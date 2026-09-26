@@ -1,0 +1,134 @@
+---
+title: Gradient descent
+kind: concept
+category: foundations/optimisation
+summary: Gradient descent minimises a differentiable function by repeatedly stepping against its gradient. The step size must stay below a limit set by the curvature, and momentum speeds progress along narrow valleys.
+tags: [optimisation, gradients, momentum]
+aliases: [steepest descent, heavy-ball method, momentum]
+code: gradient-descent
+references: [ruder2016]
+status: draft
+updated: 2026-09-26
+---
+
+import { MomentumExplorer } from './MomentumExplorer'
+import { StepSizeExplorer } from './StepSizeExplorer'
+
+<Definition>
+Gradient descent minimises a differentiable loss $L(\thetavec)$ by repeating the update
+$\thetavec \leftarrow \thetavec - \eta \nabla L(\thetavec)$. The step size $\eta > 0$
+is also called the learning rate. The negative gradient is the direction of steepest local decrease.
+</Definition>
+
+## The update
+
+The gradient $\nabla L(\thetavec)$ points in the direction of steepest increase. Its length is the rate of
+increase in that direction. Each step moves a distance proportional to the gradient's length. Steps therefore shrink
+as the gradient approaches zero near a minimum.
+
+The step size is the only parameter. It controls both speed and stability.
+
+## Step size
+
+The examples below fit a line $y \approx wx + b$ by minimising the mean squared error (MSE) over the two parameters
+$(w, b)$. The MSE is a quadratic function of $(w, b)$. Its contours are ellipses.
+
+<StepSizeExplorer />
+
+Four regimes appear as $\eta$ grows:
+
+- **Too small.** The path is smooth but slow. Most of the budget is spent crossing the valley.
+- **Well chosen.** The path reaches the minimum in few steps.
+- **Overshooting.** The path zig-zags across the valley floor. The loss still falls at every step.
+- **Too large.** Each step overshoots by more than the last. The loss grows without bound.
+
+## The stability limit
+
+Near a minimum, any smooth loss is approximately quadratic. Let $H$ be its Hessian, with eigenvalues
+$\lambda_{\min} \le \dots \le \lambda_{\max}$. Along the eigenvector of $\lambda_i$, each step multiplies the
+distance to the minimum by $1 - \eta\lambda_i$ <Cite id="boyd2004" />.
+
+- If $\eta\lambda_i < 1$, the distance shrinks without changing sign.
+- If $1 < \eta\lambda_i < 2$, the distance shrinks but changes sign each step. This is the zig-zag.
+- If $\eta\lambda_i > 2$, the distance grows. The iteration diverges.
+
+Gradient descent therefore converges on a quadratic if and only if $\eta < 2/\lambda_{\max}$. The steepest direction
+sets the limit.
+
+<Derivation title="Why each direction scales by 1 − ηλ">
+Write the quadratic as $L(\thetavec) = L^* + \tfrac{1}{2}(\thetavec - \thetavec^*)^\top
+H (\thetavec - \thetavec^*)$. Its gradient is $H(\thetavec - \thetavec^*)$.
+
+Let $\evec_t = \thetavec_t - \thetavec^*$ be the error. The update gives
+$\evec_{t+1} = \evec_t - \eta H \evec_t = (I - \eta H)\evec_t$.
+
+$H$ is symmetric, so it has orthogonal eigenvectors. In that basis, $I - \eta H$ is diagonal with entries
+$1 - \eta\lambda_i$. Each component of the error evolves independently: $e_{t,i} = (1 - \eta\lambda_i)^t e_{0,i}$.
+
+The excess loss is $L - L^* = \tfrac{1}{2}\sum_i \lambda_i e_{t,i}^2$. Every term shrinks while
+$|1 - \eta\lambda_i| < 1$. The loss therefore decreases monotonically on a quadratic, even while the parameters
+zig-zag.
+</Derivation>
+
+## Conditioning
+
+The condition number $\kappa = \lambda_{\max}/\lambda_{\min}$ measures how elongated the loss contours are. The
+stability limit is set by $\lambda_{\max}$. Progress along the flattest direction is set by $\lambda_{\min}$. A large
+$\kappa$ forces a step small enough for the steep direction and too small for the flat one.
+
+The best constant step is $\eta = 2/(\lambda_{\min} + \lambda_{\max})$. The error then shrinks by at least a factor
+$(\kappa - 1)/(\kappa + 1)$ per step <Cite id="boyd2004" />. In the example above, $\kappa \approx 32$. Each step
+removes only about 6% of the remaining error.
+
+The feature $x$ in the example is not centred. That couples $w$ and $b$ and tilts the ellipses. Centring and scaling
+features reduces $\kappa$. It is the cheapest way to speed up gradient descent.
+
+## Momentum
+
+The heavy-ball method adds a velocity term <Cite id="polyak1964" />:
+
+$$
+\vvec \leftarrow \beta\vvec - \eta\nabla L(\thetavec), \qquad
+\thetavec \leftarrow \thetavec + \vvec
+$$
+
+The coefficient $\beta \in [0, 1)$ sets how much of the previous step carries over. With $\beta = 0$ the method is
+plain gradient descent.
+
+Momentum helps because the two directions of a narrow valley behave differently. Across the valley, the gradient
+changes sign each step, and the accumulated velocity cancels. Along the valley, the gradient keeps the same sign,
+and the velocity accumulates. The effective step along the floor grows toward $\eta/(1 - \beta)$
+<Cite id="goh2017" />.
+
+The example below is a logistic regression with one uncentred feature. Its loss is not quadratic, and its valley is
+much narrower than the one above.
+
+<MomentumExplorer />
+
+On a quadratic with well-tuned $\eta$ and $\beta$, the error shrinks by a factor $(\sqrt\kappa - 1)/(\sqrt\kappa + 1)$
+per step <Cite id="polyak1964" />. This replaces $\kappa$ with $\sqrt\kappa$ in the rate. For $\kappa = 100$, plain
+gradient descent needs about 115 steps to reduce the error tenfold. Tuned momentum needs about 12.
+
+<Callout variant="warning">
+Momentum does not decrease the loss at every step. With $\beta$ close to 1, the iterate overshoots the valley floor
+and returns. The loss rises and falls. A loss curve that oscillates is not by itself a sign of a bad step size.
+</Callout>
+
+Nesterov momentum evaluates the gradient at the look-ahead point $\thetavec + \beta\vvec$ instead of at
+$\thetavec$. It is the variant most used for training neural networks <Cite id="sutskever2013" />.
+
+## Choosing a step size
+
+- Start from a stable value and increase it until the loss stops falling or starts to oscillate. Then back off.
+- A schedule that decreases $\eta$ over training allows large early steps and precise late ones.
+- A line search chooses $\eta$ at each step by testing the loss along the gradient direction <Cite id="boyd2004" />.
+- Adaptive methods such as Adam scale the step separately for each parameter <Cite id="ruder2016" />.
+
+## Pitfalls
+
+- A loss that is falling slowly may be ill-conditioned rather than near convergence. Plot the excess loss on a log
+  scale. A straight line means steady linear convergence.
+- Raw loss values hide the difference between two slow runs. Compare distance to the optimum, or compare on a log
+  scale.
+- The stability limit depends on the data scale. Rescaling a feature by 10 multiplies the corresponding curvature by
+  100.

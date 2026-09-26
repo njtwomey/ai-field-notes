@@ -1,0 +1,53 @@
+import { lazy, Suspense } from 'react'
+import { createBrowserRouter, RouterProvider } from 'react-router'
+import { ThemeProvider } from '@/components/theme-provider'
+import { AppShell } from '@/components/layout/AppShell'
+import { TooltipProvider } from '@/components/ui/tooltip'
+import { BrowsePage, CategoryRedirect } from '@/pages/BrowsePage'
+import { HomePage } from '@/pages/HomePage'
+import { NotePage } from '@/pages/NotePage'
+import { NotFoundPage } from '@/pages/NotFoundPage'
+import { ReferencesPage } from '@/pages/ReferencesPage'
+import { TagPage, TagsPage } from '@/pages/TagsPage'
+
+// Loads KaTeX's renderer, so it gets its own chunk.
+const NotationPage = lazy(() => import('@/pages/NotationPage'))
+
+const router = createBrowserRouter(
+  [
+    {
+      element: <AppShell />,
+      children: [
+        { index: true, element: <HomePage /> },
+        { path: 'browse', element: <BrowsePage /> },
+        { path: 'c/*', element: <CategoryRedirect /> },
+        { path: 'tags', element: <TagsPage /> },
+        { path: 'tags/:tag', element: <TagPage /> },
+        { path: 'references', element: <ReferencesPage /> },
+        {
+          path: 'notation',
+          element: (
+            <Suspense>
+              <NotationPage />
+            </Suspense>
+          ),
+        },
+        { path: 'n/:slug', element: <NotePage tab="concept" /> },
+        { path: 'n/:slug/code', element: <NotePage tab="code" /> },
+        { path: 'n/:slug/outputs/:run?', element: <NotePage tab="outputs" /> },
+        { path: '*', element: <NotFoundPage /> },
+      ],
+    },
+  ],
+  { basename: import.meta.env.BASE_URL.replace(/\/$/, '') },
+)
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <TooltipProvider>
+        <RouterProvider router={router} />
+      </TooltipProvider>
+    </ThemeProvider>
+  )
+}
