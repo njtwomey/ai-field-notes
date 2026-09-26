@@ -31,3 +31,6 @@ export const excess = (losses: number[], optimum: number) => losses.map((l) => M
 
 /** Round a clicked grid coordinate to the slider precision. */
 export const snap = (v: number) => Math.round(v * 100) / 100
+
+/** Snap a dragged coordinate and keep it within the plotted grid's axis values. */
+export const inGrid = (v: number, axis: number[]) => snap(Math.min(Math.max(v, axis[0]), axis[axis.length - 1]))

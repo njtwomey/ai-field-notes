@@ -30,7 +30,7 @@ function logJoint(p: Point, m: Mixture, j: number): number {
 }
 
 /** Responsibilities and mean log-likelihood under `m`. */
-function eStep(points: Point[], m: Mixture): { responsibilities: number[][]; logLikelihood: number } {
+export function eStep(points: Point[], m: Mixture): { responsibilities: number[][]; logLikelihood: number } {
   let total = 0
   const responsibilities = points.map((p) => {
     const logs = m.weights.map((_, j) => logJoint(p, m, j))
@@ -95,6 +95,17 @@ export function step(points: Point[], s: EmState, tol = 1e-6): EmState {
 export function seek(points: Point[], s: EmState, i: number): EmState {
   const cursor = Math.max(0, Math.min(s.mixtures.length - 1, Math.round(i)))
   return { ...s, cursor, responsibilities: eStep(points, s.mixtures[cursor]).responsibilities }
+}
+
+/**
+ * Move component j's mean in the mixture on display and start a new run from the edited mixture. Earlier iterations
+ * are discarded: the edit can lower the likelihood, and the history must stay one monotone EM run.
+ */
+export function moveMean(points: Point[], s: EmState, j: number, mean: Point): EmState {
+  const current = s.mixtures[s.cursor]
+  const mixture = { ...current, means: current.means.map((m, i) => (i === j ? mean : m)) }
+  const { responsibilities, logLikelihood } = eStep(points, mixture)
+  return { mixtures: [mixture], history: [logLikelihood], cursor: 0, responsibilities, done: false }
 }
 
 /** True when the cursor is at the last iteration and that iteration converged. */

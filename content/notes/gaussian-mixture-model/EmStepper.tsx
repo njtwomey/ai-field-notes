@@ -7,12 +7,13 @@ import {
   StepControls,
   XYChart,
   formatNumber,
+  type Handle,
   type XYSeries,
 } from '@/components/viz'
 import type { PointCloud2d } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
 import { CENTRE_INIT_OPTIONS, type CentreInit, type Point } from '@/lib/math/cluster'
-import { ellipse, finished, initialise, seek, step, type EmState } from './em'
+import { ellipse, finished, initialise, moveMean, seek, step, type EmState } from './em'
 
 const MAX_RUN = 300
 
@@ -78,11 +79,21 @@ export function EmStepper() {
     setState(s)
   }
   const last = state.history.length - 1
+  const meanHandles: Handle[] = state.mixtures[state.cursor].means.map((m, j) => ({
+    kind: 'point',
+    at: m,
+    label: `mean ${j + 1}`,
+    onDrag: (p) => setState((s) => s && moveMean(points, s, j, p)),
+  }))
+  // Scrubbing the curve shows any earlier iteration; seek rounds to the nearest one and keeps the history.
+  const cursorHandle: Handle[] = [
+    { kind: 'x', at: state.cursor, label: 'shown', onDrag: (x) => setState((s) => s && seek(points, s, x)) },
+  ]
 
   return (
     <Interactive
       title="Expectation-maximisation, step by step"
-      caption="Each step re-estimates every component from all points, weighted by how likely each point is to belong to it, then recomputes those probabilities. Points take the colour of their most likely component. Solid ellipses are one standard deviation from the mean; dashed ones are two. The log-likelihood never decreases. With random initialisation, seed 5 converges to a worse optimum and seed 3 stalls on a plateau before escaping. k-means++ reaches the better fit for every seed from 0 to 20. Click the log-likelihood curve to go back to any iteration; Step or Run from there continues from that point."
+      caption="Each step re-estimates every component from all points, weighted by how likely each point is to belong to it, then recomputes those probabilities. Points take the colour of their most likely component. Solid ellipses are one standard deviation from the mean; dashed ones are two. The log-likelihood never decreases. With random initialisation, seed 5 converges to a worse optimum and seed 3 stalls on a plateau before escaping. k-means++ reaches the better fit for every seed from 0 to 20. Drag along the log-likelihood curve to go back to any iteration; Step or Run from there continues from that point. Drag a mean to move it by hand; the run restarts from the edited mixture."
       controls={
         <>
           <ParamSlider label="k" value={k} onChange={setK} min={1} max={6} step={1} />
@@ -106,14 +117,16 @@ export function EmStepper() {
       }
     >
       <div className="grid items-center gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        <XYChart equalAspect xRange={[-9, 7]} yRange={[-3, 5]} xLabel="x₁" yLabel="x₂" series={series} />
         <XYChart
-          height={320}
-          xLabel="iteration"
-          yLabel="mean log-likelihood"
-          series={curve}
-          onPlotClick={([x]) => setState(seek(points, state, x))}
+          equalAspect
+          xRange={[-9, 7]}
+          yRange={[-3, 5]}
+          xLabel="x₁"
+          yLabel="x₂"
+          series={series}
+          handles={meanHandles}
         />
+        <XYChart height={320} xLabel="iteration" yLabel="mean log-likelihood" series={curve} handles={cursorHandle} />
       </div>
     </Interactive>
   )

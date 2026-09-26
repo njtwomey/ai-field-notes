@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useTheme } from '@/components/theme-provider'
 import type { Series } from '@/generated/contracts'
 import { EChart, type EChartClick } from './EChart'
+import type { Handle } from './handles'
 import { chrome, diverging, MARKER_SHAPES, seriesColor, sequential, type Mode } from './palette'
 import { formatNumber, LINE_WIDTH, MARKER_SIZE } from './theme'
 
@@ -39,6 +40,10 @@ export type HeatmapProps = {
   overlay?: HeatmapOverlay[]
   /** A single highlighted point, e.g. the current parameter setting. Moving it does not redraw the grid. */
   marker?: [number, number]
+  /** Draggable handles bound to parameters. See handles.ts. */
+  handles?: Handle[]
+  /** Ink arrows over the grid, e.g. a gradient at the marker. Updated without redrawing the grid. */
+  vectors?: { from: [number, number]; to: [number, number] }[]
   /** Called with the centre of a clicked cell, or a clicked overlay point. Cells show a pointer cursor when set. */
   onCellClick?: (x: number, y: number) => void
   valueLabel?: string
@@ -99,6 +104,8 @@ export function Heatmap({
   range,
   overlay = NO_OVERLAY,
   marker,
+  vectors,
+  handles,
   onCellClick,
   valueLabel = 'value',
   height = 360,
@@ -193,6 +200,16 @@ export function Heatmap({
           symbol: 'circle',
           symbolSize: 14,
           itemStyle: { color: chrome(mode).ink, borderColor: chrome(mode).surface, borderWidth: 2 },
+          // Vectors ride on the marker series as a markLine, which orients arrowheads in screen space.
+          markLine: {
+            silent: true,
+            symbol: ['none', 'arrow'],
+            symbolSize: 10,
+            label: { show: false },
+            lineStyle: { color: chrome(mode).ink, width: LINE_WIDTH, type: 'solid' },
+            animation: false,
+            data: [],
+          },
           z: 5,
         },
       ],
@@ -207,10 +224,11 @@ export function Heatmap({
         {
           id: 'marker',
           data: mx === undefined ? [] : [[mx, my]],
+          markLine: { data: (vectors ?? []).map((v) => [{ coord: v.from }, { coord: v.to }]) },
         },
       ],
     }),
-    [overlays, mx, my],
+    [overlays, mx, my, vectors],
   )
 
   // Clicks on overlay points (e.g. an optimum drawn on top of the grid) select that point too.
@@ -221,5 +239,14 @@ export function Heatmap({
       }
     : undefined
 
-  return <EChart option={option} patch={patch} onClick={handleClick} height={height} ariaLabel={ariaLabel} />
+  return (
+    <EChart
+      option={option}
+      patch={patch}
+      onClick={handleClick}
+      handles={handles}
+      height={height}
+      ariaLabel={ariaLabel}
+    />
+  )
 }

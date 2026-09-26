@@ -7,12 +7,13 @@ import {
   Readout,
   XYChart,
   formatNumber,
+  type Handle,
   type HeatmapOverlay,
 } from '@/components/viz'
 import type { RegressionSurface } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
 import { mean } from '@/lib/math'
-import { descend, excess, snap, type LossAndGrad, type Vec } from './optim'
+import { descend, excess, inGrid, type LossAndGrad, type Vec } from './optim'
 
 /** MSE of y ≈ w·x + b from sufficient statistics: O(1) per evaluation, however many samples. */
 function mseProblem(x: number[], y: number[]) {
@@ -58,6 +59,15 @@ export function StepSizeExplorer() {
     return [{ name: 'MSE − MSE*', type: 'line' as const, x: e.map((_, i) => i), y: e, slot: 1 }]
   }, [run, data])
 
+  const startHandle: Handle[] | undefined = data && [
+    {
+      kind: 'point',
+      at: start,
+      label: 'start',
+      onDrag: ([w, b]) => setStart([inGrid(w, data.surface.x), inGrid(b, data.surface.y)]),
+    },
+  ]
+
   if (error) return <p className="text-sm text-destructive">{error.message}</p>
   if (!data || !problem || !run) return null
 
@@ -70,7 +80,7 @@ export function StepSizeExplorer() {
   return (
     <Interactive
       title="Step size on a quadratic loss"
-      caption="Left: log₁₀ MSE of a line fit over slope w and intercept b, with the gradient-descent path from the start point. Click a cell to move the start. Right: the excess loss per step on a log scale, so a straight line means a constant rate. Try the presets, then push η past 2/λ_max."
+      caption="Left: log₁₀ MSE of a line fit over slope w and intercept b, with the gradient-descent path from the start point. Drag the dot to move the start. Right: the excess loss per step on a log scale, so a straight line means a constant rate. Try the presets, then push η past 2/λ_max."
       controls={
         <>
           <ParamSlider
@@ -117,8 +127,7 @@ export function StepSizeExplorer() {
           yLabel="b"
           valueLabel="log₁₀ MSE"
           overlay={overlay}
-          marker={start}
-          onCellClick={(w, b) => setStart([snap(w), snap(b)])}
+          handles={startHandle}
           height={340}
         />
         <XYChart height={340} series={curve} yLog xLabel="step" yLabel="MSE − MSE*" />

@@ -1,6 +1,7 @@
 import {
   BookOpen,
   Brain,
+  ChartArea,
   ChartSpline,
   Cpu,
   Dices,
@@ -21,6 +22,7 @@ const icons: Record<CategoryIcon, LucideIcon> = {
   target: Target,
   shapes: Shapes,
   'chart-spline': ChartSpline,
+  bell: ChartArea,
   network: Network,
   cpu: Cpu,
   'book-open': BookOpen,

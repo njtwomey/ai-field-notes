@@ -1,7 +1,7 @@
 import { Layers } from 'lucide-react'
 import { Link } from 'react-router'
 import { categoryIcon } from '@/components/layout/category-icon'
-import { browseUrl, notes, taxonomy, type BrowseParams } from '@/lib/content'
+import { browseUrl, notes, taxonomy, type BrowseParams, type CategoryNode } from '@/lib/content'
 import { cn } from '@/lib/utils'
 import { inCategory } from './filters'
 
@@ -39,23 +39,48 @@ export function TopicRail({ params, onNavigate }: { params: BrowseParams; onNavi
               <span className="text-xs tabular-nums">{n}</span>
             </Link>
             {open && topic.children.length > 0 && (
-              <div className="my-0.5 ml-4 space-y-0.5 border-l pl-2">
-                {topic.children.map((sub) => (
-                  <Link
-                    key={sub.path}
-                    to={browseUrl({ ...params, c: sub.path })}
-                    onClick={onNavigate}
-                    className={cn(item(params.c === sub.path), 'py-1 text-xs')}
-                  >
-                    <span className="flex-1">{sub.title}</span>
-                    <span className="tabular-nums">{count(sub.path)}</span>
-                  </Link>
-                ))}
-              </div>
+              <Subtopics nodes={topic.children} params={params} onNavigate={onNavigate} count={count} item={item} />
             )}
           </div>
         )
       })}
     </nav>
+  )
+}
+
+/** Subtopics at any depth, shown once their top-level topic is open. */
+function Subtopics({
+  nodes,
+  params,
+  onNavigate,
+  count,
+  item,
+}: {
+  nodes: CategoryNode[]
+  params: BrowseParams
+  onNavigate?: () => void
+  count: (path: string) => number
+  item: (active: boolean) => string
+}) {
+  return (
+    <div className="my-0.5 ml-4 space-y-0.5 border-l pl-2">
+      {nodes.map((sub) => {
+        return (
+          <div key={sub.path}>
+            <Link
+              to={browseUrl({ ...params, c: sub.path })}
+              onClick={onNavigate}
+              className={cn(item(params.c === sub.path), 'py-1 text-xs', count(sub.path) === 0 && 'opacity-50')}
+            >
+              <span className="flex-1">{sub.title}</span>
+              <span className="tabular-nums">{count(sub.path)}</span>
+            </Link>
+            {sub.children.length > 0 && (
+              <Subtopics nodes={sub.children} params={params} onNavigate={onNavigate} count={count} item={item} />
+            )}
+          </div>
+        )
+      })}
+    </div>
   )
 }

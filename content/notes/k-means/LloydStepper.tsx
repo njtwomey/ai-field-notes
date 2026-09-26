@@ -1,31 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, StepControls, XYChart, formatNumber } from '@/components/viz'
+import {
+  Interactive,
+  ParamChoice,
+  ParamSlider,
+  Readout,
+  StepControls,
+  XYChart,
+  formatNumber,
+  type Handle,
+} from '@/components/viz'
 import type { PointCloud2d } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
-import { CENTRE_INIT_OPTIONS, d2, initialCentres, type CentreInit, type Point } from '@/lib/math/cluster'
-
-type State = { centroids: Point[]; labels: number[]; inertia: number; iteration: number; done: boolean }
-
-function assign(points: Point[], centroids: Point[]) {
-  const labels = points.map((p) => centroids.reduce((best, c, j) => (d2(p, c) < d2(p, centroids[best]) ? j : best), 0))
-  const inertia = points.reduce((s, p, i) => s + d2(p, centroids[labels[i]]), 0)
-  return { labels, inertia }
-}
-
-function step(points: Point[], s: State): State {
-  const k = s.centroids.length
-  const centroids = s.centroids.map((c, j) => {
-    const members = points.filter((_, i) => s.labels[i] === j)
-    if (!members.length) return c
-    return [
-      members.reduce((a, p) => a + p[0], 0) / members.length,
-      members.reduce((a, p) => a + p[1], 0) / members.length,
-    ] as Point
-  })
-  const moved = centroids.some((c, j) => d2(c, s.centroids[j]) > 1e-12)
-  const { labels, inertia } = assign(points, centroids)
-  return { centroids, labels, inertia, iteration: s.iteration + 1, done: !moved || k === 0 }
-}
+import { CENTRE_INIT_OPTIONS, initialCentres, type CentreInit, type Point } from '@/lib/math/cluster'
+import { assign, step, type State } from './lloyd'
 
 /** Lloyd's algorithm one step at a time on data from python/mlc/figures/kmeans.py. */
 export function LloydStepper() {
@@ -45,6 +32,19 @@ export function LloydStepper() {
   useEffect(reset, [points, k, init, seed]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!data || !state) return null
+  // Dragging a centroid starts a new run from the edited centroids: points are reassigned and the count restarts,
+  // since a hand-placed centroid can raise the inertia and the iterations before it no longer describe this run.
+  const handles: Handle[] = state.centroids.map((c, j) => ({
+    kind: 'point',
+    at: c,
+    label: `centroid ${j + 1}`,
+    onDrag: (p) =>
+      setState((s) => {
+        if (!s) return s
+        const centroids = s.centroids.map((old, i) => (i === j ? p : old))
+        return { centroids, ...assign(points, centroids), iteration: 0, done: false }
+      }),
+  }))
   const runToEnd = () => {
     let s = state
     for (let i = 0; i < 100 && !s.done; i++) s = step(points, s)
@@ -54,7 +54,7 @@ export function LloydStepper() {
   return (
     <Interactive
       title="Lloyd's algorithm, step by step"
-      caption="Each step moves every centroid to the mean of its points, then reassigns points to the nearest centroid. Inertia never increases. Try random initialisation with different seeds: some runs converge to a worse split."
+      caption="Each step moves every centroid to the mean of its points, then reassigns points to the nearest centroid. Inertia never increases. Try random initialisation with different seeds: some runs converge to a worse split. Drag a centroid to place it by hand; the run restarts from there."
       controls={
         <>
           <ParamSlider label="k" value={k} onChange={setK} min={1} max={6} step={1} />
@@ -80,6 +80,7 @@ export function LloydStepper() {
         height={380}
         xLabel="x₁"
         yLabel="x₂"
+        handles={handles}
         series={[
           {
             name: 'points',

@@ -36,10 +36,12 @@ export interface Contracts {
   Grid2d?: Grid2d
   ContingencyTable?: ContingencyTable
   RocCurve?: RocCurve
+  ImageSvd?: ImageSvd
   LogisticValley?: LogisticValley
   LossSurface?: LossSurface
   ModelSelectionTable?: ModelSelectionTable
   RegressionSurface?: RegressionSurface
+  TypeIErrorMaps?: TypeIErrorMaps
 }
 /**
  * Written to ``generated/manifest.json``. The site's single entry point to generated assets.
@@ -359,6 +361,30 @@ export interface RocCurve {
   auc: number
 }
 /**
+ * A test image and its thin SVD. The site rebuilds any rank-k approximation from these factors.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "ImageSvd".
+ */
+export interface ImageSvd {
+  /**
+   * Row-major, first row at the top, values in [0, 1].
+   */
+  image: number[][]
+  /**
+   * Shape (size, size): left singular vectors as columns.
+   */
+  u: number[][]
+  /**
+   * Singular values, largest first.
+   */
+  s: number[]
+  /**
+   * Shape (size, size): right singular vectors as rows.
+   */
+  vt: number[][]
+}
+/**
  * Log-cross-entropy of a 1-D logistic regression over (w, b), with the data it was computed on.
  *
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -405,6 +431,24 @@ export interface ModelSelectionTable {
    * Indexed [restarts − 1][n index][k index].
    */
   deviance: number[][][]
+  /**
+   * The best fit behind each deviance, indexed likewise.
+   */
+  fits: FittedMixture[][][]
+}
+/**
+ * A diagonal-covariance Gaussian mixture in 2-D.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "FittedMixture".
+ */
+export interface FittedMixture {
+  weights: number[]
+  means: Point2d[]
+  /**
+   * Per-component variances along x and y.
+   */
+  variances: Point2d[]
 }
 /**
  * Log-MSE of y ≈ w·x + b over (w, b), with the data it was computed on.
@@ -425,4 +469,16 @@ export interface RegressionSurface {
 export interface Point2D2 {
   x: number
   y: number
+}
+/**
+ * Type I error rates of the pooled and Welch tests over the variance ratio and the second group's size.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "TypeIErrorMaps".
+ */
+export interface TypeIErrorMaps {
+  pooled: Grid2d
+  welch: Grid2d
+  n1: number
+  alpha: number
 }

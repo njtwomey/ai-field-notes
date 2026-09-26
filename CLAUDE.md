@@ -160,6 +160,17 @@ stale.
     (`range={[0, 3]}` is a new array each render), or every render redraws the whole chart.
   - Put small, fast-changing parts of a chart (a marker, a cursor) in `EChart`'s `patch` prop, keyed by series `id`,
     so they update without redrawing the rest. `Heatmap`'s `marker` works this way.
+- Direct manipulation: when a parameter has an obvious place on a chart (a mean, a threshold, a start point, a
+  centroid, a vector tip, a rank on a spectrum), bind it to a draggable handle as well as its slider. Do this by
+  default, without being asked. The handle must be the thing itself, not a proxy: dragging a distribution's mean line
+  to reshape the whole curve feels wrong, so distribution parameters stay on sliders.
+  - Pass `handles` (see `site/src/components/viz/handles.ts`: `point`, `x` or `y`) to `XYChart`, `Heatmap` or
+    `EChart`. Each handle's `onDrag` writes the same state the slider reads; `useParam` clamps and snaps it to the
+    slider's range, and `ParamSlider param={…}` binds the slider.
+  - There are no update loops: charts emit only on pointer events, never when their props change. Axes freeze during a
+    drag, so a range that depends on the dragged value cannot rescale under the pointer; they refit on release.
+  - With one handle, pressing anywhere on the plot moves it. With several, the nearest within `GRAB_RADIUS` wins.
+    Prefer handles to `onPlotClick`/`onCellClick`, and say in the caption what can be dragged.
 - In-browser computation must stay light enough for slider drags. Seeded randomness uses `rng(seed)` from
   `site/src/lib/math`, never `Math.random`. Anything heavier becomes a Python `@figure` builder.
 - Tailwind generates only the classes it finds. `site/src/index.css` has `@source '../../content'` so that classes used
@@ -229,7 +240,12 @@ Frontmatter (validated; see `site/src/lib/content-schema.ts`): `title`, `kind`, 
   - `test`: a statistical test.
   - `case-study`: compares specific models, with a `<SpecTable>`.
   - `overview`: a hub. Its components list themselves via `partOf`.
-- **Category** is a path in `content/taxonomy.yaml`. It is used for browsing only; one note has one category.
+- **Category** is a path in `content/taxonomy.yaml`, up to three levels deep (e.g.
+  `probability-distributions/discrete`). Top-level topics are subjects, ordered from mathematical prerequisites to
+  applications; subtopics are a subject's natural chapters. Place a note by its subject, not by where it is used:
+  Bayes' theorem is probability theory even though every model uses it. Categories are for browsing; one note has one
+  category, and cross-cutting links are relations and tags. Lists follow taxonomy order (`categoryOrder`), never
+  alphabetical order.
 - **Relations** are typed: `requires` (prerequisites), `partOf` (component of a larger system), `related` (see also).
   Backlinks and component lists are computed; declare each relation only on one side.
 - **Tags** are cross-cutting kebab-case labels.
@@ -252,3 +268,7 @@ Frontmatter (validated; see `site/src/lib/content-schema.ts`): `title`, `kind`, 
 - `katex` is pinned to the exact version that `rehype-katex` renders with (`npm ls katex` must show one deduped
   copy). The stylesheet comes from the top-level package and the HTML from rehype-katex's; if they differ, class
   names drift and sub- and superscripts render at full size.
+- `EChart` calls `setOption` without `lazyUpdate`. A lazy update leaves the chart without coordinate systems until the
+  next frame, so converting a pointer position to data coordinates (handles, `onPlotClick`) fails mid-drag.
+- Handle dragging uses DOM pointer events with pointer capture, not zrender's events. Listeners are removed on
+  unmount; StrictMode mounts twice on the same element.

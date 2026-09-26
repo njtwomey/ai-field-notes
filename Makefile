@@ -42,7 +42,8 @@ test: ## Run Python core tests
 
 check: contracts content lint typecheck test ## Everything CI runs before a build
 	uv run mlc check
-	@git diff --quiet -- site/src/generated || (echo "contracts out of date: run make contracts" && exit 1)
+	@# In CI the tree starts clean, so any change after regenerating means the committed contracts were stale.
+	@if [ -n "$$CI" ]; then git diff --quiet -- site/src/generated || (echo "contracts out of date: run make contracts" && exit 1); fi
 
 build: assets content ## Production build into dist/
 	npm run build

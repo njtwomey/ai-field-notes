@@ -1,5 +1,15 @@
 import { useMemo, useState } from 'react'
-import { Heatmap, Interactive, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from '@/components/viz'
+import {
+  Heatmap,
+  Interactive,
+  ParamSlider,
+  Readout,
+  XYChart,
+  formatNumber,
+  useParam,
+  type Handle,
+  type XYSeries,
+} from '@/components/viz'
 import type { LossSurface } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
 import { mean, sigmoid } from '@/lib/math'
@@ -17,8 +27,10 @@ function boundary(w1: number, w2: number): number[] | undefined {
  */
 export function LossSurfaceExplorer() {
   const { data, error } = useFigure<LossSurface>('logistic-regression/loss-surface')
-  const [w1, setW1] = useState(-2)
-  const [w2, setW2] = useState(2.5)
+  const w1Param = useParam(-2, { min: -4, max: 4, step: 0.1 })
+  const w2Param = useParam(2.5, { min: -4, max: 4, step: 0.1 })
+  const w1 = w1Param.value
+  const w2 = w2Param.value
   const [lambda, setLambda] = useState(0)
 
   // Regularised surface and its minimum on the grid. Recomputed only when λ changes.
@@ -81,17 +93,45 @@ export function LossSurfaceExplorer() {
     return norm < 1e-9 ? [] : [{ from: [0, 0] as [number, number], to: [w1 / norm, w2 / norm] as [number, number] }]
   }, [w1, w2])
 
+  // On the loss surface, the weights themselves are the handle.
+  const weightHandle: Handle[] = [
+    {
+      kind: 'point',
+      at: [w1, w2],
+      label: 'w',
+      onDrag: ([a, b]) => {
+        w1Param.set(a)
+        w2Param.set(b)
+      },
+    },
+  ]
+  // In feature space, the tip of the unit normal turns w about the origin and keeps ‖w‖ (1 when w = 0).
+  const normalHandle: Handle[] = [
+    {
+      kind: 'point',
+      at: normal.length ? normal[0].to : [1, 0],
+      label: 'direction of w',
+      onDrag: ([a, b]) => {
+        if (Math.hypot(a, b) < 1e-9) return
+        const angle = Math.atan2(b, a)
+        const norm = Math.hypot(w1, w2) || 1
+        w1Param.set(norm * Math.cos(angle))
+        w2Param.set(norm * Math.sin(angle))
+      },
+    },
+  ]
+
   if (error) return <p className="text-sm text-destructive">{error.message}</p>
   if (!data || !surface || !stats) return null
 
   return (
     <Interactive
       title="Loss surface and decision boundary"
-      caption="Left: mean cross-entropy plus the L2 penalty (λ/2)‖w‖² for every (w₁, w₂), bias fixed at 0. The diamond marks the minimum. Right: the data, the boundary for your weights and the boundary at the minimum. The arrow is the unit normal w/‖w‖. It points toward y = 1. The length ‖w‖, in the readout, sets how sharply P(y = 1) changes across the boundary. Drag the sliders or click a cell. Raise λ and the minimum moves toward the origin: a smaller ‖w‖, a softer boundary."
+      caption="Left: mean cross-entropy plus the L2 penalty (λ/2)‖w‖² for every (w₁, w₂), bias fixed at 0. The diamond marks the minimum. Right: the data, the boundary for your weights and the boundary at the minimum. The arrow is the unit normal w/‖w‖. It points toward y = 1. The length ‖w‖, in the readout, sets how sharply P(y = 1) changes across the boundary. Drag the dot on the loss surface to move w, or drag the arrow tip to turn the boundary at fixed ‖w‖. Raise λ and the minimum moves toward the origin: a smaller ‖w‖, a softer boundary."
       controls={
         <>
-          <ParamSlider label="w₁" value={w1} onChange={setW1} min={-4} max={4} step={0.1} />
-          <ParamSlider label="w₂" value={w2} onChange={setW2} min={-4} max={4} step={0.1} />
+          <ParamSlider label="w₁" param={w1Param} />
+          <ParamSlider label="w₂" param={w2Param} />
           <ParamSlider label="L2 penalty λ" value={lambda} onChange={setLambda} min={0} max={1} step={0.01} />
         </>
       }
@@ -115,12 +155,7 @@ export function LossSurfaceExplorer() {
           yLabel={data.surface.y_label}
           valueLabel="loss"
           overlay={overlay}
-          marker={[w1, w2]}
-          onCellClick={(a, b) => {
-            // Cells sit on a 0.1 grid; round away floating-point noise so the slider labels read cleanly.
-            setW1(Math.round(a * 100) / 100)
-            setW2(Math.round(b * 100) / 100)
-          }}
+          handles={weightHandle}
           range={[0, 3]}
           height={340}
         />
@@ -132,6 +167,7 @@ export function LossSurfaceExplorer() {
           yLabel="x₂"
           series={series}
           vectors={normal}
+          handles={normalHandle}
         />
       </div>
     </Interactive>

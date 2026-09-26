@@ -2,18 +2,25 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTheme } from '@/components/theme-provider'
 import type { Series } from '@/generated/contracts'
 import { EChart } from './EChart'
+import type { Handle } from './handles'
 import { chrome, MARKER_SHAPES, seriesColor } from './palette'
 import { formatNumber, LINE_WIDTH, MARKER_SIZE } from './theme'
 
 /** A contract `Series` (group optional) plus display options that only the site needs. */
-export type XYSeries = Omit<Series, 'group'> & {
+export type XYSeries = Omit<Series, 'group' | 'type'> & {
+  /** `bar` draws a bar at each x, e.g. a histogram; bars take the width of the gap between x values. */
+  type: Series['type'] | 'bar'
   group?: number[] | null
   /** Fixed categorical slot. Defaults to the series index. Colour follows the entity, so pass it when filtering. */
   slot?: number
   /** Draw as a dashed reference line (lines only). */
   dashed?: boolean
+  /** Fill the region under a line down to y = 0, e.g. a shaded tail probability (lines only). */
+  area?: boolean
   /** Larger ink-coloured markers, e.g. centroids. Not a category, so no palette slot. */
   emphasis?: boolean
+  /** Background marks in the muted chrome colour, e.g. the unremarkable majority. Not a category. */
+  muted?: boolean
   /** Names for group indices, shown in the legend. */
   groupNames?: string[]
 }
@@ -25,7 +32,8 @@ export type XYChartProps = {
   xLabel?: string
   yLabel?: string
   xRange?: [number, number]
-  yRange?: [number, number]
+  /** Either end may be undefined to let that end fit the data. */
+  yRange?: [number | undefined, number | undefined]
   /** Logarithmic y-axis, e.g. for loss curves that fall by orders of magnitude. Values must be positive. */
   yLog?: boolean
   /** Thin muted segments drawn under the data, e.g. residuals. */
@@ -38,6 +46,10 @@ export type XYChartProps = {
    * and ignores `height`.
    */
   equalAspect?: boolean
+  /** Hide axes, ticks and grid lines, e.g. for a grid of people where coordinates mean nothing. */
+  bare?: boolean
+  /** Draggable handles bound to parameters. See handles.ts. */
+  handles?: Handle[]
   /** Clicks anywhere in the plot area, in data coordinates. See EChart. */
   onPlotClick?: (point: [number, number]) => void
   height?: number
@@ -59,6 +71,8 @@ export function XYChart({
   vectors,
   equalAspect,
   onPlotClick,
+  handles,
+  bare,
   height = 320,
   ariaLabel,
 }: XYChartProps) {
@@ -79,9 +93,19 @@ export function XYChart({
         return
       }
       const data = s.x.map((x, i) => [x, s.y[i]])
-      if (s.type === 'scatter') {
+      if (s.type === 'bar') {
+        out.push({
+          name: s.name,
+          type: 'bar',
+          data,
+          barWidth: '92%',
+          barGap: '-100%',
+          itemStyle: { color: s.muted ? chrome(mode).grid : seriesColor(mode, slot), borderRadius: [2, 2, 0, 0] },
+          z: 1,
+        })
+      } else if (s.type === 'scatter') {
         // Emphasised marks (e.g. centroids) are ink-coloured so they never read as another category.
-        const color = s.emphasis ? chrome(mode).ink : seriesColor(mode, slot)
+        const color = s.emphasis ? chrome(mode).ink : s.muted ? chrome(mode).grid : seriesColor(mode, slot)
         out.push(scatter(s.name, data, color, s.emphasis ? 3 : 0, s.emphasis, mode))
       } else {
         out.push({
@@ -92,6 +116,7 @@ export function XYChart({
           smooth: false,
           lineStyle: { width: LINE_WIDTH, color: seriesColor(mode, slot), type: s.dashed ? 'dashed' : 'solid' },
           itemStyle: { color: seriesColor(mode, slot) },
+          ...(s.area ? { areaStyle: { color: seriesColor(mode, slot), opacity: 0.3 } } : {}),
           z: 3,
         })
       }
@@ -132,13 +157,14 @@ export function XYChart({
     return {
       // Equal horizontal and vertical margin totals, so the plot area has exactly the container's proportions.
       ...(equalAspect ? { grid: ASPECT_GRID } : {}),
+      ...(bare ? { grid: { left: 8, right: 8, top: 32, bottom: 8 } } : {}),
       legend: { data: legend, show: legend.length > 1 },
       tooltip: {
         trigger: 'item',
         formatter: (p: { seriesName: string; value: number[] }) =>
           `${p.seriesName}<br/>(${formatNumber(p.value[0])}, ${formatNumber(p.value[1])})`,
       },
-      xAxis: { type: 'value', name: xLabel, min: x0, max: x1, scale: true },
+      xAxis: { type: 'value', name: xLabel, min: x0, max: x1, scale: true, show: !bare },
       yAxis: yLog
         ? {
             type: 'log',
@@ -148,10 +174,10 @@ export function XYChart({
             nameGap: 44,
             axisLabel: { formatter: (v: number) => formatPower(v) },
           }
-        : { type: 'value', name: yLabel, min: y0, max: y1, scale: true, nameGap: 36 },
+        : { type: 'value', name: yLabel, min: y0, max: y1, scale: true, nameGap: 36, show: !bare },
       series: out,
     }
-  }, [series, segments, vectors, xLabel, yLabel, x0, x1, y0, y1, yLog, equalAspect, mode])
+  }, [series, segments, vectors, xLabel, yLabel, x0, x1, y0, y1, yLog, equalAspect, bare, mode])
 
   // For equal aspect, derive the height from the measured width: plot height / plot width = y span / x span.
   const wrapper = useRef<HTMLDivElement>(null)
@@ -164,7 +190,8 @@ export function XYChart({
     return () => observer.disconnect()
   }, [equalAspect])
 
-  if (!equalAspect) return <EChart option={option} height={height} ariaLabel={ariaLabel} onPlotClick={onPlotClick} />
+  if (!equalAspect)
+    return <EChart option={option} height={height} ariaLabel={ariaLabel} onPlotClick={onPlotClick} handles={handles} />
   if (x0 === undefined || x1 === undefined || y0 === undefined || y1 === undefined) {
     throw new Error('XYChart equalAspect needs xRange and yRange')
   }
@@ -172,7 +199,15 @@ export function XYChart({
   const aspectHeight = Math.round((plotWidth * (y1 - y0)) / (x1 - x0)) + ASPECT_MARGIN
   return (
     <div ref={wrapper} className="w-full">
-      {width > 0 && <EChart option={option} height={aspectHeight} ariaLabel={ariaLabel} onPlotClick={onPlotClick} />}
+      {width > 0 && (
+        <EChart
+          option={option}
+          height={aspectHeight}
+          ariaLabel={ariaLabel}
+          onPlotClick={onPlotClick}
+          handles={handles}
+        />
+      )}
     </div>
   )
 }

@@ -7,7 +7,7 @@ import { z } from 'zod'
 export const slug = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'must be kebab-case')
 export const categoryPath = z.string().regex(/^[a-z0-9-]+(?:\/[a-z0-9-]+)*$/, 'must be a slash-separated path of slugs')
 
-export const noteKinds = ['concept', 'technique', 'test', 'case-study', 'overview'] as const
+export const noteKinds = ['concept', 'distribution', 'technique', 'test', 'case-study', 'overview'] as const
 
 export const frontmatterSchema = z
   .object({
@@ -45,6 +45,7 @@ export const categoryIcons = [
   'target',
   'shapes',
   'chart-spline',
+  'bell',
   'network',
   'cpu',
   'book-open',

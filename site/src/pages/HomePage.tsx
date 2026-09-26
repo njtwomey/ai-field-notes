@@ -5,7 +5,7 @@ import { categoryIcon } from '@/components/layout/category-icon'
 import { kindIcons } from '@/components/layout/kind-icon'
 import { openSearch } from '@/components/layout/SearchCommand'
 import { Kbd } from '@/components/ui/kbd'
-import { browseUrl, kindLabels, notes, noteUrl, references, taxonomy, topicOf } from '@/lib/content'
+import { browseUrl, categoryOrder, kindLabels, notes, noteUrl, references, taxonomy, topicOf } from '@/lib/content'
 
 /** Titles shown per topic tile before "more". */
 const PER_TOPIC = 5
@@ -48,7 +48,9 @@ export function HomePage() {
       <section className="mt-16 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {taxonomy.map((topic) => {
           const Icon = categoryIcon(topic.icon)
-          const list = notes.filter((n) => inCategory(n, topic.path)).sort((a, b) => a.title.localeCompare(b.title))
+          const list = notes
+            .filter((n) => inCategory(n, topic.path))
+            .sort((a, b) => categoryOrder(a.category) - categoryOrder(b.category) || a.title.localeCompare(b.title))
           return (
             <div key={topic.path} className="flex flex-col rounded-xl border p-5">
               <Link to={browseUrl({ c: topic.path })} className="group mb-3 flex items-center gap-2.5">

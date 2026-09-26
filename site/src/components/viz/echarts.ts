@@ -1,5 +1,5 @@
 /** Tree-shaken ECharts build. Register new chart types or components here, once. */
-import { CustomChart, GraphChart, LineChart, ScatterChart } from 'echarts/charts'
+import { BarChart, CustomChart, GraphChart, LineChart, ScatterChart } from 'echarts/charts'
 import {
   DataZoomComponent,
   GridComponent,
@@ -12,6 +12,7 @@ import * as echarts from 'echarts/core'
 import { SVGRenderer } from 'echarts/renderers'
 
 echarts.use([
+  BarChart,
   LineChart,
   ScatterChart,
   CustomChart,

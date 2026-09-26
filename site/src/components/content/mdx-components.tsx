@@ -5,6 +5,7 @@
 import { isValidElement, type ComponentProps, type ReactElement, type ReactNode } from 'react'
 import { CodeBlock } from '@/components/code/CodeBlock'
 import { Interactive, Readout } from '@/components/viz'
+import { DistributionExplorer } from '@/components/widgets/DistributionExplorer'
 import { Asset } from './Asset'
 import { Callout, Definition } from './Callout'
 import { Cite } from './Cite'
@@ -34,6 +35,7 @@ export const mdxComponents = {
   Cite,
   Definition,
   Derivation,
+  DistributionExplorer,
   Interactive,
   NoteLink,
   Readout,

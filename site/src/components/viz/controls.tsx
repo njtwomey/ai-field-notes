@@ -1,19 +1,15 @@
-import { useId, useState, type ReactNode } from 'react'
+import { useEffect, useId, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useDebouncedCallback } from '@/hooks/use-debounced-callback'
+import type { Param } from './param'
 import { formatNumber } from './theme'
 
-type ParamSliderProps = {
+type SliderOptions = {
   label: ReactNode
-  value: number
-  onChange: (value: number) => void
-  min: number
-  max: number
-  step?: number
   format?: (v: number) => string
   /**
    * Milliseconds between the thumb moving and `onChange` firing. The thumb and label update immediately; the figure
@@ -22,21 +18,29 @@ type ParamSliderProps = {
   debounceMs?: number
 }
 
-export function ParamSlider({
-  label,
-  value,
-  onChange,
-  min,
-  max,
-  step = 0.01,
-  format = formatNumber,
-  debounceMs = 60,
-}: ParamSliderProps) {
+/** Either a `param` from useParam (preferred: shared with chart handles), or explicit value, onChange and range. */
+type ParamSliderProps = SliderOptions &
+  (
+    | { param: Param; value?: never; onChange?: never; min?: never; max?: never; step?: never }
+    | { param?: never; value: number; onChange: (value: number) => void; min: number; max: number; step?: number }
+  )
+
+export function ParamSlider(props: ParamSliderProps) {
+  const { label, format = formatNumber, debounceMs = 60 } = props
+  const value = props.param ? props.param.value : props.value
+  const onChange = props.param ? props.param.set : props.onChange
+  const min = props.param ? props.param.min : props.min
+  const max = props.param ? props.param.max : props.max
+  const step = props.param ? props.param.step : (props.step ?? 0.01)
   const id = useId()
   // Value under the thumb while dragging; null when the slider shows the committed `value`.
   const [dragging, setDragging] = useState<number | null>(null)
   const debounced = useDebouncedCallback(onChange, debounceMs)
   const shown = dragging ?? value
+  // When another input (a chart handle) changes the value, drop any pending slider update so it cannot overwrite it.
+  useEffect(() => {
+    if (dragging === null) debounced.cancel()
+  }, [value, dragging, debounced])
   const toNumber = (v: number | readonly number[]) => (Array.isArray(v) ? v[0] : (v as number))
   return (
     <div className="flex flex-col gap-2">

@@ -6,11 +6,12 @@ import {
   Readout,
   XYChart,
   formatNumber,
+  type Handle,
   type HeatmapOverlay,
 } from '@/components/viz'
 import type { LogisticValley } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
-import { descend, excess, snap, type LossAndGrad, type Vec } from './optim'
+import { descend, excess, inGrid, type LossAndGrad, type Vec } from './optim'
 
 /** Mean cross-entropy of P(y = 1) = σ(w·x + b), with its gradient. */
 function crossEntropy(x: number[], y: number[]): LossAndGrad {
@@ -87,6 +88,15 @@ export function MomentumExplorer() {
     }
   }, [runs, data, beta])
 
+  const startHandle: Handle[] | undefined = data && [
+    {
+      kind: 'point',
+      at: start,
+      label: 'start',
+      onDrag: ([w, b]) => setStart([inGrid(w, data.surface.x), inGrid(b, data.surface.y)]),
+    },
+  ]
+
   if (error) return <p className="text-sm text-destructive">{error.message}</p>
   if (!data || !runs || !curves) return null
 
@@ -95,7 +105,7 @@ export function MomentumExplorer() {
   return (
     <Interactive
       title="Momentum in a narrow valley"
-      caption="Left: log₁₀ cross-entropy of a 1-D logistic regression over weight w and bias b. The feature is not centred, so the valley is long and thin. Both optimisers use the same step size and start; click a cell to move the start. Plain gradient descent reaches the valley floor quickly, then crawls along it. Momentum keeps its speed along the floor. With β near 1 it overshoots, and its loss rises and falls."
+      caption="Left: log₁₀ cross-entropy of a 1-D logistic regression over weight w and bias b. The feature is not centred, so the valley is long and thin. Both optimisers use the same step size and start; drag the dot to move the start. Plain gradient descent reaches the valley floor quickly, then crawls along it. Momentum keeps its speed along the floor. With β near 1 it overshoots, and its loss rises and falls."
       controls={
         <>
           <ParamSlider
@@ -132,8 +142,7 @@ export function MomentumExplorer() {
           yLabel="b"
           valueLabel="log₁₀ cross-entropy"
           overlay={overlay}
-          marker={start}
-          onCellClick={(w, b) => setStart([snap(w), snap(b)])}
+          handles={startHandle}
           height={340}
         />
         <XYChart height={340} series={curves.series} yLog xLabel="step" yLabel="L − L*" />

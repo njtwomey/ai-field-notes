@@ -18,6 +18,7 @@ export function loadNote(slug: string): Promise<MdxModule> {
 
 export const kindLabels: Record<NoteKind, string> = {
   concept: 'Concept',
+  distribution: 'Distribution',
   technique: 'Technique',
   test: 'Statistical test',
   'case-study': 'Case study',
@@ -39,12 +40,19 @@ export function components(slug: string): NoteMeta[] {
 }
 
 const categoryIndex = new Map<string, CategoryNode>()
+const categoryRank = new Map<string, number>()
 const walk = (nodes: CategoryNode[]) =>
   nodes.forEach((n) => {
     categoryIndex.set(n.path, n)
+    categoryRank.set(n.path, categoryRank.size)
     walk(n.children)
   })
 walk(taxonomy)
+
+/** Position of a category in taxonomy.yaml order (depth-first). Sort categories by this, never alphabetically. */
+export function categoryOrder(path: string): number {
+  return categoryRank.get(path) ?? Number.MAX_SAFE_INTEGER
+}
 
 export function category(path: string): CategoryNode | undefined {
   return categoryIndex.get(path)

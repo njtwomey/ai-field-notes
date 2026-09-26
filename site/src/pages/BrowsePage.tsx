@@ -8,7 +8,16 @@ import { TopicRail } from '@/components/browse/TopicRail'
 import { kindIcons } from '@/components/layout/kind-icon'
 import { Input } from '@/components/ui/input'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { browseUrl, category, categoryTrail, kindLabels, notes, type BrowseParams, type NoteKind } from '@/lib/content'
+import {
+  browseUrl,
+  category,
+  categoryOrder,
+  categoryTrail,
+  kindLabels,
+  notes,
+  type BrowseParams,
+  type NoteKind,
+} from '@/lib/content'
 import { noteKinds } from '@/lib/content-schema'
 import { cn } from '@/lib/utils'
 
@@ -43,7 +52,7 @@ export function BrowsePage() {
   const groups = useMemo(() => {
     const byCategory = new Map<string, typeof matches>()
     for (const n of matches) byCategory.set(n.category, [...(byCategory.get(n.category) ?? []), n])
-    return [...byCategory.entries()].sort(([a], [b]) => a.localeCompare(b))
+    return [...byCategory.entries()].sort(([a], [b]) => categoryOrder(a) - categoryOrder(b))
   }, [matches])
 
   const filtered = !!(params.c || params.kind || params.q)
@@ -125,9 +134,7 @@ export function BrowsePage() {
               {groups.map(([path, list]) => (
                 <section key={path} className="space-y-3">
                   <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                    {categoryTrail(path)
-                      .map((c) => c.title)
-                      .join(' › ')}
+                    {groupTitle(path, params.c)}
                   </h2>
                   <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                     {list.map((n) => (
@@ -174,6 +181,16 @@ function KindChip({
       {count !== undefined && <span className="tabular-nums opacity-70">{count}</span>}
     </button>
   )
+}
+
+/**
+ * A group's heading: its category trail below the selected topic, which the rail already shows. A group that is the
+ * selected category itself keeps its own title.
+ */
+function groupTitle(path: string, selected?: string): string {
+  const trail = categoryTrail(path)
+  const below = selected ? trail.filter((c) => !`${selected}/`.startsWith(`${c.path}/`)) : trail
+  return (below.length ? below : trail.slice(-1)).map((c) => c.title).join(' › ')
 }
 
 /** Old category URLs (/c/…) open the explorer filtered to that category. */

@@ -12,13 +12,16 @@ export const referenceIcons: Record<Reference['type'], LucideIcon> = {
   course: GraduationCap,
 }
 
-/** Compact reference: icon, title link, authors, venue and year. Used in hover cards and reference lists. */
+/**
+ * A reference: title link, authors, venue and year. The full form (hover cards, reference lists) adds a type icon and
+ * the note; `compact` (margin notes) shows only the essentials.
+ */
 export function ReferenceCard({ reference, compact }: { reference: Reference; compact?: boolean }) {
   const Icon = referenceIcons[reference.type]
   const meta = [formatAuthors(reference.authors), reference.venue, reference.year].filter(Boolean).join(' · ')
   return (
     <div className="flex gap-2">
-      <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+      {!compact && <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
       <div className="min-w-0 space-y-0.5">
         <a
           href={reference.url}
