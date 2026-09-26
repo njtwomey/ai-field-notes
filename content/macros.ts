@@ -208,6 +208,8 @@ export const macroGroups: MacroGroup[] = [
       '\\Laplace': '\\operatorname{Laplace}',
       '\\Wishart': '\\operatorname{Wishart}',
       '\\ChiSq': '\\chi^2',
+      '\\Hypergeom': '\\operatorname{Hypergeom}',
+      '\\FDist': '\\operatorname{F}',
     },
   },
 ]

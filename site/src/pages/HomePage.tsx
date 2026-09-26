@@ -1,16 +1,13 @@
 import { ArrowRight, Search, Waypoints } from 'lucide-react'
 import { Link } from 'react-router'
-import { inCategory } from '@/components/browse/filters'
 import { categoryIcon } from '@/components/layout/category-icon'
 import { kindIcons } from '@/components/layout/kind-icon'
 import { openSearch } from '@/components/layout/SearchCommand'
 import { Kbd } from '@/components/ui/kbd'
-import { browseUrl, categoryOrder, kindLabels, notes, noteUrl, references, taxonomy, topicOf } from '@/lib/content'
+import { browseUrl, kindLabels, notes, notesInCategory, noteUrl, references, taxonomy, topicOf } from '@/lib/content'
+import { cn } from '@/lib/utils'
 
-/** Titles shown per topic tile before "more". */
-const PER_TOPIC = 5
-
-/** Landing page: search, then every topic with its notes as direct links, then what changed recently. */
+/** Landing page: search, then every topic with its subtopics, then what changed recently. */
 export function HomePage() {
   const recent = [...notes].sort((a, b) => b.updated.localeCompare(a.updated)).slice(0, 6)
   return (
@@ -18,7 +15,7 @@ export function HomePage() {
       <section className="mx-auto max-w-2xl space-y-6 text-center">
         <h1 className="font-prose text-5xl font-bold">AI Field Notes</h1>
         <p className="font-prose text-lg text-muted-foreground">
-          One idea per page, with interactive figures, runnable code and sources.
+          Notes on AI and machine learning gathered over a research career, digitised and curated in one place.
         </p>
         <button
           type="button"
@@ -48,9 +45,6 @@ export function HomePage() {
       <section className="mt-16 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {taxonomy.map((topic) => {
           const Icon = categoryIcon(topic.icon)
-          const list = notes
-            .filter((n) => inCategory(n, topic.path))
-            .sort((a, b) => categoryOrder(a.category) - categoryOrder(b.category) || a.title.localeCompare(b.title))
           return (
             <div key={topic.path} className="flex flex-col rounded-xl border p-5">
               <Link to={browseUrl({ c: topic.path })} className="group mb-3 flex items-center gap-2.5">
@@ -58,36 +52,27 @@ export function HomePage() {
                   <Icon className="size-4" aria-hidden />
                 </span>
                 <span className="flex-1 font-medium group-hover:underline">{topic.title}</span>
-                <span className="text-xs text-muted-foreground tabular-nums">{list.length}</span>
+                <span className="text-xs text-muted-foreground tabular-nums">{notesInCategory(topic.path).length}</span>
               </Link>
-              {list.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No notes yet.</p>
-              ) : (
-                <ul className="space-y-1">
-                  {list.slice(0, PER_TOPIC).map((n) => {
-                    const Kind = kindIcons[n.kind]
-                    return (
-                      <li key={n.slug}>
-                        <Link
-                          to={noteUrl(n.slug)}
-                          className="-mx-2 flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-muted"
-                        >
-                          <Kind className="size-3.5 shrink-0 text-muted-foreground" aria-label={kindLabels[n.kind]} />
-                          <span className="truncate">{n.title}</span>
-                        </Link>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-              {list.length > PER_TOPIC && (
-                <Link
-                  to={browseUrl({ c: topic.path })}
-                  className="mt-2 text-xs text-muted-foreground hover:text-foreground"
-                >
-                  +{list.length - PER_TOPIC} more
-                </Link>
-              )}
+              <ul className="space-y-1">
+                {topic.children.map((child) => {
+                  const count = notesInCategory(child.path).length
+                  return (
+                    <li key={child.path}>
+                      <Link
+                        to={browseUrl({ c: child.path })}
+                        className={cn(
+                          '-mx-2 flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-muted',
+                          count === 0 && 'text-muted-foreground',
+                        )}
+                      >
+                        <span className="flex-1 truncate">{child.title}</span>
+                        <span className="text-xs text-muted-foreground tabular-nums">{count}</span>
+                      </Link>
+                    </li>
+                  )
+                })}
+              </ul>
             </div>
           )
         })}

@@ -27,13 +27,34 @@ import { macroExample, macroGroups, macros } from '../content/macros.ts'
 const CONTENT_ID = 'virtual:content'
 const SEARCH_ID = 'virtual:search'
 
-function listNotes(notesDir: string): string[] {
-  if (!fs.existsSync(notesDir)) return []
-  return fs
-    .readdirSync(notesDir, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && fs.existsSync(path.join(notesDir, d.name, 'index.mdx')))
-    .map((d) => d.name)
-    .sort()
+/** A note found on disk: its slug (the folder name), its folder relative to notes/, and the category its path implies. */
+type NoteDir = { slug: string; dir: string; category: string }
+
+/**
+ * Every note under notes/, at any depth. A folder holding index.mdx is a note and is never searched further. Any other
+ * folder is a category; folders starting with `_` hold shared code and are skipped.
+ * Notes directly under notes/ are the legacy flat layout, whose category comes from frontmatter.
+ */
+function listNotes(notesDir: string, errors: string[]): { notes: NoteDir[]; folders: string[] } {
+  const notes: NoteDir[] = []
+  const folders: string[] = []
+  const walk = (rel: string) => {
+    for (const d of fs.readdirSync(path.join(notesDir, rel), { withFileTypes: true })) {
+      if (!d.isDirectory() || d.name.startsWith('_') || d.name.startsWith('.')) continue
+      const child = rel ? `${rel}/${d.name}` : d.name
+      if (fs.existsSync(path.join(notesDir, child, 'index.mdx'))) {
+        notes.push({ slug: d.name, dir: child, category: rel })
+        const nested = fs.globSync('**/index.mdx', { cwd: path.join(notesDir, child) }).filter((f) => f !== 'index.mdx')
+        for (const f of nested) errors.push(`content/notes/${child}/${f}: a note folder must not contain other notes`)
+      } else {
+        folders.push(child)
+        walk(child)
+      }
+    }
+  }
+  if (fs.existsSync(notesDir)) walk('')
+  notes.sort((a, b) => a.slug.localeCompare(b.slug))
+  return { notes, folders }
 }
 
 function splitFrontmatter(source: string, file: string): { data: unknown; body: string } {
@@ -137,8 +158,20 @@ export function buildIndex(contentDir: string) {
   const notesDir = path.join(contentDir, 'notes')
   const notes: NoteMeta[] = []
   const bodies: Record<string, string> = {}
-  for (const noteSlug of listNotes(notesDir)) {
-    const file = `notes/${noteSlug}/index.mdx`
+  const found = listNotes(notesDir, errors)
+  // Folders that are neither notes nor categories are reported by `make doctor`; a note beneath one fails below with
+  // an unknown category.
+  const seen = new Map<string, string>()
+  for (const { slug: noteSlug, dir, category } of found.notes) {
+    const file = `notes/${dir}/index.mdx`
+    const clash = seen.get(noteSlug)
+    if (clash) {
+      errors.push(
+        `content/${file}: slug "${noteSlug}" is also used by content/${clash}; slugs are URLs and must be unique`,
+      )
+      continue
+    }
+    seen.set(noteSlug, file)
     const source = fs.readFileSync(path.join(contentDir, file), 'utf8')
     const { data, body } = splitFrontmatter(source, file)
     const parsed = frontmatterSchema.safeParse(data)
@@ -146,10 +179,20 @@ export function buildIndex(contentDir: string) {
       errors.push(formatIssues(`content/${file}`, parsed.error))
       continue
     }
+    // Nested notes take their category from the folder path; flat (legacy) notes from frontmatter.
+    if (category && parsed.data.category && parsed.data.category !== category) {
+      errors.push(`content/${file}: frontmatter category "${parsed.data.category}" disagrees with folder "${category}"`)
+    }
+    const resolvedCategory = category || parsed.data.category
+    if (!resolvedCategory) {
+      errors.push(`content/${file}: no category; move the note into a category folder`)
+      continue
+    }
     errors.push(...mathErrors(body).map((e) => `content/${file}: ${e}`))
     const text = plainText(body)
     notes.push({
       ...parsed.data,
+      category: resolvedCategory,
       slug: noteSlug,
       file,
       headings: extractHeadings(body),
@@ -186,7 +229,7 @@ export function buildIndex(contentDir: string) {
   }
   if (errors.length) throw new Error(`Content validation failed:\n${errors.join('\n')}`)
 
-  return { notes, references, taxonomy, bodies }
+  return { notes, references, taxonomy, bodies, folders: found.folders }
 }
 
 export function contentIndex({ contentDir }: { contentDir: string }): Plugin {

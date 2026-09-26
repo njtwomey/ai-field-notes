@@ -6,6 +6,8 @@
  * `<DistributionExplorer id="…" />` in it.
  */
 import { logChoose, logFactorial, normalCdf, normalPdf, normalQuantile } from '@/lib/math/special'
+import { bernoulli, geometric, hypergeometric, negativeBinomial } from './discrete'
+import { continuous } from './continuous'
 
 export type DistributionParam = {
   key: string
@@ -160,7 +162,20 @@ const logistic: Distribution = {
 }
 
 export const distributions: Record<string, Distribution> = Object.fromEntries(
-  [poisson, binomial, exponential, gaussian, cauchy, gumbel, logistic].map((d) => [d.id, d]),
+  [
+    poisson,
+    binomial,
+    exponential,
+    gaussian,
+    cauchy,
+    gumbel,
+    logistic,
+    bernoulli,
+    geometric,
+    negativeBinomial,
+    hypergeometric,
+    ...continuous,
+  ].map((d) => [d.id, d]),
 )
 
 export function distribution(id: string): Distribution {

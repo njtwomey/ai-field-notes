@@ -1,0 +1,106 @@
+---
+title: Rejection sampling
+kind: technique
+summary: Rejection sampling draws from a target density p by proposing from an easier density q with p ≤ Mq, and accepting a proposal x with probability p(x)/(M q(x)). Accepted draws follow p exactly; on average one in M proposals is accepted.
+tags: [probability, sampling, simulation, monte-carlo, worked-example]
+aliases: [acceptance-rejection method, accept-reject, von Neumann rejection]
+related: [inverse-transform-sampling, sampling-a-disk-or-sphere, box-muller-transform, beta-distribution]
+references: [vonneumann1951, robert2004, gilks1992, devroye1986]
+status: draft
+updated: 2026-09-26
+---
+
+import { RejectionSampler } from './RejectionSampler'
+
+<Definition>
+Let $p$ be a target density, $q$ a proposal density that can be sampled, and $M$ a constant with $p(x) \le M q(x)$ for
+every $x$. Repeat: draw $x \sim q$ and $u \sim \Unif(0, 1)$, and accept $x$ if $u \le p(x)/\paren{M q(x)}$. The accepted
+values are independent draws from $p$. Each proposal is accepted with probability $1/M$
+<Cite id="vonneumann1951" />.
+</Definition>
+
+## Problem
+
+Many densities can be evaluated but not sampled directly. The quantile function may have no closed form, or the
+density may be known only up to a normalising constant, as with a posterior density $p(\thetavec \mid \Dcal) \propto
+p(\Dcal \mid \thetavec)\, p(\thetavec)$.
+
+## Mechanism
+
+The graph of $M q$ lies above the graph of $p$. Drawing $x \sim q$ and a height $h = u \cdot M q(x)$ produces a point
+$(x, h)$ that is uniform in the region under $M q$. Keeping only the points with $h \le p(x)$ leaves points uniform in
+the region under $p$. The $x$-coordinate of a point uniform under the graph of a density has that density, so the kept
+$x$ values follow $p$.
+
+The region under $M q$ has area $M$, and the region under $p$ has area 1. The fraction of points kept is therefore
+$1/M$, and the number of proposals needed per accepted draw is geometric with mean $M$.
+
+## Proof
+
+The geometric argument can be written as a calculation. For a proposal $X \sim q$, the probability of acceptance given
+$X = x$ is $p(x)/\paren{M q(x)}$. The joint probability of proposing a value in a small interval $[x, x + dx]$ and
+accepting it is
+
+$$
+q(x)\, dx \cdot \frac{p(x)}{M q(x)} = \frac{p(x)}{M}\, dx.
+$$
+
+Integrating over $x$ gives the overall acceptance probability $\int p(x)/M\, dx = 1/M$. Dividing, the density of an
+accepted value is $\paren{p(x)/M} / (1/M) = p(x)$. Successive attempts are independent, so accepted values are
+independent.
+
+<RejectionSampler />
+
+## Unnormalised targets
+
+The method needs $p$ only up to a constant. If $\tilde p = Z p$ with $Z$ unknown and $\tilde p \le M q$, the same
+algorithm with $\tilde p$ in place of $p$ still returns exact draws from $p$. The acceptance rate becomes $Z/M$. This is
+why rejection sampling works for posteriors whose evidence $p(\Dcal)$ is intractable.
+
+## Worked example
+
+Take the target $p(x) = 6x(1 - x)$ on $[0, 1]$, the $\Beta(2, 2)$ density (see
+<NoteLink to="beta-distribution">beta distribution</NoteLink>), and the uniform proposal $q(x) = 1$ on
+$[0, 1]$.
+
+1. The target peaks at $x = 1/2$ with $p(1/2) = 1.5$. The smallest valid constant is $M = 1.5$.
+2. Propose $x = 0.2$ with $u = 0.5$. The ratio is $p(0.2)/(1.5 \cdot 1) = 0.96/1.5 = 0.64$. Since $0.5 \le 0.64$,
+   accept $x = 0.2$.
+3. Propose $x = 0.9$ with $u = 0.5$. The ratio is $p(0.9)/1.5 = 0.54/1.5 = 0.36$. Since $0.5 > 0.36$, reject.
+
+On average two of every three proposals are accepted.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(0)
+p = lambda x: 6 * x * (1 - x)
+M = 1.5
+x = rng.uniform(size=100_000)
+u = rng.uniform(size=100_000)
+samples = x[u <= p(x) / M]
+print(len(samples) / len(x), samples.mean(), samples.var())  # ≈ 0.667, 0.5, 0.05
+```
+
+## Cost and trade-offs
+
+- **Choice of proposal.** The acceptance rate is $1/M$, and the smallest valid $M$ is $\sup_x p(x)/q(x)$. A proposal
+  close in shape to the target gives $M$ near 1. The proposal must have tails at least as heavy as the target's, or the
+  supremum is infinite.
+- **Dimension.** The best $M$ usually grows exponentially with dimension. For the target $\Gauss(\zeros, \Imat_d)$ and
+  the slightly wider proposal $\Gauss(\zeros, \sigma^2 \Imat_d)$ with $\sigma > 1$, the ratio is $p(\xvec)/q(\xvec) =
+  \sigma^d \exp\paren{-\tfrac12 \norm{\xvec}^2 (1 - \sigma^{-2})}$. The exponent is never positive, so the ratio peaks
+  at the origin with value $M = \sigma^d$. With $\sigma = 1.1$ and $d = 100$, the acceptance rate is $1.1^{-100} \approx
+  7 \times 10^{-5}$. Markov chain Monte Carlo methods replace rejection sampling in high dimensions.
+- **Exactness.** Unlike Markov chain methods, rejection sampling returns exact, independent draws with no burn-in.
+- **Adaptive envelopes.** For log-concave densities, adaptive rejection sampling builds a piecewise-exponential
+  envelope from tangents of $\log p$ and refines it at every rejection <Cite id="gilks1992" />.
+
+## Pitfalls
+
+- **An envelope that does not cover the target.** If $p(x) > M q(x)$ anywhere, the method silently returns draws from
+  $\min\paren{p, M q}$, normalised. The figure shows this when $M$ is set below the peak. Nothing in the output signals
+  the error.
+- **Estimating $M$ from a grid.** A supremum found on a coarse grid can miss a narrow peak. Use an analytic bound where
+  possible, or add a safety margin.
+- **Unbounded run time.** The number of attempts per draw is random. With a large $M$ some draws take many attempts.

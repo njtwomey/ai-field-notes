@@ -7,13 +7,14 @@ import { z } from 'zod'
 export const slug = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'must be kebab-case')
 export const categoryPath = z.string().regex(/^[a-z0-9-]+(?:\/[a-z0-9-]+)*$/, 'must be a slash-separated path of slugs')
 
-export const noteKinds = ['concept', 'distribution', 'technique', 'test', 'case-study', 'overview'] as const
+export const noteKinds = ['concept', 'distribution', 'technique', 'test', 'example', 'case-study', 'overview'] as const
 
 export const frontmatterSchema = z
   .object({
     title: z.string().min(1),
     kind: z.enum(noteKinds),
-    category: categoryPath,
+    /** Only for notes directly under content/notes/; nested notes take their category from their folder path. */
+    category: categoryPath.optional(),
     summary: z.string().min(1).max(280),
     tags: z.array(slug).default([]),
     aliases: z.array(z.string()).default([]),
@@ -78,9 +79,11 @@ export const categorySchema: z.ZodType<CategoryInput> = z.lazy(() =>
 
 export type Frontmatter = z.infer<typeof frontmatterSchema>
 
-export type NoteMeta = Frontmatter & {
+export type NoteMeta = Omit<Frontmatter, 'category'> & {
+  /** Category path, from the note's folder (or legacy frontmatter). Always set. */
+  category: string
   slug: string
-  /** Path relative to content/, e.g. `notes/linear-regression/index.mdx`. */
+  /** Path relative to content/, e.g. `notes/supervised-learning/regression/linear-regression/index.mdx`. */
   file: string
   headings: { depth: number; text: string; id: string }[]
   /** Reference keys cited inline with <Cite>, in first-use order. */

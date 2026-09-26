@@ -1,0 +1,136 @@
+---
+title: LU decomposition
+kind: concept
+summary: LU decomposition factors a square matrix into a unit lower-triangular matrix and an upper-triangular matrix, usually after a row permutation. It is Gaussian elimination recorded once, so that each later solve costs two cheap triangular substitutions.
+tags: [linear-algebra, decompositions, linear-systems, worked-example]
+aliases: [LU factorisation, LUP decomposition, PA = LU, Gaussian elimination, forward substitution, back substitution]
+related: [cholesky-decomposition, qr-decomposition, matrix-inverse, determinant, condition-number]
+references: [golub2013, trefethen1997, higham2002]
+status: draft
+updated: 2026-09-26
+---
+
+<Definition>
+An LU decomposition of a square matrix $\Amat \in \reals^{n \times n}$ is a factorisation
+
+$$
+\Pmat\Amat = \Lmat\Umat,
+$$
+
+where $\Pmat$ is a permutation matrix, $\Lmat$ is lower triangular with ones on its diagonal, and $\Umat$ is upper
+triangular. Every square matrix has one. When no row exchanges are needed, $\Pmat = \eye$ and $\Amat = \Lmat\Umat$
+<Cite id="golub2013" />.
+</Definition>
+
+## From Gaussian elimination
+
+Gaussian elimination subtracts multiples of each pivot row from the rows below it until the matrix is upper
+triangular. The triangular result is $\Umat$. The multiplier $\ell_{ij}$ used to clear entry $(i, j)$ becomes entry
+$(i, j)$ of $\Lmat$. The factorisation is therefore a record of elimination, not a new algorithm.
+
+The multipliers land in $\Lmat$ unchanged because each elimination step is a matrix product. Step $k$ clears column $k$
+below the pivot by subtracting $\ell_{ik}$ times row $k$ from each row $i > k$. That is multiplication on the left by
+
+$$
+\Emat_k = \eye - \lvec_k\evec_k^\top,
+$$
+
+where $\lvec_k$ holds the multipliers $\ell_{k+1,k}, \dots, \ell_{nk}$ in positions $k+1$ to $n$ and zeros above. After
+$n - 1$ steps, $\Emat_{n-1}\cdots\Emat_2\Emat_1\Amat = \Umat$, so
+
+$$
+\Amat = \Emat_1^{-1}\Emat_2^{-1}\cdots\Emat_{n-1}^{-1}\Umat.
+$$
+
+Each inverse is easy. Since $\lvec_k$ is zero in position $k$, $\evec_k^\top\lvec_k = 0$, and
+
+$$
+(\eye - \lvec_k\evec_k^\top)(\eye + \lvec_k\evec_k^\top) = \eye - \lvec_k(\evec_k^\top\lvec_k)\evec_k^\top = \eye,
+$$
+
+so $\Emat_k^{-1} = \eye + \lvec_k\evec_k^\top$: undoing a step adds the rows back. In the product of the inverses every
+cross term $\lvec_j\evec_j^\top\lvec_k\evec_k^\top$ with $j < k$ vanishes, because $\lvec_k$ is zero in position $j$.
+What remains is
+
+$$
+\Lmat = \eye + \lvec_1\evec_1^\top + \lvec_2\evec_2^\top + \dots + \lvec_{n-1}\evec_{n-1}^\top,
+$$
+
+the identity with multiplier $\ell_{ik}$ in position $(i, k)$. Hence $\Amat = \Lmat\Umat$.
+
+Row exchanges, recorded in $\Pmat$, are needed when a pivot is zero. **Partial pivoting** exchanges rows at every step
+so that the pivot is the largest entry in its column. This keeps every $\abs{\ell_{ij}} \le 1$ and is the default in
+numerical libraries <Cite id="trefethen1997" />.
+
+## Solving linear systems
+
+To solve $\Amat\xvec = \bvec$ with $\Pmat\Amat = \Lmat\Umat$, write $\Lmat\Umat\xvec = \Pmat\bvec$ and set
+$\yvec = \Umat\xvec$:
+
+1. **Forward substitution.** Solve $\Lmat\yvec = \Pmat\bvec$ from the first row down. Row $i$ involves only
+   $y_1, \dots, y_i$.
+2. **Back substitution.** Solve $\Umat\xvec = \yvec$ from the last row up. Row $i$ involves only $x_i, \dots, x_n$.
+
+$\Lmat$ has ones on its diagonal and is always invertible. Back substitution divides by the diagonal entries of
+$\Umat$, so the solution exists and is unique exactly when every $u_{ii}$ is nonzero, that is when $\Amat$ is
+invertible.
+
+## Cost
+
+Factorising a dense $n \times n$ matrix costs about $\tfrac{2}{3}n^3$ floating-point operations. Step $k$ updates the
+$(n - k)^2$ entries below and to the right of the pivot with one multiplication and one subtraction each, and
+$\sum_{k=1}^{n-1} 2(n - k)^2 \approx \tfrac{2}{3}n^3$. Each triangular solve
+costs about $n^2$. A system with $k$ right-hand sides therefore costs $\tfrac{2}{3}n^3 + 2kn^2$ with one factorisation,
+against $k \cdot \tfrac{2}{3}n^3$ if elimination is repeated for each. Forming $\Amat^{-1}$ explicitly is slower and
+less accurate than solving with the factors <Cite id="higham2002" />.
+
+The factors also give the <NoteLink to="determinant">determinant</NoteLink>:
+$\det\Amat = \det(\Pmat)^{-1}\prod_i u_{ii}$, because $\det\Lmat = 1$ and determinants multiply. $\det\Pmat = \pm 1$
+counts the parity of the row exchanges. Solving with the factors is also why forming the
+<NoteLink to="matrix-inverse">matrix inverse</NoteLink> is never needed.
+
+## Worked example
+
+Take
+
+$$
+\Amat = \begin{bmatrix} 4 & 3 & 0 \\ 3 & 4 & -1 \\ 0 & -1 & 4 \end{bmatrix}, \qquad
+\bvec = \begin{bmatrix} 10 \\ 8 \\ 10 \end{bmatrix}.
+$$
+
+**Eliminate.** The multiplier for row 2 is $\ell_{21} = 3/4$, which leaves row 2 as $(0, \tfrac{7}{4}, -1)$. Row 3
+already starts with zero, so $\ell_{31} = 0$. The next pivot is $\tfrac{7}{4}$, and $\ell_{32} = -1 / \tfrac{7}{4} =
+-\tfrac{4}{7}$ leaves row 3 as $(0, 0, \tfrac{24}{7})$. No row exchange is needed, so
+
+$$
+\Lmat = \begin{bmatrix} 1 & 0 & 0 \\ \tfrac{3}{4} & 1 & 0 \\ 0 & -\tfrac{4}{7} & 1 \end{bmatrix}, \qquad
+\Umat = \begin{bmatrix} 4 & 3 & 0 \\ 0 & \tfrac{7}{4} & -1 \\ 0 & 0 & \tfrac{24}{7} \end{bmatrix}.
+$$
+
+**Forward substitution** on $\Lmat\yvec = \bvec$ gives $y_1 = 10$, then
+$y_2 = 8 - \tfrac{3}{4} \cdot 10 = \tfrac{1}{2}$, then $y_3 = 10 + \tfrac{4}{7} \cdot \tfrac{1}{2} = \tfrac{72}{7}$.
+
+**Back substitution** on $\Umat\xvec = \yvec$ gives $x_3 = \tfrac{72}{7} / \tfrac{24}{7} = 3$, then
+$\tfrac{7}{4}x_2 = \tfrac{1}{2} + 3$ so $x_2 = 2$, then $4x_1 = 10 - 3 \cdot 2$ so $x_1 = 1$. The solution is
+$\xvec = (1, 2, 3)$.
+
+The determinant is $4 \cdot \tfrac{7}{4} \cdot \tfrac{24}{7} = 24$.
+
+## Relation to other factorisations
+
+- For a symmetric positive definite matrix, the <NoteLink to="cholesky-decomposition">Cholesky decomposition</NoteLink>
+  $\Amat = \Lmat\Lmat^\top$ is the symmetric form of LU. It needs no pivoting and costs half as much.
+- The <NoteLink to="qr-decomposition">QR decomposition</NoteLink> also solves square systems and handles rectangular
+  least-squares problems. It costs about twice as much as LU for square matrices and is more robust when $\Amat$ is
+  close to singular.
+
+## Pitfalls
+
+- **No pivoting.** Without row exchanges, a tiny pivot creates huge multipliers and destroys accuracy. The matrix
+  $\begin{bmatrix} \epsilon & 1 \\ 1 & 1 \end{bmatrix}$ with small $\epsilon$ factors exactly, but in floating point the
+  computed solution is badly wrong unless the rows are exchanged <Cite id="trefethen1997" />.
+- **Ill-conditioning.** Pivoting controls the growth of rounding errors in the factors. It cannot fix a large
+  <NoteLink to="condition-number">condition number</NoteLink>, which amplifies errors in $\bvec$ whatever method is
+  used.
+- **Fill-in.** For sparse matrices, $\Lmat$ and $\Umat$ can be much denser than $\Amat$. Sparse solvers reorder rows
+  and columns to limit this.

@@ -1,0 +1,147 @@
+---
+title: Negative binomial distribution
+kind: distribution
+summary: The negative binomial distribution counts the failures before the r-th success in independent trials with success probability p. It is also a Poisson whose rate is gamma-distributed, which makes it the standard model for overdispersed counts, whose variance exceeds their mean.
+tags: [probability, distributions, counts, overdispersion, worked-example]
+aliases: [negative binomial, NegBin, Pascal distribution, gamma–Poisson mixture, Pólya distribution]
+related: [poisson-distribution, geometric-distribution, binomial-distribution, law-of-total-expectation]
+references: [cameron2013]
+status: draft
+updated: 2026-09-26
+---
+
+import { Overdispersion } from './Overdispersion'
+
+<Definition>
+A random variable $X$ has a negative binomial distribution with $r > 0$ and success probability $p \in (0, 1]$, written
+$X \sim \NegBin(r, p)$, if
+
+$$
+P(X = k) = \frac{\Gamma(k + r)}{k!\,\Gamma(r)}\, p^r (1 - p)^k, \qquad k = 0, 1, 2, \dots
+$$
+
+For integer $r$ the coefficient is $\binom{k + r - 1}{k}$, and $X$ is the number of failures before the $r$-th success
+in independent $\Bern(p)$ trials.
+</Definition>
+
+Other conventions count trials instead of failures, or exchange the roles of $p$ and $1 - p$. This note follows the
+convention of SciPy's `nbinom`, and its mean is $r(1 - p)/p$.
+
+## At a glance
+
+| | |
+| --- | --- |
+| Parameters | $r > 0$, success probability $p \in (0, 1]$ |
+| Support | $k \in \{0, 1, 2, \dots\}$ |
+| pmf | $\frac{\Gamma(k + r)}{k!\,\Gamma(r)} p^r (1 - p)^k$ |
+| Mean | $\mu = r(1 - p)/p$ |
+| Variance | $r(1 - p)/p^2 = \mu + \mu^2/r$ |
+| Mean–dispersion form | mean $\mu$ and dispersion $r$, with $p = r/(r + \mu)$ |
+
+<DistributionExplorer id="negative-binomial" />
+
+## Where it comes from
+
+**Waiting for the $r$-th success.** The $r$-th success falls on trial $k + r$ when the first $k + r - 1$ trials contain
+exactly $r - 1$ successes and trial $k + r$ succeeds. There are $\binom{k + r - 1}{k}$ ways to place the $k$ failures
+among the first $k + r - 1$ trials, and each arrangement has probability $p^r (1 - p)^k$.
+
+**A Poisson with a random rate.** Let the rate of a Poisson count vary from unit to unit:
+
+$$
+\Lambda \sim \GammaD\paren{r, \beta}, \qquad X \mid \Lambda \sim \Poisson(\Lambda),
+$$
+
+where $\GammaD$ is the <NoteLink to="gamma-distribution">gamma distribution</NoteLink> with shape $r$ and rate
+$\beta = p/(1 - p)$, so that $\expect[\Lambda] = r(1 - p)/p$. Then $X \sim \NegBin(r, p)$. Greenwood and Yule introduced
+this mixture to model accident counts among workers who differ in their proneness to accidents
+<Cite id="greenwood1920" />. This form allows any $r > 0$.
+
+<Derivation title="The gamma–Poisson mixture">
+Integrate the rate out:
+
+$$
+P(X = k) = \int_0^\infty \frac{e^{-\lambda}\lambda^k}{k!}\, \frac{\beta^r \lambda^{r - 1} e^{-\beta\lambda}}{\Gamma(r)}
+\, d\lambda = \frac{\beta^r}{k!\,\Gamma(r)} \int_0^\infty \lambda^{k + r - 1} e^{-(1 + \beta)\lambda}\, d\lambda
+= \frac{\Gamma(k + r)}{k!\,\Gamma(r)} \paren{\frac{\beta}{1 + \beta}}^r \paren{\frac{1}{1 + \beta}}^k.
+$$
+
+With $\beta = p/(1 - p)$, $\beta/(1 + \beta) = p$ and $1/(1 + \beta) = 1 - p$, which is the $\NegBin(r, p)$ pmf. Taking
+$\beta = (1 - p)/p$ instead gives a different distribution with the wrong mean.
+</Derivation>
+
+<Overdispersion />
+
+## Properties
+
+**Mean and variance.** For integer $r$, $X$ is a sum of $r$ independent failure counts $Y_i$, each with
+$P(Y_i = k) = (1 - p)^k p$, mean $(1 - p)/p$ and variance $(1 - p)/p^2$. Adding gives $\expect[X] = r(1 - p)/p$ and
+$\var(X) = r(1 - p)/p^2$.
+
+For any $r > 0$, use the mixture and the laws of total expectation and variance. $\Lambda$ has mean $\mu = r/\beta$ and
+variance $r/\beta^2 = \mu^2/r$, so
+
+$$
+\expect[X] = \expect[\Lambda] = \mu, \qquad \var(X) = \expect[\var(X \mid \Lambda)] + \var(\expect[X \mid \Lambda])
+= \mu + \frac{\mu^2}{r}.
+$$
+
+The first term is the Poisson variance, $\var(X \mid \Lambda) = \Lambda$, averaged over the rate. The second is the
+variance of the conditional mean, which is the variance of the rate itself. The decomposition is the law of total
+variance (see <NoteLink to="law-of-total-expectation">law of total expectation</NoteLink>).
+
+**Overdispersion.** The variance is $\mu + \mu^2/r$, always larger than the mean $\mu$. The term $\mu^2/r$ is the extra
+variance contributed by the random rate. Small $r$ means strong overdispersion. As $r \to \infty$ with $\mu$ fixed, the
+extra term vanishes and $\NegBin$ tends to $\Poisson(\mu)$.
+
+**Closure under sums.** If $X_1 \sim \NegBin(r_1, p)$ and $X_2 \sim \NegBin(r_2, p)$ are independent with the same
+$p$, then $X_1 + X_2 \sim \NegBin(r_1 + r_2, p)$. For integer $r_1$ and $r_2$ this is the waiting-time picture: wait
+for $r_1$ successes, then for $r_2$ more.
+
+<Derivation title="Closure under sums for any r">
+The probability generating function is
+
+$$
+\expect[s^X] = \sum_{k \ge 0} \frac{\Gamma(k + r)}{k!\,\Gamma(r)} p^r \paren{(1 - p)s}^k
+= \paren{\frac{p}{1 - (1 - p)s}}^r,
+$$
+
+by the negative binomial series $\sum_k \frac{\Gamma(k + r)}{k!\,\Gamma(r)} z^k = (1 - z)^{-r}$ for $\abs{z} < 1$. At
+$s = 1$ it equals 1, which shows the pmf is normalised. The generating function of a sum of independent variables is
+the product of theirs, and the product of the $r_1$ and $r_2$ forms is the $r_1 + r_2$ form.
+</Derivation>
+
+**More zeros.** For the same mean, the negative binomial puts more mass at 0 than the Poisson:
+$P(X = 0) = p^r = \paren{r/(r + \mu)}^r$, which exceeds $e^{-\mu}$ for every finite $r$. Taking logs,
+$\log P(X = 0) = -r \log(1 + \mu/r)$, and $\log(1 + x) < x$ for $x > 0$ gives $-r\log(1 + \mu/r) > -\mu$.
+With $\mu = 3$, the Poisson gives $P(X = 0) \approx 0.050$; the negative binomial gives $0.25$ at $r = 1$ and $0.095$ at
+$r = 5$.
+
+## Relations to other distributions
+
+- **Geometric.** $\NegBin(1, p)$ is the number of failures before the first success, which is $X - 1$ for
+  $X \sim \Geom(p)$ as defined in <NoteLink to="geometric-distribution">the geometric distribution</NoteLink>.
+- **Poisson.** A <NoteLink to="poisson-distribution">Poisson</NoteLink> with a gamma-distributed rate, and the limit as
+  $r \to \infty$ with the mean fixed.
+- **Binomial.** The <NoteLink to="binomial-distribution">binomial</NoteLink> fixes the number of trials and counts
+  successes. The negative binomial fixes the number of successes and counts failures.
+
+## In machine learning
+
+- **Count regression.** Negative binomial regression models a count with mean $\mu = \exp(\wvec^\top \xvec)$ and a
+  shared dispersion $r$. It is the usual replacement for Poisson regression when counts are overdispersed
+  <Cite id="cameron2013" />.
+- **Gene expression.** Read counts in RNA sequencing vary more between biological replicates than a Poisson allows.
+  DESeq2 models them as negative binomial with a dispersion estimated per gene <Cite id="love2014" />.
+- **Forecasting demand.** Probabilistic forecasters for sales and other counts use a negative binomial likelihood, with
+  the network predicting $\mu$ and $r$ at each time step <Cite id="salinas2020" />.
+
+## Pitfalls
+
+- **Conventions.** Libraries differ on whether $X$ counts failures or trials, whether $p$ is the probability of success
+  or of failure, and whether dispersion is given as $r$ or as $\alpha = 1/r$. Check the stated mean before using a
+  fitted model.
+- **No overdispersion.** When counts are not overdispersed, the maximum-likelihood estimate of $r$ grows without
+  bound. The Poisson model is then adequate.
+- **Excess zeros from a separate process.** The negative binomial raises $P(X = 0)$ only through the random rate. Zeros
+  from a structurally different source, such as a sensor that is off, need a zero-inflated model.

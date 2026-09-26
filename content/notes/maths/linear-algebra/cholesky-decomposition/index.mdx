@@ -1,0 +1,139 @@
+---
+title: Cholesky decomposition
+kind: concept
+summary: The Cholesky decomposition factors a symmetric positive definite matrix as LLᵀ, with L lower triangular. It is the fastest stable way to solve such systems, compute their log-determinants and sample correlated Gaussians.
+tags: [linear-algebra, decompositions, gaussian, sampling, worked-example]
+aliases: [Cholesky factorisation, Cholesky factor, LLᵀ, LDLᵀ, square root of a matrix]
+requires: [positive-definite-matrices]
+related: [lu-decomposition, schur-complement, multivariate-normal-distribution]
+references: [golub2013, higham2002, rasmussen2006]
+status: draft
+updated: 2026-09-26
+---
+
+import { GaussianSampler } from './GaussianSampler'
+
+<Definition>
+Every symmetric positive definite matrix $\Amat \in \reals^{n \times n}$ has a unique factorisation
+
+$$
+\Amat = \Lmat\Lmat^\top,
+$$
+
+where $\Lmat$ is lower triangular with positive diagonal entries. $\Lmat$ is the Cholesky factor of $\Amat$
+<Cite id="golub2013" />.
+</Definition>
+
+## Algorithm
+
+Entry $(i, j)$ of $\Lmat\Lmat^\top$ is the dot product of rows $i$ and $j$ of $\Lmat$. For $i \ge j$, row $j$ has
+nonzero entries only up to column $j$, so
+
+$$
+a_{ij} = \sum_{k \le j} \ell_{ik}\ell_{jk} = \ell_{ij}\ell_{jj} + \sum_{k<j} \ell_{ik}\ell_{jk}.
+$$
+
+Solving for the last term, column by column, gives each entry of $\Lmat$ from entries already computed:
+
+$$
+\ell_{jj} = \sqrt{a_{jj} - \sum_{k<j} \ell_{jk}^2}, \qquad
+\ell_{ij} = \frac{1}{\ell_{jj}}\paren{a_{ij} - \sum_{k<j} \ell_{ik}\ell_{jk}} \quad (i > j).
+$$
+
+The quantity under each square root is positive exactly when $\Amat$ is positive definite. Attempting the factorisation
+is therefore the cheapest practical test for positive definiteness: it fails, with a non-positive pivot, if and only if
+$\Amat$ is not PD.
+
+## Why every positive definite matrix has one
+
+The proof takes one column at a time. Partition
+
+$$
+\Amat = \begin{bmatrix} a_{11} & \avec^\top \\ \avec & \Amat_{22} \end{bmatrix}.
+$$
+
+Taking $\xvec = \evec_1$ in $\xvec^\top\Amat\xvec > 0$ gives $a_{11} > 0$, so $\ell_{11} = \sqrt{a_{11}}$ exists, and
+the first column of $\Lmat$ is $(\ell_{11}, \avec/\ell_{11})$. What remains to factor is
+
+$$
+\Smat = \Amat_{22} - \frac{\avec\avec^\top}{a_{11}},
+$$
+
+the <NoteLink to="schur-complement">Schur complement</NoteLink> of $a_{11}$. It is positive definite. For any nonzero
+$\yvec$, choose $x_1 = -\avec^\top\yvec/a_{11}$ and $\xvec = (x_1, \yvec)$. Completing the square in $x_1$ gives
+
+$$
+\xvec^\top\Amat\xvec = a_{11}x_1^2 + 2x_1\avec^\top\yvec + \yvec^\top\Amat_{22}\yvec
+= a_{11}\paren{x_1 + \frac{\avec^\top\yvec}{a_{11}}}^2 + \yvec^\top\Smat\yvec = \yvec^\top\Smat\yvec,
+$$
+
+and the left side is positive. So $\Smat$ is a positive definite matrix of size $n - 1$, and by induction it factors as
+$\Lmat_2\Lmat_2^\top$. Then
+
+$$
+\Amat = \begin{bmatrix} \ell_{11} & \zeros^\top \\ \avec/\ell_{11} & \Lmat_2 \end{bmatrix}
+\begin{bmatrix} \ell_{11} & \avec^\top/\ell_{11} \\ \zeros & \Lmat_2^\top \end{bmatrix},
+$$
+
+which multiplies out to $a_{11}$, $\avec$ and $\avec\avec^\top/a_{11} + \Smat = \Amat_{22}$. The factor is unique
+because each diagonal entry is fixed as the positive square root and each off-diagonal entry is then determined by the
+formulas above. The same identity read backwards shows that if any pivot is non-positive, $\Amat$ is not positive
+definite.
+
+## Worked example
+
+$$
+\begin{bmatrix} 4 & 2 & -2 \\ 2 & 10 & 2 \\ -2 & 2 & 6 \end{bmatrix}
+= \begin{bmatrix} 2 & 0 & 0 \\ 1 & 3 & 0 \\ -1 & 1 & 2 \end{bmatrix}
+\begin{bmatrix} 2 & 1 & -1 \\ 0 & 3 & 1 \\ 0 & 0 & 2 \end{bmatrix}.
+$$
+
+Column 1: $\ell_{11} = \sqrt 4 = 2$, then $\ell_{21} = 2/2 = 1$ and $\ell_{31} = -2/2 = -1$. Column 2:
+$\ell_{22} = \sqrt{10 - 1} = 3$ and $\ell_{32} = (2 - (-1)(1))/3 = 1$. Column 3: $\ell_{33} = \sqrt{6 - 1 - 1} = 2$.
+The determinant is $(2 \cdot 3 \cdot 2)^2 = 144$.
+
+## Uses
+
+- **Solving systems.** $\Amat\xvec = \bvec$ becomes $\Lmat\yvec = \bvec$ by forward substitution and
+  $\Lmat^\top\xvec = \yvec$ by back substitution. The factorisation costs about $\tfrac{1}{3}n^3$ operations, half the
+  cost of the <NoteLink to="lu-decomposition">LU decomposition</NoteLink>, and needs no pivoting
+  <Cite id="higham2002" />.
+- **Log-determinants.** $\det\Amat = \det\Lmat\,\det\Lmat^\top = \prod_i \ell_{ii}^2$, since the determinant of a
+  triangular matrix is the product of its diagonal, so $\log\det\Amat = 2\sum_i \log\ell_{ii}$. Summing logarithms
+  avoids the overflow and underflow of forming the determinant directly.
+- **Sampling Gaussians.** For the <NoteLink to="multivariate-normal-distribution">multivariate normal</NoteLink>, if
+  $\zvec \sim \Gauss(\zeros, \eye)$ and $\Sigmamat = \Lmat\Lmat^\top$, then
+  $\muvec + \Lmat\zvec \sim \Gauss(\muvec, \Sigmamat)$, because
+  $\cov(\Lmat\zvec) = \Lmat\,\eye\,\Lmat^\top = \Sigmamat$.
+- **Gaussian log-likelihoods.** The multivariate Gaussian density needs $\log\det\Sigmamat$ and
+  $\xvec^\top\Sigmamat^{-1}\xvec = \norm{\Lmat^{-1}\xvec}^2$. One Cholesky factorisation provides both, which is how
+  Gaussian processes are fitted in practice <Cite id="rasmussen2006" />.
+- **Whitening.** $\Lmat^{-1}\xvec$ has identity covariance when $\xvec$ has covariance $\Sigmamat$:
+  $\cov(\Lmat^{-1}\xvec) = \Lmat^{-1}\Lmat\Lmat^\top\Lmat^{-\top} = \eye$.
+
+<GaussianSampler />
+
+For a $2 \times 2$ covariance with standard deviations $\sigma_1, \sigma_2$ and correlation $\rho$,
+
+$$
+\Lmat = \begin{bmatrix} \sigma_1 & 0 \\ \rho\sigma_2 & \sigma_2\sqrt{1 - \rho^2} \end{bmatrix},
+$$
+
+so $x_1 = \sigma_1 z_1$ and $x_2 = \sigma_2\paren{\rho z_1 + \sqrt{1 - \rho^2}\, z_2}$. Multiplying out checks it:
+$\var(x_2) = \sigma_2^2(\rho^2 + 1 - \rho^2) = \sigma_2^2$ and $\cov(x_1, x_2) = \rho\sigma_1\sigma_2$.
+
+## Variants
+
+- **$\Lmat\Dmat\Lmat^\top$** factors $\Amat = \Lmat\Dmat\Lmat^\top$ with unit lower-triangular $\Lmat$ and diagonal
+  $\Dmat$. It avoids square roots and, with pivoting, extends to symmetric indefinite matrices.
+- **Pivoted Cholesky** reorders rows and columns to take the largest remaining diagonal entry first. It handles PSD
+  matrices and yields low-rank approximations of kernel matrices.
+
+## Pitfalls
+
+- **Nearly singular matrices.** Kernel and covariance matrices are often PSD with eigenvalues near zero, and round-off
+  makes the factorisation fail. Add jitter, a small multiple of the identity such as $10^{-6}\eye$, to the diagonal
+  before factoring.
+- **Not a symmetric square root.** $\Lmat$ satisfies $\Lmat\Lmat^\top = \Amat$ but is not the symmetric square root
+  $\Amat^{1/2}$ from the spectral theorem. Both can be used for sampling; only $\Lmat$ is triangular and cheap.
+- **Never invert.** Use the triangular solves with $\Lmat$ rather than forming $\Amat^{-1}$ or $\Lmat^{-1}$.

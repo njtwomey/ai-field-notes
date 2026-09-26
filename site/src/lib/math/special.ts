@@ -115,3 +115,54 @@ export function studentTCdf(t: number, df: number): number {
   const tail = 0.5 * incompleteBeta(df / (df + t * t), df / 2, 0.5)
   return t >= 0 ? 1 - tail : tail
 }
+
+/** Regularised lower incomplete gamma P(a, x) = γ(a, x)/Γ(a), for a > 0 and x ≥ 0. */
+export function incompleteGamma(a: number, x: number): number {
+  if (x <= 0) return 0
+  if (!Number.isFinite(x)) return 1
+  const front = Math.exp(a * Math.log(x) - x - logGamma(a))
+  if (x < a + 1) {
+    // Series: P(a, x) = front · Σ xⁿ / (a (a + 1) ⋯ (a + n)).
+    let term = 1 / a
+    let total = term
+    for (let n = 1; n < 500; n++) {
+      term *= x / (a + n)
+      total += term
+      if (term < total * 1e-15) break
+    }
+    return Math.min(front * total, 1)
+  }
+  // Continued fraction for Q(a, x) = 1 − P(a, x) (modified Lentz's method).
+  const tiny = 1e-300
+  let b = x + 1 - a
+  let c = 1 / tiny
+  let d = 1 / b
+  let h = d
+  for (let i = 1; i < 500; i++) {
+    const an = -i * (i - a)
+    b += 2
+    d = an * d + b
+    if (Math.abs(d) < tiny) d = tiny
+    c = b + an / c
+    if (Math.abs(c) < tiny) c = tiny
+    d = 1 / d
+    const delta = d * c
+    h *= delta
+    if (Math.abs(delta - 1) < 1e-15) break
+  }
+  return Math.max(1 - front * h, 0)
+}
+
+/**
+ * Invert an increasing cdf by bisection: the x with cdf(x) = u. `lo` must satisfy cdf(lo) ≤ u; `hi` is a starting
+ * guess and doubles until cdf(hi) ≥ u. For plot ranges and quantiles without a closed form.
+ */
+export function invertCdf(cdf: (x: number) => number, u: number, lo: number, hi: number): number {
+  for (let i = 0; i < 200 && cdf(hi) < u; i++) hi = lo + 2 * (hi - lo)
+  for (let i = 0; i < 100; i++) {
+    const mid = 0.5 * (lo + hi)
+    if (cdf(mid) < u) lo = mid
+    else hi = mid
+  }
+  return 0.5 * (lo + hi)
+}

@@ -1,0 +1,170 @@
+---
+title: Kernel trick
+kind: technique
+summary: The kernel trick runs a linear method in a high- or infinite-dimensional feature space without computing the features. Every inner product is replaced by a kernel function, so the method only ever touches the N × N Gram matrix of kernel values.
+tags: [linear-algebra, kernels, feature-maps, nonlinear-models, worked-example]
+aliases: [kernel methods, kernel function, reproducing kernel Hilbert space, RKHS, Mercer kernel, Gram matrix, kernel ridge regression, representer theorem, RBF kernel, polynomial kernel]
+requires: [positive-definite-matrices]
+related: [random-fourier-features, linear-regression, vector-norms, dot-product]
+references: [hofmann2008, aronszajn1950, scholkopf2001, rasmussen2006]
+status: draft
+updated: 2026-09-26
+---
+
+import { KernelRegression } from './KernelRegression'
+
+<Definition>
+A kernel is a function $k : \Xcal \times \Xcal \to \reals$ for which a feature map $\phi$ into an inner product space
+$\Hcal$ exists with
+
+$$
+k(\xvec, \xvec') = \inner{\phi(\xvec)}{\phi(\xvec')}_{\Hcal}.
+$$
+
+The kernel trick rewrites an algorithm so that the data enter only through inner products, then replaces each inner
+product by $k$. The algorithm then runs in $\Hcal$ without ever computing $\phi$ <Cite id="hofmann2008" />.
+</Definition>
+
+## Problem
+
+Linear models are cheap and well understood but can only draw straight boundaries and fit straight lines. Mapping the
+inputs through nonlinear features $\phi(\xvec)$ and fitting a linear model to $\phi(\xvec)$ gives nonlinear models in
+$\xvec$. Explicit features become expensive fast: all monomials of degree up to $d$ in $n$ variables number
+$\binom{n+d}{d}$, and some useful feature spaces are infinite-dimensional.
+
+Points on two concentric circles in the plane are an example. No line separates them. The features
+$\phi(\xvec) = (x_1^2, x_2^2, \sqrt 2\,x_1x_2)$ map each circle $x_1^2 + x_2^2 = r^2$ into the plane
+$z_1 + z_2 = r^2$ in $\reals^3$, and a plane between the two separates them.
+
+## Mechanism
+
+### Which functions are kernels
+
+A symmetric function $k$ is a valid kernel exactly when every Gram matrix $\Kmat_{ij} = k(\xvec_i, \xvec_j)$, for any
+finite set of points, is <NoteLink to="positive-definite-matrices">positive semi-definite</NoteLink>. One direction is a
+line of algebra. If $k$ comes from a feature map, then for any coefficients $\cvec$,
+
+$$
+\cvec^\top\Kmat\cvec = \sum_{i,j} c_i c_j \inner{\phi(\xvec_i)}{\phi(\xvec_j)} = \norm{\textstyle\sum_i c_i\phi(\xvec_i)}^2 \ge 0,
+$$
+
+the squared length of a vector in $\Hcal$, by bilinearity of the inner product. The other direction, building a
+feature map from a PSD function, is the substantial part. The
+Moore–Aronszajn theorem then constructs a unique Hilbert space of functions $\Hcal_k$, the reproducing kernel Hilbert
+space (RKHS), in which $\phi(\xvec) = k(\xvec, \cdot)$ and $f(\xvec) = \inner{f}{k(\xvec, \cdot)}$ for every
+$f \in \Hcal_k$ <Cite id="aronszajn1950" />. Sums, positive multiples and products of kernels are kernels.
+
+<Derivation title="Why sums and products of kernels are kernels">
+If $k_1$ has feature map $\phi$ and $k_2$ has feature map $\psi$, then $k_1 + k_2$ has the stacked feature map
+$(\phi, \psi)$, since the inner product of stacked vectors is the sum of the two inner products. A positive multiple
+$a\,k_1$ has feature map $\sqrt a\,\phi$. The product $k_1 k_2$ has as features all products
+$\phi_i(\xvec)\psi_j(\xvec)$:
+
+$$
+\sum_{i,j} \phi_i(\xvec)\psi_j(\xvec)\,\phi_i(\xvec')\psi_j(\xvec') = \paren{\sum_i \phi_i(\xvec)\phi_i(\xvec')}\paren{\sum_j \psi_j(\xvec)\psi_j(\xvec')}
+= k_1(\xvec, \xvec')\, k_2(\xvec, \xvec').
+$$
+</Derivation>
+
+Common kernels on $\reals^n$:
+
+| Kernel | $k(\xvec, \xvec')$ | Feature space |
+| --- | --- | --- |
+| Linear | $\xvec^\top\xvec'$ | $\reals^n$ itself |
+| Polynomial | $(\xvec^\top\xvec' + c)^d$, $c \ge 0$ | all monomials of degree up to $d$ |
+| Gaussian (RBF) | $\exp\paren{-\norm{\xvec - \xvec'}^2 / 2\ell^2}$ | infinite-dimensional |
+
+### An explicit feature map
+
+For $d = 2$ in $\reals^2$, expanding the polynomial kernel gives
+
+$$
+(x_1x_1' + x_2x_2' + c)^2 = x_1^2x_1'^2 + x_2^2x_2'^2 + 2x_1x_2x_1'x_2' + 2c\,x_1x_1' + 2c\,x_2x_2' + c^2.
+$$
+
+This is $\phi(\xvec)^\top\phi(\xvec')$ for
+
+$$
+\phi(\xvec) = \paren{x_1^2,\; x_2^2,\; \sqrt{2}\,x_1x_2,\; \sqrt{2c}\,x_1,\; \sqrt{2c}\,x_2,\; c}.
+$$
+
+Evaluating $k$ costs one inner product in $\reals^2$ and a square, while $\phi$ has six coordinates. For degree $d$ in
+$n$ dimensions the gap is $O(n)$ against $\binom{n+d}{d}$.
+
+The Gaussian kernel has an infinite feature map. Expanding the squared distance splits it into three factors,
+
+$$
+\exp\paren{-\frac{\norm{\xvec - \xvec'}^2}{2\ell^2}} = \exp\paren{-\frac{\norm{\xvec}^2}{2\ell^2}}\exp\paren{-\frac{\norm{\xvec'}^2}{2\ell^2}}
+\sum_{d=0}^{\infty} \frac{(\xvec^\top\xvec')^d}{\ell^{2d}\, d!}.
+$$
+
+The series is the Taylor series of $\exp(\xvec^\top\xvec'/\ell^2)$. Each term is a polynomial kernel of degree $d$ with
+a positive weight, so the feature map contains every monomial of every degree, each scaled by
+$\exp(-\norm{\xvec}^2/2\ell^2)$. The outer factors are a function of $\xvec$ times the same function of $\xvec'$, which
+multiplies every feature by that function.
+
+### Gram-matrix duality
+
+Ridge regression in feature space minimises $\sum_i (y_i - \wvec^\top\phi(\xvec_i))^2 + \lambda\norm{\wvec}^2$. With
+$\Phimat$ the matrix whose rows are $\phi(\xvec_i)^\top$, the solution is
+$\wvec = (\Phimat^\top\Phimat + \lambda\eye)^{-1}\Phimat^\top\yvec$. This form needs the features explicitly. It can be
+rewritten so that only inner products appear.
+
+The identity $(\Phimat^\top\Phimat + \lambda\eye)\Phimat^\top = \Phimat^\top(\Phimat\Phimat^\top + \lambda\eye)$ holds
+because both sides expand to $\Phimat^\top\Phimat\Phimat^\top + \lambda\Phimat^\top$. For $\lambda > 0$ both bracketed
+matrices are <NoteLink to="positive-definite-matrices">positive definite</NoteLink> and so invertible. Multiplying on
+the left by $(\Phimat^\top\Phimat + \lambda\eye)^{-1}$ and on the right by $(\Phimat\Phimat^\top + \lambda\eye)^{-1}$
+gives
+
+$$
+(\Phimat^\top\Phimat + \lambda\eye)^{-1}\Phimat^\top = \Phimat^\top(\Phimat\Phimat^\top + \lambda\eye)^{-1}.
+$$
+
+Applying both sides to $\yvec$ gives
+
+$$
+\wvec = \Phimat^\top\alphavec, \qquad \alphavec = (\Kmat + \lambda\eye)^{-1}\yvec, \qquad \Kmat = \Phimat\Phimat^\top,
+$$
+
+where $\Kmat_{ij} = \phi(\xvec_i)^\top\phi(\xvec_j) = k(\xvec_i, \xvec_j)$ is the Gram matrix. The $D \times D$ primal
+solve, with $D$ the feature dimension, has become an $N \times N$ dual solve, with $N$ the number of examples.
+Predictions need only kernel values:
+
+$$
+f(\xvec) = \wvec^\top\phi(\xvec) = \alphavec^\top\Phimat\,\phi(\xvec) = \sum_i \alpha_i k(\xvec_i, \xvec).
+$$
+
+The weights live in the span of the training features. The representer theorem states that this holds for any loss
+plus an increasing function of $\norm{f}_{\Hcal}$ <Cite id="scholkopf2001" />, which is why support vector machines,
+kernel PCA and Gaussian processes all reduce to computations with $\Kmat$ <Cite id="rasmussen2006" />.
+
+<KernelRegression />
+
+## Cost
+
+Kernel methods trade the feature dimension for the number of examples. Forming $\Kmat$ costs $O(N^2 n)$ time and
+$O(N^2)$ memory, and solving with it costs $O(N^3)$, typically by Cholesky factorisation. Each prediction evaluates $N$
+kernels. This is cheap for thousands of examples and prohibitive for millions.
+<NoteLink to="random-fourier-features">Random Fourier features</NoteLink> and low-rank approximations such as the
+Nyström method restore linear cost in $N$ by approximating $\Kmat$.
+
+## Trade-offs
+
+- **Choice of kernel.** The kernel fixes the hypothesis space. The Gaussian kernel can approximate any continuous
+  function on a compact set, but its width $\ell$ controls smoothness and must be tuned, usually by cross-validation or
+  by maximising a Gaussian-process marginal likelihood.
+- **Regularisation is essential.** With a rich kernel, $\Kmat$ is often nearly singular. Without $\lambda$ the fit
+  interpolates the noise, as the widget shows at small $\lambda$ and small $\ell$.
+- **Interpretability.** The model is a weighted sum of similarities to training points, not a set of feature weights.
+  With the polynomial kernel the implicit weights can be recovered; with the Gaussian kernel they cannot.
+- **Relation to neural networks.** Kernels fix the features in advance. Neural networks learn them. In the limit of
+  infinite width, some trained networks behave like kernel methods with a specific kernel.
+
+## Pitfalls
+
+- **Invalid kernels.** A similarity function that is not positive semi-definite, such as $\tanh(a\,\xvec^\top\xvec' +
+  b)$ for many $a, b$, can make $\Kmat + \lambda\eye$ indefinite for small $\lambda$ and break the optimisation.
+- **Feature scaling.** Distance-based kernels weigh every input dimension equally. Standardise features first, or use
+  a separate length scale per dimension.
+- **Numerical conditioning.** Add a small jitter to the diagonal of $\Kmat$ before factorising, even when the model has
+  no ridge term.

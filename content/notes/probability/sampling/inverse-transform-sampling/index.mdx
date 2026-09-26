@@ -1,0 +1,148 @@
+---
+title: Inverse-transform sampling
+kind: technique
+summary: Inverse-transform sampling turns uniform random numbers into draws from any distribution by passing them through its quantile function, the inverse of the cdf.
+tags: [probability, sampling, simulation, worked-example]
+aliases: [inverse cdf method, probability integral transform, quantile transform]
+related: [poisson-distribution]
+references: [devroye1986]
+status: draft
+updated: 2026-09-26
+---
+
+import { InverseTransform } from './InverseTransform'
+
+<Definition>
+Let $F$ be a cdf and $F^{-1}(u) = \inf\set{x : F(x) \ge u}$ its generalised inverse, the quantile function. If
+$U \sim \Unif(0, 1)$, then $X = F^{-1}(U)$ has cdf $F$. Sampling from $F$ therefore reduces to sampling a uniform
+number and evaluating $F^{-1}$ <Cite id="devroye1986" />.
+</Definition>
+
+## Problem
+
+Computers generate numbers that are uniform on $(0, 1)$. Models need draws from exponential, Gaussian, Gumbel or
+arbitrary empirical distributions. A general method is needed to convert one into the other.
+
+## Mechanism
+
+The cdf maps values to probabilities. Its inverse maps probabilities back to values. A uniform $u$ is a probability
+chosen at random, so $F^{-1}(u)$ is a value chosen with the frequencies that $F$ prescribes. Regions where $F$ rises
+steeply receive many draws. Flat regions receive few.
+
+## Why $F^{-1}(U)$ has cdf $F$
+
+For every $u \in (0, 1)$ and every $x$, the generalised inverse satisfies $F^{-1}(u) \le x \iff u \le F(x)$.
+
+- If $u \le F(x)$, then $x$ belongs to the set $\set{x' : F(x') \ge u}$, so the infimum of that set is at most $x$.
+- If $F^{-1}(u) \le x$, then $F$ reaches at least $u$ at points arbitrarily close to $F^{-1}(u)$ from the right. By
+  right-continuity, $F\paren{F^{-1}(u)} \ge u$, and since $F$ is non-decreasing, $F(x) \ge F\paren{F^{-1}(u)} \ge u$.
+
+Therefore
+
+$$
+P\paren{F^{-1}(U) \le x} = P\paren{U \le F(x)} = F(x).
+$$
+
+The last step holds because $P(U \le a) = a$ for $a \in [0, 1]$. The argument uses no continuity of $F$, so the method
+also works for discrete and mixed distributions.
+
+<InverseTransform />
+
+## Worked examples
+
+The recipe is always the same: write down the cdf, set $u = F(x)$, and solve for $x$.
+
+### Exponential
+
+Take $X \sim \Exp(\lambda)$, with pdf $f(x) = \lambda e^{-\lambda x}$ for $x \ge 0$.
+
+1. Integrate the pdf to get the cdf: $F(x) = \int_0^x \lambda e^{-\lambda s}\, ds = 1 - e^{-\lambda x}$.
+2. Set $u = 1 - e^{-\lambda x}$.
+3. Solve for $x$: $e^{-\lambda x} = 1 - u$, so $x = -\log(1 - u)/\lambda$.
+
+With $\lambda = 2$ and a uniform draw $u = 0.7$: $x = -\log(0.3)/2 = 1.204/2 \approx 0.602$.
+
+Because $1 - U$ is also $\Unif(0, 1)$, the sampler $x = -\log(u)/\lambda$ is equally valid and saves a subtraction.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(0)
+u = rng.uniform(size=100_000)
+x = -np.log1p(-u) / 2.0  # Exp(λ = 2); log1p keeps precision for small u
+print(x.mean())          # ≈ 0.5 = 1/λ
+```
+
+### A density defined by a formula
+
+Take $f(x) = 2x$ on $[0, 1]$, a density that rises linearly.
+
+1. The cdf is $F(x) = \int_0^x 2s\, ds = x^2$.
+2. Set $u = x^2$.
+3. Solve: $x = \sqrt{u}$.
+
+With $u = 0.49$: $x = 0.7$. Half of all draws land above $\sqrt{0.5} \approx 0.707$, because the density puts more
+mass near 1. This is also the distribution of the larger of two independent uniforms.
+
+### A discrete distribution
+
+Take a loaded die with outcomes $\set{1, 2, 3}$ and probabilities $(0.2, 0.5, 0.3)$.
+
+1. The cdf jumps at each outcome: $F(1) = 0.2$, $F(2) = 0.7$, $F(3) = 1$.
+2. For a uniform $u$, return the first outcome whose cumulative probability reaches $u$.
+3. So $u \in (0, 0.2]$ gives 1, $u \in (0.2, 0.7]$ gives 2, and $u \in (0.7, 1)$ gives 3.
+
+With $u = 0.65$ the result is 2. Each outcome receives a slice of $(0, 1)$ whose width equals its probability.
+
+```python
+probs = np.array([0.2, 0.5, 0.3])
+cdf = np.cumsum(probs)                      # [0.2, 0.7, 1.0]
+u = rng.uniform(size=100_000)
+k = np.searchsorted(cdf, u) + 1             # first index with cdf ≥ u, as outcomes 1..3
+print(np.bincount(k)[1:] / len(k))          # ≈ [0.2, 0.5, 0.3]
+```
+
+## Closed-form quantile functions
+
+| Distribution | cdf $F(x)$ | Sampler $F^{-1}(u)$ |
+| --- | --- | --- |
+| $\Exp(\lambda)$ | $1 - e^{-\lambda x}$ | $-\log(1 - u)/\lambda$ |
+| $\Gumbel(\mu, \beta)$ | $\exp(-e^{-(x-\mu)/\beta})$ | $\mu - \beta \log(-\log u)$ |
+| Logistic $(\mu, s)$ | $1/(1 + e^{-(x-\mu)/s})$ | $\mu + s \log\paren{u/(1-u)}$ |
+| $\Cauchy(x_0, \gamma)$ | $\tfrac{1}{2} + \tfrac{1}{\pi}\arctan\paren{(x - x_0)/\gamma}$ | $x_0 + \gamma \tan\paren{\pi(u - \tfrac{1}{2})}$ |
+| Discrete, values $x_1 < x_2 < \dots$ | step function | smallest $x_k$ with $F(x_k) \ge u$ |
+
+For a discrete distribution the sampler is a search over the cumulative probabilities. For the Gaussian, $F^{-1}$ has
+no closed form. Libraries use accurate numerical approximations or other methods such as Box–Muller.
+
+## The reverse direction
+
+If $F$ is continuous and $X \sim F$, then $F(X) \sim \Unif(0, 1)$. This is the probability integral transform.
+
+<Derivation title="Proof of the probability integral transform">
+Fix $u \in (0, 1)$ and let $x_u = F^{-1}(u)$. Because $F$ is continuous, $F(x_u) = u$. The event $F(X) \le u$ contains
+$X \le x_u$, and the difference between the two events is the set of $X$ values above $x_u$ where $F$ still equals
+$u$. $F$ is flat there, so that set has probability zero. Hence $P(F(X) \le u) = P(X \le x_u) = F(x_u) = u$.
+</Derivation>
+
+The transform fails for discrete $F$, because $F(X)$ then takes only the finitely or countably many values of the cdf
+at the atoms.
+
+The probability integral transform underlies calibration checks. If a model's predictive cdfs are correct, the values
+$F_i(y_i)$ at the observed outcomes are uniform. A skewed or U-shaped histogram of these values reveals bias or
+over-confidence.
+
+## Cost and trade-offs
+
+- **Speed.** One uniform draw and one function evaluation per sample, with no rejections.
+- **Monotonicity.** $F^{-1}$ is non-decreasing, so sorted uniforms give sorted samples. This makes the method
+  compatible with variance-reduction schemes that correlate uniforms, such as antithetic or quasi-random sequences.
+- **Tails.** Accuracy near $u = 0$ or $u = 1$ depends on how precisely $F^{-1}$ is computed. Use $\log(1-u)$ via a
+  `log1p` routine to avoid losing precision.
+- **No closed form.** When $F^{-1}$ must be found by root-finding, each sample becomes expensive, and methods such as
+  rejection sampling are often faster.
+
+## Pitfalls
+
+- The endpoints $u = 0$ and $u = 1$ can map to $\pm\infty$. Draw $u$ from the open interval.
+- Heavy tails, such as the Cauchy's, produce occasional extreme samples. That is correct behaviour, not an error.

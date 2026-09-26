@@ -1,0 +1,129 @@
+---
+title: Box–Muller transform
+kind: technique
+summary: The Box–Muller transform turns two independent uniform numbers into two independent standard Gaussian numbers. One uniform sets the radius √(−2 log u₁), the other sets the angle 2πu₂.
+tags: [probability, sampling, simulation, gaussian, worked-example]
+aliases: [Box-Muller, Box–Muller method, Marsaglia polar method, polar method]
+requires: [jacobian]
+related: [inverse-transform-sampling, change-of-variables, sampling-a-disk-or-sphere, rejection-sampling, gaussian-distribution, chi-squared-distribution]
+references: [box1958, marsaglia1964, neave1973, devroye1986]
+status: draft
+updated: 2026-09-26
+---
+
+import { BoxMuller } from './BoxMuller'
+
+<Definition>
+Let $U_1, U_2 \iid \Unif(0, 1)$. Set
+
+$$
+R = \sqrt{-2 \log U_1}, \qquad \Theta = 2\pi U_2, \qquad Z_1 = R \cos\Theta, \qquad Z_2 = R \sin\Theta.
+$$
+
+Then $Z_1$ and $Z_2$ are independent and each is $\Gauss(0, 1)$ <Cite id="box1958" />.
+</Definition>
+
+## Problem
+
+The <NoteLink to="gaussian-distribution">Gaussian</NoteLink> cdf $\Phi$ has no closed-form inverse. Inverse-transform
+sampling therefore needs a numerical approximation of $\Phi^{-1}$ for every draw. An exact method that uses only
+elementary functions is simpler to implement and to verify.
+
+## Mechanism
+
+The method works in polar coordinates. A pair $(Z_1, Z_2)$ of independent standard Gaussians has joint density
+
+$$
+p(z_1, z_2) = \frac{1}{2\pi} \exp\paren{-\frac{z_1^2 + z_2^2}{2}}.
+$$
+
+The density depends only on the radius $r = \sqrt{z_1^2 + z_2^2}$. So the angle $\Theta$ is uniform on $[0, 2\pi)$
+and independent of $R$. The squared radius $R^2$ is the sum of two squared standard Gaussians, which is $\ChiSq_2$
+(see <NoteLink to="chi-squared-distribution">chi-squared distribution</NoteLink>), the exponential distribution with
+mean 2. An exponential variable with mean 2 is $-2 \log U_1$ by inverse-transform
+sampling. Taking the square root gives $R$.
+
+Each step is exact, so the output is exactly Gaussian up to floating-point rounding.
+
+## Proof
+
+The argument above explains why the method should work. The proof applies the
+<NoteLink to="change-of-variables">change-of-variables formula</NoteLink> to the whole map. Write the map from $(u_1,
+u_2) \in (0, 1)^2$ to $(z_1, z_2)$ and invert it:
+
+$$
+u_1 = \exp\paren{-\frac{z_1^2 + z_2^2}{2}}, \qquad u_2 = \frac{1}{2\pi} \operatorname{atan2}(z_2, z_1) \bmod 1.
+$$
+
+The partial derivatives of the inverse are
+
+$$
+\frac{\partial u_1}{\partial z_i} = -z_i\, u_1, \qquad
+\frac{\partial u_2}{\partial z_1} = -\frac{1}{2\pi} \frac{z_2}{z_1^2 + z_2^2}, \qquad
+\frac{\partial u_2}{\partial z_2} = \frac{1}{2\pi} \frac{z_1}{z_1^2 + z_2^2}.
+$$
+
+The determinant of this Jacobian is $-\frac{u_1}{2\pi}\frac{z_1^2 + z_2^2}{z_1^2 + z_2^2} = -\frac{u_1}{2\pi}$. The
+density of $(U_1, U_2)$ is 1 on the unit square, so by the change-of-variables formula
+
+$$
+p(z_1, z_2) = 1 \cdot \abs{-\frac{u_1}{2\pi}} = \frac{1}{2\pi} \exp\paren{-\frac{z_1^2 + z_2^2}{2}}
+= \frac{e^{-z_1^2/2}}{\sqrt{2\pi}} \cdot \frac{e^{-z_2^2/2}}{\sqrt{2\pi}}.
+$$
+
+The density factorises into two standard Gaussian densities, so $Z_1$ and $Z_2$ are independent standard Gaussians.
+
+<BoxMuller />
+
+## Worked example
+
+Take $u_1 = 0.25$ and $u_2 = 0.1$.
+
+1. The radius is $R = \sqrt{-2 \log 0.25} = \sqrt{2.773} = 1.665$.
+2. The angle is $\Theta = 2\pi \cdot 0.1 = 0.628$ radians, which is $36°$.
+3. The outputs are $Z_1 = 1.665 \cos 0.628 = 1.347$ and $Z_2 = 1.665 \sin 0.628 = 0.979$.
+
+A general Gaussian $\Gauss(\mu, \sigma^2)$ follows as $\mu + \sigma Z_1$. A correlated pair with correlation $\rho$
+follows as $X_1 = Z_1$ and $X_2 = \rho Z_1 + \sqrt{1 - \rho^2}\, Z_2$.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(0)
+u1 = 1.0 - rng.uniform(size=100_000)       # in (0, 1], so log(u1) is finite
+u2 = rng.uniform(size=100_000)
+r = np.sqrt(-2.0 * np.log(u1))
+z1, z2 = r * np.cos(2 * np.pi * u2), r * np.sin(2 * np.pi * u2)
+print(z1.mean(), z1.var(), np.mean(z1 * z2))  # ≈ 0, 1, 0
+```
+
+## The polar method
+
+Marsaglia's polar method avoids the sine and cosine <Cite id="marsaglia1964" />. It draws $(V_1, V_2)$ uniformly on
+the square $[-1, 1]^2$ and keeps the pair only if $S = V_1^2 + V_2^2$ lies in $(0, 1)$. The kept point is uniform on
+the unit disc. Its angle is uniform, so $V_1 / \sqrt{S}$ and $V_2 / \sqrt{S}$ are the cosine and sine of a uniform
+angle. $S$ is uniform on $(0, 1)$: the kept point lies within radius $\sqrt s$ with probability equal to that disc's
+share of the area, $\pi s / \pi = s$. $S$ is independent of the angle, because the uniform distribution on the disc is
+unchanged by rotation. So $S$ can replace $U_1$. The outputs are
+
+$$
+Z_i = V_i \sqrt{\frac{-2 \log S}{S}}, \qquad i = 1, 2.
+$$
+
+The rejection step keeps a fraction $\pi / 4 \approx 0.785$ of the pairs.
+
+## Cost and trade-offs
+
+- **Cost.** One logarithm, one square root and one sine–cosine pair per two outputs. The polar method replaces the
+  trigonometric functions with a rejection step and a division.
+- **Tail accuracy.** The largest radius the transform can produce is set by the smallest representable $u_1$. With
+  double-precision uniforms on a grid of $2^{-53}$, the radius is at most $\sqrt{2 \cdot 53 \log 2} \approx 8.57$. Tail
+  events beyond about $8.5$ standard deviations never occur.
+- **Speed.** Modern libraries use faster methods such as the ziggurat algorithm. Box–Muller remains the standard
+  textbook method and is easy to vectorise.
+
+## Pitfalls
+
+- **Zero.** $\log 0$ is undefined. Draw $u_1$ from $(0, 1]$, for example as $1 - u$ with $u \in [0, 1)$.
+- **Weak generators.** Consecutive outputs of a poor linear congruential generator are correlated. Box–Muller maps
+  such pairs onto spirals in the plane instead of a Gaussian cloud <Cite id="neave1973" />.

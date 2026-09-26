@@ -1,0 +1,145 @@
+---
+title: Reparameterisation trick
+kind: technique
+summary: The reparameterisation trick writes a random variable z ~ q_φ as a differentiable function z = g_φ(ε) of parameter-free noise ε. Gradients of expectations with respect to φ then pass through the sample, giving low-variance Monte Carlo gradients.
+tags: [probability, sampling, gradients, variational-inference, monte-carlo, worked-example]
+aliases: [reparametrization trick, pathwise gradient, pathwise derivative, reparameterisation gradient]
+requires: [change-of-variables]
+related: [score-function-estimator, gumbel-max-trick, inverse-transform-sampling, backpropagation, exponential-distribution, gamma-distribution]
+references: [kingma2014, rezende2014, mohamed2020, figurnov2018]
+status: draft
+updated: 2026-09-26
+---
+
+import { GradientEstimators } from '@/components/widgets/GradientEstimators'
+
+<Definition>
+Suppose $\zvec \sim q_{\phivec}$ can be generated as $\zvec = \gvec_{\phivec}(\epsilonvec)$, where $\epsilonvec \sim
+p(\epsilonvec)$ does not depend on $\phivec$ and $\gvec_{\phivec}$ is differentiable in $\phivec$. Then for a
+differentiable $f$,
+
+$$
+\nabla_{\phivec}\, \expect_{q_{\phivec}}\brack{f(\zvec)} = \expect_{p(\epsilonvec)}\brack{\nabla_{\phivec}\, f\paren{\gvec_{\phivec}(\epsilonvec)}}.
+$$
+
+Averaging the right-hand side over samples of $\epsilonvec$ gives an unbiased gradient estimate
+<Cite id="kingma2014" /> <Cite id="rezende2014" />.
+</Definition>
+
+## Problem
+
+Training objectives often contain an expectation over a distribution that depends on the parameters being trained.
+The evidence lower bound of a variational autoencoder is an example: its expectation is over the encoder's
+distribution $q_{\phivec}(\zvec \mid \xvec)$. The expectation has no closed form, so it is estimated by sampling. A
+sample $\zvec \sim q_{\phivec}$ is a random number, not a function of $\phivec$, so automatic differentiation cannot
+pass a gradient through it.
+
+## Mechanism
+
+Move the randomness into an input that does not depend on $\phivec$. For a Gaussian,
+
+$$
+z \sim \Gauss(\mu, \sigma^2) \quad\Longleftrightarrow\quad z = \mu + \sigma\epsilon, \quad \epsilon \sim \Gauss(0, 1).
+$$
+
+The sample is now a deterministic, differentiable function of $\mu$ and $\sigma$, with $\epsilon$ held fixed. The
+chain rule gives
+
+$$
+\frac{\partial f(z)}{\partial \mu} = f'(z), \qquad \frac{\partial f(z)}{\partial \sigma} = f'(z)\, \epsilon.
+$$
+
+In a computation graph, $\epsilon$ is an input like the data, and backpropagation handles the rest.
+
+## Derivation
+
+The identity in the definition follows in two steps. First, $\zvec = \gvec_{\phivec}(\epsilonvec)$ has distribution
+$q_{\phivec}$, so by the law of the unconscious statistician the expectation can be taken over $\epsilonvec$ instead of
+$\zvec$:
+
+$$
+\expect_{q_{\phivec}}\brack{f(\zvec)} = \expect_{p(\epsilonvec)}\brack{f\paren{\gvec_{\phivec}(\epsilonvec)}} = \int
+f\paren{\gvec_{\phivec}(\epsilonvec)}\, p(\epsilonvec)\, d\epsilonvec.
+$$
+
+Second, the density $p(\epsilonvec)$ does not depend on $\phivec$, so $\phivec$ appears only inside the integrand.
+Differentiating under the integral sign, which is valid when $\nabla_{\phivec} f(\gvec_{\phivec}(\epsilonvec))$ is
+bounded by an integrable function, gives
+
+$$
+\nabla_{\phivec} \int f\paren{\gvec_{\phivec}(\epsilonvec)}\, p(\epsilonvec)\, d\epsilonvec = \int \nabla_{\phivec}
+f\paren{\gvec_{\phivec}(\epsilonvec)}\, p(\epsilonvec)\, d\epsilonvec.
+$$
+
+Written over $\zvec$ directly, the parameter sits in the density $q_{\phivec}(\zvec)$, and differentiating the
+integral leads instead to the score-function estimator. The chain rule expands the integrand:
+$\nabla_{\phivec} f(\gvec_{\phivec}(\epsilonvec)) = \Jmat_{\gvec}^\top \nabla_{\zvec} f$, where $\Jmat_{\gvec}$ is the
+Jacobian of $\gvec_{\phivec}(\epsilonvec)$ with respect to $\phivec$. The estimate is unbiased because each sample's
+gradient has the true gradient as its expectation.
+
+For a multivariate Gaussian $\Gauss(\muvec, \Sigmamat)$ with $\Sigmamat = \Lmat\Lmat^\top$, the map is
+$\zvec = \muvec + \Lmat\epsilonvec$ with $\epsilonvec \sim \Gauss(\zeros, \Imat)$.
+
+<GradientEstimators />
+
+The figure compares the reparameterisation estimator with the <NoteLink to="score-function-estimator">score-function
+estimator</NoteLink>, which needs no derivative of $f$. For smooth $f$ the reparameterisation estimator is usually far
+less noisy. For the step function it fails: its derivative is zero almost everywhere, so the pathwise estimate is 0
+while the true gradient is not.
+
+## Worked example
+
+Take $f(z) = z^2$ and $z \sim \Gauss(\mu, \sigma^2)$. The exact expectation is $\expect\brack{z^2} = \mu^2 + \sigma^2$,
+so the exact gradients are $2\mu$ and $2\sigma$.
+
+The reparameterised sample is $z = \mu + \sigma\epsilon$. The per-sample gradients are
+
+$$
+\frac{\partial z^2}{\partial \mu} = 2(\mu + \sigma\epsilon), \qquad \frac{\partial z^2}{\partial \sigma} = 2(\mu + \sigma\epsilon)\,\epsilon.
+$$
+
+Their expectations are $2\mu$ and $2\mu\,\expect[\epsilon] + 2\sigma\,\expect[\epsilon^2] = 2\sigma$, which match. With
+$\mu = 1$, $\sigma = 0.5$ and a single draw $\epsilon = 0.4$: $z = 1.2$, the estimate of $\partial/\partial\mu$ is
+$2.4$, and the estimate of $\partial/\partial\sigma$ is $0.96$.
+
+```python
+import torch
+
+mu = torch.tensor(1.0, requires_grad=True)
+sigma = torch.tensor(0.5, requires_grad=True)
+eps = torch.randn(10_000)            # noise that does not depend on the parameters
+z = mu + sigma * eps                  # differentiable in mu and sigma
+(z**2).mean().backward()
+print(mu.grad, sigma.grad)            # ≈ 2.0 = 2μ and 1.0 = 2σ
+```
+
+## Which distributions can be reparameterised
+
+- **Location–scale families**, such as the Gaussian, logistic, Laplace and Student $t$: $z = \mu + \sigma\epsilon$ with
+  $\epsilon$ from the standard member of the family.
+- **Distributions with a tractable quantile function**: $z = F_{\phivec}^{-1}(u)$ with $u \sim \Unif(0, 1)$, by
+  <NoteLink to="inverse-transform-sampling">inverse-transform sampling</NoteLink>. The
+  <NoteLink to="exponential-distribution">exponential</NoteLink> gives $z = -\log(u)/\lambda$.
+- **Compositions**: a log-normal is $\exp$ of a reparameterised Gaussian.
+- **<NoteLink to="gamma-distribution">Gamma</NoteLink>, beta and Dirichlet** have no simple differentiable sampler.
+  Implicit reparameterisation differentiates through the cdf instead of the sampler <Cite id="figurnov2018" />.
+- **Discrete distributions** cannot be reparameterised: a small change in the parameters either leaves a discrete sample
+  unchanged or makes it jump. Continuous relaxations such as the
+  <NoteLink to="gumbel-max-trick">Gumbel-softmax</NoteLink> approximate the discrete sample with a differentiable one.
+
+## Trade-offs
+
+- **Variance.** The pathwise estimator uses the derivative of $f$, which carries more information than values of $f$
+  alone. Its variance is usually much lower than the score-function estimator's, but this is not guaranteed for every
+  $f$ <Cite id="mohamed2020" />.
+- **Requirements.** $f$ must be differentiable in $\zvec$, and the sampler must be differentiable in $\phivec$.
+- **Cost.** One backward pass per sample, the same as ordinary backpropagation.
+
+## Pitfalls
+
+- **Non-differentiable integrands.** Where $f$ has jumps, as with thresholds, argmax or rounding, the pathwise gradient
+  ignores the effect of crossing the jump. The result is biased, often severely.
+- **Parameterising the scale.** $\sigma$ must stay positive. Optimise $\log \sigma$ or pass an unconstrained parameter
+  through a softplus.
+- **Sampling with the wrong call.** In PyTorch, `Normal(mu, sigma).sample()` blocks gradients and `rsample()` uses the
+  reparameterisation. Using `sample()` gives zero gradients for the distribution parameters.

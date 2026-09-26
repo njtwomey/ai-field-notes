@@ -1,0 +1,136 @@
+---
+title: Sampling a disc, ball or sphere
+kind: technique
+summary: To sample uniformly in the unit disc, draw the angle uniformly and the radius as √U, not U. In d dimensions, a normalised Gaussian vector is uniform on the sphere, and scaling it by U^(1/d) makes it uniform in the ball.
+tags: [probability, sampling, simulation, geometry, worked-example]
+aliases: [sampling a disk, uniform on the unit disc, uniform in the unit disk, uniform in the unit ball, uniform on the sphere, random direction, hypersphere sampling]
+requires: [change-of-variables]
+related: [box-muller-transform, rejection-sampling, sampling-the-simplex, inverse-transform-sampling, multivariate-normal-distribution]
+references: [muller1959, marsaglia1972, devroye1986]
+status: draft
+updated: 2026-09-26
+---
+
+import { DiskSampler } from './DiskSampler'
+
+<Definition>
+A point is uniform on a region when the probability that it falls in any subregion is proportional to the subregion's
+area or volume. For the unit disc, draw $U, V \iid \Unif(0, 1)$ and set
+
+$$
+R = \sqrt{U}, \qquad \Theta = 2\pi V, \qquad (X, Y) = (R\cos\Theta, R\sin\Theta).
+$$
+
+In $\reals^d$, draw $\zvec \sim \Gauss(\zeros, \Imat_d)$, the standard
+<NoteLink to="multivariate-normal-distribution">multivariate normal</NoteLink>. Then $\zvec / \norm{\zvec}$ is uniform
+on the unit sphere, and $U^{1/d}\, \zvec / \norm{\zvec}$ is uniform in the unit ball <Cite id="muller1959" />.
+</Definition>
+
+## Problem
+
+Random directions and random points in a region are basic ingredients of simulation. Examples are initialising unit
+vectors, sampling perturbations of bounded size, Monte Carlo integration over a ball, and generating test data. The
+obvious recipes, a uniform radius or uniform angles on a sphere, are not uniform.
+
+## Mechanism
+
+### The disc
+
+Area grows with the square of the radius. The disc of radius $r$ has area $\pi r^2$, so a uniform point satisfies
+
+$$
+P(R \le r) = \frac{\pi r^2}{\pi} = r^2, \qquad 0 \le r \le 1.
+$$
+
+The cdf of the radius is $F_R(r) = r^2$. Inverse-transform sampling solves $u = r^2$ to give $R = \sqrt{U}$. A uniform
+radius instead gives $P(R \le r) = r$, which puts as many points inside radius $1/2$ as outside it, although the inner
+disc has only a quarter of the area.
+
+The same result follows from polar coordinates. The map $(r, \theta) \mapsto (r\cos\theta, r\sin\theta)$ has Jacobian
+determinant $r$. The uniform density $1/\pi$ in $(x, y)$ therefore becomes the density $r/\pi$ in $(r, \theta)$ on
+$[0, 1] \times [0, 2\pi)$. It factorises into $2r$ for the radius and $1/(2\pi)$ for the angle, so $R$ and $\Theta$ are
+independent, and $R$ has density $2r$ and cdf $r^2$.
+
+<DiskSampler />
+
+### The sphere
+
+The standard Gaussian density in $\reals^d$ is proportional to $\exp\paren{-\norm{\zvec}^2/2}$. It depends only on the
+length $\norm{\zvec}$, so it is unchanged by every rotation. The direction $\zvec/\norm{\zvec}$ therefore has a
+distribution on the sphere that is unchanged by every rotation, and the only such distribution is the uniform one
+<Cite id="muller1959" />. The method works in every dimension and needs one Gaussian draw per coordinate.
+
+For the ordinary sphere in $\reals^3$ there is also a direct method. By Archimedes' hat-box theorem, the height $z$ of
+a uniform point on the sphere is uniform on $[-1, 1]$. Draw $z \sim \Unif(-1, 1)$ and $\phi \sim \Unif(0, 2\pi)$, and
+set $(x, y) = \sqrt{1 - z^2}\,(\cos\phi, \sin\phi)$ <Cite id="marsaglia1972" />.
+
+<Derivation title="Why the height is uniform (the hat-box theorem)">
+Cut the unit sphere into thin horizontal bands. The band between heights $z$ and $z + dz$ is a ring of radius
+$\sqrt{1 - z^2}$, so its circumference is $2\pi\sqrt{1 - z^2}$. Its width along the surface is not $dz$: the surface is
+tilted, and a height change $dz$ corresponds to an arc of length $dz / \sqrt{1 - z^2}$. The band's area is the product,
+
+$$
+2\pi\sqrt{1 - z^2} \cdot \frac{dz}{\sqrt{1 - z^2}} = 2\pi\, dz,
+$$
+
+which does not depend on $z$. Equal ranges of height therefore carry equal areas, and the height of a uniform point is
+uniform on $[-1, 1]$. The shrinking circumference near the poles is exactly cancelled by the steeper slope.
+</Derivation>
+
+### The ball
+
+The volume of the ball of radius $r$ in $\reals^d$ is proportional to $r^d$. The radius of a uniform point therefore
+has cdf $F_R(r) = r^d$, and inverse-transform sampling gives $R = U^{1/d}$. Multiplying a uniform direction by this
+radius gives a uniform point in the ball. The disc is the case $d = 2$.
+
+## Worked example
+
+Take $u = 0.25$ and $v = 0.125$ for the disc.
+
+1. The radius is $R = \sqrt{0.25} = 0.5$.
+2. The angle is $\Theta = 2\pi \cdot 0.125 = \pi/4$.
+3. The point is $(0.5 \cos\tfrac{\pi}{4}, 0.5 \sin\tfrac{\pi}{4}) = (0.354, 0.354)$.
+
+With $R = U$ instead, the same $u = 0.25$ gives radius $0.25$. A quarter of all draws would land within radius $0.25$,
+a region with only $1/16$ of the area.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(0)
+n, d = 100_000, 5
+z = rng.standard_normal((n, d))
+direction = z / np.linalg.norm(z, axis=1, keepdims=True)   # uniform on the sphere in R^5
+ball = direction * rng.uniform(size=(n, 1)) ** (1 / d)     # uniform in the unit ball
+print(np.mean(np.linalg.norm(ball, axis=1) <= 0.5))         # ≈ 0.5^5 = 0.03125
+```
+
+## Rejection as an alternative
+
+A uniform point in the disc can also be found by drawing points uniformly in the square $[-1, 1]^2$ and keeping those
+inside the disc. The acceptance rate is the area ratio $\pi/4 \approx 0.785$. In $d$ dimensions the rate is the ratio
+of the ball's volume to the cube's,
+
+$$
+\frac{\pi^{d/2}}{\Gamma(d/2 + 1)\, 2^d},
+$$
+
+which falls quickly: about $0.52$ for $d = 3$ and $0.0025$ for $d = 10$. The Gaussian method has no rejections in any
+dimension.
+
+## Cost and trade-offs
+
+- **Disc.** One square root, one sine and one cosine per point, with no rejections. Rejection from the square avoids the
+  trigonometric functions at the cost of about 27% extra draws.
+- **Sphere and ball.** $d$ Gaussian draws and one norm per point. For $d = 2$ and $d = 3$ the direct methods above are
+  cheaper.
+
+## Pitfalls
+
+- **Uniform radius.** $R = U$ crowds points near the centre. In $d$ dimensions the correct radius $U^{1/d}$ is close to
+  1 for most draws: most of a high-dimensional ball's volume lies near its surface.
+- **Uniform latitude and longitude.** Drawing both angles of a sphere uniformly crowds points near the poles, because
+  circles of latitude shrink towards the poles. Use a uniform height $z$ instead of a uniform latitude.
+- **Normalising uniform vectors.** $\uvec/\norm{\uvec}$ with $\uvec$ uniform on the cube $[-1, 1]^d$ is not uniform on
+  the sphere. It favours the directions of the cube's corners. The Gaussian works because its density depends only on
+  the length.

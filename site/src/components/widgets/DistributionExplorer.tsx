@@ -47,7 +47,7 @@ export function DistributionExplorer({ id, caption }: { id: string; caption?: st
   const withMean = Number.isFinite(mean)
     ? [...series, { name: 'mean', type: 'line' as const, dashed: true, x: [mean, mean], y: [0, top] }]
     : series
-  const shown = (v: number) => (Number.isFinite(v) ? formatNumber(v) : 'undefined')
+  const shown = (v: number) => (Number.isFinite(v) ? formatNumber(v) : v === Infinity ? '∞' : 'undefined')
 
   return (
     <Interactive

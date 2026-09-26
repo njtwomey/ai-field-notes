@@ -8,10 +8,12 @@ export type { CategoryNode, NoteKind, NoteMeta, Reference }
 export const notesBySlug: ReadonlyMap<string, NoteMeta> = new Map(notes.map((n) => [n.slug, n]))
 
 type MdxModule = { default: ComponentType<{ components?: Record<string, unknown> }> }
-const loaders = import.meta.glob<MdxModule>('@content/notes/*/index.mdx')
+const loaders = import.meta.glob<MdxModule>('@content/notes/**/index.mdx')
 
 export function loadNote(slug: string): Promise<MdxModule> {
-  const key = Object.keys(loaders).find((k) => k.endsWith(`/notes/${slug}/index.mdx`))
+  // Notes live at any depth, so find the loader by the note's recorded path (content/<file>).
+  const file = notesBySlug.get(slug)?.file
+  const key = file && Object.keys(loaders).find((k) => k.endsWith(`/${file}`))
   if (!key) return Promise.reject(new Error(`no note "${slug}"`))
   return loaders[key]()
 }
@@ -21,6 +23,7 @@ export const kindLabels: Record<NoteKind, string> = {
   distribution: 'Distribution',
   technique: 'Technique',
   test: 'Statistical test',
+  example: 'Worked example',
   'case-study': 'Case study',
   overview: 'Overview',
 }

@@ -1,0 +1,125 @@
+---
+title: Categorical distribution
+kind: distribution
+summary: The categorical distribution models one draw from K unordered categories with probabilities π₁, …, π_K that sum to 1. It generalises the Bernoulli to more than two outcomes. A softmax classifier outputs one, and cross-entropy is its negative log-likelihood.
+tags: [probability, distributions, classification]
+aliases: [categorical, discrete distribution, generalised Bernoulli, multinoulli, softmax distribution]
+related: [bernoulli-distribution, multinomial-distribution, logistic-regression, gumbel-max-trick, kl-divergence]
+references: [bishop2006]
+status: draft
+updated: 2026-09-26
+---
+
+import { SoftmaxCategorical } from './SoftmaxCategorical'
+
+<Definition>
+A random variable $Y$ has a categorical distribution over $K$ categories, written $Y \sim \Cat(\pivec)$, if
+
+$$
+P(Y = k) = \pi_k, \qquad k = 1, \dots, K,
+$$
+
+where $\pi_k \ge 0$ and $\sum_{k=1}^K \pi_k = 1$. With $Y$ written as a one-hot vector $\xvec \in \{0, 1\}^K$, the pmf
+is $P(\xvec) = \prod_{k=1}^K \pi_k^{x_k}$.
+</Definition>
+
+## At a glance
+
+| | |
+| --- | --- |
+| Parameter | Probability vector $\pivec$ in the simplex $\Delta^{K-1}$ ($K - 1$ free values) |
+| Support | $k \in \{1, \dots, K\}$, or one-hot vectors $\xvec$ |
+| pmf | $\pi_k$, or $\prod_k \pi_k^{x_k}$ in one-hot form |
+| Mean (one-hot) | $\pivec$ |
+| Covariance (one-hot) | $\diag(\pivec) - \pivec \pivec^\top$ |
+| Mode | $\argmax_k \pi_k$ |
+| Entropy | $-\sum_k \pi_k \log \pi_k$, at most $\log K$ |
+
+The categories have no order, so a cdf and a scalar mean are not defined. The one-hot moments play their role.
+
+## Where it comes from
+
+Any experiment with $K$ mutually exclusive outcomes is a categorical draw: the face of a die, the class of an image, the
+next word in a sentence. The probability vector $\pivec$ lies in the simplex
+$\Delta^{K-1} = \set{\pivec \in \reals^K : \pi_k \ge 0, \sum_k \pi_k = 1}$.
+
+## Properties
+
+**One-hot moments.** Each coordinate $x_k = \indicator\{Y = k\}$ is $\Bern(\pi_k)$. Two different coordinates are
+never both 1, which makes them negatively correlated. Because $x_k$ is Bernoulli, $\expect[x_k] = \pi_k$ and
+$\var(x_k) = \pi_k(1 - \pi_k)$. For $j \ne k$, $x_j x_k = 0$ always, so
+
+$$
+\cov(x_j, x_k) = \expect[x_j x_k] - \expect[x_j]\expect[x_k] = -\pi_j \pi_k.
+$$
+
+Collecting the entries gives $\cov(\xvec) = \diag(\pivec) - \pivec\pivec^\top$. Its rank is $K - 1$: the constraint
+$\sum_k x_k = 1$ means $\ones^\top \xvec$ has zero variance, so $\ones$ is in the null space.
+
+**Maximum likelihood.** For $n$ independent draws with $n_k$ in category $k$, the likelihood is
+$\prod_k \pi_k^{n_k}$ and the log-likelihood is $\sum_k n_k \log \pi_k$. Maximise it subject to $\sum_k \pi_k = 1$
+with a Lagrange multiplier $\lambda$: the stationarity condition $n_k / \pi_k = \lambda$ gives $\pi_k = n_k / \lambda$,
+and the constraint forces $\lambda = \sum_k n_k = n$. So $\hat \pi_k = n_k / n$, the observed frequencies.
+
+**Entropy.** The entropy $-\sum_k \pi_k \log \pi_k$ is 0 when one category has probability 1. It reaches its maximum,
+$\log K$, when every $\pi_k = 1/K$.
+
+<Derivation title="Why the uniform distribution has the most entropy">
+Let $\uvec$ be the uniform vector, $u_k = 1/K$. The Kullback–Leibler divergence from $\uvec$ is
+
+$$
+\KL(\pivec \,\|\, \uvec) = \sum_k \pi_k \log \frac{\pi_k}{1/K} = \log K - \paren{-\sum_k \pi_k \log \pi_k}.
+$$
+
+KL divergence is non-negative, and zero only when $\pivec = \uvec$. So the entropy is at most $\log K$, with equality
+only for the uniform distribution. Non-negativity follows from Jensen's inequality for the concave logarithm:
+$-\KL = \sum_k \pi_k \log (u_k / \pi_k) \le \log \sum_k u_k = 0$.
+</Derivation>
+
+**Softmax parameterisation.** A vector of real scores $\zvec \in \reals^K$, the logits, defines a categorical
+distribution through the softmax with temperature $T > 0$:
+
+$$
+\pi_k = \frac{\exp(z_k / T)}{\sum_{j=1}^K \exp(z_j / T)}.
+$$
+
+Adding the same constant $c$ to every logit multiplies the numerator and the denominator by $e^{c/T}$, which cancels,
+so only differences between logits matter. As
+$T \to 0$ the mass concentrates on the largest logit. As $T \to \infty$ the distribution tends to uniform
+<Cite id="bridle1990" />.
+
+<SoftmaxCategorical />
+
+## Relations to other distributions
+
+- **Bernoulli.** With $K = 2$, $\Cat(1 - p, p)$ is <NoteLink to="bernoulli-distribution">$\Bern(p)$</NoteLink>, and the
+  softmax of two logits is the logistic function of their difference.
+- **Multinomial.** The sum of $n$ independent one-hot draws is
+  <NoteLink to="multinomial-distribution">multinomial</NoteLink>: $\Mult(n, \pivec)$ counts how many draws fall in each
+  category.
+- **Dirichlet.** The <NoteLink to="dirichlet-distribution">Dirichlet distribution</NoteLink> is the conjugate prior for
+  $\pivec$. A $\Dir(\alphavec)$ prior and counts $n_k$ give a $\Dir(\alphavec + \nvec)$ posterior, where
+  $\nvec = (n_1, \dots, n_K)$: the prior density $\prod_k \pi_k^{\alpha_k - 1}$ times the likelihood
+  $\prod_k \pi_k^{n_k}$ is $\prod_k \pi_k^{\alpha_k + n_k - 1}$.
+- **Gumbel.** If $G_1, \dots, G_K$ are independent standard Gumbel variables, $\argmax_k (z_k + G_k)$ is distributed as
+  $\Cat(\operatorname{softmax}(\zvec))$. This is the <NoteLink to="gumbel-max-trick">Gumbel-max trick</NoteLink> for
+  sampling from logits <Cite id="maddison2014" />.
+
+## In machine learning
+
+- **Classification.** A neural classifier maps an input to logits, and the softmax turns them into a categorical
+  distribution over classes <Cite id="bridle1990" />. The negative log-likelihood of the true class $y$,
+  $-\log \pi_y$, is the cross-entropy loss <Cite id="bishop2006" />.
+- **Language models.** A language model outputs a categorical distribution over its vocabulary for the next token.
+  Sampling uses a temperature, and often truncates the distribution to the most probable tokens before sampling
+  <Cite id="holtzman2020" />.
+
+## Pitfalls
+
+- **Integer encoding.** Coding categories as $1, \dots, K$ in a model input imposes an order and spacing that do not
+  exist. Use one-hot vectors or learned embeddings.
+- **Unseen categories.** $\hat \pi_k = n_k / n$ is 0 for any category not observed, so a later observation of it has
+  log-likelihood $-\infty$. Additive smoothing, $(n_k + \alpha)/(n + K\alpha)$, is the posterior mean under a symmetric
+  Dirichlet prior.
+- **Overflow in the softmax.** $\exp(z_k)$ overflows for large logits. Subtract $\max_j z_j$ from every logit first;
+  the result is unchanged.

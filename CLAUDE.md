@@ -28,7 +28,8 @@ make install     # npm install + uv sync
 make dev         # Vite dev server → http://localhost:5173/ai-field-notes/
 make assets      # contracts + run examples + build figure data (cached) + manifest
 make contracts   # pydantic → JSON Schema → site/src/generated/contracts.ts
-make check       # content validation, lint, typecheck, tests, registry check, contract drift
+make check       # doctor, lint, typecheck, tests, registry check, contract drift
+make doctor      # content tree: slugs, folders vs taxonomy, figure/example ids, cross-note imports
 make build       # assets + production build into dist/
 make format      # prettier + ruff
 ```
@@ -48,10 +49,20 @@ npm run check:content                           # validate content/ without star
 
 ### Content pipeline
 
-- A note is `content/notes/<slug>/index.mdx`. The directory name is the slug and the URL (`/n/<slug>`). Slugs form a
-  flat namespace; categories never appear in URLs.
-- Note-specific widgets sit next to the note (`content/notes/<slug>/Widget.tsx`) and are imported by the MDX file.
-  Widgets shared by several notes go in `site/src/components/widgets/`.
+- A note is `content/notes/<category path>/<slug>/index.mdx`, e.g.
+  `content/notes/probability/theory/bayes-theorem/index.mdx`. The folder path is the note's category (there is no
+  `category` frontmatter) and the folder name is its slug. Depth varies by branch. URLs use the slug only
+  (`/n/<slug>`), so moving a note between categories never changes its URL: the taxonomy is plastic, links are not.
+  Slugs are one flat namespace and must be unique across the whole tree.
+- A folder holding `index.mdx` is a note and contains no other notes. Any other folder is a category and must exist in
+  `content/taxonomy.yaml`. Folders starting with `_` hold shared code and are skipped.
+- Note-specific widgets sit next to the note (`<note folder>/Widget.tsx`) and are imported by the MDX file. A note
+  never imports from another note's folder: code shared by several notes goes in `site/src/components/widgets/`,
+  `site/src/lib/`, or a `_shared/` folder in the category.
+- `make doctor` (part of `make check`) checks what the build cannot: unique slugs, folders against the taxonomy,
+  `code:` ids against `runs.toml`, `useFigure` ids against notes and generated data, and imports across notes. It also
+  warns about empty or single-note categories and names (slugs, titles, aliases) that collide across notes. Move a
+  note with a plain `mv` into another category folder, then run `make doctor`.
 - `plugins/content-index.ts` (Vite plugin) reads every note's frontmatter and validates it with zod schemas from
   `site/src/lib/content-schema.ts`. It checks categories, relation slugs, `<NoteLink to>` targets and `<Cite id>` keys.
   Any error fails dev and build with the offending file named. It exposes two virtual modules:
@@ -109,11 +120,13 @@ stale.
   prop, not `asChild`.
 - `site/src/components/viz/`: the visual system (see below). `site/src/components/content/`: MDX components.
   `site/src/components/note/`: the note page. `site/src/components/layout/`: shell, search, navigation.
-- The note page opens with `NoteBar`, which sticks under the site header. It holds the note's title, the section
-  being read ("Title · Section › Subsection"), a reading-progress line, and the Concept / Code / Outputs tabs.
-  `NoteHeader` follows: a breadcrumb ending in the note's title, kind and status, then the centred title (the page's
-  h1) and the summary set as an abstract, with tags beneath. `useReadingPosition` computes the current heading and
-  progress once, for both the bar and the left index. Sticky offsets assume a 56 px site header and a 56 px note bar.
+- The note page opens with `NoteBar`, which sticks under the site header and is the page's only breadcrumb:
+  `TaxonomyTrail` (every category crumb a dropdown of its siblings, with a link to browse it; the note's title, bold at
+  the same size, a dropdown of the other notes in its category), the status, then "›" and the section being read, a
+  reading-progress line, and the Concept / Code / Outputs tabs. Below `md` only the title crumb shows. `NoteHeader`
+  follows: the centred title (the page's h1) and the summary set as an abstract, with tags beneath.
+  `useReadingPosition` computes the current heading and progress once, for both the bar and the left index. Sticky
+  offsets assume a 56 px site header and a 56 px note bar.
 - The note page (`site/src/pages/NotePage.tsx`) spans the full window width in three columns. The left index is sticky
   and scrolls on its own: the TOC on Concept, files on Code, runs on Outputs. The centre holds the content. The right
   column holds relations and, on the Concept tab at `xl` and wider, **margin references**. Tabs are routes: `/n/:slug`,
@@ -123,10 +136,10 @@ stale.
   re-lays out when the article resizes. Hovering a marker highlights its note and the reverse. Below `xl`, markers
   show a hover card instead. Every note ends with a full References list (`ReferenceList`), which is also the target
   of each marker's link.
-- Navigation: the landing page lists every topic as a tile with its notes as direct links. `/browse` is the explorer:
-  a topic rail with counts, kind chips, a text filter and a List / Map toggle, all held in the URL
-  (`browseUrl({ c, kind, q, view })`). The Map (`ConceptMap`) draws notes as a force graph coloured and shaped by
-  topic, with requires / part-of / related edges. Top-level topics carry an `icon` in `taxonomy.yaml`.
+- Navigation: the landing page lists every topic as a tile with its subtopics and note counts, never individual notes.
+  `/browse` is the explorer: a topic rail with counts, kind chips, a text filter and a List / Map toggle, all held in
+  the URL (`browseUrl({ c, kind, q, view })`). The Map (`ConceptMap`) draws notes as a force graph coloured and shaped
+  by topic, with requires / part-of / related edges. Top-level topics carry an `icon` in `taxonomy.yaml`.
 - Tags are always shown with `TagPill` (`site/src/components/browse/TagPill.tsx`), never as ad-hoc text or badges.
 - Search is a ⌘K / `/` command palette (shadcn `Command`, filtering off) over a MiniSearch index of titles, aliases,
   tags, summaries, headings and body text.
@@ -219,6 +232,14 @@ Notes are encyclopedia entries, not blog posts. Every sentence must carry inform
   - The `<Definition>` block states it precisely.
   - The body adds detail in the section order of the note's kind (templates in `docs/templates/`).
   - `<Derivation>` holds optional depth. The note must read completely with it collapsed.
+- **Derive, don't just state.** The note's central result is derived in the main text, not hidden in a collapsed
+  block: why the dot product equals $\norm{\xvec}\norm{\yvec}\cos\theta$, where the Taylor coefficients come from, why a
+  statistic has its null distribution. Secondary results (moments, identities, special cases) get a proof in a
+  `<Derivation>`. Arguments must not be circular, e.g. Cauchy–Schwarz cannot be proved from $\abs{\cos\theta} \le 1$
+  when the angle is defined through it. When a note is mined from a source that proves a result, the note proves it
+  too.
+- **Tag worked examples.** Every note that contains a worked example carries the tag `worked-example`, including
+  every note of kind `example`.
 - **Maths uses the shared macros** in `content/macros.ts`, the site's `definitions.sty`: `\xvec`, `\Xmat`, `\muvec`
   (or `\mub`), `\Sigmamat`, `\Dcal`, `\reals`, `\expect`, `\Gauss`, `\norm{…}`, `\argmin`, `\KL`, and so on.
   Never spell out `\mathbf{x}` or `\boldsymbol{\mu}` in a note. Add a missing macro to the right group in
@@ -232,17 +253,21 @@ Notes are encyclopedia entries, not blog posts. Every sentence must carry inform
 
 ## Content model
 
-Frontmatter (validated; see `site/src/lib/content-schema.ts`): `title`, `kind`, `category`, `summary`, `tags`,
+Frontmatter (validated; see `site/src/lib/content-schema.ts`): `title`, `kind`, `summary`, `tags`,
 `aliases`, `requires`, `partOf`, `related`, `code`, `references`, `status` (`stub | draft | stable`), `updated`.
 
 - **Kinds** have their own section structure (`docs/templates/<kind>.mdx`):
   - `concept`: one idea.
   - `technique`: an engineering trick, e.g. KV caching.
   - `test`: a statistical test.
+  - `distribution`: a named probability distribution, with the shared explorer.
+  - `example`: a worked problem that illustrates several ideas (e.g. the occasionally dishonest casino), filed under an
+    `examples` category. Examples tied to one technique stay inside that technique's note.
   - `case-study`: compares specific models, with a `<SpecTable>`.
   - `overview`: a hub. Its components list themselves via `partOf`.
-- **Category** is a path in `content/taxonomy.yaml`, up to three levels deep (e.g.
-  `probability-distributions/discrete`). Top-level topics are subjects, ordered from mathematical prerequisites to
+- **Category** is the note's folder path, a path in `content/taxonomy.yaml` of any depth (e.g.
+  `probability-distributions/discrete`). Add a level only when a subtopic has several notes that form a chapter;
+  `make doctor` flags single-note branches. Top-level topics are subjects, ordered from mathematical prerequisites to
   applications; subtopics are a subject's natural chapters. Place a note by its subject, not by where it is used:
   Bayes' theorem is probability theory even though every model uses it. Categories are for browsing; one note has one
   category, and cross-cutting links are relations and tags. Lists follow taxonomy order (`categoryOrder`), never
@@ -251,10 +276,17 @@ Frontmatter (validated; see `site/src/lib/content-schema.ts`): `title`, `kind`, 
   Backlinks and component lists are computed; declare each relation only on one side.
 - **Tags** are cross-cutting kebab-case labels.
 
+## Git
+
+- Never stage, commit or push unless the user expressly asks for it in the current message. Permission is atomic: one
+  request covers one action (one commit, or one push) and does not carry over to later work. "Commit" does not imply
+  "push", and making a repository does not imply pushing to it.
+- `docs/field-notes-survey.md` is a volatile local planning file, excluded via `.git/info/exclude`. Never add it.
+
 ## Deployment
 
-- `base: '/ai-field-notes/'` in `vite.config.ts` is the only place the path is set. The router and generated-asset URLs derive it
-  from `import.meta.env.BASE_URL`.
+- `base: '/ai-field-notes/'` in `vite.config.ts` is the only place the path is set. The router and generated-asset URLs
+  derive it from `import.meta.env.BASE_URL`.
 - The build copies `index.html` to `404.html` so that GitHub Pages serves deep links to the SPA.
 - `.github/workflows/deploy.yml` runs `make check` and `npm run build`, then publishes `dist/` to Pages.
 

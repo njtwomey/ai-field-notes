@@ -1,0 +1,119 @@
+---
+title: Multiple testing
+kind: concept
+summary: Running many tests at level α makes some false rejections almost certain. Corrections control an error rate over the whole family. Bonferroni and Holm bound the chance of any false rejection; Benjamini–Hochberg bounds the expected share of false discoveries.
+tags: [hypothesis-testing, inference, worked-example]
+aliases: [multiple comparisons, Bonferroni correction, Holm correction, Benjamini–Hochberg, false discovery rate, FDR, family-wise error rate, FWER]
+requires: [p-value, significance-level]
+related: [type-i-and-type-ii-errors]
+references: [dunn1961, benjamini1995, benjamini2001, lehmann2005]
+status: draft
+updated: 2026-09-26
+---
+
+import { StepUp } from './StepUp'
+
+<Definition>
+In **multiple testing**, $m$ null hypotheses $H_1, \dots, H_m$ are tested together. Let $V$ be the number of true nulls
+that are rejected and $R$ the total number of rejections. A procedure controls the **family-wise error rate** at level
+$\alpha$ when $P(V \ge 1) \le \alpha$. It controls the **false discovery rate** at level $q$ when
+
+$$
+\text{FDR} = \expect\brack{\frac{V}{\max(R, 1)}} \le q
+$$
+
+<Cite id="benjamini1995" />.
+</Definition>
+
+## The problem
+
+Each test at level $\alpha$ rejects a true null with probability $\alpha$. With $m$ true nulls, linearity of expectation
+gives an expected $m\alpha$ false rejections, whatever the dependence. If the tests are also independent, each avoids a
+false rejection with probability $1 - \alpha$, all of them do with probability $(1 - \alpha)^m$, and the probability of
+at least one false rejection is $1 - (1 - \alpha)^m$. For
+$m = 20$ and $\alpha = 0.05$ that probability is 0.64. Studies that test many outcomes, subgroups or features and
+report the significant ones produce false positives at this rate unless they correct.
+
+## Controlling the family-wise error rate
+
+- **Bonferroni.** Test each hypothesis at level $\alpha/m$. By the union bound,
+  $P(V \ge 1) \le \sum_i P(\text{reject true } H_i) \le m \cdot \alpha/m = \alpha$, whatever the dependence between
+  tests <Cite id="dunn1961" />.
+- **Holm.** Sort the p-values, $p_{(1)} \le \dots \le p_{(m)}$. Reject $H_{(1)}, H_{(2)}, \dots$ in order while
+  $p_{(i)} \le \alpha/(m - i + 1)$, and stop at the first failure. Holm also controls the FWER under any dependence and
+  rejects everything Bonferroni rejects, often more <Cite id="lehmann2005" />.
+
+<Derivation title="Why Holm controls the family-wise error rate">
+Let $m_0 \ge 1$ be the number of true nulls, and let $p^*$ be the smallest p-value among them. Consider the event
+$E = \set{p^* > \alpha/m_0}$. By the union bound over the $m_0$ true nulls, $P(E^c) \le m_0 \cdot \alpha/m_0 = \alpha$.
+
+On $E$, Holm rejects no true null. Suppose it did, and let the first true null it reaches be at sorted position $i$.
+At most $m - m_0$ false nulls come before it, so $i \le m - m_0 + 1$ and its threshold is
+$\alpha/(m - i + 1) \le \alpha/m_0$. Its p-value is at least $p^* > \alpha/m_0$, so it fails the threshold and Holm
+stops there. Hence $P(V \ge 1) \le P(E^c) \le \alpha$, with no assumption on the dependence.
+</Derivation>
+
+FWER control is right when a single false claim is costly, as in confirmatory clinical endpoints. With many tests it
+has little power: the per-test level $\alpha/m$ becomes tiny.
+
+## Controlling the false discovery rate
+
+The **Benjamini–Hochberg** (BH) procedure at level $q$ <Cite id="benjamini1995" />:
+
+1. Sort the p-values, $p_{(1)} \le \dots \le p_{(m)}$.
+2. Find the largest $k$ with $p_{(k)} \le q\, k / m$.
+3. Reject the hypotheses with the $k$ smallest p-values.
+
+BH controls the FDR at $q\, m_0/m \le q$, where $m_0$ is the number of true nulls, when the test statistics are
+independent or positively dependent <Cite id="benjamini2001" />.
+
+**Why BH controls the FDR, for independent p-values.** Write $V/\max(R, 1)$ as a sum over the true nulls $i$ of
+$\indicator\set{H_i \text{ rejected}}/\max(R, 1)$. Fix a true null $i$ and let $R_i$ be the number of rejections BH
+makes when $p_i$ is replaced by 0. Two facts hold:
+
+1. If $H_i$ is rejected, then $R = R_i$. Lowering an already rejected p-value to 0 does not change the set of
+   rejections, because $p_i$ was already below the cut-off.
+2. $H_i$ is rejected exactly when $p_i \le q R_i/m$. With $p_i$ at 0 there are $R_i$ rejections, so the cut-off is
+   $q R_i/m$, and $p_i$ passes it exactly when $H_i$ is among them in the original data.
+
+$R_i$ depends only on the other p-values, so it is independent of $p_i$, which is $\Unif(0, 1)$ under $H_i$. Given
+$R_i = r$,
+
+$$
+\expect\brack{\frac{\indicator\set{p_i \le q r/m}}{r}} = \frac{1}{r}\cdot\frac{q r}{m} = \frac{q}{m}.
+$$
+
+The expectation is $q/m$ whatever $r$ is, so it is $q/m$ unconditionally. Summing over the $m_0$ true nulls gives
+$\text{FDR} = q\, m_0/m$. The threshold grows with the rank, so BH rejects many
+more hypotheses than Bonferroni when many effects are real. It accepts that a controlled share of the discoveries are
+false. This suits screening, such as selecting genes or features for follow-up.
+
+<StepUp />
+
+## Worked example
+
+Ten tests give the sorted p-values 0.001, 0.008, 0.039, 0.041, 0.042, 0.060, 0.074, 0.205, 0.212 and 0.216.
+
+- **Unadjusted** at 0.05: five rejections.
+- **Bonferroni** at $0.05/10 = 0.005$: one rejection, $p = 0.001$.
+- **Holm**: $0.001 \le 0.05/10$ is rejected; $0.008 > 0.05/9 = 0.0056$ stops the procedure. One rejection.
+- **BH** at $q = 0.05$: the thresholds are $0.005, 0.010, 0.015, \dots$. The largest $k$ with
+  $p_{(k)} \le 0.05k/10$ is $k = 2$, since $0.008 \le 0.010$ and no later p-value is below its threshold. Two
+  rejections.
+
+## Adjusted p-values
+
+Software often reports adjusted p-values, compared directly with $\alpha$ or $q$. The Bonferroni-adjusted value is
+$\min(1, m p_i)$. The BH-adjusted value of $p_{(i)}$ is $\min_{j \ge i} \min\paren{1, m p_{(j)}/j}$.
+
+## Pitfalls
+
+- **Hidden multiplicity.** Trying several outcomes, transformations, subgroups or stopping times and reporting the
+  best is multiple testing, even when only one test is written up.
+- **Reading an FDR as a per-discovery probability.** An FDR of 10% is an average over repetitions of the whole
+  procedure. It does not say which discoveries are false.
+- **Correcting across unrelated questions.** The family should be the set of tests that together support one
+  conclusion. Correcting across a whole career of unrelated studies loses power for nothing.
+- **Arbitrary dependence and BH.** Under strong negative dependence BH can exceed its level. The Benjamini–Yekutieli
+  variant divides $q$ by $\sum_{i=1}^m 1/i$ and holds under any dependence
+  <Cite id="benjamini2001" />.

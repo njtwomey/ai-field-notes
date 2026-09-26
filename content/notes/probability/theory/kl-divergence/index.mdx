@@ -1,0 +1,159 @@
+---
+title: Kullback–Leibler divergence
+kind: concept
+summary: The Kullback–Leibler divergence KL(p ‖ q) = E_p[log p(X)/q(X)] measures how a distribution q differs from a reference p. It is non-negative, zero only when q = p, and not symmetric. Maximum likelihood and variational inference both minimise a KL divergence.
+tags: [probability, information-theory, divergences, variational-inference, worked-example]
+aliases: [KL divergence, relative entropy, Kullback-Leibler divergence, information gain, Gibbs' inequality, forward KL, reverse KL, cross-entropy, mode-seeking, mass-covering]
+requires: [expectation]
+related: [exponential-family, gaussian-mixture-model, reparameterisation-trick]
+references: [kullback1951, cover2006, bishop2006]
+status: draft
+updated: 2026-09-26
+---
+
+import { KlAsymmetry } from './KlAsymmetry'
+
+<Definition>
+For distributions $p$ and $q$ on the same space, the Kullback–Leibler divergence of $q$ from $p$ is
+
+$$
+\KL(p \,\|\, q) = \expect_{X \sim p}\brack{\log \frac{p(X)}{q(X)}} = \sum_x p(x) \log \frac{p(x)}{q(x)} \quad
+\text{or} \quad \int p(x) \log \frac{p(x)}{q(x)}\, dx,
+$$
+
+with the conventions $0 \log(0/q) = 0$ and $p \log(p/0) = \infty$ for $p > 0$ <Cite id="kullback1951" />. With the
+natural logarithm it is measured in nats; with $\log_2$, in bits.
+</Definition>
+
+## Meaning
+
+$\log p(x) - \log q(x)$ is how much more probable $x$ is under $p$ than under $q$. The KL divergence averages this over
+draws from $p$. If $p$ generates the data and $q$ is a model, $\KL(p \,\|\, q)$ is the expected extra log-loss per
+observation from predicting with $q$ instead of $p$. In coding terms it is the expected number of extra bits needed to
+encode samples from $p$ with a code designed for $q$ <Cite id="cover2006" />.
+
+It splits into cross-entropy minus entropy:
+
+$$
+\KL(p \,\|\, q) = \underbrace{-\expect_p[\log q(X)]}_{\text{cross-entropy } H(p, q)} -
+\underbrace{\paren{-\expect_p[\log p(X)]}}_{\text{entropy } \entropy(p)}.
+$$
+
+## Properties
+
+- **Non-negative.** $\KL(p \,\|\, q) \ge 0$, with equality exactly when $p = q$ (almost everywhere). This is Gibbs'
+  inequality.
+- **Not symmetric.** $\KL(p \,\|\, q) \ne \KL(q \,\|\, p)$ in general, and the triangle inequality fails. KL is a
+  divergence, not a distance.
+- **Infinite under support mismatch.** If $q(x) = 0$ where $p(x) > 0$, then $\KL(p \,\|\, q) = \infty$.
+- **Invariant to reparameterisation.** Applying the same invertible transformation to both distributions leaves the
+  divergence unchanged.
+- **Additive for independent parts** and, more generally, satisfies a chain rule:
+  $\KL\paren{p(x, y) \,\|\, q(x, y)} = \KL\paren{p(x) \,\|\, q(x)} + \expect_{p(x)}\brack{\KL\paren{p(y \mid x) \,\|\,
+  q(y \mid x)}}$.
+
+### Why KL is non-negative
+
+The logarithm is concave, so Jensen's inequality, $\expect[\log Y] \le \log \expect[Y]$, applies with
+$Y = q(X)/p(X)$ and $X \sim p$:
+
+$$
+-\KL(p \,\|\, q) = \expect_p\brack{\log \frac{q(X)}{p(X)}} \le \log \expect_p\brack{\frac{q(X)}{p(X)}} = \log
+\sum_{x : p(x) > 0} q(x) \le \log 1 = 0.
+$$
+
+Equality in Jensen's inequality for a strictly concave function requires $q(X)/p(X)$ to be constant on the support of
+$p$, and the second inequality requires $q$ to put no mass outside it. Together these force $q = p$.
+
+<Derivation title="Proof of the chain rule">
+Factor both joints as $p(x, y) = p(x)\, p(y \mid x)$ and $q(x, y) = q(x)\, q(y \mid x)$. The log-ratio splits into a
+sum:
+
+$$
+\KL\paren{p(x, y) \,\|\, q(x, y)} = \expect_{p(x, y)}\brack{\log \frac{p(X)}{q(X)}} + \expect_{p(x, y)}\brack{\log
+\frac{p(Y \mid X)}{q(Y \mid X)}}.
+$$
+
+The first term depends only on $X$, so it is $\KL(p(x) \,\|\, q(x))$. In the second, average over $Y$ given $X$ first:
+the inner average is $\KL\paren{p(y \mid x) \,\|\, q(y \mid x)}$, which is then averaged over $p(x)$. For independent
+parts the conditionals do not depend on $x$, and the chain rule reduces to a sum.
+</Derivation>
+
+## Examples
+
+**Two coins.** Let $p = \Bern(0.5)$ and $q = \Bern(0.9)$. Then
+
+$$
+\KL(p \,\|\, q) = 0.5 \log \tfrac{0.5}{0.9} + 0.5 \log \tfrac{0.5}{0.1} \approx 0.511, \qquad
+\KL(q \,\|\, p) = 0.9 \log \tfrac{0.9}{0.5} + 0.1 \log \tfrac{0.1}{0.5} \approx 0.368
+$$
+
+nats. Using the biased coin $q$ to model the fair coin $p$ costs more than the reverse, because $q$ gives the tails of a
+fair coin only probability $0.1$.
+
+**Two Gaussians.** For $p = \Gauss(\mu_1, \sigma_1^2)$ and $q = \Gauss(\mu_2, \sigma_2^2)$,
+
+$$
+\KL(p \,\|\, q) = \log \frac{\sigma_2}{\sigma_1} + \frac{\sigma_1^2 + (\mu_1 - \mu_2)^2}{2\sigma_2^2} - \frac12.
+$$
+
+<Derivation title="Derivation of the Gaussian formula">
+The log-ratio of the densities is
+
+$$
+\log \frac{p(x)}{q(x)} = \log \frac{\sigma_2}{\sigma_1} - \frac{(x - \mu_1)^2}{2\sigma_1^2} + \frac{(x -
+\mu_2)^2}{2\sigma_2^2}.
+$$
+
+Take its expectation under $p$. $\expect_p[(X - \mu_1)^2] = \sigma_1^2$, and writing $X - \mu_2 = (X - \mu_1) +
+(\mu_1 - \mu_2)$ gives $\expect_p[(X - \mu_2)^2] = \sigma_1^2 + (\mu_1 - \mu_2)^2$, because the cross term has mean
+zero. Substituting gives $\log(\sigma_2/\sigma_1) - \frac12 + \paren{\sigma_1^2 + (\mu_1 - \mu_2)^2}/(2\sigma_2^2)$.
+</Derivation>
+
+A shift of the mean costs $(\mu_1 - \mu_2)^2/(2\sigma_2^2)$, so it is measured in units of the standard deviation of
+$q$. A $q$ narrower than $p$ is penalised much more than a $q$ wider than $p$.
+
+## Forward and reverse KL
+
+Fitting an approximation $q$ to a fixed target $p$ by minimising KL gives different answers in the two directions
+<Cite id="bishop2006" />.
+
+- **Forward, $\KL(p \,\|\, q)$.** The expectation is over $p$, and $q(x) \to 0$ where $p(x) > 0$ is heavily
+  penalised. The best $q$ spreads to cover all the mass of $p$: it is **mass-covering**. For a Gaussian $q$ the optimum
+  matches the mean and variance of $p$. Only the cross-entropy term depends on $q$, and for $q = \Gauss(m, s^2)$ it is
+  $\log s + \expect_p[(X - m)^2]/(2s^2) + \text{const}$. Setting its derivatives to zero gives $m = \expect_p[X]$ and
+  $s^2 = \var_p(X)$.
+- **Reverse, $\KL(q \,\|\, p)$.** The expectation is over $q$, and $q$ is penalised for putting mass where $p$ is
+  small, but not for missing regions where $p$ is large. The best $q$ concentrates on one mode of $p$: it is
+  **mode-seeking** <Cite id="minka2005" />.
+
+<KlAsymmetry />
+
+## In machine learning
+
+- **Maximum likelihood.** $\KL(p_{\text{data}} \,\|\, p_\theta) = -\expect_{p_{\text{data}}}[\log p_\theta(X)] +
+  \text{const}$. Maximising the average log-likelihood minimises the forward KL from the data distribution to the
+  model. Cross-entropy loss for classification is the same quantity.
+- **Variational inference** approximates an intractable posterior $p(\zvec \mid \xvec)$ by the $q$ that minimises the
+  reverse KL, which avoids expectations under $p$. The identity $\log p(\xvec) = \text{ELBO}(q) + \KL\paren{q(\zvec)
+  \,\|\, p(\zvec \mid \xvec)}$ turns this into maximising the evidence lower bound. The identity follows by writing
+  $\log p(\xvec) = \expect_q\brack{\log \frac{p(\xvec, \zvec)}{q(\zvec)}} + \expect_q\brack{\log \frac{q(\zvec)}{p(\zvec
+  \mid \xvec)}}$, which holds because the two log-ratios add to $\log p(\xvec)$ for every $\zvec$. Mode-seeking is why
+  variational posteriors tend to be overconfident.
+- **Variational autoencoders** add $\KL\paren{q(\zvec \mid \xvec) \,\|\, p(\zvec)}$ to the loss, using the closed form
+  for Gaussians <Cite id="kingma2014" />. The <NoteLink to="reparameterisation-trick">reparameterisation
+  trick</NoteLink> gives low-variance gradients of the rest of the loss.
+- **Regularising a policy or model** towards a reference, as in reinforcement learning from human feedback and in
+  knowledge distillation, uses a KL penalty.
+- **Expectation–maximisation** alternates between making a KL term zero and maximising the rest of the bound; see
+  <NoteLink to="gaussian-mixture-model">Gaussian mixture model</NoteLink>.
+
+## Pitfalls
+
+- **Direction.** "The KL between $p$ and $q$" is ambiguous. State which distribution the expectation is over.
+- **Support.** A model that assigns zero probability to an observed value has infinite forward KL. Smoothing, or
+  distributions with full support, avoid this.
+- **Estimating KL from samples** is hard in high dimensions. Plug-in estimates with density estimates are biased, and a
+  few samples where $q$ is tiny dominate the average.
+- **Not a metric.** Small KL in one direction does not imply small KL in the other, and KL values cannot be combined
+  with the triangle inequality.

@@ -1,0 +1,142 @@
+---
+title: Matrix norms
+kind: concept
+summary: A matrix norm measures the size of a matrix. The spectral norm is the largest factor by which the matrix stretches a vector; the Frobenius norm treats the entries as one long vector; the nuclear norm sums the singular values and serves as a convex stand-in for rank.
+tags: [linear-algebra, regularisation, worked-example]
+aliases: [spectral norm, operator norm, induced norm, Frobenius norm, nuclear norm, trace norm, Schatten norm]
+requires: [vector-norms]
+related: [singular-value-decomposition, condition-number, eigendecomposition]
+references: [horn2012, golub2013, recht2010, miyato2018]
+status: draft
+updated: 2026-09-26
+---
+
+import { MatrixGain } from './MatrixGain'
+
+<Definition>
+A matrix norm is a norm on $\reals^{m \times n}$. Given a vector norm, the induced (operator) norm of $\Amat$ is the
+largest factor by which $\Amat$ stretches a vector,
+
+$$
+\norm{\Amat} = \max_{\xvec \neq \zeros} \frac{\norm{\Amat\xvec}}{\norm{\xvec}}.
+$$
+
+The three norms used most in machine learning are the spectral norm $\norm{\Amat}_2 = \sigma_1$, the Frobenius norm
+$\norm{\Amat}_F = \sqrt{\sum_{i,j} a_{ij}^2}$ and the nuclear norm $\norm{\Amat}_* = \sum_i \sigma_i$, where
+$\sigma_1 \ge \sigma_2 \ge \dots \ge 0$ are the singular values of $\Amat$ <Cite id="horn2012" />.
+</Definition>
+
+## Induced norms
+
+Every vector norm induces a matrix norm. The induced norm is the smallest constant $c$ with $\norm{\Amat\xvec} \le
+c\norm{\xvec}$ for all $\xvec$, so it bounds how much $\Amat$ can amplify any input. Three induced norms have closed
+forms <Cite id="golub2013" />:
+
+| Vector norm   | Induced matrix norm             | Formula                                                   |
+| ------------- | ------------------------------- | --------------------------------------------------------- |
+| $\ell_1$      | $\norm{\Amat}_1$                | largest absolute column sum, $\max_j \sum_i \abs{a_{ij}}$ |
+| $\ell_2$      | $\norm{\Amat}_2$, spectral norm | largest singular value $\sigma_1$                         |
+| $\ell_\infty$ | $\norm{\Amat}_\infty$           | largest absolute row sum, $\max_i \sum_j \abs{a_{ij}}$    |
+
+<Derivation title="The column-sum and row-sum formulas">
+For $\ell_1$: write $\Amat\xvec = \sum_j x_j \avec_j$, where $\avec_j$ is column $j$. The triangle inequality gives
+$\norm{\Amat\xvec}_1 \le \sum_j \abs{x_j}\,\norm{\avec_j}_1 \le \paren{\max_j \norm{\avec_j}_1} \norm{\xvec}_1$. The
+standard basis vector $\evec_j$ of the largest column attains the bound, so the induced norm is the largest absolute
+column sum.
+
+For $\ell_\infty$: entry $i$ of $\Amat\xvec$ satisfies $\abs{\sum_j a_{ij} x_j} \le \sum_j \abs{a_{ij}}\,
+\norm{\xvec}_\infty$, so $\norm{\Amat\xvec}_\infty \le \paren{\max_i \sum_j \abs{a_{ij}}}\norm{\xvec}_\infty$. For the
+largest row $i$, the vector $x_j = \sgn(a_{ij})$ has $\norm{\xvec}_\infty = 1$ and attains the bound.
+</Derivation>
+
+## Why the spectral norm is the largest singular value
+
+The squared stretch of a vector is a quadratic form in the symmetric matrix $\Amat^\top\Amat$:
+
+$$
+\norm{\Amat\xvec}_2^2 = (\Amat\xvec)^\top(\Amat\xvec) = \xvec^\top\Amat^\top\Amat\,\xvec.
+$$
+
+The matrix $\Amat^\top\Amat$ is symmetric, so by the <NoteLink to="spectral-theorem">spectral theorem</NoteLink> it has
+an orthonormal basis of eigenvectors $\vvec_1, \dots, \vvec_n$ with eigenvalues $\lambda_1 \ge \dots \ge \lambda_n$
+(see <NoteLink to="eigendecomposition">eigendecomposition</NoteLink>). The eigenvalues are nonnegative, since
+$\lambda_i = \vvec_i^\top\Amat^\top\Amat\vvec_i = \norm{\Amat\vvec_i}^2$. The singular values of $\Amat$ are
+$\sigma_i = \sqrt{\lambda_i}$.
+
+Write a unit vector in this basis, $\xvec = \sum_i c_i\vvec_i$ with $\sum_i c_i^2 = 1$. Then
+
+$$
+\norm{\Amat\xvec}_2^2 = \sum_i \lambda_i c_i^2 \le \lambda_1 \sum_i c_i^2 = \lambda_1 = \sigma_1^2,
+$$
+
+with equality at $\xvec = \vvec_1$. So $\norm{\Amat}_2 = \sigma_1$. Geometrically, the spectral norm is the length of
+the longest semi-axis of the ellipse that $\Amat$ makes from the unit circle. The maximising input is the first right
+singular vector $\vvec_1$, and $\Amat\vvec_1 = \sigma_1\uvec_1$.
+
+<MatrixGain />
+
+## Frobenius and nuclear norms
+
+The Frobenius norm is the Euclidean norm of the entries. It equals a trace and a sum over singular values:
+
+$$
+\norm{\Amat}_F = \sqrt{\trace(\Amat^\top\Amat)} = \sqrt{\textstyle\sum_i \sigma_i^2}.
+$$
+
+The first equality holds because diagonal entry $j$ of $\Amat^\top\Amat$ is $\sum_i a_{ij}^2$, the squared length of
+column $j$. The second holds because the trace is the sum of the eigenvalues, and the eigenvalues of $\Amat^\top\Amat$
+are the $\sigma_i^2$.
+
+The nuclear norm sums the singular values. The spectral, Frobenius and nuclear norms are the Schatten $p$-norms for
+$p = \infty, 2, 1$: the $\ell_p$ norms of the vector of singular values. For a matrix of rank $r$,
+
+$$
+\norm{\Amat}_2 \le \norm{\Amat}_F \le \sqrt{r}\,\norm{\Amat}_2, \qquad \norm{\Amat}_F \le \norm{\Amat}_* \le \sqrt{r}\,\norm{\Amat}_F.
+$$
+
+These are the vector-norm inequalities $\norm{\sigmab}_\infty \le \norm{\sigmab}_2 \le \sqrt{r}\,\norm{\sigmab}_\infty$
+and $\norm{\sigmab}_2 \le \norm{\sigmab}_1 \le \sqrt{r}\,\norm{\sigmab}_2$ (see <NoteLink to="vector-norms">vector
+norms</NoteLink>), applied to the vector $\sigmab = (\sigma_1, \dots, \sigma_r)$ of nonzero singular values.
+
+## Submultiplicativity
+
+Induced norms and the Frobenius norm satisfy $\norm{\Amat\Bmat} \le \norm{\Amat}\,\norm{\Bmat}$. For induced norms this
+follows from applying the definition twice:
+$\norm{\Amat\Bmat\xvec} \le \norm{\Amat}\,\norm{\Bmat\xvec} \le \norm{\Amat}\,\norm{\Bmat}\,\norm{\xvec}$. For the
+Frobenius norm, entry $(i, j)$ of $\Amat\Bmat$ is the dot product of row $i$ of $\Amat$ with column $j$ of $\Bmat$.
+Cauchy–Schwarz bounds its square by the product of their squared lengths, and summing over $i$ and $j$ gives
+$\norm{\Amat\Bmat}_F^2 \le \norm{\Amat}_F^2\,\norm{\Bmat}_F^2$. A chain of $L$ linear layers therefore amplifies an
+input by at most the product of their spectral norms.
+
+## Worked example
+
+For
+
+$$
+\Amat = \begin{bmatrix} 3 & 0 \\ 4 & 5 \end{bmatrix},
+$$
+
+$\Amat^\top\Amat = \begin{bmatrix} 25 & 20 \\ 20 & 25 \end{bmatrix}$ has eigenvalues 45 and 5, so $\sigma_1 = \sqrt{45}
+\approx 6.71$ and $\sigma_2 = \sqrt 5 \approx 2.24$. Then $\norm{\Amat}_2 \approx 6.71$,
+$\norm{\Amat}_F = \sqrt{9 + 0 + 16 + 25} = \sqrt{50} \approx 7.07$ (and $\sqrt{45 + 5}$ agrees), and
+$\norm{\Amat}_* \approx 8.94$. The column sums give $\norm{\Amat}_1 = \max(7, 5) = 7$, and the row sums give
+$\norm{\Amat}_\infty = \max(3, 9) = 9$.
+
+## In machine learning
+
+- **Lipschitz constants.** A linear layer $\xvec \mapsto \Wmat\xvec$ is Lipschitz with constant $\norm{\Wmat}_2$.
+  Spectral normalisation divides each weight matrix by an estimate of its spectral norm to control how fast a
+  discriminator's output can change <Cite id="miyato2018" />.
+- **Weight decay.** An $\ell_2$ penalty on all the weights of a layer is the squared Frobenius norm of its weight
+  matrix.
+- **Low-rank recovery.** Minimising the nuclear norm is the convex relaxation of minimising rank, in the same way that
+  the $\ell_1$ norm relaxes the count of nonzero entries. Under conditions on the measurements it recovers a low-rank
+  matrix exactly <Cite id="recht2010" />. Matrix completion for recommendation uses this.
+
+## Pitfalls
+
+- **"The 2-norm" of a matrix is ambiguous.** Some libraries return the Frobenius norm by default for matrices, others
+  the spectral norm. NumPy's `np.linalg.norm(A)` returns the Frobenius norm; `np.linalg.norm(A, 2)` returns the spectral
+  norm.
+- **Cost.** The Frobenius norm costs one pass over the entries. The spectral norm needs the largest singular value;
+  power iteration on $\Amat^\top\Amat$ estimates it cheaply when an exact value is not needed.

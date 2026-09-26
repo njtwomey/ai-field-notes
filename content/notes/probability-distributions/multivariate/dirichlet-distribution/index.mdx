@@ -1,0 +1,133 @@
+---
+title: Dirichlet distribution
+kind: distribution
+summary: The Dirichlet distribution is a distribution over probability vectors, with one positive parameter per category. It generalises the beta distribution to K categories and is the conjugate prior for categorical and multinomial data, as in latent Dirichlet allocation.
+tags: [probability, distributions, bayesian, conjugate-priors, multivariate, worked-example]
+aliases: [Dirichlet, Dir(α)]
+related: [beta-distribution, gamma-distribution, categorical-distribution, multinomial-distribution]
+references: [frigyik2010, bishop2006, blei2003]
+status: draft
+updated: 2026-09-26
+---
+
+import { SimplexSamples } from './SimplexSamples'
+
+<Definition>
+A random vector $\thetavec = (\theta_1, \dots, \theta_K)$ has a Dirichlet distribution with concentration parameters
+$\alphavec = (\alpha_1, \dots, \alpha_K)$, all positive, written $\thetavec \sim \Dir(\alphavec)$, if it lies on the
+probability simplex $\set{\thetavec : \theta_k \ge 0,\ \sum_k \theta_k = 1}$ with density
+
+$$
+p(\thetavec \mid \alphavec) = \frac{\Gamma(\alpha_0)}{\prod_{k=1}^{K} \Gamma(\alpha_k)} \prod_{k=1}^{K}
+\theta_k^{\alpha_k - 1}, \qquad \alpha_0 = \sum_{k=1}^{K} \alpha_k.
+$$
+
+The density is with respect to the $(K - 1)$-dimensional volume of the simplex.
+</Definition>
+
+## At a glance
+
+| | |
+| --- | --- |
+| Parameters | Concentrations $\alpha_1, \dots, \alpha_K > 0$; total $\alpha_0 = \sum_k \alpha_k$ |
+| Support | The simplex: $\theta_k \ge 0$, $\sum_k \theta_k = 1$ |
+| Mean | $\expect[\theta_k] = \alpha_k/\alpha_0$ |
+| Variance | $\var(\theta_k) = \alpha_k(\alpha_0 - \alpha_k) / \paren{\alpha_0^2(\alpha_0 + 1)}$ |
+| Covariance | $\cov(\theta_j, \theta_k) = -\alpha_j\alpha_k / \paren{\alpha_0^2(\alpha_0 + 1)}$ for $j \neq k$ |
+| Mode | $(\alpha_k - 1)/(\alpha_0 - K)$ when every $\alpha_k > 1$ |
+
+## Where it comes from
+
+**Posterior of category probabilities.** Suppose each observation falls in one of $K$ categories with probabilities
+$\thetavec$, and category $k$ is seen $n_k$ times. The likelihood is $\prod_k \theta_k^{n_k}$. With prior
+$\thetavec \sim \Dir(\alphavec)$, the posterior is proportional to $\prod_k \theta_k^{\alpha_k + n_k - 1}$, so
+
+$$
+\thetavec \mid n_{1:K} \sim \Dir(\alpha_1 + n_1, \dots, \alpha_K + n_K).
+$$
+
+The likelihood is that of $n$ <NoteLink to="categorical-distribution">categorical</NoteLink> draws, or of one
+<NoteLink to="multinomial-distribution">multinomial</NoteLink> count vector, which differs only by a constant. For
+example, a uniform prior $\Dir(1, 1, 1)$ and counts $(5, 2, 0)$ give the posterior $\Dir(6, 3, 1)$, with mean
+$(0.6, 0.3, 0.1)$. The third category keeps probability $0.1$ although it was never observed.
+
+As for the <NoteLink to="beta-distribution">beta distribution</NoteLink>, each $\alpha_k$ acts as a prior count for
+category $k$ <Cite id="bishop2006" />.
+
+**Normalised gammas.** If $G_k \sim \GammaD(\alpha_k, 1)$ are independent, then
+$(G_1, \dots, G_K)/\sum_j G_j \sim \Dir(\alphavec)$ <Cite id="frigyik2010" />. This is how Dirichlet samples are drawn,
+with a fast gamma sampler such as that of Marsaglia and Tsang <Cite id="marsaglia2000" />.
+
+The normalised-gamma construction also produces the density. The $G_k$ have joint density
+$\prod_k g_k^{\alpha_k - 1}e^{-g_k}/\Gamma(\alpha_k)$. Change variables to the total $s = \sum_k g_k$ and the
+proportions $\theta_k = g_k/s$ for $k < K$, with $\theta_K = 1 - \sum_{k<K}\theta_k$. Then $g_k = s\theta_k$, and the
+Jacobian of the map from $(s, \theta_1, \dots, \theta_{K-1})$ to $(g_1, \dots, g_K)$ is $s^{K-1}$. So the joint density
+of $s$ and $\thetavec$ is
+
+$$
+\prod_k \frac{(s\theta_k)^{\alpha_k - 1}}{\Gamma(\alpha_k)}\, e^{-s}\, s^{K-1}
+= \frac{\prod_k \theta_k^{\alpha_k - 1}}{\prod_k \Gamma(\alpha_k)} \cdot s^{\alpha_0 - 1}e^{-s}.
+$$
+
+It factorises into a function of $\thetavec$ and a function of $s$, so the proportions are independent of the total.
+Integrating out $s$ gives $\Gamma(\alpha_0)$, which leaves the Dirichlet density. With $K = 2$ this is the argument for
+the beta distribution.
+
+<SimplexSamples />
+
+## Properties
+
+**Mean and variance.** By aggregation (below), $\theta_k \sim \Beta(\alpha_k, \alpha_0 - \alpha_k)$. The beta mean and
+variance formulas give $\expect[\theta_k] = \alpha_k/\alpha_0$ and
+
+$$
+\var(\theta_k) = \frac{\alpha_k(\alpha_0 - \alpha_k)}{\alpha_0^2(\alpha_0 + 1)}.
+$$
+
+For the covariance, $\theta_j + \theta_k \sim \Beta(\alpha_j + \alpha_k, \alpha_0 - \alpha_j - \alpha_k)$, and
+$\cov(\theta_j, \theta_k) = \tfrac12\paren{\var(\theta_j + \theta_k) - \var(\theta_j) - \var(\theta_k)}$. Substituting
+the three beta variances and simplifying gives $-\alpha_j\alpha_k/\paren{\alpha_0^2(\alpha_0 + 1)}$.
+
+**Mean and concentration.** The mean $\alphavec/\alpha_0$ sets where the mass sits on the simplex. The total
+$\alpha_0$ sets how tightly it concentrates: every variance shrinks like $1/(\alpha_0 + 1)$.
+
+**Sparsity.** When every $\alpha_k < 1$, the density is highest near the corners and edges of the simplex. Typical
+samples then put most of their mass on a few categories. When every $\alpha_k = 1$, the distribution is uniform on the
+simplex.
+
+**Negative correlation.** The entries sum to 1, so a larger $\theta_j$ leaves less for the others. Every pair of
+entries has negative covariance.
+
+**Aggregation.** Merging categories adds their parameters:
+$(\theta_1 + \theta_2, \theta_3, \dots, \theta_K) \sim \Dir(\alpha_1 + \alpha_2, \alpha_3, \dots, \alpha_K)$. Each
+marginal is beta: $\theta_k \sim \Beta(\alpha_k, \alpha_0 - \alpha_k)$. The proof uses the gamma construction:
+$\theta_1 + \theta_2 = (G_1 + G_2)/\sum_j G_j$, and $G_1 + G_2 \sim \GammaD(\alpha_1 + \alpha_2, 1)$ independently of
+the other $G_j$, so the merged vector is again a normalised gamma vector.
+
+## Relations to other distributions
+
+- **Beta.** $\Dir(\alpha_1, \alpha_2)$ is $\Beta(\alpha_1, \alpha_2)$ for $\theta_1$.
+- **Gamma.** Normalised independent gammas with a common rate are Dirichlet. See the
+  <NoteLink to="gamma-distribution">gamma distribution</NoteLink>.
+- **Categorical and multinomial.** The Dirichlet is the conjugate prior of the
+  <NoteLink to="categorical-distribution">categorical</NoteLink> and
+  <NoteLink to="multinomial-distribution">multinomial</NoteLink> distributions. Integrating $\thetavec$ out of a
+  multinomial gives the Dirichlet-multinomial distribution.
+- **Dirichlet process.** The Dirichlet process extends the Dirichlet to infinitely many categories and underlies
+  nonparametric mixture models <Cite id="frigyik2010" />.
+
+## In machine learning
+
+- **Topic models.** Latent Dirichlet allocation gives each document a $\Dir(\alphavec)$ distribution over topics and
+  each topic a Dirichlet distribution over words. Small $\alpha$ makes documents use few topics <Cite id="blei2003" />.
+- **Smoothing counts.** The posterior mean $(n_k + \alpha_k)/(n + \alpha_0)$ is additive smoothing for categorical
+  probabilities, as in naive Bayes and n-gram language models.
+- **Uncertainty over class probabilities.** Evidential and prior networks output Dirichlet parameters instead of a
+  single softmax vector, so that low $\alpha_0$ signals low confidence <Cite id="malinin2018" />.
+
+## Pitfalls
+
+- **Parameters are not probabilities.** $\alphavec = (1, 1, 1)$ and $\alphavec = (100, 100, 100)$ have the same mean
+  but very different spread. Report $\alpha_0$ along with the mean.
+- **Small α and numerics.** With $\alpha_k \ll 1$, samples can have entries that underflow to 0 in floating point. Work
+  with log-gamma samples or clip entries when taking logarithms.

@@ -1,0 +1,121 @@
+---
+title: Condition number
+kind: concept
+summary: The condition number of a matrix bounds how much a relative error in the data of a linear system can grow in its solution. In the 2-norm it is the ratio of the largest to the smallest singular value. A condition number of 10ᵏ can cost about k significant digits.
+tags: [linear-algebra, numerical-methods, linear-systems, worked-example]
+aliases: [condition, ill-conditioned, well-conditioned, ill-conditioning, kappa, κ(A)]
+requires: [matrix-norms, matrix-inverse]
+related: [singular-value-decomposition, gradient-descent, linear-regression, qr-decomposition, pseudoinverse]
+references: [trefethen1997, higham2002, golub2013]
+status: draft
+updated: 2026-09-26
+---
+
+import { PerturbSolve } from './PerturbSolve'
+
+<Definition>
+The condition number of an invertible matrix $\Amat$ in a given matrix norm is
+
+$$
+\kappa(\Amat) = \norm{\Amat}\,\norm{\Amat^{-1}}.
+$$
+
+In the spectral norm, $\kappa_2(\Amat) = \sigma_1 / \sigma_n$, the ratio of the largest to the smallest singular value.
+It satisfies $\kappa(\Amat) \ge 1$, and a singular matrix is assigned $\kappa = \infty$ <Cite id="trefethen1997" />.
+</Definition>
+
+Both facts follow from the definition. For an induced norm,
+$1 = \norm{\eye} = \norm{\Amat\Amat^{-1}} \le \norm{\Amat}\,\norm{\Amat^{-1}}$ by submultiplicativity, so
+$\kappa \ge 1$. In the spectral norm, $\norm{\Amat}_2 = \sigma_1$ (see <NoteLink to="matrix-norms">matrix
+norms</NoteLink>). If $\Amat = \Umat\Sigmamat\Vmat^\top$ is the singular value decomposition, then
+$\Amat^{-1} = \Vmat\Sigmamat^{-1}\Umat^\top$, whose singular values are $1/\sigma_i$. The largest of these is
+$1/\sigma_n$, so $\norm{\Amat^{-1}}_2 = 1/\sigma_n$ and $\kappa_2(\Amat) = \sigma_1/\sigma_n$.
+
+## What it bounds
+
+Let $\Amat\xvec = \bvec$ and perturb the right-hand side to $\bvec + \delta\bvec$. The solution moves to
+$\xvec + \delta\xvec$ with $\Amat\,\delta\xvec = \delta\bvec$, and
+
+$$
+\frac{\norm{\delta\xvec}}{\norm{\xvec}} \le \kappa(\Amat)\,\frac{\norm{\delta\bvec}}{\norm{\bvec}}.
+$$
+
+The bound combines two inequalities, one for the numerator and one for the denominator. The error solves
+$\delta\xvec = \Amat^{-1}\delta\bvec$, so
+
+$$
+\norm{\delta\xvec} \le \norm{\Amat^{-1}}\,\norm{\delta\bvec}.
+$$
+
+The solution itself satisfies $\bvec = \Amat\xvec$, so $\norm{\bvec} \le \norm{\Amat}\,\norm{\xvec}$, which rearranges
+to
+
+$$
+\frac{1}{\norm{\xvec}} \le \frac{\norm{\Amat}}{\norm{\bvec}}.
+$$
+
+Multiplying the two inequalities gives the bound, with $\kappa(\Amat) = \norm{\Amat}\,\norm{\Amat^{-1}}$. Each
+inequality is an equality for a suitable vector, so the bound is tight. In the spectral norm, equality holds when
+$\bvec$ lies along $\uvec_1$, the output direction $\Amat$ stretches most, and $\delta\bvec$ along $\uvec_n$, the
+direction it stretches least. The solution is then as small as possible for its $\bvec$, and the error as large as
+possible for its $\delta\bvec$.
+
+A small relative change in the data can therefore cause a relative change $\kappa$ times larger in the solution.
+Perturbations of $\Amat$ itself obey a similar bound, to first order <Cite id="higham2002" />.
+
+## Geometry
+
+$\Amat^{-1}$ maps a ball of perturbations around $\bvec$ to an ellipse around $\xvec$. The semi-axes of the ellipse are
+$\norm{\delta\bvec}/\sigma_i$, so the ellipse is long in the directions that $\Amat$ squashes. The condition number is
+the ratio of its longest to its shortest semi-axis. For a $2 \times 2$ system, each equation is a line and the solution
+is their intersection. Nearly parallel lines give an ill-conditioned system: shifting one line slightly slides the
+intersection a long way.
+
+<PerturbSolve />
+
+## Digits lost
+
+In floating point with machine precision $\epsilon$ (about $10^{-16}$ in double precision), a backward-stable solver
+returns the exact solution of a nearby system. Its relative error is roughly $\kappa(\Amat)\,\epsilon$. With
+$\kappa = 10^{k}$, about $k$ of the 16 significant digits are unreliable <Cite id="higham2002" />.
+
+## Worked example
+
+$$
+\Amat = \begin{bmatrix} 1 & 1 \\ 1 & 1.001 \end{bmatrix}, \qquad \bvec = \begin{bmatrix} 2 \\ 2.001 \end{bmatrix}.
+$$
+
+The solution is $\xvec = (1, 1)$. Changing $b_2$ to $2.002$, a relative change in $\bvec$ of about $3.5 \times 10^{-4}$,
+moves the solution to $(0, 2)$, a relative change of 1. The singular values of $\Amat$ are about $2.0005$ and
+$0.0005$, so $\kappa_2(\Amat) \approx 4000$, and the observed amplification of about 2800 is within the bound.
+
+## Well- and ill-conditioned matrices
+
+- Orthogonal matrices have $\kappa_2 = 1$, the smallest possible value. They preserve lengths, so every singular value
+  is 1 and they never amplify errors. Stable algorithms (<NoteLink to="qr-decomposition">QR</NoteLink>, SVD) are built
+  from them.
+- $\kappa(\alpha\Amat) = \norm{\alpha\Amat}\,\norm{\alpha^{-1}\Amat^{-1}} = \kappa(\Amat)$: scaling the whole matrix
+  changes the determinant but not the conditioning.
+- $\kappa_2(\Amat^\top\Amat) = \kappa_2(\Amat)^2$, because $\Amat^\top\Amat = \Vmat\Sigmamat^2\Vmat^\top$ has singular
+  values $\sigma_i^2$. Forming the normal equations of least squares squares the condition number. QR-based least
+  squares avoids this <Cite id="golub2013" />. For rank-deficient problems the
+  <NoteLink to="pseudoinverse">pseudoinverse</NoteLink> drops the zero singular values, and its conditioning is governed
+  by the smallest nonzero one.
+
+## In machine learning
+
+- **Optimisation speed.** On a quadratic with Hessian $\Hmat$, gradient descent needs a number of iterations roughly
+  proportional to $\kappa(\Hmat)$ to reach a fixed accuracy. Elongated loss valleys are ill-conditioned Hessians; see
+  <NoteLink to="gradient-descent">gradient descent</NoteLink>. Feature standardisation, preconditioning and adaptive
+  optimisers all aim to reduce the effective condition number.
+- **Collinear features.** Nearly dependent feature columns make $\Xmat^\top\Xmat$ ill-conditioned, so the fitted weights
+  swing wildly with small changes in the data. Ridge regression replaces $\sigma_i^2$ with $\sigma_i^2 + \lambda$ and
+  bounds the condition number by $(\sigma_1^2 + \lambda)/\lambda$.
+
+## Pitfalls
+
+- **The determinant is not a conditioning measure.** $10^{-3}\,\eye$ has determinant $10^{-3n}$ and condition number 1.
+- **Condition is a property of the problem.** A large $\kappa$ limits every algorithm. An unstable algorithm can lose
+  accuracy even on a well-conditioned problem; the two issues are separate.
+- **Estimate, do not compute.** Computing $\sigma_n$ exactly costs as much as an SVD. Libraries estimate $\kappa$
+  cheaply from an existing LU factorisation.
