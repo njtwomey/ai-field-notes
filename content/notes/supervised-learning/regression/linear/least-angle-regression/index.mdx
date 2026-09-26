@@ -1,0 +1,127 @@
+---
+title: Least-angle regression
+kind: concept
+summary: Least-angle regression (LARS) builds a linear model one feature at a time, moving the coefficients along the direction equiangular to every active feature. A small modification makes it trace the entire lasso path exactly, for about the cost of one least-squares fit.
+tags: [regression, linear-models, feature-selection, sparsity, worked-example]
+aliases: [LARS, LAR, least angle regression, LARS-lasso, homotopy method]
+requires: [lasso, orthogonal-projection]
+related: [elastic-net, gram-schmidt]
+code: linear-models
+references: [efron2004, hastie2009]
+status: draft
+updated: 2026-09-26
+---
+
+import { LarsPaths } from './LarsPaths'
+
+<Definition>
+Least-angle regression starts from all coefficients at zero and adds features to an active set one at a time. At each
+stage it moves the active coefficients along the direction that keeps the residual's correlations with all active
+features equal, until some inactive feature becomes as correlated with the residual; that feature then joins
+<Cite id="efron2004" />. With $p$ features and $n > p$ samples it reaches the least-squares fit in $p$ steps.
+</Definition>
+
+## Correlation with the residual
+
+Standardise the features so each column $\xvec_j$ of $\Xmat \in \reals^{n \times p}$ has unit length, and centre the
+target $\yvec$. For coefficients $\wvec$, the residual is $\rvec = \yvec - \Xmat\wvec$ and the correlation of feature
+$j$ with it is $c_j = \xvec_j^\top\rvec$.
+
+The <NoteLink to="lasso">lasso</NoteLink>'s optimality conditions are statements about these correlations. Every
+active feature has the same absolute correlation, proportional to the penalty $\alpha$, with the sign of its
+coefficient; every inactive feature has an absolute correlation no larger. A path of solutions along which the active correlations stay tied, and shrink together as the
+fit improves, is therefore a candidate lasso path. LARS constructs such a path directly.
+
+## The algorithm
+
+1. Start with $\wvec = \zeros$, so $\rvec = \yvec$. The active set $\Acal$ is the feature with the largest
+   $\abs{c_j}$. Call that correlation $C$.
+2. Move the active coefficients along the **equiangular direction** until an inactive feature's correlation reaches the
+   active ones'.
+3. Add that feature to $\Acal$ and repeat from step 2.
+
+### The equiangular direction
+
+Let $\Xmat_{\Acal}$ hold the active columns and $\svec_{\Acal}$ the signs of their correlations. Choose the
+coefficient step $\deltavec = (\Xmat_{\Acal}^\top\Xmat_{\Acal})^{-1}\svec_{\Acal}$ and the fitted-value
+direction $\uvec = \Xmat_{\Acal}\deltavec$. Then
+
+$$
+\Xmat_{\Acal}^\top\uvec = \Xmat_{\Acal}^\top\Xmat_{\Acal}(\Xmat_{\Acal}^\top\Xmat_{\Acal})^{-1}\svec_{\Acal} = \svec_{\Acal}.
+$$
+
+Every active feature has the same inner product, 1 in absolute value, with $\uvec$: the direction makes equal angles
+with all of them, which gives the method its name. Moving the fit by $\gamma\uvec$ changes each active correlation by
+$\gamma$ towards zero, $c_j(\gamma) = c_j - \gamma s_j$, so they all shrink together and stay tied at $C - \gamma$.
+
+### The step length
+
+An inactive feature's correlation changes at rate $a_j = \xvec_j^\top\uvec$: $c_j(\gamma) = c_j - \gamma a_j$. It
+catches up with the active ones when $\abs{c_j - \gamma a_j} = C - \gamma$. Solving for each sign, the step is the
+smallest positive value among
+
+$$
+\gamma = \min_{j \notin \Acal}{}^{+} \left\{ \frac{C - c_j}{1 - a_j},\ \frac{C + c_j}{1 + a_j} \right\}.
+$$
+
+No search is needed: each step is a closed-form computation. When every feature is active, the correlations can all
+fall to zero together, and the fit reaches least squares.
+
+### Worked example: the first step on the diabetes data
+
+On the diabetes data, with ten standardised features and 442 patients, bmi has the largest correlation with the
+target, $C = 45.16$ (in scikit-learn's scaling, where correlations are divided by $n$). LARS moves the bmi
+coefficient alone, which here is the equiangular direction of a one-feature active set. The step formula gives the
+next feature, s5, joining when both correlations have fallen to 42.30. From then on the two coefficients move together
+along a direction whose inner products with bmi and s5 are both 1. The ten features join in the order bmi, s5, bp,
+s3, sex, s6, s1, s4, s2, age.
+
+## The lasso modification
+
+Plain LARS is not quite the lasso. The lasso's conditions require each active coefficient to have the same sign as
+its correlation. Along a LARS step a coefficient can pass through zero and change sign while its correlation keeps
+its sign, which violates the conditions from that point on.
+
+The fix is to watch for it. Coefficient $j$ reaches zero at $\tilde\gamma_j = -w_j/\delta_j$. If some
+$\tilde\gamma_j$ is smaller than the step to the next joining feature, stop there, remove $j$ from the active set,
+recompute the direction and continue. With this change LARS computes the lasso solution for every $\alpha$ at once,
+since the conditions hold at every point of the path <Cite id="efron2004" />. Because the direction is constant
+between events, the lasso path is piecewise linear, with a kink at each join or drop.
+
+On the diabetes data the modification matters once. The coefficient of s3 reaches zero at $\alpha = 0.104$, and s3
+leaves the active set. It rejoins at $\alpha = 0.062$ and finishes at $+4.8$ in the OLS fit, having been negative
+for most of the path. Plain LARS lets it cross zero without stopping, in ten steps instead of twelve.
+
+<LarsPaths />
+
+## Relation to forward stagewise regression
+
+Forward stagewise regression repeatedly finds the feature most correlated with the residual and moves its coefficient
+by a tiny amount $\epsilon$ in the direction of the correlation. As $\epsilon \to 0$ its path is also piecewise
+linear, and it coincides with a third variant of LARS that forbids a coefficient from moving against its correlation
+<Cite id="efron2004" />. LARS, the lasso and forward stagewise are thus three close relatives that differ in how
+they let coefficients move, which is why their paths on many data sets look almost the same.
+
+## Cost
+
+Each step solves a linear system with the active Gram matrix $\Xmat_{\Acal}^\top\Xmat_{\Acal}$, which can
+be updated as features join or leave instead of being refactorised. The whole path then costs about the same as one
+least-squares fit, $O(np^2 + p^3)$ <Cite id="efron2004" />. It returns every knot of the path, from which the solution
+at any $\alpha$ follows by linear interpolation.
+
+## Compared with coordinate descent
+
+<NoteLink to="lasso">Coordinate descent</NoteLink> solves the lasso for a grid of $\alpha$ values; LARS gives
+the exact path with all its knots. LARS is efficient when $p$ is modest, and it makes the order of entry and each
+drop explicit. Coordinate descent scales better to large $p$ and sparse data, extends to the elastic net and to
+generalised linear models, and is what most libraries use by default <Cite id="hastie2009" />.
+
+## Pitfalls
+
+- **Collinearity.** Each step inverts the active Gram matrix. With nearly collinear features the steps become
+  numerically unstable, and the path can take many small steps with frequent drops.
+- **More features than samples.** With $p > n$ the path stops after at most $n$ active features, as the
+  lasso does.
+- **Entry order is not importance.** The order in which features join depends on correlations with the current
+  residual, not on each feature's effect alone. A feature that joins late can be as predictive as one that joins
+  early, once correlated features are accounted for.

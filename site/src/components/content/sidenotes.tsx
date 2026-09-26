@@ -127,6 +127,7 @@ export function MarginNotes() {
     <div ref={root} className="relative" style={{ height }} aria-label="Margin references">
       {placed.map(({ id, key, top, first }) => {
         const ref = references[key]
+        if (!ref) return null
         const number = note.cited.indexOf(key) + 1
         return (
           <div

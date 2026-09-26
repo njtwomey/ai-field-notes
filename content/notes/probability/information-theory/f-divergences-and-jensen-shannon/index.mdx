@@ -1,0 +1,132 @@
+---
+title: f-divergences and Jensen–Shannon divergence
+kind: concept
+summary: An f-divergence $D_f(p \,\|\, q) = \expect_q[f(p/q)]$, with $f$ convex and $f(1) = 0$, measures how $p$ differs from $q$; KL, total variation, Hellinger and $\chi^2$ are examples. Jensen–Shannon is symmetric, bounded by $\log 2$, and minimised by the original GAN.
+tags: [information-theory, probability, divergences, worked-example]
+aliases: [f-divergence, Csiszár divergence, Ali–Silvey distance, Jensen–Shannon divergence, JS divergence, JSD, total variation distance, Hellinger distance, chi-squared divergence]
+requires: [kl-divergence, entropy]
+related: [cross-entropy-and-perplexity, mutual-information]
+references: [ali1966, lin1991, cover2006, goodfellow2014]
+status: draft
+updated: 2026-09-26
+---
+
+import { DivergenceGrowth } from './DivergenceGrowth'
+
+<Definition>
+For a convex function $f : (0, \infty) \to \reals$ with $f(1) = 0$, the f-divergence of $p$ from $q$ is
+
+$$
+D_f(p \,\|\, q) = \expect_{X \sim q}\brack{f\paren{\frac{p(X)}{q(X)}}} = \sum_x q(x)\, f\paren{\frac{p(x)}{q(x)}}
+$$
+
+The family was introduced by Ali and Silvey and, independently, by Csiszár <Cite id="ali1966" />. The Jensen–Shannon
+divergence compares both distributions with their average $m = \tfrac12(p + q)$:
+
+$$
+\mathrm{JS}(p, q) = \tfrac12 \KL(p \,\|\, m) + \tfrac12 \KL(q \,\|\, m)
+$$
+
+It was introduced in this form by Lin <Cite id="lin1991" />.
+</Definition>
+
+## Why they are divergences
+
+Every f-divergence is non-negative and zero when $p = q$. Apply Jensen's inequality to the convex function $f$ under
+the expectation over $q$:
+
+$$
+D_f(p \,\|\, q) = \expect_q\brack{f\paren{\frac{p(X)}{q(X)}}} \ge f\paren{\expect_q\brack{\frac{p(X)}{q(X)}}} = f\paren{\sum_x
+p(x)} = f(1) = 0.
+$$
+
+For strictly convex $f$, equality forces $p/q$ to be constant, so $p = q$. The choice of $f$ decides how the ratio
+$p/q$ is penalised.
+
+## The family
+
+| Divergence | $f(t)$ | $D_f(p \,\Vert\, q)$ |
+| --- | --- | --- |
+| KL | $t \log t$ | $\sum p \log(p/q)$ |
+| Reverse KL | $-\log t$ | $\sum q \log(q/p)$ |
+| Total variation | $\tfrac12 \abs{t - 1}$ | $\tfrac12 \sum \abs{p - q}$ |
+| Squared Hellinger | $\tfrac12(\sqrt t - 1)^2$ | $\tfrac12 \sum (\sqrt p - \sqrt q)^2 = 1 - \sum \sqrt{pq}$ |
+| Pearson $\chi^2$ | $(t - 1)^2$ | $\sum (p - q)^2/q$ |
+
+Each entry follows by substituting $t = p/q$ and multiplying by $q$. For KL, $q \cdot (p/q)\log(p/q) = p \log(p/q)$.
+For reverse KL, $q \cdot (-\log(p/q)) = q \log(q/p)$.
+
+Total variation and squared Hellinger lie between 0 and 1; KL and $\chi^2$ are unbounded. All f-divergences satisfy a
+data-processing inequality: passing $p$ and $q$ through the same channel cannot increase the divergence between them
+<Cite id="cover2006" />.
+
+**Worked example.** For $p = \Bern(0.5)$ and $q = \Bern(0.9)$, in nats: $\KL(p \,\|\, q) = 0.511$,
+$\KL(q \,\|\, p) = 0.368$, total variation $0.4$, squared Hellinger $0.106$, $\chi^2 = 1.78$, and Jensen–Shannon
+$0.102$.
+
+## Jensen–Shannon divergence
+
+KL divergence is asymmetric and infinite when $q$ is zero where $p$ is not. Jensen–Shannon removes both problems by
+comparing each distribution with their average $m = \tfrac12(p + q)$, which is positive wherever either one is.
+
+**Symmetric.** Swapping $p$ and $q$ leaves $m$ unchanged and swaps the two terms.
+
+**Bounded by $\log 2$.** $m(x) \ge \tfrac12 p(x)$, so $p(x)/m(x) \le 2$ and
+
+$$
+\KL(p \,\|\, m) = \sum_x p(x) \log \frac{p(x)}{m(x)} \le \sum_x p(x) \log 2 = \log 2.
+$$
+
+The same holds for $\KL(q \,\|\, m)$, so $0 \le \mathrm{JS}(p, q) \le \log 2$, which is one bit. The upper bound is
+reached exactly when $p$ and $q$ have disjoint supports, since then $m = p/2$ wherever $p > 0$.
+
+**As a mutual information.** Expanding the definition gives
+
+$$
+\mathrm{JS}(p, q) = \entropy(m) - \tfrac12 \entropy(p) - \tfrac12 \entropy(q).
+$$
+
+Draw a fair coin $Z$, then draw $X$ from $p$ if $Z = 0$ and from $q$ if $Z = 1$. The marginal of $X$ is $m$, and
+$\entropy(X \mid Z) = \tfrac12\entropy(p) + \tfrac12\entropy(q)$, so $\mathrm{JS}(p, q) = I(X; Z)$: the information a
+sample carries about which distribution it came from. That is why it is at most one bit, the entropy of the coin.
+
+<Derivation title="The entropy form">
+Write $\KL(p \,\|\, m) = \sum p \log p - \sum p \log m = -\entropy(p) - \sum p \log m$, and similarly for $q$. Averaging
+the two,
+
+$$
+\mathrm{JS}(p, q) = -\tfrac12 \entropy(p) - \tfrac12 \entropy(q) - \sum_x \tfrac12\paren{p(x) + q(x)} \log m(x) =
+\entropy(m) - \tfrac12 \entropy(p) - \tfrac12 \entropy(q),
+$$
+
+because $\tfrac12(p + q) = m$ and $-\sum m \log m = \entropy(m)$.
+</Derivation>
+
+Jensen–Shannon is itself an f-divergence, with $f(t) = \tfrac12\brack{t \log \frac{2t}{1 + t} + \log \frac{2}{1 + t}}$,
+and its square root is a metric: it is symmetric and satisfies the triangle inequality.
+
+<DivergenceGrowth />
+
+## Generative adversarial networks
+
+A GAN trains a generator with distribution $q$ against a discriminator $D(x)$ that estimates the probability that $x$
+came from the data distribution $p$ rather than from the generator. For a fixed generator the best discriminator is
+$D^*(x) = p(x)/(p(x) + q(x))$, and substituting it into the original objective leaves
+
+$$
+\expect_p\brack{\log D^*(X)} + \expect_q\brack{\log\paren{1 - D^*(X)}} = 2\,\mathrm{JS}(p, q) - \log 4
+$$
+
+<Cite id="goodfellow2014" />. Training the generator therefore minimises the Jensen–Shannon divergence to the data. The
+boundedness of JS explains a known difficulty: when the generator's samples do not overlap the data, JS is stuck at
+$\log 2$ and gives no gradient pointing towards the data, which motivated alternatives such as the Wasserstein
+distance.
+
+## Pitfalls
+
+- **Direction.** $D_f(p \,\|\, q)$ is not symmetric in general; only particular choices of $f$, such as total variation,
+  squared Hellinger and Jensen–Shannon, are.
+- **Saturation.** Bounded divergences stop changing once distributions stop overlapping, as the figure shows; they
+  cannot tell a near miss from a distant one.
+- **Estimation.** Like KL, f-divergences between high-dimensional distributions are hard to estimate from samples;
+  variational estimators bound them using a learned function, which is the discriminator's role in a GAN.

@@ -1,0 +1,126 @@
+---
+title: Softmax and log-sum-exp
+kind: concept
+summary: Log-sum-exp is a smooth, convex approximation to the maximum, and its gradient is the softmax. The softmax Jacobian is $\diag(\pvec) - \pvec\pvec^\top$, and the gradient of cross-entropy with respect to the logits is simply $\pvec - \yvec$.
+tags: [calculus, derivatives, classification, worked-example]
+aliases: [softmax, log-sum-exp, LSE, softmax Jacobian, cross-entropy gradient, logits, temperature, smooth maximum, log-softmax]
+requires: [matrix-calculus-identities, exponential-and-logarithm]
+related: [categorical-distribution, logistic-regression, kl-divergence]
+references: [bridle1990, blanchard2021, boyd2004]
+status: draft
+updated: 2026-09-26
+---
+
+import { SmoothMax } from './SmoothMax'
+
+<Definition>
+For a vector of logits $\zvec \in \reals^K$, the log-sum-exp and the softmax are
+
+$$
+\operatorname{LSE}(\zvec) = \log\sum_{k=1}^{K} e^{z_k}, \qquad \operatorname{softmax}(\zvec)_i = p_i =
+\frac{e^{z_i}}{\sum_{k} e^{z_k}}.
+$$
+
+The softmax maps any real vector to a probability vector: every $p_i$ is positive and they sum to 1
+<Cite id="bridle1990" />.
+</Definition>
+
+## The gradient of log-sum-exp is the softmax
+
+Differentiate the logarithm of the sum with the chain rule:
+
+$$
+\frac{\partial\operatorname{LSE}}{\partial z_i} = \frac{1}{\sum_k e^{z_k}} \cdot e^{z_i} = p_i.
+$$
+
+So $\nabla\operatorname{LSE}(\zvec) = \operatorname{softmax}(\zvec)$. The softmax is the gradient of a scalar function,
+which is why its Jacobian below is symmetric.
+
+## The softmax Jacobian
+
+Work with $\log p_i = z_i - \operatorname{LSE}(\zvec)$. Its derivative with respect to $z_j$ is
+
+$$
+\frac{\partial \log p_i}{\partial z_j} = \delta_{ij} - p_j,
+$$
+
+where $\delta_{ij}$ is 1 when $i = j$ and 0 otherwise. Since $\partial p_i / \partial z_j = p_i\,\partial\log
+p_i/\partial z_j$,
+
+$$
+\frac{\partial p_i}{\partial z_j} = p_i(\delta_{ij} - p_j), \qquad \Jmat = \diag(\pvec) - \pvec\pvec^\top.
+$$
+
+Three properties follow from this form.
+
+- **Rows sum to zero.** $\Jmat\ones = \pvec - \pvec(\pvec^\top\ones) = \zeros$. Adding the same constant to every logit
+  leaves the softmax unchanged, so the derivative in the direction $\ones$ is zero.
+- **Symmetric and positive semidefinite.** For any $\vvec$, $\vvec^\top\Jmat\vvec = \sum_i p_i v_i^2 - (\sum_i p_i
+  v_i)^2$, the variance of $v$ under $\pvec$, which is never negative.
+- **Log-sum-exp is convex.** $\Jmat$ is also the <NoteLink to="hessian">Hessian</NoteLink> of LSE, since it is the
+  Jacobian of LSE's gradient. A positive semidefinite Hessian everywhere means LSE is convex <Cite id="boyd2004" />.
+
+## The gradient of cross-entropy
+
+For a one-hot label $\yvec$ (or any probability vector), the cross-entropy loss is $L = -\sum_i y_i\log p_i$. Substitute
+$\log p_i = z_i - \operatorname{LSE}(\zvec)$ and use $\sum_i y_i = 1$:
+
+$$
+L = -\yvec^\top\zvec + \operatorname{LSE}(\zvec), \qquad \nabla_{\zvec} L = -\yvec + \pvec = \pvec - \yvec.
+$$
+
+The gradient is the predicted distribution minus the target. It is bounded, it vanishes exactly when the prediction
+matches the label, and it needs no Jacobian at all. Libraries fuse softmax and cross-entropy into one operation for this
+reason. <NoteLink to="logistic-regression">Logistic regression</NoteLink> is the case $K = 2$, where the gradient is
+$\sigma(z) - y$.
+
+## Worked example
+
+Take $\zvec = (2, 1, 0)$ and true class 1, so $\yvec = (1, 0, 0)$.
+
+- $\sum_k e^{z_k} = e^2 + e + 1 = 11.107$, so $\operatorname{LSE} = 2.4076$ and $\pvec = (0.665, 0.245, 0.090)$.
+- The loss is $-\log 0.665 = 0.4076 = \operatorname{LSE} - z_1$.
+- The gradient is $\pvec - \yvec = (-0.335, 0.245, 0.090)$: raise the correct logit, lower the others in proportion to
+  their probability.
+
+The softmax Jacobian at this point is
+
+$$
+\Jmat = \begin{bmatrix} 0.223 & -0.163 & -0.060 \\ -0.163 & 0.185 & -0.022 \\ -0.060 & -0.022 & 0.082 \end{bmatrix},
+$$
+
+and each of its rows sums to zero.
+
+## A smooth maximum
+
+Let $m = \max_k z_k$. The sum $\sum_k e^{z_k - m}$ contains the term $e^0 = 1$ and at most $K$ terms no larger than 1,
+so it lies between 1 and $K$. Taking logarithms,
+
+$$
+\max_k z_k \le \operatorname{LSE}(\zvec) \le \max_k z_k + \log K.
+$$
+
+With a temperature $\tau > 0$, apply this to $\zvec/\tau$ and multiply by $\tau$: $\tau\operatorname{LSE}(\zvec/\tau)$
+lies within $\tau\log K$ of the maximum, and converges to it as $\tau \to 0$. Its gradient,
+$\operatorname{softmax}(\zvec/\tau)$, converges to the one-hot indicator of the largest logit (when it is unique). As
+$\tau \to \infty$ the softmax tends to the uniform distribution. Sampling from a language model at temperature $\tau$
+uses exactly this family.
+
+<SmoothMax />
+
+## Computing it stably
+
+Subtract the maximum logit before exponentiating: $\operatorname{LSE}(\zvec) = m + \log\sum_k e^{z_k - m}$ and
+$\operatorname{softmax}(\zvec) = \operatorname{softmax}(\zvec - m\ones)$. No exponent is positive, so nothing
+overflows <Cite id="blanchard2021" />. Compute $\log p_i = z_i - \operatorname{LSE}(\zvec)$ directly (log-softmax) rather
+than taking the logarithm of a softmax that may have underflowed to 0. The
+<NoteLink to="exponential-and-logarithm">exponential and logarithm</NoteLink> note works through the trick with numbers.
+
+## Pitfalls
+
+- **Softmax then log.** $\log(\operatorname{softmax}(\zvec))$ computed in two steps returns $-\infty$ when a probability
+  underflows; the fused log-softmax does not.
+- **Shift invariance.** Logits are only defined up to an additive constant, so the Jacobian is singular. Parameterisations
+  that fix one logit at 0 remove the redundancy.
+- **Saturation.** When one probability is near 1, every entry of $\Jmat$ is near 0 and gradients through the softmax
+  vanish; attention layers divide logits by $\sqrt{d}$ partly to avoid this.

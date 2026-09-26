@@ -15,6 +15,7 @@ import { Kbd } from '@/components/ui/kbd'
 import { category, kindLabels, notes, noteUrl, taxonomy, type NoteMeta } from '@/lib/content'
 import { search } from '@/lib/search'
 import { kindIcons } from './kind-icon'
+import { MathText } from '@/components/content/MathText'
 
 const OPEN_EVENT = 'mlc:open-search'
 
@@ -134,7 +135,9 @@ function ResultItem({ note, onSelect }: { note: NoteMeta; onSelect: (slug: strin
             {kindLabels[note.kind]} · {category(note.category)?.title}
           </span>
         </div>
-        <p className="line-clamp-1 text-xs text-muted-foreground">{note.summary}</p>
+        <p className="line-clamp-1 text-xs text-muted-foreground">
+          <MathText text={note.summary} />
+        </p>
       </div>
     </CommandItem>
   )

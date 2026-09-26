@@ -1,0 +1,91 @@
+---
+title: Many metrics and many variants
+kind: example
+summary: An A/B/n test with 3 variants and 10 metrics makes 30 comparisons. With no real effects, about three quarters of such experiments still show a significant result at the 5% level. Searching for the significant metric manufactures findings.
+tags: [worked-example, hypothesis-testing, ab-testing, multiple-comparisons]
+aliases: [A/B/n test, multiple metrics, look-elsewhere effect, garden of forking paths, fishing, p-hacking]
+requires: [multiple-testing, p-value]
+related: [significance-level, type-i-and-type-ii-errors, z-test, winners-curse]
+references: [kohavi2020, holm1979, benjamini1995]
+status: draft
+updated: 2026-09-26
+---
+
+import { ManyComparisons } from './ManyComparisons'
+
+<Definition>
+An online experiment tests $k = 3$ new variants against a control. The dashboard reports $m = 10$ metrics for each
+variant: conversion, revenue, clicks, retention and so on. Each of the $mk = 30$ comparisons is a two-sided test at
+$\alpha = 0.05$. Suppose no variant changes any metric. What is the probability that the dashboard shows at least one
+significant result?
+</Definition>
+
+## Setup
+
+Let $H_{vj}$ be the null hypothesis that variant $v$ does not change metric $j$, for $v = 1, \dots, k$ and
+$j = 1, \dots, m$. All $n = mk$ null hypotheses are true. Each test rejects its null with probability $\alpha$: that is
+what the <NoteLink to="significance-level">significance level</NoteLink> means for one test. The event of interest is
+that at least one of the $n$ tests rejects. Its probability is the family-wise error rate, FWER.
+
+## Solution
+
+If the $n$ tests were independent, each would fail to reject with probability $1 - \alpha$, and all would fail to
+reject with probability $(1 - \alpha)^n$. So
+
+$$
+\text{FWER} = 1 - (1 - \alpha)^n.
+$$
+
+For $n = 30$ and $\alpha = 0.05$ this is $1 - 0.95^{30} = 0.785$. More than three experiments in four would show a
+"significant" metric although nothing works. The rate passes 50% at 14 comparisons and 90% at 45.
+
+The tests in an A/B/n experiment are not quite independent. Every variant is compared with the same control, so an
+unusually high control mean on a metric lowers every variant's $z$-statistic for that metric together. The
+$z$-statistics for two variants on the same metric have correlation $1/2$: each is $(X_v - C)/\sqrt 2$ for independent
+standard normal $X_v$ and a shared $C$, so their covariance is $\var(C)/2 = 1/2$. Positively correlated tests reject
+together more often, which leaves fewer experiments with at least one rejection. Simulation gives 0.738 for this
+design, below 0.785 but still far above 0.05.
+
+Whatever the dependence, the union bound caps the rate:
+
+$$
+\text{FWER} = P\paren{\bigcup_{v,j} \set{\text{reject } H_{vj}}} \le \sum_{v,j} P(\text{reject } H_{vj}) = n\alpha.
+$$
+
+Testing each hypothesis at $\alpha/n$ therefore guarantees $\text{FWER} \le \alpha$. This is the Bonferroni correction.
+Holm's procedure is uniformly more powerful and keeps the same guarantee <Cite id="holm1979" />, and
+Benjamini–Hochberg controls the false discovery rate instead <Cite id="benjamini1995" />. When every null is true, a
+false discovery rate below $\alpha$ is the same as a family-wise rate below $\alpha$, since any rejection is a false
+one. The <NoteLink to="multiple-testing">multiple testing</NoteLink> note derives all three.
+
+In simulation of the 30-comparison design, Bonferroni and Holm give a family-wise rate of 0.046 and Benjamini–Hochberg
+0.048.
+
+## Simulation
+
+<ManyComparisons />
+
+## What it illustrates
+
+- **A p-value is calibrated for one test chosen in advance.** Its guarantee, a false-positive rate of $\alpha$, holds for
+  the test that was planned. Scanning a dashboard for the smallest p-value is a different procedure with a much larger
+  error rate.
+- **Search is the problem, not the number of metrics.** Reporting 10 metrics does no harm. Declaring success on
+  whichever one crosses the line does. Designating one primary metric before the experiment keeps its test at level
+  $\alpha$, and the others become exploratory <Cite id="kohavi2020" />.
+- **Corrections trade power for error control.** A Bonferroni threshold of $0.05/30 = 0.0017$ needs a $z$-statistic of
+  3.14 rather than 1.96, so each real effect needs more data to be detected. Fewer, better-chosen comparisons are
+  cheaper than corrections.
+- **The winner is also exaggerated.** The comparison that survives the search is, by selection, one whose noise pushed
+  it furthest. Its estimate overstates any true effect, as in the
+  <NoteLink to="winners-curse">winner's curse</NoteLink>.
+
+## Variations
+
+- **One variant, five metrics.** With $n = 5$ the rate is $1 - 0.95^5 = 0.226$; with a single control and one variant
+  the metrics are independent here, and simulation agrees (0.227).
+- **Segments.** Slicing results by country, device and new versus returning users multiplies the comparisons in the
+  same way. Ten segments of a single metric are ten tests.
+- **Correlated metrics.** Real metrics are often correlated, for example clicks and conversions. Strong positive
+  correlation lowers the family-wise rate below the independence formula, but Bonferroni's bound still holds, so the
+  correction stays valid and becomes conservative.

@@ -1,0 +1,133 @@
+---
+title: Factorial hidden Markov model
+kind: concept
+summary: 'A factorial HMM explains each observation with $M$ independent hidden Markov chains, as a meter reads the sum of several appliances. Exact inference over the $K^M$ joint states costs $O(NK^{2M})$, so structured mean field, which runs one HMM per chain, is the standard approximation.'
+tags: [structured-prediction, sequence-models, probabilistic-models, variational-inference, worked-example]
+aliases: [FHMM, factorial HMM, additive factorial HMM, energy disaggregation, non-intrusive load monitoring, NILM]
+partOf: [structured-prediction]
+requires: [hidden-markov-model]
+related: [mean-field-variational-inference, evidence-lower-bound, crf-variants]
+references: [ghahramani1997, kolter2012]
+status: draft
+updated: 2026-09-26
+---
+
+import { Disaggregation } from './Disaggregation'
+
+<Definition>
+A factorial hidden Markov model has $M$ hidden chains $\yvec^{(1)}, \dots, \yvec^{(M)}$, each a Markov chain over $K$
+states with its own initial distribution $\pi_m$ and transition matrix $A_m$. The chains evolve independently, and
+the observation at position $n$ depends on all of them:
+
+$$
+p\paren{\xvec, \yvec^{(1)}, \dots, \yvec^{(M)}} = \prod_{m=1}^{M} \brack{\pi_m\paren{y^{(m)}_1} \prod_{n=2}^{N}
+A_m\paren{y^{(m)}_{n-1}, y^{(m)}_n}} \prod_{n=1}^{N} p\paren{x_n \mid y^{(1)}_n, \dots, y^{(M)}_n}
+$$
+
+<Cite id="ghahramani1997" />.
+</Definition>
+
+## Why several chains
+
+A single <NoteLink to="hidden-markov-model">HMM</NoteLink> with $K^M$ states could represent the same joint behaviour,
+but it would need a $K^M \times K^M$ transition matrix, and it would lose the fact that the causes are separate. The
+factorial model keeps one small transition matrix per cause.
+
+The standard application is energy disaggregation, also called non-intrusive load monitoring. A household meter reads
+only the total power, and each appliance switches between states such as off and on. The model infers what each
+appliance was doing from the total alone <Cite id="kolter2012" />. In the additive Gaussian form, each chain has a
+power level per state and
+
+$$
+x_n = \sum_{m=1}^{M} P_m\paren{y_n^{(m)}} + \varepsilon_n, \qquad \varepsilon_n \sim \Gauss(0, \sigma^2).
+$$
+
+## Why exact inference is expensive
+
+The chains are independent in the prior, but not in the posterior. Each observation depends on every chain, so
+conditioning on $x_n$ couples them: a high reading makes "the kettle is on" and "the heater is on" competing
+explanations. This is explaining away, and it means the posterior does not factorise over chains.
+
+Exact inference therefore treats the $M$ chains as one HMM over the joint state
+$s_n = (y_n^{(1)}, \dots, y_n^{(M)})$, which takes $K^M$ values. Its transition matrix is the Kronecker product
+$A = A_1 \otimes \dots \otimes A_M$, and forward–backward costs $O(N K^{2M})$: one $K^M \times K^M$ matrix–vector
+product per step.
+
+The Kronecker structure helps but does not remove the exponential. Applying $A^\top$ to a vector of length $K^M$ one
+factor at a time touches each of the $K^M$ entries with $K$ values of one chain, $M$ times, which costs
+$O(M K^{M+1})$ per step instead of $O(K^{2M})$ <Cite id="ghahramani1997" />. The state space itself still grows as
+$K^M$.
+
+## Structured mean field
+
+The standard approximation keeps the structure within each chain and drops the coupling between chains. The
+variational family is
+
+$$
+q\paren{\yvec^{(1)}, \dots, \yvec^{(M)}} = \prod_{m=1}^{M} q_m\paren{\yvec^{(m)}},
+$$
+
+where each $q_m$ is itself an HMM over one chain. By the <NoteLink to="mean-field-variational-inference">mean-field
+update</NoteLink>, the optimal $q_m$ is proportional to $\exp \expect_{q_{-m}}\brack{\log p(\xvec, \yvec)}$, the
+expected log joint over the other chains.
+
+For binary chains (off 0, on 1) with power $P_m$ when on, the log likelihood of $x_n$ is
+$-\tfrac{1}{2\sigma^2}\paren{x_n - P_m y_n^{(m)} - R_n}^2$, where $R_n = \sum_{l \ne m} P_l y_n^{(l)}$ is the power of
+the other appliances. Expanding the square and keeping only the terms that involve $y_n^{(m)}$, with
+$\paren{y_n^{(m)}}^2 = y_n^{(m)}$ for a binary variable,
+
+$$
+\expect_{q_{-m}}\brack{\log p\paren{x_n \mid \cdot}} = \frac{y_n^{(m)}}{\sigma^2}\paren{P_m r_n^{(m)} -
+\tfrac12 P_m^2} + \text{const}, \qquad r_n^{(m)} = x_n - \sum_{l \ne m} P_l\, \expect_{q_l}\brack{y_n^{(l)}}.
+$$
+
+So $q_m$ is an HMM with chain $m$'s own transitions and a variational emission: node potential 1 for off and
+$\exp\brack{(P_m r_n^{(m)} - P_m^2/2)/\sigma^2}$ for on. The residual $r_n^{(m)}$ is the reading with the other
+appliances' expected power removed. Each update is one ordinary forward–backward on a $K$-state chain, and a sweep over
+all chains costs $O(N M K^2)$. Sweeping until nothing changes is coordinate ascent on the
+<NoteLink to="evidence-lower-bound">evidence lower bound</NoteLink>. With vector observations and general emission
+weights the same derivation gives a variational emission built from the residual after removing every other chain's
+expected contribution <Cite id="ghahramani1997" />.
+
+Gibbs sampling is the other common approach: resample one chain at a time given the others, with forward
+filtering–backward sampling on that chain.
+
+## Worked example
+
+Take four appliances: a 150 W fridge, a 1000 W heater, a 2000 W kettle and an 800 W microwave, with switching rates
+that make their long-run probabilities of being on 0.44, 0.29, 0.11 and 0.12. A single reading of 1950 W with
+$\sigma = 100$ W, ignoring the neighbouring time steps, gives these posteriors over combinations:
+
+| appliances on | total power | posterior |
+| --- | --- | --- |
+| kettle | 2000 W | 0.59 |
+| fridge, heater, microwave | 1950 W | 0.24 |
+| heater, microwave | 1800 W | 0.10 |
+| fridge, kettle | 2150 W | 0.07 |
+
+The combination that matches the reading exactly is not the most probable one. Three appliances being on at once is
+less likely a priori than the kettle alone, and a 50 W mismatch costs little when $\sigma = 100$ W. The time
+dimension usually resolves the ambiguity: a kettle is on for a few minutes, a heater for much longer, so the
+neighbouring readings favour one explanation. That is what the chains' transition matrices contribute.
+
+<Disaggregation />
+
+The figure shows the same effect over time. Exact inference and mean field usually agree, but where the evidence is
+ambiguous, mean field can lock onto one explanation with near certainty while the exact posterior is split or favours
+the other. Mean field minimises the reverse KL divergence $\KL(q \,\|\, p)$, which is mode-seeking: a factorised $q$
+cannot represent "either the kettle, or the heater and the microwave", so it picks one.
+
+## Related models
+
+- **Dynamic Bayesian networks.** A factorial HMM is a dynamic Bayesian network with several hidden variables per time
+  step and no edges between chains within a step. Coupled HMMs add such edges.
+- **Discriminative counterpart.** A dynamic CRF (see <NoteLink to="crf-variants">CRF variants</NoteLink>) models
+  several interacting label chains conditionally on the observations, as a factorial HMM does generatively.
+
+## Pitfalls
+
+- **Identifiability.** Appliances with similar power levels, or combinations with similar totals, are hard to
+  separate from the total alone. Prior knowledge of each appliance's power and usage pattern is usually needed.
+- **Mean-field overconfidence.** The approximate posteriors are too sharp and can be confidently wrong on ambiguous
+  stretches, as in the figure. Several restarts, or exact inference when $K^M$ is small, help.
+- **Exponential cost.** Exact inference is only practical for a handful of chains; the cost grows as $K^{2M}$.

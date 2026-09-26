@@ -1,0 +1,128 @@
+---
+title: Operator overloading and tapes
+kind: technique
+summary: Tape-based automatic differentiation runs the program on special number types whose operations record themselves in a list, the tape. Replaying the tape backwards gives reverse-mode gradients. It handles any control flow but records on every run. PyTorch works this way.
+tags: [automatic-differentiation, software, backpropagation, worked-example]
+aliases: [tape, Wengert list, autograd, GradientTape, operator overloading AD]
+requires: [backpropagation]
+related: [source-transformation-autodiff, static-and-dynamic-computation-graphs, dual-numbers]
+partOf: [history-of-automatic-differentiation]
+references: [griewank2008, griewank1996, maclaurin2015, paszke2019]
+status: draft
+updated: 2026-09-26
+---
+
+<Definition>
+Operator-overloading automatic differentiation replaces the numbers in a program by objects whose arithmetic
+operations do two things: compute the result, and append a record of the operation, its inputs and its local
+derivatives to a list called the tape. The tape is a Wengert list of the operations that actually ran. A reverse sweep
+over the tape applies the chain rule from the output back to the inputs, giving every gradient in one pass
+<Cite id="griewank2008" />.
+</Definition>
+
+## How it works
+
+The chain rule of <NoteLink to="backpropagation">backpropagation</NoteLink> needs two things: the order in which
+operations ran, and the local derivative of each operation's output with respect to each input. Overloading
+collects both as a side effect of running the program.
+
+1. **Forward pass.** Each overloaded operation, such as `a * b`, computes its value and records
+   $(\text{output}, [(\text{input}, \partial\,\text{output}/\partial\,\text{input}), \dots])$ on the tape.
+2. **Reverse sweep.** Set the adjoint of the output to 1. Walk the tape backwards. For each record, add
+   $\text{adjoint}(\text{output}) \times \text{local derivative}$ into the adjoint of each input.
+
+After the sweep, each input's adjoint is its partial derivative of the output. The order is correct because the tape
+lists operations in execution order, so reversing it visits every node after all the nodes that used it.
+
+A minimal implementation fits in a few dozen lines of Python:
+
+```python
+import math
+
+tape = []  # the Wengert list: one entry per operation, in execution order
+
+
+class Var:
+    def __init__(self, value):
+        self.value = value
+        self.grad = 0.0
+
+    def __add__(self, other):
+        return record(self.value + other.value, [(self, 1.0), (other, 1.0)])
+
+    def __mul__(self, other):
+        return record(self.value * other.value, [(self, other.value), (other, self.value)])
+
+
+def sin(x):
+    return record(math.sin(x.value), [(x, math.cos(x.value))])
+
+
+def record(value, parents):
+    """Compute a result and append it to the tape with its local derivatives."""
+    out = Var(value)
+    tape.append((out, parents))
+    return out
+
+
+def backward(y):
+    """Reverse sweep: replay the tape backwards, accumulating adjoints."""
+    y.grad = 1.0
+    for out, parents in reversed(tape):
+        for parent, local in parents:
+            parent.grad += out.grad * local
+
+
+x, y = Var(1.5), Var(-0.5)
+c = x * y + sin(x)
+f = c * c
+backward(f)
+print(x.grad, y.grad)  # -0.21248..., 0.74248...
+```
+
+**Worked example.** The code differentiates $f(x, y) = (xy + \sin x)^2$ at $(1.5, -0.5)$. The tape holds four records:
+$xy$, $\sin x$, their sum $c$ and $c \cdot c$. The sweep gives $\partial f/\partial x \approx -0.21248$ and
+$\partial f/\partial y \approx 0.74248$, the same values as the hand calculation in
+<NoteLink to="backpropagation">backpropagation</NoteLink>. Note the `+=`: $x$ is used twice, by $xy$ and by
+$\sin x$, and its adjoint collects one contribution from each.
+
+## Why the tape handles any control flow
+
+The tape records what ran, not what the code says. A loop that runs 17 times on one input records 17 iterations; an
+`if` records only the branch taken. So loops, recursion, early exits and data-dependent branches need no special
+support: each call gets the tape of its own execution. This is the define-by-run style: the graph is defined by running
+the program.
+
+The price is that the derivative is only correct for the path taken. At a point where a branch switches, the tape
+gives the derivative of one side.
+
+## In practice
+
+- **ADOL-C** (C and C++) overloads a special `adouble` type and records a tape that can be replayed for new inputs, in
+  forward or reverse mode, including higher derivatives <Cite id="griewank1996" />. CppAD works similarly.
+- **Autograd** wrapped NumPy so that ordinary array code recorded a tape, then exposed a single `grad` function
+  <Cite id="maclaurin2015" />.
+- **PyTorch** records the graph as tensors are computed: every tensor produced by a differentiable operation holds a
+  `grad_fn` node pointing at the nodes of its inputs. `loss.backward()` runs the reverse sweep over that graph and then
+  frees it; `retain_graph=True` keeps it for a second sweep <Cite id="paszke2019" />.
+- **TensorFlow 2** records operations inside a `with tf.GradientTape() as tape:` block, and `tape.gradient(loss,
+  variables)` replays them in reverse.
+
+## Trade-offs
+
+- **Easy to build and to use.** Overloading needs no parser or compiler work, and users write ordinary code.
+- **Interpretive overhead.** Every scalar or tensor operation pays for a record, and the sweep is a loop over records.
+  For small operations this dominates; array libraries amortise it by recording whole tensor operations rather than
+  scalars.
+- **Little room for optimisation.** The tool sees one operation at a time, so it cannot fuse operations or simplify
+  the derivative program as a compiler would. Frameworks recover this by tracing and compiling; see
+  <NoteLink to="static-and-dynamic-computation-graphs">static and dynamic computation graphs</NoteLink>.
+- **Memory.** The tape keeps every value the reverse sweep needs until the sweep runs. For deep networks this is the
+  activation memory; <NoteLink to="gradient-checkpointing">gradient checkpointing</NoteLink> trades it for recomputation.
+
+## Pitfalls
+
+- **Operations outside the overloaded types are invisible.** Converting a tensor to a plain number, calling
+  non-differentiable library code or modifying data in place can silently break the chain.
+- **Stale graphs.** Reusing a freed graph, or accumulating gradients across steps without zeroing them, gives wrong
+  results in frameworks that accumulate with `+=`.

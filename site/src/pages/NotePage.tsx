@@ -74,9 +74,9 @@ export function NotePage({ tab }: { tab: Tab }) {
   return (
     <NoteContext.Provider value={note}>
       <SidenoteProvider contentRef={contentRef}>
-        <main className="px-4 py-8 lg:px-8">
+        <main className="px-4 pb-8 lg:px-8">
           <div className="grid grid-cols-1 gap-10 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[240px_minmax(0,1fr)_300px]">
-            <aside className="hidden lg:block">
+            <aside className="hidden pt-8 lg:block">
               <div className="sticky top-30 max-h-[calc(100svh-8.5rem)] overflow-y-auto pr-2 pb-6">{left}</div>
             </aside>
             <div ref={contentRef} className="min-w-0 space-y-6">
@@ -90,7 +90,7 @@ export function NotePage({ tab }: { tab: Tab }) {
               <NoteHeader note={note} />
               {centre}
             </div>
-            <aside className="space-y-10 lg:col-start-2 xl:col-start-auto xl:pt-2">
+            <aside className="space-y-10 lg:col-start-2 xl:col-start-auto xl:pt-8">
               <NoteAside note={note} />
               {tab === 'concept' && wide && <MarginNotes />}
             </aside>

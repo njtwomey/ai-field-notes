@@ -41,6 +41,8 @@ function Marker({ citeKey }: { citeKey: string }) {
   }, [register, id, citeKey])
 
   const reference = references[citeKey]
+  // Only reachable on the dev server, which keeps running with content errors; a build fails on an unknown key.
+  if (!reference) return <span className="text-destructive">[{citeKey}?]</span>
   const label = `[${note.cited.indexOf(citeKey) + 1}]`
   const className = cn(
     'rounded-sm px-0.5 text-[0.7em] font-medium text-primary no-underline transition-colors hover:underline',

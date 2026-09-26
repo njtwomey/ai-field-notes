@@ -1,0 +1,137 @@
+---
+title: Exponential and logarithm
+kind: concept
+summary: The exponential function is the function equal to its own derivative with value 1 at 0; the natural logarithm is its inverse. Logarithms turn products into sums, which is why likelihoods are computed in log space, and log-sum-exp keeps those sums finite.
+tags: [calculus, numerics, worked-example]
+aliases: [exp, e, natural logarithm, log, ln, Euler's number, log space, log-sum-exp trick, underflow]
+requires: [derivative]
+related: [taylor-series, softmax-and-log-sum-exp]
+references: [spivak2008, blanchard2021]
+status: draft
+updated: 2026-09-26
+---
+
+<Definition>
+The exponential function $\exp : \reals \to (0, \infty)$ is the unique differentiable function with
+
+$$
+\exp'(x) = \exp(x), \qquad \exp(0) = 1.
+$$
+
+Euler's number is $e = \exp(1) \approx 2.71828$, and $\exp(x) = e^x$. The natural logarithm $\log : (0, \infty) \to
+\reals$ is the inverse of $\exp$: $\log(e^x) = x$ and $e^{\log y} = y$ <Cite id="spivak2008" />.
+</Definition>
+
+## The series and the limit
+
+The <NoteLink to="taylor-series">Taylor series</NoteLink> about 0 of a function equal to its own derivative has every
+derivative equal to $\exp(0) = 1$, so
+
+$$
+e^x = \sum_{k=0}^{\infty} \frac{x^k}{k!} = 1 + x + \frac{x^2}{2} + \frac{x^3}{6} + \dots
+$$
+
+The series converges for every $x$, and differentiating it term by term shifts every term down by one place, which
+returns the same series. So the series satisfies both defining conditions.
+
+The same number appears as a limit of compounding. Interest of 100% a year paid in $n$ instalments multiplies savings by
+$(1 + 1/n)^n$: 2 for $n = 1$, 2.25 for $n = 2$, 2.7048 for $n = 100$, approaching $e$ as $n \to \infty$. More generally,
+
+$$
+e^x = \lim_{n \to \infty} \paren{1 + \frac{x}{n}}^n.
+$$
+
+<Derivation title="Why the limit equals the series">
+The binomial theorem gives
+
+$$
+\paren{1 + \frac{x}{n}}^n = \sum_{k=0}^{n} \binom{n}{k} \frac{x^k}{n^k}
+= \sum_{k=0}^{n} \frac{x^k}{k!} \cdot \frac{n}{n} \cdot \frac{n-1}{n} \cdots \frac{n-k+1}{n}.
+$$
+
+For each fixed $k$ the product of fractions tends to 1 as $n \to \infty$, so each term tends to $x^k/k!$. The terms
+are bounded in absolute value by $\abs{x}^k/k!$, whose sum converges, so the limit of the sum is the sum of the limits
+(dominated convergence for series).
+</Derivation>
+
+## The derivative of $e^x$ from first principles
+
+The difference quotient of $e^x$ factors:
+
+$$
+\frac{e^{x + h} - e^x}{h} = e^x \cdot \frac{e^h - 1}{h}.
+$$
+
+From the series, $e^h - 1 = h + h^2/2 + \dots$, so $(e^h - 1)/h = 1 + h/2 + \dots \to 1$. The derivative is $e^x$. This
+limit is what the table of common derivatives in the <NoteLink to="derivative">derivative</NoteLink> note relies on.
+
+## The exponential law
+
+$e^{a + b} = e^a e^b$ follows from the defining property alone. Fix $a$ and let $g(x) = e^{a + x} e^{-x}$. The product
+and chain rules give
+
+$$
+g'(x) = e^{a + x} e^{-x} - e^{a + x} e^{-x} = 0,
+$$
+
+so $g$ is constant (by the <NoteLink to="mean-value-theorem">mean value theorem</NoteLink>) and equals
+$g(0) = e^a$. Hence $e^{a + x} e^{-x} = e^a$ for every $a$ and $x$. With $a = 0$ this reads $e^x e^{-x} = 1$, so
+$e^{-x} = 1/e^x$. Substituting back gives $e^{a + x} = e^a e^x$, and the law follows with $x = b$.
+
+## The logarithm
+
+Because $e^x$ is positive and increasing, it has an inverse on $(0, \infty)$. Differentiating $e^{\log y} = y$ with
+the chain rule gives $e^{\log y} \cdot (\log y)' = 1$, so
+
+$$
+\frac{d}{dy} \log y = \frac{1}{y}.
+$$
+
+The exponential law turns into the logarithm's rules. With $a = \log u$ and $b = \log v$, $e^{a + b} = e^a e^b = uv$,
+so $\log(uv) = \log u + \log v$. Similarly $\log(u/v) = \log u - \log v$ and $\log(u^r) = r \log u$.
+
+## Why machine learning works in log space
+
+A likelihood is a product of many probabilities. The logarithm turns it into a sum:
+
+$$
+\log \prod_{i=1}^{n} p(x_i \mid \theta) = \sum_{i=1}^{n} \log p(x_i \mid \theta).
+$$
+
+- **Underflow.** A product of $n$ probabilities of about 0.01 each is $10^{-2n}$. In double precision that is 0 once
+  $n \ge 162$, and every gradient of it is 0 too. The sum of logs is about $-4.6\,n$, which is perfectly representable.
+- **Same optimum.** $\log$ is increasing, so the parameters that maximise the log-likelihood maximise the likelihood.
+- **Easier derivatives.** The derivative of a sum is a sum of derivatives. The derivative of a product needs the product
+  rule for every factor.
+
+## The log-sum-exp trick
+
+Normalising constants and mixture likelihoods need $\log \sum_i e^{x_i}$ where the $x_i$ are themselves logs. Computing
+$e^{x_i}$ directly overflows when some $x_i$ is large and underflows when all are very negative. Factor out the largest
+term, $m = \max_i x_i$:
+
+$$
+\log \sum_{i=1}^{n} e^{x_i} = \log \paren{e^m \sum_{i=1}^{n} e^{x_i - m}} = m + \log \sum_{i=1}^{n} e^{x_i - m}.
+$$
+
+Every exponent $x_i - m$ is at most 0, so no term overflows, and the largest term is exactly $e^0 = 1$, so the sum is at
+least 1 and its logarithm is finite <Cite id="blanchard2021" />.
+
+**Worked example.** For $\xvec = (1000, 1001, 1002)$, computing $e^{1000}$ overflows to infinity. With $m = 1002$,
+
+$$
+1002 + \log\paren{e^{-2} + e^{-1} + 1} = 1002 + 0.4076 = 1002.4076.
+$$
+
+The same identity bounds the result: since the sum lies between 1 and $n$,
+$\max_i x_i \le \log \sum_i e^{x_i} \le \max_i x_i + \log n$. Log-sum-exp is a smooth version of the maximum; its
+gradient is the softmax, as derived in <NoteLink to="softmax-and-log-sum-exp">softmax and log-sum-exp</NoteLink>.
+
+## Pitfalls
+
+- **$\log(1 + x)$ for small $x$.** Computing $1 + x$ first rounds away most of $x$'s digits when $\abs{x}$ is tiny.
+  Use `log1p(x)`, and `expm1(x)` for $e^x - 1$.
+- **Log of zero.** A model that assigns probability exactly 0 to an observed event has log-likelihood $-\infty$.
+  Probabilities computed in log space from the start, for example with log-softmax, avoid forming the zero.
+- **Other bases.** $\log_2 x = \log x / \log 2$. Entropies in bits use base 2; derivatives are simplest in base $e$,
+  which is why $e$ is the default in calculus and in most libraries.

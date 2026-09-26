@@ -174,6 +174,9 @@ export function Heatmap({
         {
           name: '__grid',
           type: 'custom',
+          // Draw every cell in one pass. Above a few thousand cells ECharts otherwise paints in chunks across frames,
+          // which flickers on each update (and stalls entirely in a background tab).
+          progressive: 0,
           data: cells,
           encode: { x: 0, y: 1, tooltip: 2 },
           cursor: clickable ? 'pointer' : 'default',
@@ -247,6 +250,8 @@ export function Heatmap({
       handles={handles}
       height={height}
       ariaLabel={ariaLabel}
+      // One rectangle per cell: thousands of marks, which canvas draws far faster than SVG.
+      renderer="canvas"
     />
   )
 }

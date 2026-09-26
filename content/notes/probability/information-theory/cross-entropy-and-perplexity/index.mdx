@@ -1,0 +1,121 @@
+---
+title: Cross-entropy and perplexity
+kind: concept
+summary: The cross-entropy $\entropy(p, q) = -\sum_x p(x) \log q(x)$ is the average surprisal of outcomes from $p$ under a model $q$. It equals $\entropy(p) + \KL(p \,\|\, q)$, so cross-entropy loss is maximum likelihood; perplexity is its exponential.
+tags: [information-theory, probability, loss-functions, worked-example]
+aliases: [cross entropy, cross-entropy loss, log loss, negative log-likelihood, binary cross-entropy, perplexity, label smoothing]
+requires: [entropy, kl-divergence]
+related: [logistic-regression, softmax-and-log-sum-exp, categorical-distribution, source-coding-theorem]
+references: [cover2006, mackay2003, bishop2006]
+status: draft
+updated: 2026-09-26
+---
+
+import { CrossEntropyGap } from './CrossEntropyGap'
+
+<Definition>
+For distributions $p$ and $q$ on the same set, the cross-entropy of $q$ relative to $p$ is the expected surprisal
+under $q$ of outcomes drawn from $p$:
+
+$$
+\entropy(p, q) = \expect_{X \sim p}\brack{-\log q(X)} = -\sum_x p(x) \log q(x).
+$$
+
+The perplexity of $q$ on $p$ is $2^{\entropy(p, q)}$ with $\entropy$ in bits, or $e^{\entropy(p, q)}$ in nats
+<Cite id="cover2006" />.
+</Definition>
+
+## Cross-entropy is entropy plus divergence
+
+Add and subtract $\log p(x)$ inside the expectation:
+
+$$
+\entropy(p, q) = \expect_p\brack{-\log p(X)} + \expect_p\brack{\log \frac{p(X)}{q(X)}} = \entropy(p) + \KL(p \,\|\,
+q).
+$$
+
+The <NoteLink to="kl-divergence">KL divergence</NoteLink> is non-negative and zero only when $q = p$, so
+$\entropy(p, q) \ge \entropy(p)$ with equality exactly at $q = p$. The entropy $\entropy(p)$ is the unavoidable
+surprisal of the data; the KL term is the extra surprisal caused by using the wrong model. In coding terms,
+$\entropy(p, q)$ is the average code length when a code designed for $q$ encodes symbols that actually follow $p$ (see
+the <NoteLink to="source-coding-theorem">source coding theorem</NoteLink>).
+
+Cross-entropy is not symmetric: $\entropy(p, q) \ne \entropy(q, p)$ in general.
+
+**Worked example.** Let $p = (\tfrac12, \tfrac14, \tfrac18, \tfrac18)$ and let the model $q$ be uniform over the four
+outcomes. Then $\entropy(p) = 1.75$ bits, and
+
+$$
+\entropy(p, q) = -\sum_x p(x) \log_2 \tfrac14 = 2 \text{ bits}, \qquad \KL(p \,\|\, q) = 2 - 1.75 = 0.25 \text{ bits}.
+$$
+
+Using the uniform model costs a quarter of a bit per outcome.
+
+<CrossEntropyGap />
+
+## Cross-entropy loss is maximum likelihood
+
+A classifier outputs a distribution $q_\theta(y \mid \xvec)$ over labels. Given training pairs $(\xvec_n, y_n)$, the
+cross-entropy loss averages the surprisal of the observed labels:
+
+$$
+L(\theta) = -\frac{1}{N} \sum_{n=1}^N \log q_\theta(y_n \mid \xvec_n).
+$$
+
+This is the negative average log-likelihood, so minimising it is maximum likelihood. It is also a cross-entropy in the
+sense of the definition: for each example, the "true" distribution is the one-hot vector that puts all its mass on the
+observed label $y_n$, and $-\sum_y \indicator[y = y_n] \log q_\theta(y \mid \xvec_n) = -\log q_\theta(y_n \mid
+\xvec_n)$.
+
+Without inputs, the same argument shows that minimising cross-entropy fits the model to the empirical distribution
+$\hat p(y) = \tfrac1N \sum_n \indicator[y_n = y]$:
+
+$$
+L(\theta) = -\sum_y \hat p(y) \log q_\theta(y) = \entropy(\hat p, q_\theta) = \entropy(\hat p) + \KL(\hat p \,\|\,
+q_\theta).
+$$
+
+$\entropy(\hat p)$ does not depend on $\theta$, so minimising the loss minimises the KL divergence from the data to the
+model. Maximum likelihood, cross-entropy minimisation and forward-KL minimisation are the same procedure.
+
+## Binary cross-entropy
+
+For a binary label $y \in \set{0, 1}$ and a predicted probability $\hat y = q(y = 1)$, the cross-entropy is
+
+$$
+-\brack{y \log \hat y + (1 - y) \log(1 - \hat y)},
+$$
+
+the loss of <NoteLink to="logistic-regression">logistic regression</NoteLink>. With $\hat y = \sigma(z)$ for a logit
+$z$, its derivative is $\partial L / \partial z = \hat y - y$, and for $K$ classes with a softmax the gradient with
+respect to the logits is $\qvec - \yvec$; see <NoteLink to="softmax-and-log-sum-exp">softmax and
+log-sum-exp</NoteLink>. The gradient is the prediction error, which is why cross-entropy trains well with sigmoid and
+softmax outputs.
+
+## Perplexity
+
+Perplexity turns a cross-entropy into an effective number of choices. A model with perplexity $k$ is, on average, as
+uncertain about the next outcome as a uniform choice among $k$ options.
+
+- A uniform model over $V$ outcomes has cross-entropy $\log_2 V$ bits against any $p$, so its perplexity is $V$.
+- In the worked example, the true distribution has perplexity $2^{1.75} \approx 3.36$ and the uniform model $2^2 = 4$.
+- A language model with cross-entropy 3 bits per token on held-out text has perplexity $2^3 = 8$: it is as uncertain
+  as if it chose uniformly among 8 tokens at each step.
+
+Perplexity is only comparable between models that share a tokenisation, because the same text split into more tokens
+has a different per-token cross-entropy.
+
+## Label smoothing
+
+Label smoothing replaces the one-hot target by $(1 - \epsilon)$ on the observed label plus $\epsilon/K$ on every class.
+The loss becomes $\entropy(\tilde p, q)$ with the smoothed target $\tilde p$, whose minimiser is $q = \tilde p$ rather
+than a one-hot vector. This stops the logits growing without bound and tends to improve calibration.
+
+## Pitfalls
+
+- **Zero probabilities.** $\entropy(p, q) = \infty$ if $q$ assigns probability 0 to an outcome that $p$ can produce.
+  Implementations clip or work with logits and log-softmax for numerical stability.
+- **Units and averaging.** Report whether a loss is in nats or bits, and whether it is summed or averaged over tokens
+  or examples; perplexity depends on both.
+- **Lower bound.** Training cross-entropy cannot fall below the entropy of the labels given the inputs. Label noise sets
+  a floor on the achievable loss.

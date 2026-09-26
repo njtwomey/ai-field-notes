@@ -1,0 +1,91 @@
+---
+title: Gradient checkpointing
+kind: technique
+summary: 'Reverse mode must keep every intermediate value for the backward pass. Checkpointing stores only some of them and recomputes the rest when needed. On a chain of $n$ layers, a checkpoint every $\sqrt n$ layers cuts memory from $n$ to about $2\sqrt n$ for one extra forward pass.'
+tags: [automatic-differentiation, memory, deep-learning, worked-example]
+aliases: [activation checkpointing, rematerialisation, remat, revolve, binomial checkpointing, sublinear memory]
+requires: [backpropagation]
+related: [operator-overloading-and-tapes, static-and-dynamic-computation-graphs]
+partOf: [history-of-automatic-differentiation]
+references: [chen2016, griewank1992, griewank2000, griewank2008]
+status: draft
+updated: 2026-09-26
+---
+
+import { CheckpointTradeoff } from './CheckpointTradeoff'
+
+<Definition>
+Gradient checkpointing reduces the memory of reverse-mode differentiation by storing only some intermediate values,
+the checkpoints, during the forward pass. During the backward pass, the missing values are recomputed from the nearest
+earlier checkpoint when they are needed. It trades extra computation for less memory <Cite id="griewank2008" />.
+</Definition>
+
+## Why reverse mode needs memory
+
+Take a chain of $n$ layers, $\hvec_k = F_k(\hvec_{k-1})$ for $k = 1, \dots, n$, ending in a scalar loss. The backward
+pass computes $\bar\hvec_{k-1} = J_{F_k}(\hvec_{k-1})^\top\bar\hvec_k$. That product needs the Jacobian of layer $k$
+at its input $\hvec_{k-1}$, and the backward pass reaches layer $k$ only after the forward pass has finished. So every
+input $\hvec_0, \dots, \hvec_{n-1}$ must still be available at the end of the forward pass. Storing them all costs
+memory proportional to $n$, the activation memory that limits batch size and depth when training networks.
+
+## A checkpoint every $s$ layers
+
+Store $\hvec_k$ only when $k$ is a multiple of $s$: about $n/s$ checkpoints. Run the backward pass one segment at a
+time, starting from the last. For each segment, recompute its $s$ activations forward from the segment's checkpoint,
+backpropagate through the segment, and discard them before moving to the previous one.
+
+At any moment the memory holds the checkpoints and one segment's activations, so the peak is
+
+$$
+M(s) = \left\lceil \frac{n}{s} \right\rceil + s.
+$$
+
+Treating $n/s$ as continuous, $M'(s) = -n/s^2 + 1 = 0$ at $s = \sqrt n$, where $M = 2\sqrt n$. Every layer is run
+forward twice, once in the original pass and once in the recomputation, so the extra cost is one forward pass. A
+backward pass costs about two forward passes, so the total rises from about three forward-pass units to four, roughly
+a third more time <Cite id="chen2016" />.
+
+**Worked example.** For $n = 100$ layers, storing everything holds 100 activations. With $s = 10$ there are 10
+checkpoints and at most 10 recomputed activations: a peak of 20, a fivefold saving, for one extra forward pass. For
+$n = 10{,}000$ the saving is from $10{,}000$ to $200$.
+
+<CheckpointTradeoff />
+
+## Binomial checkpointing
+
+Recursion saves more. Inside a segment, the recomputation can itself be checkpointed, and so on. The optimal schedule
+for a chain was found by Griewank <Cite id="griewank1992" /> and implemented as the `revolve` algorithm
+<Cite id="griewank2000" />.
+
+Let $\beta(c, r)$ be the longest chain that can be reversed with $c$ checkpoint slots when each step may be run forward
+at most $r$ times. Place the first checkpoint some distance into the chain. The steps before it will be run again when
+their turn comes, so that part must be reversible with $c$ slots and only $r - 1$ further runs. The steps after it are
+reversed while that checkpoint occupies a slot, so with $c - 1$ slots and $r$ runs. The best placement makes both parts
+as long as possible:
+
+$$
+\beta(c, r) = \beta(c, r - 1) + \beta(c - 1, r), \qquad \beta(0, r) = \beta(c, 0) = 1,
+$$
+
+which is the recursion of the binomial coefficients, so $\beta(c, r) = \binom{c + r}{c}$. With $c = 10$ slots and
+$r = 3$ runs per step, a chain of $\binom{13}{3} = 286$ steps can be reversed. Since binomial coefficients grow
+exponentially when $c$ and $r$ grow together, memory and recomputation can both grow only logarithmically in the chain
+length.
+
+## In practice
+
+- **PyTorch** provides `torch.utils.checkpoint`: a wrapped block stores only its input, and its activations are
+  recomputed during the backward pass.
+- **JAX** provides `jax.checkpoint`, also called `jax.remat`, with policies that choose which intermediates to save,
+  for example saving matrix-multiplication outputs and recomputing cheap elementwise operations.
+- Transformer training commonly checkpoints each block, storing the block's input and recomputing its attention and
+  feed-forward activations.
+
+## Pitfalls
+
+- **Non-deterministic layers.** Recomputing a layer with dropout must reproduce the same random mask, so frameworks save
+  the random-number state with the checkpoint.
+- **Side effects run twice.** Anything a layer does besides computing its output, such as updating batch-norm running
+  statistics, happens again during recomputation unless the framework guards against it.
+- **The saving applies to activations only.** Parameters, gradients and optimiser state are unchanged, and for large
+  models they can dominate memory instead.

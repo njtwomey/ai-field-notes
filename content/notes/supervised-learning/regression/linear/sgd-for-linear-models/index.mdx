@@ -1,0 +1,156 @@
+---
+title: SGD for linear models
+kind: technique
+summary: Stochastic gradient descent fits ridge, lasso and elastic-net models one sample at a time, at O(d) cost per update and without holding the data in memory. It reaches the exact solution only approximately, and its L1 penalty needs a truncation step to produce exact zeros.
+tags: [regression, linear-models, optimisation, regularisation, stochastic-gradient-descent, worked-example]
+aliases: [SGDRegressor, stochastic gradient descent regression, online linear regression, truncated gradient, cumulative L1 penalty]
+requires: [gradient-descent, ridge-regression, lasso]
+related: [elastic-net, least-angle-regression, condition-number]
+code: linear-models
+references: [bottou2010, tsuruoka2009, robbins1951, polyak1992, pedregosa2011]
+status: draft
+updated: 2026-09-26
+---
+
+import { SgdTrajectories } from './SgdTrajectories'
+
+<Definition>
+Stochastic gradient descent (SGD) for linear models minimises a penalised average loss
+
+$$
+F(\wvec, b) = \frac{1}{n}\sum_{i=1}^{n} \tfrac{1}{2}\bigl(y_i - \wvec^\top\xvec_i - b\bigr)^2 + \alpha R(\wvec)
+$$
+
+by visiting the samples one at a time and stepping against the gradient of each sample's term. The penalty $R$ is
+$\frac{1}{2}\norm{\wvec}^2$ for ridge, $\norm{\wvec}_1$ for the lasso, or the elastic-net mixture
+$\rho\norm{\wvec}_1 + \frac{1 - \rho}{2}\norm{\wvec}^2$ <Cite id="pedregosa2011" />.
+</Definition>
+
+## Problem
+
+The exact solvers for these models need the data at hand and cost more than one pass over it. The closed form for
+<NoteLink to="ridge-regression">ridge</NoteLink> forms and factorises $\Xmat^\top\Xmat + \lambda\eye$, at
+$O(nd^2 + d^3)$ time and $O(d^2)$ memory. Coordinate descent for the <NoteLink to="lasso">lasso</NoteLink> makes
+repeated $O(nd)$ passes over data held in memory. When $n$ runs to hundreds of millions of rows, when $d$ is large
+and the features sparse, or when data arrive as a stream, neither is practical. SGD needs $O(d)$ memory and $O(d)$
+time per update, and it can learn from each batch as it arrives <Cite id="bottou2010" />.
+
+The objective $F$ is the same as the exact solvers' up to scaling. The lasso and elastic net match scikit-learn's
+`Lasso` and `ElasticNet` with the same $\alpha$ and $\rho$. The ridge term $\frac{\alpha}{2}\norm{\wvec}^2$ matches
+`Ridge` with $\lambda = n\alpha$.
+
+## Mechanism
+
+### The smooth part
+
+For sample $i$ with residual $r_i = y_i - \wvec^\top\xvec_i - b$, the gradient of its loss term
+$\frac{1}{2}r_i^2$ is $-r_i\xvec_i$ with respect to $\wvec$ and $-r_i$ with respect to $b$. With step size $\eta_t$ at
+step $t$, the ridge update is
+
+$$
+\wvec \leftarrow \wvec - \eta_t(-r_i\xvec_i + \alpha\wvec) = (1 - \eta_t\alpha)\,\wvec + \eta_t r_i\xvec_i, \qquad b \leftarrow b + \eta_t r_i.
+$$
+
+The penalty appears as **weight decay**: every step first multiplies the weights by $1 - \eta_t\alpha$, then moves
+them towards fitting sample $i$. Because the expected value of the sample gradient, over a uniformly chosen $i$, is the
+full gradient of $F$, each step is an unbiased estimate of a
+<NoteLink to="gradient-descent">gradient-descent</NoteLink> step.
+
+### The L1 part and exact zeros
+
+$\abs{w_j}$ has no gradient at zero. The naive **subgradient** step uses $\sgn(w_j)$:
+$w_j \leftarrow w_j + \eta_t r_i x_{ij} - \eta_t\alpha\,\sgn(w_j)$. It almost never lands exactly on zero. A weight
+near zero is pushed across it, then pushed back, and jitters around zero indefinitely.
+
+**Worked example.** Take $w_j = 0.004$, a data term $\eta_t r_i x_{ij} = 0$, and $\eta_t\alpha = 0.01$. The
+subgradient step gives $w_j = 0.004 - 0.01 = -0.006$. The next step pushes it to $+0.004$, and so on: it never
+settles at zero.
+
+The fix is to **clip at zero**: apply the penalty step, but if it would cross zero, stop at zero. That is exactly the
+soft-thresholding operator $S(v, \eta_t\alpha) = \sgn(v)\max(\abs{v} - \eta_t\alpha, 0)$ applied after the data step.
+It is the proximal operator of the L1 norm, the same operation that gives the lasso its zeros in coordinate descent.
+In the example, the clipped step gives $w_j = 0$.
+
+Clipping each step on its own still misses many zeros, because a single noisy sample can push a weight away from zero
+again before the penalty has had a chance to act. The **cumulative penalty** method keeps track of the total L1
+penalty $u_t = \alpha\sum_{s \le t}\eta_s$ that each weight should have received so far, and the penalty $q_j$ it has
+actually received. After the data step it clips $w_j$ towards zero by up to $u_t + q_j$, the penalty still owed
+<Cite id="tsuruoka2009" />. scikit-learn's `SGDRegressor` uses this method for its L1 and elastic-net penalties.
+
+For the elastic net, the update applies the decay $1 - \eta_t\alpha(1 - \rho)$ from the L2 part and then the clipped
+L1 step with strength $\alpha\rho$.
+
+### Step sizes
+
+For SGD to converge to the minimiser, the step sizes must satisfy the Robbins–Monro conditions
+$\sum_t \eta_t = \infty$ and $\sum_t \eta_t^2 < \infty$ <Cite id="robbins1951" />. The first lets the iterates travel
+any distance; the second makes the noise from single samples die out. scikit-learn offers several schedules.
+
+- **invscaling** (the default for `SGDRegressor`): $\eta_t = \eta_0/t^{p}$ with $\eta_0 = 0.01$ and $p = 0.25$. Since
+  $\sum_t t^{-0.5}$ diverges, $\sum_t \eta_t^2 = \infty$, so the noise never fully dies out and the iterates keep
+  fluctuating near the minimiser.
+- **optimal**: $\eta_t = 1/(\alpha(t + t_0))$, which satisfies both conditions and is the rate theory recommends for
+  strongly convex problems <Cite id="bottou2010" />.
+- **constant**: $\eta_t = \eta_0$. The iterates never settle; they wander in a neighbourhood of the minimiser whose
+  size grows with $\eta_0$.
+- **adaptive**: constant until the loss stops improving, then divided by five.
+
+**Averaging** reduces the fluctuation without shrinking the step. With `average=True` the reported weights are the
+average of all iterates, which converges at the optimal rate even with larger steps <Cite id="polyak1992" />.
+
+### Scale
+
+A single step size serves every coefficient, so features on different scales need very different steps: a feature
+measured in large units takes huge steps and diverges, one in small units barely moves. Standardise the features
+before SGD. Even then, convergence slows as the
+<NoteLink to="condition-number">condition number</NoteLink> of $\Xmat^\top\Xmat$ grows, because the loss surface is
+steep in some directions and nearly flat in others.
+
+## SGD against the exact solutions
+
+The figure fits the standardised diabetes data (ten features, 442 patients) with `SGDRegressor` at $\alpha = 1$, one
+point per epoch, for 60 epochs. The exact minimisers of the same objectives are 1923 (ridge), 1534 (lasso) and 1779
+(elastic net with $\rho = 0.5$).
+
+- With the default invscaling schedule, the objective gaps after 60 epochs are 0.60, 0.18 and 0.42: about $10^{-4}$ of
+  the objective. The weights are within about 0.3 of the exact values, which are of order 10.
+- With a constant step of 0.01, the lasso's gap stays near 19 from the tenth epoch on: the iterates wander without
+  converging.
+- scikit-learn's cumulative-penalty lasso finds exactly the exact solution's zero set, age, s2 and s4, but only from
+  epoch 56. Plain subgradient SGD with the same schedule reaches a similar objective gap, 0.56, yet has no exact zeros
+  at all after 60 epochs; its two smallest weights are 0.04 and 0.06 in absolute value.
+
+<SgdTrajectories />
+
+## Cost
+
+| | Exact solvers | SGD |
+| --- | --- | --- |
+| Algorithm | Closed form (Cholesky, QR, SVD) for OLS and ridge; coordinate descent or LARS for L1 penalties | One sample per update |
+| Time | $O(nd^2 + d^3)$ for the closed form; $O(nd)$ per coordinate-descent pass, repeated to convergence | $O(d)$ per update, $O(nd)$ per epoch; sparse features cost only their nonzeros |
+| Memory | The data, or $\Xmat^\top\Xmat$ ($O(d^2)$) | $O(d)$ plus one sample |
+| Accuracy | To machine precision | Close to the minimiser, with residual fluctuation set by the schedule |
+| Sparsity | Exact zeros from the L1 penalty | Exact zeros only with truncation, and they can take many epochs to appear |
+| Streaming | Refit from scratch | `partial_fit` updates the model batch by batch |
+
+## Trade-offs
+
+- **Use an exact solver when the data fit in memory.** On data sets of thousands to a few million rows, `Ridge`,
+  `Lasso` and `ElasticNet` are fast, exact and have fewer settings to tune.
+- **Use SGD at scale or online.** For very large or streaming data, or high-dimensional sparse features such as text,
+  SGD is often the only practical option, and its approximation error is small next to the statistical error.
+- **Tuning cost.** SGD adds a schedule, an initial step size, a number of epochs and a tolerance to the model's own
+  $\alpha$ and $\rho$. The exact solvers need only the model's parameters.
+- **Selection.** If exact zeros matter, as in feature selection, prefer an exact L1 solver, or run SGD long enough and
+  check that the zero set has stopped changing.
+
+## Pitfalls
+
+- **Unscaled features.** Without standardisation, SGD diverges or stalls. Scaling is not optional here, as it can be
+  for OLS.
+- **Reading an unconverged fit.** After a fixed number of epochs the weights still fluctuate. Compare against an exact
+  solver on a subsample, watch the training objective, or use averaging.
+- **Mismatched penalties.** `SGDRegressor(alpha=a, penalty="l2")` corresponds to `Ridge(alpha=n * a)`, not
+  `Ridge(alpha=a)`. The lasso and elastic-net scalings do match.
+- **Shuffling.** Samples sorted by time or label make consecutive updates correlated and the path biased. Shuffle each
+  epoch, which `SGDRegressor` does by default.

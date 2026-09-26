@@ -1,0 +1,137 @@
+---
+title: Laplace approximation
+kind: technique
+summary: Laplace's method approximates an integral of a sharply peaked function by a Gaussian integral at its peak. For a posterior it gives a Gaussian at the MAP estimate with covariance the inverse Hessian of the negative log posterior, and an evidence approximation that leads to BIC.
+tags: [calculus, integration, bayesian, approximation, worked-example]
+aliases: [Laplace's method, saddle-point approximation, Laplace approximation to the posterior]
+requires: [taylor-series, gaussian-integral]
+related: [gamma-function, beta-distribution, multivariate-normal-distribution, gaussian-mixture-model, kl-divergence]
+references: [tierney1986, mackay2003, bishop2006, schwarz1978]
+status: draft
+updated: 2026-09-26
+---
+
+import { LaplacePosterior } from './LaplacePosterior'
+
+<Definition>
+Let $f$ be twice differentiable with a unique interior maximum at $x_0$, so that $f'(x_0) = 0$ and $f''(x_0) < 0$. As
+$M \to \infty$,
+
+$$
+\int e^{M f(x)}\, dx \approx e^{M f(x_0)}\sqrt{\frac{2\pi}{M\abs{f''(x_0)}}},
+$$
+
+with relative error $O(1/M)$. In $d$ dimensions, with $\Hmat$ the Hessian of $f$ at $x_0$,
+$\int e^{M f(\xvec)}\, d\xvec \approx e^{M f(\xvec_0)}\,(2\pi/M)^{d/2}\abs{-\Hmat}^{-1/2}$ <Cite id="tierney1986" />.
+</Definition>
+
+## Derivation
+
+Near its maximum, expand $f$ to second order with a <NoteLink to="taylor-series">Taylor series</NoteLink>. The linear
+term vanishes because $f'(x_0) = 0$:
+
+$$
+f(x) \approx f(x_0) - \tfrac{1}{2}\abs{f''(x_0)}\,(x - x_0)^2.
+$$
+
+Multiplying by $M$ and exponentiating turns the integrand into an unnormalised Gaussian with variance
+$1/\paren{M\abs{f''(x_0)}}$:
+
+$$
+\int e^{M f(x)}\, dx \approx e^{M f(x_0)} \int_{-\infty}^{\infty} \exp\paren{-\tfrac{1}{2} M\abs{f''(x_0)}\,(x -
+  x_0)^2} dx
+= e^{M f(x_0)} \sqrt{\frac{2\pi}{M\abs{f''(x_0)}}},
+$$
+
+by the <NoteLink to="gaussian-integral">Gaussian integral</NoteLink>. Two approximations were made: dropping the
+cubic and higher terms, and extending the range of integration to the whole line. Both cost little when $M$ is large,
+because the integrand is then negligible outside a window of width $O(M^{-1/2})$ around $x_0$, where the cubic term is
+$O(M \cdot M^{-3/2}) = O(M^{-1/2})$. In $d$ dimensions the same steps give a multivariate Gaussian integral, whose
+normalising constant contributes $(2\pi/M)^{d/2}\abs{-\Hmat}^{-1/2}$.
+
+Stirling's formula for $n!$ is the method applied to the <NoteLink to="gamma-function">gamma function</NoteLink>.
+
+## The Laplace approximation to a posterior
+
+For parameters $\thetavec \in \reals^d$ and data $\Dcal$, the posterior is
+$p(\thetavec \mid \Dcal) = p(\Dcal \mid \thetavec)\, p(\thetavec)/p(\Dcal)$. Write the unnormalised log posterior as
+$\ell(\thetavec) = \log p(\Dcal \mid \thetavec) + \log p(\thetavec)$. Its maximiser is the MAP estimate
+$\hat\thetavec$. Expanding $\ell$ to second order around $\hat\thetavec$, where the gradient is zero,
+
+$$
+\ell(\thetavec) \approx \ell(\hat\thetavec) - \tfrac{1}{2}(\thetavec - \hat\thetavec)^\top \Amat (\thetavec -
+  \hat\thetavec),
+\qquad \Amat = -\nabla^2 \ell(\hat\thetavec).
+$$
+
+The right-hand side is the log of a Gaussian density up to a constant, so the posterior is approximated by
+
+$$
+p(\thetavec \mid \Dcal) \approx \Gauss\paren{\thetavec;\ \hat\thetavec,\ \Amat^{-1}}.
+$$
+
+The approximating mean is the MAP estimate and the covariance is the inverse of the curvature of the negative log
+posterior. Flat directions of the posterior, where $\ell$ curves little, get large variances <Cite id="mackay2003" />.
+
+## The evidence and BIC
+
+The same expansion approximates the evidence, $p(\Dcal) = \int e^{\ell(\thetavec)}\, d\thetavec$, needed to compare
+models:
+
+$$
+\log p(\Dcal) \approx \log p(\Dcal \mid \hat\thetavec) + \log p(\hat\thetavec) + \frac{d}{2}\log 2\pi
+- \frac{1}{2}\log\abs{\Amat}.
+$$
+
+For $n$ independent observations, $\Amat$ is dominated by the likelihood term, which grows linearly in $n$:
+$\Amat \approx n\,\bar\Amat$ for a per-observation curvature $\bar\Amat$ that does not depend on $n$. Then
+$\log\abs{\Amat} = d\log n + \log\abs{\bar\Amat}$. Keeping only the terms that grow with $n$,
+
+$$
+\log p(\Dcal) \approx \log p(\Dcal \mid \hat\thetavec) - \frac{d}{2}\log n.
+$$
+
+Multiplying by $-2$ gives the Bayesian information criterion,
+$\BIC = -2\log p(\Dcal \mid \hat\thetavec) + d\log n$ <Cite id="schwarz1978" />. The penalty $d\log n$ is the Occam
+factor: the volume of parameter space consistent with the data shrinks like $n^{-d/2}$. The
+<NoteLink to="gaussian-mixture-model">Gaussian mixture model</NoteLink> uses BIC to choose the number of components.
+
+## Worked example
+
+A coin with bias $\theta$ shows 7 heads and 3 tails, with a uniform prior. The exact posterior is
+$\operatorname{Beta}(8, 4)$, with mean $0.667$ and standard deviation $0.131$. For the Laplace approximation,
+$\ell(\theta) = 7\log\theta + 3\log(1 - \theta)$. Setting $\ell'(\theta) = 7/\theta - 3/(1 - \theta) = 0$ gives
+$\hat\theta = 0.7$. The curvature is
+
+$$
+-\ell''(\theta) = \frac{7}{\theta^2} + \frac{3}{(1 - \theta)^2}, \qquad -\ell''(0.7) = \frac{10}{0.7 \times 0.3} = 47.6,
+$$
+
+so the approximation is $\Gauss(0.7,\ 0.145^2)$. The evidence is exactly
+$B(8, 4) = 7!\,3!/11! = 7.58 \times 10^{-4}$. The Laplace estimate is
+$0.7^7\, 0.3^3 \sqrt{2\pi \times 0.021} = 8.08 \times 10^{-4}$, 6.6% too high. With 70 heads and 30 tails the
+standard deviations are $0.0453$ exact and $0.0458$ approximate, and the evidence error falls to 0.7%.
+
+<LaplacePosterior />
+
+## In machine learning
+
+- **Bayesian neural networks.** A Laplace approximation around a trained network's weights, often only for the last
+  layer, turns a point estimate into a posterior with calibrated uncertainty at little extra cost.
+- **Gaussian process classification.** The posterior over latent function values is non-Gaussian, and the Laplace
+  approximation is a standard way to make it tractable.
+- **Model comparison.** MacKay's evidence framework uses the Laplace evidence to set hyperparameters such as weight
+  decay <Cite id="mackay2003" />.
+
+## Pitfalls
+
+- **Skewed or bounded posteriors.** The approximation is symmetric and unbounded. For a small number of observations
+  near the edge of the parameter space, as in the example, it puts mass outside $[0, 1]$ and misplaces the mean.
+- **Boundary modes.** If the maximum is on the boundary, e.g. 10 heads and no tails, the gradient is not zero there and
+  the method does not apply as stated.
+- **Multimodality.** A single Gaussian captures one mode. Mixture posteriors, such as those of mixture models with
+  interchangeable labels, need other methods.
+- **Parameterisation.** The approximation depends on the parameterisation. Approximating in $\log\sigma$ rather than
+  $\sigma$, or in log-odds rather than a probability, usually makes the posterior more Gaussian.
+- **Indefinite Hessians.** At a saddle point or a poorly converged optimum, $\Amat$ is not positive definite and the
+  "covariance" is meaningless.

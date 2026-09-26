@@ -1,0 +1,135 @@
+---
+title: Source coding theorem
+kind: concept
+summary: No lossless prefix code for a symbol $X$ uses fewer than $\entropy(X)$ bits per symbol on average, and lengths $\lceil -\log_2 p(x) \rceil$ come within one bit of it. Coding long blocks approaches $\entropy(X)$, the limit of lossless compression.
+tags: [information-theory, compression, coding, worked-example]
+aliases: [Shannon's source coding theorem, noiseless coding theorem, Kraft inequality, Kraft–McMillan inequality, prefix code, Huffman coding, Shannon code]
+requires: [entropy, kl-divergence]
+related: [cross-entropy-and-perplexity]
+references: [shannon1948, huffman1952, cover2006, mackay2003]
+status: draft
+updated: 2026-09-26
+---
+
+import { HuffmanCode } from './HuffmanCode'
+
+<Definition>
+Let $X$ take values in a finite set with probabilities $p(x)$, and let a binary code assign each value a codeword of
+length $\ell(x)$ bits, with no codeword a prefix of another. Then the expected length satisfies
+
+$$
+\entropy(X) \le \expect[\ell(X)],
+$$
+
+and there is such a code with $\expect[\ell(X)] < \entropy(X) + 1$, where $\entropy$ is the entropy in bits. Coding
+blocks of $n$ independent symbols at once brings the length per symbol within $1/n$ of $\entropy(X)$
+<Cite id="shannon1948" />.
+</Definition>
+
+## Prefix codes
+
+A code is a **prefix code** if no codeword is the start of another. A concatenated stream of codewords then decodes
+without separators: read bits until they form a codeword, output its symbol, and start again. For example, with the
+codewords $0, 10, 110, 111$, the stream $0110100$ splits uniquely as $0 \mid 110 \mid 10 \mid 0$.
+
+A prefix code is a binary tree: each codeword is the path from the root to a leaf, with 0 for left and 1 for right,
+and no codeword sits on the path to another.
+
+## Kraft inequality
+
+Codeword lengths $\ell_1, \dots, \ell_K$ are achievable by a binary prefix code if and only if
+
+$$
+\sum_{k=1}^K 2^{-\ell_k} \le 1.
+$$
+
+**Proof that prefix codes satisfy it.** Let $L = \max_k \ell_k$ and extend the code tree to a full binary tree of depth
+$L$, which has $2^L$ leaves. The codeword of length $\ell_k$ sits at depth $\ell_k$, and the subtree below it contains
+$2^{L - \ell_k}$ of the leaves at depth $L$. No codeword is a prefix of another, so these subtrees do not overlap.
+Therefore $\sum_k 2^{L - \ell_k} \le 2^L$; divide by $2^L$.
+
+**Proof of the converse.** Given lengths that satisfy the inequality, sort them in increasing order and assign
+codewords greedily: give each length the leftmost node at that depth whose subtree is not already used. Each
+assignment uses up a fraction $2^{-\ell_k}$ of the leaves at depth $L$, and the inequality guarantees they never run
+out <Cite id="cover2006" />.
+
+## The lower bound: entropy
+
+Let $\ell$ satisfy the Kraft inequality, write $Z = \sum_x 2^{-\ell(x)} \le 1$, and define the distribution
+$r(x) = 2^{-\ell(x)}/Z$, so that $\ell(x) = -\log_2 r(x) - \log_2 Z$. Then
+
+$$
+\expect[\ell(X)] - \entropy(X) = \sum_x p(x)\paren{-\log_2 r(x) - \log_2 Z} + \sum_x p(x) \log_2 p(x) = \KL(p \,\|\,
+r) - \log_2 Z.
+$$
+
+Both terms are non-negative: the <NoteLink to="kl-divergence">KL divergence</NoteLink> always, and $-\log_2 Z$ because
+$Z \le 1$. So $\expect[\ell(X)] \ge \entropy(X)$, with equality exactly when $\ell(x) = -\log_2 p(x)$ for every $x$,
+which requires every probability to be a power of $\tfrac12$.
+
+## The upper bound: Shannon code lengths
+
+Choose $\ell(x) = \lceil -\log_2 p(x) \rceil$. These lengths satisfy the Kraft inequality, because
+$2^{-\lceil -\log_2 p(x) \rceil} \le 2^{\log_2 p(x)} = p(x)$ and the probabilities sum to 1. So a prefix code with these
+lengths exists, and since $\lceil t \rceil < t + 1$,
+
+$$
+\expect[\ell(X)] < \sum_x p(x) \paren{-\log_2 p(x) + 1} = \entropy(X) + 1.
+$$
+
+The one-bit overhead comes from rounding each length up to a whole number of bits.
+
+## Blocks approach the entropy
+
+Code $n$ independent copies $(X_1, \dots, X_n)$ as a single symbol. Its entropy is $n\,\entropy(X)$ by the chain rule
+for independent variables, so a code for the block has expected length between $n\,\entropy(X)$ and
+$n\,\entropy(X) + 1$. Per original symbol,
+
+$$
+\entropy(X) \le \frac{\expect[\ell(X_1, \dots, X_n)]}{n} < \entropy(X) + \frac1n.
+$$
+
+As $n$ grows the overhead vanishes: $\entropy(X)$ bits per symbol is achievable in the limit and cannot be beaten. This
+is Shannon's source coding theorem, and it gives entropy its operational meaning as the limit of lossless compression.
+
+## Huffman coding
+
+Huffman's algorithm builds an optimal prefix code: one with the smallest possible expected length among all prefix
+codes for the given probabilities <Cite id="huffman1952" />. Repeatedly merge the two least probable symbols (or merged
+groups) into one node whose probability is their sum, until one node remains. The merges form the code tree.
+
+**Worked example.** For five symbols with probabilities $0.4, 0.2, 0.2, 0.1, 0.1$:
+
+1. Merge the two $0.1$ symbols into a node of probability $0.2$.
+2. Three nodes now have probability $0.2$. Merge two of them into $0.4$.
+3. Merge the remaining $0.2$ with one of the two $0.4$ nodes into $0.6$.
+4. Merge $0.6$ and $0.4$ into the root.
+
+One resulting code has lengths $2, 2, 2, 3, 3$, with expected length
+$0.4 \cdot 2 + 0.2 \cdot 2 + 0.2 \cdot 2 + 0.1 \cdot 3 + 0.1 \cdot 3 = 2.2$ bits. Ties in the merges can give other
+lengths, such as $1, 2, 3, 4, 4$, with the same expected length. The entropy is $2.122$ bits, and Shannon's lengths
+$\lceil -\log_2 p \rceil = 2, 3, 3, 4, 4$ give $2.8$ bits: within the one-bit bound, but worse than Huffman.
+
+<HuffmanCode />
+
+## Coding with the wrong distribution
+
+A code designed for a distribution $q$, with lengths $\lceil -\log_2 q(x) \rceil$, used on symbols that actually follow
+$p$, has expected length
+
+$$
+\expect_p\brack{\lceil -\log_2 q(X) \rceil} < \entropy(p, q) + 1 = \entropy(p) + \KL(p \,\|\, q) + 1.
+$$
+
+The penalty for the wrong model is $\KL(p \,\|\, q)$ bits per symbol, which is the coding meaning of
+<NoteLink to="cross-entropy-and-perplexity">cross-entropy</NoteLink>. A model with lower cross-entropy is a better
+compressor; this is why language-model quality is often reported in bits per character or per byte.
+
+## Pitfalls
+
+- **Whole bits.** Symbol-by-symbol codes waste up to a bit per symbol, which matters for highly skewed sources.
+  Arithmetic coding removes this overhead by coding the whole message as one number.
+- **Known distribution.** The theorem assumes $p$ is known. Real compressors estimate it, and pay the KL divergence
+  between the estimate and the truth.
+- **Lossless only.** Lossy compression trades bits for distortion; its limit is the rate–distortion function, not
+  the entropy.

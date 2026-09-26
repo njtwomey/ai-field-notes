@@ -1,0 +1,144 @@
+---
+title: CAVI for a Gaussian with unknown mean and precision
+kind: example
+summary: Mean-field variational inference for data $x_i \sim \Gauss(\mu, \tau^{-1})$ with a Normal-Gamma prior. The optimal factors are a Gaussian $q(\mu)$ and a gamma $q(\tau)$, updated in turn. The ELBO rises to just below $\log p(x)$; $q$ gets $\expect[\mu]$ and $\expect[\tau]$ exactly right but is too narrow in $\mu$.
+tags: [worked-example, variational-inference, bayesian]
+aliases: [variational Bayes for a Gaussian, univariate Gaussian mean-field, Normal-Gamma CAVI]
+requires: [mean-field-variational-inference]
+related: [evidence-lower-bound, gaussian-distribution, gamma-distribution, exponential-family]
+references: [bishop2006, blei2017]
+status: draft
+updated: 2026-09-26
+---
+
+import { CaviNormalGamma } from './CaviNormalGamma'
+
+<Definition>
+Observations $x_1, \dots, x_N$ are independent draws from $\Gauss(\mu, \tau^{-1})$, where both the mean $\mu$ and the
+precision $\tau$ are unknown. The prior is $\mu \mid \tau \sim \Gauss\paren{\mu_0, (\lambda_0\tau)^{-1}}$ and
+$\tau \sim \GammaD(a_0, b_0)$, with shape $a_0$ and rate $b_0$. Approximate the posterior $p(\mu, \tau \mid \xvec)$ by a
+factorised $q(\mu)\, q(\tau)$ that maximises the evidence lower bound <Cite id="bishop2006" />.
+</Definition>
+
+## Setup
+
+The exact posterior of this model is known in closed form, so the example shows exactly what the mean-field
+approximation keeps and what it loses. The log joint density, keeping every term that involves $\mu$ or $\tau$, is
+
+$$
+\log p(\xvec, \mu, \tau) = \frac{N}{2}\log\tau - \frac{\tau}{2}\sum_{i=1}^N (x_i - \mu)^2
++ \frac{1}{2}\log\tau - \frac{\lambda_0\tau}{2}(\mu - \mu_0)^2 + (a_0 - 1)\log\tau - b_0\tau + \text{const}.
+$$
+
+The three groups of terms come from the likelihood, the prior on $\mu$ given $\tau$, and the prior on $\tau$. Write
+$\bar x$ for the sample mean.
+
+## Solution
+
+By <NoteLink to="mean-field-variational-inference">mean-field variational inference</NoteLink>, each optimal factor is
+$\log q^*(\cdot) = \expect_{\text{other}}[\log p(\xvec, \mu, \tau)] + \text{const}$.
+
+### The factor $q(\mu)$
+
+Take the expectation over $q(\tau)$ and keep the terms in $\mu$. Only $\expect[\tau]$ appears:
+
+$$
+\log q^*(\mu) = -\frac{\expect[\tau]}{2}\brack{\sum_{i=1}^N (x_i - \mu)^2 + \lambda_0(\mu - \mu_0)^2} + \text{const}.
+$$
+
+This is a quadratic in $\mu$, so $q^*(\mu)$ is Gaussian. Collecting the coefficient of $\mu^2$ gives the precision, and
+the coefficient of $\mu$ gives the mean:
+
+$$
+q^*(\mu) = \Gauss\paren{\mu_N, \lambda_N^{-1}}, \qquad
+\mu_N = \frac{\lambda_0\mu_0 + N\bar x}{\lambda_0 + N}, \qquad \lambda_N = (\lambda_0 + N)\,\expect[\tau].
+$$
+
+### The factor $q(\tau)$
+
+Take the expectation over $q(\mu)$ and keep the terms in $\tau$:
+
+$$
+\log q^*(\tau) = \paren{a_0 + \frac{N + 1}{2} - 1}\log\tau
+- \tau\brack{b_0 + \frac{1}{2}\expect_\mu\brack{\sum_{i=1}^N (x_i - \mu)^2 + \lambda_0(\mu - \mu_0)^2}} + \text{const}.
+$$
+
+This is the log of a <NoteLink to="gamma-distribution">gamma density</NoteLink>. Using
+$\expect_\mu[(c - \mu)^2] = (c - \mu_N)^2 + 1/\lambda_N$ for each squared term,
+
+$$
+q^*(\tau) = \GammaD(a_N, b_N), \qquad a_N = a_0 + \frac{N + 1}{2}, \qquad
+b_N = b_0 + \frac{1}{2}\brack{\sum_{i=1}^N (x_i - \mu_N)^2 + \lambda_0(\mu_N - \mu_0)^2 + \frac{N + \lambda_0}{\lambda_N}}.
+$$
+
+### The coordinate ascent
+
+The mean $\mu_N$ and the shape $a_N$ do not depend on the other factor, so they are fixed after one update. Only
+$\lambda_N$ and $b_N$ interact, through $\expect[\tau] = a_N / b_N$. CAVI alternates: set $b_N$ from the current
+$\lambda_N$, then set $\lambda_N = (\lambda_0 + N)\, a_N / b_N$. Each update maximises the ELBO in one factor, so the
+ELBO never decreases.
+
+### Comparison with the exact posterior
+
+The exact posterior is Normal-Gamma: $\mu \mid \tau \sim \Gauss\paren{\mu_N, ((\lambda_0 + N)\tau)^{-1}}$ with the same
+$\mu_N$, and $\tau \sim \GammaD(a', b')$ with
+
+$$
+a' = a_0 + \frac{N}{2}, \qquad
+b' = b_0 + \frac{1}{2}\sum_{i=1}^N (x_i - \bar x)^2 + \frac{\lambda_0 N (\bar x - \mu_0)^2}{2(\lambda_0 + N)}.
+$$
+
+<Derivation title="At convergence, E_q[τ] equals the exact posterior mean a′/b′">
+The sum in $b_N$ decomposes around $\bar x$: $\sum_i (x_i - \mu_N)^2 + \lambda_0(\mu_N - \mu_0)^2 =
+\sum_i (x_i - \bar x)^2 + \lambda_0 N(\bar x - \mu_0)^2/(\lambda_0 + N)$, because $\mu_N$ is the precision-weighted
+average of $\bar x$ and $\mu_0$. Therefore $b_N = b' + (N + \lambda_0)/(2\lambda_N)$. At the fixed point
+$\lambda_N = (\lambda_0 + N)\, \expect_q[\tau]$, so $b_N = b' + 1/(2\expect_q[\tau])$. Substituting into
+$\expect_q[\tau] = a_N / b_N$ with $a_N = a' + \tfrac{1}{2}$:
+
+$$
+\expect_q[\tau]\, b' + \tfrac{1}{2} = a' + \tfrac{1}{2} \quad\Longrightarrow\quad \expect_q[\tau] = \frac{a'}{b'},
+$$
+
+which is the exact posterior mean of $\tau$.
+</Derivation>
+
+Three consequences follow. The mean of $\mu$ is exact: both are $\mu_N$. The mean of $\tau$ is exact at convergence,
+as the derivation shows. The variance of $\mu$ is too small. Under $q$ it is
+$1/\lambda_N = b'/\paren{a'(\lambda_0 + N)}$, while the exact posterior variance of $\mu$, a Student $t$ marginal, is
+$b'/\paren{(a' - 1)(\lambda_0 + N)}$. The ratio is $1 - 1/a'$, so the mean-field approximation understates the
+uncertainty in $\mu$ most for small samples. It cannot represent the posterior's dependence between $\mu$ and $\tau$:
+the exact posterior is wider in $\mu$ where $\tau$ is small, and the factorised $q$ averages that away.
+
+### Numbers
+
+Take the ten observations $0.53, 1.8, 0.2, 1.1, 0.9, 1.4, 0.75, 1.9, 0.1, 1.2$, with $\bar x = 0.988$, and the prior
+$\mu_0 = 0$, $\lambda_0 = 1$, $a_0 = b_0 = 1$. Then $\mu_N = 9.88/11 = 0.898$, $a_N = 6.5$, $a' = 6$ and
+$b' = 3.145$. Starting from $\expect[\tau] = 0.1$, the ELBO after successive half-updates is $-24.52, -16.71, -14.26,
+-12.74, -12.55, \dots$ and converges to $-12.516$. The log evidence is $-12.475$, so the remaining gap
+$\KL(q \,\|\, p) = 0.041$. At convergence $\expect_q[\tau] = 1.908 = a'/b'$, and the standard deviation of $\mu$ is
+$0.218$ under $q$ against $0.239$ exactly, a ratio of $\sqrt{5/6} = 0.913$.
+
+## Simulation
+
+<CaviNormalGamma />
+
+## What it illustrates
+
+- **Optimal factors from the model's structure.** No family was assumed for $q(\mu)$ or $q(\tau)$. The Gaussian and
+  gamma forms fall out of the mean-field update because the model is conditionally conjugate; see
+  <NoteLink to="exponential-family">exponential family</NoteLink>.
+- **Monotone coordinate ascent.** The ELBO rises at every half-update and stops just short of the log evidence, as
+  <NoteLink to="evidence-lower-bound">evidence lower bound</NoteLink> requires.
+- **Mean-field underestimates variance.** The means are right; the spread in $\mu$ is too small by the factor
+  $\sqrt{1 - 1/a'}$, a concrete instance of the reverse KL divergence preferring narrow approximations.
+
+## Variations
+
+- **More data.** As $N$ grows, $a'$ grows and the variance ratio $1 - 1/a'$ tends to 1. The posterior dependence
+  between $\mu$ and $\tau$ weakens and the mean-field approximation becomes accurate.
+- **A strong prior.** A large $\lambda_0$ pulls $\mu_N$ towards $\mu_0$ in both the exact and the approximate posterior.
+  The variance ratio $1 - 1/a'$ does not change, because $a'$ does not depend on $\lambda_0$: a stronger prior on $\mu$
+  narrows both posteriors without closing the gap between them.
+- **An independent prior.** With $\mu \sim \Gauss(\mu_0, \sigma_0^2)$ independent of $\tau$, the exact posterior has no
+  closed form, but the mean-field updates keep the same Gaussian and gamma forms. This is the usual situation in which
+  variational inference is used.

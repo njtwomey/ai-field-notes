@@ -1,0 +1,109 @@
+---
+title: Peeking and optional stopping
+kind: example
+summary: Checking an A/B test after every batch of users and stopping at the first p < 0.05 raises the false-positive rate to 19% with 10 looks and 37% with 100, even when nothing differs. Group-sequential boundaries such as Pocock's or O'Brien–Fleming's restore the 5% rate.
+tags: [worked-example, hypothesis-testing, ab-testing, sequential-testing]
+aliases: [peeking, optional stopping, continuous monitoring, sequential testing, group sequential design, Pocock boundary, O'Brien–Fleming boundary, sampling to a foregone conclusion, alpha spending]
+requires: [p-value, z-test]
+related: [significance-level, type-i-and-type-ii-errors, sample-size-planning, multiple-testing, many-metrics-and-variants]
+references: [armitage1969, pocock1977, obrien1979, jennison2000, johari2017]
+status: draft
+updated: 2026-09-26
+---
+
+import { Peeking } from './Peeking'
+
+<Definition>
+An A/A test splits users between two identical versions of a product, so every null hypothesis is true. It is planned
+for 10,000 users per arm and a two-sided $z$-test at $\alpha = 0.05$. Instead of waiting, the analyst looks at the
+p-value after every 1,000 users per arm and stops as soon as $p < 0.05$. What is the probability of declaring a
+difference?
+</Definition>
+
+## Setup
+
+Split the experiment into $K = 10$ equal batches. Let $X_i$ be the standardised difference in means computed from
+batch $i$ alone. Under the null hypothesis the batches are independent and $X_i \sim \Gauss(0, 1)$. After $j$
+batches, the $z$-statistic for all the data so far is
+
+$$
+Z_j = \frac{S_j}{\sqrt j}, \qquad S_j = X_1 + \dots + X_j,
+$$
+
+because $S_j$ has variance $j$. Each $Z_j$ on its own is standard normal, so each single look is a valid test at level
+$\alpha$. The procedure rejects if $\abs{Z_j} \ge z$ at any look $j \le K$, with $z = z_{1 - \alpha/2} = 1.96$. The
+question asks for
+
+$$
+P\paren{\max_{j \le K} \abs{Z_j} \ge z}.
+$$
+
+## Solution
+
+The looks are not independent: they share data. For $i \le j$,
+
+$$
+\cov(Z_i, Z_j) = \frac{\cov(S_i, S_j)}{\sqrt{ij}} = \frac{\var(S_i)}{\sqrt{ij}} = \frac{i}{\sqrt{ij}} = \sqrt{\frac{i}{j}},
+$$
+
+since $S_j = S_i + (X_{i+1} + \dots + X_j)$ and the added batches are independent of $S_i$. Consecutive looks late in
+the experiment are highly correlated; early looks are nearly independent of late ones.
+
+**Two looks.** $(Z_1, Z_2)$ is bivariate normal with correlation $\sqrt{1/2} = 0.707$. The probability that neither
+crosses is the bivariate normal probability of the square $\abs{z_1} < 1.96$, $\abs{z_2} < 1.96$, which is 0.917. The
+false-positive rate is therefore $1 - 0.917 = 0.083$, not 0.05. The second look adds 0.033: the chance that the
+statistic crosses at the second look after missing at the first.
+
+**K looks.** Each extra look adds a smaller increment, because it is more correlated with the looks before it, but the
+increments never stop. Propagating the distribution of $S_j$ look by look, discarding the paths that have crossed,
+gives the exact rates <Cite id="armitage1969" />:
+
+| Looks $K$ | 1 | 2 | 5 | 10 | 20 | 50 | 100 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| $P(\text{false positive})$ | 0.050 | 0.083 | 0.142 | 0.193 | 0.248 | 0.320 | 0.373 |
+
+With 10 looks the analyst declares a difference in 19% of A/A tests, almost four times the nominal rate.
+
+**Unlimited looks.** If the experiment can run indefinitely and is checked after every user, the rate tends to 1. The
+law of the iterated logarithm states that $\limsup_{n \to \infty} S_n / \sqrt{2n \log\log n} = 1$ with probability 1. So
+$Z_n = S_n / \sqrt n$ exceeds $(1 - \epsilon)\sqrt{2\log\log n}$ infinitely often for every $\epsilon > 0$. That bound
+grows without limit, so $\abs{Z_n}$ eventually passes 1.96, or any fixed threshold, with certainty. An analyst who
+keeps collecting data until the test is significant is guaranteed to get there. This is sampling to a foregone
+conclusion.
+
+## Simulation
+
+<Peeking />
+
+## What it illustrates
+
+- **A p-value is valid for one planned analysis.** Its guarantee assumes the sample size was fixed in advance.
+  Choosing when to stop by looking at the <NoteLink to="p-value">p-value</NoteLink> changes the procedure, and the
+  procedure's error rate is what matters. The individual looks are each calibrated; the rule "stop at the first
+  significant one" is not.
+- **Peeking is multiple testing through time.** Each look is another test of the same hypothesis. It inflates the error
+  rate less than independent tests would, because the looks are correlated, but by far more than most people expect.
+  See <NoteLink to="multiple-testing">multiple testing</NoteLink> and
+  <NoteLink to="many-metrics-and-variants">many metrics and variants</NoteLink>.
+- **Fixing the horizon is the simplest remedy.** Choose the sample size with
+  <NoteLink to="sample-size-planning">sample-size planning</NoteLink>, run to that size, and test once. Monitoring the
+  dashboard is harmless as long as the stopping decision ignores it.
+
+## Variations
+
+- **Pocock's boundary.** Use the same raised threshold $c$ at every look, chosen so that
+  $P(\max_{j \le K} \abs{Z_j} \ge c) = \alpha$ <Cite id="pocock1977" />. For $K = 5$ and $\alpha = 0.05$, $c = 2.413$; for
+  $K = 10$, $c = 2.555$. The overall rate is exactly 0.05, but the final analysis needs $\abs{Z} \ge 2.41$ rather than
+  1.96, so a test that runs to the end has less power than a fixed-sample test of the same size.
+- **O'Brien–Fleming's boundary.** Use $c\sqrt{K/j}$ at look $j$, which is very strict early and close to 1.96 at the
+  end <Cite id="obrien1979" />. For $K = 5$ and $\alpha = 0.05$, $c = 2.040$, giving thresholds 4.56, 3.23, 2.63, 2.28
+  and 2.04. Early stopping needs overwhelming evidence, and the final test loses almost nothing to the interim looks.
+  Most clinical trials with interim analyses use boundaries of this shape, often through an alpha-spending function
+  that allows unequal or unplanned looks <Cite id="jennison2000" />.
+- **Always-valid p-values.** Sequential tests such as the mixture sequential probability ratio test produce p-values
+  that remain valid however often they are checked and whenever the experiment stops <Cite id="johari2017" />. They
+  suit online experimentation, where continuous monitoring is the norm, at some cost in power relative to a
+  well-planned fixed-horizon test.
+- **Peeking under a real effect.** When the treatment works, early stopping on a crossing selects experiments whose
+  noise pushed the estimate up. The estimate at stopping is exaggerated, as in the
+  <NoteLink to="winners-curse">winner's curse</NoteLink>.

@@ -227,8 +227,9 @@ Notes are encyclopedia entries, not blog posts. Every sentence must carry inform
 - **Self-contained.** A reader who knows only the prerequisites in `requires` must understand the note. Mention
   related ideas with `<NoteLink>`, but never rely on the linked note to finish an explanation.
 - **Layered depth.**
-  - The frontmatter `summary` (≤ 280 characters) defines the idea completely. It appears in search results, hover
-    cards and lists.
+  - The frontmatter `summary` (≤ 280 characters as read) defines the idea completely. It appears in search results, hover
+    cards and lists. Write its maths as `$…$`, which is rendered with KaTeX and the macros; never Unicode look-alikes
+    such as ∑, ≤, ′, ² or ₁.
   - The `<Definition>` block states it precisely.
   - The body adds detail in the section order of the note's kind (templates in `docs/templates/`).
   - `<Derivation>` holds optional depth. The note must read completely with it collapsed.

@@ -1,8 +1,8 @@
 import type { ComponentType } from 'react'
-import { notes, references, taxonomy } from 'virtual:content'
+import { contentErrors, notes, references, taxonomy } from 'virtual:content'
 import type { CategoryNode, NoteKind, NoteMeta, Reference } from '@/lib/content-schema'
 
-export { notes, references, taxonomy }
+export { contentErrors, notes, references, taxonomy }
 export type { CategoryNode, NoteKind, NoteMeta, Reference }
 
 export const notesBySlug: ReadonlyMap<string, NoteMeta> = new Map(notes.map((n) => [n.slug, n]))

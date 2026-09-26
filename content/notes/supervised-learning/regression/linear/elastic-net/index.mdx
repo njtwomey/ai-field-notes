@@ -1,0 +1,147 @@
+---
+title: Elastic net
+kind: concept
+summary: The elastic net penalises least squares with a mix of the lasso's L1 norm and ridge's squared L2 norm. It keeps the lasso's exact zeros but, unlike the lasso, shares weight within groups of correlated features and can select more features than samples.
+tags: [regression, regularisation, linear-models, sparsity, feature-selection, worked-example]
+aliases: [elastic-net regression, ElasticNet, L1 + L2 regularisation]
+requires: [lasso, ridge-regression]
+related: [least-angle-regression]
+code: linear-models
+references: [zou2005, friedman2010, hastie2009]
+status: draft
+updated: 2026-09-26
+---
+
+import { PenaltyGeometry } from '../_shared/PenaltyGeometry'
+import { ElasticNetPaths } from './ElasticNetPaths'
+
+<Definition>
+The elastic net fits a linear model by least squares with a penalty that mixes the lasso's L1 norm and ridge's
+squared L2 norm. A mixing ratio $\rho \in [0, 1]$ sets the share of the L1 term: $\rho = 1$ is the
+<NoteLink to="lasso">lasso</NoteLink>, $\rho = 0$ is <NoteLink to="ridge-regression">ridge regression</NoteLink>
+<Cite id="zou2005" />.
+</Definition>
+
+## Why mix the penalties
+
+The lasso and ridge each fail in a way the other does not.
+
+- **The lasso picks one of a correlated group.** When several features carry nearly the same information, the lasso
+  tends to keep one and set the others exactly to zero. Which one it keeps depends on small details of the sample. On
+  the diabetes data, the serum measurements s1 and s2 have correlation 0.90; the lasso lets s1 in at $\alpha = 3.2$
+  and holds s2 at zero until $\alpha = 0.25$.
+- **The lasso saturates.** With more features than samples ($d > n$), the lasso selects at most $n$ features. In
+  genomics, with tens of thousands of genes and a few hundred patients, that cap binds.
+- **Ridge never selects.** Ridge shares weight smoothly across correlated features and has no cap, but it keeps every
+  feature: no coefficient is ever exactly zero.
+
+The constraint regions show why, and what a mixture keeps. Write the penalty as
+$r\norm{\wvec}_1 + (1 - r)\norm{\wvec}_2^2$ with a mixing weight $r$, and look at the set where it is at most 1. For
+$r = 1$ it is the lasso's diamond. For $r = 0$ it is ridge's disc. For $r$ in between, the set keeps the diamond's
+corners on the axes, so a penalised solution can still land exactly on an axis and zero a coefficient. But its edges
+curve outwards, so the set is **strictly convex**: the straight edges of the diamond are gone.
+
+The straight edges are what make the lasso unstable. When two features are correlated, the least-squares error
+changes little along the direction $w_1 = -w_2$, and the OLS solution is uncertain in exactly that direction. A lasso
+solution on a flat edge follows the OLS point along the edge and jumps into a corner, dropping a feature. A curved
+edge resists: the penalty now increases along that direction, which pins the solution to one point between the axes
+and shares the weight.
+
+<PenaltyGeometry mode="elastic" />
+
+In the figure, with correlation $\rho = 0.7$ between the two features, moving the OLS point from $(2.2, 1.0)$ to
+$(1.8, 1.4)$ moves the lasso solution from the corner $(1, 0)$ to $(0.70, 0.30)$. The elastic-net solution with
+$r = 0.5$ moves only from $(0.71, 0.51)$ to $(0.65, 0.58)$.
+
+## Objective
+
+In scikit-learn's parameterisation <Cite id="friedman2010" />, with $n$ samples, standardised features and a centred
+target, the elastic net minimises
+
+$$
+L(\wvec) = \frac{1}{2n}\norm{\yvec - \Xmat\wvec}^2 + \alpha\rho\norm{\wvec}_1 + \frac{\alpha(1 - \rho)}{2}\norm{\wvec}_2^2,
+$$
+
+where $\alpha \ge 0$ sets the overall strength and $\rho$ is the `l1_ratio`. For $\rho < 1$ the quadratic term makes
+$L$ strictly convex, so the solution is unique even when $d > n$ or features are exactly collinear, and the number of
+nonzero coefficients is no longer capped at $n$.
+
+### Coordinate descent
+
+Holding all coefficients but $w_j$ fixed, with partial residual $\rvec_j = \yvec - \sum_{k \neq j}\xvec_k w_k$ and
+$z_j = \xvec_j^\top\rvec_j / n$, the terms of $L$ involving $w_j$ are
+
+$$
+\tfrac{1}{2}\bigl(1 + \alpha(1 - \rho)\bigr)w_j^2 - z_j w_j + \alpha\rho\abs{w_j} + \text{const}.
+$$
+
+Zero must lie in the subdifferential, $(1 + \alpha(1 - \rho))\,w_j - z_j + \alpha\rho\,\partial\abs{w_j}$. The same
+case analysis as for the lasso gives
+
+$$
+w_j = \frac{S(z_j,\ \alpha\rho)}{1 + \alpha(1 - \rho)}, \qquad S(z, a) = \sgn(z)\max(\abs{z} - a,\ 0).
+$$
+
+The L1 part soft-thresholds, which produces zeros; the L2 part then divides, which shrinks proportionally. Cyclic
+coordinate descent with this update and warm starts along a grid of $\alpha$ computes the whole path, as for the lasso
+<Cite id="friedman2010" />.
+
+## The grouping effect
+
+Zou and Hastie wrote the penalty as $\lambda_1\norm{\wvec}_1 + \lambda_2\norm{\wvec}_2^2$ on the objective
+$\norm{\yvec - \Xmat\wvec}^2$, with the columns of $\Xmat$ scaled to unit length. They proved that correlated
+features get similar coefficients <Cite id="zou2005" />:
+
+$$
+\abs{\hat w_i - \hat w_j} \le \frac{\norm{\yvec}}{\lambda_2}\sqrt{2(1 - \rho_{ij})} \quad \text{whenever } \hat w_i \hat w_j > 0,
+$$
+
+where $\rho_{ij} = \xvec_i^\top\xvec_j$ is the correlation between features $i$ and $j$. As the correlation tends to 1,
+the two coefficients are forced together. The lasso ($\lambda_2 = 0$) has no such bound.
+
+<Derivation title="Proof of the grouping bound">
+Both coefficients are nonzero with the same sign $s$, so the optimality conditions for $i$ and $j$ are equations:
+$-2\xvec_i^\top\rvec + \lambda_1 s + 2\lambda_2\hat w_i = 0$ and the same with $j$, where
+$\rvec = \yvec - \Xmat\hat\wvec$. Subtracting cancels the $\lambda_1$ terms:
+
+$$
+2\lambda_2(\hat w_i - \hat w_j) = 2(\xvec_i - \xvec_j)^\top\rvec.
+$$
+
+By the Cauchy–Schwarz inequality, $\abs{\hat w_i - \hat w_j} \le \norm{\xvec_i - \xvec_j}\,\norm{\rvec}/\lambda_2$.
+For unit-length columns, $\norm{\xvec_i - \xvec_j}^2 = 2 - 2\xvec_i^\top\xvec_j = 2(1 - \rho_{ij})$. Finally
+$\hat\wvec$ minimises the objective, which at $\wvec = \zeros$ equals $\norm{\yvec}^2$, so
+$\norm{\rvec}^2 \le \norm{\yvec}^2$. Combining the three gives the bound.
+</Derivation>
+
+## Naive and corrected elastic net
+
+Zou and Hastie noted that the combined penalty shrinks twice: once by the L1 term and again by the L2 term. They
+called the minimiser above the **naive** elastic net and proposed rescaling it, $\hat\wvec_{\text{EN}} = (1 + \lambda_2)\,\hat\wvec_{\text{naive}}$,
+to undo the extra ridge shrinkage while keeping its grouping effect <Cite id="zou2005" />. scikit-learn's
+`ElasticNet` and glmnet return the unscaled minimiser; the rescaling is rarely applied in practice, because
+$\alpha$ and $\rho$ are chosen by cross-validation and absorb much of the difference.
+
+## Paths on the diabetes data
+
+<ElasticNetPaths />
+
+At $\alpha = 1$ and $\rho = 0.5$, all ten coefficients are nonzero and s1 and s2 are $-0.24$ and $-2.37$: same sign,
+unlike their OLS values of $-37.7$ and $+22.7$. As $\rho$ falls, the paths become smoother and more features are
+active at any $\alpha$.
+
+## Practice
+
+- **Tune both parameters.** Cross-validate over a grid of $\rho$ values (for example 0.1, 0.5, 0.9, 0.95, 0.99, 1) and,
+  for each, a path of $\alpha$. scikit-learn's `ElasticNetCV` does this.
+- **Standardise.** Both penalty terms depend on the features' units.
+- **Solvers.** Coordinate descent is the standard exact solver. For data too large for memory, stochastic gradient
+  descent minimises the same objective approximately; see <NoteLink to="sgd-for-linear-models">SGD for linear models</NoteLink>.
+
+## Pitfalls
+
+- **Two parameters to tune.** A poorly chosen $\rho$ gives either the lasso's instability or ridge's lack of
+  selection. Its value matters most when features are strongly correlated.
+- **Grouping is not identification.** The elastic net keeps a correlated group together, but it cannot say which
+  member of the group matters. Their shared coefficients describe the group.
+- **Shrinkage bias remains.** Coefficients are biased towards zero by both terms, so they understate true effects.

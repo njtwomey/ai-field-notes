@@ -1,0 +1,113 @@
+---
+title: The winner's curse
+kind: example
+summary: When a test has low power, the estimates that reach significance are the ones that happened to land far from the truth. Reported effects from such tests are exaggerated, sometimes several-fold, and some have the wrong sign. These are type M and type S errors.
+tags: [worked-example, hypothesis-testing, ab-testing, power]
+aliases: [type M error, type S error, exaggeration ratio, magnitude error, sign error, significance filter, retrodesign]
+requires: [type-i-and-type-ii-errors, z-test]
+related: [sample-size-planning, effect-size, confidence-intervals, p-value]
+references: [gelman2014, button2013, ioannidis2008]
+status: draft
+updated: 2026-09-26
+---
+
+import { WinnersCurse } from './WinnersCurse'
+
+<Definition>
+An A/B test compares the mean of an outcome between two arms of $n = 200$ users each. The outcome has standard
+deviation 1 in each arm, and the treatment raises the mean by $\theta = 0.1$. The test is two-sided at $\alpha = 0.05$.
+Among the experiments of this design that reach significance, how large is the estimated effect on average, and how
+often does it have the wrong sign?
+</Definition>
+
+## Setup
+
+The estimate is the difference in sample means, $\hat\theta = \bar y_B - \bar y_A$. Each sample mean has variance
+$1/n$, and the arms are independent, so
+
+$$
+\hat\theta \sim \Gauss(\theta, s^2), \qquad s = \sqrt{2/n} = 0.1.
+$$
+
+The test rejects when $\abs{\hat\theta} \ge z s$, with $z = z_{1-\alpha/2} = 1.96$. Write $d = \theta / s$ for the true
+effect measured in standard errors; here $d = 1$.
+
+Three quantities describe what significance implies about the estimate <Cite id="gelman2014" />:
+
+- the **power**, $P(\text{significant})$;
+- the **type S rate**, $P(\hat\theta < 0 \mid \text{significant})$, the chance that a significant estimate has the
+  wrong sign (for $\theta > 0$);
+- the **exaggeration ratio** or type M error, $\expect[\abs{\hat\theta} \mid \text{significant}] / \theta$, the factor by
+  which a significant estimate overstates the effect on average.
+
+## Solution
+
+Standardise: $\hat\theta / s \sim \Gauss(d, 1)$. The two rejection regions have probabilities
+
+$$
+P(\hat\theta \ge zs) = 1 - \Phi(z - d), \qquad P(\hat\theta \le -zs) = \Phi(-z - d),
+$$
+
+where $\Phi$ is the standard normal cdf. Their sum is the power, and the second, divided by the power, is the type S
+rate.
+
+For the exaggeration ratio, the partial mean of a normal variable beyond a threshold is needed. For
+$X \sim \Gauss(\mu, \sigma^2)$ and a threshold $c$, write $X = \mu + \sigma Z$ and $t = (c - \mu)/\sigma$. Since
+$\int_t^\infty u\, \phi(u)\, du = \phi(t)$, where $\phi$ is the standard normal density,
+
+$$
+\expect[X; X \ge c] = \mu\,\paren{1 - \Phi(t)} + \sigma\, \phi(t).
+$$
+
+Applying this to both tails, with $\mu = \theta$, $\sigma = s$ and $c = \pm zs$,
+
+$$
+\expect\brack{\abs{\hat\theta}; \text{significant}}
+= s\LB d\,\paren{1 - \Phi(z - d)} + \phi(z - d) \RB + s\LB -d\,\Phi(-z - d) + \phi(z + d) \RB.
+$$
+
+Dividing by the power and by $\theta$ gives the exaggeration ratio.
+
+With $d = 1$ and $z = 1.96$:
+
+- power $= 1 - \Phi(0.96) + \Phi(-2.96) = 0.170$;
+- type S rate $= \Phi(-2.96)/0.170 = 0.009$;
+- exaggeration ratio $= 2.49$.
+
+The test detects the effect only 17% of the time. When it does, the estimate is on average about 2.5 times the true
+effect. A team that ships on significance and reports the estimate will report a lift of about 0.25 standard
+deviations for an effect of 0.1.
+
+The effect is not a bias of the estimator. $\hat\theta$ is unbiased over all experiments. The exaggeration comes from
+the filter: significance selects the experiments whose noise happened to push the estimate far from zero.
+
+## Simulation
+
+<WinnersCurse />
+
+## What it illustrates
+
+- **Power is not only about missing effects.** The <NoteLink to="type-i-and-type-ii-errors">type II error</NoteLink>
+  view says a low-power test often misses a real effect. The winner's curse adds that when a low-power test succeeds,
+  its estimate is unreliable. A design with 80% power has an exaggeration ratio of about 1.12; one with 17% power, about
+  2.5.
+- **Significance is a filter on the data.** Conditioning on $p < \alpha$ changes the distribution of the estimate. A
+  <NoteLink to="confidence-intervals">confidence interval</NoteLink> computed after the filter is too far from zero in
+  the same way.
+- **Plan for the effect you expect.** <NoteLink to="sample-size-planning">Sample-size planning</NoteLink> for a
+  realistic effect, not an optimistic one, is the remedy. Computing the exaggeration ratio before running a test, a
+  "design analysis", shows whether a significant result will be believable <Cite id="gelman2014" />.
+- **Published effects shrink on replication.** Studies selected for significance overstate their effects, so
+  replications with larger samples tend to find smaller ones <Cite id="ioannidis2008" />. Small neuroscience studies are
+  a documented case <Cite id="button2013" />.
+
+## Variations
+
+- **The original example.** Gelman and Carlin re-analyse a study of parental attractiveness and the sex ratio of
+  children. A plausible true effect of 0.2 percentage points, measured with standard error 8.1, gives power 0.057, a type
+  S rate of 0.24 and an exaggeration ratio of 9.5 <Cite id="gelman2014" />. A significant result from that study says
+  almost nothing about the true effect.
+- **More users.** With $n = 1{,}000$ per arm, $d = 2.24$, the power is 0.61 and the exaggeration ratio 1.28. With
+  $n = 1{,}600$, the power reaches 0.81 and the ratio 1.12.
+- **Many tests at once.** Choosing the best of several variants or metrics is a stronger filter than one significance
+  test. The winning variant's estimate is exaggerated even when every comparison is well powered.

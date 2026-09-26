@@ -1,0 +1,120 @@
+---
+title: EM as variational inference
+kind: concept
+summary: Expectation–maximisation is coordinate ascent on the evidence lower bound $\Lcal(q, \theta)$. The E-step sets $q$ to the exact posterior $p(z \mid x, \theta)$, closing the gap to $\log p(x \mid \theta)$; the M-step maximises the bound over $\theta$. Together they never decrease the log-likelihood.
+tags: [calculus-of-variations, variational-inference, latent-variables, worked-example]
+aliases: [free-energy view of EM, variational EM, EM as coordinate ascent]
+requires: [evidence-lower-bound]
+related: [expectation-maximisation, gaussian-mixture-model, mean-field-variational-inference]
+references: [dempster1977, neal1998, bishop2006]
+status: draft
+updated: 2026-09-26
+---
+
+<Definition>
+For a model $p(\xvec, \zvec \mid \thetab)$ with latent variables $\zvec$ and parameters $\thetab$, define the bound
+
+$$
+\Lcal(q, \thetab) = \expect_q\brack{\log p(\xvec, \zvec \mid \thetab)} + \entropy[q].
+$$
+
+Expectation–maximisation (EM) starts from $\thetab^{(0)}$ and repeats two steps <Cite id="dempster1977" />:
+
+- **E-step:** $q^{(t)}(\zvec) = p(\zvec \mid \xvec, \thetab^{(t)})$;
+- **M-step:** $\thetab^{(t+1)} = \argmax_{\thetab}\ \expect_{q^{(t)}}\brack{\log p(\xvec, \zvec \mid \thetab)}$.
+
+Each step maximises $\Lcal$ over one of its two arguments, so EM is coordinate ascent on the evidence lower bound
+<Cite id="neal1998" />.
+</Definition>
+
+This note develops EM from the variational side. The
+<NoteLink to="expectation-maximisation">expectation–maximisation</NoteLink> note covers the algorithm itself: worked
+examples, the bound drawn step by step, its limit, the rate of convergence and the classic variants.
+
+## The decomposition behind EM
+
+The <NoteLink to="evidence-lower-bound">evidence lower bound</NoteLink> decomposition holds for every $\thetab$:
+
+$$
+\log p(\xvec \mid \thetab) = \Lcal(q, \thetab) + \KL\paren{q(\zvec) \,\|\, p(\zvec \mid \xvec, \thetab)}.
+$$
+
+The log-likelihood that EM maximises is the bound plus a non-negative gap. The gap depends on both $q$ and $\thetab$.
+
+## The E-step closes the gap
+
+With $\thetab = \thetab^{(t)}$ fixed, $\log p(\xvec \mid \thetab^{(t)})$ does not depend on $q$. Maximising $\Lcal$ over
+$q$ is therefore the same as minimising the KL term, which is zero when $q$ is the posterior under the current
+parameters. After the E-step,
+
+$$
+\Lcal\paren{q^{(t)}, \thetab^{(t)}} = \log p\paren{\xvec \mid \thetab^{(t)}}.
+$$
+
+The bound touches the log-likelihood at the current parameters.
+
+## The M-step raises the bound
+
+With $q = q^{(t)}$ fixed, the entropy $\entropy[q^{(t)}]$ does not depend on $\thetab$. Maximising $\Lcal$ over
+$\thetab$ is therefore maximising the expected complete-data log-likelihood
+$Q(\thetab) = \expect_{q^{(t)}}[\log p(\xvec, \zvec \mid \thetab)]$, which is the M-step. For models whose
+complete-data likelihood is an exponential family, this has a closed form: the usual maximum-likelihood estimates with
+counts replaced by expected counts.
+
+## Why the likelihood never decreases
+
+Chain the two facts with the decomposition at the new parameters:
+
+$$
+\log p\paren{\xvec \mid \thetab^{(t+1)}}
+= \Lcal\paren{q^{(t)}, \thetab^{(t+1)}} + \KL\paren{q^{(t)} \,\|\, p(\zvec \mid \xvec, \thetab^{(t+1)})}
+\ge \Lcal\paren{q^{(t)}, \thetab^{(t+1)}}
+\ge \Lcal\paren{q^{(t)}, \thetab^{(t)}}
+= \log p\paren{\xvec \mid \thetab^{(t)}}.
+$$
+
+The first inequality holds because the KL divergence is non-negative. The second holds because the M-step maximises
+$\Lcal$ over $\thetab$, so it does at least as well as the old value. The last equality is the E-step's tight bound.
+The argument needs only $\Lcal(q^{(t)}, \thetab^{(t+1)}) \ge \Lcal(q^{(t)}, \thetab^{(t)})$, so any M-step that
+merely increases $Q$ also works. That variant is generalised EM.
+
+## Worked example
+
+Fit the means $\mu_1, \mu_2$ of a two-component mixture with unit variances and equal weights to the data
+$x = (-2, -1, 1, 3)$, starting from $\mu = (-0.5, 0.5)$. The log-likelihood at the start is $-10.146$.
+
+**E-step.** Each responsibility is the posterior probability of a component,
+$r_{i1} = \Gauss(x_i \mid \mu_1, 1) / \brack{\Gauss(x_i \mid \mu_1, 1) + \Gauss(x_i \mid \mu_2, 1)}$. For the four points
+$r_{i1} = (0.881, 0.731, 0.269, 0.047)$.
+
+**M-step.** The expected complete-data log-likelihood is
+$\sum_i \sum_k r_{ik}\brack{-\tfrac{1}{2}(x_i - \mu_k)^2} + \text{const}$. Setting its derivative in $\mu_k$ to zero gives
+the responsibility-weighted mean, $\mu_k = \sum_i r_{ik} x_i / \sum_i r_{ik}$, so $\mu = (-1.080, 1.487)$.
+
+**Check.** At the new means the bound with the old responsibilities is $\Lcal = -8.813$ and the log-likelihood is
+$-7.967$. The ordering $-10.146 \le -8.813 \le -7.967$ is the chain of inequalities above. Iterating to convergence gives
+$\mu = (-1.397, 2.028)$ and a log-likelihood of $-7.607$. The
+<NoteLink to="gaussian-mixture-model">Gaussian mixture model</NoteLink> note steps through the same algorithm with full
+covariances.
+
+## Variants
+
+The full catalogue of variants is in <NoteLink to="expectation-maximisation">expectation–maximisation</NoteLink>. Two
+follow directly from the variational view.
+
+- **Partial E-steps.** Any $q$ that increases $\Lcal$ keeps the monotonicity argument, so the E-step can update the
+  responsibilities of one data point at a time. This is incremental EM <Cite id="neal1998" />.
+- **Variational EM.** When the exact posterior is intractable, restrict $q$ to a family such as the factorised one of
+  <NoteLink to="mean-field-variational-inference">mean-field variational inference</NoteLink>. The E-step no longer
+  closes the gap, and the algorithm maximises the bound rather than the likelihood.
+- **Variational Bayes.** Treating $\thetab$ as a random variable with a prior, and giving it its own factor in $q$,
+  replaces the M-step point estimate by a posterior factor. Every step is then a mean-field update.
+
+## Pitfalls
+
+- **Local optima.** Monotonicity guarantees convergence of the likelihood values, not a global maximum. Mixture models
+  have many local optima and are usually fitted from several starts.
+- **Degenerate solutions.** For mixtures with free variances, the likelihood is unbounded: a component can shrink onto a
+  single point. EM can follow such a path.
+- **Slow convergence.** When the posterior over $\zvec$ is very uncertain, each step moves $\thetab$ only a little. The
+  rate is linear, set by the fraction of missing information.

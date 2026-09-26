@@ -1,0 +1,150 @@
+---
+title: When is structure needed?
+kind: concept
+summary: 'Logistic regression is a CRF with no label-to-label features. A rank-1 transition potential splits a chain into independent parts, and when auto-correlations decay fast, a per-position classifier with context features learns almost as well as a structured model.'
+tags: [structured-prediction, sequence-models, logistic-regression, dependence, worked-example]
+aliases: [structured vs unstructured models, rank-1 transition potentials, auto-correlation and excess risk, need for structure modelling]
+requires: [conditional-random-field, logistic-regression]
+partOf: [structured-prediction]
+related: [occasionally-dishonest-casino, hidden-markov-model, crf-variants, singular-value-decomposition]
+references: [twomey2016, lafferty2001]
+status: draft
+updated: 2026-09-26
+---
+
+import { CasinoAutocorrelation } from './CasinoAutocorrelation'
+import { RankOneSplit } from './RankOneSplit'
+
+<Definition>
+A sequence labelling problem can be solved by a structured model, such as a <NoteLink to="conditional-random-field">conditional
+random field</NoteLink>, whose labels interact, or by an unstructured model, such as
+<NoteLink to="logistic-regression">logistic regression</NoteLink> at each position, which sees the sequence only through
+its features. Twomey, Diethe and Flach show that the unstructured model is the structured one with its label
+interactions removed, identify exactly when interactions leave labels independent, and relate the cost of ignoring
+structure to how fast the sequence's auto-correlations decay <Cite id="twomey2016" />.
+</Definition>
+
+## Logistic regression is a CRF without edges
+
+The linear-chain CRF on a sequence $\xvec$ of length $N$ is
+
+$$
+P_{\text{CRF}}(\yvec \mid \xvec) = \frac{1}{Z_{\text{CRF}}} \prod_{n=1}^{N} \exp\{\lambdavec^\top \fvec(y_{n-1}, y_n,
+\xvec, n)\},
+$$
+
+with unigram features $f_j(\emptyset, y_n, \xvec, n)$ and bigram features $f_j(y_{n-1}, y_n, \xvec, n)$. Set every
+bigram feature to zero. The edge potentials $\Psimat_n$ become matrices of ones, the product splits into one factor per
+position, and the partition function splits the same way. What remains at each position is
+
+$$
+P_{\text{LR}}(y_n \mid \xvec) = \frac{1}{Z_{\text{LR}}} \exp\{\lambdavec^\top \fvec(y_n, \xvec, n)\},
+$$
+
+a multinomial logistic regression that may use features of the whole sequence $\xvec$ <Cite id="twomey2016" />. So the
+difference between the two models is only the bigram features. Context from the observations, such as the tokens either
+side of position $n$, can enter the logistic regression through $\fvec$; only direct interactions between labels are lost.
+
+## A rank-1 transition potential splits the chain
+
+Even with bigram features present, some transition potentials leave the labels on either side independent.
+
+**Theorem.** If the edge potential $\Psimat_{n-1}$ between positions $n - 1$ and $n$ has rank 1, then
+$(Y_1, \dots, Y_{n-1}) \perp (Y_n, \dots, Y_N)$. If every edge potential has rank 1, the labels are fully independent,
+$P(Y_1, \dots, Y_N) = \prod_n P(Y_n)$ <Cite id="twomey2016" />.
+
+**Proof.** A rank-1 matrix is an outer product. By the <NoteLink to="singular-value-decomposition">singular value
+decomposition</NoteLink>, $\Psimat_{n-1} = \sigma\, \uvec \vvec^\top$. The forward message into position $n$ is then
+
+$$
+\alphavec_n = \Psimat_{n-1}^\top \gammavec_{n-1} = \sigma\, \vvec\, \uvec^\top \gammavec_{n-1} = c\, \vvec,
+$$
+
+where $c = \sigma\, \uvec^\top \gammavec_{n-1}$ is a scalar. Everything before position $n$ now enters only through the
+constant $c$, which cancels when the marginal is normalised:
+
+$$
+P(Y_n) = \frac{\vvec \odot \psivec_n \odot \betavec_n}{\sum_{y'} \vvec(y')\, \psivec_n(y')\, \betavec_n(y')}.
+$$
+
+The same argument applied to the backward message $\betavec_{n-1} = \sigma\, \uvec\, \vvec^\top\deltavec_n$ shows that
+$P(Y_{n-1})$ does not depend on anything after the edge. More generally, the joint weight of a whole sequence is a
+product of a factor over $y_1, \dots, y_{n-1}$ (ending with $\uvec(y_{n-1})$) and a factor over $y_n, \dots, y_N$
+(starting with $\vvec(y_n)$), so the two halves are independent. If every edge is rank 1, the chain falls apart into
+single positions. $\square$
+
+A full-rank transition potential, by contrast, couples every label to every other along the chain. The rank of the
+transition potentials is therefore a direct measure of how much structure a trained CRF actually uses. Penalising the
+nuclear norm of the transition matrices during training pushes them toward low rank, and so toward a model that
+behaves like logistic regression.
+
+<RankOneSplit />
+
+## Dependence and the excess risk of ignoring structure
+
+The theorem describes a fitted model. The paper also asks the statistical question: when the data are a dependent
+sequence rather than independent examples, can an unstructured learner still reach the best possible risk, and how
+fast?
+
+The answer depends on how quickly the process forgets. A stationary process is **mixing** when events far apart in the
+sequence become independent, and its correlations then decay to zero with the lag. The paper shows that regularised
+empirical risk minimisation with the logistic loss, which is logistic regression, is consistent on such processes: its
+risk converges to the smallest achievable risk <Cite id="twomey2016" />. For processes whose correlations decay
+geometrically, it gives learning rates of the same form as the Bernstein-type bounds for independent data, with the
+dependence entering through the rate of decay. The faster the correlations decay, the closer learning is to the
+independent case.
+
+The practical reading is intuitive. If the correlation between labels dies out within a few positions, then features
+that describe a window of that width, such as $n$-grams of the surrounding tokens, capture nearly all the dependence,
+and a per-position classifier with those features loses little by ignoring label interactions. If correlations persist
+over long ranges, a fixed window cannot capture them and a structured model has something to add.
+
+## Worked example: the occasionally dishonest casino
+
+In the <NoteLink to="occasionally-dishonest-casino">occasionally dishonest casino</NoteLink>, a hidden die switches
+between fair and loaded with probability $p_s$ at each roll, and the loaded die shows face $v$ with probability $p_v$ and
+every other face with probability $(1 - p_v)/5$. The auto-correlation of the rolled faces can be derived exactly.
+
+**The die.** With symmetric switching, the die at time $t + n$ is the same as at time $t$ with probability
+$\tfrac12\paren{1 + (1 - 2p_s)^n}$. The correlation between the two dice, coded as 0 and 1, is therefore $(1 - 2p_s)^n$.
+
+**The faces.** Given the dice, the faces are independent draws. So faces $n$ rolls apart are correlated only through
+the dice, and by the <NoteLink to="law-of-total-expectation">law of total covariance</NoteLink>
+
+$$
+\operatorname{corr}(X_t, X_{t+n}) = \frac{\var(\mu_S)}{\expect[\var(X \mid S)] + \var(\mu_S)}\, (1 - 2p_s)^n,
+$$
+
+where $\mu_S$ is the mean face of the die in use. The fair die has mean 3.5 and variance $35/12$.
+
+With the paper's settings, face 1 loaded with $p_v = 0.5$ and switching probability $p_s = 0.05$
+<Cite id="twomey2016" />, the loaded die has mean 2.5. The fraction in front is 0.075, so the lag-1 correlation is 0.0675,
+and each further lag multiplies it by 0.9. It falls below 0.01 at lag 20. A simulation of 400,000 rolls gives 0.068,
+0.061 and 0.054 at lags 1, 2 and 3, against 0.068, 0.061 and 0.055 from the formula.
+
+<CasinoAutocorrelation />
+
+The profile says how wide a feature window must be: here, about twenty rolls either side carry information about the
+current die. In the paper's experiments, logistic regression with windowed features approximated the smoothing that a
+CRF achieves on this problem, and on word hyphenation and smart-home activity recognition the two models reached
+statistically indistinguishable F-scores: 0.966 against 0.963 for hyphenation and 0.788 against 0.798 for activity
+recognition, logistic regression first <Cite id="twomey2016" />.
+
+## Using auto-correlation to choose a model
+
+1. **Estimate the auto-correlation profile** of the labels, or of features that track them, before choosing a model.
+2. **Read off the decay length**, the lag beyond which the correlation is negligible.
+3. **Design feature templates** that cover that window. A per-position classifier with those features is then a strong
+   baseline, and often matches a structured model at a fraction of the training cost.
+4. **Reach for a structured model** when correlations persist beyond any practical window, or when the output must be
+   coherent as a whole; then decode with Viterbi rather than thresholding marginals.
+
+## Pitfalls
+
+- **Linear correlation can miss dependence.** If the loaded die favours face 3 or 4, the mean face barely changes and the
+  linear auto-correlation is close to zero, although the die is as persistent as ever. Rank-based or other nonlinear
+  measures of dependence avoid this.
+- **Rank 1 exactly is rare.** Trained transition potentials are seldom exactly rank 1. A dominant first singular value
+  means the coupling is weak rather than absent.
+- **Probabilities and decisions differ.** A per-position model can produce jumpy probabilities where the true labels are
+  smooth. When a coherent label sequence is needed, a structured decoder is still useful.

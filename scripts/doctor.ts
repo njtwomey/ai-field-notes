@@ -109,10 +109,12 @@ for (const folder of folders) {
 
 // Structure: empty categories and branches that hold a single note.
 const deepCount = (p: string) => notes.filter((n) => n.category === p || n.category.startsWith(`${p}/`)).length
+// Empty categories are the planned parts of the encyclopedia, so they are counted, not warned about one by one.
+const empty: string[] = []
 const visit = (nodes: CategoryNode[]) => {
   for (const c of nodes) {
     const count = deepCount(c.path)
-    if (count === 0) warnings.push(`taxonomy: "${c.path}" has no notes`)
+    if (count === 0) empty.push(c.path)
     else if (count === 1 && c.children.length === 0 && c.path.includes('/')) {
       warnings.push(`taxonomy: "${c.path}" holds a single note; consider merging it into its parent`)
     }
@@ -145,6 +147,7 @@ for (const [key, set] of owners) {
 }
 
 for (const w of warnings) console.log(`warning  ${w}`)
+if (empty.length) console.log(`info     ${empty.length} taxonomy categories have no notes yet (planned)`)
 for (const e of errors) console.error(`error    ${e}`)
 console.log(`\n${notes.length} notes · ${errors.length} errors · ${warnings.length} warnings`)
 process.exit(errors.length ? 1 : 0)

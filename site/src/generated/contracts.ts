@@ -20,6 +20,11 @@ export type Output = TextOutput | MetricsOutput | TableOutput | ChartOutput | He
  * via the `definition` "Cell".
  */
 export type Cell = number | string | null
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "Penalty".
+ */
+export type Penalty = 'l2' | 'l1' | 'elasticnet'
 
 /**
  * Generated from python/mlc/core/contracts.py by `uv run mlc schema`. Do not edit.
@@ -36,11 +41,16 @@ export interface Contracts {
   Grid2d?: Grid2d
   ContingencyTable?: ContingencyTable
   RocCurve?: RocCurve
+  ElasticNetPaths?: ElasticNetPaths
   ImageSvd?: ImageSvd
+  LarsPaths?: LarsPaths
+  LassoPath?: LassoPath
   LogisticValley?: LogisticValley
   LossSurface?: LossSurface
   ModelSelectionTable?: ModelSelectionTable
   RegressionSurface?: RegressionSurface
+  RidgePath?: RidgePath
+  SgdTrajectories?: SgdTrajectories
   TypeIErrorMaps?: TypeIErrorMaps
 }
 /**
@@ -361,6 +371,33 @@ export interface RocCurve {
   auc: number
 }
 /**
+ * Elastic-net paths for several mixing ratios; ratio 1 is the lasso.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "ElasticNetPaths".
+ */
+export interface ElasticNetPaths {
+  l1_ratios: number[]
+  paths: CoefficientPath[]
+}
+/**
+ * Coefficients of a regularised fit along a grid of penalty values, one row per feature.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "CoefficientPath".
+ */
+export interface CoefficientPath {
+  features: string[]
+  /**
+   * Penalty values, decreasing: from all-zero (or near) to least penalised.
+   */
+  penalty: number[]
+  /**
+   * Indexed [feature][penalty index].
+   */
+  coef: number[][]
+}
+/**
  * A test image and its thin SVD. The site rebuilds any rank-k approximation from these factors.
  *
  * This interface was referenced by `Contracts`'s JSON-Schema
@@ -383,6 +420,65 @@ export interface ImageSvd {
    * Shape (size, size): right singular vectors as rows.
    */
   vt: number[][]
+}
+/**
+ * LARS and the LARS–lasso modification on the diabetes data (Efron et al. 2004).
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "LarsPaths".
+ */
+export interface LarsPaths {
+  features: string[]
+  lar: KnotPath
+  lasso: KnotPath
+}
+/**
+ * A piecewise-linear path given by its knots; coefficients are linear in ‖w‖₁ between consecutive knots.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "KnotPath".
+ */
+export interface KnotPath {
+  l1_norm: number[]
+  alphas: number[]
+  /**
+   * Indexed [feature][knot].
+   */
+  coef: number[][]
+  /**
+   * Features entering or leaving the active set, in order.
+   */
+  events: PathEvent[]
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "PathEvent".
+ */
+export interface PathEvent {
+  /**
+   * Index of the knot at which the event happens.
+   */
+  knot: number
+  /**
+   * Penalty at that knot, in scikit-learn's lasso scaling.
+   */
+  alpha: number
+  feature: number
+  kind: 'enter' | 'drop'
+}
+/**
+ * Lasso coefficients against α on the diabetes data, with the OLS solution.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "LassoPath".
+ */
+export interface LassoPath {
+  path: CoefficientPath
+  /**
+   * Number of nonzero coefficients at each α.
+   */
+  nonzero: number[]
+  ols: number[]
 }
 /**
  * Log-cross-entropy of a 1-D logistic regression over (w, b), with the data it was computed on.
@@ -469,6 +565,57 @@ export interface RegressionSurface {
 export interface Point2D2 {
   x: number
   y: number
+}
+/**
+ * Ridge coefficients against λ on the diabetes data, with effective degrees of freedom and the OLS solution.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "RidgePath".
+ */
+export interface RidgePath {
+  path: CoefficientPath
+  /**
+   * Effective degrees of freedom Σ dᵢ²/(dᵢ² + λ) at each λ.
+   */
+  dof: number[]
+  ols: number[]
+}
+/**
+ * SGDRegressor weights per epoch for several penalties, against the exact solutions.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "SgdTrajectories".
+ */
+export interface SgdTrajectories {
+  features: string[]
+  alpha: number
+  l1_ratio: number
+  runs: SgdRun[]
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "SgdRun".
+ */
+export interface SgdRun {
+  penalty: Penalty
+  label: string
+  /**
+   * Indexed [feature][epoch]; epoch 0 is the zero start.
+   */
+  coef: number[][]
+  /**
+   * The exact minimiser of the same objective.
+   */
+  exact: number[]
+  /**
+   * Objective minus the exact optimum at each epoch.
+   */
+  gap: number[]
+  /**
+   * Number of coefficients exactly zero at each epoch.
+   */
+  zeros: number[]
+  exact_zeros: number
 }
 /**
  * Type I error rates of the pooled and Welch tests over the variance ratio and the second group's size.

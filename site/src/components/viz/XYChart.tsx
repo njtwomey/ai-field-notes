@@ -11,7 +11,10 @@ export type XYSeries = Omit<Series, 'group' | 'type'> & {
   /** `bar` draws a bar at each x, e.g. a histogram; bars take the width of the gap between x values. */
   type: Series['type'] | 'bar'
   group?: number[] | null
-  /** Fixed categorical slot. Defaults to the series index. Colour follows the entity, so pass it when filtering. */
+  /**
+   * Fixed categorical slot. Defaults to the series' position among the non-muted, non-emphasised series. Colour follows
+   * the entity, so pass it when filtering. There are 8 slots; fold further series into a muted "other" series.
+   */
   slot?: number
   /** Draw as a dashed reference line (lines only). */
   dashed?: boolean
@@ -82,8 +85,10 @@ export function XYChart({
   const option = useMemo(() => {
     const c = chrome(mode)
     const out: Record<string, unknown>[] = []
-    series.forEach((s, index) => {
-      const slot = s.slot ?? index
+    // Default slots count categories only: muted and emphasised series are not categories and take no palette slot.
+    let category = 0
+    series.forEach((s) => {
+      const slot = s.slot ?? (s.muted || s.emphasis ? 0 : category++)
       if (s.type === 'scatter' && s.group) {
         const groups = [...new Set(s.group)].sort((a, b) => a - b)
         for (const g of groups) {
@@ -108,16 +113,23 @@ export function XYChart({
         const color = s.emphasis ? chrome(mode).ink : s.muted ? chrome(mode).grid : seriesColor(mode, slot)
         out.push(scatter(s.name, data, color, s.emphasis ? 3 : 0, s.emphasis, mode))
       } else {
+        // Muted lines sit behind the data in the chrome colour; emphasised lines are ink. Neither uses a palette slot.
+        const color = s.emphasis ? c.ink : s.muted ? c.muted : seriesColor(mode, slot)
         out.push({
           name: s.name,
           type: 'line',
           data,
           showSymbol: false,
           smooth: false,
-          lineStyle: { width: LINE_WIDTH, color: seriesColor(mode, slot), type: s.dashed ? 'dashed' : 'solid' },
-          itemStyle: { color: seriesColor(mode, slot) },
-          ...(s.area ? { areaStyle: { color: seriesColor(mode, slot), opacity: 0.3 } } : {}),
-          z: 3,
+          lineStyle: {
+            width: s.muted ? 1 : LINE_WIDTH,
+            color,
+            opacity: s.muted ? 0.7 : 1,
+            type: s.dashed ? 'dashed' : 'solid',
+          },
+          itemStyle: { color },
+          ...(s.area ? { areaStyle: { color, opacity: 0.3 } } : {}),
+          z: s.muted ? 2 : 3,
         })
       }
     })

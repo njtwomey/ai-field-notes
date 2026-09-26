@@ -1,0 +1,150 @@
+---
+title: Evidence lower bound
+kind: concept
+summary: For any density q(z), log p(x) = ELBO(q) + KL(q ‖ p(z | x)), where ELBO(q) = E_q[log p(x, z) − log q(z)]. The ELBO is a computable lower bound on the log evidence, and maximising it over q minimises the KL divergence to the intractable posterior.
+tags: [calculus-of-variations, variational-inference, bayesian, worked-example]
+aliases: [ELBO, variational lower bound, negative variational free energy, evidence lower bound]
+requires: [kl-divergence, bayes-theorem]
+related: [reparameterisation-trick, score-function-estimator]
+references: [blei2017, jordan1999, kingma2014]
+status: draft
+updated: 2026-09-26
+---
+
+import { ElboGap } from './ElboGap'
+
+<Definition>
+Let $p(\xvec, \zvec)$ be a joint model of observed data $\xvec$ and latent variables $\zvec$, and let $q(\zvec)$ be any
+density whose support contains that of the posterior. The evidence lower bound is
+
+$$
+\operatorname{ELBO}(q) = \expect_{q}\brack{\log p(\xvec, \zvec) - \log q(\zvec)}.
+$$
+
+It satisfies $\log p(\xvec) = \operatorname{ELBO}(q) + \KL\paren{q(\zvec) \,\|\, p(\zvec \mid \xvec)}$, so
+$\operatorname{ELBO}(q) \le \log p(\xvec)$, with equality exactly when $q$ is the posterior <Cite id="blei2017" />.
+</Definition>
+
+## The problem it solves
+
+By <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink>, the posterior is
+$p(\zvec \mid \xvec) = p(\xvec, \zvec) / p(\xvec)$, with evidence $p(\xvec) = \int p(\xvec, \zvec)\, d\zvec$. The joint
+is usually easy to evaluate. The evidence is an integral over every configuration of the latent variables, which is
+intractable for most models. Variational inference replaces the integral by an optimisation: choose $q$ from a
+tractable family to be close to the posterior <Cite id="jordan1999" />. The ELBO is the objective that makes this
+possible without knowing $p(\xvec)$. The main alternatives are sampling methods and the
+<NoteLink to="laplace-approximation">Laplace approximation</NoteLink>, which fits a Gaussian at the posterior mode.
+
+## Derivation 1: Jensen's inequality
+
+Multiply and divide by $q$ inside the evidence, then use the concavity of the logarithm,
+$\log \expect[Y] \ge \expect[\log Y]$:
+
+$$
+\log p(\xvec) = \log \int q(\zvec)\, \frac{p(\xvec, \zvec)}{q(\zvec)}\, d\zvec
+\ge \int q(\zvec) \log\frac{p(\xvec, \zvec)}{q(\zvec)}\, d\zvec = \operatorname{ELBO}(q).
+$$
+
+This shows the ELBO is a lower bound, but not how loose it is.
+
+## Derivation 2: the exact decomposition
+
+Substitute $p(\xvec, \zvec) = p(\zvec \mid \xvec)\, p(\xvec)$ into the definition. The term $\log p(\xvec)$ does not
+depend on $\zvec$, and $q$ integrates to 1:
+
+$$
+\operatorname{ELBO}(q)
+= \expect_q\brack{\log p(\zvec \mid \xvec) + \log p(\xvec) - \log q(\zvec)}
+= \log p(\xvec) - \expect_q\brack{\log\frac{q(\zvec)}{p(\zvec \mid \xvec)}}.
+$$
+
+The last expectation is $\KL\paren{q \,\|\, p(\zvec \mid \xvec)}$. Rearranged,
+
+$$
+\log p(\xvec) = \operatorname{ELBO}(q) + \KL\paren{q(\zvec) \,\|\, p(\zvec \mid \xvec)}.
+$$
+
+The gap in Jensen's inequality is exactly the KL divergence from $q$ to the posterior.
+
+### Why maximising the ELBO works
+
+The left side does not depend on $q$. Any increase in the ELBO is therefore an equal decrease in the KL divergence to
+the posterior. Maximising the ELBO, which needs only the joint $p(\xvec, \zvec)$, minimises
+$\KL\paren{q \,\|\, p(\zvec \mid \xvec)}$, which needs the unknown posterior. Because the KL divergence is non-negative
+(see <NoteLink to="kl-divergence">KL divergence</NoteLink>), the ELBO never exceeds the log evidence.
+
+## Other forms
+
+Two rearrangements of the definition are used in practice.
+
+**Likelihood minus complexity.** Write $p(\xvec, \zvec) = p(\xvec \mid \zvec)\, p(\zvec)$:
+
+$$
+\operatorname{ELBO}(q) = \expect_q\brack{\log p(\xvec \mid \zvec)} - \KL\paren{q(\zvec) \,\|\, p(\zvec)}.
+$$
+
+The first term rewards latent values that explain the data. The second penalises departing from the prior. This is the
+form optimised by variational autoencoders <Cite id="kingma2014" />.
+
+**Energy plus entropy.** Split the logarithm of the quotient:
+
+$$
+\operatorname{ELBO}(q) = \expect_q\brack{\log p(\xvec, \zvec)} + \entropy[q].
+$$
+
+The first term pulls $q$ towards high-probability configurations; the entropy keeps it spread out. In statistical
+physics the negative of this quantity is the variational free energy.
+
+## The unrestricted optimum is the posterior
+
+Treat the ELBO as a functional of $q$ and optimise it subject to $\int q\, d\zvec = 1$. Its functional derivative is
+$\log p(\xvec, \zvec) - \log q(\zvec) - 1$ (see
+<NoteLink to="functionals-and-functional-derivatives">functional derivatives</NoteLink>). Adding a multiplier
+$\lambda$ for normalisation and setting the result to zero gives
+
+$$
+\log q(\zvec) = \log p(\xvec, \zvec) + \lambda - 1 \quad\Longrightarrow\quad q(\zvec) \propto p(\xvec, \zvec),
+$$
+
+which is the posterior. Over all densities, maximising the ELBO recovers exact inference. It is useful because $q$ is
+restricted to a tractable family, such as the factorised family of
+<NoteLink to="mean-field-variational-inference">mean-field variational inference</NoteLink> or a parametric family
+$q_{\phivec}$.
+
+## Worked example
+
+Take the prior $z \sim \Gauss(0, 1)$, one observation $x \mid z \sim \Gauss(z, 1)$, and a Gaussian
+$q(z) = \Gauss(m, s^2)$. Both terms of the likelihood-minus-complexity form are Gaussian expectations:
+
+$$
+\expect_q\brack{\log p(x \mid z)} = -\tfrac{1}{2}\log 2\pi - \tfrac{1}{2}\brack{(x - m)^2 + s^2}, \qquad
+\KL\paren{q \,\|\, p(z)} = \tfrac{1}{2}\paren{s^2 + m^2 - 1 - \log s^2}.
+$$
+
+Setting the derivative of their difference with respect to $m$ to zero gives $(x - m) - m = 0$. The derivative with
+respect to $s^2$ is $-\tfrac{1}{2} - \tfrac{1}{2} + 1/(2s^2)$, which is zero when $s^2 = 1/2$. So $m = x/2$ and
+$s^2 = 1/2$. This is the exact posterior $\Gauss(x/2, 1/2)$, because the Gaussian family contains it.
+Substituting back gives $\operatorname{ELBO} = -\tfrac{1}{2}\log 4\pi - x^2/4$, which is the log evidence
+$\log \Gauss(x \mid 0, 2)$: the bound is tight. For $x = 1.5$, $m = -1$ and $s = 1.2$, the ELBO is $-5.302$, the log
+evidence is $-1.828$, and the KL divergence to the posterior is $3.474$; the ELBO and the KL sum to the evidence.
+
+<ElboGap />
+
+## Optimising the ELBO in practice
+
+- **Coordinate ascent.** For conditionally conjugate models, each factor of a mean-field $q$ has a closed-form update;
+  see <NoteLink to="mean-field-variational-inference">mean-field variational inference</NoteLink>.
+- **Stochastic gradients.** For a parametric $q_{\phivec}$, the gradient
+  $\nabla_{\phivec}\operatorname{ELBO}$ is an expectation under $q_{\phivec}$ and is estimated by sampling, either with
+  the <NoteLink to="reparameterisation-trick">reparameterisation trick</NoteLink> or with the
+  <NoteLink to="score-function-estimator">score-function estimator</NoteLink>.
+- **Expectation–maximisation.** EM maximises the same bound, alternating between $q$ and the model parameters; see
+  <NoteLink to="em-as-variational-inference">EM as variational inference</NoteLink>.
+
+## Pitfalls
+
+- **Direction of the divergence.** Maximising the ELBO minimises $\KL(q \,\|\, p)$, not $\KL(p \,\|\, q)$. This reverse
+  divergence is mode-seeking: $q$ avoids regions where the posterior is small and tends to underestimate its spread.
+- **The bound is not the evidence.** Comparing models by their ELBOs compares lower bounds whose gaps can differ.
+- **Support.** If $q$ puts mass where the posterior has none, the ELBO is $-\infty$. The family must respect the
+  posterior's support, for example positive variances.

@@ -15,7 +15,11 @@ export const frontmatterSchema = z
     kind: z.enum(noteKinds),
     /** Only for notes directly under content/notes/; nested notes take their category from their folder path. */
     category: categoryPath.optional(),
-    summary: z.string().min(1).max(280),
+    /**
+     * Plain text with optional `$…$` inline maths. The 280-character limit applies to the text as read (see the content
+     * plugin), so LaTeX source does not count against it; this bound only stops runaway source.
+     */
+    summary: z.string().min(1).max(600),
     tags: z.array(slug).default([]),
     aliases: z.array(z.string()).default([]),
     requires: z.array(slug).default([]),
@@ -55,6 +59,16 @@ export const categoryIcons = [
   'dices',
   'workflow',
   'microscope',
+  'git-fork',
+  'graduation-cap',
+  'trending-down',
+  'ruler',
+  'radar',
+  'activity',
+  'audio-waveform',
+  'gamepad',
+  'languages',
+  'eye',
 ] as const
 export type CategoryIcon = (typeof categoryIcons)[number]
 

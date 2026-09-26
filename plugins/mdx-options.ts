@@ -6,11 +6,19 @@ import remarkFrontmatter from 'remark-frontmatter'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import remarkMdxFrontmatter from 'remark-mdx-frontmatter'
+import remarkSmartypants from 'remark-smartypants'
 import { macros } from '../content/macros.ts'
 
 export const mdxOptions = {
   providerImportSource: '@mdx-js/react',
-  remarkPlugins: [remarkFrontmatter, [remarkMdxFrontmatter, { name: 'frontmatter' }], remarkGfm, remarkMath],
+  // Smartypants turns straight quotes into curly ones: the prose font draws a straight " as a closing quote.
+  remarkPlugins: [
+    remarkFrontmatter,
+    [remarkMdxFrontmatter, { name: 'frontmatter' }],
+    remarkGfm,
+    remarkMath,
+    [remarkSmartypants, { dashes: false }],
+  ],
   // Unknown commands fail the build rather than rendering red text. Macros: content/macros.ts.
   rehypePlugins: [rehypeSlug, [rehypeKatex, { macros, throwOnError: true, strict: 'ignore' }]],
 } satisfies CompileOptions

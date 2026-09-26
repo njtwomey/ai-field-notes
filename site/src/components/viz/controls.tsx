@@ -1,3 +1,4 @@
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useEffect, useId, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -16,6 +17,11 @@ type SliderOptions = {
    * updates when the drag pauses, at least every 3× this interval, and always on release. 0 disables debouncing.
    */
   debounceMs?: number
+  /**
+   * Small ‹ and › buttons either side of the track that move the value by one step. Use for discrete sequences a
+   * reader steps through and compares, e.g. the number of observations seen so far.
+   */
+  withArrows?: boolean
 }
 
 /** Either a `param` from useParam (preferred: shared with chart handles), or explicit value, onChange and range. */
@@ -26,7 +32,7 @@ type ParamSliderProps = SliderOptions &
   )
 
 export function ParamSlider(props: ParamSliderProps) {
-  const { label, format = formatNumber, debounceMs = 60 } = props
+  const { label, format = formatNumber, debounceMs = 60, withArrows = false } = props
   const value = props.param ? props.param.value : props.value
   const onChange = props.param ? props.param.set : props.onChange
   const min = props.param ? props.param.min : props.min
@@ -42,6 +48,32 @@ export function ParamSlider(props: ParamSliderProps) {
     if (dragging === null) debounced.cancel()
   }, [value, dragging, debounced])
   const toNumber = (v: number | readonly number[]) => (Array.isArray(v) ? v[0] : (v as number))
+  // One step up or down, snapped to the step grid and clamped, with float noise rounded away (0.1 + 0.2).
+  const stepFrom = (v: number, direction: 1 | -1) => {
+    const places = (String(step).split('.')[1] ?? '').length
+    const next = min + Math.round((v + direction * step - min) / step) * step
+    return Number(Math.min(max, Math.max(min, next)).toFixed(places))
+  }
+  const slider = (
+    <Slider
+      id={id}
+      value={shown}
+      min={min}
+      max={max}
+      step={step}
+      onValueChange={(v) => {
+        const n = toNumber(v)
+        if (debounceMs <= 0) return onChange(n)
+        setDragging(n)
+        debounced(n)
+      }}
+      onValueCommitted={(v) => {
+        debounced.cancel()
+        setDragging(null)
+        if (toNumber(v) !== value) onChange(toNumber(v))
+      }}
+    />
+  )
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between">
@@ -50,25 +82,32 @@ export function ParamSlider(props: ParamSliderProps) {
         </Label>
         <span className="font-mono text-xs tabular-nums">{format(shown)}</span>
       </div>
-      <Slider
-        id={id}
-        value={shown}
-        min={min}
-        max={max}
-        step={step}
-        onValueChange={(v) => {
-          const n = toNumber(v)
-          if (debounceMs <= 0) return onChange(n)
-          setDragging(n)
-          debounced(n)
-        }}
-        onValueCommitted={(v) => {
-          debounced.cancel()
-          setDragging(null)
-          if (toNumber(v) !== value) onChange(toNumber(v))
-        }}
-      />
+      {withArrows ? (
+        <div className="flex items-center gap-1.5">
+          <StepButton direction={-1} disabled={value <= min} onClick={() => onChange(stepFrom(value, -1))} />
+          <div className="min-w-0 flex-1">{slider}</div>
+          <StepButton direction={1} disabled={value >= max} onClick={() => onChange(stepFrom(value, 1))} />
+        </div>
+      ) : (
+        slider
+      )}
     </div>
+  )
+}
+
+function StepButton({ direction, disabled, onClick }: { direction: 1 | -1; disabled: boolean; onClick: () => void }) {
+  const Icon = direction < 0 ? ChevronLeft : ChevronRight
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-xs"
+      disabled={disabled}
+      onClick={onClick}
+      aria-label={direction < 0 ? 'Previous' : 'Next'}
+    >
+      <Icon />
+    </Button>
   )
 }
 

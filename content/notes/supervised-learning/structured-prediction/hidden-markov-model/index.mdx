@@ -1,0 +1,211 @@
+---
+title: Hidden Markov model
+kind: concept
+summary: 'A hidden Markov model is a generative model of a sequence: a Markov chain of hidden states $y_n$, each emitting an observation $x_n$. Forward–backward gives every posterior marginal $p(y_n \mid \xvec)$ and Viterbi the most probable state sequence, both in $O(N\abs{\Ycal}^2)$ time.'
+tags: [structured-prediction, sequence-models, probabilistic-models, dynamic-programming, worked-example]
+aliases: [HMM, forward–backward algorithm, forward-backward, Viterbi algorithm, Baum–Welch algorithm, Baum-Welch]
+partOf: [structured-prediction]
+requires: [conditional-probability, bayes-theorem]
+related: [occasionally-dishonest-casino, expectation-maximisation, em-as-variational-inference, conditional-random-field]
+references: [rabiner1989, baum1970, viterbi1967, durbin1998, twomey2016]
+status: draft
+updated: 2026-09-26
+---
+
+import { HmmTrellis } from './HmmTrellis'
+
+<Definition>
+A hidden Markov model (HMM) describes an observation sequence $\xvec = (x_1, \dots, x_N)$ through a sequence of hidden
+states $\yvec = (y_1, \dots, y_N)$, each in a finite set $\Ycal$. The states form a Markov chain with initial
+distribution $\pi$ and transition matrix $A(u, v) = p(y_{n+1} = v \mid y_n = u)$, and each state emits its
+observation with probability $b_v(x_n) = p(x_n \mid y_n = v)$. The joint distribution is
+
+$$
+p(\xvec, \yvec) = \pi(y_1)\, b_{y_1}(x_1) \prod_{n=2}^{N} A(y_{n-1}, y_n)\, b_{y_n}(x_n)
+$$
+
+<Cite id="rabiner1989" />.
+</Definition>
+
+## The chain in potential form
+
+The joint distribution is a product of one factor per position and one factor per pair of neighbouring positions.
+Writing it that way makes the HMM and the <NoteLink to="conditional-random-field">conditional random field</NoteLink>
+share one set of algorithms. The notation follows Twomey, Diethe and Flach <Cite id="twomey2016" />.
+
+- The **node potential** at position $n$ is the vector $\psivec_n \in \reals^{\abs{\Ycal}}$ with
+  $\psivec_n(v) = b_v(x_n)$. The initial distribution is folded into the first one: $\psivec_1(v) = \pi(v)\, b_v(x_1)$.
+- The **edge potential** between positions $n$ and $n + 1$ is the matrix $\Psimat_n \in \reals^{\abs{\Ycal} \times
+  \abs{\Ycal}}$ with $\Psimat_n(u, v) = A(u, v)$. In an HMM it is the same matrix at every position.
+
+Then
+
+$$
+p(\xvec, \yvec) = \prod_{n=1}^{N} \psivec_n(y_n) \prod_{n=1}^{N-1} \Psimat_n(y_n, y_{n+1}),
+$$
+
+and summing over every label sequence gives $Z = \sum_{\yvec} p(\xvec, \yvec) = p(\xvec)$, the likelihood of the
+observations. The posterior over states is $p(\yvec \mid \xvec) = p(\xvec, \yvec)/Z$.
+
+## Forward–backward
+
+The sum defining $Z$ has $\abs{\Ycal}^N$ terms. It factorises along the chain, so it can be computed from left to
+right in $N$ steps.
+
+**Forward vectors.** Let $\alphavec_n(v)$ be the sum of all factors to the left of position $n$, over every prefix
+$y_1, \dots, y_{n-1}$ that ends in a transition into $y_n = v$. The node potential $\psivec_n$ is not included. Then
+$\alphavec_1 = \ones$, and splitting off the last transition gives
+
+$$
+\alphavec_n(v) = \sum_{u} \alphavec_{n-1}(u)\, \psivec_{n-1}(u)\, \Psimat_{n-1}(u, v)
+\qquad\Longleftrightarrow\qquad
+\alphavec_n = \Psimat_{n-1}^\top \gammavec_{n-1}, \quad \gammavec_{n-1} = \alphavec_{n-1} \odot \psivec_{n-1},
+$$
+
+where $\odot$ is the element-wise product.
+
+**Backward vectors.** Symmetrically, let $\betavec_n(u)$ be the sum of all factors to the right of position $n$, given
+$y_n = u$. Then $\betavec_N = \ones$ and
+
+$$
+\betavec_n(u) = \sum_{v} \Psimat_n(u, v)\, \psivec_{n+1}(v)\, \betavec_{n+1}(v)
+\qquad\Longleftrightarrow\qquad
+\betavec_n = \Psimat_n \deltavec_{n+1}, \quad \deltavec_{n+1} = \betavec_{n+1} \odot \psivec_{n+1}.
+$$
+
+**Marginals.** Every term of the sum for $Z$ with $y_n = v$ splits into the factors left of $n$, the factor
+$\psivec_n(v)$, and the factors right of $n$. Multiplication distributes over addition, so
+
+$$
+\sum_{\yvec \,:\, y_n = v} p(\xvec, \yvec) = \alphavec_n(v)\, \psivec_n(v)\, \betavec_n(v).
+$$
+
+In an HMM the left-hand side is $p(\xvec, y_n = v)$. Summing over $v$ gives $Z = p(\xvec)$ at every position, and
+dividing gives the posterior marginal:
+
+$$
+p(y_n = v \mid \xvec) = \frac{\alphavec_n(v)\, \psivec_n(v)\, \betavec_n(v)}{Z}.
+$$
+
+Each recursion step is a matrix–vector product, so the cost is $O(N \abs{\Ycal}^2)$ instead of
+$O(\abs{\Ycal}^N)$.
+
+**Filtering and smoothing.** $\gammavec_n = \alphavec_n \odot \psivec_n$ is proportional to $p(y_n, x_1, \dots, x_n)$,
+so normalising it gives the filtering distribution $p(y_n \mid x_1, \dots, x_n)$, which uses only the observations so
+far. Multiplying by $\betavec_n$ adds the evidence from later observations and gives the smoothing distribution
+$p(y_n \mid \xvec)$.
+
+**Pairwise marginals.** The same argument with two neighbouring positions fixed gives
+
+$$
+p(y_n = u, y_{n+1} = v \mid \xvec) = \frac{\gammavec_n(u)\, \Psimat_n(u, v)\, \deltavec_{n+1}(v)}{Z},
+$$
+
+which Baum–Welch needs below.
+
+## Viterbi decoding
+
+The most probable state sequence $\yvec^* = \argmax_{\yvec} p(\yvec \mid \xvec)$ is found by the same recursion with
+the sum replaced by a maximum <Cite id="viterbi1967" />. The replacement is valid because the maximum distributes over
+products of non-negative numbers, just as the sum does: $\max(ab, ac) = a \max(b, c)$ for $a \ge 0$. Define
+$\mu_1 = \ones$ and
+
+$$
+\mu_n(v) = \max_{u}\, \mu_{n-1}(u)\, \psivec_{n-1}(u)\, \Psimat_{n-1}(u, v), \qquad
+\text{back}_n(v) = \argmax_{u}\, \mu_{n-1}(u)\, \psivec_{n-1}(u)\, \Psimat_{n-1}(u, v).
+$$
+
+$\mu_n(v)$ is the probability of the best prefix ending in state $v$ at position $n$, without $\psivec_n$. The last
+state is $y_N^* = \argmax_v \mu_N(v)\, \psivec_N(v)$, and following the back-pointers
+$y_{n-1}^* = \text{back}_n(y_n^*)$ recovers the rest. Taking the most probable state at each position separately,
+from the marginals, can give a different sequence, and even one with probability zero; Viterbi gives the best
+sequence as a whole.
+
+## Numerical range
+
+Products of many probabilities underflow. Forward–backward rescales $\gammavec_n$ to sum to one at each step and
+divides each $\betavec_n$ by the same constant $c_{n+1}$; then $\log Z = \sum_n \log c_n$. Viterbi works with sums of
+logarithms instead of products.
+
+## Worked example
+
+Take the <NoteLink to="occasionally-dishonest-casino">occasionally dishonest casino</NoteLink>
+<Cite id="durbin1998" />: state F is a fair die, state L a die with $b_L(6) = 0.5$ and $b_L(k) = 0.1$ otherwise. The
+transitions are $A(F, L) = 0.05$ and $A(L, F) = 0.1$, and the chain starts from its stationary distribution
+$\pi = (2/3, 1/3)$. Observe the rolls $\xvec = (6, 6, 1)$. Vectors are written (F, L).
+
+The node potentials are $\psivec_1 = \pi \odot (1/6, 0.5) = (1/9, 1/6)$, $\psivec_2 = (1/6, 0.5)$ and
+$\psivec_3 = (1/6, 0.1)$.
+
+- **Forward.** $\alphavec_1 = (1, 1)$, so $\gammavec_1 = (1/9, 1/6)$ and
+  $\alphavec_2 = \Psimat^\top \gammavec_1 = (0.95/9 + 0.1/6,\; 0.05/9 + 0.9/6) = (0.1222, 0.1556)$.
+- **Backward.** $\betavec_3 = (1, 1)$, so $\deltavec_3 = \psivec_3$ and
+  $\betavec_2 = \Psimat \deltavec_3 = (0.95/6 + 0.05 \cdot 0.1,\; 0.1/6 + 0.9 \cdot 0.1) = (0.1633, 0.1067)$.
+  One more step gives $\betavec_1 = (0.02853, 0.05072)$.
+- **Likelihood.** At position 1, $Z = \sum_v \alphavec_1(v)\psivec_1(v)\betavec_1(v) = \tfrac19 \cdot 0.02853 +
+  \tfrac16 \cdot 0.05072 = 0.01162 = p(\xvec)$. The same value comes out at every position.
+- **Marginals.** $p(y_1 = L \mid \xvec) = (\tfrac16 \cdot 0.05072)/0.01162 = 0.727$, and likewise $0.714$ and $0.611$
+  at positions 2 and 3. The final 1 lowers the belief in the loaded die, but the two sixes before it keep it above one
+  half.
+- **Viterbi.** The best sequence is (L, L, L), with joint probability
+  $\tfrac13 \cdot 0.5 \cdot 0.9 \cdot 0.5 \cdot 0.9 \cdot 0.1 = 0.00675$.
+
+Enumerating all eight state sequences gives the same $Z$ and the same best sequence.
+
+<HmmTrellis />
+
+## Learning: Baum–Welch
+
+When the states are never observed, the parameters $\theta = (\pi, A, b)$ are fitted by
+<NoteLink to="expectation-maximisation">expectation–maximisation</NoteLink>. For HMMs this is the Baum–Welch
+algorithm <Cite id="baum1970" />.
+
+**E-step.** Run forward–backward with the current parameters and record the marginals
+$q_n(v) = p(y_n = v \mid \xvec)$ and the pairwise marginals $\xi_n(u, v) = p(y_n = u, y_{n+1} = v \mid \xvec)$.
+
+**M-step.** The expected complete-data log-likelihood separates into three parts, one per parameter group:
+
+$$
+Q(\theta) = \sum_v q_1(v) \log \pi(v) + \sum_{n=1}^{N-1} \sum_{u, v} \xi_n(u, v) \log A(u, v) +
+\sum_{n=1}^{N} \sum_v q_n(v) \log b_v(x_n).
+$$
+
+Each part is maximised subject to its probabilities summing to one. For row $u$ of $A$, add a Lagrange multiplier
+$\lambda_u$ for $\sum_v A(u, v) = 1$ and set the derivative to zero:
+$\sum_n \xi_n(u, v)/A(u, v) = \lambda_u$, so $A(u, v) \propto \sum_n \xi_n(u, v)$. Normalising, and doing the same for
+$\pi$ and for discrete emissions,
+
+$$
+\pi(v) = q_1(v), \qquad
+A(u, v) = \frac{\sum_{n=1}^{N-1} \xi_n(u, v)}{\sum_{n=1}^{N-1} q_n(u)}, \qquad
+b_v(k) = \frac{\sum_{n} q_n(v)\, \indicator[x_n = k]}{\sum_n q_n(v)}.
+$$
+
+These are the maximum-likelihood estimates for fully labelled data, with counts replaced by expected counts. Each
+iteration cannot decrease $p(\xvec)$, as for any EM algorithm, and it converges to a local maximum.
+
+## Variants
+
+- **Continuous emissions.** Replace $b_v$ by a density, such as a Gaussian or a Gaussian mixture per state. The
+  recursions are unchanged; only $\psivec_n$ changes.
+- **Explicit durations.** In an HMM the time spent in a state is geometric. A hidden semi-Markov model gives each
+  state an explicit duration distribution, at a higher inference cost <Cite id="yu2010" />.
+- **Input–output HMMs.** The transitions and emissions depend on an input sequence, which makes the model
+  conditional on those inputs.
+- **Hierarchical HMMs.** States are themselves HMMs, which models structure at several time scales
+  <Cite id="fine1998" />.
+- **Several chains.** A <NoteLink to="factorial-hidden-markov-model">factorial HMM</NoteLink> explains each
+  observation with several independent hidden chains.
+- **Discriminative counterpart.** A <NoteLink to="conditional-random-field">linear-chain CRF</NoteLink> models
+  $p(\yvec \mid \xvec)$ directly with the same chain structure, and allows features of the whole observation sequence.
+
+## Pitfalls
+
+- **Local maxima.** Baum–Welch depends on its initialisation. Several restarts, or an initialisation from a simpler
+  model, are standard.
+- **Zero probabilities.** A transition or emission estimated as zero can never be revised, and makes any sequence
+  that needs it impossible. Add pseudocounts.
+- **Marginals versus Viterbi.** The per-position most probable states and the most probable sequence answer different
+  questions, and can disagree.
+- **Label switching.** With unlabelled training, state 1 has no fixed meaning; its interpretation comes from its fitted
+  emissions.

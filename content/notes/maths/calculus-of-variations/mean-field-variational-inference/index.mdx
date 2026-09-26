@@ -1,0 +1,147 @@
+---
+title: Mean-field variational inference
+kind: technique
+summary: Mean-field variational inference approximates a posterior by a product of independent factors $q(\zvec) = \prod_j q_j(\zvec_j)$. Maximising the ELBO over one factor gives $\log q_j^*(\zvec_j) = \expect_{-j}[\log p(\xvec, \zvec)] + \text{const}$; cycling through the factors (CAVI) never decreases the ELBO.
+tags: [calculus-of-variations, variational-inference, bayesian, worked-example]
+aliases: [mean-field approximation, coordinate ascent variational inference, CAVI, variational Bayes, factorised approximation]
+requires: [evidence-lower-bound, constrained-variational-problems]
+related: [kl-divergence, gaussian-mixture-model]
+references: [blei2017, bishop2006, jordan1999]
+status: draft
+updated: 2026-09-26
+---
+
+import { MeanFieldGaussian } from './MeanFieldGaussian'
+
+<Definition>
+Mean-field variational inference restricts the approximating density to the factorised family
+
+$$
+q(\zvec) = \prod_{j=1}^m q_j(\zvec_j),
+$$
+
+where $\zvec_1, \dots, \zvec_m$ partition the latent variables, and maximises the
+<NoteLink to="evidence-lower-bound">evidence lower bound</NoteLink> over this family. Holding every factor but $q_j$
+fixed, the optimal $q_j$ satisfies
+
+$$
+\log q_j^*(\zvec_j) = \expect_{-j}\brack{\log p(\xvec, \zvec)} + \text{const},
+$$
+
+where $\expect_{-j}$ averages over all factors except $q_j$ <Cite id="blei2017" />.
+</Definition>
+
+## Why factorise
+
+The unrestricted maximiser of the ELBO is the posterior itself, which is what could not be computed. The factorised
+family removes all dependence between groups of latent variables. In exchange, each factor can often be found in closed
+form, and each expectation involves only one group at a time. The name comes from statistical physics, where each
+particle feels only the average field of the others.
+
+## Derivation of the optimal factor
+
+Fix $q_i$ for all $i \ne j$ and write the ELBO as a functional of $q_j$ alone. Because $q$ factorises, the entropy of
+$q$ is the sum of the factors' entropies, and only one of them involves $q_j$:
+
+$$
+\operatorname{ELBO}(q_j) = \int q_j(\zvec_j)\, \expect_{-j}\brack{\log p(\xvec, \zvec)}\, d\zvec_j
+- \int q_j(\zvec_j) \log q_j(\zvec_j)\, d\zvec_j + \text{const}.
+$$
+
+Here $\expect_{-j}[\log p(\xvec, \zvec)] = \int \prod_{i \ne j} q_i(\zvec_i)\, \log p(\xvec, \zvec)\, d\zvec_{-j}$ is a
+function of $\zvec_j$ only. Maximise this functional subject to $\int q_j\, d\zvec_j = 1$, a
+<NoteLink to="constrained-variational-problems">constrained variational problem</NoteLink>. Neither term contains a
+derivative of $q_j$, so the stationarity condition is pointwise. The functional derivative of the first term is
+$\expect_{-j}[\log p(\xvec, \zvec)]$, that of the entropy term is $-\log q_j - 1$, and the normalisation constraint adds
+a multiplier $\lambda$:
+
+$$
+\expect_{-j}\brack{\log p(\xvec, \zvec)} - \log q_j(\zvec_j) - 1 + \lambda = 0.
+$$
+
+Solving for $\log q_j$ gives the optimal factor, with every constant absorbed by normalisation:
+
+$$
+q_j^*(\zvec_j) = \frac{\exp\paren{\expect_{-j}\brack{\log p(\xvec, \zvec)}}}
+{\int \exp\paren{\expect_{-j}\brack{\log p(\xvec, \zvec)}}\, d\zvec_j}.
+$$
+
+<Derivation title="The same result without functional derivatives">
+Define the density $\tilde p_j(\zvec_j) \propto \exp\paren{\expect_{-j}[\log p(\xvec, \zvec)]}$ with normalising
+constant $C$. Then $\expect_{-j}[\log p(\xvec, \zvec)] = \log \tilde p_j(\zvec_j) + \log C$, and the ELBO as a function
+of $q_j$ becomes
+
+$$
+\int q_j \log\tilde p_j\, d\zvec_j - \int q_j \log q_j\, d\zvec_j + \text{const}
+= -\KL\paren{q_j \,\|\, \tilde p_j} + \text{const}.
+$$
+
+The KL divergence is non-negative and zero only when $q_j = \tilde p_j$, so this choice is the unique maximiser over
+$q_j$. The argument also shows the stationary point is a maximum, not just a stationary point.
+</Derivation>
+
+Only the terms of $\log p(\xvec, \zvec)$ that involve $\zvec_j$ matter; the rest are absorbed in the constant. In
+conditionally conjugate models, those terms are linear in the sufficient statistics of $\zvec_j$, so $q_j^*$ belongs to
+the same exponential family as the prior on $\zvec_j$, and the update only changes its parameters.
+
+## Coordinate ascent (CAVI)
+
+Coordinate ascent variational inference initialises every factor and then cycles through $j = 1, \dots, m$, replacing
+$q_j$ by $q_j^*$ computed from the current other factors <Cite id="bishop2006" />.
+
+**Monotonicity.** Each update maximises the ELBO exactly over one factor with the others fixed, so it cannot lower the
+ELBO. The ELBO is bounded above by $\log p(\xvec)$, so the sequence of values converges. The limit is a stationary point
+of the ELBO over the factorised family. It is often only a local optimum, so CAVI is typically run from several
+initialisations.
+
+The full update equations for a non-trivial model, a Gaussian with unknown mean and precision, are derived in the
+worked example <NoteLink to="cavi-gaussian-unknown-mean-and-precision">CAVI for a Gaussian with unknown mean and
+precision</NoteLink>.
+
+## Worked example: a correlated Gaussian
+
+Let the target be $\Gauss(\zeros, \Sigmamat)$ in two dimensions with unit variances and correlation $\rho$, whose
+precision matrix is $\Lambdamat = \Sigmamat^{-1} = \frac{1}{1 - \rho^2}\begin{bmatrix} 1 & -\rho \\ -\rho & 1
+\end{bmatrix}$. The terms of $\log p(\zvec) = -\tfrac{1}{2}\zvec^\top\Lambdamat\zvec + \text{const}$ that involve $z_1$
+are $-\tfrac{1}{2}\Lambda_{11} z_1^2 - \Lambda_{12} z_1 z_2$. Taking the expectation over $q_2$ replaces $z_2$ by its mean
+$m_2$:
+
+$$
+\log q_1^*(z_1) = -\tfrac{1}{2}\Lambda_{11} z_1^2 - \Lambda_{12} z_1 m_2 + \text{const}.
+$$
+
+This is a Gaussian with precision $\Lambda_{11}$ and mean $-\Lambda_{12} m_2 / \Lambda_{11} = \rho\, m_2$. By symmetry
+$q_2^*$ has mean $\rho\, m_1$. Coordinate ascent therefore alternates $m_1 \leftarrow \rho m_2$ and
+$m_2 \leftarrow \rho m_1$, which shrinks the means towards 0 by a factor of $\rho^2$ per sweep. At convergence the means
+are exact, but each factor has variance $1/\Lambda_{11} = 1 - \rho^2$, while the true marginal variance is 1. With
+$\rho = 0.8$ the mean-field variance is 0.36, and the remaining divergence is
+$\KL(q \,\|\, p) = -\tfrac{1}{2}\log(1 - \rho^2) = 0.51$.
+
+<MeanFieldGaussian />
+
+## Properties
+
+- **Variance is underestimated.** Maximising the ELBO minimises $\KL(q \,\|\, p)$, which heavily penalises $q$ for
+  putting mass where $p$ is small. A factorised $q$ cannot follow a diagonal ridge, so it shrinks to fit inside it. The
+  example shows the factor variance is the conditional variance $1/\Lambda_{jj}$, never more than the marginal
+  variance. See <NoteLink to="kl-divergence">KL divergence</NoteLink> for the forward and reverse directions.
+- **Mode seeking.** For a multimodal posterior, $q$ tends to lock onto one mode, chosen by the initialisation.
+- **Means can be right.** For a Gaussian target, mean-field means are exact at convergence, as in the example.
+- **Scale.** Each update involves one group of variables. With stochastic optimisation over data subsets, the method
+  scales to very large models, such as topic models over millions of documents <Cite id="blei2017" />.
+
+## Relation to EM
+
+If one group of variables is a point estimate rather than a distribution, its "update" becomes a maximisation. EM is the
+special case with an unrestricted $q$ over the latent variables and point estimates for the parameters; see
+<NoteLink to="em-as-variational-inference">EM as variational inference</NoteLink>. The
+<NoteLink to="gaussian-mixture-model">Gaussian mixture model</NoteLink> can be fitted either way.
+
+## Pitfalls
+
+- **Non-conjugate terms.** When $\expect_{-j}[\log p]$ has no closed form, the optimal factor cannot be computed
+  exactly. Gradient-based variational inference with a parametric family is then used instead.
+- **Reporting uncertainty.** Credible intervals from a mean-field posterior are too narrow when the latent variables are
+  correlated in the true posterior.
+- **Convergence is not correctness.** A converged ELBO certifies a stationary point of a restricted problem, not a good
+  approximation. The gap to the log evidence is unknown in general.

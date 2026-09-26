@@ -23,6 +23,7 @@ import {
   type NoteMeta,
 } from '../site/src/lib/content-schema.ts'
 import { macroExample, macroGroups, macros } from '../content/macros.ts'
+import { plainMath } from '../site/src/lib/math-text.ts'
 
 const CONTENT_ID = 'virtual:content'
 const SEARCH_ID = 'virtual:search'
@@ -139,7 +140,11 @@ function formatIssues(file: string, error: z.ZodError): string {
   return `${file}:\n${error.issues.map((i) => `  - ${i.path.join('.') || '(root)'}: ${i.message}`).join('\n')}`
 }
 
-export function buildIndex(contentDir: string) {
+/**
+ * Build and validate the index. Strict (build, CI, `make check`) throws on any error. Lenient (the dev server) keeps
+ * going: it drops whatever is broken, so the rest of the site renders, and returns the errors for the in-app banner.
+ */
+export function buildIndex(contentDir: string, { strict = true }: { strict?: boolean } = {}) {
   const errors: string[] = []
 
   const taxonomyFile = path.join(contentDir, 'taxonomy.yaml')
@@ -173,7 +178,15 @@ export function buildIndex(contentDir: string) {
     }
     seen.set(noteSlug, file)
     const source = fs.readFileSync(path.join(contentDir, file), 'utf8')
-    const { data, body } = splitFrontmatter(source, file)
+    let data: unknown
+    let body: string
+    try {
+      ;({ data, body } = splitFrontmatter(source, file))
+    } catch (err) {
+      // A YAML syntax error in one note must not take down the whole index.
+      errors.push(`content/${file}: ${err instanceof Error ? err.message : String(err)}`)
+      continue
+    }
     const parsed = frontmatterSchema.safeParse(data)
     if (!parsed.success) {
       errors.push(formatIssues(`content/${file}`, parsed.error))
@@ -189,6 +202,10 @@ export function buildIndex(contentDir: string) {
       continue
     }
     errors.push(...mathErrors(body).map((e) => `content/${file}: ${e}`))
+    // Summaries render $…$ maths too (abstract, cards, hover cards); check it, and limit the length as read.
+    errors.push(...mathErrors(parsed.data.summary).map((e) => `content/${file}: summary ${e}`))
+    const readLength = plainMath(parsed.data.summary).trim().length
+    if (readLength > 280) errors.push(`content/${file}: summary is ${readLength} characters as read; the limit is 280`)
     const text = plainText(body)
     notes.push({
       ...parsed.data,
@@ -227,9 +244,21 @@ export function buildIndex(contentDir: string) {
       if (!(key in references)) errors.push(`${where}: unknown reference "${key}" (see references.yaml)`)
     }
   }
-  if (errors.length) throw new Error(`Content validation failed:\n${errors.join('\n')}`)
+  if (errors.length && strict) throw new Error(`Content validation failed:\n${errors.join('\n')}`)
 
-  return { notes, references, taxonomy, bodies, folders: found.folders }
+  // Lenient: remove dangling references so components never look up something that does not exist.
+  const valid = notes.filter((n) => categoryPaths.has(n.category))
+  const validSlugs = new Set(valid.map((n) => n.slug))
+  const safe = valid.map((n) => ({
+    ...n,
+    requires: n.requires.filter((s) => validSlugs.has(s)),
+    partOf: n.partOf.filter((s) => validSlugs.has(s)),
+    related: n.related.filter((s) => validSlugs.has(s)),
+    linked: n.linked.filter((s) => validSlugs.has(s)),
+    cited: n.cited.filter((k) => k in references),
+    references: n.references.filter((k) => k in references),
+  }))
+  return { notes: safe, references, taxonomy, bodies, folders: found.folders, errors }
 }
 
 export function contentIndex({ contentDir }: { contentDir: string }): Plugin {
@@ -258,12 +287,14 @@ export function contentIndex({ contentDir }: { contentDir: string }): Plugin {
     },
     load(id) {
       if (id !== resolved(CONTENT_ID) && id !== resolved(SEARCH_ID)) return
-      const { notes, references, taxonomy, bodies } = buildIndex(contentDir)
+      // The dev server stays up on content errors and lists them in the page; builds stay strict.
+      const { notes, references, taxonomy, bodies, errors } = buildIndex(contentDir, { strict: !server })
       if (id === resolved(SEARCH_ID)) return `export default ${JSON.stringify(bodies)}`
       return [
         `export const notes = ${JSON.stringify(notes)}`,
         `export const references = ${JSON.stringify(references)}`,
         `export const taxonomy = ${JSON.stringify(taxonomy)}`,
+        `export const contentErrors = ${JSON.stringify(errors)}`,
       ].join('\n')
     },
   }

@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Outlet, useLocation } from 'react-router'
+import { ContentErrors } from './ContentErrors'
 import { SiteHeader } from './SiteHeader'
 
 export function AppShell() {
@@ -10,6 +11,7 @@ export function AppShell() {
   return (
     <div className="min-h-svh bg-background text-foreground">
       <SiteHeader />
+      <ContentErrors />
       <Outlet />
     </div>
   )

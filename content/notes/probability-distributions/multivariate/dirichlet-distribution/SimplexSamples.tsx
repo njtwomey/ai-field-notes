@@ -74,7 +74,10 @@ export function SimplexSamples() {
         </>
       }
     >
-      <XYChart series={series} segments={OUTLINE} xRange={X_RANGE} yRange={Y_RANGE} equalAspect bare />
+      {/* Equal aspect sets the height from the width, so cap the width: the whole simplex and the sliders fit on screen. */}
+      <div className="mx-auto w-full max-w-md">
+        <XYChart series={series} segments={OUTLINE} xRange={X_RANGE} yRange={Y_RANGE} equalAspect bare />
+      </div>
     </Interactive>
   )
 }

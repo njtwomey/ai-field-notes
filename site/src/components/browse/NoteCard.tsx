@@ -2,6 +2,7 @@ import { Link } from 'react-router'
 import { kindIcons } from '@/components/layout/kind-icon'
 import { category, kindLabels, noteUrl, type NoteMeta } from '@/lib/content'
 import { cn } from '@/lib/utils'
+import { MathText } from '@/components/content/MathText'
 
 /** A note at a glance: kind and title first, then where it sits, then one or two lines of summary. */
 export function NoteCard({ note, className }: { note: NoteMeta; className?: string }) {
@@ -22,7 +23,9 @@ export function NoteCard({ note, className }: { note: NoteMeta; className?: stri
       <span className="pl-6 text-xs text-muted-foreground">
         {kindLabels[note.kind]} · {category(note.category)?.title}
       </span>
-      <p className="line-clamp-2 pl-6 text-sm text-muted-foreground">{note.summary}</p>
+      <p className="line-clamp-2 pl-6 text-sm text-muted-foreground">
+        <MathText text={note.summary} />
+      </p>
     </Link>
   )
 }

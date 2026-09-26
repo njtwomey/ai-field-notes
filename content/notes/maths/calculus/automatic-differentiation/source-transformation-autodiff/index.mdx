@@ -1,0 +1,84 @@
+---
+title: Source-transformation automatic differentiation
+kind: technique
+summary: Source-transformation automatic differentiation reads a program before it runs and writes a second program that computes its derivatives. The result compiles and optimises like hand-written code with nothing recorded at run time, but the tool must understand the language.
+tags: [automatic-differentiation, software, compilers]
+aliases: [source transformation, source-to-source AD, code transformation AD, adjoint code generation, Tapenade, Zygote, Enzyme, Tangent]
+requires: [backpropagation]
+related: [static-and-dynamic-computation-graphs, forward-mode-autodiff]
+partOf: [history-of-automatic-differentiation]
+references: [griewank2008, bischof1992, hascoet2013, vanmerrienboer2018, innes2018, moses2020]
+status: draft
+updated: 2026-09-26
+---
+
+<Definition>
+Source-transformation automatic differentiation takes the text of a program, or a compiler's intermediate
+representation of it, and generates a new program that computes the original's derivatives. The new program is an
+ordinary program: it is compiled, optimised and run like any other, with no recording of operations at run time
+<Cite id="griewank2008" />.
+</Definition>
+
+## How it works
+
+The tool parses the program and applies a differentiation rule to each statement. For forward mode, each assignment
+gains a tangent assignment next to it:
+
+```
+y = sin(x) * a            # original statement
+dy = cos(x) * dx * a + sin(x) * da   # generated tangent statement
+```
+
+For reverse mode, the generated program has two parts. A forward part runs the original statements and saves the
+values the derivatives will need. A reverse part then visits the statements in the opposite order and updates adjoints,
+statement by statement:
+
+```
+# forward part                # reverse part (runs afterwards, statements reversed)
+t = sin(x)                    t_bar = y_bar * a;  a_bar += y_bar * t
+y = t * a                     x_bar += t_bar * cos(x)
+```
+
+Control flow becomes control flow in the generated code. A loop in the original becomes a loop in the forward part and
+a loop running backwards in the reverse part, with enough saved state to know how many iterations ran and which
+branches were taken. This bookkeeping, not the arithmetic, is the hard part of a reverse-mode source transformer.
+
+## Tools
+
+- **ADIFOR** (1992) generated forward-mode derivative code from Fortran 77 source <Cite id="bischof1992" />.
+- **TAF** and **Tapenade** generate forward and adjoint code for Fortran and C; Tapenade performs data-flow analyses to
+  decide which values must be saved for the reverse part <Cite id="hascoet2013" />.
+- **Tangent** (2017) transformed the syntax trees of Python functions, producing readable derivative code that could be
+  inspected and edited <Cite id="vanmerrienboer2018" />.
+- **Zygote** (2018–19) differentiates Julia by transforming the compiler's static single assignment (SSA) form. Working
+  on SSA rather than on source makes control flow and variable reuse explicit, and lets the Julia compiler optimise the
+  result <Cite id="innes2018" />.
+- **Enzyme** (2020) differentiates LLVM intermediate representation after the compiler has optimised it. The same tool
+  then works for C, C++, Fortran, Julia, Rust and any other language that compiles to LLVM, and differentiating
+  optimised code produces faster gradients than differentiating before optimisation <Cite id="moses2020" />.
+
+## Where JAX sits
+
+JAX neither overloads operators for recording in the usual sense nor reads Python source. It runs a Python function
+once on abstract tracer values, which captures the operations as a small intermediate language, the jaxpr. It then
+transforms the jaxpr: `grad` and `jvp` rewrite it into derivative jaxprs, and `jit` compiles the result with XLA. The
+capture step is tracing, the differentiation step is a transformation of the captured program, so JAX is a hybrid of
+the two approaches. Its limits follow: Python control flow that depends on traced values cannot be captured and must
+use structured primitives such as `lax.cond` and `lax.scan`. See
+<NoteLink to="static-and-dynamic-computation-graphs">static and dynamic computation graphs</NoteLink>.
+
+## Trade-offs
+
+- **Speed.** The derivative program is compiled code. There is no per-operation recording and no interpretation of a
+  tape, and the compiler can inline, fuse and simplify across the whole derivative computation.
+- **Analysis.** Because the whole program is visible, the tool can prove that some values are never needed and skip
+  saving them, or that some derivatives are always zero.
+- **Language coverage.** The tool must handle every feature the program uses: pointers and aliasing, exceptions,
+  dynamic dispatch, calls into libraries without source. Each unsupported feature is a program the tool cannot
+  differentiate. Transforming a compiler IR rather than source text narrows the set of features to handle, which is why
+  Zygote and Enzyme work at that level.
+- **Control flow is harder than with a tape.** A tape simply records the branches taken. A transformer must generate
+  code that saves and replays those decisions, and that handles loops whose trip count is known only at run time.
+
+Compare <NoteLink to="operator-overloading-and-tapes">operator overloading and tapes</NoteLink>, which trades the other
+way: easy coverage of any code that runs, at the cost of run-time overhead.

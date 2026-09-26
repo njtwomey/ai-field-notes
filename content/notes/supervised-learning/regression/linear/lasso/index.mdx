@@ -1,0 +1,139 @@
+---
+title: Lasso
+kind: concept
+summary: The lasso adds an L1 penalty $\alpha\norm{\wvec}_1$ to least squares. The corners of the L1 ball set some coefficients exactly to zero, so the lasso selects features as it fits. Coordinate descent solves it with one soft-thresholding step per coefficient.
+tags: [regression, regularisation, linear-models, sparsity, feature-selection, worked-example]
+aliases: [L1 regularisation, least absolute shrinkage and selection operator, soft thresholding, lasso regression]
+requires: [linear-regression, vector-norms]
+related: [ridge-regression, laplace-distribution]
+code: linear-models
+references: [tibshirani1996, friedman2010, hastie2009, efron2004]
+status: draft
+updated: 2026-09-26
+---
+
+import { PenaltyGeometry } from '../_shared/PenaltyGeometry'
+import { LassoPaths } from './LassoPaths'
+
+<Definition>
+The lasso fits $\yvec \approx \Xmat\wvec$ by minimising
+
+$$
+L(\wvec) = \frac{1}{2n}\norm{\yvec - \Xmat\wvec}^2 + \alpha\norm{\wvec}_1, \qquad \norm{\wvec}_1 = \sum_{j=1}^d \abs{w_j},
+$$
+
+where $\Xmat \in \reals^{n \times d}$ holds standardised features, $\yvec \in \reals^n$ the centred targets and
+$\alpha \ge 0$ sets the penalty's strength <Cite id="tibshirani1996" />. For $\alpha$ above a threshold every coefficient
+is exactly zero; as $\alpha$ falls, coefficients become nonzero one at a time.
+</Definition>
+
+## Why the L1 penalty gives zeros
+
+The penalised problem has an equivalent constrained form: minimise $\norm{\yvec - \Xmat\wvec}^2$ subject to
+$\norm{\wvec}_1 \le t$, where each $\alpha$ corresponds to some budget $t$. The contours of the squared error are
+ellipses centred on the OLS solution. The solution is the point where the smallest such ellipse touches the set
+$\set{\wvec : \norm{\wvec}_1 \le t}$.
+
+That set is a diamond (in higher dimensions a cross-polytope) with its corners on the coordinate axes. A corner is a
+point where some coordinates are exactly zero. An ellipse approaching the diamond from outside touches a corner for a
+whole region of OLS positions, not just for special ones. The ridge constraint $\norm{\wvec}_2 \le t$ is a disc with
+no corners: its contact point lies on an axis only when the OLS solution itself does <Cite id="hastie2009" />.
+
+<PenaltyGeometry mode="compare" />
+
+## Optimality conditions
+
+$L$ is convex but not differentiable where a coefficient is zero, because $\abs{w}$ has a kink there. Its
+**subdifferential** at 0 is the interval $[-1, 1]$: every slope between the two one-sided derivatives. A point
+minimises a convex function exactly when zero lies in the subdifferential. The partial derivative of the squared-error
+term with respect to $w_j$ is $-\frac{1}{n}\xvec_j^\top(\yvec - \Xmat\wvec)$, where $\xvec_j$ is column $j$ of $\Xmat$.
+So $\hat\wvec$ is a lasso solution exactly when, for every $j$,
+
+$$
+\frac{1}{n}\xvec_j^\top(\yvec - \Xmat\hat\wvec) =
+\begin{cases} \alpha\,\sgn(\hat w_j) & \text{if } \hat w_j \neq 0, \\ c_j \text{ with } \abs{c_j} \le \alpha & \text{if } \hat w_j = 0. \end{cases}
+$$
+
+The left side is the correlation between feature $j$ and the current residual. A feature is in the model only if its
+correlation with the residual reaches $\alpha$ in absolute value; every active feature has exactly that correlation.
+At $\wvec = \zeros$ the residual is $\yvec$, so all coefficients are zero precisely when
+$\alpha \ge \alpha_{\max} = \max_j \abs{\xvec_j^\top\yvec}/n$.
+
+## Soft thresholding
+
+Take a single coefficient with the others held fixed. Let $\rvec_j = \yvec - \sum_{k \neq j}\xvec_k w_k$ be the
+partial residual. A standardised column has $\norm{\xvec_j}^2 = n$, so the terms of $L$ that involve $w_j$ are
+
+$$
+\frac{1}{2n}\norm{\rvec_j - \xvec_j w_j}^2 + \alpha\abs{w_j}
+= \tfrac{1}{2}w_j^2 - z_j w_j + \alpha\abs{w_j} + \text{const}, \qquad z_j = \frac{\xvec_j^\top\rvec_j}{n}.
+$$
+
+Zero must lie in the subdifferential $w_j - z_j + \alpha\,\partial\abs{w_j}$.
+
+- If $w_j > 0$: $w_j = z_j - \alpha$, which is consistent when $z_j > \alpha$.
+- If $w_j < 0$: $w_j = z_j + \alpha$, consistent when $z_j < -\alpha$.
+- If $w_j = 0$: we need $z_j \in [-\alpha, \alpha]$.
+
+The three cases combine into the **soft-thresholding** operator
+
+$$
+w_j = S(z_j, \alpha) = \sgn(z_j)\,\max(\abs{z_j} - \alpha,\ 0).
+$$
+
+$z_j$ is what OLS would set $w_j$ to given the other coefficients. The lasso moves it towards zero by $\alpha$ and stops
+at zero. For comparison, the same one-coefficient problem with a ridge penalty $\frac{\lambda}{2}w_j^2$ gives
+$w_j = z_j/(1 + \lambda)$: a proportional shrink that never reaches zero.
+
+**Worked example.** With $\alpha = 1$: $z_j = 3$ gives $w_j = 2$, $z_j = -1.5$ gives $w_j = -0.5$, and any
+$z_j \in [-1, 1]$ gives exactly $w_j = 0$. When the columns of $\Xmat$ are orthogonal, the partial residuals do not
+depend on the other coefficients, and the whole lasso solution is $S$ applied to each OLS coefficient.
+
+## Coordinate descent
+
+For correlated features there is no closed form. **Cyclic coordinate descent** updates one coefficient at a time with
+$w_j \leftarrow S(z_j, \alpha)$, cycling until the coefficients stop changing <Cite id="friedman2010" />. Each update
+exactly minimises $L$ in its coordinate, so $L$ never increases. Because the non-smooth part of $L$ is a sum of
+functions of single coordinates, coordinate descent converges to the global minimum.
+
+A full cycle costs $O(nd)$. Keeping the residual $\yvec - \Xmat\wvec$ up to date makes each update $O(n)$, and
+coefficients at zero usually stay there, so later cycles touch only the active set. Solving for a decreasing grid of
+$\alpha$ values, each warm-started from the previous solution, gives the whole path at little more than the cost of
+one fit. This is how glmnet and scikit-learn's `Lasso` work.
+
+## The lasso path on the diabetes data
+
+On the diabetes data, with ten standardised features and 442 patients, $\alpha_{\max} = 45.2$. As $\alpha$ falls,
+bmi enters first, then s5 at $\alpha = 42.3$, bp at 21.5 and s3 at 15.0. At $\alpha = 1$ seven coefficients are
+nonzero and age, s2 and s4 are exactly zero. The training $R^2$ is 0.513, against 0.518 for OLS, and the 5-fold
+cross-validated $R^2$ is 0.482 for both. The lasso reaches the same predictive accuracy with three fewer features.
+
+Between the values of $\alpha$ where a feature enters or leaves, the active coefficients are linear in $\alpha$: on
+that stretch the optimality conditions are linear equations in $\wvec$ and $\alpha$. The whole path is therefore
+piecewise linear, which <NoteLink to="least-angle-regression">least-angle regression</NoteLink> exploits to compute it
+exactly <Cite id="efron2004" />.
+
+<LassoPaths />
+
+## Bayesian view
+
+Give each coefficient an independent <NoteLink to="laplace-distribution">Laplace</NoteLink> prior with density
+$p(w_j) \propto e^{-\abs{w_j}/b}$, and let the noise be Gaussian with variance $\sigma^2$. The negative log posterior
+is $\frac{1}{2\sigma^2}\norm{\yvec - \Xmat\wvec}^2 + \frac{1}{b}\norm{\wvec}_1$ plus a constant. Dividing by
+$n/\sigma^2$ gives the lasso objective with $\alpha = \sigma^2/(nb)$, so the lasso estimate is the posterior mode. The
+posterior mean under the same prior is never exactly zero: the sparsity belongs to the mode, not to the posterior.
+
+## Pitfalls
+
+- **Standardise first.** As with ridge, the penalty depends on each feature's units. A feature measured in large units
+  gets a small coefficient and is penalised less.
+- **Correlated features.** From a group of correlated features, the lasso tends to keep one and zero the rest, and
+  which one it keeps can change with small changes in the data. On the diabetes data it keeps s1 from
+  $\alpha = 3.2$ but holds its correlate s2 at zero until $\alpha = 0.25$. The
+  <NoteLink to="elastic-net">elastic net</NoteLink> adds a ridge term to share weight within such groups.
+- **At most n features.** When $d > n$, the lasso selects at most $n$ features before it saturates.
+- **Biased coefficients.** Every active coefficient is shrunk by $\alpha$, so large effects are underestimated.
+  Refitting OLS on the selected features (the relaxed lasso) removes the shrinkage but not the selection's
+  uncertainty.
+- **Selection is not inference.** A feature that the lasso zeroes is not shown to have no effect, and p-values from a
+  model refitted after selection are too small.

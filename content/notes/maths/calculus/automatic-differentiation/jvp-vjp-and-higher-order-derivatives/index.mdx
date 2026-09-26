@@ -1,0 +1,98 @@
+---
+title: JVPs, VJPs and higher-order derivatives
+kind: technique
+summary: 'Modern autodiff libraries expose two primitives: the Jacobian-vector product $\Jmat\vvec$ (forward mode) and the vector-Jacobian product $\uvec^\top\Jmat$ (reverse mode). Jacobians, gradients and Hessian-vector products are built from them, each at a small multiple of the cost of the function.'
+tags: [automatic-differentiation, derivatives, linear-algebra, worked-example]
+aliases: [JVP, VJP, Jacobian-vector product, vector-Jacobian product, Hessian-vector product, HVP, forward-over-reverse, Pearlmutter trick, jacfwd, jacrev, Taylor mode]
+requires: [forward-mode-autodiff, backpropagation]
+related: [hessian, jacobian, dual-numbers, multivariable-chain-rule]
+partOf: [history-of-automatic-differentiation]
+references: [griewank2008, baydin2018, pearlmutter1994, bradbury2018]
+status: draft
+updated: 2026-09-26
+---
+
+<Definition>
+For $\fvec : \reals^n \to \reals^m$ with Jacobian $\Jmat = \partial\fvec/\partial\xvec \in \reals^{m \times n}$ at $\xvec$:
+
+- the **Jacobian-vector product** (JVP) maps a tangent $\vvec \in \reals^n$ to $\Jmat\vvec \in \reals^m$, and is what
+  forward mode computes;
+- the **vector-Jacobian product** (VJP) maps a cotangent $\uvec \in \reals^m$ to $\uvec^\top\Jmat \in \reals^n$, and is what
+  reverse mode computes.
+
+Each costs a small constant multiple of evaluating $\fvec$, and neither forms $\Jmat$ <Cite id="griewank2008" />.
+</Definition>
+
+## Why these two are the primitives
+
+A program is a composition $\fvec = \fvec_L \circ \dots \circ \fvec_1$, so by the
+<NoteLink to="multivariable-chain-rule">chain rule</NoteLink> its Jacobian is a product,
+$\Jmat = \Jmat_L \cdots \Jmat_1$. Multiplying that product by a vector can be done without ever multiplying two matrices
+together:
+
+$$
+\Jmat\vvec = \Jmat_L\bigl(\cdots(\Jmat_2(\Jmat_1\vvec))\bigr), \qquad
+\uvec^\top\Jmat = \bigl(((\uvec^\top\Jmat_L)\Jmat_{L-1})\cdots\bigr)\Jmat_1.
+$$
+
+The first is evaluated right to left, in the same order as the program runs: that is forward mode, and it can
+proceed alongside the evaluation, as in <NoteLink to="dual-numbers">dual numbers</NoteLink>. The second is evaluated
+left to right, from the output back to the input: that is reverse mode, which must first run the program and keep its
+intermediate values, as in <NoteLink to="backpropagation">backpropagation</NoteLink>. Each step is a matrix-vector
+product with one local Jacobian, which a primitive operation supplies cheaply, usually without forming it. Every
+derivative a library offers is built from these two products.
+
+## Jacobians, and choosing a mode
+
+The full Jacobian comes one column or one row at a time:
+
+- $n$ JVPs with the basis vectors $\evec_1, \dots, \evec_n$ give its $n$ columns;
+- $m$ VJPs with $\evec_1, \dots, \evec_m$ give its $m$ rows.
+
+So forward mode is cheaper when there are few inputs ($n < m$), and reverse mode when there are few outputs ($m < n$).
+A gradient is the extreme case, $m = 1$: one VJP with $u = 1$ gives the whole gradient, whatever $n$ is. This is why
+training uses reverse mode.
+
+Libraries batch the passes: JAX's `jacfwd` and `jacrev`, and PyTorch's `torch.func.jacfwd` and `jacrev`, map the JVP or
+VJP over all basis vectors at once with `vmap` <Cite id="bradbury2018" />.
+
+## Hessian-vector products
+
+The Hessian $\Hmat$ of a scalar $f : \reals^n \to \reals$ has $n^2$ entries, too many to form for a model with millions of
+parameters. Many methods only need its product with a vector: Newton–CG steps, curvature along a direction,
+eigenvalue estimates, and the trace estimate $\trace(\Hmat) \approx \expect[\vvec^\top\Hmat\vvec]$.
+
+**Forward-over-reverse.** The gradient $\gvec(\xvec) = \nabla f(\xvec)$ is itself a function from $\reals^n$ to
+$\reals^n$, computed by reverse mode, and its Jacobian is $\Hmat$. So $\Hmat\vvec$ is a JVP of the gradient function:
+
+$$
+\Hmat\vvec = \left.\frac{d}{dt}\nabla f(\xvec + t\vvec)\right|_{t=0}.
+$$
+
+Running forward mode through the gradient computation gives $\Hmat\vvec$ exactly. Reverse mode costs a constant multiple
+of evaluating $f$, and a JVP of that computation costs a constant multiple more, so a Hessian-vector product costs a
+constant multiple of one function evaluation, independent of $n$ <Cite id="pearlmutter1994" />. In JAX this is
+`jax.jvp(jax.grad(f), (x,), (v,))`. Pearlmutter introduced the technique in 1994 as the $\mathcal{R}$-operator.
+
+**Worked example.** For $f(x_1, x_2) = x_1^2 x_2 + \sin x_2$, the gradient is $(2x_1x_2,\; x_1^2 + \cos x_2)$ and the
+Hessian is $\begin{bmatrix} 2x_2 & 2x_1 \\ 2x_1 & -\sin x_2 \end{bmatrix}$. At $\xvec = (1, 2)$ with $\vvec = (1, 0)$,
+the gradient along the line $\xvec + t\vvec$ is $(4(1 + t),\; (1 + t)^2 + \cos 2)$, and its derivative at $t = 0$ is
+$(4, 2)$. That is the first column of $\Hmat$ at $(1, 2)$, as it should be for $\vvec = \evec_1$, obtained without
+writing down $\Hmat$.
+
+## Higher orders
+
+Nesting the two products gives any mixed derivative: a JVP of a JVP gives a second directional derivative, and a VJP of
+a VJP gives reverse-over-reverse Hessian products. Each level multiplies the cost by a constant, so the cost of a
+$k$-th derivative along chosen directions grows exponentially in $k$ when computed by nesting. Taylor-mode
+differentiation propagates a truncated Taylor series through the program instead, giving the first $k$ derivatives
+along a direction at a cost that grows only polynomially in $k$ <Cite id="griewank2008" />.
+
+## Pitfalls
+
+- **Forming what can be multiplied.** Building $\Hmat$ or $\Jmat$ explicitly costs $n$ passes and $O(n^2)$ or
+  $O(mn)$ memory. When only products are needed, keep them as products.
+- **Choosing the wrong mode.** A Jacobian with many inputs and few outputs computed by `jacfwd` costs $n$ passes where
+  `jacrev` would cost $m$.
+- **Non-smooth functions.** Where a function is not twice differentiable, such as ReLU networks at their kinks, a
+  Hessian-vector product returns the derivative of whichever piece was evaluated.

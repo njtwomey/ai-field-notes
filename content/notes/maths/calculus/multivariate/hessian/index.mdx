@@ -1,0 +1,143 @@
+---
+title: Hessian
+kind: concept
+summary: The Hessian is the symmetric matrix of second partial derivatives of a scalar function. It is the curvature term of the second-order Taylor expansion, its eigenvalues classify stationary points, and its condition number sets how fast gradient descent converges.
+tags: [calculus, derivatives, optimisation, worked-example]
+aliases: [Hessian matrix, second derivative test, curvature, Newton's method, Newton step, second-order Taylor expansion]
+requires: [gradient, partial-derivatives]
+related: [positive-definite-matrices, gradient-descent, condition-number, eigendecomposition, taylor-series]
+references: [nocedal2006, deisenroth2020]
+status: draft
+updated: 2026-09-26
+---
+
+import { Curvature } from './Curvature'
+
+<Definition>
+For a twice differentiable $f : \reals^n \to \reals$, the Hessian at $\xvec$ is the $n \times n$ matrix of second
+partial derivatives
+
+$$
+\Hmat(\xvec)_{ij} = \frac{\partial^2 f}{\partial x_i\,\partial x_j}(\xvec).
+$$
+
+It is the Jacobian of the gradient. When the second partials are continuous, it is symmetric
+<Cite id="nocedal2006" />.
+</Definition>
+
+Symmetry follows from the Clairaut–Schwarz theorem in <NoteLink to="partial-derivatives">partial derivatives</NoteLink>:
+mixed partials of a function with continuous second derivatives do not depend on the order of differentiation. A real
+symmetric matrix has real eigenvalues and orthonormal eigenvectors, which is what makes the rest of this note work.
+
+## The second-order Taylor expansion
+
+Fix a point $\xvec$ and a direction $\hvec$, and study $f$ along the line through them with $\phi(t) = f(\xvec +
+t\hvec)$. The chain rule gives the derivatives of this one-variable function:
+
+$$
+\phi'(t) = \sum_i \frac{\partial f}{\partial x_i}\,h_i = \nabla f(\xvec + t\hvec)^\top\hvec, \qquad
+\phi''(t) = \sum_{i,j} \frac{\partial^2 f}{\partial x_i\,\partial x_j}\,h_i h_j = \hvec^\top\Hmat(\xvec + t\hvec)\,\hvec.
+$$
+
+The second follows from differentiating each term of the first again, with the chain rule. The one-variable
+<NoteLink to="taylor-series">Taylor expansion</NoteLink> $\phi(1) \approx \phi(0) + \phi'(0) + \tfrac12\phi''(0)$ then
+reads
+
+$$
+f(\xvec + \hvec) \approx f(\xvec) + \nabla f(\xvec)^\top\hvec + \frac{1}{2}\,\hvec^\top\Hmat(\xvec)\,\hvec.
+$$
+
+The gradient gives the slope in every direction, and the Hessian gives the curvature: along a unit direction $\uvec$ the
+second derivative of $f$ is $\uvec^\top\Hmat\uvec$.
+
+## Classifying stationary points
+
+At a stationary point, $\nabla f(\xvec) = \zeros$ and the expansion is $f(\xvec + \hvec) - f(\xvec) \approx
+\tfrac12\hvec^\top\Hmat\hvec$. Write the eigendecomposition $\Hmat = \Qmat\Lambdamat\Qmat^\top$ with eigenvalues
+$\lambda_i$ and orthonormal eigenvectors $\qvec_i$. In the eigenvector coordinates $c_i = \qvec_i^\top\hvec$,
+
+$$
+\hvec^\top\Hmat\hvec = \sum_i \lambda_i\,c_i^2.
+$$
+
+The sign of this sum for small $\hvec$ decides the shape:
+
+- **All $\lambda_i > 0$** ($\Hmat$ positive definite): every direction curves up, so $\xvec$ is a strict local minimum.
+- **All $\lambda_i < 0$** (negative definite): every direction curves down, a strict local maximum.
+- **Some positive, some negative** (indefinite): $f$ rises along some eigenvectors and falls along others, a saddle
+  point.
+- **Some $\lambda_i = 0$, the rest of one sign** (semidefinite): the test is inconclusive. $f = x^4 + y^2$ and
+  $f = x^3 + y^2$ both have Hessian $\operatorname{diag}(0, 2)$ at the origin; the first has a minimum there and the
+  second does not.
+
+The eigenvalues are the curvatures along the eigenvectors, the principal directions of the surface. The
+<NoteLink to="positive-definite-matrices">positive-definite matrices</NoteLink> note gives tests for definiteness that
+avoid computing eigenvalues.
+
+<Curvature />
+
+## Worked example
+
+Take $f(x, y) = x^3 - 3x + y^2$. The gradient and Hessian are
+
+$$
+\nabla f = \begin{bmatrix} 3x^2 - 3 \\ 2y \end{bmatrix}, \qquad
+\Hmat = \begin{bmatrix} 6x & 0 \\ 0 & 2 \end{bmatrix}.
+$$
+
+The gradient vanishes at $(1, 0)$ and $(-1, 0)$.
+
+- At $(1, 0)$, $\Hmat = \operatorname{diag}(6, 2)$ is positive definite: a local minimum, with $f(1, 0) = -2$.
+- At $(-1, 0)$, $\Hmat = \operatorname{diag}(-6, 2)$ is indefinite: a saddle, with $f(-1, 0) = 2$. Moving along $x$
+  lowers $f$ and moving along $y$ raises it.
+
+The minimum is only local: $f \to -\infty$ as $x \to -\infty$.
+
+## Newton's step
+
+Minimise the quadratic model instead of $f$ itself. Setting the gradient of
+$m(\hvec) = f + \nabla f^\top\hvec + \tfrac12\hvec^\top\Hmat\hvec$ to zero gives $\nabla f + \Hmat\hvec = \zeros$, so
+
+$$
+\hvec_{\text{Newton}} = -\Hmat^{-1}\nabla f(\xvec).
+$$
+
+When $\Hmat$ is positive definite this is a descent direction, and for a quadratic $f$ one step lands exactly on the
+minimum. Near a minimum of a smooth $f$, Newton's method converges quadratically: the number of correct digits roughly
+doubles each step <Cite id="nocedal2006" />. The price is forming and solving with an $n \times n$ matrix, which is why
+large models use gradient methods or approximations of $\Hmat$.
+
+## Curvature and gradient descent
+
+Near a minimum $f$ is close to $\tfrac12\hvec^\top\Hmat\hvec$, and a <NoteLink to="gradient-descent">gradient-descent</NoteLink>
+step with rate $\eta$ is $\hvec \leftarrow \hvec - \eta\Hmat\hvec = (\eye - \eta\Hmat)\,\hvec$. In the eigenvector
+coordinates each component evolves on its own:
+
+$$
+c_i \leftarrow (1 - \eta\lambda_i)\,c_i.
+$$
+
+Every component shrinks only if $\abs{1 - \eta\lambda_i} < 1$ for all $i$, that is $\eta < 2/\lambda_{\max}$. With the
+safe choice $\eta = 1/\lambda_{\max}$, the slowest component shrinks by the factor $1 - \lambda_{\min}/\lambda_{\max} =
+1 - 1/\kappa$ per step, where $\kappa = \lambda_{\max}/\lambda_{\min}$ is the
+<NoteLink to="condition-number">condition number</NoteLink> of $\Hmat$. Reducing the error by a factor of $10^6$ takes
+about 131 steps when $\kappa = 10$ and about 1,375 when $\kappa = 100$. Newton's step removes the dependence on $\kappa$
+by rescaling each direction by $1/\lambda_i$.
+
+## In machine learning
+
+- **Loss landscapes.** In high dimensions most stationary points of a neural-network loss are saddles, not local
+  minima; the Hessian's negative eigenvalues are the directions of escape.
+- **Second-order optimisers** such as L-BFGS, natural gradient and K-FAC approximate $\Hmat^{-1}\nabla f$ without
+  forming $\Hmat$.
+- **Hessian-vector products** $\Hmat\vvec$ cost about as much as two gradient evaluations with automatic
+  differentiation, which is enough for power iteration on the top eigenvalue.
+- **The Laplace approximation** of a posterior is a Gaussian whose precision matrix is the Hessian of the negative
+  log-posterior at its mode.
+
+## Pitfalls
+
+- **Semidefinite Hessians.** A zero eigenvalue makes the second-derivative test inconclusive; higher-order terms decide.
+- **Saddles look like minima to first order.** Gradient descent slows down near saddles because the gradient is small
+  there, even though the point is not a minimum.
+- **Cost and memory.** A model with $n$ parameters has $n^2$ Hessian entries: $10^{18}$ for a billion parameters.

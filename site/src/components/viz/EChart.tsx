@@ -34,6 +34,11 @@ export type EChartProps = {
    * so a range that depends on the dragged value cannot rescale under the pointer.
    */
   handles?: Handle[]
+  /**
+   * SVG (default) keeps lines and text crisp. Canvas is much faster for charts with thousands of marks, e.g. heatmap
+   * grids, which SVG draws as one element per cell. Fixed when the chart mounts.
+   */
+  renderer?: 'svg' | 'canvas'
 }
 
 export type EChartClick = {
@@ -84,6 +89,7 @@ export function EChart({
   ariaLabel,
   cartesian = true,
   handles,
+  renderer = 'svg',
 }: EChartProps) {
   const ref = useRef<HTMLDivElement>(null)
   const chart = useRef<echarts.ECharts | null>(null)
@@ -92,6 +98,7 @@ export function EChart({
   const { resolved } = useTheme()
   const inputs = useRef<Inputs>({ option, patch, handles, mode: resolved, cartesian })
   const frozen = useRef<Extents | null>(null)
+  const rendererRef = useRef(renderer)
 
   useEffect(() => {
     onClickRef.current = onClick
@@ -130,7 +137,7 @@ export function EChart({
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    const instance = echarts.init(el, undefined, { renderer: 'svg' })
+    const instance = echarts.init(el, undefined, { renderer: rendererRef.current })
     chart.current = instance
     instance.on('click', (e) => onClickRef.current?.(e as unknown as EChartClick))
     instance.getZr().on('click', (e) => {

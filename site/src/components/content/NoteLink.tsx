@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { Badge } from '@/components/ui/badge'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { kindLabels, notesBySlug, noteUrl } from '@/lib/content'
+import { MathText } from './MathText'
 
 /** Link to another note, with its summary on hover: `<NoteLink to="softmax">softmax</NoteLink>`. Checked at build. */
 export function NoteLink({ to, children }: { to: string; children?: ReactNode }) {
@@ -23,7 +24,9 @@ export function NoteLink({ to, children }: { to: string; children?: ReactNode })
               {kindLabels[target.kind]}
             </Badge>
           </div>
-          <p className="text-xs text-muted-foreground">{target.summary}</p>
+          <p className="text-xs text-muted-foreground">
+            <MathText text={target.summary} />
+          </p>
         </div>
       </HoverCardContent>
     </HoverCard>

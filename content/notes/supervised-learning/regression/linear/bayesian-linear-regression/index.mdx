@@ -1,0 +1,288 @@
+---
+title: Bayesian linear regression
+kind: concept
+summary: Bayesian linear regression puts a Gaussian prior on the weights of a linear model with Gaussian noise. The posterior over the weights and the predictive distribution are then Gaussian in closed form, and the marginal likelihood can choose the prior and noise precisions.
+tags: [regression, bayesian, gaussian, worked-example]
+aliases: [Bayesian regression, Bayesian ridge regression, evidence approximation, empirical Bayes, type II maximum likelihood]
+requires: [linear-regression, bayes-theorem, multivariate-normal-distribution]
+related: [ridge-regression, completing-the-square, gaussian-distribution, schur-complement, laplace-approximation, kl-divergence, evidence-lower-bound]
+references: [bishop2006, mackay1992, murphy2022]
+status: draft
+updated: 2026-09-26
+---
+
+import { PredictiveBands } from './PredictiveBands'
+import { SequentialLearning } from './SequentialLearning'
+
+<Definition>
+Bayesian linear regression models targets as $y = \wvec^\top \phivec(x) + \epsilon$ with Gaussian noise
+$\epsilon \sim \Gauss(0, \beta^{-1})$, and places a Gaussian prior $\wvec \sim \Gauss(\mvec_0, \Smat_0)$ on the weights
+<Cite id="bishop2006" />.
+Given data $\yvec$, the posterior over the weights is Gaussian,
+$p(\wvec \mid \yvec) = \Gauss(\wvec \mid \mvec_N, \Smat_N)$, with
+
+$$
+\Smat_N^{-1} = \Smat_0^{-1} + \beta\Phimat^\top\Phimat, \qquad
+\mvec_N = \Smat_N\paren{\Smat_0^{-1}\mvec_0 + \beta\Phimat^\top\yvec}
+$$
+</Definition>
+
+## Model
+
+The data are $N$ pairs $(x_n, y_n)$. A fixed set of $M$ basis functions maps each input to a feature vector
+$\phivec(x_n) \in \reals^M$, for example $(1, x_n)$ for a straight line or a constant plus Gaussian bumps. The design
+matrix $\Phimat \in \reals^{N \times M}$ has rows $\phivec(x_n)^\top$. The model has two parts.
+
+- **Likelihood.** Each target is the linear prediction plus independent Gaussian noise of precision $\beta$ (variance
+  $\beta^{-1}$), so $p(\yvec \mid \wvec) = \Gauss(\yvec \mid \Phimat\wvec, \beta^{-1}\eye)$.
+- **Prior.** $p(\wvec) = \Gauss(\wvec \mid \mvec_0, \Smat_0)$. The common special case is the zero-mean isotropic prior
+  $\Gauss(\wvec \mid \zeros, \alpha^{-1}\eye)$, a single precision $\alpha$ that says small weights are more probable.
+
+The noise precision $\beta$ and the prior are treated as known until the section on the evidence, which estimates
+them.
+
+## The posterior
+
+By <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink>, $p(\wvec \mid \yvec) \propto p(\yvec \mid \wvec)\, p(\wvec)$.
+Both factors are exponentials of quadratics in $\wvec$, so their product is too. Taking logarithms and dropping every
+term that does not contain $\wvec$,
+
+$$
+\ln p(\wvec \mid \yvec) = -\frac{\beta}{2}(\yvec - \Phimat\wvec)^\top(\yvec - \Phimat\wvec)
+- \frac{1}{2}(\wvec - \mvec_0)^\top\Smat_0^{-1}(\wvec - \mvec_0) + \text{const}.
+$$
+
+Expand both quadratics. The first gives
+$\yvec^\top\yvec - 2\wvec^\top\Phimat^\top\yvec + \wvec^\top\Phimat^\top\Phimat\wvec$, and the second gives
+$\wvec^\top\Smat_0^{-1}\wvec - 2\wvec^\top\Smat_0^{-1}\mvec_0 + \mvec_0^\top\Smat_0^{-1}\mvec_0$, using the symmetry of
+$\Smat_0^{-1}$. Collect the terms that are quadratic in $\wvec$ and the terms that are linear in $\wvec$:
+
+$$
+\ln p(\wvec \mid \yvec) = -\frac{1}{2}\wvec^\top\paren{\Smat_0^{-1} + \beta\Phimat^\top\Phimat}\wvec
++ \wvec^\top\paren{\Smat_0^{-1}\mvec_0 + \beta\Phimat^\top\yvec} + \text{const}.
+$$
+
+A Gaussian $\Gauss(\wvec \mid \mvec, \Smat)$ has log density
+$-\frac{1}{2}(\wvec - \mvec)^\top\Smat^{-1}(\wvec - \mvec) + \text{const}
+= -\frac{1}{2}\wvec^\top\Smat^{-1}\wvec + \wvec^\top\Smat^{-1}\mvec + \text{const}$.
+Matching the two lines term by term, which is <NoteLink to="completing-the-square">completing the square</NoteLink>,
+the quadratic coefficient is the precision and the linear coefficient is the precision times the mean:
+
+$$
+\Smat_N^{-1} = \Smat_0^{-1} + \beta\Phimat^\top\Phimat, \qquad
+\Smat_N^{-1}\mvec_N = \Smat_0^{-1}\mvec_0 + \beta\Phimat^\top\yvec.
+$$
+
+$\Smat_0^{-1}$ is positive definite and $\Phimat^\top\Phimat$ is positive semidefinite, so $\Smat_N^{-1}$ is positive
+definite and the posterior is a proper Gaussian even when $N < M$. Each observation adds information: the posterior
+precision is the prior precision plus $\beta$ times the data's contribution $\Phimat^\top\Phimat$.
+
+For the isotropic prior $\mvec_0 = \zeros$, $\Smat_0 = \alpha^{-1}\eye$, the result simplifies to
+
+$$
+\Smat_N^{-1} = \alpha\eye + \beta\Phimat^\top\Phimat, \qquad \mvec_N = \beta\Smat_N\Phimat^\top\yvec.
+$$
+
+### Relation to ridge regression
+
+A Gaussian's mode is its mean, so the maximum a posteriori (MAP) weights are $\mvec_N$. Dividing the isotropic
+formula through by $\beta$,
+
+$$
+\mvec_N = \paren{\Phimat^\top\Phimat + \frac{\alpha}{\beta}\eye}^{-1}\Phimat^\top\yvec,
+$$
+
+which is the <NoteLink to="ridge-regression">ridge regression</NoteLink> estimate with penalty $\lambda = \alpha/\beta$. Equivalently, $\mvec_N$ minimises
+$\frac{\beta}{2}\norm{\yvec - \Phimat\wvec}^2 + \frac{\alpha}{2}\norm{\wvec}^2$, the negative log posterior. Ridge
+regression returns only this point. The Bayesian treatment also returns $\Smat_N$, the uncertainty around it. With
+$\alpha \to 0$ the prior becomes flat and $\mvec_N$ tends to the least-squares solution of
+<NoteLink to="linear-regression">linear regression</NoteLink>.
+
+### Sequential learning
+
+The posterior after some of the data is a Gaussian, so it can serve as the prior for the rest. Processing one point
+$(x_n, y_n)$ at a time with features $\phivec_n = \phivec(x_n)$, the update is
+
+$$
+\Smat_n^{-1} = \Smat_{n-1}^{-1} + \beta\phivec_n\phivec_n^\top, \qquad
+\Smat_n^{-1}\mvec_n = \Smat_{n-1}^{-1}\mvec_{n-1} + \beta\phivec_n y_n.
+$$
+
+This is the batch formula applied with a one-row $\Phimat$. Summing the updates over $n$ gives
+$\Smat_N^{-1} = \Smat_0^{-1} + \beta\sum_n \phivec_n\phivec_n^\top = \Smat_0^{-1} + \beta\Phimat^\top\Phimat$ and the
+same for the linear term, so the order of the data does not matter and the sequential and batch posteriors agree.
+
+The figure follows the sequential-learning example in Murphy's *Probabilistic Machine Learning: An Introduction*
+<Cite id="murphy2022" />: a straight line learned one observation at a time, showing the prior, the likelihood of the
+newest point, the posterior, and lines drawn from it.
+
+<SequentialLearning />
+
+Before any data, lines drawn from the prior point in every direction. One point pins the lines to pass near it but
+leaves the slope free, which shows as a posterior stretched along a line in weight space. Two points fix both the
+intercept and the slope. Each later point shrinks the posterior further, roughly as $1/n$ in variance.
+
+## The posterior predictive
+
+The prediction at a new input $x_*$ averages over the posterior rather than using one weight vector. Write the new
+target as $y_* = \phivec_*^\top\wvec + \epsilon_*$ with $\phivec_* = \phivec(x_*)$. Given the data, $\wvec \sim
+\Gauss(\mvec_N, \Smat_N)$, and the new noise $\epsilon_* \sim \Gauss(0, \beta^{-1})$ is independent of $\wvec$. A linear
+function of a Gaussian vector is Gaussian, and the sum of independent Gaussians is Gaussian, so $y_*$ is Gaussian. Its
+mean and variance follow from linearity of expectation and the variance of a sum of independent terms:
+
+$$
+\expect[y_*] = \phivec_*^\top\expect[\wvec] = \phivec_*^\top\mvec_N, \qquad
+\var(y_*) = \var(\phivec_*^\top\wvec) + \var(\epsilon_*) = \phivec_*^\top\Smat_N\phivec_* + \beta^{-1}.
+$$
+
+Hence
+
+$$
+p(y_* \mid x_*, \yvec) = \Gauss\paren{y_* \mid \mvec_N^\top\phivec_*,\; \sigma_N^2(x_*)}, \qquad
+\sigma_N^2(x_*) = \underbrace{\beta^{-1}}_{\text{noise}}
++ \underbrace{\phivec_*^\top\Smat_N\phivec_*}_{\text{parameters}}.
+$$
+
+The two terms have different sources. The noise term is the scatter of targets around the true function; no amount of
+data removes it. The parameter term is the uncertainty about the function itself. It is small where the data constrain
+the weights and large where they do not. For a straight line, $\phivec_* = (1, x_*)$ and
+$\phivec_*^\top\Smat_N\phivec_* = [\Smat_N]_{00} + 2x_*[\Smat_N]_{01} + x_*^2[\Smat_N]_{11}$, a quadratic in $x_*$ with
+its minimum near the centre of the data. The band therefore widens away from the data. As $N$ grows, $\Smat_N$ shrinks
+and the predictive variance falls to the noise floor $\beta^{-1}$.
+
+## Worked example
+
+Fit a straight line, $\phivec(x) = (1, x)$, to the three points $(-1, -0.8)$, $(0, 0.1)$ and $(1, 1.1)$, with prior
+precision $\alpha = 1$ and noise precision $\beta = 4$ (noise standard deviation 0.5). Then
+
+$$
+\Phimat = \begin{bmatrix} 1 & -1 \\ 1 & 0 \\ 1 & 1 \end{bmatrix}, \qquad
+\Phimat^\top\Phimat = \begin{bmatrix} 3 & 0 \\ 0 & 2 \end{bmatrix}, \qquad
+\Phimat^\top\yvec = \begin{bmatrix} 0.4 \\ 1.9 \end{bmatrix}.
+$$
+
+The posterior precision is $\Smat_N^{-1} = \eye + 4\Phimat^\top\Phimat = \diag(13, 9)$, so $\Smat_N = \diag(1/13, 1/9)$
+and the posterior standard deviations of the intercept and slope are 0.277 and 0.333. The posterior mean is
+
+$$
+\mvec_N = \beta\Smat_N\Phimat^\top\yvec = \paren{\frac{4 \times 0.4}{13},\; \frac{4 \times 1.9}{9}} = (0.123,\; 0.844).
+$$
+
+Least squares gives $(0.133, 0.95)$. The prior pulls both weights towards zero, and it pulls the slope more because
+the data carry less information about it: $[\Phimat^\top\Phimat]_{11} = 2$ against 3 for the intercept. Ridge regression
+with $\lambda = \alpha/\beta = 0.25$ gives exactly $(0.123, 0.844)$.
+
+At $x_* = 2$, outside the data, $\phivec_* = (1, 2)$. The predictive mean is $0.123 + 2 \times 0.844 = 1.812$. The
+predictive variance is $\beta^{-1} + 1/13 + 4/9 = 0.25 + 0.077 + 0.444 = 0.771$, a standard deviation of 0.878. The
+parameter term, 0.521, is larger than the noise term, 0.25, because $x_* = 2$ lies beyond the data.
+
+## The marginal likelihood
+
+The marginal likelihood, or evidence, is the probability of the data with the weights integrated out:
+$p(\yvec \mid \alpha, \beta) = \int p(\yvec \mid \wvec)\, p(\wvec)\, d\wvec$. It measures how well the model class as a
+whole, not one weight vector, explains the data.
+
+The same linear-Gaussian argument as for the predictive gives it directly. $\yvec = \Phimat\wvec + \epsilonvec$ with
+$\wvec \sim \Gauss(\mvec_0, \Smat_0)$ and $\epsilonvec \sim \Gauss(\zeros, \beta^{-1}\eye)$ independent. So $\yvec$ is
+Gaussian with mean $\Phimat\mvec_0$ and covariance $\Phimat\Smat_0\Phimat^\top + \beta^{-1}\eye$:
+
+$$
+p(\yvec \mid \alpha, \beta) = \Gauss\paren{\yvec \mid \Phimat\mvec_0,\; \beta^{-1}\eye + \Phimat\Smat_0\Phimat^\top}.
+$$
+
+This is an $N$-dimensional Gaussian. For the isotropic prior there is an equivalent $M$-dimensional form that is
+cheaper when $M < N$ and leads to the re-estimation formulas below. Write the exponent of the integrand as $-E(\wvec)$
+with
+
+$$
+E(\wvec) = \frac{\beta}{2}\norm{\yvec - \Phimat\wvec}^2 + \frac{\alpha}{2}\wvec^\top\wvec.
+$$
+
+The posterior derivation above shows that $E$ is quadratic in $\wvec$ with Hessian $\Amat = \alpha\eye +
+\beta\Phimat^\top\Phimat = \Smat_N^{-1}$ and minimum at $\mvec_N$, so
+$E(\wvec) = E(\mvec_N) + \frac{1}{2}(\wvec - \mvec_N)^\top\Amat(\wvec - \mvec_N)$ exactly. The Gaussian integral
+$\int \exp\paren{-\frac{1}{2}(\wvec - \mvec_N)^\top\Amat(\wvec - \mvec_N)} d\wvec = (2\pi)^{M/2}\abs{\Amat}^{-1/2}$ and
+the normalising constants of the likelihood, $(\beta/2\pi)^{N/2}$, and the prior, $(\alpha/2\pi)^{M/2}$, give
+
+$$
+\ln p(\yvec \mid \alpha, \beta) = \frac{M}{2}\ln\alpha + \frac{N}{2}\ln\beta - E(\mvec_N) - \frac{1}{2}\ln\abs{\Amat}
+- \frac{N}{2}\ln 2\pi.
+$$
+
+In the worked example both forms give $\ln p(\yvec \mid \alpha = 1, \beta = 4) = -3.471$. The terms trade fit against
+complexity. $-E(\mvec_N)$ rewards a small residual.
+$-\frac{1}{2}\ln\abs{\Amat}$ penalises a posterior much narrower than
+the prior, which is what a flexible model that fits the noise produces. Because the Laplace approximation is exact for
+a Gaussian posterior, this is also what the <NoteLink to="laplace-approximation">Laplace approximation</NoteLink> to the
+evidence would give.
+
+## Choosing the precisions from the data
+
+The evidence is a function of $\alpha$ and $\beta$ alone, so it can choose them: maximise $\ln p(\yvec \mid \alpha,
+\beta)$ instead of fixing the precisions by hand or by cross-validation. This is empirical Bayes, also called type II
+maximum likelihood or the evidence approximation <Cite id="mackay1992" />.
+
+Let $\lambda_1, \dots, \lambda_M$ be the eigenvalues of $\beta\Phimat^\top\Phimat$. The eigenvalues of $\Amat$ are
+$\alpha + \lambda_i$, so $\ln\abs{\Amat} = \sum_i \ln(\alpha + \lambda_i)$.
+$\mvec_N$ also depends on $\alpha$ and $\beta$,
+but it minimises $E$, so the derivative of $E(\mvec_N)$ through $\mvec_N$ is zero and only the explicit dependence
+remains.
+
+- **Setting the derivative in $\alpha$ to zero.** $\frac{d}{d\alpha}\ln\abs{\Amat} = \sum_i 1/(\alpha + \lambda_i)$ and
+  $\frac{\partial E}{\partial\alpha} = \frac{1}{2}\mvec_N^\top\mvec_N$, so
+  $\frac{M}{2\alpha} - \frac{1}{2}\mvec_N^\top\mvec_N - \frac{1}{2}\sum_i \frac{1}{\alpha + \lambda_i} = 0$.
+  Multiplying by $2\alpha$ and using
+  $M - \sum_i \frac{\alpha}{\alpha + \lambda_i} = \sum_i \frac{\lambda_i}{\alpha + \lambda_i}$ gives
+
+  $$
+  \alpha = \frac{\gamma}{\mvec_N^\top\mvec_N}, \qquad \gamma = \sum_{i=1}^M \frac{\lambda_i}{\alpha + \lambda_i}.
+  $$
+
+- **Setting the derivative in $\beta$ to zero.** Each $\lambda_i$ is proportional to $\beta$, so
+  $\frac{d\lambda_i}{d\beta} = \lambda_i/\beta$ and $\frac{d}{d\beta}\ln\abs{\Amat} = \frac{1}{\beta}\sum_i
+  \frac{\lambda_i}{\alpha + \lambda_i} = \frac{\gamma}{\beta}$. With
+  $\frac{\partial E}{\partial\beta} = \frac{1}{2}\norm{\yvec - \Phimat\mvec_N}^2$,
+  $\frac{N}{2\beta} - \frac{1}{2}\norm{\yvec - \Phimat\mvec_N}^2 - \frac{\gamma}{2\beta} = 0$, so
+
+  $$
+  \frac{1}{\beta} = \frac{\norm{\yvec - \Phimat\mvec_N}^2}{N - \gamma}.
+  $$
+
+The quantity $\gamma$ is the effective number of parameters. Each term $\lambda_i/(\alpha + \lambda_i)$ lies between 0
+and 1: close to 1 for a direction in weight space that the data determine well ($\lambda_i \gg \alpha$), close to 0 for
+one that the prior determines. The $\beta$ update is the unbiased-variance formula with $N - \gamma$ degrees of
+freedom in place of $N - M$. Both equations involve $\mvec_N$ and $\gamma$, which depend on $\alpha$ and $\beta$, so
+they are solved by iteration: compute $\mvec_N$ and $\gamma$, update $\alpha$ and $\beta$, and repeat until they stop
+changing <Cite id="bishop2006" />.
+
+<PredictiveBands />
+
+Lowering $\alpha$ towards $10^{-3}$ with 8 points and 9 bumps lets the mean chase the noise, and the band pinches at the
+data and balloons between them. On those 8 points, maximising the evidence sets $\alpha \approx 4.2$ and
+$\beta \approx 10$, with $\gamma \approx 4.2$ of the 10 parameters determined by the data. On all 25 points it finds
+$\beta \approx 30$, close to the true noise precision of 25, and $\gamma \approx 7.1$.
+
+## In machine learning
+
+- **Uncertainty for free.** The predictive band comes from the same computation as the fit. It supports active
+  learning (query where $\phivec_*^\top\Smat_N\phivec_*$ is largest) and Bayesian optimisation.
+- **Gaussian processes.** Writing the predictive in terms of inner products $\phivec(x)^\top\Smat_0\phivec(x')$ and
+  replacing them by a kernel gives Gaussian process regression, the same model with infinitely many basis functions.
+- **Last-layer Bayesian networks.** Treating a trained network's final layer as a Bayesian linear regression on the
+  learned features gives calibrated predictive uncertainty at the cost of one $M \times M$ solve.
+- **A reference point for approximations.** The posterior is exact here, so it is a test case for variational methods,
+  which minimise a <NoteLink to="kl-divergence">KL divergence</NoteLink> to the posterior, and for sampling methods: any
+  approximation should recover $\Gauss(\mvec_N, \Smat_N)$.
+
+## Pitfalls
+
+- **Wrong noise model.** The predictive band assumes Gaussian noise of constant variance. Heavy tails or noise that
+  grows with $x$ make the band wrong even when the mean is right.
+- **The band covers the model, not the world.** $\phivec_*^\top\Smat_N\phivec_*$ is uncertainty within the chosen basis.
+  If the true function is outside the span of the basis functions, the band can be narrow and wrong.
+- **Scaling.** The isotropic prior $\alpha^{-1}\eye$ treats every weight alike, so features on very different scales are
+  shrunk unequally in effect. Standardise the features, or use one precision per weight (automatic relevance
+  determination).
+- **Evidence maximisation can overfit the precisions.** With few data points and many basis functions, the evidence
+  can be maximised at extreme $\alpha$ or $\beta$. A prior on the precisions, or a full treatment that integrates them
+  out, is more robust.

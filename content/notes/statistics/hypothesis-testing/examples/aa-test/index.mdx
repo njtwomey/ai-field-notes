@@ -1,0 +1,99 @@
+---
+title: A/A test
+kind: example
+summary: An A/A test splits users into two groups that receive the same experience and runs the usual analysis. About $\alpha$ of such tests come out significant and their p-values are uniform. Any other pattern exposes a broken split, metric pipeline or variance formula.
+tags: [worked-example, experimentation, hypothesis-testing]
+aliases: [A/A testing, null experiment, A/A experiment]
+requires: [p-value, z-test]
+related: [significance-level, type-i-and-type-ii-errors, confidence-intervals, null-and-alternative-hypotheses]
+references: [kohavi2020]
+status: draft
+updated: 2026-09-26
+---
+
+import { AaSimulator } from './AaSimulator'
+
+<Definition>
+An online shop runs an experiment in which both arms show the same page. Each arm gets $n = 10{,}000$ users, and each
+user converts with probability $p = 0.05$. The difference in conversion rate is tested with a two-sided two-proportion
+z-test at $\alpha = 0.05$. How often is the result significant, and how large a difference can chance alone produce?
+</Definition>
+
+## Setup
+
+Let $X_A$ and $X_B$ be the numbers of converting users in arms A and B, so $X_A, X_B \iid \Binom(n, p)$. The observed
+rates are $\hat p_A = X_A / n$ and $\hat p_B = X_B / n$, and the observed difference is $D = \hat p_B - \hat p_A$. The
+test statistic is
+
+$$
+Z = \frac{D}{\sqrt{\hat p (1 - \hat p)\, (2/n)}}, \qquad \hat p = \frac{X_A + X_B}{2n},
+$$
+
+the <NoteLink to="z-test">z-test</NoteLink> for two proportions with the pooled rate $\hat p$. Both arms are identical,
+so the null hypothesis $H_0: p_A = p_B$ is true by construction. An A/A test asks whether the analysis behaves as the
+theory says it should when there is nothing to find <Cite id="kohavi2020" />.
+
+## Solution
+
+**The spread of the difference.** Each rate has variance $p(1 - p)/n$, and the arms are independent, so
+
+$$
+\var(D) = \frac{p(1 - p)}{n} + \frac{p(1 - p)}{n} = \frac{2p(1 - p)}{n}, \qquad
+\operatorname{sd}(D) = \sqrt{\frac{2 \times 0.05 \times 0.95}{10{,}000}} = 0.00308.
+$$
+
+By the central limit theorem $D$ is approximately $\Gauss(0, 0.00308^2)$. So 95% of A/A experiments show a difference
+within $\pm 1.96 \times 0.00308 = \pm 0.0060$, that is up to 0.6 percentage points. On a 5% baseline this is a
+relative "lift" of $\pm 12\%$, produced by chance alone.
+
+**The p-values are uniform.** Under $H_0$, $Z$ is approximately standard normal. The two-sided p-value is
+$P = 2(1 - \Phi(\abs{Z}))$. For any $u \in (0, 1)$,
+
+$$
+P(P \le u) = P\paren{\abs{Z} \ge z_{1 - u/2}} = 2\paren{1 - \Phi(z_{1 - u/2})} = u,
+$$
+
+where $z_q$ is the $q$ quantile of $\Gauss(0, 1)$. So $P$ is uniform on $(0, 1)$, and a test at level $\alpha$
+rejects with probability exactly $\alpha$. This is the definition of the
+<NoteLink to="significance-level">significance level</NoteLink> at work: in an A/A test, every rejection is a
+<NoteLink to="type-i-and-type-ii-errors">Type I error</NoteLink>.
+
+**How many of many A/A tests are significant.** Each of $N$ independent A/A tests is significant with probability
+$\alpha$, so the count $S$ of significant tests satisfies $S \sim \Binom(N, \alpha)$. For $N = 1{,}000$ and
+$\alpha = 0.05$, $\expect S = 50$ and $\operatorname{sd}(S) = \sqrt{1{,}000 \times 0.05 \times 0.95} = 6.9$. The
+central 95% of the distribution runs from 37 to 64. A count outside that range is evidence that the test does not
+hold its level.
+
+**Confidence intervals cover zero.** The 95% interval $D \pm 1.96\, \widehat{\operatorname{sd}}(D)$ contains the true
+difference, 0, in about 95% of A/A experiments. This is the duality between tests and
+<NoteLink to="confidence-intervals">confidence intervals</NoteLink>: the interval excludes 0 exactly when the test
+rejects, up to the small difference between the pooled and unpooled standard errors.
+
+## Simulation
+
+<AaSimulator />
+
+## What it illustrates
+
+- **What "significant" means under the null.** A p-value below 0.05 happens in 5% of experiments where nothing
+  differs. A single significant result is weak evidence on its own; see <NoteLink to="p-value">p-value</NoteLink>.
+- **The noise floor of a metric.** The A/A spread $\sqrt{2p(1 - p)/n}$ is the smallest difference an experiment of this
+  size can hope to separate from chance. Plans for real experiments start from it; see
+  <NoteLink to="sample-size-planning">sample-size planning</NoteLink>.
+- **A calibration check for the whole pipeline.** Companies run A/A tests continuously <Cite id="kohavi2020" />.
+  Too many significant results, p-values piled near 0 or 1, or an observed spread larger than the formula all point to
+  a bug. Common causes are users assigned to both arms, events counted twice, a variance formula that assumes
+  independent observations when one user contributes many, and an unequal split between arms (a sample ratio
+  mismatch).
+
+## Variations
+
+- **Several metrics.** An A/A test that checks 20 independent metrics at $\alpha = 0.05$ finds at least one significant
+  difference with probability $1 - 0.95^{20} = 0.64$. See <NoteLink to="multiple-testing">multiple testing</NoteLink>.
+- **Peeking.** Checking the p-value every day and stopping at the first value below $\alpha$ raises the false-positive
+  rate of an A/A test far above $\alpha$, because each look is another chance to cross the threshold.
+- **Correlated observations.** If the analysis unit is a page view but randomisation is by user, a user's views are
+  correlated. The formula $2p(1 - p)/n$ then understates the variance, and more than $\alpha$ of A/A tests are
+  significant. Here the simulation's observed spread would exceed the formula.
+- **Rare events.** When $np$ is small, $X_A$ and $X_B$ are far from normal and the p-values are discrete. The share of
+  significant A/A tests then drifts from $\alpha$; set $n$ and $p$ low in the simulation to see it.

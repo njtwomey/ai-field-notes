@@ -1,0 +1,107 @@
+---
+title: Maximum-entropy Markov model
+kind: concept
+summary: 'A maximum-entropy Markov model labels a sequence with a chain of local classifiers, $P(y_n \mid y_{n-1}, \xvec)$, each a logistic regression normalised on its own. Local normalisation makes training easy but causes label bias: states with few successors ignore the observations.'
+tags: [structured-prediction, sequence-models, discriminative-models, worked-example]
+aliases: [MEMM, maximum entropy Markov model, label bias problem, label bias]
+partOf: [structured-prediction]
+requires: [logistic-regression, hidden-markov-model]
+related: [conditional-random-field, softmax-and-log-sum-exp]
+references: [mccallum2000, lafferty2001]
+status: draft
+updated: 2026-09-26
+---
+
+import { LabelBias } from './LabelBias'
+
+<Definition>
+A maximum-entropy Markov model (MEMM) is a discriminative model of a label sequence $\yvec$ given observations
+$\xvec$ that factorises into one locally normalised conditional per position:
+
+$$
+P(\yvec \mid \xvec) = \prod_{n=1}^{N} P(y_n \mid y_{n-1}, \xvec), \qquad
+P(y_n = v \mid y_{n-1} = u, \xvec) = \frac{\exp\set{\lambdavec^\top \fvec(u, v, \xvec, n)}}{\sum_{v'}
+\exp\set{\lambdavec^\top \fvec(u, v', \xvec, n)}},
+$$
+
+with feature functions $\fvec$ and weights $\lambdavec$ as in a linear-chain CRF <Cite id="mccallum2000" />.
+</Definition>
+
+## A chain of classifiers
+
+Each factor is a <NoteLink to="logistic-regression">multinomial logistic regression</NoteLink>, a maximum-entropy
+classifier, that predicts the next label from the previous label and any features of the whole observation sequence.
+This was the attraction over a <NoteLink to="hidden-markov-model">hidden Markov model</NoteLink>: features can be
+overlapping, can look at any part of $\xvec$, and need no model of how the observations are generated.
+
+- **Training.** The log-likelihood is a sum of independent local terms, one per position, each a softmax
+  log-likelihood. It is convex, and needs no inference over the chain during training.
+- **Decoding.** Viterbi works unchanged, with edge potentials $\Psimat_n(u, v) = P(y_{n+1} = v \mid y_n = u,
+  \xvec)$ and the first factor folded into $\psivec_1$.
+
+## Label bias
+
+Every local factor sums to one over the next label, for every previous label and every input:
+
+$$
+\sum_{v} P(y_n = v \mid y_{n-1} = u, \xvec) = 1.
+$$
+
+So the probability mass that reaches state $u$ is passed on in full. The observation at step $n$ can only
+redistribute it among $u$'s successors; it cannot reduce the total. A state with a single successor passes on all its
+mass whatever it observes, and a state whose transitions are nearly deterministic almost ignores its observations.
+This is the label-bias problem <Cite id="lafferty2001" />.
+
+The effect is exact in a small example. Two words share their first and last letters: states $1 \to 2 \to 3$ spell
+"rib" and states $4 \to 5 \to 3$ spell "rob". From the start state, both paths begin on the letter r. Suppose a
+fraction $p$ of the training words beginning with r were "rib", so the first local factor learns
+$P(1 \mid 0, \text{r}) = p$ and $P(4 \mid 0, \text{r}) = 1 - p$.
+
+States 1 and 4 each have one successor. Whatever feature connects state 2 to the letter i, for example a weight $w$
+on $[y_2 = 2 \wedge x_2 = \text{i}]$, it enters the local softmax over the successors of state 1, and that softmax has
+one term:
+
+$$
+P(y_2 = 2 \mid y_1 = 1, \xvec) = \frac{e^{w\,[x_2 = \text{i}]}}{e^{w\,[x_2 = \text{i}]}} = 1.
+$$
+
+The evidence cancels. For the input "rob", the two path probabilities are $p \cdot 1 \cdot 1$ and
+$(1 - p) \cdot 1 \cdot 1$, independent of the middle letter. With $p = 0.6$, the MEMM labels "rob" as the "rib" path
+with probability 0.6. No amount of training on the second letter can fix this, because the parameter it would need
+cancels out of the model.
+
+## How a CRF avoids it
+
+A <NoteLink to="conditional-random-field">conditional random field</NoteLink> uses the same features but normalises
+once, over whole label sequences:
+$P(\yvec \mid \xvec) = \exp\set{\sum_n \lambdavec^\top \fvec(y_{n-1}, y_n, \xvec, n)} / Z(\xvec)$. Scores of
+different paths are compared with each other, so the evidence weight no longer cancels. In the example, each path's
+score is its start bias plus the evidence term:
+
+$$
+P(\text{rob path} \mid \text{rob}) = \frac{(1 - p)\, e^{w}}{p + (1 - p)\, e^{w}},
+$$
+
+which is 0.973 for $p = 0.6$ and $w = 4$. The prior share $p$ would have to exceed $e^w/(1 + e^w) = 0.982$ before
+the CRF chose the wrong path.
+
+<LabelBias />
+
+A <NoteLink to="hidden-markov-model">hidden Markov model</NoteLink> is locally normalised too, but in the generative
+direction. Its factors are $A(u, v)$ and $b_v(x_n)$, and a small emission probability $b_2(\text{o})$ lowers the
+probability of the whole "rib" path. Label bias is specific to models that normalise conditional distributions over
+labels position by position.
+
+## Trade-offs
+
+- **For MEMMs.** Training is fast and decomposes by position, with no forward–backward pass. In practice they can
+  perform well when transitions are not close to deterministic.
+- **Against MEMMs.** Label bias, and the resulting preference for states with low-entropy transitions. CRFs replaced
+  MEMMs in most applications for this reason <Cite id="lafferty2001" />.
+
+## Pitfalls
+
+- **Nearly deterministic transitions.** Label bias is worst when some states have few likely successors, as with
+  multi-token entities or fixed spellings.
+- **Exposure to the true previous label.** Each local classifier is trained with the true previous label as input, but
+  at test time it receives its own prediction, so early mistakes can propagate.

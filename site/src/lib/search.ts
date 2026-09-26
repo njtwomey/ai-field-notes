@@ -1,5 +1,6 @@
 import MiniSearch from 'minisearch'
 import { notes, type NoteMeta } from '@/lib/content'
+import { plainMath } from '@/lib/math-text'
 
 type Doc = { id: string; title: string; aliases: string; summary: string; tags: string; headings: string; body: string }
 
@@ -23,7 +24,7 @@ export function searchIndex(): Promise<MiniSearch<Doc>> {
         id: n.slug,
         title: n.title,
         aliases: n.aliases.join(' '),
-        summary: n.summary,
+        summary: plainMath(n.summary),
         tags: n.tags.join(' '),
         headings: n.headings.map((h) => h.text).join(' '),
         body: bodies[n.slug] ?? '',

@@ -9,7 +9,7 @@ import {
   VisualMapComponent,
 } from 'echarts/components'
 import * as echarts from 'echarts/core'
-import { SVGRenderer } from 'echarts/renderers'
+import { CanvasRenderer, SVGRenderer } from 'echarts/renderers'
 
 echarts.use([
   BarChart,
@@ -24,6 +24,7 @@ echarts.use([
   MarkLineComponent,
   DataZoomComponent,
   SVGRenderer,
+  CanvasRenderer,
 ])
 
 export { echarts }

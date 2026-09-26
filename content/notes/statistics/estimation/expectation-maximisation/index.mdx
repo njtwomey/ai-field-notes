@@ -1,0 +1,221 @@
+---
+title: Expectation–maximisation
+kind: concept
+summary: 'Expectation–maximisation finds maximum-likelihood estimates when some variables are unobserved. Each iteration builds a lower bound on $\log p(x \mid \theta)$ that touches it at the current $\theta$, then maximises the bound. The likelihood never decreases and the iterates converge to a stationary point.'
+tags: [estimation, latent-variables, maximum-likelihood, worked-example]
+aliases: [EM, EM algorithm, expectation maximization, expectation-maximization, generalised EM, GEM, ECM, Monte Carlo EM, hard EM, two coins problem]
+requires: [expectation, kl-divergence]
+related: [em-as-variational-inference, evidence-lower-bound, gaussian-mixture-model, k-means, occasionally-dishonest-casino]
+references: [dempster1977, wu1983, do2008, mclachlan2008, neal1998]
+status: draft
+updated: 2026-09-26
+---
+
+import { EmBound } from './EmBound'
+
+<Definition>
+Let $\xvec$ be observed data, $\zvec$ unobserved (latent) variables and $\thetab$ parameters, with a model
+$p(\xvec, \zvec \mid \thetab)$. Expectation–maximisation starts from $\thetab^{(0)}$ and repeats
+<Cite id="dempster1977" />:
+
+- **E-step.** Compute the posterior of the latent variables at the current parameters,
+  $q^{(t)}(\zvec) = p(\zvec \mid \xvec, \thetab^{(t)})$, and form
+  $Q(\thetab, \thetab^{(t)}) = \expect_{q^{(t)}}\brack{\log p(\xvec, \zvec \mid \thetab)}$.
+- **M-step.** Set $\thetab^{(t+1)} = \argmax_{\thetab} Q(\thetab, \thetab^{(t)})$.
+
+The log-likelihood $\ell(\thetab) = \log p(\xvec \mid \thetab)$ never decreases from one iteration to the next.
+</Definition>
+
+## The problem
+
+Maximum likelihood with latent variables asks for
+
+$$
+\ell(\thetab) = \log p(\xvec \mid \thetab) = \log \sum_{\zvec} p(\xvec, \zvec \mid \thetab),
+$$
+
+with an integral in place of the sum for continuous $\zvec$. The logarithm of a sum does not split, so the maximiser
+rarely has a closed form. If $\zvec$ were observed, the complete-data log-likelihood $\log p(\xvec, \zvec \mid \thetab)$
+would usually be easy to maximise: for a mixture model it is a sum of per-component terms, each maximised by a
+weighted average. EM exploits this. It replaces the unknown $\zvec$ by its expected value under the current fit, solves
+the easy complete-data problem, and repeats.
+
+## A lower bound that touches
+
+For any distribution $q(\zvec)$ that is positive wherever the posterior is, multiply and divide by $q$ inside the
+sum. Jensen's inequality for the concave logarithm, $\log \expect[Y] \ge \expect[\log Y]$, then gives a lower bound:
+
+$$
+\ell(\thetab) = \log \sum_{\zvec} q(\zvec)\, \frac{p(\xvec, \zvec \mid \thetab)}{q(\zvec)}
+\;\ge\; \sum_{\zvec} q(\zvec) \log \frac{p(\xvec, \zvec \mid \thetab)}{q(\zvec)}
+\;=\; \Lcal(q, \thetab).
+$$
+
+The bound is $\Lcal(q, \thetab) = \expect_q\brack{\log p(\xvec, \zvec \mid \thetab)} + \entropy[q]$, the
+<NoteLink to="evidence-lower-bound">evidence lower bound</NoteLink>. The gap is exact. Write
+$p(\xvec, \zvec \mid \thetab) = p(\zvec \mid \xvec, \thetab)\, p(\xvec \mid \thetab)$ inside $\Lcal$:
+
+$$
+\Lcal(q, \thetab) = \sum_{\zvec} q(\zvec) \log p(\xvec \mid \thetab)
++ \sum_{\zvec} q(\zvec) \log \frac{p(\zvec \mid \xvec, \thetab)}{q(\zvec)}
+= \ell(\thetab) - \KL\paren{q \,\|\, p(\zvec \mid \xvec, \thetab)}.
+$$
+
+So $\ell(\thetab) = \Lcal(q, \thetab) + \KL(q \,\|\, p(\zvec \mid \xvec, \thetab))$ for every $q$ and every
+$\thetab$. The <NoteLink to="kl-divergence">KL divergence</NoteLink> is non-negative and is zero only when $q$ is the
+posterior. Two facts follow:
+
+- For fixed $\thetab$, the bound is tight exactly when $q = p(\zvec \mid \xvec, \thetab)$.
+- For fixed $q$, $\Lcal(q, \thetab)$ is $Q(\thetab)$ plus the constant $\entropy[q]$, so maximising the bound over
+  $\thetab$ is maximising $Q$.
+
+## The two steps and why the likelihood rises
+
+The **E-step** sets $q^{(t)} = p(\zvec \mid \xvec, \thetab^{(t)})$. The gap vanishes at $\thetab^{(t)}$, so the bound
+$\Lcal(q^{(t)}, \cdot)$ is a curve that lies below $\ell$ everywhere and touches it at $\thetab^{(t)}$. The **M-step**
+moves to the maximum of that curve. Chaining the two facts above,
+
+$$
+\ell(\thetab^{(t+1)}) \;\ge\; \Lcal(q^{(t)}, \thetab^{(t+1)}) \;\ge\; \Lcal(q^{(t)}, \thetab^{(t)}) \;=\; \ell(\thetab^{(t)}).
+$$
+
+The first inequality holds because the bound is below $\ell$ everywhere. The second holds because
+$\thetab^{(t+1)}$ maximises the bound. The equality holds because the E-step made the bound tight. The likelihood
+can only rise, and it rises by at least as much as the bound did. The same argument shows that any $\thetab^{(t+1)}$
+that merely increases $Q$ still increases $\ell$, which is the basis of generalised EM below.
+
+Seen as a whole, EM is coordinate ascent on $\Lcal(q, \thetab)$: the E-step maximises over $q$ and the M-step over
+$\thetab$. The note on <NoteLink to="em-as-variational-inference">EM as variational inference</NoteLink> develops this
+view.
+
+## Worked example: two coins
+
+Two coins, A and B, have unknown head probabilities $\theta_A$ and $\theta_B$. Five sets of 10 tosses were each made
+with one coin, chosen at random with equal probability, but the record of which coin was used is lost. The head
+counts are $h = (5, 9, 8, 4, 7)$ <Cite id="do2008" />. The latent variable $z_i$ is the coin used for set $i$.
+
+**E-step.** Start from $\theta_A = 0.6$ and $\theta_B = 0.5$. The posterior probability that set $i$ used coin A is
+
+$$
+r_i = \frac{\theta_A^{h_i}(1 - \theta_A)^{10 - h_i}}{\theta_A^{h_i}(1 - \theta_A)^{10 - h_i} + \theta_B^{h_i}(1 - \theta_B)^{10 - h_i}},
+$$
+
+giving $r = (0.45, 0.80, 0.73, 0.35, 0.65)$. The binomial coefficients cancel. Each set contributes its heads and
+tails to coin A in proportion $r_i$ and to coin B in proportion $1 - r_i$: coin A is credited with $21.3$ expected
+heads and $8.6$ expected tails, coin B with $11.7$ heads and $8.4$ tails.
+
+**M-step.** With the coin assignments filled in by their expectations, each coin's estimate is its share of heads:
+$\theta_A = 21.3/(21.3 + 8.6) = 0.71$ and $\theta_B = 11.7/(11.7 + 8.4) = 0.58$.
+
+Repeating the two steps converges to $\theta_A \approx 0.80$ and $\theta_B \approx 0.52$. Had the coin labels been
+recorded, the estimates would have been the plain head proportions of each coin's sets; EM reaches the same kind of
+answer with each set split between the coins by its posterior probability.
+
+## Worked example: genetic linkage
+
+Dempster, Laird and Rubin's original illustration has 197 animals classified into four categories with counts
+$y = (125, 18, 20, 34)$ and probabilities
+$\paren{\tfrac12 + \tfrac\theta4,\ \tfrac{1 - \theta}{4},\ \tfrac{1 - \theta}{4},\ \tfrac\theta4}$ for an unknown
+$\theta \in (0, 1)$ <Cite id="dempster1977" />.
+
+The first probability is a sum, which makes the likelihood awkward. Treat the first category as two latent ones, with
+probabilities $\tfrac12$ and $\tfrac\theta4$, and let $x_2$ be the unknown number of the 125 animals that fell into the
+$\tfrac\theta4$ part. Given $x_2$, the complete-data likelihood is proportional to
+$\theta^{x_2 + y_4}(1 - \theta)^{y_2 + y_3}$, a binomial likelihood, maximised by
+
+$$
+\theta = \frac{x_2 + y_4}{x_2 + y_2 + y_3 + y_4}.
+$$
+
+**E-step.** Given $\theta^{(t)}$, each of the 125 animals is in the $\tfrac\theta4$ part with probability
+$p^{(t)} = \tfrac{\theta^{(t)}/4}{1/2 + \theta^{(t)}/4}$, so
+$\expect[x_2] = 125\, p^{(t)}$.
+
+**M-step.** Substitute the expectation into the formula above.
+
+From $\theta^{(0)} = 0.5$: $p^{(0)} = 0.2$, $\expect[x_2] = 25$, and
+$\theta^{(1)} = (25 + 34)/(25 + 18 + 20 + 34) = 0.6082$. The next iterates are $0.6243$, $0.6265$, $0.6268$, and the
+sequence converges to the maximum-likelihood estimate $\hat\theta = 0.6268$. The error shrinks by a factor of about
+$0.133$ each step, explained below.
+
+<EmBound />
+
+## The limit
+
+Monotonicity guarantees that $\ell(\thetab^{(t)})$ converges when $\ell$ is bounded above. It does not guarantee that
+the iterates reach the global maximum. Under mild continuity conditions, every limit point of EM is a stationary point
+of $\ell$ <Cite id="wu1983" />. When $\ell$ has a single stationary point, as in the genetic-linkage example, that
+point is the maximum-likelihood estimate and EM finds it from any start. Otherwise the limit depends on the start.
+
+The symmetric mixture $\tfrac12\Gauss(\mu, 1) + \tfrac12\Gauss(-\mu, 1)$ in the figure shows all three outcomes. Its
+likelihood is symmetric in $\mu$, with maxima at $\pm\hat\mu$. Started at a positive $\mu$, EM converges to $+\hat\mu$;
+started at a negative one, to $-\hat\mu$. Started exactly at $\mu = 0$, every posterior probability is $\tfrac12$, the
+M-step returns $0$, and EM stays at a stationary point that is not a maximum. Any perturbation moves it away, but EM
+itself never does. In practice EM is run from several starts and the best likelihood is kept
+<Cite id="mclachlan2008" />.
+
+## The rate of convergence
+
+Near the limit, EM behaves like a linear map: $\thetab^{(t+1)} - \hat\thetab \approx J\,(\thetab^{(t)} - \hat\thetab)$,
+where $J$ is the Jacobian of the EM update at $\hat\thetab$. Dempster, Laird and Rubin showed that $J$ is the fraction
+of missing information. With $I_{\text{com}}$ the Fisher information of the complete data and $I_{\text{obs}}$ that of
+the observed data, both at $\hat\thetab$,
+
+$$
+J = I_{\text{com}}^{-1}\paren{I_{\text{com}} - I_{\text{obs}}} = \eye - I_{\text{com}}^{-1} I_{\text{obs}}.
+$$
+
+The difference $I_{\text{com}} - I_{\text{obs}}$ is the information lost by not observing $\zvec$. If little is
+missing, $J$ is near zero and EM converges in a few steps. If most of the information is missing, $J$ approaches the
+identity and EM crawls.
+
+For genetic linkage at $\hat\theta = 0.6268$, the observed information is $-\ell''(\hat\theta) = 377.5$ and the
+complete-data information, with $x_2$ replaced by its expectation, is
+$(\expect[x_2] + y_4)/\hat\theta^2 + (y_2 + y_3)/(1 - \hat\theta)^2 = 435.3$. So $J = 1 - 377.5/435.3 = 0.133$: about
+13% of the information is missing, and each iteration cuts the error by that factor. The straight line on the log-error
+chart in the figure has this slope.
+
+## Variants
+
+The monotonicity argument needs only that each step does not decrease the bound. That freedom produces a family of
+algorithms <Cite id="mclachlan2008" />.
+
+| Variant | What changes | When to use it |
+| --- | --- | --- |
+| Generalised EM (GEM) | The M-step only increases $Q$, for example by one gradient step | No closed-form M-step |
+| ECM | The M-step maximises over blocks of $\thetab$ in turn, each with the others fixed | Joint maximisation is hard, conditional ones are easy |
+| ECME | Some blocks maximise $\ell$ itself instead of $Q$ | Faster convergence than ECM |
+| PX-EM | Adds auxiliary parameters and maps back after each step | Slow convergence from a poorly scaled model |
+| MAP-EM | Adds $\log p(\thetab)$ to the M-step objective | Regularisation; avoids degenerate solutions |
+| Hard (classification) EM | The E-step assigns each point to its single most probable $\zvec$ | Speed; <NoteLink to="k-means">k-means</NoteLink> is the limit for a Gaussian mixture with equal weights and equal, shrinking spherical covariances |
+| Monte Carlo EM | The E-step expectation is estimated by sampling $\zvec$ | The posterior cannot be summed or integrated exactly |
+| Stochastic and online EM | Sufficient statistics are updated from small batches with a decreasing step size | Large or streaming data |
+| Incremental EM | The E-step updates the posterior of one data point at a time | Large datasets, faster early progress |
+| Variational EM | $q$ is restricted to a tractable family instead of the exact posterior | The posterior is intractable; the bound, not $\ell$, is maximised |
+| Accelerated EM (Aitken, SQUAREM) | Extrapolates along the sequence of iterates | Much of the information is missing |
+
+- **Conditional maximisation.** ECM replaces one hard M-step by several easy conditional ones and keeps the
+  monotonicity <Cite id="meng1993" />. ECME maximises the actual likelihood in some of those steps
+  <Cite id="liu1994" />, and PX-EM expands the model with parameters that the E-step can use, which speeds
+  convergence <Cite id="liu1998" />.
+- **Sampling and streaming.** Monte Carlo EM approximates $Q$ with posterior samples <Cite id="wei1990" />. Online EM
+  replaces the full E-step by a running average of expected sufficient statistics <Cite id="cappe2009" />, and
+  incremental EM updates one data point at a time <Cite id="neal1998" />.
+- **Special cases with their own names.** The Baum–Welch algorithm is EM for hidden Markov models, with the
+  forward–backward recursions as its E-step <Cite id="baum1970" />; the
+  <NoteLink to="occasionally-dishonest-casino">occasionally dishonest casino</NoteLink> example uses those recursions.
+  EM for a <NoteLink to="gaussian-mixture-model">Gaussian mixture model</NoteLink> has closed-form steps. EM for
+  missing data treats the missing entries as $\zvec$ <Cite id="little2019" />.
+- **Acceleration.** SQUAREM extrapolates from two EM steps at a time and keeps convergence global
+  <Cite id="varadhan2008" />.
+
+## Pitfalls
+
+- **Local maxima and stationary points.** EM converges to a stationary point that depends on the start. Run it from
+  several starts.
+- **Unbounded likelihoods.** For mixtures with free variances, a component can collapse onto a single point and the
+  likelihood grows without bound. MAP-EM with a prior on the variances, or a variance floor, prevents this.
+- **Slow convergence.** The rate is the fraction of missing information. Well-separated clusters converge fast;
+  heavily overlapping ones can take thousands of iterations.
+- **Stopping rules.** A small change in $\ell$ between iterations can mean slow progress, not convergence. Monitor the
+  change in the parameters as well.

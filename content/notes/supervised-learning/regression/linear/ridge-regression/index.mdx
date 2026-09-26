@@ -1,0 +1,141 @@
+---
+title: Ridge regression
+kind: concept
+summary: Ridge regression adds a penalty $\lambda\norm{\wvec}^2$ to least squares. The solution $(\Xmat^\top\Xmat + \lambda\eye)^{-1}\Xmat^\top\yvec$ always exists, shrinks every coefficient towards zero, and damps most the directions in which the data carry least information. No coefficient becomes exactly zero.
+tags: [regression, regularisation, linear-models, shrinkage, worked-example]
+aliases: [Tikhonov regularisation, L2 regularisation, weight decay, ridge]
+requires: [linear-regression, singular-value-decomposition]
+related: [positive-definite-matrices, condition-number, gaussian-distribution]
+code: linear-models
+references: [hoerl1970, hastie2009, bishop2006]
+status: draft
+updated: 2026-09-26
+---
+
+import { RidgePaths } from './RidgePaths'
+
+<Definition>
+Ridge regression fits $\yvec \approx \Xmat\wvec$ by minimising the penalised squared error
+
+$$
+L(\wvec) = \norm{\yvec - \Xmat\wvec}^2 + \lambda\norm{\wvec}^2, \qquad \lambda \ge 0,
+$$
+
+where $\Xmat \in \reals^{n \times d}$ holds the features, $\yvec \in \reals^n$ the targets and $\wvec \in \reals^d$ the
+coefficients. The solution is $\hat\wvec_\lambda = (\Xmat^\top\Xmat + \lambda\eye)^{-1}\Xmat^\top\yvec$
+<Cite id="hoerl1970" />. At $\lambda = 0$ it is ordinary least squares; as $\lambda \to \infty$ every coefficient tends
+to zero.
+</Definition>
+
+## Why penalise
+
+Ordinary least squares (<NoteLink to="linear-regression">linear regression</NoteLink>) is unbiased, but its variance
+can be large. When two features are strongly correlated, the data pin down their sum well and their difference badly.
+OLS then fits large coefficients of opposite sign that nearly cancel. On the diabetes data, the blood-serum
+measurements s1 and s2 have correlation 0.90 and OLS coefficients $-37.7$ and $+22.7$. A small change in the data
+moves such coefficients a long way. When $d > n$, or when a feature is an exact combination of others,
+$\Xmat^\top\Xmat$ is singular and OLS has no unique solution at all.
+
+The penalty $\lambda\norm{\wvec}^2$ trades a little bias for a large reduction in variance. Among coefficient vectors
+that fit the data about equally well, it prefers the one with the smallest norm.
+
+## The closed form
+
+$L$ is a quadratic in $\wvec$. Expanding,
+
+$$
+L(\wvec) = \wvec^\top(\Xmat^\top\Xmat + \lambda\eye)\wvec - 2\wvec^\top\Xmat^\top\yvec + \yvec^\top\yvec.
+$$
+
+Its gradient is $\nabla L = 2(\Xmat^\top\Xmat + \lambda\eye)\wvec - 2\Xmat^\top\yvec$. Setting it to zero gives the
+penalised normal equations
+
+$$
+(\Xmat^\top\Xmat + \lambda\eye)\,\wvec = \Xmat^\top\yvec.
+$$
+
+The matrix $\Xmat^\top\Xmat$ is positive semi-definite: $\vvec^\top\Xmat^\top\Xmat\vvec = \norm{\Xmat\vvec}^2 \ge 0$.
+Adding $\lambda\eye$ raises every eigenvalue by $\lambda$, so for $\lambda > 0$ the matrix is
+<NoteLink to="positive-definite-matrices">positive definite</NoteLink>. It is therefore invertible, the solution is
+unique whatever $\Xmat$ is, and the Hessian $2(\Xmat^\top\Xmat + \lambda\eye)$ confirms it is the minimum. Ridge was
+introduced for exactly this reason: to make ill-conditioned normal equations solvable <Cite id="hoerl1970" />. The
+<NoteLink to="condition-number">condition number</NoteLink> falls from $\sigma_1^2/\sigma_d^2$ to
+$(\sigma_1^2 + \lambda)/(\sigma_d^2 + \lambda)$.
+
+## Shrinkage along singular directions
+
+The <NoteLink to="singular-value-decomposition">singular value decomposition</NoteLink> shows what the penalty does.
+Write $\Xmat = \Umat\Dmat\Vmat^\top$ with singular values $d_1 \ge \dots \ge d_p > 0$, left singular vectors
+$\uvec_j$ and right singular vectors $\vvec_j$. Then $\Xmat^\top\Xmat = \Vmat\Dmat^2\Vmat^\top$ and
+$\Xmat^\top\Xmat + \lambda\eye = \Vmat(\Dmat^2 + \lambda\eye)\Vmat^\top$, so
+
+$$
+\hat\wvec_\lambda = \Vmat(\Dmat^2 + \lambda\eye)^{-1}\Dmat\Umat^\top\yvec
+= \sum_{j} \frac{d_j^2}{d_j^2 + \lambda} \cdot \frac{\uvec_j^\top\yvec}{d_j}\, \vvec_j.
+$$
+
+The factor $\uvec_j^\top\yvec / d_j$ is the OLS coefficient along $\vvec_j$. Ridge multiplies it by
+$d_j^2/(d_j^2 + \lambda)$, which lies between 0 and 1. Directions with a large singular value, along which the features
+vary a lot and the data determine the coefficient well, are barely touched. Directions with a small singular value are
+shrunk hard. Ridge removes variance exactly where OLS has most of it <Cite id="hastie2009" />.
+
+The fitted values are $\hat\yvec = \Xmat\hat\wvec_\lambda = \sum_j \frac{d_j^2}{d_j^2 + \lambda}\,\uvec_j\uvec_j^\top\yvec$.
+The trace of this linear map is the **effective degrees of freedom**
+
+$$
+\operatorname{df}(\lambda) = \sum_{j} \frac{d_j^2}{d_j^2 + \lambda},
+$$
+
+which falls from $p$ (the OLS fit) at $\lambda = 0$ to 0 as $\lambda \to \infty$.
+
+### Worked example: the diabetes data
+
+The diabetes data have ten standardised features and 442 patients <Cite id="efron2004" />. The singular values of
+$\Xmat$ run from $d_1 = 42.2$ down to $d_9 = 5.88$ and $d_{10} = 1.95$. The smallest direction is
+$\vvec_{10} \approx -0.71\,\mathrm{s1} + 0.56\,\mathrm{s2} + 0.32\,\mathrm{s3} + 0.26\,\mathrm{s5}$: the contrast
+between the two correlated serum measurements. OLS puts a coefficient of 51.1 on it.
+
+At $\lambda = 100$ the shrinkage factors are 0.947 along $\vvec_1$ and $1.95^2/(1.95^2 + 100) = 0.036$ along
+$\vvec_{10}$. The contrast's coefficient falls from 51.1 to 1.9, while the well-determined directions keep most of
+theirs. The effective degrees of freedom are 6.59, and the condition number of the normal equations falls from 470 to 18. The coefficients of s1 and s2 go from $-37.7$ and $+22.7$ to $-2.1$
+and $-3.7$. The training $R^2$ drops only from 0.518 to 0.506.
+
+<RidgePaths />
+
+## Bayesian view
+
+Suppose $y_i = \wvec^\top\xvec_i + \varepsilon_i$ with independent $\varepsilon_i \sim \Gauss(0, \sigma^2)$, and give
+the coefficients a <NoteLink to="gaussian-distribution">Gaussian</NoteLink> prior $\wvec \sim \Gauss(\zeros, \tau^2\eye)$.
+By <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink> the log posterior is, up to a constant,
+
+$$
+\log p(\wvec \mid \yvec) = -\frac{1}{2\sigma^2}\norm{\yvec - \Xmat\wvec}^2 - \frac{1}{2\tau^2}\norm{\wvec}^2.
+$$
+
+Multiplying by $-2\sigma^2$ gives the ridge objective with $\lambda = \sigma^2/\tau^2$. The ridge estimate is therefore
+the posterior mode, and since the posterior is Gaussian, also its mean <Cite id="bishop2006" />. A strong prior belief
+that coefficients are small (small $\tau^2$) is a large $\lambda$.
+
+## Practice
+
+- **Standardise the features.** The penalty treats every coefficient alike, so it depends on the units of each
+  feature. Rescaling a feature by 1,000 divides its coefficient by 1,000 and makes it almost free. Standardise every
+  column to mean 0 and standard deviation 1 before fitting, as the figure does.
+- **Do not penalise the intercept.** Shrinking the intercept towards zero would make the fit depend on where the
+  target's origin happens to be. Centre $\yvec$ and the columns of $\Xmat$, fit without an intercept, and recover it as
+  $\bar y - \bar\xvec^\top\hat\wvec$. scikit-learn's `Ridge` does this by default.
+- **Choose λ by validation.** Cross-validation over a logarithmic grid is standard. The efficient leave-one-out formula
+  uses the same SVD for every $\lambda$.
+- **Scaling conventions differ.** scikit-learn's `Ridge(alpha=λ)` minimises $\norm{\yvec - \Xmat\wvec}^2 + \lambda\norm{\wvec}^2$.
+  Objectives written with a mean squared error, $\frac{1}{2n}\norm{\yvec - \Xmat\wvec}^2 + \frac{\alpha}{2}\norm{\wvec}^2$,
+  correspond to $\lambda = n\alpha$. Weight decay in neural-network training is the same penalty applied by
+  <NoteLink to="gradient-descent">gradient descent</NoteLink>.
+
+## Pitfalls
+
+- **No selection.** Ridge never sets a coefficient to exactly zero, so it keeps every feature. For sparse models use
+  the <NoteLink to="lasso">lasso</NoteLink> or the <NoteLink to="elastic-net">elastic net</NoteLink>.
+- **Shrinkage is bias.** Ridge coefficients are biased towards zero, so they understate true effects. Report them as
+  predictions, not as unbiased effect estimates.
+- **Correlated features share weight.** Ridge splits the weight of a group of correlated features roughly evenly. That
+  is stable, but no single coefficient then measures its feature's effect.

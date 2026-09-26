@@ -1,4 +1,5 @@
 import { notes, type NoteKind, type NoteMeta } from '@/lib/content'
+import { plainMath } from '@/lib/math-text'
 
 export type Filters = { c?: string; kind?: NoteKind; q?: string }
 
@@ -12,7 +13,7 @@ export function filterNotes({ c, kind, q }: Filters): NoteMeta[] {
     if (c && !inCategory(n, c)) return false
     if (kind && n.kind !== kind) return false
     if (!words.length) return true
-    const haystack = [n.title, ...n.aliases, ...n.tags, n.summary].join(' ').toLowerCase()
+    const haystack = [n.title, ...n.aliases, ...n.tags, plainMath(n.summary)].join(' ').toLowerCase()
     return words.every((w) => haystack.includes(w))
   })
 }

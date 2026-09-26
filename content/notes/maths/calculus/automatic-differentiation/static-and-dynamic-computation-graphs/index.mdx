@@ -1,0 +1,82 @@
+---
+title: Static and dynamic computation graphs
+kind: technique
+summary: A framework can build the computation graph before it runs (define-and-run), record it while the code runs (define-by-run), or trace it once and compile it (trace-and-compile). The choice decides how control flow, debugging and performance work.
+tags: [automatic-differentiation, software, deep-learning]
+aliases: [define-and-run, define-by-run, eager execution, graph mode, tracing, jit, torch.compile, tf.function, static graph, dynamic graph]
+requires: [backpropagation]
+partOf: [history-of-automatic-differentiation]
+references: [bergstra2010, abadi2016, tokui2019, paszke2019, bradbury2018]
+status: draft
+updated: 2026-09-26
+---
+
+<Definition>
+A computation graph lists a program's operations and the data flowing between them; reverse-mode differentiation walks
+it backwards. Frameworks differ in when the graph exists. In **define-and-run**, the user builds the graph first and
+then executes it. In **define-by-run**, the graph is recorded as the code executes. In **trace-and-compile**, the code
+is run once on placeholder values to capture a graph, which is then optimised and reused.
+</Definition>
+
+## Define-and-run
+
+Theano built a symbolic graph in Python, differentiated it symbolically and compiled it to CPU and GPU code
+<Cite id="bergstra2010" />. TensorFlow 1 worked the same way: Python code added nodes to a graph, and a `Session` later
+ran the graph on data <Cite id="abadi2016" />.
+
+Because the whole graph exists before any data arrives, the framework can optimise it globally: fuse operations, plan
+memory, place work across devices, and differentiate it once. The cost is that the Python code no longer does the
+computation; it describes it. Control flow must be expressed as graph operations, such as `tf.cond` and
+`tf.while_loop`, and a Python `print` or debugger shows symbolic nodes rather than numbers.
+
+## Define-by-run
+
+Chainer (2015) popularised the alternative: run ordinary Python, and record each operation as it happens
+<Cite id="tokui2019" />. PyTorch's eager mode and TensorFlow 2's eager mode with `GradientTape` follow this design
+<Cite id="paszke2019" />. The recording is the tape of
+<NoteLink to="operator-overloading-and-tapes">operator-overloading autodiff</NoteLink>.
+
+Python control flow works unchanged, since each run records its own path: a loop over a variable-length sequence
+records as many steps as it takes. Debugging uses ordinary tools and ordinary numbers. The price is that the framework
+sees one operation at a time and rebuilds the graph on every call, which leaves little room for whole-program
+optimisation and adds per-operation overhead.
+
+## Trace-and-compile
+
+The third design keeps Python as the interface but compiles for speed. The framework runs the function once on
+abstract values that stand for any input of a given shape and type, capturing the operations as a graph, then
+optimises and compiles the graph and reuses it on later calls.
+
+- **JAX** traces a function to its intermediate language, then applies `grad`, `vmap` and `jit`
+  <Cite id="bradbury2018" />. See <NoteLink to="source-transformation-autodiff">source-transformation autodiff</NoteLink>
+  for why this is a hybrid.
+- **TensorFlow 2** traces Python functions decorated with `tf.function` into graphs.
+- **PyTorch** offers TorchScript and, since PyTorch 2, `torch.compile`, which captures graphs from eager code and
+  compiles them.
+
+Tracing records the operations for the values seen during tracing. Control flow that depends only on shapes or on
+Python constants is resolved at trace time and baked in. Control flow that depends on data values cannot be captured
+by a trace, so it must use structured operations, such as `lax.cond`, `lax.while_loop` and `lax.scan` in JAX, which
+become part of the graph. When an input changes shape or type, the function is traced again: frequent retracing, for
+example on every new sequence length, erases the benefit of compiling.
+
+## Consequences
+
+| Aspect | Define-and-run | Define-by-run | Trace-and-compile |
+| --- | --- | --- | --- |
+| Data-dependent control flow | graph operations only | ordinary Python | structured operations |
+| Debugging | symbolic nodes | ordinary values | ordinary values before tracing, symbolic inside |
+| Optimisation | whole graph | per operation | whole traced graph |
+| Cost per call | low (graph reused) | recording on every call | low after tracing; retrace on new shapes |
+| Examples | Theano, TensorFlow 1 | Chainer, PyTorch eager, TF 2 eager | JAX `jit`, `tf.function`, `torch.compile` |
+
+Most frameworks now combine the last two: develop and debug eagerly, then trace the stable parts for speed.
+
+## Pitfalls
+
+- **Side effects run once.** Inside a traced function, a Python `print` or a random draw from Python's own generator
+  happens at trace time only, not on every call.
+- **Silent specialisation.** A Python `if` on a value that is constant during tracing is baked into the graph; a later
+  call with a different value does not take the other branch unless it triggers a retrace.
+- **Retracing cost.** Varying shapes, or passing Python objects that differ between calls, can cause a trace and
+  compile on every call.
