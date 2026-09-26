@@ -26,7 +26,7 @@ export function SiteHeader() {
           </SheetTrigger>
           <SheetContent side="left" className="w-80 overflow-y-auto">
             <SheetHeader>
-              <SheetTitle>ML Concepts</SheetTitle>
+              <SheetTitle>AI Field Notes</SheetTitle>
             </SheetHeader>
             <div className="px-4 pb-6">
               <TopicRail params={{}} onNavigate={() => setOpen(false)} />
@@ -35,7 +35,7 @@ export function SiteHeader() {
         </Sheet>
         <Link to="/" className="flex items-center gap-2 font-semibold tracking-tight">
           <Sigma className="size-5" aria-hidden />
-          <span className="hidden sm:inline">ML Concepts</span>
+          <span className="hidden sm:inline">AI Field Notes</span>
         </Link>
         <nav className="hidden items-center gap-1 lg:flex">
           {links.map((l) => (

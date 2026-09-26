@@ -16,8 +16,8 @@ const contentDir = path.resolve(import.meta.dirname, 'content')
 
 export default defineConfig({
   root: 'site',
-  // Served from https://<user>.github.io/ml/. Change here only; the router and asset URLs read import.meta.env.BASE_URL.
-  base: '/ml/',
+  // Served from https://<user>.github.io/ai-field-notes/. Change here only; the router and asset URLs read import.meta.env.BASE_URL.
+  base: '/ai-field-notes/',
   build: {
     outDir: '../dist',
     emptyOutDir: true,

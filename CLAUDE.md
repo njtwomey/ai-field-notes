@@ -4,9 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A personal, interactive reference of machine-learning concepts, published to GitHub Pages at `<user>.github.io/ml/`.
-Each page is one **atomic note**: a single idea that reads on its own. It has interactive figures, runnable Python and
-citations. Notes link to each other, but a note must never depend on another to be understood.
+AI Field Notes: a personal, interactive reference of machine-learning concepts, published to GitHub Pages at
+`<user>.github.io/ai-field-notes/`. Each page is one **atomic note**: a single idea that reads on its own. It has
+interactive figures, runnable Python and citations. Notes link to each other, but a note must never depend on another to
+be understood.
 
 The repository separates three concerns. Keep them separate.
 
@@ -24,7 +25,7 @@ The repository separates three concerns. Keep them separate.
 
 ```bash
 make install     # npm install + uv sync
-make dev         # Vite dev server → http://localhost:5173/ml/
+make dev         # Vite dev server → http://localhost:5173/ai-field-notes/
 make assets      # contracts + run examples + build figure data (cached) + manifest
 make contracts   # pydantic → JSON Schema → site/src/generated/contracts.ts
 make check       # content validation, lint, typecheck, tests, registry check, contract drift
@@ -252,7 +253,7 @@ Frontmatter (validated; see `site/src/lib/content-schema.ts`): `title`, `kind`, 
 
 ## Deployment
 
-- `base: '/ml/'` in `vite.config.ts` is the only place the path is set. The router and generated-asset URLs derive it
+- `base: '/ai-field-notes/'` in `vite.config.ts` is the only place the path is set. The router and generated-asset URLs derive it
   from `import.meta.env.BASE_URL`.
 - The build copies `index.html` to `404.html` so that GitHub Pages serves deep links to the SPA.
 - `.github/workflows/deploy.yml` runs `make check` and `npm run build`, then publishes `dist/` to Pages.

@@ -16,7 +16,7 @@ export function HomePage() {
   return (
     <main className="mx-auto max-w-6xl px-4 pt-14 pb-20 lg:px-8">
       <section className="mx-auto max-w-2xl space-y-6 text-center">
-        <h1 className="font-prose text-5xl font-bold">ML Concepts</h1>
+        <h1 className="font-prose text-5xl font-bold">AI Field Notes</h1>
         <p className="font-prose text-lg text-muted-foreground">
           One idea per page, with interactive figures, runnable code and sources.
         </p>
