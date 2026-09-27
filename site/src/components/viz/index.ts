@@ -2,6 +2,7 @@
 export { EChart } from './EChart'
 export { XYChart, type XYSeries, type Segment } from './XYChart'
 export { Heatmap, type HeatmapOverlay } from './Heatmap'
+export { GraphDiagram, type GraphNode, type GraphEdge } from './GraphDiagram'
 export { Interactive, Readout } from './Interactive'
 export { ParamSlider, ParamChoice, ParamSwitch, ParamButton } from './controls'
 export { StepControls } from './StepControls'

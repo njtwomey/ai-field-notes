@@ -157,7 +157,8 @@ stale.
   (`bg-muted`, `text-muted-foreground`, …), never raw hex, except data colours from the palette.
 - `EChart.tsx` is the only file that touches ECharts. Register new ECharts chart types or components once in
   `viz/echarts.ts` (tree-shaken build). All chart styling defaults live in `viz/theme.ts`.
-- Build figures from the existing primitives: `XYChart`, `Heatmap`, `Interactive` (the standard frame: title,
+- Build figures from the existing primitives: `XYChart`, `Heatmap`, `GraphDiagram` (fixed-layout graphical models and
+  factor graphs), `Interactive` (the standard frame: title,
   controls, figure, readout, caption), `ParamSlider`, `ParamChoice`, `ParamSwitch`, `ParamButton`, `Readout`. Add a new
   primitive to `viz/` and export it from `viz/index.ts` rather than styling ECharts inside a note.
 - Data colours follow `design/palette.json`:
