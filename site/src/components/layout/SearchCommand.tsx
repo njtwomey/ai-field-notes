@@ -12,7 +12,7 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import { Kbd } from '@/components/ui/kbd'
-import { browseUrl, category, kindLabels, noteUrl, taxonomy, type NoteMeta } from '@/lib/content'
+import { browseUrl, category, kindLabels, noteUrl, prefetchNote, taxonomy, type NoteMeta } from '@/lib/content'
 import { parseQuery, search, suggestTags, tagCounts } from '@/lib/search'
 import { kindIcons } from './kind-icon'
 import { MathText } from '@/components/content/MathText'
@@ -56,6 +56,10 @@ export function SearchCommand() {
   const parsed = parseQuery(query)
   const results = useMemo(() => search(query), [query])
   const suggestions = parsed.partialTag !== undefined ? suggestTags(parsed.partialTag) : []
+  // The top result is the likeliest choice; start loading it while the reader decides.
+  useEffect(() => {
+    if (results[0]) prefetchNote(results[0].slug)
+  }, [results])
 
   const go = (to: string) => {
     setOpen(false)
@@ -152,7 +156,12 @@ function TagItem({ tag, count, onSelect }: { tag: string; count: number; onSelec
 function ResultItem({ note, onSelect }: { note: NoteMeta; onSelect: (slug: string) => void }) {
   const Icon = kindIcons[note.kind]
   return (
-    <CommandItem value={note.slug} onSelect={() => onSelect(note.slug)} className="items-start gap-3 py-2">
+    <CommandItem
+      value={note.slug}
+      onSelect={() => onSelect(note.slug)}
+      onMouseEnter={() => prefetchNote(note.slug)}
+      className="items-start gap-3 py-2"
+    >
       <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">

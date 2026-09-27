@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router'
 import { NoteContext } from '@/components/content/note-context'
 import { MarginNotes, SidenoteProvider } from '@/components/content/sidenotes'
@@ -9,7 +9,7 @@ import { NoteAside } from '@/components/note/NoteAside'
 import { NoteBar, type NoteTab } from '@/components/note/NoteBar'
 import { NoteHeader } from '@/components/note/NoteHeader'
 import { OutputsTab, RunIndexNav } from '@/components/note/OutputsTab'
-import { noteReferences, notesBySlug, noteUrl } from '@/lib/content'
+import { noteReferences, notesBySlug, noteUrl, prefetchNotesWhenIdle } from '@/lib/content'
 import { MARGIN_QUERY, useMediaQuery } from '@/hooks/use-media-query'
 import { sectionTrail, useReadingPosition } from '@/hooks/use-reading-position'
 import { useManifest } from '@/lib/generated'
@@ -40,6 +40,12 @@ export function NotePage({ tab }: { tab: Tab }) {
     [note, tab],
   )
   const position = useReadingPosition(headings)
+
+  // Warm the notes this one points to, so following a link is instant.
+  useEffect(() => {
+    if (!note) return
+    return prefetchNotesWhenIdle([...note.linked, ...note.requires, ...note.related, ...note.partOf])
+  }, [note])
 
   if (!note) return <Navigate to="/404" replace />
   if (tab !== 'concept' && !note.code) return <Navigate to={noteUrl(slug)} replace />

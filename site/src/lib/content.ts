@@ -18,6 +18,37 @@ export function loadNote(slug: string): Promise<MdxModule> {
   return loaders[key]()
 }
 
+const prefetched = new Set<string>()
+
+/**
+ * Start downloading a note's code without rendering it, e.g. when its link is hovered, so opening it is instant.
+ * Repeated calls are free; failures are ignored (the real navigation reports them).
+ */
+export function prefetchNote(slug: string): void {
+  if (prefetched.has(slug) || !notesBySlug.has(slug)) return
+  prefetched.add(slug)
+  loadNote(slug).catch(() => prefetched.delete(slug))
+}
+
+/** Prefetch several notes when the browser is idle, a few at a time, so they never compete with the current page. */
+export function prefetchNotesWhenIdle(slugs: string[]): () => void {
+  const queue = slugs.filter((s) => !prefetched.has(s))
+  let cancelled = false
+  const idle = (cb: () => void) =>
+    typeof window.requestIdleCallback === 'function'
+      ? window.requestIdleCallback(cb, { timeout: 3000 })
+      : globalThis.setTimeout(cb, 500)
+  const step = () => {
+    if (cancelled) return
+    queue.splice(0, 3).forEach(prefetchNote)
+    if (queue.length) idle(step)
+  }
+  idle(step)
+  return () => {
+    cancelled = true
+  }
+}
+
 export const kindLabels: Record<NoteKind, string> = {
   concept: 'Concept',
   distribution: 'Distribution',

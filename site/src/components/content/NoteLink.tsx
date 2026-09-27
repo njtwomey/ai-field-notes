@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import { Badge } from '@/components/ui/badge'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
-import { kindLabels, notesBySlug, noteUrl } from '@/lib/content'
+import { kindLabels, notesBySlug, noteUrl, prefetchNote } from '@/lib/content'
 import { MathText } from './MathText'
 
 /** Link to another note, with its summary on hover: `<NoteLink to="softmax">softmax</NoteLink>`. Checked at build. */
@@ -12,7 +12,14 @@ export function NoteLink({ to, children }: { to: string; children?: ReactNode })
   return (
     <HoverCard>
       <HoverCardTrigger
-        render={<Link to={noteUrl(to)} className="underline decoration-muted-foreground/50 underline-offset-2" />}
+        render={
+          <Link
+            to={noteUrl(to)}
+            onMouseEnter={() => prefetchNote(to)}
+            onFocus={() => prefetchNote(to)}
+            className="underline decoration-muted-foreground/50 underline-offset-2"
+          />
+        }
       >
         {children ?? target.title}
       </HoverCardTrigger>

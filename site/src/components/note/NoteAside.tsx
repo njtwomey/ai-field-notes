@@ -1,5 +1,5 @@
 import { Link } from 'react-router'
-import { backlinks, components, notesBySlug, noteUrl, type NoteMeta } from '@/lib/content'
+import { backlinks, components, notesBySlug, noteUrl, prefetchNote, type NoteMeta } from '@/lib/content'
 
 /** Relations to other notes. Sits at the top of the right column, above the margin references. */
 export function NoteAside({ note }: { note: NoteMeta }) {
@@ -22,7 +22,7 @@ export function NoteAside({ note }: { note: NoteMeta }) {
             <ul className="space-y-1.5">
               {list.map((n) => (
                 <li key={n.slug}>
-                  <Link to={noteUrl(n.slug)} className="hover:underline">
+                  <Link to={noteUrl(n.slug)} onMouseEnter={() => prefetchNote(n.slug)} className="hover:underline">
                     {n.title}
                   </Link>
                 </li>

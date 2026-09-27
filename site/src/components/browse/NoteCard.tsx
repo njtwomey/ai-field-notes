@@ -1,6 +1,6 @@
 import { Link } from 'react-router'
 import { kindIcons } from '@/components/layout/kind-icon'
-import { category, kindLabels, noteUrl, type NoteMeta } from '@/lib/content'
+import { category, kindLabels, noteUrl, prefetchNote, type NoteMeta } from '@/lib/content'
 import { cn } from '@/lib/utils'
 import { MathText } from '@/components/content/MathText'
 
@@ -10,6 +10,8 @@ export function NoteCard({ note, className }: { note: NoteMeta; className?: stri
   return (
     <Link
       to={noteUrl(note.slug)}
+      onMouseEnter={() => prefetchNote(note.slug)}
+      onFocus={() => prefetchNote(note.slug)}
       className={cn(
         'group flex flex-col gap-1.5 rounded-lg border p-4 transition-colors hover:border-foreground/30 hover:bg-muted/40',
         className,
