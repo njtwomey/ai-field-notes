@@ -1,0 +1,231 @@
+---
+title: MILLET
+kind: technique
+summary: 'MILLET treats a time series as a multiple-instance bag of time points and replaces global average pooling in a deep classifier with MIL pooling. The model then returns a class score for every time point alongside its prediction: an interpretation at almost no extra cost.'
+tags: [weak-supervision, multiple-instance-learning, time-series, classification, interpretability, deep-learning]
+aliases: [Multiple Instance Learning for Locally Explainable Time series classification, conjunctive pooling, MIL for time series classification, WebTraffic dataset]
+requires: [multiple-instance-learning, attention-based-mil]
+related: [time-series-classification-benchmarks, interpretability, positional-encoding, ndcg, shapelets]
+references: [early2024, ilse2018, wang2018mi, javed2022, ismailfawaz2020, middlehurst2023, dau2019]
+status: draft
+updated: 2026-09-27
+---
+
+import { MilletPooling } from './MilletPooling'
+
+<Definition>
+**MILLET** (Multiple Instance Learning for Locally Explainable Time series classification) is a framework for making
+deep time-series classifiers inherently interpretable. A time series $X_i = \set{\xvec_i^1, \dots, \xvec_i^t}$ is a
+multiple-instance **bag** whose **instances** are its $t$ time points, and the series label $Y_i$ is the bag label.
+The global average pooling of the classifier is replaced by a MIL pooling that produces a prediction for each time
+point as part of the forward pass. Early, Cheung, Cutajar, Xie, Kandola and Twomey proposed it and evaluated it on 85
+UCR datasets <Cite id="early2024" />.
+</Definition>
+
+## Problem
+
+Deep time-series classifiers such as FCN, ResNet and InceptionTime share one structure <Cite id="early2024" />. A
+feature extractor $\psi_{FE}$ (the **backbone**) maps a univariate series $X_i$ to one $d$-dimensional embedding per time
+point, $\Zmat_i = [\zvec_i^1, \dots, \zvec_i^t] \in \reals^{t \times d}$. **Global average pooling** (GAP) averages the
+embeddings and a classifier $\psi_{CLF}$ maps the average to class logits:
+
+$$
+\Zmat_i = \psi_{FE}(X_i), \qquad \hat{Y}_i = \psi_{CLF}\LP\frac{1}{t}\sum_{j=1}^{t}\zvec_i^j\RP.
+$$
+
+The authors identify two drawbacks. The per-time-point representations are averaged with equal weight, so their
+localisation is lost. And the model gives no account of which stretches of the series (the **class-conditional
+discriminatory motifs**) drove the prediction. Post-hoc explainers such as SHAP need hundreds of forward passes per
+explanation.
+
+Time-series classification has the same label structure as multiple-instance learning: labels exist for whole series
+and not for time points. In MIL terms, GAP followed by a classifier is mean-embedding pooling, which produces no
+instance-level predictions.
+
+## The three requirements
+
+A MILLET model must satisfy three requirements <Cite id="early2024" />.
+
+1. **Time series as MIL bags.** Each time point is an instance; each series is a bag with the series label.
+2. **Time-point predictions.** The model must output predictions for individual time points, inherently, not through
+   a post-hoc method.
+3. **Temporal ordering.** The model must respect the order of time points, unlike classical MIL, which treats
+   instances as independent and identically distributed.
+
+The backbones satisfy the first and third through their convolutions. The pooling satisfies the second.
+
+## Mechanism: four MIL poolings
+
+Each pooling takes the embeddings $\zvec_i^j$ and returns series logits $\hat{Y}_i \in \reals^{c}$ for $c$ classes. An
+attention head $\psi_{ATTN}$ returns a weight $a_i^j \in [0, 1]$ per time point.
+
+**Attention** (from attention-based MIL <Cite id="ilse2018" />) weights embeddings before classifying their average:
+
+$$
+a_i^j = \psi_{ATTN}(\zvec_i^j), \qquad \hat{Y}_i = \psi_{CLF}\LP\frac{1}{t}\sum_{j=1}^{t} a_i^j \zvec_i^j\RP.
+$$
+
+**Instance** (from mi-Net <Cite id="wang2018mi" />) classifies every time point and averages the predictions:
+
+$$
+\hat{\yvec}_i^j = \psi_{CLF}(\zvec_i^j) \in \reals^{c}, \qquad \hat{Y}_i = \frac{1}{t}\sum_{j=1}^{t}\hat{\yvec}_i^j.
+$$
+
+**Additive** (from Additive MIL <Cite id="javed2022" />) classifies attention-weighted embeddings:
+
+$$
+\hat{\yvec}_i^j = \psi_{CLF}(a_i^j \zvec_i^j), \qquad \hat{Y}_i = \frac{1}{t}\sum_{j=1}^{t}\hat{\yvec}_i^j.
+$$
+
+**Conjunctive** (new in MILLET) applies the attention head and the classifier to the embeddings in parallel, then
+scales each time point's prediction by its attention:
+
+$$
+a_i^j = \psi_{ATTN}(\zvec_i^j), \qquad \hat{\yvec}_i^j = \psi_{CLF}(\zvec_i^j), \qquad
+\hat{Y}_i = \frac{1}{t}\sum_{j=1}^{t} a_i^j\,\hat{\yvec}_i^j.
+$$
+
+The name says that a discriminatory time point must be judged important by both heads. Because the classifier cannot
+rely on the attention head to rescale the embeddings first, the two heads are trained in parallel rather than in
+sequence, which the authors expect to make the model more robust.
+
+In the paper's architecture the attention head is two linear layers with an internal dimension of 8, a $\tanh$ and a
+sigmoid. A sigmoid replaces the softmax of attention-based MIL because the series can be long. The classifier is one
+linear layer. The poolings output logits; a softmax is applied afterwards.
+
+## Where the interpretations come from
+
+Each pooling yields its interpretation from quantities computed in the forward pass <Cite id="early2024" />.
+
+- **Instance** gives class scores per time point, $\hat{\yvec}_i \in \reals^{t \times c}$. A positive score for class
+  $k$ at time $j$ supports class $k$; a negative score refutes it.
+- **Additive** and **Conjunctive** give time-point predictions and attention. They are combined into
+  $\hat{\yvec}_i^{*} = [a_i^1\hat{\yvec}_i^1, \dots, a_i^t\hat{\yvec}_i^t] \in \reals^{t \times c}$.
+- **Attention** gives only the weights $a_i \in [0, 1]^t$. They measure importance for all classes at once and do not
+  say which class a time point supports.
+
+For Conjunctive the interpretation is exact: the series logit for class $k$ is the average of
+$a_i^j \hat{y}_{i,k}^j$, so the interpretation is a decomposition of the logit into per-time-point terms.
+
+**Instance pooling and CAM.** With a linear classifier $\psi_{CLF}(\zvec) = \Wmat\zvec + \bvec$, averaging is linear,
+so
+
+$$
+\frac{1}{t}\sum_{j=1}^{t}(\Wmat\zvec_i^j + \bvec) = \Wmat\LP\frac{1}{t}\sum_{j=1}^{t}\zvec_i^j\RP + \bvec.
+$$
+
+Instance pooling computes the same series logits as GAP followed by the same layer. Its time-point scores
+$\Wmat\zvec_i^j + \bvec$ are, up to the bias, the class activation map (CAM) of the GAP model. The paper records the
+consequence that Instance has exactly as many parameters as GAP. The Instance models in the paper differ from the GAP
+models through the three enhancements below, not through the pooling function itself.
+
+## Model design
+
+MILLET was applied to three backbones, FCN, ResNet and InceptionTime <Cite id="ismailfawaz2020" />, each producing
+embeddings of size $d = 128$. Four poolings on three backbones give 12 new models <Cite id="early2024" />. Three
+enhancements were added.
+
+1. **Positional encoding.** Fixed sinusoidal encodings are added to the embeddings after feature extraction, so that
+   the time-point heads can use position. Under GAP this information would be averaged away. See
+   <NoteLink to="positional-encoding" />.
+2. **Replicate padding.** Zero padding in the convolutions made the interpretations favour the start and end of the
+   series, because padding with zeros created a false signal. Padding with the boundary value removed the bias.
+3. **Dropout.** Dropout with $p = 0.1$ after the positional encoding, to limit overfitting in the new heads.
+
+As in the original InceptionTime, each model is an ensemble of five networks trained from different initialisations.
+All models were trained with Adam at a fixed learning rate of 0.001 for 1500 epochs with cross-entropy loss, without
+hyperparameter tuning.
+
+<MilletPooling />
+
+## Evaluation of interpretations
+
+Two metrics score an interpretation, following Early et al.'s earlier work on MIL interpretability
+<Cite id="early2024" />.
+
+- **AOPCR** needs no time-point labels. Order the time points by importance for class $c$, remove them most relevant
+  first, and average the drop in the model's class-$c$ output over the removals. Subtract the same quantity for a
+  random ordering (averaged over three random orderings). A positive value means the interpretation found time points
+  that the prediction depends on. For speed, time points are removed in blocks of 5% of the length, up to 50%.
+- **NDCG@n** needs time-point labels. If $n$ time points are truly discriminatory, it scores how many of them appear in
+  the first $n$ places of the ordering, with a $1/\log_2(j + 1)$ discount at rank $j$. See <NoteLink to="ndcg" />.
+
+The UCR datasets have no time-point labels, so the authors built a synthetic dataset, **WebTraffic**, in which the
+discriminatory locations are known. Each series is a week at a 10-minute sample rate ($t = 1008$) with daily and weekly
+seasonality. Class 0 has no signature. Classes 1 to 9 inject a signature: Spikes, Flip, Skew, Noise, Cutoff, Average,
+Wander, Peak and Trough. Every signature except Spikes occupies one random window of 36 to 288 time points. The
+training and test sets each hold 500 series, 50 per class.
+
+## Results
+
+**WebTraffic.** Averaged over the three backbones, MILLET raised accuracy from 0.850 (GAP) to 0.874, and Conjunctive
+InceptionTime reached 0.940 <Cite id="early2024" />. Interpretability, as AOPCR / NDCG@n, with the best pooling for
+SHAP and MILLET:
+
+<SpecTable
+  columns={['FCN', 'ResNet', 'InceptionTime', 'Mean']}
+  rows={{
+    CAM: ['12.780 / 0.532', '20.995 / 0.582', '12.470 / 0.707', '15.415 / 0.607'],
+    SHAP: ['1.977 / 0.283', '-0.035 / 0.257', '-4.020 / 0.259', '-0.692 / 0.266'],
+    MILLET: ['14.522 / 0.540', '24.880 / 0.591', '13.192 / 0.704', '17.531 / 0.612'],
+  }}
+/>
+
+MILLET had the best AOPCR and NDCG@n for every backbone, except NDCG@n on InceptionTime, where CAM scored 0.707 against
+0.704. The authors attribute this to sparsity: MILLET's explanations may cover only part of a discriminatory region,
+such as the start and end of a Cutoff window. SHAP, run with 500 samples, scored negative AOPCR on two backbones, which
+is worse than a random ordering. MILLET was over 800 times faster than SHAP.
+
+**UCR predictive performance.** On 85 univariate UCR datasets <Cite id="dau2019" />, Conjunctive was the best pooling
+averaged over backbones, raising accuracy from $0.841 \pm 0.009$ (GAP) to $0.846 \pm 0.009$ <Cite id="early2024" />.
+The paper then compares the Conjunctive models with the best method from each of seven families of classifiers in
+Bake Off Redux <Cite id="middlehurst2023" />. Its main table, as mean / rank / number of wins over the 85 datasets:
+
+<SpecTable
+  columns={['Accuracy', 'Balanced accuracy', 'AUROC', 'NLL']}
+  rows={{
+    'Hydra-MR': ['0.857 / 5.306 / 19', '0.831 / 5.929 / 17', '0.875 / 10.682 / 7', '0.953 / 6.965 / 9'],
+    FCN: ['0.828 / 9.088 / 7', '0.804 / 8.494 / 8', '0.929 / 7.653 / 13', '1.038 / 7.176 / 5'],
+    'Conj. FCN': ['0.838 / 7.700 / 7', '0.814 / 7.300 / 7', '0.934 / 6.288 / 20', '0.973 / 6.247 / 9'],
+    ResNet: ['0.843 / 7.282 / 10', '0.819 / 6.741 / 8', '0.937 / 6.035 / 18', '1.091 / 7.788 / 0'],
+    'Conj. ResNet': ['0.845 / 7.200 / 13', '0.822 / 6.618 / 14', '0.939 / 5.512 / 16', '1.035 / 7.447 / 2'],
+    InceptionTime: ['0.853 / 6.112 / 19', '0.832 / 5.494 / 19', '0.939 / 5.453 / 26', '1.078 / 7.118 / 9'],
+    'Conj. InceptionTime': ['0.856 / 5.606 / 19', '0.834 / 5.182 / 23', '0.939 / 5.276 / 26', '1.085 / 7.341 / 9'],
+    'HC2 (reference)': ['0.860 / 4.953 / 21', '0.830 / 5.612 / 17', '0.950 / 3.441 / 43', '0.607 / 4.941 / 14'],
+  }}
+/>
+
+Conjunctive InceptionTime had the best balanced accuracy, above Hydra-MR and HIVE-COTE 2 (HC2). HC2 is a
+meta-ensemble of several classifiers and is listed for reference only. On the other metrics it was competitive but not
+the best. For every backbone, Conjunctive pooling improved on GAP in accuracy and balanced accuracy. AUROC rose or
+stayed equal, and NLL fell for FCN and ResNet but rose slightly for InceptionTime, from 1.078 to 1.085. Against
+InceptionTime, HC2 and Hydra-MR, Conjunctive InceptionTime won or drew on 48, 49 and 52 of the 85 datasets.
+
+**UCR interpretability.** Without time-point labels only AOPCR applies. Averaged over backbones, the best MILLET
+AOPCR was 6.00 against 5.71 for GAP with CAM <Cite id="early2024" />. The authors name Conjunctive the best pooling
+for interpretability; in their appendix table it has the highest mean AOPCR for the ensembled models (5.756), while
+Additive has the highest for single models (5.977). Attention
+pooling performed poorly, as expected from interpretations that are not class-specific. A trade-off appeared: more
+complex backbones predicted better and explained worse. MILLET dominated GAP on the Pareto front for FCN and
+InceptionTime but not for ResNet, where the ensembled models lost interpretability.
+
+**Cost.** The attention head adds at most 0.4% to the parameter count. On the UCR Fish dataset, training time rose by up
+to 6.0% and inference time by up to 7.5% relative to GAP. A SHAP explanation for the same model took over 6 seconds.
+
+## Trade-offs
+
+- **Sparse explanations.** MILLET tends to highlight a few time points of each motif. Sparsity helps when explaining
+  long series and improves AOPCR, but can lower NDCG@n when the ground truth is a whole region.
+- **Attention alone is not enough.** Attention weights are not class-specific and scored worst among the poolings on
+  interpretability; the class-specific poolings (Instance, Additive, Conjunctive) are the ones to use for explanations.
+- **Small training sets.** Conjunctive InceptionTime was worse than GAP InceptionTime on UCR datasets with few training
+  series and better on large ones.
+- **Scope.** The paper covers univariate series of fixed length. Variable lengths need no change. Multivariate series
+  would need interpretations per channel as well as per time point.
+- **Components are confounded.** An ablation on three datasets found that each addition (MIL pooling, positional
+  encoding, replicate padding, dropout, ensembling) improved mean balanced accuracy, but the gains depend on the
+  order in which the components were added.
+
+The code and the WebTraffic dataset are released at
+[github.com/JAEarly/MILTimeSeriesClassification](https://github.com/JAEarly/MILTimeSeriesClassification). For the
+benchmark and the competing classifiers, see <NoteLink to="time-series-classification-benchmarks" />.

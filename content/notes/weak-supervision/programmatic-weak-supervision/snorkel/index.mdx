@@ -1,0 +1,105 @@
+---
+title: Snorkel
+kind: case-study
+summary: 'Snorkel is the first end-to-end system for data programming. Users write labelling functions; Snorkel fits a generative model of their accuracies and correlations without ground truth, and trains a discriminative end model on the resulting probabilistic labels.'
+tags: [weak-supervision, programmatic-weak-supervision, labelling-functions, systems]
+aliases: [Snorkel system, modeling advantage, label density, labeling function interface, Snorkel workflow]
+requires: [data-programming]
+related: [label-model-estimation, weak-supervision-in-production, weak-supervision-benchmarks]
+references: [ratner2017, ratner2020, ratner2016, bach2017]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Snorkel** is a system for building training sets with weak supervision, by Ratner, Bach, Ehrenberg, Fries, Wu and Ré
+<Cite id="ratner2017" />, with an extended journal version <Cite id="ratner2020" />. It implements <NoteLink
+to="data-programming" /> end to end in three stages: users write labelling functions; Snorkel learns a generative model
+of the functions' accuracies and correlations from their agreements and disagreements alone; and the model's
+probabilistic labels train a discriminative end model, such as a deep network, that generalises beyond the functions.
+</Definition>
+
+## The workflow
+
+**1. Write labelling functions.** Input data are stored in a **context hierarchy** of documents, sentences, spans and
+entities (or images and regions), kept in a relational database. A data point, a **candidate**, is a tuple of contexts,
+such as a pair of chemical and disease mentions in a sentence. A labelling function takes a candidate and returns a
+label or abstains. Users write LFs at two levels <Cite id="ratner2017" />:
+
+- **Hand-defined LFs**: arbitrary Python, with the hierarchy exposed as objects.
+- **Declarative LFs**: library operators for the common kinds of weak supervision: **pattern-based** heuristics (a
+  regular expression between two mentions), **distant supervision** (alignment with an external knowledge base),
+  **weak classifiers** (models too noisy, biased or narrow to use directly) and **labelling-function generators** that
+  produce many LFs from one resource, such as one LF per branch of an ontology.
+
+The designers found that simplicity was critical to usability: an early version with manually specified LF types and
+correlation structure was dropped.
+
+**2. Model accuracies and correlations.** Snorkel applies the LFs to the unlabelled data to form the label matrix
+$\Lambda$, and fits a generative model $p_w(\Lambda, Y)$, a factor graph with one accuracy factor per LF and correlation
+factors between LFs, by maximising the marginal likelihood of $\Lambda$. No ground truth is used. See <NoteLink
+to="label-model-estimation" /> for how the model and its structure are estimated.
+
+**3. Train the end model.** The label model's posteriors $\tilde{Y} = p_{\hat{w}}(Y \mid \Lambda)$ are probabilistic
+training labels. The end model minimises the expected loss under them, a noise-aware version of its usual objective.
+
+## When is the label model worth fitting?
+
+Fitting the label model costs time, and sometimes majority vote is as good. Snorkel's optimiser decides by the **label
+density** $d_\Lambda$, the mean number of non-abstaining votes per point <Cite id="ratner2017" />.
+
+The **modelling advantage** $A_w$ is the fraction of points on which a weighted vote $f_w(\Lambda_i) = \sum_j w_j\Lambda_{ij}$
+is right and the unweighted vote $f_1(\Lambda_i) = \sum_j \Lambda_{ij}$ is wrong, minus the fraction on which the reverse
+holds.
+
+- **Low density.** Few points have more than one vote, so a weighted vote can rarely disagree with the majority. If
+  every LF votes with probability $p_l$, the expected optimal advantage is $O(\bar{d}^2)$ in the mean density
+  $\bar{d} = np_l$.
+- **High density.** With many votes per point and average accuracy above one half, majority vote converges
+  exponentially to the optimal decision, and weighting adds little.
+- **Medium density.** Between the two, weighting by accuracy matters most, and the generative model pays off.
+
+The optimiser computes an upper bound $\tilde{A}^*$ on the advantage from the label matrix, by counting the points on
+which a best-case weighted vote could overturn an incorrect majority, and fits the generative model only when the bound
+exceeds a user-set advantage tolerance $\gamma$. It predicted the advantage over majority vote to within 2.16 accuracy points
+on average and sped up pipeline executions by up to 1.8×.
+
+<SpecTable
+  columns={['Modelling advantage A_w (%)', 'Bound Ã* (%)', 'Strategy chosen', 'Label density']}
+  rows={{
+    Radiology: ['7.0', '12.4', 'generative model', '2.3'],
+    CDR: ['4.9', '7.9', 'generative model', '1.8'],
+    Spouses: ['4.4', '4.6', 'generative model', '1.4'],
+    Chem: ['0.1', '0.3', 'majority vote', '1.2'],
+    EHR: ['2.8', '4.8', 'generative model', '1.2'],
+  }}
+/>
+
+## Correlations
+
+Users often write dependent LFs: variations of one regular expression, LFs over raw tokens and over their lemmas,
+distant supervision from overlapping knowledge bases. Ignoring dependence can be catastrophic. In Snorkel's example, 5
+perfectly correlated LFs of accuracy 50% and 5 independent LFs of accuracy 99% lead the independent model to estimate
+100% and 50% respectively <Cite id="ratner2017" />: the copies agree with each other perfectly, so they look perfect.
+
+Fitting every pairwise correlation is slow: roughly 45 minutes for 100 LFs and 10,000 points. Snorkel instead selects
+correlations with the pseudolikelihood method of Bach et al. <Cite id="bach2017" />, which took 15 seconds on the same
+problem. A threshold $\epsilon$ controls how many correlations are kept. The optimiser's choice of $\epsilon$ captured
+60%–70% of the benefit of correlation learning while saving up to 61% of training time.
+
+## Results
+
+- **User study.** Subject-matter experts built models 2.8× faster and improved predictive performance by 45.5% on
+  average compared with seven hours of hand labelling <Cite id="ratner2017" />.
+- **Deployments and benchmarks.** In collaborations with the U.S. Department of Veterans Affairs and the U.S. Food and
+  Drug Administration, and on four open-source text and image data sets, Snorkel improved predictive performance by
+  132% on average over prior heuristic approaches and came within 3.60% on average of models trained on large
+  hand-curated training sets <Cite id="ratner2017" />.
+
+## Legacy
+
+Snorkel's two-stage design, labelling functions then a label model then an end model, became the reference pipeline
+for programmatic weak supervision. Later work replaced the Gibbs-sampling label model with matrix-completion and
+closed-form estimators, deployed the pipeline at industrial scale, generated labelling functions automatically, and
+standardised evaluation. See <NoteLink to="label-model-estimation" />, <NoteLink to="weak-supervision-in-production" />
+and <NoteLink to="weak-supervision-benchmarks" />.

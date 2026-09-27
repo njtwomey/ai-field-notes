@@ -1,0 +1,131 @@
+---
+title: Multiple-instance learning
+kind: concept
+summary: 'In multiple-instance learning each training example is a bag of instances with one label. Under the standard assumption a bag is positive if and only if at least one instance is positive, so the bag classifier is $F(X) = \max_{\xvec \in X} f(\xvec)$ for an instance classifier $f$.'
+tags: [weak-supervision, multiple-instance-learning, classification, worked-example]
+aliases: [MIL, multi-instance learning, standard MI assumption, bag label, mi-SVM, MI-SVM, collective assumption, noisy-OR pooling]
+requires: [support-vector-machine]
+related: [attention-based-mil, millet, learning-from-label-proportions]
+references: [dietterich1997, andrews2003, foulds2010, carbonneau2018]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+In **multiple-instance learning** (MIL) a training example is a **bag** $X = \set{\xvec_1, \dots, \xvec_K}$ of
+**instances** $\xvec_k \in \Xcal$, with a single label $Y \in \set{0, 1}$. Each instance has a label
+$y_k \in \set{0, 1}$ that is never observed. The **standard MI assumption** links them:
+
+$$
+Y = 1 \iff \exists\, k : y_k = 1, \qquad\text{equivalently}\qquad Y = \max_k y_k.
+$$
+
+The task is to predict bag labels, instance labels, or both <Cite id="dietterich1997" />.
+</Definition>
+
+## Origin
+
+Dietterich, Lathrop and Lozano-Pérez introduced MIL for drug-activity prediction <Cite id="dietterich1997" />. A
+molecule binds to a target if at least one of its low-energy shapes (conformations) fits the binding site. Each
+molecule is a bag, each conformation is an instance described by a feature vector, and only the molecule's activity
+is measured. Their algorithm searched for an axis-parallel rectangle in feature space that contains at least one
+instance of every positive bag and no instance of any negative bag. The Musk data sets from that paper remain a
+standard benchmark.
+
+Later applications keep the same shape: an image (bag) contains an object if some region (instance) shows it; a
+document is relevant if some passage is; a whole-slide pathology image is malignant if some tile is; a time series
+belongs to a class if some stretch of it shows the class's signature <Cite id="carbonneau2018" />.
+
+## What the standard assumption implies for a classifier
+
+Let $f : \Xcal \to \set{0, 1}$ be the true instance labelling. The standard assumption fixes the bag labelling as
+$F(X) = \max_{\xvec \in X} f(\xvec)$. Three consequences follow directly.
+
+1. **Negative bags are fully labelled.** $Y = 0$ forces $\max_k y_k = 0$, so every instance of a negative bag is
+   negative. Negative bags supply ordinary labelled negatives.
+2. **Positive bags are ambiguous.** $Y = 1$ says only that $\sum_k y_k \ge 1$. Any non-empty subset of a positive bag
+   could be the positive instances. The unobserved instances that make a positive bag positive are called
+   **witnesses**.
+3. **The bag score is a maximum, not an average.** A single positive instance decides the bag, whatever the number of
+   negatives. Averaging instance scores would let a large bag with one positive look negative.
+
+For a real-valued instance scorer $f(\xvec) \in \reals$, the classifier that respects the assumption is
+$F(X) = \max_k f(\xvec_k)$ with threshold $0$: the bag is positive if its highest-scoring instance is positive.
+
+**Probabilistic version.** Let $p_k = \pr(y_k = 1 \mid \xvec_k)$ and suppose instance labels are conditionally
+independent given the instances. The bag is negative only if every instance is negative, so
+
+$$
+\pr(Y = 1 \mid X) = 1 - \prod_{k=1}^{K}(1 - p_k).
+$$
+
+This is **noisy-OR** pooling. It is never below $\max_k p_k$. It equals $\max_k p_k$ when every other $p_k$ is 0 or
+the largest is 1, and it tends to 1 as the bag grows even if every $p_k$ is small. The log-likelihood of bag labels under noisy-OR is differentiable in
+the instance model's parameters, so the instance classifier can be trained from bag labels by gradient descent.
+
+**Worked example.** A bag has three instances with $p = (0.1, 0.2, 0.7)$. Noisy-OR gives
+$1 - 0.9 \times 0.8 \times 0.3 = 0.784$. The max gives $0.7$. The mean gives $0.333$, which would call the bag
+negative at threshold $0.5$ even though one instance is probably positive.
+
+## Other assumptions
+
+The standard assumption is one of several. Foulds and Frank survey the alternatives <Cite id="foulds2010" />.
+
+- **Presence-, threshold- and count-based assumptions.** Several instance concepts exist. A bag is positive if it
+  contains at least one instance of each required concept (presence), at least a threshold number of each
+  (threshold), or a number of each within given bounds (count).
+- **Collective assumption.** All instances contribute to the bag label, which is an aggregate such as the average
+  of instance-level class probabilities, $\pr(Y = 1 \mid X) = \frac{1}{K}\sum_k \pr(y = 1 \mid \xvec_k)$. Bags are
+  treated as samples from a bag-specific distribution.
+- **Metadata and embedding assumptions.** The bag label depends on summary features of the bag, such as distances to
+  prototype instances. The bag is mapped to a fixed-length vector and a standard classifier is applied.
+
+The assumption determines the pooling. Max and noisy-OR pooling encode the standard assumption. Mean pooling encodes
+the collective assumption. Learned pooling, such as <NoteLink to="attention-based-mil">attention-based MIL</NoteLink>,
+lets the data choose between them.
+
+## Max-margin MIL: mi-SVM and MI-SVM
+
+Andrews, Tsochantaridis and Hofmann gave two support vector formulations <Cite id="andrews2003" />. Both use a linear
+score $f(\xvec) = \wvec^\top\xvec + b$, labels in $\set{-1, +1}$, and a bag index set $I$ with label $Y_I$.
+
+**mi-SVM (instance level).** Treat the unknown instance labels $y_i$ as integer variables and maximise the margin over
+both labels and hyperplane:
+
+$$
+\min_{\set{y_i}}\ \min_{\wvec, b, \xivec}\ \frac{1}{2}\norm{\wvec}^2 + C\sum_i \xi_i
+\quad\text{s.t.}\quad y_i(\wvec^\top\xvec_i + b) \ge 1 - \xi_i,\ \ \xi_i \ge 0,
+$$
+
+with $y_i = -1$ for every instance of a negative bag and $\sum_{i \in I}(y_i + 1)/2 \ge 1$ for every positive bag.
+
+**MI-SVM (bag level).** Define the bag margin by the bag's highest-scoring instance and require it for every bag:
+
+$$
+\min_{\wvec, b, \xivec}\ \frac{1}{2}\norm{\wvec}^2 + C\sum_I \xi_I
+\quad\text{s.t.}\quad Y_I \max_{i \in I}(\wvec^\top\xvec_i + b) \ge 1 - \xi_I,\ \ \xi_I \ge 0.
+$$
+
+For a negative bag the constraint applies to every instance. For a positive bag it applies only to the **witness**,
+the instance with the largest score.
+
+Both problems are mixed-integer quadratic programs. The heuristic is alternation. For mi-SVM, fix the imputed
+labels, train an ordinary SVM, relabel each positive bag's instances by the sign of the new scores (forcing the top
+instance positive if none is), and repeat until the labels stop changing. For MI-SVM, fix one witness per positive
+bag, train an SVM on the witnesses and all negative instances, reselect the witnesses, and repeat. mi-SVM suits
+tasks that need instance labels; MI-SVM suits tasks that need only bag labels.
+
+## Assumptions and pitfalls
+
+- **The assumption must match the data.** The standard assumption fails when a class needs several instance types
+  together, or when a bag's label depends on the proportion of its instances. The collective or count-based
+  assumptions then fit better, and max pooling underperforms <Cite id="foulds2010" />.
+- **Bag accuracy does not imply instance accuracy.** A bag classifier can be right for the wrong instance. Carbonneau
+  et al. note that the best bag-level classifier is rarely the best instance-level classifier, and the reverse, so the
+  two tasks need separate evaluation <Cite id="carbonneau2018" />.
+- **Instances are often not independent.** Neighbouring image tiles and consecutive time points are correlated.
+  Methods that assume independent instances ignore this structure; <NoteLink to="millet" /> keeps the order of time
+  points with positional encodings.
+- **Relation to label proportions.** MIL reveals whether a bag's positive count is zero. <NoteLink
+  to="learning-from-label-proportions">Learning from label proportions</NoteLink> reveals the count itself, which is
+  strictly more information about instance labels.

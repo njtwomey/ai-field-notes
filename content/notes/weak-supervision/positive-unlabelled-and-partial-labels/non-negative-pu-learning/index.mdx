@@ -1,0 +1,123 @@
+---
+title: Unbiased and non-negative PU risk
+kind: technique
+summary: 'The negative-class risk can be rewritten with unlabelled and positive data, $(1 - \pi)R_n^- = R_u^- - \pi R_p^-$, giving an unbiased PU risk. Flexible models drive its empirical version below zero and overfit; nnPU clips the negative part at zero, $\tilde{R} = \pi\hat{R}_p^+ + \max\set{0, \hat{R}_u^- - \pi\hat{R}_p^-}$.'
+tags: [weak-supervision, positive-unlabelled, risk-estimation, deep-learning, worked-example]
+aliases: [uPU, unbiased PU learning, nnPU, non-negative PU learning, non-negative risk estimator, double hinge loss, case-control PU]
+requires: [positive-unlabelled-learning, empirical-risk-minimisation, surrogate-losses]
+related: [complementary-labels, learning-with-noisy-labels]
+references: [duplessis2014, duplessis2015, kiryo2017, bekker2020]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+In the case-control PU setting, $n_p$ positives are drawn from $p_p(\xvec) = p(\xvec \mid y = +1)$ and $n_u$ unlabelled
+points from the marginal $p(\xvec) = \pi\,p_p(\xvec) + (1 - \pi)\,p_n(\xvec)$, with class prior $\pi$ known. The
+**unbiased PU risk** (uPU) rewrites the classification risk using only these two samples. The **non-negative PU
+risk** (nnPU) clips the part of it that estimates the negative-class risk at zero, which stops flexible models from
+overfitting <Cite id="kiryo2017" />.
+</Definition>
+
+## Problem
+
+For a decision function $g : \Xcal \to \reals$ and a margin loss $\ell(t, y)$, write the partial risks
+
+$$
+R_p^{+}(g) = \expect_{p_p}\LB\ell(g(\xvec), +1)\RB, \quad
+R_p^{-}(g) = \expect_{p_p}\LB\ell(g(\xvec), -1)\RB, \quad
+R_n^{-}(g) = \expect_{p_n}\LB\ell(g(\xvec), -1)\RB, \quad
+R_u^{-}(g) = \expect_{p}\LB\ell(g(\xvec), -1)\RB.
+$$
+
+The risk that ordinary positive-negative (PN) learning estimates is
+
+$$
+R(g) = \pi R_p^{+}(g) + (1 - \pi) R_n^{-}(g).
+$$
+
+The term $R_n^{-}$ needs negatives, which PU data do not contain.
+
+## Mechanism: the unbiased risk
+
+Because $p = \pi p_p + (1 - \pi)p_n$, an expectation under $p$ splits into the two classes:
+
+$$
+R_u^{-}(g) = \pi\,\expect_{p_p}\LB\ell(g, -1)\RB + (1 - \pi)\,\expect_{p_n}\LB\ell(g, -1)\RB = \pi R_p^{-}(g) + (1 - \pi)R_n^{-}(g).
+$$
+
+Solving for the negative term, $(1 - \pi)R_n^{-}(g) = R_u^{-}(g) - \pi R_p^{-}(g)$. Substituting,
+
+$$
+R(g) = \pi R_p^{+}(g) - \pi R_p^{-}(g) + R_u^{-}(g).
+$$
+
+Every term is an expectation under $p_p$ or $p$, so replacing each by its sample mean gives an unbiased estimator
+$\hat{R}_{pu}(g)$ <Cite id="duplessis2014" />. Positive examples appear twice: once as positives and once, with
+negative weight, as "unlabelled points that are known not to be negatives".
+
+**Which losses.** du Plessis, Niu and Sugiyama first used losses with $\ell(t, +1) + \ell(t, -1) = 1$, such as the ramp
+loss, for which the estimator reduces to cost-sensitive classification of P against U; these losses are non-convex
+<Cite id="duplessis2014" />. They then observed that if
+
+$$
+\ell(t, +1) - \ell(t, -1) = -t,
+$$
+
+the two positive terms combine into a linear one, $\pi R_p^{+} - \pi R_p^{-} = -\pi\,\expect_{p_p}[g(\xvec)]$, and the
+objective $-\pi\,\expect_{p_p}[g(\xvec)] + \expect_{p}[\ell(g(\xvec), -1)]$ is convex whenever $\ell$ is. The squared
+loss $(t - 1)^2/4$, the logistic loss and the **double hinge loss** $\max\set{0, (1 - t)/2, -t}$ satisfy the condition
+<Cite id="duplessis2015" />.
+
+## Mechanism: the non-negative risk
+
+The population identity guarantees $R_u^{-}(g) - \pi R_p^{-}(g) = (1 - \pi)R_n^{-}(g) \ge 0$. Its empirical
+counterpart $\hat{R}_u^{-}(g) - \pi\hat{R}_p^{-}(g)$ has no such guarantee. A flexible model can push $g$ to large
+positive values on the training positives, which makes $\hat{R}_p^{-}$ large, and the subtraction then drives the
+estimate negative. The model is rewarded for memorising the positives. Kiryo et al. observed this with a multilayer
+perceptron separating even from odd MNIST digits: the uPU training risk kept falling and went negative while the test
+risk rose <Cite id="kiryo2017" />.
+
+nnPU replaces the subtraction by its positive part:
+
+$$
+\tilde{R}_{pu}(g) = \pi\hat{R}_p^{+}(g) + \max\set{0,\ \hat{R}_u^{-}(g) - \pi\hat{R}_p^{-}(g)}.
+$$
+
+The estimator is biased, but Kiryo et al. show that the bias decays exponentially as $n_p$ and $n_u$ grow, that the
+estimator is consistent, and that under mild conditions its mean squared error is smaller than uPU's
+<Cite id="kiryo2017" />.
+
+**Training with mini-batches.** For each mini-batch, compute $r = \hat{R}_u^{-} - \pi\hat{R}_p^{-}$. If $r \ge -\beta$,
+take an ordinary step on the uPU objective. Otherwise take a step along $-\nabla r$, with the step size discounted by
+$\gamma \in [0, 1]$: the model is pushed to increase the negative-risk estimate back towards zero. With $\beta = 0$ and
+$\gamma = 1$, the default in the paper's experiments, this is gradient descent on the clipped objective with the sign
+of the clipped term reversed when it is negative <Cite id="kiryo2017" />.
+
+## Worked example
+
+Let $\pi = 0.4$. On a mini-batch a deep network gives $\hat{R}_p^{+} = 0.05$ (the positives are fitted),
+$\hat{R}_p^{-} = 2.0$ (the positives would be very wrong as negatives) and $\hat{R}_u^{-} = 0.5$. The uPU estimate is
+$0.4 \times 0.05 + 0.5 - 0.4 \times 2.0 = -0.28$, a negative risk, which is impossible for a non-negative loss. nnPU gives
+$0.4 \times 0.05 + \max\set{0, 0.5 - 0.8} = 0.02$, and flags the batch for a corrective step.
+
+## Cost
+
+Both estimators cost the same as PN training on $n_p + n_u$ points: one forward pass per point and two loss
+evaluations per positive. The class prior $\pi$ must be supplied or estimated separately (see <NoteLink
+to="positive-unlabelled-learning" />).
+
+## Trade-offs
+
+- **Class prior.** Both estimators need $\pi$. An error in $\pi$ biases the risk directly, because $\pi$ weights both
+  positive terms.
+- **Loss choice.** uPU with a convex loss satisfying the linear-odd condition is a convex problem for linear models.
+  nnPU is designed for flexible models, where convexity is lost anyway, and its experiments use the sigmoid loss.
+- **When PU beats PN.** Kiryo et al. recall that uPU is likely to outperform PN learning with $n_n$ labelled negatives
+  when $\pi/\sqrt{n_p} + 1/\sqrt{n_u} < (1 - \pi)/\sqrt{n_n}$, provided the model class is not too flexible; unlabelled
+  data are cheap, so $n_u$ can be large <Cite id="kiryo2017" />.
+- **SCAR still applies.** Both estimators assume the positives are a random sample of all positives; selection bias
+  breaks them <Cite id="bekker2020" />.
+- **The same device elsewhere.** Rewriting a risk on unobserved labels as a signed combination of risks on observed
+  data, then correcting negative empirical terms, is also the basis of <NoteLink to="complementary-labels">
+  complementary-label learning</NoteLink>.

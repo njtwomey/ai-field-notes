@@ -1,0 +1,120 @@
+---
+title: Positive-unlabelled learning
+kind: concept
+summary: 'Positive-unlabelled learning trains a binary classifier from some labelled positives and unlabelled data. If positives are labelled at random with probability $c$, a labelled-versus-unlabelled classifier learns $g(\xvec) = c\,\pr(y = 1 \mid \xvec)$; dividing by $c$ recovers the posterior.'
+tags: [weak-supervision, positive-unlabelled, classification, class-prior, worked-example]
+aliases: [PU learning, learning from positive and unlabeled data, SCAR assumption, selected completely at random, label frequency, Elkan–Noto correction, non-traditional classifier]
+requires: [logistic-regression, bayes-theorem]
+related: [non-negative-pu-learning, one-class-svm, prior-shift-correction, anomaly-detection]
+references: [elkan2008, bekker2020, duplessis2014]
+status: draft
+updated: 2026-09-27
+---
+
+import { PuCorrection } from './PuCorrection'
+
+<Definition>
+In **positive-unlabelled (PU) learning** each training example has an input $\xvec$, a hidden class
+$y \in \set{0, 1}$ and an observed indicator $s \in \set{0, 1}$ that it is labelled. Only positives can be labelled:
+$\pr(s = 1 \mid \xvec, y = 0) = 0$. The unlabelled set mixes positives and negatives. The task is to learn
+$f(\xvec) = \pr(y = 1 \mid \xvec)$ from examples of $(\xvec, s)$ alone <Cite id="elkan2008" />.
+</Definition>
+
+## Where the setting arises
+
+Many data sets record only one class. A database of proteins with a known function lists positives; the rest of the
+proteome is unlabelled, not negative. A user's clicks are positives; unclicked items are unlabelled. A disease
+registry records diagnosed cases; undiagnosed people are unlabelled. Training an ordinary classifier with unlabelled
+as negative treats every hidden positive as a label error, and the classifier underestimates $\pr(y = 1 \mid \xvec)$
+everywhere <Cite id="bekker2020" />.
+
+## Two assumptions that make the problem solvable
+
+**SCAR.** The labelled positives are **selected completely at random** from all positives: the probability that a
+positive is labelled does not depend on $\xvec$,
+
+$$
+\pr(s = 1 \mid \xvec, y = 1) = \pr(s = 1 \mid y = 1) = c.
+$$
+
+The constant $c$ is the **label frequency**. Equivalently, $s$ and $\xvec$ are conditionally independent given $y$
+<Cite id="elkan2008" />. The weaker **SAR** assumption lets the labelling probability depend on $\xvec$ through a
+**propensity score** $e(\xvec) = \pr(s = 1 \mid \xvec, y = 1)$ <Cite id="bekker2020" />.
+
+**Two sampling scenarios.** In the **single-training-set** scenario, one sample is drawn from $p(\xvec, y, s)$ and
+the labelled examples are a subset of it. In the **case-control** scenario, the positives are one sample from
+$p(\xvec \mid y = 1)$ and the unlabelled set is an independent sample from the marginal $p(\xvec)$
+<Cite id="bekker2020" />. Elkan and Noto work in the first; the risk estimators of <NoteLink to="non-negative-pu-learning" />
+work in the second.
+
+## The Elkan–Noto correction
+
+Train any probabilistic classifier to separate labelled from unlabelled examples. It estimates the **non-traditional
+classifier** $g(\xvec) = \pr(s = 1 \mid \xvec)$. Under SCAR, because $s = 1$ implies $y = 1$,
+
+$$
+g(\xvec) = \pr(s = 1, y = 1 \mid \xvec) = \pr(y = 1 \mid \xvec)\,\pr(s = 1 \mid y = 1, \xvec) = c\,f(\xvec).
+$$
+
+So $f(\xvec) = g(\xvec)/c$ <Cite id="elkan2008" />. Three consequences follow.
+
+1. **Ranking needs no correction.** $f$ is an increasing function of $g$, so $g$ ranks examples exactly as $f$ does.
+   The area under the ROC curve is unaffected.
+2. **Thresholds do.** $g \le c$ everywhere. With $c < 1/2$, thresholding $g$ at $1/2$ labels every example negative.
+   The Bayes decision $f(\xvec) > 1/2$ is $g(\xvec) > c/2$.
+3. **The prior follows.** Summing over a sample of $m$ examples, $n$ of them labelled, gives
+   $\pr(y = 1) = \pr(s = 1)/c \approx n/(mc)$.
+
+**Estimating $c$.** On a validation set $V$ with labelled subset $P$, Elkan and Noto propose
+
+$$
+e_1 = \frac{1}{\abs{P}}\sum_{\xvec \in P} g(\xvec).
+$$
+
+For a labelled $\xvec$, $g(\xvec) = c\,f(\xvec)$. If positives and negatives do not overlap, $f(\xvec) = 1$ on the
+support of the positives, so every term equals $c$ and $e_1 = c$. When the classes overlap, $f(\xvec) < 1$ for some
+labelled points and $e_1 = c\,\expect[f(\xvec) \mid y = 1] < c$: the estimate is biased low. Two alternatives are
+$e_2 = \sum_{P} g / \sum_{V} g$ and $e_3 = \max_{V} g$, the latter justified by $g \le c$. Elkan and Noto recommend $e_1$
+for its lower variance <Cite id="elkan2008" />.
+
+**Weighting the unlabelled examples.** The same identity gives the posterior of an unlabelled example. By Bayes'
+theorem, with $\pr(s = 0 \mid \xvec, y = 1) = 1 - c$,
+
+$$
+w(\xvec) = \pr(y = 1 \mid \xvec, s = 0) = \frac{(1 - c)\,f(\xvec)}{1 - g(\xvec)} = \frac{1 - c}{c}\,\frac{g(\xvec)}{1 - g(\xvec)}.
+$$
+
+A second classifier is then trained on labelled examples as positives with weight 1, and every unlabelled example
+duplicated: once as positive with weight $w(\xvec)$ and once as negative with weight $1 - w(\xvec)$
+<Cite id="elkan2008" />.
+
+**Worked example.** Let $c = 0.4$. An unlabelled example has $g(\xvec) = 0.3$. Its posterior is
+$f(\xvec) = 0.3/0.4 = 0.75$, so it is probably positive, even though a classifier that treats unlabelled as negative
+would score it 0.3. Its weight as an unlabelled example is $w = (0.6/0.4) \times (0.3/0.7) = 0.643$.
+
+<PuCorrection />
+
+## Estimating the class prior
+
+Most PU methods need the class prior $\pi = \pr(y = 1)$ or, equivalently, the label frequency. Under SCAR in the
+single-training-set scenario, $\pi = \pr(s = 1)/c$. In the case-control scenario, $\pi$ is the proportion of positives
+in the unlabelled distribution, $p(\xvec) = \pi\,p(\xvec \mid y = 1) + (1 - \pi)\,p(\xvec \mid y = 0)$. Estimating it is
+a **mixture proportion estimation** problem, and it is not identifiable without an assumption such as the existence
+of regions where only positives occur. Bekker and Davis review estimators built on this idea
+<Cite id="bekker2020" />.
+
+## Assumptions
+
+- **SCAR is often false.** Diagnosed patients are the more severe cases; clicked items are the more visible ones. When
+  labelling depends on $\xvec$, the correction by a constant $c$ is biased. SAR methods model the propensity
+  $e(\xvec)$, which requires further assumptions to be identifiable <Cite id="bekker2020" />.
+- **The model for $g$ must be well specified.** $e_1$ is exact only if $g$ equals $\pr(s = 1 \mid \xvec)$. A
+  miscalibrated $g$ passes its error to $f$.
+
+## Pitfalls
+
+- **Unlabelled as negative.** The naive approach is biased by exactly the factor $c$ in the posterior. It still ranks
+  correctly, so a ranking metric can hide the problem while thresholded predictions are useless.
+- **Overlapping classes bias $e_1$ low.** The corrected posterior then overshoots, and some corrected values exceed 1.
+- **Relation to one-class methods.** <NoteLink to="one-class-svm" /> and other novelty detectors use positives only
+  and ignore the unlabelled data. PU learning uses the unlabelled data to learn where the negatives are.

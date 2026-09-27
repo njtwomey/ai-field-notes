@@ -1,0 +1,146 @@
+---
+title: Data programming
+kind: concept
+summary: 'Data programming labels training data with labelling functions, programs that vote $\lambda_i(\xvec) \in \set{-1, 0, +1}$. A label model learns each function''s accuracy from agreements alone, since conditional independence gives $\expect[\lambda_i\lambda_j] = a_ia_j$.'
+tags: [weak-supervision, programmatic-weak-supervision, labelling-functions, latent-variable-models, worked-example]
+aliases: [labelling functions, labeling functions, label model, generative label model, noise-aware loss, weak supervision sources, LF]
+requires: [logistic-regression, bayes-theorem]
+related: [snorkel, label-model-estimation, dawid-skene-model, learning-from-crowds, factor-graph]
+references: [ratner2016, ratner2017, zhang2022survey]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Data programming** is a paradigm for building training sets without hand labelling, introduced by Ratner, De Sa, Wu,
+Selsam and Ré <Cite id="ratner2016" />. Users write $m$ **labelling functions** (LFs)
+$\lambda_i : \Xcal \to \set{-1, 0, +1}$, each encoding a heuristic that labels some inputs and **abstains** (outputs 0)
+on the rest. A **generative label model** $p(\Lambda, Y)$ over the LF outputs $\Lambda$ and the true label $Y$ is fitted
+to unlabelled data, and its posterior $p(Y \mid \Lambda = \lambdavec(\xvec))$ serves as a probabilistic training label for
+a discriminative **end model**.
+</Definition>
+
+## Labelling functions
+
+A labelling function is ordinary code. For relation extraction from biomedical text, one LF labels a gene–disease
+pair positive if it appears in a curated knowledge base; another labels it negative if the text between the mentions
+matches "not cause"; a third combines a pattern with a second knowledge base <Cite id="ratner2016" />. LFs may be
+wrong, may overlap, and may conflict. A manual annotation is a special case: an LF that looks up the hand label. The
+user's effort moves from labelling thousands of examples to writing tens of functions.
+
+The LF outputs on $n$ unlabelled points form the **label matrix** $\Lmat \in \set{-1, 0, +1}^{n \times m}$. Majority vote
+over each row is the simplest aggregation. It ignores that some LFs are more accurate than others and that some are
+near-copies of each other.
+
+## The label model
+
+In the simplest model, LFs label independently given the true class. LF $i$ labels a point (does not abstain) with
+probability $\beta_i$ and, when it labels, is correct with probability $\alpha_i$. With balanced classes
+<Cite id="ratner2016" />,
+
+$$
+\mu_{\alphavec, \betavec}(\Lambda, Y) = \frac{1}{2}\prod_{i=1}^{m}\LP\beta_i\alpha_i\indicator[\Lambda_i = Y] + \beta_i(1 - \alpha_i)\indicator[\Lambda_i = -Y] + (1 - \beta_i)\indicator[\Lambda_i = 0]\RP.
+$$
+
+The parameters are fitted by maximising the marginal likelihood of the observed LF outputs, summing out $Y$:
+
+$$
+(\hat{\alphavec}, \hat{\betavec}) = \argmax_{\alphavec, \betavec}\ \sum_{\xvec \in S}\log\sum_{y' \in \set{-1, 1}}\mu_{\alphavec, \betavec}(\lambdavec(\xvec), y').
+$$
+
+This is the Dawid–Skene model with LFs in place of annotators, one accuracy per LF, and abstentions; see <NoteLink
+to="dawid-skene-model" />. Ratner et al. solve it by stochastic gradient descent.
+
+## Why agreements identify accuracies
+
+The label model is fitted without a single true label. The information comes from how often LFs agree.
+
+Let $a_i = \expect[\lambda_i Y]$, the LF's accuracy on the $[-1, 1]$ scale weighted by its coverage. Under the model,
+$\expect[\lambda_i \mid Y] = \beta_i\alpha_i Y - \beta_i(1 - \alpha_i)Y = \beta_i(2\alpha_i - 1)Y$, so
+$a_i = \beta_i(2\alpha_i - 1)$. Conditional independence gives, for $i \ne j$,
+
+$$
+\expect[\lambda_i\lambda_j] = \expect\LB\expect[\lambda_i \mid Y]\,\expect[\lambda_j \mid Y]\RB = a_ia_j\,\expect[Y^2] = a_ia_j.
+$$
+
+The left-hand side is observable: it is the average of $\lambda_i\lambda_j$ over the unlabelled data, agreements
+counting $+1$, disagreements $-1$ and abstentions 0. Each pair of LFs gives one equation in the unknown accuracies.
+
+- **Two LFs are not enough.** One equation $a_1a_2 = \expect[\lambda_1\lambda_2]$ cannot separate $a_1$ from $a_2$: a
+  very accurate LF paired with a mediocre one looks the same as two moderately accurate ones.
+- **Three conditionally independent LFs suffice.** Three equations in three unknowns give
+  $\abs{a_1} = \sqrt{\abs{\expect[\lambda_1\lambda_2]\,\expect[\lambda_1\lambda_3] / \expect[\lambda_2\lambda_3]}}$ and its permutations.
+- **Signs need an assumption.** Flipping the signs of all $a_i$ together, which amounts to swapping the class names,
+  leaves every product unchanged. Assuming the LFs are better than random on average, $a_i > 0$ on average, fixes the
+  sign.
+- **Coverage must overlap.** If two LFs never vote on the same point, $\expect[\lambda_i\lambda_j] = 0$ carries no
+  information. Every LF must co-vote with others often enough to estimate the products.
+
+$\beta_i$ is observable directly as the fraction of points on which LF $i$ votes, so the accuracy follows as
+$\alpha_i = (1 + a_i/\beta_i)/2$. The closed-form **triplet method** built on this identity, and estimators that
+handle correlated LFs, are the subject of <NoteLink to="label-model-estimation" />.
+
+**Worked example.** Three LFs with coverage 1 have observed agreement rates $\expect[\lambda_1\lambda_2] = 0.30$,
+$\expect[\lambda_1\lambda_3] = 0.18$ and $\expect[\lambda_2\lambda_3] = 0.15$. Then
+$a_1 = \sqrt{0.30 \times 0.18 / 0.15} = 0.6$, $a_2 = 0.30/0.6 = 0.5$ and $a_3 = 0.18/0.6 = 0.3$. The accuracies are
+$\alpha = (1 + a)/2 = (0.8, 0.75, 0.65)$.
+
+## From the label model to training labels
+
+For a point with LF outputs $\lambdavec$, the posterior under the independent model is a weighted vote. For balanced
+classes, every non-abstaining LF adds its log-likelihood ratio:
+
+$$
+\log\frac{p(Y = 1 \mid \lambdavec)}{p(Y = -1 \mid \lambdavec)} = \sum_{i:\,\lambda_i \ne 0}\lambda_i\log\frac{\alpha_i}{1 - \alpha_i}.
+$$
+
+With accuracies $(0.9, 0.6, 0.6)$ and votes $(+1, -1, -1)$, majority vote says $-1$. The label model gives log-odds
+$\log 9 - 2\log 1.5 = \log 4$, so $p(Y = 1 \mid \lambdavec) = 0.8$: one accurate LF outweighs two weak ones.
+
+**Noise-aware training.** The end model $\wvec$ is trained on the expected loss under the label model's posterior
+<Cite id="ratner2016" />:
+
+$$
+\hat{\wvec} = \argmin_{\wvec}\ \frac{1}{\abs{S}}\sum_{\xvec \in S}\expect_{(\Lambda, Y) \sim \mu_{\hat{\alphavec}, \hat{\betavec}}}\LB\log\LP1 + e^{-\wvec^\top f(\xvec)Y}\RP \,\Big|\, \Lambda = \lambdavec(\xvec)\RB + \rho\norm{\wvec}^2.
+$$
+
+For logistic loss this is logistic regression with soft targets. The end model sees the features, so it generalises to
+points on which every LF abstains, and it can learn signals that no LF encodes.
+
+## Guarantees
+
+Ratner et al. prove that, if the data are generated by some member of the model family, if the class label is
+independent of the features given the LF outputs, and if the end-model learner has bounded generalisation risk
+$\chi$, then with $m \ge 2000$ LFs and $\abs{S} \ge \frac{356}{\epsilon^2}\log\frac{m}{3\epsilon}$ unlabelled points the
+expected parameter errors are at most $m\epsilon^2$ and the end model's excess risk is at most
+$\chi + \frac{\epsilon}{27\rho}$ <Cite id="ratner2016" />. The theorem uses $m \ge 2000$ only to simplify the statement,
+and assumes $0.3 \le \beta_i \le 0.5$ and $0.8 \le \alpha_i \le 0.9$. The scaling it shows is the point: the error falls
+as $\tilde{O}(\abs{S}^{-1/2})$ in the number of **unlabelled** points, the same rate that labelled data would give,
+while the user supplies a fixed number of LFs.
+
+## Dependencies between LFs
+
+LFs written by the same person are often correlated. Ratner et al. let users declare dependencies of four types
+<Cite id="ratner2016" />: **similar** (two LFs on near-identical inputs), **fixing** (one LF votes mainly to correct
+another's mistakes), **reinforcing** (one LF votes mainly to confirm another) and **exclusive** (two LFs never vote
+together). The label model becomes a factor graph $\mu_{\thetavec}(\Lambda, Y) = Z_{\thetavec}^{-1}\exp(\thetavec^\top h(\Lambda, Y))$
+with base factors $Y$, $\Lambda_iY$, $\Lambda_i$, $\Lambda_i^2Y$ and $\Lambda_i^2$, plus one factor per declared
+dependency. Learning the dependency structure automatically is covered in <NoteLink to="label-model-estimation" />.
+
+## Results
+
+On relation extraction in genomics, pharmacogenomics and news, data programming improved on a distant-supervision
+baseline by 2.34 F1 points on average. On the 2014 TAC-KBP Slot Filling challenge it would have set a new winning
+score, and with LSTM features it scored 5.98 F1 points above a state-of-the-art LSTM baseline, which would have placed
+second <Cite id="ratner2016" />. Data programming became the core of the <NoteLink to="snorkel" /> system.
+
+## Assumptions and pitfalls
+
+- **Conditional independence.** The independent model counts two copies of one heuristic as two independent votes, and
+  their high agreement inflates both estimated accuracies. The figure in <NoteLink to="label-model-estimation" />
+  shows this.
+- **Better than random.** The sign of the solution is fixed by assuming LFs beat chance on average. A set dominated by
+  adversarial or inverted LFs is learnt upside down.
+- **Class balance.** The simple model assumes balanced classes. Imbalanced problems need a class prior in the model.
+- **Coverage.** Points on which every LF abstains get the prior as their label. Training the end model only on covered
+  points is common but discards data.

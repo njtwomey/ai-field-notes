@@ -1,0 +1,215 @@
+---
+title: Label propagation for label proportions
+kind: technique
+summary: 'LP-LLP gives every point its bag''s proportion as a soft label, propagates the soft labels over a similarity graph with $(1 - \alpha)(\Imat - \alpha\Smat)^{-1}$, and projects so that each bag''s scores sum to its known positive count, alternating until the labels settle.'
+tags: [weak-supervision, label-proportions, semi-supervised, graphs, activity-recognition, worked-example]
+aliases: [LP-LLP, label propagation for learning with label proportions, mass-preserving label propagation, active learning with label proportions]
+requires: [learning-from-label-proportions, label-propagation]
+related: [mean-map-and-invcal, k-nearest-neighbours, spectral-clustering]
+references: [poyiadzi2018, poyiadzi2019, zhou2004lgc, boyd2003, yu2013, ruping2010, twomey2016sphere]
+status: draft
+updated: 2026-09-27
+---
+
+import { LabelPropagationLlp } from './LabelPropagationLlp'
+
+<Definition>
+**Label propagation for learning with label proportions** (LP-LLP) is a transductive, graph-based method for recovering
+instance labels from bag proportions, proposed by Poyiadzi, Santos-Rodriguez and Twomey <Cite id="poyiadzi2018" />.
+Each point starts with its bag's proportion as a soft label. Soft labels are smoothed over a similarity graph by label
+propagation. The smoothed scores are then projected onto the set in which each bag's scores lie in $[0, 1]$ and sum
+to the bag's number of positives. The two steps alternate, and a point is labelled positive if its final score
+exceeds $1/2$.
+</Definition>
+
+## Problem
+
+The data are $n$ points $\xvec_1, \dots, \xvec_n \in \reals^{d}$ with hidden labels, partitioned into $K$ disjoint bags
+$B_1, \dots, B_K$. For each bag the class proportions $\pivec_k = (\pi_{k,1}, \dots, \pi_{k,c})$ are known
+<Cite id="poyiadzi2018" />. The motivating application is activity recognition in smart homes for health monitoring:
+patients will not label every activity, but will give summaries such as hours slept and hours of television per day.
+
+Earlier methods each rest on a restrictive assumption. The <NoteLink to="mean-map-and-invcal">mean map</NoteLink>
+assumes that a point is independent of its bag given its label. Inverse calibration models a bag by its mean, which
+fails when the bag's data have high variance <Cite id="ruping2010" />. ∝SVM avoids both but is a non-convex integer
+programme <Cite id="yu2013" />. LP-LLP brings the two principles of graph-based semi-supervised learning, local
+smoothness and global structure, to label proportions without assuming how bags were formed.
+
+## Label propagation
+
+Let $\Wmat$ be a similarity matrix with $W_{ij} = \exp(-\gamma\norm{\xvec_i - \xvec_j}^2)$, $\gamma > 0$, and
+$W_{ii} = 0$. Let $\Dmat$ be diagonal with $D_{ii} = \sum_j W_{ij}$, and $\Smat = \Dmat^{-1}\Wmat$, which has rows summing
+to one. With a label matrix $\Ymat \in \reals^{n \times c}$ and $0 < \alpha < 1$, label propagation iterates
+<Cite id="zhou2004lgc" />
+
+$$
+\Fmat(t + 1) = \alpha\Smat\Fmat(t) + (1 - \alpha)\Ymat, \qquad \Fmat(0) = \Ymat.
+$$
+
+**The limit.** A fixed point satisfies $\Fmat = \alpha\Smat\Fmat + (1 - \alpha)\Ymat$, so
+$(\Imat - \alpha\Smat)\Fmat = (1 - \alpha)\Ymat$. $\Smat$ is row-stochastic, so its eigenvalues have modulus at most 1 and
+those of $\alpha\Smat$ at most $\alpha < 1$. The matrix $\Imat - \alpha\Smat$ is therefore invertible and the iteration
+converges to
+
+$$
+\Fmat^* = (1 - \alpha)(\Imat - \alpha\Smat)^{-1}\Ymat = (1 - \alpha)\sum_{t=0}^{\infty}(\alpha\Smat)^t\,\Ymat.
+$$
+
+$\alpha$ balances the information from neighbours against the point's own label.
+
+**A random-walk reading.** $(\Smat^t)_{ij}$ is the probability that a walker starting at node $i$, stepping to a
+neighbour with probability proportional to the edge weight, is at node $j$ after $t$ steps. The series says that
+$f_i$ is a weighted count of the labels the walker visits, with visits after $t$ steps discounted by $\alpha^t$. Early
+visits are near $i$ and count most <Cite id="poyiadzi2018" />.
+
+**Relation to weighted $k$-nearest neighbours.** Expanding the series for one binary score, with normalised weights
+$\bar{w}_{ij} = W_{ij}/\sum_j W_{ij}$ and neighbourhood $\Ncal(i) = \set{j : W_{ij} \ne 0}$,
+
+$$
+f_i \propto y_i + \alpha\sum_{j \in \Ncal(i)}\bar{w}_{ij}y_j + \alpha^2\sum_{j}\ \sum_{h \in \Ncal(i) \cap \Ncal(j)}\bar{w}_{ih}\bar{w}_{hj}y_j + \cdots.
+$$
+
+The first-order term is a weighted <NoteLink to="k-nearest-neighbours" /> vote: local smoothness. The second-order
+term runs over common neighbours of $i$ and $j$, so a point $j$ that shares many close neighbours with $i$ influences
+it more: points on the same structure get the same label. This is the global-structure principle
+<Cite id="poyiadzi2018" />.
+
+## From labels to proportions
+
+In LLP no point has a label. Restrict to two classes. Each point receives its bag's proportion as a soft label,
+
+$$
+\hat{y}_i = \pi_{k,1} \quad\text{for } \xvec_i \in B_k,
+$$
+
+a prior probability of being positive. Propagating $\hat{\yvec}$ alone does not reproduce the proportions: nothing
+stops a bag from ending with more or fewer high scores than it has positives.
+
+**The regularisation view.** Label propagation minimises
+
+$$
+Q(\fvec) = \sum_{i=1}^{n}\sum_{j=1}^{n}S_{ij}(f_i - f_j)^2 + \gamma\sum_{i=1}^{n}(f_i - y_i)^2,
+$$
+
+a smoothness term plus a fit term. With binary scores, the bag constraints are a linear system $\Amat\fvec = \bvec$ with
+$\Amat \in \reals^{K \times n}$, $A_{ki} = 1$ if $\xvec_i \in B_k$ and 0 otherwise, and $b_k = n_{k,1}$, the number of
+positives in bag $k$. Minimising $Q$ over $\fvec \in \set{0, 1}^n$ subject to $\Amat\fvec = \bvec$ is an integer
+programme, intractable in general <Cite id="poyiadzi2018" />.
+
+**The mass-preserving relaxation.** Instead of fixing the number of points of each class in each bag, fix the total
+**mass** of scores in each bag. If $\fvec$ were unconstrained, one large $f_i$ could supply a bag's whole mass and the
+constraint would say nothing. Restricting scores to $[0, 1]$ prevents this:
+
+$$
+\fvec^* = \argmin_{\fvec \in [0, 1]^n} Q(\fvec) \quad\text{s.t.}\quad \Amat\fvec = \bvec.
+$$
+
+Each bag must place exactly $n_{k,1}$ units of mass on its points, at most one unit per point.
+
+## The algorithm
+
+LP-LLP solves the relaxed problem in two alternating steps <Cite id="poyiadzi2018" />.
+
+1. Compute $\Wmat$ and $\Smat$. Set $f_i^{(0)} = \pi_{k,1}$ for $\xvec_i \in B_k$.
+2. **Propagate:** $\fvec \leftarrow (1 - \alpha)(\Imat - \alpha\Smat)^{-1}\fvec$.
+3. **Project** onto $\set{\fvec : \Amat\fvec = \bvec} \cap [0, 1]^n$ by alternating projections <Cite id="boyd2003" />:
+   shift each bag's scores by a common amount so that they sum to $b_k$, clip every score to $[0, 1]$, and repeat. Both
+   sets are convex, and alternating projections converge to a point in their intersection when it is non-empty.
+4. Repeat steps 2 and 3 until the scores stop changing.
+5. Label $\hat{y}_i = 1$ if $f_i^* > 1/2$ and 0 otherwise.
+
+The paper writes step 2 without the factor $1 - \alpha$; the factor rescales all scores equally before the projection
+and does not change the order of scores within a bag. The final scores are not calibrated probabilities. They are
+constrained values that act as ranks within each bag, and the constraint gives control over the predicted bag
+proportions.
+
+## Worked example
+
+Six points form three bags: $B_A = \set{1, 2}$ with $\pi_A = 0.5$, $B_B = \set{3, 4}$ with $\pi_B = 1$, and
+$B_C = \set{5, 6}$ with $\pi_C = 0$. The graph has edges $1\!-\!3$, $3\!-\!4$, $2\!-\!5$ and $5\!-\!6$ of weight 1, and
+a weak edge $1\!-\!2$ of weight 0.2. Point 1 is close to the all-positive bag, point 2 to the all-negative bag. Take
+$\alpha = 0.5$.
+
+The initial scores are $\fvec^{(0)} = (0.5, 0.5, 1, 1, 0, 0)$. Row 1 of $\Smat$ puts weight $0.2/1.2 = 1/6$ on point 2 and
+$5/6$ on point 3. One propagation step gives
+
+$$
+(1 - \alpha)(\Imat - \alpha\Smat)^{-1}\fvec^{(0)} = (0.654,\ 0.346,\ 0.901,\ 0.951,\ 0.099,\ 0.049).
+$$
+
+Projection: bag A already sums to $b_A = 1$. Bag B must sum to 2 with both scores at most 1, so both become 1. Bag C
+must sum to 0 with both scores at least 0, so both become 0. After one round
+$\fvec = (0.654, 0.346, 1, 1, 0, 0)$; after a second, $(0.734, 0.266, 1, 1, 0, 0)$. Bag A's single positive is
+assigned to point 1. The proportion of bag A carries no information about which of its points is positive; the graph
+supplies it, through the neighbouring bags whose proportions are extreme.
+
+<LabelPropagationLlp />
+
+## Cost
+
+The similarity matrix costs $O(n^2)$ to build. The inverse of $\Imat - \alpha\Smat$ costs $O(n^3)$ and is the bottleneck;
+it is computed once and reused in every round. Low-rank approximations trade accuracy for speed. The projection step
+costs $O(n)$ per sweep <Cite id="poyiadzi2018" />.
+
+## Experiments
+
+The paper studies binary problems with three bags <Cite id="poyiadzi2018" />. Two bag-proportion configurations are
+used: A with proportions $(0.60, 0.40, 0.50)$ and B with $(0.85, 0.25, 0.40)$. The test data form a further bag of
+known proportion, 20% of the training size, and are included transductively with their labels hidden. $\alpha$ is
+fixed at 0.50, and $\gamma$ is chosen from a grid by the largest value of $\bar{\fvec}^\top\Smat\bar{\fvec}$. Each
+configuration is repeated 25 times. Results are accuracy, as mean (standard deviation).
+
+The data sets are two synthetic sets and the SPHERE challenge data <Cite id="twomey2016sphere" />. XOR places four unit-covariance
+Gaussians at the corners of a square of side 10. Half-Kernel is built from sine and cosine functions with noise.
+SPHERE holds wrist-worn accelerometer data from 10 people performing scripted daily activities twice; the task is
+ambulatory against sedentary activity. Sphere 1 uses the raw sensor data and Sphere 2 the challenge's baseline
+features.
+
+<SpecTable
+  columns={['∝SVM', 'InvCal', 'LP-LLP']}
+  rows={{
+    'XOR 120A': ['0.54 (0.19)', '0.81 (0.08)', '0.91 (0.14)'],
+    'XOR 120B': ['0.66 (0.46)', '0.73 (0.05)', '0.97 (0.04)'],
+    'XOR 180A': ['0.50 (0.04)', '0.83 (0.08)', '0.88 (0.18)'],
+    'XOR 180B': ['0.42 (0.09)', '0.73 (0.06)', '0.97 (0.03)'],
+    'XOR 300A': ['0.49 (0.06)', '0.88 (0.13)', '0.92 (0.12)'],
+    'XOR 300B': ['0.56 (0.07)', '0.73 (0.04)', '1.00 (0.01)'],
+    'XOR 600A': ['0.45 (0.43)', '0.94 (0.04)', '0.99 (0.01)'],
+    'XOR 600B': ['0.67 (0.46)', '0.69 (0.04)', '0.99 (0.01)'],
+    'Sphere 1 60A': ['0.50 (0.00)', '0.58 (0.29)', '0.76 (0.39)'],
+    'Sphere 1 60B': ['0.50 (0.00)', '0.50 (0.00)', '0.88 (0.29)'],
+    'Sphere 1 120A': ['0.50 (0.00)', '0.54 (0.28)', '0.59 (0.45)'],
+    'Sphere 1 120B': ['0.50 (0.00)', '0.50 (0.00)', '1.00 (0.00)'],
+    'Sphere 1 180A': ['0.52 (0.05)', '0.56 (0.26)', '0.80 (0.26)'],
+    'Sphere 1 180B': ['0.50 (0.00)', '0.50 (0.00)', '1.00 (0.01)'],
+    'Sphere 1 240A': ['0.50 (0.00)', '0.62 (0.19)', '0.78 (0.16)'],
+    'Sphere 1 240B': ['0.50 (0.00)', '0.50 (0.00)', '0.98 (0.01)'],
+  }}
+/>
+
+The row label gives the training-set size and the configuration. On Sphere 1, ∝SVM did not converge. On Half-Kernel,
+LP-LLP ranged from 0.58 (0.16) at 120A to 1.00 (0.00) at 600B, and was best in most configurations. Sphere 2 was the
+hardest representation for every method, with the highest variance; LP-LLP's accuracy there ranged from 0.50 (0.09) to
+0.74 (0.12), and it was not the best in every row. The authors attribute the high standard deviations of ∝SVM on XOR to
+the method confusing the two classes <Cite id="poyiadzi2018" />. In general, all three methods improved as the data
+sets grew.
+
+## Active learning with label proportions
+
+A follow-up by the same authors turns the setting into active learning <Cite id="poyiadzi2019" />. A conventional
+active learner queries an oracle for the label of one instance. Here the learner may instead request the label of a
+bag of instances, and the oracle answers with the bag's class proportions. The answer carries less information than
+the individual labels, but the authors show that learning remains effective, which lowers the burden on annotators
+who find aggregate questions easier to answer. The paper lists label propagation among its keywords.
+
+## Trade-offs
+
+- **No assumption on bag formation.** LP-LLP does not require points to be independent of their bags given their
+  labels, which the mean map needs <Cite id="poyiadzi2018" />.
+- **Multiclass.** The formulation extends to $c$ classes: rows of $\Fmat$ live on the probability simplex and columns
+  are constrained by the bag proportions.
+- **Transductive.** Scores exist only for points in the graph. New points must be added to the graph or scored from
+  their neighbours.
+- **Graph quality.** Everything depends on $\gamma$. Too small and the graph connects across classes; too large and it
+  fragments. The paper selects $\gamma$ by an unsupervised heuristic.
+- **Scale.** The $O(n^3)$ inverse limits the direct method to a few thousand points without approximation.

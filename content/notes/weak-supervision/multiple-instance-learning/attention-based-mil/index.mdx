@@ -1,0 +1,111 @@
+---
+title: Attention-based MIL pooling
+kind: technique
+summary: 'Attention-based MIL pools a bag of instance embeddings $\hvec_k$ into $\zvec = \sum_k a_k \hvec_k$, with weights $a_k \propto \exp\{\wvec^\top \tanh(\Vmat \hvec_k)\}$ that sum to one. The pooling is permutation-invariant, trainable end to end, and its weights point to the instances that drive the bag label.'
+tags: [weak-supervision, multiple-instance-learning, attention, deep-learning, interpretability, worked-example]
+aliases: [attention-based deep multiple instance learning, ABMIL, gated attention MIL, attention MIL pooling, MIL pooling]
+requires: [multiple-instance-learning]
+related: [bahdanau-attention, millet, interpretability]
+references: [ilse2018, zaheer2017, wang2018mi]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Attention-based MIL pooling** maps a bag of $K$ instance embeddings $\hvec_1, \dots, \hvec_K \in \reals^{M}$ to one
+bag embedding
+
+$$
+\zvec = \sum_{k=1}^{K} a_k \hvec_k, \qquad
+a_k = \frac{\exp\set{\wvec^\top \tanh(\Vmat \hvec_k)}}{\sum_{j=1}^{K}\exp\set{\wvec^\top \tanh(\Vmat \hvec_j)}},
+$$
+
+with trainable $\Vmat \in \reals^{L \times M}$ and $\wvec \in \reals^{L}$. A classifier maps $\zvec$ to the bag-label
+probability $\theta(X) = \pr(Y = 1 \mid X)$. Ilse, Tomczak and Welling introduced it and trained the whole model by
+maximising the Bernoulli log-likelihood of the bag labels <Cite id="ilse2018" />.
+</Definition>
+
+## Problem
+
+A <NoteLink to="multiple-instance-learning">multiple-instance</NoteLink> model must give the same output for any
+ordering of a bag's instances, and must accept bags of any size. Max pooling encodes the standard MI assumption but
+passes gradient to one instance per bag, so training is slow and brittle. Mean pooling passes gradient to every
+instance but lets one positive instance be drowned by many negatives. Neither is trainable, and neither says which
+instances matter.
+
+## Mechanism
+
+**Permutation-invariant bag functions.** A scoring function $S(X)$ of a set is permutation-invariant if and only if it
+can be written as $S(X) = g\LP\sum_{\xvec \in X} f(\xvec)\RP$ for suitable $f$ and $g$ <Cite id="zaheer2017" />. Any
+MIL model therefore has three parts: an instance transformation $f$, a symmetric pooling $\sigma$, and a bag-level
+transformation $g$ <Cite id="ilse2018" />. There are two placements of the classifier.
+
+- **Instance-level.** $f$ is an instance classifier returning a score per instance; $\sigma$ pools the scores; $g$ is
+  the identity. The instance scores are directly interpretable, but an instance classifier trained without instance
+  labels can be poor.
+- **Embedding-level.** $f$ maps each instance to an embedding $\hvec_k$; $\sigma$ pools embeddings into $\zvec$; $g$
+  classifies $\zvec$. This usually classifies bags better but loses per-instance scores.
+
+Attention pooling is an embedding-level pooling that keeps a per-instance quantity: the weight $a_k$.
+
+**Why the weighted sum is permutation-invariant.** Let $\phi(\hvec) = \exp\set{\wvec^\top\tanh(\Vmat\hvec)} > 0$. Then
+
+$$
+\zvec = \frac{\sum_k \phi(\hvec_k)\,\hvec_k}{\sum_k \phi(\hvec_k)}.
+$$
+
+The numerator and the denominator are both sums over the set, so both are unchanged by reordering. $\zvec$ is a
+function of two set sums, $\sum_k \phi(\hvec_k)\hvec_k$ and $\sum_k \phi(\hvec_k)$, which is the form
+$g(\sum_k f(\hvec_k))$ with $f(\hvec) = (\phi(\hvec)\hvec, \phi(\hvec))$ and $g$ the division. The theorem above
+therefore covers it.
+
+**Why the weights are normalised.** The weights are non-negative and sum to one, so $\zvec$ is a convex combination of
+the embeddings and stays on their scale whatever the bag size. Without normalisation, a bag of 100 instances would
+produce an embedding about ten times larger than a bag of 10.
+
+**What the weights can express.** If $\wvec^\top\tanh(\Vmat\hvec)$ is the same for every instance, the weights are all
+$1/K$ and attention reduces to mean pooling. If one instance's score exceeds the others by a large margin, its weight
+tends to 1 and attention approaches max pooling of that instance's embedding. Training moves between these extremes as
+the data require. The $\tanh$ lets the score take both signs.
+
+**Gated attention.** $\tanh$ is nearly linear on $[-1, 1]$, which limits the relations the score can express. Ilse
+et al. add a sigmoid gate with a second matrix $\Umat \in \reals^{L \times M}$ <Cite id="ilse2018" />:
+
+$$
+a_k \propto \exp\set{\wvec^\top\LP\tanh(\Vmat\hvec_k) \odot \operatorname{sigm}(\Umat\hvec_k)\RP}.
+$$
+
+## Worked example
+
+A bag has three two-dimensional embeddings $\hvec_1 = (1, 0)$, $\hvec_2 = (0, 1)$, $\hvec_3 = (2, 1)$, and the attention
+scores $\wvec^\top\tanh(\Vmat\hvec_k)$ come out as $(0.5, -1.0, 2.0)$. The softmax gives weights
+$a = (0.175, 0.039, 0.786)$. The bag embedding is
+$\zvec = 0.175\,(1, 0) + 0.039\,(0, 1) + 0.786\,(2, 1) = (1.747, 0.825)$. Mean pooling would give $(1, 0.667)$.
+The third instance dominates the attention-pooled embedding, and its weight of 0.786 is the model's statement that it
+is the key instance.
+
+## Evidence
+
+Ilse et al. used the same architecture and training settings as MI-Net <Cite id="wang2018mi" />. On the five classical
+benchmarks (Musk1, Musk2, Fox, Tiger, Elephant) attention and gated attention were on a par with the best classical
+methods: for example 0.892 and 0.900 accuracy on Musk1, against 0.874 for mi-SVM and 0.889 for mi-Graph
+<Cite id="ilse2018" />. On bags of MNIST digits, labelled positive if they contain a 9, attention pooling reached
+higher AUC than max, mean and MI-SVM baselines when there were few training bags. On the Colon Cancer histopathology
+set, attention reached 0.904 accuracy and 0.968 AUC, against 0.860 and 0.940 for embedding-level mean pooling
+<Cite id="ilse2018" />.
+
+## Cost
+
+The attention head adds $\Vmat$ and $\wvec$ ($L(M + 1)$ parameters, or $L(2M + 1)$ with gating) and one pass over the
+instances. It is linear in the bag size, like mean pooling.
+
+## Trade-offs
+
+- **Weights are not class evidence.** A large $a_k$ says that instance $k$ shaped the bag embedding. It does not say
+  which class the instance supports, or whether it argues for or against the prediction. In a multi-class problem the
+  same weights serve every class. <NoteLink to="millet">MILLET</NoteLink> adds instance-level class predictions for
+  this reason.
+- **Instances are treated as independent.** The softmax ignores order and neighbourhood. For time series, images and
+  text this discards structure, unless the embeddings already carry it (from convolutions or positional encodings).
+- **Softmax over long bags.** Normalising across thousands of instances makes each weight tiny and the sum dominated
+  by a few. Implementations for long sequences sometimes replace the softmax with an element-wise sigmoid.

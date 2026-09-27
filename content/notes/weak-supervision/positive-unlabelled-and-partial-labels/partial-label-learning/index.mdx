@@ -1,0 +1,105 @@
+---
+title: Partial-label learning
+kind: concept
+summary: 'In partial-label learning each instance comes with a candidate set $S$ of labels that contains the true one. If no wrong label co-occurs with the true label with probability above $\varepsilon < 1$, the true 0/1 risk is at most $1/(1 - \varepsilon)$ times the risk of predicting outside the candidate set.'
+tags: [weak-supervision, partial-labels, multiclass, surrogate-loss, worked-example]
+aliases: [PLL, learning from partial labels, ambiguous labels, superset labels, candidate label set, ambiguity degree, CLPL, convex loss for partial labels, PRODEN]
+requires: [surrogate-losses, multinomial-logistic-regression]
+related: [complementary-labels, multiple-instance-learning, learning-with-noisy-labels]
+references: [cour2011, lv2020, feng2020]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+In **partial-label learning** each training example is a pair $(\xvec, S)$ where $S \subseteq \set{1, \dots, L}$ is a
+**candidate set** that contains the unobserved true label $y$. Write $S = \set{y} \cup Z$ with $Z$ the set of
+distractor labels. The task is to learn a classifier $h : \Xcal \to \set{1, \dots, L}$ that predicts $y$
+<Cite id="cour2011" />.
+</Definition>
+
+## Where the setting arises
+
+Cour, Sapp and Taskar's example is naming faces in television: a face detected in a scene can be labelled with any of
+the characters named in the screenplay for that scene, one of whom is correct <Cite id="cour2011" />. Other sources
+are images with captions naming several objects, and annotators who give a short list when unsure.
+
+## The partial loss and the ambiguity degree
+
+The true loss $\indicator[h(\xvec) \ne y]$ cannot be evaluated. The **partial (ambiguous) 0/1 loss** can:
+
+$$
+L_A(h(\xvec), S) = \indicator\LB h(\xvec) \notin S\RB.
+$$
+
+Since $y \in S$, predicting outside $S$ is always wrong, so $\expect[L_A] \le \expect[L]$: the partial loss
+underestimates the true loss. How badly depends on the **ambiguity degree**
+
+$$
+\varepsilon = \sup_{\xvec, y, z:\ \pr(\xvec, y) > 0,\ z \ne y}\ \pr(z \in Z \mid \xvec, y),
+$$
+
+the largest probability with which a wrong label accompanies the true label <Cite id="cour2011" />.
+
+**The bound.** Fix $\xvec$ with true label $y$ and a classifier $h$. If $h(\xvec) = y$, both losses are 0. If
+$h(\xvec) = z \ne y$, the true loss is 1, and the partial loss is 1 unless $z$ happens to be in the candidate set,
+which has probability at most $\varepsilon$. So $\expect[L_A \mid \xvec, y] \ge (1 - \varepsilon)\,\indicator[h(\xvec) \ne y]$.
+Taking expectations over $(\xvec, y)$,
+
+$$
+\expect\LB L_A(h(\xvec), S)\RB \le \expect\LB L(h(\xvec), y)\RB \le \frac{1}{1 - \varepsilon}\,\expect\LB L_A(h(\xvec), S)\RB.
+$$
+
+Minimising the observable partial loss therefore controls the true loss whenever $\varepsilon < 1$. If $\varepsilon = 1$,
+some wrong label always accompanies the true label and the two cannot be told apart: when label 1 appears in every
+candidate set, there is no way to decide whether label 1 is always right or never right. For candidate sets of fixed
+size $C$ drawn uniformly, $\varepsilon = C/(L - 1)$, the smallest possible for that size <Cite id="cour2011" />.
+
+## A convex surrogate: CLPL
+
+Score each label with $g_a(\xvec)$ and predict $h(\xvec) = \argmax_a g_a(\xvec)$. With a convex binary loss $\psi$ such
+as the logistic loss $\psi(u) = \log(1 + e^{-u})$, the supervised one-against-all loss is
+$\psi(g_y(\xvec)) + \sum_{a \ne y}\psi(-g_a(\xvec))$. The **convex loss for partial labels** replaces the single true
+label by the average score of the candidates <Cite id="cour2011" />:
+
+$$
+L_\psi(\gvec(\xvec), S) = \psi\LP\frac{1}{\abs{S}}\sum_{a \in S} g_a(\xvec)\RP + \sum_{a \notin S}\psi\LP-g_a(\xvec)\RP.
+$$
+
+The first term pushes up the candidates' average score, not every candidate's score. A high score on the true label
+can carry the average, so the other candidates need not be positive. Non-candidates are pushed down individually. With
+a singleton set the loss reduces to the supervised one. Cour et al. show that CLPL upper-bounds the partial 0/1 loss
+when $\psi$ upper-bounds the 0/1 loss, that it is tighter than the naive loss that treats every candidate as a
+positive, and that it is consistent under conditions on the distribution of candidate sets <Cite id="cour2011" />.
+
+**Worked example.** Three labels, candidate set $S = \set{1, 2}$, scores $\gvec = (2, -1, -0.5)$ and the logistic
+$\psi$. The candidates' average score is $(2 - 1)/2 = 0.5$, so the first term is $\psi(0.5) = \log(1 + e^{-0.5}) = 0.474$.
+The non-candidate term is $\psi(0.5) = 0.474$. CLPL is $0.948$. The naive loss, which asks both candidates to be
+positive, is $\psi(2) + \psi(-1) + \psi(0.5) = 0.127 + 1.313 + 0.474 = 1.914$: it penalises the model for giving label 2
+a negative score, although label 2 may well be the distractor.
+
+## Deep partial-label learning
+
+Two later approaches fit any network trained by stochastic gradient descent.
+
+- **Progressive identification (PRODEN).** Weight each candidate's loss by the model's current belief that it is the
+  true label, normalised over the candidate set, and update the weights as the model improves. The model and the
+  identification of true labels improve together <Cite id="lv2020" />.
+- **Provably consistent methods.** Feng et al. propose a generation model for candidate sets, with every set containing
+  the true label equally likely, and derive a risk-consistent method (importance-reweighting each candidate by its
+  posterior) and a classifier-consistent method under that model <Cite id="feng2020" />.
+
+## Assumptions
+
+- **The true label is always in the set.** A candidate set that misses the true label is label noise, which partial-label
+  methods do not model. See <NoteLink to="learning-with-noisy-labels" />.
+- **Distractors are diverse.** Learning needs $\varepsilon < 1$, and the bound is useful only when $\varepsilon$ is well
+  below 1. Labels that systematically co-occur, such as two characters who always share scenes, cannot be separated.
+
+## Pitfalls
+
+- **Averaging is not maximising.** CLPL rewards the average candidate score, so a model can satisfy it by spreading
+  moderate scores across candidates. Its consistency conditions exclude such distributions; real data may not.
+- **Relation to other settings.** A candidate set of size $L - 1$ is equivalent to one <NoteLink
+  to="complementary-labels">complementary label</NoteLink>. Multiple-instance learning is ambiguity over instances
+  rather than over labels.

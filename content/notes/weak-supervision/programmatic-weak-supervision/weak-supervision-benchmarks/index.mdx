@@ -1,0 +1,111 @@
+---
+title: Weak supervision benchmarks
+kind: case-study
+summary: 'WRENCH standardises evaluation of programmatic weak supervision with 22 datasets, fixed labelling functions and modular label and end models. No label model wins everywhere, majority vote is a strong baseline, and labelling-function quality dominates.'
+tags: [weak-supervision, programmatic-weak-supervision, benchmarks, model-evaluation]
+aliases: [WRENCH, weak supervision benchmark, label model comparison, two-stage weak supervision, joint model]
+requires: [data-programming]
+related: [label-model-estimation, snorkel, weak-supervision-in-production, dawid-skene-model]
+references: [zhang2021wrench, zhang2022survey]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**WRENCH** (Weak supervision bENCHmark) is a benchmark platform for weak supervision by Zhang, Yu, Li, Wang, Yang, Yang
+and Ratner <Cite id="zhang2021wrench" />. It fixes the three things that made earlier comparisons unreliable: the
+datasets, the weak supervision sources applied to them, and the evaluation protocol. It includes 22 real-world datasets
+for classification and sequence tagging, real labelling functions, synthetic and procedural labelling-function
+generators, and modular implementations of label models, end models and joint models.
+</Definition>
+
+## Why a benchmark was needed
+
+Zhang et al. identify three problems in the earlier literature <Cite id="zhang2021wrench" />.
+
+- **Private and custom datasets.** Weak supervision is motivated by production needs, so many evaluations used
+  data that could not be shared.
+- **Hidden source variance.** A weak supervision dataset is defined by its inputs, its labels **and** its labelling
+  functions. Two papers could report on datasets with the same name but entirely different labelling functions, and
+  hence entirely different problems.
+- **Protocol variance.** A two-stage pipeline can be evaluated at the label model or at the end model, with hard or
+  soft labels, on covered points only or on all points. Papers differed on all of these.
+
+## What is compared
+
+WRENCH treats a weak supervision method as a composition of modules <Cite id="zhang2021wrench" />:
+
+| Task | Module | Methods |
+| ---- | ------ | ------- |
+| Classification | Label model | majority vote (MV), weighted MV, Dawid–Skene (DS), data programming (DP), MeTaL, FlyingSquid (FS) |
+| Classification | End model | logistic regression, MLP, BERT, RoBERTa, COSINE-BERT, COSINE-RoBERTa |
+| Classification | Joint model | Denoise |
+| Sequence tagging | Label model | HMM, conditional HMM (CHMM), plus the classification label models applied per token |
+| Sequence tagging | End model | LSTM-CNNs-CRF, BERT |
+| Sequence tagging | Joint model | Consensus Network (ConNet) |
+
+A **two-stage** method pairs a label model with an end model trained on its output. A **joint** (one-stage) method
+trains both together. Every pairing, with hard and with soft labels, gives more than 120 method variants: 83 for
+classification and 46 for sequence tagging. A **gold** baseline trains each end model on the true labels.
+
+## Synthetic and procedural labelling functions
+
+The synthetic generator draws LF outputs from the conditionally independent model, with control over the mean and the
+spread of the LFs' accuracies and propensities (how often they vote). Label models diverge from each other when the
+spread of accuracies is large or the propensity is small; with high propensity they converge <Cite id="zhang2021wrench" />.
+
+The procedural generator builds LFs from a labelled dataset and a feature lexicon, for example one LF per $n$-gram and
+label, and keeps those meeting thresholds on accuracy, pairwise correlation or data dependence (accuracy that varies
+across clusters of the data). On Yelp and YouTube, label models performed alike on the most accurate LFs, but differed
+widely on correlated or data-dependent LFs, where DP, MeTaL and FS clearly outperformed simpler models. Even for one
+type of LF, the ranking of label models changed between datasets.
+
+## Findings on real labelling functions
+
+Classification, selected rows of the paper's summary table <Cite id="zhang2021wrench" />:
+
+<SpecTable
+  columns={['Metric', 'Best gold end model', 'Best weak supervision (end model + label model)']}
+  rows={{
+    IMDb: ['accuracy', 'RoBERTa 93.25', 'COSINE-RoBERTa + MeTaL 88.86'],
+    Yelp: ['accuracy', 'RoBERTa 97.13', 'COSINE-RoBERTa + FS 95.45'],
+    YouTube: ['accuracy', 'BERT 97.52', 'COSINE-BERT + MV 98.00'],
+    TREC: ['accuracy', 'RoBERTa 96.68', 'COSINE-RoBERTa + DP 82.36'],
+    ChemProt: ['accuracy', 'BERT 89.76', 'COSINE-BERT + DP 61.56'],
+    CDR: ['F1', 'RoBERTa 65.86', 'MeTaL applied directly 69.61'],
+  }}
+/>
+
+The authors draw these conclusions <Cite id="zhang2021wrench" />.
+
+- **No method consistently wins.** The best weak supervision method differs across datasets. Designing a general-purpose
+  method remains open.
+- **MeTaL and majority vote are the label models most worth trying** for classification, averaged over datasets and end
+  models. Deeper end models are better, and fine-tuned pre-trained language models beat applying the label model to the
+  test data directly on most text tasks.
+- **Source quality dominates.** Both label and end models do well only when the labelling functions are reasonably
+  good. With very noisy LFs (Basketball) or very low coverage (MIT-Restaurants), a large gap to full supervision
+  remains, so LF quality should be checked before trusting any weak supervision model.
+- **Soft labels help deeper end models,** an effect the authors relate to label smoothing.
+- **Uncovered data should be used.** Training the end model only on points that received at least one vote discards
+  data; COSINE, which also uses uncovered points, did well.
+- **For sequence tagging,** HMM-based label models, which model dependencies between tokens, were best on 7 of 8
+  datasets; CHMM, which also uses the input features, had the best average. On MIT-Restaurants, where the LFs cover
+  little, majority vote was better than the probabilistic models. The tagging scheme (IO against BIO) changed F1 by up
+  to 10%.
+
+## How to read label-model comparisons
+
+- **Report the labelling functions.** A comparison is about a dataset and a set of LFs. Results do not transfer to a
+  different set of LFs on the same inputs.
+- **Separate the stages.** Say whether a number is the label model on test data, an end model trained on its labels,
+  or a joint model, and compare like with like. WRENCH notes papers that compared an end model coupled with majority
+  vote against a label model used alone.
+- **Include majority vote.** It is cheap, has no parameters and is often within noise of the best label model. The
+  modelling-advantage analysis in <NoteLink to="snorkel" /> explains when weighting can beat it.
+- **Include the gold baseline.** The gap to training on true labels is the real measure of how much the weak labels
+  cost.
+
+The companion survey by Zhang, Hsieh, Yu, Zhang and Ratner reviews label models, end models, joint models and
+related paradigms (semi-supervised, active and transfer learning) that can be combined with programmatic weak
+supervision <Cite id="zhang2022survey" />.

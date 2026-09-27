@@ -1,0 +1,148 @@
+---
+title: Learning from label proportions
+kind: concept
+summary: 'In learning from label proportions the training instances are grouped into bags and only each bag''s class proportions $\pi_k$ are known. The instance posterior $p(y \mid \xvec)$ is identifiable when bags are distributed like their classes and the $K \times c$ matrix of proportions has full column rank.'
+tags: [weak-supervision, label-proportions, classification, identifiability, worked-example]
+aliases: [LLP, learning with label proportions, aggregate labels, proportion loss, DLLP, proportion-SVM, bag proportions]
+requires: [logistic-regression]
+related: [multiple-instance-learning, mean-map-and-invcal, llp-label-propagation, prior-shift-correction]
+references: [quadrianto2009, yu2013, kuck2005, ardehaly2017, patrini2014]
+status: draft
+updated: 2026-09-27
+---
+
+import { ProportionLoss } from './ProportionLoss'
+
+<Definition>
+In **learning from label proportions** (LLP), $n$ instances $\xvec_1, \dots, \xvec_n$ are partitioned into $K$
+disjoint bags $B_1, \dots, B_K$. The instance labels $y_i \in \set{1, \dots, c}$ are hidden. For each bag the
+**proportions** $\pivec_k = (\pi_{k,1}, \dots, \pi_{k,c})$ are given, with
+$\pi_{k,h} = \abs{\set{i \in B_k : y_i = h}}/\abs{B_k}$. The task is to learn an instance classifier, or to recover the
+instance labels, from the bags and their proportions <Cite id="quadrianto2009" />.
+</Definition>
+
+## Where the setting arises
+
+Proportions are released when individual labels are private, expensive or never recorded. Election results are
+published per district, not per voter. Disease counts are published per area. A participant in a health study will
+say "today I slept 8 hours and watched TV for 2 hours" but will not label every minute of sensor data
+<Cite id="poyiadzi2018" />. LLP spans a range: $n$ bags of size one is ordinary supervised learning, and one bag holding
+everything reveals only the class prior.
+
+## The bag likelihood
+
+Consider two classes, $y_i \in \set{0, 1}$, and a probabilistic instance model $p_i = \pr(y_i = 1 \mid \xvec_i)$.
+Assume instance labels are conditionally independent given the instances. The observation for bag $k$ is the count
+$N_k = \sum_{i \in B_k} y_i = \pi_{k}\abs{B_k}$. The count is a sum of independent Bernoulli variables with different
+means, so it follows a **Poisson-binomial** distribution:
+
+$$
+\pr(N_k = m \mid B_k) = \sum_{A \subseteq B_k,\ \abs{A} = m}\ \prod_{i \in A} p_i \prod_{i \in B_k \setminus A}(1 - p_i).
+$$
+
+The exact log-likelihood of the proportions is $\sum_k \log\pr(N_k = \pi_k\abs{B_k} \mid B_k)$. It can be evaluated by
+a recursion over the instances in $O(\abs{B_k}^2)$ per bag, but it is awkward to differentiate through at scale.
+
+**The proportion loss.** The mean of the count is $\expect[N_k] = \sum_{i \in B_k} p_i$, so the expected proportion is
+the bag's mean prediction $\bar{p}_k = \frac{1}{\abs{B_k}}\sum_{i \in B_k} p_i$. Matching the mean gives the
+**proportion loss**, the cross-entropy between the given and the predicted proportion:
+
+$$
+\ell_k = -\LB\pi_k\log\bar{p}_k + (1 - \pi_k)\log(1 - \bar{p}_k)\RB.
+$$
+
+$\ell_k$ is minimised exactly when $\bar{p}_k = \pi_k$. For $c$ classes it is $-\sum_h \pi_{k,h}\log\bar{p}_{k,h}$.
+Deep LLP trains a network with this loss by averaging the softmax outputs within each bag <Cite id="ardehaly2017" />.
+The loss constrains only the average prediction of each bag, so it cannot by itself say which instances in a bag are
+positive. That information must come from the model class and from differences between bags.
+
+## When instance labels can be recovered
+
+Proportions never determine which instances in a bag are positive: permuting labels within a bag leaves every
+proportion unchanged. What can be identified is the posterior $p(y \mid \xvec)$, and instance labels are recovered to
+the extent that the posterior is close to 0 or 1.
+
+**The independence assumption.** Suppose that, given its class, an instance's distribution does not depend on its
+bag <Cite id="quadrianto2009" />:
+
+$$
+p(\xvec \mid y, k) = p(\xvec \mid y).
+$$
+
+This holds when bags are formed at random. It fails when bags are defined by a variable related to $\xvec$, such as
+geography.
+
+**Derivation.** Under the assumption, each bag's instance distribution is a mixture of the class-conditional
+distributions with the bag's proportions as weights:
+
+$$
+p(\xvec \mid k) = \sum_{h=1}^{c} p(\xvec \mid y = h, k)\,\pr(y = h \mid k) = \sum_{h=1}^{c} \pi_{k,h}\,p(\xvec \mid y = h).
+$$
+
+Stack the $K$ bag distributions in a vector $\mathbf{p}_{\text{bag}}(\xvec)$ and the $c$ class-conditionals in
+$\mathbf{p}_{\text{class}}(\xvec)$. With the $K \times c$ proportion matrix $\Pimat = [\pi_{k,h}]$,
+
+$$
+\mathbf{p}_{\text{bag}}(\xvec) = \Pimat\,\mathbf{p}_{\text{class}}(\xvec) \quad\text{for every } \xvec.
+$$
+
+The left-hand side is observable: each bag is a sample from its own distribution. If $\Pimat$ has full column rank
+$c$, the system has the unique solution
+$\mathbf{p}_{\text{class}}(\xvec) = (\Pimat^\top\Pimat)^{-1}\Pimat^\top\mathbf{p}_{\text{bag}}(\xvec)$. The class-conditional
+distributions are then determined, and with the overall class prior, so is $p(y \mid \xvec)$ by Bayes' theorem.
+
+If $\Pimat$ has rank below $c$, identification fails. In the extreme case every bag has the same proportions $\pivec$.
+Then every bag has the same distribution, the marginal $p(\xvec)$, and any split of $p(\xvec)$ into
+$\sum_h \pi_h\,p_h(\xvec)$ is equally consistent with the data. Full column rank needs at least $c$ bags whose
+proportion vectors are linearly independent; for two classes, two bags with different proportions.
+
+**Worked example.** Two bags of one-dimensional data have proportions of class 1 equal to $0.8$ and $0.3$, and
+observed bag means $1.4$ and $-0.1$. The class means $\mu_1, \mu_0$ solve
+
+$$
+\begin{pmatrix}0.8 & 0.2 \\ 0.3 & 0.7\end{pmatrix}\begin{pmatrix}\mu_1 \\ \mu_0\end{pmatrix} = \begin{pmatrix}1.4 \\ -0.1\end{pmatrix}.
+$$
+
+The determinant is $0.8 \times 0.7 - 0.2 \times 0.3 = 0.5$, so $\mu_1 = (0.7 \times 1.4 - 0.2 \times (-0.1))/0.5 = 2$ and
+$\mu_0 = (0.8 \times (-0.1) - 0.3 \times 1.4)/0.5 = -1$. Had both bags had proportion $0.5$, the matrix would be
+singular and the two class means could not be separated. The same inversion of means is the core of the <NoteLink
+to="mean-map-and-invcal">mean map</NoteLink>.
+
+The sample version is noisier: the bag means are estimated from $\abs{B_k}$ instances, and the error of the inversion
+grows as $\Pimat$ approaches rank deficiency. Bags with similar proportions carry little information, which is why
+performance falls as bags grow and their proportions converge to the prior.
+
+<ProportionLoss />
+
+## Families of methods
+
+- **Mean-operator methods.** Estimate the class-conditional means from the bag means, then fit a model that needs only
+  those means. The mean map uses the independence assumption above; the Laplacian mean map relaxes it by smoothing
+  across similar bags <Cite id="patrini2014" />. See <NoteLink to="mean-map-and-invcal" />.
+- **Bag-level regression.** Inverse calibration fits a support vector regression from each bag's mean decision value
+  to the logit of its proportion. See <NoteLink to="mean-map-and-invcal" />.
+- **Latent-label max-margin methods.** ∝SVM <Cite id="yu2013" /> treats the instance labels $y_i \in \set{-1, +1}$ as
+  variables and solves
+
+  $$
+  \min_{\yvec, \wvec, b}\ \frac{1}{2}\norm{\wvec}^2 + C\sum_{i=1}^{n}L\LP y_i, \wvec^\top\phi(\xvec_i) + b\RP + C_p\sum_{k=1}^{K}\abs{\tilde{p}_k(\yvec) - \pi_k},
+  $$
+
+  with $\tilde{p}_k(\yvec)$ the fraction of $+1$ labels in bag $k$ and $L$ the hinge loss. It alternates between an
+  SVM step with labels fixed and a label step per bag. It makes no independence assumption.
+- **Proportion losses.** Train any probabilistic model by the proportion loss on bag-mean predictions
+  <Cite id="ardehaly2017" />.
+- **Sampling methods.** Kück and de Freitas sample instance labels consistent with the proportions by MCMC within a
+  generative model <Cite id="kuck2005" />.
+- **Graph methods.** Propagate each bag's proportion as a soft label over a similarity graph, then enforce each bag's
+  total. See <NoteLink to="llp-label-propagation" />.
+
+## Pitfalls
+
+- **Bags aligned with features.** When bags are defined by location, time or demographic group, the independence
+  assumption fails and mean-operator methods are biased. Methods that constrain predictions per bag, such as ∝SVM and
+  graph propagation, do not rely on it.
+- **Evaluation.** Accuracy on held-out instances needs instance labels, which LLP data lack by definition. Papers
+  evaluate on data whose true labels were hidden to form the bags.
+- **Proportions are counts.** A proportion of 0.5 from a bag of 2 and from a bag of 200 are different evidence. The
+  Poisson-binomial likelihood accounts for bag size; the proportion loss does not.

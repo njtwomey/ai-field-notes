@@ -1,0 +1,139 @@
+---
+title: Dawid–Skene model
+kind: concept
+summary: 'The Dawid–Skene model explains crowd labels by a latent true class per item and a confusion matrix $\pi^{(k)}_{jl} = \pr(\text{annotator } k \text{ says } l \mid \text{true } j)$ per annotator. EM alternates between item posteriors and confusion matrices, weighting reliable annotators more than majority vote does.'
+tags: [weak-supervision, crowdsourcing, latent-variable-models, em-algorithm, annotation, worked-example]
+aliases: [Dawid and Skene, annotator confusion matrix, observer error rates, crowdsourcing EM, one-coin model, two-coin model]
+requires: [expectation-maximisation, categorical-distribution]
+related: [learning-from-crowds, data-programming, cohens-kappa, fleiss-kappa, naive-bayes]
+references: [dawid1979, raykar2010, whitehill2009]
+status: draft
+updated: 2026-09-27
+---
+
+import { DawidSkeneEm } from './DawidSkeneEm'
+
+<Definition>
+The **Dawid–Skene model** describes $K$ annotators labelling $N$ items into $J$ classes. Item $i$ has a latent true
+class $t_i$ with prior $\pr(t_i = j) = p_j$. Annotator $k$ has a **confusion matrix** $\pi^{(k)}$ with entries
+$\pi^{(k)}_{jl} = \pr(\text{annotator } k \text{ responds } l \mid t_i = j)$. Given the true class, responses are
+independent across annotators and repetitions. The parameters are estimated by maximum likelihood with the EM algorithm,
+without any gold labels <Cite id="dawid1979" />.
+</Definition>
+
+## Origin
+
+Dawid and Skene studied clinicians who each took a patient's history several times and recorded a diagnosis, and asked
+how to estimate each clinician's error rates when no one knows the true diagnoses <Cite id="dawid1979" />. The same
+structure describes crowdsourcing: many cheap annotators, each of unknown reliability, several per item.
+
+## The likelihood
+
+Let $n^{(k)}_{il}$ be the number of times annotator $k$ gave response $l$ for item $i$ (0 if the annotator did not
+label the item). Given $t_i = j$, the responses from annotator $k$ are multinomial, so
+
+$$
+\pr(\text{data}_i \mid t_i = j) = \prod_{k=1}^{K}\prod_{l=1}^{J}\LP\pi^{(k)}_{jl}\RP^{n^{(k)}_{il}}.
+$$
+
+Summing over the unknown class, the likelihood of all the data is
+
+$$
+\prod_{i=1}^{N}\ \sum_{j=1}^{J} p_j\prod_{k=1}^{K}\prod_{l=1}^{J}\LP\pi^{(k)}_{jl}\RP^{n^{(k)}_{il}}.
+$$
+
+The sum inside the product has no closed-form maximiser. If the true classes were known, the problem would split into
+counting.
+
+## EM for the confusion matrices
+
+Introduce indicators $T_{ij} = \indicator[t_i = j]$. The complete-data log-likelihood is
+
+$$
+\sum_{i}\sum_{j} T_{ij}\LP\log p_j + \sum_{k}\sum_{l} n^{(k)}_{il}\log\pi^{(k)}_{jl}\RP.
+$$
+
+It is linear in $T_{ij}$, so the **E-step** replaces each $T_{ij}$ by its posterior expectation under the current
+parameters. By Bayes' theorem,
+
+$$
+\hat{T}_{ij} = \frac{p_j\prod_{k}\prod_{l}\LP\pi^{(k)}_{jl}\RP^{n^{(k)}_{il}}}{\sum_{q} p_q\prod_{k}\prod_{l}\LP\pi^{(k)}_{ql}\RP^{n^{(k)}_{il}}}.
+$$
+
+The **M-step** maximises the expected complete-data log-likelihood. For annotator $k$ and true class $j$, the terms
+involving row $j$ of $\pi^{(k)}$ are $\sum_l \LP\sum_i \hat{T}_{ij}n^{(k)}_{il}\RP\log\pi^{(k)}_{jl}$, subject to
+$\sum_l \pi^{(k)}_{jl} = 1$. A Lagrange multiplier gives the weighted proportions
+
+$$
+\hat{\pi}^{(k)}_{jl} = \frac{\sum_{i}\hat{T}_{ij}\,n^{(k)}_{il}}{\sum_{l'}\sum_{i}\hat{T}_{ij}\,n^{(k)}_{il'}}, \qquad
+\hat{p}_j = \frac{1}{N}\sum_{i}\hat{T}_{ij}.
+$$
+
+Each confusion entry is the soft count of times annotator $k$ said $l$ on items believed to be of class $j$. Dawid and
+Skene initialise $\hat{T}$ from the proportion of responses for each class, which for a single response per annotator
+is the soft majority vote <Cite id="dawid1979" />. Iterating the two steps never decreases the likelihood; see
+<NoteLink to="expectation-maximisation" />.
+
+**The posterior is a weighted vote.** For two classes and one response per annotator, take logs of the E-step ratio:
+
+$$
+\log\frac{\hat{T}_{i1}}{\hat{T}_{i0}} = \log\frac{p_1}{p_0} + \sum_{k}\log\frac{\pi^{(k)}_{1,l_{ik}}}{\pi^{(k)}_{0,l_{ik}}},
+$$
+
+where $l_{ik}$ is annotator $k$'s response. Each annotator adds a log-likelihood ratio. An annotator who is right with
+probability $a$ on both classes adds $\pm\log\frac{a}{1 - a}$: large for experts, zero for a random guesser
+($a = 1/2$), and negative for an annotator who is systematically wrong, whose votes are then inverted. Majority vote is
+the special case in which every annotator has the same accuracy.
+
+## Worked example
+
+Three annotators A, B and C label eight binary items:
+
+| Item | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+| ---- | - | - | - | - | - | - | - | - |
+| A    | 1 | 1 | 0 | 0 | 1 | 0 | 1 | 0 |
+| B    | 1 | 1 | 0 | 1 | 0 | 0 | 1 | 0 |
+| C    | 0 | 1 | 1 | 0 | 1 | 0 | 0 | 1 |
+
+**Initialisation.** The soft majority vote gives $\hat{T}_{i1} = (0.667, 1, 0.333, 0.333, 0.667, 0, 0.667, 0.333)$, which
+sums to 4.
+
+**First M-step.** $\hat{p}_1 = 4/8 = 0.5$. Annotator A says 1 on items 1, 2, 5 and 7, whose $\hat{T}_{i1}$ sum to
+$0.667 + 1 + 0.667 + 0.667 = 3$, so $\hat{\pi}^{(A)}_{11} = 3/4 = 0.75$. The same computation gives accuracies of 0.75 for
+A, 0.667 for B and 0.583 for C, equal on both classes in this example.
+
+**First E-step.** Item 1 has responses $(1, 1, 0)$:
+
+$$
+\frac{\hat{T}_{11}}{\hat{T}_{10}} = \frac{0.5 \times 0.75 \times 0.667 \times 0.417}{0.5 \times 0.25 \times 0.333 \times 0.583} = \frac{0.1042}{0.0243},
+$$
+
+so $\hat{T}_{11} = 0.811$. Majority vote gave 0.667. Agreeing with the two better annotators raises the posterior.
+
+**Convergence.** EM converges to accuracies of 0.75 for A, 1.0 for B and 0.25 for C. C is judged systematically wrong,
+so C's votes count against their stated label, and the posterior follows B on every item. Items 4 and 5, where A and B
+disagree, are decided by B together with the inverted vote of C. Eight items are far too few to support a perfect
+annotator or an adversarial one: small data drive EM to confident, degenerate solutions, which is why practical
+implementations add pseudo-counts or priors on the confusion matrices.
+
+<DawidSkeneEm />
+
+## Identifiability
+
+The likelihood is unchanged if the class names are permuted together with the rows of every confusion matrix. For
+two classes, "every annotator is mostly right" and "every annotator is mostly wrong" fit the data equally well. The
+usual resolution is to assume annotators are better than random on average, and to start EM from majority vote, which
+lies in the basin of that solution.
+
+## Assumptions and pitfalls
+
+- **Conditional independence.** Annotators' errors are independent given the true class. Annotators who share a
+  misconception, or copy each other, are counted as independent evidence and are over-trusted. The same issue arises
+  for correlated labelling functions in <NoteLink to="data-programming" />.
+- **Item difficulty.** A confusion matrix is the same for every item. Hard items, on which even experts err, are not
+  modelled. GLAD adds a per-item difficulty <Cite id="whitehill2009" />; see <NoteLink to="learning-from-crowds" />.
+- **Parameters per annotator.** A full $J \times J$ matrix has $J(J - 1)$ free parameters. An annotator with few labels
+  cannot support them. The **one-coin** simplification gives each annotator a single accuracy with errors spread
+  uniformly; the binary **two-coin** model uses a sensitivity and a specificity <Cite id="raykar2010" />.
+- **Features are ignored.** The model sees only the labels. <NoteLink to="learning-from-crowds" /> learns a classifier
+  on the item features jointly with the annotator parameters.

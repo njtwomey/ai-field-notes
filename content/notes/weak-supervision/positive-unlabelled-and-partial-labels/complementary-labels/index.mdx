@@ -1,0 +1,98 @@
+---
+title: Complementary-label learning
+kind: concept
+summary: 'A complementary label names one class an instance does not belong to. If it is drawn uniformly from the $K - 1$ wrong classes, the classification risk equals $\expect_{\bar{p}}\LB\sum_{j}\ell(f(\xvec), j) - (K - 1)\,\ell(f(\xvec), \bar{y})\RB$, an unbiased estimate from complementary labels alone, for any loss and model.'
+tags: [weak-supervision, complementary-labels, multiclass, risk-estimation, worked-example]
+aliases: [complementary labels, complementary-label learning, negative labels, learning from complementary labels]
+requires: [empirical-risk-minimisation, multinomial-logistic-regression]
+related: [partial-label-learning, non-negative-pu-learning]
+references: [ishida2017, ishida2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+In **complementary-label learning** each training instance $\xvec$ comes with a **complementary label**
+$\bar{y} \in \set{1, \dots, K}$ that names a class the instance does **not** belong to. Under the standard assumption the
+complementary label is drawn uniformly from the $K - 1$ classes other than the true label $y$. The task is to learn an
+ordinary $K$-class classifier <Cite id="ishida2017" />.
+</Definition>
+
+## Why the setting exists
+
+Choosing the correct class from a long list is slow and error-prone. Saying that an image is not a cat is fast, and
+a randomly proposed class is usually wrong. Complementary labels are cheap to collect: show the annotator one random
+class and ask whether it applies. A "no" answer yields a complementary label <Cite id="ishida2017" />.
+
+## The data distribution
+
+Let $p(\xvec, y)$ be the ordinary joint distribution. Under the uniform assumption, the complementary-label
+distribution is
+
+$$
+\bar{p}(\xvec, \bar{y}) = \frac{1}{K - 1}\sum_{y \ne \bar{y}} p(\xvec, y) = \frac{p(\xvec) - p(\xvec, \bar{y})}{K - 1}.
+$$
+
+Dividing by $p(\xvec)$ links the two posteriors:
+
+$$
+\bar{p}(\bar{y} = j \mid \xvec) = \frac{1 - p(y = j \mid \xvec)}{K - 1}
+\quad\Longleftrightarrow\quad
+p(y = j \mid \xvec) = 1 - (K - 1)\,\bar{p}(\bar{y} = j \mid \xvec).
+$$
+
+The ordinary posterior is a fixed affine function of the complementary posterior, so a model of one is a model of the
+other. The class with the smallest complementary probability is the most probable class.
+
+**Worked example.** With $K = 4$, a model estimates $\bar{p}(\bar{y} \mid \xvec) = (0.1, 0.3, 0.3, 0.3)$. The ordinary
+posterior is $1 - 3 \times 0.1 = 0.7$ for class 1 and $1 - 3 \times 0.3 = 0.1$ for each of the others. The
+complementary label rarely points at class 1 because class 1 is usually the true class.
+
+## An unbiased risk for any loss
+
+The goal is the ordinary risk $R(f) = \expect_{p(\xvec, y)}[\ell(f(\xvec), y)]$ for a loss $\ell$ and model $f$. For any
+function $h(\xvec, j)$, the expression for $\bar{p}$ gives
+
+$$
+\expect_{\bar{p}}\LB h(\xvec, \bar{y})\RB = \sum_{j=1}^{K}\int \frac{p(\xvec) - p(\xvec, j)}{K - 1}\,h(\xvec, j)\,d\xvec
+= \frac{1}{K - 1}\LP\sum_{j=1}^{K}\expect_{p(\xvec)}\LB h(\xvec, j)\RB - \expect_{p(\xvec, y)}\LB h(\xvec, y)\RB\RP.
+$$
+
+Set $h = \ell$ and solve for the ordinary risk:
+
+$$
+R(f) = \sum_{j=1}^{K}\expect_{p(\xvec)}\LB\ell(f(\xvec), j)\RB - (K - 1)\,\expect_{\bar{p}}\LB\ell(f(\xvec), \bar{y})\RB.
+$$
+
+The marginal of $\xvec$ under $\bar{p}$ is $p(\xvec)$, so both expectations can be taken over the complementary-labelled
+sample:
+
+$$
+R(f) = \expect_{\bar{p}(\xvec, \bar{y})}\LB\sum_{j=1}^{K}\ell(f(\xvec), j) - (K - 1)\,\ell(f(\xvec), \bar{y})\RB.
+$$
+
+Ishida et al. derive this estimator for arbitrary losses and models <Cite id="ishida2019" />. The first term penalises
+confidence in every class; the second rewards pushing the loss up on the complementary label, that is, moving
+probability away from the class the instance is known not to be. Because the estimator is unbiased, it also allows
+model selection by cross-validation on complementary-labelled data alone.
+
+The first paper on the setting obtained an unbiased estimator only for losses satisfying a symmetry condition, such as
+one-versus-all and pairwise-comparison losses built from a binary loss with $\ell(z) + \ell(-z) = 1$, and proved an
+estimation error bound at the optimal parametric rate <Cite id="ishida2017" />.
+
+## Correcting negative risks
+
+The negative coefficient $-(K - 1)$ lets the empirical risk go below zero, and flexible models exploit this, as in
+<NoteLink to="non-negative-pu-learning">positive-unlabelled learning</NoteLink>. Ishida et al. rewrite the risk as a
+sum of per-class terms, each non-negative in the population, and correct the empirical terms that turn negative:
+either by clipping them at zero or by taking a gradient ascent step on them <Cite id="ishida2019" />.
+
+## Assumptions and pitfalls
+
+- **Uniform selection.** The derivation needs $\bar{y}$ to be uniform over the wrong classes. If annotators prefer to
+  reject some classes, for example obviously wrong ones, the estimator is biased.
+- **Information per label.** One complementary label rules out one class of $K$, while an ordinary label rules out
+  $K - 1$. The gap grows with $K$, so the method pays off only when complementary labels are much cheaper to collect.
+- **Variance.** The factor $K - 1$ multiplies the variance of the second term. Large $K$ makes the empirical risk noisy.
+- **Relation to partial labels.** A complementary label is a <NoteLink to="partial-label-learning">candidate set</NoteLink>
+  of the $K - 1$ remaining classes.

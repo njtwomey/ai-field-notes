@@ -1,0 +1,116 @@
+---
+title: Learning from crowds
+kind: concept
+summary: 'Learning from crowds trains a classifier directly from several annotators'' noisy labels. Raykar et al. model $\pr(y = 1 \mid \xvec)$ by logistic regression and each annotator by a sensitivity and specificity, and fit both by EM: the E-step''s soft labels become targets for the classifier.'
+tags: [weak-supervision, crowdsourcing, latent-variable-models, em-algorithm, logistic-regression]
+aliases: [learning from multiple annotators, Raykar model, two-coin annotator model, GLAD, generative model of labels abilities and difficulties, annotator expertise]
+requires: [dawid-skene-model, logistic-regression]
+related: [data-programming, learning-with-noisy-labels, knowledge-distillation]
+references: [raykar2010, whitehill2009, dawid1979]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Learning from crowds** is the problem of training a classifier $f : \Xcal \to \Ycal$ when each training item
+$\xvec_i$ has labels $y_i^1, \dots, y_i^R$ from $R$ annotators of unknown reliability and no gold label. The method of
+Raykar et al. estimates the classifier, each annotator's reliability and the hidden true labels jointly by maximum
+likelihood <Cite id="raykar2010" />.
+</Definition>
+
+## Intuition
+
+Two separate steps are the obvious approach: aggregate the labels (by majority vote or the <NoteLink
+to="dawid-skene-model" />), then train a classifier on the aggregate. The aggregation step ignores the features. Yet a
+classifier that has learnt from the other items knows which label an item's features suggest, and that knowledge should
+count when the annotators disagree. Joint estimation lets the classifier act as one more voter, weighted by how well
+it fits.
+
+## The model
+
+Binary labels, $y_i \in \set{0, 1}$. The classifier is logistic regression, $p_i = \pr(y_i = 1 \mid \xvec_i) = \sigma(\wvec^\top\xvec_i)$.
+Annotator $j$ is a **two-coin** model with
+
+$$
+\alpha^j = \pr(y^j = 1 \mid y = 1) \ \text{(sensitivity)}, \qquad \beta^j = \pr(y^j = 0 \mid y = 0) \ \text{(specificity)}.
+$$
+
+Given the true label, annotators respond independently of each other and of $\xvec$. Define the probability of item
+$i$'s responses under each true label:
+
+$$
+a_i = \prod_{j=1}^{R}(\alpha^j)^{y_i^j}(1 - \alpha^j)^{1 - y_i^j}, \qquad
+b_i = \prod_{j=1}^{R}(\beta^j)^{1 - y_i^j}(1 - \beta^j)^{y_i^j}.
+$$
+
+Marginalising the true label, the likelihood is
+
+$$
+\pr(\text{data} \mid \wvec, \alphavec, \betavec) = \prod_{i=1}^{N}\LB a_i p_i + b_i(1 - p_i)\RB.
+$$
+
+## EM
+
+Treat the true labels as missing data <Cite id="raykar2010" />.
+
+**E-step.** The posterior probability that item $i$ is positive, given its features and responses, is
+
+$$
+\mu_i = \pr(y_i = 1 \mid y_i^1, \dots, y_i^R, \xvec_i) = \frac{a_i p_i}{a_i p_i + b_i(1 - p_i)}.
+$$
+
+**M-step.** The expected complete-data log-likelihood is
+$\sum_i \mu_i\log(p_i a_i) + (1 - \mu_i)\log\LB(1 - p_i)b_i\RB$. Setting its derivatives to zero gives closed forms for the
+annotators,
+
+$$
+\alpha^j = \frac{\sum_i \mu_i\,y_i^j}{\sum_i \mu_i}, \qquad \beta^j = \frac{\sum_i (1 - \mu_i)(1 - y_i^j)}{\sum_i (1 - \mu_i)},
+$$
+
+and, for the classifier, the gradient $\sum_i (\mu_i - \sigma(\wvec^\top\xvec_i))\xvec_i$. That is the gradient of
+logistic regression with soft targets $\mu_i$. The M-step for $\wvec$ is therefore an ordinary weighted logistic
+regression, solved by Newton–Raphson. Any classifier that accepts soft labels can replace it.
+
+**The posterior as a weighted vote.** Taking the log-odds of $\mu_i$,
+
+$$
+\operatorname{logit}(\mu_i) = \wvec^\top\xvec_i + c + \sum_{j=1}^{R} y_i^j\LB\operatorname{logit}(\alpha^j) + \operatorname{logit}(\beta^j)\RB,
+\qquad c = \sum_{j=1}^{R}\log\frac{1 - \alpha^j}{\beta^j}.
+$$
+
+The estimated truth is a linear combination of the classifier's log-odds and the annotators' votes. Annotator $j$'s
+weight is $\operatorname{logit}(\alpha^j) + \operatorname{logit}(\beta^j)$: zero for an annotator with
+$\alpha^j + \beta^j = 1$ (a coin that ignores the item), and negative for one who is worse than that
+<Cite id="raykar2010" />.
+
+**Without features.** Dropping $\xvec$ and replacing $p_i$ by a prevalence $p$ recovers the binary Dawid–Skene model.
+Raykar et al. also place beta priors on $\alpha^j$ and $\beta^j$, which keeps the estimates away from 0 and 1 for
+annotators with few labels, and extend the model to multiclass, ordinal and regression targets.
+
+## Item difficulty: GLAD
+
+Dawid–Skene and Raykar et al. give each annotator one error model for all items. Whitehill et al.'s **GLAD** also
+models how hard each item is <Cite id="whitehill2009" />. Labeller $i$ has expertise $\alpha_i \in (-\infty, \infty)$;
+image $j$ has inverse difficulty $\beta_j \in (0, \infty)$. The probability of a correct label is
+
+$$
+\pr(L_{ij} = Z_j \mid \alpha_i, \beta_j) = \frac{1}{1 + e^{-\alpha_i\beta_j}},
+$$
+
+with $Z_j$ the true label. As an image gets harder ($\beta_j \to 0$), every labeller approaches a coin flip. A
+labeller with $\alpha_i = 0$ is a coin flip on every image, and $\alpha_i < 0$ marks an adversarial labeller whose
+labels are systematically wrong. The parameters are fitted by EM, with gradient ascent in the M-step. Whitehill et al.
+report that GLAD outperforms majority vote and is robust to both noisy and adversarial labellers.
+
+## Assumptions and pitfalls
+
+- **Conditional independence of annotators.** Raykar et al. note that the assumption is not true in general: an
+  advanced cancer that is easy to detect is labelled positive by almost every radiologist <Cite id="raykar2010" />.
+  GLAD's difficulty parameter captures part of this dependence.
+- **Local optima.** EM finds a local maximum. Starting from majority vote places it in the basin where annotators are
+  better than random.
+- **The classifier can overrule the crowd.** A classifier that fits the training set too well dominates the posterior
+  and can override correct but minority labels. Regularising the classifier or its prior matters more here than in
+  ordinary training.
+- **Relation to programmatic labels.** Replace annotators by labelling functions that may abstain and the same
+  latent-variable structure becomes the label model of <NoteLink to="data-programming" />.

@@ -1,0 +1,107 @@
+---
+title: Weak supervision in production
+kind: case-study
+summary: 'Programmatic supervision beyond Snorkel: DryBell let non-servable resources at Google supervise servable models; Snuba generates labelling functions; TANDA learns augmentations; slicing functions target critical subsets; LLM prompts serve as labelling functions.'
+tags: [weak-supervision, programmatic-weak-supervision, labelling-functions, systems, data-augmentation, large-language-models]
+aliases: [Snorkel DryBell, Snuba, Reef, TANDA, transformation functions, slicing functions, slice-based learning, LLM labelling functions, prompted labelling functions]
+requires: [data-programming]
+related: [snorkel, label-model-estimation, weak-supervision-benchmarks, data-augmentation, prompting]
+references: [bach2019, varma2018, ratner2017tanda, chen2019slice, smith2022, arora2022, zhang2022survey]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+After <NoteLink to="snorkel" />, the same group and others extended programmatic supervision in four directions: running
+it on industrial data at scale (Snorkel DryBell), generating the labelling functions automatically (Snuba), programming
+other parts of the training pipeline with the same kind of user-written functions (transformation functions for
+augmentation, slicing functions for critical subsets), and using large language models as labelling functions. The
+survey by Zhang et al. organises the field around these components <Cite id="zhang2022survey" />.
+</Definition>
+
+## Snorkel DryBell at Google
+
+Bach et al. deployed weak supervision on three classification tasks at Google <Cite id="bach2019" />. Snorkel DryBell
+kept Snorkel's three stages and changed three things.
+
+1. **Flexible ingestion of organisational knowledge.** Labelling functions were written from templates over existing
+   resources: source heuristics, content heuristics, internal models (topic models, named-entity recognisers) and
+   knowledge graphs.
+2. **Cross-feature production serving.** Many useful signals are **non-servable**: too slow, too expensive or unavailable
+   when a prediction is needed, such as aggregate statistics, crawler results or large internal models. DryBell uses
+   them only as labelling functions, to label training data for an end model defined over cheap **servable** features.
+3. **Sampling-free, distributed execution.** The generative label model was reimplemented as a TensorFlow computation
+   graph that needs no Gibbs sampling, and labelling functions run in a MapReduce pipeline. Weak supervision over more
+   than 6 million data points ran in under 30 minutes.
+
+**Results.** In topic classification, ten labelling functions over 684,000 unlabelled points matched a model trained on
+80,000 hand labels and came within 4.6 F1 points of one trained on 175,000. In product classification, after a change
+of category invalidated the existing negative labels, eight labelling functions matched 12,000 hand labels and came
+within 5.1 F1 points of 50,000. In real-time event classification, 140 sources defined over non-servable features
+trained a deep network over real-time event features; compared with an unweighted combination of the sources, it
+identified 58% more events of interest with a 4.5% quality improvement on an internal metric. Across the content tasks,
+the non-servable sources gave an average 52% gain in final F1 <Cite id="bach2019" />.
+
+The deployment's lesson is that the most valuable weak supervision in an organisation is often knowledge that already
+exists in a form that cannot be served, and weak supervision is a way to transfer it into a servable model.
+
+## Snuba: generating labelling functions
+
+Writing labelling functions still takes expert time, much of it spent on repetitive choices such as thresholds and
+text patterns. Varma and Ré's **Snuba** (also called Reef) generates them from a small labelled set and a large
+unlabelled set <Cite id="varma2018" />. Each iteration runs three components.
+
+- **Synthesiser.** Fits many simple models, such as decision stumps, logistic regressions and nearest-neighbour rules,
+  over small subsets of user-defined **primitives** (bag-of-words features, bounding-box attributes). Each heuristic
+  abstains where its confidence is low, trading coverage for accuracy.
+- **Pruner.** Ranks candidates by a weighted average of their F1 on the labelled set and their diversity, the Jaccard
+  distance between the unlabelled points they label and those the committed set already labels, and adds the best one
+  to the committed set.
+- **Verifier.** Fits a label model to the committed heuristics and uses the small labelled set to test whether their
+  noise is still within what the label model can handle. Generation stops when it is not.
+
+Snuba generated heuristics in under five minutes that performed up to 9.74 F1 points better than the best known
+user-defined heuristics developed over many days, and outperformed semi-supervised learning by up to 14.35 F1 points
+<Cite id="varma2018" />.
+
+## Transformation functions: learning augmentation (TANDA)
+
+Data augmentation is another place where domain knowledge enters as small functions: rotate an image, swap a word for
+a synonym. Composing them well is hard, because a sequence of individually safe transformations can destroy the label.
+Ratner et al.'s **TANDA** has users write **transformation functions** and learns a generative sequence model over
+them, trained adversarially on unlabelled data so that transformed points stay within the data distribution. The
+learnt model is robust to misspecified functions. It improved accuracy by 4.0 points on CIFAR-10, 1.4 F1 points on the
+ACE relation-extraction task and 3.4 points on a medical imaging data set over standard heuristic augmentation
+<Cite id="ratner2017tanda" />. See <NoteLink to="data-augmentation" />.
+
+## Slicing functions: critical subsets
+
+Aggregate metrics hide failures on small subsets that matter: cyclists in autonomous driving, questions in dialogue.
+Chen et al.'s **slice-based learning** lets users write **slicing functions**, heuristics that mark membership of a
+critical subset, in the same style as labelling functions <Cite id="chen2019slice" />. The model learns a
+slice-expert representation for each slice on a shared backbone, and an attention mechanism combines them according to
+the predicted slice membership. The approach improved on baselines by up to 19.0 F1 on slices and 4.6 F1 overall, with
+a parameter-efficient representation.
+
+## Language models as labelling functions
+
+A prompted large language model is a labelling function that anyone can write in natural language. Smith et al. ask
+the model several distinct questions about each example, map each answer to a vote or an abstention, and denoise the
+votes with the Snorkel label model before training an end classifier <Cite id="smith2022" />. On the WRENCH benchmark
+this reduced errors by 19.5% on average relative to zero-shot prompting, and matched or exceeded classifiers trained
+from hand-engineered rules. Arora et al.'s **Ask Me Anything** applies the same idea to prompting itself: several
+imperfect question-answering prompts give noisy votes with different accuracies and dependencies, and weak supervision
+combines them. It lifted performance by 10.2% on average over few-shot prompting, and let the 6-billion-parameter GPT-J
+match or exceed few-shot GPT-3 (175 billion parameters) on 15 of 20 benchmarks <Cite id="arora2022" />. See <NoteLink
+to="prompting" />.
+
+## Common threads
+
+- **Code as supervision.** Labelling functions, transformation functions and slicing functions all let a domain expert
+  program the training data rather than label it, and all need a model that tolerates the functions' errors.
+- **Servability.** Supervision may use any signal available at training time; the end model uses only what is
+  available at prediction time.
+- **The label model is replaceable.** Every system above treats label aggregation as a module, from Gibbs-sampled factor
+  graphs to TensorFlow graphs to closed forms (see <NoteLink to="label-model-estimation" />).
+- **Evaluation needs a benchmark.** Reported gains depend heavily on the labelling functions used, which motivated the
+  standardised comparisons in <NoteLink to="weak-supervision-benchmarks" />.
