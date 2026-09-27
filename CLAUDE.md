@@ -301,11 +301,9 @@ Frontmatter (validated; see `site/src/lib/content-schema.ts`): `title`, `kind`, 
 
 ## Git
 
-- Standing approval: when a batch of work is finished (no agents still running) and `make check` passes, then the
-  commit builds cleanly from a fresh checkout, add, commit and push. If any check fails, fix or report it and do not
-  push.
-- Otherwise never stage, commit or push unless the user asks in the current message; that permission covers one
-  action and does not carry over. "Commit" does not imply "push".
+- Never stage, commit or push unless the user expressly asks for it in the current message. Permission is atomic: one
+  request covers one action (one commit, or one push) and does not carry over to later work. "Commit" does not imply
+  "push", and making a repository does not imply pushing to it.
 - `docs/field-notes-survey.md` is a volatile local planning file, excluded via `.git/info/exclude`. Never add it.
 
 ## Deployment
