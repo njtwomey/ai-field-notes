@@ -1,0 +1,101 @@
+---
+title: Temperature scaling
+kind: technique
+summary: 'Temperature scaling divides a network''s logits by one constant $T > 0$ before the softmax, choosing $T$ to minimise log loss on held-out data. $T > 1$ softens overconfident probabilities. The predicted class, and so accuracy, never changes, and the log loss is convex in $1/T$.'
+tags: [calibration, classification, deep-learning, worked-example]
+aliases: [temperature calibration, softmax temperature scaling, vector scaling, matrix scaling]
+requires: [softmax-and-log-sum-exp, classifier-calibration]
+related: [dirichlet-calibration, platt-scaling, calibration-definitions, calibration-error]
+partOf: [classifier-calibration]
+references: [guo2017, kull2019, silvafilho2023]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A $K$-class network outputs logits $\zvec \in \reals^K$ and probabilities $\operatorname{softmax}(\zvec)$.
+**Temperature scaling** replaces them by
+
+$$
+\qvec = \operatorname{softmax}(\zvec / T), \qquad q_k = \frac{\exp(z_k / T)}{\sum_j \exp(z_j / T)},
+$$
+
+with a single temperature $T > 0$ fitted by minimising the log loss of $\qvec$ on a held-out validation set. Guo, Pleiss,
+Sun and Weinberger introduced it for neural networks and found it the most effective of the post-hoc methods they
+compared <Cite id="guo2017" />.
+</Definition>
+
+## Problem
+
+Guo et al. found that modern deep networks are overconfident: their top-class probability is on average higher than
+their accuracy, and more so for deeper and wider networks trained with batch normalisation and little weight decay
+<Cite id="guo2017" />. Training continues to reduce log loss on the training set after accuracy saturates, which it does
+by making the logits larger. The probabilities on new data end up too close to 0 and 1. Multiclass calibration maps with
+many parameters can fix this but risk overfitting a validation set that is small relative to $K$.
+
+## Mechanism
+
+**The predicted class does not change.** Dividing every logit by the same positive $T$ preserves their order, so
+$\argmax_k q_k = \argmax_k z_k$. Accuracy, and every metric that depends only on the predicted class, is unchanged.
+Temperature scaling changes only how confident the probabilities are.
+
+**What $T$ does.** For $T > 1$ the logits shrink towards each other and the distribution becomes flatter. For $T < 1$
+it becomes sharper. As $T \to \infty$ the probabilities tend to uniform, and as $T \to 0$ to a one-hot vector on the
+largest logit.
+
+**Fitting is a convex one-dimensional problem.** Write $\beta = 1/T$. The log loss of one case with label $y$ is
+
+$$
+\ell(\beta) = -\beta z_y + \log\sum_j \exp(\beta z_j).
+$$
+
+The log-sum-exp of a linear function of $\beta$ is convex, and $-\beta z_y$ is linear, so $\ell$ is convex in $\beta$,
+and so is its average over the validation set. Its derivative is
+
+$$
+\ell'(\beta) = -z_y + \sum_j q_j z_j,
+$$
+
+where $q_j$ is the softmax at $\beta$. Setting the average derivative to zero gives the optimality condition:
+**the average of $\expect_{\qvec}[z]$, the expected logit under the calibrated probabilities, equals the average logit
+of the true class**. A one-dimensional search (Newton's method, or bisection on $\ell'$) finds it in a few steps.
+
+**Vector and matrix scaling.** Guo et al. also tried $\qvec = \operatorname{softmax}(\Wmat\zvec + \bvec)$ with diagonal
+$\Wmat$ (vector scaling) or full $\Wmat$ (matrix scaling). Both reduce to temperature scaling when $\Wmat = \eye/T$ and
+$\bvec = \zeros$. They have $2K$ and $K^2 + K$ parameters and overfit more easily <Cite id="guo2017" />.
+<NoteLink to="dirichlet-calibration">Dirichlet calibration</NoteLink> applies the same linear map to log-probabilities
+and adds regularisation to control that.
+
+## Cost
+
+One parameter, fitted once on validation logits; prediction costs one division per logit. Nothing about the network
+changes and no retraining is needed.
+
+## Trade-offs
+
+- **One parameter corrects one thing.** Temperature scaling can fix a uniform overconfidence. It cannot fix a model
+  that is overconfident in some regions and underconfident in others, or miscalibrated for some classes only. It targets
+  <NoteLink to="calibration-definitions">confidence calibration</NoteLink>; classwise miscalibration can remain
+  <Cite id="kull2019" />.
+- **Binary case.** For two classes, temperature scaling is logistic calibration of the logit with no intercept,
+  $\sigma(z/T)$. It cannot shift the probabilities, only stretch them.
+- **Distribution shift.** $T$ is fitted to the validation distribution. Under a shift in inputs the network's
+  overconfidence usually changes and the fitted $T$ is no longer right.
+
+## Worked example
+
+**Effect of $T$.** Logits $(2, 1, 0)$ give probabilities $(0.665, 0.245, 0.090)$ at $T = 1$, $(0.506, 0.307, 0.186)$
+at $T = 2$, and $(0.867, 0.117, 0.016)$ at $T = 0.5$. The first class is predicted in all three cases.
+
+**Fitting $T$.** A validation set has ten cases in three groups:
+
+| logits | cases | true classes | accuracy | confidence at $T = 1$ | at $T = 1.466$ |
+| --- | --- | --- | --- | --- | --- |
+| $(3, 0, 0)$ | 4 | 1, 1, 1, 2 | 0.75 | 0.909 | 0.795 |
+| $(0, 2, 0)$ | 3 | 2, 2, 1 | 0.67 | 0.787 | 0.662 |
+| $(0, 0, 1)$ | 3 | 3, 3, 2 | 0.67 | 0.576 | 0.497 |
+
+Minimising the mean log loss gives $T = 1.466$, reducing it from $0.875$ to $0.835$. At that temperature the average
+expected logit and the average true-class logit are both $1.5$, as the optimality condition requires. The first two
+groups are now close to calibrated. The third group, which was underconfident at $T = 1$, has become more so, because
+one temperature must serve all three.

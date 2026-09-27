@@ -1,0 +1,109 @@
+---
+title: Platt scaling
+kind: technique
+summary: 'Platt scaling turns a classifier score $f$ into a probability $1/(1 + \exp(Af + B))$, fitting $A$ and $B$ by maximum likelihood on held-out data. The sigmoid is exact when the scores of each class are Gaussian with a shared variance. It cannot represent the identity on probability inputs.'
+tags: [calibration, classification, logistic-regression, worked-example]
+aliases: [Platt scaling, logistic calibration, sigmoid calibration, Platt's method, Platt calibration]
+requires: [logistic-regression, classifier-calibration]
+related: [beta-calibration, isotonic-calibration, temperature-scaling, support-vector-machine, calibration-under-imbalance]
+partOf: [classifier-calibration]
+references: [platt1999, niculescumizil2005, kull2017, silvafilho2023]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Platt scaling** maps a real-valued classifier score $f$ to a probability
+
+$$
+P(y = 1 \mid f) = \frac{1}{1 + \exp(Af + B)},
+$$
+
+with $A$ and $B$ fitted by minimising log loss on scores of data not used to train the classifier. Platt introduced it to
+obtain probabilities from support vector machines <Cite id="platt1999" />. Applied to a score that is already a
+probability it is also called **logistic calibration**.
+</Definition>
+
+## Problem
+
+Many classifiers output scores that rank cases well but are not probabilities. A support vector machine outputs a signed
+distance from its margin. Boosted trees output sums of votes. Even models that output numbers in $[0, 1]$ may distort
+them, such as naive Bayes or a network trained on rebalanced classes. A decision rule that compares a probability with a
+cost threshold needs a probability.
+
+## Mechanism
+
+**Why a sigmoid.** Suppose the score has a Gaussian distribution in each class with a common variance:
+$f \mid y = 1 \sim \Gauss(\mu_1, \sigma^2)$ and $f \mid y = 0 \sim \Gauss(\mu_0, \sigma^2)$, with prior $\pi = P(y = 1)$. By
+<NoteLink to="bayes-theorem">Bayes' theorem</NoteLink>, the posterior log-odds is the log prior odds plus the log
+likelihood ratio:
+
+$$
+\log\frac{P(y = 1 \mid f)}{P(y = 0 \mid f)} = \log\frac{\pi}{1 - \pi} - \frac{(f - \mu_1)^2 - (f - \mu_0)^2}{2\sigma^2} =
+\frac{\mu_1 - \mu_0}{\sigma^2} f - \frac{\mu_1^2 - \mu_0^2}{2\sigma^2} + \log\frac{\pi}{1 - \pi}.
+$$
+
+The quadratic terms $f^2$ cancel because the variances are equal. The log-odds is linear in $f$, so the posterior is a
+logistic function of $f$: Platt's form with $A = -(\mu_1 - \mu_0)/\sigma^2$ and $B$ the negative of the remaining
+constant. Platt observed empirically that the class-conditional densities of SVM outputs are roughly like this between
+the margins <Cite id="platt1999" />.
+
+**Fitting.** Given held-out pairs $(f_i, y_i)$ and targets $t_i$, minimise the log loss
+
+$$
+-\sum_i \brack{t_i \log p_i + (1 - t_i)\log(1 - p_i)}, \qquad p_i = \frac{1}{1 + \exp(Af_i + B)}.
+$$
+
+This is one-dimensional <NoteLink to="logistic-regression">logistic regression</NoteLink> of the label on the score. The
+objective is convex in $(A, B)$, and Newton's method converges in a few iterations.
+
+**Regularised targets.** With $N_+$ positives and $N_-$ negatives in the calibration set, Platt replaces the labels 1
+and 0 by
+
+$$
+t_+ = \frac{N_+ + 1}{N_+ + 2}, \qquad t_- = \frac{1}{N_- + 2}.
+$$
+
+These are the posterior means of a Bernoulli probability under a uniform prior after observing all-positive or
+all-negative outcomes (Laplace's rule of succession). They stop the fit from driving $\abs{A}$ to infinity when the
+calibration data are separable <Cite id="platt1999" />.
+
+**Held-out scores.** The scores used to fit $A$ and $B$ must come from data the classifier was not trained on: a
+separate calibration set, or out-of-fold scores from cross-validation. An SVM's training outputs cluster at the margins
+$\pm 1$ and would give a sigmoid that is far too steep.
+
+## Probability inputs and the identity
+
+When the input is itself a probability $s \in [0, 1]$, logistic calibration fits $\sigma(\gamma s + \delta)$, with
+$\sigma$ the logistic function. The identity map $s \mapsto s$ is not in this family, since the logit of the output
+would have to equal $\log\paren{s/(1 - s)}$, which is not linear in $s$. Applied to an already calibrated model, logistic
+calibration therefore makes it worse <Cite id="kull2017" />. The fix is to feed it the log-odds of the score,
+$\sigma(\gamma \log\frac{s}{1 - s} + \delta)$, which contains the identity at $\gamma = 1$, $\delta = 0$. That is the
+special case $a = b$ of <NoteLink to="beta-calibration">beta calibration</NoteLink>.
+
+## Cost
+
+Two parameters, fitted by a convex optimisation with a handful of Newton steps. Prediction costs one exponential.
+Because it has so few parameters, Platt scaling needs little calibration data. Niculescu-Mizil and Caruana found it
+beat isotonic regression for all nine learning methods they tried when the calibration set had fewer than roughly 200 to
+1000 cases, and it corrected the sigmoid-shaped distortions of boosted trees and SVMs well
+<Cite id="niculescumizil2005" />.
+
+## Trade-offs
+
+- **Right shape or wrong shape.** The sigmoid is exact only under the equal-variance Gaussian model. Distortions of
+  other shapes, such as the inverse-sigmoid curve of an underconfident model, or a skewed curve, cannot be fitted.
+  <NoteLink to="isotonic-calibration">Isotonic calibration</NoteLink> fits any monotone shape at the cost of more data.
+- **Monotone by construction.** With $A < 0$ the map is increasing, so rankings, the ROC curve and AUC are unchanged.
+- **Multiclass use.** Fitting one sigmoid per class against the rest and renormalising works, but ignores interactions
+  between classes. <NoteLink to="temperature-scaling">Temperature scaling</NoteLink> and
+  <NoteLink to="dirichlet-calibration">Dirichlet calibration</NoteLink> are the multiclass counterparts.
+
+## Worked example
+
+**From the Gaussian model.** Scores are $\Gauss(1, 1)$ for positives and $\Gauss(-1, 1)$ for negatives, with equal
+priors. The log-odds is $(1 - (-1))/1 \cdot f - (1 - 1)/2 + 0 = 2f$, so $A = -2$, $B = 0$. A score of $f = 0.5$ maps to
+$1/(1 + e^{-1}) = 0.731$, and a score of $0$, midway between the class means, maps to $0.5$.
+
+**Regularised targets.** A calibration set has $N_+ = 30$ positives and $N_- = 70$ negatives. The targets are
+$t_+ = 31/32 = 0.969$ and $t_- = 1/72 = 0.014$. Even a score far on the positive side is fitted towards $0.969$, not 1.

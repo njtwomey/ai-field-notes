@@ -1,0 +1,125 @@
+---
+title: Estimating calibration error
+kind: concept
+summary: 'The binned calibration error of a calibrated model is positive: sampling noise adds about $\sqrt{2Mv/(\pi n)}$ for $M$ bins, $n$ cases and mean variance $v$, while binning hides error. Subtracting each bin''s variance debiases the squared error.'
+tags: [calibration, metrics, estimation, uncertainty-quantification, worked-example]
+aliases: [ECE estimator, debiased ECE, plug-in calibration error, squared calibration error, ECE sweep, calibration error bias, test of calibration]
+requires: [calibration-error, reliability-diagrams-and-consistency-bars]
+related: [scoring-rule-decompositions, calibration-definitions, metric-confidence-intervals]
+references: [kumar2019, roelofs2022, brocker2012, naeini2015, vaicenavicius2019, silvafilho2023]
+status: draft
+updated: 2026-09-27
+---
+
+import { EceBias } from './EceBias'
+
+<Definition>
+For a binary model with prediction $p(\xvec)$, the **$L^r$ calibration error** is
+
+$$
+\text{CE}_r = \paren{\expect\abs{\expect[y \mid p(\xvec)] - p(\xvec)}^r}^{1/r}.
+$$
+
+$\text{CE}_1$ is the expected calibration error (ECE). The **plug-in** (binned) estimator groups $n$ test cases into bins
+$B_1, \dots, B_M$ and replaces $\expect[y \mid p]$ by the bin frequency $\bar y_m$ and $p$ by the bin mean $\bar p_m$:
+$\widehat{\text{ECE}} = \sum_m \frac{n_m}{n}\abs{\bar y_m - \bar p_m}$, and
+$\widehat{\text{CE}}_2^2 = \sum_m \frac{n_m}{n}(\bar y_m - \bar p_m)^2$ <Cite id="naeini2015" /> <Cite id="kumar2019" />.
+</Definition>
+
+## Two sources of error
+
+The binned estimator makes two approximations, and they push in opposite directions.
+
+- **Binning bias, downwards.** The estimator measures the calibration of a coarser model, one that predicts $\bar p_m$
+  for every case in bin $m$. Averaging within a bin cancels miscalibration of opposite signs. Kumar, Liang and Ma proved
+  that, in the population, the binned calibration error is never larger than the true calibration error of a model with
+  continuous outputs, and can be much smaller <Cite id="kumar2019" />.
+- **Estimation bias, upwards.** With a finite test set, $\bar y_m$ is a noisy estimate of the bin's true frequency. The
+  absolute value or square of a noisy gap is positive even when the true gap is zero, so a calibrated model receives a
+  positive ECE.
+
+For the moderate test sets common in practice the second effect usually dominates, especially for well-calibrated
+models <Cite id="roelofs2022" />.
+
+## Size of the upward bias
+
+Take bin $m$ with $n_m$ cases and write $\Delta_m = \expect[\bar y_m] - \bar p_m$ for its true gap. Given the
+predictions, $\bar y_m$ is an average of independent Bernoulli labels, with variance
+$\sigma_m^2 = \sum_{i \in B_m} p_i(1 - p_i)/n_m^2 \approx \bar p_m(1 - \bar p_m)/n_m$ for a calibrated model.
+
+**Squared error.** Since $\expect[X^2] = (\expect X)^2 + \var X$,
+
+$$
+\expect\brack{(\bar y_m - \bar p_m)^2} = \Delta_m^2 + \sigma_m^2.
+$$
+
+The plug-in squared error overestimates by $\sum_m (n_m/n)\sigma_m^2 \approx \sum_m \bar p_m(1 - \bar p_m)/n$. With
+roughly equal bin variances this is about $Mv/n$, where $v$ is the average of $p(1 - p)$. The bias grows linearly with
+the number of bins and falls as $1/n$.
+
+**Absolute error.** For a calibrated model, $\Delta_m = 0$ and $\bar y_m - \bar p_m$ is approximately
+$\Gauss(0, \sigma_m^2)$. A zero-mean normal variable has $\expect\abs{X} = \sigma\sqrt{2/\pi}$. With equal-mass bins,
+$n_m = n/M$ and $\sigma_m \approx \sqrt{vM/n}$, so
+
+$$
+\expect\brack{\widehat{\text{ECE}}} \approx \sqrt{\frac{2}{\pi}}\sqrt{\frac{vM}{n}} = \sqrt{\frac{2Mv}{\pi n}}.
+$$
+
+The bias of the ECE falls only as $1/\sqrt{n}$. Halving it needs four times as many test cases.
+
+## Debiased estimator
+
+For the squared error, the upward bias is a variance, and a variance can be estimated. If the cases in a bin share a
+probability $p$, then $\expect[\bar y_m(1 - \bar y_m)] = p(1 - p)(1 - 1/n_m)$, so $\bar y_m(1 - \bar y_m)/(n_m - 1)$ is
+unbiased for $\sigma_m^2 = p(1 - p)/n_m$. Subtracting it bin by bin gives the **debiased estimator**
+
+$$
+\widehat{\text{CE}}_{2,\text{db}}^2 = \sum_m \frac{n_m}{n}\brack{(\bar y_m - \bar p_m)^2 - \frac{\bar y_m(1 - \bar y_m)}{n_m -
+1}}
+$$
+
+<Cite id="brocker2012" /> <Cite id="kumar2019" />. It can be negative for a calibrated model, which is the price of
+being unbiased. Kumar et al. showed that it needs a number of test cases proportional to $\sqrt{M}$ to reach a given
+relative accuracy, where the plug-in estimator needs a number proportional to $M$ <Cite id="kumar2019" />.
+
+## Choosing the bins
+
+Roelofs, Cain, Shlens and Mozer measured the bias of estimators on simulated models whose true calibration error is
+known <Cite id="roelofs2022" />. Equal-mass bins had lower bias than equal-width bins for every binning estimator.
+They proposed **$\text{ECE}_\text{sweep}$**: use equal-mass bins, and choose the largest number of bins for which the
+bin frequencies $\bar y_1, \dots, \bar y_M$ are still non-decreasing. The idea is that the true calibration curve of a
+reasonable model is monotone, so a non-monotone binned curve is fitting noise. In their experiments the debiased
+estimator was best for perfectly calibrated models and $\text{ECE}_\text{sweep}$ for miscalibrated ones.
+
+<EceBias />
+
+## Testing calibration instead of estimating it
+
+A calibration error estimate needs a reference for how large it would be by chance. **Consistency resampling** provides
+one: redraw every label from $\Bern(p_i)$, recompute the estimate, and repeat. The resampled values form the
+distribution of the estimator under the hypothesis that the model is calibrated, and the proportion at least as large
+as the observed value is a $p$-value <Cite id="vaicenavicius2019" />. The same procedure works for confidence and
+classwise ECE <Cite id="silvafilho2023" />.
+
+## Worked example
+
+A perfectly calibrated model has predictions spread uniformly on $[0, 1]$, so $v = \expect[p(1 - p)] = 1/6$.
+
+| $n$ | bins $M$ | predicted mean ECE $\sqrt{2Mv/(\pi n)}$ | simulated mean ECE | simulated mean $\widehat{\text{CE}}_2^2$ | predicted $Mv/n$ |
+| --- | --- | --- | --- | --- | --- |
+| 100 | 10 | 0.103 | 0.101 | 0.0173 | 0.0167 |
+| 1000 | 15 | 0.040 | 0.039 | 0.0025 | 0.0025 |
+| 10000 | 15 | 0.013 | 0.012 | 0.00025 | 0.00025 |
+
+The simulated values average 300 test sets of equal-width bins. A calibrated model scored on 1000 cases with 15 bins
+reports an ECE near $0.04$. A published ECE of $0.03$ on such a test set is indistinguishable from perfect calibration.
+The debiased squared estimator averaged within $0.0004$ of zero at every size.
+
+## Pitfalls
+
+- **Comparing ECEs across test-set sizes or bin counts.** The bias differs, so the numbers are not comparable. Fix both,
+  or use a debiased estimator.
+- **Treating ECE as a loss to minimise.** ECE is not a proper scoring rule. Predicting the base rate everywhere gives an
+  ECE near zero and no information (see <NoteLink to="scoring-rule-decompositions">decompositions of proper scoring
+  rules</NoteLink>).
+- **Ignoring the binning bias.** A small binned ECE does not prove a continuous model is calibrated within bins.

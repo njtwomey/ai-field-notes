@@ -1,0 +1,120 @@
+---
+title: Beta calibration
+kind: technique
+summary: 'Beta calibration maps a binary score $s \in (0, 1)$ to $\sigma(a \ln s - b \ln(1 - s) + c)$. The family is the exact posterior when each class''s scores are beta-distributed, contains the identity ($a = b = 1$, $c = 0$), and is fitted as a logistic regression on $\ln s$ and $-\ln(1 - s)$.'
+tags: [calibration, classification, logistic-regression, distributions, worked-example]
+aliases: [beta calibration map, beta calibration family, Kull-Silva Filho-Flach calibration]
+requires: [platt-scaling, beta-distribution]
+related: [isotonic-calibration, dirichlet-calibration, distribution-calibration, logistic-regression]
+partOf: [classifier-calibration]
+references: [kull2017, kull2017b, silvafilho2023, songhao2019]
+status: draft
+updated: 2026-09-27
+---
+
+import { BetaFamily } from './BetaFamily'
+
+<Definition>
+For a binary classifier whose score $s \in (0, 1)$ estimates $P(y = 1 \mid \xvec)$, the **beta calibration map** is
+
+$$
+\mu(s; a, b, c) = \frac{1}{1 + 1 \big/ \paren{e^c\, s^a / (1 - s)^b}} = \sigma\paren{a \ln s - b \ln(1 - s) + c},
+$$
+
+where $\sigma$ is the logistic function and $a, b \ge 0$. The parameters are fitted by logistic regression of the label
+on the two features $\ln s$ and $-\ln(1 - s)$ over a calibration set. Kull, Silva Filho and Flach derived it from
+beta-distributed class-conditional scores <Cite id="kull2017" /> <Cite id="kull2017b" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="platt-scaling">Logistic calibration</NoteLink> fits $\sigma(\gamma s + \delta)$ to a probability score.
+Its derivation assumes that the scores of each class are Gaussian with a shared variance, which cannot be right for
+numbers confined to $[0, 1]$. Its shapes are all sigmoids in $s$. In particular, the identity map $s \mapsto s$ is not a
+member, so logistic calibration of an already calibrated classifier makes it worse <Cite id="kull2017" />. An
+underconfident model needs an inverse-sigmoid correction, which the logistic family also lacks.
+
+## Mechanism
+
+**Derivation from beta-distributed scores.** Model the score of each class with a beta distribution, the standard
+family on $[0, 1]$: $s \mid y = 1 \sim \Beta(\alpha_1, \beta_1)$ and $s \mid y = 0 \sim \Beta(\alpha_0, \beta_0)$, with
+prior $\pi_1 = P(y = 1)$ and $\pi_0 = 1 - \pi_1$. The beta density is
+$s^{\alpha - 1}(1 - s)^{\beta - 1} / B(\alpha, \beta)$, where $B$ is the beta function. The likelihood ratio is
+
+$$
+\frac{p(s \mid 1)}{p(s \mid 0)} = \frac{B(\alpha_0, \beta_0)}{B(\alpha_1, \beta_1)}\, s^{\alpha_1 - \alpha_0}\,(1 -
+s)^{\beta_1 - \beta_0}.
+$$
+
+The posterior odds are the prior odds times this ratio. Taking logs,
+
+$$
+\log\frac{P(y = 1 \mid s)}{P(y = 0 \mid s)} = a \ln s - b \ln(1 - s) + c,
+$$
+
+with $a = \alpha_1 - \alpha_0$, $b = \beta_0 - \beta_1$ and $c = \ln\frac{B(\alpha_0, \beta_0)}{B(\alpha_1, \beta_1)} +
+\ln\frac{\pi_1}{\pi_0}$. Applying the logistic function gives the map in the definition <Cite id="kull2017" />.
+
+**Which shapes it contains.**
+
+- **The identity.** At $a = b = 1$, $c = 0$ the log-odds is $\ln s - \ln(1 - s)$, the log-odds of $s$ itself, so
+  $\mu(s) = s$. A calibrated classifier stays calibrated. It arises, for instance, when positives are $\Beta(2, 1)$ and
+  negatives $\Beta(1, 2)$ with equal priors.
+- **Logistic in the log-odds.** When $a = b$, $a \ln s - a\ln(1 - s) = a \operatorname{logit}(s)$, so the map is
+  $\sigma(a \operatorname{logit}(s) + c)$: Platt scaling applied to the log-odds of the score. $a > 1$ gives sigmoids,
+  which sharpen an underconfident model; $a < 1$ gives inverse sigmoids, which soften an overconfident one.
+- **Asymmetric maps.** $a \ne b$ bends the two ends of the curve differently, which fits models that are overconfident
+  about one class only.
+
+**Monotonicity.** The derivative of the log-odds is $a/s + b/(1 - s)$. It is non-negative for all $s$ exactly when
+$a \ge 0$ and $b \ge 0$, and then the map is non-decreasing and preserves the classifier's ranking. An unconstrained fit can
+in principle return a negative coefficient, although this never happened in the authors' experiments
+<Cite id="kull2017" />.
+
+**Fitting.** Compute the features $u = \ln s$ and $v = -\ln(1 - s)$ for each calibration case and fit an ordinary
+logistic regression of $y$ on $(u, v)$ with an intercept. The coefficients are $a$, $b$ and $c$. No new optimiser is
+needed.
+
+**Midpoint parametrisation.** The score $m$ at which $\mu(m) = 1/2$ satisfies $c = b\ln(1 - m) - a\ln m$. Writing the
+family in terms of $(a, b, m)$ separates the steepness of the two ends from the location of the decision threshold.
+
+<BetaFamily />
+
+## Cost
+
+Three parameters, fitted by a logistic regression with two features. Like logistic calibration it needs little
+calibration data. On 41 UCI datasets, with naive Bayes and two AdaBoost variants as the base classifiers, beta
+calibration was significantly better than logistic calibration for naive Bayes and for the AdaBoost variant that pushes
+probabilities to the extremes, in both log loss and Brier score. In log loss it was also significantly better than
+isotonic calibration on those learners <Cite id="kull2017" />. If an unconstrained fit ever returns $a < 0$ or
+$b < 0$, the authors suggest fixing that coefficient at zero and refitting.
+
+## Trade-offs
+
+- **Still parametric.** Beta calibration cannot fit a non-monotone or wavy distortion. With a large calibration set,
+  <NoteLink to="isotonic-calibration">isotonic calibration</NoteLink> can do better.
+- **Scores at 0 or 1.** $\ln s$ or $\ln(1 - s)$ is infinite. Clip scores to $[\varepsilon, 1 - \varepsilon]$ before
+  computing the features.
+- **Binary only.** The multiclass extension replaces the two beta distributions by $K$ Dirichlet distributions, giving
+  <NoteLink to="dirichlet-calibration">Dirichlet calibration</NoteLink>.
+- **Beyond classification.** Song, Diethe, Kull and Flach use beta calibration maps to transform the predicted
+  cumulative distribution functions of a regressor (see <NoteLink to="distribution-calibration">distribution
+  calibration</NoteLink>) <Cite id="songhao2019" />.
+
+## Worked example
+
+**A calibrated model.** Positives have scores $\Beta(2, 1)$, with density $2s$, and negatives $\Beta(1, 2)$, with density
+$2(1 - s)$. With equal priors, $a = 2 - 1 = 1$, $b = 2 - 1 = 1$ and $c = \ln\frac{B(1, 2)}{B(2, 1)} = \ln 1 = 0$. The
+map is the identity: the posterior is $2s / (2s + 2(1 - s)) = s$.
+
+**A skewed model.** Positives have scores $\Beta(3, 1)$ and negatives $\Beta(1, 2)$, with equal priors. Then $a = 3 -
+1 = 2$, $b = 2 - 1 = 1$, and $c = \ln\frac{B(1, 2)}{B(3, 1)} = \ln\frac{1/2}{1/3} = \ln 1.5 = 0.405$. The map is
+$\mu(s) = \sigma(2\ln s - \ln(1 - s) + 0.405)$:
+
+| score $s$ | $0.2$ | $0.5$ | $0.8$ |
+| --- | --- | --- | --- |
+| $\mu(s)$ | $0.070$ | $0.429$ | $0.828$ |
+
+Each value equals the posterior computed directly from the two beta densities. At $s = 0.5$, for example, the densities
+are $3 \times 0.5^2 = 0.75$ and $2 \times 0.5 = 1$, so the posterior is $0.75 / 1.75 = 0.429$. The model is
+overconfident at the low end and underconfident at the high end, which no single sigmoid in $s$ can correct.

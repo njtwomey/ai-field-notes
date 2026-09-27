@@ -1,0 +1,124 @@
+---
+title: Precision-recall-gain curves
+kind: concept
+summary: 'Precision-recall-gain curves rescale precision and recall harmonically, $\text{precG} = (\text{prec} - \pi)/((1 - \pi)\text{prec})$, so the always-positive classifier sits at a corner. Interpolation becomes linear, $F_1$ isometrics straight, and the area relates to expected $F_1$.'
+tags: [roc-analysis, metrics, classification, information-retrieval, worked-example]
+aliases: [PRG curve, precision gain, recall gain, F-gain, AUPRG, area under the precision-recall-gain curve]
+requires: [precision-recall-curve-and-average-precision, roc-convex-hull]
+related: [roc-isometrics, precision-recall-and-f-score, evaluating-imbalanced-classifiers, roc-curve-and-auc]
+references: [flach2015, davis2006]
+status: draft
+updated: 2026-09-27
+---
+
+import { PrgCurves } from './PrgCurves'
+
+<Definition>
+Let $\pi$ be the proportion of positives. The **precision gain** and **recall gain** of a classifier are
+
+$$
+\text{precG} = \frac{\text{prec} - \pi}{(1 - \pi)\,\text{prec}} = 1 - \frac{\pi}{1 - \pi}\frac{\text{FP}}{\text{TP}}, \qquad
+\text{recG} = \frac{\text{rec} - \pi}{(1 - \pi)\,\text{rec}} = 1 - \frac{\pi}{1 - \pi}\frac{\text{FN}}{\text{TP}}.
+$$
+
+A **precision-recall-gain (PRG) curve** plots precision gain against recall gain for every threshold of a scoring
+classifier, within the unit square <Cite id="flach2015" />.
+</Definition>
+
+## What goes wrong with precision-recall curves
+
+Precision-recall analysis ignores true negatives, which suits retrieval and detection tasks with a vast number of
+irrelevant cases. The <NoteLink to="precision-recall-curve-and-average-precision">PR curve</NoteLink> is the natural
+plot, but it lacks the properties that make ROC analysis work <Cite id="flach2015" />:
+
+- **No universal baseline.** A random classifier has precision $\pi$, so the baseline depends on the class ratio.
+- **No linear interpolation.** Randomising between two classifiers does not give a point on the straight line between
+  them in PR space <Cite id="davis2006" />.
+- **No convex Pareto front.** The set of non-dominated points is not convex, so it cannot be read off by eye.
+- **An area without meaning.** The area under a PR curve averages precision arithmetically over recall. The $F$-score
+  combines precision and recall harmonically. The two scales disagree.
+
+Precision-recall-gain curves repair all four by a change of coordinates.
+
+## Deriving the gains
+
+The right baseline for $F$-scores is the always-positive classifier. A random classifier that predicts positive with
+probability $q$ has $\text{prec} = \pi$ and $\text{rec} = q$, so its $F_\beta$ grows with $q$ and is largest at $q = 1$,
+always positive, with $\text{prec} = \pi$ and $\text{rec} = 1$. Any classifier with precision or recall below $\pi$
+loses to this baseline in $F$-score. The useful range of both quantities is therefore $[\pi, 1]$.
+
+Precision and recall enter $F$-scores through their reciprocals, because $F_\beta$ is a weighted harmonic mean. So the
+range $[\pi, 1]$ is rescaled to $[0, 1]$ on a harmonic scale:
+
+$$
+x \mapsto \frac{1/x - 1/\pi}{1/1 - 1/\pi} = \frac{x - \pi}{(1 - \pi)\,x}.
+$$
+
+Applied to precision and recall this gives the gains in the definition. The count forms follow by substituting
+$\text{prec} = \text{TP}/(\text{TP} + \text{FP})$: then $1 - \text{prec} = \text{FP}/(\text{TP} + \text{FP})$, and
+
+$$
+\frac{\text{prec} - \pi}{(1 - \pi)\,\text{prec}} = 1 - \frac{\pi\,(1 - \text{prec})}{(1 - \pi)\,\text{prec}} = 1 -
+\frac{\pi}{1 - \pi}\frac{\text{FP}}{\text{TP}}.
+$$
+
+The same steps with recall give $\text{FN}/\text{TP}$. The always-positive classifier has $\text{prec} = \pi$ and
+$\text{rec} = 1$, so it sits at $(\text{recG}, \text{precG}) = (1, 0)$ for every $\pi$.
+
+## F-scores become linear
+
+Define the $F_\beta$ gain in the same way, $\text{FG}_\beta = (F_\beta - \pi)/\paren{(1 - \pi) F_\beta}$. With
+$F_\beta = (1 + \beta^2)\text{TP}/\paren{(1 + \beta^2)\text{TP} + \text{FP} + \beta^2\text{FN}}$, the same algebra gives
+
+$$
+\text{FG}_\beta = 1 - \frac{\pi}{1 - \pi}\frac{\text{FP} + \beta^2\,\text{FN}}{(1 + \beta^2)\,\text{TP}}.
+$$
+
+Adding the two gains with weights 1 and $\beta^2$,
+
+$$
+\text{precG} + \beta^2\,\text{recG} = (1 + \beta^2) - \frac{\pi}{1 - \pi}\frac{\text{FP} + \beta^2\,\text{FN}}{\text{TP}}
+= (1 + \beta^2)\,\text{FG}_\beta.
+$$
+
+So in PRG space every $F_\beta$ isometric is a straight line of slope $-\beta^2$. $F_1$ isometrics have slope $-1$, and
+$\text{FG}_1$ is the arithmetic mean of precision gain and recall gain. The baseline $F_1 = \pi$ is the minor diagonal
+from $(0, 1)$ to $(1, 0)$, whatever the class ratio <Cite id="flach2015" />.
+
+## The other ROC properties return
+
+- **Linear interpolation.** Randomising between two classifiers gives a point on the straight line between them in PRG
+  space, although the mixing weight along the line is not the randomisation probability: it is reweighted by the two
+  classifiers' true-positive counts <Cite id="flach2015" />.
+- **Convex Pareto front.** Because interpolation is linear, the non-dominated points form a convex hull, as in ROC space.
+  Every point on it is $F_\beta$-optimal for some $\beta$: the one whose isometric slope $-\beta^2$ is tangent there.
+- **A meaningful area.** Flach and Kull show that if operating points are chosen so that a particular reweighted
+  difference between recall and precision is uniformly distributed, the expected $\text{FG}_1$ is a linear function of
+  the area under the PRG curve, $\text{AUPRG}$. When the curve starts at precision gain 1, the expected $\text{FG}_1$ is
+  $\text{AUPRG}/2 + 1/4$ <Cite id="flach2015" />.
+- **Calibration for $F$-scores.** The segments of the PRG convex hull can be turned into scores that give, for each
+  case, the value of $\beta$ for which it lies on the $F_\beta$ decision boundary. That removes the need to tune a
+  separate threshold for each $\beta$.
+
+<PrgCurves />
+
+## Worked example
+
+With prevalence $\pi = 0.1$, a classifier has precision $0.5$ and recall $0.8$.
+
+- Precision gain: $(0.5 - 0.1)/(0.9 \times 0.5) = 0.889$.
+- Recall gain: $(0.8 - 0.1)/(0.9 \times 0.8) = 0.972$.
+- $F_1 = 2 \times 0.5 \times 0.8 / 1.3 = 0.615$, so $\text{FG}_1 = (0.615 - 0.1)/(0.9 \times 0.615) = 0.931$.
+- The mean of the two gains is $(0.889 + 0.972)/2 = 0.931$, as the linearity result requires.
+
+A precision of $0.5$ looks modest, but at $\pi = 0.1$ it is far above the baseline: the gain says the classifier
+removes 89% of the gap between the baseline and perfect precision, on the harmonic scale.
+
+## Pitfalls
+
+- **Gains depend on $\pi$.** Two PRG curves are comparable only on test sets with the same class ratio, or after
+  recomputing precision for a common $\pi$.
+- **Negative gains are cut off.** Operating points with precision or recall below $\pi$ fall outside the plot. They are
+  worse than always predicting positive for every $F_\beta$.
+- **Averaging $F_1$ over folds.** $F_1$ is not linear in the counts, so its arithmetic mean over cross-validation folds
+  has no clear meaning. $\text{FG}_1$ is linear on the harmonic scale and can be averaged <Cite id="flach2015" />.

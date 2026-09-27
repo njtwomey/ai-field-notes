@@ -1,0 +1,105 @@
+---
+title: Classifier calibration
+kind: overview
+summary: 'A classifier is calibrated if, among cases given probability vector $\svec$, the classes occur with frequencies $\svec$. Post-hoc calibration learns a map from the model''s scores to calibrated probabilities on held-out data: Platt, isotonic, beta, temperature or Dirichlet calibration.'
+tags: [calibration, classification, probabilistic, uncertainty-quantification]
+aliases: [probability calibration, post-hoc calibration, calibration map, calibrator, recalibration]
+requires: [proper-scoring-rule]
+related: [calibration-error, scoring-rule-decompositions, bayes-decision-rule, calibration-under-imbalance, reliability-diagrams-and-consistency-bars]
+references: [silvafilho2023, niculescumizil2005, zadrozny2001, zadrozny2002, guo2017, degroot1983]
+status: draft
+updated: 2026-09-27
+---
+
+import { CalibrationMaps } from './CalibrationMaps'
+
+<Definition>
+A probabilistic classifier outputs a probability vector $\svec = f(\xvec)$ over $K$ classes. It is **calibrated** if
+$P(y = k \mid f(\xvec) = \svec) = s_k$ for every output $\svec$ and class $k$. **Post-hoc calibration** keeps the trained
+model and learns a **calibration map** $\mu$ from its outputs to new probabilities $\mu(\svec)$, fitted on data not used
+to train the model. The survey by Silva Filho, Song, Perello-Nieto, Santos-Rodriguez, Kull and Flach is the reference for
+the whole topic <Cite id="silvafilho2023" />.
+</Definition>
+
+## Why calibrate
+
+A calibrated probability can be used directly in a decision. The <NoteLink to="bayes-decision-rule">Bayes decision
+rule</NoteLink> compares $P(y = 1 \mid \xvec)$ with $c_{\text{FP}}/(c_{\text{FP}} + c_{\text{FN}})$, a threshold that
+is correct only if the probability is. Calibrated outputs can be combined with other probabilities, adjusted to a new
+class prior with Bayes' theorem, and shown to people as risks.
+
+Many classifiers are not calibrated. Naive Bayes pushes probabilities towards 0 and 1 because it multiplies evidence from
+correlated features. Support vector machines and boosted trees output scores whose distortion is roughly sigmoidal
+<Cite id="niculescumizil2005" />. Modern neural networks trained with log loss tend to be overconfident <Cite id="guo2017" />. Resampling
+or reweighting the training data to fix class imbalance also distorts probabilities (see
+<NoteLink to="calibration-under-imbalance">calibration under class imbalance</NoteLink>).
+
+## What calibration can and cannot fix
+
+The <NoteLink to="scoring-rule-decompositions">decomposition of proper scoring rules</NoteLink> states the limit
+precisely. A model's expected log loss or Brier score is its calibration loss plus its refinement loss. A calibration map
+that sends each output $\svec$ to the class frequencies $\expect[\yvec \mid \svec]$ removes the calibration loss and
+leaves the refinement loss untouched. Calibration improves the probabilities a model reports. It cannot improve how well
+the model separates the classes, and a strictly increasing binary map leaves the ROC curve unchanged.
+
+## Components
+
+The notes in this chapter declare themselves part of this overview.
+
+- **Definitions.** For more than two classes, "calibrated" has at least three meanings, of increasing strength:
+  confidence, classwise and multiclass calibration (see <NoteLink to="calibration-definitions">definitions of classifier
+  calibration</NoteLink>).
+- **Binary calibration maps.** <NoteLink to="platt-scaling">Platt scaling</NoteLink> fits a logistic function of the
+  score. <NoteLink to="isotonic-calibration">Isotonic calibration</NoteLink> fits the best non-decreasing step function.
+  <NoteLink to="beta-calibration">Beta calibration</NoteLink> fits a three-parameter family derived from beta-distributed
+  scores, which contains the identity.
+- **Multiclass calibration maps.** <NoteLink to="temperature-scaling">Temperature scaling</NoteLink> divides a network's
+  logits by one fitted constant. <NoteLink to="dirichlet-calibration">Dirichlet calibration</NoteLink> fits a linear map
+  of log-probabilities, the multiclass analogue of beta calibration.
+- **Evaluation.** <NoteLink to="reliability-diagrams-and-consistency-bars">Reliability diagrams</NoteLink> show
+  calibration, and <NoteLink to="estimating-calibration-error">calibration error estimators</NoteLink> measure it; both
+  must allow for sampling noise.
+
+## Data flow
+
+1. Train the classifier on the training set.
+2. Score a separate **calibration set** with the trained classifier. Using the training set would calibrate the
+   classifier's fit to data it has memorised; cross-validated scores are an alternative when data are scarce
+   <Cite id="niculescumizil2005" />.
+3. Fit the calibration map by minimising a proper score (log loss for the parametric maps, squared error for isotonic
+   regression) on (score, label) pairs from the calibration set.
+4. At prediction time, pass each new score through the model and then the map.
+5. Evaluate on a test set with a proper score and a calibration diagnostic.
+
+Histogram binning, a simple nonparametric map, replaces each score by the fraction of positives among calibration
+cases in the same score bin <Cite id="zadrozny2001" />. Binary maps extend to many classes by calibrating each class
+against the rest and renormalising, as Zadrozny and Elkan proposed <Cite id="zadrozny2002" />. That handles each class's marginal probability separately and ignores how the
+classes interact, which is why genuinely multiclass maps such as Dirichlet calibration exist.
+
+<CalibrationMaps />
+
+## Choosing a map
+
+| map | parameters | contains identity | shapes | data needed |
+| --- | --- | --- | --- | --- |
+| logistic (Platt) | 2 | no, for probability inputs | sigmoids in the score | little |
+| beta | 3 | yes | sigmoids, inverse sigmoids, skewed maps | little |
+| isotonic | up to one per distinct score | yes | any non-decreasing step function | a lot |
+| temperature | 1 | yes | uniform sharpening or softening | little |
+| Dirichlet | $K(K + 1)$ | yes | linear maps of log-probabilities | moderate, with regularisation |
+
+Parametric maps generalise from few calibration cases but can be the wrong shape. Isotonic regression fits any monotone
+distortion but overfits small calibration sets. Niculescu-Mizil and Caruana found that Platt scaling beats isotonic regression
+for every one of nine learning methods when the calibration set is small, below roughly 200 to 1000 cases
+<Cite id="niculescumizil2005" />.
+
+## Pitfalls
+
+- **Calibrating on the training data.** The model's outputs on its own training cases are more confident than on new
+  cases. The map learns the wrong correction.
+- **Evaluating on the calibration set.** A map evaluated on the data it was fitted to looks better than it is.
+- **Calibration under shift.** A map fitted under one class prior or input distribution is not calibrated under
+  another. A change of prior alone can be corrected with Bayes' theorem (see
+  <NoteLink to="prior-shift-correction">prior-shift correction</NoteLink>); other shifts need new calibration data.
+- **Calibrated on average is not calibrated for a subgroup.** Calibration conditions on the model output, not on the
+  features. A model can be calibrated overall and miscalibrated for every subgroup of interest.

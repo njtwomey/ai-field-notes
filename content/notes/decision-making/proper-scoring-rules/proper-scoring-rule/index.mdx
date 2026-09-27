@@ -1,0 +1,152 @@
+---
+title: Proper scoring rules
+kind: concept
+summary: 'A scoring rule $S(\qvec, y)$ charges a forecaster who reported $\qvec$ when $y$ occurred. It is proper if the expected charge under any true distribution $\pvec$ is minimised by reporting $\qvec = \pvec$, and strictly proper if only by $\pvec$. Log loss and Brier score are strictly proper.'
+tags: [scoring-rules, decision-theory, calibration, probabilistic, worked-example]
+aliases: [scoring rule, propriety, strictly proper, improper scoring rule, spherical score, Schervish representation, linear score]
+requires: [expectation, bayes-decision-rule]
+related: [log-loss-and-brier-score, bregman-divergences-and-scoring-rules, scoring-rule-decompositions, crps-and-interval-scores, kl-divergence, threshold-choice-methods]
+references: [gneiting2007, savage1971, schervish1989, brier1950]
+status: draft
+updated: 2026-09-27
+---
+
+import { ExpectedScore } from './ExpectedScore'
+
+<Definition>
+Let $\Ycal = \set{1, \dots, K}$ be a finite set of outcomes and $\qvec$ a probability vector over it. A **scoring rule**
+$S(\qvec, y)$ is the loss charged for reporting $\qvec$ when outcome $y$ occurs. Its expected value under a distribution
+$\pvec$ is $S(\qvec, \pvec) = \sum_y p_y\, S(\qvec, y)$. The rule is **proper** if
+
+$$
+S(\pvec, \pvec) \le S(\qvec, \pvec) \quad \text{for all } \pvec, \qvec,
+$$
+
+and **strictly proper** if equality holds only when $\qvec = \pvec$ <Cite id="gneiting2007" />.
+</Definition>
+
+This note orients scores as losses, lower being better, which is the convention in machine learning. Gneiting and
+Raftery use the opposite orientation, with positive rewards; propriety then means maximisation at $\qvec = \pvec$
+<Cite id="gneiting2007" />.
+
+## Why propriety matters
+
+A forecaster who believes the outcome has distribution $\pvec$ and is judged by $S$ reports whatever minimises their
+expected score. Under a proper rule that report is $\pvec$ itself, so honesty is optimal. Under a strictly proper rule
+it is the only optimal report. Propriety makes a scoring rule an incentive to report beliefs as they are
+<Cite id="savage1971" />.
+
+The same property makes a scoring rule a sound training loss. Minimising the expected score
+$\expect_{\xvec, y}\brack{S(\qvec(\xvec), y)}$ over all functions $\qvec(\xvec)$ splits into minimising
+$S(\qvec(\xvec), P(\cdot \mid \xvec))$ separately at each $\xvec$. For a strictly proper rule the unique minimiser is the
+true conditional distribution, $\qvec(\xvec) = P(\cdot \mid \xvec)$. Training a classifier by log loss or Brier score
+therefore targets calibrated probabilities, given a flexible enough model and enough data.
+
+## Log loss is strictly proper
+
+The log loss is $S(\qvec, y) = -\log q_y$. The excess expected loss of reporting $\qvec$ instead of $\pvec$ is
+
+$$
+S(\qvec, \pvec) - S(\pvec, \pvec) = -\sum_y p_y \log q_y + \sum_y p_y \log p_y = \sum_y p_y \log\frac{p_y}{q_y} = \KL(\pvec
+\,\Vert\, \qvec).
+$$
+
+The Kullback–Leibler divergence is non-negative by Jensen's inequality applied to the concave logarithm:
+$-\KL(\pvec \,\Vert\, \qvec) = \sum_y p_y \log(q_y/p_y) \le \log \sum_y p_y (q_y / p_y) = \log \sum_y q_y \le 0$. Since
+the logarithm is strictly concave, equality requires $q_y / p_y$ to be constant over the outcomes with $p_y > 0$, and
+that constant must be 1, so $\qvec = \pvec$. The log loss is strictly proper.
+
+## The Brier score is strictly proper
+
+The Brier score is $S(\qvec, y) = \norm{\qvec - \evec_y}^2$, where $\evec_y$ is the one-hot vector for outcome $y$
+<Cite id="brier1950" />. Since $\expect_{y \sim \pvec}[\evec_y] = \pvec$, adding and subtracting $\pvec$ inside the norm
+gives
+
+$$
+S(\qvec, \pvec) = \expect_y\norm{(\qvec - \pvec) + (\pvec - \evec_y)}^2 = \norm{\qvec - \pvec}^2 + 2\inner{\qvec -
+\pvec}{\expect_y[\pvec - \evec_y]} + \expect_y\norm{\pvec - \evec_y}^2.
+$$
+
+The middle term is zero because $\expect_y[\evec_y] = \pvec$. So $S(\qvec, \pvec) - S(\pvec, \pvec) = \norm{\qvec -
+\pvec}^2$, which is positive for every $\qvec \ne \pvec$.
+
+## The spherical score is strictly proper
+
+The spherical loss is $S(\qvec, y) = 1 - q_y / \norm{\qvec}$. Its expected value is $1 - \inner{\pvec}{\qvec} /
+\norm{\qvec}$. By the Cauchy–Schwarz inequality $\inner{\pvec}{\qvec} \le \norm{\pvec}\norm{\qvec}$, with equality only
+when $\qvec$ is a positive multiple of $\pvec$. Two probability vectors that are multiples of each other are equal. So
+the expected loss is at least $1 - \norm{\pvec}$ and reaches it only at $\qvec = \pvec$.
+
+## An improper rule: the linear score
+
+The linear loss $S(\qvec, y) = 1 - q_y$ looks reasonable: it charges less the more probability the report gave to what
+happened. Its expected value is $1 - \inner{\pvec}{\qvec}$, which is linear in $\qvec$ and is minimised at a vertex of the
+simplex: put all probability on the most likely outcome. The linear loss rewards overconfidence. For two outcomes it
+equals the absolute error $\abs{y - q}$ between the label and the reported probability of the positive class, so mean
+absolute error of probabilities is improper too.
+
+<ExpectedScore />
+
+## Every binary proper rule is a mixture of cost-weighted losses
+
+For two outcomes write $q$ for the reported probability of $y = 1$. For a cost proportion $c \in (0, 1)$, a false
+positive costs $c$ and a false negative $1 - c$. The Bayes decision rule predicts positive when the probability is at
+least $c$ (see <NoteLink to="bayes-decision-rule">Bayes decision rule</NoteLink>). Charging a report $q$ the cost of
+acting on it gives the **cost-weighted loss**
+
+$$
+\ell_c(q, y) = c\,\indicator[y = 0,\ q \ge c] + (1 - c)\,\indicator[y = 1,\ q < c].
+$$
+
+Each $\ell_c$ is proper. Under a true probability $p$, reporting $q$ leads to predicting positive if $q \ge c$, with
+expected cost $c(1 - p)$, or negative, with expected cost $(1 - c)p$. The first is no worse exactly when $p \ge c$, and
+the report $q = p$ makes that choice. So $q = p$ minimises the expected value of every $\ell_c$ at once.
+
+A mixture $S(q, y) = \int_0^1 \ell_c(q, y)\, \nu(dc)$ with a non-negative weight $\nu$ is therefore proper, because the
+honest report minimises every term of the integral. Schervish showed the converse: every proper scoring rule for a
+binary outcome is such a mixture, up to terms that do not depend on the report <Cite id="schervish1989" />. If $\nu$
+puts positive weight on every interval, the rule is strictly proper. The two common rules are:
+
+- **Brier score**, $\nu(dc) = 2\,dc$: for $y = 1$, $\int_q^1 2(1 - c)\,dc = (1 - q)^2$; for $y = 0$,
+  $\int_0^q 2c\,dc = q^2$.
+- **Log loss**, $\nu(dc) = dc / \paren{c(1 - c)}$: for $y = 1$, $\int_q^1 dc / c = -\ln q$; for $y = 0$,
+  $\int_0^q dc / (1 - c) = -\ln(1 - q)$.
+
+A proper score is thus an average decision cost, over a distribution of cost ratios the forecaster does not know in
+advance. The Brier score weights all cost proportions equally. The log loss weights extreme cost proportions, near 0
+and 1, much more heavily, which is why it punishes confident mistakes so hard (see
+<NoteLink to="threshold-choice-methods">threshold choice methods</NoteLink>).
+
+## Worked example
+
+An event has true probability $p = 0.7$. Three reports are scored in expectation, using the two-class Brier score
+$\norm{\qvec - \evec_y}^2$:
+
+| report $\qvec$ | log loss | Brier score | linear loss |
+| --- | --- | --- | --- |
+| $(0.7, 0.3)$, honest | $0.611$ | $0.420$ | $0.420$ |
+| $(0.8, 0.2)$ | $0.639$ | $0.440$ | $0.380$ |
+| $(1, 0)$ | $\infty$ | $0.600$ | $0.300$ |
+
+The log and Brier losses are lowest for the honest report. The Brier excess for $(0.8, 0.2)$ is
+$\norm{\qvec - \pvec}^2 = 0.1^2 + 0.1^2 = 0.02$, as derived above. The linear loss prefers the exaggerated reports and
+is lowest for certainty.
+
+## Beyond finite outcomes
+
+For a real-valued outcome with predictive distribution $F$, the log score $-\log f(y)$ of the density and the
+continuous ranked probability score are strictly proper among distributions with a density and a finite mean,
+respectively (see <NoteLink to="crps-and-interval-scores">CRPS and interval scores</NoteLink>). Gneiting and Raftery give
+the general theory, which characterises every proper scoring rule through a convex function of the reported
+distribution <Cite id="gneiting2007" />; the note on <NoteLink to="bregman-divergences-and-scoring-rules">Bregman
+divergences and scoring rules</NoteLink> derives that representation.
+
+## Pitfalls
+
+- **Propriety is a property of the expectation.** A single case can score better with a dishonest report. The guarantee
+  is about the average over outcomes drawn from the true distribution.
+- **Proper is not the same as informative.** Reporting the base rate for every case is honest if that is all one knows,
+  and scores well on calibration while carrying no information about individual cases. The
+  <NoteLink to="scoring-rule-decompositions">decompositions</NoteLink> of a proper score separate the two.
+- **Accuracy, ECE and AUC are not proper scoring rules.** None of them is minimised in expectation only by the true
+  probabilities.

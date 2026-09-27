@@ -1,0 +1,100 @@
+---
+title: Reliability diagrams and consistency bars
+kind: concept
+summary: 'A reliability diagram plots, for bins of predicted probability, the observed frequency of the event against the mean prediction; a calibrated model lies on the diagonal. Consistency bars show how far a calibrated model strays by chance, from labels resampled from its predictions.'
+tags: [calibration, metrics, probabilistic, uncertainty-quantification, worked-example]
+aliases: [consistency bars, consistency resampling, calibration plot, calibration curve, reliability curve, confidence reliability diagram, classwise reliability diagram]
+requires: [calibration-error, binomial-distribution]
+related: [estimating-calibration-error, classifier-calibration, calibration-definitions, scoring-rule-decompositions]
+references: [brocker2007, murphy1977, degroot1983, niculescumizil2005, silvafilho2023]
+status: draft
+updated: 2026-09-27
+---
+
+import { ConsistencyBars } from './ConsistencyBars'
+
+<Definition>
+Split the predicted probabilities $p_1, \dots, p_n$ of a binary event into bins $B_1, \dots, B_M$. For each bin, let
+$\bar p_m$ be the mean prediction and $\bar y_m$ the observed frequency of the event. A **reliability diagram** plots
+$\bar y_m$ against $\bar p_m$. A calibrated model's points lie near the diagonal <Cite id="murphy1977" />. **Consistency
+bars** mark, for each bin, the range of $\bar y_m$ that a calibrated model would produce by chance, obtained by redrawing
+every label from $\Bern(p_i)$ <Cite id="brocker2007" />.
+</Definition>
+
+## Reading the diagram
+
+The diagonal is perfect calibration: the event happens in a fraction $p$ of the cases predicted $p$. Points below the
+diagonal at high predictions and above it at low ones form a curve flatter than the diagonal: the model is
+**overconfident**, its probabilities too close to 0 and 1. A curve steeper than the diagonal means **underconfidence**.
+A curve shifted up or down at every point means the model under- or overestimates the base rate. The diagram shows where
+a model is miscalibrated, which a single number such as the expected calibration error cannot (see
+<NoteLink to="calibration-error">calibration error</NoteLink>).
+
+The diagram shows calibration, not quality. A model that predicts the base rate for every case puts one point on the
+diagonal. A histogram of the predictions beneath the diagram shows how spread out they are, their sharpness, and how
+many cases stand behind each point <Cite id="niculescumizil2005" />.
+
+## Construction choices
+
+**Where to put each point.** Plotting $\bar y_m$ at the centre of bin $m$ instead of at the mean prediction $\bar p_m$
+can make a calibrated model look miscalibrated by up to half a bin width, whenever the predictions within a bin are not
+spread evenly <Cite id="brocker2007" />. Plot at $\bar p_m$.
+
+**Equal width or equal mass.** Equal-width bins on $[0, 1]$ are easy to read but leave bins with few cases where
+predictions are rare, often at the extremes. Equal-mass bins, each with $n/M$ cases, give every point the same precision
+but crowd the points where predictions are dense.
+
+**How many bins.** More bins show more detail and give each point fewer cases. With $n_m$ cases in a bin, the standard
+deviation of $\bar y_m$ is roughly $\sqrt{\bar p_m(1 - \bar p_m)/n_m}$. Ten bins and a few hundred cases per bin is
+a common compromise.
+
+## Consistency bars
+
+A point off the diagonal is evidence of miscalibration only if it is further off than sampling noise would put it.
+Bröcker and Smith proposed **consistency resampling** <Cite id="brocker2007" />:
+
+1. Keep the predictions $p_1, \dots, p_n$ and the binning fixed.
+2. Draw surrogate labels $\tilde y_i \sim \Bern(p_i)$ independently. These are labels from a world in which the model is
+   exactly calibrated.
+3. Compute the surrogate observed frequency $\tilde{\bar y}_m$ for each bin.
+4. Repeat many times. The 5% and 95% quantiles of $\tilde{\bar y}_m$ form the bar for bin $m$.
+
+A point outside its bar is unlikely under calibration at that bin. Each bar is a pointwise 90% interval, so with ten
+bins one bar is expected to be missed by chance even for a calibrated model. Bröcker and Smith also plot the diagram on
+**probability paper**, rescaling the $y$-axis so that every bar has the same length, which makes departures comparable
+across bins.
+
+The bars have a closed-form approximation. Given the predictions in bin $m$, the surrogate frequency is an average of
+independent Bernoulli variables, with mean $\bar p_m$ and variance $\sum_{i \in B_m} p_i(1 - p_i)/n_m^2$. For a bin of
+reasonable size a normal approximation gives the bar $\bar p_m \pm 1.645\sqrt{\sum_{i \in B_m} p_i(1 - p_i)}/n_m$.
+
+<ConsistencyBars />
+
+## Multiclass diagrams
+
+For $K$ classes there are two common one-dimensional diagrams <Cite id="silvafilho2023" />. A **confidence reliability
+diagram** bins the top-class probability and plots the accuracy of the predicted class, which checks confidence
+calibration. A **classwise reliability diagram** draws one diagram per class, class $k$ against the rest, which checks
+classwise calibration. Neither checks the whole probability vector (see <NoteLink to="calibration-definitions">definitions
+of classifier calibration</NoteLink>).
+
+## Worked example
+
+A bin holds cases with predictions close to $0.3$, and the event occurred in 40% of them.
+
+- **With 40 cases.** The standard deviation of the observed frequency under calibration is
+  $\sqrt{0.3 \times 0.7/40} = 0.072$. The 90% bar is $0.3 \pm 1.645 \times 0.072 = [0.18, 0.42]$. The observed $0.4$ is
+  inside: no evidence of miscalibration in this bin.
+- **With 400 cases.** The standard deviation is $\sqrt{0.21/400} = 0.023$ and the bar is $[0.26, 0.34]$. The same
+  observed $0.4$ is well outside: the model underestimates the probability in this bin.
+
+The point is in the same place in both diagrams. Only the bars tell the two situations apart.
+
+## Pitfalls
+
+- **Reading noise as miscalibration.** Without bars, small bins at the extremes produce wild points that look like
+  miscalibration.
+- **Hiding miscalibration inside bins.** A bin averages over its cases. A model that is overconfident in one half of a
+  bin and underconfident in the other can put a point on the diagonal.
+- **Drawing on the calibration set.** A diagram of a calibrated model drawn on the data used to fit its calibration map
+  is optimistic. Use held-out data.

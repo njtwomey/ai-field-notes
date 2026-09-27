@@ -1,0 +1,111 @@
+---
+title: Definitions of classifier calibration
+kind: concept
+summary: 'For $K$ classes, calibration has three meanings. Confidence calibration checks the top probability against accuracy, classwise calibration each class probability, and multiclass calibration the whole vector: $P(y = k \mid \svec) = s_k$. The last implies the others.'
+tags: [calibration, classification, probabilistic, worked-example]
+aliases: [classwise calibration, multiclass calibration, canonical calibration, calibration in the strong sense, top-label calibration, canonical calibration function]
+requires: [classifier-calibration, law-of-total-expectation]
+related: [calibration-error, estimating-calibration-error, dirichlet-calibration, temperature-scaling, distribution-calibration]
+partOf: [classifier-calibration]
+references: [silvafilho2023, kull2019, guo2017, zadrozny2002, vaicenavicius2019, widmann2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $\svec = f(\xvec)$ be the probability vector a classifier outputs over classes $1, \dots, K$, and $\hat y =
+\argmax_k s_k$ its predicted class. The classifier is
+
+- **confidence-calibrated** if $P(y = \hat y \mid s_{\hat y} = \alpha) = \alpha$ for every $\alpha$;
+- **classwise-calibrated** if $P(y = k \mid s_k = v) = v$ for every class $k$ and value $v$;
+- **multiclass-calibrated** if $P(y = k \mid \svec) = s_k$ for every $k$ and every output vector $\svec$.
+
+For $K > 2$ these conditions are increasingly strong <Cite id="silvafilho2023" /> <Cite id="kull2019" />.
+</Definition>
+
+## Three questions about one output
+
+A calibrated output can be taken at face value. The definitions differ in which face value they check.
+
+**Confidence calibration** checks only the top-label probability. Among all cases where the model's highest probability
+is 0.8, it should be right 80% of the time. Guo et al. used this definition, without naming it, to show that modern
+neural networks are overconfident <Cite id="guo2017" />. It is the condition behind the confidence ECE.
+
+**Classwise calibration** treats each class as its own binary problem, class $k$ against the rest. Among cases whose
+probability for class 3 is 0.2, class 3 should occur 20% of the time, whatever the other entries of the vector. It is
+the condition that one-against-rest binary calibration targets <Cite id="zadrozny2002" />.
+
+**Multiclass calibration** conditions on the whole vector. Among cases that receive the output $(0.6, 0.3, 0.1)$, the
+three classes should occur in proportions $0.6$, $0.3$ and $0.1$. This is also called calibration in the strong sense
+<Cite id="widmann2019" />, or canonical calibration. The function $\svec \mapsto \expect[\yvec \mid \svec]$ is the
+canonical calibration function <Cite id="vaicenavicius2019" />; the model is multiclass-calibrated exactly when that
+function is the identity.
+
+## The multiclass condition implies the other two
+
+Both implications follow from the law of total expectation, averaging a conditional probability over a finer
+conditioning.
+
+**Classwise.** The event $s_k = v$ is a union of output vectors $\svec$ with $k$-th entry $v$. For each such vector,
+multiclass calibration gives $P(y = k \mid \svec) = s_k = v$. Averaging over the vectors in the event,
+
+$$
+P(y = k \mid s_k = v) = \expect\brack{P(y = k \mid \svec) \mid s_k = v} = \expect\brack{s_k \mid s_k = v} = v.
+$$
+
+**Confidence.** The predicted class $\hat y$ and its probability $s_{\hat y}$ are functions of $\svec$. For each vector,
+$P(y = \hat y \mid \svec) = s_{\hat y}$. Averaging over the vectors whose top probability is $\alpha$ gives
+$P(y = \hat y \mid s_{\hat y} = \alpha) = \alpha$.
+
+The converses fail. Classwise calibration conditions on one coordinate at a time and confidence calibration on one
+summary; each pools vectors that multiclass calibration keeps apart.
+
+## Counterexamples
+
+**Confidence-calibrated, not classwise-calibrated.** Ten cases all receive $\svec = (0.6, 0.3, 0.1)$, and their classes
+occur 6, 1 and 3 times. The top class is right 6 times in 10, matching the confidence $0.6$. But class 2 occurs with
+frequency $0.1$ where the model says $0.3$, and class 3 with frequency $0.3$ where it says $0.1$. A decision that depends
+on class 3's probability, such as whether to order a test for it, would be made on wrong numbers.
+
+**Classwise-calibrated, not confidence-calibrated.** Silva Filho et al. give forty cases in four groups of ten
+<Cite id="silvafilho2023" />:
+
+| output $\svec$ | class counts |
+| --- | --- |
+| $(0.3, 0.3, 0.4)$ | $(4, 2, 4)$ |
+| $(0.4, 0.3, 0.3)$ | $(3, 4, 3)$ |
+| $(0.4, 0.6, 0)$ | $(5, 5, 0)$ |
+| $(0.3, 0.6, 0.1)$ | $(2, 7, 1)$ |
+
+For class 1, the twenty cases with $s_1 = 0.3$ contain $4 + 2 = 6$ of class 1, a frequency of $0.3$, and the twenty with
+$s_1 = 0.4$ contain $3 + 5 = 8$, a frequency of $0.4$. Classes 2 and 3 check out the same way. For confidence, the
+twenty cases with top probability $0.6$ are right $5 + 7 = 12$ times, a frequency of $0.6$. The twenty with top
+probability $0.4$ are right $4 + 3 = 7$ times, a frequency of $0.35$, not $0.4$. The model is classwise-calibrated
+and not confidence-calibrated. Classwise calibration pools every case with $s_1 = 0.4$, including $(0.4, 0.6, 0)$ where
+class 1 is not the prediction; confidence calibration looks only at the cases where $0.4$ is the largest entry.
+
+## Two classes
+
+With $K = 2$, $s_2 = 1 - s_1$, so conditioning on $s_1$ is conditioning on the whole vector. Classwise and multiclass
+calibration coincide. Confidence calibration is still weaker, because the event "top probability is $0.7$" pools the
+outputs $(0.7, 0.3)$ and $(0.3, 0.7)$. Take equal numbers of cases with each output. If class 1 occurs with frequency
+$0.8$ among the first and $0.4$ among the second, the top-label accuracy is $0.8$ and $0.6$, which average to $0.7$.
+The model is confidence-calibrated, but its probabilities for class 1 are wrong in both groups.
+
+## Which definition to use
+
+- **Decisions on the top label only**, such as accepting or rejecting a prediction with the
+  <NoteLink to="reject-option">reject option</NoteLink>, need confidence calibration.
+- **Decisions that weigh several classes**, such as cost-sensitive decisions with a full cost matrix, need the whole
+  vector to be right, which is multiclass calibration. Classwise calibration is a practical proxy that can be checked
+  class by class.
+- **Estimating** multiclass calibration means estimating $\expect[\yvec \mid \svec]$ over a $(K - 1)$-dimensional
+  simplex. Binning fails beyond a few classes because most bins are empty. Confidence and classwise calibration reduce
+  the problem to one dimension (see <NoteLink to="estimating-calibration-error">estimating calibration error</NoteLink>).
+
+## Pitfalls
+
+- **Reporting only confidence ECE.** Temperature scaling can drive confidence ECE close to zero while classwise
+  miscalibration remains (see <NoteLink to="dirichlet-calibration">Dirichlet calibration</NoteLink>).
+- **Calibration is about the output, not the input.** All three definitions condition on the model's output. None says
+  the probabilities are right for a subgroup defined by the features.

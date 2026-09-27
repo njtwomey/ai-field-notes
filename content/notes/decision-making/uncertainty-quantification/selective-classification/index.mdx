@@ -1,0 +1,98 @@
+---
+title: Selective classification
+kind: concept
+summary: 'A selective classifier pairs a classifier with a selection function that decides whether to predict. It trades coverage, the fraction of cases accepted, against selective risk, the error on accepted cases. A confidence threshold set on held-out data can guarantee a target risk.'
+tags: [uncertainty-quantification, classification, decision-theory, worked-example]
+aliases: [selective prediction, risk-coverage curve, selective risk, abstaining classifier with guarantees, selection with guaranteed risk, SGR, AURC]
+requires: [reject-option, binomial-distribution]
+related: [conformal-prediction, aleatoric-and-epistemic-uncertainty, classifier-calibration, metric-confidence-intervals]
+references: [elyaniv2010, geifman2017, chow1970, gal2016]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **selective classifier** is a pair $(f, g)$ of a classifier $f$ and a selection function $g : \Xcal \to \set{0, 1}$. It
+predicts $f(\xvec)$ when $g(\xvec) = 1$ and abstains otherwise. Its **coverage** is $\phi(f, g) = \expect[g(\xvec)]$, the
+probability of predicting, and its **selective risk** is
+
+$$
+R(f, g) = \frac{\expect\brack{\ell(f(\xvec), y)\, g(\xvec)}}{\phi(f, g)},
+$$
+
+the expected loss on the cases it accepts. The **risk-coverage curve** plots selective risk against coverage
+<Cite id="elyaniv2010" /> <Cite id="geifman2017" />.
+</Definition>
+
+## Costs or constraints
+
+Chow's <NoteLink to="reject-option">reject option</NoteLink> fixes a cost $d$ for abstaining and minimises expected
+loss. Many applications cannot name that cost. It is easier to say "the accepted predictions must have at most 2%
+error" or "the system must handle at least 70% of cases". Selective classification states the problem that way: maximise
+coverage subject to a bound on selective risk, or minimise selective risk at a given coverage.
+
+The two views meet. Chow's rule with cost $d$ minimises error plus $d$ times the reject rate; at the reject rate it
+produces, no rule has a lower error. So if the true posterior were known, thresholding its largest entry would trace the
+best possible risk-coverage curve <Cite id="chow1970" />.
+
+## Confidence scores and thresholds
+
+In practice $g$ thresholds a **confidence-rate function** $\kappa(\xvec)$: $g_\theta(\xvec) = \indicator[\kappa(\xvec) \ge
+\theta]$. Only the ordering of cases by $\kappa$ matters. Common choices are the largest softmax probability (softmax
+response) and agreement across Monte Carlo dropout samples <Cite id="gal2016" />. Geifman and El-Yaniv found the two
+nearly equivalent on CIFAR-10 and CIFAR-100, and softmax response clearly better on ImageNet <Cite id="geifman2017" />.
+
+A good $\kappa$ ranks the cases the classifier gets wrong below the ones it gets right. That is a ranking property, not
+calibration: a confidence score that is badly calibrated but correctly ordered gives the same risk-coverage curve as a
+calibrated one. The area under the risk-coverage curve (AURC) summarises the ranking over all thresholds.
+
+## Guaranteeing a selective risk
+
+Given a classifier $f$, a confidence function $\kappa$, a labelled set of $m$ held-out cases, a target risk $r^*$ and a
+confidence level $\delta$, the **selection with guaranteed risk** (SGR) algorithm finds a threshold $\theta$ such that
+
+$$
+P\paren{R(f, g_\theta) > r^*} < \delta,
+$$
+
+with the probability over the draw of the held-out set <Cite id="geifman2017" />.
+
+**The bound for one threshold.** Fix $\theta$. The accepted held-out cases are an independent sample from the accepted
+region, so their number of errors is binomial with the true selective risk as its success probability. If $n_\theta$
+cases are accepted and $e$ of them are misclassified, the one-sided upper confidence bound $b^*$ is the solution of
+
+$$
+\sum_{j=0}^{e} \binom{n_\theta}{j} b^j (1 - b)^{n_\theta - j} = \delta.
+$$
+
+Then the true selective risk exceeds $b^*$ with probability below $\delta$ <Cite id="geifman2017" />.
+
+**Searching over thresholds.** Checking many thresholds on the same data would inflate the error probability. SGR sorts
+the held-out cases by $\kappa$ and binary-searches for the lowest threshold whose bound is below $r^*$. It examines
+$k = \lceil \log_2 m \rceil$ thresholds and uses $\delta/k$ for each bound, so by the union bound the returned threshold
+satisfies the guarantee with probability at least $1 - \delta$.
+
+## Worked example
+
+A classifier is evaluated on $m = 2000$ held-out cases, with target risk $r^* = 0.04$ and $\delta = 0.001$. The binary
+search takes $k = \lceil \log_2 2000 \rceil = 11$ steps, so each bound uses $\delta/11 = 9.1 \times 10^{-5}$.
+
+| accepted cases | coverage | errors | empirical risk | upper bound $b^*$ | meets $r^* = 0.04$ |
+| --- | --- | --- | --- | --- | --- |
+| 500 | 0.25 | 5 | 0.010 | 0.039 | yes |
+| 1200 | 0.60 | 24 | 0.020 | 0.040 (0.0397) | yes |
+| 1500 | 0.75 | 45 | 0.030 | 0.050 | no |
+
+The threshold that accepts 1200 cases has twice the empirical risk of the one that accepts 500, but more cases make its
+bound almost as tight. It meets the target at 60% coverage. The threshold accepting 1500 cases has an empirical risk of
+3%, below the target, but its bound of 5% does not certify it.
+
+## Pitfalls
+
+- **Empirical risk below target is not a guarantee.** With few accepted cases, the bound can be far above the empirical
+  risk. Report the bound, not only the observed error.
+- **The guarantee is for the held-out distribution.** Under distribution shift, both the ranking quality of $\kappa$ and
+  the error rate among accepted cases change.
+- **Confidence is not correctness for unfamiliar inputs.** A network can be confident on inputs unlike its training data.
+  Selection based on softmax response inherits that failure (see
+  <NoteLink to="aleatoric-and-epistemic-uncertainty">aleatoric and epistemic uncertainty</NoteLink>).

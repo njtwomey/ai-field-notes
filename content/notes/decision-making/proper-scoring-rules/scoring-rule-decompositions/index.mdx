@@ -1,0 +1,160 @@
+---
+title: Decompositions of proper scoring rules
+kind: concept
+summary: 'A proper score''s expectation splits into calibration loss $\expect[d(S, C)]$ plus refinement loss, where $C = \expect[Y \mid S]$ and $d$ is the rule''s divergence. Refinement splits into grouping and irreducible loss; for the Brier score this gives Murphy''s three terms.'
+tags: [scoring-rules, calibration, decompositions, uncertainty-quantification, worked-example]
+aliases: [calibration-refinement decomposition, calibration loss, refinement loss, grouping loss, irreducible loss, epistemic loss, adjustment loss, reliability resolution uncertainty, Kull-Flach decomposition]
+requires: [proper-scoring-rule]
+related: [log-loss-and-brier-score, bregman-divergences-and-scoring-rules, calibration-error, aleatoric-and-epistemic-uncertainty, classifier-calibration, threshold-choice-methods]
+references: [kull2015, murphy1973, degroot1983, silvafilho2023, brocker2009, brocker2012]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $S$ be a proper scoring rule, orientated as a loss, with **entropy** $H(\pvec) = S(\pvec, \pvec)$ and **divergence**
+$d(\qvec, \pvec) = S(\qvec, \pvec) - S(\pvec, \pvec) \ge 0$. A model outputs a probability vector $\svec = f(\xvec)$. Write
+$\cvec = \expect[\yvec \mid \svec]$ for the class distribution among cases that receive the output $\svec$, and
+$\qvec = \expect[\yvec \mid \xvec]$ for the true class distribution given the features, where $\yvec$ is the one-hot
+label. The expected score decomposes as
+
+$$
+\expect[S(\svec, \yvec)] = \underbrace{\expect[d(\svec, \cvec)]}_{\text{calibration loss}} +
+\underbrace{\expect[d(\cvec, \qvec)]}_{\text{grouping loss}} + \underbrace{\expect[d(\qvec, \yvec)]}_{\text{irreducible
+loss}}
+$$
+
+<Cite id="kull2015" />.
+</Definition>
+
+## Two facts used throughout
+
+**The expected score is linear in the outcome distribution.** For a fixed report $\svec$,
+$S(\svec, \pvec) = \sum_y p_y S(\svec, y)$. So the expected score of $\svec$ over outcomes drawn from any distribution
+with mean vector $\pvec$ equals $S(\svec, \pvec)$.
+
+**Divergence plus entropy is expected score.** By the definition of $d$, $S(\svec, \pvec) = d(\svec, \pvec) +
+H(\pvec)$. For a one-hot outcome, $H(\yvec) = 0$ for the usual rules, so $d(\qvec, \yvec) = S(\qvec, \yvec)$.
+
+## Calibration loss and refinement loss
+
+Condition on the model output. Given $\svec$, the label has distribution $\cvec$, so by the first fact
+
+$$
+\expect[S(\svec, \yvec)] = \expect_{\svec}\brack{S(\svec, \cvec)} = \expect\brack{d(\svec, \cvec)} +
+\expect\brack{H(\cvec)}.
+$$
+
+The first term is the **calibration loss** (CL). It is zero exactly when $\svec = \cvec$ for almost every output, which
+is the definition of a calibrated model. The second term is the **refinement loss** (RL). It is the expected score of
+the calibrated version of the model, the model whose output $\svec$ is replaced by $\cvec$. A calibration map that sends
+$\svec$ to $\cvec$ removes CL and leaves RL unchanged. RL can only be reduced by separating cases that the model
+currently gives the same output <Cite id="degroot1983" />.
+
+## Grouping loss and irreducible loss
+
+Condition on the features instead. Given $\xvec$, the label has distribution $\qvec$. The model output is a function of
+$\xvec$, so the same argument gives
+
+$$
+\expect[S(\svec, \yvec)] = \expect\brack{d(\svec, \qvec)} + \expect\brack{H(\qvec)}.
+$$
+
+The second term is the **irreducible loss** (IL), the loss of the Bayes-optimal model that outputs $\qvec$; it is
+aleatoric. The first is the **epistemic loss** (EL), the loss due to the model not being optimal <Cite id="kull2015" />.
+
+Applying the same argument to the calibrated output $\cvec$, which is also a function of $\xvec$, gives
+$\expect[S(\cvec, \yvec)] = \expect[d(\cvec, \qvec)] + \text{IL}$. The left side is RL, because the calibrated model's
+expected score is $\expect[H(\cvec)]$. So
+
+$$
+\text{RL} = \underbrace{\expect\brack{d(\cvec, \qvec)}}_{\text{GL}} + \text{IL}, \qquad \text{EL} = \text{CL} + \text{GL}.
+$$
+
+The **grouping loss** (GL) arises because the model puts cases with different true distributions $\qvec$ into the same
+group of output $\svec$. Calibration cannot fix it: within one group, a single output value must serve cases that need
+different ones. The whole loss is CL + GL + IL. Only CL can be estimated from outputs and labels alone. GL and IL need
+$\qvec$, which is unknown in practice.
+
+## Adjustment loss
+
+Kull and Flach split the calibration loss further <Cite id="kull2015" />. An **adjustment** is the simplest correction
+of the outputs: shift them so that their average matches the average label. For the binary Brier score, the adjusted
+output is $a = s + \delta$ with $\delta = \expect[y] - \expect[s]$. Expanding,
+
+$$
+\expect\brack{(s - y)^2} = \expect\brack{(a - y - \delta)^2} = \expect\brack{(a - y)^2} - 2\delta\,\expect[a - y] +
+\delta^2 = \expect\brack{(a - y)^2} + \delta^2,
+$$
+
+because $\expect[a - y] = 0$ by construction. The **adjustment loss** $\text{AL} = \delta^2$ is the part of the calibration
+loss that one global shift removes. The remainder is the **post-adjustment calibration loss**, giving four terms: AL,
+post-adjustment CL, GL and IL. For log loss the adjustment is multiplicative, reweighting the classes. The authors prove
+that the split holds for the Brier score and log loss, and propose adjustment as a cheap first step before full
+calibration <Cite id="kull2015" />.
+
+## Murphy's decomposition of the Brier score
+
+For binary outcomes and the Brier score $(s - y)^2$, the divergence is $d(s, c) = (s - c)^2$ and the entropy is
+$H(c) = c(1 - c)$. The refinement loss can be rewritten. Let $\bar y = \expect[y] = \expect[c]$ be the base rate. Then
+
+$$
+\expect[c(1 - c)] = \expect[c] - \expect[c^2] = \bar y - \paren{\var(c) + \bar y^2} = \bar y(1 - \bar y) - \expect\brack{(c -
+\bar y)^2}.
+$$
+
+Substituting into CL + RL gives Murphy's three terms <Cite id="murphy1973" />:
+
+$$
+\expect\brack{(s - y)^2} = \underbrace{\expect\brack{(s - c)^2}}_{\text{reliability}} - \underbrace{\expect\brack{(c - \bar
+y)^2}}_{\text{resolution}} + \underbrace{\bar y(1 - \bar y)}_{\text{uncertainty}}.
+$$
+
+Reliability is the calibration loss. Resolution rewards outputs whose groups have observed frequencies far from the base
+rate. Uncertainty is the Brier score of always forecasting the base rate, a property of the data alone. In practice
+$\cvec$ is estimated by grouping forecasts into bins, which makes the empirical reliability and resolution biased
+estimates <Cite id="brocker2012" />. Bröcker also showed that the calibration-refinement split holds for every proper score <Cite id="brocker2009" />.
+
+## Worked example
+
+**Binned binary forecasts.** Fifteen forecasts take three values: $0.2$ five times (one event), $0.5$ four times (two
+events) and $0.8$ six times (four events). The base rate is $\bar y = 7/15 = 0.467$. The observed frequencies are
+$c = 0.2$, $0.5$ and $0.667$.
+
+- Reliability: $\paren{5 \times 0^2 + 4 \times 0^2 + 6 \times 0.133^2}/15 = 0.0071$.
+- Resolution: $\paren{5 \times 0.267^2 + 4 \times 0.033^2 + 6 \times 0.2^2}/15 = 0.0400$.
+- Uncertainty: $0.467 \times 0.533 = 0.2489$.
+
+The Brier score is $0.0071 - 0.0400 + 0.2489 = 0.216$, which is also the direct average of $(s - y)^2$.
+
+**Three classes, all four terms.** Silva Filho et al. give ten cases with three classes <Cite id="silvafilho2023" />.
+Four cases share the output $\svec = (0.9, 0.1, 0)$; three are class 1 and one class 2, so $\cvec = (0.75, 0.25, 0)$. Six
+share $\svec = (0.6, 0.2, 0.2)$ with classes $(1, 2, 2, 2, 3, 3)$, so $\cvec = (1/6, 3/6, 2/6)$. The true posteriors
+$\qvec$ are $(0.75, 0.25, 0)$ for the first four, $(0.5, 0.5, 0)$ for the next two, and $(0, 0.5, 0.5)$ for the last
+four. With the Brier score summed over classes, $\norm{\svec - \yvec}^2$, and with log loss:
+
+| term | Brier | log loss |
+| --- | --- | --- |
+| total | 0.712 | 1.118 |
+| calibration loss $\expect[d(\svec, \cvec)]$ | 0.195 | 0.286 |
+| grouping loss $\expect[d(\cvec, \qvec)]$ | 0.067 | 0.191 |
+| irreducible loss $\expect[d(\qvec, \yvec)]$ | 0.450 | 0.641 |
+| epistemic loss CL + GL | 0.262 | 0.477 |
+| refinement loss GL + IL | 0.517 | 0.832 |
+
+The second group of six cases mixes two kinds of case with different $\qvec$, which produces the grouping loss.
+Calibrating the model would cut its Brier score from 0.712 to 0.517, but no calibration map can go below that.
+
+**Adjustment.** Take class 1 of the same data as a binary problem: outputs $0.9$ four times and $0.6$ six times, labels
+$(1, 1, 1, 0, 1, 0, 0, 0, 0, 0)$. The mean output is $0.72$ and the base rate $0.4$, so $\delta = -0.32$. The binary
+Brier score falls from $0.280$ to $0.178$ after the shift, a drop of $\delta^2 = 0.102$.
+
+## Pitfalls
+
+- **Estimated calibration loss depends on how outputs are grouped.** With continuous outputs no two cases share a
+  value, so $\cvec$ must be estimated by binning or smoothing (see
+  <NoteLink to="estimating-calibration-error">estimating calibration error</NoteLink>).
+- **Low calibration loss does not mean a good model.** Always predicting the base rate has zero calibration loss and the
+  largest possible refinement loss.
+- **Grouping loss is invisible to calibration diagnostics.** A reliability diagram can be perfect while the model lumps
+  together cases that need different probabilities.

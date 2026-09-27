@@ -1,0 +1,119 @@
+---
+title: Distribution calibration
+kind: concept
+summary: 'A regressor is distribution-calibrated if, among cases that receive the predictive density $s$, the target is distributed as $s$. This implies quantile calibration but not conversely. Song et al. fit beta calibration maps to the cdf with parameters that depend on the prediction.'
+tags: [calibration, regression, probabilistic, uncertainty-quantification, gaussian-process, worked-example]
+aliases: [distribution-calibrated regression, GP-Beta calibration, density calibration, conditional calibration of regressors, local calibration]
+requires: [quantile-calibration, beta-calibration]
+related: [calibration-definitions, scoring-rule-decompositions, gaussian-process, conformal-prediction, probabilistic-forecasting]
+references: [songhao2019, songhao2018, kuleshov2018, kull2015, kull2017]
+status: draft
+updated: 2026-09-27
+---
+
+import { PitByPrediction } from './PitByPrediction'
+
+<Definition>
+A probabilistic regression model $f$ maps an input $\xvec$ to a predictive density $s_\xvec = f(\xvec)$ for a real target
+$y$. Write $S = f(X)$ for the random prediction. The model is **distribution-calibrated** if, for every predicted density
+$s$ and every $y$,
+
+$$
+p(Y = y \mid S = s) = s(y).
+$$
+
+Among all cases that receive the same prediction, the targets follow that prediction <Cite id="songhao2019" />.
+</Definition>
+
+## Mirroring classifier calibration
+
+A classifier is calibrated when, among cases given probability vector $\svec$, the classes occur with frequencies
+$\svec$. The condition conditions on the output. <NoteLink to="quantile-calibration">Quantile calibration</NoteLink> of a
+regressor does not: it asks that $P(Y \le F^{-1}(\tau)) = \tau$ with the probability taken over all cases together. Song,
+Diethe, Kull and Flach defined distribution calibration to restore the conditioning <Cite id="songhao2019" />. If a
+distribution-calibrated model predicts mean $\mu$ and variance $\sigma^2$, then among all cases that received that
+prediction the target has mean $\mu$ and variance $\sigma^2$. That is what a user reading a single prediction needs.
+
+## Distribution calibration implies quantile calibration
+
+Let $f$ be distribution-calibrated and let $g(\xvec, \tau)$ be the $\tau$-quantile of the predicted distribution
+$f(\xvec)$, which exists because each predicted cdf is continuous. The quantile $g(X, \tau)$ is determined by the
+prediction $S$. Given $S = s$, the target has density $s$, so
+
+$$
+P\paren{Y \le g(X, \tau) \mid S = s} = \int_{-\infty}^{g} s(y)\, dy = \tau.
+$$
+
+Averaging over $S$ gives $P\paren{Y \le g(X, \tau)} = \tau$ for every $\tau$: the model is quantile-calibrated
+<Cite id="songhao2019" />.
+
+The converse fails. $P(Y \le G_\tau) = \tau$ is a statement about an average over all predictions and says nothing
+about $P(Y \le G_\tau \mid S = s)$ for a particular $s$. A model can be too wide for some predictions and too narrow for
+others, with the errors cancelling in the pooled PIT histogram.
+
+<PitByPrediction />
+
+## Calibration loss for densities
+
+The log loss of a predictive density decomposes like a proper score for classes. Condition on the prediction: given
+$S = s$, the target has some density $p(\cdot \mid s)$. Then
+
+$$
+\expect\brack{-\ln s_X(Y)} = \expect_X\brack{\KL\paren{p(\cdot \mid s_X) \,\Vert\, s_X}} + \expect\brack{-\ln p(Y \mid
+s_X)}.
+$$
+
+The first term is the calibration loss and the second the refinement loss (see
+<NoteLink to="scoring-rule-decompositions">decompositions of proper scoring rules</NoteLink>) <Cite id="kull2015" />.
+Once the model is trained the refinement loss is fixed. The calibration loss is zero exactly when every KL term is
+zero, which is distribution calibration. A post-hoc map that achieves it removes all the log loss that recalibration can
+remove <Cite id="songhao2019" />.
+
+## GP-Beta: a method for distribution calibration
+
+A single global map, as in isotonic quantile recalibration, applies the same correction to every prediction and so
+cannot fix errors that differ between predictions. Song et al. make the correction depend on the prediction
+<Cite id="songhao2019" />.
+
+**Beta maps on the cdf.** A <NoteLink to="beta-calibration">beta calibration map</NoteLink>
+$c_\beta(q) = \sigma\paren{a\ln q - b\ln(1 - q) + c}$ applied to the predicted cdf value $q = F(y)$ gives a new cdf
+$c_\beta(F(y))$. Its density is the old density times the link $r_\beta(q) = dc_\beta(q)/dq$, which is non-negative
+exactly when $a, b \ge 0$. The family contains the identity at $a = b = 1$, $c = 0$. Sigmoid maps ($a, b > 1$) narrow the
+predicted distribution, inverse sigmoids ($a, b < 1$) widen it, $c$ shifts it, and $a \ne b$ skews it
+<Cite id="kull2017" />.
+
+**Parameters that vary with the prediction.** The three parameters $(a, b, c)$ are modelled as functions of the
+predicted distribution by a multi-output <NoteLink to="gaussian-process">Gaussian process</NoteLink>. For Gaussian
+predictions, the kernel compares two predictions $(\mu_1, \sigma_1)$ and $(\mu_2, \sigma_2)$ through a kernel mean
+embedding, which reduces to an RBF kernel on the means when both variances are zero. The GP is fitted by stochastic
+variational inference with inducing points, maximising the likelihood of the calibration targets under the calibrated
+densities.
+
+Each prediction thus receives its own calibration map, learned from calibration cases with similar predictions. On GP
+regression and Bayesian neural network models, the method improved both distribution-level and quantile-level
+calibration <Cite id="songhao2019" />. An earlier paper by Song, Kull and Flach calibrated probabilistic regression
+non-parametrically, by deriving the calibrated cumulative distribution from a calibrated multiclass classifier
+<Cite id="songhao2018" />.
+
+## Worked example
+
+Half the cases have noise $\Gauss(0, 0.5^2)$ and half $\Gauss(0, 1.5^2)$. The model gets the variances the wrong way
+round: it predicts $\Gauss(0, 1.5^2)$ for the first kind (prediction A) and $\Gauss(0, 0.5^2)$ for the second
+(prediction B). In a simulation with 100,000 cases:
+
+| | all cases | prediction A | prediction B |
+| --- | --- | --- | --- |
+| 90% central interval coverage, raw | 0.708 | 1.000 | 0.415 |
+| after global quantile recalibration | 0.900 | 1.000 | 0.799 |
+
+Recalibration with one global map makes the pooled coverage exactly right. Every case that receives prediction A still
+gets an interval that is far too wide, and every case that receives prediction B one that is too narrow. The model is now
+quantile-calibrated and not distribution-calibrated. A map that depends on the prediction, as in GP-Beta, would widen
+B's distribution and narrow A's.
+
+## Pitfalls
+
+- **Conditioning on the prediction, not the input.** Distribution calibration is still weaker than predicting the true
+  conditional distribution $p(y \mid \xvec)$. Two inputs that receive the same prediction are pooled.
+- **Estimation needs many cases per prediction.** Checking $p(y \mid S = s) = s$ requires grouping similar predictions,
+  which is harder the more parameters the predictive distribution has.

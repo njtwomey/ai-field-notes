@@ -1,0 +1,115 @@
+---
+title: Dirichlet calibration
+kind: technique
+summary: 'Dirichlet calibration maps a probability vector $\qvec$ to $\operatorname{softmax}(\Wmat \ln \qvec + \bvec)$, the posterior when each class''s outputs are Dirichlet. It contains the identity and temperature scaling, reduces to beta calibration for two classes, and is a regularised logistic regression.'
+tags: [calibration, classification, logistic-regression, distributions, worked-example]
+aliases: [Dirichlet calibration map, ODIR regularisation, off-diagonal and intercept regularisation, Dir-ODIR, Dir-L2]
+requires: [beta-calibration, dirichlet-distribution, softmax-and-log-sum-exp]
+related: [temperature-scaling, calibration-definitions, platt-scaling, isotonic-calibration]
+partOf: [classifier-calibration]
+references: [kull2019, guo2017, kull2017, silvafilho2023]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For a classifier that outputs a probability vector $\qvec$ over $K$ classes, the **Dirichlet calibration map** is
+
+$$
+\mu(\qvec; \Wmat, \bvec) = \operatorname{softmax}\paren{\Wmat \ln \qvec + \bvec},
+$$
+
+where $\ln \qvec$ is taken elementwise, $\Wmat$ is a $K \times K$ matrix and $\bvec \in \reals^K$. It is the posterior
+class distribution when the output vector of each class follows a Dirichlet distribution, and it is fitted by
+multinomial logistic regression of the label on the features $\ln \qvec$, with regularisation. Kull, Perello-Nieto,
+Kängsepp, Silva Filho, Song and Flach introduced it as the multiclass generalisation of beta calibration
+<Cite id="kull2019" />.
+</Definition>
+
+## Problem
+
+Binary calibration maps extend to $K$ classes only one class at a time: calibrate each class against the rest, then
+renormalise. That ignores how the classes interact, and the renormalisation can undo the calibration of each class.
+<NoteLink to="temperature-scaling">Temperature scaling</NoteLink> is natively multiclass but has one parameter, which
+can only sharpen or soften every output uniformly, and it needs logits, so it applies to neural networks only. A
+multiclass map is needed that is flexible, derived from a model of the outputs, applicable to any classifier and
+controllable when $K$ is large.
+
+## Mechanism
+
+**Derivation from Dirichlet class-conditionals.** Model the output vector of each class with a
+<NoteLink to="dirichlet-distribution">Dirichlet distribution</NoteLink>: $\qvec \mid y = k \sim \Dir(\alphavec^{(k)})$,
+with density $\prod_j q_j^{\alpha^{(k)}_j - 1} / B(\alphavec^{(k)})$, where $B$ is the multivariate beta function. With
+class priors $\pi_k$, <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink> gives
+
+$$
+\ln P(y = k \mid \qvec) = \sum_{j=1}^K \paren{\alpha^{(k)}_j - 1}\ln q_j + \ln\pi_k - \ln B(\alphavec^{(k)}) - \ln Z(\qvec),
+$$
+
+where $Z(\qvec)$ normalises over $k$. The first term is linear in $\ln \qvec$ with coefficients $w_{kj} =
+\alpha^{(k)}_j - 1$, and the next two form a constant $b_k$. So the posterior is $\operatorname{softmax}(\Wmat \ln \qvec +
+\bvec)$. Kull et al. prove that this generative family, the linear family with unrestricted $\Wmat$ and $\bvec$, and a
+unique canonical parametrisation all contain the same maps <Cite id="kull2019" />.
+
+**Special cases.**
+
+- **Identity.** With $\Wmat = \eye$ and $\bvec = \zeros$, $\operatorname{softmax}(\ln \qvec) = \qvec / \sum_j q_j = \qvec$.
+  A calibrated model can stay calibrated.
+- **Temperature scaling.** If $\qvec = \operatorname{softmax}(\zvec)$, then $\ln \qvec = \zvec - L\ones$ with
+  $L = \log\sum_j e^{z_j}$. Taking $\Wmat = \eye / T$ and $\bvec = \zeros$ gives $\operatorname{softmax}(\zvec/T - (L/T)\ones)
+  = \operatorname{softmax}(\zvec / T)$, since the softmax ignores a constant added to every entry. Temperature scaling is
+  a Dirichlet map <Cite id="kull2019" />.
+- **Beta calibration.** For $K = 2$, $\ln \qvec = (\ln s, \ln(1 - s))$ with $s = q_1$, and the map reduces to
+  $\sigma(a \ln s - b \ln(1 - s) + c)$, the <NoteLink to="beta-calibration">beta calibration</NoteLink> family
+  <Cite id="kull2017" />.
+
+**Relation to matrix scaling.** Guo et al.'s matrix scaling applies $\operatorname{softmax}(\Wmat\zvec + \bvec)$ to
+logits <Cite id="guo2017" />. Dirichlet calibration applies the same layer to log-probabilities. The log-softmax discards
+the overall level of the logits, so matrix scaling sees slightly more information on neural networks, and Dirichlet
+calibration applies to any classifier that outputs probabilities.
+
+**Fitting and regularisation.** Minimise log loss on the calibration set over $\Wmat$ and $\bvec$. That is a convex
+multinomial logistic regression with $K$ features, $K^2 + K$ parameters. For non-neural classifiers with few classes,
+plain L2 regularisation suffices. For networks with many classes, Kull et al. proposed **ODIR** (off-diagonal and
+intercept regularisation): penalise the squared off-diagonal entries of $\Wmat$ and the squared entries of $\bvec$ with
+separate weights,
+
+$$
+\frac1n\sum_{i=1}^n \text{logloss}\paren{\mu(\qvec_i), y_i} + \frac{\lambda_W}{K(K - 1)}\sum_{i \ne j} w_{ij}^2 +
+\frac{\lambda_b}{K}\sum_j b_j^2,
+$$
+
+with $\lambda_W$ and $\lambda_b$ chosen by internal cross-validation. The diagonal stays free to correct each class's own
+confidence; the off-diagonal terms, which let one class's output change another's probability, are shrunk
+<Cite id="kull2019" />. Outputs of exactly zero must be clipped to a small positive number before taking logs.
+
+## Cost
+
+Fitting is a convex problem with $K^2 + K$ parameters. With 100 classes that is 10,100 parameters, which ODIR made
+fittable on the validation sets of standard image benchmarks <Cite id="kull2019" />. Prediction costs one
+$K \times K$ matrix-vector product, a log and a softmax.
+
+## Trade-offs
+
+- **Evidence.** On 21 UCI datasets with 11 classifiers, L2-regularised Dirichlet calibration had the best average rank
+  in log loss and in the proportion of tests that accepted classwise calibration, ahead of one-against-rest beta and
+  isotonic calibration and of temperature scaling. On deep networks, Dirichlet and matrix scaling with ODIR outperformed
+  temperature scaling in most cases on CIFAR-10 and in classwise ECE on CIFAR-100 <Cite id="kull2019" />.
+- **Parametric.** The map is linear in $\ln \qvec$. Distortions of another shape remain.
+- **Interpretable parameters.** In the canonical parametrisation, entry $a_{ij}$ says how much a high output for class $j$
+  raises the calibrated probability of class $i$. Large off-diagonal entries point to systematic confusions of the
+  uncalibrated model <Cite id="kull2019" />.
+- **Decisions can change.** Unlike temperature scaling, a general $\Wmat$ can change the argmax, so accuracy can go up
+  or down.
+
+## Worked example
+
+The output is $\qvec = (0.7, 0.2, 0.1)$.
+
+- **$\Wmat = \eye/2$, $\bvec = \zeros$.** The map is $\operatorname{softmax}(\tfrac12\ln\qvec)$, proportional to
+  $\sqrt{\qvec} = (0.837, 0.447, 0.316)$. Normalising gives $(0.523, 0.279, 0.198)$: a softer distribution, as
+  temperature scaling with $T = 2$ would give. For a network with logits $(2, 1, 0)$, whose softmax is
+  $(0.665, 0.245, 0.090)$, the same map gives $(0.506, 0.307, 0.186)$, identical to $\operatorname{softmax}(\zvec / 2)$.
+- **$\Wmat = \eye$, $\bvec = (0, \ln 2, 0)$.** The map multiplies the second class's probability by 2 before normalising:
+  $(0.7, 0.4, 0.1)/1.2 = (0.583, 0.333, 0.083)$. The intercept corrects a model that underestimates class 2 everywhere,
+  which a temperature cannot do.

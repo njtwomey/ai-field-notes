@@ -1,0 +1,108 @@
+---
+title: Quantile calibration
+kind: concept
+summary: 'A regression model with predictive cdfs $F_i$ is quantile-calibrated if the observed $y_i$ fall below the predicted $p$-quantile a fraction $p$ of the time, for every $p$: equivalently, the PIT values $F_i(y_i)$ are uniform. Isotonic regression on the PIT values recalibrates any model.'
+tags: [calibration, regression, probabilistic, uncertainty-quantification, worked-example]
+aliases: [quantile-calibrated regression, probabilistic calibration, calibrated regression, PIT uniformity, recalibration of regression models, Kuleshov recalibration]
+requires: [inverse-transform-sampling, isotonic-calibration]
+related: [distribution-calibration, probabilistic-forecasting, prediction-intervals, conformal-prediction, crps-and-interval-scores]
+references: [kuleshov2018, gneiting2007b, songhao2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A probabilistic regression model predicts, for each input $\xvec_i$, a cumulative distribution function $F_i$ for the
+target. It is **quantile-calibrated** if, for every level $p \in [0, 1]$,
+
+$$
+\frac1n\sum_{i=1}^n \indicator\brack{y_i \le F_i^{-1}(p)} \to p \quad \text{as } n \to \infty,
+$$
+
+so that the predicted $p$-quantile is exceeded a fraction $1 - p$ of the time. Equivalently, the **probability integral
+transform** (PIT) values $u_i = F_i(y_i)$ are uniformly distributed on $[0, 1]$ <Cite id="kuleshov2018" />
+<Cite id="gneiting2007b" />.
+</Definition>
+
+## From classification to regression
+
+A binary classifier is calibrated if the event happens in a fraction $p$ of the cases given probability $p$. A
+regression model predicts a whole distribution, so there are many events to check: $y \le F_i^{-1}(p)$ for every
+$p$. Quantile calibration asks that each of these events happen at the advertised rate, pooled over all cases. A
+calibrated 90% central prediction interval, from the 5% to the 95% quantile, then contains 90% of the outcomes.
+
+## Why the PIT is uniform
+
+Let $Y$ have a continuous cdf $F$. For $u \in (0, 1)$, $F(Y) \le u$ holds exactly when $Y \le F^{-1}(u)$, so
+
+$$
+P(F(Y) \le u) = P(Y \le F^{-1}(u)) = F(F^{-1}(u)) = u.
+$$
+
+$F(Y)$ is uniform on $[0, 1]$. If each $F_i$ is the true conditional distribution of $y_i$, each $u_i$ is uniform,
+and so is their pooled distribution. Quantile calibration asks only for the pooled statement, $P(u \le p) = p$ averaged
+over cases, which is the same as the fraction of $y_i \le F_i^{-1}(p)$ tending to $p$.
+
+## Reading a PIT histogram
+
+A histogram of the $u_i$ is the regression analogue of a reliability diagram.
+
+- **Flat.** Consistent with quantile calibration.
+- **U-shaped.** Too many outcomes fall in the tails of their predicted distributions: the predictions are too narrow,
+  the model overconfident.
+- **Hump-shaped.** Too few outcomes in the tails: the predictions are too wide.
+- **Sloped.** Outcomes fall systematically on one side of the predicted median: the predictions are biased.
+
+## Recalibration with isotonic regression
+
+Kuleshov, Fenner and Ermon proposed a post-hoc fix that works for any model with predictive cdfs
+<Cite id="kuleshov2018" />.
+
+1. On a calibration set, compute $u_i = F_i(y_i)$.
+2. For each $u_i$, compute the empirical frequency $\hat P(u_i) = \frac1n\abs{\set{j : u_j \le u_i}}$.
+3. Fit an <NoteLink to="isotonic-calibration">isotonic regression</NoteLink> $R: [0, 1] \to [0, 1]$ to the pairs
+   $(u_i, \hat P(u_i))$.
+4. Use $R \circ F_i$ as the new cdf for each case.
+
+The map $R$ estimates $P(u \le p)$, the rate at which the model's $p$-quantile is actually exceeded. Composing sends
+each level to its observed rate, so the recalibrated model is quantile-calibrated on the calibration data. $R$ is
+non-decreasing, so $R \circ F_i$ is still a valid cdf. The recalibrated $\tau$-quantile of case $i$ is
+$F_i^{-1}(R^{-1}(\tau))$.
+
+## Calibration is not enough
+
+The **climatological** forecast, which predicts the marginal distribution of $y$ for every case, is quantile-calibrated
+and ignores the inputs. Gneiting, Balabdaoui and Raftery therefore judge probabilistic forecasts by maximising
+**sharpness**, the concentration of the predictive distributions, subject to calibration <Cite id="gneiting2007b" />. A
+proper scoring rule such as the <NoteLink to="crps-and-interval-scores">CRPS</NoteLink> rewards both at once.
+
+Quantile calibration is also a marginal property. It pools every case, so a model can be calibrated overall while its
+intervals are too wide for some inputs and too narrow for others. Recalibration with one global map $R$ cannot fix
+that, because it applies the same correction to every case. Song, Diethe, Kull and Flach proposed the stronger
+condition of <NoteLink to="distribution-calibration">distribution calibration</NoteLink> for this reason
+<Cite id="songhao2019" />.
+
+## Worked example
+
+A model predicts $\Gauss(\mu_i, 1)$ for each case, and its means are right, but the true noise has standard deviation 2:
+$y_i = \mu_i + \varepsilon_i$ with $\varepsilon_i \sim \Gauss(0, 4)$.
+
+**Miscalibration.** The PIT is $u_i = \Phi(\varepsilon_i)$, with $\Phi$ the standard normal cdf. The outcome falls
+below the predicted 5% quantile $\mu_i - 1.645$ when $\varepsilon_i \le -1.645$, which has probability
+$\Phi(-1.645/2) = 0.205$, not 0.05. The predicted 90% central interval $\mu_i \pm 1.645$ contains the outcome with probability
+$2\Phi(0.8225) - 1 = 0.589$. The PIT histogram is U-shaped, with 20.5% of values below 0.05 and another 20.5% above
+0.95.
+
+**Recalibration map.** $P(u \le p) = P(\varepsilon \le \Phi^{-1}(p)) = \Phi(\Phi^{-1}(p)/2)$, which is the map $R$ that
+isotonic regression estimates with enough data. The recalibrated $\tau$-quantile solves $R(u) = \tau$, giving
+$u = \Phi(2\Phi^{-1}(\tau))$ and quantile $\mu_i + 2\Phi^{-1}(\tau)$. Recalibration has doubled the predicted spread, which
+is the right correction here because every case has the same noise.
+
+## Pitfalls
+
+- **Discrete or censored targets.** The PIT of a discrete distribution is not uniform even when the forecast is correct.
+  Use a randomised PIT or a different check.
+- **A flat PIT histogram does not certify good forecasts.** It is consistent with the climatological forecast. Report a
+  proper score as well.
+- **Recalibrating on the training set.** As for classifiers, the map must be fitted on data the model was not trained
+  on.

@@ -1,0 +1,114 @@
+---
+title: Cost curves
+kind: concept
+summary: 'A cost curve plots normalised expected cost against the probability cost $\text{PC}(+)$, which folds prior and error costs into one number. Each ROC point becomes the line $\text{FNR}\cdot\text{PC} + \text{FPR}(1 - \text{PC})$; their lower envelope is dual to the ROC convex hull.'
+tags: [roc-analysis, decision-theory, classification, worked-example]
+aliases: [cost curve, Drummond-Holte cost curves, probability cost, normalised expected cost, lower envelope, operating range]
+requires: [roc-convex-hull]
+related: [roc-curve-and-auc, threshold-choice-methods, cost-sensitive-learning, operating-points-and-equal-error-rate]
+references: [drummond2006, provost2001, hernandezorallo2012]
+status: draft
+updated: 2026-09-27
+---
+
+import { CostCurvePlot } from './CostCurvePlot'
+
+<Definition>
+Let $p(+)$ be the probability of the positive class, $C(-\mid+)$ the cost of a false negative and $C(+\mid-)$ the cost
+of a false positive. The **probability cost** is
+
+$$
+\text{PC}(+) = \frac{p(+)\, C(-\mid+)}{p(+)\, C(-\mid+) + p(-)\, C(+\mid-)} \in [0, 1].
+$$
+
+A classifier with false-positive rate FPR and false-negative rate $\text{FNR} = 1 - \text{TPR}$ has **normalised expected
+cost** $\text{NE}[C] = \text{FNR}\cdot\text{PC}(+) + \text{FPR}\cdot\paren{1 - \text{PC}(+)}$. A **cost curve** plots
+$\text{NE}[C]$ against $\text{PC}(+)$ <Cite id="drummond2006" />.
+</Definition>
+
+## From expected cost to a straight line
+
+The expected cost per case of a classifier, with correct decisions costing nothing, is
+
+$$
+\expect[C] = p(+)\, C(-\mid+)\, \text{FNR} + p(-)\, C(+\mid-)\, \text{FPR}.
+$$
+
+The largest value it can take is $p(+) C(-\mid+) + p(-) C(+\mid-)$, reached by a classifier that gets everything wrong.
+Dividing by that maximum gives a cost in $[0, 1]$. Both weights, divided by the same maximum, become $\text{PC}(+)$ and
+$1 - \text{PC}(+)$:
+
+$$
+\text{NE}[C] = \frac{\expect[C]}{p(+) C(-\mid+) + p(-) C(+\mid-)} = \text{FNR}\cdot\text{PC}(+) + \text{FPR}\cdot\paren{1 -
+\text{PC}(+)}.
+$$
+
+For a fixed classifier, $\text{NE}[C]$ is linear in $\text{PC}(+)$. It runs from $\text{FPR}$ at $\text{PC}(+) = 0$,
+where only negatives matter, to $\text{FNR}$ at $\text{PC}(+) = 1$, where only positives matter. A whole ROC point is one
+straight line on the cost plot. Changes in prior and changes in costs that leave $\text{PC}(+)$ fixed are
+indistinguishable, which is the same fact as the single iso-cost slope of ROC analysis.
+
+## Duality with ROC space
+
+An iso-cost line in ROC space has slope $m = p(-) C(+\mid-) / \paren{p(+) C(-\mid+)}$ (see
+<NoteLink to="roc-convex-hull">ROC convex hull</NoteLink>). In terms of the probability cost,
+
+$$
+m = \frac{1 - \text{PC}(+)}{\text{PC}(+)}.
+$$
+
+So each operating condition is a slope in ROC space and a vertical line on the cost plot. Each classifier is a point in
+ROC space and a line on the cost plot. This is point-line duality. The classifiers that are optimal for some operating
+condition are the vertices of the ROC convex hull in one view and the lines that touch the **lower envelope** in the
+other. At each $\text{PC}(+)$, the lower envelope is the least normalised cost achievable by choosing among the
+classifiers, which is the vertex that an iso-cost line of slope $m$ touches <Cite id="drummond2006" />.
+
+The two trivial classifiers are the diagonals. Always predicting negative has $\text{FNR} = 1$, $\text{FPR} = 0$, so
+$\text{NE} = \text{PC}(+)$. Always predicting positive has $\text{NE} = 1 - \text{PC}(+)$. Together they form a tent
+peaking at $0.5$. A classifier is useful only where its line lies below the tent.
+
+<CostCurvePlot />
+
+## What cost curves show that ROC curves hide
+
+- **Cost differences are vertical distances.** The gap between two classifiers at a given $\text{PC}(+)$ is read
+  directly off the $y$-axis. In ROC space the same difference is the distance between two parallel iso-cost lines,
+  which is hard to judge by eye.
+- **The operating range.** The interval of $\text{PC}(+)$ over which a classifier beats both trivial classifiers is where
+  its line lies below the tent. A classifier with a good AUC can be useless for the operating conditions that matter.
+- **Averaging and confidence.** Averaging cost curves over cross-validation folds, or drawing confidence bands on
+  $\text{NE}[C]$, is a vertical operation on the plot. Drummond and Holte give such procedures
+  <Cite id="drummond2006" />.
+
+## Area under the lower envelope
+
+The area under a lower envelope is the expected normalised cost when $\text{PC}(+)$ is uniformly distributed on
+$[0, 1]$ and the best threshold is chosen for each value. Hernández-Orallo, Flach and Ferri showed that this area
+equals the refinement loss of the classifier's scores after they are calibrated along the ROC convex hull, with the
+Brier score computed as if the two classes were equally frequent <Cite id="hernandezorallo2012" />. It is a measure of ranking quality under optimal threshold choice, which sits
+alongside AUC and the Brier score as one of several <NoteLink to="threshold-choice-methods">threshold choice
+methods</NoteLink>.
+
+## Worked example
+
+Classifier $A$ has $\text{FPR} = 0.1$ and $\text{TPR} = 0.5$, so its cost line runs from $(0, 0.1)$ to $(1, 0.5)$.
+Classifier $B$ has $\text{FPR} = 0.3$ and $\text{TPR} = 0.85$, a line from $(0, 0.3)$ to $(1, 0.15)$.
+
+**Where they cross.** Setting $0.1 + 0.4\,\text{PC} = 0.3 - 0.15\,\text{PC}$ gives $\text{PC} = 0.2/0.55 = 0.364$.
+The dual check: the ROC segment from $A$ to $B$ has slope $(0.85 - 0.5)/(0.3 - 0.1) = 1.75$, and
+$(1 - 0.364)/0.364 = 1.75$.
+
+**Operating ranges.** $A$ beats always-negative when $0.1 + 0.4\,\text{PC} < \text{PC}$, that is $\text{PC} > 1/6$, and
+beats always-positive when $\text{PC} < 0.9/1.4 = 0.643$. $B$ beats the trivial classifiers for
+$0.261 < \text{PC} < 0.824$. The lower envelope is always-negative up to $\text{PC} = 0.167$, then $A$ up to $0.364$,
+then $B$ up to $0.824$, then always-positive.
+
+**One operating condition.** With prevalence $p(+) = 0.2$, a false negative costing 4 and a false positive costing 1,
+$\text{PC}(+) = 0.8/(0.8 + 0.8) = 0.5$. There $A$ costs $0.30$ and $B$ costs $0.225$, so $B$ is the better choice.
+Multiplying back by the normaliser $0.8 + 0.8 = 1.6$ gives expected costs of $0.48$ and $0.36$ per case.
+
+## Pitfalls
+
+- **Normalised cost is not cost.** $\text{NE}[C]$ divides by a quantity that changes with the operating condition.
+  Compare classifiers at one $\text{PC}(+)$, not the same classifier across different ones, unless you multiply back.
+- **Lines from thresholds chosen on the test set** give an optimistic lower envelope, as for the ROC hull.

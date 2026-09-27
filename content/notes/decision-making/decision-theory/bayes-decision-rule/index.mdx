@@ -1,0 +1,162 @@
+---
+title: Bayes decision rule
+kind: concept
+summary: 'Given a loss $\ell(a, y)$ for taking action $a$ when the truth is $y$, the Bayes decision rule takes the action with the least posterior expected loss $\sum_y \ell(a, y)\,P(y \mid \xvec)$. No other rule has lower expected loss. For two classes it thresholds $P(y = 1 \mid \xvec)$ at $c_{\text{FP}}/(c_{\text{FP}} + c_{\text{FN}})$.'
+tags: [decision-theory, classification, thresholds, worked-example]
+aliases: [Bayes optimal classifier, Bayes classifier, Bayes risk, conditional risk, expected loss minimisation, minimum expected loss decision, likelihood ratio decision rule]
+requires: [bayes-theorem, expectation]
+related: [cost-sensitive-learning, reject-option, roc-convex-hull, proper-scoring-rule, logistic-regression, threshold-moving]
+references: [bishop2006, elkan2001, murphy2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { BayesRiskEnvelope } from './BayesRiskEnvelope'
+
+<Definition>
+Let $y \in \Ycal$ be an unknown state, $\xvec$ the observed features and $\Acal$ a set of actions. A loss function
+$\ell(a, y) \ge 0$ gives the cost of taking action $a$ when the state is $y$. The **conditional risk** of action $a$ at
+$\xvec$ is its posterior expected loss,
+
+$$
+R(a \mid \xvec) = \sum_{y \in \Ycal} \ell(a, y)\, P(y \mid \xvec).
+$$
+
+The **Bayes decision rule** is $\delta^*(\xvec) = \argmin_{a \in \Acal} R(a \mid \xvec)$. Its expected loss
+$R^* = \expect_{\xvec}\brack{\min_a R(a \mid \xvec)}$ is the **Bayes risk**, the lowest expected loss that any decision
+rule can achieve <Cite id="bishop2006" />.
+</Definition>
+
+## Why the pointwise minimum is optimal
+
+A decision rule $\delta$ maps every feature vector to an action. Its risk is the expected loss over the joint
+distribution of $\xvec$ and $y$. By the law of total expectation, this is the average over $\xvec$ of the conditional
+risk of the action the rule takes:
+
+$$
+R(\delta) = \expect_{\xvec, y}\brack{\ell(\delta(\xvec), y)} = \expect_{\xvec}\brack{R(\delta(\xvec) \mid \xvec)}.
+$$
+
+For every $\xvec$, $R(\delta(\xvec) \mid \xvec) \ge \min_a R(a \mid \xvec) = R(\delta^*(\xvec) \mid \xvec)$. Taking
+expectations of both sides gives $R(\delta) \ge R(\delta^*)$ for every rule $\delta$. The rule has no global
+coupling: minimising the expected loss of the whole rule reduces to minimising the conditional risk at each
+$\xvec$ separately. The Bayes rule needs two ingredients, the posterior $P(y \mid \xvec)$ and the loss $\ell$, and
+nothing else about the problem.
+
+## Zero-one loss gives the most probable class
+
+When the actions are the classes and every error costs 1, $\ell(a, y) = \indicator[a \ne y]$. Then
+
+$$
+R(a \mid \xvec) = \sum_{y \ne a} P(y \mid \xvec) = 1 - P(a \mid \xvec),
+$$
+
+which is smallest for the class with the largest posterior. The Bayes rule under zero-one loss is the maximum a
+posteriori (MAP) classifier, and its Bayes risk is the lowest achievable error rate, $\expect_{\xvec}[1 - \max_y
+P(y \mid \xvec)]$. Predicting the most probable class is therefore a special case, correct only when all errors cost the
+same.
+
+## Two classes: a threshold on the posterior
+
+With classes $y \in \set{0, 1}$, write $p = P(y = 1 \mid \xvec)$. Let a false positive cost $c_{\text{FP}} > 0$, a false
+negative cost $c_{\text{FN}} > 0$, and correct decisions cost 0. The two conditional risks are
+
+$$
+R(\text{predict } 1 \mid \xvec) = (1 - p)\, c_{\text{FP}}, \qquad R(\text{predict } 0 \mid \xvec) = p\, c_{\text{FN}}.
+$$
+
+Predicting positive is optimal when $(1 - p)\, c_{\text{FP}} \le p\, c_{\text{FN}}$. Rearranging gives
+
+$$
+p \ge p^* = \frac{c_{\text{FP}}}{c_{\text{FP}} + c_{\text{FN}}}.
+$$
+
+The optimal threshold depends on the costs only through their ratio. Equal costs give $p^* = 1/2$. A false negative
+nine times as costly as a false positive gives $p^* = 0.1$. A general $2 \times 2$ cost matrix with non-zero costs
+for correct decisions reduces to this form by subtracting each column's correct-decision cost; the note on
+<NoteLink to="cost-sensitive-learning">cost-sensitive learning</NoteLink> works through that reduction
+<Cite id="elkan2001" />.
+
+<BayesRiskEnvelope />
+
+## The same rule as a likelihood-ratio test
+
+Write $\pi_1 = P(y = 1)$ and $\pi_0 = 1 - \pi_1$ for the class priors and $p(\xvec \mid y)$ for the class-conditional
+densities. By <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink>, $p / (1 - p) = \paren{\pi_1\, p(\xvec \mid 1)} /
+\paren{\pi_0\, p(\xvec \mid 0)}$. The condition $(1 - p)\, c_{\text{FP}} \le p\, c_{\text{FN}}$ is the same as
+$p / (1 - p) \ge c_{\text{FP}} / c_{\text{FN}}$, which becomes
+
+$$
+\Lambda(\xvec) = \frac{p(\xvec \mid 1)}{p(\xvec \mid 0)} \ge \frac{\pi_0\, c_{\text{FP}}}{\pi_1\, c_{\text{FN}}}.
+$$
+
+The Bayes rule is a likelihood-ratio test. The threshold on $\Lambda$ combines the priors and the costs into one
+number, so a change of prior and a change of costs that leave $\pi_0 c_{\text{FP}} / (\pi_1 c_{\text{FN}})$ fixed give
+the same decisions. In ROC space the same number is the slope of the lines of equal expected cost (see
+<NoteLink to="roc-convex-hull">ROC convex hull</NoteLink>).
+
+## Actions need not be classes
+
+The action set is separate from the label set. A clinic might choose among sending a patient home, prescribing rest and
+prescribing antibiotics, when the patient is healthy, has flu or has pneumonia. A classifier can defer a case to a human
+at a fixed cost, which gives the <NoteLink to="reject-option">reject option</NoteLink>. The Bayes rule applies unchanged:
+compute $R(a \mid \xvec)$ for each action and take the smallest.
+
+## The Bayes risk is concave in the posterior
+
+For two classes, each conditional risk is a linear function of $p$. The minimum conditional risk
+$H(p) = \min_a R(a \mid p)$ is a minimum of linear functions, so it is concave and piecewise linear, as in the figure.
+Its maximum is at the threshold $p^*$, where the decision is hardest. For zero-one loss $H(p) = \min(p, 1 - p)$. The
+function $H$ plays the role of a generalised entropy. Averaging such minimum-risk functions over a range of costs
+produces the expected-score functions of <NoteLink to="proper-scoring-rule">proper scoring rules</NoteLink>: the Brier
+score is proportional to the average loss of a decision maker who applies the Bayes threshold when the cost proportion
+$c_{\text{FP}}/(c_{\text{FP}} + c_{\text{FN}})$ is uniformly distributed (see
+<NoteLink to="threshold-choice-methods">threshold choice methods</NoteLink>).
+
+## Worked example
+
+**Three actions, three states.** A patient is healthy, has flu or has pneumonia. The model gives posterior
+probabilities $(0.6, 0.3, 0.1)$. The losses $\ell(a, y)$ are
+
+| action | healthy | flu | pneumonia |
+| --- | --- | --- | --- |
+| send home | 0 | 2 | 20 |
+| prescribe rest | 1 | 0 | 10 |
+| antibiotics | 3 | 3 | 0 |
+
+The conditional risks are $0.3 \times 2 + 0.1 \times 20 = 2.6$ for sending home,
+$0.6 \times 1 + 0.1 \times 10 = 1.6$ for rest, and $0.6 \times 3 + 0.3 \times 3 = 2.7$ for antibiotics. The Bayes action
+is to prescribe rest, although the most probable state is "healthy". The 10% chance of pneumonia makes sending the
+patient home too costly.
+
+**A binormal threshold.** A score $x$ is $\Gauss(0, 1)$ for negatives and $\Gauss(2, 1)$ for positives, with prior
+$\pi_1 = 0.2$. A false negative costs 4 and a false positive 1. The likelihood ratio is
+$\Lambda(x) = \exp(2x - 2)$ and the threshold on it is $\pi_0 c_{\text{FP}} / (\pi_1 c_{\text{FN}}) = 0.8 / 0.8 = 1$,
+so the Bayes rule predicts positive when $x \ge 1$. Its risk per case is
+
+$$
+\pi_0\, c_{\text{FP}}\, P(x \ge 1 \mid 0) + \pi_1\, c_{\text{FN}}\, P(x < 1 \mid 1) = 0.8 \times 0.1587 + 0.8 \times
+0.1587 = 0.254,
+$$
+
+with both probabilities equal to $1 - \Phi(1)$, where $\Phi$ is the standard normal cdf. The accuracy-maximising rule
+predicts positive when $p \ge 1/2$, which here means $\Lambda(x) \ge 4$, so $x \ge 1.693$. Under the stated costs that
+rule has risk $0.340$, 34% more.
+
+## Assumptions
+
+- **The posterior is correct.** A plug-in rule uses an estimate $\hat p(y \mid \xvec)$. It is optimal only if the
+  estimate is calibrated; see <NoteLink to="classifier-calibration">classifier calibration</NoteLink>.
+- **The losses are known and additive.** The rule minimises the average loss over many decisions. A single
+  catastrophic outcome, or a loss that depends on other decisions (a budget, a quota), needs a different formulation.
+- **The deployment distribution matches.** If the class priors change between training and deployment, the posterior
+  must be adjusted before the rule is applied (see <NoteLink to="cost-sensitive-learning">cost-sensitive
+  learning</NoteLink>).
+
+## Pitfalls
+
+- **Treating 0.5 as the default threshold.** It is optimal only for equal error costs and a calibrated model.
+- **Reporting accuracy for a cost-sensitive task.** The rule that maximises accuracy can have much higher expected
+  cost, as the binormal example shows. Evaluate with the loss the decisions will incur.
+- **Scores that are not probabilities.** A margin or a ranking score cannot be compared with $p^*$. Either calibrate it
+  or pick the threshold on held-out data with the actual costs.

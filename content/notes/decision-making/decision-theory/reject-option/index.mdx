@@ -1,0 +1,112 @@
+---
+title: Reject option
+kind: concept
+summary: 'A classifier with a reject option may abstain at cost $d$ instead of predicting. Chow''s rule rejects when the largest posterior probability is below $1 - d$ and otherwise predicts the most probable class. Along its error-reject curve, error falls by $d$ per unit of reject rate.'
+tags: [decision-theory, classification, uncertainty-quantification, thresholds, worked-example]
+aliases: [Chow's rule, classification with rejection, abstention, abstaining classifier, error-reject tradeoff, error-reject curve, deferral to a human]
+requires: [bayes-decision-rule]
+related: [selective-classification, conformal-prediction, aleatoric-and-epistemic-uncertainty, classifier-calibration]
+references: [chow1970, bartlett2008]
+status: draft
+updated: 2026-09-27
+---
+
+import { RejectBand } from './RejectBand'
+
+<Definition>
+A classifier with a **reject option** has $K + 1$ actions: predict one of the $K$ classes, or reject (abstain, defer
+to a human). A wrong prediction costs 1, a correct one costs 0, and a rejection costs $d \in [0, 1]$ whatever the class.
+**Chow's rule** is the Bayes decision rule for this loss: with posterior probabilities $p_k = P(y = k \mid \xvec)$,
+
+$$
+\delta^*(\xvec) =
+\begin{cases}
+\argmax_k p_k & \text{if } \max_k p_k \ge 1 - d, \\
+\text{reject} & \text{otherwise}
+\end{cases}
+$$
+
+<Cite id="chow1970" />.
+</Definition>
+
+## Deriving the rule
+
+The Bayes decision rule takes the action with the smallest conditional risk (see
+<NoteLink to="bayes-decision-rule">Bayes decision rule</NoteLink>). Predicting class $k$ is wrong with probability
+$1 - p_k$, so its conditional risk is $R(k \mid \xvec) = 1 - p_k$. Rejecting costs $d$ with certainty. The best
+prediction is the most probable class, with risk $1 - \max_k p_k$. Rejecting is better exactly when
+$d < 1 - \max_k p_k$, that is, when $\max_k p_k < 1 - d$.
+
+Two limits bound the useful range of $d$. At $d = 0$ rejection is free and every case short of certainty is rejected.
+Since $\max_k p_k \ge 1/K$ always, a cost $d \ge 1 - 1/K$ means no case is ever rejected. For two classes that is
+$d \ge 1/2$, and for $d < 1/2$ the reject region is the band $d < p < 1 - d$, where $p = P(y = 1 \mid \xvec)$.
+
+## Unequal error costs
+
+With two classes, a false positive cost $c_{\text{FP}}$, a false negative cost $c_{\text{FN}}$ and a rejection cost $d$,
+the three conditional risks are $p\, c_{\text{FN}}$ (predict 0), $(1 - p)\, c_{\text{FP}}$ (predict 1) and $d$ (reject).
+Predicting 0 beats rejecting when $p \le d / c_{\text{FN}}$. Predicting 1 beats rejecting when $p \ge 1 - d / c_{\text{FP}}$.
+The reject region is the interval between them,
+
+$$
+\frac{d}{c_{\text{FN}}} < p < 1 - \frac{d}{c_{\text{FP}}},
+$$
+
+which is non-empty only if $d\,(1/c_{\text{FN}} + 1/c_{\text{FP}}) < 1$, that is
+$d < c_{\text{FP}} c_{\text{FN}} / (c_{\text{FP}} + c_{\text{FN}})$. A rejection more expensive than that is never worth
+it: at the hardest posterior, $p^* = c_{\text{FP}}/(c_{\text{FP}} + c_{\text{FN}})$, the best prediction already costs
+less.
+
+## The error-reject trade-off
+
+Write $t = 1 - d$ for the acceptance threshold on $\max_k p_k$. Each $t$ gives a reject rate $\rho(t)$, the probability
+that $\max_k p_k < t$, and an error rate $E(t)$, the probability of accepting a case and misclassifying it. Lowering $d$
+raises $t$, rejects more cases and removes errors. Chow showed that this curve has two properties
+<Cite id="chow1970" />.
+
+**The slope is $-d$.** Raising $t$ slightly moves into the reject region the accepted cases whose largest posterior is
+just below the new threshold. Each such case has $\max_k p_k \approx t$, so it would have been misclassified with
+probability $1 - t = d$. Rejecting an extra probability mass $\Delta\rho$ of cases therefore removes $d\,\Delta\rho$
+expected errors, and $dE / d\rho = -d$. The first cases rejected (at $d$ near $1/2$ for two classes) remove about half
+an error each; later ones, with posteriors near certainty, remove almost nothing.
+
+**Every point is optimal for its reject rate.** Chow's rule with cost $d$ minimises $E + d\rho$ over all decision
+rules, because that sum is its expected loss. Suppose another rule rejected the same fraction $\rho$ with a smaller error
+$E' < E$. It would have $E' + d\rho < E + d\rho$, contradicting optimality. So no rule that rejects a fraction $\rho$ of
+cases has a lower error rate. The cost $d$ acts as a Lagrange multiplier for a constraint on the reject rate.
+
+<RejectBand />
+
+## Worked example
+
+**Three classes.** With rejection cost $d = 0.3$, the rule accepts a case when $\max_k p_k \ge 0.7$. A case with
+posteriors $(0.5, 0.3, 0.2)$ is rejected: predicting class 1 would cost $1 - 0.5 = 0.5$ in expectation, more than
+$0.3$. A case with posteriors $(0.8, 0.1, 0.1)$ is predicted as class 1, at expected cost $0.2$.
+
+**Binormal.** A score $x$ is $\Gauss(0, 1)$ for negatives and $\Gauss(2, 1)$ for positives, with equal priors. The
+posterior is $p(x) = \sigma(2x - 2)$, where $\sigma$ is the logistic function. Without rejection ($d = 0.5$) the rule
+predicts positive for $x \ge 1$ and has error rate $\Phi(-1) = 0.159$, with $\Phi$ the standard normal cdf. With
+$d = 0.2$ the reject band is $p \in (0.2, 0.8)$, which is $x \in (0.307, 1.693)$. That rejects 33.4% of cases and cuts
+the error rate to 4.5%. The expected loss falls from $0.159$ to $0.045 + 0.2 \times 0.334 = 0.112$. With $d = 0.05$ the
+rule rejects 67.5% of cases for an error rate of 0.7%.
+
+## Assumptions
+
+- **Calibrated posteriors.** Chow's rule compares $\max_k p_k$ with a number. An overconfident model reports posteriors
+  that are too high, so it rejects too few cases and its error rate on accepted cases is higher than $d$ implies.
+  Calibrate first (see <NoteLink to="classifier-calibration">classifier calibration</NoteLink>).
+- **One rejection cost.** The rule assumes that deferring costs the same for every case. If the expert is slower on hard
+  cases or has limited capacity, the problem becomes one of choosing which cases to defer under a budget, which is the
+  setting of <NoteLink to="selective-classification">selective classification</NoteLink>.
+
+## Pitfalls
+
+- **Ambiguity is not novelty.** The rule rejects cases that the model finds ambiguous between classes. An input unlike
+  anything in the training data can still receive a confident posterior and be accepted. Detecting such inputs needs a
+  measure of epistemic uncertainty or a density model, not the posterior alone (see
+  <NoteLink to="aleatoric-and-epistemic-uncertainty">aleatoric and epistemic uncertainty</NoteLink>).
+- **Reporting accuracy on accepted cases alone.** Any classifier looks accurate if it rejects enough. Report the error
+  rate together with the reject rate, or the whole error-reject curve.
+- **Learning with rejection is a different problem.** Training a model to abstain directly, with a surrogate loss for
+  the reject option, can do better than thresholding a posterior when the posterior is poorly estimated
+  <Cite id="bartlett2008" />.

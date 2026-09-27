@@ -1,0 +1,160 @@
+---
+title: Threshold choice methods
+kind: concept
+summary: 'Average a classifier''s loss over uniform cost proportions and each rule for setting the threshold yields a known metric: a fixed threshold gives error rate, $t = c$ gives the Brier score, a rate-based threshold gives a linear function of AUC, the optimal one hull refinement loss.'
+tags: [roc-analysis, decision-theory, metrics, scoring-rules, worked-example]
+aliases: [threshold choice method, expected loss over operating conditions, score-driven threshold, rate-driven threshold, coherent interpretation of AUC, unified view of performance metrics]
+requires: [roc-curve-and-auc, log-loss-and-brier-score, bayes-decision-rule]
+related: [cost-curves, roc-convex-hull, proper-scoring-rule, scoring-rule-decompositions, isotonic-calibration]
+references: [hernandezorallo2012, flach2011, hand2009, drummond2006]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+An **operating condition** for a binary classifier is a cost proportion $c = c_{\text{FP}}/(c_{\text{FP}} + c_{\text{FN}})
+\in [0, 1]$. At threshold $t$ on a score $s$ (predict positive when $s \ge t$), the loss is
+
+$$
+Q(t; c) = 2\,\brack{c\,(1 - \pi)\,\text{FPR}(t) + (1 - c)\,\pi\,\text{FNR}(t)},
+$$
+
+with $\pi$ the fraction of positives. A **threshold choice method** is a function $T(c)$ giving the threshold to use
+under condition $c$. Its **expected loss** for a density $w$ over conditions is $L = \int_0^1 Q\paren{T(c); c}\, w(c)\,
+dc$. With $w$ uniform, each common threshold choice method turns $L$ into a familiar performance metric
+<Cite id="hernandezorallo2012" />.
+</Definition>
+
+## Why the threshold rule matters
+
+A metric such as AUC or the Brier score is often described as "averaging over all thresholds" or "over all costs". That
+description is incomplete. Expected loss over a range of operating conditions depends on two choices: how likely each
+condition is ($w$), and how the threshold is set once the condition is known ($T$). Work on proper scoring rules varied
+$w$. Hernández-Orallo, Flach and Ferri varied $T$, and found that each natural choice recovers a different standard
+metric <Cite id="hernandezorallo2012" />. A metric is then a statement about how the model will be deployed.
+
+The factor 2 in $Q$ makes $Q(t; 1/2)$ equal to the error rate: at $c = 1/2$ the two errors cost the same and
+$Q = (1 - \pi)\text{FPR} + \pi\,\text{FNR}$.
+
+## Fixed threshold: the error rate
+
+If the threshold is the same $t_0$ whatever the condition, $Q(t_0; c)$ is linear in $c$. Its average over a uniform $c$
+is its value at the mean, $c = 1/2$:
+
+$$
+L_{\text{fixed}} = Q(t_0; \tfrac12) = (1 - \pi)\,\text{FPR}(t_0) + \pi\,\text{FNR}(t_0),
+$$
+
+the error rate at $t_0$. Accuracy is the right metric for a classifier whose threshold will never be adjusted.
+
+## Score-driven threshold: the Brier score
+
+Suppose the scores are probability estimates $s \in [0, 1]$ and the threshold is set at the cost proportion itself,
+$T(c) = c$. That is the <NoteLink to="bayes-decision-rule">Bayes decision rule</NoteLink> for calibrated
+probabilities. Consider one case with score $s$ and average its loss over $c \sim \Unif(0, 1)$.
+
+- A **positive** case is missed when $s < c$, which costs $2(1 - c)$ per case in the normalisation of $Q$. Its average
+  loss is $\int_s^1 2(1 - c)\, dc = (1 - s)^2$.
+- A **negative** case is flagged when $s \ge c$, which costs $2c$. Its average loss is $\int_0^s 2c\, dc = s^2$.
+
+In both cases the result is $(s - y)^2$, with $y \in \set{0, 1}$ the label. Averaging over cases gives
+
+$$
+L_{\text{score-driven}} = \frac1n\sum_{i=1}^n (s_i - y_i)^2,
+$$
+
+the Brier score <Cite id="hernandezorallo2012" />. The Brier score measures how well a model performs when its
+probabilities are taken at face value and used as thresholds, across all cost proportions equally.
+
+## Rate-driven threshold: a linear function of AUC
+
+Now suppose the scores are only a ranking, and the threshold is set so that a fraction $r = 1 - c$ of cases is predicted
+positive. More expensive false positives mean fewer positive predictions. Write $\text{TPR}(r)$ and $\text{FPR}(r)$ for
+the rates at that threshold. The predicted-positive rate satisfies $r = \pi\,\text{TPR} + (1 - \pi)\,\text{FPR}$, so
+$\pi\,\text{FNR} = \pi - r + (1 - \pi)\,\text{FPR}$. Substituting into $Q$ with $c = 1 - r$,
+
+$$
+Q = 2\,\brack{(1 - r)(1 - \pi)\,\text{FPR} + r\,\paren{\pi - r + (1 - \pi)\,\text{FPR}}} = 2\,\brack{(1 - \pi)\,\text{FPR}
++ r\pi - r^2}.
+$$
+
+Averaging over $r \sim \Unif(0, 1)$ gives $L = 2(1 - \pi)\int_0^1 \text{FPR}\, dr + \pi - 2/3$. The integral runs along
+the ROC curve, where $dr = \pi\, d\text{TPR} + (1 - \pi)\, d\text{FPR}$:
+
+$$
+\int_0^1 \text{FPR}\, dr = \pi \int \text{FPR}\, d\text{TPR} + (1 - \pi)\int_0^1 \text{FPR}\, d\text{FPR} = \pi\,(1 -
+\text{AUC}) + \frac{1 - \pi}{2}.
+$$
+
+The first integral uses $\int \text{FPR}\, d\text{TPR} + \int \text{TPR}\, d\text{FPR} = 1$ along a curve from $(0, 0)$
+to $(1, 1)$, which is integration by parts. Collecting terms,
+
+$$
+L_{\text{rate-driven}} = 2\pi(1 - \pi)(1 - \text{AUC}) + (1 - \pi)^2 + \pi - \tfrac23 = \pi(1 - \pi)(1 - 2\,\text{AUC}) +
+\tfrac13.
+$$
+
+Expected loss falls linearly as AUC rises <Cite id="hernandezorallo2012" />. This answers Hand's objection that AUC
+averages misclassification losses with a weighting that depends on the classifier itself <Cite id="hand2009" />. Flach,
+Hernández-Orallo and Ferri gave AUC a coherent reading as expected loss when both the cost parameter and the data point
+whose score sets the threshold are drawn uniformly, so that neither distribution depends on the model
+<Cite id="flach2011" />.
+
+## Optimal threshold: the convex-hull refinement loss
+
+If the threshold is chosen to minimise $Q(t; c)$ for each $c$, which requires knowing the ROC curve, the expected loss is
+the area under the lower envelope of the classifier's <NoteLink to="cost-curves">cost lines</NoteLink>. Hernández-Orallo,
+Flach and Ferri showed that it equals the refinement loss of the scores after calibration along the ROC convex hull
+<Cite id="hernandezorallo2012" />. Calibration along the hull is <NoteLink to="isotonic-calibration">isotonic
+calibration</NoteLink>, so $L_{\text{optimal}}$ is the Brier score of the scores after the pool adjacent violators
+algorithm has been applied to them on the same data. Hand's H measure is a rescaling of this optimal expected loss with a
+$\Beta(2, 2)$ weighting over cost proportions instead of a uniform one <Cite id="hand2009" />.
+
+Since the optimal method takes the least loss at every $c$, $L_{\text{optimal}}$ is at most each of the others. The
+gap $L_{\text{score-driven}} - L_{\text{optimal}}$ is the Brier score minus its hull refinement loss, a calibration loss
+(see <NoteLink to="scoring-rule-decompositions">decompositions of proper scoring rules</NoteLink>). A well-calibrated
+model gains little from tuning its thresholds; a poorly calibrated one gains a lot.
+
+## Summary
+
+| threshold choice $T(c)$ | information needed | expected loss, uniform $c$ |
+| --- | --- | --- |
+| fixed, $t_0$ | none | error rate at $t_0$ |
+| score-driven, $t = c$ | calibrated probabilities | Brier score |
+| rate-driven, predicted-positive rate $1 - c$ | a ranking | $\pi(1 - \pi)(1 - 2\,\text{AUC}) + 1/3$ |
+| optimal | the ROC curve on deployment data | Brier score after isotonic calibration |
+
+The table suggests how to choose a metric. Use accuracy if the threshold will be frozen, the Brier score if the model's
+probabilities will be thresholded at the cost proportion, AUC if a fixed fraction of cases will be acted on, and the
+refinement loss if thresholds will be tuned to each condition <Cite id="hernandezorallo2012" />.
+
+## Worked example
+
+A simulated sample has $n = 4000$ cases with prevalence $\pi = 0.3$ (1198 positives in the draw, a sample prevalence of 0.2995). Each case's score is
+$s = \sigma(\pm 1 + 1.5z)$ with $z \sim \Gauss(0, 1)$, the sign $+$ for positives and $\sigma$ the logistic function.
+On this sample:
+
+- the error rate at $t_0 = 0.5$ is $0.263$, and the fixed-threshold expected loss is $0.263$;
+- the Brier score is $0.1757$, and averaging $Q(c; c)$ over a grid of 2000 values of $c$ gives $0.1757$;
+- AUC is $0.816$, so the rate-driven formula gives $0.2995 \times 0.7005 \times (1 - 1.632) + 1/3 = 0.2007$, matching the
+  grid average $0.2007$;
+- the Brier score after isotonic calibration is $0.1494$, matching the grid average of the optimal loss.
+
+Here $0.149 < 0.176 < 0.201 < 0.263$. Tuning the threshold to each condition helps most. Using the scores as
+probabilities comes next, because these scores are close to calibrated but not exactly so.
+
+## Assumptions
+
+- **Uniform operating conditions.** Each identity holds for $c \sim \Unif(0, 1)$. Other densities $w(c)$ give other
+  weightings of the same losses; a $\Beta$ density concentrated near the expected cost proportion is often more
+  realistic.
+- **Cost proportion versus skew.** Folding the class prior into the operating condition, as the probability cost of
+  cost curves does, gives versions of the same results with the two classes weighted equally
+  <Cite id="hernandezorallo2012" />.
+
+## Pitfalls
+
+- **Comparing metrics that assume different deployments.** A model with the best AUC may not have the best Brier score.
+  Neither is wrong; they answer different questions about how thresholds will be set.
+- **Treating the optimal method as achievable.** It needs the deployment ROC curve. On the training data it is
+  optimistic.
