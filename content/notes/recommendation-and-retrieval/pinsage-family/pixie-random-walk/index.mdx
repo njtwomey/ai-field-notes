@@ -1,0 +1,139 @@
+---
+title: Pixie
+kind: technique
+summary: 'Pixie (WWW 2018) recommends from billions of pins in real time by simulating short random walks on an in-memory pin–board graph from a user''s weighted query pins. It biases walks per user, boosts pins reached from several query pins with $(\sum_q \sqrt{V_q})^2$ and stops walks early.'
+tags: [recommender-systems, random-walks, graphs, systems, pinterest, worked-example]
+aliases: [Pixie random walk, multi-hit booster, random walk with restarts recommendation, graph pruning for recommendation]
+requires: [random-walk, markov-chain]
+partOf: [pinsage-family]
+related: [pinsage, graph-collaborative-filtering, multi-stage-recommendation, neighbourhood-collaborative-filtering]
+references: [eksombatchai2018pixie, ying2018pinsage]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Pixie** is Pinterest's real-time graph-based recommender. Its input is a user-specific set of query pins with weights,
+$Q = \set{(q, w_q)}$. From each query pin it simulates many short random walks on a bipartite graph of pins and boards,
+counts how often each pin is visited, combines the counts across query pins so that pins reached from several of them
+are boosted, and returns the most visited pins. The graph, pruned to 3 billion nodes and 17 billion edges, is held in
+the memory of a single machine <Cite id="eksombatchai2018pixie" />.
+</Definition>
+
+## Problem
+
+Pinterest recommends from more than 3 billion items to more than 200 million monthly active users. Recommendations must
+respond to what the user just did, which rules out precomputing them daily. The paper sets the real-time requirement at
+under 100 milliseconds per request. Precomputing for every registered user also wastes work on inactive users
+<Cite id="eksombatchai2018pixie" />.
+
+Users save pins to boards. A board groups pins that one person considers related, so the pin–board graph
+$G = (P, B, E)$ records many human judgements of relatedness. Pixie uses the graph directly, without learning
+embeddings. $E(p)$ denotes the boards linked to pin $p$ and $E(b)$ the pins on board $b$.
+
+## Basic random walk
+
+From a query pin $q$, a step picks a random board $b \in E(p)$ of the current pin $p$, then a random pin
+$p' \in E(b)$ of that board, and moves to $p'$. Each walk has a random length drawn with a parameter $\alpha$, and walks
+are repeated from $q$ until the total number of steps reaches $N$. A counter $V[p]$ records how many times each pin was
+visited. The pins with the highest counts are the recommendations. The work is $O(N)$, independent of the size of the
+graph <Cite id="eksombatchai2018pixie" />.
+
+Visit counts from repeated walks that restart at $q$ estimate the personalised PageRank of $q$, the same quantity that
+<NoteLink to="pinsage">PinSage</NoteLink> later used to choose and weight neighbourhoods
+<Cite id="ying2018pinsage" />.
+
+## Pixie's extensions
+
+**Biased walks.** The step to a neighbour is drawn by a user-specific `PersonalizedNeighbor` rule that prefers edges
+matching the user's features, for example language or topic. This acts like a separate edge-weighted graph for each
+user without storing one. In practice the weights take a few discrete values, and edges of similar languages and topics
+are stored next to each other, so the biased choice is a draw from a sub-range of the neighbour list
+<Cite id="eksombatchai2018pixie" />.
+
+**Multiple weighted query pins.** Recent pins get high weights and old pins low weights, by time and type of
+interaction. A high-degree query pin needs more steps to produce stable counts. Pixie gives query pin $q$ the budget
+
+$$
+N_q = w_q N \frac{s_q}{\sum_{r \in Q} s_r}, \qquad s_q = \abs{E(q)}\paren{C - \log\abs{E(q)}},
+$$
+
+where $C = \max_{p \in P} \abs{E(p)}$ is the largest pin degree <Cite id="eksombatchai2018pixie" />. As a function of the
+degree $x = \abs{E(q)}$, $s(x) = x(C - \log x)$ has second derivative $-1/x < 0$, so it is concave: it grows with degree
+but more slowly than proportionally. High-degree pins get more steps and low-degree pins are not starved.
+
+**Multi-hit booster.** Let $V_q[p]$ be the visit count of pin $p$ in the walks from $q$. Pixie combines the counts as
+<Cite id="eksombatchai2018pixie" />
+
+$$
+V[p] = \paren{\sum_{q \in Q} \sqrt{V_q[p]}}^2 = \sum_{q \in Q} V_q[p] + 2\sum_{q < r} \sqrt{V_q[p]\,V_r[p]}.
+$$
+
+The expansion shows what the square root does. The first sum is the plain total. The cross terms are positive only for
+pins visited from at least two query pins. A pin reached from a single query pin keeps its count unchanged.
+
+**Worked example.** Pin $A$ is visited 16 times from one query pin and never from the others. Pin $B$ is visited 8
+times from each of two query pins. Both have a plain total of 16. The booster gives $V[A] = (\sqrt{16})^2 = 16$ and
+$V[B] = (\sqrt 8 + \sqrt 8)^2 = 32$. A pin visited 4 times from each of four query pins, also a total of 16, gets
+$(4 \cdot 2)^2 = 64$.
+
+**Early stopping.** The walks from a query pin stop when at least $n_p$ pins have reached a visit count of $n_v$,
+tracked with a single counter. On 20,000 single-pin queries, $n_p = 2{,}000$ and $n_v = 4$ kept 84% of the top 1,000
+results of a very long walk while running three times faster. With $n_v = 8$, 900 of the top 1,000 matched and runtime
+halved <Cite id="eksombatchai2018pixie" />.
+
+**Boards as recommendations.** Walks visit boards as well as pins, so Pixie can recommend boards. New pins are served
+by recommending boards first and then the fresh pins saved to them, which addresses cold start for new pins
+<Cite id="eksombatchai2018pixie" />.
+
+## Graph pruning
+
+The raw graph has 7 billion nodes and over 100 billion edges. Pixie removes two kinds of noise. First, it computes an LDA
+topic vector for each pin's description and the entropy of each board's topic distribution; high-entropy (topically
+diverse) boards are removed with their edges. Second, it caps the degree of popular pins: with pruning factor
+$\delta \le 1$, pin $p$ keeps $\abs{E(p)}^{\delta}$ edges, those to the boards whose topic vectors are most similar to
+the pin's <Cite id="eksombatchai2018pixie" />.
+
+After pruning the graph has 1 billion boards, 2 billion pins and 17 billion edges and fits in about 120 GB of memory. In
+a link-prediction task, removing the most diverse 10% of boards and then setting $\delta = 0.91$ raised F1 by 58% over
+the unpruned graph while keeping 20% of the edges <Cite id="eksombatchai2018pixie" />.
+
+## Implementation
+
+Pixie is written in C++ on the SNAP library. All adjacency lists sit in one contiguous array with an offset per node, so
+sampling a random neighbour is one array read. Visit counts go into an open-addressing hash table with linear probing,
+sized to $N$ entries, the maximum possible number of distinct visited pins. The graph is rebuilt daily by a Hadoop
+pipeline and loaded into shared memory backed by Linux HugePages <Cite id="eksombatchai2018pixie" />.
+
+## Cost
+
+A single server holds the whole pruned graph, so walks never cross machines. The 99th-percentile latency is under 60 ms
+and one server handles about 1,200 requests per second; the cluster served nearly 100,000 requests per second. Runtime
+grows linearly with the number of steps and is below 50 ms for walks of fewer than 200,000 steps
+<Cite id="eksombatchai2018pixie" />.
+
+## Reported results
+
+Given a query pin, the task is to rank, among all 2 billion pins, the related pin that a user saved while viewing the query pin. The fraction of cases
+with the saved pin in the top $K$ <Cite id="eksombatchai2018pixie" />:
+
+| method                   | top 10 | top 100 | top 1000 |
+| ------------------------ | ------ | ------- | -------- |
+| content-based (textual)  | 1.0%   | 2.2%    | 4.8%     |
+| content-based (visual)   | 1.1%   | 2.4%    | 4.5%     |
+| content-based (combined) | 2.1%   | 4.6%    | 10.5%    |
+| Pixie                    | 6.3%   | 23.1%   | 52.2%    |
+
+In A/B tests against the earlier Hadoop-based system, which precomputed recommendations, per-pin engagement rose by 48%
+on homefeed, 13% on related pins, 26% for board recommendations and 20% on the explore tab. The paper reports that
+systems backed by Pixie contribute more than 80% of all user engagement on Pinterest <Cite id="eksombatchai2018pixie" />.
+
+## Trade-offs
+
+- **No learned representation.** Pixie scores pins relative to a query set. It produces no vector that other models can
+  use as a feature, which is what <NoteLink to="pinsage">PinSage</NoteLink> added.
+- **Walk length sets breadth.** Longer walks give more diverse, exploratory results and shorter walks more focused
+  ones.
+- **Memory bound.** The design needs the pruned graph to fit in one machine's memory.
+- **Popular pins dominate plain counts.** Degree capping and the booster counteract this; without them, walks diffuse
+  through large boards and popular pins.

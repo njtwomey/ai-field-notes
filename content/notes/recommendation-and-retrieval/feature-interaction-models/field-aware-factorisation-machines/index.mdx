@@ -1,0 +1,89 @@
+---
+title: Field-aware factorisation machines
+kind: concept
+summary: 'A field-aware factorisation machine gives each feature one latent vector per field and scores the pair $(i, j)$ by $\inner{\vvec_{i, f(j)}}{\vvec_{j, f(i)}}$, with $f(j)$ the field of $j$. It won click-prediction contests at the cost of more parameters and quadratic time.'
+tags: [recommender-systems, feature-interactions, click-through-rate, advertising, worked-example]
+aliases: [FFM, field-aware factorization machine, field-aware FM]
+requires: [factorisation-machines]
+partOf: [recommender-systems]
+related: [wide-and-deep, context-aware-recommendation]
+references: [juan2016ffm]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+In a **field-aware factorisation machine** (FFM) every feature belongs to one of $F$ fields, such as publisher,
+advertiser or gender, and $f(j)$ is the field of feature $j$. Each feature $i$ has one latent vector
+$\vvec_{i, g} \in \reals^k$ for every field $g$. The model is
+
+$$
+\hat{y}(\xvec) = w_0 + \sum_{i=1}^{n} w_ix_i + \sum_{i=1}^{n}\sum_{j=i+1}^{n}\inner{\vvec_{i, f(j)}}{\vvec_{j, f(i)}}x_ix_j.
+$$
+
+When feature $i$ interacts with feature $j$, it uses the vector it keeps for $j$'s field, and $j$ uses the vector it
+keeps for $i$'s field <Cite id="juan2016ffm" />.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="factorisation-machines">factorisation machine</NoteLink> gives each feature a single vector that serves
+every interaction. Practitioners in advertising and click-through-rate prediction found this limiting. Features come in
+fields, and the way a feature interacts can depend on which field its partner comes from. The value "male" might
+interact with product categories in one way and with age groups in another. One vector has to compromise between them;
+one vector per partner field does not.
+
+## Worked example
+
+Juan et al. use an ad impression with three active features, one per field: publisher ESPN, advertiser Nike, gender
+male <Cite id="juan2016ffm" />. An FM scores the interactions as
+
+$$
+\inner{\vvec_{\text{ESPN}}}{\vvec_{\text{Nike}}} + \inner{\vvec_{\text{ESPN}}}{\vvec_{\text{Male}}} + \inner{\vvec_{\text{Nike}}}{\vvec_{\text{Male}}}.
+$$
+
+The single vector $\vvec_{\text{ESPN}}$ must explain both how ESPN pairs with advertisers and how it pairs with
+genders. An FFM scores them as
+
+$$
+\inner{\vvec_{\text{ESPN}, A}}{\vvec_{\text{Nike}, P}} + \inner{\vvec_{\text{ESPN}, G}}{\vvec_{\text{Male}, P}} + \inner{\vvec_{\text{Nike}, G}}{\vvec_{\text{Male}, A}},
+$$
+
+with $P$, $A$ and $G$ the publisher, advertiser and gender fields. ESPN uses its advertiser-field vector against Nike
+and its gender-field vector against Male.
+
+## Cost
+
+| model | parameters | prediction cost |
+| ----- | ---------- | --------------- |
+| FM    | $nk$       | $O(\bar{n}k)$   |
+| FFM   | $nFk$      | $O(\bar{n}^2k)$ |
+
+Here $\bar{n}$ is the number of non-zero features per example <Cite id="juan2016ffm" />. The parameter count grows by
+the factor $F$. Prediction time also grows: the linear-time rewriting of an FM relies on one shared vector per feature,
+and field-dependent vectors break it, so an FFM sums over all pairs of non-zero features. With a few dozen fields, as in
+typical CTR data, $\bar{n}$ is small and this is affordable. Juan et al. also found that FFMs need a much smaller $k$
+than FMs, because each vector has a narrower job.
+
+## Where it worked
+
+FFMs won click-prediction competitions run by Criteo and Avazu and were deployed in advertising systems
+<Cite id="juan2016ffm" />. Three properties explain their success: field-specific vectors capture
+interactions more precisely, the field structure matches domain experts' view of the features, and the model stays
+cheap enough for production.
+
+## Pitfalls
+
+- **Overfitting.** $F$ times the parameters overfits small datasets. Juan et al. used early stopping on a validation
+  set; tune $k$ and the regularisation together.
+- **Fields must be defined.** The model's inductive bias is only as good as the grouping of features into fields.
+- **Numerical features.** A numerical feature needs its own field or must be discretised into bins.
+
+## Legacy
+
+FMs and FFMs bridge matrix factorisation and deep learning. They established that interactions between sparse features
+can be learned through embeddings, that architectural inductive bias such as field awareness pays, and that
+collaborative and content signals can live in one model. <NoteLink
+to="field-weighted-factorisation-machines">Field-weighted FMs</NoteLink> keep the field dependence with one scalar per
+field pair instead of one vector per field, and <NoteLink to="deepfm">DeepFM</NoteLink> carries the ideas into neural
+networks.

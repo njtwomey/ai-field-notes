@@ -1,0 +1,99 @@
+---
+title: Neighbourhood collaborative filtering
+kind: concept
+summary: 'Neighbourhood (memory-based) collaborative filtering predicts a user''s rating of an item from similar users'' ratings of it, or from the user''s ratings of similar items, with similarities such as cosine computed from the interaction matrix.'
+tags: [recommender-systems, collaborative-filtering, nearest-neighbours, worked-example]
+aliases: [collaborative filtering, memory-based collaborative filtering, user-based collaborative filtering, item-based collaborative filtering, item-kNN, ItemKNN, user-kNN, item-to-item recommendation, adjusted cosine similarity]
+requires: [explicit-and-implicit-feedback, pairwise-distances-and-cosine-similarity]
+partOf: [recommender-systems]
+related: [k-nearest-neighbours, matrix-factorisation-for-recommendation, progress-and-baselines-in-recommendation]
+references: [resnick1994grouplens, sarwar2001itemcf, dacrema2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Collaborative filtering** recommends from the behaviour of many users, on the assumption that users who agreed in
+the past will agree in the future. **Neighbourhood** (memory-based) methods compute similarities directly from the
+interaction matrix. **User-based** methods predict user $u$'s rating of item $i$ from the ratings of $i$ by the users
+most similar to $u$ <Cite id="resnick1994grouplens" />. **Item-based** methods predict it from $u$'s own ratings of the
+items most similar to $i$ <Cite id="sarwar2001itemcf" />. Model-based methods such as matrix factorisation instead fit a
+model of users and items.
+</Definition>
+
+## Intuition
+
+Collaborative filtering needs no description of the items. It uses the "wisdom of the crowd": if many users who liked
+*Alien* also liked *Blade Runner*, then someone who liked *Alien* is a good candidate for *Blade Runner*, whatever the
+two films are about. The crowd's co-occurrence patterns stand in for item features. This
+lets collaborative filtering recommend across categories a content description would keep apart, and it is why a new
+item with no interactions cannot be recommended at all (see <NoteLink to="cold-start-problem">cold start</NoteLink>).
+
+## Item-based prediction
+
+Let $\rvec_{\cdot i}$ be the column of ratings of item $i$. The similarity of items $i$ and $j$ is computed over the set
+$\Ucal_{ij}$ of users who rated both. The **cosine similarity** is
+
+$$
+s_{ij} = \frac{\sum_{u \in \Ucal_{ij}} r_{ui}r_{uj}}{\sqrt{\sum_{u \in \Ucal_{ij}} r_{ui}^2}\sqrt{\sum_{u \in \Ucal_{ij}} r_{uj}^2}}.
+$$
+
+On a 1 to 5 scale every rating is positive, so raw cosine is positive for every pair. **Adjusted cosine** first
+subtracts each user's mean rating $\bar{r}_u$ from their ratings, so that a similarity measures whether users rate the
+two items above or below their own average together <Cite id="sarwar2001itemcf" />.
+
+The prediction combines $u$'s ratings of the $k$ items most similar to $i$ that $u$ has rated, $\Ncal_k(i; u)$. A common
+form works with deviations from each item's mean $\bar{r}_j$:
+
+$$
+\hat{r}_{ui} = \bar{r}_i + \frac{\sum_{j \in \Ncal_k(i; u)} s_{ij}\paren{r_{uj} - \bar{r}_j}}{\sum_{j \in \Ncal_k(i; u)}\abs{s_{ij}}}.
+$$
+
+User-based prediction is the same with the roles of users and items exchanged.
+
+## Worked example
+
+Four users rate items A, B and C (a dash is missing):
+
+| user | A   | B   | C   |
+| ---- | --- | --- | --- |
+| 1    | 5   | 4   | –   |
+| 2    | 4   | 5   | 2   |
+| 3    | 1   | 2   | 5   |
+| 4    | 5   | –   | 1   |
+
+Predict user 1's rating of C from A and B. The item means are $\bar{r}_A = 3.75$, $\bar{r}_B = 3.667$ and
+$\bar{r}_C = 2.667$.
+
+- **Raw cosine.** Over users 2, 3 and 4, $s_{CA} = (8 + 5 + 5)/(\sqrt{30}\sqrt{42}) = 0.507$. Over users 2 and 3,
+  $s_{CB} = (10 + 10)/(\sqrt{29}\sqrt{29}) = 0.690$. The prediction is
+  $2.667 + (0.507 \cdot 1.25 + 0.690 \cdot 0.333)/1.197 = 3.39$.
+- **Adjusted cosine.** Subtracting user means ($\bar{r}_2 = 3.67$, $\bar{r}_3 = 2.67$, $\bar{r}_4 = 3$) gives
+  $s_{CA} = -0.920$ and $s_{CB} = -0.884$: users who rate A and B above their average rate C below it. The prediction
+  is $2.667 + (-0.920 \cdot 1.25 - 0.884 \cdot 0.333)/1.804 = 1.87$.
+
+User 1 likes A and B. Raw cosine misses that C is disliked by exactly the users who like A and B, because all
+ratings are positive. Adjusted cosine sees it and predicts a low rating.
+
+## Why item-based
+
+Sarwar et al. argued for item-based neighbourhoods at scale. A catalogue usually has fewer items than users, and item
+similarities change slowly, so they can be precomputed offline and served from a table of each item's nearest
+neighbours <Cite id="sarwar2001itemcf" />. "Customers who bought this also bought" is item-based collaborative
+filtering.
+
+## As a baseline
+
+A well-tuned item-kNN is a strong baseline for top-$n$ recommendation. Ferrari Dacrema et al. found that it, or simple
+graph-based methods, outperformed most of the neural recommenders they could reproduce <Cite id="dacrema2019" />. See
+<NoteLink to="progress-and-baselines-in-recommendation">progress and baselines</NoteLink>.
+
+## Pitfalls
+
+- **Few co-raters.** A similarity computed from two shared users is noise. Shrink similarities towards zero by the
+  number of co-raters, or require a minimum.
+- **Popularity dominates.** With implicit data, popular items co-occur with everything. Normalise by item frequency,
+  as cosine does, and check that neighbour lists are not all bestsellers.
+- **No generalisation beyond co-occurrence.** Two items never consumed by the same user have no similarity. Model-based
+  methods such as <NoteLink to="matrix-factorisation-for-recommendation">matrix factorisation</NoteLink> connect them
+  through shared latent factors.

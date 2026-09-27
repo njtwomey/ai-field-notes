@@ -1,0 +1,72 @@
+---
+title: SASRec
+kind: concept
+summary: 'SASRec runs a causally masked transformer over a user''s item sequence and scores the next item by the dot product of the output at position $t$ with each item embedding. Attention lets it behave like a Markov chain on sparse data and use long histories on dense data.'
+tags: [recommender-systems, sequence-modelling, transformer, deep-learning]
+aliases: [SASRec, self-attentive sequential recommendation, causal transformer for recommendation, unidirectional self-attention recommender]
+requires: [sequential-recommendation-models, causal-masking, scaled-dot-product-attention]
+partOf: [recommender-systems]
+related: [decoder-only-transformers, progress-and-baselines-in-recommendation]
+references: [kang2018sasrec, klenitskiy2023]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**SASRec** maps a user's most recent $n$ items $(i_1, \ldots, i_n)$ to embeddings $\evec_{i_t} + \pvec_t$, the sum of a
+learned item embedding and a learned position embedding. It applies a stack of transformer blocks whose self-attention
+is **causally masked**: position $t$ attends only to positions $1, \ldots, t$. The output $\fvec_t$ at position $t$
+scores every candidate $j$ for position $t + 1$ by $r_{t,j} = \fvec_t\transpose\evec_j$, reusing the input item
+embeddings <Cite id="kang2018sasrec" />.
+</Definition>
+
+## Intuition
+
+A sequence model must decide how much of the history matters for the next step. A first-order Markov chain uses only
+the last item; a recurrent network compresses everything into one state. Self-attention computes a weight for each past
+item from its content and position, per prediction. Kang and McAuley found that SASRec's attention adapts to the data:
+on sparse datasets it concentrates on the last few items, like a Markov chain; on dense datasets it spreads over long
+histories, like a recurrent network <Cite id="kang2018sasrec" />.
+
+## Architecture
+
+1. **Embedding.** The sequence is truncated or left-padded to length $n$. Each item gets $\evec_{i_t} \in \reals^d$ and
+   each position a learned $\pvec_t \in \reals^d$. Without the position term the model would see a set, not a sequence.
+2. **Self-attention blocks.** Each block applies <NoteLink to="scaled-dot-product-attention">scaled dot-product
+   attention</NoteLink> with a <NoteLink to="causal-masking">causal mask</NoteLink>, then a point-wise feed-forward
+   network, with residual connections, layer normalisation and dropout.
+3. **Prediction.** The output $\fvec_t$ of the last block is the user's current-intent vector after $t$ items. Scores
+   are inner products with the shared item embeddings.
+
+## Training
+
+Every prefix is a training example. For a sequence of length $n$ the target at position $t$ is $i_{t+1}$, so one forward
+pass trains $n - 1$ predictions at once. The mask is what makes this valid: without it, position $t$ could attend to
+$i_{t+1}$, the answer it is asked to predict.
+
+The original paper used binary cross-entropy with one sampled negative $j$ per position:
+
+$$
+\mathcal{L} = -\sum_{S_u}\sum_{t=1}^{n-1}\LB\ln\sigma\paren{r_{t, i_{t+1}}} + \ln\paren{1 - \sigma\paren{r_{t, j}}}\RB.
+$$
+
+<Cite id="kang2018sasrec" />
+
+At inference, the output at the last position scores all items, and the top ones are recommended. Because scoring is a
+dot product with item embeddings, retrieval can use an approximate nearest-neighbour index.
+
+## Comparison with BERT4Rec
+
+<NoteLink to="bert4rec">BERT4Rec</NoteLink> replaced the causal mask with bidirectional attention and a masked-item
+objective and reported better results. Klenitskiy and Vasilev trained SASRec with the full softmax cross-entropy over
+all items that BERT4Rec uses, instead of one sampled negative. SASRec then matched or beat BERT4Rec and trained faster
+<Cite id="klenitskiy2023" />. The lesson is that the architecture and training objective must match the
+task at inference: next-item prediction is left to right, and a causal model fits it directly.
+
+## Pitfalls
+
+- **The loss matters as much as the architecture.** One sampled negative per position gives a weak gradient. Sampled
+  softmax with many negatives, or the full softmax where the catalogue allows, trains a much better model.
+- **Maximum length.** Learned position embeddings fix the longest sequence the model can take. Longer histories must
+  be truncated.
+- **Cold items.** Item embeddings are IDs. A new item has an untrained embedding until it appears in sequences.

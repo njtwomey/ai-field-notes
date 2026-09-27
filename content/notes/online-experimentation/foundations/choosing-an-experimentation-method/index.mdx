@@ -1,0 +1,92 @@
+---
+title: Choosing an experimentation method
+kind: concept
+summary: 'A/B tests buy durable, absolute causal estimates; interleaving buys fast relative comparisons of rankers; bandits minimise regret while they run; reinforcement learning optimises long-term policies. The question and the decision''s lifetime decide.'
+tags: [experimentation, ab-testing, bandits, recommender-systems, worked-example]
+aliases: [experimentation strategy, experimentation maturity, learning versus earning, hybrid experimentation, experiment velocity, cost of slow experimentation]
+requires: [ab-test]
+related: [interleaving, bandits-vs-ab-tests, multi-armed-bandit, contextual-bandit, reinforcement-learning-for-recommendation, overall-evaluation-criterion, ab-test-power, experimentation-biases-in-recommendation]
+references: [kohavi2020, aurisset2017interleaving, mui2019bandit, chapelle2012interleaving]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Choosing an experimentation method** means matching the method to the decision it informs. Four methods cover most
+needs of a product such as a recommender: the **A/B test** (causal validation of a change), **interleaving** (relative
+comparison of two rankers), the **multi-armed bandit** (earning while learning) and **reinforcement learning**
+(learning a long-term policy). They are complements, not competitors <Cite id="kohavi2020" />.
+</Definition>
+
+## Four methods, four objectives
+
+| method | primary objective | efficiency | opportunity cost | output |
+| --- | --- | --- | --- | --- |
+| <NoteLink to="ab-test">A/B test</NoteLink> | causal validation of a long-term effect | slowest, most data | highest: fixed allocation to losers | absolute lift on business metrics, e.g. +2.1% revenue |
+| <NoteLink to="interleaving">interleaving</NoteLink> | which of two rankers users prefer | highest for rankings | low: users still see half the incumbent | relative preference |
+| <NoteLink to="multi-armed-bandit">bandit</NoteLink> | reward during the experiment | converges faster than an A/B test | lowest by design | the current best arm |
+| <NoteLink to="reinforcement-learning-for-recommendation">reinforcement learning</NoteLink> | long-term cumulative user value | a separate class | depends on exploration | a policy |
+
+**A/B tests buy decisional confidence.** Random assignment gives an unbiased estimate of the average treatment effect
+in the live system, with controlled error rates. The fixed allocation that makes this possible also sends a large share
+of traffic to worse variants for the whole test: the regret of pure exploration. That cost is worth paying for
+long-lived, high-stakes and hard-to-reverse decisions, such as a new core algorithm or a redesign
+<Cite id="kohavi2020" />. See <NoteLink to="bandits-vs-ab-tests">bandits versus A/B tests</NoteLink> for the formal
+trade-off between regret and estimation.
+
+## A maturity spectrum
+
+One way to organise the methods is by the phase of development each serves.
+
+1. **Screening.** Many candidate rankers differ in features or hyperparameters. Interleaving compares them quickly with
+   little traffic and prunes the pool to one or two.
+2. **Validation and launch.** The survivors face a full A/B test against production, which measures their absolute
+   effect on revenue, retention and satisfaction. Netflix describes exactly this two-stage process <Cite
+   id="aurisset2017interleaving" />.
+3. **Continuous, tactical optimisation.** Components with a short shelf life, such as headlines, promotional banners or
+   the order of carousels, are run by bandits that minimise regret. An A/B test can still compare a new bandit algorithm
+   with the old one.
+4. **Strategic, long-horizon optimisation.** Reinforcement learning, as a long-term investment, learns policies for the
+   whole user journey and outcomes such as lifetime value.
+
+Hybrids are common. Mui et al. inserted a short Thompson-sampling bandit between offline evaluation and A/B testing of
+recommender algorithms at Expedia Group: up to six candidates could be screened and the winner validated in about five
+weeks, where serial four-week A/B tests of six candidates would take six months <Cite id="mui2019bandit" />.
+
+## The cost of slow experimentation
+
+Most ideas do not improve the metrics they target. Kohavi et al. report that at Microsoft about a third of tested ideas
+improved their target metrics, and that other large organisations see similar or lower success rates
+<Cite id="kohavi2020" />.
+With a low success rate, the number of experiments per year sets the rate of improvement.
+
+**Worked example.** With a success rate of 15%, a team that runs one experiment a month finds $12 \times 0.15 = 1.8$
+improvements a year. Two a month gives $24 \times 0.15 = 3.6$; one a week gives $52 \times 0.15 = 7.8$. Quadrupling
+velocity quadruples the yield.
+
+Throughput also changes what gets tried. A team that can run few experiments tests only safe, incremental changes and
+risks a local optimum; a team that can run many can afford bold ideas, some of which turn out to be the breakthroughs.
+And experts are poor at predicting which ideas will win, which is why testing many beats choosing a few
+<Cite id="kohavi2020" />. Investment in experimentation infrastructure is therefore an investment in the rate of
+innovation, not only a cost saving.
+
+## Questions that decide
+
+1. **Learning or earning?** Durable knowledge for a critical decision calls for an A/B test. Maximum reward during a
+   live, time-limited campaign calls for a bandit.
+2. **Is it a ranking comparison that needs fast iteration?** Interleaving is the default screen for rankers.
+3. **What is the decision's shelf life?** Evergreen decisions (a core algorithm, a redesign) need an A/B test;
+   perishable ones (news headlines, promotions) suit bandits. See <NoteLink to="bandits-vs-ab-tests">bandits versus A/B
+   tests</NoteLink>.
+4. **One interaction or a long relationship?** A discrete choice point suits a <NoteLink
+   to="contextual-bandit">contextual bandit</NoteLink>; a multi-session journey optimised for lifetime value is a
+   reinforcement-learning problem.
+5. **How mature is the team?** A/B testing is the most accessible; interleaving and bandits need real-time
+   infrastructure; reinforcement learning needs deep expertise, off-policy evaluation and heavy infrastructure.
+
+## Pitfalls
+
+- **Screening on the wrong signal.** Interleaving measures click preference. A ranker that wins on clicks can still lose
+  on retention; the A/B stage exists to catch that.
+- **Ignoring systemic biases.** Every method runs inside the recommender's feedback loops. See
+  <NoteLink to="experimentation-biases-in-recommendation">experimentation biases in recommendation</NoteLink>.

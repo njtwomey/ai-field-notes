@@ -1,0 +1,88 @@
+---
+title: The cold-start problem
+kind: concept
+summary: 'Cold start is the failure of collaborative filtering for users or items with no interaction history: their ID embeddings cannot be learned. Remedies replace or supplement IDs with features, sessions, auxiliary behaviours, graphs or language models.'
+tags: [recommender-systems, cold-start, embeddings]
+aliases: [cold start, cold-start problem, new user problem, new item problem, item cold start, user cold start, session cold start, strict cold start]
+requires: [matrix-factorisation-for-recommendation]
+partOf: [recommender-systems]
+related: [content-based-filtering, hybrid-recommenders, two-tower-model, sequential-recommendation-models, multi-behaviour-recommendation, graph-collaborative-filtering, llms-as-recommenders, contextual-bandit]
+references: [schein2002coldstart, volkovs2017dropoutnet, kula2015lightfm]
+status: draft
+updated: 2026-09-27
+---
+
+import { WarmUp } from './WarmUp'
+
+<Definition>
+The **cold-start problem** is the inability of a recommender to personalise for a user, or to recommend an item, for
+which it has no interaction history. In pure collaborative filtering each user and item is known only through an **ID
+embedding** learned from its interactions; an entity with no interactions has no data to learn from
+<Cite id="schein2002coldstart" />.
+</Definition>
+
+## Why collaborative filtering cannot avoid it
+
+<NoteLink to="matrix-factorisation-for-recommendation">Matrix factorisation</NoteLink> learns a vector per user ID
+and per item ID from observed pairs, and nothing else. This is not a flaw to be fixed but an
+intrinsic property of the paradigm: the reliance on ID embeddings is the source of its strength, since it needs no
+feature engineering, and of this weakness.
+
+- **User cold start.** A new user has no row in the matrix and no vector. The system can show only non-personalised
+  lists, such as the most popular items, until the user has interacted enough to "warm up".
+- **Item cold start.** A new item has no column and no vector, so the model never recommends it. Because it is never
+  recommended it gathers no interactions, and it stays invisible: a vicious cycle.
+- **Session cold start.** A known user starts a session whose intent their history does not reveal, such as buying a
+  gift.
+
+Two degrees are useful to distinguish. **Strict** cold start means zero interactions. **Sparse** (sometimes "cool")
+start means a handful, enough for a noisy vector.
+
+## A ladder of remedies
+
+The history of user and item representations reads as a progressive loosening of the tie between embeddings
+and interaction history.
+
+1. **Content-based and hybrid models** represent items by their attributes, so a new item has a vector from its
+   features at once. See <NoteLink to="content-based-filtering">content-based filtering</NoteLink> and
+   <NoteLink to="hybrid-recommenders">hybrid recommenders</NoteLink> <Cite id="kula2015lightfm" />.
+2. **Two-tower models** compute user vectors from sign-up and context features and item vectors from content, which
+   handles both new users and new items. See the <NoteLink to="two-tower-model">two-tower model</NoteLink>.
+3. **Sequential models** build a user vector from the first clicks of a session, turning a session cold-start user warm
+   within a few interactions. See <NoteLink to="sequential-recommendation-models">sequential
+   recommendation</NoteLink>.
+4. **Multi-task and multi-behaviour models** transfer knowledge from dense behaviours (views, clicks) to sparse targets
+   (purchases), so a user cold for purchases is warm for the model. See
+   <NoteLink to="multi-behaviour-recommendation">multi-behaviour recommendation</NoteLink>.
+5. **Graph networks** pull information from the neighbourhoods of the few items a sparse user touched, and graphs over
+   attributes give embeddings to entities with no interactions. See <NoteLink to="graph-collaborative-filtering">graph
+   collaborative filtering</NoteLink>.
+6. **Large language models** encode item text with enough world knowledge to place a new item near the items users
+   would treat as similar. See <NoteLink to="llms-as-recommenders">LLMs as recommenders</NoteLink>.
+
+<WarmUp />
+
+## Content and IDs together
+
+The figure shows why hybrids dominate. A content vector is available at once but is limited by what the features say;
+an ID vector starts from nothing but improves with each interaction. A model that starts at the content estimate and
+lets interactions refine it is never worse than either. LightFM does this by summing feature embeddings with the ID
+embedding <Cite id="kula2015lightfm" />. DropoutNet trains a network on both kinds of input while randomly dropping the
+interaction input, so that at serving time it can fall back on content for cold entities
+<Cite id="volkovs2017dropoutnet" />.
+
+## Non-model remedies
+
+- **Popularity and editorial lists.** The default for a new user. Strong on average and impersonal.
+- **Onboarding.** Ask new users to pick a few interests or rate a few items.
+- **Exploration.** Deliberately show new items to some users to gather interactions. A
+  <NoteLink to="contextual-bandit">contextual bandit</NoteLink> decides how much to explore, trading short-term
+  reward for information.
+
+## Pitfalls
+
+- **Evaluating on warm entities only.** Random splits leave few cold users or items in the test set. Evaluate cold
+  start on a split of entities held out entirely.
+- **Starving new items.** A ranker trained on logged exposure scores items it has rarely shown with low confidence and
+  keeps not showing them. Reserve exposure for new items or correct for it (see
+  <NoteLink to="popularity-bias">popularity bias</NoteLink>).

@@ -1,0 +1,97 @@
+---
+title: Two-tower model
+kind: concept
+summary: 'A two-tower model encodes the user with one network and each item with another and scores a pair by the dot product of the two vectors. Since the towers meet only at the dot product, item vectors are precomputed and searched with an approximate nearest-neighbour index.'
+tags: [recommender-systems, retrieval, deep-learning, embeddings, contrastive-learning]
+aliases: [two tower model, dual encoder recommender, two-tower retrieval, DSSM, candidate generation model, in-batch negatives, sampled softmax, logQ correction]
+requires: [matrix-factorisation-for-recommendation, multilayer-perceptron, softmax-and-log-sum-exp]
+partOf: [multi-stage-recommendation]
+related: [approximate-nearest-neighbour-search, maximum-inner-product-search, contrastive-learning]
+references: [rendle2020ncf, covington2016youtube, yi2019sampling, yang2020mns, radford2021]
+status: draft
+updated: 2026-09-27
+---
+
+import { TwoTowerDiagram } from './TwoTowerDiagram'
+
+<Definition>
+A **two-tower model** has a **query tower** $g_\theta$ that maps user and context features $\xvec$ to a vector
+$\uvec = g_\theta(\xvec) \in \reals^d$, and an **item tower** $h_\phi$ that maps item features $\zvec_i$ to
+$\vvec_i = h_\phi(\zvec_i) \in \reals^d$. The score of a pair is $s(\xvec, i) = \uvec\transpose\vvec_i$, or the cosine
+similarity. The towers share no computation before the score
+<Cite id="covington2016youtube" />.
+</Definition>
+
+<TwoTowerDiagram />
+
+## Why late interaction
+
+A model that feeds user and item features into one network together, such as <NoteLink to="deepfm">DeepFM</NoteLink>,
+can learn interactions such as "users of this age like this genre". Scoring a user against a catalogue of $10^9$ items
+with such a model takes $10^9$ forward passes per request, which is impossible in real time.
+
+The two-tower design gives up those cross features in exchange for a decoupled computation.
+
+- **Offline.** The item tower depends only on item features. It is run once over the whole catalogue, and the vectors
+  are stored in an <NoteLink to="approximate-nearest-neighbour-search">approximate nearest-neighbour</NoteLink> index
+  such as Faiss, ScaNN or HNSW.
+- **Online.** A request runs only the query tower, once. The index returns the $K$ items with the largest inner
+  product with $\uvec$, a <NoteLink to="maximum-inner-product-search">maximum inner product search</NoteLink>, in
+  milliseconds over billions of vectors.
+
+This is a pragmatic compromise: some expressiveness traded for serving at a scale no
+cross-feature model can reach. That is why the two-tower model is the default for the retrieval stage of a
+<NoteLink to="multi-stage-recommendation">multi-stage recommender</NoteLink>, with a cross-feature ranker after it.
+
+## Training
+
+Training data are positive pairs $(\xvec_b, i_b)$ from implicit feedback. The loss must also push unrelated pairs apart.
+Common choices are pointwise logistic loss, the pairwise <NoteLink to="bayesian-personalised-ranking">BPR</NoteLink>
+loss and contrastive losses.
+
+**In-batch negatives.** In a batch of $B$ positive pairs, the other $B - 1$ items serve as negatives for each query.
+With scores $s_{bb'} = \uvec_b\transpose\vvec_{i_{b'}}$ and a temperature $\tau$, the batch softmax loss is
+
+$$
+\mathcal{L} = -\frac{1}{B}\sum_{b=1}^{B}\ln\frac{\exp(s_{bb}/\tau)}{\sum_{b'=1}^{B}\exp(s_{bb'}/\tau)}.
+$$
+
+This is the InfoNCE loss of <NoteLink to="contrastive-learning">contrastive learning</NoteLink>, as used by CLIP for
+image-text pairs <Cite id="radford2021" />. The item vectors are computed once per batch and reused as negatives, so
+negatives cost almost nothing.
+
+**Popularity of in-batch negatives.** Items appear in a batch in proportion to how often they are positives, so
+popular items are frequent negatives. This acts as a form of hard-negative mining: the model must
+separate a user's item from the popular items it resembles. It also biases the model.
+A softmax over the full catalogue has partition function $Z = \sum_{j=1}^{M}\exp(s_j)$. If a negative $j$ is drawn
+with probability $q_j$, then $\expect_{j \sim q}[\exp(s_j)/q_j] = \sum_j q_j\exp(s_j)/q_j = Z$, so each sampled logit
+must be corrected to $s_j - \ln q_j$ for the sampled sum to stand in for $Z$. Without the correction, popular items are
+over-penalised. Yi et al. estimate $q_j$ from streaming item frequencies and subtract $\ln q_j$ from each in-batch
+logit, the **logQ correction** <Cite id="yi2019sampling" />.
+
+**Mixed negatives.** In-batch negatives never include items that were never positives, which are often the long tail.
+Adding negatives sampled uniformly from the catalogue covers them <Cite id="yang2020mns" />.
+
+## Cold start
+
+Because the towers read features, not only IDs, they give vectors to new entities.
+
+- **New users.** Features collected at sign-up (age, location) or inferred from the request (device, time) feed the
+  query tower. The model generalises from other users with similar features.
+- **New items.** The item tower computes a vector from the title, description, category and image as soon as the item
+  is added, and the item is retrievable at once.
+
+The quality of those vectors depends on how much the towers rely on ID embeddings, which are untrained for new
+entities. See the <NoteLink to="cold-start-problem">cold-start problem</NoteLink>.
+
+## Pitfalls
+
+- **No cross features.** The model cannot express "this user likes this item only on mobile" unless the context enters
+  the query tower. Accept this at retrieval and add cross features in the ranker.
+- **Index staleness.** Retraining the item tower changes every item vector. The index must be rebuilt, and query and
+  item vectors must come from the same model version.
+- **Choosing an MLP scorer instead.** A learned MLP similarity cannot be searched with an index, and a tuned dot product
+  is usually at least as accurate <Cite id="rendle2020ncf" />. See <NoteLink
+  to="progress-and-baselines-in-recommendation">progress and baselines</NoteLink>.
+- **Norms encode popularity.** With dot-product scores, a large item-vector norm raises the item for every user.
+  Cosine similarity or norm regularisation limits this.

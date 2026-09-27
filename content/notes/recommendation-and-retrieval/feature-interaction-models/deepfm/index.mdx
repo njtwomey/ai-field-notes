@@ -1,0 +1,66 @@
+---
+title: DeepFM and deep feature-interaction models
+kind: concept
+summary: 'DeepFM replaces the hand-built wide part of Wide & Deep with a factorisation machine that shares its embeddings with a deep network, so feature interactions are learned without manual crosses. DCN, xDeepFM and DLRM build interactions in other ways.'
+tags: [recommender-systems, feature-interactions, deep-learning, click-through-rate]
+aliases: [DeepFM, Deep & Cross Network, DCN, cross network, xDeepFM, compressed interaction network, CIN, DLRM, deep learning recommendation model, deep CTR models]
+requires: [factorisation-machines, wide-and-deep]
+partOf: [recommender-systems]
+related: [field-aware-factorisation-machines, multi-stage-recommendation, neural-collaborative-filtering]
+references: [guo2017deepfm, wang2017dcn, lian2018xdeepfm, naumov2019dlrm]
+status: draft
+updated: 2026-09-27
+---
+
+import { DeepFmDiagram } from './DeepFmDiagram'
+
+<Definition>
+**DeepFM** predicts a click probability as $\hat{y} = \sigma(y_{\text{FM}} + y_{\text{DNN}})$. Both terms read the same
+embedding $\evec_f$ of each input field $f$. $y_{\text{FM}}$ is a
+<NoteLink to="factorisation-machines">factorisation machine</NoteLink>: first-order weights plus inner products of
+pairs of embeddings. $y_{\text{DNN}}$ is a feed-forward network applied to the concatenated embeddings. The model is
+trained end to end <Cite id="guo2017deepfm" />.
+</Definition>
+
+<DeepFmDiagram />
+
+## From Wide & Deep to DeepFM
+
+<NoteLink to="wide-and-deep">Wide & Deep</NoteLink> needs engineers to choose which features to cross in its wide
+part. DeepFM puts a factorisation machine there. The FM learns a weight for every pair of features through their
+embeddings, so no crosses are designed by hand. The FM captures first- and second-order
+interactions explicitly; the network captures higher orders implicitly.
+
+The two components share one embedding table. This differs from earlier hybrids such as FNN, which pre-trained an FM
+and used its embeddings to initialise a network, and from Wide & Deep, whose wide inputs are separate raw and crossed
+features. Sharing means the FM's pairwise signal shapes the embeddings the network uses, and the model needs no
+pre-training <Cite id="guo2017deepfm" />. DeepFM became a standard baseline for click-through-rate prediction.
+
+## Relatives
+
+Several relatives differ in how they build interactions.
+
+- **Deep & Cross Network (DCN).** A cross network replaces the wide part. Each layer computes $\xvec_{l+1} =
+  \xvec_0\xvec_l\transpose\wvec_l + \bvec_l + \xvec_l$ from the input embedding vector $\xvec_0$. Layer $l$ adds
+  interactions of degree one higher, so $L$ layers give bounded-degree polynomial crosses with only $O(d)$ parameters
+  per layer for input dimension $d$ <Cite id="wang2017dcn" />.
+- **xDeepFM.** A compressed interaction network (CIN) builds interactions at the level of whole embedding vectors
+  rather than individual bits, layer by layer, alongside a plain network. This makes the order of each learned
+  interaction explicit <Cite id="lian2018xdeepfm" />.
+- **DLRM.** Facebook's deep learning recommendation model looks up an embedding for each sparse feature, passes dense
+  features through a bottom network to a vector of the same size, takes the dot products of all pairs of these vectors,
+  and feeds them with the dense vector to a top network. The paper also addresses training at scale: embedding tables
+  too large for one device are split across devices (model parallelism) while the networks are replicated (data
+  parallelism) <Cite id="naumov2019dlrm" />.
+
+All four share one design: embeddings for sparse features, an explicit interaction component, and a network. They are
+**ranking** models. Their power comes from combining user, item and context features before scoring, which is exactly
+what a retrieval model over a large catalogue cannot afford (see <NoteLink to="multi-stage-recommendation">multi-stage
+recommendation</NoteLink>).
+
+## Pitfalls
+
+- **Embedding tables dominate.** Parameters are mostly embeddings. Memory, hashing of rare IDs and the sharding of
+  tables matter more than the network.
+- **Gains over tuned baselines are small.** Improvements of a few thousandths of AUC are typical in CTR benchmarks.
+  Compare against a well-tuned FM or DeepFM under the same preprocessing.

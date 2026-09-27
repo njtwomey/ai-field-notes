@@ -1,0 +1,202 @@
+---
+title: Graph learning for Uber Eats recommendations
+kind: case-study
+summary: 'Uber Eats embedded users, dishes and restaurants with a GraphSAGE variant on per-city bipartite order graphs, trained with a max-margin loss whose low-rank positives rank often-ordered dishes above rarely ordered ones. Embedding similarities became ranking features.'
+tags: [worked-example, recommender-systems, graph-neural-networks, embeddings, systems]
+aliases: [Uber Eats graph learning, Uber Eats GraphSAGE, low-rank positives, max-margin loss with low-rank positives]
+requires: [graph-collaborative-filtering, graph-convolutional-network]
+partOf: [recommender-systems]
+related: [pinsage, graphsage, lightgcn, untrained-graph-propagation, multi-stage-recommendation, two-tower-model]
+references: [liu2019ubereats, hamilton2017graphsage, ying2018pinsage, molino2019parallax]
+status: draft
+updated: 2026-09-27
+---
+
+import { BipartiteDiagram, ComputationTree, PipelineDiagram } from './UberDiagrams'
+import { LossGeometry } from './LossGeometry'
+
+<Callout variant="note">
+This note is adapted from, and closely follows, the Uber Engineering article "Food Discovery with Uber Eats: Using Graph
+Learning to Power Recommendations" by Isaac Liu, Ankur Sarda, Ankit Jain and Piero Molino (4 December 2019)
+<Cite id="liu2019ubereats" />. It re-derives their model and redraws their figures in this site's notation and style.
+All design decisions and results are theirs.
+</Callout>
+
+## At a glance
+
+<SpecTable
+  columns={['GraphSAGE (original)', 'Uber Eats variant']}
+  rows={{
+    Graph: ['one homogeneous graph', 'user–dish and user–restaurant bipartite graphs, one per city'],
+    Edges: ['binary', 'weighted by order counts and ratings'],
+    'Node inputs': ['features of one size', 'type-specific projection of user, dish and restaurant features'],
+    Aggregation: ['mean or max pooling after a projection', 'weighted pooling and weighted sampling'],
+    Loss: ['link prediction against negatives', 'max-margin with negatives plus low-rank positives'],
+    Use: ['node embeddings', 'dot-product and cosine features for a ranking model'],
+  }}
+/>
+
+## Context
+
+Uber Eats is "a portal to more than 320,000 restaurant-partners in over 500 cities globally across 36 countries". Its
+recommender works in two phases. **Candidate generation** pre-filters dishes and restaurants at scale, for example
+removing restaurants outside the user's delivery range. A **personalised ranker** then orders the candidates using
+context such as day, time and location, learning patterns such as "ordering certain types of food on specific days of
+the week" <Cite id="liu2019ubereats" />. The graph embeddings described here feed the ranker as features. See
+<NoteLink to="multi-stage-recommendation">multi-stage recommendation</NoteLink>.
+
+## Graph construction
+
+The team built two bipartite graphs: one with users and dishes as nodes, where an edge carries "the number of times a
+user ordered a specific dish", and one with users and restaurants, where an edge carries how many times a user ordered
+from that restaurant. Ratings also inform the weights. Separate models are trained for each city, "as their graphs are
+only loosely connected" <Cite id="liu2019ubereats" />.
+
+<BipartiteDiagram />
+
+## The model
+
+The encoder is GraphSAGE, "a specific flavor of GNN in which the aggregation function is a max or mean pooling after a
+projection", chosen "because of its strong scalability"; it samples a fixed number of neighbours at one and two hops
+<Cite id="liu2019ubereats" /> <Cite id="hamilton2017graphsage" />. See <NoteLink to="graphsage">GraphSAGE</NoteLink>.
+Uber made three changes.
+
+**1. A projection per node type.** Users, dishes and restaurants have features of different sizes: dishes can be
+described by word embeddings of their descriptions or image features, restaurants by menu and cuisine features. An extra
+layer projects each type to a common size. In our notation, a node $v$ of type $\tau(v)$ with raw features $\xvec_v$
+starts from
+
+$$
+\hvec_v^{(0)} = \Pmat_{\tau(v)}\xvec_v.
+$$
+
+**2. Weighted aggregation.** Each layer $k$ pools the neighbours $\Ncal(v)$ (sampled, with the edge weights informing
+the sampling) using the edge weights $w_{vu}$, projects the pooled vector with a matrix $\Wmat_k$, projects the node's
+own vector with a matrix $\Bmat_k$, and concatenates the two. With a weighted mean as the pooling function and a
+non-linearity $\sigma$,
+
+$$
+\hvec_{\Ncal(v)}^{(k)} = \frac{\sum_{u \in \Ncal(v)} w_{vu}\,\hvec_u^{(k-1)}}{\sum_{u \in \Ncal(v)} w_{vu}}, \qquad
+\hvec_v^{(k)} = \sigma\paren{\LB\Wmat_k\hvec_{\Ncal(v)}^{(k)} \,\Vert\, \Bmat_k\hvec_v^{(k-1)}\RB},
+$$
+
+where $\Vert$ is concatenation. Two layers give the embedding $\zvec_v = \hvec_v^{(2)}$, which depends on $v$'s own
+features and on everything within two hops. The article describes exactly this recursion, with $\Wmat_1, \Bmat_1$ for
+layer 1 and $\Wmat_2, \Bmat_2$ for layer 2 <Cite id="liu2019ubereats" />. The same parameters serve every node, so the
+model scales to large graphs and can embed a new user, dish or restaurant from its features and connections.
+
+<ComputationTree />
+
+**3. A loss for weighted edges.** "The most impactful change was adopting a hinge loss, a type of loss that fits the
+ranking of items with respect to the user better than using binary edges" <Cite id="liu2019ubereats" />.
+
+## The loss
+
+Score a user–dish pair by $s(u, v) = \zvec_u\transpose\zvec_v$. The base max-margin loss asks that, for every positive
+edge $(u, v)$, the positive dish scores above a negative dish $n$ drawn from dishes the user never ordered, by a margin
+$\gamma_1$:
+
+$$
+\ell_{\text{neg}}(u, v) = \expect_{n}\LB\max\paren{0,\ s(u, n) - s(u, v) + \gamma_1}\RB.
+$$
+
+This treats every positive edge alike, although "a dish a user ordered once and a dish a user ordered ten times" are
+very different signals. Uber added **low-rank positives**: for a positive edge $(u, v)$, a low-rank positive is another
+edge $(u, l)$ of the same user with a lower weight, $w_{ul} < w_{uv}$. A second hinge term, with a margin $\gamma_2$ set
+lower than $\gamma_1$, asks that the heavier edge score higher <Cite id="liu2019ubereats" />. The article gives the loss
+as a figure; written in our notation, with $\lambda$ the multiplier that sets the relative importance of the two parts,
+
+$$
+\mathcal{L} = \sum_{(u, v) \in \Ecal}\LB\expect_n\max\paren{0,\ s(u, n) - s(u, v) + \gamma_1} + \lambda\,\expect_{l \,:\, w_{ul} < w_{uv}}\max\paren{0,\ s(u, l) - s(u, v) + \gamma_2}\RB.
+$$
+
+**Why it orders items by weight.** The loss is zero exactly when every term is zero. For a user's heaviest dish $v$, a
+lighter dish $l$ and a never-ordered dish $n$, that requires
+
+$$
+s(u, v) \ge s(u, l) + \gamma_2 \quad\text{and}\quad s(u, l) \ge s(u, n) + \gamma_1,
+$$
+
+the second because $(u, l)$ is itself a positive edge with its own negative term. So the zero-loss configurations are
+exactly those with $s(u, v) > s(u, l) > s(u, n)$ and gaps of at least $\gamma_2$ and $\gamma_1$. Frequently ordered
+dishes rank above occasionally ordered ones, which rank above dishes never ordered. Setting $\gamma_2 < \gamma_1$ keeps
+the distinction between two dishes the user likes smaller than the distinction between liked and unknown dishes, and
+$\lambda$ trades off the two kinds of error.
+
+<LossGeometry />
+
+## Downstream use
+
+Once trained, the embeddings give similarities between users and items. Uber added "the dot product and cosine
+similarity of user and items" as features to both the dish and the restaurant rankers <Cite id="liu2019ubereats" />.
+
+## Pipeline
+
+The article describes a four-step data pipeline and a training pipeline <Cite id="liu2019ubereats" />:
+
+1. Jobs pull data from Apache Hive into HDFS as Parquet files of nodes and edges, with every property versioned by
+   timestamp so that back-dated graphs can be built.
+2. For a chosen date, the most recent properties of each node and edge are kept and stored on HDFS in Cypher format.
+3. Cypher queries run on Apache Spark produce one graph per city.
+4. The city graphs are converted to NetworkX format, and TensorFlow processes on GPUs train the model and generate the
+   embeddings.
+
+The embeddings are stored in a lookup table, from which the ranking model retrieves them when a user opens the app.
+
+<PipelineDiagram />
+
+## Results
+
+The article reports, quoted exactly <Cite id="liu2019ubereats" />:
+
+- **Offline.** Trained on four months of data and tested on the following ten days, ranking all dishes and restaurants
+  in the city by cosine similarity to the user: "a performance boost of over ~20 percent compared to the existing
+  production model on metrics like Mean Reciprocal Rank, Precision@K, and NDCG."
+- **In the ranking model.** Adding the similarity feature gave "a 12 percent boost in AUC compared to the existing
+  productionized baseline model", and "the graph learning similarity feature was by far the most influential feature in
+  the recommendation model."
+- **Online.** "We conducted an A/B test in San Francisco and observed a substantial improvement in engagement and
+  click-through rate when leveraging the graph learning feature compared to the previous production model."
+
+See <NoteLink to="recommendation-metrics">metrics for recommendation</NoteLink> for MRR, precision at $K$ and NDCG.
+
+## Visualising the embeddings
+
+To show what the embeddings capture, the article follows a hypothetical user who first ordered two Indian dishes,
+chicken tandoori and vegetable biryani, and later a pizza, a Cobb salad, doughnuts, ma po tofu, chicken tikka masala and
+garlic naan. It plots popular dishes of several cuisines with "explicit axes": the $x$ coordinate is a dish's similarity
+to the user's embedding before the later orders, and the $y$ coordinate its similarity after them, a technique from
+Parallax <Cite id="liu2019ubereats" /> <Cite id="molino2019parallax" />. Three patterns appear:
+
+- Before the later orders, the closest dishes are almost all Indian, with some Chinese dishes also ranked high,
+  suggesting a second-order link between the cuisines ("users who ordered many Indian dishes also ordered Chinese
+  ones").
+- American, Italian, Thai and Korean dishes move much closer after the later orders, through the direct orders and
+  through second-order effects of the Chinese dish.
+- Cuisines outside the top three increase their similarity, which the authors read as the model learning that "this
+  specific user might like for new cuisine suggestions to be surfaced."
+
+Explicit axes make the change in an embedding interpretable by projecting onto directions that have a meaning, here
+"similar before" and "similar after".
+
+## What is distinctive
+
+- **Weights as ranks, not labels.** Instead of treating edge weight as a regression target, the loss uses it to order
+  a user's positives, which fits a ranking use.
+- **Heterogeneous nodes by projection.** A per-type projection lets one GNN embed users, dishes and restaurants.
+- **Graphs as features.** The embeddings did not replace the ranker; similarity features from them became its strongest
+  input.
+
+## Comparison
+
+- **PinSage** also adapts GraphSAGE to recommendation at scale, with random-walk neighbourhoods and a max-margin loss
+  with hard negatives <Cite id="ying2018pinsage" />; Uber's article cites it as the motivating prior work. See
+  <NoteLink to="pinsage">PinSage</NoteLink>.
+- **LightGCN** drops the projections and non-linearities because its nodes are IDs without features; Uber's nodes carry
+  rich features, which is where GraphSAGE-style layers pay. See <NoteLink to="lightgcn">LightGCN</NoteLink>.
+- **Propagation alone** already reveals community structure; see
+  <NoteLink to="untrained-graph-propagation">untrained graph propagation</NoteLink>.
+
+The article lists two directions for future work: merging the dish and restaurant graphs into one graph of all entities
+so that the tasks reinforce each other, and handling new cities with little data through meta graph learning
+<Cite id="liu2019ubereats" />.

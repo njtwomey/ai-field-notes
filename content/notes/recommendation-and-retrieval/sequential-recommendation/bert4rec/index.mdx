@@ -1,0 +1,72 @@
+---
+title: BERT4Rec
+kind: concept
+summary: 'BERT4Rec runs a bidirectional transformer over a user''s item sequence, trained to predict randomly masked items from both sides (the Cloze objective). It predicts the next item by appending a mask token. Trained with the same loss, causal SASRec matches or beats it.'
+tags: [recommender-systems, sequence-modelling, transformer, deep-learning]
+aliases: [BERT4Rec, bidirectional sequential recommendation, Cloze objective for recommendation, masked item prediction]
+requires: [sequential-recommendation-models, encoder-only-transformers]
+partOf: [recommender-systems]
+related: [sasrec, progress-and-baselines-in-recommendation, transformer]
+references: [sun2019bert4rec, devlin2019, klenitskiy2023]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**BERT4Rec** encodes a user's item sequence with a bidirectional transformer, in which every position attends to every
+other. During training a proportion $\rho$ of items is replaced by a special token $[\text{mask}]$, and the model
+predicts the original item at each masked position from the whole sequence. At inference $[\text{mask}]$ is appended
+after the last real item, and the output at that position scores candidates for the next item <Cite id="sun2019bert4rec"
+/>.
+</Definition>
+
+## Motivation
+
+<NoteLink to="sasrec">SASRec</NoteLink> lets each position see only its past. Sun et al. argued that user behaviour is
+not strictly ordered. A user might view an item, browse related products, and come back to buy the first one. The
+context of the purchase lies both before and after the item in the clickstream, and a representation that uses both
+sides should be richer <Cite id="sun2019bert4rec" />.
+
+## The Cloze objective
+
+A bidirectional model cannot be trained to predict the next item: position $t$ would attend to $i_{t+1}$ and copy it.
+BERT4Rec adopts the masked-language-model objective of BERT <Cite id="devlin2019" />, known as the Cloze task.
+
+1. Replace a random proportion $\rho$ of the items in the sequence with $[\text{mask}]$.
+2. Run the bidirectional encoder over the corrupted sequence.
+3. At each masked position, predict the original item with a softmax over the whole catalogue, and minimise the negative
+   log-likelihood of the true items:
+
+$$
+\mathcal{L} = -\frac{1}{\abs{\Mcal}}\sum_{t \in \Mcal}\ln p\paren{i_t \mid S_u'},
+$$
+
+where $\Mcal$ is the set of masked positions and $S_u'$ the masked sequence. Each masked position is predicted from
+items on both sides, and no position sees its own answer. Random masking also creates many training examples from one
+sequence <Cite id="sun2019bert4rec" />.
+
+**Inference.** Append $[\text{mask}]$ to the end of the history. The output at that position is a representation of the
+user's current intent; its softmax scores the next item. Because the only masked position
+at inference is the last one, Sun et al. also trained on sequences in which only the last item is masked, to reduce the
+mismatch between training and use.
+
+## Does bidirectionality help?
+
+BERT4Rec reported gains over SASRec on several benchmarks. Later work separated the architecture from the loss.
+BERT4Rec's objective is a full softmax over all items; the original SASRec used binary cross-entropy with one sampled
+negative. When SASRec is trained with the same full-softmax cross-entropy, it outperforms BERT4Rec and trains faster
+<Cite id="klenitskiy2023" />. The causal architecture fits next-item prediction more naturally
+than masked pre-training, which was designed for a different objective.
+
+The comparison is a case of the evaluation problem described in
+<NoteLink to="progress-and-baselines-in-recommendation">progress and baselines</NoteLink>: a difference in training
+setup was credited to an architectural idea.
+
+## Pitfalls
+
+- **Training–inference mismatch.** Masks are scattered in training and at the end at inference. Include last-item
+  masking in training.
+- **Slow convergence.** Only the masked fraction of positions gives a training signal per pass, against every
+  position for a causal model. BERT4Rec needs longer training.
+- **Full softmax cost.** The output layer over millions of items dominates computation; large catalogues need sampled
+  softmax.

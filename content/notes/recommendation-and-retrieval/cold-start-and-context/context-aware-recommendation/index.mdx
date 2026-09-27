@@ -1,0 +1,74 @@
+---
+title: Context-aware recommendation
+kind: concept
+summary: 'Context-aware recommenders condition on the situation of a request: time, place, device, company. Context enters by filtering the training data (pre-filtering), filtering the output (post-filtering), or as model features fused with user and item embeddings (contextual modelling).'
+tags: [recommender-systems, context, embeddings, attention]
+aliases: [context-aware recommender systems, CARS, contextual pre-filtering, contextual post-filtering, contextual modelling, feature fusion, attention-based fusion]
+requires: [explicit-and-implicit-feedback]
+partOf: [recommender-systems]
+related: [factorisation-machines, deepfm, sequential-recommendation-models, two-tower-model, contextual-bandit, multi-behaviour-recommendation]
+references: [adomavicius2011context, zhou2018din]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **context-aware recommender** predicts a user's preference for an item given the **context** $c$ of the request,
+$\hat{y}(u, i, c)$, instead of $\hat{y}(u, i)$. Context is any situational factor that can change the preference, such
+as time, location, device or company <Cite id="adomavicius2011context" />.
+</Definition>
+
+## Why context matters
+
+Early systems asked what a user likes. Context-aware systems ask what the user likes now, in this situation. Common
+kinds of context:
+
+- **Temporal:** time of day, day of week, season. Coffee in the morning, films on a Friday night.
+- **Spatial:** the user's location. Nearby restaurants, clothing for the local weather.
+- **Device:** mobile, desktop or television. Short videos on a phone, feature films on a TV.
+- **Social:** who the user is with. Family films when children are present.
+
+## Three ways to use context
+
+Adomavicius and Tuzhilin's classification is standard <Cite id="adomavicius2011context" />.
+
+1. **Contextual pre-filtering.** Select the training data that match the context and train an ordinary recommender on
+   it, for example a weekday-morning model from weekday-morning interactions. Simple, but each context gets a fraction
+   of the data.
+2. **Contextual post-filtering.** Train a context-free model, then filter or re-rank its output by context, for example
+   promoting shorter films on mobile. Simple, but items can be dropped before context is considered.
+3. **Contextual modelling.** Make context a model input. Each contextual variable gets an embedding ("morning",
+   "mobile"), which the model combines with user and item embeddings. This is the most powerful and now the standard
+   approach. <NoteLink to="factorisation-machines">Factorisation machines</NoteLink>, which learn interactions between
+   any features, are a natural example.
+
+## Fusing embeddings
+
+A model with a user ID, a history, several items' features and contextual variables has many embeddings, which must be
+combined into one representation.
+
+- **Concatenation.** Join the vectors and pass them through dense layers, which can learn any interaction between
+  them.
+- **Pooling.** Sum or average vectors of the same kind, such as the videos watched in a session. Cheap, and loses
+  order and emphasis.
+- **Interaction-based fusion.** Take the dot product of every pair of embeddings and feed the matrix of interactions
+  onwards, as DLRM does (see <NoteLink to="deepfm">deep feature-interaction models</NoteLink>).
+- **Attention-based fusion.** An attention network computes a weight for each embedding given the current request, and
+  the fused vector is the weighted sum. On a Friday night it might weight the user's history of comedies and the "Friday
+  night" embedding highly. Alibaba's DIN attends over a user's past behaviours with the
+  candidate item as the query <Cite id="zhou2018din" />.
+
+The two design choices run in parallel. Pre-filtering and simple concatenation combine information
+early, at the data level; post-filtering and attention combine it late, near the prediction. Integrated approaches embed
+both context and interactions in the architecture, at greater cost. Attention acts as a
+switchboard that routes the information relevant to each request, so the user representation is built on the fly
+rather than stored.
+
+## Pitfalls
+
+- **Context changes what is logged.** Items shown on a TV home screen differ from those on mobile. Context-dependent
+  exposure biases the data; see <NoteLink to="biases-in-recommender-feedback">biases in recommender feedback</NoteLink>.
+- **Too many contexts.** Pre-filtering by every combination of device, time and place leaves tiny datasets. Model
+  context as features and let the model share strength.
+- **Retrieval needs context too.** If context enters only the ranker, retrieval may return candidates wrong for the
+  situation. Feed context into the query tower of a <NoteLink to="two-tower-model">two-tower model</NoteLink>.

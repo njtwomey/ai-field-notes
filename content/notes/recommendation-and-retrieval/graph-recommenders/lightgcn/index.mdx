@@ -1,0 +1,103 @@
+---
+title: LightGCN
+kind: concept
+summary: 'LightGCN learns user and item embeddings by linear propagation on the user-item graph, $\Emat^{(k+1)} = \Dmat^{-1/2}\Amat\Dmat^{-1/2}\Emat^{(k)}$, with no weight matrices or non-linearities, and averages the layers: $\Emat = \sum_k\alpha_k\Emat^{(k)}$. Only the layer-0 embeddings are trained.'
+tags: [recommender-systems, collaborative-filtering, graph-neural-networks, embeddings]
+aliases: [LightGCN, light graph convolution, simplified graph convolution for recommendation, LGC]
+requires: [graph-collaborative-filtering, matrix-factorisation-for-recommendation]
+partOf: [recommender-systems]
+related: [graph-convolutional-network, bayesian-personalised-ranking, pinsage]
+references: [he2020lightgcn, wang2019ngcf, rendle2009bpr]
+status: draft
+updated: 2026-09-27
+---
+
+import { Propagation } from './Propagation'
+
+<Definition>
+**LightGCN** gives every user and item a trainable embedding $\evec^{(0)} \in \reals^d$ and propagates embeddings over
+the user–item interaction graph for $K$ layers:
+
+$$
+\evec_u^{(k+1)} = \sum_{i \in \Ncal_u}\frac{1}{\sqrt{\abs{\Ncal_u}}\sqrt{\abs{\Ncal_i}}}\evec_i^{(k)}, \qquad
+\evec_i^{(k+1)} = \sum_{u \in \Ncal_i}\frac{1}{\sqrt{\abs{\Ncal_i}}\sqrt{\abs{\Ncal_u}}}\evec_u^{(k)}.
+$$
+
+The final embeddings are weighted sums over layers, $\evec_u = \sum_{k=0}^{K}\alpha_k\evec_u^{(k)}$ and likewise for
+items, and the score is $\hat{y}_{ui} = \evec_u\transpose\evec_i$ <Cite id="he2020lightgcn" />.
+</Definition>
+
+## What was removed
+
+Earlier graph recommenders such as NGCF copied graph convolutional networks: each layer applied a weight matrix and a
+non-linear activation. He et al.'s ablations showed that neither helped collaborative filtering, and that removing both
+improved accuracy. The extra parameters made training harder and encouraged overfitting
+<Cite id="he2020lightgcn" />. LightGCN keeps only the part that carries the collaborative
+signal: normalised neighbourhood aggregation. Its only parameters are the layer-0 embeddings, the same number as
+<NoteLink to="matrix-factorisation-for-recommendation">matrix factorisation</NoteLink>.
+
+The normalisation $1/\sqrt{\abs{\Ncal_u}\abs{\Ncal_i}}$ is the symmetric normalisation of graph convolutional networks.
+It keeps embeddings from growing with repeated aggregation, and it discounts messages through high-degree nodes: an
+item everyone interacted with says little about any one user's taste.
+
+## Matrix form
+
+Stack users and items into one embedding matrix $\Emat^{(k)} \in \reals^{(U + M) \times d}$. With the interaction matrix
+$\Rmat \in \set{0, 1}^{U \times M}$, the adjacency matrix of the bipartite graph and its degree matrix are
+
+$$
+\Amat = \begin{pmatrix} \zeros & \Rmat \\ \Rmat\transpose & \zeros \end{pmatrix}, \qquad \Dmat = \diag\paren{\Amat\ones}.
+$$
+
+Row $u$ of $\Amat\Emat^{(k)}$ sums the embeddings of $u$'s items, and scaling by $\Dmat^{-1/2}$ on both sides applies
+the normalisation. So the two update rules together are
+
+$$
+\Emat^{(k+1)} = \hat{\Amat}\Emat^{(k)}, \qquad \hat{\Amat} = \Dmat^{-1/2}\Amat\Dmat^{-1/2},
+$$
+
+and by induction $\Emat^{(k)} = \hat{\Amat}^k\Emat^{(0)}$. The final embeddings are
+
+$$
+\Emat = \sum_{k=0}^{K}\alpha_k\hat{\Amat}^k\Emat^{(0)} = \Pmat\Emat^{(0)}, \qquad \Pmat = \sum_{k=0}^{K}\alpha_k\hat{\Amat}^k.
+$$
+
+LightGCN is therefore a linear model: a fixed graph filter $\Pmat$ applied to trainable embeddings. Entry
+$(\hat{\Amat}^k)_{ab}$ is a degree-weighted count of the paths of length $k$ from node $a$ to node $b$. User $u$'s final
+embedding is a mixture of the initial embeddings of all nodes within $K$ hops, weighted by how strongly paths connect
+them. Paths of odd length link users to items; paths of even length link users to users <Cite id="he2020lightgcn" />.
+
+<Propagation />
+
+Powers of $\hat{\Amat}$ act as a low-pass filter on the graph: they keep components that vary smoothly along edges,
+which is why even random embeddings propagated this way reveal communities. See
+<NoteLink to="untrained-graph-propagation">untrained graph propagation on the karate club</NoteLink>.
+
+## Layer combination and self-connections
+
+The final embedding includes $\evec^{(0)}$, the node's own trained vector, and every intermediate layer. He et al. give
+three reasons <Cite id="he2020lightgcn" />.
+
+1. **Over-smoothing.** Repeated multiplication by $\hat{\Amat}$ makes deep-layer embeddings of connected nodes alike.
+   Keeping shallow layers preserves what distinguishes each node.
+2. **Different hops mean different things.** One hop gives the items a user touched; three hops give items liked by
+   similar users. Combining layers uses all of them.
+3. **Self-connections for free.** Graph convolutional networks add self-loops to $\Amat$ so a node keeps its own
+   information. Including $\Emat^{(0)}$ in the sum has the same effect, so LightGCN's $\Amat$ has no self-loops.
+
+Uniform weights $\alpha_k = 1/(K + 1)$ work well and are the default.
+
+## Training
+
+LightGCN is trained with the <NoteLink to="bayesian-personalised-ranking">BPR</NoteLink> loss on sampled triples, with
+$\ell_2$ regularisation of $\Emat^{(0)}$ only <Cite id="rendle2009bpr" /> <Cite id="he2020lightgcn" />. Each gradient
+step backpropagates through the $K$ propagations. On the benchmarks used for NGCF, LightGCN improved accuracy by about
+16% relative on average under the same settings, and it became the standard graph baseline <Cite id="he2020lightgcn" />.
+
+## Pitfalls
+
+- **Too many layers.** Performance usually peaks at $K = 2$ to $4$. The figure shows why: with large $K$ every user's
+  mixture spreads over the whole graph.
+- **Cost of full propagation.** Every training step multiplies by a sparse matrix with $2\abs{\Ecal}$ non-zeros $K$
+  times. On very large graphs, sampling methods such as <NoteLink to="pinsage">PinSage</NoteLink> are needed.
+- **IDs only.** LightGCN has no feature input, so a node added after training has no embedding.

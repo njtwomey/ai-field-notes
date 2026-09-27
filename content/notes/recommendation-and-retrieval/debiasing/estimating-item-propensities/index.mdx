@@ -1,0 +1,207 @@
+---
+title: Estimating item propensities from clicks
+kind: example
+summary: 'From a click-count matrix without impression logs, estimate each user''s exposure to each item by a rank-1 Poisson model $C_{ui} \sim \Poisson(\alpha_u\beta_i)$, fitted in closed form, and by a Gamma-Poisson EM that adds a latent relevance $r_{ui}$ to absorb pairwise preference.'
+tags: [worked-example, recommender-systems, bias, propensity-scores, expectation-maximisation, poisson]
+aliases: [item exposure propensity, Poisson factorisation for exposure, IPF propensity, iterative proportional fitting, Gamma-Poisson EM, rank-1 KL-NMF]
+requires: [propensity-in-recommendation, poisson-distribution, gamma-distribution, expectation-maximisation]
+partOf: [recommender-systems]
+related: [negative-binomial-and-overdispersion, non-negative-matrix-factorisation, unbiased-learning-to-rank, poisson-regression, weighted-matrix-factorisation]
+references: [gopalan2015hpf, liang2016exposure, dempster1977, lee2001]
+status: draft
+updated: 2026-09-27
+---
+
+import { PropensityEm } from './PropensityEm'
+
+<Definition>
+A log records $C_{ui} \in \set{0, 1, 2, \ldots}$, the number of clicks by user $u$ on item $i$ over a window, for four
+users and five items:
+
+| user | item 1 | item 2 | item 3 | item 4 | item 5 | total $C_{u\cdot}$ |
+| ---- | ------ | ------ | ------ | ------ | ------ | ------------------ |
+| 1    | 4      | 2      | 1      | 1      | 0      | 8                  |
+| 2    | 6      | 3      | 2      | 1      | 1      | 13                 |
+| 3    | 2      | 1      | 0      | 0      | 6      | 9                  |
+| 4    | 8      | 4      | 2      | 1      | 1      | 16                 |
+| total $C_{\cdot i}$ | 20 | 10 | 5    | 3      | 8      | $N = 46$           |
+
+Impressions were not logged. Estimate the **item exposure propensity** $\pi_{ui}$, the probability that user $u$ is
+exposed to item $i$, (A) with a rank-1 Poisson model and (B) with a Gamma–Poisson model that also has a latent
+user–item relevance.
+</Definition>
+
+## Setup
+
+Clicks on a given pair are rare events summed over many opportunities, so a Poisson count is a natural model. Suppose
+the expected click rate factorises into an exposure part and a preference part:
+
+$$
+\lambda_{ui} \approx \alpha_u\,\beta_i\,r_{ui},
+$$
+
+where $\alpha_u > 0$ is user $u$'s activity or exposure tendency, $\beta_i > 0$ is item $i$'s popularity or exposure
+tendency, and $r_{ui}$ is the residual user–item compatibility. The pair $(\alpha, \beta)$ is the **exposure
+baseline**. Normalising it over items for each user gives the propensity proxy
+
+$$
+\hat\pi_{ui} = \frac{\hat\alpha_u\hat\beta_i}{\sum_j\hat\alpha_u\hat\beta_j} = \frac{\hat\beta_i}{\sum_j\hat\beta_j}.
+$$
+
+Without exposure logs, $\alpha$ and $\beta$ are identified only up to a common scale: $(c\alpha, \beta/c)$ gives the
+same rates. The scale is fixed by requiring $\frac{1}{U}\sum_u\alpha_u = 1$.
+
+## Solution, model A: rank-1 Poisson factorisation
+
+**Model.** $C_{ui} \sim \Poisson(\alpha_u\beta_i)$ independently, which sets $r_{ui} \equiv 1$.
+
+**Likelihood.** The Poisson probability is $e^{-\lambda}\lambda^{c}/c!$, so
+
+$$
+\log L(\alpha, \beta) = \sum_{u, i}\LB C_{ui}\log(\alpha_u\beta_i) - \alpha_u\beta_i - \log C_{ui}!\RB.
+$$
+
+Dropping the constant $\log C_{ui}!$ and grouping by parameter,
+
+$$
+\log L = \sum_u\LB C_{u\cdot}\log\alpha_u - \alpha_u\sum_i\beta_i\RB + \sum_i C_{\cdot i}\log\beta_i,
+$$
+
+with $C_{u\cdot} = \sum_i C_{ui}$ and $C_{\cdot i} = \sum_u C_{ui}$.
+
+**Normal equations.** Setting the partial derivatives to zero,
+
+$$
+\frac{\partial\log L}{\partial\alpha_u} = \frac{C_{u\cdot}}{\alpha_u} - \sum_i\beta_i = 0 \;\Rightarrow\; \alpha_u = \frac{C_{u\cdot}}{\sum_i\beta_i},
+\qquad
+\frac{\partial\log L}{\partial\beta_i} = \frac{C_{\cdot i}}{\beta_i} - \sum_u\alpha_u = 0 \;\Rightarrow\; \beta_i = \frac{C_{\cdot i}}{\sum_u\alpha_u}.
+$$
+
+Alternating these two updates is iterative proportional fitting (IPF); it is the rank-1 case of non-negative matrix
+factorisation under the KL divergence <Cite id="lee2001" />. For rank 1 the iteration
+stops after one sweep. Summing the first equation over $u$ gives $\sum_u\alpha_u\sum_i\beta_i = N$, and then
+
+$$
+\hat\alpha_u\hat\beta_i = \frac{C_{u\cdot}}{\sum_i\beta_i}\cdot\frac{C_{\cdot i}}{\sum_u\alpha_u} = \frac{C_{u\cdot}C_{\cdot i}}{N}.
+$$
+
+The fitted rate of each pair is its row total times its column total over the grand total, the independence fit of a
+contingency table. Every row and column of the fitted matrix sums to the observed total, which is the margin-matching
+property of IPF.
+
+**Numbers.** With the mean of $\alpha$ fixed at 1, $\hat\alpha_u = C_{u\cdot}/(N/U) = C_{u\cdot}/11.5$ and
+$\hat\beta_i = C_{\cdot i}/U$:
+
+- $\hat\alpha = (0.696, 1.130, 0.783, 1.391)$,
+- $\hat\beta = (5, 2.5, 1.25, 0.75, 2)$,
+- $\hat\pi_{u\cdot} = \hat\beta/11.5 = (0.435, 0.217, 0.109, 0.065, 0.174)$ for every user.
+
+The fit expects user 3 to click item 5 $\hat\alpha_3\hat\beta_5 = 9 \cdot 8/46 = 1.57$ times. User 3 clicked it 6 times.
+
+**Limitation.** Without $r_{ui}$, persistent compatibility is forced into $(\alpha, \beta)$. "Popular because relevant"
+and "relevant because popular" cannot be told apart. User 3's liking for item 5 has
+inflated item 5's exposure estimate for everyone.
+
+## Solution, model B: Gamma–Poisson EM with latent relevance
+
+**Model.** Keep the Poisson counts and give each pair a latent multiplicative relevance with mean 1:
+
+$$
+C_{ui} \mid r_{ui} \sim \Poisson(\alpha_u\beta_ir_{ui}), \qquad r_{ui} \sim \GammaD(a, a),
+$$
+
+in the shape–rate parameterisation, so $\expect[r_{ui}] = a/a = 1$. The hyperparameter $a > 0$ controls shrinkage: large
+$a$ forces $r_{ui} \approx 1$ and recovers model A; small $a$ lets pairwise relevance absorb more.
+
+**Joint density.** With the Poisson probability and the Gamma density $\frac{a^a}{\Gamma(a)}r^{a-1}e^{-ar}$,
+
+$$
+p(C_{ui}, r_{ui} \mid \alpha, \beta) = \frac{a^a}{\Gamma(a)\,C_{ui}!}(\alpha_u\beta_i)^{C_{ui}}\,r_{ui}^{C_{ui} + a - 1}\,e^{-r_{ui}(\alpha_u\beta_i + a)}.
+$$
+
+**Posterior of the relevance.** As a function of $r_{ui}$ the density is proportional to
+$r^{(a + C_{ui}) - 1}e^{-(a + \alpha_u\beta_i)r}$, a Gamma kernel. The Gamma prior is conjugate to the Poisson, and
+
+$$
+r_{ui} \mid C, \alpha, \beta \sim \GammaD\paren{a + C_{ui},\; a + \alpha_u\beta_i}, \qquad
+\expect[r_{ui}] = \frac{a + C_{ui}}{a + \alpha_u\beta_i}.
+$$
+
+The posterior mean exceeds 1 exactly when the pair has more clicks than its exposure baseline predicts
+($C_{ui} > \alpha_u\beta_i$).
+
+**E-step.** With the current $(\alpha, \beta)$, compute $\expect[r_{ui}]$ for every pair.
+
+**M-step.** The expected complete-data log-likelihood, keeping the terms that involve $\alpha$ and $\beta$, is
+
+$$
+Q(\alpha, \beta) = \sum_{u, i}\LB C_{ui}\log\alpha_u + C_{ui}\log\beta_i - \alpha_u\beta_i\,\expect[r_{ui}]\RB + \text{const},
+$$
+
+with the expectations held fixed. Setting derivatives to zero,
+
+$$
+\alpha_u = \frac{C_{u\cdot}}{\sum_i\beta_i\,\expect[r_{ui}]}, \qquad
+\beta_i = \frac{C_{\cdot i}}{\sum_u\alpha_u\,\expect[r_{ui}]}.
+$$
+
+These are the IPF updates with each pair's exposure re-weighted by its posterior relevance. Rescale so the mean of
+$\alpha$ is 1 after each M-step, and iterate. EM never decreases the marginal likelihood <Cite id="dempster1977" />.
+
+**Marginal distribution.** Integrating $r$ out,
+
+$$
+p(C_{ui} = c) = \int_0^\infty\frac{e^{-\lambda r}(\lambda r)^c}{c!}\frac{a^a}{\Gamma(a)}r^{a-1}e^{-ar}\,dr
+= \frac{a^a\lambda^c}{\Gamma(a)\,c!}\int_0^\infty r^{a + c - 1}e^{-(a + \lambda)r}\,dr
+= \frac{\Gamma(a + c)}{\Gamma(a)\,c!}\paren{\frac{a}{a + \lambda}}^{a}\paren{\frac{\lambda}{a + \lambda}}^{c},
+$$
+
+with $\lambda = \alpha_u\beta_i$, using $\int_0^\infty r^{s-1}e^{-br}dr = \Gamma(s)/b^s$. This is the negative binomial
+$\NegBin(a, p = a/(a + \lambda))$, a Gamma–Poisson mixture with mean $\lambda$ and variance $\lambda + \lambda^2/a$. So
+$a$ also sets the overdispersion relative to the Poisson. See <NoteLink
+to="negative-binomial-and-overdispersion">negative binomial regression and overdispersion</NoteLink>.
+
+**Numbers, with $a = 1$.** Start from the IPF solution. The first E-step gives user 3 and item 5
+$\expect[r_{35}] = (1 + 6)/(1 + 1.565) = 2.73$. EM converges to
+
+- $\hat\alpha = (0.709, 1.155, 0.787, 1.349)$,
+- $\hat\beta = (4.854, 2.437, 1.199, 0.750, 2.219)$,
+- $\hat\pi_{u\cdot} = (0.424, 0.213, 0.105, 0.065, 0.194)$,
+
+with posterior relevances for item 5 of $0.39, 0.56, 2.55, 0.50$ for users 1 to 4. The marginal log-likelihood rises
+from $-37.388$ at the IPF solution to $-37.366$.
+
+<PropensityEm />
+
+## What it illustrates
+
+- **Signal partition.** EM loads cross-user and cross-item regularities onto $(\alpha, \beta)$ and pairwise residuals
+  onto $r_{ui}$, shrunk towards 1 by $a$. User 3's burst on item 5 becomes relevance
+  ($\expect[r_{35}] = 2.55$).
+- **Non-identifiability of exposure and preference.** The same partition reads the other users' single clicks on item 5
+  as low relevance, not low exposure, and raises $\hat\pi$ for item 5 from 0.174 to 0.194. Both readings fit the clicks.
+  Without impression logs, instrumentation or randomisation, exposure and preference cannot
+  be fully separated. See <NoteLink to="propensity-in-recommendation">propensity in
+  recommendation</NoteLink>.
+- **Closed-form updates.** Conjugacy makes the E-step exact and the M-step a weighted IPF, so both scale to large
+  sparse matrices. The same Gamma–Poisson structure underlies Poisson factorisation recommenders
+  <Cite id="gopalan2015hpf" />, and explicit exposure variables appear in exposure-aware matrix factorisation
+  <Cite id="liang2016exposure" />.
+
+## Variations
+
+In practice:
+
+- **Initialise EM from IPF.** It is fast and puts the scales in the right range.
+- **Fix the scale every iteration,** for example mean $\alpha = 1$, to avoid drift. When optimising directly, keep
+  parameters positive by writing $\alpha_u = e^{\eta_u}$ and $\beta_i = e^{\zeta_i}$.
+- **Cohorts and context.** Estimate within homogeneous cohorts (device, page type, region, time slice), or add a
+  multiplicative context factor, $\lambda_{ui} = \alpha_u\beta_i\delta_{\text{device}(u)}$, with its own IPF or EM
+  update, equivalently $\log\lambda_{ui} = \eta_u + \zeta_i + \xi_{\text{device}(u)}$.
+- **Regularisation.** Put weak priors or $\ell_2$ penalties on $\log\alpha$ and $\log\beta$ for sparse users and items;
+  add small pseudo-counts to all-zero rows and columns; cap extreme counts from bots.
+- **Diagnostics.** Monitor the relative change of $(\alpha, \beta)$, the held-out negative-binomial log-likelihood, the
+  stability of $\hat\pi$ across adjacent time windows, and the distribution of the resulting inverse-propensity weights
+  $1/\hat\pi$, clipping heavy tails.
+- **Assumptions.** The Poisson approximation needs small per-opportunity probabilities and many opportunities.
+  Re-estimate after interface or policy changes.

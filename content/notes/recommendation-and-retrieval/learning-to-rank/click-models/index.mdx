@@ -1,0 +1,105 @@
+---
+title: Click models
+kind: concept
+summary: 'A click model is a probabilistic model of how users examine and click a ranked list. The position-based model sets $P(\text{click}) = \pi(k)\,r$; the cascade model has users scan down and stop at the first click, so rank $k$ is reached with probability $\prod_{j<k}(1 - r_j)$.'
+tags: [information-retrieval, learning-to-rank, position-bias, implicit-feedback, worked-example]
+aliases: [click model, position-based model, PBM, cascade model, dynamic Bayesian network click model, DBN click model, dependent click model, user browsing model, click > skip above, examination hypothesis]
+requires: [conditional-probability, explicit-and-implicit-feedback]
+partOf: [recommender-systems]
+related: [field-interactions-in-neural-ranking, propensity-in-recommendation, survival-and-hazard-functions, geometric-distribution]
+references: [joachims2007clicks, craswell2008cascade, richardson2007clicks, chapelle2009dbn, chuklin2015clickmodels]
+status: draft
+updated: 2026-09-27
+---
+
+import { ClickCurves } from './ClickCurves'
+
+<Definition>
+A **click model** is a generative model of user behaviour on a ranked list that separates two events for the document
+$d$ at rank $k$: whether the user **examines** it, $E_k$, and whether the user finds it **attractive** or relevant once
+examined, $A_d$. A click happens when both occur, $C_k = E_k \cdot A_d$. Click models differ in how they model
+examination <Cite id="chuklin2015clickmodels" /> <Cite id="craswell2008cascade" />.
+</Definition>
+
+## Why clicks need a model
+
+Clicks were hoped to be free relevance labels. Joachims et al.'s eye-tracking studies showed two biases
+<Cite id="joachims2007clicks" />.
+
+1. **Trust bias (position bias).** Users click higher-ranked results more, trusting that the engine put the best first,
+   whatever those results' quality.
+2. **Quality bias.** How good the whole list is changes how users click on each result.
+
+Clicks are therefore relative judgements, not absolute ones. The first corrections were rules. **Click > skip above**
+says that a clicked result is preferred to every unclicked result ranked above it, because the user saw those and
+passed them over. Click models replace such rules with explicit probabilistic accounts of the user.
+
+## The position-based model
+
+The **examination hypothesis** says that examination depends on the position and attractiveness on the document and
+query, independently <Cite id="richardson2007clicks" />:
+
+$$
+P(C = 1 \mid q, d, k) = \underbrace{P(E = 1 \mid k)}_{\pi(k)}\;\underbrace{P(A = 1 \mid q, d)}_{r(q, d)}.
+$$
+
+The **position-based model** (PBM) takes this as its whole model. The examination probability $\pi(k)$ is the
+**propensity** of rank $k$.
+
+**Estimating $\pi$ by swapping.** Show document $A$ at rank 1 to some users and, by random swap, at rank 5 to others.
+Its expected click-through rates are $\pi(1)r_A$ and $\pi(5)r_A$, so their ratio is $\pi(1)/\pi(5)$: relevance cancels.
+For example, 100 clicks at rank 1 and 20 at rank 5, from equal numbers of impressions, give
+$\pi(1)/\pi(5) = 5$. Swaps between many pairs of ranks trace out the whole curve up to scale.
+
+The PBM is flexible, since $\pi$ can take any shape. Its assumption is strong: examining rank 3 is equally likely
+whether or not the user clicked ranks 1 and 2, and every document at a rank is equally likely to be examined.
+
+## The cascade model
+
+The **cascade model** derives examination from a behaviour. The user reads from the top, examines each result in turn,
+clicks the first attractive one and stops <Cite id="craswell2008cascade" />. Rank $k$ is examined exactly when none of
+the results above was clicked, so
+
+$$
+P(E_k = 1) = \prod_{j=1}^{k-1}\paren{1 - r_j}, \qquad P(C_k = 1) = r_k\prod_{j=1}^{k-1}\paren{1 - r_j},
+$$
+
+with $r_j$ the attractiveness of the result at rank $j$. The examination probability of rank $k$ is a survival
+probability: the chance of passing $k - 1$ results without stopping. If every result has the same attractiveness $r$,
+then $P(E_k = 1) = (1 - r)^{k-1}$ and the rank of the click is <NoteLink
+to="geometric-distribution">geometric</NoteLink>, the waiting time to the first success. With unequal $r_j$ it is the
+waiting time in a sequence of independent trials with different success probabilities. See <NoteLink
+to="survival-and-hazard-functions">survival and hazard functions</NoteLink>; in this view each $r_j$ is the hazard at
+rank $j$.
+
+<ClickCurves />
+
+The cascade model captures what the PBM cannot: examination of lower results depends on the results above them. It
+implies at most one click per session, which is too strict for many settings.
+
+## Richer models
+
+- **Dependent click model.** After a click, the user continues with a rank-dependent probability instead of stopping,
+  which allows several clicks. The number of clicks then parallels a negative binomial count.
+- **Dynamic Bayesian network model.** Chapelle and Zhang separate attractiveness (does the snippet invite a click?) from
+  satisfaction (did the page answer the query?). After a click the user is satisfied with probability $s_d$ and stops;
+  otherwise they continue to the next result with a persistence probability $\gamma$ <Cite id="chapelle2009dbn" />.
+- **User browsing model.** Examination depends on the rank and on the distance to the last click.
+
+The progression runs from rules, through a single behavioural story, to stateful models of cognition. Each step fits
+behaviour better and needs more data.
+
+## Limitations
+
+Click models estimate a relevance parameter per query–document pair from repeated impressions of that pair, ideally
+under different rankings. Long-tail queries and personal search, where a query is seen once, give no repetitions. The
+richer the model, the more data it needs. These limits motivated <NoteLink to="unbiased-learning-to-rank">unbiased
+learning to rank</NoteLink>, which estimates only the examination model and leaves relevance to a feature-based ranker.
+
+## Pitfalls
+
+- **Confounding by the ranker.** In logs, relevant documents sit at high ranks. Fitting $\pi$ naively from logged CTR
+  by rank attributes relevance to position and overestimates the drop-off. Use randomisation or a model that separates
+  the two; see <NoteLink to="propensity-in-recommendation">propensity in recommendation</NoteLink>.
+- **One model for all layouts.** A grid, a carousel and a list are examined differently. Estimate separately per
+  layout and device.

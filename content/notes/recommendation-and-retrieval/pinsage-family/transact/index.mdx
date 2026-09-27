@@ -1,0 +1,158 @@
+---
+title: TransAct
+kind: concept
+summary: 'TransAct (KDD 2023) is a transformer over a user''s 100 latest actions inside Pinterest''s homefeed ranker, run per candidate with the candidate''s embedding concatenated to every action. Its output joins the daily PinnerFormer embedding: a real-time and batch hybrid.'
+tags: [recommender-systems, ranking, user-modelling, transformer, sequence-modelling, pinterest]
+aliases: [TransAct V2, Pinnability, realtime-batch hybrid ranking, early fusion, random time window mask, next action loss, lifelong user sequence]
+requires: [transformer, multi-task-learning, pinnerformer]
+partOf: [pinsage-family]
+related: [sequential-recommendation-models, sasrec, deepfm, wide-and-deep, multi-stage-recommendation, pinfm]
+references: [xia2023transact, xia2025transactv2, pancha2022pinnerformer, chen2019bst, wang2021dcnv2, cheng2016wide]
+status: draft
+updated: 2026-09-27
+---
+
+import { TransActDiagram } from './TransActDiagram'
+
+<Definition>
+**TransAct** is a sub-module of Pinterest's homefeed ranking model. For a user $u$ and a candidate pin $p$, it encodes
+the user's real-time action sequence $S(u) = (a_1, \dots, a_{\abs{S}})$, the 100 most recent actions, each with an
+action type, a PinSage embedding and a timestamp. The candidate's PinSage embedding is concatenated to every action
+(**early fusion**), a two-layer transformer encoder processes the sequence, and the first $K$ outputs plus an
+element-wise max over all outputs form a vector $\zvec \in \reals^{(K+1)d}$. The ranker combines $\zvec$ with the
+daily PinnerFormer embedding and other features to predict the probability of each action type
+<Cite id="xia2023transact" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="pinnerformer">PinnerFormer</NoteLink> is computed once a day. It captures long-term interests but misses
+what the user did in the last few minutes. A retrieval embedding also cannot see the candidate: it scores candidates by
+a dot product. The homefeed ranker scores only the candidates that retrieval returns, so it can afford a model that
+looks at the user's latest actions and the candidate together <Cite id="xia2023transact" />.
+
+TransAct is the real-time half of a **hybrid**. The batch half, PinnerFormer, supplies long-term interests at low cost.
+The real-time half, TransAct, supplies short-term intent learned end to end with the ranking objective.
+
+## The ranker: Pinnability
+
+Pinnability predicts, for user $u$ and pin $p$, the probability of each action in a set of heads $H$ (click, repin,
+hide and others). Its structure follows <NoteLink to="wide-and-deep">Wide & Deep</NoteLink>
+<Cite id="cheng2016wide" />. Categorical features pass through embedding layers, numerical features through batch
+normalisation. A full-rank DCN V2 layer crosses the features explicitly <Cite id="wang2021dcnv2" />, and fully connected
+layers lead to one output per head <Cite id="xia2023transact" />.
+
+The loss is a weighted binary cross-entropy summed over heads:
+
+$$
+\mathcal{L} = w_u \sum_{h \in H} -w_h \brack{y_h \log f(\xvec)_h + (1 - y_h)\log\paren{1 - f(\xvec)_h}}, \qquad
+w_h = \sum_{a \in H} M_{h,a}\, y_a.
+$$
+
+The label weight matrix $\Mmat \in \reals^{\abs{H} \times \abs{H}}$ sets how much each observed action contributes to
+each head's loss. With $\Mmat$ diagonal this is the ordinary multi-head cross-entropy; empirically chosen off-diagonal
+weights improved performance. The user weight $w_u = w_{\mathrm{state}} \times w_{\mathrm{location}} \times
+w_{\mathrm{gender}}$ reweights users by business needs <Cite id="xia2023transact" />.
+
+<TransActDiagram />
+
+## Architecture
+
+**Feature encoding.** Each action type (for example repin, click or hide) has a learned embedding of dimension
+$d_{\mathrm{action}} = 32$. Each acted-on pin is represented by a 32-dimensional PinSage embedding. The sequence feature is
+$[\Wmat_{\mathrm{actions}} \Vert \Wmat_{\mathrm{pins}}] \in \reals^{\abs{S} \times (d_{\mathrm{PinSage}} +
+d_{\mathrm{action}})}$. The action type matters: a pin the user hid should count against similar candidates, and a pin
+the user saved for them <Cite id="xia2023transact" />.
+
+**Early fusion.** The candidate's PinSage embedding is concatenated to every row, giving
+$\Umat \in \reals^{\abs{S} \times d}$ with $d = d_{\mathrm{action}} + 2 d_{\mathrm{PinSage}} = 96$. Attention can then
+compare the candidate with each past action directly. The paper also tried appending the candidate as an extra sequence
+element, as in BST <Cite id="chen2019bst" />; concatenation was better <Cite id="xia2023transact" />.
+
+**Encoder.** A standard transformer encoder with 2 layers, 1 head, feed-forward dimension 32, dropout 0.1 and no
+positional encoding, which offline tests found ineffective. Four layers with feed-forward dimension 384 performed best
+but added 30% latency <Cite id="xia2023transact" />.
+
+**Random time-window mask.** Training on all recent actions leads the model to recommend near-copies of what the user
+just engaged with, a "rabbit hole" that hurts homefeed diversity. In each training forward pass, a window $T$ is drawn
+uniformly from 0 to 24 hours and every action in $(t_{\mathrm{request}} - T, t_{\mathrm{request}})$ is masked. The mask
+is not used at inference <Cite id="xia2023transact" />.
+
+**Output compression.** The encoder output $\Omat \in \reals^{\abs{S} \times d}$ is too large to cross with other
+features in DCN V2, whose cost grows quadratically with input size. TransAct keeps the first $K$ rows, which correspond
+to the most recent actions because the sequence is sorted newest first, and appends an element-wise max over all
+rows, which summarises the whole window:
+
+$$
+\zvec = \operatorname{flatten}\paren{[\ovec_0, \dots, \ovec_{K-1}, \operatorname{maxpool}(\Omat)]} \in \reals^{(K+1)d}.
+$$
+
+Among the compressions compared (one row, the first $K$ rows, all rows, max pooling and combinations), first $K$ plus
+max pooling gave the highest HIT@3 for repins <Cite id="xia2023transact" />.
+
+## Cost of early fusion
+
+Early fusion makes the sequence depend on the candidate, so the transformer must be run once per candidate, not once per
+user. With $\abs{S} = 100$, attention alone evaluates $100^2 = 10^4$ query–key products per candidate per layer, repeated
+for every candidate in the request. Pinnability with TransAct needs 65 times the floating-point operations of its
+predecessor. Pinterest served it at neutral latency and cost by moving inference to GPUs and removing launch overhead:
+fusing CUDA kernels, merging embedding lookups for hundreds of features into one, copying all features to the GPU in
+one buffer, using larger batches and capturing the model as a CUDA graph <Cite id="xia2023transact" />.
+
+Real-time features make the model go stale within days. Pinnability is retrained from scratch twice a week
+<Cite id="xia2023transact" />.
+
+## Reported results
+
+The offline data is three weeks of homefeed logs: 3 billion training instances from 177 million users and 720 million
+pins. HIT@3 counts, per head, the engaged pins among the top three of each ranked chunk, on sessions with randomised
+order to remove position bias. "Non-core" users have not saved a pin in the past 28 days. Lifts over Pinnability without
+real-time sequence features <Cite id="xia2023transact" />:
+
+| method                  | HIT@3 repin, all | repin, non-core | HIT@3 hide, all | hide, non-core |
+| ----------------------- | ---------------- | --------------- | --------------- | -------------- |
+| WDL with sequence       | +0.21%           | +0.35%          | −1.61%          | −1.55%         |
+| BST, all actions        | +4.41%           | +5.09%          | +2.33%          | +3.59%         |
+| BST, positive actions   | +7.34%           | +8.16%          | −1.12%*         | −3.14%*        |
+| TransAct                | +9.40%           | +10.42%         | −14.86%         | −13.54%        |
+
+Starred values are not statistically significant. Lower hide rates are better. BST cannot tell a hide from a repin
+because it does not encode action types <Cite id="xia2023transact" />.
+
+**Hybrid ablation.** Removing TransAct from the full model changed HIT@3 by $-8.59\%$ for repins and $+17.45\%$ for
+hides. Removing PinnerFormer changed them by $-2.46\%$ and $+3.61\%$. Removing all other user features changed them by
+only $-0.67\%$ and $+1.40\%$ <Cite id="xia2023transact" />. The real-time sequence matters most, and the batch
+embedding still adds value.
+
+**Online.** With each arm serving 1.5% of homefeed users, TransAct changed homefeed repin volume by $+11.0\%$ ($+17.0\%$
+for non-core users), hide volume by $-10.0\%$ ($-10.5\%$) and overall time spent by $+2.0\%$ ($+1.5\%$)
+<Cite id="xia2023transact" />.
+
+## TransAct V2
+
+TransAct V2 (arXiv 2025) extends the model to **lifelong** sequences <Cite id="xia2025transactv2" />:
+
+- **Lifelong sequence.** Up to two years of explicit actions (repins, clicks, hides), of length on the order of
+  $10^4$, with the maximum length set at the 90th percentile of users' two-year history lengths weighted by visit
+  frequency. PinSage embeddings are stored as int8 to halve their size.
+- **Candidate-anchored retrieval.** The transformer does not read the whole lifelong sequence. For each candidate $c$,
+  it takes the top $K$ actions by dot product between PinSage embeddings from the lifelong sequence, the real-time
+  sequence and the impression sequence, plus the $r$ most recent real-time actions:
+  $\Scal_{\mathrm{all}} = \mathrm{NN}(\Scal_{LL}, c) \oplus \Scal_{RT}[{:}r] \oplus \mathrm{NN}(\Scal_{RT}[r{:}], c)
+  \oplus \mathrm{NN}(\Scal_{\mathrm{imp}}, c)$, a sequence of a few hundred elements.
+- **Next action loss.** An auxiliary sampled-softmax loss trains the causally masked output at position $t$ to predict
+  whether the next action is positive, contrasting its PinSage embedding with negatives. Impressions the user did not
+  engage with were better negatives than in-batch ones.
+- **Serving.** Nearest-neighbour features are computed at request time and logged for training, and a single fused
+  Triton kernel runs the small transformer.
+
+Against TransAct in production A/B tests, TransAct V2 changed homefeed repin volume by $+6.35\%$, hide volume by
+$-12.80\%$, impression diversity by $+0.45\%$ and time spent on the app by $+1.41\%$. The training data had 6.9 billion
+instances from 182 million users and 350 million pins <Cite id="xia2025transactv2" />.
+
+## Pitfalls
+
+- **Per-candidate cost.** Early fusion multiplies transformer cost by the number of candidates; the deployment depends on
+  GPU serving work.
+- **Staleness.** The model must be retrained often because it learns on fast-changing real-time features.
+- **Rabbit holes.** Without the time-window mask the model over-weights the latest actions and narrows the feed.

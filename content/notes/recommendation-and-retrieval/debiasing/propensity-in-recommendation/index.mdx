@@ -1,0 +1,121 @@
+---
+title: Propensity in recommendation
+kind: concept
+summary: 'A propensity is the probability that a user-item interaction could be observed, before any preference: the chance a rank is examined, an item exposed, a channel fires or a policy picks an action. Dividing by it separates preference from exposure.'
+tags: [recommender-systems, bias, causal-inference, propensity-scores]
+aliases: [propensity, exposure propensity, examination propensity, position propensity, item propensity, channel propensity, propensity estimation, intervention harvesting, randomised swap, propensity dynamics]
+requires: [biases-in-recommender-feedback, conditional-probability]
+partOf: [recommender-systems]
+related: [unbiased-learning-to-rank, logging-policies-and-propensities, causal-inference-from-observational-data, isotonic-regression, generalised-additive-model, kalman-filter]
+references: [rosenbaum1983, schnabel2016treatments, joachims2017ultr, wang2018position, ai2018dla, agarwal2019intervention, luo2024unconfounded]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **propensity** is the probability that a user–item interaction becomes observable, before any preference enters.
+Writing $O_{ui} = 1$ when the interaction of user $u$ with item $i$ could be observed (the item was exposed, the rank
+examined), the propensity is $\pi_{ui} = P(O_{ui} = 1)$, possibly conditional on rank, context or the logging policy. An
+observed outcome is the product of observability and preference, so propensities are what must be divided out to
+recover preference <Cite id="schnabel2016treatments" />.
+</Definition>
+
+## Intuition
+
+Propensity affects how data are collected, how models are trained and evaluated, and how systems are deployed. Without
+it, what users prefer is confused with what they happened to see. Everyday cases build the intuition.
+
+- **Shelf visibility.** Cereal at eye level is noticed far more often than cereal on the bottom shelf. The propensity is
+  the shelf's visibility, separate from the cereal's taste. A bottom-shelf cereal that sells as well as an eye-level one
+  is probably preferred.
+- **Street corners.** A café on a busy corner sees ten times the passers-by of one in an alley. Equal sales mean the
+  alley café is the more popular.
+- **Posting time.** A post at peak hours reaches ten times the audience of one at 3 a.m. Viral content posted off-peak
+  indicates more intrinsic appeal than moderately successful peak-hour content.
+
+In each case an outcome count mixes opportunity and appeal, and comparing appeal requires dividing by opportunity.
+
+## Parallels in machine learning
+
+The same structure appears in several models, which helps explain how propensity is built into modern architectures.
+
+- **Item response theory.** A test answer combines a student's ability with a question's difficulty through a logistic
+  link. Positions or contexts play the role of questions, with propensity as difficulty. IRT is a rank-1 matrix
+  factorisation, so propensity models are low-rank factorisations too.
+- **Product of experts.** One expert models the probability of exposure, another the preference given exposure, and
+  they multiply.
+- **Zero-inflated models.** One process decides whether an event can happen, another its value if it can. Propensity is
+  the first process.
+- **Survival analysis.** In a cascade of attention, reaching rank $k$ means surviving the ranks above. See
+  <NoteLink to="click-models">click models</NoteLink>.
+- **Multi-task learning, embeddings and attention.** Shared layers learn preference common to several behaviours while
+  task heads learn channel-specific observation; position, device and context can enter as learned embeddings; and
+  propensity acts like a soft attention mask that lets more or less preference signal through.
+
+## Types of propensity
+
+Five kinds are worth distinguishing, each estimated differently.
+
+| propensity             | meaning                                                         | how it is estimated                                                                                       |
+| ---------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| position $\pi(k)$      | rank $k$ is examined                                            | randomised swaps; click models (PBM, cascade); monotone curve fits such as isotonic regression or a GAM   |
+| item exposure $\pi_{ui}$ | user $u$ is exposed to item $i$                               | impression logs if kept; otherwise Poisson factorisation or Gamma–Poisson EM on clicks; activity × popularity |
+| contextual $\pi(c)$    | examination given device, viewport, region, time or layout      | logistic regression or GAMs over context; per-cohort estimates; hierarchical pooling                      |
+| channel $\pi(\text{ch})$ | a telemetry channel (click, rating, purchase) fires given exposure | direct logging; multi-task models with a propensity head per channel                                  |
+| logging policy $\pi(a \mid x)$ | the policy chose action $a$ in context $x$              | logged at decision time; else reconstructed from the policy's logic or imitated by a model                |
+
+The last is the propensity of <NoteLink to="logging-policies-and-propensities">logging policies</NoteLink> in bandits
+and off-policy evaluation. Estimating item exposure from clicks alone is worked through in
+<NoteLink to="estimating-item-propensities">estimating item propensities</NoteLink>.
+
+## Estimating position propensities
+
+- **Randomisation.** Randomly permuting or swapping results for a small share of traffic breaks the link between rank
+  and relevance. The click-through rate at each rank, or the ratio of CTRs of the same document at two ranks, then
+  measures examination directly. This is the gold standard. It costs user experience and engineering effort
+  <Cite id="joachims2017ultr" />.
+- **EM on observational logs.** Fit a position-based click model by expectation–maximisation: estimate relevance given
+  the current examination model, then examination given relevance. Wang et al. used a regression-based EM so that
+  relevance is a function of features and queries need not repeat <Cite id="wang2018position" />. See
+  <NoteLink to="expectation-maximisation">expectation–maximisation</NoteLink>.
+- **Dual learning.** Learn the ranker and the propensity model together: the ranker's relevance estimates supervise the
+  propensity model and the propensities de-bias the ranker's training <Cite id="ai2018dla" />.
+- **Intervention harvesting.** Different versions of a ranker, deployed over time, placed the same document at
+  different ranks. Those natural swaps act as interventions, and Agarwal et al. estimate position bias from them without
+  new randomisation <Cite id="agarwal2019intervention" />.
+
+**Relevance confounds propensity estimation.** A good logging policy puts relevant documents near the top, so high rank
+and high relevance are correlated in logs. A naive estimate that divides clicks by rank attributes some of the relevance
+to position and overestimates the examination of top ranks, which weakens the correction. Treating this as a causal
+problem gives better propensities. Luo et al. apply the back-door adjustment with a propensity model that conditions on
+the logging policy's ranking scores <Cite id="luo2024unconfounded" />.
+
+## Several propensities at once
+
+Position, activity, popularity, device and channel act together. There are four ways to combine them.
+
+- **Factorised product.** Assume independence and multiply, $\pi(u, i, k, x) \approx
+  \pi_{\text{pos}}(k)\,\pi_{\text{dev}}(x_{\text{device}})\,\pi_{\text{pop}}(i)\,\alpha_u$. Simple and interpretable;
+  ignores interactions.
+- **Joint model.** Fit $\pi(u, i, k, x) = \sigma(f_\theta(u, i, k, x))$ with a logistic regression, boosted trees or a
+  network. Captures interactions, and can blur exposure into relevance unless constrained.
+- **Hierarchical composition.** Global baselines plus deviations, $\log\pi(u, i, k, x) = \gamma_k + \delta_{k,
+  x_{\text{device}}} + \phi_i + \alpha_u$, which shares strength across cohorts and allows context-specific corrections.
+- **Embedded.** Rank, device and popularity enter a neural recommender as embeddings or side tokens and are learned end
+  to end, with monotonicity or regularisation constraints on position features.
+
+## Propensities change
+
+Propensities are not fixed properties of ranks or items. Position curves flatten when infinite scroll spreads attention,
+and shift when a banner or carousel is added. Item exposure drifts as the catalogue changes, and purchase propensity
+peaks at holidays. Most work estimates static curves; time-varying estimation, by smoothing weekly estimates,
+state-space models such as the <NoteLink to="kalman-filter">Kalman filter</NoteLink>, hierarchical Bayesian models with
+time-varying parameters, or sequence models, is comparatively unexplored and remains an open area.
+
+## Pitfalls
+
+- **Stale propensities.** A curve estimated before a redesign is wrong after it. Re-estimate after interface or policy
+  changes.
+- **Propensities near zero.** Their inverses explode. Clip or smooth, and report how much weight was affected.
+- **Positivity.** An item never exposed has propensity zero, and no re-weighting recovers its preference. Only
+  exploration does.

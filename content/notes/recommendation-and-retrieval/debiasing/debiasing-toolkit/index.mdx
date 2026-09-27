@@ -1,0 +1,103 @@
+---
+title: The debiasing toolkit
+kind: concept
+summary: 'Debiasing methods for recommenders intervene at different levels: re-weighting the data (propensity scores), modelling causes (causal graphs), purging representations (adversaries), distilling from unbiased data, and contrastive, augmented or simulated training.'
+tags: [recommender-systems, bias, causal-inference, fairness]
+aliases: [debiasing methods, causal deconfounding, knowledge distillation for debiasing, contrastive debiasing, AutoDebias, deconfounded recommender, RecoGym, RecSim NG, recommender simulation]
+requires: [biases-in-recommender-feedback]
+partOf: [recommender-systems]
+related: [propensity-in-recommendation, unbiased-learning-to-rank, popularity-bias, bias-mitigation, generative-adversarial-network, knowledge-distillation, contrastive-learning, multi-behaviour-recommendation]
+references: [schnabel2016treatments, wang2020deconfounded, zhang2021pda, chen2021autodebias, zhou2021clrec, wu2021sgl, rohde2018recogym, mladenov2021recsimng, gomezuribe2015netflix, geyik2019linkedin, ma2018esmm, chen2023biassurvey]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Debiasing** a recommender means learning users' preferences from confounded observational feedback, so that the
+model's predictions reflect what users would do if exposed to an item, not what the logging policy made them see. The
+methods differ in where they intervene: on the data, the causal model, the representation, the objective, or the
+training distribution.
+</Definition>
+
+## Levels of intervention
+
+The methods can be organised by the level at which each acts, each with its idea in a sentence. Write $X$
+for the inputs, $Y$ for the outcome and $Z$ for the biasing variable (position, popularity, a sensitive attribute).
+
+| level | method | idea |
+| --- | --- | --- |
+| data | propensity scoring | Re-weight samples so that $Z$ becomes independent of $Y$, breaking the spurious correlation in the data <Cite id="schnabel2016treatments" /> |
+| causal model | structural causal models | Write down how $X$, $Y$ and $Z$ are related and compute the effect of $X$ on $Y$ as if $Z$ were held fixed, for example by the back-door criterion |
+| features | adversarial learning | Learn a representation of $X$ from which $Z$ cannot be predicted; a downstream model then cannot use $Z$ |
+| teacher–student | knowledge distillation | Train a teacher on a small unbiased dataset and distil it into a student trained on large biased data |
+| similarity | contrastive learning | Learn what makes items similar to users with positive and negative pairs built to control for $Z$ |
+| objective | multi-task learning | Model the target and the bias as separate tasks so shared features become bias-invariant |
+| optimisation | regularisation and constraints | Define a measure of bias or unfairness and optimise under a constraint on it |
+| synthetic data | augmentation | Generate counterfactual examples where bias left gaps in the data |
+| model fusion | ensembles | Combine models with different biases so the biases cancel |
+| meta level | meta-learning | Learn from tasks with different bias patterns to find features invariant across them |
+
+## Structural causal models
+
+The potential-outcomes framework of Rubin, Rosenbaum and Imbens underlies propensity scoring. The structural causal
+model framework of Pearl represents assumptions as a directed acyclic graph and applies graphical rules such as the
+back-door adjustment. If popularity is a common cause of an item's score and the user's interaction, adjusting for it
+gives a deconfounded estimate of preference; PDA does this and can re-introduce a chosen amount of popularity at
+inference (see <NoteLink to="popularity-bias">popularity bias</NoteLink>) <Cite id="zhang2021pda" />. The deconfounded
+recommender of Wang et al. handles unobserved confounders by fitting an exposure model and using its output as a
+substitute confounder <Cite id="wang2020deconfounded" />.
+
+## Adversarial debiasing
+
+Borrowing the minimax game of <NoteLink to="generative-adversarial-network">generative adversarial networks</NoteLink>,
+two models are trained against each other.
+
+1. The recommender predicts interactions from user and item features.
+2. An adversary predicts the biasing factor (position, popularity, a sensitive attribute) from the recommender's
+   internal representations.
+
+The recommender minimises its prediction loss while maximising the adversary's loss. Its representations become
+uninformative about the bias, so predictions made from them cannot depend on it. The approach has been used against
+position bias in news recommendation and for fairness with respect to sensitive user attributes. See also
+<NoteLink to="bias-mitigation">bias mitigation</NoteLink> for classification.
+
+## Data-centric methods
+
+- **Augmentation.** Add synthetic interactions for under-represented items or users, by imputation or with generative
+  models such as variational autoencoders or large language models, to rebalance the training distribution.
+- **Simulation.** Build an environment that simulates users, exposure and feedback, with the exposure mechanism under
+  control, and study how policies shape the system over time. RecoGym simulates an e-commerce setting
+  <Cite id="rohde2018recogym" />; RecSim NG models the interplay of user preferences, policies and item discovery
+  probabilistically <Cite id="mladenov2021recsimng" />. Simulation is valuable for long-term effects and feedback loops
+  that static logs cannot show.
+- **Contrastive learning.** Augment the data, for example by dropping nodes or edges of the interaction graph, and train
+  with an InfoNCE loss that makes views of the same user agree <Cite id="wu2021sgl" />. The representation becomes
+  robust to superficial correlations. CLRec showed that contrastive losses implicitly re-weight examples much like
+  inverse propensity scoring, and reduced exposure bias in candidate generation at Taobao <Cite id="zhou2021clrec" />.
+
+## Learning to debias
+
+AutoDebias uses a small uniformly collected dataset as a validation set and meta-learns weights for the biased training
+interactions that maximise performance on it. It finds effective corrections without an explicit causal model
+<Cite id="chen2021autodebias" />.
+
+## From the literature
+
+Some landmarks trace the field from values to methods:
+
+- **Objectives first.** Netflix emphasised optimising long-term retention instead of short-term clicks, with A/B tests
+  as the arbiter <Cite id="gomezuribe2015netflix" />.
+- **Recommendations as treatments.** Schnabel et al. brought propensity weighting from causal inference to
+  recommendation <Cite id="schnabel2016treatments" />.
+- **Sample-selection bias in conversions.** ESMM trains conversion prediction over the whole impression space, not only
+  clicked impressions <Cite id="ma2018esmm" />.
+- **Fairness in production.** LinkedIn applied fairness-aware re-ranking as a post-processing step in search and
+  recommendation <Cite id="geyik2019linkedin" />.
+
+## Pitfalls
+
+- **One bias at a time.** Most methods target a single bias; real systems have several interacting ones. General,
+  automated frameworks that discover the causal structure of a system's biases remain an open problem.
+- **Static corrections for moving targets.** Popularity and preferences drift; a correction fitted once goes stale.
+- **Unverifiable success.** A debiased model must be evaluated without the bias it removes. See
+  <NoteLink to="unbiased-offline-evaluation">unbiased offline evaluation</NoteLink>.

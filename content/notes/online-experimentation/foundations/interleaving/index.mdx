@@ -1,0 +1,109 @@
+---
+title: Interleaving
+kind: technique
+summary: 'Interleaving compares two rankers by merging their lists into one shown to each user and crediting each click to the ranker that contributed the item. Each user is their own control, so it needs far fewer users than an A/B test, but gives only a preference.'
+tags: [experimentation, ranking, information-retrieval, recommender-systems, worked-example]
+aliases: [interleaved testing, interleaved evaluation, team-draft interleaving, TDI, balanced interleaving, probabilistic interleaving, within-subject ranking experiment, graduated interleaving]
+requires: [ab-test, binomial-test]
+related: [ab-test-power, click-models, multi-stage-recommendation, randomisation-and-analysis-units, overall-evaluation-criterion]
+references: [joachims2002clickthrough, radlinski2008clickthrough, hofmann2011probabilistic, chapelle2012interleaving, aurisset2017interleaving]
+status: draft
+updated: 2026-09-27
+---
+
+import { InterleavingPower } from './InterleavingPower'
+
+<Definition>
+**Interleaving** is an online experiment that compares two ranking functions, A and B. For each request, an interleaving
+algorithm merges the two rankings into a single list, remembering which ranker contributed each item. The user sees the
+merged list. Each click is credited to the ranker that contributed the clicked item, and the ranker whose items receive
+more clicks in a session wins that session. Over many sessions, a test of whether each ranker wins half of the decisive
+sessions decides which is preferred <Cite id="radlinski2008clickthrough" /> <Cite id="chapelle2012interleaving" />.
+</Definition>
+
+## Problem
+
+An <NoteLink to="ab-test">A/B test</NoteLink> of two rankers shows ranker A to one group of users and B to another and
+compares a metric such as clicks per session. Users differ enormously: some click on almost everything, some on nothing.
+That between-user variance is the largest source of noise, and a small improvement to a mature ranker is lost in it
+unless the test is very large or very long.
+
+## Mechanism
+
+**A within-subject design.** Interleaving turns the between-subjects comparison of an A/B test into a within-subject
+one: every user sees results from both rankers in the same list, in the same session and context. A heavy clicker adds
+many clicks to both sides; a light clicker adds few to both. User-level variation cancels in the comparison. The
+statistical problem changes from comparing the means of two populations to testing whether a single proportion, the
+share of sessions won by A, differs from one half.
+
+**Merging the lists.** The merge must not favour either ranker through position, since users click higher positions
+more.
+
+- **Balanced interleaving.** Toss a coin to decide which ranker starts, then alternate, taking each ranker's next item
+  not already in the list. At any cut-off $k$ the two rankers' contributions differ by at most one <Cite
+  id="joachims2002clickthrough" />.
+- **Team-draft interleaving.** In each round a coin decides which ranker picks first; each then adds its highest-ranked
+  item not yet in the list, as captains draft players for teams. Every item belongs to exactly one team, duplicates are
+  handled naturally, and credit is by team membership <Cite id="radlinski2008clickthrough" />.
+- **Probabilistic interleaving.** Items are drawn at random with probabilities that decrease with their rank in each
+  ranker's list. Every item can come from either ranker with known probability, and the analysis can marginalise over
+  the ways the list could have been built <Cite id="hofmann2011probabilistic" />.
+
+**Testing.** Count sessions won by A, $w_A$, and by B, $w_B$, ignoring ties. Under the null hypothesis that neither
+ranker is preferred, $w_A \sim \Binom(w_A + w_B, 1/2)$, and the <NoteLink to="binomial-test">binomial test</NoteLink>
+gives the $p$-value. Bootstrap tests over users handle several correlated sessions per user.
+
+## Worked example
+
+Ranker A wins 530 of 1,000 decisive sessions. Under the null the count has mean 500 and standard deviation
+$\sqrt{1{,}000 \cdot 0.5 \cdot 0.5} = 15.8$, so the observed excess of 30 is 1.90 standard deviations. The exact
+two-sided binomial $p$-value is 0.062: suggestive, not significant at the 5% level. Twice as many sessions with the same
+53% share, 1,060 of 2,000, would give $z = 2.68$ and $p \approx 0.007$.
+
+## Efficiency
+
+<InterleavingPower />
+
+The figure makes the source of the gain visible: raising user heterogeneity hurts the A/B test and barely touches
+interleaving. Chapelle et al. validated interleaving against A/B tests at scale on search engines and found it agreed
+with them while needing far fewer queries <Cite id="chapelle2012interleaving" />. Netflix reported that interleaving
+needed more than 100 times fewer users than a population-based A/B test to reach 95% power when comparing
+personalisation algorithms <Cite id="aurisset2017interleaving" />. Industrial reports put the gain at one to two orders
+of magnitude.
+
+The efficiency has strategic value.
+
+- **Faster iteration.** More ranking ideas can be tried per month.
+- **Smaller effects detected.** Improvements too small for an A/B test of practical size become measurable.
+- **Cheaper experiments.** Less traffic per test frees capacity for concurrent tests.
+- **Lower risk.** Every user still receives about half of their results from the proven ranker, which cushions the
+  effect of a bad candidate. The mixing need not be even: a new ranker can start with a small share of each list, such
+  as one result per page, and grow as confidence builds, provided the analysis accounts for the share in force at each
+  session.
+
+## Limitations
+
+- **Relative, not absolute.** "A won 65% of sessions" says which ranker users prefer, not how much revenue, conversion
+  or retention changes. Business decisions need absolute lifts.
+- **Rankings only.** It compares two rankers over the same kind of list. It cannot test interface changes, pricing,
+  infrastructure, or very different experiences such as a list against a chatbot, which cannot be merged meaningfully.
+- **Short-term, click-level signal.** It measures preference at the moment of clicking, not long-term effects.
+
+## Interleaving before A/B testing
+
+The limits define its place: a fast screen, not a replacement. Many candidate rankers are compared by interleaving, the
+weakest are dropped, and the best one or two proceed to a full A/B test that measures their absolute effect on business
+metrics. Netflix describes this two-stage process, with interleaving as a pruning step and A/B tests measuring
+longer-term member behaviour <Cite id="aurisset2017interleaving" />. A model that predicts A/B outcomes from
+interleaving results, using their correlation, helps translate between the two. See <NoteLink
+to="choosing-an-experimentation-method">choosing an experimentation method</NoteLink>.
+
+## Pitfalls
+
+- **Unbalanced merges.** A merge that systematically gives one ranker the top position favours it by position bias
+  alone. Use team-draft or balanced interleaving, and check with an A/A interleaving test that each ranker wins half the
+  time.
+- **Similar rankers tie often.** When both rankers put the same items at the top, most sessions are ties and carry no
+  information. Report the tie rate.
+- **Sessions are not independent.** Several sessions from one user are correlated. Aggregate per user or use a bootstrap
+  over users.

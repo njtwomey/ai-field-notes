@@ -1,0 +1,76 @@
+---
+title: Feedback loops in recommendation
+kind: concept
+summary: 'A recommender trains on interactions that its own earlier versions caused, so its biases compound: items ranked high collect clicks because they are ranked high, and the next model ranks them higher. Exposure concentrates and unexplored items starve.'
+tags: [recommender-systems, bias, feedback-loops, exploration]
+aliases: [degenerate feedback loop, Matthew effect, rich get richer, algorithmic confounding, filter bubble, echo chamber]
+requires: [biases-in-recommender-feedback]
+partOf: [recommender-systems]
+related: [popularity-bias, exploration-in-rl, contextual-bandit, fairness-in-recommendation]
+references: [jiang2019degenerate, chaney2018feedback, chen2023biassurvey]
+status: draft
+updated: 2026-09-27
+---
+
+import { LoopSimulation } from './LoopSimulation'
+
+<Definition>
+A **feedback loop** in a recommender system is the cycle in which a model's recommendations shape user behaviour, the
+behaviour is logged, and the log trains the next model. Because the model decides what users can react to, the loop
+amplifies whatever biases the model has <Cite id="jiang2019degenerate" />.
+</Definition>
+
+## The cycle
+
+Four steps repeat.
+
+1. A model is trained on click data skewed by position bias. It learns a spurious link between high rank and relevance.
+2. At serving time it puts the items it believes relevant, often those that already benefited from past bias, at the
+   top.
+3. Position bias gives those items a disproportionate share of clicks, whatever their relevance to each user.
+4. The new clicks train the next model.
+
+The result is a **Matthew effect**: the rich get richer. Popular, highly ranked items become more entrenched, while
+items that might be more relevant, but were exposed less, never gather the evidence needed to prove it. Beyond
+accuracy, the loop reduces diversity, creates filter bubbles and treats item providers unfairly.
+
+<LoopSimulation />
+
+## Why it degenerates
+
+The loop is a failure of exploration. The model learns only about items it shows. An item with a low early estimate is
+shown rarely, so its estimate never improves; the error persists because the model's own choices prevent the data that
+would correct it. Jiang et al. analysed this dynamic as a degenerate feedback loop: without exploration or other
+intervention, a user's interest estimates can drift to extremes set by what the system happened to show
+<Cite id="jiang2019degenerate" />. Chaney et al. simulated recommenders trained on data they had themselves confounded
+and found that the loop makes users' consumption more homogeneous and lowers the utility they get, compared with a
+system that knows true preferences <Cite id="chaney2018feedback" />.
+
+The <NoteLink to="multi-armed-bandit">multi-armed bandit</NoteLink> is the minimal model of the problem: a greedy
+policy that never explores can lock onto a worse arm for ever.
+
+## Breaking the loop
+
+The lines of attack range from heuristic to principled.
+
+- **Exploration.** Show some items for the information they yield, not only for their estimated reward, as bandits do.
+  Randomised exposure also produces data with known propensities for later correction. See
+  <NoteLink to="contextual-bandit">contextual bandits</NoteLink>.
+- **Propensity correction.** Weight logged interactions by the inverse probability that they were observable, so the
+  model learns preferences, not exposure. See <NoteLink to="unbiased-learning-to-rank">unbiased learning to
+  rank</NoteLink> and <NoteLink to="propensity-in-recommendation">propensity</NoteLink>.
+- **Causal models of popularity.** Separate the effect of popularity on exposure from preference. See
+  <NoteLink to="popularity-bias">popularity bias</NoteLink>.
+- **Objectives beyond clicks.** Reward diversity, novelty and long-term satisfaction, and measure them. See
+  <NoteLink to="beyond-accuracy-metrics">beyond-accuracy metrics</NoteLink> and
+  <NoteLink to="reinforcement-learning-for-recommendation">reinforcement learning for recommendation</NoteLink>.
+- **Simulation.** Simulators of the whole loop let a policy's long-run effect be studied before deployment. See the
+  <NoteLink to="debiasing-toolkit">debiasing toolkit</NoteLink>.
+
+## Pitfalls
+
+- **Short experiments miss it.** A loop plays out over weeks of retraining. An A/B test of a model that is not retrained
+  on its own arm's data measures none of it. See <NoteLink to="experimentation-biases-in-recommendation">experimentation
+  biases in recommendation</NoteLink>.
+- **Static offline metrics reward it.** A model that imitates the logging policy scores well on logs the policy
+  produced.

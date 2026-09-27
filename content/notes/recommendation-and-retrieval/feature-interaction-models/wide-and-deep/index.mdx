@@ -1,0 +1,84 @@
+---
+title: Wide & Deep
+kind: concept
+summary: 'Wide & Deep sums the logits of a linear model over crossed sparse features, which memorises specific co-occurrences, and a feed-forward network over feature embeddings, which generalises to unseen combinations, and trains both jointly through one logistic loss.'
+tags: [recommender-systems, feature-interactions, deep-learning, click-through-rate]
+aliases: [Wide and Deep, Wide & Deep learning, wide and deep model, memorisation and generalisation]
+requires: [logistic-regression, multilayer-perceptron]
+partOf: [recommender-systems]
+related: [multi-stage-recommendation]
+references: [cheng2016wide]
+status: draft
+updated: 2026-09-27
+---
+
+import { WideDeepDiagram } from './WideDeepDiagram'
+
+<Definition>
+A **Wide & Deep** model predicts the probability of a positive outcome, such as an app install, as
+
+$$
+P(y = 1 \mid \xvec) = \sigma\paren{\wvec_{\text{wide}}\transpose\LB\xvec, \phi(\xvec)\RB + \wvec_{\text{deep}}\transpose\avec^{(L)} + b},
+$$
+
+where $\phi(\xvec)$ are cross-product transformations of sparse features, $\avec^{(L)}$ is the last hidden layer of a
+feed-forward network fed with embeddings of the sparse features and the dense features, and $\sigma$ is the logistic
+function. The two parts are trained jointly <Cite id="cheng2016wide" />.
+</Definition>
+
+<WideDeepDiagram />
+
+## Memorisation and generalisation
+
+Cheng et al. framed recommendation as needing two abilities <Cite id="cheng2016wide" />.
+
+- **Memorisation** learns that specific feature combinations co-occur with the label in the training data. A
+  cross-product feature such as AND(installed = Netflix, impression = Hulu) is 1 only when both hold. A linear model
+  over many such crosses memorises precise rules, for example that users who installed a game often install its
+  sequel. It cannot score a pair of values that never appeared together, because the cross
+  feature for that pair has no trained weight.
+- **Generalisation** transfers to combinations not seen in training. An embedding per feature value and a network on
+  top of the embeddings can score any combination, because similar values get similar embeddings. With sparse, high-rank
+  interactions, such as niche users with specific tastes, this over-generalises and recommends loosely related items.
+
+The wide part supplies the first and the deep part the second. The resulting pattern recurs: hybrid
+architectures in which each component addresses one aspect of the problem.
+
+## Mechanism
+
+A cross-product transformation is a product of binary features,
+
+$$
+\phi_k(\xvec) = \prod_{i=1}^{d} x_i^{c_{ki}}, \qquad c_{ki} \in \set{0, 1},
+$$
+
+which is 1 exactly when every feature selected by $c_{k\cdot}$ is 1. The deep part embeds each categorical feature,
+concatenates the embeddings with the dense features, and applies several ReLU layers.
+
+**Joint training, not an ensemble.** The two logits are summed before a single sigmoid, and the gradient of the loss
+flows into both parts at once. The wide part therefore only has to cover what the deep part misses, and needs only a
+small number of crosses. An ensemble would train each part alone to full accuracy and average them. Cheng et al. used
+FTRL with $\ell_1$ regularisation for the wide weights and AdaGrad for the deep part <Cite id="cheng2016wide" />.
+
+## Google Play
+
+The model ranked apps in the Google Play store, after a retrieval stage cut the catalogue to a candidate list. Each
+categorical feature had a 32-dimensional embedding; the concatenated input of about 1,200 dimensions fed three ReLU
+layers. The wide part crossed the user's installed apps with the impressed app. In a three-week online experiment with
+1% of users per arm, Wide & Deep raised app acquisitions by 3.9% relative to the production wide-only model and by
+about 1% relative to a deep-only model. Offline AUC barely differed: 0.726, 0.722 and 0.728
+<Cite id="cheng2016wide" />.
+
+## Legacy
+
+Wide & Deep made the hybrid of a memorising component and a generalising network a template. Its weakness is that the
+crosses are chosen by hand. <NoteLink to="deepfm">DeepFM</NoteLink> replaces the wide part with a
+<NoteLink to="factorisation-machines">factorisation machine</NoteLink> that learns all pairwise interactions from
+shared embeddings; the Deep & Cross Network replaces it with learned polynomial crosses.
+
+## Pitfalls
+
+- **Feature engineering in the wide part.** Choosing crosses takes domain knowledge and maintenance. Missing a cross
+  leaves the memorisation to a deep part that is poor at it.
+- **Offline AUC understates the online effect.** The Google Play result is a small AUC change with a clear online
+  gain. Decide with an <NoteLink to="ab-test">online experiment</NoteLink>.

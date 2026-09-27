@@ -1,0 +1,88 @@
+---
+title: Reinforcement learning for recommendation
+kind: concept
+summary: 'Reinforcement learning treats recommendation as a Markov decision process: each recommendation changes the user''s state, and a policy maximises long-term return, such as retention, instead of the next click. Vast action spaces and risky exploration make it hard.'
+tags: [recommender-systems, reinforcement-learning, sequential-decisions, off-policy-evaluation]
+aliases: [RL for recommendation, reinforcement learning recommender, recommendation as an MDP, REINFORCE recommender, top-K off-policy correction, SlateQ, long-term user value]
+requires: [markov-decision-process, reinforcement-learning]
+partOf: [recommender-systems]
+related: [contextual-bandit, off-policy-evaluation-in-rl, offline-rl, policy-gradient-theorem, feedback-loops-in-recommendation, slate-off-policy-evaluation]
+references: [afsar2022rlsurvey, chen2019topk, ie2019slateq, rohde2018recogym, mladenov2021recsimng, sutton2018]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Reinforcement learning for recommendation** models the interaction between a recommender and a user as a <NoteLink
+to="markov-decision-process">Markov decision process</NoteLink> $(\Scal, \Acal, P, R, \gamma)$. The **state** $s_t$
+describes the user and context (recent history, profile, session); an **action** $a_t$ is an item or a slate; the
+**transition** $P(s_{t+1} \mid s_t, a_t)$ captures how the recommendation changes the user; the **reward** $R$ scores
+the response; and the **discount** $\gamma \in [0, 1)$ weights the future. The goal is a policy $\pi(a \mid s)$ that
+maximises the expected return $\expect_\pi\LB\sum_{t \ge 0}\gamma^tR_{t+1}\RB$ <Cite id="afsar2022rlsurvey" />.
+</Definition>
+
+## From prediction to decisions
+
+A supervised recommender predicts the next click and shows the items with the highest predictions. It treats each
+recommendation as independent and ignores that what it shows today shapes what the user wants, knows and does tomorrow.
+RL treats the recommender as an agent acting on an environment, the user, over time. It can reason about consequences:
+recommending a niche item today, a short-term risk, may broaden a user's tastes and raise engagement over the coming
+months.
+
+The discount sets the horizon. The return from step $t$ is $G_t = \sum_{j \ge 0}\gamma^jR_{t+j+1}$; a reward $n$ steps
+ahead is worth $\gamma^n$ as much as an immediate one. With $\gamma = 0$ the problem reduces to maximising the next
+reward, the <NoteLink to="contextual-bandit">contextual bandit</NoteLink>. With $\gamma$ near 1 a reward 100 steps away
+still counts: $0.99^{100} = 0.37$.
+
+## The reward is the objective
+
+The reward is the only signal the agent learns from, so it defines what success means. A reward of clicks produces
+clickbait. Richer formulations include:
+
+- **Deeper engagement:** dwell time, completion, conversion, session length.
+- **Diversity and novelty:** explicit rewards for recommending varied or unfamiliar items, against filter bubbles.
+- **Long-term satisfaction:** retention, churn, lifetime value, session satisfaction as the reward.
+
+Designing the reward is a business decision as much as a technical one, with the same trade-offs as choosing an
+<NoteLink to="overall-evaluation-criterion">overall evaluation criterion</NoteLink>.
+
+## Obstacles in practice
+
+- **State and action spaces.** Billions of user states and millions of items rule out tabular methods. Deep function
+  approximation is required, with its loss of guarantees.
+- **Sparse and delayed rewards.** A user may browse hundreds of items before buying one, and a recommended series may
+  pay off in weeks of viewing. Assigning credit to the action that caused a delayed reward is hard.
+- **Exploration is risky.** An untrained agent exploring freely on live users can wreck their experience. Agents are
+  therefore trained on logs from the existing system, which is <NoteLink to="offline-rl">offline RL</NoteLink>, and must
+  be evaluated from those logs by <NoteLink to="off-policy-evaluation-in-rl">off-policy evaluation</NoteLink> before
+  deployment. Both are hard, and a badly evaluated policy can do real damage.
+- **Instability.** Deep RL is sensitive to hyperparameters and can diverge.
+
+These hurdles make full RL a long-term goal for most organisations rather than a routine tool.
+
+## Examples
+
+**Off-policy REINFORCE at YouTube.** Chen et al. trained a softmax policy over millions of videos with a <NoteLink
+to="policy-gradient-theorem">policy gradient</NoteLink> on logs from earlier recommenders. Each logged trajectory is
+re-weighted by the importance ratio $\pi_\theta(a \mid s)/\beta(a \mid s)$ between the new policy and a learned model
+$\beta$ of the logging policy. Because the system shows $K$ items at once, they replace $\pi_\theta(a \mid s)$ in the
+objective by the probability that $a$ appears in a top-$K$ sample, $\alpha_\theta(a \mid s) = 1 - (1 - \pi_\theta(a \mid
+s))^K$, which multiplies the gradient by $K(1 - \pi_\theta(a \mid s))^{K-1}$. The factor shrinks for items the policy
+already favours and pushes probability to items not yet in its top $K$ <Cite id="chen2019topk" />.
+
+**SlateQ.** A slate is an action from a combinatorial space. Under assumptions that the user consumes at most one item
+from the slate and that choice follows a known choice model, Ie et al. decompose the value of a slate into the values of
+its items weighted by their probabilities of being chosen, which makes Q-learning over slates tractable
+<Cite id="ie2019slateq" />.
+
+**Simulators.** RecoGym and RecSim NG simulate users so that policies and their long-run effects can be tested before
+live traffic <Cite id="rohde2018recogym" /> <Cite id="mladenov2021recsimng" />.
+
+## Pitfalls
+
+- **Myopic rewards in RL clothing.** An RL system with a click reward and a small $\gamma$ is a click predictor with
+  extra complexity.
+- **Simulator gaps.** A policy that games a simulator's user model may fail on real users.
+- **Popularity through the back door.** Without explicit rewards for diversity, an RL policy trained on logs inherits
+  the logging policy's popularity bias. With them, it is one of the few frameworks that can actively counter it. See
+  <NoteLink to="experimentation-biases-in-recommendation">experimentation biases in recommendation</NoteLink>.

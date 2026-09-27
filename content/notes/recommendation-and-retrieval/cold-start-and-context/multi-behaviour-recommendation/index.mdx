@@ -1,0 +1,75 @@
+---
+title: Multi-behaviour recommendation
+kind: concept
+summary: 'Multi-behaviour recommenders learn from several interaction types (view, click, cart, purchase) with multi-task models: shared-bottom networks, MMoE and PLE gates over experts, or STEM''s task-specific embeddings. Dense behaviours warm up users who are cold for sparse targets.'
+tags: [recommender-systems, multi-task-learning, cold-start, deep-learning]
+aliases: [multi-behavior recommendation, multi-task recommendation, MMoE, multi-gate mixture of experts, PLE, progressive layered extraction, STEM, shared-bottom, ESMM, entire space multi-task model]
+requires: [multilayer-perceptron, explicit-and-implicit-feedback]
+partOf: [recommender-systems]
+related: [mixture-of-experts, negative-transfer, biases-in-recommender-feedback]
+references: [ma2018mmoe, tang2020ple, su2024stem, ma2018esmm]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **multi-behaviour recommender** models several kinds of user action on items, such as view, click, add-to-cart and
+purchase, instead of one. It is usually a **multi-task** model: one network with a shared part and one output head per
+behaviour, trained on the sum of the tasks' losses, $\mathcal{L} = \sum_k \lambda_k\mathcal{L}_k$.
+</Definition>
+
+## Behaviours differ in strength and density
+
+A purchase says more than a view. A system trained on one behaviour ignores the rest.
+The behaviours also differ in volume: views may outnumber purchases a hundred to one. Modelling them jointly keeps each
+behaviour distinct, for example as separate sequences or graphs per behaviour, while sharing what they have in common.
+
+Multi-task learning offers two gains.
+
+1. **Efficiency.** One model to train and serve instead of several.
+2. **Positive transfer.** Representations learned from a data-rich task, such as clicks, improve a data-poor one, such
+   as purchases.
+
+The risk is <NoteLink to="negative-transfer">negative transfer</NoteLink>: optimising one task harms another when their
+needs conflict.
+
+## Architectures
+
+- **Shared bottom.** Embeddings and lower layers are shared; each task has its own tower on top. Simple, and brittle
+  when tasks conflict, because all tasks must use the same representation.
+- **MMoE.** Multi-gate mixture of experts replaces the shared bottom with $E$ expert networks $f_1, \ldots, f_E$. Each
+  task $k$ has a gating network that weights the experts for each input:
+  $$
+  y_k = h_k\paren{\sum_{e=1}^{E} g_{k,e}(\xvec)f_e(\xvec)}, \qquad \gvec_k(\xvec) = \operatorname{softmax}\paren{\Wmat_k\xvec}.
+  $$
+  Tasks that are related learn to use the same experts; tasks that are not learn to use different ones, which limits
+  negative transfer <Cite id="ma2018mmoe" />. See <NoteLink to="mixture-of-experts">mixture of experts</NoteLink>.
+- **PLE.** Progressive layered extraction splits experts into shared experts and task-specific experts at each layer.
+  Each task's gate mixes the shared experts with its own, and stacking such layers separates shared and task-specific
+  knowledge step by step <Cite id="tang2020ple" />.
+- **STEM.** The architectures above still share one embedding per user and item across all tasks, which assumes a
+  user's preferences are the same whatever the behaviour. Shared and task-specific embeddings (STEM) give each user and
+  item a shared embedding plus one embedding per task; a task's prediction uses the shared embedding and its own. This
+  captures both the common ground and where behaviours diverge <Cite id="su2024stem" />.
+
+**Cascaded tasks.** Some behaviours are conditional on others: a conversion follows a click. Training a conversion
+model only on clicked impressions creates a sample-selection bias, because it is served on all impressions. ESMM models
+$p(\text{click and convert}) = p(\text{click}) \cdot p(\text{convert} \mid \text{click})$ over the entire impression
+space, so both factors are trained on the data they are applied to <Cite id="ma2018esmm" />.
+
+## Warming up cold users
+
+A user is often cold only for the target behaviour. A new shopper may have no purchases and dozens of views and clicks
+from the first session. A purchase-only model has nothing for this user. A multi-task model learns the user's
+representation from the dense auxiliary behaviours, and the purchase head reads that representation, so it can predict
+purchases before the first one. See the <NoteLink to="cold-start-problem">cold-start
+problem</NoteLink>.
+
+## Pitfalls
+
+- **Task weights are business decisions.** The weights $\lambda_k$ trade clicks against purchases. Multi-task models
+  force an organisation to quantify the relative value of its objectives.
+- **Gradient conflict.** Tasks with very different loss scales or data volumes dominate shared parameters. Normalise
+  losses and monitor each task.
+- **Behaviours can mislead.** A click on a clickbait title is dense and weakly related to satisfaction. Transfer from it
+  carries its biases into sparse tasks.

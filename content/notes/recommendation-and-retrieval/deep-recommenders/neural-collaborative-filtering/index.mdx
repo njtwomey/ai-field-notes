@@ -1,0 +1,88 @@
+---
+title: Neural collaborative filtering
+kind: concept
+summary: 'Neural collaborative filtering replaces the dot product of matrix factorisation with a learned network over user and item embeddings. NeuMF fuses a generalised MF branch, which contains MF as a special case, with an MLP. A tuned dot product often does as well.'
+tags: [recommender-systems, collaborative-filtering, deep-learning, implicit-feedback]
+aliases: [NCF, NeuMF, neural matrix factorisation, generalised matrix factorisation, GMF, neural collaborative filtering framework]
+requires: [matrix-factorisation-for-recommendation, multilayer-perceptron, explicit-and-implicit-feedback]
+partOf: [recommender-systems]
+related: [two-tower-model, wide-and-deep, progress-and-baselines-in-recommendation, bayesian-personalised-ranking]
+references: [he2017ncf, rendle2020ncf]
+status: draft
+updated: 2026-09-27
+---
+
+import { NcfDiagram } from './NcfDiagram'
+
+<Definition>
+**Neural collaborative filtering** (NCF) predicts the probability that user $u$ interacts with item $i$ as
+$\hat{y}_{ui} = f(\pvec_u, \qvec_i)$, where $\pvec_u$ and $\qvec_i$ are learned embeddings of the user and item IDs and
+$f$ is a neural network. It is trained on implicit feedback with binary cross-entropy, with unobserved items sampled
+as negatives <Cite id="he2017ncf" />.
+</Definition>
+
+## Motivation
+
+<NoteLink to="matrix-factorisation-for-recommendation">Matrix factorisation</NoteLink> scores a pair by the dot product
+$\pvec_u\transpose\qvec_i$, a fixed, linear combination of the latent factors. This linearity was a main reason the
+field turned to deep learning. NCF keeps the latent-factor idea and makes the interaction function learnable, so deep
+learning generalises the classical method instead of discarding it.
+
+## Architecture
+
+The architecture has four layers.
+
+1. **Input.** One-hot vectors for the user ID and the item ID.
+2. **Embedding.** A fully connected layer without bias maps each one-hot vector to a dense vector. This is a table
+   lookup, and the vectors are the latent factors.
+3. **Neural CF layers.** A multilayer perceptron on the concatenated embeddings, with ReLU activations, learns the
+   interaction.
+4. **Output.** A sigmoid gives the probability of interaction.
+
+Training minimises the binary cross-entropy over observed pairs (label 1) and sampled unobserved pairs (label 0):
+
+$$
+\mathcal{L} = -\sum_{(u, i) \in \Ocal}\ln\hat{y}_{ui} - \sum_{(u, j) \in \Ocal^-}\ln\paren{1 - \hat{y}_{uj}},
+$$
+
+where $\Ocal^-$ holds a few sampled negatives per positive; He et al. used about four <Cite id="he2017ncf" />.
+
+<NcfDiagram />
+
+## MF as a special case
+
+The **generalised matrix factorisation** (GMF) branch multiplies the embeddings element-wise and applies a linear
+output layer:
+
+$$
+\hat{y}_{ui} = a\paren{\hvec\transpose\paren{\pvec_u \odot \qvec_i}}.
+$$
+
+Set the activation $a$ to the identity and every entry of $\hvec$ to 1. Then $\hvec\transpose(\pvec_u \odot \qvec_i) =
+\sum_k p_{uk}q_{ik} = \pvec_u\transpose\qvec_i$, which is matrix factorisation. Learning $\hvec$ weights the latent
+dimensions differently, and a sigmoid $a$ turns the score into a probability <Cite id="he2017ncf" />.
+
+**NeuMF** fuses the linear GMF branch with the non-linear MLP branch. Each branch has its own embeddings, because the
+best embedding size and representation differ between them. The last layers of the two branches are concatenated and
+passed through a final sigmoid layer. He et al. pre-trained each branch separately and used them to initialise NeuMF,
+and reported that NeuMF beat either branch alone on MovieLens and Pinterest data <Cite id="he2017ncf" />.
+
+## The dot product revisited
+
+Rendle et al. re-ran the comparison with a carefully tuned dot-product MF. It outperformed NeuMF and the MLP on the same
+benchmarks. They also showed that an MLP needs many parameters and much data to approximate a dot product, so the MLP
+is not a strict improvement on the dot product in practice. And a dot product can be searched quickly for the best
+items with a maximum-inner-product index, while an MLP must be evaluated on every candidate
+<Cite id="rendle2020ncf" />.
+
+NCF led the shift from linear to neural interaction models. The later result shows that the gain came from tuning and
+training details as much as from the architecture; see <NoteLink to="progress-and-baselines-in-recommendation">progress
+and baselines</NoteLink>.
+
+## Pitfalls
+
+- **Serving cost.** $f$ must run for every candidate item. This rules out NCF as a retrieval model over a large
+  catalogue; a <NoteLink to="two-tower-model">two-tower model</NoteLink> keeps the dot product for that reason.
+- **IDs only.** Plain NCF uses only user and item IDs. It has the same cold-start problem as MF.
+- **Sampled evaluation.** NCF was evaluated by ranking each held-out item among 100 sampled items. Such sampled metrics
+  can disagree with full-catalogue metrics.

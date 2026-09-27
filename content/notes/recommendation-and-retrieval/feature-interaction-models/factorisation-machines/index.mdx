@@ -1,0 +1,113 @@
+---
+title: Factorisation machines
+kind: concept
+summary: 'A factorisation machine scores features as $w_0 + \sum_i w_ix_i + \sum_{i<j}\inner{\vvec_i}{\vvec_j}x_ix_j$ with an embedding per feature. It models all pairwise interactions in $O(kn)$ time, including unseen pairs, and reduces to matrix factorisation on user and item IDs.'
+tags: [recommender-systems, feature-interactions, matrix-factorisation, click-through-rate, worked-example]
+aliases: [FM, factorization machine, factorization machines, second-order factorisation machine, polynomial regression with factorised interactions]
+requires: [matrix-factorisation-for-recommendation, logistic-regression]
+partOf: [recommender-systems]
+related: [wide-and-deep, hybrid-recommenders, bayesian-personalised-ranking]
+references: [rendle2010fm]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **factorisation machine** (FM) of degree 2 maps a real feature vector $\xvec \in \reals^n$ to
+
+$$
+\hat{y}(\xvec) = w_0 + \sum_{i=1}^{n} w_ix_i + \sum_{i=1}^{n}\sum_{j=i+1}^{n}\inner{\vvec_i}{\vvec_j}x_ix_j,
+$$
+
+with a global bias $w_0$, a weight $w_i$ per feature, and a latent vector $\vvec_i \in \reals^k$ per feature. The weight
+of the interaction between features $i$ and $j$ is the inner product of their vectors <Cite id="rendle2010fm" />.
+</Definition>
+
+## Why factorise the interactions
+
+Real recommendation problems come with more than a user and an item: the user's age and country, the item's category
+and price, the time of day, the device. After one-hot encoding, $\xvec$ has millions of
+dimensions and a handful of non-zeros. A second-order polynomial model gives each pair $(i, j)$ its own weight
+$w_{ij}$. With sparse data most pairs never occur together in training, so their $w_{ij}$ are never updated, and the
+model cannot predict for them.
+
+An FM ties the pair weights together: $w_{ij} = \inner{\vvec_i}{\vvec_j}$. Every observation involving feature $i$
+updates $\vvec_i$, so each vector is learned from all of its feature's interactions. The interaction of two features
+that never co-occurred is still estimated, from how each interacts with the features it did meet. This is the same
+mechanism by which <NoteLink to="matrix-factorisation-for-recommendation">matrix factorisation</NoteLink> predicts a
+rating for a user–item pair it has not seen <Cite id="rendle2010fm" />.
+
+## Computing the interactions in linear time
+
+The pairwise sum has $n(n-1)/2$ terms. It can be rewritten to cost $O(kn)$. Expand the square of a sum over all
+features, for one latent dimension $f$:
+
+$$
+\paren{\sum_{i=1}^{n} v_{if}x_i}^2 = \sum_{i=1}^{n} v_{if}^2x_i^2 + 2\sum_{i=1}^{n}\sum_{j=i+1}^{n} v_{if}v_{jf}x_ix_j.
+$$
+
+Solve for the cross terms and sum over $f = 1, \ldots, k$. Since $\inner{\vvec_i}{\vvec_j} = \sum_f v_{if}v_{jf}$,
+
+$$
+\sum_{i=1}^{n}\sum_{j=i+1}^{n}\inner{\vvec_i}{\vvec_j}x_ix_j
+= \frac{1}{2}\sum_{f=1}^{k}\LB\paren{\sum_{i=1}^{n} v_{if}x_i}^2 - \sum_{i=1}^{n} v_{if}^2x_i^2\RB.
+$$
+
+Each inner sum runs over the non-zero features only. With $m$ non-zeros per example the cost is $O(km)$
+<Cite id="rendle2010fm" />.
+
+**Check.** Take $n = 3$, $k = 2$, $\xvec = (1, 1, 0.5)$, $\vvec_1 = (1, 0)$, $\vvec_2 = (0.5, 1)$ and $\vvec_3 = (-1,
+2)$. Pair by pair: $\inner{\vvec_1}{\vvec_2} \cdot 1 = 0.5$, $\inner{\vvec_1}{\vvec_3} \cdot 0.5 = -0.5$,
+$\inner{\vvec_2}{\vvec_3} \cdot 0.5 = 0.75$, total $0.75$. With the identity: $\sum_i \vvec_ix_i = (1, 2)$ and $\sum_i
+\vvec_i^2x_i^2 = (1.5, 2)$ elementwise, so $\frac{1}{2}[(1 - 1.5) + (4 - 2)] = 0.75$.
+
+## Matrix factorisation as a special case
+
+Let $\xvec$ contain only two one-hot blocks: user $u$ (position $u$) and item $i$ (position $U + i$). All other entries
+are zero, so the linear terms reduce to $w_u + w_{U+i}$ and the only interacting pair is (user, item):
+
+$$
+\hat{y}(\xvec) = w_0 + w_u + w_{U+i} + \inner{\vvec_u}{\vvec_{U+i}}.
+$$
+
+This is matrix factorisation with a global mean and user and item biases. Adding blocks to $\xvec$ extends the model
+without a new derivation: the user's other rated items give SVD++-like terms, a time block gives time effects, item
+attributes give a content-aware model <Cite id="rendle2010fm" />. FMs thus combine
+collaborative and content signals in one model.
+
+## Training
+
+The model is linear in each parameter, so gradients are simple. For a feature $i$ and dimension $f$,
+
+$$
+\frac{\partial\hat{y}}{\partial v_{if}} = x_i\sum_{j=1}^{n} v_{jf}x_j - v_{if}x_i^2,
+$$
+
+and the sum $\sum_j v_{jf}x_j$ is shared by all $i$ and computed once per example. FMs are trained with squared loss for
+regression, logistic loss for click prediction, or a pairwise loss such as
+<NoteLink to="bayesian-personalised-ranking">BPR</NoteLink> for ranking, by SGD, ALS or MCMC.
+
+## Feature types
+
+An FM handles many kinds of input in one framework:
+
+- **Categorical:** one-hot user and item IDs, genres, categories.
+- **Numerical:** age, price, time since last purchase.
+- **Context:** time of day, day of week, location.
+- **Derived:** historical statistics, moving averages, crosses.
+
+## Legacy
+
+FMs showed that interactions between sparse features can be learned through embeddings, and that one model can blend
+collaborative and content features. <NoteLink to="field-aware-factorisation-machines">Field-aware FMs</NoteLink> add
+field-specific embeddings; <NoteLink to="field-weighted-factorisation-machines">field-weighted FMs</NoteLink> add one
+weight per pair of fields; <NoteLink to="deepfm">DeepFM</NoteLink> puts an FM beside a deep network that shares its
+embeddings.
+
+## Pitfalls
+
+- **One vector per feature for every partner.** The same $\vvec_i$ must serve interactions with users, items, times
+  and devices. Field-aware FMs relax this.
+- **Only second order.** Degree-3 FMs exist but are rarely used; deep models capture higher orders.
+- **Numerical features need scaling.** A raw price of 1,000 multiplies every interaction it enters. Normalise or bucket
+  numerical features.

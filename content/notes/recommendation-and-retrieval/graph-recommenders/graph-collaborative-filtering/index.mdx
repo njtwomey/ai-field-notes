@@ -1,0 +1,95 @@
+---
+title: Graph collaborative filtering
+kind: concept
+summary: 'Graph collaborative filtering treats interactions as edges of a bipartite user-item graph and learns embeddings by message passing: each layer updates a node from its neighbours, so $K$ layers encode $K$-hop paths. NGCF and LightGCN are examples.'
+tags: [recommender-systems, collaborative-filtering, graph-neural-networks, embeddings]
+aliases: [graph-based recommendation, GNN recommender, bipartite graph recommendation, NGCF, neural graph collaborative filtering, high-order connectivity, SGL]
+requires: [matrix-factorisation-for-recommendation, message-passing-neural-network]
+partOf: [recommender-systems]
+related: [graph-convolutional-network, contrastive-learning, pinsage-family]
+references: [wang2019ngcf, he2020lightgcn, gilmer2017, wu2021sgl]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Graph collaborative filtering** represents interactions as a bipartite graph $\Gcal = (\Vcal, \Ecal)$ whose nodes are
+users and items, $\Vcal = \Ucal \cup \Ical$, with an edge $(u, i) \in \Ecal$ when user $u$ interacted with item $i$. A
+graph neural network computes node embeddings by repeated **message passing**: at layer $k + 1$, each node's embedding
+is a function of its own and its neighbours' embeddings at layer $k$. Scores are inner products of the final user and
+item embeddings <Cite id="wang2019ngcf" />.
+</Definition>
+
+## Collaborative filtering as paths
+
+The graph view makes collaborative filtering explicit. Take the path $u_1 \to i_1 \to u_2 \to i_2$. User $u_1$ is
+similar to $u_2$ because both interacted with $i_1$, and $u_2$ interacted with $i_2$, so $u_1$ might like $i_2$. This is
+the reasoning of <NoteLink to="neighbourhood-collaborative-filtering">neighbourhood methods</NoteLink>, read off a path
+of length 3.
+
+<NoteLink to="matrix-factorisation-for-recommendation">Matrix factorisation</NoteLink> captures such paths only
+implicitly, through a loss that ties $u_1$ and $u_2$ to the vector of $i_1$. A graph network puts them into the
+embedding directly.
+
+## Message passing
+
+A <NoteLink to="message-passing-neural-network">message-passing</NoteLink> layer aggregates neighbours'
+embeddings <Cite id="gilmer2017" />. Stacking layers widens what each node sees:
+
+- After one layer, a user's embedding contains the items they interacted with.
+- After two, the other users who interacted with those items.
+- After three, the other items those users interacted with.
+
+A user with few interactions receives information from the dense neighbourhoods of the few items they touched, which
+helps sparse users most. Propagation alone already exposes community structure: an untrained network, or plain powers of
+the normalised adjacency applied to random features, separates the two factions of Zachary's karate club (see
+<NoteLink to="untrained-graph-propagation">untrained graph propagation</NoteLink>).
+
+**NGCF.** Neural Graph Collaborative Filtering transferred the design of graph convolutional networks to the
+bipartite graph. Its layer transforms messages with weight matrices $\Wmat_1$ and $\Wmat_2$, includes an element-wise
+product that makes the message depend on the pair, and applies a non-linearity:
+
+$$
+\evec_u^{(k+1)} = \operatorname{LeakyReLU}\paren{\Wmat_1\evec_u^{(k)} + \sum_{i \in \Ncal_u}\frac{1}{\sqrt{\abs{\Ncal_u}\abs{\Ncal_i}}}\paren{\Wmat_1\evec_i^{(k)} + \Wmat_2\paren{\evec_i^{(k)} \odot \evec_u^{(k)}}}},
+$$
+
+where $\Ncal_u$ is the set of items adjacent to $u$. The final representation concatenates all layers' outputs
+<Cite id="wang2019ngcf" />.
+
+## Less is more
+
+He et al. ablated NGCF and found that the weight matrices and the non-linearity did not help collaborative filtering and
+could hurt it. Removing them gave <NoteLink to="lightgcn">LightGCN</NoteLink>, which propagates embeddings linearly and
+was more accurate, about 16% on average over NGCF under the same settings <Cite id="he2020lightgcn" />.
+
+The reason lies in the inputs. Graph convolutional networks were designed for nodes with rich input features, where
+transforming features is the point. In collaborative filtering a node is an ID with a learnable embedding and nothing
+else. The useful operation is smoothing preference signals along edges, and extra transformations only add parameters
+to overfit. Matching the architecture's inductive bias to the problem, not importing a general-purpose design, made the
+model simpler and better.
+
+## Variants
+
+Further directions include the following.
+
+- **Graph attention.** Weight neighbours by learned attention instead of fixed degree normalisation, so that some
+  interactions count more.
+- **Self-supervision.** SGL perturbs the graph (dropping nodes or edges) to create two views, and adds a contrastive
+  loss that pulls the same node's embeddings in the two views together. This improves accuracy on sparse data and
+  long-tail items <Cite id="wu2021sgl" />.
+- **Social graphs.** DiffNet propagates influence through a user-user social graph alongside the interaction graph.
+- **Attribute graphs for cold start.** A graph over attributes (genres, brands, actors) gives embeddings to attributes;
+  a new item's embedding is aggregated from its attributes. See the <NoteLink to="cold-start-problem">cold-start
+  problem</NoteLink>.
+- **Web scale.** <NoteLink to="pinsage">PinSage</NoteLink> samples neighbourhoods by random walks to scale graph
+  convolutions to billions of nodes. Its successors at Pinterest are covered in
+  <NoteLink to="pinsage-family">the PinSage family</NoteLink>.
+
+## Pitfalls
+
+- **Over-smoothing.** Many layers mix every node with the whole graph, and embeddings become alike. Two to four layers
+  are typical.
+- **Full-graph propagation is expensive.** Each training step on the full graph touches every edge. Large graphs need
+  sampled neighbourhoods.
+- **Transductive by default.** Models built on ID embeddings cannot embed a node added after training without
+  retraining or an inductive design.

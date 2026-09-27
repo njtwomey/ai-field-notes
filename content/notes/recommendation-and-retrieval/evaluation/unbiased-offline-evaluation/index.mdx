@@ -1,0 +1,86 @@
+---
+title: Unbiased offline evaluation
+kind: concept
+summary: 'Metrics computed naively on logged interactions reward models that imitate the logging policy. Weighting each observed outcome by the inverse of its observation propensity gives an unbiased estimate of the metric over all user-item pairs.'
+tags: [recommender-systems, evaluation, bias, importance-sampling, worked-example]
+aliases: [counterfactual evaluation of recommenders, IPS-weighted metrics, propensity-weighted evaluation, unbiased evaluation, replay evaluation]
+requires: [recommendation-metrics, propensity-in-recommendation]
+partOf: [recommender-systems]
+related: [off-policy-evaluation, slate-off-policy-evaluation, logging-policies-and-propensities, beyond-accuracy-metrics, fairness-in-recommendation, ab-test]
+references: [schnabel2016treatments, li2011, dudik2011, swaminathan2015b]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Unbiased offline evaluation** estimates what a metric would be over all user–item pairs, or under a new policy, from
+interactions logged by an existing system. Each observed outcome is weighted by the inverse of the probability that it
+was observed, its propensity $P_{ui}$, so that under-observed pairs count for as much as they would in a complete
+dataset <Cite id="schnabel2016treatments" />.
+</Definition>
+
+## Why naive metrics mislead
+
+A metric computed on logged interactions averages only over what the logging system showed and users chose to rate or
+click. It is confounded by the same biases a debiased model tries to remove. Suppose a debiased model learns that a
+popular item, clicked at rank 1 in the logs, is not relevant to a particular user, and does not recommend it. Naive
+evaluation counts the logged click as a miss. The metric rewards imitating the old policy and penalises correcting it.
+
+## The estimator
+
+Let $\delta_{ui}$ be the loss or gain a metric assigns to the pair $(u, i)$ under the model being evaluated (a squared
+error, or a rank-discounted gain), and let $O_{ui} = 1$ if the outcome for the pair was observed. The target is the
+average over all $U \cdot M$ pairs,
+
+$$
+R = \frac{1}{UM}\sum_{u, i}\delta_{ui}.
+$$
+
+The naive estimate averages over observed pairs only, $\hat{R}_{\text{naive}} = \sum_{u,i}
+O_{ui}\delta_{ui}/\sum_{u,i}O_{ui}$. Its expectation weights each pair by its propensity $P_{ui} = P(O_{ui} = 1)$, which
+is not the target unless all propensities are equal. The inverse-propensity-scored estimate is
+
+$$
+\hat{R}_{\text{IPS}} = \frac{1}{UM}\sum_{u, i}\frac{O_{ui}}{P_{ui}}\delta_{ui}.
+$$
+
+Since $\expect[O_{ui}] = P_{ui}$, each term has expectation $\delta_{ui}$, and $\expect[\hat{R}_{\text{IPS}}] = R$
+whenever every $P_{ui} > 0$ <Cite id="schnabel2016treatments" />. The same weighting applies to ranking metrics such as
+precision at $k$ and DCG, and to evaluating a new policy from a log of an old one, where the weight becomes the ratio of
+the two policies' probabilities of the logged action; see <NoteLink to="off-policy-evaluation">off-policy
+evaluation</NoteLink>. Li et al.'s replay method, which keeps only logged rounds where a uniformly random logging policy
+chose what the new policy would have chosen, is the special case with equal propensities <Cite id="li2011" />.
+
+## Worked example
+
+Four items; the model's loss on each is $\delta = (0, 0, 1, 1)$: it is right on items 1 and 2 and wrong on items 3 and
+4. The true mean loss is $0.5$. The logging system shows the items with propensities $P = (0.9, 0.5, 0.2, 0.1)$, so the
+model is wrong exactly on the items users rarely see.
+
+- The naive estimate has expectation approximately $\frac{\sum_i P_i\delta_i}{\sum_i P_i} = \frac{0.2 + 0.1}{1.7} =
+  0.176$. The model looks three times better than it is.
+- The IPS estimate has expectation $\frac{1}{4}\sum_i P_i\frac{\delta_i}{P_i} = \frac{1}{4}(0 + 0 + 1 + 1) = 0.5$.
+
+The price is variance: a single observation of item 4 carries weight $1/0.1 = 10$. Clipping the weights or
+self-normalising them (dividing by $\sum O_{ui}/P_{ui}$ instead of $UM$) reduces the variance at the cost of some bias
+<Cite id="swaminathan2015b" />; doubly robust estimators add a model of the outcome <Cite id="dudik2011" />.
+
+## Holistic evaluation
+
+Debiasing aims at more than accuracy, so its evaluation must too.
+
+- **Diversity, novelty and serendipity** measure whether popularity bias was reduced. A successful debiased model
+  should improve them, often at a small cost in raw accuracy. See <NoteLink to="beyond-accuracy-metrics">beyond-accuracy
+  metrics</NoteLink>.
+- **Fairness metrics** measure disparities: demographic parity (equal rates of positive outcomes across groups), equal
+  opportunity (equal true-positive rates), and provider-side exposure (whether small sellers or niche artists get
+  exposure in line with relevance). See <NoteLink to="fairness-in-recommendation">fairness in recommendation</NoteLink>.
+
+## Pitfalls
+
+- **Wrong propensities.** Estimated propensities that are off by a factor bias the metric by that factor. Validate them
+  on randomised data where possible.
+- **No support.** Pairs never shown have propensity zero; no weighting can evaluate a model on them. The estimate covers
+  only what the logging policy could have shown.
+- **Offline is still not online.** Unbiased estimates of logged-outcome metrics do not capture novelty effects, feedback
+  loops or long-term retention. Confirm launch decisions with an <NoteLink to="ab-test">online experiment</NoteLink>.

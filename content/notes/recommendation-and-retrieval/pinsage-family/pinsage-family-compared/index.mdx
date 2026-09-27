@@ -1,0 +1,118 @@
+---
+title: The PinSage family compared
+kind: case-study
+summary: 'Seven Pinterest models side by side. Item side: PinSage (graph convolution), ItemSage (multi-modal transformer), OmniSage (graph transformer). User side: PinnerSage (clusters), PinnerFormer (daily transformer), TransAct (real-time, in the ranker), PinFM (pretrained).'
+tags: [recommender-systems, embeddings, user-modelling, pinterest, industry-systems]
+aliases: [Pinterest embedding models compared, PinSage vs PinnerFormer]
+requires: [pinsage-family]
+partOf: [pinsage-family]
+related: [pinsage, pinnersage, pinnerformer, itemsage, transact, omnisage, pinfm, graphsage, pixie-random-walk]
+references: [ying2018pinsage, pal2020pinnersage, pancha2022pinnerformer, baltescu2022itemsage, xia2023transact, badrinath2025omnisage, chen2025pinfm]
+status: draft
+updated: 2026-09-27
+---
+
+## At a glance
+
+Item and entity embeddings <Cite id="ying2018pinsage" /> <Cite id="baltescu2022itemsage" />
+<Cite id="badrinath2025omnisage" />:
+
+<SpecTable
+  columns={['PinSage', 'ItemSage', 'OmniSage']}
+  rows={{
+    Published: ['KDD 2018', 'KDD 2022', 'KDD 2025'],
+    Embeds: ['pins', 'shopping products', 'pins, boards and other entities'],
+    Inputs: ['visual and text features; pin–board graph', 'up to 20 image PinSage vectors, 12 text fields', 'image and text features; heterogeneous graph; user sequences'],
+    Neighbourhood: ['top T random-walk visits', 'none', 'top k per node type, random walk with restart'],
+    Aggregator: ['visit-weighted mean, 2 layers', '1-layer transformer over 32 inputs', 'transformer over neighbours ordered by proximity'],
+    Objective: ['max-margin, curriculum hard negatives', 'multi-task sampled softmax, logQ', 'entity–entity, entity–feature, user–entity contrastive'],
+    Output: ['1,024-d vector (reported models)', '256-d unit vector', 'unit vector per entity'],
+    Inference: ['MapReduce batch, under 24 h for 3B items', 'daily batch, one HNSW index', 'daily batch, 6B+ entities'],
+    'Graph size': ['3B nodes, 18B edges', '—', '5.6B nodes, 63.5B edges'],
+  }}
+/>
+
+User models <Cite id="pal2020pinnersage" /> <Cite id="pancha2022pinnerformer" /> <Cite id="xia2023transact" />
+<Cite id="chen2025pinfm" />:
+
+<SpecTable
+  columns={['PinnerSage', 'PinnerFormer', 'TransAct', 'PinFM']}
+  rows={{
+    Published: ['KDD 2020', 'KDD 2022', 'KDD 2023', 'RecSys 2025'],
+    'User is': ['set of medoid pins with importance', 'one 256-d vector', 'features inside the ranker, per candidate', 'module inside the ranker, per candidate'],
+    'Action input': ['PinSage of last 90 days of actions', 'PinSage and metadata of last 256 actions', 'PinSage and type of last 100 actions', 'item IDs, types and surfaces; 2 years'],
+    Model: ['Ward clustering, no training', 'causal pre-norm transformer', '2-layer transformer, early fusion', 'GPT-2-style decoder, 20B+ parameters'],
+    Objective: ['none (unsupervised clustering)', 'dense all-action sampled softmax', 'weighted multi-head cross-entropy', 'next-, multi- and future-token InfoNCE, then ranking loss'],
+    Refresh: ['daily batch plus online update', 'daily batch', 'every request', 'every request'],
+    'Sees candidate': ['no', 'no', 'yes (concatenated)', 'yes (appended)'],
+    'Main use': ['retrieval by ANN', 'ranking feature, retrieval', 'homefeed ranking', 'homefeed and related-items ranking'],
+  }}
+/>
+
+## Architecture
+
+The item-side models differ in how much structure they aggregate. PinSage is a graph convolutional network: two layers
+of a dense transform, a mean weighted by random-walk visit counts and a concatenation with the node's own vector
+<Cite id="ying2018pinsage" />. ItemSage aggregates no graph at all. It treats a product's image embeddings and text
+fields as a set of 32 tokens and reads them with one transformer layer through a `[CLS]` token
+<Cite id="baltescu2022itemsage" />. OmniSage combines the two ideas: it samples graph neighbourhoods as PinSage does, but
+reads the node's and neighbours' features with a transformer, as ItemSage reads a product's features
+<Cite id="badrinath2025omnisage" />.
+
+The user-side models differ in when they run and whether they see the candidate. PinnerSage and PinnerFormer run once a
+day and produce vectors that do not depend on the candidate; they can be looked up in a feature store or used as
+nearest-neighbour queries. TransAct and PinFM run inside the ranker for every candidate and attend to the user's actions
+together with the candidate's embedding, which is more accurate and far more expensive
+<Cite id="xia2023transact" /> <Cite id="chen2025pinfm" />.
+
+## Training
+
+- **PinSage.** Max-margin loss on pins engaged with in sequence; 500 shared random negatives per batch; hard negatives
+  ranked 2,000 to 5,000 by personalised PageRank, added one more per epoch.
+- **PinnerSage.** No training. Quality comes from the fixed PinSage embeddings, Ward's criterion and the threshold
+  $\alpha$.
+- **PinnerFormer.** Each sampled position predicts a random positive engagement from the next 28 days; mixed in-batch and
+  random negatives with a logQ correction.
+- **ItemSage.** Separate in-batch and random-negative softmax terms, with positives from four engagement types allocated
+  within each batch.
+- **TransAct.** Trained end to end with the ranker's weighted cross-entropy; a random time-window mask of up to 24 hours
+  in training.
+- **OmniSage.** Weighted sum of entity–entity, entity–feature and next- and future-entity contrastive losses.
+- **PinFM.** Pretrained with next-, multi- and future-token contrastive losses on two years of activity, then fine-tuned
+  with the ranker at about a tenth of its learning rate.
+
+## What is distinctive
+
+- **PinSage** made graph convolutions work on billions of nodes, with neighbourhood sampling, producer–consumer
+  minibatches and layer-wise MapReduce inference.
+- **PinnerSage** represents a user by as many vectors as the data supports, chosen as real pins so that results can be
+  cached by pin id.
+- **PinnerFormer** trains for a long horizon so that a daily embedding loses less to staleness.
+- **ItemSage** makes one embedding compatible with two frozen query spaces, so three surfaces share one index.
+- **TransAct** pairs a real-time sequence model with the daily PinnerFormer embedding in one ranker.
+- **OmniSage** trains graph embeddings end to end on user sequences as well as on graph and content signals.
+- **PinFM** transfers one pretrained sequence model to several rankers and serves it by deduplicating user histories.
+
+## Comparison
+
+Reported headline results are measured on different tasks, surfaces and baselines, so they cannot be ranked against each
+other.
+
+| model        | compared with                          | reported online effect                                             |
+| ------------ | -------------------------------------- | ------------------------------------------------------------------ |
+| PinSage      | annotation and visual embeddings       | repin rate +10% to +30% on homefeed                                |
+| PinnerSage   | single decay-average user embedding    | homefeed engagement volume +4%; shopping +20%                      |
+| PinnerFormer | aggregated PinnerSage in the ranker    | homefeed repins +7.5%; daily active users +0.4%                    |
+| ItemSage     | sum-pooling product embeddings         | clicks +11.34% on Home; GMV per user +6.85% on Closeup             |
+| TransAct     | ranker without real-time sequences     | homefeed repin volume +11.0%; hide volume −10.0%                   |
+| OmniSage     | PinSage in five applications           | sitewide repins about +2.5%                                        |
+| PinFM        | homefeed ranker without PinFM          | sitewide saves +1.20%; fresh saves +5.70%                          |
+
+Sources: <Cite id="ying2018pinsage" /> <Cite id="pal2020pinnersage" /> <Cite id="pancha2022pinnerformer" />
+<Cite id="baltescu2022itemsage" /> <Cite id="xia2023transact" /> <Cite id="badrinath2025omnisage" />
+<Cite id="chen2025pinfm" />.
+
+Two trends run through the table. Each user model is compared with its predecessor at Pinterest, so the chain
+decay average → PinnerSage → PinnerFormer, and PinnerFormer plus TransAct in the ranker, is a sequence of measured
+replacements. On the item side, PinSage embeddings were the reference that later models built on, from 2018 until
+OmniSage replaced them in production models in 2025.

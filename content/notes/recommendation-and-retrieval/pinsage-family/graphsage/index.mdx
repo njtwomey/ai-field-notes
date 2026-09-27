@@ -1,0 +1,136 @@
+---
+title: GraphSAGE
+kind: concept
+summary: 'GraphSAGE (NeurIPS 2017) learns functions that build a node''s embedding from its own features and an aggregate of a fixed-size sample of its neighbours, repeated for $K$ layers. It embeds nodes unseen in training, and each minibatch costs $O(\prod_k S_k)$ for sample sizes $S_k$.'
+tags: [graph-neural-networks, embeddings, deep-learning, inductive-learning, worked-example]
+aliases: [SAGE, sample and aggregate, inductive graph embedding, GraphSAGE-mean, GraphSAGE-pool, neighbourhood sampling]
+requires: [message-passing-neural-network]
+partOf: [pinsage-family]
+related: [graph-convolutional-network, graph-attention-network, pinsage, word-embeddings]
+references: [hamilton2017graphsage, ying2018pinsage, kipf2017, xu2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**GraphSAGE** ("sample and aggregate") computes an embedding $\zvec_v$ for a node $v$ of a graph from input features
+$\xvec_v$. It sets $\hvec_v^{(0)} = \xvec_v$ and, for $k = 1, \dots, K$,
+
+$$
+\hvec_{\Ncal(v)}^{(k)} = \mathrm{AGGREGATE}_k\paren{\set{\hvec_u^{(k-1)} : u \in \Ncal_k(v)}}, \qquad
+\hvec_v^{(k)} = \frac{\sigma\paren{\Wmat_k\,[\hvec_v^{(k-1)} \Vert \hvec_{\Ncal(v)}^{(k)}]}}
+{\norm{\sigma\paren{\Wmat_k\,[\hvec_v^{(k-1)} \Vert \hvec_{\Ncal(v)}^{(k)}]}}_2},
+$$
+
+with $\zvec_v = \hvec_v^{(K)}$. $\Ncal_k(v)$ is a fixed-size uniform sample of $v$'s neighbours drawn afresh at each
+layer, $[\cdot \Vert \cdot]$ is concatenation, $\sigma$ is a non-linearity, and the weights $\Wmat_k$ and the aggregator
+parameters are shared by all nodes <Cite id="hamilton2017graphsage" />.
+</Definition>
+
+## Intuition
+
+Earlier node-embedding methods such as DeepWalk learn one free vector per node. They are **transductive**: a node that
+was absent during training has no vector, and adding nodes requires more training. GraphSAGE is **inductive**. It learns
+the functions that turn a neighbourhood into a vector, not the vectors themselves. A new node with features and edges is
+embedded by running those functions <Cite id="hamilton2017graphsage" />.
+
+GraphSAGE is a <NoteLink to="message-passing-neural-network">message passing neural network</NoteLink> with two
+specific choices. The update concatenates the node's own vector with the neighbourhood aggregate before a dense layer,
+which acts as a skip connection between layers. The neighbourhood is a sample of fixed size, which bounds the cost of a
+minibatch.
+
+## Why sampling bounds the cost
+
+To compute $\zvec_v$ with $K$ layers, the model needs layer-$(K-1)$ vectors of $v$'s sampled neighbours, which need
+layer-$(K-2)$ vectors of their sampled neighbours, and so on. With $S_k$ samples at layer $k$, the tree of required
+nodes has at most $1 + S_K + S_K S_{K-1} + \dots + \prod_{k=1}^{K} S_k$ nodes. The last term dominates, so the cost per
+target node is $O(\prod_{k=1}^{K} S_k)$, whatever the graph's size or degree distribution. Without sampling, the
+neighbourhood of a single node can include a large fraction of the graph, and the paper notes that the worst-case cost
+of a batch is then $O(\abs{\Vcal})$ <Cite id="hamilton2017graphsage" />.
+
+The experiments use $K = 2$ with $S_1 = 25$ and $S_2 = 10$, so each target node needs at most $1 + 25 + 250 = 276$
+vectors. The authors found high performance with $K = 2$ and $S_1 S_2 \le 500$ <Cite id="hamilton2017graphsage" />.
+
+In the minibatch algorithm, the sampled sets are built from the targets outwards, and the layers are then computed from
+the outermost set inwards, computing only the vectors that the recursion needs <Cite id="hamilton2017graphsage" />.
+
+## Aggregators
+
+A node's neighbours have no order, so the aggregator should be symmetric: invariant to permutations of its inputs. The
+paper compares four <Cite id="hamilton2017graphsage" />.
+
+- **Mean.** The element-wise mean of $\set{\hvec_u^{(k-1)}}$.
+- **GCN.** Replace the concatenation and aggregation by
+  $\hvec_v^{(k)} = \sigma\paren{\Wmat \cdot \mathrm{MEAN}(\set{\hvec_v^{(k-1)}} \cup \set{\hvec_u^{(k-1)} : u \in \Ncal(v)})}$.
+  This is an inductive variant of the <NoteLink to="graph-convolutional-network">graph convolutional network</NoteLink>
+  propagation rule, which differs from Kipf and Welling's by a normalisation constant <Cite id="kipf2017" />.
+- **LSTM.** An LSTM run over a random permutation of the neighbours. It is more expressive but not symmetric.
+- **Pooling.** Each neighbour passes through a dense layer, then an element-wise maximum is taken:
+  $\max\set{\sigma(\Wmat_{\mathrm{pool}}\hvec_{u}^{(k-1)} + \bvec) : u \in \Ncal(v)}$. The authors found no significant
+  difference between max and mean at this step.
+
+The GCN aggregator lacks the concatenation. The paper reports that the concatenation, a skip connection between search
+depths, gives significant gains <Cite id="hamilton2017graphsage" />.
+
+## Worked example
+
+Take a node $v$ with $\hvec_v^{(0)} = (1, 0)$ and a sample of two neighbours with vectors $(0, 1)$ and $(1, 1)$. The
+mean aggregator gives $\hvec_{\Ncal(v)}^{(1)} = (0.5, 1)$. The concatenation is $(1, 0, 0.5, 1)$. Let
+$\Wmat_1 = \begin{pmatrix} 1 & 0 & 1 & 0 \\ 0 & 1 & 0 & 1 \end{pmatrix}$, which adds the node's vector to the aggregate,
+and let $\sigma$ be ReLU. Then $\sigma(\Wmat_1 [\cdot]) = (1.5, 1)$, with norm $\sqrt{1.5^2 + 1^2} \approx 1.803$. The
+layer-1 vector is $\hvec_v^{(1)} \approx (0.832, 0.555)$. A different uniform sample of neighbours would give a
+different aggregate, so the embedding is itself a random variable during training.
+
+## Training objectives
+
+Without labels, GraphSAGE applies a graph-based loss to the outputs $\zvec_u$ <Cite id="hamilton2017graphsage" />:
+
+$$
+J(\zvec_u) = -\log \sigma(\zvec_u\transpose\zvec_v) - Q \cdot \expect_{v_n \sim P_n}\log\sigma(-\zvec_u\transpose\zvec_{v_n}),
+$$
+
+where $v$ co-occurs with $u$ on a fixed-length random walk, $\sigma$ is the logistic function, $P_n$ is a negative
+sampling distribution and $Q$ is the number of negatives. The loss has the form of skip-gram with negative sampling used
+for <NoteLink to="word-embeddings">word embeddings</NoteLink>. The difference is that $\zvec_u$ is computed from $u$'s
+features and neighbourhood, not looked up in a table. With labels, the loss is replaced or augmented by a task loss
+such as cross-entropy.
+
+## Relation to the Weisfeiler–Lehman test
+
+With $K = \abs{\Vcal}$, identity weight matrices and a hash function as aggregator without non-linearity, the GraphSAGE
+forward pass is the Weisfeiler–Lehman vertex-refinement test for graph isomorphism. GraphSAGE replaces the hash by
+trainable aggregators, a continuous approximation of the test <Cite id="hamilton2017graphsage" />. Later work made the
+expressive power precise for sum aggregation <Cite id="xu2019" />.
+
+## Reported results
+
+The paper classifies unseen nodes in a citation graph and a Reddit post graph, and nodes of unseen protein–protein
+interaction graphs (PPI). Micro-averaged F1 scores with supervised training <Cite id="hamilton2017graphsage" />:
+
+| method           | citation | Reddit | PPI   |
+| ---------------- | -------- | ------ | ----- |
+| raw features     | 0.575    | 0.585  | 0.422 |
+| DeepWalk + features | 0.701 | 0.691  | —     |
+| GraphSAGE-GCN    | 0.772    | 0.930  | 0.500 |
+| GraphSAGE-mean   | 0.820    | 0.950  | 0.598 |
+| GraphSAGE-LSTM   | 0.832    | 0.954  | 0.612 |
+| GraphSAGE-pool   | 0.839    | 0.948  | 0.600 |
+
+Across the three domains the supervised models improved F1 by 51% on average over node features alone, and the
+proposed aggregators gained 7.4% on average over the GCN aggregator <Cite id="hamilton2017graphsage" />.
+
+## Role in the PinSage family
+
+<NoteLink to="pinsage">PinSage</NoteLink> is GraphSAGE adapted to Pinterest's pin–board graph. It keeps the
+per-node computation graph, shared weights and concatenation. It replaces uniform neighbour sampling by the top $T$
+nodes of random-walk visit counts and the mean or max aggregator by a mean weighted by those counts
+<Cite id="ying2018pinsage" />. The name "Sage" recurs in later Pinterest models that do not all use graphs.
+
+## Pitfalls
+
+- **Sampling adds variance.** Each forward pass sees a different neighbourhood, so training is noisier than with full
+  neighbourhoods.
+- **Uniform sampling ignores importance.** Every neighbour is equally likely to be sampled, whether it is strongly or
+  weakly connected. The paper lists non-uniform samplers as future work, which PinSage then supplied.
+- **The LSTM aggregator is order-dependent.** Random permutation hides the dependence in expectation but not in a
+  single pass.

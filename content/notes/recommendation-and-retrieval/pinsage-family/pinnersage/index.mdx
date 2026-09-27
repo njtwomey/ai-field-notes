@@ -1,0 +1,200 @@
+---
+title: PinnerSage
+kind: concept
+summary: 'PinnerSage (KDD 2020) represents a user by several embeddings instead of one. It clusters the PinSage embeddings of the user''s last 90 days of action pins with Ward''s method, represents each cluster by its medoid pin and scores each cluster by $\sum_i e^{-\lambda(T_{\mathrm{now}} - T_i)}$.'
+tags: [recommender-systems, embeddings, clustering, user-modelling, pinterest, worked-example]
+aliases: [multi-modal user embedding, multi-embedding user representation, medoid user embedding, cluster importance score]
+requires: [hierarchical-clustering, pinsage]
+partOf: [pinsage-family]
+related: [k-means, hnsw, two-tower-model, pinnerformer, approximate-nearest-neighbour-search]
+references: [pal2020pinnersage, ying2018pinsage, pancha2022pinnerformer, ward1963, lance1967, mullner2011]
+status: draft
+updated: 2026-09-27
+---
+
+import { WardMedoids } from './WardMedoids'
+
+<Definition>
+**PinnerSage** is Pinterest's user-representation system from 2020. It takes the pins a user saved or clicked in the
+last 90 days, each with a fixed PinSage embedding $\pvec_i \in \reals^{d}$ and an action time $T_i$. It clusters these
+embeddings with **Ward's hierarchical method** and a merge threshold $\alpha$. It represents each cluster $C$ by its
+**medoid**, the member minimising the summed squared distance to the other members, and gives the cluster an
+**importance** $\sum_{i \in C} e^{-\lambda (T_{\mathrm{now}} - T_i)}$. A user is the set of (medoid, importance) pairs,
+of any size. Recommendations come from nearest-neighbour search around a few medoids sampled by importance
+<Cite id="pal2020pinnersage" />.
+</Definition>
+
+## Why several embeddings
+
+A user who follows painting, shoes and science fiction has three unrelated interests. An item such as a pin usually has
+one. If the user is one vector in the pin embedding space, the vector must sit between the three interest regions, where
+the nearest pins may belong to none of them. The paper illustrates this with three pins whose merged embedding is
+closest to an unrelated concept <Cite id="pal2020pinnersage" />.
+
+The paper measures the effect on next-action prediction: a prediction counts as correct when the cosine similarity
+between the user representation and the next action pin exceeds 0.8. Relative to using the last pin, a time-decayed
+average of past pins improved accuracy by 25%. An oracle that picks, with knowledge of the next pin, the closest of 3
+k-means centroids improved it by 98%. An oracle that picks the closest past pin improved it by 140%
+<Cite id="pal2020pinnersage" />. Keeping several representatives recovers most of the gap to the oracle.
+
+PinnerSage also keeps pin embeddings fixed. It uses <NoteLink to="pinsage">PinSage</NoteLink> embeddings
+and does not learn user and pin embeddings jointly. The paper argues that joint training would pull a user's unrelated
+interests together in pin space <Cite id="pal2020pinnersage" />.
+
+## Step 1: Ward clustering
+
+Ward's method starts with every pin as its own cluster and repeatedly merges the pair of clusters whose merge increases
+the within-cluster sum of squares least <Cite id="ward1963" />. The number of clusters is not fixed. It follows from the
+threshold $\alpha$ on the merge distance, so a light user may get 3 to 5 clusters and a heavy user 75 to 100
+<Cite id="pal2020pinnersage" />.
+
+**The merge cost.** Let cluster $A$ have $n_A$ members and centroid $\avec$, and cluster $B$ have $n_B$ members and
+centroid $\bvec$. Write $\mathrm{ESS}(C) = \sum_{\xvec \in C} \norm{\xvec - \cvec_C}^2$ for the sum of squared distances
+to the centroid $\cvec_C$. The merged centroid is $\mvec = (n_A\avec + n_B\bvec)/(n_A + n_B)$. For any point $\mvec$,
+
+$$
+\sum_{\xvec \in A} \norm{\xvec - \mvec}^2 = \sum_{\xvec \in A} \norm{(\xvec - \avec) + (\avec - \mvec)}^2
+= \mathrm{ESS}(A) + n_A \norm{\avec - \mvec}^2,
+$$
+
+because the cross term $2(\avec - \mvec)\transpose \sum_{\xvec \in A}(\xvec - \avec)$ vanishes: deviations from a
+centroid sum to zero. The same holds for $B$. From the definition of $\mvec$,
+$\avec - \mvec = \frac{n_B}{n_A + n_B}(\avec - \bvec)$ and $\bvec - \mvec = \frac{n_A}{n_A + n_B}(\bvec - \avec)$.
+Adding the two identities,
+
+$$
+\Delta(A, B) = \mathrm{ESS}(A \cup B) - \mathrm{ESS}(A) - \mathrm{ESS}(B)
+= \frac{n_A n_B^2 + n_B n_A^2}{(n_A + n_B)^2}\norm{\avec - \bvec}^2
+= \frac{n_A n_B}{n_A + n_B}\norm{\avec - \bvec}^2.
+$$
+
+Ward's cost is the squared distance between centroids, scaled by a factor that grows with both sizes. Two large clusters
+must be much closer than two small ones before they merge, so the method prefers compact clusters of similar size. This
+matches PinnerSage's requirement that a cluster combine only conceptually similar pins.
+
+**Implementation.** PinnerSage initialises $d_{ij} = \norm{\pvec_i - \pvec_j}^2$ and, after merging $C_i$ and $C_j$,
+updates the distance to every other cluster $C_k$ with the Lance–Williams formula for Ward's method
+<Cite id="pal2020pinnersage" /> <Cite id="lance1967" />:
+
+$$
+d(C_i \cup C_j, C_k) = \frac{(n_i + n_k)\,d_{ik} + (n_j + n_k)\,d_{jk} - n_k\,d_{ij}}{n_i + n_j + n_k}.
+$$
+
+<Derivation title="The Lance–Williams update equals twice Ward's merge cost">
+Define $D(A, B) = 2\Delta(A, B) = \frac{2 n_A n_B}{n_A + n_B}\norm{\avec - \bvec}^2$. For two single points,
+$D = \norm{\xvec_i - \xvec_j}^2$, which is PinnerSage's initialisation. It remains to show that $D$ obeys the update.
+
+Let $K$ have $n_K$ members and centroid $\kvec$, and let $n = n_A + n_B$. The squared distance from $\kvec$ to the
+merged centroid $\mvec$ satisfies the weighted-variance identity
+
+$$
+\norm{\kvec - \mvec}^2 = \frac{n_A}{n}\norm{\kvec - \avec}^2 + \frac{n_B}{n}\norm{\kvec - \bvec}^2
+- \frac{n_A n_B}{n^2}\norm{\avec - \bvec}^2,
+$$
+
+which follows by expanding $\norm{\kvec - \mvec}^2$ with $\mvec = (n_A\avec + n_B\bvec)/n$. Substitute
+$\norm{\kvec - \avec}^2 = \frac{n_A + n_K}{2 n_A n_K} D(A, K)$, the matching expression for $B$, and
+$\norm{\avec - \bvec}^2 = \frac{n}{2 n_A n_B} D(A, B)$. Then
+
+$$
+D(A \cup B, K) = \frac{2 n n_K}{n + n_K}\norm{\kvec - \mvec}^2
+= \frac{(n_A + n_K) D(A, K) + (n_B + n_K) D(B, K) - n_K D(A, B)}{n_A + n_B + n_K}.
+$$
+
+The merge distances in PinnerSage are therefore $2\Delta$, twice the increase in the within-cluster sum of squares.
+</Derivation>
+
+**Cutting the tree.** The algorithm records every merge with its distance. It then walks the merge history from the
+largest distance down and keeps each merged cluster $C_i \cup C_j$ with $d_{ij} \le \alpha$ that is disjoint from the
+clusters already kept <Cite id="pal2020pinnersage" />. The result is the set of largest clusters formed below the
+threshold. As written, the procedure returns only merged clusters, so a pin whose first merge happens above $\alpha$
+belongs to none of them.
+
+**Cost.** PinnerSage finds merges with a stack: it follows each cluster to its nearest neighbour until two clusters are
+each other's nearest neighbours, then merges them. This is the nearest-neighbour-chain scheme, valid for Ward's method,
+and it runs in $O(m^2)$ time for $m$ action pins <Cite id="pal2020pinnersage" /> <Cite id="mullner2011" />.
+
+## Step 2: medoids
+
+Each cluster is represented by the member pin
+
+$$
+m(C) = \argmin_{m \in C} \sum_{j \in C} \norm{\pvec_m - \pvec_j}^2.
+$$
+
+A centroid can lie in a region that no action pin occupies, and an outlier in the cluster pulls it further away. A
+medoid is always one of the user's own pins. The system stores only the medoid's pin id, fetches its embedding from a
+key-value store, and caches nearest-neighbour results by pin id. A popular pin that is a medoid for many users is then
+searched once <Cite id="pal2020pinnersage" />.
+
+## Step 3: importance
+
+The importance of cluster $C$ is
+
+$$
+\mathrm{Importance}(C, \lambda) = \sum_{i \in C} e^{-\lambda (T_{\mathrm{now}} - T_i)},
+$$
+
+where $T_i$ is the time of the action on pin $i$. With $\lambda = 0$ it counts the cluster's pins, so it measures
+frequency. A larger $\lambda$ discounts old actions, so it measures recency. The paper found $\lambda = 0.01$ a good
+balance, with $\lambda = 0.1$ placing too much weight on recent interests <Cite id="pal2020pinnersage" />.
+
+**Worked example.** Take three one-dimensional action pins at $0$, $1$ and $5$. Ward merges $\set{0}$ and $\set{1}$ first,
+at $d = 1$. The update gives $d(\set{0, 1}, \set{5}) = (2 \cdot 25 + 2 \cdot 16 - 1)/3 = 27$. The merge-cost formula
+agrees: $2 \cdot \frac{2 \cdot 1}{3}(0.5 - 5)^2 = 27$. With $\alpha = 10$ the clusters are $\set{0, 1}$, and pin $5$
+joins none. With $\alpha = 30$ all three form one cluster. Its summed squared distances are 26 for pin 0, 17 for pin 1
+and 41 for pin 5, so the medoid is pin 1. The centroid is 2, a point that none of the actions occupies. If the pins
+were acted on 0, 10 and 100 days ago, the importance with $\lambda = 0.01$ is $1 + e^{-0.1} + e^{-1} \approx 2.27$.
+
+<WardMedoids />
+
+## Serving
+
+The system cannot query all of a user's medoids, for cost reasons and because the user would see too many topics at
+once. It samples at most 3 medoids per user with probability proportional to importance and retrieves each one's
+nearest pins from an <NoteLink to="approximate-nearest-neighbour-search">approximate nearest-neighbour</NoteLink> index
+<Cite id="pal2020pinnersage" />.
+
+- **Index.** <NoteLink to="hnsw">HNSW</NoteLink> performed best on cost, latency and recall among the schemes tried,
+  which included LSH Orthoplex and product quantisation.
+- **Index refinement.** Near-duplicate and low-quality pins are removed from the index.
+- **Two-pronged updates.** A daily batch job reclusters the last 90 days of actions on MapReduce and stores medoids and
+  importances in a key-value store. An online job updates clusters from the user's most recent 20 actions of the current
+  day, which the next batch run absorbs.
+
+The reported relative cost changes were $-60\%$ for replacing LSH Orthoplex by HNSW, $-50\%$ for index refinement and
+$-75\%$ for medoids instead of centroids <Cite id="pal2020pinnersage" />.
+
+## Reported results
+
+In A/B tests against a single decay-average embedding, PinnerSage raised engagement volume (repins and clicks) by 4% on
+homefeed and 20% on shopping, and engagement propensity by 2% and 8% <Cite id="pal2020pinnersage" />.
+
+Offline, each model's embeddings retrieve up to 400 candidates, and relevance is the share of future action pins with
+cosine similarity at least 0.8 to some candidate. Lifts over the last-pin model <Cite id="pal2020pinnersage" />:
+
+| model                                  | relevance | recall |
+| -------------------------------------- | --------- | ------ |
+| decay average ($\lambda = 0.01$)       | 28%       | 14%    |
+| sequence model (HierTCN)               | 31%       | 16%    |
+| PinnerSage, one sampled embedding      | 33%       | 18%    |
+| PinnerSage, k-means ($k = 5$)          | 91%       | 68%    |
+| PinnerSage, complete linkage           | 88%       | 65%    |
+| PinnerSage, centroid representative    | 105%      | 81%    |
+| PinnerSage, importance $\lambda = 0$   | 97%       | 72%    |
+| PinnerSage, importance $\lambda = 0.1$ | 94%       | 69%    |
+| PinnerSage (Ward, medoid, $\lambda = 0.01$) | 110% | 88%    |
+
+Ward beat k-means and complete linkage. Medoids matched a HierTCN sequence model as cluster representative (110% and
+88%) and were chosen because they are cheaper to store and cache <Cite id="pal2020pinnersage" />.
+
+## Pitfalls
+
+- **Many vectors are awkward as a ranking feature.** Storing 20 or more 256-dimensional embeddings per training row does
+  not scale for ranking models. Pinterest's ranking models used a weighted aggregate of the top PinnerSage embeddings,
+  which <NoteLink to="pinnerformer">PinnerFormer</NoteLink> later replaced with a single learned embedding
+  <Cite id="pancha2022pinnerformer" />.
+- **No learning.** Nothing in PinnerSage is trained on engagement. Its quality rests on the fixed pin embeddings and
+  the threshold $\alpha$.
+- **Threshold sensitivity.** $\alpha$ decides the number of interests. A low value fragments interests and drops stray
+  pins; a high value merges unrelated interests.

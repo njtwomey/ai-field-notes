@@ -1,0 +1,127 @@
+---
+title: Unbiased learning to rank
+kind: concept
+summary: 'Unbiased learning to rank trains rankers on biased click logs by weighting each click by the inverse of its examination propensity, $1/\pi(k)$. The weighted loss is an unbiased estimate of the loss on true relevance, at a cost in variance.'
+tags: [learning-to-rank, position-bias, causal-inference, importance-sampling, implicit-feedback, worked-example]
+aliases: [ULTR, counterfactual learning to rank, inverse propensity scoring for ranking, IPS for clicks, propensity-weighted ranking, clipped IPS, CIPS, dual learning algorithm, DLA]
+requires: [click-models, empirical-risk-minimisation, importance-sampling]
+partOf: [recommender-systems]
+related: [off-policy-evaluation, field-interactions-in-neural-ranking, ranking-losses, logging-policies-and-propensities, unbiased-offline-evaluation, causal-inference-from-observational-data]
+references: [joachims2017ultr, wang2016selection, wang2018position, ai2018dla, horvitz1952, swaminathan2015b, dudik2011, bottou2013]
+status: draft
+updated: 2026-09-27
+---
+
+import { IpsClicks } from './IpsClicks'
+
+<Definition>
+**Unbiased learning to rank** (ULTR) learns a ranking function $S$ from logged clicks by minimising an
+**inverse-propensity-scored** empirical risk,
+
+$$
+\hat{R}_{\text{IPS}}(S) = \frac{1}{N}\sum_{n=1}^{N}\sum_{d \,:\, c_{n,d} = 1}\frac{\ell\paren{S(x_n), d}}{\pi\paren{k_{n,d}}},
+$$
+
+where query $x_n$'s document $d$ was shown at rank $k_{n,d}$, $c_{n,d} = 1$ marks a click, $\ell(S(x_n), d)$ is the loss
+the new ranker $S$ incurs on $d$, and $\pi(k)$ is the probability that a user examines rank $k$. Under the examination
+hypothesis, $\hat{R}_{\text{IPS}}$ is an unbiased estimate of the risk that $S$ would have on true relevance labels
+<Cite id="joachims2017ultr" /> <Cite id="wang2016selection" />.
+</Definition>
+
+## A counterfactual question
+
+<NoteLink to="click-models">Click models</NoteLink> ask "what is the probability that this click means relevance?" and
+estimate relevance per query–document pair, which needs repeated impressions. ULTR asks a different question: what
+would the user have done under a different ranking? The ranking shown is a **treatment**, the click an **outcome**, and
+the log is observational data from a policy that assigns treatments in a biased way, putting what it already believes
+good at the top <Cite id="joachims2017ultr" />. The goal is to learn and evaluate a new
+policy from that log.
+
+The design is modular. A separately estimated examination model $\pi(k)$ re-weights the data, and any ranking model,
+such as a ranking SVM, LambdaMART or a neural network, is trained on the re-weighted data from query and document
+features. Relevance is never estimated per pair, so ULTR works when queries do not repeat, where click models fail.
+
+## Why the weighting is unbiased
+
+Standard <NoteLink to="empirical-risk-minimisation">empirical risk minimisation</NoteLink> would minimise the true risk
+$R(S) = \int\Delta(S(x) \mid x)\,dP(x)$, with $\Delta$ a loss computed from true relevance. Take losses that add up over
+relevant documents, $\Delta(S(x) \mid x) = \sum_{d} \text{rel}(x, d)\,\ell(S(x), d)$, as for the rank of relevant
+documents or DCG. Relevance is unobserved; clicks are.
+
+Assume the **examination hypothesis**: a document at rank $k$ is clicked if and only if it is examined and relevant, and
+examination depends only on the rank, $P(E = 1 \mid k) = \pi(k)$ <Cite id="richardson2007clicks" />. Then for a document
+of relevance $\text{rel}(x, d) \in \set{0, 1}$ shown at rank $k$,
+
+$$
+\expect\LB c_d\RB = \pi(k)\,\text{rel}(x, d).
+$$
+
+A click-based loss that counts each click once therefore estimates $\sum_d \pi(k_d)\,\text{rel}(x, d)\,\ell(S(x), d)$,
+which down-weights relevant documents that happened to be shown low. Dividing each click by its propensity undoes this:
+
+$$
+\expect\LB\sum_{d \,:\, c_d = 1}\frac{\ell(S(x), d)}{\pi(k_d)}\RB
+= \sum_d\frac{\expect[c_d]}{\pi(k_d)}\ell(S(x), d)
+= \sum_d \text{rel}(x, d)\,\ell(S(x), d) = \Delta(S(x) \mid x),
+$$
+
+provided $\pi(k_d) > 0$ for every relevant document. Averaging over queries, $\expect[\hat{R}_{\text{IPS}}(S)] = R(S)$.
+The loss $\ell(S(x), d)$ is evaluated at the new ranker's positions, but the weight uses the logged position, which is
+where the click was generated <Cite id="joachims2017ultr" />.
+
+This is the Horvitz–Thompson estimator of survey sampling: each sampled unit is weighted by the inverse of its
+inclusion probability <Cite id="horvitz1952" />. It is also <NoteLink to="importance-sampling">importance
+sampling</NoteLink>: data come from the logging distribution $\pi_0$ and the target is an expectation under another,
+$\expect_{\pi_t}[\ell] = \expect_{\pi_0}[(\pi_t/\pi_0)\ell]$, here with a target in which every document is examined.
+
+<IpsClicks />
+
+## The variance problem
+
+Unbiasedness has a price. For one relevant document at rank $k$ the weighted click $c/\pi(k)$ is $1/\pi(k)$ with
+probability $\pi(k)$ and 0 otherwise, so
+
+$$
+\var\LB\frac{c}{\pi(k)}\RB = \frac{\pi(k)}{\pi(k)^2} - 1 = \frac{1}{\pi(k)} - 1.
+$$
+
+The variance grows like $1/\pi$. A click at a rank examined with probability $0.001$ gets weight 1,000, and a single
+lucky click can dominate the risk estimate and its gradient. The further the new ranker
+moves documents from where the logging policy put them, the more the estimate relies on such rare events. The figure
+shows both effects: the naive click rate is biased by position, and the IPS estimate is correct on average but noisy for
+items usually shown low.
+
+Estimators trade some bias for variance:
+
+- **Clipped IPS** caps each weight at $\tau$: $\min\set{1/\pi(k), \tau}$. Variance falls; the estimate is biased because
+  the rarest, most informative clicks are down-weighted, and $\tau$ must be tuned <Cite id="bottou2013" />.
+- **Self-normalised IPS** divides by the sum of the weights instead of $N$. It is biased but consistent, and usually
+  more stable than IPS <Cite id="swaminathan2015b" />.
+- **Doubly robust** estimators add a model of the outcome and use the weights to correct its errors. They are unbiased
+  if either the propensities or the outcome model are correct <Cite id="dudik2011" />.
+
+These are the estimators of <NoteLink to="off-policy-evaluation">off-policy evaluation</NoteLink> applied to ranks.
+
+## Where the propensities come from
+
+Everything rests on knowing $\pi(k)$. The options are covered in <NoteLink to="propensity-in-recommendation">propensity
+in recommendation</NoteLink>: randomised swaps of results between ranks, the gold standard but costly; an EM algorithm
+that fits a position-based click model to logs <Cite id="wang2018position" />; or the dual learning algorithm, which
+learns the ranker and the propensity model jointly, each supplying the other's correction <Cite id="ai2018dla" />.
+
+## Assumptions
+
+- **Examination hypothesis.** Clicks factorise into examination by rank and relevance. Cascading behaviour, where
+  examination depends on the results above, violates it.
+- **Positivity.** Every relevant document has a positive probability of being examined at its logged rank. Documents
+  never shown get no weight at all, which is a selection problem IPS cannot fix.
+- **Correct propensities.** Errors in $\pi$ bias the estimate in proportion.
+
+## Pitfalls
+
+- **Weights that explode.** Deep ranks with tiny propensities make training unstable. Clip, normalise, or limit
+  training to ranks with enough examination.
+- **Clicks as negatives.** IPS corrects clicked (positive) documents. Unclicked documents are not evidence of
+  irrelevance, and treating them as negatives reintroduces bias.
+- **Evaluating on the biased log.** A debiased ranker scored with naive click metrics on the same log looks worse than
+  it is. See <NoteLink to="unbiased-offline-evaluation">unbiased offline evaluation</NoteLink>.

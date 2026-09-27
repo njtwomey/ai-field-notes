@@ -1,0 +1,75 @@
+---
+title: Content-based filtering
+kind: concept
+summary: 'Content-based filtering recommends items whose features resemble those of items the user liked. Items are embedded from their metadata (TF-IDF, text and image encoders, CLIP, categorical embeddings), so new items can be recommended at once; the cost is over-specialisation.'
+tags: [recommender-systems, cold-start, embeddings, content-features]
+aliases: [content-based recommendation, CBF, item profiling, content embeddings, multimodal item embeddings, categorical feature embedding]
+requires: [explicit-and-implicit-feedback]
+partOf: [recommender-systems]
+related: [tf-idf, sentence-embeddings, clip, neighbourhood-collaborative-filtering, llms-as-recommenders]
+references: [salton1988, devlin2019, radford2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Content-based filtering** builds a feature vector $\phi(i)$ for each item from its attributes (text, images,
+category, price) and a profile for each user from the items they liked, and recommends the items whose vectors are
+closest to the profile. It uses no other user's behaviour.
+</Definition>
+
+## Principle
+
+Collaborative filtering knows an item only by who interacted with it. Content-based filtering knows it by what it is.
+The shift is a change of philosophy: an item is no longer an abstract ID but the sum of its
+intrinsic characteristics, which lets knowledge transfer from known items to new ones.
+
+A simple user profile is the average of the vectors of the items the user liked, $\pvec_u =
+\frac{1}{\abs{\Ical_u}}\sum_{i \in \Ical_u}\phi(i)$, and items are ranked by cosine similarity with $\pvec_u$. Learned
+models instead fit a user-specific function of $\phi(i)$.
+
+## Item profiling
+
+The quality of the recommendations depends on the item vectors. Item representations have evolved in stages.
+
+- **Keywords.** <NoteLink to="tf-idf">TF-IDF</NoteLink> turns a description into a sparse vector that weights terms by
+  how distinctive they are <Cite id="salton1988" />.
+- **Text encoders.** Word embeddings averaged over a document, and then transformers such as BERT, give dense vectors in
+  which semantically similar descriptions are close, even without shared words <Cite id="devlin2019" />. See
+  <NoteLink to="sentence-embeddings">sentence embeddings</NoteLink>. Almost every new item has a title and a
+  description, so this covers item cold start broadly.
+- **Image encoders.** In fashion, furniture and media, appearance drives preference. Convolutional networks and vision
+  transformers pre-trained on large image collections embed texture, shape, colour and style.
+- **Cross-modal models.** <NoteLink to="clip">CLIP</NoteLink> embeds images and text in one space by contrastive
+  training on image-caption pairs <Cite id="radford2021" />. Items can then be searched by a description, and text and
+  image signals reinforce each other.
+
+## Categorical and binary attributes
+
+- **High-cardinality categories** such as brand or artist are mapped to integer indices and looked up in a trainable
+  embedding table. Training places categories liked by similar users close together.
+- **A binary flag** such as "on sale" can be a two-entry categorical embedding, which lets the model learn a rich
+  representation of the state, or a single 0/1 input concatenated with other numerical features, which treats it as a
+  linear signal.
+
+The final item vector is usually formed by concatenating the attribute embeddings and passing them through a dense
+layer that learns their interactions.
+
+## Strengths and weaknesses
+
+- **New items.** A vector exists the moment the item is added, which solves item cold start.
+- **Niche items.** An item liked by few users can still be recommended to a user whose profile matches it.
+- **Over-specialisation.** Recommendations stay close to what the user already consumed. The system cannot discover
+  that a science-fiction reader also enjoys a particular cookbook, which collaborative filtering could learn from other
+  users. Users stay trapped in their existing taste profiles.
+- **New users.** A user with no likes has no profile, so content-based filtering does not solve user cold start.
+
+<NoteLink to="hybrid-recommenders">Hybrid recommenders</NoteLink> combine content with collaborative signals to keep
+the strengths of both.
+
+## Pitfalls
+
+- **Features that do not reflect taste.** Two films by the same studio share metadata but not necessarily an audience.
+  Check that content similarity predicts co-consumption before relying on it.
+- **Mismatched spaces.** A pre-trained text encoder's notion of similarity is linguistic. Fine-tuning on interaction
+  data aligns it with users' notion.

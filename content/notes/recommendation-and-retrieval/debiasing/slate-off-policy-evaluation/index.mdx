@@ -1,0 +1,107 @@
+---
+title: Off-policy evaluation for slates
+kind: concept
+summary: 'A slate of $l$ items from $m$ has $m!/(m-l)!$ orderings, so slate-level IPS almost never has support, and items on a page affect each other. Practical estimators assume structure: independent item-position rewards, additive rewards or Markov interactions.'
+tags: [recommender-systems, off-policy-evaluation, bias, importance-sampling, worked-example]
+aliases: [slate recommendation, slate off-policy evaluation, independent IPS, IIPS, item-position IPS, pseudoinverse estimator, reward interaction IPS, RIPS, whole-page unbiased learning to rank, WP-ULTR]
+requires: [unbiased-learning-to-rank, off-policy-evaluation]
+partOf: [recommender-systems]
+related: [click-models, interference-and-cluster-randomisation]
+references: [swaminathan2017slate, li2018clickope, mcinerney2020rips, bottou2013, zou2022baiduultr]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **slate** is an ordered list $\svec = (s_1, \ldots, s_l)$ of $l$ items shown together, such as a carousel, a row of
+products or a playlist. **Off-policy evaluation for slates** estimates the expected reward a target policy $\pi$ would
+earn from logs of slates chosen by a logging policy $\pi_0$. Because the space of slates is combinatorial and items
+interact, it requires structural assumptions about how the slate's reward arises
+<Cite id="swaminathan2017slate" />.
+</Definition>
+
+## Why slate-level IPS fails
+
+The direct extension of <NoteLink to="off-policy-evaluation">inverse propensity scoring</NoteLink> weights each logged
+slate's reward by the ratio of its probabilities,
+
+$$
+\hat{V}_{\text{IPS}}(\pi) = \frac{1}{n}\sum_{t=1}^{n}\frac{\pi(\svec_t \mid x_t)}{\pi_0(\svec_t \mid x_t)}R_t.
+$$
+
+It is unbiased when $\pi_0$ gives positive probability to every slate $\pi$ might show. Two problems make it unusable.
+
+1. **Cardinality and support.** With $m$ items and slates of length $l$ there are $m!/(m - l)!$ ordered slates. For $m =
+   1{,}000$ and $l = 10$ that is about $9.6 \times 10^{29}$. A logging policy that spread probability evenly would give
+   each slate about $10^{-30}$. The slates a new policy proposes have almost surely never been logged, the weight is
+   undefined or astronomically large, and the estimate has no support <Cite id="bottou2013" />.
+2. **Interactions between items.** Causal estimators usually assume that one unit's outcome does not depend on other
+   units' treatments (the stable unit treatment value assumption). On a slate this fails: two similar items compete for
+   attention, and the order of songs changes how a playlist is enjoyed. The value of a slate is often more than the sum
+   of its parts, which is why slates are built at all.
+
+Research on slates is therefore a search for the right simplifying assumption about user behaviour. The more realistic
+the behavioural model, the higher the variance of the estimator it permits.
+
+## Structural assumptions
+
+**Independent item-position rewards (IIPS).** Assume the slate's reward is a sum of per-position rewards,
+$R = \sum_{k=1}^{l} r_k$, and that $r_k$ depends only on the item at position $k$, not on the rest of the slate. Then
+
+$$
+\expect_\pi[R] = \sum_{k=1}^{l}\sum_{a}\pi(s_k = a \mid x)\,\expect[r_k \mid s_k = a, x],
+$$
+
+which depends on the policy only through the marginal probabilities of each item at each position. Each position can be
+importance-weighted on its own:
+
+$$
+\hat{V}_{\text{IIPS}}(\pi) = \frac{1}{n}\sum_{t=1}^{n}\sum_{k=1}^{l}\frac{\pi(s_{t,k} \mid x_t)}{\pi_0(s_{t,k} \mid x_t)}\,r_{t,k},
+$$
+
+where $\pi(s_{t,k} \mid x_t)$ is the probability that $\pi$ puts the logged item at position $k$. The support problem
+shrinks from slates to item–position pairs, and the variance falls sharply. If items do interact, the estimator is
+biased, and the bias does not shrink with more data <Cite id="li2018clickope" />.
+
+**Additive rewards.** Swaminathan et al. assume only that the expected slate reward is a sum of unknown item–position
+contributions, and build a pseudoinverse estimator that is unbiased under that assumption with far less data than
+slate-level IPS <Cite id="swaminathan2017slate" />.
+
+**Sequential interactions (RIPS).** For slates consumed in order, such as playlists and video queues, assume a Markov
+structure: the reward at position $k$ depends on the item at $k$ and on the user's interaction at position $k - 1$.
+Reward interaction IPS uses nested expectations over the prefix of the slate to estimate each position's reward. It is
+asymptotically unbiased under the Markov assumption and has a better bias–variance trade-off than both slate-level IPS,
+which has too much variance, and IIPS, which has too much bias <Cite id="mcinerney2020rips" />.
+
+<NoteLink to="click-models">Click models</NoteLink> supply other structures: under a cascade model, for example, the
+reward at a position depends on the items above it only through whether the user reached it <Cite id="li2018clickope"
+/>.
+
+## Worked example
+
+A slate of $l = 2$ positions. In one logged round the logging policy put item $A$ first with probability 0.5 and item
+$B$ second with probability 0.2, and showed the slate $(A, B)$ with probability 0.1. The user clicked $A$ ($r_1 = 1$)
+and not $B$ ($r_2 = 0$). A target policy puts $A$ first with probability 0.9 and $B$ second with probability 0.1, and
+shows $(A, B)$ with probability 0.09.
+
+- Slate IPS: $\frac{0.09}{0.1}(1 + 0) = 0.9$.
+- IIPS: $\frac{0.9}{0.5} \cdot 1 + \frac{0.1}{0.2} \cdot 0 = 1.8$.
+
+The single round is too small to compare accuracy; the point is the weights. With 20 positions and thousands of items,
+slate probabilities multiply to numbers like $10^{-30}$, while each IIPS ratio stays a ratio of two ordinary
+probabilities.
+
+## Whole-page bias
+
+Bias on a page is not only vertical position. The type of content (image, video), the height of an element, the text of
+its snippet and the layout all affect attention. Whole-page unbiased learning to rank aims to correct for all
+presentation features at once. One approach learns the structure of a causal graph linking presentation features,
+relevance and clicks from data, then adjusts for every bias it finds. Large datasets with rich display features, such
+as Baidu-ULTR, make this line of research possible <Cite id="zou2022baiduultr" />.
+
+## Pitfalls
+
+- **Unverified independence.** IIPS looks precise because its variance is low. Its bias is invisible in the estimate
+  itself. Check the interaction assumption with a small randomised experiment.
+- **Logging marginals.** IIPS needs the logging policy's marginal probability of each item at each position. Log them,
+  or be able to recompute them, when slates are generated.

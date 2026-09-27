@@ -1,0 +1,100 @@
+---
+title: Popularity bias
+kind: concept
+summary: 'Popularity bias is the tendency of recommenders trained on logged interactions to over-recommend already popular items, which dominate the data. Causal methods such as PDA treat popularity as a confounder and remove its effect in training.'
+tags: [recommender-systems, bias, causal-inference, fairness, diversity]
+aliases: [popularity bias, long-tail problem, Matthew effect in recommendation, popularity-bias deconfounding and adjusting, PDA, MACR, model-agnostic counterfactual reasoning]
+requires: [biases-in-recommender-feedback, causal-inference-from-observational-data]
+partOf: [recommender-systems]
+related: [cold-start-problem]
+references: [zhang2021pda, wei2021macr, chen2023biassurvey]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Popularity bias** is the systematic over-recommendation of popular items relative to their relevance to individual
+users. Popular items receive more interactions, dominate the training data, and become a low-loss default for the model,
+while niche and new items are under-recommended even to users they would suit
+<Cite id="chen2023biassurvey" />.
+</Definition>
+
+## How it arises and grows
+
+A model that minimises loss on logged interactions learns that popular items are a safe prediction: they are relevant
+to many users, so ranking them high is rarely wrong. Popularity itself is partly produced by the recommender, since
+items it showed collected the interactions. Through the <NoteLink to="feedback-loops-in-recommendation">feedback
+loop</NoteLink> the popular become more popular, a Matthew effect, and the long tail becomes invisible. Users are pushed
+into mainstream filter bubbles; providers of niche items face an unequal field.
+
+Popularity bias sits at the start of a causal chain: **data bias → unfair models → non-diverse recommendations**. Biased
+data produce biased predictions; biased predictions allocate exposure unfairly across providers and user groups; unfair
+allocation shows the same popular items again and again. A responsible system acts on all three links: causal methods on
+the data, fairness-aware training on the model, and diversification on the output. See <NoteLink
+to="fairness-in-recommendation">fairness in recommendation</NoteLink> and <NoteLink
+to="diversified-re-ranking">diversified re-ranking</NoteLink>.
+
+## Popularity as a confounder
+
+Not all popularity is bias. Some items are popular because many people like them, and a recommender should use that. The
+bias is the part of popularity that reaches clicks through exposure rather than through preference. In a causal graph,
+item popularity $Z$ affects both which items are exposed and whether a user clicks, alongside the user–item match. A
+model fitted to $P(C \mid U, I)$ absorbs both paths. The interventional quantity $P(C \mid do(U, I))$ blocks the path
+through popularity. By the back-door adjustment (see <NoteLink to="causal-inference-from-observational-data">causal
+inference from observational data</NoteLink>),
+
+$$
+P(C \mid do(U, I)) = \sum_z P(C \mid U, I, z)\,P(z).
+$$
+
+## PDA: deconfound, then adjust
+
+Popularity-bias Deconfounding and Adjusting (PDA) makes this concrete <Cite id="zhang2021pda" />.
+
+**Training.** Model the click probability as a product of a user–item match $f_\theta(u, i) > 0$ and a popularity term,
+
+$$
+P(C = 1 \mid u, i, m_i) \propto f_\theta(u, i)\cdot m_i^{\gamma},
+$$
+
+where $m_i$ is item $i$'s recent popularity and $\gamma \ge 0$ is learned. The popularity term explains the clicks that
+popularity causes, so $f_\theta$ need not.
+
+**Deconfounded ranking.** Substituting into the back-door formula,
+
+$$
+P(C = 1 \mid do(u, i)) \propto \sum_z f_\theta(u, i)\,z^{\gamma}P(z) = f_\theta(u, i)\sum_z z^{\gamma}P(z) \propto f_\theta(u, i),
+$$
+
+because the sum over $z$ does not depend on $(u, i)$. Ranking by $f_\theta$ alone removes the popularity effect.
+
+**Adjusting.** Removing all popularity discards useful information, for example that an item is trending. PDA can
+re-introduce a controlled amount at inference, ranking by $f_\theta(u, i)\,\tilde{m}_i^{\tilde\gamma}$ with
+$\tilde{m}_i$ a forecast of the item's future popularity and $\tilde\gamma$ chosen by the operator. This balances
+relevance against discovery.
+
+## Counterfactual inference
+
+MACR asks what a prediction would be if only item and user conformity acted, with no user–item match. It trains a
+matching branch together with an item branch and a user branch whose outputs multiply the match score. At inference it
+subtracts the counterfactual score, in which the match is fixed to a reference value, from the full score, leaving the
+part due to the match. The method is model-agnostic: any recommender can supply the matching branch
+<Cite id="wei2021macr" />.
+
+## Measuring it
+
+- **Popularity of recommendations.** The mean popularity of recommended items against that of items users actually
+  consume.
+- **Exposure concentration.** Gini or Herfindahl indices of exposure across items, and catalogue coverage. See
+  <NoteLink to="beyond-accuracy-metrics">beyond-accuracy metrics</NoteLink>.
+- **Accuracy by popularity bucket.** Accuracy on tail items separately from head items.
+
+## Pitfalls
+
+- **Debiasing to zero popularity.** Recommending obscure items at random hurts accuracy and trust. The aim is to remove
+  the popularity caused by exposure, not to penalise popularity itself.
+- **Evaluating on biased logs.** A debiased model looks worse on logged clicks, which favour popular items. Use
+  <NoteLink to="unbiased-offline-evaluation">unbiased offline evaluation</NoteLink> or an online test.
+- **Experiments can reward the bias.** An A/B test on click-through rate can favour a model that finds popular items
+  better. See <NoteLink to="experimentation-biases-in-recommendation">experimentation biases in
+  recommendation</NoteLink>.

@@ -1,0 +1,122 @@
+---
+title: Progress and baselines in recommendation research
+kind: concept
+summary: 'Ferrari Dacrema et al. could reproduce only 7 of 18 neural top-$n$ recommenders, and 6 of the 7 were often beaten by simple nearest-neighbour or graph baselines. Untuned baselines, inconsistent splits and sampled metrics can manufacture progress.'
+tags: [recommender-systems, reproducibility, evaluation, methodology, worked-example]
+aliases: [are we really making much progress, reproducibility crisis in recommender systems, weak baselines, baseline tuning, sampled metrics, sampled evaluation, phantom progress]
+requires: [recommendation-metrics]
+partOf: [recommender-systems]
+related: [matrix-factorisation-for-recommendation, two-tower-model, hit-rate-and-r-precision, roc-curve-and-auc, hyperparameter-search]
+references: [dacrema2019, dacrema2021troubling, rendle2020ncf, krichene2020sampled, klenitskiy2023]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Progress** in recommendation research is a claim that a new method beats existing ones. The claim holds only if the
+comparison is fair: baselines implemented well and tuned with the same effort as the new method, on the same data
+splits, preprocessing and metrics. Ferrari Dacrema, Cremonesi and Jannach found that this condition often failed for
+neural recommenders published at leading conferences, so that much apparent progress was not real
+<Cite id="dacrema2019" />.
+</Definition>
+
+## The 2019 study
+
+Ferrari Dacrema et al. considered 18 neural algorithms for top-$n$ recommendation presented at top-level research
+conferences (KDD, SIGIR, WWW, RecSys) and tried to reproduce each from its paper and published artefacts. From their
+abstract <Cite id="dacrema2019" />:
+
+- "Only 7 of them could be reproduced with reasonable effort."
+- "6 of them can often be outperformed with comparably simple heuristic methods, e.g., based on nearest-neighbor or
+  graph-based techniques."
+- "The remaining one clearly outperformed the baselines but did not consistently outperform a well-tuned non-neural
+  linear ranking method."
+
+The simple methods were item-based and user-based <NoteLink to="neighbourhood-collaborative-filtering">nearest-neighbour
+collaborative filtering</NoteLink>, graph-based random walks, and well-tuned
+<NoteLink to="matrix-factorisation-for-recommendation">matrix factorisation</NoteLink> and linear models. 
+
+**The extended study.** In ACM Transactions on Information Systems (2021) the same group, with Boglio, widened the
+analysis to neural collaborative filtering papers published between 2015 and 2018. They report that "11 out of the 12
+reproducible neural approaches can be outperformed by conceptually simple methods" and that none "was actually
+consistently better than already existing learning-based techniques, e.g., using matrix factorization or linear models"
+<Cite id="dacrema2021troubling" />.
+
+## How illusory progress arises
+
+The studies identify the following mechanisms <Cite id="dacrema2019" />.
+
+1. **Weak or untuned baselines.** The new method is tuned extensively; baselines run with default or copied
+   hyperparameters, or in a weak implementation. The gap then measures tuning effort, not ideas.
+2. **Missing hyperparameter search.** Papers often do not report how hyperparameters were chosen or searched, so
+   neither the result nor the baseline can be reproduced.
+3. **Inconsistent preprocessing and splits.** The same dataset is filtered with different minimum-interaction
+   thresholds and split differently (random, leave-one-out, by time) across papers. Numbers cannot be compared across
+   papers, and each paper can choose a favourable protocol.
+4. **Selective reporting.** Results appear only for the datasets and metrics on which the method wins.
+5. **Unavailable code.** Without code and configurations, a method cannot be checked or built upon.
+6. **Sampled metrics.** Ranking the held-out item among a small random sample of items, instead of the whole catalogue,
+   can reverse which method looks better (below).
+
+## Sampled metrics
+
+To save computation, many papers ranked each held-out item against $m = 100$ sampled items and reported hit rate or
+NDCG on that list of $m + 1$. Krichene and Rendle showed that "sampled metrics are inconsistent with their exact
+version" and "do not persist relative statements, e.g., 'algorithm A is better than B', not even in expectation"
+<Cite id="krichene2020sampled" />.
+
+**Why.** Suppose the held-out item has rank $R$ among all $M$ items, so $R - 1$ items score above it. The sampled
+metric sees only $m$ random items out of the other $M - 1$. The number of them that outrank the held-out item follows a
+hypergeometric distribution. The item is at the top of the sampled list when none of the $R - 1$ higher items is drawn:
+
+$$
+P(\text{sampled rank} = 1) = \binom{M - R}{m}\Big/\binom{M - 1}{m}.
+$$
+
+With $m = 1$ this is $(M - R)/(M - 1)$, the fraction of other items ranked below the held-out one. Averaged over test
+cases, sampled hit rate at 1 with one negative is the <NoteLink to="roc-curve-and-auc">AUC</NoteLink>. As $m$ shrinks,
+every top-heavy metric collapses towards AUC, which weighs an error at rank 500 almost as much as one at rank 5
+<Cite id="krichene2020sampled" />.
+
+**Worked example.** Take $M = 10{,}000$ items and $m = 100$ sampled negatives, and compute hit rate at 10 (see
+<NoteLink to="hit-rate-and-r-precision">hit rate</NoteLink>). A held-out item counts as a hit on the sampled list when
+fewer than 10 of the 100 sampled items outrank it. The probability of that is
+
+| true rank $R$ | full hit rate at 10 | sampled hit rate at 10 |
+| ------------- | ------------------- | ---------------------- |
+| 10            | 1                   | 1.000                  |
+| 100           | 0                   | 1.000                  |
+| 500           | 0                   | 0.973                  |
+| 1,000         | 0                   | 0.452                  |
+
+A model that puts held-out items around rank 500 scores almost perfectly on the sampled metric and zero on the full
+one. A model that places some items at rank 1 and others at rank 2,000 can look worse on the sampled metric while being
+far more useful.
+
+## Follow-ups on specific claims
+
+- **Dot product versus MLP.** Rendle et al. revisited the experiments of
+  <NoteLink to="neural-collaborative-filtering">neural collaborative filtering</NoteLink>. With proper hyperparameter
+  selection, "a simple dot product substantially outperforms the proposed learned similarities"; learning a dot product
+  with an MLP is "non-trivial"; and MLP similarities are too costly for retrieval, where dot products allow fast
+  maximum-inner-product search <Cite id="rendle2020ncf" />. This is why the <NoteLink to="two-tower-model">two-tower
+  model</NoteLink> keeps the dot product.
+- **Loss versus architecture.** The advantage reported for <NoteLink to="bert4rec">BERT4Rec</NoteLink> over
+  <NoteLink to="sasrec">SASRec</NoteLink> disappears when both use the same loss <Cite id="klenitskiy2023" />.
+
+## Evaluating a new recommender
+
+1. **Include simple baselines.** Popularity, item-kNN, a tuned matrix factorisation and a linear model
+   are cheap and often strong.
+2. **Tune every method equally.** Give each the same hyperparameter search budget on the same validation data, and
+   report the search spaces. See <NoteLink to="hyperparameter-search">hyperparameter search</NoteLink>.
+3. **Fix and document the protocol.** State filtering thresholds, the split (prefer a split by time, which matches
+   deployment), and the candidate set for ranking metrics.
+4. **Use full-catalogue metrics.** If sampling is unavoidable, use corrected estimators and say so.
+5. **Report everything.** All datasets and metrics considered, including losses, with variability across seeds.
+6. **Release code and configurations.**
+7. **Remember that offline is not online.** Even a fair offline comparison uses data logged by another policy. See
+   <NoteLink to="unbiased-offline-evaluation">unbiased offline evaluation</NoteLink> and confirm with an
+   <NoteLink to="ab-test">online experiment</NoteLink>.
+
+These findings do not invalidate neural approaches. They show that genuine progress needs rigorous evaluation.

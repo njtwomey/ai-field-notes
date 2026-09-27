@@ -1,0 +1,73 @@
+---
+title: Hybrid recommenders
+kind: concept
+summary: 'A hybrid recommender combines collaborative and content signals. In LightFM each user and item embedding is the sum of its features'' embeddings, including its ID, so a new item gets a vector from its tags at once and an established one behaves like MF.'
+tags: [recommender-systems, cold-start, embeddings, matrix-factorisation, worked-example]
+aliases: [hybrid recommendation, LightFM, feature-sum embeddings, hybrid matrix factorisation]
+requires: [matrix-factorisation-for-recommendation, content-based-filtering]
+partOf: [recommender-systems]
+related: [two-tower-model, neighbourhood-collaborative-filtering]
+references: [kula2015lightfm]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **hybrid recommender** uses both collaborative signals (who interacted with what) and content signals (what users and
+items are). In **LightFM**, a user $u$ with feature set $\Fcal_u$ and an item $i$ with feature set $\Fcal_i$ have
+embeddings
+
+$$
+\qvec_u = \sum_{j \in \Fcal_u}\evec_j^{U}, \qquad \pvec_i = \sum_{j \in \Fcal_i}\evec_j^{I},
+$$
+
+the sums of learned embeddings of their features, and the score is
+$\hat{y}_{ui} = \sigma(\qvec_u\transpose\pvec_i + b_u + b_i)$ with biases also summed over features. An entity's own ID is one of its features <Cite id="kula2015lightfm" />.
+</Definition>
+
+## Why combine
+
+Collaborative filtering captures taste patterns no metadata describes, and fails for entities with no history.
+<NoteLink to="content-based-filtering">Content-based filtering</NoteLink> works from the first moment and
+over-specialises, missing the serendipity that comes from other users' behaviour. A hybrid aims for the accuracy of the
+first with the robustness of the second, including under cold start.
+
+## How LightFM handles cold start
+
+- **A new item** has an ID whose embedding was never trained. Its other features, such as tags and categories, have
+  embeddings learned from every other item that shares them. Summing those gives a vector at once.
+- **A new user** is embedded from demographic or sign-up features in the same way.
+- **An established entity** has a well-trained ID embedding, which dominates the sum. With only ID features, LightFM is
+  <NoteLink to="matrix-factorisation-for-recommendation">matrix factorisation</NoteLink>.
+
+The model moves smoothly between the two regimes: with abundant interactions it behaves like collaborative filtering,
+with sparse data it relies on shared feature embeddings. Feature embeddings also place
+similar features close together, so "sci-fi" and "cyberpunk" end up near each other if the same users like them
+<Cite id="kula2015lightfm" />.
+
+## Worked example
+
+Two-dimensional embeddings have been learned for tags: $\evec_{\text{sci-fi}} = (0.8, 0.1)$,
+$\evec_{\text{1980s}} = (0.1, 0.5)$, $\evec_{\text{romance}} = (-0.6, 0.3)$ and $\evec_{\text{2010s}} = (0, -0.2)$. A
+user's vector is $\qvec_u = (1, 0.2)$. Two new films arrive with no interactions; their ID embeddings are untrained and
+set to zero.
+
+- Film A, tagged sci-fi and 1980s: $\pvec_A = (0.9, 0.6)$ and $\qvec_u\transpose\pvec_A = 0.9 + 0.12 = 1.02$.
+- Film B, tagged romance and 2010s: $\pvec_B = (-0.6, 0.1)$ and $\qvec_u\transpose\pvec_B = -0.6 + 0.02 = -0.58$.
+
+The model ranks A above B for this user before anyone has watched either. As interactions for A arrive, its ID embedding
+is trained and $\pvec_A$ moves to reflect how users actually respond to it.
+
+## Relation to other models
+
+- A <NoteLink to="factorisation-machines">factorisation machine</NoteLink> with user and item feature blocks also
+  learns an embedding per feature. It scores all pairwise interactions, including within the user side; LightFM sums
+  first and takes one inner product.
+- A <NoteLink to="two-tower-model">two-tower model</NoteLink> generalises the sum to a neural network per side.
+
+## Pitfalls
+
+- **Uninformative features.** If features do not predict taste, cold-start vectors are no better than random.
+- **ID features swamp content.** With many interactions the ID embedding absorbs everything and the content embeddings
+  receive little gradient from those items. Regularise ID embeddings more strongly, or drop them, if cold-start quality
+  matters most.

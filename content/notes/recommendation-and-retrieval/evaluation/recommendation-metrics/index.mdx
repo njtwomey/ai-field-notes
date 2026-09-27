@@ -1,0 +1,113 @@
+---
+title: Metrics for recommendation and retrieval
+kind: concept
+summary: 'Recommenders are evaluated offline with ranking metrics (precision and recall at $k$, hit rate, MAP, MRR, NDCG, ERR) and beyond-accuracy metrics, and online with business metrics such as click-through, conversion and retention.'
+tags: [recommender-systems, metrics, ranking, evaluation, worked-example]
+aliases: [recommender evaluation metrics, ranking metrics, expected reciprocal rank, ERR, alpha-NDCG, offline and online evaluation, CTR]
+requires: [explicit-and-implicit-feedback]
+partOf: [recommender-systems]
+related: [precision-and-recall-at-k, hit-rate-and-r-precision, mean-average-precision-and-mrr, ndcg, calibration-error, overall-evaluation-criterion, click-models]
+references: [herlocker2004evaluating, jarvelin2002, chapelle2009err, clarke2008novelty]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For a request $q$ (a query or a user), let $R_q = (d_1, \ldots, d_k)$ be the top $k$ items a system returns, let
+$\text{rel}(d) \in \set{0, 1, \ldots}$ be an item's graded relevance, and let $G_q$ be the set of all relevant items. A
+**ranking metric** is a function of the relevances along $R_q$, averaged over requests $q \in Q$. Recommenders are also
+judged by properties of the lists (diversity, coverage, novelty) and by the behaviour they cause (clicks, purchases,
+retention) <Cite id="herlocker2004evaluating" />.
+</Definition>
+
+## Binary-relevance metrics
+
+Each is written with the indicator $\indicator[\cdot]$.
+
+- **Precision at $k$**, $\frac{1}{k}\sum_{i=1}^{k}\indicator[d_i \in G_q]$: how clean the top of the list is. Blind to
+  relevant items it missed. See <NoteLink to="precision-and-recall-at-k">precision and recall at k</NoteLink>.
+- **Recall at $k$**, $\frac{1}{\abs{G_q}}\sum_{i=1}^{k}\indicator[d_i \in G_q]$: how much of what is relevant was found.
+  Blind to order within the top $k$.
+- **Hit rate at $k$**, $\indicator[\exists i \le k : d_i \in G_q]$: whether anything useful appeared. Suits tasks where
+  one good item suffices. See <NoteLink to="hit-rate-and-r-precision">hit rate</NoteLink>.
+- **Average precision**, $\text{AP}(q) = \frac{1}{\abs{G_q}}\sum_i \text{Precision@}i \cdot \indicator[d_i \in G_q]$,
+  and its mean over requests, MAP: rewards placing all relevant items early. See <NoteLink
+  to="mean-average-precision-and-mrr">MAP and MRR</NoteLink>.
+- **Mean reciprocal rank**, the average of $1/\min\set{i : d_i \in G_q}$: how far a user must read to find the first
+  useful item. Ignores everything after it.
+
+## Graded-relevance metrics
+
+- **NDCG at $k$.** $\text{DCG@}k = \sum_{i=1}^{k}(2^{\text{rel}(d_i)} - 1)/\log_2(i + 1)$ rewards relevant items and
+  discounts them by position; dividing by the DCG of the ideal ordering gives a value in $[0, 1]$. The step from rank 1
+  to 2 matters more than from 20 to 21 <Cite id="jarvelin2002" />. See <NoteLink to="ndcg">NDCG</NoteLink>.
+- **Expected reciprocal rank.** ERR models a user who reads down the list and stops when satisfied. Map each grade to a
+  probability of satisfaction, $R_i = (2^{\text{rel}(d_i)} - 1)/2^{g_{\max}}$ with $g_{\max}$ the highest grade. The
+  user stops at rank $r$ if the item there satisfies them and none above did, which happens with probability
+  $R_r\prod_{j<r}(1 - R_j)$. This is the <NoteLink to="click-models">cascade model</NoteLink>. ERR is the expected
+  reciprocal of the stopping rank:
+  $$
+  \text{ERR@}k = \sum_{r=1}^{k}\frac{1}{r}R_r\prod_{j=1}^{r-1}\paren{1 - R_j}.
+  $$
+  A highly relevant item at the top makes later items count for little, because the user has probably stopped
+  <Cite id="chapelle2009err" />. Its weakness is that it depends on the assumed stopping model.
+- **$\alpha$-NDCG.** For ambiguous requests with several intents ("jaguar" the animal or the car), the gain of an item
+  for an intent is discounted by $(1 - \alpha)$ for each earlier item that already covered that intent. Lists that cover
+  several intents score higher. It needs intent annotations <Cite id="clarke2008novelty" />.
+
+## Worked example
+
+A system returns five items with grades $(3, 0, 2, 0, 1)$. One more relevant item, of grade 1, was not returned, so
+$\abs{G_q} = 4$.
+
+- Precision@5 $= 3/5 = 0.6$; recall@5 $= 3/4 = 0.75$; hit rate@5 $= 1$; reciprocal rank $= 1$.
+- AP $= (1 + 2/3 + 3/5)/4 = 0.567$.
+- DCG@5 $= 7/1 + 3/\log_2 4 + 1/\log_2 6 = 7 + 1.5 + 0.387 = 8.887$. The ideal top five among all relevant items has
+  grades $(3, 2, 1, 1, 0)$ and DCG $= 7 + 3/\log_2 3 + 1/2 + 1/\log_2 5 = 9.823$, so NDCG@5 $= 0.905$.
+- With $g_{\max} = 3$, $R = (0.875, 0, 0.375, 0, 0.125)$ and
+  ERR@5 $= 0.875 + \frac{1}{3}(0.125)(0.375) + \frac{1}{5}(0.125)(0.625)(0.125) = 0.893$.
+
+ERR is dominated by the grade-3 item at rank 1; NDCG still credits the items below it.
+
+## Beyond accuracy
+
+Diversity within a list, coverage of the catalogue, concentration of exposure, novelty and serendipity measure what
+ranking metrics ignore. They have their own note: <NoteLink to="beyond-accuracy-metrics">beyond-accuracy
+metrics</NoteLink>.
+
+## Business and behavioural metrics
+
+The main online measures are these.
+
+- **Click-through rate**, clicks per impression: immediate engagement and the default online metric. Optimising it alone
+  invites clickbait.
+- **Conversion rate**, purchases per impression: closer to business value, blind to long-term retention.
+- **Session metrics:** dwell time, skips, playlist depth, session length. A long dwell can mean engagement or struggle.
+- **Retention:** whether users come back. The measure of long-term satisfaction.
+- **Revenue metrics:** average order value, lifetime value, revenue per impression. Primary business outcomes, which
+  must be balanced against fairness and diversity.
+
+Choosing among them for a launch decision is the problem of the <NoteLink to="overall-evaluation-criterion">overall
+evaluation criterion</NoteLink>.
+
+## Fairness and safety
+
+- **Exposure fairness.** Items, providers or groups get visibility in proportion to relevance. See
+  <NoteLink to="fairness-in-recommendation">fairness in recommendation</NoteLink>.
+- **Calibration.** Predicted engagement probabilities match observed frequencies: of items scored 0.7, about 70% are
+  clicked. See <NoteLink to="calibration-error">calibration error</NoteLink>.
+- **Bias metrics.** Popularity bias (over-promotion of popular items) and under-service of demographic groups.
+
+## Offline and online
+
+Offline metrics are reproducible and cheap, and they are computed on logs produced by another policy. Online experiments
+measure real impact, slowly and at a cost. Counterfactual estimators such as inverse propensity scoring and doubly
+robust methods sit between the two: they correct logged data towards what a new policy would have achieved. See
+<NoteLink to="unbiased-offline-evaluation">unbiased offline evaluation</NoteLink>. For generated recommendations and
+explanations, where list metrics do not apply, see <NoteLink to="llm-as-a-judge">LLM as a judge</NoteLink>.
+
+## Pitfalls
+
+- **Sampled candidates.** Ranking a held-out item among a hundred random items instead of the catalogue can reverse
+  comparisons. See <NoteLink to="progress-and-baselines-in-recommendation">progress and baselines</NoteLink>.
+- **One metric.** Each metric encodes a model of the user. Report several, and choose the primary one for the task.

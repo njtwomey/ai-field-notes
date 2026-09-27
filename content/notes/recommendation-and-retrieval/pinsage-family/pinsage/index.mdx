@@ -1,0 +1,228 @@
+---
+title: 'PinSage: sampling, pooling and training'
+kind: concept
+summary: 'PinSage (KDD 2018) embeds pins from content features and a pin-board graph of 3 billion nodes. Each node''s neighbourhood is the top $T$ nodes by random-walk visits, pooled with weights proportional to the visits; training uses a max-margin loss with curriculum hard negatives.'
+tags: [recommender-systems, graph-neural-networks, embeddings, systems, pinterest, worked-example]
+aliases: [PinSage convolve, random-walk neighbourhood sampling, curriculum hard negatives, producer-consumer minibatches, PinSage MapReduce inference]
+requires: [graphsage, graph-convolutional-network]
+partOf: [pinsage-family]
+related: [pixie-random-walk, triplet-and-margin-losses, markov-chain, locality-sensitive-hashing, approximate-nearest-neighbour-search]
+references: [ying2018pinsage, hamilton2017graphsage, eksombatchai2018pixie, bengio2009curriculum]
+status: draft
+updated: 2026-09-27
+---
+
+import { NeighbourhoodSampling } from './NeighbourhoodSampling'
+import { ConvolveDiagram } from './ConvolveDiagram'
+
+<Definition>
+**PinSage** is a graph convolutional network that computes an embedding $\zvec_u \in \reals^{d}$ for every node $u$ of
+a bipartite graph of pins (image items) and boards (user-curated collections of pins). Each layer aggregates a node's
+**importance-based neighbourhood**: the $T$ nodes most often visited by short random walks from $u$. The aggregation is
+a mean weighted by those visit counts, called **importance pooling**. Training minimises a max-margin ranking loss on
+pairs of pins engaged with in sequence, with hard negatives added by a curriculum. Pinterest trained and ran it on a
+graph with 3 billion nodes and 18 billion edges <Cite id="ying2018pinsage" />.
+</Definition>
+
+## Problem
+
+Pinterest wants an embedding for each of about 2 billion pins, for related-pin retrieval by nearest-neighbour search and
+as a feature in ranking models. Each pin has an image and text annotations. Pins are also connected through boards:
+the graph has 2 billion pins, 1 billion boards and over 18 billion pin–board edges <Cite id="ying2018pinsage" />.
+
+A spectral <NoteLink to="graph-convolutional-network">graph convolutional network</NoteLink> multiplies features by
+powers of the full normalised adjacency matrix. That requires the whole graph during training, which is infeasible at
+this size. <NoteLink to="graphsage">GraphSAGE</NoteLink> removes the requirement by computing each node's embedding from
+a sampled, fixed-size neighbourhood and shared aggregation weights <Cite id="hamilton2017graphsage" />. PinSage keeps
+that design and changes four things: how neighbourhoods are sampled, how they are pooled, how negatives are chosen, and
+how training and inference are run on commodity hardware <Cite id="ying2018pinsage" />.
+
+## The convolution
+
+A PinSage layer, called `convolve`, maps node $u$'s current vector $\zvec_u$, its neighbours' vectors
+$\set{\zvec_v : v \in \Ncal(u)}$ and neighbour weights $\set{\alpha_v}$ to a new vector
+<Cite id="ying2018pinsage" />:
+
+$$
+\nvec_u = \gamma\paren{\set{\operatorname{ReLU}(\Qmat\zvec_v + \qvec) : v \in \Ncal(u)}, \alphavec}, \qquad
+\zvec_u^{\mathrm{new}} = \frac{\operatorname{ReLU}(\Wmat\,[\zvec_u \Vert \nvec_u] + \wvec)}
+{\norm{\operatorname{ReLU}(\Wmat\,[\zvec_u \Vert \nvec_u] + \wvec)}_2}.
+$$
+
+Here $[\cdot \Vert \cdot]$ is concatenation, $\Qmat, \qvec, \Wmat, \wvec$ are the layer's weights and $\gamma$ is a
+symmetric pooling function. The weights are shared by every node and differ between layers. Layer 0 is the input
+feature vector $\xvec_u$. After $K$ layers a two-layer network gives the output,
+$\zvec_u = \Gmat_2 \operatorname{ReLU}(\Gmat_1 \hvec_u^{(K)} + \gvec)$. The paper reports that concatenating
+$\zvec_u$ with $\nvec_u$ works better than averaging them, and that the final normalisation stabilises training and
+makes approximate nearest-neighbour search more efficient <Cite id="ying2018pinsage" />.
+
+<ConvolveDiagram />
+
+For each pin, $\xvec_u$ concatenates a 4,096-dimensional visual embedding (the sixth fully connected layer of a VGG-16
+classifier), a 256-dimensional Word2Vec-style embedding of its annotations and the log of its degree. Only pins have
+features, so the model uses an even number of layers: pins feed boards, boards feed pins. The reported models use
+$K = 2$, pooled dimension $m = 2048$ and embedding dimension $d = 1024$ <Cite id="ying2018pinsage" />.
+
+## Importance-based neighbourhoods
+
+GraphSAGE samples neighbours uniformly from the one-hop neighbourhood. PinSage instead simulates short random walks from
+$u$, counts how often each node is visited, normalises the counts to sum to 1 and keeps the $T$ nodes with the highest
+normalised counts <Cite id="ying2018pinsage" />. The walks come from Pinterest's
+<NoteLink to="pixie-random-walk">Pixie</NoteLink> system <Cite id="eksombatchai2018pixie" />. This has two effects.
+First, the neighbourhood has a fixed size $T$, so the memory of each minibatch is bounded. Second, each neighbour carries
+a score of how strongly the graph connects it to $u$, which the pooling step uses.
+
+**Why visit counts measure importance.** Let $\Pmat$ be the transition matrix of the walk on the graph, so
+$(\Pmat^k)_{uv}$ is the probability that a walk from $u$ is at $v$ after $k$ steps. Suppose each walk continues after
+every step with probability $1 - c$ and stops otherwise, so walk lengths are geometric. The expected number of visits
+to $v \ne u$ during one walk is the sum over steps of the probability that the walk is still running and is at $v$:
+
+$$
+\expect[\text{visits to } v] = \sum_{k \ge 1} (1-c)^{k-1} (\Pmat^k)_{uv}
+= \frac{1}{c(1-c)} \cdot c \sum_{k \ge 0} (1-c)^k (\Pmat^k)_{uv}
+= \frac{\pi_u(v)}{c(1-c)}.
+$$
+
+The $k = 0$ term is zero because $v \ne u$. The vector
+$\pivec_u = c \sum_{k \ge 0} (1-c)^k \evec_u\transpose \Pmat^k$ is the **personalised PageRank** of $u$, where $\evec_u$ is the indicator vector of node $u$ and $\pi_u(v)$ is entry $v$. It is the stationary
+distribution of a walk that restarts at $u$ with probability $c$ at each step. It satisfies
+$\pivec_u = c\,\evec_u\transpose + (1-c)\,\pivec_u \Pmat$, which is the fixed-point form of the same series. By the law of
+large numbers, the total count at $v$ over many walks, divided by the number of walks, converges to the expectation. The
+counts are therefore proportional to $\pi_u(v)$, and so are the normalised counts. This is the paper's statement that
+in the limit of infinitely many simulations the normalised counts approximate personalised PageRank scores with respect
+to $u$ <Cite id="ying2018pinsage" />.
+
+<NeighbourhoodSampling />
+
+## Importance pooling
+
+PinSage sets $\gamma$ to a weighted mean, with weight $\alpha_v$ proportional to $v$'s normalised visit count
+<Cite id="ying2018pinsage" />:
+
+$$
+\nvec_u = \sum_{v \in \Ncal(u)} \alpha_v \operatorname{ReLU}(\Qmat\zvec_v + \qvec), \qquad
+\alpha_v = \frac{\pi_u(v)}{\sum_{w \in \Ncal(u)} \pi_u(w)}.
+$$
+
+A neighbour that the walks reach often contributes more than one reached once. In the paper's ablation, replacing mean
+pooling by importance pooling (with hard negatives in both) raises hit rate from 46% to 67%
+<Cite id="ying2018pinsage" />.
+
+**Worked example.** Take $T = 3$ neighbours with visit counts 6, 3 and 1. The weights are
+$\alphavec = (0.6, 0.3, 0.1)$. If the transformed neighbour vectors are $(1, 0)$, $(0, 1)$ and $(1, 1)$, the pooled
+vector is $0.6\,(1, 0) + 0.3\,(0, 1) + 0.1\,(1, 1) = (0.7, 0.4)$. A plain mean would give $(0.67, 0.67)$ to two
+decimals, which lets the rarely visited third neighbour pull the result as much as the most visited one.
+
+## Training
+
+**Positive pairs.** A labelled pair $(q, i)$ is a pin $i$ that a user interacted with immediately after pin $q$. The
+training set has 1.2 billion such pairs <Cite id="ying2018pinsage" />.
+
+**Loss.** For a positive pair, PinSage uses a max-margin (hinge) ranking loss over negatives $n_k$ drawn from a
+negative distribution $P_n(q)$, with margin $\Delta$ <Cite id="ying2018pinsage" />:
+
+$$
+J(\zvec_q, \zvec_i) = \expect_{n_k \sim P_n(q)} \max\set{0,\; \zvec_q\transpose\zvec_{n_k} - \zvec_q\transpose\zvec_i + \Delta}.
+$$
+
+Each term is zero once the positive's score beats the negative's by at least $\Delta$. Its gradient with respect to
+$\zvec_q$ is $\zvec_{n_k} - \zvec_i$ while the margin is violated and $\zeros$ afterwards. A negative contributes to
+learning only while it scores within $\Delta$ of the positive. The loss is a
+<NoteLink to="triplet-and-margin-losses">triplet margin loss</NoteLink> on inner products.
+
+**Shared negatives.** Each minibatch samples 500 negatives shared by all its examples, instead of separate negatives per
+example. The paper observed no difference in quality and fewer embeddings to compute <Cite id="ying2018pinsage" />.
+
+**Why random negatives are too easy.** The system must rank about 1,000 relevant pins at the top of 2 billion. Take the
+1,000 pins most related to $q$. The probability that a single uniform negative falls among them is
+$1{,}000 / (2 \times 10^9) = 5 \times 10^{-7}$. The probability that at least one of 500 independent uniform negatives
+does is $1 - (1 - 5 \times 10^{-7})^{500} \approx 2.5 \times 10^{-4}$. Almost every minibatch therefore contains no
+negative that is close to the query, and the hinge terms are almost all zero. The paper states the same point as a
+resolution of 1 in 500 against a required resolution of 1 in 2 million <Cite id="ying2018pinsage" />.
+
+**Hard negatives.** For each positive pair, PinSage adds hard negatives: pins ranked 2,000 to 5,000 by personalised
+PageRank from $q$, sampled at random from that range. They are related to $q$ but less related than $i$. Training on
+them from the start doubled the number of epochs needed to converge <Cite id="ying2018pinsage" />.
+
+**Curriculum.** The first epoch uses no hard negatives. Epoch $n$ adds $n - 1$ hard negatives per item, so the task
+gets harder as training proceeds, a form of curriculum learning <Cite id="bengio2009curriculum" />. The reported run used
+6 hard negatives per pin, for 7.5 billion training examples in total. The curriculum improved performance by 12% in the
+paper's summary <Cite id="ying2018pinsage" />.
+
+## Systems
+
+**Producer–consumer minibatches.** The adjacency lists and features of billions of nodes stay in CPU memory (500 GB in
+total). For each minibatch a CPU producer samples neighbourhoods, re-indexes the nodes involved into a small subgraph,
+extracts the matching rows of the feature matrix and samples negatives. The GPU consumer receives this subgraph and runs
+the convolutions without further CPU–GPU communication. CPU work for the next minibatch overlaps GPU work on the current
+one, which almost halved training time. Training ran on one machine with 32 cores and 16 Tesla K80 GPUs, with batch
+sizes from 512 to 4,096, a linear learning-rate warm-up in the first epoch and exponential decay afterwards
+<Cite id="ying2018pinsage" />.
+
+**MapReduce inference.** Computing each node's embedding separately recomputes shared neighbours many times. PinSage
+instead computes layer by layer. One MapReduce job projects every pin with the first layer's dense transform. A second
+job joins pins to their boards and pools them into board vectors. Two more jobs compute the next layer's pin vectors
+from the boards. Every node's vector is computed once per layer. Embeddings for 3 billion items were generated in less
+than 24 hours on a Hadoop cluster of 378 AWS d2.8xlarge nodes <Cite id="ying2018pinsage" />.
+
+**Inductive training.** The model's parameters do not depend on the number of nodes, so it trains on a subgraph and
+embeds the rest. Training used 20% of the boards with the pins they touch and 70% of the labelled pairs. A subgraph of
+300 million items reached the best hit rate and cut runtime by a factor of 6 compared with the full graph
+<Cite id="ying2018pinsage" />.
+
+**Retrieval.** Related pins are the nearest neighbours of a query pin's embedding, found with
+<NoteLink to="locality-sensitive-hashing">locality-sensitive hashing</NoteLink> and a two-level retrieval based on the
+Weak AND operator <Cite id="ying2018pinsage" />.
+
+## Reported results
+
+Offline, each test pair $(q, i)$ is scored by whether $i$ appears among the 500 nearest neighbours of $q$ in a sample of
+5 million test pins (hit rate), and by a scaled mean reciprocal rank that divides each rank by 100
+<Cite id="ying2018pinsage" />.
+
+| method (Table 1)           | hit rate | MRR  |
+| -------------------------- | -------- | ---- |
+| visual embedding           | 17%      | 0.23 |
+| annotation embedding       | 14%      | 0.19 |
+| combined, 2-layer MLP      | 27%      | 0.37 |
+| max pooling                | 39%      | 0.37 |
+| mean pooling               | 41%      | 0.51 |
+| mean pooling, cross-entropy| 29%      | 0.35 |
+| mean pooling, hard negs    | 46%      | 0.56 |
+| PinSage                    | 67%      | 0.59 |
+
+The neighbourhood size trades accuracy for training time: $T = 10$ gave 60% hit rate and 0.51 MRR in 20 hours,
+$T = 20$ gave 63% and 0.54 in 33 hours, and $T = 50$ gave 67% and 0.59 in 78 hours. A batch size of 2,048 gave the
+shortest total training time, 48.8 hours <Cite id="ying2018pinsage" />.
+
+In head-to-head human judgements of which of two recommendations is more related to a query pin, PinSage won 56.5% of
+decided comparisons against visual embeddings, 72.5% against annotation embeddings, 60.0% against combined embeddings
+and 62.4% against Pixie. In production A/B tests on homefeed, PinSage raised repin rate by 10% to 30% over the
+annotation and visual embeddings, depending on the setting <Cite id="ying2018pinsage" />.
+
+The distribution of cosine similarities between random pairs of PinSage embeddings has kurtosis 0.43, against 2.49 for
+annotation embeddings and 1.20 for visual embeddings. A wider spread separates items of different relevance and lowers
+the collision rate of locality-sensitive hashing <Cite id="ying2018pinsage" />.
+
+## Compared with LightGCN
+
+| property       | LightGCN                   | PinSage                                        |
+| -------------- | -------------------------- | ---------------------------------------------- |
+| node inputs    | trainable ID embeddings    | content features                               |
+| neighbourhood  | all neighbours, full graph | top $T$ by random-walk visits                  |
+| layer          | linear, normalised sum     | dense layers, importance pooling, concatenation |
+| new nodes      | need retraining            | embedded from features                         |
+| intended scale | benchmark graphs           | billions of nodes                              |
+
+<NoteLink to="lightgcn">LightGCN</NoteLink> shows that when nodes are IDs without features, transformation layers and
+non-linearities hurt collaborative filtering. PinSage shows that with rich content features at web scale they help. The
+two results agree: whether to transform depends on whether nodes have features worth transforming.
+
+## Pitfalls
+
+- **Hard negatives from the start.** Without the curriculum, hard negatives double the epochs to convergence.
+- **Walk settings change the model.** Walk length, number of walks and $T$ decide which signals reach a node, and
+  larger $T$ costs training time.
+- **Labels from the incumbent system.** The positive pairs came from engagement with Pixie's recommendations, so the
+  paper compares with Pixie only in human evaluation, not offline <Cite id="ying2018pinsage" />.
+- **Features only on pins.** Boards have no input features, which forces an even number of layers.

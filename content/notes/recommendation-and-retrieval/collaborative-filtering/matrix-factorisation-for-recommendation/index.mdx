@@ -1,0 +1,135 @@
+---
+title: Matrix factorisation for recommendation
+kind: concept
+summary: 'Matrix factorisation approximates a sparse ratings matrix as $\Rmat \approx \Wmat\Vmat\transpose$, giving each user and item a $K$-dimensional latent vector and predicting $\hat{r}_{ui} = \wvec_u\transpose\vvec_i$. The factors minimise squared error on the observed entries plus an $\ell_2$ penalty.'
+tags: [recommender-systems, collaborative-filtering, matrix-factorisation, latent-factors, worked-example]
+aliases: [matrix factorization, latent factor model, MF, Funk SVD, SVD recommender, matrix completion for recommendation, probabilistic matrix factorisation]
+requires: [explicit-and-implicit-feedback, singular-value-decomposition, ridge-regression]
+partOf: [recommender-systems]
+related: [non-negative-matrix-factorisation, netflix-prize]
+references: [koren2009mf, mnih2007pmf, zhou2008als]
+status: draft
+updated: 2026-09-27
+---
+
+import { MfFigure } from './MfFigure'
+
+<Definition>
+**Matrix factorisation** models a $U \times M$ interaction matrix $\Rmat$ as the product of a user-factor matrix
+$\Wmat \in \reals^{U \times K}$ and an item-factor matrix $\Vmat \in \reals^{M \times K}$, with $K \ll U, M$. Row
+$\wvec_u$ of $\Wmat$ is user $u$'s latent vector and row $\vvec_i$ of $\Vmat$ is item $i$'s. The predicted rating is
+$\hat{r}_{ui} = \wvec_u\transpose\vvec_i$. The factors are chosen to fit the observed entries $\Ocal$ of $\Rmat$
+<Cite id="koren2009mf" />.
+</Definition>
+
+## The model
+
+Collaborative filtering fills in the missing entries of $\Rmat$ from the observed ones. Matrix factorisation assumes
+that the full matrix is close to low rank. A rank-$K$ matrix is exactly one that can be written as
+$\Wmat\Vmat\transpose$ with $K$ columns in each factor, so the model is
+
+$$
+\hat{r}_{ui} = \wvec_u\transpose\vvec_i = \sum_{k=1}^{K} w_{uk}v_{ik}.
+$$
+
+The low-rank assumption says that a few hidden dimensions explain most of how users rate items. In a film catalogue
+the dimensions often line up with comedy versus drama, mainstream versus art house, or a period of cinema. A user's
+coordinate $w_{uk}$ says how much they like dimension $k$; an item's coordinate $v_{ik}$ says how much the item has it.
+The prediction is high when the two vectors point the same way. The dimensions are learned, not specified, and need not
+have names <Cite id="koren2009mf" />.
+
+The model has $K(U + M)$ parameters instead of the $UM$ entries of the matrix. For $U = 10^6$, $M = 10^5$ and $K = 64$
+that is $7 \times 10^7$ parameters against $10^{11}$ cells.
+
+## The objective
+
+Only the observed entries carry information. Fitting every observed rating exactly is possible once $K$ is large, and
+then the missing entries are arbitrary, so the fit is regularised:
+
+$$
+\min_{\Wmat, \Vmat} \sum_{(u, i) \in \Ocal} \paren{r_{ui} - \wvec_u\transpose\vvec_i}^2 + \lambda\paren{\norm{\Wmat}_F^2 + \norm{\Vmat}_F^2}.
+$$
+
+The penalty weight $\lambda \ge 0$ shrinks the vectors of users and items with few ratings towards zero, where
+predictions fall back to the global behaviour. The same objective is the negative log posterior of a probabilistic
+model, $r_{ui} \sim \Gauss(\wvec_u\transpose\vvec_i, \sigma^2)$ with Gaussian priors $\wvec_u, \vvec_i \sim
+\Gauss(\zeros, \sigma_0^2\eye)$ and $\lambda = \sigma^2/\sigma_0^2$. This is probabilistic matrix factorisation
+<Cite id="mnih2007pmf" />.
+
+## Fitting
+
+The objective is not convex in $(\Wmat, \Vmat)$ jointly, because the product $\wvec_u\transpose\vvec_i$ couples them. It
+is a quadratic in either factor with the other fixed. Two algorithms use this.
+
+**Stochastic gradient descent.** For one observed rating, write the error $e_{ui} = r_{ui} - \wvec_u\transpose\vvec_i$.
+The derivative of $e_{ui}^2 + \lambda(\norm{\wvec_u}^2 + \norm{\vvec_i}^2)$ with respect to $\wvec_u$ is
+$-2e_{ui}\vvec_i + 2\lambda\wvec_u$, and symmetrically for $\vvec_i$. With step size $\eta$ absorbing the factor 2, the
+updates for one rating are
+
+$$
+\wvec_u \leftarrow \wvec_u + \eta\paren{e_{ui}\vvec_i - \lambda\wvec_u}, \qquad
+\vvec_i \leftarrow \vvec_i + \eta\paren{e_{ui}\wvec_u - \lambda\vvec_i}.
+$$
+
+Each update costs $O(K)$, so one pass over the data costs $O(K\abs{\Ocal})$.
+
+**Alternating least squares.** Fix $\Vmat$ and solve a ridge regression for each user, then fix $\Wmat$ and solve one
+for each item. Each solve is exact and independent of the others, so the sweeps parallelise. See
+<NoteLink to="alternating-least-squares">alternating least squares</NoteLink> <Cite id="zhou2008als" />.
+
+<MfFigure />
+
+## Relation to the singular value decomposition
+
+For a fully observed matrix $\Mmat \in \reals^{m \times n}$ the <NoteLink to="singular-value-decomposition">singular
+value decomposition</NoteLink> $\Mmat = \Umat\Sigmamat\Vmat\transpose$ gives the answer directly. Keeping the $K$
+largest singular values and their singular vectors gives the rank-$K$ matrix closest to $\Mmat$ in Frobenius norm (the
+Eckart–Young theorem). Setting $\Wmat = \Umat_K\Sigmamat_K^{1/2}$ and $\Vmat = \Vmat_K\Sigmamat_K^{1/2}$ puts that
+approximation in the form above.
+
+A ratings matrix is not fully observed. Filling the missing entries with zeros or means and taking the SVD treats
+guesses as data, and the result is dominated by them. The objective above sums over $\Ocal$ only. It has no closed form,
+which is why iterative methods "inspired by" the SVD, not the SVD itself, became the workhorses of the era. The Netflix
+Prize community called the SGD version "SVD" even though it computes no singular value decomposition <Cite
+id="koren2009mf" />.
+
+## Biases
+
+Much of the variation in ratings is not interaction. Some users rate everything high and some films are rated high by
+everyone. Koren et al. add a global mean $\mu$ and bias terms,
+
+$$
+\hat{r}_{ui} = \mu + b_u + b_i + \wvec_u\transpose\vvec_i,
+$$
+
+with $b_u$ and $b_i$ penalised like the factors. The factors then explain only what the biases cannot
+<Cite id="koren2009mf" />. The figure above centres ratings on their mean, the simplest version of this.
+
+## Limitations
+
+Three limits of the paradigm each motivated a later family of models.
+
+1. **Cold start.** A user or item with no observed ratings has no data to fit its vector. Its vector stays at its
+   initial value, or at zero under the penalty, and the model cannot personalise for it. See the
+   <NoteLink to="cold-start-problem">cold-start problem</NoteLink>.
+2. **Scale.** Each ALS sweep solves $U + M$ systems of size $K$. At web scale this is still costly, and the model must
+   be refitted as data arrive.
+3. **Linearity.** The score is a dot product, bilinear in the two vectors. It cannot express, for example, that a
+   user likes horror only in combination with comedy. Replacing the dot product with a learned function motivated
+   <NoteLink to="neural-collaborative-filtering">neural collaborative filtering</NoteLink>, although a tuned dot
+   product remains hard to beat.
+
+## Assumptions
+
+- **Low rank.** The full matrix is well approximated by rank $K$.
+- **Missing at random.** Fitting only observed entries assumes that which entries are observed does not depend on
+  their values. Users rate what they chose to watch, so this fails; see
+  <NoteLink to="biases-in-recommender-feedback">biases in recommender feedback</NoteLink>.
+
+## Pitfalls
+
+- **Fitting implicit feedback on observed entries only.** With clicks, every observed entry is 1, and the model
+  learns to predict 1 everywhere. Use <NoteLink to="weighted-matrix-factorisation">weighted matrix
+  factorisation</NoteLink> or a ranking loss.
+- **Unregularised rank.** Increasing $K$ without increasing $\lambda$ fits the training ratings better and the held-out
+  ratings worse, as the figure shows. Choose both on held-out data.

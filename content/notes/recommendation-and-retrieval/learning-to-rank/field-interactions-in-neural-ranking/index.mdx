@@ -1,0 +1,95 @@
+---
+title: Field interactions in neural ranking
+kind: concept
+summary: 'Multi-field documents can be ranked by models that score interactions between the query and each field, or between all pairs of fields. On recipe search, field-weighted FMs restricted to query-field interactions beat all-pairs interactions.'
+tags: [information-retrieval, learning-to-rank, feature-interactions, recommender-systems]
+aliases: [multi-field ranking, field-aware ranking, query-field interactions, field-to-field interactions, NRM-F, non-linear multi-field interaction, NL-MFI]
+requires: [field-weighted-factorisation-machines, ndcg]
+partOf: [recommender-systems]
+related: [factorisation-machines, ranking-losses, two-tower-model, content-based-filtering]
+references: [takiguchi2020fields, takiguchi2021recipe, pan2018fwfm, zamani2018nrmf]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **field-aware ranking model** scores a document made of several fields $f_1, \ldots, f_k$, such as title, description
+and ingredients, against a query $q$ by modelling **interactions** between representations of the query and the fields.
+Query–field interactions pair the query with each field ($k$ pairs); field-to-field interactions also pair fields with
+each other ($k(k-1)/2$ pairs among $k$ fields) <Cite id="takiguchi2021recipe" />.
+</Definition>
+
+## Two model families
+
+Documents in practice have structure. A recipe has a title, an ingredient list, a description, a country and images.
+Collapsing all fields into one text or one embedding discards how users read documents and the correlations between
+fields <Cite id="takiguchi2021recipe" />. Two neural designs keep the fields apart.
+
+- **NRM-F** (neural ranking model with multiple fields) encodes each field and the query separately, forms query–field
+  interactions by element-wise (Hadamard) products, concatenates them and scores them with fully connected layers. It
+  uses no first-order features and no field-to-field interactions <Cite id="zamani2018nrmf" />.
+- **FwFM**, the <NoteLink to="field-weighted-factorisation-machines">field-weighted factorisation machine</NoteLink>
+  from click prediction, treats the query and each field as fields of one input. It scores all pairs by dot products
+  with a learned weight per pair, adds first-order terms, and sums <Cite id="pan2018fwfm" />.
+
+Recommendation models such as FwFMs do not distinguish a query from item features; document-ranking models such as
+NRM-F are built around the query. Takiguchi, Twomey and Vaquero asked which interactions matter
+<Cite id="takiguchi2020fields" />.
+
+## Findings on recipe search
+
+Both studies used search logs from Cookpad, a recipe platform, with sessions truncated at the last clicked result,
+clicked recipes as positives, and NDCG@20 as the metric.
+
+**Non-linear multiple field interactions** <Cite id="takiguchi2020fields" />. Over 10 time-ordered splits of about 2.7
+million queries:
+
+- Models restricted to query–field interactions beat the same models with all interactions: NRM-F 0.6483 against 0.6403
+  ($p = 0.0031$) and FwFM 0.6674 against 0.6616 ($p = 0.001$, paired $t$-tests). The authors suggest that irrelevant
+  field pairs add noise.
+- FwFM outperformed the simplified NRM-F, showing that a model from recommendation can serve document ranking as it is.
+- Adding first-order features significantly improved FwFM but not NRM-F.
+- An FwFM using field pairs selected by their correlation with clicks (0.665) did not beat the query–field FwFM (0.667).
+
+**Field-aware neural ranking for recipe search**, at the SIGIR eCom'21 workshop, added image embeddings and evaluated
+with 10-fold cross-validation and Bonferroni-corrected $t$-tests at $\alpha = 0.01$ <Cite id="takiguchi2021recipe" />:
+
+| model | NDCG@20 |
+| ----- | ------- |
+| random | 0.523 |
+| baseline (concatenated first-order features) | 0.643 |
+| NRM-F (all) | 0.641 |
+| NRM-F (query–field) | 0.652 |
+| FwFM (all) | 0.661 |
+| FwFM (query–field) | 0.667 |
+
+The query–field FwFM was significantly better than every other configuration, with a narrower spread across folds. The
+authors report that "field-weighted factorisation machines models provide a statistically significant improvement over
+baselines in recipe retrieval tasks" and that "sparsely capturing subsets of field interactions based on domain
+knowledge and feature selection heuristics offers significant advantages over baselines and exhaustive alternatives"
+<Cite id="takiguchi2021recipe" />.
+
+**Which pairs carry signal.** Correlating each interaction's score with clicks, the query pairs ranked low and
+title–country ranked highest. The authors explain that the candidates were already retrieved for the query, so the query
+adds little new information at the re-ranking stage; regional preference is strongly predictive; and image pairs were
+weak, making the costly image features a candidate for removal <Cite id="takiguchi2021recipe" />. A model on a sparse
+set of correlation-selected pairs (0.663) matched the query–field model and significantly beat the all-pairs FwFM. Such
+selection matters where there is no query, as in re-ranking a recipe feed.
+
+## Lessons
+
+- **More interactions can be worse.** A subset of interactions chosen by domain knowledge beat the exhaustive set in
+  both architectures. Modelling every pair invites noise and correlated features.
+- **Architecture matters as much as interactions.** The same interaction choices gave different results in NRM-F and
+  FwFM; conclusions about interactions do not transfer across architectures <Cite id="takiguchi2020fields" />.
+- **Stage matters.** Signals that dominate retrieval (query–field matching) may add little to a re-ranker whose
+  candidates already match the query.
+- **Explainability.** A model factorised by fields gives a score per field pair, which mirrors the document's structure
+  <Cite id="takiguchi2021recipe" />.
+
+## Pitfalls
+
+- **Truncated sessions inflate baselines.** Cutting each session at the last click makes even a random ranking score
+  NDCG@20 of 0.523 in the recipe study. Compare against random and simple baselines under the same protocol.
+- **Correlation is not importance.** Interaction–click correlations are a heuristic; the correlation-selected model did
+  not beat the query–field model.

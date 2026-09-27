@@ -1,0 +1,83 @@
+---
+title: Biases in recommender feedback
+kind: concept
+summary: 'Logged implicit feedback is observational: users can only react to what the system showed. Selection, position, exposure and popularity bias are forms of one problem, confounding of relevance by the presentation policy, so their corrections come from causal inference.'
+tags: [recommender-systems, bias, causal-inference, implicit-feedback]
+aliases: [selection bias in recommendation, position bias, trust bias, presentation bias, MNAR feedback, observational feedback]
+requires: [explicit-and-implicit-feedback, causal-inference-from-observational-data]
+partOf: [recommender-systems]
+related: [click-models, unbiased-learning-to-rank, reweighting-biased-samples]
+references: [chen2023biassurvey, joachims2007clicks, schnabel2016treatments, wang2016selection]
+status: draft
+updated: 2026-09-27
+---
+
+import { ConfoundingDag } from './ConfoundingDag'
+
+<Definition>
+**Bias in recommender feedback** is any systematic difference between the interactions a system logs and users' true
+preferences. It arises because the feedback is **observational**: the system chooses which items each user sees and
+where, and users can only react to those. The resulting biases are confounding by the presentation policy
+<Cite id="chen2023biassurvey" />.
+</Definition>
+
+## The core dilemma
+
+Implicit feedback is abundant, cheap and continuously generated, and it is what modern personalisation learns from. It
+is also not a clean measure of preference. In a controlled experiment one would show items
+to users uniformly at random and read off their preferences. A live system cannot do that without a poor experience,
+so it shows ranked lists of items it already believes relevant. That ranking contaminates the data the next model is
+trained on. Fitting models blindly to such data causes gaps between offline and online performance and lost trust.
+
+## One structure, many names
+
+The named biases are not separate phenomena. Each is a case of the same causal structure.
+
+<ConfoundingDag />
+
+The variable of interest, relevance $R$, is confounded by the presentation $Z$ that the logging policy chose. Position
+influences clicks independently of relevance. Because the policy puts popular or previously successful items in
+prominent positions, features such as popularity become spuriously correlated with clicks. A model trained on clicks
+learns the policy along with the preferences. Recognising this structure moves the field from heuristic fixes to the
+methods of <NoteLink to="causal-inference-from-observational-data">causal inference</NoteLink>, which exist to separate
+cause from correlation in observational data.
+
+## A taxonomy
+
+Surveys list four main biases <Cite id="chen2023biassurvey" />.
+
+- **Selection bias.** The training data are not a representative sample of preferences, because users choose what to
+  interact with from a list the system pre-selected. In personal search, queries with no clicks may be dropped from
+  training, leaving only queries where users found something <Cite id="wang2016selection" />. Explicit ratings are
+  biased the same way: users rate what they chose to watch, and rate more readily what they loved or hated. The data are
+  missing not at random <Cite id="schnabel2016treatments" />.
+- **Position bias.** Users examine and click higher positions more, whatever the items' relevance. Joachims et al.
+  called this trust bias: users trust that the top results are best <Cite id="joachims2007clicks" />. Rank then affects
+  click-through rate independently of relevance. See <NoteLink to="click-models">click models</NoteLink>.
+- **Exposure bias.** Users can interact only with items they were shown. An unobserved interaction is ambiguous: seen
+  and not wanted, or never seen. Treating all unobserved pairs as negatives, as early models did, penalises every item
+  the current system does not show.
+- **Popularity bias.** Popular items are over-represented in logs, so models learn that recommending them is a safe way
+  to reduce loss and under-recommend niche items that would suit particular users. This reduces personalisation and
+  diversity. See <NoteLink to="popularity-bias">popularity bias</NoteLink>.
+
+The biases interact and compound over time through <NoteLink to="feedback-loops-in-recommendation">feedback
+loops</NoteLink>.
+
+## Consequences
+
+- **Offline evaluation misleads.** A metric computed on logged clicks rewards models that imitate the logging policy.
+- **The rich get richer.** Items shown often gather more interactions and are shown more.
+- **Unfair exposure.** Providers of niche or new items receive less exposure than their relevance merits, and users
+  with non-mainstream tastes receive worse recommendations.
+
+The remedy starts with the probability that an interaction was observable at all, the
+<NoteLink to="propensity-in-recommendation">propensity</NoteLink>, and continues with the methods in the
+<NoteLink to="debiasing-toolkit">debiasing toolkit</NoteLink>.
+
+## Pitfalls
+
+- **Correcting one bias at a time.** Position, popularity and selection act together. A position correction that ignores
+  exposure still learns only about items that were shown.
+- **Assuming randomisation where there was none.** A holdout of "random" recommendations that still filters by
+  eligibility rules is not uniform; its propensities must be computed, not assumed.

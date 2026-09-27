@@ -1,0 +1,74 @@
+---
+title: Diversified re-ranking
+kind: technique
+summary: 'Diversified re-ranking reorders a relevance-ranked candidate list so the final slate covers several interests. Maximal marginal relevance adds items greedily by $\lambda\,\text{relevance} - (1-\lambda)\,\text{max similarity to chosen items}$; determinantal point processes score whole sets by a determinant.'
+tags: [recommender-systems, diversity, ranking, re-ranking]
+aliases: [MMR, maximal marginal relevance, determinantal point process for recommendation, DPP re-ranking, slate diversification, diversification]
+requires: [multi-stage-recommendation, beyond-accuracy-metrics]
+partOf: [multi-stage-recommendation]
+related: [popularity-bias, fairness-in-recommendation, slate-off-policy-evaluation]
+references: [carbonell1998mmr, kulesza2012dpp, chen2018dpp, wilhelm2018dpp]
+status: draft
+updated: 2026-09-27
+---
+
+import { MmrFigure } from './MmrFigure'
+
+<Definition>
+**Diversified re-ranking** takes candidates scored for relevance and builds a list that trades relevance against
+redundancy, usually as a post-processing stage after ranking. It optimises the **slate**, the list as a whole, instead
+of each item's relevance separately.
+</Definition>
+
+## Problem
+
+A ranker scores items one at a time, so the top of its list is often a cluster of near-duplicates: five films from the
+same franchise, ten versions of the same shoe. Each is relevant; together they waste the slate and cover one of the
+user's interests. Popularity bias makes this worse by promoting the same items for everyone. Slate optimisation and
+diversification are the output-side response. Diversity is measured by <NoteLink to="beyond-accuracy-metrics">intra-list
+diversity</NoteLink> and coverage.
+
+## Mechanism
+
+**Maximal marginal relevance.** Start from the candidates $C$ and an empty list $S$. Repeatedly add
+
+$$
+d^* = \argmax_{d \in C \setminus S}\LB\lambda\,\text{rel}(d) - (1 - \lambda)\max_{d' \in S}\operatorname{sim}(d, d')\RB,
+$$
+
+where $\text{rel}(d)$ is the base model's relevance score, $\operatorname{sim}$ an item similarity and $\lambda \in [0,
+1]$ the trade-off. The first item is the most relevant one; each later item is penalised by its similarity to the
+closest item already chosen <Cite id="carbonell1998mmr" />. With $\lambda = 1$ MMR returns the relevance ranking; with
+$\lambda = 0$ it maximises spread and ignores relevance.
+
+<MmrFigure />
+
+**Determinantal point processes.** A DPP assigns each subset $S$ of the candidates a probability proportional to a
+determinant, $P(S) \propto \det(\Lmat_S)$, where $\Lmat$ is a positive semi-definite kernel and $\Lmat_S$ its rows and
+columns for $S$ <Cite id="kulesza2012dpp" />. A common kernel combines quality scores $q_i \ge 0$ and a similarity
+matrix $\Smat$ (with $S_{ii} = 1$): $L_{ij} = q_iS_{ij}q_j$. Then $\Lmat_S = \diag(\qvec_S)\Smat_S\diag(\qvec_S)$ and
+
+$$
+\det(\Lmat_S) = \paren{\prod_{i \in S} q_i^2}\det(\Smat_S).
+$$
+
+The first factor rewards quality. The second is the squared volume spanned by the items' feature vectors when $\Smat$ is
+a Gram matrix: it is 1 for orthogonal items and 0 when two are identical. One number thus measures relevance and
+diversity together. Finding the most probable subset is hard, but a greedy algorithm that adds the item with the largest
+gain in $\log\det$, like MMR, is fast and accurate in practice <Cite id="chen2018dpp" />. Both methods build the list
+iteratively and condition each choice on what was already chosen. YouTube deployed a DPP in its recommendation system
+and reported gains in user satisfaction and engagement <Cite id="wilhelm2018dpp" />.
+
+## Cost
+
+- MMR needs $O(k\abs{C})$ similarity evaluations for a list of $k$ from $\abs{C}$ candidates, cheap for the hundreds of
+  items that reach re-ranking.
+- Greedy DPP inference with incremental Cholesky updates costs $O(k^2\abs{C})$ <Cite id="chen2018dpp" />.
+
+## Trade-offs
+
+- **Relevance against diversity.** Each notch of diversity costs some expected relevance at the top of the list. Tune
+  $\lambda$, or the kernel's balance of quality and similarity, online.
+- **Which similarity.** Genre, embedding or co-consumption similarity lead to different lists.
+- **Post-processing versus modelling.** Re-ranking fixes the output of a biased model; it does not fix the bias. Combine
+  it with <NoteLink to="popularity-bias">debiased training</NoteLink> where possible.

@@ -1,0 +1,76 @@
+---
+title: Sequential recommendation
+kind: concept
+summary: 'Sequential recommendation predicts a user''s next interaction from the ordered sequence of their recent ones, modelling what the user is doing now rather than a static profile. Models range from Markov chains to recurrent networks (GRU4Rec) and self-attention (SASRec).'
+tags: [recommender-systems, sequence-modelling, deep-learning]
+aliases: [sequential recommendation, session-based recommendation, next-item prediction, next-item recommendation, GRU4Rec]
+requires: [recurrent-neural-network]
+partOf: [recommender-systems]
+related: [gru, transformer, two-tower-model]
+references: [hidasi2016gru4rec, kang2018sasrec, sun2019bert4rec, zhou2018din, zhou2019dien]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Sequential recommendation** models a user's history as an ordered sequence of items $S_u = (i_1, i_2, \ldots, i_t)$
+and predicts the next item, $p(i_{t+1} \mid i_1, \ldots, i_t)$. **Session-based** recommendation is the special case in
+which the sequence is one short, often anonymous, browsing session <Cite id="hidasi2016gru4rec" />.
+</Definition>
+
+## Two questions
+
+The models before it, from <NoteLink to="matrix-factorisation-for-recommendation">matrix factorisation</NoteLink> to
+<NoteLink to="two-tower-model">two-tower models</NoteLink>, summarise a user's whole history in one vector. That vector
+answers "who is this user?": their long-term tastes. It ignores order, and so ignores the strongest signal of current
+intent: what the user did in the last few minutes.
+
+An example: a shopper searches for hiking boots, clicks several pairs, then searches for wool socks. Their
+purchase history is books and electronics. A static profile recommends books. The sequence says the user is on a hiking
+trip mission and wants gaiters and a rain jacket now.
+
+Deep learning did not produce one successor to matrix factorisation. It split the problem into two streams: static
+models of long-term preference and sequential models of short-term intent. Industrial systems use both, typically a
+static model for broad candidate generation and a sequence-aware model for precise real-time ranking.
+
+## From Markov chains to attention
+
+- **Markov chains.** A first-order model predicts the next item from the last one alone,
+  $p(i_{t+1} \mid i_t)$. It is simple and strong on sparse data, and blind to anything before the last step.
+- **Recurrent networks.** GRU4Rec runs a <NoteLink to="gru">gated recurrent unit</NoteLink> over the session's clicks
+  and predicts the next click from the hidden state. It introduced session-parallel mini-batches and ranking losses
+  tailored to recommendation, and beat item-to-item baselines by a wide margin on session data
+  <Cite id="hidasi2016gru4rec" />. Recurrent networks struggle with long-range dependencies because of vanishing
+  gradients, and their step-by-step computation does not parallelise over the sequence.
+- **Self-attention.** A <NoteLink to="transformer">transformer</NoteLink> relates every position to every other in
+  one parallel step. <NoteLink to="sasrec">SASRec</NoteLink> applies causal self-attention to next-item prediction
+  <Cite id="kang2018sasrec" />; <NoteLink to="bert4rec">BERT4Rec</NoteLink> applies bidirectional self-attention with
+  a masked-item objective <Cite id="sun2019bert4rec" />.
+
+The analogy is to language modelling: an item is a word, a user's history a sentence, and next-item prediction is
+next-word prediction.
+
+## Attention over history for a target item
+
+A different use of attention conditions the user representation on the candidate being scored. Alibaba's Deep Interest
+Network (DIN) weights each past behaviour by its relevance to the candidate ad, so a user with diverse interests gets a
+different vector for each candidate <Cite id="zhou2018din" />. DIEN adds a recurrent layer that models how interests
+evolve before applying the attention <Cite id="zhou2019dien" />. Related models include DSIN, which splits
+behaviour into sessions and attends across them; STAMP, which balances the last click against a longer-term memory;
+and SR-GNN, which models each session as a graph of item transitions.
+
+## Session cold start
+
+A user may be new, or returning with no stored history, or their history may say nothing about today's mission. A
+sequential model needs only the first one or two interactions of the session to produce a context-aware vector, and
+personalises the rest of the session from it. A session cold-start user becomes warm within a few clicks. See the
+<NoteLink to="cold-start-problem">cold-start problem</NoteLink>.
+
+## Pitfalls
+
+- **Repeat consumption.** In music or groceries, the next item is often one already consumed. Filtering out seen items,
+  as many benchmarks do, removes the easiest correct answer.
+- **Leakage in evaluation.** Hold out each user's last item and split by time; a random split lets the model see the
+  future.
+- **Long histories.** Attention cost grows with the square of sequence length. Production systems truncate, summarise
+  older history into a static vector, or use efficient attention.

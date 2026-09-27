@@ -1,0 +1,146 @@
+---
+title: Field-weighted factorisation machines
+kind: concept
+summary: 'A field-weighted factorisation machine scores each feature pair by $\inner{\vvec_i}{\vvec_j}r_{F(i),F(j)}$, one learned scalar per pair of fields. It models field-dependent interactions with a few parameters more than an FM, about 4% of an FFM''s; low-rank variants cut serving cost.'
+tags: [recommender-systems, feature-interactions, click-through-rate, advertising, worked-example]
+aliases: [FwFM, field-weighted factorization machine, field-weighted FM, DPLR-FwFM, low-rank field-weighted factorisation machine, field interaction matrix]
+requires: [factorisation-machines, field-aware-factorisation-machines]
+partOf: [recommender-systems]
+related: [deepfm, wide-and-deep, eigendecomposition]
+references: [pan2018fwfm, shtoff2024dplr, juan2016ffm, rendle2010fm]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **field-weighted factorisation machine** (FwFM) is a <NoteLink to="factorisation-machines">factorisation
+machine</NoteLink> in which the interaction of features $i$ and $j$ is scaled by a learned weight for the pair of
+fields they belong to:
+
+$$
+\hat{y}(\xvec) = w_0 + \sum_{i=1}^{m} x_iw_i + \sum_{i=1}^{m}\sum_{j=i+1}^{m} x_ix_j\inner{\vvec_i}{\vvec_j}\,r_{F(i), F(j)},
+$$
+
+where $m$ is the number of features, $F(i)$ is the field of feature $i$, $\vvec_i \in \reals^K$ its embedding and
+$r_{F(i), F(j)} \in \reals$ the interaction strength of the two fields <Cite id="pan2018fwfm" />.
+</Definition>
+
+## Motivation
+
+In multi-field categorical data, such as ad impressions with user, advertiser and publisher fields, features from one
+field interact differently with features from different fields. Pan et al. measured this directly: the mutual
+information between field-pair conjunctions and the click label varies widely across field pairs <Cite id="pan2018fwfm"
+/>. A plain FM gives every pair the same form, $\inner{\vvec_i}{\vvec_j}$. <NoteLink
+to="field-aware-factorisation-machines">Field-aware FMs</NoteLink> capture the differences by giving each feature one
+embedding per other field, which multiplies the parameter count by the number of fields. FwFMs are the memory-efficient
+alternative. FwFMs keep one embedding per feature and move the field dependence into one scalar per field pair.
+
+## Parameter count
+
+Let $m$ be the number of features, $n$ the number of fields and $K$ the embedding size. Ignoring $w_0$
+<Cite id="pan2018fwfm" />:
+
+| model | linear | embeddings | field weights | total |
+| ----- | ------ | ---------- | ------------- | ----- |
+| FM    | $m$    | $mK$       | 0             | $m + mK$ |
+| FFM   | $m$    | $m(n - 1)K$ | 0            | $m + m(n - 1)K$ |
+| FwFM  | $m$    | $mK$       | $n(n - 1)/2$  | $m + mK + n(n - 1)/2$ |
+
+Each FFM feature keeps $n - 1$ embeddings, one for each other field. An FwFM keeps one embedding and adds one scalar per
+unordered field pair. Since $n \ll m$, the FwFM is about the size of an FM, and the ratio to an FFM with the same $K$ is
+
+$$
+\frac{m + mK + n(n - 1)/2}{m + m(n - 1)K} \approx \frac{1 + K}{1 + (n - 1)K}.
+$$
+
+For the Criteo data in the paper, $m = 399{,}784$ training features and $n = 26$ fields with $K = 10$ give
+$4{,}397{,}949$ FwFM parameters against $100{,}345{,}784$ for the FFM, 4.4%. This is the source of the paper's headline:
+FwFMs "can achieve competitive prediction performance with only as few as 4% parameters of FFMs" <Cite id="pan2018fwfm"
+/>. On the Oath data, with $n = 15$, the same ratio is 7.8%.
+
+## Results
+
+On test sets, FwFMs beat logistic regression, Poly2 and FMs, and came close to FFMs, which scored best on training and
+validation data but overfit more: test AUC 0.8614 against 0.8624 for FFMs on the Oath data, and 0.7764 against 0.7768 on
+Criteo. When FFMs were shrunk, by a small $K$ and feature hashing, to the same number of parameters, FwFMs won by 0.70%
+(Oath) and 0.45% (Criteo) AUC with the original linear terms, and by 0.92% and 0.47% with field-wise linear vectors
+<Cite id="pan2018fwfm" />.
+
+## Linear terms
+
+Pan et al. also replaced the scalar linear term $x_iw_i$ with an inner product against the feature's embedding, so that
+the linear part uses what the embedding has learned <Cite id="pan2018fwfm" />.
+
+- **FwFM_LW:** the original scalar weights, $\sum_i x_iw_i$, with $m$ parameters.
+- **FwFM_FeLV:** a vector per feature, $\sum_i x_i\inner{\vvec_i}{\wvec_i}$, with $mK$ parameters.
+- **FwFM_FiLV:** a vector per field, $\sum_i x_i\inner{\vvec_i}{\wvec_{F(i)}}$, with $nK$ parameters.
+
+The field-wise version fitted training data least well and generalised best, with the highest test AUC on both
+datasets.
+
+## Worked example
+
+One impression with three active features in three fields: gender (male), advertiser (Nike) and publisher (ESPN). Take
+$K = 2$, $\vvec_{\text{male}} = (1, 0.5)$, $\vvec_{\text{Nike}} = (0.8, -0.2)$, $\vvec_{\text{ESPN}} = (0.3, 1)$, linear
+weights $w_0 = -1$, $w_{\text{male}} = 0.1$, $w_{\text{Nike}} = 0.3$, $w_{\text{ESPN}} = 0.2$, and field weights
+$r_{G,A} = 1.2$, $r_{G,P} = 0.1$, $r_{A,P} = 0.6$.
+
+- Linear part: $-1 + 0.1 + 0.3 + 0.2 = -0.4$.
+- Inner products: $\inner{\vvec_{\text{male}}}{\vvec_{\text{Nike}}} = 0.7$,
+  $\inner{\vvec_{\text{male}}}{\vvec_{\text{ESPN}}} = 0.8$, $\inner{\vvec_{\text{Nike}}}{\vvec_{\text{ESPN}}} = 0.04$.
+- FwFM: $-0.4 + 1.2 \cdot 0.7 + 0.1 \cdot 0.8 + 0.6 \cdot 0.04 = 0.544$, a click probability of $\sigma(0.544) = 0.633$.
+- FM, which is the FwFM with every $r = 1$: $-0.4 + 0.7 + 0.8 + 0.04 = 1.14$, probability $0.758$.
+
+The small weight $r_{G,P} = 0.1$ says that gender–publisher pairs carry little signal here, so their large inner product
+barely moves the score. An FFM would express the same by learning separate gender vectors for the publisher and the
+advertiser fields.
+
+## Low-rank FwFMs for fast serving
+
+An FM scores many items for one user cheaply: by the linear-time identity, the sums over user and context features are
+computed once per request, and each item adds work proportional only to its own fields. An FwFM breaks this, because
+every field pair has its own weight: scoring costs $O(n^2K)$ per item, including all context–context pairs. Production
+systems prune small field weights to cut the cost <Cite id="shtoff2024dplr" />.
+
+Shtoff et al. instead constrain the field-interaction matrix $\Rmat \in \reals^{n \times n}$ (symmetric, zero diagonal)
+to a **diagonal plus low-rank** form,
+
+$$
+\Rmat = \Umat\transpose\diag(\evec)\,\Umat + \diag(\dvec), \qquad \Umat \in \reals^{\rho \times n},\ \evec \in \reals^\rho,
+$$
+
+with $\dvec$ set so that the diagonal of $\Rmat$ is zero. A low-rank form alone cannot work: a plain FM has
+$\Rmat_{\text{FM}} = \ones\ones\transpose - \eye$, whose eigenvalues are $n - 1$ and $-1$ repeated, so it has full rank,
+but it is rank 1 plus a diagonal <Cite id="shtoff2024dplr" />.
+
+Stack the active field vectors as the rows of $\Vmat \in \reals^{n \times K}$. The pairwise term is
+$\frac{1}{2}\sum_{i, j}\inner{\vvec_i}{\vvec_j}R_{ij} = \frac{1}{2}\trace(\Vmat\transpose\Rmat\Vmat)$. Substituting the
+decomposition and writing $\Pmat = \Umat\Vmat \in \reals^{\rho \times K}$,
+
+$$
+\trace(\Vmat\transpose\Rmat\Vmat) = \sum_{i=1}^{n} d_i\norm{\vvec_i}^2 + \sum_{r=1}^{\rho} e_r\norm{\Pmat_{r,:}}^2.
+$$
+
+Split the fields into context fields $\Ccal$ and item fields $\Ical$. Then $\Pmat = \Umat_{\Ccal}\Vmat_{\Ccal} +
+\Umat_{\Ical}\Vmat_{\Ical}$, and both $\Umat_{\Ccal}\Vmat_{\Ccal}$ and $\sum_{i \in \Ccal} d_i\norm{\vvec_i}^2$ are
+computed once per request. Each item costs $O(\rho\abs{\Ical}K)$: the number of context fields no longer matters
+<Cite id="shtoff2024dplr" />.
+
+On Criteo, Avazu and MovieLens, low-rank models matched or beat pruned models with the same number of parameters when
+fewer than about 20% of interactions were kept. Deployed in an advertising system with 63 fields, 38 of them item
+fields, a rank-3 model improved average inference latency per ad by 34.27% and the 95th-percentile ranking latency by
+5.45% <Cite id="shtoff2024dplr" />.
+
+## In neural ranking
+
+Takiguchi, Twomey and colleagues used FwFMs as neural ranking models over document fields (query, title, description,
+ingredients, country, image) for recipe search, and found that restricting interactions to query–field pairs beat
+modelling all field pairs. See <NoteLink to="field-interactions-in-neural-ranking">field interactions in neural
+ranking</NoteLink>.
+
+## Pitfalls
+
+- **Post-hoc factorisation.** Training a full FwFM and factorising $\Rmat$ afterwards can lose accuracy; Shtoff et al.
+  train the low-rank form directly <Cite id="shtoff2024dplr" />.
+- **Field weights are not importances.** A small $r$ can be offset by large embeddings. Inspect contributions, not
+  weights alone.

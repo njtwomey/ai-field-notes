@@ -1,0 +1,118 @@
+---
+title: OmniSage
+kind: concept
+summary: 'OmniSage (KDD 2025) embeds pins, boards and other entities of a 5.6-billion-node heterogeneous graph. A transformer reads each node''s features with its random-walk neighbours, trained on entity-entity, entity-feature and user-sequence contrastive tasks. It replaced PinSage.'
+tags: [recommender-systems, graph-neural-networks, embeddings, contrastive-learning, transformer, pinterest]
+aliases: [heterogeneous graph representation learning, universal entity embeddings, entity-feature task, user-entity task, chunked sampled softmax]
+requires: [pinsage, contrastive-learning, transformer]
+partOf: [pinsage-family]
+related: [graphsage, pinnerformer, itemsage, graph-attention-network, multi-task-learning]
+references: [badrinath2025omnisage, ying2018pinsage, pancha2022pinnerformer, agarwal2024omnisearchsage, gurukar2022multibisage]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**OmniSage** is a representation-learning framework that produces one embedding per entity (pins, boards and other
+entity types) at Pinterest. It builds a heterogeneous graph of entities and interactions, samples each node's
+neighbourhood by random walks with restart per node type, and encodes the node's content features together with its
+neighbours' features with a transformer, one per entity type. It is trained on three families of contrastive tasks:
+entity–entity pairs from graph edges and engagement logs, entity–feature pairs, and next and future entities in user
+activity sequences <Cite id="badrinath2025omnisage" />.
+</Definition>
+
+## Problem
+
+Before OmniSage, Pinterest learned representations with separate models for separate signals: PinSage for the pin–board graph,
+PinnerFormer for user sequences, content models for images and text, and task-specific models such as ItemSage and
+OmniSearchSage <Cite id="ying2018pinsage" /> <Cite id="pancha2022pinnerformer" /> <Cite id="agarwal2024omnisearchsage" />.
+MultiBiSage had already shown that pin embeddings improve when trained on several bipartite graphs (with users, idea
+pins, creators and interactions such as add-to-cart and follow) instead of the pin–board graph alone
+<Cite id="gurukar2022multibisage" />. OmniSage combines graphs, content and sequences in one model whose embeddings
+serve many applications <Cite id="badrinath2025omnisage" />.
+
+## Heterogeneous graph
+
+The graph $\Hcal = (\Vcal, \Ecal, \Tcal_v, \Tcal_e)$ has node types $\Tcal_v$ (users, queries, pins, boards and others)
+and edge types $\Tcal_e$ (searches, saves, clicks, categorisations and others). Popular nodes are pruned by keeping a
+uniform sample of $d^{\alpha}$ of their $d$ edges, with $\alpha = 0.86$; low-degree nodes are not pruned. After pruning
+the graph has 5.6 billion nodes and 63.5 billion edges <Cite id="badrinath2025omnisage" />.
+
+## Neighbourhood sampling
+
+OmniSage keeps PinSage's importance-based neighbourhoods: the proximity $s(u, v, G)$ of $v$ to $u$ is the visit
+probability of a random walk with restart from $u$ <Cite id="ying2018pinsage" />. It extends them to several types. For a
+subset of relations $R \subseteq \Tcal_e$, let $\Hcal_R$ be the subgraph with only those edge types. For each node type
+$t$, it keeps the $k_t$ nodes of type $t$ with the highest proximity in $\Hcal_R$. The neighbourhood is the union over
+chosen subsets $R_1, \dots, R_n$:
+
+$$
+N(u, \Hcal) = \bigcup_{i=1}^{n} N(u, \Hcal_{R_i}).
+$$
+
+Per-type quotas $k_t$ stop one abundant type from filling the neighbourhood. The proximity scores are approximated with
+the forward-push algorithm <Cite id="badrinath2025omnisage" />.
+
+## Encoder
+
+Each entity type $t$ has its own embedder $f_t$. Images are encoded by an in-house pretrained vision transformer and text
+by a shared hash embedding of n-grams. The neighbours of $u$ are sorted by proximity score, their features pass through
+an MLP, and the resulting sequence goes through a transformer encoder with a learned `[CLS]` token. The `[CLS]` output
+passes through an MLP and is normalised to unit length <Cite id="badrinath2025omnisage" />.
+
+Compared with <NoteLink to="pinsage">PinSage</NoteLink>, the aggregator changes from a weighted mean with
+weights fixed by visit counts to self-attention over neighbours ordered by those counts. Attention weights can then
+depend on the content of the node and each neighbour.
+
+## Objectives
+
+All tasks use the same sampled softmax with in-batch and random negatives, for a query $\qvec$, positive $\pvec$ and
+negatives $\Ncal$: $L(\qvec, \pvec, \Ncal) = -\log \frac{e^{s(\qvec, \pvec)}}{e^{s(\qvec, \pvec)} +
+\sum_{\nvec \in \Ncal} e^{s(\qvec, \nvec)}}$ <Cite id="badrinath2025omnisage" />.
+
+- **Entity–entity.** Positive pairs come from graph edges (a node and a sampled neighbour of a chosen type) and from
+  engagement logs such as pin–pin and board–pin. Each data source $i$ has a weight $w_i$ in $L_{\mathrm{pair}}$.
+- **Entity–feature.** For each feature type $x$ of node $u$, an MLP encoder $g_x$ maps the feature to a query, and the
+  positive is $u$'s own embedding. This keeps content information in the embedding, which matters for cold-start nodes.
+- **User–entity.** A causal transformer decoder reads a user's sequence of entity embeddings $\pvec_1, \dots, \pvec_t$
+  and outputs user embeddings $\uvec_t$. The next-action loss contrasts $\uvec_t$ with $\pvec_{t+1}$. The future-action
+  loss contrasts it with an entity sampled from a future window, following PinnerFormer
+  <Cite id="pancha2022pinnerformer" />.
+
+The total loss is
+$L = \lambda_p L_{\mathrm{pair}} + \lambda_f L_{\mathrm{feat}} + \lambda_s (L_{\mathrm{next}} + L_{\mathrm{fut}})$.
+Because the sequence losses backpropagate into the entity embedders, the graph embeddings are trained end to end on user
+activity <Cite id="badrinath2025omnisage" />.
+
+## Training and inference systems
+
+**Graph engine.** An in-house engine, Grogu, holds the graph as memory-mapped adjacency lists on high-memory machines,
+samples neighbours on the fly in C++, and fetches features from a RocksDB key-value store partitioned across machines
+<Cite id="badrinath2025omnisage" />.
+
+**Chunked sampled softmax.** With $b$ queries and $k$ negatives pooled across devices, the logits matrix
+$\Qmat\Nmat\transpose$ has $b \times k$ entries per task and is held until the backward pass. OmniSage detaches the
+query, positive and negative embeddings, computes the loss and its gradients with respect to those embeddings chunk by
+chunk, frees each chunk's logits, averages the accumulated gradients, and then backpropagates once from the embeddings
+into the model. Peak memory for logits falls from $b \times k$ to (chunk size) $\times k$ without extra backward passes
+through the model, which permits larger batches <Cite id="badrinath2025omnisage" />.
+
+**Inference.** A daily batch job embeds over 6 billion entities. Nodes pruned from the graph or without edges get zero
+neighbour features <Cite id="badrinath2025omnisage" />.
+
+## Reported results
+
+Offline, the unified model improved recall over PinSage by 32.1% and over PinnerFormer by 89.5% on their respective
+tasks <Cite id="badrinath2025omnisage" />.
+
+In A/B tests that replaced PinSage representations with OmniSage in homefeed ranking, related-pins retrieval and
+related-pins ranking, sitewide repins rose by 0.92%, 0.39% and 0.85% respectively, over 1.7% in total. OmniSage board
+embeddings in the Board More Ideas surface raised sitewide repins by 1.05% and that surface's repins by 9.7%. Across
+five applications the paper reports about a 2.5% increase in sitewide repins <Cite id="badrinath2025omnisage" />.
+
+## Pitfalls
+
+- **Many knobs.** Relation subsets, per-type quotas $k_t$, task weights $\lambda$ and data-source weights $w_i$ all
+  change the embedding; the paper ablates several of them.
+- **Daily inference.** Embeddings are refreshed once a day, like PinnerFormer, so they miss same-day activity.
+- **Infrastructure.** On-the-fly sampling over billions of nodes needs a dedicated graph engine and feature store.

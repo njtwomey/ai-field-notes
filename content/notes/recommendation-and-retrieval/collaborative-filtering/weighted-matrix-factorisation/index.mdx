@@ -1,0 +1,94 @@
+---
+title: Weighted matrix factorisation
+kind: technique
+summary: 'Weighted matrix factorisation fits implicit feedback over every user-item cell: interactions are targets of 1 with a high confidence weight and unobserved cells are targets of 0 with a small weight, so absences act as weak negatives.'
+tags: [recommender-systems, collaborative-filtering, matrix-factorisation, implicit-feedback, worked-example]
+aliases: [WMF, implicit ALS, iALS, one-class matrix factorisation, confidence-weighted matrix factorisation, Hu-Koren-Volinsky]
+requires: [matrix-factorisation-for-recommendation, explicit-and-implicit-feedback]
+partOf: [recommender-systems]
+related: [biases-in-recommender-feedback, propensity-in-recommendation]
+references: [hu2008implicit]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Weighted matrix factorisation** (WMF) fits user vectors $\wvec_u$ and item vectors $\vvec_i$ to all $U \times M$ cells
+of an implicit-feedback matrix. Each cell has a binary target $p_{ui}$, 1 if user $u$ interacted with item $i$ and 0
+otherwise, and a weight $c_{ui} > 0$ that is large for observed interactions and small for unobserved ones:
+
+$$
+\min_{\Wmat, \Vmat}\sum_{u, i} c_{ui}\paren{p_{ui} - \wvec_u\transpose\vvec_i}^2 + \lambda\paren{\norm{\Wmat}_F^2 + \norm{\Vmat}_F^2}.
+$$
+
+<Cite id="hu2008implicit" />
+</Definition>
+
+## Problem
+
+Implicit feedback records only positive events. Fitting <NoteLink to="matrix-factorisation-for-recommendation">matrix
+factorisation</NoteLink> to the observed cells alone fits a matrix of ones: the model predicts 1 everywhere and ranks
+nothing. The unobserved cells must enter the objective. They cannot be treated as firm negatives either, because most
+of them are items the user never saw.
+
+## Mechanism
+
+A general form puts a weight $w_{ui}$ on observed pairs and a small uniform weight $w_0$ on the rest:
+
+$$
+\min_{\Wmat, \Vmat}\sum_{(u, i) \in \Ocal} w_{ui}\paren{r_{ui} - \wvec_u\transpose\vvec_i}^2 + \sum_{(u, i) \notin \Ocal} w_0\paren{\wvec_u\transpose\vvec_i}^2.
+$$
+
+The second sum pulls every unobserved prediction towards 0, softly. The weights express confidence: $w_{ui}$ grows with
+how often or how long the user engaged, and $w_0$ says how much an absence is worth as a negative.
+
+Hu, Koren and Volinsky's version, the usual reference implementation, separates the two roles of the raw count
+$r_{ui}$, such as the number of plays. The **preference** $p_{ui} = \indicator[r_{ui} > 0]$ is the target. The
+**confidence** $c_{ui} = 1 + \alpha r_{ui}$ is the weight, with $\alpha$ typically around 40 in their experiments.
+Unobserved cells get $p_{ui} = 0$ with confidence 1; a film watched ten times gets $p_{ui} = 1$ with confidence
+$1 + 10\alpha$ <Cite id="hu2008implicit" />.
+
+**Fitting by weighted ALS.** With $\Vmat$ fixed, user $u$'s terms are a weighted least-squares problem over all $M$
+items. Let $\Cmat_u = \diag(c_{u1}, \ldots, c_{uM})$ and $\pvec_u = (p_{u1}, \ldots, p_{uM})\transpose$. Setting the
+gradient $-2\Vmat\transpose\Cmat_u(\pvec_u - \Vmat\wvec_u) + 2\lambda\wvec_u$ to zero gives
+
+$$
+\wvec_u = \paren{\Vmat\transpose\Cmat_u\Vmat + \lambda\eye}^{-1}\Vmat\transpose\Cmat_u\pvec_u.
+$$
+
+Only the $n_u$ observed items have $c_{ui} \ne 1$ or $p_{ui} \ne 0$. Writing $\Vmat\transpose\Cmat_u\Vmat =
+\Vmat\transpose\Vmat + \Vmat\transpose(\Cmat_u - \eye)\Vmat$ reuses $\Vmat\transpose\Vmat$ across users, and
+$\Vmat\transpose\Cmat_u\pvec_u$ sums only over observed items. Each user step costs $O(n_uK^2 + K^3)$ even though it
+fits all $M$ cells. Item steps are symmetric. See <NoteLink to="alternating-least-squares">alternating least
+squares</NoteLink> <Cite id="hu2008implicit" />.
+
+## Worked example
+
+A user played item A 5 times and item B once, and never played item C. With $\alpha = 40$ the targets and weights
+are:
+
+| item | plays $r_{ui}$ | target $p_{ui}$ | weight $c_{ui} = 1 + 40r_{ui}$ |
+| ---- | -------------- | --------------- | ------------------------------ |
+| A    | 5              | 1               | 201                            |
+| B    | 1              | 1               | 41                             |
+| C    | 0              | 0               | 1                              |
+
+A prediction error of 0.5 on A costs $201 \times 0.25 = 50.25$, on B $41 \times 0.25 = 10.25$, and on C $1 \times 0.25 =
+0.25$. The fit bends to explain A before B, and bends very little for C. C still counts: summed over the hundreds of
+thousands of unobserved items, the weak zeros stop the model from predicting 1 everywhere.
+
+## Cost
+
+- The objective has $UM$ terms. Without the rewriting above, fitting it would be infeasible. With it, a sweep costs
+  about as much as ALS on the observed cells alone.
+- SGD cannot use the trick directly; SGD versions sample unobserved cells instead, which approximates the objective.
+
+## Trade-offs
+
+- **Uniform weight on absences.** A constant $w_0$ treats an item the user never saw like one they saw and skipped.
+  Exposure-aware variants weight unobserved cells by an estimated probability of exposure, which connects WMF to
+  <NoteLink to="propensity-in-recommendation">propensity</NoteLink> methods.
+- **Pointwise, not pairwise.** WMF regresses on 0 and 1. <NoteLink to="bayesian-personalised-ranking">BPR</NoteLink>
+  instead asks only that observed items outrank unobserved ones, which targets the ranking directly.
+- **Hyperparameters matter.** The confidence scale $\alpha$ and the regularisation $\lambda$ change results
+  substantially and must be tuned on held-out interactions.

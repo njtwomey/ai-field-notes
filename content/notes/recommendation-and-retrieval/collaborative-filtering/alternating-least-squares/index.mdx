@@ -1,0 +1,121 @@
+---
+title: Alternating least squares
+kind: technique
+summary: 'Alternating least squares fits a matrix factorisation by fixing the item factors and solving one ridge regression per user, $\wvec_u = (\Vmat_u\transpose\Vmat_u + \lambda\eye)^{-1}\Vmat_u\transpose\rvec_u$, then fixing the user factors and doing the same per item. The solves are exact and independent, so sweeps parallelise.'
+tags: [recommender-systems, collaborative-filtering, matrix-factorisation, optimisation]
+aliases: [ALS, ALS-WR, weighted alternating least squares, WALS, alternating minimisation for matrix factorisation]
+requires: [matrix-factorisation-for-recommendation, ridge-regression]
+partOf: [recommender-systems]
+related: [coordinate-descent, weighted-matrix-factorisation, stochastic-gradient-descent-theory]
+references: [zhou2008als, hu2008implicit, koren2009mf]
+status: draft
+updated: 2026-09-27
+---
+
+import { AlsVsSgd } from './AlsVsSgd'
+
+<Definition>
+**Alternating least squares** (ALS) minimises the regularised matrix-factorisation objective
+
+$$
+J(\Wmat, \Vmat) = \sum_{(u, i) \in \Ocal}\paren{r_{ui} - \wvec_u\transpose\vvec_i}^2 + \lambda\paren{\norm{\Wmat}_F^2 + \norm{\Vmat}_F^2}
+$$
+
+by alternating two exact steps: with $\Vmat$ fixed, set every user vector $\wvec_u$ to its minimiser; with $\Wmat$
+fixed, set every item vector $\vvec_i$ to its minimiser. Each step is a set of independent ridge regressions
+<Cite id="zhou2008als" />.
+</Definition>
+
+## Problem
+
+$J$ is not convex in $(\Wmat, \Vmat)$ together: the term $\wvec_u\transpose\vvec_i$ is a product of unknowns. Gradient
+descent works but needs a step size and many passes. ALS uses the structure of the problem instead. With one factor
+fixed, $J$ is a convex quadratic in the other, and a quadratic can be minimised exactly in closed form.
+
+## Mechanism
+
+**The user step.** Fix $\Vmat$. The terms of $J$ that involve user $u$ are
+
+$$
+J_u(\wvec_u) = \sum_{i \in \Ocal_u}\paren{r_{ui} - \vvec_i\transpose\wvec_u}^2 + \lambda\norm{\wvec_u}^2,
+$$
+
+where $\Ocal_u$ is the set of items user $u$ rated. No other user's vector appears, so each user is a separate problem.
+Stack the rated items' vectors as the rows of $\Vmat_u \in \reals^{n_u \times K}$ and the ratings as $\rvec_u \in
+\reals^{n_u}$, with $n_u = \abs{\Ocal_u}$. Then $J_u = \norm{\rvec_u - \Vmat_u\wvec_u}^2 + \lambda\norm{\wvec_u}^2$, a
+<NoteLink to="ridge-regression">ridge regression</NoteLink> of the user's ratings on the item vectors. Its gradient is
+
+$$
+\nabla J_u = -2\Vmat_u\transpose\paren{\rvec_u - \Vmat_u\wvec_u} + 2\lambda\wvec_u.
+$$
+
+Setting it to zero gives the normal equations $(\Vmat_u\transpose\Vmat_u + \lambda\eye)\wvec_u =
+\Vmat_u\transpose\rvec_u$, so
+
+$$
+\wvec_u = \paren{\Vmat_u\transpose\Vmat_u + \lambda\eye}^{-1}\Vmat_u\transpose\rvec_u.
+$$
+
+For $\lambda > 0$ the matrix is positive definite, so the solution exists and is unique. The Hessian
+$2(\Vmat_u\transpose\Vmat_u + \lambda\eye)$ is positive definite, so it is the minimum.
+
+**The item step.** Fix $\Wmat$. By the same argument, with $\Wmat_i$ the vectors of the users who rated item $i$ and
+$\rvec_i$ their ratings,
+
+$$
+\vvec_i = \paren{\Wmat_i\transpose\Wmat_i + \lambda\eye}^{-1}\Wmat_i\transpose\rvec_i.
+$$
+
+**The algorithm.**
+
+1. Initialise $\Vmat$ with small random values.
+2. Update every $\wvec_u$ with the user step.
+3. Update every $\vvec_i$ with the item step.
+4. Repeat steps 2 and 3 until $J$ or the held-out error stops improving.
+
+<AlsVsSgd />
+
+## Why it converges
+
+Each step replaces a block of variables with the exact minimiser of $J$ over that block, holding the rest fixed. So
+$J$ cannot increase:
+$J(\Wmat^{(t+1)}, \Vmat^{(t)}) \le J(\Wmat^{(t)}, \Vmat^{(t)})$ and
+$J(\Wmat^{(t+1)}, \Vmat^{(t+1)}) \le J(\Wmat^{(t+1)}, \Vmat^{(t)})$. $J$ is bounded below by 0, so the sequence of
+objective values converges. This is block <NoteLink to="coordinate-descent">coordinate descent</NoteLink>. Because $J$
+is not jointly convex, the limit is a stationary point that depends on the initialisation, not necessarily the global
+minimum.
+
+## Cost
+
+A user step costs $O(n_uK^2)$ to form $\Vmat_u\transpose\Vmat_u$ and $O(K^3)$ to solve the $K \times K$ system. A full
+sweep costs $O(\abs{\Ocal}K^2 + (U + M)K^3)$. With $K$ in the tens to low hundreds this is dominated by the first term.
+
+The per-user problems share no variables, so a sweep parallelises across machines: each worker needs only its users'
+ratings and a copy of $\Vmat$. Zhou et al. used this to fit the Netflix data on a cluster <Cite id="zhou2008als" />, and
+ALS became a staple of industrial recommenders. Zhou et al. also scaled the penalty by the number of ratings, $\lambda
+n_u\norm{\wvec_u}^2$, which they called weighted-$\lambda$ regularisation (ALS-WR).
+
+## Implicit feedback
+
+With implicit feedback every cell of the matrix enters the objective, with a small weight for unobserved cells (see
+<NoteLink to="weighted-matrix-factorisation">weighted matrix factorisation</NoteLink>). A user step then involves all
+$M$ items, and $\Vmat\transpose\Cmat_u\Vmat$, with $\Cmat_u$ the diagonal matrix of user $u$'s weights, looks like it
+costs $O(MK^2)$ per user. Hu et al. write it as
+
+$$
+\Vmat\transpose\Cmat_u\Vmat = \Vmat\transpose\Vmat + \Vmat\transpose\paren{\Cmat_u - \eye}\Vmat.
+$$
+
+$\Vmat\transpose\Vmat$ is shared by all users and computed once per sweep. $\Cmat_u - \eye$ is non-zero only for the
+$n_u$ items user $u$ interacted with, so the second term costs $O(n_uK^2)$. A sweep over the full matrix then costs no
+more than one over the observed entries <Cite id="hu2008implicit" />. This weighted ALS (WALS) is why ALS suits implicit
+feedback so well.
+
+## Trade-offs
+
+- **No step size.** Each update is exact. SGD needs a learning rate and a schedule.
+- **Fewer, heavier passes.** An ALS sweep costs more than an SGD epoch but usually does much more.
+- **Restricted to squared loss.** The closed form exists because the loss is quadratic in each block. For ranking
+  losses such as <NoteLink to="bayesian-personalised-ranking">BPR</NoteLink> or for neural models, SGD is the tool.
+- **Cold start is unchanged.** A user with no ratings has $\Vmat_u$ empty and gets $\wvec_u = \zeros$. ALS fits the
+  same model as SGD and inherits its limits.
