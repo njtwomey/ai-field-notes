@@ -1,0 +1,174 @@
+---
+title: Cubic spline interpolation
+kind: concept
+summary: 'The interpolating cubic spline is $C^2$, cubic between data points, and fixed by two end conditions (natural, clamped, not-a-knot, periodic). Its second derivatives solve a tridiagonal system in $O(n)$; the natural spline minimises $\int f''''^2$ among interpolants, and the error is $O(h^4)$.'
+tags: [splines, interpolation, numerical-methods, worked-example]
+aliases: [interpolating cubic spline, cubic spline interpolant, not-a-knot condition, clamped spline, natural end conditions, Holladay theorem, Thomas algorithm, tridiagonal matrix algorithm, spline moments]
+requires: [piecewise-polynomials-and-continuity, integration-by-parts]
+partOf: [splines-and-interpolation]
+related: [polynomial-interpolation-and-runge, smoothing-splines, regression-splines, lu-decomposition, monotone-and-shape-preserving-interpolation]
+references: [deboor1978, holladay1957, hall1976, schoenberg1946, suli2003, press2007]
+status: draft
+updated: 2026-09-27
+---
+
+import { SplinePlayground } from '../_shared/SplinePlayground'
+
+<Definition>
+Given data $(x_i, y_i)$, $i = 0, \dots, n$, with $x_0 < x_1 < \dots < x_n$, the **interpolating cubic spline** is the
+function $S$ that is a cubic polynomial on each interval $[x_i, x_{i+1}]$, has continuous first and second derivatives
+at every interior node, and satisfies $S(x_i) = y_i$. These conditions leave two degrees of freedom, fixed by an
+**end condition**: natural ($S'' = 0$ at both ends), clamped (given end slopes), not-a-knot (a single cubic across the
+first two and the last two intervals) or periodic <Cite id="deboor1978" />.
+</Definition>
+
+## Counting the unknowns
+
+There are $n$ intervals and $4n$ cubic coefficients. Interpolation at both ends of each interval gives $2n$
+equations, and continuity of $S'$ and $S''$ at the $n - 1$ interior nodes gives $2(n - 1)$ more. That is $4n - 2$
+equations for $4n$ unknowns, so two conditions remain, one at each end.
+
+## The tridiagonal system
+
+Parameterise the spline by its second derivatives at the nodes, the **moments** $M_i = S''(x_i)$. Let
+$h_i = x_{i+1} - x_i$ and $\delta_i = (y_{i+1} - y_i)/h_i$. On $[x_i, x_{i+1}]$, $S$ is cubic, so $S''$ is linear and
+interpolates the moments:
+
+$$
+S''(x) = M_i\frac{x_{i+1} - x}{h_i} + M_{i+1}\frac{x - x_i}{h_i}.
+$$
+
+This makes $S''$ continuous by construction. Integrating twice introduces a linear function, whose two constants are
+fixed by $S(x_i) = y_i$ and $S(x_{i+1}) = y_{i+1}$:
+
+$$
+S(x) = M_i\frac{(x_{i+1} - x)^3}{6h_i} + M_{i+1}\frac{(x - x_i)^3}{6h_i}
++ \paren{y_i - \frac{M_i h_i^2}{6}}\frac{x_{i+1} - x}{h_i} + \paren{y_{i+1} - \frac{M_{i+1}h_i^2}{6}}\frac{x - x_i}{h_i}.
+$$
+
+Differentiating and evaluating at the two ends of the interval gives the one-sided slopes
+
+$$
+S'(x_i^+) = \delta_i - \frac{h_i}{6}(2M_i + M_{i+1}), \qquad S'(x_{i+1}^-) = \delta_i + \frac{h_i}{6}(M_i + 2M_{i+1}).
+$$
+
+The only condition left is continuity of $S'$ at each interior node, $S'(x_i^-) = S'(x_i^+)$. Using the second
+formula on interval $i - 1$ and the first on interval $i$:
+
+$$
+h_{i-1}M_{i-1} + 2(h_{i-1} + h_i)M_i + h_iM_{i+1} = 6(\delta_i - \delta_{i-1}), \qquad i = 1, \dots, n - 1.
+$$
+
+These are $n - 1$ equations in $n + 1$ moments. Each involves three neighbouring moments, so the matrix is
+tridiagonal.
+
+## End conditions
+
+- **Natural:** $M_0 = M_n = 0$. The spline continues as a straight line beyond the data. The system reduces to the
+  $n - 1$ interior moments.
+- **Clamped:** given slopes $S'(x_0) = s_0$ and $S'(x_n) = s_n$. From the slope formulas,
+  $2h_0M_0 + h_0M_1 = 6(\delta_0 - s_0)$ and $h_{n-1}M_{n-1} + 2h_{n-1}M_n = 6(s_n - \delta_{n-1})$. scipy's
+  `bc_type='clamped'` sets $s_0 = s_n = 0$.
+- **Not-a-knot:** $S'''$ is continuous at $x_1$ and $x_{n-1}$, so the first two pieces are one cubic and so are the
+  last two. Since $S''' = (M_{i+1} - M_i)/h_i$ on interval $i$, the condition at $x_1$ is
+  $h_1M_0 - (h_0 + h_1)M_1 + h_0M_2 = 0$. Not-a-knot needs no information that the data does not contain, and is
+  the default in scipy and MATLAB. With three points it gives the interpolating parabola.
+- **Periodic:** $y_n = y_0$, $M_n = M_0$, and $S'$ continuous across the wrap-around. The first and last rows gain
+  corner entries, and the matrix becomes cyclic tridiagonal.
+
+**Worked example.** Take $x = 0, 1, 2, 3$ and $y = 0, 1, 0, 1$ with natural ends. Here $h_i = 1$,
+$\delta = (1, -1, 1)$ and $M_0 = M_3 = 0$. The two interior equations are
+
+$$
+4M_1 + M_2 = 6(-1 - 1) = -12, \qquad M_1 + 4M_2 = 6(1 + 1) = 12,
+$$
+
+so $M_1 = -4$ and $M_2 = 4$. On $[0, 1]$, $S(x) = \tfrac{5}{3}x - \tfrac{2}{3}x^3$, and $S(0.5) = 0.75$. By symmetry
+$S(1.5) = 0.5$. scipy's `CubicSpline(x, y, bc_type='natural')` returns the same moments and values.
+
+## Solving in linear time: the Thomas algorithm
+
+A tridiagonal system $a_iM_{i-1} + b_iM_i + c_iM_{i+1} = d_i$ is solved by Gaussian elimination that touches only
+the three diagonals. The forward sweep eliminates $a_i$ with row $i - 1$:
+
+$$
+c_i' = \frac{c_i}{b_i - a_ic_{i-1}'}, \qquad d_i' = \frac{d_i - a_id_{i-1}'}{b_i - a_ic_{i-1}'},
+$$
+
+leaving an upper bidiagonal system $M_i + c_i'M_{i+1} = d_i'$, solved backwards by
+$M_i = d_i' - c_i'M_{i+1}$. The cost is $O(n)$ operations and $O(n)$ memory, against $O(n^3)$ for dense elimination
+<Cite id="press2007" />. No pivoting is needed when the matrix is strictly diagonally dominant, which the spline
+system is: $2(h_{i-1} + h_i) > h_{i-1} + h_i$. Then every pivot satisfies $\abs{b_i - a_ic_{i-1}'} > \abs{c_i}$, so
+$\abs{c_i'} < 1$ and errors do not grow.
+
+<SplinePlayground
+  title="Cubic spline end conditions"
+  initialType="cubic"
+  types={['cubic', 'polynomial', 'linear', 'pchip']}
+  presets={['initial', 'runge', 'step', 'uneven']}
+  showLower
+  caption="Switch between the four end conditions and watch only the ends change. The basis panel shows the cardinal spline of the selected point, the interpolant of data that is 1 there and 0 elsewhere: it is non-zero everywhere but decays fast away from its point, so the spline is global in principle and nearly local in practice. The lower panel shows S'' is continuous and piecewise linear. Load the Runge preset and compare with the interpolating polynomial."
+/>
+
+## The smoothest interpolant
+
+**Theorem (Holladay).** Among all functions $g$ with a square-integrable second derivative on $[x_0, x_n]$ that
+interpolate the data, the natural cubic spline $S$ uniquely minimises $\int_{x_0}^{x_n} g''(x)^2\,dx$
+<Cite id="holladay1957" />.
+
+**Proof.** Let $e = g - S$, so $e(x_i) = 0$ at every node. Then
+
+$$
+\int g''^2 = \int S''^2 + 2\int S''e'' + \int e''^2.
+$$
+
+Integrate the middle term by parts on each interval:
+
+$$
+\int_{x_i}^{x_{i+1}} S''e''\,dx = \brack{S''e'}_{x_i}^{x_{i+1}} - \int_{x_i}^{x_{i+1}} S'''e'\,dx.
+$$
+
+Summed over intervals, the boundary terms telescope, because $S''$ and $e'$ are continuous, to
+$S''(x_n)e'(x_n) - S''(x_0)e'(x_0)$, which is zero by the natural end conditions. On each interval $S'''$ is a constant
+$c_i$, so $\int_{x_i}^{x_{i+1}} S'''e' = c_i(e(x_{i+1}) - e(x_i)) = 0$. Hence $\int S''e'' = 0$ and
+
+$$
+\int g''^2 = \int S''^2 + \int e''^2 \ge \int S''^2,
+$$
+
+with equality only if $e'' = 0$, that is $e$ linear; $e$ vanishes at two or more nodes, so $e = 0$.
+
+The same argument shows that a clamped spline minimises $\int g''^2$ among interpolants with the same end slopes: then
+$e'(x_0) = e'(x_n) = 0$ kills the boundary terms. $\int g''^2$ approximates the bending energy of a thin elastic
+strip with small slope, which is why a draughtsman's spline, a strip of wood held by weights at the data points,
+takes this shape. For the worked example the natural spline has $\int S''^2 = 16$; the not-a-knot and zero-slope
+clamped splines through the same points have 36.
+
+## Accuracy
+
+If $f$ has four continuous derivatives and the spline is clamped with the true slopes $f'(x_0)$, $f'(x_n)$, then
+
+$$
+\max\abs{f - S} \le \frac{5}{384}\,h^4\max\abs{f^{(4)}}, \qquad h = \max_i h_i,
+$$
+
+and the constant $5/384$ is the best possible <Cite id="hall1976" />. The derivatives converge too, with errors
+$O(h^3)$ for $S'$ and $O(h^2)$ for $S''$. The rate is easy to see numerically. Interpolating $\sin$ on $[0, \pi]$ with
+$n$ equal intervals and true end slopes gives maximum errors $6.32 \times 10^{-5}$, $3.89 \times 10^{-6}$,
+$2.42 \times 10^{-7}$ and $1.51 \times 10^{-8}$ for $n = 8, 16, 32, 64$. Each halving of $h$ divides the error by 16.
+The natural end condition is wrong whenever $f''$ is not zero at the ends. It then loses accuracy near the ends, to
+$O(h^2)$, while the interior keeps $O(h^4)$.
+
+Unlike polynomial interpolation, refining the nodes always helps. The bound holds for any spacing of the nodes, so the
+clamped spline converges for every $f$ with four continuous derivatives as $h \to 0$, and there is no Runge
+phenomenon.
+
+## Pitfalls
+
+- **Overshoot.** A cubic spline through step-like or monotone data overshoots. Through $y = 0, 0, 0, 1, 1, 1$ at
+  $x = 0, \dots, 5$ the natural spline dips to $-0.109$ and rises to $1.109$. Use
+  <NoteLink to="monotone-and-shape-preserving-interpolation">PCHIP</NoteLink> when the data's shape must be kept.
+- **Noisy data.** An interpolant reproduces the noise. A <NoteLink to="smoothing-splines">smoothing spline</NoteLink>
+  trades fidelity for smoothness.
+- **Natural ends by default.** "Natural" sounds neutral but forces $S'' = 0$. Prefer not-a-knot unless the physics
+  says the ends are straight.

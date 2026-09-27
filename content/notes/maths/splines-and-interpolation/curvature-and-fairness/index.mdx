@@ -1,0 +1,128 @@
+---
+title: Curvature and fairness
+kind: concept
+summary: 'Curvature is the turning rate of the unit tangent per unit length, $\kappa = (x''y'''' - y''x'''')/(x''^2 + y''^2)^{3/2}$, the reciprocal radius of the osculating circle. Curvature combs show it along a curve. A fair curve has continuous curvature with few monotone pieces; fairing lowers $\int\kappa^2\,ds$.'
+tags: [differential-geometry, splines, computer-aided-design, worked-example]
+aliases: [curvature of a curve, signed curvature, osculating circle, radius of curvature, curvature comb, porcupine plot, fairing, fair curve, elastica, curve fairness]
+requires: [derivative, piecewise-polynomials-and-continuity]
+partOf: [splines-and-interpolation]
+related: [cubic-spline-interpolation, smoothing-penalties-and-curvature, nurbs, splines-for-curves-and-surfaces, euler-lagrange-equation]
+references: [farin2002, farin1989, levien2009, moreton1992, holladay1957]
+status: draft
+updated: 2026-09-27
+---
+
+import { SplinePlayground } from '../_shared/SplinePlayground'
+
+<Definition>
+Let $\cvec(u) = (x(u), y(u))$ be a plane curve with $\cvec' \ne 0$, arc length $s$ and unit tangent
+$\tvec = \cvec'/\norm{\cvec'}$. Its **signed curvature** $\kappa$ is defined by $d\tvec/ds = \kappa\,\nvec$, where
+$\nvec$ is $\tvec$ rotated by $+90°$. It equals
+
+$$
+\kappa = \frac{x'y'' - y'x''}{\paren{x'^2 + y'^2}^{3/2}}
+$$
+
+in any regular parameterisation. $\abs{\kappa}$ is the reciprocal of the radius of the **osculating circle**, the
+circle that best fits the curve at the point <Cite id="farin2002" />.
+</Definition>
+
+## Deriving the formula
+
+Write $\sigma = ds/du = \norm{\cvec'}$ for the speed, so that $\cvec' = \sigma\,\tvec$. Differentiate with respect to
+$u$ and use the chain rule $d\tvec/du = \sigma\,d\tvec/ds = \sigma\kappa\,\nvec$:
+
+$$
+\cvec'' = \sigma'\,\tvec + \sigma^2\kappa\,\nvec.
+$$
+
+The second derivative splits into a part along the tangent, which changes the speed, and a part along the normal,
+which bends the path. Take the two-dimensional cross product $\avec \times \bvec = a_1b_2 - a_2b_1$ with $\cvec'$.
+Since $\tvec \times \tvec = 0$ and $\tvec \times \nvec = 1$,
+
+$$
+\cvec' \times \cvec'' = \sigma\,\tvec \times (\sigma'\,\tvec + \sigma^2\kappa\,\nvec) = \sigma^3\kappa,
+\qquad \kappa = \frac{x'y'' - y'x''}{\sigma^3}.
+$$
+
+The formula does not depend on the parameterisation. Reparameterising multiplies $\sigma$ by $\phi'$ and adds a
+tangential term to $\cvec''$, which the cross product ignores. For a graph $y = f(x)$, take $u = x$:
+$x' = 1$, $x'' = 0$, and
+
+$$
+\kappa = \frac{f''}{\paren{1 + f'^2}^{3/2}}.
+$$
+
+For small slopes $\kappa \approx f''$. That is the link between geometric curvature and the $\int f''^2$ penalties of
+<NoteLink to="cubic-spline-interpolation">interpolating</NoteLink> and
+<NoteLink to="smoothing-penalties-and-curvature">smoothing</NoteLink> splines.
+
+**The osculating circle.** The circle with centre $\cvec + \nvec/\kappa$ and radius $1/\abs{\kappa}$ passes through
+the point with the same tangent and the same curvature. It agrees with the curve to second order, which no other
+circle does.
+
+**Worked example.** For the circle $\cvec(u) = (R\cos u, R\sin u)$, $x'y'' - y'x'' = R^2\sin^2u + R^2\cos^2u = R^2$
+and $\sigma = R$, so $\kappa = 1/R$. For the parabola $y = x^2$, $f' = 2x$ and $f'' = 2$: $\kappa(0) = 2$ and
+$\kappa(1) = 2/5^{3/2} = 0.179$. The osculating circle at the vertex has radius $1/2$ and centre $(0, 1/2)$.
+
+## Curvature combs
+
+A **curvature comb** draws, at many points along the curve, a line segment along the normal with length proportional
+to $\kappa$. The tips form a second curve. The comb shows at a glance what the eye struggles to see in the curve
+itself:
+
+- **Jumps** in the comb are discontinuities of curvature: the curve is $G^1$ but not $G^2$ there. Cubic Hermite and
+  PCHIP curves jump at every data point; cubic B-splines with simple knots do not.
+- **Sign changes** are inflection points, where the curve changes from turning left to turning right.
+- **Bumps** in the comb envelope are places where curvature rises and falls again. Each one is a place a reflection
+  on a glossy surface will visibly wobble.
+
+<SplinePlayground
+  title="Curvature combs and osculating circles"
+  initialType="bspline"
+  types={['bspline', 'cubic', 'catmull-rom', 'pchip', 'bezier', 'nurbs']}
+  initialPoints={[[0.8, 1.2], [1.8, 4.2], [3.2, 5], [4.4, 2.4], [5.6, 1.2], [6.8, 3.6], [8, 5], [9.2, 2]]}
+  showComb
+  showOsculating
+  showLower
+  initialLower="curvature"
+  presets={['initial', 'uneven', 'circle']}
+  caption="The comb teeth are proportional to the curvature, and the dashed circle is the osculating circle at t; drag t along the curve in the basis or curvature panel. Switch to Catmull–Rom or PCHIP and the comb jumps at every point: those curves are only G¹. Move a single control point slightly and watch the comb and the bending energy ∫κ² ds: small changes in position make large changes in curvature. Load the circle preset for a constant comb."
+/>
+
+## Fairness
+
+A curve is **fair** if it looks smooth to a trained eye. The working definitions in design translate the eye's
+judgement into curvature <Cite id="farin1989" />:
+
+- the curvature plot is continuous ($G^2$),
+- it consists of as few monotone pieces as possible, with no unintended bumps,
+- the curvature is small where the designer intends the curve to be nearly straight.
+
+**Energy.** A thin elastic rod that passes through fixed points takes the shape that minimises its bending energy
+
+$$
+E = \int \kappa^2\,ds.
+$$
+
+Its minimisers are Euler's **elastica**. The problem is non-linear, because both $\kappa$ and $ds$ depend on the
+curve, and it needs the <NoteLink to="euler-lagrange-equation">Euler–Lagrange equation</NoteLink> for a solution
+<Cite id="levien2009" />. For a graph with small slope, $\kappa \approx f''$ and $ds \approx dx$, so
+$E \approx \int f''^2\,dx$. The natural cubic spline minimises that linearised energy exactly, by Holladay's theorem
+<Cite id="holladay1957" />, which is why it approximates a draughtsman's elastic spline when the slopes are small. For
+steep or closed curves it does not, and fairing methods minimise $\int\kappa^2\,ds$ or $\int (d\kappa/ds)^2\,ds$
+directly. The second energy favours curves whose curvature changes linearly, such as clothoids, used for road and
+rail transitions <Cite id="levien2009" /> <Cite id="moreton1992" />.
+
+**Fairing** improves a given spline. Common methods remove a knot and reinsert it where the comb shows a bump, move
+the single control point that most reduces a fairness energy, or add an energy term to a least-squares fit. Each step
+checks the curvature plot.
+
+## Pitfalls
+
+- **Parametric continuity is not fairness.** A $C^2$ curve in its parameter can still have an unfair comb with
+  bumps, and a $G^2$ curve with a poor parameterisation can be perfectly fair.
+- **Curvature amplifies noise.** $\kappa$ involves second derivatives. A control point moved by a small amount can
+  change the comb a lot, so fairing works on the comb, not on positions.
+- **Scaling.** Curvature has units of inverse length. Scaling a shape by $a$ divides $\kappa$ by $a$ and $E$ by $a$,
+  so compare energies only at the same scale.

@@ -1,0 +1,143 @@
+---
+title: Hermite and Catmull–Rom splines
+kind: concept
+summary: 'A cubic Hermite spline fixes each piece by the values and slopes at its ends, so it is local and $C^1$. Catmull–Rom splines take each slope from the neighbouring points. The parameter spacing $\norm{\Delta\pvec}^\alpha$ matters: centripetal $\alpha = 1/2$ avoids cusps and loops within a segment.'
+tags: [splines, interpolation, computer-graphics, animation, worked-example]
+aliases: [cubic Hermite spline, Hermite interpolation, Hermite basis functions, Catmull–Rom spline, cardinal spline, centripetal Catmull–Rom, chordal parameterisation, Kochanek–Bartels tension, Barry–Goldman algorithm]
+requires: [piecewise-polynomials-and-continuity]
+partOf: [splines-and-interpolation]
+related: [cubic-spline-interpolation, monotone-and-shape-preserving-interpolation, splines-for-curves-and-surfaces]
+references: [catmull1974, yuksel2011, barry1988, farin2002, deboor1978]
+status: draft
+updated: 2026-09-27
+---
+
+import { SplinePlayground } from '../_shared/SplinePlayground'
+
+<Definition>
+A **cubic Hermite spline** through points $\pvec_0, \dots, \pvec_n$ at parameters $t_0 < \dots < t_n$ with tangents
+$\mvec_0, \dots, \mvec_n$ is the piecewise cubic whose piece on $[t_i, t_{i+1}]$ has value $\pvec_i$ and derivative
+$\mvec_i$ at $t_i$, and value $\pvec_{i+1}$ and derivative $\mvec_{i+1}$ at $t_{i+1}$. It is $C^1$. A
+**Catmull–Rom spline** chooses each tangent from the neighbouring points, $\mvec_i$ being the derivative at $t_i$ of
+the parabola through $\pvec_{i-1}, \pvec_i, \pvec_{i+1}$ <Cite id="catmull1974" />.
+</Definition>
+
+## The Hermite basis
+
+Map the interval to $s = (t - t_i)/h_i \in [0, 1]$, $h_i = t_{i+1} - t_i$. By the chain rule, a derivative
+$\mvec$ with respect to $t$ becomes $h_i\mvec$ with respect to $s$. Write the piece as
+$\qvec(s) = \avec + \bvec s + \cvec s^2 + \dvec s^3$ and impose the four conditions:
+
+$$
+\qvec(0) = \pvec_0, \quad \qvec'(0) = \mvec_0, \quad \qvec(1) = \pvec_1, \quad \qvec'(1) = \mvec_1
+$$
+
+(with the scaled tangents). The first two give $\avec = \pvec_0$ and $\bvec = \mvec_0$. The last two give
+$\cvec + \dvec = \pvec_1 - \pvec_0 - \mvec_0$ and $2\cvec + 3\dvec = \mvec_1 - \mvec_0$, so
+
+$$
+\cvec = 3(\pvec_1 - \pvec_0) - 2\mvec_0 - \mvec_1, \qquad \dvec = 2(\pvec_0 - \pvec_1) + \mvec_0 + \mvec_1.
+$$
+
+Collecting the coefficient of each datum gives the **Hermite basis**:
+
+$$
+\qvec(s) = H_{00}(s)\,\pvec_0 + H_{10}(s)\,\mvec_0 + H_{01}(s)\,\pvec_1 + H_{11}(s)\,\mvec_1,
+$$
+
+$$
+H_{00} = 2s^3 - 3s^2 + 1, \quad H_{10} = s^3 - 2s^2 + s, \quad H_{01} = -2s^3 + 3s^2, \quad H_{11} = s^3 - s^2.
+$$
+
+$H_{00}$ and $H_{01}$ are 1 at one end and 0 at the other with zero slope at both. $H_{10}$ and $H_{11}$ vanish at both
+ends with slope 1 at one. Neighbouring pieces share $\pvec_i$ and $\mvec_i$, so the spline is $C^1$ whatever the
+tangents are. Each piece depends only on its own two points and two tangents: moving one point changes at most the
+pieces whose tangents it enters.
+
+Hermite splines leave the tangents to the user. Cubic interpolating splines choose them globally to make $S''$
+continuous. <NoteLink to="monotone-and-shape-preserving-interpolation">PCHIP</NoteLink> chooses them locally to keep
+monotone data monotone. Catmull–Rom splines choose them locally from the neighbours.
+
+## Catmull–Rom tangents
+
+The tangent at $\pvec_i$ is the derivative at $t_i$ of the parabola through the three points around it. With chord
+slopes $\deltavec_{i-1} = (\pvec_i - \pvec_{i-1})/h_{i-1}$ and $\deltavec_i = (\pvec_{i+1} - \pvec_i)/h_i$, that
+derivative is
+
+$$
+\mvec_i = \frac{h_i\,\deltavec_{i-1} + h_{i-1}\,\deltavec_i}{h_{i-1} + h_i}.
+$$
+
+To derive it, write the parabola in Newton form around $t_i$: its derivative at $t_i$ is
+$\deltavec_{i-1} + (t_i - t_{i-1})\,f[t_{i-1}, t_i, t_{i+1}]$, and the second divided difference is
+$(\deltavec_i - \deltavec_{i-1})/(h_{i-1} + h_i)$. Simplifying gives the weighted average above, in which each chord's
+slope is weighted by the length of the other interval.
+
+With uniform parameters, $h_i = 1$, the tangent is $\mvec_i = (\pvec_{i+1} - \pvec_{i-1})/2$: the direction from the
+previous point to the next. At the ends the formula needs a missing neighbour. A common choice, used in the figure,
+reflects: $\pvec_{-1} = 2\pvec_0 - \pvec_1$.
+
+**Worked example.** Take $\pvec_0 = (0, 0)$, $\pvec_1 = (1, 1)$, $\pvec_2 = (2, -1)$, $\pvec_3 = (3, 0)$ with uniform
+parameters. The tangents at $\pvec_1$ and $\pvec_2$ are $(\pvec_2 - \pvec_0)/2 = (1, -0.5)$ and
+$(\pvec_3 - \pvec_1)/2 = (1, -0.5)$. At $s = 1/2$ the Hermite weights are $H_{00} = H_{01} = 1/2$,
+$H_{10} = 1/8$, $H_{11} = -1/8$, so the midpoint of the middle segment is
+
+$$
+\tfrac{1}{2}(1, 1) + \tfrac{1}{8}(1, -0.5) + \tfrac{1}{2}(2, -1) - \tfrac{1}{8}(1, -0.5) = (1.5, 0).
+$$
+
+Expanded in the four points, the uniform midpoint is $(-\pvec_0 + 9\pvec_1 + 9\pvec_2 - \pvec_3)/16$, which gives the
+same answer.
+
+## Cardinal splines and tension
+
+A **cardinal spline** scales every Catmull–Rom tangent by $1 - \tau$. The **tension** $\tau = 0$ gives Catmull–Rom.
+$\tau = 1$ gives zero tangents: the curve stops at every point and each piece is a straight segment traced with an
+ease-in and ease-out. Values between tighten the curve towards the control polygon. Animation packages add further
+per-key parameters for bias and continuity on the same Hermite frame.
+
+## Parameterisation: uniform, centripetal, chordal
+
+For a curve in the plane the parameters $t_i$ are not given. They are chosen from the points:
+
+$$
+t_{i+1} = t_i + \norm{\pvec_{i+1} - \pvec_i}^\alpha.
+$$
+
+$\alpha = 0$ is **uniform**, $\alpha = 1/2$ **centripetal** and $\alpha = 1$ **chordal**. The same points give three
+different curves. Barry and Goldman showed that the non-uniform Catmull–Rom segment is a pyramid of linear
+interpolations, like de Casteljau's algorithm for <NoteLink to="bezier-curves">Bézier curves</NoteLink>
+<Cite id="barry1988" />.
+
+**Why uniform parameters make loops.** In uniform parameters the tangent $(\pvec_{i+1} - \pvec_{i-1})/2$ does not
+depend on the length of the segment it starts. When a short segment sits between long ones, the curve must leave
+$\pvec_i$ with a long tangent and arrive at nearby $\pvec_{i+1}$ with another long tangent. A cubic that covers a short
+distance with high speed at both ends overshoots and turns back, which makes a loop or a cusp. For
+$\pvec = (0, 0), (1, 3), (1.3, 3), (4, 0)$, the uniform segment between $(1, 3)$ and $(1.3, 3)$ rises to $y = 3.375$
+and crosses itself. The centripetal segment rises to 3.049 and the chordal to 3.005, and neither crosses itself.
+
+Non-uniform parameters scale the tangents with the chords. Yuksel, Schaefer and Keyser proved that centripetal
+parameterisation is the one that guarantees no cusps and no self-intersections within a segment, and that it follows
+the control polygon more tightly than uniform parameterisation <Cite id="yuksel2011" />. Chordal curves can stray
+further from the polygon at sharp turns. Centripetal Catmull–Rom is the usual default for paths through keyframes.
+
+<SplinePlayground
+  title="Catmull–Rom parameterisation"
+  initialType="catmull-rom"
+  types={['catmull-rom', 'cubic', 'bspline']}
+  initialAlpha={0}
+  initialPoints={[[1, 0.6], [2.6, 4.6], [3.1, 4.6], [8.5, 0.6], [9.4, 2]]}
+  presets={['initial', 'uneven', 'step']}
+  showPolygon
+  caption="The uniform curve makes a loop in the short segment at the top. Switch to centripetal: the loop disappears. Chordal hugs the polygon even more. Raise the tension to pull the curve onto the polygon. The basis panel shows the cardinal function of the selected point: it is non-zero only on the two segments on each side of its point, which is what local control means."
+/>
+
+## Trade-offs
+
+- **Local but only $C^1$.** Moving a point changes four segments at most. The second derivative jumps at every point,
+  so curvature combs are discontinuous. A <NoteLink to="cubic-spline-interpolation">cubic interpolating
+  spline</NoteLink> is $C^2$ but global.
+- **Interpolating.** The curve passes through every point, unlike a <NoteLink to="b-splines">B-spline</NoteLink>,
+  which is easier for keyframes and harder for fairness.
+- **Parameter speed.** Equal steps in $t$ are not equal steps in arc length. Animation along the path needs
+  <NoteLink to="splines-for-curves-and-surfaces">arc-length reparameterisation</NoteLink> for constant speed.

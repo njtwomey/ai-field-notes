@@ -1,0 +1,144 @@
+---
+title: Monotone and shape-preserving interpolation
+kind: concept
+summary: 'Cubic splines overshoot step-like data. A cubic Hermite piece on monotone data stays monotone if both end slopes lie in $[0, 3]$ times the chord slope. PCHIP''s weighted harmonic-mean slopes meet this condition; Akima''s local weighted average does not.'
+tags: [splines, interpolation, numerical-methods, monotonicity, worked-example]
+aliases: [PCHIP, piecewise cubic Hermite interpolating polynomial, Fritsch–Carlson method, Fritsch–Butland slopes, monotone cubic interpolation, Akima interpolation, Akima spline, makima, shape-preserving interpolation]
+requires: [hermite-and-catmull-rom-splines]
+partOf: [splines-and-interpolation]
+related: [cubic-spline-interpolation, isotonic-regression, shape-constrained-gams, convex-sets-and-functions]
+references: [fritsch1980, fritsch1984, akima1970, deboor1978]
+status: draft
+updated: 2026-09-27
+---
+
+import { SplinePlayground } from '../_shared/SplinePlayground'
+
+<Definition>
+An interpolant is **shape-preserving** if it keeps a qualitative property of the data: monotone data gives a monotone
+curve, and the curve stays within the range of neighbouring data. **PCHIP** is the piecewise cubic Hermite
+interpolant whose slopes are chosen so that monotone data give a monotone $C^1$ curve <Cite id="fritsch1980" />
+<Cite id="fritsch1984" />. **Akima's method** chooses slopes by a local weighted average designed to avoid wiggles
+without solving a global system <Cite id="akima1970" />.
+</Definition>
+
+## Why cubic splines overshoot
+
+A <NoteLink to="cubic-spline-interpolation">cubic spline</NoteLink> has a continuous second derivative. On a step
+such as $y = 0, 0, 0, 1, 1, 1$ at $x = 0, 1, \dots, 5$, the spline must bend upward to climb the step and bend back
+to level off, and $C^2$ forbids it from doing either abruptly. It spreads the bending into the flat parts, which it
+can only do by dipping below 0 before the step and rising above 1 after it. The natural spline reaches $-0.109$ and
+$1.109$: an overshoot of 10.9% of the data range. The slopes at each node are set by the whole data set through the
+tridiagonal system, so a single step causes ripples that decay only geometrically away from it.
+
+Overshoot matters when the values have a meaning that forbids it: a cumulative distribution function must not
+decrease, a concentration must not go negative, a lookup table for a monotone physical law must stay monotone.
+
+## When a Hermite piece is monotone
+
+A cubic Hermite piece on $[x_i, x_{i+1}]$ has values $y_i < y_{i+1}$, slopes $d_i, d_{i+1}$, width $h$ and chord slope
+$\Delta = (y_{i+1} - y_i)/h > 0$. Rescale to $s \in [0, 1]$ and $q = (y - y_i)/(y_{i+1} - y_i)$. The piece becomes
+$q(0) = 0$, $q(1) = 1$ with slopes $\alpha = d_i/\Delta$ and $\beta = d_{i+1}/\Delta$. From the Hermite basis,
+
+$$
+q(s) = (-2s^3 + 3s^2) + \alpha(s^3 - 2s^2 + s) + \beta(s^3 - s^2),
+$$
+
+$$
+q'(s) = 6s(1 - s) + \alpha(1 - s)(1 - 3s) + \beta\,s(3s - 2).
+$$
+
+The piece is monotone iff $q'(s) \ge 0$ on $[0, 1]$. Since $q'(0) = \alpha$ and $q'(1) = \beta$, the condition
+$\alpha, \beta \ge 0$ is necessary.
+
+**Sufficient condition: $0 \le \alpha, \beta \le 3$.** For fixed $s$, $q'(s)$ is an affine function of
+$(\alpha, \beta)$. The set of $(\alpha, \beta)$ with $q'(s) \ge 0$ for one $s$ is a half-plane. The set with
+$q'(s) \ge 0$ for all $s$ is an intersection of half-planes, hence convex. A convex set that contains the four corners
+of the square $[0, 3]^2$ contains the whole square. Check the corners:
+
+$$
+\begin{aligned}
+(\alpha, \beta) = (0, 0):&\quad q' = 6s(1 - s) \ge 0, \\
+(3, 0):&\quad q' = 6s - 6s^2 + 3(1 - 4s + 3s^2) = 3(1 - s)^2 \ge 0, \\
+(0, 3):&\quad q' = 6s - 6s^2 + 3(3s^2 - 2s) = 3s^2 \ge 0, \\
+(3, 3):&\quad q' = 12s^2 - 12s + 3 = 3(2s - 1)^2 \ge 0.
+\end{aligned}
+$$
+
+So every slope pair in $[0, 3]^2$ gives a monotone piece. Fritsch and Carlson characterised the full monotone region,
+which is larger: it adds a region bounded by an ellipse beyond the square <Cite id="fritsch1980" />. The square is
+the convenient part because it constrains each slope on its own, so slopes can be chosen one node at a time. A node's
+slope enters two pieces, and each piece only asks that the slope be at most 3 times its own chord slope.
+
+If $\Delta = 0$, monotonicity forces $d_i = d_{i+1} = 0$, and the piece is flat.
+
+## PCHIP slopes
+
+PCHIP sets the slope at an interior node to zero if the neighbouring chord slopes $\Delta_{i-1}$ and $\Delta_i$ differ
+in sign or either is zero: the data has a local extremum there, and the curve should too. Otherwise it uses a weighted
+harmonic mean <Cite id="fritsch1984" />:
+
+$$
+\frac{w_1 + w_2}{d_i} = \frac{w_1}{\Delta_{i-1}} + \frac{w_2}{\Delta_i}, \qquad
+w_1 = 2h_i + h_{i-1}, \quad w_2 = h_i + 2h_{i-1}.
+$$
+
+**The slopes meet the sufficient condition.** Take both chord slopes positive. Dropping the second term on the right
+can only increase $d_i$, so $d_i \le \frac{w_1 + w_2}{w_1}\Delta_{i-1}$. With $w_1 + w_2 = 3(h_{i-1} + h_i)$ and
+$w_1 = h_{i-1} + 2h_i \ge h_{i-1} + h_i$, this gives $d_i \le 3\Delta_{i-1}$. The same argument with the first term
+dropped gives $d_i \le 3\Delta_i$. So $d_i/\Delta \in [0, 3]$ for both pieces that meet at node $i$. With equal
+spacing the weights are equal and $d_i = 2\Delta_{i-1}\Delta_i/(\Delta_{i-1} + \Delta_i)$, which is at most
+$2\min(\Delta_{i-1}, \Delta_i)$.
+
+At the two end nodes scipy uses a three-point one-sided estimate, set to zero if its sign differs from the first chord
+slope and capped at 3 times that slope if the first two chord slopes differ in sign. The end slopes then also satisfy
+the condition. Every piece is monotone where the data are, and the curve has an extremum only at data nodes where the
+data have one.
+
+The harmonic mean is small when either chord slope is small. Near a flat stretch the curve flattens, which is what
+keeps it from overshooting. The price is that PCHIP is only $C^1$, and its curvature jumps at the nodes.
+
+## Akima's method
+
+Akima's slope at node $i$ is a weighted average of the two chord slopes on either side,
+
+$$
+d_i = \frac{\abs{\Delta_{i+1} - \Delta_i}\,\Delta_{i-1} + \abs{\Delta_{i-1} - \Delta_{i-2}}\,\Delta_i}
+{\abs{\Delta_{i+1} - \Delta_i} + \abs{\Delta_{i-1} - \Delta_{i-2}}},
+$$
+
+with two extra chord slopes extrapolated linearly at each end <Cite id="akima1970" />. The weight on each side is how
+much the chord slopes change on the other side. If the data are straight over the two intervals to the right,
+$\Delta_{i+1} = \Delta_i$, the slope is exactly that chord slope. This makes the curve follow straight runs and keeps wiggles local. The
+**modified Akima** (makima) variant adds $\abs{\Delta_{i+1} + \Delta_i}/2$ to each weight to handle flat regions.
+
+Akima's slopes are not constrained to $[0, 3]\Delta$, so monotone data can give a non-monotone curve. For
+$y = 0, 0.5, 0.6, 2, 2.1, 4, 4.1, 4.2$ at $x = 0, \dots, 7$, Akima's slopes at $x = 1$ and $x = 2$ are both 0.406,
+against a chord slope of 0.1 between them: $\alpha = \beta = 4.06$. The curve rises to 0.556 at $x \approx 1.33$ and
+then falls. PCHIP gives slopes 0.167 and 0.187 there and stays monotone.
+
+**Worked example.** For the step data $y = 0, 0, 0, 1, 1, 1$, every node has a zero chord slope on at least one side.
+PCHIP sets every slope to zero, and the curve is flat, then an S-shaped cubic from $(2, 0)$ to $(3, 1)$, then flat
+again. Its range is exactly $[0, 1]$. Akima's weights also give zero slopes here.
+
+<SplinePlayground
+  title="Overshoot and monotone interpolation"
+  initialType="pchip"
+  types={['pchip', 'akima', 'cubic', 'linear', 'catmull-rom']}
+  overlay="cubic"
+  initialPoints={[[0.8, 1], [2, 1.1], [3.2, 1.2], [4.2, 1.25], [5, 4.6], [6.2, 4.7], [7.6, 4.75], [9.2, 4.8]]}
+  presets={['initial', 'step', 'runge', 'uneven']}
+  showLower
+  caption="PCHIP (solid) against the natural cubic spline (dashed) on step-like data. The overshoot readout is the amount by which the curve leaves the range of the data. Drag a point to make the data non-monotone: PCHIP puts a flat extremum exactly at that data point. PCHIP and Akima have no basis panel because their slopes depend non-linearly on the data. The derivative plot shows the price of shape preservation: f'' jumps at every node."
+/>
+
+## Trade-offs
+
+- **Smoothness.** PCHIP and Akima are $C^1$. A cubic spline is $C^2$. For smooth data the spline is more accurate:
+  PCHIP's error is $O(h^3)$ at best, and lower near extrema where it forces zero slopes.
+- **Locality.** Both methods compute each slope from at most five nearby points. Changing one data value changes the
+  curve only nearby, and no linear system is solved.
+- **Not linear in the data.** Doubling the data doubles a spline but not in general a PCHIP interpolant, because the
+  slope rules involve signs, minima and harmonic means. Sums of interpolants are not interpolants of sums.
+- **Related ideas.** For noisy monotone data, fit rather than interpolate: <NoteLink to="isotonic-regression">isotonic
+  regression</NoteLink> or <NoteLink to="shape-constrained-gams">shape-constrained smooths</NoteLink>.

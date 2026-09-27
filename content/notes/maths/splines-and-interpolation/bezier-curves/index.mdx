@@ -1,0 +1,139 @@
+---
+title: Bézier curves
+kind: concept
+summary: 'A Bézier curve of degree $n$ is $\cvec(t) = \sum_i \pvec_i\binom{n}{i}t^i(1 - t)^{n-i}$, $t \in [0, 1]$. It starts at $\pvec_0$, ends at $\pvec_n$, is tangent to the end legs and stays in the convex hull of its points. De Casteljau''s algorithm evaluates and splits it by repeated linear interpolation.'
+tags: [splines, computer-graphics, computer-aided-design, polynomials, worked-example]
+aliases: [Bézier curve, Bezier curve, Bernstein basis, Bernstein polynomials, de Casteljau's algorithm, de Casteljau algorithm, degree elevation, Bézier subdivision, quadratic Bézier, cubic Bézier, variation-diminishing property]
+requires: [piecewise-polynomials-and-continuity]
+partOf: [splines-and-interpolation]
+related: [b-splines, nurbs, hermite-and-catmull-rom-splines, splines-for-curves-and-surfaces]
+references: [farin2002, farouki2012, piegl1997]
+status: draft
+updated: 2026-09-27
+---
+
+import { SplinePlayground } from '../_shared/SplinePlayground'
+
+<Definition>
+The **Bernstein polynomials** of degree $n$ are $b_{i,n}(t) = \binom{n}{i}t^i(1 - t)^{n-i}$, $i = 0, \dots, n$. A
+**Bézier curve** with control points $\pvec_0, \dots, \pvec_n$ is $\cvec(t) = \sum_{i=0}^n \pvec_i\,b_{i,n}(t)$ for
+$t \in [0, 1]$. De Casteljau at Citroën and Bézier at Renault developed these curves for car body design around 1960
+<Cite id="farin2002" /> <Cite id="farouki2012" />.
+</Definition>
+
+## The Bernstein basis
+
+The binomial theorem gives $\sum_i b_{i,n}(t) = ((1 - t) + t)^n = 1$, and every $b_{i,n}$ is non-negative on
+$[0, 1]$. So each curve point is a convex combination of the control points:
+
+- **Convex hull.** $\cvec(t)$ lies in the convex hull of $\pvec_0, \dots, \pvec_n$.
+- **Affine invariance.** Applying an affine map (rotation, scaling, shear, translation) to the control points applies
+  it to the curve.
+- **End points.** $b_{i,n}(0) = \indicator[i = 0]$ and $b_{i,n}(1) = \indicator[i = n]$, so $\cvec(0) = \pvec_0$ and
+  $\cvec(1) = \pvec_n$.
+
+$b_{i,n}$ peaks at $t = i/n$, so each control point pulls the curve most near that parameter. Every $b_{i,n}$ is
+non-zero on the open interval $(0, 1)$: moving one control point moves the whole curve. Control is global.
+
+## De Casteljau's algorithm
+
+Pascal's rule $\binom{n}{i} = \binom{n-1}{i} + \binom{n-1}{i-1}$ gives the Bernstein recursion
+
+$$
+b_{i,n}(t) = (1 - t)\,b_{i,n-1}(t) + t\,b_{i-1,n-1}(t).
+$$
+
+Substitute into the curve and collect the terms in each $b_{i,n-1}$:
+
+$$
+\cvec(t) = \sum_{i=0}^n \pvec_i b_{i,n}(t) = \sum_{i=0}^{n-1} \brack{(1 - t)\,\pvec_i + t\,\pvec_{i+1}}b_{i,n-1}(t).
+$$
+
+The degree-$n$ curve equals a degree-$(n - 1)$ curve whose control points are the points at fraction $t$ along each
+leg of the control polygon. Repeating $n$ times leaves one point:
+
+$$
+\pvec_i^{[r]} = (1 - t)\,\pvec_i^{[r-1]} + t\,\pvec_{i+1}^{[r-1]}, \qquad \cvec(t) = \pvec_0^{[n]}.
+$$
+
+This is **de Casteljau's algorithm**. It uses only convex combinations, costs $O(n^2)$ and is numerically stable. It
+is the special case of <NoteLink to="b-splines">de Boor's algorithm</NoteLink> for the knot vector with $n + 1$ zeros
+followed by $n + 1$ ones: a Bézier curve is a clamped B-spline with a single span.
+
+**Worked example.** Take the quadratic curve with $\pvec_0 = (0, 0)$, $\pvec_1 = (1, 2)$, $\pvec_2 = (2, 0)$ at
+$t = 1/2$. The first level gives $(0.5, 1)$ and $(1.5, 1)$. The second gives $\cvec(1/2) = (1, 1)$. The Bernstein
+form agrees: $\tfrac14(0, 0) + \tfrac12(1, 2) + \tfrac14(2, 0) = (1, 1)$. The segment from $(0.5, 1)$ to $(1.5, 1)$ is
+tangent to the curve there, and the curve's peak height 1 is half the height of the middle control point.
+
+## Derivatives
+
+Differentiating the Bernstein polynomial gives $b_{i,n}' = n\,(b_{i-1,n-1} - b_{i,n-1})$. Summing by parts,
+
+$$
+\cvec'(t) = n\sum_{i=0}^{n-1}(\pvec_{i+1} - \pvec_i)\,b_{i,n-1}(t).
+$$
+
+The derivative is a Bézier curve of degree $n - 1$ whose control points are the scaled legs of the polygon. At the
+ends, $\cvec'(0) = n(\pvec_1 - \pvec_0)$ and $\cvec'(1) = n(\pvec_n - \pvec_{n-1})$: the curve leaves along the first
+leg and arrives along the last. The last level of de Casteljau's algorithm also gives the tangent:
+$\cvec'(t) = n(\pvec_1^{[n-1]} - \pvec_0^{[n-1]})$. In the example, $\cvec'(1/2) = 2((1.5, 1) - (0.5, 1)) = (2, 0)$.
+
+Joining Bézier pieces uses these formulas. Two cubic pieces on parameter intervals of equal length meet with $C^1$ continuity
+when the shared point is the midpoint of the two adjacent control points, and with $G^1$ continuity when the three points are collinear with the
+shared point between them (see <NoteLink to="piecewise-polynomials-and-continuity">continuity</NoteLink>).
+
+## Subdivision
+
+The triangle of de Casteljau's algorithm at $t$ also splits the curve. The points down its left edge,
+$\pvec_0^{[0]}, \pvec_0^{[1]}, \dots, \pvec_0^{[n]}$, are the control points of the piece of the curve on $[0, t]$,
+reparameterised to $[0, 1]$. The points up its right edge,
+$\pvec_0^{[n]}, \pvec_1^{[n-1]}, \dots, \pvec_n^{[0]}$, are the control points of the piece on $[t, 1]$
+<Cite id="farin2002" />. Under repeated subdivision at $t = 1/2$ the control polygons converge to the curve, and
+the distance between them falls by a factor of about 4 at each level, which gives fast rendering, intersection tests and flatness checks.
+
+## Degree elevation
+
+A curve of degree $n$ is also a curve of degree $n + 1$. Multiply by $1 = (1 - t) + t$ and use
+$(1 - t)\,b_{i,n} = \frac{n + 1 - i}{n + 1}b_{i,n+1}$ and $t\,b_{i,n} = \frac{i + 1}{n + 1}b_{i+1,n+1}$. Collecting the
+terms in each $b_{i,n+1}$ gives the new control points
+
+$$
+\qvec_i = \frac{i}{n + 1}\,\pvec_{i-1} + \paren{1 - \frac{i}{n + 1}}\pvec_i, \qquad i = 0, \dots, n + 1.
+$$
+
+Each new point lies on a leg of the old polygon. The curve is unchanged, and the new polygon is closer to it.
+Repeated elevation makes the polygons converge to the curve, but slowly.
+
+## Variation diminishing
+
+A straight line crosses a Bézier curve no more often than it crosses the control polygon <Cite id="farin2002" />. The
+curve therefore wiggles no more than its polygon does. The same holds for B-spline curves. It is the geometric
+counterpart of the fact that Bernstein coefficients bound the number of sign changes of a polynomial.
+
+<SplinePlayground
+  title="De Casteljau's algorithm"
+  initialType="bezier"
+  types={['bezier', 'bspline']}
+  initialPoints={[[1, 1], [2.2, 5], [6, 5.4], [8.8, 1.4]]}
+  initialT={0.4}
+  showConstruction
+  presets={['initial', 'uneven']}
+  caption="Step t with the arrows or drag the t line in the basis panel: each level of the construction interpolates the one before at the same fraction t, and the last point is on the curve. The last segment is the tangent. The basis panel shows the Bernstein polynomials. 'Elevate degree' adds a control point without changing the curve. Add points by clicking: every point moves the whole curve."
+/>
+
+## Where Bézier curves are used
+
+- **Fonts.** TrueType outlines are quadratic Bézier pieces; PostScript Type 1 and CFF outlines are cubic.
+- **Vector graphics.** SVG paths and PDF use quadratic and cubic Bézier segments.
+- **Easing curves.** CSS `cubic-bezier(x1, y1, x2, y2)` is a cubic Bézier from $(0, 0)$ to $(1, 1)$ that maps time to
+  progress.
+- **CAD.** Composite Bézier pieces are the building block of B-spline and <NoteLink to="nurbs">NURBS</NoteLink>
+  geometry. Knot insertion converts any B-spline to Bézier pieces.
+
+## Pitfalls
+
+- **High degree.** Global control and slow convergence of the polygon make high-degree curves hard to shape. Use
+  piecewise cubics.
+- **No conics.** A polynomial curve cannot trace an exact circle. Rational curves (<NoteLink to="nurbs">NURBS</NoteLink>)
+  can.
+- **Parameter is not arc length.** Equal steps in $t$ bunch up where control points are close.

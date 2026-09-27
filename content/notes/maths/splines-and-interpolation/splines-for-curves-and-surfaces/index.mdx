@@ -1,0 +1,133 @@
+---
+title: Splines for curves and surfaces
+kind: concept
+summary: 'Shapes are drawn as parametric splines $\cvec(u)$ with a chosen parameterisation (uniform, chordal, centripetal), which can be changed to arc length. Tensor products $\sum_{ij}\pvec_{ij}B_i(u)B_j(v)$ give surfaces, and subdivision such as Chaikin''s corner cutting generates the same splines.'
+tags: [splines, computer-graphics, computer-aided-design, differential-geometry, worked-example]
+aliases: [parametric curve, parametric spline, arc-length parameterisation, arc length reparameterisation, tensor-product surface, B-spline surface, subdivision curve, subdivision surface, Chaikin's algorithm, corner cutting, Catmull–Clark subdivision]
+requires: [b-splines]
+partOf: [splines-and-interpolation]
+related: [hermite-and-catmull-rom-splines, nurbs, curvature-and-fairness, tensor-product-smooths, numerical-integration, root-finding]
+references: [farin2002, piegl1997, chaikin1974, riesenfeld1975, catmull1978, yuksel2011, deboor1978]
+status: draft
+updated: 2026-09-27
+---
+
+import { ChaikinSubdivision } from './ChaikinSubdivision'
+
+<Definition>
+A **parametric spline curve** is a map $\cvec(u) = (x(u), y(u))$ (or into three dimensions) whose coordinates are
+splines in a common parameter $u$. A **tensor-product spline surface** is
+$\svec(u, v) = \sum_i\sum_j \pvec_{ij}\,B_i(u)\,B_j(v)$ over a grid of control points. A **subdivision scheme**
+defines a curve or surface as the limit of repeatedly refining a control polygon or mesh by fixed local averaging
+rules <Cite id="farin2002" />.
+</Definition>
+
+## Graphs against parametric curves
+
+A function $y = f(x)$ can only draw shapes that pass the vertical line test. Circles, spirals, letters and car bodies
+do not. A parametric curve gives each coordinate its own function of a parameter, so the curve may turn back, cross
+itself and close up. Every spline family in this section has a parametric form: apply a one-dimensional scheme to
+$x(u)$ and to $y(u)$ separately, with the same parameters.
+
+## Choosing the parameters
+
+To interpolate points $\pvec_0, \dots, \pvec_n$ with a parametric spline, first assign parameters $u_0 < \dots < u_n$.
+The common choices are
+
+$$
+u_{i+1} = u_i + \norm{\pvec_{i+1} - \pvec_i}^\alpha, \qquad \alpha = 0 \text{ (uniform)}, \tfrac12
+\text{ (centripetal)}, 1 \text{ (chordal)}.
+$$
+
+Uniform parameters ignore spacing, so a short gap between long ones is crossed at high speed and the curve can loop.
+Chordal parameters approximate arc length. Centripetal parameters are the compromise that avoids cusps and
+self-intersections for <NoteLink to="hermite-and-catmull-rom-splines">Catmull–Rom curves</NoteLink>
+<Cite id="yuksel2011" />. The parameters decide the shape: the same points and the same spline type give different
+curves.
+
+## Arc-length parameterisation
+
+The **arc length** from $u_0$ to $u$ is
+
+$$
+s(u) = \int_{u_0}^u \norm{\cvec'(v)}\,dv,
+$$
+
+because $\norm{\cvec'(v)}\,dv$ is the length of the chord traced in a small step $dv$. If $\cvec' \ne 0$, $s$ is
+strictly increasing and has an inverse $u(s)$. The curve $\cvec(u(s))$ has unit speed: by the chain rule its
+derivative is $\cvec'(u)\,u'(s) = \cvec'/\norm{\cvec'}$. Unit speed is what animation needs for constant velocity
+along a path, and what text needs to be laid evenly along a curve.
+
+Arc length has no closed form for most splines, because $\norm{\cvec'}$ is the square root of a polynomial.
+Compute $s(u)$ by Gaussian <NoteLink to="numerical-integration">quadrature</NoteLink> on each span, and invert
+$s(u) = s^*$ by Newton's method (<NoteLink to="root-finding">root finding</NoteLink>), whose derivative
+$s'(u) = \norm{\cvec'(u)}$ is known. A table of $(u, s)$ pairs with interpolation is the usual fast approximation.
+
+**Worked example.** The parabola $\cvec(u) = (u, u^2)$ has $\norm{\cvec'} = \sqrt{1 + 4u^2}$. Its length from 0 to 1
+is
+
+$$
+s(1) = \int_0^1 \sqrt{1 + 4u^2}\,du = \frac{\sqrt5}{2} + \frac{\operatorname{arsinh}2}{4} = 1.4789.
+$$
+
+scipy's `quad` gives the same value to 15 digits. The parameter midpoint $u = 1/2$ is at arc length 0.5739, only 39%
+of the way along the curve.
+
+## Tensor-product surfaces
+
+Fix $v$. Then $\svec(u, v) = \sum_i \paren{\sum_j \pvec_{ij}B_j(v)}B_i(u)$ is a B-spline curve in $u$ whose control
+points are themselves B-spline curves in $v$. Everything proved for curves carries over one direction at a time:
+evaluation by de Boor's algorithm in $u$ then in $v$, knot insertion along a row or column, the convex hull property
+from $\sum_{ij}B_i(u)B_j(v) = 1$, and local control over a $(p + 1) \times (q + 1)$ patch of the grid
+<Cite id="piegl1997" />. With rational weights the surfaces are NURBS surfaces, which represent spheres, cylinders and
+tori exactly. The same product construction builds the <NoteLink to="tensor-product-smooths">tensor-product
+smooths</NoteLink> of additive models.
+
+A rectangular grid of control points cannot model every shape. A sphere closed by one grid has degenerate poles, and
+branching shapes need many patches stitched with continuity conditions along their edges.
+
+## Subdivision
+
+Subdivision builds smooth shapes from averaging rules. **Chaikin's algorithm** replaces every edge
+$\pvec_i\pvec_{i+1}$ of a polygon by the two points
+
+$$
+\qvec_{2i} = \tfrac34\pvec_i + \tfrac14\pvec_{i+1}, \qquad \qvec_{2i+1} = \tfrac14\pvec_i + \tfrac34\pvec_{i+1},
+$$
+
+cutting every corner <Cite id="chaikin1974" />. Repeating converges to a smooth curve. Riesenfeld showed that the limit
+is the uniform quadratic B-spline curve of the original polygon <Cite id="riesenfeld1975" />.
+
+**Why the limit is a B-spline.** The uniform B-spline $N_p$ of degree $p$ on knots $0, 1, \dots, p + 1$ is the
+$(p + 1)$-fold convolution of the unit box $\chi = \indicator[0, 1)$. The box splits into two half boxes,
+$\chi(x) = \chi(2x) + \chi(2x - 1)$. Convolving $p + 1$ copies, and using that the $(p + 1)$-fold convolution of
+$\chi(2\cdot)$ is $2^{-p}N_p(2\cdot)$, the binomial expansion gives the **refinement equation**
+
+$$
+N_p(x) = 2^{-p}\sum_{k=0}^{p+1}\binom{p + 1}{k}N_p(2x - k).
+$$
+
+For $p = 2$ the coefficients are $\tfrac14(1, 3, 3, 1)$. A quadratic B-spline curve $\sum_i \pvec_iN_2(x - i)$ is
+therefore also a B-spline curve on the half-spaced knots, $\sum_j \qvec_jN_2(2x - j)$. Collecting the coefficient of
+$N_2(2x - j)$ gives $\qvec_{2i} = \tfrac34\pvec_{i-1} + \tfrac14\pvec_i$ and $\qvec_{2i+1} = \tfrac14\pvec_{i-1} +
+\tfrac34\pvec_i$: Chaikin's rule, up to relabelling. Each round is exact <NoteLink to="b-splines">knot
+insertion</NoteLink> at every midpoint, and the polygons converge to the curve because B-spline control polygons
+converge under knot refinement. The same argument with $p = 3$ gives the cubic rules
+$\tfrac18(\pvec_{i-1} + 6\pvec_i + \pvec_{i+1})$ and $\tfrac12(\pvec_i + \pvec_{i+1})$.
+
+<ChaikinSubdivision />
+
+**Subdivision surfaces.** Catmull and Clark generalised the cubic rules from grids to meshes of arbitrary topology
+<Cite id="catmull1978" />. Away from irregular vertices the limit surface is a bicubic B-spline surface; at vertices
+where more or fewer than four faces meet, special weights keep it $G^1$. Loop subdivision does the same for triangle
+meshes. Subdivision surfaces are the standard for animated characters in film, where a closed branching surface must
+bend without seams.
+
+## Pitfalls
+
+- **Parameter speed is not physical speed.** Animating by stepping $u$ uniformly makes objects speed up and slow down.
+  Reparameterise by arc length.
+- **Interpolating parametric data with uniform parameters.** Unevenly spaced points then give loops and cusps. Use
+  centripetal or chordal parameters.
+- **Stitching patches.** Tensor-product patches meet with only the continuity their shared boundary rows enforce;
+  $G^1$ across patch boundaries needs extra conditions on the control points near the seam.

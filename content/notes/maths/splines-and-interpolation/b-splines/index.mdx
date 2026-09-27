@@ -1,0 +1,177 @@
+---
+title: B-splines
+kind: concept
+summary: 'B-splines $B_{i,p}$ are the basis for splines of degree $p$ on a knot vector. From the Cox–de Boor recursion they are non-negative, sum to one, vanish outside $p + 1$ knot intervals and are $C^{p-r}$ at a knot of multiplicity $r$. De Boor''s algorithm evaluates $\sum_i \pvec_i B_{i,p}(u)$.'
+tags: [splines, computer-aided-design, computer-graphics, numerical-methods, worked-example]
+aliases: [B-spline basis, basis spline, Cox–de Boor recursion, de Boor's algorithm, knot insertion, Boehm's algorithm, Curry–Schoenberg theorem, knot vector, open uniform knot vector, clamped knot vector, Greville abscissae, B-spline curve]
+requires: [piecewise-polynomials-and-continuity, polynomial-interpolation-and-runge]
+partOf: [splines-and-interpolation]
+related: [bezier-curves, nurbs, regression-splines, p-splines, splines-in-machine-learning]
+references: [deboor1978, cox1972bspline, deboor1972, curry1966, schoenberg1946, boehm1980, piegl1997, farin2002]
+status: draft
+updated: 2026-09-27
+---
+
+import { SplinePlayground } from '../_shared/SplinePlayground'
+
+<Definition>
+Let $t_0 \le t_1 \le \dots \le t_m$ be a non-decreasing **knot vector**. The **B-splines** of degree $p$ on it are
+defined by $B_{i,0}(u) = \indicator[t_i \le u < t_{i+1}]$ and the **Cox–de Boor recursion**
+
+$$
+B_{i,p}(u) = \frac{u - t_i}{t_{i+p} - t_i}B_{i,p-1}(u) + \frac{t_{i+p+1} - u}{t_{i+p+1} - t_{i+1}}B_{i+1,p-1}(u),
+$$
+
+with any term whose denominator is zero taken as zero. There are $m - p$ of them. A **B-spline curve** with control
+points $\pvec_0, \dots, \pvec_{m-p-1}$ is $\cvec(u) = \sum_i \pvec_i B_{i,p}(u)$ on $[t_p, t_{m-p}]$
+<Cite id="deboor1978" /> <Cite id="cox1972bspline" /> <Cite id="deboor1972" />.
+</Definition>
+
+## Where the recursion comes from
+
+Schoenberg defined a B-spline as a divided difference of a truncated power <Cite id="schoenberg1946" />
+<Cite id="curry1966" />. With $g_p(t) = (t - u)_+^p$ viewed as a function of $t$ for fixed $u$, and
+$[t_i, \dots, t_k]$ the divided difference over those knots (see
+<NoteLink to="polynomial-interpolation-and-runge">polynomial interpolation</NoteLink>),
+
+$$
+B_{i,p}(u) = (t_{i+p+1} - t_i)\,[t_i, \dots, t_{i+p+1}]\,g_p.
+$$
+
+Two facts about divided differences give the recursion.
+
+- **Leibniz rule.** $[t_i, \dots, t_k](fg) = \sum_{r=i}^k [t_i, \dots, t_r]f \cdot [t_r, \dots, t_k]g$.
+- **Recursion.** $[t_i, \dots, t_k]g = ([t_{i+1}, \dots, t_k]g - [t_i, \dots, t_{k-1}]g)/(t_k - t_i)$.
+
+Write $g_p = f \cdot g_{p-1}$ with $f(t) = t - u$. The divided differences of the linear $f$ are $[t_i]f = t_i - u$,
+$[t_i, t_{i+1}]f = 1$, and zero for three or more knots. The Leibniz rule keeps two terms:
+
+$$
+[t_i, \dots, t_{i+p+1}]g_p = (t_i - u)\,[t_i, \dots, t_{i+p+1}]g_{p-1} + [t_{i+1}, \dots, t_{i+p+1}]g_{p-1}.
+$$
+
+Let $A = [t_i, \dots, t_{i+p}]g_{p-1}$ and $B = [t_{i+1}, \dots, t_{i+p+1}]g_{p-1}$. By the recursion the first
+divided difference on the right is $(B - A)/(t_{i+p+1} - t_i)$. Substituting and collecting,
+
+$$
+(t_{i+p+1} - t_i)\,[t_i, \dots, t_{i+p+1}]g_p = (u - t_i)\,A + (t_{i+p+1} - u)\,B.
+$$
+
+The left side is $B_{i,p}(u)$. By the definition at degree $p - 1$, $A = B_{i,p-1}(u)/(t_{i+p} - t_i)$ and
+$B = B_{i+1,p-1}(u)/(t_{i+p+1} - t_{i+1})$. That is the Cox–de Boor recursion. At degree 0,
+$(t_{i+1} - t_i)[t_i, t_{i+1}]g_0 = (t_{i+1} - u)_+^0 - (t_i - u)_+^0$, the indicator of $[t_i, t_{i+1})$.
+
+The recursion only ever forms convex combinations of non-negative numbers, so it is numerically stable. The divided
+difference form, by contrast, cancels large terms.
+
+## Properties
+
+- **Local support.** $B_{i,p} = 0$ outside $[t_i, t_{i+p+1})$. If $u < t_i$, $g_p$ is the polynomial $(t - u)^p$ at
+  every knot involved, and a divided difference over $p + 2$ points of a degree-$p$ polynomial is zero. If
+  $u \ge t_{i+p+1}$, $g_p$ is zero at every knot. So each control point moves the curve only on $p + 1$ knot intervals.
+- **Non-negativity.** On its support, both weights in the recursion lie in $[0, 1]$, so by induction
+  $B_{i,p} \ge 0$.
+- **Partition of unity.** Write $\omega_{i}(u) = (u - t_i)/(t_{i+p} - t_i)$. Summing the recursion over $i$ and
+  collecting the terms in $B_{i,p-1}$,
+  $$
+  \sum_i B_{i,p} = \sum_i \paren{\omega_i + (1 - \omega_i)}B_{i,p-1} = \sum_i B_{i,p-1} = \dots = \sum_i B_{i,0} = 1
+  $$
+  on $[t_p, t_{m-p}]$. Hence each curve point is a convex combination of at most $p + 1$ control points and lies in
+  their convex hull, and moving all control points by a vector moves the curve by the same vector.
+- **Smoothness.** $B_{i,p}$ is a polynomial of degree $p$ on each knot interval, and $C^{p-r}$ at a knot repeated $r$
+  times. A divided difference over a repeated knot involves derivatives of $g_p$ in $t$ up to order $r - 1$, which are
+  multiples of $(t - u)_+^{p-r+1}$; that function is $C^{p-r}$ in $u$ <Cite id="deboor1978" />.
+- **Derivative.** Differentiating the definition, $\partial_u g_p = -p\,g_{p-1}$, gives
+  $B_{i,p}' = p\,(A - B)$ with $A$, $B$ as above, that is
+  $$
+  B_{i,p}'(u) = \frac{p}{t_{i+p} - t_i}B_{i,p-1}(u) - \frac{p}{t_{i+p+1} - t_{i+1}}B_{i+1,p-1}(u).
+  $$
+  Applied to a curve, $\cvec'(u) = \sum_i p\,\frac{\pvec_i - \pvec_{i-1}}{t_{i+p} - t_i}B_{i,p-1}(u)$: the derivative
+  of a B-spline curve is a B-spline curve of one degree lower, whose control points are scaled differences of the
+  original ones.
+
+## The spline space: Curry–Schoenberg
+
+**Theorem (Curry–Schoenberg).** On $[t_p, t_{m-p}]$, the B-splines $B_{0,p}, \dots, B_{m-p-1,p}$ form a basis of
+the space of piecewise polynomials of degree $p$ with breakpoints at the distinct interior knots and smoothness
+$C^{p-r}$ at each knot of multiplicity $r$ <Cite id="curry1966" />.
+
+Each B-spline lies in that space by the smoothness property. The dimension count of
+<NoteLink to="piecewise-polynomials-and-continuity">piecewise polynomials</NoteLink> gives $(p + 1) + \sum_j r_j$ for
+interior multiplicities $r_j$, which equals the number of B-splines, $m - p$, when the end knots are repeated $p + 1$
+times. Linear independence completes the proof <Cite id="deboor1978" />. Every spline is therefore a unique
+combination of B-splines, which is why <NoteLink to="regression-splines">regression splines</NoteLink>,
+<NoteLink to="p-splines">P-splines</NoteLink> and CAD systems all use them.
+
+## Knot vectors
+
+- **Open uniform (clamped).** The end knots are repeated $p + 1$ times and the interior knots are equally spaced. The
+  curve starts at $\pvec_0$ and ends at the last control point, tangent to the first and last legs of the control
+  polygon.
+- **Uniform.** All knots equally spaced. Every basis function is a shifted copy of one function, and the curve starts
+  and ends away from the control points.
+- **Non-uniform.** Knots placed where the curve needs flexibility; repeated knots create deliberate kinks.
+
+**Worked example.** On the uniform knots $0, 1, 2, 3, 4$ there is one cubic B-spline $B$. On $[0, 1]$ only the first
+term of each recursion step is non-zero, so $B_{\cdot,1} = u$, $B_{\cdot,2} = \frac{u}{2}u = \frac{u^2}{2}$ and
+$B(u) = \frac{u}{3}\cdot\frac{u^2}{2} = \frac{u^3}{6}$. Its values at the interior knots are
+$B(1) = \tfrac{1}{6}$, $B(2) = \tfrac{2}{3}$, $B(3) = \tfrac{1}{6}$, and $B'(1) = \tfrac{1}{2}$, $B(0.5) = \tfrac{1}{48}$.
+scipy's `BSpline.basis_element([0, 1, 2, 3, 4])` returns the same numbers. A uniform cubic B-spline curve therefore
+passes through $(\pvec_{i-1} + 4\pvec_i + \pvec_{i+1})/6$ at each knot, a weighted average of three control points.
+
+## De Boor's algorithm
+
+Substitute the recursion into the curve and collect the terms in each $B_{i,p-1}$:
+
+$$
+\cvec(u) = \sum_i \pvec_i B_{i,p}(u) = \sum_i \brack{(1 - \omega_i(u))\,\pvec_{i-1} + \omega_i(u)\,\pvec_i} B_{i,p-1}(u).
+$$
+
+At a fixed $u$ this is a curve of degree $p - 1$ with new control points, each a point on a leg of the control polygon.
+Repeating $p$ times leaves degree 0, where only the basis function of the span $[t_k, t_{k+1})$ holding $u$ is
+non-zero. So $\cvec(u)$ is the single point left after $p$ rounds of linear interpolation among the $p + 1$ control
+points $\pvec_{k-p}, \dots, \pvec_k$:
+
+$$
+\pvec_i^{[r]} = (1 - \alpha_{i,r})\,\pvec_{i-1}^{[r-1]} + \alpha_{i,r}\,\pvec_i^{[r-1]},
+\qquad \alpha_{i,r} = \frac{u - t_i}{t_{i+p+1-r} - t_i},
+$$
+
+for $i = k - p + r, \dots, k$, and $\cvec(u) = \pvec_k^{[p]}$. The cost is $O(p^2)$ per point. The playground draws this
+triangle when "construction at t" is on.
+
+## Knot insertion
+
+Adding a knot enlarges the spline space, so the old curve has an exact representation on the new knots with one more
+control point. Boehm's algorithm computes it <Cite id="boehm1980" />: to insert $\bar u \in [t_k, t_{k+1})$, keep
+$\pvec_i$ for $i \le k - p$, shift $\pvec_{i-1}$ to position $i$ for $i \ge k + 1$, and replace the $p$ points in
+between by
+
+$$
+\qvec_i = (1 - a_i)\,\pvec_{i-1} + a_i\,\pvec_i, \qquad a_i = \frac{\bar u - t_i}{t_{i+p} - t_i}, \quad
+k - p + 1 \le i \le k.
+$$
+
+These are the first-level points of de Boor's algorithm at $\bar u$. Inserting the same knot $p$ times reaches a
+control point on the curve, which splits the curve there. Inserting many knots makes the control polygon converge to
+the curve, the basis of <NoteLink to="splines-for-curves-and-surfaces">subdivision</NoteLink>.
+
+<SplinePlayground
+  title="B-spline curves and knots"
+  initialType="bspline"
+  types={['bspline', 'nurbs', 'bezier']}
+  initialPoints={[[0.8, 1.2], [1.8, 4.2], [3.2, 5], [4.4, 2.4], [5.6, 1.2], [6.8, 3.6], [8, 5], [9.2, 2]]}
+  initialDegree={3}
+  showConstruction
+  presets={['initial', 'uneven', 'circle']}
+  caption="Drag a control point: only p + 1 knot intervals of the curve move. The basis panel shows the B-splines over the parameter, with the selected point's function coloured and its values at t marked; drag the knot lines to make the knots non-uniform, or raise a knot's multiplicity to lower the continuity. De Boor's triangle is drawn at t. 'Insert knot at t' adds a control point and leaves the curve unchanged. Switch to uniform knots to see the curve let go of its end points."
+/>
+
+## Pitfalls
+
+- **Right end of the domain.** With half-open indicators $B_{i,0}$, every basis function is zero at $u = t_m$.
+  Implementations close the last non-empty interval so that the curve reaches its end point.
+- **Too few control points.** Degree $p$ needs at least $p + 1$ control points. With exactly $p + 1$ and clamped knots,
+  the curve is a <NoteLink to="bezier-curves">Bézier curve</NoteLink>.
+- **The curve does not pass through the control points.** It lies within their convex hull and follows them loosely.
+  To pass through data, solve for control points (interpolation) or use an interpolating spline.

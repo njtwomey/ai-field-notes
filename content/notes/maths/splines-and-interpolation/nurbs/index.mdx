@@ -1,0 +1,119 @@
+---
+title: NURBS
+kind: concept
+summary: 'A NURBS curve $\sum_i w_i\pvec_iB_{i,p}(u)/\sum_i w_iB_{i,p}(u)$ is a B-spline with a positive weight per control point: the projection of a polynomial B-spline in homogeneous coordinates. It represents conics exactly; a quarter circle is a rational quadratic with middle weight $\sqrt2/2$.'
+tags: [splines, computer-aided-design, computer-graphics, projective-geometry, worked-example]
+aliases: [non-uniform rational B-spline, rational B-spline, rational Bézier curve, NURBS curve, control point weights, homogeneous coordinates for curves, exact conic representation]
+requires: [b-splines, bezier-curves]
+partOf: [splines-and-interpolation]
+related: [homography, pinhole-camera-model, splines-for-curves-and-surfaces, curvature-and-fairness]
+references: [piegl1997, farin2002, deboor1978]
+status: draft
+updated: 2026-09-27
+---
+
+import { SplinePlayground } from '../_shared/SplinePlayground'
+
+<Definition>
+A **NURBS curve** of degree $p$ has control points $\pvec_0, \dots, \pvec_n$, positive weights $w_0, \dots, w_n$ and
+a knot vector $t_0 \le \dots \le t_{n+p+1}$. It is
+
+$$
+\cvec(u) = \frac{\sum_{i=0}^n w_i\,\pvec_i\,B_{i,p}(u)}{\sum_{i=0}^n w_i\,B_{i,p}(u)} = \sum_{i=0}^n \pvec_i\,R_{i,p}(u),
+\qquad R_{i,p} = \frac{w_iB_{i,p}}{\sum_j w_jB_{j,p}},
+$$
+
+where $B_{i,p}$ are the <NoteLink to="b-splines">B-splines</NoteLink> on the knots. With all weights equal it is a
+B-spline curve. With the knots of a single span it is a **rational Bézier curve** <Cite id="piegl1997" />.
+</Definition>
+
+## Properties of the rational basis
+
+The functions $R_{i,p}$ inherit the useful properties of $B_{i,p}$ when all weights are positive. They are
+non-negative, they sum to 1 by construction, and $R_{i,p}$ vanishes wherever $B_{i,p}$ does, so control stays local.
+The curve lies in the convex hull of the control points active on each span, and it is as smooth as the B-splines
+away from knots. A knot of multiplicity $r$ still gives $C^{p-r}$.
+
+A weight is a second handle on each control point:
+
+- **Raising $w_i$** pulls the curve towards $\pvec_i$. As $w_i \to \infty$ the curve passes through $\pvec_i$.
+- **Lowering $w_i$** pushes the curve away. At $w_i = 0$ the point has no influence.
+- **Scaling every weight by the same factor** leaves the curve unchanged, because the factor cancels.
+
+## The projective view
+
+Lift each control point to **homogeneous coordinates** $\pvec_i^w = (w_ix_i, w_iy_i, w_i)$ in three dimensions. The
+polynomial B-spline curve $\cvec^w(u) = \sum_i \pvec_i^w B_{i,p}(u)$ has third coordinate $W(u) = \sum_i w_iB_{i,p}(u)$.
+Dividing by it, the central projection onto the plane $W = 1$, gives exactly the NURBS curve. A NURBS curve is the
+shadow of an ordinary B-spline curve, cast from the origin.
+
+This view gives the algorithms for free. <NoteLink to="b-splines">De Boor's algorithm</NoteLink>, knot insertion and
+<NoteLink to="bezier-curves">degree elevation</NoteLink> are applied to the homogeneous points, and the results are
+projected. Projective transformations, the maps of <NoteLink to="homography">homographies</NoteLink> and
+<NoteLink to="pinhole-camera-model">perspective cameras</NoteLink>, map a NURBS curve to a NURBS curve by acting on
+the homogeneous control points. Polynomial curves are only closed under affine maps.
+
+Derivatives follow from the quotient rule. With $\avec(u) = \sum_i w_i\pvec_iB_{i,p}(u)$, so that $\cvec = \avec/W$,
+
+$$
+\cvec' = \frac{\avec' - W'\cvec}{W}, \qquad \cvec'' = \frac{\avec'' - 2W'\cvec' - W''\cvec}{W}.
+$$
+
+## Exact conics
+
+A polynomial curve cannot trace a circle: if $x(t)$ and $y(t)$ are polynomials with $x^2 + y^2 = 1$ for all $t$, both
+must be constant. A rational quadratic can. Take the quadratic rational Bézier curve with control points
+$\pvec_0 = (1, 0)$, $\pvec_1 = (1, 1)$, $\pvec_2 = (0, 1)$ and weights $1, w, 1$. With $a = (1 - t)^2$,
+$b = 2wt(1 - t)$, $c = t^2$ and $D = a + b + c$,
+
+$$
+x(t) = \frac{a + b}{D}, \qquad y(t) = \frac{b + c}{D}.
+$$
+
+The curve lies on the unit circle iff $(a + b)^2 + (b + c)^2 = (a + b + c)^2$. Expanding both sides, all terms cancel
+except $b^2 = 2ac$, that is
+
+$$
+4w^2t^2(1 - t)^2 = 2t^2(1 - t)^2 \quad\Longleftrightarrow\quad w = \tfrac{\sqrt2}{2}.
+$$
+
+So the weight $\sqrt2/2$ makes the curve a quarter of the unit circle. In general a circular arc of angle $\theta$ is
+a rational quadratic whose middle control point is where the end tangents meet, with weight $\cos(\theta/2)$. Weights
+below 1 give ellipses, 1 a parabola, above 1 hyperbolas <Cite id="piegl1997" />. A full circle joins four quarter
+arcs: nine control points on a square, corner weights $\sqrt2/2$, and the knot vector
+$(0, 0, 0, \tfrac14, \tfrac14, \tfrac12, \tfrac12, \tfrac34, \tfrac34, 1, 1, 1)$, whose double interior knots let
+each quarter be its own rational Bézier piece.
+
+**Worked example.** At $t = 1/2$ the quarter arc has $a = c = 1/4$ and $b = \sqrt2/4$, so
+
+$$
+\cvec(1/2) = \frac{\tfrac14(1, 0) + \tfrac{\sqrt2}{4}(1, 1) + \tfrac14(0, 1)}{\tfrac12 + \tfrac{\sqrt2}{4}}
+= (0.7071, 0.7071),
+$$
+
+the point at 45°. At $t = 1/4$ the curve is at $(0.9298, 0.3681)$, an angle of 21.6°, not 22.5°. The curve is exactly
+circular but its parameter is not proportional to angle. The playground's circle preset evaluates to radius 1 within
+$2 \times 10^{-16}$ and curvature 1 within $10^{-15}$.
+
+<SplinePlayground
+  title="Weights and exact circles"
+  initialType="nurbs"
+  types={['nurbs', 'bspline']}
+  initialPoints={[[7.5, 3], [7.5, 5.5], [5, 5.5], [2.5, 5.5], [2.5, 3], [2.5, 0.5], [5, 0.5], [7.5, 0.5], [7.5, 3]]}
+  initialWeights={[1, Math.SQRT1_2, 1, Math.SQRT1_2, 1, Math.SQRT1_2, 1, Math.SQRT1_2, 1]}
+  initialKnots={[0, 0, 0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1, 1, 1]}
+  initialDegree={2}
+  showComb
+  presets={['initial', 'uneven']}
+  caption="The starting curve is a NURBS circle: the curvature comb has constant length, so the curvature is constant. Click a control point to select it and change its weight: above 1 the curve is pulled to the point, below 1 it is pushed away. Switch to B-spline, which sets every weight to 1, and the circle becomes a rounded square."
+/>
+
+## Trade-offs
+
+- **Exact geometry.** Circles, cylinders, cones and surfaces of revolution are exact, which is why IGES, STEP and
+  every major CAD kernel store geometry as NURBS.
+- **Parameterisation.** Weights change the speed of the parameter along the curve. Two different sets of weights can
+  give the same shape with different parameterisations.
+- **Non-positive weights.** Zero or negative weights break the convex hull property and can put a pole on the curve.
+- **Cost.** Every evaluation divides, and derivatives need the quotient rule. Rational curves have no simple closed
+  form for arc length or offsets.

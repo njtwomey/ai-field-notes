@@ -1,0 +1,110 @@
+---
+title: Smoothing and penalised splines
+kind: concept
+summary: 'For noisy data, splines fit instead of interpolate: regression splines use few B-splines, smoothing splines minimise $\sum_i (y_i - f(x_i))^2 + \lambda\int f''''^2$, P-splines penalise coefficient differences. As $\lambda$ grows the fit moves from the natural cubic interpolant to the least-squares line.'
+tags: [splines, smoothing, regression, regularisation, worked-example]
+aliases: [spline smoothing, penalised spline, penalized spline, interpolation to regression, smoothing parameter continuum, lambda continuum]
+requires: [cubic-spline-interpolation, b-splines, linear-regression]
+partOf: [splines-and-interpolation]
+related: [regression-splines, smoothing-splines, p-splines, smoothing-penalties-and-curvature, generalised-additive-model, ridge-regression, effective-degrees-of-freedom]
+references: [reinsch1967, green1994, eilers1996, hastie2009, wahba1990, craven1979]
+status: draft
+updated: 2026-09-27
+---
+
+import { SplinePlayground } from '../_shared/SplinePlayground'
+
+<Definition>
+A **smoothing spline** with parameter $\lambda \ge 0$ is the minimiser over twice-differentiable $f$ of
+
+$$
+\sum_{i=1}^n \paren{y_i - f(x_i)}^2 + \lambda\int f''(x)^2\,dx.
+$$
+
+The minimiser is a natural cubic spline with knots at the data <Cite id="reinsch1967" />. A **penalised spline** is
+the same idea on a fixed B-spline basis, with a quadratic penalty on the coefficients. Both trade closeness to the data
+against roughness, with $\lambda$ setting the exchange rate <Cite id="green1994" />.
+</Definition>
+
+## From interpolation to fitting
+
+An interpolating spline, such as the <NoteLink to="cubic-spline-interpolation">cubic spline</NoteLink>, passes
+through every data point. When the $y_i$ carry measurement noise, passing through them reproduces the noise, and the
+curve wiggles at the scale of the data spacing. There are three standard ways to stop interpolating.
+
+1. **Fewer basis functions.** A <NoteLink to="regression-splines">regression spline</NoteLink> uses $K$ knots with
+   $K$ much smaller than $n$, and fits the $K + 4$ B-spline coefficients by least squares. The number and placement of
+   knots control smoothness.
+2. **A roughness penalty on a function.** A <NoteLink to="smoothing-splines">smoothing spline</NoteLink> keeps a knot
+   at every data point and adds $\lambda\int f''^2$. There is no knot choice; $\lambda$ controls smoothness.
+3. **A roughness penalty on coefficients.** A <NoteLink to="p-splines">P-spline</NoteLink> uses a generous B-spline
+   basis, say 20 to 40 functions, and penalises squared second differences of neighbouring coefficients,
+   $\lambda\sum_j (\theta_j - 2\theta_{j-1} + \theta_{j-2})^2$ <Cite id="eilers1996" />. Because B-splines are local
+   and sum to one, differences of coefficients approximate derivatives of the curve.
+
+All three are linear smoothers: the fitted values are $\hat\yvec = \Smat_\lambda\yvec$ for a matrix
+$\Smat_\lambda$ that does not depend on $\yvec$. The <NoteLink to="smoothing-penalties-and-curvature">penalty
+note</NoteLink> works out the matrices.
+
+## Why the minimiser is a natural cubic spline
+
+Let $g$ be any candidate and $s$ the natural cubic spline that interpolates $g$ at the distinct $x_i$. The residual
+sum of squares depends only on the values at the $x_i$, so it is the same for $g$ and $s$. By Holladay's theorem,
+proved in the <NoteLink to="cubic-spline-interpolation">cubic spline note</NoteLink>, $\int s''^2 \le \int g''^2$ with
+equality only if $g = s$. So replacing $g$ by $s$ never increases the objective. The search over all functions reduces
+to a search over the $n$ values of a natural spline, a finite-dimensional ridge problem solved by Reinsch's algorithm
+in $O(n)$ <Cite id="reinsch1967" />.
+
+## The $\lambda$ continuum
+
+**As $\lambda \to 0$** the penalty vanishes, and the objective is minimised by any interpolant. Among interpolants the
+limit picks the one with least $\int f''^2$, the natural cubic interpolating spline.
+
+**As $\lambda \to \infty$** any curvature is infinitely costly, so the limit must have $\int f''^2 = 0$, that is
+$f'' = 0$: a straight line. Among straight lines the penalty is zero, and the residual sum of squares is minimised by
+the ordinary least-squares line. The limit is the <NoteLink to="linear-regression">least-squares line</NoteLink>.
+
+The lines are exactly the functions the penalty does not see, its **null space**. Between the two ends, the
+<NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink> $\trace\Smat_\lambda$ fall
+continuously from $n$ to 2.
+
+**Worked example.** Take $x = 0, 1, \dots, 5$ and $y = 1, 2.2, 1.8, 3.5, 3.1, 4.6$. scipy's
+`make_smoothing_spline(x, y, lam)` gives the fitted values
+
+| $\lambda$     | fitted values at $x = 0, \dots, 5$           | $\trace\Smat_\lambda$ |
+| ------------- | -------------------------------------------- | --------------------- |
+| $10^{-8}$     | 1.000, 2.200, 1.800, 3.500, 3.100, 4.600     | 6.00                  |
+| $10^{-2}$     | 1.029, 2.102, 1.951, 3.344, 3.207, 4.567     | 5.59                  |
+| $1$           | 1.137, 1.768, 2.333, 2.967, 3.611, 4.385     | 3.03                  |
+| $10^{2}$      | 1.102, 1.740, 2.378, 3.018, 3.659, 4.302     | 2.03                  |
+| $10^{8}$      | 1.100, 1.740, 2.380, 3.020, 3.660, 4.300     | 2.00                  |
+
+At $\lambda = 10^{-8}$ the fit reproduces the data, and at $x = 2.5$ it equals the natural cubic interpolant's value,
+2.6559, to eight digits. At $\lambda = 10^8$ it is the least-squares line $1.1 + 0.64x$.
+
+<SplinePlayground
+  title="From interpolation to smoothing"
+  initialType="smoothing"
+  types={['smoothing', 'cubic', 'polynomial', 'linear']}
+  overlay="cubic"
+  initialLogLambda={0}
+  initialPoints={[[0.6, 1.4], [1.5, 2.9], [2.3, 2.1], [3.1, 3.6], [4, 2.6], [4.8, 4.1], [5.6, 3.3], [6.5, 4.8], [7.3, 3.9], [8.2, 5.2], [9.2, 4.4]]}
+  presets={['initial', 'runge', 'step']}
+  caption="Slide log λ from −4 to 3. At the bottom the smoothing spline (solid) sits on the natural cubic interpolant (dashed); at the top it is a straight line. The basis panel shows the equivalent kernel of the selected point: the fitted curve when that point's y is 1 and all others are 0. As λ grows it widens from a spike at the point into a straight line: the weight that point has in the least-squares line. The bending energy readout falls towards 0."
+/>
+
+## Choosing $\lambda$
+
+$\lambda$ is a smoothing parameter, chosen from the data. Generalised cross-validation <Cite id="craven1979" /> and
+restricted maximum likelihood are standard; see <NoteLink to="gam-smoothing-parameter-selection">smoothing parameter
+selection</NoteLink>. Without the data's help, $\lambda$ has no natural scale: it depends on the units of $x$ and
+$y$. Report the effective degrees of freedom instead of $\lambda$ itself.
+
+## Where these lead
+
+- **Bayesian view.** The smoothing spline is the posterior mean of a Gaussian process with an integrated Wiener
+  process prior <Cite id="wahba1990" />.
+- **Additive models.** Each smooth term of a <NoteLink to="generalised-additive-model">generalised additive
+  model</NoteLink> is a penalised spline.
+- **Two and more dimensions.** <NoteLink to="thin-plate-regression-splines">Thin-plate splines</NoteLink> and
+  <NoteLink to="tensor-product-smooths">tensor-product smooths</NoteLink> generalise the penalty.

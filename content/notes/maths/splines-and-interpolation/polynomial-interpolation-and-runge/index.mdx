@@ -1,0 +1,190 @@
+---
+title: Polynomial interpolation and Runge's phenomenon
+kind: concept
+summary: 'Through $n + 1$ points with distinct $x_j$ passes exactly one polynomial of degree at most $n$. Its error is $f^{(n+1)}(\xi)\,\omega(x)/(n+1)!$ with $\omega(x) = \prod_j (x - x_j)$. On equispaced nodes $\omega$ is huge near the ends and the interpolant can diverge (Runge); Chebyshev nodes make $\max\abs{\omega}$ as small as possible.'
+tags: [interpolation, polynomials, numerical-methods, approximation-theory, worked-example]
+aliases: [Lagrange interpolation, Lagrange polynomial, Newton divided differences, divided differences, Runge phenomenon, Chebyshev nodes, Lebesgue constant, barycentric interpolation, interpolation error formula]
+requires: [taylor-series, mean-value-theorem]
+partOf: [splines-and-interpolation]
+related: [numerical-integration, numerical-stability-and-conditioning, cubic-spline-interpolation]
+references: [runge1901, trefethen2019, berrut2004, suli2003, deboor1978]
+status: draft
+updated: 2026-09-27
+---
+
+import { RungeExplorer } from './RungeExplorer'
+
+<Definition>
+Given $n + 1$ nodes $x_0, \dots, x_n$ that are pairwise distinct and values $y_0, \dots, y_n$, the **interpolating
+polynomial** is the unique polynomial $p_n$ of degree at most $n$ with $p_n(x_j) = y_j$ for every $j$. When
+$y_j = f(x_j)$ for a function $f$ with $n + 1$ continuous derivatives, the error at $x$ is
+$f(x) - p_n(x) = f^{(n+1)}(\xi)\,\omega(x)/(n + 1)!$ for some $\xi$ in the smallest interval holding $x$ and the
+nodes, where $\omega(x) = \prod_{j=0}^n (x - x_j)$ is the **node polynomial** <Cite id="suli2003" />.
+</Definition>
+
+## Existence and uniqueness
+
+Write $p_n(x) = \sum_{k=0}^n c_k x^k$. The $n + 1$ conditions $p_n(x_j) = y_j$ are a linear system
+$\Vmat\cvec = \yvec$ with the Vandermonde matrix $V_{jk} = x_j^k$. Uniqueness follows without computing
+$\det\Vmat$. If $p$ and $q$ both interpolate, then $p - q$ has degree at most $n$ and $n + 1$ roots $x_0, \dots, x_n$.
+A nonzero polynomial of degree at most $n$ has at most $n$ roots, so $p - q = 0$. Uniqueness of the solution of a
+square system implies $\Vmat$ is invertible, so a solution exists for every $\yvec$.
+
+Solving the Vandermonde system is a poor way to compute $p_n$. The monomials $x^k$ are nearly parallel on an interval,
+so $\Vmat$ is badly conditioned. Two other forms are better.
+
+## Lagrange form
+
+The **Lagrange basis polynomial** for node $j$ is
+
+$$
+\ell_j(x) = \prod_{k \ne j} \frac{x - x_k}{x_j - x_k}.
+$$
+
+$\ell_j$ has degree $n$, equals 1 at $x_j$ and 0 at every other node. Hence
+
+$$
+p_n(x) = \sum_{j=0}^n y_j\,\ell_j(x)
+$$
+
+takes the value $y_j$ at $x_j$. The interpolant is linear in the data: $\ell_j$ is the interpolant of the unit vector
+that is 1 at node $j$.
+
+**Barycentric form.** Divide $p_n$ by the interpolant of the constant 1, which is $\sum_j \ell_j(x) = 1$. With
+weights $w_j = 1/\prod_{k \ne j}(x_j - x_k)$, the factor $\omega(x)$ cancels and
+
+$$
+p_n(x) = \frac{\sum_j \frac{w_j}{x - x_j} y_j}{\sum_j \frac{w_j}{x - x_j}}.
+$$
+
+Evaluation costs $O(n)$ per point once the weights are known, and the formula is numerically stable for any nodes
+<Cite id="berrut2004" />.
+
+## Newton form and divided differences
+
+The **Newton form** builds $p_n$ one node at a time:
+
+$$
+p_n(x) = a_0 + a_1(x - x_0) + a_2(x - x_0)(x - x_1) + \dots + a_n\prod_{j<n}(x - x_j).
+$$
+
+Adding node $x_{n+1}$ adds one term and leaves $a_0, \dots, a_n$ unchanged, because the new term vanishes at the old
+nodes. The coefficient $a_k$ is the **divided difference** $f[x_0, \dots, x_k]$, defined by $f[x_j] = y_j$ and
+
+$$
+f[x_j, \dots, x_{j+k}] = \frac{f[x_{j+1}, \dots, x_{j+k}] - f[x_j, \dots, x_{j+k-1}]}{x_{j+k} - x_j}.
+$$
+
+The recursion holds because $a_k$ is the leading coefficient of the degree-$k$ interpolant on $x_0, \dots, x_k$. That
+interpolant can be written as a blend of the two degree-$(k - 1)$ interpolants $q$ on $x_1, \dots, x_k$ and $r$ on
+$x_0, \dots, x_{k-1}$:
+
+$$
+p(x) = \frac{(x - x_0)\,q(x) - (x - x_k)\,r(x)}{x_k - x_0}.
+$$
+
+At $x_0$ this gives $r(x_0)$, at $x_k$ it gives $q(x_k)$, and at an interior node both $q$ and $r$ equal $y_j$, so
+$p$ interpolates. Its leading coefficient is the difference of the leading coefficients of $q$ and $r$ divided by
+$x_k - x_0$, which is the recursion.
+
+**Worked example.** Take nodes $0, 1, 2$ with values $1, 3, 2$. The first divided differences are
+$f[0, 1] = (3 - 1)/1 = 2$ and $f[1, 2] = (2 - 3)/1 = -1$. The second is $f[0, 1, 2] = (-1 - 2)/(2 - 0) = -1.5$. So
+
+$$
+p_2(x) = 1 + 2x - 1.5\,x(x - 1), \qquad p_2(1.5) = 1 + 3 - 1.5 \cdot 0.75 = 2.875.
+$$
+
+The Lagrange form gives the same value: $\ell_0(1.5) = -0.125$, $\ell_1(1.5) = 0.75$, $\ell_2(1.5) = 0.375$, and
+$1 \cdot (-0.125) + 3 \cdot 0.75 + 2 \cdot 0.375 = 2.875$.
+
+## The error formula
+
+Fix $x$ distinct from the nodes and define, for $t$ in an interval $I$ holding $x$ and the nodes,
+
+$$
+g(t) = f(t) - p_n(t) - \frac{f(x) - p_n(x)}{\omega(x)}\,\omega(t).
+$$
+
+$g$ vanishes at the $n + 1$ nodes, where $f = p_n$ and $\omega = 0$, and at $t = x$ by construction: $n + 2$ zeros.
+By Rolle's theorem, between each pair of consecutive zeros $g'$ has a zero, so $g'$ has at least $n + 1$ zeros.
+Repeating, $g^{(n+1)}$ has at least one zero $\xi \in I$. Now $p_n^{(n+1)} = 0$, because $p_n$ has degree at most $n$,
+and $\omega^{(n+1)} = (n + 1)!$, because $\omega$ is monic of degree $n + 1$. So
+
+$$
+0 = g^{(n+1)}(\xi) = f^{(n+1)}(\xi) - \frac{f(x) - p_n(x)}{\omega(x)}(n + 1)!,
+\qquad
+f(x) - p_n(x) = \frac{f^{(n+1)}(\xi)}{(n + 1)!}\,\omega(x).
+$$
+
+The error has two factors. One depends on $f$: how large its high derivatives are. The other depends only on the
+nodes: the node polynomial $\omega$.
+
+## Runge's phenomenon
+
+Runge interpolated $f(x) = 1/(1 + 25x^2)$ on $[-1, 1]$ at equally spaced nodes <Cite id="runge1901" />. The function
+is smooth, yet the maximum error grows without bound as $n$ grows. The interpolant converges in the middle of the
+interval and oscillates with growing amplitude near $\pm 1$.
+
+Both factors of the error formula explain it. For equispaced nodes $\abs{\omega(x)}$ is much larger near the ends
+than in the middle, because a point near an end is far from most nodes. At degree 10 the ratio of its maximum near
+$\pm 1$ to its maximum on $[-0.1, 0.1]$ is about 87, and the ratio grows exponentially with $n$. And the derivatives of $f$ grow
+like $(n + 1)!\,5^{n+1}$: $f$ has poles at $x = \pm i/5$, close to the real interval, and the Taylor series of $f$ has
+radius of convergence $1/5$. The product outruns $(n + 1)!$ near the ends <Cite id="trefethen2019" />.
+
+<RungeExplorer />
+
+The figure's numbers, checked with scipy's `BarycentricInterpolator`: at degree 10 the maximum error is 1.92 with
+equispaced nodes and 0.109 with Chebyshev nodes; at degree 20 it is 59.8 and 0.0153.
+
+## Chebyshev nodes minimise the node polynomial
+
+The only part of the error bound we control is $\max_{[-1,1]}\abs{\omega}$. The **Chebyshev polynomial**
+$T_m(x) = \cos(m\arccos x)$ is a polynomial of degree $m$: from $\cos((m + 1)\theta) + \cos((m - 1)\theta) =
+2\cos\theta\cos(m\theta)$ follows $T_{m+1} = 2xT_m - T_{m-1}$ with $T_0 = 1$, $T_1 = x$, so its leading
+coefficient is $2^{m-1}$. Choose the nodes as the roots of $T_{n+1}$,
+
+$$
+x_j = \cos\frac{(2j + 1)\pi}{2n + 2}, \qquad j = 0, \dots, n.
+$$
+
+Then $\omega = T_{n+1}/2^n$, and $\max\abs{\omega} = 2^{-n}$, since $\abs{T_{n+1}} \le 1$.
+
+**No monic polynomial of degree $n + 1$ does better.** $T_{n+1}$ reaches $\pm 1$ with alternating signs at the
+$n + 2$ points $z_k = \cos(k\pi/(n + 1))$. Suppose a monic $q$ of degree $n + 1$ had $\max\abs{q} < 2^{-n}$. Then
+$d = T_{n+1}/2^n - q$ has degree at most $n$, since the leading terms cancel. At each $z_k$, $d(z_k)$ has the sign of
+$T_{n+1}(z_k)$, because $\abs{q(z_k)} < 2^{-n} = \abs{T_{n+1}(z_k)}/2^n$. So $d$ changes sign $n + 1$ times and has
+$n + 1$ roots, which forces $d = 0$ and $q = T_{n+1}/2^n$, a contradiction.
+
+For equispaced nodes at degree 10 the maximum of $\abs{\omega}$ is $8.5 \times 10^{-3}$, against
+$2^{-10} = 9.8 \times 10^{-4}$ for Chebyshev nodes. On an interval $[a, b]$ the nodes map linearly and the bound
+scales by $((b - a)/2)^{n+1}$.
+
+## The Lebesgue constant
+
+The error formula needs $f^{(n+1)}$. A bound that needs no derivatives compares $p_n$ with the best polynomial
+approximation $p^*$ of degree $n$ in the maximum norm. Interpolation is linear and reproduces polynomials of degree
+at most $n$, so $p_n - p^*$ is the interpolant of $f - p^*$:
+
+$$
+\abs{p_n(x) - p^*(x)} = \abs{\sum_j (f - p^*)(x_j)\,\ell_j(x)} \le \norm{f - p^*}_\infty \sum_j \abs{\ell_j(x)}.
+$$
+
+With the **Lebesgue constant** $\Lambda_n = \max_x \sum_j \abs{\ell_j(x)}$ and the triangle inequality,
+
+$$
+\norm{f - p_n}_\infty \le (1 + \Lambda_n)\,\norm{f - p^*}_\infty.
+$$
+
+$\Lambda_n$ also bounds how much errors in the data $y_j$ are amplified. For Chebyshev nodes
+$\Lambda_n \le \frac{2}{\pi}\log(n + 1) + 1$; for equispaced nodes $\Lambda_n$ grows like
+$2^{n+1}/(e\,n\log n)$ <Cite id="trefethen2019" />. The measured values are 2.49 and 29.9 at degree 10, and 2.90 and
+$1.1 \times 10^4$ at degree 20.
+
+## Pitfalls
+
+- **High degree on equispaced data.** Tabulated or sampled data usually comes on a uniform grid. Use a
+  <NoteLink to="cubic-spline-interpolation">spline</NoteLink> or local polynomials of low degree instead of one global
+  polynomial.
+- **The Vandermonde system.** Solving for monomial coefficients loses digits as $n$ grows. Evaluate through the
+  barycentric formula or the Newton form.
+- **Extrapolation.** Outside the nodes $\abs{\omega}$ grows like $\abs{x}^{n+1}$, and so does the error.

@@ -1,0 +1,128 @@
+---
+title: Splines in machine learning
+kind: concept
+summary: 'Splines supply learnable one-variable functions to machine learning: GAM smooth terms, Kolmogorov–Arnold networks with a B-spline on every edge, spline activations, calibration maps, monotone spline flows and quantile smoothing splines. Each is a combination of local B-splines.'
+tags: [splines, deep-learning, regression, calibration, worked-example]
+aliases: [Kolmogorov–Arnold network, KAN, Kolmogorov-Arnold networks, spline activation function, learnable activation function, deep spline networks, spline calibration, I-splines, monotone regression splines, quantile smoothing splines, grid extension]
+requires: [b-splines]
+partOf: [splines-and-interpolation]
+related: [generalised-additive-model, p-splines, activation-functions, universal-approximation-theorem, normalising-flow, isotonic-calibration, shape-constrained-gams, n-hits, expectile-gams]
+references: [liu2024kan, bohra2020, lucena2018, gupta2021, ramsay1988, koenker1994, durkan2019, eilers1996, unser1999, wood2017]
+status: draft
+updated: 2026-09-27
+---
+
+import { SplineActivation } from './SplineActivation'
+
+<Definition>
+In machine learning a spline is a **learnable function of one variable**, $\phi(x) = \sum_{i} c_i B_i(x)$, whose
+coefficients $c_i$ are fitted to data by least squares, maximum likelihood or gradient descent. The fixed B-spline
+basis $B_i$ on a grid of knots makes $\phi$ smooth, local and linear in its parameters <Cite id="unser1999" />.
+Models differ in where they put these functions and in the constraints and penalties on the coefficients.
+</Definition>
+
+## Why splines suit learning
+
+Three properties of <NoteLink to="b-splines">B-splines</NoteLink> carry over directly.
+
+- **Linear in the parameters.** With the knots fixed, $\phi$ is a linear model in the coefficients. Least squares has
+  a closed form, gradients are the basis values, and penalties on coefficients are quadratic.
+- **Local.** A data point at $x$ affects only the $k + 1$ coefficients whose basis functions are non-zero at $x$. Each
+  gradient step changes the function only near the data that produced it, and the design matrix is banded.
+- **Shape constraints are linear.** A B-spline function is non-decreasing if its coefficients are, because
+  $\phi' = \sum_i k\,(c_i - c_{i-1})/(t_{i+k} - t_i)\,B_{i,k-1}$ and the $B_{i,k-1}$ are non-negative. Monotonicity
+  and convexity become inequality constraints on coefficient differences.
+
+## Generalised additive models
+
+A <NoteLink to="generalised-additive-model">generalised additive model</NoteLink> writes the linear predictor as a sum
+of smooth functions of single features, $g(\expect[y]) = \beta_0 + \sum_j f_j(x_j)$. Each $f_j$ is a
+<NoteLink to="p-splines">P-spline</NoteLink> or another penalised spline <Cite id="eilers1996" />
+<Cite id="wood2017" />. The additive structure keeps the model interpretable: every $f_j$ is a curve that can be
+plotted. The <NoteLink to="smoothing-and-penalised-splines">smoothing note</NoteLink> covers the penalties, and
+<NoteLink to="shape-constrained-gams">shape-constrained GAMs</NoteLink> the monotone and convex variants.
+
+## Kolmogorov–Arnold networks
+
+The Kolmogorov–Arnold representation theorem states that every continuous $f : [0, 1]^n \to \reals$ can be written
+as
+
+$$
+f(\xvec) = \sum_{q=1}^{2n+1}\Phi_q\paren{\sum_{p=1}^n \phi_{q,p}(x_p)}
+$$
+
+with continuous functions of one variable $\Phi_q$ and $\phi_{q,p}$. Addition is the only multivariate operation.
+**Kolmogorov–Arnold networks** (KANs) turn the theorem's two-layer form into a deep architecture
+<Cite id="liu2024kan" />. A KAN layer with $n_{\text{in}}$ inputs and $n_{\text{out}}$ outputs has a learnable
+function on every edge, and each output sums its incoming edges:
+
+$$
+x_{l+1,j} = \sum_{i=1}^{n_{\text{in}}}\phi_{l,j,i}(x_{l,i}), \qquad
+\phi(x) = w_b\,\operatorname{silu}(x) + w_s\sum_{i=0}^{G+k-1}c_i\,B_i(x).
+$$
+
+Here $B_i$ are the B-splines of degree $k$ (usually 3) on a uniform grid of $G$ intervals, extended by $k$ knots
+beyond each end, and $\operatorname{silu}(x) = x/(1 + e^{-x})$ is a fixed residual term. Where a multilayer perceptron
+has learnable weights on edges and fixed <NoteLink to="activation-functions">activations</NoteLink> on nodes, a KAN
+has learnable activations on edges and plain sums on nodes.
+
+**Grid extension.** A trained KAN can be refined by fitting each edge's spline on a finer grid, by least squares on
+samples of the coarse spline, and continuing training. Each refinement adds capacity without discarding what was
+learned <Cite id="liu2024kan" />. The figure below does exactly this when $G$ changes.
+
+**Worked example.** A KAN with widths $[2, 5, 1]$, grid $G = 5$ and cubic splines has $2 \times 5 + 5 \times 1 = 15$
+edges. Each edge has $G + k = 8$ spline coefficients and two scalars $w_b, w_s$, so the network has
+$15 \times 10 = 150$ parameters. An MLP with the same widths has $2 \times 5 + 5 + 5 \times 1 + 1 = 21$. KANs spend
+parameters on flexible one-dimensional functions, which can be plotted and in some cases replaced by symbolic
+formulas; they are slower per parameter to evaluate than matrix multiplications.
+
+<SplineActivation />
+
+## Spline activation functions
+
+A network can keep weights on edges and still learn its activations. **Deep spline networks** give each neuron a
+learnable linear spline activation. A total-variation penalty on its second derivative favours activations with few
+knots, and the optimal activations under this penalty are provably linear splines <Cite id="bohra2020" />. A ReLU is
+the special case of one knot. The <NoteLink to="universal-approximation-theorem">universal approximation
+theorem</NoteLink> holds for any non-polynomial activation, so the gain is in efficiency and interpretability rather
+than expressiveness.
+
+## Calibration maps
+
+A classifier's scores can be mapped to calibrated probabilities by a monotone one-dimensional function. Isotonic
+regression gives a step function (<NoteLink to="isotonic-calibration">isotonic calibration</NoteLink>). A spline
+gives a smooth map with few parameters: Lucena fits a spline to the log-odds by penalised logistic regression
+<Cite id="lucena2018" />, and Gupta and co-authors fit a cubic spline to the cumulative distribution of scores and
+recover calibrated probabilities from its derivative <Cite id="gupta2021" />.
+
+## Monotone splines and flows
+
+**I-splines** are integrals of normalised B-splines (M-splines). Each is monotone, so any non-negative combination is
+monotone. Ramsay used them for monotone regression <Cite id="ramsay1988" />. The same idea powers **neural spline
+flows**: a <NoteLink to="normalising-flow">normalising flow</NoteLink> needs invertible one-dimensional transforms with
+cheap Jacobians, and a monotone rational-quadratic spline with bins and derivatives output by a network is
+invertible in closed form <Cite id="durkan2019" />. Monotonicity in both uses comes from the
+<NoteLink to="monotone-and-shape-preserving-interpolation">Hermite slope conditions</NoteLink> or from non-negative
+coefficient differences.
+
+## Quantile smoothing splines
+
+Replacing squared error by the check loss $\rho_\tau(r) = r(\tau - \indicator[r < 0])$ turns a smoothing spline into
+an estimate of the conditional $\tau$-quantile. With an $L^1$ penalty on the total variation of $f'$, the solution is
+a linear spline, computable by linear programming <Cite id="koenker1994" />. Asymmetric squared losses give expectile
+splines (<NoteLink to="expectile-gams">expectile GAMs</NoteLink>).
+
+## Interpolation inside networks
+
+Splines also appear as fixed layers. Image resampling in spatial transformers and many upsampling layers use linear
+or cubic interpolation kernels. <NoteLink to="n-hits">N-HiTS</NoteLink> forecasts a few coefficients per block and
+interpolates them to the full horizon.
+
+## Pitfalls
+
+- **Grid range.** B-splines are zero outside their knots. Inputs that drift beyond the grid fall on the silu term
+  alone in a KAN, or on nothing in a plain spline layer. Normalise inputs or update the grid.
+- **Too many knots without a penalty.** An unpenalised spline with many coefficients overfits, exactly as a
+  <NoteLink to="regression-splines">regression spline</NoteLink> with too many knots does.
+- **Evaluation cost.** Each spline evaluation finds a knot span and runs a short recursion; on GPUs this is slower
+  than a dense matrix product with the same number of parameters.
