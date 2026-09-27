@@ -1,0 +1,125 @@
+---
+title: Overall evaluation criterion and guardrail metrics
+kind: concept
+summary: The overall evaluation criterion (OEC) is the metric, or weighted combination of metrics, that an experiment is meant to improve. Guardrail metrics must not get worse; each is checked by a non-inferiority test against a margin fixed in advance.
+tags: [ab-testing, metrics, hypothesis-testing, worked-example]
+aliases: [OEC, overall evaluation criterion, guardrail metric, guardrail metrics, success metric, north star metric, non-inferiority test, non-inferiority margin]
+requires: [null-and-alternative-hypotheses, confidence-intervals, one-and-two-sided-tests]
+related: [ab-test-power, many-metrics-and-variants, multiple-testing, sample-ratio-mismatch, randomisation-and-analysis-units]
+references: [kohavi2020, kohavi2009, kohavi2012, deng2016]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The **overall evaluation criterion** (OEC) of an online experiment is the quantitative measure that the experiment is
+designed to improve and on which the launch decision rests. It is a single metric or a weighted combination of
+metrics, measured per randomisation unit during the experiment, and chosen so that a short-term improvement predicts
+long-term value <Cite id="kohavi2009" />. **Guardrail metrics** are metrics that must not get worse. Each guardrail is
+checked with a **non-inferiority test**: the treatment passes when the data rule out a degradation larger than a
+margin set before the experiment.
+</Definition>
+
+## Intuition
+
+An experiment measures dozens of metrics, and some move in opposite directions. Without an agreed criterion, the
+decision drifts toward whichever metric looks best after the fact, which is the multiple-comparisons problem described
+in <NoteLink to="many-metrics-and-variants">many metrics and variants</NoteLink>. Fixing the OEC before the experiment
+turns the launch decision into a test of one pre-specified hypothesis. The guardrails bound what the improvement may
+cost.
+
+## Kinds of metrics
+
+- **Goal metrics** describe what the organisation ultimately wants, such as long-term revenue or retained users. They
+  often move too slowly or too noisily to measure in a two-week experiment.
+- **Driver metrics**, also called surrogate or signpost metrics, move within an experiment and are believed to cause
+  the goal metrics. The OEC is built from driver metrics.
+- **Guardrail metrics** protect the business and the validity of the experiment. Organisational guardrails include
+  page load time, error and crash rates, and revenue. Trust-related guardrails check the experiment itself, such as
+  the <NoteLink to="sample-ratio-mismatch">sample ratio</NoteLink> between arms.
+- **Debug metrics** break the OEC and guardrails into components, so that a surprising movement can be explained.
+
+This taxonomy follows <Cite id="kohavi2020" />.
+
+## Properties of a good OEC
+
+1. **Measurable in the experiment.** It is computed from the experiment's own data within its duration.
+2. **Attributable.** It is defined per randomisation unit, so that it can be compared between arms with a valid
+   variance.
+3. **Sensitive.** It moves detectably for changes that matter. A metric with a large variance needs a large sample;
+   see <NoteLink to="ab-test-power">power for A/B tests</NoteLink>.
+4. **Directionally aligned with long-term value.** A short-term gain in the OEC must not come from a change that hurts
+   users. Metric development should check this against experiments with known outcomes <Cite id="deng2016" />.
+
+The fourth property fails easily. Kohavi and colleagues report a search-engine experiment in which a ranking bug that
+showed worse results raised queries per user by over 10% and revenue per user by over 30% <Cite id="kohavi2012" />. Users searched more because they
+could not find what they wanted. Monthly queries factor as users, times sessions per user, times queries per session.
+A better search engine should raise sessions per user and lower queries per session, so the authors argue that
+sessions per user belongs in the OEC and that queries per user should not be maximised.
+
+## Combining metrics
+
+When several driver metrics matter, an OEC can be a weighted sum of their relative changes,
+
+$$
+\text{OEC} = \sum_{k} w_k \frac{\Delta_k}{\mu_k},
+$$
+
+where $\Delta_k$ is the treatment-minus-control difference in metric $k$, $\mu_k$ is its control mean and $w_k$ is a
+weight that states how much a 1% change in metric $k$ is worth. The weights make the trade-offs explicit before the
+data arrive. The variance of the combination includes the covariances between the metrics, which are estimated from
+per-unit data in the same way as each metric's own variance.
+
+## Guardrails as non-inferiority tests
+
+Let $\Delta$ be the true relative change in a guardrail metric for which larger values are worse, such as page load
+time. A **non-inferiority margin** $\delta_{\text{NI}} > 0$ is the largest degradation the organisation accepts. The
+hypotheses are
+
+$$
+H_0: \Delta \ge \delta_{\text{NI}} \qquad \text{against} \qquad H_1: \Delta < \delta_{\text{NI}}.
+$$
+
+The null hypothesis is that the treatment is unacceptably worse. With estimate $\hat\Delta$ and standard error
+$\widehat{\text{se}}$, the level-$\alpha$ test rejects $H_0$, and the guardrail passes, when the one-sided upper
+confidence bound lies below the margin:
+
+$$
+\hat\Delta + z_{1-\alpha}\,\widehat{\text{se}} < \delta_{\text{NI}},
+$$
+
+where $z_q$ is the standard normal $q$-quantile. This is the <NoteLink to="z-test">z-test</NoteLink> of
+$H_0: \Delta = \delta_{\text{NI}}$ with a one-sided alternative, rewritten as a confidence bound: the statistic
+$(\hat\Delta - \delta_{\text{NI}})/\widehat{\text{se}}$ is below $-z_{1-\alpha}$ exactly when the inequality holds.
+
+**Worked example.** A new page layout is tested with page load time as a guardrail, a margin of $+2\%$ and
+$\alpha = 0.05$, so $z_{0.95} = 1.645$.
+
+| Estimate $\hat\Delta$ | Standard error | Upper bound $\hat\Delta + 1.645\,\widehat{\text{se}}$ | Guardrail |
+| --- | --- | --- | --- |
+| $+0.8\%$ | $0.5\%$ | $+1.62\%$ | passes |
+| $+0.8\%$ | $1.0\%$ | $+2.45\%$ | not shown to pass |
+
+In the second row the two-sided test of $\Delta = 0$ gives $z = 0.8$ and $p = 0.42$, so the slowdown is not
+significant. A rule that passes a guardrail whenever the degradation is not significant would pass it. The data are
+nevertheless compatible with a slowdown of 2.45%, beyond the margin. The non-inferiority test puts the burden of proof
+on the treatment, so an underpowered experiment cannot pass a guardrail by default.
+
+**Sample size for a guardrail.** For power $1 - \beta$ to pass when the true change is zero, the standard error must
+satisfy $(z_{1-\alpha} + z_{1-\beta})\,\text{se} \le \delta_{\text{NI}}$. The derivation is the one for any one-sided
+z-test: under $\Delta = 0$ the upper bound is normal with mean $z_{1-\alpha}\,\text{se}$, and it must fall below
+$\delta_{\text{NI}}$ with probability $1 - \beta$. With $\alpha = 0.05$, power 0.8 and a 2% margin, the standard error
+must be at most $2\% / (1.645 + 0.842) = 0.80\%$.
+
+## Pitfalls
+
+- **Choosing the OEC after seeing the data.** Any metric chosen because it moved is a biased estimate of that
+  movement, and its p-value is not valid.
+- **An OEC that rewards harm.** Metrics such as clicks or queries can rise because users struggle. Every candidate
+  OEC should be checked for changes that raise it while making the product worse.
+- **Absence of a significant degradation.** A non-significant change in a guardrail is not evidence that it held.
+  Only a confidence bound inside the margin is.
+- **Many guardrails.** A harmless treatment must pass every non-inferiority test, so its chance of failing at least
+  one grows with the number of guardrails, unless each test has high power. A rule that alarms on any significant
+  degradation has the opposite problem: its chance of a false alarm grows with the number of guardrails. The decision
+  rule must be fixed in advance; see <NoteLink to="multiple-testing">multiple testing</NoteLink>.

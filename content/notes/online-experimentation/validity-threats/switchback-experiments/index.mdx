@@ -1,0 +1,95 @@
+---
+title: Switchback experiments
+kind: concept
+summary: A switchback experiment randomises time periods, often per region, so everyone in a period gets the same variant and concurrent users cannot interfere. Carryover from the previous period biases the estimate towards zero; discarding each period's start removes it.
+tags: [ab-testing, experimental-design, validity, time-series, worked-example]
+aliases: [switchback, switchback test, time-split experiment, time-based randomisation, carryover effect, burn-in period]
+requires: [interference-and-cluster-randomisation, randomisation-and-analysis-units]
+related: [ab-test-power]
+references: [bojinov2023, kohavi2020]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **switchback experiment** divides time into periods, optionally within each of several regions, and randomly assigns
+each period to treatment or control. Every user and every transaction in a period experiences the same variant. The
+treatment effect is estimated by comparing outcomes in treated and control periods. **Carryover** is the part of a
+period's outcome caused by the previous period's variant. A **burn-in** discards the start of each period, where
+carryover is concentrated <Cite id="bojinov2023" />.
+</Definition>
+
+## Intuition
+
+In a ride-hailing market, a new pricing rule shown to half the riders changes which drivers are free for the other
+half. Riders and drivers share one pool, so user-level randomisation is contaminated by
+<NoteLink to="interference-and-cluster-randomisation">interference</NoteLink>, and a city can be too tightly connected
+to split into clusters. Switching the whole market between variants over time makes the comparison one between
+market states, each with a single variant. The price is that consecutive periods are not independent: drivers
+positioned by the previous period's rule are still where it put them.
+
+## Details
+
+**The estimator.** Let $n$ periods of length $L$ each be assigned treatment independently with probability $1/2$, and
+let $\bar Y_k$ be the mean outcome in period $k$. The estimate is the mean of $\bar Y_k$ over treated periods minus the
+mean over control periods. The independent units are the periods, so the standard error is roughly
+$\sigma_p\sqrt{4/n}$, where $\sigma_p$ is the standard deviation of a period mean. Periods at the same time of day
+or day of week differ systematically, so randomising within blocks of comparable periods, such as each hour of a
+week, removes that variation from the comparison.
+
+**Carryover bias.** Suppose the treatment raises the outcome by $\tau$, but the system responds with a lag: for the
+first $c$ minutes of each period the outcome still reflects the previous period's variant, and afterwards it
+reflects the current one. With $T_k \in \set{0, 1}$ the assignment of period $k$, the expected effect contained in
+period $k$ is
+
+$$
+\tau\paren{\frac{L - c}{L}\,T_k + \frac{c}{L}\,T_{k-1}}.
+$$
+
+Assignments are independent, so $\expect[T_{k-1} \mid T_k] = 1/2$. Treated periods contain on average
+$\tau\paren{(L - c)/L + c/(2L)}$ and control periods $\tau c/(2L)$. The difference is
+
+$$
+\tau\paren{1 - \frac{c}{L}}.
+$$
+
+The carryover appears equally, on average, in both kinds of period, so it cancels, and what remains is the
+treatment's effect on the uncontaminated share of each period. The estimate is biased towards zero by the factor
+$1 - c/L$.
+
+**Burn-in.** Discarding the first $b \ge c$ minutes of every period removes all contaminated data, and the estimate on
+the remaining minutes is unbiased for $\tau$. It keeps a share $(L - b)/L$ of the data.
+
+**Worked example.** A pricing change has a carryover of $c = 10$ minutes.
+
+| Period length $L$ | Estimate without burn-in | Data kept with a 10-minute burn-in |
+| --- | --- | --- |
+| 60 minutes | $0.83\,\tau$ | 83% |
+| 30 minutes | $0.67\,\tau$ | 67% |
+| 20 minutes | $0.50\,\tau$ | 50% |
+
+Short periods give many periods and a small standard error, but they lose a large share of each period to carryover
+or to the burn-in. Long periods waste little of each period but give few periods. The period length balances the two,
+and it should exceed the carryover by a wide margin.
+
+**Optimal designs.** Bojinov, Simchi-Levi and Zhao derive switchback designs that are minimax optimal when the
+carryover lasts at most a known number of periods, give randomisation-based inference for them, and propose a
+data-driven procedure to identify the length of the carryover <Cite id="bojinov2023" />.
+
+## Assumptions
+
+- **Carryover shorter than the burn-in.** If the system takes longer to settle than the burn-in, the estimate is still
+  biased towards zero.
+- **No anticipation.** Outcomes in a period do not depend on future assignments. This holds when users and algorithms
+  cannot know the schedule.
+- **Stable effect over the experiment.** The periods sample different times, so the estimate averages the effect over
+  the times sampled. Blocking by time of day makes that average explicit.
+
+## Pitfalls
+
+- **Users as the unit of analysis.** A switchback experiment has as many independent units as periods, often a few
+  hundred. A standard error computed over users or rides is far too small <Cite id="kohavi2020" />.
+- **Users who span periods.** A user whose session crosses a switch sees both variants. Metrics that depend on user
+  learning, such as retention, cannot be measured by a switchback.
+- **Regular schedules.** Alternating variants on a fixed pattern, such as every other hour, can align with periodic
+  demand and bias the comparison. Assignments must be random.

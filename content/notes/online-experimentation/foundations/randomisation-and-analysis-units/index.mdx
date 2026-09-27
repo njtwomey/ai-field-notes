@@ -1,0 +1,118 @@
+---
+title: Randomisation and analysis units
+kind: concept
+summary: The randomisation unit is what an experiment assigns to a variant, such as a user; the analysis unit is what a metric averages over, such as a page view. When analysis units are finer, the naive variance is too small by the design effect $1 + (m - 1)\rho$.
+tags: [ab-testing, experimental-design, variance, worked-example]
+aliases: [randomization unit, unit of randomisation, unit of analysis, analysis unit, unit mismatch, design effect, intra-cluster correlation]
+requires: [standard-error, variance-and-covariance, z-test]
+related: [aa-test]
+references: [kohavi2020, deng2017, deng2018, lohr2021]
+status: draft
+updated: 2026-09-27
+---
+
+import { UnitMismatch } from './UnitMismatch'
+
+<Definition>
+The **randomisation unit** of an online experiment is the entity that is assigned to a variant, such as a user, a
+device, a session, a page view or a whole city. The **analysis unit** is the entity over which a metric is computed, for
+example page views for a click-through rate. Standard variance formulas treat analysis units as independent. That
+holds when the analysis unit is the randomisation unit. When each randomisation unit contributes $m$ correlated
+analysis units, the naive variance is too small by the **design effect** $1 + (m - 1)\rho$, where $\rho$ is the
+correlation between analysis units of the same randomisation unit <Cite id="kohavi2020" />.
+</Definition>
+
+## Intuition
+
+Randomisation makes the variants comparable at the level of the unit that was randomised. Two users in the same arm
+are independent draws, so their contributions to a metric are independent. Two page views of the same user are not:
+a user who clicks a lot on one page tends to click a lot on the next. A metric computed over page views therefore
+contains fewer independent pieces of information than it has page views. A variance formula that counts page views as
+independent overstates the information and understates the standard error.
+
+## Choosing the randomisation unit
+
+- **Consistency of experience.** A user should see the same variant on every visit. Randomising by user, through a
+  stable identifier hashed together with the experiment identifier, does this. Randomising by page view shows the
+  same user both variants, which is noticeable for visible changes and lets one variant's effect leak into the other.
+- **Granularity and power.** Finer units, such as sessions or page views, give more independent units and smaller
+  standard errors. They are acceptable only when the treatment cannot affect later units, for example a change in
+  server latency that users do not learn about.
+- **Interference.** The unit must be coarse enough that treated and control units do not affect each other. Markets
+  with shared supply, and social features, often need clusters such as cities or friend groups; see
+  <NoteLink to="interference-and-cluster-randomisation">interference and cluster randomisation</NoteLink>.
+- **Identifier quality.** Anonymous cookies are cleared and devices are shared, so one person can appear as several
+  users and see several variants. Logged-in identifiers are more stable but cover only part of the traffic.
+
+## Unit mismatch and the design effect
+
+Let each arm contain $U$ randomisation units, each contributing $m$ analysis units with outcomes $Y_{uj}$,
+$j = 1, \dots, m$. Assume every outcome has variance $\sigma^2$, outcomes of the same unit have correlation $\rho$,
+and different units are independent. The arm mean is $\bar Y = \frac{1}{Um}\sum_{u}\sum_{j} Y_{uj}$. Its variance is
+the sum of all variances and covariances, divided by $(Um)^2$:
+
+$$
+\var(\bar Y) = \frac{1}{(Um)^2} \sum_{u=1}^{U} \paren{m\sigma^2 + m(m - 1)\rho\sigma^2}
+= \frac{\sigma^2}{Um}\,\paren{1 + (m - 1)\rho}.
+$$
+
+Each unit contributes $m$ variance terms and $m(m - 1)$ covariance terms, each equal to $\rho\sigma^2$. The naive
+formula $\sigma^2/(Um)$ keeps only the variance terms. The ratio of the true variance to the naive one is the design
+effect <Cite id="lohr2021" />
+
+$$
+D = 1 + (m - 1)\rho.
+$$
+
+$D = 1$ when $m = 1$ or $\rho = 0$. The effective number of independent observations is $Um/D$. For
+$0 \le \rho \le 1$ it lies between $U$, reached at $\rho = 1$, and $Um$, reached at $\rho = 0$.
+
+**The effect on an A/A test.** Under the null hypothesis the naive statistic $Z_{\text{naive}} = \hat\Delta /
+\widehat{\text{se}}_{\text{naive}}$ equals the correctly standardised statistic multiplied by $\sqrt D$, so
+$Z_{\text{naive}} \sim \Gauss(0, D)$ approximately. The naive test rejects when $\abs{Z_{\text{naive}}} \ge
+z_{1-\alpha/2}$, where $z_q$ is the standard normal $q$-quantile. Its false-positive rate is
+
+$$
+P\paren{\abs{\Gauss(0, D)} \ge z_{1-\alpha/2}} = 2\paren{1 - \Phi\paren{\frac{z_{1-\alpha/2}}{\sqrt D}}},
+$$
+
+where $\Phi$ is the standard normal distribution function. At $\alpha = 0.05$:
+
+| Views per user $m$ | Correlation $\rho$ | Design effect $D$ | A/A false-positive rate |
+| --- | --- | --- | --- |
+| 5 | 0.05 | 1.2 | 0.074 |
+| 10 | 0.1 | 1.9 | 0.155 |
+| 20 | 0.1 | 2.9 | 0.250 |
+
+With 10 page views per user and a modest correlation of 0.1, an experiment with no effect is declared significant
+15.5% of the time instead of 5%. An <NoteLink to="aa-test">A/A test</NoteLink> analysed this way shows the problem as
+too many small p-values.
+
+<UnitMismatch />
+
+## Correct analyses
+
+- **Aggregate to the randomisation unit.** Compute one value per user, such as clicks per user, and compare the
+  per-user means. The users are independent, so the usual standard error is valid.
+- **Ratio metrics.** A page-level rate such as total clicks over total page views is a ratio of two per-user sums. Its
+  variance comes from the <NoteLink to="ratio-metrics-and-delta-method">delta method</NoteLink> applied to per-user
+  totals <Cite id="deng2018" />. The delta method handles unequal numbers of views per user, which the design-effect
+  formula with a single $m$ does not.
+- **Resampling by unit.** A bootstrap must resample users, with all their page views, not individual page views.
+- **Cluster-robust standard errors.** A regression on page-level data gives valid standard errors when they are
+  clustered by user.
+
+## Assumptions
+
+- Randomisation units are independent of one another. Interference between users breaks this, and no analysis at the
+  user level repairs it.
+- Assignment is by a fixed unit identifier. If the identifier changes during the experiment, as with cleared cookies,
+  one person becomes several units, and those units are correlated.
+
+## Pitfalls
+
+- **Binomial variance on page views.** Treating a click-through rate as a binomial proportion over page views assumes
+  $\rho = 0$. The variance is too small whenever users differ in their propensity to click <Cite id="deng2017" />.
+- **Power calculations at the wrong unit.** A power calculation that treats page views as independent understates
+  the required sample size by the factor $D$. The variance must be the variance of the per-user metric; see
+  <NoteLink to="ab-test-power">power for A/B tests</NoteLink>.

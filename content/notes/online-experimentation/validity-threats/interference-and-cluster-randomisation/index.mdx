@@ -1,0 +1,106 @@
+---
+title: Interference and cluster randomisation
+kind: concept
+summary: Interference means one user's outcome depends on others' assignments, as in social networks and shared-supply marketplaces. A user-level A/B test then misses the spillover. Randomising whole clusters captures the within-cluster part, at the cost of fewer independent units.
+tags: [ab-testing, validity, causal-inference, experimental-design, worked-example]
+aliases: [interference, SUTVA, stable unit treatment value assumption, spillover, network effects in experiments, cluster randomisation, cluster randomization, graph cluster randomisation, marketplace interference]
+requires: [randomisation-and-analysis-units, ab-test-power]
+related: [reweighting-biased-samples, novelty-and-primacy-effects]
+references: [hudgens2008, ugander2013, aronow2017, blake2014, kohavi2020]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Interference** occurs when the outcome of one unit depends on the treatment assigned to other units. The standard
+analysis of an A/B test assumes there is none, the **stable unit treatment value assumption** (SUTVA): each unit's
+outcome depends only on its own assignment. Under interference, the difference in means between arms estimates
+neither the effect of treating everyone nor the effect of treating one user. **Cluster randomisation** assigns whole
+groups of connected units, such as cities, markets or communities in a social graph, to the same arm, so that most
+interactions happen within an arm <Cite id="hudgens2008" />.
+</Definition>
+
+## Intuition
+
+In a messaging app, a new feature that makes sending messages easier also changes what the recipients receive. If a
+user is in control but their friends are in treatment, the control user's behaviour changes too, and the control arm
+no longer shows what happens without the feature. In a marketplace with fixed inventory, a treatment that helps
+buyers find cheap items lets treated buyers take items that control buyers would have bought. Treatment looks better
+than control, partly because control got worse, and the lift disappears when everyone is treated
+<Cite id="blake2014" />.
+
+## Details
+
+**A linear model.** Let unit $i$ have treatment indicator $T_i$, and let $f_i$ be the share of its neighbours that are
+treated, for friends in a network or competitors for the same supply. Suppose
+
+$$
+\expect[Y_i] = \alpha + \beta\,T_i + \gamma f_i.
+$$
+
+$\beta$ is the direct effect of a unit's own treatment and $\gamma$ the spillover from its neighbours. The quantity a
+launch decision needs is the **global treatment effect**, everyone treated against no one treated:
+$(\alpha + \beta + \gamma) - \alpha = \beta + \gamma$.
+
+**User-level randomisation.** Each unit is treated independently with probability $1/2$. A unit's neighbours are
+assigned independently of the unit, so $\expect[f_i \mid T_i] = 1/2$ in both arms. The difference in arm means is
+
+$$
+\paren{\alpha + \beta + \tfrac{\gamma}{2}} - \paren{\alpha + \tfrac{\gamma}{2}} = \beta.
+$$
+
+The spillover appears equally in both arms and cancels. The estimate misses $\gamma$ entirely. When $\gamma < 0$, as
+in the marketplace, the test overstates the global effect. When $\gamma > 0$, as in the messaging app, it
+understates it.
+
+**Cluster randomisation.** Partition units into clusters and treat each cluster with probability $1/2$. Let a share
+$\phi$ of each unit's neighbours lie in its own cluster; the rest lie in other clusters, which are treated
+independently with probability $1/2$. A treated unit has $\expect[f_i] = \phi + (1 - \phi)/2$ and a control unit
+$\expect[f_i] = (1 - \phi)/2$. The difference in arm means is
+
+$$
+\beta + \gamma\paren{\phi + \tfrac{1 - \phi}{2}} - \gamma\,\tfrac{1 - \phi}{2} = \beta + \phi\gamma.
+$$
+
+The bias is $-(1 - \phi)\gamma$: the share of interactions that cross cluster boundaries. Clusters that contain most
+of each unit's interactions give $\phi$ close to 1. Graph cluster randomisation chooses clusters by partitioning the
+social graph to make $\phi$ large <Cite id="ugander2013" />.
+
+**Worked example.** Take $\beta = 2\%$ and $\gamma = 3\%$, so the global effect is 5%. A user-level test estimates
+2%. Cluster randomisation with $\phi = 0.6$ estimates $2\% + 0.6 \times 3\% = 3.8\%$. The remaining bias,
+$0.4 \times 3\% = 1.2$ points, comes from the 40% of interactions between clusters.
+
+**The cost.** The independent units of a cluster-randomised experiment are the clusters. If outcomes within a cluster
+of size $m$ have intra-cluster correlation $\rho$, the variance of an arm mean is multiplied by the design effect
+$1 + (m - 1)\rho$ relative to independent units; see
+<NoteLink to="randomisation-and-analysis-units">randomisation and analysis units</NoteLink>. Large clusters capture
+more interference and have fewer independent units, so bias and variance trade off through the choice of clusters.
+The analysis must be done at the cluster level, or with standard errors clustered by it.
+
+## Detecting interference
+
+- **Two levels of randomisation.** Randomising some users individually and others by cluster, and comparing the two
+  estimates, tests for interference. Under SUTVA both estimate $\beta$; the difference estimates $\phi\gamma$.
+- **Varying saturation.** Assigning clusters different treated shares, such as 20% or 80% of their members, and
+  comparing untreated units across clusters measures the spillover onto control units <Cite id="hudgens2008" />.
+- **Exposure models.** When the spillover depends on a known function of neighbours' assignments, such as the share
+  treated, each unit's probability of each exposure can be computed from the design, and inverse-probability weighting
+  estimates the effect of each exposure <Cite id="aronow2017" />.
+
+## Assumptions
+
+- The linear model is an illustration. The qualitative result, that user-level randomisation cancels any spillover
+  shared equally by both arms, does not depend on linearity.
+- Cluster randomisation assumes that interference between clusters is weak. It does not help when every unit
+  interacts with every other, as in a single global auction; there, time-based designs such as
+  <NoteLink to="switchback-experiments">switchback experiments</NoteLink> are used.
+
+## Pitfalls
+
+- **Analysing clusters as users.** A cluster-randomised experiment analysed with a user-level standard error has the
+  inflated false-positive rate of any unit mismatch.
+- **Too few clusters.** With a handful of cities per arm, one unusual city can dominate the comparison. Pairing or
+  stratifying similar clusters before randomising reduces this.
+- **Assuming no interference because the product is not social.** Shared inventory, shared budgets, pricing
+  algorithms and ranking systems that learn from all users create interference without any social feature
+  <Cite id="kohavi2020" />.

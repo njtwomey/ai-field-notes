@@ -1,0 +1,124 @@
+---
+title: Group-sequential designs and alpha spending
+kind: concept
+summary: A group-sequential design analyses an experiment at planned interim looks and stops when the z-statistic crosses a raised boundary, set so that the overall false-positive rate is $\alpha$. An alpha-spending function $\alpha(t)$ fixes how much of $\alpha$ is used by information fraction $t$.
+tags: [ab-testing, sequential-testing, hypothesis-testing, worked-example]
+aliases: [group sequential design, group sequential test, sequential testing, alpha spending, alpha-spending function, Lan–DeMets spending function, Pocock boundary, O'Brien–Fleming boundary, interim analysis, error spending]
+requires: [z-test, type-i-and-type-ii-errors, peeking-and-optional-stopping]
+related: [msprt-and-always-valid-p-values, ab-test-power, multiple-testing, winners-curse]
+references: [lan1983, demets1994, pocock1977, obrien1979, jennison2000, armitage1969]
+status: draft
+updated: 2026-09-27
+---
+
+import { SequentialComparison } from './SequentialComparison'
+
+<Definition>
+A **group-sequential design** plans up to $K$ analyses of an accumulating experiment, at information fractions
+$0 < t_1 < \dots < t_K = 1$ of a maximum sample size. At look $k$ it computes the usual z-statistic $Z_k$ from all data
+so far and stops, rejecting $H_0$, if $\abs{Z_k} \ge c_k$. The boundaries $c_1, \dots, c_K$ are chosen so that
+$P_{H_0}\paren{\abs{Z_k} \ge c_k \text{ for some } k} = \alpha$. An **alpha-spending function** $\alpha(t)$, increasing
+from $\alpha(0) = 0$ to $\alpha(1) = \alpha$, sets the boundaries look by look: the probability under $H_0$ of stopping
+at or before look $k$ is $\alpha(t_k)$ <Cite id="lan1983" />.
+</Definition>
+
+## Intuition
+
+Checking an experiment repeatedly with the fixed-sample threshold of 1.96 gives chance many opportunities to cross
+it, and the false-positive rate grows with every look, as shown in
+<NoteLink to="peeking-and-optional-stopping">peeking and optional stopping</NoteLink>. A group-sequential design keeps
+the looks but raises the threshold. The total false-positive rate is a budget $\alpha$, and the design decides in
+advance how much of it each look may use. Spending little early keeps the final analysis almost as powerful as a
+fixed-sample test. Spending more early makes early stopping more likely when the effect is large.
+
+## Details
+
+**The joint distribution of the looks.** Let $S_k$ be the sum of the standardised data up to look $k$, with variance
+$I_k$, the information, proportional to the sample size. Then $Z_k = S_k/\sqrt{I_k}$ and $t_k = I_k/I_K$. For
+$j \le k$, $S_k = S_j + (S_k - S_j)$, and the increment is independent of $S_j$, so
+
+$$
+\cov(Z_j, Z_k) = \frac{\var(S_j)}{\sqrt{I_j I_k}} = \sqrt{\frac{I_j}{I_k}} = \sqrt{\frac{t_j}{t_k}}.
+$$
+
+Under $H_0$, $(Z_1, \dots, Z_K)$ is multivariate normal with mean zero, unit variances and these correlations. Under an
+effect $\theta$ per unit of information, $Z_k$ has mean $\theta\sqrt{I_k}$. Every probability a design needs is a
+rectangle probability of this distribution. They are computed by propagating the density of $S_k$ from look to look,
+discarding the paths that have crossed, as a convolution with the density of the independent increment
+<Cite id="armitage1969" />.
+
+**Classical boundaries.** Pocock's design uses a constant $c_k = c$ <Cite id="pocock1977" />. O'Brien and Fleming's
+uses $c_k = c\sqrt{K/k}$, very strict early and close to the fixed-sample value at the end <Cite id="obrien1979" />.
+Both require $K$ equally spaced looks fixed in advance. For $K = 5$ and $\alpha = 0.05$, Pocock's $c = 2.413$ and
+O'Brien and Fleming's $c = 2.040$, giving boundaries 4.56, 3.23, 2.63, 2.28 and 2.04.
+
+**Alpha spending.** Lan and DeMets replaced the fixed boundary shape by a spending function. At look $k$, with
+$c_1, \dots, c_{k-1}$ already fixed, $c_k$ solves
+
+$$
+P_{H_0}\paren{\abs{Z_j} < c_j \text{ for } j < k,\ \abs{Z_k} \ge c_k} = \alpha(t_k) - \alpha(t_{k-1}).
+$$
+
+The equation uses only the information fractions reached so far. The number and timing of looks therefore need not be
+fixed in advance, provided they are not chosen in response to the observed results <Cite id="demets1994" />. Two
+functions approximate the classical designs:
+
+$$
+\alpha_{\text{OF}}(t) = 2\paren{2 - 2\Phi\paren{\frac{z_{1-\alpha/4}}{\sqrt t}}}, \qquad
+\alpha_{\text{P}}(t) = \alpha\ln\paren{1 + (e - 1)t},
+$$
+
+where $\Phi$ is the standard normal distribution function and $z_q$ its $q$-quantile. The O'Brien–Fleming-type
+function spends $2 - 2\Phi(z_{1-\alpha/4}/\sqrt t)$ in each tail. It is the one-sided function
+$2 - 2\Phi(z_{1-\alpha'/2}/\sqrt t)$ at $\alpha' = \alpha/2$ per tail, the convention of the R packages ldbounds and
+gsDesign. At $t = 1$ both functions equal $\alpha$.
+
+**Worked example.** Five equally spaced looks at $\alpha = 0.05$:
+
+| Look | $t$ | O'Brien–Fleming-type: cumulative $\alpha$ | $c_k$ | Nominal $p$ | Pocock-type: cumulative $\alpha$ | $c_k$ | Nominal $p$ |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 0.2 | 0.000001 | 4.88 | 0.000001 | 0.0148 | 2.44 | 0.0148 |
+| 2 | 0.4 | 0.0008 | 3.36 | 0.0008 | 0.0262 | 2.43 | 0.0152 |
+| 3 | 0.6 | 0.0076 | 2.68 | 0.0074 | 0.0354 | 2.41 | 0.0159 |
+| 4 | 0.8 | 0.0244 | 2.29 | 0.0220 | 0.0432 | 2.40 | 0.0165 |
+| 5 | 1.0 | 0.0500 | 2.03 | 0.0423 | 0.0500 | 2.39 | 0.0170 |
+
+The nominal $p$ is the two-sided p-value at which each look stops, $2\paren{1 - \Phi(c_k)}$. A look stops if the
+ordinary p-value computed at that look is below it. From look 2 onward the nominal values exceed the
+increments of $\alpha(t)$: some of the paths beyond $c_k$ at look $k$ crossed at an earlier look, stopped there, and
+use no new $\alpha$.
+
+**What sequential looks cost and save.** A design that must keep power 0.8 against an effect $\delta$ needs a larger
+maximum sample than the fixed-sample test, because its final boundary is above 1.96. It also stops early when the
+effect is real. For the designs in the table, with power 0.8 at $\alpha = 0.05$:
+
+| Design | Maximum sample, relative to fixed | Expected sample when the effect is $\delta$ |
+| --- | --- | --- |
+| O'Brien–Fleming-type | 1.025 | 0.824 |
+| Pocock-type | 1.212 | 0.796 |
+
+The O'Brien–Fleming-type design costs 2.5% more users at most and saves 18% on average when the treatment works. The
+Pocock-type design stops earlier on average but needs 21% more users if it runs to the end.
+
+<SequentialComparison />
+
+## Assumptions
+
+- **Information fractions not chosen from the data.** The looks may be irregular, but their timing must not depend
+  on the observed effect.
+- **A fixed maximum.** The spending function is defined relative to the maximum information $I_K$. Extending an
+  experiment beyond it requires a new design.
+- **Normal statistics with independent increments.** This holds for differences in means of independent randomisation
+  units once samples are large. Metrics whose per-user values keep changing, such as cumulative revenue per user,
+  need care, because a user's contribution at one look is not independent of their contribution at the next.
+
+## Pitfalls
+
+- **Biased estimates at stopping.** An experiment that stops early because $\abs{Z_k}$ crossed a high boundary
+  selects estimates that are too large, as in the <NoteLink to="winners-curse">winner's curse</NoteLink>. The naive
+  confidence interval at the stopping look does not have its nominal coverage; adjusted intervals order the possible
+  outcomes by stopping look and value <Cite id="jennison2000" />.
+- **Looking without a boundary.** Glancing at a dashboard is harmless only if no decision follows from it. Any look
+  that could stop the experiment must be one of the design's looks.
+- **Futility stopping without planning.** Stopping for lack of effect lowers power and must also be planned, with its
+  own spending of the type II error. Stopping for futility never raises the false-positive rate.

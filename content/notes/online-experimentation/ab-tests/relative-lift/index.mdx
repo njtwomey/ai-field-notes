@@ -1,0 +1,106 @@
+---
+title: Relative lift and its confidence interval
+kind: concept
+summary: The relative lift $\mu_T/\mu_C - 1$ divides by an estimated control mean, so its interval must include the control's noise. The delta method gives a symmetric interval, the log ratio and Fieller's method asymmetric ones; dividing the absolute interval by $\bar Y_C$ is too narrow.
+tags: [ab-testing, confidence-intervals, delta-method, worked-example]
+aliases: [percent change, percentage lift, relative difference, relative effect, Fieller's theorem, Fieller interval, log-ratio interval]
+requires: [ratio-metrics-and-delta-method, confidence-intervals, conversion-rate-metrics]
+related: [ab-test, effect-size, revenue-and-heavy-tailed-metrics, ab-test-power]
+references: [kohavi2020, deng2018, fieller1954]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The **relative lift** of a treatment is $L = \mu_T/\mu_C - 1$, the change in a metric's mean as a fraction of the
+control mean. Its estimate is $\hat L = \bar Y_T/\bar Y_C - 1$. Because the denominator $\bar Y_C$ is itself estimated,
+a confidence interval for $L$ must account for the noise in both means. The delta method, a log-ratio transformation
+and Fieller's method each give such an interval <Cite id="deng2018" />.
+</Definition>
+
+## Intuition
+
+A difference of 0.3 percentage points means more on a 4% baseline than on a 40% one, so experiments report lifts in
+percent. Dividing the absolute confidence interval by the observed control mean treats that mean as known. If the
+control mean was underestimated by chance, the lift is overestimated, and the interval ignores this. The ratio of two
+noisy quantities is also skewed: the denominator appears in the reciprocal, so an equally large error below the true
+control mean moves the ratio more than one above it.
+
+## Details
+
+Let the arms be independent with $\var(\bar Y_T) = v_T$ and $\var(\bar Y_C) = v_C$.
+
+**Delta method.** Expanding $g(y_T, y_C) = y_T/y_C$ to first order around $(\mu_T, \mu_C)$,
+
+$$
+\hat L - L \approx \frac{1}{\mu_C}(\bar Y_T - \mu_T) - \frac{\mu_T}{\mu_C^2}(\bar Y_C - \mu_C),
+\qquad
+\var(\hat L) \approx \frac{v_T}{\mu_C^2} + \frac{\mu_T^2\, v_C}{\mu_C^4}.
+$$
+
+The interval is $\hat L \pm z_{1-\alpha/2}\sqrt{\widehat\var(\hat L)}$ with the means and variances replaced by
+estimates, where $z_q$ is the standard normal $q$-quantile. The second term is the one the naive interval omits. For
+a ratio metric in each arm, $v_T$ and $v_C$ are themselves delta-method variances; see
+<NoteLink to="ratio-metrics-and-delta-method">ratio metrics and the delta method</NoteLink>.
+
+**Log ratio.** The logarithm makes the ratio a difference, $\ln(\bar Y_T/\bar Y_C) = \ln\bar Y_T - \ln\bar Y_C$. The
+delta method applied to each logarithm gives
+
+$$
+\var\paren{\ln\frac{\bar Y_T}{\bar Y_C}} \approx \frac{v_T}{\mu_T^2} + \frac{v_C}{\mu_C^2}.
+$$
+
+A symmetric interval on the log scale, transformed back by $\exp(\cdot) - 1$, is asymmetric for $L$ and never
+extends below $-1$.
+
+**Fieller's method.** If $\bar Y_T$ and $\bar Y_C$ are normal, then for the true ratio $\rho = \mu_T/\mu_C$ the
+quantity $\bar Y_T - \rho\bar Y_C$ has mean zero and variance $v_T + \rho^2 v_C$. The set of $\rho$ not rejected at
+level $\alpha$ is
+
+$$
+\set{\rho : \paren{\bar Y_T - \rho\bar Y_C}^2 \le z_{1-\alpha/2}^2\paren{v_T + \rho^2 v_C}}.
+$$
+
+Expanding gives the quadratic inequality
+$\paren{\bar Y_C^2 - z^2 v_C}\rho^2 - 2\bar Y_T\bar Y_C\,\rho + \paren{\bar Y_T^2 - z^2 v_T} \le 0$, with
+$z = z_{1-\alpha/2}$. When $\bar Y_C^2 > z^2 v_C$, the control mean is significantly different from zero, the
+leading coefficient is positive, and the set is the interval between the two roots <Cite id="fieller1954" />. Its
+coverage does not rely on a linearisation, only on the normality of the two means.
+
+## Worked example
+
+Arm C converts 2,000 of 50,000 users (4.00%) and arm T 2,150 of 50,000 (4.30%), as in
+<NoteLink to="conversion-rate-metrics">conversion-rate metrics</NoteLink>. The estimated lift is
+$\hat L = 0.043/0.040 - 1 = 7.5\%$. The variances are $v_C = 0.04 \times 0.96/50{,}000$ and
+$v_T = 0.043 \times 0.957/50{,}000$.
+
+| Method | 95% interval for the lift |
+| --- | --- |
+| Absolute interval divided by $\bar Y_C$ | $[1.32\%,\ 13.68\%]$ |
+| Delta method, standard error 3.27 points | $[1.09\%,\ 13.91\%]$ |
+| Log ratio, standard error 0.0304 on the log scale | $[1.28\%,\ 14.10\%]$ |
+| Fieller | $[1.28\%,\ 14.12\%]$ |
+
+The naive interval is the narrowest because it omits $\mu_T^2 v_C/\mu_C^4$. Its standard error is 3.15 points against
+3.27 for the delta method. The log-ratio and Fieller intervals agree closely and are shifted upward, reflecting the
+skew of a ratio. At this sample size all four exclude zero. With smaller samples or rarer events the differences grow,
+and the naive interval under-covers.
+
+## Assumptions
+
+- **Independent arms.** The formulas above omit a covariance term between $\bar Y_T$ and $\bar Y_C$, which is zero
+  when different units are randomised to each arm.
+- **A control mean far from zero.** All three methods need $\bar Y_C$ to be many standard errors from zero. For
+  metrics such as profit that can be zero or negative, a relative lift is not meaningful.
+- **Approximate normality of the means.** For heavy-tailed metrics this needs large samples; see
+  <NoteLink to="revenue-and-heavy-tailed-metrics">revenue and heavy-tailed metrics</NoteLink>.
+
+## Pitfalls
+
+- **Testing the lift and the difference separately.** $L = 0$ exactly when $\mu_T = \mu_C$. The test of no effect
+  should be the test of the absolute difference. A delta-method z-statistic for $L$ gives a slightly different
+  p-value, here $0.075/0.0327 = 2.29$ against 2.38, because it uses a different standard error.
+- **Averaging lifts across experiments.** Relative lifts from experiments with different baselines are not on a
+  common scale. Combining them needs weights, and their sum is not the lift of the combined changes.
+- **Planning in relative terms, analysing in absolute terms.** A relative MDE must be converted with the control mean
+  before sizing; see <NoteLink to="ab-test-power">power for A/B tests</NoteLink>.

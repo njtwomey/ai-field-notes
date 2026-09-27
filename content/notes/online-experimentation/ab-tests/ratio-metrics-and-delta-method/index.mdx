@@ -1,0 +1,111 @@
+---
+title: Ratio metrics and the delta method
+kind: concept
+summary: A ratio metric such as clicks per page view divides two per-user totals, $\bar Y/\bar X$, while users are randomised. The delta method linearises it to the mean of $Y - RX$, giving the variance $\var(Y - RX)/(n\mu_X^2)$; a binomial formula over page views understates it.
+tags: [ab-testing, metrics, variance, delta-method, worked-example]
+aliases: [ratio metric, delta method, click-through rate variance, CTR variance, linearisation, linearization, ratio estimator]
+requires: [randomisation-and-analysis-units, variance-and-covariance, taylor-series, standard-error]
+related: [revenue-and-heavy-tailed-metrics, aa-test]
+references: [deng2018, budylin2018, kohavi2020, casella2002]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **ratio metric** in an experiment randomised by user is a ratio of two per-user totals summed over an arm:
+
+$$
+\hat R = \frac{\sum_{i=1}^{n} Y_i}{\sum_{i=1}^{n} X_i} = \frac{\bar Y}{\bar X},
+$$
+
+where $X_i$ and $Y_i$ are user $i$'s totals, such as page views and clicks. The **delta method** approximates its
+variance by linearising the ratio around the true means $\mu_X$ and $\mu_Y$:
+
+$$
+\var(\hat R) \approx \frac{\sigma_Y^2 - 2R\sigma_{XY} + R^2\sigma_X^2}{n\,\mu_X^2}, \qquad R = \frac{\mu_Y}{\mu_X},
+$$
+
+with $\sigma_X^2$, $\sigma_Y^2$ and $\sigma_{XY}$ the per-user variances and covariance <Cite id="deng2018" />.
+</Definition>
+
+## Intuition
+
+Clicks per page view looks like a proportion, with page views as trials. It is not one, because page views are not
+the randomisation unit. A user who views many pages contributes many correlated trials, and users differ in how likely
+they are to click. The independent units are users, and each user contributes a pair $(X_i, Y_i)$. The ratio of two
+averages of such pairs is a smooth function of two sample means, and the delta method gives the variance of any smooth
+function of sample means.
+
+## Details
+
+**Derivation.** Write $\hat R = g(\bar Y, \bar X)$ with $g(y, x) = y/x$. A first-order
+<NoteLink to="taylor-series">Taylor expansion</NoteLink> around $(\mu_Y, \mu_X)$ gives
+
+$$
+\hat R - R \approx \frac{1}{\mu_X}(\bar Y - \mu_Y) - \frac{\mu_Y}{\mu_X^2}(\bar X - \mu_X)
+= \frac{1}{\mu_X}\paren{\bar Y - R\bar X},
+$$
+
+using $\mu_Y - R\mu_X = 0$. The right-hand side is $1/\mu_X$ times the sample mean of the per-user variable
+$D_i = Y_i - RX_i$, which has mean zero. The users are independent, so
+
+$$
+\var(\hat R) \approx \frac{\var(D)}{n\mu_X^2} = \frac{\sigma_Y^2 - 2R\sigma_{XY} + R^2\sigma_X^2}{n\mu_X^2}.
+$$
+
+The estimate replaces every moment by its sample value. The neglected terms are of order $1/n$ relative to those kept,
+so the approximation is accurate when $n$ is large and $\bar X$ is far from zero relative to its standard error
+<Cite id="casella2002" />.
+
+**Linearisation.** The derivation shows that $\hat R$ behaves like the mean of $D_i = Y_i - \hat R X_i$, scaled by
+$1/\bar X$. Computing this per-user variable turns a ratio metric into an ordinary per-user mean, so that the same
+code, variance-reduction methods and tests apply to both <Cite id="budylin2018" />.
+
+**Comparing arms.** The arms are independent, so the variance of $\hat R_T - \hat R_C$ is the sum of the two arms'
+delta-method variances. The relative difference $\hat R_T/\hat R_C - 1$ needs one more application of the delta
+method; see <NoteLink to="relative-lift">relative lift</NoteLink>.
+
+**Ratio of means and mean of ratios.** $\bar Y/\bar X$ weights each user by their page views. The average of per-user
+click-through rates $\frac{1}{n}\sum_i Y_i/X_i$ weights users equally. They estimate different quantities, and the
+choice is part of the metric's definition. The mean of ratios is an ordinary per-user mean and needs no delta method,
+but it is undefined for users with $X_i = 0$.
+
+## Worked example
+
+An arm has $n = 10{,}000$ users. Page views per user have mean $\mu_X = 5$ and standard deviation $\sigma_X = 4$.
+Clicks per user have mean $\mu_Y = 0.5$ and standard deviation $\sigma_Y = 1.2$. The correlation between a user's page
+views and clicks is 0.5, so $\sigma_{XY} = 0.5 \times 4 \times 1.2 = 2.4$.
+
+1. **The ratio.** $R = 0.5/5 = 0.1$.
+2. **Delta method.** $\var(D) = 1.44 - 2 \times 0.1 \times 2.4 + 0.1^2 \times 16 = 1.12$, so
+   $\var(\hat R) = 1.12/(10{,}000 \times 25) = 4.48 \times 10^{-6}$ and the standard error is 0.00212.
+3. **Binomial formula.** Treating the 50,000 page views as independent trials gives
+   $\sqrt{0.1 \times 0.9/50{,}000} = 0.00134$. It is too small by a factor of 1.58, and the variance by a factor of
+   2.49.
+4. **Consequence.** In an A/A test, the naive statistic is approximately $\Gauss(0, 2.49)$, so a test at
+   $\alpha = 0.05$ rejects with probability $2\paren{1 - \Phi(1.96/1.58)} = 0.214$, where $\Phi$ is the standard normal
+   distribution function. One A/A test in five is declared significant.
+
+A simulation checks the approximation. Page views per user were drawn from a negative binomial distribution with
+mean 5, each user's click probability from $\Beta(1, 9)$, and clicks from the binomial distribution given both. Over
+2,000 simulated arms of 2,000 users, the standard deviation of $\hat R$ was 0.00375. The delta-method standard error
+averaged 0.00388 and the binomial formula 0.00300.
+
+## Assumptions
+
+- **Independent randomisation units.** The pairs $(X_i, Y_i)$ are independent across users.
+- **Large samples.** The linearisation and the normal approximation both need many users. Heavy-tailed denominators,
+  such as a few users with thousands of page views, slow the convergence.
+- **Denominators not affected by the treatment, or both effects reported.** If the treatment changes page views, the
+  ratio can rise because the denominator fell. Reporting the numerator and denominator per user alongside the ratio
+  shows which moved.
+
+## Pitfalls
+
+- **Binomial variance on the analysis unit.** Any variance formula that treats page views, sessions or impressions as
+  independent when users were randomised is too small; see
+  <NoteLink to="randomisation-and-analysis-units">randomisation and analysis units</NoteLink>.
+- **Bootstrapping page views.** A bootstrap must resample users with all their page views. Resampling page views
+  reproduces the binomial error.
+- **Forgetting the covariance.** Omitting $-2R\sigma_{XY}$ overstates the variance when clicks and page views are
+  positively correlated, which they usually are.

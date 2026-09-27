@@ -1,0 +1,125 @@
+---
+title: Revenue and heavy-tailed metrics
+kind: concept
+summary: Revenue per user is zero for most users and very large for a few, so its variance and skewness are large, experiments need several times more users than for conversion, and normal approximations need very large samples. Capping reduces variance but changes the estimand.
+tags: [ab-testing, metrics, variance, heavy-tails, worked-example]
+aliases: [revenue per user, heavy-tailed metric, metric capping, capping, winsorising, winsorizing, zero-inflated metric]
+requires: [ab-test-power, log-normal-distribution, bernoulli-distribution]
+related: [conversion-rate-metrics, welch-t-test]
+references: [kohavi2020, kohavi2014]
+status: draft
+updated: 2026-09-27
+---
+
+import { CappingTradeoff } from './CappingTradeoff'
+
+<Definition>
+A **heavy-tailed metric** in an online experiment is a per-user metric whose distribution has a long right tail, so
+that a small share of users contributes a large share of the total. Revenue per user is the standard case: most users
+spend nothing and a few spend a great deal. Such metrics have a large coefficient of variation, which makes
+experiments on them need many users, and a large skewness, which slows the convergence of the sample mean to the
+normal distribution that tests assume <Cite id="kohavi2014" />. **Capping**, also called winsorising, replaces each
+value above a threshold $c$ by $c$. It reduces the variance but tests a different quantity, the mean of the capped
+metric.
+</Definition>
+
+## Intuition
+
+A difference in means estimated from 50,000 users can move by more than the effect being measured when one user
+places a single very large order. The variance of the mean is driven by the rare large values, and whether one of them
+lands in treatment or control is luck. Capping removes that luck. It also removes whatever part of the treatment
+effect lives in the tail, so whether it helps depends on where the effect is.
+
+## A model of revenue per user
+
+Let each user buy with probability $p$, and let a buyer's spend be log-normal. Revenue per user is $Y = BR$ with
+$B \sim \Bern(p)$ and $R \sim \LogNorm(\mu, \sigma^2)$ independent. Because $B^k = B$, the moments are
+$\expect[Y^k] = p\,\expect[R^k] = p\,e^{k\mu + k^2\sigma^2/2}$.
+
+Take $p = 0.05$, $\mu = 3.5$ and $\sigma = 1.2$, so the median purchase is $e^{3.5} = 33.1$.
+
+| Quantity | Value |
+| --- | --- |
+| Mean $\expect[Y] = p\,e^{\mu + \sigma^2/2}$ | 3.40 |
+| Standard deviation | 31.07 |
+| Coefficient of variation | 9.13 |
+| Skewness | 39.1 |
+
+**Sample size.** From <NoteLink to="ab-test-power">power for A/B tests</NoteLink>, the users per arm needed to detect a
+relative lift $r$ are $2(z_{1-\alpha/2} + z_{1-\beta})^2(\sigma_Y/\mu_Y)^2/r^2$, where $z_q$ is the standard normal
+$q$-quantile. At $\alpha = 0.05$, power 0.8 and $r = 5\%$, revenue per user needs 523,765 users per arm. Conversion
+alone, with coefficient of variation $\sqrt{(1 - p)/p} = 4.36$, needs 119,303. The ratio is
+$9.13^2 / 4.36^2 = 4.39$: revenue needs 4.4 times as many users as conversion for the same relative lift.
+
+**Normality.** The skewness of a mean of $n$ independent values is the skewness of one value divided by $\sqrt n$, so
+the sampling distribution approaches the normal slowly when the skewness $\gamma$ is large. A rule of thumb for the
+normal approximation to be adequate is $n > 355\gamma^2$ per arm <Cite id="kohavi2014" />. Here that is
+$355 \times 39.1^2 = 544{,}065$ users, about the same as the sample needed for power. For a difference between two arms of equal size
+and the same distribution, the third cumulants of the two means cancel, so the difference is closer to normal than
+either mean. The rule matters most for one-sided tests, for unequal arms and when the treatment changes the tail.
+
+<Derivation title="Skewness of a mean">
+Let $Y_1, \dots, Y_n$ be independent with mean $\mu$, variance $\sigma^2$ and third central moment $\kappa_3$.
+Cumulants of independent variables add, so $\bar Y - \mu$ has variance $\sigma^2/n$ and third central moment
+$n\kappa_3/n^3 = \kappa_3/n^2$. Its skewness is $(\kappa_3/n^2)/(\sigma^2/n)^{3/2} = (\kappa_3/\sigma^3)/\sqrt n$.
+</Derivation>
+
+## Capping
+
+Let $Y_c = \min(Y, c)$. For the log-normal model the capped moments have a closed form, with $\Phi$ the standard normal
+distribution function:
+
+$$
+\expect\brack{\min(R, c)^k} = e^{k\mu + k^2\sigma^2/2}\,\Phi\paren{\frac{\ln c - \mu}{\sigma} - k\sigma}
++ c^k \paren{1 - \Phi\paren{\frac{\ln c - \mu}{\sigma}}}.
+$$
+
+The first term integrates $r^k$ over $r < c$ and the second counts every larger value as $c$.
+
+The sample size needed for a fixed power is proportional to $\var(Y_c)/\Delta_c^2$, where $\Delta_c$ is the treatment
+effect on the capped mean. Capping helps when it lowers the variance by more than it lowers the squared effect. The
+table uses the model above with a 5% lift applied in two ways: to every purchase value, which shifts $\mu$ by
+$\ln 1.05$, or to the purchase rate $p$.
+
+| Cap at percentile of all users | $c$ | Buyers capped | Variance ratio | Value lift: effect kept | Value lift: users needed | Rate lift: effect kept | Rate lift: users needed |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 99% | 90.9 | 20% | 0.141 | 0.352 | 1.14 | 0.627 | 0.36 |
+| 99.5% | 154.1 | 10% | 0.249 | 0.524 | 0.91 | 0.759 | 0.43 |
+| 99.9% | 389.4 | 2% | 0.516 | 0.798 | 0.81 | 0.918 | 0.61 |
+
+Users needed are relative to the uncapped metric. When the treatment scales purchase values, a tight cap removes most
+of the effect along with the variance, and at the 99th percentile the test needs more users than without a cap. When
+the treatment raises the purchase rate, the effect scales with the capped mean and capping is a large gain. Capping at
+the 99.9th percentile also lowers the skewness from 39.1 to 11.4, and the rule of thumb for normality from 544,065 to
+46,058 users.
+
+<CappingTradeoff />
+
+**The estimand changes.** A capped metric answers a different question: the change in mean revenue after limiting
+each user's contribution to $c$. It estimates the change in true mean revenue with a bias that depends on the tail.
+The cap $c$ must be fixed before the experiment, from pre-experiment data, and applied identically in both arms. A cap
+computed from the pooled experiment data depends on the treatment.
+
+## Other remedies
+
+- **Log transformation.** Comparing means of log revenue tests a change in the geometric mean, which describes the
+  typical buyer, not total revenue. The two can have opposite signs. If buyers' log-spend moves from
+  $\Gauss(3.5, 1.0^2)$ to $\Gauss(3.4, 1.2^2)$, mean log-spend falls by 0.10 while mean spend rises by
+  $e^{3.4 + 0.72 - 3.5 - 0.5} - 1 = 12.7\%$.
+- **Rank tests.** The Mann–Whitney test detects a shift in the whole distribution. It is not a test of equal means.
+- **Variance reduction.** <NoteLink to="cuped">CUPED</NoteLink> with pre-experiment revenue as the covariate reduces
+  variance without changing the estimand.
+- **Decomposition.** Revenue per user is conversion times revenue per buyer. Conversion is a well-behaved
+  <NoteLink to="conversion-rate-metrics">conversion-rate metric</NoteLink> and is often the more sensitive signal.
+
+## Pitfalls
+
+- **Revenue per buyer as a test metric.** Revenue per buyer conditions on buying, which the treatment can change. If
+  the treatment converts extra buyers who spend less than average, revenue per buyer falls while revenue per user
+  rises. Its denominator is also random, so it is a <NoteLink to="ratio-metrics-and-delta-method">ratio metric</NoteLink>.
+- **Removing outliers after seeing the data.** Deleting the largest orders because they look anomalous, after the
+  results are known, makes the test invalid. Bots and fraud should be filtered by rules fixed in advance and applied
+  to both arms.
+- **Trusting normality for a single mean.** With skewness near 40, an interval for one arm's mean from 50,000 users
+  is far from the $355\gamma^2$ rule, and its two tails have unequal error rates. A cap, a larger sample or a
+  bootstrap check is needed.

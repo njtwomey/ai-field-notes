@@ -1,0 +1,168 @@
+---
+title: mSPRT and always-valid p-values
+kind: test
+summary: The mSPRT averages the likelihood ratio over a prior on the effect and rejects when the average reaches $1/\alpha$. Ville's inequality bounds its false-positive rate by $\alpha$ however often the data are checked, so its p-values and intervals are valid at any stopping time.
+tags: [ab-testing, sequential-testing, hypothesis-testing, martingales, worked-example]
+aliases: [mSPRT, mixture sequential probability ratio test, always-valid p-value, always valid inference, anytime-valid p-value, sequential probability ratio test, SPRT, Ville's inequality]
+requires: [neyman-pearson-lemma, z-test, peeking-and-optional-stopping]
+related: [ab-test-power, gamblers-ruin]
+references: [johari2017, johari2022, robbins1970, wald1945, ramdas2023]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The **mixture sequential probability ratio test** (mSPRT) monitors an experiment after every observation. It computes
+the likelihood ratio of the data under an effect $\theta$ against no effect, averaged over a mixing distribution
+$h(\theta)$, and rejects $H_0: \theta = 0$ as soon as this average reaches $1/\alpha$. Under $H_0$ the averaged
+likelihood ratio is a non-negative martingale starting at 1, so by Ville's inequality the probability that it ever
+reaches $1/\alpha$ is at most $\alpha$. The **always-valid p-value** $p_n = \min\paren{1, \min_{m \le n} 1/\Lambda_m}$ is a p-value at
+every stopping time, including one chosen by looking at the data <Cite id="johari2022" />.
+</Definition>
+
+## Hypotheses
+
+The experiment compares two arms with true difference in means $\theta$. The null hypothesis is $H_0: \theta = 0$ and
+the alternative $H_1: \theta \ne 0$. The test is sequential: the number of observations at which it stops is random
+and is not fixed in advance.
+
+## Assumptions
+
+- **A likelihood for the data.** For A/B tests the difference in means $\hat\theta_n$ after $n$ users per arm is
+  treated as normal, $\hat\theta_n \sim \Gauss(\theta, V_n)$ with $V_n = 2\sigma^2/n$ and per-user variance
+  $\sigma^2$ estimated from the data <Cite id="johari2017" />.
+- **Independent users.** Each new user adds independent information, so the likelihood ratio updates
+  multiplicatively.
+- **A mixing distribution.** $h$ expresses which effects are plausible. With $h = \Gauss(0, \tau^2)$ the statistic has
+  a closed form. $\tau$ affects power, not validity.
+
+## Test statistic
+
+**The likelihood ratio.** For a normal estimate with known variance, the likelihood ratio of $\theta$ against 0 is
+
+$$
+\Lambda_n(\theta) = \frac{\exp\paren{-(\hat\theta_n - \theta)^2/(2V_n)}}{\exp\paren{-\hat\theta_n^2/(2V_n)}}
+= \exp\paren{\frac{\theta\hat\theta_n - \theta^2/2}{V_n}}.
+$$
+
+**The mixture.** Averaging over $\theta \sim \Gauss(0, \tau^2)$ gives
+
+$$
+\Lambda_n = \int \Lambda_n(\theta)\,h(\theta)\,d\theta = \sqrt{\frac{V_n}{V_n + \tau^2}}\,
+\exp\paren{\frac{\tau^2\,\hat\theta_n^2}{2V_n(V_n + \tau^2)}}.
+$$
+
+A single alternative $\theta_1$, as in Wald's SPRT, would need the effect size to be known
+<Cite id="wald1945" />. Mixing over $\theta$ gives a test with power against every $\theta \ne 0$
+<Cite id="robbins1970" />.
+
+<Derivation title="The Gaussian mixture integral">
+The exponent of $\Lambda_n(\theta)h(\theta)$ is, up to the normalising constant $1/\sqrt{2\pi\tau^2}$,
+
+$$
+\frac{\theta\hat\theta}{V} - \frac{\theta^2}{2V} - \frac{\theta^2}{2\tau^2}
+= -\frac{\theta^2}{2s^2} + \frac{\theta\hat\theta}{V}, \qquad \frac{1}{s^2} = \frac{1}{V} + \frac{1}{\tau^2} = \frac{V + \tau^2}{V\tau^2}.
+$$
+
+Completing the square, this equals $-(\theta - s^2\hat\theta/V)^2/(2s^2) + s^2\hat\theta^2/(2V^2)$. The Gaussian
+integral over $\theta$ contributes $\sqrt{2\pi s^2}$, so
+
+$$
+\Lambda_n = \sqrt{\frac{s^2}{\tau^2}}\exp\paren{\frac{s^2\hat\theta^2}{2V^2}}, \qquad
+\frac{s^2}{\tau^2} = \frac{V}{V + \tau^2}, \qquad \frac{s^2}{V^2} = \frac{\tau^2}{V(V + \tau^2)}.
+$$
+</Derivation>
+
+## Decision rule
+
+Reject $H_0$ at the first $n$ with $\Lambda_n \ge 1/\alpha$. Taking logarithms, with $Z_n = \hat\theta_n/\sqrt{V_n}$ the
+ordinary z-statistic, the rule is
+
+$$
+Z_n^2 \ge \frac{V_n + \tau^2}{\tau^2}\paren{2\ln\frac{1}{\alpha} + \ln\frac{V_n + \tau^2}{V_n}}.
+$$
+
+The right-hand side is the squared boundary $c_n^2$. It grows slowly, like $\ln n$, as $V_n \to 0$.
+
+**Why the false-positive rate is at most $\alpha$.** Under $H_0$, each $\Lambda_n(\theta)$ is a martingale: given the
+data so far, the next observation multiplies it by $f_\theta(X)/f_0(X)$, whose expectation under $f_0$ is
+$\int f_\theta(x)\,dx = 1$. An average of martingales over a fixed $h$ is a martingale, so $\Lambda_n$ is a
+non-negative martingale with $\Lambda_0 = 1$.
+
+Let $\sigma$ be the first $n$ with $\Lambda_n \ge 1/\alpha$, and fix $N$. The time $\min(\sigma, N)$ is a bounded
+stopping time, so by the optional stopping theorem $\expect[\Lambda_{\min(\sigma, N)}] = \Lambda_0 = 1$. On the event
+$\sigma \le N$ the stopped value is at least $1/\alpha$, and otherwise it is non-negative, so
+
+$$
+1 = \expect[\Lambda_{\min(\sigma, N)}] \ge \frac{1}{\alpha}P(\sigma \le N), \qquad P(\sigma \le N) \le \alpha.
+$$
+
+Letting $N \to \infty$ gives $P\paren{\Lambda_n \ge 1/\alpha \text{ for some } n} \le \alpha$. This is Ville's
+inequality <Cite id="ramdas2023" />. The bound holds however often the analyst looks and whatever rule decides when to
+stop.
+
+## Always-valid p-values and intervals
+
+Define $p_0 = 1$ and $p_n = \min\paren{p_{n-1}, 1/\Lambda_n}$. For any $\alpha$, $p_n \le \alpha$ for some $n$ exactly
+when $\Lambda_n \ge 1/\alpha$ for some $n$, so $P_{H_0}(p_T \le \alpha) \le \alpha$ for every stopping time $T$. The
+p-value can be watched continuously and the experiment stopped at any time.
+
+Testing $\theta = \theta_0$ instead of 0 replaces $\hat\theta_n$ by $\hat\theta_n - \theta_0$. The values of $\theta_0$
+not rejected at time $n$ form the interval
+
+$$
+\hat\theta_n \pm c_n\sqrt{V_n},
+$$
+
+and with probability at least $1 - \alpha$ the true $\theta$ lies in every one of these intervals simultaneously.
+Intersecting them over time keeps that guarantee. A sequence of intervals with this property is a confidence
+sequence; see <NoteLink to="e-values-and-confidence-sequences">e-values and confidence sequences</NoteLink>.
+
+## Worked example
+
+A conversion rate near 10% gives per-user variance $\sigma^2 = 0.1 \times 0.9 = 0.09$. The team sets
+$\tau = 0.01$, the lift of one percentage point it cares about, and $\alpha = 0.05$. After $n$ users per arm,
+$V_n = 0.18/n$, and the difference in conversion needed to stop is $c_n\sqrt{V_n}$.
+
+| Users per arm | $c_n$ | Difference needed to stop |
+| --- | --- | --- |
+| 1,000 | 4.244 | 5.69 points |
+| 10,000 | 3.048 | 1.29 points |
+| 14,751 | 3.035 | 1.06 points |
+| 100,000 | 3.195 | 0.43 points |
+| 1,000,000 | 3.512 | 0.15 points |
+
+At 14,751 users per arm, the size of the fixed-horizon test in the <NoteLink to="ab-test">A/B test example</NoteLink>,
+the fixed-sample test needs a difference of $1.96\sqrt{0.18/14{,}751} = 0.68$ points. The mSPRT needs 1.06 points,
+because its threshold must hold at every $n$. The boundary $c_n$ is smallest near 15,000 users per arm, where $V_n$ is about an
+eighth of $\tau^2$, and rises slowly on either side.
+
+## Power
+
+Validity at every look costs power at any single look. With ten equally spaced looks up to the sample size at which a
+fixed-horizon test has power 0.8, $\alpha = 0.05$ and $\tau$ equal to the effect:
+
+| Procedure | False-positive rate | Power at the planned effect |
+| --- | --- | --- |
+| Fixed horizon, one look | 0.050 | 0.800 |
+| O'Brien–Fleming-type alpha spending | 0.050 | 0.785 |
+| Pocock-type alpha spending | 0.050 | 0.702 |
+| mSPRT | 0.009 | 0.474 |
+
+With ten looks the mSPRT uses less than a fifth of its $\alpha$, because its guarantee also covers the observations
+between looks. It gains when effects are much larger than planned, by stopping early, and when no maximum sample size
+can be fixed. <NoteLink to="group-sequential-designs">Group-sequential designs</NoteLink> are more powerful when the
+number of looks and the maximum sample size are known.
+
+## Pitfalls
+
+- **Misreading $\tau$.** $\tau$ is a tuning choice, not an assumption the test relies on for validity. A $\tau$ far from
+  the effects that occur costs power. Johari and colleagues choose it from the distribution of effects in past
+  experiments <Cite id="johari2017" />.
+- **Variance estimated from few users.** The validity argument treats $V_n$ as known. With a plug-in variance from the
+  first few users, early decisions can be wrong; a minimum sample before the first look is common.
+- **Time-varying effects.** Continuous monitoring makes it easy to stop in the first days, when
+  <NoteLink to="novelty-and-primacy-effects">novelty effects</NoteLink> are largest. A valid test of $\theta = 0$ can
+  still estimate a transient effect.
+- **Stopping for significance and reporting the estimate.** The estimate at a data-dependent stopping time is biased
+  away from zero. The always-valid interval, not the point estimate, carries the guarantee.

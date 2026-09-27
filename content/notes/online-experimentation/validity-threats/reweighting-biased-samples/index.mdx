@@ -1,0 +1,121 @@
+---
+title: Reweighting biased samples
+kind: concept
+summary: When an experiment's users differ in mix from the population a launch will reach and effects vary by segment, weighting each segment's effect by its population share recovers the population effect. The price is variance, measured by the Kish effective sample size $(\sum w_i)^2/\sum w_i^2$.
+tags: [ab-testing, survey-sampling, weighting, worked-example]
+aliases: [post-stratification, poststratification, Horvitz–Thompson estimator, Hájek estimator, inverse probability weighting, Kish effective sample size, design weights, external validity]
+requires: [standard-error, law-of-total-expectation, confidence-intervals]
+related: [simpsons-paradox, triggering-and-dilution, overall-evaluation-criterion]
+references: [horvitz1952, lohr2021, miratrix2013, xie2016, kohavi2020]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **biased sample**, in experimentation, is a set of experiment users whose composition differs from the target
+population, the users who will receive the change if it launches. If the treatment effect varies between segments,
+the experiment's average effect then differs from the population's. **Reweighting** gives each user a weight $w_i$
+proportional to the ratio of their segment's share in the population to its share in the sample, or more generally
+to $1/\pi_i$, where $\pi_i$ is the user's probability of being in the sample. **Post-stratification** applies this to
+segment-level estimates, and the **Horvitz–Thompson** and **Hájek** estimators apply it to individual units
+<Cite id="horvitz1952" />.
+</Definition>
+
+## Intuition
+
+Randomisation makes treatment and control comparable with each other. It does not make them representative of
+anyone other than the users who entered the experiment. If 80% of experiment users are on desktop while the launch
+will reach equal numbers of desktop and mobile users, the experiment answers a question about a desktop-heavy
+population. Reweighting answers the question about the target population, provided the effect within each segment is
+the same in the sample and in the population.
+
+Samples become biased in routine ways. A feature available only in a new app version is tested on early adopters.
+Users who visit often are more likely to enter a short experiment than occasional users. A test run during a sale
+sees a different mix of shoppers than the rest of the year.
+
+## Details
+
+**Post-stratification.** Partition users into strata $h = 1, \dots, H$ with population shares $W_h$ summing to 1.
+Estimate the effect $\hat\tau_h$ within each stratum, by the difference in means between arms. The post-stratified
+estimate and its variance are
+
+$$
+\hat\tau_{\text{PS}} = \sum_{h} W_h\,\hat\tau_h, \qquad \var(\hat\tau_{\text{PS}}) = \sum_{h} W_h^2 \var(\hat\tau_h).
+$$
+
+Randomisation within each stratum makes $\hat\tau_h$ unbiased for the stratum's effect $\tau_h$, so
+$\expect[\hat\tau_{\text{PS}}] = \sum_h W_h\tau_h$, the population effect. The unweighted estimate instead weights
+stratum $h$ by its sample share $s_h$.
+
+**Horvitz–Thompson.** Let each of $N$ population units enter the sample with known probability $\pi_i > 0$, and let
+$I_i$ indicate that it did. The estimator $\hat T = \sum_{i} I_i y_i/\pi_i$ of the population total
+$T = \sum_i y_i$ is unbiased, because $\expect[I_i] = \pi_i$:
+
+$$
+\expect[\hat T] = \sum_{i=1}^{N} \frac{\expect[I_i]\, y_i}{\pi_i} = \sum_{i=1}^{N} y_i.
+$$
+
+**Hájek.** The Horvitz–Thompson mean $\hat T/N$ uses the known population size. The Hájek estimator divides instead
+by the sum of the weights, $\bar y_w = \sum_i w_i y_i / \sum_i w_i$ over the sample, with $w_i = 1/\pi_i$. It is
+slightly biased, with bias of order $1/n$. Adding a constant $k$ to every $y_i$ shifts it by exactly $k$, which is
+not true of the Horvitz–Thompson mean when the realised weights do not sum to $N$, and it often has the smaller
+variance. Post-stratification is the Hájek estimator with weights $w_i = W_h/s_h$ for units in stratum
+$h$ <Cite id="lohr2021" />.
+
+**Kish effective sample size.** Unequal weights cost precision. Suppose $y_1, \dots, y_n$ are independent with common
+variance $\sigma^2$ and fixed weights $w_i$. Then
+
+$$
+\var(\bar y_w) = \frac{\sum_i w_i^2 \sigma^2}{\paren{\sum_i w_i}^2} = \frac{\sigma^2}{n_{\text{eff}}}, \qquad
+n_{\text{eff}} = \frac{\paren{\sum_i w_i}^2}{\sum_i w_i^2}.
+$$
+
+With $\bar w$ the mean weight and $c_w$ the coefficient of variation of the weights,
+$\sum_i w_i^2 = n\bar w^2(1 + c_w^2)$, so $n_{\text{eff}} = n/(1 + c_w^2)$. Equal weights give $n_{\text{eff}} = n$;
+any spread in the weights lowers it.
+
+## Worked example
+
+An experiment has 100,000 users split equally between arms. 80% are desktop users and 20% mobile users, but the launch
+will reach equal numbers of each. The absolute conversion lift is $+2.0$ percentage points on desktop and $-1.0$ on
+mobile. Conversion is about 10% everywhere, so each stratum's difference in means has variance
+$2 \times 0.09 / (n_h/2) = 0.36/n_h$ for $n_h$ users in the stratum.
+
+1. **Unweighted.** The experiment's own average effect is $0.8 \times 2.0 + 0.2 \times (-1.0) = 1.4$ points, with
+   standard error $\sqrt{0.36/100{,}000} = 0.19$ points.
+2. **Post-stratified.** The population effect is $0.5 \times 2.0 + 0.5 \times (-1.0) = 0.5$ points. The variance is
+   $0.25 \times 0.36/80{,}000 + 0.25 \times 0.36/20{,}000 = 5.63 \times 10^{-6}$, a standard error of 0.24 points.
+3. **Weights.** Desktop users get $0.5/0.8 = 0.625$ and mobile users $0.5/0.2 = 2.5$. The effective sample size is
+   $100{,}000 / (0.8 \times 0.625^2 + 0.2 \times 2.5^2) = 100{,}000/1.5625 = 64{,}000$, and
+   $\sqrt{100{,}000/64{,}000} = 1.25$ is the ratio of the two standard errors.
+
+The unweighted estimate is precise and answers the wrong question. The reweighted estimate is 25% noisier and answers
+the right one. Here the difference, 1.4 against 0.5 points, is far larger than either standard error.
+
+## Assumptions
+
+- **Ignorability within strata.** Users in a stratum who entered the experiment have the same average effect as users
+  in that stratum who did not. Reweighting corrects for observed characteristics only.
+- **Positivity.** Every stratum of the target population appears in the sample. No weight can represent a segment
+  that was never tested.
+- **Known target shares.** $W_h$ comes from data outside the experiment, such as the traffic mix over a typical
+  period.
+
+## Post-stratification for precision
+
+Post-stratification also reduces variance when the sample is representative. With $W_h$ set to the strata's shares
+of the experiment itself, the estimator keeps its target and removes the between-stratum part of the variance, much
+as a covariate does in <NoteLink to="cuped">CUPED</NoteLink> <Cite id="miratrix2013" />. Online experiments use this
+with strata such as country or device <Cite id="xie2016" />.
+
+## Pitfalls
+
+- **Extreme weights.** A stratum with few sample users and a large population share receives a large weight and
+  dominates the variance. Merging small strata or trimming weights trades bias for variance.
+- **Strata defined by post-treatment variables.** Stratifying on something the treatment affects, such as sessions
+  during the experiment, compares different kinds of users across arms.
+- **Too many strata.** Each extra split lowers $n_h$ and makes the within-stratum estimates noisy. The strata should
+  be the dimensions along which effects plausibly differ.
+- **Reweighting away a real finding.** If effects differ by segment, the segment estimates themselves are often more
+  useful than any single weighted average. <NoteLink to="simpsons-paradox">Simpson's paradox</NoteLink> shows how an
+  aggregate can reverse the segment-level pattern.

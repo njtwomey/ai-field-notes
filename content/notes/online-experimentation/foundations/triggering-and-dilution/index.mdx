@@ -1,0 +1,133 @@
+---
+title: Triggering and dilution
+kind: concept
+summary: Triggering analyses only the users a change could affect, flagged by the same condition in both arms. It never needs more users than the all-user analysis. Dilution converts the triggered effect back to all users; with a triggered share $q$ the absolute effect is $q$ times as large.
+tags: [ab-testing, power, variance, worked-example]
+aliases: [triggered analysis, trigger analysis, triggering, dilution, diluted treatment effect, counterfactual logging]
+requires: [ab-test-power, variance-and-covariance, law-of-total-expectation]
+related: [randomisation-and-analysis-units, sample-ratio-mismatch, overall-evaluation-criterion]
+references: [kohavi2020, deng2015]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Triggering** restricts the analysis of an A/B test to the **triggered** users, those for whom the treatment could
+have made a difference, such as users who reached the checkout page that was changed. The trigger condition is
+evaluated in the same way in both arms: in control it records that the user would have seen the change, which is
+called counterfactual logging. **Dilution** converts the effect measured on triggered users into the effect on all
+users. If a share $q$ of users trigger and the treatment has no effect on the rest, the absolute effect per user in the
+whole population is $q$ times the effect per triggered user <Cite id="kohavi2020" />.
+</Definition>
+
+## Intuition
+
+Users who never reach the changed page contribute outcomes that the treatment cannot move. They add variance to
+both arms and nothing to the difference. Removing them from both arms leaves the difference unchanged and shrinks
+the noise. The removal is valid only when the rule that removes a user does not depend on the arm, so that the
+triggered users of each arm remain comparable random samples of the same population.
+
+## Details
+
+Let a share $q$ of users trigger. Triggered users have metric mean $\mu_t$ and variance $\sigma_t^2$ in control, and
+the treatment changes their mean by $\Delta_t$. Untriggered users have mean $\mu_u$ and variance $\sigma_u^2$, and the
+treatment does not change them.
+
+**The diluted effect.** Over all users, the control mean is $\mu = q\mu_t + (1 - q)\mu_u$ and the treatment mean is
+$q(\mu_t + \Delta_t) + (1 - q)\mu_u$. Their difference is
+
+$$
+\Delta = q\,\Delta_t.
+$$
+
+As a relative lift,
+
+$$
+\frac{\Delta}{\mu} = \frac{\Delta_t}{\mu_t} \cdot \frac{q\mu_t}{\mu}.
+$$
+
+The relative lift on triggered users is multiplied by $q\mu_t/\mu$, the share of the metric's total that comes from
+triggered users, not by the share of users.
+
+**Why triggering needs fewer users.** Let $K = 2(z_{1-\alpha/2} + z_{1-\beta})^2$, where $z_q$ is the standard normal
+$q$-quantile. By the formula in <NoteLink to="ab-test-power">power for A/B tests</NoteLink>, the analysis of all users
+needs $K\sigma^2/\Delta^2 = K\sigma^2/(q\Delta_t)^2$ users per arm, where $\sigma^2$ is the per-user variance over all
+users. The triggered analysis needs $K\sigma_t^2/\Delta_t^2$ triggered users per arm. Only a share $q$ of enrolled users
+trigger, so it needs $K\sigma_t^2/(q\Delta_t^2)$ enrolled users per arm. The ratio of the two requirements is
+
+$$
+R = \frac{K\sigma^2/(q\Delta_t)^2}{K\sigma_t^2/(q\Delta_t^2)} = \frac{\sigma^2}{q\,\sigma_t^2}.
+$$
+
+The variance of a mixture of two groups is the average within-group variance plus the variance of the group means,
+by the <NoteLink to="law-of-total-expectation">law of total variance</NoteLink>:
+
+$$
+\sigma^2 = q\sigma_t^2 + (1 - q)\sigma_u^2 + q(1 - q)(\mu_t - \mu_u)^2.
+$$
+
+Dividing by $q\sigma_t^2$,
+
+$$
+R = 1 + \frac{(1 - q)\sigma_u^2 + q(1 - q)(\mu_t - \mu_u)^2}{q\,\sigma_t^2} \ge 1,
+$$
+
+because every term in the fraction is non-negative. The triggered analysis therefore never needs more users than the
+analysis of all users, and it needs strictly fewer whenever $q < 1$ and the untriggered users vary or differ in mean
+from the triggered ones.
+
+<Derivation title="The variance decomposition">
+Let $T$ indicate that a user triggers, with $P(T = 1) = q$. The second moment splits by group:
+$\expect[Y^2] = q(\sigma_t^2 + \mu_t^2) + (1 - q)(\sigma_u^2 + \mu_u^2)$. The mean is $\mu = q\mu_t + (1 - q)\mu_u$.
+Hence
+
+$$
+\sigma^2 = \expect[Y^2] - \mu^2 = q\sigma_t^2 + (1 - q)\sigma_u^2 + q\mu_t^2 + (1 - q)\mu_u^2 - \paren{q\mu_t + (1 - q)\mu_u}^2.
+$$
+
+Expanding the square, the last three terms are $q(1 - q)\mu_t^2 + q(1 - q)\mu_u^2 - 2q(1 - q)\mu_t\mu_u =
+q(1 - q)(\mu_t - \mu_u)^2$.
+</Derivation>
+
+## Worked example
+
+A change to the checkout page can affect only users who reach checkout: $q = 10\%$ of users. The metric is purchase
+conversion. Users who reach checkout convert at $\mu_t = 20\%$ and the change is expected to raise that to 22%, so
+$\Delta_t = 0.02$. Users who never reach checkout still buy through other routes at $\mu_u = 5\%$. Take $\alpha = 0.05$
+and power 0.8, so $K = 15.698$.
+
+1. **Triggered analysis.** $\sigma_t^2 = 0.2 \times 0.8 = 0.16$, so $15.698 \times 0.16 / 0.02^2 = 6{,}279$ triggered
+   users per arm are needed. At $q = 0.1$ that means 62,791 enrolled users per arm.
+2. **All users.** The overall conversion is $\mu = 0.1 \times 0.20 + 0.9 \times 0.05 = 0.065$, so
+   $\sigma^2 = 0.065 \times 0.935 = 0.060775$. The diluted effect is $\Delta = 0.1 \times 0.02 = 0.002$. The requirement
+   is $15.698 \times 0.060775 / 0.002^2 = 238{,}508$ users per arm.
+3. **The ratio.** $R = 238{,}508 / 62{,}791 = 3.80$. The decomposition gives the same number: $\sigma^2 = 0.016 +
+   0.04275 + 0.002025$, and $0.060775 / (0.1 \times 0.16) = 3.80$. Most of the excess comes from the untriggered users'
+   own variance, $(1 - q)\sigma_u^2 = 0.04275$.
+4. **Dilution.** The relative lift on triggered users is $0.02/0.20 = 10\%$. Triggered users produce
+   $0.1 \times 0.20 / 0.065 = 30.8\%$ of all purchases, so the relative lift on all users is
+   $10\% \times 0.308 = 3.08\%$, which equals $0.002/0.065$.
+
+## Assumptions
+
+- **The trigger does not depend on the arm.** The condition is evaluated identically in treatment and control, from
+  information that the treatment cannot change. If treatment users trigger by seeing the new page and control users
+  by some other rule, the two triggered groups differ before any effect.
+- **Untriggered users are unaffected.** Dilution by $q$ assumes the treatment does nothing outside the triggered
+  group. A change that alters which users reach checkout violates it.
+- **Metrics start at the trigger.** Outcomes recorded before a user first triggers cannot be affected by the treatment
+  and are usually excluded.
+
+## Pitfalls
+
+- **Treatment-dependent triggers.** A trigger such as "clicked the new button" exists only in treatment. Comparing
+  users who clicked with all control users compares self-selected groups. The trigger must be "would have been shown
+  the button", logged in both arms.
+- **Sample ratio mismatch among triggered users.** A trigger that behaves differently between arms shows up as an
+  unequal split of triggered users even when the overall split is correct. The
+  <NoteLink to="sample-ratio-mismatch">sample ratio</NoteLink> check must be run on the triggered population too.
+- **Missing affected users.** A trigger that is too narrow drops users the treatment affected and biases the diluted
+  estimate. A trigger that is too broad only costs power. Comparing the arms on the untriggered users, where the
+  difference should be zero, checks for leakage.
+- **Reporting the triggered lift as the overall lift.** A 10% lift on triggered users is a 3.08% lift on all users in
+  the example above. Launch decisions and impact estimates need the diluted figure <Cite id="deng2015" />.

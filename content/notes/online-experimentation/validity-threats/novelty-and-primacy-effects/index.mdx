@@ -1,0 +1,93 @@
+---
+title: Novelty and primacy effects
+kind: concept
+summary: A novelty effect is a treatment effect that starts large because a change is new and decays as users get used to it; a primacy effect starts small or negative and grows as users learn. A short experiment averages over the transient and misestimates the long-run effect.
+tags: [ab-testing, validity, time-varying-effects, worked-example]
+aliases: [novelty effect, primacy effect, change aversion, learning effect, user learning, long-term effect, long-term holdout]
+requires: [ab-test-power]
+related: [reweighting-biased-samples, overall-evaluation-criterion, switchback-experiments]
+references: [kohavi2020, hohnhold2015]
+status: draft
+updated: 2026-09-27
+---
+
+import { NoveltyDecay } from './NoveltyDecay'
+
+<Definition>
+A **novelty effect** is a treatment effect that is large when users first meet a change, because it is new, and
+declines as they become used to it. A **primacy effect**, or change aversion, is the reverse: users who are used to the
+old experience first respond worse to the new one, and the effect improves as they learn it. In both cases the effect
+depends on the time since a user's first exposure, and an experiment that ends before the transient has passed
+estimates a mixture of transient and long-run effects <Cite id="kohavi2020" />.
+</Definition>
+
+## Intuition
+
+A new button colour draws clicks because it is unfamiliar. After a week, users stop noticing it. A redesigned menu
+slows down users who knew where everything was. After a week, they are as fast as before, or faster. The experiment
+measures what users do during the experiment, and the launch decision is about what they will do for the following
+year. When the two differ, the experiment's length decides which one it reports.
+
+## Details
+
+**A model.** Let the effect on a user $t$ days after first exposure be
+
+$$
+\tau(t) = \tau_\infty + (\tau_0 - \tau_\infty)\,e^{-t/\lambda},
+$$
+
+where $\tau_0$ is the initial effect, $\tau_\infty$ the long-run effect and $\lambda$ the time constant in days.
+$\tau_0 > \tau_\infty$ describes novelty and $\tau_0 < \tau_\infty$ primacy.
+
+**The estimate.** Suppose every user is first exposed on day 0 and the experiment weights each of its $T$ days
+equally. Its estimate is the average of $\tau(t)$ over $[0, T]$:
+
+$$
+\bar\tau(T) = \frac{1}{T}\int_0^T \tau(t)\,dt = \tau_\infty + (\tau_0 - \tau_\infty)\,\frac{\lambda}{T}\paren{1 - e^{-T/\lambda}},
+$$
+
+using $\int_0^T e^{-t/\lambda}\,dt = \lambda\paren{1 - e^{-T/\lambda}}$. For $T$ much larger than $\lambda$ the bias is
+approximately $(\tau_0 - \tau_\infty)\lambda/T$. It decays like $1/T$, not exponentially, because the early days
+remain in the average: doubling the experiment's length roughly halves the bias.
+
+**Worked example.** A change has an initial lift of $\tau_0 = 5\%$ that decays to $\tau_\infty = 1\%$ with
+$\lambda = 3$ days. After $T = 14$ days,
+$\bar\tau = 1 + 4 \times \tfrac{3}{14}\paren{1 - e^{-14/3}} = 1.85\%$, which overstates the long-run lift by 85%.
+After 28 days the estimate is 1.43%. The daily effect is within 0.04 points of $\tau_\infty$ by day 14, but the
+estimate still carries the first days.
+
+<NoveltyDecay />
+
+**Staggered entry.** In practice users enter throughout the experiment, the heaviest users first. On a given calendar
+day the experiment mixes users at different times since exposure, and the users who arrive late have had little time
+to get past the transient. The calendar-time estimate therefore approaches $\tau_\infty$ even more slowly than the
+model above.
+
+## Detection
+
+- **Effect by time since exposure.** Plotting the treatment effect against days since each user's first exposure,
+  rather than against calendar days, separates the transient from changes in who is in the experiment.
+- **New against existing users.** Users who never saw the old experience cannot experience change aversion or novelty
+  relative to it. A large difference between the effect on new users and on existing users points to a transient.
+- **Long-term holdouts.** Keeping a small share of users on the old experience for weeks or months after launch
+  measures the long-run effect directly.
+- **Learning experiments.** Hohnhold, O'Brien and Tang expose one group of users to a treatment for a long period, then
+  give it and a control group the same experience and measure the difference that remains. That difference is what
+  users learned <Cite id="hohnhold2015" />.
+
+## Assumptions
+
+- The model assumes one exponential transient and a stable long-run effect. Real effects can have several time scales,
+  and seasonal changes can look like decay.
+
+## Pitfalls
+
+- **Declining effects that are not novelty.** An effect estimated by calendar day can fall because heavy users
+  entered first and lighter users later, even when each user's effect is constant. The plot by time since exposure
+  tells these apart. See <NoteLink to="reweighting-biased-samples">reweighting biased samples</NoteLink>.
+- **Stopping at the first significant result.** A novelty effect is largest at the start, so an experiment stopped
+  as soon as it becomes significant is especially likely to report an inflated effect; see
+  <NoteLink to="peeking-and-optional-stopping">peeking and optional stopping</NoteLink>.
+- **Reading a declining cumulative estimate as a trend.** The cumulative estimate and its confidence interval also
+  change as data accumulate by chance. A trend should be judged from the daily or per-cohort effects and their
+  intervals.

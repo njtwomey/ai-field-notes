@@ -1,0 +1,121 @@
+---
+title: Conversion-rate metrics
+kind: concept
+summary: A conversion rate is the share of randomisation units, usually users, that complete an action. Each unit is a Bernoulli trial with variance $p(1 - p)$, and two arms are compared with the two-proportion z-test, which equals the $\chi^2$ test on the 2×2 table.
+tags: [ab-testing, metrics, hypothesis-testing, worked-example]
+aliases: [conversion rate, conversion metric, user-level conversion, binary metric, proportion metric]
+requires: [z-test, binomial-distribution, confidence-intervals]
+related: [ab-test, ratio-metrics-and-delta-method, welch-t-test, chi-squared-distribution, ab-test-power]
+references: [kohavi2020, fleiss2003, deng2018]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **conversion-rate metric** is the proportion of randomisation units that complete a target action, such as a
+purchase or a sign-up, during the experiment. With $n$ users in an arm and $X$ of them converting, the estimate is
+$\hat p = X/n$. Each user's outcome is a Bernoulli variable with mean $p$ and variance $p(1 - p)$, and users are
+independent, so $\var(\hat p) = p(1 - p)/n$. Two arms are compared with the two-proportion
+<NoteLink to="z-test">z-test</NoteLink> <Cite id="fleiss2003" />.
+</Definition>
+
+## Intuition
+
+A conversion rate reduces each user to one bit: converted or not. The bit's variance is fixed by its mean, $p(1 - p)$,
+so no separate variance estimate is needed and no user can dominate the average. This makes conversion rates the most
+stable metrics in online experiments. The price is sensitivity: a rate near zero has a large coefficient of variation,
+$\sqrt{(1 - p)/p}$, and detecting small relative changes needs many users.
+
+## Details
+
+**Which denominator.** The unit in the denominator must be the randomisation unit.
+
+- **Per user.** The share of users who converted at least once. Users are independent, so the Bernoulli variance
+  applies.
+- **Per session or per visit.** Conversions divided by sessions. Sessions of one user are correlated, and the number
+  of sessions per user is random, so this is a ratio of two per-user sums. Its variance comes from the
+  <NoteLink to="ratio-metrics-and-delta-method">delta method</NoteLink>, not from $p(1 - p)/n_{\text{sessions}}$
+  <Cite id="deng2018" />.
+- **Conversions per user.** A count, such as orders per user, is a mean of a non-negative integer variable. Its
+  variance must be estimated from the data, as in the <NoteLink to="welch-t-test">Welch t-test</NoteLink>.
+
+**The test.** Let arm A have $x_A$ conversions from $n_A$ users and arm B $x_B$ from $n_B$. Under
+$H_0: p_A = p_B$ both arms share one rate, estimated by the pooled rate $\bar p = (x_A + x_B)/(n_A + n_B)$. The
+statistic
+
+$$
+Z = \frac{\hat p_B - \hat p_A}{\sqrt{\bar p(1 - \bar p)\paren{\frac{1}{n_A} + \frac{1}{n_B}}}}
+$$
+
+is approximately standard normal under $H_0$. The confidence interval for $p_B - p_A$ does not assume $H_0$, so it
+uses each arm's own variance:
+
+$$
+\hat p_B - \hat p_A \pm z_{1-\alpha/2}\sqrt{\frac{\hat p_A(1 - \hat p_A)}{n_A} + \frac{\hat p_B(1 - \hat p_B)}{n_B}},
+$$
+
+where $z_q$ is the standard normal $q$-quantile.
+
+**Three tests, one answer.** The pooled z-test, Pearson's $\chi^2$ test of independence on the 2×2 table of arm
+against outcome, and the Welch t-test on the 0/1 outcomes agree closely in large samples. The first two are exactly
+equivalent: $Z^2$ equals the $\chi^2$ statistic, as shown below. Welch's test uses the unpooled variance, which differs
+from the pooled one only when the rates differ.
+
+<Derivation title="The z-test and the chi-squared test agree">
+Write the table with rows for arms and columns for converted and not converted: $a = x_A$, $b = n_A - x_A$,
+$c = x_B$, $d = n_B - x_B$. Let $C_1 = a + c$ and $C_2 = b + d$ be the column totals and $N = n_A + n_B$.
+
+**The $\chi^2$ statistic.** The expected count in cell $(i, j)$ is $E_{ij} = R_i C_j / N$, with row totals
+$R_1 = n_A$ and $R_2 = n_B$. For cell $(1, 1)$, $a - n_A C_1/N = \paren{a(a + b + c + d) - (a + b)(a + c)}/N =
+(ad - bc)/N$. The margins are fixed, so the other three cells have the same deviation up to sign. Hence
+
+$$
+\chi^2 = \frac{(ad - bc)^2}{N^2}\sum_{i,j}\frac{1}{E_{ij}} = \frac{(ad - bc)^2}{N^2} \cdot \frac{N (R_1 + R_2)(C_1 + C_2)}{R_1R_2C_1C_2}
+= \frac{N (ad - bc)^2}{n_A n_B C_1 C_2}.
+$$
+
+**The z statistic.** The numerator is $\hat p_B - \hat p_A = (c\,n_A - a\,n_B)/(n_A n_B)$, and
+$c\,n_A - a\,n_B = c(a + b) - a(c + d) = bc - ad$. The pooled rate is $\bar p = C_1/N$, so the denominator squared is
+$(C_1 C_2/N^2) \cdot N/(n_A n_B) = C_1 C_2/(N n_A n_B)$. Therefore
+
+$$
+Z^2 = \frac{(ad - bc)^2}{(n_A n_B)^2} \cdot \frac{N n_A n_B}{C_1 C_2} = \frac{N (ad - bc)^2}{n_A n_B C_1 C_2} = \chi^2.
+$$
+
+A $\chi^2$ variable with one degree of freedom is the square of a standard normal, so the two tests give the same
+two-sided p-value.
+</Derivation>
+
+## Worked example
+
+Arm A converts 2,000 of 50,000 users and arm B 2,150 of 50,000.
+
+1. **Rates.** $\hat p_A = 4.00\%$, $\hat p_B = 4.30\%$, and the difference is 0.30 percentage points.
+2. **Test.** The pooled rate is $\bar p = 4{,}150/100{,}000 = 0.0415$. The standard error under $H_0$ is
+   $\sqrt{0.0415 \times 0.9585 \times (2/50{,}000)} = 0.001261$, so $Z = 0.0030/0.001261 = 2.378$ and the two-sided
+   p-value is 0.0174.
+3. **Equivalent tests.** Pearson's $\chi^2$ on the table is $5.656 = 2.378^2$, with the same p-value. Welch's
+   t-test on the 100,000 zeros and ones gives $t = 2.378$ and $p = 0.0174$.
+4. **Interval.** The unpooled standard error is also 0.001261 to four significant figures, so the 95% interval is
+   $0.0030 \pm 1.96 \times 0.001261 = [0.053, 0.547]$ percentage points.
+
+The relative lift is $0.30/4.00 = 7.5\%$. Its interval is not the absolute interval divided by 4%, because the
+denominator is also estimated; see <NoteLink to="relative-lift">relative lift</NoteLink>.
+
+## Assumptions
+
+- **Independent units.** Each user converts or not independently of other users. The denominator is the
+  randomisation unit.
+- **Large counts.** The normal approximation needs several conversions and non-conversions in each arm. For very
+  small counts, Fisher's exact test or the <NoteLink to="binomial-test">binomial test</NoteLink> applies.
+- **A fixed window.** Every user has the same opportunity to convert. Users who joined on the last day of the
+  experiment have had less time, so the rate depends on when users arrived, equally in both arms.
+
+## Pitfalls
+
+- **Binomial variance for per-session rates.** Sessions per user vary and are correlated within users, so
+  $p(1 - p)/n_{\text{sessions}}$ underestimates the variance of a per-session rate.
+- **Pooled variance in the interval.** The pooled variance is valid only under $H_0$. The interval must not assume the
+  hypothesis it is used to assess.
+- **Many conversion events.** Tracking several conversion events and reporting the one that moved is the
+  multiple-comparisons problem of <NoteLink to="many-metrics-and-variants">many metrics and variants</NoteLink>.
