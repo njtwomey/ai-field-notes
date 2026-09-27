@@ -1,0 +1,154 @@
+---
+title: Stochastic variational inference
+kind: technique
+summary: 'Stochastic variational inference scales mean-field variational inference to large datasets. It samples a minibatch, optimises its local variational parameters, and takes a natural-gradient step on the global parameters, $\lambda \leftarrow (1 - \rho_t)\lambda + \rho_t \hat\lambda$, with decreasing steps $\rho_t$.'
+tags: [variational-inference, bayesian, approximate-inference, optimisation, stochastic-gradient, worked-example]
+aliases: [SVI, online variational Bayes, natural gradient variational inference, Robbins–Monro step sizes]
+requires: [mean-field-variational-inference, exponential-family]
+related: [variational-inference, black-box-variational-inference, amortised-inference, evidence-lower-bound, gradient-descent]
+references: [hoffman2013, amari1998, robbins1951, blei2017, blei2003]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Stochastic variational inference (SVI) maximises the evidence lower bound of a model with global latent variables
+$\betavec$ and local latent variables $\zvec_n$, one per data point, by stochastic optimisation. Each step samples a data
+point or a minibatch, fits its local variational parameters, forms the value $\hat\lambdavec$ that the global
+variational parameters would take if the whole dataset were copies of the sample, and moves the current parameters
+towards it:
+
+$$
+\lambdavec \leftarrow (1 - \rho_t)\,\lambdavec + \rho_t\,\hat\lambdavec.
+$$
+
+This update is a step of size $\rho_t$ along the natural gradient of the ELBO <Cite id="hoffman2013" />.
+</Definition>
+
+## Problem
+
+Coordinate ascent for <NoteLink to="mean-field-variational-inference">mean-field variational inference</NoteLink>
+alternates between updating every local factor $q(\zvec_n)$ and updating the global factor $q(\betavec)$. The global
+update sums over all $N$ data points, so each iteration is a full pass through the data. Early in the fit the global
+parameters are poor, and the local updates computed from them are wasted work. For a topic model of millions of
+documents, a single pass can take hours before the global topics improve at all <Cite id="hoffman2013" />. SVI updates
+the global parameters after every minibatch.
+
+## Model class
+
+SVI applies to models of the form
+
+$$
+p(\betavec, \zvec_{1:N}, \xvec_{1:N}) = p(\betavec) \prod_{n=1}^{N} p(\xvec_n, \zvec_n \mid \betavec),
+$$
+
+in which the complete conditional of the global variables is in an exponential family,
+
+$$
+p(\betavec \mid \xvec, \zvec) \propto h(\betavec) \exp\paren{\etavec_g(\xvec, \zvec)^\top \tvec(\betavec)}, \qquad
+\etavec_g(\xvec, \zvec) = \alphavec + \sum_{n=1}^N \tvec_n(\xvec_n, \zvec_n),
+$$
+
+where $\alphavec$ is the natural parameter of a conjugate prior and $\tvec_n$ is the contribution of data point $n$.
+The local complete conditionals are also in exponential families. Mixture models, hidden Markov models, topic models
+such as latent Dirichlet allocation <Cite id="blei2003" />, and many hierarchical regressions have this form.
+
+The variational family is mean field, with $q(\betavec \mid \lambdavec)$ in the same family as the complete conditional
+and natural parameter $\lambdavec$. The coordinate-ascent update of the global factor is
+
+$$
+\lambdavec^* = \expect_{q(\zvec)}\brack{\etavec_g(\xvec, \zvec)} = \alphavec + \sum_{n=1}^N \expect_{q(\zvec_n)}\brack{\tvec_n(\xvec_n, \zvec_n)}.
+$$
+
+## Mechanism
+
+### The natural gradient
+
+A Euclidean gradient in $\lambdavec$ measures distance between parameter vectors, not between the distributions they
+define. The **natural gradient** premultiplies the gradient by the inverse Fisher information $\Gmat(\lambdavec)$ of
+$q(\betavec \mid \lambdavec)$, which measures change in terms of the KL divergence between nearby distributions
+<Cite id="amari1998" />. For an exponential family with log-normaliser $A$, the Fisher information is
+$\Gmat(\lambdavec) = \nabla^2 A(\lambdavec)$.
+
+Hold the local factors at their optimum and view the ELBO as a function of $\lambdavec$. Up to terms that do not depend
+on $\lambdavec$, the global part of the ELBO is $\expect_q\brack{\log p(\betavec \mid \xvec, \zvec)} - \expect_q\brack{\log q(\betavec \mid \lambdavec)}$.
+Using $\expect_q[\tvec(\betavec)] = \nabla A(\lambdavec)$,
+
+$$
+\Lcal(\lambdavec) = \nabla A(\lambdavec)^\top \paren{\expect_q[\etavec_g] - \lambdavec} + A(\lambdavec) + \text{const}.
+$$
+
+Differentiating, the terms $\pm\nabla A(\lambdavec)$ cancel:
+
+$$
+\nabla_{\lambdavec}\Lcal = \nabla^2 A(\lambdavec)\paren{\expect_q[\etavec_g] - \lambdavec}, \qquad
+\Gmat(\lambdavec)^{-1}\nabla_{\lambdavec}\Lcal = \expect_q[\etavec_g] - \lambdavec.
+$$
+
+The natural gradient is the difference between the coordinate-ascent target and the current value. A natural-gradient
+step of size 1 is exactly the coordinate-ascent update. A step of size $\rho$ moves a fraction $\rho$ of the way
+there <Cite id="hoffman2013" />.
+
+### Noisy natural gradients
+
+The target $\expect_q[\etavec_g]$ contains a sum over all data points. Pick one index $n$ uniformly at random, fit its
+local factor $q(\zvec_n)$ given the current $\lambdavec$, and form
+
+$$
+\hat\lambdavec = \alphavec + N\, \expect_{q(\zvec_n)}\brack{\tvec_n(\xvec_n, \zvec_n)}.
+$$
+
+This is the global update for a dataset of $N$ copies of point $n$. Its expectation over the random index is the full
+sum, so $\hat\lambdavec - \lambdavec$ is an unbiased estimate of the natural gradient. A minibatch $\Bcal$ replaces the
+factor $N$ by $N/\abs{\Bcal}$ and sums over the batch. The update is
+
+$$
+\lambdavec_{t+1} = \lambdavec_t + \rho_t\paren{\hat\lambdavec_t - \lambdavec_t} = (1 - \rho_t)\,\lambdavec_t + \rho_t\,\hat\lambdavec_t.
+$$
+
+With steps satisfying the Robbins–Monro conditions $\sum_t \rho_t = \infty$ and $\sum_t \rho_t^2 < \infty$, the iterates
+converge to a local optimum of the ELBO <Cite id="robbins1951" />. A common schedule is $\rho_t = (t + \tau)^{-\kappa}$
+with $\kappa \in (0.5, 1]$ and delay $\tau \ge 0$.
+
+### The algorithm
+
+1. Initialise $\lambdavec$.
+2. Repeat: sample a minibatch; for each point in it, optimise the local parameters given $\lambdavec$; form
+   $\hat\lambdavec$; set $\lambdavec \leftarrow (1 - \rho_t)\lambdavec + \rho_t\hat\lambdavec$.
+
+## Worked example
+
+Observations $x_n \sim \Gauss(\mu, 1)$, $n = 1, \dots, N$, with prior $\mu \sim \Gauss(0, 1)$. There are no local
+variables. A Gaussian $q(\mu) = \Gauss(m, s^2)$ has natural parameters $\lambdavec = (m/s^2, -1/(2s^2))$, so
+$m = \lambda_1/(-2\lambda_2)$ and $s^2 = 1/(-2\lambda_2)$. The prior has $\alphavec = (0, -1/2)$, and each observation
+contributes $\tvec_n = (x_n, -1/2)$. The exact posterior has
+$\lambdavec^* = \paren{\sum_n x_n,\ -(1 + N)/2}$.
+
+Take $N = 1000$, start at the prior $\lambdavec = (0, -0.5)$, sample $x_n = 0.8$, and use $\rho = 0.1$.
+
+- **Intermediate parameter.** $\hat\lambdavec = (0 + 1000 \times 0.8,\ -0.5 - 1000 \times 0.5) = (800, -500.5)$, the
+  posterior for 1000 copies of 0.8.
+- **Update.** $\lambdavec = 0.9 \times (0, -0.5) + 0.1 \times (800, -500.5) = (80, -50.5)$.
+- **Moments.** $s^2 = 1/101$ and $m = 80/101 = 0.792$.
+
+The second component already has the right form and reaches $-500.5$ as the steps accumulate. The first is an
+exponentially weighted average of $N x_n$ over the sampled points. With $\rho_t = 1/t$ it is the plain average of
+the $N x_n$, which converges to $\sum_n x_n$: the exact posterior.
+
+## Cost
+
+Each step costs one minibatch's local updates plus an $O(\dim \lambdavec)$ global update, independent of $N$. SVI often
+reaches a good ELBO before one full pass of coordinate ascent has finished. It also processes streaming data, since it
+never needs the whole dataset at once.
+
+## Trade-offs
+
+- **Conjugacy is required.** The closed-form natural gradient needs exponential-family complete conditionals. Models
+  without them use <NoteLink to="black-box-variational-inference">black-box variational inference</NoteLink>, which
+  estimates ordinary gradients by Monte Carlo.
+- **Step sizes matter.** Too large a $\rho_t$ gives noisy parameters; too small gives slow progress. Larger minibatches
+  reduce the noise of $\hat\lambdavec$ and allow larger steps.
+- **Local optima.** As with coordinate ascent, the result depends on initialisation.
+- **Local parameters are refitted each time.** A point's local factor is recomputed whenever it is sampled.
+  <NoteLink to="amortised-inference">Amortised inference</NoteLink> replaces these per-point optimisations with a learned
+  function of the data.

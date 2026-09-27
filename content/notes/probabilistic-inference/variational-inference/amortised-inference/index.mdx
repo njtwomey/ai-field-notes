@@ -1,0 +1,119 @@
+---
+title: Amortised inference
+kind: concept
+summary: 'Amortised inference learns one function, an inference network, that maps any observation $\xvec$ to an approximate posterior $q_{\phivec}(\zvec \mid \xvec)$, instead of optimising a separate approximation per observation. Inference on new data is one forward pass; the price is the amortisation gap.'
+tags: [variational-inference, bayesian, approximate-inference, deep-learning, latent-variable-models, worked-example]
+aliases: [amortized inference, amortisation gap, amortization gap, semi-amortised variational inference, neural posterior estimation, NPE, recognition model, encoder network]
+requires: [variational-inference]
+related: [variational-autoencoder, black-box-variational-inference, stochastic-variational-inference, evidence-lower-bound, kl-divergence]
+references: [kingma2014, rezende2014, cremer2018, kim2018, papamakarios2016, cranmer2020]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+In amortised inference, the approximate posterior for an observation $\xvec$ is the output of a learned function,
+$q_{\phivec}(\zvec \mid \xvec)$, whose parameters $\phivec$ are shared across all observations. A neural network, the
+**inference network** or **encoder**, maps $\xvec$ to the parameters of a distribution over $\zvec$, for example a
+mean and a diagonal covariance. The network is trained once, on many observations, so that the cost of inference is
+spread, or amortised, over every later query <Cite id="kingma2014" /> <Cite id="rezende2014" />.
+</Definition>
+
+## The problem it solves
+
+In a latent-variable model with one latent $\zvec_n$ per observation $\xvec_n$, standard
+<NoteLink to="variational-inference">variational inference</NoteLink> gives each observation its own variational
+parameters $\lambdavec_n$ and optimises each by an inner loop. With $N$ observations there are $N$ sets of parameters.
+Every new observation needs its own optimisation from scratch. When $N$ is in the millions, or when inference must run
+in real time, this is too slow.
+
+Amortisation replaces the $N$ separate optimisations by regression. The optimal $\lambdavec_n^*$ is some function of
+$\xvec_n$; the inference network learns an approximation of that function from the data.
+
+## Mechanism
+
+**Training by the ELBO.** Maximise the sum of the evidence lower bounds of all observations over the shared parameters:
+
+$$
+\Lcal(\phivec) = \sum_{n=1}^{N} \expect_{q_{\phivec}(\zvec \mid \xvec_n)}\brack{\log p(\xvec_n, \zvec) - \log q_{\phivec}(\zvec \mid \xvec_n)}.
+$$
+
+Minibatches of observations and the <NoteLink to="reparameterisation-trick">reparameterisation trick</NoteLink> give
+unbiased stochastic gradients, as in <NoteLink to="black-box-variational-inference">black-box variational
+inference</NoteLink>. When the generative model has parameters $\thetavec$ too, they are trained jointly on the same
+objective. That is the <NoteLink to="variational-autoencoder">variational autoencoder</NoteLink>: the inference
+network is the encoder and $p_{\thetavec}(\xvec \mid \zvec)$ the decoder.
+
+**Training on simulations.** When the model can be simulated but its likelihood cannot be evaluated, draw pairs
+$(\zvec, \xvec)$ from the joint, $\zvec \sim p(\zvec)$ then $\xvec \sim p(\xvec \mid \zvec)$, and maximise
+$\expect_{p(\zvec, \xvec)}\brack{\log q_{\phivec}(\zvec \mid \xvec)}$. Split the joint as $p(\xvec)\,p(\zvec \mid \xvec)$:
+
+$$
+-\expect_{p(\zvec, \xvec)}\brack{\log q_{\phivec}(\zvec \mid \xvec)}
+= \expect_{p(\xvec)}\brack{\KL\paren{p(\zvec \mid \xvec) \,\|\, q_{\phivec}(\zvec \mid \xvec)}} + \expect_{p(\xvec)}\brack{\entropy\brack{p(\zvec \mid \xvec)}}.
+$$
+
+The entropy term does not depend on $\phivec$. Maximising the log-likelihood of the simulated latents therefore
+minimises the forward KL divergence to the true posterior, averaged over the data the model generates, without ever
+evaluating that posterior. This is **neural posterior estimation**, a form of simulation-based inference
+<Cite id="papamakarios2016" /> <Cite id="cranmer2020" />. The forward KL makes the fitted posteriors mass-covering rather
+than mode-seeking.
+
+## The amortisation gap
+
+For one observation, let $q^*_{\xvec}$ be the best member of the variational family, found by optimising for $\xvec$
+alone. The gap between the log evidence and the ELBO of the amortised posterior splits into two parts
+<Cite id="cremer2018" />:
+
+$$
+\log p(\xvec) - \operatorname{ELBO}\paren{q_{\phivec}(\cdot \mid \xvec)}
+= \underbrace{\log p(\xvec) - \operatorname{ELBO}(q^*_{\xvec})}_{\text{approximation gap}}
++ \underbrace{\operatorname{ELBO}(q^*_{\xvec}) - \operatorname{ELBO}\paren{q_{\phivec}(\cdot \mid \xvec)}}_{\text{amortisation gap}}.
+$$
+
+The approximation gap is the cost of the family, for example a diagonal Gaussian. The amortisation gap is the cost of
+predicting the parameters from $\xvec$ with a network of limited capacity, trained on finite data, rather than
+optimising them. Cremer et al. found that in trained variational autoencoders the amortisation gap is often the larger
+of the two <Cite id="cremer2018" />. **Semi-amortised** inference closes part of it: use the encoder's output as the
+starting point for a few steps of per-observation optimisation, and train the encoder through those steps
+<Cite id="kim2018" />.
+
+## Worked example: a linear Gaussian model
+
+Let $z \sim \Gauss(0, 1)$ and $x \mid z \sim \Gauss(z, \sigma^2)$. By Bayes' theorem the posterior is
+
+$$
+p(z \mid x) = \Gauss\paren{\frac{x}{1 + \sigma^2},\ \frac{\sigma^2}{1 + \sigma^2}}.
+$$
+
+- **Per-observation inference.** Fitting $q_n = \Gauss(m_n, s_n^2)$ to each of $N$ observations means $2N$ variational
+  parameters and $N$ optimisations. For $N = 10^6$ that is two million numbers.
+- **Amortised inference.** An encoder $q_{\phivec}(z \mid x) = \Gauss(a x + b, c^2)$ has three parameters. The
+  posterior mean is linear in $x$ and the posterior variance does not depend on $x$, so the family contains the exact
+  posterior for every $x$ at $a = 1/(1 + \sigma^2)$, $b = 0$ and $c^2 = \sigma^2/(1 + \sigma^2)$. For $\sigma^2 = 1$,
+  $a = 0.5$ and $c^2 = 0.5$. Maximising the summed ELBO recovers these values, and both gaps are zero. A new
+  observation $x = 2$ gets its posterior $\Gauss(1, 0.5)$ from one multiplication.
+- **A limited encoder.** If the encoder is restricted to a constant mean, $a = 0$, it cannot follow the posterior mean
+  as $x$ varies. The ELBO is then below its per-observation optimum for every $x \ne 0$, by the amortisation gap.
+
+In nonlinear models the map from $\xvec$ to the optimal variational parameters is nonlinear, and the encoder's
+capacity determines how small the gap can be.
+
+## Assumptions
+
+- **A distribution of queries.** The encoder is accurate for observations like those it was trained on. For
+  observations far from the training data, its output can be arbitrarily poor, and nothing in the output signals it.
+- **Local latent variables.** Amortisation suits models with one latent per observation. Global parameters shared by
+  all observations are fitted directly.
+
+## Pitfalls
+
+- **The encoder can hide a poor posterior.** A good reconstruction or a high ELBO does not show that each
+  $q_{\phivec}(\zvec \mid \xvec)$ is close to its posterior. Compare with per-observation optimisation on a sample of
+  data to measure the amortisation gap.
+- **Joint training can bias the model.** When the generative model and the encoder are trained together, the model can
+  adapt to the encoder's limitations, for example by making its posteriors easy to approximate. In a variational
+  autoencoder this contributes to posterior collapse.
+- **Simulation-based training depends on the prior.** Neural posterior estimation trained on simulations from the prior
+  is accurate where the prior puts mass. Observed data in the tails of the prior predictive get poorly trained
+  posteriors.

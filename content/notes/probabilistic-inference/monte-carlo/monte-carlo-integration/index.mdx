@@ -1,0 +1,126 @@
+---
+title: Monte Carlo integration
+kind: technique
+summary: 'Monte Carlo integration estimates an expectation $\expect_p[f(\xvec)]$ by the average of $f$ over $N$ independent samples from $p$. The estimate is unbiased, its variance is $\var(f)/N$, and by the central limit theorem its error shrinks as $1/\sqrt{N}$ in any dimension.'
+tags: [monte-carlo, sampling, integration, probability, worked-example]
+aliases: [Monte Carlo method, Monte Carlo estimator, plain Monte Carlo, crude Monte Carlo, control variates, antithetic variates]
+requires: [expectation, variance-and-covariance]
+related: [importance-sampling, markov-chain-monte-carlo, rejection-sampling, inverse-transform-sampling, laplace-approximation]
+references: [metropolis1949, owen2013, robert2004, caflisch1998]
+status: draft
+updated: 2026-09-27
+---
+
+import { MonteCarloPi } from './MonteCarloPi'
+
+<Definition>
+Let $\xvec$ have density $p$ and let $f$ be a function with $\mu = \expect_p[f(\xvec)]$ finite. Given independent samples
+$\xvec^{(1)}, \dots, \xvec^{(N)} \sim p$, the Monte Carlo estimator of $\mu$ is
+
+$$
+\hat\mu_N = \frac{1}{N} \sum_{i=1}^{N} f\paren{\xvec^{(i)}}.
+$$
+
+It is unbiased, it converges to $\mu$ as $N \to \infty$, and when $\sigma^2 = \var_p(f(\xvec))$ is finite its standard
+error is $\sigma/\sqrt{N}$ <Cite id="metropolis1949" /> <Cite id="owen2013" />.
+</Definition>
+
+## Problem
+
+Probabilistic inference is full of integrals: posterior means, predictive densities, marginal likelihoods and
+expected losses. Each is an expectation $\int f(\xvec)\, p(\xvec)\, d\xvec$. Any integral $\int g(\xvec)\, d\xvec$ over
+a bounded region can be written this way too, with $p$ uniform on the region and $f = g \cdot \text{volume}$.
+Deterministic quadrature on a grid with $m$ points per axis needs $m^d$ evaluations in $d$ dimensions, which is
+infeasible for $d$ beyond a handful. Monte Carlo integration replaces the grid with random points. Its accuracy
+depends on the variance of $f$, not on the dimension.
+
+## Mechanism
+
+**Unbiased.** Each term has expectation $\mu$, so by linearity $\expect[\hat\mu_N] = \mu$.
+
+**Variance.** The terms are independent, so their variances add:
+
+$$
+\var(\hat\mu_N) = \frac{1}{N^2} \sum_{i=1}^{N} \var\paren{f(\xvec^{(i)})} = \frac{\sigma^2}{N}.
+$$
+
+The standard error is $\sigma/\sqrt{N}$. Halving it needs four times the samples.
+
+**Consistent.** By the strong law of large numbers, $\hat\mu_N \to \mu$ with probability 1 whenever $\mu$ is finite,
+even if $\sigma^2$ is infinite.
+
+**Error bars.** When $\sigma^2$ is finite, the central limit theorem gives
+$\sqrt{N}(\hat\mu_N - \mu) \to \Gauss(0, \sigma^2)$ in distribution. Replacing $\sigma^2$ by the sample variance
+$\hat\sigma^2 = \frac{1}{N-1}\sum_i \paren{f(\xvec^{(i)}) - \hat\mu_N}^2$ gives an approximate 95% confidence interval
+$\hat\mu_N \pm 1.96\, \hat\sigma/\sqrt{N}$. The same samples give both the estimate and its error.
+
+**Dimension.** The rate $N^{-1/2}$ holds in every dimension. A product rule of order $r$ on a grid has error
+$O(N^{-r/d})$ with $N$ total points in $d$ dimensions, which beats Monte Carlo only while $r/d > 1/2$
+<Cite id="caflisch1998" />. The dimension enters Monte Carlo only through $\sigma^2$, which can still grow with $d$.
+
+## Worked example: estimating π
+
+Let $\xvec = (u, v)$ be uniform on the unit square and $f(\xvec) = 4\, \indicator[u^2 + v^2 \le 1]$. The quarter disc
+has area $\pi/4$, so $\expect[f] = \pi$. The indicator is Bernoulli with $q = \pi/4 = 0.785$, so
+
+$$
+\sigma = 4\sqrt{q(1 - q)} = 4\sqrt{0.785 \times 0.215} = 1.642.
+$$
+
+With $N = 10^4$ samples the standard error is $1.642/100 = 0.0164$, and the 95% interval has half-width $0.032$. The
+estimate typically has two correct decimal places. One more decimal place needs $10^6$ samples. This is the typical
+behaviour of Monte Carlo integration: cheap to reach low accuracy, expensive to reach high accuracy.
+
+<MonteCarloPi />
+
+## Variance reduction
+
+The error is $\sigma/\sqrt{N}$, so reducing $\sigma$ is equivalent to taking more samples. Several estimators keep the
+expectation and reduce the variance <Cite id="owen2013" />.
+
+- **Importance sampling** draws from a different density that puts more samples where $\abs{f}\,p$ is large, and
+  reweights. See <NoteLink to="importance-sampling">importance sampling</NoteLink>.
+- **Control variates** subtract a correlated function $g$ with known mean. The estimator averages
+  $f(\xvec) - c\,\paren{g(\xvec) - \expect[g]}$, which is unbiased for any constant $c$.
+- **Antithetic variates** pair each sample with a mirrored one, such as $u$ and $1 - u$ for a uniform $u$. When $f$ is
+  monotone the two values are negatively correlated, and their average varies less than two independent values.
+- **Stratification** splits the domain into regions and samples each in proportion to its probability, which removes
+  the variance due to how many samples land in each region.
+- **Quasi-Monte Carlo** replaces random points by low-discrepancy sequences, with error close to $O(N^{-1})$ for smooth
+  integrands of moderate dimension <Cite id="caflisch1998" />.
+
+<Derivation title="The optimal control variate">
+Let $h_c(\xvec) = f(\xvec) - c\,(g(\xvec) - \expect[g])$. Its variance is
+
+$$
+\var(h_c) = \var(f) - 2c\,\cov(f, g) + c^2 \var(g).
+$$
+
+This is a quadratic in $c$, minimised where its derivative $-2\cov(f, g) + 2c\var(g)$ is zero, at
+$c^* = \cov(f, g)/\var(g)$. Substituting,
+
+$$
+\var(h_{c^*}) = \var(f) - \frac{\cov(f, g)^2}{\var(g)} = \var(f)\paren{1 - \rho^2},
+$$
+
+where $\rho$ is the correlation between $f(\xvec)$ and $g(\xvec)$. A control variate with $\abs{\rho} = 0.9$ removes 81%
+of the variance, which is worth five times as many samples. In practice $c^*$ is estimated from the same samples, the
+regression slope of $f$ on $g$.
+</Derivation>
+
+## Trade-offs
+
+- **Sampling $p$ must be possible.** Plain Monte Carlo needs independent samples from $p$, obtained for example by
+  <NoteLink to="inverse-transform-sampling">inverse transform sampling</NoteLink> or
+  <NoteLink to="rejection-sampling">rejection sampling</NoteLink>. Posteriors usually cannot be sampled directly;
+  <NoteLink to="importance-sampling">importance sampling</NoteLink> and
+  <NoteLink to="markov-chain-monte-carlo">Markov chain Monte Carlo</NoteLink> extend the method to them.
+- **Slow convergence.** The rate $N^{-1/2}$ cannot be improved by more computing alone. Low-dimensional smooth integrals
+  are better done by quadrature.
+- **Infinite variance.** If $\var(f) = \infty$, the estimate still converges but the central limit theorem fails, and
+  the sample variance gives meaningless error bars. For example, with $x$ uniform on $(0, 1)$ and $f(x) = x^{-1/2}$,
+  the mean is 2 but $\expect[f^2] = \int_0^1 x^{-1}\, dx$ diverges. The estimate converges slowly, with occasional large
+  jumps.
+- **Rare events.** For a probability $q$ estimated by an indicator, the relative standard error is
+  $\sqrt{(1 - q)/(Nq)}$. Estimating $q = 10^{-6}$ to 10% relative error needs about $10^8$ samples. Importance sampling
+  is the usual fix.

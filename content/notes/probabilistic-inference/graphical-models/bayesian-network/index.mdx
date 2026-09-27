@@ -1,0 +1,173 @@
+---
+title: Bayesian network
+kind: concept
+summary: 'A Bayesian network is a directed acyclic graph over random variables whose joint distribution factorises as $p(\xvec) = \prod_i p(x_i \mid \xvec_{\mathrm{pa}(i)})$. The graph encodes conditional independences, read off by d-separation from three local structures: chain, fork and collider.'
+tags: [graphical-models, probabilistic-models, bayesian, conditioning, worked-example]
+aliases: [Bayes net, belief network, directed graphical model, DAG model, d-separation, explaining away, Markov blanket, v-structure]
+requires: [independence, conditional-probability]
+related: [markov-random-field, factor-graph, variable-elimination, hidden-markov-model, naive-bayes]
+references: [pearl1988, koller2009, bishop2006, cooper1990]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A Bayesian network over random variables $x_1, \dots, x_n$ is a directed acyclic graph $G$ with one node per variable,
+together with one conditional distribution $p(x_i \mid \xvec_{\mathrm{pa}(i)})$ per node, where $\mathrm{pa}(i)$ is the
+set of parents of node $i$ in $G$. The joint distribution is the product of these conditionals:
+
+$$
+p(x_1, \dots, x_n) = \prod_{i=1}^{n} p\paren{x_i \mid \xvec_{\mathrm{pa}(i)}}.
+$$
+
+The graph encodes conditional independences that hold for every choice of the conditionals <Cite id="pearl1988" />.
+</Definition>
+
+## Factorisation
+
+The chain rule of probability writes any joint distribution, in any order of the variables, as
+
+$$
+p(x_1, \dots, x_n) = \prod_{i=1}^{n} p(x_i \mid x_1, \dots, x_{i-1}).
+$$
+
+Order the variables so that every parent precedes its children; a directed acyclic graph always admits such a
+topological order. A Bayesian network asserts that each factor depends only on the parents:
+$p(x_i \mid x_1, \dots, x_{i-1}) = p(x_i \mid \xvec_{\mathrm{pa}(i)})$. Each missing edge is therefore an independence
+assumption. Conversely, the product of any conditionals $p(x_i \mid \xvec_{\mathrm{pa}(i)})$ is a normalised joint
+distribution: summing out the last variable in the topological order removes its factor, because a conditional
+distribution sums to 1, and the argument repeats down the order.
+
+The factorisation is the reason Bayesian networks are compact. For $n$ binary variables the full joint table has
+$2^n - 1$ free parameters. A network in which each node has at most $k$ parents needs at most $n\,2^k$, one Bernoulli
+parameter per node and per configuration of its parents.
+
+The factorisation is also a recipe for sampling, called **ancestral sampling**: draw each variable in topological order
+from its conditional, given the already drawn values of its parents.
+
+## The local Markov property
+
+The factorisation is equivalent to the **local Markov property**: each variable is conditionally independent of its
+non-descendants given its parents <Cite id="koller2009" />. A node's parents shield it from everything upstream. A
+related set is the **Markov blanket** of node $i$: its parents, its children and its children's other parents. Given its
+Markov blanket, $x_i$ is independent of every other variable.
+
+<Derivation title="The Markov blanket from the factorisation">
+The conditional of $x_i$ given all other variables is proportional to the joint, viewed as a function of $x_i$:
+
+$$
+p(x_i \mid \xvec_{-i}) \propto p\paren{x_i \mid \xvec_{\mathrm{pa}(i)}} \prod_{j \,:\, i \in \mathrm{pa}(j)} p\paren{x_j \mid \xvec_{\mathrm{pa}(j)}}.
+$$
+
+Factors that do not contain $x_i$ cancel on normalisation. The remaining factors mention $x_i$, its parents, its
+children $x_j$ and the other parents of those children. Nothing else appears, so the conditional depends only on the
+Markov blanket.
+</Derivation>
+
+## Three canonical structures
+
+Every question about independence in a Bayesian network reduces to three structures on three nodes $a$, $b$ and $c$.
+Each is analysed directly from the factorisation.
+
+**Chain**, $a \to c \to b$. The joint is $p(a)\,p(c \mid a)\,p(b \mid c)$. Conditioning on $c$:
+
+$$
+p(a, b \mid c) = \frac{p(a)\,p(c \mid a)\,p(b \mid c)}{p(c)} = p(a \mid c)\,p(b \mid c),
+$$
+
+using $p(a)\,p(c \mid a) = p(a \mid c)\,p(c)$ by Bayes' theorem. So $a \perp b \mid c$. Without conditioning,
+$p(a, b) = p(a) \sum_c p(c \mid a)\,p(b \mid c)$, and the sum depends on $a$ in general, so $a$ and $b$ are dependent.
+Observing the middle of a chain blocks the flow of information.
+
+**Fork**, $a \leftarrow c \to b$. The joint is $p(c)\,p(a \mid c)\,p(b \mid c)$. Dividing by $p(c)$ gives
+$p(a, b \mid c) = p(a \mid c)\,p(b \mid c)$, so $a \perp b \mid c$. Without conditioning,
+$p(a, b) = \sum_c p(c)\,p(a \mid c)\,p(b \mid c)$ is a mixture and does not factorise in general. A common cause makes
+its effects dependent until the cause is observed.
+
+**Collider**, $a \to c \leftarrow b$, also called a v-structure. The joint is $p(a)\,p(b)\,p(c \mid a, b)$. Without
+conditioning, summing out $c$ removes its factor, and $p(a, b) = p(a)\,p(b)$: the two causes are independent.
+Conditioning on $c$ gives
+
+$$
+p(a, b \mid c) = \frac{p(a)\,p(b)\,p(c \mid a, b)}{p(c)},
+$$
+
+which does not factorise in $a$ and $b$ when $p(c \mid a, b)$ couples them. Observing a common effect makes its causes
+dependent. The same holds when any descendant of $c$ is observed, since a descendant carries information about $c$.
+This is **explaining away**.
+
+The collider behaves in the opposite way to the chain and the fork. Observation blocks a chain or a fork and opens a
+collider.
+
+## d-separation
+
+Let $A$, $B$ and $C$ be disjoint sets of nodes. An undirected path between a node of $A$ and a node of $B$ is
+**blocked** by $C$ if it contains a node $m$ such that either
+
+- the arrows meet head-to-tail ($\to m \to$) or tail-to-tail ($\leftarrow m \to$) at $m$, and $m \in C$; or
+- the arrows meet head-to-head ($\to m \leftarrow$) at $m$, and neither $m$ nor any descendant of $m$ is in $C$.
+
+$A$ and $B$ are **d-separated** by $C$ if every such path is blocked. The two conditions are the three canonical
+structures applied at each interior node of the path. If $A$ and $B$ are d-separated by $C$, then
+$A \perp B \mid C$ in every distribution that factorises over the graph <Cite id="pearl1988" />. Conversely, if they
+are not d-separated, the independence fails for almost every choice of the conditionals, so d-separation finds all
+the independences that the graph alone implies <Cite id="koller2009" />.
+
+## Worked example: explaining away
+
+A burglary $B$ or an earthquake $E$ can set off an alarm $A$. The graph is the collider $B \to A \leftarrow E$, with
+$p(B = 1) = 0.001$, $p(E = 1) = 0.002$ and
+
+| $B$ | $E$ | $p(A = 1 \mid B, E)$ |
+| --- | --- | -------------------- |
+| 1   | 1   | 0.95                 |
+| 1   | 0   | 0.94                 |
+| 0   | 1   | 0.29                 |
+| 0   | 0   | 0.001                |
+
+The joint is $p(B)\,p(E)\,p(A \mid B, E)$. Summing it over $B$ and $E$ with $A = 1$ gives $p(A = 1) = 0.002516$.
+
+- **Alarm observed.** The terms with $B = 1$ sum to $0.001 \times (0.002 \times 0.95 + 0.998 \times 0.94) = 0.000940$,
+  so $p(B = 1 \mid A = 1) = 0.000940 / 0.002516 = 0.374$. The alarm raises the probability of a burglary from 0.001 to
+  0.374.
+- **Alarm and earthquake observed.** Fix $E = 1$ as well:
+
+  $$
+  p(B = 1 \mid A = 1, E = 1) = \frac{0.001 \times 0.95}{0.001 \times 0.95 + 0.999 \times 0.29} = 0.0033.
+  $$
+
+The earthquake explains the alarm, and the probability of a burglary falls back to 0.0033. $B$ and $E$ are independent
+a priori, but they are dependent given $A$, as the collider analysis predicts.
+
+## Inference
+
+Inference in a Bayesian network means computing a conditional such as $p(B \mid A = 1)$: sum the joint over the
+unobserved variables that are not queried, then normalise. Exact inference is NP-hard in general
+<Cite id="cooper1990" />. Its cost is governed by the structure of the graph. For graphs whose moral graph is a tree,
+<NoteLink to="belief-propagation">belief propagation</NoteLink> computes every marginal in linear time;
+<NoteLink to="variable-elimination">variable elimination</NoteLink> and the
+<NoteLink to="junction-tree-algorithm">junction tree algorithm</NoteLink> handle general graphs at a cost exponential in
+their treewidth. Approximate methods include
+<NoteLink to="markov-chain-monte-carlo">Markov chain Monte Carlo</NoteLink> and
+<NoteLink to="variational-inference">variational inference</NoteLink>.
+
+Familiar models are Bayesian networks. <NoteLink to="naive-bayes">Naive Bayes</NoteLink> is a fork with the class as the
+common parent of every feature. A <NoteLink to="hidden-markov-model">hidden Markov model</NoteLink> is a chain of hidden
+states, each with one observed child.
+
+## Assumptions
+
+- **Acyclicity.** The graph has no directed cycles. A feedback loop must be unrolled in time, as in a dynamic Bayesian
+  network.
+- **Faithfulness is not assumed.** The graph guarantees the independences that d-separation finds. Particular numbers
+  in the conditionals can create extra independences that the graph does not show.
+
+## Pitfalls
+
+- **Edges are not causal claims.** A Bayesian network is a factorisation. The graphs $a \to b$ and $b \to a$ represent
+  the same set of distributions. A causal reading needs further assumptions.
+- **Conditioning on a collider.** Selecting data on a common effect creates dependence between its causes. This is the
+  source of selection bias and Berkson's paradox.
+- **Different graphs, same independences.** Two graphs imply the same independences exactly when they have the same
+  skeleton and the same v-structures <Cite id="koller2009" />. The chain, the reversed chain and the fork are indistinguishable from
+  independence information alone.

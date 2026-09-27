@@ -1,0 +1,129 @@
+---
+title: Gibbs sampling
+kind: technique
+summary: 'Gibbs sampling draws from a joint distribution by resampling one variable, or block, at a time from its full conditional given all the others. Each update is a Metropolis–Hastings move with acceptance probability exactly 1. It mixes slowly when variables are highly correlated.'
+tags: [monte-carlo, sampling, markov-chains, bayesian, graphical-models, worked-example]
+aliases: [Gibbs sampler, full conditional distribution, blocked Gibbs sampling, collapsed Gibbs sampling, systematic scan, random scan, heat bath algorithm, Glauber dynamics]
+requires: [markov-chain-monte-carlo, metropolis-hastings]
+related: [markov-random-field, bayesian-network, mcmc-diagnostics, mean-field-variational-inference, multivariate-normal-distribution]
+references: [geman1984, gelfand1990, casella1992, liu1994collapsed, griffiths2004, robert2004]
+status: draft
+updated: 2026-09-27
+---
+
+import { GibbsGaussian } from './GibbsGaussian'
+
+<Definition>
+Let $\pi(\xvec)$ be a distribution over $\xvec = (x_1, \dots, x_d)$ and write $\xvec_{-j}$ for all components except
+$x_j$. The **full conditional** of $x_j$ is $\pi(x_j \mid \xvec_{-j})$. A Gibbs sampler updates the state by drawing
+
+$$
+x_j \sim \pi(x_j \mid \xvec_{-j})
+$$
+
+for each $j$ in turn (a **systematic scan**) or for a randomly chosen $j$ (a **random scan**), always conditioning on
+the current values of the others. The chain has $\pi$ as its stationary distribution <Cite id="geman1984" />
+<Cite id="gelfand1990" />.
+</Definition>
+
+## Problem
+
+Sampling a high-dimensional joint distribution directly is hard, but its one-dimensional conditionals are often easy.
+In a <NoteLink to="bayesian-network">Bayesian network</NoteLink> or a
+<NoteLink to="markov-random-field">Markov random field</NoteLink>, the full conditional of a variable depends only on
+its Markov blanket, and in conjugate Bayesian models it is a standard distribution. Gibbs sampling builds a
+<NoteLink to="markov-chain-monte-carlo">Markov chain Monte Carlo</NoteLink> sampler from these conditionals alone,
+with no proposal to tune and no rejections.
+
+## Why it is correct
+
+A Gibbs update of $x_j$ is a <NoteLink to="metropolis-hastings">Metropolis–Hastings</NoteLink> move with the proposal
+$q(\yvec \mid \xvec) = \pi(y_j \mid \xvec_{-j})$ for $\yvec_{-j} = \xvec_{-j}$, and zero otherwise. The proposal changes
+only $x_j$. Since $\yvec_{-j} = \xvec_{-j}$, write $\pi(\xvec) = \pi(x_j \mid \xvec_{-j})\,\pi(\xvec_{-j})$ and likewise
+for $\yvec$. The Metropolis–Hastings ratio is
+
+$$
+\frac{\pi(\yvec)\, q(\xvec \mid \yvec)}{\pi(\xvec)\, q(\yvec \mid \xvec)}
+= \frac{\pi(y_j \mid \xvec_{-j})\,\pi(\xvec_{-j}) \cdot \pi(x_j \mid \xvec_{-j})}
+{\pi(x_j \mid \xvec_{-j})\,\pi(\xvec_{-j}) \cdot \pi(y_j \mid \xvec_{-j})} = 1.
+$$
+
+Every proposal is accepted. Each single-variable update therefore satisfies detailed balance and leaves $\pi$
+invariant. A systematic scan composes these updates. The composition leaves $\pi$ invariant because each step does,
+although it is not itself reversible. A random scan is a mixture of the updates and is reversible.
+
+Invariance does not guarantee ergodicity. If $\pi$ puts zero probability on part of the path between two regions, a
+sampler that changes one coordinate at a time may be unable to cross. For example, if $x_1 = x_2$ with probability 1,
+no single-coordinate update can move either variable.
+
+## Full conditionals in graphical models
+
+The full conditional is proportional to the joint as a function of $x_j$, so every factor that does not contain $x_j$
+cancels. In a Markov random field only the potentials that touch $x_j$ remain.
+
+**Ising model.** With spins $x_i \in \set{-1, +1}$, couplings $J$ between neighbours and field $h$,
+
+$$
+\pi(x_i = +1 \mid \xvec_{-i}) = \frac{e^{a_i}}{e^{a_i} + e^{-a_i}} = \frac{1}{1 + e^{-2 a_i}}, \qquad
+a_i = J \sum_{j \in N(i)} x_j + h,
+$$
+
+where $N(i)$ is the set of neighbours of $i$. Each update needs only the neighbouring spins. This is the "heat bath"
+algorithm of statistical physics, which Geman and Geman applied to image restoration <Cite id="geman1984" />.
+
+## Worked example: a correlated Gaussian
+
+Let $(x_1, x_2)$ be Gaussian with zero means, unit variances and correlation $\rho$. The full conditionals are
+
+$$
+x_1 \mid x_2 \sim \Gauss(\rho\, x_2,\ 1 - \rho^2), \qquad x_2 \mid x_1 \sim \Gauss(\rho\, x_1,\ 1 - \rho^2).
+$$
+
+A sweep draws $x_1' = \rho\, x_2 + \sqrt{1 - \rho^2}\,\epsilon_1$, then $x_2' = \rho\, x_1' + \sqrt{1 - \rho^2}\,\epsilon_2$
+with $\epsilon_1, \epsilon_2 \sim \Gauss(0, 1)$. Substituting the previous sweep's $x_2 = \rho\, x_1 + \dots$ shows that
+the sequence of $x_1$ values is an autoregressive process,
+
+$$
+x_1^{(t+1)} = \rho^2\, x_1^{(t)} + \text{independent Gaussian noise},
+$$
+
+with lag-$k$ autocorrelation $\rho^{2k}$. Its integrated autocorrelation time is
+
+$$
+\tau = 1 + 2\sum_{k=1}^{\infty} \rho^{2k} = \frac{1 + \rho^2}{1 - \rho^2}.
+$$
+
+For $\rho = 0.9$, $\tau = 1.81/0.19 = 9.5$: each sweep is worth about a tenth of an independent sample. For
+$\rho = 0.99$, $\tau = 99.5$. The conditionals have standard deviation $\sqrt{1 - \rho^2}$, 0.14 for $\rho = 0.99$,
+while the distribution extends about $\sqrt{1 + \rho} = 1.41$ along its long axis. Axis-parallel steps of size 0.14
+explore a distance of 1.41 only by a slow random walk.
+
+<GibbsGaussian />
+
+## Variants
+
+- **Blocked Gibbs.** Sample strongly dependent variables jointly from their conditional given the rest. In the example,
+  drawing $(x_1, x_2)$ jointly gives independent samples. In a hidden Markov model, the whole state sequence can be
+  drawn at once by forward filtering and backward sampling.
+- **Collapsed Gibbs.** Integrate some variables out analytically and sample the rest from the resulting marginal. The
+  sampler then works in a lower dimension, with less dependence, and never samples the integrated variables
+  <Cite id="liu1994collapsed" />. The standard sampler for latent Dirichlet allocation integrates out the topic
+  proportions and word distributions and resamples only the topic of each word <Cite id="griffiths2004" />.
+- **Metropolis-within-Gibbs.** When a full conditional cannot be sampled directly, replace its exact draw by one
+  Metropolis–Hastings step that leaves that conditional invariant. The composition still leaves $\pi$ invariant.
+- **Data augmentation.** Add latent variables that make every conditional easy, such as the component labels of a
+  mixture model, and sample them alongside the parameters.
+
+## Trade-offs
+
+- **No tuning, no rejections.** Gibbs sampling has no step size and wastes no proposals. For conditionally conjugate
+  models every step is a draw from a standard distribution <Cite id="casella1992" />.
+- **Needs tractable conditionals.** Non-conjugate models need Metropolis-within-Gibbs or other samplers.
+- **Correlation slows it down.** Coordinate-wise moves are short when variables are strongly correlated, as the worked
+  example shows. Reparameterising or blocking helps; <NoteLink to="hamiltonian-monte-carlo">Hamiltonian Monte
+  Carlo</NoteLink> moves along correlated directions directly.
+- **Multimodality.** In an Ising model with strong coupling, flipping from mostly $+1$ to mostly $-1$ requires passing
+  through configurations of low probability, one spin at a time. The sampler can stay in one phase for a very long time.
+- **Relation to mean field.** <NoteLink to="mean-field-variational-inference">Mean-field variational inference</NoteLink>
+  has the same structure, visiting one variable at a time and using its Markov blanket, but it updates a distribution
+  over each variable deterministically instead of drawing a value.

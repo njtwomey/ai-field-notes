@@ -1,0 +1,160 @@
+---
+title: Belief propagation
+kind: technique
+summary: 'Belief propagation computes every marginal of a tree-structured factor graph by passing messages along its edges; each message sums a factor against incoming messages. Two sweeps give all marginals exactly. With maxima in place of sums (max-product) it finds the mode.'
+tags: [graphical-models, inference, message-passing, dynamic-programming, worked-example]
+aliases: [sum-product algorithm, sum-product message passing, max-product algorithm, max-sum algorithm, Pearl's belief propagation, BP]
+requires: [factor-graph, variable-elimination]
+related: [hidden-markov-model, conditional-random-field, kalman-smoother, junction-tree-algorithm, loopy-belief-propagation, markov-random-field]
+references: [pearl1988, kschischang2001, bishop2006, koller2009]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+On a factor graph $p(\xvec) \propto \prod_a f_a(\xvec_{\partial a})$ that is a tree, the **sum-product algorithm** sends
+a message along each edge in each direction:
+
+$$
+\mu_{i \to a}(x_i) = \prod_{b \in \partial i \setminus a} \mu_{b \to i}(x_i), \qquad
+\mu_{a \to i}(x_i) = \sum_{\xvec_{\partial a \setminus i}} f_a(\xvec_{\partial a}) \prod_{j \in \partial a \setminus i} \mu_{j \to a}(x_j).
+$$
+
+The marginal of each variable is the normalised product of its incoming messages,
+$p(x_i) \propto \prod_{a \in \partial i} \mu_{a \to i}(x_i)$ <Cite id="kschischang2001" />. The algorithm is exact on
+trees and was introduced by Pearl for polytree Bayesian networks <Cite id="pearl1988" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="variable-elimination">Variable elimination</NoteLink> computes one marginal by summing out the other
+variables in a good order. Computing the marginal of every variable that way repeats almost all of the work for each
+variable. On a tree the intermediate sums can be shared: the sum over a subtree does not depend on which variable is
+being queried, only on the edge through which the subtree is attached. Belief propagation computes each such sum once,
+as a message, and reuses it for every query.
+
+## Mechanism
+
+Here $\partial i$ is the set of factors that use variable $x_i$ and $\partial a$ the set of variables used by factor
+$f_a$. A leaf variable sends the constant message $\mu_{i \to a} = 1$. A leaf factor sends
+$\mu_{a \to i}(x_i) = f_a(x_i)$. Every other node sends a message to a neighbour once it has received messages from all
+its other neighbours. A convenient schedule picks any root, sends messages from the leaves to the root, then from the
+root back to the leaves. Every edge then carries one message in each direction.
+
+After both sweeps:
+
+- **Variable marginals.** $p(x_i) \propto \prod_{a \in \partial i} \mu_{a \to i}(x_i)$.
+- **Factor marginals.** The joint of the variables of one factor is
+  $p(\xvec_{\partial a}) \propto f_a(\xvec_{\partial a}) \prod_{j \in \partial a} \mu_{j \to a}(x_j)$.
+- **Partition function.** $Z = \sum_{x_i} \prod_{a \in \partial i} \mu_{a \to i}(x_i)$, the same for every $i$.
+- **Evidence.** Fixing observed variables in the factors before passing messages gives the conditional marginals given
+  the evidence, and $Z$ becomes the probability of the evidence.
+
+### Derivation on a tree
+
+Fix a variable $x_i$. Removing $x_i$ from the tree splits the other nodes into one subtree per neighbouring factor
+$a \in \partial i$. Every factor lies in exactly one subtree, so the joint splits as
+
+$$
+\prod_b f_b = \prod_{a \in \partial i} F_a(x_i, X_a),
+$$
+
+where $F_a$ is the product of the factors in the subtree hanging from $a$ and $X_a$ is the set of variables in that
+subtree. The subtrees share no variables other than $x_i$, so the sum over all other variables distributes over the
+product:
+
+$$
+p(x_i) \propto \sum_{\text{all but } x_i} \prod_{a \in \partial i} F_a(x_i, X_a)
+= \prod_{a \in \partial i} \underbrace{\sum_{X_a} F_a(x_i, X_a)}_{\mu_{a \to i}(x_i)}.
+$$
+
+This defines the factor-to-variable message as the sum over everything behind the edge. It satisfies the recursion in
+the definition. The subtree behind $a$ consists of $f_a$ and, for each other variable $x_j$ of $f_a$, the subtree
+hanging from $x_j$ away from $a$. Write $G_j(x_j, X_j)$ for the product of the factors in the subtree hanging from
+$x_j$. Then $F_a = f_a \prod_{j \in \partial a \setminus i} G_j$. The $G_j$ share no variables, so
+
+$$
+\mu_{a \to i}(x_i) = \sum_{\xvec_{\partial a \setminus i}} f_a(\xvec_{\partial a}) \prod_{j \in \partial a \setminus i}
+\underbrace{\sum_{X_j} G_j(x_j, X_j)}_{\mu_{j \to a}(x_j)}.
+$$
+
+The subtree hanging from $x_j$ is in turn made of the subtrees behind the factors $b \in \partial j \setminus a$, so
+$G_j = \prod_{b} F_b$ and $\mu_{j \to a}(x_j) = \prod_{b \in \partial j \setminus a} \mu_{b \to j}(x_j)$. Both message
+equations are the distributive law applied at one node. The derivation needs the subtrees to be disjoint, which is
+exactly what a tree guarantees.
+
+## Pairwise Markov random fields
+
+For a <NoteLink to="markov-random-field">Markov random field</NoteLink> with node potentials $\psi_i(x_i)$ and edge
+potentials $\psi_{ij}(x_i, x_j)$, the factor-to-variable and variable-to-factor messages combine into one message per
+directed edge of the undirected graph:
+
+$$
+m_{j \to i}(x_i) = \sum_{x_j} \psi_{ij}(x_i, x_j)\, \psi_j(x_j) \prod_{k \in N(j) \setminus i} m_{k \to j}(x_j), \qquad
+p(x_i) \propto \psi_i(x_i) \prod_{j \in N(i)} m_{j \to i}(x_i),
+$$
+
+where $N(j)$ is the set of neighbours of node $j$. On a chain the left-to-right messages are the forward vectors and
+the right-to-left messages are the backward vectors of the forward–backward algorithm of a
+<NoteLink to="hidden-markov-model">hidden Markov model</NoteLink>. For Gaussian potentials the messages are Gaussian,
+and the two sweeps are the <NoteLink to="kalman-filter">Kalman filter</NoteLink> and the
+<NoteLink to="kalman-smoother">Kalman smoother</NoteLink>.
+
+## Worked example
+
+A chain of three binary variables $x_1 - x_2 - x_3$, each in $\set{0, 1}$, has node potentials
+$\psi_1 = (0.7, 0.3)$, $\psi_2 = (0.4, 0.6)$ and $\psi_3 = (0.2, 0.8)$, listing the values at $x = 0$ and $x = 1$, and
+the same edge potential on both edges, $\psi(u, v) = 2$ if $u = v$ and $1$ otherwise.
+
+**Inward messages to $x_2$.**
+
+$$
+m_{1 \to 2}(x_2) = \sum_{x_1} \psi(x_1, x_2)\,\psi_1(x_1) = (2 \times 0.7 + 0.3,\ 0.7 + 2 \times 0.3) = (1.7, 1.3),
+$$
+
+and by the same rule $m_{3 \to 2} = (2 \times 0.2 + 0.8,\ 0.2 + 2 \times 0.8) = (1.2, 1.8)$.
+
+**Marginal of $x_2$.** $\psi_2 \odot m_{1 \to 2} \odot m_{3 \to 2} = (0.816, 1.404)$, where $\odot$ is the element-wise
+product. The sum is $Z = 2.22$, so $p(x_2) = (0.368, 0.632)$.
+
+**Outward messages.** $m_{2 \to 1}(x_1) = \sum_{x_2} \psi(x_1, x_2)\,\psi_2(x_2)\,m_{3 \to 2}(x_2) = (2.04, 2.64)$, so
+$p(x_1) \propto (0.7 \times 2.04,\ 0.3 \times 2.64) = (1.428, 0.792)$, which normalises to $(0.643, 0.357)$. The same sum
+is $Z = 2.22$ again. Likewise $m_{2 \to 3} = (2.14, 2.24)$ and $p(x_3) = (0.193, 0.807)$.
+
+Four messages give all three marginals. Summing the joint over its eight configurations gives the same numbers.
+
+## Max-product
+
+Replacing every sum by a maximum gives the **max-product** algorithm. The maximum distributes over products of
+non-negative factors as the sum does, $\max_x a\, g(x) = a \max_x g(x)$ for $a \ge 0$, so the derivation carries over
+unchanged. The product of incoming messages at $x_i$ is then the **max-marginal**, $\max_{\xvec : x_i = v} p(\xvec)$ up to
+the constant $Z$. Working with logarithms turns products into sums, and the algorithm is called **max-sum**.
+
+To recover the most probable configuration, take the maximising value at the root, then pass back towards the leaves,
+choosing at each variable the value that attained the maximum in the message given its already chosen neighbour. This
+backtracking avoids inconsistent choices when the maximum is tied.
+
+In the example, the max-product messages into $x_2$ are $(\max(1.4, 0.3), \max(0.7, 0.6)) = (1.4, 0.7)$ from $x_1$ and
+$(0.8, 1.6)$ from $x_3$. The max-marginal of $x_2$ is $(0.4 \times 1.4 \times 0.8,\ 0.6 \times 0.7 \times 1.6) = (0.448,
+0.672)$, so $x_2 = 1$. Backtracking, $x_1$ maximises $\psi_1(x_1)\psi(x_1, 1) = (0.7, 0.6)$, so $x_1 = 0$, and $x_3$
+maximises $\psi(1, x_3)\psi_3(x_3) = (0.2, 1.6)$, so $x_3 = 1$. The most probable configuration is $(0, 1, 1)$, with
+probability $0.672/2.22 = 0.303$. On a chain this is the Viterbi algorithm.
+
+## Cost
+
+A factor-to-variable message from a factor with $d$ variables of $k$ states costs $O(k^d)$. Each edge carries two
+messages, so the total cost is linear in the number of edges and, for a pairwise model, $O(\abs{E}\, k^2)$. Computing
+every marginal costs about twice as much as computing one by variable elimination.
+
+## Trade-offs
+
+- **Trees only, for exactness.** On a graph with cycles the derivation fails, because the subtrees are no longer
+  disjoint. The <NoteLink to="junction-tree-algorithm">junction tree algorithm</NoteLink> clusters variables into a
+  tree and runs the same messages on the clusters, at a cost exponential in the cluster size. Running the local
+  updates on the cyclic graph anyway gives <NoteLink to="loopy-belief-propagation">loopy belief propagation</NoteLink>,
+  which is approximate.
+- **Numerical range.** Messages are products of many numbers and underflow on long chains. Normalising each message to
+  sum to 1 changes nothing but a constant, which cancels in the marginals; the constants must be tracked separately if
+  $Z$ is wanted.
+- **Max-marginals are not marginals.** The configuration that maximises each marginal separately need not be the most
+  probable joint configuration. Use max-product for the joint mode and sum-product for per-variable probabilities.

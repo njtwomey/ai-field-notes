@@ -1,0 +1,148 @@
+---
+title: Variational inference
+kind: concept
+summary: 'Variational inference approximates a posterior $p(\zvec \mid \xvec)$ by the member of a tractable family $\Qcal$ closest to it in $\KL(q \,\|\, p)$, found by maximising the evidence lower bound. The reverse KL is mode-seeking: $q$ fits one mode and tends to understate uncertainty.'
+tags: [variational-inference, bayesian, approximate-inference, optimisation, worked-example]
+aliases: [VI, variational Bayesian inference, variational approximation, variational family, zero-forcing, mode-seeking behaviour]
+requires: [kl-divergence, bayes-theorem]
+related: [evidence-lower-bound, mean-field-variational-inference, stochastic-variational-inference, black-box-variational-inference, amortised-inference, expectation-propagation, markov-chain-monte-carlo, laplace-approximation]
+references: [jordan1999, blei2017, bishop2006, wainwright2008, minka2005]
+status: draft
+updated: 2026-09-27
+---
+
+import { KlDirections } from './KlDirections'
+
+<Definition>
+Given a joint model $p(\xvec, \zvec)$ of data $\xvec$ and latent variables $\zvec$, and a family $\Qcal$ of densities
+over $\zvec$, variational inference approximates the posterior by
+
+$$
+q^* = \argmin_{q \in \Qcal} \KL\paren{q(\zvec) \,\|\, p(\zvec \mid \xvec)}
+= \argmax_{q \in \Qcal}\, \expect_q\brack{\log p(\xvec, \zvec) - \log q(\zvec)}.
+$$
+
+The objective on the right is the evidence lower bound (ELBO). It needs only the joint, not the posterior, and the two
+problems have the same solution <Cite id="jordan1999" /> <Cite id="blei2017" />.
+</Definition>
+
+## The problem it solves
+
+The posterior $p(\zvec \mid \xvec) = p(\xvec, \zvec)/p(\xvec)$ requires the evidence
+$p(\xvec) = \int p(\xvec, \zvec)\, d\zvec$, an integral over every latent configuration. For most models it has no
+closed form, and the posterior cannot be normalised or sampled directly.
+<NoteLink to="markov-chain-monte-carlo">Markov chain Monte Carlo</NoteLink> samples it asymptotically exactly, at a
+cost that can be large. Variational inference turns the integration problem into an optimisation problem: search a
+family of tractable densities for the one closest to the posterior. It gives up exactness for speed, scales to large
+datasets through stochastic optimisation, and returns a density that is cheap to evaluate and sample.
+
+## The evidence lower bound, two ways
+
+**By Jensen's inequality.** Multiply and divide by $q$ inside the evidence, and use the concavity of the logarithm,
+$\log\expect[Y] \ge \expect[\log Y]$:
+
+$$
+\log p(\xvec) = \log \int q(\zvec) \frac{p(\xvec, \zvec)}{q(\zvec)}\, d\zvec
+\ge \int q(\zvec) \log\frac{p(\xvec, \zvec)}{q(\zvec)}\, d\zvec = \operatorname{ELBO}(q).
+$$
+
+This shows the bound but not its gap.
+
+**By decomposing the KL divergence.** Expand the divergence from $q$ to the posterior, substituting
+$p(\zvec \mid \xvec) = p(\xvec, \zvec)/p(\xvec)$:
+
+$$
+\KL\paren{q \,\|\, p(\zvec \mid \xvec)} = \expect_q\brack{\log q(\zvec) - \log p(\xvec, \zvec)} + \log p(\xvec)
+= -\operatorname{ELBO}(q) + \log p(\xvec).
+$$
+
+Rearranged, $\log p(\xvec) = \operatorname{ELBO}(q) + \KL\paren{q \,\|\, p(\zvec \mid \xvec)}$. The log evidence does
+not depend on $q$, so every increase in the ELBO is an equal decrease in the KL divergence. Since the divergence is
+non-negative, the gap in Jensen's inequality is exactly the divergence. See
+<NoteLink to="evidence-lower-bound">evidence lower bound</NoteLink> for other forms of the bound.
+
+## Choosing the family
+
+The family $\Qcal$ sets the trade-off between accuracy and cost. Over all densities the optimum is the exact posterior.
+
+- **Mean field.** $q(\zvec) = \prod_j q_j(\zvec_j)$, independent factors. The optimal factors satisfy
+  $\log q_j^* = \expect_{-j}\brack{\log p(\xvec, \zvec)} + \text{const}$, and coordinate ascent cycles through them;
+  see <NoteLink to="mean-field-variational-inference">mean-field variational inference</NoteLink>.
+- **Parametric families.** $q_{\phivec}$ with parameters $\phivec$, such as a Gaussian with full covariance, optimised
+  by gradient ascent on the ELBO; see <NoteLink to="black-box-variational-inference">black-box variational
+  inference</NoteLink>.
+- **Flexible families.** Normalising flows transform a simple density through invertible maps to fit skewed or
+  multimodal posteriors.
+- **Amortised families.** $q_{\phivec}(\zvec \mid \xvec)$ predicts the variational parameters from the data with a
+  network; see <NoteLink to="amortised-inference">amortised inference</NoteLink>.
+
+For datasets too large for full passes, <NoteLink to="stochastic-variational-inference">stochastic variational
+inference</NoteLink> follows noisy natural gradients computed on minibatches.
+
+## The direction of the divergence
+
+Variational inference minimises the **reverse** divergence $\KL(q \,\|\, p) = \expect_q\brack{\log q/p}$, with the
+expectation under the approximation. The **forward** divergence $\KL(p \,\|\, q) = \expect_p\brack{\log p/q}$ would
+need expectations under the posterior, which are what is missing. The two directions behave differently
+<Cite id="minka2005" />.
+
+**Reverse KL is zero-forcing.** The integrand $q \log(q/p)$ is large wherever $q > 0$ and $p$ is small. Placing mass
+where the posterior has almost none is heavily penalised, while leaving part of the posterior uncovered costs little,
+since $q \approx 0$ there. When $q$ cannot represent every mode, it concentrates on one. The result is
+**mode-seeking** and tends to underestimate the posterior's spread.
+
+**Forward KL is zero-avoiding.** The integrand $p \log(p/q)$ is large wherever $p > 0$ and $q$ is small, so $q$ must
+cover every region where the posterior has mass. The result is **mass-covering**, and for multimodal targets it puts
+mass in the low-probability gaps between modes.
+
+**Forward KL within an exponential family matches moments.** Let $q(\zvec) = h(\zvec)\exp\paren{\etavec^\top
+\tvec(\zvec) - A(\etavec)}$. As a function of $\etavec$,
+
+$$
+\KL(p \,\|\, q) = -\etavec^\top \expect_p[\tvec(\zvec)] + A(\etavec) + \text{const}.
+$$
+
+Its gradient is $\nabla A(\etavec) - \expect_p[\tvec] = \expect_q[\tvec] - \expect_p[\tvec]$, since the gradient of the
+log-normaliser is the mean of the sufficient statistics. Setting it to zero gives $\expect_q[\tvec] = \expect_p[\tvec]$.
+For a Gaussian $q$, the forward fit has the mean and covariance of $p$. This is the projection used by
+<NoteLink to="expectation-propagation">expectation propagation</NoteLink>.
+
+<KlDirections />
+
+## Worked example: two modes
+
+Let $p(z) = \frac12\Gauss(z \mid -3, 1) + \frac12\Gauss(z \mid 3, 1)$, and fit $q(z) = \Gauss(m, s^2)$.
+
+- **Forward KL.** Moment matching gives $m = 0$ and $s^2 = \expect_p[z^2] = 1 + 9 = 10$, so $s = 3.16$. This $q$ peaks
+  at $z = 0$, where $p$ is at its lowest. Its forward divergence is $0.462$ and its reverse divergence is $0.938$.
+- **Reverse KL.** Numerical minimisation gives $m = \pm 2.98$ and $s = 1.02$, one fit per mode, with
+  $\KL(q \,\|\, p) = 0.689$. The value is close to $\log 2 = 0.693$: under $q$, the target is about half the density of
+  a single component, so $\log(q/p) \approx \log 2$ wherever $q$ has mass. Its forward divergence is $7.86$, because
+  $q$ misses half the target entirely.
+- **A second stationary point.** The reverse divergence also has a local minimum at $m = 0$, $s = 2.74$, with value
+  $0.841$. Gradient ascent on the ELBO started near $m = 0$ can stop there.
+
+The reverse fit describes one mode well and says nothing about the other. It reports a posterior standard deviation of
+1.02, while the true one is 3.16.
+
+## Assumptions and cost
+
+- The joint $p(\xvec, \zvec)$ must be computable pointwise, up to a constant.
+- The ELBO and its gradient must be computable or estimable: in closed form for conditionally conjugate models, or by
+  Monte Carlo with the <NoteLink to="reparameterisation-trick">reparameterisation trick</NoteLink> or the
+  <NoteLink to="score-function-estimator">score-function estimator</NoteLink>.
+- Each iteration costs about as much as evaluating the joint a few times, and convergence typically needs hundreds to
+  thousands of iterations. This is usually far cheaper than MCMC to comparable accuracy in the mean.
+
+## Pitfalls
+
+- **Underestimated uncertainty.** Reverse KL shrinks $q$ into the posterior. Mean-field approximations of correlated
+  posteriors underestimate marginal variances; the <NoteLink to="mean-field-variational-inference">mean-field
+  note</NoteLink> shows that each factor's variance is the conditional, not the marginal, variance.
+- **Bias does not vanish.** Unlike MCMC, more computation does not remove the error. The approximation error is fixed
+  by the family.
+- **The ELBO is not the evidence.** Comparing models by their ELBOs compares lower bounds whose gaps differ.
+- **Local optima.** The ELBO is non-convex in general. Different initialisations can converge to different modes, as
+  in the worked example.
+- **Support.** If $q$ puts mass outside the support of the posterior, the ELBO is $-\infty$. Constrained parameters are
+  transformed to the real line before a Gaussian $q$ is fitted.

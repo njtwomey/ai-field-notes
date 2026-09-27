@@ -1,0 +1,145 @@
+---
+title: MCMC diagnostics
+kind: technique
+summary: 'MCMC diagnostics check whether Markov chains have converged and how precise they are. Trace plots show mixing; $\hat R$ compares between-chain and within-chain variance and should be below 1.01; the effective sample size $N/\tau$ discounts autocorrelation.'
+tags: [monte-carlo, markov-chains, bayesian, diagnostics, worked-example]
+aliases: [R-hat, Rhat, potential scale reduction factor, Gelman–Rubin diagnostic, Gelman-Rubin statistic, split R-hat, rank-normalised R-hat, bulk ESS, tail ESS, trace plot, Monte Carlo standard error, MCSE, integrated autocorrelation time]
+requires: [markov-chain-monte-carlo]
+related: [metropolis-hastings, gibbs-sampling, hamiltonian-monte-carlo, probabilistic-programming]
+references: [gelman1992, vehtari2021, geyer1992, gelman2013, betancourt2017]
+status: draft
+updated: 2026-09-27
+---
+
+import { ChainDiagnostics } from './ChainDiagnostics'
+
+<Definition>
+MCMC diagnostics are statistics computed from the output of several Markov chains, run from dispersed starting
+points, that detect failure to converge and quantify precision. The main ones are trace plots, the potential scale
+reduction factor $\hat R$, which compares variance between chains with variance within them
+<Cite id="gelman1992" />, and the effective sample size, which converts correlated draws into an equivalent number of
+independent draws <Cite id="geyer1992" />. Current practice uses rank-normalised split-$\hat R$ and bulk and tail
+effective sample sizes <Cite id="vehtari2021" />.
+</Definition>
+
+## Problem
+
+A <NoteLink to="markov-chain-monte-carlo">Markov chain Monte Carlo</NoteLink> sampler converges to its target only as the
+number of steps grows without bound. A finite run can fail in two ways. It may not have reached the target yet, still
+remembering its starting point or confined to one mode. Or it may have reached the target but mix so slowly that its
+draws carry little information. Neither failure is visible in a single chain's summary statistics. Diagnostics cannot
+prove convergence, but they detect the common failures.
+
+## Trace plots
+
+A trace plot shows each parameter's value against the iteration number, one line per chain. Chains that have converged
+and mix well overlap and look like stationary noise around a common level. Warning signs are a trend at the start
+(warm-up not finished), chains at different levels (different modes or not yet converged), long flat stretches
+(proposals rejected), and slow wandering (high autocorrelation).
+
+## The potential scale reduction factor
+
+Run $m$ chains of $n$ draws each, and let $\theta_{ij}$ be draw $i$ of chain $j$. Let $\bar\theta_j$ be the mean of chain
+$j$, $\bar\theta$ the mean of all draws, and $s_j^2$ the sample variance within chain $j$. Define the between-chain and
+within-chain variances
+
+$$
+B = \frac{n}{m - 1}\sum_{j=1}^{m} \paren{\bar\theta_j - \bar\theta}^2, \qquad W = \frac{1}{m}\sum_{j=1}^{m} s_j^2,
+$$
+
+a pooled estimate of the target variance, and the ratio
+
+$$
+\hat V = \frac{n - 1}{n}\, W + \frac{1}{n}\, B, \qquad \hat R = \sqrt{\frac{\hat V}{W}}
+$$
+
+<Cite id="gelman1992" />.
+
+**Why it works.** If every chain samples the target, both $W$ and $\hat V$ estimate the target variance and $\hat R$
+is close to 1. If the chains started far apart and have not yet mixed, two things happen. Each chain has explored only
+part of the distribution, so $W$ underestimates the variance. The chains' means disagree, so $B$ is large and $\hat V$
+overestimates it. Both push $\hat R$ above 1. As $n \to \infty$ the chains converge, $B/n \to 0$, and $\hat R \to 1$.
+The name reflects the interpretation: $\hat R$ is the factor by which the scale of the current distribution of draws
+might shrink if the chains were run for ever.
+
+**Split $\hat R$.** Cutting each chain in half and treating the halves as $2m$ chains detects a chain that drifts
+within its run, which the original statistic misses when all chains drift together.
+
+**Rank normalisation.** $\hat R$ uses means and variances, which do not exist for heavy-tailed targets and are
+insensitive to differences in scale. Vehtari et al. replace every draw by the normal quantile of its rank among all
+draws, then compute split-$\hat R$ on these normal scores, and repeat on the folded draws $\abs{\theta - \operatorname{median}}$
+to detect chains with the same location but different scales. They recommend using samples only when $\hat R < 1.01$
+<Cite id="vehtari2021" />. The older threshold of 1.1 is too permissive.
+
+## Effective sample size
+
+Draws from a Markov chain are autocorrelated. For a stationary chain with autocorrelations $\rho_k$ at lag $k$, the
+variance of the average of $N$ draws is approximately $\frac{\sigma^2}{N}\tau$, with integrated autocorrelation time
+
+$$
+\tau = 1 + 2\sum_{k=1}^{\infty}\rho_k.
+$$
+
+The **effective sample size** is $\mathrm{ESS} = N/\tau$: the number of independent draws that would give the same
+variance.
+
+**Estimating $\tau$.** The sample autocorrelations $\hat\rho_k$ are noisy at large lags, and summing all of them gives
+an estimate with variance that does not shrink. Geyer's **initial positive sequence** estimator sums the pairs
+$\hat\rho_{2k} + \hat\rho_{2k+1}$ while they remain positive, and stops at the first negative pair. For a reversible
+chain the true pair sums are positive and decreasing, which justifies the truncation <Cite id="geyer1992" />.
+
+**Several chains.** Computing the autocorrelations from the combined variance $\hat V$ rather than per chain penalises
+chains that disagree, so the ESS falls when $\hat R$ is high <Cite id="vehtari2021" />.
+
+**Bulk and tail.** The **bulk-ESS** is computed on rank-normalised draws and measures precision for the centre of the
+distribution, such as means and medians. The **tail-ESS** is the smaller of the ESS values for the indicators of being
+below the 5% and above the 95% quantiles, and measures precision for interval endpoints. Both should exceed about 100
+per chain <Cite id="vehtari2021" />.
+
+**Monte Carlo standard error.** The standard error of a posterior mean estimate is
+$\mathrm{MCSE} = \hat\sigma/\sqrt{\mathrm{ESS}}$, where $\hat\sigma$ is the posterior standard deviation. Report
+estimates to the number of digits the MCSE supports.
+
+<ChainDiagnostics />
+
+## Worked example
+
+**$\hat R$ for two disagreeing chains.** Chain 1 has draws $(1.0, 1.2, 0.8, 1.0)$ and chain 2 has
+$(2.0, 2.2, 1.8, 2.0)$. So $m = 2$ and $n = 4$.
+
+- Chain means are 1.0 and 2.0; the overall mean is 1.5.
+- Each chain has sample variance $(0 + 0.04 + 0.04 + 0)/3 = 0.0267$, so $W = 0.0267$.
+- $B = \frac{4}{1}\paren{0.5^2 + 0.5^2} = 2$.
+- $\hat V = \frac34 \times 0.0267 + \frac14 \times 2 = 0.520$.
+- $\hat R = \sqrt{0.520/0.0267} = 4.42$.
+
+Each chain looks stable on its own, but the chains sample different regions, and $\hat R$ is far above 1.
+
+**ESS for an autoregressive chain.** Suppose a chain behaves like an AR(1) process with coefficient $\phi = 0.9$, so
+$\rho_k = 0.9^k$. Then $\tau = 1 + 2\sum_{k \ge 1} 0.9^k = 1 + 2 \times 9 = 19$, which equals $(1 + \phi)/(1 - \phi)$. A
+run of $N = 1000$ draws has $\mathrm{ESS} = 1000/19 = 52.6$, and the MCSE of the mean is
+$\sigma/\sqrt{52.6} = 0.138\,\sigma$. Estimating the mean to within $0.01\,\sigma$ would need an ESS of $10^4$, or about
+190,000 draws.
+
+## Sampler-specific diagnostics
+
+<NoteLink to="hamiltonian-monte-carlo">Hamiltonian Monte Carlo</NoteLink> has diagnostics of its own
+<Cite id="betancourt2017" />:
+
+- **Divergent transitions.** A trajectory whose energy error blows up signals a region of high curvature that the
+  integrator cannot follow. Even a few divergences mean the posterior may be explored with bias.
+- **Maximum tree depth.** NUTS trajectories that hit the depth limit suggest a poorly scaled posterior and slow
+  exploration.
+- **Energy diagnostics.** A low ratio of the variance of energy changes between iterations to the variance of the
+  energy (the E-BFMI) means momentum resampling explores the energy levels slowly, typically because of heavy tails.
+
+## Trade-offs
+
+- **Necessary, not sufficient.** All chains can miss the same mode. Diagnostics compare chains with each other, not
+  with the target. Dispersed starting points make shared failures less likely.
+- **Per quantity.** Diagnostics are computed per parameter or per derived quantity. A model can have good ESS for its
+  means and poor ESS for its variance parameters. Check the quantities that the analysis reports.
+- **Warm-up is excluded.** Diagnostics apply to the draws kept after warm-up. Adaptation of step sizes during warm-up
+  breaks the Markov property, so those draws are discarded.
+- **Simulation-based checks.** For a new sampler or model, simulation-based calibration, which fits many simulated
+  datasets and checks the ranks of the true parameters among the posterior draws, tests the whole inference pipeline.

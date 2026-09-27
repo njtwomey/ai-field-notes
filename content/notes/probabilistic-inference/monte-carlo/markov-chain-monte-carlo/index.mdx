@@ -1,0 +1,172 @@
+---
+title: Markov chain Monte Carlo
+kind: concept
+summary: 'Markov chain Monte Carlo samples a target $\pi$ by simulating a Markov chain whose stationary distribution is $\pi$. Detailed balance, $\pi(x)T(x \to y) = \pi(y)T(y \to x)$, makes $\pi$ stationary; ergodicity makes the chain converge to it, so averages along the chain estimate expectations under $\pi$.'
+tags: [monte-carlo, sampling, markov-chains, bayesian, worked-example]
+aliases: [MCMC, Markov chain, stationary distribution, detailed balance, reversible Markov chain, ergodic theorem, burn-in, transition kernel]
+requires: [monte-carlo-integration, conditional-probability]
+related: [metropolis-hastings, gibbs-sampling, hamiltonian-monte-carlo, mcmc-diagnostics, importance-sampling]
+references: [metropolis1953, hastings1970, tierney1994, geyer1992, robert2004, gelman2013]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Markov chain Monte Carlo (MCMC) draws dependent samples from a target distribution $\pi$ by simulating a Markov chain
+$x_0, x_1, x_2, \dots$ whose transition kernel $T(x \to y)$ leaves $\pi$ invariant:
+
+$$
+\int \pi(x)\, T(x \to y)\, dx = \pi(y) \quad \text{for all } y.
+$$
+
+If the chain is also ergodic, the distribution of $x_t$ converges to $\pi$ from any starting point, and the average
+$\frac{1}{N}\sum_{t=1}^N f(x_t)$ converges to $\expect_\pi[f]$ <Cite id="tierney1994" />.
+</Definition>
+
+## The problem it solves
+
+Bayesian inference needs expectations under a posterior $\pi(x) = \tilde\pi(x)/Z$, where $\tilde\pi$ is the product of
+prior and likelihood and $Z$ is an intractable integral. <NoteLink to="monte-carlo-integration">Monte Carlo
+integration</NoteLink> needs independent samples from $\pi$, which are rarely available.
+<NoteLink to="importance-sampling">Importance sampling</NoteLink> needs a proposal close to $\pi$ everywhere, which
+fails in high dimensions. MCMC needs only the ability to evaluate $\tilde\pi$ at points, and it explores $\pi$ by
+small local moves, so it works in thousands of dimensions. The price is that successive samples are correlated.
+
+## Markov chains
+
+A Markov chain is a sequence of random states in which the next state depends only on the current one, through a
+**transition kernel** $T(x \to y) = p(x_{t+1} = y \mid x_t = x)$. If $x_t$ has distribution $\pi_t$, then
+
+$$
+\pi_{t+1}(y) = \int \pi_t(x)\, T(x \to y)\, dx,
+$$
+
+with a sum in place of the integral for discrete states. For a finite state space, $T$ is a matrix whose rows sum to
+1, and $\pi_{t+1} = \pi_t T$ as row vectors. A distribution with $\pi T = \pi$ is **stationary**: a chain started in
+$\pi$ stays in $\pi$.
+
+## Detailed balance implies stationarity
+
+A kernel satisfies **detailed balance** with respect to $\pi$ if
+
+$$
+\pi(x)\, T(x \to y) = \pi(y)\, T(y \to x) \quad \text{for all } x, y.
+$$
+
+The flow of probability from $x$ to $y$ equals the flow back. Such a chain is called **reversible**: in stationarity,
+the sequence run backwards has the same law as run forwards.
+
+Detailed balance implies stationarity. Integrate both sides over $x$:
+
+$$
+\int \pi(x)\, T(x \to y)\, dx = \int \pi(y)\, T(y \to x)\, dx = \pi(y) \int T(y \to x)\, dx = \pi(y).
+$$
+
+The last step uses the fact that $T(y \to \cdot)$ is a probability distribution. Detailed balance is a local condition
+on pairs of states, so it is much easier to check than the global stationarity equation. It is sufficient, not
+necessary: some samplers are non-reversible and still leave $\pi$ invariant.
+
+Detailed balance involves $\pi$ only through ratios $\pi(y)/\pi(x) = \tilde\pi(y)/\tilde\pi(x)$. The normalising
+constant $Z$ cancels. This is why MCMC can sample a posterior without computing the evidence.
+
+## Ergodicity implies convergence
+
+Stationarity says that $\pi$ is a fixed point. Convergence to it from an arbitrary start needs two more conditions
+<Cite id="tierney1994" />:
+
+- **Irreducibility.** From every state, every region of positive probability under $\pi$ can be reached with positive
+  probability in some number of steps. Otherwise the chain can be trapped in part of the space.
+- **Aperiodicity.** The chain does not cycle deterministically between sets of states. A chain that alternates
+  between two sets never settles.
+
+A chain with a stationary distribution $\pi$ that is irreducible and aperiodic is **ergodic** (for continuous spaces a
+technical condition, Harris recurrence, is also needed, and holds for the standard samplers). Then:
+
+1. $\pi$ is the unique stationary distribution.
+2. The distribution of $x_t$ converges to $\pi$ in total variation, from any starting point.
+3. **Ergodic theorem.** For any $f$ with $\expect_\pi\abs{f} < \infty$,
+   $\frac{1}{N}\sum_{t=1}^N f(x_t) \to \expect_\pi[f]$ with probability 1.
+
+The ergodic theorem is the law of large numbers for Markov chains. It is what licenses using chain averages as
+estimates.
+
+## Error of an MCMC average
+
+Successive states are correlated, so the variance of a chain average is larger than for independent samples. For a
+stationary chain with $\sigma^2 = \var_\pi(f)$ and autocorrelation $\rho_k = \corr\paren{f(x_t), f(x_{t+k})}$,
+
+$$
+\var\paren{\frac{1}{N}\sum_{t=1}^N f(x_t)} \approx \frac{\sigma^2}{N}\,\tau, \qquad
+\tau = 1 + 2\sum_{k=1}^{\infty} \rho_k.
+$$
+
+The **integrated autocorrelation time** $\tau$ is the number of chain steps worth one independent sample, and $N/\tau$
+is the effective sample size of the chain <Cite id="geyer1992" />. A Markov chain central limit theorem holds under
+conditions on how fast the chain mixes, so $\sigma\sqrt{\tau/N}$ is the Monte Carlo standard error. See
+<NoteLink to="mcmc-diagnostics">MCMC diagnostics</NoteLink> for how $\tau$ is estimated.
+
+<Derivation title="Where the autocorrelation time comes from">
+Expand the variance of the sum as a double sum of covariances. In stationarity
+$\cov\paren{f(x_s), f(x_t)} = \sigma^2 \rho_{\abs{s - t}}$, and lag $k$ occurs $N - k$ times in each direction:
+
+$$
+\var\paren{\sum_{t=1}^N f(x_t)} = \sigma^2\paren{N + 2\sum_{k=1}^{N-1}(N - k)\,\rho_k}.
+$$
+
+Divide by $N^2$. When the autocorrelations are summable, $\sum_k (1 - k/N)\rho_k \to \sum_k \rho_k$ as $N \to \infty$,
+which gives $\frac{\sigma^2}{N}\paren{1 + 2\sum_k \rho_k}$.
+</Derivation>
+
+## Worked example: a two-state chain
+
+A chain on states $\set{1, 2}$ moves from 1 to 2 with probability $a$ and from 2 to 1 with probability $b$:
+
+$$
+T = \begin{pmatrix} 1 - a & a \\ b & 1 - b \end{pmatrix}.
+$$
+
+- **Stationary distribution.** Detailed balance between the two states is $\pi_1 a = \pi_2 b$. With $\pi_1 + \pi_2 = 1$,
+  $\pi = \paren{b/(a + b),\ a/(a + b)}$. For $a = 0.3$ and $b = 0.1$, $\pi = (0.25, 0.75)$.
+- **Convergence.** Let $e_t = \pi_t(1) - \pi_1$. One step gives
+  $\pi_{t+1}(1) = \pi_t(1)(1 - a) + (1 - \pi_t(1))\, b$, and subtracting the same identity for $\pi$ gives
+  $e_{t+1} = (1 - a - b)\, e_t$. The error shrinks geometrically, by the factor $1 - a - b = 0.6$ per step. After 10
+  steps it is $0.6^{10} = 0.006$ of its starting value. The factor $1 - a - b$ is the second eigenvalue of $T$; the
+  first is 1, with eigenvector $\pi$.
+- **Autocorrelation.** For any function of this chain, $\rho_k = (1 - a - b)^k$. Then
+  $\tau = 1 + 2\sum_{k \ge 1} 0.6^k = 1 + 2 \times 1.5 = 4$. A chain of $N$ steps estimates the probability of state 1 as
+  precisely as $N/4$ independent draws.
+- **Irreducibility and aperiodicity.** Both hold when $0 < a, b$ and $a + b < 2$. With $a = b = 1$ the chain alternates
+  deterministically: $\pi = (0.5, 0.5)$ is still stationary, but a chain started in state 1 never converges to it.
+
+## Constructing a sampler
+
+Every MCMC method is a recipe for a kernel that leaves $\pi$ invariant:
+
+- <NoteLink to="metropolis-hastings">Metropolis–Hastings</NoteLink> proposes a move and accepts it with a probability
+  chosen to satisfy detailed balance <Cite id="metropolis1953" /> <Cite id="hastings1970" />.
+- <NoteLink to="gibbs-sampling">Gibbs sampling</NoteLink> resamples one variable or block at a time from its full
+  conditional distribution.
+- <NoteLink to="hamiltonian-monte-carlo">Hamiltonian Monte Carlo</NoteLink> uses gradients of $\log\tilde\pi$ to make
+  long moves with high acceptance.
+
+Kernels can be combined. If $T_1$ and $T_2$ each leave $\pi$ invariant, so do the composition (apply $T_1$ then
+$T_2$) and any mixture (apply $T_1$ with probability $\alpha$, else $T_2$). Composition is how Gibbs sweeps and
+"Metropolis-within-Gibbs" samplers are built.
+
+## Practice
+
+- **Burn-in.** Early states reflect the starting point. Discard an initial stretch, often the first half, before
+  averaging <Cite id="gelman2013" />.
+- **Several chains.** Run chains from dispersed starting points and compare them. Agreement is evidence, not proof,
+  of convergence; see <NoteLink to="mcmc-diagnostics">MCMC diagnostics</NoteLink>.
+- **Thinning** keeps every $k$th state. It saves memory but never reduces the variance of an estimate for a fixed
+  number of computed states <Cite id="geyer1992" />.
+
+## Pitfalls
+
+- **No certificate of convergence.** A chain that has not found a second mode of $\pi$ looks converged. Theory
+  guarantees convergence as $N \to \infty$ but gives no practical bound in most problems.
+- **Multimodality.** Local moves cross low-probability regions between modes rarely, so mixing between modes can take
+  longer than any feasible run. Tempering and population methods address this.
+- **Stationarity is not enough.** A kernel that leaves $\pi$ invariant can still be reducible, as a sampler that never
+  proposes moves across a gap is. Check that proposals can reach the whole support.

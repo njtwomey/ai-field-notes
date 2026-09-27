@@ -1,0 +1,181 @@
+---
+title: Importance sampling
+kind: technique
+summary: 'Importance sampling estimates $\expect_p[f]$ with samples from a proposal $q$, weighting each by $w = p/q$. The optimal proposal is $q^* \propto \abs{f}\,p$. The self-normalised form needs $p$ only up to a constant and is biased by $O(1/N)$; the effective sample size measures weight degeneracy.'
+tags: [monte-carlo, sampling, importance-sampling, bayesian, worked-example]
+aliases: [importance weights, self-normalised importance sampling, self-normalized importance sampling, SNIS, optimal proposal, likelihood ratio weighting]
+requires: [monte-carlo-integration]
+related: [particle-filter, rejection-sampling, off-policy-evaluation, markov-chain-monte-carlo, kl-divergence]
+references: [owen2013, robert2004, kong1994, mackay2003]
+status: draft
+updated: 2026-09-27
+---
+
+import { ImportanceTail } from './ImportanceTail'
+
+<Definition>
+Let $p$ be a target density, $f$ a function, and $q$ a **proposal** density with $q(\xvec) > 0$ wherever
+$f(\xvec)\,p(\xvec) \ne 0$. With the **importance weight** $w(\xvec) = p(\xvec)/q(\xvec)$ and samples
+$\xvec^{(1)}, \dots, \xvec^{(N)} \sim q$,
+
+$$
+\expect_p[f(\xvec)] = \expect_q[f(\xvec)\, w(\xvec)] \approx \hat\mu_{\mathrm{IS}} = \frac{1}{N}\sum_{i=1}^{N} f(\xvec^{(i)})\, w(\xvec^{(i)}).
+$$
+
+The estimator is unbiased. Its variance depends on how well $q$ matches $\abs{f}\,p$ <Cite id="owen2013" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="monte-carlo-integration">Monte Carlo integration</NoteLink> needs samples from $p$. Two situations defeat
+it. The target may be impossible to sample, as most posteriors are. Or the target may be easy to sample but the
+integrand may be concentrated where $p$ puts little mass, as for the probability of a rare event: almost every sample
+contributes zero. Importance sampling draws from a density $q$ chosen for convenience or for efficiency, and corrects
+the mismatch with weights.
+
+## Mechanism
+
+**Identity.** Multiply and divide by $q$ inside the integral:
+
+$$
+\int f(\xvec)\, p(\xvec)\, d\xvec = \int f(\xvec)\, \frac{p(\xvec)}{q(\xvec)}\, q(\xvec)\, d\xvec = \expect_q[f\, w].
+$$
+
+The support condition makes the division valid wherever the integrand is non-zero. The estimator is the Monte Carlo
+average of $f\,w$ under $q$, so it is unbiased, with variance
+
+$$
+\var(\hat\mu_{\mathrm{IS}}) = \frac{1}{N}\paren{\expect_q[f^2 w^2] - \mu^2}
+= \frac{1}{N}\paren{\int \frac{f(\xvec)^2 p(\xvec)^2}{q(\xvec)}\, d\xvec - \mu^2},
+$$
+
+where $\mu = \expect_p[f]$. The variance can be far smaller than that of plain Monte Carlo, or far larger. It is
+infinite when $q$ has lighter tails than $f\,p$, because $p^2/q$ then fails to be integrable.
+
+### The optimal proposal
+
+Only the term $\int f^2 p^2/q$ depends on $q$. By the Cauchy–Schwarz inequality, for any density $q$,
+
+$$
+\paren{\int \abs{f}\, p\, d\xvec}^2 = \paren{\int \frac{\abs{f}\, p}{\sqrt{q}}\, \sqrt{q}\, d\xvec}^2
+\le \int \frac{f^2 p^2}{q}\, d\xvec \cdot \int q\, d\xvec = \int \frac{f^2 p^2}{q}\, d\xvec.
+$$
+
+Equality holds when $\abs{f}\, p/\sqrt{q}$ is proportional to $\sqrt{q}$, that is when
+
+$$
+q^*(\xvec) = \frac{\abs{f(\xvec)}\, p(\xvec)}{\int \abs{f}\, p\, d\xvec}.
+$$
+
+The optimal proposal puts samples where the integrand $\abs{f}\,p$ is large, not where $p$ is large. When $f \ge 0$,
+the minimum of $\int f^2p^2/q$ is $\mu^2$ and the variance is zero: every sample returns $f\,p/q^* = \mu$ exactly. The
+optimum needs $\mu$ itself, so it cannot be used directly. It says what to aim for: a proposal with roughly the shape
+of $\abs{f}\,p$ and tails at least as heavy <Cite id="owen2013" />.
+
+## Self-normalised importance sampling
+
+In Bayesian inference the target is a posterior known only up to its normalising constant,
+$p(\xvec) = \tilde p(\xvec)/Z$ with $Z = \int \tilde p$ unknown. The unnormalised weights
+$\tilde w^{(i)} = \tilde p(\xvec^{(i)})/q(\xvec^{(i)})$ estimate $Z$ without bias, since
+$\expect_q[\tilde p/q] = \int \tilde p = Z$. Dividing one estimate by the other cancels $Z$:
+
+$$
+\hat\mu_{\mathrm{SN}} = \frac{\sum_{i} \tilde w^{(i)}\, f(\xvec^{(i)})}{\sum_{i} \tilde w^{(i)}}
+= \sum_{i} \bar w^{(i)}\, f(\xvec^{(i)}), \qquad \bar w^{(i)} = \frac{\tilde w^{(i)}}{\sum_j \tilde w^{(j)}}.
+$$
+
+The numerator and the denominator are each unbiased, for $Z\mu$ and $Z$. Their ratio is not. A first-order expansion
+of the ratio about $(Z\mu, Z)$ gives a bias of order $1/N$ and a variance
+
+$$
+\var(\hat\mu_{\mathrm{SN}}) \approx \frac{1}{N}\, \expect_q\brack{w^2\, (f - \mu)^2},
+$$
+
+with $w = p/q$ the normalised weight <Cite id="owen2013" />. The bias vanishes as $N \to \infty$, so the estimator is
+consistent. The standard error is also $O(N^{-1/2})$, so for large $N$ the bias is negligible beside the noise. The
+self-normalised estimator can have lower variance than the unbiased one, because the errors of numerator and
+denominator partly cancel.
+
+<Derivation title="The bias and variance of the ratio">
+Write $A = \frac1N\sum_i \tilde w^{(i)} f(\xvec^{(i)})$ and $B = \frac1N\sum_i \tilde w^{(i)}$, with
+$\expect[A] = Z\mu$ and $\expect[B] = Z$. Expand $A/B$ to first order around the means:
+
+$$
+\frac{A}{B} \approx \mu + \frac{1}{Z}\paren{(A - Z\mu) - \mu\,(B - Z)} = \mu + \frac{1}{NZ}\sum_i \tilde w^{(i)}\paren{f(\xvec^{(i)}) - \mu}.
+$$
+
+The linear term has mean zero, so the bias comes from second-order terms, which are averages of products of two
+deviations of size $O(N^{-1/2})$ each; the bias is therefore $O(1/N)$. The variance of the linear term is
+$\frac{1}{N Z^2}\var_q\paren{\tilde w\,(f - \mu)} = \frac{1}{N}\expect_q\brack{w^2 (f - \mu)^2}$, because
+$\expect_q[\tilde w\,(f - \mu)] = Z\,\expect_p[f - \mu] = 0$ and $\tilde w / Z = w$.
+</Derivation>
+
+## Effective sample size
+
+When a few weights dominate, the estimate rests on a few samples, whatever $N$ is. The **effective sample size**
+
+$$
+\mathrm{ESS} = \frac{\paren{\sum_i \tilde w^{(i)}}^2}{\sum_i \paren{\tilde w^{(i)}}^2} = \frac{1}{\sum_i \paren{\bar w^{(i)}}^2}
+$$
+
+equals $N$ when all weights are equal and 1 when one weight holds everything <Cite id="kong1994" />. It comes from the
+variance formula above with $f - \mu$ treated as having constant spread: then
+$\var(\hat\mu_{\mathrm{SN}}) \approx \frac{\sigma^2}{N}\expect_q[w^2] = \frac{\sigma^2}{N}\paren{1 + \var_q(w)}$, which is
+the variance of an average of $N/(1 + \var_q(w))$ independent samples from $p$. The sample version of
+$N/(1 + \var_q(w))$ is the ratio above.
+
+The ESS measures how well $q$ approximates $p$, not how well it suits a particular $f$. A proposal fitted to a tail
+event has a small ESS and a small error for that event.
+
+**Weights degenerate in high dimensions.** Take $p = \Gauss(\zeros, \eye_d)$ and $q = \Gauss(\zeros, s^2 \eye_d)$. The
+weight is a product over coordinates, so $\expect_q[w^2]$ is a product of one-dimensional factors,
+$\paren{s^2/\sqrt{2s^2 - 1}}^d$. For $s = 1.2$ the factor is 1.050. In $d = 10$ dimensions
+$\expect_q[w^2] = 1.63$, and the ESS is about $0.61\,N$; in $d = 100$ it is $134$, and the ESS is about $N/134$. A
+proposal that is slightly too wide in every direction wastes almost all its samples in high dimensions.
+<NoteLink to="markov-chain-monte-carlo">Markov chain Monte Carlo</NoteLink> avoids the product of weights by moving
+locally.
+
+## Worked example: a Gaussian tail
+
+Estimate $\mu = P(X > 3)$ for $X \sim \Gauss(0, 1)$. The exact value is $1.350 \times 10^{-3}$.
+
+- **Plain Monte Carlo.** The indicator has variance $\mu(1 - \mu)$. With $N = 10^4$ the relative standard error is
+  $\sqrt{(1 - \mu)/(N\mu)} = 0.272$. About 13 of the $10^4$ samples land in the tail.
+- **Shifted proposal.** Take $q = \Gauss(3, 1)$. The weight is $w(x) = \exp(-3x + 4.5)$. The second moment is
+  $\int_3^\infty p^2/q\, dx = e^{9}\,P(X > 6) = 7.99 \times 10^{-6}$, so the per-sample variance is
+  $7.99 \times 10^{-6} - \mu^2 = 6.17 \times 10^{-6}$. With $N = 10^4$ the relative standard error is
+  $\sqrt{6.17 \times 10^{-6}/10^4}/\mu = 0.0184$.
+- **Comparison.** The variance ratio is $\mu(1 - \mu)/6.17 \times 10^{-6} = 218$. The shifted proposal is worth 218
+  times as many plain samples. The best shift of a unit-variance Gaussian is at 3.15, and it improves the ratio only to
+  222.
+
+The exact second moment follows by completing the square:
+$p(x)^2/q(x) = e^{\mu_q^2}\,\Gauss(x \mid -\mu_q, 1)$ for $q = \Gauss(\mu_q, 1)$, and $\int_3^\infty \Gauss(x \mid -3, 1)\,dx =
+P(X > 6)$.
+
+<ImportanceTail />
+
+## Uses
+
+- **Posterior expectations** with a proposal fitted to the posterior, such as a
+  <NoteLink to="laplace-approximation">Laplace approximation</NoteLink> with heavier tails.
+- **Marginal likelihoods.** The average of the unnormalised weights estimates the evidence $Z = p(\text{data})$ without
+  bias.
+- **Sequential Monte Carlo.** The <NoteLink to="particle-filter">particle filter</NoteLink> applies importance sampling
+  recursively through time and resamples when the ESS falls.
+- **Off-policy evaluation.** Estimating the value of one policy from data logged under another weights each logged
+  reward by the ratio of action probabilities; see <NoteLink to="off-policy-evaluation">off-policy evaluation</NoteLink>.
+- **Rare-event simulation** with proposals shifted towards the event, as in the worked example.
+
+## Trade-offs
+
+- **Tails decide everything.** A proposal lighter-tailed than $\abs{f}\,p$ gives infinite variance. A Gaussian proposal
+  for a Student-t target is the classic failure. Choose proposals with heavier tails than the target, such as a
+  Student-t with few degrees of freedom.
+- **Infinite variance hides.** With infinite variance, most runs look fine and the sample variance underestimates the
+  error; a rare huge weight eventually shifts the estimate. Plot the largest weights, or the ESS as $N$ grows.
+- **Unbiased or self-normalised.** Use the plain estimator when $p$ is normalised and unbiasedness matters, for example
+  inside a larger unbiased estimator. Use the self-normalised estimator when $p$ is known only up to a constant.
+- **Compared with rejection sampling.** <NoteLink to="rejection-sampling">Rejection sampling</NoteLink> needs a bound
+  $p \le Mq$ and discards samples. Importance sampling needs no bound and keeps every sample, but returns weighted
+  samples rather than exact draws.

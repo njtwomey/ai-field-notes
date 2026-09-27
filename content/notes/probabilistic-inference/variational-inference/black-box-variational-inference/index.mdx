@@ -1,0 +1,134 @@
+---
+title: Black-box variational inference
+kind: technique
+summary: 'Black-box variational inference maximises the ELBO of any model whose log joint can be evaluated, by stochastic gradient ascent with Monte Carlo gradients: the score-function estimator, which needs only $\log p(\xvec, \zvec)$, or the lower-variance reparameterisation estimator.'
+tags: [variational-inference, bayesian, approximate-inference, gradients, monte-carlo, worked-example]
+aliases: [BBVI, ADVI, automatic differentiation variational inference, Monte Carlo variational inference, stochastic gradient variational inference, doubly stochastic variational inference]
+requires: [variational-inference, score-function-estimator, reparameterisation-trick]
+related: [stochastic-variational-inference, amortised-inference, evidence-lower-bound, variational-autoencoder, probabilistic-programming]
+references: [ranganath2014, kucukelbir2017, mohamed2020, kingma2014, blei2017]
+status: draft
+updated: 2026-09-27
+---
+
+import { BbviPaths } from './BbviPaths'
+
+<Definition>
+Black-box variational inference fits a parametric approximation $q_{\phivec}(\zvec)$ to the posterior of a model
+$p(\xvec, \zvec)$ by stochastic gradient ascent on the evidence lower bound
+
+$$
+\Lcal(\phivec) = \expect_{q_{\phivec}}\brack{\log p(\xvec, \zvec) - \log q_{\phivec}(\zvec)},
+$$
+
+using unbiased Monte Carlo estimates of $\nabla_{\phivec}\Lcal$ computed from samples of $q_{\phivec}$. The model enters
+only through evaluations of $\log p(\xvec, \zvec)$ (and, for the reparameterisation estimator, its gradient in
+$\zvec$), so no model-specific derivation is needed <Cite id="ranganath2014" />.
+</Definition>
+
+## Problem
+
+Coordinate-ascent and <NoteLink to="stochastic-variational-inference">stochastic variational inference</NoteLink> need
+conditionally conjugate models, and each new model needs its expectations derived by hand. Most models of interest,
+such as a logistic regression with a Gaussian prior or a hierarchical model with non-conjugate likelihoods, have
+ELBOs with no closed form. Black-box variational inference estimates the gradient of the ELBO by sampling instead of
+computing the ELBO analytically. The same code then fits any model that can report its log joint, which is what makes
+automatic inference in <NoteLink to="probabilistic-programming">probabilistic programming</NoteLink> systems possible.
+
+## Mechanism
+
+The ELBO is an expectation under a distribution that depends on $\phivec$, so the gradient cannot be moved inside the
+expectation directly. Two identities make it an expectation again.
+
+### The score-function gradient
+
+Differentiate under the integral with $\nabla q_{\phivec} = q_{\phivec}\nabla\log q_{\phivec}$, and note that the
+derivative of $-\log q_{\phivec}$ inside the integrand contributes $-\expect_q\brack{\nabla\log q_{\phivec}} = 0$:
+
+$$
+\nabla_{\phivec}\Lcal = \expect_{q_{\phivec}}\brack{\nabla_{\phivec}\log q_{\phivec}(\zvec)\,\paren{\log p(\xvec, \zvec) - \log q_{\phivec}(\zvec)}}.
+$$
+
+Averaging the bracket over samples $\zvec^{(s)} \sim q_{\phivec}$ gives an unbiased estimate that needs only
+evaluations of $\log p(\xvec, \zvec)$ and the score $\nabla_{\phivec}\log q_{\phivec}$ <Cite id="ranganath2014" />. It
+works for discrete latent variables and non-differentiable models. See the
+<NoteLink to="score-function-estimator">score-function estimator</NoteLink> for the identity in general.
+
+Its variance is often too large to use directly. Ranganath et al. reduce it in two ways <Cite id="ranganath2014" />:
+
+- **Rao–Blackwellisation.** With a mean-field $q$, the gradient for the parameters of factor $j$ needs only the terms
+  of $\log p$ that involve $\zvec_j$, its Markov blanket. The other terms have zero expected contribution and only add
+  noise.
+- **Control variates.** Subtracting a baseline $b$ from $\log p - \log q$ leaves the expectation unchanged, since the
+  score has mean zero. A baseline near the ELBO removes most of the noise that comes from the overall level of
+  $\log p - \log q$.
+
+### The reparameterisation gradient
+
+If $\zvec = \gvec_{\phivec}(\epsilonvec)$ with $\epsilonvec \sim p(\epsilonvec)$ free of $\phivec$, for example
+$\zvec = \muvec + \Lmat\epsilonvec$ with $\epsilonvec \sim \Gauss(\zeros, \eye)$, the expectation can be taken over
+$\epsilonvec$ and the gradient passes through the sample:
+
+$$
+\nabla_{\phivec}\Lcal = \expect_{p(\epsilonvec)}\brack{\nabla_{\phivec}\paren{\log p\paren{\xvec, \gvec_{\phivec}(\epsilonvec)} - \log q_{\phivec}\paren{\gvec_{\phivec}(\epsilonvec)}}}.
+$$
+
+This estimator uses the gradient $\nabla_{\zvec}\log p(\xvec, \zvec)$, which tells it in which direction the log joint
+increases. It typically has much lower variance than the score-function estimator, often low enough to use a single
+sample per step <Cite id="kingma2014" /> <Cite id="mohamed2020" />. It needs continuous latent variables and a
+differentiable model. See the <NoteLink to="reparameterisation-trick">reparameterisation trick</NoteLink>.
+
+### Automatic differentiation variational inference
+
+ADVI combines the reparameterisation gradient with automatic transformations <Cite id="kucukelbir2017" />. It maps every
+constrained latent variable to the real line (a positive scale through a logarithm, a probability through a logit),
+adding the log-Jacobian of the map to the log joint, then fits a Gaussian, mean-field or full-rank, in the
+unconstrained space. The user writes only the model. Stan and PyMC implement ADVI.
+
+### The algorithm
+
+1. Initialise $\phivec$.
+2. Repeat: draw $S$ samples from $q_{\phivec}$ (or from $p(\epsilonvec)$); compute the gradient estimate; update $\phivec$
+   with a step size that decreases or is adapted, for example by Adam.
+3. Monitor a smoothed Monte Carlo estimate of the ELBO, which is noisy.
+
+When the data are large, the log joint is also estimated on a minibatch, scaling the likelihood term by $N/\abs{\Bcal}$.
+The gradient then has two sources of noise, the samples of $\zvec$ and the choice of minibatch, hence the name doubly
+stochastic.
+
+## Worked example: the variance of the two estimators
+
+Take the model $z \sim \Gauss(0, 1)$, $x \mid z \sim \Gauss(z, 1)$ with one observation $x = 1.5$, and
+$q(z) = \Gauss(m, s^2)$ at $m = -1$, $s = 1.2$. The exact gradient of the ELBO with respect to $m$ is
+$\partial\Lcal/\partial m = (x - m) - m = 3.5$.
+
+- **Reparameterisation.** With $z = m + s\epsilon$, the entropy of $q$ does not depend on $m$, and
+  $\partial_z\log p(x, z) = (x - z) - z$. The single-sample estimate is $x - 2(m + s\epsilon) = 3.5 - 2.4\,\epsilon$.
+  Its mean is 3.5 and its standard deviation is $2s = 2.4$.
+- **Score function.** The single-sample estimate is $\frac{z - m}{s^2}\paren{\log p(x, z) - \log q(z)}$. Its mean is
+  3.5 and its standard deviation, computed by simulation, is 8.01. With the baseline $b = \Lcal = -5.30$ it is 5.55.
+
+The score-function estimator needs $(8.01/2.4)^2 = 11$ times as many samples for the same precision, or 5.3 times with
+the baseline. The gap grows with the dimension of $\zvec$, because the score-function estimator correlates one scalar,
+$\log p - \log q$, with every coordinate of the score.
+
+<BbviPaths />
+
+## Cost
+
+Each step costs $S$ evaluations of the log joint, and of its gradient for the reparameterisation estimator. Compared
+with <NoteLink to="hamiltonian-monte-carlo">Hamiltonian Monte Carlo</NoteLink>, which needs many gradient evaluations
+per draw, BBVI with one sample per step is cheap per iteration and converges in hundreds to thousands of steps. The
+result is an approximation limited by the family of $q$.
+
+## Trade-offs
+
+- **Score function or reparameterisation.** Use the reparameterisation gradient for continuous, differentiable models.
+  Use the score function for discrete latent variables or black-box simulators, with baselines and Rao–Blackwellisation.
+- **Noisy objective.** The ELBO is estimated, not computed, so convergence is judged on a smoothed trace. Step sizes
+  that are too large make the variational parameters oscillate; a decreasing schedule or an adaptive optimiser is needed.
+- **The family limits accuracy.** A mean-field Gaussian cannot represent correlations or skew. Full-rank Gaussians
+  cost $O(d^2)$ parameters; normalising flows add flexibility at more cost.
+- **Amortisation.** Fitting a separate $q$ for every data point in a latent-variable model is slow. A shared encoder
+  network, as in the <NoteLink to="variational-autoencoder">variational autoencoder</NoteLink>, amortises the fit; see
+  <NoteLink to="amortised-inference">amortised inference</NoteLink>.

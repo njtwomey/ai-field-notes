@@ -1,0 +1,129 @@
+---
+title: Variable elimination
+kind: technique
+summary: 'Variable elimination computes a marginal of a product of factors by summing out one variable at a time, pushing each sum inside the product. Its cost is $O(n k^{w+1})$ for $n$ variables with $k$ states, where $w$ is the induced width of the elimination order.'
+tags: [graphical-models, inference, dynamic-programming, worked-example]
+aliases: [bucket elimination, sum-product variable elimination, elimination order, induced width, treewidth, min-fill heuristic]
+requires: [factor-graph]
+related: [bayesian-network, markov-random-field, belief-propagation, junction-tree-algorithm]
+references: [zhang1994, dechter1999, koller2009, cooper1990]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Variable elimination computes a marginal $p(\xvec_Q)$ of a distribution given as a product of factors,
+$p(\xvec) \propto \prod_a f_a(\xvec_{\partial a})$, by eliminating the other variables one at a time in a chosen
+order. Eliminating $x_j$ multiplies together the factors that contain $x_j$, sums $x_j$ out of the product, and puts the
+resulting factor back in the set <Cite id="zhang1994" /> <Cite id="dechter1999" />.
+</Definition>
+
+## Problem
+
+A marginal of a <NoteLink to="bayesian-network">Bayesian network</NoteLink> or
+<NoteLink to="markov-random-field">Markov random field</NoteLink> is a sum of the joint over all the other variables.
+With $n$ variables of $k$ states each, the joint has $k^n$ entries, so summing it directly is infeasible beyond a few
+dozen binary variables. The joint is a product of small factors, and most factors do not contain most variables.
+Multiplication distributes over addition, $\sum_x a\, g(x) = a \sum_x g(x)$, so a sum over $x_j$ need only touch the
+factors that contain $x_j$.
+
+## Mechanism
+
+Start with the set $\Fcal$ of all factors, with any evidence fixed in them. For each variable $x_j$ in the elimination
+order, excluding the query variables:
+
+1. Remove from $\Fcal$ every factor that contains $x_j$, and multiply them into one factor $\phi_j$. Its scope is $x_j$
+   together with every other variable in those factors.
+2. Sum out $x_j$: $\tau_j = \sum_{x_j} \phi_j$. The new factor $\tau_j$ has the scope of $\phi_j$ minus $x_j$.
+3. Add $\tau_j$ to $\Fcal$.
+
+When only the query variables remain, multiply the remaining factors. The result is proportional to $p(\xvec_Q)$, or to
+$p(\xvec_Q, \text{evidence})$ when evidence was fixed; normalising gives the marginal or the conditional
+$p(\xvec_Q \mid \text{evidence})$. The unnormalised total, summed over $\xvec_Q$ as well, is the partition function
+$Z$ or the probability of the evidence.
+
+Every step is exact. The algorithm only reorders the sum by the distributive law.
+
+## Worked example
+
+Take the alarm network with $B \to A \leftarrow E$, $p(B = 1) = 0.001$, $p(E = 1) = 0.002$ and
+$p(A = 1 \mid B, E) = 0.95, 0.94, 0.29, 0.001$ for $(B, E) = (1, 1), (1, 0), (0, 1), (0, 0)$. The query is
+$p(A = 1) = \sum_{b, e} p(b)\, p(e)\, p(A = 1 \mid b, e)$.
+
+**Eliminate $E$.** The factors that contain $E$ are $p(e)$ and $p(A = 1 \mid b, e)$. Their product summed over $e$ is a
+factor of $b$ alone:
+
+$$
+\tau(b) = \sum_e p(e)\, p(A = 1 \mid b, e), \qquad
+\tau(1) = 0.002 \times 0.95 + 0.998 \times 0.94 = 0.94002, \qquad
+\tau(0) = 0.002 \times 0.29 + 0.998 \times 0.001 = 0.001578.
+$$
+
+**Eliminate $B$.** The factors that contain $B$ are $p(b)$ and $\tau(b)$:
+
+$$
+p(A = 1) = 0.001 \times 0.94002 + 0.999 \times 0.001578 = 0.002516.
+$$
+
+The direct sum has four terms, each a product of three numbers. Here the saving is small. It grows exponentially with
+the number of variables.
+
+## Cost and the induced width
+
+The cost of a step is the size of the table $\phi_j$, $k^{\abs{\text{scope}(\phi_j)}}$. The scope depends on the order.
+
+Track the scopes on an undirected graph with an edge between any two variables that share a factor. Eliminating $x_j$
+creates a factor over all of its current neighbours, so in the graph the neighbours become a clique: new **fill edges**
+join any of them not already adjacent, and $x_j$ is deleted. The graph with every fill edge added is the **induced
+graph** of the order. The **induced width** $w$ of the order is the size of the largest set of neighbours met at
+elimination, which is the size of the largest clique of the induced graph minus one. The largest table has $k^{w+1}$
+entries, and there are $n$ eliminations, so the total cost is
+
+$$
+O\paren{n\, k^{w + 1}}.
+$$
+
+The smallest induced width over all orders is the **treewidth** of the graph. Exact inference is exponential in the
+treewidth and linear in the number of variables.
+
+**The order matters.** Take a star: a centre $c$ joined to $m$ leaves, each edge with a pairwise factor. Eliminating a
+leaf first creates a factor over $c$ alone, at cost $k^2$. Eliminating all leaves costs $O(m k^2)$, and the induced
+width is 1. Eliminating the centre first multiplies all $m$ factors into a table over $c$ and every leaf, of size
+$k^{m+1}$, and joins every pair of leaves by a fill edge. The induced width is $m$.
+
+**Some graphs are expensive under any order.** A tree has treewidth 1. A chain is the special case that gives the
+forward algorithm of a hidden Markov model. A cycle has treewidth 2. An $L \times L$ grid has treewidth $L$, so exact
+inference on a $100 \times 100$ image model needs tables with $k^{101}$ entries. Finding an order of minimum width is
+NP-hard, and exact inference in Bayesian networks is NP-hard in general <Cite id="cooper1990" />. Greedy heuristics work
+well in practice: **min-degree** eliminates the variable with fewest current neighbours, and **min-fill** eliminates the
+one whose elimination adds the fewest fill edges <Cite id="koller2009" />.
+
+<Derivation title="Why a new factor's scope is the current neighbourhood">
+Before any elimination, two variables are adjacent exactly when they share a factor. Suppose this holds before
+eliminating $x_j$. The factors multiplied into $\phi_j$ are those containing $x_j$, so the scope of $\phi_j$ minus $x_j$
+is exactly the set of current neighbours of $x_j$. The new factor $\tau_j$ contains all of them, so they all share a
+factor afterwards, which is what the fill edges record. Every other factor is unchanged. By induction the graph with
+fill edges always records which variables share a factor, and each $\phi_j$ has scope $x_j$ plus its neighbours at the
+moment of elimination.
+</Derivation>
+
+## Variants
+
+- **Max-product elimination.** Replacing each sum by a maximum computes $\max_{\xvec} p(\xvec)$, the probability of the
+  most probable configuration. Recording the maximising value of each eliminated variable, as a function of its
+  neighbours, recovers the configuration by a backward pass. On a chain this is the Viterbi algorithm. The same order
+  and the same cost apply, since the maximum distributes over products of non-negative factors just as the sum does.
+- **Log space.** Working with log-factors turns products into sums and sums into log-sum-exp, which avoids underflow.
+
+## Trade-offs
+
+- **One query at a time.** Variable elimination answers one marginal per run. Computing the marginal of every variable
+  would repeat most of the work $n$ times. <NoteLink to="belief-propagation">Belief propagation</NoteLink> on a tree
+  and the <NoteLink to="junction-tree-algorithm">junction tree algorithm</NoteLink> on a general graph cache the
+  intermediate factors as messages and obtain every marginal for about twice the cost of one.
+- **Exponential in the width.** When the treewidth is large, as in grids and densely connected networks, no order
+  helps. Approximate methods such as <NoteLink to="loopy-belief-propagation">loopy belief propagation</NoteLink>,
+  <NoteLink to="markov-chain-monte-carlo">Markov chain Monte Carlo</NoteLink> and
+  <NoteLink to="variational-inference">variational inference</NoteLink> are then needed.
+- **Pruning.** Variables that are neither queried, observed nor ancestors of either can be removed from a Bayesian
+  network before elimination, because their factors sum to 1.

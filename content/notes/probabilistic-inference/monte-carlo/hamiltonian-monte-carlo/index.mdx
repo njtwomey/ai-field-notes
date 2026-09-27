@@ -1,0 +1,182 @@
+---
+title: Hamiltonian Monte Carlo
+kind: technique
+summary: 'Hamiltonian Monte Carlo samples $\pi(\qvec) \propto e^{-U(\qvec)}$ by adding a Gaussian momentum $\pvec$, simulating Hamiltonian dynamics with the leapfrog integrator, and accepting the end point with probability $\min(1, e^{-\Delta H})$. Gradients let it make long moves that are almost always accepted.'
+tags: [monte-carlo, sampling, markov-chains, bayesian, gradients, worked-example]
+aliases: [HMC, hybrid Monte Carlo, leapfrog integrator, Hamiltonian dynamics, No-U-Turn Sampler, NUTS, mass matrix, divergent transitions]
+requires: [markov-chain-monte-carlo, metropolis-hastings, gradient]
+related: [gibbs-sampling, mcmc-diagnostics, probabilistic-programming, multivariate-normal-distribution]
+references: [duane1987, neal2011, hoffman2014, betancourt2017, carpenter2017]
+status: draft
+updated: 2026-09-27
+---
+
+import { HmcTrajectories } from './HmcTrajectories'
+
+<Definition>
+Let the target be $\pi(\qvec) \propto \exp(-U(\qvec))$ on $\reals^d$, with **potential energy** $U = -\log\tilde\pi$.
+Hamiltonian Monte Carlo introduces a momentum $\pvec \sim \Gauss(\zeros, \Mmat)$ and the **Hamiltonian**
+
+$$
+H(\qvec, \pvec) = U(\qvec) + \tfrac12 \pvec^\top \Mmat^{-1} \pvec.
+$$
+
+Each iteration draws a fresh momentum, simulates Hamiltonian dynamics for $L$ leapfrog steps of size $\epsilon$ to reach
+$(\qvec^*, \pvec^*)$, and accepts $\qvec^*$ with probability $\min\set{1, \exp\paren{H(\qvec, \pvec) - H(\qvec^*, \pvec^*)}}$.
+The chain leaves $\pi$ invariant <Cite id="duane1987" /> <Cite id="neal2011" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="metropolis-hastings">Random-walk Metropolis</NoteLink> proposes blind moves. To keep the acceptance rate
+reasonable in $d$ dimensions its step must shrink like $d^{-1/2}$, and it explores by a random walk, so the distance
+covered grows only as the square root of the number of steps. Correlated targets make this worse: the step must suit
+the narrowest direction. Hamiltonian Monte Carlo uses the gradient $\nabla U$ to propose distant points that still
+have high probability, by following a trajectory that stays on a level set of the joint density of position and
+momentum.
+
+## Hamiltonian dynamics
+
+Treat $\qvec$ as the position of a particle on the surface $U$ and $\pvec$ as its momentum. Hamilton's equations are
+
+$$
+\frac{d\qvec}{dt} = \frac{\partial H}{\partial \pvec} = \Mmat^{-1}\pvec, \qquad
+\frac{d\pvec}{dt} = -\frac{\partial H}{\partial \qvec} = -\nabla U(\qvec).
+$$
+
+The particle speeds up downhill and slows uphill. The dynamics has three properties that make it a valid proposal
+mechanism <Cite id="neal2011" />.
+
+- **Energy is conserved.** By the chain rule,
+  $\frac{dH}{dt} = \nabla_{\qvec} H^\top \frac{d\qvec}{dt} + \nabla_{\pvec} H^\top \frac{d\pvec}{dt}
+  = \nabla_{\qvec} H^\top \nabla_{\pvec} H - \nabla_{\pvec} H^\top \nabla_{\qvec} H = 0$. The joint density
+  $\propto e^{-H}$ is the same at every point of a trajectory.
+- **Volume is preserved.** The flow's velocity field $(\nabla_{\pvec} H, -\nabla_{\qvec} H)$ has divergence
+  $\sum_i \paren{\frac{\partial^2 H}{\partial q_i \partial p_i} - \frac{\partial^2 H}{\partial p_i \partial q_i}} = 0$.
+  A divergence-free flow maps any region to a region of the same volume (Liouville's theorem).
+- **The dynamics is reversible.** Running the flow for time $t$, negating the momentum and running for time $t$ again
+  returns to the start with negated momentum.
+
+Energy conservation means an exact trajectory would always be accepted. Volume preservation means no Jacobian term
+enters the acceptance probability. Reversibility makes the proposal its own inverse after a momentum flip, which is
+what detailed balance needs.
+
+## The leapfrog integrator
+
+Hamilton's equations have no closed-form solution in general. The **leapfrog** integrator takes a half step in
+momentum, a full step in position, and another half step in momentum:
+
+$$
+\pvec_{1/2} = \pvec - \tfrac{\epsilon}{2}\nabla U(\qvec), \qquad
+\qvec' = \qvec + \epsilon\, \Mmat^{-1} \pvec_{1/2}, \qquad
+\pvec' = \pvec_{1/2} - \tfrac{\epsilon}{2}\nabla U(\qvec').
+$$
+
+Consecutive half steps in momentum merge, so $L$ steps cost $L$ gradient evaluations.
+
+**Volume-preserving.** Each of the three updates is a **shear**: it changes one of $\qvec$ and $\pvec$ by an amount
+that depends only on the other. The Jacobian of a shear is block triangular with identity blocks on the diagonal, so
+its determinant is 1. A composition of maps with determinant 1 has determinant 1.
+
+**Reversible.** Start from $(\qvec', -\pvec')$ and apply a leapfrog step. The first half step gives
+$-\pvec' - \frac{\epsilon}{2}\nabla U(\qvec') = -\pvec_{1/2}$. The position step gives
+$\qvec' - \epsilon\,\Mmat^{-1}\pvec_{1/2} = \qvec$. The last half step gives
+$-\pvec_{1/2} - \frac{\epsilon}{2}\nabla U(\qvec) = -\pvec$. The step returns exactly to $(\qvec, -\pvec)$, and so do $L$
+steps.
+
+**Not energy-conserving.** The leapfrog is exact in volume and reversibility but only approximate in energy. The
+energy error over a trajectory of fixed length is $O(\epsilon^2)$, and it does not drift: leapfrog trajectories
+oscillate around the true energy instead of accumulating error.
+
+## The acceptance step
+
+Define the proposal map $F(\qvec, \pvec) = (\qvec^*, -\pvec^*)$: run $L$ leapfrog steps, then negate the momentum.
+By reversibility, $F(F(\zvec)) = \zvec$, and $F$ preserves volume. Target the joint density
+$\pi(\qvec, \pvec) \propto e^{-H(\qvec, \pvec)}$, whose $\qvec$-marginal is $\pi(\qvec)$. Accept with
+
+$$
+\alpha(\zvec) = \min\set{1, \frac{\pi(F(\zvec))}{\pi(\zvec)}} = \min\set{1, e^{H(\zvec) - H(F(\zvec))}},
+$$
+
+using $H(\qvec, -\pvec) = H(\qvec, \pvec)$. This satisfies detailed balance. For any region $A$, the probability of
+jumping from $A$ to $F(A)$ is $\int_A \min\set{\pi(\zvec), \pi(F(\zvec))}\, d\zvec$. The probability of jumping back
+is $\int_{F(A)} \min\set{\pi(\wvec), \pi(F(\wvec))}\, d\wvec$. Substituting $\wvec = F(\zvec)$, with unit Jacobian and
+$F(F(\zvec)) = \zvec$, turns the second integral into the first.
+
+Resampling $\pvec \sim \Gauss(\zeros, \Mmat)$ at the start of each iteration is a
+<NoteLink to="gibbs-sampling">Gibbs</NoteLink> update of the momentum, which also leaves $\pi(\qvec, \pvec)$ invariant.
+The negation of the momentum does not matter after resampling and is never implemented. Discarding $\pvec$ leaves
+samples of $\pi(\qvec)$.
+
+<HmcTrajectories />
+
+## Worked example: one leapfrog step
+
+Take $U(q) = q^2/2$, a standard Gaussian target, with $M = 1$, $\epsilon = 0.5$ and start $(q, p) = (1, 0)$, so
+$H = 0.5$.
+
+- **Half step.** $p_{1/2} = 0 - 0.25 \times 1 = -0.25$.
+- **Position.** $q' = 1 + 0.5 \times (-0.25) = 0.875$.
+- **Half step.** $p' = -0.25 - 0.25 \times 0.875 = -0.46875$.
+- **Energy.** $H' = 0.875^2/2 + 0.46875^2/2 = 0.38281 + 0.10986 = 0.49268$. Then $\Delta H = -0.0073$, and the
+  proposal is accepted with probability 1.
+
+The exact flow for time 0.5 reaches $(\cos 0.5, -\sin 0.5) = (0.878, -0.479)$, close to the leapfrog point.
+
+**Stability.** For $U(q) = q^2/(2\sigma^2)$, one leapfrog step is a linear map with determinant 1 and trace
+$2 - \epsilon^2/\sigma^2$. Its eigenvalues $\lambda$ satisfy $\lambda^2 - (2 - \epsilon^2/\sigma^2)\lambda + 1 = 0$. When
+$\abs{2 - \epsilon^2/\sigma^2} < 2$ they are complex with modulus 1 and trajectories stay bounded; otherwise one is real
+with modulus above 1 and trajectories grow exponentially. The leapfrog is stable exactly when $\epsilon < 2\sigma$. For
+a multivariate target the narrowest direction sets the limit, $\epsilon < 2\sigma_{\min}$. With $\sigma = 1$, the step
+size $\epsilon = 0.5$ above is well inside the limit of 2.
+
+<Derivation title="The trace of the leapfrog map">
+With $U'(q) = q/\sigma^2$, the three updates give
+
+$$
+q' = \paren{1 - \tfrac{\epsilon^2}{2\sigma^2}} q + \epsilon\, p, \qquad
+p' = -\tfrac{\epsilon}{\sigma^2}\paren{1 - \tfrac{\epsilon^2}{4\sigma^2}} q + \paren{1 - \tfrac{\epsilon^2}{2\sigma^2}} p.
+$$
+
+The diagonal entries sum to $2 - \epsilon^2/\sigma^2$. The determinant is
+$\paren{1 - \frac{\epsilon^2}{2\sigma^2}}^2 + \frac{\epsilon^2}{\sigma^2}\paren{1 - \frac{\epsilon^2}{4\sigma^2}} = 1$, as
+volume preservation requires. The eigenvalues of a $2 \times 2$ matrix with determinant 1 have product 1; they lie on
+the unit circle exactly when the discriminant $\text{trace}^2 - 4$ is negative.
+</Derivation>
+
+## Tuning
+
+- **Step size $\epsilon$.** Too large and $\Delta H$ grows, so proposals are rejected; beyond the stability limit the
+  trajectory diverges. Too small and each trajectory costs many gradients. Implementations adapt $\epsilon$ during
+  warm-up to reach a target acceptance rate, 0.8 by default in Stan, by dual averaging <Cite id="hoffman2014" />.
+- **Trajectory length $\epsilon L$.** Too short and HMC behaves like a random walk. Too long and the trajectory turns
+  back towards its start, wasting computation.
+- **Mass matrix $\Mmat$.** Setting $\Mmat^{-1}$ to an estimate of the posterior covariance rescales the target to be
+  roughly isotropic, which removes the constraint that the narrowest direction imposes on $\epsilon$. Warm-up estimates
+  a diagonal or dense $\Mmat$ from early draws.
+
+**The No-U-Turn Sampler** (NUTS) removes the need to choose $L$. It builds a trajectory by repeatedly doubling it,
+forwards or backwards in time at random, until the two ends start to move towards each other: the distance between the
+end points $\qvec^+ - \qvec^-$ stops growing when $(\qvec^+ - \qvec^-)^\top \pvec^\pm < 0$ at either end. It then samples
+a point from the trajectory in a way that preserves detailed balance <Cite id="hoffman2014" />. NUTS with warm-up
+adaptation of $\epsilon$ and $\Mmat$ is the default sampler of Stan and PyMC; see
+<NoteLink to="probabilistic-programming">probabilistic programming</NoteLink>.
+
+## Cost
+
+Each iteration costs $L$ gradient evaluations of $\log\tilde\pi$. In $d$ dimensions the step size needed for a fixed
+acceptance rate shrinks only as $d^{-1/4}$, against $d^{-1/2}$ for random-walk Metropolis, so HMC needs about
+$O(d^{1/4})$ gradients per effective sample on smooth targets <Cite id="neal2011" />. Automatic differentiation
+supplies the gradients.
+
+## Trade-offs
+
+- **Needs gradients.** The target must be differentiable in continuous parameters. Discrete parameters must be summed
+  out or sampled by another kernel.
+- **Divergences are diagnostic.** In regions of high curvature, such as the neck of a hierarchical model's funnel, the
+  leapfrog becomes unstable and the energy error explodes. These **divergent transitions** mean the sampler cannot
+  explore that region, and the estimates may be biased. Reparameterising (for example the non-centred form of a
+  hierarchical model) usually removes them <Cite id="betancourt2017" />.
+- **Multimodality remains hard.** A trajectory conserves energy approximately, so it cannot climb over a deep valley of
+  low density between modes. Momentum resampling changes the energy level only gradually.
+- **Heavy tails.** In the tails of a heavy-tailed target the gradient is small and trajectories are slow to return.

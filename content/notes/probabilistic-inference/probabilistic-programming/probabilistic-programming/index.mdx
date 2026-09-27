@@ -1,0 +1,132 @@
+---
+title: Probabilistic programming
+kind: overview
+summary: 'A probabilistic programming language lets a model be written as a program that draws random variables and conditions on data; the system derives the log density and runs inference automatically. Stan, PyMC, Pyro, NumPyro and Turing automate MCMC and variational inference.'
+tags: [bayesian, inference, software, monte-carlo, variational-inference, worked-example]
+aliases: [probabilistic programming language, Stan, PyMC, Pyro, NumPyro, Turing.jl, BUGS, JAGS, universal probabilistic programming, eight schools]
+related: [hamiltonian-monte-carlo, black-box-variational-inference, mcmc-diagnostics, gibbs-sampling, bayesian-network, stochastic-variational-inference]
+references: [carpenter2017, salvatier2016, bingham2019, phan2019, ge2018, lunn2000, kucukelbir2017, hoffman2014, gelman2013]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A probabilistic programming language (PPL) is a language, usually embedded in a general-purpose language, in which a
+statistical model is written as a program. Statements draw latent variables from distributions and condition observed
+variables on data. The system turns the program into a function that computes the log joint density and its gradient,
+and runs a general-purpose inference algorithm on it, so the same model code serves for simulation, fitting and
+prediction <Cite id="carpenter2017" /> <Cite id="bingham2019" />.
+</Definition>
+
+## Components
+
+A PPL separates three things that hand-written inference code mixes together.
+
+- **The model.** A program with two kinds of random statement: `sample` draws a latent variable from a prior or
+  conditional distribution, and `observe` (or `sample` with an observed value) conditions on data. The program's
+  execution trace defines the joint distribution $p(\xvec, \zvec)$.
+- **The log density.** Running the program with given values of the latent variables accumulates
+  $\log p(\xvec, \zvec)$: every `sample` statement adds the log density of its value and every `observe` adds the log
+  likelihood of the data. Constrained parameters, such as a positive scale, are transformed to the real line and the
+  log-Jacobian of the transformation is added, so that samplers and optimisers work on an unconstrained space.
+  Automatic differentiation supplies the gradient.
+- **The inference engine.** A generic algorithm that needs only the log density, its gradient, or the ability to run
+  the program: <NoteLink to="hamiltonian-monte-carlo">Hamiltonian Monte Carlo</NoteLink> and its adaptive form NUTS,
+  <NoteLink to="black-box-variational-inference">black-box variational inference</NoteLink>,
+  <NoteLink to="gibbs-sampling">Gibbs sampling</NoteLink>, or sequential Monte Carlo.
+
+Diagnostics complete the loop: $\hat R$, effective sample sizes and divergence counts are reported with every fit;
+see <NoteLink to="mcmc-diagnostics">MCMC diagnostics</NoteLink>.
+
+## Systems
+
+| System  | Host language | Default inference                                    | Other inference                                                   |
+| ------- | ------------- | ---------------------------------------------------- | ----------------------------------------------------------------- |
+| BUGS    | Own language  | Gibbs sampling from full conditionals                | Slice, rejection or Metropolis steps for non-conjugate nodes      |
+| Stan    | Own language  | NUTS with adapted step size and mass matrix          | ADVI; optimisation for posterior modes                            |
+| PyMC    | Python        | NUTS for continuous variables                        | Metropolis and Gibbs-type steps for discrete ones; SMC; ADVI      |
+| Pyro    | Python        | Stochastic variational inference with a guide        | NUTS and HMC; enumeration of discrete latent variables            |
+| NumPyro | Python (JAX)  | NUTS, compiled                                       | Stochastic variational inference                                  |
+| Turing  | Julia         | NUTS                                                 | Composable Gibbs combining HMC with particle methods for discrete |
+
+- **BUGS** and its descendants build a <NoteLink to="bayesian-network">Bayesian network</NoteLink> from the model and
+  derive each variable's full conditional from its Markov blanket, recognising conjugate cases for exact draws
+  <Cite id="lunn2000" />.
+- **Stan** compiles its own modelling language to C++ with reverse-mode automatic differentiation. Its default is the
+  No-U-Turn Sampler, with step size and a diagonal mass matrix tuned during warm-up <Cite id="carpenter2017" />
+  <Cite id="hoffman2014" />. Stan also implements automatic differentiation variational inference
+  <Cite id="kucukelbir2017" />. It supports only continuous parameters; discrete ones must be summed out in the model.
+- **PyMC** is a Python library. It assigns NUTS to continuous variables and other samplers to discrete ones, combining
+  them in compound steps <Cite id="salvatier2016" />.
+- **Pyro** is built on PyTorch. Its central abstraction is stochastic variational inference: the user writes the model
+  and a **guide**, a second program that defines the variational family $q$, and the system maximises the ELBO. It can
+  also generate guides automatically, and supports neural networks inside models and guides
+  <Cite id="bingham2019" />. **NumPyro** reimplements Pyro's interface on JAX, whose compilation makes its NUTS fast
+  <Cite id="phan2019" />.
+- **Turing** is a Julia library whose samplers compose: a Gibbs sampler can update continuous blocks by HMC and
+  discrete blocks by particle methods <Cite id="ge2018" />.
+
+## Data flow
+
+1. **Write the model** as a program over parameters and data.
+2. **Condition** by passing the observed data.
+3. **Compile or trace** the program into a log density on an unconstrained space, with gradients.
+4. **Run inference.** Warm up the sampler or optimiser, then draw samples or fit $q$.
+5. **Diagnose** with $\hat R$, effective sample sizes and divergences.
+6. **Use the posterior** by running the same program forwards with posterior draws of the parameters, to predict or to
+   check the model against data (posterior predictive checks).
+
+## Example: eight schools
+
+The eight-schools data are estimated effects $y_j$ of a coaching programme in eight schools, with known standard
+errors $\sigma_j$ <Cite id="gelman2013" />. The hierarchical model is $y_j \sim \Gauss(\theta_j, \sigma_j^2)$,
+$\theta_j \sim \Gauss(\mu, \tau^2)$, with priors $\mu \sim \Gauss(0, 25)$ and $\tau \sim \operatorname{HalfCauchy}(5)$.
+In NumPyro:
+
+```python
+import jax.numpy as jnp
+import numpyro
+import numpyro.distributions as dist
+from jax import random
+from numpyro.infer import MCMC, NUTS
+
+y = jnp.array([28.0, 8.0, -3.0, 7.0, -1.0, 1.0, 18.0, 12.0])
+sigma = jnp.array([15.0, 10.0, 16.0, 11.0, 9.0, 11.0, 10.0, 18.0])
+
+
+def eight_schools(sigma, y=None):
+    mu = numpyro.sample("mu", dist.Normal(0, 5))
+    tau = numpyro.sample("tau", dist.HalfCauchy(5))
+    with numpyro.plate("school", len(sigma)):
+        theta_raw = numpyro.sample("theta_raw", dist.Normal(0, 1))
+        theta = numpyro.deterministic("theta", mu + tau * theta_raw)
+        numpyro.sample("obs", dist.Normal(theta, sigma), obs=y)
+
+
+mcmc = MCMC(NUTS(eight_schools), num_warmup=1000, num_samples=1000, num_chains=4, chain_method="sequential")
+mcmc.run(random.PRNGKey(0), sigma, y=y)
+mcmc.print_summary()  # means, intervals, effective sample sizes and R-hat for every parameter
+```
+
+The program never states a posterior, a gradient or a sampler setting. NUTS adapts its step size during the 1000 warm-up
+iterations of each chain. In one run the posterior mean of $\mu$ is 4.3 and of $\tau$ is 3.6, every $\hat R$ is 1.00,
+and there are no divergent transitions.
+
+The model is written in **non-centred** form: $\theta_j = \mu + \tau\,\eta_j$ with $\eta_j \sim \Gauss(0, 1)$. The
+centred form, `theta = numpyro.sample("theta", dist.Normal(mu, tau))`, defines the same distribution but a different
+geometry. When $\tau$ is small the $\theta_j$ are squeezed together, a funnel that the sampler's step size cannot
+follow. With the same seed, the centred version produced 144 divergent transitions in 4000 draws. The PPL automates
+inference; choosing a parameterisation that inference can handle remains the modeller's job.
+
+## Variants
+
+- **Restricted and universal languages.** Stan and BUGS fix the set of random variables before running: the model is a
+  static graph. Pyro, Turing and similar systems allow stochastic control flow, where the number and kind of random
+  choices depend on earlier random choices. Such **universal** languages can express any computable model, but
+  gradient-based inference applies only to the parts with a fixed, continuous structure. The rest relies on sequential
+  Monte Carlo, importance sampling or Metropolis–Hastings over program traces.
+- **Deep probabilistic programming.** Pyro and NumPyro let neural networks define distributions in the model and the
+  guide, which gives variational autoencoders and amortised inference as special cases.
+- **Discrete latent variables.** Gradient-based samplers cannot move discrete variables. Systems sum them out
+  automatically where possible, as Pyro's enumeration does, or combine gradient-based and discrete samplers, as PyMC
+  and Turing do.

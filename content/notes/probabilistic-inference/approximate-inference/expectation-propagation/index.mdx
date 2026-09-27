@@ -1,0 +1,136 @@
+---
+title: Expectation propagation
+kind: technique
+summary: 'Expectation propagation approximates a posterior that is a product of factors by replacing each factor with an exponential-family site. Each update removes one site, multiplies in the true factor, and matches the moments of the result, minimising a local forward KL divergence.'
+tags: [approximate-inference, bayesian, message-passing, exponential-family, worked-example]
+aliases: [EP, assumed density filtering, ADF, moment matching, cavity distribution, tilted distribution, site approximation]
+requires: [exponential-family, kl-divergence, bayes-theorem]
+related: [gp-classification, variational-inference, loopy-belief-propagation, laplace-approximation, belief-propagation, multivariate-normal-distribution]
+references: [minka2001, minka2005, rasmussen2006, bishop2006, vehtari2020]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let a posterior factorise as $p(\thetavec) \propto p_0(\thetavec)\prod_{i=1}^{n} t_i(\thetavec)$, with a prior $p_0$ in
+an exponential family $\Fcal$ and factors $t_i$, for example the likelihoods of single data points. Expectation
+propagation (EP) approximates it by
+
+$$
+q(\thetavec) \propto p_0(\thetavec)\prod_{i=1}^{n} \tilde t_i(\thetavec),
+$$
+
+where each **site** $\tilde t_i$ is an unnormalised member of $\Fcal$. It refines one site at a time: remove it from
+$q$, multiply in the true factor $t_i$, and project the result back onto $\Fcal$ by matching moments
+<Cite id="minka2001" />.
+</Definition>
+
+## Problem
+
+A posterior with a Gaussian prior and non-Gaussian likelihoods, such as a
+<NoteLink to="gp-classification">Gaussian process classifier</NoteLink> or a probit regression, is not Gaussian, and
+its moments are integrals with no closed form. Each single factor is easy to handle, however: the product of a
+Gaussian and one probit factor has closed-form moments. EP builds a global Gaussian approximation from these local,
+tractable computations.
+
+## Moment matching
+
+The projection step solves, for a target density $\hat p$,
+
+$$
+q^{\mathrm{new}} = \argmin_{q \in \Fcal} \KL\paren{\hat p \,\|\, q}.
+$$
+
+Write $q(\thetavec) = h(\thetavec)\exp\paren{\etavec^\top\tvec(\thetavec) - A(\etavec)}$ with sufficient statistics
+$\tvec$ and log-normaliser $A$. As a function of the natural parameter $\etavec$,
+
+$$
+\KL(\hat p \,\|\, q) = \expect_{\hat p}[\log\hat p - \log h] - \etavec^\top\expect_{\hat p}[\tvec(\thetavec)] + A(\etavec).
+$$
+
+The gradient of the log-normaliser is the mean of the sufficient statistics, $\nabla A(\etavec) = \expect_q[\tvec]$.
+Setting the gradient of the divergence to zero gives
+
+$$
+\expect_{q^{\mathrm{new}}}\brack{\tvec(\thetavec)} = \expect_{\hat p}\brack{\tvec(\thetavec)}.
+$$
+
+$A$ is convex, so this stationary point is the minimum. For a Gaussian family, $\tvec(\thetavec)$ collects $\thetavec$
+and $\thetavec\thetavec^\top$, and the projection matches the mean and covariance. This is the forward KL divergence,
+so the projection is mass-covering; see <NoteLink to="variational-inference">variational inference</NoteLink> for the
+contrast with the reverse direction.
+
+## Mechanism
+
+Initialise every site to 1 (so $q = p_0$), or to a rough guess. Then repeat until the sites stop changing, visiting
+each $i$ in turn:
+
+1. **Cavity.** Remove site $i$: $q^{\setminus i}(\thetavec) \propto q(\thetavec)/\tilde t_i(\thetavec)$. In natural
+   parameters this is a subtraction; for a Gaussian, precisions and precision-weighted means subtract.
+2. **Tilted distribution.** Multiply in the true factor: $\hat p_i(\thetavec) \propto q^{\setminus i}(\thetavec)\, t_i(\thetavec)$.
+   This is the best available guess of the posterior's shape near factor $i$.
+3. **Project.** Set $q^{\mathrm{new}}$ to the member of $\Fcal$ with the moments of $\hat p_i$.
+4. **Update the site.** $\tilde t_i \propto q^{\mathrm{new}}/q^{\setminus i}$, again a subtraction of natural
+   parameters, so that $q = q^{\mathrm{new}}$.
+
+Each update minimises $\KL(\hat p_i \,\|\, q)$, a divergence in which only one factor is exact. EP never minimises a
+global divergence. Its fixed points are stationary points of an approximation to the log evidence, closely related to
+the Bethe free energy of <NoteLink to="loopy-belief-propagation">loopy belief propagation</NoteLink>
+<Cite id="minka2005" />. EP with a fully factorised discrete $q$ on a graphical model is loopy belief propagation
+<Cite id="minka2001" />.
+
+**Assumed density filtering** (ADF) is a single pass of steps 1 to 3 in which each factor is included once and never
+revisited. Its result depends on the order of the factors. EP's iteration refines early sites in the light of later
+ones and removes the order dependence.
+
+The normalising constants of the tilted distributions also give an approximation to the evidence $p(\text{data})$, used
+for hyperparameter learning, for example in Gaussian process classification <Cite id="rasmussen2006" />.
+
+## Worked example: one probit factor
+
+Take a prior $\theta \sim \Gauss(0, 1)$ and one factor $t(\theta) = \Phi(\theta)$, the probit likelihood of a positive
+label, where $\Phi$ is the standard normal cdf. With one site, the cavity is the prior, $\Gauss(\mu, \sigma^2)$ with
+$\mu = 0$ and $\sigma^2 = 1$.
+
+The tilted distribution $\hat p(\theta) \propto \Gauss(\theta \mid \mu, \sigma^2)\,\Phi(\theta)$ has closed-form
+moments. With $\kappa = \mu/\sqrt{1 + \sigma^2}$, its normaliser is $\Phi(\kappa)$, and
+
+$$
+\expect[\theta] = \mu + \frac{\sigma^2\, \phi(\kappa)}{\Phi(\kappa)\sqrt{1 + \sigma^2}}, \qquad
+\var[\theta] = \sigma^2 - \frac{\sigma^4\, \phi(\kappa)}{(1 + \sigma^2)\,\Phi(\kappa)}\paren{\kappa + \frac{\phi(\kappa)}{\Phi(\kappa)}},
+$$
+
+where $\phi$ is the standard normal density <Cite id="rasmussen2006" />. Here $\kappa = 0$, $\Phi(0) = 1/2$ and
+$\phi(0) = 1/\sqrt{2\pi}$:
+
+- **Normaliser.** $\Phi(0) = 0.5$.
+- **Mean.** $\frac{1/\sqrt{2\pi}}{0.5 \times \sqrt 2} = 1/\sqrt\pi = 0.564$.
+- **Variance.** $1 - \frac{1}{2} \times \frac{1/\sqrt{2\pi}}{0.5} \times \frac{1/\sqrt{2\pi}}{0.5} = 1 - 1/\pi = 0.682$.
+
+So $q^{\mathrm{new}} = \Gauss(0.564, 0.682)$. The site is the ratio of $q^{\mathrm{new}}$ to the cavity. Its precision
+is $1/0.682 - 1/1 = 0.467$, so its variance is $\pi - 1 = 2.14$. Its precision-weighted mean is $0.564/0.682 - 0 = 0.828$,
+so its mean is $0.828/0.467 = \sqrt\pi = 1.77$. The probit factor is replaced by the Gaussian site
+$\tilde t(\theta) \propto \Gauss(\theta \mid 1.77, 2.14)$. With a single factor the tilted distribution is the exact
+posterior, and EP matches its mean and variance exactly. With several factors, each site is refined in turn against a
+cavity that contains the other sites.
+
+## Cost
+
+For a Gaussian $q$ over $d$ dimensions, each site update costs a rank-one update of the covariance for scalar factors,
+$O(d^2)$, and a full pass over $n$ factors $O(n d^2)$. For Gaussian process classification with $n$ training points
+this gives $O(n^3)$ per pass, like the Laplace approximation, with a few passes needed.
+
+## Trade-offs
+
+- **Accuracy.** For Gaussian process classification EP gives more accurate marginal posteriors and evidence estimates
+  than the <NoteLink to="laplace-approximation">Laplace approximation</NoteLink>, which fits the curvature at the mode
+  <Cite id="rasmussen2006" />. Matching moments captures the skew of the posterior in the mean, where Laplace ignores it.
+- **No convergence guarantee.** EP is not the optimisation of a single objective, and it can oscillate or diverge.
+  Damping, replacing each site by a weighted geometric average of its old and new values, usually fixes this.
+- **Invalid sites.** A site can have negative precision. The approximation stays valid as long as $q$ and every cavity
+  have positive precision; if a cavity does not, the update must be skipped or damped.
+- **Tilted moments must be computable.** Each factor must allow the moments of $q^{\setminus i}\, t_i$, in closed form or
+  by low-dimensional quadrature. This suits factors that depend on $\thetavec$ through a scalar, such as
+  $t_i(\thetavec) = f(\xvec_i^\top\thetavec)$.
+- **Distributed inference.** Sites are local, so data can be split across machines, each refining its own site against
+  a shared global approximation <Cite id="vehtari2020" />.
