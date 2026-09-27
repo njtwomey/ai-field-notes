@@ -1,0 +1,144 @@
+---
+title: Random over- and undersampling
+kind: technique
+summary: "Random undersampling keeps each majority example with probability $\\beta$; random oversampling duplicates minority examples. Both change the training prior, so the learnt posterior becomes $p' = p/(p + \\beta(1 - p))$, a shift of $-\\log\\beta$ in log-odds that must be undone before use as probabilities."
+tags: [class-imbalance, classification, resampling, calibration, worked-example]
+aliases: [random undersampling, random oversampling, downsampling the majority class, upsampling the minority class, class resampling, undersampling correction]
+requires: [bayes-theorem, logistic-regression]
+partOf: [class-imbalance]
+related: [cost-sensitive-learning, class-weights, smote-and-variants, ensemble-methods-for-imbalance, calibration-under-imbalance]
+references: [dalpozzolo2015, elkan2001, he2009, vandengoorbergh2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { UndersamplingWarp } from './UndersamplingWarp'
+
+<Definition>
+**Random undersampling** builds a training set by keeping every minority (positive) example and each majority
+(negative) example independently with probability $\beta \in (0, 1]$. **Random oversampling** keeps every example and
+adds copies of minority examples drawn at random with replacement. Both change the proportion of positives in the
+training set, and so the prior that a model fitted to it learns. Neither changes the distribution of $\xvec$ within
+each class <Cite id="he2009" />.
+</Definition>
+
+## Problem
+
+Some learners handle a rare class badly. A tree with a minimum leaf size cannot isolate a small minority region, and a
+model whose loss is dominated by the majority spends its capacity there. Resampling the training set to a less
+extreme ratio is the oldest remedy. It is also a way to cut training cost when the majority class is very large.
+
+## Mechanism
+
+### The effective prior
+
+Let $\pi$ be the prevalence of positives in the original data. After undersampling, a fraction $\pi$ of examples are
+positive and all are kept, while a fraction $1 - \pi$ are negative and a fraction $\beta$ of those are kept. The
+training prevalence is
+
+$$
+\pi' = \frac{\pi}{\pi + \beta(1 - \pi)}.
+$$
+
+The training set is balanced, $\pi' = 0.5$, when $\beta = \pi/(1 - \pi)$. Oversampling that replicates each positive
+$m$ times in expectation gives $\pi' = m\pi/\paren{m\pi + (1 - \pi)}$. Dividing numerator and denominator by $m$ shows
+this equals undersampling with $\beta = 1/m$. In the prior, and in the posterior below, the two are the same
+operation.
+
+### The posterior after undersampling
+
+Let $s \in \set{0, 1}$ indicate that an example is kept. Undersampling keeps positives with certainty and negatives
+with probability $\beta$, and the decision does not look at $\xvec$:
+
+$$
+P(s = 1 \mid y = 1, \xvec) = 1, \qquad P(s = 1 \mid y = 0, \xvec) = \beta.
+$$
+
+Write $p = P(y = 1 \mid \xvec)$ for the posterior in the original data. A model fitted to the undersampled data
+estimates $p' = P(y = 1 \mid \xvec, s = 1)$. By Bayes' theorem, conditioning on $s = 1$,
+
+$$
+p' = \frac{P(s = 1 \mid y = 1, \xvec)\,p}{P(s = 1 \mid y = 1, \xvec)\,p + P(s = 1 \mid y = 0, \xvec)\,(1 - p)}
+= \frac{p}{p + \beta(1 - p)}
+$$
+
+<Cite id="dalpozzolo2015" />. Since $\beta < 1$, $p' > p$ for every $p$ strictly between 0 and 1: the model
+overestimates the probability of the minority class everywhere. Dividing $p'$ by $1 - p' = \beta(1 - p)/(p + \beta(1 -
+p))$ gives the same result in odds,
+
+$$
+\frac{p'}{1 - p'} = \frac{1}{\beta}\cdot\frac{p}{1 - p},
+\qquad
+\operatorname{logit} p' = \operatorname{logit} p - \log\beta.
+$$
+
+Undersampling adds the constant $-\log\beta$ to the log-odds of every example. For a well-specified
+<NoteLink to="logistic-regression">logistic regression</NoteLink> this moves the intercept by $-\log\beta$ and leaves
+the weights alone.
+
+### Undoing the distortion
+
+Solving $p' = p/(p + \beta(1 - p))$ for $p$ gives the correction
+
+$$
+p = \frac{\beta p'}{\beta p' - p' + 1}.
+$$
+
+In log-odds it subtracts back the shift: $\operatorname{logit} p = \operatorname{logit} p' + \log\beta$. The
+correction is exact when the model estimates $p'$ well. It is the special case of Elkan's base-rate adjustment in
+which the base rate changes from $\pi'$ back to $\pi$; see <NoteLink to="cost-sensitive-learning">cost-sensitive
+learning</NoteLink> <Cite id="elkan2001" />.
+
+<UndersamplingWarp />
+
+### Ranking and thresholds
+
+The map from $p$ to $p'$ is strictly increasing. It therefore preserves the order of examples, and the ROC curve of
+the true posterior is the same before and after the warp. Dal Pozzolo et al. conclude that the bias introduced by
+undersampling does not affect the ranking but does affect the decisions and the calibration
+<Cite id="dalpozzolo2015" />.
+
+A threshold on $p'$ corresponds to a threshold on $p$. The rule $p' \ge 0.5$ is the rule $p \ge \beta/(1 + \beta)$.
+With the balancing choice $\beta = \pi/(1 - \pi)$, $\beta/(1 + \beta) = \pi$: training on balanced data and
+thresholding at 0.5 is the rule "predict positive when the posterior exceeds the prevalence", which maximises
+balanced accuracy (see <NoteLink to="threshold-moving">threshold moving</NoteLink>). Conversely, a target threshold
+$t$ on $p$ becomes $t' = t/\paren{t + \beta(1 - t)}$ on $p'$.
+
+## Worked example
+
+A data set has $n = 100\,000$ transactions, of which 1% are fraud: 1 000 positives and 99 000 negatives. Undersampling
+to balance keeps each negative with probability $\beta = 0.01/0.99 = 1/99$, leaving about 1 000 negatives.
+
+A model trained on the balanced set scores a transaction at $p' = 0.8$. The corrected probability is
+
+$$
+p = \frac{0.8/99}{0.8/99 - 0.8 + 1} = \frac{0.00808}{0.20808} = 0.0388.
+$$
+
+The transaction has a 3.9% chance of being fraud, not 80%. A score of $p' = 0.5$ corresponds to $p = 0.01$, the
+prevalence, as the threshold argument predicts. If the costs call for flagging at $p \ge t = 0.05$, the threshold on
+the balanced model's score is $t' = 0.05/(0.05 + 0.95/99) = 0.839$.
+
+## Cost
+
+Undersampling shrinks the training set to $n(\pi + \beta(1 - \pi))$ examples, about $2n\pi$ when balancing. Training
+is faster by the same factor for learners linear in $n$. Oversampling grows the training set and the training time.
+
+## Trade-offs
+
+- **Undersampling discards information.** The negatives that are dropped carry information about
+  $p(\xvec \mid y = 0)$, including near the decision boundary. The fitted model has higher variance. Averaging models
+  trained on several undersampled sets recovers much of it: see
+  <NoteLink to="ensemble-methods-for-imbalance">ensemble methods for imbalance</NoteLink>.
+- **Oversampling duplicates.** Exact copies let flexible learners memorise individual minority points: a deep tree
+  grows a leaf around each duplicated point. Duplicating adds no information, and in a likelihood it is the same as
+  giving each positive a weight $m$, which <NoteLink to="class-weights">class weights</NoteLink> do without the copies.
+  Synthetic oversampling (<NoteLink to="smote-and-variants">SMOTE</NoteLink>) avoids exact copies.
+- **Resample after splitting.** Resampling before a train/validation split puts copies of one minority example on both
+  sides of the split, and validation scores become optimistic. Evaluation must use data at the original prevalence.
+- **Probabilities need correcting.** Without the correction above, predicted risks are inflated. In clinical risk
+  models, resampling produced strongly overestimated risks without improving discrimination
+  <Cite id="vandengoorbergh2022" />.
+- **Informed undersampling** removes selected negatives rather than random ones, e.g. those that form Tomek links with
+  positives or those far from any positive <Cite id="he2009" />. Selection then depends on $\xvec$, so
+  $P(s = 1 \mid y = 0, \xvec)$ is no longer the constant $\beta$ and the correction above no longer holds exactly.

@@ -1,0 +1,122 @@
+---
+title: Ensemble methods for imbalance
+kind: technique
+summary: 'Ensembles for imbalance train many models on balanced subsets, each with every minority example and a different sample of the majority, and combine them. Balanced random forests, EasyEnsemble, BalanceCascade and RUSBoost recover data a single undersample discards.'
+tags: [class-imbalance, classification, ensembles, resampling, worked-example]
+aliases: [balanced random forest, weighted random forest, EasyEnsemble, BalanceCascade, RUSBoost, UnderBagging, exploratory undersampling]
+requires: [random-over-and-undersampling]
+partOf: [class-imbalance]
+related: [smote-and-variants, class-weights, calibration-under-imbalance]
+references: [chen2004, liu2009, seiffert2010, dalpozzolo2015, elor2022]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+An **ensemble method for imbalance** trains $T$ base models, each on a training set in which the classes are
+balanced by undersampling the majority (or oversampling the minority), and combines their outputs by averaging or
+voting. Because each model sees a different random sample of the majority class, the ensemble as a whole uses most of
+the majority data, while every individual model trains on a balanced set <Cite id="liu2009" />.
+</Definition>
+
+## Problem
+
+Undersampling the majority class to balance it discards most majority examples: at a prevalence of 1%, balancing keeps
+about one negative in 99. The resulting model has high variance and ignores information about the majority class
+that lies in the discarded examples, some of it near the decision boundary. Oversampling keeps all the data but, with
+flexible learners, overfits duplicated minority examples. Ensembles keep the benefit of balanced training sets while
+averaging away the variance of any one undersample.
+
+## Mechanism
+
+### How much of the majority an ensemble sees
+
+Let there be $n_1$ positives and $n_0$ negatives. Each base model samples $n_1$ negatives at random. A given negative
+is left out of one subset with probability $1 - n_1/n_0$, and out of all $T$ independent subsets with probability
+$(1 - n_1/n_0)^T$. The expected fraction of negatives used by at least one model is
+
+$$
+1 - \paren{1 - \frac{n_1}{n_0}}^{T}.
+$$
+
+To use a fraction $c$ of the negatives, the ensemble needs $T = \log(1 - c)/\log(1 - n_1/n_0)$ models. For
+$n_1/n_0$ small, $\log(1 - n_1/n_0) \approx -n_1/n_0$, so $T \approx (n_0/n_1)\log\frac{1}{1 - c}$: about three times
+the imbalance ratio to use 95% of the negatives, since $\log 20 = 3.0$.
+
+### Balanced and weighted random forests
+
+Chen, Liaw and Breiman proposed two adaptations of random forests <Cite id="chen2004" />.
+
+- **Balanced random forest.** For each tree, draw a bootstrap sample from the minority class, and draw the same number
+  of cases, with replacement, from the majority class. Grow an unpruned tree on this balanced sample with the usual
+  random selection of features at each split. Predict by majority vote, or by a threshold on the fraction of votes.
+- **Weighted random forest.** Keep the ordinary bootstrap and give the minority class a larger weight, both in the
+  Gini criterion used to choose splits and in the weighted vote at each leaf.
+
+In their experiments both improved the prediction of the minority class over a standard forest, with neither
+consistently better than the other; balanced forests train faster because each tree sees a smaller sample
+<Cite id="chen2004" />.
+
+### EasyEnsemble
+
+EasyEnsemble samples $T$ subsets $\Ncal_1, \dots, \Ncal_T$ of the negatives, each of size $n_1$, independently. On
+each balanced set $\Pcal \cup \Ncal_i$, where $\Pcal$ is the set of all positives, it trains an AdaBoost ensemble
+$H_i(\xvec) = \sgn\paren{\sum_{j=1}^{s_i}\alpha_{i,j}h_{i,j}(\xvec) - \theta_i}$ of $s_i$ weak learners $h_{i,j}$ with
+weights $\alpha_{i,j}$ and threshold $\theta_i$. The final classifier pools every weak learner:
+
+$$
+H(\xvec) = \sgn\paren{\sum_{i=1}^{T}\sum_{j=1}^{s_i}\alpha_{i,j}\,h_{i,j}(\xvec) - \sum_{i=1}^{T}\theta_i}
+$$
+
+<Cite id="liu2009" />. The subsets are independent, so the $T$ AdaBoost runs can be trained in parallel. Boosting
+inside each subset reduces bias, and combining subsets reduces variance.
+
+### BalanceCascade
+
+BalanceCascade samples the subsets sequentially and removes negatives that are already handled. After training $H_i$,
+it sets the threshold $\theta_i$ so that $H_i$'s false-positive rate on the remaining negatives is
+$f = (n_1/n_0)^{1/(T-1)}$, then removes from the pool every negative that $H_i$ classifies correctly. After $T - 1$
+rounds the pool has shrunk by the factor $f^{T-1} = n_1/n_0$, from $n_0$ to $n_1$ negatives. Later models therefore
+concentrate on the negatives that earlier models found hard <Cite id="liu2009" />. The final classifier has the same
+form as EasyEnsemble's.
+
+### RUSBoost
+
+RUSBoost puts the undersampling inside a single boosting run <Cite id="seiffert2010" />. At each round of AdaBoost.M2
+it undersamples the majority class at random to a target class ratio, trains the weak learner on the reduced sample
+using the current boosting weights of the kept examples, and then updates the weights of all training examples from
+that learner's errors. Every round sees a different majority sample, and the boosting weights steer later rounds
+towards hard examples of both classes. SMOTEBoost is the same construction with SMOTE in place of undersampling; it is
+slower, because it grows the training set instead of shrinking it <Cite id="seiffert2010" />.
+
+## Worked example
+
+A data set has $n_1 = 100$ positives and $n_0 = 10\,000$ negatives, a ratio of 1 to 100. One balanced undersample keeps
+100 negatives, 1% of them.
+
+- With $T = 10$ subsets, the expected fraction of negatives used is $1 - 0.99^{10} = 0.096$.
+- To use 95% of the negatives needs $T = \log 0.05/\log 0.99 = 298$ subsets, close to $3 \times 100$ as the
+  approximation predicts.
+- BalanceCascade with $T = 10$ sets $f = 0.01^{1/9} = 0.599$: each stage misclassifies about 60% of the remaining
+  negatives, which stay in the pool, and the correctly classified 40% are removed.
+
+## Cost
+
+EasyEnsemble and balanced forests train $T$ models on $2n_1$ examples each, so their total training cost is that of
+about $2Tn_1$ examples. When $T$ is near the imbalance ratio $n_0/n_1$, this is about the cost of one model on all
+the data. EasyEnsemble's subsets are independent and train in parallel; BalanceCascade's and RUSBoost's rounds are
+sequential.
+
+## Trade-offs
+
+- **Probabilities are distorted.** Each base model learns the balanced prior, so the averaged score overstates the
+  rare class exactly as one undersampled model does. Correct it with the undersampling formula before reading it as a
+  probability <Cite id="dalpozzolo2015" />, or recalibrate (see <NoteLink to="calibration-under-imbalance">calibration
+  under imbalance</NoteLink>).
+- **Every model sees every positive.** The ensemble reduces variance from the majority sample but not from the
+  scarcity of positives. The positives remain the limiting quantity.
+- **BalanceCascade discards negatives it deems easy.** If the early models are poor, it discards negatives that were
+  informative, and it is more sensitive to label noise than EasyEnsemble.
+- **Alternatives.** A single model trained with <NoteLink to="class-weights">class weights</NoteLink> uses all the
+  data without resampling. For strong learners such as gradient-boosted trees, weights or threshold tuning are the
+  simpler first choice <Cite id="elor2022" />.

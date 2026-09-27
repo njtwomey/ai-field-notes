@@ -1,0 +1,139 @@
+---
+title: Class weights
+kind: technique
+summary: 'Class weights multiply each example''s loss by a weight $w_y$ for its class. In expectation this equals training on data resampled to prior $\propto w_y\pi_y$, so the learnt posterior odds are scaled by $w_1/w_0$. For a well-specified logistic regression only the intercept moves, by $\log(w_1/w_0)$.'
+tags: [class-imbalance, classification, loss-functions, logistic-regression, worked-example]
+aliases: [class weighting, weighted loss, class_weight balanced, weighted cross-entropy, prior correction, rare-events logistic regression, class-balanced loss]
+requires: [logistic-regression, bayes-theorem, expectation]
+partOf: [class-imbalance]
+related: [random-over-and-undersampling, cost-sensitive-learning, threshold-moving, calibration-under-imbalance, focal-loss]
+references: [king2001, elkan2001, zadrozny2003, cui2019, menon2021]
+status: draft
+updated: 2026-09-27
+---
+
+import { WeightedLogisticFit } from './WeightedLogisticFit'
+
+<Definition>
+Training with **class weights** minimises the weighted empirical risk
+
+$$
+\hat R_w(f) = \frac{1}{n}\sum_{i=1}^{n} w_{y_i}\,\ell\paren{f(\xvec_i), y_i},
+$$
+
+where $\ell$ is the loss of prediction $f(\xvec_i)$ on label $y_i$ and $w_k > 0$ is the weight of class $k$. The
+common "balanced" choice is $w_k = n/(K n_k)$ for $K$ classes with $n_k$ examples each, which gives every class the
+same total weight. Weights are the deterministic counterpart of resampling the training set
+<Cite id="zadrozny2003" />.
+</Definition>
+
+## Problem
+
+A loss summed over examples is dominated by the majority class. Resampling fixes the balance but discards data or
+duplicates it, and adds sampling noise. Weighting changes the balance while every example is used exactly once.
+
+## Mechanism
+
+### Weighting equals resampling in expectation
+
+Let $\pi_k = P(y = k)$ be the class priors and $R_k(f) = \expect\brack{\ell(f(\xvec), k) \mid y = k}$ the expected
+loss on class $k$. The expected weighted risk is, by the law of total expectation,
+
+$$
+R_w(f) = \expect\brack{w_y\,\ell(f(\xvec), y)} = \sum_k \pi_k w_k R_k(f) = Z\sum_k \pi'_k R_k(f),
+\qquad \pi'_k = \frac{w_k\pi_k}{Z},\quad Z = \sum_j w_j \pi_j.
+$$
+
+The last sum is the ordinary, unweighted risk under a distribution with the same class-conditional densities
+$p(\xvec \mid y)$ and priors $\pi'_k$. The factor $Z$ does not depend on $f$. So minimising the weighted risk and
+minimising the unweighted risk on data resampled to priors $\pi'$ have the same solution. Sampling each example with
+probability proportional to its weight produces exactly that distribution, which is the cost-proportionate sampling of
+Zadrozny et al. <Cite id="zadrozny2003" />.
+
+### The learnt posterior
+
+If $\ell$ is the log loss, the minimiser of the risk under priors $\pi'$ is the posterior under those priors. By
+Bayes' theorem in odds, with likelihood ratio $\Lambda(\xvec) = p(\xvec \mid y = 1)/p(\xvec \mid y = 0)$, the weighted
+model learns
+
+$$
+\frac{p_w}{1 - p_w} = \Lambda(\xvec)\,\frac{\pi'_1}{\pi'_0} = \Lambda(\xvec)\,\frac{w_1\pi_1}{w_0\pi_0}
+= \frac{w_1}{w_0}\cdot\frac{p}{1 - p},
+$$
+
+where $p = P(y = 1 \mid \xvec)$ is the true posterior. Weighting multiplies the posterior odds by $w_1/w_0$. This is
+the same distortion as undersampling the negatives by $\beta = w_0/w_1$ (see
+<NoteLink to="random-over-and-undersampling">random over- and undersampling</NoteLink>). Balanced weights for two
+classes have $w_1/w_0 = n_0/n_1 = (1 - \pi)/\pi$, the imbalance ratio.
+
+### Only the intercept moves in logistic regression
+
+Suppose <NoteLink to="logistic-regression">logistic regression</NoteLink> is well specified:
+$\operatorname{logit} p = \wvec^\top\xvec + b$ for some $(\wvec, b)$. Taking logs of the odds above,
+
+$$
+\operatorname{logit} p_w = \wvec^\top\xvec + b + \log\frac{w_1}{w_0}.
+$$
+
+This is again a logistic regression, with the same $\wvec$ and intercept $b + \log(w_1/w_0)$. The weighted log loss
+is minimised by $p_w$ and the model family contains $p_w$, so the weighted maximum-likelihood estimate converges to
+$\paren{\wvec, b + \log(w_1/w_0)}$. The weights change the intercept and nothing else. Subtracting
+$\log(w_1/w_0)$ from the fitted intercept recovers the unweighted model.
+
+King and Zeng derive the same correction for the reverse situation: data collected with a chosen fraction $\bar y$ of
+events (case-control sampling) from a population whose true fraction is $\tau$. Their **prior correction** subtracts
+$\log\brack{\frac{1 - \tau}{\tau}\cdot\frac{\bar y}{1 - \bar y}}$ from the intercept, which is the log of the ratio of
+sample odds to population odds <Cite id="king2001" />. They also compare weighting each observation to undo the
+sampling. Prior correction is more efficient when the model is correct. Weighting is more robust when it is not
+<Cite id="king2001" />.
+
+<WeightedLogisticFit />
+
+### When the model is misspecified
+
+If no $(\wvec, b)$ reproduces the true posterior, the weighted and unweighted fits are different projections of it.
+The weighted fit gives more influence to errors on the minority class, so it fits the posterior better where
+positives are, at the expense of the majority region. The slope changes, and no intercept correction undoes that.
+This is the one case where weighting changes the ranking of examples. It can improve decisions at a low threshold
+when the model cannot fit the whole posterior. The figure shows it with unequal class variances, where the true
+log-odds is quadratic in the score.
+
+## Worked example
+
+Simulate $n = 200\,000$ scores with $\pi = 0.02$, $s \sim \Gauss(0, 1)$ for negatives and $s \sim \Gauss(2, 1)$ for
+positives. The true posterior is logistic with slope 2 and intercept $\operatorname{logit}(0.02) - 2 = -5.892$.
+
+Balanced weights are $w_1 = 1/(2 \times 0.02) = 25$ and $w_0 = 1/(2 \times 0.98) = 0.510$. Their ratio is
+$w_1/w_0 = 49$, and $\log 49 = 3.892$.
+
+| Fit | Slope | Intercept |
+| --- | --- | --- |
+| Unweighted | 1.969 | $-5.853$ |
+| Weighted | 1.959 | $-1.946$ |
+| Weighted, intercept minus $\log 49$ | 1.959 | $-5.838$ |
+
+The slopes agree to within sampling error. The intercept moves by $3.907$, against the predicted $3.892$. After the
+correction the weighted model's probabilities match the unweighted model's.
+
+## Cost
+
+Weighting costs nothing beyond the original training. Unlike undersampling, it does not shorten training.
+
+## Trade-offs
+
+- **Weights distort probabilities** exactly as resampling does. Correct them before using them as probabilities:
+  subtract $\log(w_1/w_0)$ from the logit, or recalibrate (see
+  <NoteLink to="calibration-under-imbalance">calibration under imbalance</NoteLink>).
+- **For a well-specified model, weighting then correcting is the unweighted model.** Choosing the threshold on the
+  unweighted model reaches the same decisions (see <NoteLink to="threshold-moving">threshold moving</NoteLink>).
+  Weighting earns its place with misspecified or capacity-limited models, and with learners that have no threshold to
+  move.
+- **Weights interact with regularisation.** The weighted data term has total weight $nZ$ instead of $n$, so a fixed
+  penalty is relatively weaker or stronger than before, and the intercept shift is no longer exactly
+  $\log(w_1/w_0)$.
+- **Large weights raise gradient variance** in stochastic gradient descent: a minibatch that happens to contain one
+  heavily weighted positive takes a large step.
+- **Many classes.** With long-tailed class counts, weights $1/n_k$ can be extreme. Cui et al. weight by the inverse of an
+  effective number of examples, $(1 - \beta^{n_k})/(1 - \beta)$ with $\beta$ close to 1, which saturates for large
+  classes <Cite id="cui2019" />. Menon et al. instead add $\log\pi_k$ to each logit inside the softmax cross-entropy,
+  the training-time form of logit adjustment <Cite id="menon2021" />.

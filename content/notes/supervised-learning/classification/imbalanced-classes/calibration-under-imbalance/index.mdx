@@ -1,0 +1,129 @@
+---
+title: Calibration under imbalance
+kind: concept
+summary: 'Resampling or weighting by a factor $\kappa$ multiplies a model''s posterior odds by $\kappa$, so it overstates the rare class. Subtracting $\log\kappa$ from the logit undoes this for a well-specified model; Platt scaling or isotonic regression on held-out data also fix other miscalibration.'
+tags: [class-imbalance, calibration, classification, probabilistic, worked-example]
+aliases: [recalibration after resampling, calibrating imbalanced classifiers]
+requires: [logistic-regression, calibration-error]
+partOf: [class-imbalance]
+related: [random-over-and-undersampling, class-weights, prior-shift-correction, threshold-moving, log-loss-and-brier-score, focal-loss]
+references: [platt1999, zadrozny2002, niculescumizil2005, wallace2012, dalpozzolo2015, vandengoorbergh2022, guo2017]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A classifier with output $q(\xvec) \in [0, 1]$ is **calibrated** if, among cases given probability $q$, a fraction $q$
+are positive: $P(y = 1 \mid q(\xvec) = q) = q$ for every $q$ (see <NoteLink to="calibration-error">calibration
+error</NoteLink>). Under class imbalance, calibration is disturbed in two ways. The remedies for imbalance distort it
+by a known factor. And the scarcity of positives makes calibration hard to estimate and to repair.
+</Definition>
+
+## Intuition
+
+A model trained on balanced data believes positives are as common as negatives. Asked about a borderline case, it
+answers as if the prior were 0.5. The ranking of cases is unaffected, but every probability for the rare class is too
+high. The size of the error is known exactly from how the training data were rebalanced, so it can be removed exactly.
+
+## Details
+
+### The distortion
+
+Undersampling negatives by $\beta$, oversampling positives by $1/\beta$, or weighting positives by $w_1$ and negatives
+by $w_0$ all change the training prior. Each multiplies the learnt posterior odds by a constant, $\kappa = 1/\beta$ or
+$\kappa = w_1/w_0$ (see <NoteLink to="random-over-and-undersampling">random over- and undersampling</NoteLink> and
+<NoteLink to="class-weights">class weights</NoteLink>). If $p$ is the true posterior and $q$ the model's output,
+
+$$
+\frac{q}{1 - q} = \kappa\,\frac{p}{1 - p}.
+$$
+
+The reliability curve plots the observed frequency of positives against the predicted probability. For this model,
+among cases with output $q$ the true posterior is $p$ with odds $\frac{q}{\kappa(1 - q)}$, so
+
+$$
+P(y = 1 \mid q) = \frac{q}{q + \kappa(1 - q)}.
+$$
+
+For $\kappa > 1$ this lies below the diagonal at every $q$ strictly between 0 and 1: the model overestimates the
+probability of the rare class everywhere. Van den Goorbergh et al. observed exactly this in clinical risk models
+trained after undersampling, oversampling or SMOTE <Cite id="vandengoorbergh2022" />.
+
+### Undoing it analytically
+
+When $\kappa$ is known and the model is well specified, the correction is exact:
+
+$$
+\operatorname{logit} p = \operatorname{logit} q - \log\kappa,
+\qquad
+p = \frac{q}{q + \kappa(1 - q)}.
+$$
+
+For resampling by $\beta$ this is the Dal Pozzolo et al. correction <Cite id="dalpozzolo2015" />. For logistic
+regression it is a change of intercept. The correction needs no held-out data. It does not fix any other
+miscalibration, such as overconfidence from overfitting or a misspecified model.
+
+### Undoing it empirically
+
+**Platt scaling** fits a one-feature logistic regression, $\hat p = \sigma(a\,z + b)$, on held-out data, where $z$ is
+the model's score and $\sigma$ the logistic function <Cite id="platt1999" />. If $z = \operatorname{logit} q$, the
+analytic correction is the special case $a = 1$, $b = -\log\kappa$. Platt scaling therefore removes the distortion
+from resampling and, through $a \ne 1$, uniform over- or underconfidence as well. It must be fitted on data at the
+deployment prevalence, not on resampled data. To avoid overfitting with few examples, Platt replaces the targets 1
+and 0 by $(n_1 + 1)/(n_1 + 2)$ and $1/(n_0 + 2)$, where $n_1$ and $n_0$ count the positives and negatives in the
+calibration set <Cite id="platt1999" />.
+
+**Isotonic regression** fits the best non-decreasing step function from score to probability on held-out data
+<Cite id="zadrozny2002" />. It can correct any monotone distortion, not only a sigmoid one. It needs more data: the
+steps at high scores are set by the few positives there. Niculescu-Mizil and Caruana found Platt scaling better than
+isotonic regression when the calibration set is small <Cite id="niculescumizil2005" />. With a rare class, the
+calibration set is effectively small even when it has many examples.
+
+**Temperature scaling** divides the logits of a multiclass network by one scalar fitted on held-out data
+<Cite id="guo2017" />. It fixes overconfidence but cannot fix a shift of the prior, which needs a per-class bias as in
+vector scaling or the prior adjustment of <NoteLink to="prior-shift-correction">prior-shift correction</NoteLink>.
+
+### Measuring calibration with few positives
+
+- **Most mass sits near zero.** With $\pi = 0.01$, most predictions are below 0.05. Equal-width reliability bins
+  above 0.5 may hold a handful of cases, and the calibration error there is noise. Use equal-mass bins, or a smooth
+  reliability curve with a confidence band.
+- **Expected calibration error is dominated by the low-probability bins.** A model that predicts the constant $\pi$
+  for every case has an expected calibration error of zero and is useless. Pair calibration metrics with a
+  discrimination metric.
+- **Minority-class probabilities are the least reliable.** Wallace and Dahabreh show that probability estimates for
+  the minority class are unreliable even when overall calibration looks good <Cite id="wallace2012" />. Measuring
+  calibration separately within each class, e.g. a Brier score over the positives alone, exposes this.
+
+### Order of operations
+
+1. Train, with or without resampling or weights.
+2. Correct the prior analytically if the training prior was changed on purpose.
+3. Recalibrate on held-out data at the deployment prevalence if the model is miscalibrated for other reasons.
+4. Choose the threshold on the calibrated probabilities (see <NoteLink to="threshold-moving">threshold
+   moving</NoteLink>).
+
+## Worked example
+
+A logistic regression is trained with balanced class weights on data with $\pi = 0.02$, so
+$\kappa = w_1/w_0 = 0.98/0.02 = 49$. For a case with model output $q = 0.9$, the posterior odds are
+$0.9/0.1 = 9$, and the corrected odds are $9/49 = 0.184$, giving $p = 9/58 = 0.155$. A case with $q = 0.5$ has
+corrected odds $1/49$ and $p = 1/50 = 0.02$, the prevalence. Without the correction, the model would report a 90%
+probability for a case that is positive 15.5% of the time.
+
+Platt scaling fitted to the logit on a large held-out set at $\pi = 0.02$ would find $a \approx 1$ and
+$b \approx -\log 49 = -3.89$, reproducing the analytic correction.
+
+## Assumptions
+
+- The analytic correction assumes the resampling or weighting depends only on the class, not on $\xvec$, and that
+  the model estimates the posterior of the resampled data well.
+- Empirical recalibration assumes the held-out data come from the deployment distribution.
+
+## Pitfalls
+
+- **Recalibrating on resampled data** calibrates the model to the resampled prior and reintroduces the distortion.
+- **Treating ranking scores as probabilities.** Calibration does not change AUROC, and good AUROC does not imply
+  calibration.
+- **Correcting twice.** A model corrected analytically and then recalibrated with Platt scaling on held-out data is
+  fine; a model corrected analytically twice for the same $\kappa$ underestimates the rare class.

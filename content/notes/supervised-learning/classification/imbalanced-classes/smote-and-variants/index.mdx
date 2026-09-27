@@ -1,0 +1,141 @@
+---
+title: SMOTE and variants
+kind: technique
+summary: 'SMOTE creates synthetic minority examples on segments joining a minority example to one of its $k$ nearest minority neighbours. Borderline-SMOTE generates only near the boundary, ADASYN more where the majority is denser. All assume the minority fills the space between neighbours.'
+tags: [class-imbalance, classification, resampling, data-augmentation, nearest-neighbours, worked-example]
+aliases: [SMOTE, synthetic minority oversampling, synthetic minority over-sampling technique, Borderline-SMOTE, ADASYN, adaptive synthetic sampling, SMOTE-NC]
+requires: [random-over-and-undersampling]
+partOf: [class-imbalance]
+related: [data-augmentation, ensemble-methods-for-imbalance, calibration-under-imbalance, threshold-moving]
+references: [chawla2002, han2005, he2008, blagus2013, elor2022, vandengoorbergh2022, he2009]
+status: draft
+updated: 2026-09-27
+---
+
+import { SmoteExplorer } from './SmoteExplorer'
+
+<Definition>
+The **synthetic minority oversampling technique (SMOTE)** adds artificial minority examples to a training set. For
+each minority example $\xvec_i$, it finds the $k$ nearest minority examples, picks one of them, $\xvec_j$, at random,
+and creates
+
+$$
+\xvec_{\text{new}} = \xvec_i + u\,(\xvec_j - \xvec_i), \qquad u \sim \Unif(0, 1),
+$$
+
+a point drawn uniformly on the segment between them. Repeating this $r$ times per minority example multiplies the
+minority class by $1 + r$ <Cite id="chawla2002" />.
+</Definition>
+
+## Problem
+
+Random oversampling duplicates minority examples. A flexible learner then fits a tiny region around each copy: a
+decision tree grows a leaf for it, and a 1-nearest-neighbour classifier claims only the copy's exact location. SMOTE
+spreads the new examples out, so the minority decision region grows to cover the space between minority examples
+rather than shrinking onto them. Chawla et al. combined it with undersampling of the majority and reported better ROC
+performance than either form of random resampling across several data sets <Cite id="chawla2002" />.
+
+## Mechanism
+
+### SMOTE
+
+Chawla et al. use $k = 5$ and express the amount of oversampling as a percentage: 200% creates $r = 2$ synthetic
+points per minority example, each from a neighbour chosen at random among the five <Cite id="chawla2002" />.
+Distances are Euclidean, so features must be on comparable scales. For nominal features, **SMOTE-NC** interpolates the
+continuous features and gives each nominal feature the value held by the majority of the $k$ neighbours
+<Cite id="chawla2002" />.
+
+### What the interpolation assumes
+
+A synthetic point is a valid minority example only if the segment between two minority examples lies inside the
+minority region. The assumption holds when the minority class occupies a connected, roughly convex region at the scale
+of $k$ neighbours. It fails in three ways, which the figure below shows.
+
+- **Separated clusters.** If the minority class has two clusters and $k$ is larger than the smaller cluster, some
+  segments cross the space between them, which may belong to the majority.
+- **Label noise.** A mislabelled minority point inside the majority region generates synthetic points around itself
+  and along segments reaching back to the real minority region.
+- **Overlap.** Where the classes overlap, synthetic points land among majority points and push the learnt boundary
+  into majority territory.
+
+### SMOTE shrinks the minority distribution
+
+Interpolation pulls points towards each other. Take two independent minority examples $X$ and $X'$ with mean $\muvec$
+and covariance $\Sigmamat$, and an independent $U \sim \Unif(0, 1)$. The synthetic point is
+$X_{\text{new}} = (1 - U)X + UX'$. Its mean is $\expect\brack{1 - U}\muvec + \expect\brack{U}\muvec = \muvec$. Centre
+the variables, $\tilde X = X - \muvec$ and $\tilde X' = X' - \muvec$, so that
+$X_{\text{new}} - \muvec = (1 - U)\tilde X + U\tilde X'$. The cross term has zero expectation because $\tilde X$ and
+$\tilde X'$ are independent with mean zero. Hence
+
+$$
+\cov(X_{\text{new}}) = \expect\brack{(1 - U)^2}\Sigmamat + \expect\brack{U^2}\Sigmamat
+= \paren{\tfrac13 + \tfrac13}\Sigmamat = \tfrac23\Sigmamat.
+$$
+
+For random pairs, SMOTE keeps the minority mean and shrinks its covariance to two thirds <Cite id="blagus2013" />.
+Nearest-neighbour pairs are closer together, so the shrinkage is milder. In a simulation with 200 standard-normal
+points in two dimensions, the variance of the synthetic points is 0.95, 0.89 and 0.80 times the original for
+$k = 1$, 5 and 20. The synthetic points are also correlated with the real ones they were made from, so they add less
+information than their number suggests. In high-dimensional data, Blagus and Lusa found that SMOTE helped few
+classifiers and biased $k$-nearest-neighbour classifiers towards the minority class <Cite id="blagus2013" />.
+
+### Borderline-SMOTE
+
+Borderline-SMOTE generates only from minority examples near the class boundary <Cite id="han2005" />. For each minority
+example it counts $m'$, the number of majority examples among its $m$ nearest neighbours in the whole training set.
+
+- $m' = m$: every neighbour is majority. The example is treated as **noise** and does not generate.
+- $m/2 \le m' < m$: the example is in **danger**, close to the boundary. It generates, using SMOTE's rule.
+- $m' < m/2$: the example is **safe**, inside the minority region, and does not generate.
+
+The variant concentrates new examples where the learner is most likely to err and ignores isolated points. A second
+form, Borderline-SMOTE2, also interpolates towards majority neighbours, with $u$ restricted to $(0, 0.5)$ so that the
+new point stays nearer the minority example <Cite id="han2005" />.
+
+### ADASYN
+
+ADASYN allocates synthetic examples in proportion to how hard each minority example is <Cite id="he2008" />. Let $G$
+be the total number of synthetic examples to generate. For each minority example $\xvec_i$, let $\Delta_i$ be the
+number of majority examples among its $K$ nearest neighbours, and $r_i = \Delta_i/K$. The normalised ratios
+$\hat r_i = r_i/\sum_j r_j$ sum to 1, and $\xvec_i$ generates $g_i = \hat r_i G$ synthetic examples with SMOTE's rule.
+Unlike Borderline-SMOTE, ADASYN keeps the points with $r_i = 1$ and gives them the largest share, so it amplifies label
+noise.
+
+<SmoteExplorer />
+
+## Worked example
+
+A minority example $\xvec_i = (1, 2)$ has neighbour $\xvec_j = (3, 1)$, and the draw is $u = 0.25$. The synthetic
+example is
+
+$$
+\xvec_{\text{new}} = (1, 2) + 0.25\,\paren{(3, 1) - (1, 2)} = (1, 2) + (0.5, -0.25) = (1.5, 1.75).
+$$
+
+With $m = 7$ for Borderline-SMOTE, a minority example with 7 majority neighbours is noise, one with 4, 5 or 6 is in
+danger, and one with 0 to 3 is safe. With $K = 7$ in ADASYN, examples with 7, 4 and 1 majority neighbours have $r_i$
+of 1, $4/7$ and $1/7$. If they were the only minority examples, $\hat r_i = 7/12$, $4/12$ and $1/12$, and with $G = 12$
+they would generate 7, 4 and 1 synthetic examples.
+
+## Cost
+
+Finding the $k$ nearest minority neighbours of $n_1$ minority examples costs $O(n_1^2 d)$ by brute force in $d$
+dimensions, less with a spatial index. Borderline-SMOTE and ADASYN search the whole training set, $O(n_1 n d)$. The
+learner then trains on the enlarged set.
+
+## Trade-offs
+
+- **Probabilities are distorted.** Adding synthetic positives raises the training prevalence exactly as oversampling
+  does. The correction from <NoteLink to="random-over-and-undersampling">random over- and undersampling</NoteLink>
+  applies only approximately, because synthetic points are not drawn from $p(\xvec \mid y = 1)$. Recalibrate on
+  held-out data at the deployment prevalence (see <NoteLink to="calibration-under-imbalance">calibration under
+  imbalance</NoteLink>). In clinical risk models, SMOTE produced strongly overestimated risks without improving
+  discrimination <Cite id="vandengoorbergh2022" />.
+- **Strong learners gain little.** Across many data sets, balancing with SMOTE helped weak classifiers but did not
+  improve gradient-boosted trees over training on the original data and tuning the threshold <Cite id="elor2022" />.
+- **Resample inside cross-validation.** Synthetic points built from a validation example leak it into training.
+- **Distances must mean something.** SMOTE needs scaled continuous features. For categorical, text or image data,
+  interpolation between examples rarely produces a valid example; class-aware
+  <NoteLink to="data-augmentation">data augmentation</NoteLink> is the analogue there.
+- **Cleaning.** Several combinations follow SMOTE with a cleaning step that removes examples whose neighbours are
+  mostly of the other class, to undo the damage in overlap regions <Cite id="he2009" />.

@@ -1,0 +1,184 @@
+---
+title: Threshold moving
+kind: technique
+summary: 'Threshold moving keeps a trained probabilistic classifier and changes only the cut-off on $p = P(y = 1 \mid \xvec)$. With error costs $c_{\text{FP}}$ and $c_{\text{FN}}$ the optimal cut-off is $c_{\text{FP}}/(c_{\text{FP}} + c_{\text{FN}})$; balanced accuracy is maximised at the prevalence $\pi$ and $F_1$ at half the best $F_1$.'
+tags: [class-imbalance, classification, decision-theory, thresholds, worked-example]
+aliases: [threshold tuning, cut-off tuning, F1-optimal threshold, post-hoc logit adjustment]
+requires: [bayes-theorem, confusion-matrix]
+partOf: [class-imbalance]
+related:
+  [
+    cost-sensitive-learning,
+    operating-points-and-equal-error-rate,
+    precision-recall-and-f-score,
+    accuracy-and-balanced-accuracy,
+    calibration-under-imbalance,
+    class-weights,
+  ]
+references: [elkan2001, lipton2014, menon2021, provost2000]
+status: draft
+updated: 2026-09-27
+---
+
+import { ThresholdExplorer } from './ThresholdExplorer'
+
+<Definition>
+**Threshold moving** replaces the default decision rule "predict positive when $p \ge 0.5$" with "predict positive when
+$p \ge t$", where $p = P(y = 1 \mid \xvec)$ is the classifier's estimated probability that example $\xvec$ is
+positive and $t \in (0, 1)$ is chosen for the task. The model is trained on the data as given. Only the decision
+changes. The threshold is derived from misclassification costs when they are known, or chosen to optimise a metric
+on held-out data when they are not <Cite id="elkan2001" />.
+</Definition>
+
+## Problem
+
+A classifier trained by maximum likelihood estimates the posterior $p$. The rule $p \ge 0.5$ minimises the expected
+number of errors, so it treats a false positive and a false negative as equally bad. Under class imbalance that rule
+rarely predicts the rare class. When positives make up a fraction $\pi = 0.01$ of cases, an example needs evidence
+strong enough to overturn prior odds of 99 to 1 before $p$ reaches 0.5. Most positives never get there. The resulting
+classifier has high accuracy and low recall. That outcome is correct for the 0-1 loss and wrong for most applications
+that care about the rare class <Cite id="provost2000" />.
+
+## Mechanism
+
+### The cost-optimal threshold
+
+Let $c_{\text{FP}} > 0$ be the cost of a false positive and $c_{\text{FN}} > 0$ the cost of a false negative, with
+correct decisions costing nothing. For an example with posterior $p$, predicting positive costs
+$(1 - p)\,c_{\text{FP}}$ in expectation, because the example is negative with probability $1 - p$. Predicting
+negative costs $p\,c_{\text{FN}}$. Predicting positive is the better choice when
+
+$$
+(1 - p)\,c_{\text{FP}} \le p\,c_{\text{FN}}
+\iff
+p \ge t^* = \frac{c_{\text{FP}}}{c_{\text{FP}} + c_{\text{FN}}}.
+$$
+
+Equal costs give $t^* = 0.5$. A false negative that costs 20 false positives gives $t^* = 1/21 \approx 0.048$. The
+threshold depends only on the ratio of the two costs. The general case, with costs on correct decisions and more than
+two classes, is in <NoteLink to="cost-sensitive-learning">cost-sensitive learning</NoteLink>.
+
+### Where the prevalence enters
+
+The prevalence $\pi = P(y = 1)$ does not appear in $t^*$. It is already inside $p$. By
+<NoteLink to="bayes-theorem">Bayes' theorem</NoteLink> in odds form, with likelihood ratio
+$\Lambda(\xvec) = p(\xvec \mid y = 1) / p(\xvec \mid y = 0)$,
+
+$$
+\frac{p}{1 - p} = \Lambda(\xvec)\,\frac{\pi}{1 - \pi}.
+$$
+
+The rule $p \ge t^*$ is therefore the rule
+
+$$
+\Lambda(\xvec) \ge \frac{t^*}{1 - t^*}\cdot\frac{1 - \pi}{\pi} = \frac{c_{\text{FP}}}{c_{\text{FN}}}\cdot\frac{1 - \pi}{\pi}.
+$$
+
+The evidence an example must carry grows with the imbalance $(1 - \pi)/\pi$ and shrinks with the cost ratio
+$c_{\text{FN}}/c_{\text{FP}}$. When the cost ratio equals the imbalance, the two cancel and the rule becomes
+$\Lambda(\xvec) \ge 1$: predict the class under which $\xvec$ is more likely. Threshold moving and resampling the
+training set both act on this one quantity, which is why they can reach the same decisions.
+
+### Thresholds that optimise a metric
+
+Many applications state a metric rather than costs. For a calibrated $p$, the best threshold for two common metrics
+follows from the posterior alone.
+
+**Balanced accuracy.** Balanced accuracy is the mean of the true-positive rate and the true-negative rate. Write $P$
+and $N$ for the numbers of positives and negatives, and FN and FP for the error counts. Then
+
+$$
+\text{BA} = \tfrac12\paren{1 - \tfrac{\text{FN}}{P}} + \tfrac12\paren{1 - \tfrac{\text{FP}}{N}}
+= 1 - \paren{\tfrac{1}{2P}\,\text{FN} + \tfrac{1}{2N}\,\text{FP}}.
+$$
+
+Maximising BA is minimising total cost with $c_{\text{FN}} = 1/(2P)$ and $c_{\text{FP}} = 1/(2N)$. These costs are
+inversely proportional to the class sizes, so their ratio is $c_{\text{FN}}/c_{\text{FP}} = N/P = (1 - \pi)/\pi$.
+The cost-optimal threshold is
+
+$$
+t^*_{\text{BA}} = \frac{1/N}{1/N + 1/P} = \frac{P}{P + N} = \pi.
+$$
+
+Balanced accuracy is maximised by predicting positive when the posterior exceeds the prevalence. By the odds form
+above, this is the rule $\Lambda(\xvec) \ge 1$. The same holds for the Youden index, which is $2\,\text{BA} - 1$.
+
+**$F_1$.** For a calibrated classifier the $F_1$-optimal threshold is half the largest achievable $F_1$
+<Cite id="lipton2014" />:
+
+$$
+t^*_{F_1} = \tfrac12 F_1^*.
+$$
+
+The threshold therefore lies below 0.5 whenever $F_1^* < 1$, and a classifier with $F_1^* = 0.4$ should predict
+positive from $p = 0.2$ upwards.
+
+<Derivation title="Why the F1-optimal threshold is half the optimal F1">
+Write $F_1 = 2\,\text{TP}/(2\,\text{TP} + \text{FP} + \text{FN})$. The number of positives
+$P = \text{TP} + \text{FN}$ is fixed, so the denominator is $D = \text{TP} + \text{FP} + P$, and the numerator is
+$M = 2\,\text{TP}$. Consider adding one more example, with posterior $p$, to the predicted positives. In expectation
+TP rises by $p$ and FP by $1 - p$, so $M$ rises by $2p$ and $D$ by 1. The new score exceeds the old one when
+
+$$
+\frac{M + 2p}{D + 1} > \frac{M}{D} \iff 2pD > M \iff p > \frac{M}{2D} = \frac{F_1}{2}.
+$$
+
+Adding examples in decreasing order of $p$ increases $F_1$ while each added $p$ exceeds half the current $F_1$, and
+decreases it afterwards. At the optimum, the last example added has $p = F_1^*/2$. The argument treats counts as
+expectations, so it holds for large test sets <Cite id="lipton2014" />.
+</Derivation>
+
+**More than two classes.** For $K$ classes with priors $\pi_k$, the rule that minimises the balanced error (the mean
+over classes of each class's error rate) predicts $\argmax_k P(y = k \mid \xvec)/\pi_k$. This is the multiclass form of
+$t^*_{\text{BA}} = \pi$. In logit form it subtracts $\log \pi_k$ from each logit, which is called post-hoc logit
+adjustment <Cite id="menon2021" />.
+
+<ThresholdExplorer />
+
+### When the scores are not probabilities
+
+The formulas above need calibrated probabilities. A classifier whose scores rank well but are miscalibrated, or one
+trained on resampled data, needs one of two remedies. The first is to recalibrate its scores (see
+<NoteLink to="calibration-under-imbalance">calibration under imbalance</NoteLink>) and then apply the formula. The
+second is to choose the threshold empirically: score a held-out set drawn at the deployment prevalence, evaluate the
+cost or metric at every distinct score, and keep the best. The empirical route needs no calibration. It does need a
+held-out set with enough positives: with 30 positives, one positive changes recall by 0.033, and the selected
+threshold moves by as much between resamples.
+
+## Worked example
+
+Scores are $s \sim \Gauss(0, 1)$ for negatives and $s \sim \Gauss(2, 1)$ for positives, and the prevalence is
+$\pi = 0.05$. The posterior is exactly logistic in $s$: $\operatorname{logit} p = \operatorname{logit}\pi + 2s - 2$.
+A false negative costs 20 times a false positive. Costs below are per case, in units of $c_{\text{FP}}$, and equal
+$(1 - \pi)\,\text{FPR} + 20\,\pi\,(1 - \text{TPR})$.
+
+| Threshold on $p$ | Threshold on $s$ | Recall | Precision | $F_1$ | Balanced accuracy | Cost per case |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0.5 (default) | 2.472 | 0.318 | 0.714 | 0.440 | 0.656 | 0.688 |
+| $t^* = 1/21 = 0.048$ | 0.974 | 0.847 | 0.213 | 0.340 | 0.841 | 0.309 |
+| $\pi = 0.05$ | 1.000 | 0.841 | 0.218 | 0.347 | 0.841 | 0.309 |
+| 0.259 | 1.947 | 0.521 | 0.516 | 0.518 | 0.748 | 0.503 |
+
+The default threshold misses 68% of positives and more than doubles the cost. The cost-optimal threshold $t^* = 0.048$
+cuts the cost from 0.688 to 0.309. Here the cost ratio 20 is close to the imbalance $0.95/0.05 = 19$, so $t^*$ nearly
+equals $\pi$ and the cost-optimal and balanced-accuracy-optimal thresholds almost coincide. The last row maximises
+$F_1$ at 0.518, and its threshold on $p$ is 0.259, half of 0.518, as derived above. Each metric picks a different
+operating point from the same model.
+
+## Cost
+
+Threshold moving adds no training cost. Choosing a threshold empirically needs one sort of the held-out scores,
+$O(n \log n)$ for $n$ held-out examples, and one pass to evaluate the metric at each distinct score.
+
+## Trade-offs
+
+- **It changes decisions, not rankings.** The ROC curve, AUROC and average precision are unchanged, because they
+  already sweep every threshold. A model that ranks badly stays bad.
+- **It needs calibrated probabilities or representative held-out data.** A formula threshold applied to
+  miscalibrated scores lands at the wrong operating point.
+- **It does not add information about the rare class.** When the minority class has few examples, the estimated
+  posterior is noisy in the minority region, and no threshold removes that variance.
+- **Compared with resampling,** threshold moving reaches the same decision rule without discarding or duplicating data
+  and keeps probabilities interpretable. Elkan recommends it over rebalancing for that reason <Cite id="elkan2001" />.
+  See <NoteLink to="random-over-and-undersampling">random over- and undersampling</NoteLink> and
+  <NoteLink to="class-weights">class weights</NoteLink> for the training-time alternatives.

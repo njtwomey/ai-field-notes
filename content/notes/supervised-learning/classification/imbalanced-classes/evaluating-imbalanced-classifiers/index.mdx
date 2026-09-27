@@ -1,0 +1,155 @@
+---
+title: Evaluating imbalanced classifiers
+kind: concept
+summary: 'Rates within each true class (TPR, FPR, balanced accuracy, AUROC) do not depend on the prevalence $\pi$; precision, $F_1$, MCC, average precision and accuracy do. Report each metric against its chance baseline and recompute precision at the deployment prevalence.'
+tags: [class-imbalance, metrics, classification, evaluation, worked-example]
+aliases: [imbalanced evaluation, evaluation under class imbalance, prevalence-adjusted precision, PR versus ROC, metric baselines under imbalance]
+requires: [confusion-matrix, bayes-theorem]
+partOf: [class-imbalance]
+related:
+  [
+    roc-curve-and-auc,
+    precision-recall-curve-and-average-precision,
+    precision-recall-and-f-score,
+    accuracy-and-balanced-accuracy,
+    matthews-correlation-coefficient,
+    log-loss-and-brier-score,
+    metric-confidence-intervals,
+    choosing-a-metric,
+  ]
+references: [saito2015, davis2006, provost2000, flach2015, he2009]
+status: draft
+updated: 2026-09-27
+---
+
+import { MetricsVsPrevalence } from './MetricsVsPrevalence'
+
+<Definition>
+Evaluating a classifier on imbalanced data means choosing metrics whose dependence on the prevalence
+$\pi = P(y = 1)$ is known and reporting each against its value for an uninformative classifier. A metric is
+**prevalence-invariant** if it depends only on the true-positive rate $\text{TPR} = P(\hat y = 1 \mid y = 1)$ and the
+false-positive rate $\text{FPR} = P(\hat y = 1 \mid y = 0)$, and **prevalence-dependent** otherwise. The definitions of
+the individual metrics are in <NoteLink to="confusion-matrix">confusion matrix</NoteLink> and the notes linked from
+it.
+</Definition>
+
+## Intuition
+
+A classifier's behaviour on positives and on negatives is a property of the classifier. How many of its alarms are
+real depends also on how many positives there are to find. A metric that mixes the two answers a question about one
+particular prevalence. That is right when the test set's prevalence is the deployment prevalence, and misleading when
+it is not.
+
+## Details
+
+### Why ROC is invariant to the class ratio
+
+TPR and FPR are each a probability conditional on the true class. Changing $\pi$ changes how many positives and
+negatives there are, but under label shift it does not change $p(\xvec \mid y)$, and so it does not change the
+distribution of scores within either class. Every point of the ROC curve, and every summary of it such as AUROC,
+depends on the classifier and the class-conditional distributions only. Balanced accuracy, $(\text{TPR} + 1 -
+\text{FPR})/2$, and informedness, $\text{TPR} - \text{FPR}$, are invariant for the same reason. See
+<NoteLink to="roc-curve-and-auc">ROC curve and AUC</NoteLink> and
+<NoteLink to="accuracy-and-balanced-accuracy">accuracy and balanced accuracy</NoteLink>.
+
+### Why precision is not
+
+Precision is a probability conditional on the prediction, $P(y = 1 \mid \hat y = 1)$. By Bayes' theorem,
+
+$$
+\text{precision} = \frac{P(\hat y = 1 \mid y = 1)\,P(y = 1)}{P(\hat y = 1)}
+= \frac{\pi\,\text{TPR}}{\pi\,\text{TPR} + (1 - \pi)\,\text{FPR}}.
+$$
+
+In odds form, $\frac{\text{precision}}{1 - \text{precision}} = \frac{\text{TPR}}{\text{FPR}}\cdot\frac{\pi}{1 - \pi}$.
+Precision odds are the prior odds of a positive multiplied by the classifier's likelihood ratio $\text{TPR}/\text{FPR}$.
+For precision to reach 0.5, the classifier needs $\text{FPR} \le \text{TPR}\,\pi/(1 - \pi)$. At $\pi = 0.001$ and
+$\text{TPR} = 0.9$, that is an FPR below 0.0009. Any metric that contains precision inherits the dependence on $\pi$:
+$F_1$, average precision and the precision-recall curve. The
+<NoteLink to="precision-recall-curve-and-average-precision">precision-recall curve</NoteLink> note shows the PR curve
+sinking with $\pi$ while the ROC curve stays put.
+
+Saito and Rehmsmeier argue that the PR plot is the more informative of the two on imbalanced data, because it shows
+the quantity that falls, the fraction of alarms that are real <Cite id="saito2015" />. The two curves contain the same
+information at a fixed prevalence: each ROC point maps to one PR point, and one curve dominates another in ROC space
+exactly when it dominates in PR space <Cite id="davis2006" />.
+
+### MCC and accuracy move too
+
+The <NoteLink to="matthews-correlation-coefficient">Matthews correlation coefficient</NoteLink> uses all four cells of
+the confusion matrix and is 0 for chance at every prevalence, but its value for a fixed classifier still falls as
+$\pi$ falls, because it contains precision and the negative predictive value. Accuracy,
+$\pi\,\text{TPR} + (1 - \pi)(1 - \text{FPR})$, tends to the true-negative rate as $\pi \to 0$, so it rises for any
+classifier with a low FPR as positives become rarer.
+
+<MetricsVsPrevalence />
+
+### Baselines
+
+A metric value means little without the value an uninformative classifier gets at the same prevalence.
+
+| Metric | Uninformative baseline | Value at $\pi = 0.01$ |
+| --- | --- | --- |
+| Accuracy | $\max(\pi, 1 - \pi)$, by always predicting the majority | 0.99 |
+| Balanced accuracy | 0.5 | 0.5 |
+| AUROC | 0.5 | 0.5 |
+| Precision, average precision | $\pi$, for a random ranking | 0.01 |
+| $F_1$ | $2\pi/(1 + \pi)$, by predicting every case positive | 0.0198 |
+| MCC | 0 | 0 |
+| Brier score | $\pi(1 - \pi)$, by predicting $\pi$ for every case | 0.0099 |
+
+The $F_1$ baseline follows from precision $\pi$ and recall 1: $F_1 = 2\pi/(\pi + 1)$. The Brier baseline follows from
+predicting the constant $q = \pi$: the squared error is $(1 - \pi)^2$ with probability $\pi$ and $\pi^2$ with
+probability $1 - \pi$, and $\pi(1 - \pi)^2 + (1 - \pi)\pi^2 = \pi(1 - \pi)$. A Brier score of 0.009 at $\pi = 0.01$
+is barely better than knowing only the prevalence. The <NoteLink to="log-loss-and-brier-score">log loss and Brier
+score</NoteLink> note covers skill scores relative to such a baseline. Precision-recall-gain curves rescale
+precision and recall relative to the always-positive classifier so that the baseline is fixed <Cite id="flach2015" />.
+
+### Comparing at the deployment prevalence
+
+A test set is often enriched with positives, or drawn at a different time, so its prevalence $\pi_{\text{test}}$
+differs from the deployment prevalence $\pi_{\text{dep}}$. The prevalence-invariant rates TPR and FPR estimated on the
+test set carry over. Precision does not, but it can be recomputed at $\pi_{\text{dep}}$ from them with the formula
+above. Two classifiers evaluated on test sets with different prevalences should be compared on TPR and FPR, or on
+precision recomputed at one common prevalence, never on raw precision, $F_1$ or average precision.
+
+### Protocol
+
+- **Stratify** train, validation and test splits by class, so that every fold contains positives.
+- **Count positives, not examples.** The standard error of a recall estimate from $n_1$ positives is
+  $\sqrt{r(1 - r)/n_1}$. With 50 positives and recall 0.8, it is 0.057. Report
+  <NoteLink to="metric-confidence-intervals">confidence intervals</NoteLink>.
+- **Report a ranking metric and an operating point.** AUROC or average precision describe the scores; precision and
+  recall at the chosen threshold describe the decisions. Choose the threshold on validation data, never on the test
+  set.
+- **Evaluate at the original prevalence.** Resampling or weighting belongs to training only.
+- **Prefer costs when they are known.** Expected cost at the chosen threshold is the metric the application cares
+  about <Cite id="provost2000" />.
+
+## Worked example
+
+A classifier has $\text{TPR} = 0.9$ and $\text{FPR} = 0.05$. Its metrics at three prevalences are:
+
+| $\pi$ | Precision | $F_1$ | MCC | Accuracy | Balanced accuracy |
+| --- | --- | --- | --- | --- | --- |
+| 0.5 | 0.947 | 0.923 | 0.851 | 0.925 | 0.925 |
+| 0.1 | 0.667 | 0.766 | 0.746 | 0.945 | 0.925 |
+| 0.01 | 0.154 | 0.263 | 0.360 | 0.9495 | 0.925 |
+
+At $\pi = 0.01$, precision is $0.01 \times 0.9/(0.01 \times 0.9 + 0.99 \times 0.05) = 0.009/0.0585 = 0.154$: 85%
+of alarms are false. Accuracy has risen to 0.9495 while every precision-based metric has collapsed. Balanced
+accuracy is the same in every row. A model validated on a balanced test set with precision 0.947 would deliver
+precision 0.154 in a deployment with 1% positives.
+
+## Assumptions
+
+- Prevalence invariance of TPR and FPR holds under label shift, when $p(\xvec \mid y)$ is the same in the test data and
+  the deployment. If the positives themselves change, no metric transfers.
+
+## Pitfalls
+
+- **Reading AUROC alone.** A high AUROC is compatible with useless precision at low prevalence, as the worked example
+  shows.
+- **Comparing average precision across data sets** with different prevalences. Compare each to its own baseline $\pi$.
+- **Macro-averaging over classes** gives the rare class equal weight; micro-averaging gives it almost none. State which
+  (see <NoteLink to="averaging-multiclass-metrics">averaging multiclass metrics</NoteLink>).

@@ -1,0 +1,139 @@
+---
+title: Focal loss
+kind: technique
+summary: 'Focal loss $-\alpha_t(1 - p_t)^\gamma\log p_t$ multiplies cross-entropy by $(1 - p_t)^\gamma$, where $p_t$ is the probability of the true class. Easy examples get almost no loss or gradient, so training is not swamped by the many easy negatives of an extremely imbalanced problem.'
+tags: [class-imbalance, loss-functions, deep-learning, object-detection, calibration, worked-example]
+aliases: [RetinaNet loss, alpha-balanced focal loss, focusing parameter, prior bias initialisation]
+requires: [cross-entropy-and-perplexity, logistic-regression]
+partOf: [class-imbalance]
+related: [class-weights, calibration-under-imbalance, log-loss-and-brier-score]
+references: [lin2017, charoenphakdee2021, mukhoti2020]
+status: draft
+updated: 2026-09-27
+---
+
+import { FocalLossCurves } from './FocalLossCurves'
+
+<Definition>
+For a binary label $y \in \set{0, 1}$ and a predicted probability $p = \sigma(z)$ of class 1, with logit $z$, let
+$p_t = p$ if $y = 1$ and $p_t = 1 - p$ if $y = 0$: the probability the model gives the true class. Cross-entropy is
+$-\log p_t$. The **focal loss** is
+
+$$
+\text{FL}(p_t) = -\alpha_t\,(1 - p_t)^\gamma\,\log p_t,
+$$
+
+with focusing parameter $\gamma \ge 0$ and class weight $\alpha_t = \alpha$ for positives and $1 - \alpha$ for
+negatives. With $\gamma = 0$ it is weighted cross-entropy <Cite id="lin2017" />.
+</Definition>
+
+## Problem
+
+Lin et al. introduced focal loss for one-stage object detectors, which classify on the order of $10^5$ candidate boxes
+per image, almost all of them background <Cite id="lin2017" />. Each easy background box is classified confidently and
+contributes a small loss. There are so many of them that together they dominate the total loss and its gradient. The
+few informative examples, the objects and the hard background boxes, then have little influence on training. Class
+weights alone do not fix this: they rescale all negatives equally, easy and hard alike.
+
+## Mechanism
+
+### The modulating factor
+
+The factor $(1 - p_t)^\gamma$ is close to 1 for a misclassified example ($p_t$ small) and close to 0 for a
+well-classified one ($p_t$ near 1). With $\gamma = 2$, an example with $p_t = 0.9$ has its loss multiplied by
+$0.1^2 = 0.01$, and one with $p_t = 0.968$ by about $0.001$ <Cite id="lin2017" />. The weight depends on the example's
+difficulty rather than its class. Class imbalance is addressed indirectly: in a heavily imbalanced problem most easy
+examples belong to the majority class.
+
+### The gradient
+
+Training follows the gradient of the loss with respect to the logit $z$. For $y = 1$, $p_t = \sigma(z)$ and
+$dp_t/dz = p_t(1 - p_t)$. For $y = 0$, $p_t = 1 - \sigma(z)$ and $dp_t/dz = -p_t(1 - p_t)$. In both cases the
+magnitude of the derivative is $p_t(1 - p_t)$ times the magnitude of the derivative with respect to $p_t$.
+
+For cross-entropy, $d(-\log p_t)/dp_t = -1/p_t$, so the gradient magnitude is $1 - p_t$.
+
+For focal loss with $\alpha_t = 1$, let $f(p_t) = -(1 - p_t)^\gamma\log p_t$. By the product rule,
+
+$$
+\frac{df}{dp_t} = \gamma(1 - p_t)^{\gamma - 1}\log p_t - \frac{(1 - p_t)^\gamma}{p_t}.
+$$
+
+Multiplying by $p_t(1 - p_t)$ and taking the magnitude, using $\log p_t < 0$,
+
+$$
+\abs{\frac{\partial\,\text{FL}}{\partial z}} = (1 - p_t)^\gamma\brack{(1 - p_t) - \gamma\,p_t\log p_t}.
+$$
+
+Dividing by the cross-entropy gradient $1 - p_t$ gives the factor by which focal loss scales an example's gradient:
+
+$$
+(1 - p_t)^\gamma\brack{1 + \gamma\,\frac{p_t\,(-\log p_t)}{1 - p_t}}.
+$$
+
+As $p_t \to 1$, $-\log p_t \approx 1 - p_t$, so the bracket tends to $1 + \gamma$ and the factor behaves like
+$(1 + \gamma)(1 - p_t)^\gamma$. Easy examples lose their gradient polynomially fast in $1 - p_t$. At $p_t = 0.9$ and
+$\gamma = 2$ the factor is $0.01 \times (1 + 2 \times 0.9 \times 0.105/0.1) = 0.029$, a 35-fold reduction. For a hard
+example, $p_t \to 0$, the factor tends to 1 and the gradient is unchanged.
+
+<FocalLossCurves />
+
+### The class weight $\alpha$
+
+$\alpha$ balances the classes as class weights do. Lin et al. found $\gamma = 2$ and $\alpha = 0.25$ worked best, which
+gives positives, the rare class, the smaller weight. The modulating factor already removes most of the easy
+negatives' loss, so the weight that best balances the remaining loss favours negatives <Cite id="lin2017" />.
+
+### Prior initialisation
+
+At the start of training a network with zero-mean output predicts $p = 0.5$ for every box. With about $10^5$ boxes of
+background, the loss from background is then enormous and training can diverge. Lin et al. initialise the bias of the
+final layer to $b = -\log\paren{(1 - \pi)/\pi}$, so that $\sigma(b) = \pi$ with $\pi = 0.01$, which is
+$b = \operatorname{logit}(0.01) = -4.595$ <Cite id="lin2017" />. The initial prediction then matches the prior of the
+rare class. This initialisation helps any model trained on imbalanced data, with or without focal loss.
+
+### Focal loss is not a proper scoring rule
+
+Cross-entropy is minimised in expectation by predicting the true posterior $\eta = P(y = 1 \mid \xvec)$. Focal loss is
+not. At a point with posterior $\eta$, a prediction $q$ has expected loss $\eta f(q) + (1 - \eta) f(1 - q)$. With
+$\gamma = 2$, the minimiser is $q^* = 0.538$ for $\eta = 0.6$, $q^* = 0.627$ for $\eta = 0.8$ and $q^* = 0.750$ for
+$\eta = 0.95$. The minimiser is pulled towards 0.5: focal loss rewards underconfidence. The expected loss is symmetric
+under swapping $q$ with $1 - q$ and $\eta$ with $1 - \eta$, so $q^* > 0.5$ exactly when $\eta > 0.5$ and decisions at
+0.5 are preserved. Charoenphakdee et al. prove that focal loss is classification-calibrated but not strictly proper,
+and give a transformation that recovers $\eta$ from $q^*$ <Cite id="charoenphakdee2021" />. For deep networks, whose
+cross-entropy training makes them overconfident, the underconfidence bias can partly cancel the overconfidence, and
+Mukhoti et al. found focal-loss networks better calibrated than cross-entropy ones <Cite id="mukhoti2020" />.
+
+## Worked example
+
+A detector sees $10^5$ easy background boxes with $p_t = 0.99$ and 100 object boxes with $p_t = 0.5$.
+
+| | Cross-entropy | Focal loss, $\gamma = 2$ |
+| --- | --- | --- |
+| Loss per easy negative | $-\log 0.99 = 0.01005$ | $0.01^2 \times 0.01005 = 1.005 \times 10^{-6}$ |
+| Total over easy negatives | 1005 | 0.1005 |
+| Loss per object | $-\log 0.5 = 0.693$ | $0.5^2 \times 0.693 = 0.173$ |
+| Total over objects | 69.3 | 17.3 |
+| Easy negatives : objects | 14.5 : 1 | 1 : 172 |
+
+Under cross-entropy the easy negatives contribute 14.5 times the loss of the objects. Under focal loss the objects
+contribute 172 times the loss of the easy negatives. The factor $\alpha$ is left at 1 here to isolate the effect of
+$\gamma$.
+
+## Cost
+
+Focal loss costs one extra power and multiplication per example over cross-entropy. It adds two hyperparameters,
+$\gamma$ and $\alpha$.
+
+## Trade-offs
+
+- **Probabilities are biased towards 0.5.** Use the outputs as scores, or recalibrate them on held-out data (see
+  <NoteLink to="calibration-under-imbalance">calibration under imbalance</NoteLink>).
+- **Hard examples include mislabelled ones.** Focal loss concentrates training on examples the model gets wrong,
+  which includes label noise.
+- **Compared with sampling hard examples.** Online hard example mining discards easy examples outright; focal loss
+  down-weights them smoothly. Lin et al. report that focal loss outperformed it for their detector
+  <Cite id="lin2017" />.
+- **Compared with class weights.** <NoteLink to="class-weights">Class weights</NoteLink> reweight by class and preserve
+  the proper scoring rule up to a known prior shift. Focal loss reweights by difficulty and does not. For a moderately
+  imbalanced tabular problem, a weighted or unweighted cross-entropy with a moved threshold is the simpler choice.
