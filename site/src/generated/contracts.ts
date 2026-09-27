@@ -25,6 +25,11 @@ export type Cell = number | string | null
  * via the `definition` "Penalty".
  */
 export type Penalty = 'l2' | 'l1' | 'elasticnet'
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "FontClass".
+ */
+export type FontClass = 'sans' | 'humanist' | 'serif' | 'didone' | 'slab' | 'mono'
 
 /**
  * Generated from python/mlc/core/contracts.py by `uv run mlc schema`. Do not edit.
@@ -42,6 +47,7 @@ export interface Contracts {
   ContingencyTable?: ContingencyTable
   RocCurve?: RocCurve
   ElasticNetPaths?: ElasticNetPaths
+  FontManifoldData?: FontManifoldData
   ImageSvd?: ImageSvd
   LarsPaths?: LarsPaths
   LassoPath?: LassoPath
@@ -396,6 +402,93 @@ export interface CoefficientPath {
    * Indexed [feature][penalty index].
    */
   coef: number[][]
+}
+/**
+ * Glyph outlines of real fonts in dense correspondence: one integer vector per font.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "FontManifoldData".
+ */
+export interface FontManifoldData {
+  /**
+   * Pinned repository commit the fonts come from.
+   */
+  source: string
+  cap_height: number
+  /**
+   * The word the figure sets.
+   */
+  display: string
+  fonts: FontInfo[]
+  glyphs: GlyphLayout[]
+  /**
+   * One row per font: x, y of every sample of every contour of every glyph, then advance widths.
+   */
+  vectors: number[][]
+  /**
+   * Sample index (into the display word's P, outer contour) of the foot-serif tip.
+   */
+  handle: number
+  /**
+   * Sample index on the left edge of the P's stem, held fixed while the serif is dragged.
+   */
+  anchor: number
+  dropped: DroppedFont[]
+}
+/**
+ * One training font: a family instanced at one weight, width and posture.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "FontInfo".
+ */
+export interface FontInfo {
+  family: string
+  /**
+   * Style label, e.g. 'Bold Italic'.
+   */
+  style: string
+  /**
+   * Design class, for colouring the latent space.
+   */
+  cls: 'sans' | 'humanist' | 'serif' | 'didone' | 'slab' | 'mono'
+  /**
+   * CSS weight, 100 to 900.
+   */
+  weight: number
+  /**
+   * Width as a percentage of normal.
+   */
+  width: number
+  italic: boolean
+}
+/**
+ * Where one character sits in every font vector.
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "GlyphLayout".
+ */
+export interface GlyphLayout {
+  char: string
+  /**
+   * Samples per contour: the outer contour first, then counters.
+   */
+  contours: number[]
+  /**
+   * Index in the vector of the first coordinate (x of sample 0 of contour 0).
+   */
+  offset: number
+  /**
+   * Index in the vector of the advance width.
+   */
+  advance: number
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "DroppedFont".
+ */
+export interface DroppedFont {
+  font: string
+  reason: string
 }
 /**
  * A test image and its thin SVD. The site rebuilds any rank-k approximation from these factors.

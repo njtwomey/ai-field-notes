@@ -77,6 +77,13 @@ export const categoryIcons = [
   'tags',
   'repeat',
   'arrow-right-left',
+  'grid',
+  'layers',
+  'message-square',
+  'sparkles',
+  'waves',
+  'share',
+  'fingerprint',
 ] as const
 export type CategoryIcon = (typeof categoryIcons)[number]
 

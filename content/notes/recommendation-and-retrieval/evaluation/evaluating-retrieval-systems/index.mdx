@@ -1,0 +1,195 @@
+---
+title: Evaluating retrieval and recommendation systems
+kind: concept
+summary: 'Rankers are evaluated in batch on a test collection of queries, judged documents and a metric; in user studies; or online from clicks on live traffic. Each metric models a different user, so which of two rankings is better depends on the metric.'
+tags: [information-retrieval, recommender-systems, evaluation, ranking, metrics, implicit-feedback, worked-example]
+aliases: [IR evaluation, evaluating search systems, Cranfield paradigm, Cranfield experiments, test collection, batch evaluation, user-study evaluation, topical relevance, user relevance, which ranking is better]
+requires: [precision-and-recall-at-k]
+related: [recommendation-metrics, mean-average-precision-and-mrr, ndcg, hit-rate-and-r-precision, click-models, explicit-and-implicit-feedback, interleaving, ab-test, overall-evaluation-criterion, unbiased-offline-evaluation, choosing-an-experimentation-method]
+references: [arguello2021evaluation, cleverdon1967cranfield, voorhees2005trec, saracevic2007relevance, kelly2009interactive, joachims2005clickthrough, joachims2007clicks, manning2008]
+status: draft
+updated: 2026-09-27
+---
+
+import { RankingDuel } from '../../../metrics/ranking-metrics/_shared/RankingDuel'
+
+<Callout variant="note" title="Source">
+The three-way view of evaluation (batch, user study, online) and the "which ranking is better?" comparison of two
+ranked lists A and B are adapted from Jaime Arguello's lecture "Evaluation Overview" for INLS 509: Information
+Retrieval at the University of North Carolina at Chapel Hill <Cite id="arguello2021evaluation" />. The two lists in the
+figure below reproduce the lists on his slides. The interactive figure, the derivations and the table of user models
+are this site's.
+</Callout>
+
+<Definition>
+Evaluating a retrieval or recommendation system means estimating how well its rankings satisfy the information needs of
+its users. There are three methods <Cite id="arguello2021evaluation" />. **Batch evaluation** scores rankings with a
+metric computed from a fixed **test collection**: a set of documents, a set of queries, and human judgements of which
+documents are relevant to each query. A **user study** observes recruited participants doing tasks with the system.
+**Online evaluation** splits live traffic between systems and compares them by logged behaviour such as clicks.
+</Definition>
+
+## Three methods, three trade-offs
+
+Batch evaluation is cheap to repeat and exactly reproducible, but it measures relevance as judged by assessors, out of
+context. A user study measures what users do and think, but for few people, in a laboratory. Online evaluation
+measures real behaviour at scale, but only for systems with many users, and through noisy signals. The table
+summarises the comparison.
+
+| | Batch (test collection) | User study | Online (live traffic) |
+| --- | --- | --- | --- |
+| Evidence | Assessors' relevance judgements and a metric | Observed behaviour, task success, questionnaires | Clicks, skips, dwell and other logs |
+| Cost per system compared | Near zero once the collection exists | High: participants, experimenter time, coding of data | Low per user, but needs a large user base |
+| Up-front cost | High: judging documents | Designing tasks and instruments | Experimentation infrastructure |
+| Realism | Low: judgements made out of context | Medium: real people, artificial setting and tasks | High: real users, real tasks, usually unaware of the test |
+| Reproducibility | Exact: same queries, same judgements | Hard: the study is rerun for each new system | Hard: traffic, users and content change |
+| Measures | Mostly topical relevance | Task-level success and perceived success | Behaviour, interpreted as satisfaction |
+| Typical use | Development: diagnose failures, detect small gains over a baseline | Understanding needs, behaviour and interface design | Launch decisions |
+
+The methods are complementary. Batch evaluation filters ideas cheaply; online evaluation confirms the survivors; user
+studies explain what the logs and the metrics cannot.
+
+## Batch evaluation: the Cranfield paradigm
+
+The test-collection method comes from the Cranfield experiments of Cyril Cleverdon in the 1960s, which compared
+indexing languages on a fixed collection of aeronautics papers, a fixed set of questions and exhaustive relevance
+judgements <Cite id="cleverdon1967cranfield" />. The method has four parts.
+
+1. **Queries.** A set of queries, because a system's quality is its average over the queries it will face. A single
+   query says almost nothing.
+2. **Descriptions.** Each query comes with a written description of the information being sought, because a two-word
+   query is ambiguous. For the query "pet therapy" the description might require documents to describe how
+   animal-assisted therapy is used, its benefits, its success or its regulation.
+3. **Judgements.** Human assessors read the description and label documents relevant or not, sometimes on a graded
+   scale.
+4. **A metric.** A function of the ranked list and the judgements. Every ranking metric assumes that the system should
+   place the most relevant documents where users are most likely to engage with them, which is at the top.
+
+Exhaustive judging is impossible for millions of documents. The Text REtrieval Conference (TREC), run by the US
+National Institute of Standards and Technology since 1992, judges only a **pool**: the union of the top-ranked
+documents of every participating system. Unjudged documents are treated as non-relevant <Cite id="voorhees2005trec" />.
+Pooling makes large collections affordable and makes recall an estimate, since relevant documents that no pooled
+system found are never counted.
+
+Once a collection exists, every new system is evaluated on the same queries and the same judgements. The experimental
+condition is fixed, so a difference in the metric is a difference between systems. That property lets researchers
+measure small improvements over a baseline and find the queries on which a system fails.
+
+## Topical relevance and user relevance
+
+Whether a document satisfies a user depends on many factors: its topic, but also its novelty to that user, its
+freshness, the authority of its source, its format, its reading level and the expertise it assumes
+<Cite id="saracevic2007relevance" />. **Topical relevance** is the first factor alone: the document is about the
+query's topic. **User relevance** includes all the others.
+
+An assessor judging a document against a written description, without the user's history or context, judges mostly
+topical relevance. Batch evaluation therefore measures mostly topical relevance
+<Cite id="arguello2021evaluation" />. A document the user has already read is topically relevant and useless to them.
+User studies and online evaluation see user relevance, because the users themselves act on the results.
+
+## Which ranking is better?
+
+Two systems, A and B, return ranked lists for the same query. Relevant documents in A sit at ranks 5, 7 and 11. Relevant
+documents in B sit at ranks 11, 13, 17, 18, 19, 21, 24 and 28. Assume the collection holds $R = 10$ relevant documents in total, so that each list misses some of them.
+Let $c_A(k)$ and $c_B(k)$ be the numbers of relevant documents in the top $k$ of each list. Each metric gives its own
+verdict.
+
+- **Rank of the first relevant document** (lower is better): A has 5, B has 11. A is better.
+- **Precision at 10**, $P@10 = c(10)/10$: A has $2/10 = 0.2$ (ranks 5 and 7), B has $0$. A is better.
+- **Precision at 1**: neither list has a relevant document at rank 1, so both score 0. The metric cannot separate them.
+- **Recall at 10**, $R@10 = c(10)/R$: A has $2/10 = 0.2$, B has $0$. A is better.
+- **Recall at 30**: A has $3/10 = 0.3$, B has $8/10 = 0.8$. B is better.
+
+The verdict reverses between $R@10$ and $R@30$, and the reversal is caused by the cut-off, not by the switch from
+precision to recall. At a fixed $k$, both metrics are the count $c(k)$ divided by a constant that is the same for the two
+lists: $k$ for precision and $R$ for recall. So
+
+$$
+P@k_A > P@k_B \iff c_A(k) > c_B(k) \iff R@k_A > R@k_B ,
+$$
+
+and precision and recall at the same cut-off always agree on which list is better. The verdict of either metric
+changes exactly where the cumulative counts cross. Here $c_A(k) = 3$ for all $k \ge 11$, while $c_B$ reaches 3 at
+$k = 17$ and 4 at $k = 18$. A is better for $5 \le k \le 16$, the lists tie at $k = 17$, and B is better from
+$k = 18$ on.
+
+Metrics that use every rank give yet another answer. Average precision sums the precision at the rank of each relevant
+document and divides by $R$:
+
+$$
+\text{AP}_A = \tfrac{1}{10}\paren{\tfrac{1}{5} + \tfrac{2}{7} + \tfrac{3}{11}} = 0.076, \qquad
+\text{AP}_B = \tfrac{1}{10}\paren{\tfrac{1}{11} + \tfrac{2}{13} + \tfrac{3}{17} + \cdots + \tfrac{8}{28}} = 0.177 .
+$$
+
+B is better, because the three documents A finds early are outweighed by the five more that B finds later.
+
+<RankingDuel preset="slides" />
+
+Each metric is a model of a user, and the verdict is the verdict for that user.
+
+| Metric | The user it models | Better list in the example ($k = 10$, $R = 10$) |
+| --- | --- | --- |
+| First relevant rank, reciprocal rank | Wants one good answer and stops there | A |
+| $P@k$ | Reads exactly the first $k$ results | Tie for $k \le 4$, A for $5 \le k \le 16$, B for $k \ge 18$ |
+| $R@k$ | Wants every relevant document among the first $k$, e.g. a patent searcher | Same as $P@k$ |
+| AP | Reads down to each relevant document in turn, and needs all of them | B |
+| nDCG@$k$ | Pays attention that decays with $\log_2$ of the rank | A at $k = 10$, B at $k = 30$ |
+| ERR@$k$ | Reads down and stops at the first satisfying result (a cascade) | A at $k = 10$ and at $k = 30$ |
+
+No metric is correct in general. The choice of metric is a claim about how the system's users read a ranked list, and
+it should be made before comparing systems, not after. See <NoteLink to="recommendation-metrics">metrics for
+recommendation and retrieval</NoteLink> for the definitions of the graded metrics.
+
+## User studies
+
+A user study gives participants one or more systems and a set of tasks, then records what they do, asks about their
+actions and reasoning, measures success (task completion, time taken) and measures perceived success with
+questionnaires <Cite id="kelly2009interactive" />. Search is done to accomplish a larger task, and a study can
+manipulate the task and watch how search behaviour changes.
+
+User studies are expensive: participants are paid, and the experimenter's time and the coding of observations cost more.
+Samples are small and drawn from narrow populations, so results generalise poorly. The laboratory is not the user's
+normal environment. Every new system needs a new study. Asking users directly which system they prefer, or what they
+need, is not a substitute for observing them: stated preferences and recalled behaviour differ from actual behaviour.
+
+## Online evaluation and implicit feedback
+
+A service with an existing user population can send a fraction $x$ of its query traffic to system A and a fraction $y$
+to system B, then compare the systems on the logged behaviour of each group. This is an
+<NoteLink to="ab-test">A/B test</NoteLink>. Usage is natural, users are in their own context and usually do not know a
+test is running, and the number of users can be very large.
+
+The logged signals are <NoteLink to="explicit-and-implicit-feedback">implicit feedback</NoteLink>. A click is a
+surrogate for perceived relevance; a skip, a result passed over above a click, is a surrogate for perceived
+non-relevance. Both surrogates are noisy.
+
+- **Clicks are biased by position.** Users click high-ranked results more because they trust the ranking, whatever the
+  results' quality. Eye-tracking shows that clicks are informative as relative judgements (a clicked result is
+  preferred to the unclicked results above it) but unreliable as absolute ones <Cite id="joachims2005clickthrough" />
+  <Cite id="joachims2007clicks" />. <NoteLink to="click-models">Click models</NoteLink> make the position effect
+  explicit.
+- **No click is ambiguous.** A user who reads the results and closes the browser may have found the answer in a
+  snippet, found nothing useful, or been interrupted. The absence of a click is a noisy surrogate for non-relevance.
+- **A click is not satisfaction.** A click on a misleading snippet followed by a quick return to the results is a bad
+  outcome. Dwell time and query reformulations help separate the two.
+
+Online evaluation requires a service with many users, enough that a worse variant can be exposed to some of them. It
+requires knowing which implicit signals correlate with good and bad experiences, which is the problem of choosing an
+<NoteLink to="overall-evaluation-criterion">overall evaluation criterion</NoteLink>. Experiments are hard to repeat,
+because the traffic, the users and the content change. <NoteLink to="interleaving">Interleaving</NoteLink> reduces the
+number of users needed by showing each user a merged list from both systems, and
+<NoteLink to="unbiased-offline-evaluation">unbiased offline evaluation</NoteLink> reuses logged clicks to estimate how a
+new system would have performed.
+
+## Pitfalls
+
+- **One metric, one user.** Reporting a single metric hides that another plausible user would prefer the other system.
+  Report the metric that matches the task, plus one that models a different reader.
+- **Reporting the cut-off that wins.** Because verdicts flip with $k$, choosing $k$ after seeing the results is a form
+  of selective reporting. Fix $k$ in advance.
+- **Incomplete judgements.** With pooled judgements, a new system that finds relevant documents no pooled system found
+  is scored as if they were non-relevant. Recall and AP are biased against novel systems.
+- **Averages hide queries.** A mean over queries can improve while many queries get worse. Compare systems with paired
+  tests over queries and inspect per-query differences.
+- **Offline gains that do not transfer.** A batch improvement in topical relevance may not change user behaviour, and
+  an online gain in clicks may not reflect satisfaction.

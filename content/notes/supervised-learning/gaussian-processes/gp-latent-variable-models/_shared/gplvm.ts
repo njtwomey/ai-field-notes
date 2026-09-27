@@ -1,7 +1,8 @@
 /**
  * A small Gaussian process latent variable model for the figures in this category: squared exponential kernel,
  * a standard normal prior on the latent points, optional back constraints, and Adam on the log posterior. Matrices
- * are at most a few dozen rows, so dense loops are enough.
+ * are at most a few dozen rows, so dense loops are enough; the data may have thousands of columns, which enter only
+ * through YYᵀ and the predictive mean.
  */
 import { rng } from '@/lib/math'
 import { cholesky, cholSolve, logDet, type Matrix } from '../../_shared/gp'
@@ -36,7 +37,22 @@ export type FitOptions = {
 
 const sqDist = (a: number[], b: number[]) => a.reduce((s, v, i) => s + (v - b[i]) ** 2, 0)
 
-export const outer = (Y: Matrix): Matrix => Y.map((a) => Y.map((b) => a.reduce((s, v, i) => s + v * b[i], 0)))
+/** YYᵀ. Plain loops over the symmetric half: rows can be thousands of entries long (the font manifold). */
+export function outer(Y: Matrix): Matrix {
+  const n = Y.length
+  const out: Matrix = Array.from({ length: n }, () => new Array<number>(n).fill(0))
+  for (let i = 0; i < n; i++) {
+    const a = Y[i]
+    for (let j = 0; j <= i; j++) {
+      const b = Y[j]
+      let s = 0
+      for (let d = 0; d < a.length; d++) s += a[d] * b[d]
+      out[i][j] = s
+      out[j][i] = s
+    }
+  }
+  return out
+}
 
 /** A⁻¹ from the Cholesky factor of A. */
 function inverse(l: Matrix): Matrix {
@@ -50,8 +66,18 @@ function inverse(l: Matrix): Matrix {
   return cols[0].map((_, i) => cols.map((c) => c[i]))
 }
 
-const matMul = (a: Matrix, b: Matrix): Matrix =>
-  a.map((row) => b[0].map((_, j) => row.reduce((s, v, k) => s + v * b[k][j], 0)))
+function matMul(a: Matrix, b: Matrix): Matrix {
+  const m = b[0].length
+  return a.map((row) => {
+    const out = new Array<number>(m).fill(0)
+    for (let k = 0; k < row.length; k++) {
+      const v = row[k]
+      const bk = b[k]
+      for (let j = 0; j < m; j++) out[j] += v * bk[j]
+    }
+    return out
+  })
+}
 
 /** Eigenvalues (descending) and eigenvectors (columns) of a symmetric matrix, by cyclic Jacobi rotations. */
 export function eigSymmetric(a: Matrix): { values: number[]; vectors: Matrix } {
@@ -153,11 +179,25 @@ function objective(X: Point[], logEll: number, logSf: number, logSn: number, YYt
   return { logPost, gX, gEll, gSf, gSn }
 }
 
-/** Fits a GP-LVM with Q = 2 by Adam ascent on the log posterior, recording snapshots along the way. */
-export function fitGplvm(Y: Matrix, X0: Point[], opts: FitOptions): GplvmFit {
-  const { iterations, snapshotEvery, learningRate = 0.05, backConstraint, initialAIsX0 = false } = opts
+/** Settings of an incremental fit: everything in FitOptions except the schedule. */
+export type FitterOptions = Omit<FitOptions, 'iterations' | 'snapshotEvery'>
+
+export type GplvmFitter = {
+  /** Adam steps taken so far. */
+  readonly iteration: number
+  /** Takes n more Adam steps (n = 0 is allowed) and returns the state reached. */
+  run: (n: number) => GplvmState
+}
+
+/**
+ * A GP-LVM fit with Q = 2 by Adam ascent on the log posterior, advanced a few steps at a time. A widget can run it in
+ * chunks between frames, so that a fit on large data never blocks the page.
+ */
+export function gplvmFitter(Y: Matrix, X0: Point[], opts: FitterOptions = {}): GplvmFitter {
+  const { learningRate = 0.05, backConstraint, initialAIsX0 = false } = opts
   const n = Y.length
   const D = Y[0].length
+  // The likelihood sees the data only through the n × n matrix YYᵀ, so each step costs O(n³) whatever D is.
   const YYt = outer(Y)
   // With back constraints the free parameters are A, and X = K_bc A. A starts where K_bc A reproduces X0.
   const Kbc = backConstraint ? Y.map((a) => Y.map((b) => Math.exp((-backConstraint / 2) * sqDist(a, b)))) : undefined
@@ -184,22 +224,12 @@ export function fitGplvm(Y: Matrix, X0: Point[], opts: FitOptions): GplvmFit {
   const size = 2 * n + 3
   const m1 = new Array<number>(size).fill(0)
   const m2 = new Array<number>(size).fill(0)
-  const snapshots: GplvmState[] = []
-  const its: number[] = []
-  for (let t = 0; t <= iterations; t++) {
+  let t = 0
+  const evaluate = () => {
     const X = latent()
-    const o = objective(X, h[0], h[1], h[2], YYt, D)
-    if (t % snapshotEvery === 0) {
-      snapshots.push({
-        X: X.map((p): Point => [p[0], p[1]]),
-        ell: Math.exp(h[0]),
-        sf: Math.exp(h[1]),
-        sn: Math.exp(h[2]),
-        logPost: o.logPost,
-      })
-      its.push(t)
-    }
-    if (t === iterations) break
+    return { X, o: objective(X, h[0], h[1], h[2], YYt, D) }
+  }
+  const update = (o: ReturnType<typeof objective>) => {
     const gP = Kbc
       ? Kbc.map((r): Point => [
           r.reduce((s, v, m) => s + v * o.gX[m][0], 0),
@@ -218,6 +248,38 @@ export function fitGplvm(Y: Matrix, X0: Point[], opts: FitOptions): GplvmFit {
     }
     P = Array.from({ length: n }, (_, i): Point => [params[2 * i], params[2 * i + 1]])
     h = params.slice(2 * n)
+    t++
+  }
+  let current = evaluate()
+  return {
+    get iteration() {
+      return t
+    },
+    run: (steps) => {
+      for (let k = 0; k < steps; k++) {
+        update(current.o)
+        current = evaluate()
+      }
+      return {
+        X: current.X.map((p): Point => [p[0], p[1]]),
+        ell: Math.exp(h[0]),
+        sf: Math.exp(h[1]),
+        sn: Math.exp(h[2]),
+        logPost: current.o.logPost,
+      }
+    },
+  }
+}
+
+/** Fits a GP-LVM with Q = 2 by Adam ascent on the log posterior, recording a snapshot every `snapshotEvery` steps. */
+export function fitGplvm(Y: Matrix, X0: Point[], opts: FitOptions): GplvmFit {
+  const { iterations, snapshotEvery, ...rest } = opts
+  const fitter = gplvmFitter(Y, X0, rest)
+  const snapshots: GplvmState[] = [fitter.run(0)]
+  const its: number[] = [0]
+  for (let t = snapshotEvery; t <= iterations; t += snapshotEvery) {
+    snapshots.push(fitter.run(snapshotEvery))
+    its.push(t)
   }
   return { snapshots, iterations: its }
 }
@@ -227,6 +289,8 @@ export type Predictor = {
   mean: (x: Point) => number[]
   /** Posterior standard deviation of each output of f at x, noise excluded. The same for every output. */
   sd: (x: Point) => number
+  /** Posterior mean of the chosen outputs only: O(n) per output rather than O(nD) for the whole vector. */
+  meanAt: (x: Point, dims: number[]) => number[]
   /** Gradient of output d's posterior mean with respect to x. */
   meanGrad: (x: Point, d: number) => Point
 }
@@ -245,6 +309,10 @@ export function predictor(Y: Matrix, s: GplvmState): Predictor {
     mean: (x) => {
       const k = kvec(x)
       return alpha[0].map((_, d) => k.reduce((acc, km, m) => acc + km * alpha[m][d], 0))
+    },
+    meanAt: (x, dims) => {
+      const k = kvec(x)
+      return dims.map((d) => k.reduce((acc, km, m) => acc + km * alpha[m][d], 0))
     },
     sd: (x) => {
       const k = kvec(x)

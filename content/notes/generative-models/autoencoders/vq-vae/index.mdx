@@ -1,0 +1,128 @@
+---
+title: VQ-VAE
+kind: concept
+summary: A VQ-VAE replaces the continuous latent of a VAE by the nearest vector of a learned codebook. Gradients skip the lookup by the straight-through estimator, codebook and commitment losses keep codes and encoder outputs close, and a prior over code indices is fitted afterwards.
+tags: [deep-learning, generative-models, representation-learning, vector-quantisation, discrete-latents, worked-example]
+aliases: [vector-quantised variational autoencoder, vector quantized VAE, VQ-VAE-2, codebook, commitment loss, straight-through estimator, neural discrete representation learning]
+requires: [variational-autoencoder]
+related: [k-means, quantisation, autoregressive-generative-models, latent-diffusion, gumbel-max-trick]
+references: [oord2017, razavi2019, bengio2013b, esser2021]
+status: draft
+updated: 2026-09-27
+---
+
+import { VqVaeDiagram } from './VqVaeDiagram'
+
+<Definition>
+A **vector-quantised variational autoencoder** (VQ-VAE) has an encoder $\zvec_e(\xvec)$, a **codebook** of $K$
+vectors $\evec_1, \dots, \evec_K \in \reals^D$, and a decoder $p_{\thetavec}(\xvec \mid \zvec_q)$
+<Cite id="oord2017" />. Each encoder output vector is replaced by its nearest codebook entry,
+
+$$
+\zvec_q(\xvec) = \evec_{k^\star}, \qquad k^\star = \argmin_{j}\, \norm{\zvec_e(\xvec) - \evec_j}^2,
+$$
+
+and the model minimises
+
+$$
+L = -\log p_{\thetavec}(\xvec \mid \zvec_q) + \norm{\mathrm{sg}[\zvec_e] - \evec_{k^\star}}^2 + \beta\,
+\norm{\zvec_e - \mathrm{sg}[\evec_{k^\star}]}^2,
+$$
+
+where $\mathrm{sg}[\cdot]$ is the stop-gradient operator: identity in the forward pass, zero derivative in the backward
+pass. The prior over codes is trained separately, after the autoencoder.
+</Definition>
+
+## Why discrete latents
+
+Many kinds of data are naturally described by discrete symbols: phonemes in speech, words in text, object categories
+in images. A discrete latent also has a simple prior: a categorical distribution over $K$ indices, which an
+<NoteLink to="autoregressive-generative-models">autoregressive model</NoteLink> can fit exactly by maximum likelihood.
+A Gaussian-latent <NoteLink to="variational-autoencoder">VAE</NoteLink> with an expressive decoder tends to suffer
+posterior collapse. The VQ-VAE avoids it because its KL term is a constant, as shown below, so there is no pressure
+towards an uninformative code <Cite id="oord2017" />.
+
+In image models the encoder is convolutional and outputs a grid of vectors, e.g. $32 \times 32$ vectors of dimension
+$D$ for a $128 \times 128$ image. Each grid position is quantised separately, so an image becomes a $32 \times 32$ grid
+of integers in $\set{1, \dots, K}$.
+
+<VqVaeDiagram />
+
+## The VAE view and its constant KL term
+
+Read the quantisation as a posterior that is one-hot: $q(k \mid \xvec) = 1$ for $k = k^\star$ and 0 otherwise. During
+training the prior is uniform, $p(k) = 1/K$. The KL term of the ELBO is then
+
+$$
+\KL\paren{q(k \mid \xvec) \,\|\, p(k)} = \sum_k q(k \mid \xvec) \log \frac{q(k \mid \xvec)}{1/K} = 1 \cdot \log
+\frac{1}{1/K} = \log K.
+$$
+
+It does not depend on any parameter and drops out of training. The ELBO reduces to the reconstruction term.
+
+## The three loss terms
+
+**Reconstruction.** $-\log p_{\thetavec}(\xvec \mid \zvec_q)$ trains the decoder and, through the straight-through
+estimator, the encoder.
+
+**Straight-through gradient.** The $\argmin$ is piecewise constant, so its derivative is zero almost everywhere. The
+VQ-VAE copies the gradient of the loss with respect to the decoder input $\zvec_q$ directly to the encoder output
+$\zvec_e$, as if quantisation were the identity <Cite id="oord2017" />. In code, this is
+$\zvec_q \leftarrow \zvec_e + \mathrm{sg}[\zvec_q - \zvec_e]$: the forward value is $\zvec_q$, and the backward pass sees
+only $\zvec_e$. The approach is the straight-through estimator of Bengio et al. <Cite id="bengio2013b" />. It is
+biased but works because $\zvec_q$ and $\zvec_e$ are close, which the next two terms ensure.
+
+**Codebook loss.** $\norm{\mathrm{sg}[\zvec_e] - \evec_{k^\star}}^2$ moves the selected codebook vector towards the
+encoder outputs assigned to it. The reconstruction gradient never reaches the codebook, because the straight-through
+copy bypasses it, so this term is the only one that trains the codebook. It is a stochastic version of the
+<NoteLink to="k-means">k-means</NoteLink> centroid update. Replacing it by an exponential moving average of the
+assigned encoder outputs is a common alternative <Cite id="oord2017" />.
+
+**Commitment loss.** $\beta\norm{\zvec_e - \mathrm{sg}[\evec_{k^\star}]}^2$ keeps the encoder outputs near their chosen
+codes. Without it, the encoder output could drift far from every codebook vector while the codebook chases it. Van den
+Oord et al. used $\beta = 0.25$ and found results robust to values from 0.1 to 2 <Cite id="oord2017" />.
+
+## The prior, fitted afterwards
+
+After the autoencoder is trained, every training image is encoded to its grid of indices. A separate autoregressive
+model, a PixelCNN for images or a WaveNet for audio, is trained by maximum likelihood on these grids. To generate,
+sample a grid of indices from the prior, look up the codebook vectors and decode <Cite id="oord2017" />. The two-stage
+split means the autoencoder handles local detail and the prior handles global structure, on a grid many times smaller
+than the image.
+
+## VQ-VAE-2
+
+VQ-VAE-2 uses a hierarchy of two latent grids <Cite id="razavi2019" />. For $256 \times 256$ images, a top grid of
+$32 \times 32$ codes captures global structure such as shape and layout. A bottom grid of $64 \times 64$ codes,
+conditioned on the top, captures local texture. Separate PixelCNN priors with self-attention are fitted to each level,
+the bottom one conditioned on the top. The model generated ImageNet samples whose quality and diversity were
+competitive with GANs of the time <Cite id="razavi2019" />.
+
+Later work kept the two-stage recipe and changed its parts. VQGAN adds an adversarial and a perceptual loss to the
+autoencoder and fits a transformer as the prior <Cite id="esser2021" />. The same learned discrete codes serve as image
+tokens for large autoregressive image and multimodal models.
+
+## Worked example
+
+A codebook has $K = 3$ entries in $D = 2$: $\evec_1 = (0, 0)$, $\evec_2 = (1, 0)$ and $\evec_3 = (0, 1)$. The encoder
+outputs $\zvec_e = (0.8, 0.3)$. The squared distances are
+
+$$
+\norm{\zvec_e - \evec_1}^2 = 0.73, \qquad \norm{\zvec_e - \evec_2}^2 = 0.04 + 0.09 = 0.13, \qquad \norm{\zvec_e -
+\evec_3}^2 = 0.64 + 0.49 = 1.13.
+$$
+
+The nearest entry is $\evec_2$, so $\zvec_q = (1, 0)$ and the index 2 is stored. The codebook loss is $0.13$; its
+gradient moves $\evec_2$ towards $(0.8, 0.3)$. With $\beta = 0.25$ the commitment loss is $0.25 \times 0.13 = 0.0325$;
+its gradient moves $\zvec_e$ towards $(1, 0)$. The decoder receives $(1, 0)$, and whatever gradient reaches $(1, 0)$ is
+applied unchanged to $\zvec_e$.
+
+## Pitfalls
+
+- **Codebook collapse.** Only a few codebook vectors get selected, and unselected vectors receive no gradient and
+  never recover. Remedies include initialising the codebook from encoder outputs with k-means, resetting unused
+  entries to random encoder outputs, and lower-dimensional or normalised codes.
+- **Bias of the straight-through gradient.** The encoder is updated as if quantisation were absent. The error grows
+  with the distance between $\zvec_e$ and $\zvec_q$.
+- **Sampling needs the second stage.** Decoding uniformly random indices gives noise. The generative quality depends
+  on the prior as much as on the autoencoder.

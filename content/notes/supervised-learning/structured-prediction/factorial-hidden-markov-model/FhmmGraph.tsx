@@ -1,46 +1,53 @@
 import { useState } from 'react'
 import { MathText } from '@/components/content/MathText'
-import { GraphDiagram, Interactive, ParamSwitch, type GraphEdge, type GraphNode } from '@/components/viz'
-import { POSITIONS, at } from '../_shared/chain-graph'
+import { Diagram } from '@/components/diagram/Diagram'
+import { link, variable } from '@/components/diagram/components'
+import type { DiagramEdge, DiagramNode } from '@/components/diagram/types'
+import { Interactive, ParamSwitch } from '@/components/viz'
+import { POSITIONS } from '../_shared/chain-graph'
 
 const CHAINS = [1, 2, 3]
-const ROW = 0.85
+const ROW = 1.5
+const STEP = 3.2
+// Each chain sits a little further left than the one above, so that the edges from the upper chains down to x_n
+// pass beside the lower chains' nodes rather than through them.
+const SHIFT = 0.8
 
-const NODES: GraphNode[] = [
+const NODES: DiagramNode[] = [
   ...CHAINS.flatMap((m, r) =>
-    POSITIONS.map((p, i) => ({ id: `y${m}${i}`, label: `y^{(${m})}_{${p}}`, x: at(i), y: r * ROW })),
+    POSITIONS.map((p, i) =>
+      variable(`y${m}${i}`, STEP * i - SHIFT * r, r * ROW, `$y^{(${m})}_{${p}}$`, { w: 1.15, h: 1.15 }),
+    ),
   ),
-  ...POSITIONS.map((p, i) => ({
-    id: `x${i}`,
-    label: `x_{${p}}`,
-    x: at(i) + 0.55,
-    y: CHAINS.length * ROW + 0.2,
-    kind: 'observed' as const,
-  })),
+  ...POSITIONS.map((p, i) =>
+    variable(`x${i}`, STEP * i + 0.9, CHAINS.length * ROW + 0.3, `$x_{${p}}$`, { w: 1.15, h: 1.15, filled: true }),
+  ),
 ]
 
-const DIRECTED: GraphEdge[] = CHAINS.flatMap((m) => [
-  { source: `y${m}0`, target: `y${m}1` },
-  { source: `y${m}1`, target: `y${m}2` },
-  ...[0, 1, 2].map((i) => ({ source: `y${m}${i}`, target: `x${i}` })),
+const DIRECTED: DiagramEdge[] = CHAINS.flatMap((m) => [
+  link(`y${m}0`, `y${m}1`),
+  link(`y${m}1`, `y${m}2`),
+  ...[0, 1, 2].map((i) => link(`y${m}${i}`, `x${i}`)),
 ])
 
 // Moralising at each x_n joins every pair of its parents, the states of all chains at position n.
-const MORAL: GraphEdge[] = [0, 1, 2].flatMap((i) =>
+const MORAL: DiagramEdge[] = [0, 1, 2].flatMap((i) =>
   [
     [1, 2],
     [2, 3],
     [1, 3],
-  ].map(([a, b]) => ({
-    source: `y${a}${i}`,
-    target: `y${b}${i}`,
-    directed: false,
-    dashed: true,
-    highlight: true,
-    // The edge from chain 1 to chain 3 bends around chain 2.
-    curveness: b - a > 1 ? 0.45 : 0,
-  })),
+  ].map(([a, b]) =>
+    link(`y${a}${i}`, `y${b}${i}`, false, {
+      dashed: true,
+      highlight: true,
+      // The edge from chain 1 to chain 3 bends around chain 2.
+      ...(b - a > 1 && { route: 'curve' as const, bend: 1 }),
+    }),
+  ),
 )
+
+const PLAIN = { unit: 44, nodes: NODES, edges: DIRECTED }
+const MORALISED = { unit: 44, nodes: NODES, edges: [...DIRECTED, ...MORAL] }
 
 /** M = 3 hidden chains share each observation; moralising shows how observing x_n couples them. */
 export function FhmmGraph() {
@@ -59,12 +66,7 @@ export function FhmmGraph() {
       }
       controls={<ParamSwitch label="couple chains given x" checked={moral} onChange={setMoral} />}
     >
-      <GraphDiagram
-        nodes={NODES}
-        edges={moral ? [...DIRECTED, ...MORAL] : DIRECTED}
-        height={300}
-        ariaLabel="Factorial hidden Markov model with three chains"
-      />
+      <Diagram spec={moral ? MORALISED : PLAIN} ariaLabel="Factorial hidden Markov model with three chains" />
     </Interactive>
   )
 }

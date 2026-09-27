@@ -1,0 +1,114 @@
+---
+title: Multi-head attention
+kind: concept
+summary: Multi-head attention runs $h$ scaled dot-product attentions in parallel on learned projections of width $d/h$ and merges their outputs with a final projection. It costs about as much as one full-width head, and each position gathers $h$ separate weighted averages.
+tags: [deep-learning, transformer, attention, worked-example]
+aliases: [MHA, attention heads, attention head, head dimension]
+requires: [scaled-dot-product-attention]
+partOf: [transformer]
+related: [multi-query-and-grouped-query-attention, multi-head-latent-attention, kv-cache, graph-attention-network]
+references: [vaswani2017, michel2019]
+status: draft
+updated: 2026-09-27
+---
+
+import { MultiHeadDiagram } from './MultiHeadDiagram'
+
+<Definition>
+Multi-head attention with $h$ heads maps queries, keys and values of model width $d$ to
+$$
+\operatorname{MultiHead}(\Qmat, \Kmat, \Vmat) = [\text{head}_1 \,\Vert\, \cdots \,\Vert\, \text{head}_h]\, \Wmat_O,
+\qquad \text{head}_i = \operatorname{Attention}(\Qmat \Wmat_Q^{i}, \Kmat \Wmat_K^{i}, \Vmat \Wmat_V^{i}),
+$$
+where $\Wmat_Q^i, \Wmat_K^i \in \reals^{d \times d_k}$, $\Wmat_V^i \in \reals^{d \times d_v}$,
+$\Wmat_O \in \reals^{h d_v \times d}$, $\Vert$ concatenates along the feature axis, and $\operatorname{Attention}$ is
+<NoteLink to="scaled-dot-product-attention">scaled dot-product attention</NoteLink>. Usually $d_k = d_v = d/h$
+<Cite id="vaswani2017" />.
+</Definition>
+
+<MultiHeadDiagram />
+
+## Intuition
+
+One attention head gives each position one set of weights over the other positions, and so one weighted average. A
+word in a sentence may need several things at once: its syntactic head, the noun a pronoun refers to, the previous
+word. A single softmax must compromise between them.
+
+Several heads remove the compromise. Each head has its own projections, so it compares positions in its own subspace
+and produces its own weights. One head can attend to the previous token while another attends to a distant antecedent.
+The output projection $\Wmat_O$ mixes the heads' results back into one vector per position.
+
+## Why several heads are more expressive
+
+Row $i$ of one head's output is $\sum_j \alpha_{ij} \vvec_j$ with $\alpha_{ij} \ge 0$ and $\sum_j \alpha_{ij} = 1$. It
+is a convex combination of the value vectors, so it lies in their convex hull. With one head, every output is a single
+point of that hull, mapped by $\Wmat_O$.
+
+Split $\Wmat_O$ into blocks $\Wmat_O^1, \dots, \Wmat_O^h$ of $d_v$ rows, one per head. Multiplying the concatenation by
+$\Wmat_O$ is the same as summing the heads' separately projected outputs:
+
+$$
+\operatorname{MultiHead}_i = \sum_{r=1}^{h} \paren{\sum_j \alpha^{r}_{ij}\, \vvec^{r}_j}\, \Wmat_O^{r}.
+$$
+
+Each head contributes its own weighted average with its own weights $\alpha^r$. The output is a sum of $h$
+independently chosen averages rather than one. Vaswani et al. describe this as letting the model attend to information
+from different representation subspaces at different positions, which averaging in a single head inhibits
+<Cite id="vaswani2017" />.
+
+## Parameters and cost
+
+With $d_k = d_v = d/h$, the projections for all heads together have $3 \cdot h \cdot d \cdot (d/h) = 3d^2$ weights, and
+$\Wmat_O$ has $d^2$. The total, $4d^2$, does not depend on $h$ and equals that of a single head of full width.
+
+The score matrices cost $h \cdot n^2 \cdot (d/h) = n^2 d$ multiply-adds for a sequence of length $n$, also independent
+of $h$. More heads do increase memory for the weights, $h n^2$ values instead of $n^2$.
+
+In practice all heads are computed at once. One $d \times d$ matrix produces all queries, which are reshaped to
+$n \times h \times d/h$ and processed as a batch of $h$ attentions.
+
+## Worked example
+
+The base transformer has $d = 512$ and $h = 8$ heads, so each head has $d_k = d_v = 64$ <Cite id="vaswani2017" />.
+
+- Projection weights: $4 \cdot 512^2 = 1{,}048{,}576$. With biases, $1{,}048{,}576 + 4 \cdot 512 = 1{,}050{,}624$.
+- Scores for a sequence of $n = 1000$ tokens: $8 \cdot 1000^2 = 8 \times 10^6$ weights per layer.
+- Each head's scores are divided by $\sqrt{64} = 8$, not by $\sqrt{512}$. The scale follows the width of the head.
+
+In the paper's ablation, one head of width 512 scored 0.9 BLEU lower than eight heads of width 64. Very many narrow
+heads, 32 of width 16, were also worse than eight <Cite id="vaswani2017" />.
+
+## Each head is a low-rank bilinear form
+
+Head $i$ scores query position $a$ against key position $b$ by
+
+$$
+\qvec_a^{\tr} \kvec_b = \xvec_a^{\tr} \Wmat_Q^i (\Wmat_K^i)^{\tr} \xvec_b.
+$$
+
+The $d \times d$ matrix $\Wmat_Q^i (\Wmat_K^i)^{\tr}$ has rank at most $d_k$. A head therefore compares positions
+through a bilinear form of rank $d_k = d/h$: it can react to at most $d_k$ directions of the input. The value side is
+the same: $\Wmat_V^i \Wmat_O^i$, with $\Wmat_O^i$ the rows of $\Wmat_O$ that belong to head $i$, is a $d \times d$ map
+of rank at most $d_v$. Splitting $d$ into $h$ heads trades one full-rank comparison for $h$ low-rank ones.
+
+## Variants
+
+The $h$ key and value heads dominate the memory of autoregressive decoding, because every generated token's keys and
+values are cached (see <NoteLink to="kv-cache">KV caching</NoteLink>). Later models share one key–value head among
+several query heads, in <NoteLink to="multi-query-and-grouped-query-attention">multi-query and grouped-query
+attention</NoteLink>, or compress keys and values into a latent vector, in
+<NoteLink to="multi-head-latent-attention">multi-head latent attention</NoteLink>.
+
+## Assumptions
+
+- Useful relations between positions can be found in low-dimensional subspaces of width $d/h$.
+- A fixed number of heads per layer is enough; the model cannot add heads for harder inputs.
+
+## Pitfalls
+
+- **Heads are not all needed.** After training, many heads can be removed at test time with little loss in accuracy
+  <Cite id="michel2019" />. Head count is a capacity choice, not a count of distinct functions.
+- **Interpreting heads.** Individual heads sometimes align with recognisable patterns, such as attending to the previous
+  token. Most do not have a single clean role.
+- **Head width too small.** With a fixed $d$, raising $h$ shrinks $d_k$. Very narrow heads have low-rank score matrices,
+  since $\Qmat \Wmat_Q^i (\Kmat \Wmat_K^i)^{\tr}$ has rank at most $d_k$.

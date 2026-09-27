@@ -26,8 +26,9 @@ exceeds $1/2$.
 
 The data are $n$ points $\xvec_1, \dots, \xvec_n \in \reals^{d}$ with hidden labels, partitioned into $K$ disjoint bags
 $B_1, \dots, B_K$. For each bag the class proportions $\pivec_k = (\pi_{k,1}, \dots, \pi_{k,c})$ are known
-<Cite id="poyiadzi2018" />. The motivating application is activity recognition in smart homes for health monitoring:
-patients will not label every activity, but will give summaries such as hours slept and hours of television per day.
+<Cite id="poyiadzi2018" />. The goal is a label for every point. Activity recognition in smart homes is a typical
+source of such data: a resident will not label every minute of sensor data, but will give summaries such as hours
+slept and hours of television per day.
 
 Earlier methods each rest on a restrictive assumption. The <NoteLink to="mean-map-and-invcal">mean map</NoteLink>
 assumes that a point is independent of its bag given its label. Inverse calibration models a bag by its mean, which
@@ -35,7 +36,9 @@ fails when the bag's data have high variance <Cite id="ruping2010" />. ∝SVM av
 programme <Cite id="yu2013" />. LP-LLP brings the two principles of graph-based semi-supervised learning, local
 smoothness and global structure, to label proportions without assuming how bags were formed.
 
-## Label propagation
+## Mechanism
+
+### Label propagation
 
 Let $\Wmat$ be a similarity matrix with $W_{ij} = \exp(-\gamma\norm{\xvec_i - \xvec_j}^2)$, $\gamma > 0$, and
 $W_{ii} = 0$. Let $\Dmat$ be diagonal with $D_{ii} = \sum_j W_{ij}$, and $\Smat = \Dmat^{-1}\Wmat$, which has rows summing
@@ -74,7 +77,7 @@ term runs over common neighbours of $i$ and $j$, so a point $j$ that shares many
 it more: points on the same structure get the same label. This is the global-structure principle
 <Cite id="poyiadzi2018" />.
 
-## From labels to proportions
+### From labels to proportions
 
 In LLP no point has a label. Restrict to two classes. Each point receives its bag's proportion as a soft label,
 
@@ -106,7 +109,7 @@ $$
 
 Each bag must place exactly $n_{k,1}$ units of mass on its points, at most one unit per point.
 
-## The algorithm
+### The algorithm
 
 LP-LLP solves the relaxed problem in two alternating steps <Cite id="poyiadzi2018" />.
 
@@ -118,12 +121,11 @@ LP-LLP solves the relaxed problem in two alternating steps <Cite id="poyiadzi201
 4. Repeat steps 2 and 3 until the scores stop changing.
 5. Label $\hat{y}_i = 1$ if $f_i^* > 1/2$ and 0 otherwise.
 
-The paper writes step 2 without the factor $1 - \alpha$; the factor rescales all scores equally before the projection
-and does not change the order of scores within a bag. The final scores are not calibrated probabilities. They are
-constrained values that act as ranks within each bag, and the constraint gives control over the predicted bag
-proportions.
+The factor $1 - \alpha$ in step 2 rescales all scores equally before the projection and does not change the order of
+scores within a bag, so it can be dropped. The final scores are not calibrated probabilities. They are constrained
+values that act as ranks within each bag, and the constraint gives control over the predicted bag proportions.
 
-## Worked example
+### Worked example
 
 Six points form three bags: $B_A = \set{1, 2}$ with $\pi_A = 0.5$, $B_B = \set{3, 4}$ with $\pi_B = 1$, and
 $B_C = \set{5, 6}$ with $\pi_C = 0$. The graph has edges $1\!-\!3$, $3\!-\!4$, $2\!-\!5$ and $5\!-\!6$ of weight 1, and
@@ -151,57 +153,6 @@ The similarity matrix costs $O(n^2)$ to build. The inverse of $\Imat - \alpha\Sm
 it is computed once and reused in every round. Low-rank approximations trade accuracy for speed. The projection step
 costs $O(n)$ per sweep <Cite id="poyiadzi2018" />.
 
-## Experiments
-
-The paper studies binary problems with three bags <Cite id="poyiadzi2018" />. Two bag-proportion configurations are
-used: A with proportions $(0.60, 0.40, 0.50)$ and B with $(0.85, 0.25, 0.40)$. The test data form a further bag of
-known proportion, 20% of the training size, and are included transductively with their labels hidden. $\alpha$ is
-fixed at 0.50, and $\gamma$ is chosen from a grid by the largest value of $\bar{\fvec}^\top\Smat\bar{\fvec}$. Each
-configuration is repeated 25 times. Results are accuracy, as mean (standard deviation).
-
-The data sets are two synthetic sets and the SPHERE challenge data <Cite id="twomey2016sphere" />. XOR places four unit-covariance
-Gaussians at the corners of a square of side 10. Half-Kernel is built from sine and cosine functions with noise.
-SPHERE holds wrist-worn accelerometer data from 10 people performing scripted daily activities twice; the task is
-ambulatory against sedentary activity. Sphere 1 uses the raw sensor data and Sphere 2 the challenge's baseline
-features.
-
-<SpecTable
-  columns={['∝SVM', 'InvCal', 'LP-LLP']}
-  rows={{
-    'XOR 120A': ['0.54 (0.19)', '0.81 (0.08)', '0.91 (0.14)'],
-    'XOR 120B': ['0.66 (0.46)', '0.73 (0.05)', '0.97 (0.04)'],
-    'XOR 180A': ['0.50 (0.04)', '0.83 (0.08)', '0.88 (0.18)'],
-    'XOR 180B': ['0.42 (0.09)', '0.73 (0.06)', '0.97 (0.03)'],
-    'XOR 300A': ['0.49 (0.06)', '0.88 (0.13)', '0.92 (0.12)'],
-    'XOR 300B': ['0.56 (0.07)', '0.73 (0.04)', '1.00 (0.01)'],
-    'XOR 600A': ['0.45 (0.43)', '0.94 (0.04)', '0.99 (0.01)'],
-    'XOR 600B': ['0.67 (0.46)', '0.69 (0.04)', '0.99 (0.01)'],
-    'Sphere 1 60A': ['0.50 (0.00)', '0.58 (0.29)', '0.76 (0.39)'],
-    'Sphere 1 60B': ['0.50 (0.00)', '0.50 (0.00)', '0.88 (0.29)'],
-    'Sphere 1 120A': ['0.50 (0.00)', '0.54 (0.28)', '0.59 (0.45)'],
-    'Sphere 1 120B': ['0.50 (0.00)', '0.50 (0.00)', '1.00 (0.00)'],
-    'Sphere 1 180A': ['0.52 (0.05)', '0.56 (0.26)', '0.80 (0.26)'],
-    'Sphere 1 180B': ['0.50 (0.00)', '0.50 (0.00)', '1.00 (0.01)'],
-    'Sphere 1 240A': ['0.50 (0.00)', '0.62 (0.19)', '0.78 (0.16)'],
-    'Sphere 1 240B': ['0.50 (0.00)', '0.50 (0.00)', '0.98 (0.01)'],
-  }}
-/>
-
-The row label gives the training-set size and the configuration. On Sphere 1, ∝SVM did not converge. On Half-Kernel,
-LP-LLP ranged from 0.58 (0.16) at 120A to 1.00 (0.00) at 600B, and was best in most configurations. Sphere 2 was the
-hardest representation for every method, with the highest variance; LP-LLP's accuracy there ranged from 0.50 (0.09) to
-0.74 (0.12), and it was not the best in every row. The authors attribute the high standard deviations of ∝SVM on XOR to
-the method confusing the two classes <Cite id="poyiadzi2018" />. In general, all three methods improved as the data
-sets grew.
-
-## Active learning with label proportions
-
-A follow-up by the same authors turns the setting into active learning <Cite id="poyiadzi2019" />. A conventional
-active learner queries an oracle for the label of one instance. Here the learner may instead request the label of a
-bag of instances, and the oracle answers with the bag's class proportions. The answer carries less information than
-the individual labels, but the authors show that learning remains effective, which lowers the burden on annotators
-who find aggregate questions easier to answer. The paper lists label propagation among its keywords.
-
 ## Trade-offs
 
 - **No assumption on bag formation.** LP-LLP does not require points to be independent of their bags given their
@@ -211,5 +162,14 @@ who find aggregate questions easier to answer. The paper lists label propagation
 - **Transductive.** Scores exist only for points in the graph. New points must be added to the graph or scored from
   their neighbours.
 - **Graph quality.** Everything depends on $\gamma$. Too small and the graph connects across classes; too large and it
-  fragments. The paper selects $\gamma$ by an unsupervised heuristic.
+  fragments. No labels are available to tune it. Poyiadzi et al. pick $\gamma$ from a grid by the largest
+  $\bar{\fvec}^\top\Smat\bar{\fvec}$, where $\bar{\fvec}$ is the vector of final scores: the value under which the
+  recovered scores agree most with their neighbours <Cite id="poyiadzi2018" />.
 - **Scale.** The $O(n^3)$ inverse limits the direct method to a few thousand points without approximation.
+- **Where it helps most.** On data whose classes form non-linear clusters, such as XOR, and on raw wrist-worn accelerometer data from
+  the SPHERE smart-home challenge <Cite id="twomey2016sphere" />, LP-LLP was more accurate than ∝SVM and inverse
+  calibration, and its advantage was largest when the bag proportions differed most <Cite id="poyiadzi2018" />. When
+  all proportions sit near the class prior, every method has little to work with.
+- **Asking for proportions.** The same label format suits active learning: instead of querying one instance's label,
+  the learner asks for a bag's proportions, a question that annotators find easier to answer. Poyiadzi et al. show that
+  learning stays effective with such queries <Cite id="poyiadzi2019" />.

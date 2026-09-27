@@ -7,10 +7,12 @@ aliases: [recommender evaluation metrics, ranking metrics, expected reciprocal r
 requires: [explicit-and-implicit-feedback]
 partOf: [recommender-systems]
 related: [precision-and-recall-at-k, hit-rate-and-r-precision, mean-average-precision-and-mrr, ndcg, calibration-error, overall-evaluation-criterion, click-models]
-references: [herlocker2004evaluating, jarvelin2002, chapelle2009err, clarke2008novelty]
+references: [herlocker2004evaluating, jarvelin2002, chapelle2009err, clarke2008novelty, arguello2021evaluation]
 status: draft
 updated: 2026-09-27
 ---
+
+import { RankingDuel } from '../../../metrics/ranking-metrics/_shared/RankingDuel'
 
 <Definition>
 For a request $q$ (a query or a user), let $R_q = (d_1, \ldots, d_k)$ be the top $k$ items a system returns, let
@@ -32,7 +34,10 @@ Each is written with the indicator $\indicator[\cdot]$.
   one good item suffices. See <NoteLink to="hit-rate-and-r-precision">hit rate</NoteLink>.
 - **Average precision**, $\text{AP}(q) = \frac{1}{\abs{G_q}}\sum_i \text{Precision@}i \cdot \indicator[d_i \in G_q]$,
   and its mean over requests, MAP: rewards placing all relevant items early. See <NoteLink
-  to="mean-average-precision-and-mrr">MAP and MRR</NoteLink>.
+  to="mean-average-precision-and-mrr">MAP and MRR</NoteLink>. Recommender libraries usually report **AP@$k$**, which
+  sums only over the top $k$ and divides by $\min(\abs{G_q}, k)$ instead of $\abs{G_q}$. With that divisor a list
+  whose top $k$ is entirely relevant scores 1 even when the user has more than $k$ relevant items. The two conventions
+  give different numbers for the same list, so a reported MAP@$k$ must state its divisor.
 - **Mean reciprocal rank**, the average of $1/\min\set{i : d_i \in G_q}$: how far a user must read to find the first
   useful item. Ignores everything after it.
 
@@ -69,6 +74,33 @@ $\abs{G_q} = 4$.
 
 ERR is dominated by the grade-3 item at rank 1; NDCG still credits the items below it.
 
+## Each metric models a user
+
+Two systems can be ranked in opposite orders by two metrics on the same request. The disagreement is not noise. Each
+metric encodes a model of how the user reads the list, and the two metrics describe different users.
+
+- **Reciprocal rank and hit rate** model a user who wants one good item and stops there.
+- **Precision and recall at $k$** model a user who reads exactly $k$ items. At the same $k$ the two always agree on
+  which of two lists is better, because both are the count of relevant items in the top $k$ divided by a constant
+  shared by the lists. Their verdict changes with $k$, wherever the cumulative counts of the two lists cross.
+- **AP** models a user who reads down to every relevant item and needs all of them.
+- **NDCG** models attention that decays with $\log_2$ of the rank and credits every relevant item it reaches.
+- **ERR** models a user who stops at the first satisfying item, so items below an excellent one count for little.
+
+For example, a list with one grade-3 item at rank 1 and a list with grades $(1, 1, 2, 1, 1)$ in its top five, from a
+request with six relevant items, score $0.566$ and $0.801$ under NDCG@10 (linear gains) but $0.875$ and $0.301$ under
+ERR@10. NDCG prefers the second list and ERR the first. Choose the primary metric from the product's reading pattern
+before comparing systems: a carousel of one hero item is a cascade, a grid of twenty items is closer to precision at
+20. <NoteLink to="evaluating-retrieval-systems">Evaluating retrieval systems</NoteLink> works through a full example.
+
+<Callout variant="note" title="Source">
+The A-versus-B ranking comparison in the figure below, and the overview of evaluation it comes from, are adapted from
+Jaime Arguello's lecture "Evaluation Overview" for INLS 509: Information Retrieval at the University of North Carolina
+at Chapel Hill <Cite id="arguello2021evaluation" />. The interactive figure is this site's.
+</Callout>
+
+<RankingDuel preset="graded" metric="err" />
+
 ## Beyond accuracy
 
 Diversity within a list, coverage of the catalogue, concentration of exposure, novelty and serendipity measure what
@@ -99,6 +131,13 @@ evaluation criterion</NoteLink>.
 - **Bias metrics.** Popularity bias (over-promotion of popular items) and under-service of demographic groups.
 
 ## Offline and online
+
+There are three ways to evaluate a recommender <Cite id="arguello2021evaluation" />. **Offline (batch) evaluation**
+computes the metrics above on held-out interactions or judged items. **User studies** observe recruited participants
+and ask them about their experience. **Online evaluation** splits live traffic and compares behaviour, through
+<NoteLink to="ab-test">A/B tests</NoteLink> or <NoteLink to="interleaving">interleaving</NoteLink>. Each trades cost and
+reproducibility against realism; <NoteLink to="evaluating-retrieval-systems">evaluating retrieval systems</NoteLink>
+compares them.
 
 Offline metrics are reproducible and cheap, and they are computed on logs produced by another policy. Online experiments
 measure real impact, slowly and at a cost. Counterfactual estimators such as inverse propensity scoring and doubly

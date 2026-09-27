@@ -60,8 +60,8 @@ makes approximate nearest-neighbour search more efficient <Cite id="ying2018pins
 
 For each pin, $\xvec_u$ concatenates a 4,096-dimensional visual embedding (the sixth fully connected layer of a VGG-16
 classifier), a 256-dimensional Word2Vec-style embedding of its annotations and the log of its degree. Only pins have
-features, so the model uses an even number of layers: pins feed boards, boards feed pins. The reported models use
-$K = 2$, pooled dimension $m = 2048$ and embedding dimension $d = 1024$ <Cite id="ying2018pinsage" />.
+features, so the model uses an even number of layers: pins feed boards, boards feed pins. Two layers are enough for a
+pin to see other pins through the boards they share <Cite id="ying2018pinsage" />.
 
 ## Importance-based neighbourhoods
 
@@ -104,9 +104,7 @@ $$
 \alpha_v = \frac{\pi_u(v)}{\sum_{w \in \Ncal(u)} \pi_u(w)}.
 $$
 
-A neighbour that the walks reach often contributes more than one reached once. In the paper's ablation, replacing mean
-pooling by importance pooling (with hard negatives in both) raises hit rate from 46% to 67%
-<Cite id="ying2018pinsage" />.
+A neighbour that the walks reach often contributes more than one reached once.
 
 **Worked example.** Take $T = 3$ neighbours with visit counts 6, 3 and 1. The weights are
 $\alphavec = (0.6, 0.3, 0.1)$. If the transformed neighbour vectors are $(1, 0)$, $(0, 1)$ and $(1, 1)$, the pooled
@@ -145,9 +143,9 @@ PageRank from $q$, sampled at random from that range. They are related to $q$ bu
 them from the start doubled the number of epochs needed to converge <Cite id="ying2018pinsage" />.
 
 **Curriculum.** The first epoch uses no hard negatives. Epoch $n$ adds $n - 1$ hard negatives per item, so the task
-gets harder as training proceeds, a form of curriculum learning <Cite id="bengio2009curriculum" />. The reported run used
-6 hard negatives per pin, for 7.5 billion training examples in total. The curriculum improved performance by 12% in the
-paper's summary <Cite id="ying2018pinsage" />.
+gets harder as training proceeds, a form of curriculum learning <Cite id="bengio2009curriculum" />. Early epochs learn
+the coarse structure from easy negatives, while the hinge terms are still non-zero for them. Later epochs refine the
+fine distinctions that only hard negatives expose <Cite id="ying2018pinsage" />.
 
 ## Systems
 
@@ -155,54 +153,34 @@ paper's summary <Cite id="ying2018pinsage" />.
 total). For each minibatch a CPU producer samples neighbourhoods, re-indexes the nodes involved into a small subgraph,
 extracts the matching rows of the feature matrix and samples negatives. The GPU consumer receives this subgraph and runs
 the convolutions without further CPU–GPU communication. CPU work for the next minibatch overlaps GPU work on the current
-one, which almost halved training time. Training ran on one machine with 32 cores and 16 Tesla K80 GPUs, with batch
-sizes from 512 to 4,096, a linear learning-rate warm-up in the first epoch and exponential decay afterwards
-<Cite id="ying2018pinsage" />.
+one, which almost halved training time <Cite id="ying2018pinsage" />.
 
 **MapReduce inference.** Computing each node's embedding separately recomputes shared neighbours many times. PinSage
 instead computes layer by layer. One MapReduce job projects every pin with the first layer's dense transform. A second
 job joins pins to their boards and pools them into board vectors. Two more jobs compute the next layer's pin vectors
-from the boards. Every node's vector is computed once per layer. Embeddings for 3 billion items were generated in less
-than 24 hours on a Hadoop cluster of 378 AWS d2.8xlarge nodes <Cite id="ying2018pinsage" />.
+from the boards. Every node's vector is computed once per layer, so the cost is linear in the number of edges rather
+than in the number of nodes times the size of a $K$-hop neighbourhood <Cite id="ying2018pinsage" />.
 
 **Inductive training.** The model's parameters do not depend on the number of nodes, so it trains on a subgraph and
-embeds the rest. Training used 20% of the boards with the pins they touch and 70% of the labelled pairs. A subgraph of
-300 million items reached the best hit rate and cut runtime by a factor of 6 compared with the full graph
-<Cite id="ying2018pinsage" />.
+embeds the rest from their features and neighbourhoods. A subgraph of a tenth of the graph was enough, at a fraction of
+the runtime <Cite id="ying2018pinsage" />.
 
 **Retrieval.** Related pins are the nearest neighbours of a query pin's embedding, found with
 <NoteLink to="locality-sensitive-hashing">locality-sensitive hashing</NoteLink> and a two-level retrieval based on the
 Weak AND operator <Cite id="ying2018pinsage" />.
 
-## Reported results
+## What it bought
 
-Offline, each test pair $(q, i)$ is scored by whether $i$ appears among the 500 nearest neighbours of $q$ in a sample of
-5 million test pins (hit rate), and by a scaled mean reciprocal rank that divides each rank by 100
+The largest single gain came from the neighbourhood. With hard negatives in both models, importance pooling over
+random-walk neighbourhoods raised the offline hit rate from 46% to 67% over mean pooling on uniformly sampled neighbours
+<Cite id="ying2018pinsage" />. Larger $T$ helped further, at a roughly proportional cost in training time. In production
+A/B tests on the home feed, PinSage embeddings raised the repin rate by 10% to 30% over content-only embeddings
 <Cite id="ying2018pinsage" />.
 
-| method (Table 1)           | hit rate | MRR  |
-| -------------------------- | -------- | ---- |
-| visual embedding           | 17%      | 0.23 |
-| annotation embedding       | 14%      | 0.19 |
-| combined, 2-layer MLP      | 27%      | 0.37 |
-| max pooling                | 39%      | 0.37 |
-| mean pooling               | 41%      | 0.51 |
-| mean pooling, cross-entropy| 29%      | 0.35 |
-| mean pooling, hard negs    | 46%      | 0.56 |
-| PinSage                    | 67%      | 0.59 |
-
-The neighbourhood size trades accuracy for training time: $T = 10$ gave 60% hit rate and 0.51 MRR in 20 hours,
-$T = 20$ gave 63% and 0.54 in 33 hours, and $T = 50$ gave 67% and 0.59 in 78 hours. A batch size of 2,048 gave the
-shortest total training time, 48.8 hours <Cite id="ying2018pinsage" />.
-
-In head-to-head human judgements of which of two recommendations is more related to a query pin, PinSage won 56.5% of
-decided comparisons against visual embeddings, 72.5% against annotation embeddings, 60.0% against combined embeddings
-and 62.4% against Pixie. In production A/B tests on homefeed, PinSage raised repin rate by 10% to 30% over the
-annotation and visual embeddings, depending on the setting <Cite id="ying2018pinsage" />.
-
-The distribution of cosine similarities between random pairs of PinSage embeddings has kurtosis 0.43, against 2.49 for
-annotation embeddings and 1.20 for visual embeddings. A wider spread separates items of different relevance and lowers
-the collision rate of locality-sensitive hashing <Cite id="ying2018pinsage" />.
+The embeddings also spread out more. Cosine similarities between random pairs of PinSage embeddings are less peaked
+than those of the content embeddings <Cite id="ying2018pinsage" />. A wider spread separates items of different
+relevance, and it lowers the collision rate of <NoteLink to="locality-sensitive-hashing">locality-sensitive
+hashing</NoteLink>, which makes retrieval cheaper.
 
 ## Compared with LightGCN
 
@@ -220,7 +198,8 @@ two results agree: whether to transform depends on whether nodes have features w
 
 ## Pitfalls
 
-- **Hard negatives from the start.** Without the curriculum, hard negatives double the epochs to convergence.
+- **Hard negatives from the start.** Without the curriculum, hard negatives double the epochs to convergence
+  <Cite id="ying2018pinsage" />.
 - **Walk settings change the model.** Walk length, number of walks and $T$ decide which signals reach a node, and
   larger $T$ costs training time.
 - **Labels from the incumbent system.** The positive pairs came from engagement with Pixie's recommendations, so the

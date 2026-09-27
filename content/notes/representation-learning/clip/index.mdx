@@ -1,0 +1,129 @@
+---
+title: CLIP
+kind: concept
+summary: CLIP trains an image encoder and a text encoder so that matching image–caption pairs have high cosine similarity, with a symmetric InfoNCE loss over each batch. A new class set is then classified zero-shot by embedding a caption for each class and picking the most similar one.
+tags: [deep-learning, representation-learning, multimodal, computer-vision, nlp, worked-example]
+aliases: [contrastive language-image pretraining, contrastive language-image pre-training, image-text contrastive learning, prompt ensembling, ALIGN, SigLIP, dual encoder]
+requires: [contrastive-learning]
+related: [clip-score, transfer-learning-and-fine-tuning]
+references: [radford2021, jia2021, zhai2023, oord2018, yuksekgonul2023]
+status: draft
+updated: 2026-09-27
+---
+
+import { ClipDiagram } from './ClipDiagram'
+
+<Definition>
+CLIP (contrastive language–image pretraining) has an image encoder $f$ and a text encoder $g$, each followed by a
+linear projection into a shared $D$-dimensional space and normalisation to unit length. For a batch of $N$ image–text
+pairs with embeddings $\uvec_i = f(\text{image}_i)$ and $\vvec_j = g(\text{text}_j)$, the logits are
+$\ell_{ij} = \uvec_i^{\tr} \vvec_j / \tau$ with a learned temperature $\tau$. The loss is the average of a cross-entropy
+that matches each image to its text over the rows of $\ell$ and one that matches each text to its image over the
+columns <Cite id="radford2021" />.
+</Definition>
+
+## Intuition
+
+A standard image classifier is trained on a fixed list of classes. Adding a class means collecting labelled images and
+retraining. Captions found alongside images on the web describe far more concepts than any label set, and need no
+annotation effort.
+
+CLIP learns from 400 million such pairs <Cite id="radford2021" />. It does not try to generate the caption. It learns
+which caption, among those in the batch, belongs to which image. After training, an image and a sentence that describes
+it lie close together in the shared space. Classifying an image then means writing a sentence for each class and asking
+which sentence is closest.
+
+## Training objective
+
+Within a batch, pair $i$ is the only positive for image $i$, and the other $N - 1$ texts are negatives. The image-to-text
+loss is the cross-entropy of row $i$ of the logit matrix with target $i$. The text-to-image loss does the same for
+column $j$:
+
+$$
+\mathcal{L} = \frac{1}{2N} \sum_{i=1}^{N} \brack{-\log \frac{e^{\ell_{ii}}}{\sum_{j} e^{\ell_{ij}}}}
++ \frac{1}{2N} \sum_{j=1}^{N} \brack{-\log \frac{e^{\ell_{jj}}}{\sum_{i} e^{\ell_{ij}}}}.
+$$
+
+<ClipDiagram />
+
+Each half is the InfoNCE loss of <NoteLink to="contrastive-learning">contrastive learning</NoteLink> with $N$
+candidates. By the InfoNCE bound, each half gives $I(\text{image}; \text{text}) \ge \log N - \mathcal{L}_{\text{half}}$
+<Cite id="oord2018" />. The loss trains both encoders to keep the information that images and their captions share.
+
+CLIP used batches of 32,768 pairs, so each image is contrasted with 32,767 texts. The temperature is learned as a
+log-parameterised scale, initialised to $\tau = 0.07$ and clipped so that $1/\tau$ never exceeds 100
+<Cite id="radford2021" />.
+
+Radford et al. compared this objective with generating the caption word by word and with predicting its bag of words.
+Predicting a bag of words learned zero-shot ImageNet accuracy 3 times faster than generating captions, and the
+contrastive objective another 4 times faster <Cite id="radford2021" />. Matching is easier than generating: the model
+need not predict the exact wording of a caption, only recognise which caption fits.
+
+## Zero-shot classification
+
+Given $K$ class names, write one sentence per class from a template, such as "a photo of a `{class}`.", and embed each
+with the text encoder to get $\vvec_1, \dots, \vvec_K$. For an image with embedding $\uvec$,
+
+$$
+p(y = k \mid \text{image}) = \frac{\exp(\uvec^{\tr} \vvec_k / \tau)}{\sum_{k'=1}^{K} \exp(\uvec^{\tr} \vvec_{k'} / \tau)}.
+$$
+
+This is multinomial <NoteLink to="logistic-regression">logistic regression</NoteLink> on the image embedding with
+weight vector $\vvec_k / \tau$ for class $k$. The text encoder generates the classifier's weights from the class names,
+so no labelled images of the new classes are needed. It is also the training objective restricted to one image and
+$K$ candidate texts.
+
+**Prompt engineering.** The template matters. A bare class name is ambiguous ("crane" the bird or the machine) and
+unlike the captions seen in training. Averaging the text embeddings of many templates for each class (prompt ensembling,
+80 templates for ImageNet) improved ImageNet accuracy over a single default template by about 5 percentage points
+together with prompt engineering <Cite id="radford2021" />. Zero-shot CLIP reached 76.2% top-1 accuracy on ImageNet,
+matching the original ResNet-50, without using any of the 1.28 million labelled training images
+<Cite id="radford2021" />.
+
+### Worked example
+
+An image has cosine similarities 0.31, 0.26 and 0.22 with the prompts for "dog", "cat" and "horse". The similarities
+look close, but CLIP's learned scale $1/\tau$ reaches 100. The logits are then 31, 26 and 22, and the softmax gives
+
+$$
+p(\text{dog}) = \frac{e^{31}}{e^{31} + e^{26} + e^{22}} = 0.993, \qquad p(\text{cat}) = 0.0067, \qquad
+p(\text{horse}) = 0.0001.
+$$
+
+At $\tau = 0.07$, the value at initialisation, the logits are 4.43, 3.71 and 3.14, and the probabilities are 0.566,
+0.277 and 0.157. The ranking is the same; the learned temperature decides how confident the model is.
+
+## Related models
+
+- **ALIGN** trains the same dual-encoder objective on 1.8 billion noisy image–alt-text pairs with minimal filtering,
+  and shows that scale compensates for noise <Cite id="jia2021" />.
+- **SigLIP** replaces the softmax with an independent binary classification of every image–text pair in the batch,
+  $-\log \sigma\paren{z_{ij} (\uvec_i^{\tr} \vvec_j / \tau + b)}$ with $z_{ij} = 1$ for matching pairs and $-1$
+  otherwise <Cite id="zhai2023" />. The loss has no normaliser over the batch, so it needs no all-to-all communication
+  of embeddings across devices and works well at smaller batch sizes.
+
+## Uses
+
+CLIP embeddings serve image search by text and text search by image, zero-shot classification, and as a frozen image
+encoder for other models. The cosine similarity between an image and a caption also serves as an evaluation metric for
+generated images, <NoteLink to="clip-score">CLIPScore</NoteLink>.
+
+## Assumptions
+
+- Web captions describe the content of their images well enough, on average, to serve as supervision.
+- The concepts needed downstream appear, with their names, in the pretraining captions. Zero-shot accuracy is poor on
+  concepts and tasks that captions rarely cover, such as counting objects or estimating distances
+  <Cite id="radford2021" />.
+
+## Pitfalls
+
+- **Bag-of-concepts behaviour.** Contrastive matching can be solved by detecting which objects and attributes are
+  present without their relations. CLIP-style models often fail to prefer the correct caption over one with the same
+  words in a different order, such as "the horse is eating the grass" against "the grass is eating the horse"
+  <Cite id="yuksekgonul2023" />.
+- **Prompt sensitivity.** Small changes in wording change zero-shot accuracy by several points. Report the templates
+  used.
+- **Distribution of the pretraining data.** The web data is not public, and its biases, including social stereotypes,
+  pass into the model's similarities.
+- **Temperature at inference.** Zero-shot probabilities use the learned $1/\tau$, which makes them very confident. They
+  are not calibrated.

@@ -1,0 +1,223 @@
+---
+title: Solving a maze
+kind: example
+summary: 'A maze is a small Markov decision process: cells are states, moves are actions, each move costs 1 and the goal pays 10. Value iteration solves it from the known model. Q-learning and SARSA learn the same values from experience, and choose different routes past traps.'
+tags: [worked-example, reinforcement-learning, markov-decision-processes, dynamic-programming, temporal-difference]
+aliases: [maze MDP, maze solving, gridworld maze]
+requires: [markov-decision-process, bellman-equations]
+related: [value-iteration, q-learning, sarsa, epsilon-greedy]
+references: [bellman1957, watkins1989, watkins1992, rummery1994, sutton2018]
+status: draft
+updated: 2026-09-27
+---
+
+import { MazeExplorer } from './MazeExplorer'
+
+<Definition>
+An agent moves through a rectangular grid of cells. Some cells are walls, one is the start, one is the goal, and some
+are traps. In each open cell the agent chooses one of four moves: up, right, down or left. A move goes in the chosen
+direction with probability $1 - \rho$ and in each of the two perpendicular directions with probability $\rho/2$, where
+$\rho \in [0, 1)$ is the **slip probability**. A move into a wall or off the grid leaves the agent where it is. Every
+move pays $-1$. A move that enters the goal pays $+10$ instead and ends the episode. A move that enters a trap pays
+$-20$ instead and puts the agent back on the start. Future rewards are discounted by $\gamma \in (0, 1)$. Find the
+policy that maximises the expected discounted return from the start, first with the transition probabilities known,
+then without them.
+</Definition>
+
+## Setup
+
+The maze is a <NoteLink to="markov-decision-process">Markov decision process</NoteLink> $(\Scal, \Acal, p, r, \gamma)$.
+
+- **States.** $\Scal$ is the set of open cells: every cell that is not a wall, not a trap and not the goal. The goal is
+  a terminal state with value 0. A trap is not a state, because the agent never stays in it.
+- **Actions.** $\Acal = \set{\text{up}, \text{right}, \text{down}, \text{left}}$ in every state.
+- **Transitions and rewards.** $p(s', r \mid s, a)$ is the probability of landing in $s'$ with reward $r$. With $\rho =
+  0$
+  every move is deterministic. Entering the goal gives $(s', r) = (\text{goal}, 10)$. Entering a trap gives
+  $(s', r) = (\text{start}, -20)$. Any other landing cell $c$, including the current cell after a bump, gives
+  $(s', r) = (c, -1)$.
+- **Return.** From time $t$ the return is $G_t = R_{t+1} + \gamma R_{t+2} + \gamma^2 R_{t+3} + \dots$, up to the step
+  that enters the goal.
+
+The step cost makes short routes better than long ones. The discount makes the goal reward worth less the further away
+it is. With $\rho = 0$ and $\gamma = 0.9$, a cell $d$ moves from the goal along the shortest route has optimal value
+
+$$
+v_*(d) = -\sum_{k=0}^{d-2}\gamma^k + \gamma^{d-1} \cdot 10 = -\frac{1 - \gamma^{d-1}}{1 - \gamma} + 10\gamma^{d-1},
+$$
+
+because the first $d - 1$ moves each pay $-1$ and the last pays $+10$. This gives $v_*(1) = 10$, $v_*(2) = 8$,
+$v_*(3) = 6.2$, and a negative value from $d = 8$ on: $v_*(7) = 0.63$ and $v_*(8) = -0.43$.
+
+## Solution
+
+### Planning: value iteration with the model known
+
+The **Bellman optimality equation** for action values follows from splitting the return after one step,
+$G_t = R_{t+1} + \gamma G_{t+1}$. An agent that takes $a$ in $s$ and acts optimally afterwards collects
+$R_{t+1}$ and then, from $S_{t+1}$, at best $\max_{a'}q_*(S_{t+1}, a')$ in expectation. Averaging over the outcome of
+the move gives
+
+$$
+q_*(s, a) = \sum_{s', r}p(s', r \mid s, a)\brack{r + \gamma\max_{a'}q_*(s', a')},
+$$
+
+with $\max_{a'}q_*(\text{goal}, a') = 0$ <Cite id="bellman1957" />. The right-hand side defines an operator $\Hcal$ on
+action-value tables, and $q_*$ is its fixed point. <NoteLink to="value-iteration">Value iteration</NoteLink> applies
+$\Hcal$ repeatedly from $Q_0 = 0$:
+
+$$
+Q_{k+1}(s, a) = \sum_{s', r}p(s', r \mid s, a)\brack{r + \gamma\max_{a'}Q_k(s', a')}.
+$$
+
+$\Hcal$ is a $\gamma$-contraction in the sup norm, so $Q_k \to q_*$ from any start. The state value is
+$V_k(s) = \max_a Q_k(s, a)$, and the greedy policy picks $\argmax_a Q_k(s, a)$.
+
+**Two sweeps by hand.** Take the open-room maze, an $8 \times 8$ grid without walls, with the start at $(0, 0)$ and the
+goal at $(7, 7)$. Let $\gamma = 0.9$ and $\rho = 0$. Cell $A = (7, 6)$ is directly below the goal and cell
+$B = (7, 5)$ is below $A$.
+
+- Sweep 1. $Q_1(A, \text{up}) = 10 + 0 = 10$, because the move enters the goal. Every move that does not enter the goal
+  pays $-1$ and lands in a cell with $V_0 = 0$, so it gets $-1$. So $V_1(A) = 10$ and $V_1(s) = -1$ in every cell
+  that does not touch the goal.
+- Sweep 2. $Q_2(B, \text{up}) = -1 + 0.9 \cdot V_1(A) = -1 + 9 = 8$. A cell far from the goal gets
+  $-1 + 0.9 \cdot (-1) = -1.9$.
+
+The values match $v_*(1) = 10$ and $v_*(2) = 8$. Sweep $k$ fixes the cells within $k$ moves of the goal, because an
+optimal route of $d \le k$ moves is already inside the $k$-step lookahead. A cell further away holds
+$-(1 - \gamma^k)/(1 - \gamma)$, the return of $k$ moves that never reach the goal. The start is 14 moves from the goal,
+so the values are exact after 14 sweeps, and $V(0, 0) = v_*(14) = -4.92$.
+
+With slip, the backup averages over the three outcomes. At $\rho = 0.2$ the first sweep gives
+$Q_1(A, \text{up}) = 0.8 \cdot 10 + 0.1 \cdot (-1) + 0.1 \cdot (-1) = 7.8$: a slip right bumps into the edge of the
+grid, and a slip left lands in $(6, 6)$.
+
+### Learning: Q-learning without the model
+
+Without $p$, the agent cannot compute the sum in the backup. It can sample it. Each step from $(S_t, A_t)$ produces one
+outcome $(R_{t+1}, S_{t+1})$ drawn from $p(\cdot \mid S_t, A_t)$, and the **target**
+
+$$
+Y_t = R_{t+1} + \gamma\max_{a'}Q(S_{t+1}, a')
+$$
+
+satisfies $\expect[Y_t \mid S_t = s, A_t = a] = (\Hcal Q)(s, a)$. Each target is an unbiased sample of one
+value-iteration
+backup. **Q-learning** moves the entry towards the target by a step size $\alpha \in (0, 1]$
+<Cite id="watkins1989" />:
+
+$$
+Q(S_t, A_t) \leftarrow Q(S_t, A_t) + \alpha\paren{Y_t - Q(S_t, A_t)}.
+$$
+
+The update is an incremental average. Write $Q_n$ for the entry after its $n$-th update and $Y_n$ for that update's
+target. With $\alpha_n = 1/n$, if $Q_{n-1} = \frac{1}{n-1}\sum_{i<n}Y_i$ then
+
+$$
+Q_n = Q_{n-1} + \frac{1}{n}\paren{Y_n - Q_{n-1}} = \frac{n-1}{n}Q_{n-1} + \frac{1}{n}Y_n = \frac{1}{n}\sum_{i=1}^{n}Y_i,
+$$
+
+so by induction $Q_n$ is the mean of the targets seen so far. A constant $\alpha$ gives an exponentially weighted mean
+instead, which tracks targets that change as $Q$ improves. Tabular Q-learning converges to $q_*$ with probability 1 when
+every state-action pair is updated infinitely often and the step sizes satisfy $\sum_n\alpha_n = \infty$ and
+$\sum_n\alpha_n^2 < \infty$ <Cite id="watkins1992" />.
+
+The agent must choose actions while it learns. **$\varepsilon$-greedy** behaviour takes a uniformly random action with
+probability $\varepsilon$ and the greedy action otherwise, with ties broken at random. The table starts at $Q = 0$.
+With $\gamma = 0.9$ that is above the true value of every cell 8 or more moves from the goal. An action that has been
+tried and has paid
+$-1$ therefore looks worse than an untried one, so the agent systematically tries untried actions. This is optimism in
+the face of uncertainty, and it comes for free from the initial table.
+
+**Three updates by hand.** In the open room with $\gamma = 0.9$, $\alpha = 0.5$ and $Q = 0$:
+
+1. The agent moves up from $B$ to $A$. The target is $-1 + 0.9 \cdot \max_{a'}Q(A, a') = -1$, so
+   $Q(B, \text{up}) \leftarrow 0 + 0.5\,(-1 - 0) = -0.5$.
+2. It moves up from $A$ into the goal. The target is $10$, because the goal is terminal, so
+   $Q(A, \text{up}) \leftarrow 0 + 0.5 \cdot 10 = 5$.
+3. In a later episode it moves up from $B$ to $A$ again. The target is now $-1 + 0.9 \cdot 5 = 3.5$, so
+   $Q(B, \text{up}) \leftarrow -0.5 + 0.5\,(3.5 - (-0.5)) = 1.5$, and up becomes the greedy action in $B$.
+
+Value iteration moves information about the goal one cell per sweep over every cell. Q-learning moves it one cell per
+visit, and only along the paths the agent happens to take. Early episodes are therefore long random walks, and the
+arrows fill in backwards from the goal as episodes accumulate.
+
+### Learning on-policy: SARSA
+
+**SARSA** replaces the maximum in the target by the value of the action $A_{t+1}$ that the agent will actually take
+next, chosen $\varepsilon$-greedily <Cite id="rummery1994" />:
+
+$$
+Y_t = R_{t+1} + \gamma Q(S_{t+1}, A_{t+1}).
+$$
+
+Its expected target is the Bellman expectation backup for the $\varepsilon$-greedy policy $\pi$, so SARSA learns
+$q_\pi$ rather than $q_*$. In update 3 above, suppose the agent in $A$ next draws the exploratory action left, with
+$Q(A, \text{left}) = -0.5$. Q-learning's target for $(B, \text{up})$ is still $-1 + 0.9 \cdot 5 = 3.5$. SARSA's is
+$-1 + 0.9 \cdot (-0.5) = -1.45$.
+
+The difference decides the route in the two-routes maze. The start and the goal are joined by a bridge of 8 moves and
+by a detour of 16 moves around a block of walls. Five of the bridge cells have a trap directly above and directly
+below. An $\varepsilon$-greedy agent takes a random action with probability $\varepsilon$, and half of the random
+actions are up or down. Each of those five moves therefore enters a trap with probability $\varepsilon/2$. At
+$\varepsilon = 0.1$ the probability of crossing without a fall is $0.95^5 = 0.774$, so 22.6% of crossings end in
+at least one fall, each costing $-20$ and a restart.
+
+- Q-learning's targets assume greedy behaviour from the next state on, and a greedy agent never falls. Q-learning
+  learns $q_*$ and takes the bridge.
+- SARSA's targets include the falls, so the bridge looks worse than the detour. With $\alpha = 0.5$, $\gamma = 0.95$
+  and $\varepsilon = 0.1$, SARSA's greedy route after 300 episodes is the detour in 10 of 10 seeds, and Q-learning's
+  is the bridge in 10 of 10.
+
+Slip has the same effect on the planner. A slip on the bridge enters a trap with probability $\rho$, since both
+perpendicular cells are traps. Value iteration keeps the bridge for $\rho \le 0.065$ and switches to the detour from
+$\rho = 0.07$, at both $\gamma = 0.9$ and $\gamma = 0.95$. The cliff-edge maze repeats the comparison of
+<Cite id="sutton2018" />: a row of traps lies between the start and the goal, Q-learning learns the route along the
+edge, and SARSA learns a route one or more rows away from it.
+
+## Simulation
+
+<MazeExplorer />
+
+The widget runs the agent live. Useful things to try:
+
+- **Travel back.** After 50 to 100 episodes, pause and drag the chart's handle to episode 1, then step forward with the
+  arrows. After episode 1 most visited cells point at an action they have not tried yet, and only the last cell before
+  the goal points at the goal. Over later episodes, arrows that lead to the goal spread back from it one visited cell
+  at a time, and the path of each episode shortens.
+- **Q-learning against SARSA.** On the two-routes maze, run both with the same seed. The final greedy routes differ as
+  derived above. Switch on the decay of $\varepsilon$: SARSA's behaviour then approaches greedy, its values approach
+  $q_*$, and in some seeds its route moves back to the bridge (2 of 10 seeds within 300 episodes).
+- **Planning.** Choose value iteration and step through sweeps. The value of the start stays at
+  $-(1 - \gamma^k)/(1 - \gamma)$ until sweep $k$ reaches the start's distance from the goal. Raise the slip
+  probability past 0.07 and the greedy route leaves the bridge.
+- **Return and reference.** With $\rho = 0$, the dashed line is the return of the shortest route. The moving average of
+  the learning agents stays below it while $\varepsilon > 0$, because exploratory moves cost steps and falls.
+
+## What it illustrates
+
+- A <NoteLink to="markov-decision-process">Markov decision process</NoteLink> models the maze exactly: the next cell
+  depends only on the current cell and the move.
+- The <NoteLink to="bellman-equations">Bellman optimality equation</NoteLink> is the one equation both planners and
+  learners solve. <NoteLink to="value-iteration">Value iteration</NoteLink> applies it with the model;
+  <NoteLink to="q-learning">Q-learning</NoteLink> applies it to one sampled transition at a time.
+- Reward information propagates backwards from the goal: one cell per sweep for value iteration, one cell per visit
+  for <NoteLink to="temporal-difference-learning">temporal-difference</NoteLink> methods.
+- Exploration is necessary and costly. <NoteLink to="epsilon-greedy">$\varepsilon$-greedy</NoteLink> behaviour and
+  optimistic initial values make every action get tried; see <NoteLink to="exploration-in-rl">exploration in
+  RL</NoteLink>.
+- On-policy and off-policy learning differ in what they learn. <NoteLink to="sarsa">SARSA</NoteLink> values the policy
+  it follows, exploration included; Q-learning values the greedy policy.
+
+## Variations
+
+- **Goal reward only.** With no step cost and $\gamma < 1$, the discount alone favours short routes, because
+  $\gamma^{d-1} \cdot 10$ falls with the distance $d$. With $\gamma = 1$ and no step cost every route that reaches the
+  goal is optimal.
+- **Terminal traps.** If a trap ended the episode with reward $-20$, a long enough maze would make jumping into the
+  nearest trap better than walking to the goal. Returning the agent to the start instead makes a trap strictly worse
+  than any move.
+- **Model-based learning.** An agent can estimate $p$ from its transitions and run value iteration on the estimate,
+  which reuses each experience many times. See <NoteLink to="model-based-rl">model-based RL</NoteLink>.
+- **Large mazes.** A table has one entry per state-action pair. Mazes seen as images, or with many cells, need a
+  function approximator such as a <NoteLink to="deep-q-network">deep Q-network</NoteLink>.

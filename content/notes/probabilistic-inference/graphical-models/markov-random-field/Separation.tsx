@@ -1,25 +1,31 @@
 import { useState } from 'react'
 import { MathText } from '@/components/content/MathText'
-import { GraphDiagram, Interactive, ParamChoice, Readout, type GraphEdge, type GraphNode } from '@/components/viz'
+import { Diagram } from '@/components/diagram/Diagram'
+import { link, variable } from '@/components/diagram/components'
+import { Interactive, ParamChoice, Readout } from '@/components/viz'
 
-type Graph = { nodes: GraphNode[]; edges: GraphEdge[]; a: string; b: string; separator: string[] }
-
-const link = (source: string, target: string): GraphEdge => ({ source, target, directed: false })
+type Vertex = { id: string; label: string; x: number; y: number }
+type Graph = { nodes: Vertex[]; edges: [string, string][]; a: string; b: string; separator: string[] }
 
 // A chain of five spins, and a 3 × 3 grid numbered row by row.
 const GRAPHS: Record<'chain' | 'grid', Graph> = {
   chain: {
-    nodes: [1, 2, 3, 4, 5].map((i) => ({ id: `${i}`, label: `x_${i}`, x: i, y: 0 })),
-    edges: [1, 2, 3, 4].map((i) => link(`${i}`, `${i + 1}`)),
+    nodes: [1, 2, 3, 4, 5].map((i) => ({ id: `${i}`, label: `x_${i}`, x: 1.5 * i, y: 0 })),
+    edges: [1, 2, 3, 4].map((i): [string, string] => [`${i}`, `${i + 1}`]),
     a: '1',
     b: '5',
     separator: ['3'],
   },
   grid: {
-    nodes: [...Array(9).keys()].map((i) => ({ id: `${i + 1}`, label: `x_${i + 1}`, x: i % 3, y: Math.floor(i / 3) })),
-    edges: [...Array(9).keys()].flatMap((i) => [
-      ...(i % 3 < 2 ? [link(`${i + 1}`, `${i + 2}`)] : []),
-      ...(i < 6 ? [link(`${i + 1}`, `${i + 4}`)] : []),
+    nodes: [...Array(9).keys()].map((i) => ({
+      id: `${i + 1}`,
+      label: `x_${i + 1}`,
+      x: 1.5 * (i % 3),
+      y: 1.5 * Math.floor(i / 3),
+    })),
+    edges: [...Array(9).keys()].flatMap((i): [string, string][] => [
+      ...(i % 3 < 2 ? [[`${i + 1}`, `${i + 2}`] as [string, string]] : []),
+      ...(i < 6 ? [[`${i + 1}`, `${i + 4}`] as [string, string]] : []),
     ]),
     a: '1',
     b: '9',
@@ -33,8 +39,8 @@ function reachable(g: Graph, start: string, blocked: Set<string>): Set<string> {
   const stack = [start]
   while (stack.length) {
     const u = stack.pop()!
-    for (const e of g.edges) {
-      const v = e.source === u ? e.target : e.target === u ? e.source : undefined
+    for (const [s, t] of g.edges) {
+      const v = s === u ? t : t === u ? s : undefined
       if (v && !blocked.has(v) && !seen.has(v)) {
         seen.add(v)
         stack.push(v)
@@ -51,7 +57,7 @@ export function Separation() {
   const g = GRAPHS[which]
   const s = new Set(observed[which] ?? g.separator)
   const reach = reachable(g, g.a, s)
-  const label = (id: string) => `$${g.nodes.find((n) => n.id === id)!.label!}$`
+  const label = (id: string) => `$${g.nodes.find((n) => n.id === id)!.label}$`
   const toggle = (id: string) => {
     if (id === g.a || id === g.b) return
     const next = new Set(s)
@@ -91,11 +97,14 @@ export function Separation() {
         </>
       }
     >
-      <GraphDiagram
-        nodes={g.nodes.map((n) => ({ ...n, kind: s.has(n.id) ? 'observed' : 'variable' }))}
-        edges={g.edges}
-        highlight={[...reach]}
-        height={which === 'chain' ? 110 : 240}
+      <Diagram
+        spec={{
+          unit: 48,
+          nodes: g.nodes.map((n) =>
+            variable(n.id, n.x, n.y, `$${n.label}$`, { filled: s.has(n.id), highlight: reach.has(n.id) }),
+          ),
+          edges: g.edges.map(([a, b]) => link(a, b, false)),
+        }}
         onNodeClick={toggle}
         ariaLabel={`Undirected ${which} with an observed set`}
       />

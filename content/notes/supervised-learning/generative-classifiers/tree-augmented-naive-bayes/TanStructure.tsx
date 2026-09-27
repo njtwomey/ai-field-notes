@@ -1,14 +1,9 @@
 import { useMemo, useState } from 'react'
 import { MathText } from '@/components/content/MathText'
-import {
-  GraphDiagram,
-  Interactive,
-  ParamChoice,
-  Readout,
-  StepControls,
-  type GraphEdge,
-  type GraphNode,
-} from '@/components/viz'
+import { Diagram } from '@/components/diagram/Diagram'
+import { link, variable } from '@/components/diagram/components'
+import type { DiagramEdge, DiagramSpec } from '@/components/diagram/types'
+import { Interactive, ParamChoice, Readout, StepControls } from '@/components/viz'
 
 /** The worked example's 16 training rows: class c, then features x1..x4. */
 const DATA = [
@@ -108,15 +103,11 @@ function directed(root: number) {
 }
 
 // K4 drawn without crossings: x2 sits inside the triangle x1, x3, x4, so every weight label has its own place.
-const COMPLETE: GraphNode[] = [
-  { id: 'x1', label: 'x_1', x: 0, y: 2 },
-  { id: 'x2', label: 'x_2', x: 1.6, y: 1.25 },
-  { id: 'x3', label: 'x_3', x: 3.2, y: 2 },
-  { id: 'x4', label: 'x_4', x: 1.6, y: 0 },
-]
-const WITH_CLASS: GraphNode[] = [
-  { id: 'c', x: 1.5, y: 0 },
-  ...Array.from({ length: D }, (_, i) => ({ id: id(i), label: `x_${i + 1}`, x: i, y: 1.2 })),
+const COMPLETE: [number, number][] = [
+  [0, 3],
+  [2.4, 1.9],
+  [4.8, 3],
+  [2.4, 0],
 ]
 
 type View = 'kruskal' | 'nb' | 'tan'
@@ -132,29 +123,40 @@ export function TanStructure() {
   const nb = useMemo(() => evaluate(Array(D).fill(null)), [])
   const tan = useMemo(() => evaluate(directed(root)), [root])
 
-  let nodes: GraphNode[]
-  let edges: GraphEdge[]
-  let highlight: string[] = []
+  let spec: DiagramSpec
   if (view === 'kruskal') {
-    nodes = COMPLETE
-    edges = EDGES.map(({ i, j, w }, k) => ({
-      source: id(i),
-      target: id(j),
-      directed: false,
-      label: w.toFixed(3),
-      highlight: k < steps && accepted[k],
-      dashed: k < steps && !accepted[k],
-    }))
-    if (next) highlight = [id(next.i), id(next.j)]
+    const ends = next ? [id(next.i), id(next.j)] : []
+    spec = {
+      unit: 48,
+      nodes: COMPLETE.map(([x, y], i) => variable(id(i), x, y, `$x_${i + 1}$`, { highlight: ends.includes(id(i)) })),
+      edges: EDGES.map(({ i, j, w }, k) =>
+        link(id(i), id(j), false, {
+          label: `$${w.toFixed(3)}$`,
+          // The vertical x2–x4 edge has its weight low on its right, clear of the x1–x4 and x3–x4 edges.
+          ...(i === 1 && j === 3 && { labelSide: 'right' as const, labelPos: 0.3 }),
+          highlight: k < steps && accepted[k],
+          dashed: k < steps && !accepted[k],
+        }),
+      ),
+    }
   } else {
-    nodes = WITH_CLASS
     const parents = directed(root)
-    edges = Array.from({ length: D }, (_, i) => ({ source: 'c', target: id(i) }))
+    const edges: DiagramEdge[] = Array.from({ length: D }, (_, i) => link('c', id(i)))
+    // Tree edges run along the feature row, bowing below it so that they clear the features in between.
     if (view === 'tan')
       parents.forEach((p, i) => {
-        if (p !== null) edges.push({ source: id(p), target: id(i), highlight: true })
+        if (p !== null) edges.push(link(id(p), id(i), true, { highlight: true, route: 'curve', bend: 0.35 * (i - p) }))
       })
-    highlight = view === 'tan' ? [id(root)] : []
+    spec = {
+      unit: 48,
+      nodes: [
+        variable('c', 2.25, 0, '$c$'),
+        ...Array.from({ length: D }, (_, i) =>
+          variable(id(i), 1.5 * i, 1.8, `$x_${i + 1}$`, { highlight: view === 'tan' && i === root }),
+        ),
+      ],
+      edges,
+    }
   }
 
   const verdict = (k: number) => {
@@ -226,11 +228,8 @@ export function TanStructure() {
         )
       }
     >
-      <GraphDiagram
-        nodes={nodes}
-        edges={edges}
-        highlight={highlight}
-        height={view === 'kruskal' ? 250 : 190}
+      <Diagram
+        spec={spec}
         ariaLabel={
           view === 'kruskal'
             ? 'Complete graph over four features weighted by conditional mutual information'

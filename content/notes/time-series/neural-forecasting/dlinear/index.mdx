@@ -89,29 +89,9 @@ $\Wmat(\xvec + c\ones - (x_L + c)\ones) + (x_L + c)\ones = \hat\yvec + c\ones$. 
 with the level, whatever $\Wmat$ is. This helps when the test period's level differs from anything seen in training, as
 in exchange rates.
 
-## Findings
-
-<Cite id="zeng2023" /> reports the following on nine benchmark datasets.
-
-- **Accuracy.** LTSF-Linear outperformed the transformer models in every multivariate setting, often by 20% to 50% in
-  MSE against FEDformer, the strongest of them. The linear models do not model any interaction between variables.
-- **A naive forecast beat them on exchange rates.** Repeating the last value outperformed all the transformers on the
-  exchange-rate data by about 45%. The transformers extrapolated spurious trends fitted to noise.
-- **Longer windows did not help the transformers.** As the look-back window grew from 24 to 720 steps, the
-  transformers' error stayed flat or rose. The linear models' error fell steadily.
-- **Order barely mattered to them.** Shuffling the input window left Informer's error on exchange rates almost
-  unchanged, while the linear model's error rose by 27% on average. On ETTh1, where periodicity is strong, shuffling
-  did hurt Autoformer and FEDformer, which build decomposition or frequency structure into their layers.
-- **Removing parts of Informer improved it.** Replacing attention with linear layers, then dropping the remaining
-  modules, then reducing the model to one linear layer lowered the error at each step. On exchange rates at horizon 96,
-  MSE fell from 0.847 for Informer to 0.084 for the linear layer.
-
-The DLinear moving-average kernel has width 25, the same as Autoformer's decomposition. The linear models used a
-look-back of $L = 336$; the transformers used their default $L = 96$, at which they performed best.
-
 ## Worked example
 
-With $L = 336$ and $H = 720$, the plain linear layer has $HL = 720 \times 336 = 241{,}920$ weights and DLinear has
+With a look-back of $L = 336$ and a horizon of $H = 720$, the plain linear layer has $HL = 720 \times 336 = 241{,}920$ weights and DLinear has
 $2HL = 483{,}840$, before biases. Both are shared across all variables.
 
 For an AR(1) series $y_t = 0.9\,y_{t-1} + \varepsilon_t$, the companion matrix is the scalar $0.9$, and the optimal
@@ -121,6 +101,22 @@ $\Wmat$ is zero except in its last column, which holds $0.9, 0.81, 0.729, \dots$
 For NLinear with $\Wmat$ fixed, the windows $(0, 2, 4)$ and $(100, 102, 104)$ differ by a constant $100$. After
 subtracting the last value, both become $(-4, -2, 0)$. The linear layer produces the same output for both, and adding
 back $4$ or $104$ makes their forecasts differ by exactly $100$ at every horizon.
+
+## What the evidence shows
+
+On the long-horizon benchmarks used by the transformer papers, the linear models beat every transformer in every
+multivariate setting, often by 20% to 50% in mean squared error against the strongest of them <Cite id="zeng2023" />. On
+exchange rates, repeating the last value beat all the transformers, which extrapolated spurious trends fitted to noise.
+
+Two diagnostics explain the gap, and both can be run on any forecaster.
+
+- **Lengthen the window.** A model that extracts temporal information should improve as the look-back window grows,
+  since a longer window holds more cycles and a better estimate of the trend. The linear models' error fell steadily as
+  the window grew from 24 to 720 steps. The transformers' error stayed flat or rose, a sign that they fitted noise in
+  the extra input rather than using it <Cite id="zeng2023" />.
+- **Shuffle the window.** A model that uses the order of its inputs should get worse when they are permuted. Shuffling
+  left Informer's error on exchange rates almost unchanged, while the linear model's error rose sharply
+  <Cite id="zeng2023" />. This is the permutation argument above made empirical.
 
 ## What the result says
 

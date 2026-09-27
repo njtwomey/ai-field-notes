@@ -5,14 +5,26 @@ summary: Campbell and Kautz put the outlines of 46 fonts into dense corresponden
 tags: [worked-example, gaussian-process, latent-variable-models, generative-model, computer-graphics, typography, shape-correspondence]
 aliases: [manifold of fonts, font manifold, Campbell and Kautz fonts, generative font manifold]
 requires: [gaussian-process-latent-variable-model]
-related: [bayesian-gplvm, principal-component-analysis, variational-autoencoder]
-references: [campbell2014, campbell2014project, lawrence2005, titsias2010, rasmussen2006]
+related: [bayesian-gplvm, principal-component-analysis, variational-autoencoder, dynamic-time-warping]
+references: [campbell2014, campbell2014project, campbell2014demo, lawrence2005, titsias2010, rasmussen2006, googlefonts2026, sakoe1978]
 status: draft
 updated: 2026-09-27
 ---
 
 import { FontManifold } from './FontManifold'
 import { FontPipeline } from './FontPipeline'
+
+<Callout variant="credit" title="Provenance: Campbell and Kautz (2014)">
+This note presents Neill Campbell and Jan Kautz's work, not mine. I include it here because it is very nice work: a
+clear demonstration of what a GP-LVM can do. The method is copied from their SIGGRAPH 2014 paper "Learning a Manifold of
+Fonts" <Cite id="campbell2014" />. The correspondence pipeline, the matching energy, the GP-LVM model, the editing rule
+and the observations about the manifold are all theirs; this note restates them in this site's notation and redraws
+their pipeline. Only the figure is new: 66 instances of open-licensed fonts from Google Fonts, put into correspondence
+by a simpler pipeline written for this site, with a GP-LVM fitted in your browser. It uses none of their code or data.
+Their own interactive demonstration, on their 46 fonts and all 62 characters, is the complete version: [interactive 2D font manifold
+demonstration](https://ndfcampbell.org/research/fonts/#interactive-2d-font-manifold-demonstration)
+<Cite id="campbell2014demo" />.
+</Callout>
 
 <Definition>
 Given $M = 46$ ordinary font files, build a continuous space of fonts in which every point generates a complete,
@@ -69,16 +81,14 @@ with indices taken modulo $N$ around the closed curve. The first term makes curv
 sample. The exponential caps the cost of the very large curvature at sharp corners. The second, elastic, term keeps
 samples spread evenly unless curvature pulls them together. $E_\eta$ matches outward normals near the top and bottom of
 the glyph, which lets serifs of serif fonts match the plain terminals of sans serif fonts. The constraint
-$t_{i+1,m} - t_{i,m} \ge 0$ keeps the samples in order. The parameters used were $\gamma = 50$, $\beta = 5$ in the normal
-term, $\lambda_\eta = 1$ and $\lambda_{\text{el}} = MN^2/6000$. The problem was solved with a constrained interior-point
-optimiser with L-BFGS Hessian updates <Cite id="campbell2014" />.
+$t_{i+1,m} - t_{i,m} \ge 0$ keeps the samples in order. The problem is a constrained smooth optimisation over all
+fonts' sample positions at once <Cite id="campbell2014" />.
 
 Minimised directly, the energy falls into poor local minima in which sharp concavities are out of correspondence. The
 remedy is coarse to fine. Each outline is written as an elliptic Fourier series, a sum of harmonics in $t$. With only
 the lowest harmonics, different fonts' versions of a character look alike even when their full outlines differ, and
 matching is easy. The optimisation is run first on a low-pass version of the outlines and then repeated with more and
-more harmonics, each run starting from the last. The paper shows the sequence 2, 4, 6, 10, 20, 26 and 40 components.
-Matching took about 20 minutes per outline, and outlines can be matched in parallel.
+more harmonics, each run starting from the last.
 
 ### A font as one vector
 
@@ -112,7 +122,6 @@ latent points $\Xmat$ and the hyperparameters $\thetavec$
 maximise the log-likelihood jointly, by conjugate gradients. The latent points start at the PCA projection of $\Ymat$.
 The hyperparameters have a wide prior $\log\thetavec \sim \Gauss(\zeros, \eye)$ and start at its mean. The fitted noise
 variance was very small, which the authors read as evidence that the outlines do lie near a low-dimensional manifold.
-Fitting took under 2 minutes.
 
 The dimension of the data is large and the number of fonts small, which suits the GP-LVM. The likelihood depends on
 the data only through the $46 \times 46$ matrix $\Ymat\Ymat^\top$, so the cost of each iteration does not grow with
@@ -128,8 +137,8 @@ $$
 
 where $\Xmat^*$ are the fitted latent points. The inverse is computed once, and each new font costs one row of kernel
 evaluations and a product. Adding $\bar\uvec$ back gives the outline vector $\hat\uvec = \hat\yvec + \bar\uvec$, from
-which every character is drawn. The noise term is used in training only. Generation takes milliseconds, which is why
-the authors could offer a JavaScript viewer <Cite id="campbell2014project" />.
+which every character is drawn. The noise term is used in training only. Generation takes milliseconds, which is what makes an
+interactive viewer possible <Cite id="campbell2014project" />.
 
 Far from all training fonts, every kernel value is near zero, so $\hat\yvec \to \zeros$ and the manifold returns the
 average font. The posterior variance, $c(\hat\xvec, \hat\xvec) - \Cmat(\hat\xvec, \Xmat^*)\Cmat(\Xmat^*,
@@ -168,28 +177,71 @@ outline, and the variance heatmap shows the user approaching the edge.
 
 ## Simulation
 
-The figure is a toy stand-in for the paper's real fonts, not a reproduction. Twenty synthetic fonts each draw an "o"
-and an "I" as 76 vertices in correspondence, 32 on each contour of the "o" and 12 on the "I", so each font is a
-vector of 152 numbers. Five parameters generate each font: the width of the "o", stroke weight, slant, stroke contrast
-and serif length. Serif fonts are given higher contrast, as in many real typefaces, and four of the fonts are italic. The
-GP-LVM sees only the 152-dimensional vectors, never the five parameters.
+The figure applies the same two stages to real fonts, on a smaller scale. It is not a reproduction of the paper; for
+the paper's manifold use Campbell's
+[interactive demonstration](https://ndfcampbell.org/research/fonts/#interactive-2d-font-manifold-demonstration)
+<Cite id="campbell2014demo" />.
+
+**Fonts.** The training set has 66 font instances drawn from 23 families in the Google Fonts repository, all under the
+SIL Open Font License or the Apache License <Cite id="googlefonts2026" />. The families span grotesque and geometric
+sans, humanist sans, serif, didone, slab serif and monospace designs. Variable fonts are instanced at several weights,
+and some at a condensed width or in italic, so one family contributes up to five instances. EB Garamond is dropped
+because its "P" has an open bowl and therefore one contour where the other fonts have two.
+
+**Characters.** Each font contributes 23 capitals: every letter except K, Q and W, whose contour counts or shapes
+differ between designs. Every font is scaled so that its "H" is 700 units tall.
+
+**Correspondence.** The pipeline is a simplified version of the paper's stage 1.
+
+1. Each Bézier outline is flattened to a polyline.
+2. Outer contours are turned counter-clockwise and counters clockwise.
+3. Counters are ordered by matching their centroids to a reference font's.
+4. Each contour is resampled at 400 points by arc length and rotated to the cyclic shift that best matches the
+   reference.
+5. Every font is aligned to a template by <NoteLink to="dynamic-time-warping">dynamic time warping</NoteLink>
+   <Cite id="sakoe1978" />. The matching features are position and unit tangent, with italics de-slanted, and a
+   penalty on uneven stretching plays the role of the elastic term.
+6. The alignment runs coarse to fine: once on heavily smoothed outlines, then again on lightly smoothed ones within
+   a band around the coarse match.
+7. The template is re-estimated as the mean aligned outline, and steps 5 and 6 are repeated three times.
+8. The output samples are placed along the template. Every place where at least three fonts have a corner gets its own
+   sample, and each font's corner is moved onto that sample. The remaining samples are spread along the outline,
+   denser on curves.
+
+The displayed word gets the densest sampling, 260 points around the "M". Concatenating every sample of every
+contour of every character, and then the 23 advance widths, gives each font a vector of $D = 4{,}479$ integers.
+
+**Fitting.** The vectors are centred and divided by one common scale. The 2-D GP-LVM then starts from the PCA
+projection and takes 300 Adam steps on the log posterior. The steps run a few at a time between animation frames, so
+the latent points can be watched moving into place. The cost of a step depends on the $66 \times 66$ matrix
+$\Ymat\Ymat^\top$, not on $D$, and the whole fit takes about half a second on a laptop. Changing the set of fonts
+refits the model from scratch.
 
 <FontManifold />
 
-The toy shows the paper's behaviour in miniature. The three styles occupy separate regions of the latent space. Moving
-the latent point between regions interpolates serif length, contrast, weight and slant together. Far from every font
-the glyphs relax to the average font and the standard deviation approaches its prior value. Dragging the serif tip
-changes the "o", which was never touched, because the manifold has learned that long serifs and high contrast go
-together.
+The first latent dimension runs from serif designs to sans designs, with the slab serifs between them. The didones form
+a group of their own, and so do the monospaced fonts. The instances of one family sit close together, and weight
+varies within a family's small region of the latent space. Between training fonts the word changes gradually. Far
+from every font the mean returns to the average font, a medium-weight serif, and the standard deviation approaches
+its prior value.
 
-## Evaluation as reported
+Dragging the foot serif of the "P" edits the whole alphabet. In the training fonts a longer foot serif comes with
+heavier strokes. Pulling the tip of a Baskerville serif outward therefore moves the latent point towards the bold and
+black serif fonts, and every letter thickens, although only one point of one letter was dragged. Pushing the tip
+inward moves towards the light serifs. In a sans font the same sample is the corner of the stem, and dragging it
+outward thickens the stem and makes the whole font bolder. The tip stops following the pointer where the manifold has
+no font with a longer or shorter serif.
 
-The paper's evidence is visual. It shows the manifold, typeset samples of the word "hamburgefon" across it, single
-character manifolds, interpolation between two fonts, the average font and editing sequences
-<Cite id="campbell2014" />. It compares interpolation through its correspondences with two alternatives on a rasterised
-glyph moving from Times New Roman to Tahoma. Interpolating signed distance transforms has topological problems when one outline is not strictly inside the other. Lagrangian
-mass transport does better but has no constraint to keep smooth boundaries or topology. The matched outlines interpolate
-smoothly. The paper reports no user study and no quantitative measure of the quality of generated fonts.
+The mean of a Gaussian process is a weighted sum of the training fonts in which some weights are negative. Near the
+highest-contrast didones, those weights can push the two edges of a hairline stroke past each other. The hairline then
+thins to nothing or crosses itself. The GP-LVM has no notion of a valid outline, so nothing in the model prevents this.
+
+## Evidence
+
+The paper's evidence is visual: the manifold, typeset samples across it, interpolation between fonts, the average font
+and editing sequences <Cite id="campbell2014" />. Interpolation through matched outlines stays smooth where
+interpolating signed distance transforms breaks topology. The paper reports no user study and no quantitative measure
+of the quality of generated fonts.
 
 ## What it illustrates
 

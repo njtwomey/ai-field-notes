@@ -159,8 +159,7 @@ stale.
   (`bg-muted`, `text-muted-foreground`, …), never raw hex, except data colours from the palette.
 - `EChart.tsx` is the only file that touches ECharts. Register new ECharts chart types or components once in
   `viz/echarts.ts` (tree-shaken build). All chart styling defaults live in `viz/theme.ts`.
-- Build figures from the existing primitives: `XYChart`, `Heatmap`, `GraphDiagram` (fixed-layout graphical models and
-  factor graphs), `Interactive` (the standard frame: title,
+- Build figures from the existing primitives: `XYChart`, `Heatmap`, `Interactive` (the standard frame: title,
   controls, figure, readout, caption), `ParamSlider`, `ParamChoice`, `ParamSwitch`, `ParamButton`, `Readout`. Add a new
   primitive to `viz/` and export it from `viz/index.ts` rather than styling ECharts inside a note.
 - Data colours follow `design/palette.json`:
@@ -200,9 +199,10 @@ stale.
   routed at right angles through ports (`id:n|s|e|w`) and waypoints, or drawn `straight`/`curve` for graphical models.
   Labels are KaTeX, drawn as an HTML overlay; nodes grow to fit their labels (`fitLabels`), `spread` spaces a layout
   out, and edge labels sit beside their edge (rotated along it when they fit; `labelPos`, `labelSide`, `labelOffset`).
-  Reusable pieces (`op`, `gate`, `projector` encoder/decoder trapezoids, `reparam`) live in
-  `components.ts`; add a component there rather than repeating a pattern. `/lab/diagrams` is the test bench. The older
-  `GraphDiagram` (ECharts) still backs existing graphical-model figures.
+  An edge from a node to itself draws a self-loop on the `from` side; `shade` (0–1) fills a node in proportion to a
+  value such as a probability. Reusable pieces (`op`, `gate`, `projector` encoder/decoder trapezoids, `reparam`, and
+  `variable`, `factor`, `link` for graphical models) live in `components.ts`; add a component there rather than
+  repeating a pattern. Specs used by several notes live in `diagram/specs/`. `/lab/diagrams` is the test bench.
 - `XYChart equalAspect` gives equal pixel length per unit on both axes, for any ranges. Use it whenever a shape or
   angle matters: an ellipse, a normal vector against a boundary. Arrows are drawn with the `vectors` prop.
 - Reusable static images go in `content/assets/` and are placed with `<Asset name="…" />`. Never copy an image into

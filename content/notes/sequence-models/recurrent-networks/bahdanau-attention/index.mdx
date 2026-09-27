@@ -1,0 +1,117 @@
+---
+title: Bahdanau attention
+kind: concept
+summary: Bahdanau attention gives a sequence-to-sequence decoder a new context vector at every step, $\cvec_i = \sum_j \alpha_{ij} \hvec_j$, a weighted average of all encoder states. The weights are a softmax of learned alignment scores between the decoder state and each encoder state.
+tags: [deep-learning, sequence-models, nlp, attention, worked-example]
+aliases: [additive attention, alignment model, soft alignment, RNNsearch, content-based attention]
+requires: [sequence-to-sequence, softmax-and-log-sum-exp]
+related: [scaled-dot-product-attention, transformer]
+references: [bahdanau2015, luong2015]
+status: draft
+updated: 2026-09-27
+---
+
+import { AttentionDiagram } from './AttentionDiagram'
+
+<Definition>
+Bahdanau attention computes, for decoder step $i$, a score $e_{ij} = \vvec_a^{\tr} \tanh(\Wmat_a \svec_{i-1} +
+\Umat_a \hvec_j)$ between the previous decoder state $\svec_{i-1}$ and every encoder state $\hvec_j$. A softmax over
+$j$ turns the scores into weights $\alpha_{ij}$, and the context vector $\cvec_i = \sum_j \alpha_{ij} \hvec_j$ is fed to
+the decoder at step $i$ <Cite id="bahdanau2015" />.
+</Definition>
+
+## Intuition
+
+A plain <NoteLink to="sequence-to-sequence">sequence-to-sequence model</NoteLink> passes the whole input to the decoder
+through one fixed-size vector. Long inputs do not fit. A human translator does not memorise a sentence and then write
+the translation. They look back at the relevant source words while writing each target word.
+
+Attention does the same. The encoder keeps one vector per source position. When the decoder writes target word $i$, it
+scores how relevant each source position is, and reads a weighted average of the source vectors. The weights form a
+soft alignment between target and source words, learned without any alignment labels.
+
+## Mechanism
+
+**Encoder.** A bidirectional RNN reads the source $x_1, \dots, x_S$ forwards and backwards. The annotation of position
+$j$ concatenates the two states, $\hvec_j = [\overrightarrow{\hvec}_j; \overleftarrow{\hvec}_j]$. It summarises the
+whole sentence with a focus on the words around $x_j$.
+
+**Alignment scores.** A one-hidden-layer network, the alignment model, scores each pair:
+
+$$
+e_{ij} = a(\svec_{i-1}, \hvec_j) = \vvec_a^{\tr} \tanh\paren{\Wmat_a \svec_{i-1} + \Umat_a \hvec_j}.
+$$
+
+This is additive attention: the two inputs are projected and added before the nonlinearity.
+
+**Weights.** Normalise over source positions with a softmax:
+
+$$
+\alpha_{ij} = \frac{\exp(e_{ij})}{\sum_{k=1}^{S} \exp(e_{ik})}.
+$$
+
+**Context and decoder.** The context is $\cvec_i = \sum_{j=1}^{S} \alpha_{ij} \hvec_j$. The decoder state is
+$\svec_i = f(\svec_{i-1}, y_{i-1}, \cvec_i)$ and the output distribution is $p(y_i \mid y_{<i}, \xvec) = g(y_{i-1},
+\svec_i, \cvec_i)$. Every step has its own context, so the input is no longer compressed into one vector.
+
+<AttentionDiagram />
+
+## Why it works
+
+**Expected annotation.** The weights $\alpha_{i1}, \dots, \alpha_{iS}$ are non-negative and sum to 1, so they form a
+probability distribution over source positions. The context is the expected annotation under that distribution:
+$\cvec_i = \expect_{j \sim \alpha_i}[\hvec_j]$. When one score dominates, $\cvec_i \approx \hvec_{j^\star}$ and the
+decoder copies one position. When scores are flat, the decoder reads an average.
+
+**Differentiability.** A hard choice of one position would have no gradient. The softmax average is differentiable in
+every score, so the alignment model is trained by backpropagation along with the rest of the network, from translation
+pairs alone.
+
+**Short gradient paths.** The derivative of the context with respect to an annotation, holding the weights fixed, is
+$\partial \cvec_i / \partial \hvec_j = \alpha_{ij} \I$. The loss at output step $i$ reaches source position $j$ through
+one weighted sum, whatever the distance between them. Without attention the same signal must pass back through every
+decoder step and every encoder step in between, and decays as described in
+<NoteLink to="backpropagation-through-time">backpropagation through time</NoteLink>.
+
+## Worked example
+
+Take $S = 3$ source positions with two-dimensional annotations $\hvec_1 = (1, 0)$, $\hvec_2 = (0, 1)$ and
+$\hvec_3 = (1, 1)$, and alignment scores $e = (1.0, 2.0, 0.5)$ at some decoder step. The softmax gives
+
+$$
+\alpha = \frac{(e^{1}, e^{2}, e^{0.5})}{e^{1} + e^{2} + e^{0.5}} = (0.231, 0.629, 0.140).
+$$
+
+The context is $\cvec = 0.231\,(1, 0) + 0.629\,(0, 1) + 0.140\,(1, 1) = (0.371, 0.769)$. Most weight falls on position
+2, whose score was highest by 1. A difference of 1 in score is a factor of $e \approx 2.72$ in weight.
+
+## Results
+
+On WMT'14 English to French, the attention model with a 50-word training limit (RNNsearch-50) scored 26.75 BLEU, against
+17.82 for the same encoder–decoder without attention (RNNenc-50) <Cite id="bahdanau2015" />. The score of the
+attention model did not fall as sentences grew longer, while that of the plain encoder–decoder did. The learned weights,
+drawn as a matrix, show mostly monotone alignments with local reorderings, such as French adjective–noun order.
+
+## Variants
+
+Luong et al. compared scoring functions <Cite id="luong2015" />:
+
+- **Dot:** $e_{ij} = \svec_i^{\tr} \hvec_j$.
+- **General (multiplicative):** $e_{ij} = \svec_i^{\tr} \Wmat_a \hvec_j$.
+- **Concat (additive):** Bahdanau's form.
+
+They also used the current decoder state $\svec_i$ rather than the previous one. The dot form, with scaling, became the
+<NoteLink to="scaled-dot-product-attention">scaled dot-product attention</NoteLink> of the
+<NoteLink to="transformer">transformer</NoteLink>.
+
+## Assumptions
+
+- Each output token depends mainly on a few input positions, and which ones can be predicted from the decoder state.
+- The whole source sequence is available when decoding starts.
+
+## Pitfalls
+
+- **Cost grows with both lengths.** Every decoder step scores every source position, so a pair of lengths $S$ and $T$
+  costs $O(ST)$ score evaluations.
+- **Attention is not explanation.** Attention weights show where the decoder read, not why it produced its output.
+  Different weight patterns can give the same prediction.

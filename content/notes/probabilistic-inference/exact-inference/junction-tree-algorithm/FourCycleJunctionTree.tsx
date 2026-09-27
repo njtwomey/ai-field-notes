@@ -1,40 +1,37 @@
 import { useState } from 'react'
 import { MathText } from '@/components/content/MathText'
-import { GraphDiagram, Interactive, ParamChoice, Readout, type GraphEdge, type GraphNode } from '@/components/viz'
+import { Diagram } from '@/components/diagram/Diagram'
+import { link, variable } from '@/components/diagram/components'
+import type { DiagramEdge, DiagramSpec } from '@/components/diagram/types'
+import { Interactive, ParamChoice, Readout } from '@/components/viz'
 
 type Stage = 'cycle' | 'chordal' | 'tree'
 
-const CYCLE_NODES: GraphNode[] = [
-  { id: 'a', x: 0, y: 0 },
-  { id: 'b', x: 1.4, y: 0 },
-  { id: 'c', x: 1.4, y: 1.4 },
-  { id: 'd', x: 0, y: 1.4 },
+const CYCLE_NODES = [
+  variable('a', 0, 0, '$a$'),
+  variable('b', 2, 0, '$b$'),
+  variable('c', 2, 2, '$c$'),
+  variable('d', 0, 2, '$d$'),
 ]
-const edge = (source: string, target: string, extra: Partial<GraphEdge> = {}): GraphEdge => ({
-  source,
-  target,
-  directed: false,
-  ...extra,
-})
+const edge = (from: string, to: string, extra: Partial<DiagramEdge> = {}) => link(from, to, false, extra)
 const CYCLE_EDGES = [edge('a', 'b'), edge('b', 'c'), edge('c', 'd'), edge('d', 'a')]
+const clique = (id: string, x: number, label: string) => ({ id, x, y: 0, w: 1.7, h: 0.8, tone: 'ink' as const, label })
 
-const STAGES: Record<Stage, { nodes: GraphNode[]; edges: GraphEdge[]; cliques: string }> = {
+const STAGES: Record<Stage, { spec: DiagramSpec; cliques: string }> = {
   cycle: {
-    nodes: CYCLE_NODES,
-    edges: CYCLE_EDGES,
+    spec: { unit: 56, nodes: CYCLE_NODES, edges: CYCLE_EDGES },
     cliques: '$\\{a, b\\}$, $\\{b, c\\}$, $\\{c, d\\}$, $\\{d, a\\}$',
   },
   chordal: {
-    nodes: CYCLE_NODES,
-    edges: [...CYCLE_EDGES, edge('a', 'c', { dashed: true, highlight: true })],
+    spec: { unit: 56, nodes: CYCLE_NODES, edges: [...CYCLE_EDGES, edge('a', 'c', { dashed: true, highlight: true })] },
     cliques: '$C_1 = \\{a, b, c\\}$, $C_2 = \\{a, c, d\\}$',
   },
   tree: {
-    nodes: [
-      { id: 'C1', label: 'a, b, c', x: 0, y: 0, kind: 'cluster' },
-      { id: 'C2', label: 'a, c, d', x: 2, y: 0, kind: 'cluster' },
-    ],
-    edges: [edge('C1', 'C2', { label: 'a, c' })],
+    spec: {
+      unit: 56,
+      nodes: [clique('C1', 0, '$a, b, c$'), clique('C2', 3.4, '$a, c, d$')],
+      edges: [edge('C1', 'C2', { label: '$a, c$' })],
+    },
     cliques: '$C_1 = \\{a, b, c\\}$, $C_2 = \\{a, c, d\\}$, separator $\\{a, c\\}$',
   },
 }
@@ -63,12 +60,7 @@ export function FourCycleJunctionTree() {
       }
       readout={<Readout label="maximal cliques" value={<MathText text={s.cliques} />} />}
     >
-      <GraphDiagram
-        nodes={s.nodes}
-        edges={s.edges}
-        height={stage === 'tree' ? 110 : 200}
-        ariaLabel={`Stage: ${stage}`}
-      />
+      <Diagram spec={s.spec} ariaLabel={`Stage: ${stage}`} />
     </Interactive>
   )
 }

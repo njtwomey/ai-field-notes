@@ -90,6 +90,26 @@ function parseEnd(ref: string): { id: string; side?: Side } {
   return { id, side: side as Side | undefined }
 }
 
+type Loop = { s0: Pt; c0: Pt; c1: Pt; s1: Pt; apex: Pt; dir: Pt }
+
+const SIDE_ANGLE: Record<Side, number> = { e: 0, s: Math.PI / 2, w: Math.PI, n: -Math.PI / 2 }
+
+/** A self-loop outside one side of a node: a cubic curve leaving and re-entering the outline either side of it. */
+function loopEdge(n: DiagramNode, side: Side): Loop {
+  const [w, h] = size(n)
+  const r = Math.min(w, h) / 2
+  const theta = SIDE_ANGLE[side]
+  const ray = (a: number, d: number): Pt => ({ x: n.x + Math.cos(a) * d, y: n.y + Math.sin(a) * d })
+  const out = (a: number) => boundary(n, ray(a, 1))
+  const reach = r + 0.9
+  const s0 = out(theta - 0.45)
+  const s1 = out(theta + 0.45)
+  const c0 = ray(theta - 0.6, reach)
+  const c1 = ray(theta + 0.6, reach)
+  const apex = { x: (s0.x + s1.x) / 8 + (3 * (c0.x + c1.x)) / 8, y: (s0.y + s1.y) / 8 + (3 * (c0.y + c1.y)) / 8 }
+  return { s0, c0, c1, s1, apex, dir: { x: Math.cos(theta), y: Math.sin(theta) } }
+}
+
 /** Corner points of an edge in grid units, from port to port. */
 function routeEdge(e: DiagramEdge, byId: Map<string, DiagramNode>): Pt[] {
   const a = parseEnd(e.from)
@@ -309,11 +329,34 @@ export function Diagram({
   const layout = useMemo(() => {
     const byId = new Map(spec.nodes.map((n) => [n.id, n]))
     const groups = (spec.groups ?? []).map((g) => ({ g, box: groupBox(g, byId) }))
-    const edges = (spec.edges ?? []).map((e) => ({ e, pts: routeEdge(e, byId) }))
+    // An edge whose ends coincide (e.g. swallowed by a wide text node) has nothing to draw.
+    const edges = (spec.edges ?? [])
+      .map((e) => {
+        const a = parseEnd(e.from)
+        if (a.id !== parseEnd(e.to).id) return { e, pts: routeEdge(e, byId) }
+        const n = byId.get(a.id)
+        if (!n) throw new Error(`diagram edge ${e.from} → ${e.to}: unknown node`)
+        const loop = loopEdge(n, a.side ?? 'n')
+        return { e, pts: [loop.s0, loop.s1], loop }
+      })
+      .filter(({ pts }) => pts.length >= 2)
+    // A curved edge bows out by half its bend at the middle; that apex must be inside the view too.
+    const apex = ({ e, pts, loop }: { e: DiagramEdge; pts: Pt[]; loop?: Loop }): Pt[] => {
+      // A loop's label sits beyond its apex, so leave room for it.
+      if (loop) {
+        const room = e.label ? (Math.abs(loop.dir.x) > 0.5 ? 1.2 : 0.55) : 0
+        return [{ x: loop.apex.x + loop.dir.x * room, y: loop.apex.y + loop.dir.y * room }]
+      }
+      if (e.route !== 'curve' || pts.length !== 2) return []
+      const [p, q] = pts
+      const len = Math.hypot(q.x - p.x, q.y - p.y) || 1
+      const half = (e.bend ?? 0.6) / 2
+      return [{ x: (p.x + q.x) / 2 - ((q.y - p.y) / len) * half, y: (p.y + q.y) / 2 + ((q.x - p.x) / len) * half }]
+    }
     const all: Box[] = [
       ...spec.nodes.map(extent),
       ...groups.map((g) => g.box),
-      ...edges.flatMap(({ pts }) => pts.map((p) => ({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }))),
+      ...edges.flatMap((edge) => [...edge.pts, ...apex(edge)].map((p) => ({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }))),
     ]
     const margin = 0.3
     const view = {
@@ -360,7 +403,7 @@ export function Diagram({
             align: right ? 'end' : 'start',
             content: (
               <div
-                className="font-sans font-medium tracking-wide whitespace-nowrap uppercase"
+                className="font-sans font-medium tracking-wide whitespace-nowrap uppercase [&_.katex]:normal-case"
                 style={{ color: colour }}
               >
                 <MathText text={g.label} />
@@ -385,12 +428,51 @@ export function Diagram({
         )
       })}
 
-      {layout.edges.map(({ e, pts }, i) => {
+      {layout.edges.map(({ e, pts, loop }, i) => {
         const colour = e.highlight
           ? seriesColor(mode, ACCENT_SLOT)
           : e.tone === undefined
             ? c.inkSecondary
             : toneColour(mode, e.tone)
+        if (loop) {
+          const [s0, c0, c1, s1, apex] = [loop.s0, loop.c0, loop.c1, loop.s1, loop.apex].map((p) => ({
+            x: p.x * u,
+            y: p.y * u,
+          }))
+          const head = 7
+          // Beside a node the label grows away from the loop; above or below it is centred on the apex.
+          const sideways = Math.abs(loop.dir.x) > 0.5
+          const len = Math.hypot(s1.x - c1.x, s1.y - c1.y) || 1
+          const end = { x: s1.x - ((s1.x - c1.x) / len) * head * 0.8, y: s1.y - ((s1.y - c1.y) / len) * head * 0.8 }
+          if (e.label)
+            overlays.push({
+              key: `e-${i}`,
+              at: { x: apex.x + loop.dir.x * (sideways ? 5 : 0), y: apex.y + loop.dir.y * 12 },
+              anchor: sideways ? (loop.dir.x > 0 ? 'start' : 'end') : 'center',
+              size: 11,
+              align: 'center',
+              content: (
+                <span
+                  className="rounded px-1 whitespace-nowrap"
+                  style={{ background: c.surface, color: c.inkSecondary }}
+                >
+                  <MathText text={e.label} />
+                </span>
+              ),
+            })
+          return (
+            <g key={i}>
+              <path
+                d={`M ${s0.x} ${s0.y} C ${c0.x} ${c0.y} ${c1.x} ${c1.y} ${end.x} ${end.y}`}
+                fill="none"
+                stroke={colour}
+                strokeWidth={e.highlight ? 2.5 : 1.5}
+                strokeDasharray={e.dashed ? '5 4' : undefined}
+              />
+              {(e.arrow ?? 'end') !== 'none' && <polygon points={arrowHead(s1, c1, head)} fill={colour} />}
+            </g>
+          )
+        }
         let px = pts.map((p) => ({ x: p.x * u, y: p.y * u }))
         let control: Pt | undefined
         if (e.route === 'curve' && px.length === 2) {
@@ -517,7 +599,7 @@ export function Diagram({
         const dash = n.dashed || shape === 'noise' ? '4 3' : undefined
         const tint = {
           fill: colour,
-          fillOpacity: n.filled ? 0.35 : 0.14,
+          fillOpacity: n.shade !== undefined ? 0.04 + 0.5 * Math.min(Math.max(n.shade, 0), 1) : n.filled ? 0.35 : 0.14,
           stroke: colour,
           strokeWidth: n.highlight ? 2.5 : 1.5,
           strokeDasharray: dash,
@@ -636,6 +718,8 @@ export function Diagram({
       style={{
         position: 'relative',
         width: '100%',
+        // Labels are placed in percentages of this box, so it must not be stretched taller than the SVG (a grid cell).
+        height: 'fit-content',
         maxWidth: width * (spec.maxScale ?? 1.4),
         margin: '0 auto',
         containerType: 'inline-size',

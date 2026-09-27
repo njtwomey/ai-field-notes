@@ -26,8 +26,8 @@ adjacency to build features <Cite id="twomey2017topologies" />.
 A classifier that learns that sensor `m17` predicts cooking in one house has learnt nothing about a house without an
 `m17`. House-to-house transfer needs a vocabulary shared by the homes. Rashidi and Cook assign each sensor a location
 label, the room or functional area it is in, build activity templates in both houses and learn a mapping between them
-<Cite id="rashidi2011" />. Feuz and Cook instead map the target feature space into the source's with heuristic search,
-and evaluate on 18 smart apartments <Cite id="feuz2014" />. Both need to know which sensors belong together. Two
+<Cite id="rashidi2011" />. Feuz and Cook instead map the target feature space into the source's with heuristic search
+<Cite id="feuz2014" />. Both need to know which sensors belong together. Two
 questions follow. How much accuracy does a model lose when the sensors are coarsened to such a vocabulary? And can the
 grouping be learnt from the data instead of from floor plans?
 
@@ -55,36 +55,17 @@ evaluation counts a prediction as correct if it is in that set.
 
 ### What coarsening costs
 
-The experiments use the CASAS `twor.2009` dataset: two residents over about three months, 13 labelled activities of which
-eight belong to a specific resident, and 71 sensors, of which 51 are motion sensors spaced about two metres apart
-<Cite id="twomey2014context" />. A linear-chain <NoteLink to="conditional-random-field" /> classified each event from the
-day of the week, the hour and the current and two previous sensor events. Precision is the fraction of predictions in the set of open
-activities; the false-negative rate is the fraction of activities never predicted during their span.
+Context modulation turns the cost of a representation into something measurable on a home that has labels. Train the
+same classifier on the original dataset and on each rewritten version, and compare. On a two-resident CASAS home with 51
+motion sensors, a linear-chain <NoteLink to="conditional-random-field" /> lost about 12 points of precision when the
+motion sensors were merged to room level, and about one activity in five was then never predicted
+<Cite id="twomey2014context" />. Several activities take place in one room, and a room-level sensor cannot tell them
+apart. Anonymising the labels had the opposite effect and raised precision, because an activity looks the same to the
+sensors whoever performs it.
 
-<SpecTable
-  columns={['Sensors', 'Labels', 'Precision', 'False-negative rate']}
-  rows={{
-    'allSens allAct': ['all', 'with resident', '76.2%', '8.6%'],
-    'allSens someAct': ['all', 'anonymised', '85.2%', '6.7%'],
-    'someSens allAct': ['motion merged by room', 'with resident', '64.0%', '20%'],
-    'someSens someAct': ['motion merged by room', 'anonymised', '71.1%', '18%'],
-    'no doors': ['door sensors removed', 'anonymised', '82.9%', '9.7%'],
-    'no lights': ['light sensors removed', 'anonymised', '83.6%', '10.8%'],
-    'no doors or lights': ['both removed', 'anonymised', '81.7%', '9.8%'],
-  }}
-/>
-
-Always predicting the most common label gives a precision of about 36%. Anonymising the labels raised precision by
-about 9 points, roughly a 35% reduction in error, which the authors attribute to activities looking the same to the
-sensors whoever performs them. Merging motion sensors to room level cost about 12 points of precision and raised the
-false-negative rate by a factor of two to three, so that about one activity in five was never predicted: several
-activities take place in one room, and a room-level sensor cannot tell them apart. Removing door and light sensors
-changed precision and the false-negative rate by less than 4 points. For this home, dense motion sensing mattered and door
-and light sensors did not <Cite id="twomey2014context" />.
-
-For transfer, the table measures a price. The room-level vocabulary that makes homes comparable costs this home about
-12 points of precision. A transferred model can be no better than a model trained on the target with the same
-coarsened representation.
+The measurement bounds transfer. A model transferred into a room-level vocabulary can be no better than a model
+trained on the target home in that same vocabulary. The gap between the fine and coarse versions of one home is the
+price of making homes comparable.
 
 ## Learning sensor topologies
 
@@ -106,8 +87,15 @@ $$
 so the matrix of centred cross-products is $\Xmat\transpose \Ymat - m\, \bar\xvec \bar\yvec\transpose$, where $\bar\xvec$
 and $\bar\yvec$ are the column means. For entries in $\set{-1, 0, 1}$, $x_i^2 = \abs{x_i}$, so the variance of a column is
 $\frac1m \sum_i \abs{x_i} - \bar x^2$, computable from the column sums of $\abs{\Xmat}$. Every quantity uses sparse
-products, and the cost is governed by the number of non-zero entries. On the whole `twor.2009` dataset the computation took
-under two seconds <Cite id="twomey2017topologies" />.
+products, and the cost is governed by the number of non-zero entries rather than by $m \times n$
+<Cite id="twomey2017topologies" />.
+
+As a check, take $m = 6$ slices and three on-event columns: sensor $a$ fires in slices 1 and 2, sensor $b$ in slices 2
+and 3, and sensor $c$ in slices 5 and 6. Every column has mean $\frac13$ and variance $\frac13 - \frac19 = \frac29$.
+For $a$ and $b$, $\xvec\transpose\yvec = 1$, so the centred cross-product is $1 - 6 \cdot \frac19 = \frac13$ and the
+correlation is $\frac{1}{6} \cdot \frac13 / \frac29 = 0.25$. For $a$ and $c$, $\xvec\transpose\yvec = 0$ and the
+correlation is $-\frac{1}{6} \cdot \frac23 / \frac29 = -0.5$. Sensors that fire in overlapping slices correlate
+positively, and only the one shared non-zero entry entered the product.
 
 The correlations at lags $l = -L, \dots, L$ are combined with weights $w(l) = \exp(-\abs{l})$ for lags in seconds, so
 that short lags, most likely caused by one person walking past both sensors, count most. Positive and negative lags are
@@ -130,32 +118,13 @@ parallel streams of activity by different residents without hand segmentation. F
 within a group, up to a maximum cardinality $c$, rather than all conjunctions. The authors describe this as a graph-based
 regularisation of the conditional random field's feature space <Cite id="twomey2017topologies" />.
 
-### Results as reported
+### What the adjacency buys
 
-The learnt adjacencies were checked against a hand-built adjacency matrix for `twor.2009` by treating the learnt weights
-as scores for the hand-built links. The area under the ROC curve was $0.879$ for weighted cross-correlation and $0.843$
-for mutual information, and both thresholds gave accuracies of about $0.94$, close to the best achievable. Visually, the
-learnt adjacencies respected walls on three differently laid-out testbeds: `twor.2009`, a two-storey home with two
-residents; `tokyo`, an open-plan office with nine employees; and `aruba`, a single-resident home with sensors of two
-different ranges <Cite id="twomey2017topologies" />.
-
-For activity recognition on `twor.2009`, in five-fold cross-validation:
-
-<SpecTable
-  columns={['Precision', 'Recall', 'F1']}
-  rows={{
-    'independent sensors (vanilla)': ['0.644', '0.636', '0.632'],
-    'all conjunctions (exhaustive)': ['0.533', '0.530', '0.521'],
-    'hand-coded adjacency': ['0.679', '0.692', '0.682'],
-    'mutual-information adjacency': ['0.668', '0.679', '0.669'],
-    'cross-correlation adjacency': ['0.673', '0.684', '0.675'],
-  }}
-/>
-
-A Friedman test on the F1 scores was significant ($Q = 143.9$, $p < 10^{-10}$). Nemenyi post-hoc tests at $\alpha = 0.01$
-found the exhaustive method significantly worse than all others, and could not separate the vanilla, hand-coded,
-cross-correlation and mutual-information models from one another. The adjacency-informed models had the best average
-scores, and the unrestricted power set overfitted.
+The learnt adjacencies agreed well with a hand-built adjacency matrix of the same home, and on three testbeds with
+different layouts they respected walls <Cite id="twomey2017topologies" />. For activity recognition, features restricted
+to adjacent sensors did as well as features built from the hand-built adjacency. Features from every conjunction of
+active sensors did clearly worse than independent sensors <Cite id="twomey2017topologies" />. The unrestricted power set
+overfits to co-occurrences of unrelated rooms, and the adjacency removes those features without a floor plan.
 
 ## Why this matters for transfer
 
@@ -165,6 +134,14 @@ them, so groups of adjacent sensors approximate functional areas, the vocabulary
 without a floor plan or labels from the new house. Context modulation measures what such a vocabulary costs on a house
 with labels <Cite id="twomey2014context" />. With the vocabulary in place, the person-to-person transfer of <NoteLink
 to="active-transfer-learning" /> applies within it <Cite id="diethe2016active" />.
+
+## Cost
+
+Context modulation is a rewrite of an event file and costs one pass over the data per context. The sparse
+cross-correlation costs one sparse product per lag, proportional to the number of sensor events. Mutual information
+needs the joint on–off counts of every pair of sensors, $O(n^2)$ pairs for $n$ sensors. Restricting conjunctions to
+groups of adjacent sensors shrinks the feature space from every subset of the active sensors to subsets of each group,
+up to cardinality $c$.
 
 ## Trade-offs
 

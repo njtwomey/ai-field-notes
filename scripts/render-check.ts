@@ -6,6 +6,7 @@
  *   node scripts/render-check.ts '/browse?c=maths'           # any page path, with a leading slash
  *   node scripts/render-check.ts --save /tmp/dom k-means   # also write each page's DOM to <dir>/<slug>.html
  *   node scripts/render-check.ts --shot /tmp/png --height 3000 --width 800 k-means   # also save a PNG per page
+ *   node scripts/render-check.ts --shot /tmp/png --scheme light k-means             # screenshot in light or dark
  *
  * This is the only sanctioned way to render pages headlessly. Pages run one at a time, and each Chrome is killed after
  * a hard timeout: `--virtual-time-budget` alone can wait forever on the dev server's open HMR socket, and ad-hoc loops
@@ -25,6 +26,7 @@ let save: string | undefined
 let shot: string | undefined
 let height = 2400
 let width = 1400
+let scheme: 'light' | 'dark' | undefined
 const slugs: string[] = []
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--port') port = Number(args[++i])
@@ -32,6 +34,7 @@ for (let i = 0; i < args.length; i++) {
   else if (args[i] === '--shot') shot = args[++i]
   else if (args[i] === '--height') height = Number(args[++i])
   else if (args[i] === '--width') width = Number(args[++i])
+  else if (args[i] === '--scheme') scheme = args[++i] as 'light' | 'dark'
   else slugs.push(args[i])
 }
 if (slugs.length === 0) {
@@ -86,6 +89,8 @@ function screenshot(url: string, file: string): Promise<boolean> {
         '--headless=new',
         '--disable-gpu',
         '--hide-scrollbars',
+        // Blink's preferred colour scheme: 0 is dark, 1 is light. The site follows it unless a theme is stored.
+        ...(scheme ? [`--blink-settings=preferredColorScheme=${scheme === 'dark' ? 0 : 1}`] : []),
         `--user-data-dir=${profile}`,
         `--window-size=${width},${height}`,
         '--virtual-time-budget=10000',

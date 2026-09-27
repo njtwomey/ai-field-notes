@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import { GraphDiagram, Interactive, ParamChoice, Readout, type GraphEdge, type GraphNode } from '@/components/viz'
+import { Diagram } from '@/components/diagram/Diagram'
+import { link, variable } from '@/components/diagram/components'
+import { Interactive, ParamChoice, Readout } from '@/components/viz'
 
 const NODES = [
   { id: 'a', x: 0, y: 0 },
@@ -10,22 +12,22 @@ const NODES = [
   { id: 'g', x: 0, y: 2 },
   { id: 'f', x: 1.75, y: 2 },
   { id: 'h', x: 1.75, y: 3 },
-] as const satisfies readonly GraphNode[]
+] as const
 
 type Id = (typeof NODES)[number]['id']
 
-const EDGES: GraphEdge[] = [
-  { source: 'a', target: 'c' },
-  { source: 'b', target: 'c' },
-  { source: 'd', target: 'e' },
-  { source: 'c', target: 'g' },
-  { source: 'c', target: 'f' },
-  { source: 'e', target: 'f' },
-  { source: 'f', target: 'h' },
+const EDGES: [string, string][] = [
+  ['a', 'c'],
+  ['b', 'c'],
+  ['d', 'e'],
+  ['c', 'g'],
+  ['c', 'f'],
+  ['e', 'f'],
+  ['f', 'h'],
 ]
 
-const parents = (i: string) => EDGES.filter((e) => e.target === i).map((e) => e.source)
-const children = (i: string) => EDGES.filter((e) => e.source === i).map((e) => e.target)
+const parents = (i: string) => EDGES.filter(([, t]) => t === i).map(([s]) => s)
+const children = (i: string) => EDGES.filter(([s]) => s === i).map(([, t]) => t)
 
 function blanket(i: string) {
   const ch = children(i)
@@ -60,11 +62,15 @@ export function MarkovBlanket() {
         </>
       }
     >
-      <GraphDiagram
-        nodes={NODES.map((n) => ({ ...n, kind: inBlanket.has(n.id) ? 'observed' : 'variable' }))}
-        edges={EDGES}
-        highlight={[node]}
-        height={260}
+      <Diagram
+        spec={{
+          unit: 48,
+          spread: [1.1, 1.3],
+          nodes: NODES.map((n) =>
+            variable(n.id, n.x, n.y, `$${n.id}$`, { filled: inBlanket.has(n.id), highlight: n.id === node }),
+          ),
+          edges: EDGES.map(([s, t]) => link(s, t)),
+        }}
         onNodeClick={(id) => NODES.some((n) => n.id === id) && setNode(id as Id)}
         ariaLabel={`Directed graph with the Markov blanket of ${node} shaded`}
       />

@@ -1,31 +1,25 @@
 import { useState } from 'react'
-import { GraphDiagram, Interactive, ParamSwitch, Readout, type GraphEdge, type GraphNode } from '@/components/viz'
+import { Diagram } from '@/components/diagram/Diagram'
+import { link, variable } from '@/components/diagram/components'
+import type { DiagramEdge, DiagramSpec } from '@/components/diagram/types'
+import { Interactive, ParamSwitch, Readout } from '@/components/viz'
 
-type Structure = { name: string; edges: GraphEdge[]; blockedWhenObserved: boolean }
+type Structure = { name: string; edges: DiagramEdge[]; blockedWhenObserved: boolean }
 
 const STRUCTURES: Structure[] = [
   {
     name: 'Chain  a → c → b',
-    edges: [
-      { source: 'a', target: 'c' },
-      { source: 'c', target: 'b' },
-    ],
+    edges: [link('a', 'c'), link('c', 'b')],
     blockedWhenObserved: true,
   },
   {
     name: 'Fork  a ← c → b',
-    edges: [
-      { source: 'c', target: 'a' },
-      { source: 'c', target: 'b' },
-    ],
+    edges: [link('c', 'a'), link('c', 'b')],
     blockedWhenObserved: true,
   },
   {
     name: 'Collider  a → c ← b',
-    edges: [
-      { source: 'a', target: 'c' },
-      { source: 'b', target: 'c' },
-    ],
+    edges: [link('a', 'c'), link('b', 'c')],
     blockedWhenObserved: false,
   },
 ]
@@ -33,15 +27,21 @@ const STRUCTURES: Structure[] = [
 /** The three canonical structures, with c observed or not, and whether a path between a and b is open. */
 export function CanonicalStructures() {
   const [observed, setObserved] = useState(false)
-  const nodes = (s: Structure): GraphNode[] => {
+  const spec = (s: Structure, open: boolean): DiagramSpec => {
     // Chains read left to right; forks and colliders put c between a and b, above or below them.
     const collider = !s.blockedWhenObserved
     const chain = s.name.startsWith('Chain')
-    return [
-      { id: 'a', x: 0, y: chain ? 0 : collider ? 0 : 1 },
-      { id: 'c', x: 1, y: chain ? 0 : collider ? 1 : 0, kind: observed ? 'observed' : 'variable' },
-      { id: 'b', x: 2, y: chain ? 0 : collider ? 0 : 1 },
-    ]
+    const ends = chain ? 0 : collider ? 0 : 1.3
+    const size = { w: 0.75, h: 0.75 }
+    return {
+      unit: 56,
+      nodes: [
+        variable('a', 0, ends, '$a$', { ...size, highlight: open }),
+        variable('c', 1.5, chain ? 0 : collider ? 1.3 : 0, '$c$', { ...size, filled: observed }),
+        variable('b', 3, ends, '$b$', { ...size, highlight: open }),
+      ],
+      edges: s.edges,
+    }
   }
   return (
     <Interactive
@@ -57,14 +57,10 @@ export function CanonicalStructures() {
         {STRUCTURES.map((s) => {
           const open = observed ? !s.blockedWhenObserved : s.blockedWhenObserved
           return (
-            <div key={s.name} className="text-center">
-              <GraphDiagram
-                nodes={nodes(s)}
-                edges={s.edges}
-                highlight={open ? ['a', 'b'] : []}
-                height={150}
-                ariaLabel={s.name}
-              />
+            <div key={s.name} className="flex flex-col gap-1 text-center">
+              <div className="flex flex-1 items-center">
+                <Diagram spec={spec(s, open)} ariaLabel={s.name} />
+              </div>
               <p className="text-xs text-muted-foreground">{s.name}</p>
             </div>
           )

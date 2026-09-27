@@ -1,15 +1,9 @@
 import { useMemo } from 'react'
 import { MathText } from '@/components/content/MathText'
-import {
-  GraphDiagram,
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
-  useParam,
-  type GraphEdge,
-  type GraphNode,
-} from '@/components/viz'
+import { Diagram } from '@/components/diagram/Diagram'
+import { link, variable } from '@/components/diagram/components'
+import type { DiagramEdge, DiagramNode } from '@/components/diagram/types'
+import { Interactive, ParamSlider, Readout, XYChart, useParam } from '@/components/viz'
 import { rng } from '@/lib/math'
 
 /** A toy pin–board graph: each board lists the pins saved to it. Pin 1 is the query. */
@@ -29,13 +23,12 @@ const pinId = (p: number) => `p${p}`
 const boardId = (b: number) => `b${b + 1}`
 const boardsOf = PIN_IDS.map((p) => BOARDS.flatMap((pins, b) => (pins.includes(p) ? [b] : [])))
 
-const NODES: GraphNode[] = [
-  ...PIN_IDS.map((p) => ({ id: pinId(p), label: `p_${p}`, x: p - 1, y: 2 })),
-  ...BOARDS.map((_, b) => ({ id: boardId(b), label: `b_${b + 1}`, x: 0.5 + 1.75 * b, y: 0 })),
+const PIN_GAP = 1.3
+const NODES: DiagramNode[] = [
+  ...PIN_IDS.map((p) => variable(pinId(p), PIN_GAP * (p - 1), 2.6, `$p_${p}$`, { w: 0.85, h: 0.85 })),
+  ...BOARDS.map((_, b) => variable(boardId(b), PIN_GAP * (0.5 + 1.75 * b), 0, `$b_${b + 1}$`, { w: 0.85, h: 0.85 })),
 ]
-const BASE_EDGES: GraphEdge[] = BOARDS.flatMap((pins, b) =>
-  pins.map((p) => ({ source: boardId(b), target: pinId(p), directed: false })),
-)
+const BASE_EDGES: DiagramEdge[] = BOARDS.flatMap((pins, b) => pins.map((p) => link(boardId(b), pinId(p), false)))
 
 type Walk = { pins: number[]; boards: number[] }
 
@@ -81,18 +74,22 @@ export function NeighbourhoodSampling() {
     [counts, T],
   )
   const pooledTotal = neighbours.reduce((s, p) => s + counts[p], 0)
-  const inHood = new Set(neighbours)
 
   const last = n > 0 ? all[n - 1] : undefined
-  const walkEdges: GraphEdge[] = last
-    ? last.boards.flatMap((b, s) => [
-        { source: pinId(last.pins[s]), target: boardId(b), highlight: true },
-        { source: boardId(b), target: pinId(last.pins[s + 1]), highlight: true },
-      ])
-    : []
-  const nodes = NODES.map((node) =>
-    node.id.startsWith('p') && inHood.has(Number(node.id.slice(1))) ? { ...node, kind: 'observed' as const } : node,
-  )
+  const spec = useMemo(() => {
+    const hood = new Set(neighbours)
+    const walkEdges: DiagramEdge[] = last
+      ? last.boards.flatMap((b, s) => [
+          link(pinId(last.pins[s]), boardId(b), true, { highlight: true }),
+          link(boardId(b), pinId(last.pins[s + 1]), true, { highlight: true }),
+        ])
+      : []
+    const nodes = NODES.map((node) => {
+      const pin = node.id.startsWith('p') ? Number(node.id.slice(1)) : 0
+      return { ...node, filled: hood.has(pin), highlight: pin === QUERY }
+    })
+    return { nodes, edges: [...BASE_EDGES, ...walkEdges] }
+  }, [last, neighbours])
 
   const barSeries = useMemo(() => {
     const hood = new Set(neighbours)
@@ -143,11 +140,8 @@ export function NeighbourhoodSampling() {
         </>
       }
     >
-      <GraphDiagram
-        nodes={nodes}
-        edges={[...BASE_EDGES, ...walkEdges]}
-        highlight={[pinId(QUERY)]}
-        height={200}
+      <Diagram
+        spec={spec}
         ariaLabel="Bipartite graph of nine pins and five boards with the latest random walk from pin 1 highlighted"
       />
       <XYChart

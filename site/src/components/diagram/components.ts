@@ -2,7 +2,7 @@
  * Reusable pieces for diagrams. Each returns part of a spec with ids under a prefix, so several copies can sit in one
  * diagram; `merge` joins parts into one spec.
  */
-import type { DiagramEdge, DiagramGroup, DiagramNode, DiagramSpec, Direction, Tone } from './types'
+import type { DiagramEdge, DiagramGroup, DiagramNode, DiagramSpec, Direction, Side, Tone } from './types'
 
 type Part = { nodes?: DiagramNode[]; edges?: DiagramEdge[]; groups?: DiagramGroup[] }
 
@@ -12,6 +12,27 @@ export function merge(...parts: Part[]): DiagramSpec {
     edges: parts.flatMap((p) => p.edges ?? []),
     groups: parts.flatMap((p) => p.groups ?? []),
   }
+}
+
+/** A random variable in a graphical model: an ink circle, shaded with `filled: true` when observed. */
+export function variable(
+  id: string,
+  x: number,
+  y: number,
+  label: string,
+  extra: Partial<DiagramNode> = {},
+): DiagramNode {
+  return { id, x, y, shape: 'circle', tone: 'ink', label, ...extra }
+}
+
+/** A factor of a factor graph: a small filled square, labelled outside on `side`. */
+export function factor(id: string, x: number, y: number, label: string, side: Side = 'n'): DiagramNode {
+  return { id, x, y, shape: 'factor', label, labelSide: side }
+}
+
+/** A graphical-model edge: a straight arrow, or a plain line when `directed` is false. */
+export function link(from: string, to: string, directed = true, extra: Partial<DiagramEdge> = {}): DiagramEdge {
+  return { from, to, route: 'straight', arrow: directed ? 'end' : 'none', ...extra }
 }
 
 /** A small operator circle: ⊕, ⊗, ⊙, σ or tanh. */

@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import { GraphDiagram, Interactive, ParamSwitch, Readout } from '@/components/viz'
+import { Diagram } from '@/components/diagram/Diagram'
+import { link, variable } from '@/components/diagram/components'
+import { Interactive, ParamSwitch, Readout } from '@/components/viz'
 
 // The worked example's numbers: p(B = 1), p(E = 1) and p(A = 1 | B, E).
 const P_B = 0.001
@@ -37,18 +39,16 @@ export function AlarmNetwork() {
       }
       readout={<Readout label="p(B = 1 | evidence)" value={posteriorBurglary(alarm, quake).toPrecision(3)} />}
     >
-      <GraphDiagram
-        nodes={[
-          { id: 'B', x: 0, y: 0 },
-          { id: 'E', x: 2, y: 0, kind: quake ? 'observed' : 'variable' },
-          { id: 'A', x: 1, y: 1, kind: alarm ? 'observed' : 'variable' },
-        ]}
-        edges={[
-          { source: 'B', target: 'A' },
-          { source: 'E', target: 'A' },
-        ]}
-        highlight={['B']}
-        height={170}
+      <Diagram
+        spec={{
+          unit: 56,
+          nodes: [
+            variable('B', 0, 0, '$B$', { highlight: true }),
+            variable('E', 2.4, 0, '$E$', { filled: quake }),
+            variable('A', 1.2, 1.6, '$A$', { filled: alarm }),
+          ],
+          edges: [link('B', 'A'), link('E', 'A')],
+        }}
         ariaLabel="Burglary and earthquake both point into alarm"
       />
     </Interactive>

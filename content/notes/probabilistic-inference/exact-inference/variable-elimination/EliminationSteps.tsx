@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { MathText } from '@/components/content/MathText'
-import { GraphDiagram, Interactive, ParamChoice, Readout, StepControls, type GraphNode } from '@/components/viz'
+import { Diagram } from '@/components/diagram/Diagram'
+import { link, variable } from '@/components/diagram/components'
+import { Interactive, ParamChoice, Readout, StepControls } from '@/components/viz'
 
-type Problem = { nodes: GraphNode[]; edges: [string, string][]; order: string[] }
+type Vertex = { id: string; label?: string; x: number; y: number }
+type Problem = { nodes: Vertex[]; edges: [string, string][]; order: string[] }
 
 const LEAVES = [1, 2, 3, 4].map((i) => `l${i}`)
-const STAR_NODES: GraphNode[] = [
+const STAR_NODES: Vertex[] = [
   { id: 'c', x: 1, y: 1 },
   { id: 'l1', label: 'l_1', x: 0, y: 0 },
   { id: 'l2', label: 'l_2', x: 2, y: 0 },
@@ -35,6 +38,17 @@ const PROBLEMS = {
 
 type Key = keyof typeof PROBLEMS
 const pairKey = (u: string, v: string) => (u < v ? `${u}|${v}` : `${v}|${u}`)
+
+/** Whether the segment from u to v passes through the centre of some other node. */
+function passesNode(p: Problem, u: string, v: string): boolean {
+  const [a, b] = [u, v].map((id) => p.nodes.find((n) => n.id === id)!)
+  return p.nodes.some((n) => {
+    if (n === a || n === b) return false
+    const t = ((n.x - a.x) * (b.x - a.x) + (n.y - a.y) * (b.y - a.y)) / ((b.x - a.x) ** 2 + (b.y - a.y) ** 2)
+    const d = Math.hypot(a.x + t * (b.x - a.x) - n.x, a.y + t * (b.y - a.y) - n.y)
+    return t > 0 && t < 1 && d < 0.3
+  })
+}
 
 /** The graph after `steps` eliminations: remaining nodes, original and fill edges, and each step's neighbourhood. */
 function eliminate(p: Problem, steps: number) {
@@ -71,18 +85,34 @@ export function EliminationSteps() {
   const edges = [...state.adjacent]
     .map((k) => k.split('|'))
     .filter(([u, v]) => state.remaining.has(u) && state.remaining.has(v))
-    .map(([u, v]) => ({
-      source: u,
-      target: v,
-      directed: false,
-      dashed: state.fill.has(pairKey(u, v)),
-      highlight: state.fill.has(pairKey(u, v)),
-    }))
+    .map(([u, v]) => {
+      const fill = state.fill.has(pairKey(u, v))
+      // A straight line through another node (a diagonal of the star) bows around it instead.
+      return link(u, v, false, {
+        dashed: fill,
+        highlight: fill,
+        ...(passesNode(p, u, v) && { route: 'curve' as const, bend: 0.9 }),
+      })
+    })
+  // Eliminated variables stay in place, dashed and greyed, so the layout does not move between steps.
+  const spec = {
+    unit: 56,
+    nodes: p.nodes.map((n) =>
+      variable(
+        n.id,
+        n.x * 1.5,
+        n.y * 1.5,
+        label(n.id),
+        state.remaining.has(n.id) ? { highlight: n.id === state.next } : { dashed: true, tone: 'neutral' },
+      ),
+    ),
+    edges,
+  }
   return (
     <Interactive
       title="Elimination order and fill edges"
       caption={
-        <MathText text="Step eliminates the coloured variable. Its current neighbours become a clique; the dashed coloured edges are fill edges added by earlier steps. In the star, eliminating the leaves first adds nothing, while eliminating the centre first joins every pair of leaves." />
+        <MathText text="Step eliminates the coloured variable. Its current neighbours become a clique; the dashed coloured edges are fill edges added by earlier steps. Eliminated variables stay in place, dashed and grey. In the star, eliminating the leaves first adds nothing, while eliminating the centre first joins every pair of leaves." />
       }
       controls={
         <>
@@ -119,13 +149,7 @@ export function EliminationSteps() {
         </>
       }
     >
-      <GraphDiagram
-        nodes={p.nodes.filter((n) => state.remaining.has(n.id))}
-        edges={edges}
-        highlight={state.next ? [state.next] : []}
-        height={key === 'alarm' ? 170 : 230}
-        ariaLabel="Undirected graph during variable elimination"
-      />
+      <Diagram spec={spec} ariaLabel="Undirected graph during variable elimination" />
     </Interactive>
   )
 }

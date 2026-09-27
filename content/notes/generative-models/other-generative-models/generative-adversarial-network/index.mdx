@@ -1,0 +1,138 @@
+---
+title: Generative adversarial network
+kind: concept
+summary: A GAN trains a generator $G$ that maps noise to samples against a discriminator $D$ that tells real from generated data, via the minimax game $\min_G \max_D V(D, G)$. For the optimal $D$ the objective equals $2\,\mathrm{JS}(p_{\text{data}}, p_g) - \log 4$, minimised when $p_g = p_{\text{data}}$.
+tags: [deep-learning, generative-models, adversarial-training, game-theory, divergences, worked-example]
+aliases: [GAN, generative adversarial net, adversarial training, minimax game, non-saturating GAN loss, mode collapse, optimal discriminator]
+requires: [f-divergences-and-jensen-shannon, backpropagation]
+partOf: [deep-generative-models]
+related: [kl-divergence, frechet-inception-distance, inception-score, precision-and-recall-for-generative-models, logistic-regression]
+references: [goodfellow2014, radford2016, arjovsky2017, nowozin2016, salimans2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { OptimalDiscriminator } from './OptimalDiscriminator'
+import { GanDiagram } from './GanDiagram'
+
+<Definition>
+A **generative adversarial network** (GAN) consists of two networks <Cite id="goodfellow2014" />. The **generator**
+$G_{\thetavec} : \reals^k \to \reals^d$ maps noise $\zvec \sim p(\zvec)$, e.g. $\Gauss(\zeros, \Imat)$, to a sample
+$G(\zvec)$; the distribution of $G(\zvec)$ is written $p_g$. The **discriminator** $D_{\phivec} : \reals^d \to (0, 1)$
+outputs the probability that its input came from the data rather than from the generator. They play the two-player
+minimax game
+
+$$
+\min_{G}\, \max_{D}\; V(D, G) = \expect_{\xvec \sim p_{\text{data}}}\brack{\log D(\xvec)} + \expect_{\zvec \sim
+p(\zvec)}\brack{\log\paren{1 - D(G(\zvec))}}.
+$$
+
+$V$ is the log-likelihood of a binary classifier that labels data 1 and generated samples 0. The discriminator
+maximises it; the generator minimises it.
+</Definition>
+
+## Intuition
+
+The generator never sees the data directly. It receives only the discriminator's gradient, which says how to change a
+generated sample to make it look more like data. The discriminator is a learned loss function that keeps improving as
+the generator does. The model has no explicit density: $p_g$ is defined only through the sampler $G$, so a GAN is an
+**implicit** generative model. Sampling is a single forward pass.
+
+<GanDiagram />
+
+## The optimal discriminator
+
+Fix $G$. Write both expectations as integrals over $\xvec$, the second by the change of variable $\xvec = G(\zvec)$:
+
+$$
+V(D, G) = \int \brack{p_{\text{data}}(\xvec) \log D(\xvec) + p_g(\xvec) \log\paren{1 - D(\xvec)}} d\xvec.
+$$
+
+The integrand can be maximised separately at each $\xvec$. For $a, b \ge 0$ not both zero, the function $y \mapsto a
+\log y + b \log(1 - y)$ on $(0, 1)$ has derivative $a/y - b/(1 - y)$, which is zero at $y = a/(a + b)$, and it is
+concave. So
+
+$$
+D^\star_G(\xvec) = \frac{p_{\text{data}}(\xvec)}{p_{\text{data}}(\xvec) + p_g(\xvec)}.
+$$
+
+## The generator minimises the Jensen–Shannon divergence
+
+Substitute $D^\star_G$. Let $m = \tfrac12(p_{\text{data}} + p_g)$, so that $D^\star_G = p_{\text{data}}/(2m)$ and
+$1 - D^\star_G = p_g/(2m)$:
+
+$$
+V(D^\star_G, G) = \expect_{p_{\text{data}}}\brack{\log \frac{p_{\text{data}}}{m}} + \expect_{p_g}\brack{\log
+\frac{p_g}{m}} - 2\log 2 = \KL(p_{\text{data}} \,\|\, m) + \KL(p_g \,\|\, m) - \log 4.
+$$
+
+The two KL terms are twice the <NoteLink to="f-divergences-and-jensen-shannon">Jensen–Shannon divergence</NoteLink>:
+
+$$
+V(D^\star_G, G) = 2\,\mathrm{JS}(p_{\text{data}}, p_g) - \log 4.
+$$
+
+JS is non-negative and zero only when the distributions are equal. The global minimum over $G$ is therefore $-\log 4$,
+reached exactly when $p_g = p_{\text{data}}$, and at that point $D^\star = \tfrac12$ everywhere
+<Cite id="goodfellow2014" />. If $G$ and $D$ had unlimited capacity and $D$ were trained to optimality after every
+generator step, training would minimise JS.
+
+<OptimalDiscriminator />
+
+## Training
+
+Training alternates stochastic gradient steps: ascend $V$ in $\phivec$ on a minibatch of data and a minibatch of
+generated samples, then descend in $\thetavec$.
+
+**The non-saturating loss.** Early in training the generator is poor, $D(G(\zvec)) \approx 0$, and $\log(1 -
+D(G(\zvec)))$ is flat. Write $D = \sigma(a)$ with logit $a$. The derivative of $\log(1 - \sigma(a))$ with respect to $a$
+is $-\sigma(a) = -D$, close to 0, so the generator gets almost no gradient. Goodfellow et al. instead have the generator
+maximise $\log D(G(\zvec))$ <Cite id="goodfellow2014" />. Its derivative with respect to $a$ is $1 - D$, close to 1 when
+$D$ is near 0. The fixed points of the game are unchanged. With $D = 0.01$ the two gradients with respect to the logit
+are $-0.01$ and $0.99$ in magnitude.
+
+## Worked example
+
+A discrete example makes $D^\star$ and the divergence explicit. The data put probability $(0.5, 0.5, 0)$ on three
+points and the generator puts $(0.25, 0.25, 0.5)$.
+
+- Optimal discriminator: $D^\star = 0.5/0.75 = 2/3$ on the first two points and $0/0.5 = 0$ on the third.
+- Value: $V = \log\tfrac23 + \brack{0.5\log\tfrac13 + 0.5 \log 1} = -0.405 - 0.549 = -0.955$.
+- Jensen–Shannon divergence: $(V + \log 4)/2 = (-0.955 + 1.386)/2 = 0.216$ nats. A direct computation with $m = (0.375,
+  0.375, 0.25)$ gives the same value.
+
+The third point receives $D^\star = 0$: the discriminator is certain that any sample there is fake, and the generator's
+mass there costs it most.
+
+## Failure modes
+
+- **Mode collapse.** The generator maps many noise vectors to one or a few outputs. The alternating updates do not
+  solve $\min_G \max_D$ exactly. If the generator takes several steps against a fixed discriminator, its best response
+  is to put all mass at the point the discriminator currently rates most real. The discriminator then learns to reject
+  that point, and the generator jumps to another. Samples look realistic but cover only part of the data
+  <Cite id="salimans2016" />.
+- **Vanishing gradients with disjoint supports.** Images lie near low-dimensional manifolds, and $p_g$ and
+  $p_{\text{data}}$ often barely overlap early in training. If their supports are disjoint, $\mathrm{JS} = \log 2$
+  whatever the distance between them, and a near-optimal discriminator gives the generator no useful gradient. The
+  Wasserstein GAN replaces JS by the earth mover's distance, which shrinks smoothly as the distributions approach each
+  other <Cite id="arjovsky2017" />.
+- **Non-convergence.** Gradient descent on a minimax game can oscillate or cycle instead of converging.
+
+## Variants
+
+- **DCGAN** fixed an all-convolutional architecture with batch normalisation that made training stable enough for
+  images <Cite id="radford2016" />.
+- **f-GAN** generalises the objective to any <NoteLink to="f-divergences-and-jensen-shannon">f-divergence</NoteLink>
+  through its variational lower bound; the original GAN is the Jensen–Shannon case <Cite id="nowozin2016" />.
+- **WGAN** trains a critic with a Lipschitz constraint to estimate the Wasserstein-1 distance <Cite id="arjovsky2017" />.
+- **Conditional GANs** feed a label or other condition to both networks.
+
+## Pitfalls
+
+- **No likelihood.** A GAN cannot score a data point, so it cannot be evaluated or compared by held-out
+  log-likelihood. Sample-based metrics such as <NoteLink to="frechet-inception-distance">FID</NoteLink> and
+  <NoteLink to="precision-and-recall-for-generative-models">precision and recall</NoteLink> are used instead.
+- **Training tricks matter.** Results depend strongly on architecture, normalisation, learning rates and the balance
+  of discriminator and generator steps <Cite id="salimans2016" />.
+- **The theory assumes an optimal discriminator.** The JS result holds only at $D^\star$. In practice the discriminator
+  is far from optimal, and the generator minimises something else.

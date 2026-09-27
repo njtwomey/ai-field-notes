@@ -1,0 +1,240 @@
+---
+title: Backretrieval
+kind: concept
+summary: 'Backretrieval scores a cross-lingual text embedding without parallel text. Each source-language caption retrieves its nearest target-language caption; that caption''s image ranks all source images, and the score is the fraction of queries whose own image is in the top $K$.'
+tags: [metrics, nlp, embeddings, cross-lingual, information-retrieval, evaluation, worked-example]
+aliases: [BkR, image-pivoted evaluation, image-pivoted retrieval metric]
+requires: [precision-and-recall-at-k, sentence-embeddings, pairwise-distances-and-cosine-similarity]
+related: [embedding-evaluation, clip, rank-correlation, pearson-correlation, machine-translation, triplet-and-margin-losses]
+references: [fain2021backretrieval, radovanovic2010hubs, hoeffding1963]
+status: draft
+updated: 2026-09-27
+---
+
+import { BackretrievalToy } from './BackretrievalToy'
+
+<Definition>
+Let $\Omega_{\mathrm S} = \{(s_i, I_i)\}_{i=1}^{N}$ be texts $s_i$ in a source language paired with images $I_i$, and
+$\Omega_{\mathrm T} = \{(t_j, J_j)\}_{j=1}^{M}$ texts $t_j$ in a target language paired with images $J_j$. The two
+collections need not describe the same items. Given a cross-lingual text embedding $f$ and an image similarity $g$,
+each query $s_q$ retrieves the target text $t_{j^*}$ with the most similar embedding. The image $J_{j^*}$ then ranks
+every source image by $g$. **Backretrieval** $\mathrm{BkR}@K$ is the fraction of queries whose own image $I_q$ ranks
+in the top $K$ <Cite id="fain2021backretrieval" />.
+</Definition>
+
+## Intuition
+
+The standard test of a cross-lingual text embedding is cross-lingual retrieval. A query document in one language ranks
+documents in another language by cosine similarity, and the score is the recall at $K$ of the query's known
+translation. That test needs a parallel corpus: pairs of documents known to say the same thing in both languages.
+Parallel data outside standard benchmarks requires bilingual annotators familiar with the domain. Machine-translated
+test sets bias model selection towards methods correlated with the translation system
+<Cite id="fain2021backretrieval" />.
+
+Images need no translation. A photo of chicken soup looks the same whether its caption is English or Spanish. Many
+domains have captioned images in every language separately: social media posts, product listings and recipe sites.
+Backretrieval uses the image as the pivot. If the embedding maps an English caption close to a Spanish caption about the
+same thing, the Spanish caption's photo will look like the English caption's photo. Retrieving back from that photo to
+the English images will then find the query's own photo near the top. If the embedding is poor, the retrieved Spanish
+caption is about something else, its photo shows something else, and the query's photo ranks low.
+
+Backretrieval evaluates the text embedding $f$ only. The image similarity $g$ is a fixed instrument. The method is
+distinct from multimodal machine translation, which uses images to improve the translation model rather than to
+evaluate it.
+
+## The procedure
+
+The text embedding $f$ maps a text in either language to a vector $f(\cdot) \in \reals^n$. The image similarity
+$g(I, I')$ returns a score for any two images. Fain, Twomey and Bollegala take $g$ to be the cosine similarity between
+the last-layer features of a convolutional network pretrained on ImageNet <Cite id="fain2021backretrieval" />
+<Cite id="babenko2014neural" /> <Cite id="deng2009" />. Backretrieval computes four steps for each query pair
+$(s_q, I_q) \in \Omega_{\mathrm S}$.
+
+1. **Embed.** Compute $f(t_j)$ for every target text $t_j$ and $f(s_q)$ for the query.
+2. **Retrieve.** Find the target text most similar to the query,
+   $$
+   j^*(q) = \argmax_{j \in \{1, \dots, M\}} \cos\LP f(s_q), f(t_j) \RP.
+   $$
+   The text $t_{j^*(q)}$ is the retrieved text and $J_{j^*(q)}$ its image.
+3. **Retrieve back.** Rank every source image $I_i \in \Omega_{\mathrm S}$ by $g(J_{j^*(q)}, I_i)$ in descending order.
+   The rank of the query's own image is
+   $$
+   \rho_q = 1 + \sum_{i=1}^{N} \indicator\left[ g(J_{j^*(q)}, I_i) > g(J_{j^*(q)}, I_q) \right].
+   $$
+4. **Score.** Backretrieval at cut-off $K$ is the recall at $K$ of the query's image,
+   $$
+   \mathrm{BkR}@K(f) = \frac{1}{N} \sum_{q=1}^{N} \indicator[\rho_q \le K].
+   $$
+
+Fain et al. use $K = 10$ <Cite id="fain2021backretrieval" />. $\mathrm{BkR}@K$ lies in $[0, 1]$, and a higher
+value is better. Step 2 keeps only the single nearest target text. The top-$K$ cut-off applies to the image ranking in
+step 3. The formula for $\rho_q$ breaks ties in favour of the query; the paper does not specify a tie rule.
+
+The quantity that Backretrieval approximates is the ground-truth cross-lingual retrieval score $\mathrm{XLR}@K$. It
+needs a parallel set in which $t_q$ is the translation of $s_q$ for every $q$. Each query ranks all $N$ translations by
+$\cos(f(s_q), f(t_j))$, and $\mathrm{XLR}@K$ is the fraction of queries whose translation $t_q$ ranks in the top $K$.
+Backretrieval replaces the unknown correspondence $s_q \leftrightarrow t_q$ with the image comparison in step 3.
+
+## Worked example
+
+Four English captions with photos form $\Omega_{\mathrm S}$: (1) a dog running on grass, (2) a bowl of ramen, (3) a
+red bus, (4) a cat on a sofa. Four German captions with their own photos form $\Omega_{\mathrm T}$: (A) a dog playing
+in a park, (B) a noodle soup, (C) a train at a station, (D) a sleeping cat. No German caption is a translation of an
+English one.
+
+Step 2 with some embedding $f$ retrieves A for query 1, B for query 2, D for query 3 and A for query 4. Step 3 needs
+the image similarities $g(J_j, I_i)$ between each retrieved German photo and all four English photos.
+
+| German photo     | $I_1$ (dog) | $I_2$ (ramen) | $I_3$ (bus) | $I_4$ (cat) |
+| ---------------- | ----------- | ------------- | ----------- | ----------- |
+| $J_{\mathrm{A}}$ (dog)   | 0.82        | 0.10          | 0.25        | 0.55        |
+| $J_{\mathrm{B}}$ (soup)  | 0.12        | 0.74          | 0.08        | 0.15        |
+| $J_{\mathrm{D}}$ (cat)   | 0.50        | 0.14          | 0.18        | 0.79        |
+
+The ranks of each query's own image follow row by row.
+
+- Query 1 retrieved A. In row A, $I_1$ has the highest similarity, 0.82, so $\rho_1 = 1$.
+- Query 2 retrieved B. In row B, $I_2$ has the highest similarity, 0.74, so $\rho_2 = 1$.
+- Query 3 retrieved D. Row D sorts as $I_4$ (0.79), $I_1$ (0.50), $I_3$ (0.18), $I_2$ (0.14), so $\rho_3 = 3$.
+- Query 4 retrieved A. Row A sorts as $I_1$ (0.82), $I_4$ (0.55), $I_3$ (0.25), $I_2$ (0.10), so $\rho_4 = 2$.
+
+With $K = 1$, queries 1 and 2 are hits and $\mathrm{BkR}@1 = 2/4 = 0.5$. With $K = 2$, query 4 is also a hit and
+$\mathrm{BkR}@2 = 3/4 = 0.75$. A random embedding would score $K/N$ in expectation, 0.25 and 0.5 respectively (derived
+below). Query 4 shows how the image step grades a near miss: the cat caption retrieved the dog caption, and a dog photo
+still ranks the cat photo second. Query 3 shows a miss: no German caption mentions a bus, the embedding picked the cat,
+and the bus photo ranks third.
+
+Queries 1 and 4 both retrieved A, so they share the ranking in row A. Only one image can occupy rank 1 in that row, so
+at most one of the two queries can be a hit at $K = 1$. This cap is the basis of the hubness argument below.
+
+## Why it tracks ground-truth retrieval
+
+Backretrieval is only useful if it orders embedding models the way the unavailable ground truth would. Fain et al.
+sketch the argument under two assumptions <Cite id="fain2021backretrieval" />. The first is that retrieval with $g$
+performs better than random. The second is that the probability of finding $I_q$ in step 3 depends only on whether the
+retrieved text $t_{j^*(q)}$ is a correct match for $s_q$ under the ground-truth pairing. The paper states the conclusion
+without a proof. The argument below fills in the steps.
+
+**An affine link.** Write $c_f(q) = 1$ if embedding $f$ retrieves a correct match for query $q$ and $c_f(q) = 0$
+otherwise. Let $\pi_f = \frac{1}{N} \sum_q c_f(q)$ be the fraction of queries with a correct match. By the second
+assumption, the hit indicator $h_f(q) = \indicator[\rho_q \le K]$ has
+
+$$
+\prob(h_f(q) = 1 \mid c_f(q) = 1) = \alpha, \qquad \prob(h_f(q) = 1 \mid c_f(q) = 0) = \beta,
+$$
+
+with $\alpha$ and $\beta$ fixed by the images and $g$, not by $f$. Averaging over queries gives
+
+$$
+\expect[\mathrm{BkR}@K(f)] = \frac{1}{N} \sum_q \LB \beta + (\alpha - \beta) c_f(q) \RB = \beta + (\alpha - \beta)\, \pi_f.
+$$
+
+The expected Backretrieval is an affine function of the ground-truth match rate $\pi_f$. The first assumption says that
+a correct match makes the query's image easier to find than an incorrect one, so $\alpha > \beta$ and the slope is
+positive. Two models with $\pi_{f_1} > \pi_{f_2}$ then have
+$\expect[\mathrm{BkR}@K(f_1)] - \expect[\mathrm{BkR}@K(f_2)] = (\alpha - \beta)(\pi_{f_1} - \pi_{f_2}) > 0$. The
+expected scores preserve the ground-truth order.
+
+**With high probability.** Write $\delta = (\alpha - \beta)(\pi_{f_1} - \pi_{f_2})$. Suppose the hits of different
+queries are independent given the retrievals. The differences $D_q = h_{f_1}(q) - h_{f_2}(q)$ lie in $[-1, 1]$ and
+have mean $\delta$. <NoteLink to="hoeffdings-inequality">Hoeffding's inequality</NoteLink> for their average over $N$
+queries <Cite id="hoeffding1963" /> gives
+
+$$
+\prob\LP \mathrm{BkR}@K(f_1) \le \mathrm{BkR}@K(f_2) \RP = \prob\LP \bar D - \delta \le -\delta \RP \le
+\exp\LP -\frac{2 N^2 \delta^2}{N \cdot 2^2} \RP = \exp\LP -\frac{N \delta^2}{2} \RP.
+$$
+
+The wrong order becomes exponentially unlikely in $N$. The gap $\delta$ shrinks with $\alpha - \beta$, so a weak image
+similarity needs more queries, which is why evaluations use thousands of queries where the data allow. The
+Hoeffding bound ignores the small variance of rare hits and is conservative when $\alpha$ and $\beta$ are both small.
+
+The argument connects Backretrieval to the match rate $\pi_f$ of the top-1 retrieved text. The ground-truth metric is
+$\mathrm{XLR}@K$ on a parallel set, which is a different number. Both increase as $f$ places texts with the same
+meaning closer across languages. Whether their orders agree in practice is an empirical question, answered below.
+
+**Random embeddings score $K/N$.** If $f$ carries no information, the retrieved image $J_{j^*(q)}$ is unrelated to
+$I_q$. By symmetry $I_q$ is equally likely to hold any of the $N$ ranks, so $\prob(\rho_q \le K) = K/N$ and
+$\expect[\mathrm{BkR}@K] = K/N$. This is $\beta$ in the affine link. With $N = 10\,000$ queries and $K = 10$, a random
+embedding scores $K/N = 1.0 \times 10^{-3}$, and a model is only informative to the extent that it beats this floor.
+
+**Equality in the parallel limit.** Suppose the target set is a translation of the source set, $t_q$ translating $s_q$,
+and each translation keeps its image, $J_q = I_q$. Suppose also that the images are distinct and each image is more
+similar to itself than to any other, $g(I, I) > g(I, I')$ for $I' \ne I$. If $j^*(q) = q$, step 3 ranks from
+$J_q = I_q$ and puts $I_q$ first, so $\rho_q = 1$. If $j^*(q) = m \ne q$, step 3 ranks from $J_m = I_m$, which puts $I_m$
+first, so $\rho_q \ge 2$. Hence $\indicator[\rho_q \le 1] = \indicator[j^*(q) = q]$ for every query, and
+
+$$
+\mathrm{BkR}@1(f) = \mathrm{XLR}@1(f).
+$$
+
+For $K > 1$ the two differ. A retrieved wrong text whose image resembles $I_q$ still earns a hit, as query 4 did in the
+worked example.
+
+**Robustness to hubs.** In high-dimensional spaces a few points, called hubs, are the nearest neighbour of many others
+<Cite id="radovanovic2010hubs" />. A hub target text $t_h$ retrieved by $m$ queries sends all $m$ of them to the same
+ranking of source images from $J_h$. That ranking has exactly $K$ positions at or above rank $K$, and each position holds
+one source image. At most $K$ of the $m$ queries can therefore be hits, however large $m$ is. A hub adds at most $K/N$ to
+Backretrieval. Fain et al. state this robustness to hubness as part of their theoretical sketch
+<Cite id="fain2021backretrieval" />.
+
+## Interactive toy world
+
+<BackretrievalToy />
+
+The toy places every item's meaning at a point in the plane. The embedding under test rotates and perturbs the
+target-language texts, so a larger rotation or noise is a worse cross-lingual model. The image-feature noise controls
+how informative $g$ is: as it grows, $\alpha$ falls towards $\beta$, the swept points flatten towards the $K/N$ line, and
+the correlation between the two metrics weakens.
+
+## What the evidence shows
+
+Fain, Twomey and Bollegala tested the metric itself on public datasets whose images carry independently written
+captions in two languages, such as Multi30K (English and German) <Cite id="elliott2016multi30k" />
+<Cite id="fain2021backretrieval" />. The captions of each image make $\mathrm{XLR}@10$ computable, so every evaluated
+embedding model gives a point $(\mathrm{XLR}@10, \mathrm{BkR}@10)$. Across about ten multilingual embedding models,
+Backretrieval correlated with the ground truth at a <NoteLink to="pearson-correlation">Pearson</NoteLink> coefficient of
+0.97 to 0.99 in every language direction. A baseline that correlates text distances directly with image distances,
+without the retrieval step, reached at most 0.81. The two metrics live on different scales: $\mathrm{BkR}@10$ values
+were several times smaller than $\mathrm{XLR}@10$ values, as the affine link predicts when $\alpha - \beta$ is well
+below 1. Only the ordering of models transfers.
+
+The same paper applied Backretrieval where no ground truth exists: recipes on the Cookpad platform, written separately
+in five languages. Backretrieval guided the design of a recipe embedding. Scored per language pair, it showed that an
+embedding trained with a monolingual <NoteLink to="triplet-and-margin-losses">triplet loss</NoteLink> left some
+languages poorly aligned with the others, because nothing in that loss ties the languages together. Adding a
+cross-lingual alignment penalty lifted the worst pairs. A blinded human study then compared that
+embedding with the LaBSE model it started from <Cite id="feng2022labse" />. The rater found 2.3 times as many very
+relevant cross-lingual suggestions from the new embedding, where Backretrieval had scored it about 1.8 times higher.
+The study had one rater and 20 queries, so it is a sanity check rather than a validation.
+
+## Assumptions
+
+- **Paired image–text data in each language.** Every evaluated text has an image, and the image depicts what the text
+  is about.
+- **Comparable content across languages.** The source and target collections cover overlapping subjects. A query whose
+  subject is absent from the target collection can only miss, whatever the embedding.
+- **An informative image similarity.** $g$ must rank images of the same content above others more often than chance,
+  so that $\alpha > \beta$.
+- **Hits depend on the text match only.** The theoretical sketch assumes that the chance of recovering $I_q$ depends
+  only on whether the retrieved text matches, not on other properties of the embedding.
+
+## Pitfalls
+
+- **Scores are not comparable across setups.** $\mathrm{BkR}$ is compressed by $\alpha - \beta$, which depends on the
+  image model, the dataset and $N$. Compare models on the same data with the same $g$. Calibrating Backretrieval to the
+  scale of the ground truth is listed by the authors as future work.
+- **Near-duplicate images.** Datasets with many visually similar images (plated dishes, product photos on white
+  backgrounds) push the query's image down the ranking even after a correct text match. $\alpha$ falls, $\delta$
+  shrinks, and more queries are needed to separate models.
+- **Image-model errors and domain shift.** An ImageNet-trained network may not separate fine distinctions such as two
+  soups. Errors of $g$ reduce $\alpha - \beta$ but do not reverse the order of models, provided $g$ stays better than
+  chance and does not depend on $f$.
+- **Only visually grounded meaning is measured.** Two texts that differ in content a photo cannot show, such as
+  cooking time or a vegan substitution, receive the same image evidence. Backretrieval cannot reward an embedding for
+  separating them.
+- **Several texts per image.** When one image carries several captions, as in Flickr30k and MS-COCO, a retrieved
+  caption of a similar image counts as success. That matches the intended notion of relevance but differs from
+  translation retrieval, which rewards only the exact counterpart.
+- **Dependent queries.** The Hoeffding argument assumes independent hits. Queries that share a hub retrieval share one
+  image ranking, so their hits are dependent and the effective number of queries is smaller than $N$.

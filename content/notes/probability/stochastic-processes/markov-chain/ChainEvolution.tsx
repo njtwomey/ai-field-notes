@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react'
+import { MathText } from '@/components/content/MathText'
+import { Diagram } from '@/components/diagram/Diagram'
+import type { DiagramEdge, DiagramSpec, Side } from '@/components/diagram/types'
 import {
-  GraphDiagram,
   Interactive,
   ParamChoice,
   ParamSlider,
   Readout,
   XYChart,
   formatNumber,
-  type GraphEdge,
+  useParam,
   type XYSeries,
 } from '@/components/viz'
 
@@ -15,6 +17,13 @@ type Matrix = number[][]
 type State = '0' | '1' | '2'
 
 const NAMES = ['sunny', 'cloudy', 'rainy']
+const SHORT = ['S', 'C', 'R']
+/** Where each state sits, and the side its self-loop is drawn on. */
+const PLACES: [number, number, Side][] = [
+  [0, 0, 'w'],
+  [4.4, 0, 'e'],
+  [2.2, 3.4, 's'],
+]
 const STEPS = 30
 const TIMES = Array.from({ length: STEPS + 1 }, (_, t) => t)
 
@@ -122,17 +131,43 @@ export function ChainEvolution() {
     return lines
   }, [path, pi])
 
-  const edges: GraphEdge[] = []
-  P.forEach((row, i) =>
-    row.forEach((p, j) => {
-      if (i !== j && p > 0.005) edges.push({ source: String(i), target: String(j), label: pct(p), curveness: 0.25 })
-    }),
-  )
-  const nodes = [
-    { id: '0', label: `S (${pct(P[0][0])})`, x: 0, y: 0 },
-    { id: '1', label: `C (${pct(P[1][1])})`, x: 2, y: 0 },
-    { id: '2', label: `R (${pct(P[2][2])})`, x: 1, y: 1.6 },
-  ]
+  const time = useParam(3, { min: 0, max: STEPS, step: 1 })
+  const t = time.value
+  // Each state is shaded by P(X_t = state), in the colour of its line; arrows carry the transition probabilities.
+  const diagram = useMemo((): DiagramSpec => {
+    const edges: DiagramEdge[] = []
+    P.forEach((row, i) =>
+      row.forEach((p, j) => {
+        if (p <= 0.005) return
+        const from = i === j ? `${i}:${PLACES[i][2]}` : String(i)
+        edges.push({
+          from,
+          to: String(j),
+          route: 'curve',
+          bend: 0.55,
+          // Each arrow of a pair bows to its own side; its label goes on the outside of the bow.
+          labelSide: 'right',
+          label: `$${pct(p)}$`,
+          tone: 'neutral',
+        })
+      }),
+    )
+    return {
+      unit: 44,
+      nodes: PLACES.map(([x, y], i) => ({
+        id: String(i),
+        x,
+        y,
+        shape: 'circle',
+        w: 1.2,
+        h: 1.2,
+        tone: i,
+        shade: path[t][i],
+        label: `${SHORT[i]}\n$${pct(path[t][i])}$`,
+      })),
+      edges,
+    }
+  }, [P, path, t])
 
   const tv = pi ? 0.5 * path[STEPS].reduce((s, v, j) => s + Math.abs(v - pi[j]), 0) : NaN
   const setRow = (i: number, patch: Partial<RowSpec>) =>
@@ -141,7 +176,9 @@ export function ChainEvolution() {
   return (
     <Interactive
       title="A three-state chain approaching its stationary distribution"
-      caption="States sunny (S), cloudy (C) and rainy (R). Each row of P is set by the probability of staying and the share of the remainder that moves on to the next state (S → C → R → S). Solid lines are P(Xₜ = state) from the chosen start; dashed lines are the stationary π. The distance shrinks like |λ₂|ᵗ. The cycle preset is periodic and never settles; the sticky preset settles slowly."
+      caption={
+        <MathText text="States sunny (S), cloudy (C) and rainy (R). Each row of $P$ is set by the probability of staying and the share of the remainder that moves on to the next state (S → C → R → S). The graph shows the chain at time $t$: arrows carry the transition probabilities, self-loops included, and each state is shaded by $P(X_t = \text{state})$. Solid lines are $P(X_t = \text{state})$ from the chosen start; dashed lines are the stationary $\pi$. The distance shrinks like $\abs{\lambda_2}^t$. Step $t$ with the arrows or drag it on the chart. The cycle preset is periodic and never settles; the sticky preset settles slowly." />
+      }
       controls={
         <>
           <ParamChoice
@@ -154,6 +191,7 @@ export function ChainEvolution() {
               { value: 'sticky', label: 'sticky' },
             ]}
           />
+          <ParamSlider label="time t" param={time} format={(v) => String(v)} withArrows />
           <ParamChoice
             label="start state"
             value={start}
@@ -190,9 +228,20 @@ export function ChainEvolution() {
         </>
       }
     >
-      <div className="grid gap-4 md:grid-cols-[1fr_2fr]">
-        <GraphDiagram nodes={nodes} edges={edges} height={260} ariaLabel="Transition graph of the chain" />
-        <XYChart height={260} xLabel="t" yLabel="probability" series={series} yRange={[0, 1]} xRange={[0, STEPS]} />
+      <div className="grid items-center gap-4 md:grid-cols-2">
+        <Diagram
+          spec={diagram}
+          ariaLabel="Transition graph of the chain, each state shaded by its probability at time t"
+        />
+        <XYChart
+          height={260}
+          xLabel="t"
+          yLabel="probability"
+          series={series}
+          yRange={[0, 1]}
+          xRange={[0, STEPS]}
+          handles={[{ kind: 'x', at: t, label: 't', onDrag: (x) => time.set(x) }]}
+        />
       </div>
     </Interactive>
   )

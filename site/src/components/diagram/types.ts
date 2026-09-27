@@ -41,6 +41,8 @@ export type DiagramNode = {
   dashed?: boolean
   /** Shade the node: an observed variable in a graphical model. */
   filled?: boolean
+  /** Shade the node in proportion to a value in [0, 1], e.g. a probability; overrides `filled`. */
+  shade?: number
   /** Draw in the accent colour with a heavier outline, e.g. the variables a sentence or a control is about. */
   highlight?: boolean
   /** Put the label outside the shape instead of inside (defaults to `n` for factors and dots). */
@@ -63,7 +65,10 @@ export type DiagramGroup = {
 }
 
 export type DiagramEdge = {
-  /** A node id, optionally with a side: `mha:s`. Without a side the side facing the other end is used. */
+  /**
+   * A node id, optionally with a side: `mha:s`. Without a side the side facing the other end is used. An edge from a
+   * node to itself is a loop drawn outside the side given on `from` (default `n`), e.g. a self-transition.
+   */
   from: string
   to: string
   /** Waypoints in grid units; the edge passes through them in order. */

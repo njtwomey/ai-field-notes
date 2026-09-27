@@ -1,31 +1,26 @@
 import { useState } from 'react'
-import { GraphDiagram, Interactive, ParamSwitch, type GraphEdge, type GraphNode } from '@/components/viz'
+import { Diagram } from '@/components/diagram/Diagram'
+import { link, variable } from '@/components/diagram/components'
+import type { DiagramSpec } from '@/components/diagram/types'
+import { Interactive, ParamSwitch } from '@/components/viz'
 import { POSITIONS, at, chainEnds, labelNodes, potentialChain } from '../_shared/chain-graph'
 
-function directedChain(): { nodes: GraphNode[]; edges: GraphEdge[] } {
-  const xs: GraphNode[] = POSITIONS.map((p, i) => ({
-    id: `x${i}`,
-    label: `x_{${p}}`,
-    x: at(i),
-    y: 1,
-    kind: 'observed',
-  }))
+function directedChain(): DiagramSpec {
+  const xs = POSITIONS.map((p, i) => variable(`x${i}`, at(i), 1.8, `$x_{${p}}$`, { w: 1.05, h: 1.05, filled: true }))
   const ends = chainEnds(0, 'y0', 'y2', true)
   return {
     nodes: [...labelNodes(0), ...xs, ...ends.nodes],
-    edges: [
-      { source: 'y0', target: 'y1' },
-      { source: 'y1', target: 'y2' },
-      ...[0, 1, 2].map((i) => ({ source: `y${i}`, target: `x${i}` })),
-      ...ends.edges,
-    ],
+    edges: [link('y0', 'y1'), link('y1', 'y2'), ...[0, 1, 2].map((i) => link(`y${i}`, `x${i}`)), ...ends.edges],
   }
 }
+
+const DIRECTED = directedChain()
+const POTENTIALS = potentialChain()
 
 /** The HMM as a directed graph, and the same chain in potential form with the observations absorbed. */
 export function HmmGraph() {
   const [potentials, setPotentials] = useState(false)
-  const g = potentials ? potentialChain() : directedChain()
+  const g = potentials ? POTENTIALS : DIRECTED
   return (
     <Interactive
       title="The HMM as a graph"
@@ -36,7 +31,7 @@ export function HmmGraph() {
       }
       controls={<ParamSwitch label="potential form" checked={potentials} onChange={setPotentials} />}
     >
-      <GraphDiagram nodes={g.nodes} edges={g.edges} height={190} ariaLabel="Hidden Markov model chain" />
+      <Diagram spec={{ ...g, unit: 48 }} ariaLabel="Hidden Markov model chain" />
     </Interactive>
   )
 }
