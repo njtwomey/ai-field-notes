@@ -86,7 +86,7 @@ export function RunningMeans() {
       controls={
         <>
           <ParamChoice label="distribution" value={id} onChange={setId} options={DISTRIBUTIONS} />
-          <ParamSlider label="n (draws shown)" value={n} onChange={setN} min={50} max={MAX_N} step={50} />
+          <ParamSlider label="n (draws shown)" value={n} onChange={setN} min={50} max={MAX_N} step={50} withArrows />
         </>
       }
       readout={

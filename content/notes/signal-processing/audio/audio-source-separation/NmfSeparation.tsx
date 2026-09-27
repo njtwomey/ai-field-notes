@@ -122,7 +122,7 @@ export function NmfSeparation() {
       controls={
         <>
           <ParamSlider label="rank K" param={rank} withArrows />
-          <ParamSlider label="iterations" param={iterations} />
+          <ParamSlider label="iterations" param={iterations} withArrows />
         </>
       }
       readout={

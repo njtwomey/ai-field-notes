@@ -139,7 +139,7 @@ export function ManyComparisons() {
           <ParamSlider label="variants k" param={variants} />
           <ParamChoice label="α" value={alpha} onChange={setAlpha} options={ALPHAS} />
           <ParamChoice label="correction" value={method} onChange={setMethod} options={CORRECTIONS} />
-          <ParamSlider label="experiment shown" param={shown} />
+          <ParamSlider label="experiment shown" param={shown} withArrows />
           <ParamSlider label="seed" param={seed} />
         </>
       }

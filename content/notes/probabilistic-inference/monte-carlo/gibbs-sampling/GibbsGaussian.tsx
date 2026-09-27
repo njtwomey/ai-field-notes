@@ -108,7 +108,7 @@ export function GibbsGaussian() {
       controls={
         <>
           <ParamSlider label="correlation ρ" param={rho} />
-          <ParamSlider label="sweeps" param={sweeps} format={(v) => String(v)} />
+          <ParamSlider label="sweeps" param={sweeps} format={(v) => String(v)} withArrows />
           <ParamSlider label="random seed" param={seed} withArrows />
           <ParamSwitch label="block both coordinates" checked={blocked} onChange={setBlocked} />
         </>

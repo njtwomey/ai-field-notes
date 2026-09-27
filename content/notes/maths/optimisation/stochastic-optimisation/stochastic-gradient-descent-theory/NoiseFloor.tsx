@@ -84,7 +84,15 @@ export function NoiseFloor() {
             format={(v) => formatNumber(10 ** v)}
           />
           <ParamSlider label="noise σ" value={sigma} onChange={setSigma} min={0.1} max={3} step={0.1} />
-          <ParamSlider label="iterations" value={steps} onChange={setSteps} min={100} max={3000} step={100} />
+          <ParamSlider
+            label="iterations"
+            value={steps}
+            onChange={setSteps}
+            min={100}
+            max={3000}
+            step={100}
+            withArrows
+          />
           <ParamButton onClick={() => setSeed((s) => s + 1)}>New noise</ParamButton>
         </>
       }

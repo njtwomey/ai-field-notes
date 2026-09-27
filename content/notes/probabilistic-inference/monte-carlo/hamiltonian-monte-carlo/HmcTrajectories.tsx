@@ -141,7 +141,7 @@ export function HmcTrajectories() {
           <ParamSlider label="step size ε" param={eps} />
           <ParamSlider label="leapfrog steps L" param={steps} format={(v) => String(v)} />
           <ParamSlider label="correlation ρ" param={rho} />
-          <ParamSlider label="iterations" param={iterations} format={(v) => String(v)} />
+          <ParamSlider label="iterations" param={iterations} format={(v) => String(v)} withArrows />
           <ParamSlider label="momentum seed" param={seed} withArrows />
         </>
       }

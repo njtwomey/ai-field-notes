@@ -92,7 +92,7 @@ export function StepSizeExplorer() {
             step={0.01}
             format={(v) => formatNumber(10 ** v)}
           />
-          <ParamSlider label="steps" value={steps} onChange={setSteps} min={5} max={100} step={1} />
+          <ParamSlider label="steps" value={steps} onChange={setSteps} min={5} max={100} step={1} withArrows />
           <div className="flex flex-wrap gap-2">
             <ParamButton onClick={() => preset(0.1)}>Too small</ParamButton>
             <ParamButton

@@ -48,7 +48,7 @@ export function RingAllReduce() {
             max={8}
             step={1}
           />
-          <ParamSlider label="step" value={s} onChange={setStep} min={0} max={total} step={1} />
+          <ParamSlider label="step" value={s} onChange={setStep} min={0} max={total} step={1} withArrows />
         </>
       }
       readout={

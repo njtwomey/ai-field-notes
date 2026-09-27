@@ -124,7 +124,7 @@ export function ModelSelection() {
       caption="Each k is fitted by EM from several k-means++ starts, keeping the best. The dashed line is −2 log L. It only falls, so on its own it always prefers more components; its bend at k = 3 is the elbow. AIC adds 2 per parameter and BIC adds log n per parameter, turning the elbow into a minimum. Lower is better. Change n: BIC's penalty grows with n, AIC's does not. Drag the line labelled k, or use its slider, to see the fitted mixture at that k on the right: beyond k = 3, extra components split real clusters or cover a few stray points."
       controls={
         <>
-          <ParamSlider label="k shown" param={k} />
+          <ParamSlider label="k shown" param={k} withArrows />
           <ParamSlider label="points n" value={n} onChange={setN} min={30} max={400} step={10} />
           <ParamSlider label="restarts per k" value={restarts} onChange={setRestarts} min={1} max={5} step={1} />
           <ParamSwitch label="zoom on k ≥ 3" checked={zoom} onChange={setZoom} />

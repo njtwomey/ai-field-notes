@@ -156,7 +156,7 @@ export function AccelerationExplorer() {
             step={0.05}
             format={(v) => formatNumber(10 ** v)}
           />
-          <ParamSlider label="iterations" value={steps} onChange={setSteps} min={20} max={500} step={10} />
+          <ParamSlider label="iterations" value={steps} onChange={setSteps} min={20} max={500} step={10} withArrows />
           <ParamChoice
             label="Nesterov momentum"
             value={variant}

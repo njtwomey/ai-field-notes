@@ -131,6 +131,7 @@ export function EbmShapes() {
             max={Math.log10(ROUNDS)}
             step={0.02}
             format={(v) => String(Math.min(ROUNDS, Math.round(10 ** v)))}
+            withArrows
           />
           <ParamChoice
             label="learning rate ν"

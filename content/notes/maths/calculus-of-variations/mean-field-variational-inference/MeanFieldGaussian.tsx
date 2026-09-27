@@ -88,7 +88,7 @@ export function MeanFieldGaussian() {
       controls={
         <>
           <ParamSlider label="correlation ρ" param={rho} />
-          <ParamSlider label="sweeps" param={sweeps} />
+          <ParamSlider label="sweeps" param={sweeps} withArrows />
         </>
       }
       readout={

@@ -74,7 +74,7 @@ export function SgdTrajectories() {
             onChange={setChoice}
             options={data.runs.map((r, k) => ({ value: String(k), label: r.label }))}
           />
-          <ParamSlider label="epoch" param={epoch} />
+          <ParamSlider label="epoch" param={epoch} withArrows />
         </>
       }
       readout={

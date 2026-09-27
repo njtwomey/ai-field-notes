@@ -138,7 +138,7 @@ export function MetropolisExplorer() {
             ]}
           />
           <ParamSlider label="proposal scale σ" param={scale} />
-          <ParamSlider label="iterations" param={iterations} format={(v) => String(v)} />
+          <ParamSlider label="iterations" param={iterations} format={(v) => String(v)} withArrows />
           <ParamSlider label="random seed" param={seed} withArrows />
         </>
       }
