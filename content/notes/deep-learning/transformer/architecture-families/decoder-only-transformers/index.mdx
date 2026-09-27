@@ -1,0 +1,114 @@
+---
+title: Decoder-only transformers
+kind: concept
+summary: A decoder-only transformer is one stack of causally masked self-attention blocks that reads a prompt and writes its continuation with the same weights. It gets a next-token loss at every position, caches past keys and values, and turns any task into continuing text.
+tags: [deep-learning, transformer, language-models, nlp, worked-example]
+aliases: [decoder-only model, causal decoder, GPT family, GPT architecture, causal decoder-only transformer]
+requires: [transformer, causal-masking]
+related:
+  [
+    autoregressive-transformer-language-model,
+    encoder-only-transformers,
+    encoder-decoder-transformers,
+    prefix-lm-and-unified-models,
+    modern-decoder-block,
+    in-context-learning,
+    kv-cache,
+  ]
+references: [radford2018, radford2019, brown2020, touvron2023b, raffel2020, wang2022architecture, devlin2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+  A decoder-only transformer is a stack of $L$ transformer blocks whose self-attention is causally masked, followed by a
+  normalisation and an output head over the vocabulary. The output at position $t$ depends only on tokens $1, \dots, t$
+  and gives $p(x_{t + 1} \mid x_1, \dots, x_t)$. There is no encoder and no cross-attention: the prompt and the
+  generated text are one sequence processed by one stack.
+</Definition>
+
+## Intuition
+
+An encoder–decoder uses one network to read and another to write. A decoder-only model reads and writes with the same
+network, and reading the prompt is the same operation as having written it. Any task that can be stated as text, such as
+translation, question answering or classification, becomes the continuation of a prompt.
+
+## The lineage
+
+The training objective and the scaling results are in <NoteLink to="autoregressive-transformer-language-model">the
+autoregressive transformer language model</NoteLink>. The architecture changed as follows.
+
+| Model | Year | Size   | Layers, width | Context | Architectural changes                                                                                      |
+| ----- | ---- | ------ | ------------- | ------- | ---------------------------------------------------------------------------------------------------------- |
+| GPT   | 2018 | ~117M  | 12, 768       | 512     | the 2017 decoder without cross-attention; learned positions; GELU                                          |
+| GPT-2 | 2019 | 1.5B   | 48, 1600      | 1,024   | pre-norm plus a final norm; residual weights scaled by $1/\sqrt N$ at initialisation                       |
+| GPT-3 | 2020 | 175B   | 96, 12,288    | 2,048   | as GPT-2, with alternating dense and locally banded sparse attention layers                                |
+| LLaMA | 2023 | 7B–65B | 32–80         | 2,048   | RMSNorm, SwiGLU, rotary positions; see <NoteLink to="modern-decoder-block">modern decoder block</NoteLink> |
+
+GPT fine-tuned a 12-layer decoder on each downstream task <Cite id="radford2018" />. GPT-2 moved layer normalisation
+to the input of each sub-block, added one after the last block, and scaled the weights of residual layers at
+initialisation by $1/\sqrt N$ for $N$ residual layers <Cite id="radford2019" />. GPT-3 kept that architecture, with
+the sparse attention layers as the exception <Cite id="brown2020" />, and showed that a large enough model performs
+tasks from a few examples in its prompt; see <NoteLink to="in-context-learning">in-context learning</NoteLink>. LLaMA
+replaced the block's components <Cite id="touvron2023b" />.
+
+## Why decoder-only models became the default
+
+### A loss at every position
+
+For a sequence of $n$ tokens, next-token prediction gives $n - 1$ targets from one forward pass (see <NoteLink to="causal-masking">causal masking</NoteLink>). Masked language modelling gives about $0.15n$. T5-style span
+corruption gives the corrupted 15% of tokens plus one sentinel per span. At equal tokens processed, the decoder receives
+several times as many prediction targets.
+
+### Nothing to recompute when text is appended
+
+In a causal stack, the key and value at position $t$ in every layer are functions of $x_1, \dots, x_t$ only. Appending
+tokens leaves them unchanged. Generation, and a conversation that grows turn by turn, therefore process each token once
+and keep its keys and values in the <NoteLink to="kv-cache">KV cache</NoteLink>. In an encoder, or in the encoder of an
+encoder–decoder, each position attends to all others. Adding a token to the input changes every encoder state, so a
+growing input must be re-encoded.
+
+### One model for every task
+
+Pre-training and use share one interface: text in, next token out. No task-specific head is needed, and instructions
+and examples go in the prompt.
+
+### What controlled comparisons show
+
+The case for decoder-only models is not that they win every comparison at equal compute.
+
+- T5 compared architectures with the same compute per example. An encoder–decoder with $L + L$ layers has about the
+  parameters of a $2L$-layer decoder but the compute of an $L$-layer one, because the encoder processes only the input
+  and the decoder only the target. With a denoising objective, the encoder–decoder scored 83.28 on GLUE, a prefix
+  language model 81.82 and a plain decoder language model 74.70 <Cite id="raffel2020" />.
+- Wang et al. trained models of over 5 billion parameters on 168 billion tokens. After unsupervised pre-training alone,
+  causal decoders trained with next-token prediction generalised best zero-shot. After multitask fine-tuning, models
+  with bidirectional attention over the input trained with masked language modelling were best
+  <Cite id="wang2022architecture" />.
+
+Decoder-only models became the default because they are simple to scale, need no task-specific parts, cache cheaply and
+work zero-shot from pre-training alone. Encoders and encoder–decoders remain strong where the input is fixed and the
+output is short or structured.
+
+## Worked example
+
+**Targets per sequence.** For $n = 2048$: next-token prediction gives 2,047 targets; masked language modelling at 15%
+gives 307.
+
+**A three-turn conversation.** Each turn adds 500 tokens, and the model reads the whole history before replying. A
+decoder with a KV cache processes $500 + 500 + 500 = 1{,}500$ new tokens in total. A model with a bidirectional encoder
+over the history re-encodes $500 + 1{,}000 + 1{,}500 = 3{,}000$ tokens, and the ratio grows linearly with the number of
+turns.
+
+## Assumptions
+
+- The output is text generated left to right. Tasks with a fixed input and a label may be served better by an encoder.
+- A one-directional context is enough for representation. Each position's vector sees only the left context, so
+  embeddings from a decoder usually use the last token or a mean over positions.
+
+## Pitfalls
+
+- **Prompt tokens have no bidirectional view.** The prompt is encoded causally, so an early prompt token cannot use a
+  later one. <NoteLink to="prefix-lm-and-unified-models">Prefix language models</NoteLink> relax this for the prompt.
+- **Training on the prompt.** Fine-tuning losses are often restricted to the response tokens, since the prompt is
+  given; the causal mask alone does not do this.

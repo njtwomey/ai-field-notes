@@ -1,0 +1,160 @@
+---
+title: Encoder-only transformers
+kind: concept
+summary: An encoder-only transformer is a stack of unmasked self-attention blocks that maps $n$ tokens to $n$ vectors, each depending on the whole input. It is pre-trained by denoising, such as masked language modelling or ELECTRA's replaced-token detection, and cannot generate text.
+tags: [deep-learning, transformer, language-models, nlp, worked-example]
+aliases:
+  [
+    encoder-only model,
+    bidirectional encoder,
+    BERT family,
+    ELECTRA,
+    replaced token detection,
+    DeBERTa,
+    disentangled attention,
+    enhanced mask decoder,
+  ]
+requires: [transformer, masked-language-modelling]
+related:
+  [
+    bert-vs-gpt,
+    decoder-only-transformers,
+    encoder-decoder-transformers,
+    prefix-lm-and-unified-models,
+    sentence-embeddings,
+    relative-position-representations,
+    attention-head-analysis,
+  ]
+references: [devlin2019, liu2019, clark2020electra, he2021deberta, vaswani2017]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+  An encoder-only transformer is the encoder half of the <NoteLink to="transformer">transformer</NoteLink>: a stack of
+  blocks with self-attention and no mask, so the output vector at every position depends on every input token. It maps a
+  sequence of $n$ tokens to $n$ vectors in $\reals^d$. It is pre-trained on unlabelled text with a denoising objective
+  and then fine-tuned, or used to produce embeddings. BERT is the standard example <Cite id="devlin2019" />.
+</Definition>
+
+## Intuition
+
+Understanding a word often needs the words after it: in "the bank of the river", "river" decides the sense of "bank".
+A left-to-right model builds the vector for "bank" before it has read "river". An encoder builds every vector from the
+whole sentence at once. The price is that it has no left-to-right factorisation of the text, so it cannot generate text
+one token at a time.
+
+## Why an encoder cannot generate
+
+With no mask, the representation at position $i$ is a function of all $n$ tokens. A prediction read from position $i$
+is therefore a conditional $p(x_i \mid \text{the other tokens})$, not a factor of
+
+$$
+p(x_1, \dots, x_n) = \prod_{i=1}^n p(x_i \mid x_1, \dots, x_{i-1}).
+$$
+
+Products of the conditionals $p(x_i \mid x_{\setminus i})$ do not in general give the joint distribution, so sampling
+from them one at a time does not sample text. A second consequence concerns inference cost. Appending a token changes
+the representation at every earlier position, because every position attends to the new one. None of the previous
+computation can be reused, so there is no <NoteLink to="kv-cache">KV cache</NoteLink>, and extending a sequence by one
+token costs a full forward pass.
+
+## BERT and its successors
+
+**BERT** takes one or two text segments, `[CLS] A [SEP] B [SEP]`, adds learned position and segment embeddings, and
+trains with two objectives. Masked language modelling predicts 15% of tokens from the rest (see <NoteLink to="masked-language-modelling">masked language modelling</NoteLink>). Next sentence prediction classifies
+whether segment B followed segment A in the corpus <Cite id="devlin2019" />. The final vector of `[CLS]` feeds sentence
+classifiers; the final vector of each token feeds tagging and span extraction.
+
+**RoBERTa** found that removing next sentence prediction "matches or slightly improves downstream task performance",
+and that training longer on more data with larger batches and dynamic masking closes most of the gap to later models <Cite id="liu2019" />. Next sentence prediction has since been dropped from most encoders.
+
+### ELECTRA: a loss at every position
+
+Masked language modelling computes a loss at the 15% of positions that were masked. The other 85% of each sequence
+contributes only context. ELECTRA replaces the task with **replaced-token detection** <Cite id="clark2020electra" />.
+
+1. A small **generator** $G$, itself a masked language model, fills the masked positions with sampled tokens.
+2. A **discriminator** $D$, the encoder being trained, reads the corrupted sequence $\hat\xvec$ and predicts for every
+   position $t$ whether $\hat x_t$ is the original token.
+
+The discriminator loss is a binary cross-entropy summed over all $n$ positions:
+
+$$
+\Lcal_{\text{Disc}} = -\sum_{t=1}^{n} \Big( \indicator[\hat x_t = x_t] \log D(\hat\xvec, t) +
+\indicator[\hat x_t \ne x_t] \log\paren{1 - D(\hat\xvec, t)} \Big).
+$$
+
+A sampled token that happens to equal the original counts as original. The two networks are trained together on
+$\Lcal_{\text{MLM}}(G) + \lambda\,\Lcal_{\text{Disc}}(D)$ with $\lambda = 50$. The discriminator loss is not propagated
+into the generator, since sampling is not differentiable, so the generator is trained by maximum likelihood rather than
+adversarially. Generators a quarter to half the size of the discriminator worked best. After pre-training the generator
+is discarded <Cite id="clark2020electra" />.
+
+The gain comes from the denser signal. In ELECTRA's ablation, a discriminator trained only on the masked 15% of
+positions scored 82.4 on GLUE, close to BERT's 82.2, while the full model scored 85.0. ELECTRA-Small, trained on one GPU
+for four days, outperformed GPT, which used 30 times more compute. ELECTRA-Large performed comparably to RoBERTa and
+XLNet with less than a quarter of their pre-training compute <Cite id="clark2020electra" />.
+
+### DeBERTa: separate content and position
+
+BERT adds a position embedding to each token embedding, so one vector carries both. DeBERTa keeps a content vector
+$\Hmat_i$ and a relative-position embedding for each pair, and expands the attention score into content-to-content,
+content-to-position and position-to-content terms <Cite id="he2021deberta" />. Let $\Pmat \in \reals^{2k \times d}$
+hold one learned embedding per relative-distance bucket, shared across layers. With content projections
+$\Qmat^c = \Hmat\Wmat_{q,c}$, $\Kmat^c = \Hmat\Wmat_{k,c}$ and projected relative-position embeddings
+$\Qmat^r = \Pmat\Wmat_{q,r}$, $\Kmat^r = \Pmat\Wmat_{k,r}$,
+
+$$
+\tilde A_{ij} = \underbrace{\qvec^c_i \cdot \kvec^c_j}_{\text{content-to-content}} +
+\underbrace{\qvec^c_i \cdot \kvec^r_{\delta(i,j)}}_{\text{content-to-position}} +
+\underbrace{\kvec^c_j \cdot \qvec^r_{\delta(j,i)}}_{\text{position-to-content}},
+\qquad \Amat = \operatorname{softmax}\paren{\frac{\tilde\Amat}{\sqrt{3d}}}.
+$$
+
+The relative distance is clipped to a window of $2k$ buckets:
+
+$$
+\delta(i, j) = \begin{cases} 0 & i - j \le -k, \\ 2k - 1 & i - j \ge k, \\ i - j + k & \text{otherwise}, \end{cases}
+$$
+
+with $k = 512$ in pre-training. The position-to-position term is dropped because, with relative positions, it adds
+little. The divisor $\sqrt{3d}$ replaces $\sqrt d$ because the score is a sum of three dot products <Cite id="he2021deberta" />. Relative positions alone cannot tell apart two words in the same local context, as in "a
+new store opened beside the new mall" with "store" and "mall" masked. DeBERTa therefore adds absolute positions just
+before the softmax layer that predicts masked tokens, which it calls the enhanced mask decoder. A 1.5-billion-parameter
+DeBERTa scored 89.9 on SuperGLUE against a human baseline of 89.8 <Cite id="he2021deberta" />.
+
+## Worked example
+
+**Training signal per sequence.** For a 512-token sequence, masked language modelling predicts
+$\lceil 0.15 \times 512 \rceil = 77$ tokens. Replaced-token detection makes 512 binary decisions. The decisions carry
+less information each, a single bit against a choice among tens of thousands of tokens, but every position of every
+layer receives a gradient from its own target.
+
+**DeBERTa buckets.** With $k = 4$: $i - j = 2$ gives $\delta = 6$; $i - j = -3$ gives $\delta = 1$; $i - j = 4$ and
+$i - j = 9$ both give $\delta = 7$; $i - j = -6$ gives $\delta = 0$. Eight relative-position embeddings cover all
+distances.
+
+## Uses
+
+- **Classification and tagging.** A linear layer on the `[CLS]` vector or on each token vector, fine-tuned with the
+  encoder; see <NoteLink to="transfer-learning-and-fine-tuning">transfer learning and fine-tuning</NoteLink>.
+- **Embeddings and retrieval.** Pooled encoder outputs serve as <NoteLink to="sentence-embeddings">sentence
+  embeddings</NoteLink> for search and clustering. An encoder computes each document's vector once, independently of
+  the query.
+- **Comparison with decoders.** <NoteLink to="bert-vs-gpt">BERT and GPT</NoteLink> compares the first encoder and the
+  first decoder of the pre-training era at the same size.
+
+## Assumptions
+
+- The task's input is available in full before any output is needed.
+- Outputs are one vector per token, or a fixed set of labels, not free text.
+
+## Pitfalls
+
+- **Maximum length.** Learned absolute positions fix the maximum input length, 512 tokens for BERT. Longer documents
+  must be split.
+- **Pre-training and fine-tuning mismatch.** The `[MASK]` token appears in pre-training but never in fine-tuning
+  inputs. BERT's 80/10/10 replacement rule reduces the mismatch; ELECTRA's discriminator never sees `[MASK]` at all.
+- **Similarity from raw outputs.** Pre-trained encoder vectors are trained for token prediction, not for comparison
+  by cosine similarity. Retrieval models fine-tune them with a contrastive objective first.

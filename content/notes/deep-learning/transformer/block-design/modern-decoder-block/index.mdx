@@ -1,0 +1,132 @@
+---
+title: Modern decoder block
+kind: overview
+summary: 'The block of most decoder LLMs since LLaMA is pre-norm with RMSNorm, rotates queries and keys by position (RoPE), uses grouped-query attention and a SwiGLU feed-forward layer, and has no biases or dropout. At $d = 4096$ it has the parameters and FLOPs of the 2017 block.'
+tags: [deep-learning, transformer, language-models, worked-example]
+aliases: [Llama block, Llama-style block, modern transformer block, LLM decoder layer, decoder layer]
+requires: [transformer, causal-masking]
+related:
+  [
+    decoder-only-transformers,
+    autoregressive-transformer-language-model,
+    llama-family,
+    gpt-2-vs-deepseek-v3,
+    kv-cache,
+    multi-query-and-grouped-query-attention,
+    rotary-position-embedding,
+  ]
+references:
+  [vaswani2017, touvron2023b, touvron2023, grattafiori2024, chowdhery2022, gemmateam2024, shazeer2020, zhang2019]
+status: draft
+updated: 2026-09-27
+---
+
+import { BlockBuilder } from './BlockBuilder'
+
+<Definition>
+A modern decoder block maps a sequence of residual vectors $\Xmat \in \reals^{n \times d}$ to
+
+$$
+\begin{aligned}
+\Hmat &= \Xmat + \operatorname{GQA}_{\text{RoPE}}\paren{\operatorname{RMSNorm}_1(\Xmat)}, \\
+\Ymat &= \Hmat + \operatorname{SwiGLU}\paren{\operatorname{RMSNorm}_2(\Hmat)},
+\end{aligned}
+$$
+
+where attention is causal, uses fewer key-value heads than query heads and rotates queries and keys by their positions,
+and no linear map has a bias. LLaMA introduced this combination: pre-normalisation with RMSNorm, the SwiGLU activation
+and rotary embeddings in place of absolute positions <Cite id="touvron2023b" />. Grouped-query attention was added in
+the larger Llama 2 models and in all Llama 3 models <Cite id="touvron2023" /> <Cite id="grattafiori2024" />.
+
+</Definition>
+
+## Components
+
+The block keeps the skeleton of the 2017 <NoteLink to="transformer">transformer</NoteLink> decoder: a residual stream,
+causal self-attention and a position-wise feed-forward network. It drops cross-attention, since there is no encoder, and
+replaces almost every part.
+
+| Part            | 2017 transformer                                 | Modern decoder block                                                            | Note                                                                                           |
+| --------------- | ------------------------------------------------ | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Stack           | encoder and decoder                              | decoder only                                                                    | <NoteLink to="decoder-only-transformers">decoder-only transformers</NoteLink>                  |
+| Norm placement  | post-norm: $\operatorname{LN}(\xvec + F(\xvec))$ | pre-norm: $\xvec + F(\operatorname{RMSNorm}(\xvec))$, final norm                | <NoteLink to="pre-norm-and-post-norm">pre-norm and post-norm</NoteLink>                        |
+| Norm type       | LayerNorm, gain and shift                        | RMSNorm, gain only                                                              | <NoteLink to="rmsnorm-in-transformers">RMSNorm in transformers</NoteLink>                      |
+| Position        | sinusoids added to the input once                | rotation of $\qvec$ and $\kvec$ in every layer                                  | <NoteLink to="rotary-position-embedding">rotary position embedding</NoteLink>                  |
+| Attention heads | $h$ query, key and value heads                   | $h$ query heads sharing $g < h$ key-value heads                                 | <NoteLink to="multi-query-and-grouped-query-attention">grouped-query attention</NoteLink>      |
+| Feed-forward    | $\max(0, \xvec\Wmat_1)\Wmat_2$, width $4d$       | $(\operatorname{SiLU}(\xvec\Wmat) \odot \xvec\Vmat)\Wmat_2$, width about $8d/3$ | <NoteLink to="gated-feed-forward-layers">gated feed-forward layers</NoteLink>                  |
+| Biases          | every linear map and norm                        | none                                                                            | <NoteLink to="bias-terms-and-dropout-in-modern-transformers">bias terms and dropout</NoteLink> |
+| Dropout         | 0.1 on sublayer outputs and embeddings           | none in pre-training                                                            | <NoteLink to="bias-terms-and-dropout-in-modern-transformers">bias terms and dropout</NoteLink> |
+| Embeddings      | tied, input scaled by $\sqrt d$                  | often untied                                                                    | <NoteLink to="embeddings-and-output-heads">embeddings and output heads</NoteLink>              |
+
+Components that declare themselves part of this block are listed beside the note. Two further changes appear in some
+models but not in the Llama line: <NoteLink to="parallel-attention-and-feed-forward">parallel attention and
+feed-forward</NoteLink> (GPT-J, PaLM) and <NoteLink to="qk-normalisation-and-logit-soft-capping">QK normalisation and
+logit soft-capping</NoteLink> (Gemma 2 caps attention logits).
+
+## Data flow
+
+For one token with residual vector $\xvec \in \reals^d$, $h$ query heads of size $d_h = d/h$ and $g$ key-value heads:
+
+1. $\tilde\xvec = \operatorname{RMSNorm}_1(\xvec)$.
+2. Queries $\tilde\xvec\Wmat_Q \in \reals^{h d_h}$, keys $\tilde\xvec\Wmat_K \in \reals^{g d_h}$ and values
+   $\tilde\xvec\Wmat_V \in \reals^{g d_h}$. Each query and key head is rotated by angles proportional to the token's
+   position.
+3. Query head $i$ attends, with a causal mask, to the keys and values of head $\lfloor i g/h \rfloor$. The $h$ outputs
+   are concatenated and projected by $\Wmat_O \in \reals^{d \times d}$, then added: $\hvec = \xvec + \ovec$.
+4. $\tilde\hvec = \operatorname{RMSNorm}_2(\hvec)$, then
+   $\yvec = \hvec + \paren{\operatorname{SiLU}(\tilde\hvec\Wmat) \odot \tilde\hvec\Vmat}\Wmat_2$.
+
+After the last block a final RMSNorm and the output head give the logits.
+
+## Counting parameters, FLOPs and cache
+
+**Parameters.** The attention projections have $d \cdot d$ for $\Wmat_Q$ and $\Wmat_O$ each and $d \cdot g d_h$ for
+$\Wmat_K$ and $\Wmat_V$ each, $2d^2 + 2 d g d_h$ in total. The gated feed-forward layer has $3 d d'_{ff}$. Two RMSNorms
+add $2d$. With $g = h$ the attention part is $4d^2$, as in 2017.
+
+**FLOPs.** Generating one token costs two FLOPs per weight in every matrix product, since each weight is used in one
+multiply and one add. Attending to $n$ cached tokens costs $2nd$ for the scores $\qvec\Kmat^\tr$ over all heads and $2nd$
+for the weighted sum of values, so $4nd$ per block. Grouped keys and values do not reduce this term: every query head
+still scores $n$ keys of size $d_h$.
+
+**Cache.** Each block stores a key and a value of size $d_h$ for each of the $g$ key-value heads, $2 g d_h$ numbers per
+token per block. At 2 bytes each and $L$ blocks, that is $4 L g d_h$ bytes per token. Reducing $g$ from $h$ to $h/4$
+cuts the cache by four; see <NoteLink to="kv-cache">KV cache</NoteLink>.
+
+<BlockBuilder />
+
+## Worked example
+
+Take the dimensions of Llama 2 7B: $d = 4096$, $h = 32$, $d_h = 128$, $L = 32$ blocks, $d'_{ff} = 11008$, a vocabulary
+of 32,000 and untied embeddings. Llama 2 7B uses $g = 32$ key-value heads.
+
+- **Attention.** $4 \cdot 4096^2 = 67{,}108{,}864$ parameters.
+- **Feed-forward.** $3 \cdot 4096 \cdot 11008 = 135{,}266{,}304$.
+- **Norms.** $2 \cdot 4096 = 8{,}192$.
+- **Block.** $202{,}383{,}360$. Thirty-two blocks give $6{,}476{,}267{,}520$.
+- **Model.** Adding two vocabulary matrices of $32{,}000 \times 4096$ and the final norm gives
+  $6{,}476{,}267{,}520 + 262{,}144{,}000 + 4{,}096 = 6{,}738{,}415{,}616$, the published size of Llama 2 7B
+  <Cite id="touvron2023" />.
+
+The 2017 block at the same width, with $d_{ff} = 4d$, LayerNorm and biases, has $67{,}108{,}864$ attention weights,
+$134{,}217{,}728$ feed-forward weights, $16{,}384$ normalisation parameters and $36{,}864$ biases: $201{,}379{,}840$ in
+total, within 0.5% of the modern block. The replacement of parts changed quality and stability, not size.
+
+The cache is $4 \cdot 32 \cdot 32 \cdot 128 = 524{,}288$ bytes (512 KiB) per token, or 2 GiB for one sequence of 4,096
+tokens. With $g = 8$, as in Llama 3 8B, it is 128 KiB per token and 0.5 GiB for the same sequence. At $n = 4096$ the
+FLOPs per generated token are $32 \cdot (2 \cdot 177{,}209{,}344 + 4 \cdot 4096 \cdot 4096) = 13.49 \times 10^9$ with
+$g = 8$; the $4nd$ attention term is 16% of the total.
+
+## Variants
+
+- **Gemma 2** normalises both the input and the output of each sublayer, uses GeGLU, ties its embeddings and caps
+  attention logits with a soft cap of 50 <Cite id="gemmateam2024" />.
+- **PaLM** uses parallel sublayers, multi-query attention ($g = 1$), SwiGLU, rotary positions, tied embeddings and no
+  biases <Cite id="chowdhery2022" />.
+- **Mixture-of-experts models** replace the feed-forward layer with many gated experts and a router; see
+  <NoteLink to="mixture-of-experts">mixture of experts</NoteLink>. DeepSeek-V3 also replaces grouped-query attention
+  with <NoteLink to="multi-head-latent-attention">multi-head latent attention</NoteLink>; see
+  <NoteLink to="gpt-2-vs-deepseek-v3">GPT-2 and DeepSeek-V3</NoteLink>.
+- **Long context** changes the attention pattern, not the block: see
+  <NoteLink to="sliding-window-and-sparse-attention">sliding-window and sparse attention</NoteLink> and
+  <NoteLink to="long-context-methods">long-context methods</NoteLink>.

@@ -1,0 +1,131 @@
+---
+title: RMSNorm in transformers
+kind: technique
+summary: 'Most decoder LLMs normalise the input of every attention and feed-forward sublayer, and the final output, with RMSNorm, $\gammavec \odot \xvec/\sqrt{\frac1d\norm{\xvec}^2 + \epsilon}$. Layer normalisation equals RMSNorm applied after removing the mean, so dropping the centring loses one direction of $d$ and saves a reduction.'
+tags: [deep-learning, transformer, normalisation, worked-example]
+aliases: [pre-RMSNorm, RMSNorm placement, T5 layer norm, scale-only layer normalisation]
+requires: [layer-normalisation, pre-norm-and-post-norm]
+partOf: [modern-decoder-block]
+related: [residual-stream-view, bias-terms-and-dropout-in-modern-transformers, qk-normalisation-and-logit-soft-capping]
+references: [zhang2019, ba2016, raffel2020, touvron2023b, gemmateam2024]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For a token's residual vector $\xvec \in \reals^d$, RMSNorm computes
+
+$$
+\operatorname{RMSNorm}(\xvec) = \gammavec \odot \frac{\xvec}{r(\xvec)}, \qquad
+r(\xvec) = \sqrt{\frac1d \sum_{k=1}^d x_k^2 + \epsilon},
+$$
+
+with a learned gain $\gammavec \in \reals^d$ and a small constant $\epsilon$ <Cite id="zhang2019" />. A pre-norm
+decoder applies it to the input of every attention and feed-forward sublayer and once more before the output head. It
+has no mean subtraction and no additive shift.
+
+</Definition>
+
+The general properties of RMSNorm, its gradient and its relation to batch normalisation are in <NoteLink to="layer-normalisation">layer normalisation</NoteLink>. This note covers how transformers use it.
+
+## Problem
+
+Layer normalisation computes two statistics per token, a mean and a variance, and carries a gain and a shift. In a
+large model the normalisation runs $2L + 1$ times per token in an $L$-layer pre-norm decoder. It does little arithmetic
+but reads and writes the whole activation, so its cost is set by memory traffic. The question is whether the mean and
+the shift do anything the rest of the block cannot.
+
+## Mechanism
+
+### Placement
+
+In a pre-norm block each sublayer reads a normalised copy of the residual stream and adds its output back unnormalised:
+
+$$
+\hvec = \xvec + \operatorname{Attn}(\operatorname{RMSNorm}_1(\xvec)), \qquad
+\xvec' = \hvec + \operatorname{FFN}(\operatorname{RMSNorm}_2(\hvec)).
+$$
+
+Each normalisation has its own gain. A final $\operatorname{RMSNorm}_f$ precedes the unembedding. T5 was an early
+user: it applied a layer normalisation "where the activations are only rescaled and no additive bias is applied" to the
+input of each subcomponent <Cite id="raffel2020" />. LLaMA uses pre-normalisation with RMSNorm <Cite id="touvron2023b" />. Gemma 2 applies RMSNorm to both the input and the output of every sublayer <Cite id="gemmateam2024" />, the peri-norm arrangement described in <NoteLink to="pre-norm-and-post-norm">pre-norm and post-norm</NoteLink>.
+
+### Layer normalisation is RMSNorm after centring
+
+Write $\Pmat = \I - \frac1d\ones\ones^\tr$ for the projection that removes the mean. Ignoring the gains, shift and
+$\epsilon$, layer normalisation divides the centred vector $\Pmat\xvec$ by its root mean square:
+
+$$
+\operatorname{LN}(\xvec) = \frac{\Pmat\xvec}{\sqrt{\frac1d\norm{\Pmat\xvec}^2}} = \operatorname{RMSNorm}(\Pmat\xvec).
+$$
+
+So the only difference is the component of $\xvec$ along $\ones$. Split $\xvec = \Pmat\xvec + \bar x\ones$ with
+$\bar x$ the mean. The two parts are orthogonal, so
+
+$$
+\norm{\xvec}^2 = \norm{\Pmat\xvec}^2 + d\,\bar x^2 .
+$$
+
+When the stream has little mean, $\bar x^2$ is small next to $\frac1d\norm{\Pmat\xvec}^2$ and the two normalisations
+agree. When it has a large mean, RMSNorm passes that direction through and divides by a larger number. In either case
+the following sublayer begins with linear projections, which can learn to ignore or use the $\ones$ direction. Centring
+removes one direction out of $d$, which for $d = 4096$ is a small constraint. Zhang and Sennrich hypothesised that
+re-scaling, not re-centring, is what makes layer normalisation work, and found that RMSNorm matched its quality while
+cutting running time by 7% to 64% across their models <Cite id="zhang2019" />.
+
+### The shift is a bias
+
+The shift $\betavec$ of layer normalisation is added to the input of the next linear map $\Wmat$, and
+$(\hat\xvec + \betavec)\Wmat = \hat\xvec\Wmat + \betavec\Wmat$. The term $\betavec\Wmat$ is a constant vector, which is
+exactly a bias on that linear map. Blocks that remove biases from their linear maps have no reason to keep one inside the
+normalisation; see <NoteLink to="bias-terms-and-dropout-in-modern-transformers">bias terms and dropout</NoteLink>.
+
+### Folding the gain
+
+In pre-norm the normalisation feeds only linear projections. For a projection $\Wmat \in \reals^{d \times m}$,
+
+$$
+\operatorname{RMSNorm}(\xvec)\,\Wmat = \frac{\xvec}{r(\xvec)} \paren{\operatorname{diag}(\gammavec)\,\Wmat}.
+$$
+
+The gain can be multiplied into the rows of $\Wmat$ after training. The normalisation at inference then only divides
+by $r(\xvec)$. The same holds for the query, key and value projections and for both input matrices of a gated
+feed-forward layer, which share one normalised input.
+
+### Invariances
+
+$\operatorname{RMSNorm}(a\xvec) = \operatorname{RMSNorm}(\xvec)$ for any $a > 0$, ignoring $\epsilon$, so the next
+sublayer does not see the overall scale of the residual stream, which grows with depth in a pre-norm stack. With unit
+gains, RMSNorm also commutes with any orthogonal matrix $\Rmat$: $\norm{\Rmat\xvec} = \norm{\xvec}$, so
+$\operatorname{RMSNorm}(\Rmat\xvec) = \Rmat\operatorname{RMSNorm}(\xvec)$. Layer normalisation commutes only with the
+orthogonal matrices that map $\ones$ to $\pm\ones$. This is why a rotated basis of the residual stream is equivalent to
+the original in an RMSNorm model once the gains are folded; see <NoteLink to="residual-stream-view">the residual stream
+view</NoteLink>.
+
+## Worked example
+
+Take $\xvec = (1, 2, 3, 6)$, $d = 4$, unit gains and $\epsilon = 0$.
+
+- **Layer normalisation.** $\bar x = 3$ and $\Pmat\xvec = (-2, -1, 0, 3)$ with $\norm{\Pmat\xvec}^2 = 14$. Dividing by
+  $\sqrt{14/4} = 1.871$ gives $(-1.069, -0.535, 0, 1.604)$.
+- **RMSNorm of the centred vector.** $\operatorname{RMSNorm}(\Pmat\xvec)$ divides the same vector by the same
+  $1.871$, so it equals $\operatorname{LN}(\xvec)$.
+- **RMSNorm of the raw vector.** $\norm{\xvec}^2 = 50 = 14 + 4 \cdot 3^2$. Dividing $\xvec$ by $\sqrt{50/4} = 3.536$
+  gives $(0.283, 0.566, 0.849, 1.697)$. The mean $0.849$ survives, and every entry is divided by a larger number
+  because of it.
+
+## Cost
+
+RMSNorm needs one reduction per token (the sum of squares) where layer normalisation needs two (the mean, then the
+variance), and has $d$ parameters instead of $2d$. A pre-norm decoder with $L$ layers has $(2L + 1)d$ normalisation
+parameters, about $2.7 \times 10^5$ for $L = 32$ and $d = 4096$, which is negligible. The saving is in time: one fewer
+pass over the activations at every normalisation.
+
+## Trade-offs
+
+- **Precision.** The mean square of a large activation can overflow in 16-bit arithmetic. Implementations compute
+  $r(\xvec)$ in 32 bits and cast the result back.
+- **Position of $\epsilon$.** $\epsilon$ is added inside the square root. It sets a floor on the divisor, which matters
+  only for tokens whose residual vector is close to zero.
+- **Not a remedy for placement.** RMSNorm changes what a normalisation computes, not where it sits. A post-norm model
+  with RMSNorm has the same gradient behaviour near the output as a post-norm model with layer normalisation.

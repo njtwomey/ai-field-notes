@@ -1,0 +1,120 @@
+---
+title: Attention head analysis
+kind: concept
+summary: 'Attention head analysis asks what individual heads of a trained transformer attend to and how much each matters. Some heads track position, syntax or coreference, and most can be pruned with little loss. A head''s effect is $\alpha_{ij}\,\xvec_j\Wmat_{OV}$, so weights alone explain little.'
+tags: [deep-learning, transformer, interpretability, attention, worked-example]
+aliases:
+  [
+    attention heads analysis,
+    head pruning,
+    attention is not explanation,
+    attention as explanation,
+    BERT attention analysis,
+    specialised heads,
+    no-op attention,
+  ]
+requires: [multi-head-attention]
+related: [residual-stream-view, encoder-only-transformers, in-context-learning, attention-sinks]
+references: [clark2019bert, voita2019, michel2019, jain2019, wiegreffe2019, kobayashi2020, elhage2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+  **Attention head analysis** examines the attention weights $\alpha_{ij}$ of each head in a trained transformer, which
+  say how much query position $i$ reads from key position $j$. It asks three questions: which patterns individual heads
+  compute, how much the model depends on each head, and whether the weights explain the model's predictions.
+</Definition>
+
+## Intuition
+
+Each head produces an $n \times n$ matrix of weights that can be drawn and inspected. That makes heads the most visible
+part of a transformer. Inspection shows interpretable patterns, but a pattern is not the same as a contribution to the
+output: what a head adds to the stream also depends on what it reads from each position.
+
+## What heads attend to
+
+Clark et al. studied the 144 heads of BERT-base <Cite id="clark2019bert" />.
+
+- **Positional heads.** Four heads, in layers 2, 4, 7 and 8, put on average more than half their attention on the
+  previous token, and five put more than half on the next token.
+- **Special tokens.** Over half of BERT's attention in layers 6 to 10 goes to `[SEP]`. Gradients of the loss with respect
+  to attention on `[SEP]` are small, and heads with a specific function attend to `[SEP]` when that function does not
+  apply. Clark et al. interpret this attention as a no-op.
+- **Syntax and coreference.** Taking each head's most-attended word as a prediction, particular heads find direct
+  objects of verbs, determiners of nouns, objects of prepositions and objects of possessive pronouns with more than 75%
+  accuracy. No single head does well on many relations. One head links coreferent mentions to their antecedents with 65%
+  accuracy. A probe that combines attention maps reaches 77 unlabelled attachment score on dependency parsing.
+
+Voita et al. classified the encoder heads of translation transformers by function <Cite id="voita2019" />:
+**positional** heads attend to an adjacent token at least 90% of the time; **syntactic** heads identify a dependency
+relation at least 10% more accurately than a positional baseline; and a **rare-words** head attends to the least frequent
+tokens of the sentence.
+
+## How much each head matters
+
+Michel et al. found that a large share of heads can be removed at test time without a significant loss, and that some
+layers can be reduced to a single head <Cite id="michel2019" />. Voita et al. pruned heads during training with a
+stochastic gate on each head and a differentiable relaxation of the $L_0$ penalty on the number of open gates. On
+English–Russian WMT, pruning 38 of 48 encoder heads reduced BLEU by 0.15. The specialised heads, positional, syntactic
+and rare-words, were the last to be pruned <Cite id="voita2019" />.
+
+Pruning results say that the trained model has redundant heads, not that a smaller model trained from the start would do
+as well. They also do not say that a pruned head did nothing: other heads may compute the same function.
+
+## Is attention an explanation?
+
+### The case against
+
+Jain and Wallace examined recurrent (BiLSTM) encoders with attention on text classification. Attention weights
+correlated only weakly with gradient-based and leave-one-out measures of feature importance. For many inputs they could
+construct very different attention distributions, including adversarial ones, that left the prediction almost unchanged.
+If other weightings give the same output, the observed weighting cannot be taken as the reason for the output <Cite id="jain2019" />.
+
+### The case for a narrower claim
+
+Wiegreffe and Pinter argued that the conclusion depends on what "explanation" means and that the adversarial search
+had too much freedom: it chose a new distribution for each input without a model that would produce it <Cite id="wiegreffe2019" />. They proposed four tests: compare with uniform attention weights, to see whether attention
+is needed at all; compare with the variance across random seeds; transfer the learned weights to a model without
+attention; and train an adversarial model end to end. Adversarial distributions that fooled one prediction at a time did
+not transfer as useful weights, so prior work did not show that attention is useless as explanation <Cite id="wiegreffe2019" />. Both papers studied recurrent models with a single attention layer. Transformers add
+further complications.
+
+### What a head actually writes
+
+In a transformer the output of one head at query position $i$ is
+
+$$
+\sum_j \alpha_{ij}\,\xvec_j\,\Wmat_{OV}, \qquad \Wmat_{OV} = \Wmat_V\Wmat_O ,
+$$
+
+where $\xvec_j$ is the residual vector at position $j$ (see <NoteLink to="residual-stream-view">the residual stream
+view</NoteLink>). The contribution of key $j$ is the vector $\alpha_{ij}\,\xvec_j\Wmat_{OV}$, whose size is
+$\alpha_{ij}\norm{\xvec_j\Wmat_{OV}}$. A large weight on a position whose transformed vector is short contributes little.
+Kobayashi et al. measured these norms in BERT and found that, contrary to the weights, BERT "pays poor attention to
+special tokens" <Cite id="kobayashi2020" />. This fits the no-op reading of attention to `[SEP]`: a head can park its
+weight on a position whose value it has learned to make small. A head's output is then added to the stream, mixed by
+later layers, and combined with every other head's, so even the norm-weighted contribution describes one step of a
+longer computation.
+
+## Worked example
+
+A head attends from one query to two keys with weights $\alpha = (0.9, 0.1)$. The transformed vectors have norms
+$\norm{\xvec_1\Wmat_{OV}} = 0.05$ and $\norm{\xvec_2\Wmat_{OV}} = 2.0$. The contributions have norms
+$0.9 \times 0.05 = 0.045$ and $0.1 \times 2.0 = 0.2$. The key with 10% of the attention contributes more than four
+times as much to the output as the key with 90%. A heat map of $\alpha$ would point at the wrong position.
+
+## Assumptions
+
+- A head's pattern is read on typical inputs. Heads can behave differently on other distributions.
+- The most-attended position is used as the head's "prediction" in probing. Heads that spread weight across positions are
+  scored poorly by this rule even if they carry information.
+
+## Pitfalls
+
+- **Reading weights as importance.** Weights ignore the value norms and everything downstream of the head.
+- **Reading pruning as uselessness.** Redundancy means another head can take over, not that the function is absent.
+- **Generalising from one model.** Results for BERT-base, translation encoders or BiLSTM classifiers do not transfer
+  automatically to large decoders, whose heads include mechanisms such as
+  <NoteLink to="in-context-learning">induction heads</NoteLink> and
+  <NoteLink to="attention-sinks">attention sinks</NoteLink>.

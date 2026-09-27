@@ -1,0 +1,124 @@
+---
+title: Bias terms and dropout in modern transformers
+kind: concept
+summary: The 2017 transformer has a bias in every linear map and applies dropout 0.1 to each sublayer output. Large LLMs usually drop both. The key bias has no effect on attention, the value bias folds into the output bias, and one pass over the data leaves dropout little to do.
+tags: [deep-learning, transformer, regularisation, training, worked-example]
+aliases: [bias-free transformer, no-bias linear layers, dropout-free pretraining, key bias, value bias]
+requires: [scaled-dot-product-attention, dropout]
+partOf: [modern-decoder-block]
+related: [rmsnorm-in-transformers, training-stability-at-scale, transfer-learning-and-fine-tuning, residual-stream-view]
+references: [vaswani2017, chowdhery2022, shazeer2020, elhage2021, raffel2020, devlin2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+In the original transformer every linear map $\xvec \mapsto \xvec\Wmat + \bvec$ carries a bias $\bvec$, every layer
+normalisation carries a shift $\betavec$, and dropout with rate $P_{\text{drop}} = 0.1$ is applied to each sublayer
+output before the residual addition and to the sum of embeddings and positional encodings <Cite id="vaswani2017" />.
+Many large decoder language models remove both. PaLM uses no biases "in any of the dense kernels or layer norms" and
+was "trained without dropout" <Cite id="chowdhery2022" />.
+</Definition>
+
+## Intuition
+
+A bias costs almost nothing, and dropout is a standard regulariser, so removing them needs a reason. For biases, several
+are provably redundant inside attention, and the rest can be emulated by the network. For dropout, the reason is the
+training regime: a model that sees each token once cannot overfit its training data in the usual sense.
+
+## Biases
+
+### How many there are
+
+A layer of the base transformer ($d = 512$, $d_{ff} = 2048$) has $4d^2 + 2d\,d_{ff} = 3{,}145{,}728$ weights and
+$4d + d_{ff} + d + 2d = 5{,}632$ biases and normalisation shifts, 0.18% of its parameters. At $d = 4096$ the share is
+0.02%. Removing biases is not about parameter count.
+
+### The key bias does nothing
+
+Let a query $\qvec_i$ score keys $\kvec_j + \bvec_k$, with a bias $\bvec_k$ shared across positions. The score is
+
+$$
+\qvec_i \cdot (\kvec_j + \bvec_k) = \qvec_i \cdot \kvec_j + \qvec_i \cdot \bvec_k .
+$$
+
+The second term depends on $i$ but not on $j$. The softmax over $j$ is unchanged when the same constant is added to every
+score in a row, so the attention weights are exactly those without the bias.
+
+### The value bias folds into the output
+
+With values $\vvec_j + \bvec_v$ and attention weights $\alpha_{ij}$ that sum to 1 over $j$,
+
+$$
+\sum_j \alpha_{ij}(\vvec_j + \bvec_v) = \sum_j \alpha_{ij}\vvec_j + \bvec_v .
+$$
+
+After the output projection $\Wmat_O$ the extra term is the constant vector $\bvec_v\Wmat_O$, which a bias on the output
+projection already provides. With multiple heads each head's value bias adds a constant, and the constants sum to one
+output bias.
+
+### The query bias is a real parameter
+
+$(\qvec_i + \bvec_q)\cdot\kvec_j = \qvec_i\cdot\kvec_j + \bvec_q\cdot\kvec_j$. The second term varies with $j$: it is a
+preference for keys along $\bvec_q$, the same for every query. That cannot be removed without changing the function.
+
+### The remaining biases can be emulated
+
+The shift of a normalisation adds a constant vector to the input of the next linear map, which is a bias on that map.
+A bias on any linear map can be emulated if some direction of the residual stream carries a constant value, since the
+weights reading that direction then act as the bias. Elhage et al. note that "a model with biases can always be
+simulated without them by folding them into the weights and creating a dimension that is always one" <Cite id="elhage2021" />.
+
+### Why remove them
+
+PaLM reports that removing biases "result[ed] in increased training stability for large models" <Cite id="chowdhery2022" />. T5 had already removed the shift from its layer normalisation <Cite id="raffel2020" />, and
+the gated feed-forward layers of Shazeer omit biases <Cite id="shazeer2020" />. The redundancies above mean that little
+function is lost. A bias-free block also has fewer parameter types to initialise, decay and shard.
+
+## Dropout
+
+### What it did in 2017
+
+The base model trained for 100,000 steps of about 25,000 source and 25,000 target tokens each, about 2.5 billion
+source tokens in total, on 4.5 million English–German sentence pairs <Cite id="vaswani2017" />. Every sentence was
+seen many times. Dropout at 0.1
+(0.3 for the big English–German model) limited overfitting to that repeated data.
+
+### Why one pass removes the need
+
+When every batch is drawn from data the model has never seen, the training loss on a batch is an unbiased estimate of
+the loss on new data. The gap between training and held-out loss is then close to zero, and there is no overfitting to
+reduce. Dropout still perturbs every forward pass, which adds gradient noise and makes each step less informative.
+Large language models are trained for about one epoch on most of their data, so dropout costs more than it returns.
+
+Shazeer, training T5-style models, found that no dropout during pre-training produced better results, and attributed
+the weaker numbers of the original T5 to its use of dropout while pre-training <Cite id="shazeer2020" />. PaLM trained
+without dropout and used 0.1 for fine-tuning "in most cases" <Cite id="chowdhery2022" />.
+
+### Where it stays
+
+Fine-tuning on a small labelled set repeats the data for many epochs, and dropout is useful again; see <NoteLink to="transfer-learning-and-fine-tuning">transfer learning and fine-tuning</NoteLink>. Encoder models such as
+BERT used dropout 0.1 during pre-training on a smaller corpus that was repeated for about 40 epochs <Cite id="devlin2019" />.
+
+## Worked example
+
+Take one query $\qvec = (1, 2)$ and two keys $\kvec_1 = (1, 0)$ and $\kvec_2 = (0, 1)$, and ignore the $1/\sqrt{d_k}$
+factor. The scores are $(1, 2)$ and the weights $\operatorname{softmax}(1, 2) = (0.269, 0.731)$. Add a key bias
+$\bvec_k = (3, -1)$. Both keys shift, the scores become $(1 + 1, 2 + 1) = (2, 3)$ because
+$\qvec \cdot \bvec_k = 3 - 2 = 1$, and the weights are $\operatorname{softmax}(2, 3) = (0.269, 0.731)$, the same as
+before. Adding a query bias $\bvec_q = (3, -1)$ instead gives scores $(1 + 3, 2 - 1) = (4, 1)$ and weights
+$(0.953, 0.047)$: the query bias changes where the head looks.
+
+## Assumptions
+
+- The redundancy of the key bias assumes the softmax runs over keys that all carry the same bias. A per-position bias,
+  such as a relative position term, is not removable.
+- The argument against dropout assumes data are not repeated. Pre-training runs that repeat a small corpus for several
+  epochs are back in the regime where regularisation helps.
+
+## Pitfalls
+
+- **Removing the query bias and expecting identical behaviour.** Only the key and value biases are removable without
+  changing the function.
+- **Keeping dropout in a single-epoch run by default.** Library defaults often set dropout to 0.1. In large-scale
+  pre-training this slows training without improving held-out loss.

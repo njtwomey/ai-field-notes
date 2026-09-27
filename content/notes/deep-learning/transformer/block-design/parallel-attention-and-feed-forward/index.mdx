@@ -1,0 +1,113 @@
+---
+title: Parallel attention and feed-forward
+kind: technique
+summary: 'A parallel transformer block computes attention and the feed-forward network from the same normalised input and adds both to the stream, $\yvec = \xvec + \operatorname{Attn}(\operatorname{LN}\xvec) + \operatorname{FFN}(\operatorname{LN}\xvec)$. FLOPs are unchanged, but the input projections fuse; PaLM trained about 15% faster.'
+tags: [deep-learning, transformer, efficiency, worked-example]
+aliases: [parallel block, parallel layers, parallel residual, GPT-J block, parallel attention]
+requires: [pre-norm-and-post-norm, multi-head-attention]
+partOf: [modern-decoder-block]
+related: [gated-feed-forward-layers, model-parallelism, residual-stream-view]
+references: [wang2021gptj, chowdhery2022, black2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { BlockLayouts } from './BlockLayouts'
+
+<Definition>
+A **serial** pre-norm block applies its two sublayers one after the other:
+$\hvec = \xvec + \operatorname{Attn}(\operatorname{LN}_1\xvec)$, then
+$\yvec = \hvec + \operatorname{FFN}(\operatorname{LN}_2\hvec)$. A **parallel** block computes both from the block input:
+
+$$
+\yvec = \xvec + \operatorname{Attn}(\operatorname{LN}\xvec) + \operatorname{FFN}(\operatorname{LN}\xvec).
+$$
+
+GPT-J introduced the form <Cite id="wang2021gptj" />; GPT-NeoX-20B and PaLM used it <Cite id="black2022" /> <Cite id="chowdhery2022" />.
+
+</Definition>
+
+<BlockLayouts />
+
+## Problem
+
+In a serial block the feed-forward network cannot start until attention has finished and its output has been added
+to the stream. Each layer is two dependent steps. Both sublayers begin with matrix products of a normalised token
+vector: the query, key and value projections for attention and the input projection of the feed-forward network. In a
+serial block these read different vectors, so they are separate products.
+
+## Mechanism
+
+### What changes
+
+Expand the serial block with $\avec = \operatorname{Attn}(\operatorname{LN}_1\xvec)$:
+
+$$
+\yvec_{\text{serial}} = \xvec + \avec + \operatorname{FFN}\paren{\operatorname{LN}_2(\xvec + \avec)}, \qquad
+\yvec_{\text{parallel}} = \xvec + \avec + \operatorname{FFN}\paren{\operatorname{LN}(\xvec)}.
+$$
+
+The only difference is whether the feed-forward network of layer $\ell$ sees the attention output of the same layer.
+It still sees the attention outputs of every earlier layer, which are already in $\xvec$.
+
+### Why the difference is small in deep stacks
+
+The feed-forward input in the two cases is the normalisation of $\xvec + \avec$ or of $\xvec$. A normalisation
+discards scale, so what matters is the angle between $\xvec + \avec$ and $\xvec$. If $\avec$ is orthogonal to $\xvec$,
+
+$$
+\tan\theta = \frac{\norm{\avec}}{\norm{\xvec}} .
+$$
+
+In a pre-norm stack the stream at layer $\ell$ has $\norm{\xvec}^2 \approx (1 + c\ell)\,d$ at initialisation, where $c$
+is the variance per coordinate that each branch adds, and the attention output has $\norm{\avec}^2 \approx c\,d$ (see <NoteLink to="pre-norm-and-post-norm">pre-norm and post-norm</NoteLink>). The angle therefore shrinks as
+$1/\sqrt\ell$. A deep layer's feed-forward network receives almost the same input in both forms. The first-order
+change to its output is the feed-forward Jacobian times the normalisation Jacobian times $\avec$, and the normalisation
+Jacobian has norm $\sqrt d/\norm{\xvec}$, which carries the same $1/\sqrt\ell$ factor.
+
+### Where the speed comes from
+
+The number of FLOPs is unchanged: both forms compute the same products. The savings are in how they are scheduled.
+
+- **Fused input projection.** Attention's $\Wmat_Q, \Wmat_K, \Wmat_V$ and the feed-forward input matrices all multiply
+  the same vector $\operatorname{LN}(\xvec)$. They can be concatenated into one matrix of width
+  $3d + d_{ff}$ (or $3d + 2d'_{ff}$ for a <NoteLink to="gated-feed-forward-layers">gated layer</NoteLink>), and the
+  output projections likewise. One large product uses the hardware better than several smaller ones.
+- **One normalisation.** The input is normalised once per layer instead of twice.
+- **One reduction under tensor parallelism.** When each sublayer's weights are split across devices, each device holds
+  a partial sum of the sublayer's output, and the partial sums must be added across devices. A serial block needs this
+  once per sublayer, because the feed-forward network needs the full attention output. A parallel block can add the
+  two partial outputs locally and communicate once per layer.
+
+PaLM reports that the parallel form trains roughly 15% faster at large scale, "since the MLP and Attention input matrix
+multiplications can be fused" <Cite id="chowdhery2022" />.
+
+## Worked example
+
+Take branches that each add variance $c = 1$ per coordinate, so the stream entering layer $\ell$ has
+$\norm{\xvec}^2 \approx (1 + \ell)\,d$ and the attention output has $\norm{\avec}^2 \approx d$.
+
+| Layer $\ell$ | $\norm{\avec}/\norm{\xvec}$ | Angle between $\xvec + \avec$ and $\xvec$ |
+| ------------ | --------------------------- | ----------------------------------------- |
+| 1            | 0.707                       | 35.3°                                     |
+| 5            | 0.408                       | 22.2°                                     |
+| 20           | 0.218                       | 12.3°                                     |
+| 80           | 0.111                       | 6.3°                                      |
+
+In the first layers the feed-forward network in a parallel block sees a noticeably different input. In layer 80 the
+two inputs differ by six degrees.
+
+## Cost
+
+Parameters and FLOPs equal those of the serial block. The sequential depth of the network halves, from $2L$ dependent
+sublayers to $L$. Activation memory is unchanged.
+
+## Trade-offs
+
+- **Quality at small scale.** PaLM's ablations "showed a small quality degradation at 8B scale but no quality
+  degradation at 62B scale", and the authors extrapolated that the effect is neutral at 540B <Cite id="chowdhery2022" />.
+  This agrees with the angle argument: larger models are deeper, and the same-layer interaction matters less.
+- **Adoption.** GPT-J, GPT-NeoX-20B and PaLM are parallel. The Llama family and most later open models keep the serial
+  block, which is the safer choice when the speed-up is small for a given hardware setup.
+- **Interaction with gating.** In a gated feed-forward layer the fused input product has width $3d + 2d'_{ff}$; the
+  gain from fusion grows with the share of the feed-forward layer in the block.

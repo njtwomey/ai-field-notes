@@ -1,0 +1,173 @@
+---
+title: Residual stream view
+kind: concept
+summary: 'The residual stream view treats a transformer as components that read from and add to one shared vector per token. A head reduces to a QK matrix $\Wmat_Q\Wmat_K^\tr$ (where it looks) and an OV matrix $\Wmat_V\Wmat_O$ (what it writes), and attention-only logits expand into paths.'
+tags: [deep-learning, transformer, interpretability, attention, worked-example]
+aliases:
+  [
+    transformer circuits,
+    mathematical framework for transformer circuits,
+    QK circuit,
+    OV circuit,
+    path expansion,
+    virtual attention heads,
+    attention head composition,
+    K-composition,
+    skip-trigram,
+    virtual weights,
+  ]
+requires: [multi-head-attention, residual-connections]
+related:
+  [
+    in-context-learning,
+    attention-head-analysis,
+    rmsnorm-in-transformers,
+    parallel-attention-and-feed-forward,
+    pre-norm-and-post-norm,
+  ]
+references: [elhage2021, olsson2022]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+  In a pre-norm transformer the vector $\xvec_\ell \in \reals^d$ of a token after $\ell$ sublayers is the token's
+  embedding plus the sum of every earlier sublayer's output at that position. The **residual stream view** treats this
+  vector as a shared channel: each attention head and each feed-forward layer **reads** it through a linear projection
+  (after a normalisation) and **writes** to it by adding a linear projection of its result <Cite id="elhage2021" />. The
+  output head reads the final stream.
+</Definition>
+
+## Intuition
+
+Nothing in the stream is overwritten by default. A component that writes a vector into some subspace leaves it there
+for every later component to read, until another component writes the negative of it. Components communicate through
+subspaces of the stream, and the analysis of a model becomes the analysis of which component writes into the subspace
+that another reads.
+
+## Details
+
+Rows are tokens throughout: $\Xmat \in \reals^{n \times d}$ holds the stream of $n$ tokens.
+
+### Linearity of the stream
+
+Unrolling $\xvec_{\ell+1} = \xvec_\ell + F_\ell(\xvec_\ell)$ gives
+
+$$
+\xvec_L = \xvec_0 + \sum_{\ell=0}^{L-1} F_\ell(\xvec_\ell).
+$$
+
+Suppose a component writes $\avec\Wmat_{\text{out}}$, with $\Wmat_{\text{out}} \in \reals^{k \times d}$, and a later
+component reads $\xvec\Wmat_{\text{in}}$, with $\Wmat_{\text{in}} \in \reals^{d \times m}$. The part of the later input
+that comes from the earlier output is $\avec\,(\Wmat_{\text{out}}\Wmat_{\text{in}})$. The product
+$\Wmat_{\text{out}}\Wmat_{\text{in}}$ is a **virtual weight** connecting the two components directly, even when many
+layers separate them.
+
+### No privileged basis
+
+Let $\Rmat$ be any orthogonal $d \times d$ matrix. Replace every write matrix $\Wmat_{\text{out}}$ by
+$\Wmat_{\text{out}}\Rmat$, the embedding $\Wmat_E$ by $\Wmat_E\Rmat$, and every read matrix $\Wmat_{\text{in}}$ by
+$\Rmat^\tr\Wmat_{\text{in}}$. The stream becomes $\xvec\Rmat$, and every read gives
+$\xvec\Rmat\Rmat^\tr\Wmat_{\text{in}} = \xvec\Wmat_{\text{in}}$, unchanged. The function computed is the same, so the
+coordinates of the stream have no special meaning <Cite id="elhage2021" />. RMSNorm with unit gains commutes with
+$\Rmat$, since it divides by a norm that $\Rmat$ preserves; learned gains break the symmetry only until they are folded
+into the next read matrix.
+
+### An attention head as two matrices
+
+A head with query, key and value projections $\Wmat_Q, \Wmat_K, \Wmat_V \in \reals^{d \times d_h}$ and output rows
+$\Wmat_O \in \reals^{d_h \times d}$ computes
+
+$$
+\Amat = \operatorname{softmax}\paren{\frac{\Xmat\Wmat_Q\Wmat_K^\tr\Xmat^\tr}{\sqrt{d_h}} + \Mmat}, \qquad
+\operatorname{head}(\Xmat) = \Amat\,\Xmat\,\Wmat_V\Wmat_O,
+$$
+
+with the causal mask $\Mmat$. The four projections appear only in two products:
+
+- the **QK matrix** $\Wmat_{QK} = \Wmat_Q\Wmat_K^\tr \in \reals^{d \times d}$ decides which positions attend to which;
+- the **OV matrix** $\Wmat_{OV} = \Wmat_V\Wmat_O \in \reals^{d \times d}$ decides what an attended position writes into
+  the stream of the attending one.
+
+Both have rank at most $d_h$. Splitting a head into query and key, or value and output, is a factorisation choice that
+does not affect the function.
+
+### Heads are independent and additive
+
+Multi-head attention concatenates the head outputs $\Amat^h\Xmat\Wmat_V^h$ and multiplies by $\Wmat_O \in
+\reals^{h d_h \times d}$. Split $\Wmat_O$ into row blocks $\Wmat_O^h \in \reals^{d_h \times d}$, one per head. Block
+multiplication gives
+
+$$
+\operatorname{concat}_h\paren{\Amat^h\Xmat\Wmat_V^h}\,\Wmat_O = \sum_h \Amat^h\Xmat\,\Wmat_V^h\Wmat_O^h = \sum_h
+\Amat^h\Xmat\,\Wmat_{OV}^h .
+$$
+
+A layer of $h$ heads is $h$ separate components writing to the stream, each with its own QK and OV matrices.
+
+### Zero layers: bigrams
+
+With embedding $\Wmat_E \in \reals^{V \times d}$ and unembedding $\Wmat_U \in \reals^{d \times V}$, a model with no
+blocks maps a one-hot token $\tvec$ to logits $\tvec\,\Wmat_E\Wmat_U$. The $V \times V$ matrix $\Wmat_E\Wmat_U$ can only
+store which token tends to follow which, a bigram table <Cite id="elhage2021" />.
+
+### One attention-only layer: skip-trigrams
+
+Ignore normalisation, which is a scaling that can be folded into adjacent weights, and positional terms. With one layer
+of heads, the logits at destination position $i$ are
+
+$$
+\zvec_i = \underbrace{\tvec_i\,\Wmat_E\Wmat_U}_{\text{direct path}} + \sum_h \sum_j A^h_{ij}\;
+\tvec_j\,\underbrace{\Wmat_E\Wmat_{OV}^h\Wmat_U}_{\text{OV circuit}}, \qquad
+A^h_{ij} \propto \exp\paren{\tvec_i\,\underbrace{\Wmat_E\Wmat_{QK}^h\Wmat_E^\tr}_{\text{QK circuit}}\,\tvec_j^\tr/\sqrt{d_h}} .
+$$
+
+Both circuits are $V \times V$ tables that can be read from the weights without running the model. The QK circuit says
+how much a destination token wants to attend to each source token. The OV circuit says how attending to a source token
+changes the logit of each output token. Together they implement **skip-trigrams** "$A \dots B \to C$": a source token
+$A$ earlier in the context, attended to from the current token $B$, raises the logit of $C$. Many heads in such models
+copy: their OV circuit raises the logit of the attended token itself <Cite id="elhage2021" />.
+
+### Two layers: composition
+
+A head in the second layer reads a stream that includes the first layer's outputs. It can use them in three places:
+
+- **Q-composition**: its $\Wmat_Q$ reads a subspace written by an earlier head;
+- **K-composition**: its $\Wmat_K$ does;
+- **V-composition**: its $\Wmat_V$ does.
+
+V-composition of heads $h_1$ and $h_2$ acts as a **virtual attention head** with pattern $\Amat^{h_2}\Amat^{h_1}$ and OV
+matrix $\Wmat_{OV}^{h_1}\Wmat_{OV}^{h_2}$. Q- and K-composition change the attention pattern itself, which lets a head
+attend by a relation computed by another head <Cite id="elhage2021" />. An **induction head** uses K-composition with a
+previous-token head to find where the current token occurred before and copy what followed it; see <NoteLink to="in-context-learning">in-context learning</NoteLink> and <Cite id="olsson2022" />.
+
+## Worked example
+
+Take a vocabulary $\{A, B, C\}$, $d = 6$ and one head with $d_h = 3$. Let the embedding write token $k$ into
+coordinate $k$ (coordinates 1 to 3), let the unembedding read coordinates 4 to 6, and let the head have
+
+- a QK circuit that, after division by $\sqrt{d_h}$, is 2 for destination $C$ and source $A$ and 0 elsewhere, so
+  that $C$ looks for earlier $A$;
+- an OV matrix that copies coordinate $k$ to coordinate $k + 3$, so that its OV circuit is the $3 \times 3$ identity.
+
+The direct path $\Wmat_E\Wmat_U$ is zero, because the embedding and the unembedding use disjoint subspaces. On the
+sequence $A\,B\,C$, the destination $C$ scores the sources $(A, B, C)$ as $(2, 0, 0)$, with weights
+$\operatorname{softmax}(2, 0, 0) = (0.787, 0.107, 0.107)$. The head writes $0.787$ into coordinate 4, $0.107$ into
+coordinate 5 and $0.107$ into coordinate 6. The logits at $C$ are $(0.787, 0.107, 0.107)$: the model predicts $A$. This
+is the skip-trigram "$A \dots C \to A$". Every quantity came from reading the two circuits, without running the model.
+
+## Assumptions
+
+- The analysis is exact for attention-only models with patterns treated as given. Feed-forward layers also read and
+  write the stream, but their elementwise nonlinearity does not reduce to $V \times V$ tables.
+- Normalisations are folded into adjacent weights up to a scalar per token, and biases are omitted.
+
+## Pitfalls
+
+- **Bandwidth.** The stream has $d$ dimensions, but the components writing to it have many more. Llama 2 7B has
+  $32 \times 32$ heads writing up to 128 dimensions each and $32 \times 11{,}008$ feed-forward units, all into
+  $d = 4096$. Subspaces are shared, and some components appear to erase what others wrote <Cite id="elhage2021" />.
+- **The softmax is not linear.** The path expansion is linear in the OV circuits once the attention patterns are fixed.
+  The patterns themselves depend nonlinearly on the stream, which is what Q- and K-composition exploit.
+- **Coordinates are not features.** Because the stream has no privileged basis, a single coordinate of it need not mean
+  anything; see <NoteLink to="attention-head-analysis">attention head analysis</NoteLink> for what individual heads do.

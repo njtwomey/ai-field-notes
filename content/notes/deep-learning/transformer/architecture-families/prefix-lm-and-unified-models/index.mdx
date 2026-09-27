@@ -1,0 +1,135 @@
+---
+title: Prefix LM and unified models
+kind: concept
+summary: 'A prefix language model is one transformer stack whose mask is bidirectional over the first $P$ tokens and causal after them, with a loss only after the prefix. Changing $P$ turns one set of weights into an encoder, a decoder or an encoder–decoder; UniLM and UL2 mix masks.'
+tags: [deep-learning, transformer, language-models, nlp, worked-example]
+aliases:
+  [
+    prefix language model,
+    prefix LM,
+    non-causal decoder,
+    UniLM,
+    UL2,
+    mixture of denoisers,
+    mode switching,
+    self-attention masks,
+  ]
+requires: [causal-masking, encoder-only-transformers, decoder-only-transformers]
+related: [encoder-decoder-transformers, masked-language-modelling, transformer]
+references: [dong2019unilm, tay2023ul2, raffel2020, wang2022architecture]
+status: draft
+updated: 2026-09-27
+---
+
+import { MaskPatterns } from './MaskPatterns'
+
+<Definition>
+A prefix language model splits a sequence of $n$ tokens into a prefix $x_1, \dots, x_P$ and a continuation
+$x_{P+1}, \dots, x_n$. Its self-attention mask lets query $i$ attend to key $j$ when $j \le P$ or $j \le i$:
+
+$$
+M_{ij} = \begin{cases} 0 & j \le P \text{ or } j \le i, \\ -\infty & \text{otherwise,} \end{cases}
+$$
+
+indexing positions from 1. The prefix is encoded bidirectionally and the continuation causally, and the loss covers only
+the continuation. $P = 0$ gives a causal decoder and $P = n$ an encoder. A **unified model** trains one set of weights
+with several such masks <Cite id="dong2019unilm" />.
+
+</Definition>
+
+## Intuition
+
+Encoder, decoder and encoder–decoder transformers use the same block. What separates them is which positions may read
+which. Written as a mask over one sequence, the three are three patterns of a single matrix, and a prefix mask spans the
+range between them.
+
+<MaskPatterns />
+
+## Details
+
+### Counting allowed pairs
+
+Rows $i \le P$ attend to the $P$ prefix keys, since every $j \le i$ is also in the prefix. Rows $i > P$ attend to keys
+$1, \dots, i$. The number of allowed query–key pairs is
+
+$$
+P \cdot P + \sum_{i=P+1}^{n} i = P^2 + \frac{n(n+1)}{2} - \frac{P(P+1)}{2}.
+$$
+
+With $P = 0$ this is $n(n+1)/2$, the causal count, and with $P = n$ it is $n^2$.
+
+### The prefix mask and the encoder–decoder
+
+Over the concatenation [input; target], an encoder–decoder has the same connectivity as a prefix mask with $P$ equal to
+the input length. Input positions attend to all input positions (encoder self-attention). Target positions attend to
+all input positions (cross-attention) and to earlier target positions (causal self-attention). No input position attends
+to a target position. The two differ in parameters: the encoder–decoder uses separate weights for the two parts and
+separate cross-attention projections, while the prefix model uses one stack for both.
+
+### Caching
+
+The prefix states depend on the whole prefix, so they are computed once when the prefix is known. Generated tokens are
+causal and are cached as in a decoder. If the prefix grows, for example when a reply becomes part of the next prompt,
+every prefix state changes and must be recomputed.
+
+## UniLM
+
+UniLM trains one transformer with four masks, chosen per batch: bidirectional as in BERT, sequence-to-sequence
+(bidirectional over the first segment, causal over the second, which is a prefix mask), left-to-right and right-to-left <Cite id="dong2019unilm" />. Within a batch, the bidirectional and sequence-to-sequence objectives are each used a third
+of the time and the two one-directional objectives a sixth each. Every objective predicts masked tokens, and segment
+embeddings tell the model which mask is in use. With BERT-large's size, 24 layers of width 1024 and about 340M
+parameters, UniLM set new results on CNN/DailyMail abstractive summarisation (ROUGE-L 40.51) and on Gigaword, while
+remaining usable as a BERT-style encoder <Cite id="dong2019unilm" />.
+
+## UL2
+
+UL2 treats pre-training objectives as denoisers described by a mean span length $\mu$, a corruption rate $r$ and a
+number of corrupted spans $n$ <Cite id="tay2023ul2" />. For a sequence of length $L$, a causal language model is one
+span covering the sequence, $(\mu = L, r = 1, n = 1)$, and a prefix language model with prefix $P$ is
+$(\mu = L - P, r = 1 - P/L, n = 1)$. UL2 mixes three kinds.
+
+| Denoiser       | Settings                                                                                  | Resembles                      |
+| -------------- | ----------------------------------------------------------------------------------------- | ------------------------------ |
+| R (regular)    | $(\mu = 3, r = 0.15)$ and $(\mu = 8, r = 0.15)$                                           | T5 span corruption             |
+| S (sequential) | $(\mu = L/4, r = 0.25, n = 1)$, the span at the end                                       | prefix language modelling      |
+| X (extreme)    | $(\mu = 3, r = 0.5)$, $(\mu = 8, r = 0.5)$, $(\mu = 64, r = 0.15)$, $(\mu = 64, r = 0.5)$ | long spans or heavy corruption |
+
+The seven denoisers are mixed in roughly equal shares. A **mode token** [R], [S] or [X] is prepended to each example to
+say which kind it is, and at fine-tuning or prompting time the matching token selects the behaviour. A 20B UL2
+encoder–decoder trained on 1 trillion tokens outperformed the 175B GPT-3 on zero-shot SuperGLUE and tripled the
+one-shot summarisation score of T5-XXL <Cite id="tay2023ul2" />. The authors report that the choice of denoisers matters
+more than the choice between a decoder-only and an encoder–decoder backbone.
+
+## Evidence on prefix masks
+
+- T5, at equal compute per example with a denoising objective, scored 81.82 on GLUE with a prefix language model,
+  74.70 with a causal language model and 83.28 with an encoder–decoder <Cite id="raffel2020" />.
+- Wang et al. found that causal decoders trained on next-token prediction were best zero-shot after pre-training alone,
+  but that non-causal (prefix) decoders trained with masked language modelling were best after multitask fine-tuning.
+  They also converted a trained causal decoder into a non-causal one by changing the mask and continuing training
+  <Cite id="wang2022architecture" />.
+
+## Worked example
+
+Take $n = 8$ tokens with a prefix of $P = 3$.
+
+- Encoder: $8^2 = 64$ allowed pairs.
+- Causal decoder: $8 \cdot 9/2 = 36$ pairs, and a next-token loss on 7 tokens.
+- Prefix model: $3^2 + 36 - 3 \cdot 4/2 = 9 + 36 - 6 = 39$ pairs. Rows 1 to 3 attend to 3 keys each and rows 4 to 8
+  attend to 4, 5, 6, 7 and 8 keys, and $9 + 30 = 39$. The loss covers the 5 tokens after the prefix.
+
+The prefix model adds 3 pairs to the causal mask, the entries above the diagonal inside the prefix, and gives up 2
+training targets.
+
+## Assumptions
+
+- The task has a natural split into a given part and a generated part. For open-ended text the prefix length is chosen at
+  random during training.
+- The same weights can serve bidirectional and causal reading. UniLM and UL2 show this works, at some cost to each mode
+  compared with a specialist.
+
+## Pitfalls
+
+- **Losses on the prefix.** Prefix positions see each other bidirectionally, so a next-token loss on them would let each
+  prefix position read its own target. The loss must be restricted to the continuation.
+- **Growing prompts.** Unlike a causal decoder, a prefix model cannot append to its prefix without recomputing it.

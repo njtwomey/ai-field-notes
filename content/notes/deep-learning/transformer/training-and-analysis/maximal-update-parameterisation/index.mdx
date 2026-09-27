@@ -1,0 +1,144 @@
+---
+title: Maximal update parameterisation
+kind: technique
+summary: 'Maximal update parameterisation (µP) scales each layer''s initialisation and learning rate with width $n$ so that each layer''s features move by a width-independent amount per step. With Adam, hidden and output layers get learning rate $\propto 1/n$. Tuned hyperparameters then transfer.'
+tags: [deep-learning, training, optimisation, transformer, hyperparameters, worked-example]
+aliases:
+  [µP, muP, maximal update parametrization, µTransfer, muTransfer, zero-shot hyperparameter transfer, tensor programs]
+requires: [weight-initialisation, adam]
+related:
+  [training-stability-at-scale, embeddings-and-output-heads, learning-rate-schedules, scaled-dot-product-attention]
+references: [yang2021tp4, yang2021mup, wortsman2023]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+  A **parameterisation** specifies, for each weight matrix, how its initialisation variance, its learning rate and any
+  multiplier scale with the network width $n$. The **maximal update parameterisation** (µP) is the one in which, as $n
+  \to \infty$, activations stay of order 1 at initialisation and every layer's features change by order 1 per training
+  step <Cite id="yang2021tp4" />. **µTransfer** tunes hyperparameters on a narrow model in µP and reuses them unchanged
+  on a wide one <Cite id="yang2021mup" />.
+</Definition>
+
+## Problem
+
+Under the standard parameterisation (SP) every weight is initialised with variance $1/\text{fan-in}$ and one learning
+rate is shared by all layers. The best learning rate then depends on width: in a transformer it moves as width grows, so
+a value tuned on a small model is wrong for a large one <Cite id="yang2021mup" />. Tuning directly on the large model
+costs several full training runs. The aim is a parameterisation in which the best hyperparameters do not depend on
+width.
+
+## Mechanism
+
+Consider a network with a fixed input dimension, hidden layers of width $n$ and a fixed output dimension. Three kinds of
+weight matrix scale differently: **input weights** map a fixed dimension to $n$, **hidden weights** map $n$ to $n$, and
+**output weights** map $n$ to a fixed dimension. Write $\hvec \in \reals^n$ for a hidden activation vector whose
+coordinates are of order 1.
+
+### How much one Adam step changes a layer's output
+
+For one example, the gradient of a loss with respect to a weight matrix $\Wmat$ that computes $\Wmat\hvec$ is an outer
+product $\gvec\hvec^\tr$, where $\gvec$ is the gradient with respect to the layer's output. Adam divides each entry of the
+gradient by the root of its running squared average, so its first update has entries of size about $\eta$ with the sign
+of the gradient:
+
+$$
+\Delta\Wmat \approx -\eta\,\operatorname{sign}(\gvec)\operatorname{sign}(\hvec)^\tr .
+$$
+
+The change this causes in the layer's output, for the same input, is
+
+$$
+\Delta\Wmat\,\hvec = -\eta\,\operatorname{sign}(\gvec)\paren{\operatorname{sign}(\hvec)^\tr\hvec}
+= -\eta\,\operatorname{sign}(\gvec)\,\norm{\hvec}_1 .
+$$
+
+The sum $\norm{\hvec}_1 = \sum_i \operatorname{sign}(h_i)\,h_i = \sum_i \abs{h_i}$ runs over the fan-in. Every term is
+positive, because the update is correlated with the input it was computed from, so the terms add coherently rather
+than cancelling, and $\norm{\hvec}_1$ is of order $n$. Each output coordinate changes by order
+$\eta \cdot \text{fan-in}$.
+
+### Learning rates
+
+For every layer's output to change by order 1 per step:
+
+- **Hidden weights**, fan-in $n$: the change is of order $\eta n$, so $\eta_{\text{hidden}} \propto 1/n$.
+- **Output weights**, fan-in $n$: likewise $\eta_{\text{out}} \propto 1/n$.
+- **Input weights**, fixed fan-in: the change is of order $\eta$, so $\eta_{\text{in}}$ stays constant.
+
+Under SP one learning rate serves all three. Keeping hidden updates bounded requires $\eta \propto 1/n$, which makes the
+input layer's updates vanish as $1/n$. Keeping the input layer learning requires constant $\eta$, which makes the hidden
+updates grow as $n$. No single rate is right at every width, which is why the optimum drifts. Yang et al. show this in a
+transformer: after a few Adam steps under SP, the changes in the output logits and attention logits grow with width,
+while the word embeddings change by an amount independent of width <Cite id="yang2021mup" />.
+
+### Initialisation
+
+At initialisation, $\Wmat\hvec$ with entries of variance $\sigma^2$ has coordinates of variance $n\sigma^2$, because the
+$n$ random terms are independent and add as a random walk. Variance $1/\text{fan-in}$ keeps hidden activations of order 1,
+as in SP. The output layer is different. With variance $1/n$, the initial output is of order 1 and is a random function of
+the input, which the training must work against. µP initialises output weights with variance $1/n^2$, so the initial
+output is of order $1/\sqrt n$ and vanishes at large width. The output is then produced by what the network learns.
+The coherent sum in the previous section still gives the output layer's update an effect of order $\eta_{\text{out}} n$.
+
+### The rules
+
+For Adam, Yang et al. give <Cite id="yang2021mup" />:
+
+| Weights               | Initialisation variance | Adam learning rate        |
+| --------------------- | ----------------------- | ------------------------- |
+| input weights, biases | $1/\text{fan-in}$       | constant                  |
+| hidden weights        | $1/\text{fan-in}$       | $\propto 1/\text{fan-in}$ |
+| output weights        | $1/\text{fan-in}^2$     | $\propto 1/\text{fan-in}$ |
+
+A transformer needs one more change: attention logits use $\qvec \cdot \kvec/d_h$ instead of $\qvec \cdot
+\kvec/\sqrt{d_h}$. The $1/\sqrt{d_h}$ of <NoteLink to="scaled-dot-product-attention">scaled dot-product
+attention</NoteLink> assumes that $\qvec$ and $\kvec$ are independent, so their dot product is a random walk of size
+$\sqrt{d_h}$. After training they are correlated, and the dot product grows as $d_h$ by the same coherent-sum argument <Cite id="yang2021mup" />.
+
+### Why hyperparameters transfer
+
+In µP the training dynamics of the network converge to a limit as $n \to \infty$ in which every layer still learns
+features. Widening the network moves it closer to that limit instead of into a different regime. The loss as a function
+of the hyperparameters therefore converges as width grows, and so does its minimiser <Cite id="yang2021tp4" />. Under SP
+the limit either blows up or freezes the hidden features, so the best hyperparameters keep moving.
+
+In practice µP is specified relative to a **base width** $n_0$. A model of width $n$ scales each rule by $n_0/n$, so at
+$n = n_0$ it coincides with the model the hyperparameters were tuned on.
+
+## Evidence
+
+Yang et al. tuned a 40-million-parameter proxy in µP and transferred its hyperparameters to a 6.7-billion-parameter
+GPT-3. The result outperformed the published GPT-3 6.7B, and the tuning cost 7% of the pre-training cost <Cite id="yang2021mup" />. Transfer across width has theoretical support. Transfer across depth, batch size, sequence
+length and training time was validated empirically on transformers. Regularisation hyperparameters, such as dropout and
+weight decay, do not transfer. Wortsman et al. found that µP kept the optimal learning rate fixed across widths but did
+not reduce the sensitivity of the loss to the learning rate <Cite id="wortsman2023" />.
+
+## Worked example
+
+A proxy of width $n_0 = 256$ trains best with Adam learning rate $\eta = 10^{-3}$. The target has width $n = 4096$, a
+factor 16 wider.
+
+**One step under SP.** The same $\eta$ changes each hidden coordinate by about $\eta n$: $10^{-3} \times 256 = 0.256$ in
+the proxy and $10^{-3} \times 4096 = 4.1$ in the target. The target's features move 16 times further per step, far
+outside the regime the proxy was tuned in.
+
+**One step under µP.** Hidden and output learning rates become $10^{-3} \times 256/4096 = 6.25 \times 10^{-5}$, and the
+hidden change is $6.25 \times 10^{-5} \times 4096 = 0.256$, the same as in the proxy. The embedding learning rate stays
+$10^{-3}$, since its fan-in is the vocabulary one-hot and does not grow. The output weights' initial standard deviation
+is divided by 16 relative to the proxy, since it scales as $1/n$.
+
+## Cost
+
+No extra computation. The implementation cost is bookkeeping: each parameter needs its width class, a base shape and
+per-group learning rates and initialisations.
+
+## Trade-offs
+
+- **Tied embeddings.** The input and output matrices want different scalings. Yang et al. give an equivalent form that
+  moves the scaling into multipliers so that the matrix can be shared <Cite id="yang2021mup" />.
+- **Scope.** The theory covers width. Depth needs its own rules, and µP does not remove instabilities with other
+  causes; see <NoteLink to="training-stability-at-scale">training stability at scale</NoteLink>.
+- **Adoption.** µP changes many defaults at once, and a mistake in one layer's rule silently breaks transfer. A standard
+  check is to train a few widths and confirm that the loss-against-learning-rate curves share a minimum.
