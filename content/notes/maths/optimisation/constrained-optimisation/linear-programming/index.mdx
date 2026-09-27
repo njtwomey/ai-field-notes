@@ -1,0 +1,125 @@
+---
+title: Linear programming
+kind: concept
+summary: 'A linear program minimises a linear objective $\cvec^\top\xvec$ over a polyhedron. If an optimum exists, one is at a vertex. The simplex method walks between adjacent vertices; interior-point methods cross the inside. Every LP has a dual LP with the same optimal value.'
+tags: [optimisation, constrained-optimisation, duality, convexity, worked-example]
+aliases: [LP, linear program, simplex method, simplex algorithm, LP duality, standard form, basic feasible solution]
+requires: [lagrangian-duality, rank-and-null-space]
+related: [quadratic-programming, kkt-conditions, penalty-and-barrier-methods, convex-sets-and-functions]
+references: [dantzig1963, boyd2004, nocedal2006, karmarkar1984]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **linear program** (LP) minimises a linear function subject to linear equality and inequality constraints. In
+**standard form** it is
+
+$$
+\min_{\xvec \in \reals^n}\ \cvec^\top\xvec \quad \text{subject to} \quad \Amat\xvec = \bvec,\ \ \xvec \ge \zeros,
+$$
+
+with $\Amat \in \reals^{m \times n}$ of full row rank $m < n$. Its **dual** is $\max_{\yvec}\ \bvec^\top\yvec$
+subject to $\Amat^\top\yvec \le \cvec$. When either problem has a finite optimum, both do, and the optimal values are
+equal <Cite id="dantzig1963" />.
+</Definition>
+
+## Intuition
+
+Each linear inequality $\avec_i^\top\xvec \le b_i$ keeps one side of a hyperplane. Their intersection, the **feasible
+region**, is a convex polyhedron with flat faces and corners. The objective $\cvec^\top\xvec$ has parallel hyperplanes
+as level sets. Minimising it means sliding a level hyperplane in the direction $-\cvec$ until it is about to leave the
+polyhedron. The last contact is a corner, an edge or a whole face. In every case it includes a corner. So a finite
+optimum, when it exists, is attained at a **vertex**, and the search can be restricted to vertices.
+
+Any LP can be put in standard form. An inequality $\avec^\top\xvec \le b$ becomes $\avec^\top\xvec + s = b$ with a
+**slack** variable $s \ge 0$. A free variable $x$ is written as $x^+ - x^-$ with both parts nonnegative. Maximisation
+becomes minimisation of $-\cvec^\top\xvec$.
+
+## Why the optimum is at a vertex
+
+A **vertex** of the feasible set $\Pcal$ is a point that is not the midpoint of two other points of $\Pcal$. In
+standard form, vertices are the **basic feasible solutions**: choose $m$ columns of $\Amat$ that form an invertible
+matrix $\Bmat$, set the other $n - m$ variables to zero, and solve $\Bmat\xvec_B = \bvec$. If the result is nonnegative,
+it is a vertex. There are at most $\binom{n}{m}$ of them.
+
+Suppose $\xvec$ is optimal but not a vertex. Then $\xvec = \tfrac12(\xvec + \dvec) + \tfrac12(\xvec - \dvec)$ for
+some $\dvec \ne \zeros$ with both $\xvec \pm \dvec$ feasible. Since $\xvec$ is optimal, neither point can be better, so
+$\cvec^\top\dvec = 0$ and the whole segment is optimal. Move along $\pm\dvec$ until a new coordinate of $\xvec$ reaches
+zero. The new point is still optimal and has one more zero coordinate. Repeating reaches a point with at most $m$
+nonzero coordinates whose columns are independent: a vertex. If the feasible set contains no line, which holds in
+standard form, this process terminates <Cite id="boyd2004" />.
+
+## The simplex method
+
+The **simplex method** moves from vertex to adjacent vertex, improving the objective at each move <Cite id="dantzig1963" />.
+Two vertices are adjacent when their sets of basic columns differ in one column.
+
+1. At a vertex with basis $\Bmat$, compute the **reduced costs** of the nonbasic variables, the rate at which the
+   objective changes if one of them is increased from zero while the basic variables adjust to keep $\Amat\xvec = \bvec$.
+2. If no reduced cost is negative, the vertex is optimal. Stop.
+3. Otherwise choose a nonbasic variable with negative reduced cost to enter the basis. Increase it until a basic
+   variable reaches zero (the **ratio test**). That variable leaves the basis.
+4. If no basic variable ever reaches zero, the LP is unbounded. Otherwise repeat from the new vertex.
+
+The number of vertices can grow exponentially, and there are LPs (the Klee–Minty cubes) on which the simplex method
+with the classic pivot rule visits all $2^n$ vertices <Cite id="nocedal2006" />. On practical problems it typically
+needs a small multiple of $m$ pivots.
+
+**Interior-point methods** instead follow a smooth path through the interior of the polyhedron towards the optimum.
+Karmarkar's method was the first practical one with a polynomial bound on the number of iterations
+<Cite id="karmarkar1984" />. Modern solvers use primal-dual interior-point methods based on log barriers (see
+<NoteLink to="penalty-and-barrier-methods">penalty and barrier methods</NoteLink>). They take 20 to 60 iterations almost
+independently of problem size, each iteration being a sparse linear solve.
+
+## Duality
+
+Take an LP in inequality form: maximise $\cvec^\top\xvec$ subject to $\Amat\xvec \le \bvec$, $\xvec \ge \zeros$. Multiply
+the $i$-th constraint by a weight $y_i \ge 0$ and add them: $\yvec^\top\Amat\xvec \le \yvec^\top\bvec$. If the weights
+also satisfy $\Amat^\top\yvec \ge \cvec$, then for every feasible $\xvec \ge \zeros$,
+
+$$
+\cvec^\top\xvec \le (\Amat^\top\yvec)^\top\xvec = \yvec^\top\Amat\xvec \le \bvec^\top\yvec.
+$$
+
+Every such $\yvec$ gives an upper bound on the primal objective. The dual LP looks for the smallest bound: minimise
+$\bvec^\top\yvec$ subject to $\Amat^\top\yvec \ge \cvec$, $\yvec \ge \zeros$. This is **weak duality**. The same dual
+follows from the Lagrangian (see <NoteLink to="lagrangian-duality">Lagrangian duality</NoteLink>).
+
+**Strong duality** holds for every LP with a finite optimum: the best bound is tight. No Slater condition is needed.
+The inequalities in the chain above are then equalities, which gives **complementary slackness**:
+
+- if a primal constraint is slack ($\avec_i^\top\xvec < b_i$), its dual variable is zero;
+- if a primal variable is positive, its dual constraint is tight.
+
+Each dual variable $y_i$ is the **shadow price** of resource $i$: the increase in the optimal objective per unit
+increase of $b_i$.
+
+## Worked example
+
+Maximise $3x_1 + 2x_2$ subject to $x_1 + x_2 \le 4$, $x_1 + 3x_2 \le 6$, $x_1 \le 3.5$ and $x_1, x_2 \ge 0$.
+
+The feasible region is a pentagon with vertices $(0, 0)$, $(3.5, 0)$, $(3.5, 0.5)$, $(3, 1)$ and $(0, 2)$. The objective
+values there are $0$, $10.5$, $11.5$, $11$ and $4$. The optimum is $(3.5, 0.5)$ with value $11.5$. Starting at the
+origin, the simplex method increases $x_1$ first (its objective coefficient is larger) and stops at $(3.5, 0)$ when the
+constraint $x_1 \le 3.5$ binds. It then increases $x_2$ along the edge $x_1 = 3.5$ until $x_1 + x_2 \le 4$ binds, at
+$(3.5, 0.5)$. No adjacent vertex improves the objective, so it stops after two pivots.
+
+The dual is: minimise $4y_1 + 6y_2 + 3.5y_3$ subject to $y_1 + y_2 + y_3 \ge 3$, $y_1 + 3y_2 \ge 2$, $\yvec \ge \zeros$.
+Complementary slackness finds its solution. The second primal constraint is slack ($3.5 + 1.5 = 5 < 6$), so $y_2 = 0$.
+Both primal variables are positive, so both dual constraints are tight: $y_1 + y_3 = 3$ and $y_1 = 2$. Hence
+$\yvec = (2, 0, 1)$ with dual value $8 + 3.5 = 11.5$, equal to the primal value. Raising the right-hand side of the first
+constraint from 4 raises the optimum at rate $y_1 = 2$. The rate holds until that right-hand side reaches $13/3$,
+where the point $(3.5,\ 5/6)$ makes the second constraint active and the basis changes.
+
+## Pitfalls
+
+- **Infeasible and unbounded are different failures.** An infeasible LP has no feasible point; an unbounded one has
+  feasible points with objective tending to $-\infty$. Solvers report which. If the primal is unbounded the dual is
+  infeasible.
+- **Degeneracy.** When more than $m$ constraints pass through a vertex, simplex pivots can make no progress and, with a
+  poor rule, cycle. Bland's rule or perturbation prevents cycling.
+- **Integer variables change everything.** Requiring $\xvec$ to be integer makes the problem NP-hard. The LP relaxation
+  gives a bound, used by branch-and-bound solvers.
+- **Numerical scaling.** Coefficients spanning many orders of magnitude cause solvers to misjudge feasibility.
+  Rescale rows and columns before solving.

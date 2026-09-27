@@ -1,0 +1,158 @@
+---
+title: Quasi-Newton methods
+kind: technique
+summary: Quasi-Newton methods replace the Hessian in Newton's method with an approximation built from gradient differences to satisfy the secant condition $\Bmat_{k+1}\svec_k = \yvec_k$. BFGS makes a rank-two update that stays positive definite; L-BFGS stores only the last $m$ pairs.
+tags: [optimisation, second-order-methods, worked-example]
+aliases: [BFGS, L-BFGS, limited-memory BFGS, secant condition, DFP, Broyden–Fletcher–Goldfarb–Shanno, two-loop recursion, SR1]
+requires: [newtons-method, line-search]
+related: [convergence-of-gradient-descent, trust-region-methods, matrix-inverse, gp-hyperparameter-learning]
+references: [nocedal2006, broyden1970, fletcher1970, goldfarb1970, shanno1970, liu1989]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **quasi-Newton method** minimises $f$ with steps $\pvec_k = -\Hmat_k\gvec_k$, where $\Hmat_k$ approximates the
+inverse Hessian, followed by a line search. After each step it updates $\Hmat_k$ using
+$\svec_k = \xvec_{k+1} - \xvec_k$ and $\yvec_k = \nabla f(\xvec_{k+1}) - \nabla f(\xvec_k)$ so that the **secant
+condition** $\Hmat_{k+1}\yvec_k = \svec_k$ holds. The **BFGS** update is
+
+$$
+\Hmat_{k+1} = (\Imat - \rho_k\svec_k\yvec_k^\top)\,\Hmat_k\,(\Imat - \rho_k\yvec_k\svec_k^\top) + \rho_k\svec_k\svec_k^\top,
+\qquad \rho_k = \frac{1}{\yvec_k^\top\svec_k}
+$$
+
+<Cite id="broyden1970" /> <Cite id="fletcher1970" /> <Cite id="goldfarb1970" /> <Cite id="shanno1970" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="newtons-method">Newton's method</NoteLink> converges in a handful of iterations near a minimum but needs
+the Hessian, $n^2$ second derivatives, and an $O(n^3)$ solve per step. Gradient descent needs only the gradient but can
+take thousands of iterations on ill-conditioned problems. Quasi-Newton methods sit between them. They use only
+gradients, cost $O(n^2)$ per step (or $O(mn)$ for L-BFGS), and converge superlinearly: faster than any fixed linear
+rate.
+
+## Mechanism
+
+### The secant condition
+
+The gradient changes along a step by approximately the Hessian times the step:
+$\nabla f(\xvec_{k+1}) - \nabla f(\xvec_k) \approx \nabla^2 f(\xvec_{k+1})(\xvec_{k+1} - \xvec_k)$, with equality for
+quadratics. A Hessian approximation $\Bmat_{k+1}$ should reproduce this observed change:
+
+$$
+\Bmat_{k+1}\svec_k = \yvec_k, \qquad \text{equivalently} \qquad \Hmat_{k+1}\yvec_k = \svec_k \ \text{ for } \Hmat = \Bmat^{-1}.
+$$
+
+In one dimension this determines the curvature: $b_{k+1} = (g_{k+1} - g_k)/(x_{k+1} - x_k)$, the slope of the secant
+line through two gradient values. In $n$ dimensions it gives $n$ equations for $n(n+1)/2$ unknowns. The remaining
+freedom is used to keep $\Bmat$ symmetric, positive definite and close to its previous value.
+
+A symmetric positive definite $\Bmat_{k+1}$ can satisfy the secant condition only if $\svec_k^\top\yvec_k =
+\svec_k^\top\Bmat_{k+1}\svec_k > 0$. This **curvature condition** holds automatically for strictly convex $f$. For
+general $f$ it is enforced by a line search that satisfies the Wolfe conditions (see <NoteLink to="line-search">line
+search</NoteLink>).
+
+### Deriving the BFGS update
+
+Look for a symmetric rank-two correction of $\Bmat = \Bmat_k$ built from the two vectors available, $\yvec$ and
+$\Bmat\svec$:
+
+$$
+\Bmat_{k+1} = \Bmat + a\,\yvec\yvec^\top + b\,\Bmat\svec\svec^\top\Bmat.
+$$
+
+Apply it to $\svec$ and impose the secant condition:
+$\Bmat\svec + a(\yvec^\top\svec)\yvec + b(\svec^\top\Bmat\svec)\Bmat\svec = \yvec$. Matching the coefficients of
+$\yvec$ and of $\Bmat\svec$ gives $a = 1/(\yvec^\top\svec)$ and $b = -1/(\svec^\top\Bmat\svec)$:
+
+$$
+\Bmat_{k+1} = \Bmat_k - \frac{\Bmat_k\svec_k\svec_k^\top\Bmat_k}{\svec_k^\top\Bmat_k\svec_k} + \frac{\yvec_k\yvec_k^\top}{\yvec_k^\top\svec_k}.
+$$
+
+The first correction removes the old curvature along $\svec$. The second inserts the measured curvature. Applying the
+Sherman–Morrison–Woodbury formula twice turns this into the update of $\Hmat = \Bmat^{-1}$ in the definition. That form
+is what is used, because it gives the step as a matrix-vector product with no linear solve. Multiplying it by
+$\yvec_k$ confirms the secant condition: $(\Imat - \rho\yvec\svec^\top)\yvec = \yvec - \yvec = \zeros$, leaving
+$\rho\svec(\svec^\top\yvec) = \svec$.
+
+Among all symmetric matrices satisfying the secant condition, the BFGS $\Hmat_{k+1}$ is the one closest to $\Hmat_k$ in
+a weighted Frobenius norm <Cite id="goldfarb1970" /> <Cite id="nocedal2006" />. The **DFP** update is the same
+construction with the roles of $\Bmat$ and $\Hmat$ swapped. It works less well in practice.
+
+### Positive definiteness is preserved
+
+Suppose $\Hmat_k \succ 0$ and $\svec^\top\yvec > 0$. For any $\zvec \ne \zeros$, let $\wvec = \zvec - \rho\yvec(\svec^\top\zvec)$. Then
+
+$$
+\zvec^\top\Hmat_{k+1}\zvec = \wvec^\top\Hmat_k\wvec + \rho(\svec^\top\zvec)^2 \ge 0.
+$$
+
+Both terms are nonnegative. If both were zero, then $\svec^\top\zvec = 0$, so $\wvec = \zvec \ne \zeros$ and
+$\wvec^\top\Hmat_k\wvec > 0$, a contradiction. So $\Hmat_{k+1} \succ 0$, and every quasi-Newton step
+$-\Hmat_{k+1}\gvec$ is a descent direction.
+
+### L-BFGS
+
+Storing $\Hmat_k$ costs $n^2$ memory, too much for large $n$. **L-BFGS** keeps only the last $m$ pairs
+$(\svec_i, \yvec_i)$, typically $m$ between 5 and 20, and applies the BFGS updates implicitly to an initial matrix
+$\Hmat^0_k = \gamma_k\Imat$ with $\gamma_k = \svec_{k-1}^\top\yvec_{k-1}/\yvec_{k-1}^\top\yvec_{k-1}$
+<Cite id="liu1989" />. The product $\Hmat_k\gvec_k$ is computed by the **two-loop recursion**, in $O(mn)$ operations:
+
+```text
+q ← g_k
+for i = k−1, k−2, …, k−m:          # newest to oldest
+    α_i ← ρ_i s_iᵀ q
+    q ← q − α_i y_i
+r ← γ_k q
+for i = k−m, …, k−2, k−1:          # oldest to newest
+    β ← ρ_i y_iᵀ r
+    r ← r + s_i (α_i − β)
+return r                             # r = H_k g_k; the step is −r
+```
+
+The first loop applies the right-hand factors $(\Imat - \rho_i\yvec_i\svec_i^\top)$ of the nested updates. The second
+applies the left-hand factors and adds the $\rho_i\svec_i\svec_i^\top$ terms. L-BFGS is the default optimiser for smooth
+problems with many parameters that fit in memory: logistic regression, conditional random fields,
+<NoteLink to="gp-hyperparameter-learning">Gaussian process hyperparameters</NoteLink> and full-batch training of small
+networks.
+
+## Worked example
+
+Minimise $f(\xvec) = \tfrac12\xvec^\top\Qmat\xvec - \cvec^\top\xvec$ with $\Qmat = \begin{pmatrix} 3 & 1 \\ 1 & 2
+\end{pmatrix}$ and $\cvec = (1, 1)$. The minimiser is $\xvec^* = \Qmat^{-1}\cvec = (0.2, 0.4)$. Start at
+$\xvec_0 = \zeros$ with $\Hmat_0 = \Imat$ and use an exact line search.
+
+1. The gradient is $\gvec_0 = -\cvec = (-1, -1)$, so the first step is steepest descent. The exact step length along
+   $\pvec = (1, 1)$ is $\gvec_0^\top\gvec_0/\pvec^\top\Qmat\pvec = 2/7$. So $\svec_0 = (2/7, 2/7)$ and
+   $\xvec_1 = (0.286, 0.286)$.
+2. The gradient change is $\yvec_0 = \Qmat\svec_0 = (8/7, 6/7)$, and $\svec_0^\top\yvec_0 = 4/7 > 0$.
+3. The BFGS update gives $\Hmat_1 = \begin{pmatrix} 0.510 & -0.347 \\ -0.347 & 0.796 \end{pmatrix}$. It is positive
+   definite (eigenvalues 0.278 and 1.028) and satisfies $\Hmat_1\yvec_0 = \svec_0$.
+4. The second step lands exactly on $\xvec^* = (0.2, 0.4)$, and the next update gives
+   $\Hmat_2 = \Qmat^{-1} = \begin{pmatrix} 0.4 & -0.2 \\ -0.2 & 0.6 \end{pmatrix}$.
+
+On a quadratic in $n$ dimensions with exact line searches, BFGS terminates in at most $n$ steps and recovers the exact
+inverse Hessian <Cite id="nocedal2006" />.
+
+## Cost
+
+| Method | Memory | Work per iteration | Local rate |
+| --- | --- | --- | --- |
+| Gradient descent | $n$ | $O(n)$ plus one gradient | linear |
+| BFGS | $n^2$ | $O(n^2)$ plus one gradient | superlinear |
+| L-BFGS | $2mn$ | $O(mn)$ plus one gradient | linear, usually fast |
+| Newton | $n^2$ | $O(n^3)$ plus gradient and Hessian | quadratic |
+
+## Trade-offs
+
+- **Needs a Wolfe line search.** Without the curvature condition, $\svec^\top\yvec$ can be negative and the update
+  loses positive definiteness. Implementations skip or damp the update when $\svec^\top\yvec$ is tiny.
+- **Deterministic gradients.** Noisy gradients corrupt $\yvec$, since it is a difference of two noisy vectors, and
+  quasi-Newton methods degrade badly with minibatch gradients. They are rarely used for stochastic training.
+- **SR1.** The symmetric rank-one update does not preserve positive definiteness but approximates indefinite Hessians
+  better. It is used inside <NoteLink to="trust-region-methods">trust-region methods</NoteLink>, which can handle
+  indefinite models.
+- **Bounds.** L-BFGS-B extends L-BFGS to box constraints, and is the method behind `scipy.optimize.minimize` with
+  bounds.

@@ -134,6 +134,7 @@ export const macroGroups: MacroGroup[] = [
     macros: {
       '\\argmin': '\\operatorname*{arg\\,min}',
       '\\argmax': '\\operatorname*{arg\\,max}',
+      '\\prox': '\\operatorname{prox}',
       '\\trace': '\\operatorname{tr}',
       '\\diag': '\\operatorname{diag}',
       '\\rank': '\\operatorname{rank}',

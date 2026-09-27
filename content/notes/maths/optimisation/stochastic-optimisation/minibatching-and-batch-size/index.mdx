@@ -1,0 +1,133 @@
+---
+title: Minibatching and batch size
+kind: concept
+summary: A minibatch gradient averages $B$ example gradients, dividing the gradient noise variance by $B$. Up to a critical batch size, set by the ratio of gradient noise to signal, a larger batch allows a proportionally larger step; beyond it, extra examples buy little.
+tags: [optimisation, stochastic-optimisation, deep-learning, worked-example]
+aliases: [minibatch, mini-batch gradient descent, batch size, critical batch size, gradient noise scale, large-batch training]
+requires: [stochastic-gradient-descent-theory, variance-and-covariance]
+related: [learning-rate-schedules, variance-reduction, sgd-for-linear-models, batch-normalisation]
+references: [bottou2018, mccandlish2018, goyal2017, keskar2017, smith2018batch]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For a loss $F(\xvec) = \frac1n\sum_{i=1}^n f_i(\xvec)$, a **minibatch gradient** averages the gradients of a random
+subset $\Bcal$ of $B$ examples: $\gvec_\Bcal = \frac1B\sum_{i \in \Bcal}\nabla f_i(\xvec)$. It is an unbiased estimate
+of $\nabla F(\xvec)$. If the examples are drawn independently, with per-example gradient covariance $\Sigmamat$, its
+covariance is $\Sigmamat/B$ <Cite id="bottou2018" />.
+</Definition>
+
+## Intuition
+
+A single-example gradient is cheap and noisy. A full-batch gradient is exact and costs $n$ example-gradients.
+A minibatch sits between them. Averaging $B$ independent gradients leaves the mean unchanged and divides the variance
+by $B$, so the noise, measured by its standard deviation, falls like $1/\sqrt B$.
+
+On parallel hardware, the $B$ gradients in a batch are computed at the same time. Up to the size that fills the
+hardware, a batch of 256 costs about the same wall-clock time as a batch of 1. The question is then not the cost per
+step but how much progress each step makes, and how that progress grows with $B$.
+
+## Noise and the step size
+
+In the analysis of <NoteLink to="stochastic-gradient-descent-theory">SGD</NoteLink>, the noise enters through the
+variance $\sigma^2$. With batch size $B$ it becomes $\sigma^2/B$. For a strongly convex problem the constant-step noise
+floor becomes approximately
+
+$$
+\expect\norm{\xvec - \xvec^*}^2 \approx \frac{\eta\sigma^2}{2\mu B}.
+$$
+
+The floor depends on $\eta/B$. Doubling the batch and doubling the step keeps the floor fixed while halving the number
+of steps needed to cover the same distance. This is the **linear scaling rule**: multiply the learning rate by $k$ when
+the batch is multiplied by $k$ <Cite id="goyal2017" />. It fails once $\eta$ approaches the curvature limit $2/L$ of
+<NoteLink to="gradient-descent">gradient descent</NoteLink>. Past that point the step cannot grow, and extra batch size
+only lowers noise that is no longer the bottleneck.
+
+Changing the batch size during training is equivalent, to first order, to changing the step. Increasing the batch
+instead of decaying the learning rate gives similar results with fewer, larger steps <Cite id="smith2018batch" />.
+
+## The critical batch size
+
+How much does a larger batch help per step? Model the loss near the current point by a quadratic with gradient
+$\bar\gvec = \nabla F$ and Hessian $\Hmat$. A step $-\epsilon\gvec_\Bcal$ changes the expected loss by
+
+$$
+\expect\LB F(\xvec - \epsilon\gvec_\Bcal)\RB - F(\xvec) \approx -\epsilon\norm{\bar\gvec}^2 + \frac{\epsilon^2}{2}\LP\bar\gvec^\top\Hmat\bar\gvec + \frac{\trace(\Hmat\Sigmamat)}{B}\RP.
+$$
+
+The second-order term uses $\expect[\gvec^\top\Hmat\gvec] = \bar\gvec^\top\Hmat\bar\gvec + \trace(\Hmat\cov(\gvec))$ with
+$\cov(\gvec_\Bcal) = \Sigmamat/B$. Minimising over $\epsilon$ gives the best step and the best expected decrease:
+
+$$
+\epsilon_{\text{opt}}(B) = \frac{\epsilon_{\max}}{1 + B_{\text{noise}}/B}, \qquad
+\Delta F_{\text{opt}}(B) = \frac{\Delta F_{\max}}{1 + B_{\text{noise}}/B}, \qquad
+B_{\text{noise}} = \frac{\trace(\Hmat\Sigmamat)}{\bar\gvec^\top\Hmat\bar\gvec},
+$$
+
+where $\epsilon_{\max} = \norm{\bar\gvec}^2/\bar\gvec^\top\Hmat\bar\gvec$ and $\Delta F_{\max} = \norm{\bar\gvec}^4/(2\bar\gvec^\top\Hmat\bar\gvec)$
+are the values for an exact gradient <Cite id="mccandlish2018" />.
+
+The **gradient noise scale** $B_{\text{noise}}$ separates two regimes.
+
+- For $B \ll B_{\text{noise}}$, $\Delta F_{\text{opt}} \approx \Delta F_{\max} B/B_{\text{noise}}$: progress per step
+  grows linearly with $B$, and the optimal step grows with it. Doubling the batch halves the number of steps at no extra
+  cost in examples. This is the regime of the linear scaling rule.
+- For $B \gg B_{\text{noise}}$, progress per step saturates at $\Delta F_{\max}$. Doubling the batch doubles the
+  examples per step and barely reduces the number of steps.
+
+When the Hessian is a multiple of the identity, the noise scale simplifies to $B_{\text{simple}} = \trace(\Sigmamat)/
+\norm{\bar\gvec}^2$: total gradient variance divided by squared gradient norm. It can be estimated during training from
+gradient norms at two batch sizes. It grows as training proceeds, because $\norm{\bar\gvec}$ shrinks, which is why larger
+batches become useful later in training.
+
+## Worked example
+
+**Progress per step and per example.** Suppose $B_{\text{noise}} = 100$. The fraction of the exact-gradient progress
+that one step achieves is $1/(1 + 100/B)$:
+
+| $B$ | progress per step | progress per example |
+| --- | --- | --- |
+| 10 | $0.091\,\Delta F_{\max}$ | $0.0091\,\Delta F_{\max}$ |
+| 100 | $0.5\,\Delta F_{\max}$ | $0.005\,\Delta F_{\max}$ |
+| 1000 | $0.909\,\Delta F_{\max}$ | $0.00091\,\Delta F_{\max}$ |
+
+Going from 10 to 100 multiplies progress per step by 5.5 at a cost of 10 times the examples. Going from 100 to 1000
+multiplies it by only 1.8. Near $B_{\text{noise}}$ the trade-off between steps and examples is balanced.
+
+**Sampling without replacement.** Drawing a batch without replacement from a finite dataset reduces the variance by the
+finite-population factor $(n - B)/(n - 1)$. For $n = 1000$ and $B = 100$ the variance is $0.00901\,\sigma^2$ instead of
+$0.01\,\sigma^2$: a 10% reduction. For $B = n$ it is zero, since the batch is the full dataset.
+
+<Derivation title="Variance of a minibatch drawn without replacement">
+Let $\vvec_i = \nabla f_i(\xvec) - \nabla F(\xvec)$, so $\sum_i\vvec_i = \zeros$, and let
+$\sigma^2 = \frac1n\sum_i\norm{\vvec_i}^2$. The batch error is $\bar\vvec = \frac1B\sum_{i \in \Bcal}\vvec_i$. Each $i$
+is in $\Bcal$ with probability $B/n$, and each pair $i \ne j$ with probability $B(B - 1)/(n(n - 1))$. Then
+
+$$
+\expect\norm{\bar\vvec}^2 = \frac{1}{B^2}\LP\frac{B}{n}\sum_i\norm{\vvec_i}^2 + \frac{B(B - 1)}{n(n - 1)}\sum_{i \ne j}\vvec_i^\top\vvec_j\RP.
+$$
+
+Since $\sum_{i \ne j}\vvec_i^\top\vvec_j = \norm{\sum_i\vvec_i}^2 - \sum_i\norm{\vvec_i}^2 = -n\sigma^2$, this is
+$\frac{\sigma^2}{B}\LP 1 - \frac{B - 1}{n - 1}\RP = \frac{\sigma^2}{B}\cdot\frac{n - B}{n - 1}$.
+</Derivation>
+
+## Assumptions
+
+- **Local quadratic model.** The critical batch size comes from a second-order expansion around the current point. It
+  describes the next step, and it changes as training proceeds.
+- **Independent examples.** Correlated examples in a batch, such as consecutive frames of a video, carry less
+  information than $B$ independent ones, and the variance falls more slowly than $1/B$.
+
+## Pitfalls
+
+- **Scaling the batch without the step.** A larger batch with an unchanged learning rate makes the same progress per
+  step with more computation. Adjust the step, typically with a warm-up period at the start
+  <Cite id="goyal2017" />.
+- **Generalisation.** Very large batches have been reported to find sharper minima that generalise worse
+  <Cite id="keskar2017" />. Much of the gap closes with tuned step sizes and longer training, and the effect is still
+  debated.
+- **Batch-dependent layers.** <NoteLink to="batch-normalisation">Batch normalisation</NoteLink> computes statistics over
+  the batch. Changing the batch size changes the model's behaviour, not only the optimiser's noise.
+- **Throughput is not progress.** A batch that saturates the hardware maximises examples per second, not loss decrease
+  per second. Beyond the critical batch size, the extra examples are mostly wasted.

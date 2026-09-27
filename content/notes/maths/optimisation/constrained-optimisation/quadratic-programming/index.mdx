@@ -1,0 +1,119 @@
+---
+title: Quadratic programming
+kind: concept
+summary: A quadratic program minimises $\tfrac12\xvec^\top\Pmat\xvec + \qvec^\top\xvec$ subject to linear constraints. With $\Pmat$ positive semidefinite it is convex. Equality constraints alone give one linear KKT system; inequalities are handled by active-set or interior-point methods.
+tags: [optimisation, constrained-optimisation, convexity, worked-example]
+aliases: [QP, quadratic program, convex quadratic program, active-set method, KKT system, equality-constrained QP]
+requires: [kkt-conditions, positive-definite-matrices]
+related: [linear-programming, support-vector-machine, model-predictive-control, lasso, lagrangian-duality, penalty-and-barrier-methods]
+references: [nocedal2006, boyd2004]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **quadratic program** (QP) is
+
+$$
+\min_{\xvec \in \reals^n}\ \tfrac12\xvec^\top\Pmat\xvec + \qvec^\top\xvec \quad \text{subject to} \quad
+\Amat\xvec = \bvec,\ \ \Gmat\xvec \le \hvec,
+$$
+
+with $\Pmat$ symmetric. It is a **convex QP** when $\Pmat$ is positive semidefinite. A convex QP has a global minimum
+characterised exactly by the <NoteLink to="kkt-conditions">KKT conditions</NoteLink>. A QP with indefinite $\Pmat$ is
+NP-hard in general <Cite id="nocedal2006" />.
+</Definition>
+
+## Intuition
+
+A QP is the simplest step beyond a <NoteLink to="linear-programming">linear program</NoteLink>: a quadratic bowl
+instead of a tilted plane, over the same kind of polyhedron. Unlike an LP, the minimum need not be at a vertex. It can
+be in the interior (where the bowl's bottom is feasible), on a face or edge, or at a vertex. Which constraints are
+active at the solution is the unknown that makes QPs harder than linear systems.
+
+QPs appear throughout machine learning and control:
+
+- the <NoteLink to="support-vector-machine">support vector machine</NoteLink> dual, a QP with box constraints and one
+  equality;
+- the <NoteLink to="lasso">lasso</NoteLink>, which becomes a QP when $\wvec$ is split into positive and negative parts;
+- <NoteLink to="model-predictive-control">model predictive control</NoteLink> with linear dynamics, quadratic cost and
+  input limits, which solves one QP per time step;
+- Markowitz portfolio selection, which minimises the variance $\xvec^\top\Sigmamat\xvec$ of a portfolio subject to
+  budget and return constraints.
+
+## Equality constraints: one linear system
+
+With only $\Amat\xvec = \bvec$, the Lagrangian is $\tfrac12\xvec^\top\Pmat\xvec + \qvec^\top\xvec +
+\nuvec^\top(\Amat\xvec - \bvec)$. Setting its gradient in $\xvec$ to zero and adding the constraint gives the
+**KKT system**
+
+$$
+\begin{pmatrix} \Pmat & \Amat^\top \\ \Amat & \zeros \end{pmatrix}
+\begin{pmatrix} \xvec \\ \nuvec \end{pmatrix} =
+\begin{pmatrix} -\qvec \\ \bvec \end{pmatrix}.
+$$
+
+The KKT matrix is nonsingular when $\Amat$ has full row rank and $\Pmat$ is positive definite on the null space of
+$\Amat$ ($\vvec^\top\Pmat\vvec > 0$ whenever $\Amat\vvec = \zeros$, $\vvec \ne \zeros$). Then the QP has a unique
+solution, found by one linear solve. The matrix is symmetric but indefinite, so it is factorised with an $\Lmat\Dmat\Lmat^\top$
+factorisation, or reduced by eliminating $\xvec$ when $\Pmat$ is invertible: $\xvec = -\Pmat^{-1}(\qvec +
+\Amat^\top\nuvec)$ and $\Amat\Pmat^{-1}\Amat^\top\nuvec = -\bvec - \Amat\Pmat^{-1}\qvec$.
+
+## Inequality constraints
+
+### Active-set methods
+
+If the set $\Wcal$ of constraints active at the solution were known, the QP would reduce to an equality-constrained QP
+with the constraints in $\Wcal$ treated as equalities. An **active-set method** guesses $\Wcal$ and corrects the guess
+<Cite id="nocedal2006" />:
+
+1. Solve the equality-constrained QP with the current working set $\Wcal$.
+2. If the solution violates a constraint outside $\Wcal$, move towards it only as far as feasibility allows and add
+   the blocking constraint to $\Wcal$.
+3. If the solution is feasible, check the multipliers of the inequality constraints in $\Wcal$. If all are
+   nonnegative, KKT holds and the point is optimal. If one is negative, the objective improves by leaving that
+   constraint, so remove it from $\Wcal$.
+
+Each step changes $\Wcal$ by one constraint and updates a factorisation cheaply. Active-set methods are fast when the
+active set changes little between related problems, as in model predictive control, where the previous solution is a
+good warm start.
+
+### Interior-point methods
+
+Interior-point methods replace the inequalities by a logarithmic barrier and follow the minimiser as the barrier
+weight shrinks (see <NoteLink to="penalty-and-barrier-methods">penalty and barrier methods</NoteLink>). Each iteration
+solves a KKT system like the one above with an extra diagonal term. They take a few tens of iterations regardless of
+the number of constraints and scale to large sparse problems.
+
+### Dual methods
+
+For $\Pmat \succ 0$ the dual of a QP with inequality constraints $\Gmat\xvec \le \hvec$ has only the bounds
+$\lambdavec \ge \zeros$ (derived in <NoteLink to="lagrangian-duality">Lagrangian duality</NoteLink>). Bound-constrained
+problems are easy for projected gradient and coordinate methods, which is how SVM solvers such as SMO work on the dual.
+
+## Worked example
+
+Minimise the variance of a portfolio of three independent assets with variances 1, 2 and 4, fully invested:
+$\min \tfrac12\xvec^\top\Pmat\xvec$ with $\Pmat = \diag(1, 2, 4)$ subject to $x_1 + x_2 + x_3 = 1$.
+
+Stationarity gives $p_i x_i + \nu = 0$, so $x_i = -\nu/p_i$: each weight is proportional to the inverse variance.
+The constraint gives $-\nu(1 + \tfrac12 + \tfrac14) = 1$, so $\nu = -4/7$ and $\xvec = (4/7, 2/7, 1/7)$. The objective
+is $2/7$, so the portfolio variance $\xvec^\top\Pmat\xvec$ is $4/7$, lower than that of any single asset.
+
+Now add the inequality $x_1 \le 0.5$. The previous solution has $x_1 = 0.571$, which violates it, so the active-set
+method adds it to the working set. With $x_1 = 0.5$ fixed, the remaining budget $0.5$ is again split in inverse
+proportion to the variances 2 and 4: $x_2 = 1/3$ and $x_3 = 1/6$. Check the signs. The gradient $\Pmat\xvec =
+(0.5, 2/3, 2/3)$ must equal $-\nu\ones - \mu\evec_1$ with $\mu \ge 0$ the multiplier of $x_1 - 0.5 \le 0$. The second
+and third components give $\nu = -2/3$, and the first gives $\mu = 2/3 - 0.5 = 1/6 \ge 0$. KKT holds, so
+$\xvec = (0.5, 1/3, 1/6)$ is optimal, with objective $0.292$. The positive multiplier says that loosening the cap would
+lower the variance further.
+
+## Pitfalls
+
+- **Check convexity.** If $\Pmat$ has a negative eigenvalue on the feasible directions, KKT points can be saddle points
+  or maxima, and local solvers return local solutions only.
+- **Nearly singular $\Pmat$.** A positive semidefinite but singular $\Pmat$ can make the solution nonunique and the KKT
+  matrix singular. A small ridge term $\epsilon\Imat$ restores uniqueness at a small bias.
+- **Degenerate active sets.** Constraints that are active with zero multiplier make active-set methods cycle or stall.
+- **Do not solve a QP with a general nonlinear solver** when a QP solver is available. QP solvers exploit the structure
+  and certify optimality through the KKT residual.

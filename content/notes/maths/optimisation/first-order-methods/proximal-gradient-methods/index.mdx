@@ -1,0 +1,148 @@
+---
+title: Proximal gradient methods
+kind: technique
+summary: Proximal gradient descent minimises $f(\xvec) + g(\xvec)$, with $f$ smooth and $g$ convex but possibly nonsmooth, by a gradient step on $f$ followed by the proximal operator of $g$. For the $\ell_1$ norm the proximal operator is soft-thresholding, giving ISTA; adding Nesterov extrapolation gives FISTA.
+tags: [optimisation, convexity, nonsmooth-optimisation, sparsity, worked-example]
+aliases: [proximal operator, prox operator, proximal gradient descent, ISTA, FISTA, iterative shrinkage-thresholding, soft-thresholding operator, projected gradient descent, forward-backward splitting, Moreau envelope]
+requires: [gradient-descent, subgradients]
+related: [lasso, accelerated-gradient-methods, convergence-of-gradient-descent, coordinate-descent, penalty-and-barrier-methods, sgd-for-linear-models]
+references: [parikh2014, beck2009, daubechies2004, moreau1965, boyd2004]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The **proximal operator** of a convex function $g$ with parameter $\eta > 0$ is
+
+$$
+\prox_{\eta g}(\vvec) = \argmin_{\xvec}\LP g(\xvec) + \frac{1}{2\eta}\norm{\xvec - \vvec}^2\RP.
+$$
+
+To minimise $F(\xvec) = f(\xvec) + g(\xvec)$ with $f$ differentiable and $L$-smooth, **proximal gradient descent**
+iterates $\xvec_{k+1} = \prox_{\eta g}(\xvec_k - \eta\nabla f(\xvec_k))$ with $\eta \le 1/L$
+<Cite id="parikh2014" />.
+</Definition>
+
+## Problem
+
+Many objectives are a smooth loss plus a nonsmooth penalty or constraint: the <NoteLink to="lasso">lasso</NoteLink>
+(squared error plus $\lambda\norm{\xvec}_1$), nonnegative least squares, or any smooth loss restricted to a convex set.
+Gradient descent does not apply, because the penalty has kinks. The <NoteLink to="subgradients">subgradient
+method</NoteLink> applies but converges at $O(1/\sqrt{k})$ and does not produce exact zeros. Proximal methods treat
+the smooth part with its gradient and the nonsmooth part exactly. They keep the $O(1/k)$ rate of gradient descent on
+smooth problems.
+
+## Mechanism
+
+### The step minimises a model
+
+Gradient descent with step $\eta$ minimises a quadratic model of $f$ around $\xvec_k$:
+$\xvec_{k+1} = \argmin_{\xvec} f(\xvec_k) + \nabla f(\xvec_k)^\top(\xvec - \xvec_k) + \tfrac{1}{2\eta}\norm{\xvec -
+\xvec_k}^2$. Proximal gradient adds $g$ to the model, unchanged:
+
+$$
+\xvec_{k+1} = \argmin_{\xvec}\ \nabla f(\xvec_k)^\top(\xvec - \xvec_k) + \frac{1}{2\eta}\norm{\xvec - \xvec_k}^2 + g(\xvec).
+$$
+
+Completing the square, the first two terms equal $\tfrac{1}{2\eta}\norm{\xvec - (\xvec_k - \eta\nabla f(\xvec_k))}^2$
+minus a constant. So the step is a gradient step on $f$ (the forward step) followed by the proximal operator of $g$
+(the backward step). When $\eta \le 1/L$, the descent lemma makes the model an upper bound on $F$, so $F$ decreases at
+every step.
+
+### Fixed points are minimisers
+
+The optimality condition of the prox problem is $\zeros \in \partial g(\xvec) + (\xvec - \vvec)/\eta$. A point $\xvec$
+is a fixed point, $\xvec = \prox_{\eta g}(\xvec - \eta\nabla f(\xvec))$, if and only if
+$\zeros \in \partial g(\xvec) + \nabla f(\xvec)$, which is $\zeros \in \partial F(\xvec)$. The iteration stops exactly
+at minimisers of $F$.
+
+### Soft-thresholding is the prox of the $\ell_1$ norm
+
+Take $g(x) = \lambda\abs{x}$ in one dimension. The prox problem is $\min_x \lambda\abs{x} + \tfrac{1}{2\eta}(x - v)^2$.
+Its optimality condition is $0 \in \lambda\,\partial\abs{x} + (x - v)/\eta$. Write $\tau = \eta\lambda$.
+
+- If $x > 0$: $\partial\abs{x} = \set{1}$, so $x = v - \tau$. This is consistent only if $v > \tau$.
+- If $x < 0$: $x = v + \tau$, consistent only if $v < -\tau$.
+- If $x = 0$: $0 \in \lambda[-1, 1] - v/\eta$, which holds exactly when $\abs{v} \le \tau$.
+
+The three cases cover every $v$ once. The result is the **soft-thresholding** operator
+
+$$
+\prox_{\eta\lambda\abs{\cdot}}(v) = S_\tau(v) = \sgn(v)\max(\abs{v} - \tau, 0).
+$$
+
+The $\ell_1$ norm is a sum over coordinates, and the squared distance is too, so the prox of $\lambda\norm{\xvec}_1$
+applies $S_\tau$ to each coordinate. Values inside $[-\tau, \tau]$ become exactly zero. This is where the lasso's
+sparsity comes from in an iterative solver.
+
+### ISTA and FISTA
+
+For the lasso, $f(\xvec) = \tfrac12\norm{\Amat\xvec - \bvec}^2$ has $\nabla f = \Amat^\top(\Amat\xvec - \bvec)$ and
+$L = \lambda_{\max}(\Amat^\top\Amat)$. Proximal gradient descent becomes the **iterative shrinkage-thresholding
+algorithm (ISTA)** <Cite id="daubechies2004" />:
+
+$$
+\xvec_{k+1} = S_{\lambda/L}\LP\xvec_k - \tfrac1L\Amat^\top(\Amat\xvec_k - \bvec)\RP.
+$$
+
+Replacing the gradient step in <NoteLink to="accelerated-gradient-methods">Nesterov's accelerated method</NoteLink>
+with the proximal step gives **FISTA** <Cite id="beck2009" />. The proofs carry over line by line, because they use
+only the one-step inequality $F(\xvec^+) \le F(\uvec) + \tfrac{L}{2}(\norm{\yvec - \uvec}^2 - \norm{\xvec^+ -
+\uvec}^2)$, which holds for the proximal step too. The rates are
+
+$$
+F(\xvec_k) - F^* \le \frac{L\norm{\xvec_0 - \xvec^*}^2}{2k} \ \text{(ISTA)}, \qquad
+F(\xvec_k) - F^* \le \frac{2L\norm{\xvec_0 - \xvec^*}^2}{(k+1)^2} \ \text{(FISTA)}.
+$$
+
+### Other proximal operators
+
+| $g$ | $\prox_{\eta g}(\vvec)$ |
+| --- | --- |
+| $0$ | $\vvec$ (plain gradient descent) |
+| indicator of a convex set $\Ccal$ ($0$ inside, $+\infty$ outside) | Euclidean projection onto $\Ccal$ |
+| $\tfrac{\lambda}{2}\norm{\xvec}^2$ | $\vvec/(1 + \eta\lambda)$ |
+| $\lambda\norm{\xvec}_2$ (group lasso, one group) | $\max(1 - \eta\lambda/\norm{\vvec}, 0)\,\vvec$ |
+| indicator of $\xvec \ge \zeros$ | $\max(\vvec, 0)$ coordinate-wise |
+
+The indicator row shows that **projected gradient descent** is a special case: the prox of an indicator minimises the
+distance to $\vvec$ over $\Ccal$. Many more closed forms are catalogued in <Cite id="parikh2014" />.
+
+## Worked example
+
+Take $\lambda = 1$, $L = 1$, and a point where the gradient step gives $\vvec = \xvec_k - \nabla f(\xvec_k) =
+(3, -0.5, 1.2)$. Soft-thresholding with $\tau = \lambda/L = 1$ gives
+
+$$
+S_1(3) = 2, \qquad S_1(-0.5) = 0, \qquad S_1(1.2) = 0.2,
+$$
+
+so $\xvec_{k+1} = (2, 0, 0.2)$. The second coordinate is set exactly to zero. A subgradient step on the same objective
+would have moved it to a small nonzero value on one side of zero or the other.
+
+## Cost
+
+Each iteration costs one gradient of $f$ and one prox evaluation. For the $\ell_1$ norm, box constraints and many other
+penalties, the prox costs $O(n)$, the same as a vector addition. The method is then as cheap per iteration as gradient
+descent. When the prox has no closed form (for example a total-variation penalty in two dimensions), it must be solved
+by an inner iterative method, and the cost rises.
+
+## Trade-offs
+
+- **Against the subgradient method.** Proximal gradient has rate $O(1/k)$ rather than $O(1/\sqrt k)$ and produces exact
+  zeros, but it needs a prox that is cheap to evaluate.
+- **Against coordinate descent.** For the lasso with many features, <NoteLink to="coordinate-descent">coordinate
+  descent</NoteLink> with soft-thresholding per coordinate is often faster in practice. Proximal gradient updates all
+  coordinates at once and parallelises better.
+- **Against smoothing.** Replacing $\abs{x}$ by a smooth approximation such as the Huber function allows plain
+  gradient descent, but the solution is no longer exactly sparse and the smoothing parameter trades accuracy for
+  conditioning.
+
+<Derivation title="The Moreau envelope">
+The optimal value of the prox problem, $M_{\eta g}(\vvec) = \min_{\xvec} g(\xvec) + \tfrac{1}{2\eta}\norm{\xvec -
+\vvec}^2$, is the **Moreau envelope** of $g$ <Cite id="moreau1965" />. It is convex and differentiable even when $g$ is
+not, with gradient $\nabla M_{\eta g}(\vvec) = (\vvec - \prox_{\eta g}(\vvec))/\eta$, and it has the same
+minimisers as $g$. For $g = \abs{\cdot}$ it is the Huber function: quadratic $v^2/(2\eta)$ for $\abs{v} \le \eta$ and
+$\abs{v} - \eta/2$ beyond. The proximal step on $g$ alone, $\vvec \leftarrow \prox_{\eta g}(\vvec)$, is
+therefore a gradient step of length $\eta$ on the envelope.
+</Derivation>

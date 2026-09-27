@@ -1,0 +1,119 @@
+---
+title: Coordinate descent
+kind: technique
+summary: Coordinate descent minimises a function one coordinate at a time, exactly or with a coordinate gradient step. It converges for smooth convex functions and for a smooth function plus a separable penalty such as the lasso, but can stall on nonseparable nonsmooth functions.
+tags: [optimisation, convexity, sparsity, worked-example]
+aliases: [cyclic coordinate descent, randomised coordinate descent, block coordinate descent, coordinate minimisation]
+requires: [gradient-descent, convex-sets-and-functions]
+related: [iterative-linear-solvers, lasso, proximal-gradient-methods, convergence-of-gradient-descent, mean-field-variational-inference, expectation-maximisation]
+references: [wright2015, nesterov2012, friedman2010]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Coordinate descent** minimises $f : \reals^n \to \reals$ by repeatedly choosing a coordinate $i$ and updating only
+$x_i$, holding the others fixed. **Exact** coordinate descent sets $x_i$ to the minimiser of $f$ along coordinate $i$.
+**Coordinate gradient descent** takes the step $x_i \leftarrow x_i - \tfrac{1}{L_i}\,\partial_i f(\xvec)$, where
+$L_i$ bounds the curvature of $f$ along coordinate $i$. Coordinates are chosen in cyclic order, uniformly at random,
+or greedily <Cite id="wright2015" />.
+</Definition>
+
+## Problem
+
+A full gradient step changes every coordinate and needs every partial derivative. For some problems a single
+coordinate's derivative, or even its exact minimiser, costs far less than $1/n$ of a full gradient, because the rest
+of the computation can be cached and updated. Least squares with a maintained residual, the
+<NoteLink to="lasso">lasso</NoteLink>, the <NoteLink to="support-vector-machine">support vector machine</NoteLink> dual
+and many matrix factorisations have this property. Coordinate descent exploits it.
+
+## Mechanism
+
+### Exact minimisation on a quadratic
+
+For $f(\xvec) = \tfrac12\xvec^\top\Amat\xvec - \bvec^\top\xvec$ with $\Amat$ symmetric positive definite, the partial
+derivative in $x_i$ is $\sum_j A_{ij}x_j - b_i$. Setting it to zero gives
+
+$$
+x_i \leftarrow \frac{1}{A_{ii}}\LP b_i - \sum_{j \ne i} A_{ij}x_j \RP.
+$$
+
+A full cyclic sweep of this update is the **Gauss–Seidel** method for the linear system $\Amat\xvec = \bvec$. It
+converges for every symmetric positive definite $\Amat$. Each update costs one row of $\Amat$.
+
+### Why it converges on smooth functions
+
+Assume the partial derivative $\partial_i f$ is $L_i$-Lipschitz along coordinate $i$, and let $L_{\max} = \max_i L_i$.
+The one-dimensional descent lemma, applied along coordinate $i$ with step $1/L_i$, gives
+
+$$
+f(\xvec^+) \le f(\xvec) - \frac{1}{2L_i}(\partial_i f(\xvec))^2 \le f(\xvec) - \frac{1}{2L_{\max}}(\partial_i f(\xvec))^2.
+$$
+
+Choose $i$ uniformly at random. Taking the expectation over $i$ replaces $(\partial_i f)^2$ by its average,
+$\norm{\nabla f}^2/n$:
+
+$$
+\expect\LB f(\xvec^+)\RB \le f(\xvec) - \frac{1}{2nL_{\max}}\norm{\nabla f(\xvec)}^2.
+$$
+
+This is the sufficient decrease of <NoteLink to="convergence-of-gradient-descent">gradient descent</NoteLink> with $L$
+replaced by $nL_{\max}$. The rest of the analysis carries over. If $f$ is $\mu$-strongly convex, the
+Polyak–Łojasiewicz inequality $\norm{\nabla f}^2 \ge 2\mu(f - f^*)$ gives
+
+$$
+\expect\LB f(\xvec_{k+1}) - f^*\RB \le \LP 1 - \frac{\mu}{nL_{\max}}\RP \expect\LB f(\xvec_k) - f^*\RB
+$$
+
+<Cite id="nesterov2012" />. After $n$ coordinate updates, about the cost of one full gradient, the error has shrunk by
+roughly $1 - \mu/L_{\max}$. Full gradient descent shrinks it by $1 - \mu/L$ in the same cost. Since
+$L_{\max} \le L \le nL_{\max}$, coordinate descent is never worse per unit of work, and it is up to $n$ times better when
+the coordinates are weakly coupled and $L$ is much larger than every $L_i$.
+
+### Separable nonsmooth penalties
+
+For $F(\xvec) = f(\xvec) + \sum_i g_i(x_i)$, with $f$ smooth and each $g_i$ convex, the coordinate update minimises
+$f$ along $x_i$ plus $g_i(x_i)$. For the lasso, $g_i = \lambda\abs{x_i}$, and the update is soft-thresholding of the
+coordinate's least-squares value (derived in <NoteLink to="proximal-gradient-methods">proximal gradient
+methods</NoteLink>). Coordinate descent converges to a minimiser in this setting, because at a point where no
+coordinate can improve, $0 \in \partial_i F$ for each $i$, and separability makes the full subdifferential the product
+of these coordinate sets. glmnet fits the whole lasso path this way <Cite id="friedman2010" />.
+
+## Worked example: where coordinate descent stalls
+
+Separability is essential. Consider
+
+$$
+f(x, y) = \abs{x - y} - \frac{x + y}{2} + \frac{(x + y)^2}{4}.
+$$
+
+The function is convex: it is a norm of a linear map, plus a linear term, plus a convex quadratic of a linear map.
+
+- Along the $x$ axis from the origin, $f(x, 0) = \abs{x} - x/2 + x^2/4$. For $x > 0$ this is $x/2 + x^2/4 > 0$, and for
+  $x < 0$ it is $-3x/2 + x^2/4 > 0$. So $x = 0$ minimises $f$ along $x$. By symmetry $y = 0$ minimises $f$ along $y$.
+- Along the diagonal, $f(t, t) = -t + t^2$, minimised at $t = 1/2$ with $f(1/2, 1/2) = -1/4 < 0 = f(0, 0)$.
+
+Started at the origin, exact coordinate descent never moves, although the origin is not a minimum. The kink of
+$\abs{x - y}$ lies along the diagonal, the only direction of descent, and neither coordinate axis points along it. A
+grid search confirms that $-1/4$ is the global minimum. With a separable penalty such kinks lie along coordinate
+directions, and the problem does not arise.
+
+## Cost
+
+Each update costs one partial derivative. For least squares with $\Amat \in \reals^{m \times n}$, keeping the residual
+$\rvec = \Amat\xvec - \bvec$ up to date makes a coordinate update $O(m)$, and a sweep over all coordinates $O(mn)$, the
+same as one full gradient. For sparse $\Amat$ the cost of an update is proportional to the nonzeros in one column.
+
+## Trade-offs
+
+- **No step size to tune** for exact minimisation, and no line search.
+- **Sequential.** Updates depend on each other, so parallelising needs care: simultaneous updates of coupled coordinates
+  can diverge.
+- **Coupled coordinates slow it down.** On a quadratic whose level sets are ellipses tilted at $45°$, each update moves
+  along an axis and the path zig-zags. A change of variables that decouples the coordinates helps, as it does for
+  gradient descent.
+- **Cyclic versus random order.** Random order has the clean expected rate above. Cyclic order is often faster in
+  practice but has worse worst-case bounds <Cite id="wright2015" />.
+- **Related algorithms.** Block coordinate descent updates groups of variables. The EM algorithm and coordinate ascent
+  <NoteLink to="mean-field-variational-inference">mean-field variational inference</NoteLink> are block coordinate
+  ascent on a lower bound.

@@ -1,0 +1,144 @@
+---
+title: Evolution strategies and CMA-ES
+kind: technique
+summary: Evolution strategies minimise a black-box $f$ by sampling candidates from a Gaussian $\Gauss(\mvec, \sigma^2\Cmat)$ and moving the distribution towards the best of them. CMA-ES also adapts the covariance $\Cmat$ and step size $\sigma$. Its updates approximate natural-gradient steps on the expected objective $\expect[f(\xvec)]$.
+tags: [optimisation, derivative-free-optimisation, stochastic-optimisation, worked-example]
+aliases: [evolution strategy, CMA-ES, covariance matrix adaptation, covariance matrix adaptation evolution strategy, natural evolution strategies, NES, OpenAI ES, cumulative step-size adaptation]
+requires: [multivariate-normal-distribution, score-function-estimator]
+related: [nelder-mead, simulated-annealing, hyperparameter-search, policy-gradient-theorem, reparameterisation-trick]
+references: [hansen2001, hansen2016, wierstra2014, salimans2017, amari1998]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+An **evolution strategy** (ES) minimises $f : \reals^n \to \reals$ by repeating three steps: sample $\lambda$
+candidates $\xvec_i = \mvec + \sigma\yvec_i$ with $\yvec_i \sim \Gauss(\zeros, \Cmat)$; rank them by $f$; and move the
+mean $\mvec$ towards a weighted average of the best $\mu$ of them. The **covariance matrix adaptation evolution
+strategy** (CMA-ES) also updates $\Cmat$ from the successful steps and adapts $\sigma$ from the length of the recent
+path of the mean <Cite id="hansen2001" /> <Cite id="hansen2016" />.
+</Definition>
+
+## Problem
+
+Gradient-free problems in moderate dimension (tens to a few thousand variables) are common: tuning controllers or
+simulators, fitting models with non-differentiable components, and policy search in reinforcement learning. The
+objective can be noisy, multimodal and badly scaled. <NoteLink to="nelder-mead">Nelder–Mead</NoteLink> degrades beyond
+about ten variables. Random search wastes evaluations because it ignores what it has learned. An evolution strategy
+keeps a search distribution and learns its location, scale and shape from ranked samples.
+
+## Mechanism
+
+### Sample, rank, recombine
+
+At each generation, draw $\lambda$ samples $\xvec_i = \mvec + \sigma\yvec_i$. Sort them so that
+$f(\xvec_{1:\lambda}) \le f(\xvec_{2:\lambda}) \le \dots$. With positive weights $w_1 \ge \dots \ge w_\mu$ summing to 1,
+update the mean along the weighted average of the best steps:
+
+$$
+\mvec \leftarrow \mvec + \sigma\sum_{i=1}^\mu w_i\yvec_{i:\lambda}.
+$$
+
+Only the ranks of the $f$ values are used, not the values. The method is therefore invariant to any strictly
+increasing transformation of $f$: minimising $f$, $e^f$ or $f^3$ gives the same iterates.
+
+### Adapting the covariance
+
+The **rank-$\mu$ update** estimates the covariance of the successful steps:
+
+$$
+\Cmat \leftarrow (1 - c_\mu)\Cmat + c_\mu\sum_{i=1}^\mu w_i\,\yvec_{i:\lambda}\yvec_{i:\lambda}^\top.
+$$
+
+Steps that led to good values are over-represented in the sum, so the distribution stretches in directions of
+improvement. On a quadratic $\tfrac12\xvec^\top\Hmat\xvec$, the covariance learns a shape close to $\Hmat^{-1}$
+<Cite id="hansen2016" />. Sampling from $\Gauss(\zeros, \Hmat^{-1})$ makes the problem look perfectly conditioned, which
+is what <NoteLink to="newtons-method">Newton's method</NoteLink> achieves with the Hessian. CMA-ES learns it from
+rankings alone.
+
+The **rank-one update** adds $c_1\pvec_c\pvec_c^\top$, where the **evolution path** $\pvec_c$ is an exponentially
+weighted sum of successive mean displacements. Consecutive steps in the same direction reinforce each other, so the
+path detects a consistent direction that single generations would miss.
+
+### Adapting the step size
+
+**Cumulative step-size adaptation** keeps a second path $\pvec_\sigma$ of mean displacements, whitened by
+$\Cmat^{-1/2}$. Under random selection, its length has the distribution of the norm of a standard Gaussian vector.
+If the path is longer than that, successive steps are correlated and the step size should grow. If shorter, steps
+cancel each other and it should shrink:
+
+$$
+\sigma \leftarrow \sigma\exp\LP\frac{c_\sigma}{d_\sigma}\LP\frac{\norm{\pvec_\sigma}}{\expect\norm{\Gauss(\zeros, \Imat)}} - 1\RP\RP.
+$$
+
+Default values for $\lambda$, $\mu$, $w_i$ and the learning rates $c_\mu, c_1, c_c, c_\sigma, d_\sigma$ depend only on
+$n$ and are rarely tuned; the default population is $\lambda = 4 + \lfloor 3\ln n\rfloor$ <Cite id="hansen2016" />.
+
+### The natural-gradient view
+
+Consider the expected objective under the search distribution, $J(\thetavec) = \expect_{\xvec \sim p_{\thetavec}}[f(\xvec)]$,
+with $\thetavec = (\mvec, \Cmat)$. The <NoteLink to="score-function-estimator">score-function identity</NoteLink> gives
+its gradient without differentiating $f$:
+
+$$
+\nabla_{\thetavec} J = \expect_{\xvec \sim p_{\thetavec}}\LB f(\xvec)\,\nabla_{\thetavec}\log p_{\thetavec}(\xvec)\RB.
+$$
+
+For the mean of a Gaussian, $\nabla_\mvec\log p = \Cmat^{-1}(\xvec - \mvec)$ and the Fisher information is
+$\Cmat^{-1}$. The **natural gradient** premultiplies by the inverse Fisher matrix <Cite id="amari1998" />, which cancels
+the $\Cmat^{-1}$. Up to constant factors, the natural gradients are
+
+$$
+\tilde\nabla_\mvec J = \expect\LB f(\xvec)(\xvec - \mvec)\RB, \qquad
+\tilde\nabla_\Cmat J = \expect\LB f(\xvec)\LP(\xvec - \mvec)(\xvec - \mvec)^\top - \Cmat\RP\RB.
+$$
+
+Replace $f$ by rank-based weights (positive for good samples, zero or negative for bad ones) and estimate the
+expectations from the $\lambda$ samples. A step along these estimates is exactly the weighted mean update and
+the rank-$\mu$ covariance update above. CMA-ES is thus a natural-gradient method on the parameters of its sampling
+distribution <Cite id="wierstra2014" /> <Cite id="hansen2016" />. The natural gradient makes the updates independent of
+how the distribution is parameterised.
+
+### Simple ES as a gradient estimator
+
+Fixing $\Cmat = \Imat$ and using raw $f$ values gives a Monte Carlo estimate of the gradient of the Gaussian-smoothed
+objective $J(\mvec) = \expect_{\epsilonvec \sim \Gauss(\zeros, \Imat)}[f(\mvec + \sigma\epsilonvec)]$:
+
+$$
+\nabla J(\mvec) = \frac1\sigma\expect\LB f(\mvec + \sigma\epsilonvec)\,\epsilonvec\RB \approx \frac{1}{\lambda\sigma}\sum_{i=1}^\lambda f(\mvec + \sigma\epsilonvec_i)\,\epsilonvec_i.
+$$
+
+Evaluating each perturbation in pairs $\pm\epsilonvec_i$ (antithetic sampling) cancels the constant part of $f$ and
+reduces the variance. This estimator scales to policies with millions of parameters on thousands of workers, because
+each worker needs only a random seed and a scalar return <Cite id="salimans2017" />.
+
+## Worked example
+
+Take $f(x) = x^2$ in one dimension, mean $m = 1.5$ and $\sigma = 0.3$. With $x = m + \sigma\epsilon$,
+
+$$
+\frac1\sigma\expect\LB(m + \sigma\epsilon)^2\epsilon\RB = \frac1\sigma\LP m^2\expect\epsilon + 2m\sigma\expect\epsilon^2 + \sigma^2\expect\epsilon^3\RP = 2m = 3,
+$$
+
+since $\expect\epsilon = \expect\epsilon^3 = 0$ and $\expect\epsilon^2 = 1$. The estimator recovers $f'(m) = 3$ exactly
+in expectation. A Monte Carlo average over $2\times10^6$ samples gives $3.007$. The smoothed objective is
+$J(m) = m^2 + \sigma^2$, which has the same minimiser as $f$. For nonconvex $f$, smoothing with larger $\sigma$
+removes small local minima. This smoothing is one reason evolution strategies cope with rugged objectives.
+
+## Cost
+
+Each generation costs $\lambda$ evaluations of $f$, which can run in parallel. The covariance update and sampling cost
+$O(n^2)$ per sample, and the eigendecomposition used to sample from $\Cmat$ costs $O(n^3)$, amortised over several
+generations. This limits full CMA-ES to a few thousand variables. Diagonal and low-rank variants scale further.
+
+## Trade-offs
+
+- **Evaluations.** An ES typically needs hundreds to thousands of evaluations per dimension on hard problems. When each
+  evaluation is expensive, Bayesian optimisation (see <NoteLink to="hyperparameter-search">hyperparameter search</NoteLink>)
+  is more economical.
+- **Gradients available.** When $f$ is differentiable and cheap to differentiate, gradient-based methods use far fewer
+  evaluations. The ES gradient estimator's variance grows with the dimension.
+- **Invariance.** CMA-ES is invariant to rotations of the search space and to monotone transformations of $f$. Few
+  other methods have both.
+- **Multimodality.** Restart strategies with increasing population (IPOP-CMA-ES) handle many local minima. A single run
+  converges to one basin.

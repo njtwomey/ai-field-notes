@@ -1,0 +1,103 @@
+---
+title: Mirror descent
+kind: concept
+summary: Mirror descent replaces the squared Euclidean distance in a gradient step with a Bregman divergence $D_\psi$ suited to the feasible set. With negative entropy on the simplex it becomes the exponentiated gradient update $x_i \propto x_i e^{-\eta g_i}$, with rate depending on $\log n$.
+tags: [optimisation, convexity, online-learning, worked-example]
+aliases: [exponentiated gradient, mirror map, multiplicative weights update, entropic mirror descent]
+requires: [subgradients, kl-divergence]
+related: [bregman-divergences-and-scoring-rules, conjugate-functions, proximal-gradient-methods, adagrad-and-rmsprop, multi-armed-bandit]
+references: [beck2003, kivinen1997, nesterov2004]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $\psi$ be a differentiable, strictly convex function, the **mirror map**. Its **Bregman divergence** is
+$D_\psi(\xvec, \yvec) = \psi(\xvec) - \psi(\yvec) - \nabla\psi(\yvec)^\top(\xvec - \yvec)$. **Mirror descent** for
+minimising a convex $f$ over a convex set $\Ccal$ updates
+
+$$
+\xvec_{k+1} = \argmin_{\xvec \in \Ccal}\ \eta\,\gvec_k^\top\xvec + D_\psi(\xvec, \xvec_k), \qquad \gvec_k \in \partial f(\xvec_k).
+$$
+
+With $\psi = \tfrac12\norm{\xvec}^2$, $D_\psi$ is half the squared Euclidean distance and the update is projected
+(sub)gradient descent <Cite id="beck2003" />.
+</Definition>
+
+## Intuition
+
+The <NoteLink to="subgradients">subgradient method</NoteLink> measures step length in the Euclidean norm. Its rate is
+$RG/\sqrt{K}$, where $R$ is the Euclidean radius of the feasible set and $G$ bounds the Euclidean norm of
+subgradients. For some sets the Euclidean norm is a poor fit. On the probability simplex in $\reals^n$, gradients are
+often bounded coordinate-wise, so their Euclidean norm can be $\sqrt n$ times larger than their largest entry.
+
+Mirror descent measures distance with a divergence adapted to the set. The Bregman divergence $D_\psi(\xvec, \yvec)$
+is the gap at $\xvec$ between $\psi$ and its tangent plane at $\yvec$. It is nonnegative by convexity and zero only when
+$\xvec = \yvec$. It is not symmetric. The KL divergence and the squared Euclidean distance are both Bregman divergences; their
+other properties are covered in <NoteLink to="bregman-divergences-and-scoring-rules">Bregman divergences and scoring
+rules</NoteLink>.
+
+The name comes from the unconstrained update. Setting the gradient of the objective to zero gives
+$\eta\gvec_k + \nabla\psi(\xvec_{k+1}) - \nabla\psi(\xvec_k) = \zeros$, that is
+
+$$
+\nabla\psi(\xvec_{k+1}) = \nabla\psi(\xvec_k) - \eta\gvec_k.
+$$
+
+The gradient step is taken in the "mirror" (dual) space of $\nabla\psi$ values, and mapped back through the inverse
+of $\nabla\psi$, which is $\nabla\psi^*$ by the inverse-gradient property of <NoteLink to="conjugate-functions">conjugate
+functions</NoteLink>.
+
+## Exponentiated gradient
+
+On the simplex $\Delta_n = \set{\xvec \ge \zeros : \ones^\top\xvec = 1}$, take the negative entropy
+$\psi(\xvec) = \sum_i x_i\log x_i$. Its Bregman divergence between points of the simplex is the
+<NoteLink to="kl-divergence">KL divergence</NoteLink> $\sum_i x_i\log(x_i/y_i)$. The update minimises
+$\eta\gvec^\top\xvec + \sum_i x_i\log(x_i/x_{k,i})$ subject to $\ones^\top\xvec = 1$. With multiplier $\nu$ for the
+constraint, the stationarity condition in $x_i$ is $\eta g_i + \log(x_i/x_{k,i}) + 1 + \nu = 0$, so
+$x_i = x_{k,i}e^{-\eta g_i}e^{-1-\nu}$. The factor $e^{-1-\nu}$ is fixed by normalisation:
+
+$$
+x_{k+1,i} = \frac{x_{k,i}\,e^{-\eta g_{k,i}}}{\sum_j x_{k,j}\,e^{-\eta g_{k,j}}}.
+$$
+
+This is the **exponentiated gradient** update <Cite id="kivinen1997" />, also called multiplicative weights. It stays
+on the simplex without any projection. Coordinates with large gradients lose weight multiplicatively.
+
+## Rate
+
+The analysis of the subgradient method carries over with $D_\psi$ in place of the squared distance. If $\psi$ is
+1-strongly convex with respect to a norm $\norm{\cdot}$ and $\norm{\gvec_k}_* \le G$ in the dual norm, then with a
+constant step
+
+$$
+\min_{k < K} f(\xvec_k) - f^* \le \frac{D_\psi(\xvec^*, \xvec_0)}{\eta K} + \frac{\eta G^2}{2}
+$$
+
+<Cite id="beck2003" />. Choosing $\eta$ to balance the terms gives $G\sqrt{2D_\psi(\xvec^*, \xvec_0)/K}$.
+
+For the simplex with negative entropy, $\psi$ is 1-strongly convex with respect to $\norm{\cdot}_1$ (this is Pinsker's
+inequality), the dual norm is $\norm{\cdot}_\infty$, and starting from the uniform point gives
+$D_\psi(\xvec^*, \xvec_0) \le \log n$. The rate is $G_\infty\sqrt{2\log n/K}$. Projected subgradient descent on the
+same problem has a bound of order $G_\infty\sqrt{n/K}$, because $G_2$ can be $\sqrt n\,G_\infty$. In high dimension the
+difference between $\log n$ and $n$ is large.
+
+## Worked example
+
+Start at the uniform point $\xvec_0 = (1/3, 1/3, 1/3)$ with gradient $\gvec = (1, 0, -1)$ and $\eta = 1$. The
+unnormalised weights are $\tfrac13(e^{-1}, 1, e^{1}) = (0.123, 0.333, 0.906)$. Normalising gives
+$\xvec_1 = (0.090, 0.245, 0.665)$. The coordinate with negative gradient gains weight, the one with positive gradient
+loses it, and the point stays on the simplex. A Euclidean step of the same size, $\xvec_0 - \gvec = (-0.667, 0.333,
+1.333)$, leaves the simplex and must be projected back.
+
+## Pitfalls
+
+- **The divergence must match the set.** The gradient of negative entropy, $\log x_i + 1$, tends to $-\infty$ at the
+  edge of the simplex, which keeps iterates strictly inside. On an unbounded set negative entropy is not a sensible
+  choice.
+- **Zero weights are permanent.** Multiplicative updates never revive a coordinate that reaches exactly zero. Start from
+  a point with all coordinates positive.
+- **Online learning.** The same update, applied to a sequence of loss vectors, is the Hedge algorithm for prediction
+  with expert advice. Its regret after $K$ rounds is of order $\sqrt{K\log n}$: the rate above multiplied by $K$.
+- **Adaptive methods.** AdaGrad is mirror descent with a quadratic mirror map $\tfrac12\xvec^\top\Hmat_k\xvec$ that
+  adapts to the observed gradients (see <NoteLink to="adagrad-and-rmsprop">AdaGrad and RMSProp</NoteLink>).

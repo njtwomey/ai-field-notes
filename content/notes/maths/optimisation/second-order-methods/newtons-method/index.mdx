@@ -1,0 +1,148 @@
+---
+title: Newton's method
+kind: concept
+summary: Newton's method minimises $f$ by jumping to the minimiser of its second-order Taylor model, $\xvec_{k+1} = \xvec_k - \nabla^2 f(\xvec_k)^{-1}\nabla f(\xvec_k)$. Near a minimum with positive definite Hessian it converges quadratically. Far away it can diverge or move to a maximum, so practical versions damp the step.
+tags: [optimisation, second-order-methods, convergence, worked-example]
+aliases: [Newton–Raphson method for optimisation, damped Newton method, Newton direction, Newton decrement]
+requires: [hessian, taylor-series, gradient]
+related: [root-finding, quasi-newton-methods, line-search, trust-region-methods, gauss-newton-and-levenberg-marquardt, iteratively-reweighted-least-squares, convergence-of-gradient-descent]
+references: [nocedal2006, boyd2004, nesterov2004]
+status: draft
+updated: 2026-09-27
+---
+
+import { NewtonExplorer } from './NewtonExplorer'
+
+<Definition>
+**Newton's method** for minimising a twice-differentiable $f : \reals^n \to \reals$ iterates
+
+$$
+\xvec_{k+1} = \xvec_k - \Hmat_k^{-1}\gvec_k, \qquad \gvec_k = \nabla f(\xvec_k), \quad \Hmat_k = \nabla^2 f(\xvec_k).
+$$
+
+The step $\pvec_k = -\Hmat_k^{-1}\gvec_k$ is the **Newton direction**. It is found by solving the linear system
+$\Hmat_k\pvec_k = -\gvec_k$. **Damped Newton** takes $\xvec_{k+1} = \xvec_k + t_k\pvec_k$ with a step
+$t_k \in (0, 1]$ chosen by a <NoteLink to="line-search">line search</NoteLink> <Cite id="nocedal2006" />.
+</Definition>
+
+## Intuition
+
+The <NoteLink to="taylor-series">second-order Taylor expansion</NoteLink> of $f$ around $\xvec_k$ is the quadratic
+model
+
+$$
+m_k(\pvec) = f(\xvec_k) + \gvec_k^\top\pvec + \tfrac12\pvec^\top\Hmat_k\pvec.
+$$
+
+Its gradient is $\gvec_k + \Hmat_k\pvec$. Setting that to zero gives $\pvec = -\Hmat_k^{-1}\gvec_k$. Newton's method
+moves to the stationary point of the model and builds a new model there. When $\Hmat_k$ is positive definite, the
+model is a bowl and the stationary point is its minimum.
+
+Gradient descent uses a model with curvature $1/\eta$ in every direction. Newton's method uses the true curvature in
+each direction. On a quadratic $f$ the model is exact, and Newton's method reaches the minimum in one step, whatever the
+<NoteLink to="condition-number">condition number</NoteLink>. The Hessian rescales each eigen-direction of the problem
+by its curvature, which undoes the ill-conditioning that slows gradient descent.
+
+Newton's method is **affine invariant**. Under a change of variables $\xvec = \Amat\yvec$ with invertible $\Amat$, the
+Newton iterates in $\yvec$ are the images of those in $\xvec$. Scaling or rotating the parameters has no effect on it.
+Gradient descent does not have this property.
+
+## Quadratic convergence
+
+Let $\xvec^*$ be a minimiser with $\nabla f(\xvec^*) = \zeros$. Assume that near $\xvec^*$ the Hessian satisfies
+$\Hmat \succeq m\Imat$ with $m > 0$ and is Lipschitz: $\norm{\nabla^2 f(\xvec) - \nabla^2 f(\yvec)} \le
+M\norm{\xvec - \yvec}$. Write $\evec_k = \xvec_k - \xvec^*$.
+
+The gradient difference is an integral of the Hessian along the segment from $\xvec^*$ to $\xvec_k$:
+$\gvec_k = \gvec_k - \nabla f(\xvec^*) = \int_0^1 \nabla^2 f(\xvec^* + t\evec_k)\,\evec_k\,dt$. Then
+
+$$
+\evec_{k+1} = \evec_k - \Hmat_k^{-1}\gvec_k = \Hmat_k^{-1}\int_0^1 \LP \Hmat_k - \nabla^2 f(\xvec^* + t\evec_k) \RP\evec_k\,dt.
+$$
+
+The points $\xvec_k$ and $\xvec^* + t\evec_k$ are a distance $(1 - t)\norm{\evec_k}$ apart, so the bracket has norm at
+most $M(1 - t)\norm{\evec_k}$. Integrating $1 - t$ over $[0, 1]$ gives $\tfrac12$, and $\norm{\Hmat_k^{-1}} \le 1/m$:
+
+$$
+\norm{\evec_{k+1}} \le \frac{M}{2m}\norm{\evec_k}^2.
+$$
+
+The error is squared at every step, up to the constant $M/(2m)$. Once $\norm{\evec_k} < m/M$, the number of correct
+digits roughly doubles per iteration. This is **quadratic convergence** <Cite id="nocedal2006" />. The region where it
+holds is the **region of quadratic convergence**. Gradient descent, by contrast, gains a fixed number of digits per
+iteration.
+
+## Worked example
+
+Minimise $f(x) = x^4/4 - x^2 + 2x$, whose minimiser is $x^* = -1.769292$. Here $f'(x) = x^3 - 2x + 2$ and
+$f''(x) = 3x^2 - 2$. Starting at $x_0 = -2$:
+
+| $k$ | $x_k$ | error $x_k - x^*$ |
+| --- | --- | --- |
+| 0 | $-2$ | $-2.3\times10^{-1}$ |
+| 1 | $-1.8$ | $-3.1\times10^{-2}$ |
+| 2 | $-1.769948$ | $-6.6\times10^{-4}$ |
+| 3 | $-1.7692927$ | $-3.1\times10^{-7}$ |
+| 4 | $-1.76929235424$ | $-6.8\times10^{-14}$ |
+
+The ratio $e_{k+1}/e_k^2$ approaches $f'''(x^*)/(2f''(x^*)) = -0.718$, the one-dimensional form of the constant
+$M/(2m)$. Four iterations reach machine precision.
+
+## Failure modes
+
+Far from a minimum the quadratic model can be a poor guide. The figure shows three failures.
+
+<NewtonExplorer />
+
+- **Overshooting on a convex function.** For $f(x) = \log\cosh x$, which is convex with minimum at 0, the Newton step
+  is $x - \tanh x\cosh^2 x = x - \tfrac12\sinh 2x$. From $\abs{x_0} < 1.089$ it converges; from $x_0 = 1.2$ the iterates
+  are $-1.53$, $3.82$, $-517$, and then overflow. The curvature $\operatorname{sech}^2 x$ is tiny far from the origin,
+  so the model predicts a minimum much too far away.
+- **Negative curvature.** Where $f''(x) < 0$, the model is an upside-down bowl and its stationary point is a maximum.
+  Newton's method moves uphill towards it. On $x^4/4 - x^2/2 + x/10$ from $x_0 = 0.3$, it converges to the local
+  maximum at $x = 0.101$. In several dimensions, an indefinite Hessian sends Newton's method towards saddle points.
+- **Cycling.** On $x^4/4 - x^2 + 2x$ from $x_0 = 0$, the iterates alternate $0, 1, 0, 1, \dots$ forever.
+
+## Damped Newton
+
+A backtracking line search on the Newton direction fixes the first failure. Start with $t = 1$ and halve $t$ until the
+<NoteLink to="line-search">Armijo condition</NoteLink> $f(\xvec + t\pvec) \le f(\xvec) + c\,t\,\gvec^\top\pvec$ holds.
+When $\Hmat$ is positive definite, $\gvec^\top\pvec = -\gvec^\top\Hmat^{-1}\gvec < 0$, so $\pvec$ is a descent
+direction and a small enough $t$ always succeeds. On $\log\cosh x$ from $x_0 = 1.2$ with $c = 0.25$, the first step
+is halved once, to $x_1 = -0.167$; after that full steps are accepted and the iterates are $3.1\times10^{-3}$ and
+$-2.0\times10^{-8}$.
+
+For strongly convex $f$ with Lipschitz Hessian, damped Newton has two phases. In the first, each step decreases $f$ by
+at least a fixed amount. In the second, which starts once the iterate enters the region of quadratic convergence, full
+steps are always accepted and convergence is quadratic <Cite id="boyd2004" />. The number of iterations in the second
+phase is tiny: about 5 or 6 for any practical accuracy.
+
+Negative curvature needs a different fix: replace $\Hmat$ by a positive definite matrix before solving. Options are
+adding $\lambda\Imat$ with $\lambda$ large enough (the idea behind <NoteLink to="gauss-newton-and-levenberg-marquardt">Levenberg–Marquardt</NoteLink>),
+flipping negative eigenvalues, or restricting the step to a region where the model is trusted
+(<NoteLink to="trust-region-methods">trust-region methods</NoteLink>). Damped Newton in the figure falls back to the
+gradient direction when $f'' \le 0$.
+
+## Cost
+
+Each iteration forms the $n \times n$ Hessian and solves an $n \times n$ linear system. With a
+<NoteLink to="cholesky-decomposition">Cholesky factorisation</NoteLink> the solve costs about $n^3/3$ operations, and
+storage is $n^2$. For $n$ in the thousands this is affordable and the few iterations needed make Newton's method the
+fastest option. For $n$ in the millions, as in neural networks, it is not. <NoteLink to="quasi-newton-methods">Quasi-Newton
+methods</NoteLink> approximate the Hessian from gradients, and Newton–CG methods solve the system approximately with
+conjugate gradients, using only Hessian-vector products.
+
+In statistics, Newton's method on a log-likelihood is **Fisher scoring** when the Hessian is replaced by its
+expectation. For generalised linear models it becomes <NoteLink to="iteratively-reweighted-least-squares">iteratively
+reweighted least squares</NoteLink>.
+
+## Pitfalls
+
+- **Pure Newton is not a global method.** Always use a line search or trust region unless the start is known to be close.
+- **Do not invert the Hessian.** Solve $\Hmat\pvec = -\gvec$ with a factorisation. Forming $\Hmat^{-1}$ costs more and
+  is less accurate.
+- **Stopping rule.** The quantity $\lambda^2 = \gvec^\top\Hmat^{-1}\gvec$, the **Newton decrement**, estimates
+  $2(f(\xvec) - f^*)$ near the optimum. It is affine invariant, unlike $\norm{\gvec}$, and is the natural stopping
+  criterion.
+- **Nonconvex problems.** A converged Newton iteration has found a stationary point. Check that the Hessian there is
+  positive definite before calling it a minimum.

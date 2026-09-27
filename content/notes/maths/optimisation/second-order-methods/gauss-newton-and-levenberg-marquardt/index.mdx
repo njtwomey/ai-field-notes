@@ -1,0 +1,114 @@
+---
+title: Gauss–Newton and Levenberg–Marquardt
+kind: technique
+summary: For nonlinear least squares $\tfrac12\norm{\rvec(\xvec)}^2$, Gauss–Newton approximates the Hessian by $\Jmat^\top\Jmat$, dropping second derivatives of the residuals, and solves a linear least-squares problem per step. Levenberg–Marquardt adds damping $\lambda\Imat$, moving between Gauss–Newton and gradient descent as $\lambda$ changes.
+tags: [optimisation, second-order-methods, least-squares, worked-example]
+aliases: [Gauss–Newton method, Levenberg–Marquardt algorithm, LM algorithm, damped least squares, nonlinear least squares, generalised Gauss–Newton]
+requires: [newtons-method, jacobian, linear-regression]
+related: [trust-region-methods, iteratively-reweighted-least-squares, structure-from-motion, camera-calibration, quasi-newton-methods]
+references: [nocedal2006, levenberg1944, marquardt1963]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+To minimise $S(\xvec) = \tfrac12\sum_{i=1}^m r_i(\xvec)^2 = \tfrac12\norm{\rvec(\xvec)}^2$ with residuals
+$\rvec : \reals^n \to \reals^m$ and Jacobian $\Jmat = \partial\rvec/\partial\xvec \in \reals^{m \times n}$,
+**Gauss–Newton** takes the step $\pvec$ that solves $\Jmat^\top\Jmat\,\pvec = -\Jmat^\top\rvec$.
+**Levenberg–Marquardt** solves $(\Jmat^\top\Jmat + \lambda\Imat)\pvec = -\Jmat^\top\rvec$ with a damping parameter
+$\lambda \ge 0$ that is decreased after successful steps and increased after failed ones
+<Cite id="levenberg1944" /> <Cite id="marquardt1963" />.
+</Definition>
+
+## Problem
+
+Fitting a model $y \approx h(t; \xvec)$ that is nonlinear in its parameters, such as an exponential growth curve, a
+camera projection or a chemical rate law, leads to a sum of squared residuals $r_i = h(t_i; \xvec) - y_i$.
+<NoteLink to="newtons-method">Newton's method</NoteLink> needs the Hessian of $S$, which involves second derivatives of
+every residual. Gradient descent ignores curvature and is slow. The least-squares structure gives most of the Hessian
+for free.
+
+## Mechanism
+
+### The Gauss–Newton approximation
+
+Differentiate $S = \tfrac12\sum_i r_i^2$. The gradient and Hessian are
+
+$$
+\nabla S = \sum_i r_i\nabla r_i = \Jmat^\top\rvec, \qquad
+\nabla^2 S = \sum_i \nabla r_i\nabla r_i^\top + \sum_i r_i\nabla^2 r_i = \Jmat^\top\Jmat + \sum_i r_i\nabla^2 r_i.
+$$
+
+The first term of the Hessian needs only the Jacobian, which the gradient already uses. The second term needs every
+residual's Hessian. Gauss–Newton drops it. The approximation is good in two cases: when the residuals $r_i$ are small
+at the solution (the model fits well), and when the residuals are nearly linear ($\nabla^2 r_i$ small).
+
+With $\Jmat^\top\Jmat$ in place of $\nabla^2 S$, the Newton equation becomes $\Jmat^\top\Jmat\pvec = -\Jmat^\top\rvec$.
+These are the normal equations of the linear least-squares problem
+
+$$
+\min_{\pvec}\ \tfrac12\norm{\rvec + \Jmat\pvec}^2.
+$$
+
+This is the same step derived differently: linearise the residuals, $\rvec(\xvec + \pvec) \approx \rvec + \Jmat\pvec$,
+and solve the resulting <NoteLink to="linear-regression">linear regression</NoteLink>. It is solved stably with a QR
+factorisation of $\Jmat$, without forming $\Jmat^\top\Jmat$.
+
+The matrix $\Jmat^\top\Jmat$ is always positive semidefinite, so the Gauss–Newton direction is a descent direction
+whenever $\Jmat$ has full column rank. Near a solution with zero residual, Gauss–Newton converges quadratically, like
+Newton. With large residuals it converges only linearly, or not at all.
+
+### Levenberg–Marquardt damping
+
+Adding $\lambda\Imat$ to $\Jmat^\top\Jmat$ does three things.
+
+- The matrix becomes positive definite for any $\lambda > 0$, so the step exists even when $\Jmat$ is rank deficient.
+- As $\lambda \to 0$ the step becomes the Gauss–Newton step.
+- As $\lambda \to \infty$ the step becomes $-\Jmat^\top\rvec/\lambda$, a short gradient descent step.
+
+The damping adapts to how well the linearisation predicts. A common rule: after a step that reduces $S$, accept it and
+divide $\lambda$ by 10; after a step that increases $S$, reject it, multiply $\lambda$ by 10 and solve again. The step
+with damping $\lambda$ is the solution of the Gauss–Newton model restricted to a ball whose radius shrinks as $\lambda$
+grows, so Levenberg–Marquardt is a <NoteLink to="trust-region-methods">trust-region method</NoteLink> that controls
+the multiplier rather than the radius <Cite id="nocedal2006" />.
+
+Marquardt replaced $\lambda\Imat$ with $\lambda\diag(\Jmat^\top\Jmat)$ <Cite id="marquardt1963" />. The damping then
+scales with each parameter's curvature, and the step no longer depends on the units of the parameters.
+
+## Worked example
+
+Fit $y \approx a e^{bt}$ to the four points $t = 0, 1, 2, 3$, $y = 2.0, 2.7, 3.7, 4.9$, from $(a, b) = (1, 0)$. The
+residuals are $r_i = a e^{bt_i} - y_i$, and the Jacobian has rows $(e^{bt_i},\ a t_i e^{bt_i})$. The starting loss is
+$S = 13.2$.
+
+| iteration | Gauss–Newton $(a, b)$ | $S$ | Levenberg–Marquardt $(a, b)$ | $S$ |
+| --- | --- | --- | --- | --- |
+| 1 | $(1.870, 0.970)$ | $478.8$ | $(1.080, 0.161)$ | $8.85$ |
+| 2 | $(1.279, 0.788)$ | $41.4$ | $(1.349, 0.601)$ | $5.95$ |
+| 3 | $(1.580, 0.494)$ | $2.38$ | $(1.717, 0.377)$ | $0.149$ |
+| 4 | $(1.943, 0.318)$ | $0.0136$ | $(1.992, 0.298)$ | $0.0038$ |
+| 5 | $(2.015, 0.297)$ | $0.00148$ | $(2.015, 0.298)$ | $0.00147$ |
+
+Both reach $(a, b) = (2.0154, 0.2975)$ with $S = 0.001472$. The first Gauss–Newton step overshoots badly: the
+linearisation at $b = 0$ cannot see the exponential growth, and the loss rises from 13.2 to 479. Levenberg–Marquardt,
+starting at $\lambda = 0.01$, rejects steps until $\lambda = 100$, takes a short cautious step, and then decreases
+$\lambda$ tenfold per iteration. Its loss decreases at every step. Near the solution both methods take nearly the same
+steps, and both converge rapidly because the residuals there are small.
+
+## Cost
+
+Each iteration evaluates the $m \times n$ Jacobian and solves an $n \times n$ system (or an $m \times n$ least-squares
+problem), at $O(mn^2)$. No second derivatives are needed. Levenberg–Marquardt may solve several systems per iteration
+when steps are rejected. In <NoteLink to="structure-from-motion">bundle adjustment</NoteLink>, $\Jmat$ is sparse and
+the normal equations are solved with a Schur complement that exploits the structure.
+
+## Trade-offs
+
+- **Large residuals.** When the model fits poorly, the dropped term matters and Gauss–Newton slows down. Quasi-Newton
+  methods that approximate only the dropped term can help.
+- **Other losses.** For a loss that is not a sum of squares, the **generalised Gauss–Newton** matrix
+  $\Jmat^\top\nabla^2\ell\,\Jmat$ keeps the curvature of the loss $\ell$ and drops that of the model. For a GLM with
+  canonical link it equals the Fisher information, and the method is <NoteLink to="iteratively-reweighted-least-squares">iteratively
+  reweighted least squares</NoteLink>.
+- **Robustness.** Squared residuals give outliers large influence. Robust losses such as Huber are handled by
+  reweighting the residuals at each iteration.

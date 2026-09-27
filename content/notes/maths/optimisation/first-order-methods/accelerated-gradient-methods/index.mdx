@@ -1,0 +1,161 @@
+---
+title: Accelerated gradient methods
+kind: concept
+summary: Nesterov's accelerated gradient method takes a gradient step from an extrapolated point $\yvec_k = \xvec_k + \beta_k(\xvec_k - \xvec_{k-1})$. On $L$-smooth convex functions it reaches $f(\xvec_k) - f^* = O(L\norm{\xvec_0 - \xvec^*}^2/k^2)$, which no first-order method can beat, against $O(1/k)$ for gradient descent.
+tags: [optimisation, convergence, momentum, gradients]
+aliases: [fast gradient method, optimal first-order method, estimate sequence]
+requires: [convergence-of-gradient-descent]
+related: [momentum-and-nesterov, gradient-descent, proximal-gradient-methods, condition-number]
+references: [nesterov1983, nesterov2004, polyak1964, beck2009, lessard2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { AccelerationExplorer } from './AccelerationExplorer'
+
+<Definition>
+**Nesterov's accelerated gradient method** minimises an $L$-smooth convex $f$ from $\xvec_0$ by setting
+$\xvec_1 = \xvec_0 - \tfrac1L\nabla f(\xvec_0)$, $t_1 = 1$, and for $k \ge 1$
+
+$$
+t_{k+1} = \frac{1 + \sqrt{1 + 4t_k^2}}{2}, \qquad
+\yvec_k = \xvec_k + \frac{t_k - 1}{t_{k+1}}(\xvec_k - \xvec_{k-1}), \qquad
+\xvec_{k+1} = \yvec_k - \frac1L\nabla f(\yvec_k).
+$$
+
+It guarantees $f(\xvec_k) - f^* \le 2L\norm{\xvec_0 - \xvec^*}^2/(k+1)^2$ <Cite id="nesterov1983" />
+<Cite id="beck2009" />.
+</Definition>
+
+## Intuition
+
+<NoteLink to="convergence-of-gradient-descent">Gradient descent</NoteLink> with step $1/L$ uses only the current
+gradient. On a long, shallow valley it takes many short steps in nearly the same direction. An accelerated method
+remembers the previous displacement $\xvec_k - \xvec_{k-1}$ and extrapolates along it before taking the gradient step.
+The extrapolation weight $(t_k - 1)/t_{k+1}$ starts at 0 and rises towards 1 as $1 - 3/k$ for large $k$. Consistent
+directions build speed. The gradient at the extrapolated point, rather than at $\xvec_k$, corrects the step before it
+overshoots.
+
+The gain is in the rate, not the constant. Gradient descent needs $O(1/\epsilon)$ iterations for accuracy $\epsilon$.
+The accelerated method needs $O(1/\sqrt\epsilon)$. For $\epsilon = 10^{-6}$ that is the difference between about a
+million iterations and about a thousand.
+
+The deep-learning view of the same update, with a fixed momentum coefficient and stochastic gradients, is in
+<NoteLink to="momentum-and-nesterov">momentum and Nesterov momentum</NoteLink>. This note derives the guarantees.
+
+## The O(1/k²) rate
+
+The proof builds a quantity that never increases and that bounds $f(\xvec_k) - f^*$ <Cite id="beck2009" />.
+
+**Step 1: a one-step inequality.** Let $\xvec^+ = \yvec - \tfrac1L\nabla f(\yvec)$ be a gradient step from any
+$\yvec$. The descent lemma gives $f(\xvec^+) \le f(\yvec) - \tfrac{1}{2L}\norm{\nabla f(\yvec)}^2$. Convexity gives
+$f(\yvec) \le f(\uvec) + \nabla f(\yvec)^\top(\yvec - \uvec)$ for any $\uvec$. Adding them and writing
+$\nabla f(\yvec) = L(\yvec - \xvec^+)$,
+
+$$
+f(\xvec^+) \le f(\uvec) + L(\yvec - \xvec^+)^\top(\yvec - \uvec) - \frac{L}{2}\norm{\yvec - \xvec^+}^2
+= f(\uvec) + \frac{L}{2}\LP\norm{\yvec - \uvec}^2 - \norm{\xvec^+ - \uvec}^2\RP.
+$$
+
+The equality uses $2\avec^\top\bvec - \norm{\avec}^2 = \norm{\bvec}^2 - \norm{\bvec - \avec}^2$ with
+$\avec = \yvec - \xvec^+$ and $\bvec = \yvec - \uvec$.
+
+**Step 2: choose $\uvec$ between the iterate and the optimum.** Apply step 1 at $\yvec = \yvec_k$, so
+$\xvec^+ = \xvec_{k+1}$, with $\uvec = (1 - 1/t)\xvec_k + (1/t)\xvec^*$ and $t = t_{k+1} \ge 1$. By convexity
+$f(\uvec) \le (1 - 1/t)f(\xvec_k) + (1/t)f^*$. Write $\delta_k = f(\xvec_k) - f^*$ and multiply by $t^2$:
+
+$$
+t^2\delta_{k+1} \le (t^2 - t)\,\delta_k + \frac{L}{2}\LP\norm{t\yvec_k - (t-1)\xvec_k - \xvec^*}^2 - \norm{t\xvec_{k+1} - (t-1)\xvec_k - \xvec^*}^2\RP.
+$$
+
+**Step 3: the choices of $t_k$ and $\yvec_k$ make it telescope.** The recursion for $t_{k+1}$ is the positive root of
+$t_{k+1}^2 - t_{k+1} = t_k^2$, so the first term is $t_k^2\delta_k$. The extrapolation rule is equivalent to
+$t_{k+1}\yvec_k - (t_{k+1} - 1)\xvec_k = t_k\xvec_k - (t_k - 1)\xvec_{k-1}$. Define
+$\wvec_k = t_k\xvec_k - (t_k - 1)\xvec_{k-1} - \xvec^*$. The inequality becomes
+
+$$
+t_{k+1}^2\delta_{k+1} + \frac{L}{2}\norm{\wvec_{k+1}}^2 \le t_k^2\delta_k + \frac{L}{2}\norm{\wvec_k}^2.
+$$
+
+The quantity $E_k = t_k^2\delta_k + \tfrac{L}{2}\norm{\wvec_k}^2$ never increases.
+
+**Step 4: start and finish.** At $k = 1$, $t_1 = 1$ and $\wvec_1 = \xvec_1 - \xvec^*$. Step 1 with $\yvec = \xvec_0$
+and $\uvec = \xvec^*$ gives $E_1 \le \tfrac{L}{2}\norm{\xvec_0 - \xvec^*}^2$. So
+$t_k^2\delta_k \le E_k \le \tfrac{L}{2}\norm{\xvec_0 - \xvec^*}^2$. Finally, $\sqrt{1 + 4t^2} \ge 2t$ gives
+$t_{k+1} \ge t_k + \tfrac12$, so $t_k \ge (k+1)/2$ and
+
+$$
+f(\xvec_k) - f^* \le \frac{L\norm{\xvec_0 - \xvec^*}^2}{2t_k^2} \le \frac{2L\norm{\xvec_0 - \xvec^*}^2}{(k+1)^2}.
+$$
+
+Unlike gradient descent, the function values need not decrease at every step. The guarantee is on $E_k$, which mixes
+function value and distance.
+
+## The lower bound
+
+Nesterov constructed a quadratic, a tridiagonal "chain" function, on which any method whose iterates lie in the span
+of the previous gradients has $f(\xvec_k) - f^* \ge 3L\norm{\xvec_0 - \xvec^*}^2/(32(k+1)^2)$ for $k$ up to half the
+dimension <Cite id="nesterov2004" />. Each gradient reveals only one more coordinate of the chain. The accelerated method
+matches this bound up to a constant factor, so it is an **optimal** first-order method for the class. Gradient descent
+is a factor of $k$ slower.
+
+## Strongly convex functions
+
+If $f$ is also $\mu$-strongly convex, with $\kappa = L/\mu$, a constant momentum weight
+
+$$
+\beta = \frac{\sqrt\kappa - 1}{\sqrt\kappa + 1}, \qquad \yvec_k = \xvec_k + \beta(\xvec_k - \xvec_{k-1}), \qquad
+\xvec_{k+1} = \yvec_k - \frac1L\nabla f(\yvec_k),
+$$
+
+gives $f(\xvec_k) - f^* \le (1 - 1/\sqrt\kappa)^k\,(f(\xvec_0) - f^* + \tfrac{\mu}{2}\norm{\xvec_0 - \xvec^*}^2)$
+<Cite id="nesterov2004" />. The number of iterations for accuracy $\epsilon$ drops from $\kappa\log(1/\epsilon)$ for
+gradient descent to $\sqrt\kappa\log(1/\epsilon)$. For $\kappa = 100$ and a reduction by $10^6$, that is about 1380
+against 140. The lower bound for this class is $((\sqrt\kappa - 1)/(\sqrt\kappa + 1))^k$, so this rate is optimal up to
+constants.
+
+The constant weight needs $\mu$. The $t_k$ schedule does not, and it still converges on strongly convex problems, but
+only at the $O(1/k^2)$ rate, with visible ripples. Restarting the schedule whenever $f$ increases recovers a linear
+rate in practice without knowing $\mu$.
+
+## Heavy ball on quadratics
+
+Polyak's **heavy-ball method** evaluates the gradient at $\xvec_k$ instead of at an extrapolated point:
+$\xvec_{k+1} = \xvec_k - \alpha\nabla f(\xvec_k) + \beta(\xvec_k - \xvec_{k-1})$ <Cite id="polyak1964" />. On a
+quadratic with Hessian eigenvalues in $[\mu, L]$, the choice
+
+$$
+\alpha = \frac{4}{(\sqrt L + \sqrt\mu)^2}, \qquad \beta = \LP\frac{\sqrt\kappa - 1}{\sqrt\kappa + 1}\RP^2
+$$
+
+makes every eigen-direction contract by $(\sqrt\kappa - 1)/(\sqrt\kappa + 1)$ per step. That is faster than Nesterov's
+$1 - 1/\sqrt\kappa$. The derivation, by eigen-decomposing a two-step linear recursion, is in
+<NoteLink to="momentum-and-nesterov">momentum and Nesterov momentum</NoteLink>.
+
+The heavy-ball guarantee does not extend beyond quadratics. There are smooth strongly convex functions on which heavy
+ball with these parameters cycles and never converges <Cite id="lessard2016" />. Nesterov's method, by evaluating the
+gradient after extrapolating, keeps its guarantee on the whole class.
+
+## Figure: three methods on one valley
+
+<AccelerationExplorer />
+
+At $\kappa = 100$ and the default start, reducing $f$ by a factor $10^6$ takes 480 iterations of gradient descent, 65
+of Nesterov's method with known $\mu$ and 58 of heavy ball. The step $1/L$ removes the steep component in one
+iteration, so gradient descent then moves straight along the valley floor, and its slow progress there is the whole
+cost. Heavy ball's larger step overshoots the floor and spirals in, so its curve is not monotone. The convex schedule
+starts fast, but its curve ripples: each ripple is a stretch in which the momentum is too large for the flat direction.
+Raising $\kappa$ widens the gap between gradient descent and the accelerated methods.
+
+## Pitfalls
+
+- **Acceleration is fragile to noise.** With stochastic gradients the extrapolation amplifies errors, and the
+  accelerated rate is lost to the noise term. In deep learning, momentum helps mostly through smoothing, not through
+  the rate derived here.
+- **Nonmonotone progress.** The function value rises at times. A stopping rule based on a single increase will stop too
+  early.
+- **The step must be $1/L$ or smaller.** Overestimating the step breaks the proof. A backtracking version increases
+  $L$ whenever the descent lemma fails at the tried step.
+- **Proximal version.** The same scheme with a proximal step in place of the gradient step is FISTA, which carries the
+  $O(1/k^2)$ rate to composite problems such as the lasso (see <NoteLink to="proximal-gradient-methods">proximal
+  gradient methods</NoteLink>).

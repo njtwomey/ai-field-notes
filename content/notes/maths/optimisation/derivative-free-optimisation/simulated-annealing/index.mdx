@@ -1,0 +1,105 @@
+---
+title: Simulated annealing
+kind: technique
+summary: Simulated annealing minimises $f$ by a random walk that always accepts downhill moves and accepts an uphill move of size $\Delta$ with probability $e^{-\Delta/T}$. At fixed temperature $T$ the walk samples the Boltzmann distribution $\propto e^{-f/T}$; lowering $T$ slowly concentrates it on the global minima.
+tags: [optimisation, derivative-free-optimisation, combinatorial-optimisation, markov-chain-monte-carlo, worked-example]
+aliases: [annealing, Metropolis acceptance rule, cooling schedule, Boltzmann distribution, logarithmic cooling]
+requires: [metropolis-hastings]
+related: [markov-chain-monte-carlo, evolution-strategies-and-cma-es, nelder-mead, gibbs-sampling]
+references: [kirkpatrick1983, metropolis1953, geman1984, hajek1988]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Simulated annealing** minimises $f$ over a set $\Xcal$, discrete or continuous, using a proposal distribution
+$q(\xvec' \mid \xvec)$ and a decreasing sequence of temperatures $T_k > 0$. At step $k$ it proposes $\xvec' \sim
+q(\cdot \mid \xvec_k)$, computes $\Delta = f(\xvec') - f(\xvec_k)$, and moves to $\xvec'$ with probability
+$\min(1, e^{-\Delta/T_k})$; otherwise it stays <Cite id="kirkpatrick1983" />.
+</Definition>
+
+## Problem
+
+Local search that only accepts improvements stops at the first local minimum. Many objectives, especially combinatorial
+ones such as the travelling salesman problem, graph partitioning or circuit placement, have enormous numbers of local
+minima and no gradients. Random restarts help little when the number of basins is exponential. Simulated annealing
+lets the search climb out of basins, often early and rarely late.
+
+The name comes from metallurgy. Cooling a metal slowly lets its atoms settle into a low-energy crystal. Cooling it
+quickly freezes defects in place. The algorithm treats $f$ as energy and $T$ as temperature.
+
+## Mechanism
+
+### The Metropolis rule samples the Boltzmann distribution
+
+At a fixed temperature $T$, the acceptance rule is the <NoteLink to="metropolis-hastings">Metropolis</NoteLink> rule for
+the target density
+
+$$
+\pi_T(\xvec) \propto e^{-f(\xvec)/T},
+$$
+
+the **Boltzmann distribution** <Cite id="metropolis1953" />. To check this, take a symmetric proposal,
+$q(\xvec' \mid \xvec) = q(\xvec \mid \xvec')$, and a pair with $f(\xvec') > f(\xvec)$. The probability flow from
+$\xvec$ to $\xvec'$ is $\pi_T(\xvec)\,q\,e^{-(f(\xvec') - f(\xvec))/T}$, and from $\xvec'$ back to $\xvec$ it is
+$\pi_T(\xvec')\,q \cdot 1$. Both equal $q\,e^{-f(\xvec')/T}$ up to the same normalising constant. This **detailed
+balance** makes $\pi_T$ a stationary distribution of the chain.
+
+### Low temperature concentrates on the global minima
+
+The ratio of the Boltzmann probabilities of any point $\xvec$ and a global minimiser $\xvec^*$ is
+
+$$
+\frac{\pi_T(\xvec)}{\pi_T(\xvec^*)} = e^{-(f(\xvec) - f^*)/T}.
+$$
+
+For any $\xvec$ with $f(\xvec) > f^*$, the ratio tends to zero as $T \to 0$. On a finite set, $\pi_T$ therefore converges
+to the uniform distribution over the global minimisers. At high temperature $\pi_T$ is nearly uniform and the walk
+explores freely. At low temperature it is concentrated but the walk moves slowly, because escaping a basin of depth $d$
+requires an uphill run whose probability scales like $e^{-d/T}$. Annealing starts hot, to explore, and cools, to
+concentrate, hoping to stay close to $\pi_T$ throughout.
+
+### Cooling schedules
+
+The schedule decides whether the chain can track $\pi_T$ as it changes.
+
+- **Logarithmic:** $T_k = c/\log(k + 2)$. For $c$ large enough the probability of being at a global minimiser tends to
+  1 <Cite id="geman1984" />. On a finite set, the exact condition is that $c$ is at least the depth of the deepest local
+  minimum that is not global, the height of the barrier that must be climbed to leave it <Cite id="hajek1988" />. The
+  schedule is so slow that it is a theoretical guarantee rather than a practical recipe.
+- **Geometric:** $T_{k+1} = \alpha T_k$ with $\alpha$ between 0.8 and 0.99, holding each temperature for a number of
+  proposals proportional to the neighbourhood size <Cite id="kirkpatrick1983" />. This is the common practical choice.
+  It carries no guarantee of reaching the global minimum.
+
+The initial temperature is set so that most uphill proposals are accepted, for example $T_0$ comparable to a typical
+$\Delta$. The final temperature is set so that almost none are.
+
+## Worked example
+
+**Acceptance probabilities.** An uphill move with $\Delta = 1$ is accepted with probability $e^{-1} = 0.368$ at
+$T = 1$, $e^{-2} = 0.135$ at $T = 0.5$ and $e^{-10} = 4.5\times10^{-5}$ at $T = 0.1$. Lowering the temperature tenfold
+makes the same uphill move about 8000 times less likely.
+
+**Two minima.** Let $\Xcal$ have two local minima with $f = 0$ (global) and $f = 0.5$ (local), and ignore the other
+states. Their Boltzmann probability ratio is $e^{-0.5/T}$: $0.61$ at $T = 1$ and $e^{-5} = 0.0067$ at $T = 0.1$. At high
+temperature both are visited almost equally. At low temperature the global minimum dominates, provided the chain
+has had time to cross between them. If the barrier between the basins has height $d = 2$, the rate of crossing at
+$T = 0.1$ scales like $e^{-20} \approx 2\times10^{-9}$ per attempt. A chain that cooled to $0.1$ while in the wrong
+basin will not leave it.
+
+## Cost
+
+Each step costs one proposal and one evaluation of $f$, often only of the change $\Delta$, which for local moves in
+combinatorial problems can be computed in constant time. Runs need many steps, typically $10^5$ to $10^8$.
+
+## Trade-offs
+
+- **Generality.** It needs only a proposal and a way to compute $\Delta$, and applies to discrete, continuous and mixed
+  spaces.
+- **Tuning.** The initial temperature, cooling rate, time per temperature and proposal size all matter, and poor
+  choices either waste time or freeze too early.
+- **Guarantees are asymptotic.** The global convergence result holds only for the logarithmic schedule and infinite
+  time. In practice simulated annealing is a heuristic that usually finds good, not optimal, solutions.
+- **Relatives.** Parallel tempering runs chains at several temperatures and swaps states between them, keeping exploration
+  alive without a schedule. For continuous problems with gradients, Langevin dynamics adds noise of temperature $T$ to
+  gradient descent and has the same Boltzmann stationary distribution.

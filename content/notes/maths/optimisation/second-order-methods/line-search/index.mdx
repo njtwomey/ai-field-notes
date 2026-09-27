@@ -1,0 +1,129 @@
+---
+title: Line search
+kind: technique
+summary: A line search chooses the step length $\alpha$ along a descent direction $\pvec$. The Armijo condition demands a decrease proportional to $\alpha\nabla f^\top\pvec$; the Wolfe curvature condition rules out steps that are too short. Backtracking, which shrinks $\alpha$ until Armijo holds, is the simplest rule.
+tags: [optimisation, step-size, worked-example]
+aliases: [backtracking line search, Armijo condition, sufficient decrease condition, Wolfe conditions, strong Wolfe conditions, curvature condition, exact line search, Zoutendijk's theorem]
+requires: [gradient-descent, taylor-series]
+related: [newtons-method, quasi-newton-methods, trust-region-methods, convergence-of-gradient-descent, learning-rate-schedules]
+references: [nocedal2006, armijo1966, wolfe1969, boyd2004]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Given an iterate $\xvec$ and a descent direction $\pvec$ with $\nabla f(\xvec)^\top\pvec < 0$, a **line search**
+chooses a step length $\alpha > 0$ and sets $\xvec^+ = \xvec + \alpha\pvec$. With $\phi(\alpha) = f(\xvec + \alpha\pvec)$
+and constants $0 < c_1 < c_2 < 1$, the **Wolfe conditions** are
+
+$$
+\phi(\alpha) \le \phi(0) + c_1\alpha\phi'(0) \quad \text{(sufficient decrease)}, \qquad
+\phi'(\alpha) \ge c_2\phi'(0) \quad \text{(curvature)}.
+$$
+
+The first alone is the **Armijo condition** <Cite id="armijo1966" /> <Cite id="wolfe1969" />.
+</Definition>
+
+## Problem
+
+Descent methods choose a direction: the negative gradient, a <NoteLink to="newtons-method">Newton</NoteLink> direction
+or a <NoteLink to="quasi-newton-methods">quasi-Newton</NoteLink> direction. They still need a length. A fixed step
+requires knowing the smoothness constant $L$, which is rarely available and varies across the domain. Too long a step
+increases $f$. Too short a step wastes iterations. The **exact line search** $\alpha = \argmin_{\alpha > 0}\phi(\alpha)$
+is too expensive for anything but quadratics, and not needed. A line search accepts any step that makes enough
+progress, and finds one with few function evaluations.
+
+## Mechanism
+
+### Sufficient decrease
+
+The slope of $\phi$ at 0 is $\phi'(0) = \nabla f(\xvec)^\top\pvec < 0$. The tangent line $\phi(0) + \alpha\phi'(0)$
+predicts the decrease for small $\alpha$. The Armijo condition accepts $\alpha$ if the actual decrease is at least a
+fraction $c_1$ of the predicted one. Typical values are $c_1 = 10^{-4}$. Requiring *some* decrease, $\phi(\alpha) <
+\phi(0)$, is not enough: the decreases can shrink so fast that the iterates converge to a non-stationary point.
+
+### Curvature
+
+The Armijo condition holds for every small enough $\alpha$, so it cannot prevent tiny steps. The curvature condition
+requires the slope at $\alpha$ to have risen to at least $c_2$ times the initial slope. A step at which $\phi$ is still
+falling steeply is too short. Typical values are $c_2 = 0.9$ for Newton and quasi-Newton directions and $c_2 = 0.1$
+for nonlinear conjugate gradients. The **strong Wolfe** conditions replace the curvature condition with
+$\abs{\phi'(\alpha)} \le c_2\abs{\phi'(0)}$, which also excludes steps far past the minimum along the line.
+
+The curvature condition is what quasi-Newton methods need. It gives
+$\yvec^\top\svec = \alpha(\nabla f(\xvec^+) - \nabla f(\xvec))^\top\pvec = \alpha(\phi'(\alpha) - \phi'(0)) \ge
+\alpha(c_2 - 1)\phi'(0) > 0$, which keeps the BFGS approximation positive definite.
+
+### Backtracking
+
+**Backtracking** starts from a trial step $\alpha_0$ (1 for Newton-type directions) and multiplies it by
+$\rho \in (0, 1)$, typically $\tfrac12$, until the Armijo condition holds. The steps it rejects are too long, so the
+step it accepts is not much too short, and the curvature condition is usually not checked.
+
+**Backtracking terminates, and the step it accepts is not too small.** Take $\pvec = -\nabla f(\xvec)$ and $f$
+$L$-smooth. The descent lemma gives $\phi(\alpha) \le \phi(0) - \alpha(1 - L\alpha/2)\norm{\nabla f}^2$. The Armijo
+condition asks for $\phi(\alpha) \le \phi(0) - c_1\alpha\norm{\nabla f}^2$. It therefore holds whenever
+$1 - L\alpha/2 \ge c_1$, that is for every $\alpha \le 2(1 - c_1)/L$. Backtracking stops at the first trial step below
+this threshold, so the accepted step satisfies $\alpha \ge \min(\alpha_0,\ 2\rho(1 - c_1)/L)$. The guaranteed decrease
+per iteration is then a constant fraction of the one with the ideal step $1/L$, and the convergence rates of
+<NoteLink to="convergence-of-gradient-descent">gradient descent</NoteLink> carry over without knowing $L$
+<Cite id="boyd2004" />.
+
+### Zoutendijk's theorem
+
+For general descent directions, let $\theta_k$ be the angle between $\pvec_k$ and $-\nabla f(\xvec_k)$. If $f$ is
+bounded below and $L$-smooth, and every step satisfies the Wolfe conditions, then
+
+$$
+\sum_k \cos^2\theta_k\,\norm{\nabla f(\xvec_k)}^2 < \infty
+$$
+
+<Cite id="nocedal2006" />. So if the directions stay away from orthogonal to the gradient ($\cos\theta_k \ge \delta >
+0$), the gradients tend to zero. This is the global convergence guarantee of line-search methods.
+
+<Derivation title="Proof of Zoutendijk's theorem">
+The curvature condition and the Lipschitz gradient give a lower bound on the step:
+$(c_2 - 1)\nabla f_k^\top\pvec_k \le (\nabla f_{k+1} - \nabla f_k)^\top\pvec_k \le L\alpha_k\norm{\pvec_k}^2$, so
+$\alpha_k \ge \frac{(c_2 - 1)\nabla f_k^\top\pvec_k}{L\norm{\pvec_k}^2}$. Substitute into the sufficient decrease
+condition, using $\nabla f_k^\top\pvec_k < 0$:
+
+$$
+f_{k+1} \le f_k - c_1\frac{1 - c_2}{L}\frac{(\nabla f_k^\top\pvec_k)^2}{\norm{\pvec_k}^2}
+= f_k - c_1\frac{1 - c_2}{L}\cos^2\theta_k\norm{\nabla f_k}^2.
+$$
+
+Summing over $k$, the left side telescopes and $f$ is bounded below, so the sum of the decreases is finite.
+</Derivation>
+
+## Worked example
+
+Minimise $f(\xvec) = \tfrac12(x_1^2 + 10x_2^2)$ from $\xvec = (1, 1)$, where $f = 5.5$ and $\nabla f = (1, 10)$. Take
+$\pvec = -\nabla f$, so $\phi'(0) = -101$. Backtrack from $\alpha_0 = 1$ with $\rho = \tfrac12$ and $c_1 = 10^{-4}$.
+
+| $\alpha$ | $\phi(\alpha)$ | Armijo bound $5.5 - 0.0101\alpha$ | accepted |
+| --- | --- | --- | --- |
+| 1 | 405 | 5.4899 | no |
+| 0.5 | 80.1 | 5.4950 | no |
+| 0.25 | 11.5 | 5.4975 | no |
+| 0.125 | 0.695 | 5.4987 | yes |
+
+The accepted step is $0.125$. The exact minimiser along the line is $\alpha^* = \gvec^\top\gvec/\gvec^\top\Amat\gvec =
+0.101$, with $\Amat = \diag(1, 10)$. The smoothness constant is $L = 10$, and the threshold from the analysis above is
+$2(1 - c_1)/L \approx 0.2$. Backtracking found a step within a factor of 2 of that threshold with four function
+evaluations.
+
+## Cost
+
+Each trial costs one function evaluation. Backtracking usually accepts the first trial for Newton-type directions near
+the solution, so it costs almost nothing there. Wolfe line searches also evaluate gradients at trial points. They use
+bracketing and cubic interpolation to find an acceptable point in a few trials <Cite id="nocedal2006" />.
+
+## Trade-offs
+
+- **Line search versus trust region.** A line search fixes the direction and chooses the length. A
+  <NoteLink to="trust-region-methods">trust-region method</NoteLink> fixes a maximum length and chooses the direction.
+  Trust regions handle indefinite Hessians more naturally.
+- **Stochastic settings.** With minibatch gradients, $\phi$ is itself noisy and the conditions cannot be checked
+  reliably. Deep learning uses <NoteLink to="learning-rate-schedules">learning-rate schedules</NoteLink> instead.
+- **Initial trial step.** For gradient descent, a good $\alpha_0$ is the previous accepted step times a small factor
+  such as 2, so the search can grow as well as shrink.

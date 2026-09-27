@@ -1,0 +1,140 @@
+---
+title: Penalty and barrier methods
+kind: technique
+summary: Penalty and barrier methods solve a constrained problem as a sequence of unconstrained ones. A penalty charges for violations; a log barrier blocks the boundary from inside, with duality gap $m/t$ on its central path. The augmented Lagrangian adds multiplier estimates.
+tags: [optimisation, constrained-optimisation, duality, worked-example]
+aliases: [penalty method, quadratic penalty, exact penalty, log barrier, logarithmic barrier, interior-point method, central path, augmented Lagrangian, method of multipliers, ADMM, alternating direction method of multipliers]
+requires: [kkt-conditions, newtons-method]
+related: [lagrangian-duality, linear-programming, quadratic-programming, proximal-gradient-methods]
+references: [fiacco1990, boyd2004, nocedal2006, hestenes1969, boyd2011, karmarkar1984]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For minimising $f_0(\xvec)$ subject to constraints, a **penalty method** minimises $f_0(\xvec) + \mu P(\xvec)$ for an
+increasing sequence of weights $\mu$, where $P \ge 0$ vanishes exactly on the feasible set. A **barrier method**, for
+inequality constraints $f_i(\xvec) \le 0$, minimises $t f_0(\xvec) - \sum_i \log(-f_i(\xvec))$ for an increasing
+sequence of $t$, starting from a strictly feasible point. Each unconstrained minimiser is the starting point of the next
+<Cite id="fiacco1990" />.
+</Definition>
+
+## Problem
+
+Unconstrained minimisation is well understood: Newton's method, quasi-Newton methods and gradient descent all apply.
+Constraints break these methods, because a step can leave the feasible set. Penalty and barrier methods move the
+constraints into the objective and reuse unconstrained solvers. The price is a sequence of problems instead of one,
+and conditioning that deteriorates as the sequence approaches the constrained solution.
+
+## Mechanism
+
+### Quadratic penalty
+
+For equality constraints $h_j(\xvec) = 0$ the quadratic penalty is $\tfrac{\mu}{2}\sum_j h_j(\xvec)^2$. For
+inequalities it is $\tfrac{\mu}{2}\sum_i \max(0, f_i(\xvec))^2$. The penalised minimiser $\xvec(\mu)$ is generally
+infeasible, and approaches the constrained solution only as $\mu \to \infty$. At $\xvec(\mu)$, stationarity reads
+$\nabla f_0 + \sum_j \mu h_j\nabla h_j = \zeros$. Comparing with the Lagrange condition, $\mu h_j(\xvec(\mu))$ estimates
+the multiplier $\nu_j$. So the violation $h_j \approx \nu_j/\mu$ shrinks only like $1/\mu$.
+
+Large $\mu$ makes the Hessian of the penalised function ill-conditioned: its curvature across the constraint grows like
+$\mu$ while the curvature along it stays fixed. Unconstrained solvers slow down, and the sequence must increase $\mu$
+gradually with warm starts.
+
+An **exact penalty** $\mu\sum_j\abs{h_j(\xvec)}$ has the constrained solution as its exact minimiser for every $\mu$
+larger than the largest $\abs{\nu_j}$. It is nonsmooth, which complicates the inner solver <Cite id="nocedal2006" />.
+
+### Log barrier and the central path
+
+For inequality constraints, the barrier $-\sum_i\log(-f_i(\xvec))$ is finite only strictly inside the feasible set and
+grows to $+\infty$ at its boundary. Minimising $t f_0 - \sum_i \log(-f_i)$ therefore never leaves the interior. As $t$
+grows, the objective dominates and the minimiser $\xvec^*(t)$ moves towards the constrained optimum along a smooth
+curve, the **central path**.
+
+The central path comes with a certificate of accuracy. Stationarity at $\xvec^*(t)$ is
+
+$$
+t\nabla f_0(\xvec^*) + \sum_i \frac{1}{-f_i(\xvec^*)}\nabla f_i(\xvec^*) = \zeros.
+$$
+
+Divide by $t$ and define $\lambda_i = 1/(-t f_i(\xvec^*)) > 0$. The equation says that $\xvec^*(t)$ minimises the
+Lagrangian $L(\xvec, \lambdavec) = f_0 + \sum_i\lambda_i f_i$ for a convex problem, so the dual function at $\lambdavec$
+is
+
+$$
+g(\lambdavec) = f_0(\xvec^*) + \sum_i \lambda_i f_i(\xvec^*) = f_0(\xvec^*) - \frac{m}{t}.
+$$
+
+By <NoteLink to="lagrangian-duality">weak duality</NoteLink>, $f_0(\xvec^*(t)) - p^* \le m/t$, where $m$ is the number
+of inequality constraints <Cite id="boyd2004" />. The central path point for weight $t$ is within $m/t$ of optimal,
+with a dual point that proves it. The condition $\lambda_i(-f_i) = 1/t$ is a relaxed complementary slackness that
+becomes exact as $t \to \infty$.
+
+**Interior-point methods** follow the central path approximately: increase $t$ by a factor such as 10, take a few
+damped Newton steps, and repeat. Primal-dual versions update $\xvec$ and $\lambdavec$ together by Newton steps on the
+relaxed KKT equations. They solve linear programs, quadratic programs and many other convex problems in 20 to 60 Newton
+steps. Karmarkar's algorithm started this line of work for linear programming <Cite id="karmarkar1984" />.
+
+### Augmented Lagrangian
+
+The **augmented Lagrangian** for equality constraints adds a quadratic penalty to the Lagrangian:
+
+$$
+\Lcal_\rho(\xvec, \nuvec) = f_0(\xvec) + \nuvec^\top\hvec(\xvec) + \frac{\rho}{2}\norm{\hvec(\xvec)}^2.
+$$
+
+The **method of multipliers** alternates $\xvec_{k+1} = \argmin_{\xvec}\Lcal_\rho(\xvec, \nuvec_k)$ with
+$\nuvec_{k+1} = \nuvec_k + \rho\hvec(\xvec_{k+1})$ <Cite id="hestenes1969" />. The update comes from comparing
+stationarity of $\Lcal_\rho$, $\nabla f_0 + \sum_j(\nu_j + \rho h_j)\nabla h_j = \zeros$, with the Lagrange
+condition: $\nu_j + \rho h_j$ is the improved multiplier estimate. Because the multiplier absorbs the constraint force,
+the penalty weight $\rho$ need not grow without bound, and the subproblems stay well conditioned.
+
+### ADMM
+
+The **alternating direction method of multipliers** applies the augmented Lagrangian to problems that split into two
+parts, $\min f(\xvec) + g(\zvec)$ subject to $\Amat\xvec + \Bmat\zvec = \cvec$. It minimises over $\xvec$ and $\zvec$
+one at a time instead of jointly, then updates the multiplier <Cite id="boyd2011" />:
+
+$$
+\xvec \leftarrow \argmin_{\xvec}\Lcal_\rho(\xvec, \zvec, \yvec), \qquad
+\zvec \leftarrow \argmin_{\zvec}\Lcal_\rho(\xvec, \zvec, \yvec), \qquad
+\yvec \leftarrow \yvec + \rho(\Amat\xvec + \Bmat\zvec - \cvec).
+$$
+
+For the lasso, $f = \tfrac12\norm{\Dmat\xvec - \bvec}^2$ and $g = \lambda\norm{\zvec}_1$ with the constraint
+$\xvec - \zvec = \zeros$. The $\xvec$-update is a ridge regression and the $\zvec$-update is soft-thresholding (see
+<NoteLink to="proximal-gradient-methods">proximal gradient methods</NoteLink>). ADMM converges for convex problems
+under mild conditions, often slowly to high accuracy but quickly to modest accuracy, and it distributes naturally across
+machines when $f$ is a sum over data shards.
+
+## Worked example
+
+**Penalty and barrier.** Minimise $x$ subject to $x \ge 1$, so $p^* = 1$ with multiplier $\lambda^* = 1$.
+
+- Quadratic penalty: $x + \tfrac{\mu}{2}\max(0, 1 - x)^2$ is minimised where $1 - \mu(1 - x) = 0$, at
+  $x = 1 - 1/\mu$. For $\mu = 1, 10, 100$ the iterates are $0, 0.9, 0.99$: infeasible, approaching from outside, with
+  $\mu(1 - x) = 1 = \lambda^*$.
+- Log barrier: $tx - \log(x - 1)$ is minimised where $t - 1/(x - 1) = 0$, at $x = 1 + 1/t$. For $t = 1, 10, 100$ the
+  iterates are $2, 1.1, 1.01$: strictly feasible, approaching from inside. The gap $f_0 - p^* = 1/t$ equals $m/t$ with
+  $m = 1$, and $\lambda = 1/(t(x - 1)) = 1 = \lambda^*$ exactly.
+
+**Augmented Lagrangian.** Minimise $\tfrac12 x^2$ subject to $x = 1$. The multiplier is $\nu^* = -1$. With $\rho = 1$
+and $\nu_0 = 0$, the $x$-update is $x = (\rho - \nu)/(1 + \rho)$. The iterates are $x = 0.5, 0.75, 0.875, \dots$ with
+$\nu = -0.5, -0.75, -0.875, \dots$: the error halves each iteration, with $\rho$ fixed at 1. The error factor is
+$1/(1 + \rho)$, so $\rho = 10$ divides the error by 11 per iteration. The quadratic penalty with the same weight
+$\mu = 1$ stops at $x = 0.5$ and needs $\mu \to \infty$ to converge.
+
+## Cost
+
+Each outer iteration is an unconstrained minimisation, usually a few Newton steps from a warm start. Interior-point
+methods need 20 to 60 Newton steps in total; each Newton step solves a linear system of the size of the KKT system. ADMM
+iterations are cheap when the two subproblems have closed forms, but can take hundreds of iterations.
+
+## Trade-offs
+
+- **Penalty:** simple and works from infeasible starts, but ill-conditioned for large $\mu$ and never exactly feasible.
+- **Barrier:** always feasible and gives a duality gap bound, but needs a strictly feasible start, and cannot handle
+  equality constraints by the barrier itself.
+- **Augmented Lagrangian:** keeps $\rho$ bounded and converges to exact feasibility; the multiplier update adds an outer
+  loop.
+- **ADMM:** splits hard problems into easy pieces, at the cost of slow convergence to high accuracy and sensitivity to
+  $\rho$.

@@ -1,0 +1,178 @@
+---
+title: Stochastic gradient descent theory
+kind: concept
+summary: SGD steps along unbiased noisy gradients. For convex $f$ with bounded gradients, the averaged iterate reaches $\expect f(\bar\xvec_K) - f^* \le RG/\sqrt K$. With a constant step on a strongly convex $f$ the error falls fast to a noise floor proportional to $\eta$; steps obeying $\sum\eta_k = \infty$, $\sum\eta_k^2 < \infty$ remove the floor.
+tags: [optimisation, stochastic-optimisation, convergence, gradients, worked-example]
+aliases: [SGD convergence, stochastic approximation, Robbins–Monro conditions, Robbins–Monro algorithm, Polyak–Ruppert averaging, iterate averaging, noise floor]
+requires: [convergence-of-gradient-descent, expectation, variance-and-covariance]
+related: [sgd-for-linear-models, learning-rate-schedules, minibatching-and-batch-size, variance-reduction, subgradients, stochastic-variational-inference]
+references: [robbins1951, polyak1992, bottou2018, nemirovski2009, bottou2010]
+status: draft
+updated: 2026-09-27
+---
+
+import { NoiseFloor } from './NoiseFloor'
+
+<Definition>
+To minimise $F(\xvec) = \expect_\xi[f(\xvec, \xi)]$, **stochastic gradient descent** (SGD) iterates
+$\xvec_{k+1} = \xvec_k - \eta_k\gvec_k$, where $\gvec_k = \nabla f(\xvec_k, \xi_k)$ is computed from a fresh sample
+$\xi_k$ and is **unbiased**: $\expect[\gvec_k \mid \xvec_k] = \nabla F(\xvec_k)$. Its convergence depends on the
+step sizes $\eta_k$ and on the gradient noise, measured by the variance $\sigma^2 \ge \expect\norm{\gvec_k -
+\nabla F(\xvec_k)}^2$ or the second moment $G^2 \ge \expect\norm{\gvec_k}^2$ <Cite id="robbins1951" />
+<Cite id="bottou2018" />.
+</Definition>
+
+## Intuition
+
+In machine learning $F$ is an average loss over $n$ training examples, and $\xi$ picks one example or a minibatch. A
+full gradient costs $n$ example-gradients. A stochastic gradient costs one and points in the right direction on
+average. Far from the optimum, the true gradient is large and the noise is a small perturbation, so SGD makes almost
+the same progress per step as gradient descent at a fraction of the cost. Near the optimum, the true gradient shrinks
+to zero but the noise does not. With a constant step the iterate keeps being kicked around and settles into a cloud
+whose size is proportional to the step. Reaching the optimum itself needs the steps to shrink.
+
+## Convex functions: the O(1/√K) rate
+
+Assume $F$ is convex, $\expect\norm{\gvec_k}^2 \le G^2$ and $\norm{\xvec_0 - \xvec^*} \le R$. Expand the squared
+distance after one step and take the expectation conditional on $\xvec_k$:
+
+$$
+\expect\LB\norm{\xvec_{k+1} - \xvec^*}^2 \mid \xvec_k\RB = \norm{\xvec_k - \xvec^*}^2 - 2\eta_k\nabla F(\xvec_k)^\top(\xvec_k - \xvec^*) + \eta_k^2\expect\LB\norm{\gvec_k}^2 \mid \xvec_k\RB.
+$$
+
+Unbiasedness replaced $\gvec_k$ by $\nabla F(\xvec_k)$ in the middle term. Convexity gives
+$\nabla F(\xvec_k)^\top(\xvec_k - \xvec^*) \ge F(\xvec_k) - F^*$. Write $D_k = \expect\norm{\xvec_k - \xvec^*}^2$.
+Taking full expectations,
+
+$$
+2\eta_k\,\expect\LB F(\xvec_k) - F^*\RB \le D_k - D_{k+1} + \eta_k^2 G^2.
+$$
+
+Sum over $k = 0, \dots, K - 1$ with a constant step $\eta$. The distances telescope and $D_K \ge 0$, so
+$\frac1K\sum_k \expect[F(\xvec_k) - F^*] \le R^2/(2\eta K) + \eta G^2/2$. By convexity, the averaged iterate
+$\bar\xvec_K = \frac1K\sum_{k<K}\xvec_k$ does at least as well as the average of the values. Choosing
+$\eta = R/(G\sqrt K)$ balances the two terms:
+
+$$
+\expect\LB F(\bar\xvec_K)\RB - F^* \le \frac{RG}{\sqrt K}.
+$$
+
+This is the same argument as for the deterministic <NoteLink to="subgradients">subgradient method</NoteLink>, with an
+expectation. No stochastic first-order method can do better than $O(1/\sqrt K)$ on this class, so the rate is optimal
+<Cite id="nemirovski2009" />. Smoothness does not help here: the noise, not the curvature, limits the rate.
+
+## Strongly convex functions: the noise floor
+
+Now let $F$ be $\mu$-strongly convex and $L$-smooth, and let the noise have variance at most $\sigma^2$. Split the
+update into a deterministic gradient step and noise:
+
+$$
+\xvec_{k+1} - \xvec^* = \underbrace{\LP\xvec_k - \eta\nabla F(\xvec_k) - \xvec^*\RP}_{\text{gradient step}} - \eta\underbrace{\LP\gvec_k - \nabla F(\xvec_k)\RP}_{\text{noise}}.
+$$
+
+The noise has mean zero given $\xvec_k$, so the cross term vanishes in expectation and the squared norms add. For
+$\eta \le 1/L$ the gradient step is a contraction, $\norm{\xvec - \eta\nabla F(\xvec) - \xvec^*} \le (1 - \eta\mu)
+\norm{\xvec - \xvec^*}$. On a quadratic this is visible directly: the step multiplies each eigen-direction of the
+Hessian by $1 - \eta\lambda_i \in [0, 1 - \eta\mu]$. Hence
+
+$$
+D_{k+1} \le (1 - \eta\mu)^2 D_k + \eta^2\sigma^2.
+$$
+
+Unrolling the recursion gives a geometric decay towards a fixed point:
+
+$$
+D_k \le (1 - \eta\mu)^{2k}D_0 + \frac{\eta^2\sigma^2}{1 - (1 - \eta\mu)^2} = (1 - \eta\mu)^{2k}D_0 + \frac{\eta\sigma^2}{\mu(2 - \eta\mu)}.
+$$
+
+The first term is the deterministic linear rate of <NoteLink to="convergence-of-gradient-descent">gradient descent</NoteLink>.
+The second is the **noise floor**, approximately $\eta\sigma^2/(2\mu)$. On a quadratic with isotropic noise the bound is
+exact, coordinate by coordinate. A constant step converges linearly to a neighbourhood of radius $O(\sqrt{\eta})$ and
+then stops improving. Halving the step halves the floor but also halves the linear rate.
+
+<NoiseFloor />
+
+## Decreasing steps
+
+### Robbins–Monro conditions
+
+Unroll the recursion with varying steps, taking $(1 - \eta_k\mu)^2 \le 1 - \eta_k\mu$:
+
+$$
+D_K \le \prod_{k<K}(1 - \eta_k\mu)\,D_0 + \sigma^2\sum_{k<K}\eta_k^2\prod_{j=k+1}^{K-1}(1 - \eta_j\mu).
+$$
+
+The first term forgets the starting point only if $\prod_k(1 - \eta_k\mu) \to 0$, which holds if and only if
+$\sum_k \eta_k = \infty$. The second term, the accumulated noise, vanishes only if the steps shrink: it is controlled
+when $\sum_k \eta_k^2 < \infty$. Together these are the **Robbins–Monro conditions**
+
+$$
+\sum_{k=0}^\infty \eta_k = \infty, \qquad \sum_{k=0}^\infty \eta_k^2 < \infty,
+$$
+
+under which stochastic approximation converges to the root of $\nabla F = \zeros$ <Cite id="robbins1951" />. The
+schedule $\eta_k = c/k$ satisfies both. The schedule $c/\sqrt k$ fails the second, and a constant step fails it too.
+
+### The O(1/k) rate
+
+For strongly convex $F$, the schedule $\eta_k = 2/(\mu(k + k_0))$ with $k_0 \ge 2L/\mu$ (so that $\eta_k \le 1/L$)
+gives
+
+$$
+D_k \le \frac{\nu}{k + k_0}, \qquad \nu = \max\LP k_0 D_0,\ \frac{4\sigma^2}{\mu^2}\RP.
+$$
+
+The proof is by induction. Write $m = k + k_0$ and assume $D_k \le \nu/m$. Then
+$D_{k+1} \le (1 - 2/m)\nu/m + 4\sigma^2/(\mu^2 m^2) \le \nu(m - 1)/m^2 \le \nu/(m + 1)$, using $4\sigma^2/\mu^2 \le \nu$
+and $(m - 1)(m + 1) \le m^2$ <Cite id="bottou2018" />. The rate $O(\sigma^2/(\mu^2 k))$ is optimal for stochastic
+first-order methods on strongly convex problems <Cite id="nemirovski2009" />.
+
+The constant in the step matters. A step $c/k$ with $c$ below $1/(2\mu)$ can slow convergence to $O(k^{-2c\mu})$, far
+slower than $1/k$. Underestimating $\mu$ is safe; overestimating it is not.
+
+### Iterate averaging
+
+**Polyak–Ruppert averaging** runs SGD with steps that decay more slowly than $1/k$, such as $\eta_k \propto k^{-\alpha}$
+with $\tfrac12 < \alpha < 1$, and returns the running average $\bar\xvec_K = \frac1K\sum_{k<K}\xvec_k$. Larger steps make
+fast progress and forget the start quickly; averaging cancels the fluctuations. The average attains the optimal
+asymptotic covariance, the one achieved by the best possible estimator from the same samples, without knowing $\mu$ or
+the curvature <Cite id="polyak1992" />. On quadratics even a constant step with averaging converges, as the figure
+shows.
+
+## Nonconvex functions
+
+For $L$-smooth nonconvex $F$ with noise variance $\sigma^2$, SGD with a constant step $\eta \le 1/L$ satisfies
+
+$$
+\frac1K\sum_{k<K}\expect\norm{\nabla F(\xvec_k)}^2 \le \frac{2(F(\xvec_0) - F^*)}{\eta K} + L\eta\sigma^2,
+$$
+
+from the descent lemma and unbiasedness <Cite id="bottou2018" />. With $\eta \propto 1/\sqrt K$ the average squared
+gradient norm falls like $1/\sqrt K$. This guarantees approximate stationarity, not a minimum. The theory of neural
+network training rests on this bound and on empirical findings.
+
+## Worked example
+
+Take $F(x) = \tfrac{\mu}{2}x^2$ with $\mu = 1$, and gradients $\mu x + \sigma\epsilon$ with $\epsilon \sim \Gauss(0, 1)$
+and $\sigma = 1$. With $\eta = 0.1$ the recursion is exact: $D_{k+1} = 0.81 D_k + 0.01$. The fixed point is
+$D_\infty = 0.01/0.19 = 0.0526$, matching $\eta\sigma^2/(\mu(2 - \eta\mu))$. A simulation of 20000 runs for 2000 steps
+gives $0.0529$. The approximation $\eta\sigma^2/(2\mu) = 0.05$ is close. With $\eta = 0.01$, the floor drops to
+$0.0050$, but the contraction per step weakens from $0.9$ to $0.99$, so reaching the floor from $D_0 = 9$ takes about
+ten times as many steps.
+
+## Assumptions
+
+- **Unbiased gradients from independent samples.** Sampling without replacement (epochs over shuffled data) violates
+  independence within an epoch; it usually converges faster, but the analysis differs.
+- **Bounded variance.** The results use a bound on $\sigma^2$ or $G^2$ over the path. For least squares the variance
+  grows with $\norm{\xvec}$, and the bounds hold only in a bounded region or under a growth condition.
+
+## Pitfalls
+
+- **A flat loss curve is not convergence.** With a constant step, the training loss stops improving at the noise floor.
+  Decaying the step, or averaging, often lowers it further. See <NoteLink to="learning-rate-schedules">learning-rate schedules</NoteLink>.
+- **Reducing the noise instead of the step.** Larger <NoteLink to="minibatching-and-batch-size">minibatches</NoteLink>
+  divide $\sigma^2$ by the batch size, and <NoteLink to="variance-reduction">variance reduction</NoteLink> removes the
+  floor for finite sums while keeping a constant step.
+- **Rates count samples, not time.** SGD's $O(1/\sqrt K)$ is worse than gradient descent's $O(1/K)$ per iteration, but
+  each SGD iteration is $n$ times cheaper. For large $n$ and modest accuracy, SGD wins <Cite id="bottou2010" />.

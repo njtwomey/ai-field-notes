@@ -1,0 +1,126 @@
+---
+title: Variance reduction
+kind: technique
+summary: For a finite sum $F = \frac1n\sum_i f_i$, variance-reduced methods such as SVRG, SAG and SAGA correct each stochastic gradient with a stored reference gradient. The estimate stays unbiased and its variance vanishes at the optimum, so a constant step converges linearly.
+tags: [optimisation, stochastic-optimisation, convergence, worked-example]
+aliases: [SVRG, stochastic variance reduced gradient, SAG, stochastic average gradient, SAGA, variance-reduced SGD, incremental gradient]
+requires: [stochastic-gradient-descent-theory, variance-and-covariance]
+related: [minibatching-and-batch-size, convergence-of-gradient-descent, sgd-for-linear-models, importance-sampling]
+references: [johnson2013, leroux2012, schmidt2017, defazio2014, bottou2018]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For $F(\xvec) = \frac1n\sum_{i=1}^n f_i(\xvec)$, **SVRG** keeps a snapshot $\tilde\xvec$ and its full gradient
+$\nabla F(\tilde\xvec)$, and steps along
+
+$$
+\gvec_k = \nabla f_i(\xvec_k) - \nabla f_i(\tilde\xvec) + \nabla F(\tilde\xvec), \qquad i \sim \Unif\set{1, \dots, n},
+$$
+
+refreshing the snapshot every $m$ steps <Cite id="johnson2013" />. **SAGA** stores the last gradient $\alphavec_j$ seen
+for every $j$ and steps along $\nabla f_i(\xvec_k) - \alphavec_i + \frac1n\sum_j\alphavec_j$, then sets
+$\alphavec_i \leftarrow \nabla f_i(\xvec_k)$ <Cite id="defazio2014" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="stochastic-gradient-descent-theory">SGD</NoteLink> with a constant step stalls at a noise floor
+proportional to the step times the gradient variance. The variance does not vanish at the optimum: at $\xvec^*$ the
+average gradient is zero, but the individual $\nabla f_i(\xvec^*)$ are not. Decreasing steps remove the floor but slow
+convergence to $O(1/k)$. Full gradient descent converges linearly but costs $n$ gradients per step.
+
+When $F$ is a finite sum, as every training loss is, the noise has structure: it comes from a fixed, finite set of
+functions that are revisited. Variance-reduced methods exploit this to combine the cheap steps of SGD with the linear
+rate of gradient descent.
+
+## Mechanism
+
+### A control variate
+
+To estimate the mean of a random variable $X$, subtract a correlated variable $Y$ whose mean is known and add the mean
+back: $Z = X - Y + \expect Y$. Then $\expect Z = \expect X$, and
+
+$$
+\var(Z) = \var(X) + \var(Y) - 2\cov(X, Y).
+$$
+
+When $X$ and $Y$ are strongly positively correlated, $\var(Z)$ is much smaller than $\var(X)$. This is the
+**control variate** technique from Monte Carlo estimation.
+
+SVRG applies it with $X = \nabla f_i(\xvec)$ and $Y = \nabla f_i(\tilde\xvec)$, using the same random index $i$ for
+both. The mean of $Y$ over $i$ is the full gradient $\nabla F(\tilde\xvec)$, computed once per snapshot.
+
+**The estimate is unbiased.** Averaging over $i$, $\expect[\gvec_k] = \nabla F(\xvec_k) - \nabla F(\tilde\xvec) +
+\nabla F(\tilde\xvec) = \nabla F(\xvec_k)$.
+
+**Its variance vanishes as the iterates converge.** The variance of a vector is at most its second moment, so
+
+$$
+\expect\norm{\gvec_k - \nabla F(\xvec_k)}^2 \le \expect_i\norm{\nabla f_i(\xvec_k) - \nabla f_i(\tilde\xvec)}^2 \le L^2\norm{\xvec_k - \tilde\xvec}^2,
+$$
+
+when each $f_i$ is $L$-smooth. As $\xvec_k$ and $\tilde\xvec$ both approach $\xvec^*$, the bound goes to zero. The two
+gradients share the same example, so their difference cancels the part of the noise that comes from which example was
+drawn. Only the part that comes from the iterate having moved since the snapshot remains.
+
+### SVRG
+
+1. Compute the full gradient $\nabla F(\tilde\xvec)$ at the snapshot: $n$ gradient evaluations.
+2. Run $m$ inner steps $\xvec \leftarrow \xvec - \eta\gvec_k$ with the corrected gradient, each costing two
+   gradient evaluations.
+3. Set the snapshot to the last (or an averaged) inner iterate and repeat.
+
+For $\mu$-strongly convex $F$ and $L$-smooth $f_i$, with $\eta$ a small constant fraction of $1/L$ and
+$m$ of order $\kappa = L/\mu$, each outer loop reduces the expected suboptimality by a constant factor
+<Cite id="johnson2013" />. The total cost to reach accuracy $\epsilon$ is $O((n + \kappa)\log(1/\epsilon))$ gradient
+evaluations.
+
+### SAG and SAGA
+
+SAG and SAGA avoid the periodic full pass by storing one gradient per example. **SAG** steps along the average of the
+stored gradients after refreshing one of them <Cite id="leroux2012" /> <Cite id="schmidt2017" />. The average is a biased
+estimate of $\nabla F(\xvec_k)$, which complicates the analysis. **SAGA** uses the unbiased control-variate form in the
+definition. Both have the same $O((n + \kappa)\log(1/\epsilon))$ complexity. SAGA also handles a nonsmooth regulariser
+through a proximal step.
+
+For linear models, $\nabla f_i(\xvec) = \ell'(\avec_i^\top\xvec)\avec_i$, so storing the scalar $\ell'$ is enough and
+the memory is $O(n)$ rather than $O(nd)$.
+
+## Worked example
+
+Least squares with $f_i(\wvec) = \tfrac12(\avec_i^\top\wvec - y_i)^2$ on five examples: rows $\avec_i$ equal to
+$(1, 2), (2, 0), (0, 1), (1, 1), (3, 1)$ and targets $\yvec = (-0.7, 1.8, -0.9, -0.4, 2.2)$. The minimiser is
+$\wvec^* = (0.967, -0.9)$.
+
+- **SGD at the optimum.** The individual gradients at $\wvec^*$ average to zero, but their mean squared norm is
+  $0.199$. That is the variance an SGD step carries even at the solution.
+- **SVRG with a nearby snapshot.** With $\tilde\wvec = \wvec^* + (0.05, 0)$, the variance of the SVRG estimate at
+  $\wvec^*$ is $0.030$, about 6.5 times smaller. With $\tilde\wvec = \wvec^* + (0.01, 0)$ it is $0.0012$. For least
+  squares the correction $\nabla f_i(\wvec) - \nabla f_i(\tilde\wvec) = \avec_i\avec_i^\top(\wvec - \tilde\wvec)$ depends
+  only on $\wvec - \tilde\wvec$, so the variance scales exactly with $\norm{\wvec - \tilde\wvec}^2$: dividing the
+  distance by 5 divides the variance by 25.
+
+## Cost
+
+| Method | Gradient evaluations to reach $\epsilon$ (strongly convex) | Extra memory |
+| --- | --- | --- |
+| Gradient descent | $O(n\kappa\log(1/\epsilon))$ | none |
+| SGD, decreasing steps | $O(\kappa\sigma^2/(\mu\epsilon))$ | none |
+| SVRG | $O((n + \kappa)\log(1/\epsilon))$ | one snapshot and its gradient |
+| SAG, SAGA | $O((n + \kappa)\log(1/\epsilon))$ | one gradient (or scalar) per example |
+
+For $n$ and $\kappa$ both large, $n + \kappa$ is much smaller than $n\kappa$.
+
+## Trade-offs
+
+- **Finite sums only.** The methods need to revisit examples. For streaming data or data augmentation, where every
+  sample is new, the reference gradients go stale and the benefit disappears.
+- **Deep networks.** Variance-reduced methods have not beaten tuned SGD with momentum on deep networks
+  <Cite id="bottou2018" />. The snapshot gradients go stale quickly when the loss is highly nonconvex, and batch
+  normalisation and data augmentation break the finite-sum structure.
+- **Modest accuracy.** When only a few passes over the data are affordable, plain SGD makes more progress per pass at
+  the start. Variance reduction pays off when high accuracy is needed, as in convex models trained to convergence.
+- **Step size.** A constant step of order $1/L$ works. With SGD, a constant step that large would sit on a high noise
+  floor.

@@ -1,0 +1,93 @@
+---
+title: Nelder–Mead method
+kind: technique
+summary: The Nelder–Mead method minimises a function of $n$ variables from function values alone. It keeps a simplex of $n + 1$ points and reflects the worst through the centroid of the rest, expanding, contracting or shrinking as the values dictate. It has no general convergence guarantee.
+tags: [optimisation, derivative-free-optimisation, worked-example]
+aliases: [Nelder–Mead, downhill simplex method, amoeba method, Nelder-Mead simplex]
+requires: [gradient-descent]
+related: [evolution-strategies-and-cma-es, simulated-annealing, hyperparameter-search, linear-programming]
+references: [nelder1965, lagarias1998, mckinnon1998, nocedal2006]
+status: draft
+updated: 2026-09-27
+---
+
+import { NelderMeadExplorer } from './NelderMeadExplorer'
+
+<Definition>
+The **Nelder–Mead method** minimises $f : \reals^n \to \reals$ by maintaining a simplex of $n + 1$ points
+$\xvec_1, \dots, \xvec_{n+1}$ ordered so that $f(\xvec_1) \le \dots \le f(\xvec_{n+1})$. Each iteration computes the
+centroid $\bar\xvec$ of the best $n$ points and tries points on the line from the worst point $\xvec_{n+1}$ through
+$\bar\xvec$. It replaces $\xvec_{n+1}$ with a better point on that line, or else shrinks the whole simplex towards
+$\xvec_1$ <Cite id="nelder1965" />.
+</Definition>
+
+## Problem
+
+Some objectives have no usable gradient. The function may be a simulation, a physical experiment or a black-box
+program; it may be noisy or have kinks. Finite-difference gradients cost $n$ extra evaluations each and fail on noisy or
+nonsmooth functions. Nelder–Mead needs only comparisons between function values, and usually one or two evaluations
+per iteration.
+
+The name "simplex" refers to the geometric shape (a triangle in two dimensions, a tetrahedron in three). The method is
+unrelated to the simplex method of <NoteLink to="linear-programming">linear programming</NoteLink>.
+
+## Mechanism
+
+With the standard coefficients (reflection 1, expansion 2, contraction $\tfrac12$, shrink $\tfrac12$), one iteration
+is <Cite id="nocedal2006" />:
+
+1. **Order** the vertices by $f$ and compute the centroid $\bar\xvec = \frac1n\sum_{i=1}^n\xvec_i$ of all but the
+   worst.
+2. **Reflect**: $\xvec_r = \bar\xvec + (\bar\xvec - \xvec_{n+1})$. If $f(\xvec_1) \le f(\xvec_r) < f(\xvec_n)$,
+   replace the worst point with $\xvec_r$ and stop the iteration.
+3. **Expand**: if $f(\xvec_r) < f(\xvec_1)$, the direction is promising. Try $\xvec_e = \bar\xvec + 2(\bar\xvec -
+   \xvec_{n+1})$ and keep the better of $\xvec_e$ and $\xvec_r$.
+4. **Contract**: if $f(\xvec_r) \ge f(\xvec_n)$, the reflected point is poor. Try a point halfway between $\bar\xvec$
+   and the better of $\xvec_r$ and $\xvec_{n+1}$. Accept it if it improves on that point.
+5. **Shrink**: if contraction fails, move every vertex halfway towards the best, $\xvec_i \leftarrow \xvec_1 +
+   \tfrac12(\xvec_i - \xvec_1)$.
+
+The reflection moves the simplex away from high values, like a crude gradient step. Expansion lets the simplex grow and
+accelerate along a descending valley. Contraction and shrinking make it smaller, so it can settle into a minimum. The
+simplex adapts its shape to the local level sets: long along a valley, narrow across it.
+
+The method stops when the simplex is small or the spread of function values across its vertices falls below a
+tolerance.
+
+<NelderMeadExplorer />
+
+## Worked example
+
+Minimise $f(x, y) = (x - 1)^2 + 4(y - 2)^2$ from the simplex $(0, 0)$, $(1, 0)$, $(0, 1)$, with values 17, 16 and 5.
+
+**Iteration 1.** The worst vertex is $(0, 0)$. The centroid of the other two is $(0.5, 0.5)$. The reflected point is
+$(1, 1)$ with $f = 4$, better than the best vertex (5), so try expanding: $(1.5, 1.5)$ with $f = 0.25 + 1 = 1.25$. The
+expansion is better still and replaces $(0, 0)$. The simplex is now $(1.5, 1.5)$, $(0, 1)$, $(1, 0)$ with values
+1.25, 5 and 16.
+
+**Iteration 2.** The worst vertex is $(1, 0)$. The centroid of the other two is $(0.75, 1.25)$. The reflected point is
+$(0.5, 2.5)$ with $f = 0.25 + 1 = 1.25$. It ties with the best vertex and is better than the second worst (5), so it is
+accepted without trying an expansion. The simplex is now $(1.5, 1.5)$, $(0.5, 2.5)$, $(0, 1)$.
+
+Two iterations reduced the worst value in the simplex from 17 to 5 with three function evaluations. On the Rosenbrock
+function in the figure, from $(-1.2, 1)$, the best vertex reaches $f < 10^{-12}$ in about 100 iterations.
+
+## Cost
+
+One iteration evaluates $f$ once or twice in the usual case (reflection, possibly expansion or contraction) and $n$
+times after a shrink. Memory is $n + 1$ points. There is no linear algebra beyond vector averages.
+
+## Trade-offs
+
+- **No convergence theory in general.** In one dimension the method converges for strictly convex functions, and in two
+  dimensions it has some guarantees <Cite id="lagarias1998" />. McKinnon constructed a smooth strictly convex function
+  in two dimensions on which the simplex collapses and converges to a point that is not a minimiser
+  <Cite id="mckinnon1998" />. Restarting from the returned point with a fresh simplex usually recovers.
+- **Poor in high dimension.** Performance degrades quickly beyond about 10 variables. The simplex tends to degenerate
+  into a lower-dimensional shape, and progress per evaluation falls.
+- **Robust to kinks and mild noise.** Using only rankings of function values makes it insensitive to monotone
+  transformations of $f$ and to small discontinuities.
+- **Alternatives.** For expensive evaluations in a few dimensions, Bayesian optimisation (see
+  <NoteLink to="hyperparameter-search">hyperparameter search</NoteLink>) makes better use of each evaluation. For
+  moderate dimensions and noisy or rugged objectives, <NoteLink to="evolution-strategies-and-cma-es">CMA-ES</NoteLink>
+  is more reliable.
