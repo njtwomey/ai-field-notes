@@ -1,0 +1,271 @@
+---
+title: Tree-augmented naive Bayes
+kind: concept
+summary: 'Tree-augmented naive Bayes (TAN) keeps the class as a parent of every feature and adds a tree over the features, so each feature has at most one feature parent. The maximum-likelihood tree is the maximum spanning tree with edge weights $I(x_i; x_j \mid c)$.'
+tags: [classification, generative-models, probabilistic, graphical-models, information-theory, worked-example]
+aliases: [TAN, TAN classifier, augmented naive Bayes, Construct-TAN, conditional Chow–Liu tree]
+requires: [naive-bayes, bayesian-network, mutual-information]
+related: [chow-liu-trees, averaged-one-dependence-estimators, dirichlet-distribution]
+references: [friedman1997, chow1968, kruskal1956, prim1957, keogh1999, koller2009, cover2006]
+status: draft
+updated: 2026-09-27
+---
+
+import { TanStructure } from './TanStructure'
+
+<Definition>
+A **tree-augmented naive Bayes** (TAN) classifier is a <NoteLink to="bayesian-network">Bayesian network</NoteLink>
+over a class $c \in \set{1, \dots, K}$ and discrete features $x_1, \dots, x_d$ in which the class has no parents, every
+feature has the class as a parent, and the feature-to-feature edges form a directed tree: one root feature has no
+feature parent and every other feature $x_i$ has exactly one, $x_{\pi(i)}$. The joint distribution factorises as
+
+$$
+p(c, \xvec) = p(c)\, p(x_r \mid c) \prod_{i \ne r} p(x_i \mid c, x_{\pi(i)}),
+$$
+
+where $r$ is the root. The maximum-likelihood tree is a maximum-weight spanning tree of the complete graph over the
+features with edge weights $I(x_i; x_j \mid c)$ <Cite id="friedman1997" />.
+</Definition>
+
+## From naive Bayes to a tree
+
+<NoteLink to="naive-bayes">Naive Bayes</NoteLink> sets $p(\xvec \mid c) = \prod_i p(x_i \mid c)$: the features are
+conditionally independent given the class. TAN allows each feature to depend on the class and on one other feature.
+The class-conditional distribution becomes
+
+$$
+p(\xvec \mid c) = p(x_r \mid c) \prod_{i \ne r} p(x_i \mid c, x_{\pi(i)}).
+$$
+
+Each feature still sees the class, so every feature contributes to the posterior. The extra edge lets feature $x_i$
+discount the part of its evidence that its parent already supplied. For two classes the log-odds are
+
+$$
+\log\frac{p(c = 1 \mid \xvec)}{p(c = 0 \mid \xvec)} = \log\frac{p(c = 1)}{p(c = 0)} + \log\frac{p(x_r \mid c = 1)}{p(x_r \mid c = 0)} + \sum_{i \ne r}\log\frac{p(x_i \mid c = 1, x_{\pi(i)})}{p(x_i \mid c = 0, x_{\pi(i)})}.
+$$
+
+If $x_i$ is a copy of its parent, then $p(x_i \mid c, x_{\pi(i)})$ is 1 for the observed value in both classes and the
+term for $x_i$ is $\log 1 = 0$. Naive Bayes would instead add the parent's log-likelihood ratio a second time.
+
+A tree is the largest structure of this kind whose best member can be found exactly and cheaply. The restriction to
+one feature parent keeps every conditional table three-dimensional: class, feature and parent. For $d$ binary
+features and $K$ classes, naive Bayes has $Kd$ feature parameters and TAN has $K(2d - 1)$: one for the root and two
+for each other feature, one per parent value.
+
+## The likelihood decomposes over tree edges
+
+Let $\Dcal = \set{(c^{(n)}, \xvec^{(n)})}_{n=1}^{N}$ be $N$ training examples and $\hat p$ the empirical
+distribution, the relative frequency of each configuration in $\Dcal$. All entropies $\hat\entropy$ and mutual
+informations $\hat I$ below are computed under $\hat p$.
+
+**Step 1: the parameters.** Take any Bayesian network over variables $v_1, \dots, v_m$ with parent sets
+$\mathrm{pa}(k)$ and conditional tables $\theta(v_k \mid \mathrm{pa}(k))$. Its log-likelihood is a sum over nodes. Grouping
+the examples by the values of each node and its parents gives
+
+$$
+\log p(\Dcal) = \sum_{n=1}^{N}\sum_{k=1}^{m}\log\theta\paren{v_k^{(n)} \mid \mathrm{pa}(k)^{(n)}} = N\sum_{k=1}^{m}\sum_{u, a}\hat p(v_k = u, \mathrm{pa}(k) = a)\log\theta(u \mid a).
+$$
+
+For each parent value $a$ the inner sum is $\hat p(a)\sum_u \hat p(u \mid a)\log\theta(u \mid a)$. It equals
+$-\hat p(a)\brack{\hat\entropy(v_k \mid \mathrm{pa}(k) = a) + \KL(\hat p(\cdot \mid a) \,\|\, \theta(\cdot \mid a))}$.
+The <NoteLink to="kl-divergence">KL divergence</NoteLink> is non-negative and zero only when the two distributions
+agree, so the maximum-likelihood parameters are the empirical conditionals $\theta(u \mid a) = \hat p(u \mid a)$. At
+those parameters
+
+$$
+\log p(\Dcal) = -N\sum_{k=1}^{m}\hat\entropy(v_k \mid \mathrm{pa}(k)) = N\sum_{k=1}^{m}\hat I(v_k; \mathrm{pa}(k)) - N\sum_{k=1}^{m}\hat\entropy(v_k),
+$$
+
+using $\hat\entropy(v \mid \mathrm{pa}) = \hat\entropy(v) - \hat I(v; \mathrm{pa})$ from the definition of
+<NoteLink to="mutual-information">mutual information</NoteLink>. The last sum does not depend on the graph. The
+graph enters only through $\sum_k \hat I(v_k; \mathrm{pa}(k))$ <Cite id="friedman1997" />.
+
+**Step 2: specialise to TAN.** The class has no parents and contributes $\hat I(c; \emptyset) = 0$. The root has parent
+set $\set{c}$ and contributes $\hat I(x_r; c)$. Every other feature has parent set $\set{c, x_{\pi(i)}}$. The chain
+rule for mutual information, $I(X; Y, Z) = I(X; Z) + I(X; Y \mid Z)$, splits its term:
+
+$$
+\hat I(x_i; c, x_{\pi(i)}) = \hat I(x_i; c) + \hat I(x_i; x_{\pi(i)} \mid c).
+$$
+
+Adding up,
+
+$$
+\log p(\Dcal) = N\sum_{i=1}^{d}\hat I(x_i; c) + N\sum_{i \ne r}\hat I(x_i; x_{\pi(i)} \mid c) - N\Big[\hat\entropy(c) + \sum_{i=1}^{d}\hat\entropy(x_i)\Big].
+$$
+
+The first and last terms are the same for every tree. The middle term is a sum over the $d - 1$ tree edges of the
+edge weight
+
+$$
+w_{ij} = \hat I(x_i; x_j \mid c) = \sum_{c, x_i, x_j}\hat p(c, x_i, x_j)\log\frac{\hat p(x_i, x_j \mid c)}{\hat p(x_i \mid c)\,\hat p(x_j \mid c)}.
+$$
+
+Conditional mutual information is symmetric in $x_i$ and $x_j$, so the edge's direction does not matter. The
+maximum-likelihood TAN is therefore the tree that maximises the total weight of its undirected edges: a
+**maximum-weight spanning tree** of the complete graph on the features. This is the argument of Chow and Liu for a
+single joint distribution <Cite id="chow1968" />, with every quantity conditioned on the class. The
+<NoteLink to="chow-liu-trees">Chow–Liu tree</NoteLink> note derives the unconditional case from the KL divergence.
+
+Every weight is non-negative, so adding an edge never lowers the likelihood. The best structure with at most one
+feature parent per feature therefore uses as many edges as it can, $d - 1$, and connects all features.
+
+## Finding the maximum spanning tree
+
+The number of spanning trees of the complete graph on $d$ vertices is $d^{d-2}$, so enumeration is out of reach
+beyond a handful of features. Two greedy algorithms find the optimum exactly.
+
+- **Kruskal's algorithm** sorts the $\binom{d}{2}$ edges by weight, heaviest first, and accepts an edge when it
+  joins two different components of the edges accepted so far. An edge whose ends are already connected would close
+  a cycle and is rejected. It stops after $d - 1$ acceptances <Cite id="kruskal1956" />.
+- **Prim's algorithm** starts from any vertex and repeatedly adds the heaviest edge with exactly one end in the
+  growing tree <Cite id="prim1957" />.
+
+Both are correct for the same reason, the **cut property**. Split the vertices into two non-empty sets $S$ and
+$\bar S$. The heaviest edge $e$ crossing the split lies in some maximum spanning tree. Take a maximum tree $T$ without
+$e$. Adding $e$ to $T$ creates a cycle, and that cycle crosses the split a second time through some edge $f$ of $T$.
+Swapping $f$ for $e$ gives a spanning tree of weight $w(T) + w_e - w_f \ge w(T)$, so it is also maximal. Kruskal's
+accepted edge is the heaviest edge leaving the component of one of its ends, and Prim's is the heaviest edge leaving
+the current tree. Each is a heaviest crossing edge, so every step keeps the partial tree inside some maximum tree.
+
+Finally, pick any feature as the root and direct every tree edge away from it. Each feature then has one feature
+parent, and adding the class as a parent of every feature gives the TAN. The choice of root does not change the
+likelihood. The graphs obtained from different roots are Markov equivalent: reversing an edge $x_i \to x_j$ creates
+no new v-structure, because both ends are already children of $c$, and every family $\set{c, x_i, x_j}$ stays the same.
+With maximum-likelihood parameters, all roots give the same distribution and the same posteriors.
+
+<Derivation title="Cost of learning a TAN">
+Computing the weights needs the counts of every triple $(c, x_i, x_j)$. One pass over the data updates
+$\binom{d}{2}$ counts per example, which costs $O(N d^2)$. Summing each weight over its $K v^2$ cells, for features
+with $v$ values, costs $O(K d^2 v^2)$. Kruskal's algorithm on the complete graph costs $O(d^2 \log d)$ for the sort.
+Friedman, Geiger and Goldszmidt give the total as $O(d^2 N)$, since $N$ is usually larger than $\log d$
+<Cite id="friedman1997" />. There is no search over structures and no iterative optimisation: learning is a fixed
+number of passes, like naive Bayes.
+</Derivation>
+
+<TanStructure />
+
+## Smoothing the parameters
+
+A TAN table conditions each feature on the class and a parent value. Its cells hold fewer examples than naive Bayes
+cells, which condition on the class alone. The maximum-likelihood estimate of $p(x_i \mid c, x_{\pi(i)})$ is then noisy
+and often exactly 0 or 1. A probability of 0 lets one feature veto a class.
+
+Friedman, Geiger and Goldszmidt shrink every estimate towards the feature's marginal frequency. Write $\Pi$ for the
+parents of $x$ and $N\hat p(\Pi)$ for the number of training examples with those parent values. The smoothed estimate
+is
+
+$$
+\theta^{s}(x \mid \Pi) = \frac{N\hat p(\Pi)}{N\hat p(\Pi) + N^0}\,\hat p(x \mid \Pi) + \frac{N^0}{N\hat p(\Pi) + N^0}\,\hat p(x),
+$$
+
+a weighted average whose weight on the conditional frequency grows with the number of examples behind it
+<Cite id="friedman1997" />. It is the posterior mean under a
+<NoteLink to="dirichlet-distribution">Dirichlet prior</NoteLink> whose pseudo-counts are $N^0 \hat p(x)$: add $N^0\hat
+p(x)$ to the count of $x$ and $N^0$ to the total. They tried $N^0 \in \set{1, 5, 10}$ and used $N^0 = 5$. Smoothing is
+applied after the structure is chosen. In their experiments smoothed TAN performed at least as well as unsmoothed TAN,
+and occasionally much better.
+
+## Worked example
+
+Sixteen examples have a binary class $c$ and four binary features. The eight examples of class 1 are
+
+$$
+(x_1, x_2, x_3, x_4) \in \set{1100, 1110, 1111, 1111, 0110, 0000, 1111, 1111},
+$$
+
+and the eight of class 0 are
+
+$$
+(x_1, x_2, x_3, x_4) \in \set{0000, 0000, 0001, 1111, 0000, 1111, 0011, 1110}.
+$$
+
+Feature $x_2$ nearly copies $x_1$, and $x_3$ nearly copies $x_2$. The priors are $\hat p(c = 1) = \hat p(c = 0) =
+1/2$.
+
+**Edge weights.** For $x_1$ and $x_2$ within class 1, the pairs $(x_1, x_2)$ are $(1, 1)$ six times, $(0, 1)$ once
+and $(0, 0)$ once. So $\hat p(x_1 = 1 \mid c = 1) = 6/8$, $\hat p(x_2 = 1 \mid c = 1) = 7/8$, and the class-1
+mutual information is
+
+$$
+\tfrac{6}{8}\log_2\tfrac{6/8}{(6/8)(7/8)} + \tfrac{1}{8}\log_2\tfrac{1/8}{(2/8)(7/8)} + \tfrac{1}{8}\log_2\tfrac{1/8}{(2/8)(1/8)} = 0.1445 - 0.1009 + 0.2500 = 0.2936 \text{ bits}.
+$$
+
+Within class 0 the pairs are $(0, 0)$ five times and $(1, 1)$ three times, a perfect copy, so the class-0 mutual
+information is the entropy $\entropy(x_1 \mid c = 0) = 0.9544$ bits, with $\hat p(x_1 = 1 \mid c = 0) = 3/8$. Weighting by the class
+probabilities, $w_{12} = \tfrac12(0.2936) + \tfrac12(0.9544) = 0.624$ bits. The same computation for all six pairs, in bits,
+gives
+
+| edge | $x_1 x_2$ | $x_2 x_3$ | $x_1 x_3$ | $x_3 x_4$ | $x_1 x_4$ | $x_2 x_4$ |
+| --------------------- | --------- | --------- | --------- | --------- | --------- | --------- |
+| $\hat I(x_i; x_j \mid c)$ | 0.624 | 0.421 | 0.311 | 0.250 | 0.180 | 0.093 |
+
+**Spanning tree.** Kruskal's algorithm accepts $x_1 x_2$ (0.624) and $x_2 x_3$ (0.421). It rejects $x_1 x_3$
+(0.311), because $x_1$ and $x_3$ are already connected through $x_2$. It accepts $x_3 x_4$ (0.250), which completes a
+tree with $d - 1 = 3$ edges and total weight $1.295$ bits. The remaining two edges both close cycles. Rooting the
+chain at $x_1$ gives parents $\pi(2) = 1$, $\pi(3) = 2$ and $\pi(4) = 3$.
+
+**Likelihood gain.** Naive Bayes and TAN share every term of the decomposed log-likelihood except the tree edges.
+With maximum-likelihood parameters the training log-likelihood of TAN therefore exceeds that of naive Bayes by
+$N \times 1.295 = 16 \times 1.295 = 20.72$ bits. Direct computation gives $-72.60$ bits for naive Bayes and $-51.88$
+for TAN, a difference of $20.72$.
+
+**Posterior for $\xvec = (1, 1, 1, 0)$.** Naive Bayes multiplies one likelihood ratio per feature, with
+maximum-likelihood estimates:
+
+$$
+\frac{p(x_1 = 1 \mid 1)}{p(x_1 = 1 \mid 0)} \cdot \frac{p(x_2 = 1 \mid 1)}{p(x_2 = 1 \mid 0)} \cdot \frac{p(x_3 = 1 \mid 1)}{p(x_3 = 1 \mid 0)} \cdot \frac{p(x_4 = 0 \mid 1)}{p(x_4 = 0 \mid 0)} = \frac{6/8}{3/8} \cdot \frac{7/8}{3/8} \cdot \frac{6/8}{4/8} \cdot \frac{4/8}{4/8} = 2 \cdot 2.333 \cdot 1.5 \cdot 1 = 7.
+$$
+
+With equal priors, $p(c = 1 \mid \xvec) = 7/8 = 0.875$. TAN conditions each feature on its parent:
+
+$$
+\frac{6/8}{3/8} \cdot \frac{p(x_2 = 1 \mid 1, x_1 = 1)}{p(x_2 = 1 \mid 0, x_1 = 1)} \cdot \frac{p(x_3 = 1 \mid 1, x_2 = 1)}{p(x_3 = 1 \mid 0, x_2 = 1)} \cdot \frac{p(x_4 = 0 \mid 1, x_3 = 1)}{p(x_4 = 0 \mid 0, x_3 = 1)} = 2 \cdot \frac{6/6}{3/3} \cdot \frac{6/7}{3/3} \cdot \frac{2/6}{1/4} = 2 \cdot 1 \cdot 0.857 \cdot 1.333 = 2.286.
+$$
+
+The posterior is $2.286/3.286 = 0.696$. Given $x_1 = 1$, feature $x_2 = 1$ is certain in both classes, so it adds no
+evidence. Naive Bayes counted it as a second, independent factor of 2.333. With Friedman's smoothing at $N^0 = 5$ the
+posteriors are 0.762 for naive Bayes and 0.632 for TAN.
+
+## Relation to naive Bayes and general Bayesian networks
+
+Naive Bayes counts correlated features as independent evidence. Three identical copies of one feature triple its
+log-likelihood ratio. TAN can absorb one such redundancy per feature: with $x_2 = x_1$ exactly,
+$\hat I(x_1; x_2 \mid c) = \hat\entropy(x_1 \mid c)$ is the largest weight involving either feature. Some maximum
+spanning tree then contains the edge $x_1 x_2$, and with it $x_2$ contributes nothing to the posterior. When features are conditionally independent given the
+class, every weight estimates zero, the tree edges carry noise, and TAN pays with larger tables for no gain.
+
+Friedman, Geiger and Goldszmidt also learned unrestricted Bayesian networks with the MDL score and used them as
+classifiers. On 25 data sets they were significantly better than naive Bayes on six and significantly worse on six,
+all of which had more than 15 features <Cite id="friedman1997" />. The joint likelihood is dominated by the terms
+that model the features among themselves; the single term for the class is a small part of it. Structure search
+could leave important features out of the class's Markov blanket, and the classifier then ignored them. TAN fixes the
+class as a parent of every feature, so every feature is used. On the same data sets smoothed TAN was more accurate
+than naive Bayes and competitive with C4.5 and selective naive Bayes. A **Chow–Liu multinet**, one tree per class
+learned from that class's data, performed as well as TAN, with neither dominating.
+
+TAN chooses edges by joint likelihood, not by classification accuracy. The **SuperParent** algorithm of Keogh and
+Pazzani adds augmenting edges one at a time by their effect on cross-validated accuracy. On ten data sets it was more
+accurate than unsmoothed TAN, at a higher training cost <Cite id="keogh1999" />. The
+<NoteLink to="averaged-one-dependence-estimators">one-dependence family</NoteLink> note compares these and related
+classifiers.
+
+## Assumptions
+
+- Features are discrete. Continuous features are discretised first, or modelled with conditional Gaussians.
+- Given the class, each feature depends on at most one other feature, and the dependencies form a tree shared by all
+  classes.
+- The training class frequencies estimate the deployment priors.
+
+## Pitfalls
+
+- **The tree is always complete.** Sample conditional mutual information is positive even for independent features,
+  so TAN adds $d - 1$ edges whatever the data. Spurious edges cost parameters and variance; smoothing limits the
+  damage.
+- **Joint, not conditional, likelihood.** The structure maximises $\log p(c, \xvec)$ over the data. The edges that
+  best explain the features need not be the ones that most improve $p(c \mid \xvec)$ <Cite id="friedman1997" />.
+- **Sparse tables.** With many feature values, $K v^2$ cells per feature quickly outnumber the data. Smooth the
+  estimates.
+- **Remaining double counting.** TAN discounts redundancy only along tree edges. Redundancy among three or more
+  features, or between features the tree does not join, is still counted more than once, so the posteriors can
+  remain overconfident.

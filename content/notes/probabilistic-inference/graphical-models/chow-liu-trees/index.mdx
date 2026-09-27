@@ -1,0 +1,161 @@
+---
+title: Chow–Liu trees
+kind: concept
+summary: 'A Chow–Liu tree is the tree-structured distribution closest in KL divergence to a joint distribution over $d$ discrete variables. It is the maximum-weight spanning tree with edge weights $I(x_i; x_j)$, and on data it is the maximum-likelihood tree.'
+tags: [graphical-models, information-theory, probabilistic-models, structure-learning, worked-example]
+aliases: [Chow-Liu tree, Chow–Liu algorithm, dependence tree, maximum-likelihood tree, tree-structured distribution]
+requires: [mutual-information, kl-divergence, bayesian-network]
+related: [tree-augmented-naive-bayes, belief-propagation, markov-random-field]
+references: [chow1968, kruskal1956, prim1957, friedman1997, koller2009]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $p$ be a joint distribution over discrete variables $x_1, \dots, x_d$. A **tree-structured distribution** with
+undirected spanning tree $T$ has the form
+
+$$
+q_T(\xvec) = \prod_{i=1}^{d} q(x_i) \prod_{(i, j) \in T}\frac{q(x_i, x_j)}{q(x_i)\,q(x_j)}.
+$$
+
+The **Chow–Liu tree** is the $q_T$ that minimises $\KL(p \,\|\, q_T)$ over all trees and all such distributions. Its
+pairwise marginals equal those of $p$, and its tree is a maximum-weight spanning tree of the complete graph on the
+variables with edge weights $I(x_i; x_j)$ under $p$ <Cite id="chow1968" />.
+</Definition>
+
+## Why trees
+
+A joint distribution over $d$ binary variables has $2^d - 1$ free parameters. A tree-structured distribution has
+$2d - 1$: rooted at $x_r$ and directed away from it, it is the
+<NoteLink to="bayesian-network">Bayesian network</NoteLink> $q(x_r)\prod_{i \ne r} q(x_i \mid x_{\pi(i)})$, with
+one parameter for the root and two for every other variable. On a tree, <NoteLink to="belief-propagation">belief propagation</NoteLink>
+computes every marginal exactly in two sweeps, at a cost linear in $d$.
+
+The two forms of $q_T$ agree. Writing each conditional as $q(x_i \mid x_{\pi(i)}) = q(x_i, x_{\pi(i)})/q(x_{\pi(i)})$
+and multiplying out gives one pairwise marginal per edge. Every variable except the root appears as a parent in the
+denominator once for each of its children. Collecting the single-variable factors gives the symmetric product above,
+which does not mention a root.
+
+## Deriving the optimal tree
+
+Fix a tree $T$ and write its distribution in rooted form. Then
+
+$$
+\KL(p \,\|\, q_T) = \sum_{\xvec} p(\xvec)\log p(\xvec) - \sum_{\xvec} p(\xvec)\log q_T(\xvec) = -\entropy_p(\xvec) - \sum_{i=1}^{d}\expect_p\brack{\log q(x_i \mid x_{\pi(i)})},
+$$
+
+with $x_{\pi(r)}$ empty for the root. The first term does not depend on $q$.
+
+**Step 1: the best distribution for a fixed tree.** Each expectation depends only on one conditional table. For
+each parent value $a$ it is $\sum_u p(x_i = u, x_{\pi(i)} = a)\log q(u \mid a)$, which equals
+$-p(a)\brack{\entropy_p(x_i \mid x_{\pi(i)} = a) + \KL(p(\cdot \mid a) \,\|\, q(\cdot \mid a))}$. The
+<NoteLink to="kl-divergence">KL divergence</NoteLink> is zero only at $q(\cdot \mid a) = p(\cdot \mid a)$, so the
+optimal tables are the true conditionals, $q(x_i \mid x_{\pi(i)}) = p(x_i \mid x_{\pi(i)})$. The tree distribution then
+has the pairwise marginals of $p$ on every edge.
+
+**Step 2: the best tree.** With those tables each expectation is $-\entropy_p(x_i \mid x_{\pi(i)}) = -\entropy_p(x_i) +
+I(x_i; x_{\pi(i)})$. Substituting,
+
+$$
+\KL(p \,\|\, q_T) = \sum_{i=1}^{d}\entropy_p(x_i) - \entropy_p(\xvec) - \sum_{(i, j) \in T} I(x_i; x_j).
+$$
+
+The first two terms are the same for every tree. <NoteLink to="mutual-information">Mutual information</NoteLink> is
+symmetric, so the last term depends only on the undirected edges. Minimising the divergence therefore means
+maximising $\sum_{(i, j) \in T} I(x_i; x_j)$: the best tree is a maximum-weight spanning tree with mutual
+informations as edge weights <Cite id="chow1968" />. The root does not matter, as the symmetric form already shows.
+
+The constant $\sum_i \entropy_p(x_i) - \entropy_p(\xvec)$ is the **total correlation** of $p$, the divergence from
+$p$ to the product of its marginals. A tree removes $\sum_{T} I(x_i; x_j)$ of it; what remains is the dependence that no
+tree can express.
+
+## Maximum likelihood on data
+
+Given $N$ samples, apply the result to the empirical distribution $\hat p$. The log-likelihood of $q_T$ is
+$N\sum_{\xvec}\hat p(\xvec)\log q_T(\xvec) = -N\brack{\entropy(\hat p) + \KL(\hat p \,\|\, q_T)}$. Maximising the
+likelihood is minimising $\KL(\hat p \,\|\, q_T)$, so the **maximum-likelihood tree** is the Chow–Liu tree of the
+empirical distribution. Its weights are the plug-in mutual informations $\hat I(x_i; x_j)$ and its tables are the
+empirical pairwise frequencies <Cite id="chow1968" />.
+
+The algorithm:
+
+1. Count every pair $(x_i, x_j)$ over the data and compute $\hat I(x_i; x_j)$ for all $\binom{d}{2}$ pairs. For
+   variables with $v$ values this costs $O(N d^2 + d^2 v^2)$.
+2. Find a maximum-weight spanning tree of the complete graph with **Kruskal's algorithm**, which scans edges from
+   heaviest to lightest and accepts each one that does not close a cycle <Cite id="kruskal1956" />, or **Prim's
+   algorithm**, which grows one tree by the heaviest edge leaving it <Cite id="prim1957" />.
+3. Choose any root, direct the edges away from it, and set each table to the empirical conditional frequency.
+
+Enumeration is not an option: by Cayley's formula there are $d^{d-2}$ spanning trees on $d$ labelled vertices.
+
+<Derivation title="Why the greedy spanning-tree algorithms are exact">
+Split the vertices into two non-empty sets $S$ and $\bar S$ and let $e$ be the heaviest edge with one end in each.
+Some maximum spanning tree contains $e$. Take a maximum tree $T$ without $e$. Adding $e$ to $T$ creates a cycle,
+which must cross between $S$ and $\bar S$ a second time through an edge $f$ of $T$. Removing $f$ restores a spanning
+tree of weight $w(T) + w_e - w_f \ge w(T)$, which is therefore also maximal and contains $e$.
+
+Kruskal's accepted edge is a heaviest edge leaving the component of one of its ends, because every heavier edge
+leaving that component was considered earlier and was accepted or joined it already. Prim's edge is a heaviest edge
+leaving the current tree. By the exchange argument, each step keeps the accepted edges inside some maximum spanning
+tree, so the final tree is maximal.
+</Derivation>
+
+## Worked example
+
+Three binary variables $A$, $B$ and $C$ have the joint distribution below, in hundredths.
+
+| $(a, b, c)$ | 000 | 001 | 010 | 011 | 100 | 101 | 110 | 111 |
+| ------------------ | --- | --- | --- | --- | --- | --- | --- | --- |
+| $100\,p(a, b, c)$ | 30 | 6 | 4 | 8 | 5 | 3 | 8 | 36 |
+
+The pairwise marginals, as $2 \times 2$ tables in hundredths with rows indexed by the first variable, are
+$p(a, b) = \begin{pmatrix} 36 & 12 \\ 8 & 44 \end{pmatrix}$, $p(a, c) = \begin{pmatrix} 34 & 14 \\ 13 & 39
+\end{pmatrix}$ and $p(b, c) = \begin{pmatrix} 35 & 9 \\ 12 & 44 \end{pmatrix}$. Their mutual informations are
+$I(A; B) = 0.278$, $I(B; C) = 0.256$ and $I(A; C) = 0.158$ bits.
+
+On three vertices every spanning tree has two edges and is a path. Kruskal's algorithm accepts $AB$ and $BC$ and
+rejects $AC$, which would close a cycle. The Chow–Liu tree is the chain $A - B - C$, with distribution
+$q(a, b, c) = p(a, b)\,p(c \mid b)$.
+
+The marginal entropies sum to $\entropy(A) + \entropy(B) + \entropy(C) = 2.986$ bits and the joint entropy is
+$\entropy(A, B, C) = 2.432$ bits, a total correlation of $0.554$ bits. The divergence of each tree is
+
+| tree | edges | $\sum_T I$ (bits) | $\KL(p \,\|\, q_T)$ (bits) |
+| ------------- | ------------ | ----------------- | -------------------------- |
+| $A - B - C$ | $AB$, $BC$ | 0.534 | 0.020 |
+| $B - A - C$ | $AB$, $AC$ | 0.436 | 0.118 |
+| $A - C - B$ | $AC$, $BC$ | 0.414 | 0.140 |
+
+Computing each $\KL(p \,\|\, q_T)$ directly from the eight joint probabilities gives the same values as
+$0.554 - \sum_T I$. The chain through $B$ loses only 0.020 bits: most of the dependence between $A$ and $C$ runs
+through $B$.
+
+## Uses
+
+- **Density estimation.** A Chow–Liu tree is a cheap, exactly normalised model of a discrete joint distribution with
+  exact marginals and conditionals by message passing.
+- **Classification.** Chow and Liu fitted one tree per class to recognise handwritten characters. Friedman, Geiger
+  and Goldszmidt report that Chow and Liu found this halved the error rate of naive Bayes <Cite id="friedman1997" />.
+  <NoteLink to="tree-augmented-naive-bayes">Tree-augmented naive Bayes</NoteLink> conditions every weight on the
+  class, $I(x_i; x_j \mid c)$, and shares one tree across classes.
+- **Structure-learning baseline.** Among Bayesian networks with at most one parent per node, the Chow–Liu tree is the
+  exact maximum-likelihood structure, found in polynomial time. With two or more parents per node the problem is
+  NP-hard in general <Cite id="koller2009" />.
+
+## Assumptions
+
+- The variables are discrete, or continuous with a model whose mutual information is known. For jointly Gaussian
+  variables $I(x_i; x_j) = -\tfrac12\log(1 - \rho_{ij}^2)$, a monotone function of $\abs{\rho_{ij}}$, so the tree
+  maximises the total absolute correlation along its edges.
+- The approximation keeps only pairwise dependence along $d - 1$ edges.
+
+## Pitfalls
+
+- **Always a full tree.** Plug-in mutual information is positive for independent variables in finite samples, so the
+  algorithm connects every variable. Stop at edges below a threshold, or penalise each edge by its parameter count
+  as in BIC, to get a forest.
+- **Plug-in bias.** $\hat I$ is biased upwards, more for variables with many values. Weights for high-cardinality
+  pairs are inflated relative to binary ones.
+- **Direction is not causal.** Every rooting gives the same distribution. The arrows of a Chow–Liu tree carry no
+  causal meaning.

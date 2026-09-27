@@ -1,0 +1,134 @@
+---
+title: Averaged one-dependence estimators
+kind: concept
+summary: 'Averaged one-dependence estimators (AODE) classify by averaging, over every feature $x_s$ with enough support, the model $p(c, x_s)\prod_j p(x_j \mid c, x_s)$ in which $x_s$ is a parent of all other features. It sits between naive Bayes and full Bayesian networks.'
+tags: [classification, generative-models, probabilistic, graphical-models]
+aliases: [AODE, SPODE, super-parent one-dependence estimator, k-dependence Bayesian classifier, KDB, SuperParent TAN, SP-TAN, semi-naive Bayes]
+requires: [naive-bayes, bayesian-network]
+related: [tree-augmented-naive-bayes, bagging]
+references: [webb2005, sahami1996, friedman1997, keogh1999, keoghpazzani2002]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **one-dependence estimator** is a Bayesian-network classifier in which the class $c$ is a parent of every feature
+and each feature has at most one other feature as a parent. A **super-parent one-dependence estimator** (SPODE) makes
+a single feature $x_s$ the parent of all the others:
+
+$$
+p_s(c, \xvec) = p(c, x_s)\prod_{j=1}^{d} p(x_j \mid c, x_s),
+$$
+
+where the factor for $j = s$ is 1. **Averaged one-dependence estimators** (AODE) predict with the mean of the SPODEs
+whose super-parent value $x_s$ occurs at least $m$ times in the training data:
+
+$$
+\hat y(\xvec) = \argmax_c \sum_{s \,:\, F(x_s) \ge m} \hat p(c, x_s)\prod_{j=1}^{d}\hat p(x_j \mid c, x_s),
+$$
+
+with $F(x_s)$ the training count of value $x_s$. Webb, Boughton and Wang used $m = 30$ <Cite id="webb2005" />.
+</Definition>
+
+## The dependence spectrum
+
+Sahami defines a **$k$-dependence Bayesian classifier** as a Bayesian network over $c$ and $x_1, \dots, x_d$ in which
+$c$ has no parents and each feature has $c$ plus at most $k$ features as parents <Cite id="sahami1996" />. The value of
+$k$ places a classifier on a spectrum.
+
+- $k = 0$ is <NoteLink to="naive-bayes">naive Bayes</NoteLink>: $p(c)\prod_j p(x_j \mid c)$.
+- $k = 1$ contains <NoteLink to="tree-augmented-naive-bayes">tree-augmented naive Bayes</NoteLink> (TAN) and every
+  SPODE.
+- $k = d - 1$ can represent any joint distribution. By the chain rule, $p(c, \xvec) = p(c)\prod_j p(x_j \mid c, x_1,
+  \dots, x_{j-1})$, and feature $x_j$ has $j - 1 \le d - 1$ feature parents.
+
+Moving up the spectrum removes independence assumptions. Each extra parent multiplies a feature's conditional table
+by the number of values $v$ of that parent. For binary features and $K$ classes, a feature with $k$ feature parents
+has $K 2^k$ free parameters. Estimates from the same $N$ examples become noisier as $k$ grows. The classifiers in this
+family differ in how they pick the parents, and in whether they pick at all.
+
+## Choosing the parents
+
+**TAN** allows $k = 1$ and picks the tree over the features that maximises the joint likelihood. That tree is the
+maximum-weight spanning tree with edge weights $\hat I(x_i; x_j \mid c)$, found exactly in $O(d^2 \log d)$ time after
+the weights are counted <Cite id="friedman1997" />.
+
+**KDB** (Sahami's $k$-dependence algorithm) orders the features by their mutual information with the class,
+$\hat I(x_j; c)$, largest first. It adds them to the network in that order. Each new feature gets the class as a
+parent, plus the $\min(k, \text{number already added})$ earlier features with the largest
+$\hat I(x_j; x_i \mid c)$ <Cite id="sahami1996" />. The ordering keeps the graph acyclic. There is no search: one pass
+over the pairwise statistics fixes the structure. A variant adds a parent only when its conditional mutual information
+exceeds a threshold, so that a large $k$ does not force spurious edges.
+
+**SuperParent** (SP-TAN) starts from naive Bayes and adds augmenting edges greedily by their effect on estimated
+classification accuracy. At each step it finds the feature that, made the parent of every feature still without a
+feature parent, gives the most accurate classifier. It then adds only the single edge from that super-parent to its
+best child, and repeats until no edge improves accuracy <Cite id="keogh1999" /><Cite id="keoghpazzani2002" />. It
+evaluates $O(d)$ candidate classifiers for every edge it adds, so training costs $O(NKd^3)$, far more than TAN
+<Cite id="webb2005" />.
+
+**AODE** selects nothing. Every SPODE with enough support gets an equal vote.
+
+## Why averaging is exact in form
+
+For any feature $x_s$ the product rule gives, with no approximation,
+
+$$
+p(c, \xvec) = p(c, x_s)\,p(\xvec \mid c, x_s).
+$$
+
+The identity holds for every $s$, so it also holds for the mean over any set $S$ of features:
+
+$$
+p(c, \xvec) = \frac{1}{\abs{S}}\sum_{s \in S} p(c, x_s)\,p(\xvec \mid c, x_s).
+$$
+
+AODE makes one approximation: within each term, the features are conditionally independent given the class and the
+super-parent, $p(\xvec \mid c, x_s) \approx \prod_j p(x_j \mid c, x_s)$ <Cite id="webb2005" />. This is weaker than
+naive Bayes' assumption, because each term conditions on one more variable. The count threshold $m$ drops terms whose
+tables $\hat p(x_j \mid c, x_s)$ rest on few examples. If no feature value reaches $m$, AODE falls back to naive
+Bayes. Normalising the sum over classes gives class probabilities.
+
+Choosing one model from many lets a learner fit the training sample more closely, which raises variance. AODE avoids
+model selection entirely. Its training is a single pass that counts every triple $(c, x_s, x_j)$, and it can be
+updated incrementally as data arrive <Cite id="webb2005" />.
+
+## Comparison
+
+In the table, $N$ is the number of training examples, $d$ the number of features, $K$ the number of classes and $v$
+the number of values per feature. Costs are as given by Webb, Boughton and Wang for NB, TAN, SP-TAN and AODE
+<Cite id="webb2005" />, and by Sahami for KDB <Cite id="sahami1996" />.
+
+| classifier | feature parents | structure selection | training time | classification time | reported accuracy |
+| ------------------- | ------------------------ | -------------------------------------------- | ------------------------------------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| naive Bayes | 0 | none | $O(Nd)$ | $O(Kd)$ | Competitive with C4.5 on UCI data <Cite id="friedman1997" /> |
+| TAN | 1, a tree | maximum spanning tree on $\hat I(x_i; x_j \mid c)$ | $O(Nd^2 + Kd^2v^2 + d^2\log d)$ | $O(Kd)$ | Smoothed TAN's error generally below naive Bayes' across 25 data sets; competitive with C4.5 <Cite id="friedman1997" /> |
+| KDB | up to $k$ | greedy by $\hat I(x_j; c)$, then $\hat I(x_j; x_i \mid c)$ | $O(d^2 N K v^2)$ for the structure | $O(Kdk)$ | On six data sets, $k \ge 1$ matched or beat $k = 0$ on most; Chess rose from 86.2% to about 95% <Cite id="sahami1996" /> |
+| SuperParent | 1 | greedy search on classification accuracy | $O(NKd^3)$ | $O(Kd)$ | More accurate than unsmoothed TAN on ten data sets <Cite id="keogh1999" /> |
+| AODE | 1, all SPODEs averaged | none | $O(Nd^2)$ | $O(Kd^2)$ | Lower error than naive Bayes on 22 of 37 data sets, higher on 8; comparable to SP-TAN <Cite id="webb2005" /> |
+| full Bayesian network | any | heuristic search on a score such as MDL | search-dependent | inference-dependent | Against naive Bayes on 25 data sets: significantly better on 6, significantly worse on 6 <Cite id="friedman1997" /> |
+
+AODE stores tables of size $O(K(dv)^2)$, one entry per class and pair of feature values. TAN and SP-TAN need the same
+tables while training but keep only $O(Kdv^2)$ once the structure is fixed <Cite id="webb2005" />. AODE therefore
+trades a larger model and $O(Kd^2)$ classification for training without search.
+
+The accuracy findings come from different benchmark suites, protocols and implementations. They compare methods
+within a paper, not across papers.
+
+## Assumptions
+
+- Features are discrete. Continuous features are discretised first.
+- For AODE, each super-parent explains the remaining dependence among the features given the class. Dependence that
+  no single feature explains is still double counted.
+- For KDB, the ordering by $\hat I(x_j; c)$ is a heuristic. A feature can only take parents that are more informative
+  about the class than itself, which may exclude the features it depends on most.
+
+## Pitfalls
+
+- **Sparse tables.** Each extra parent divides the data among $v$ times more cells. KDB with large $k$ and TAN on
+  small data need smoothing, and AODE needs its support threshold $m$.
+- **Quadratic memory.** AODE's pairwise tables grow as $(dv)^2$. With thousands of features, such as words in text,
+  they may not fit.
+- **Joint versus conditional objective.** TAN and KDB choose parents by statistics of the joint distribution. Edges
+  that explain the features well need not improve $p(c \mid \xvec)$. SuperParent optimises accuracy directly and
+  pays for it in training time.
