@@ -1,0 +1,110 @@
+---
+title: Deep factor models
+kind: concept
+summary: 'A deep factor model writes each series'' latent function as a global part, $\sum_k w_{i,k} g_k(\xvec_{i,t})$ with $K$ RNN factors $g_k$ shared by all series, plus a local random effect from a classical probabilistic model. The local part supplies uncertainty; the global part learns shared patterns.'
+tags: [time-series, forecasting, neural-forecasting, probabilistic-forecasting, recurrent-networks, gaussian-process]
+aliases: [Deep Factors, DeepFactor, DF-RNN, DF-LDS, DF-GP, deep factor models with random effects, global-local forecasting]
+requires: [kalman-filter]
+related: [deepar, deep-state-space-models]
+references: [wang2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **deep factor model with random effects** generates each series $z_{i,t}$, $i = 1, \dots, N$, from a latent function
+that is the sum of a fixed global effect and a local random effect <Cite id="wang2019" />:
+
+$$
+f_{i,t} = \sum_{k=1}^{K} w_{i,k}\, g_k(\xvec_{i,t}), \qquad r_{i,\cdot} \sim R_i, \qquad
+u_{i,t} = f_{i,t} + r_{i,t}, \qquad z_{i,t} \sim p(z_{i,t} \mid u_{i,t}).
+$$
+
+The $K$ **global factors** $g_k$ are deterministic RNNs shared by all series, the weights $\wvec_i = (w_{i,k})_k$ are a
+learnt embedding of series $i$, $R_i$ is a classical local probabilistic time-series model, and $p$ is the observation
+likelihood.
+</Definition>
+
+## Global and local
+
+Forecasting a large collection of related series pulls in two directions. A **local** model, fitted per series, captures
+each series' own noise and gives calibrated uncertainty, but learns nothing across series. A **global** model, shared by
+all series, learns common patterns from much more data, but its uncertainty is hard to specify for each series.
+
+Deep factor models split the job. The global part is a small set of **deep factors** $g_1, \dots, g_K$, which act like
+dynamic principal components or "eigen time series": every series' fixed effect is a linear combination of the same
+$K$ curves, mixed by its own weights $\wvec_i$. The local part is a random effect $r_{i,t}$ drawn from a classical model
+fitted with per-series parameters. The global factors are kept deterministic, so no inference over latent variables
+that couple all $N$ series is needed.
+
+The paper motivates this split with a characterisation of exchangeable time series: a collection whose joint
+distribution is invariant to relabelling the series decomposes into a global part and conditionally independent local
+parts <Cite id="wang2019" />.
+
+## Three local models
+
+The paper gives three instantiations, which differ only in $R_i$. With a Gaussian observation model
+$z_{i,t} \sim \Gauss(u_{i,t}, \sigma_{i,t}^2)$ each has a closed-form likelihood.
+
+| Model  | Local random effect $r_{i,t}$                                          | Likelihood of $\zvec_i$                                                          |
+| ------ | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| DF-RNN | Independent $\Gauss(0, \sigma_{i,t}^2)$, $\sigma_{i,t}$ from a noise RNN | $\prod_t \Gauss(z_{i,t} - f_{i,t} \mid 0, \sigma_{i,t}^2)$                       |
+| DF-LDS | Linear dynamical system (innovation state space model)                 | Kalman filter on $z_{i,t} - f_{i,t}$                                             |
+| DF-GP  | Zero-mean Gaussian process with kernel $K_i$                           | $\Gauss(\zvec_i - \fvec_i \mid \zeros, \Kmat_i + \sigma_i^2\eye)$            |
+
+In DF-LDS the local state evolves as $\hvec_{i,t} = \Fmat_{i,t}\hvec_{i,t-1} + \qvec_{i,t}\epsilon_{i,t}$ with
+$r_{i,t} = \avec_{i,t}^\top\hvec_{i,t}$, the same structure as the state space models used by
+<NoteLink to="deep-state-space-models">DeepState</NoteLink>. In DF-GP each series has its own kernel hyperparameters.
+
+## Deriving the likelihood
+
+Take the Gaussian case. Given the global factors, the fixed effect $\fvec_i = (f_{i,1}, \dots, f_{i,T})$ is a
+known vector. The observation is $\zvec_i = \fvec_i + \rvec_i + \epsilonvec_i$, where
+$\rvec_i$ is the random effect and $\epsilonvec_i$ the observation noise. Subtracting the known mean
+leaves the residual $\zvec_i - \fvec_i = \rvec_i + \epsilonvec_i$, which is distributed exactly as
+the local model plus white noise. The likelihood of series $i$ is therefore the local model's marginal likelihood
+evaluated on the residual.
+
+- For DF-GP, $\rvec_i \sim \Gauss(\zeros, \Kmat_i)$ and $\epsilonvec_i \sim \Gauss(\zeros, \sigma_i^2\eye)$
+  are independent, so their sum is $\Gauss(\zeros, \Kmat_i + \sigma_i^2\eye)$. This is the standard GP marginal
+  likelihood with mean $\fvec_i$.
+- For DF-LDS, the noise is absorbed into the observation equation of the linear dynamical system, and the Kalman filter
+  computes the likelihood of the residual by the prediction error decomposition.
+- For DF-RNN, the residuals are independent Gaussians, and the likelihood is a product.
+
+The parameters $\Theta$ (the factor RNNs, the embeddings $\wvec_i$ and the local hyperparameters) are fitted by
+maximum likelihood, $\Theta = \argmax \sum_i \log p(\zvec_i \mid \Theta)$, with stochastic gradients. Each series'
+likelihood depends on the global factors only through $\fvec_i$, so a mini-batch of series gives an unbiased
+gradient.
+
+For non-Gaussian observations, such as counts, the marginal likelihood is intractable. The paper then fits a
+variational lower bound, with an encoder network that proposes the latent function $\uvec_i$ from $\zvec_i$
+<Cite id="wang2019" />.
+
+## Forecasting
+
+To forecast, the global RNNs are unrolled over the future covariates to get $f_{i,T+1:T+\tau}$. The local model gives
+the predictive distribution of $r_{i,T+1:T+\tau}$ conditioned on the observed residuals: Kalman prediction for DF-LDS,
+GP conditioning for DF-GP. The forecast is the sum. Uncertainty comes entirely from the local model and the observation
+noise, so it is expressed in the familiar terms of that model.
+
+## Why factor the global part
+
+A shared RNN producing $K$ curves is cheaper than a full per-series recurrent model: the $K$ factor RNNs run on
+covariates, and each series adds only its $K$ weights and a few local parameters. On the electricity data the paper
+reports lower error and lower variance than a standard RNN forecaster of similar size trained with the same squared
+loss <Cite id="wang2019" />.
+
+## Assumptions
+
+- The global signal of every series lies in the span of $K$ shared curves. Series with idiosyncratic structure must
+  push it into the local model.
+- The global factors are deterministic. Their own uncertainty is not represented.
+- The local model family is chosen by hand.
+
+## Pitfalls
+
+- DF-GP costs $O(T^3)$ per series for the kernel inverse, which limits the history length.
+- $K$ trades expressiveness for data efficiency. Too few factors force structure into the local model, whose
+  uncertainty then inflates; too many lose the sharing benefit.
+- The non-Gaussian variant optimises a bound, and the quality of its forecast uncertainty depends on the encoder.

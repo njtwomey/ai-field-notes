@@ -1,0 +1,199 @@
+---
+title: DeepAR
+kind: concept
+summary: 'DeepAR is a global probabilistic forecaster. An LSTM, shared by all series, reads the previous value $z_{t-1}$ and covariates $\xvec_t$ and outputs the parameters of $p(z_t \mid z_{1:t-1})$. Training maximises the log-likelihood; forecasts are sample paths drawn by ancestral sampling.'
+tags: [time-series, forecasting, neural-forecasting, probabilistic-forecasting, recurrent-networks, worked-example]
+aliases: [autoregressive recurrent network forecaster, probabilistic autoregressive RNN]
+requires: [negative-binomial-distribution]
+related: [deep-state-space-models, crps-and-interval-scores, student-t-distribution]
+references: [salinas2020, hochreiter1997]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**DeepAR** models the future of each time series $i$ as a product of one-step conditional distributions
+<Cite id="salinas2020" />:
+
+$$
+p(z_{i,t_0:T} \mid z_{i,1:t_0-1}, \xvec_{i,1:T}) = \prod_{t=t_0}^{T} \ell\paren{z_{i,t} \mid \thetavec(\hvec_{i,t})}, \qquad
+\hvec_{i,t} = h(\hvec_{i,t-1}, z_{i,t-1}, \xvec_{i,t}; \Phi).
+$$
+
+$z_{i,t}$ is the value of series $i$ at time $t$, $\xvec_{i,t}$ are covariates known for all $t$, $h$ is a multi-layer
+LSTM <Cite id="hochreiter1997" /> with parameters $\Phi$ shared by every series, $\thetavec(\hvec)$ is a small output
+layer, and $\ell$ is a fixed likelihood such as a Gaussian or a negative binomial. Forecasts are joint samples of
+$z_{i,t_0:T}$ drawn one step at a time.
+</Definition>
+
+## The forecasting problem
+
+A retailer has $N$ related series, one per product, with $N$ in the thousands or millions. Many series are short, many
+are intermittent counts, and their scales span orders of magnitude. A classical local model such as ARIMA or
+exponential smoothing fits each series separately. A short series then has too little data to estimate its own
+parameters, and patterns shared across products (a holiday spike, a weekly cycle) are learnt again for every series.
+
+DeepAR fits one **global** model to all series. The network parameters $\Phi$ are shared, so a pattern seen in many
+series is learnt once. The output is a full predictive distribution, from which any quantile or any function of the
+future path (such as total demand over the next four weeks) can be computed.
+
+The time index splits into two ranges. The **conditioning range** $[1, t_0 - 1]$ holds observed values. The
+**prediction range** $[t_0, T]$ holds the values to forecast. During training both ranges lie in the past, so every
+$z_{i,t}$ is observed.
+
+## Architecture
+
+At each step $t$ the network receives three inputs: its previous hidden state $\hvec_{i,t-1}$, the previous value
+$z_{i,t-1}$, and the covariates $\xvec_{i,t}$. The model is **autoregressive** because it consumes the last observation,
+and **recurrent** because the hidden state carries information forward. The paper uses the same network, with the same
+weights, over both ranges. The state at the end of the conditioning range, $\hvec_{i,t_0-1}$, summarises the history.
+The initial state $\hvec_{i,0}$ and $z_{i,0}$ are zero.
+
+The covariates carry calendar information (day of week, hour of day, week or month of year), an **age** feature (the
+distance to the series' first observation) and any known future inputs such as a planned price or promotion. A
+categorical item identifier or product category enters through a learnt embedding. All covariates are standardised to
+zero mean and unit variance <Cite id="salinas2020" />.
+
+An affine layer maps $\hvec_{i,t}$ to the parameters of $\ell$. Parameters that must be positive pass through the
+softplus function $\operatorname{softplus}(a) = \log(1 + e^a)$.
+
+- **Gaussian likelihood** for real-valued data: $\mu = \wvec_\mu^\top\hvec + b_\mu$ and
+  $\sigma = \operatorname{softplus}(\wvec_\sigma^\top\hvec + b_\sigma)$.
+- **Negative binomial likelihood** for non-negative counts, parameterised by its mean $\mu > 0$ and shape $\alpha > 0$:
+
+$$
+\ell_{\mathrm{NB}}(z \mid \mu, \alpha) = \frac{\Gamma(z + 1/\alpha)}{\Gamma(z + 1)\,\Gamma(1/\alpha)}
+\paren{\frac{1}{1 + \alpha\mu}}^{1/\alpha} \paren{\frac{\alpha\mu}{1 + \alpha\mu}}^{z}, \qquad
+\var[z] = \mu + \alpha\mu^2.
+$$
+
+Both $\mu$ and $\alpha$ come from softplus layers. The shape $\alpha$ sets how far the variance exceeds the mean. At
+$\alpha \to 0$ the distribution tends to a Poisson with mean $\mu$. This is the
+<NoteLink to="negative-binomial-distribution">negative binomial</NoteLink> in its mean and dispersion form. Any
+likelihood with a cheap sampler and a differentiable log-density fits the same slot, for example a
+<NoteLink to="student-t-distribution">Student-$t$</NoteLink> for heavy tails or a Bernoulli for binary data.
+
+## Deriving the training objective
+
+The joint density of a whole window factorises by the chain rule of probability, with no approximation:
+
+$$
+p(z_{i,1:T} \mid \xvec_{i,1:T}) = \prod_{t=1}^{T} p(z_{i,t} \mid z_{i,1:t-1}, \xvec_{i,1:T}).
+$$
+
+DeepAR models each factor as $\ell(z_{i,t} \mid \thetavec(\hvec_{i,t}))$. The hidden state $\hvec_{i,t}$ is a
+deterministic function of $z_{i,1:t-1}$ and $\xvec_{i,1:t}$, computed by unrolling the recurrence. Conditioning on
+$\hvec_{i,t}$ is therefore the same as conditioning on the observed history. Taking logarithms turns the product into a
+sum, and summing over independent series gives the log-likelihood
+
+$$
+\mathcal{L}(\Phi) = \sum_{i=1}^{N} \sum_{t=t_0}^{T} \log \ell\paren{z_{i,t} \mid \thetavec(\hvec_{i,t})}.
+$$
+
+Every quantity in $\mathcal{L}$ is observed during training. A state-space model has latent states that must be
+integrated out, which requires filtering. DeepAR has no latent variables: $\hvec_{i,t}$ is computed, not inferred. The
+gradient $\nabla_\Phi\mathcal{L}$ is therefore exact and is obtained by
+<NoteLink to="backpropagation">backpropagation</NoteLink> through time, and $\Phi$ is fitted by stochastic
+<NoteLink to="gradient-descent">gradient descent</NoteLink>. Because the encoder and decoder share weights, the
+paper also includes the terms for $t < t_0$ in the sum, which is the same as setting $t_0$ to the start of the window.
+
+For the Gaussian likelihood, one term of $-\mathcal{L}$ is
+
+$$
+-\log \ell_G(z \mid \mu, \sigma) = \tfrac12\log(2\pi) + \log\sigma + \frac{(z - \mu)^2}{2\sigma^2}.
+$$
+
+The squared error is weighted by $1/\sigma^2$, and the $\log\sigma$ term stops the network from inflating $\sigma$ to
+make every error cheap. The network learns a mean and an uncertainty jointly.
+
+Training examples are windows cut from each series at many start points, with fixed conditioning and prediction
+lengths. A window may start before the series' first observation, in which case the missing targets are padded with
+zeros. This teaches the model how new series behave. Absolute time is then visible only through covariates, not
+through position in the window.
+
+<Derivation title="Teacher forcing and the train–test mismatch">
+In the training objective, $\hvec_{i,t}$ is computed from the true $z_{i,t-1}$. At prediction time the true value is
+unknown for $t \ge t_0$, and a sample $\tilde z_{i,t-1}$ is fed back instead. Training on true inputs while predicting
+from the model's own outputs is called **teacher forcing**, and the gap between the two input distributions can
+compound over the horizon. Scheduled sampling mixes model samples into training inputs to close the gap. The DeepAR
+authors report that variants of scheduled sampling gave no significant accuracy gain on their forecasting data and
+slowed convergence <Cite id="salinas2020" />.
+</Derivation>
+
+## Scale handling
+
+Retail series follow a rough power law: most items sell a few units a week and a few items sell thousands. Two
+problems follow.
+
+- **Input and output scale.** The autoregressive input $z_{i,t-1}$ and the output mean $\mu$ both scale with the series,
+  but the network's nonlinearities work in a limited range. DeepAR divides the autoregressive inputs by an item scale
+  $\nu_i$ and multiplies the scale-dependent likelihood parameters back. The paper uses
+  $\nu_i = 1 + \frac{1}{t_0}\sum_{t=1}^{t_0} z_{i,t}$, the mean over the conditioning range plus one. For the negative
+  binomial with network outputs $o_\mu$ and $o_\alpha$, $\mu = \nu_i\operatorname{softplus}(o_\mu)$ and
+  $\alpha = \operatorname{softplus}(o_\alpha)/\sqrt{\nu_i}$. Counts cannot simply be divided by $\nu_i$ before
+  modelling, because the result would no longer be integer.
+- **Sampling imbalance.** Uniform sampling of training windows rarely visits the few large series. DeepAR samples a
+  window from series $i$ with probability proportional to $\nu_i$.
+
+The $\sqrt{\nu_i}$ in the shape follows from the variance formula. With $\mu = \nu_i\tilde\mu$ and
+$\alpha = \tilde\alpha/\sqrt{\nu_i}$, the variance is $\nu_i\tilde\mu + \nu_i^{3/2}\tilde\alpha\tilde\mu^2$. It grows
+faster than the Poisson variance $\nu_i\tilde\mu$ and slower than the constant-coefficient-of-variation growth
+$\nu_i^2$.
+
+## Forecasting by ancestral sampling
+
+Once trained, the model draws joint sample paths from $p(z_{i,t_0:T} \mid z_{i,1:t_0-1}, \xvec_{i,1:T})$:
+
+1. Run the recurrence over the conditioning range with observed values to get $\hvec_{i,t_0-1}$.
+2. For $t = t_0, \dots, T$: compute $\tilde\hvec_{i,t} = h(\tilde\hvec_{i,t-1}, \tilde z_{i,t-1}, \xvec_{i,t}; \Phi)$
+   and draw $\tilde z_{i,t} \sim \ell(\cdot \mid \thetavec(\tilde\hvec_{i,t}))$, starting from
+   $\tilde\hvec_{i,t_0-1} = \hvec_{i,t_0-1}$ and $\tilde z_{i,t_0-1} = z_{i,t_0-1}$.
+3. Repeat $S$ times to get $S$ paths.
+
+Each path is an exact draw from the model's joint distribution. The chain-rule factorisation says that drawing
+$z_{t_0}$ from its marginal, then $z_{t_0+1}$ from its conditional given the drawn $z_{t_0}$, and so on, produces a
+sample from the product of the factors, which is the joint. This procedure is **ancestral sampling**.
+
+Quantiles of $z_{i,t}$ for each $t$ are the empirical quantiles across the $S$ paths. Because the paths are joint,
+they also answer questions about sums or maxima over the horizon, which per-step quantiles cannot. The spread of
+the paths widens with the horizon because every sampled value feeds its noise into the next step.
+
+## Worked example: one likelihood term
+
+Take one step of a count series with network outputs giving $\mu = 4$ and $\alpha = 0.5$, and suppose the observed
+value is $z = 2$. Then $1/\alpha = 2$ and $\alpha\mu = 2$, so
+
+$$
+\ell_{\mathrm{NB}}(2 \mid 4, 0.5) = \frac{\Gamma(4)}{\Gamma(3)\,\Gamma(2)} \paren{\tfrac13}^{2} \paren{\tfrac23}^{2}
+= 3 \cdot \tfrac19 \cdot \tfrac49 = \tfrac{4}{27} \approx 0.148.
+$$
+
+The term contributes $\log(4/27) \approx -1.910$ to $\mathcal{L}$. The predictive variance is
+$4 + 0.5 \cdot 16 = 12$, three times the Poisson variance of the same mean.
+
+The scale factor is computed from the conditioning range. A series with conditioning values $0, 3, 5, 4, 8$ has mean
+$4$ and $\nu_i = 5$. The network sees inputs $0, 0.6, 1, 0.8, 1.6$.
+
+## Results reported
+
+On the paper's datasets (automotive parts demand, Amazon retail demand, electricity and traffic), DeepAR improved accuracy over the
+state-of-the-art baselines by about 15% <Cite id="salinas2020" />. A full training and prediction run on 500,000
+series took under ten hours on a single GPU instance.
+
+## Assumptions
+
+- Series are conditionally independent given their covariates and $\Phi$. DeepAR shares parameters across series but
+  does not model their joint distribution at one time.
+- The one-step likelihood is from a fixed parametric family. A wrong family (a Gaussian for spiky counts) gives
+  miscalibrated intervals however well the mean is fitted.
+- Covariates in the prediction range must be known at forecast time.
+
+## Pitfalls
+
+- Per-step quantiles from sample paths are noisy for small $S$. Tail quantiles need many paths.
+- The recurrence is sequential in $t$. Training and sampling cost grow linearly with the window length, and sampling
+  cannot be parallelised across the horizon.
+- Scaling by the conditioning mean fails for series whose conditioning range is all zeros or dominated by an outlier;
+  the $+1$ in $\nu_i$ only prevents division by zero.
+- Probabilistic forecasts should be evaluated with proper scoring rules such as the
+  <NoteLink to="crps-and-interval-scores">CRPS or quantile loss</NoteLink>, not only by the error of the median.

@@ -1,0 +1,141 @@
+---
+title: Deep state space models
+kind: concept
+summary: 'A deep state space model (DeepState) gives each time series its own linear-Gaussian state space model whose time-varying parameters $\Theta_t$ are output by an RNN shared across series. The Kalman filter gives the exact likelihood for training and the state posterior for forecasting.'
+tags: [time-series, forecasting, neural-forecasting, probabilistic-forecasting, state-space-models, recurrent-networks]
+aliases: [DeepState, RNN-parameterised state space model]
+requires: [kalman-filter]
+related: [deepar, deep-factor-models, linear-gaussian-state-space-models]
+references: [rangapuram2018]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **deep state space model** forecasts each series $z^{(i)}_{1:T_i}$ with a linear-Gaussian state space model whose
+parameters $\Theta^{(i)}_t$ change over time and are produced by a recurrent network from the series' covariates
+<Cite id="rangapuram2018" />:
+
+$$
+\Theta^{(i)}_t = \Psi(\xvec^{(i)}_{1:t}; \Phi), \qquad
+p(z^{(i)}_{1:T_i} \mid \xvec^{(i)}_{1:T_i}; \Phi) = p_{\mathrm{SS}}(z^{(i)}_{1:T_i} \mid \Theta^{(i)}_{1:T_i}).
+$$
+
+$\Psi$ is a multi-layer LSTM followed by affine maps and range-constraining transforms, $\Phi$ are its parameters
+shared by all series, and $p_{\mathrm{SS}}$ is the marginal likelihood of the state space model with the latent state
+integrated out.
+</Definition>
+
+## Motivation
+
+Classical state space models, such as exponential smoothing in innovations form or structural models with level,
+trend and seasonal states, encode known structure. That structure makes them data-efficient and interpretable, but
+each series is fitted separately, and covariates must be chosen by hand. Neural forecasters such as
+<NoteLink to="deepar">DeepAR</NoteLink> learn patterns across series from raw covariates, but need more data and give
+no handle on smoothness or components.
+
+DeepState keeps the linear-Gaussian state space model as the per-series likelihood and moves only the choice of its
+parameters into a network. The network is shared, so patterns are learnt across series. The model for any single
+series is still linear and Gaussian, so the <NoteLink to="kalman-filter">Kalman filter</NoteLink> computes its
+likelihood and forecast exactly.
+
+## The per-series model
+
+Drop the series index $i$ for this section. The latent state $\lvec_t \in \reals^L$ encodes components such as level,
+trend and seasonality. The model is
+
+$$
+\lvec_t = \Fmat_t\lvec_{t-1} + \gvec_t\varepsilon_t, \qquad
+z_t = \avec_t^\top\lvec_{t-1} + b_t + \sigma_t\epsilon_t, \qquad \varepsilon_t, \epsilon_t \sim \Gauss(0, 1),
+$$
+
+with $\lvec_0 \sim \Gauss(\muvec_0, \diag(\sigmavec_0^2))$. $\Fmat_t$ ($L \times L$) is the transition matrix,
+$\gvec_t \in \reals^L$ the innovation strength, $\avec_t \in \reals^L$ and $b_t$ the observation weights and offset,
+and $\sigma_t > 0$ the observation noise. The structure of $\Fmat_t$ and $\avec_t$ fixes which components the state
+holds. In the simplest case, a local level model, $L = 1$, $F_t = 1$ and $a_t = 1$: the level drifts as a random walk
+with step size $g_t$ and is observed with noise $\sigma_t$.
+
+The structure of the state (which components it holds, and hence the pattern of $\Fmat_t$ and $\avec_t$) is chosen
+per dataset, for example a day-of-week or hour-of-day seasonal model <Cite id="rangapuram2018" />. The last LSTM
+layer's output is mapped to the time-varying parameters by affine maps followed by elementwise transforms that keep
+each parameter in its valid range, such as a softplus for noise scales.
+
+The network reads only the covariates $\xvec_t$ (for example day of week, product category, price), not the target.
+All information from the observed values $z_{1:t}$ enters through the Kalman filter. This is the main structural
+difference from DeepAR, whose network consumes $z_{t-1}$ directly.
+
+## Deriving the likelihood
+
+The marginal likelihood of one series factorises by the chain rule into one-step predictive densities, the
+**prediction error decomposition**:
+
+$$
+\log p_{\mathrm{SS}}(z_{1:T} \mid \Theta_{1:T}) = \sum_{t=1}^{T} \log p(z_t \mid z_{1:t-1}, \Theta_{1:t}).
+$$
+
+Each factor is Gaussian and is computed by the Kalman filter. Suppose that after seeing $z_{1:t-1}$ the state that
+emits $z_t$ has posterior $\lvec_{t-1} \mid z_{1:t-1} \sim \Gauss(\mvec_{t-1}, \Pmat_{t-1})$. The observation
+$z_t = \avec_t^\top\lvec_{t-1} + b_t + \sigma_t\epsilon_t$ is a linear function of this Gaussian plus independent
+Gaussian noise, so
+
+$$
+z_t \mid z_{1:t-1} \sim \Gauss\paren{\avec_t^\top\mvec_{t-1} + b_t,\ \avec_t^\top\Pmat_{t-1}\avec_t + \sigma_t^2}.
+$$
+
+Conditioning on $z_t$ updates the state posterior by the Kalman gain $\kvec_t = \Pmat_{t-1}\avec_t / S_t$, where
+$S_t = \avec_t^\top\Pmat_{t-1}\avec_t + \sigma_t^2$ is the predictive variance:
+
+$$
+\mvec'_{t-1} = \mvec_{t-1} + \kvec_t\paren{z_t - \avec_t^\top\mvec_{t-1} - b_t}, \qquad
+\Pmat'_{t-1} = \Pmat_{t-1} - \kvec_t S_t\kvec_t^\top.
+$$
+
+The transition then moves the state forward: $\mvec_t = \Fmat_t\mvec'_{t-1}$ and
+$\Pmat_t = \Fmat_t\Pmat'_{t-1}\Fmat_t^\top + \gvec_t\gvec_t^\top$. Summing the Gaussian log-densities over $t$ gives the
+exact log-likelihood of the series.
+
+Every step is a sequence of matrix products and one scalar division, so the whole computation is differentiable in
+$\Theta_{1:T}$ and hence in $\Phi$. The training objective is
+
+$$
+\mathcal{L}(\Phi) = \sum_{i=1}^{N} \log p_{\mathrm{SS}}\paren{z^{(i)}_{1:T_i} \mid \Theta^{(i)}_{1:T_i}(\Phi)},
+$$
+
+maximised by stochastic gradient ascent with gradients from automatic differentiation through the filter
+<Cite id="rangapuram2018" />.
+
+## Forecasting
+
+For series $i$ with history $z_{1:T}$ and covariates $\xvec_{1:T+\tau}$:
+
+1. Unroll the RNN over the training range to get $\Theta_{1:T}$ and run the Kalman filter to get the posterior of the
+   last state, $p(\lvec_T \mid z_{1:T})$.
+2. Unroll the RNN over the prediction range to get $\Theta_{T+1:T+\tau}$ from the future covariates.
+3. Sample $\lvec_T$ from its posterior and apply the transition and observation equations recursively to get sample
+   paths $\hat z_{T+1:T+\tau}$.
+
+Because the model is linear-Gaussian given $\Theta$, the forecast distribution at each step is also available in
+closed form. Sampling is used when joint quantities over the horizon are needed.
+
+## What the structure buys
+
+- **Small data.** The state space structure constrains forecasts to smooth, interpretable components, which limits
+  overfitting when series are short.
+- **Interpretability.** The per-series parameters $\Theta^{(i)}_t$ can be inspected and even changed, because each
+  one has a meaning in the state space model (a noise level, a prior seasonal profile).
+- **Exact inference.** No sampling or variational approximation is needed in training.
+
+## Assumptions
+
+- Observations are Gaussian given the state. Counts and intermittent demand fit poorly unless transformed.
+- Dynamics are linear given $\Theta_t$. Nonlinear effects must come through the covariates that drive $\Theta_t$.
+- Series are independent given their covariates and $\Phi$.
+
+## Pitfalls
+
+- The Kalman recursion is sequential in $t$, so training cost is linear in series length and cannot be parallelised
+  over time.
+- The chosen state structure (which components, which seasonal period) is a modelling decision the network cannot
+  undo. A missing seasonal component is not learnt from data.
+- Numerical care is needed: covariance updates in the plain form can lose symmetry or positive definiteness in long
+  series.
