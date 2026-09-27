@@ -1,0 +1,136 @@
+---
+title: Automatic relevance determination
+kind: concept
+summary: Automatic relevance determination gives each input dimension, or each weight, its own prior scale and fits the scales by maximising the marginal likelihood. Scales of irrelevant inputs go to zero prior variance (infinite length-scale), which removes those inputs from the model.
+tags: [gaussian-process, bayesian, feature-selection, sparsity, model-selection, worked-example]
+aliases: [ARD, ARD kernel, ARD prior, per-dimension length-scales, anisotropic squared exponential kernel]
+requires: [gp-hyperparameter-learning, bayesian-linear-regression]
+related: [lasso, covariance-functions, multilayer-perceptron]
+references: [mackay1994, neal1996, rasmussen2006, tipping2001, tipping2003, piironen2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { ArdSurface } from './ArdSurface'
+
+<Definition>
+Automatic relevance determination (ARD) is a prior with one scale hyperparameter per input dimension or per weight,
+fitted by maximising the marginal likelihood <Cite id="mackay1994" /> <Cite id="neal1996" />. In a Gaussian process on
+$\reals^D$ the ARD squared exponential kernel is
+
+$$
+k(\xvec, \xvec') = \sigma_f^2 \exp\paren{-\frac12\sum_{d=1}^{D}\frac{(x_d - x_d')^2}{\ell_d^2}},
+$$
+
+with length-scales $\ell_1, \dots, \ell_D > 0$. In a linear model $y = \wvec^\top\phivec(\xvec) + \varepsilon$ the ARD
+prior is $w_m \sim \Gauss(0, \alpha_m^{-1})$ independently, with one precision $\alpha_m$ per weight. A large fitted
+$\ell_d$ or $\alpha_m$ switches the corresponding input or feature off.
+</Definition>
+
+## Intuition
+
+An isotropic kernel measures distance with one ruler for every input. If one input is pure noise, the isotropic kernel
+still treats points that differ only in that input as dissimilar, and the model has to explain variation that is not
+there. ARD gives each input its own ruler. Stretching the ruler for input $d$ to infinite length ($\ell_d \to \infty$)
+makes every pair of points look identical along $d$, so the function becomes constant in $x_d$.
+
+The marginal likelihood decides how far to stretch each ruler. Its complexity penalty charges for every direction in
+which the model can vary. An input that carries no signal buys no data fit, so the penalty drives its scale to the
+limit that removes it. MacKay introduced ARD for Bayesian neural networks, with one prior variance per group of
+input weights <Cite id="mackay1994" />, and Neal developed it with hierarchical priors and Markov chain Monte Carlo
+<Cite id="neal1996" />.
+
+## Why irrelevant features are switched off
+
+The mechanism is exact for linear models. Take $N$ targets $\yvec$, an $N \times M$ design matrix $\Phimat$ with
+columns $\phivec_1, \dots, \phivec_M$, noise variance $\sigma^2$ and the ARD prior. The targets are a sum of
+independent Gaussian terms, $\yvec = \sum_m w_m\phivec_m + \varepsilonvec$, so
+
+$$
+\yvec \sim \Gauss(\zeros, \Cmat), \qquad \Cmat = \sigma^2\eye + \sum_{m=1}^{M}\alpha_m^{-1}\phivec_m\phivec_m^\top.
+$$
+
+Fix every precision except $\alpha = \alpha_m$ for one feature $\phivec = \phivec_m$. Write
+$\Cmat_{-} = \Cmat - \alpha^{-1}\phivec\phivec^\top$ for the covariance without it, and define two scalars,
+
+$$
+s = \phivec^\top\Cmat_{-}^{-1}\phivec, \qquad q = \phivec^\top\Cmat_{-}^{-1}\yvec.
+$$
+
+The sparsity factor $s$ measures how much of $\phivec$ the other features and the noise already explain; a feature
+that overlaps with the others has small $s$. The quality factor $q$ measures how strongly $\phivec$ aligns with the
+targets after accounting for the others <Cite id="tipping2003" />. The matrix determinant lemma gives
+$\abs{\Cmat} = \abs{\Cmat_{-}}(1 + s/\alpha)$, and the Sherman–Morrison formula gives
+$\Cmat^{-1} = \Cmat_{-}^{-1} - \Cmat_{-}^{-1}\phivec\phivec^\top\Cmat_{-}^{-1}/(\alpha + s)$, so
+$\yvec^\top\Cmat^{-1}\yvec = \yvec^\top\Cmat_{-}^{-1}\yvec - q^2/(\alpha + s)$. The log marginal likelihood
+$L = -\frac12(N\ln 2\pi + \ln\abs{\Cmat} + \yvec^\top\Cmat^{-1}\yvec)$ splits into a part without the feature and a part
+that depends on $\alpha$:
+
+$$
+L(\alpha) = L_{-} + \frac12\brack{\ln\alpha - \ln(\alpha + s) + \frac{q^2}{\alpha + s}}.
+$$
+
+Its derivative is
+
+$$
+\frac{dL}{d\alpha} = \frac12\brack{\frac1\alpha - \frac{1}{\alpha + s} - \frac{q^2}{(\alpha + s)^2}}
+= \frac{s^2 + \alpha(s - q^2)}{2\alpha(\alpha + s)^2}.
+$$
+
+The denominator is positive. If $q^2 \le s$, the numerator is positive for every $\alpha > 0$, so $L$ increases all the
+way to $\alpha \to \infty$. The prior variance of the weight goes to zero and the feature is removed. If $q^2 > s$, the
+numerator vanishes at a single point, which is the maximum:
+
+$$
+\alpha = \frac{s^2}{q^2 - s}.
+$$
+
+A feature is kept only when its alignment with the targets, $q^2$, exceeds the variance it would add in directions the
+model cannot otherwise explain, $s$ <Cite id="tipping2003" />. Nothing in the data-fit term alone rewards removing a
+feature; the removal comes from the $\ln\abs{\Cmat}$ penalty.
+
+### Worked example
+
+Take two targets, noise variance $\sigma^2 = 1$ and a single feature $\phivec = (1, 1)$, so $\Cmat_{-} = \eye$ and
+$s = 2$.
+
+- For $\yvec = (1, 1)$, $q = 2$ and $q^2 = 4 > 2$. The maximum is at $\alpha = 4/(4 - 2) = 2$, a prior weight variance
+  of $0.5$.
+- For $\yvec = (1, 0.5)$, $q = 1.5$ and $q^2 = 2.25 > 2$, barely. The maximum is at $\alpha = 4/0.25 = 16$, a small
+  prior variance of $0.0625$.
+- For $\yvec = (1, -1)$, $q = 0$. The feature explains nothing and $\alpha \to \infty$: the weight is pruned.
+
+## ARD in Gaussian processes
+
+For the ARD kernel, the input $d$ enters only through $(x_d - x_d')^2/\ell_d^2$. As $\ell_d \to \infty$ this term goes
+to zero for every pair, and the kernel becomes the ARD kernel on the remaining $D - 1$ inputs. The model without input
+$d$ is therefore the limit of the model with it, and the marginal likelihood compares them on the same scale. If the
+targets do not vary with $x_d$, a finite $\ell_d$ adds prior variance in a direction the data do not use. The
+complexity term $-\frac12\ln\abs{\Kmat_y}$ penalises that variance, and the data-fit term gains nothing, so the
+optimum sits at a very large $\ell_d$. The gradient with respect to $\ln\ell_d$ vanishes in that limit, which is why
+optimisers report large, somewhat arbitrary values rather than infinity <Cite id="rasmussen2006" />.
+
+<ArdSurface />
+
+The reciprocal $1/\ell_d$ is often read as the relevance of input $d$. The reading has limits. The length-scale
+measures how nonlinearly the function varies along $x_d$, not how much of the output variance $x_d$ explains. An input
+with a strong linear effect can receive a longer length-scale than an input with a weak but wiggly effect
+<Cite id="piironen2016" />.
+
+## Assumptions
+
+- **Additive scales.** ARD assumes relevance is axis-aligned: each input is either used or not. A signal that depends
+  on a combination such as $x_1 - x_2$ needs a full linear map inside the kernel.
+- **A good fit of the other hyperparameters.** The noise variance and signal variance are fitted jointly with the
+  scales. A poorly estimated noise variance changes which features look relevant.
+
+## Pitfalls
+
+- **Overfitting with many inputs.** With $D$ length-scales and few points the marginal likelihood can overfit, and
+  irrelevant inputs are not always switched off. Put a prior on the length-scales or compare with cross-validation.
+- **Local maxima.** Each length-scale can settle in a local maximum. Initialise at the scale of the standardised inputs
+  and restart.
+- **Unstandardised inputs.** The fitted $\ell_d$ is in the units of $x_d$. Compare relevances only after standardising
+  the inputs.
+- **Relevance is not importance.** Rank inputs by $1/\ell_d$ only as a rough guide. Predictive variable selection
+  measures importance directly <Cite id="piironen2016" />.

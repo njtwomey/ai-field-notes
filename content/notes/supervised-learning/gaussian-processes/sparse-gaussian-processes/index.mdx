@@ -1,0 +1,193 @@
+---
+title: Sparse Gaussian processes
+kind: technique
+summary: Sparse Gaussian processes summarise the latent function by its values $\uvec$ at $M \ll N$ inducing inputs, which cuts the cost of GP regression from $O(N^3)$ to $O(NM^2)$. DTC, FITC and the variational free energy differ in how the data depend on $\uvec$.
+tags: [gaussian-process, approximate-inference, scalability, variational-inference, low-rank-approximation]
+aliases: [sparse GP, inducing points, inducing variables, pseudo-inputs, FITC, DTC, subset of regressors, variational free energy, VFE, SVGP, stochastic variational Gaussian process, Nyström approximation]
+requires: [gaussian-process, gp-hyperparameter-learning]
+related: [evidence-lower-bound, kl-divergence, random-fourier-features, cholesky-decomposition]
+references: [quinonero2005, snelson2006, titsias2009, hensman2013, hensman2015, williams2001, bauer2016, rasmussen2006]
+status: draft
+updated: 2026-09-27
+---
+
+import { SparseGp } from './SparseGp'
+
+<Definition>
+A sparse Gaussian process introduces $M$ inducing inputs $\Zmat = (\zvec_1, \dots, \zvec_M)$ and the inducing
+variables $\uvec = f(\Zmat) \sim \Gauss(\zeros, \Kmat_{uu})$, the latent function's values there. It approximates the
+joint prior of the training values $\fvec$ and test values $\fvec_*$ by assuming them conditionally independent given
+$\uvec$, with an approximate training conditional $q(\fvec \mid \uvec)$ <Cite id="quinonero2005" />. Every
+computation then involves only $M \times M$ matrices and $N \times M$ cross-covariances.
+</Definition>
+
+## Problem
+
+Exact <NoteLink to="gaussian-process">Gaussian process</NoteLink> regression factorises the $N \times N$ matrix
+$\Kmat_{ff} + \sigma^2\eye$, in $O(N^3)$ time and $O(N^2)$ memory, for predictions and for every evaluation of the
+marginal likelihood during hyperparameter fitting. At $N = 10^5$ the matrix alone takes 80 GB in double precision.
+Most of that work is redundant when the function is smooth: a few hundred well-placed function values determine it
+almost everywhere.
+
+## Mechanism
+
+### The Nyström matrix
+
+Write $\Kmat_{fu} = k(\Xmat, \Zmat)$ for the $N \times M$ cross-covariance between training and inducing inputs,
+$\Kmat_{uu} = k(\Zmat, \Zmat)$, and
+
+$$
+\Qmat_{ab} = \Kmat_{au}\Kmat_{uu}^{-1}\Kmat_{ub}
+$$
+
+for any two sets of inputs $a$ and $b$. By GP conditioning, $\expect[\fvec \mid \uvec] = \Kmat_{fu}\Kmat_{uu}^{-1}\uvec$
+and $\cov[\fvec \mid \uvec] = \Kmat_{ff} - \Qmat_{ff}$. The matrix $\Qmat_{ff}$ has rank at most $M$ and is the
+covariance of the conditional mean. It is the Nyström approximation of $\Kmat_{ff}$ <Cite id="williams2001" />. The
+difference $\Kmat_{ff} - \Qmat_{ff}$ is positive semi-definite, being a conditional covariance.
+
+### Three approximate priors
+
+Each method keeps the exact prior $p(\uvec)$ and replaces the exact conditional
+$p(\fvec \mid \uvec) = \Gauss(\Kmat_{fu}\Kmat_{uu}^{-1}\uvec,\ \Kmat_{ff} - \Qmat_{ff})$ by a cheaper one.
+Integrating $\uvec$ out gives a Gaussian marginal over the targets <Cite id="quinonero2005" />:
+
+| Method | Training conditional $q(\fvec \mid \uvec)$ | Marginal $q(\yvec)$ |
+| --- | --- | --- |
+| Subset of regressors (SoR), DTC | $\Gauss(\Kmat_{fu}\Kmat_{uu}^{-1}\uvec,\ \zeros)$ | $\Gauss(\zeros,\ \Qmat_{ff} + \sigma^2\eye)$ |
+| FITC | $\Gauss(\Kmat_{fu}\Kmat_{uu}^{-1}\uvec,\ \diag[\Kmat_{ff} - \Qmat_{ff}])$ | $\Gauss(\zeros,\ \Qmat_{ff} + \diag[\Kmat_{ff} - \Qmat_{ff}] + \sigma^2\eye)$ |
+
+The subset of regressors makes $\fvec$ a deterministic function of $\uvec$. It is a finite linear model with $M$ basis
+functions $k(\cdot, \zvec_m)$, so its predictive variance collapses to zero far from the inducing inputs. Deterministic
+training conditional (DTC) uses the same training conditional but the exact test conditional, which restores the
+term $\Kmat_{**} - \Qmat_{**}$ in the predictive variance. The fully independent training conditional (FITC) keeps the
+exact conditional variance of each $f_i$ and drops only the correlations between them. It was introduced as the
+sparse pseudo-input GP, with the inducing inputs optimised as hyperparameters <Cite id="snelson2006" />.
+
+### Prediction in $O(NM^2)$
+
+Write the marginal covariance as $\Qmat_{ff} + \Lambdamat$, with $\Lambdamat = \sigma^2\eye$ for DTC and
+$\Lambdamat = \diag[\Kmat_{ff} - \Qmat_{ff}] + \sigma^2\eye$ for FITC. Both $\Lambdamat$ are diagonal. Define the
+$M \times M$ matrix
+
+$$
+\Sigmamat = (\Kmat_{uu} + \Kmat_{uf}\Lambdamat^{-1}\Kmat_{fu})^{-1}.
+$$
+
+The Woodbury identity gives
+$(\Qmat_{ff} + \Lambdamat)^{-1} = \Lambdamat^{-1} - \Lambdamat^{-1}\Kmat_{fu}\Sigmamat\Kmat_{uf}\Lambdamat^{-1}$,
+which needs only $\Sigmamat$ and a diagonal inverse. Substituting into the Gaussian conditioning formulas gives the
+predictive mean and variance at a test input with cross-covariance $\kvec_{u*} = k(\Zmat, \xvec_*)$:
+
+$$
+\mu_* = \kvec_{u*}^\top\Sigmamat\Kmat_{uf}\Lambdamat^{-1}\yvec, \qquad
+\sigma_*^2 = k_{**} - \kvec_{u*}^\top\Kmat_{uu}^{-1}\kvec_{u*} + \kvec_{u*}^\top\Sigmamat\kvec_{u*},
+$$
+
+where $k_{**} = k(\xvec_*, \xvec_*)$. SoR drops the first two terms of $\sigma_*^2$. Forming
+$\Kmat_{uf}\Lambdamat^{-1}\Kmat_{fu}$ costs $O(NM^2)$ and everything else is $O(M^3)$ or cheaper. The log marginal
+likelihood $\ln\Gauss(\yvec \mid \zeros, \Qmat_{ff} + \Lambdamat)$ costs the same through the matrix determinant
+lemma, $\abs{\Qmat_{ff} + \Lambdamat} = \abs{\Sigmamat^{-1}}\,\abs{\Kmat_{uu}}^{-1}\abs{\Lambdamat}$.
+
+<SparseGp />
+
+### The variational free energy
+
+DTC and FITC change the model and then fit it. The inducing inputs become extra hyperparameters of a different
+model, and nothing ties that model to the exact GP. Titsias instead keeps the exact model and approximates its
+posterior <Cite id="titsias2009" />. The variational family is
+
+$$
+q(\fvec, \uvec) = p(\fvec \mid \uvec)\, q(\uvec),
+$$
+
+with the exact conditional and a free distribution $q(\uvec)$. The <NoteLink to="evidence-lower-bound">evidence lower
+bound</NoteLink> is
+
+$$
+\ln p(\yvec) \ge \Fcal = \int p(\fvec \mid \uvec)\, q(\uvec) \ln\frac{p(\yvec \mid \fvec)\, p(\fvec \mid \uvec)\, p(\uvec)}{p(\fvec \mid \uvec)\, q(\uvec)}\, d\fvec\, d\uvec.
+$$
+
+The conditional $p(\fvec \mid \uvec)$ cancels inside the logarithm, which is what makes the bound cheap. The integral
+over $\fvec$ then involves only the Gaussian likelihood. With $\fvec \mid \uvec$ of mean
+$\mvec_u = \Kmat_{fu}\Kmat_{uu}^{-1}\uvec$ and covariance $\Kmat_{ff} - \Qmat_{ff}$,
+
+$$
+\int p(\fvec \mid \uvec)\ln p(\yvec \mid \fvec)\, d\fvec
+= \ln\Gauss(\yvec \mid \mvec_u, \sigma^2\eye) - \frac{1}{2\sigma^2}\trace(\Kmat_{ff} - \Qmat_{ff}),
+$$
+
+because $\expect\norm{\yvec - \fvec}^2 = \norm{\yvec - \mvec_u}^2 + \trace\cov[\fvec \mid \uvec]$. Write
+$G(\uvec) = \Gauss(\yvec \mid \mvec_u, \sigma^2\eye)$. The bound becomes
+
+$$
+\Fcal = \int q(\uvec)\ln\frac{G(\uvec)\, p(\uvec)}{q(\uvec)}\, d\uvec - \frac{1}{2\sigma^2}\trace(\Kmat_{ff} - \Qmat_{ff}).
+$$
+
+The first term equals $\ln\int G(\uvec)p(\uvec)\,d\uvec$ minus the
+<NoteLink to="kl-divergence">KL divergence</NoteLink> from $q(\uvec)$ to the normalised product $G(\uvec)p(\uvec)$. It
+is maximised by making that divergence zero, so the optimal $q(\uvec)$ is proportional to $G(\uvec)p(\uvec)$, a
+Gaussian. The integral $\int G(\uvec)p(\uvec)\,d\uvec$ is the marginal of $\yvec = \Kmat_{fu}\Kmat_{uu}^{-1}\uvec + \varepsilonvec$
+with $\uvec \sim \Gauss(\zeros, \Kmat_{uu})$, which is $\Gauss(\yvec \mid \zeros, \Qmat_{ff} + \sigma^2\eye)$. The
+collapsed bound is
+
+$$
+\Fcal = \ln\Gauss(\yvec \mid \zeros, \Qmat_{ff} + \sigma^2\eye) - \frac{1}{2\sigma^2}\trace(\Kmat_{ff} - \Qmat_{ff}).
+$$
+
+The first term is the DTC marginal likelihood. The trace term is the total prior variance of $\fvec$ that the
+inducing variables fail to explain, divided by twice the noise variance. It penalises inducing inputs that leave
+parts of the data poorly covered. It vanishes when $\Zmat = \Xmat$, where the bound equals the exact marginal
+likelihood. The optimal $q(\uvec)$ gives the DTC predictive equations.
+
+Because $\Fcal$ is a lower bound on the exact $\ln p(\yvec)$, the inducing inputs are variational parameters, not
+model parameters. Maximising $\Fcal$ over $\Zmat$ and the hyperparameters jointly moves the approximation toward the
+exact posterior and cannot overfit by adding inducing points. The DTC and FITC marginal likelihoods are not bounds.
+In the figure, with length-scale 0.6 and ten evenly spaced inducing inputs, the DTC value (shown for SoR, which shares it) is $-29.6$ against
+an exact $-34.2$, while the bound is $-114.2$.
+
+### Stochastic variational inference
+
+The collapsed bound still sums over all data inside a single Gaussian, so it cannot be evaluated on a minibatch.
+Hensman, Fusi and Lawrence keep $q(\uvec) = \Gauss(\mvec, \Smat)$ explicit instead of optimising it out
+<Cite id="hensman2013" />. The bound then separates over data points:
+
+$$
+\Fcal = \sum_{i=1}^{N}\expect_{q(f_i)}[\ln p(y_i \mid f_i)] - \KL\paren{q(\uvec)\,\|\,p(\uvec)},
+$$
+
+where $q(f_i)$ is Gaussian with mean $\kvec_{iu}\Kmat_{uu}^{-1}\mvec$ and variance
+$k_{ii} - \kvec_{iu}\Kmat_{uu}^{-1}\kvec_{ui} + \kvec_{iu}\Kmat_{uu}^{-1}\Smat\Kmat_{uu}^{-1}\kvec_{ui}$. An unbiased
+estimate of the sum comes from a minibatch, so the stochastic variational GP (SVGP) trains by stochastic gradient
+ascent in $O(M^3)$ per step, independent of $N$. The expectations are one-dimensional, so non-Gaussian likelihoods such
+as classification need only quadrature <Cite id="hensman2015" />.
+
+## Cost
+
+| Method | Training | Prediction, mean / variance | Memory |
+| --- | --- | --- | --- |
+| Exact GP | $O(N^3)$ | $O(N)$ / $O(N^2)$ | $O(N^2)$ |
+| SoR, DTC, FITC, VFE | $O(NM^2)$ | $O(M)$ / $O(M^2)$ | $O(NM)$ |
+| SVGP | $O(BM^2 + M^3)$ per step, minibatch $B$ | $O(M)$ / $O(M^2)$ | $O(M^2)$ |
+
+## Trade-offs
+
+- **FITC versus VFE.** FITC's heteroscedastic diagonal lets it fit the data well with few inducing points, but it
+  tends to underestimate the noise variance and can overfit, because its inducing inputs are free model parameters.
+  VFE tends to overestimate the noise and to underfit with too few inducing points, but improves monotonically as
+  inducing points are added <Cite id="bauer2016" />.
+- **Number of inducing points.** $M$ must grow with the complexity of the function, roughly with the input range
+  divided by the length-scale in one dimension. Short length-scales in high dimensions need many inducing points,
+  and the approximation then loses its advantage.
+- **Placement.** Initialise $\Zmat$ with a subset of the inputs or k-means centres, then optimise. In the figure,
+  crowding the inducing inputs leaves regions uncovered, the trace term grows and the VFE band widens there.
+- **Alternatives.** Random Fourier features give a sparse spectrum approximation with a fixed basis. Structured
+  interpolation methods exploit grid structure instead of a low-rank one.
+
+## Pitfalls
+
+- **Comparing marginal likelihoods across methods.** DTC and FITC define their own models. Their marginal likelihoods
+  can exceed the exact one and are not bounds. Only the VFE bound is comparable to the exact value.
+- **Degenerate SoR variance.** The subset-of-regressors predictive variance shrinks to zero far from the inducing
+  inputs. Use DTC, FITC or VFE predictions instead.
+- **Ill-conditioned $\Kmat_{uu}$.** Two inducing inputs that drift together make $\Kmat_{uu}$ nearly singular. Add
+  jitter to its diagonal before factorising.

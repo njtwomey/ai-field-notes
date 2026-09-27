@@ -1,0 +1,165 @@
+---
+title: Support vector machine
+kind: concept
+summary: A support vector machine is a linear classifier $\sgn(\wvec^\top\xvec + b)$ that maximises the margin to the nearest training points, allowing violations at cost $C$. Its dual depends on the data only through inner products, and the solution is a sum over a few support vectors.
+tags: [classification, max-margin, kernels, convex-optimisation, worked-example]
+aliases: [SVM, support vector classifier, maximum-margin classifier, soft-margin SVM, hard-margin SVM, linear SVM, hinge loss, support vectors]
+requires: [dot-product, vector-norms]
+related: [logistic-regression, structural-svm, perceptron, gradient-descent]
+references: [cortes1995, boser1992, scholkopf2002, platt1998, platt1999, hastie2009]
+status: draft
+updated: 2026-09-27
+---
+
+import { MarginExplorer } from './MarginExplorer'
+
+<Definition>
+Given training pairs $(\xvec_i, y_i)$ with $\xvec_i \in \reals^D$ and $y_i \in \set{-1, +1}$, the soft-margin support
+vector machine (SVM) solves
+
+$$
+\min_{\wvec, b, \xivec}\ \frac12\norm{\wvec}^2 + C\sum_{i=1}^{N}\xi_i \quad \text{subject to} \quad
+y_i(\wvec^\top\xvec_i + b) \ge 1 - \xi_i,\ \ \xi_i \ge 0,
+$$
+
+and classifies a new input by $\sgn(\wvec^\top\xvec + b)$ <Cite id="cortes1995" />. The slack $\xi_i$ measures how far
+point $i$ violates the margin, and $C > 0$ sets the price of violations. With $C = \infty$ and separable data it is the
+hard-margin SVM of Boser, Guyon and Vapnik <Cite id="boser1992" />.
+</Definition>
+
+## Intuition
+
+When two classes can be separated by a hyperplane, infinitely many hyperplanes do it. The SVM picks the one with the
+widest empty band between the classes. A boundary far from every training point is robust to small perturbations of
+the data and, by margin-based generalisation bounds, tends to generalise well.
+
+The widest band touches a few points on each side. Those points, the support vectors, fix the solution: moving or
+deleting any other point, as long as it stays outside the band, changes nothing. When the classes overlap, the soft
+margin lets some points into the band or across the boundary, and $C$ trades the width of the band against the total
+violation.
+
+<MarginExplorer />
+
+## The margin
+
+The signed distance from a point $\xvec$ to the hyperplane $\wvec^\top\xvec + b = 0$ is
+$(\wvec^\top\xvec + b)/\norm{\wvec}$. To see this, write $\xvec = \xvec_0 + t\,\wvec/\norm{\wvec}$ with $\xvec_0$ on the
+hyperplane. Then $\wvec^\top\xvec + b = \wvec^\top\xvec_0 + b + t\norm{\wvec} = t\norm{\wvec}$, so
+$t = (\wvec^\top\xvec + b)/\norm{\wvec}$.
+
+The pair $(\wvec, b)$ can be rescaled by any positive constant without changing the hyperplane. Fix the scale so that
+the closest points satisfy $y_i(\wvec^\top\xvec_i + b) = 1$. Their distance to the hyperplane is then $1/\norm{\wvec}$,
+and the band between the planes $\wvec^\top\xvec + b = \pm 1$ has width $2/\norm{\wvec}$. Maximising the width is
+minimising $\norm{\wvec}$, or equivalently $\frac12\norm{\wvec}^2$, subject to
+$y_i(\wvec^\top\xvec_i + b) \ge 1$ for every $i$. This is the hard-margin problem. Adding slacks $\xi_i$ with a linear
+penalty gives the soft-margin problem in the definition.
+
+## The hinge loss
+
+For fixed $\wvec$ and $b$, the best slack for point $i$ is the smallest one that satisfies both constraints:
+$\xi_i = \max(0, 1 - y_i f(\xvec_i))$, with $f(\xvec) = \wvec^\top\xvec + b$. Substituting it removes the constraints:
+
+$$
+\min_{\wvec, b}\ \sum_{i=1}^{N}\max\paren{0,\ 1 - y_i f(\xvec_i)} + \frac{1}{2C}\norm{\wvec}^2.
+$$
+
+The SVM is therefore L2-regularised empirical risk minimisation with the hinge loss
+$\ell(y, f) = \max(0, 1 - yf)$ <Cite id="hastie2009" />. The hinge loss is zero for points classified correctly with
+margin at least 1 and grows linearly otherwise. <NoteLink to="logistic-regression">Logistic regression</NoteLink>
+minimises the same objective with the log loss $\ln(1 + e^{-yf})$, which is smooth and never exactly zero. The flat
+part of the hinge loss is what makes the SVM solution sparse, and its lack of a probabilistic reading is why SVM
+outputs are not probabilities.
+
+## The dual problem
+
+Introduce multipliers $\alpha_i \ge 0$ for the margin constraints and $\mu_i \ge 0$ for $\xi_i \ge 0$. The Lagrangian is
+
+$$
+L = \frac12\norm{\wvec}^2 + C\sum_i\xi_i - \sum_i\alpha_i\brack{y_i(\wvec^\top\xvec_i + b) - 1 + \xi_i} - \sum_i\mu_i\xi_i.
+$$
+
+For fixed primal variables, the maximum of $L$ over $\alpha_i, \mu_i \ge 0$ is the primal objective if every constraint
+holds and $+\infty$ if any is violated. The primal problem is therefore $\min_{\wvec, b, \xivec}\max_{\alphavec, \muvec \ge \zeros} L$.
+The dual problem swaps the order, $\max_{\alphavec, \muvec}\min_{\wvec, b, \xivec} L$. Swapping never increases the
+value, which is weak duality. For a convex quadratic objective with linear constraints that some point satisfies, as
+here, the two values are equal.
+
+The inner minimisation is unconstrained, so its gradients vanish:
+
+$$
+\frac{\partial L}{\partial\wvec} = \wvec - \sum_i\alpha_i y_i\xvec_i = \zeros, \qquad
+\frac{\partial L}{\partial b} = -\sum_i\alpha_i y_i = 0, \qquad
+\frac{\partial L}{\partial\xi_i} = C - \alpha_i - \mu_i = 0.
+$$
+
+The first condition gives $\wvec = \sum_i\alpha_i y_i\xvec_i$. The third, with $\mu_i \ge 0$, gives $\alpha_i \le C$.
+Substituting all three into $L$ cancels the slack terms and the bias term. The remaining terms are
+$\frac12\norm{\wvec}^2 - \wvec^\top\sum_i\alpha_i y_i\xvec_i + \sum_i\alpha_i = -\frac12\norm{\wvec}^2 + \sum_i\alpha_i$.
+The dual is
+
+$$
+\max_{\alphavec}\ \sum_{i=1}^{N}\alpha_i - \frac12\sum_{i=1}^{N}\sum_{j=1}^{N}\alpha_i\alpha_j y_i y_j\,\xvec_i^\top\xvec_j
+\quad \text{subject to} \quad 0 \le \alpha_i \le C,\ \ \sum_{i=1}^{N}\alpha_i y_i = 0.
+$$
+
+The dual is a quadratic programme in $N$ variables with box constraints and one equality. It depends on the inputs only
+through the inner products $\xvec_i^\top\xvec_j$. Replacing them with a kernel $k(\xvec_i, \xvec_j)$ gives the
+<NoteLink to="kernel-svm">kernel SVM</NoteLink>.
+
+### Support vectors
+
+At the optimum, complementary slackness holds for each constraint: $\alpha_i\brack{y_i f(\xvec_i) - 1 + \xi_i} = 0$ and
+$\mu_i\xi_i = (C - \alpha_i)\xi_i = 0$. Each training point falls into one of three cases.
+
+| $\alpha_i$ | Consequence | Position |
+| --- | --- | --- |
+| $0$ | $\xi_i = 0$, $y_i f(\xvec_i) \ge 1$ | outside the margin; no influence on $\wvec$ |
+| $0 < \alpha_i < C$ | $\xi_i = 0$, $y_i f(\xvec_i) = 1$ | exactly on the margin |
+| $C$ | $\xi_i \ge 0$, $y_i f(\xvec_i) \le 1$ | inside the margin or misclassified |
+
+The points with $\alpha_i > 0$ are the support vectors. The weight vector $\wvec = \sum_i\alpha_i y_i\xvec_i$ is a
+combination of them alone. Any support vector on the margin gives the bias, $b = y_i - \wvec^\top\xvec_i$; averaging
+over all of them is numerically safer.
+
+### Worked example
+
+Take three points: $\xvec_1 = (0, 0)$ with $y_1 = -1$, and $\xvec_2 = (2, 0)$, $\xvec_3 = (0, 2)$ with label $+1$. The
+problem is symmetric under swapping the two coordinates, so $\wvec = (a, a)$. The hard-margin constraints are
+$-b \ge 1$ for $\xvec_1$ and $2a + b \ge 1$ for $\xvec_2$ and $\xvec_3$. Minimising $\norm{\wvec}^2 = 2a^2$ makes both
+tight: $b = -1$ and $a = 1$. The solution is $\wvec = (1, 1)$, $b = -1$, a boundary $x_1 + x_2 = 1$ and a margin
+width $2/\norm{\wvec} = \sqrt 2$.
+
+In the dual, $\sum_i\alpha_i y_i = 0$ gives $\alpha_1 = \alpha_2 + \alpha_3$, and
+$\wvec = \alpha_2(2, 0) + \alpha_3(0, 2) = (1, 1)$ gives $\alpha_2 = \alpha_3 = 0.5$ and $\alpha_1 = 1$. The dual
+objective is $\sum_i\alpha_i - \frac12\norm{\wvec}^2 = 2 - 1 = 1$, equal to the primal objective
+$\frac12\norm{\wvec}^2 = 1$. A fourth point $(3, 3)$ with label $+1$ has $f = 5 > 1$, so $\alpha_4 = 0$ and adding it
+changes nothing.
+
+## Training
+
+The dual has $N$ variables and a dense $N \times N$ matrix, so general-purpose quadratic programming solvers scale
+poorly. Sequential minimal optimisation (SMO) updates two multipliers at a time <Cite id="platt1998" />. Two is the
+smallest number that can move while keeping $\sum_i\alpha_i y_i = 0$: fixing all others ties the pair to a line
+segment inside the box $[0, C]^2$. The objective along that segment is a one-dimensional quadratic, minimised in
+closed form and clipped to the box. Choosing the pair that most violates the optimality conditions and repeating
+converges to the solution. The figure trains its SVM this way in the browser. Linear SVMs on large sparse data are
+usually trained in the primal instead, by coordinate descent on the dual or subgradient methods on the hinge loss.
+
+## Assumptions
+
+- **Two classes.** Multi-class problems combine binary SVMs, one class against the rest or one pair of classes at a
+  time.
+- **Scaled features.** The margin is measured in the Euclidean norm, so features on larger scales dominate it.
+  Standardise the features.
+- **Linear boundary.** The linear SVM draws a hyperplane. Curved boundaries need the kernel form.
+
+## Pitfalls
+
+- **Reading the output as a probability.** $f(\xvec)$ is a signed distance, not a probability. Platt scaling fits a
+  logistic function to held-out decision values when probabilities are needed <Cite id="platt1999" />.
+- **Choosing $C$ on training error.** Training error always falls as $C$ grows. Choose $C$ by cross-validation, on a
+  logarithmic grid.
+- **Class imbalance.** One $C$ for both classes lets the majority class dominate the slack total. Use a separate $C$
+  per class, scaled inversely to class frequency.
+- **Many support vectors.** With heavily overlapping classes most points end up at $\alpha_i = C$. The solution is
+  then not sparse and prediction with a kernel is slow.

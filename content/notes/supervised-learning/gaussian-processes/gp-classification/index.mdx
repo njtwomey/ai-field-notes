@@ -1,0 +1,168 @@
+---
+title: Gaussian process classification
+kind: concept
+summary: Gaussian process classification puts a GP prior on a latent function $f$ and squashes it through a sigmoid to give class probabilities. The posterior over $f$ is not Gaussian, so it is approximated, by a Laplace approximation at its mode or by expectation propagation.
+tags: [gaussian-process, classification, bayesian, approximate-inference, worked-example]
+aliases: [GPC, GP classification, Laplace approximation for GP classification, Gaussian process classifier]
+requires: [gaussian-process, logistic-regression, laplace-approximation]
+related: [kernel-svm, relevance-vector-machine, kl-divergence]
+references: [rasmussen2006, williams1998, minka2001, kuss2005, mackay1992c]
+status: draft
+updated: 2026-09-27
+---
+
+import { GpClassification } from './GpClassification'
+
+<Definition>
+Binary Gaussian process classification models labels $y_i \in \set{-1, +1}$ through a latent function
+$f \sim \GP(0, k)$ and a sigmoid likelihood, $p(y_i \mid f_i) = \sigma(y_i f_i)$ with $f_i = f(\xvec_i)$
+<Cite id="williams1998" />. Here $\sigma(z) = 1/(1 + e^{-z})$ is the logistic sigmoid, or the standard normal cdf
+$\Phi$ for the probit model. The prediction for a new input is the class probability averaged over the posterior of
+the latent function,
+
+$$
+\bar\pi_* = p(y_* = +1 \mid \xvec_*, \yvec) = \int \sigma(f_*)\, p(f_* \mid \xvec_*, \yvec)\, df_*.
+$$
+</Definition>
+
+## Intuition
+
+<NoteLink to="logistic-regression">Logistic regression</NoteLink> squashes a linear function through the sigmoid. GP
+classification squashes a random function instead, with the kernel controlling how smoothly the class probability
+changes with the input. The latent function has no meaning of its own. Only $\sigma(f)$ is observed, through the
+labels.
+
+With a Gaussian likelihood the posterior over the latent values would be Gaussian and exact. The sigmoid likelihood
+breaks conjugacy: the posterior $p(\fvec \mid \yvec) \propto p(\yvec \mid \fvec)\,\Gauss(\fvec \mid \zeros, \Kmat)$
+has no closed form. Every practical method replaces it with a Gaussian $q(\fvec) = \Gauss(\fvec \mid \hat\fvec, \Sigmamat)$
+and then predicts as if it were exact.
+
+<GpClassification />
+
+## The Laplace approximation
+
+The <NoteLink to="laplace-approximation">Laplace approximation</NoteLink> fits a Gaussian at the posterior mode, with
+covariance equal to the inverse of the negative Hessian of the log posterior there <Cite id="williams1998" />. The log
+posterior, up to a constant, is
+
+$$
+\Psi(\fvec) = \ln p(\yvec \mid \fvec) - \tfrac12\fvec^\top\Kmat^{-1}\fvec.
+$$
+
+The likelihood factorises over data points, so its gradient is a vector with entries
+$\partial\ln p(y_i \mid f_i)/\partial f_i$ and its Hessian is diagonal. Define
+
+$$
+\Wmat = -\nabla\nabla\ln p(\yvec \mid \fvec), \qquad \nabla\Psi = \nabla\ln p(\yvec \mid \fvec) - \Kmat^{-1}\fvec, \qquad
+\nabla\nabla\Psi = -\Wmat - \Kmat^{-1}.
+$$
+
+For the logistic likelihood, with targets $t_i = (y_i + 1)/2 \in \set{0, 1}$ and $\pi_i = \sigma(f_i)$, the derivatives
+are $\partial\ln p(y_i \mid f_i)/\partial f_i = t_i - \pi_i$ and $W_{ii} = \pi_i(1 - \pi_i)$. The log-likelihood is
+concave, so $\Wmat$ has non-negative entries, $\Psi$ is strictly concave and the mode $\hat\fvec$ is unique.
+
+### Finding the mode
+
+Setting $\nabla\Psi = \zeros$ gives the self-consistency condition
+
+$$
+\hat\fvec = \Kmat\,\nabla\ln p(\yvec \mid \hat\fvec).
+$$
+
+The mode cannot be read off, since the right side depends on $\hat\fvec$. Newton's method solves it. A Newton step
+replaces $\fvec$ by $\fvec - (\nabla\nabla\Psi)^{-1}\nabla\Psi$, which simplifies to
+
+$$
+\fvec^{\text{new}} = (\Kmat^{-1} + \Wmat)^{-1}\paren{\Wmat\fvec + \nabla\ln p(\yvec \mid \fvec)}.
+$$
+
+Newton's method on a concave function with this curvature typically converges in fewer than ten iterations. A
+numerically stable implementation never inverts $\Kmat$. It factorises
+$\Bmat = \eye + \Wmat^{1/2}\Kmat\Wmat^{1/2}$, whose eigenvalues are at least 1, by Cholesky decomposition
+<Cite id="rasmussen2006" />.
+
+The approximation is
+
+$$
+q(\fvec \mid \yvec) = \Gauss\paren{\fvec \mid \hat\fvec, (\Kmat^{-1} + \Wmat)^{-1}}.
+$$
+
+### Predicting the latent value
+
+For a test input with cross-covariance $\kvec_* = k(\Xmat, \xvec_*)$, the GP prior gives the conditional
+$p(f_* \mid \fvec) = \Gauss(f_* \mid \kvec_*^\top\Kmat^{-1}\fvec,\ k_{**} - \kvec_*^\top\Kmat^{-1}\kvec_*)$, with
+$k_{**} = k(\xvec_*, \xvec_*)$. Averaging over $q$ by the laws of total expectation and total variance gives
+
+$$
+\expect_q[f_*] = \kvec_*^\top\Kmat^{-1}\hat\fvec = \kvec_*^\top\nabla\ln p(\yvec \mid \hat\fvec),
+$$
+
+using the mode condition, and
+
+$$
+\var_q[f_*] = k_{**} - \kvec_*^\top\Kmat^{-1}\kvec_* + \kvec_*^\top\Kmat^{-1}(\Kmat^{-1} + \Wmat)^{-1}\Kmat^{-1}\kvec_*
+= k_{**} - \kvec_*^\top(\Kmat + \Wmat^{-1})^{-1}\kvec_*.
+$$
+
+The second equality is the Woodbury identity
+$(\Kmat + \Wmat^{-1})^{-1} = \Kmat^{-1} - \Kmat^{-1}(\Kmat^{-1} + \Wmat)^{-1}\Kmat^{-1}$. The formulas match GP
+regression with a noise variance $1/W_{ii}$ for each point: points classified confidently have small $W_{ii}$ and act
+like very noisy observations. The mean is a weighted sum of kernels with weights $t_i - \hat\pi_i$, so points that are
+already fitted well contribute little.
+
+### Predicting the class probability
+
+The class probability averages the sigmoid over $f_* \sim \Gauss(\mu_*, s_*^2)$, with $\mu_*$ and $s_*^2$ the moments
+above. For the probit likelihood the integral is exact:
+$\int\Phi(f)\Gauss(f \mid \mu, s^2)\,df = \Phi(\mu/\sqrt{1 + s^2})$. For the logistic sigmoid MacKay's approximation
+$\bar\pi_* \approx \sigma(\kappa\mu_*)$ with $\kappa = (1 + \pi s_*^2/8)^{-1/2}$ follows from
+$\sigma(z) \approx \Phi(\sqrt{\pi/8}\,z)$ <Cite id="mackay1992c" />. Averaging moves the probability toward $1/2$ by an
+amount that grows with the latent uncertainty. The decision $\bar\pi_* > 1/2$ is the same as $\mu_* > 0$, but the
+probability is better calibrated than $\sigma(\mu_*)$.
+
+### Worked example
+
+Take one training point with $y = +1$ and prior variance $k(\xvec, \xvec) = 4$. The mode solves
+$\hat f = 4\,(1 - \sigma(\hat f))$, which gives $\hat f = 1.043$ and $\sigma(\hat f) = 0.739$. The curvature is
+$W = 0.739 \times 0.261 = 0.193$, so the approximate posterior variance is $(1/4 + 0.193)^{-1} = 2.259$. The plug-in
+probability at the training input is $0.739$. Averaging the sigmoid over $\Gauss(1.043, 2.259)$ gives $0.677$, and
+MacKay's approximation gives $\sigma(1.043/\sqrt{1 + 2.259\pi/8}) = 0.681$.
+
+### The approximate marginal likelihood
+
+The kernel hyperparameters are fitted by the Laplace approximation to the marginal likelihood. Expanding $\Psi$ to
+second order about $\hat\fvec$ and integrating the Gaussian gives
+
+$$
+\ln q(\yvec \mid \Xmat) = -\tfrac12\hat\fvec^\top\Kmat^{-1}\hat\fvec + \ln p(\yvec \mid \hat\fvec) - \tfrac12\ln\abs{\Bmat},
+$$
+
+where the prior's normaliser $\abs{\Kmat}^{-1/2}$ and the Gaussian integral's $\abs{\Kmat^{-1} + \Wmat}^{-1/2}$ combine
+through $\abs{\Kmat}\,\abs{\Kmat^{-1} + \Wmat} = \abs{\eye + \Kmat\Wmat} = \abs{\Bmat}$ <Cite id="rasmussen2006" />.
+
+## Expectation propagation
+
+Expectation propagation (EP) replaces each likelihood factor $p(y_i \mid f_i)$ by an unnormalised Gaussian site
+$\tilde t_i(f_i)$ <Cite id="minka2001" />. It updates one site at a time: remove it from the current approximation,
+multiply in the exact likelihood factor, and choose the new site so that the resulting Gaussian matches the mean and
+variance of that tilted distribution. For the probit likelihood the required moments are in closed form. Where the
+Laplace approximation matches curvature at the mode, EP matches moments, which suits the skewed posteriors of
+classification. In a comparison on benchmark problems, EP gave predictive probabilities and marginal likelihoods much
+closer to Markov chain Monte Carlo than the Laplace approximation, which underestimates the latent mean
+<Cite id="kuss2005" />. EP costs a few times more and is not guaranteed to converge.
+
+## Assumptions
+
+- **Binary labels.** The multi-class version uses one latent function per class and a softmax likelihood, with
+  $\Wmat$ block-structured rather than diagonal.
+- **Gaussian approximation.** Both methods assume the posterior is close to Gaussian. With well-separated classes it is
+  strongly skewed, and the Laplace approximation places the mean too close to zero.
+
+## Pitfalls
+
+- **Cubic cost.** Each Newton step costs $O(N^3)$, like exact GP regression, and sparse approximations are needed for
+  large datasets.
+- **Reporting $\sigma(\mu_*)$.** Squashing the latent mean ignores the latent variance and gives overconfident
+  probabilities far from the data.
+- **Large signal variance.** With separable data the marginal likelihood can keep increasing with $\sigma_f$, driving
+  the latent function to extreme values. Bound $\sigma_f$ or put a prior on it.

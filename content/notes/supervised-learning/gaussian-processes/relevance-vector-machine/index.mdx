@@ -1,0 +1,187 @@
+---
+title: Relevance vector machine
+kind: concept
+summary: The relevance vector machine is a Bayesian linear model on one kernel basis function per training point, with a separate prior precision $\alpha_i$ for each weight. Maximising the marginal likelihood drives most $\alpha_i$ to infinity, leaving a sparse model with probabilistic predictions.
+tags: [sparse-bayesian-learning, kernels, bayesian, sparsity, regression, classification]
+aliases: [RVM, sparse Bayesian learning, SBL, relevance vectors]
+requires: [bayesian-linear-regression, automatic-relevance-determination]
+related: [support-vector-machine, kernel-ridge-regression, lasso, gaussian-process]
+references: [tipping2001, tipping2003, mackay1992, rasmussen2005]
+status: draft
+updated: 2026-09-27
+---
+
+import { RvmFit } from './RvmFit'
+
+<Definition>
+The relevance vector machine (RVM) models a target as $y = \sum_{i=0}^{N} w_i\phi_i(\xvec) + \varepsilon$, with a bias
+$\phi_0 = 1$ and one kernel function $\phi_i(\xvec) = k(\xvec, \xvec_i)$ centred on each training input, and Gaussian
+noise $\varepsilon \sim \Gauss(0, \beta^{-1})$ <Cite id="tipping2001" />. Each weight has its own zero-mean Gaussian
+prior $w_i \sim \Gauss(0, \alpha_i^{-1})$. The precisions $\alpha_i$ and $\beta$ are set by maximising the marginal
+likelihood. Most $\alpha_i$ diverge, their weights are fixed at zero, and the training inputs that remain are the
+relevance vectors.
+</Definition>
+
+## Intuition
+
+A support vector machine and kernel ridge regression both predict with a sum of kernels centred on training inputs.
+Kernel ridge regression uses all of them. The support vector machine uses a subset chosen by its loss. The RVM chooses
+the subset by Bayesian model selection: it gives every basis function a separate prior scale and lets the marginal
+likelihood decide which scales should be zero.
+
+The pruning comes from the Occam penalty in the marginal likelihood. A basis function whose weight could be non-zero
+adds prior variance to the targets. If the data do not need that variance, the determinant term of the marginal
+likelihood penalises it, and the best prior variance for that weight is exactly zero. This is
+<NoteLink to="automatic-relevance-determination">automatic relevance determination</NoteLink> applied to a kernel
+basis.
+
+<RvmFit />
+
+## The model
+
+Let $\Phimat$ be the $N \times (N + 1)$ design matrix with entries $\Phi_{ni} = \phi_i(\xvec_n)$, and
+$\Amat = \diag(\alpha_0, \dots, \alpha_N)$ the prior precision matrix. Given the hyperparameters, this is
+<NoteLink to="bayesian-linear-regression">Bayesian linear regression</NoteLink>. The posterior over the weights is
+Gaussian with
+
+$$
+\Sigmamat = (\Amat + \beta\Phimat^\top\Phimat)^{-1}, \qquad \muvec = \beta\Sigmamat\Phimat^\top\yvec,
+$$
+
+and the predictive distribution at a new input is Gaussian with mean $\muvec^\top\phivec(\xvec_*)$ and variance
+$\beta^{-1} + \phivec(\xvec_*)^\top\Sigmamat\phivec(\xvec_*)$.
+
+## The marginal likelihood
+
+Define the energy $E(\wvec) = \frac\beta2\norm{\yvec - \Phimat\wvec}^2 + \frac12\wvec^\top\Amat\wvec$. The likelihood
+times the prior is
+
+$$
+p(\yvec \mid \wvec)\,p(\wvec) = \paren{\frac{\beta}{2\pi}}^{N/2}\prod_i\paren{\frac{\alpha_i}{2\pi}}^{1/2} e^{-E(\wvec)}.
+$$
+
+The energy is quadratic in $\wvec$ with Hessian $\Sigmamat^{-1} = \Amat + \beta\Phimat^\top\Phimat$ and minimiser
+$\muvec$, so a second-order expansion about $\muvec$ is exact:
+$E(\wvec) = E(\muvec) + \frac12(\wvec - \muvec)^\top\Sigmamat^{-1}(\wvec - \muvec)$. The Gaussian integral over
+$\wvec$ gives $(2\pi)^{(N+1)/2}\abs{\Sigmamat}^{1/2}e^{-E(\muvec)}$, and the log marginal likelihood is
+
+$$
+\Lcal(\alphavec, \beta) = \frac12\sum_i\ln\alpha_i + \frac N2\ln\beta - E(\muvec) - \frac12\ln\abs{\Sigmamat^{-1}} - \frac N2\ln 2\pi.
+$$
+
+### Re-estimation of the precisions
+
+Differentiate $\Lcal$ with respect to one precision $\alpha_i$. Three terms depend on it.
+
+- $\frac12\ln\alpha_i$ contributes $\frac{1}{2\alpha_i}$.
+- $E(\muvec)$ depends on $\alpha_i$ directly and through $\muvec$. The indirect part vanishes because $\muvec$
+  minimises $E$, so the gradient of $E$ at $\muvec$ is zero. The direct part is $\frac12\mu_i^2$.
+- $\frac12\ln\abs{\Sigmamat^{-1}}$ contributes $\frac12\trace(\Sigmamat\,\partial\Sigmamat^{-1}/\partial\alpha_i) =
+  \frac12\Sigma_{ii}$, since $\partial\Sigmamat^{-1}/\partial\alpha_i$ has a single 1 at position $(i, i)$.
+
+Setting the derivative to zero gives $1/\alpha_i - \mu_i^2 - \Sigma_{ii} = 0$. Define
+
+$$
+\gamma_i = 1 - \alpha_i\Sigma_{ii} \in [0, 1].
+$$
+
+The number $\gamma_i$ measures how well the data determine $w_i$. It is near 1 when the posterior variance
+$\Sigma_{ii}$ is much smaller than the prior variance $1/\alpha_i$, and near 0 when the data leave the prior unchanged.
+Rearranging the stationarity condition as $\alpha_i\mu_i^2 = \gamma_i$ gives MacKay's fixed-point update
+<Cite id="mackay1992" />:
+
+$$
+\alpha_i^{\text{new}} = \frac{\gamma_i}{\mu_i^2}.
+$$
+
+For the noise precision, the terms $\frac N2\ln\beta$, $E(\muvec)$ and $\frac12\ln\abs{\Sigmamat^{-1}}$ contribute
+$\frac{N}{2\beta} - \frac12\norm{\yvec - \Phimat\muvec}^2 - \frac12\trace(\Sigmamat\Phimat^\top\Phimat)$. The trace
+simplifies, because $\beta\Phimat^\top\Phimat = \Sigmamat^{-1} - \Amat$:
+$\trace(\Sigmamat\Phimat^\top\Phimat) = \beta^{-1}\trace(\eye - \Sigmamat\Amat) = \beta^{-1}\sum_i\gamma_i$. Setting
+the derivative to zero gives
+
+$$
+\beta^{\text{new}} = \frac{N - \sum_i\gamma_i}{\norm{\yvec - \Phimat\muvec}^2}.
+$$
+
+The denominator $N - \sum_i\gamma_i$ is the number of data points minus the number of well-determined parameters, the
+Bayesian analogue of the degrees-of-freedom correction in an unbiased variance estimate. Training alternates between
+computing $\Sigmamat$ and $\muvec$ and applying the two updates <Cite id="tipping2001" />.
+
+### Why the weights go to zero
+
+For a weight that the data do not support, $\mu_i$ shrinks toward zero faster than $\gamma_i$, and the update
+$\alpha_i = \gamma_i/\mu_i^2$ grows without bound. The limit is exact, not a numerical accident. Fix every
+hyperparameter except $\alpha_i$. With $\Cmat_{-i}$ the covariance of $\yvec$ without basis function $i$, define
+$s_i = \phivec_i^\top\Cmat_{-i}^{-1}\phivec_i$ and $q_i = \phivec_i^\top\Cmat_{-i}^{-1}\yvec$, where $\phivec_i$ is
+column $i$ of $\Phimat$. Then, up to terms that do not involve $\alpha_i$,
+
+$$
+\Lcal(\alpha_i) = \frac12\brack{\ln\alpha_i - \ln(\alpha_i + s_i) + \frac{q_i^2}{\alpha_i + s_i}},
+$$
+
+whose unique maximum is $\alpha_i = s_i^2/(q_i^2 - s_i)$ when $q_i^2 > s_i$ and $\alpha_i = \infty$ otherwise
+<Cite id="tipping2003" />. A basis function survives only if its alignment with the targets exceeds the variance it
+would add.
+
+<Derivation title="The marginal likelihood as a function of one precision">
+Integrating out the weights, $\yvec \sim \Gauss(\zeros, \Cmat)$ with
+$\Cmat = \beta^{-1}\eye + \sum_j\alpha_j^{-1}\phivec_j\phivec_j^\top = \Cmat_{-i} + \alpha_i^{-1}\phivec_i\phivec_i^\top$.
+The matrix determinant lemma gives $\abs{\Cmat} = \abs{\Cmat_{-i}}(1 + s_i/\alpha_i)$. The Sherman–Morrison formula
+gives $\Cmat^{-1} = \Cmat_{-i}^{-1} - \Cmat_{-i}^{-1}\phivec_i\phivec_i^\top\Cmat_{-i}^{-1}/(\alpha_i + s_i)$, so
+$\yvec^\top\Cmat^{-1}\yvec = \yvec^\top\Cmat_{-i}^{-1}\yvec - q_i^2/(\alpha_i + s_i)$. Substituting into
+$\Lcal = -\frac12(N\ln 2\pi + \ln\abs{\Cmat} + \yvec^\top\Cmat^{-1}\yvec)$ and using
+$-\ln(1 + s_i/\alpha_i) = \ln\alpha_i - \ln(\alpha_i + s_i)$ gives the expression above. Its derivative is
+$\frac{s_i^2 + \alpha_i(s_i - q_i^2)}{2\alpha_i(\alpha_i + s_i)^2}$, which is positive for every $\alpha_i$ when
+$q_i^2 \le s_i$ and has a single zero otherwise.
+</Derivation>
+
+The same criterion gives a faster algorithm. Tipping and Faul start from an empty model and repeatedly add, re-estimate
+or delete one basis function using $s_i$ and $q_i$, so the matrices stay as small as the final model
+<Cite id="tipping2003" />.
+
+### The effective prior on the weights
+
+Tipping's paper places gamma hyperpriors on each $\alpha_i$ and lets them become flat on $\ln\alpha_i$. Integrating
+$\alpha_i$ out of $\Gauss(w_i \mid 0, \alpha_i^{-1})$ under the flat limit gives the improper prior
+$p(w_i) \propto 1/\abs{w_i}$, which is sharply peaked at zero and heavy-tailed <Cite id="tipping2001" />. Type-II
+maximum likelihood on $\alpha_i$ is a way of using this sparsity-favouring prior without having to compute with it
+directly.
+
+## Classification
+
+For binary targets the likelihood is Bernoulli with $p(y = 1 \mid \xvec) = \sigma(\wvec^\top\phivec(\xvec))$, where
+$\sigma$ is the logistic sigmoid. The weight posterior is no longer Gaussian. Tipping uses a Laplace approximation at
+the posterior mode, found by iteratively reweighted least squares, and then applies the same $\alpha$ updates with
+$\muvec$ and $\Sigmamat$ from the approximation <Cite id="tipping2001" />.
+
+## Comparison with the support vector machine
+
+| | Support vector machine | Relevance vector machine |
+| --- | --- | --- |
+| Output | a decision value or a point estimate | a predictive distribution |
+| Sparsity | support vectors, often a large fraction of the data | relevance vectors, typically far fewer |
+| Hyperparameters | $C$ (and $\epsilon$ for regression) by cross-validation | noise and precisions by marginal likelihood; kernel width by cross-validation or evidence |
+| Kernel | must be positive semi-definite | any basis functions |
+| Training | convex quadratic programme | non-convex; $O(M^3)$ per iteration for $M$ active basis functions |
+
+On benchmark problems Tipping reports test errors comparable to the support vector machine with an order of magnitude
+fewer kernel functions <Cite id="tipping2001" />. Relevance vectors tend to be prototypical examples rather than
+points near the decision boundary.
+
+## Assumptions
+
+- **A good basis.** The RVM selects among the given basis functions. It cannot adjust their width or place them
+  anywhere other than on training inputs, so the kernel width still needs tuning.
+- **Gaussian noise for regression.** The closed-form updates need a Gaussian likelihood.
+
+## Pitfalls
+
+- **Overconfident predictions away from the data.** The prior over functions is a finite sum of basis functions
+  centred on the relevance vectors. Far from all of them every $\phi_i(\xvec_*) \approx 0$, so the predictive variance
+  collapses to the noise level $\beta^{-1}$, exactly where uncertainty should be largest. A Gaussian process does not
+  have this defect. Adding a basis function at the test point repairs it <Cite id="rasmussen2005" />.
+- **Local optima.** The marginal likelihood over $(\alphavec, \beta)$ is not concave. Different initialisations can
+  prune different basis functions.
+- **Cubic early cost.** The re-estimation updates start with all $N + 1$ basis functions and need an
+  $O(N^3)$ inverse per iteration until pruning shrinks the set. Use the incremental algorithm for large $N$.

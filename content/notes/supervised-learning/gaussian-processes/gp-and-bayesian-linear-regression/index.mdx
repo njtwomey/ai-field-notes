@@ -1,0 +1,152 @@
+---
+title: Gaussian processes and Bayesian linear regression
+kind: concept
+summary: Bayesian linear regression with features $\phivec(\xvec)$ and prior $\wvec \sim \Gauss(\zeros, \Sigmamat_p)$ is a Gaussian process with kernel $k(\xvec, \xvec') = \phivec(\xvec)^\top\Sigmamat_p\phivec(\xvec')$, and both views give the same predictions. Infinitely many features give kernels such as the squared exponential.
+tags: [gaussian-process, bayesian, regression, kernels, feature-maps]
+aliases: [weight-space view, weight space and function space, neural network Gaussian process, NNGP, infinitely wide neural network]
+requires: [gaussian-process, bayesian-linear-regression]
+related: [kernel-trick, multilayer-perceptron, reproducing-kernel-hilbert-space]
+references: [rasmussen2006, neal1996, williams1998b, lee2018]
+status: draft
+updated: 2026-09-27
+---
+
+import { BasisToKernel } from './BasisToKernel'
+
+<Definition>
+Let $f(\xvec) = \phivec(\xvec)^\top\wvec$ with a fixed feature map $\phivec : \Xcal \to \reals^D$ and a Gaussian prior
+$\wvec \sim \Gauss(\zeros, \Sigmamat_p)$. Then $f$ is a Gaussian process with zero mean and covariance function
+
+$$
+k(\xvec, \xvec') = \phivec(\xvec)^\top\Sigmamat_p\,\phivec(\xvec').
+$$
+
+With Gaussian noise of variance $\sigma^2$, the posterior predictive distribution of Bayesian linear regression
+(the weight-space view) equals that of Gaussian process regression with this kernel (the function-space view)
+<Cite id="rasmussen2006" />.
+</Definition>
+
+## Intuition
+
+A prior on weights induces a prior on functions. Drawing $\wvec$ and plotting $\phivec(\xvec)^\top\wvec$ gives one
+random function, and the covariance of its values at two inputs depends only on the features at those inputs and on
+$\Sigmamat_p$. A <NoteLink to="gaussian-process">Gaussian process</NoteLink> specifies the same object directly by that
+covariance, without mentioning weights. The two descriptions are the same model written in different coordinates.
+
+The equivalence runs in both directions. Every Bayesian linear model is a Gaussian process with a degenerate kernel of
+rank at most $D$. Many useful kernels, including the squared exponential, correspond to linear models with infinitely
+many features, which only the function-space view can compute with.
+
+## From weights to a kernel
+
+For any finite set of inputs with feature matrix $\Phimat \in \reals^{N \times D}$, whose rows are
+$\phivec(\xvec_i)^\top$, the function values are $\fvec = \Phimat\wvec$. A linear map of a Gaussian vector is Gaussian,
+so $\fvec \sim \Gauss(\zeros, \Phimat\Sigmamat_p\Phimat^\top)$ with entries
+
+$$
+\cov[f(\xvec_i), f(\xvec_j)] = \phivec(\xvec_i)^\top\cov[\wvec]\,\phivec(\xvec_j) = \phivec(\xvec_i)^\top\Sigmamat_p\,\phivec(\xvec_j).
+$$
+
+Every finite set of function values is jointly Gaussian, which is the definition of a Gaussian process. The Gram matrix
+$\Kmat = \Phimat\Sigmamat_p\Phimat^\top$ has rank at most $D$. For $N > D$ it is singular, and the prior contains only
+functions in the $D$-dimensional span of the features.
+
+## The same predictions
+
+The data are $\yvec = \Phimat\wvec + \varepsilonvec$ with $\varepsilonvec \sim \Gauss(\zeros, \sigma^2\eye)$. In weight
+space, the posterior over $\wvec$ is Gaussian with precision $\Amat = \sigma^{-2}\Phimat^\top\Phimat + \Sigmamat_p^{-1}$
+and mean $\sigma^{-2}\Amat^{-1}\Phimat^\top\yvec$ (derived in
+<NoteLink to="bayesian-linear-regression">Bayesian linear regression</NoteLink>). The prediction at $\xvec_*$, with
+features $\phivec_* = \phivec(\xvec_*)$, has
+
+$$
+\text{mean } \sigma^{-2}\phivec_*^\top\Amat^{-1}\Phimat^\top\yvec, \qquad \text{variance } \phivec_*^\top\Amat^{-1}\phivec_*.
+$$
+
+In function space, with $\kvec_* = \Phimat\Sigmamat_p\phivec_*$ and $k_{**} = \phivec_*^\top\Sigmamat_p\phivec_*$, GP
+regression predicts
+
+$$
+\text{mean } \kvec_*^\top(\Kmat + \sigma^2\eye)^{-1}\yvec, \qquad \text{variance } k_{**} - \kvec_*^\top(\Kmat + \sigma^2\eye)^{-1}\kvec_*.
+$$
+
+The means agree by a push-through identity. Expanding and regrouping,
+
+$$
+\sigma^{-2}\Phimat^\top(\Phimat\Sigmamat_p\Phimat^\top + \sigma^2\eye) = \sigma^{-2}\Phimat^\top\Phimat\Sigmamat_p\Phimat^\top + \Phimat^\top
+= (\sigma^{-2}\Phimat^\top\Phimat + \Sigmamat_p^{-1})\Sigmamat_p\Phimat^\top = \Amat\Sigmamat_p\Phimat^\top.
+$$
+
+Multiplying on the left by $\Amat^{-1}$ and on the right by $(\Kmat + \sigma^2\eye)^{-1}$ gives
+$\sigma^{-2}\Amat^{-1}\Phimat^\top = \Sigmamat_p\Phimat^\top(\Kmat + \sigma^2\eye)^{-1}$. Applying
+$\phivec_*^\top(\cdot)\,\yvec$ to both sides turns the weight-space mean into the function-space mean.
+
+The variances agree by the Woodbury identity applied to $\Amat^{-1}$:
+
+$$
+\Amat^{-1} = (\Sigmamat_p^{-1} + \sigma^{-2}\Phimat^\top\Phimat)^{-1} = \Sigmamat_p - \Sigmamat_p\Phimat^\top(\sigma^2\eye + \Phimat\Sigmamat_p\Phimat^\top)^{-1}\Phimat\Sigmamat_p.
+$$
+
+Taking $\phivec_*^\top(\cdot)\phivec_*$ of both sides gives
+$\phivec_*^\top\Amat^{-1}\phivec_* = k_{**} - \kvec_*^\top(\Kmat + \sigma^2\eye)^{-1}\kvec_*$.
+
+The two views cost different amounts. The weight-space solution inverts the $D \times D$ matrix $\Amat$, in
+$O(ND^2 + D^3)$ time. The function-space solution inverts the $N \times N$ matrix $\Kmat + \sigma^2\eye$, in $O(N^3)$
+time. The cheaper one is the one with the smaller matrix. For $D = \infty$ only the function-space view is available.
+
+## Infinitely many features
+
+Take one-dimensional inputs and Gaussian bumps $\phi_c(x) = \exp(-(x - c)^2/2\lambda^2)$ of width $\lambda$, centred on
+a grid of points $c_m$ with spacing $\Delta$. Give each weight variance $\sigma_w^2\Delta$, so that the total prior
+variance does not grow as the grid is refined. The kernel is
+
+$$
+k(x, x') = \sigma_w^2\sum_m \Delta\, \phi_{c_m}(x)\,\phi_{c_m}(x').
+$$
+
+As $\Delta \to 0$ over the whole real line the sum becomes an integral. Completing the square in $c$, with midpoint
+$\bar x = (x + x')/2$, gives $(x - c)^2 + (x' - c)^2 = 2(c - \bar x)^2 + (x - x')^2/2$. Then
+
+$$
+k(x, x') = \sigma_w^2\, e^{-(x - x')^2/4\lambda^2}\int_{-\infty}^{\infty} e^{-(c - \bar x)^2/\lambda^2}\,dc
+= \sqrt{\pi}\,\lambda\,\sigma_w^2 \exp\paren{-\frac{(x - x')^2}{2(\sqrt 2\lambda)^2}},
+$$
+
+the squared exponential kernel with length-scale $\ell = \sqrt 2\lambda$ and variance $\sqrt\pi\lambda\sigma_w^2$
+<Cite id="rasmussen2006" />. A Gaussian process with the squared exponential kernel is Bayesian linear regression on a
+continuum of Gaussian bumps, one at every location.
+
+<BasisToKernel />
+
+Mercer's theorem makes the converse general. A continuous positive semi-definite kernel on a compact domain has an
+expansion $k(\xvec, \xvec') = \sum_i \mu_i\,\psi_i(\xvec)\psi_i(\xvec')$ in eigenfunctions $\psi_i$ with eigenvalues
+$\mu_i \ge 0$. The Gaussian process with kernel $k$ is therefore Bayesian linear regression on the features $\psi_i$
+with independent weights $w_i \sim \Gauss(0, \mu_i)$.
+
+## Infinitely wide neural networks
+
+Neal showed that a network with one hidden layer becomes a Gaussian process as the number of hidden units grows
+<Cite id="neal1996" />. Let $f(\xvec) = b + \sum_{h=1}^{H} v_h\, g(\uvec_h^\top\xvec + a_h)$ with independent priors
+on all weights, and scale the output weights so that $\var[v_h] = \sigma_v^2/H$. For fixed inputs, the $H$ terms of the
+sum are independent and identically distributed, so by the central limit theorem the function values at any finite set
+of inputs tend to a joint Gaussian as $H \to \infty$. The limiting kernel is
+$k(\xvec, \xvec') = \sigma_b^2 + \sigma_v^2\,\expect[g(\uvec^\top\xvec + a)\,g(\uvec^\top\xvec' + a)]$. For the error
+function activation and Gaussian input weights the expectation has a closed form, the arcsine kernel
+<Cite id="williams1998b" />. The same argument applies layer by layer to deep networks, giving the neural network
+Gaussian process <Cite id="lee2018" />. In the limit the hidden units no longer learn features: the network's prior is
+fixed by its architecture.
+
+## Assumptions
+
+- **Gaussian weights and noise.** The equivalence of predictions needs a Gaussian prior on the weights and a Gaussian
+  likelihood. With other priors, $f$ is not a Gaussian process.
+- **Fixed features.** The feature map has no parameters of its own. Features with learned parameters, such as
+  neural-network hidden units, give a Gaussian process only in the infinite-width limit.
+
+## Pitfalls
+
+- **Degenerate priors.** A finite feature set gives a kernel of rank $D$. Far from the features' support, such as
+  beyond the last Gaussian bump, the prior variance drops to zero, and the posterior variance with it. The model is
+  then confident exactly where it has no information.
+- **Feature scaling in the limit.** The limit exists only if the weight variance shrinks with the number of features.
+  Without the factor $\Delta$ or $1/H$ the prior variance grows without bound.

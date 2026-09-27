@@ -1,0 +1,193 @@
+---
+title: Gaussian process
+kind: concept
+summary: A Gaussian process is a distribution over functions in which the values at any finite set of inputs are jointly Gaussian, with covariance given by a kernel $k(\xvec, \xvec')$. Regression conditions this Gaussian on noisy observations, which gives a closed-form posterior mean and variance.
+tags: [gaussian-process, bayesian, nonparametric, regression, kernels, worked-example]
+aliases: [GP, Gaussian process regression, GPR, kriging, function-space view]
+requires: [multivariate-normal-distribution, positive-definite-matrices]
+related: [bayesian-linear-regression, kernel-trick, cholesky-decomposition, schur-complement]
+references: [rasmussen2006, williams1996, mackay2003, bishop2006]
+status: draft
+updated: 2026-09-27
+---
+
+import { GpRegression } from './GpRegression'
+
+<Definition>
+A Gaussian process is a collection of random variables $\set{f(\xvec) : \xvec \in \Xcal}$, indexed by an input set
+$\Xcal$, such that every finite subset has a joint Gaussian distribution <Cite id="rasmussen2006" />. A Gaussian process
+is fixed by a mean function $m(\xvec) = \expect[f(\xvec)]$ and a covariance function
+$k(\xvec, \xvec') = \cov[f(\xvec), f(\xvec')]$, and is written $f \sim \GP(m, k)$. For inputs
+$\xvec_1, \dots, \xvec_N$ the vector $\fvec = (f(\xvec_1), \dots, f(\xvec_N))$ is distributed as
+$\Gauss(\mvec, \Kmat)$ with $m_i = m(\xvec_i)$ and $\Kmat_{ij} = k(\xvec_i, \xvec_j)$.
+</Definition>
+
+## Intuition
+
+A Gaussian process is a prior over functions that is stated one finite set of points at a time. The covariance
+function says how strongly the values at two inputs move together. The squared exponential covariance
+
+$$
+k(x, x') = \sigma_f^2 \exp\paren{-\frac{(x - x')^2}{2\ell^2}}
+$$
+
+gives nearby inputs a correlation close to 1 and distant inputs a correlation close to 0. Here $\sigma_f^2$ is the
+variance of $f(x)$ at every input and the length-scale $\ell$ is the distance over which the correlation decays. A
+function drawn from this prior is smooth and wiggles on a scale of about $\ell$.
+
+A sample from the prior on a plot is a draw of $\fvec \sim \Gauss(\zeros, \Kmat)$ at a few hundred grid inputs, drawn
+as a line. Regression keeps the same prior and conditions it on the observed values. The functions consistent with
+the data are pinned down near the observations and stay as uncertain as the prior far from them.
+
+<GpRegression />
+
+## The function-space view
+
+A Gaussian process is well defined because the finite-dimensional distributions agree with each other. The
+distribution of $(f(\xvec_1), f(\xvec_2))$ that the process specifies directly equals the marginal obtained from the
+distribution of $(f(\xvec_1), f(\xvec_2), f(\xvec_3))$ by integrating out $f(\xvec_3)$. This holds because the marginal
+of a <NoteLink to="multivariate-normal-distribution">multivariate normal</NoteLink> keeps the corresponding sub-vector
+of the mean and sub-block of the covariance. By the Kolmogorov extension theorem, consistent finite-dimensional
+distributions define a single process.
+
+Every Gram matrix $\Kmat$ must be a valid covariance matrix, that is symmetric and
+<NoteLink to="positive-definite-matrices">positive semi-definite</NoteLink>. A function $k$ with this property for
+every finite set of inputs is a positive semi-definite kernel. The mean function is usually taken to be zero after
+centring the targets. This note assumes $m = 0$ from here on.
+
+The model makes no assumption about a parametric form for $f$. The number of quantities it tracks grows with the
+number of observations, which is why Gaussian processes are called nonparametric.
+
+## Regression with Gaussian noise
+
+The data are $N$ inputs $\Xmat = (\xvec_1, \dots, \xvec_N)$ and targets $\yvec \in \reals^N$ generated as
+
+$$
+y_i = f(\xvec_i) + \varepsilon_i, \qquad f \sim \GP(0, k), \qquad \varepsilon_i \iid \Gauss(0, \sigma_n^2),
+$$
+
+with the noise independent of $f$. The goal is the distribution of $\fvec_* = f(\Xmat_*)$ at $M$ test inputs
+$\Xmat_*$. Write $\Kmat = k(\Xmat, \Xmat)$ for the $N \times N$ training Gram matrix, $\Kmat_* = k(\Xmat, \Xmat_*)$
+for the $N \times M$ cross-covariance and $\Kmat_{**} = k(\Xmat_*, \Xmat_*)$ for the $M \times M$ test covariance.
+
+### The joint distribution
+
+The targets are the latent values plus independent noise, so $\cov[\yvec] = \Kmat + \sigma_n^2\eye$ and
+$\cov[\yvec, \fvec_*] = \cov[\fvec, \fvec_*] = \Kmat_*$. The pair $(\yvec, \fvec_*)$ is a linear function of the
+jointly Gaussian vector $(\fvec, \fvec_*, \varepsilonvec)$, so it is jointly Gaussian:
+
+$$
+\begin{bmatrix} \yvec \\ \fvec_* \end{bmatrix} \sim \Gauss\paren{\zeros,\
+\begin{bmatrix} \Kmat + \sigma_n^2\eye & \Kmat_* \\ \Kmat_*^\top & \Kmat_{**} \end{bmatrix}}.
+$$
+
+### Conditioning on the targets
+
+Write $\Amat = \Kmat + \sigma_n^2\eye$. For $\sigma_n^2 > 0$ the matrix $\Amat$ is positive definite and so invertible.
+Define the residual vector
+
+$$
+\zvec = \fvec_* - \Kmat_*^\top\Amat^{-1}\yvec.
+$$
+
+The vector $\zvec$ is a linear function of $(\yvec, \fvec_*)$, so $(\zvec, \yvec)$ is jointly Gaussian. Its
+cross-covariance with $\yvec$ is
+
+$$
+\cov[\zvec, \yvec] = \cov[\fvec_*, \yvec] - \Kmat_*^\top\Amat^{-1}\cov[\yvec, \yvec] = \Kmat_*^\top - \Kmat_*^\top\Amat^{-1}\Amat = \zeros.
+$$
+
+Jointly Gaussian vectors with zero cross-covariance are independent, so the distribution of $\zvec$ does not change
+when $\yvec$ is observed. The mean of $\zvec$ is $\zeros$. Its covariance is
+
+$$
+\cov[\zvec] = \Kmat_{**} - 2\Kmat_*^\top\Amat^{-1}\Kmat_* + \Kmat_*^\top\Amat^{-1}\Amat\Amat^{-1}\Kmat_*
+= \Kmat_{**} - \Kmat_*^\top\Amat^{-1}\Kmat_*.
+$$
+
+Given $\yvec$, the test values are $\fvec_* = \zvec + \Kmat_*^\top\Amat^{-1}\yvec$: an independent Gaussian plus a
+known vector. The posterior is therefore
+
+$$
+\fvec_* \mid \yvec \sim \Gauss(\bar{\fvec}_*, \Sigmamat_*), \qquad
+\bar{\fvec}_* = \Kmat_*^\top(\Kmat + \sigma_n^2\eye)^{-1}\yvec, \qquad
+\Sigmamat_* = \Kmat_{**} - \Kmat_*^\top(\Kmat + \sigma_n^2\eye)^{-1}\Kmat_*.
+$$
+
+These are the Gaussian conditioning formulas, and $\Sigmamat_*$ is the
+<NoteLink to="schur-complement">Schur complement</NoteLink> of $\Amat$ in the joint covariance
+<Cite id="rasmussen2006" />. The predictive distribution of new noisy targets $\yvec_*$ adds the noise variance to the diagonal:
+$\cov[\yvec_* \mid \yvec] = \Sigmamat_* + \sigma_n^2\eye$.
+
+### Reading the posterior
+
+For a single test input $\xvec_*$ with cross-covariance vector $\kvec_* = k(\Xmat, \xvec_*)$, the posterior mean is
+
+$$
+\bar f(\xvec_*) = \kvec_*^\top\alphavec = \sum_{i=1}^{N} \alpha_i\, k(\xvec_i, \xvec_*), \qquad \alphavec = (\Kmat + \sigma_n^2\eye)^{-1}\yvec.
+$$
+
+The mean is a weighted sum of $N$ kernel functions centred on the training inputs. It equals the prediction of
+<NoteLink to="kernel-ridge-regression">kernel ridge regression</NoteLink> with penalty $\lambda = \sigma_n^2$. The posterior variance
+
+$$
+\var[f(\xvec_*) \mid \yvec] = k(\xvec_*, \xvec_*) - \kvec_*^\top(\Kmat + \sigma_n^2\eye)^{-1}\kvec_*
+$$
+
+is the prior variance minus a non-negative term, because $(\Kmat + \sigma_n^2\eye)^{-1}$ is positive definite. The
+variance depends on the inputs but not on the targets $\yvec$. Far from every training input $\kvec_* \approx \zeros$,
+so the mean returns to $0$ and the variance returns to the prior variance $k(\xvec_*, \xvec_*)$.
+
+The posterior over functions is itself a Gaussian process, with mean function $\bar f$ and covariance function
+$k(\xvec, \xvec') - k(\Xmat, \xvec)^\top(\Kmat + \sigma_n^2\eye)^{-1}k(\Xmat, \xvec')$. Posterior samples on a grid
+are draws from $\Gauss(\bar{\fvec}_*, \Sigmamat_*)$, drawn as in the figure.
+
+### Worked example
+
+Take the squared exponential kernel with $\sigma_f = 1$ and $\ell = 1$, noise variance $\sigma_n^2 = 0.1$, and two
+observations $y = 1$ at $x = 0$ and $y = 0.5$ at $x = 1$. The training Gram matrix has off-diagonal entry
+$e^{-1/2} = 0.6065$:
+
+$$
+\Kmat + \sigma_n^2\eye = \begin{bmatrix} 1.1 & 0.6065 \\ 0.6065 & 1.1 \end{bmatrix}, \qquad
+\alphavec = (\Kmat + \sigma_n^2\eye)^{-1}\yvec = \begin{bmatrix} 0.9461 \\ -0.0671 \end{bmatrix}.
+$$
+
+At $x_* = 0.5$ both training inputs are at distance $0.5$, so $\kvec_* = (0.8825, 0.8825)$. The posterior mean is
+$0.8825 \times (0.9461 - 0.0671) = 0.7757$. The posterior variance is $1 - \kvec_*^\top(\Kmat + \sigma_n^2\eye)^{-1}\kvec_* = 0.0873$,
+a standard deviation of $0.295$. At $x_* = 3$, $\kvec_* = (0.0111, 0.1353)$, the posterior mean is $0.0014$ and the
+variance is $0.978$, close to the prior variance of 1.
+
+## Computation
+
+The standard implementation factorises $\Kmat + \sigma_n^2\eye = \Lmat\Lmat^\top$ by
+<NoteLink to="cholesky-decomposition">Cholesky decomposition</NoteLink> once, in $O(N^3)$ time and $O(N^2)$ memory
+<Cite id="rasmussen2006" />. Then $\alphavec = \Lmat^{-\top}\Lmat^{-1}\yvec$ costs two triangular solves. Each
+prediction costs $O(N)$ for the mean and $O(N^2)$ for the variance, through $\vvec = \Lmat^{-1}\kvec_*$ and
+$\var = k(\xvec_*, \xvec_*) - \vvec^\top\vvec$. The same factor gives the log marginal likelihood, which is used to set
+the kernel's hyperparameters $\ell$, $\sigma_f$ and $\sigma_n$ (see
+<NoteLink to="gp-hyperparameter-learning">hyperparameter learning</NoteLink>). The cubic cost limits exact inference to
+tens of thousands of points. <NoteLink to="sparse-gaussian-processes">Sparse Gaussian processes</NoteLink> based on
+inducing points reduce it to $O(NM^2)$ for $M$ inducing points.
+
+## Assumptions
+
+- **Gaussian noise.** The closed form needs a Gaussian likelihood. Classification and count data need approximate
+  inference, as in <NoteLink to="gp-classification">Gaussian process classification</NoteLink>.
+- **The kernel encodes the prior.** The <NoteLink to="covariance-functions">covariance function</NoteLink> sets smoothness, length-scale, periodicity and stationarity. A kernel
+  that is wrong for the data gives confident, wrong predictions between the observations.
+- **Fixed hyperparameters.** The formulas treat $\ell$, $\sigma_f$ and $\sigma_n$ as known. In practice they are
+  estimated by maximising the marginal likelihood, and that uncertainty is not reflected in the posterior variance.
+
+## Pitfalls
+
+- **Numerical conditioning.** With small noise and a long length-scale, $\Kmat$ is nearly singular. Add a small jitter
+  (about $10^{-6}\sigma_f^2$) to the diagonal before factorising, and never form $(\Kmat + \sigma_n^2\eye)^{-1}$
+  explicitly.
+- **Latent versus predictive variance.** The band for $f(\xvec_*)$ excludes the noise. The band for a new observation
+  $y_*$ adds $\sigma_n^2$ and is wider. Mixing them up gives intervals that are too narrow or too wide.
+- **Reversion to the mean far from data.** Away from the observations the mean decays to the prior mean, here zero.
+  For extrapolating a trend, a zero-mean stationary kernel is a poor prior; add a linear or polynomial mean or kernel.
+- **Unscaled inputs.** A single length-scale treats every input dimension alike. Standardise the inputs, or give each
+  dimension its own length-scale by
+  <NoteLink to="automatic-relevance-determination">automatic relevance determination</NoteLink>.

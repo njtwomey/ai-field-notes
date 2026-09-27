@@ -1,0 +1,151 @@
+---
+title: Kernel ridge regression
+kind: concept
+summary: Kernel ridge regression fits $f(\xvec) = \sum_i \alpha_i k(\xvec_i, \xvec)$ by penalised least squares in a kernel's feature space, with $\alphavec = (\Kmat + \lambda\eye)^{-1}\yvec$. Its prediction equals the posterior mean of a Gaussian process with noise variance $\lambda$.
+tags: [regression, kernels, regularisation, nonlinear-models, worked-example]
+aliases: [KRR, dual ridge regression, kernelised ridge regression, least-squares kernel regression]
+requires: [ridge-regression, kernel-trick]
+related: [gaussian-process, representer-theorem, random-fourier-features, cholesky-decomposition]
+references: [hofmann2008, scholkopf2002, rasmussen2006, hastie2009, kimeldorf1971]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Kernel ridge regression takes training pairs $(\xvec_i, y_i)$, a positive semi-definite kernel $k$ and a penalty
+$\lambda > 0$, and predicts
+
+$$
+f(\xvec) = \sum_{i=1}^{N}\alpha_i\, k(\xvec_i, \xvec), \qquad \alphavec = (\Kmat + \lambda\eye)^{-1}\yvec,
+$$
+
+where $\Kmat_{ij} = k(\xvec_i, \xvec_j)$ is the $N \times N$ Gram matrix. The prediction minimises
+$\sum_i (y_i - f(\xvec_i))^2 + \lambda\norm{f}_{\Hcal}^2$ over the kernel's function space
+<Cite id="hofmann2008" />.
+</Definition>
+
+## Intuition
+
+<NoteLink to="ridge-regression">Ridge regression</NoteLink> fits a linear model with a penalty on the squared weights.
+Kernel ridge regression fits the same model in the feature space of a kernel, where the features can be many or
+infinitely many. The solution is written in terms of $N$ coefficients, one per training point, instead of one per
+feature. The prediction at a new input is a weighted sum of its kernel similarities to the training inputs.
+
+## Details
+
+### The dual solution
+
+Let $\phivec : \Xcal \to \Hcal$ be a feature map of the kernel, so $k(\xvec, \xvec') = \phivec(\xvec)^\top\phivec(\xvec')$,
+and let $\Phimat$ be the matrix whose rows are $\phivec(\xvec_i)^\top$. The objective is
+
+$$
+J(\wvec) = \norm{\yvec - \Phimat\wvec}^2 + \lambda\norm{\wvec}^2.
+$$
+
+$J$ is strictly convex for $\lambda > 0$, so its minimiser is the unique point where the gradient vanishes:
+$-2\Phimat^\top(\yvec - \Phimat\wvec) + 2\lambda\wvec = \zeros$. Rearranging,
+
+$$
+\wvec = \Phimat^\top\alphavec, \qquad \alphavec = \frac{1}{\lambda}(\yvec - \Phimat\wvec).
+$$
+
+The first equation says the optimal weight vector lies in the span of the training features, whatever the dimension of
+$\Hcal$. Substituting it into the second gives $\lambda\alphavec = \yvec - \Phimat\Phimat^\top\alphavec = \yvec - \Kmat\alphavec$,
+so
+
+$$
+(\Kmat + \lambda\eye)\,\alphavec = \yvec.
+$$
+
+The matrix $\Kmat + \lambda\eye$ is positive definite, so $\alphavec$ is unique. The prediction is
+$f(\xvec) = \wvec^\top\phivec(\xvec) = \alphavec^\top\Phimat\phivec(\xvec) = \sum_i \alpha_i k(\xvec_i, \xvec)$. Neither
+$\wvec$ nor $\phivec$ appears in the result. The primal solution $(\Phimat^\top\Phimat + \lambda\eye)^{-1}\Phimat^\top\yvec$
+inverts a $D \times D$ matrix, with $D$ the feature dimension; the dual inverts an $N \times N$ one. The same span
+argument holds for any loss plus an increasing function of $\norm{\wvec}$, which is the
+<NoteLink to="representer-theorem">representer theorem</NoteLink>.
+
+### Fitted values and effective degrees of freedom
+
+The fitted values are $\hat\yvec = \Kmat\alphavec = \Hmat\yvec$ with the smoother matrix
+$\Hmat = \Kmat(\Kmat + \lambda\eye)^{-1}$. With eigenvalues $\mu_j \ge 0$ of $\Kmat$, $\Hmat$ has the same eigenvectors
+and eigenvalues $\mu_j/(\mu_j + \lambda)$. Components of $\yvec$ along directions of large kernel variance pass almost
+unchanged; components along directions with $\mu_j \ll \lambda$ are shrunk toward zero. The effective number of
+parameters is
+
+$$
+\mathrm{df}(\lambda) = \trace\Hmat = \sum_{j=1}^{N}\frac{\mu_j}{\mu_j + \lambda},
+$$
+
+which falls from $\rank\Kmat$ at $\lambda = 0$ toward zero as $\lambda \to \infty$ <Cite id="hastie2009" />.
+
+### Relation to the Gaussian process posterior mean
+
+A <NoteLink to="gaussian-process">Gaussian process</NoteLink> with covariance $k$ and Gaussian noise of variance
+$\sigma_n^2$ has posterior mean $\kvec_*^\top(\Kmat + \sigma_n^2\eye)^{-1}\yvec$ at a test input with
+$\kvec_* = k(\Xmat, \xvec_*)$. This is kernel ridge regression with $\lambda = \sigma_n^2$ <Cite id="rasmussen2006" />.
+The agreement is not a coincidence. For $f = \sum_i \alpha_i k(\xvec_i, \cdot)$ the squared function-space norm is
+$\norm{f}_{\Hcal}^2 = \alphavec^\top\Kmat\alphavec = \fvec^\top\Kmat^{-1}\fvec$ at the training values
+$\fvec = \Kmat\alphavec$, for invertible $\Kmat$. The negative log posterior of the GP at the training values is
+
+$$
+\frac{1}{2\sigma_n^2}\norm{\yvec - \fvec}^2 + \frac12\fvec^\top\Kmat^{-1}\fvec + \text{const},
+$$
+
+which is the kernel ridge objective divided by $2\sigma_n^2$. The posterior is Gaussian, so its mode is its mean, and
+the kernel ridge solution is the GP's posterior mean. The GP adds a posterior variance and a marginal likelihood for
+choosing $\lambda$ and the kernel. Kernel ridge regression usually chooses them by cross-validation. The same
+equivalence underlies the older result that smoothing splines are posterior means of a Gaussian process
+<Cite id="kimeldorf1971" />.
+
+### Worked example
+
+Take the Gaussian kernel $k(x, x') = \exp(-(x - x')^2/2)$, $\lambda = 0.1$, and two points: $y = 1$ at $x = 0$ and
+$y = 0.5$ at $x = 1$. The Gram matrix has off-diagonal entry $e^{-1/2} = 0.6065$, and solving
+$(\Kmat + 0.1\eye)\alphavec = \yvec$ gives $\alphavec = (0.9461, -0.0671)$. The prediction at $x = 0.5$ is
+$0.8825 \times (0.9461 - 0.0671) = 0.7757$, the same as the Gaussian process posterior mean with noise variance $0.1$.
+The fitted values are $\hat\yvec = \Kmat\alphavec = (0.905, 0.507)$, pulled slightly toward each other. The Gram matrix
+has eigenvalues $1.607$ and $0.393$, so $\mathrm{df} = 1.607/1.707 + 0.393/0.493 = 1.739$ effective parameters out of
+two.
+
+### Leave-one-out predictions in closed form
+
+Cross-validation for kernel ridge regression costs no more than one fit. With $\Pmat = (\Kmat + \lambda\eye)^{-1}$, the
+prediction at $\xvec_i$ from a model fitted without point $i$ is
+
+$$
+\hat y_{-i} = y_i - \frac{[\Pmat\yvec]_i}{P_{ii}} = y_i - \frac{y_i - \hat y_i}{1 - H_{ii}}.
+$$
+
+In the worked example this gives $0.276$ at $x = 0$ and $0.551$ at $x = 1$. Each equals the single-point fit
+$k(x_i, x_j)\,y_j/(1 + \lambda)$ from the other point.
+
+<Derivation title="The leave-one-out formula">
+Treat $\yvec$ as a draw from $\Gauss(\zeros, \Kmat + \lambda\eye)$, the marginal of a Gaussian process with noise
+variance $\lambda$. The kernel ridge prediction at $\xvec_i$ from the other $N - 1$ points equals the GP posterior mean
+of $f(\xvec_i)$ given $\yvec_{-i}$. Since the noise on $y_i$ is independent of everything else, that is also
+$\expect[y_i \mid \yvec_{-i}]$.
+
+The density of $\yvec$ is proportional to $\exp(-\frac12\yvec^\top\Pmat\yvec)$. As a function of $y_i$ alone the exponent
+is $-\frac12 P_{ii}y_i^2 - y_i\sum_{j \ne i}P_{ij}y_j$ plus terms without $y_i$. Completing the square shows that
+$y_i \mid \yvec_{-i}$ is Gaussian with mean $-\sum_{j \ne i}P_{ij}y_j/P_{ii} = y_i - [\Pmat\yvec]_i/P_{ii}$.
+
+For the second form, $\Hmat = \Kmat\Pmat = \eye - \lambda\Pmat$, since $\Kmat\Pmat + \lambda\Pmat = \eye$. So
+$\yvec - \hat\yvec = \lambda\Pmat\yvec$ and $1 - H_{ii} = \lambda P_{ii}$, and the ratio of the two is
+$[\Pmat\yvec]_i/P_{ii}$.
+</Derivation>
+
+## Assumptions
+
+- **Squared loss.** Kernel ridge regression is least squares and is sensitive to outliers. Robust losses need
+  iterative solvers but keep the same form $f = \sum_i \alpha_i k(\xvec_i, \cdot)$.
+- **A kernel that matches the target.** The kernel's function space fixes which functions are cheap under the penalty.
+  A Gaussian kernel with a length-scale that is too long cannot fit sharp features at any $\lambda$.
+
+## Pitfalls
+
+- **Cubic cost.** Solving for $\alphavec$ costs $O(N^3)$ by Cholesky factorisation and storing $\Kmat$ costs $O(N^2)$.
+  For large $N$ use random Fourier features, a Nyström approximation or conjugate gradients.
+- **Dense coefficients.** Unlike the support vector machine, almost every $\alpha_i$ is non-zero, so each prediction
+  sums over all $N$ training points.
+- **No uncertainty.** The point prediction carries no error bar. The Gaussian process with the same kernel supplies one
+  at no extra cost in the fit.

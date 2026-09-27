@@ -1,0 +1,170 @@
+---
+title: Gaussian process hyperparameter learning
+kind: technique
+summary: A Gaussian process sets its kernel hyperparameters $\thetavec$ by maximising the log marginal likelihood $\ln p(\yvec \mid \Xmat, \thetavec)$, a data-fit term plus a complexity penalty $-\frac12\ln\abs{\Kmat + \sigma_n^2\eye}$. Its gradient is available in closed form.
+tags: [gaussian-process, bayesian, model-selection, hyperparameters, worked-example]
+aliases: [GP marginal likelihood, GP evidence, maximum marginal likelihood, Bayesian Occam's razor, GP model selection]
+requires: [gaussian-process, covariance-functions]
+related: [bayesian-linear-regression, cholesky-decomposition, determinant, gradient-descent]
+references: [rasmussen2006, mackay1992, mackay2003, neal1996]
+status: draft
+updated: 2026-09-27
+---
+
+import { MarginalLikelihood } from './MarginalLikelihood'
+
+<Definition>
+For a zero-mean <NoteLink to="gaussian-process">Gaussian process</NoteLink> with kernel $k_{\thetavec}$ and Gaussian
+noise of variance $\sigma_n^2$, the marginal likelihood is the probability of the targets with the latent function
+integrated out,
+
+$$
+p(\yvec \mid \Xmat, \thetavec) = \int p(\yvec \mid \fvec)\, p(\fvec \mid \Xmat, \thetavec)\, d\fvec = \Gauss(\yvec \mid \zeros, \Kmat_y), \qquad \Kmat_y = \Kmat_{\thetavec} + \sigma_n^2\eye.
+$$
+
+Type-II maximum likelihood chooses the hyperparameters $\thetavec$, such as the length-scale $\ell$, the signal
+variance $\sigma_f^2$ and the noise variance $\sigma_n^2$, by maximising $\ln p(\yvec \mid \Xmat, \thetavec)$
+<Cite id="rasmussen2006" />.
+</Definition>
+
+## Problem
+
+A Gaussian process has no weights to fit, but its kernel has parameters. The length-scale decides whether the model
+explains the data with a rapidly varying function and little noise or a slowly varying function and much noise. The
+training error cannot choose between them: it always prefers the shortest length-scale and zero noise, which
+interpolate the data. A criterion must reward fit and penalise flexibility.
+
+## Mechanism
+
+### The log marginal likelihood
+
+Under the model, $\yvec = \fvec + \varepsilonvec$ with $\fvec \sim \Gauss(\zeros, \Kmat)$ and
+$\varepsilonvec \sim \Gauss(\zeros, \sigma_n^2\eye)$ independent. A sum of independent Gaussian vectors is Gaussian,
+with the means and covariances added, so $\yvec \sim \Gauss(\zeros, \Kmat + \sigma_n^2\eye)$. This is the integral in
+the definition, done without integrating. Taking the logarithm of the multivariate normal density gives
+
+$$
+\ln p(\yvec \mid \Xmat, \thetavec) =
+\underbrace{-\tfrac12\, \yvec^\top\Kmat_y^{-1}\yvec}_{\text{data fit}}
+\ \underbrace{-\ \tfrac12 \ln\abs{\Kmat_y}}_{\text{complexity}}
+\ \underbrace{-\ \tfrac{N}{2}\ln 2\pi}_{\text{constant}}.
+$$
+
+- The **data-fit** term is the only term that involves $\yvec$. It is a Mahalanobis length of the targets. It is
+  largest when the targets lie in directions in which $\Kmat_y$ has large variance.
+- The **complexity** term depends only on the inputs and the hyperparameters. With eigenvalues $\lambda_i$ of
+  $\Kmat_y$, it equals $-\frac12\sum_i \ln\lambda_i$. It penalises covariance matrices that spread variance over many
+  directions, which is what flexible kernels do.
+- The **constant** is the same for every $\thetavec$.
+
+### Occam's razor
+
+The marginal likelihood is a normalised density over datasets: $\int p(\yvec \mid \Xmat, \thetavec)\, d\yvec = 1$. A
+short length-scale can generate many different target vectors, so it spreads its unit of probability thinly and gives
+low density to each. A very long length-scale can generate only nearly constant vectors and gives almost no density to
+the observed ones if they vary. The setting that maximises the density of the observed $\yvec$ is the simplest one
+that can still produce it <Cite id="mackay1992" />. This automatic penalty on complexity is called Bayesian Occam's
+razor <Cite id="mackay2003" />.
+
+<MarginalLikelihood />
+
+### Worked example
+
+Take two observations, $y = 1$ at $x = 0$ and $y = 0.5$ at $x = 1$, a squared exponential kernel with $\sigma_f = 1$
+and noise variance $\sigma_n^2 = 0.1$. The constant is $-\ln 2\pi = -1.8379$. As the length-scale grows the two
+function values become more strongly correlated. The complexity term rises throughout, because the covariance
+collapses toward one direction. Beyond $\ell = 1$ the data fit falls, because the targets differ:
+
+| $\ell$ | data fit | complexity | $\ln p(\yvec \mid \ell)$ |
+| --- | --- | --- | --- |
+| 0.5 | −0.520 | −0.088 | −2.446 |
+| 1 | −0.456 | 0.086 | −2.208 |
+| 2 | −0.571 | 0.421 | −1.988 |
+| 5 | −0.792 | 0.695 | −1.935 |
+| 20 | −0.885 | 0.774 | −1.949 |
+
+The maximum is at $\ell = 4.15$, with $\ln p(\yvec \mid \ell) = -1.934$. Two points that differ by $0.5$ are better
+explained, under noise variance $0.1$, by a nearly constant function than by a function that varies between them.
+
+### The gradient
+
+Hyperparameters are fitted by gradient ascent, usually with L-BFGS and on a log scale so that they stay positive. Two
+matrix identities give the gradient. Differentiating $\Kmat_y\Kmat_y^{-1} = \eye$ with respect to a hyperparameter
+$\theta_j$ gives $\partial\Kmat_y\,\Kmat_y^{-1} + \Kmat_y\,\partial(\Kmat_y^{-1}) = \zeros$, so
+
+$$
+\frac{\partial \Kmat_y^{-1}}{\partial\theta_j} = -\Kmat_y^{-1}\frac{\partial\Kmat_y}{\partial\theta_j}\Kmat_y^{-1}, \qquad
+\frac{\partial \ln\abs{\Kmat_y}}{\partial\theta_j} = \trace\paren{\Kmat_y^{-1}\frac{\partial\Kmat_y}{\partial\theta_j}}.
+$$
+
+The second identity is proved below. Substituting both into the log marginal likelihood, and writing
+$\alphavec = \Kmat_y^{-1}\yvec$,
+
+$$
+\frac{\partial}{\partial\theta_j}\ln p(\yvec \mid \Xmat, \thetavec)
+= \tfrac12\,\alphavec^\top\frac{\partial\Kmat_y}{\partial\theta_j}\alphavec - \tfrac12\trace\paren{\Kmat_y^{-1}\frac{\partial\Kmat_y}{\partial\theta_j}}
+= \tfrac12\trace\paren{(\alphavec\alphavec^\top - \Kmat_y^{-1})\frac{\partial\Kmat_y}{\partial\theta_j}},
+$$
+
+using $\alphavec^\top\Mmat\alphavec = \trace(\alphavec\alphavec^\top\Mmat)$ <Cite id="rasmussen2006" />. For the
+squared exponential kernel the derivatives of the Gram matrix are elementwise:
+$\partial\Kmat_{ij}/\partial\ln\ell = \Kmat_{ij}\, r_{ij}^2/\ell^2$ with $r_{ij} = \norm{\xvec_i - \xvec_j}$,
+$\partial\Kmat/\partial\ln\sigma_f = 2\Kmat$, and $\partial\Kmat_y/\partial\ln\sigma_n = 2\sigma_n^2\eye$.
+
+<Derivation title="The derivative of a log-determinant">
+Let $\Amat$ be symmetric positive definite and $\Dmat$ symmetric. For small $\epsilon$,
+
+$$
+\ln\abs{\Amat + \epsilon\Dmat} = \ln\abs{\Amat} + \ln\abs{\eye + \epsilon\Amat^{-1}\Dmat}.
+$$
+
+The determinant of $\eye + \epsilon\Mmat$ is the product $\prod_i (1 + \epsilon\mu_i)$ over the eigenvalues $\mu_i$ of
+$\Mmat$, which equals $1 + \epsilon\sum_i\mu_i + O(\epsilon^2) = 1 + \epsilon\trace\Mmat + O(\epsilon^2)$. Since
+$\ln(1 + u) = u + O(u^2)$,
+
+$$
+\ln\abs{\Amat + \epsilon\Dmat} = \ln\abs{\Amat} + \epsilon\trace(\Amat^{-1}\Dmat) + O(\epsilon^2).
+$$
+
+With $\Amat = \Kmat_y(\thetavec)$ and $\Dmat = \partial\Kmat_y/\partial\theta_j$, the coefficient of $\epsilon$ is the
+derivative.
+</Derivation>
+
+### Leave-one-out cross-validation
+
+Cross-validation is the main alternative to the marginal likelihood. For a Gaussian process the leave-one-out
+predictive distributions come from one factorisation. Write $\Pmat = \Kmat_y^{-1}$. The joint density of $\yvec$ is
+proportional to $\exp(-\frac12\yvec^\top\Pmat\yvec)$. As a function of $y_i$ alone, with the other targets fixed, the
+exponent is $-\frac12 P_{ii}y_i^2 - y_i\sum_{j \ne i}P_{ij}y_j$ plus a constant.
+<NoteLink to="completing-the-square">Completing the square</NoteLink> shows that
+$y_i$ given the other targets is Gaussian with
+
+$$
+\var[y_i \mid \yvec_{-i}] = \frac{1}{P_{ii}}, \qquad
+\expect[y_i \mid \yvec_{-i}] = -\frac{1}{P_{ii}}\sum_{j \ne i}P_{ij}y_j = y_i - \frac{[\Pmat\yvec]_i}{P_{ii}}.
+$$
+
+The sum of the $N$ leave-one-out log predictive densities is then a criterion that costs no more than the marginal
+likelihood <Cite id="rasmussen2006" />.
+
+## Cost
+
+One evaluation of the log marginal likelihood needs the Cholesky factor $\Lmat$ of $\Kmat_y$, in $O(N^3)$ time. Then
+$\alphavec$ costs $O(N^2)$ and $\ln\abs{\Kmat_y} = 2\sum_i\ln L_{ii}$ is free. The gradient needs $\Kmat_y^{-1}$ once,
+another $O(N^3)$, and then $O(N^2)$ per hyperparameter for the trace of a product of two matrices. An optimiser
+usually needs tens to a few hundred evaluations.
+
+## Trade-offs
+
+- **Point estimate versus integration.** Maximising over $\thetavec$ ignores the uncertainty in the hyperparameters.
+  A fully Bayesian treatment places a prior on $\thetavec$ and integrates by Markov chain Monte Carlo
+  <Cite id="neal1996" />, at a much higher cost. The difference matters most with little data.
+- **Local maxima.** The surface over $(\ell, \sigma_n)$ is not concave. Short-length-scale, low-noise explanations and
+  long-length-scale, high-noise explanations can both be local maxima. Restart from several initial values and compare
+  the maxima by their marginal likelihood.
+- **Marginal likelihood versus cross-validation.** The marginal likelihood trusts the model: it is optimal when the
+  kernel family is right. Leave-one-out cross-validation measures predictive performance directly and is more robust
+  when the kernel is misspecified, at the price of higher variance.
+- **Overfitting with many hyperparameters.** With one length-scale per input dimension
+  (<NoteLink to="automatic-relevance-determination">automatic relevance determination</NoteLink>), or a neural-network feature
+  map inside the kernel, the marginal likelihood can overfit like any other training objective.

@@ -1,0 +1,163 @@
+---
+title: Reproducing kernel Hilbert space
+kind: concept
+summary: A reproducing kernel Hilbert space is a Hilbert space of functions in which evaluation is an inner product, $f(\xvec) = \inner{f}{k(\xvec, \cdot)}_{\Hcal}$. Every positive semi-definite kernel $k$ defines exactly one, and its norm $\norm{f}_{\Hcal}$ measures how rough $f$ is.
+tags: [kernels, functional-analysis, linear-algebra, worked-example]
+aliases: [RKHS, reproducing property, Moore–Aronszajn theorem, Mercer's theorem, RKHS norm, native space]
+requires: [kernel-trick, positive-definite-matrices]
+related: [gaussian-process, kernel-ridge-regression, eigendecomposition, fourier-transform]
+references: [aronszajn1950, mercer1909, scholkopf2002, rasmussen2006, hofmann2008]
+status: draft
+updated: 2026-09-27
+---
+
+import { MinNormInterpolant } from './MinNormInterpolant'
+
+<Definition>
+A reproducing kernel Hilbert space (RKHS) on a set $\Xcal$ is a Hilbert space $\Hcal$ of functions $f : \Xcal \to \reals$
+with a function $k : \Xcal \times \Xcal \to \reals$, the reproducing kernel, such that for every $\xvec \in \Xcal$
+
+1. the function $k_{\xvec} = k(\xvec, \cdot)$ belongs to $\Hcal$, and
+2. $f(\xvec) = \inner{f}{k_{\xvec}}_{\Hcal}$ for every $f \in \Hcal$ (the reproducing property).
+
+Equivalently, $\Hcal$ is a Hilbert space of functions on which every evaluation $f \mapsto f(\xvec)$ is a continuous
+linear functional <Cite id="aronszajn1950" />.
+</Definition>
+
+## Intuition
+
+In most function spaces, such as $L^2$, a function is only defined up to its values on sets of measure zero, so
+"the value at $\xvec$" means nothing. In an RKHS every function has a definite value at every point, and that value is
+obtained geometrically, as the inner product with a fixed element $k_{\xvec}$ that represents the point $\xvec$. The
+kernel is the inner product of two such representers: applying the reproducing property to $f = k_{\xvec'}$ gives
+
+$$
+k(\xvec, \xvec') = \inner{k_{\xvec}}{k_{\xvec'}}_{\Hcal}.
+$$
+
+So $\xvec \mapsto k_{\xvec}$ is a feature map into $\Hcal$ whose inner products are the kernel, which is exactly the
+setting of the <NoteLink to="kernel-trick">kernel trick</NoteLink>. The RKHS is the canonical feature space of $k$.
+
+The norm matters as much as the inner product. The Cauchy–Schwarz inequality gives, for any $f, g \in \Hcal$,
+
+$$
+\abs{f(\xvec) - g(\xvec)} = \abs{\inner{f - g}{k_{\xvec}}_{\Hcal}} \le \norm{f - g}_{\Hcal}\sqrt{k(\xvec, \xvec)}.
+$$
+
+Functions that are close in norm are close at every point. A small norm forbids large values, and, for the kernels
+below, large slopes or high frequencies. Penalising $\norm{f}_{\Hcal}$ is therefore a smoothness penalty whose meaning is
+set by the kernel.
+
+## Construction from a kernel
+
+The Moore–Aronszajn theorem states that every symmetric positive semi-definite function $k$ is the reproducing kernel
+of exactly one RKHS <Cite id="aronszajn1950" />. The construction is concrete.
+
+1. **Finite combinations.** Let $\Hcal_0$ be the set of functions $f = \sum_{i=1}^{n} a_i k_{\xvec_i}$ for any finite
+   set of points and coefficients.
+2. **Inner product.** For $f = \sum_i a_i k_{\xvec_i}$ and $g = \sum_j b_j k_{\xvec'_j}$ define
+   $\inner{f}{g} = \sum_{i,j} a_i b_j\, k(\xvec_i, \xvec'_j)$. This equals $\sum_j b_j f(\xvec'_j)$, which depends on
+   $f$ only through its values, so it does not depend on how $f$ is written as a sum.
+3. **Reproducing property.** Taking $g = k_{\xvec}$ gives $\inner{f}{k_{\xvec}} = \sum_i a_i k(\xvec_i, \xvec) = f(\xvec)$.
+4. **Positive definiteness.** $\inner{f}{f} = \avec^\top\Kmat\avec \ge 0$ because the Gram matrix $\Kmat$ is
+   positive semi-definite. If $\inner{f}{f} = 0$, the Cauchy–Schwarz inequality gives
+   $\abs{f(\xvec)} \le \sqrt{\inner{f}{f}}\sqrt{k(\xvec, \xvec)} = 0$ for every $\xvec$, so $f = 0$.
+5. **Completion.** Add the limits of Cauchy sequences in $\Hcal_0$. By the pointwise bound above, a Cauchy sequence in
+   norm converges at every point, so each limit is a genuine function.
+
+Uniqueness follows because any RKHS with kernel $k$ contains every $k_{\xvec}$, hence $\Hcal_0$, and its inner product on
+$\Hcal_0$ is forced by the reproducing property. For a finite combination, the squared norm is the quadratic form of
+the Gram matrix:
+
+$$
+\norm{\textstyle\sum_i a_i k_{\xvec_i}}_{\Hcal}^2 = \avec^\top\Kmat\avec.
+$$
+
+## Examples
+
+### The linear kernel
+
+For $k(\xvec, \xvec') = \xvec^\top\xvec'$ on $\reals^D$, the representer of $\xvec$ is the linear function
+$k_{\xvec}(\cdot) = \xvec^\top(\cdot)$. Finite sums of linear functions are linear, so
+$\Hcal = \set{f_{\wvec}(\xvec) = \wvec^\top\xvec : \wvec \in \reals^D}$ with
+$\inner{f_{\wvec}}{f_{\vvec}}_{\Hcal} = \wvec^\top\vvec$. The reproducing property is
+$\inner{f_{\wvec}}{k_{\xvec}} = \wvec^\top\xvec = f_{\wvec}(\xvec)$. The RKHS norm is the Euclidean norm of the weights,
+so penalising it is ridge regression.
+
+### The Brownian motion kernel
+
+Let $k(x, x') = \min(x, x')$ on $[0, 1]$, the covariance of Brownian motion. The RKHS is the space of functions with
+$f(0) = 0$ and a square-integrable derivative, with
+
+$$
+\inner{f}{g}_{\Hcal} = \int_0^1 f'(t)\, g'(t)\, dt, \qquad \norm{f}_{\Hcal}^2 = \int_0^1 f'(t)^2\, dt.
+$$
+
+To check the reproducing property, note that $k_x(t) = \min(x, t)$ has derivative $1$ for $t < x$ and $0$ for $t > x$.
+Then $\inner{f}{k_x}_{\Hcal} = \int_0^x f'(t)\,dt = f(x) - f(0) = f(x)$. The norm is the total squared slope, a
+roughness penalty.
+
+### Worked example
+
+With the Brownian motion kernel, take $f = k_{0.25} + k_{0.75}$. The Gram matrix of the points $0.25$ and $0.75$ is
+$\begin{bmatrix} 0.25 & 0.25 \\ 0.25 & 0.75 \end{bmatrix}$, so $\norm{f}_{\Hcal}^2 = \ones^\top\Kmat\ones = 1.5$.
+Directly, $f$ has slope $2$ on $[0, 0.25]$, slope $1$ on $[0.25, 0.75]$ and slope $0$ after, and
+$\int_0^1 f'^2 = 4 \times 0.25 + 1 \times 0.5 = 1.5$.
+
+The function of smallest norm with $f(0.25) = 1$ and $f(0.75) = 0.5$ is $\sum_i \alpha_i k_{x_i}$ with
+$\alphavec = \Kmat^{-1}\yvec = (5, -1)$, the <NoteLink to="representer-theorem">representer theorem</NoteLink> applied
+to interpolation. It is the piecewise linear function through $(0, 0)$, $(0.25, 1)$ and $(0.75, 0.5)$, flat afterwards,
+with squared norm $\yvec^\top\Kmat^{-1}\yvec = 16 \times 0.25 + 1 \times 0.5 = 4.5$. Linear interpolation is the
+smoothest interpolation in this norm.
+
+<MinNormInterpolant />
+
+### Stationary kernels and frequencies
+
+For a stationary kernel $k(x, x') = \kappa(x - x')$ on $\reals$ with Fourier transform $\hat\kappa(\omega) > 0$, the RKHS
+norm is a weighted energy in frequency <Cite id="scholkopf2002" />:
+
+$$
+\norm{f}_{\Hcal}^2 = \frac{1}{2\pi}\int_{-\infty}^{\infty}\frac{\abs{\hat f(\omega)}^2}{\hat\kappa(\omega)}\, d\omega.
+$$
+
+Frequencies where the kernel has little power are expensive. The exponential kernel $e^{-\abs{x - x'}}$ has
+$\hat\kappa(\omega) = 2/(1 + \omega^2)$, so by Parseval's theorem
+$\norm{f}_{\Hcal}^2 = \frac12\int(f^2 + f'^2)\,dx$, a Sobolev norm. The Gaussian kernel's transform decays like
+$e^{-\ell^2\omega^2/2}$, so its RKHS contains only functions whose spectrum decays even faster, which are infinitely
+differentiable.
+
+## Mercer's theorem
+
+Let $k$ be continuous and positive semi-definite on a compact set $\Xcal$ with a finite measure $\mu$. The integral
+operator $(T f)(\xvec) = \int k(\xvec, \xvec') f(\xvec')\, d\mu(\xvec')$ has orthonormal eigenfunctions $e_i$ in $L^2(\mu)$
+with eigenvalues $\lambda_1 \ge \lambda_2 \ge \dots \ge 0$, and
+
+$$
+k(\xvec, \xvec') = \sum_{i} \lambda_i\, e_i(\xvec)\, e_i(\xvec'),
+$$
+
+with absolute and uniform convergence <Cite id="mercer1909" />. The RKHS is then the set of
+$f = \sum_i c_i e_i$ with $\sum_i c_i^2/\lambda_i < \infty$ (over $i$ with $\lambda_i > 0$), with
+$\norm{f}_{\Hcal}^2 = \sum_i c_i^2/\lambda_i$. The reproducing property checks directly: $k_{\xvec}$ has coefficients
+$\lambda_i e_i(\xvec)$, so $\inner{f}{k_{\xvec}}_{\Hcal} = \sum_i c_i\lambda_i e_i(\xvec)/\lambda_i = f(\xvec)$. The feature
+map $\xvec \mapsto (\sqrt{\lambda_i}\, e_i(\xvec))_i$ realises the kernel as an inner product in $\ell^2$. Components
+along eigenfunctions with small eigenvalues cost a lot of norm, which is how the RKHS norm encodes smoothness.
+
+## Assumptions
+
+- **Positive semi-definite kernel.** Only positive semi-definite kernels have an RKHS. A similarity function with
+  indefinite Gram matrices does not define a Hilbert space of functions.
+- **Functions, not equivalence classes.** RKHS elements are defined pointwise. $L^2$ is not an RKHS on $[0, 1]$,
+  because evaluation at a point is not continuous there.
+
+## Pitfalls
+
+- **Gaussian process samples are not in the RKHS.** A zero-mean Gaussian process with kernel $k$ has the expansion
+  $f = \sum_i \sqrt{\lambda_i}\, z_i\, e_i$ with independent $z_i \sim \Gauss(0, 1)$. Its squared RKHS norm is
+  $\sum_i \lambda_i z_i^2/\lambda_i = \sum_i z_i^2$, which diverges with probability one when infinitely many
+  $\lambda_i$ are positive <Cite id="rasmussen2006" />. The RKHS describes the posterior mean, not typical sample paths.
+- **Same function, different norms.** A function can belong to the RKHS of several kernels with different norms. The
+  penalty $\norm{f}_{\Hcal}$ depends on the kernel, including its length-scale, not on $f$ alone.
+- **The Gaussian RKHS is small.** Many continuous functions, such as $\abs{x}$, are not in the Gaussian kernel's RKHS.
+  They can be approximated arbitrarily well by its elements, at the cost of a large norm.
