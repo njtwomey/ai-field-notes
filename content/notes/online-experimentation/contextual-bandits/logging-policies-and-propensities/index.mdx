@@ -1,0 +1,124 @@
+---
+title: Logging policies and propensities
+kind: concept
+summary: 'A logging policy is the randomised rule that chose the actions in a log; a propensity is the probability it gave the chosen action. A log can evaluate another policy only if it gave that policy''s actions positive probability and recorded the propensities.'
+tags: [bandits, causal-inference, importance-sampling, experimentation, worked-example]
+aliases: [logging policy, behaviour policy, behavior policy, propensity score, action propensity, overlap, positivity, effective sample size, Kish effective sample size, exploration bucket]
+requires: [contextual-bandit, expectation, variance-and-covariance]
+related: [epsilon-greedy, thompson-sampling, randomisation-and-analysis-units, softmax-and-log-sum-exp]
+references: [li2011, bottou2013, dudik2011, lattimore2020]
+status: draft
+updated: 2026-09-27
+---
+
+import { LoggingOverlap } from './LoggingOverlap'
+
+<Definition>
+A **logging policy** $\pi_0$ is the rule that chose the action $a$ in each logged round, as a probability distribution
+$\pi_0(\cdot \mid x)$ over the $K$ actions given the context $x$. The **propensity** of a logged round is
+$p = \pi_0(a \mid x)$, the probability that the logging policy gave the action it actually took. A log has
+**overlap** with a target policy $\pi$ if $\pi_0(a \mid x) > 0$ whenever $\pi(a \mid x) > 0$
+<Cite id="bottou2013" />.
+</Definition>
+
+## Why the probabilities matter
+
+Every log of a deployed system is shaped by the policy that produced it. A recommender that shows popular items gets
+clicks on popular items, and the log says little about unpopular ones. To ask "what would another policy have
+earned?", the analysis must undo that shaping. <NoteLink to="off-policy-evaluation">Off-policy evaluation</NoteLink>
+does so by weighting each logged reward by $w = \pi(a \mid x) / \pi_0(a \mid x)$. The weight needs the propensity,
+and it exists only where the propensity is positive.
+
+A logging policy that is useful for later analysis has three properties.
+
+1. **Randomised.** Each action it might take has a known probability given the context. A deterministic policy has
+   propensities of 0 and 1, and a log from it can evaluate only policies that agree with it everywhere.
+2. **Overlapping.** The probabilities are positive for every action the policies to be evaluated might take.
+3. **Recorded.** The propensity is written to the log at decision time, together with the context exactly as the
+   policy saw it.
+
+## Common logging policies
+
+- **ε-greedy.** Play the currently best action with probability $1 - \varepsilon + \varepsilon/K$ and each other
+  action with probability $\varepsilon/K$. The propensities are known in closed form and bounded below by
+  $\varepsilon/K$. See <NoteLink to="epsilon-greedy">ε-greedy</NoteLink>.
+- **Softmax.** Play action $a$ with probability $\exp(s_a/\tau) / \sum_b\exp(s_b/\tau)$ for model scores $s_a$ and a
+  temperature $\tau > 0$. Propensities are in closed form but can be tiny for low-scoring actions; a floor, by mixing
+  with the uniform distribution, keeps them bounded.
+- **Uniform exploration bucket.** Serve a small random share of traffic, say 1%, with uniformly random actions. That
+  share is an ideal log for evaluation: every propensity is $1/K$. Li et al. used such a bucket to evaluate news
+  recommendation policies offline without bias <Cite id="li2011" />.
+- **Thompson sampling.** The propensity of an action is the posterior probability that it is the best, which has no
+  closed form. It must be estimated at decision time by drawing many posterior samples and counting how often each
+  action wins. With $M$ draws, an action with true probability $10^{-3}$ is seen about $M/1000$ times, so small
+  propensities are estimated poorly unless $M$ is large.
+
+## The cost of small propensities
+
+An importance weight is large where the logging policy rarely did what the target does. Large weights make the
+estimates noisy. Two quantities describe how much a log is worth for evaluating a given target.
+
+**Effective sample size.** For a weighted average $\sum_i w_iy_i / \sum_i w_i$ of independent values $y_i$ with
+variance $\sigma^2$, the variance is
+
+$$
+\var\paren{\frac{\sum_i w_iy_i}{\sum_i w_i}} = \frac{\sigma^2\sum_i w_i^2}{\paren{\sum_i w_i}^2} = \frac{\sigma^2}{n_{\text{eff}}},
+\qquad n_{\text{eff}} = \frac{\paren{\sum_i w_i}^2}{\sum_i w_i^2}.
+$$
+
+An unweighted average of $n_{\text{eff}}$ values would have the same variance. For large $n$, the weights have mean 1
+and $n_{\text{eff}} \approx n / \expect[w^2]$.
+
+**The second moment of the weights.** Take an ε-greedy logging policy with greedy action $g(x)$ and a deterministic
+target $\pi$ that agrees with $g$ on a fraction $1 - \rho$ of contexts and picks another action on the rest. Where they
+agree, the weight is $1/(1 - \varepsilon + \varepsilon/K)$, earned with probability $1 - \varepsilon + \varepsilon/K$.
+Where they disagree, the weight is $K/\varepsilon$, earned with probability $\varepsilon/K$. Otherwise the weight is 0.
+So
+
+$$
+\expect[w^2] = (1 - \rho)\cdot\frac{1}{1 - \varepsilon + \varepsilon/K} + \rho\cdot\frac{K}{\varepsilon}.
+$$
+
+The second term dominates for small $\varepsilon$. For rewards in $[0, 1]$, the standard error of the
+<NoteLink to="off-policy-evaluation">IPS estimate</NoteLink> from $n$ rows is at most $\sqrt{\expect[w^2]/n}$.
+
+**Example.** With $K = 4$ actions, $\varepsilon = 0.1$ and a target that disagrees on $\rho = 20\%$ of contexts, the
+weights are $1/0.925 = 1.08$ on agreeing rows and $4/0.1 = 40$ on disagreeing ones. Then
+$\expect[w^2] = 0.8/0.925 + 0.2 \cdot 40 = 8.86$, and 10,000 logged rows are worth about $10{,}000/8.86 = 1{,}128$
+rows of an on-policy experiment. Raising $\varepsilon$ to $0.5$ lowers $\expect[w^2]$ to $0.8/0.625 + 0.2 \cdot 8 = 2.88$,
+worth about 3,470 rows, at the price of acting randomly half the time.
+
+<LoggingOverlap />
+
+## What to log
+
+- The context exactly as the policy saw it, including feature values computed at decision time.
+- The action taken and its propensity. When cheap, the whole distribution $\pi_0(\cdot \mid x)$, which lets later
+  analyses evaluate stochastic targets exactly.
+- The version of the policy and its random seed, so that propensities can be recomputed or audited.
+- The reward, with its timestamp, and whether it was observed at all. Missing rewards that depend on the action bias
+  every estimator.
+
+## Estimated propensities
+
+When propensities were not logged, they are sometimes estimated from the log by regressing the chosen action on the
+context, for example with multinomial logistic regression. This is the propensity-score method of observational
+studies. It works only if the logging policy depended on nothing beyond the recorded context. Errors in the estimated
+propensities bias IPS; the doubly robust estimator remains unbiased if the reward model is correct
+<Cite id="dudik2011" />.
+
+## Assumptions
+
+- The logging policy's choice depends only on the recorded context and on randomness independent of the rewards.
+- The logged propensities are the probabilities actually used. A system that logs the policy's intended probabilities
+  but then applies business rules that override some actions logs the wrong numbers.
+
+## Pitfalls
+
+- **Rounding propensities.** Logging $p = 0$ for an action that had probability $10^{-6}$ makes its weight infinite.
+  Store probabilities at full precision and set a floor in the policy itself.
+- **Overlap only on average.** A policy that explores a lot overall can still never explore in some contexts, such as
+  a segment always served by a rule. Estimates for targets that act differently in that segment are biased. Check
+  overlap per segment, not only globally.
+- **Clipping hides the problem.** Capping weights at $M$ reduces variance but silently drops the value of the rows it
+  clips <Cite id="bottou2013" />. Report how much weight was clipped.

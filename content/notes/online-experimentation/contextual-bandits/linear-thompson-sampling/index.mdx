@@ -1,0 +1,128 @@
+---
+title: Linear Thompson sampling
+kind: concept
+summary: 'Linear Thompson sampling draws $\tilde\thetavec \sim \Gauss(\hat\thetavec, v^2\Vmat^{-1})$ from the Gaussian posterior of a linear reward model, where $\hat\thetavec$ is the ridge estimate, and pulls the arm with the largest $\xvec\transpose\tilde\thetavec$. It is a randomised counterpart of LinUCB.'
+tags: [bandits, experimentation, bayesian-inference, linear-models, personalisation]
+aliases: [LinTS, linear TS, Thompson sampling for linear bandits, contextual Thompson sampling, Bayesian linear bandit]
+requires: [contextual-bandit, thompson-sampling, multivariate-normal-distribution]
+related: [bayesian-linear-regression, ridge-regression, laplace-approximation, cholesky-decomposition]
+references: [agrawal2013, russo2018, abbasi2011, chu2011]
+status: draft
+updated: 2026-09-27
+---
+
+import { LinearBanditPlane } from '../_shared/LinearBanditPlane'
+
+<Definition>
+For a linear bandit with rewards $r = \xvec\transpose\thetavec^* + \eta$, **linear Thompson sampling** keeps
+$\Vmat_t = \lambda\I + \sum_{s \le t}\xvec_s\xvec_s\transpose$, $\bvec_t = \sum_{s \le t}r_s\xvec_s$ and
+$\hat\thetavec_t = \Vmat_t^{-1}\bvec_t$ over the pulled arms' features. In round $t + 1$ it draws
+
+$$
+\tilde\thetavec \sim \Gauss\paren{\hat\thetavec_t,\ v^2\Vmat_t^{-1}}
+$$
+
+and pulls the arm whose features $\xvec_{t+1,a}$ maximise $\xvec_{t+1,a}\transpose\tilde\thetavec$. The scale $v > 0$
+sets how widely it explores <Cite id="agrawal2013" />.
+</Definition>
+
+## Intuition
+
+<NoteLink to="thompson-sampling">Thompson sampling</NoteLink> for independent arms draws a mean for each arm from its
+posterior and pulls the largest. With a linear model the unknown is the single vector $\thetavec^*$, so one draw of
+$\tilde\thetavec$ scores every arm at once. Arms that are best for many plausible parameters are pulled often; arms
+that are best only for implausible parameters are pulled rarely.
+
+The draw spreads along the directions where the posterior is wide, the directions that past pulls have not explored.
+An arm pointing along such a direction sometimes gets a high score from a draw and is tried. Once its direction has
+been measured, the posterior narrows there, and the arm wins only if it really is better.
+
+## The Gaussian posterior
+
+With a Gaussian prior and Gaussian noise the posterior is exact and has the ridge estimate as its mean. Take the prior
+$\thetavec \sim \Gauss(\zeros, (\sigma^2/\lambda)\I)$ and noise $\eta \sim \Gauss(0, \sigma^2)$. The log posterior is
+the log prior plus the log likelihood, up to a constant in $\thetavec$:
+
+$$
+-\frac{\lambda}{2\sigma^2}\norm{\thetavec}^2 - \frac{1}{2\sigma^2}\sum_{s \le t}(r_s - \xvec_s\transpose\thetavec)^2
+= -\frac{1}{2\sigma^2}\paren{\thetavec\transpose\Vmat_t\thetavec - 2\thetavec\transpose\bvec_t} + \text{const}.
+$$
+
+Expanding the square gives $\thetavec\transpose(\sum_s\xvec_s\xvec_s\transpose)\thetavec - 2\thetavec\transpose\sum_s r_s\xvec_s$
+plus terms without $\thetavec$, and adding the prior's $\lambda\thetavec\transpose\thetavec$ turns the first matrix into
+$\Vmat_t$. Completing the square,
+$\thetavec\transpose\Vmat_t\thetavec - 2\thetavec\transpose\bvec_t = (\thetavec - \Vmat_t^{-1}\bvec_t)\transpose\Vmat_t(\thetavec - \Vmat_t^{-1}\bvec_t) - \bvec_t\transpose\Vmat_t^{-1}\bvec_t$.
+This is the log density of a multivariate Gaussian, so
+
+$$
+\thetavec \mid \text{data} \sim \Gauss\paren{\hat\thetavec_t,\ \sigma^2\Vmat_t^{-1}}.
+$$
+
+Linear Thompson sampling with $v = \sigma$ is exact posterior sampling under this model. Other values of $v$ widen or
+narrow the posterior deliberately. See <NoteLink to="bayesian-linear-regression">Bayesian linear regression</NoteLink>.
+
+## A randomised LinUCB
+
+For a single arm with features $\xvec$, the sampled score is a linear function of a Gaussian vector, so it is Gaussian:
+
+$$
+\xvec\transpose\tilde\thetavec \sim \Gauss\paren{\xvec\transpose\hat\thetavec_t,\ v^2\norm{\xvec}^2_{\Vmat_t^{-1}}},
+\qquad\text{that is}\qquad
+\xvec\transpose\tilde\thetavec = \xvec\transpose\hat\thetavec_t + v\norm{\xvec}_{\Vmat_t^{-1}}Z_{\xvec},
+\quad Z_{\xvec} \sim \Gauss(0, 1).
+$$
+
+<NoteLink to="linucb">LinUCB</NoteLink> scores the same arm by $\xvec\transpose\hat\thetavec_t + \alpha\norm{\xvec}_{\Vmat_t^{-1}}$.
+Linear Thompson sampling replaces the fixed multiplier $\alpha$ by a random one, $vZ_{\xvec}$. The exploration bonus
+has the same shape, the width of the ellipsoid in the arm's direction, but it is sometimes negative, and it is
+correlated across arms because all scores come from one draw $\tilde\thetavec$. Two arms pointing the same way get
+similar random bonuses.
+
+<LinearBanditPlane policy="lints" />
+
+## Regret
+
+Agrawal and Goyal proved a frequentist bound for linear Thompson sampling. With the posterior scale widened to
+$v = \sigma\sqrt{c\,d\log(t/\delta)}$ for a constant $c$, the regret is $\tilde O(d^{3/2}\sqrt{T})$ with probability
+$1 - \delta$, or $\tilde O(d\sqrt{T\log K})$ with $K$ arms per round <Cite id="agrawal2013" />. This is a factor
+$\sqrt{d}$ worse than LinUCB's $\tilde O(d\sqrt{T})$ <Cite id="abbasi2011" />. The extra factor comes from the
+widening: the proof needs each draw to be optimistic, above the true best score, with constant probability, and a
+Gaussian in $d$ dimensions puts little mass in any one optimistic direction unless it is inflated by about $\sqrt{d}$.
+
+The Bayesian regret, averaged over a Gaussian prior on $\thetavec^*$, of exact posterior sampling ($v = \sigma$) is
+$\tilde O(d\sqrt{T})$, matching LinUCB <Cite id="russo2018" />. In practice $v = \sigma$ or smaller works well, and the
+widened version explores too much.
+
+## Computation
+
+A draw needs a matrix square root of $\Vmat_t^{-1}$. With the <NoteLink to="cholesky-decomposition">Cholesky
+factor</NoteLink> $\Lmat$ of $\Vmat_t^{-1} = \Lmat\Lmat\transpose$, set $\tilde\thetavec = \hat\thetavec_t + v\Lmat\zvec$ with
+$\zvec \sim \Gauss(\zeros, \I)$. A fresh factorisation costs $O(d^3)$ per round; a rank-one update of the factor
+after each pull costs $O(d^2)$. Scoring $K$ arms then costs $O(Kd)$, less than LinUCB's $O(Kd^2)$, because the bonus
+comes from the draw rather than from one quadratic form per arm.
+
+## Beyond linear rewards
+
+The same recipe applies to any model with an approximate posterior. For click-through rates, a logistic model
+$\prob(r = 1 \mid \xvec) = \sigma(\xvec\transpose\thetavec)$ has no conjugate prior. A
+<NoteLink to="laplace-approximation">Laplace approximation</NoteLink> replaces the posterior by a Gaussian centred at
+the maximum a posteriori estimate, with precision given by the Hessian of the negative log posterior, and Thompson
+sampling draws from that Gaussian <Cite id="russo2018" />. Neural reward models use a Gaussian over the last layer's
+weights, bootstrapped ensembles or dropout as approximate posteriors.
+
+## Assumptions
+
+- Rewards are linear in the features with sub-Gaussian noise, as for LinUCB. The exact-posterior interpretation needs
+  Gaussian noise and a Gaussian prior; the algorithm and its frequentist bound do not.
+- The scale $v$ matches the noise level. A $v$ far below $\sigma$ makes the draws too confident and can lock onto a
+  wrong arm.
+
+## Pitfalls
+
+- **Stale noise scale.** $v$ is often fixed at a guessed $\sigma$. If the reward noise is larger, for example revenue
+  with heavy tails, the posterior is overconfident and exploration stops early.
+- **Propensities are not free.** The probability that linear Thompson sampling picks arm $a$ for context $\xvec$ has no
+  closed form. Off-policy evaluation of its logs needs these probabilities, estimated by repeated draws at logging
+  time.
+- **Correlated exploration.** Because one draw scores all arms, many similar arms are explored together or not at all.
+  With near-duplicate arms this is efficient; with a misspecified model it can hide a good arm behind similar bad ones.

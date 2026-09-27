@@ -1,0 +1,148 @@
+---
+title: Bayesian and frequentist bandits
+kind: concept
+summary: 'Frequentist bandit analysis bounds the regret for every fixed set of arm means. Bayesian analysis averages the regret over a prior on the means, and its optimal policy for discounted rewards is the Gittins index. Thompson sampling and UCB each have guarantees in both senses.'
+tags: [bandits, bayesian-inference, experimentation, sequential-decision-making]
+aliases: [Gittins index, Bayesian regret, frequentist regret, Bayes-optimal bandit, index theorem, dynamic allocation index, Bayes-UCB]
+requires: [multi-armed-bandit, bayes-theorem]
+related: [thompson-sampling, ucb1, beta-distribution]
+references: [gittins1979, russo2018, lattimore2020, kaufmann2012, agrawal2012, bubeck2012]
+status: draft
+updated: 2026-09-27
+---
+
+import { GittinsIndex } from './GittinsIndex'
+
+<Definition>
+In a $K$-armed bandit with arm means $\muvec = (\mu_1, \dots, \mu_K)$, the **frequentist regret** of a policy is the
+function $R_T(\muvec) = T\mu^* - \expect_{\muvec}[\sum_t X_t]$, with the expectation over rewards and the policy's
+randomness for fixed $\muvec$. Given a prior $\Pi$ on $\muvec$, the **Bayesian regret** is its average,
+$\mathrm{BR}_T = \expect_{\muvec \sim \Pi}[R_T(\muvec)]$. A **Bayes-optimal** policy minimises the Bayesian regret, or
+maximises expected discounted reward under the prior.
+</Definition>
+
+## Two questions about one problem
+
+Both views study the same problem: choose arms, observe rewards, lose reward while learning. They differ in what the
+guarantee promises.
+
+A frequentist bound holds for every $\muvec$. It can depend on $\muvec$ through the gaps, as in the
+$\sum_i \log T / \Delta_i$ bounds of <NoteLink to="ucb1">UCB1</NoteLink>, or be a worst case over all $\muvec$, as in
+the $\sqrt{KT}$ minimax rate. It protects against the least favourable problem, whatever its prior probability.
+
+A Bayesian bound holds on average over problems drawn from the prior. It is a statement about a population of
+problems: the next thousand pages to test, or the next thousand ad creatives. A policy that is bad on rare problems but
+good on typical ones can have small Bayesian regret. When the prior is a fair description of where problems come from,
+the Bayesian criterion measures what a deployer actually cares about.
+
+Every frequentist bound implies a Bayesian bound: if $R_T(\muvec) \le B$ for all $\muvec$, then the average is at most
+$B$. The converse fails, because an average can hide bad cases.
+
+## The Bayes-optimal policy
+
+With a prior, the bandit becomes a fully specified decision problem. The state is the posterior over $\muvec$, a pull
+changes the posterior by <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink>, and the expected reward of a pull is
+the posterior mean of the pulled arm. The Bayes-optimal policy is the solution of this Markov decision problem over
+posteriors. For Bernoulli arms with Beta priors the state is the success and failure counts of every arm. The number of
+states reachable in $T$ rounds grows like $T^{2K}$, so exact dynamic programming is out of reach beyond small problems.
+
+### The Gittins index
+
+For an infinite horizon with discount factor $\gamma \in (0, 1)$ and independent arms, the problem decomposes. Gittins
+proved that the Bayes-optimal policy pulls, in each round, the arm with the highest **Gittins index**, a number computed
+from that arm's posterior alone <Cite id="gittins1979" />. A $K$-armed problem becomes $K$ one-armed problems.
+
+The index of an arm is defined by calibration against a known alternative. Suppose the only other option is a
+**retirement arm** that pays a known constant $\lambda$ per round. Pulling the retirement arm reveals nothing, so the
+posterior of the unknown arm stays the same, and a decision-maker who retires once retires for good. The one-armed
+problem is therefore an optimal stopping problem: pull the unknown arm until some stopping time $\tau$, then collect
+$\lambda$ per round. Its value is
+
+$$
+V(\lambda) = \max_{\tau \ge 0}\ \expect\brack{\sum_{t=0}^{\tau - 1}\gamma^t X_t + \sum_{t=\tau}^{\infty}\gamma^t\lambda}.
+$$
+
+Retiring immediately, $\tau = 0$, earns $\lambda/(1 - \gamma)$. For small $\lambda$ it is better to pull the arm; for
+$\lambda$ above every plausible mean it is better to retire. The **Gittins index** is the $\lambda$ at which the two are
+equally good: the largest $\lambda$ with $V(\lambda) > \lambda/(1 - \gamma)$. It is the fair price of the arm. Rearranging
+the indifference condition gives the equivalent ratio form,
+
+$$
+\nu = \sup_{\tau > 0}\frac{\expect\brack{\sum_{t=0}^{\tau - 1}\gamma^t X_t}}{\expect\brack{\sum_{t=0}^{\tau - 1}\gamma^t}},
+$$
+
+the best discounted reward per unit of discounted time the arm can deliver before stopping.
+
+The index exceeds the posterior mean. Pulling reveals information, and the option to retire later means bad news costs
+little while good news is exploited for ever. For $\gamma = 0.9$, an arm with a uniform $\Beta(1, 1)$ prior has
+posterior mean $0.5$ and Gittins index $0.703$. A Bayes-optimal player prefers it to a known arm that pays $0.65$. After
+ten observations with half successes, $\Beta(5, 5)$, the same mean has index $0.568$: the posterior is sharper and
+the information is worth less.
+
+<GittinsIndex />
+
+### Limits of the index
+
+The index theorem needs geometric discounting, independent arms and arms whose state changes only when pulled. It
+fails for a fixed finite horizon, where the value of information falls as the end approaches, and for correlated arms,
+where pulling one arm teaches something about another. It also depends on the prior: with a prior far from the truth,
+the Bayes-optimal policy for that prior can have large frequentist regret. And the index must be computed per arm
+state, which is cheap for Beta–Bernoulli arms and expensive for richer models.
+
+## Crossing the line
+
+The most used algorithms are good in both senses.
+
+**Bayesian algorithms with frequentist guarantees.** <NoteLink to="thompson-sampling">Thompson sampling</NoteLink> is
+defined through a prior and a posterior, but its regret bounds for Bernoulli arms hold for every fixed $\muvec$ and
+match the Lai–Robbins constant <Cite id="agrawal2012" /> <Cite id="kaufmann2012" />. The prior acts as a device for
+randomising sensibly, not as an assumption the guarantee rests on.
+
+**Frequentist analysis gives Bayesian guarantees.** Russo and Van Roy showed that any upper confidence bound analysis
+transfers to Thompson sampling's Bayesian regret, even though Thompson sampling never computes a confidence bound
+<Cite id="russo2018" />. The argument is short. Let $A^* = \argmax_i \mu_i$ be the optimal arm, random under the prior,
+and let $U_t(i)$ be any upper confidence bound computed from the history $H_{t-1}$. Add and subtract:
+
+$$
+\mu_{A^*} - \mu_{A_t} = \paren{\mu_{A^*} - U_t(A^*)} + \paren{U_t(A^*) - U_t(A_t)} + \paren{U_t(A_t) - \mu_{A_t}}.
+$$
+
+Thompson sampling matches probabilities: given $H_{t-1}$, the pulled arm $A_t$ has the same distribution as $A^*$.
+$U_t$ is fixed given $H_{t-1}$, so $\expect[U_t(A^*) \mid H_{t-1}] = \expect[U_t(A_t) \mid H_{t-1}]$, and the middle term
+has expectation zero. Summing over rounds,
+
+$$
+\mathrm{BR}_T = \expect\brack{\sum_{t=1}^{T}\paren{U_t(A_t) - \mu_{A_t}}} + \expect\brack{\sum_{t=1}^{T}\paren{\mu_{A^*} - U_t(A^*)}}.
+$$
+
+For a UCB policy, $A_t$ maximises $U_t$, so the middle term is at most zero and the same two sums bound its regret. The
+first sum is the total width of the confidence intervals at the pulled arms, the second the cost of the intervals
+failing to cover the best arm. Both are exactly what a UCB analysis bounds. Every such bound, for $K$-armed, linear or
+other structured bandits, is therefore also a bound on the Bayesian regret of Thompson sampling. For $K$ arms this gives
+$O(\sqrt{KT\log T})$ for every prior.
+
+## Comparison
+
+| | Frequentist view | Bayesian view |
+| --- | --- | --- |
+| Unknowns | fixed means $\muvec$ | means drawn from a prior $\Pi$ |
+| Criterion | $R_T(\muvec)$ for every $\muvec$, or its maximum | $\expect_{\Pi}[R_T(\muvec)]$ |
+| Optimal policy | none uniformly; asymptotically optimal ones reach the Lai–Robbins constant | the Bayes-optimal policy for $\Pi$; Gittins index for discounted independent arms |
+| Typical algorithms | UCB1, KL-UCB, successive elimination | Gittins index, Thompson sampling, Bayes-optimal lookahead |
+| Main risk | over-exploring on problems that are easy in practice | a prior that misdescribes the problems met |
+
+## Assumptions
+
+- The Gittins index theorem assumes independent arms, geometric discounting and arms that change only when pulled
+  <Cite id="gittins1979" />.
+- Bayesian regret bounds assume that the means are drawn from the stated prior. A frequentist bound needs no prior.
+
+## Pitfalls
+
+- **Discounting is a modelling choice.** The discount $\gamma$ sets an effective horizon of $1/(1 - \gamma)$ rounds. A
+  Gittins policy tuned for $\gamma = 0.9$ explores as if the game lasted ten rounds, which is far too little for a
+  campaign of a million visitors.
+- **Bayes-optimal is not robust.** Optimality holds under the stated prior. A tight prior centred on the wrong value
+  can make the Bayes-optimal policy commit to a bad arm, with regret linear in $T$ on that problem.
+- **Bayesian regret is not a posterior statement.** A bound on $\mathrm{BR}_T$ says nothing about the regret on the
+  particular problem at hand, only about the average over problems like it.

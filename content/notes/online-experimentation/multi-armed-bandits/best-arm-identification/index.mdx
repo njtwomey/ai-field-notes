@@ -1,0 +1,132 @@
+---
+title: Best-arm identification
+kind: concept
+summary: 'Best-arm identification samples $K$ arms to name the one with the highest mean, and scores only that final choice. With fixed confidence $\delta$ the goal is few samples; successive elimination needs $O(\sum_i \Delta_i^{-2}\log(K/(\delta\Delta_i)))$. Top-two Thompson sampling is a Bayesian alternative.'
+tags: [bandits, experimentation, pure-exploration, sequential-testing]
+aliases: [pure exploration, best arm identification, BAI, successive elimination, action elimination, top-two Thompson sampling, successive rejects, fixed-confidence identification, fixed-budget identification]
+requires: [multi-armed-bandit, ucb1]
+related: [explore-then-commit, thompson-sampling, ab-test, multiple-testing]
+references: [evendar2006, kaufmann2016, audibert2010, russo2016, lattimore2020, hoeffding1963]
+status: draft
+updated: 2026-09-27
+---
+
+import { SuccessiveElimination } from './SuccessiveElimination'
+
+<Definition>
+**Best-arm identification** is a bandit problem in which a learner samples $K$ arms with unknown means
+$\mu_1, \dots, \mu_K$ and then recommends one arm $\hat\imath$. Only the recommendation is scored. In the
+**fixed-confidence** setting the learner chooses when to stop and must satisfy
+$\prob(\hat\imath \ne \argmax_i \mu_i) \le \delta$ for a given $\delta \in (0, 1)$, which makes it **$\delta$-PAC**;
+the cost is the number of samples $\tau$. In the **fixed-budget** setting the number of samples $n$ is given and the
+cost is the error probability <Cite id="kaufmann2016" />.
+</Definition>
+
+## Pure exploration
+
+The <NoteLink to="multi-armed-bandit">regret</NoteLink> of a bandit charges every pull of a suboptimal arm. Best-arm
+identification charges nothing during sampling and everything for a wrong final answer. It models a test phase
+followed by a long deployment: choosing which of $K$ page designs to launch, which drug dose to take to the next trial
+phase, or which hyperparameter setting to train at full scale.
+
+The two goals need different allocations. A regret-minimising algorithm such as <NoteLink to="ucb1">UCB1</NoteLink>
+pulls each suboptimal arm only about $\log T$ times, and nearly all its pulls go to the leader. The leader is then
+measured precisely, but the runner-up is not, and it is the runner-up's measurement that decides whether the leader
+can be declared best with confidence. An identification algorithm spends its samples where the comparison is close:
+on the best arm and its nearest competitors, roughly in proportion to $1/\Delta_i^2$, where $\Delta_i$ is arm $i$'s gap
+to the best mean.
+
+## Successive elimination
+
+Successive elimination samples all surviving arms equally and drops an arm as soon as the data show it is not the best
+<Cite id="evendar2006" />. For rewards in $[0, 1]$:
+
+1. Start with every arm active. In round $s = 1, 2, \dots$, pull every active arm once. Each active arm now has $s$
+   samples and a sample mean $\hat\mu_{i,s}$.
+2. Set the radius $r_s = \sqrt{\log(4Ks^2/\delta) / (2s)}$.
+3. Remove every active arm $i$ with $\hat\mu_{i,s} + r_s < \max_{j \text{ active}}(\hat\mu_{j,s} - r_s)$: its upper
+   bound is below some arm's lower bound.
+4. Stop when one arm remains and recommend it.
+
+<SuccessiveElimination />
+
+**Correctness.** Call the run *good* if every sample mean stays within $r_s$ of its true mean, for every arm and
+every round. By Hoeffding's inequality, arm $i$ at round $s$ violates this with probability at most
+$2e^{-2sr_s^2} = 2\delta/(4Ks^2) = \delta/(2Ks^2)$ <Cite id="hoeffding1963" />. A union bound over the $K$ arms and all
+rounds gives
+
+$$
+\prob(\text{not good}) \le \sum_{s=1}^{\infty}\sum_{i=1}^{K}\frac{\delta}{2Ks^2} = \frac{\delta}{2}\cdot\frac{\pi^2}{6}
+< \delta.
+$$
+
+On a good run the best arm is never removed. Its upper bound satisfies $\hat\mu^* + r_s \ge \mu^*$, and every other
+arm's lower bound satisfies $\hat\mu_j - r_s \le \mu_j \le \mu^*$. So the recommendation is correct with probability at
+least $1 - \delta$.
+
+**Sample complexity.** On a good run, a suboptimal arm $i$ is removed once its upper bound falls below the best arm's
+lower bound. That is guaranteed when $\mu_i + 2r_s < \mu^* - 2r_s$, that is when $r_s < \Delta_i/4$. Squaring,
+$\log(4Ks^2/\delta)/(2s) < \Delta_i^2/16$, which holds once
+
+$$
+s \ge s_i \approx \frac{8}{\Delta_i^2}\log\frac{4Ks_i^2}{\delta} = O\paren{\frac{1}{\Delta_i^2}\log\frac{K}{\delta\Delta_i}}.
+$$
+
+Arm $i$ is sampled $s_i$ times. The best arm survives until the last competitor is removed, so it is sampled as often
+as the arm with the smallest gap; set its $\Delta$ to that smallest gap. The total is
+$\sum_i s_i = O\paren{\sum_i \Delta_i^{-2}\log(K/(\delta\Delta_i))}$. Uniform sampling with the same intervals must
+sample every arm until the closest pair separates, $K$ times the largest $s_i$. The saving is large when the gaps
+differ, as in the figure.
+
+The quantity $H = \sum_i \Delta_i^{-2}$ is the **complexity** of the problem. Kaufmann, Cappé and Garivier showed that
+every $\delta$-PAC algorithm needs of order $H\log(1/\delta)$ samples in expectation, with exact constants given by KL
+divergences between the arms' distributions <Cite id="kaufmann2016" />. Successive elimination is optimal up to the
+logarithmic factor inside the sum.
+
+## Top-two Thompson sampling
+
+<NoteLink to="thompson-sampling">Thompson sampling</NoteLink> pulls each arm with its posterior probability of being
+best. For identification this starves the challengers: once the leader is fairly certain, almost every pull goes to it,
+and the runner-up's estimate improves slowly. Russo's **top-two Thompson sampling** fixes this with a parameter
+$\beta \in (0, 1)$, usually $1/2$ <Cite id="russo2016" />:
+
+1. Draw $\tilde\thetavec$ from the posterior and let $I = \argmax_i \tilde\theta_i$.
+2. With probability $\beta$, pull $I$.
+3. Otherwise, draw again from the posterior until the argmax $J$ differs from $I$, and pull $J$.
+
+The leader gets a fraction $\beta$ of the pulls, and the rest go to the arms most likely to beat it. Russo proved that
+the posterior probability of a wrong answer then decays at the fastest exponential rate possible for any allocation that
+gives the best arm a fraction $\beta$ of the samples. Stopping when the posterior probability of the leader being best
+exceeds $1 - \delta$ gives a practical fixed-confidence procedure.
+
+## Fixed budget
+
+With a budget of $n$ samples and no stopping decision, **successive rejects** divides the budget into $K - 1$ phases
+of increasing length. After each phase it discards the arm with the lowest sample mean, so the last phases compare only
+the best few arms with many samples each. Its error probability is at most about
+$\exp\paren{-n/(H_2\log K)}$, where $H_2 = \max_i i\,\Delta_{(i)}^{-2}$ over the gaps sorted in increasing order
+<Cite id="audibert2010" />. Unlike fixed-confidence methods, it needs no knowledge of $\delta$ or the gaps.
+
+## Relation to A/B testing
+
+A classical <NoteLink to="ab-test">A/B test</NoteLink> is fixed-budget identification with uniform allocation and a
+significance test at the end. With two arms, uniform allocation is optimal for equal variances. With many arms,
+elimination saves samples by dropping clear losers early, and a sequential stopping rule saves samples when the best
+arm is clearly better. Comparing $K$ arms with pairwise tests at level $\alpha$ each inflates the error rate, a problem
+of <NoteLink to="multiple-testing">multiple testing</NoteLink>; the union bound in the elimination radius, the
+$\log(4Ks^2/\delta)$ term, pays for all comparisons and all interim looks at once.
+
+## Assumptions
+
+- There is a unique best arm. With ties, a fixed-confidence algorithm may never stop; an $\varepsilon$-good version
+  accepts any arm within $\varepsilon$ of the best.
+- Rewards are bounded or sub-Gaussian and independent, and the arms are stationary during sampling.
+
+## Pitfalls
+
+- **Hoeffding intervals are conservative.** For conversion rates near 0 the elimination radius above is several times
+  wider than an exact binomial interval. KL-based intervals stop much earlier with the same guarantee.
+- **Stopping rules and inference interact.** The sample means at the stopping time are biased: the winner's estimate
+  is too high, because arms were kept or dropped by comparing the same noisy estimates.
+- **Close runners-up dominate the cost.** Two arms with gap $0.01$ need about $8 \times 10^4\log(4Ks^2/\delta)$ samples
+  each under successive elimination. If any arm within $\varepsilon$ would do, set $\varepsilon$ and stop far earlier.

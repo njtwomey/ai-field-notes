@@ -1,0 +1,128 @@
+---
+title: Non-stationary bandits
+kind: concept
+summary: 'In a non-stationary bandit the arms'' means change over time, and regret is measured against the best arm at each round. Discounted UCB down-weights old rewards by $\gamma^s$; sliding-window UCB keeps the last $\tau$. Tuned to $\Upsilon$ change points, both have regret of order $\sqrt{\Upsilon T}$ up to logarithms.'
+tags: [bandits, experimentation, online-learning, non-stationarity]
+aliases: [switching bandit, piecewise-stationary bandit, restless bandit, drifting bandit, discounted UCB, D-UCB, sliding-window UCB, SW-UCB, dynamic regret]
+requires: [multi-armed-bandit, ucb1]
+related: [change-point-detection, cusum, bayesian-online-changepoint-detection, epsilon-greedy, stationarity]
+references: [garivier2011b, lattimore2020, auer2002b]
+status: draft
+updated: 2026-09-27
+---
+
+import { NonStationary } from './NonStationary'
+
+<Definition>
+A **non-stationary bandit** is a $K$-armed bandit in which the reward of arm $i$ in round $t$ has a mean $\mu_i(t)$ that
+may change with $t$. The learner is compared with the best arm of each round, and the **dynamic regret** is
+
+$$
+R_T = \sum_{t=1}^{T}\paren{\mu^*(t) - \expect[\mu_{A_t}(t)]}, \qquad \mu^*(t) = \max_i \mu_i(t).
+$$
+
+In a **piecewise-stationary** or **switching** bandit, the means are constant between $\Upsilon_T - 1$ unknown change
+points, so there are $\Upsilon_T$ stationary segments <Cite id="garivier2011b" />.
+</Definition>
+
+## Why stationary algorithms fail
+
+<NoteLink to="ucb1">UCB1</NoteLink> and <NoteLink to="thompson-sampling">Thompson sampling</NoteLink> average all past
+rewards of an arm. That is optimal when the mean never moves, and it is what makes their confidence intervals shrink.
+After a change it works against them. Suppose arm 1 has been the best for 1,000 rounds and has been pulled 950 times.
+If its mean then drops below arm 2's, its sample mean moves by at most $1/951$ per new pull. The policy keeps pulling
+arm 1 for hundreds of rounds before the stale evidence is outweighed. Meanwhile arm 2's interval is narrow too, because
+the policy explores it only about $\log t$ times, so its new, better mean is rarely seen.
+
+A stationary algorithm's dynamic regret after a change can grow linearly for a period proportional to how long the
+previous segment lasted. With changes spread through the horizon, the total is linear in $T$.
+
+## Discounted UCB
+
+Discounted UCB (D-UCB) weights a reward observed $s$ rounds ago by $\gamma^s$, for a discount factor
+$\gamma \in (0, 1)$ <Cite id="garivier2011b" />. The discounted count and mean of arm $i$ at round $t$ are
+
+$$
+N_t(\gamma, i) = \sum_{s=1}^{t}\gamma^{t-s}\indicator\set{A_s = i}, \qquad
+\bar X_t(\gamma, i) = \frac{1}{N_t(\gamma, i)}\sum_{s=1}^{t}\gamma^{t-s}X_s\indicator\set{A_s = i}.
+$$
+
+The policy pulls the arm maximising $\bar X_t(\gamma, i) + 2B\sqrt{\xi\log n_t(\gamma) / N_t(\gamma, i)}$, where $B$
+bounds the rewards, $\xi > 1/2$ is a constant and $n_t(\gamma) = \sum_i N_t(\gamma, i)$. The total weight of all past
+rounds is at most $\sum_{s \ge 0}\gamma^s = 1/(1 - \gamma)$, so D-UCB has an effective memory of $1/(1 - \gamma)$
+rounds. An arm not pulled for a while sees its discounted count shrink geometrically, its bonus grow, and it is tried
+again. Both updates are $O(K)$ per round: multiply every count and sum by $\gamma$, then add the new reward.
+
+## Sliding-window UCB
+
+Sliding-window UCB (SW-UCB) forgets abruptly: only the last $\tau$ rounds count <Cite id="garivier2011b" />. With
+$N_t(\tau, i)$ the number of pulls of arm $i$ among rounds $t - \tau + 1, \dots, t$ and $\bar X_t(\tau, i)$ their mean
+reward, the index is
+
+$$
+\bar X_t(\tau, i) + B\sqrt{\frac{\xi\log\min(t, \tau)}{N_t(\tau, i)}}.
+$$
+
+An arm with no pull in the window has an infinite index and is pulled at once. A ring buffer of the last $\tau$
+pulls keeps the counts and sums up to date in $O(1)$ per round.
+
+<NonStationary />
+
+## How long to remember
+
+The memory length trades bias against variance. Consider SW-UCB with window $\tau$ on a problem with $\Upsilon$
+segments, $K$ arms and gaps of order $\Delta$, with rewards in $[0, 1]$.
+
+- **Stale data after a change.** For up to $\tau$ rounds after a change, the window mixes the old and new segments,
+  and the policy may favour the formerly best arm. In the worst case these rounds cost up to 1 each, so at most
+  $\Upsilon\tau$ in total.
+- **Re-exploration.** Inside a stationary stretch, SW-UCB behaves like UCB restarted every $\tau$ rounds, because data
+  older than $\tau$ is forgotten. Each restart pulls every suboptimal arm about $\log\tau / \Delta^2$ times, at a cost of
+  about $\log\tau / \Delta$ per arm. There are about $T/\tau$ windows, for a cost of $TK\log\tau / (\tau\Delta)$.
+
+The regret is roughly $\Upsilon\tau + TK\log T / (\tau\Delta)$. The first term grows with $\tau$ and the second falls.
+Setting the derivative in $\tau$ to zero gives $\tau^* = \sqrt{TK\log T / (\Upsilon\Delta)}$, where the two terms are
+equal and the regret is $2\sqrt{\Upsilon TK\log T / \Delta}$. Garivier and Moulines make this precise. With
+$\tau = 2B\sqrt{T\log T / \Upsilon_T}$, SW-UCB has regret $O(\sqrt{\Upsilon_T T\log T})$. With
+$1/(1 - \gamma) = 4B\sqrt{T / \Upsilon_T}$, D-UCB has regret $O(\sqrt{\Upsilon_T T}\log T)$. They also show that no
+policy can do better than order $\sqrt{T}$ on switching problems, so both are optimal up to logarithmic factors
+<Cite id="garivier2011b" />. The rate $\sqrt{T}$, rather than $\log T$, is the price of never knowing whether the
+current best arm is still the best.
+
+Both tunings need $\Upsilon_T$ and $T$. With the wrong memory the figure shows the two failure modes: a long memory
+reacts slowly after each change, and a short one pays the re-exploration cost even on a problem with no changes.
+
+## Other approaches
+
+- **Change detection and restart.** Run a stationary algorithm and monitor each arm's rewards with a change-point
+  detector such as <NoteLink to="cusum">CUSUM</NoteLink> or a generalised likelihood ratio test. On an alarm, reset the
+  arm's statistics or restart the algorithm. Between changes this keeps the $\log T$ behaviour of the stationary
+  algorithm. It needs some forced exploration so that a change in a rarely pulled arm is noticed. See
+  <NoteLink to="change-point-detection">change-point detection</NoteLink>.
+- **Discounted Thompson sampling.** Decay the Beta pseudo-counts towards the prior by a factor $\gamma$ each round. The
+  posterior never becomes more confident than about $1/(1 - \gamma)$ observations allow.
+- **Constant ε-greedy.** A fixed exploration rate $\varepsilon$ keeps every arm's estimate fresh at the cost of
+  constant regret per round. It is crude but robust and common in practice.
+- **Adversarial algorithms.** <NoteLink to="exp3">EXP3</NoteLink> makes no stochastic assumption and competes with the
+  best fixed arm. Its variant EXP3.S competes with the best sequence of arms that switches a bounded number of times
+  <Cite id="auer2002b" />.
+- **Restless bandits.** When each arm's state evolves as a Markov chain whether or not it is pulled, the Bayesian
+  problem is a restless bandit. Its exact solution is intractable in general <Cite id="lattimore2020" />.
+
+## Assumptions
+
+- Rewards are bounded by a known $B$.
+- The number of change points $\Upsilon_T$, or a bound on it, and the horizon $T$ are known when tuning $\gamma$ or
+  $\tau$. With a total variation budget $V_T = \sum_t \max_i\abs{\mu_i(t+1) - \mu_i(t)}$ instead of a count, similar
+  tunings apply for drifting means.
+- The changes do not depend on the learner's actions. If they do, the problem is closer to reinforcement learning.
+
+## Pitfalls
+
+- **Detecting a change needs data on every arm.** A policy that stops pulling an arm cannot notice that the arm has
+  improved. Every non-stationary method keeps some exploration going, which costs regret on stationary problems.
+- **Seasonality is not non-stationarity.** Conversion rates that follow the day of the week change predictably. Adding
+  the day as a context in a <NoteLink to="contextual-bandit">contextual bandit</NoteLink> models this better than
+  forgetting.
+- **Memory in rounds, not time.** $\tau$ and $\gamma$ count pulls. If traffic doubles at weekends, a window of $\tau$
+  pulls covers half as much calendar time then.

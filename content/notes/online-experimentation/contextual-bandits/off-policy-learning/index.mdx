@@ -1,0 +1,138 @@
+---
+title: Off-policy learning
+kind: concept
+summary: 'Off-policy learning picks a policy from logged bandit feedback by maximising an off-policy value estimate such as IPS. The maximum of a noisy estimate is optimistic, and IPS changes with a shift of the rewards; variance penalties and self-normalisation help.'
+tags: [bandits, causal-inference, importance-sampling, policy-optimisation]
+aliases: [batch learning from bandit feedback, BLBF, counterfactual learning, offline policy learning, offline policy optimisation, counterfactual risk minimisation, CRM, POEM, propensity overfitting]
+requires: [off-policy-evaluation]
+related: [cost-sensitive-learning, score-function-estimator, winners-curse, softmax-and-log-sum-exp]
+references: [swaminathan2015, swaminathan2015b, dudik2011, bottou2013]
+status: draft
+updated: 2026-09-27
+---
+
+import { PolicyLearning } from './PolicyLearning'
+
+<Definition>
+**Off-policy learning** takes a log $\Dcal = \set{(x_i, a_i, r_i, p_i)}_{i=1}^{n}$ collected by a logging policy with
+propensities $p_i$, and returns a policy
+
+$$
+\hat\pi = \argmax_{\pi \in \Pi}\hat V(\pi)
+$$
+
+from a class $\Pi$, where $\hat V$ is an <NoteLink to="off-policy-evaluation">off-policy estimate</NoteLink> of the
+value $V(\pi) = \expect_x[\sum_a\pi(a \mid x)\mu(x, a)]$. It is also called batch learning from bandit feedback
+<Cite id="swaminathan2015" />.
+</Definition>
+
+## Intuition
+
+Supervised learning is told the right label for each example. A log of bandit feedback says only how good the chosen
+action was, for actions chosen by someone else's policy. Off-policy evaluation turns such a log into an estimate of any
+policy's value. Off-policy learning optimises that estimate. The idea is simple, and the difficulties come from the
+optimisation: searching over many policies finds the ones whose estimates are most flattered by noise.
+
+## The IPS objective
+
+With importance weights $w_i(\pi) = \pi(a_i \mid x_i)/p_i$, the IPS estimate of a policy's value is
+$\hat V_{\text{IPS}}(\pi) = \frac1n\sum_i w_i(\pi)\,r_i$. For deterministic policies,
+$\pi(a_i \mid x_i) = \indicator\set{\pi(x_i) = a_i}$, and
+
+$$
+\hat V_{\text{IPS}}(\pi) = \frac1n\sum_{i=1}^{n}\frac{r_i}{p_i}\,\indicator\set{\pi(x_i) = a_i}.
+$$
+
+Maximising this is weighted classification: each logged row is an example with input $x_i$, label $a_i$ and
+importance $r_i/p_i$, and the policy is a classifier rewarded for predicting the logged action on rows with high
+importance. Any classifier that accepts example weights can therefore learn a policy. The
+<NoteLink to="cost-sensitive-learning">cost-sensitive</NoteLink> version uses the doubly robust estimate of each
+action's reward, $\hat\mu(x_i, a) + \indicator\set{a = a_i}(r_i - \hat\mu(x_i, a_i))/p_i$, as a full vector of rewards
+for every row <Cite id="dudik2011" />.
+
+For a differentiable stochastic policy $\pi_{\thetavec}(a \mid x)$, such as a softmax over scores, the gradient of the
+IPS objective is
+
+$$
+\nabla_{\thetavec}\hat V_{\text{IPS}} = \frac1n\sum_{i=1}^{n}\frac{r_i}{p_i}\nabla_{\thetavec}\pi_{\thetavec}(a_i \mid x_i)
+= \frac1n\sum_{i=1}^{n}w_i r_i\,\nabla_{\thetavec}\log\pi_{\thetavec}(a_i \mid x_i),
+$$
+
+using $\nabla\pi = \pi\nabla\log\pi$. This is the <NoteLink to="score-function-estimator">score-function
+estimator</NoteLink> of policy gradient, with the importance weight correcting for sampling from $\pi_0$ instead of
+$\pi_{\thetavec}$.
+
+## Two failure modes
+
+**The maximum is optimistic.** Even if $\hat V(\pi)$ is unbiased for every fixed $\pi$, the estimate at the chosen
+policy is not. For every $\pi'$, $\max_\pi\hat V(\pi) \ge \hat V(\pi')$. Taking expectations,
+$\expect[\max_\pi\hat V(\pi)] \ge \expect[\hat V(\pi')] = V(\pi')$ for every $\pi'$, and therefore
+
+$$
+\expect\brack{\max_{\pi \in \Pi}\hat V(\pi)} \ge \max_{\pi \in \Pi}V(\pi).
+$$
+
+The estimated value of the learned policy overstates what it will earn, and more so for a rich class $\Pi$ and a noisy
+estimator. This is the <NoteLink to="winners-curse">winner's curse</NoteLink> of policy search. With IPS the noise is
+largest for policies that choose actions with small logging propensities, so the search is drawn towards exactly the
+policies the log knows least about.
+
+**IPS depends on the reward baseline.** Adding a constant $c$ to every reward does not change which policy is best:
+every policy's true value rises by $c$. IPS changes differently for different policies:
+
+$$
+\frac1n\sum_i w_i(\pi)(r_i + c) = \hat V_{\text{IPS}}(\pi) + c\,\bar w(\pi), \qquad \bar w(\pi) = \frac1n\sum_i w_i(\pi).
+$$
+
+The average weight $\bar w(\pi)$ has expectation 1 but varies between policies in a finite sample. With $c > 0$ the
+objective favours policies with large $\bar w$, those that agree with the log on rows with small propensities. With
+$c < 0$, as when all rewards are losses, it favours policies with $\bar w$ near 0, which avoid the logged actions
+altogether; such a policy scores 0, better than any negative estimate. Swaminathan and Joachims call this **propensity
+overfitting** <Cite id="swaminathan2015b" />. The self-normalised estimator has no such dependence:
+
+$$
+\frac{\sum_i w_i(\pi)(r_i + c)}{\sum_i w_i(\pi)} = \hat V_{\text{SNIPS}}(\pi) + c.
+$$
+
+<PolicyLearning />
+
+## Counterfactual risk minimisation
+
+Swaminathan and Joachims bound the true value of a policy below by its estimate minus a term proportional to the
+estimate's standard deviation, using an empirical Bernstein inequality over the policy class. **Counterfactual risk
+minimisation** (CRM) maximises that lower bound <Cite id="swaminathan2015" />:
+
+$$
+\hat\pi = \argmax_{\pi \in \Pi}\paren{\hat V_M(\pi) - \lambda\sqrt{\frac{\widehat{\var}_M(\pi)}{n}}},
+$$
+
+where $\hat V_M$ is IPS with weights clipped at $M$ and $\widehat{\var}_M$ is the sample variance of its terms. The
+penalty is large for policies whose estimate rests on a few heavily weighted rows, so the search prefers policies the
+log supports well. Their algorithm POEM applies this to softmax policies trained by gradient ascent. Norm-POEM replaces
+the IPS estimate by SNIPS to remove propensity overfitting <Cite id="swaminathan2015b" />.
+
+## Practice
+
+- **Validate on held-out logs.** Because the training estimate is optimistic, estimate the learned policy's value on
+  logs not used for learning, and compare it with the logging policy's value on the same logs.
+- **Stay close to the logging policy.** Policies that differ from $\pi_0$ everywhere are those the log evaluates worst.
+  Penalties on divergence from $\pi_0$, clipping and variance penalties all push the same way.
+- **Deploy with exploration.** A learned policy that is deterministic produces logs from which its successor cannot be
+  evaluated. Deploying it with some randomisation, and logging the propensities, keeps the loop going
+  <Cite id="bottou2013" />.
+
+## Assumptions
+
+- The log satisfies the conditions for off-policy evaluation: overlap with every policy in $\Pi$, correct propensities
+  and no unrecorded confounders.
+- Contexts and rewards come from the same distribution at deployment as in the log.
+
+## Pitfalls
+
+- **Rewards coded as losses.** With IPS and negative rewards, the learner can maximise the objective by avoiding the
+  logged actions. Use SNIPS or DR, or shift rewards so that the baseline is sensible and check that the result does not
+  depend on the shift.
+- **Rich policy classes on small logs.** A neural policy trained on 10,000 rows with small propensities finds spikes of
+  luck in the IPS surface. Restrict the class, penalise variance, or collect more exploration.
+- **Reporting the training objective.** The value of $\hat V$ at the learned policy is not an estimate of its
+  performance. It is biased upwards by the selection.

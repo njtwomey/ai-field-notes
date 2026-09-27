@@ -1,0 +1,162 @@
+---
+title: Thompson sampling
+kind: concept
+summary: 'Thompson sampling keeps a posterior over each arm''s mean, draws once from every posterior and pulls the arm with the largest draw. Each arm is pulled with its posterior probability of being the best. With Beta priors on Bernoulli arms the regret matches the Lai–Robbins bound.'
+tags: [bandits, experimentation, bayesian-inference, online-learning]
+aliases: [posterior sampling, probability matching, randomised probability matching, Beta–Bernoulli bandit, Gaussian Thompson sampling]
+requires: [multi-armed-bandit, bayes-theorem, beta-distribution]
+related: [ucb1, bernoulli-distribution, gaussian-distribution]
+references: [thompson1933, agrawal2012, kaufmann2012, russo2018, scott2010, lattimore2020]
+status: draft
+updated: 2026-09-27
+---
+
+import { BanditSimulator } from '../_shared/BanditSimulator'
+import { TsPosterior } from './TsPosterior'
+
+<Definition>
+**Thompson sampling** is a policy for a $K$-armed bandit with a prior distribution over the arms' means
+$\thetavec = (\theta_1, \dots, \theta_K)$. In round $t$ it draws a sample $\tilde\thetavec_t$ from the posterior
+$p(\thetavec \mid H_{t-1})$ given the history $H_{t-1}$ of arms and rewards, pulls
+$A_t = \argmax_i \tilde\theta_{t,i}$, observes the reward and updates the posterior <Cite id="thompson1933" />.
+</Definition>
+
+## Intuition
+
+Thompson proposed the rule in 1933 for allocating patients between two treatments <Cite id="thompson1933" />. The
+posterior of an arm's mean describes what is known about that arm. A narrow posterior means the arm is well measured;
+a wide posterior means it could still be much better or much worse than it looks.
+
+A draw from a wide posterior lands far from its centre often. An arm with few pulls therefore sometimes produces the
+largest draw even when its sample mean is lower than another arm's, and it gets pulled. That is exploration. An arm
+whose posterior is concentrated well below another's almost never produces the largest draw, so it is almost never
+pulled. That is exploitation. The randomness of the draw sets the balance, with no tuning parameter.
+
+## The Beta–Bernoulli algorithm
+
+For Bernoulli rewards, give each arm an independent $\Beta(\alpha_0, \beta_0)$ prior, usually $\Beta(1, 1)$, the
+uniform distribution on $[0, 1]$. The <NoteLink to="beta-distribution">Beta distribution</NoteLink> is conjugate to the
+Bernoulli likelihood. After $N_i$ pulls of arm $i$ with $S_i$ successes, the posterior density of $\theta_i$ is
+proportional to prior times likelihood:
+
+$$
+p(\theta_i \mid H) \propto \theta_i^{\alpha_0 - 1}(1 - \theta_i)^{\beta_0 - 1} \cdot \theta_i^{S_i}(1 - \theta_i)^{N_i - S_i}
+= \theta_i^{\alpha_0 + S_i - 1}(1 - \theta_i)^{\beta_0 + N_i - S_i - 1},
+$$
+
+which is the kernel of $\Beta(\alpha_0 + S_i, \beta_0 + N_i - S_i)$. The arms' posteriors stay independent because
+each reward carries information about one arm only. The algorithm is:
+
+1. For each arm $i$, draw $\tilde\theta_i \sim \Beta(\alpha_0 + S_i, \beta_0 + N_i - S_i)$.
+2. Pull $A_t = \argmax_i \tilde\theta_i$ and observe $X_t \in \set{0, 1}$.
+3. Add 1 to $N_{A_t}$ and $X_t$ to $S_{A_t}$.
+
+The state is two counts per arm, and a round costs $K$ Beta draws.
+
+<TsPosterior />
+
+## Probability matching
+
+Thompson sampling pulls each arm with exactly the posterior probability that it is the best arm. Let
+$A^* = \argmax_i \theta_i$ be the optimal arm, a random variable under the posterior because $\thetavec$ is. The draw
+$\tilde\thetavec_t$ has the same distribution given $H_{t-1}$ as $\thetavec$ itself. The chosen arm
+$A_t = \argmax_i \tilde\theta_{t,i}$ is the same function of $\tilde\thetavec_t$ as $A^*$ is of $\thetavec$. So for every
+arm $i$,
+
+$$
+\prob(A_t = i \mid H_{t-1}) = \prob(A^* = i \mid H_{t-1}).
+$$
+
+This property explains the regret. An arm with posterior probability $10^{-3}$ of being best is pulled in about one
+round in a thousand. For a suboptimal arm $i$ with $N_i$ pulls, the posterior probability that $\theta_i$ exceeds the
+optimal mean $\mu^*$ decays roughly like $e^{-N_i\operatorname{kl}(\mu_i, \mu^*)}$, the Chernoff rate for a Bernoulli mean,
+where $\operatorname{kl}$ is the Bernoulli KL divergence. The arm keeps being pulled until this probability is of order
+$1/t$, which happens at about $N_i = \log t / \operatorname{kl}(\mu_i, \mu^*)$ pulls: the Lai–Robbins rate.
+
+## Regret
+
+Agrawal and Goyal gave the first logarithmic regret bound for Beta–Bernoulli Thompson sampling
+<Cite id="agrawal2012" />. Kaufmann, Korda and Munos sharpened it to the optimal constant: for every $\varepsilon > 0$
+and every suboptimal arm $i$,
+
+$$
+\expect[N_i(T)] \le (1 + \varepsilon)\frac{\log T}{\operatorname{kl}(\mu_i, \mu^*)} + C(\varepsilon, \muvec),
+$$
+
+where $C$ does not depend on $T$ <Cite id="kaufmann2012" />. This matches the Lai–Robbins lower bound, so Thompson
+sampling is asymptotically optimal for Bernoulli arms, like KL-UCB. The guarantee is frequentist: it holds for every
+fixed vector of means $\muvec$, not only on average over the prior. Averaged over the prior, the Bayesian regret of
+Thompson sampling is $O(\sqrt{KT\log T})$ for any prior <Cite id="russo2018" />.
+
+## Gaussian rewards
+
+For rewards $X \sim \Gauss(\theta_i, \sigma^2)$ with known variance $\sigma^2$, the conjugate prior on $\theta_i$ is
+Gaussian. With prior $\Gauss(m_0, s_0^2)$ and $N_i$ rewards with mean $\hat\mu_i$, the posterior is Gaussian with
+precision and mean
+
+$$
+\frac{1}{s_i^2} = \frac{1}{s_0^2} + \frac{N_i}{\sigma^2}, \qquad
+m_i = s_i^2\paren{\frac{m_0}{s_0^2} + \frac{N_i\hat\mu_i}{\sigma^2}}.
+$$
+
+Precisions add, and the posterior mean is the precision-weighted average of the prior mean and the sample mean.
+Gaussian Thompson sampling draws $\tilde\theta_i \sim \Gauss(m_i, s_i^2)$ for each arm and pulls the largest. With a
+flat prior, $s_0 \to \infty$, the draw is $\Gauss(\hat\mu_i, \sigma^2/N_i)$: a random point in the arm's confidence
+interval, where UCB would take the top of the interval. Agrawal and Goyal use $\Gauss(\hat\mu_i, 1/(N_i + 1))$ for
+rewards in $[0, 1]$ and prove logarithmic regret for it too <Cite id="agrawal2012" />.
+
+<Derivation title="The Gaussian posterior">
+The log posterior is, up to a constant in $\theta$,
+
+$$
+-\frac{(\theta - m_0)^2}{2s_0^2} - \sum_{j=1}^{N}\frac{(x_j - \theta)^2}{2\sigma^2}
+= -\frac{\theta^2}{2}\paren{\frac{1}{s_0^2} + \frac{N}{\sigma^2}} + \theta\paren{\frac{m_0}{s_0^2} + \frac{N\hat\mu}{\sigma^2}}
++ \text{const}.
+$$
+
+A quadratic $-\frac{a}{2}\theta^2 + b\theta$ in the exponent is the log density of $\Gauss(b/a, 1/a)$ up to a constant,
+by completing the square. Here $a = 1/s_0^2 + N/\sigma^2$ and $b = m_0/s_0^2 + N\hat\mu/\sigma^2$, which gives the
+formulas above.
+</Derivation>
+
+## Simulation
+
+<BanditSimulator
+  algorithms={['ucb1', 'klucb', 'ts']}
+  offer={['egreedy', 'ucb1', 'klucb', 'ts']}
+  lowerBound
+  title="Thompson sampling against index policies"
+  caption="Bernoulli arms with draggable true means. Thompson sampling usually has the lowest regret of the three and tracks the Lai–Robbins curve, with no confidence level to choose. Its curves vary more from seed to seed than UCB1's, because its choices are random."
+/>
+
+## Practical properties
+
+- **Batches and delays.** The draws are random, so a batch of users served between posterior updates is spread over
+  the arms in proportion to their probability of being best. A deterministic index policy would give the whole batch
+  one arm. This makes Thompson sampling the common choice for web experiments with delayed feedback
+  <Cite id="scott2010" />.
+- **Any model with a posterior.** The algorithm needs only a way to sample from the posterior. The same rule works for
+  linear and logistic reward models, for arms with correlated means and for hierarchical priors. When exact sampling is
+  hard, approximate posteriors are used: a Laplace approximation, bootstrap resamples or an ensemble of models
+  <Cite id="russo2018" />.
+- **Propensities are implicit.** The probability of each action is $\prob(A^* = i \mid H_{t-1})$, which has no closed
+  form for $K > 2$. Off-policy evaluation of logged Thompson sampling data needs these probabilities, estimated by
+  drawing many samples per round and counting how often each arm wins.
+
+## Assumptions
+
+- The reward model and the prior are specified. The frequentist guarantees above assume Bernoulli arms with uniform
+  priors, or Gaussian models; with a badly misspecified model the posterior can concentrate on a wrong arm.
+- Rewards are stationary. The posterior of an arm only sharpens, so after a change the algorithm reacts slowly unless
+  old data are discounted.
+
+## Pitfalls
+
+- **A confident wrong prior slows learning.** A $\Beta(100, 900)$ prior on an arm whose true rate is 0.3 needs
+  hundreds of pulls to move. Priors should be weak or fitted to comparable past experiments.
+- **Probability matching is not always efficient.** When the goal is to identify the best arm rather than to earn
+  reward, Thompson sampling puts too little effort into the runner-up, whose measurement is what certifies the winner.
+  Top-two Thompson sampling corrects this.
+- **Many near-identical arms.** With 100 arms of almost equal quality, probability matching keeps spreading pulls over
+  all of them, because each remains plausibly best. The resulting regret is small per round but the allocation looks
+  indecisive.

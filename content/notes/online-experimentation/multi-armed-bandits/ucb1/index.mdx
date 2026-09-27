@@ -1,0 +1,207 @@
+---
+title: UCB1
+kind: concept
+summary: 'UCB1 pulls the arm with the highest upper confidence bound $\hat\mu_i + \sqrt{2\log t / N_i}$, where $\hat\mu_i$ is the arm''s sample mean after $N_i$ pulls. The bonus comes from Hoeffding''s inequality. Each suboptimal arm is pulled $O(\log T / \Delta_i^2)$ times, so the regret is $O(\sum_i \log T / \Delta_i)$.'
+tags: [bandits, experimentation, online-learning, concentration-inequalities]
+aliases: [upper confidence bound, UCB, UCB algorithm, optimism in the face of uncertainty, Hoeffding's inequality]
+requires: [multi-armed-bandit]
+related: [confidence-intervals, markov-and-chebyshev-inequalities]
+references: [auer2002, hoeffding1963, lattimore2020, bubeck2012, lai1985]
+status: draft
+updated: 2026-09-27
+---
+
+import { BanditSimulator } from '../_shared/BanditSimulator'
+import { UcbStepper } from './UcbStepper'
+
+<Definition>
+**UCB1** is a policy for a $K$-armed bandit with rewards in $[0, 1]$. It pulls each arm once. In every later round $t$
+it pulls
+
+$$
+A_t = \argmax_{i} \paren{\hat\mu_i(t-1) + \sqrt{\frac{2\log t}{N_i(t-1)}}},
+$$
+
+where $N_i(t-1)$ is the number of pulls of arm $i$ in the first $t - 1$ rounds and $\hat\mu_i(t-1)$ is the mean of
+their rewards. The bracket is arm $i$'s **index**, an upper confidence bound on its mean $\mu_i$
+<Cite id="auer2002" />.
+</Definition>
+
+## Intuition
+
+UCB1 follows the principle of **optimism in the face of uncertainty**: act as if each arm were as good as the data
+plausibly allow. The index of an arm is its sample mean plus a bonus that shrinks as the arm is pulled. An arm can have
+the highest index for two reasons. Either its sample mean is high, and pulling it exploits. Or it has few pulls, its
+bonus is large, and pulling it explores.
+
+Optimism corrects itself. If an arm is pulled because its index is high but its true mean is low, its rewards pull
+the sample mean down and its bonus shrinks, so its index falls below the best arm's. If the optimal arm has an unluckily
+low sample mean, its bonus keeps growing with $\log t$ while it is not pulled, so it is eventually tried again. A
+suboptimal arm stops being pulled once its interval is narrow enough to lie below the optimal mean, and it is pulled
+again only rarely, as $\log t$ grows.
+
+The exploration is directed. Unlike <NoteLink to="epsilon-greedy">ε-greedy</NoteLink>, UCB1 never spends a round on an
+arm that is confidently worse than another. And unlike <NoteLink to="explore-then-commit">explore-then-commit</NoteLink>,
+it needs neither the horizon $T$ nor the gaps.
+
+## Where the bonus comes from
+
+The bonus is the width of a one-sided confidence interval from Hoeffding's inequality <Cite id="hoeffding1963" />.
+Let $X_1, \dots, X_n$ be independent rewards in $[0, 1]$ with mean $\mu$, and let $\hat\mu_n$ be their average. Then
+for every $\varepsilon > 0$,
+
+$$
+\prob\paren{\mu \ge \hat\mu_n + \varepsilon} \le e^{-2n\varepsilon^2}
+\qquad\text{and}\qquad
+\prob\paren{\mu \le \hat\mu_n - \varepsilon} \le e^{-2n\varepsilon^2}.
+$$
+
+The proof is the Chernoff method. For any $\lambda > 0$, Markov's inequality applied to $e^{\lambda(\mu - \hat\mu_n)n}$
+gives
+
+$$
+\prob\paren{\mu - \hat\mu_n \ge \varepsilon} \le e^{-\lambda n\varepsilon}\,\expect\brack{e^{\lambda\sum_{j}(\mu - X_j)}}
+= e^{-\lambda n\varepsilon}\prod_{j=1}^{n}\expect\brack{e^{\lambda(\mu - X_j)}}.
+$$
+
+**Hoeffding's lemma** bounds each factor: a random variable with mean zero on an interval of length 1 has
+$\expect[e^{\lambda Y}] \le e^{\lambda^2/8}$. The bound becomes $\exp(-\lambda n\varepsilon + n\lambda^2/8)$. The
+exponent is smallest at $\lambda = 4\varepsilon$, where it equals $-2n\varepsilon^2$.
+
+To turn this into an interval, fix a failure probability $\delta$ and solve $e^{-2n\varepsilon^2} = \delta$ for
+$\varepsilon$:
+
+$$
+\varepsilon = \sqrt{\frac{\log(1/\delta)}{2n}}.
+$$
+
+With probability at least $1 - \delta$, $\mu < \hat\mu_n + \sqrt{\log(1/\delta)/(2n)}$. UCB1 takes $\delta = t^{-4}$,
+which makes the bonus $\sqrt{4\log t/(2n)} = \sqrt{2\log t/n}$. The confidence level rises with $t$: the longer the game,
+the more costly it is to write off the best arm by mistake, so the intervals must fail less often.
+
+<Derivation title="Hoeffding's lemma">
+Let $Y$ take values in $[a, b]$ with $\expect[Y] = 0$, and let $\psi(\lambda) = \log\expect[e^{\lambda Y}]$. Then
+$\psi(0) = 0$ and $\psi'(0) = \expect[Y] = 0$. The second derivative is the variance of $Y$ under the tilted law with
+density proportional to $e^{\lambda y}$. That law still lives on $[a, b]$, and any random variable on an interval of
+length $b - a$ has variance at most $(b - a)^2/4$, the variance of a fair coin on the two endpoints. So
+$\psi''(\lambda) \le (b - a)^2/4$ for every $\lambda$. Taylor's theorem with the remainder in Lagrange form gives
+$\psi(\lambda) = \psi(0) + \lambda\psi'(0) + \tfrac12\lambda^2\psi''(\xi) \le \lambda^2(b - a)^2/8$ for some $\xi$
+between $0$ and $\lambda$. For rewards in $[0, 1]$, $Y = \mu - X$ lies in an interval of length 1, which gives
+$\expect[e^{\lambda Y}] \le e^{\lambda^2/8}$.
+</Derivation>
+
+<UcbStepper />
+
+## Regret
+
+Write $\mu^*$ for the optimal mean, $\Delta_i = \mu^* - \mu_i$ for the gap of arm $i$, and
+$c_{t,s} = \sqrt{2\log t / s}$ for the bonus of an arm with $s$ pulls at round $t$. By the regret decomposition of the
+<NoteLink to="multi-armed-bandit">multi-armed bandit</NoteLink>, $R_T = \sum_i \Delta_i\expect[N_i(T)]$, so it
+suffices to bound the pulls of each suboptimal arm <Cite id="auer2002" />.
+
+**Step 1: a suboptimal pull needs one of three events.** Suppose arm $i$ is pulled at round $t$ when it has $s_i$
+pulls and the optimal arm has $s$ pulls, with sample means $\hat\mu_{i,s_i}$ and $\hat\mu^*_s$. Its index is at least
+the optimal arm's:
+
+$$
+\hat\mu^*_s + c_{t,s} \le \hat\mu_{i,s_i} + c_{t,s_i}.
+$$
+
+This inequality implies at least one of the following.
+
+1. The optimal arm's index is below its mean: $\hat\mu^*_s + c_{t,s} \le \mu^*$.
+2. Arm $i$'s sample mean is too high: $\hat\mu_{i,s_i} \ge \mu_i + c_{t,s_i}$.
+3. Arm $i$'s interval is still wide: $\mu^* < \mu_i + 2c_{t,s_i}$.
+
+If all three failed, then $\hat\mu^*_s + c_{t,s} > \mu^* \ge \mu_i + 2c_{t,s_i} > \hat\mu_{i,s_i} + c_{t,s_i}$,
+which contradicts the inequality.
+
+**Step 2: event 3 stops after enough pulls.** Event 3 says $c_{t,s_i} > \Delta_i/2$, that is
+$2\log t / s_i > \Delta_i^2/4$, that is $s_i < 8\log t / \Delta_i^2$. Once arm $i$ has
+$\ell = \lceil 8\log T / \Delta_i^2\rceil$ pulls, event 3 is impossible for every $t \le T$.
+
+**Step 3: events 1 and 2 are rare.** By Hoeffding's inequality with $\varepsilon = c_{t,s}$, each of events 1 and 2
+has probability at most $e^{-2s \cdot 2\log t / s} = t^{-4}$ for any fixed pull counts. At round $t$ the counts $s$ and
+$s_i$ are unknown, so take a union bound over all $t^2$ pairs of values. The probability that arm $i$ is pulled at
+round $t$ with at least $\ell$ pulls is at most $2t^2 \cdot t^{-4} = 2t^{-2}$.
+
+**Step 4: add up.** Arm $i$ is pulled at most $\ell$ times before it has $\ell$ pulls, and afterwards only on rounds
+where event 1 or 2 occurs:
+
+$$
+\expect[N_i(T)] \le \frac{8\log T}{\Delta_i^2} + 1 + \sum_{t=1}^{\infty}\frac{2}{t^2}
+= \frac{8\log T}{\Delta_i^2} + 1 + \frac{\pi^2}{3}.
+$$
+
+Multiplying by $\Delta_i$ and summing gives the regret bound of Auer, Cesa-Bianchi and Fischer:
+
+$$
+R_T \le \sum_{i:\Delta_i > 0}\frac{8\log T}{\Delta_i} + \paren{1 + \frac{\pi^2}{3}}\sum_{i=1}^{K}\Delta_i.
+$$
+
+The bound is logarithmic in $T$ and holds at every $T$, so UCB1 is an anytime algorithm. The constant 8 is loose. A
+finer analysis of the same index shows $\expect[N_i(T)] \le (2 + o(1))\log T / \Delta_i^2$ <Cite id="lattimore2020" />.
+The figure shows this rate: a suboptimal arm's count follows $c\log t / \Delta_i^2$ with $c = 2$, the count at which
+its bonus equals its gap.
+
+<Derivation title="A bound that does not depend on the gaps">
+The gap-dependent bound is large when some $\Delta_i$ is tiny, but an arm with a tiny gap costs little per pull. Split
+the arms at a threshold $\delta > 0$. Arms with $\Delta_i < \delta$ cost less than $\delta$ per round, so at most
+$T\delta$ in total. Each arm with $\Delta_i \ge \delta$ costs at most
+$\Delta_i\expect[N_i(T)] \le 8\log T/\Delta_i + O(1) \le 8\log T/\delta + O(1)$. So
+
+$$
+R_T \le T\delta + \frac{8K\log T}{\delta} + O(K).
+$$
+
+The right side is smallest at $\delta = \sqrt{8K\log T / T}$, which gives $R_T \le 2\sqrt{8KT\log T} + O(K)$. This is
+within a factor $\sqrt{\log T}$ of the minimax lower bound of order $\sqrt{KT}$ <Cite id="bubeck2012" />.
+</Derivation>
+
+## Comparison with the lower bound
+
+For Bernoulli arms the Lai–Robbins bound says every consistent policy pulls arm $i$ at least
+$(1 + o(1))\log T / \KL(\mu_i \,\|\, \mu^*)$ times, where $\KL(p \,\|\, q)$ is the KL divergence between Bernoulli
+distributions with means $p$ and $q$ <Cite id="lai1985" />. Pinsker's inequality gives
+$\KL(\mu_i \,\|\, \mu^*) \ge 2\Delta_i^2$, so the lower bound is at most $\log T / (2\Delta_i^2)$. UCB1 pulls about
+$2\log T / \Delta_i^2$ times, at least four times the lower bound. The gap is largest when the means are near 0 or 1,
+where Bernoulli rewards have small variance and Hoeffding's inequality, which assumes the worst variance, is loose.
+For means $0.05$ and $0.1$, $\KL = 0.0167$ while $2\Delta^2 = 0.005$. KL-UCB replaces the Hoeffding interval with a
+KL interval and attains the Lai–Robbins constant.
+
+<BanditSimulator
+  algorithms={['ucb1', 'klucb', 'ts']}
+  offer={['egreedy', 'edecay', 'ucb1', 'klucb', 'ts']}
+  lowerBound
+  title="UCB1 against the lower bound"
+  caption="Bernoulli arms with draggable true means. UCB1's regret grows like log t but sits well above the Lai–Robbins curve, because its Hoeffding intervals are wider than the data require. Drag the arms towards 0 or 1 and the difference to KL-UCB and Thompson sampling widens."
+/>
+
+## Variants
+
+- **General confidence level.** The index $\hat\mu_i + \sqrt{2\log f(t) / N_i}$ with $f(t) = 1 + t\log^2 t$ has the
+  asymptotic constant $2/\Delta_i^2$ exactly <Cite id="lattimore2020" />.
+- **Sub-Gaussian rewards.** For rewards that are $\sigma$-sub-Gaussian, not bounded, the bonus becomes
+  $\sigma\sqrt{2\log f(t) / N_i}$ with the same analysis.
+- **Variance-aware bonuses.** Replacing the worst-case variance $1/4$ by an empirical variance gives tighter intervals
+  for low-variance arms.
+- **MOSS.** A bonus of $\sqrt{\max(0, \log(T/(KN_i))) / N_i}$ removes the $\sqrt{\log T}$ factor from the worst-case
+  bound, at the cost of needing $T$ <Cite id="bubeck2012" />.
+- **KL-UCB.** The Hoeffding interval is replaced by the set of means within a KL-divergence budget of the sample mean.
+
+## Assumptions
+
+- Rewards lie in $[0, 1]$ or another known bounded range; the bonus must be rescaled by the range width otherwise.
+- The rewards of each arm are independent and identically distributed over time.
+- Feedback is immediate. With delayed feedback the index is computed from stale counts, and several rounds may pull
+  the same arm before its bonus shrinks.
+
+## Pitfalls
+
+- **The bonus assumes worst-case variance.** For conversion rates of a few percent the Hoeffding interval is several
+  times wider than an exact binomial interval, and UCB1 explores far more than needed.
+- **Deterministic choices.** Given the same history, UCB1 always pulls the same arm. In a batched deployment, where
+  thousands of users are served between updates, every user in the batch gets the same arm. Randomised policies such
+  as Thompson sampling spread a batch across arms.
+- **The rewards must be scaled.** Using revenue in euros with the bonus $\sqrt{2\log t / N_i}$ makes the bonus
+  negligible, and UCB1 becomes nearly greedy.

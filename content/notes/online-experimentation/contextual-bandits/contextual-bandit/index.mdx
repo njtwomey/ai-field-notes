@@ -1,0 +1,120 @@
+---
+title: Contextual bandit
+kind: concept
+summary: 'A contextual bandit shows the learner a context $x_t$ before each choice of arm $a_t$, and reveals only that arm''s reward. The goal is a policy $\pi(x)$ with high value $V(\pi) = \expect[\mu(x, \pi(x))]$; regret is measured against the best policy, which can beat every single arm.'
+tags: [bandits, experimentation, online-learning, personalisation, worked-example]
+aliases: [contextual multi-armed bandit, associative bandit, bandit with side information, personalised bandit, policy value, logged bandit feedback]
+requires: [multi-armed-bandit]
+related: [logistic-regression, cost-sensitive-learning]
+references: [li2010, li2011, auer2002b, lattimore2020, chu2011]
+status: draft
+updated: 2026-09-27
+---
+
+import { ContextValue } from './ContextValue'
+
+<Definition>
+A **contextual bandit** with $K$ arms is played over rounds $t = 1, \dots, T$. In each round a context $x_t \in \Xcal$
+is drawn from a distribution $D$ and shown to the learner. The learner chooses an arm $a_t \in \set{1, \dots, K}$ and
+observes a reward $r_t$ with mean $\mu(x_t, a_t)$, and nothing about the other arms. A **policy** is a map
+$\pi : \Xcal \to \set{1, \dots, K}$, or a distribution over arms given $x$, and its **value** is
+$V(\pi) = \expect_{x \sim D}[\mu(x, \pi(x))]$. For a class $\Pi$ of policies, the regret is
+$R_T = T\max_{\pi \in \Pi}V(\pi) - \expect[\sum_t r_t]$ <Cite id="lattimore2020" />.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="multi-armed-bandit">multi-armed bandit</NoteLink> looks for one arm that is best on average. Often
+the best arm depends on who is asking: the headline that one reader clicks is not the one another reader clicks. A
+contextual bandit sees a description of the situation first, such as the user's features, the time or the device, and
+learns which arm is best for each description.
+
+The feedback is still bandit feedback: the learner sees the reward of the arm it chose, for the context it saw. It
+does not learn what the other arms would have paid for this user. This separates a contextual bandit from supervised
+learning, where the correct label is revealed, and from reinforcement learning, where actions also change future
+contexts.
+
+## What the context is worth
+
+The best policy $\pi^*(x) = \argmax_a \mu(x, a)$ picks the best arm separately for each context. Its value is at least
+that of the best single arm. For any arm $a$ and any context $x$, $\max_b\mu(x, b) \ge \mu(x, a)$. Taking expectations
+over $x$ gives $\expect[\max_b\mu(x, b)] \ge \expect[\mu(x, a)]$ for every $a$, and so
+
+$$
+V(\pi^*) = \expect_x\brack{\max_a \mu(x, a)} \ge \max_a \expect_x[\mu(x, a)].
+$$
+
+The difference is lost in every round by a learner that ignores the context, however long it runs. The two sides are
+equal exactly when one arm is best for almost every context.
+
+**Example.** Take $x \sim \Unif(0, 1)$ and three arms with $\mu(x, 1) = 0.7 - 0.5x$, $\mu(x, 2) = 0.35 + 0.3x$ and
+$\mu(x, 3) = 0.15 + 0.4x$. The averages are $0.45$, $0.5$ and $0.35$, so the best single arm is arm 2, with value
+$0.5$. Arms 1 and 2 cross at $x = 0.4375$, and arm 3 is never the best. The best policy plays arm 1 below the crossing
+and arm 2 above it, with value
+
+$$
+\int_0^{0.4375}(0.7 - 0.5x)\,dx + \int_{0.4375}^{1}(0.35 + 0.3x)\,dx = 0.5766.
+$$
+
+A context-free bandit forgoes $0.0766$ per round, 15% of the best single arm's value.
+
+<ContextValue />
+
+## Approaches
+
+**One bandit per context.** With finitely many contexts, run a separate $K$-armed bandit for each. If context $x$
+occurs $T_x$ times and each bandit has regret at most $c\sqrt{KT_x}$, the total regret is at most, by the
+Cauchy–Schwarz inequality,
+
+$$
+\sum_{x \in \Xcal}c\sqrt{KT_x} \le c\sqrt{K}\sqrt{\abs{\Xcal}\sum_x T_x} = c\sqrt{K\abs{\Xcal}T}.
+$$
+
+The bound grows with the number of contexts, because nothing learned about one context transfers to another. With
+continuous or high-dimensional contexts this is useless.
+
+**Reward models.** Assume $\mu(x, a)$ belongs to a model class and share statistical strength across contexts. The
+linear model $\mu(x, a) = \xvec_{a}\transpose\thetavec$, where $\xvec_a$ is a feature vector for the pair of context
+and arm, gives <NoteLink to="linucb">LinUCB</NoteLink> and <NoteLink to="linear-thompson-sampling">linear Thompson
+sampling</NoteLink>, with regret of order $d\sqrt{T}$ up to logarithms in the feature dimension $d$, independent of
+the number of contexts <Cite id="chu2011" />. Generalised linear models such as
+<NoteLink to="logistic-regression">logistic regression</NoteLink> and neural networks extend the same idea with
+approximate confidence sets or posteriors.
+
+**Policy classes.** Without a reward model, compete with the best policy in a class $\Pi$. EXP4 runs exponential weights
+over the policies and has regret $O(\sqrt{KT\log\abs{\Pi}})$ even against adversarial rewards
+<Cite id="auer2002b" />. It needs a weight per policy, so for large classes practical algorithms instead call a
+supervised learner, trained on importance-weighted data as in
+<NoteLink to="cost-sensitive-learning">cost-sensitive classification</NoteLink>, to find good policies.
+
+**ε-greedy with a regression model.** Fit a model of $\mu(x, a)$ on the data so far, play its best arm, and explore
+uniformly with probability $\varepsilon$. It has no strong guarantee but is simple, and its known exploration
+probabilities make the logged data easy to reuse.
+
+## News recommendation
+
+Li, Chu, Langford and Schapire used a contextual bandit to choose which news article to feature on the Yahoo! front
+page. The context was the user's features and the articles' features; the reward was a click. LinUCB raised the click
+rate by 12.5% over a context-free bandit <Cite id="li2010" />. The same group showed how to evaluate such policies
+offline without bias, by replaying logged data collected with uniformly random choices and keeping only the rounds where
+the evaluated policy agrees with the log <Cite id="li2011" />. Logs and their reuse are the subject of
+<NoteLink to="logging-policies-and-propensities">logging policies</NoteLink> and
+<NoteLink to="off-policy-evaluation">off-policy evaluation</NoteLink>.
+
+## Assumptions
+
+- Contexts are drawn independently of the learner's past actions. If showing an arm changes who arrives next, the
+  problem is reinforcement learning.
+- The reward depends on the context and the chosen arm only. Interference between users, such as a recommendation that
+  changes what others see, breaks this.
+- Model-based methods assume the model class contains the true mean reward function, or nearly so. A misspecified
+  linear model can have regret linear in $T$.
+
+## Pitfalls
+
+- **Features that depend on the action.** A context feature recorded after the choice, or computed from it, leaks the
+  outcome of the choice into the policy and biases every estimate.
+- **Unlogged probabilities.** The data a contextual bandit collects are shaped by its own choices. Without the
+  probability of each chosen arm, later analysis cannot correct for this.
+- **Too many features, too little data.** Exploration cost grows with the feature dimension. A linear bandit with
+  1,000 sparse features explores for a long time before its confidence sets are useful.

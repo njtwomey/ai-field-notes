@@ -1,0 +1,193 @@
+---
+title: Off-policy evaluation
+kind: concept
+summary: 'Off-policy evaluation estimates a target policy''s value from logs of a logging policy $\pi_0$. IPS reweights each reward by $\pi(a \mid x)/\pi_0(a \mid x)$ and is unbiased; SNIPS normalises the weights; the direct method models rewards; doubly robust combines both.'
+tags: [bandits, causal-inference, importance-sampling, experimentation, worked-example]
+aliases: [OPE, counterfactual evaluation, offline policy evaluation, inverse propensity scoring, IPS, inverse probability weighting, importance sampling estimator, self-normalised IPS, SNIPS, direct method, doubly robust estimator, Horvitz–Thompson estimator, replay method]
+requires: [contextual-bandit, logging-policies-and-propensities, expectation]
+related: [reweighting-biased-samples, law-of-total-expectation]
+references: [horvitz1952, dudik2011, swaminathan2015b, li2011, bottou2013]
+status: draft
+updated: 2026-09-27
+---
+
+import { OpeVariance } from './OpeVariance'
+
+<Definition>
+A log $\Dcal = \set{(x_i, a_i, r_i, p_i)}_{i=1}^{n}$ records, for each round, a context $x_i \sim D$, the arm
+$a_i \sim \pi_0(\cdot \mid x_i)$ chosen by a **logging policy** $\pi_0$, the reward $r_i$ with mean $\mu(x_i, a_i)$, and
+the **propensity** $p_i = \pi_0(a_i \mid x_i)$. **Off-policy evaluation** estimates the value of a different **target
+policy** $\pi$,
+
+$$
+V(\pi) = \expect_{x \sim D}\brack{\sum_a \pi(a \mid x)\,\mu(x, a)},
+$$
+
+from $\Dcal$ alone, without deploying $\pi$ <Cite id="dudik2011" />.
+</Definition>
+
+## Why it is hard
+
+A log answers questions about the policy that produced it. Its average reward estimates $V(\pi_0)$, not $V(\pi)$. For
+rounds in which $\pi$ would have chosen a different arm, the log holds no reward for that arm: the outcome is
+counterfactual. And the rounds in which $\pi$ agrees with $\pi_0$ are not a random sample of all rounds, because
+$\pi_0$ chose its arms depending on the context.
+
+Off-policy evaluation makes a log reusable. A team can compare many candidate policies offline and deploy only the
+promising ones, instead of running an <NoteLink to="ab-test">A/B test</NoteLink> for each. It needs the logging policy
+to have been randomised, and its probabilities recorded, as described in
+<NoteLink to="logging-policies-and-propensities">logging policies and propensities</NoteLink>.
+
+## Inverse propensity scoring
+
+The **inverse propensity scoring** (IPS) estimator reweights each logged reward by how much more, or less, often the
+target policy would have chosen the logged arm:
+
+$$
+\hat V_{\text{IPS}} = \frac1n\sum_{i=1}^{n}w_i r_i, \qquad w_i = \frac{\pi(a_i \mid x_i)}{p_i}.
+$$
+
+It is the Horvitz–Thompson estimator of survey sampling applied to actions <Cite id="horvitz1952" />.
+
+**Unbiasedness.** Assume **overlap**: $\pi_0(a \mid x) > 0$ whenever $\pi(a \mid x) > 0$. Condition on the context $x$
+and average over the logged arm and reward. The arm $a$ is drawn from $\pi_0(\cdot \mid x)$ and the reward has mean
+$\mu(x, a)$, so
+
+$$
+\expect\brack{\frac{\pi(a \mid x)}{\pi_0(a \mid x)}r \,\Big|\, x}
+= \sum_a \pi_0(a \mid x)\,\frac{\pi(a \mid x)}{\pi_0(a \mid x)}\,\mu(x, a)
+= \sum_a \pi(a \mid x)\,\mu(x, a).
+$$
+
+The logging probabilities cancel. Averaging over $x \sim D$ by the
+<NoteLink to="law-of-total-expectation">law of total expectation</NoteLink> gives $\expect[w r] = V(\pi)$, and the mean
+of $n$ independent terms has the same expectation. Without overlap, the sum over $a$ skips the arms that $\pi_0$ never
+plays, and the estimator is biased by exactly the value $\pi$ gets from those arms.
+
+**Variance.** The terms are independent, so $\var(\hat V_{\text{IPS}}) = \var(w r)/n$. For a deterministic target
+policy the weight is $1/\pi_0(\pi(x) \mid x)$ when the logged arm matches and 0 otherwise, and the second moment is
+
+$$
+\expect[w^2r^2] = \expect_x\brack{\frac{\expect[r^2 \mid x, \pi(x)]}{\pi_0(\pi(x) \mid x)}}.
+$$
+
+It grows like the inverse of the logging probability of the target's arm. When the logging policy rarely does what the
+target would do, a few rows with huge weights dominate the estimate.
+
+## Self-normalised IPS
+
+The weights have expectation 1: given $x$, $\expect[w \mid x] = \sum_a \pi_0(a \mid x)\,\pi(a \mid x)/\pi_0(a \mid x) = \sum_a \pi(a \mid x) = 1$.
+In a finite sample their average $\bar w = \frac1n\sum_i w_i$ is not 1, and IPS inherits its fluctuations. The
+**self-normalised** estimator divides by it <Cite id="swaminathan2015b" />:
+
+$$
+\hat V_{\text{SNIPS}} = \frac{\sum_i w_i r_i}{\sum_i w_i}.
+$$
+
+SNIPS is a weighted average of the observed rewards, so it always lies within their range; IPS can exceed the largest
+possible reward. It is biased, by an amount of order $1/n$, because it is a ratio of two random sums, but it is
+consistent, and its variance is usually much smaller. The average weight $\bar w$ is also a diagnostic: far from 1, it
+signals too little overlap or wrong propensities.
+
+## The direct method
+
+The **direct method** (DM) fits a reward model $\hat\mu(x, a)$ on the log, by regression of $r_i$ on $(x_i, a_i)$, and
+averages its predictions for the target's actions:
+
+$$
+\hat V_{\text{DM}} = \frac1n\sum_{i=1}^{n}\sum_a \pi(a \mid x_i)\,\hat\mu(x_i, a).
+$$
+
+It uses no propensities and has low variance. Its bias is the error of the model on the target's actions,
+$\expect_x[\sum_a\pi(a \mid x)(\hat\mu(x, a) - \mu(x, a))]$. The model is fitted mostly on the logging policy's
+actions, so it is least accurate exactly where the target differs from the log, and that bias does not shrink as $n$
+grows.
+
+## Doubly robust
+
+The **doubly robust** (DR) estimator starts from the direct method and corrects it with the importance-weighted
+residuals of the model <Cite id="dudik2011" />:
+
+$$
+\hat V_{\text{DR}} = \frac1n\sum_{i=1}^{n}\brack{\sum_a \pi(a \mid x_i)\,\hat\mu(x_i, a) + w_i\paren{r_i - \hat\mu(x_i, a_i)}}.
+$$
+
+It is unbiased if either the propensities or the reward model is correct.
+
+**Correct propensities, any model.** The correction term is IPS applied to the residual $r - \hat\mu(x, a)$. By the
+same calculation as for IPS, its conditional expectation given $x$ is
+$\sum_a\pi(a \mid x)(\mu(x, a) - \hat\mu(x, a))$. Adding the model term $\sum_a\pi(a \mid x)\hat\mu(x, a)$ leaves
+$\sum_a\pi(a \mid x)\mu(x, a)$, whose expectation over $x$ is $V(\pi)$. The model's errors cancel.
+
+**Correct model, any weights.** If $\hat\mu = \mu$, then given $x$ and $a$ the residual $r - \mu(x, a)$ has mean zero,
+whatever weight multiplies it. The correction has expectation zero, and the model term is exactly the direct method
+with a correct model, which is unbiased.
+
+The variance of DR is that of IPS with the reward replaced by the residual. A good model makes the residuals small, and
+DR's variance far below IPS's; a useless model, $\hat\mu = 0$, reduces DR to IPS.
+
+<OpeVariance />
+
+## Worked example
+
+A site shows one of two layouts, arm 1 or arm 2, to two types of user, A and B. The logging policy shows arm 1 to type
+A users with probability 0.8 and to type B users with probability 0.5. The target policy shows arm 2 to type A and arm
+1 to type B. Six rows were logged, with reward 1 for a click:
+
+| row | type $x$ | arm $a$ | propensity $p$ | reward $r$ | target arm $\pi(x)$ | weight $w$ |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | A | 1 | 0.8 | 1 | 2 | 0 |
+| 2 | A | 2 | 0.2 | 1 | 2 | 5 |
+| 3 | A | 1 | 0.8 | 0 | 2 | 0 |
+| 4 | B | 1 | 0.5 | 1 | 1 | 2 |
+| 5 | B | 2 | 0.5 | 0 | 1 | 0 |
+| 6 | B | 1 | 0.5 | 0 | 1 | 2 |
+
+The weight is $1/p$ where the logged arm matches the target's arm and 0 elsewhere.
+
+- **IPS.** $\hat V_{\text{IPS}} = (5 \cdot 1 + 2 \cdot 1 + 2 \cdot 0)/6 = 7/6 = 1.167$. The estimate of a click rate
+  exceeds 1, because row 2, a rare action that happened to succeed, carries weight 5.
+- **SNIPS.** The weights sum to 9, so $\hat V_{\text{SNIPS}} = 7/9 = 0.778$. The average weight is $9/6 = 1.5$, far
+  from its expectation of 1, which warns that six rows are too few.
+- **Direct method.** Suppose a reward model, fitted on other data, predicts
+  $\hat\mu(A, 1) = 0.5$, $\hat\mu(A, 2) = 0.6$, $\hat\mu(B, 1) = 0.5$ and $\hat\mu(B, 2) = 0.4$. The target plays
+  arm 2 for the three type A rows and arm 1 for the three type B rows, so
+  $\hat V_{\text{DM}} = (3 \cdot 0.6 + 3 \cdot 0.5)/6 = 0.55$.
+- **Doubly robust.** The corrections $w_i(r_i - \hat\mu(x_i, a_i))$ are nonzero only on the matched rows:
+  $5(1 - 0.6) = 2$ for row 2, $2(1 - 0.5) = 1$ for row 4 and $2(0 - 0.5) = -1$ for row 6. Their average is
+  $2/6 = 0.333$, so $\hat V_{\text{DR}} = 0.55 + 0.333 = 0.883$.
+
+The four estimates range from 0.55 to 1.17. With six rows that is expected: the example shows the arithmetic, not a
+reliable answer. The spread shows how each estimator reacts to the one lucky, heavily weighted row. IPS takes it at face
+value; SNIPS dilutes it by the total weight; DM ignores it; DR adds its surprise relative to the model.
+
+## Variants
+
+- **Replay.** With a uniformly random logging policy and a deterministic target, keep only the rows where the target
+  agrees with the log and average their rewards. This is SNIPS with equal weights. Li et al. used it to evaluate news
+  recommendation policies offline <Cite id="li2011" />.
+- **Clipping.** Replace $w_i$ by $\min(w_i, M)$. The variance falls and a downward bias appears, of the size of the
+  value the target gets from rows with weights above $M$ <Cite id="bottou2013" />.
+- **Confidence intervals.** The terms of IPS and DR are independent, so a normal interval
+  $\hat V \pm 1.96\,\hat s/\sqrt{n}$, with $\hat s$ the sample standard deviation of the terms, is standard. With heavy
+  weights it undercovers; the effective sample size $(\sum_i w_i)^2/\sum_i w_i^2$ should be checked first.
+
+## Assumptions
+
+- **Overlap.** Every action the target can take has positive logging probability in every context where the target
+  takes it.
+- **Correct propensities.** IPS, SNIPS and the propensity part of DR need the true logging probabilities, recorded at
+  decision time.
+- **No unrecorded confounders.** The logging policy's choice depends only on the recorded context. If it also used
+  information not in $x$, the propensities computed from $x$ are wrong.
+- **Stationarity.** The reward distribution when the target is deployed is the one seen in the log.
+
+## Pitfalls
+
+- **Deterministic logging.** A logging policy that always picks its favourite arm gives weight 0 or $\infty$. Nothing
+  can be learned about other arms, whatever the estimator.
+- **Reusing the log to fit the model.** Fitting $\hat\mu$ on the same rows used for the DR correction adds a small
+  bias. Cross-fitting, where each row's residual uses a model fitted on the other rows, removes it.
+- **Reporting IPS without diagnostics.** A single row with weight 1,000 can move the estimate by more than the
+  differences between the policies being compared. Report the average weight, the effective sample size and the
+  largest weights.

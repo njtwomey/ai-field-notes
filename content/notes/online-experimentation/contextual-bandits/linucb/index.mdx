@@ -1,0 +1,185 @@
+---
+title: LinUCB
+kind: concept
+summary: 'LinUCB assumes an arm''s expected reward is linear in its features, $\xvec\transpose\thetavec$. It fits $\thetavec$ by ridge regression and pulls the arm maximising $\xvec\transpose\hat\thetavec + \alpha\norm{\xvec}_{\Vmat^{-1}}$, the largest reward over a confidence ellipsoid for $\thetavec$. Its regret is $\tilde O(d\sqrt{T})$.'
+tags: [bandits, experimentation, online-learning, linear-models, personalisation]
+aliases: [LinUCB, linear UCB, OFUL, linear bandit, stochastic linear bandit, confidence ellipsoid, elliptical potential lemma, disjoint LinUCB, hybrid LinUCB]
+requires: [contextual-bandit, ucb1, ridge-regression]
+related: [linear-thompson-sampling, positive-definite-matrices, matrix-inverse, bayesian-linear-regression]
+references: [li2010, chu2011, abbasi2011, lattimore2020]
+status: draft
+updated: 2026-09-27
+---
+
+import { LinearBanditPlane } from '../_shared/LinearBanditPlane'
+
+<Definition>
+In a **linear bandit**, each round offers arms with feature vectors $\xvec_{t,1}, \dots, \xvec_{t,K} \in \reals^d$, and
+the reward of arm $a$ is $r_t = \xvec_{t,a}\transpose\thetavec^* + \eta_t$ for an unknown $\thetavec^* \in \reals^d$ and
+zero-mean $\sigma$-sub-Gaussian noise $\eta_t$. **LinUCB** keeps $\Vmat_t = \lambda\I + \sum_{s \le t}\xvec_s\xvec_s\transpose$
+and $\bvec_t = \sum_{s \le t}r_s\xvec_s$ over the pulled arms' features $\xvec_s$, estimates
+$\hat\thetavec_t = \Vmat_t^{-1}\bvec_t$ and pulls
+
+$$
+a_{t+1} = \argmax_a\paren{\xvec_{t+1,a}\transpose\hat\thetavec_t + \alpha\norm{\xvec_{t+1,a}}_{\Vmat_t^{-1}}},
+\qquad \norm{\xvec}_{\Vmat^{-1}} = \sqrt{\xvec\transpose\Vmat^{-1}\xvec},
+$$
+
+for a confidence radius $\alpha > 0$ <Cite id="li2010" /> <Cite id="abbasi2011" />.
+</Definition>
+
+## Intuition
+
+<NoteLink to="ucb1">UCB1</NoteLink> keeps a separate interval for each arm. In a linear bandit the arms share one
+unknown vector $\thetavec^*$, so a pull of one arm teaches something about every arm whose features point in a similar
+direction. LinUCB therefore keeps one confidence set, for $\thetavec^*$ itself, and derives every arm's optimistic
+reward from it.
+
+The confidence set is an ellipsoid centred on the ridge estimate. Its shape records which directions of feature space
+have been explored. Pulling arms along one direction shrinks the ellipsoid along that direction and leaves the others
+wide. An arm pointing along a well-explored direction gets a small bonus; an arm pointing somewhere new gets a large
+one. The number of arms can be large or change every round, because the cost of learning depends on the dimension $d$,
+not on $K$.
+
+## The ridge estimate
+
+The estimate $\hat\thetavec_t$ minimises the penalised squared error
+$\sum_{s \le t}(r_s - \xvec_s\transpose\thetavec)^2 + \lambda\norm{\thetavec}^2$. Setting the gradient
+$-2\sum_s \xvec_s(r_s - \xvec_s\transpose\thetavec) + 2\lambda\thetavec$ to zero gives
+$(\lambda\I + \sum_s\xvec_s\xvec_s\transpose)\thetavec = \sum_s r_s\xvec_s$, that is $\Vmat_t\hat\thetavec_t = \bvec_t$.
+The penalty $\lambda > 0$ makes $\Vmat_t$ invertible before $d$ independent directions have been pulled. See
+<NoteLink to="ridge-regression">ridge regression</NoteLink>.
+
+## The optimistic index
+
+Suppose $\thetavec^*$ lies, with high probability, in the ellipsoid
+
+$$
+\Ccal_t = \set{\thetavec : \norm{\thetavec - \hat\thetavec_t}_{\Vmat_t} \le \beta},
+\qquad \norm{\uvec}_{\Vmat} = \sqrt{\uvec\transpose\Vmat\uvec}.
+$$
+
+Optimism means scoring each arm by the best reward any plausible parameter could give it, $\max_{\thetavec \in \Ccal_t}\xvec\transpose\thetavec$.
+Write $\xvec\transpose\thetavec = \xvec\transpose\hat\thetavec_t + \xvec\transpose(\thetavec - \hat\thetavec_t)$. The
+second term is an inner product that splits between the two norms. With the symmetric square root $\Vmat^{1/2}$,
+
+$$
+\xvec\transpose(\thetavec - \hat\thetavec_t) = (\Vmat_t^{-1/2}\xvec)\transpose(\Vmat_t^{1/2}(\thetavec - \hat\thetavec_t))
+\le \norm{\Vmat_t^{-1/2}\xvec}\,\norm{\Vmat_t^{1/2}(\thetavec - \hat\thetavec_t)}
+= \norm{\xvec}_{\Vmat_t^{-1}}\norm{\thetavec - \hat\thetavec_t}_{\Vmat_t}
+$$
+
+by the Cauchy–Schwarz inequality. Inside $\Ccal_t$ the last factor is at most $\beta$. Equality holds at
+$\thetavec = \hat\thetavec_t + \beta\Vmat_t^{-1}\xvec / \norm{\xvec}_{\Vmat_t^{-1}}$, which lies on the boundary of
+$\Ccal_t$. So
+
+$$
+\max_{\thetavec \in \Ccal_t}\xvec\transpose\thetavec = \xvec\transpose\hat\thetavec_t + \beta\norm{\xvec}_{\Vmat_t^{-1}}.
+$$
+
+This is the LinUCB index with $\alpha = \beta$. The first term exploits the estimate; the second is the ellipsoid's
+half-width in the direction $\xvec$, large for directions not yet explored.
+
+<LinearBanditPlane policy="linucb" />
+
+## The size of the ellipsoid
+
+The radius $\beta$ comes from the error of the ridge estimate. Substituting $r_s = \xvec_s\transpose\thetavec^* + \eta_s$
+into $\bvec_t$ gives $\bvec_t = (\Vmat_t - \lambda\I)\thetavec^* + \sum_s\eta_s\xvec_s$, so
+
+$$
+\hat\thetavec_t - \thetavec^* = \Vmat_t^{-1}\sum_{s \le t}\eta_s\xvec_s - \lambda\Vmat_t^{-1}\thetavec^*.
+$$
+
+Fix a direction $\xvec$ and suppose, for now, that the pulled features were chosen in advance. The error along $\xvec$
+has two parts.
+
+- **Noise.** $\sum_s(\xvec\transpose\Vmat_t^{-1}\xvec_s)\eta_s$ is a weighted sum of independent $\sigma$-sub-Gaussian
+  terms. Its variance proxy is $\sigma^2\sum_s(\xvec\transpose\Vmat_t^{-1}\xvec_s)^2 =
+  \sigma^2\xvec\transpose\Vmat_t^{-1}(\sum_s\xvec_s\xvec_s\transpose)\Vmat_t^{-1}\xvec \le \sigma^2\norm{\xvec}_{\Vmat_t^{-1}}^2$,
+  because $\sum_s\xvec_s\xvec_s\transpose \preceq \Vmat_t$. With probability $1 - \delta$ it is at most
+  $\sigma\sqrt{2\log(2/\delta)}\,\norm{\xvec}_{\Vmat_t^{-1}}$.
+- **Bias.** By Cauchy–Schwarz as above, $\abs{\lambda\xvec\transpose\Vmat_t^{-1}\thetavec^*} \le
+  \lambda\norm{\xvec}_{\Vmat_t^{-1}}\norm{\thetavec^*}_{\Vmat_t^{-1}} \le \sqrt\lambda\,S\norm{\xvec}_{\Vmat_t^{-1}}$ when
+  $\norm{\thetavec^*} \le S$, since $\Vmat_t \succeq \lambda\I$.
+
+Both parts are proportional to $\norm{\xvec}_{\Vmat_t^{-1}}$, which is why the confidence set is an ellipsoid shaped by
+$\Vmat_t$, with $\alpha = \sigma\sqrt{2\log(2/\delta)} + \sqrt\lambda S$. For rewards in $[0, 1]$ and $\lambda = 1$, Li et
+al. used $\alpha = 1 + \sqrt{\log(2/\delta)/2}$ <Cite id="li2010" />.
+
+In a bandit the features are not chosen in advance: $\xvec_s$ depends on past noise through the policy, and the
+fixed-design argument fails. Abbasi-Yadkori, Pál and Szepesvári proved a self-normalised bound for martingales that
+holds for adaptively chosen features, at all times simultaneously <Cite id="abbasi2011" />:
+
+$$
+\norm{\hat\thetavec_t - \thetavec^*}_{\Vmat_t} \le \sigma\sqrt{2\log\frac1\delta + \log\frac{\det\Vmat_t}{\lambda^d}} + \sqrt\lambda S.
+$$
+
+The price of adaptivity is the $\log\det$ term, of order $d\log t$, so $\beta_t$ grows like $\sqrt{d\log t}$.
+
+## Regret
+
+Let $\xvec_t$ be the pulled features and $\xvec_t^*$ those of the best arm in round $t$. When $\thetavec^* \in \Ccal_{t-1}$,
+optimism gives $(\xvec_t^*)\transpose\thetavec^* \le \mathrm{UCB}(\xvec_t^*) \le \mathrm{UCB}(\xvec_t)$, and the index
+exceeds the true reward of the pulled arm by at most twice the half-width. So the regret of round $t$ is at most
+$2\beta_t\norm{\xvec_t}_{\Vmat_{t-1}^{-1}}$. Summing with the Cauchy–Schwarz inequality,
+
+$$
+R_T \le 2\beta_T\sum_{t=1}^{T}\norm{\xvec_t}_{\Vmat_{t-1}^{-1}} \le 2\beta_T\sqrt{T\sum_{t=1}^{T}\norm{\xvec_t}^2_{\Vmat_{t-1}^{-1}}}.
+$$
+
+The **elliptical potential lemma** bounds the last sum by $2d\log(1 + TL^2/(d\lambda))$ for $\norm{\xvec_t} \le L$, when
+each term is at most 1. With $\beta_T$ of order $\sqrt{d\log T}$, the regret is $O(d\sqrt{T}\log T)$
+<Cite id="abbasi2011" />. It depends on the dimension, not on the number of arms, and is optimal up to logarithmic
+factors <Cite id="lattimore2020" />.
+
+<Derivation title="The elliptical potential lemma">
+Pulling $\xvec_t$ updates $\Vmat_t = \Vmat_{t-1} + \xvec_t\xvec_t\transpose$. The matrix determinant lemma gives
+$\det\Vmat_t = \det\Vmat_{t-1}(1 + \norm{\xvec_t}^2_{\Vmat_{t-1}^{-1}})$. Taking logarithms and summing,
+
+$$
+\sum_{t=1}^{T}\log\paren{1 + \norm{\xvec_t}^2_{\Vmat_{t-1}^{-1}}} = \log\frac{\det\Vmat_T}{\det\lambda\I}.
+$$
+
+For $0 \le u \le 1$, $u \le 2\log(1 + u)$, so the sum of the squared widths, each capped at 1, is at most twice the
+right side. The determinant of $\Vmat_T$ is at most $(\trace\Vmat_T/d)^d$ by the inequality of arithmetic and
+geometric means applied to its eigenvalues, and $\trace\Vmat_T \le d\lambda + TL^2$. So
+$\log(\det\Vmat_T/\lambda^d) \le d\log(1 + TL^2/(d\lambda))$. The widths cannot stay large for long: every large width
+multiplies the determinant by a large factor, and the determinant grows at most polynomially in $T$.
+</Derivation>
+
+## Disjoint and shared models
+
+Li et al. describe two forms <Cite id="li2010" />. In the **disjoint** model each arm $a$ has its own parameter
+$\thetavec_a$, and the features are the context $\xvec_t$ alone: $\mu(\xvec_t, a) = \xvec_t\transpose\thetavec_a$. Each
+arm keeps its own $\Vmat_a$ and $\bvec_a$, updated only when it is pulled. This is $K$ independent linear bandits and
+suits a small, fixed set of arms. In the **hybrid** model the reward adds a part shared by all arms, with features of
+the pair (user, article), so that new arms benefit from what the shared part has learned. The single-$\thetavec$ form in
+the definition covers both, with features built accordingly.
+
+## Computation
+
+Each round needs $\Vmat_t^{-1}$. The Sherman–Morrison formula updates it after a rank-one change in $O(d^2)$:
+
+$$
+(\Vmat + \xvec\xvec\transpose)^{-1} = \Vmat^{-1} - \frac{\Vmat^{-1}\xvec\xvec\transpose\Vmat^{-1}}{1 + \xvec\transpose\Vmat^{-1}\xvec}.
+$$
+
+Scoring $K$ arms costs $O(Kd^2)$ per round.
+
+## Assumptions
+
+- The expected reward is linear in known features, $\expect[r \mid \xvec] = \xvec\transpose\thetavec^*$. With
+  misspecification the confidence set can exclude the truth and the regret can become linear in $T$.
+- The noise is conditionally sub-Gaussian with a known scale $\sigma$, and $\norm{\thetavec^*} \le S$ for a known $S$.
+- The features are bounded, $\norm{\xvec} \le L$.
+
+## Pitfalls
+
+- **The theoretical radius is too large.** The $\beta_t$ of the analysis makes LinUCB explore far more than needed.
+  In practice $\alpha$ is tuned, often well below 1, and the guarantee is lost.
+- **Unscaled features.** The ellipsoid is only as good as the features. A feature measured in thousands dominates
+  $\Vmat_t$ and its direction is explored almost immediately, while small-scale features stay unexplored.
+- **Deterministic choices.** Like UCB1, LinUCB is deterministic given the history. Batched updates give every user in a
+  batch the same arm for the same context, and the logged data have propensities of 0 or 1, which rules out standard
+  off-policy evaluation of other policies.
