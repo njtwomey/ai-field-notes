@@ -1,0 +1,119 @@
+---
+title: Deep Q-network
+kind: technique
+summary: 'A deep Q-network trains a neural network $Q_{\thetavec}(s,a)$ by Q-learning, regressing on targets $r + \gamma \max_{a''} Q_{\thetavec^-}(s'', a'')$ from a frozen target network, with minibatches drawn from a replay buffer of past transitions. Both devices keep the regression stable.'
+tags: [reinforcement-learning, value-based-methods, deep-learning, off-policy, worked-example]
+aliases: [DQN, deep Q-learning, experience replay, replay buffer, target network, double DQN, dueling network, prioritised experience replay, Rainbow, deadly triad]
+requires: [q-learning, multilayer-perceptron]
+partOf: [reinforcement-learning]
+related: [convolutional-layer, adagrad-and-rmsprop, gradient-descent]
+references: [mnih2015, mnih2013, lin1992, hasselt2016, wang2016, schaul2016, hessel2018, sutton2018]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **deep Q-network** (DQN) represents the action-value function by a neural network $Q_{\thetavec}(s, a)$ that takes a
+state and outputs one value per action. It learns by <NoteLink to="q-learning">Q-learning</NoteLink> with two
+additions. Transitions $(s, a, r, s')$ are stored in a **replay buffer** $\Dcal$, and each gradient step uses a random
+minibatch from it. The targets come from a **target network** $Q_{\thetavec^-}$, a copy of the online network updated
+only every $C$ steps. The loss is
+
+$$
+L(\thetavec) = \expect_{(s, a, r, s') \sim \Dcal}\brack{\paren{r + \gamma\max_{a'}Q_{\thetavec^-}(s', a') - Q_{\thetavec}(s, a)}^2}
+$$
+
+<Cite id="mnih2015" />.
+</Definition>
+
+## Problem
+
+Tabular Q-learning needs one entry per state-action pair. For images, continuous sensors or board positions, the table
+is astronomically large and most states are seen once or never. A function approximator generalises across similar
+states. The naive combination, one semi-gradient Q-learning step per observed transition, is unstable: the estimates
+oscillate or diverge.
+
+Three ingredients cause the instability when combined, the **deadly triad** <Cite id="sutton2018" />:
+
+- **function approximation**, so an update at one state changes the values of others;
+- **bootstrapping**, so targets are built from the model's own estimates;
+- **off-policy data**, so the states updated are not distributed as under the policy being evaluated.
+
+Q-learning with a neural network has all three. The DQN devices do not remove the triad; they make its failure much
+less likely in practice.
+
+## Mechanism
+
+**The regression view.** For a fixed target network, minimising $L(\thetavec)$ is ordinary least-squares regression:
+inputs $(s, a)$, labels $y = r + \gamma\max_{a'}Q_{\thetavec^-}(s', a')$. Its gradient is
+
+$$
+\nabla_{\thetavec}L = -2\,\expect\brack{\paren{y - Q_{\thetavec}(s, a)}\nabla_{\thetavec}Q_{\thetavec}(s, a)},
+$$
+
+and the gradient does not flow into $y$. DQN approximates **fitted Q-iteration**: each period between target updates
+performs one approximate application of the Bellman optimality operator, by regression.
+
+**Why a replay buffer.** Consecutive transitions in a trajectory are strongly correlated: frame $t+1$ looks like frame
+$t$. Stochastic gradient descent assumes the minibatch approximates the data distribution; a run of correlated samples
+pulls the network towards whatever part of the state space the agent is in now, and it forgets the rest. Sampling
+uniformly from a buffer of the last $N$ transitions (one million in the Atari agents) breaks the correlation. It also
+reuses each transition in many updates, and averages the training distribution over many past policies, which damps
+feedback loops between the policy and the data it collects <Cite id="lin1992" />. Replay is possible only because
+Q-learning is off-policy: old transitions from old policies are valid samples of the Bellman optimality equation.
+
+**Why a target network.** If the target used the online parameters, $y = r + \gamma\max_{a'}Q_{\thetavec}(s', a')$,
+every step that raises $Q_{\thetavec}(s, a)$ would also tend to raise $Q_{\thetavec}(s', a')$ for the similar state
+$s'$, and so the target. The regression chases a target that moves with it, and value errors can grow without bound.
+Freezing $\thetavec^-$ for $C$ steps (10,000 in the Atari agents) turns each period into a stationary regression
+problem, whose solution is then copied into the target network <Cite id="mnih2015" />.
+
+**Other details.** The Atari agent used a convolutional network on four stacked $84 \times 84$ greyscale frames, so
+that the input shows motion. It clipped rewards to $[-1, 1]$ so one learning rate suited every game, used the Huber
+loss (equivalently, clipped TD errors), trained with RMSProp, and annealed $\varepsilon$ from 1 to 0.1 over the first
+million frames <Cite id="mnih2015" />.
+
+## Improvements
+
+- **Double DQN.** The max in the target overestimates, as the <NoteLink to="q-learning">Q-learning</NoteLink> note
+  shows. Double DQN selects the action with the online network and evaluates it with the target network:
+  $y = r + \gamma Q_{\thetavec^-}(s', \argmax_{a'}Q_{\thetavec}(s', a'))$. It reduced overestimation and improved
+  scores on most Atari games <Cite id="hasselt2016" />.
+- **Dueling architecture.** The network splits into a state-value stream $V(s)$ and an advantage stream $A(s, a)$,
+  combined as $Q(s, a) = V(s) + A(s, a) - \frac{1}{\abs{\Acal}}\sum_{a'}A(s, a')$. Subtracting the mean makes the split
+  identifiable. $V$ is learned from every transition, whatever action was taken, which helps in states where the
+  action matters little <Cite id="wang2016" />.
+- **Prioritised experience replay.** Sample transition $i$ with probability $P(i) \propto \abs{\delta_i}^\alpha$, where
+  $\delta_i$ is its last TD error, so surprising transitions are replayed more. Non-uniform sampling biases the
+  gradient; importance weights $w_i = (N\,P(i))^{-\beta}$, with $\beta$ annealed to 1, correct it
+  <Cite id="schaul2016" />.
+- **Rainbow.** Double Q-learning, dueling heads, prioritised replay, multi-step returns, a distributional value head
+  and noisy-network exploration, combined in one agent. Each component contributed, and prioritised replay and
+  multi-step returns contributed most <Cite id="hessel2018" />.
+
+## Worked example
+
+A transition has reward $r = 1$ and discount $\gamma = 0.99$. The next state has two actions. The online network gives
+$Q_{\thetavec}(s', \cdot) = (2.0, 3.0)$ and the target network gives $Q_{\thetavec^-}(s', \cdot) = (2.5, 2.2)$.
+
+- **DQN target:** $1 + 0.99 \max(2.5, 2.2) = 1 + 0.99 \cdot 2.5 = 3.475$.
+- **Double DQN target:** the online network selects action 2, and the target network evaluates it:
+  $1 + 0.99 \cdot 2.2 = 3.178$.
+
+The two networks disagree about which action is best. That disagreement is a sign the high value 2.5 may be noise,
+and double DQN declines to back it up.
+
+## Cost
+
+Replay memory holds $N$ transitions; for image inputs this dominates memory, so frames are stored once and stacked on
+sampling. Each environment step costs one forward pass to act. Each update costs a forward and backward pass on a
+minibatch, plus a forward pass of the target network. The original Atari agent trained on 50 million frames per game.
+
+## Trade-offs
+
+- **Discrete actions only.** The $\max_{a'}$ is a loop over outputs. Continuous actions need
+  <NoteLink to="deterministic-policy-gradients">deterministic policy gradients</NoteLink> or a sampling-based maximiser.
+- **Sample efficiency against stability.** A larger $C$ is more stable but propagates value more slowly. A larger
+  replay buffer holds more diverse but staler data.
+- **Off-policy data reuse** makes DQN far more sample-efficient than on-policy policy-gradient methods, at the price of
+  weaker stability guarantees.

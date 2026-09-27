@@ -1,0 +1,130 @@
+---
+title: Q-learning
+kind: concept
+summary: 'Q-learning is off-policy TD control: it updates $Q(S,A)$ towards $R + \gamma \max_{a''} Q(S'', a'')$ whatever action is taken next, so it learns $q_*$ while following any policy that keeps exploring. The max overestimates under noise; double Q-learning corrects this.'
+tags: [reinforcement-learning, value-based-methods, off-policy, temporal-difference, worked-example]
+aliases: [Watkins Q-learning, tabular Q-learning, maximisation bias, overestimation bias, double Q-learning, off-policy TD control]
+requires: [temporal-difference-learning, bellman-equations]
+partOf: [reinforcement-learning]
+related: [sarsa, value-iteration, epsilon-greedy]
+references: [watkins1989, watkins1992, tsitsiklis1994, jaakkola1994, hasselt2010, sutton2018]
+status: draft
+updated: 2026-09-27
+---
+
+import { CliffWalking } from '../_shared/CliffWalking'
+
+<Definition>
+**Q-learning** learns the optimal action-value function $q_*$ of a Markov decision process from sampled transitions
+$(S_t, A_t, R_{t+1}, S_{t+1})$, with the update
+
+$$
+Q(S_t, A_t) \leftarrow Q(S_t, A_t) + \alpha\brack{R_{t+1} + \gamma\max_{a'}Q(S_{t+1}, a') - Q(S_t, A_t)}.
+$$
+
+The transitions may come from any **behaviour policy**, for example $\varepsilon$-greedy with respect to $Q$. The
+learned **target policy** is greedy, $\pi(s) = \argmax_a Q(s, a)$ <Cite id="watkins1989" />.
+</Definition>
+
+## Intuition
+
+Q-learning is a sampled version of Q-value iteration. The <NoteLink to="bellman-equations">Bellman optimality
+equation</NoteLink> for action values,
+
+$$
+q_*(s, a) = \expect\brack{R_{t+1} + \gamma\max_{a'}q_*(S_{t+1}, a') \mid S_t = s, A_t = a},
+$$
+
+has the maximum inside the expectation. A single observed transition from $(s, a)$ is therefore an unbiased sample of
+the right-hand side, with $Q$ standing in for $q_*$. Which action the agent takes next does not enter the target, and
+neither does the policy that chose $A_t$: the equation holds for each pair $(s, a)$ separately. That is why Q-learning
+is **off-policy**. It can learn the optimal policy while behaving randomly, from another agent's logs, or from replayed
+old experience.
+
+## Convergence
+
+Let $\Hcal$ be the Q-value optimality operator,
+$(\Hcal Q)(s, a) = r(s, a) + \gamma\sum_{s'}p(s' \mid s, a)\max_{a'}Q(s', a')$. Given $S_t = s$ and $A_t = a$, the
+expected Q-learning target is $(\Hcal Q)(s, a)$, so the expected update is $\alpha(\Hcal Q - Q)(s, a)$. $\Hcal$ is a
+$\gamma$-contraction in the sup norm, by the same argument as for the state-value operator: the difference of two
+maxima is at most the maximum difference, and averaging over $s'$ does not increase it. Q-learning is therefore
+asynchronous stochastic approximation of a contraction's fixed point.
+
+**Theorem.** In a finite MDP with bounded rewards and $\gamma < 1$, tabular Q-learning converges to $q_*$ with
+probability 1 if <Cite id="watkins1992" /> <Cite id="tsitsiklis1994" /> <Cite id="jaakkola1994" />:
+
+- every state-action pair is updated infinitely often, and
+- the step sizes $\alpha_n(s, a)$ at the $n$-th update of each pair satisfy $\sum_n\alpha_n(s, a) = \infty$ and
+  $\sum_n\alpha_n(s, a)^2 < \infty$.
+
+The behaviour policy is otherwise arbitrary. The first condition is the only demand on exploration, and it is why a
+purely greedy behaviour policy can fail: pairs it never tries keep their initial values.
+
+<CliffWalking />
+
+The cliff-walking figure shows the cost of learning off-policy while exploring. Q-learning learns the optimal path
+along the cliff edge, because its targets assume greedy behaviour. The agent does not behave greedily: one step in ten
+is random, and a random step off the edge costs 100. <NoteLink to="sarsa">SARSA</NoteLink> learns the values of the
+exploring policy and takes a longer, safer path, so it earns more reward while exploration continues. Averaged over 10
+runs, the last 100 of 500 episodes pay about $-49$ per episode for Q-learning and $-27$ for SARSA at $\varepsilon = 0.1$
+and $\alpha = 0.5$.
+
+## Maximisation bias
+
+The target uses $\max_{a'}Q(S_{t+1}, a')$, the maximum of noisy estimates. For any random estimates $\hat Q(a)$ with
+means $q(a)$,
+
+$$
+\expect\brack{\max_a\hat Q(a)} \ge \max_a\expect\brack{\hat Q(a)} = \max_a q(a),
+$$
+
+because the maximum is a convex function and <NoteLink to="expectation">Jensen's inequality</NoteLink> applies. More
+directly: $\max_a\hat Q(a) \ge \hat Q(a^\dagger)$ for the truly best action $a^\dagger$, whose expectation is
+$\max_a q(a)$. The bias is largest when many actions have similar values and the estimates are noisy. It is then fed
+back through bootstrapping, and states with many actions look better than they are <Cite id="hasselt2010" />.
+
+**Double Q-learning** removes the bias by using two tables, $Q^A$ and $Q^B$, trained on different samples. At each step
+one of them, say $Q^A$, is chosen at random and updated with the other's estimate of its own best action:
+
+$$
+Q^A(S_t, A_t) \leftarrow Q^A(S_t, A_t) + \alpha\brack{R_{t+1} + \gamma Q^B\paren{S_{t+1}, \argmax_{a'}Q^A(S_{t+1}, a')} - Q^A(S_t, A_t)}.
+$$
+
+If $Q^B$ is independent of $Q^A$, then given the selected action $\hat a = \argmax_{a'}Q^A(S_{t+1}, a')$, the estimate
+$Q^B(S_{t+1}, \hat a)$ has mean $q(S_{t+1}, \hat a) \le \max_{a'}q(S_{t+1}, a')$. The selection noise no longer inflates
+the value. The estimator can underestimate, but it does not compound an upward bias <Cite id="hasselt2010" />.
+
+## Worked example
+
+**One update.** An agent in $S$ takes $A$ with $Q(S, A) = 0$, receives $R = 1$ and lands in $S'$ with
+$Q(S', \cdot) = (0.2, 0.5, -0.1)$. With $\gamma = 0.9$ and $\alpha = 0.1$, the target is $1 + 0.9 \cdot 0.5 = 1.45$ and
+$Q(S, A) \leftarrow 0 + 0.1 \cdot 1.45 = 0.145$. The update is the same whichever action the agent takes in $S'$.
+
+**Maximisation bias.** A state has 10 actions, each with true value 0. Each action's estimate is its true value plus
+independent standard normal noise. The single estimator reports $\max_a\hat Q(a)$, whose expectation is the expected
+maximum of 10 standard normals, $1.54$, although every action is worth 0. The double estimator selects
+$\hat a = \argmax_a\hat Q^A(a)$ and reports $\hat Q^B(\hat a)$, an independent estimate with mean 0: it is unbiased here.
+
+## Variants
+
+- **Deep Q-learning.** A neural network replaces the table; experience replay and a target network stabilise training.
+  See <NoteLink to="deep-q-network">deep Q-network</NoteLink>.
+- **Expected SARSA** with a greedy target policy is Q-learning; with an $\varepsilon$-greedy target it interpolates
+  between Q-learning and SARSA.
+- **$n$-step Q-learning.** Multi-step targets propagate reward faster but are off-policy for $n > 1$ unless corrected
+  by importance weights or truncated at exploratory actions.
+
+## Assumptions
+
+- **Tabular representation.** The convergence theorem is for tables. With function approximation, off-policy
+  bootstrapping can diverge.
+- **Markov states and stationary environment.**
+
+## Pitfalls
+
+- **Online performance versus learned policy.** Q-learning's greedy policy can be optimal while the exploring agent
+  performs poorly, as on the cliff. Report the greedy policy's return separately from the reward collected while
+  learning.
+- **Insufficient exploration.** Greedy behaviour with zero-initialised values can lock onto the first action that pays
+  anything. Keep $\varepsilon > 0$ or initialise optimistically; see <NoteLink to="exploration-in-rl">exploration in
+  RL</NoteLink>.

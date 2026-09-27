@@ -1,0 +1,100 @@
+---
+title: SARSA
+kind: concept
+summary: 'SARSA is on-policy TD control. After each step it updates $Q(S,A)$ towards $R + \gamma Q(S'', A'')$, where $A''$ is the action the agent will actually take next, and acts $\varepsilon$-greedily with respect to $Q$. It learns the value of the exploring policy it follows.'
+tags: [reinforcement-learning, value-based-methods, on-policy, temporal-difference, worked-example]
+aliases: [Sarsa, state-action-reward-state-action, on-policy TD control, expected SARSA, modified connectionist Q-learning, GLIE]
+requires: [temporal-difference-learning, epsilon-greedy]
+partOf: [reinforcement-learning]
+related: [q-learning, policy-iteration]
+references: [rummery1994, sutton2018, singh2000]
+status: draft
+updated: 2026-09-27
+---
+
+import { CliffWalking } from '../_shared/CliffWalking'
+
+<Definition>
+**SARSA** learns an action-value table $Q(s, a)$ while acting with a policy derived from it, usually
+<NoteLink to="epsilon-greedy">$\varepsilon$-greedy</NoteLink>. After each step it has the quintuple
+$(S_t, A_t, R_{t+1}, S_{t+1}, A_{t+1})$, which gives the method its name, and updates
+
+$$
+Q(S_t, A_t) \leftarrow Q(S_t, A_t) + \alpha\brack{R_{t+1} + \gamma Q(S_{t+1}, A_{t+1}) - Q(S_t, A_t)},
+$$
+
+with $Q(s, \cdot) = 0$ at terminal states <Cite id="rummery1994" /> <Cite id="sutton2018" />.
+</Definition>
+
+## Intuition
+
+SARSA is <NoteLink to="temporal-difference-learning">TD(0)</NoteLink> applied to action values, combined with a policy
+that keeps changing to follow them. The TD part evaluates the current policy $\pi$: the target
+$R_{t+1} + \gamma Q(S_{t+1}, A_{t+1})$ is a sample of the Bellman expectation equation
+
+$$
+q_\pi(s, a) = \expect\brack{R_{t+1} + \gamma\,q_\pi(S_{t+1}, A_{t+1}) \mid S_t = s, A_t = a},
+$$
+
+because $A_{t+1}$ is drawn from $\pi$. The control part improves the policy, because an $\varepsilon$-greedy policy is
+greedy with respect to $Q$ most of the time. Evaluation and improvement are interleaved at every step. This is
+generalised <NoteLink to="policy-iteration">policy iteration</NoteLink> with both steps done approximately.
+
+Action values, not state values, are what make this model-free. Improving a policy from $v_\pi$ requires the one-step
+look-ahead $\sum_{s'}p(s' \mid s, a)v_\pi(s')$, which needs $p$. Improving it from $q_\pi$ needs only
+$\argmax_a Q(s, a)$.
+
+## On-policy learning
+
+SARSA learns the value of the policy that generates its data, exploration included. With $\varepsilon = 0.1$, the
+values it learns account for the random action taken one step in ten. A state next to a hazard gets a low value under
+that policy, even if a perfectly greedy agent could pass it safely. SARSA's learned policy therefore avoids states
+where exploration is dangerous. <NoteLink to="q-learning">Q-learning</NoteLink>, which bootstraps from the greedy
+action, learns the values of the greedy policy instead and ignores the risk that exploration creates.
+
+<CliffWalking />
+
+## Convergence
+
+Two conditions make tabular SARSA converge to $q_*$ with probability 1 in a finite MDP <Cite id="singh2000" />:
+
+- **Robbins–Monro step sizes.** For each pair $(s, a)$, the step sizes sum to infinity and their squares sum to a finite
+  value.
+- **GLIE: greedy in the limit with infinite exploration.** Every state-action pair is visited infinitely often, and the
+  policy becomes greedy with respect to $Q$ in the limit. An $\varepsilon$-greedy policy with $\varepsilon_t = 1/t$
+  satisfies both.
+
+With a fixed $\varepsilon$, SARSA instead settles near the best $\varepsilon$-greedy policy, which is what the
+cliff-walking figure shows.
+
+## Worked example
+
+An agent in state $S$ takes action $A$ with $Q(S, A) = -3$, receives $R = -1$ and lands in $S'$, where
+$Q(S', \text{left}) = -2$ and $Q(S', \text{right}) = -5$. The $\varepsilon$-greedy policy explores and picks
+$A' = \text{right}$. With $\alpha = 0.5$ and $\gamma = 1$:
+
+- **SARSA** uses the action it will take: target $-1 + (-5) = -6$, and
+  $Q(S, A) \leftarrow -3 + 0.5\,(-6 - (-3)) = -4.5$.
+- **Q-learning** would use the best action: target $-1 + (-2) = -3$, and $Q(S, A)$ stays at $-3$.
+- **Expected SARSA** (below) with $\varepsilon = 0.1$ over two actions weights left by $0.95$ and right by $0.05$:
+  target $-1 + (0.95 \cdot (-2) + 0.05 \cdot (-5)) = -3.15$, and $Q(S, A) \leftarrow -3.075$.
+
+SARSA's single sample punishes $(S, A)$ for an exploratory choice made afterwards. Averaged over many visits, that
+punishment is the true cost of exploring from $S'$.
+
+## Variants
+
+- **Expected SARSA.** Replace $Q(S_{t+1}, A_{t+1})$ by its expectation under the policy,
+  $\sum_{a'}\pi(a' \mid S_{t+1})\,Q(S_{t+1}, a')$. This removes the variance due to sampling $A_{t+1}$ at the cost of a
+  sum over actions. With a greedy target policy it is Q-learning <Cite id="sutton2018" />.
+- **$n$-step SARSA and SARSA($\lambda$).** Use $n$-step returns or eligibility traces over state-action pairs, as in
+  <NoteLink to="temporal-difference-learning">TD($\lambda$)</NoteLink>. Traces speed up credit assignment when rewards
+  are sparse.
+- **Function approximation.** Semi-gradient SARSA with linear features is more stable than off-policy Q-learning with
+  the same features, because it learns on-policy.
+
+## Pitfalls
+
+- **Freezing $\varepsilon$ and reading the greedy policy.** With constant exploration, $Q$ estimates the exploring
+  policy's values. The greedy policy read off it is safe but can be longer than optimal, as the cliff figure shows.
+- **Step size too large with stochastic rewards.** A large $\alpha$ lets single unlucky samples dominate $Q$.

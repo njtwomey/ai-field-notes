@@ -1,0 +1,126 @@
+---
+title: Deterministic policy gradients
+kind: concept
+summary: 'For a deterministic policy $a = \mu_{\thetavec}(s)$ over continuous actions, the return''s gradient is $\expect_s[\nabla_{\thetavec}\mu_{\thetavec}(s)\,\nabla_a Q(s,a)|_{a=\mu_{\thetavec}(s)}]$: move the action uphill on a learned critic. DDPG and TD3 build on it; SAC adds an entropy bonus.'
+tags: [reinforcement-learning, policy-methods, continuous-control, off-policy, worked-example]
+aliases: [DPG, deterministic policy gradient theorem, DDPG, deep deterministic policy gradient, TD3, twin delayed DDPG, clipped double Q-learning, SAC, soft actor-critic, maximum entropy reinforcement learning, soft Bellman equation]
+requires: [policy-gradient-theorem, actor-critic, deep-q-network]
+partOf: [reinforcement-learning]
+related: [reparameterisation-trick, entropy, softmax-and-log-sum-exp]
+references: [silver2014, lillicrap2016, fujimoto2018, haarnoja2018]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **deterministic policy** maps each state to one action, $a = \mu_{\thetavec}(s) \in \reals^m$. The **deterministic
+policy gradient theorem** states that the gradient of its expected return is
+
+$$
+\nabla_{\thetavec}J(\thetavec) = \expect_{s \sim \rho^\mu}\brack{\nabla_{\thetavec}\mu_{\thetavec}(s)\,\nabla_a q_\mu(s, a)\big|_{a = \mu_{\thetavec}(s)}},
+$$
+
+where $\rho^\mu$ is the policy's discounted state distribution, $q_\mu$ its action-value function, and
+$\nabla_{\thetavec}\mu_{\thetavec}(s)$ the Jacobian of the action with respect to the parameters
+<Cite id="silver2014" />.
+</Definition>
+
+## Intuition
+
+With continuous actions, a critic $Q(s, a)$ is a smooth surface over the action space. Its gradient $\nabla_a Q$ says
+in which direction to move the action to increase value. The deterministic policy gradient moves the policy's output in
+that direction, through the chain rule into $\thetavec$. No sampling over actions is needed, so the estimate has none of
+the action noise that makes <NoteLink to="policy-gradient-theorem">stochastic policy gradients</NoteLink> high in
+variance, especially in many action dimensions.
+
+The alternative, maximising $Q(s, a)$ over $a$ at every step as in <NoteLink to="deep-q-network">DQN</NoteLink>, is
+an inner optimisation problem per step. The actor $\mu_{\thetavec}$ learns to solve it approximately, once, for all
+states.
+
+## Derivation
+
+The stochastic theorem in state form is $\nabla J = \sum_s\eta(s)\sum_a q_\pi(s, a)\nabla_{\thetavec}\pi_{\thetavec}(a \mid s)$,
+with $\eta$ the discounted visitation. The gradient acts only on the policy inside the sum over actions, never on the
+visitation or on $q_\pi$. The same holds for a deterministic policy, with the sum over actions replaced by evaluation
+at $\mu_{\thetavec}(s)$: $\nabla J = \sum_s\eta(s)\,\nabla_{\thetavec}\brack{q_\mu(s, \mu_{\thetavec}(s))}$ with $q_\mu$
+held fixed. The chain rule gives the theorem. Silver et al. prove it directly, and show it is the limit of the
+stochastic policy gradient as the policy's variance shrinks to zero <Cite id="silver2014" />.
+
+**Off-policy learning.** The theorem integrates over states only. Replacing $\rho^\mu$ by the state distribution of a
+different, exploring behaviour policy gives an approximate gradient that needs no importance weights over actions. A
+critic learned off-policy by Q-learning-style targets can therefore be combined with replayed data.
+
+## DDPG
+
+**Deep deterministic policy gradient** applies the theorem with neural networks and the stabilising devices of
+<NoteLink to="deep-q-network">DQN</NoteLink> <Cite id="lillicrap2016" />:
+
+- a **critic** $Q_{\phivec}(s, a)$ regressed on targets $y = r + \gamma Q_{\phivec^-}(s', \mu_{\thetavec^-}(s'))$, with
+  target networks for both actor and critic;
+- an **actor** updated by $\nabla_{\thetavec}\frac1B\sum_i Q_{\phivec}(s_i, \mu_{\thetavec}(s_i))$ over a minibatch
+  from a replay buffer;
+- **soft target updates** $\phivec^- \leftarrow \tau\phivec + (1 - \tau)\phivec^-$ with small $\tau$, such as 0.001;
+- **exploration noise** added to the actor's output when acting, since a deterministic policy does not explore.
+
+## TD3
+
+The actor maximises the critic, so it seeks out and exploits the critic's overestimates, and these are fed back
+through the targets. **Twin delayed DDPG** makes three changes <Cite id="fujimoto2018" />:
+
+- **Clipped double Q-learning.** Learn two critics and use the smaller of their target estimates,
+  $y = r + \gamma\min_{j = 1, 2}Q_{\phivec_j^-}(s', \tilde a)$. The minimum biases targets down rather than up, which is
+  safer because underestimated actions are not preferred by the actor and so their errors do not propagate.
+- **Target policy smoothing.** Use $\tilde a = \mu_{\thetavec^-}(s') + \epsilon$ with small clipped Gaussian noise
+  $\epsilon$, so the target averages the critic over a neighbourhood of the action and narrow spurious peaks are
+  smoothed away.
+- **Delayed policy updates.** Update the actor and targets once per two critic updates, so the actor follows a critic
+  that has had time to settle.
+
+## Soft actor-critic and maximum-entropy RL
+
+**Maximum-entropy RL** adds the policy's <NoteLink to="entropy">entropy</NoteLink> to the reward, with temperature
+$\alpha > 0$:
+
+$$
+J(\pi) = \expect_\pi\brack{\sum_t\gamma^t\paren{R_{t+1} + \alpha\,\entropy\brack{\pi(\cdot \mid S_t)}}}.
+$$
+
+The agent is rewarded for acting as randomly as possible while still collecting reward. This keeps exploration going
+and makes learned behaviour robust to perturbations.
+
+**The optimal policy is a softmax of $Q$.** At one state, choose the action distribution $\pi$ to maximise
+$\sum_a\pi(a)Q(a) + \alpha\entropy[\pi]$ subject to $\sum_a\pi(a) = 1$. Setting the derivative of the Lagrangian to
+zero, $Q(a) - \alpha(\log\pi(a) + 1) - \lambda = 0$, gives $\pi(a) \propto \exp(Q(a)/\alpha)$. The maximum value is
+$\alpha\log\sum_a\exp(Q(a)/\alpha)$, a smooth maximum that tends to $\max_a Q(a)$ as $\alpha \to 0$; see
+<NoteLink to="softmax-and-log-sum-exp">softmax and log-sum-exp</NoteLink>. The **soft Bellman equations** follow:
+
+$$
+q(s, a) = r(s, a) + \gamma\,\expect_{s'}\brack{v(s')}, \qquad v(s) = \expect_{a \sim \pi}\brack{q(s, a) - \alpha\log\pi(a \mid s)}.
+$$
+
+**Soft actor-critic** (SAC) learns two critics by these equations, with the clipped double-Q minimum of TD3, and trains
+a stochastic Gaussian actor to minimise $\KL(\pi_{\thetavec}(\cdot \mid s) \,\|\, \exp(Q(s, \cdot)/\alpha)/Z(s))$. The
+actor's sampled actions are written as $a = \tanh(\mu_{\thetavec}(s) + \sigma_{\thetavec}(s)\odot\epsilon)$ with
+$\epsilon \sim \Gauss(\zeros, \eye)$, so the gradient flows through the sample by the
+<NoteLink to="reparameterisation-trick">reparameterisation trick</NoteLink> <Cite id="haarnoja2018" />. SAC is
+off-policy, uses a replay buffer, and is less sensitive to hyperparameters than DDPG.
+
+## Worked example
+
+**Deterministic gradient.** A one-dimensional problem has critic $Q(s, a) = 5 - (a - 2)^2$ at some state, and the
+actor outputs $a = \mu_\theta(s) = \theta$ with $\theta = 0.5$. Then $\nabla_a Q = -2(a - 2) = 3$ at $a = 0.5$ and
+$\nabla_\theta\mu = 1$, so the gradient is 3. A step of size 0.1 moves $\theta$ to 0.8, towards the critic's peak at 2.
+
+**Soft policy.** Three actions have $Q = (1, 2, 3)$. With $\alpha = 1$ the optimal soft policy is
+$\exp(Q)/\sum\exp(Q) = (0.090, 0.245, 0.665)$ and the soft value is $\log(e + e^2 + e^3) = 3.41$: the best action's
+value 3 plus an entropy bonus. With $\alpha = 0.5$ the policy sharpens to $(0.016, 0.117, 0.867)$ and the soft value
+falls to 3.07.
+
+## Pitfalls
+
+- **Critic exploitation.** The actor follows $\nabla_a Q$ wherever the critic is wrong, which is why TD3's changes
+  matter more than they appear.
+- **Exploration noise scale.** DDPG's performance depends heavily on the noise added to actions; SAC's learned variance
+  avoids this choice.
+- **Bounded actions.** A $\tanh$ squashing changes the density of the actions; SAC corrects the log-probability with
+  the Jacobian of the squashing.

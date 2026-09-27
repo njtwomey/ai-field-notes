@@ -1,0 +1,151 @@
+---
+title: Off-policy evaluation in reinforcement learning
+kind: concept
+summary: 'Off-policy evaluation estimates a target policy''s return from trajectories of a behaviour policy. Per-decision importance sampling weights each reward by $\prod_{k \le t} \pi_e(A_k \mid S_k)/\pi_b(A_k \mid S_k)$; doubly robust estimators subtract a learned $\hat Q$ as a control variate.'
+tags: [reinforcement-learning, off-policy, importance-sampling, causal-inference, worked-example]
+aliases: [off-policy policy evaluation, OPE for MDPs, per-decision importance sampling, PDIS, trajectory importance sampling, weighted importance sampling, sequential doubly robust estimator, fitted Q evaluation, FQE, curse of horizon]
+requires: [off-policy-evaluation, markov-decision-process, importance-sampling]
+partOf: [reinforcement-learning]
+related: [offline-rl, temporal-difference-learning]
+references: [precup2000, jiang2016, thomas2016, sutton2018]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Trajectories $\tau = (S_0, A_0, R_1, \dots, S_{T-1}, A_{T-1}, R_T)$ are collected by a **behaviour policy** $\pi_b$,
+with the probability $\pi_b(A_t \mid S_t)$ of each action recorded. **Off-policy evaluation** (OPE) estimates the value
+of a different **evaluation policy** $\pi_e$,
+
+$$
+v(\pi_e) = \expect_{\tau \sim \pi_e}\brack{\sum_{t=0}^{T-1}\gamma^t R_{t+1}},
+$$
+
+from these trajectories alone <Cite id="precup2000" />. The one-step case $T = 1$ is
+<NoteLink to="off-policy-evaluation">off-policy evaluation for contextual bandits</NoteLink>.
+</Definition>
+
+## Intuition
+
+Deploying an untested policy in medicine, education or a live product can be costly or unsafe, and an
+<NoteLink to="offline-rl">offline RL</NoteLink> method produces candidate policies that must be ranked before any is
+tried. OPE answers "what would this policy have earned?" from logs of what another policy did. In the bandit case, one
+<NoteLink to="importance-sampling">importance weight</NoteLink> per decision corrects the mismatch. In an MDP, the
+evaluation policy would also have visited different states, so the correction must account for every decision along
+the way.
+
+## Trajectory importance sampling
+
+The trajectory's probability under a policy is $d_0(S_0)\prod_t\pi(A_t \mid S_t)p(S_{t+1}, R_{t+1} \mid S_t, A_t)$.
+The start distribution and the dynamics are the same for both policies and cancel in the ratio, which leaves the
+cumulative importance ratio
+
+$$
+\rho_{0:t} = \prod_{k=0}^{t}\frac{\pi_e(A_k \mid S_k)}{\pi_b(A_k \mid S_k)}.
+$$
+
+Reweighting the whole return, $\hat v_{\text{IS}} = \rho_{0:T-1}\sum_t\gamma^t R_{t+1}$, averaged over trajectories,
+is unbiased when $\pi_b(a \mid s) > 0$ wherever $\pi_e(a \mid s) > 0$.
+
+**The curse of horizon.** Each factor has expectation 1 under $\pi_b$, but the product's variance grows geometrically.
+If each factor has second moment $1 + c$ and the factors are independent, then $\expect[\rho_{0:T-1}^2] = (1 + c)^T$.
+With $c = 0.1$, a modest mismatch, a 10-step horizon multiplies the second moment by 2.6 and a 50-step horizon by 117.
+Long-horizon importance sampling is often useless without variance reduction.
+
+## Per-decision importance sampling
+
+A reward cannot depend on actions taken after it. The reward $R_{t+1}$ needs only the ratio of the actions up to
+$A_t$ <Cite id="precup2000" />:
+
+$$
+\hat v_{\text{PDIS}} = \sum_{t=0}^{T-1}\gamma^t\rho_{0:t}R_{t+1}.
+$$
+
+**Unbiasedness.** Split the full weight on $R_{t+1}$ as $\rho_{0:T-1} = \rho_{0:t}\,\rho_{t+1:T-1}$. Condition on the
+history up to $S_{t+1}$. Each later factor $\pi_e(A_k \mid S_k)/\pi_b(A_k \mid S_k)$ has expectation
+$\sum_a\pi_b(a \mid S_k)\,\pi_e(a \mid S_k)/\pi_b(a \mid S_k) = 1$ given the history up to $S_k$, so by iterated
+expectations $\expect[\rho_{t+1:T-1} \mid \text{history to } S_{t+1}] = 1$. Hence
+$\expect[\rho_{0:T-1}R_{t+1}] = \expect[\rho_{0:t}R_{t+1}]$, and dropping the later factors changes no expectation. It
+removes their variance. Early rewards now carry short products, and only late rewards carry the full one.
+
+**Weighted variants.** Dividing by the average weight instead of $n$, as self-normalised IPS does for bandits, gives
+weighted importance sampling. It is biased but consistent, and far more stable.
+
+## Doubly robust estimation
+
+Let $\hat Q(s, a)$ be an estimate of $q_{\pi_e}$, for example from fitted Q evaluation (below), and
+$\hat V(s) = \sum_a\pi_e(a \mid s)\hat Q(s, a)$. The **doubly robust** estimator of Jiang and Li is defined backwards
+along each trajectory, from $\hat v_{\text{DR}}^{(T)} = 0$ <Cite id="jiang2016" />:
+
+$$
+\hat v_{\text{DR}}^{(t)} = \hat V(S_t) + \rho_t\paren{R_{t+1} + \gamma\,\hat v_{\text{DR}}^{(t+1)} - \hat Q(S_t, A_t)},
+\qquad \rho_t = \frac{\pi_e(A_t \mid S_t)}{\pi_b(A_t \mid S_t)},
+$$
+
+and the estimate is $\hat v_{\text{DR}}^{(0)}$. Each step starts from the model's prediction $\hat V(S_t)$ and adds an
+importance-weighted correction: the observed reward plus the estimate of the rest, minus what the model predicted for
+the action actually taken.
+
+**Unbiased with correct ratios, whatever $\hat Q$.** Suppose, by induction from the end, that
+$\hat v_{\text{DR}}^{(t+1)}$ has conditional mean $v_{\pi_e}(S_{t+1})$ given $S_{t+1}$. Given $S_t = s$, averaging the
+correction over $A_t \sim \pi_b$ multiplies by $\pi_e/\pi_b$ and so turns it into an average over $A_t \sim \pi_e$:
+
+$$
+\expect\brack{\rho_t\paren{R_{t+1} + \gamma\hat v_{\text{DR}}^{(t+1)} - \hat Q(s, A_t)} \,\Big|\, S_t = s}
+= \sum_a\pi_e(a \mid s)\paren{q_{\pi_e}(s, a) - \hat Q(s, a)}.
+$$
+
+Adding $\hat V(s) = \sum_a\pi_e(a \mid s)\hat Q(s, a)$ cancels the model and leaves
+$\sum_a\pi_e(a \mid s)\,q_{\pi_e}(s, a) = v_{\pi_e}(s)$. The induction ends at $t = 0$ with an unbiased estimate.
+
+**Low variance with a good $\hat Q$.** If $\hat Q = q_{\pi_e}$ exactly, each correction term has mean zero given the
+past, and the variance that remains comes only from the randomness of rewards and transitions, not of the actions.
+Unrolled, the estimator is per-decision importance sampling minus a control variate:
+
+$$
+\hat v_{\text{DR}} = \hat v_{\text{PDIS}} - \sum_{t=0}^{T-1}\gamma^t\paren{\rho_{0:t}\hat Q(S_t, A_t) - \rho_{0:t-1}\hat V(S_t)},
+$$
+
+with $\rho_{0:-1} = 1$. Each subtracted term has mean zero, by the same one-step calculation, so the subtraction removes
+variance without adding bias. Jiang and Li also derive a Cramér–Rao lower bound on the variance of any unbiased OPE estimator
+and show that the doubly robust estimator can match it <Cite id="jiang2016" />. Thomas and Brunskill combine weighted importance
+sampling with this control variate and blend it with the model-based estimate to reduce error further
+<Cite id="thomas2016" />.
+
+## Model-based evaluation
+
+The direct method for sequences estimates $q_{\pi_e}$ without importance weights. **Fitted Q evaluation** regresses
+$\hat Q(s, a)$ on targets $r + \gamma\sum_{a'}\pi_e(a' \mid s')\hat Q(s', a')$ over logged transitions, repeatedly, as
+in <NoteLink to="temporal-difference-learning">temporal-difference learning</NoteLink> with the evaluation policy's
+expectation in the target. It has low variance, but its bias under function approximation does not shrink with more
+data, and it is least accurate for the actions $\pi_e$ takes and $\pi_b$ rarely does.
+
+## Worked example
+
+A two-step trajectory has $\gamma = 1$. The behaviour policy chose each action with probability 0.5. The evaluation
+policy would have chosen the first logged action with probability 0.9 and the second with 0.2, so $\rho_0 = 1.8$ and
+$\rho_1 = 0.4$. The rewards were $R_1 = 1$ and $R_2 = 2$.
+
+- **Trajectory IS:** $\rho_0\rho_1(R_1 + R_2) = 1.8 \cdot 0.4 \cdot 3 = 2.16$.
+- **Per-decision IS:** $\rho_0R_1 + \rho_0\rho_1R_2 = 1.8 + 1.44 = 3.24$. The first reward keeps its weight 1.8, instead
+  of being scaled down by an action taken after it.
+- **Doubly robust**, with $\hat Q(S_0, A_0) = 2.5$, $\hat V(S_0) = 2.6$, $\hat Q(S_1, A_1) = 1.5$ and
+  $\hat V(S_1) = 1.8$. Backwards: $\hat v^{(1)} = 1.8 + 0.4\,(2 - 1.5) = 2.0$, then
+  $\hat v^{(0)} = 2.6 + 1.8\,(1 + 2.0 - 2.5) = 3.5$.
+
+With one trajectory the three numbers differ widely; averaged over many trajectories, all are unbiased, and their
+variances differ.
+
+## Assumptions
+
+- **Coverage.** $\pi_b(a \mid s) > 0$ whenever $\pi_e(a \mid s) > 0$ in states $\pi_e$ can reach.
+- **Known behaviour probabilities.** Logged at decision time, or estimated, in which case the estimators inherit the
+  estimation error.
+- **No unobserved confounding.** $\pi_b$ chose actions using only the recorded state.
+
+## Pitfalls
+
+- **Long horizons.** Importance-sampling estimators degrade exponentially with the horizon. Report the effective sample
+  size of the weights alongside any estimate.
+- **Deterministic behaviour policies.** A greedy logging policy gives zero probability to the evaluation policy's
+  alternatives; no estimator can recover their value from its logs.

@@ -1,0 +1,159 @@
+---
+title: Markov decision process
+kind: concept
+summary: 'A Markov decision process is a tuple $(\Scal, \Acal, p, r, \gamma)$: states, actions, transition probabilities $p(s'' \mid s, a)$, rewards and a discount $\gamma$. A policy $\pi(a \mid s)$ chooses actions; its value $v_\pi(s)$ is the expected discounted return from $s$.'
+tags: [reinforcement-learning, markov-decision-processes, sequential-decisions, worked-example]
+aliases: [MDP, finite MDP, discounted return, discount factor, state-value function, action-value function, Q-function, stationary policy, Markov property]
+requires: [expectation, conditional-probability]
+partOf: [reinforcement-learning]
+related: [multi-armed-bandit, contextual-bandit, hidden-markov-model, linear-quadratic-regulator]
+references: [sutton2018, puterman1994, bellman1957]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **Markov decision process** (MDP) is a tuple $(\Scal, \Acal, p, r, \gamma)$. $\Scal$ is a set of states and $\Acal$ a
+set of actions. The **transition kernel** $p(s' \mid s, a)$ is the probability of moving to state $s'$ after taking
+action $a$ in state $s$. The **reward function** $r(s, a)$ is the expected reward received for that step. The
+**discount factor** $\gamma \in [0, 1)$ weights future rewards. At each time $t = 0, 1, 2, \dots$ an agent observes
+$S_t$, chooses $A_t$, receives $R_{t+1}$ and moves to $S_{t+1} \sim p(\cdot \mid S_t, A_t)$
+<Cite id="puterman1994" /> <Cite id="sutton2018" />.
+</Definition>
+
+## Intuition
+
+An MDP is the standard model of sequential decision-making under uncertainty. The agent's action changes both the
+reward it receives now and the state it will be in next, and the state determines which rewards are available later.
+A good action can therefore pay little now and much later. A <NoteLink to="multi-armed-bandit">multi-armed
+bandit</NoteLink> is the special case with a single state: actions have no lasting effect, and the only difficulty is
+learning which one pays most.
+
+The word **Markov** refers to the assumption that the next state and reward depend on the history only through the
+current state and action:
+
+$$
+\prob(S_{t+1} = s', R_{t+1} = x \mid S_0, A_0, R_1, \dots, S_t, A_t) = \prob(S_{t+1} = s', R_{t+1} = x \mid S_t, A_t).
+$$
+
+The state is defined to be whatever summary of the past makes this true. If the agent observes only part of the state,
+the process is a partially observable MDP, and the agent must act on a belief about the state.
+
+## Returns and discounting
+
+The agent's objective is the **return**, the discounted sum of future rewards from time $t$:
+
+$$
+G_t = R_{t+1} + \gamma R_{t+2} + \gamma^2 R_{t+3} + \dots = \sum_{k=0}^{\infty} \gamma^k R_{t+k+1}.
+$$
+
+The return satisfies the recursion $G_t = R_{t+1} + \gamma G_{t+1}$, which follows by taking the first term out of the
+sum and factoring $\gamma$ from the rest. Every result in dynamic programming and temporal-difference learning starts
+from this identity.
+
+**Why discount.** If every reward satisfies $\abs{R_t} \le R_{\max}$, then
+
+$$
+\abs{G_t} \le \sum_{k=0}^{\infty}\gamma^k R_{\max} = \frac{R_{\max}}{1 - \gamma},
+$$
+
+by the geometric series, so the return is finite for every behaviour. With $\gamma = 1$ an infinite sum of rewards can
+diverge, and two policies with infinite total reward cannot be ranked. The quantity $1/(1 - \gamma)$ is the **effective
+horizon**: rewards more than a few multiples of it steps ahead carry negligible weight. $\gamma = 0.9$ gives a horizon of
+10 steps, $\gamma = 0.99$ a horizon of 100. Discounting can also be read as a probability $1 - \gamma$ that the process
+stops at each step.
+
+**Episodic tasks.** Many tasks end: a game is won or lost, a robot reaches its goal. A terminal state is modelled as
+absorbing, with every later reward 0, so the return is a finite sum and $\gamma = 1$ is allowed if every policy
+terminates with probability 1.
+
+## Policies
+
+A **policy** $\pi(a \mid s)$ is a probability distribution over actions for each state. A policy is **deterministic**
+if it puts all its mass on one action, written $a = \pi(s)$. It is **stationary** because it does not depend on $t$.
+For a discounted MDP with finite $\Scal$ and $\Acal$, a stationary deterministic policy is optimal among all policies,
+including those that look at the whole history or randomise <Cite id="puterman1994" />. The
+<NoteLink to="bellman-equations">Bellman optimality equation</NoteLink> shows why: the best action from a state
+depends only on that state.
+
+A policy and a starting state define a Markov chain over states. Its transition matrix $P_\pi$ has entries
+$P_\pi(s, s') = \sum_a \pi(a \mid s)\,p(s' \mid s, a)$, and its expected one-step reward is
+$r_\pi(s) = \sum_a \pi(a \mid s)\,r(s, a)$.
+
+## Value functions
+
+The **state-value function** of a policy is its expected return from each state:
+
+$$
+v_\pi(s) = \expect_\pi\brack{G_t \mid S_t = s}.
+$$
+
+The expectation is over the actions drawn from $\pi$ and the transitions drawn from $p$. The **action-value function**
+fixes the first action and follows $\pi$ afterwards:
+
+$$
+q_\pi(s, a) = \expect_\pi\brack{G_t \mid S_t = s, A_t = a}.
+$$
+
+The two are related by averaging over the first action, $v_\pi(s) = \sum_a \pi(a \mid s)\,q_\pi(s, a)$, by the
+<NoteLink to="law-of-total-expectation">law of total expectation</NoteLink>. The **optimal** value functions are
+$v_*(s) = \max_\pi v_\pi(s)$ and $q_*(s, a) = \max_\pi q_\pi(s, a)$. A policy is optimal if its values equal $v_*$ in
+every state simultaneously. Such a policy exists for finite discounted MDPs, and acting greedily with respect to $q_*$,
+$\pi_*(s) = \argmax_a q_*(s, a)$, is one <Cite id="bellman1957" />.
+
+The action-value function is what makes learning without a model possible: choosing the best action from $q$ needs no
+knowledge of $p$, whereas choosing it from $v$ requires a one-step look-ahead through $p$.
+
+## Worked example
+
+A machine is either **good** or **worn**. In each period the operator either **runs** it or **repairs** it:
+
+| state | action | reward | next state |
+| --- | --- | --- | --- |
+| good | run | 2 | good with probability 0.8, worn with 0.2 |
+| good | repair | −1 | good |
+| worn | run | 1 | worn |
+| worn | repair | −1 | good |
+
+Take $\gamma = 0.9$. Consider the policy "always run".
+
+- From **worn**, running keeps the machine worn and pays 1 per period, so
+  $v(\text{worn}) = 1 + 0.9 + 0.9^2 + \dots = 1/(1 - 0.9) = 10$.
+- From **good**, condition on the first transition. The first reward is 2. With probability 0.8 the machine is still
+  good, and the return from there has expected value $v(\text{good})$ again; with probability 0.2 it is worn, with
+  expected return 10. So $v(\text{good}) = 2 + 0.9\,(0.8\,v(\text{good}) + 0.2 \cdot 10)$, which gives
+  $0.28\,v(\text{good}) = 3.8$ and $v(\text{good}) = 13.57$.
+
+Now consider "run when good, repair when worn". From worn the operator pays 1 and returns to good:
+$v(\text{worn}) = -1 + 0.9\,v(\text{good})$. From good, $v(\text{good}) = 2 + 0.9\,(0.8\,v(\text{good}) + 0.2\,v(\text{worn}))$.
+Substituting the first equation into the second gives $0.118\,v(\text{good}) = 1.82$, so $v(\text{good}) = 15.42$ and
+$v(\text{worn}) = 12.88$. The repair policy is better in both states, although a repair costs a period's reward. The
+<NoteLink to="policy-iteration">policy iteration</NoteLink> note shows that it is optimal.
+
+## Variants
+
+- **Average reward.** For continuing tasks without discounting, the objective is the long-run reward per step,
+  $\lim_{T \to \infty}\frac1T\expect\brack{\sum_{t=1}^{T}R_t}$ <Cite id="puterman1994" />.
+- **Finite horizon.** The return stops at a fixed time $T$. Optimal policies then depend on the time remaining.
+- **Partial observability.** In a POMDP the agent sees an observation drawn from $p(o \mid s)$, not the state. Its
+  belief $\prob(S_t \mid \text{history})$ is a sufficient statistic and follows a filtering recursion like that of a
+  <NoteLink to="hidden-markov-model">hidden Markov model</NoteLink>.
+- **Continuous states and actions.** $\Scal$ and $\Acal$ can be subsets of $\reals^n$, with $p$ a density. The
+  <NoteLink to="linear-quadratic-regulator">linear-quadratic regulator</NoteLink>, with linear dynamics and quadratic
+  costs, is the case in which the optimal policy has a closed form.
+
+## Assumptions
+
+- **Markov state.** The next state and reward depend only on the current state and action.
+- **Stationarity.** $p$ and $r$ do not change over time.
+- **Known reward.** The reward encodes the designer's objective exactly. Maximising a mis-specified reward produces
+  behaviour that scores well and does the wrong thing.
+
+## Pitfalls
+
+- **Treating observations as states.** A single video frame does not show velocities, so it is not a Markov state. Stack
+  frames or keep a recurrent memory.
+- **Choosing $\gamma$ as a tuning knob only.** $\gamma$ changes the problem: with a small $\gamma$ the optimal policy
+  ignores consequences more than $1/(1 - \gamma)$ steps away.
+- **Comparing returns across discount factors.** Values scale roughly with $1/(1 - \gamma)$, so they are comparable only
+  at the same $\gamma$.

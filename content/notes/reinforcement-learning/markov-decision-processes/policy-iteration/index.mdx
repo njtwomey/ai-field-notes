@@ -1,0 +1,131 @@
+---
+title: Policy iteration
+kind: concept
+summary: 'Policy iteration solves a known MDP by alternating exact evaluation of the current policy, $v_\pi = (I - \gamma P_\pi)^{-1} r_\pi$, with greedy improvement. The policy improvement theorem makes each new policy at least as good, so it reaches an optimal policy in finitely many steps.'
+tags: [reinforcement-learning, markov-decision-processes, dynamic-programming, planning, worked-example]
+aliases: [Howard's policy iteration, policy improvement theorem, policy evaluation, policy improvement, generalised policy iteration, modified policy iteration]
+requires: [bellman-equations]
+partOf: [reinforcement-learning]
+related: [value-iteration, actor-critic]
+references: [howard1960, puterman1994, sutton2018]
+status: draft
+updated: 2026-09-27
+---
+
+import { GridworldPlanner } from '../_shared/GridworldPlanner'
+
+<Definition>
+**Policy iteration** finds an optimal deterministic policy of a finite
+<NoteLink to="markov-decision-process">Markov decision process</NoteLink> with known model. Starting from any
+deterministic policy $\pi_0$, it repeats two steps:
+
+1. **Evaluation:** solve the linear Bellman expectation equations for $v_{\pi_k}$.
+2. **Improvement:** set $\pi_{k+1}(s) \in \argmax_a q_{\pi_k}(s, a)$, where
+   $q_{\pi_k}(s, a) = r(s, a) + \gamma\sum_{s'}p(s' \mid s, a)\,v_{\pi_k}(s')$, keeping $\pi_k(s)$ when it is among
+   the maximisers.
+
+It stops when the policy no longer changes <Cite id="howard1960" />.
+</Definition>
+
+## Intuition
+
+Evaluation answers "how good is this policy from each state?". Improvement asks, state by state, "would a different
+first action, followed by the current policy, do better?". If so, switching to that action everywhere it helps cannot
+hurt, because the gain at the first step is kept at every later visit. Each round therefore produces a policy at least
+as good in every state, and there are only finitely many deterministic policies.
+
+<GridworldPlanner algorithm="policy-iteration" />
+
+## Policy evaluation
+
+The <NoteLink to="bellman-equations">Bellman expectation equation</NoteLink> for a deterministic policy is the linear
+system $(\eye - \gamma P_\pi)v_\pi = r_\pi$, with $P_\pi(s, s') = p(s' \mid s, \pi(s))$ and $r_\pi(s) = r(s, \pi(s))$.
+It has a unique solution for $\gamma < 1$. For $n$ states it can be solved directly in $O(n^3)$ operations, or
+approximately by iterating $v \leftarrow r_\pi + \gamma P_\pi v$, which converges geometrically because the map is a
+$\gamma$-contraction.
+
+## The policy improvement theorem
+
+**Theorem.** Let $\pi$ and $\pi'$ be deterministic policies with $q_\pi(s, \pi'(s)) \ge v_\pi(s)$ for every state $s$.
+Then $v_{\pi'}(s) \ge v_\pi(s)$ for every $s$. If the first inequality is strict at some state, the second is strict
+there too <Cite id="sutton2018" />.
+
+**Proof.** In operator form the hypothesis reads $T_{\pi'}v_\pi \ge v_\pi$, because
+$(T_{\pi'}v_\pi)(s) = r(s, \pi'(s)) + \gamma\sum_{s'}p(s' \mid s, \pi'(s))\,v_\pi(s') = q_\pi(s, \pi'(s))$. The operator
+$T_{\pi'}$ is monotone: $v \le w$ implies $T_{\pi'}v \le T_{\pi'}w$, since $P_{\pi'}$ has non-negative entries. Apply
+$T_{\pi'}$ repeatedly to the hypothesis:
+
+$$
+v_\pi \le T_{\pi'}v_\pi \le T_{\pi'}^2 v_\pi \le T_{\pi'}^3 v_\pi \le \cdots
+$$
+
+$T_{\pi'}$ is a $\gamma$-contraction with fixed point $v_{\pi'}$, so the sequence converges to $v_{\pi'}$, and
+$v_\pi \le v_{\pi'}$. If $(T_{\pi'}v_\pi)(s) > v_\pi(s)$ at some $s$, then $v_{\pi'}(s) \ge (T_{\pi'}v_\pi)(s) > v_\pi(s)$.
+
+The same argument unrolled in time reads: take $\pi'$'s action for one step and then follow $\pi$; this is at least as
+good as $\pi$. Taking $\pi'$ for two steps and then $\pi$ is at least as good as one step, and so on.
+
+## Termination and optimality
+
+The greedy policy $\pi_{k+1}$ satisfies $q_{\pi_k}(s, \pi_{k+1}(s)) = \max_a q_{\pi_k}(s, a) \ge q_{\pi_k}(s, \pi_k(s)) = v_{\pi_k}(s)$,
+so the theorem gives $v_{\pi_{k+1}} \ge v_{\pi_k}$.
+
+- **The values never decrease, and increase strictly while the policy changes.** The tie-breaking rule keeps
+  $\pi_k(s)$ when it is a maximiser, so the policy changes at $s$ only when some action is strictly better there. Then
+  the improvement is strict at $s$, and no policy can repeat.
+- **Finite termination.** There are $\abs{\Acal}^{\abs{\Scal}}$ deterministic policies, and none repeats, so the
+  algorithm stops after finitely many rounds.
+- **Optimality at termination.** When $\pi_{k+1} = \pi_k$, every state satisfies
+  $v_{\pi_k}(s) = \max_a[r(s, a) + \gamma\sum_{s'}p(s' \mid s, a)\,v_{\pi_k}(s')]$. That is the Bellman optimality
+  equation, whose unique solution is $v_*$, so $\pi_k$ is optimal.
+
+In practice the number of rounds is small: often fewer than ten, even with thousands of states. Howard introduced the
+method and observed this <Cite id="howard1960" />. The known worst-case bounds are far larger than what is seen.
+
+## Worked example
+
+Take the machine MDP of the <NoteLink to="markov-decision-process">MDP</NoteLink> note with $\gamma = 0.9$: running a
+good machine pays 2 and keeps it good with probability 0.8, else it wears; running a worn machine pays 1 and keeps it
+worn; a repair costs 1 and makes the machine good. Start from $\pi_0 = $ "always run".
+
+**Evaluate $\pi_0$.** The MDP note solves the two equations: $v_{\pi_0} = (13.57, 10.00)$ for (good, worn).
+
+**Improve.** Compute $q_{\pi_0}$ from $v_{\pi_0}$:
+
+| state | run | repair |
+| --- | --- | --- |
+| good | $2 + 0.9\,(0.8 \cdot 13.57 + 0.2 \cdot 10) = 13.57$ | $-1 + 0.9 \cdot 13.57 = 11.21$ |
+| worn | $1 + 0.9 \cdot 10 = 10.00$ | $-1 + 0.9 \cdot 13.57 = 11.21$ |
+
+Repair beats running in the worn state, by 1.21, so $\pi_1$ = "run when good, repair when worn".
+
+**Evaluate $\pi_1$.** Solving the linear system gives $v_{\pi_1} = (15.42, 12.88)$. Both states improved, as the
+theorem promises, including the good state whose action did not change: a good machine eventually wears, and it is
+then repaired instead of run worn for ever.
+
+**Improve again.** With $v_{\pi_1}$, running a good machine is worth 15.42 against 12.88 for a repair, and repairing a
+worn machine 12.88 against 12.59 for running it. No action changes, so $\pi_1$ is optimal. Policy iteration took two
+evaluations; <NoteLink to="value-iteration">value iteration</NoteLink> took 70 sweeps to get the values within 0.01.
+
+## Variants
+
+- **Modified policy iteration.** Evaluate approximately with $m$ sweeps of $v \leftarrow T_\pi v$ instead of solving
+  exactly. $m = 1$ is value iteration; $m = \infty$ is policy iteration <Cite id="puterman1994" />.
+- **Generalised policy iteration.** Any scheme that interleaves partial evaluation and partial improvement, including
+  learning methods that estimate values from samples. <NoteLink to="sarsa">SARSA</NoteLink> and
+  <NoteLink to="actor-critic">actor-critic</NoteLink> methods are of this form <Cite id="sutton2018" />.
+- **Policy iteration on action values.** Evaluate $q_\pi$ instead of $v_\pi$, so that improvement needs no model:
+  $\pi'(s) = \argmax_a q_\pi(s, a)$.
+
+## Cost
+
+Each round costs one linear solve, $O(\abs{\Scal}^3)$, plus the improvement step, $O(\abs{\Scal}^2\abs{\Acal})$.
+Rounds are expensive and few; value iteration's sweeps are cheap and many. Policy iteration wins when $\gamma$ is close
+to 1, where value iteration needs $O(1/(1 - \gamma))$ sweeps.
+
+## Pitfalls
+
+- **Tie-breaking.** Switching between equally good actions can make the policy cycle among optimal policies without
+  ever reporting convergence. Keep the current action when it is a maximiser.
+- **Exact evaluation at scale.** The linear solve is infeasible for millions of states. Approximate evaluation with
+  function approximation loses the monotone improvement guarantee.

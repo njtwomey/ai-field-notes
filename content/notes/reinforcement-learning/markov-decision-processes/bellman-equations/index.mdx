@@ -1,0 +1,182 @@
+---
+title: Bellman equations
+kind: concept
+summary: 'The Bellman equations write a value as immediate reward plus discounted next value. For a policy, $v_\pi = r_\pi + \gamma P_\pi v_\pi$ is linear; for optimal control, $v_*(s) = \max_a [r(s,a) + \gamma \sum_{s''} p(s'' \mid s,a) v_*(s'')]$. Both operators are $\gamma$-contractions.'
+tags: [reinforcement-learning, markov-decision-processes, dynamic-programming, fixed-point, worked-example]
+aliases: [Bellman equation, Bellman expectation equation, Bellman optimality equation, Bellman operator, Bellman backup, contraction mapping, Banach fixed-point theorem]
+requires: [markov-decision-process, law-of-total-expectation]
+partOf: [reinforcement-learning]
+related: [matrix-inverse, vector-norms, hamilton-jacobi-bellman-equation]
+references: [bellman1957, puterman1994, sutton2018, bertsekas2017]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For a policy $\pi$ in a <NoteLink to="markov-decision-process">Markov decision process</NoteLink>, the **Bellman
+expectation equation** states that for every state $s$,
+
+$$
+v_\pi(s) = \sum_a \pi(a \mid s)\brack{r(s, a) + \gamma\sum_{s'}p(s' \mid s, a)\,v_\pi(s')}.
+$$
+
+The **Bellman optimality equation** replaces the average over actions by a maximum:
+
+$$
+v_*(s) = \max_a\brack{r(s, a) + \gamma\sum_{s'}p(s' \mid s, a)\,v_*(s')}.
+$$
+
+Each equation has exactly one solution when $\gamma < 1$: the value of $\pi$ and the optimal value
+<Cite id="bellman1957" />.
+</Definition>
+
+## Intuition
+
+The value of a state is what the agent gets now plus what it can expect to get from wherever it lands, discounted by
+one step. The equations turn an infinite sum over the future into a relation between neighbouring states. Dynamic
+programming, temporal-difference learning and Q-learning all work by making a value table satisfy one of these
+equations.
+
+Bellman's **principle of optimality** says the same thing for control: whatever the first action, an optimal policy
+must act optimally from the state that action leads to <Cite id="bellman1957" />. So the best first action is the one
+that maximises immediate reward plus the discounted optimal value of the next state.
+
+## Deriving the expectation equation
+
+Start from the recursion of the return, $G_t = R_{t+1} + \gamma G_{t+1}$, and take expectations given $S_t = s$ under
+$\pi$. Condition on the first action $A_t = a$ and the next state $S_{t+1} = s'$ with the
+<NoteLink to="law-of-total-expectation">law of total expectation</NoteLink>:
+
+$$
+v_\pi(s) = \sum_a \pi(a \mid s)\brack{\expect\brack{R_{t+1} \mid s, a} + \gamma\sum_{s'}p(s' \mid s, a)\,
+\expect_\pi\brack{G_{t+1} \mid S_t = s, A_t = a, S_{t+1} = s'}}.
+$$
+
+The first expectation is $r(s, a)$ by definition. For the second, the Markov property says that the future after time
+$t+1$ depends on the past only through $S_{t+1}$, and $\pi$ is stationary, so
+$\expect_\pi[G_{t+1} \mid S_t = s, A_t = a, S_{t+1} = s'] = \expect_\pi[G_{t+1} \mid S_{t+1} = s'] = v_\pi(s')$.
+Substituting gives the Bellman expectation equation.
+
+The same steps with the first action fixed give the equation for action values:
+
+$$
+q_\pi(s, a) = r(s, a) + \gamma\sum_{s'}p(s' \mid s, a)\sum_{a'}\pi(a' \mid s')\,q_\pi(s', a').
+$$
+
+## Matrix form and exact solution
+
+For finite $\Scal$ with $n$ states, stack the values into a vector $v_\pi \in \reals^n$. With the policy's transition
+matrix $P_\pi$ and reward vector $r_\pi$, defined in the <NoteLink to="markov-decision-process">MDP</NoteLink> note,
+the expectation equation is the linear system
+
+$$
+v_\pi = r_\pi + \gamma P_\pi v_\pi \quad\Longleftrightarrow\quad (\eye - \gamma P_\pi)\,v_\pi = r_\pi.
+$$
+
+The matrix $\eye - \gamma P_\pi$ is invertible. $P_\pi$ is a stochastic matrix: its entries are non-negative and each
+row sums to 1, so $\norm{P_\pi x}_\infty \le \norm{x}_\infty$ for every $x$. If $(\eye - \gamma P_\pi)x = 0$, then
+$x = \gamma P_\pi x$ and $\norm{x}_\infty \le \gamma\norm{x}_\infty$, which forces $x = 0$ when $\gamma < 1$. Hence
+
+$$
+v_\pi = (\eye - \gamma P_\pi)^{-1}r_\pi = \sum_{k=0}^{\infty}\gamma^k P_\pi^k\,r_\pi.
+$$
+
+The series is the definition of the value read backwards: $P_\pi^k r_\pi$ is the expected reward $k$ steps ahead.
+Solving the system costs $O(n^3)$, which is practical for thousands of states and is the evaluation step of
+<NoteLink to="policy-iteration">policy iteration</NoteLink>.
+
+## Bellman operators are contractions
+
+Define two maps on value vectors $v \in \reals^n$:
+
+$$
+(T_\pi v)(s) = \sum_a \pi(a \mid s)\brack{r(s, a) + \gamma\sum_{s'}p(s' \mid s, a)\,v(s')},
+\qquad
+(T v)(s) = \max_a\brack{r(s, a) + \gamma\sum_{s'}p(s' \mid s, a)\,v(s')}.
+$$
+
+The Bellman equations say that $v_\pi$ is a fixed point of $T_\pi$ and $v_*$ a fixed point of $T$. Both maps are
+**$\gamma$-contractions** in the sup norm $\norm{v}_\infty = \max_s\abs{v(s)}$:
+
+$$
+\norm{Tv - Tw}_\infty \le \gamma\norm{v - w}_\infty.
+$$
+
+**Proof for $T$.** For any two functions $f$ and $g$ of $a$, $\abs{\max_a f(a) - \max_a g(a)} \le \max_a\abs{f(a) - g(a)}$:
+if the first maximum is the larger and is attained at $a_1$, then
+$\max_a f(a) - \max_a g(a) \le f(a_1) - g(a_1)$. Apply this with $f$ and $g$ the bracketed terms for $v$ and $w$. The
+rewards cancel, so for every state $s$
+
+$$
+\abs{(Tv)(s) - (Tw)(s)} \le \max_a \gamma\sum_{s'}p(s' \mid s, a)\abs{v(s') - w(s')} \le \gamma\norm{v - w}_\infty,
+$$
+
+because the probabilities $p(\cdot \mid s, a)$ sum to 1. Taking the maximum over $s$ gives the claim. The proof for
+$T_\pi$ is the same with the maximum replaced by an average, and the inequality holds without the first step.
+
+By the **Banach fixed-point theorem**, a contraction on a complete space has exactly one fixed point, and iterating the
+map from any starting vector converges to it geometrically: $\norm{T^k v - v_*}_\infty \le \gamma^k\norm{v - v_*}_\infty$.
+This is the convergence proof of <NoteLink to="value-iteration">value iteration</NoteLink>.
+
+## The fixed point of the optimality equation is optimal
+
+Contraction gives $T$ a unique fixed point $\bar v$. Two further facts show that $\bar v = v_*$, the best value any
+policy can reach.
+
+**Monotonicity.** If $v \le w$ componentwise then $Tv \le Tw$ and $T_\pi v \le T_\pi w$, because the probabilities are
+non-negative.
+
+**No policy beats $\bar v$.** For any stationary policy $\pi$, averaging over actions is at most maximising over them,
+so $v_\pi = T_\pi v_\pi \le T v_\pi$. Applying $T$ repeatedly and using monotonicity,
+$v_\pi \le Tv_\pi \le T^2 v_\pi \le \dots$, and the sequence converges to $\bar v$. So $v_\pi \le \bar v$.
+
+**Some policy attains $\bar v$.** Let $\bar\pi(s)$ be an action that attains the maximum in $(T\bar v)(s)$. Then
+$T_{\bar\pi}\bar v = T\bar v = \bar v$, so $\bar v$ is the fixed point of $T_{\bar\pi}$, which is $v_{\bar\pi}$.
+
+Together, $\bar v = \max_\pi v_\pi = v_*$, and any policy that is greedy with respect to $v_*$ is optimal. Puterman
+extends the argument to history-dependent and randomised policies <Cite id="puterman1994" />.
+
+The optimal action values satisfy
+
+$$
+q_*(s, a) = r(s, a) + \gamma\sum_{s'}p(s' \mid s, a)\max_{a'}q_*(s', a'),
+$$
+
+with $v_*(s) = \max_a q_*(s, a)$. This form has the maximum inside the expectation, which is what lets
+<NoteLink to="q-learning">Q-learning</NoteLink> estimate it from sampled transitions.
+
+## Worked example
+
+Take the machine MDP of the <NoteLink to="markov-decision-process">MDP</NoteLink> note with $\gamma = 0.9$: a good
+machine run pays 2 and stays good with probability 0.8; a worn machine run pays 1 and stays worn; a repair costs 1 and
+makes the machine good. The candidate $v_*(\text{good}) = 910/59 = 15.42$ and $v_*(\text{worn}) = 760/59 = 12.88$
+gives the action values
+
+| state | run | repair |
+| --- | --- | --- |
+| good | $2 + 0.9\,(0.8 \cdot 15.42 + 0.2 \cdot 12.88) = 15.42$ | $-1 + 0.9 \cdot 15.42 = 12.88$ |
+| worn | $1 + 0.9 \cdot 12.88 = 12.59$ | $-1 + 0.9 \cdot 15.42 = 12.88$ |
+
+The maximum in each row equals the candidate value: 15.42 in the good state, 12.88 in the worn state. The candidate
+satisfies the optimality equation, so it is $v_*$ by uniqueness. The greedy policy runs a good machine and repairs a
+worn one. Repairing a worn machine beats running it by only $0.29$, less than a third of one period's reward.
+
+## Continuous time
+
+When time is continuous, letting the step length shrink to zero turns the optimality equation into a partial
+differential equation for the value function, the <NoteLink to="hamilton-jacobi-bellman-equation">Hamilton–Jacobi–Bellman
+equation</NoteLink> of optimal control.
+
+## Assumptions
+
+- **Discounting or termination.** The contraction argument needs $\gamma < 1$. With $\gamma = 1$ it needs every policy
+  to reach a terminal state with probability 1.
+- **Finite, known model.** Exact solution requires $p$ and $r$. Sampling-based methods replace the sums by samples.
+- **Bounded rewards.** Values then lie in $[-R_{\max}, R_{\max}]/(1 - \gamma)$ and the sup norm is finite.
+
+## Pitfalls
+
+- **Confusing the two equations.** The expectation equation is linear and evaluates a given policy. The optimality
+  equation is nonlinear because of the maximum and cannot be solved by one matrix inversion.
+- **Assuming contraction under function approximation.** A contraction followed by a projection onto a function class
+  need not contract. Fitted value iteration and deep Q-learning can diverge for this reason.

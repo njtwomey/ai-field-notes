@@ -1,0 +1,140 @@
+---
+title: Actor-critic methods
+kind: concept
+summary: 'An actor-critic method learns a policy (the actor) by policy gradient, weighting $\nabla \log \pi_{\thetavec}(a \mid s)$ by an advantage estimated from a learned value function (the critic). GAE averages $n$-step advantages into $\sum_l (\gamma\lambda)^l \delta_{t+l}$, a sum of TD errors.'
+tags: [reinforcement-learning, policy-methods, temporal-difference, variance-reduction, worked-example]
+aliases: [actor-critic, advantage actor-critic, A2C, A3C, asynchronous advantage actor-critic, advantage function, generalised advantage estimation, generalized advantage estimation, GAE, critic, entropy bonus]
+requires: [policy-gradient-theorem, temporal-difference-learning]
+partOf: [reinforcement-learning]
+related: [policy-iteration, trust-region-and-ppo, deterministic-policy-gradients]
+references: [sutton2018, mnih2016, schulman2016, sutton2000]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+An **actor-critic** method maintains two learned functions. The **actor** is a policy $\pi_{\thetavec}(a \mid s)$,
+updated along a policy-gradient estimate. The **critic** is a value function $V_{\wvec}(s)$, learned by
+<NoteLink to="temporal-difference-learning">temporal-difference learning</NoteLink> and used to estimate the
+**advantage** $A_\pi(s, a) = q_\pi(s, a) - v_\pi(s)$ of each action taken. The actor update is
+
+$$
+\thetavec \leftarrow \thetavec + \alpha_{\thetavec}\,\hat A_t\,\nabla_{\thetavec}\log\pi_{\thetavec}(A_t \mid S_t),
+$$
+
+where $\hat A_t$ is the critic's advantage estimate <Cite id="sutton2018" />.
+</Definition>
+
+## Intuition
+
+The <NoteLink to="policy-gradient-theorem">policy gradient theorem</NoteLink> weights each action's score by how good
+the action was. REINFORCE measures that with the full return, which is unbiased and noisy, and must wait for the episode
+to end. A critic answers the same question after one step: the action was good if the reward plus the value of where
+it led beats the value of where it started. The actor proposes, the critic judges, and each improves the other. The
+arrangement is generalised <NoteLink to="policy-iteration">policy iteration</NoteLink> with a parametric policy.
+
+## The TD error estimates the advantage
+
+With a critic equal to the true value, $V = v_\pi$, the one-step TD error is
+$\delta_t = R_{t+1} + \gamma v_\pi(S_{t+1}) - v_\pi(S_t)$. Its conditional mean given the state and action is
+
+$$
+\expect\brack{\delta_t \mid S_t = s, A_t = a} = \expect\brack{R_{t+1} + \gamma v_\pi(S_{t+1}) \mid s, a} - v_\pi(s) = q_\pi(s, a) - v_\pi(s),
+$$
+
+by the Bellman equation for $q_\pi$. So $\delta_t$ is an unbiased sample of the advantage, and replacing $G_t - b(S_t)$
+by $\delta_t$ in the policy gradient changes its variance but not its mean. With an imperfect critic, $\delta_t$ is
+biased by the critic's errors.
+
+**One-step actor-critic.** After each transition:
+
+1. compute $\delta_t = R_{t+1} + \gamma V_{\wvec}(S_{t+1}) - V_{\wvec}(S_t)$, with $V = 0$ at terminal states;
+2. update the critic, $\wvec \leftarrow \wvec + \alpha_{\wvec}\,\delta_t\nabla_{\wvec}V_{\wvec}(S_t)$;
+3. update the actor, $\thetavec \leftarrow \thetavec + \alpha_{\thetavec}\,\delta_t\nabla_{\thetavec}\log\pi_{\thetavec}(A_t \mid S_t)$.
+
+The critic usually learns faster than the actor, so that the actor sees a critic adapted to its current policy.
+
+## Generalised advantage estimation
+
+Between the one-step TD error and the Monte Carlo advantage lie the **$n$-step advantage estimates**
+
+$$
+\hat A_t^{(n)} = R_{t+1} + \gamma R_{t+2} + \dots + \gamma^{n-1}R_{t+n} + \gamma^n V(S_{t+n}) - V(S_t).
+$$
+
+Each is a sum of TD errors. Writing $\delta_{t+l} = R_{t+l+1} + \gamma V(S_{t+l+1}) - V(S_{t+l})$ and summing with
+weights $\gamma^l$, the intermediate values cancel in pairs:
+
+$$
+\sum_{l=0}^{n-1}\gamma^l\delta_{t+l} = \sum_{l=0}^{n-1}\gamma^l R_{t+l+1} + \gamma^n V(S_{t+n}) - V(S_t) = \hat A_t^{(n)}.
+$$
+
+Small $n$ relies on the critic and has low variance and high bias; large $n$ relies on sampled rewards and has the
+opposite trade-off. **Generalised advantage estimation** (GAE) averages all of them with geometric weights, as the
+$\lambda$-return does <Cite id="schulman2016" />:
+
+$$
+\hat A_t^{\text{GAE}(\gamma, \lambda)} = (1 - \lambda)\sum_{n=1}^{\infty}\lambda^{n-1}\hat A_t^{(n)}
+= (1 - \lambda)\sum_{n=1}^{\infty}\lambda^{n-1}\sum_{l=0}^{n-1}\gamma^l\delta_{t+l}.
+$$
+
+Exchange the sums. The TD error $\delta_{t+l}$ appears in every $\hat A_t^{(n)}$ with $n \ge l + 1$, so its total
+weight is $(1 - \lambda)\gamma^l\sum_{n \ge l+1}\lambda^{n-1} = (1 - \lambda)\gamma^l\lambda^l/(1 - \lambda) = (\gamma\lambda)^l$.
+Hence
+
+$$
+\hat A_t^{\text{GAE}(\gamma, \lambda)} = \sum_{l=0}^{\infty}(\gamma\lambda)^l\,\delta_{t+l}.
+$$
+
+$\lambda = 0$ gives the one-step TD error $\delta_t$. $\lambda = 1$ gives $\sum_l\gamma^l\delta_{t+l} = G_t - V(S_t)$,
+the Monte Carlo advantage with a value baseline. Values of $\lambda$ between about 0.92 and 0.99 worked best in its experiments
+<Cite id="schulman2016" />. The estimates for a whole trajectory are computed backwards in one pass with the recursion
+$\hat A_t = \delta_t + \gamma\lambda\hat A_{t+1}$, which is how <NoteLink to="trust-region-and-ppo">PPO</NoteLink>
+implementations compute them.
+
+## A2C and A3C
+
+**A3C** (asynchronous advantage actor-critic) runs many actors in parallel threads, each on its own copy of the
+environment. Each collects a few steps, computes $n$-step advantages with a shared critic, and applies its gradients
+asynchronously to shared parameters <Cite id="mnih2016" />. Parallel actors decorrelate the data, which replaces the
+replay buffer of a <NoteLink to="deep-q-network">DQN</NoteLink> and keeps learning on-policy. **A2C** is the
+synchronous version: wait for all actors, then take one batched gradient step. It uses a GPU more efficiently.
+
+Both share one network body between actor and critic, with a policy head and a value head, and minimise
+
+$$
+L = -\hat A_t\log\pi_{\thetavec}(A_t \mid S_t) + c_v\paren{\hat G_t - V(S_t)}^2 - c_e\,\entropy\brack{\pi_{\thetavec}(\cdot \mid S_t)}.
+$$
+
+The entropy term, weighted by $c_e$, penalises premature collapse onto a single action and keeps exploration going
+<Cite id="mnih2016" />.
+
+## Worked example
+
+A three-step episode has rewards $R_1 = 1$, $R_2 = 0$, $R_3 = 2$ and ends in a terminal state. The critic's values
+along the way are $V(S_0) = 1.0$, $V(S_1) = 1.5$, $V(S_2) = 0.5$ and $V(S_3) = 0$. Take $\gamma = 0.9$ and
+$\lambda = 0.8$, so $\gamma\lambda = 0.72$.
+
+- TD errors: $\delta_0 = 1 + 0.9 \cdot 1.5 - 1 = 1.35$, $\delta_1 = 0 + 0.9 \cdot 0.5 - 1.5 = -1.05$,
+  $\delta_2 = 2 + 0 - 0.5 = 1.5$.
+- GAE backwards: $\hat A_2 = 1.5$, $\hat A_1 = -1.05 + 0.72 \cdot 1.5 = 0.03$,
+  $\hat A_0 = 1.35 + 0.72 \cdot 0.03 = 1.372$.
+- For comparison at $t = 0$: $\lambda = 0$ gives $1.35$, and $\lambda = 1$ gives
+  $1.35 + 0.9 \cdot (-1.05) + 0.81 \cdot 1.5 = 1.62$, which equals $G_0 - V(S_0) = 1 + 0.81 \cdot 2 - 1$.
+
+At $t = 1$ the critic expected 1.5 and the step itself disappointed ($\delta_1 < 0$), but the reward that followed made
+up for it, and the GAE estimate is close to zero.
+
+## Assumptions
+
+- **A critic close to $v_\pi$.** The advantage estimate is biased by the critic's error, less so for $\lambda$ near 1.
+- **On-policy data.** The advantage refers to the current policy. Off-policy actor-critic methods correct for the
+  mismatch with importance weights or, as in <NoteLink to="deterministic-policy-gradients">DDPG and SAC</NoteLink>,
+  use a critic of action values.
+
+## Pitfalls
+
+- **Unnormalised advantages.** Their scale changes as rewards change. Normalising them to zero mean and unit variance
+  within a batch keeps the actor's step size stable.
+- **Sharing a body without balancing the losses.** The value loss can dominate the policy loss in a shared network;
+  $c_v$ must be tuned.
