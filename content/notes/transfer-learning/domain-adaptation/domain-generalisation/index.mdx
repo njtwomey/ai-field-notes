@@ -1,0 +1,130 @@
+---
+title: Domain generalisation
+kind: concept
+summary: 'Domain generalisation trains on several source domains so that a predictor works on an unseen domain, with no target data at all. Methods seek relations that are invariant across domains, as IRM does; under fair model selection, ERM on pooled domains is hard to beat.'
+tags: [transfer-learning, domain-adaptation, generalisation, causality, worked-example]
+aliases: [multi-source domain generalisation, out-of-domain generalisation, invariant prediction, IRMv1, DomainBed]
+requires: [domain-adaptation-theory, empirical-risk-minimisation]
+related: [robustness-to-distribution-shift, domain-adversarial-training, feature-alignment-methods, meta-learning, dataset-shift]
+references: [blanchard2011, muandet2013, arjovsky2019, rosenfeld2021, gulrajani2021, li2018mldg, sagawa2020]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+In **domain generalisation**, training data come from several source domains, or *environments*, $e \in \Ecal_{\text{tr}}$,
+each with its own distribution $p^e(\xvec, y)$, and the environment of each example is known. The goal is a predictor
+$f$ with low risk $R^e(f) = \expect_{p^e}\brack{\ell(f(\xvec), y)}$ on environments not seen during training, from which
+no data, labelled or unlabelled, are available. It differs from domain adaptation, which sees unlabelled target inputs
+<Cite id="blanchard2011" /> <Cite id="muandet2013" />.
+</Definition>
+
+## Intuition
+
+With one source domain, nothing distinguishes a stable relation between input and label from an accident of how the data
+were collected. With several, relations that hold in every domain can be told apart from relations that vary. A
+classifier of cows and camels trained on photographs in which cows stand on grass and camels on sand can use the
+background; if the proportion of grassy camels differs between training environments, the background's predictive power
+changes across them and the animal's shape does not. Domain generalisation methods try to learn the relations that do
+not change, on the assumption that they will not change in the next environment either.
+
+## Formal views
+
+- **A distribution over domains.** Blanchard et al. treat each domain's distribution as a draw from a
+  meta-distribution, and learn a classifier that takes the domain's input distribution as a second argument. A new
+  domain's unlabelled test inputs then select its classifier, and generalisation bounds hold over the meta-distribution
+  <Cite id="blanchard2011" />.
+- **Invariant features.** Domain-invariant component analysis finds a kernel feature map that minimises the variance
+  of the domains' distributions around their mean in the feature space, while keeping the information about the label
+  <Cite id="muandet2013" />.
+- **Worst-case risk.** Distributionally robust optimisation minimises $\max_{e \in \Ecal_{\text{tr}}} R^e(f)$ rather than
+  the average; see <NoteLink to="robustness-to-distribution-shift" /> for group DRO <Cite id="sagawa2020" />.
+- **Meta-learning.** Split the training domains into meta-train and meta-test domains on each step, and update the
+  parameters so that a step that lowers the meta-train loss also lowers the meta-test loss <Cite id="li2018mldg" />. See
+  <NoteLink to="meta-learning" />.
+
+## Invariant risk minimisation
+
+**Invariant risk minimisation** (IRM) asks for a representation $\Phi : \Xcal \to \Hcal$ on which a single classifier
+$w$ is optimal in every training environment at once <Cite id="arjovsky2019" />:
+$$
+\min_{\Phi,\, w} \sum_{e \in \Ecal_{\text{tr}}} R^e(w \circ \Phi) \quad \text{subject to} \quad w \in \argmin_{\bar w}
+R^e(\bar w \circ \Phi) \text{ for all } e \in \Ecal_{\text{tr}} .
+$$
+The constraint is a bilevel problem, one inner optimisation per environment. Its practical version, **IRMv1**, fixes the
+classifier to the scalar $w = 1$, so that $\Phi$ itself produces the prediction, and replaces the constraint by a penalty
+on how far $w = 1$ is from optimal in each environment:
+$$
+\min_\Phi \sum_{e \in \Ecal_{\text{tr}}} \paren{R^e(\Phi) + \lambda \norm{\nabla_{w \mid w = 1} R^e(w \cdot \Phi)}^2} .
+$$
+If $w = 1$ is optimal for environment $e$, the derivative of $R^e(w \cdot \Phi)$ in $w$ is zero at $w = 1$, so the
+penalty is zero. For the squared loss the condition reads
+$$
+\frac{\partial}{\partial w} \expect_e\brack{(w\, \Phi(\xvec) - y)^2} \Big|_{w = 1} = 2\, \expect_e\brack{\Phi(\xvec)
+\paren{\Phi(\xvec) - y}} = 0 \iff \frac{\expect_e\brack{\Phi(\xvec)\, y}}{\expect_e\brack{\Phi(\xvec)^2}} = 1 :
+$$
+the least-squares coefficient of $y$ on the feature is the same, $1$, in every environment. IRMv1 penalises features
+whose regression coefficient varies across environments.
+
+### Worked example: a spurious feature
+
+Arjovsky et al. use a three-variable structural model with an environment parameter $\sigma^2$ <Cite id="arjovsky2019" />:
+$$
+X_1 \sim \Gauss(0, \sigma^2), \qquad Y = X_1 + \Gauss(0, \sigma^2), \qquad X_2 = Y + \Gauss(0, 1).
+$$
+$X_1$ causes $Y$, and $X_2$ is an effect of $Y$. Compute the least-squares coefficients in an environment with a given
+$\sigma^2$. The variances and covariances are $\var(X_1) = \sigma^2$, $\var(Y) = 2\sigma^2$, $\var(X_2) = 2\sigma^2 +
+1$, $\cov(X_1, Y) = \cov(X_1, X_2) = \sigma^2$ and $\cov(X_2, Y) = 2\sigma^2$.
+
+- **Regress on $X_1$ alone:** coefficient $\cov(X_1, Y)/\var(X_1) = 1$ in every environment.
+- **Regress on $X_2$ alone:** coefficient $2\sigma^2 / (2\sigma^2 + 1)$, which depends on the environment.
+- **Regress on both:** the normal equations $\sigma^2 \beta_1 + \sigma^2 \beta_2 = \sigma^2$ and $\sigma^2 \beta_1 +
+  (2\sigma^2 + 1)\beta_2 = 2\sigma^2$ give $\beta_1 + \beta_2 = 1$, then $\beta_2 = \sigma^2 / (\sigma^2 + 1)$ and
+  $\beta_1 = 1 / (\sigma^2 + 1)$. Both depend on the environment.
+
+For $\sigma^2 = 1$ the regression on both features has coefficients $(0.5, 0.5)$; for $\sigma^2 = 3$ it has $(0.25,
+0.75)$. The pooled least-squares fit uses $X_2$ heavily, because $X_2$ is the better predictor within each training
+environment. In an environment with $\sigma^2 = 100$ it is miscalibrated, and under an intervention that sets $X_2$
+directly it is wrong. Only the regression on $X_1$ has the same coefficient everywhere, and it is the one IRM selects.
+
+## What IRM does not guarantee
+
+Rosenfeld, Ravikumar and Risteski analyse IRM in a model with invariant and environment-specific latent features
+<Cite id="rosenfeld2021" />. In the linear case, IRM recovers the invariant predictor only when the number of training
+environments exceeds the number of spurious feature dimensions; with fewer, it can rely on the spurious features just as ERM does. In the
+nonlinear case they construct predictors that satisfy the IRMv1 condition nearly perfectly on the training environments
+while relying on spurious features, and that fail on test environments that are not close to the training ones.
+
+## The DomainBed finding
+
+Methods for domain generalisation had been evaluated with inconsistent datasets, architectures and, above all, model
+selection rules. Some selected hyperparameters with labelled data from the test domain, which the setting forbids.
+Gulrajani and Lopez-Paz built DomainBed, a testbed of seven multi-domain datasets, nine baseline algorithms and three
+model selection criteria, and reran the comparison <Cite id="gulrajani2021" />. Carefully tuned empirical risk
+minimisation on the pooled training domains, with data augmentation, performed as well as the best alternatives on every
+dataset. Their conclusion is that a domain-generalisation algorithm without a model selection rule that uses only
+training domains is incomplete.
+
+The three selection criteria are:
+
+1. **training-domain validation:** hold out part of each training domain and pick the model with the best pooled
+   held-out accuracy;
+2. **leave-one-domain-out:** hold out a whole training domain in turn and average;
+3. **test-domain validation:** use a small labelled sample of the test domain, an oracle that indicates an upper limit.
+
+## Assumptions
+
+- The test environment is related to the training environments in the way the method assumes: drawn from the same
+  meta-distribution, or sharing the invariant mechanism.
+- The training environments differ enough to expose the spurious relations. Environments that differ little give
+  invariance penalties nothing to detect.
+- The environment label of every training example is known.
+
+## Pitfalls
+
+- **Selecting models on the test domain.** It turns domain generalisation into domain adaptation with labelled target
+  data and inflates reported gains <Cite id="gulrajani2021" />.
+- **Too few environments.** Invariance-based methods need many diverse environments relative to the number of spurious
+  directions <Cite id="rosenfeld2021" />.
+- **Reading invariance as causality.** A relation can be invariant across the training environments by accident and
+  still change in a new one.

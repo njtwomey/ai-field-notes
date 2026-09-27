@@ -1,0 +1,177 @@
+---
+title: Context modulation and sensor topologies for transfer
+kind: technique
+summary: 'Activity models do not transfer between smart homes with different sensors. Context modulation rewrites a dataset into new contexts by deleting, merging and renaming sensors and labels; learnt sensor adjacency matrices give layout-aware features to share across homes.'
+tags: [transfer-learning, activity-recognition, smart-homes, feature-engineering, structured-prediction]
+aliases: [context modulation, sensor topology learning, sensor adjacency matrix, house-to-house transfer, heterogeneous sensor transfer, weighted cross-correlation adjacency]
+requires: [conditional-random-field, mutual-information]
+related: [active-transfer-learning, bayesian-active-learning, multi-task-learning, transfer-learning, pearson-correlation]
+references: [twomey2014context, twomey2017topologies, rashidi2011, feuz2014, twomey2016, diethe2016active, pan2010survey]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+In a smart home, activity recognition learns a map from a stream of sensor events, such as a motion sensor turning on
+or a door opening, to the activity being performed. Two homes rarely have the same sensors, so their input spaces
+differ and transfer between them is **heterogeneous** <Cite id="pan2010survey" />. This note covers two techniques by
+Twomey and colleagues for building representations that can be shared. **Context modulation** rewrites an existing
+dataset into new, user-defined contexts by deleting, merging and renaming sensors and labels <Cite id="twomey2014context" />.
+**Sensor topology learning** estimates from unlabelled data which sensors are adjacent in the home, and uses the
+adjacency to build features <Cite id="twomey2017topologies" />.
+</Definition>
+
+## Problem
+
+A classifier that learns that sensor `m17` predicts cooking in one house has learnt nothing about a house without an
+`m17`. House-to-house transfer needs a vocabulary shared by the homes. Rashidi and Cook assign each sensor a location
+label, the room or functional area it is in, build activity templates in both houses and learn a mapping between them
+<Cite id="rashidi2011" />. Feuz and Cook instead map the target feature space into the source's with heuristic search,
+and evaluate on 18 smart apartments <Cite id="feuz2014" />. Both need to know which sensors belong together. Two
+questions follow. How much accuracy does a model lose when the sensors are coarsened to such a vocabulary? And can the
+grouping be learnt from the data instead of from floor plans?
+
+## Context modulation
+
+Twomey and Flach define **context modulation** as modifying a dataset so that it represents a new context chosen by the
+analyst <Cite id="twomey2014context" />. A sensor event file lists a timestamp, a sensor identifier, its state and the
+start or end of labelled activities. Their software applies four kinds of rewrite, each specified by regular expressions:
+
+- **Sensor deletion** removes every event from matching sensors, simulating a failed sensor or a blind spot. The
+  activity boundaries on deleted rows are remembered, so labels are not lost.
+- **Sensor merging** renames several sensors to one identifier, such as all motion sensors in a room to `m_kitchen`.
+  This simulates a sparser layout or sensors with wider fields of view, and produces the room-level vocabulary that
+  transfer needs.
+- **Feature engineering** rewrites derived attributes, for example mapping hours to periods such as breakfast time,
+  or days to weekday and weekend.
+- **Label engineering** rewrites activity labels. Removing the resident identifier from labels such as `R1_Work`
+  anonymises the task, so that the model classifies activities regardless of who performs them. Harmonising names such as
+  "cooking" and "meal preparation" makes labels consistent across datasets, which transfer between homes requires.
+  Keeping the resident and the activity as separate labels recasts the problem as multi-task learning.
+
+When several residents are active, an event can belong to any of the currently open activities. The software records
+the set of open activities with each event, which makes the labels ambiguous in the sense of <NoteLink to="partial-label-learning" />, and
+evaluation counts a prediction as correct if it is in that set.
+
+### What coarsening costs
+
+The experiments use the CASAS `twor.2009` dataset: two residents over about three months, 13 labelled activities of which
+eight belong to a specific resident, and 71 sensors, of which 51 are motion sensors spaced about two metres apart
+<Cite id="twomey2014context" />. A linear-chain <NoteLink to="conditional-random-field" /> classified each event from the
+day of the week, the hour and the current and two previous sensor events. Precision is the fraction of predictions in the set of open
+activities; the false-negative rate is the fraction of activities never predicted during their span.
+
+<SpecTable
+  columns={['Sensors', 'Labels', 'Precision', 'False-negative rate']}
+  rows={{
+    'allSens allAct': ['all', 'with resident', '76.2%', '8.6%'],
+    'allSens someAct': ['all', 'anonymised', '85.2%', '6.7%'],
+    'someSens allAct': ['motion merged by room', 'with resident', '64.0%', '20%'],
+    'someSens someAct': ['motion merged by room', 'anonymised', '71.1%', '18%'],
+    'no doors': ['door sensors removed', 'anonymised', '82.9%', '9.7%'],
+    'no lights': ['light sensors removed', 'anonymised', '83.6%', '10.8%'],
+    'no doors or lights': ['both removed', 'anonymised', '81.7%', '9.8%'],
+  }}
+/>
+
+Always predicting the most common label gives a precision of about 36%. Anonymising the labels raised precision by
+about 9 points, roughly a 35% reduction in error, which the authors attribute to activities looking the same to the
+sensors whoever performs them. Merging motion sensors to room level cost about 12 points of precision and raised the
+false-negative rate by a factor of two to three, so that about one activity in five was never predicted: several
+activities take place in one room, and a room-level sensor cannot tell them apart. Removing door and light sensors
+changed precision and the false-negative rate by less than 4 points. For this home, dense motion sensing mattered and door
+and light sensors did not <Cite id="twomey2014context" />.
+
+For transfer, the table measures a price. The room-level vocabulary that makes homes comparable costs this home about
+12 points of precision. A transferred model can be no better than a model trained on the target with the same
+coarsened representation.
+
+## Learning sensor topologies
+
+Sensor events are usually treated as independent features, but complex activities show up as combinations of sensors.
+Taking every combination, the power set of the active sensors, is equivalent to a polynomial kernel and learns weights
+for spurious combinations: motion in a bedroom together with motion in the kitchen, when two residents happen to be in
+those rooms at once. Twomey, Diethe, Craddock and Flach learn an **adjacency matrix** $\Amat$ of the sensor network from
+unlabelled event streams, and allow only combinations of adjacent sensors <Cite id="twomey2017topologies" />.
+
+### Weighted cross-correlation
+
+Represent the stream as a sparse matrix $\Xmat \in \reals^{m \times n}$, one row per one-second time slice and one column
+per sensor, with entries in $\set{0, 1}$ for sensor-on events or $\set{-1, 0, 1}$ for on and off events. Let $\Ymat$ be
+$\Xmat$ lagged by $l$ slices. The correlation between columns needs centred data, and centring destroys sparsity. It can
+be avoided. For columns $\xvec$ and $\yvec$ with means $\bar x$ and $\bar y$,
+$$
+\sum_{i=1}^{m} (x_i - \bar x)(y_i - \bar y) = \xvec\transpose \yvec - m \bar x \bar y ,
+$$
+so the matrix of centred cross-products is $\Xmat\transpose \Ymat - m\, \bar\xvec \bar\yvec\transpose$, where $\bar\xvec$
+and $\bar\yvec$ are the column means. For entries in $\set{-1, 0, 1}$, $x_i^2 = \abs{x_i}$, so the variance of a column is
+$\frac1m \sum_i \abs{x_i} - \bar x^2$, computable from the column sums of $\abs{\Xmat}$. Every quantity uses sparse
+products, and the cost is governed by the number of non-zero entries. On the whole `twor.2009` dataset the computation took
+under two seconds <Cite id="twomey2017topologies" />.
+
+The correlations at lags $l = -L, \dots, L$ are combined with weights $w(l) = \exp(-\abs{l})$ for lags in seconds, so
+that short lags, most likely caused by one person walking past both sensors, count most. Positive and negative lags are
+treated alike, since the direction of travel does not matter for adjacency. The weighted sum is thresholded at the first
+value that gives an average of fewer than five connections per sensor, the heuristic being that a sensor is adjacent to
+itself and a few neighbours.
+
+### Mutual information
+
+The second method sets $A_{ij}$ to the <NoteLink to="mutual-information" /> between the on–off states of sensors $i$ and
+$j$, on the reasoning that neighbouring sensors switch on and off together. Mutual information is not bounded, so a single
+threshold does not fit every pair. The threshold for a pair is the mean of the two sensors' average mutual information with
+all sensors, $T_{ij} = \frac12\paren{\expect[A_{i,:}] + \expect[A_{:,j}]}$, and the pair is adjacent if $A_{ij} > T_{ij}$
+<Cite id="twomey2017topologies" />.
+
+### Using the adjacency
+
+Given $\Amat$, the active sensors in each time slice are split into groups of mutually reachable sensors, which separates
+parallel streams of activity by different residents without hand segmentation. Features are the conjunctions of sensors
+within a group, up to a maximum cardinality $c$, rather than all conjunctions. The authors describe this as a graph-based
+regularisation of the conditional random field's feature space <Cite id="twomey2017topologies" />.
+
+### Results as reported
+
+The learnt adjacencies were checked against a hand-built adjacency matrix for `twor.2009` by treating the learnt weights
+as scores for the hand-built links. The area under the ROC curve was $0.879$ for weighted cross-correlation and $0.843$
+for mutual information, and both thresholds gave accuracies of about $0.94$, close to the best achievable. Visually, the
+learnt adjacencies respected walls on three differently laid-out testbeds: `twor.2009`, a two-storey home with two
+residents; `tokyo`, an open-plan office with nine employees; and `aruba`, a single-resident home with sensors of two
+different ranges <Cite id="twomey2017topologies" />.
+
+For activity recognition on `twor.2009`, in five-fold cross-validation:
+
+<SpecTable
+  columns={['Precision', 'Recall', 'F1']}
+  rows={{
+    'independent sensors (vanilla)': ['0.644', '0.636', '0.632'],
+    'all conjunctions (exhaustive)': ['0.533', '0.530', '0.521'],
+    'hand-coded adjacency': ['0.679', '0.692', '0.682'],
+    'mutual-information adjacency': ['0.668', '0.679', '0.669'],
+    'cross-correlation adjacency': ['0.673', '0.684', '0.675'],
+  }}
+/>
+
+A Friedman test on the F1 scores was significant ($Q = 143.9$, $p < 10^{-10}$). Nemenyi post-hoc tests at $\alpha = 0.01$
+found the exhaustive method significantly worse than all others, and could not separate the vanilla, hand-coded,
+cross-correlation and mutual-information models from one another. The adjacency-informed models had the best average
+scores, and the unrestricted power set overfitted.
+
+## Why this matters for transfer
+
+The authors argue that learnt adjacency matrices give a way to construct high-level features suitable for transfer
+between smart houses <Cite id="twomey2017topologies" />. The learnt graphs are dense within rooms and sparse between
+them, so groups of adjacent sensors approximate functional areas, the vocabulary that house-to-house methods need,
+without a floor plan or labels from the new house. Context modulation measures what such a vocabulary costs on a house
+with labels <Cite id="twomey2014context" />. With the vocabulary in place, the person-to-person transfer of <NoteLink
+to="active-transfer-learning" /> applies within it <Cite id="diethe2016active" />.
+
+## Trade-offs
+
+- **Coarser is more transferable and less accurate.** Room-level features are shared across homes but lose the
+  within-room detail that separates activities in the same room.
+- **Adjacency from behaviour, not geometry.** A learnt adjacency reflects how people move. Rarely visited areas, or
+  sensors with unusual behaviour, can be left unconnected; the authors observed isolated sensors in all three homes.
+- **Sequential dependence.** The adjacency features are used inside a conditional random field. Whether structured
+  sequence models are needed at all depends on the features <Cite id="twomey2016" />; see <NoteLink
+  to="when-is-structure-needed" />.

@@ -1,0 +1,190 @@
+---
+title: Importance weighting for covariate shift
+kind: technique
+summary: 'Under covariate shift, weighting each source example by $w(\xvec) = p_T(\xvec)/p_S(\xvec)$ makes the source risk an unbiased estimate of the target risk. The weights are estimated directly, by kernel mean matching, KLIEP or a domain classifier; their variance limits the effective sample size.'
+tags: [transfer-learning, domain-adaptation, covariate-shift, kernel-methods, worked-example]
+aliases: [importance-weighted empirical risk minimisation, kernel mean matching, KMM, KLIEP, density ratio estimation, importance-weighted cross-validation, IWCV]
+requires: [dataset-shift, importance-sampling, empirical-risk-minimisation]
+related: [domain-adaptation-theory, feature-alignment-methods, label-shift-and-target-shift, reproducing-kernel-hilbert-space, logistic-regression, kl-divergence]
+references: [shimodaira2000, sugiyama2007iwcv, huang2007kmm, gretton2012, sugiyama2008kliep, kanamori2009ulsif, bickel2009, cortes2010]
+status: draft
+updated: 2026-09-27
+---
+
+import { DomainShiftDemo } from '../_shared/DomainShiftDemo'
+
+<Definition>
+**Covariate shift** is the case in which the source and target distributions share the conditional $p(y \mid \xvec)$
+and differ in the input distribution, $p_S(\xvec) \ne p_T(\xvec)$. **Importance weighting** trains on labelled source
+examples $(\xvec_i, y_i)$, $i = 1, \dots, n_s$, with each loss multiplied by the **importance weight** $w(\xvec_i) =
+p_T(\xvec_i) / p_S(\xvec_i)$. The weighted average loss is then an unbiased estimate of the target risk
+<Cite id="shimodaira2000" />. The weights are estimated from the source inputs and a sample of unlabelled target inputs
+$\xvec'_j$, $j = 1, \dots, n_t$.
+</Definition>
+
+## Problem
+
+A model fitted by minimising the average training loss minimises an estimate of the source risk. Under covariate shift
+the target risk weights the same pointwise losses differently, by where the target inputs fall. If the model class
+contains the true regression function, the difference does not matter: the unweighted fit converges to the truth wherever
+the source has support, and the truth is right for every input distribution. If the model is **misspecified**, the best
+approximation depends on the input distribution, and the fit that is best for the source is not the best for the target
+<Cite id="shimodaira2000" />. Linear models of curved functions, and any model regularised enough to underfit, are in
+this position.
+
+## Mechanism
+
+### The reweighted risk
+
+Let $\ell(h(\xvec), y)$ be the loss of hypothesis $h$ on example $(\xvec, y)$. Because the conditional is shared, the
+target risk can be rewritten as an expectation over the source:
+$$
+R_T(h) = \int p_T(\xvec)\, p(y \mid \xvec)\, \ell(h(\xvec), y)\, d\xvec\, dy
+= \int p_S(\xvec)\, p(y \mid \xvec)\, \frac{p_T(\xvec)}{p_S(\xvec)}\, \ell(h(\xvec), y)\, d\xvec\, dy
+= \expect_{S}\brack{w(\xvec)\, \ell(h(\xvec), y)} .
+$$
+The middle step multiplies and divides by $p_S(\xvec)$, which requires $p_S(\xvec) > 0$ wherever $p_T(\xvec) > 0$. The
+**importance-weighted empirical risk**
+$$
+\hat R_w(h) = \frac{1}{n_s} \sum_{i=1}^{n_s} w(\xvec_i)\, \ell(h(\xvec_i), y_i)
+$$
+therefore has expectation $R_T(h)$ for every fixed $h$. Minimising it is empirical risk minimisation for the target,
+carried out on source data. This is <NoteLink to="importance-sampling" /> with the source as the proposal
+distribution.
+
+For a maximum-likelihood model, Shimodaira showed that the weighted log-likelihood gives a consistent estimate of the
+parameter that is best for the target, and that the unweighted estimate is more efficient when the model is correctly
+specified <Cite id="shimodaira2000" />. He proposed the flattened weights $w(\xvec)^\lambda$, $0 \le \lambda \le 1$,
+which interpolate between the unweighted fit ($\lambda = 0$: low variance, biased) and the fully weighted fit
+($\lambda = 1$: unbiased, high variance).
+
+### Model selection needs weighting too
+
+Ordinary cross-validation estimates the source risk, so under covariate shift it chooses hyperparameters for the wrong
+distribution. **Importance-weighted cross-validation** multiplies each held-out loss by its weight, which makes the
+validation estimate unbiased for the target risk. Sugiyama et al. show that it is almost unbiased under covariate shift
+and use it to choose the flattening exponent $\lambda$ <Cite id="sugiyama2007iwcv" />.
+
+## Estimating the weights
+
+Estimating $p_T$ and $p_S$ separately and dividing is unreliable in more than a few dimensions: small errors in the
+denominator's tail become large errors in the ratio. The methods below estimate the ratio directly.
+
+### Kernel mean matching
+
+Let $k$ be a kernel with feature map $\phivec$ into a <NoteLink to="reproducing-kernel-hilbert-space" />
+$\Fcal$. The **mean embedding** of a distribution $p$ is $\muvec_p = \expect_p\brack{\phivec(\xvec)}$. For a
+characteristic kernel, such as the Gaussian kernel, the mean embedding determines the distribution
+<Cite id="gretton2012" />. If $w$ is the true ratio, the reweighted source has the target's mean embedding:
+$$
+\expect_S\brack{w(\xvec)\, \phivec(\xvec)} = \int p_S(\xvec) \frac{p_T(\xvec)}{p_S(\xvec)} \phivec(\xvec)\, d\xvec =
+\muvec_T .
+$$
+**Kernel mean matching** turns this identity into an estimator: choose weights $\beta_i$ on the source examples so that
+the weighted source mean embedding matches the target sample's <Cite id="huang2007kmm" />:
+$$
+\min_{\betavec} \norm{\frac{1}{n_s} \sum_{i=1}^{n_s} \beta_i\, \phivec(\xvec_i) - \frac{1}{n_t} \sum_{j=1}^{n_t}
+\phivec(\xvec'_j)}_{\Fcal}^2 \quad \text{subject to} \quad 0 \le \beta_i \le B, \quad \abs{\frac{1}{n_s} \sum_i \beta_i
+- 1} \le \epsilon .
+$$
+Expanding the squared norm with $\inner{\phivec(\xvec)}{\phivec(\xvec')} = k(\xvec, \xvec')$ gives
+$$
+\frac{1}{n_s^2} \betavec\transpose \Kmat \betavec - \frac{2}{n_s^2} \kappavec\transpose \betavec + \text{const},
+\qquad K_{ii'} = k(\xvec_i, \xvec_{i'}), \quad \kappa_i = \frac{n_s}{n_t} \sum_{j=1}^{n_t} k(\xvec_i, \xvec'_j),
+$$
+a quadratic programme in $n_s$ variables. The bound $B$ caps any single weight, which limits variance; the second
+constraint keeps the weights averaging to about one. The objective is the squared maximum mean discrepancy between the
+weighted source and the target, the statistic of the kernel two-sample test <Cite id="gretton2012" />.
+
+### KLIEP
+
+The **Kullback–Leibler importance estimation procedure** models the ratio as a non-negative combination of basis
+functions, $\hat w(\xvec) = \sum_{l=1}^{b} \alpha_l \psi_l(\xvec)$ with $\alpha_l \ge 0$, usually Gaussian kernels centred
+on target points <Cite id="sugiyama2008kliep" />. It chooses $\alphavec$ so that $\hat p_T(\xvec) = \hat w(\xvec)\,
+p_S(\xvec)$ is close to $p_T$ in <NoteLink to="kl-divergence">Kullback–Leibler divergence</NoteLink>:
+$$
+\KL(p_T \,\|\, \hat w\, p_S) = \expect_T\brack{\log \frac{p_T(\xvec)}{p_S(\xvec)}} - \expect_T\brack{\log \hat
+w(\xvec)} .
+$$
+The first term does not depend on $\alphavec$, so minimising the divergence means maximising $\expect_T\brack{\log \hat
+w(\xvec)}$. For $\hat p_T$ to be a density, $\hat w$ must average to one under the source. Replacing both
+expectations by sample averages gives a convex problem:
+$$
+\max_{\alphavec \ge \zeros} \frac{1}{n_t} \sum_{j=1}^{n_t} \log \sum_l \alpha_l \psi_l(\xvec'_j) \quad \text{subject to}
+\quad \frac{1}{n_s} \sum_{i=1}^{n_s} \sum_l \alpha_l \psi_l(\xvec_i) = 1 .
+$$
+Because it has an objective on held-out target points, the kernel width can be chosen by likelihood cross-validation,
+which kernel mean matching lacks. Least-squares importance fitting (uLSIF) fits the same model by minimising the squared
+error $\expect_S\brack{(\hat w - w)^2}$, which has a closed-form solution <Cite id="kanamori2009ulsif" />.
+
+### A domain classifier
+
+Pool the source and target inputs, label them $d = 0$ and $d = 1$, and train a probabilistic classifier for $p(d = 1 \mid
+\xvec)$. By Bayes' theorem, $p(d = 1 \mid \xvec) \propto n_t\, p_T(\xvec)$ and $p(d = 0 \mid \xvec) \propto n_s\,
+p_S(\xvec)$ with the same constant, so
+$$
+w(\xvec) = \frac{p_T(\xvec)}{p_S(\xvec)} = \frac{n_s}{n_t} \cdot \frac{p(d = 1 \mid \xvec)}{p(d = 0 \mid \xvec)} .
+$$
+For <NoteLink to="logistic-regression" /> the odds are $\exp(\thetavec\transpose \xvec)$, so the weight is an exponential
+in the classifier's score <Cite id="bickel2009" />. The same classifier also measures the divergence between the domains
+(see <NoteLink to="domain-adaptation-theory" />). The figure below uses a logistic domain classifier with quadratic
+features, which can represent the ratio of two Gaussians exactly.
+
+<DomainShiftDemo initial={[0.5, 0.2]} />
+
+## Cost
+
+Importance weighting trades bias for variance. A weighted average of $n$ terms with normalised weights $\tilde w_i =
+w_i / \sum_{i'} w_{i'}$ and a common variance $\sigma^2$ has variance $\sigma^2 \sum_i \tilde w_i^2$. An unweighted
+average of $n_e$ terms has variance $\sigma^2 / n_e$, so the weighted average is worth
+$$
+n_e = \frac{\paren{\sum_i w_i}^2}{\sum_i w_i^2}
+$$
+unweighted examples, the **effective sample size**. It equals $n$ when all weights are equal and falls towards $1$ when a
+single weight dominates.
+
+The effective sample size is governed by the second moment of the weights. Its expectation is roughly $n /
+\expect_S\brack{w^2}$, since $\expect_S[w] = 1$. Cortes, Mansour and Mohri show that learning guarantees for importance
+weighting hold when $\expect_S\brack{w^2}$ is finite, and can fail when it is not <Cite id="cortes2010" />. The second
+moment can be large or infinite for distributions that look close.
+
+### Worked example: Gaussian shift
+
+Let the source be $\Gauss(0, 1)$ and the target $\Gauss(\mu, 1)$. The weight is $w(x) = \exp\paren{\mu x - \mu^2/2}$,
+and
+$$
+\expect_S\brack{w^2} = \expect\brack{e^{2\mu x - \mu^2}} = e^{-\mu^2}\, e^{(2\mu)^2/2} = e^{\mu^2},
+$$
+using $\expect\brack{e^{t x}} = e^{t^2/2}$ for a standard normal $x$. The effective sample size is about $n e^{-\mu^2}$.
+A shift of one standard deviation leaves $37\%$ of the sample; two standard deviations leave $1.8\%$; three leave
+$0.012\%$. With $n = 1000$ source examples and $\mu = 2$, the weighted estimate is worth about 18 target examples.
+
+<Derivation title="When the second moment is infinite">
+Let the source be $\Gauss(0, \sigma_S^2)$ and the target $\Gauss(0, \sigma_T^2)$. Then
+$$
+\expect_S\brack{w^2} = \int \frac{p_T(x)^2}{p_S(x)}\, dx
+= \frac{\sigma_S}{\sqrt{2\pi}\,\sigma_T^2} \int \exp\paren{-\frac{x^2}{2}\paren{\frac{2}{\sigma_T^2} -
+\frac{1}{\sigma_S^2}}} dx .
+$$
+The integral is finite only if $2/\sigma_T^2 > 1/\sigma_S^2$, that is, $\sigma_T^2 < 2\sigma_S^2$. When it is finite
+it equals $\sqrt{2\pi} / \sqrt{2/\sigma_T^2 - 1/\sigma_S^2}$, so
+$$
+\expect_S\brack{w^2} = \frac{\sigma_S^2}{\sigma_T \sqrt{2\sigma_S^2 - \sigma_T^2}} .
+$$
+A target only $\sqrt 2 \approx 1.41$ times wider than the source already has weights with infinite variance: the rare
+source points in the tails, where the target has relatively more mass, receive enormous weights. A target narrower than
+the source is always safe.
+</Derivation>
+
+## Trade-offs
+
+- **Flatten or cap the weights.** The exponent $\lambda$, the cap $B$ in kernel mean matching and clipping at a
+  quantile all accept bias for lower variance. Choose them by importance-weighted cross-validation.
+- **Weight only where support overlaps.** Where the target has mass and the source has none, the weights are undefined
+  and no reweighting can help. The effective sample size reveals this: it collapses as the overlap shrinks.
+- **Weight only when misspecified.** A well-specified model gains nothing in expectation from weighting and loses
+  efficiency. The more flexible the model, the closer it is to well-specified on the region the source covers, and the
+  less weighting changes the fit there.
+- **The ratio of marginals only.** Importance weighting corrects covariate shift. It does not correct a change in
+  $p(y \mid \xvec)$. A change in class proportions needs weights on labels instead; see <NoteLink
+  to="label-shift-and-target-shift" />.

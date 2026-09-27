@@ -1,0 +1,162 @@
+---
+title: Bayesian active learning
+kind: concept
+summary: 'Bayesian active learning queries the label expected to tell the most about the model. The expected information gain equals the mutual information between label and parameters: predictive entropy minus expected entropy (BALD). Evidence-based selection compares Bayes factors.'
+tags: [active-learning, bayesian-inference, information-theory, transfer-learning, worked-example]
+aliases: [BALD, Bayesian active learning by disagreement, expected information gain, information-theoretic active learning, evidence-based instance selection, maximal Bayes factor selection]
+requires: [mutual-information, bayesian-inference, entropy]
+related: [active-transfer-learning, aleatoric-and-epistemic-uncertainty, bayes-factors-and-model-comparison, stream-based-active-learning, selective-sampling, expectation-propagation, learning-from-label-proportions]
+references: [lindley1956, mackay1992info, houlsby2011bald, gal2017dbal, kirsch2019batchbald, lewis1994, twomey2015evidence, kass1995, poyiadzi2019, cohn1996, kapoor2007]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Bayesian active learning** keeps a posterior $p(\thetavec \mid \Dcal)$ over model parameters given the labelled data
+$\Dcal$, and chooses the next input $\xvec$ from a pool to maximise the **expected information gain** about
+$\thetavec$ from observing its label:
+$$
+\text{EIG}(\xvec) = \entropy\brack{\thetavec \mid \Dcal} - \expect_{y \sim p(y \mid \xvec, \Dcal)} \entropy\brack{\thetavec
+\mid \Dcal \cup \set{(\xvec, y)}} .
+$$
+This equals the mutual information between the label and the parameters, which can be computed in the space of labels:
+$\entropy\brack{y \mid \xvec, \Dcal} - \expect_{\thetavec \sim p(\thetavec \mid \Dcal)} \entropy\brack{y \mid \xvec,
+\thetavec}$, the form known as **BALD** <Cite id="lindley1956" /> <Cite id="mackay1992info" /> <Cite
+id="houlsby2011bald" />.
+</Definition>
+
+## Intuition
+
+A label is worth asking for if the answer will change what the model believes. Two things make the answer uncertain.
+The model may not know which parameters are right, so different plausible models predict differently: asking resolves
+the disagreement. Or the label may be inherently random given the input, so every plausible model predicts a coin flip:
+asking tells nothing about the model. Only the first kind of uncertainty is worth paying for. Predictive entropy mixes
+the two; the expected information gain keeps only the first. The decomposition is the one in <NoteLink
+to="aleatoric-and-epistemic-uncertainty" />.
+
+## From parameter space to label space
+
+The definition in parameter space needs the entropy of a posterior over many parameters for every candidate label, which
+is intractable for most models. The mutual information is symmetric, $I(\thetavec; y) = I(y; \thetavec)$, which gives a
+form that needs entropies of the label only. Write $\entropy$ for entropy and condition everything on $\xvec$ and
+$\Dcal$:
+$$
+\begin{aligned}
+\text{EIG}(\xvec) &= \entropy[\thetavec] - \expect_y \entropy[\thetavec \mid y] = I(\thetavec; y) \\
+&= \entropy[y] - \expect_{\thetavec} \entropy[y \mid \thetavec] \\
+&= \entropy\brack{\expect_{\thetavec}\, p(y \mid \xvec, \thetavec)} - \expect_{\thetavec}\, \entropy\brack{p(y \mid \xvec,
+\thetavec)} .
+\end{aligned}
+$$
+The first line is the definition of <NoteLink to="mutual-information" /> as the expected reduction in entropy of one
+variable from observing the other. The second writes the same quantity with the roles swapped. The third uses that the
+predictive distribution is the posterior average of the model's predictions. For classification both terms are entropies
+of a distribution over classes and can be computed from posterior samples of $\thetavec$ <Cite id="houlsby2011bald" />.
+
+The first term is the **predictive entropy**; maximising it alone is uncertainty sampling <Cite id="lewis1994" />. The
+second is the **expected entropy**, the uncertainty that would remain even if the parameters were known. BALD, *Bayesian
+active learning by disagreement*, is their difference: it is high where individual posterior samples are confident but
+disagree with each other.
+
+### Worked example
+
+Suppose the posterior puts probability $1/2$ on each of two parameter settings, $\thetavec_1$ and $\thetavec_2$. At input
+A, both predict $p(y = 1) = 0.5$. At input B, $\thetavec_1$ predicts $0.9$ and $\thetavec_2$ predicts $0.1$. With the
+binary entropy $h(p) = -p \log_2 p - (1 - p) \log_2 (1 - p)$:
+
+- Both inputs have predictive probability $0.5$ and predictive entropy $h(0.5) = 1$ bit, so uncertainty sampling cannot
+  choose between them.
+- At A the expected entropy is $1$ bit, so the information gain is $0$: the label is a coin flip under both hypotheses and
+  its answer changes nothing.
+- At B the expected entropy is $h(0.9) = 0.469$ bits, so the information gain is $0.531$ bits: the label will favour one
+  hypothesis over the other by odds of $9$ to $1$.
+
+BALD queries B.
+
+## Computing it
+
+- **Gaussian process classifiers.** For a probit likelihood and a Gaussian posterior with mean $\mu_{\xvec}$ and variance
+  $\sigma_{\xvec}^2$ for the latent function, Houlsby et al. approximate the expected entropy with a Gaussian-shaped curve
+  and obtain, in bits,
+  $$
+  \text{BALD}(\xvec) \approx h\paren{\Phi\paren{\frac{\mu_{\xvec}}{\sqrt{\sigma_{\xvec}^2 + 1}}}} - \frac{C}{\sqrt{\sigma_{\xvec}^2 +
+  C^2}} \exp\paren{-\frac{\mu_{\xvec}^2}{2(\sigma_{\xvec}^2 + C^2)}}, \qquad C = \sqrt{\frac{\pi \ln 2}{2}},
+  $$
+  where $\Phi$ is the standard normal distribution function <Cite id="houlsby2011bald" />.
+- **Deep networks.** Samples from an approximate posterior, such as Monte Carlo dropout, give both terms by averaging over
+  $T$ stochastic forward passes <Cite id="gal2017dbal" />.
+- **Batches.** Taking the $b$ inputs with the highest individual scores picks near-duplicates, because their information
+  overlaps. BatchBALD scores a batch by the joint mutual information $I(y_1, \dots, y_b; \thetavec)$, which counts shared
+  information once, and builds the batch greedily <Cite id="kirsch2019batchbald" />.
+
+Other criteria target the goal of learning rather than the parameters: expected reduction in prediction error or
+variance <Cite id="cohn1996" />, or expected reduction in misclassification cost net of labelling cost, the value of
+information used in <NoteLink to="active-transfer-learning" /> <Cite id="kapoor2007" />.
+
+## Evidence-based instance selection
+
+Twomey, Diethe and Flach propose a selection rule built on Bayesian model comparison rather than on entropy
+<Cite id="twomey2015evidence" />. The **evidence** of a model $H$ is its marginal likelihood, $p(\Dcal \mid H) = \int
+p(\Dcal \mid \thetavec, H)\, p(\thetavec \mid H)\, d\thetavec$, and the **Bayes factor** $p(\Dcal \mid H_1) / p(\Dcal \mid
+H_2)$ measures how strongly the data favour $H_1$ over $H_2$ (see <NoteLink to="bayes-factors-and-model-comparison" />).
+
+For a binary problem with labelled set $L$ and a candidate unlabelled instance $\xvec_u$, the rule is:
+
+1. Update the current model with $(\xvec_u, \oplus)$ to obtain a candidate model $M_\oplus$, and with $(\xvec_u,
+   \ominus)$ to obtain $M_\ominus$. The updates are Bayesian, by expectation propagation.
+2. Compute the evidence of the labelled set extended by each hypothesis under its candidate model:
+   $E_\oplus = \text{Evidence}(L \cup \set{(\xvec_u, \oplus)}, M_\oplus)$ and $E_\ominus = \text{Evidence}(L \cup
+   \set{(\xvec_u, \ominus)}, M_\ominus)$.
+3. Score the instance by the **maximal Bayes factor**, $\text{BF}(\xvec_u) = \max\set{E_\oplus / E_\ominus, E_\ominus /
+   E_\oplus}$, so that strong evidence in either direction gives a large score.
+4. Query the instance with the smallest score, $u = \argmin_{u \in U} \text{BF}(\xvec_u)$: the one for which neither
+   hypothesised label is strongly preferred.
+
+Because the whole labelled set enters each evidence, the score is not the model's predictive probability at $\xvec_u$
+alone, which is what distinguishes it from uncertainty sampling. For comparison: if each evidence were the exact
+marginal likelihood under the original prior, then $E_\oplus = p(L)\, p(\oplus \mid \xvec_u, L)$, the ratio
+$E_\oplus / E_\ominus$ would be the predictive odds, and the rule would reduce to uncertainty sampling. The difference
+comes from evaluating each evidence under the model already updated with the hypothesised label. Bayes factors are read
+on conventional scales of weak, moderate, strong and decisive evidence <Cite id="kass1995" />, and the authors suggest a
+stopping rule based on the band into which the selected instance's Bayes factor falls, without testing it.
+
+Learning is online and myopic: once the parameters have been updated with an instance, that instance is not used for
+classification again, although it is used for model selection. The rule extends to more than two classes by comparing
+the evidence of every class hypothesis.
+
+**Results as reported** <Cite id="twomey2015evidence" />. The experiments transfer between the same accelerometer datasets
+as in <NoteLink to="active-transfer-learning" />: the smartphone dataset as source and USC-HAD as target, reduced to a
+binary task between walking upstairs and walking downstairs, the two activities common to both, with 48 time-domain
+features of the body acceleration. Target features were standardised with the source's moments, and the source posterior
+over weight means, but not over precisions, became the target prior. The baselines were random sampling and uncertainty
+sampling.
+
+- Without transfer, the models start at chance, and uncertainty sampling and the evidence-based rule performed about
+  equally, with little change after about five queries.
+- With transfer, accuracy was about $0.75$ before any target label was seen, the variance across test subjects was lower,
+  and learning curves were smoother.
+- The evidence-based rule beat random selection in the initial rise, in steady-state accuracy and in variance across
+  subjects, and gave lower mean Brier scores, a measure of calibration, than both random and uncertainty sampling.
+
+The authors note that the rule is much more expensive to compute than uncertainty sampling, since each candidate needs
+two model updates and two evidence computations.
+
+## Other kinds of query
+
+The query need not be a single label. Poyiadzi, Santos-Rodriguez and Twomey let the learner ask for the label of a
+**bag** of instances, answered with the bag's class proportions. The answer carries less information than the instance
+labels, but they show that learning remains effective, which suits annotators who find aggregate questions easier to
+answer <Cite id="poyiadzi2019" />. See <NoteLink to="learning-from-label-proportions" />.
+
+## Assumptions
+
+- The model is well specified enough that its posterior uncertainty means something. A misspecified model's disagreement
+  can point to regions where no setting of its parameters fits.
+- The pool is representative of the inputs the model will face.
+
+## Pitfalls
+
+- **Posterior approximations.** Information gain computed from a poor approximate posterior, such as too few samples or an
+  overconfident variational fit, can be badly wrong.
+- **Myopia.** Greedy one-step information gain can be far from the best sequence of queries.
+- **Sampling bias.** Actively chosen labelled sets are not random samples; estimates of accuracy from them are biased.

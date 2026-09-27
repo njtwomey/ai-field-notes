@@ -1,0 +1,121 @@
+---
+title: Hierarchical Bayesian transfer
+kind: concept
+summary: 'Hierarchical Bayesian transfer gives the parameters of every task a shared prior, $\wvec_t \sim \Gauss(\muvec, \Sigmamat)$, learns $\muvec$ and $\Sigmamat$ from source tasks, and uses them as the prior for a new task. The new task starts at the source mean and moves to its own estimate as its data grow.'
+tags: [transfer-learning, bayesian-inference, multi-task-learning, empirical-bayes, worked-example]
+aliases: [shared prior transfer, hierarchical prior transfer, empirical Bayes for learning to learn, task clustering prior]
+requires: [hierarchical-models, bayesian-linear-regression]
+related: [multi-task-learning, meta-learning, hierarchical-gaussian-process, active-transfer-learning, when-does-transfer-help, expectation-maximisation]
+references: [baxter2000, bakker2003, gelman2013, bonilla2008, grant2018, evgeniou2004, diethe2016active, twomey2015evidence]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Hierarchical Bayesian transfer** treats the parameters $\wvec_t$ of each task $t$ as draws from a common prior
+$p(\wvec \mid \etavec)$ with hyperparameters $\etavec$. The hyperparameters are learnt from the source tasks, either
+as a point estimate (empirical Bayes) or as a posterior $p(\etavec \mid \Dcal_1, \dots, \Dcal_T)$. For a new target
+task, the learnt prior replaces an uninformative one. With no target data the model predicts like an average source
+task; as target data arrive, the posterior moves to the target's own estimate.
+</Definition>
+
+## Intuition
+
+A prior says what parameter values are plausible before seeing data. In a single task it must be chosen by hand. Across
+many related tasks it can be estimated: if every previous user's activity classifier put a large positive weight on a
+given accelerometer feature, a new user's classifier probably does too. The hierarchy makes this precise. How much the new
+task borrows is set by the spread of the source tasks around their mean, which is itself estimated from the data. This
+is partial pooling, as in <NoteLink to="hierarchical-models" />, with the groups being tasks and the quantity of
+interest being the prediction for a new group.
+
+## The Gaussian linear case
+
+Let task $t$ have inputs $\Xmat_t$, targets $\yvec_t$ and the model $\yvec_t = \Xmat_t \wvec_t +
+\varepsilonvec_t$ with $\varepsilonvec_t \sim \Gauss(\zeros, \sigma^2 \eye)$, and let the task
+weights share the prior $\wvec_t \sim \Gauss(\muvec, \Sigmamat)$.
+
+### The target posterior
+
+For a new task with data $(\Xmat, \yvec)$, the prior $\Gauss(\muvec, \Sigmamat)$ and the Gaussian likelihood give a
+Gaussian posterior, as in <NoteLink to="bayesian-linear-regression" />:
+$$
+\Smat = \paren{\Sigmamat^{-1} + \sigma^{-2} \Xmat\transpose \Xmat}^{-1}, \qquad \mvec = \Smat \paren{\Sigmamat^{-1}
+\muvec + \sigma^{-2} \Xmat\transpose \yvec} .
+$$
+When $\Xmat\transpose\Xmat$ is invertible, write the least-squares estimate as $\hat\wvec = (\Xmat\transpose
+\Xmat)^{-1} \Xmat\transpose \yvec$, so that $\Xmat\transpose \yvec = \Xmat\transpose \Xmat \hat\wvec$. Then
+$$
+\mvec = \Smat \Sigmamat^{-1} \muvec + \Smat\, \sigma^{-2} \Xmat\transpose \Xmat\, \hat\wvec ,
+$$
+and the two matrix weights sum to $\Smat(\Sigmamat^{-1} + \sigma^{-2} \Xmat\transpose \Xmat) = \eye$. The posterior mean
+is a precision-weighted average of the source mean $\muvec$ and the target's own estimate $\hat\wvec$. With no target
+data it is $\muvec$. As the target data grow, $\sigma^{-2}\Xmat\transpose\Xmat$ dominates $\Sigmamat^{-1}$ and the
+posterior mean tends to $\hat\wvec$. A small $\Sigmamat$, meaning the source tasks agreed with each other, makes the
+target borrow for longer. This is the same bias–variance trade-off as in <NoteLink to="when-does-transfer-help" />,
+with the weight chosen by the estimated spread of the tasks rather than by hand.
+
+### Worked example
+
+One feature, prior $w \sim \Gauss(2, 0.5^2)$ learnt from source tasks, noise $\sigma = 1$. A new task observes $n = 4$
+points at $x = \pm 1$, so $\sum x^2 = 4$, with least-squares slope $\hat w = 3$. The posterior precision is $1/0.25 + 4/1
+= 8$ and the posterior mean is $(4 \times 2 + 4 \times 3)/8 = 2.5$, halfway. With $n = 40$ points at $x = \pm 1$ the
+precision is $4 + 40 = 44$ and the mean is $(8 + 120)/44 = 2.91$, close to the target's own slope. With a flat prior the
+mean would be $3$ in both cases, and with $4$ points its standard deviation would be $0.5$ rather than the hierarchical
+$1/\sqrt{8} = 0.35$.
+
+### Learning the prior: empirical Bayes
+
+The hyperparameters are estimated by maximising the marginal likelihood of all source tasks, with each task's weights
+integrated out:
+$$
+p(\yvec_1, \dots, \yvec_T \mid \muvec, \Sigmamat) = \prod_{t=1}^{T} \Gauss\paren{\yvec_t \mid \Xmat_t \muvec,\; \sigma^2
+\eye + \Xmat_t \Sigmamat \Xmat_t\transpose} .
+$$
+The <NoteLink to="expectation-maximisation">EM algorithm</NoteLink> treats the $\wvec_t$ as missing data. The E-step
+computes each task's posterior $\Gauss(\mvec_t, \Smat_t)$ under the current prior, by the formulas above. The M-step
+maximises the expected complete-data log-likelihood $\sum_t \expect\brack{\log \Gauss(\wvec_t \mid \muvec, \Sigmamat)}$,
+which gives
+$$
+\muvec = \frac{1}{T} \sum_t \mvec_t, \qquad \Sigmamat = \frac{1}{T} \sum_t \brack{(\mvec_t - \muvec)(\mvec_t -
+\muvec)\transpose + \Smat_t} .
+$$
+The prior mean is the average task, and the prior covariance is the scatter of the tasks plus their individual
+uncertainty. Bakker and Heskes use this model for multi-task neural networks, with a hidden layer shared by all tasks and
+task-specific output weights drawn from the hierarchical prior, and extend it to a mixture of Gaussian priors, which clusters tasks, and
+to priors gated by task features <Cite id="bakker2003" />.
+
+Empirical Bayes treats the estimated hyperparameters as known, which understates uncertainty when there are few source
+tasks. A full Bayesian treatment puts a hyperprior on $(\muvec, \Sigmamat)$, such as a Gaussian on the mean and a Gamma
+on each precision, and passes the posterior over them to the target task <Cite id="gelman2013" />.
+
+## Other forms of the same idea
+
+- **Regularised multi-task learning.** The penalty that pulls each task's weights towards their average is the negative
+  log of the Gaussian prior above, so its solution is the maximum a posteriori estimate <Cite id="evgeniou2004" />. See
+  <NoteLink to="multi-task-learning" />.
+- **Hierarchical and multi-task Gaussian processes.** A shared function with task-specific deviations,
+  $f_t \mid g \sim \GP(g, k_f)$, is the nonparametric version; see <NoteLink to="hierarchical-gaussian-process" />.
+  Multi-task Gaussian processes couple tasks through a task covariance matrix <Cite id="bonilla2008" />.
+- **Learning to learn.** Baxter models tasks as draws from an environment and learns the bias from them; the hierarchical
+  prior is a Bayesian bias of this kind <Cite id="baxter2000" />.
+- **Gradient-based meta-learning.** A few gradient steps from a learnt initialisation behave like maximum a posteriori
+  inference under a prior centred at the initialisation, so model-agnostic meta-learning can be read as empirical Bayes
+  in a hierarchical model <Cite id="grant2018" />. See <NoteLink to="meta-learning" />.
+- **Personalisation.** A community of individuals shares a prior over classifier weights, and a new individual starts
+  from the community posterior and is updated online as labels arrive. Diethe, Twomey and Flach use this construction
+  for activity recognition across people and combine it with active learning <Cite id="diethe2016active" /> <Cite
+  id="twomey2015evidence" />. See <NoteLink to="active-transfer-learning" />.
+
+## Assumptions
+
+- Tasks are exchangeable: before seeing data, no task is expected to differ from the others in a particular direction.
+  Known task features break exchangeability and call for a gated or regression prior.
+- The prior family can express how tasks vary. A single Gaussian cannot represent two clusters of tasks; a mixture can.
+
+## Pitfalls
+
+- **Too few source tasks.** The covariance $\Sigmamat$ has $d(d+1)/2$ free entries and is estimated from $T$ tasks.
+  With $T$ small, use a diagonal or scaled-identity covariance, or a hyperprior.
+- **Transferring certainty.** Source tasks with much data give a narrow prior. If the target differs from them in ways
+  the source tasks did not, the narrow prior slows adaptation. Widening the transferred prior, or transferring the mean
+  but not the precision, trades speed for safety.

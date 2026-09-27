@@ -1,0 +1,118 @@
+---
+title: Label shift and target shift in domain adaptation
+kind: concept
+summary: 'Label shift changes the class proportions $p(y)$ between source and target while $p(\xvec \mid y)$ is fixed. The target proportions are identified from unlabelled target inputs by matching mean embeddings; weights $p_T(y)/p_S(y)$ then correct training. Conditional shift also moves $p(\xvec \mid y)$.'
+tags: [transfer-learning, domain-adaptation, dataset-shift, kernel-methods]
+aliases: [generalised target shift, conditional shift, anticausal domain adaptation, label-shift importance weighting]
+requires: [dataset-shift, importance-weighting-for-covariate-shift]
+related: [prior-shift-correction, feature-alignment-methods, domain-adversarial-training, negative-transfer, bayes-theorem]
+references: [zhang2013target, lipton2018, saerens2002, garg2020, alexandari2020, zhao2019invariant, gretton2012]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Label shift**, also called **target shift**, is the case in which the source and target share the class-conditional
+distributions, $p_S(\xvec \mid y) = p_T(\xvec \mid y)$, and differ in the class proportions, $p_S(y) \ne p_T(y)$.
+**Conditional shift** is the case in which $p(\xvec \mid y)$ changes too. In domain adaptation, labelled source data
+and unlabelled target inputs are available, and the task is to estimate the target proportions and correct the
+classifier for them <Cite id="zhang2013target" /> <Cite id="lipton2018" />.
+</Definition>
+
+## Intuition
+
+Label shift is the natural shift when the label causes the input. A disease produces symptoms; a spoken word produces a
+sound. How a disease presents does not depend on how common it is, so $p(\xvec \mid y)$ is stable, while prevalence
+changes between hospitals, seasons and populations. Covariate shift is the natural shift in the other direction, when
+the input causes the label. The two assumptions are incompatible in general: if $p(y)$ changes and $p(\xvec \mid y)$
+does not, then $p(\xvec)$ and $p(y \mid \xvec)$ both change.
+
+The single-classifier view of the problem, correcting the posterior of an already trained model at deployment, is in
+<NoteLink to="prior-shift-correction" />. This note takes the domain-adaptation view: identify the shift from
+unlabelled target data, and train for the target.
+
+## The reweighted risk
+
+With $w(y) = p_T(y) / p_S(y)$ and $p(\xvec \mid y)$ shared, the target risk is a reweighted source risk:
+$$
+R_T(h) = \sum_y p_T(y) \int p(\xvec \mid y)\, \ell(h(\xvec), y)\, d\xvec = \sum_y p_S(y)\, w(y) \int p(\xvec \mid y)\,
+\ell(h(\xvec), y)\, d\xvec = \expect_S\brack{w(y)\, \ell(h(\xvec), y)} .
+$$
+This is importance weighting with weights on labels instead of inputs. There are only $K$ weights for $K$ classes, so
+their variance is small unless a class is rare in the source and common in the target.
+
+## Identifying the target proportions
+
+The target labels are unobserved, so $w$ must be estimated from target inputs. The key identity is that the target
+input distribution is a mixture of the shared class conditionals with the target proportions:
+$$
+p_T(\xvec) = \sum_{k=1}^{K} p(\xvec \mid y = k)\, p_T(y = k) .
+$$
+Apply any feature map $\phivec$ and take expectations. With $\muvec_k = \expect\brack{\phivec(\xvec) \mid y = k}$ the
+class-conditional mean feature, which the labelled source estimates,
+$$
+\expect_T\brack{\phivec(\xvec)} = \sum_{k} \muvec_k\, p_T(y = k) = \sum_k \muvec_k\, p_S(y = k)\, w_k .
+$$
+This is a linear system in the $K$ unknowns $w_k$. The target mean on the left is estimated from unlabelled target
+inputs. The proportions are **identified** when the $K$ vectors $\muvec_k$ are linearly independent, so that different
+mixtures give different means.
+
+Two choices of $\phivec$ give the two standard estimators.
+
+- **Black-box shift estimation** takes $\phivec(\xvec)$ to be the one-hot vector of a fixed classifier's predicted
+  label. Then $\expect_T[\phivec]$ is the vector $\qvec$ of predicted-label frequencies on the target, and
+  $\muvec_k\, p_S(y = k)$ is column $k$ of the joint confusion matrix $\Cmat_{jk} = p_S(\hat y = j, y = k)$, estimated on
+  held-out source data. The system becomes $\qvec = \Cmat \wvec$, solved as $\hat\wvec = \hat\Cmat^{-1} \hat\qvec$
+  <Cite id="lipton2018" />. The classifier need not be accurate or calibrated; its confusion matrix must be invertible.
+  The derivation of the estimator and a worked example are in <NoteLink to="prior-shift-correction" />.
+- **Kernel mean matching of labels** takes $\phivec$ to be the feature map of a characteristic kernel. For discrete labels, the
+  method of Zhang et al. chooses $\betavec \ge \zeros$ to minimise $\norm{\sum_k \beta_k\, \hat p_S(y = k)\, \hat\muvec_k -
+  \hat\muvec_T}^2$ in the reproducing-kernel Hilbert space, subject to $\sum_k \beta_k \hat p_S(y = k) = 1$ <Cite
+  id="zhang2013target" />; they state it for general labels with a conditional embedding operator. This is the label analogue of kernel mean matching for covariate shift (see <NoteLink
+  to="importance-weighting-for-covariate-shift" />), a quadratic programme in $K$ variables, and it uses the maximum
+  mean discrepancy of <Cite id="gretton2012" />.
+
+A third estimator maximises the likelihood of the target inputs under the mixture, by the EM algorithm of Saerens et
+al. <Cite id="saerens2002" />. Garg et al. show that black-box shift estimation is roughly maximum likelihood with a
+particular coarse calibration of the classifier, that maximum likelihood is consistent when the classifier is calibrated
+and the confusion matrix is invertible, and that black-box shift estimation loses efficiency because of its coarse
+calibration <Cite id="garg2020" />. Alexandari et al. found that maximum likelihood after
+bias-corrected calibration matched or beat black-box shift estimation <Cite id="alexandari2020" />.
+
+Once $\hat w$ is available there are two uses. Retrain with the weighted risk above, or keep the source classifier
+and multiply its predicted class probabilities by $\hat w_k$ and renormalise, which is <NoteLink to="bayes-theorem" />
+applied with the new prior.
+
+## Conditional and generalised target shift
+
+If the class conditionals also change, the mixture identity fails and the problem is not identifiable without further
+assumptions. Zhang et al. assume the change in each class conditional is a **location–scale** transformation, $\xvec
+\mapsto \Wmat_k \xvec + \bvec_k$ for class $k$, and estimate the transformation together with the proportions by kernel
+mean matching; they call this **generalised target shift** <Cite id="zhang2013target" />. More flexible assumptions,
+such as matching features learnt by a network, lose identifiability: many combinations of new proportions and new
+conditionals explain the same target inputs.
+
+## Interaction with feature alignment
+
+Methods that align the marginal feature distributions, such as <NoteLink to="domain-adversarial-training" />, assume the
+aligned domains should look alike. Under label shift they should not: the target inputs are a differently weighted
+mixture of the same classes, so their marginal distribution legitimately differs. Forcing it to match the source moves
+target inputs of the more common target class onto source regions of other classes. Zhao et al. prove that when the
+label distributions differ, invariant representations increase the combined source and target error by an amount that
+grows with the difference between label distributions <Cite id="zhao2019invariant" />. Weighting the source by $\hat
+w(y)$ before aligning removes this conflict.
+
+## Assumptions
+
+- The class conditionals are shared, or change only in the assumed parametric way.
+- Every class present in the target is present in the source.
+- The features used for matching separate the classes, so that the linear system is well conditioned.
+
+## Pitfalls
+
+- **Treating label shift as covariate shift.** Input-space importance weights assume $p(y \mid \xvec)$ is fixed, which
+  label shift violates.
+- **Ill-conditioned systems.** With a weak classifier or many similar classes, $\hat\Cmat$ is close to singular and the
+  estimated weights are noisy or negative. Clip to non-negative values and renormalise.
+- **Rare source classes.** A class with few source examples has a poorly estimated conditional mean and, if common in
+  the target, a large weight.

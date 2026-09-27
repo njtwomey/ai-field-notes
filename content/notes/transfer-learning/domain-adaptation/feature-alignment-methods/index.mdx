@@ -1,0 +1,138 @@
+---
+title: Feature alignment for domain adaptation
+kind: technique
+summary: 'Feature alignment maps source and target inputs into a space where their distributions match, then trains a classifier on the mapped source. TCA matches kernel mean embeddings, CORAL matches covariances in closed form, and deep variants add an MMD or CORAL loss.'
+tags: [transfer-learning, domain-adaptation, kernel-methods, deep-learning]
+aliases: [correlation alignment, CORAL, Deep CORAL, transfer component analysis, TCA, deep adaptation network, DAN, deep domain confusion, MMD-based domain adaptation]
+requires: [domain-adaptation-theory, reproducing-kernel-hilbert-space, variance-and-covariance]
+related: [domain-adversarial-training, importance-weighting-for-covariate-shift, kernel-inception-distance, eigendecomposition, kernel-pca]
+references: [gretton2012, pan2011tca, sun2016coral, sun2016deepcoral, tzeng2014ddc, long2015dan, bendavid2010, zhao2019invariant]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Feature alignment** learns a map $\phivec : \Xcal \to \Zcal$ under which the distribution of mapped source inputs is
+close to that of mapped target inputs, and trains a classifier on the mapped labelled source data. Closeness is measured
+by a statistic computable from unlabelled samples: the difference of kernel mean embeddings (maximum mean discrepancy),
+the difference of covariance matrices (CORAL), or the error of a domain classifier (<NoteLink
+to="domain-adversarial-training" />).
+</Definition>
+
+## Problem
+
+The target-error bound of <NoteLink to="domain-adaptation-theory" /> has three terms: source error, a divergence between
+the input distributions and the error $\lambda$ of the best joint hypothesis <Cite id="bendavid2010" />. Importance weighting leaves the inputs alone
+and reweights them. Feature alignment changes the inputs so that the divergence term is small, while the classifier keeps
+the source error small. The price is that the map can also change $\lambda$.
+
+## Maximum mean discrepancy
+
+Let $k$ be a kernel with feature map $\varphivec$ into a <NoteLink to="reproducing-kernel-hilbert-space" /> $\Fcal$, so
+that $k(\xvec, \xvec') = \inner{\varphivec(\xvec)}{\varphivec(\xvec')}_{\Fcal}$ and $f(\xvec) = \inner{f}{\varphivec(\xvec)}_{\Fcal}$
+for every $f \in \Fcal$. The **maximum mean discrepancy** between distributions $p$ and $q$ is the largest difference in
+the expectation of a unit-norm function <Cite id="gretton2012" />:
+$$
+\operatorname{MMD}(p, q) = \sup_{\norm{f}_{\Fcal} \le 1} \paren{\expect_{p}\brack{f(\xvec)} - \expect_{q}\brack{f(\yvec)}}.
+$$
+By the reproducing property, $\expect_p[f(\xvec)] = \inner{f}{\muvec_p}_{\Fcal}$ with mean embedding $\muvec_p =
+\expect_p\brack{\varphivec(\xvec)}$. The supremum is therefore $\sup_{\norm{f} \le 1} \inner{f}{\muvec_p -
+\muvec_q}$, which by the Cauchy–Schwarz inequality is attained at $f = (\muvec_p - \muvec_q) / \norm{\muvec_p -
+\muvec_q}$:
+$$
+\operatorname{MMD}(p, q) = \norm{\muvec_p - \muvec_q}_{\Fcal} .
+$$
+Expanding the square with the kernel,
+$$
+\operatorname{MMD}^2(p, q) = \expect\brack{k(\xvec, \xvec')} + \expect\brack{k(\yvec, \yvec')} - 2\, \expect\brack{k(\xvec,
+\yvec)},
+$$
+with $\xvec, \xvec' \sim p$ and $\yvec, \yvec' \sim q$ independent. Every term is an average of kernel evaluations, so
+the statistic is estimated from samples without density estimation. For a characteristic kernel, such as the Gaussian
+kernel, $\operatorname{MMD}(p, q) = 0$ only if $p = q$ <Cite id="gretton2012" />. The unbiased estimator and its use as a
+test are covered in <NoteLink to="kernel-inception-distance" />.
+
+With a linear kernel, $\muvec_p$ is the mean and the MMD compares only means. With a quadratic kernel it compares first
+and second moments. A Gaussian kernel compares all moments, weighted by the bandwidth.
+
+## Transfer component analysis
+
+Transfer component analysis looks for a low-dimensional projection in the kernel feature space in which the domains have
+close means and the data keep their variance <Cite id="pan2011tca" />. Stack the $n = n_s + n_t$ source and target inputs,
+form the kernel matrix $\Kmat \in \reals^{n \times n}$, and project with $\Wmat \in \reals^{n \times m}$, so that the
+embedded data are the rows of $\Kmat \Wmat$. The squared empirical MMD between the embedded domains is
+$$
+\norm{\frac{1}{n_s} \sum_{i \in S} \zvec_i - \frac{1}{n_t} \sum_{j \in T} \zvec_j}^2 = \trace\paren{\Wmat\transpose \Kmat
+\Lmat \Kmat \Wmat},
+\qquad
+L_{ij} = \begin{cases} 1/n_s^2 & i, j \in S \\ 1/n_t^2 & i, j \in T \\ -1/(n_s n_t) & \text{otherwise.} \end{cases}
+$$
+The identity holds because $\Lmat = \evec \evec\transpose$ with $e_i = 1/n_s$ on source rows and $-1/n_t$ on target rows,
+and $\evec\transpose \Kmat \Wmat$ is the difference of the two embedded means. The variance of the embedded data is
+$\trace\paren{\Wmat\transpose \Kmat \Hmat \Kmat \Wmat}$, where $\Hmat = \eye - \frac{1}{n} \ones \ones\transpose$ centres
+the data. TCA solves
+$$
+\min_{\Wmat} \; \trace\paren{\Wmat\transpose \Kmat \Lmat \Kmat \Wmat} + \mu \trace\paren{\Wmat\transpose \Wmat}
+\quad \text{subject to} \quad \Wmat\transpose \Kmat \Hmat \Kmat \Wmat = \eye_m ,
+$$
+where $\mu > 0$ regularises the projection and the constraint fixes the scale. With a symmetric matrix $\Zmat$ of
+<NoteLink to="lagrange-multipliers" />, the Lagrangian is $\trace\paren{\Wmat\transpose (\Kmat \Lmat \Kmat + \mu
+\eye) \Wmat} - \trace\paren{(\Wmat\transpose \Kmat \Hmat \Kmat \Wmat - \eye) \Zmat}$. Setting its gradient in $\Wmat$ to
+zero gives
+$$
+(\Kmat \Lmat \Kmat + \mu \eye)\, \Wmat = \Kmat \Hmat \Kmat\, \Wmat \Zmat ,
+$$
+a generalised eigenproblem. The objective at a solution is $\trace(\Zmat)$, so the minimum takes the $m$ eigenvectors of
+$(\Kmat \Lmat \Kmat + \mu \eye)^{-1} \Kmat \Hmat \Kmat$ with the largest eigenvalues <Cite id="pan2011tca" />. With $\Lmat =
+\zeros$ this reduces to <NoteLink to="kernel-pca" />; the $\Lmat$ term is what makes the components transferable. A
+classifier is then trained on the embedded source rows and applied to the embedded target rows.
+
+## Correlation alignment
+
+CORAL aligns second-order statistics with a linear map <Cite id="sun2016coral" />. Let $\Cmat_S$ and $\Cmat_T$ be the
+$d \times d$ covariance matrices of the source and target features. Find a matrix $\Amat$ such that the transformed
+source features $\xvec\transpose \Amat$ have the target covariance:
+$$
+\min_{\Amat} \norm{\Amat\transpose \Cmat_S \Amat - \Cmat_T}_F^2 .
+$$
+If both covariances are full rank, $\Amat = \Cmat_S^{-1/2} \Cmat_T^{1/2}$ reaches the minimum of zero, since
+$$
+\Amat\transpose \Cmat_S \Amat = \Cmat_T^{1/2} \Cmat_S^{-1/2} \Cmat_S \Cmat_S^{-1/2} \Cmat_T^{1/2} = \Cmat_T,
+$$
+using that symmetric square roots are symmetric and commute with their own matrix. The map **whitens** the source,
+removing its correlations, and then **re-colours** it with the target's. Sun et al. derive the general solution when the
+covariances are rank deficient, through their <NoteLink to="eigendecomposition">eigendecompositions</NoteLink>; in
+practice they add the identity to each covariance, which makes both full rank <Cite id="sun2016coral" />. The algorithm
+has four steps: add $\eye$ to each covariance, multiply the source features by $\Cmat_S^{-1/2}$, multiply by
+$\Cmat_T^{1/2}$, and train any classifier on the result. Target features are used unchanged.
+
+CORAL needs no hyperparameters beyond the regulariser and no target labels. It aligns only the first two moments and
+only linearly.
+
+## Deep alignment losses
+
+In a network, the alignment term becomes a loss on the activations of one or more layers, computed on each minibatch of
+source and target inputs and added to the classification loss on the source.
+
+- **Deep domain confusion** adds the squared MMD with a linear kernel at one adaptation layer <Cite id="tzeng2014ddc" />.
+- **Deep adaptation networks** add a multi-kernel MMD, a combination of Gaussian kernels of several bandwidths, at
+  several task-specific layers <Cite id="long2015dan" />.
+- **Deep CORAL** adds $\ell_{\text{CORAL}} = \frac{1}{4d^2} \norm{\Cmat_S - \Cmat_T}_F^2$ on the last layer's
+  activations, where $\Cmat_S$ and $\Cmat_T$ are minibatch covariances of $d$-dimensional features
+  <Cite id="sun2016deepcoral" />. The loss is differentiable in the features and is trained jointly with the source
+  classification loss, whose weight balances the two.
+
+The MMD and CORAL losses are fixed statistics. A domain classifier is a learnt statistic that looks for whatever
+difference remains; see <NoteLink to="domain-adversarial-training" />.
+
+## Trade-offs
+
+- **Alignment does not guarantee transfer.** Aligning the marginal distributions of features reduces the divergence term
+  of the bound but can raise the joint error $\lambda$. When the class proportions differ between domains, perfectly
+  aligned features force errors on one of them <Cite id="zhao2019invariant" />.
+- **Kernel methods scale with $n^2$.** TCA forms and decomposes $n \times n$ matrices; CORAL works with $d \times d$
+  covariances and scales to any number of examples.
+- **Moment matching is partial.** CORAL and linear-kernel MMD match only low-order moments. Distributions that agree in
+  mean and covariance can still differ.
+- **The bandwidth matters.** A Gaussian-kernel MMD with too small a bandwidth sees every sample as different; with too
+  large a bandwidth it sees only the means. Multi-kernel MMD averages over bandwidths to reduce this sensitivity.

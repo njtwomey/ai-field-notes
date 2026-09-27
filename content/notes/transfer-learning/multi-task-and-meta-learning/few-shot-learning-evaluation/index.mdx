@@ -1,0 +1,93 @@
+---
+title: Few-shot learning evaluation
+kind: concept
+summary: 'Few-shot classifiers are evaluated on episodes of $N$ unseen classes with $K$ labelled examples each, averaging accuracy over hundreds of episodes with a 95% confidence interval. Class splits must be disjoint, and a pretrained network with a linear classifier is the baseline to beat.'
+tags: [transfer-learning, meta-learning, few-shot-learning, evaluation, worked-example]
+aliases: [few-shot benchmarks, miniImageNet, Omniglot, Meta-Dataset, cross-domain few-shot learning, episodic evaluation]
+requires: [meta-learning]
+related: [metric-based-few-shot-learning, transfer-learning-and-fine-tuning, confidence-intervals, test-time-adaptation]
+references: [lake2015, vinyals2016, ravi2017, triantafillou2020, guo2020cdfsl, chen2019closer, tian2020rethinking, dhillon2020, nichol2018reptile]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Few-shot evaluation** measures how well a method learns classes it has not seen. The classes of a dataset are split
+into disjoint meta-training, meta-validation and meta-test sets. An **episode** samples $N$ classes from one split, $K$
+labelled support examples per class and a number of query examples per class. The method adapts on the support set and
+is scored on the query set. The reported figure is the mean query accuracy over many meta-test episodes, usually 600 or
+more, with a 95% confidence interval <Cite id="vinyals2016" /> <Cite id="ravi2017" />.
+</Definition>
+
+## Benchmarks
+
+<SpecTable
+  columns={['Contents', 'Split or protocol', 'What it tests']}
+  rows={{
+    'Omniglot': ['1623 handwritten characters from 50 alphabets, 20 drawings each', '20-way and 5-way, 1-shot and 5-shot', 'learning from one example; now near ceiling'],
+    'miniImageNet': ['100 ImageNet classes, 600 images each, 84 × 84 pixels', '64 train, 16 validation, 20 test classes', 'the standard natural-image benchmark'],
+    'Meta-Dataset': ['10 image datasets from different domains', 'variable ways and shots per episode', 'generalisation across datasets and imbalanced support sets'],
+    'Cross-domain few-shot (BSCD-FSL)': ['train on ImageNet; test on crop disease, satellite, dermatology and chest X-ray images', '5-way, 5 to 50 shots', 'transfer to domains unlike the training classes'],
+  }}
+/>
+
+Omniglot was introduced as a test of human-like concept learning <Cite id="lake2015" />; miniImageNet by Vinyals et
+al. <Cite id="vinyals2016" />, with the class split of Ravi and Larochelle now standard <Cite id="ravi2017" />.
+Meta-Dataset varies the number of classes and examples per episode and draws them from ten sources, so a method cannot
+tune to one configuration <Cite id="triantafillou2020" />. The cross-domain benchmark of Guo et al. measures what happens
+when the new classes come from a different kind of image <Cite id="guo2020cdfsl" />.
+
+## Reporting uncertainty
+
+Each episode gives an accuracy $a_e$. Over $E$ independent episodes with mean $\bar a$ and standard deviation $s$, the
+mean has standard error $s/\sqrt{E}$, and the usual interval is
+$$
+\bar a \pm 1.96 \frac{s}{\sqrt{E}} .
+$$
+The $1.96$ is the $97.5$th percentile of the standard normal distribution, justified by the central limit theorem for
+the average of independent episode accuracies (see <NoteLink to="confidence-intervals" />).
+
+### Worked example
+
+With $E = 600$ episodes and a per-episode standard deviation of $8$ percentage points, typical of 5-way 5-shot
+miniImageNet, the interval half-width is $1.96 \times 8 / \sqrt{600} = 0.64$ points. For 1-shot episodes, whose
+accuracies vary more, a standard deviation of $20$ points gives $1.60$ points. Two methods reported at $60.2 \pm 0.6$
+and $60.8 \pm 0.6$ are not distinguished by these intervals. Evaluating both methods on the same episodes and computing
+the interval of the per-episode difference is more sensitive, because the difficulty of an episode affects both
+methods alike.
+
+## Baselines that must be reported
+
+Several studies found that elaborate meta-learning was matched by simple transfer.
+
+- **Pretrain and fit a linear head.** Chen et al. trained a network by ordinary classification on all meta-training
+  classes, then fitted a new linear or cosine-similarity classifier on each episode's support set. With deeper
+  backbones the differences between methods shrank, and in a cross-domain setting, miniImageNet to birds, the baseline
+  compared favourably with meta-learning methods <Cite id="chen2019closer" />.
+- **Pretrain and use logistic regression.** Tian et al. found that a representation learnt by supervised or
+  self-supervised training on the meta-training set, followed by logistic regression on the support set, outperformed
+  the meta-learning methods of the time <Cite id="tian2020rethinking" />.
+- **Fine-tune.** Dhillon et al. showed that fine-tuning a network trained with cross-entropy is a strong baseline, and
+  that fine-tuning transductively, using the unlabelled query examples as well, beat the published results on four
+  benchmarks with one set of hyperparameters <Cite id="dhillon2020" />.
+- **Under domain shift.** On the cross-domain benchmark, all meta-learning methods tested underperformed simple
+  fine-tuning, by $12.8$ points of accuracy on average <Cite id="guo2020cdfsl" />.
+
+These results do not show that meta-learning is useless. They show that the representation matters more than the
+adaptation rule on current benchmarks, and that a method must beat a well-tuned transfer baseline with the same backbone
+before its gains can be credited to meta-learning.
+
+## Pitfalls
+
+- **Transductive evaluation without saying so.** Batch normalisation computed on the query batch shares information
+  among query examples, which makes the evaluation transductive. Nichol et al. note that MAML was evaluated this way, and
+  found that transduction raised accuracy in every case they tested; transductive and inductive results are not
+  comparable <Cite id="nichol2018reptile" />.
+- **Different backbones.** A deeper backbone can add more accuracy than the method being proposed. Compare methods
+  with the same backbone and training budget.
+- **Tuning on meta-test classes.** Hyperparameters, including the number of inner steps and the stopping time, must be
+  chosen on the meta-validation classes.
+- **Overlap between splits.** Meta-test classes that are near-duplicates of meta-training classes, or a pretrained
+  backbone trained on data containing the meta-test classes, turn a few-shot test into a many-shot one.
+- **One configuration.** Results at 5-way 1-shot and 5-way 5-shot say little about 20-way or imbalanced support sets
+  <Cite id="triantafillou2020" />.

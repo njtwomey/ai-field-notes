@@ -1,0 +1,108 @@
+---
+title: Lifelong and continual transfer
+kind: concept
+summary: 'In lifelong learning a model meets tasks in sequence and should learn each new task faster because of earlier ones (forward transfer) without losing them (backward transfer). An accuracy matrix measures both; ELLA and progressive networks aim at forward transfer.'
+tags: [transfer-learning, continual-learning, online-learning, multi-task-learning]
+aliases: [lifelong transfer, ELLA, efficient lifelong learning algorithm, progressive neural networks]
+requires: [continual-learning, multi-task-learning]
+related: [evaluating-continual-learners, regularisation-based-continual-learning, replay-and-architectural-methods, meta-learning, online-transfer-learning, test-time-adaptation, negative-transfer, taylor-series]
+references: [thrun1998, lopezpaz2017, diazrodriguez2018, ruvolo2013ella, rusu2016, wang2022cotta]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Lifelong learning** is learning from a sequence of tasks $\Tcal_1, \Tcal_2, \dots$, one after another, with the aim
+that experience with earlier tasks makes later ones easier to learn <Cite id="thrun1998" />. Its transfer is measured in
+two directions. **Forward transfer** is the effect of learning earlier tasks on performance on a new task before and while
+it is learnt. **Backward transfer** is the effect of learning a new task on performance on earlier ones; negative backward
+transfer is forgetting <Cite id="lopezpaz2017" />.
+</Definition>
+
+## Intuition
+
+Transfer learning usually has one source and one target. Lifelong learning makes every task a target when it arrives and a
+source afterwards. A learner that only fine-tunes on each task in turn gets forward transfer for free, since each task
+starts from the previous weights, and pays for it with forgetting. A learner that freezes what it has learnt cannot forget
+but may not transfer. How the continual learner avoids forgetting is covered in <NoteLink to="continual-learning" />; this
+note concerns how it transfers.
+
+## Measuring transfer
+
+Both directions are read off the **accuracy matrix** $R_{i,j}$, the test accuracy on task $j$ after training on tasks
+$1, \dots, i$. Backward transfer averages $R_{T,j} - R_{j,j}$, the change in each task's accuracy between just after it
+was learnt and the end. Forward transfer averages $R_{j-1,j} - \bar b_j$, the accuracy on task $j$ before training on it
+minus that of an untrained model <Cite id="lopezpaz2017" />. Definitions, a worked example and the related forgetting
+measure are in <NoteLink to="evaluating-continual-learners" />. Two points matter for transfer. The forward-transfer
+summary measures zero-shot transfer only. Transfer *during* learning shows on the diagonal: comparing $R_{j,j}$ with the
+accuracy of a learner trained on task $j$ alone measures whether earlier tasks helped task $j$ to be learnt, and a
+shortfall is <NoteLink to="negative-transfer" />.
+
+Díaz-Rodríguez et al. argue that accuracy and forgetting are not enough. They add memory overhead and computational
+efficiency to accuracy and to forward and backward transfer, and combine the metrics into one score for ranking, so that
+methods that buy transfer with ever-larger models are compared fairly <Cite id="diazrodriguez2018" />.
+
+## Methods built for forward transfer
+
+### A shared basis: ELLA
+
+The efficient lifelong learning algorithm models each task's parameters as a sparse combination of a shared basis,
+$\thetavec_t = \Lmat \svec_t$, with $\Lmat \in \reals^{d \times k}$ shared and $\svec_t \in \reals^k$ sparse
+<Cite id="ruvolo2013ella" />. The multi-task objective over $T$ tasks is
+$$
+\frac{1}{T} \sum_{t=1}^{T} \min_{\svec_t} \brack{\frac{1}{n_t} \sum_{i=1}^{n_t} \ell\paren{f(\xvec_{ti}; \Lmat \svec_t),
+y_{ti}} + \mu \norm{\svec_t}_1} + \lambda \norm{\Lmat}_F^2 .
+$$
+Optimising it exactly would revisit every task's data whenever $\Lmat$ changes. ELLA removes that need with a second-order
+<NoteLink to="taylor-series" /> expansion of each task's loss around its single-task optimum $\hat\thetavec_t$. The
+gradient vanishes there, so
+$$
+\frac{1}{n_t} \sum_i \ell\paren{f(\xvec_{ti}; \thetavec), y_{ti}} \approx \text{const} + \norm{\thetavec -
+\hat\thetavec_t}_{\Dmat_t}^2, \qquad \norm{\vvec}_{\Dmat}^2 = \vvec\transpose \Dmat \vvec,
+$$
+where $\Dmat_t$ is half the Hessian of the task's average loss at $\hat\thetavec_t$. Each task is then summarised by the
+pair $(\hat\thetavec_t, \Dmat_t)$, and the objective becomes
+$$
+\frac{1}{T} \sum_{t} \min_{\svec_t} \brack{\norm{\hat\thetavec_t - \Lmat \svec_t}_{\Dmat_t}^2 + \mu \norm{\svec_t}_1} +
+\lambda \norm{\Lmat}_F^2 .
+$$
+When task $t$ arrives, ELLA fits $\hat\thetavec_t$ and $\Dmat_t$, computes $\svec_t$ by a lasso problem with $\Lmat$ fixed,
+and updates $\Lmat$ in closed form from the accumulated sufficient statistics. Earlier codes $\svec_{t'}$ are not
+recomputed. Forward transfer comes from the basis: a new task is expressed in terms of components learnt from old ones.
+Backward transfer comes from updating $\Lmat$, which changes every earlier task's parameters $\Lmat \svec_{t'}$. The
+Hessian weighting is the same device as in elastic weight consolidation; see <NoteLink
+to="regularisation-based-continual-learning" />.
+
+### Progressive networks
+
+Progressive neural networks add a new column of layers for each task and freeze the columns of earlier tasks
+<Cite id="rusu2016" />. Each layer of the new column receives, besides its own previous layer, lateral connections from
+the corresponding layers of all earlier columns. Freezing makes forgetting impossible, and the lateral connections let the
+new task reuse any earlier feature, which gives forward transfer. The cost is growth: parameters grow linearly with the
+number of tasks, and lateral connections grow quadratically. See <NoteLink to="replay-and-architectural-methods" />.
+
+### Other routes
+
+- **Fine-tune in sequence** gives forward transfer and maximal forgetting; it is the baseline for FWT and BWT.
+- **Hierarchical priors updated online** carry forward what tasks have in common while leaving each task its own
+  parameters; see <NoteLink to="hierarchical-bayesian-transfer" />.
+- **Meta-learning** across the sequence learns an initialisation from which later tasks are fast to learn; see <NoteLink
+  to="meta-learning" />.
+- **Continual test-time adaptation** faces the unlabelled version of the problem: a deployed model adapts to a target
+  distribution that keeps changing, and must not drift away from what it knew <Cite id="wang2022cotta" />; see <NoteLink
+  to="test-time-adaptation" />.
+
+## Assumptions
+
+- Tasks are related enough that earlier ones help later ones. For unrelated sequences, forward transfer is zero or
+  negative, and the best a lifelong learner can do is not to interfere.
+- Task boundaries are known, or can be detected. The metrics above need them.
+
+## Pitfalls
+
+- **Reporting only final accuracy.** $\text{ACC}$ alone cannot distinguish a learner that transferred and forgot from one
+  that neither transferred nor forgot.
+- **Ignoring growth.** Methods that add parameters per task trivially avoid forgetting; compare at equal memory
+  <Cite id="diazrodriguez2018" />.
+- **Evaluating on the training order only.** Transfer depends on the order of tasks. Averages over several orders are more
+  informative.

@@ -1,0 +1,126 @@
+---
+title: Multi-task learning
+kind: concept
+summary: 'Multi-task learning trains several related tasks together so that each borrows statistical strength from the others. Hard sharing uses common layers with task heads; soft sharing couples separate parameters by a penalty. The cost of the shared part is spread over all tasks.'
+tags: [transfer-learning, multi-task-learning, deep-learning, regularisation, learning-theory]
+aliases: [multitask learning, MTL, hard parameter sharing, soft parameter sharing, regularised multi-task learning, task grouping, uncertainty weighting, gradient surgery, PCGrad]
+requires: [empirical-risk-minimisation, gradient-descent]
+related: [hierarchical-bayesian-transfer, meta-learning, negative-transfer, transfer-learning-and-fine-tuning, rademacher-complexity, multi-behaviour-recommendation]
+references: [caruana1997, baxter2000, maurer2016, evgeniou2004, ruder2017mtl, misra2016, duong2015, kendall2018, yu2020pcgrad, standley2020, fifty2021, argyriou2008]
+status: draft
+updated: 2026-09-27
+---
+
+import { SharingDiagram } from './SharingDiagram'
+
+<Definition>
+**Multi-task learning** learns $T$ tasks at once. Task $t$ has data $\set{(\xvec_{ti}, y_{ti})}_{i=1}^{n}$ from its own
+distribution and a loss $L_t$, and the model shares part of its parameters or representation across tasks. Training
+minimises a weighted sum $\sum_t \lambda_t L_t$. The other tasks act as an inductive bias: they favour hypotheses that
+explain several tasks, which is a better bias than a generic regulariser when the tasks are related
+<Cite id="caruana1997" />.
+</Definition>
+
+## Intuition
+
+Caruana's argument is that the training signals of related tasks carry information about each other's hidden
+structure <Cite id="caruana1997" />. A feature that helps predict one task, learnt from that task's labels, is available
+to the others. Features that a single task would fit to noise are less likely to survive when every task must use them.
+Shared training also acts as data amplification: a shared layer sees $T n$ examples rather than $n$.
+
+## Hard and soft sharing
+
+<SharingDiagram />
+
+**Hard parameter sharing** passes every task through the same hidden layers $\phivec(\cdot; \Wmat)$ and gives each
+task its own output head $g_t$, so task $t$ predicts $g_t(\phivec(\xvec; \Wmat); \vvec_t)$ <Cite id="caruana1997" />.
+It is the most common form in deep learning and reduces overfitting in proportion to how much of the network is shared
+<Cite id="ruder2017mtl" />.
+
+**Soft parameter sharing** gives each task its own parameters $\wvec_t$ and adds a penalty that keeps them close.
+Duong et al. couple two parsers by the squared distance between their weights <Cite id="duong2015" />; cross-stitch
+networks learn linear combinations of the tasks' activations at each layer <Cite id="misra2016" />.
+
+### Soft sharing is shrinkage to the mean
+
+Evgeniou and Pontil write each task's linear weights as a common part plus a task-specific part, $\wvec_t = \wvec_0 +
+\vvec_t$, and penalise $\lambda_1 \sum_t \norm{\vvec_t}^2 + \lambda_2 \norm{\wvec_0}^2$ <Cite id="evgeniou2004" />.
+Eliminating $\wvec_0$ shows what the penalty does to the task weights. With the $\wvec_t$ fixed, the penalty
+$\lambda_1 \sum_t \norm{\wvec_t - \wvec_0}^2 + \lambda_2 \norm{\wvec_0}^2$ is minimised at
+$$
+\wvec_0 = a \sum_t \wvec_t, \qquad a = \frac{\lambda_1}{T \lambda_1 + \lambda_2} .
+$$
+Write $\bar\wvec = \frac1T \sum_t \wvec_t$ and $\svec = \sum_t \wvec_t = T \bar\wvec$. Substituting, and using $(T
+\lambda_1 + \lambda_2) a^2 = \lambda_1 a$,
+$$
+\lambda_1 \sum_t \norm{\wvec_t}^2 - 2 \lambda_1 a \norm{\svec}^2 + (T\lambda_1 + \lambda_2) a^2 \norm{\svec}^2 =
+\lambda_1 \sum_t \norm{\wvec_t}^2 - \lambda_1 a T^2 \norm{\bar\wvec}^2 .
+$$
+Finally $T \norm{\bar\wvec}^2 = \sum_t \norm{\wvec_t}^2 - \sum_t \norm{\wvec_t - \bar\wvec}^2$, so the penalty equals
+$$
+\frac{\lambda_1 \lambda_2}{T\lambda_1 + \lambda_2} \sum_t \norm{\wvec_t}^2 + \frac{T \lambda_1^2}{T\lambda_1 + \lambda_2}
+\sum_t \norm{\wvec_t - \bar\wvec}^2 .
+$$
+The first term is ordinary ridge regularisation of each task. The second pulls every task towards the average task.
+Large $\lambda_1$ forces the tasks to agree; large $\lambda_2$ leaves them independent. This penalty is the negative log
+of a Gaussian prior in which the task weights scatter around a shared mean, so soft sharing is the maximum a posteriori
+estimate of a hierarchical model; see <NoteLink to="hierarchical-bayesian-transfer" />.
+
+Other structural assumptions give other penalties. Convex multi-task feature learning assumes the tasks share a small
+set of features and penalises the $(2,1)$-norm of the weight matrix after a learnt rotation, which selects the same
+features for all tasks <Cite id="argyriou2008" />.
+
+## What sharing buys: bounds
+
+Baxter formalised the argument with an **environment** of tasks: a distribution over task distributions from which the
+training tasks are drawn <Cite id="baxter2000" />. The learner chooses a hypothesis space, its bias, from a family of
+spaces, using $T$ tasks with $n$ examples each. Baxter shows that the number of examples per task needed to reach a
+given accuracy falls as $T$ grows, because the cost of learning the bias is divided among the tasks, while the cost of
+learning each task within the chosen bias is not. A bias learnt this way also generalises to new tasks from the same
+environment.
+
+Maurer, Pontil and Romera-Paredes give an explicit bound for representation learning with a shared map $h \in \Hcal$
+and task-specific predictors $f_t \in \Fcal$ <Cite id="maurer2016" />. With probability at least $1 - \delta$, the
+average excess risk of the empirical minimiser over the $T$ tasks is at most
+$$
+\frac{c_1 L\, G(\Hcal(\bar\Xmat))}{nT} + \frac{c_2\, Q \sup_{h} \norm{h(\bar\Xmat)}}{n \sqrt{T}} + \sqrt{\frac{8 \ln(4 /
+\delta)}{nT}},
+$$
+where $G(\Hcal(\bar\Xmat))$ is the Gaussian average of the representation class on all $nT$ inputs, $L$ is a Lipschitz
+constant, $Q$ measures the complexity of the task-specific class and $c_1, c_2$ are constants. For many classes,
+including deep compositions of Lipschitz maps, $G$ grows as $\sqrt{nT}$, so the first term is of order $1 / \sqrt{nT}$:
+**the representation is paid for by all $nT$ examples**, and its cost vanishes as the number of tasks grows. The second
+term is typically of order $1/\sqrt{n}$: **each task still pays for its own head** with its own $n$ examples. A single
+task learnt alone pays for both parts with $n$ examples. Multi-task learning helps most when the representation is the
+complex part and the heads are simple.
+
+## Balancing tasks
+
+The weights $\lambda_t$ matter, and the tasks' losses can differ in scale by orders of magnitude.
+
+- **Uncertainty weighting.** Model task $t$'s regression target as Gaussian with noise $\sigma_t^2$ and learn $\sigma_t$
+  by maximum likelihood. The negative log-likelihood is $\frac{1}{2\sigma_t^2} L_t + \log \sigma_t$ up to constants, where
+  $L_t$ is the squared error. Summed over tasks, this weights each loss by $1/(2\sigma_t^2)$, and the $\log \sigma_t$ term
+  stops the weights going to zero <Cite id="kendall2018" />.
+- **Gradient surgery.** When two tasks' gradients $\gvec_i$ and $\gvec_j$ on the shared parameters conflict,
+  $\gvec_i\transpose \gvec_j < 0$, PCGrad replaces $\gvec_i$ by its projection onto the normal plane of $\gvec_j$,
+  $\gvec_i - \frac{\gvec_i\transpose \gvec_j}{\norm{\gvec_j}^2} \gvec_j$, so that the step for one task does not undo the
+  other <Cite id="yu2020pcgrad" />.
+
+## Which tasks to learn together
+
+Relatedness is not symmetric and not obvious. Standley et al. trained networks on all pairs from a set of vision tasks
+and found that whether two tasks help each other changes with the network's size and the amount of data; they chose
+groupings by searching over combinations under a compute budget <Cite id="standley2020" />. Fifty et al. estimate
+affinity during a single training run: the **inter-task affinity** of task $i$ on task $j$ is the relative change in
+$L_j$ after a gradient step on $L_i$ alone, $1 - L_j(\thetavec - \eta \nabla L_i) / L_j(\thetavec)$, averaged over
+training <Cite id="fifty2021" />. Tasks with high mutual affinity are grouped.
+
+## Pitfalls
+
+- **Negative transfer between tasks.** A shared layer that serves one task can hurt another. Compare every task with its
+  single-task baseline; see <NoteLink to="negative-transfer" />.
+- **One task dominates.** Without balancing, the task with the largest loss or gradient decides the shared
+  representation.
+- **Sharing too much.** Hard sharing up to the last layer forces tasks with different output structure through the same
+  bottleneck. Sharing the lower layers and separating the upper ones is the usual compromise <Cite id="ruder2017mtl" />.

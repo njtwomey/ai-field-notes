@@ -1,0 +1,180 @@
+---
+title: Active transfer learning
+kind: technique
+summary: 'Active transfer learning starts a target model from knowledge learnt on source domains, then asks for labels only on the target examples most worth labelling. Transfer removes the cold start of active learning; active selection spends the budget where the model is least sure.'
+tags: [transfer-learning, active-learning, bayesian-inference, activity-recognition, smart-homes]
+aliases: [transfer active learning, hierarchical Bayesian active transfer learning, community Bayes point machine, personalised activity recognition, value of information active learning]
+requires: [transfer-learning, hierarchical-bayesian-transfer]
+related: [bayesian-active-learning, context-modulation-and-sensor-transfer, online-transfer-learning, stream-based-active-learning, expectation-propagation, sequential-bayesian-updating]
+references: [diethe2016active, diethe2015bayesian, twomey2015evidence, herbrich2001, minka2001, opper1998, kapoor2007, rashidi2011, anguita2013, zhang2012uschad, settles2009, kale2013, yang2013transfer, rai2010, chattopadhyay2013, su2020aada]
+status: draft
+updated: 2026-09-27
+---
+
+import { CommunityBpmDiagram } from './CommunityBpmDiagram'
+
+<Definition>
+**Active transfer learning** combines two ways of saving target labels. **Transfer** initialises the target model with
+knowledge from source domains, such as a prior over parameters learnt from other people or other houses. **Active
+learning** then chooses which unlabelled target examples to send to an annotator, one at a time or in batches, under a
+labelling budget <Cite id="settles2009" />. The transferred model gives useful predictions before any target label
+arrives, and its uncertainty guides the choice of queries <Cite id="diethe2016active" />.
+</Definition>
+
+## Problem
+
+Activity recognition in smart homes has both problems at once <Cite id="diethe2015bayesian" /> <Cite
+id="diethe2016active" />. First, the deployment context differs from the learning context. People perform the same
+activity in different ways and with different frequencies, and houses differ in layout and in where their sensors are.
+Second, labels are expensive and unreliable. Accurate labels come from experts annotating video from head-mounted or
+room cameras; cheaper labels come from residents reporting what they are doing, either at the moment through a phone app
+or at the end of the day, and are less precise about when an activity started and ended.
+
+Transfer alone gives a model that fits the average person, not this one. Active learning alone starts from nothing: the
+first queries are chosen by a model whose uncertainty is itself uninformed, the **cold-start** problem. Combining the
+two starts active learning from a model whose uncertainty already reflects what varies between people.
+
+Diethe, Twomey and Flach distinguish two transfer problems <Cite id="diethe2015bayesian" />:
+
+1. **Person to person.** Different people have different activity patterns and perform activities differently. This
+   calls for learning about groups of individuals, with group-level priors transferred to a new individual.
+2. **House to house.** Different houses have different layouts and sensors, so there may be no correspondence between
+   the sensors of two houses. This calls for a shared feature vocabulary. Rashidi and Cook label each sensor with its
+   room or functional area and map activities between houses through these meta-features <Cite id="rashidi2011" />. See
+   <NoteLink to="context-modulation-and-sensor-transfer" />.
+
+## Mechanism: the community Bayes point machine
+
+The model of Diethe, Twomey and Flach is a hierarchical, multi-class extension of the Bayes point machine, a Bayesian
+linear classifier <Cite id="herbrich2001" />. It makes five assumptions <Cite id="diethe2016active" />:
+
+1. the features $\xvec$ are fully observed;
+2. the order of instances does not matter;
+3. the prediction is a linear discriminant, $p(y_i \mid \xvec_i, \wvec) = p(y_i \mid s_i = \wvec\transpose \xvec_i)$, with
+   score $s_i$;
+4. the scores are subject to additive Gaussian noise;
+5. each individual has their own weights, drawn from a communal prior.
+
+For class $c$ of individual $r$, the weight vector $\wvec_{rc}$ has independent Gaussian components whose means
+$\mu_{cd}$ and precisions $\tau_{cd}$, one per class and feature $d$, are shared by the whole community of $R$
+individuals. The means have Gaussian priors and the precisions Gamma priors. Each class score $s_{rnc} =
+\wvec_{rc}\transpose \xvec_{rn}$ receives Gaussian noise, and the label is the class with the largest noisy score, an
+arg-max factor that acts as a probabilistic multi-class switch. Inference uses expectation propagation
+<Cite id="minka2001" />, and online learning uses assumed-density filtering, which updates the Gaussian posterior one
+example at a time <Cite id="opper1998" />.
+
+<CommunityBpmDiagram />
+
+Assumption 2 ignores the sequential nature of activity data. The authors note that its cost depends on how strongly
+consecutive examples depend on each other, which in turn depends on the preprocessing: features computed over windows of
+the raw signal weaken the dependence.
+
+### Transfer to a new individual
+
+Training on the community gives posteriors over the shared means and precisions. For a new individual, the same model is
+configured with $R = 1$, and the priors over $\mu$ and $\tau$ are replaced by the community posteriors. The new person's
+classifier can then predict before seeing any of their data, and it is trained online as their labels arrive. It moves
+smoothly from generic predictions that fit anyone in the community to personalised predictions for this person
+<Cite id="diethe2016active" />.
+
+When source and target are different datasets, the authors transfer the posterior over the weight means but reset the
+precisions to their prior, $\Gamma(1, 1)$: there is no reason for the target to be as certain about the weights as the
+source was. Keeping the means keeps the source's decision boundaries as the starting point <Cite
+id="diethe2016active" /> <Cite id="twomey2015evidence" />. This is the choice discussed under "transferring certainty" in
+<NoteLink to="hierarchical-bayesian-transfer" />.
+
+## Choosing what to label
+
+The papers compare three selection rules in the personalisation phase, each myopic: one example is labelled at a time
+from a pool.
+
+- **Uncertainty sampling** queries the example whose predicted class probability is closest to chance, $0.5$ for two
+  classes.
+- **Certainty sampling**, the opposite, queries the example the classifier is most confident about. It was included as
+  a sanity check <Cite id="diethe2016active" />.
+- **Value of information** extends the decision-theoretic method of Kapoor, Horvitz and Basu
+  <Cite id="kapoor2007" />.
+
+### Value of information
+
+Let $\Cmat \in \reals^{\abs{\Ycal} \times \abs{\Ycal}}$ be a cost matrix, where $C_{ij}$ is the cost of classifying a
+point of class $i$ as class $j$ and $C_{ii} = 0$, and let $p_i$ be the model's predicted probability for example $i$.
+The total expected misclassification cost on the labelled set is
+$$
+J_S = \sum_{a \in \Ycal} \paren{\sum_{i : y_i = a} C_{ai}(1 - p_i) + \sum_{i : y_i \ne a} C_{ia}\, p_i} .
+$$
+For an unlabelled example $\tilde\xvec_i$ the true class probability $p_i^*$ is unknown and is replaced by the model's
+estimate $p_i$:
+$$
+J_{\tilde\xvec_i} = \sum_{a \in \Ycal} \paren{C_{ai}(1 - p_i)\, p_i^* + C_{ia}\, p_i (1 - p_i^*)} \approx \sum_{a \in
+\Ycal} (C_{ai} + C_{ia})\, p_i (1 - p_i) .
+$$
+The value of information of labelling $\tilde\xvec_i$ adds the label costs, expressed in the same currency as the
+misclassification costs, and the example with the highest value is queried. A negative value for the best candidate
+means that no single label reduces the total cost, which gives a stopping rule <Cite id="diethe2016active" />.
+
+The workshop version of the framework allows several labelling methods $j = 1, \dots, n$ with costs $L_j$ and a quality
+$0 \le G_j \le 1$, the expected gain from a label of method $j$, where $G_j = 1$ is perfect labelling. The criterion
+becomes
+$$
+\text{VOI}(\tilde\xvec_i, j) = J_S + J_{\tilde\xvec_i} + \sum_{i'=1}^{m} G_j L_j(\xvec_{i'}) - G_j L_j(\tilde\xvec_i),
+$$
+and the pair of example and labelling method with the highest value is chosen; labelling stops when the value is
+negative for every method <Cite id="diethe2015bayesian" />. This lets the system decide between asking the resident on
+their phone and paying for video annotation.
+
+A consequence of the approximation is worth noting. For two classes with symmetric costs and a label cost that does not
+depend on the example, $J_{\tilde\xvec_i}$ is proportional to $p_i(1 - p_i)$, which is largest at $p_i = 1/2$. The value
+of information then ranks the pool in the same order as uncertainty sampling. The two rules differ when costs are
+asymmetric, when there are more than two classes, or when label costs vary.
+
+## Results as reported
+
+**Synthetic data** <Cite id="diethe2016active" />. A community of 10 subjects was sampled from a model with community
+weight prior $\Gauss(4, 1)$, features uniform on $[0, 1]$ plus a constant bias of $-1$, scores with Gaussian noise of unit
+variance, and labels given by the sign of the noisy score. Five subjects trained the community model and five were used
+for personalisation. Using the community posterior as the prior gave higher cumulative online accuracy than starting each
+new subject from the original $\Gauss(0, 1)$ prior. To mimic redundant or corrupted real data, the feature vectors of
+90% of the examples offered to the active learner were set to zero. On hold-out accuracy the value-of-information rule
+that selects by the greatest relative risk (VOI+) learnt fastest, and certainty sampling beat uncertainty sampling, because uncertainty sampling kept choosing
+the zeroed examples, about which the model is always uncertain.
+
+**Accelerometer data** <Cite id="diethe2016active" />. The source was the smartphone dataset of Anguita et al., with 30
+participants, six activities, a waist-worn phone sampling at 50 Hz and labels from video <Cite id="anguita2013" />. The
+target was USC-HAD, with 14 participants, a MotionNode sensor sampling at 100 Hz and labels from an observer
+<Cite id="zhang2012uschad" />. The two datasets were collected by different researchers with different equipment and
+possibly different labelling conventions. Forty-eight features were computed from the body acceleration signal. Learning
+from the target alone started at an accuracy of $0.5$, and active selection reached its best accuracy after about five
+labelled examples. With the source posteriors as priors, the model reached about 70% accuracy before seeing any target
+example, with balanced classes, which removes much of the cold start. The active rules gave consistently lower variance
+across subjects than random sampling and outperformed the baselines overall, but no single active rule was best, and on
+the real data the more expensive value-of-information rule did not outperform uncertainty sampling.
+
+A companion paper introduces a selection rule based on Bayesian model evidence and evaluates it on a binary version of
+the same transfer problem <Cite id="twomey2015evidence" />; see <NoteLink to="bayesian-active-learning" />.
+
+## Other approaches
+
+- **Stream-based active transfer.** Kale and Liu combine labelled source data with an importance-weighted active learner
+  that sees target examples as a stream and queries each with some probability. They derive a generalisation bound and
+  find that the source data mitigate the cold start <Cite id="kale2013" />. See <NoteLink
+  to="stream-based-active-learning" />.
+- **Label complexity.** Yang, Hanneke and Carbonell bound the total number of labels needed to learn a sequence of related
+  target tasks, and show that with transfer it can be much smaller than learning each task separately, including for
+  self-verifying active learning <Cite id="yang2013transfer" />.
+- **Domain adaptation with queries.** Rai et al. start active learning in the target from a classifier trained on the
+  source, and filter candidate queries with a classifier that separates source-like from target-like inputs
+  <Cite id="rai2010" />. Chattopadhyay et al. choose source weights and a batch of target queries jointly, so that the
+  reweighted source and the labelled target batch match the target distribution in maximum mean discrepancy
+  <Cite id="chattopadhyay2013" />. Su et al. weight uncertainty by a domain discriminator's estimate of how target-like
+  an example is <Cite id="su2020aada" />.
+
+## Trade-offs
+
+- **Transfer the right thing.** Transferring posterior certainty along with posterior means can make the target model
+  slow to move away from the source. Resetting the precisions to the prior keeps the source's direction while allowing
+  fast personalisation.
+- **Myopic selection.** Choosing one example at a time with a one-step criterion ignores what later labels will reveal,
+  and can choose redundant examples when run in batches.
+- **Selection bias.** Actively chosen examples are not a random sample of the target. Accuracy measured on them is
+  biased, so evaluation needs a separate random hold-out set, as in the papers above.

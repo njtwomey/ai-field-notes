@@ -1,0 +1,112 @@
+---
+title: Test-time adaptation
+kind: technique
+summary: 'Test-time adaptation updates a trained model on unlabelled test batches without the source data. Re-estimating batch-normalisation statistics on the test batch undoes channel-wise affine shifts; Tent also minimises prediction entropy through the normalisation parameters.'
+tags: [transfer-learning, domain-adaptation, deep-learning, online-learning, robustness]
+aliases: [Tent, test-time entropy minimisation, fully test-time adaptation, batch normalisation adaptation, AdaBN, prediction-time batch normalisation, source-free domain adaptation, test-time training]
+requires: [batch-normalisation, entropy, domain-adaptation-theory]
+related: [online-transfer-learning, robustness-to-distribution-shift, lifelong-and-continual-transfer, self-training, feature-alignment-methods, concept-drift-adaptation]
+references: [wang2021tent, li2016adabn, schneider2020, nado2020, sun2020ttt, liang2020shot, wang2022cotta, niu2022eata, grandvalet2005, ioffe2015, hendrycks2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Test-time adaptation** modifies a model trained on a source distribution using only the unlabelled inputs it meets at
+test time, usually as a stream of batches. In **fully test-time adaptation** the model has nothing else: no source data,
+no labels and no change to how it was trained <Cite id="wang2021tent" />. Two widely used methods are **re-estimating
+batch-normalisation statistics** on the test data <Cite id="li2016adabn" /> <Cite id="schneider2020" /> and
+**Tent**, which also minimises the entropy of the model's predictions by updating the normalisation layers' scale and
+shift parameters <Cite id="wang2021tent" />.
+</Definition>
+
+## Problem
+
+A deployed model meets shift it was not trained for: new sensors, image corruptions, a new hospital. Domain adaptation
+methods need the source data at adaptation time, which may be too large, private or simply gone. Fine-tuning needs target
+labels. What is always available is the stream of test inputs and the model. Test-time adaptation asks how much can be
+recovered from those alone, online, before or while predicting.
+
+## Mechanism
+
+### Re-estimating normalisation statistics
+
+A <NoteLink to="batch-normalisation" /> layer normalises each channel $c$ with a mean $\mu_c$ and standard deviation
+$\sigma_c$, then applies a learnt scale and shift, $\gamma_c (z - \mu_c)/\sigma_c + \beta_c$ <Cite id="ioffe2015" />. At
+test time the statistics are normally the running averages from training. **AdaBN** replaces them with statistics
+computed on the target data <Cite id="li2016adabn" />.
+
+Suppose the shift acts on a channel's pre-normalisation activations as a per-channel affine map, $z_T = a z_S + b$ with
+$a > 0$, as a change in contrast or brightness might. Then $\mu_T = a \mu_S + b$ and $\sigma_T = a \sigma_S$, and
+normalising with the target's own statistics gives
+$$
+\frac{z_T - \mu_T}{\sigma_T} = \frac{a z_S + b - a\mu_S - b}{a \sigma_S} = \frac{z_S - \mu_S}{\sigma_S} .
+$$
+The shift is removed exactly, and every later layer sees the activations it was trained on. Real shifts are not exactly
+affine per channel, and the removal is only partial, but this explains why a change of statistics alone recovers much of
+the lost accuracy. It is <NoteLink to="feature-alignment-methods">alignment of first and second moments</NoteLink> done
+channel by channel without any training.
+
+Schneider et al. replaced the source statistics by those of corrupted test images across 25 vision models and improved
+robustness in every case; a ResNet-50's mean corruption error on ImageNet-C fell from 76.7% to 62.2%
+<Cite id="schneider2020" /> <Cite id="hendrycks2019" />. With few test images, they mix source and target statistics,
+treating the source statistics as a prior worth a fixed number of pseudo-samples; for a ResNet-50, adaptation to a single image
+already helped. Nado et al. call the per-batch version prediction-time batch normalisation and report that it improves both
+accuracy and calibration under covariate shift <Cite id="nado2020" />.
+
+### Tent: entropy minimisation
+
+Tent keeps the target statistics and additionally updates the scale and shift parameters $(\gamma, \beta)$ of every
+normalisation layer to minimise the mean entropy of the predictions on each test batch <Cite id="wang2021tent" />:
+$$
+\min_{\gamma, \beta} \; \frac{1}{B} \sum_{b=1}^{B} \entropy\paren{p(y \mid \xvec_b)}, \qquad \entropy(p) = -\sum_{k} p_k
+\log p_k .
+$$
+One gradient step is taken per batch, and the updated parameters are used for the next batch. All other weights stay
+fixed, which keeps the number of adapted parameters under 1% of the model and makes the update cheap and stable.
+
+**What the gradient does.** Let $\pvec = \operatorname{softmax}(\zvec)$ for logits $\zvec$. The softmax derivative
+is $\partial p_c / \partial z_k = p_c (\delta_{ck} - p_k)$, where $\delta_{ck}$ is $1$ if $c = k$ and $0$ otherwise.
+Then
+$$
+\frac{\partial \entropy}{\partial z_k} = -\sum_c p_c (\delta_{ck} - p_k)(\log p_c + 1) = -p_k(\log p_k + 1) + p_k \sum_c p_c
+(\log p_c + 1) = -p_k\paren{\log p_k + \entropy} .
+$$
+Descending the entropy therefore raises logit $k$ when $\log p_k > -\entropy$, that is, when class $k$ is more probable
+than the prediction's "typical" class, and lowers it otherwise. Each step sharpens the prediction towards the classes it
+already favours. Entropy minimisation is the semi-supervised principle that decision boundaries should pass through
+regions of low density, where predictions are confident <Cite id="grandvalet2005" />; on target data it moves the
+features so that the source classifier's boundaries avoid dense target regions.
+
+Tent reduced error on corrupted versions of ImageNet and CIFAR-10/100 and reached a new state of the art on ImageNet-C
+at the time. It also handled source-free adaptation from SVHN to MNIST, MNIST-M and USPS digits, from synthetic GTA to
+real Cityscapes for segmentation, and on VisDA-C, each in one epoch of test-time optimisation <Cite id="wang2021tent" />.
+
+### Related settings
+
+- **Test-time training** changes training: the network is trained with a self-supervised auxiliary task, such as
+  predicting image rotations, on a shared trunk. At test time it takes gradient steps on the auxiliary loss for each test
+  input before predicting <Cite id="sun2020ttt" />.
+- **Source-free domain adaptation** has the target data as a whole, offline, but not the source data. SHOT freezes the
+  source classifier and trains the feature extractor on target data with information maximisation and self-supervised
+  pseudo-labels <Cite id="liang2020shot" />.
+
+## Cost
+
+Statistics re-estimation costs nothing beyond the forward pass. Tent adds one backward pass per batch through the network
+to the normalisation parameters.
+
+## Trade-offs
+
+- **Collapse.** Entropy is minimised by predicting one class confidently for everything. With small batches, label shift
+  within batches or long streams, Tent can drift towards such degenerate solutions.
+- **Continual shift.** When the target distribution keeps changing, errors in the model's own predictions accumulate.
+  CoTTA averages predictions over weight-averaged models and augmentations and stochastically restores a small fraction
+  of weights to their source values at each step <Cite id="wang2022cotta" />. EATA updates only on reliable, non-redundant
+  test samples, since high-entropy samples give noisy gradients, and adds a Fisher-weighted penalty that keeps important
+  weights near their source values to avoid forgetting the source distribution <Cite id="niu2022eata" />. See <NoteLink
+  to="lifelong-and-continual-transfer" />.
+- **Batch assumptions.** Batch statistics assume each batch is a representative sample of one target distribution. A batch
+  of one class, or a batch mixing several domains, gives wrong statistics.
+- **Only some shifts.** Normalisation-based adaptation handles shifts that act on low-level feature statistics, such as
+  corruptions and changes of style. It does not correct a change in $p(y \mid \xvec)$.

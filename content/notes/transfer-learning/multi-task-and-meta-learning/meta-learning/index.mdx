@@ -1,0 +1,167 @@
+---
+title: Meta-learning
+kind: concept
+summary: 'Meta-learning trains on many tasks so that a new task can be learnt from few examples. MAML learns an initialisation from which one gradient step fits a new task, differentiating through the step; first-order MAML and Reptile drop the second derivatives.'
+tags: [transfer-learning, meta-learning, few-shot-learning, deep-learning, optimisation]
+aliases: [learning to learn, MAML, model-agnostic meta-learning, first-order MAML, FOMAML, Reptile, gradient-based meta-learning, bilevel optimisation, iMAML, ANIL]
+requires: [gradient-descent, backpropagation, hessian]
+related: [metric-based-few-shot-learning, few-shot-learning-evaluation, hierarchical-bayesian-transfer, multi-task-learning, domain-generalisation, transfer-learning-and-fine-tuning, taylor-series]
+references: [thrun1998, hospedales2021, finn2017maml, nichol2018reptile, grant2018, raghu2020anil, rajeswaran2019imaml, baxter2000, ravi2017]
+status: draft
+updated: 2026-09-27
+---
+
+import { MamlLoopDiagram } from './MamlLoopDiagram'
+import { MetaSine } from './MetaSine'
+
+<Definition>
+**Meta-learning**, or learning to learn, trains a learning algorithm on a distribution of tasks $p(\Tcal)$ so that it
+performs well on new tasks from the same distribution after seeing few of their examples <Cite id="thrun1998" /> <Cite
+id="hospedales2021" />. Each task $\Tcal_i$ comes with a **support set** $\Dcal_i^{\text{tr}}$ for adaptation and a
+**query set** $\Dcal_i^{\text{val}}$ for evaluation. The algorithm has meta-parameters $\thetavec$ shared across tasks,
+and task-specific parameters $\phivec_i = \text{Adapt}(\thetavec, \Dcal_i^{\text{tr}})$. Meta-training chooses
+$\thetavec$ to minimise the expected query loss after adaptation,
+$$
+\min_{\thetavec} \; \expect_{\Tcal_i \sim p(\Tcal)} \brack{L_i^{\text{val}}\paren{\text{Adapt}(\thetavec,
+\Dcal_i^{\text{tr}})}} .
+$$
+</Definition>
+
+## Intuition
+
+Ordinary training learns one function from many examples. Meta-learning learns *how to learn* a function from few
+examples, by practising on many small problems. The training data are tasks, and each task is split the way it will be
+at test time: a few labelled examples to learn from and some held-out examples to be scored on. What is learnt is
+whatever makes learning fast: a starting point, a metric, a learning rule or an architecture.
+
+## Three families
+
+Hospedales et al. classify methods by what $\text{Adapt}$ is <Cite id="hospedales2021" />.
+
+1. **Optimisation-based.** Adaptation is gradient descent on the support set, and $\thetavec$ is the initialisation or
+   the optimiser's hyperparameters. MAML and Reptile are the main examples. A learnt LSTM optimiser is another
+   <Cite id="ravi2017" />.
+2. **Metric-based.** Adaptation is nearest-neighbour or kernel classification in a learnt embedding, so it involves no
+   gradient steps. See <NoteLink to="metric-based-few-shot-learning" />.
+3. **Model-based.** A network reads the support set and outputs predictions for the query set in one forward pass, so
+   $\text{Adapt}$ is a black box.
+
+## Model-agnostic meta-learning
+
+MAML takes $\text{Adapt}$ to be one or a few steps of gradient descent from $\thetavec$ <Cite id="finn2017maml" />. With
+one step of size $\alpha$,
+$$
+\phivec_i = \thetavec - \alpha \nabla_{\thetavec} L_i^{\text{tr}}(\thetavec),
+\qquad
+\min_{\thetavec} \sum_{\Tcal_i} L_i^{\text{val}}\paren{\thetavec - \alpha \nabla_{\thetavec} L_i^{\text{tr}}(\thetavec)} .
+$$
+It applies to any model trained by gradient descent, which is what *model-agnostic* means. The meta-parameters are an
+initialisation that is not good for any task by itself but is a short step from a good solution for every task.
+
+<MamlLoopDiagram />
+
+### The meta-gradient
+
+The outer objective depends on $\thetavec$ through $\phivec_i$, so the chain rule gives
+$$
+\nabla_{\thetavec} L_i^{\text{val}}(\phivec_i) = \paren{\frac{\partial \phivec_i}{\partial \thetavec}}\transpose
+\nabla_{\phivec} L_i^{\text{val}}(\phivec_i) .
+$$
+The Jacobian of the inner step is
+$$
+\frac{\partial \phivec_i}{\partial \thetavec} = \eye - \alpha \nabla^2_{\thetavec} L_i^{\text{tr}}(\thetavec),
+$$
+which is symmetric because the <NoteLink to="hessian" /> is. Hence
+$$
+\nabla_{\thetavec} L_i^{\text{val}}(\phivec_i) = \paren{\eye - \alpha \nabla^2 L_i^{\text{tr}}(\thetavec)}
+\nabla L_i^{\text{val}}(\phivec_i) .
+$$
+The query gradient is evaluated at the adapted parameters and then corrected by the curvature of the support loss at
+the initialisation. The correction accounts for how moving $\thetavec$ changes where the inner step lands. For $k$ inner
+steps with iterates $\phivec^{(0)} = \thetavec, \phivec^{(1)}, \dots, \phivec^{(k)}$, the Jacobian is the product
+$\prod_{j=0}^{k-1} \paren{\eye - \alpha \nabla^2 L_i^{\text{tr}}(\phivec^{(j)})}$, taken in reverse order.
+
+The outer update over a batch of $B$ tasks is $\thetavec \leftarrow \thetavec - \beta \sum_{i=1}^{B}
+\nabla_{\thetavec} L_i^{\text{val}}(\phivec_i)$. Automatic differentiation computes the Hessian–vector product without
+forming the Hessian, at the cost of keeping the inner computation graph in memory and roughly one extra backward pass
+per inner step.
+
+### First-order MAML
+
+Dropping the second-derivative term gives **first-order MAML**:
+$\nabla_{\thetavec} L_i^{\text{val}}(\phivec_i) \approx \nabla_{\phivec} L_i^{\text{val}}(\phivec_i)$, the query gradient
+at the adapted parameters, applied to $\thetavec$. Finn et al. report that it performs nearly as well as full MAML on
+their few-shot image benchmarks, and suggest that ReLU networks are locally almost linear, so their Hessians contribute
+little <Cite id="finn2017maml" />.
+
+### Reptile
+
+**Reptile** removes the query set altogether <Cite id="nichol2018reptile" />. Sample a task, run $k$ steps of stochastic
+gradient descent from $\thetavec$ to reach $\tilde\phivec$, and move the initialisation towards the result:
+$$
+\thetavec \leftarrow \thetavec + \epsilon \paren{\tilde\phivec - \thetavec} .
+$$
+With $k = 1$ this is ordinary SGD on the pooled tasks, which learns the average task. With $k > 1$ it is not.
+
+### Why first-order methods work
+
+Nichol et al. expand the updates to second order in the inner step size $\alpha$ <Cite id="nichol2018reptile" />. Take
+two inner steps on minibatches 1 and 2 of one task, with gradients $\gvec_1, \gvec_2$ at the iterates and gradients
+$\bar\gvec_j$ and Hessians $\bar\Hmat_j$ of minibatch $j$'s loss at the initialisation. By a first-order <NoteLink
+to="taylor-series" /> expansion around $\thetavec$,
+$$
+\gvec_2 = \nabla L_2(\thetavec - \alpha \gvec_1) \approx \bar\gvec_2 - \alpha \bar\Hmat_2 \bar\gvec_1 .
+$$
+The update directions are then, to order $\alpha$,
+$$
+\begin{aligned}
+\text{MAML:} &\quad \bar\gvec_2 - \alpha \bar\Hmat_2 \bar\gvec_1 - \alpha \bar\Hmat_1 \bar\gvec_2, \\
+\text{first-order MAML:} &\quad \gvec_2 \approx \bar\gvec_2 - \alpha \bar\Hmat_2 \bar\gvec_1, \\
+\text{Reptile:} &\quad (\gvec_1 + \gvec_2) \approx \bar\gvec_1 + \bar\gvec_2 - \alpha \bar\Hmat_2 \bar\gvec_1 .
+\end{aligned}
+$$
+Take expectations over tasks and minibatches. The minibatches are exchangeable, so $\expect[\bar\gvec_1] =
+\expect[\bar\gvec_2]$, call it **AvgGrad**, and $\expect[\bar\Hmat_2 \bar\gvec_1] = \expect[\bar\Hmat_1 \bar\gvec_2]$,
+call it **AvgGradInner**. AvgGradInner is half the gradient of $\expect[\bar\gvec_1\transpose \bar\gvec_2]$, because
+$\nabla(\bar\gvec_1\transpose \bar\gvec_2) = \bar\Hmat_1 \bar\gvec_2 + \bar\Hmat_2 \bar\gvec_1$. So, in expectation,
+$$
+\text{MAML} \approx \text{AvgGrad} - 2\alpha\, \text{AvgGradInner}, \qquad
+\text{FOMAML} \approx \text{AvgGrad} - \alpha\, \text{AvgGradInner}, \qquad
+\text{Reptile} \approx 2\, \text{AvgGrad} - \alpha\, \text{AvgGradInner} .
+$$
+Descending along $-\text{AvgGradInner}$ increases the inner product between gradients from different minibatches of the
+same task. When those gradients agree, a step on one minibatch also lowers the loss on another: the model generalises
+within the task from few examples. All three methods contain this term with a positive coefficient; they differ in its
+weight relative to the ordinary joint-training term. Plain pooled training has no such term.
+
+<MetaSine />
+
+## Other views
+
+- **Hierarchical Bayes.** A few gradient steps from $\thetavec$ with early stopping approximate the maximum a posteriori
+  estimate under a Gaussian prior centred at $\thetavec$. MAML is then empirical Bayes: it learns the prior mean of a
+  hierarchical model across tasks <Cite id="grant2018" />. See <NoteLink to="hierarchical-bayesian-transfer" />.
+- **Implicit gradients.** iMAML defines adaptation as the minimiser of $L_i^{\text{tr}}(\phivec) + \frac{\lambda}{2}
+  \norm{\phivec - \thetavec}^2$. The implicit function theorem gives the meta-gradient $\paren{\eye + \frac{1}{\lambda}
+  \nabla^2 L_i^{\text{tr}}(\phivec_i)}^{-1} \nabla L_i^{\text{val}}(\phivec_i)$, which depends only on the solution, not on
+  the path, so memory does not grow with the number of inner steps <Cite id="rajeswaran2019imaml" />.
+- **Feature reuse.** Raghu et al. found that on standard few-shot image benchmarks the representations of a
+  MAML-trained network barely change in the inner loop; adapting only the final layer (ANIL) matched MAML
+  <Cite id="raghu2020anil" />. On those benchmarks, MAML's benefit comes mostly from learning good features.
+- **Bias learning.** Baxter's environment of tasks is the statistical model behind all of these: tasks are draws from
+  one distribution, and what is learnt is a bias for that distribution <Cite id="baxter2000" />.
+
+## Assumptions
+
+- Meta-test tasks come from the same distribution as meta-training tasks. Meta-learnt initialisations are specialised
+  and can adapt worse than a generic one to tasks unlike any seen.
+- The inner-loop step size and number of steps at meta-test time match those used in meta-training.
+
+## Pitfalls
+
+- **Weak baselines.** A network pretrained on the pooled meta-training classes and fine-tuned, or used with a linear
+  classifier on its features, is a strong baseline for few-shot classification. See <NoteLink
+  to="few-shot-learning-evaluation" />.
+- **Instability.** Second-order meta-gradients through several steps can explode or vanish. First-order methods and
+  per-step learning rates are common remedies.
+- **Memory.** Full MAML stores the inner computation graph for every task in the meta-batch.

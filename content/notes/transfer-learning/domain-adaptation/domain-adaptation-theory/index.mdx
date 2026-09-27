@@ -1,0 +1,169 @@
+---
+title: Domain adaptation theory
+kind: concept
+summary: 'For any classifier $h$, target error is at most source error plus half the $\Hcal\Delta\Hcal$-divergence between the input distributions plus $\lambda$, the error of the best joint hypothesis. The divergence is estimated from unlabelled data with a classifier that separates source from target.'
+tags: [transfer-learning, domain-adaptation, learning-theory, generalisation]
+aliases: [H-divergence, H-delta-H divergence, A-distance, proxy A-distance, discrepancy distance, Ben-David bound]
+requires: [vc-dimension, empirical-risk-minimisation, dataset-shift]
+related: [domain-adversarial-training, feature-alignment-methods, importance-weighting-for-covariate-shift, negative-transfer, when-does-transfer-help, rademacher-complexity, robustness-to-distribution-shift]
+references: [bendavid2007, bendavid2010, kifer2004, mansour2009, zhao2019invariant, ganin2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { DomainShiftDemo } from '../_shared/DomainShiftDemo'
+
+<Definition>
+In **unsupervised domain adaptation** a learner sees labelled examples from a source distribution $\Dcal_S$ over
+inputs $\Xcal$ and unlabelled inputs from a target distribution $\Dcal_T$, and must output a classifier $h \in \Hcal$
+with low target error $R_T(h)$. **Domain adaptation theory** bounds $R_T(h)$ by quantities that can be estimated from
+these data. The central result, due to Ben-David et al., is
+$$
+R_T(h) \le R_S(h) + \tfrac{1}{2}\, d_{\Hcal\Delta\Hcal}(\Dcal_S, \Dcal_T) + \lambda
+$$
+for every $h \in \Hcal$, where $d_{\Hcal\Delta\Hcal}$ is a divergence between the input distributions that depends on the
+hypothesis class and $\lambda$ is the smallest combined source and target error of any single hypothesis
+<Cite id="bendavid2007" /> <Cite id="bendavid2010" />.
+</Definition>
+
+## Setting and notation
+
+Each domain is a distribution $\Dcal$ over $\Xcal$ with a labelling function $f : \Xcal \to [0, 1]$, the probability
+that the label is $1$. The **error** of a hypothesis $h : \Xcal \to \set{0, 1}$ against a labelling $f$ under
+$\Dcal$ is the expected disagreement
+$$
+R(h, f) = \expect_{\xvec \sim \Dcal} \abs{h(\xvec) - f(\xvec)} .
+$$
+Write $R_S(h) = R_S(h, f_S)$ and $R_T(h) = R_T(h, f_T)$ for the source and target errors, and $R_S(h, h')$ for the
+source probability that two hypotheses disagree. This disagreement satisfies the triangle inequality
+$R(f_1, f_2) \le R(f_1, f_3) + R(f_3, f_2)$ for any three labelling functions, because $\abs{a - b} \le \abs{a - c} +
+\abs{c - b}$ holds pointwise.
+
+## Why a naive divergence is not enough
+
+The total variation distance $d_1(\Dcal_S, \Dcal_T) = 2 \sup_B \abs{\Dcal_S(B) - \Dcal_T(B)}$, taken over all measurable
+sets $B$, gives a first bound: $R_T(h) \le R_S(h) + d_1(\Dcal_S, \Dcal_T) + \min\set{\expect_{\Dcal_S}\abs{f_S -
+f_T}, \expect_{\Dcal_T}\abs{f_S - f_T}}$ <Cite id="bendavid2010" />. It has two defects. It cannot be estimated
+accurately from finite samples of arbitrary distributions, and it is too strict: it counts differences on sets where
+no hypothesis in $\Hcal$ can make a mistake. Ben-David et al. replace it with a divergence that looks only at the sets a
+hypothesis class can carve out.
+
+## The $\Hcal$-divergence
+
+For a hypothesis class $\Hcal$, the **$\Hcal$-divergence** between two distributions is
+$$
+d_{\Hcal}(\Dcal, \Dcal') = 2 \sup_{h \in \Hcal} \abs{\pr_{\Dcal}\brack{h(\xvec) = 1} - \pr_{\Dcal'}\brack{h(\xvec) = 1}} .
+$$
+It is the largest difference in the mass that the two distributions give to a set of the form $\set{\xvec : h(\xvec) =
+1}$ <Cite id="kifer2004" />. It is never larger than the total variation distance. For a class of finite VC dimension
+it can be estimated from samples: if $U$ and $U'$ are samples of size $m$ and $d$ is the VC dimension of $\Hcal$, then
+with probability at least $1 - \delta$,
+$$
+d_{\Hcal}(\Dcal, \Dcal') \le \hat{d}_{\Hcal}(U, U') + 4 \sqrt{\frac{d \log(2m) + \log(2/\delta)}{m}}
+$$
+<Cite id="bendavid2010" />.
+
+**Estimating it with a domain classifier.** Label every source input $0$ and every target input $1$, and train a
+classifier from $\Hcal$ to tell them apart. If $\Hcal$ is symmetric (it contains $1 - h$ whenever it contains $h$), the
+empirical divergence is determined by the best achievable error $\epsilon$ on this balanced problem:
+$$
+\hat{d}_{\Hcal}(U, U') = 2\paren{1 - 2\epsilon}.
+$$
+A classifier that cannot beat chance, $\epsilon = 1/2$, gives divergence $0$; one that separates the domains perfectly
+gives the maximum, $2$. Finding the minimum-error classifier is intractable for most classes, so in practice a linear or
+kernel classifier is trained with a convex loss and its held-out error is plugged in. The result is called the **proxy
+$\Acal$-distance**; it approximates the divergence from below <Cite id="bendavid2007" />.
+
+## The symmetric difference class
+
+The bound needs a divergence for the class of disagreement regions. The **symmetric difference hypothesis class**
+$\Hcal\Delta\Hcal$ contains $g(\xvec) = h(\xvec) \oplus h'(\xvec)$ for all $h, h' \in \Hcal$, where $\oplus$ is
+exclusive or: $g$ is $1$ exactly where $h$ and $h'$ disagree. Its divergence is therefore
+$$
+d_{\Hcal\Delta\Hcal}(\Dcal_S, \Dcal_T) = 2 \sup_{h, h' \in \Hcal} \abs{R_S(h, h') - R_T(h, h')},
+$$
+twice the largest change, between domains, in how often two hypotheses disagree. It follows at once that for any $h,
+h' \in \Hcal$,
+$$
+\abs{R_S(h, h') - R_T(h, h')} \le \tfrac{1}{2}\, d_{\Hcal\Delta\Hcal}(\Dcal_S, \Dcal_T).
+$$
+The VC dimension of $\Hcal\Delta\Hcal$ is at most twice that of $\Hcal$, so the finite-sample estimate above applies
+with $2d$ in place of $d$ <Cite id="bendavid2010" />.
+
+## Deriving the bound
+
+Let $h^* = \argmin_{h \in \Hcal} \brack{R_S(h) + R_T(h)}$ be the **ideal joint hypothesis** and $\lambda = R_S(h^*) +
+R_T(h^*)$ its combined error. For any $h \in \Hcal$:
+$$
+\begin{aligned}
+R_T(h) &\le R_T(h^*) + R_T(h, h^*) && \text{triangle inequality through } h^* \\
+&\le R_T(h^*) + R_S(h, h^*) + \abs{R_T(h, h^*) - R_S(h, h^*)} && \text{add and subtract } R_S(h, h^*) \\
+&\le R_T(h^*) + R_S(h, h^*) + \tfrac{1}{2}\, d_{\Hcal\Delta\Hcal}(\Dcal_S, \Dcal_T) && \text{by the inequality above} \\
+&\le R_T(h^*) + R_S(h) + R_S(h^*) + \tfrac{1}{2}\, d_{\Hcal\Delta\Hcal}(\Dcal_S, \Dcal_T) && \text{triangle inequality through } f_S \\
+&= R_S(h) + \tfrac{1}{2}\, d_{\Hcal\Delta\Hcal}(\Dcal_S, \Dcal_T) + \lambda .
+\end{aligned}
+$$
+The first line compares $h$ with the target labels by way of $h^*$. The second moves the disagreement of $h$ and $h^*$
+from the target to the source, where it can be measured without target labels. The third bounds the cost of that move by
+the divergence. The fourth splits the source disagreement into the errors of $h$ and $h^*$ against the source labels.
+Replacing the divergence by its estimate from $m$ unlabelled examples per domain gives, with probability at least
+$1 - \delta$,
+$$
+R_T(h) \le R_S(h) + \tfrac{1}{2}\, \hat{d}_{\Hcal\Delta\Hcal}(U_S, U_T) + 4 \sqrt{\frac{2d \log(2m) +
+\log(2/\delta)}{m}} + \lambda
+$$
+<Cite id="bendavid2010" />.
+
+## Reading the three terms
+
+1. **Source error** $R_S(h)$ is what ordinary training minimises.
+2. **Divergence** $\tfrac12 d_{\Hcal\Delta\Hcal}$ is measurable from unlabelled data. It depends on the representation:
+   the same two input distributions can be far apart in one feature space and indistinguishable in another. This term
+   motivates methods that learn features under which a domain classifier fails, such as <NoteLink
+   to="domain-adversarial-training" /> and <NoteLink to="feature-alignment-methods" /> <Cite id="ganin2016" />.
+3. **The joint error** $\lambda$ cannot be estimated without target labels. It is small when one hypothesis in the class
+   is good on both domains. When it is large, no method that relies on the source can succeed, whatever the
+   divergence.
+
+The bound is an argument about *adaptability*: if some hypothesis works on both domains, a hypothesis that works on the
+source and cannot tell the domains apart will work on the target. It does not say that making the domains
+indistinguishable keeps $\lambda$ small. Changing the representation changes $\lambda$, and aligning feature
+distributions can raise it when the class proportions differ between domains <Cite id="zhao2019invariant" />. See
+<NoteLink to="negative-transfer" />.
+
+<DomainShiftDemo />
+
+## The discrepancy distance
+
+Mansour, Mohri and Rostamizadeh extend the argument to general losses $L$, including the squared loss for regression
+<Cite id="mansour2009" />. The **discrepancy distance** between a target distribution $P$ and a source distribution $Q$ is
+$$
+\text{disc}_L(P, Q) = \max_{h, h' \in \Hcal} \abs{L_P(h', h) - L_Q(h', h)},
+$$
+where $L_P(h', h) = \expect_P\brack{L(h'(\xvec), h(\xvec))}$. For the 0–1 loss it equals half the $\Hcal\Delta\Hcal$
+divergence. If $L$ is symmetric and satisfies the triangle inequality, and $h_P^*$ and $h_Q^*$ are the best hypotheses
+for the target and source, then for every $h \in \Hcal$
+$$
+L_P(h, f_P) \le L_P(h_P^*, f_P) + L_Q(h, h_Q^*) + \text{disc}_L(P, Q) + L_Q(h_Q^*, h_P^*).
+$$
+The proof follows the same steps as above, with the triangle inequality taken through $h_Q^*$ and $h_P^*$ instead of
+the ideal joint hypothesis. The bound compares $h$ with the best source hypothesis rather than with the source labels,
+so it has only one term that involves the target labelling. Mansour et al. give cases in which it is tighter than
+the Ben-David bound by a factor of three and note that in general neither bound implies the other. They also bound the discrepancy from samples with
+Rademacher complexity and derive a reweighting of source examples that minimises the empirical discrepancy
+<Cite id="mansour2009" />.
+
+## Assumptions
+
+- The class $\Hcal$ has finite VC dimension, or finite Rademacher complexity for the discrepancy bounds.
+- The unlabelled samples from each domain are independent and identically distributed.
+- A hypothesis that is good on both domains exists, so that $\lambda$ is small. Nothing in the data can check this.
+
+## Pitfalls
+
+- **Treating the bound as an estimate.** The divergence term uses a supremum over the class and is often near its
+  maximum of $2$ for flexible classes, which makes the bound loose. It is a guide to what matters, not a prediction.
+- **Reading a small divergence as safety.** Divergences between input distributions ignore labels. Two domains can
+  have the same inputs and opposite labels.
+- **Estimating the divergence with the class being adapted.** A domain classifier more flexible than $\Hcal$ reports a
+  larger divergence than the one in the bound; a weaker one reports a smaller one.

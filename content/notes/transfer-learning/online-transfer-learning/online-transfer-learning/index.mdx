@@ -1,0 +1,170 @@
+---
+title: Online transfer learning
+kind: technique
+summary: 'Online transfer learning combines a fixed source classifier with a target classifier learnt from a stream. OTL mixes the two with exponential weights, making at most $4\min\set{\Sigma_h, \Sigma_f} + 8 \ln 2$ mistakes; for new features it co-regularises two views, starting one at the source model.'
+tags: [transfer-learning, online-learning, kernel-methods, learning-theory]
+aliases: [OTL, co-regularised online transfer learning, COTL, homogeneous online transfer learning, heterogeneous online transfer learning]
+requires: [hedge-and-exponential-weights, online-learning-for-linear-models]
+related: [online-learning, aggregating-algorithm-and-mixability, online-newton-step-and-exp-concavity, tracking-the-best-expert, concept-drift-adaptation, sequential-bayesian-updating, active-transfer-learning, test-time-adaptation, negative-transfer]
+references: [zhao2010otl, zhao2014otl, cesabianchi2006, crammer2006, opper1998, diethe2016active, twomey2015evidence]
+status: draft
+updated: 2026-09-27
+---
+
+import { OtlStream } from './OtlStream'
+
+<Definition>
+In **online transfer learning** a classifier $h$ has been trained on a source domain, and target examples $(\xvec_t,
+y_t)$, $y_t \in \set{-1, +1}$, arrive one at a time. At each round the learner predicts $y_t$, then sees it and updates.
+The goal is to make few mistakes on the target stream by using $h$ as well as the target data. Zhao and Hoi's **OTL**
+algorithm predicts with a weighted combination of $h$ and a target classifier $f_t$ learnt online, and adjusts the two
+weights by exponential weighting <Cite id="zhao2010otl" />.
+</Definition>
+
+## Problem
+
+Offline transfer assumes the target data are available before training. In many applications they arrive over time: a
+new user's activity labels, a new customer's transactions, a new sensor's readings. The source classifier is useful at
+the start, when the target learner has seen nothing, and may become useless later if the target differs. The learner does
+not know in advance how related the domains are. It needs a rule that trusts the source while it is better and stops
+trusting it when it is not, with a guarantee that holds for any sequence.
+
+## Homogeneous OTL
+
+When the source and target share the input space, OTL keeps the source classifier $h$ fixed and learns a new classifier
+$f_t$ on the target stream alone, by the passive-aggressive algorithm <Cite id="crammer2006" /> (see <NoteLink
+to="online-learning-for-linear-models" />). Scores are mapped to $[0, 1]$ by $\Pi(z) = \max\set{0, \min\set{1, (z + 1)/2}}$,
+and the label $y \in \set{-1, 1}$ to $\Pi(y) \in \set{0, 1}$. The prediction is
+$$
+\hat y_t = \sgn\paren{w_{1,t}\, \Pi(h(\xvec_t)) + w_{2,t}\, \Pi(f_t(\xvec_t)) - \tfrac12},
+$$
+with $w_{1,1} = w_{2,1} = 1/2$. After the label is revealed, each classifier suffers the squared loss $\ell_t(g) =
+\paren{\Pi(g(\xvec_t)) - \Pi(y_t)}^2$ and the weights are updated by
+$$
+w_{1,t+1} = \frac{w_{1,t}\, e^{-\eta \ell_t(h)}}{w_{1,t}\, e^{-\eta \ell_t(h)} + w_{2,t}\, e^{-\eta \ell_t(f_t)}}, \qquad
+w_{2,t+1} = 1 - w_{1,t+1},
+$$
+with $\eta = 1/2$. Unrolling the recursion, $w_{1,t} \propto \exp\paren{-\eta \sum_{s < t} \ell_s(h)}$: each weight
+decays exponentially with its classifier's cumulative loss. This is the exponentially weighted average forecaster over two
+experts <Cite id="cesabianchi2006" />; see <NoteLink to="hedge-and-exponential-weights" />. Separately, $f_t$ takes a
+passive-aggressive step on the hinge loss $[1 - y_t f_t(\xvec_t)]_+$ whenever it is positive, with step size $\tau_t =
+\min\set{C, [1 - y_t f_t(\xvec_t)]_+ / \kappa(\xvec_t, \xvec_t)}$ for kernel $\kappa$.
+
+### The loss bound
+
+Write $\Sigma_h = \sum_{t=1}^{T} \ell_t(h)$ and $\Sigma_f = \sum_{t=1}^{T} \ell_t(f_t)$ for the cumulative squared losses,
+and $p_t = w_{1,t} \Pi(h(\xvec_t)) + w_{2,t} \Pi(f_t(\xvec_t))$ for the mixed prediction. Zhao and Hoi show
+<Cite id="zhao2010otl" />
+$$
+\sum_{t=1}^{T} \paren{p_t - \Pi(y_t)}^2 \le \min\set{\Sigma_h, \Sigma_f} + 2 \ln 2 .
+$$
+The proof has two steps.
+
+**Exp-concavity.** For fixed $y \in \set{0, 1}$, the function $g(z) = \exp\paren{-\eta (z - y)^2}$ on $z \in [0, 1]$ has
+second derivative $g''(z) = g(z)\paren{4\eta^2 (z - y)^2 - 2\eta}$. Since $\abs{z - y} \le 1$, this is non-positive whenever
+$\eta \le 1/2$, so $g$ is concave: the squared loss is **$\eta$-exp-concave** on $[0, 1]$ for $\eta \le 1/2$ (see <NoteLink
+to="online-newton-step-and-exp-concavity" />). By Jensen's inequality, for weights summing to one,
+$$
+e^{-\eta (p_t - \Pi(y_t))^2} \ge w_{1,t}\, e^{-\eta \ell_t(h)} + w_{2,t}\, e^{-\eta \ell_t(f_t)} .
+$$
+
+**Telescoping.** Let $W_t = \frac12 e^{-\eta \sum_{s < t} \ell_s(h)} + \frac12 e^{-\eta \sum_{s < t} \ell_s(f_s)}$, so that
+$W_1 = 1$ and the right-hand side above equals $W_{t+1} / W_t$. Taking logarithms, $(p_t - \Pi(y_t))^2 \le -\frac{1}{\eta} \ln
+(W_{t+1}/W_t)$. Summing over $t$, the sum telescopes:
+$$
+\sum_{t=1}^{T} (p_t - \Pi(y_t))^2 \le -\frac{1}{\eta} \ln W_{T+1} \le -\frac{1}{\eta} \ln\paren{\tfrac12 e^{-\eta \Sigma_h}} =
+\Sigma_h + \frac{\ln 2}{\eta},
+$$
+because $W_{T+1}$ is at least either of its two terms. The same holds with $\Sigma_f$. With $\eta = 1/2$ the constant is
+$2 \ln 2$.
+
+### The mistake bound
+
+A mistake at round $t$ means that $p_t$ lies on the wrong side of $1/2$ from $\Pi(y_t) \in \set{0, 1}$, so $(p_t -
+\Pi(y_t))^2 \ge 1/4$. Counting mistakes $M$,
+$$
+\frac{M}{4} \le \sum_{t} (p_t - \Pi(y_t))^2 \le \min\set{\Sigma_h, \Sigma_f} + 2 \ln 2
+\quad\Longrightarrow\quad
+M \le 4 \min\set{\Sigma_h, \Sigma_f} + 8 \ln 2 .
+$$
+By the same argument each mistake of $h$ contributes at least $1/4$ to $\Sigma_h$. If the losses on correct rounds are
+small, $4 \Sigma_h$ is close to the number of mistakes $M_h$ of $h$, and similarly for $f$, so OTL makes about as many
+mistakes as the better of the two, plus $8 \ln 2 \approx 5.5$ <Cite id="zhao2010otl" />. It does not need to know in
+advance which one that is. A useless source costs at most a constant number of mistakes, which bounds <NoteLink
+to="negative-transfer" />.
+
+<OtlStream />
+
+The figure shows the typical course. Early on, $f$ has seen little and $h$ is better if the shift is small, so the
+ensemble follows $h$. As $f$ learns the target concept its cumulative loss falls below $h$'s, and the weight moves to $f$.
+For a large shift the weight moves to $f$ almost at once. When the target concept later returns to the source concept,
+the weight moves back only slowly, because it depends on losses accumulated over the whole stream. Methods for
+<NoteLink to="tracking-the-best-expert" /> share weight between experts at every round to handle such switches.
+
+## Heterogeneous OTL
+
+Zhao and Hoi also treat a target whose features extend the source's: $\xvec_t = (\xvec_t^{(1)}, \xvec_t^{(2)})$, where
+the first view lives in the source input space and the second is new <Cite id="zhao2010otl" />. **Co-regularised OTL**
+learns a classifier on each view, predicts with their average, $\hat y_t = \sgn\paren{\frac12 \paren{f_t^{(1)}(\xvec_t^{(1)}) +
+f_t^{(2)}(\xvec_t^{(2)})}}$, and initialises $f_1^{(1)} = h$ and $f_1^{(2)} = 0$. Each round solves
+$$
+\min_{f^{(1)}, f^{(2)}} \frac{\gamma_1}{2} \norm{f^{(1)} - f_t^{(1)}}^2 + \frac{\gamma_2}{2} \norm{f^{(2)} - f_t^{(2)}}^2 +
+C \ell_t, \qquad \ell_t = \brack{1 - y_t\, \tfrac12\paren{f^{(1)}(\xvec_t^{(1)}) + f^{(2)}(\xvec_t^{(2)})}}_+ ,
+$$
+which keeps both views close to their previous values while correcting the latest mistake. With kernels $\kappa_1,
+\kappa_2$ and $k_i = \kappa_i(\xvec_t^{(i)}, \xvec_t^{(i)})$, the solution is
+$$
+f_{t+1}^{(i)} = f_t^{(i)} + \frac{\tau_t}{2\gamma_i}\, y_t\, \kappa_i(\xvec_t^{(i)}, \cdot), \qquad \tau_t = \min\set{C,
+\frac{4 \gamma_1 \gamma_2\, \ell_t}{k_1 \gamma_2 + k_2 \gamma_1}} .
+$$
+
+<Derivation title="The step size of co-regularised OTL">
+Consider the update direction $f^{(i)} = f_t^{(i)} + a_i\, y_t\, \kappa_i(\xvec_t^{(i)}, \cdot)$, which the representer
+theorem guarantees. The penalty is $\frac{\gamma_1}{2} a_1^2 k_1 + \frac{\gamma_2}{2} a_2^2 k_2$, and the new averaged margin
+is the old one plus $\frac12(a_1 k_1 + a_2 k_2)$. For a given increase in margin, minimising the penalty sets $a_i \propto
+1/\gamma_i$; write $a_i = \tau / (2\gamma_i)$. The margin then rises by $\frac{\tau}{4}\paren{k_1/\gamma_1 +
+k_2/\gamma_2}$. Without the cap $C$, the smallest step that removes the loss $\ell_t$ satisfies
+$$
+\frac{\tau}{4}\paren{\frac{k_1}{\gamma_1} + \frac{k_2}{\gamma_2}} = \ell_t
+\quad\Longrightarrow\quad
+\tau = \frac{4 \gamma_1 \gamma_2\, \ell_t}{k_1 \gamma_2 + k_2 \gamma_1} .
+$$
+The cap $C$ limits the step on a single noisy example, as in the PA-I variant of passive-aggressive learning
+<Cite id="crammer2006" />.
+</Derivation>
+
+The mistake bound compares the algorithm with any fixed pair of classifiers $(g^{(1)}, g^{(2)})$ <Cite id="zhao2010otl" />.
+If $k_1 \le R_1$ and $k_2 \le R_2$ on every round and $\tau = \min\set{C, 4\gamma_1\gamma_2 / (R_1 \gamma_2 + R_2
+\gamma_1)}$, then
+$$
+M \le \frac{1}{\tau}\paren{\gamma_1 \norm{h - g^{(1)}}^2 + \gamma_2 \norm{g^{(2)}}^2 + 2C \sum_{t=1}^{T} \ell_t(g^{(1)},
+g^{(2)})} ,
+$$
+where $\ell_t(g^{(1)}, g^{(2)})$ is the averaged hinge loss of the comparator. Starting the first view at $h$ replaces the
+usual $\norm{g^{(1)}}^2$ by $\norm{h - g^{(1)}}^2$. The source helps exactly as much as it is close to a good classifier
+on the shared features. A later journal version extends the analysis and experiments <Cite id="zhao2014otl" />.
+
+## Bayesian online transfer
+
+A Bayesian model gives a different route to the same goal: use the source posterior as the target prior and update it
+online as target labels arrive. Assumed-density filtering keeps a Gaussian approximation to the posterior and projects it
+back after each example <Cite id="opper1998" /> (see <NoteLink to="sequential-bayesian-updating" />). In the community Bayes
+point machine of Diethe, Twomey and Flach, a new person's classifier starts from the posterior over weights learnt from
+other people and is updated this way after each label. Evaluated as an online learner, which predicts each example before
+its label is revealed, this gave higher cumulative accuracy than the same model started from a generic prior
+<Cite id="diethe2016active" />, and on real accelerometer data it predicted with about 70% to 75% accuracy before its
+first target label <Cite id="diethe2016active" /> <Cite id="twomey2015evidence" />. See <NoteLink
+to="active-transfer-learning" />, where the same online learner also chooses which labels to request.
+
+The two routes weigh the source differently. OTL weights the source *classifier* by its observed losses and can discard
+it entirely. The Bayesian route weights the source *prior* by the amount of target data, and never discards it, but its
+influence shrinks as the target likelihood grows.
+
+## Trade-offs
+
+- **The source is fixed.** OTL never updates $h$. If the source is partly right, a mixture of a fixed $h$ and a new $f$
+  cannot express "$h$ with a correction"; heterogeneous OTL's initialisation of a view at $h$ can.
+- **Slow switching.** Cumulative-loss weights adapt slowly after a change in which classifier is better. Sharing or
+  discounting the weights trades this against noise.
+- **Squared loss on clipped scores.** The bound concerns losses of predictions mapped to $[0, 1]$. A classifier with
+  small margins has non-zero loss even when it is right, so $4\Sigma$ can exceed its mistake count.

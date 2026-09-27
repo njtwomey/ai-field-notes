@@ -1,0 +1,119 @@
+---
+title: Metric-based few-shot learning
+kind: technique
+summary: 'Metric-based few-shot learning trains an embedding on many small episodes so that new classes are recognised from a few examples by distance. Prototypical networks classify by the nearest class mean; with squared Euclidean distance this is a linear classifier.'
+tags: [transfer-learning, meta-learning, few-shot-learning, metric-learning, worked-example]
+aliases: [prototypical networks, matching networks, relation networks, episodic training, N-way K-shot classification, class prototypes]
+requires: [meta-learning, multinomial-logistic-regression]
+related: [few-shot-learning-evaluation, metric-learning, k-nearest-neighbours, contrastive-learning, linear-discriminant-analysis]
+references: [vinyals2016, snell2017, sung2018relation, chen2019closer, tian2020rethinking]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+In **$N$-way $K$-shot classification**, a task presents $N$ classes never seen in training, each with $K$ labelled
+**support** examples, and asks for the labels of unlabelled **query** examples. **Metric-based** methods learn an
+embedding $f_{\phivec} : \Xcal \to \reals^M$ on many training episodes of the same form, and classify each query by its
+similarity to the embedded support examples. Adapting to a new task needs no gradient steps: it is a forward pass through
+the embedding and a comparison <Cite id="vinyals2016" /> <Cite id="snell2017" />.
+</Definition>
+
+## Problem
+
+A classifier with thousands of parameters cannot be fitted to five examples per class. A good embedding, in which
+examples of one class sit close together and examples of different classes far apart, makes the problem easy: nearest
+neighbours in it work from a single example. Metric-based methods learn such an embedding from classes that have plenty
+of data, so that it works on classes that do not.
+
+## Episodic training
+
+Training mimics the test condition <Cite id="vinyals2016" />. Each training step samples $N$ classes from the training
+classes, $K$ support examples and some query examples per class, classifies the queries using only the support set, and
+back-propagates the query loss into the embedding. The embedding is optimised for exactly the operation it will perform
+on new classes.
+
+## Matching networks
+
+Matching networks predict the label of a query $\hat\xvec$ as an attention-weighted sum of the support labels
+<Cite id="vinyals2016" />:
+$$
+\hat y = \sum_{i=1}^{NK} a(\hat\xvec, \xvec_i)\, \yvec_i, \qquad a(\hat\xvec, \xvec_i) = \frac{\exp\paren{c(f(\hat\xvec),
+g(\xvec_i))}}{\sum_{j} \exp\paren{c(f(\hat\xvec), g(\xvec_j))}},
+$$
+where $\yvec_i$ is the one-hot label of support example $i$, $c$ is cosine similarity, and $f$ and $g$ embed queries and
+support examples. In the full version, $g$ embeds each support example in the context of the whole support set with a
+bidirectional LSTM, and $f$ attends over the support set. With a single support example per class, the prediction is a
+soft nearest neighbour.
+
+## Prototypical networks
+
+Prototypical networks summarise each class by the mean of its embedded support examples, the **prototype**
+<Cite id="snell2017" />:
+$$
+\cvec_k = \frac{1}{\abs{S_k}} \sum_{(\xvec_i, y_i) \in S_k} f_{\phivec}(\xvec_i),
+$$
+and classify a query by a softmax over negative distances to the prototypes,
+$$
+p_{\phivec}(y = k \mid \xvec) = \frac{\exp\paren{-d\paren{f_{\phivec}(\xvec), \cvec_k}}}{\sum_{k'} \exp\paren{-d\paren{f_{\phivec}(\xvec),
+\cvec_{k'}}}} .
+$$
+Training minimises the negative log-probability of the true class of each query, averaged over episodes.
+
+### The mean is the right summary
+
+For squared Euclidean distance, the point $\cvec$ that minimises the total distance $\sum_i \norm{\zvec_i - \cvec}^2$
+to a class's embedded points $\zvec_i$ solves $\sum_i 2(\cvec - \zvec_i) = \zeros$, which is their mean. More generally,
+the mean minimises the expected Bregman divergence from a set of points to a representative, and squared Euclidean
+distance is a Bregman divergence. The softmax over negative Bregman divergences is the posterior class probability of a
+mixture of exponential-family densities with those means, so a prototypical network performs mixture density estimation
+in the embedding space <Cite id="snell2017" />.
+
+### It is a linear classifier
+
+Expand the squared distance:
+$$
+-\norm{\zvec - \cvec_k}^2 = -\zvec\transpose \zvec + 2 \cvec_k\transpose \zvec - \cvec_k\transpose \cvec_k .
+$$
+The first term is the same for every class, so it cancels in the softmax. What remains is linear in the embedding
+$\zvec = f_{\phivec}(\xvec)$:
+$$
+p(y = k \mid \xvec) \propto \exp\paren{\wvec_k\transpose \zvec + b_k}, \qquad \wvec_k = 2\cvec_k, \quad b_k = -\norm{\cvec_k}^2 .
+$$
+A prototypical network with squared Euclidean distance is therefore <NoteLink to="multinomial-logistic-regression" /> on
+the embedding, with weights read off the prototypes instead of fitted. All the nonlinearity is in the embedding. Snell
+et al. found squared Euclidean distance clearly better than cosine similarity, and training with more classes per
+episode than at test time better still <Cite id="snell2017" />. The same form, class means with a shared metric, gives
+<NoteLink to="linear-discriminant-analysis" /> when the embedding is the identity and the covariance is shared.
+
+### Worked example
+
+A 3-way 2-shot episode in a two-dimensional embedding. The support embeddings are $(1, 0)$ and $(1.4, 0.6)$ for class 1,
+$(-1, 1)$ and $(-0.6, 1.4)$ for class 2, and $(0, -1.2)$ and $(0.4, -0.8)$ for class 3. The prototypes are the means,
+$\cvec_1 = (1.2, 0.3)$, $\cvec_2 = (-0.8, 1.2)$ and $\cvec_3 = (0.2, -1)$. A query embedded at $(0.6, 0.2)$ has squared
+distances $0.37$, $2.96$ and $1.60$. The softmax of their negatives gives probabilities $0.731$, $0.055$ and $0.214$,
+so the query is assigned to class 1.
+
+## Relation networks
+
+Relation networks replace the fixed distance by a learnt one: a second network takes the concatenated embeddings of a
+query and a class and outputs a relation score in $[0, 1]$, trained by regression to $1$ for matching pairs and $0$
+otherwise <Cite id="sung2018relation" />. The comparison can then capture similarities that no fixed metric in the
+embedding does.
+
+## Cost
+
+Adapting to a task is one forward pass per support and query example and $N$ distance computations per query. There
+are no inner-loop gradients, which makes metric-based methods cheaper than <NoteLink to="meta-learning">MAML</NoteLink>
+to train and to use.
+
+## Trade-offs
+
+- **The embedding does the work.** Chen et al. and Tian et al. showed that an embedding trained by ordinary supervised
+  classification on all training classes, followed by a nearest-centroid or linear classifier, matches or beats
+  episodically trained metric methods on standard benchmarks <Cite id="chen2019closer" /> <Cite
+  id="tian2020rethinking" />. See <NoteLink to="few-shot-learning-evaluation" />.
+- **Fixed capacity per class.** A prototype is one point. Classes with several modes, or support sets with outliers,
+  are poorly summarised by their mean.
+- **Distribution of classes.** The embedding generalises to new classes that resemble the training classes. For
+  classes from a different domain, such as medical images after training on natural images, the benefit shrinks.
