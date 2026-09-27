@@ -6,8 +6,3 @@ declare module 'virtual:content' {
   /** Content errors. Always empty in a build (which fails instead); listed in a banner by the dev server. */
   export const contentErrors: string[]
 }
-
-declare module 'virtual:search' {
-  const bodies: Record<string, string>
-  export default bodies
-}

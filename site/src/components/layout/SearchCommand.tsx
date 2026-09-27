@@ -1,5 +1,5 @@
-import { Search } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { FolderOpen, Hash, Search } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
 import {
@@ -12,8 +12,8 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import { Kbd } from '@/components/ui/kbd'
-import { category, kindLabels, notes, noteUrl, taxonomy, type NoteMeta } from '@/lib/content'
-import { search } from '@/lib/search'
+import { browseUrl, category, kindLabels, noteUrl, taxonomy, type NoteMeta } from '@/lib/content'
+import { parseQuery, search, suggestTags, tagCounts } from '@/lib/search'
 import { kindIcons } from './kind-icon'
 import { MathText } from '@/components/content/MathText'
 
@@ -25,11 +25,13 @@ export function openSearch() {
   window.dispatchEvent(new Event(OPEN_EVENT))
 }
 
-/** ⌘K / Ctrl+K palette. Empty query lists notes by top-level category; typing runs a full-text search. */
+/**
+ * ⌘K / Ctrl+K palette. Words search titles, aliases, summaries, tags and headings; `#tag` filters by a tag, with
+ * autocomplete while it is typed. The empty palette offers popular tags and the topics rather than every note.
+ */
 export function SearchCommand() {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState<NoteMeta[]>([])
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -51,26 +53,22 @@ export function SearchCommand() {
     }
   }, [])
 
-  useEffect(() => {
-    let live = true
-    if (query.trim()) search(query).then((r) => live && setResults(r))
-    return () => {
-      live = false
-    }
-  }, [query])
+  const parsed = parseQuery(query)
+  const results = useMemo(() => search(query), [query])
+  const suggestions = parsed.partialTag !== undefined ? suggestTags(parsed.partialTag) : []
 
-  const shown = query.trim() ? results : []
-
-  const go = (slug: string) => {
+  const go = (to: string) => {
     setOpen(false)
     setQuery('')
-    navigate(noteUrl(slug))
+    navigate(to)
   }
 
-  const grouped = taxonomy.map((root) => ({
-    title: root.title,
-    notes: notes.filter((n) => n.category === root.path || n.category.startsWith(`${root.path}/`)),
-  }))
+  /** Put a tag into the query: replace the `#…` being typed, or append. */
+  const addTag = (tag: string) => {
+    const base =
+      parsed.partialTag !== undefined ? query.replace(/#\S*$/, '') : query.replace(/\s*$/, query.trim() ? ' ' : '')
+    setQuery(`${base}#${tag} `)
+  }
 
   return (
     <>
@@ -94,33 +92,60 @@ export function SearchCommand() {
         <Command shouldFilter={false}>
           <CommandInput
             autoFocus
-            placeholder="Search titles, tags, headings and text…"
+            placeholder="Search titles, summaries and tags · #tag to filter by tag"
             value={query}
             onValueChange={setQuery}
           />
           <CommandList>
             <CommandEmpty>No matching notes.</CommandEmpty>
-            {query.trim() ? (
-              <CommandGroup heading="Results">
-                {shown.map((n) => (
-                  <ResultItem key={n.slug} note={n} onSelect={go} />
+            {suggestions.length > 0 && (
+              <CommandGroup heading="Tags">
+                {suggestions.map(({ tag, count }) => (
+                  <TagItem key={tag} tag={tag} count={count} onSelect={addTag} />
                 ))}
               </CommandGroup>
+            )}
+            {query.trim() ? (
+              results.length > 0 && (
+                <CommandGroup
+                  heading={parsed.tags.length ? `Notes tagged ${parsed.tags.map((t) => `#${t}`).join(' ')}` : 'Notes'}
+                >
+                  {results.map((n) => (
+                    <ResultItem key={n.slug} note={n} onSelect={(slug) => go(noteUrl(slug))} />
+                  ))}
+                </CommandGroup>
+              )
             ) : (
-              grouped
-                .filter((g) => g.notes.length)
-                .map((g) => (
-                  <CommandGroup key={g.title} heading={g.title}>
-                    {g.notes.map((n) => (
-                      <ResultItem key={n.slug} note={n} onSelect={go} />
-                    ))}
-                  </CommandGroup>
-                ))
+              <>
+                <CommandGroup heading="Popular tags">
+                  {tagCounts.slice(0, 12).map(({ tag, count }) => (
+                    <TagItem key={tag} tag={tag} count={count} onSelect={addTag} />
+                  ))}
+                </CommandGroup>
+                <CommandGroup heading="Topics">
+                  {taxonomy.map((t) => (
+                    <CommandItem key={t.path} value={`topic-${t.path}`} onSelect={() => go(browseUrl({ c: t.path }))}>
+                      <FolderOpen className="size-4 text-muted-foreground" aria-hidden />
+                      {t.title}
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
             )}
           </CommandList>
         </Command>
       </CommandDialog>
     </>
+  )
+}
+
+function TagItem({ tag, count, onSelect }: { tag: string; count: number; onSelect: (tag: string) => void }) {
+  return (
+    <CommandItem value={`tag-${tag}`} onSelect={() => onSelect(tag)}>
+      <Hash className="size-4 text-muted-foreground" aria-hidden />
+      {tag}
+      <span className="ml-auto text-xs text-muted-foreground tabular-nums">{count}</span>
+    </CommandItem>
   )
 }
 
