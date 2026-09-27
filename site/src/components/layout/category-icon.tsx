@@ -1,6 +1,7 @@
 import { createElement } from 'react'
 import {
   Activity,
+  ArrowRightLeft,
   AudioWaveform,
   Blend,
   BookOpen,
@@ -21,6 +22,7 @@ import {
   Microscope,
   Network,
   Radar,
+  Repeat,
   Ruler,
   Shapes,
   ShieldCheck,
@@ -65,6 +67,8 @@ const icons: Record<CategoryIcon, LucideIcon> = {
   shield: ShieldCheck,
   blend: Blend,
   tags: Tags,
+  repeat: Repeat,
+  'arrow-right-left': ArrowRightLeft,
 }
 
 /** A top-level topic's icon from taxonomy.yaml, or a folder when it has none. */
