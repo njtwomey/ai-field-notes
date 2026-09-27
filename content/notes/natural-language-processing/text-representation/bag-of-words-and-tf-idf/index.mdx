@@ -1,0 +1,160 @@
+---
+title: Bag of words and TF-IDF
+kind: concept
+summary: 'A bag of words represents a document by its term counts, ignoring order. TF-IDF weights each count by $\log(N/\mathrm{df}_t)$, which follows from the log-odds of relevance when a term''s presence tells little. BM25 adds term-frequency saturation and document-length normalisation.'
+tags: [nlp, information-retrieval, feature-engineering, worked-example]
+aliases: [bag-of-words, BoW, TF-IDF, tf-idf, tfidf, term frequency, inverse document frequency, IDF, BM25, Okapi BM25, vector space model, document-term matrix, Robertson–Spärck Jones weight]
+requires: [tokenisation]
+related: [pairwise-distances-and-cosine-similarity, naive-bayes, multinomial-distribution, latent-dirichlet-allocation, word-embeddings, sentence-embeddings]
+references: [salton1975, sparckjones1972, salton1988, robertson2009, manning2008]
+status: draft
+updated: 2026-09-27
+---
+
+import { Bm25Saturation } from './Bm25Saturation'
+
+<Definition>
+Let a collection hold $N$ documents over a vocabulary of $V$ terms. The **bag-of-words** vector of document $d$ is
+$\xvec_d \in \naturals^V$, where $\mathrm{tf}_{t,d}$, the term frequency, counts the occurrences of term $t$ in $d$.
+The document frequency $\mathrm{df}_t$ is the number of documents that contain $t$. **TF-IDF** replaces each count by
+
+$$
+w_{t,d} = \mathrm{tf}_{t,d} \cdot \log \frac{N}{\mathrm{df}_t},
+$$
+
+so that a term counts for more when it is frequent in the document and rare in the collection
+<Cite id="sparckjones1972" /> <Cite id="salton1988" />.
+</Definition>
+
+## Bag of words
+
+A bag of words keeps which terms occur and how often, and discards their order. "dog bites man" and "man bites dog"
+have the same vector. Stacking the vectors of all documents gives the $N \times V$ document–term matrix, which is sparse:
+a document uses a tiny fraction of the vocabulary.
+
+In the vector space model, a query is a short document, and documents are ranked by the cosine similarity between
+their vectors and the query's <Cite id="salton1975" />. The cosine divides by both vector lengths, so a long document
+does not win only by having more words (see <NoteLink to="pairwise-distances-and-cosine-similarity">cosine
+similarity</NoteLink>). Probabilistic models read the same counts as draws from a
+<NoteLink to="multinomial-distribution">multinomial distribution</NoteLink>, as in multinomial
+<NoteLink to="naive-bayes">naive Bayes</NoteLink>.
+
+Raw counts have one defect. The most frequent terms, such as "the" and "of", occur in nearly every document and
+dominate every similarity, yet say nothing about what a document is about.
+
+## Why the inverse document frequency
+
+### As surprisal
+
+Pick a document uniformly at random. The probability that it contains term $t$ is $\mathrm{df}_t / N$. Learning that a
+document contains $t$ carries $-\log(\mathrm{df}_t / N) = \log(N/\mathrm{df}_t)$ nats of information. A term in every
+document carries none; a term in one document carries $\log N$. Spärck Jones proposed weighting terms by this
+specificity <Cite id="sparckjones1972" />.
+
+### As a log-odds of relevance
+
+The probabilistic retrieval model gives a sharper derivation <Cite id="robertson2009" />. Represent document $d$ by
+binary indicators $x_t \in \set{0, 1}$ for the presence of each query term. Let $R$ be the event that $d$ is relevant to
+the query, and rank documents by the log-odds $\log P(R \mid d) / P(\bar{R} \mid d)$. By Bayes' theorem this equals
+$\log P(d \mid R) / P(d \mid \bar{R})$ plus a constant that does not depend on $d$.
+
+Assume the indicators are independent given relevance, with $p_t = P(x_t = 1 \mid R)$ and $q_t = P(x_t = 1 \mid
+\bar{R})$. Then
+
+$$
+\log \frac{P(d \mid R)}{P(d \mid \bar{R})} = \sum_t \Big( x_t \log \frac{p_t}{q_t} + (1 - x_t) \log \frac{1 - p_t}{1 -
+q_t} \Big) = \sum_t x_t \log \frac{p_t (1 - q_t)}{q_t (1 - p_t)} + \text{const}.
+$$
+
+Each query term present in $d$ adds its own weight. Without relevance judgements, two estimates are natural. Almost all
+documents are not relevant, so $q_t \approx \mathrm{df}_t / N$. Nothing is known about $p_t$, so set $p_t = \tfrac12$,
+which makes $p_t / (1 - p_t) = 1$. The weight becomes
+
+$$
+\log \frac{1 - q_t}{q_t} = \log \frac{N - \mathrm{df}_t}{\mathrm{df}_t} \approx \log \frac{N}{\mathrm{df}_t} \quad
+\text{when } \mathrm{df}_t \ll N.
+$$
+
+This is the IDF. Adding $\tfrac12$ to each count for smoothing gives the Robertson–Spärck Jones weight $\log\big((N -
+\mathrm{df}_t + \tfrac12) / (\mathrm{df}_t + \tfrac12)\big)$ used by BM25 <Cite id="robertson2009" />.
+
+### Term frequency
+
+The IDF says which terms matter; the term frequency says how much document $d$ is about them. Salton and Buckley
+compared many combinations and found that $\mathrm{tf} \times \mathrm{idf}$ weights with length-normalised document
+vectors rank well across collections <Cite id="salton1988" />. Common variants replace $\mathrm{tf}$ by $1 +
+\log\mathrm{tf}$ for $\mathrm{tf} > 0$, which damps repeated terms <Cite id="manning2008" />.
+
+## BM25
+
+BM25 scores document $d$ against query $q$ by
+
+$$
+\operatorname{BM25}(d, q) = \sum_{t \in q} \mathrm{idf}_t \cdot \frac{\mathrm{tf}_{t,d}\, (k_1 + 1)}{\mathrm{tf}_{t,d} +
+k_1 \big(1 - b + b\, L_d / \bar{L}\big)},
+$$
+
+where $L_d$ is the length of $d$ in tokens, $\bar{L}$ is the average length, and $k_1 \ge 0$ and $b \in [0, 1]$ are
+parameters <Cite id="robertson2009" />. Typical values are $k_1 \in [1.2, 2]$ and $b = 0.75$.
+
+**Saturation.** At average length the term-frequency factor is $f(\mathrm{tf}) = \mathrm{tf}(k_1 + 1) / (\mathrm{tf} +
+k_1)$. It is 0 at $\mathrm{tf} = 0$ and 1 at $\mathrm{tf} = 1$, it increases, and it approaches $k_1 + 1$ as
+$\mathrm{tf} \to \infty$. The first occurrence of a term is the strongest evidence; the tenth adds little. With $k_1 =
+0$ the factor is 1 for any $\mathrm{tf} > 0$, so only presence counts. As $k_1 \to \infty$ the factor tends to
+$\mathrm{tf}$, so counts are used raw. The shape approximates a model in which a term's count in a document follows one
+Poisson rate when the document is about the term and a lower rate when it is not <Cite id="robertson2009" />.
+
+**Length normalisation.** A long document repeats terms because it is long, not because it is more about them. Divide
+the term frequency by $B = 1 - b + b L_d / \bar{L}$, which is 1 at average length and grows with $L_d$. Substituting
+$\mathrm{tf}/B$ into the saturating factor gives
+
+$$
+\frac{(\mathrm{tf}/B)(k_1 + 1)}{\mathrm{tf}/B + k_1} = \frac{\mathrm{tf}\,(k_1 + 1)}{\mathrm{tf} + k_1 B},
+$$
+
+which is the BM25 factor. With $b = 0$ length is ignored; with $b = 1$ term frequency is divided by the relative length.
+
+<Bm25Saturation />
+
+BM25 is a scoring formula over bag-of-words vectors. It remains a standard baseline for ranking documents against a
+keyword query, and for retrieving candidates before a neural model re-ranks them.
+
+## Worked example
+
+Take five documents:
+
+1. "the cat sat on the mat" (6 tokens)
+2. "the dog sat on the log" (6 tokens)
+3. "the cat chased the dog" (5 tokens)
+4. "a dog and a cat played" (6 tokens)
+5. "the bird sang" (3 tokens)
+
+So $N = 5$ and $\bar{L} = 26/5 = 5.2$. "the" is in 4 documents, "cat" in 3 and "mat" in 1. With natural logarithms,
+$\mathrm{idf}_{\text{the}} = \log(5/4) = 0.223$, $\mathrm{idf}_{\text{cat}} = \log(5/3) = 0.511$ and
+$\mathrm{idf}_{\text{mat}} = \log 5 = 1.609$. The word that names document 1's topic weighs seven times as much as
+"the".
+
+For the query "cat mat", the TF-IDF scores (sums of $w_{t,d}$ over the query terms) are $0.511 + 1.609 = 2.120$ for
+document 1, $0.511$ for documents 3 and 4, and 0 for documents 2 and 5.
+
+BM25 with $k_1 = 1.2$, $b = 0.75$ and the non-negative IDF $\log\big(1 + (N - \mathrm{df}_t + \tfrac12)/(\mathrm{df}_t +
+\tfrac12)\big)$ gives 1.811 for document 1, 0.548 for document 3 and 0.507 for document 4. TF-IDF tied documents 3 and
+4. BM25 ranks document 3 higher, because it has 5 tokens against document 4's 6, so its single "cat" is stronger
+evidence.
+
+## Assumptions
+
+- **Order carries no meaning.** Negation, word order and phrases are lost unless n-grams are added as extra terms.
+- **Terms are independent.** Synonyms are unrelated dimensions: "car" and "automobile" never match. Dense
+  <NoteLink to="word-embeddings">word embeddings</NoteLink> and <NoteLink to="sentence-embeddings">sentence
+  embeddings</NoteLink> address this.
+
+## Pitfalls
+
+- **The Robertson–Spärck Jones IDF can be negative.** $\log\big((N - \mathrm{df}_t + \tfrac12)/(\mathrm{df}_t +
+  \tfrac12)\big)$ is negative when a term is in more than half the documents: "the" above gets $-1.10$. A document then
+  loses score for containing a query term. Implementations add 1 inside the logarithm or clip the weight at zero.
+- **Vocabulary and preprocessing change everything.** Stop-word lists, stemming and lower-casing change $\mathrm{tf}$
+  and $\mathrm{df}$ and so every weight. Fit them on the collection, not on the query.
+- **IDF is a collection statistic.** Scores from different collections, or from shards with different $N$ and
+  $\mathrm{df}$, are not comparable.

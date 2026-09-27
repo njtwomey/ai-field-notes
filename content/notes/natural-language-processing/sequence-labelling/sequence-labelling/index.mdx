@@ -1,0 +1,110 @@
+---
+title: Sequence labelling in NLP
+kind: concept
+summary: 'Sequence labelling assigns one tag to every token of a sentence. Part-of-speech tagging labels words directly; chunking and named-entity recognition encode spans as token tags with the BIO or BIOES scheme. HMMs, MEMMs, CRFs and neural taggers all solve the same problem.'
+tags: [nlp, sequence-labelling, structured-prediction, sequence-models, worked-example]
+aliases: [tagging, part-of-speech tagging, POS tagging, chunking, shallow parsing, BIO tagging, IOB tagging, IOB2, BIOES, IOBES, BILOU, span encoding]
+requires: [tokenisation, logistic-regression]
+related: [structured-prediction, hidden-markov-model, maximum-entropy-markov-model, conditional-random-field, when-is-structure-needed, named-entity-recognition, bilstm-crf]
+references: [jurafsky2025, ramshaw1995, tjongkimsang2003, lample2016]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A sequence-labelling task maps a sentence of $N$ tokens, $\xvec = (x_1, \dots, x_N)$, to a label sequence $\yvec = (y_1,
+\dots, y_N)$ with $y_n \in \Ycal$, one label per token. Tasks that ask for spans of text, such as noun phrases or names,
+are turned into sequence labelling by a tagging scheme that marks where each span begins and ends
+<Cite id="jurafsky2025" />.
+</Definition>
+
+## Tasks
+
+- **Part-of-speech (POS) tagging** labels each word with its grammatical category, such as noun, verb or determiner. The
+  Penn Treebank tag set has 45 tags. Taggers reach about 97% token accuracy on English newswire; choosing each word's
+  most frequent tag already gives about 92% <Cite id="jurafsky2025" />. The difficulty is ambiguity: "back" is a noun,
+  verb, adjective or adverb depending on context.
+- **Chunking** (shallow parsing) groups words into non-overlapping, non-recursive phrases, such as noun phrases and verb
+  phrases. Ramshaw and Marcus cast it as tagging each word as inside or outside a chunk <Cite id="ramshaw1995" />.
+- **Named-entity recognition** finds names and their types. The CoNLL-2003 shared task uses four types: person,
+  location, organisation and miscellaneous <Cite id="tjongkimsang2003" />. See
+  <NoteLink to="named-entity-recognition">named-entity recognition</NoteLink>.
+
+All three are instances of <NoteLink to="structured-prediction">structured prediction</NoteLink>: neighbouring labels
+depend on each other, so predicting each token on its own ignores information.
+
+## Encoding spans as tags
+
+A span task has $E$ span types. A tagging scheme turns the spans into one tag per token, and decoding must turn the tags
+back into spans.
+
+| Scheme | Tags | Number of tags |
+| --- | --- | --- |
+| IO | `I-X` inside a span of type X, `O` outside | $E + 1$ |
+| BIO (IOB2) | `B-X` first token of a span, `I-X` any later token, `O` | $2E + 1$ |
+| BIOES (IOBES, BILOU) | `B-X` begin, `I-X` inside, `E-X` end, `S-X` single-token span, `O` | $4E + 1$ |
+
+**IO is ambiguous.** Two adjacent spans of the same type produce an unbroken run of `I-X` tags, which reads as one span.
+**BIO** marks every span start, so adjacent spans stay separate. Ramshaw and Marcus's original scheme, now called IOB1,
+used `B` only for a span that immediately follows another span of the same type <Cite id="ramshaw1995" />. **BIOES**
+also marks span ends and single-token spans. It gives the model more specific targets at boundaries, at the price of
+more labels. Lample et al. found BIOES slightly better than BIO for neural NER <Cite id="lample2016" />.
+
+### Worked example
+
+Chunk "She gave the dog a bone" into noun phrases (NP) and verb phrases (VP): [NP She] [VP gave] [NP the dog] [NP a
+bone].
+
+| Token | IO | BIO | BIOES |
+| --- | --- | --- | --- |
+| She | `I-NP` | `B-NP` | `S-NP` |
+| gave | `I-VP` | `B-VP` | `S-VP` |
+| the | `I-NP` | `B-NP` | `B-NP` |
+| dog | `I-NP` | `I-NP` | `E-NP` |
+| a | `I-NP` | `B-NP` | `B-NP` |
+| bone | `I-NP` | `I-NP` | `E-NP` |
+
+Under IO, "the dog a bone" is one run of four `I-NP` tags, so decoding returns one noun phrase instead of two. BIO
+separates them with the `B-NP` on "a". Here $E = 2$, so IO has 3 tags, BIO 5 and BIOES 9.
+
+### Valid transitions
+
+Not every tag sequence decodes to spans. In BIO, `I-X` must follow `B-X` or `I-X`; `O` followed by `I-X` is invalid. In
+BIOES, `B-X` must be followed by `I-X` or `E-X`, and `E-X` or `S-X` must be followed by `B`, `S` or `O`. A tagger that
+predicts each token independently can output invalid sequences. A model with label-transition scores can forbid them by
+setting the score of each invalid transition to $-\infty$, so that Viterbi decoding only returns valid sequences.
+
+## Models
+
+The models below share one chain structure over the labels and differ in what they model and how they normalise.
+
+| Model | Models | Normalisation | Features of the observations |
+| --- | --- | --- | --- |
+| Per-token classifier | $P(y_n \mid \xvec)$ | per token | any, through a context window |
+| <NoteLink to="hidden-markov-model">HMM</NoteLink> | $p(\xvec, \yvec)$ | joint, generative | only the current token, through emissions |
+| <NoteLink to="maximum-entropy-markov-model">MEMM</NoteLink> | $\prod_n P(y_n \mid y_{n-1}, \xvec)$ | per token | any |
+| <NoteLink to="conditional-random-field">CRF</NoteLink> | $P(\yvec \mid \xvec)$ | per sequence | any |
+| <NoteLink to="bilstm-crf">BiLSTM-CRF</NoteLink> | $P(\yvec \mid \xvec)$ | per sequence | learned by a network |
+| Transformer token classifier | $P(y_n \mid \xvec)$ | per token | learned by a network |
+
+An HMM for POS tagging has the tags as hidden states and the words as emissions. Its transition probabilities
+encode, for example, that determiners precede nouns. A CRF conditions on the whole sentence and can use overlapping
+features, such as suffixes, capitalisation and neighbouring words, that a generative model would have to model. A
+transformer encoder sees the whole sentence through attention, so a per-token softmax on top of it often performs
+nearly as well as adding a CRF layer; whether the label structure still pays is the question of
+<NoteLink to="when-is-structure-needed">when structure is needed</NoteLink>.
+
+## Evaluation
+
+POS tagging is scored by token accuracy, because every token has exactly one correct tag. Span tasks are scored by
+precision, recall and F1 over whole spans: a predicted span counts only if its boundaries and type both match a gold
+span. Token accuracy on span tasks is misleading, because most tokens are `O`.
+
+## Pitfalls
+
+- **Tokenisation mismatch.** Subword tokenisers split words into several pieces, while tags are defined on words. A
+  common convention labels the first piece of each word and ignores the rest in the loss.
+- **Scheme conversion.** Corpora are distributed in different schemes. Convert all data, and the decoder, to one scheme
+  before training and evaluation.
+- **Per-token decoding.** Taking the most probable tag at each position can produce invalid or inconsistent sequences;
+  Viterbi decoding under a transition model returns the most probable valid sequence.

@@ -1,0 +1,114 @@
+---
+title: Neural language model
+kind: concept
+summary: 'A neural language model computes $p(w_t \mid \text{context})$ with a network over learned word embeddings, so similar words share statistical strength. Bengio''s model reads a fixed window of $n - 1$ words; a recurrent model carries an unbounded context in its hidden state.'
+tags: [nlp, language-models, deep-learning, embeddings, recurrent-networks, worked-example]
+aliases: [neural probabilistic language model, NPLM, feed-forward language model, RNN language model, RNNLM, recurrent language model, LSTM language model]
+requires: [n-gram-language-model, multilayer-perceptron, softmax-and-log-sum-exp]
+related: [word-embeddings, recurrent-neural-network, lstm, backpropagation-through-time, autoregressive-transformer-language-model, cross-entropy-and-perplexity]
+references: [bengio2003, mikolov2010, jurafsky2025]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A neural language model predicts the next word $w_t$ from its context with a neural network. Each word $w$ in a
+vocabulary of size $V$ has a learned embedding $\Cmat_w \in \reals^m$. The network maps the embeddings of the context to
+a vector of scores $\yvec \in \reals^V$, and a softmax turns the scores into the distribution $p(w_t = j \mid
+\text{context}) = e^{y_j} / \sum_{k} e^{y_k}$. The embeddings and the network are trained together to minimise the
+cross-entropy of the next word <Cite id="bengio2003" />.
+</Definition>
+
+## The problem with counts
+
+An <NoteLink to="n-gram-language-model">n-gram model</NoteLink> treats each context as a separate row of a table. It
+learns nothing about "the dog was running in a room" from "the cat was walking in the bedroom", because "dog" and "cat"
+are unrelated symbols to it. The number of contexts grows as $V^{n-1}$, so almost every long context is unseen, and
+smoothing can only back off to shorter contexts. Bengio et al. called this the curse of dimensionality of language
+modelling <Cite id="bengio2003" />.
+
+A neural model replaces the table with a function of word vectors. If "dog" and "cat" have nearby embeddings, the
+network computes nearby predictions for contexts that contain them, and a training sentence about one moves the
+predictions for the other.
+
+## The feed-forward model
+
+Bengio, Ducharme, Vincent and Jauvin predict $w_t$ from the previous $n - 1$ words <Cite id="bengio2003" />.
+
+1. **Look up and concatenate.** $\xvec = (\Cmat_{w_{t-1}}, \dots, \Cmat_{w_{t-n+1}}) \in \reals^{(n-1)m}$.
+2. **Hidden layer.** $\hvec = \tanh(\dvec + \Hmat \xvec)$ with $\Hmat \in \reals^{h \times (n-1)m}$.
+3. **Scores.** $\yvec = \bvec + \Umat \hvec + \Wmat \xvec$, with $\Umat \in \reals^{V \times h}$ and an optional direct
+   connection $\Wmat \in \reals^{V \times (n-1)m}$ from the embeddings to the output.
+4. **Softmax.** $p(w_t = j \mid w_{t-n+1:t-1}) = \operatorname{softmax}(\yvec)_j$.
+
+**Training.** The loss for one position is $-\log p(w_t \mid \cdot) = -y_{w_t} + \log \sum_k e^{y_k}$. Its gradient
+with respect to the scores is
+
+$$
+\frac{\partial}{\partial \yvec}\big(-\log \operatorname{softmax}(\yvec)_{w_t}\big) = \pvec - \evec_{w_t},
+$$
+
+the predicted distribution minus the one-hot vector of the observed word. Backpropagation carries this error to
+$\Umat$, $\Hmat$ and the embeddings of the context words. An embedding row $\Cmat_w$ receives an update every time $w$
+appears in any context, so it is shaped by all of them. This is how the model shares evidence between words that occur
+in similar contexts.
+
+**Results.** On the Brown corpus the best network had a test perplexity about 24% lower than the best smoothed n-gram
+model, and about 8% lower on the larger AP News corpus <Cite id="bengio2003" />. The learned embeddings were an early
+form of the <NoteLink to="word-embeddings">word embeddings</NoteLink> later trained on their own.
+
+## Recurrent language models
+
+A fixed window still forgets everything more than $n - 1$ words back. A recurrent language model replaces the window
+by a hidden state $\svec_t \in \reals^H$ that summarises the whole prefix <Cite id="mikolov2010" />:
+
+$$
+\svec_t = \sigma(\Umat \xvec_t + \Wmat \svec_{t-1}), \qquad p(w_{t+1} \mid w_{1:t}) = \operatorname{softmax}(\Vmat
+\svec_t),
+$$
+
+where $\xvec_t$ is the one-hot vector (equivalently, the embedding) of the current word $w_t$ and $\sigma$ is the
+logistic function. The same weights are used at every position. Training unrolls the recurrence over the sequence and
+applies <NoteLink to="backpropagation-through-time">backpropagation through time</NoteLink>. Mikolov et al. reported
+that a mixture of several recurrent models reduced perplexity by about 50% relative to a state-of-the-art backoff n-gram
+model <Cite id="mikolov2010" />. Simple recurrent networks struggle to carry information over long gaps because of
+vanishing gradients, and <NoteLink to="lstm">LSTM</NoteLink> language models became the standard neural language model
+until transformers replaced them.
+
+## Worked example
+
+Count the parameters of a feed-forward model with $V = 10{,}000$, embedding size $m = 100$, $n = 4$ (three context
+words), $h = 500$ hidden units and no direct connection.
+
+| Part | Shape | Parameters |
+| --- | --- | --- |
+| Embeddings $\Cmat$ | $10{,}000 \times 100$ | 1,000,000 |
+| Hidden weights $\Hmat$ | $500 \times 300$ | 150,000 |
+| Hidden bias $\dvec$ | $500$ | 500 |
+| Output weights $\Umat$ | $10{,}000 \times 500$ | 5,000,000 |
+| Output bias $\bvec$ | $10{,}000$ | 10,000 |
+| **Total** | | **6,160,500** |
+
+A 4-gram table over the same vocabulary has $10^{12}$ possible contexts, each with its own distribution over $10^4$
+words. The network grows linearly with the window: one more context word adds $m h = 50{,}000$ weights to $\Hmat$. The
+output layer holds 81% of the parameters, and computing it costs $V h = 5 \times 10^6$ multiply-adds per predicted word.
+
+## Cost of the softmax
+
+Every prediction normalises over the whole vocabulary, which costs $O(V h)$ per word in training and in evaluation.
+Factorising the softmax into word classes or a tree, or estimating its gradient from a sample of words, reduces the cost
+<Cite id="jurafsky2025" />. Subword <NoteLink to="tokenisation">tokenisation</NoteLink> also caps $V$ at tens of
+thousands of tokens while removing unknown words.
+
+## Assumptions
+
+- **A fixed vocabulary.** Words not seen in training map to an unknown-word token.
+- **The recurrence can summarise the prefix.** A fixed-size state must hold everything the model needs about the past,
+  which limits how much long-range information survives.
+
+## Pitfalls
+
+- **Perplexities need the same vocabulary and tokenisation** to be compared with n-gram results.
+- **Sequential computation.** A recurrent model computes $\svec_t$ after $\svec_{t-1}$, so training cannot be
+  parallelised over positions. The <NoteLink to="autoregressive-transformer-language-model">transformer language
+  model</NoteLink> removes this constraint.

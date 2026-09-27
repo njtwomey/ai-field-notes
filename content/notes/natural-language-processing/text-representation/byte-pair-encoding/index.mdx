@@ -1,0 +1,106 @@
+---
+title: Byte-pair encoding
+kind: concept
+summary: 'Byte-pair encoding learns a subword vocabulary by starting from single characters or bytes and repeatedly merging the most frequent adjacent pair of symbols in a corpus. The ordered merge list is the tokeniser: encoding replays the merges, so every string can be encoded.'
+tags: [nlp, tokenisation, algorithms, worked-example]
+aliases: [BPE, byte pair encoding, byte-level BPE, BPE merges, merge table]
+requires: [tokenisation]
+related: [wordpiece-and-unigram-tokenisation, word-embeddings]
+references: [sennrich2016, gage1994, radford2019, kudo2018b]
+status: draft
+updated: 2026-09-27
+---
+
+import { BpeSteps } from './BpeSteps'
+
+<Definition>
+Byte-pair encoding (BPE) learns an ordered list of merges from a corpus. It starts with every word split into single
+symbols (characters or bytes) and repeats one step until the vocabulary reaches a target size: count every adjacent
+pair of symbols, weighted by word frequency, and replace every occurrence of the most frequent pair $(a, b)$ by the new
+symbol $ab$. The vocabulary is the base symbols plus one new symbol per merge <Cite id="sennrich2016" />.
+</Definition>
+
+## Origin
+
+BPE began as a data-compression scheme: replace the most frequent pair of bytes in a file by an unused byte, and repeat
+<Cite id="gage1994" />. Sennrich, Haddow and Birch applied the same greedy step to the characters of words to build
+a subword vocabulary for neural machine translation. Frequent words end up as single symbols, and rare words split
+into frequent pieces, so the translation model needs no out-of-vocabulary token <Cite id="sennrich2016" />.
+
+## The learning algorithm
+
+1. **Pre-tokenise and count.** Split the corpus into words and count each distinct word. Represent each word as its
+   sequence of characters followed by an end-of-word marker `</w>`. The marker keeps "est" at the end of "newest"
+   distinct from "est" at the start of "estate".
+2. **Count pairs.** For every adjacent pair of symbols $(a, b)$, sum the counts of the words in which it occurs, once
+   per occurrence.
+3. **Merge.** Take the pair with the highest count, append $(a, b)$ to the merge list, and replace $a$ followed by $b$
+   by the single symbol $ab$ in every word.
+4. **Repeat** steps 2 and 3 for a chosen number of merges $M$.
+
+The final vocabulary size is the number of base symbols plus $M$, less any symbols that no longer occur on their own.
+$M$ is the one hyperparameter; translation and language models use tens of thousands of merges.
+
+**Encoding new text.** Split a word into base symbols and apply the learned merges in the order they were learned.
+Because every base symbol is in the vocabulary, every word has an encoding. The merge list, not the vocabulary alone,
+determines the segmentation: two vocabularies with the same symbols but different merge orders can encode a word
+differently.
+
+**Cost.** A naive implementation recounts all pairs after each merge, which costs $O(M \cdot S)$ for $S$ symbols in the
+distinct-word table. Practical implementations keep a pair-count table and an index from each pair to the words that
+contain it, and update only the words touched by a merge.
+
+## Worked example
+
+Take the corpus of Sennrich et al.: "low" 5 times, "lower" 2 times, "newest" 6 times and "widest" 3 times. Written as
+symbols, the words are `l o w </w>`, `l o w e r </w>`, `n e w e s t </w>` and `w i d e s t </w>`. The corpus has
+$5 \cdot 4 + 2 \cdot 6 + 6 \cdot 7 + 3 \cdot 7 = 95$ symbols.
+
+Several pairs occur in both "newest" and "widest". The pairs `e s`, `s t` and `t </w>` each occur $6 + 3 = 9$ times.
+With ties broken by the first pair met when reading the corpus, the first ten merges are:
+
+| Step | Merge | Count | Step | Merge | Count |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `e` + `s` | 9 | 6 | `n` + `e` | 6 |
+| 2 | `es` + `t` | 9 | 7 | `ne` + `w` | 6 |
+| 3 | `est` + `</w>` | 9 | 8 | `new` + `est</w>` | 6 |
+| 4 | `l` + `o` | 7 | 9 | `low` + `</w>` | 5 |
+| 5 | `lo` + `w` | 7 | 10 | `w` + `i` | 3 |
+
+After ten merges the corpus reads `low</w>`, `low e r </w>`, `newest</w>` and `wi d est</w>`, which is 28 tokens instead
+of 95. The unseen word "lowest" starts as `l o w e s t </w>`. Replaying the merges gives `l o w es t </w>` after step
+1, `l o w est</w>` after step 3, and `low est</w>` after step 5. The model receives two tokens it has seen in training,
+`low` and `est</w>`, instead of one unknown word.
+
+<BpeSteps />
+
+## Byte-level BPE
+
+Character-level BPE still needs a base symbol for every character, and Unicode has more than 150,000. A byte-level BPE
+runs on the UTF-8 bytes of the text, so there are exactly 256 base symbols and every string, in any script, has an
+encoding. GPT-2 uses byte-level BPE with 50,000 merges; its vocabulary of 50,257 tokens is the 256 bytes, the 50,000
+merged symbols and one end-of-text token <Cite id="radford2019" />. GPT-2 also pre-tokenises with a regular expression
+that separates letters, digits and punctuation, so that merges cannot join, for example, a word and the full stop
+after it. Without that rule the vocabulary fills with variants such as "dog", "dog." and "dog!".
+
+A merged byte sequence need not be a whole UTF-8 character. A token may hold half of a multi-byte character, so decoding
+a single token can give invalid text even though decoding a whole sequence is exact.
+
+## Properties
+
+- **Greedy and deterministic.** Each merge is chosen by frequency alone, without reference to any downstream model.
+  The segmentation of a word is unique.
+- **Frequency order.** Early merges are frequent pieces; late merges are long, rare pieces, often whole words. Cutting
+  the merge list shorter gives a smaller, finer vocabulary.
+- **No probabilities.** BPE has no likelihood for a segmentation, so it cannot rank alternatives. The
+  <NoteLink to="wordpiece-and-unigram-tokenisation">unigram language model</NoteLink> tokeniser has one, and can
+  sample segmentations.
+
+## Pitfalls
+
+- **The merge list is part of the model.** Retraining the tokeniser changes every token id; the embedding table must be
+  retrained with it.
+- **Tie-breaking and implementation details matter.** Two implementations with different tie rules or pre-tokenisers
+  learn different vocabularies from the same corpus.
+- **Uneven compression across domains.** Merges learned on prose split code, numbers and other languages into many
+  short tokens, which lengthens their sequences.

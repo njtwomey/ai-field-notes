@@ -1,0 +1,103 @@
+---
+title: Sentence embeddings
+kind: concept
+summary: 'A sentence embedding maps a whole text to one vector so that cosine similarity reflects meaning. Mean pooling averages an encoder''s token vectors. Sentence-BERT fine-tunes the encoder in a siamese set-up so that one embedding per sentence replaces $O(n^2)$ cross-encoder passes.'
+tags: [nlp, embeddings, representation-learning, similarity-search, worked-example]
+aliases: [sentence embedding, text embedding, Sentence-BERT, SBERT, siamese network, bi-encoder, cross-encoder, mean pooling]
+requires: [word-embeddings, pairwise-distances-and-cosine-similarity]
+related: [masked-language-modelling, contrastive-learning, nearest-neighbour-search, bag-of-words-and-tf-idf, transformer]
+references: [reimers2019, devlin2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A sentence embedding is a map $f_{\thetavec}$ from a text $s$ to a vector $\uvec = f_{\thetavec}(s) \in \reals^d$, trained so
+that the cosine similarity $\cos(\uvec, \vvec)$ of two embeddings is high when the texts mean similar things. Most
+sentence embeddings are built from a transformer encoder: the encoder outputs one vector per token, and a pooling step
+reduces them to one vector <Cite id="reimers2019" />.
+</Definition>
+
+## Why one vector per text
+
+Many tasks compare texts: semantic search, clustering, duplicate detection, retrieval for question answering. A
+**cross-encoder** reads both texts together, such as BERT with the input "`[CLS]` text A `[SEP]` text B", and outputs a
+similarity score. Cross-encoders are accurate, because every token of one text attends to every token of the other.
+They cost one full forward pass per pair. Finding the most similar pair among $n$ sentences needs $n(n - 1)/2$ passes:
+49,995,000 for $n = 10{,}000$, which Reimers and Gurevych estimated at about 65 hours on a GPU <Cite id="reimers2019" />.
+
+A **bi-encoder** embeds each text once, independently. The $n$ embeddings cost $n$ passes. Comparing them is a matrix
+product, and a <NoteLink to="nearest-neighbour-search">nearest-neighbour index</NoteLink> finds the closest vectors
+without comparing all pairs. The same search took about 5 seconds with Sentence-BERT <Cite id="reimers2019" />. The
+price is that the two texts never interact inside the model, so a bi-encoder is usually less accurate than a
+cross-encoder on the same pair. A common design retrieves candidates with a bi-encoder and re-ranks the top few with a
+cross-encoder.
+
+## Pooling
+
+A transformer encoder turns tokens $1, \dots, T$ into vectors $\hvec_1, \dots, \hvec_T \in \reals^d$. Three poolings are
+common.
+
+- **`[CLS]` pooling** takes the output at the first, special token. BERT's pretraining uses this vector to predict
+  whether two sentences are consecutive <Cite id="devlin2019" />.
+- **Mean pooling** averages the token vectors. Batches pad short texts to a common length, so the average must skip the
+  padding. With a mask $m_i = 1$ for real tokens and $m_i = 0$ for padding,
+
+  $$
+  \uvec = \frac{\sum_{i=1}^{T} m_i \hvec_i}{\sum_{i=1}^{T} m_i}.
+  $$
+
+- **Max pooling** takes the maximum of each coordinate over the real tokens.
+
+Without fine-tuning, none of these works well. On semantic textual similarity benchmarks, the `[CLS]` vector and the
+mean of BERT's output vectors both scored below the average of GloVe word vectors <Cite id="reimers2019" />. The
+encoder was trained to predict masked tokens, not to place similar sentences near each other.
+
+## Sentence-BERT
+
+Sentence-BERT (SBERT) fine-tunes a pretrained encoder so that pooled embeddings are directly comparable
+<Cite id="reimers2019" />. It uses a **siamese** network: the same encoder, with shared weights, embeds both texts of a
+training pair, $\uvec = f_{\thetavec}(a)$ and $\vvec = f_{\thetavec}(b)$. The loss depends on the training data.
+
+- **Classification on natural language inference (NLI).** Each pair is labelled entailment, contradiction or neutral.
+  A linear layer reads the concatenation $(\uvec, \vvec, \abs{\uvec - \vvec})$ and a softmax predicts the label:
+  $\operatorname{softmax}(\Wmat [\uvec; \vvec; \abs{\uvec - \vvec}])$ with $\Wmat \in \reals^{3 \times 3d}$. The layer is
+  discarded after training. Its only purpose is to shape the geometry of $\uvec$ and $\vvec$.
+- **Regression on similarity scores.** The loss is the squared error between $\cos(\uvec, \vvec)$ and a gold score.
+- **Triplets.** Given an anchor $a$, a positive $p$ and a negative $n$, the loss is $\max(\norm{\uvec_a - \uvec_p} -
+  \norm{\uvec_a - \uvec_n} + \epsilon, 0)$ with margin $\epsilon$, which pushes the positive closer than the negative.
+
+SBERT with mean pooling, trained on NLI data, outperformed averaged GloVe vectors and raw BERT embeddings on the
+semantic textual similarity benchmarks, and mean pooling performed better than `[CLS]` pooling in its ablation
+<Cite id="reimers2019" />.
+
+## In-batch negatives
+
+Later sentence-embedding models mostly train with a contrastive loss on pairs of related texts, such as a question and
+its answer. Within a batch of $B$ pairs $(a_j, b_j)$, each $a_j$ must pick its own $b_j$ out of all $B$ candidates, with
+the loss $-\log \big( e^{\cos(\uvec_j, \vvec_j)/\tau} / \sum_{k} e^{\cos(\uvec_j, \vvec_k)/\tau} \big)$ at temperature
+$\tau$. The other $B - 1$ texts in the batch serve as negatives at no extra cost. This is the InfoNCE loss of
+<NoteLink to="contrastive-learning">contrastive learning</NoteLink>, and larger batches give more negatives.
+
+## Worked example
+
+Let an encoder output 3-dimensional token vectors. Sentence A has two real tokens, $(1, 0, 1)$ and $(0, 2, 1)$, and is
+padded to length 3; the encoder's output at the padding position is $(3, -1, 0)$. Sentence B has three real tokens,
+$(1, 1, 0)$, $(0, 1, 2)$ and $(1, 0, 1)$.
+
+- **Masked mean pooling.** $\uvec_A = (0.5, 1, 1)$ and $\uvec_B = (\tfrac23, \tfrac23, 1)$. Their cosine similarity is
+  $\uvec_A^\top \uvec_B / (\norm{\uvec_A}\norm{\uvec_B}) = 0.970$.
+- **Unmasked mean.** Averaging all three positions of A gives $(\tfrac43, \tfrac13, \tfrac23)$, and the cosine similarity
+  drops to 0.847.
+
+The padding position changed the similarity by 0.12. Sentence A's embedding would also change with the batch it
+happened to be padded in.
+
+## Pitfalls
+
+- **Cosine similarity is not calibrated across models.** A similarity of 0.8 means different things for different
+  models and even different domains. Choose thresholds on labelled data.
+- **Length and domain shift.** Models trained on sentences degrade on long documents, which exceed the context window
+  or average away their content. Split long texts into passages.
+- **Asymmetric tasks.** A query and a document are different kinds of text. Models for retrieval are often trained with
+  separate prefixes or encoders for the two sides.

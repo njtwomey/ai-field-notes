@@ -1,0 +1,144 @@
+---
+title: Instruction tuning and alignment
+kind: concept
+summary: 'A pretrained language model continues text; instruction tuning makes it follow requests. Supervised fine-tuning maximises the likelihood of responses given prompts. Preference optimisation, by RLHF or DPO, then moves the model toward responses people prefer under a KL penalty.'
+tags: [nlp, language-models, fine-tuning, alignment, worked-example]
+aliases: [instruction tuning, supervised fine-tuning, SFT, instruction following, InstructGPT, FLAN, alignment tax, post-training]
+requires: [autoregressive-transformer-language-model, kl-divergence]
+related: [rlhf, transfer-learning-and-fine-tuning, language-model-evaluation, decoding-strategies, trust-region-and-ppo]
+references: [wei2022, ouyang2022, rafailov2023, christiano2017]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Instruction tuning and alignment are the fine-tuning stages that follow pretraining. **Supervised fine-tuning** (SFT)
+trains a pretrained model on prompts $x$ paired with desired responses $y$, by maximum likelihood of $y$ given $x$.
+**Preference optimisation** then adjusts the resulting policy $\pi_{\thetavec}(y \mid x)$ toward responses that people
+prefer, while a KL penalty keeps it close to a reference policy. Reinforcement learning from human feedback (RLHF) and
+direct preference optimisation (DPO) are the two standard ways to do this <Cite id="ouyang2022" />
+<Cite id="rafailov2023" />.
+</Definition>
+
+## Why pretraining is not enough
+
+A model trained to predict web text continues a prompt the way web text would. Given a question, a plausible continuation
+may be more questions of the same kind, because lists of questions are common documents. The model can also produce
+untruthful or toxic text, because such text is in its training data. Making the model larger does not by itself fix
+this <Cite id="ouyang2022" />. What the model is asked to do (continue documents) differs from what users want (answers
+to requests), and the fine-tuning stages close that gap.
+
+## Supervised fine-tuning
+
+Collect pairs $(x, y)$ of instructions and good responses. SFT minimises the negative log-likelihood of each response
+given its prompt:
+
+$$
+\Lcal_{\text{SFT}}(\thetavec) = -\sum_{(x, y)} \sum_{t=1}^{\abs{y}} \log \pi_{\thetavec}(y_t \mid x, y_{<t}).
+$$
+
+This is the pretraining objective of the <NoteLink to="autoregressive-transformer-language-model">autoregressive
+language model</NoteLink>, computed on the concatenation of prompt and response, with the loss of every prompt token
+masked out. The prompt tokens are inputs only, so no capacity is spent on learning to predict prompts.
+
+**Instruction tuning on many tasks.** FLAN rewrote more than 60 existing NLP datasets as natural-language instructions
+through templates and fine-tuned a 137-billion-parameter pretrained model on them. On task types held out of
+fine-tuning, FLAN surpassed zero-shot GPT-3 (175 billion parameters) on 20 of 25 tasks. Its ablations found that the
+benefit depended on model scale, the number of fine-tuning datasets and the use of natural-language instructions
+<Cite id="wei2022" />.
+
+**What SFT cannot do.** SFT imitates demonstrations. It cannot tell the model which of two plausible answers is better,
+and good demonstrations are expensive to write. Comparing two answers is easier for a person than writing a good one.
+
+## Preference optimisation
+
+The data are comparisons $(x, y_w, y_l)$: for prompt $x$, a person preferred response $y_w$ to $y_l$. The
+Bradley–Terry model links preferences to a scalar reward $r(x, y)$:
+
+$$
+P(y_w \succ y_l \mid x) = \sigma\big(r(x, y_w) - r(x, y_l)\big),
+$$
+
+with $\sigma$ the logistic function. The policy should earn a high reward without moving far from a reference policy
+$\pi_{\text{ref}}$, usually the SFT model:
+
+$$
+\max_{\pi} \ \expect_{x}\Big[ \expect_{y \sim \pi(\cdot \mid x)}\big[r(x, y)\big] - \beta\, \KL\big(\pi(\cdot \mid x)
+\,\|\, \pi_{\text{ref}}(\cdot \mid x)\big) \Big].
+$$
+
+The KL term matters because the reward is learned from a limited set of comparisons. Far from the responses it was
+fitted on, it is unreliable, and a policy that maximises it without restraint finds responses that score well but
+that people do not prefer. The coefficient $\beta > 0$ sets the trade-off.
+
+**RLHF.** InstructGPT fitted a reward model $r_{\phivec}$ to labeller rankings by maximum likelihood under the
+Bradley–Terry model, then maximised the objective above with the policy-gradient method
+<NoteLink to="trust-region-and-ppo">PPO</NoteLink>, sampling fresh responses from the policy and scoring them with
+$r_{\phivec}$ <Cite id="ouyang2022" />. Learning a reward from pairwise human preferences and optimising a policy
+against it was introduced for control tasks by Christiano et al. <Cite id="christiano2017" />. The reward model, the
+optimisation and its failure modes are covered in <NoteLink to="rlhf">reinforcement learning from human
+feedback</NoteLink>.
+
+**DPO.** The KL-regularised objective has the closed-form optimum $\pi^\star(y \mid x) \propto \pi_{\text{ref}}(y \mid x)\,
+e^{r(x, y)/\beta}$. Solving for the reward gives $r(x, y) = \beta \log\big(\pi^\star(y \mid x) / \pi_{\text{ref}}(y \mid
+x)\big)$ plus a term that depends on $x$ only, and that term cancels in the Bradley–Terry difference. Writing the reward
+through the trainable policy therefore turns preference data directly into a loss for the policy
+<Cite id="rafailov2023" />:
+
+$$
+\Lcal_{\text{DPO}}(\thetavec) = -\expect_{(x, y_w, y_l)}\Big[\log \sigma\Big(\beta \log \frac{\pi_{\thetavec}(y_w \mid
+x)}{\pi_{\text{ref}}(y_w \mid x)} - \beta \log \frac{\pi_{\thetavec}(y_l \mid x)}{\pi_{\text{ref}}(y_l \mid x)}\Big)\Big].
+$$
+
+DPO needs only the log-probabilities of fixed responses under two models: no separate reward model and no sampling
+during training.
+
+<Derivation title="The optimal policy of the KL-regularised objective">
+For one prompt $x$, write $Z(x) = \sum_y \pi_{\text{ref}}(y \mid x)\, e^{r(x, y)/\beta}$ and $\pi^\star = \pi_{\text{ref}}\,
+e^{r/\beta} / Z$. Then
+
+$$
+\expect_{\pi}\Big[r - \beta \log \frac{\pi}{\pi_{\text{ref}}}\Big] = -\beta\, \expect_{\pi}\Big[\log
+\frac{\pi}{\pi_{\text{ref}}\, e^{r/\beta}}\Big] = -\beta\, \expect_{\pi}\Big[\log \frac{\pi}{\pi^\star}\Big] + \beta \log
+Z(x) = -\beta\, \KL(\pi \,\|\, \pi^\star) + \beta \log Z(x).
+$$
+
+$Z(x)$ does not depend on $\pi$, and the KL divergence is non-negative and zero only at $\pi = \pi^\star$, so $\pi^\star$
+maximises the objective. Taking logarithms of its definition gives $r = \beta \log(\pi^\star / \pi_{\text{ref}}) + \beta
+\log Z(x)$.
+</Derivation>
+
+## The InstructGPT pipeline
+
+| Stage | Data | Trains | Loss |
+| --- | --- | --- | --- |
+| Pretraining | web-scale text | $\pi_0$ | next-token cross-entropy |
+| SFT | prompts with labeller-written responses | $\pi_{\text{SFT}}$ from $\pi_0$ | cross-entropy on response tokens |
+| Reward model | prompts with ranked responses | $r_{\phivec}$ | Bradley–Terry log-loss |
+| RL | prompts only; responses are sampled | $\pi_{\thetavec}$ from $\pi_{\text{SFT}}$ | reward minus KL penalty, by PPO |
+
+Labellers preferred the outputs of a 1.3-billion-parameter InstructGPT model to those of the 175-billion-parameter GPT-3,
+which has 100 times more parameters <Cite id="ouyang2022" />. The fine-tuning stages changed behaviour more than a
+hundredfold increase in scale did.
+
+## Worked example
+
+- **SFT loss.** A prompt of 5 tokens is followed by a response of 3 tokens, to which the model assigns probabilities
+  0.5, 0.25 and 0.8. The prompt tokens are masked, so the loss is $-(\ln 0.5 + \ln 0.25 + \ln 0.8) = \ln 10 = 2.303$
+  nats, or 0.768 nats per response token.
+- **Comparisons from rankings.** A labeller who ranks $K$ responses to one prompt yields $\binom{K}{2}$ ordered pairs:
+  6 pairs for $K = 4$ and 36 for $K = 9$. InstructGPT's labellers ranked between 4 and 9 responses per prompt
+  <Cite id="ouyang2022" />.
+- **DPO at initialisation.** With $\pi_{\thetavec} = \pi_{\text{ref}}$, both log-ratios are zero, so the loss is
+  $-\log \sigma(0) = \log 2 = 0.693$ for every pair, whatever $\beta$ is.
+
+## Pitfalls
+
+- **The reward is a proxy.** Preference optimisation fits what labellers prefer, which can favour length, confident tone
+  or agreement with the user over correctness.
+- **Alignment tax.** Fine-tuning toward preferences can lower scores on standard NLP benchmarks. InstructGPT reduced this
+  by mixing pretraining updates into the RL stage <Cite id="ouyang2022" />.
+- **SFT data sets the ceiling of imitation.** Demonstrations that are wrong or inconsistent are learned as faithfully
+  as good ones.
+- **Evaluation needs held-out prompts and people.** Reward-model scores and training-set preferences overstate the gain;
+  see <NoteLink to="language-model-evaluation">language model evaluation</NoteLink>.

@@ -1,0 +1,99 @@
+---
+title: Named-entity recognition
+kind: concept
+summary: 'Named-entity recognition finds spans of text that name people, places, organisations and other entities, and assigns each a type. It is solved as BIO sequence labelling, first with feature-based CRFs, then BiLSTM-CRFs, then fine-tuned transformers, and scored by span-level F1.'
+tags: [nlp, sequence-labelling, information-extraction, worked-example]
+aliases: [NER, named entity recognition, entity extraction, CoNLL-2003, span-level F1, conlleval, token classification]
+requires: [sequence-labelling, precision-recall-and-f-score]
+related: [conditional-random-field, bilstm-crf, masked-language-modelling, word-embeddings]
+references: [tjongkimsang2003, lample2016, devlin2019, jurafsky2025]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Named-entity recognition (NER) takes a tokenised sentence and returns a set of typed spans $(i, j, c)$: tokens $i$ to $j$
+form a name of type $c$. The CoNLL-2003 shared task, the standard English and German benchmark, uses four types:
+person (PER), location (LOC), organisation (ORG) and miscellaneous (MISC) <Cite id="tjongkimsang2003" />. NER is solved
+as <NoteLink to="sequence-labelling">sequence labelling</NoteLink> by encoding the spans as BIO or BIOES tags.
+</Definition>
+
+## What makes it hard
+
+- **Ambiguity of type.** "Washington" is a person, a city, a state or a government depending on context.
+- **Ambiguity of boundary.** "Bank of America Stadium" is one location, not an organisation followed by a word.
+- **Unseen names.** Most names in a test set are rare or absent from the training data, so a model must recognise a name
+  from its form and context: capitalisation, suffixes such as "-ville", or a preceding "Mr.".
+- **Little labelled data.** CoNLL-2003 English has about 14,000 training sentences, far too few to learn word meanings
+  from scratch.
+
+## Feature-based CRFs
+
+The classical approach is a linear-chain <NoteLink to="conditional-random-field">conditional random field</NoteLink>
+over BIO tags, with hand-written feature templates <Cite id="jurafsky2025" />:
+
+- the word, lower-cased, and the words in a window around it;
+- the word shape, which maps upper-case letters to `X`, lower-case to `x` and digits to `d`, so "McDonald" becomes
+  `XxXxxxxx`, often shortened to `XxXx`;
+- prefixes and suffixes of a few characters;
+- whether the word appears in a gazetteer, a list of known names;
+- the part-of-speech and chunk tags of the word.
+
+Each template produces thousands of binary features, and the CRF learns a weight for each feature and tag. The
+transition features learn that, for example, `I-PER` follows only `B-PER` or `I-PER`. The accuracy of such systems rests
+mostly on the features and gazetteers, which take expert effort and do not transfer across languages or domains.
+
+## BiLSTM-CRF
+
+Lample et al. replaced the feature templates with learned representations <Cite id="lample2016" />. Each word is
+represented by a pretrained word embedding concatenated with a character-level embedding, computed by a bidirectional
+LSTM over the word's characters, which captures shape and affixes. A bidirectional LSTM over the words gives a
+context-dependent vector per token, and a CRF layer on top scores tag transitions. The model reached 90.94 F1 on
+CoNLL-2003 English without gazetteers or language-specific features, and the BIOES scheme worked slightly better than
+BIO. The architecture and its training are in <NoteLink to="bilstm-crf">BiLSTM-CRF</NoteLink>.
+
+## Transformer token classification
+
+A pretrained transformer encoder, such as BERT, is fine-tuned with a linear layer and softmax over tags at each token
+<Cite id="devlin2019" />. The encoder's self-attention already conditions every token on the whole sentence, so a CRF
+layer is often omitted. A word split into several subword tokens still has one tag. The usual convention, used by BERT,
+predicts the tag at the first subword and ignores the other subwords in the loss and at decoding.
+
+Fine-tuned BERT-large reached 92.8 F1 on the CoNLL-2003 English test set <Cite id="devlin2019" />.
+
+## Evaluation: span-level F1
+
+The CoNLL evaluation counts whole spans <Cite id="tjongkimsang2003" />. A predicted span is correct only if its start,
+end and type all equal those of a gold span. With $\text{tp}$ correct predicted spans, $\hat{S}$ predicted spans and $S$
+gold spans,
+
+$$
+P = \frac{\text{tp}}{\hat{S}}, \qquad R = \frac{\text{tp}}{S}, \qquad F_1 = \frac{2PR}{P + R},
+$$
+
+pooled over all spans in the test set (micro-averaged). See <NoteLink to="precision-recall-and-f-score">precision,
+recall and F-score</NoteLink>.
+
+### Worked example
+
+Take the 12 tokens "Barack Obama spoke at the United Nations in New York City ." with gold spans [PER Barack Obama],
+[ORG United Nations] and [LOC New York City]. A tagger predicts [PER Barack Obama], [ORG United Nations] and [LOC New
+York], tagging "City" as `O`.
+
+- **Span level.** Two of the three predicted spans match exactly, so $P = 2/3$, $R = 2/3$ and $F_1 = 0.667$. The
+  truncated location counts as a false positive and a false negative at once.
+- **Token level.** Only "City" has the wrong BIO tag (`O` instead of `I-LOC`), so token accuracy is $11/12 = 0.917$.
+
+Token accuracy rewards the model for the many easy `O` tokens and barely registers the boundary error that makes the
+extracted location wrong.
+
+## Pitfalls
+
+- **Boundary errors count twice.** Under exact matching, a span off by one token is both a false positive and a false
+  negative. Report partial-match or per-type scores alongside exact F1 when boundaries are uncertain.
+- **Annotation guidelines differ.** Whether "the" in "the United Nations" or a title such as "President" belongs to a
+  span varies between datasets. Models trained on one convention lose points on another.
+- **Domain shift.** Taggers trained on news underperform on social media, clinical text or code, where capitalisation
+  and name forms differ.
+- **Nested entities.** "Bank of America Stadium" contains the organisation "Bank of America". Flat BIO tagging can mark
+  only one of them.

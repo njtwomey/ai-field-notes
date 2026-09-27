@@ -1,0 +1,166 @@
+---
+title: Autoregressive transformer language model
+kind: concept
+summary: 'A GPT-style language model is a causally masked transformer decoder trained to minimise $-\sum_t \log p(x_t \mid x_{<t})$ on large text corpora. Loss falls as a power law in parameters $N$ and tokens $D$; for compute $C \approx 6ND$, Chinchilla scales $N$ and $D$ in equal proportion.'
+tags: [nlp, language-models, transformer, deep-learning, scaling-laws, worked-example]
+aliases: [GPT, generative pre-trained transformer, decoder-only language model, causal language model, causal language modelling, next-token prediction, scaling laws, Chinchilla scaling law, compute-optimal training, Kaplan scaling laws, exposure bias]
+requires: [transformer, causal-masking, cross-entropy-and-perplexity]
+related: [neural-language-model, decoding-strategies, kv-cache, autoregressive-generative-models, masked-language-modelling, instruction-tuning-and-alignment, gpt-2-vs-deepseek-v3]
+references: [radford2018, radford2019, brown2020, kaplan2020, hoffmann2022, besiroglu2024, vaswani2017]
+status: draft
+updated: 2026-09-27
+---
+
+import { ComputeOptimal } from './ComputeOptimal'
+
+<Definition>
+An autoregressive transformer language model factorises the probability of a token sequence $x_1, \dots, x_T$ by the
+chain rule, $p_{\thetavec}(x_{1:T}) = \prod_{t=1}^{T} p_{\thetavec}(x_t \mid x_{<t})$, and computes every conditional with
+one decoder-only <NoteLink to="transformer">transformer</NoteLink>. A causal mask lets position $t$ attend only to
+positions $1, \dots, t$. The output at position $t$ passes through a linear layer and a softmax over the vocabulary to
+give $p_{\thetavec}(x_{t+1} \mid x_{\le t})$ <Cite id="radford2018" />.
+</Definition>
+
+## The training objective
+
+Given a corpus of token sequences, the parameters $\thetavec$ minimise the average negative log-likelihood of each token
+given the tokens before it:
+
+$$
+\Lcal(\thetavec) = -\frac{1}{T} \sum_{t=1}^{T} \log p_{\thetavec}(x_t \mid x_{<t}).
+$$
+
+This is the cross-entropy between the data and the model, so minimising it is maximum likelihood, and its exponential
+is the perplexity (see <NoteLink to="cross-entropy-and-perplexity">cross-entropy and perplexity</NoteLink>).
+
+**One pass gives every prediction.** The <NoteLink to="causal-masking">causal mask</NoteLink> sets every attention score
+from position $t$ to a later position to $-\infty$. The output at position $t$ therefore depends only on $x_{\le t}$,
+and the loss terms for all $T$ positions come out of one forward pass over the sequence. A recurrent
+<NoteLink to="neural-language-model">neural language model</NoteLink> needs $T$ sequential steps for the same work.
+
+**Teacher forcing.** In training, the prediction at position $t$ is conditioned on the true prefix $x_{<t}$ from the
+data, never on the model's own earlier predictions. At generation time the prefix is the model's own output, sampled one
+token at a time (see <NoteLink to="decoding-strategies">decoding strategies</NoteLink>). The model is never trained on
+its own mistakes, so an early error puts it in a state that it did not see in training. This mismatch is called
+exposure bias.
+
+## From GPT to GPT-3
+
+- **GPT** pretrained a 12-layer decoder on the BooksCorpus with the objective above, then fine-tuned the whole network
+  with a small task head on each labelled task <Cite id="radford2018" />.
+- **GPT-2** scaled the recipe to 1.5 billion parameters and a 40 GB web corpus, WebText. It performed several tasks,
+  such as reading comprehension and translation, without fine-tuning, by conditioning on a prompt that described the
+  task <Cite id="radford2019" />.
+- **GPT-3** had 175 billion parameters, trained on 300 billion tokens. Given a few examples of a task in its context
+  window, it performed the task without any gradient update. This in-context learning improved with model size
+  <Cite id="brown2020" />.
+
+The architecture changed little between the three. The scale of parameters, data and compute changed by orders of
+magnitude. The comparison <NoteLink to="gpt-2-vs-deepseek-v3">GPT-2 and DeepSeek-V3</NoteLink> shows what changed in
+later models.
+
+## Training compute
+
+A transformer with $N$ parameters (excluding embeddings) spends about $2N$ floating-point operations per token in the
+forward pass: each parameter takes part in one multiply and one add. The backward pass costs about twice the forward
+pass, since it computes gradients with respect to both the activations and the weights. Training on $D$ tokens therefore
+costs
+
+$$
+C \approx 6 N D \text{ FLOPs}.
+$$
+
+Attention adds a term that grows with the context length. It is small when the model width is large compared with the
+context <Cite id="kaplan2020" />.
+
+## Scaling laws
+
+Kaplan et al. trained models over several orders of magnitude of size and data and found that the test loss follows
+power laws. When the other factors do not limit it, the loss falls as $L(N) = (N_c / N)^{\alpha_N}$ with $\alpha_N
+\approx 0.076$ in the number of parameters, and as $L(D) = (D_c/D)^{\alpha_D}$ with $\alpha_D \approx 0.095$ in the
+number of tokens. Width and depth mattered little at a fixed $N$. For a compute-efficient allocation they found $N
+\propto C^{0.73}$: most extra compute should go into a larger model, trained on comparatively little data and stopped
+before convergence <Cite id="kaplan2020" />.
+
+### The Chinchilla allocation
+
+Hoffmann et al. trained over 400 models, from 70 million to over 16 billion parameters on 5 to 500 billion tokens, with
+the learning-rate schedule matched to each run's length <Cite id="hoffmann2022" />. One of their three analyses fits
+
+$$
+L(N, D) = E + \frac{A}{N^{\alpha}} + \frac{B}{D^{\beta}},
+$$
+
+where $E$ is the loss of an ideal model on this data, the second term is the shortfall of a finite model and the third
+the shortfall of finite data. Their fitted values are $E = 1.69$, $A = 406.4$, $B = 410.7$, $\alpha = 0.34$ and $\beta
+= 0.28$.
+
+**Deriving the optimum.** Fix the compute $C$ and substitute $D = C / (6N)$. The loss as a function of $N$ alone is
+
+$$
+L(N) = E + A N^{-\alpha} + B \Big(\frac{6N}{C}\Big)^{\beta}.
+$$
+
+The first term falls with $N$ and the second rises with it, because a larger model affords fewer tokens. Set the
+derivative to zero:
+
+$$
+-\alpha A N^{-\alpha - 1} + \beta B \Big(\frac{6}{C}\Big)^{\beta} N^{\beta - 1} = 0 \quad\Longrightarrow\quad
+N^{\alpha + \beta} = \frac{\alpha A}{\beta B} \Big(\frac{C}{6}\Big)^{\beta}.
+$$
+
+So
+
+$$
+N_{\text{opt}}(C) = G \Big(\frac{C}{6}\Big)^{a}, \qquad D_{\text{opt}}(C) = G^{-1} \Big(\frac{C}{6}\Big)^{b}, \qquad
+G = \Big(\frac{\alpha A}{\beta B}\Big)^{1/(\alpha + \beta)},
+$$
+
+with $a = \beta / (\alpha + \beta)$ and $b = \alpha / (\alpha + \beta)$. The exponents sum to one. The fitted values give
+$a = 0.45$ and $b = 0.55$. Hoffmann et al.'s other two analyses, which read the optimum directly off families of
+training runs, gave $a \approx b \approx 0.5$: parameters and tokens should grow in equal proportion, about 20 tokens
+per parameter <Cite id="hoffmann2022" />. Kaplan's allocation, $N \propto C^{0.73}$, instead put most compute into
+parameters. Hoffmann et al. attributed the difference mainly to Kaplan's use of one learning-rate schedule for all
+training lengths, which penalised the shorter runs of small models.
+
+**The test.** Gopher had 280 billion parameters trained on 300 billion tokens. Chinchilla used about the same compute
+for 70 billion parameters and 1.4 trillion tokens. Chinchilla outperformed Gopher on almost every evaluation and
+reached 67.5% on the MMLU benchmark, more than 7 points above Gopher <Cite id="hoffmann2022" />. A smaller model is
+also cheaper to fine-tune and to serve.
+
+<ComputeOptimal />
+
+### Worked example
+
+Take Chinchilla's budget, $C = 6 \cdot 70 \times 10^9 \cdot 1.4 \times 10^{12} = 5.88 \times 10^{23}$ FLOPs. The fitted
+loss is
+
+$$
+L(70\text{B}, 1.4\text{T}) = 1.69 + \frac{406.4}{(7 \times 10^{10})^{0.34}} + \frac{410.7}{(1.4 \times 10^{12})^{0.28}} =
+1.937,
+$$
+
+and for Gopher, with $C = 5.04 \times 10^{23}$, $L(280\text{B}, 300\text{B}) = 1.993$. The formula ranks Chinchilla
+above Gopher at less than 1.2 times Gopher's compute. At $C = 5.76 \times 10^{23}$ the closed form gives $N_{\text{opt}}
+= 3.2 \times 10^{10}$ and $D_{\text{opt}} = 3.0 \times 10^{12}$, about 93 tokens per parameter. The parametric fit and the
+direct analyses disagree by a factor of about two in model size at this budget. A later replication refitted the
+parametric model to data reconstructed from the paper and obtained estimates consistent with the direct analyses
+<Cite id="besiroglu2024" />.
+
+## Assumptions
+
+- **Loss is the target.** Scaling laws predict pretraining cross-entropy. Downstream accuracy is a noisier and sometimes
+  abrupt function of the loss.
+- **Data is not repeated.** The fits assume each token is seen about once. Repeating a limited corpus for many epochs
+  gives less than the fit predicts.
+- **Training compute only.** The allocation ignores inference. A model that will serve many requests is often trained
+  smaller and on more tokens than compute-optimal, because it is cheaper to run.
+
+## Pitfalls
+
+- **Extrapolation is sensitive to the constants.** Small changes in $\alpha$ and $\beta$ move $N_{\text{opt}}$ by large
+  factors at budgets far beyond the fitted range.
+- **Tokenisation and data define the loss.** Losses fitted on one tokeniser and corpus do not transfer to another, and
+  "tokens" is not a unit of information.
+- **Exposure bias is not fixed by more data.** Generated text can drift or repeat, because the model conditions on its
+  own outputs; decoding and later fine-tuning address this.

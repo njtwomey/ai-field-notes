@@ -1,0 +1,140 @@
+---
+title: Speculative decoding
+kind: technique
+summary: 'Speculative decoding drafts $\gamma$ tokens with a small model $q$ and checks them with one parallel pass of the large model $p$. Each draft token is kept with probability $\min(1, p/q)$; after a rejection, resampling from $\max(0, p - q)$ makes the output exactly distributed as $p$.'
+tags: [nlp, language-models, inference, sampling, worked-example]
+aliases: [speculative sampling, draft model, draft-and-verify decoding, assisted generation]
+requires: [autoregressive-transformer-language-model, rejection-sampling]
+related: [decoding-strategies, kv-cache, causal-masking]
+references: [leviathan2023, chen2023b]
+status: draft
+updated: 2026-09-27
+---
+
+import { DraftAcceptance } from './DraftAcceptance'
+
+<Definition>
+Speculative decoding speeds up sampling from a large target model $p$ with a small draft model $q$. The draft proposes
+$\gamma$ tokens one at a time. The target scores all of them in one forward pass. Each draft token is accepted with
+probability $\min\big(1, p(x)/q(x)\big)$; at the first rejection, a replacement is sampled from the normalised residual
+$\max(0, p - q)$, and the remaining drafts are discarded. The generated text has exactly the distribution of sampling
+from $p$ alone <Cite id="leviathan2023" /> <Cite id="chen2023b" />.
+</Definition>
+
+## Problem
+
+Autoregressive generation produces one token per forward pass of the target model. For a large model at small batch
+size, a forward pass is limited by reading the weights from memory, not by arithmetic. Scoring $\gamma + 1$ positions in
+one pass therefore takes about as long as scoring one. The model could check several tokens for the price of one, if it
+knew which tokens to check. A small model can guess them, because many tokens, such as the end of a common phrase, are
+easy to predict.
+
+## Mechanism
+
+One iteration, starting from a prefix $x_{<t}$:
+
+1. **Draft.** Sample $\tilde{x}_1, \dots, \tilde{x}_\gamma$ from the draft model autoregressively, and record its
+   distributions $q_1, \dots, q_\gamma$, where $q_i = q(\cdot \mid x_{<t}, \tilde{x}_{<i})$.
+2. **Score.** Run the target model once on the prefix followed by all $\gamma$ drafts. The
+   <NoteLink to="causal-masking">causal mask</NoteLink> makes the output at each position the target's conditional
+   given the tokens before it, so one pass gives $p_1, \dots, p_{\gamma+1}$.
+3. **Verify.** For $i = 1, \dots, \gamma$, draw $u \sim \Unif(0, 1)$ and accept $\tilde{x}_i$ if $u \le p_i(\tilde{x}_i) /
+   q_i(\tilde{x}_i)$. At the first rejection, sample a replacement from
+
+   $$
+   r_i(x) = \frac{\max\big(0, p_i(x) - q_i(x)\big)}{\sum_{x'} \max\big(0, p_i(x') - q_i(x')\big)}
+   $$
+
+   and end the iteration. If all $\gamma$ drafts are accepted, sample one extra token from $p_{\gamma+1}$.
+
+Every iteration emits between 1 and $\gamma + 1$ tokens for one call of the target.
+
+## Why the output is distributed as p
+
+Consider one position, with target distribution $p$ and draft distribution $q$. The token emitted there is either a
+draft that was accepted or a replacement drawn after a rejection.
+
+**Accepted drafts.** The draft proposes $x$ with probability $q(x)$ and keeps it with probability $\min(1, p(x)/q(x))$.
+So the probability of proposing and keeping $x$ is
+
+$$
+q(x) \min\Big(1, \frac{p(x)}{q(x)}\Big) = \min\big(q(x), p(x)\big).
+$$
+
+**Rejections.** Summing over $x$, the probability of acceptance is $\alpha = \sum_x \min(p(x), q(x))$, and a rejection
+happens with probability $1 - \alpha$. Since $\sum_x p(x) = 1$,
+
+$$
+1 - \alpha = \sum_x \big(p(x) - \min(p(x), q(x))\big) = \sum_x \max\big(0, p(x) - q(x)\big),
+$$
+
+which is the normalising constant of the residual $r$. After a rejection the emitted token is drawn from $r$, so this
+branch contributes
+
+$$
+(1 - \alpha)\, r(x) = (1 - \alpha) \frac{\max(0, p(x) - q(x))}{1 - \alpha} = \max\big(0, p(x) - q(x)\big).
+$$
+
+**Together.** For every token,
+
+$$
+P(\text{emit } x) = \min\big(p(x), q(x)\big) + \max\big(0, p(x) - q(x)\big) = p(x).
+$$
+
+The emitted token has the target distribution. When a draft is accepted, the next position is checked against the
+target's conditional given that same token, so the argument applies position by position and the whole sequence is
+distributed as if sampled from $p$. The rule is a form of <NoteLink to="rejection-sampling">rejection sampling</NoteLink>
+in which rejected mass is not wasted: the residual puts it exactly where $q$ under-proposes <Cite id="leviathan2023" />.
+
+**Greedy decoding** is the special case where $p$ and $q$ put all mass on their argmax. A draft is accepted exactly when
+it equals the target's argmax, and the replacement is the target's argmax.
+
+<DraftAcceptance />
+
+## Cost
+
+**Acceptance rate.** The acceptance probability at one position is $\alpha = \sum_x \min(p(x), q(x)) = 1 -
+\mathrm{TV}(p, q)$, where $\mathrm{TV}(p, q) = \tfrac12 \sum_x \abs{p(x) - q(x)}$ is the total variation distance. A
+draft that matches the target is always accepted.
+
+**Tokens per target call.** Assume each draft is accepted independently with probability $\alpha$. The first $i$ drafts
+are all accepted with probability $\alpha^i$. The iteration emits one token from the target (a replacement or the extra
+token) plus one per accepted draft, so the expected number of tokens is
+
+$$
+\expect[\text{tokens}] = 1 + \sum_{i=1}^{\gamma} \alpha^i = \frac{1 - \alpha^{\gamma+1}}{1 - \alpha}.
+$$
+
+It approaches $1 / (1 - \alpha)$ as $\gamma$ grows.
+
+**Speed-up.** Let one draft call cost a fraction $c$ of one target call. An iteration costs $\gamma c + 1$ target calls,
+so the expected speed-up over plain decoding is $(1 - \alpha^{\gamma+1}) / \big((1 - \alpha)(\gamma c + 1)\big)$
+<Cite id="leviathan2023" />. Larger $\gamma$ helps while $\alpha$ is high and the draft is cheap.
+
+Leviathan et al. reported 2 to 3 times faster decoding of T5-XXL with identical outputs <Cite id="leviathan2023" />.
+Chen et al. reported 2 to 2.5 times faster sampling from the 70-billion-parameter Chinchilla model
+<Cite id="chen2023b" />.
+
+## Worked example
+
+Let the target and draft distributions over three tokens be $p = (0.5, 0.3, 0.2)$ and $q = (0.3, 0.5, 0.2)$.
+
+- **Acceptance.** $\min(p, q) = (0.3, 0.3, 0.2)$, so $\alpha = 0.8$. Token 2 is over-proposed: it is drafted with
+  probability 0.5 and kept with probability $0.3/0.5 = 0.6$. Tokens 1 and 3 are always kept when drafted.
+- **Residual.** $\max(0, p - q) = (0.2, 0, 0)$, with total $0.2 = 1 - \alpha$. After a rejection the replacement is
+  always token 1.
+- **Check.** $P(\text{emit token 1}) = 0.3 + 0.2 = 0.5$, $P(\text{emit token 2}) = 0.3 + 0 = 0.3$ and
+  $P(\text{emit token 3}) = 0.2$, which is $p$. A simulation with 200,000 draws gives $(0.501, 0.301, 0.198)$.
+- **Throughput.** With $\gamma = 4$, the expected number of tokens per target call is $(1 - 0.8^5)/(1 - 0.8) = 3.36$.
+  If a draft call costs $c = 0.05$ of a target call, the speed-up is $3.36 / 1.2 = 2.8$.
+
+## Trade-offs
+
+- **The draft must share the tokeniser.** $p$ and $q$ are compared token by token, so both models need the same
+  vocabulary.
+- **Memory.** The draft model and its <NoteLink to="kv-cache">KV cache</NoteLink> occupy accelerator memory, and the
+  target's cache must be rolled back to the last accepted token after a rejection.
+- **Gains shrink at large batch sizes.** When many sequences are decoded together, the target's forward pass becomes
+  limited by arithmetic, and scoring $\gamma + 1$ positions per sequence is no longer nearly free.
+- **Gains depend on the text.** Predictable text, such as code and boilerplate, gives high $\alpha$; creative text at
+  high temperature gives low $\alpha$.

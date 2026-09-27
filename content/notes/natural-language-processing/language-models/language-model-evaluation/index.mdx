@@ -1,0 +1,108 @@
+---
+title: Language model evaluation
+kind: concept
+summary: 'Language models are evaluated intrinsically, by held-out log-likelihood as perplexity or bits per byte, and extrinsically, by benchmarks. Multiple-choice items compare option log-likelihoods; code uses the unbiased pass@$k$ estimator $1 - \binom{n-c}{k}/\binom{n}{k}$.'
+tags: [nlp, language-models, evaluation, metrics, worked-example]
+aliases: [LLM evaluation, language model benchmarks, pass@k, benchmark contamination, data contamination, MMLU, HumanEval, few-shot evaluation]
+requires: [autoregressive-transformer-language-model, perplexity-as-a-metric]
+related: [cross-entropy-and-perplexity, bleu, rouge, squad-exact-match-and-f1, tokenisation, source-coding-theorem]
+references: [hendrycks2021, chen2021b, brown2020, jurafsky2025]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Evaluating a language model means measuring how well it predicts or performs on text it was not trained on.
+**Intrinsic** evaluation scores the model's probabilities on held-out text, as perplexity or bits per byte.
+**Extrinsic** evaluation scores the model's outputs on tasks, through benchmarks with a fixed set of items, a prompt
+format and a scoring rule <Cite id="jurafsky2025" />.
+</Definition>
+
+## Intrinsic evaluation
+
+A model $p$ assigns a total negative log-likelihood $L = -\sum_{t=1}^{T} \log p(x_t \mid x_{<t})$, in nats, to a held-out
+text of $T$ tokens. The per-token perplexity is $e^{L/T}$. The note on
+<NoteLink to="perplexity-as-a-metric">perplexity as an evaluation metric</NoteLink> covers how it is measured.
+
+The per-token average depends on the tokeniser. A tokeniser with longer tokens spreads the same total $L$ over fewer
+tokens, so its per-token perplexity is higher even when the model is identical. The total $L$ does not depend on the
+tokeniser, so normalising by a property of the raw text makes models comparable. For a text of $B$ bytes, **bits per
+byte** is
+
+$$
+\mathrm{BPB} = \frac{L}{B \ln 2} = \frac{T}{B} \cdot \frac{\ell}{\ln 2},
+$$
+
+where $\ell = L/T$ is the mean loss per token in nats and $B/T$ is the average number of bytes per token. By the
+<NoteLink to="source-coding-theorem">source coding theorem</NoteLink>, an arithmetic coder driven by the model would
+compress the text to about BPB bits per byte.
+
+### Worked example
+
+Model A has a loss of 2.2 nats per token with a tokeniser that averages 4.2 bytes per token. Model B has 2.0 nats per
+token with 3.6 bytes per token.
+
+- **Per token.** A has perplexity $e^{2.2} = 9.03$ and B has $e^{2.0} = 7.39$. B looks better.
+- **Per byte.** A has $2.2 / (4.2 \ln 2) = 0.756$ bits per byte and B has $2.0 / (3.6 \ln 2) = 0.801$. A is better.
+
+B's advantage came from its shorter tokens: each of its tokens has less text to predict.
+
+## Benchmarks
+
+A benchmark fixes a set of items, a prompt format and a scoring rule. The same model can score differently when any of
+the three changes, so all three are part of the result.
+
+**Multiple choice by likelihood.** For an item with prompt $c$ and options $a_1, \dots, a_m$, score each option by its
+log-likelihood given the prompt, $\log p(a_j \mid c) = \sum_{t} \log p(a_{j,t} \mid c, a_{j,<t})$, and pick the highest.
+Longer options have more tokens and so lower log-likelihoods, which is why the sum is often divided by the number of
+tokens or bytes in the option. An alternative lists the options with letters and asks the model to generate the letter.
+MMLU covers 57 subjects, from elementary mathematics to law, as four-option multiple-choice questions
+<Cite id="hendrycks2021" />.
+
+**Few-shot prompting.** The prompt can include $k$ solved examples before the test item. GPT-3 showed that accuracy often
+rises with $k$ without any gradient update, and reported zero-, one- and few-shot results side by side
+<Cite id="brown2020" />.
+
+**Free-form generation.** The model generates an answer, which is compared with references by exact match, token
+<NoteLink to="squad-exact-match-and-f1">F1</NoteLink>, or overlap metrics such as <NoteLink to="bleu">BLEU</NoteLink> and
+<NoteLink to="rouge">ROUGE</NoteLink>. Answers must first be extracted and normalised from the generated text, and that
+parsing step can change the score.
+
+### Functional correctness and pass@k
+
+For code, a generated program is correct if it passes unit tests. HumanEval has 164 hand-written Python problems with
+tests <Cite id="chen2021b" />. The metric pass@$k$ is the probability that at least one of $k$ sampled programs passes.
+If one sample passes with probability $\rho$, then pass@$k = 1 - (1 - \rho)^k$.
+
+Estimating it from exactly $k$ samples per problem has high variance. Chen et al. draw $n \ge k$ samples, count the $c$
+that pass, and use
+
+$$
+\widehat{\text{pass@}k} = 1 - \frac{\binom{n - c}{k}}{\binom{n}{k}}
+$$
+
+<Cite id="chen2021b" />. The ratio is the probability that a random subset of $k$ of the $n$ samples contains none of the
+$c$ correct ones. **The estimator is unbiased.** The $n$ samples are independent, so a subset of $k$ of them chosen at
+random is $k$ independent samples. The probability that all $k$ fail, averaged over the $n$ draws, is therefore $(1 -
+\rho)^k$, and the expected value of the estimator is $1 - (1 - \rho)^k$.
+
+The plug-in estimate $1 - (1 - c/n)^k$ is biased low: $1 - (1 - x)^k$ is concave in $x$, so by Jensen's inequality its
+value at the mean $c/n$ is at least its mean.
+
+**Worked example.** With $n = 10$ samples and $c = 3$ correct, pass@1 is $1 - 7/10 = 0.3$. For $k = 5$, $\binom{7}{5} =
+21$ and $\binom{10}{5} = 252$, so pass@5 $= 1 - 21/252 = 0.917$. The plug-in estimate would give $1 - 0.7^5 = 0.832$.
+
+## Pitfalls
+
+- **Contamination.** Benchmark items published on the web end up in pretraining corpora, and a model that has seen the
+  answers scores higher without being more capable. GPT-3's authors searched their training data for n-gram overlaps
+  with each benchmark and reported results on the clean subsets <Cite id="brown2020" />. Held-out or newly written
+  items are the only reliable defence.
+- **Prompt sensitivity.** The template, the order of the options, the number of examples and even whitespace can move
+  benchmark accuracy by several points. Compare models only under the same harness.
+- **Saturation.** Once the best models approach a benchmark's ceiling, or its error rate in the labels, differences
+  between them are noise.
+- **Perplexity is not quality.** Lower perplexity predicts better benchmark scores on average across model scales, but
+  it does not measure instruction following, factual accuracy or safety. Fine-tuning for those, as in
+  <NoteLink to="instruction-tuning-and-alignment">instruction tuning and alignment</NoteLink>, can even raise perplexity
+  on generic text.

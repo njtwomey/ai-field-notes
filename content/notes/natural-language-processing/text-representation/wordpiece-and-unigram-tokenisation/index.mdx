@@ -1,0 +1,161 @@
+---
+title: WordPiece and unigram tokenisation
+kind: concept
+summary: 'WordPiece builds a subword vocabulary by merging the pair that most raises a unigram model''s likelihood, which ranks pairs by $c_{ab}/(c_a c_b)$. The unigram tokeniser prunes a large vocabulary by EM, scores each segmentation by $\prod_i p(x_i)$ and picks the best one with Viterbi.'
+tags: [nlp, tokenisation, expectation-maximisation, dynamic-programming, worked-example]
+aliases: [WordPiece, unigram language model tokeniser, unigram tokenizer, SentencePiece, subword regularisation, subword regularization, greedy longest-match-first]
+requires: [tokenisation, byte-pair-encoding]
+related: [expectation-maximisation, hidden-markov-model]
+references: [schuster2012, wu2016, devlin2019, huggingface2024wordpiece, kudo2018, kudo2018b]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**WordPiece** learns a subword vocabulary bottom up, like <NoteLink to="byte-pair-encoding">byte-pair
+encoding</NoteLink>, but merges the pair of symbols that most increases the likelihood of the training data under a
+unigram model of the symbols <Cite id="schuster2012" />. The **unigram language model** tokeniser works top down. It
+assigns each token $v$ in a vocabulary $\Vcal$ a probability $p(v)$, scores a segmentation $\xvec = (x_1, \dots, x_K)$
+of a string by $P(\xvec) = \prod_{i=1}^{K} p(x_i)$, and shrinks a large candidate vocabulary by removing the tokens
+whose loss lowers the likelihood least <Cite id="kudo2018" />.
+</Definition>
+
+## WordPiece
+
+### The merge criterion
+
+Model the corpus as a sequence of independent symbols with probabilities $p(t) = c_t / N$, where $c_t$ is the count
+of symbol $t$ and $N$ is the total number of symbols. The log-likelihood of the corpus is $\sum_t c_t \log p(t)$.
+
+Merging symbols $a$ and $b$ into $ab$ replaces each of the $c_{ab}$ adjacent occurrences of $a\,b$ by one symbol. Each
+such occurrence contributed $\log p(a) + \log p(b)$ before the merge and contributes $\log p(ab)$ after it. Holding the
+other probabilities fixed, the change in log-likelihood is
+
+$$
+\Delta \ell(a, b) \approx c_{ab} \big(\log p(ab) - \log p(a) - \log p(b)\big) = c_{ab} \log \frac{p(ab)}{p(a)\, p(b)}.
+$$
+
+The logarithm is the pointwise mutual information of $a$ and $b$. It is large when $a$ and $b$ occur together more
+often than independence predicts. Schuster and Nakajima describe WordPiece as choosing, at each step, the new unit that
+increases the training likelihood most <Cite id="schuster2012" />. Google did not publish the training code. The
+widely used Hugging Face reimplementation ranks pairs by
+
+$$
+\text{score}(a, b) = \frac{c_{ab}}{c_a\, c_b},
+$$
+
+which equals $p(ab) / (p(a) p(b))$ divided by $N$, so it ranks by the pointwise mutual information alone
+<Cite id="huggingface2024wordpiece" />. BPE ranks by $c_{ab}$ alone.
+
+**Example.** Suppose `t` occurs 200 times, `h` 60 times and the pair `t h` 50 times, while `q` occurs 10 times, `u`
+100 times and `q u` 10 times. BPE merges `t h` first, because $50 > 10$. WordPiece scores `t h` at $50 / (200 \cdot
+60) = 0.0042$ and `q u` at $10 / (10 \cdot 100) = 0.01$, and merges `q u` first, because `q` is never seen without
+`u`.
+
+### Encoding
+
+WordPiece marks every piece that continues a word, rather than the end of the word. BERT writes the continuation prefix
+as `##` and uses a vocabulary of 30,000 pieces <Cite id="devlin2019" />. A word is encoded greedily from the left: take
+the longest vocabulary entry that is a prefix of the remaining characters, emit it, and repeat on the rest with the `##`
+prefix. "unaffable" becomes `un`, `##aff`, `##able`. If at some point no entry matches, the whole word becomes the
+unknown token `[UNK]`. Greedy longest-match-first does not in general give the segmentation with the fewest pieces or
+the highest likelihood. Google's neural machine translation system used a WordPiece vocabulary of 8,000 to 32,000 units
+shared between source and target <Cite id="wu2016" />.
+
+## The unigram language model tokeniser
+
+### The model
+
+A vocabulary $\Vcal$ carries probabilities with $\sum_{v \in \Vcal} p(v) = 1$. A string $X$ has a set $\Scal(X)$ of
+candidate segmentations, every way of writing $X$ as a concatenation of tokens from $\Vcal$. The model treats the
+tokens of a segmentation as independent:
+
+$$
+P(\xvec) = \prod_{i=1}^{K} p(x_i), \qquad \xvec \in \Scal(X).
+$$
+
+The tokeniser outputs the most probable segmentation $\xvec^\star = \argmax_{\xvec \in \Scal(X)} P(\xvec)$. The
+segmentations of $X$ form a lattice over its character positions, with one edge per vocabulary token that spans a
+substring. Viterbi finds $\xvec^\star$ in time proportional to the length of $X$ times the length of the longest token:
+the best score at position $j$ is the maximum over tokens $v$ ending at $j$ of the best score at the start of $v$ plus
+$\log p(v)$ <Cite id="kudo2018" />.
+
+### Training by EM
+
+The segmentation of each training string is not observed, so the probabilities are fitted by maximising the marginal
+likelihood over segmentations,
+
+$$
+\Lcal = \sum_{s=1}^{S} \log \sum_{\xvec \in \Scal(X_s)} P(\xvec),
+$$
+
+with <NoteLink to="expectation-maximisation">expectation–maximisation</NoteLink>. The E-step computes, for every token
+$v$, its expected count: the number of times $v$ appears in a segmentation, averaged under the posterior $P(\xvec \mid
+X_s) = P(\xvec) / \sum_{\xvec'} P(\xvec')$. The forward–backward algorithm on the lattice computes these expectations
+without listing the segmentations, as for a <NoteLink to="hidden-markov-model">hidden Markov model</NoteLink>. The
+M-step sets each $p(v)$ proportional to its expected count.
+
+### Pruning the vocabulary
+
+1. **Seed.** Start from a vocabulary much larger than the target, such as all characters plus the most frequent
+   substrings of the corpus.
+2. **Fit.** Run EM to fit $p(v)$.
+3. **Score.** For each token $v$, compute its loss: the drop in $\Lcal$ when $v$ is removed from $\Vcal$.
+4. **Prune.** Keep the tokens with the largest loss, such as the top 80%, and always keep the single characters so that
+   every string stays encodable.
+5. **Repeat** steps 2 to 4 until the vocabulary reaches the target size <Cite id="kudo2018" />.
+
+A token with small loss is one whose strings are segmented almost as well without it.
+
+### Worked example
+
+Let the vocabulary hold `h`, `u`, `g` with probability 0.05 each, `s` with 0.10, `hu` with 0.08, `ug` with 0.10, `hug`
+with 0.07 and `gs` with 0.03. The string "hugs" has six segmentations:
+
+| Segmentation | $P(\xvec)$ | Posterior |
+| --- | --- | --- |
+| `hug` `s` | $0.07 \cdot 0.10 = 0.0070$ | 0.674 |
+| `hu` `gs` | $0.08 \cdot 0.03 = 0.0024$ | 0.231 |
+| `h` `ug` `s` | $0.05 \cdot 0.10 \cdot 0.10 = 0.0005$ | 0.048 |
+| `hu` `g` `s` | $0.08 \cdot 0.05 \cdot 0.10 = 0.0004$ | 0.039 |
+| `h` `u` `gs` | $0.05 \cdot 0.05 \cdot 0.03 = 0.000075$ | 0.007 |
+| `h` `u` `g` `s` | $0.05^3 \cdot 0.10 = 0.0000125$ | 0.001 |
+
+The marginal probability is the sum, $0.0103875$. Viterbi returns `hug` `s`. The E-step credits `hug` with an expected
+count of 0.674 and `hu` with $0.231 + 0.039 = 0.270$. The losses for pruning, with the other probabilities held fixed,
+are $\log(0.0103875 / 0.0033875) = 1.12$ nats for `hug`, 0.27 for `gs` and 0.05 for `ug`. Of these three, `ug` is the
+first candidate to prune: "hugs" loses little probability without it.
+
+### Subword regularisation
+
+The unigram model gives a probability to every segmentation, so training can sample a different segmentation of each
+sentence each time it is seen, with probability proportional to $P(\xvec)^\alpha$ for a smoothing exponent $\alpha$.
+Kudo reported that this makes translation models more robust, especially with little data <Cite id="kudo2018" />.
+Evaluation uses the Viterbi segmentation.
+
+## SentencePiece
+
+SentencePiece is a library that trains and applies BPE and unigram tokenisers directly on raw text
+<Cite id="kudo2018b" />. It does not pre-tokenise on spaces. It replaces each space by the ordinary symbol `▁`
+(U+2581) and treats the text as one stream of characters, so the same procedure works for languages written without
+spaces, and decoding is the concatenation of the pieces with `▁` turned back into a space. The vocabulary size is set
+directly rather than through a number of merges.
+
+## Comparison
+
+| | BPE | WordPiece | Unigram LM |
+| --- | --- | --- | --- |
+| Direction | bottom-up merges | bottom-up merges | top-down pruning |
+| Selection | pair count $c_{ab}$ | $c_{ab} / (c_a c_b)$ | loss in marginal likelihood |
+| Encoding | replay merges in order | greedy longest match | Viterbi on the lattice |
+| Probabilities | none | none at encoding time | $P(\xvec) = \prod_i p(x_i)$ |
+| Samples segmentations | no | no | yes |
+
+## Pitfalls
+
+- **"WordPiece" names two things.** The published description (likelihood gain) and the common reimplementation (a
+  count ratio) are not the same criterion.
+- **Independence is an approximation.** The unigram model ignores which token follows which. It scores segmentations
+  well enough to choose among them, but it is not a language model of the text.
+- **Greedy encoding can fail where another segmentation exists.** WordPiece emits `[UNK]` when the longest-prefix path
+  dead-ends, even if a different split would have encoded the word.

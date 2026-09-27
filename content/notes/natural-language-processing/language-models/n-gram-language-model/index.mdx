@@ -1,0 +1,177 @@
+---
+title: N-gram language model
+kind: concept
+summary: 'An n-gram language model predicts each word from the previous $n - 1$ words, $p(w_i \mid w_{i-n+1:i-1})$, estimated from counts. Most n-grams are never seen, so the counts are smoothed: add-$k$ adds pseudo-counts, and Kneser–Ney subtracts a discount and backs off to a continuation probability.'
+tags: [nlp, language-models, smoothing, maximum-likelihood, worked-example]
+aliases: [n-gram model, bigram model, trigram model, Markov language model, Kneser–Ney smoothing, Kneser-Ney, modified Kneser–Ney, absolute discounting, add-k smoothing, backoff, interpolated smoothing, continuation probability]
+requires: [conditional-probability, cross-entropy-and-perplexity]
+related: [naive-bayes, dirichlet-distribution, neural-language-model, perplexity-as-a-metric, tokenisation]
+references: [jurafsky2025, manning1999, chen1999, kneser1995]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A language model assigns a probability to every sequence of words $w_1, \dots, w_N$. The chain rule writes it exactly
+as $p(w_{1:N}) = \prod_{i=1}^{N} p(w_i \mid w_{1:i-1})$. An **n-gram model** assumes that each word depends only on the
+previous $n - 1$ words:
+
+$$
+p(w_{1:N}) \approx \prod_{i=1}^{N} p(w_i \mid w_{i-n+1:i-1}).
+$$
+
+A bigram model ($n = 2$) conditions on one word, a trigram model on two. The conditional probabilities are estimated
+from counts in a training corpus <Cite id="jurafsky2025" />.
+</Definition>
+
+## Setting up
+
+Pad every sentence with a start symbol `<s>` and an end symbol `</s>`. The start symbols give the first words a context.
+The end symbol is predicted like a word, which makes the probabilities of all finite sentences sum to one. Write $h$ for
+a context of $n - 1$ words, $c(h, w)$ for the number of times word $w$ follows $h$ in the corpus, and $c(h) = \sum_w
+c(h, w)$. Let $V$ be the number of words that can be predicted, including `</s>`.
+
+The model is a Markov chain of order $n - 1$ over words. It has one categorical
+distribution over the next word for each context.
+
+## Maximum likelihood
+
+The log-likelihood of the corpus under the model is $\sum_{h, w} c(h, w) \log p(w \mid h)$. Each context has its own
+distribution, so maximise separately for each $h$ subject to $\sum_w p(w \mid h) = 1$. With a Lagrange multiplier
+$\lambda_h$,
+
+$$
+\frac{\partial}{\partial p(w \mid h)} \Big( \sum_w c(h, w) \log p(w \mid h) - \lambda_h \big(\textstyle\sum_w p(w \mid
+h) - 1\big) \Big) = \frac{c(h, w)}{p(w \mid h)} - \lambda_h = 0,
+$$
+
+so $p(w \mid h) = c(h, w) / \lambda_h$, and the constraint gives $\lambda_h = c(h)$. The maximum likelihood estimate is
+the relative frequency
+
+$$
+p_{\text{ML}}(w \mid h) = \frac{c(h, w)}{c(h)}.
+$$
+
+## Sparsity
+
+A vocabulary of $V$ words has $V^{n}$ possible n-grams. With $V = 10^4$ there are $10^{12}$ possible trigrams, far more
+than any corpus contains. Most valid n-grams are never observed, and the maximum likelihood estimate gives each of them
+probability zero. One zero in a test sentence makes its probability zero and its
+<NoteLink to="perplexity-as-a-metric">perplexity</NoteLink> infinite. Smoothing moves some probability from observed
+n-grams to unobserved ones.
+
+## Add-k smoothing
+
+Add a pseudo-count $k > 0$ to every n-gram:
+
+$$
+p_{\text{add-}k}(w \mid h) = \frac{c(h, w) + k}{c(h) + k V}.
+$$
+
+The denominator keeps each distribution normalised. The estimate is the posterior mean of the categorical probabilities
+under a symmetric <NoteLink to="dirichlet-distribution">Dirichlet</NoteLink> prior with parameter $k$. With $k = 1$ it
+is Laplace smoothing, as in <NoteLink to="naive-bayes">naive Bayes</NoteLink>.
+
+For language modelling add-$k$ works poorly. With a large $V$, the $kV$ pseudo-counts outweigh the real counts of most
+contexts, so too much probability goes to unseen words. It also treats every unseen word alike: after "San", an unseen
+"Francisco" and an unseen "the" get the same probability.
+
+## Discounting and backoff
+
+Two ideas fix these defects.
+
+**Absolute discounting.** Church and Gale compared the counts of bigrams in one half of a large corpus with their counts
+in the other half. A bigram seen $c \ge 2$ times in the first half was seen about $c - 0.75$ times, on average, in the
+second <Cite id="jurafsky2025" />. So subtract a fixed discount $d \in (0, 1)$ from every observed count and give the
+freed probability to the unseen words.
+
+**Interpolation with a lower order.** Spread the freed probability according to a lower-order distribution $p_{\text{low}}(w)$,
+which depends on fewer words of context and is better estimated.
+
+For a bigram model with context $v$, the interpolated absolute-discounting estimate is
+
+$$
+p(w \mid v) = \frac{\max\big(c(v, w) - d, 0\big)}{c(v)} + \lambda(v)\, p_{\text{low}}(w).
+$$
+
+**The weight $\lambda(v)$ is fixed by normalisation.** Let $N_{1+}(v\,\bullet)$ be the number of distinct words seen
+after $v$. With $d \le 1$, every seen bigram has a count of at least $d$, so the first term sums over $w$ to $\big(c(v) -
+d\, N_{1+}(v\,\bullet)\big) / c(v)$. For the total to be 1, with $\sum_w p_{\text{low}}(w) = 1$,
+
+$$
+\lambda(v) = \frac{d\, N_{1+}(v\,\bullet)}{c(v)}.
+$$
+
+A context followed by many different words releases more probability, because the next word after it is more likely to
+be new.
+
+## Kneser–Ney smoothing
+
+Kneser and Ney changed the lower-order distribution <Cite id="kneser1995" />. The lower order is used when the bigram
+count is small, so it should answer a specific question: how likely is $w$ to appear after a context it has not been
+seen with? The raw frequency of $w$ answers a different question. "Francisco" can be frequent in a corpus and still
+occur almost only after "San". It is then a poor guess after any new context.
+
+The **continuation probability** counts the distinct contexts a word follows, not its occurrences:
+
+$$
+p_{\text{cont}}(w) = \frac{N_{1+}(\bullet\, w)}{N_{1+}(\bullet\,\bullet)},
+$$
+
+where $N_{1+}(\bullet\, w)$ is the number of distinct words that precede $w$ and $N_{1+}(\bullet\,\bullet)$ is the
+number of distinct bigram types. Interpolated Kneser–Ney for bigrams is
+
+$$
+p_{\text{KN}}(w \mid v) = \frac{\max\big(c(v, w) - d, 0\big)}{c(v)} + \frac{d\, N_{1+}(v\,\bullet)}{c(v)}\,
+p_{\text{cont}}(w).
+$$
+
+Higher orders apply the same formula recursively: the discounted trigram estimate interpolates with a bigram
+distribution that uses continuation counts. Chen and Goodman compared smoothing methods across corpora and orders. An
+interpolated, **modified** Kneser–Ney, with three discounts $d_1, d_2, d_{3+}$ for n-grams seen once, twice and three or
+more times, performed best in their experiments <Cite id="chen1999" />.
+
+## Worked example
+
+Train a bigram model on three sentences:
+
+- `<s> I am Sam </s>`
+- `<s> Sam I am </s>`
+- `<s> I do not like green eggs and ham </s>`
+
+The predictable words are the 11 word types other than `<s>`, so $V = 11$. The corpus has 15 distinct bigram types.
+"I" occurs 3 times as a context, followed by "am" twice and "do" once, so $N_{1+}(\text{I}\,\bullet) = 2$. The
+continuation probability of `</s>` is $3/15 = 0.2$, because three distinct words precede it; "am" and "like" each
+follow one word type, so their continuation probability is $1/15 = 0.067$.
+
+With $d = 0.75$, $\lambda(\text{I}) = 0.75 \cdot 2 / 3 = 0.5$. The next-word probabilities after "I" are:
+
+| $w$ | $c(\text{I}, w)$ | Maximum likelihood | Add-one | Kneser–Ney |
+| --- | --- | --- | --- | --- |
+| am | 2 | 0.667 | 0.214 | $1.25/3 + 0.5 \cdot 0.067 = 0.450$ |
+| do | 1 | 0.333 | 0.143 | $0.25/3 + 0.5 \cdot 0.067 = 0.117$ |
+| `</s>` | 0 | 0 | 0.071 | $0.5 \cdot 0.2 = 0.100$ |
+| like | 0 | 0 | 0.071 | $0.5 \cdot 0.067 = 0.033$ |
+
+Each column sums to one over all 11 words. Add-one keeps only $3/14 = 0.21$ for the observed "am", against 0.667 by
+maximum likelihood. Kneser–Ney keeps 0.450 and spreads the rest by continuation counts.
+
+The per-word perplexity of the test sentence `<s> I am Sam </s>`, over its 4 predictions, is 1.73 under maximum
+likelihood, 5.51 with add-one and 2.94 with Kneser–Ney. For `<s> I like ham </s>` it is infinite under maximum
+likelihood, because $p_{\text{ML}}(\text{like} \mid \text{I}) = 0$, 8.28 with add-one, and 7.46 with Kneser–Ney.
+
+## Assumptions
+
+- **Finite memory.** Only the last $n - 1$ words matter. Agreement across a clause, such as a verb agreeing with a
+  distant subject, is invisible to a trigram.
+- **No sharing between words.** "cat" and "dog" are unrelated symbols, so evidence about one says nothing about the
+  other. A <NoteLink to="neural-language-model">neural language model</NoteLink> shares statistical strength through
+  word embeddings.
+
+## Pitfalls
+
+- **Closed vocabulary.** Test words not in the training vocabulary need an unknown-word token, and perplexities are
+  comparable only with the same vocabulary.
+- **Tune the discount on held-out data.** $d$, like $k$, is chosen on held-out text, never on the test set.
+- **Storage.** The number of stored n-grams grows quickly with $n$ and corpus size. Large systems prune rare n-grams or
+  store counts in compressed tries.

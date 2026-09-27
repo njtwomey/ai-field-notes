@@ -1,0 +1,93 @@
+---
+title: Tokenisation
+kind: concept
+summary: 'Tokenisation splits text into a sequence of units from a fixed vocabulary $\Vcal$, the symbols a language model reads and predicts. Words give short sequences but an open vocabulary; characters or bytes give a closed vocabulary but long sequences; subwords sit between the two.'
+tags: [nlp, tokenisation, language-models, worked-example]
+aliases: [tokenization, tokeniser, tokenizer, subword tokenisation, word tokenisation, character-level model, out-of-vocabulary words, OOV]
+requires: []
+related: [byte-pair-encoding, wordpiece-and-unigram-tokenisation, bag-of-words-and-tf-idf, n-gram-language-model, perplexity-as-a-metric]
+references: [jurafsky2025, sennrich2016, kudo2018b]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A tokeniser is a pair of maps between strings and sequences over a finite vocabulary $\Vcal$. Encoding maps a string
+$s$ to token ids $(t_1, \dots, t_T)$ with $t_i \in \Vcal$; decoding maps the ids back to a string. A tokeniser is
+**lossless** when decoding the encoding of every string returns that string. The size $V = \abs{\Vcal}$ and the average
+number of tokens per character fix how long the sequences a model processes are <Cite id="jurafsky2025" />.
+</Definition>
+
+## Why the unit matters
+
+A language model assigns probabilities to token sequences, and a classifier or embedding model reads token sequences.
+Every downstream quantity is counted in tokens: the context window, the cost of attention, the perplexity and the price
+of an API call. The tokeniser is fixed before training and cannot be changed afterwards without retraining the
+embedding table.
+
+Two quantities pull in opposite directions.
+
+- **Vocabulary size $V$.** Each token has a row in the input embedding matrix and a row in the output softmax, so the
+  parameters in those layers grow as $V d$ for model width $d$. Rare tokens get few training examples, so their rows are
+  poorly estimated.
+- **Sequence length $T$.** A text of $C$ characters becomes about $C / \bar{c}$ tokens, where $\bar{c}$ is the average
+  number of characters per token. Self-attention costs $O(T^2)$ per layer, and a fixed context window holds less text
+  when $T$ is large.
+
+A larger vocabulary lengthens the average token and shortens the sequence. A smaller vocabulary does the reverse.
+
+## Three granularities
+
+**Words.** Split on whitespace and punctuation, then map each word to an id. Word sequences are short. The vocabulary
+is open: any new name, misspelling or inflection is a word the model has never seen. A word tokeniser keeps the $V$ most
+frequent words and maps every other word to one out-of-vocabulary (OOV) token, which erases its identity. Languages
+without spaces, such as Chinese and Japanese, also need a separate segmenter to find the words at all.
+
+**Characters or bytes.** Use the alphabet, or the 256 byte values of the UTF-8 encoding, as the vocabulary. Every
+string can be encoded, so there is no OOV token. Byte-level vocabularies are also language-independent. The sequences
+are several times longer than word sequences, and the model must learn to spell before it can learn syntax.
+
+**Subwords.** Keep frequent words as single tokens and split rare words into frequent pieces, such as
+"token" + "isation". The vocabulary is learned from a corpus to a chosen size, typically 30,000 to 250,000. With the
+single characters or bytes included in $\Vcal$, every string still has an encoding. Subword tokenisation was introduced
+to neural machine translation to translate rare words without an OOV token <Cite id="sennrich2016" />. The two common
+learning algorithms are <NoteLink to="byte-pair-encoding">byte-pair encoding</NoteLink>, which merges frequent pairs
+bottom up, and the <NoteLink to="wordpiece-and-unigram-tokenisation">unigram language model</NoteLink>, which prunes a
+large candidate vocabulary top down.
+
+## Worked example
+
+Encode the text "low lower lowest" (16 characters including the two spaces) under three schemes.
+
+- **Words.** The encoding is the three tokens `low`, `lower`, `lowest`. If the vocabulary was built from a corpus
+  without "lowest", the third token becomes the OOV token and the encoding loses the word.
+- **Characters.** Encode each character, including the two spaces. The encoding has 16 tokens from a vocabulary of 8
+  symbols: `l`, `o`, `w`, `e`, `r`, `s`, `t` and the space.
+- **Subwords.** With a subword vocabulary that contains `low`, `er` and `est` besides the single characters, the
+  encoding is `low`, `low` `er`, `low` `est`, which is 5 tokens. "lowest" is encoded from pieces the model has seen in
+  other words, and the shared piece `low` ties the three words together.
+
+The subword encoding is about three times shorter than the character encoding and has no OOV failure.
+
+## Pre-tokenisation and normalisation
+
+Most tokenisers run two steps before the subword algorithm.
+
+- **Normalisation** rewrites the string: Unicode normal form (NFC or NFKC), optional lower-casing, removal of control
+  characters. Normalisation that loses information, such as lower-casing, makes the tokeniser lossy.
+- **Pre-tokenisation** splits the text into chunks, usually at whitespace and punctuation, and the subword algorithm
+  runs inside each chunk. A merge can then never cross a word boundary. SentencePiece skips this step: it treats the
+  input as a raw character stream and encodes the space as an ordinary symbol, `▁` (U+2581), so that decoding is exact
+  concatenation and no language-specific splitter is needed <Cite id="kudo2018b" />.
+
+## Pitfalls
+
+- **Perplexity is per token.** Two models with different tokenisers have per-token perplexities in different units;
+  see <NoteLink to="perplexity-as-a-metric">perplexity as an evaluation metric</NoteLink>.
+- **Uneven cost across languages.** A vocabulary learned mostly from English splits other scripts into more tokens per
+  character. The same sentence then costs more context and compute in those languages.
+- **Leading spaces create duplicate tokens.** Byte-level tokenisers attach the preceding space to the word, so " the"
+  and "the" are different tokens with different embeddings.
+- **Numbers and code.** Subword tokenisers can split numbers into irregular chunks, so that one four-digit number is a
+  single token and the next is two. Arithmetic and character-level tasks, such as counting letters, become harder than their character-level
+  descriptions suggest.
