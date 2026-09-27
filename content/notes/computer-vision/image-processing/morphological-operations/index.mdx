@@ -1,0 +1,159 @@
+---
+title: Morphological operations
+kind: concept
+summary: 'Mathematical morphology probes a binary image $A$ with a small shape $B$. Erosion $A \ominus B$ keeps the points where $B$ fits inside $A$; dilation $A \oplus B$ adds $B$ around every point. Opening (erode then dilate) removes specks narrower than $B$; closing (dilate then erode) fills small holes.'
+tags: [computer-vision, image-processing, worked-example]
+aliases:
+  [
+    mathematical morphology,
+    erosion,
+    dilation,
+    opening,
+    closing,
+    structuring element,
+    morphological gradient,
+    top-hat transform,
+  ]
+requires: [image-filtering]
+related: [median-filter, edge-detection, semantic-segmentation]
+references: [serra1982, haralick1987, soille2004, szeliski2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { MorphologyExplorer } from './MorphologyExplorer'
+
+<Definition>
+Treat a binary image as the set $A \subseteq \integers^2$ of its foreground pixels, and choose a small set $B$ of
+offsets, the structuring element, such as a $3 \times 3$ square or a disk. Write $B_z = \set{z + b : b \in B}$ for $B$
+translated to $z$. **Erosion** is $A \ominus B = \set{z : B_z \subseteq A}$, the positions where $B$ fits inside $A$.
+**Dilation** is $A \oplus B = \set{a + b : a \in A, b \in B}$. **Opening** is $A \circ B = (A \ominus B) \oplus B$ and
+**closing** is $A \bullet B = (A \oplus B) \ominus B$ <Cite id="serra1982" />.
+</Definition>
+
+## Intuition
+
+Erosion slides the structuring element over the image and keeps its centre only where the whole element lies on the
+foreground. Shapes shrink by the radius of $B$, and anything thinner than $B$ disappears. Dilation stamps a copy of $B$
+at every foreground pixel. Shapes grow by the radius of $B$, and holes and gaps smaller than $B$ fill in.
+
+Each operation alone changes the size of everything. Composing them undoes the size change for shapes that are large
+compared with $B$ while keeping the removal for small features. Opening deletes small foreground specks and thin
+protrusions; closing deletes small background holes and narrow gaps. The structuring element sets what "small" means,
+and its shape sets the geometry: a disk treats all directions alike, a horizontal line removes only features that are
+short horizontally.
+
+<MorphologyExplorer />
+
+## Details
+
+### Erosion and dilation as filters
+
+For a symmetric $B$, containing $-b$ whenever it contains $b$, dilation equals
+$\set{z : B_z \cap A \neq \emptyset}$: the positions where $B$ touches the foreground. In pixel terms, with $A$ stored
+as an array of 0s and 1s,
+
+$$
+(A \ominus B)(z) = \min_{b \in B} A(z + b), \qquad (A \oplus B)(z) = \max_{b \in B} A(z + b).
+$$
+
+Erosion is a minimum filter and dilation is a maximum filter over the window $B$. The same formulas apply unchanged to a
+greyscale image: greyscale erosion darkens and shrinks bright regions, and greyscale dilation brightens and grows them.
+These filters are nonlinear. Like the <NoteLink to="median-filter" />, which is the other order statistic of the window,
+they do not blur edges.
+
+### Duality
+
+Erosion of the foreground is dilation of the background. Write $A^c$ for the complement and $\hat B = \set{-b : b \in B}$
+for the reflected element. A position $z$ is not in $A \ominus B$ exactly when $B_z$ is not contained in $A$, that is,
+when some $z + b$ lies in $A^c$. That holds exactly when $z \in A^c \oplus \hat B$. So
+
+$$
+(A \ominus B)^c = A^c \oplus \hat B, \qquad (A \bullet B)^c = A^c \circ \hat B.
+$$
+
+The second identity follows by applying the first twice. Every statement about opening has a mirror statement about
+closing with foreground and background exchanged.
+
+### Opening is the union of fitting translates
+
+The central property of opening follows directly from the definitions. A point $z$ is in $(A \ominus B) \oplus B$ when
+$z = y + b$ for some $b \in B$ and some $y$ with $B_y \subseteq A$. That says $z \in B_y$ for a translate $B_y$ that
+fits inside $A$. So
+
+$$
+A \circ B = \bigcup \set{B_y : B_y \subseteq A}.
+$$
+
+Opening keeps exactly the parts of $A$ that can be covered by copies of $B$ lying wholly inside $A$. A foreground region
+too small or too thin to contain one copy of $B$ vanishes. A large region survives with only its corners and narrow
+spurs rounded off to the shape of $B$.
+
+Three properties follow <Cite id="haralick1987" />:
+
+- **Anti-extensive:** $A \circ B \subseteq A$, because every $B_y$ in the union lies in $A$. By duality, closing is
+  extensive: $A \subseteq A \bullet B$.
+- **Increasing:** $A_1 \subseteq A_2$ implies $A_1 \circ B \subseteq A_2 \circ B$, since a translate that fits in $A_1$
+  fits in $A_2$.
+- **Idempotent:** $(A \circ B) \circ B = A \circ B$. Opening twice with the same element changes nothing more.
+
+<Derivation title="Proof that opening is idempotent">
+By anti-extensivity applied to $A \circ B$, $(A \circ B) \circ B \subseteq A \circ B$. For the reverse inclusion, take
+any translate $B_y \subseteq A$. It is one of the sets in the union that defines $A \circ B$, so
+$B_y \subseteq A \circ B$. It is therefore a translate that fits inside $A \circ B$, and it belongs to the union that
+defines $(A \circ B) \circ B$. Every point of $A \circ B$ lies in such a $B_y$, so
+$A \circ B \subseteq (A \circ B) \circ B$. The two inclusions give equality. Idempotence of closing follows by duality.
+</Derivation>
+
+Idempotence is what makes opening and closing filters in the morphological sense: they remove a class of features
+completely in one application, rather than shrinking it further each time as a linear blur does.
+
+### Derived operations
+
+- **Open–close filter.** Opening followed by closing removes both bright specks and dark holes smaller than $B$. It is
+  a common clean-up step for noisy segmentation masks.
+- **Morphological gradient.** $(A \oplus B) - (A \ominus B)$ marks a band around every boundary. With a $3 \times 3$
+  element it is a two-pixel outline.
+- **Top-hat.** $f - f \circ B$ keeps greyscale features that are brighter than their surroundings and smaller than
+  $B$. It removes slowly varying illumination before thresholding.
+- **Skeleton, hit-or-miss and reconstruction.** Repeated erosions, templates of foreground and background pixels, and
+  dilation constrained to a mask extend the toolbox to shape analysis <Cite id="soille2004" />.
+
+## Worked example
+
+Take a 1D binary image of 14 pixels and the element $B = \set{-1, 0, 1}$, three pixels wide:
+
+| operation  | pixels 0 to 13                  |
+| ---------- | ------------------------------- |
+| $A$        | 0 1 1 0 1 1 1 1 0 0 0 1 0 0     |
+| erosion    | 0 0 0 0 0 1 1 0 0 0 0 0 0 0     |
+| dilation   | 1 1 1 1 1 1 1 1 1 0 1 1 1 0     |
+| opening    | 0 0 0 0 1 1 1 1 0 0 0 0 0 0     |
+| closing    | 0 1 1 1 1 1 1 1 0 0 0 1 0 0     |
+
+Erosion keeps a pixel only if it and both neighbours are 1. Only pixels 5 and 6 qualify. Dilation sets a pixel to 1 if
+any of the three is 1, so every pixel within one step of the foreground turns on. Opening dilates the erosion: pixels 5
+and 6 grow back to 4 through 7. The run at pixels 1 and 2 is two pixels wide, too narrow to contain $B$, so it is gone,
+as is the isolated pixel 11. The run at 4 to 7 contains $B$ and is restored exactly. Closing erodes the dilation. The
+one-pixel gap at pixel 3 is filled; the three-pixel gap at pixels 8 to 10 is as wide as $B$ and stays open. Pixel 11
+survives closing, because closing never removes foreground.
+
+## Assumptions
+
+- The objects of interest are larger than the noise, so a structuring element exists that is bigger than the defects
+  and smaller than the objects.
+- Shape matters more than intensity. For greyscale images, flat structuring elements treat intensity as height
+  and remove peaks and valleys narrower than $B$.
+
+## Pitfalls
+
+- **Order matters.** Opening then closing is not closing then opening. Each removes a different class of features
+  first.
+- **Size of $B$.** An element larger than the thinnest real structure deletes it. A one-pixel line vanishes under
+  opening with any element wider than one pixel in its cross direction.
+- **Square vs disk.** Erosion by a square shrinks diagonals more slowly than a disk does, so repeated square erosions
+  turn circles into octagons.
+- **Borders.** Pixels outside the image must be treated as background or ignored. The choice decides whether objects
+  touching the border are eroded from that side.
+- **Non-symmetric elements.** For a non-symmetric $B$, dilation and "the positions where $B$ touches $A$" differ by a
+  reflection. Libraries differ in which one they compute.

@@ -1,0 +1,127 @@
+---
+title: Vision transformer
+kind: concept
+summary: 'A vision transformer (ViT) cuts an image into $P \times P$ patches, maps each linearly to a $D$-dimensional token, adds position embeddings and a class token, and runs a transformer encoder. A $224 \times 224$ image with $P = 16$ gives 196 patches. It needs large pretraining sets.'
+tags: [computer-vision, deep-learning, transformer, classification, worked-example]
+aliases: [ViT, ViT-B/16, ViT-L/16, patch embedding, class token, CLS token, DeiT, Swin Transformer]
+requires: [transformer, image-classification]
+related:
+  [
+    positional-encoding,
+    multi-head-attention,
+    convolutional-layer,
+    masked-image-modelling,
+    clip,
+    classic-cnn-architectures,
+  ]
+references: [dosovitskiy2021, vaswani2017, touvron2021, liu2021swin]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A vision transformer splits an image $\xvec \in \reals^{H \times W \times C}$ into $N = HW/P^2$ non-overlapping patches
+of $P \times P$ pixels. Each patch is flattened to a vector of length $P^2 C$ and mapped by a shared linear layer to a
+$D$-dimensional token. A learned class token is prepended, a learned position embedding is added to every token, and
+the $N + 1$ tokens pass through a transformer encoder. The class token's final state feeds a classification head
+<Cite id="dosovitskiy2021" />.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="transformer" /> processes a set of tokens, letting every token attend to every other. Text supplies
+tokens directly. An image does not: treating each pixel as a token gives $224^2 = 50{,}176$ tokens, and attention over
+all pairs would cost about $2.5 \times 10^9$ scores per layer. Grouping pixels into $16 \times 16$ patches cuts this to
+196 tokens, a short sentence. Each patch is a "visual word".
+
+A convolutional network builds in two assumptions: nearby pixels matter most, and the same feature detector applies at
+every position. A ViT keeps only the second, through the shared patch embedding. From the first layer onward, any patch
+can attend to any other, so the network must learn from data which patches relate. With enough data it learns local
+patterns in early layers and global ones later, and the lack of a built-in locality bias stops being a handicap.
+
+## Details
+
+### Patch embedding
+
+Let $\xvec_n \in \reals^{P^2 C}$ be the $n$-th patch, flattened. The patch embedding is
+
+$$
+\zvec_n^{(0)} = \Emat \xvec_n + \evec_n^{\text{pos}}, \qquad \Emat \in \reals^{D \times P^2 C},
+$$
+
+with a position embedding $\evec_n^{\text{pos}} \in \reals^D$ learned for each patch position. This is a convolution
+with $D$ output channels, kernel size $P$ and stride $P$. At output position $(i, j)$ such a convolution computes
+$\sum_{c, u, v} w_{d, c, u, v}\, x_{c,\, Pi + u,\, Pj + v}$, which reads exactly the pixels of patch $(i, j)$ once each.
+Reshaping the weights $w_{d, c, u, v}$ into row $d$ of $\Emat$ gives the same numbers. Implementations use the
+convolution.
+
+### Class token, position embeddings and encoder
+
+A learned vector $\zvec_0^{(0)} = \xvec_{\text{class}} \in \reals^D$ is prepended to the $N$ patch tokens, as BERT does
+for text. It is attached to no patch, so to produce a useful final state it must gather information from all of them
+through attention. The encoder is the standard pre-norm transformer: $L$ blocks, each of
+<NoteLink to="multi-head-attention" /> and a two-layer MLP, each with layer normalisation before it and a residual
+connection around it. The head is a linear layer on the class token's output, $\hat\yvec =
+\operatorname{softmax}(\Wmat\, \operatorname{LN}(\zvec_0^{(L)}))$. Averaging all patch outputs instead of using a class
+token works equally well.
+
+Self-attention treats its inputs as a set, so without position embeddings the model cannot tell a shuffled image from
+the original. ViT learns one embedding per patch index. Dosovitskiy et al. found that 2D-aware position embeddings
+gave no gain over 1D ones, and the learned 1D embeddings of neighbouring patches end up similar, recovering the grid
+<Cite id="dosovitskiy2021" />. Fine-tuning at a higher resolution with the same patch size produces more patches;
+the learned embeddings are interpolated in 2D to the new grid.
+
+### Cost
+
+Self-attention over $N + 1$ tokens costs $O(N^2 D)$ per layer and the MLP costs $O(N D^2)$. With
+$N = HW/P^2$, attention grows with the square of the pixel count: doubling the image side at fixed $P$ multiplies $N$ by
+4 and the attention cost by 16. Hierarchical variants such as the Swin Transformer restrict attention to local windows
+that shift between layers and merge patches as depth increases, which makes the cost linear in the image size and
+produces multi-scale feature maps for detection and segmentation <Cite id="liu2021swin" />.
+
+### Data requirements
+
+The standard configurations are ViT-B (12 layers, $D = 768$, 12 heads, 86 million parameters), ViT-L (24 layers,
+$D = 1024$, 16 heads, 307 million) and ViT-H (32 layers, $D = 1280$, 16 heads, 632 million), written with the patch size,
+as in ViT-B/16. Trained on ImageNet-1k alone (1.3 million images), ViT-L/16 was less accurate than comparable residual
+networks. Pretrained on ImageNet-21k (14 million images) it matched them, and pretrained on JFT-300M (300 million) it
+surpassed them: ViT-H/14 reached 88.55% top-1 accuracy on ImageNet after fine-tuning <Cite id="dosovitskiy2021" />.
+Built-in assumptions help when data is scarce and constrain the model when data is plentiful.
+
+The data requirement is partly a matter of training recipe. DeiT trained ViT-B on ImageNet-1k alone to 81.8% top-1
+with strong augmentation, regularisation and, optionally, distillation from a CNN teacher through an extra token
+<Cite id="touvron2021" />. Self-supervised pretraining such as <NoteLink to="masked-image-modelling" /> and
+image–text pretraining such as <NoteLink to="clip" /> are the other routes to the scale ViTs need.
+
+## Worked example
+
+Take ViT-B/16 on a $224 \times 224$ RGB image. The patch grid is $224/16 = 14$ on each side, so $N = 196$ patches,
+each a vector of $16 \cdot 16 \cdot 3 = 768$ numbers. With the class token the sequence has 197 tokens.
+
+The patch embedding has $768 \times 768$ weights and 768 biases, $590{,}592$ parameters. Each encoder block has
+$4D^2 + 4D = 2{,}362{,}368$ attention parameters (query, key, value and output projections), $2 \cdot 768 \cdot 3072 +
+3072 + 768 = 4{,}722{,}432$ MLP parameters and $3{,}072$ layer-normalisation parameters, $7{,}087{,}872$ in total. Twelve
+blocks hold $85.1$ million. The position embeddings add $197 \times 768 = 151{,}296$ and a 1000-class head adds
+$769{,}000$. The total is 86.6 million.
+
+The attention scores $\Qmat\Kmat^\top$ in one layer cost $197^2 \times 768 \approx 2.98 \times 10^7$ multiply-adds.
+Fine-tuning at $384 \times 384$ gives $24^2 = 576$ patches and 577 tokens, and the same product costs
+$2.56 \times 10^8$, 8.6 times as much for 2.9 times as many pixels.
+
+## Assumptions
+
+- A patch of $16 \times 16$ pixels is a meaningful unit. Fine detail within a patch is visible only through the linear
+  embedding, so small objects and dense prediction tasks favour smaller patches or hierarchical models.
+- Enough pretraining data or a strong training recipe is available to learn locality and translation behaviour that a
+  CNN gets for free.
+
+## Pitfalls
+
+- **Training from scratch on small data.** A ViT trained on a few thousand images underperforms a small CNN. Start
+  from pretrained weights.
+- **Changing resolution.** Position embeddings are tied to the patch grid. A new resolution needs interpolated
+  embeddings and usually a short fine-tuning run.
+- **Quadratic memory.** High-resolution inputs exhaust memory through the $N \times N$ attention matrices. Use windowed
+  attention, larger patches or memory-efficient attention kernels.
+- **Patch boundaries.** Non-overlapping patches split objects at arbitrary lines, and the model is not equivariant to
+  shifts smaller than $P$ pixels.

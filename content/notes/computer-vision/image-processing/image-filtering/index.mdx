@@ -1,0 +1,174 @@
+---
+title: Image filtering
+kind: concept
+summary: 'Linear image filtering replaces each pixel by a weighted sum of its neighbours, $g = h \ast f$, with the same kernel $h$ everywhere. Box and Gaussian kernels blur. A rank-one kernel $h = \avec \bvec^\top$ is separable: a row pass and a column pass cost $2k$ instead of $k^2$ per pixel.'
+tags: [computer-vision, image-processing, filters, worked-example]
+aliases: [linear filtering, 2D filtering, Gaussian blur, box filter, separable filter, unsharp masking, border handling]
+requires: [convolution]
+related:
+  [
+    convolutional-layer,
+    moving-average-and-smoothing-filters,
+    median-filter,
+    convolution-theorem,
+    singular-value-decomposition,
+  ]
+references: [szeliski2022, tomasi1998]
+status: draft
+updated: 2026-09-27
+---
+
+import { ImageFilterExplorer } from './ImageFilterExplorer'
+
+<Definition>
+A linear shift-invariant filter maps an image $f$ to an image $g$ by
+$g(r, c) = \sum_{u, v} h(u, v)\, f(r - u, c - v)$, a two-dimensional convolution $g = h \ast f$ with a kernel $h$ of
+size $k \times k$. The same weights are used at every pixel. Pixels outside the image are supplied by a border rule:
+zero, replicated edge, mirror or wrap.
+</Definition>
+
+## Intuition
+
+A filter asks each pixel to look at a small window around itself and report a weighted sum. Positive weights that sum
+to one average the window. Averaging suppresses noise and fine detail, so the image blurs. Weights that sum to zero
+cancel on flat regions and respond only where intensity changes, so they detect edges. One kernel, swept over the
+whole image, applies the same local rule everywhere.
+
+<ImageFilterExplorer />
+
+## Details
+
+### Convolution and correlation
+
+An image is a function $f(r, c)$ of row $r$ and column $c$, with $H$ rows and $W$ columns. The 2D convolution with a
+kernel $h$ indexed by offsets $u, v \in \set{-m, \dots, m}$, with $k = 2m + 1$, is
+
+$$
+(h \ast f)(r, c) = \sum_{u=-m}^{m} \sum_{v=-m}^{m} h(u, v)\, f(r - u, c - v).
+$$
+
+The cross-correlation $(h \star f)(r, c) = \sum_{u, v} h(u, v)\, f(r + u, c + v)$ uses the kernel unflipped.
+Correlation with $h$ equals convolution with the kernel rotated by 180 degrees, so the two coincide for symmetric
+kernels such as the box and the Gaussian. Image libraries and convolutional layers usually compute correlation. The
+distinction matters for antisymmetric kernels such as derivative filters, whose sign flips.
+
+A filter is linear, $h \ast (\alpha f_1 + \beta f_2) = \alpha\, h \ast f_1 + \beta\, h \ast f_2$, and shift-invariant:
+shifting $f$ shifts $g$ by the same amount. The response to a single bright pixel (an impulse) is the kernel itself,
+which is why $h$ is also called the point spread function. The 1D theory of <NoteLink to="convolution" /> carries over
+axis by axis.
+
+### Smoothing kernels
+
+- **Box filter.** $h(u, v) = 1/k^2$ on a $k \times k$ window. Each output is the window mean.
+- **Gaussian filter.** $h(u, v) \propto \exp\paren{-(u^2 + v^2)/(2\sigma^2)}$, sampled out to about $3\sigma$ and
+  normalised to sum to one. The width $\sigma$ is in pixels.
+- **Binomial filter.** The $3 \times 3$ kernel $\tfrac{1}{16}[1, 2, 1]^\top [1, 2, 1]$ is a cheap approximation of a
+  Gaussian with $\sigma \approx 0.7$.
+
+A smoothing kernel that sums to one preserves the mean intensity of a flat region. The Gaussian is preferred to the
+box because its frequency response is also a Gaussian and has no sidelobes. The box filter's response is a sinc, whose
+negative lobes pass some high frequencies with inverted sign and leave ringing near edges (see
+<NoteLink to="convolution-theorem" />).
+
+### Noise reduction
+
+Let the image be a clean image plus independent noise of variance $\sigma_n^2$ at each pixel. A filter output is a
+weighted sum of $k^2$ independent noise values, so its noise variance is
+
+$$
+\var\paren{\sum_{u, v} h(u, v)\, n(r - u, c - v)} = \sigma_n^2 \sum_{u, v} h(u, v)^2.
+$$
+
+For a box filter, $\sum h^2 = k^2 \cdot (1/k^2)^2 = 1/k^2$, so a $5 \times 5$ box cuts the noise variance by a factor
+of 25. For a Gaussian of width $\sigma$, the sum is close to the integral
+$\iint G_\sigma^2 = 1/(4\pi\sigma^2)$. At $\sigma = 1.5$ this is $0.035$, a 28-fold reduction. The same averaging
+also blurs edges by about $\sigma$ pixels, which is the trade-off every linear smoother makes.
+
+### Separable filters
+
+A kernel is separable when it is an outer product $h(u, v) = a(u)\, b(v)$, that is, a rank-one matrix
+$\Hmat = \avec \bvec^\top$. Substitute this into the correlation and move $a(u)$ out of the inner sum:
+
+$$
+g(r, c) = \sum_{u} \sum_{v} a(u)\, b(v)\, f(r + u, c + v) = \sum_{u} a(u) \underbrace{\sum_{v} b(v)\, f(r + u, c + v)}_{t(r + u,\, c)}.
+$$
+
+The inner sum $t$ is a 1D filter along each row with $\bvec$. The outer sum is a 1D filter along each column of $t$
+with $\avec$. A $k \times k$ filter then costs $2k$ multiply-adds per pixel instead of $k^2$. For $k = 11$ that is 22
+against 121.
+
+The Gaussian is separable because the exponential of a sum is a product:
+
+$$
+\exp\paren{-\frac{u^2 + v^2}{2\sigma^2}} = \exp\paren{-\frac{u^2}{2\sigma^2}} \exp\paren{-\frac{v^2}{2\sigma^2}}.
+$$
+
+The box filter is the outer product of two 1D box filters. A kernel that is not rank one can be written by the
+<NoteLink to="singular-value-decomposition" /> as $\Hmat = \sum_{i=1}^{\rho} s_i \uvec_i \vvec_i^\top$, a sum of
+$\rho = \rank \Hmat$ separable filters. Keeping the largest terms approximates it at cost $2\rho k$ per pixel
+<Cite id="szeliski2022" />.
+
+### Border handling
+
+A $k \times k$ window centred on a pixel within $m$ pixels of the border reaches outside the image. Common rules for the
+missing values are:
+
+- **Zero** (constant): treat outside pixels as 0. Darkens a frame of width $m$ around a bright image.
+- **Replicate** (clamp): repeat the nearest edge pixel.
+- **Reflect** (mirror): reflect the image about its edge, $\dots, f_1, f_0 \mid f_0, f_1, \dots$.
+- **Wrap** (circular): treat the image as periodic. Filtering with the discrete Fourier transform does this
+  implicitly, so opposite edges bleed into each other.
+
+Replicate and reflect keep a flat region flat up to the border. The alternative is to return only the
+$(H - k + 1) \times (W - k + 1)$ pixels whose window fits, as a convolutional layer with no padding does.
+
+### Sharpening and nonlinear filters
+
+Unsharp masking adds back the detail that a blur removes: $g = f + \alpha\,(f - G_\sigma \ast f)$ with gain
+$\alpha > 0$. It is linear, with kernel $(1 + \alpha)\delta - \alpha G_\sigma$, and overshoots on both sides of each
+edge, which the eye reads as crispness.
+
+Some useful filters are not linear. The <NoteLink to="median-filter" /> replaces each pixel by the median of its
+window and removes salt-and-pepper noise without blurring edges. The bilateral filter weights each neighbour by both
+its distance and its intensity difference from the centre pixel, so it smooths within regions but not across edges
+<Cite id="tomasi1998" />.
+
+## Worked example
+
+Take a $4 \times 4$ image with a vertical step edge, every row equal to $[0, 0, 10, 10]$, and the binomial kernel
+$\Hmat = \tfrac{1}{16}[1, 2, 1]^\top [1, 2, 1]$. Filter separably with replicated borders.
+
+The row pass with $\tfrac14[1, 2, 1]$ gives, left to right,
+
+$$
+\tfrac14(0 + 0 + 0) = 0, \quad \tfrac14(0 + 0 + 10) = 2.5, \quad \tfrac14(0 + 20 + 10) = 7.5, \quad
+\tfrac14(10 + 20 + 10) = 10.
+$$
+
+The first and last values use the replicated edge pixels 0 and 10. Every column is now constant, so the column pass
+changes nothing and each output row is $[0, 2.5, 7.5, 10]$. The sharp step has become a ramp two pixels wide.
+
+With zero padding the result changes near the border. The row pass gives $[0, 2.5, 7.5, 7.5]$, because the missing
+pixel right of the image counts as 0. The column pass then scales the top and bottom rows by $\tfrac14(2 + 1) = 0.75$,
+since one of their three vertical neighbours is missing. The corner pixel becomes $0.75 \times 7.5 = 5.625$ instead of
+10. This is the dark frame that zero padding draws around a bright image.
+
+## Assumptions
+
+- The pixel grid is regular and the same filter suits every location. Where noise or detail varies across the image,
+  an adaptive or edge-aware filter does better.
+- Noise is additive and independent between pixels for the variance calculation to hold. Correlated noise is reduced
+  less.
+
+## Pitfalls
+
+- **Correlation vs convolution.** Libraries differ in whether they flip the kernel. For a derivative kernel the output
+  changes sign.
+- **Unnormalised kernels.** A smoothing kernel that does not sum to one changes the image's brightness. A truncated
+  Gaussian must be renormalised after truncation.
+- **Truncating a Gaussian too early.** Cutting at $1\sigma$ leaves a box-like kernel with sidelobes. Use a radius of
+  at least $3\sigma$.
+- **Integer overflow.** Filtering 8-bit images in 8-bit arithmetic clips negative values and sums above 255. Filter in
+  floating point.
+- **Ignoring the border.** Statistics computed over the whole filtered image include a frame of width $m$ that the
+  border rule invented.

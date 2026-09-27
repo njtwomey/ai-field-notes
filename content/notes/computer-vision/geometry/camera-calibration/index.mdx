@@ -1,0 +1,156 @@
+---
+title: Camera calibration
+kind: concept
+summary: 'Camera calibration estimates a camera''s intrinsics $\Kmat$ and lens distortion. Zhang''s method photographs a planar pattern: each view gives a homography $\Hmat \sim \Kmat[\rvec_1\ \rvec_2\ \tvec]$ and two linear constraints on $\Bmat = \Kmat^{-\top}\Kmat^{-1}$, so three views fix $\Kmat$ before nonlinear refinement.'
+tags: [computer-vision, geometry, linear-algebra, worked-example]
+aliases:
+  [
+    intrinsic calibration,
+    Zhang's method,
+    checkerboard calibration,
+    image of the absolute conic,
+  ]
+requires: [pinhole-camera-model, homography, cholesky-decomposition]
+related: [structure-from-motion, epipolar-geometry-and-stereo]
+references: [zhang2000, tsai1987, hartley2004, szeliski2022]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Camera calibration estimates the parameters of a camera model from images of a target with known geometry. The
+intrinsic parameters are the matrix $\Kmat$ (focal lengths $f_x, f_y$, principal point $(c_x, c_y)$, skew $s$) and the
+lens distortion coefficients. The extrinsic parameters, a rotation and translation, place the target relative to the
+camera in each image. Estimation minimises the reprojection error: the distance in pixels between the detected target
+points and their projections under the model.
+</Definition>
+
+## Intuition
+
+A camera turns directions into pixels. Measuring anything metric from an image, such as the angle between two rays,
+the size of an object or the depth from a stereo pair, requires knowing that map. Calibration measures it by showing
+the camera points whose positions are known and comparing where they land with where the model says they should.
+
+A flat checkerboard is the usual target because its corners are easy to detect to a fraction of a pixel and its
+geometry is known exactly. Photographing it at several orientations provides enough independent constraints to fix
+the focal lengths and principal point. A board seen straight on tells little: its image changes the same way whether
+the camera has a long focal length or the board is far away. Tilted views break that ambiguity.
+
+## Details
+
+### One view of a plane gives two constraints
+
+Put the target in the plane $Z = 0$ of its own frame. A target point $(X, Y, 0)$ images at
+$\xvec \sim \Kmat\brack{\rvec_1\ \rvec_2\ \rvec_3 \mid \tvec}(X, Y, 0, 1)^\top$. The third rotation column multiplies
+zero and drops out, so the map from target to image is a homography (see <NoteLink to="homography" />):
+
+$$
+\Hmat = \brack{\hvec_1\ \hvec_2\ \hvec_3} = \lambda\, \Kmat \brack{\rvec_1\ \rvec_2\ \tvec}
+$$
+
+for some scale $\lambda \neq 0$. $\Hmat$ is estimated from the detected corners by the DLT. Solving for the rotation
+columns gives $\rvec_1 = \lambda^{-1}\Kmat^{-1}\hvec_1$ and $\rvec_2 = \lambda^{-1}\Kmat^{-1}\hvec_2$. The columns of a
+rotation matrix are orthonormal, so $\rvec_1^\top\rvec_2 = 0$ and $\rvec_1^\top\rvec_1 = \rvec_2^\top\rvec_2$.
+Substituting, and cancelling $\lambda^{-2}$:
+
+$$
+\hvec_1^\top \Bmat\, \hvec_2 = 0, \qquad \hvec_1^\top \Bmat\, \hvec_1 = \hvec_2^\top \Bmat\, \hvec_2, \qquad
+\Bmat = \Kmat^{-\top}\Kmat^{-1}.
+$$
+
+The unknown rotation and translation have been eliminated. What remains is two equations per view in the symmetric
+matrix $\Bmat$ alone <Cite id="zhang2000" />. $\Bmat$ is known in projective geometry as the image of the absolute
+conic <Cite id="hartley2004" />.
+
+### Solving linearly for the intrinsics
+
+$\Bmat$ is symmetric with six distinct entries, collected as $\bvec = (B_{11}, B_{12}, B_{22}, B_{13}, B_{23},
+B_{33})$. Each quadratic form $\hvec_i^\top\Bmat\hvec_j$ is linear in $\bvec$: $\hvec_i^\top\Bmat\hvec_j =
+\vvec_{ij}^\top\bvec$ with
+
+$$
+\vvec_{ij} = \paren{h_{i1}h_{j1},\ h_{i1}h_{j2} + h_{i2}h_{j1},\ h_{i2}h_{j2},\ h_{i3}h_{j1} + h_{i1}h_{j3},\
+h_{i3}h_{j2} + h_{i2}h_{j3},\ h_{i3}h_{j3}},
+$$
+
+where $h_{ik}$ is entry $k$ of column $\hvec_i$. Each view contributes the two rows $\vvec_{12}^\top$ and
+$(\vvec_{11} - \vvec_{22})^\top$. Stacking $n$ views gives $\Vmat\bvec = \zeros$ with $\Vmat \in \reals^{2n \times 6}$.
+$\bvec$ is defined up to scale, so it has 5 unknowns and needs $n \ge 3$ views in general position. If the skew is
+known to be zero, adding the row $(0, 1, 0, 0, 0, 0)$ lets 2 views suffice. The solution is the right singular vector
+of $\Vmat$ for the smallest singular value, as in the DLT.
+
+$\Kmat^{-1}$ is upper triangular, so $\Bmat = (\Kmat^{-1})^\top\Kmat^{-1}$ is its Cholesky factorisation up to scale.
+Flip the sign of $\bvec$ if needed to make $\Bmat$ positive definite, compute the Cholesky factor $\Bmat = \Lmat\Lmat^\top$
+with $\Lmat$ lower triangular, and take $\Kmat = (\Lmat^\top)^{-1}$ scaled so that $K_{33} = 1$ (see
+<NoteLink to="cholesky-decomposition" />). Zhang also gives the entries of $\Kmat$ in closed form.
+
+### Extrinsics
+
+With $\Kmat$ known, each view's pose follows from its homography: $\lambda = 1/\norm{\Kmat^{-1}\hvec_1}$,
+$\rvec_1 = \lambda\Kmat^{-1}\hvec_1$, $\rvec_2 = \lambda\Kmat^{-1}\hvec_2$, $\rvec_3 = \rvec_1 \times \rvec_2$ and
+$\tvec = \lambda\Kmat^{-1}\hvec_3$. With noise, the matrix $\brack{\rvec_1\ \rvec_2\ \rvec_3}$ is not exactly a
+rotation. The nearest rotation in the Frobenius norm is $\Umat\Vmat^\top$, from its SVD $\Umat\Sigmamat\Vmat^\top$.
+
+### Nonlinear refinement with distortion
+
+The linear solution minimises algebraic errors and ignores lens distortion. It initialises a maximum-likelihood
+refinement over all parameters: with $\mvec_{ij}$ the detected position of corner $j$ in image $i$ and $\Mmat_j$ its
+known position on the target, minimise
+
+$$
+\sum_{i=1}^{n} \sum_{j} \norm{\mvec_{ij} - \hat\mvec(\Kmat, k_1, k_2, \Rmat_i, \tvec_i, \Mmat_j)}^2
+$$
+
+by Levenberg–Marquardt, where $\hat\mvec$ projects with the full camera model including radial distortion
+$k_1, k_2$ (see <NoteLink to="pinhole-camera-model" />). The distortion coefficients start at zero. The root mean
+square reprojection error at the optimum measures the fit; a value well below one pixel is typical for a good lens and
+careful corner detection <Cite id="zhang2000" />.
+
+### Other targets and methods
+
+With a non-planar target of known 3D points, the full $3 \times 4$ camera matrix can be estimated directly from 6 or
+more points by a DLT, and split into $\Kmat$ and $\Rmat$ by an RQ decomposition of its left $3 \times 3$ block
+<Cite id="hartley2004" />. Tsai's method used a planar or non-planar target with a separate model for radial
+distortion and was the photogrammetric standard before Zhang's <Cite id="tsai1987" />. Self-calibration recovers
+$\Kmat$ from the constraints between views of an unknown scene, without any target.
+
+## Worked example
+
+**Why tilted views are needed.** Let the board face the camera squarely at distance $d$: $\Rmat = \I$ and
+$\tvec = (0, 0, d)$. With $\Kmat$ of zero skew,
+
+$$
+\Hmat = \Kmat\brack{\evec_1\ \evec_2\ \tvec} = \begin{bmatrix} f_x & 0 & c_x d \\ 0 & f_y & c_y d \\ 0 & 0 & d
+\end{bmatrix}.
+$$
+
+So $\hvec_1 = (f_x, 0, 0)$ and $\hvec_2 = (0, f_y, 0)$, and the two constraints read $f_xf_y B_{12} = 0$ and
+$f_x^2 B_{11} = f_y^2 B_{22}$. They fix $B_{12} = 0$ and the ratio $B_{11}/B_{22}$: the skew and the aspect ratio
+$f_x/f_y$. They do not involve $B_{13}$, $B_{23}$ or $B_{33}$, so they say nothing about the size of the focal length or
+the principal point. Moving the board away while lengthening the focal length changes its image identically.
+
+**Recovering $\Kmat$ from three views.** A simulated camera has $f_x = f_y = 800$ pixels and principal point
+$(320, 240)$. It views a $7 \times 9$ grid of corners with 3 cm spacing from 0.6 to 0.7 m, tilted by 10 to 30 degrees
+about different axes in three views. Estimating each homography, stacking the six rows into $\Vmat$ and factorising
+recovers $\Kmat$ exactly from noiseless corners. Adding Gaussian noise of 0.2 pixels to every corner gives
+$f_x = 806$, $f_y = 808$ and principal point $(315, 239)$: errors of about 1% in focal length and 5 pixels in the
+principal point. More views and the nonlinear refinement reduce them.
+
+## Assumptions
+
+- The target is flat and its corner positions are known exactly. A warped printout or a board that bends violates
+  this and biases every parameter.
+- The camera's intrinsics do not change during calibration: fixed focus, fixed zoom and no image stabilisation.
+- The distortion model has enough terms for the lens. Wide-angle and fisheye lenses need higher-order or different
+  models.
+
+## Pitfalls
+
+- **Degenerate views.** Views that differ only by translating the board, or boards that are all parallel, add no new
+  constraints on $\Bmat$. Tilt the board by different amounts about different axes.
+- **Uncovered image regions.** Distortion is largest near the edges and corners of the image. If the target never
+  appears there, the distortion estimate is extrapolated and wrong.
+- **Low reprojection error is not accuracy.** A model can fit the calibration images well and still be wrong where
+  there were no points, or be biased by a warped target. Check on held-out images.
+- **Resolution changes.** Calibrating at one resolution and using another requires scaling $\Kmat$. Cropping shifts the
+  principal point.

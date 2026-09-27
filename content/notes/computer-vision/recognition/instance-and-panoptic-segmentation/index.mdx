@@ -1,0 +1,148 @@
+---
+title: Instance and panoptic segmentation
+kind: concept
+summary: 'Instance segmentation gives each detected object its own mask; Mask R-CNN adds a mask head and RoIAlign to Faster R-CNN. Panoptic segmentation labels every pixel with a class and, for countable things, an instance id. Mask2Former handles every variant with mask queries.'
+tags: [computer-vision, deep-learning, worked-example]
+aliases:
+  [
+    instance segmentation,
+    panoptic segmentation,
+    Mask R-CNN,
+    RoIAlign,
+    RoI Align,
+    things and stuff,
+    Panoptic FPN,
+    Mask2Former,
+    Segment Anything,
+  ]
+requires: [object-detection, semantic-segmentation]
+related: [panoptic-quality, mean-average-precision-for-detection, dice-and-segmentation-overlap]
+references: [he2017, kirillov2019, kirillov2019fpn, cheng2022, kirillov2023, lin2014]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Instance segmentation** outputs, for every object of a set of countable classes, a class label, a score and a binary
+mask of the pixels that belong to that object. **Panoptic segmentation** assigns every pixel a pair $(c, i)$: a class
+$c$ and an instance id $i$. Countable classes ("things", such as people and cars) get a separate id per object;
+amorphous classes ("stuff", such as sky, road and grass) get a single id. Each pixel has exactly one label, so segments
+do not overlap <Cite id="kirillov2019" />.
+</Definition>
+
+## Intuition
+
+<NoteLink to="semantic-segmentation" /> says which pixels are "person" but not how many people there are or which
+pixel belongs to whom. <NoteLink to="object-detection" /> separates the people but gives only boxes. Instance
+segmentation combines the two: a detector finds each object, and a second step marks the object's exact pixels inside
+its box.
+
+Instance segmentation still ignores the background, and its masks can overlap. Panoptic segmentation asks for one
+consistent description of the whole scene: every pixel labelled, sky and road included, with countable objects
+separated. It unifies what had been two tasks with different outputs and metrics.
+
+## Details
+
+### Mask R-CNN
+
+Mask R-CNN extends Faster R-CNN with a third head that runs in parallel with the classification and box heads on each
+region of interest <Cite id="he2017" />. The mask head is a small fully convolutional network that outputs $K$ masks of
+$m \times m$ values ($m = 28$), one per class, each passed through a per-pixel sigmoid. The training loss for each
+region is
+
+$$
+\mathcal{L} = \mathcal{L}_{\text{cls}} + \mathcal{L}_{\text{box}} + \mathcal{L}_{\text{mask}},
+$$
+
+where $\mathcal{L}_{\text{mask}}$ is the mean binary cross-entropy over the $m^2$ pixels of the mask for the region's
+ground-truth class only. The other $K - 1$ masks receive no gradient. Mask prediction is thereby decoupled from
+classification: the mask head decides "object or not" for a class the classifier has already chosen, rather than
+making classes compete at each pixel. Replacing the per-class sigmoid with a softmax over classes at each pixel cost 5.5
+points of mask AP <Cite id="he2017" />. At test time the $m \times m$ mask of the predicted class is resized to the box
+and thresholded at 0.5.
+
+### RoIAlign
+
+The mask must line up with the image to within a pixel. Fast R-CNN's RoI pooling does not. It maps a region's box to
+feature-map coordinates by dividing by the stride and rounding, then divides the region into bins and rounds each bin
+boundary again. With a stride of 16, a rounding of half a feature cell moves the region by 8 pixels.
+
+RoIAlign removes all rounding. It keeps the region's real-valued coordinates, divides it into $7 \times 7$ bins (or
+$14 \times 14$ for the mask head), samples a few regularly spaced points in each bin, typically four, and averages or
+max-pools them. The value at a real-valued point $(x, y)$ comes from the four surrounding feature cells by bilinear
+interpolation. With $x_0 = \lfloor x \rfloor$, $y_0 = \lfloor y \rfloor$, $a = x - x_0$ and $b = y - y_0$,
+
+$$
+F(x, y) = (1 - a)(1 - b) F_{x_0, y_0} + a(1 - b) F_{x_0 + 1, y_0} + (1 - a) b F_{x_0, y_0 + 1} + ab F_{x_0 + 1, y_0 + 1}.
+$$
+
+This is the unique function of the form $\alpha + \beta x + \gamma y + \delta xy$ that matches the four corner values.
+It is differentiable in the feature values, so gradients reach the backbone. RoIAlign improved mask AP by 10% to 50%
+relative to RoI pooling, with larger gains at stricter IoU thresholds <Cite id="he2017" />.
+
+### Panoptic segmentation
+
+A panoptic output is a map from pixels to $(c, i)$ pairs with no overlaps and no unlabelled pixels, except those marked
+void. Its quality is measured by panoptic quality, which matches predicted and true segments with IoU above 0.5 and
+multiplies the mean IoU of matched segments by an F1-like recognition score (see
+<NoteLink to="panoptic-quality" />).
+
+The first panoptic systems ran separate semantic and instance models and merged their outputs with a heuristic:
+<Cite id="kirillov2019" />
+
+1. Sort instance masks by confidence and paste them in that order, so each pixel keeps the most confident mask that
+   claims it. Drop masks that lose most of their pixels.
+2. Fill the remaining pixels with the stuff classes of the semantic prediction. Drop stuff regions below an area
+   threshold.
+
+Panoptic FPN shares one feature pyramid backbone between a Mask R-CNN branch for things and a light semantic branch
+for stuff, so one network with one backbone produces both outputs <Cite id="kirillov2019fpn" />.
+
+### Mask classification: one architecture for every task
+
+Semantic segmentation classifies each pixel. Mask R-CNN detects boxes and then classifies pixels inside them. Mask
+classification replaces both with a set prediction: $N$ learned queries each output a class, including "no object",
+and a mask over the whole image. Training matches queries to ground-truth segments one to one, as DETR does for boxes.
+Semantic, instance and panoptic segmentation differ only in what counts as a segment. Mask2Former restricts each
+query's cross-attention to the pixels of its current predicted mask, which speeds convergence, and set the state of the
+art on all three tasks with one architecture <Cite id="cheng2022" />.
+
+Promptable models go further. The Segment Anything Model returns masks for any object indicated by a point, box or
+rough mask, with no class labels. It was trained on over one billion masks <Cite id="kirillov2023" />.
+
+## Worked example
+
+**RoI pooling vs RoIAlign.** A region spans $x \in [37, 181]$ pixels on a feature map of stride 16. In feature
+coordinates this is $[37/16, 181/16] = [2.3125, 11.3125]$. RoI pooling rounds to $[2, 11]$: the left edge moves by
+$0.3125$ cells, or 5 pixels. Splitting 9 cells into 7 bins then rounds each bin boundary as well. RoIAlign keeps
+$[2.3125, 11.3125]$ and uses bins $9/7 = 1.286$ cells wide.
+
+Suppose one sampling point falls at $(x, y) = (2.5, 3.25)$ and the four surrounding feature values are
+$F_{2,3} = 1$, $F_{3,3} = 2$, $F_{2,4} = 3$ and $F_{3,4} = 5$. Then $a = 0.5$ and $b = 0.25$, so
+
+$$
+F(2.5, 3.25) = 0.375 \cdot 1 + 0.375 \cdot 2 + 0.125 \cdot 3 + 0.125 \cdot 5 = 2.125.
+$$
+
+RoI pooling would read one of the four cells and ignore the fractional position.
+
+**Merging into a panoptic map.** An instance model outputs two person masks with scores 0.9 and 0.6 that share 200
+pixels. The first mask is pasted first and keeps those 200 pixels; the second keeps the rest of its pixels. If more
+than half of the second mask was taken, it is dropped. Pixels claimed by no mask take the semantic model's stuff label,
+such as "grass".
+
+## Assumptions
+
+- Things are countable and have well-defined extents; stuff is amorphous. Some classes, such as trees in a forest, sit
+  between the two, and datasets make an arbitrary choice.
+- The box proposal contains the whole object. A mask head on a box that cuts off part of the object cannot recover the
+  missing part.
+
+## Pitfalls
+
+- **Low mask resolution.** A $28 \times 28$ mask upsampled to a large box gives smooth, imprecise boundaries. Refinement
+  heads or higher-resolution mask features help on large objects.
+- **Overlapping instance masks.** Instance segmentation evaluation with mask AP tolerates overlaps. Converting to a
+  panoptic map requires resolving them, and the resolution rule changes the score.
+- **Evaluating with the wrong metric.** Mask AP ignores stuff, and mean IoU ignores instance identity. Panoptic
+  quality scores both, but weights a small object the same as a large one.

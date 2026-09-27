@@ -1,0 +1,210 @@
+---
+title: Homography
+kind: concept
+summary: 'A homography is an invertible $3 \times 3$ matrix $\Hmat$ mapping image points $\xvec \mapsto \xvec'' \sim \Hmat\xvec$ in homogeneous coordinates. It relates two views of a plane or two views from a rotating camera, has 8 degrees of freedom, and is estimated from 4 or more matches by the DLT and SVD, made robust by RANSAC.'
+tags: [computer-vision, geometry, linear-algebra, worked-example]
+aliases:
+  [
+    projective transformation,
+    planar homography,
+    perspective transform,
+    direct linear transform,
+    DLT,
+    RANSAC,
+    random sample consensus,
+    image stitching,
+    Hartley normalisation,
+  ]
+requires: [pinhole-camera-model, singular-value-decomposition]
+related: [feature-detection-and-descriptors, camera-calibration, epipolar-geometry-and-stereo, structure-from-motion]
+references: [hartley2004, fischler1981, hartley1997, szeliski2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { HomographyExplorer } from './HomographyExplorer'
+import { RansacIterations } from './RansacIterations'
+
+<Definition>
+A homography, or projective transformation of the plane, maps a point with homogeneous coordinates
+$\xvec = (x, y, 1)^\top$ to $\xvec' \sim \Hmat\xvec$, where $\Hmat$ is an invertible $3 \times 3$ matrix and $\sim$
+means equal up to a nonzero scale. In pixel coordinates,
+$x' = (h_{11}x + h_{12}y + h_{13}) / (h_{31}x + h_{32}y + h_{33})$ and likewise for $y'$ with the second row. $\Hmat$
+and $c\Hmat$ define the same map, so a homography has 8 degrees of freedom <Cite id="hartley2004" />.
+</Definition>
+
+## Intuition
+
+Photograph a flat poster from two different places. Each pixel of the first photograph shows one point of the poster,
+and that point appears at some pixel of the second. The correspondence is a homography. Straight lines stay straight,
+but lengths, angles and parallelism are not kept: the rectangle of the poster becomes a general quadrilateral, and its
+parallel edges converge to a vanishing point. Four corners fix the whole map.
+
+The same map relates two photographs taken from one position with the camera turned. That is why panorama stitching
+works for any scene, flat or not, as long as the camera rotates about its centre.
+
+<HomographyExplorer />
+
+## Details
+
+### Where homographies come from
+
+**A plane seen by a camera.** Choose world coordinates so that the plane is $Z = 0$. With the camera matrix
+$\Pmat = \Kmat\brack{\rvec_1\ \rvec_2\ \rvec_3 \mid \tvec}$, where $\rvec_i$ are the columns of $\Rmat$, a point
+$(X, Y, 0)$ on the plane projects to
+
+$$
+\xvec \sim \Kmat \brack{\rvec_1\ \rvec_2\ \rvec_3 \mid \tvec} \begin{bmatrix} X \\ Y \\ 0 \\ 1 \end{bmatrix} =
+\Kmat \brack{\rvec_1\ \rvec_2\ \tvec} \begin{bmatrix} X \\ Y \\ 1 \end{bmatrix}.
+$$
+
+The zero coordinate removes the third column, so plane-to-image is the $3 \times 3$ matrix
+$\Hmat = \Kmat\brack{\rvec_1\ \rvec_2\ \tvec}$. Two cameras viewing the plane give $\xvec_1 \sim \Hmat_1 \pvec$ and
+$\xvec_2 \sim \Hmat_2 \pvec$ for plane coordinates $\pvec$, so $\xvec_2 \sim \Hmat_2 \Hmat_1^{-1} \xvec_1$.
+
+**A rotating camera.** Let a camera with intrinsics $\Kmat$ rotate by $\Rmat$ about its centre. A point with camera
+coordinates $\Xmat$ images at $\xvec_1 \sim \Kmat\Xmat$ before and $\xvec_2 \sim \Kmat\Rmat\Xmat$ after. Eliminating
+$\Xmat = \Kmat^{-1}\xvec_1$ up to scale gives $\xvec_2 \sim \Kmat\Rmat\Kmat^{-1}\xvec_1$. The depth of the point has
+cancelled, so the map holds for every point in the scene.
+
+If the camera both moves and the scene is not planar, points at different depths shift by different amounts
+(parallax), and no single homography relates the views. The relation is then the epipolar constraint (see
+<NoteLink to="epipolar-geometry-and-stereo" />).
+
+### Special cases
+
+Homographies contain a hierarchy of simpler maps. With $h_{31} = h_{32} = 0$ the denominator is constant and the map is
+affine (6 degrees of freedom): parallel lines stay parallel. Restricting the upper-left block to a scaled rotation
+gives a similarity (4), and to a rotation a Euclidean motion (3). The bottom row $(h_{31}, h_{32})$ carries the
+perspective effect: the line $h_{31}x + h_{32}y + h_{33} = 0$ maps to infinity, and the images of parallel lines meet
+on the image of the line at infinity. The vanishing point of lines with direction $(d_x, d_y)$ is
+$\Hmat(d_x, d_y, 0)^\top$.
+
+### Direct linear transform
+
+Given $n \ge 4$ correspondences $\xvec_i \leftrightarrow \xvec'_i$, find $\Hmat$. The relation $\xvec' \sim \Hmat\xvec$
+holds up to scale, so it is not a linear equation as written. Two vectors are parallel exactly when their cross product
+is zero, so it is equivalent to
+
+$$
+\xvec'_i \times \Hmat\xvec_i = \zeros.
+$$
+
+Write $\hvec_j^\top$ for row $j$ of $\Hmat$, so $\Hmat\xvec_i = (\hvec_1^\top\xvec_i, \hvec_2^\top\xvec_i,
+\hvec_3^\top\xvec_i)$, and $\xvec'_i = (u_i, v_i, 1)$. The cross product is
+
+$$
+\begin{bmatrix}
+v_i\, \hvec_3^\top\xvec_i - \hvec_2^\top\xvec_i \\
+\hvec_1^\top\xvec_i - u_i\, \hvec_3^\top\xvec_i \\
+u_i\, \hvec_2^\top\xvec_i - v_i\, \hvec_1^\top\xvec_i
+\end{bmatrix} = \zeros.
+$$
+
+The third row equals $-u_i$ times the first minus $v_i$ times the second, so only two rows are independent. Each is
+linear in the nine unknowns $\hvec = (\hvec_1, \hvec_2, \hvec_3) \in \reals^9$:
+
+$$
+\begin{bmatrix}
+\zeros^\top & -\xvec_i^\top & v_i\,\xvec_i^\top \\
+\xvec_i^\top & \zeros^\top & -u_i\,\xvec_i^\top
+\end{bmatrix} \hvec = \zeros.
+$$
+
+Stacking all $n$ correspondences gives $\Amat\hvec = \zeros$ with $\Amat \in \reals^{2n \times 9}$. Four points in
+general position, no three collinear, give 8 independent equations and determine $\hvec$ up to scale.
+
+With more points and noise, $\Amat\hvec = \zeros$ has no exact solution other than zero. Fix the scale by
+$\norm{\hvec} = 1$ and minimise $\norm{\Amat\hvec}$. Take the <NoteLink to="singular-value-decomposition" />
+$\Amat = \Umat\Sigmamat\Vmat^\top$ with singular values $\sigma_1 \ge \dots \ge \sigma_9 \ge 0$. Since $\Umat$ has
+orthonormal columns and $\Vmat$ is orthogonal, substituting $\yvec = \Vmat^\top\hvec$ gives
+
+$$
+\norm{\Amat\hvec}^2 = \norm{\Sigmamat \Vmat^\top\hvec}^2 = \sum_{k=1}^{9} \sigma_k^2 y_k^2, \qquad
+\norm{\yvec} = \norm{\hvec} = 1.
+$$
+
+A weighted sum of $y_k^2$ with weights summing to one is smallest when all the weight is on the smallest $\sigma_k^2$.
+So $\yvec = \evec_9$ and $\hvec = \Vmat\evec_9 = \vvec_9$, the right singular vector for the smallest singular value.
+The minimum is $\sigma_9^2$, which is zero for exact data.
+
+### Normalisation
+
+Pixel coordinates are of order $10^2$ to $10^3$. The rows of $\Amat$ then mix entries of 1, of order $10^3$ and, in
+the products $u_i x_i$, of order $10^6$, and the solution is badly conditioned. Hartley showed that normalising first
+is essential <Cite id="hartley1997" />: translate each image's points so that their centroid is at the origin, and
+scale them so that their mean distance from it is $\sqrt{2}$. With these similarity transforms $\Tmat$ and $\Tmat'$,
+solve for $\tilde\Hmat$ from $\tilde\xvec_i = \Tmat\xvec_i$ and $\tilde\xvec'_i = \Tmat'\xvec'_i$, then undo it:
+$\Hmat = \Tmat'^{-1}\tilde\Hmat\Tmat$.
+
+The DLT minimises an algebraic error with no geometric meaning. The estimate is usually refined by minimising the
+reprojection error $\sum_i d(\xvec'_i, \Hmat\xvec_i)^2$ in pixels, a nonlinear least-squares problem started from the
+DLT solution.
+
+### RANSAC
+
+Correspondences from <NoteLink to="feature-detection-and-descriptors">feature matching</NoteLink> contain outliers,
+often a large fraction. One wrong match with an error of hundreds of pixels ruins a least-squares fit. Random sample
+consensus (RANSAC) fits the model to many small random subsets and keeps the one most of the data agrees with
+<Cite id="fischler1981" />:
+
+1. Draw a minimal sample of $s$ correspondences at random: $s = 4$ for a homography.
+2. Fit the model to the sample by the DLT.
+3. Count the inliers: correspondences whose reprojection error is below a threshold $\epsilon$, such as 3 pixels.
+4. Repeat $N$ times and keep the model with the most inliers. Refit it to all its inliers.
+
+The number of samples follows from asking for at least one sample free of outliers. Let a fraction $w$ of the
+correspondences be inliers. A sample of $s$ points drawn independently is all inliers with probability $w^s$ and
+contains an outlier with probability $1 - w^s$. All $N$ independent samples contain an outlier with probability
+$(1 - w^s)^N$. To make that failure probability at most $1 - p$:
+
+$$
+(1 - w^s)^N \le 1 - p \quad \Longleftrightarrow \quad N \ge \frac{\log(1 - p)}{\log(1 - w^s)}.
+$$
+
+The direction of the inequality flips because both logarithms are negative. $N$ does not depend on the number of
+correspondences, only on the inlier ratio and the sample size. The inlier ratio is usually unknown; adaptive RANSAC
+starts with a pessimistic $w$ and lowers $N$ each time a model with more inliers is found.
+
+<RansacIterations />
+
+## Worked example
+
+**A perspective homography.** Map the unit square with corners $(0, 0), (1, 0), (1, 1), (0, 1)$ to the trapezoid
+$(0, 0), (1, 0), (0.75, 0.75), (0.25, 0.75)$, a square floor tile seen from above and in front. Solving the DLT gives,
+scaled so that $h_{33} = 1$,
+
+$$
+\Hmat = \begin{bmatrix} 1 & 0.5 & 0 \\ 0 & 1.5 & 0 \\ 0 & 1 & 1 \end{bmatrix}.
+$$
+
+Check one corner: $\Hmat(1, 1, 1)^\top = (1.5, 1.5, 2)^\top \sim (0.75, 0.75)$. The square's centre maps to
+$\Hmat(0.5, 0.5, 1)^\top = (0.75, 0.75, 1.5)^\top \sim (0.5, 0.5)$. The trapezoid is 0.75 high, so the centre lands
+two thirds of the way up, not halfway: the far half of the tile is foreshortened. The vertical edges have direction
+$(0, 1, 0)$ and vanish at $\Hmat(0, 1, 0)^\top = (0.5, 1.5, 1)^\top \sim (0.5, 1.5)$. The horizontal edges have
+direction $(1, 0, 0)$, which maps to $(1, 0, 0)$, a point at infinity, so they stay parallel.
+
+**RANSAC iterations.** With half the matches correct, $w = 0.5$, and success probability $p = 0.99$, a homography needs
+
+$$
+N = \frac{\log 0.01}{\log(1 - 0.5^4)} = \frac{-4.605}{-0.0645} = 71.4,
+$$
+
+so 72 samples. A fundamental matrix from 8 points needs $\log 0.01 / \log(1 - 0.5^8) = 1177$ samples at the same $w$.
+
+## Assumptions
+
+- The scene is planar, or the camera only rotates about its centre. Otherwise a homography holds only approximately,
+  for distant scenes where parallax is small.
+- Lens distortion has been removed. A distorted image does not map straight lines to straight lines.
+- Inliers have small, roughly isotropic errors, so one pixel threshold separates them from outliers.
+
+## Pitfalls
+
+- **Unnormalised DLT.** Solving in raw pixel coordinates gives visibly worse homographies for the same data.
+- **Degenerate samples.** Three collinear points in a minimal sample leave $\Amat$ with rank below 8. Reject such
+  samples before fitting.
+- **Threshold choice.** A threshold $\epsilon$ that is too small rejects good matches; one that is too large accepts
+  outliers and biases the fit. Set it from the expected localisation error of the features.
+- **Too few iterations.** $N$ grows very fast as $w$ falls. With $w = 0.2$ and $s = 4$, $p = 0.99$ needs 2876 samples.
+  Filter matches with the ratio test before RANSAC.

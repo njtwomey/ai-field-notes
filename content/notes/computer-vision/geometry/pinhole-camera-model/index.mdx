@@ -1,0 +1,185 @@
+---
+title: Pinhole camera model
+kind: concept
+summary: 'The pinhole camera projects a 3D point $\Xmat$ to the pixel $\xvec \sim \Kmat[\Rmat \mid \tvec]\Xmat$ in homogeneous coordinates. The rotation $\Rmat$ and translation $\tvec$ place the camera in the world; the intrinsic matrix $\Kmat$ holds the focal lengths and principal point. Lens distortion is modelled separately.'
+tags: [computer-vision, geometry, linear-algebra, worked-example]
+aliases:
+  [
+    camera model,
+    perspective projection,
+    camera projection matrix,
+    camera matrix,
+    intrinsic matrix,
+    camera intrinsics,
+    camera extrinsics,
+    homogeneous coordinates,
+    lens distortion,
+    radial distortion,
+    vanishing point,
+  ]
+requires: [matrix-multiplication]
+related: [homography, camera-calibration, epipolar-geometry-and-stereo, structure-from-motion]
+references: [hartley2004, szeliski2022, tsai1987]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A pinhole camera maps a point $\Xmat = (X, Y, Z)$ in world coordinates to a pixel $(u, v)$ by
+$\lambda\, (u, v, 1)^\top = \Pmat\, (X, Y, Z, 1)^\top$ with $\Pmat = \Kmat \brack{\Rmat \mid \tvec}$, a $3 \times 4$
+camera matrix. The rotation $\Rmat$ and translation $\tvec$ (extrinsics) move the point into camera coordinates. The
+upper-triangular $\Kmat$ (intrinsics) holds the focal lengths $f_x, f_y$ in pixels, the principal point $(c_x, c_y)$
+and a skew $s$. The scalar $\lambda$ is the point's depth.
+</Definition>
+
+## Intuition
+
+Light from a scene passes through a single point, the pinhole or centre of projection, and lands on an image plane
+behind it. Each image point receives light from exactly one direction, so the image records directions, not
+distances. Every point along one ray through the centre lands on the same pixel. Far objects look small because the
+same physical size subtends a smaller angle.
+
+A real camera has a lens rather than a pinhole, but for a focused lens the geometry is the same, up to distortion. The
+model separates what belongs to the camera (focal length, sensor layout) from where the camera is (its position and
+orientation).
+
+## Details
+
+### Projection by similar triangles
+
+Put the centre of projection at the origin, looking along the $Z$ axis, with an image plane at distance $f$ in front of
+it (a mirror image of the physical plane behind the pinhole, which avoids an inverted picture). A point $(X, Y, Z)$ with
+$Z > 0$ and its image $(x, y)$ on the plane lie on the same ray through the origin. The triangles formed with the $Z$
+axis are similar, so
+
+$$
+\frac{x}{f} = \frac{X}{Z}, \qquad \frac{y}{f} = \frac{Y}{Z} \quad \Longrightarrow \quad x = f\frac{X}{Z}, \quad
+y = f\frac{Y}{Z}.
+$$
+
+Division by $Z$ makes projection nonlinear. Doubling the distance halves the image size.
+
+### Homogeneous coordinates
+
+Represent an image point $(x, y)$ by any vector $(wx, wy, w)$ with $w \neq 0$, and a 3D point by $(X, Y, Z, 1)$.
+Vectors that differ by a nonzero factor represent the same point; write $\avec \sim \bvec$ for this. Projection then
+becomes linear:
+
+$$
+\begin{bmatrix} fX \\ fY \\ Z \end{bmatrix} =
+\begin{bmatrix} f & 0 & 0 & 0 \\ 0 & f & 0 & 0 \\ 0 & 0 & 1 & 0 \end{bmatrix}
+\begin{bmatrix} X \\ Y \\ Z \\ 1 \end{bmatrix} \sim \begin{bmatrix} fX/Z \\ fY/Z \\ 1 \end{bmatrix}.
+$$
+
+Dividing by the third coordinate recovers the image point. The division is postponed to the end, so chains of
+projections, rotations and translations compose as matrix products <Cite id="hartley2004" />.
+
+### Intrinsics
+
+Pixels are indexed from a corner, not from the point where the optical axis meets the sensor, and pixels need not be
+square. Let the sensor have $m_x$ pixels per unit length horizontally and $m_y$ vertically, and let the optical axis hit
+pixel $(c_x, c_y)$, the principal point. Then $u = m_x x + c_x$ and $v = m_y y + c_y$. Folding these into the projection
+gives
+
+$$
+\Kmat = \begin{bmatrix} f_x & s & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{bmatrix}, \qquad f_x = f m_x, \quad
+f_y = f m_y,
+$$
+
+and $\lambda (u, v, 1)^\top = \Kmat\, (X_c, Y_c, Z_c)^\top$ for a point in camera coordinates, with $\lambda = Z_c$. The
+focal lengths are in pixels. The skew $s$ is zero for modern sensors. $\Kmat$ has five parameters.
+
+The horizontal field of view $\theta$ of an image $W$ pixels wide with the principal point at its centre satisfies
+$\tan(\theta/2) = (W/2)/f_x$. A longer focal length gives a narrower view.
+
+### Extrinsics and the camera matrix
+
+World points are expressed in a frame of their own. A rotation $\Rmat$ (orthogonal, $\det \Rmat = 1$) and translation
+$\tvec$ take world coordinates to camera coordinates, $\Xmat_c = \Rmat \Xmat + \tvec$. Combining with the intrinsics:
+
+$$
+\lambda \begin{bmatrix} u \\ v \\ 1 \end{bmatrix} = \Kmat \brack{\Rmat \mid \tvec}
+\begin{bmatrix} \Xmat \\ 1 \end{bmatrix} = \Pmat \begin{bmatrix} \Xmat \\ 1 \end{bmatrix}.
+$$
+
+$\Pmat$ has 12 entries but is defined only up to scale, so it has 11 degrees of freedom: 5 intrinsic and 6 extrinsic (3
+for rotation, 3 for translation).
+
+The camera centre $\cvec$ in world coordinates is the point that maps to the origin of the camera frame:
+$\Rmat\cvec + \tvec = \zeros$, so $\cvec = -\Rmat^\top \tvec$. Then $\Pmat (\cvec, 1)^\top = \Kmat(\Rmat\cvec + \tvec) =
+\zeros$: the centre is the null vector of $\Pmat$, the one point with no image.
+
+### Back-projection and depth
+
+Inverting the projection gives a ray, not a point. The pixel $(u, v)$ is the image of every point
+
+$$
+\Xmat(\lambda) = \cvec + \lambda\, \Rmat^\top \Kmat^{-1} (u, v, 1)^\top, \qquad \lambda > 0.
+$$
+
+Recovering $\lambda$ needs more information: a second view (see <NoteLink to="epipolar-geometry-and-stereo" />), a
+known plane (see <NoteLink to="homography" />), or a known object size.
+
+### Vanishing points
+
+Parallel lines in 3D meet in the image. Take a line $\Xmat(\mu) = \avec + \mu \dvec$ with direction $\dvec$. Its image
+is $\Kmat(\Rmat\avec + \tvec + \mu\Rmat\dvec)$ in homogeneous coordinates. Divide by $\mu$ and let $\mu \to \infty$: the
+image tends to $\Kmat \Rmat \dvec$. The limit does not depend on $\avec$, so every line with direction $\dvec$ converges
+to the same vanishing point $\vvec \sim \Kmat\Rmat\dvec$. Lines parallel to the image plane have $(\Rmat\dvec)_3 = 0$,
+so their vanishing point is at infinity and they stay parallel in the image.
+
+### Lens distortion
+
+Real lenses bend rays so that straight lines image as curves, most visibly near the edges of wide-angle images. The
+standard model acts on normalised coordinates $(x_n, y_n) = (X_c/Z_c, Y_c/Z_c)$ before $\Kmat$ is applied. With
+$r^2 = x_n^2 + y_n^2$,
+
+$$
+x_d = x_n (1 + k_1 r^2 + k_2 r^4 + k_3 r^6) + 2p_1 x_n y_n + p_2 (r^2 + 2x_n^2),
+$$
+
+and symmetrically for $y_d$ with the roles of $p_1$ and $p_2$ exchanged. The $k_i$ model radial distortion: $k_1 < 0$
+pulls points inwards (barrel) and $k_1 > 0$ pushes them outwards (pincushion). The $p_i$ model tangential distortion
+from a lens not parallel to the sensor. The parameters are estimated with the intrinsics during
+<NoteLink to="camera-calibration" /> <Cite id="tsai1987" />. Fisheye lenses with fields of view near 180 degrees need
+different models, because $x_n = \tan\theta$ diverges <Cite id="szeliski2022" />.
+
+## Worked example
+
+A camera has $f_x = f_y = 800$ pixels, principal point $(320, 240)$, zero skew and a $640 \times 480$ image. Its
+horizontal field of view is $2\arctan(320/800) = 43.6°$ and its vertical field of view $2\arctan(240/800) = 33.4°$.
+
+Place the camera with $\Rmat = \I$ and $\tvec = (0, 0, 1)$ metres, and take the world point $\Xmat = (0.5, -0.2, 4)$.
+In camera coordinates $\Xmat_c = (0.5, -0.2, 5)$. Then
+
+$$
+\Kmat \Xmat_c = \begin{bmatrix} 800 \cdot 0.5 + 320 \cdot 5 \\ 800 \cdot (-0.2) + 240 \cdot 5 \\ 5 \end{bmatrix} =
+\begin{bmatrix} 2000 \\ 1040 \\ 5 \end{bmatrix} \sim \begin{bmatrix} 400 \\ 208 \\ 1 \end{bmatrix}.
+$$
+
+The point images at pixel $(400, 208)$. The camera centre is $\cvec = -\Rmat^\top\tvec = (0, 0, -1)$ in world
+coordinates.
+
+Now add barrel distortion with $k_1 = -0.2$ and all other coefficients zero. The image corner at pixel $(640, 480)$
+has normalised coordinates $(0.4, 0.3)$ and $r^2 = 0.25$. The distortion factor is $1 - 0.2 \times 0.25 = 0.95$, so the
+point is imaged at $(0.38, 0.285)$, pixel $(624, 468)$: 16 pixels inwards horizontally and 12 vertically. At the point
+above, with $r^2 = 0.0116$, the shift is under a quarter of a pixel.
+
+## Assumptions
+
+- All rays pass through one point. Thick lenses, zoom lenses at changing settings and some catadioptric cameras
+  violate this.
+- The sensor is a flat, rigid grid read out at one instant. Rolling-shutter cameras expose rows at different times, so
+  a moving camera distorts the image in ways the model does not capture.
+
+## Pitfalls
+
+- **Conventions.** Libraries differ in whether $\Rmat, \tvec$ map world to camera or camera to world, in the direction
+  of the $y$ axis, and in whether the camera looks along $+Z$ or $-Z$. Mixing conventions silently mirrors or inverts
+  results.
+- **Focal length units.** $f_x$ in pixels depends on the resolution. Resizing an image by a factor scales $f_x$, $f_y$,
+  $c_x$ and $c_y$ by the same factor.
+- **Points behind the camera.** The homogeneous division maps a point with $Z_c < 0$ to a valid-looking pixel. Check
+  the sign of the depth.
+- **Distorted coordinates.** Projective formulas such as homographies and epipolar constraints hold only after
+  distortion has been removed.

@@ -1,0 +1,150 @@
+---
+title: Image classification
+kind: concept
+summary: 'Image classification assigns one of $K$ labels to a whole image. A model maps pixels to logits $\zvec$, a softmax gives class probabilities, and training minimises cross-entropy, whose gradient is $\pvec - \yvec$. Hand-crafted features gave way to CNNs in 2012, then to transformers.'
+tags: [computer-vision, classification, deep-learning, worked-example]
+aliases: [image recognition, visual recognition, ImageNet classification, top-5 error, bag of visual words, bag of features]
+requires: [multinomial-logistic-regression, convolutional-layer]
+related:
+  [
+    classic-cnn-architectures,
+    vision-transformer,
+    data-augmentation,
+    transfer-learning-and-fine-tuning,
+    clip,
+    object-detection,
+    semantic-segmentation,
+    feature-detection-and-descriptors,
+  ]
+references: [deng2009, russakovsky2015, sivic2003, dalal2005, krizhevsky2012, he2016, dosovitskiy2021, szeliski2022]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Image classification is the task of assigning an image $\xvec \in \reals^{H \times W \times 3}$ one label from a fixed
+set of $K$ classes. A classifier computes a vector of $K$ logits $\zvec = f_{\thetavec}(\xvec)$ and class probabilities
+$p_k = \exp(z_k) / \sum_j \exp(z_j)$. It is trained on labelled images by minimising the cross-entropy
+$-\log p_y$ of the true class $y$, and predicts $\argmax_k p_k$.
+</Definition>
+
+## Intuition
+
+The same object can produce very different pixel arrays. A cat photographed from the side and from above, in daylight
+and under a lamp, partly hidden behind a chair, shares almost no pixel values across the photographs. Two images of
+different classes, a husky and a wolf on snow, can be close in pixel space. A classifier must be insensitive to
+viewpoint, lighting, deformation, occlusion, background and variation within a class, while staying sensitive to the
+small differences between classes.
+
+Every approach builds a representation in which images of the same class are close and a simple classifier, usually
+linear, separates the classes. The history of the field is a history of how that representation is made: designed by
+hand, learned by a convolutional network, or learned by a transformer from very large datasets.
+
+## Details
+
+### The classification head
+
+Most modern classifiers share one structure. A backbone maps the image to a feature map $\Fmat \in \reals^{h \times w
+\times d}$. Global average pooling averages it over positions to a vector $\bar\fvec = \frac{1}{hw} \sum_{i, j}
+\fvec_{ij} \in \reals^d$. A linear layer gives logits $\zvec = \Wmat \bar\fvec + \bvec$, and a softmax gives
+probabilities.
+
+Averaging over positions discards where a feature occurred. A convolutional backbone is equivariant to translation: an
+object shifted by a multiple of the network's total stride produces the same features, shifted (see
+<NoteLink to="convolutional-layer" />). The average over positions is the same for a shifted feature map, apart from
+border effects. So the logits are invariant to such shifts, which is the invariance a whole-image label requires.
+
+### The training loss and its gradient
+
+For one image with true class $y$ and one-hot label vector $\yvec$, the cross-entropy loss is
+
+$$
+\ell(\zvec) = -\log p_y = -z_y + \log \sum_{j=1}^{K} \exp(z_j).
+$$
+
+Differentiate with respect to logit $z_k$. The first term contributes $-1$ if $k = y$ and 0 otherwise, that is
+$-y_k$. The second contributes $\exp(z_k) / \sum_j \exp(z_j) = p_k$. So
+
+$$
+\frac{\partial \ell}{\partial z_k} = p_k - y_k, \qquad \nabla_\zvec \ell = \pvec - \yvec.
+$$
+
+The gradient pushes the true class's logit up by $1 - p_y$ and every other logit down by its probability. When the
+model is confident and right, $\pvec \approx \yvec$ and the example contributes almost nothing. Backpropagation carries
+$\pvec - \yvec$ through $\Wmat$ into the backbone. This is <NoteLink to="multinomial-logistic-regression" /> on learned
+features.
+
+Images with several labels at once, such as "person" and "bicycle", use $K$ independent sigmoid outputs and a binary
+cross-entropy per class instead of a softmax.
+
+### Three generations of representation
+
+- **Hand-crafted features.** Before 2012, pipelines computed local descriptors such as SIFT or histograms of oriented
+  gradients (HOG) <Cite id="dalal2005" />. The bag-of-visual-words model clusters descriptors from training images with
+  $k$-means into a vocabulary of "visual words". Each image becomes a histogram of how many of its descriptors fall
+  in each cluster, and a linear or kernel SVM classifies the histograms <Cite id="sivic2003" />.
+- **Convolutional networks.** In the 2012 ImageNet challenge, a CNN trained end to end on raw pixels with GPUs, ReLU
+  and dropout reached 15.3% top-5 error against 26.2% for the best hand-crafted entry <Cite id="krizhevsky2012" />.
+  Deeper networks followed. Residual networks reached 3.57% top-5 error in 2015 <Cite id="he2016" />. The
+  representation is learned: early layers find edges and colour blobs, later layers find parts and objects (see
+  <NoteLink to="classic-cnn-architectures" />).
+- **Transformers and scale.** The <NoteLink to="vision-transformer" /> splits an image into patches and processes them
+  as a sequence with self-attention. It has weaker built-in assumptions about images than a CNN and outperforms CNNs
+  when pretrained on hundreds of millions of images <Cite id="dosovitskiy2021" />. Contrastive image–text pretraining,
+  as in <NoteLink to="clip" />, classifies new classes from their names with no labelled examples.
+
+### Benchmarks and metrics
+
+ImageNet has over 14 million images labelled with WordNet categories <Cite id="deng2009" />. Its 2012 challenge subset,
+often called ImageNet-1k, has 1000 classes, about 1.28 million training images and 50,000 validation images
+<Cite id="russakovsky2015" />. Performance is reported as **top-1 accuracy**, the fraction of images whose most probable
+class is correct, and **top-5 error**, the fraction whose correct class is not among the five most probable. Top-5
+exists because many ImageNet images contain several objects and some classes are hard to tell apart, such as dozens of
+dog breeds.
+
+### Training practice
+
+A modern recipe combines a pretrained backbone, <NoteLink to="data-augmentation" /> (random crops, flips, colour jitter
+and mixing of images), label smoothing, weight decay and a learning-rate schedule. With few labelled images, starting
+from a network pretrained on a large dataset and fine-tuning it is far more accurate than training from scratch (see
+<NoteLink to="transfer-learning-and-fine-tuning" />).
+
+## Worked example
+
+A three-class classifier outputs logits $\zvec = (2.0, 1.0, 0.1)$ for classes cat, dog and fox. The softmax gives
+
+$$
+\sum_j e^{z_j} = e^{2.0} + e^{1.0} + e^{0.1} = 7.389 + 2.718 + 1.105 = 11.212,
+$$
+
+$$
+\pvec = (7.389, 2.718, 1.105) / 11.212 = (0.659, 0.242, 0.099).
+$$
+
+The prediction is cat. If the true class is dog, the loss is $-\log 0.242 = 1.417$ and the gradient with respect to
+the logits is
+
+$$
+\pvec - \yvec = (0.659, 0.242 - 1, 0.099) = (0.659, -0.758, 0.099).
+$$
+
+A gradient step lowers the cat logit most, raises the dog logit, and lowers the fox logit slightly. The components sum
+to zero, because adding a constant to every logit leaves the softmax unchanged.
+
+## Assumptions
+
+- Each image has one dominant object or scene that defines its label. Cluttered images with several objects fit
+  detection or multi-label classification better.
+- Training and test images come from the same distribution. Classifiers trained on ImageNet photographs lose accuracy
+  on sketches, unusual viewpoints or new camera types.
+
+## Pitfalls
+
+- **Shortcut features.** A network uses whatever separates the training classes, including backgrounds, watermarks or
+  texture rather than shape. High test accuracy on the same distribution does not rule this out.
+- **Label noise and ambiguity.** Some ImageNet validation labels are wrong, and some images fit several classes, so small
+  differences in top-1 accuracy between models can reflect label errors rather than skill.
+- **Overconfident probabilities.** Softmax outputs of deep networks are often poorly calibrated. Recalibrate on
+  held-out data before treating them as probabilities.
+- **Resolution mismatch.** Training at one image size and testing at another shifts the apparent size of objects and
+  changes accuracy.

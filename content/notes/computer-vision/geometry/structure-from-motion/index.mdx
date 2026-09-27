@@ -1,0 +1,198 @@
+---
+title: Structure from motion
+kind: concept
+summary: 'Structure from motion recovers camera poses and 3D points from overlapping images: it matches features, estimates relative poses, triangulates points and refines everything by bundle adjustment, a nonlinear least-squares fit of reprojection error solved via a Schur complement.'
+tags: [computer-vision, geometry, optimisation, worked-example]
+aliases:
+  [
+    SfM,
+    bundle adjustment,
+    point triangulation,
+    multi-view reconstruction,
+    3D reconstruction,
+    incremental structure from motion,
+    perspective-n-point,
+    PnP,
+    reprojection error,
+    visual SLAM,
+  ]
+requires: [epipolar-geometry-and-stereo, schur-complement]
+related: [pinhole-camera-model, homography, camera-calibration, feature-detection-and-descriptors, gradient-descent]
+references:
+  [
+    triggs2000,
+    hartley2004,
+    hartley1997b,
+    lepetit2009,
+    snavely2006,
+    agarwal2011,
+    schonberger2016,
+    nocedal2006,
+    szeliski2022,
+  ]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Structure from motion (SfM) takes $m$ images of a static scene and correspondences between them, and estimates the
+camera matrices $\Pmat_i = \Kmat_i\brack{\Rmat_i \mid \tvec_i}$ and the 3D points $\Xmat_j$ that best explain the
+observed image points $\xvec_{ij}$. "Best" means minimising the total reprojection error
+$\sum_{(i, j)} \norm{\xvec_{ij} - \pi(\Pmat_i, \Xmat_j)}^2$, where $\pi$ projects a point with a camera and the sum runs
+over the observed pairs. This final optimisation is bundle adjustment <Cite id="triggs2000" />.
+</Definition>
+
+## Intuition
+
+A single image loses depth. Two images from known positions recover it by intersecting rays. SfM solves the harder
+problem where neither the positions nor the scene are known: each image constrains the others through the points they
+share. Estimating a few cameras and points from their pairwise geometry gives a rough reconstruction. Adding more
+images one at a time, and repeatedly adjusting all cameras and points together so that every projected point lands
+where it was observed, turns thousands of photographs into a consistent 3D model.
+
+The name "bundle" refers to the bundle of rays leaving each camera centre towards the points it sees. Bundle adjustment
+moves cameras and points until every bundle passes through its image points.
+
+## Details
+
+### Triangulation
+
+Given cameras $\Pmat_1, \Pmat_2$ and a match $\xvec_1 \leftrightarrow \xvec_2$, find $\Xmat$. Each view gives
+$\xvec_i \sim \Pmat_i\Xmat$. As for the homography, write this as $\xvec_i \times \Pmat_i\Xmat = \zeros$. With
+$\pvec_k^{\top}$ the rows of $\Pmat_i$ and $\xvec_i = (u_i, v_i, 1)$, two independent rows of the cross product give
+
+$$
+u_i\, \pvec_3^\top\Xmat - \pvec_1^\top\Xmat = 0, \qquad v_i\, \pvec_3^\top\Xmat - \pvec_2^\top\Xmat = 0.
+$$
+
+Two views give four equations $\Amat\Xmat = \zeros$ in the four homogeneous coordinates of $\Xmat$. The solution with
+$\norm{\Xmat} = 1$ is the right singular vector of $\Amat$ for its smallest singular value. With more views the same
+construction adds two rows per view.
+
+This linear method minimises an algebraic quantity. The statistically optimal triangulation minimises the reprojection
+error in both images, which for two views reduces to finding the roots of a degree-6 polynomial
+<Cite id="hartley1997b" />. Accuracy depends on the angle between the rays: nearly parallel rays, from cameras close
+together relative to the point's distance, give large depth errors.
+
+### Ambiguity of the reconstruction
+
+Images alone cannot fix the coordinate frame. For any invertible $4 \times 4$ matrix $\Gmat$, the cameras
+$\Pmat_i\Gmat^{-1}$ and points $\Gmat\Xmat_j$ produce the same images, since $(\Pmat_i\Gmat^{-1})(\Gmat\Xmat_j) =
+\Pmat_i\Xmat_j$. With uncalibrated cameras the reconstruction is therefore determined only up to a projective
+transformation, 15 degrees of freedom. With known intrinsics, $\Gmat$ must keep every $\Pmat_i\Gmat^{-1}$ of the form
+$\Kmat_i\brack{\Rmat \mid \tvec}$, which leaves a similarity: a rotation, a translation and a scale, 7 degrees of
+freedom <Cite id="hartley2004" />. The overall scale of a monocular reconstruction is unknown without a measured
+distance or another sensor.
+
+### Incremental reconstruction
+
+Incremental SfM, as in Bundler and COLMAP, builds the model one image at a time
+<Cite id="snavely2006" /> <Cite id="schonberger2016" />:
+
+1. **Correspondences.** Detect and describe features in every image, match them between pairs, and keep pairs whose
+   matches fit a fundamental matrix, essential matrix or homography under RANSAC.
+2. **Initialisation.** Choose a pair with many matches and a wide baseline. Estimate its essential matrix, decompose
+   it into $\Rmat, \tvec$ (see <NoteLink to="epipolar-geometry-and-stereo" />) and triangulate the matches.
+3. **Registration.** Pick an image that sees many already-reconstructed points. Its 2D–3D correspondences determine
+   its pose: the perspective-$n$-point (PnP) problem, solved from three or more points with RANSAC, for example by
+   EPnP <Cite id="lepetit2009" />.
+4. **Triangulation.** Triangulate the new image's matches with registered images that are not yet in the model.
+5. **Bundle adjustment.** Refine the new cameras and points locally, and periodically everything, then remove points
+   with large reprojection errors.
+6. Repeat from step 3 until no image can be added.
+
+Errors accumulate as images are added, so the repeated bundle adjustment is what keeps a long chain of images
+consistent. Global SfM instead estimates all rotations at once from the pairwise ones, then all translations, then runs
+one bundle adjustment. It is faster but more sensitive to wrong pairs. City-scale reconstructions from internet photo
+collections combine these steps with large-scale image retrieval <Cite id="agarwal2011" />.
+
+### Bundle adjustment as nonlinear least squares
+
+Collect all camera parameters (rotation, translation and possibly intrinsics and distortion) and all point coordinates
+into one vector $\thetavec$. Stack the reprojection errors $\xvec_{ij} - \pi(\Pmat_i, \Xmat_j)$ into a residual vector
+$\rvec(\thetavec)$. Bundle adjustment minimises $E(\thetavec) = \norm{\rvec(\thetavec)}^2$. Under independent Gaussian
+image noise of equal variance, this is the maximum-likelihood estimate.
+
+Linearise the residual about the current estimate: $\rvec(\thetavec + \deltavec) \approx \rvec + \Jmat\deltavec$, with
+$\Jmat = \partial\rvec/\partial\thetavec$ the Jacobian. The linearised error $\norm{\rvec + \Jmat\deltavec}^2$ has
+gradient $2\Jmat^\top(\rvec + \Jmat\deltavec)$ with respect to $\deltavec$. Setting it to zero gives the Gauss–Newton
+normal equations
+
+$$
+\Jmat^\top\Jmat\, \deltavec = -\Jmat^\top\rvec.
+$$
+
+Levenberg–Marquardt adds a damping term, $(\Jmat^\top\Jmat + \mu\,\diag(\Jmat^\top\Jmat))\deltavec = -\Jmat^\top\rvec$,
+increasing $\mu$ when a step fails to reduce $E$ and decreasing it when a step succeeds. Large $\mu$ gives short
+gradient-descent steps; small $\mu$ gives Gauss–Newton steps, which converge quickly near the solution
+<Cite id="nocedal2006" />. A robust loss such as Huber's replaces the square for each residual to limit the influence
+of remaining outliers.
+
+### Sparsity and the Schur complement
+
+Each residual depends on one camera and one point. Order $\thetavec$ as all camera parameters $\thetavec_c$, then all
+point parameters $\thetavec_p$. The normal equations take the block form
+
+$$
+\begin{bmatrix} \Umat & \Wmat \\ \Wmat^\top & \Vmat \end{bmatrix}
+\begin{bmatrix} \deltavec_c \\ \deltavec_p \end{bmatrix} =
+\begin{bmatrix} \epsilonvec_c \\ \epsilonvec_p \end{bmatrix},
+$$
+
+where $\Umat$ couples cameras, $\Vmat$ couples points and $\Wmat$ couples cameras with the points they see. Two
+different points never share a residual, so $\Vmat$ is block diagonal with one $3 \times 3$ block per point, and
+inverting it costs $O(n)$ for $n$ points. Multiply the second block row by $\Wmat\Vmat^{-1}$ and subtract it from the
+first to eliminate $\deltavec_p$:
+
+$$
+\paren{\Umat - \Wmat\Vmat^{-1}\Wmat^\top}\deltavec_c = \epsilonvec_c - \Wmat\Vmat^{-1}\epsilonvec_p, \qquad
+\deltavec_p = \Vmat^{-1}\paren{\epsilonvec_p - \Wmat^\top\deltavec_c}.
+$$
+
+The matrix $\Smat = \Umat - \Wmat\Vmat^{-1}\Wmat^\top$ is the <NoteLink to="schur-complement" /> of $\Vmat$. Its size
+is set by the number of camera parameters only. The reduced camera system is solved by Cholesky factorisation, or by
+preconditioned conjugate gradients for very large problems, and the points are recovered one at a time by
+back-substitution <Cite id="triggs2000" />.
+
+$\Jmat^\top\Jmat$ is singular along the 7 directions of the similarity ambiguity: moving every camera and point by the
+same similarity leaves the residuals unchanged. Damping, or fixing one camera and the distance to a second, removes
+this gauge freedom.
+
+## Worked example
+
+**Triangulation.** Take normalised cameras $\Pmat_1 = \brack{\I \mid \zeros}$ and $\Pmat_2 = \brack{\I \mid (-1, 0, 0)^\top}$,
+a unit baseline along $x$. The point $\Xmat = (0.5, 0.2, 4)$ projects to $\xvec_1 = (0.125, 0.05)$ and
+$\xvec_2 = (-0.125, 0.05)$. The four equations are
+
+$$
+\begin{bmatrix} -1 & 0 & 0.125 & 0 \\ 0 & -1 & 0.05 & 0 \\ -1 & 0 & -0.125 & 1 \\ 0 & -1 & 0.05 & 0 \end{bmatrix}
+\Xmat = \zeros.
+$$
+
+The smallest singular value is 0 and its right singular vector, scaled to a last coordinate of 1, is
+$(0.5, 0.2, 4, 1)$: the point is recovered exactly. Shift $\xvec_2$ by $-0.01$ in $x$, a disparity error of 4%. The
+solution becomes $(0.481, 0.192, 3.846)$: the depth $1/0.26 = 3.846$ is 4% short, as the rectified formula $Z = fB/d$
+predicts.
+
+**Problem size.** A reconstruction with $m = 100$ cameras of 6 parameters each, $n = 50{,}000$ points and
+$300{,}000$ observations has $600 + 150{,}000 = 150{,}600$ unknowns and $600{,}000$ residuals. The full normal matrix
+is $150{,}600 \times 150{,}600$. After eliminating the points, the reduced camera system is $600 \times 600$, and the
+elimination needs $50{,}000$ inversions of $3 \times 3$ blocks.
+
+## Assumptions
+
+- The scene is static and rigid. Moving objects produce matches that fit no single camera motion and must be rejected
+  as outliers.
+- Image errors are independent, small and roughly Gaussian after outlier removal, so least squares is the right
+  criterion.
+- Images overlap enough, and with enough baseline, for every camera to share well-triangulated points with others.
+
+## Pitfalls
+
+- **Bad initial pair.** A pair with a small baseline gives poorly triangulated points, and errors propagate to every
+  camera registered later. Choose the initial pair for both many matches and a wide angle between rays.
+- **Drift.** Long sequences accumulate scale and rotation errors. Loop closure, recognising a place seen before, and a
+  global bundle adjustment correct it.
+- **Repetitive structure.** Symmetric buildings and repeated facades produce consistent but wrong matches that fold the
+  reconstruction onto itself.
+- **Local minima.** Bundle adjustment is a local method. It refines a good initial estimate; it does not find one.

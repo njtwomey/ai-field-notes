@@ -1,0 +1,180 @@
+---
+title: Edge detection
+kind: concept
+summary: 'Edge detection marks pixels where image intensity changes sharply. It smooths with a Gaussian, estimates the gradient $\nabla f$ with derivative kernels such as Sobel, and keeps local maxima of $\norm{\nabla f}$ across the edge. Canny adds two thresholds; Marr–Hildreth uses zero crossings of $\nabla^2 G \ast f$.'
+tags: [computer-vision, image-processing, filters, worked-example]
+aliases:
+  [
+    edge detector,
+    Sobel operator,
+    Sobel filter,
+    Canny edge detector,
+    Canny,
+    Laplacian of Gaussian,
+    Marr-Hildreth,
+    image gradient,
+    hysteresis thresholding,
+  ]
+requires: [image-filtering, gradient]
+related: [feature-detection-and-descriptors, image-pyramids-and-scale-space, convolutional-layer]
+references: [canny1986, marr1980, szeliski2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { CannyExplorer } from './CannyExplorer'
+
+<Definition>
+An edge is a curve in the image across which intensity changes sharply. An edge detector takes an image $f(r, c)$ and
+returns a binary map of edge pixels. It estimates the intensity gradient
+$\nabla f = (\partial f / \partial x, \partial f / \partial y)$ after smoothing, and marks the pixels where the gradient
+magnitude $\norm{\nabla f}$ is a local maximum in the gradient direction and large enough to count.
+</Definition>
+
+## Intuition
+
+A photograph of an object is mostly regions of slowly varying brightness separated by boundaries: object outlines,
+shadows, creases and texture. Across a boundary, intensity jumps. The derivative of intensity is near zero inside
+regions and large at the jump, so edges are ridges of the gradient magnitude. Two problems remain. Differentiation
+amplifies pixel noise, so the image must be smoothed first. A blurred jump gives a ridge several pixels wide, so the
+detector must thin it to the one pixel where the change is steepest.
+
+<CannyExplorer />
+
+## Details
+
+### Image gradients from derivative kernels
+
+Take $x$ along columns and $y$ along rows. The central difference estimates a derivative with the kernel
+$\tfrac12[-1, 0, 1]$:
+
+$$
+\frac{\partial f}{\partial x}(r, c) \approx \frac{f(r, c + 1) - f(r, c - 1)}{2}.
+$$
+
+The Sobel kernel combines this difference with the smoothing kernel $[1, 2, 1]^\top$ across the other axis:
+
+$$
+S_x = \begin{bmatrix} 1 \\ 2 \\ 1 \end{bmatrix} \begin{bmatrix} -1 & 0 & 1 \end{bmatrix} =
+\begin{bmatrix} -1 & 0 & 1 \\ -2 & 0 & 2 \\ -1 & 0 & 1 \end{bmatrix}, \qquad S_y = S_x^\top.
+$$
+
+$S_x$ is separable, so it costs two 1D passes. On a ramp $f = a x$ each row difference is $2a$ and the weights $1, 2, 1$
+sum to 4, so correlation with $S_x$ returns $8a$. Dividing by 8 gives the slope in intensity per pixel. The gradient
+magnitude and direction are
+
+$$
+\norm{\nabla f} = \sqrt{g_x^2 + g_y^2}, \qquad \theta = \operatorname{atan2}(g_y, g_x).
+$$
+
+The gradient points across the edge, from dark to bright. The edge itself runs perpendicular to $\theta$.
+
+### Why smoothing comes first
+
+Differentiation multiplies the Fourier transform of a signal by $i\omega$, so a component of frequency $\omega$ is
+amplified in proportion to $\omega$. Image structure is concentrated at low frequencies and pixel noise is spread
+evenly across all frequencies. A raw derivative therefore boosts noise relative to the edges. Smoothing with a Gaussian
+$G_\sigma$ first removes the high frequencies.
+
+Smoothing and differentiation combine into one filter. Differentiation is linear and commutes with the sum in a
+convolution:
+
+$$
+\frac{\partial}{\partial x}\paren{G_\sigma \ast f} = \frac{\partial}{\partial x} \sum_{u, v} G_\sigma(u, v)\,
+f(x - u, y - v) = \paren{\frac{\partial G_\sigma}{\partial x}} \ast f.
+$$
+
+The derivative of Gaussian $\partial G_\sigma / \partial x = -(x/\sigma^2)\, G_\sigma$ is the kernel. The width
+$\sigma$ sets the scale: a small $\sigma$ finds fine texture and noise, a large $\sigma$ finds only coarse outlines.
+
+### The Canny detector
+
+Canny posed edge detection as an optimisation with three criteria for a step edge in white noise: detect real edges
+and few false ones, place each detected edge close to the true one, and give a single response per edge. He showed
+that the optimal filter under these criteria is closely approximated by the first derivative of a Gaussian
+<Cite id="canny1986" />. The full detector has four steps:
+
+1. **Smooth** the image with $G_\sigma$.
+2. **Compute the gradient** $g_x, g_y$ and from it the magnitude $M = \norm{\nabla f}$ and direction $\theta$.
+3. **Non-maximum suppression.** Round $\theta$ to the nearest of $0°, 45°, 90°, 135°$. Keep a pixel only if $M$ there
+   is at least as large as $M$ at its two neighbours along that direction; set it to zero otherwise. A ridge several
+   pixels wide becomes a curve one pixel wide.
+4. **Hysteresis thresholding.** Choose a high threshold $T_h$ and a low threshold $T_\ell < T_h$. Pixels with
+   $M \ge T_h$ are edges. A pixel with $T_\ell \le M < T_h$ is an edge only if it is connected, through a chain of
+   such pixels, to a pixel above $T_h$. All others are discarded. Canny recommended $T_h / T_\ell$ between 2 and 3.
+
+A single threshold forces a choice. Set it high and a real contour whose contrast dips along its length breaks into
+fragments. Set it low and isolated noise responses survive. Hysteresis keeps the weak middle of a contour that is
+anchored by strong pixels, and drops weak responses that stand alone.
+
+### Second-derivative detectors
+
+A blurred step edge has its steepest slope where its second derivative crosses zero. For a step of height $h$ smoothed
+by a Gaussian, the profile is $s(x) = h\,\Phi(x/\sigma)$ with $\Phi$ the standard normal distribution function. Then
+$s'(x) = (h/\sigma)\, \phi(x/\sigma)$, which peaks at $x = 0$, and $s''(x) = -(h x/\sigma^3)\, \phi(x/\sigma)$, which
+changes sign at $x = 0$. Maxima of the first derivative are zero crossings of the second.
+
+In two dimensions the rotation-invariant second derivative is the Laplacian $\nabla^2 = \partial^2/\partial x^2 +
+\partial^2/\partial y^2$. Differentiating the Gaussian twice gives the Laplacian of Gaussian kernel
+
+$$
+\nabla^2 G_\sigma(x, y) = \frac{x^2 + y^2 - 2\sigma^2}{\sigma^4}\, G_\sigma(x, y).
+$$
+
+Marr and Hildreth proposed marking edges at the zero crossings of $\nabla^2 G_\sigma \ast f$ <Cite id="marr1980" />.
+The LoG is a single isotropic filter, so it needs no direction estimate. Its zero crossings always form closed
+contours. Zero crossings also appear in flat noisy regions, so practical versions keep only crossings with a large
+slope. The difference of two Gaussians, $G_{k\sigma} - G_\sigma$, approximates $(k - 1)\sigma^2 \nabla^2 G_\sigma$ and
+is cheaper, because each Gaussian is separable (see <NoteLink to="image-pyramids-and-scale-space" />).
+
+<Derivation title="Derivation: the Laplacian of Gaussian">
+Write $G_\sigma(x, y) = \frac{1}{2\pi\sigma^2} \exp\paren{-\frac{x^2 + y^2}{2\sigma^2}}$. The first derivative in $x$
+is $\partial_x G_\sigma = -\frac{x}{\sigma^2} G_\sigma$. Differentiating again with the product rule gives
+
+$$
+\partial_x^2 G_\sigma = -\frac{1}{\sigma^2} G_\sigma + \frac{x^2}{\sigma^4} G_\sigma = \frac{x^2 - \sigma^2}{\sigma^4}
+G_\sigma.
+$$
+
+The same holds for $y$. Adding the two gives $\nabla^2 G_\sigma = \frac{x^2 + y^2 - 2\sigma^2}{\sigma^4} G_\sigma$. The
+kernel is negative inside the circle of radius $\sqrt{2}\sigma$ and positive outside, which gives its "Mexican hat"
+shape when negated. Its integral over the plane is zero, so it returns zero on a region of constant intensity.
+</Derivation>
+
+## Worked example
+
+Take an image whose rows are all $[0, 0, 4, 10, 10]$: a ramp edge between columns 1 and 3. With no extra smoothing,
+the Sobel $x$ response divided by 8 reduces to the central difference, because every column is constant:
+
+| column                   | 0   | 1   | 2   | 3   | 4   |
+| ------------------------ | --- | --- | --- | --- | --- |
+| intensity                | 0   | 0   | 4   | 10  | 10  |
+| $g_x = (f_{c+1} - f_{c-1})/2$ | 0   | 2   | 5   | 3   | 0   |
+
+Columns 0 and 4 use replicated borders. The vertical derivative $g_y$ is 0 everywhere, so $\theta = 0$ and the
+gradient points along the row. Non-maximum suppression compares each pixel with its left and right neighbours. Column
+2 has $5 \ge 2$ and $5 \ge 3$ and is kept. Columns 1 and 3 are smaller than column 2 and are set to zero. The ramp,
+three pixels wide in $g_x$, becomes an edge one pixel wide at column 2.
+
+For hysteresis, take $T_h = 4$ and $T_\ell = 1.5$ and two thinned chains of connected pixels with magnitudes
+$[6, 3, 2, 5, 1]$ and $[2, 3, 2]$. In the first chain, 6 and 5 are strong, 3 and 2 are weak but connected to them and
+are kept, and 1 is below $T_\ell$ and dropped. The second chain has no strong pixel, so all three are dropped. A single
+threshold of 1.5 would keep the second chain; a single threshold of 4 would break the first into two pieces.
+
+## Assumptions
+
+- Edges are steps or ramps in intensity, locally straight at the scale $\sigma$. Corners, junctions and thin lines
+  violate this, so Canny rounds corners and can leave gaps at junctions.
+- Noise is additive, independent between pixels and of roughly constant variance, so one pair of thresholds suits the
+  whole image.
+
+## Pitfalls
+
+- **Choosing $\sigma$.** No single scale suits every edge. Fine texture and coarse boundaries need different $\sigma$;
+  scale-space methods detect across a range of scales.
+- **Absolute thresholds.** Gradient magnitude scales with image contrast, so fixed thresholds fail across images.
+  Set them relative to the image, for example from percentiles of $M$.
+- **Kernel sign conventions.** Libraries differ in whether they compute correlation or convolution and in the
+  direction of the $y$ axis, so the sign of $g_y$ and $\theta$ varies.
+- **Edges are not boundaries.** Edge pixels come from shadows, texture and specular highlights as well as object
+  outlines. Grouping them into object contours is a separate problem.

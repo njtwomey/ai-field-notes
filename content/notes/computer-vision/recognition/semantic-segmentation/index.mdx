@@ -1,0 +1,157 @@
+---
+title: Semantic segmentation
+kind: concept
+summary: 'Semantic segmentation assigns a class to every pixel. A fully convolutional network maps an $H \times W$ image to $H \times W \times K$ class scores. Encoder–decoders (FCN, U-Net) restore resolution with upsampling and skips; dilated convolutions (DeepLab) avoid losing it.'
+tags: [computer-vision, deep-learning, worked-example]
+aliases:
+  [
+    pixel-wise classification,
+    dense prediction,
+    fully convolutional network,
+    FCN,
+    U-Net,
+    encoder-decoder segmentation,
+    DeepLab,
+    atrous convolution,
+    atrous spatial pyramid pooling,
+    ASPP,
+    transposed convolution,
+  ]
+requires: [convolutional-layer, image-classification]
+related:
+  [
+    instance-and-panoptic-segmentation,
+    object-detection,
+    dice-and-segmentation-overlap,
+    pooling-and-strides,
+    residual-network,
+    morphological-operations,
+  ]
+references: [long2015, ronneberger2015, yu2016, chen2018deeplab, chen2017deeplab, dumoulin2016, odena2016, everingham2010]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Semantic segmentation labels every pixel of an image with one of $K$ classes. A model maps an image of $H \times W$
+pixels to a score map $\Zmat \in \reals^{H \times W \times K}$, applies a softmax over classes at each pixel, and is
+trained with the sum of per-pixel cross-entropies. Pixels of the same class get the same label; separate objects of one
+class are not distinguished.
+</Definition>
+
+## Intuition
+
+A classification network already computes, at each position of its last feature map, features that describe what is
+there. Its final pooling and fully connected layers throw that position away. Segmentation keeps it: classify every
+position of the feature map, then bring the coarse map back to the resolution of the image.
+
+Two needs pull against each other. Recognising a pixel as "cow" requires context from a large region, which a network
+gets by downsampling. Placing the boundary between cow and grass needs fine spatial detail, which downsampling
+destroys. Segmentation architectures differ in how they reconcile the two: by combining coarse and fine feature maps
+through skip connections, or by growing the receptive field without downsampling.
+
+## Details
+
+### Fully convolutional networks
+
+A fully connected layer on a $7 \times 7 \times 512$ feature map is equivalent to a convolution with a $7 \times 7$
+kernel and one output channel per unit. Replacing every fully connected layer of a classifier this way gives a network
+of only convolutions and pooling, which accepts any input size and outputs a spatial grid of class scores. Long,
+Shelhamer and Darrell made this conversion, then upsampled the coarse score map, which has an output stride of 32, to
+the input resolution <Cite id="long2015" />.
+
+Upsampling by 32 in one step gives blobby boundaries. FCN-16s and FCN-8s add score maps predicted from earlier pooling
+layers, at strides 16 and 8, to the upsampled coarse scores. The earlier layers carry finer location information. FCN-8s
+reached 62.2% mean IoU on PASCAL VOC 2012, a 20% relative improvement over the previous best <Cite id="long2015" />.
+
+### Transposed convolution
+
+Learned upsampling uses a transposed convolution. A convolution with stride $s$ maps each window of the input to one
+output value. The transposed convolution runs the same connectivity backwards: each input value is multiplied by the
+kernel and added into a window of the output, with windows placed $s$ positions apart. For input width $n$, kernel
+size $k$, stride $s$ and padding $p$ removed from each side, the output width is
+
+$$
+m = (n - 1)s + k - 2p.
+$$
+
+The first input value's window starts at position 0; the last starts at $(n - 1)s$ and ends at $(n - 1)s + k - 1$, so
+the full output has $(n - 1)s + k$ positions, and padding trims $p$ from each end. This inverts the size formula of an
+ordinary convolution <Cite id="dumoulin2016" />. When $k$ is not divisible by $s$, some outputs receive more
+contributions than their neighbours, which produces checkerboard artifacts. Bilinear upsampling followed by an
+ordinary convolution avoids them <Cite id="odena2016" />.
+
+### U-Net: encoder–decoder with skip connections
+
+U-Net has a contracting encoder, four stages of two $3 \times 3$ convolutions and a $2 \times 2$ max pool, and a
+symmetric expanding decoder of $2 \times 2$ up-convolutions and $3 \times 3$ convolutions <Cite id="ronneberger2015" />.
+At each resolution, the decoder concatenates the encoder's feature map at the same resolution with its own upsampled
+features before convolving. The encoder supplies precise location; the decoder supplies context from the bottom of the
+U. The channel count doubles at each encoder stage (64 to 1024) and halves at each decoder stage.
+
+U-Net was designed for biomedical images with few labelled examples. It relied on heavy elastic-deformation
+augmentation and a loss that weights pixels near the borders between touching cells more heavily. Its shape recurs far
+beyond segmentation, for example as the denoising network in diffusion models.
+
+### Dilated convolution and DeepLab
+
+A dilated (atrous) convolution with dilation rate $d$ spaces its $k$ taps $d$ positions apart:
+$y_i = \sum_{u=0}^{k-1} w_u\, x_{i + d u}$. It covers $d(k - 1) + 1$ inputs with $k$ weights and no downsampling
+<Cite id="yu2016" />.
+
+Stacking dilated layers grows the receptive field exponentially. Each layer with kernel $k$ and dilation $d$ extends
+the receptive field by $d(k - 1)$. For $L$ layers of $3 \times 3$ kernels with dilations $1, 2, 4, \dots, 2^{L-1}$,
+the receptive field per side is
+
+$$
+1 + \sum_{\ell=0}^{L-1} 2 \cdot 2^{\ell} = 1 + 2(2^{L} - 1) = 2^{L+1} - 1.
+$$
+
+Ten such layers see 2047 pixels in each direction with 90 weights per channel pair and a full-resolution output.
+Ordinary $3 \times 3$ layers would need 1023 layers for the same field.
+
+DeepLab replaces the strides of the last stages of a classification backbone with dilation, so the output stride is 8
+or 16 rather than 32 <Cite id="chen2018deeplab" />. Atrous spatial pyramid pooling (ASPP) runs parallel dilated
+convolutions with several rates, such as 6, 12 and 18, plus image-level pooling, and concatenates their outputs to see
+objects at several scales at once <Cite id="chen2017deeplab" />. Early versions refined boundaries with a fully
+connected conditional random field over pixels. Later versions dropped it.
+
+### Training and evaluation
+
+The loss is the mean over pixels of the cross-entropy between the predicted distribution and the true class. Rare
+classes occupy few pixels and contribute little to it. Class-weighted cross-entropy, or a Dice-based loss that
+normalises by region size, rebalances them. Datasets mark ambiguous boundary pixels as "void" and exclude them from both
+loss and evaluation <Cite id="everingham2010" />.
+
+The standard metric is mean IoU: for each class, the intersection over union of predicted and true pixel sets,
+accumulated over the whole test set, averaged over classes (see <NoteLink to="dice-and-segmentation-overlap" />).
+Pixel accuracy is dominated by large classes such as road and sky and is rarely reported alone.
+
+## Worked example
+
+**Transposed convolution.** A decoder turns a $7 \times 7$ feature map into $14 \times 14$ with $k = 4$, $s = 2$ and
+$p = 1$. The output width is $(7 - 1) \cdot 2 + 4 - 2 = 14$. Here $k = 4$ is divisible by $s = 2$, so every output
+position away from the border receives exactly $k/s = 2$ contributions per axis, and there is no checkerboard pattern.
+With $k = 3$, $s = 2$ and $p = 1$ the width is $(7 - 1) \cdot 2 + 3 - 2 = 13$, and alternate output positions receive two
+contributions and one, which is the source of the checkerboard.
+
+**Receptive field.** A context module of four $3 \times 3$ layers with dilations 1, 2, 4 and 8 has a receptive field
+of $2^{5} - 1 = 31$ pixels per side: $1 + 2 + 4 + 8 + 16 = 31$. Four ordinary $3 \times 3$ layers see only
+$1 + 4 \cdot 2 = 9$.
+
+## Assumptions
+
+- Each pixel belongs to exactly one class. Transparent, blurred or mixed pixels at boundaries do not.
+- Classes are defined by appearance and context available in the image. Distinguishing two identical-looking regions
+  that differ only in meaning, such as a road and a car park, needs more context than a local receptive field gives.
+
+## Pitfalls
+
+- **Coarse output.** An output stride of 32 cannot place a boundary more precisely than about 16 pixels. Skip
+  connections, lower output stride or refinement are needed for sharp boundaries.
+- **Gridding.** Stacking layers with the same dilation $d > 1$ samples the input on a sparse grid and misses the
+  pixels between. Mixing rates, as in $1, 2, 4$, fills the gaps.
+- **Class imbalance.** Unweighted cross-entropy lets a model ignore small classes such as poles and signs with little
+  loss. Check per-class IoU, not only the mean.
+- **Resolution memory.** Full-resolution feature maps are expensive. A $1024 \times 2048$ street scene at output
+  stride 8 still has $128 \times 256$ positions per channel in the final layers.

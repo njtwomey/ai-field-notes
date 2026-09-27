@@ -1,0 +1,196 @@
+---
+title: Feature detection and descriptors
+kind: concept
+summary: 'A local feature is a distinctive image point plus a vector describing its neighbourhood, used to match views. Harris corners are points where the structure tensor $\Mmat$ has two large eigenvalues, scored by $\det\Mmat - k(\trace\Mmat)^2$. SIFT adds scale and rotation invariance; ORB uses binary tests.'
+tags: [computer-vision, image-processing, worked-example]
+aliases:
+  [
+    local features,
+    keypoints,
+    interest points,
+    Harris corner detector,
+    corner detection,
+    structure tensor,
+    second-moment matrix,
+    Shi-Tomasi,
+    SIFT,
+    scale-invariant feature transform,
+    ORB,
+    FAST,
+    BRIEF,
+    ratio test,
+    feature matching,
+  ]
+requires: [edge-detection, eigendecomposition]
+related: [image-pyramids-and-scale-space, homography, structure-from-motion, nearest-neighbour-search]
+references: [harris1988, shi1994, lowe2004, rublee2011, rosten2006, calonder2010, bay2008, szeliski2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { HarrisResponse } from './HarrisResponse'
+
+<Definition>
+A **feature detector** finds keypoints: image locations, often with a scale and an orientation, that can be found again
+in another image of the same scene. A **descriptor** summarises the image patch around each keypoint as a vector, so
+that patches showing the same surface point have nearby vectors. Matching pairs keypoints across images by the distance
+between their descriptors.
+</Definition>
+
+## Intuition
+
+To align two photographs, or to reconstruct a scene from them, one needs pairs of pixels that show the same physical
+point. A patch in a flat region looks like every other patch near it, so its position is undefined. A patch on a
+straight edge can slide along the edge without changing, so its position is undefined along one direction. A patch at
+a corner changes whichever way it moves, so its position is fixed in both directions. Corners and blobs are the points
+worth matching.
+
+A match also needs a comparison that survives the change of view. Raw pixels change with rotation, scale and lighting.
+A descriptor built from histograms of gradient directions, measured relative to the keypoint's own scale and
+orientation, changes much less.
+
+## Details
+
+### The structure tensor
+
+Let $I$ be the image and $w$ a window function around a point, such as a Gaussian of width $\sigma_i$. Shift the window
+by $(u, v)$ and measure the change as a weighted sum of squared differences:
+
+$$
+E(u, v) = \sum_{x, y} w(x, y) \brack{I(x + u, y + v) - I(x, y)}^2.
+$$
+
+For a small shift, the first-order Taylor expansion $I(x + u, y + v) \approx I(x, y) + I_x u + I_y v$, with $I_x$ and
+$I_y$ the partial derivatives, gives
+
+$$
+E(u, v) \approx \sum_{x, y} w(x, y)\, (I_x u + I_y v)^2 =
+\begin{bmatrix} u & v \end{bmatrix} \Mmat \begin{bmatrix} u \\ v \end{bmatrix}, \qquad
+\Mmat = \sum_{x, y} w(x, y) \begin{bmatrix} I_x^2 & I_x I_y \\ I_x I_y & I_y^2 \end{bmatrix}.
+$$
+
+$\Mmat$ is the structure tensor, or second-moment matrix. It is symmetric and positive semi-definite, so it has real
+eigenvalues $\lambda_1 \ge \lambda_2 \ge 0$ with orthogonal eigenvectors. The change $E$ is $\lambda_1$ times the
+squared shift along the first eigenvector and $\lambda_2$ times it along the second. The eigenvalues classify the
+patch:
+
+- **Flat:** $\lambda_1 \approx \lambda_2 \approx 0$. No shift changes the patch.
+- **Edge:** $\lambda_1 \gg \lambda_2 \approx 0$. Shifts along the edge (the second eigenvector) change nothing.
+- **Corner:** both eigenvalues large. Every shift changes the patch.
+
+### Harris and Shi–Tomasi responses
+
+Harris and Stephens avoided computing eigenvalues at every pixel <Cite id="harris1988" />. The determinant and trace of
+$\Mmat$ are $\det\Mmat = \lambda_1\lambda_2$ and $\trace\Mmat = \lambda_1 + \lambda_2$, both cheap. Their response is
+
+$$
+R = \det\Mmat - k\,(\trace\Mmat)^2 = \lambda_1\lambda_2 - k(\lambda_1 + \lambda_2)^2,
+$$
+
+with $k$ typically between 0.04 and 0.06. On an edge, $\lambda_2 = 0$ gives $R = -k\lambda_1^2 < 0$. At an isotropic
+corner, $\lambda_1 = \lambda_2 = \lambda$ gives $R = \lambda^2(1 - 4k) > 0$ for $k < 1/4$. In general, write
+$\rho = \lambda_1/\lambda_2 \ge 1$. Then $R > 0$ exactly when
+
+$$
+\frac{\rho}{(1 + \rho)^2} > k.
+$$
+
+The left side falls as $\rho$ grows, so $k$ sets the largest eigenvalue ratio accepted as a corner: 23.0 for
+$k = 0.04$ and 14.6 for $k = 0.06$. Corners are the local maxima of $R$ above a threshold. Shi and Tomasi used
+$\min(\lambda_1, \lambda_2) = \lambda_2$ instead, which directly measures how well the patch can be tracked in its
+weakest direction <Cite id="shi1994" />.
+
+The response depends only on the eigenvalues, so it is unchanged by rotating the image. It is not invariant to scale:
+a corner seen at a larger scale looks like an edge inside a small window.
+
+<HarrisResponse />
+
+### SIFT: scale-invariant keypoints and descriptors
+
+Lowe's scale-invariant feature transform has four stages <Cite id="lowe2004" />:
+
+1. **Scale-space extrema.** Build a difference-of-Gaussians stack, which approximates the scale-normalised Laplacian
+   (see <NoteLink to="image-pyramids-and-scale-space" />). A sample is a candidate keypoint if it is larger or smaller
+   than all 26 neighbours: 8 at its own scale and 9 at each adjacent scale.
+2. **Localisation and filtering.** Fit a quadratic to the DoG function $D$ around the sample. Setting the gradient of
+   $D(\xvec_0 + \deltavec) \approx D + \nabla D^\top \deltavec + \tfrac12 \deltavec^\top \Hmat \deltavec$ to zero gives
+   the sub-pixel offset $\hat\deltavec = -\Hmat^{-1} \nabla D$. Candidates with $\abs{D(\hat\deltavec)} < 0.03$ (for
+   intensities in $[0, 1]$) are dropped as low contrast. Candidates on edges are dropped with the $2 \times 2$ spatial
+   Hessian of $D$: if its eigenvalues are $\alpha = r\beta$, then $(\trace \Hmat)^2 / \det \Hmat = (r + 1)^2/r$, which
+   grows with $r$. Lowe rejects points with $r > 10$, that is $(\trace \Hmat)^2/\det\Hmat > 12.1$.
+3. **Orientation.** Build a 36-bin histogram of gradient directions around the keypoint, weighted by gradient
+   magnitude and a Gaussian window. Its peak sets the keypoint's orientation; any other peak within 80% of it creates
+   another keypoint at the same place.
+4. **Descriptor.** Rotate a $16 \times 16$ sample grid at the keypoint's scale to its orientation. Split it into
+   $4 \times 4$ cells and build an 8-bin orientation histogram in each: $4 \cdot 4 \cdot 8 = 128$ numbers. Normalise
+   to unit length, clip entries at 0.2 and renormalise, which limits the effect of non-linear lighting changes.
+
+Because every measurement is taken relative to the keypoint's scale and orientation, the descriptor is invariant to
+image scaling and rotation. Normalisation removes changes in contrast. Histograms over cells tolerate small shifts and
+distortions. SURF approximates the same pipeline with box filters on an integral image <Cite id="bay2008" />.
+
+### ORB: binary features
+
+ORB replaces floating-point gradients with intensity comparisons <Cite id="rublee2011" />:
+
+- **FAST detection.** A pixel is a corner if at least 9 contiguous pixels on a circle of 16 around it are all brighter
+  or all darker than it by a threshold <Cite id="rosten2006" />. ORB ranks FAST points by the Harris response and
+  detects them on an image pyramid for scale.
+- **Orientation from the intensity centroid.** With patch moments $m_{pq} = \sum_{x, y} x^p y^q I(x, y)$ taken about
+  the keypoint, the angle is $\theta = \operatorname{atan2}(m_{01}, m_{10})$, the direction from the keypoint to the
+  patch's centre of brightness.
+- **Steered BRIEF descriptor.** BRIEF compares the smoothed intensities at 256 pairs of points in the patch and records
+  each comparison as one bit <Cite id="calonder2010" />. ORB rotates the point pairs by $\theta$ and chooses pairs that
+  are uncorrelated and have high variance.
+
+The descriptor is 32 bytes. Two descriptors are compared by Hamming distance, the number of differing bits, which is an
+XOR and a population count. ORB is about two orders of magnitude faster than SIFT, at some cost in robustness to large
+scale changes.
+
+### Matching
+
+Each descriptor in one image is matched to its nearest neighbour in the other: Euclidean distance for SIFT, Hamming
+distance for ORB. Many keypoints have no true match, because they were occluded or fell outside the other view. Lowe's
+ratio test accepts a match only if the nearest neighbour is clearly closer than the second nearest, with
+$d_1 / d_2 < 0.8$. In his experiments this removed 90% of false matches and less than 5% of correct ones
+<Cite id="lowe2004" />. Large databases use approximate <NoteLink to="nearest-neighbour-search" />. Surviving matches
+still contain outliers, so geometric fitting uses a robust method such as RANSAC (see <NoteLink to="homography" />).
+
+## Worked example
+
+Suppose the structure tensor at one pixel is $\Mmat = \diag(10, 2)$, in squared intensity units. Then
+$\det\Mmat = 20$, $\trace\Mmat = 12$ and, with $k = 0.04$,
+
+$$
+R = 20 - 0.04 \times 144 = 14.24 > 0.
+$$
+
+The eigenvalue ratio is 5, below the limit of 23.0, so the point is a corner. Rotate the image by $30°$. The gradients
+rotate and the tensor becomes
+
+$$
+\Mmat' = \begin{bmatrix} 8 & 3.46 \\ 3.46 & 4 \end{bmatrix},
+$$
+
+with $\det\Mmat' = 32 - 12 = 20$ and $\trace\Mmat' = 12$, so $R$ is again 14.24. The response ignores rotation.
+
+Now take an edge, $\Mmat = \diag(10, 0.1)$. Then $\det\Mmat = 1$, $\trace\Mmat = 10.1$ and
+$R = 1 - 0.04 \times 102.01 = -3.08$. The eigenvalue ratio is 100, well above 23, and $R$ is negative. The
+Shi–Tomasi score is $\min(\lambda_1, \lambda_2) = 2$ for the corner and $0.1$ for the edge.
+
+## Assumptions
+
+- The scene is locally planar and rigid, so a small patch changes by roughly a similarity or affine transformation
+  between views. Strong perspective, non-rigid motion and specular reflections break this.
+- The scene is textured. Uniform walls, sky and repetitive patterns such as windows or tiles give few keypoints or
+  ambiguous matches.
+
+## Pitfalls
+
+- **Threshold on an absolute scale.** $R$ grows with the fourth power of image contrast. Thresholds relative to the
+  maximum response, or a fixed number of strongest keypoints, transfer better between images.
+- **Clustered keypoints.** Strong responses concentrate on textured regions, leaving other parts of the image without
+  matches. Adaptive non-maximal suppression or a grid spreads them out.
+- **Repeated structure.** The nearest neighbour of a window corner is often another, identical window corner. The ratio
+  test rejects many of these, but geometric verification is still needed.
+- **Mixing distances.** Binary descriptors must be compared with Hamming distance, not Euclidean distance on the bytes.

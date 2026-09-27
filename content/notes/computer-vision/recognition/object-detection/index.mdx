@@ -1,0 +1,210 @@
+---
+title: Object detection
+kind: concept
+summary: 'Object detection outputs a box, class and score for every object in an image. Two-stage detectors (Faster R-CNN) classify region proposals; one-stage detectors (YOLO, SSD) predict densely from anchors; both remove duplicates by non-maximum suppression. DETR predicts a set.'
+tags: [computer-vision, deep-learning, worked-example]
+aliases:
+  [
+    detection,
+    bounding box detection,
+    R-CNN,
+    Fast R-CNN,
+    Faster R-CNN,
+    region proposal network,
+    RPN,
+    YOLO,
+    SSD,
+    DETR,
+    anchor boxes,
+    non-maximum suppression,
+    NMS,
+    feature pyramid network,
+    FPN,
+  ]
+requires: [image-classification, intersection-over-union]
+related:
+  [
+    mean-average-precision-for-detection,
+    focal-loss,
+    instance-and-panoptic-segmentation,
+    semantic-segmentation,
+    transformer,
+    residual-network,
+  ]
+references:
+  [
+    girshick2014,
+    girshick2015,
+    ren2015,
+    redmon2016,
+    liu2016ssd,
+    lin2017,
+    lin2017fpn,
+    carion2020,
+    uijlings2013,
+    bodla2017,
+    tian2019,
+    everingham2010,
+    lin2014,
+  ]
+status: draft
+updated: 2026-09-27
+---
+
+import { NmsExplorer } from './NmsExplorer'
+
+<Definition>
+Object detection takes an image and returns a set of detections, each an axis-aligned bounding box $(x, y, w, h)$
+(centre, width and height), a class label from $K$ classes and a confidence score. The number of objects is not known in
+advance. A detection is correct if its class is right and its box overlaps a ground-truth box of that class with
+<NoteLink to="intersection-over-union" /> above a threshold, usually 0.5.
+</Definition>
+
+## Intuition
+
+Classification answers "what is in this image?". Detection also answers "where, and how many?". The output is a
+variable-length set, which a network with a fixed output size cannot produce directly. Every detector resolves this in
+one of two ways. It can make a large, fixed number of guesses, one per location and shape on a grid, score each, and
+then discard the duplicates. Or it can predict a fixed number of slots, most of them "no object", and train with a loss
+that matches slots to objects one to one.
+
+## Details
+
+### Two-stage detectors: the R-CNN family
+
+- **R-CNN.** Selective search, a bottom-up grouping of superpixels, proposes about 2000 candidate regions per image
+  <Cite id="uijlings2013" />. Each region is warped to a fixed size and passed through a CNN pretrained on ImageNet. A
+  linear SVM per class scores the features and a linear regressor refines the box. R-CNN improved mean average
+  precision on PASCAL VOC 2012 by more than 30% relative to the previous best, to 53.3% <Cite id="girshick2014" />. It
+  ran the CNN 2000 times per image.
+- **Fast R-CNN.** Run the CNN once on the whole image. For each proposal, RoI pooling divides the proposal's region of
+  the feature map into a fixed grid, such as $7 \times 7$, and max-pools each cell. The fixed-size result feeds layers
+  that output class probabilities and box refinements, trained jointly with one multi-task loss
+  <Cite id="girshick2015" />.
+- **Faster R-CNN.** Replace selective search with a region proposal network (RPN) that shares the backbone's features.
+  At every position of the feature map it places $k = 9$ anchor boxes, of three areas ($128^2$, $256^2$, $512^2$ pixels)
+  and three aspect ratios (1:2, 1:1, 2:1). A small convolutional head predicts, for each anchor, an objectness score and
+  four box offsets. Anchors with IoU above 0.7 with a ground-truth box are positives and below 0.3 negatives. The top
+  proposals after NMS go to the Fast R-CNN head. Detection ran at about 5 frames per second with a VGG-16 backbone
+  <Cite id="ren2015" />.
+
+Objects appear at many sizes. A feature pyramid network adds a top-down path with lateral connections to the backbone,
+so that every level of the feature pyramid has strong semantic features, and assigns each anchor size to a level
+<Cite id="lin2017fpn" />.
+
+### Box parameterisation
+
+A detector does not predict box coordinates directly. It predicts offsets relative to an anchor or proposal
+$(x_a, y_a, w_a, h_a)$:
+
+$$
+t_x = \frac{x - x_a}{w_a}, \quad t_y = \frac{y - y_a}{h_a}, \quad t_w = \log\frac{w}{w_a}, \quad t_h = \log\frac{h}{h_a}.
+$$
+
+Each choice has a reason. Dividing the centre offset by the anchor's size makes the target independent of scale: if
+the image, box and anchor are all enlarged by a factor $s$, then $x - x_a$ and $w_a$ both scale by $s$ and $t_x$ is
+unchanged. The same holds for $t_w$, since $\log(sw/(sw_a)) = \log(w/w_a)$. The logarithm also makes the decoded width
+$w = w_a e^{t_w}$ positive for any prediction, and treats doubling and halving symmetrically, as $\pm \log 2$. The
+offsets are trained with the smooth $L_1$ loss, quadratic below 1 and linear above, so large errors on a few
+boxes do not dominate the gradient.
+
+### One-stage detectors
+
+One-stage detectors skip the proposal step and predict classes and boxes densely.
+
+- **YOLO** divides the image into an $S \times S$ grid. Each cell predicts $B$ boxes, each with four coordinates and a
+  confidence, plus $C$ class probabilities. With $S = 7$, $B = 2$ and $C = 20$ the output is a
+  $7 \times 7 \times 30$ tensor. The cell containing an object's centre is responsible for it. YOLO ran at 45 frames per
+  second, with more localisation errors than Faster R-CNN <Cite id="redmon2016" />.
+- **SSD** places default boxes of several aspect ratios on six feature maps of decreasing resolution, from
+  $38 \times 38$ to $1 \times 1$ for a $300 \times 300$ input, 8732 boxes in all. Fine maps detect small objects and
+  coarse maps large ones <Cite id="liu2016ssd" />.
+- **RetinaNet** showed that the accuracy gap between one- and two-stage detectors came from class imbalance: among
+  about 100,000 anchors per image, almost all are easy background. Its <NoteLink to="focal-loss" /> down-weights
+  well-classified anchors so that the rare objects dominate training <Cite id="lin2017" />.
+- **Anchor-free** detectors such as FCOS predict, at each feature-map location inside an object, the distances to the
+  four sides of its box, which removes the anchor hyperparameters <Cite id="tian2019" />.
+
+### Non-maximum suppression
+
+A dense detector fires several times on each object, with overlapping boxes from neighbouring anchors. Greedy
+non-maximum suppression (NMS) keeps one box per object:
+
+1. Discard boxes with score below a score threshold. Sort the rest by score.
+2. Move the highest-scoring box from the list to the output.
+3. Delete from the list every box whose IoU with that box exceeds the IoU threshold $\tau$, typically 0.5.
+4. Repeat from step 2 until the list is empty.
+
+NMS is applied separately for each class. With $n$ boxes it costs $O(n^2)$ IoU computations in the worst case. The
+threshold $\tau$ is a trade-off: too low and a box for a second object that overlaps the first is deleted; too high and
+duplicates survive. Soft-NMS lowers the scores of overlapping boxes in proportion to their IoU instead of deleting them
+<Cite id="bodla2017" />.
+
+<NmsExplorer />
+
+### Set prediction with DETR
+
+DETR removes both anchors and NMS <Cite id="carion2020" />. A CNN backbone and a transformer encoder process the image.
+A transformer decoder takes $N = 100$ learned query vectors and outputs $N$ predictions, each a class, which may be
+"no object", and a box. Training first finds the one-to-one assignment $\hat\sigma$ of predictions to the $M \le N$
+ground-truth objects that minimises the total matching cost,
+
+$$
+\hat\sigma = \argmin_{\sigma} \sum_{i=1}^{M} \mathcal{L}_{\text{match}}\paren{y_i, \hat y_{\sigma(i)}},
+$$
+
+where the cost combines the predicted probability of the true class with the $L_1$ and generalised IoU distances
+between boxes. The Hungarian algorithm solves this assignment in $O(N^3)$. The loss is then computed on matched pairs,
+and unmatched predictions are trained to output "no object". Because each object is matched to exactly one
+prediction, the network learns not to produce duplicates. DETR needed far longer training than Faster R-CNN (500 epochs
+on COCO) and was weaker on small objects.
+
+### Evaluation
+
+Detectors are compared by mean average precision: detections are matched to ground truth by IoU in order of
+confidence, a precision–recall curve is built for each class, and the area under it is averaged over classes (see
+<NoteLink to="mean-average-precision-for-detection" />). PASCAL VOC uses an IoU threshold of 0.5
+<Cite id="everingham2010" />. COCO averages over thresholds from 0.50 to 0.95 <Cite id="lin2014" />, which rewards
+precise localisation.
+
+## Worked example
+
+**Box encoding.** An anchor has centre $(100, 100)$ and size $64 \times 128$ pixels. The ground-truth box has centre
+$(110, 90)$ and size $80 \times 120$. The regression targets are
+
+$$
+t_x = \frac{10}{64} = 0.156, \quad t_y = \frac{-10}{128} = -0.078, \quad t_w = \log\frac{80}{64} = 0.223, \quad
+t_h = \log\frac{120}{128} = -0.065.
+$$
+
+All four are small numbers of order 0.1, whatever the pixel size of the object, which makes them easy to regress.
+
+**NMS.** Take the ten boxes of the figure above: four around person A (scores 0.95, 0.80, 0.70, 0.40), three around
+person B (0.90, 0.75, 0.50) and three around object C (0.85, 0.60, 0.30). The best boxes of A and B have IoU 0.35. With
+$\tau = 0.5$ and no score threshold:
+
+1. Keep A 0.95. Its IoUs with the other A boxes are 0.77, 0.74 and 0.57, all above 0.5, so they are deleted. Its IoUs
+   with the B boxes are 0.35, 0.27 and 0.36, so they stay.
+2. Keep B 0.90. The remaining B boxes have IoU 0.76 and 0.74 with it and are deleted.
+3. Keep C 0.85. The other C boxes have IoU 0.69 and 0.71 and are deleted.
+
+Three boxes remain, one per object. With $\tau = 0.3$, step 1 also deletes B 0.90 (IoU 0.35) and B 0.50 (IoU 0.36).
+B 0.75 has IoU 0.27 with A's box and survives, so B is still detected, but by a worse box. With $\tau = 0.7$, A 0.40
+(IoU 0.57) and C 0.60 (IoU 0.69) survive as duplicates and would count as false positives.
+
+## Assumptions
+
+- Objects are well described by axis-aligned rectangles. Thin diagonal objects, such as a pole seen at an angle, fill a
+  small fraction of their box, and rotated-box or mask-based methods suit them better.
+- Objects of the same class rarely overlap heavily. Crowds violate this, and NMS then removes true detections.
+
+## Pitfalls
+
+- **One NMS threshold for all scenes.** A threshold tuned on sparse scenes loses people in crowds. Soft-NMS or set
+  prediction handles overlap better.
+- **Small objects.** Downsampling in the backbone leaves few feature-map cells on a small object. Feature pyramids and
+  higher input resolution help.
+- **Anchor design.** Anchors whose sizes and shapes do not cover the dataset's objects leave some objects with no
+  positive anchor, so they are never learned.
+- **Comparing mAP across protocols.** VOC AP at IoU 0.5 and COCO AP averaged over 0.50 to 0.95 often differ by about 20
+  points for the same detector.

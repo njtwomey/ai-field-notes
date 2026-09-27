@@ -1,0 +1,194 @@
+---
+title: Image pyramids and scale space
+kind: concept
+summary: 'A Gaussian pyramid blurs and halves an image repeatedly; a Laplacian pyramid stores differences between levels and reconstructs it exactly. Scale space $G_t \ast f$ solves the heat equation, and scale-normalised derivatives such as $t\nabla^2 L$ find each structure''s size.'
+tags: [computer-vision, image-processing, multiresolution, worked-example]
+aliases:
+  [
+    image pyramid,
+    Gaussian pyramid,
+    Laplacian pyramid,
+    scale-space,
+    scale space theory,
+    difference of Gaussians,
+    DoG,
+    automatic scale selection,
+    multiresolution,
+  ]
+requires: [image-filtering]
+related:
+  [
+    edge-detection,
+    feature-detection-and-descriptors,
+    aliasing,
+    decimation-and-interpolation,
+    discrete-wavelet-transform,
+    filter-banks,
+  ]
+references: [burt1983, burt1983b, koenderink1984, lindeberg1994, lindeberg1998, lowe2004, szeliski2022]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **Gaussian pyramid** is a sequence of images $g_0 = f, g_1, g_2, \dots$ in which each level is the previous one
+smoothed with a small low-pass kernel and subsampled by 2 in each direction. A **Laplacian pyramid** stores
+$L_\ell = g_\ell - \operatorname{expand}(g_{\ell+1})$ for each level plus the coarsest $g_N$. **Scale space** is the
+one-parameter family $L(x, y; t) = (G_t \ast f)(x, y)$ of the image blurred by Gaussians of variance $t = \sigma^2 \ge 0$
+<Cite id="lindeberg1994" />.
+</Definition>
+
+## Intuition
+
+The same object can cover 10 pixels or 500, depending on its distance from the camera. A detector with a fixed window
+sees only one of those sizes. Representing the image at many resolutions lets a fixed-size operation look at every
+scale: a $5 \times 5$ window on a level subsampled four times covers $80 \times 80$ pixels of the original.
+
+Blurring removes detail finer than the blur width. A stack of increasingly blurred images therefore separates structure
+by size. Differences between adjacent levels hold the detail that one level has and the next has lost, which is a
+band of spatial frequencies. The pyramid samples the stack coarsely and cheaply; scale space treats the blur width as a
+continuous coordinate.
+
+## Details
+
+### Gaussian pyramid
+
+Burt and Adelson built each level as <Cite id="burt1983" />
+
+$$
+g_{\ell+1}(r, c) = \sum_{u=-2}^{2} \sum_{v=-2}^{2} w(u)\, w(v)\, g_\ell(2r + u, 2c + v),
+$$
+
+with a separable five-tap kernel such as the binomial $w = \tfrac{1}{16}[1, 4, 6, 4, 1]$. The blur comes before the
+subsampling for a reason. Keeping every second pixel halves the sampling rate, so any frequency above the new Nyquist
+limit folds back onto a lower one (see <NoteLink to="aliasing" />). The low-pass kernel removes most of those
+frequencies first, as in <NoteLink to="decimation-and-interpolation" />.
+
+Each level has a quarter of the pixels of the one before. A pyramid over an $H \times W$ image with infinitely many
+levels stores
+
+$$
+HW\paren{1 + \tfrac14 + \tfrac1{16} + \cdots} = HW \cdot \frac{1}{1 - 1/4} = \tfrac43 HW
+$$
+
+pixels. The whole pyramid costs a third more storage than the image, and building it costs a constant number of
+operations per original pixel.
+
+### Laplacian pyramid
+
+Let $\operatorname{expand}$ upsample an image by 2, inserting zeros, and interpolate with the same kernel (scaled by 4
+to keep the brightness). Define
+
+$$
+L_\ell = g_\ell - \operatorname{expand}(g_{\ell+1}), \quad \ell = 0, \dots, N - 1, \qquad L_N = g_N.
+$$
+
+Reconstruction runs from the top. Rearranging the definition gives
+$g_\ell = L_\ell + \operatorname{expand}(g_{\ell+1})$. Starting from $g_N = L_N$ and applying this $N$ times recovers
+$g_0 = f$ exactly. The identity holds for any kernel, because each $L_\ell$ records exactly the error that
+$\operatorname{expand}$ makes. Nothing is lost unless the $L_\ell$ are quantised.
+
+Each $L_\ell$ is band-pass: $g_\ell$ has frequencies up to its Nyquist limit and $\operatorname{expand}(g_{\ell+1})$ has
+only the lower half of them, so their difference holds roughly one octave of frequencies. In smooth regions $L_\ell$ is
+close to zero. Burt and Adelson used this for compression: the Laplacian pyramid has a much lower entropy than the
+image. Blending two images level by level of their Laplacian pyramids joins them with a transition width matched to
+each frequency band, which hides seams <Cite id="burt1983b" />. The Laplacian pyramid is overcomplete, with
+$\tfrac43 HW$ coefficients; <NoteLink to="discrete-wavelet-transform">wavelet transforms</NoteLink> give a critically
+sampled alternative.
+
+### Scale space and the heat equation
+
+Let $G_t(x, y) = \frac{1}{2\pi t} \exp\paren{-\frac{x^2 + y^2}{2t}}$, a Gaussian of variance $t$ in each coordinate, and
+$L(\cdot\,; t) = G_t \ast f$ with $L(\cdot\,; 0) = f$. Differentiate $G_t$ with $\rho^2 = x^2 + y^2$:
+
+$$
+\frac{\partial G_t}{\partial t} = \paren{-\frac{1}{t} + \frac{\rho^2}{2t^2}} G_t, \qquad
+\nabla^2 G_t = \frac{\rho^2 - 2t}{t^2}\, G_t.
+$$
+
+The first is half the second, so $\partial_t G_t = \tfrac12 \nabla^2 G_t$. Convolution with $f$ commutes with both
+derivatives, so scale space solves the diffusion (heat) equation
+
+$$
+\frac{\partial L}{\partial t} = \frac12 \nabla^2 L, \qquad L(\cdot\,; 0) = f.
+$$
+
+Blurring is diffusion of intensity. Two further properties make the Gaussian the natural kernel:
+
+- **Semigroup.** $G_{t_1} \ast G_{t_2} = G_{t_1 + t_2}$, because the sum of two independent Gaussian displacements is
+  Gaussian with the sum of their variances. Blurring with $\sigma = 3$ and then $\sigma = 4$ equals blurring once with
+  $\sigma = 5$. Any level can be computed from any finer one.
+- **Non-enhancement of extrema.** At a local maximum of $L$ the Laplacian is $\nabla^2 L \le 0$, so by the heat
+  equation the maximum can only fall as $t$ grows; a minimum can only rise. Blurring never sharpens a peak or deepens a
+  valley. Koenderink argued from a related causality requirement that coarse structure must be a simplification of
+  fine structure <Cite id="koenderink1984" />. Among linear, shift-invariant, rotation-symmetric smoothing families
+  with the semigroup property, non-enhancement singles out the Gaussian <Cite id="lindeberg1994" />. In two
+  dimensions new local extrema can still appear in rare configurations; what is ruled out is the enhancement of
+  existing ones.
+
+### Scale selection
+
+Derivatives of $L$ shrink as $t$ grows, because blurring flattens everything. Lindeberg multiplied each derivative of
+order $m$ by $t^{m/2} = \sigma^m$, giving scale-normalised derivatives whose extrema over $t$ mark a structure's
+characteristic size <Cite id="lindeberg1998" />. For blobs the operator is the scale-normalised Laplacian
+$\sigma^2 \nabla^2 L$.
+
+Take a Gaussian blob $f = 2\pi s^2 G_{s^2}$ of radius parameter $s$ and height 1. By the semigroup property,
+$L(\cdot\,; \sigma^2) = 2\pi s^2 G_{s^2 + \sigma^2}$. At the blob centre, $\nabla^2 G_T(0) = -2/T \cdot 1/(2\pi T)$, so
+
+$$
+\sigma^2 \nabla^2 L(0; \sigma^2) = -\frac{2 s^2 \sigma^2}{(s^2 + \sigma^2)^2}.
+$$
+
+Write $u = \sigma^2$. The magnitude $u/(s^2 + u)^2$ has derivative proportional to $(s^2 + u) - 2u$, which is zero at
+$u = s^2$. The response peaks at $\sigma = s$: the detector's scale matches the blob's size, whatever that size is. A
+blob twice as large is found at twice the $\sigma$ with the same peak value $-\tfrac12$. This is scale invariance, and
+it is what SIFT keypoints rely on (see <NoteLink to="feature-detection-and-descriptors" />).
+
+### Difference of Gaussians
+
+The scale-normalised Laplacian is approximated cheaply by subtracting adjacent blurred images. With $t = \sigma^2$ the
+heat equation gives $\partial G / \partial \sigma = 2\sigma\, \partial G / \partial t = \sigma \nabla^2 G$. A finite
+difference in $\sigma$ with ratio $k$ then gives
+
+$$
+G_{k\sigma} - G_\sigma \approx (k\sigma - \sigma)\, \frac{\partial G}{\partial \sigma} = (k - 1)\, \sigma^2 \nabla^2 G.
+$$
+
+The difference of Gaussians is the scale-normalised Laplacian times a constant $k - 1$ that is the same at every scale.
+SIFT builds octaves of $s$ blurred images with $k = 2^{1/s}$, subtracts neighbours, and halves the image at the end of
+each octave <Cite id="lowe2004" />.
+
+## Worked example
+
+A $512 \times 512$ image has $262{,}144$ pixels. Its Gaussian pyramid down to $1 \times 1$ has ten levels, of sides
+$512, 256, \dots, 1$. The total pixel count is
+
+$$
+\sum_{\ell=0}^{9} 4^{\ell} = \frac{4^{10} - 1}{3} = 349{,}525,
+$$
+
+within one pixel of $\tfrac43 \times 262{,}144 = 349{,}525.3$.
+
+For scale selection, take a Gaussian blob with $s = 4$ pixels. The formula above gives a scale-normalised Laplacian at
+the centre of $-0.32$ at $\sigma = 2$, $-0.50$ at $\sigma = 4$ and $-0.43$ at $\sigma = 6$. Computing the same
+quantities numerically with a sampled Gaussian Laplacian gives $-0.320$, $-0.500$ and $-0.426$. The extremum is at
+$\sigma = 4$, the size of the blob.
+
+## Assumptions
+
+- Structures of interest are roughly blob- or edge-like, so a Gaussian model of their profile makes the selected scale
+  meaningful.
+- The image is band-limited enough for the pyramid's small kernel to suppress aliasing. A five-tap kernel is not an
+  ideal low-pass filter; a little aliasing remains.
+
+## Pitfalls
+
+- **Subsampling without blurring.** Taking every second pixel directly aliases fine texture into false coarse
+  patterns, such as moiré on fabric.
+- **Pyramid levels are not shift-invariant.** Shifting the input by one pixel changes a subsampled level by more than
+  a shift. Detectors that need exact positions refine them at the finest level.
+- **Octave spacing is coarse.** A factor of 2 between levels misses sizes in between. Scale-space detectors use several
+  blur levels per octave and interpolate the extremum.
+- **Scale-normalisation exponent.** The exponent $\gamma = 1$ in $\sigma^{\gamma m}$ suits blobs. Edges and ridges need
+  other exponents for their selected scale to match their width.
