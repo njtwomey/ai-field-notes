@@ -1,0 +1,168 @@
+---
+title: Hierarchical clustering
+kind: concept
+summary: 'Agglomerative hierarchical clustering starts with every point as its own cluster and repeatedly merges the two closest clusters, where the linkage (single, complete, average or Ward) defines closeness. The merges form a dendrogram; cutting it at a height gives a flat clustering.'
+tags: [clustering, unsupervised, worked-example]
+aliases: [agglomerative clustering, dendrogram, single linkage, complete linkage, average linkage, UPGMA, Ward's method, Lance–Williams formula, cophenetic distance]
+requires: [pairwise-distances-and-cosine-similarity]
+related: [k-means, internal-clustering-indices]
+references: [hastie2009, lance1967, ward1963, mullner2011]
+status: draft
+updated: 2026-09-27
+---
+
+import { DendrogramCut } from './DendrogramCut'
+
+<Definition>
+**Agglomerative hierarchical clustering** takes $n$ points and a distance $d(\xvec_i, \xvec_j)$ between points. It
+starts from $n$ singleton clusters. At each of $n - 1$ steps it merges the two clusters $A$ and $B$ with the smallest
+**linkage** $D(A, B)$, a distance between sets of points, and records the value of $D$ as the height of the merge. The
+output is a binary tree, the **dendrogram**, whose leaves are the points and whose internal nodes are the merges
+<Cite id="hastie2009" />.
+</Definition>
+
+## Linkages
+
+The linkage decides which clusters count as close. The four common choices, for clusters $A$ and $B$ of sizes $n_A$
+and $n_B$ with means $\muvec_A$ and $\muvec_B$:
+
+| Linkage | $D(A, B)$ | Clusters it favours |
+| --- | --- | --- |
+| Single | $\min_{\xvec \in A, \yvec \in B} d(\xvec, \yvec)$ | Long, chained, any shape |
+| Complete | $\max_{\xvec \in A, \yvec \in B} d(\xvec, \yvec)$ | Compact, similar diameter |
+| Average (UPGMA) | $\frac{1}{n_A n_B} \sum_{\xvec \in A} \sum_{\yvec \in B} d(\xvec, \yvec)$ | Between single and complete |
+| Ward | $\frac{n_A n_B}{n_A + n_B} \norm{\muvec_A - \muvec_B}^2$ | Compact, similar size, as in k-means |
+
+Single linkage looks only at the closest pair. A chain of points between two groups makes their single-linkage
+distance small, so single linkage merges the groups early. This is the **chaining** effect. Complete linkage looks at
+the farthest pair and splits elongated groups instead. Ward's linkage is the increase in the within-cluster sum of
+squares caused by the merge <Cite id="ward1963" />. Each Ward step is the greedy step that keeps the
+<NoteLink to="k-means">k-means</NoteLink> objective as small as possible.
+
+## Why Ward's linkage is the increase in squared error
+
+Let $\operatorname{SSE}(C) = \sum_{\xvec \in C} \norm{\xvec - \muvec_C}^2$. Merge $A$ and $B$ into $C$, with
+$n = n_A + n_B$ and $\muvec_C = (n_A\muvec_A + n_B\muvec_B)/n$. For a point $\xvec \in A$, expand around $\muvec_A$:
+
+$$
+\norm{\xvec - \muvec_C}^2 = \norm{\xvec - \muvec_A}^2 + 2(\xvec - \muvec_A)^\top(\muvec_A - \muvec_C)
++ \norm{\muvec_A - \muvec_C}^2.
+$$
+
+Summed over $\xvec \in A$, the middle term vanishes because $\sum_{\xvec \in A}(\xvec - \muvec_A) = \zeros$. The same
+holds for $B$. So
+
+$$
+\operatorname{SSE}(C) = \operatorname{SSE}(A) + \operatorname{SSE}(B) + n_A\norm{\muvec_A - \muvec_C}^2
++ n_B\norm{\muvec_B - \muvec_C}^2.
+$$
+
+Substituting $\muvec_A - \muvec_C = \frac{n_B}{n}(\muvec_A - \muvec_B)$ and
+$\muvec_B - \muvec_C = -\frac{n_A}{n}(\muvec_A - \muvec_B)$, the last two terms sum to
+$\paren{\frac{n_A n_B^2}{n^2} + \frac{n_B n_A^2}{n^2}}\norm{\muvec_A - \muvec_B}^2 =
+\frac{n_A n_B}{n}\norm{\muvec_A - \muvec_B}^2$. The increase in squared error is therefore
+
+$$
+\operatorname{SSE}(A \cup B) - \operatorname{SSE}(A) - \operatorname{SSE}(B) = \frac{n_A n_B}{n_A + n_B}\norm{\muvec_A -
+\muvec_B}^2.
+$$
+
+The factor $n_A n_B/(n_A + n_B)$ penalises merging two large clusters, so Ward's method tends to produce clusters of
+similar size.
+
+## The Lance–Williams update
+
+Recomputing $D$ from the points after every merge is wasteful. Lance and Williams showed that all four linkages can be
+updated from the old cluster distances alone <Cite id="lance1967" />. After merging $A$ and $B$, the distance from any
+other cluster $K$ to $A \cup B$ is
+
+$$
+D(K, A \cup B) = \alpha_A D(K, A) + \alpha_B D(K, B) + \beta D(A, B) + \gamma \abs{D(K, A) - D(K, B)}.
+$$
+
+The coefficients for each linkage follow from its definition:
+
+- **Single.** $\alpha_A = \alpha_B = \tfrac12$, $\beta = 0$, $\gamma = -\tfrac12$. For numbers $a$ and $b$,
+  $\tfrac12 a + \tfrac12 b - \tfrac12\abs{a - b} = \min(a, b)$. The closest pair between $K$ and $A \cup B$ is the
+  closer of the closest pairs between $K$ and $A$ and between $K$ and $B$.
+- **Complete.** The same with $\gamma = +\tfrac12$, which gives $\max(a, b)$.
+- **Average.** $\alpha_A = n_A/(n_A + n_B)$, $\alpha_B = n_B/(n_A + n_B)$, $\beta = \gamma = 0$. The sum of all
+  $n_K(n_A + n_B)$ pairwise distances splits into the pairs with $A$ and the pairs with $B$, so the mean over
+  $A \cup B$ is the size-weighted mean of the two means.
+- **Ward** (with $D$ the Ward linkage). $\alpha_A = (n_A + n_K)/(n_A + n_B + n_K)$,
+  $\alpha_B = (n_B + n_K)/(n_A + n_B + n_K)$, $\beta = -n_K/(n_A + n_B + n_K)$, $\gamma = 0$.
+
+<Derivation title="Derivation of the Ward coefficients">
+Write $\Delta_{PQ} = \frac{n_P n_Q}{n_P + n_Q}\norm{\muvec_P - \muvec_Q}^2$ and let $N = n_A + n_B + n_K$. The mean of
+$A \cup B$ is $\muvec_C = (n_A\muvec_A + n_B\muvec_B)/(n_A + n_B)$. Expand
+$\norm{\muvec_K - \muvec_C}^2$ with weights $w_A = n_A/(n_A + n_B)$ and $w_B = n_B/(n_A + n_B)$: for any vectors,
+$\norm{\muvec_K - w_A\muvec_A - w_B\muvec_B}^2 = w_A\norm{\muvec_K - \muvec_A}^2 + w_B\norm{\muvec_K - \muvec_B}^2 -
+w_A w_B\norm{\muvec_A - \muvec_B}^2$, which is the variance decomposition of a two-point distribution. Multiply by
+$n_K(n_A + n_B)/N$:
+
+$$
+\Delta_{K,C} = \frac{n_K n_A}{N}\norm{\muvec_K - \muvec_A}^2 + \frac{n_K n_B}{N}\norm{\muvec_K - \muvec_B}^2 -
+\frac{n_K n_A n_B}{N(n_A + n_B)}\norm{\muvec_A - \muvec_B}^2.
+$$
+
+Now $\frac{n_K n_A}{N}\norm{\muvec_K - \muvec_A}^2 = \frac{n_K + n_A}{N}\Delta_{KA}$, the same for $B$, and the last
+term is $\frac{n_K}{N}\Delta_{AB}$. That gives the coefficients above.
+</Derivation>
+
+The update makes the naive algorithm $O(n^2)$ in memory and $O(n^3)$ in time: $n - 1$ merges, each scanning the
+distance matrix. Better algorithms reach $O(n^2)$ time for all four linkages; for single linkage, SLINK is one
+<Cite id="mullner2011" />.
+
+## The dendrogram and cutting it
+
+The dendrogram draws each merge as a horizontal bar at its height. For single, complete, average and Ward linkage the
+heights never decrease from one merge to the next, so the tree has no crossings. Cutting the tree at height $t$ keeps
+the merges below $t$ and yields a flat clustering. Cutting between two consecutive heights gives the same clusters, so
+the tree encodes the clusterings for every number of clusters from $n$ down to 1 at once. A long vertical gap between
+consecutive merges suggests a natural cut.
+
+<DendrogramCut />
+
+The height at which two points first join the same cluster is their **cophenetic distance**. It satisfies the
+ultrametric inequality $c(\xvec, \zvec) \le \max(c(\xvec, \yvec), c(\yvec, \zvec))$. The correlation between
+cophenetic and original distances measures how faithfully the tree represents the data.
+
+## Worked example
+
+Five points on a line: $0, 1, 3, 7, 8$, with $d(x, y) = \abs{x - y}$.
+
+The first two merges are the same for every linkage: $\set{0, 1}$ and $\set{7, 8}$, both at height 1. The remaining
+three clusters are $\set{0, 1}$, $\set{3}$ and $\set{7, 8}$.
+
+- **Single.** $D(\set{0,1}, \set{3}) = 2$ and $D(\set{3}, \set{7,8}) = 4$, so $\set{0, 1, 3}$ forms at height 2. The
+  last merge is at $\min = 7 - 3 = 4$.
+- **Complete.** $D(\set{0,1}, \set{3}) = 3$ and $D(\set{3}, \set{7,8}) = 5$, so $\set{0, 1, 3}$ forms at height 3. The
+  last merge is at $\max = 8 - 0 = 8$.
+- **Average.** $D(\set{0,1}, \set{3}) = (3 + 2)/2 = 2.5$. The last merge is at the mean of the six distances
+  between $\set{0, 1, 3}$ and $\set{7, 8}$: $(7 + 8 + 6 + 7 + 4 + 5)/6 = 37/6 \approx 6.17$.
+- **Ward.** Merging $\set{0, 1}$ with $\set{3}$ adds $\frac{2 \cdot 1}{3}(3 - 0.5)^2 = 4.17$ to the squared error.
+  Merging $\set{0, 1}$ with $\set{7, 8}$ would add $\frac{2 \cdot 2}{4}(7.5 - 0.5)^2 = 49$, so $\set{0, 1, 3}$ forms
+  first. The last merge adds $\frac{3 \cdot 2}{5}(7.5 - \tfrac43)^2 = 45.63$.
+
+All four linkages give the same two-cluster solution, $\set{0, 1, 3}$ and $\set{7, 8}$. They disagree about how far
+apart the clusters are, which changes where a height threshold would cut. Libraries often report the Ward height as
+$\sqrt{2 \times \text{increase}}$, so that two single points merge at their distance: $\sqrt{2 \cdot 4.17} = 2.89$
+and $\sqrt{2 \cdot 45.63} = 9.55$ here. The numbers match SciPy's `linkage`.
+
+## Divisive clustering
+
+Divisive clustering builds the tree from the top: it starts with one cluster and splits recursively, for instance with
+2-means at each node. It is less common, because the best split of a set is expensive to find exactly. Agglomerative
+merges are greedy and cheap.
+
+## Pitfalls
+
+- **Merges are final.** A merge made early is never undone, even if later merges show it was wrong. The tree is not a
+  global optimum of any objective.
+- **Linkage changes the answer.** Single linkage finds chained, non-convex clusters but merges groups joined by
+  noise. Complete and Ward linkage prefer compact clusters and split elongated ones.
+- **Scaling.** Distances depend on the units of each feature. Standardise first, or choose the distance deliberately.
+- **Quadratic memory.** The distance matrix has $n(n - 1)/2$ entries, which limits the method to tens of thousands of
+  points on one machine.
+- **Choosing the cut.** The height or number of clusters is a separate decision; see
+  <NoteLink to="choosing-the-number-of-clusters">choosing the number of clusters</NoteLink>.

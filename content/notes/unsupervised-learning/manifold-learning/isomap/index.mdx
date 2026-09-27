@@ -1,0 +1,84 @@
+---
+title: Isomap
+kind: concept
+summary: 'Isomap embeds data from a curved manifold by estimating geodesic distances as shortest paths in a nearest-neighbour graph and applying classical MDS to them. On a manifold that is isometric to a convex region of $\reals^k$, it recovers the intrinsic coordinates as the sample grows.'
+tags: [manifold-learning, dimensionality-reduction, unsupervised, graphs, worked-example]
+aliases: [isometric feature mapping, geodesic distance, neighbourhood graph, short-circuit edges, landmark Isomap]
+requires: [multidimensional-scaling, k-nearest-neighbours]
+related: [locally-linear-embedding, principal-component-analysis, spectral-clustering]
+references: [tenenbaum2000, borg2005]
+status: draft
+updated: 2026-09-27
+---
+
+import { IsomapSpiral } from './IsomapSpiral'
+
+<Definition>
+**Isomap** takes points $\xvec_1, \dots, \xvec_n \in \reals^D$ and a neighbourhood size $k$ (or radius
+$\varepsilon$) <Cite id="tenenbaum2000" />. It
+
+1. builds a graph that joins each point to its $k$ nearest neighbours, with edge lengths $\norm{\xvec_i - \xvec_j}$;
+2. computes the shortest-path distance $d_G(i, j)$ between every pair of points in the graph;
+3. applies classical <NoteLink to="multidimensional-scaling">multidimensional scaling</NoteLink> to the matrix of
+   $d_G$ and keeps the top $m$ coordinates.
+</Definition>
+
+## Straight-line distance is the wrong distance
+
+Data often lie near a low-dimensional curved surface, a **manifold**, inside a high-dimensional space. Images of one
+object under different rotations form a curve; the "Swiss roll" is a sheet rolled up in three dimensions. Two points
+on opposite layers of the roll are close in straight-line distance but far apart along the sheet. PCA and classical MDS
+use straight-line distances, so they project the layers on top of each other.
+
+The distance along the manifold is the **geodesic** distance. On a manifold that can be unrolled without stretching,
+geodesic distances are the Euclidean distances of the unrolled coordinates. Isomap estimates them and hands them to
+MDS, which then finds those coordinates.
+
+## Geodesics from a neighbourhood graph
+
+Over short distances a smooth manifold is nearly flat, so for near neighbours the straight-line distance approximates
+the geodesic distance. A long geodesic is approximated by a chain of short hops. The shortest path through the
+neighbourhood graph is the chain of hops with the smallest total length. It is computed by Dijkstra's algorithm from
+every point, $O(n^2\log n + n^2 k)$ in total, or by Floyd–Warshall in $O(n^3)$.
+
+Tenenbaum, de Silva and Langford proved that the graph distances converge to the true geodesic distances as the
+sampling density increases, provided the neighbourhoods are small compared with the curvature of the manifold and the
+gaps between its folds <Cite id="tenenbaum2000" />. If the manifold is isometric to a convex region of $\reals^m$, the
+geodesic distances are Euclidean in $m$ dimensions, and classical MDS recovers the coordinates up to rotation and
+translation.
+
+<IsomapSpiral />
+
+## Choosing k
+
+The neighbourhood size trades two failures against each other:
+
+- **Too small.** The graph falls into disconnected pieces, and some geodesic distances are infinite. Isomap then embeds
+  each connected component separately, or fails.
+- **Too large.** Edges jump across gaps between folds of the manifold. One such **short-circuit** edge makes many
+  shortest paths cut across, and the embedding collapses the folds.
+
+The residual variance, $1 - R^2$ between $d_G$ and the embedded distances, plotted against the dimension $m$, shows the
+intrinsic dimension as the point where it stops falling.
+
+## Worked example
+
+Five points lie on a unit semicircle at angles $0°, 45°, 90°, 135°, 180°$. Join points closer than $\varepsilon = 0.8$.
+
+- Adjacent points are $2\sin(22.5°) = 0.765$ apart; the next nearest are $1.414$ apart. The graph is a chain.
+- The graph distance between the two ends is $4 \times 0.765 = 3.061$. The true arc length is $\pi = 3.142$ and the
+  straight-line distance is $2$.
+- The graph distances are $0.765\abs{i - j}$. Classical MDS on them gives one nonzero eigenvalue, $5.858$, and the
+  coordinates $(1.531, 0.765, 0, -0.765, -1.531)$ up to sign: the semicircle unrolled onto a line with equal spacing.
+- Classical MDS on the straight-line distances instead needs two dimensions (eigenvalues $3$ and $0.834$). Its first
+  coordinate, $(-1, -0.707, 0, 0.707, 1)$, bunches the points near the ends.
+
+## Pitfalls
+
+- **Short circuits.** A single edge across a fold changes the embedding globally. Noise makes short circuits more likely.
+- **Holes and non-convexity.** If the manifold has a hole, geodesics bend around it, and the distances are not
+  Euclidean in any flat domain. The embedding is distorted.
+- **Cost.** All-pairs shortest paths and a dense $n \times n$ eigendecomposition limit plain Isomap to a few thousand
+  points. Landmark Isomap computes distances from a subset of landmark points only.
+- **Curvature.** A manifold that cannot be flattened without stretching, such as a sphere, has no distance-preserving
+  map to the plane. Isomap then gives the best classical-MDS compromise.

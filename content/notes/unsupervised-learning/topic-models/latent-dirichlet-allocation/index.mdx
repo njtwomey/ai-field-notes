@@ -1,0 +1,159 @@
+---
+title: Latent Dirichlet allocation
+kind: concept
+summary: 'LDA models each document as a mixture of $K$ topics, each topic a distribution over words. Document mixtures $\thetavec_d$ and topics $\phivec_k$ have Dirichlet priors, and each word is drawn by first choosing a topic from $\thetavec_d$. Collapsed Gibbs sampling or variational EM infers the topics.'
+tags: [topic-models, unsupervised, bayesian, latent-variable-models, nlp, worked-example]
+aliases: [LDA topic model, topic model, topic–word distribution, document–topic distribution, variational EM for LDA]
+requires: [dirichlet-distribution, categorical-distribution, bayes-theorem]
+related: [gibbs-sampling, probabilistic-latent-semantic-analysis, mean-field-variational-inference, expectation-maximisation, multinomial-distribution, gaussian-mixture-model]
+references: [blei2003, griffiths2004, bishop2006]
+status: draft
+updated: 2026-09-27
+---
+
+import { GibbsBars } from './GibbsBars'
+
+<Definition>
+**Latent Dirichlet allocation** (LDA) is a generative model of $D$ documents over a vocabulary of $V$ words with $K$
+topics <Cite id="blei2003" />. With hyperparameters $\alpha > 0$ and $\beta > 0$:
+
+1. For each topic $k = 1, \dots, K$, draw a distribution over words $\phivec_k \sim \Dir(\beta, \dots, \beta)$.
+2. For each document $d$, draw a distribution over topics $\thetavec_d \sim \Dir(\alpha, \dots, \alpha)$.
+3. For each word position $n$ in document $d$, draw a topic $z_{dn} \sim \Cat(\thetavec_d)$, then a word
+   $w_{dn} \sim \Cat(\phivec_{z_{dn}})$.
+
+Only the words $w_{dn}$ are observed. Inference recovers the topics $\phivec_k$, the document mixtures $\thetavec_d$
+and the assignments $z_{dn}$.
+</Definition>
+
+## The model in words
+
+A **topic** is a probability distribution over the vocabulary. A topic about genetics puts high probability on "gene",
+"DNA" and "sequence". A **document** is a bag of words, with order ignored, and it is about several topics in different
+proportions. Each word in it was produced by one of those topics. Documents share the same $K$ topics but mix them
+differently. Fitting LDA to a corpus finds topics whose mixtures explain which words co-occur in documents.
+
+In plate notation, an outer plate over documents $d$ contains $\thetavec_d$ and an inner plate over positions $n$,
+which contains $z_{dn} \to w_{dn}$. A separate plate over topics $k$ contains $\phivec_k$, which points into every
+$w_{dn}$. The hyperparameter $\alpha$ points into $\thetavec_d$ and $\beta$ into $\phivec_k$.
+
+The Dirichlet priors control sparsity. With $\alpha < 1$, draws of $\thetavec_d$ concentrate on few topics, so each
+document is about a handful of subjects. With $\beta < 1$, each topic concentrates on few words. The
+<NoteLink to="dirichlet-distribution">Dirichlet</NoteLink> is conjugate to the categorical distribution, which makes
+the collapsed sampler below possible.
+
+## Counts
+
+Inference works with counts of the current topic assignments:
+
+| Symbol | Meaning |
+| --- | --- |
+| $n_{dk}$ | Number of words in document $d$ assigned to topic $k$. |
+| $n_{kw}$ | Number of times word $w$ is assigned to topic $k$ across the corpus. |
+| $n_k$ | Total number of words assigned to topic $k$: $n_k = \sum_w n_{kw}$. |
+| $n^{\neg i}$ | Any count with the current word $i$ removed. |
+
+## Collapsing the Dirichlets
+
+The conditional distribution of one assignment needs the joint $p(\wvec, \zvec \mid \alpha, \beta)$ with $\thetavec$
+and $\phivec$ integrated out. For one topic, the words assigned to it are independent draws from $\phivec_k$, so their
+probability given $\phivec_k$ is $\prod_w\phi_{kw}^{n_{kw}}$. Integrating against the Dirichlet prior with density
+$\frac{\Gamma(V\beta)}{\Gamma(\beta)^V}\prod_w\phi_{kw}^{\beta - 1}$ gives another Dirichlet integral:
+
+$$
+\int \prod_w \phi_{kw}^{n_{kw}}\,\Dir(\phivec_k \mid \beta)\,d\phivec_k = \frac{\Gamma(V\beta)}{\Gamma(\beta)^V}\,
+\frac{\prod_w\Gamma(n_{kw} + \beta)}{\Gamma(n_k + V\beta)}.
+$$
+
+The integral of $\prod_w\phi_{kw}^{n_{kw} + \beta - 1}$ over the simplex is the inverse normalising constant of
+$\Dir(n_{k1} + \beta, \dots, n_{kV} + \beta)$, which is $\prod_w\Gamma(n_{kw} + \beta)/\Gamma(n_k + V\beta)$. The same
+argument for $\thetavec_d$ gives the factor $\prod_k\Gamma(n_{dk} + \alpha)/\Gamma(n_d + K\alpha)$ per document, up to
+constants. So
+
+$$
+p(\wvec, \zvec \mid \alpha, \beta) \propto \prod_{k=1}^K\frac{\prod_w\Gamma(n_{kw} + \beta)}{\Gamma(n_k + V\beta)}
+\;\prod_{d=1}^D\frac{\prod_k\Gamma(n_{dk} + \alpha)}{\Gamma(n_d + K\alpha)}.
+$$
+
+## The collapsed Gibbs update
+
+Collapsed <NoteLink to="gibbs-sampling">Gibbs sampling</NoteLink> resamples one assignment $z_i$ at a time from its
+conditional given all others
+<Cite id="griffiths2004" />. Let word $i$ be word type $w$ in document $d$. Compare the joint with $z_i = k$ against the
+joint with word $i$ removed. Only the factors for topic $k$ and document $d$ change, and each of their counts grows by
+one. With $\Gamma(x + 1) = x\,\Gamma(x)$, each ratio of gamma functions reduces to a single count:
+
+$$
+\frac{\Gamma(n_{kw}^{\neg i} + 1 + \beta)}{\Gamma(n_{kw}^{\neg i} + \beta)} = n_{kw}^{\neg i} + \beta, \qquad
+\frac{\Gamma(n_k^{\neg i} + V\beta)}{\Gamma(n_k^{\neg i} + 1 + V\beta)} = \frac{1}{n_k^{\neg i} + V\beta},
+$$
+
+and similarly $n_{dk}^{\neg i} + \alpha$ for the document. The document length $n_d$ does not depend on $k$. Hence
+
+$$
+p(z_i = k \mid \zvec^{\neg i}, \wvec) \propto \paren{n_{dk}^{\neg i} + \alpha}\,
+\frac{n_{kw}^{\neg i} + \beta}{n_k^{\neg i} + V\beta}.
+$$
+
+The first factor favours topics already common in the document. The second favours topics that already use word $w$
+often. One **sweep** applies the update to every word in the corpus, adjusting the counts as it goes. After burn-in, the
+counts give point estimates of the collapsed parameters:
+
+$$
+\hat\phi_{kw} = \frac{n_{kw} + \beta}{n_k + V\beta}, \qquad \hat\theta_{dk} = \frac{n_{dk} + \alpha}{n_d + K\alpha}.
+$$
+
+<GibbsBars />
+
+## Variational EM
+
+Blei, Ng and Jordan fitted LDA by variational inference instead <Cite id="blei2003" />. For each document they use the
+<NoteLink to="mean-field-variational-inference">mean-field</NoteLink> family
+$q(\thetavec_d, \zvec_d) = \Dir(\thetavec_d \mid \gammavec_d)\prod_n\Cat(z_{dn} \mid \rvec_{dn})$ and treat the topics
+as parameters. Coordinate ascent on the evidence lower bound gives
+
+$$
+r_{dnk} \propto \phi_{k, w_{dn}}\exp\paren{\psi(\gamma_{dk})}, \qquad \gamma_{dk} = \alpha + \sum_n r_{dnk},
+$$
+
+where $\psi$ is the digamma function, since $\expect_q[\log\theta_{dk}] = \psi(\gamma_{dk}) - \psi(\sum_j\gamma_{dj})$.
+The M-step sets $\phi_{kw} \propto \sum_{d,n} r_{dnk}\,\indicator[w_{dn} = w]$, the expected number of times topic $k$
+produced word $w$. Variational EM is deterministic and parallelises across documents. Stochastic versions process the
+corpus in mini-batches.
+
+## Worked example
+
+**One Gibbs update.** A corpus has $V = 10$ word types and $K = 2$ topics, with $\alpha = 0.1$ and $\beta = 0.01$.
+Word $i$ is type $w$ in document $d$. With word $i$ removed, the counts are $n_{d1} = 3$, $n_{d2} = 1$, $n_{1w} = 4$,
+$n_{2w} = 2$, $n_1 = 20$ and $n_2 = 15$.
+
+- Topic 1: $(3 + 0.1)(4 + 0.01)/(20 + 0.1) = 0.6185$.
+- Topic 2: $(1 + 0.1)(2 + 0.01)/(15 + 0.1) = 0.1464$.
+
+Normalising, $p(z_i = 1) = 0.809$ and $p(z_i = 2) = 0.191$. Topic 1 wins because the document already uses it more and
+it already produces word $w$ more often.
+
+**The bars corpus.** In the figure, the six true topics each put probability $1/3$ on one row or one column of a
+$3 \times 3$ grid of words. Documents draw their topic mixtures from $\Dir(0.3)$. From random initial assignments, the
+mean total variation distance between each learned topic and the closest true topic falls from $0.64$ to below $0.1$
+after 20 sweeps and to about $0.02$ after 40 sweeps, for each of the first three seeds.
+
+## Relatives
+
+- <NoteLink to="probabilistic-latent-semantic-analysis">Probabilistic latent semantic analysis</NoteLink> is the same
+  model without the Dirichlet priors, with $\thetavec_d$ a free parameter for each training document.
+- A <NoteLink to="gaussian-mixture-model">mixture model</NoteLink> assigns a whole data point to one component. LDA
+  assigns each word of a document separately, so one document can belong to several topics. This is a mixed-membership
+  model.
+- <NoteLink to="non-negative-matrix-factorisation">Non-negative matrix factorisation</NoteLink> of the document–word
+  count matrix with the KL divergence gives topic-like factors without priors.
+
+## Pitfalls
+
+- **Choosing K.** The number of topics is a modelling choice. Held-out perplexity, topic coherence and the use the
+  topics are put to can disagree.
+- **Label switching.** Topic numbers are arbitrary. Different runs or distant samples of one run give the same topics in
+  a different order, so estimates must not be averaged across samples naively.
+- **Stop words and rare words.** Very common words appear in every topic and very rare words cannot be assigned
+  reliably. Remove both before fitting.
+- **Bag of words.** Word order, syntax and negation are ignored.

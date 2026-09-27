@@ -1,0 +1,147 @@
+---
+title: Factor analysis
+kind: concept
+summary: 'Factor analysis models $\xvec = \muvec + \Wmat\zvec + \epsilonvec$ with $q$ standard-normal factors $\zvec$ and independent noise of diagonal covariance $\Psimat$, so $\cov(\xvec) = \Wmat\Wmat^\top + \Psimat$. Unlike probabilistic PCA, each feature has its own noise variance; EM fits it.'
+tags: [dimensionality-reduction, unsupervised, latent-variable-models, probabilistic, gaussian, expectation-maximisation, worked-example]
+aliases: [FA, common factor analysis, factor loadings, uniqueness, communality, varimax rotation, Heywood case]
+requires: [multivariate-normal-distribution, expectation-maximisation]
+related: [probabilistic-pca, principal-component-analysis, linear-gaussian-state-space-models, independent-component-analysis, canonical-correlation-analysis]
+references: [spearman1904b, rubin1982, bishop2006, roweis1999]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Factor analysis** models an observation $\xvec \in \reals^d$ as a linear function of $q < d$ unobserved **factors**
+$\zvec$ plus independent noise:
+
+$$
+\zvec \sim \Gauss(\zeros, \Imat_q), \qquad \xvec = \muvec + \Wmat\zvec + \epsilonvec, \qquad
+\epsilonvec \sim \Gauss(\zeros, \Psimat), \qquad \Psimat = \diag(\psi_1, \dots, \psi_d).
+$$
+
+$\Wmat$ is the $d \times q$ matrix of **loadings**, and $\psi_m$ is the **uniqueness** of feature $m$: its variance not
+shared with other features. The marginal distribution is $\xvec \sim \Gauss(\muvec, \Wmat\Wmat^\top + \Psimat)$
+<Cite id="bishop2006" />.
+</Definition>
+
+## What the model says
+
+Because $\Psimat$ is diagonal, the noise terms of different features are independent. Every correlation between
+features must come through the factors: given $\zvec$, the features are independent. The covariance splits into a
+shared, low-rank part and a feature-specific diagonal part:
+
+$$
+\cov(x_m, x_{m'}) = \sum_{k=1}^q W_{mk}W_{m'k} \quad (m \ne m'), \qquad
+\var(x_m) = \underbrace{\sum_{k=1}^q W_{mk}^2}_{\text{communality}} + \psi_m.
+$$
+
+The **communality** is the part of a feature's variance explained by the factors. Spearman introduced the model with a
+single factor, general intelligence, to explain the positive correlations among school test scores
+<Cite id="spearman1904b" />.
+
+## Factor analysis and probabilistic PCA
+
+<NoteLink to="probabilistic-pca">Probabilistic PCA</NoteLink> is the special case $\Psimat = \sigma^2\Imat$. The
+difference changes what the models are invariant to.
+
+- **Rescaling features.** Multiply the data by a positive diagonal matrix $\Amat$, for example by changing units. The
+  factor model still holds with loadings $\Amat\Wmat$ and noise $\Amat\Psimat\Amat$, which is still diagonal. The
+  factor-analysis fit rescales with the data. PPCA's noise $\sigma^2\Amat^2$ is no longer isotropic, so PPCA's fit
+  changes in substance, as PCA's does.
+- **Rotating the data.** Multiply the data by an orthogonal matrix $\Qmat$. PPCA's noise $\sigma^2\Qmat\Qmat^\top =
+  \sigma^2\Imat$ stays isotropic, so its fit rotates with the data. Factor analysis's noise $\Qmat\Psimat\Qmat^\top$
+  is no longer diagonal.
+- **Noisy features.** A feature with large independent noise has a large variance. PCA and PPCA treat that variance
+  as structure and may devote a component to it. Factor analysis assigns it to $\psi_m$.
+
+Factor analysis suits features on different scales whose noise levels differ. PCA suits features in common units
+where directions in feature space have meaning.
+
+## Posterior over the factors
+
+The factors and the observation are jointly Gaussian. Up to constants,
+
+$$
+\log p(\zvec \mid \xvec) = -\tfrac12\zvec^\top\zvec - \tfrac12(\tilde\xvec - \Wmat\zvec)^\top\Psimat^{-1}(\tilde\xvec -
+\Wmat\zvec) = -\tfrac12\zvec^\top\paren{\Imat + \Wmat^\top\Psimat^{-1}\Wmat}\zvec + \zvec^\top\Wmat^\top\Psimat^{-1}
+\tilde\xvec + \text{const},
+$$
+
+with $\tilde\xvec = \xvec - \muvec$. Completing the square gives
+
+$$
+\zvec \mid \xvec \sim \Gauss\paren{\Gmat\Wmat^\top\Psimat^{-1}\tilde\xvec,\; \Gmat}, \qquad
+\Gmat = \paren{\Imat_q + \Wmat^\top\Psimat^{-1}\Wmat}^{-1}.
+$$
+
+The posterior mean is the **factor score** of an observation. Only a $q \times q$ matrix is inverted, and
+$\Psimat^{-1}$ is diagonal.
+
+## Fitting by EM
+
+The maximum-likelihood estimate of $\muvec$ is the sample mean. For $\Wmat$ and $\Psimat$ there is no closed form.
+Expectation–maximisation treats the factors as missing data <Cite id="rubin1982" />. With centred data
+$\tilde\xvec_i = \xvec_i - \bar\xvec$ and sample covariance $\Smat$:
+
+**E-step.** For each point, $\expect[\zvec_i] = \Gmat\Wmat^\top\Psimat^{-1}\tilde\xvec_i$ and
+$\expect[\zvec_i\zvec_i^\top] = \Gmat + \expect[\zvec_i]\expect[\zvec_i]^\top$.
+
+**M-step.** The expected complete-data log-likelihood is
+$-\frac12\sum_i\expect\LB(\tilde\xvec_i - \Wmat\zvec_i)^\top\Psimat^{-1}(\tilde\xvec_i - \Wmat\zvec_i)\RB -
+\frac n2\log\abs{\Psimat}$. Its gradient in $\Wmat$ is $\Psimat^{-1}\sum_i\paren{\tilde\xvec_i\expect[\zvec_i]^\top -
+\Wmat\expect[\zvec_i\zvec_i^\top]}$, which vanishes at
+
+$$
+\Wmat_{\text{new}} = \paren{\sum_i\tilde\xvec_i\expect[\zvec_i]^\top}\paren{\sum_i\expect[\zvec_i\zvec_i^\top]}^{-1}.
+$$
+
+Setting the derivative in each $\psi_m$ to zero and using the equation for $\Wmat_{\text{new}}$ gives
+
+$$
+\Psimat_{\text{new}} = \diag\paren{\Smat - \Wmat_{\text{new}}\frac1n\sum_i\expect[\zvec_i]\tilde\xvec_i^\top}.
+$$
+
+Each iteration increases the likelihood, as EM always does. Convergence can be slow when a uniqueness approaches zero.
+
+## Rotation and identifiability
+
+For any $q \times q$ orthogonal matrix $\Rmat$, the loadings $\Wmat\Rmat$ give the same covariance
+$\Wmat\Rmat\Rmat^\top\Wmat^\top + \Psimat$. The likelihood cannot distinguish them. Practitioners choose a rotation
+that makes the loadings easy to read. **Varimax** maximises the variance of the squared loadings within each column,
+which pushes each loading toward 0 or toward a large value, so that each factor involves few features.
+
+## Worked example
+
+Three standardised test scores have correlations $r_{12} = 0.72$, $r_{13} = 0.63$ and $r_{23} = 0.56$. Fit one factor,
+$q = 1$, with loadings $w_1, w_2, w_3$.
+
+- **Loadings.** The model gives $r_{mm'} = w_m w_{m'}$ for $m \ne m'$. Then
+  $w_1^2 = \frac{r_{12}\,r_{13}}{r_{23}} = \frac{0.72 \times 0.63}{0.56} = 0.81$, so $w_1 = 0.9$. In the same way
+  $w_2^2 = r_{12}r_{23}/r_{13} = 0.64$ and $w_3^2 = r_{13}r_{23}/r_{12} = 0.49$, so $w_2 = 0.8$ and $w_3 = 0.7$.
+- **Uniquenesses.** Each score has variance 1, so $\psi_m = 1 - w_m^2$: $0.19$, $0.36$ and $0.51$. The first test
+  measures the factor most reliably.
+- **Probabilistic PCA on the same matrix.** The correlation matrix has eigenvalues $2.276$, $0.455$ and $0.270$. PPCA
+  gives $\sigma^2 = (0.455 + 0.270)/2 = 0.362$ for every test and loadings $0.830, 0.803, 0.762$. It spreads the noise
+  evenly and so overstates the loadings of the noisier tests and understates the first.
+
+Scikit-learn's `FactorAnalysis` on 200,000 samples drawn from this correlation matrix recovers loadings
+$0.903, 0.803, 0.703$ and uniquenesses $0.190, 0.361, 0.509$.
+
+## Relatives
+
+- A <NoteLink to="linear-gaussian-state-space-models">linear-Gaussian state-space model</NoteLink> is factor analysis
+  whose factors evolve over time by linear dynamics <Cite id="roweis1999" />.
+- <NoteLink to="independent-component-analysis">Independent component analysis</NoteLink> keeps the linear mixing but
+  replaces the Gaussian factors by non-Gaussian ones, which removes the rotational ambiguity.
+
+## Pitfalls
+
+- **Heywood cases.** The maximum-likelihood $\psi_m$ can reach zero or become negative, meaning a feature is claimed
+  to be explained perfectly by the factors. Constrain $\psi_m$ to be at least a small positive value.
+- **Rotation is a choice.** Interpretations of individual factors depend on the rotation, which the data do not
+  determine.
+- **Choosing q.** The number of factors is a model-selection problem. Use likelihood-ratio tests, BIC or held-out
+  likelihood.
+- **Linear and Gaussian.** Nonlinear relations between features and factors, or strongly non-Gaussian data, violate
+  the model.

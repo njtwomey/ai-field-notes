@@ -1,0 +1,145 @@
+---
+title: Graphical lasso
+kind: concept
+summary: 'The graphical lasso estimates a sparse precision matrix $\Thetamat = \Sigmamat^{-1}$ by maximising the Gaussian log-likelihood $\log\det\Thetamat - \trace(\Smat\Thetamat)$ minus $\lambda\sum\abs{\theta_{ij}}$. Zeros in $\Thetamat$ are conditional independences, so the estimate is a Gaussian graphical model.'
+tags: [covariance-estimation, graphical-models, sparsity, high-dimensional, regularisation, worked-example]
+aliases: [glasso, sparse inverse covariance estimation, Gaussian graphical model, GGM, precision matrix estimation, partial correlation, neighbourhood selection, covariance selection]
+requires: [multivariate-normal-distribution, lasso, matrix-inverse]
+related: [shrinkage-covariance-estimation, schur-complement, conditional-random-field, independence]
+references: [friedman2008, meinshausen2006, banerjee2008, yuan2007, dempster1972]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $\Smat$ be the sample covariance of $n$ observations of $\xvec \in \reals^p$, assumed Gaussian with precision
+matrix $\Thetamat = \Sigmamat^{-1}$. The **graphical lasso** estimate is
+
+$$
+\hat\Thetamat = \argmax_{\Thetamat \succ 0}\; \log\det\Thetamat - \trace(\Smat\Thetamat) - \lambda\sum_{i \ne j}
+\abs{\theta_{ij}},
+$$
+
+with penalty $\lambda \ge 0$ <Cite id="friedman2008" /> <Cite id="yuan2007" />. The $\ell_1$ penalty sets many
+off-diagonal entries of $\hat\Thetamat$ exactly to zero. Some formulations also penalise the diagonal.
+</Definition>
+
+## Zeros in the precision matrix are conditional independences
+
+For a Gaussian vector, split the variables into a pair $A = \set{i, j}$ and the rest $B$. The conditional distribution
+of $\xvec_A$ given $\xvec_B$ is Gaussian with covariance equal to the
+<NoteLink to="schur-complement">Schur complement</NoteLink> $\Sigmamat_{AA} - \Sigmamat_{AB}\Sigmamat_{BB}^{-1}
+\Sigmamat_{BA}$. The block-inverse formula shows that this Schur complement is exactly $(\Thetamat_{AA})^{-1}$, the
+inverse of the $2 \times 2$ block of the precision matrix. So
+
+$$
+\cov(\xvec_A \mid \xvec_B) = \begin{pmatrix} \theta_{ii} & \theta_{ij} \\ \theta_{ij} & \theta_{jj} \end{pmatrix}^{-1}
+= \frac{1}{\theta_{ii}\theta_{jj} - \theta_{ij}^2}\begin{pmatrix} \theta_{jj} & -\theta_{ij} \\ -\theta_{ij} &
+\theta_{ii} \end{pmatrix}.
+$$
+
+The conditional covariance of $x_i$ and $x_j$ is zero exactly when $\theta_{ij} = 0$. For jointly Gaussian variables,
+zero covariance means independence. Hence
+
+$$
+\theta_{ij} = 0 \iff x_i \perp x_j \mid \text{all other variables}.
+$$
+
+The conditional correlation, or **partial correlation**, is $\rho_{ij \cdot \text{rest}} = -\theta_{ij}/
+\sqrt{\theta_{ii}\theta_{jj}}$, read off the matrix above. A **Gaussian graphical model** draws an edge between $i$ and
+$j$ when $\theta_{ij} \ne 0$. Estimating which entries are zero is **covariance selection** <Cite id="dempster1972" />.
+
+A zero in $\Thetamat$ does not imply a zero in $\Sigmamat$. In a chain $x_1 \to x_2 \to x_3$, $x_1$ and $x_3$ are
+correlated through $x_2$ but independent given it.
+
+## Why a penalty
+
+The Gaussian log-likelihood of $\Thetamat$, up to constants, is $\frac n2\LB\log\det\Thetamat - \trace(\Smat
+\Thetamat)\RB$. Its maximiser is $\Smat^{-1}$. That estimate has no exact zeros, so it never reports a conditional
+independence, and it does not exist when $p \ge n$. The $\ell_1$ penalty, as in the
+<NoteLink to="lasso">lasso</NoteLink>, makes the problem well posed for any $p$ and produces exact zeros. The objective
+is concave in $\Thetamat$: $\log\det$ is concave on positive definite matrices, the trace is linear, and the penalty is
+convex.
+
+## Optimality conditions
+
+The gradient of $\log\det\Thetamat$ is $\Thetamat^{-1}$ and the gradient of $\trace(\Smat\Thetamat)$ is $\Smat$. Write
+$\Wmat = \Thetamat^{-1}$ for the estimated covariance. The subgradient condition for the optimum is
+
+$$
+\Wmat - \Smat - \lambda\Gammamat = \zeros,
+$$
+
+where $\gamma_{ij} = \sgn(\theta_{ij})$ if $\theta_{ij} \ne 0$ and $\gamma_{ij} \in [-1, 1]$ if $\theta_{ij} = 0$,
+for $i \ne j$, and $\gamma_{ii} = 0$ when the diagonal is not penalised. Two consequences:
+
+- The estimated covariance agrees with the sample covariance to within $\lambda$ in every entry:
+  $\abs{w_{ij} - s_{ij}} \le \lambda$.
+- An entry of $\Thetamat$ is nonzero only where the constraint binds, $\abs{w_{ij} - s_{ij}} = \lambda$.
+  With $\lambda \ge \max_{i \ne j}\abs{s_{ij}}$, a diagonal $\Wmat$ satisfies the conditions, and the graph is empty.
+
+## Block coordinate descent
+
+Friedman, Hastie and Tibshirani solve the problem one column at a time <Cite id="friedman2008" />. Partition $\Wmat$,
+$\Smat$ and $\Thetamat$ with the last variable separated:
+
+$$
+\Wmat = \begin{pmatrix} \Wmat_{11} & \wvec_{12} \\ \wvec_{12}^\top & w_{22} \end{pmatrix}, \qquad
+\Thetamat = \begin{pmatrix} \Thetamat_{11} & \thetavec_{12} \\ \thetavec_{12}^\top & \theta_{22} \end{pmatrix}.
+$$
+
+The upper right block of $\Wmat\Thetamat = \Imat$ reads $\Wmat_{11}\thetavec_{12} + \wvec_{12}\theta_{22} = \zeros$,
+so $\wvec_{12} = \Wmat_{11}\betavec$ with $\betavec = -\thetavec_{12}/\theta_{22}$. Since $\theta_{22} > 0$,
+$\sgn(\thetavec_{12}) = -\sgn(\betavec)$. The optimality condition for the last column, $\wvec_{12} - \svec_{12} -
+\lambda\gammavec_{12} = \zeros$, becomes
+
+$$
+\Wmat_{11}\betavec - \svec_{12} + \lambda\,\sgn(\betavec) = \zeros.
+$$
+
+This is the optimality condition of the lasso problem $\min_{\betavec} \tfrac12\betavec^\top\Wmat_{11}\betavec -
+\betavec^\top\svec_{12} + \lambda\norm{\betavec}_1$. The algorithm cycles through the columns. For each, it solves this
+lasso by coordinate descent, sets $\wvec_{12} = \Wmat_{11}\betavec$, and moves on. At convergence the precision matrix
+follows from the same block identity: $\theta_{22} = 1/(w_{22} - \wvec_{12}^\top\betavec)$ and
+$\thetavec_{12} = -\betavec\,\theta_{22}$. Each sweep costs about $O(p^3)$, less when the solution is sparse.
+
+**Neighbourhood selection** is a cheaper approximation. Regress each variable on all others with the lasso and join
+$i$ and $j$ when either regression selects the other. Meinshausen and Bühlmann showed that it recovers the graph
+consistently in high dimensions under suitable conditions <Cite id="meinshausen2006" />. It estimates the graph but not
+$\Thetamat$ itself.
+
+## Choosing λ
+
+- **Cross-validation** of the Gaussian log-likelihood on held-out data targets prediction, and tends to select too many
+  edges.
+- **BIC** and its extended version, which adds a penalty for the number of possible graphs, target the correct graph.
+- **Stability selection** refits on subsamples and keeps edges selected in a large fraction of them.
+
+## Worked example
+
+**A chain.** Let $x_1, x_2, x_3$ have precision $\Thetamat = \begin{pmatrix} 2 & -1 & 0 \\ -1 & 2 & -1 \\ 0 & -1 & 2
+\end{pmatrix}$. Its inverse is $\Sigmamat = \begin{pmatrix} 0.75 & 0.5 & 0.25 \\ 0.5 & 1 & 0.5 \\ 0.25 & 0.5 & 0.75
+\end{pmatrix}$. The correlation of $x_1$ and $x_3$ is $0.25/0.75 = 0.333$. Their partial correlation is
+$-\theta_{13}/\sqrt{\theta_{11}\theta_{33}} = 0$. The partial correlation of neighbours is $1/\sqrt{2 \cdot 2} = 0.5$.
+
+**From a sample.** For 200 draws from this distribution (NumPy seed 0), the inverse sample covariance has
+$(\Smat^{-1})_{13} = -0.021$: small, but not zero. The graphical lasso with $\lambda = 0.15$ (scikit-learn,
+diagonal not penalised) returns
+
+$$
+\hat\Thetamat = \begin{pmatrix} 1.573 & -0.633 & 0 \\ -0.633 & 1.528 & -0.581 \\ 0 & -0.581 & 1.530 \end{pmatrix}.
+$$
+
+The zero recovers the missing edge. The estimated covariance satisfies the optimality conditions: $w_{13} = 0.145$ and
+$s_{13} = 0.292$ differ by $0.147 < \lambda$, so $\theta_{13}$ is inactive, while $w_{12} - s_{12} = 0.383 - 0.533 =
+-0.15$ sits on the boundary. The nonzero entries are shrunk toward zero, the usual lasso bias.
+
+## Pitfalls
+
+- **Scale.** The penalty treats all entries alike, so variables on different scales are penalised unevenly. Standardise
+  first, which amounts to working with the correlation matrix.
+- **Gaussianity.** The link between zeros and conditional independence holds for Gaussian data. For other data a zero
+  means only zero partial correlation.
+- **Biased entries.** The $\ell_1$ penalty shrinks the nonzero entries. Refit without penalty on the selected graph if
+  the values matter.
+- **Graph is not causation.** An edge is a conditional dependence, without direction.

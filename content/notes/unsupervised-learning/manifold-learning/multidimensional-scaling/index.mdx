@@ -1,0 +1,128 @@
+---
+title: Multidimensional scaling
+kind: concept
+summary: 'Multidimensional scaling places $n$ points in $k$ dimensions so that their distances match a given $n \times n$ dissimilarity matrix. Classical MDS double-centres the squared distances into a Gram matrix $\Bmat = -\tfrac12\Jmat\Dmat^{(2)}\Jmat$ and embeds with its top eigenvectors; metric MDS minimises stress.'
+tags: [manifold-learning, dimensionality-reduction, unsupervised, linear-algebra, worked-example]
+aliases: [MDS, classical MDS, Torgerson scaling, principal coordinates analysis, PCoA, double centring, stress, metric MDS, non-metric MDS, SMACOF]
+requires: [eigendecomposition, pairwise-distances-and-cosine-similarity]
+related: [procrustes-analysis, positive-definite-matrices]
+references: [torgerson1952, kruskal1964, borg2005]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Multidimensional scaling** (MDS) takes an $n \times n$ matrix of dissimilarities $\delta_{ij}$ between $n$ items and
+returns points $\yvec_1, \dots, \yvec_n \in \reals^k$ whose Euclidean distances $\norm{\yvec_i - \yvec_j}$
+approximate $\delta_{ij}$. **Classical MDS** computes the points in closed form from an eigendecomposition
+<Cite id="torgerson1952" />. **Metric MDS** minimises a stress function numerically, and **non-metric MDS** matches
+only the rank order of the dissimilarities <Cite id="kruskal1964" />.
+</Definition>
+
+## Only distances are given
+
+Many data sets come as comparisons, not coordinates: travel times between cities, how often subjects confuse two
+sounds, edit distances between strings, distances along a graph. MDS turns such a table into a map. The result is
+determined only up to rotation, reflection and translation, because these leave all distances unchanged.
+
+## Classical MDS: from distances to a Gram matrix
+
+Suppose the dissimilarities are exact Euclidean distances between unknown centred points $\xvec_i \in \reals^p$,
+stacked as the rows of $\Xmat$. Let $\Bmat = \Xmat\Xmat^\top$ be the **Gram matrix** of inner products,
+$b_{ij} = \xvec_i^\top\xvec_j$. The squared distances are
+
+$$
+d_{ij}^2 = \norm{\xvec_i - \xvec_j}^2 = b_{ii} + b_{jj} - 2b_{ij}.
+$$
+
+In matrix form, with $\cvec = (b_{11}, \dots, b_{nn})^\top$ and $\Dmat^{(2)}$ the matrix of squared distances,
+$\Dmat^{(2)} = \cvec\ones^\top + \ones\cvec^\top - 2\Bmat$. To recover $\Bmat$, apply the centring matrix
+$\Jmat = \Imat - \frac1n\ones\ones^\top$ on both sides. Since $\Jmat\ones = \zeros$, the two rank-one terms vanish:
+
+$$
+\Jmat\Dmat^{(2)}\Jmat = -2\Jmat\Bmat\Jmat.
+$$
+
+The points are centred, so $\Jmat\Xmat = \Xmat$ and $\Jmat\Bmat\Jmat = \Bmat$. Therefore
+
+$$
+\Bmat = -\tfrac12\Jmat\Dmat^{(2)}\Jmat.
+$$
+
+This is **double centring**: subtract each row mean and each column mean of the squared distances, add back the grand
+mean, and multiply by $-\tfrac12$. Entry by entry, $b_{ij} = -\frac12\paren{d_{ij}^2 - \bar d_{i\cdot}^2 - \bar
+d_{\cdot j}^2 + \bar d_{\cdot\cdot}^2}$.
+
+$\Bmat$ is symmetric and positive semidefinite. Its eigendecomposition $\Bmat = \Qmat\Lambdamat\Qmat^\top$, with
+$\lambda_1 \ge \lambda_2 \ge \dots$, gives the coordinates
+
+$$
+\Ymat = \Qmat_k\Lambdamat_k^{1/2},
+$$
+
+whose Gram matrix is $\Ymat\Ymat^\top = \Qmat_k\Lambdamat_k\Qmat_k^\top$. If the distances come from points in
+$\reals^p$, at most $p$ eigenvalues are nonzero, and $k = p$ reproduces every distance exactly.
+
+For $k$ smaller than the rank, $\Qmat_k\Lambdamat_k\Qmat_k^\top$ is the best rank-$k$ approximation of $\Bmat$ in
+Frobenius norm (Eckart–Young). Classical MDS therefore minimises the **strain**
+$\norm{\Bmat - \Ymat\Ymat^\top}_F$ over $k$-dimensional configurations.
+
+## Classical MDS is PCA
+
+With Euclidean distances computed from a centred data matrix, let $\Xmat = \Umat\Sigmamat\Vmat^\top$ be its
+<NoteLink to="singular-value-decomposition">singular value decomposition</NoteLink>. Then $\Bmat = \Xmat\Xmat^\top =
+\Umat\Sigmamat^2\Umat^\top$, so $\Qmat_k = \Umat_k$, $\Lambdamat_k^{1/2} = \Sigmamat_k$ and $\Ymat = \Umat_k\Sigmamat_k$.
+These are the principal component scores of <NoteLink to="principal-component-analysis">PCA</NoteLink>. Classical MDS
+works from the $n \times n$ Gram matrix and PCA from the $p \times p$ covariance matrix; the smaller one is cheaper to
+decompose. In ecology the method is also called **principal coordinates analysis**.
+
+## Non-Euclidean dissimilarities
+
+When the $\delta_{ij}$ are not Euclidean distances, for example graph distances or subjective ratings, $\Bmat$ can have
+negative eigenvalues. Classical MDS keeps the largest positive ones. The size of the negative eigenvalues, compared with
+the positive ones, measures how far the dissimilarities are from Euclidean. <NoteLink to="isomap">Isomap</NoteLink>
+applies classical MDS to shortest-path distances in a neighbourhood graph.
+
+## Metric and non-metric MDS
+
+**Metric MDS** minimises a stress function directly, for example
+
+$$
+\operatorname{Stress}(\Ymat) = \sum_{i < j} w_{ij}\paren{\delta_{ij} - \norm{\yvec_i - \yvec_j}}^2,
+$$
+
+with weights $w_{ij}$, often 1 or $\delta_{ij}^{-2}$. Unlike strain, stress compares distances rather than inner
+products, and it allows missing dissimilarities ($w_{ij} = 0$). It has no closed form. The SMACOF algorithm minimises it
+by majorisation: at each step it minimises a quadratic upper bound that touches the stress at the current configuration
+<Cite id="borg2005" />.
+
+**Non-metric MDS** assumes only that larger dissimilarities should map to larger distances. Kruskal's algorithm
+alternates between fitting a monotone (isotonic) regression of the distances on the dissimilarities and moving the
+points to reduce the stress against the fitted values <Cite id="kruskal1964" />. It suits ordinal data such as
+similarity ratings.
+
+## Worked example
+
+Four points at the corners of a unit square, in cyclic order. Adjacent corners have squared distance 1 and opposite
+corners 2:
+
+$$
+\Dmat^{(2)} = \begin{pmatrix} 0 & 1 & 2 & 1 \\ 1 & 0 & 1 & 2 \\ 2 & 1 & 0 & 1 \\ 1 & 2 & 1 & 0 \end{pmatrix}.
+$$
+
+- Every row and column mean is $1$, and the grand mean is $1$. Double centring gives
+  $b_{ij} = -\frac12(d_{ij}^2 - 1 - 1 + 1) = -\frac12(d_{ij}^2 - 1)$, so the diagonal is $\frac12$, adjacent pairs get
+  $0$ and opposite pairs $-\frac12$.
+- $\Bmat$ has eigenvalues $1, 1, 0, 0$: the configuration is exactly two-dimensional.
+- Taking the two eigenvectors scaled by $\sqrt1$ gives the coordinates $(0, -0.707)$, $(-0.707, 0)$, $(0, 0.707)$,
+  $(0.707, 0)$: a square of side 1 centred at the origin, rotated by $45°$. Its squared distances are 1 for adjacent
+  and 2 for opposite corners, as required.
+
+## Pitfalls
+
+- **Only relative positions.** The configuration is unique only up to rotation, reflection and translation. Use
+  <NoteLink to="procrustes-analysis">Procrustes analysis</NoteLink> to compare two MDS solutions.
+- **Large distances dominate.** Squared errors weight large dissimilarities most, so classical MDS preserves the global
+  layout and can distort local neighbourhoods.
+- **Quadratic memory.** The dissimilarity matrix has $n^2$ entries. Landmark methods embed a subset and place the rest
+  by triangulation.

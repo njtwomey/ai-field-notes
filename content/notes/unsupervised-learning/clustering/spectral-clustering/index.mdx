@@ -1,0 +1,174 @@
+---
+title: Spectral clustering
+kind: concept
+summary: 'Spectral clustering builds a similarity graph over the points and clusters the rows of the bottom eigenvectors of its Laplacian $\Lmat = \Dmat - \Wmat$. Those eigenvectors solve a continuous relaxation of the normalised cut, so the method finds connected, non-convex clusters that k-means cannot.'
+tags: [clustering, unsupervised, graphs, linear-algebra, worked-example]
+aliases: [normalised cut, normalized cut, Ncut, ratio cut, graph Laplacian, normalised graph Laplacian, Fiedler vector, Ng–Jordan–Weiss algorithm, Shi–Malik algorithm, similarity graph]
+requires: [eigendecomposition, k-means]
+related: [spectral-theorem, label-propagation, hierarchical-clustering, graph-convolutional-network]
+references: [vonluxburg2007, shi2000, ng2002b, belkin2003]
+status: draft
+updated: 2026-09-27
+---
+
+import { SpectralExplorer } from './SpectralExplorer'
+
+<Definition>
+Spectral clustering of $n$ points into $k$ clusters takes a symmetric similarity matrix $\Wmat \in \reals^{n \times n}$
+with $W_{ij} \ge 0$, for example $W_{ij} = \exp\paren{-\norm{\xvec_i - \xvec_j}^2/(2\sigma^2)}$. Let $d_i =
+\sum_j W_{ij}$ be the degree of point $i$, $\Dmat = \diag(d_1, \dots, d_n)$, and $\Lmat = \Dmat - \Wmat$ the
+**graph Laplacian**. The algorithm computes the $k$ eigenvectors of a normalised Laplacian with the smallest
+eigenvalues, stacks them as the columns of an $n \times k$ matrix, and clusters its rows with
+<NoteLink to="k-means">k-means</NoteLink> <Cite id="vonluxburg2007" />.
+</Definition>
+
+## Clustering as cutting a graph
+
+Treat the points as the nodes of a weighted graph, with edge weight $W_{ij}$ between points $i$ and $j$. A good
+two-way clustering splits the nodes into $A$ and its complement $\bar A$ so that little weight crosses the split. The
+crossing weight is the **cut**:
+
+$$
+\operatorname{cut}(A, \bar A) = \sum_{i \in A,\, j \in \bar A} W_{ij}.
+$$
+
+Minimising the cut alone usually splits off a single weakly connected point. The **normalised cut** of Shi and Malik
+divides by the **volume** of each side, $\operatorname{vol}(A) = \sum_{i \in A} d_i$, so both sides must carry
+substantial weight <Cite id="shi2000" />:
+
+$$
+\operatorname{Ncut}(A, \bar A) = \frac{\operatorname{cut}(A, \bar A)}{\operatorname{vol}(A)} +
+\frac{\operatorname{cut}(A, \bar A)}{\operatorname{vol}(\bar A)}.
+$$
+
+Minimising Ncut exactly is NP-hard. Its relaxation leads to an eigenvector problem.
+
+## The Laplacian's quadratic form
+
+For any vector $\fvec \in \reals^n$, which assigns a number $f_i$ to each node,
+
+$$
+\fvec^\top\Lmat\fvec = \sum_i d_i f_i^2 - \sum_{i,j} W_{ij} f_i f_j
+= \frac12 \sum_{i,j} W_{ij}\paren{f_i^2 + f_j^2 - 2f_i f_j} = \frac12 \sum_{i,j} W_{ij}(f_i - f_j)^2.
+$$
+
+The middle step writes $\sum_i d_i f_i^2 = \sum_{i,j} W_{ij} f_i^2$ and splits it into two equal halves using the
+symmetry of $\Wmat$. Three facts follow:
+
+- $\Lmat$ is symmetric and positive semidefinite, because the form is a sum of non-negative terms.
+- $\Lmat\ones = \zeros$, because each row of $\Lmat$ sums to $d_i - \sum_j W_{ij} = 0$. The smallest eigenvalue is 0.
+- $\fvec^\top\Lmat\fvec = 0$ exactly when $f_i = f_j$ for every edge with $W_{ij} > 0$, that is, when $\fvec$ is
+  constant on each connected component. The multiplicity of the eigenvalue 0 equals the number of connected
+  components, and the indicator vectors of the components span its eigenspace.
+
+The last fact is the ideal case: if the graph falls apart into $k$ components, the bottom $k$ eigenvectors identify
+them exactly. Spectral clustering works when the graph is close to that case.
+
+## Relaxing the normalised cut
+
+Encode a split by the vector
+
+$$
+f_i = \begin{cases} \sqrt{\operatorname{vol}(\bar A)/\operatorname{vol}(A)} & i \in A, \\
+-\sqrt{\operatorname{vol}(A)/\operatorname{vol}(\bar A)} & i \in \bar A. \end{cases}
+$$
+
+Write $a = \operatorname{vol}(A)$, $b = \operatorname{vol}(\bar A)$ and $V = a + b$. Three quantities can be computed
+directly:
+
+- **Orthogonality.** $(\Dmat\fvec)^\top\ones = \sum_{i \in A} d_i\sqrt{b/a} - \sum_{i \in \bar A} d_i\sqrt{a/b} =
+  a\sqrt{b/a} - b\sqrt{a/b} = \sqrt{ab} - \sqrt{ab} = 0$.
+- **Scale.** $\fvec^\top\Dmat\fvec = a \cdot \frac{b}{a} + b \cdot \frac{a}{b} = V$.
+- **Cut.** Only edges that cross the split contribute to $\frac12\sum_{i,j} W_{ij}(f_i - f_j)^2$, and each crossing
+  edge appears twice in the double sum. For them $(f_i - f_j)^2 = \paren{\sqrt{b/a} + \sqrt{a/b}}^2 = \frac{b}{a} +
+  \frac{a}{b} + 2 = \frac{(a + b)^2}{ab}$. So
+
+$$
+\fvec^\top\Lmat\fvec = \operatorname{cut}(A, \bar A)\,\frac{V^2}{ab} = V\operatorname{cut}(A, \bar A)
+\paren{\frac1a + \frac1b} = V \operatorname{Ncut}(A, \bar A).
+$$
+
+Dividing by the scale gives $\operatorname{Ncut}(A, \bar A) = \fvec^\top\Lmat\fvec / \fvec^\top\Dmat\fvec$. Minimising
+Ncut is therefore minimising this ratio over vectors $\fvec$ of the two-valued form, subject to
+$\Dmat\fvec \perp \ones$. The **relaxation** drops the two-valued form and lets $\fvec$ be any real vector:
+
+$$
+\min_{\fvec \in \reals^n} \frac{\fvec^\top\Lmat\fvec}{\fvec^\top\Dmat\fvec} \quad \text{subject to} \quad
+\fvec^\top\Dmat\ones = 0.
+$$
+
+This is a generalised Rayleigh quotient. Substitute $\gvec = \Dmat^{1/2}\fvec$. The objective becomes
+$\gvec^\top\Lmat_{\text{sym}}\gvec / \gvec^\top\gvec$ with the **symmetric normalised Laplacian**
+$\Lmat_{\text{sym}} = \Dmat^{-1/2}\Lmat\Dmat^{-1/2} = \Imat - \Dmat^{-1/2}\Wmat\Dmat^{-1/2}$, and the constraint becomes
+$\gvec \perp \Dmat^{1/2}\ones$. The vector $\Dmat^{1/2}\ones$ is the eigenvector of $\Lmat_{\text{sym}}$ with eigenvalue 0.
+By the <NoteLink to="spectral-theorem">spectral theorem</NoteLink>, the minimum of a Rayleigh quotient over the
+orthogonal complement of the bottom eigenvector is the second-smallest eigenvalue, attained at its eigenvector. In the
+original variables, $\fvec = \Dmat^{-1/2}\gvec$ solves the generalised eigenproblem
+
+$$
+\Lmat\fvec = \lambda\Dmat\fvec
+$$
+
+with the second-smallest $\lambda$. Rounding $\fvec$ back to two values, for instance by its sign or by the threshold
+with the smallest Ncut, gives the clustering. The eigenvector for the second-smallest eigenvalue of a Laplacian is
+called the **Fiedler vector**.
+
+For $k$ clusters the same argument applies to $k$ indicator-like vectors, collected as the columns of
+$\Hmat \in \reals^{n \times k}$. The relaxed problem minimises $\trace(\Hmat^\top\Lmat\Hmat)$ subject to
+$\Hmat^\top\Dmat\Hmat = \Imat$. Its solution is the $k$ generalised eigenvectors with the smallest eigenvalues
+<Cite id="vonluxburg2007" />. The rows of $\Hmat$ are no longer exact indicators, so a final k-means step rounds them
+to clusters.
+
+## Algorithms
+
+- **Shi–Malik.** Compute the bottom $k$ solutions of $\Lmat\fvec = \lambda\Dmat\fvec$, which are the eigenvectors of
+  the random-walk Laplacian $\Lmat_{\text{rw}} = \Dmat^{-1}\Lmat$, and run k-means on the rows <Cite id="shi2000" />.
+- **Ng–Jordan–Weiss.** Compute the bottom $k$ eigenvectors of $\Lmat_{\text{sym}}$, equivalently the top $k$ of
+  $\Dmat^{-1/2}\Wmat\Dmat^{-1/2}$. Normalise each row of the $n \times k$ matrix to unit length, then run k-means
+  <Cite id="ng2002b" />. The row normalisation undoes the factor $\Dmat^{1/2}$, so points of one component land on the
+  same point of the unit sphere.
+
+Both methods also give a low-dimensional embedding of the points. Using the bottom nontrivial eigenvectors of the
+Laplacian as coordinates is Laplacian eigenmaps <Cite id="belkin2003" />.
+
+<SpectralExplorer />
+
+## The similarity graph
+
+The result depends more on the graph than on the algorithm <Cite id="vonluxburg2007" />:
+
+- **Fully connected Gaussian graph.** $W_{ij} = \exp(-\norm{\xvec_i - \xvec_j}^2/(2\sigma^2))$. The width $\sigma$
+  sets which points count as neighbours. Too small a $\sigma$ breaks true clusters into many components. Too large a
+  $\sigma$ connects everything, and the eigenvectors describe global geometry instead of clusters.
+- **k-nearest-neighbour graph.** Connect $i$ and $j$ if either is among the other's $k$ nearest neighbours. It adapts
+  to varying density and is sparse, so eigenvectors are cheap to compute.
+- **ε-neighbourhood graph.** Connect points within distance $\varepsilon$.
+
+The **eigengap** heuristic chooses the number of clusters: pick $k$ so that the first $k$ eigenvalues are small and
+the $(k + 1)$-th is much larger. With $k$ perfectly separated components, $\lambda_1 = \dots = \lambda_k = 0 <
+\lambda_{k+1}$.
+
+## Worked example
+
+Six nodes form two triangles, $\set{1, 2, 3}$ and $\set{4, 5, 6}$, joined by one edge between nodes 3 and 4. All edge
+weights are 1. The degrees are $(2, 2, 3, 3, 2, 2)$.
+
+- The Laplacian $\Lmat = \Dmat - \Wmat$ has eigenvalues $0, 0.438, 3, 3, 3, 4.562$. The second is
+  $(5 - \sqrt{17})/2 = 0.438$, well separated from the third, so the eigengap suggests $k = 2$.
+- The Fiedler vector of $\Lmat$ is $(0.465, 0.465, 0.261, -0.261, -0.465, -0.465)$. Its sign splits the graph into the
+  two triangles. The bridge nodes 3 and 4 have the smallest magnitudes: they are the least certain.
+- For the normalised cut, $\Lmat_{\text{sym}}$ has second eigenvalue $0.205$. Its generalised eigenvector
+  $\Dmat^{-1/2}\gvec \propto (0.315, 0.315, 0.186, -0.186, -0.315, -0.315)$ gives the same split.
+- The split cuts one edge, and each triangle has volume $2 + 2 + 3 = 7$, so
+  $\operatorname{Ncut} = 1/7 + 1/7 = 0.286$.
+
+## Pitfalls
+
+- **Cost.** A dense eigendecomposition costs $O(n^3)$ time and $O(n^2)$ memory. Large problems need a sparse
+  $k$-nearest-neighbour graph and an iterative eigensolver such as Lanczos.
+- **The relaxation is not the cut.** The eigenvectors minimise a relaxed objective. There are graphs where the rounded
+  solution is far from the minimum Ncut <Cite id="vonluxburg2007" />.
+- **Graph parameters.** $\sigma$, $k$ or $\varepsilon$ matter more than the choice of Laplacian and have no default
+  that suits all data.
+- **Disconnected graphs.** Isolated points or tiny components take up the bottom eigenvectors. Use the largest
+  connected component, or a $k$-nearest-neighbour graph with $k$ large enough to connect every true cluster.

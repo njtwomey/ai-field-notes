@@ -1,0 +1,138 @@
+---
+title: t-SNE
+kind: concept
+summary: 't-SNE embeds points in two or three dimensions by matching neighbour probabilities. Gaussian affinities $p_{ij}$ in the data, calibrated by a perplexity, are matched by heavy-tailed Student-t affinities $q_{ij}$ in the embedding, minimising $\KL(P \,\|\, Q)$ by gradient descent.'
+tags: [manifold-learning, dimensionality-reduction, unsupervised, visualisation, worked-example]
+aliases: [t-distributed stochastic neighbour embedding, t-distributed stochastic neighbor embedding, tSNE, stochastic neighbour embedding, SNE, crowding problem, early exaggeration, Barnes–Hut t-SNE]
+requires: [kl-divergence, gradient-descent]
+related: [principal-component-analysis, multidimensional-scaling, student-t-distribution, entropy]
+references: [vandermaaten2008, vandermaaten2014, wattenberg2016, kobak2019, kobak2021]
+status: draft
+updated: 2026-09-27
+---
+
+import { TsneExplorer } from './TsneExplorer'
+
+<Definition>
+**t-distributed stochastic neighbour embedding** (t-SNE) maps points $\xvec_1, \dots, \xvec_n \in \reals^D$ to points
+$\yvec_1, \dots, \yvec_n \in \reals^m$, usually $m = 2$ <Cite id="vandermaaten2008" />. It defines symmetric
+affinities $p_{ij}$ from Gaussian neighbourhoods in the data and
+
+$$
+q_{ij} = \frac{\paren{1 + \norm{\yvec_i - \yvec_j}^2}^{-1}}{\sum_{k \ne l}\paren{1 + \norm{\yvec_k - \yvec_l}^2}^{-1}}
+$$
+
+in the embedding, and chooses the $\yvec_i$ to minimise $C = \KL(P \,\|\, Q) = \sum_{i \ne j} p_{ij}\log(p_{ij}/q_{ij})$.
+</Definition>
+
+## Affinities in the data
+
+For each point $i$, t-SNE defines a distribution over the other points that favours near neighbours:
+
+$$
+p_{j \mid i} = \frac{\exp\paren{-\norm{\xvec_i - \xvec_j}^2/2\sigma_i^2}}{\sum_{k \ne i}\exp\paren{-\norm{\xvec_i -
+\xvec_k}^2/2\sigma_i^2}}.
+$$
+
+The width $\sigma_i$ differs per point. It is set so that the distribution has a fixed **perplexity**
+$2^{\entropy(P_i)}$, where $\entropy(P_i) = -\sum_j p_{j \mid i}\log_2 p_{j \mid i}$ is its
+<NoteLink to="entropy">entropy</NoteLink> in bits. Perplexity is an effective number of neighbours: a uniform
+distribution over $k$ points has perplexity exactly $k$. A binary search on $\sigma_i$ reaches the target, because the
+entropy increases with $\sigma_i$. Points in dense regions get small $\sigma_i$ and points in sparse regions large
+ones, so every point has about the same number of effective neighbours. Typical perplexities are 5 to 50.
+
+The conditional probabilities are symmetrised: $p_{ij} = (p_{j \mid i} + p_{i \mid j})/2n$. The $p_{ij}$ sum to 1 over
+all pairs, and every point has $\sum_j p_{ij} > 1/2n$, so even an outlier influences the embedding.
+
+## The crowding problem and the Student-t kernel
+
+The original stochastic neighbour embedding used Gaussian affinities in the embedding as well. That fails because of
+the **crowding problem**. In $D$ dimensions, the volume within distance $r$ of a point grows as $r^D$, so a point can
+have many neighbours at a moderate distance, all nearly equidistant from it and from each other. In two dimensions
+there is not enough room to place them all at that distance. With a Gaussian kernel in the embedding, moderately
+distant points are then either crushed toward the centre or cost a great deal.
+
+t-SNE uses a Student-t kernel with one degree of freedom, $(1 + d^2)^{-1}$, in the embedding
+<Cite id="vandermaaten2008" />. Its tails are heavy: it decays as $d^{-2}$, not $e^{-d^2}$. A pair of points with a
+small $p_{ij}$ can be placed far apart in the embedding without a large mismatch in $q_{ij}$. At distance 3 the
+Student-t kernel is still $1/10$ of its peak, while $e^{-d^2}$ is $1.2 \times 10^{-4}$. The heavy tail lets
+moderately dissimilar points spread out, which separates clusters and leaves space between them. The $d^{-2}$ decay
+also means that far apart groups interact like an inverse-square law, independent of the scale of the map.
+
+## The gradient
+
+Write $d_{ij} = \norm{\yvec_i - \yvec_j}$, $w_{ij} = (1 + d_{ij}^2)^{-1}$ and $Z = \sum_{k \ne l} w_{kl}$, so that
+$q_{ij} = w_{ij}/Z$. Since the $p_{ij}$ sum to 1,
+
+$$
+C = \sum_{k \ne l} p_{kl}\log p_{kl} - \sum_{k \ne l} p_{kl}\log w_{kl} + \log Z.
+$$
+
+The first term does not depend on the embedding. Only pairs that contain $i$ depend on $\yvec_i$, and
+$\partial w_{ij}/\partial\yvec_i = -2w_{ij}^2(\yvec_i - \yvec_j)$.
+
+- **Second term.** $-\partial\log w_{ij}/\partial\yvec_i = 2w_{ij}(\yvec_i - \yvec_j)$. Each unordered pair $\set{i, j}$
+  appears twice, as $(i, j)$ and $(j, i)$, with $p_{ij} = p_{ji}$. The contribution is
+  $4\sum_j p_{ij}w_{ij}(\yvec_i - \yvec_j)$.
+- **Third term.** $\partial Z/\partial\yvec_i = 2\sum_j \partial w_{ij}/\partial\yvec_i = -4\sum_j w_{ij}^2(\yvec_i -
+  \yvec_j)$, so $\partial\log Z/\partial\yvec_i = -4\sum_j q_{ij}w_{ij}(\yvec_i - \yvec_j)$.
+
+Adding them,
+
+$$
+\frac{\partial C}{\partial\yvec_i} = 4\sum_{j}\paren{p_{ij} - q_{ij}}\frac{\yvec_i - \yvec_j}{1 + \norm{\yvec_i -
+\yvec_j}^2}.
+$$
+
+Each other point acts on $\yvec_i$ like a spring along $\yvec_i - \yvec_j$. It attracts when the pair is more similar
+in the data than in the map ($p_{ij} > q_{ij}$) and repels otherwise. The factor $w_{ij}$ weakens both forces with
+distance.
+
+<TsneExplorer />
+
+## Optimisation
+
+- **Initialisation.** Small random positions, or the first two principal components scaled down. PCA initialisation
+  preserves more of the global arrangement <Cite id="kobak2021" />.
+- **Early exaggeration.** For the first iterations, multiply every $p_{ij}$ by a factor such as 12. Attraction then
+  dominates, clusters contract into tight groups, and they move past each other freely before the layout settles.
+- **Momentum and adaptive gains** speed up gradient descent.
+- **Cost.** The exact gradient costs $O(n^2)$ per iteration. Barnes–Hut t-SNE approximates the repulsive forces of
+  distant groups by their centres of mass and uses only the nearest neighbours for the attractive forces, for
+  $O(n\log n)$ <Cite id="vandermaaten2014" />.
+
+The widget above runs exact t-SNE in the browser on 160 points for 500 iterations: early exaggeration of 12 for the
+first 100 iterations, learning rate 50, momentum 0.5 then 0.8.
+
+## Worked example
+
+**Calibrating one point.** A point has three neighbours at distances 1, 2 and 3, and the target perplexity is 2. The
+binary search gives $\sigma = 1.156$. The conditional probabilities are $p = (0.727, 0.237, 0.036)$. Their entropy is
+1 bit, so the perplexity is $2^1 = 2$: the point behaves as if it had two equally likely neighbours.
+
+**Tails.** For a pair at embedding distance 1 the Student-t kernel is $1/2$ and the Gaussian $e^{-1} = 0.37$. At
+distance 3 they are $1/10$ and $1.2 \times 10^{-4}$. Placing a weakly related pair at distance 3 instead of 1 reduces
+its similarity 5-fold under the Student-t kernel, but about 3000-fold under the Gaussian.
+
+## Reading a t-SNE plot
+
+t-SNE preserves neighbourhoods. Most other features of the plot are unreliable <Cite id="wattenberg2016" />:
+
+- **Cluster sizes mean little.** Each point has the same effective number of neighbours, so dense clusters expand and
+  sparse ones contract.
+- **Distances between clusters mean little.** The heavy tail stretches large distances by varying amounts.
+- **Perplexity changes the picture.** Small perplexities break data into many small clumps, even pure noise. Compare
+  several values.
+- **Runs differ.** The cost is non-convex; different seeds give different layouts. Structure that appears across seeds
+  and perplexities is trustworthy.
+
+In practice, reduce very high-dimensional data to about 50 dimensions with PCA first, which removes noise and speeds up
+the distance computations <Cite id="kobak2019" />.
+
+## Pitfalls
+
+- **No out-of-sample map.** t-SNE optimises positions for the given points. A new point requires rerunning or a
+  separate method.
+- **Not for features.** The embedding axes have no meaning, and the embedding is for visualisation, not as input to
+  downstream models.
+- **Clusters in noise.** With small perplexity, t-SNE produces apparent clusters from structureless data.

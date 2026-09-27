@@ -1,0 +1,137 @@
+---
+title: Shrinkage covariance estimation
+kind: concept
+summary: 'A shrinkage estimator replaces the sample covariance $\Smat$ by $(1 - \delta)\Smat + \delta m\Imat$, pulling its eigenvalues toward their mean $m$. The Ledoit–Wolf estimate of $\delta$ minimises expected squared error from the data alone and gives a well-conditioned estimate even when $p > n$.'
+tags: [covariance-estimation, statistics, high-dimensional, regularisation, worked-example]
+aliases: [Ledoit–Wolf estimator, Ledoit–Wolf shrinkage, covariance shrinkage, shrinkage intensity, oracle approximating shrinkage, OAS, well-conditioned covariance estimator]
+requires: [variance-and-covariance, eigendecomposition]
+related: [condition-number, positive-definite-matrices, ridge-regression, linear-discriminant-analysis, wishart-distribution]
+references: [ledoit2004, chen2010, schafer2005, marchenko1967]
+status: draft
+updated: 2026-09-27
+---
+
+import { ShrinkageExplorer } from './ShrinkageExplorer'
+
+<Definition>
+Let $\Smat$ be the $p \times p$ sample covariance of $n$ observations and $m = \trace(\Smat)/p$ the mean of its
+eigenvalues. The **linear shrinkage estimator** with intensity $\delta \in [0, 1]$ is
+
+$$
+\hat\Sigmamat_\delta = (1 - \delta)\Smat + \delta m\Imat.
+$$
+
+The **Ledoit–Wolf estimator** chooses $\delta$ from the data to minimise the expected squared Frobenius error
+$\expect\norm{\hat\Sigmamat_\delta - \Sigmamat}^2$, where $\norm{\Amat}^2 = \trace(\Amat\Amat^\top)/p$
+<Cite id="ledoit2004" />.
+</Definition>
+
+## The sample covariance is poor in high dimensions
+
+The sample covariance is unbiased, but it estimates $p(p + 1)/2$ numbers from $np$ values. When $p$ is not small
+compared with $n$, its errors are large and systematic:
+
+- **Eigenvalues spread out.** The largest sample eigenvalues are too large and the smallest too small. For
+  $\Sigmamat = \Imat$, whose eigenvalues are all 1, the sample eigenvalues spread over
+  $\LB(1 - \sqrt{p/n})^2,\, (1 + \sqrt{p/n})^2\RB$ as $n$ and $p$ grow in proportion. This is the Marchenko–Pastur law
+  <Cite id="marchenko1967" />. With $p/n = 0.5$ the range is $[0.09, 2.91]$.
+- **Singularity.** When $p \ge n$, $\Smat$ has rank at most $n - 1$ and cannot be inverted. Methods that need
+  $\Smat^{-1}$, such as <NoteLink to="linear-discriminant-analysis">linear discriminant analysis</NoteLink>,
+  Mahalanobis distances and portfolio optimisation, fail or become unstable.
+
+Shrinkage trades a little bias for a large reduction in variance, as in
+<NoteLink to="ridge-regression">ridge regression</NoteLink>.
+
+## What shrinkage does to the eigenvalues
+
+$\Smat$ and $m\Imat$ share eigenvectors, so $\hat\Sigmamat_\delta$ keeps the eigenvectors of $\Smat$ and maps each
+eigenvalue $\lambda_i$ to $(1 - \delta)\lambda_i + \delta m$. Every eigenvalue moves toward the mean by the same
+fraction, which counteracts the spreading. The smallest eigenvalue becomes at least $\delta m > 0$, so the estimate is
+positive definite and its <NoteLink to="condition-number">condition number</NoteLink> is at most
+$\paren{(1 - \delta)\lambda_{\max} + \delta m}/(\delta m)$.
+
+## The optimal intensity
+
+Let $\mu = \trace(\Sigmamat)/p$. Consider shrinking toward the unknown $\mu\Imat$ first, and define
+
+$$
+\alpha^2 = \norm{\Sigmamat - \mu\Imat}^2, \qquad \beta^2 = \expect\norm{\Smat - \Sigmamat}^2.
+$$
+
+$\alpha^2$ measures how far the true covariance is from a multiple of the identity. $\beta^2$ is the sampling error of
+$\Smat$. The error of the shrunk estimate is
+
+$$
+\expect\norm{\delta\mu\Imat + (1 - \delta)\Smat - \Sigmamat}^2 =
+\expect\norm{\delta(\mu\Imat - \Sigmamat) + (1 - \delta)(\Smat - \Sigmamat)}^2 = \delta^2\alpha^2 + (1 - \delta)^2
+\beta^2.
+$$
+
+The cross term vanishes because $\expect[\Smat - \Sigmamat] = \zeros$ and $\mu\Imat - \Sigmamat$ is fixed. Setting the
+derivative $2\delta\alpha^2 - 2(1 - \delta)\beta^2$ to zero gives
+
+$$
+\delta^* = \frac{\beta^2}{\alpha^2 + \beta^2}, \qquad \text{error} = \frac{\alpha^2\beta^2}{\alpha^2 + \beta^2}.
+$$
+
+The optimal error is smaller than both $\beta^2$, the error of $\Smat$, and $\alpha^2$, the error of the target. Shrink
+a lot when the sample is noisy compared with how far the truth is from the target, and little otherwise. Because
+$\expect[\Smat] = \Sigmamat$, the quantity $\alpha^2 + \beta^2$ equals $\expect\norm{\Smat - \mu\Imat}^2$, which can be
+estimated from the data.
+
+## The Ledoit–Wolf estimates
+
+Ledoit and Wolf replace each unknown by a consistent estimate, with observations $\xvec_1, \dots, \xvec_n$ centred at
+their mean <Cite id="ledoit2004" />:
+
+- $m = \trace(\Smat)/p$ estimates $\mu$;
+- $d^2 = \norm{\Smat - m\Imat}^2$ estimates $\alpha^2 + \beta^2$;
+- $\bar b^2 = \frac{1}{n^2}\sum_{k=1}^n\norm{\xvec_k\xvec_k^\top - \Smat}^2$ estimates $\beta^2$, because $\Smat$ is the
+  mean of the $n$ matrices $\xvec_k\xvec_k^\top$ and the variance of a mean of $n$ terms is their variance over $n$;
+- $b^2 = \min(\bar b^2, d^2)$ keeps the estimate of $\beta^2$ no larger than the total.
+
+The estimated intensity is $\hat\delta = b^2/d^2 \in [0, 1]$. As $n$ and $p$ grow together, $\hat\delta$ converges to
+the optimal intensity and the estimator's error to the optimal error. Nothing about the distribution beyond finite
+fourth moments is assumed.
+
+<ShrinkageExplorer />
+
+## Variants
+
+- **Other targets.** Shrinking toward the diagonal of $\Smat$ keeps each variance and shrinks only the correlations.
+  Schäfer and Strimmer give intensities for six targets <Cite id="schafer2005" />.
+- **Oracle approximating shrinkage** (OAS) derives a different intensity under a Gaussian assumption. It converges
+  faster when $n$ is small <Cite id="chen2010" />.
+- **Nonlinear shrinkage** moves each eigenvalue by its own amount instead of the same fraction.
+
+## Worked example
+
+**Two dimensions.** A sample covariance $\Smat = \begin{pmatrix} 2 & 0.5 \\ 0.5 & 1 \end{pmatrix}$ has eigenvalues
+$1.5 \pm \sqrt{0.5}$, that is $2.207$ and $0.793$, and $m = 1.5$. With $\delta = 0.3$,
+$\hat\Sigmamat = 0.7\Smat + 0.45\Imat = \begin{pmatrix} 1.85 & 0.35 \\ 0.35 & 1.15 \end{pmatrix}$. Its eigenvalues are
+$0.7 \times 2.207 + 0.45 = 1.995$ and $0.7 \times 0.793 + 0.45 = 1.005$. The condition number falls from $2.78$ to
+$1.99$.
+
+**Fifty dimensions.** Take $\Sigmamat_{ij} = 0.5^{\abs{i - j}}$ with $p = 50$; its eigenvalues range from $0.33$ to
+$2.98$. Averaged over 200 simulated samples, with scikit-learn's `ledoit_wolf`:
+
+| $n$ | $\hat\delta$ | Error of $\Smat$ | Error of Ledoit–Wolf |
+| --- | --- | --- | --- |
+| 25 | 0.716 | 1.953 | 0.518 |
+| 50 | 0.592 | 1.017 | 0.406 |
+| 100 | 0.437 | 0.510 | 0.292 |
+| 200 | 0.283 | 0.257 | 0.186 |
+| 1000 | 0.074 | 0.051 | 0.048 |
+
+Errors are $\norm{\hat\Sigmamat - \Sigmamat}^2 = \trace\paren{(\hat\Sigmamat - \Sigmamat)^2}/p$. At $n = 25$ the
+shrinkage estimate is almost four times as accurate as $\Smat$. As $n$ grows the intensity falls toward 0 and the two
+estimates converge.
+
+## Pitfalls
+
+- **Scale.** Shrinking toward $m\Imat$ assumes the variables have comparable variances. Standardise first, or shrink
+  toward the diagonal.
+- **The loss is Frobenius.** $\hat\delta$ minimises squared error of the covariance itself. It is not tuned for the
+  inverse, for eigenvectors or for a downstream task; cross-validating $\delta$ on the task can do better.
+- **No sparsity.** Linear shrinkage keeps every correlation nonzero. For a sparse inverse covariance, use the
+  <NoteLink to="graphical-lasso">graphical lasso</NoteLink>.

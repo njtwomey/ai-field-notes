@@ -1,0 +1,112 @@
+---
+title: Histogram density estimation
+kind: concept
+summary: 'A density histogram estimates $f(x)$ by the fraction of points in the bin containing $x$, divided by the bin width $h$. Its squared bias grows as $h^2$ and its variance as $1/nh$, so the optimal width shrinks as $n^{-1/3}$. Scott''s and the Freedman–Diaconis rules estimate it.'
+tags: [density-estimation, nonparametric, unsupervised, statistics, worked-example]
+aliases: [histogram, density histogram, bin width, Freedman–Diaconis rule, Scott's rule, Sturges' rule, averaged shifted histogram]
+requires: [binomial-distribution, taylor-series]
+related: []
+references: [freedman1981, scott1979, sturges1926, silverman1986]
+status: draft
+updated: 2026-09-27
+---
+
+import { HistogramExplorer } from './HistogramExplorer'
+
+<Definition>
+Fix an origin $t_0$ and a bin width $h > 0$, and divide the line into bins $B_k = [t_0 + kh,\, t_0 + (k + 1)h)$. For a
+sample $x_1, \dots, x_n$ with $\nu_k$ points in bin $B_k$, the **density histogram** is
+
+$$
+\hat f(x) = \frac{\nu_k}{nh} \qquad \text{for } x \in B_k.
+$$
+
+It is non-negative and integrates to $\sum_k \nu_k h/(nh) = 1$, so it is a density.
+</Definition>
+
+## Counts, frequencies and densities
+
+A histogram of raw counts $\nu_k$ changes scale with $n$ and with $h$. Dividing by $n$ gives the fraction of the sample
+in each bin, and dividing again by $h$ turns that fraction into a density, a probability per unit length. Only the
+density scaling can be compared with a probability density function or with histograms that use different bins.
+
+## Bias and variance
+
+Fix $x$ in bin $B$ with centre $c$, and let $p = \int_B f(y)\,dy$ be the probability of the bin. The count $\nu$ of
+points in $B$ is <NoteLink to="binomial-distribution">binomial</NoteLink>, $\nu \sim \Binom(n, p)$, so
+
+$$
+\expect[\hat f(x)] = \frac{p}{h}, \qquad \var[\hat f(x)] = \frac{p(1 - p)}{nh^2}.
+$$
+
+**Variance.** For a small bin $p \approx hf(x)$, so $\var[\hat f(x)] \approx f(x)/(nh)$. Summed over bins, the
+integrated variance is $\sum_k p_k(1 - p_k)/(nh) \approx 1/(nh)$, because $\sum_k p_k = 1$ and $\sum_k p_k^2$ is of
+order $h$.
+
+**Bias.** Expanding $f$ around the bin centre, $p/h = f(c) + O(h^2)$ and $f(x) = f(c) + f'(c)(x - c) + O(h^2)$. The
+bias is $p/h - f(x) = -f'(c)(x - c) + O(h^2)$. It is linear in the distance from the centre: the estimate is flat,
+the density is sloped. The squared bias integrated over one bin is
+$f'(c)^2\int_{-h/2}^{h/2}u^2\,du = f'(c)^2h^3/12$. Summed over bins, this approximates
+$\frac{h^2}{12}\int f'(x)^2\,dx = h^2R(f')/12$, with $R(f') = \int f'^2$.
+
+The asymptotic mean integrated squared error is the sum
+
+$$
+\operatorname{AMISE}(h) = \frac{1}{nh} + \frac{h^2R(f')}{12}.
+$$
+
+Setting the derivative $-1/(nh^2) + hR(f')/6$ to zero gives <Cite id="scott1979" />
+
+$$
+h^* = \paren{\frac{6}{R(f')\,n}}^{1/3}, \qquad \operatorname{AMISE}(h^*) \propto n^{-2/3}.
+$$
+
+The optimal width shrinks as $n^{-1/3}$. The error falls as $n^{-2/3}$, more slowly than the $n^{-4/5}$ of a
+<NoteLink to="kernel-density-estimation">kernel density estimate</NoteLink>, because the histogram's bias is first
+order in $h$ instead of second order.
+
+## Bin-width rules
+
+- **Scott's rule.** For a Gaussian density with standard deviation $\sigma$, $R(f') = 1/(4\sqrt\pi\,\sigma^3)$. Then
+  $h^* = (24\sqrt\pi)^{1/3}\sigma n^{-1/3} = 3.49\,\sigma n^{-1/3}$, with $\sigma$ estimated by the sample standard
+  deviation <Cite id="scott1979" />.
+- **Freedman–Diaconis rule.** $h = 2\,\text{IQR}\,n^{-1/3}$, with IQR the interquartile range
+  <Cite id="freedman1981" />. The IQR is not inflated by outliers or heavy tails, so the rule is more robust than
+  Scott's. For a Gaussian, $\text{IQR} = 1.349\sigma$ and the rule gives $2.70\,\sigma n^{-1/3}$, somewhat narrower
+  bins.
+- **Sturges' rule.** Use $\lceil\log_2 n\rceil + 1$ bins over the range of the data <Cite id="sturges1926" />. The
+  number of bins grows only logarithmically with $n$, so for large samples the bins are too wide and the histogram
+  oversmooths.
+
+All three rules assume a roughly unimodal density. For multimodal data, where $R(f')$ is larger than for one Gaussian,
+they choose bins that are too wide.
+
+<HistogramExplorer />
+
+## The origin matters
+
+Two histograms with the same width but different origins can suggest different shapes: one mode or two, a skew to the
+left or the right. The origin is an arbitrary choice that the data do not determine. The **averaged shifted
+histogram** averages $m$ histograms whose origins are shifted by $h/m$. As $m$ grows it approaches a kernel density
+estimate with a triangular kernel, which removes the dependence on the origin <Cite id="silverman1986" />.
+
+## Worked example
+
+For $n = 1000$ points from a standard Gaussian ($\sigma = 1$, $\text{IQR} = 1.349$):
+
+- **Scott.** $h = 3.49 \times 1000^{-1/3} = 3.49/10 = 0.349$.
+- **Freedman–Diaconis.** $h = 2 \times 1.349/10 = 0.270$.
+- **Sturges.** $\lceil\log_2 1000\rceil + 1 = 10 + 1 = 11$ bins. A sample of 1000 standard Gaussians typically spans
+  about 6.5, so each bin is about $0.6$ wide, nearly twice Scott's width.
+
+Doubling the sample to $n = 2000$ narrows Scott's width by a factor of $2^{1/3} = 1.26$, to $0.277$.
+
+## Pitfalls
+
+- **Unequal bins.** With bins of different widths, the heights must be densities, $\nu_k/(nh_k)$. Plotting raw counts
+  exaggerates the wide bins.
+- **Edges on data values.** Rounded data put many points exactly on bin edges. Choose edges between the recorded
+  values, or the assignment rule decides the shape.
+- **Discontinuous estimate.** The histogram is a step function even when the density is smooth. Use a kernel density
+  estimate when derivatives or a smooth curve matter.
+- **Many dimensions.** The number of bins grows as $(1/h)^d$, and most are empty for moderate $d$.

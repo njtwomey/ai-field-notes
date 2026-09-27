@@ -1,0 +1,101 @@
+---
+title: Locally linear embedding
+kind: concept
+summary: 'Locally linear embedding writes each point as an affine combination of its $k$ nearest neighbours, then finds low-dimensional points that the same weights reconstruct. Both steps have closed forms: a small linear solve per point and the bottom eigenvectors of $(\Imat - \Wmat)^\top(\Imat - \Wmat)$.'
+tags: [manifold-learning, dimensionality-reduction, unsupervised, linear-algebra, worked-example]
+aliases: [LLE, reconstruction weights, Hessian LLE, modified LLE]
+requires: [k-nearest-neighbours, eigendecomposition]
+related: [spectral-clustering, principal-component-analysis]
+references: [roweis2000, saul2003]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Locally linear embedding** (LLE) maps points $\xvec_1, \dots, \xvec_n \in \reals^D$ to $\yvec_1, \dots, \yvec_n \in
+\reals^m$ in two steps <Cite id="roweis2000" />. First, for each point it finds weights $w_{ij}$, nonzero only for the
+$k$ nearest neighbours $j \in N(i)$, that minimise the reconstruction error
+$\norm{\xvec_i - \sum_j w_{ij}\xvec_j}^2$ subject to $\sum_j w_{ij} = 1$. Second, it fixes the weights and finds
+the $\yvec_i$ that minimise $\sum_i\norm{\yvec_i - \sum_j w_{ij}\yvec_j}^2$, subject to centring and unit covariance.
+</Definition>
+
+## Local patches are nearly flat
+
+A smooth manifold looks flat in a small enough neighbourhood. Within that patch, each point is close to the affine
+span of its neighbours, so it can be written as a weighted combination of them. The weights describe the local
+geometry: how the point sits relative to its neighbours. With the sum-to-one constraint, the weights do not change when
+the patch is rotated, rescaled or translated. Those are the transformations that unrolling a manifold applies to each
+patch. LLE therefore expects the same weights to describe the unrolled, low-dimensional coordinates, and it looks for
+coordinates that the weights reconstruct.
+
+The invariances follow from the objective. Rotating or scaling all points multiplies every residual
+$\xvec_i - \sum_j w_{ij}\xvec_j$ by the same matrix or factor, so the minimising weights do not change. Translating all
+points by $\tvec$ adds $\tvec - \sum_j w_{ij}\tvec = \zeros$ to each residual, because $\sum_j w_{ij} = 1$.
+
+## Step 1: reconstruction weights
+
+Fix point $i$ and write $\wvec \in \reals^k$ for its weights on its neighbours $\xvec_{j_1}, \dots, \xvec_{j_k}$. Using
+$\sum_a w_a = 1$,
+
+$$
+\xvec_i - \sum_a w_a\xvec_{j_a} = \sum_a w_a(\xvec_i - \xvec_{j_a}),
+$$
+
+so the squared error is $\wvec^\top\Cmat\wvec$ with the $k \times k$ **local Gram matrix**
+$C_{ab} = (\xvec_i - \xvec_{j_a})^\top(\xvec_i - \xvec_{j_b})$. Minimise it subject to $\ones^\top\wvec = 1$. The
+Lagrangian $\wvec^\top\Cmat\wvec - 2\lambda(\ones^\top\wvec - 1)$ is stationary where $\Cmat\wvec = \lambda\ones$, so
+
+$$
+\wvec = \frac{\Cmat^{-1}\ones}{\ones^\top\Cmat^{-1}\ones}.
+$$
+
+In practice one solves $\Cmat\wvec = \ones$ and divides by the sum. When $k > D$, or when the neighbours are affinely
+dependent, $\Cmat$ is singular and the weights are not unique. The standard fix adds a small multiple of the identity,
+$\Cmat + \epsilon\,\trace(\Cmat)\Imat$ with $\epsilon$ around $10^{-3}$, which picks the smallest-norm weights among
+the near-optimal ones <Cite id="saul2003" />.
+
+## Step 2: embedding
+
+Collect the weights in an $n \times n$ matrix $\Wmat$, with row $i$ holding the weights of point $i$. With the
+embedding stacked as the rows of $\Ymat \in \reals^{n \times m}$, the cost is
+
+$$
+\Phi(\Ymat) = \sum_i\norm{\yvec_i - \sum_j w_{ij}\yvec_j}^2 = \norm{(\Imat - \Wmat)\Ymat}_F^2 = \trace\paren{\Ymat^\top
+\Mmat\Ymat}, \qquad \Mmat = (\Imat - \Wmat)^\top(\Imat - \Wmat).
+$$
+
+Without constraints, $\Ymat = \zeros$ is optimal. LLE requires $\sum_i\yvec_i = \zeros$ and
+$\frac1n\Ymat^\top\Ymat = \Imat$, which removes translation and collapse. Minimising $\trace(\Ymat^\top\Mmat\Ymat)$
+with orthonormal columns gives the eigenvectors of $\Mmat$ with the smallest eigenvalues, by the same trace argument
+as in <NoteLink to="principal-component-analysis">PCA</NoteLink>. $\Mmat$ is positive semidefinite, and
+$\Mmat\ones = (\Imat - \Wmat)^\top(\ones - \Wmat\ones) = \zeros$ because each row of $\Wmat$ sums to 1. The constant
+vector is therefore the bottom eigenvector, with eigenvalue 0. It violates the centring constraint and is discarded.
+The embedding is given by the eigenvectors $2, \dots, m + 1$, scaled by $\sqrt n$.
+
+$\Mmat$ is sparse, with about $nk^2$ nonzero entries, so a sparse eigensolver finds the bottom eigenvectors quickly.
+Step 1 costs $O(nDk^3)$ at most. LLE avoids the all-pairs shortest paths of
+<NoteLink to="isomap">Isomap</NoteLink>.
+
+## Worked example
+
+A point $\xvec = (1, 1)$ has two neighbours, $(0, 0)$ and $(3, 0)$.
+
+- The differences are $\xvec - (0, 0) = (1, 1)$ and $\xvec - (3, 0) = (-2, 1)$. The local Gram matrix is
+  $\Cmat = \begin{pmatrix} 2 & -1 \\ -1 & 5 \end{pmatrix}$.
+- $\Cmat^{-1} = \frac19\begin{pmatrix} 5 & 1 \\ 1 & 2 \end{pmatrix}$, so $\Cmat^{-1}\ones = \frac19(6, 3)$. Normalising
+  to sum 1 gives $\wvec = (2/3, 1/3)$.
+- The reconstruction is $\frac23(0, 0) + \frac13(3, 0) = (1, 0)$, the orthogonal projection of $\xvec$ onto the line
+  through its neighbours. The error is $\norm{(0, 1)}^2 = 1$.
+
+The weights say that $\xvec$ sits one third of the way from the first neighbour to the second. In a one-dimensional
+embedding, LLE places $\yvec$ one third of the way between the neighbours' embeddings.
+
+## Pitfalls
+
+- **Regularisation matters.** When $k > D$ the result depends on $\epsilon$. Modified LLE and Hessian LLE use several
+  weight vectors per neighbourhood to make the embedding more stable.
+- **Neighbourhood size.** As with Isomap, too few neighbours disconnect the graph and too many short-circuit folds.
+- **Distorted global shape.** LLE preserves local weights, not distances. The unit-covariance constraint can squash
+  or stretch the embedding, and non-uniform sampling distorts it further.
+- **Near-zero eigenvalues.** When several eigenvalues of $\Mmat$ are almost equal, the chosen eigenvectors are unstable
+  and the embedding can change a lot with small changes to the data.

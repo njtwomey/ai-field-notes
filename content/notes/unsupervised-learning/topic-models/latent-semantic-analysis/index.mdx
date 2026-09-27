@@ -1,0 +1,103 @@
+---
+title: Latent semantic analysis
+kind: concept
+summary: 'Latent semantic analysis takes the truncated SVD $\Amat_k = \Umat_k\Sigmamat_k\Vmat_k^\top$ of a weighted term–document matrix and compares documents and terms in the $k$-dimensional space it spans. Terms used in similar documents get similar coordinates, so a query can match a document without sharing its words.'
+tags: [topic-models, unsupervised, nlp, information-retrieval, linear-algebra, worked-example]
+aliases: [LSA, latent semantic indexing, LSI, term–document matrix, folding in]
+requires: [singular-value-decomposition, pairwise-distances-and-cosine-similarity]
+related: [word-embeddings, non-negative-matrix-factorisation]
+references: [deerwester1990, eckart1936, hofmann1999]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $\Amat$ be a $V \times D$ **term–document matrix**, with $A_{wd}$ a weighted count of term $w$ in document $d$.
+**Latent semantic analysis** (LSA) computes the rank-$k$ truncated singular value decomposition
+$\Amat_k = \Umat_k\Sigmamat_k\Vmat_k^\top$, with $k$ much smaller than $V$ and $D$ <Cite id="deerwester1990" />.
+Document $d$ is represented by column $d$ of $\Sigmamat_k\Vmat_k^\top = \Umat_k^\top\Amat$, term $w$ by row $w$ of
+$\Umat_k\Sigmamat_k$, and documents and queries are compared by the cosine of their representations.
+</Definition>
+
+## The vocabulary problem
+
+Keyword retrieval matches a query to documents that contain its words. It fails in two ways. **Synonymy:** a query for
+"car" misses a document that says "automobile". **Polysemy:** a query for "bank" retrieves documents about rivers and
+about money. Both arise because individual words are noisy indicators of what a document is about. LSA replaces the
+$V$ raw term dimensions by $k$ latent dimensions estimated from how terms co-occur across the whole corpus. Terms that
+appear in similar contexts load on the same dimensions, even if they never appear together in one document.
+
+## Truncated SVD
+
+The SVD writes $\Amat = \sum_j \sigma_j\uvec_j\vvec_j^\top$ with orthonormal $\uvec_j \in \reals^V$ and
+$\vvec_j \in \reals^D$ and $\sigma_1 \ge \sigma_2 \ge \dots \ge 0$. Keeping the first $k$ terms gives $\Amat_k$, the
+rank-$k$ matrix closest to $\Amat$ in Frobenius norm, by the Eckart–Young theorem <Cite id="eckart1936" />. The
+squared error is $\sum_{j > k}\sigma_j^2$. The $k$ **latent dimensions** are the directions $\uvec_1, \dots, \uvec_k$
+in term space.
+
+Document $d$'s latent coordinates are the projections of its column $\avec_d$ onto these directions, $\Umat_k^\top
+\avec_d$. Because $\Umat_k^\top\Amat = \Sigmamat_k\Vmat_k^\top$, these are the columns of $\Sigmamat_k\Vmat_k^\top$.
+Cosine similarity between two documents in the latent space equals the cosine between their columns in $\Amat_k$,
+since $\Umat_k$ has orthonormal columns. The truncation discards the small singular values, which mostly describe
+idiosyncratic word choices. The kept dimensions describe systematic co-occurrence.
+
+## Queries and new documents
+
+A query $\qvec$ is a vector of term counts, weighted like the documents. **Folding in** maps it into the latent space
+the same way as a document: $\hat\qvec = \Umat_k^\top\qvec$. Retrieval ranks documents by the cosine between $\hat\qvec$
+and each document's coordinates. New documents are folded in the same way without recomputing the SVD. After many
+additions the latent space no longer reflects the corpus and must be recomputed.
+
+## Weighting
+
+Raw counts let frequent words dominate. Two weightings are common:
+
+- **tf–idf.** $A_{wd} = \text{tf}_{wd}\log(D/\text{df}_w)$, where $\text{df}_w$ is the number of documents that
+  contain term $w$. Terms in every document get weight 0.
+- **Log–entropy.** $A_{wd} = \log(1 + \text{tf}_{wd}) \cdot g_w$, where the global weight $g_w = 1 +
+  \sum_d p_{wd}\log p_{wd}/\log D$, with $p_{wd} = \text{tf}_{wd}/\sum_{d'}\text{tf}_{wd'}$, is 1 minus the normalised
+  entropy of the term's distribution over documents. Terms spread evenly over documents get weight near 0.
+
+LSA is usually applied without centring, unlike <NoteLink to="principal-component-analysis">PCA</NoteLink>. Centring
+would make the matrix dense, which is expensive for a large sparse corpus. The first singular vector then roughly
+tracks overall term frequency.
+
+## Worked example
+
+Five terms and four documents: $d_1$ = "car engine", $d_2$ = "automobile engine", $d_3$ = "flower petal",
+$d_4$ = "flower". With raw counts,
+
+$$
+\Amat = \begin{pmatrix} 1 & 0 & 0 & 0 \\ 0 & 1 & 0 & 0 \\ 1 & 1 & 0 & 0 \\ 0 & 0 & 1 & 1 \\ 0 & 0 & 1 & 0
+\end{pmatrix} \begin{matrix} \text{car} \\ \text{automobile} \\ \text{engine} \\ \text{flower} \\ \text{petal}
+\end{matrix}
+$$
+
+- **Singular values.** $1.732, 1.618, 1, 0.618$. The first two carry $(3 + 2.618)/7 = 80\%$ of
+  $\norm{\Amat}_F^2 = 7$.
+- **Latent dimensions.** $\uvec_1 = (0.408, 0.408, 0.816, 0, 0)$ is the vehicle dimension and $\uvec_2 = (0, 0, 0,
+  0.851, 0.526)$ the flower dimension, up to sign.
+- **Documents.** With $k = 2$, $d_1$ and $d_2$ both map to $(1.225, 0)$, and $d_3$ and $d_4$ map to $(0, 1.376)$ and
+  $(0, 0.851)$. The raw cosine between $d_1$ and $d_2$ is $0.5$, from the shared "engine". In the latent space it is 1.
+- **Reconstruction.** The row for "car" in $\Amat_2$ is $(0.5, 0.5, 0, 0)$. The rank-2 approximation credits $d_2$
+  with half an occurrence of "car", although $d_2$ never uses the word.
+- **A query.** The query "car" has raw cosine 0 with $d_2$. Folded in, $\Umat_2^\top\qvec = (0.408, 0)$, and its
+  cosine with both $d_1$ and $d_2$ is 1. LSA retrieves the "automobile" document for a "car" query.
+
+## Relatives
+
+- <NoteLink to="probabilistic-latent-semantic-analysis">Probabilistic latent semantic analysis</NoteLink> replaces the
+  SVD by a mixture model with non-negative, normalised factors fitted by maximum likelihood <Cite id="hofmann1999" />.
+- Dense <NoteLink to="word-embeddings">word embeddings</NoteLink> from co-occurrence statistics, such as GloVe, are
+  also low-rank factorisations of a word–context matrix.
+
+## Pitfalls
+
+- **Negative values.** Latent coordinates can be negative, which makes the dimensions hard to interpret as topics.
+  <NoteLink to="non-negative-matrix-factorisation">NMF</NoteLink> gives non-negative, more readable factors.
+- **Polysemy.** Each term has one vector, which averages over its senses. LSA helps with synonymy more than with
+  polysemy.
+- **Choosing k.** Too small a $k$ merges distinct subjects; too large a $k$ keeps noise. Values of 100 to 300 are common
+  for large corpora, chosen by retrieval performance.
+- **Squared error on counts.** The SVD's Frobenius criterion suits Gaussian noise, not counts. Weighting helps, and
+  probabilistic models address it directly.

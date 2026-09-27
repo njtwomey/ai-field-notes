@@ -1,0 +1,133 @@
+---
+title: Choosing the number of clusters
+kind: concept
+summary: 'A clustering objective such as the within-cluster sum of squares always improves as the number of clusters $k$ grows, so it cannot choose $k$. The elbow method, silhouette, gap statistic, BIC and eigengap add a reference or a penalty so that a best $k$ exists.'
+tags: [clustering, unsupervised, model-selection, worked-example]
+aliases: [number of clusters, elbow method, gap statistic, selecting k, eigengap heuristic, cluster stability]
+requires: [k-means]
+related: [gaussian-mixture-model, internal-clustering-indices, hierarchical-clustering, spectral-clustering, dbscan]
+references: [tibshirani2001, thorndike1953, rousseeuw1987, fraley2002, hastie2009]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Choosing the number of clusters means selecting $k$ for a clustering method from the data alone, without true labels.
+Every method fits a clustering for each candidate $k = 1, \dots, K$ and scores it with a criterion that does not
+improve automatically with $k$. The chosen $k$ optimises that criterion.
+</Definition>
+
+## Why the objective cannot choose k
+
+Let $W_k$ be the within-cluster sum of squares of the best clustering with $k$ clusters:
+$W_k = \sum_{j=1}^k \sum_{\xvec_i \in C_j} \norm{\xvec_i - \muvec_j}^2$. Take the best clustering with $k$ clusters and
+split any cluster with at least two distinct points into two. The squared error of the split cluster cannot increase,
+because each half is at least as close to its own mean as to the old mean. So $W_{k+1} \le W_k$, and $W_n = 0$ when
+every point is its own cluster. The same holds for the log-likelihood of a mixture model, which never decreases as
+components are added. Every criterion below counteracts this monotone improvement in one of three ways: by looking
+for diminishing returns, by comparing with data that has no clusters, or by penalising complexity.
+
+## Elbow method
+
+Plot $W_k$ against $k$ and choose the $k$ after which the curve flattens, the "elbow" <Cite id="thorndike1953" />.
+Adding a cluster that splits a true cluster reduces $W_k$ much less than adding one that separates two true
+clusters. The elbow is a visual judgement and has no formal definition. On data without clear clusters the curve bends
+smoothly and no $k$ stands out. The <NoteLink to="k-means">k-means</NoteLink> note shows the curve interactively.
+
+## Silhouette
+
+The silhouette of point $i$ is $s_i = (b_i - a_i)/\max(a_i, b_i)$, where $a_i$ is its mean distance to the other
+points in its cluster and $b_i$ its mean distance to the nearest other cluster <Cite id="rousseeuw1987" />. The mean
+silhouette over all points is highest when clusters are tight and well separated. Choose the $k$ that maximises it.
+The silhouette is undefined for $k = 1$, so it cannot conclude that the data has no cluster structure. The
+<NoteLink to="internal-clustering-indices">internal clustering indices</NoteLink> note covers the silhouette with the
+Calinski–Harabasz, Davies–Bouldin and Dunn indices.
+
+## Gap statistic
+
+The gap statistic compares $\log W_k$ with its expected value under a reference distribution that has no clusters
+<Cite id="tibshirani2001" />. $W_k$ falls with $k$ even for structureless data, because more centres always cover the
+space more finely. The reference measures that baseline fall, and the gap measures the extra fall that only real
+clusters produce:
+
+$$
+\operatorname{Gap}(k) = \expect^*\LB\log W_k^*\RB - \log W_k.
+$$
+
+Here $W_k^*$ is the within-cluster sum of squares of the same clustering method applied to a data set drawn from the
+reference distribution, of the same size as the data. The usual reference is uniform over the bounding box of the
+data, or over the box aligned with its principal components. The expectation is estimated by the mean over $B$
+reference data sets, typically $B = 10$ to $50$. Let $\text{sd}_k$ be the standard deviation of the $B$ values of
+$\log W_k^*$, and $s_k = \text{sd}_k\sqrt{1 + 1/B}$, which also accounts for the error of the mean. The rule is to
+choose the smallest $k$ with
+
+$$
+\operatorname{Gap}(k) \ge \operatorname{Gap}(k + 1) - s_{k+1}.
+$$
+
+This picks the $k$ after which the gap stops increasing by more than its noise. Unlike the silhouette, the gap
+statistic can choose $k = 1$.
+
+## Information criteria for mixture models
+
+A probabilistic clustering such as a <NoteLink to="gaussian-mixture-model">Gaussian mixture model</NoteLink> has a
+likelihood, so it can use a penalised likelihood. With maximised log-likelihood $\ell_k$, $p_k$ free parameters and $n$
+points,
+
+$$
+\BIC(k) = -2\ell_k + p_k \log n.
+$$
+
+Lower is better. The penalty grows with the number of parameters, so the criterion has a minimum. BIC approximates
+$-2\log p(\Xmat \mid k)$, the log marginal likelihood of the model with $k$ components, and choosing its minimum
+approximates choosing the most probable $k$ <Cite id="fraley2002" />. BIC answers a question about the density, not
+about the clusters: a single non-Gaussian cluster may need several Gaussian components to fit well, and BIC will count
+them all.
+
+## Other criteria
+
+- **Eigengap.** In <NoteLink to="spectral-clustering">spectral clustering</NoteLink>, choose $k$ so that the first
+  $k$ eigenvalues of the graph Laplacian are small and the next one is much larger.
+- **Dendrogram gaps.** In <NoteLink to="hierarchical-clustering">hierarchical clustering</NoteLink>, cut where the
+  heights of consecutive merges jump.
+- **Stability.** Cluster many subsamples or perturbed copies of the data and measure how often pairs of points stay
+  together. The true $k$ tends to give the most reproducible clusterings.
+- **Density-based methods.** <NoteLink to="dbscan">DBSCAN</NoteLink> does not take $k$; the number of clusters follows
+  from its density threshold.
+
+## Worked example
+
+Take 300 points from four Gaussian blobs in the plane with standard deviation 0.8 (scikit-learn's `make_blobs` with
+`random_state=2`). Two of the four blobs sit close together. For each $k$, k-means gives $W_k$, the mean silhouette and
+the gap statistic ($B = 20$ uniform reference sets over the bounding box). A Gaussian mixture with full covariances
+gives BIC.
+
+| $k$ | $W_k$ | Silhouette | $\operatorname{Gap}(k)$ | $s_k$ | BIC |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 7658.8 | — | 0.227 | 0.031 | 3123.3 |
+| 2 | 3336.0 | 0.583 | 0.419 | 0.036 | 2673.4 |
+| 3 | 760.4 | **0.718** | 1.527 | 0.028 | 2418.5 |
+| 4 | 394.9 | 0.669 | 1.779 | 0.042 | **2393.7** |
+| 5 | 351.6 | 0.595 | 1.673 | 0.039 | 2398.1 |
+| 6 | 315.8 | 0.476 | 1.569 | 0.033 | 2422.6 |
+
+- **Elbow.** $W_k$ drops by 77% from $k = 2$ to 3 and by 48% from 3 to 4, then by 11% from 4 to 5. The elbow lies at
+  3 or 4, depending on the reader.
+- **Silhouette.** It peaks at $k = 3$. Merging the two close blobs gives cleaner separation than keeping them apart.
+- **Gap.** The rule first holds at $k = 4$: $\operatorname{Gap}(4) = 1.779 \ge \operatorname{Gap}(5) - s_5 = 1.673 -
+  0.039 = 1.634$. At $k = 3$ it fails, since $1.527 < 1.779 - 0.042$.
+- **BIC.** It is smallest at $k = 4$.
+
+The criteria disagree because they define a cluster differently. The silhouette rewards separation; the gap
+statistic and BIC reward any real reduction in spread or improvement in fit.
+
+## Pitfalls
+
+- **No single right answer.** The number of clusters depends on the scale of interest. Two close blobs are one cluster
+  at a coarse scale and two at a fine one.
+- **Criteria inherit the method's assumptions.** $W_k$, the silhouette and the gap statistic favour compact, convex
+  clusters. They mislead for elongated, nested or density-defined clusters.
+- **Local optima.** Every criterion assumes the clustering for each $k$ is close to optimal. Use several restarts per
+  $k$.
+- **Report the curve.** A table or plot of the criterion over $k$ shows how clear the choice is. A single chosen number
+  hides a flat curve.

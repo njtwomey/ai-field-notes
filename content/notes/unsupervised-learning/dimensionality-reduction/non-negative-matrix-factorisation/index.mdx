@@ -1,0 +1,138 @@
+---
+title: Non-negative matrix factorisation
+kind: concept
+summary: 'NMF approximates a non-negative $d \times n$ matrix as $\Vmat \approx \Wmat\Hmat$ with non-negative factors of inner dimension $r$. Without subtraction, each column is an additive combination of parts. Lee and Seung''s multiplicative updates decrease the squared error or KL divergence monotonically.'
+tags: [dimensionality-reduction, unsupervised, matrix-factorisation, optimisation, worked-example]
+aliases: [NMF, non-negative matrix factorization, nonnegative matrix factorization, multiplicative update rules, Lee–Seung updates, parts-based representation]
+requires: [matrix-multiplication, gradient-descent]
+related: [principal-component-analysis, probabilistic-latent-semantic-analysis, latent-dirichlet-allocation, singular-value-decomposition, audio-source-separation]
+references: [lee1999, lee2001, gaussier2005, smaragdis2003]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Non-negative matrix factorisation** (NMF) takes a matrix $\Vmat \in \reals^{d \times n}$ with $V_{i\mu} \ge 0$ and a
+rank $r < \min(d, n)$, and finds $\Wmat \in \reals^{d \times r}$ and $\Hmat \in \reals^{r \times n}$, both with
+non-negative entries, that minimise a divergence between $\Vmat$ and $\Wmat\Hmat$. The usual divergences are the
+squared Frobenius error $\norm{\Vmat - \Wmat\Hmat}_F^2 = \sum_{i\mu}(V_{i\mu} - (\Wmat\Hmat)_{i\mu})^2$ and the
+generalised Kullback–Leibler divergence
+$D(\Vmat \,\|\, \Wmat\Hmat) = \sum_{i\mu}\paren{V_{i\mu}\log\frac{V_{i\mu}}{(\Wmat\Hmat)_{i\mu}} - V_{i\mu} +
+(\Wmat\Hmat)_{i\mu}}$ <Cite id="lee2001" />.
+</Definition>
+
+## Parts, not eigenvectors
+
+Each column $\vvec_\mu$ of $\Vmat$ is one data item: an image, a document's word counts, a spectrogram frame. The
+factorisation writes it as $\vvec_\mu \approx \sum_{a=1}^r H_{a\mu}\wvec_a$, a combination of the $r$ columns of
+$\Wmat$ with coefficients from column $\mu$ of $\Hmat$. In <NoteLink to="principal-component-analysis">PCA</NoteLink>
+the basis vectors and coefficients can be negative, so an item is built by adding and cancelling whole-image patterns.
+In NMF nothing can be subtracted. The basis vectors must be parts that add up. Lee and Seung showed that NMF of face
+images learns localised parts such as eyes, noses and mouths, while PCA learns global "eigenfaces"
+<Cite id="lee1999" />. On word counts, the columns of $\Wmat$ are groups of co-occurring words, much like topics.
+
+## Multiplicative updates
+
+Minimising either divergence jointly in $\Wmat$ and $\Hmat$ is not convex. It is convex in each factor with the other
+fixed. Lee and Seung's algorithm alternates two updates <Cite id="lee2001" />. For the squared error, with $\odot$ and
+the fraction bar acting elementwise,
+
+$$
+\Hmat \leftarrow \Hmat \odot \frac{\Wmat^\top\Vmat}{\Wmat^\top\Wmat\Hmat}, \qquad
+\Wmat \leftarrow \Wmat \odot \frac{\Vmat\Hmat^\top}{\Wmat\Hmat\Hmat^\top}.
+$$
+
+**Where the update comes from.** The gradient of $F(\Hmat) = \frac12\norm{\Vmat - \Wmat\Hmat}_F^2$ is
+$\Wmat^\top\Wmat\Hmat - \Wmat^\top\Vmat$. A gradient step with a separate step size for each entry is
+$H_{a\mu} \leftarrow H_{a\mu} - \eta_{a\mu}\paren{(\Wmat^\top\Wmat\Hmat)_{a\mu} - (\Wmat^\top\Vmat)_{a\mu}}$. Choose
+$\eta_{a\mu} = H_{a\mu}/(\Wmat^\top\Wmat\Hmat)_{a\mu}$. The $H_{a\mu}$ terms cancel and leave
+
+$$
+H_{a\mu} \leftarrow H_{a\mu}\,\frac{(\Wmat^\top\Vmat)_{a\mu}}{(\Wmat^\top\Wmat\Hmat)_{a\mu}}.
+$$
+
+The update multiplies each entry by a non-negative ratio, so non-negative factors stay non-negative without any
+projection or step-size tuning. An entry grows when the data pull harder ($\Wmat^\top\Vmat$) than the current
+reconstruction does ($\Wmat^\top\Wmat\Hmat$), and shrinks otherwise. At a fixed point with $H_{a\mu} > 0$ the ratio is
+1, so the gradient in that entry is zero.
+
+For the KL divergence the updates are
+
+$$
+H_{a\mu} \leftarrow H_{a\mu}\,\frac{\sum_i W_{ia}V_{i\mu}/(\Wmat\Hmat)_{i\mu}}{\sum_i W_{ia}}, \qquad
+W_{ia} \leftarrow W_{ia}\,\frac{\sum_\mu H_{a\mu}V_{i\mu}/(\Wmat\Hmat)_{i\mu}}{\sum_\mu H_{a\mu}}.
+$$
+
+Both sets of updates never increase their divergence (derivation below).
+
+<Derivation title="Why the squared-error update never increases the error">
+Fix $\Wmat$ and consider one column: $F(\hvec) = \frac12\norm{\vvec - \Wmat\hvec}^2$ for $\hvec \ge 0$, at current
+value $\hvec^t$. Because $F$ is quadratic,
+
+$$
+F(\hvec) = F(\hvec^t) + (\hvec - \hvec^t)^\top\nabla F(\hvec^t) + \tfrac12(\hvec - \hvec^t)^\top\Wmat^\top\Wmat
+(\hvec - \hvec^t).
+$$
+
+Define $G(\hvec, \hvec^t)$ by the same expression with $\Wmat^\top\Wmat$ replaced by the diagonal matrix $\Kmat$ with
+$K_{aa} = (\Wmat^\top\Wmat\hvec^t)_a/h^t_a$. If $\Kmat - \Wmat^\top\Wmat$ is positive semidefinite, then
+$G(\hvec, \hvec^t) \ge F(\hvec)$ for all $\hvec$, with equality at $\hvec = \hvec^t$: $G$ is an **auxiliary function**.
+
+To check the condition, scale by $\hvec^t$. For any vector $\nuvec$, with $\Amat = \Wmat^\top\Wmat$ (non-negative
+entries),
+
+$$
+\sum_{a,b}\nu_a h^t_a(\Kmat - \Amat)_{ab}h^t_b\nu_b = \sum_{a,b}A_{ab}h^t_a h^t_b\nu_a^2 - \sum_{a,b}A_{ab}h^t_a h^t_b
+\nu_a\nu_b = \tfrac12\sum_{a,b}A_{ab}h^t_a h^t_b(\nu_a - \nu_b)^2 \ge 0.
+$$
+
+The first equality uses $K_{aa}(h^t_a)^2 = h^t_a\sum_b A_{ab}h^t_b$, and the second symmetrises over $a$ and $b$.
+
+$G$ is minimised where its gradient vanishes: $\hvec = \hvec^t - \Kmat^{-1}\nabla F(\hvec^t)$, which is exactly the
+multiplicative update. Then $F(\hvec^{t+1}) \le G(\hvec^{t+1}, \hvec^t) \le G(\hvec^t, \hvec^t) = F(\hvec^t)$. The same
+argument, with a different auxiliary function built from the concavity of the logarithm, covers the KL updates
+<Cite id="lee2001" />.
+</Derivation>
+
+Monotone decrease does not by itself guarantee convergence to a stationary point, and the updates can be slow once an
+entry approaches zero. Alternating non-negative least squares and coordinate-descent methods (HALS) often converge
+faster. The result depends on initialisation, since the problem has many local minima.
+
+## Worked example
+
+Factor $\Vmat = \begin{pmatrix} 1 & 2 \\ 3 & 4 \end{pmatrix}$ with $r = 1$, starting from
+$\Wmat = (1, 1)^\top$ and $\Hmat = (1, 1)$. The starting error is
+$\norm{\Vmat - \Wmat\Hmat}_F^2 = 0 + 1 + 4 + 9 = 14$.
+
+1. **Update $\Hmat$.** $\Wmat^\top\Vmat = (4, 6)$ and $\Wmat^\top\Wmat\Hmat = 2 \cdot (1, 1) = (2, 2)$, so
+   $\Hmat \leftarrow (1 \cdot 4/2,\; 1 \cdot 6/2) = (2, 3)$.
+2. **Update $\Wmat$.** $\Vmat\Hmat^\top = (1 \cdot 2 + 2 \cdot 3,\; 3 \cdot 2 + 4 \cdot 3)^\top = (8, 18)^\top$ and
+   $\Hmat\Hmat^\top = 13$, so $\Wmat\Hmat\Hmat^\top = (13, 13)^\top$ and $\Wmat \leftarrow (8/13, 18/13)^\top =
+   (0.615, 1.385)^\top$.
+3. **Error.** $\Wmat\Hmat = \begin{pmatrix} 1.231 & 1.846 \\ 2.769 & 4.154 \end{pmatrix}$, and the error is $0.154$.
+
+After many iterations the error converges to $0.134$, the square of the second singular value of $\Vmat$ ($0.366$).
+For a non-negative matrix the best rank-1 approximation of the
+<NoteLink to="singular-value-decomposition">SVD</NoteLink> is itself non-negative, so rank-1 NMF matches it here. For
+$r > 1$, NMF's error is generally larger than the truncated SVD's, the price of the constraint.
+
+## Relatives
+
+- NMF with the KL divergence, after normalising the factors, is the same model as
+  <NoteLink to="probabilistic-latent-semantic-analysis">probabilistic latent semantic analysis</NoteLink>, and the two
+  algorithms have the same fixed points <Cite id="gaussier2005" />.
+- <NoteLink to="latent-dirichlet-allocation">Latent Dirichlet allocation</NoteLink> adds Dirichlet priors to that
+  model.
+- In audio, NMF of a magnitude spectrogram learns one spectral template per note or source in $\Wmat$ and its
+  activation over time in $\Hmat$ <Cite id="smaragdis2003" />; see
+  <NoteLink to="audio-source-separation">audio source separation</NoteLink>.
+
+## Pitfalls
+
+- **Non-uniqueness.** $\Wmat\Hmat = (\Wmat\Dmat)(\Dmat^{-1}\Hmat)$ for any positive diagonal $\Dmat$, and other,
+  non-diagonal ambiguities can exist. Normalise the columns of $\Wmat$ before interpreting them.
+- **Zeros are absorbing.** An entry that becomes exactly 0 stays 0 under multiplicative updates. Initialise with
+  strictly positive values.
+- **Choosing r.** The rank is a model-selection choice; the error always falls as $r$ grows.
+- **Parts are not guaranteed.** Localised parts appear when the data are built from parts. Sparsity penalties
+  encourage them when they do not appear on their own.

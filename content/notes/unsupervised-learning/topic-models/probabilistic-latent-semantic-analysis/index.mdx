@@ -1,0 +1,105 @@
+---
+title: Probabilistic latent semantic analysis
+kind: concept
+summary: 'Probabilistic latent semantic analysis models each word occurrence in document $d$ as drawn from $P(w \mid d) = \sum_z P(z \mid d)\,P(w \mid z)$, a document-specific mixture of $K$ topics. EM fits the topics and mixtures by maximum likelihood. LDA adds Dirichlet priors to the same model.'
+tags: [topic-models, unsupervised, latent-variable-models, nlp, expectation-maximisation, worked-example]
+aliases: [PLSA, pLSA, PLSI, probabilistic latent semantic indexing, aspect model, tempered EM]
+requires: [expectation-maximisation, categorical-distribution]
+related: [latent-semantic-analysis, kl-divergence]
+references: [hofmann1999, hofmann1999b, hofmann2001, gaussier2005, blei2003]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Probabilistic latent semantic analysis** (PLSA), or the **aspect model**, describes a corpus by the counts $n(d, w)$
+of word $w$ in document $d$ <Cite id="hofmann1999" />. Each word occurrence has an unobserved topic
+$z \in \set{1, \dots, K}$, and given the topic, the word is independent of the document:
+
+$$
+P(w \mid d) = \sum_{z=1}^K P(z \mid d)\,P(w \mid z).
+$$
+
+The parameters are the topic–word distributions $P(w \mid z)$ and one topic mixture $P(z \mid d)$ per training
+document. They maximise the log-likelihood $\ell = \sum_{d,w} n(d, w)\log P(w \mid d)$.
+</Definition>
+
+## From LSA to a probabilistic model
+
+<NoteLink to="latent-semantic-analysis">Latent semantic analysis</NoteLink> factorises the term–document matrix with a
+truncated SVD. The factors can be negative and have no probabilistic meaning. PLSA keeps the idea of a low-rank
+factorisation but makes each factor a probability distribution. In matrix form, the $D \times V$ matrix of
+$P(w \mid d)$ is the product of a $D \times K$ matrix of topic mixtures and a $K \times V$ matrix of topics, both with
+non-negative rows that sum to 1. The fitting criterion is the likelihood of the observed counts, a KL divergence
+between the empirical word distributions and the model, rather than squared error.
+
+## EM derivation
+
+Treat the topic of each occurrence as missing data. The **E-step** computes its posterior by
+<NoteLink to="bayes-theorem">Bayes' theorem</NoteLink>:
+
+$$
+P(z \mid d, w) = \frac{P(z \mid d)\,P(w \mid z)}{\sum_{z'}P(z' \mid d)\,P(w \mid z')}.
+$$
+
+The **M-step** maximises the expected complete-data log-likelihood
+
+$$
+Q = \sum_{d,w} n(d, w)\sum_z P(z \mid d, w)\LB\log P(z \mid d) + \log P(w \mid z)\RB
+$$
+
+subject to $\sum_w P(w \mid z) = 1$ for each $z$ and $\sum_z P(z \mid d) = 1$ for each $d$. The two sets of parameters
+separate. For $P(w \mid z)$, the Lagrangian $\sum_{d,w} n(d, w)P(z \mid d, w)\log P(w \mid z) - \lambda_z(\sum_w P(w
+\mid z) - 1)$ is stationary where $P(w \mid z) = \sum_d n(d, w)P(z \mid d, w)/\lambda_z$. The constraint fixes
+$\lambda_z$ as the sum over $w$ of the numerator. The same argument applies to $P(z \mid d)$:
+
+$$
+P(w \mid z) = \frac{\sum_d n(d, w)\,P(z \mid d, w)}{\sum_{d,w'} n(d, w')\,P(z \mid d, w')}, \qquad
+P(z \mid d) = \frac{\sum_w n(d, w)\,P(z \mid d, w)}{n(d)},
+$$
+
+with $n(d) = \sum_w n(d, w)$ the length of document $d$. Each is an expected count, normalised. As with any
+<NoteLink to="expectation-maximisation">EM algorithm</NoteLink>, the likelihood never decreases, and the result depends
+on the initialisation.
+
+## Relation to NMF and LDA
+
+- **NMF.** PLSA's likelihood is, up to constants, the generalised KL divergence between the count matrix and a
+  non-negative product $\Wmat\Hmat$. Gaussier and Goutte showed that
+  <NoteLink to="non-negative-matrix-factorisation">non-negative matrix factorisation</NoteLink> with the KL divergence
+  and PLSA optimise the same objective, and that NMF's multiplicative updates, suitably normalised, are PLSA's EM
+  updates <Cite id="gaussier2005" />.
+- **LDA.** <NoteLink to="latent-dirichlet-allocation">Latent Dirichlet allocation</NoteLink> puts a Dirichlet prior on
+  each document's mixture and on each topic <Cite id="blei2003" />. PLSA's mixtures are free parameters, one set per
+  training document. Their number grows linearly with the corpus, which invites overfitting, and the model defines no
+  probability for a new document. LDA is a full generative model of documents and handles new ones by inference.
+
+## Tempered EM and new documents
+
+Hofmann reduced overfitting with **tempered EM**: the E-step posterior is raised to a power $0 < \tau \le 1$ and
+renormalised, which flattens it. $\tau$ is lowered until the likelihood of held-out data stops improving
+<Cite id="hofmann2001" />. To place a new document, **folding in** runs EM on that document alone, updating only its
+mixture $P(z \mid d)$ and keeping the topics fixed.
+
+## Worked example
+
+Two documents over three words, with counts $n(d_1, \cdot) = (2, 1, 0)$ and $n(d_2, \cdot) = (0, 1, 2)$, and $K = 2$.
+Start from $P(w \mid z_1) = (0.5, 0.3, 0.2)$, $P(w \mid z_2) = (0.2, 0.3, 0.5)$ and $P(z \mid d) = (0.5, 0.5)$ for
+both documents. The initial log-likelihood is $-6.607$.
+
+- **E-step.** For word 1 in either document, $P(z_1 \mid d, w_1) = \frac{0.5 \times 0.5}{0.5 \times 0.5 + 0.5 \times
+  0.2} = 0.714$. For word 2 it is $0.5$, and for word 3 it is $0.286$.
+- **M-step, topics.** The expected count of word 1 from topic 1 is $2 \times 0.714 = 1.429$; of word 2,
+  $1 \times 0.5 + 1 \times 0.5 = 1$; of word 3, $2 \times 0.286 = 0.571$. Normalising by their sum, 3, gives
+  $P(w \mid z_1) = (0.476, 0.333, 0.190)$. By symmetry $P(w \mid z_2) = (0.190, 0.333, 0.476)$.
+- **M-step, mixtures.** For $d_1$, the expected number of words from topic 1 is $2 \times 0.714 + 1 \times 0.5 =
+  1.929$ out of 3, so $P(z_1 \mid d_1) = 0.643$. By symmetry $P(z_1 \mid d_2) = 0.357$.
+- The log-likelihood rises to $-6.130$.
+
+## Pitfalls
+
+- **Overfitting.** The number of parameters, $K(V - 1) + D(K - 1)$, grows with the corpus. Use tempered EM, held-out
+  data, or LDA.
+- **Local maxima.** Different initialisations give different topics. Run several and keep the best likelihood.
+- **No generative model for new documents.** Folding in is a heuristic step that fits a new document's mixture by
+  maximum likelihood.

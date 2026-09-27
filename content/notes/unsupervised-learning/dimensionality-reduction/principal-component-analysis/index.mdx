@@ -1,0 +1,191 @@
+---
+title: Principal component analysis
+kind: concept
+summary: 'PCA finds orthonormal directions $\uvec_1, \uvec_2, \dots$ of decreasing variance in centred data: the eigenvectors of the sample covariance, or the right singular vectors of the data matrix. Projecting onto the first $k$ maximises retained variance and minimises squared reconstruction error.'
+tags: [dimensionality-reduction, unsupervised, linear-algebra, worked-example]
+aliases: [PCA, principal components, principal axes, Karhunen–Loève transform, Hotelling transform, scree plot, explained variance ratio, principal component scores, loadings]
+requires: [eigendecomposition, variance-and-covariance, orthogonal-projection]
+related: [singular-value-decomposition, spectral-theorem, multidimensional-scaling, latent-semantic-analysis, kernel-trick]
+references: [pearson1901, hotelling1933, jolliffe2002, jolliffe2016, eckart1936]
+status: draft
+updated: 2026-09-27
+---
+
+import { ProjectionAxis } from './ProjectionAxis'
+import { ScreePlot } from './ScreePlot'
+
+<Definition>
+Let $\xvec_1, \dots, \xvec_n \in \reals^d$ be data with mean $\bar\xvec$, and let
+$\Smat = \frac1n\sum_{i=1}^n (\xvec_i - \bar\xvec)(\xvec_i - \bar\xvec)^\top$ be the $d \times d$ sample covariance.
+**Principal component analysis** (PCA) computes the eigendecomposition $\Smat = \Umat\Lambdamat\Umat^\top$ with
+eigenvalues $\lambda_1 \ge \dots \ge \lambda_d \ge 0$ and orthonormal eigenvectors $\uvec_1, \dots, \uvec_d$, the
+**principal directions**. The $j$-th **principal component score** of point $i$ is
+$z_{ij} = \uvec_j^\top(\xvec_i - \bar\xvec)$. Reducing to $k$ dimensions keeps the first $k$ scores
+<Cite id="hotelling1933" />.
+</Definition>
+
+## Notation
+
+| Symbol | Meaning |
+| --- | --- |
+| $n$, $d$ | Number of points; number of features. |
+| $\Xmat$ | The $n \times d$ centred data matrix, with rows $(\xvec_i - \bar\xvec)^\top$. |
+| $\Smat$ | Sample covariance $\frac1n\Xmat^\top\Xmat$. Some texts divide by $n - 1$; the directions are the same. |
+| $\uvec_j$, $\lambda_j$ | $j$-th principal direction (unit vector in $\reals^d$) and the variance along it. |
+| $\Umat_k$ | The $d \times k$ matrix $[\uvec_1, \dots, \uvec_k]$. |
+| $\zvec_i$ | Scores of point $i$: $\zvec_i = \Umat_k^\top(\xvec_i - \bar\xvec) \in \reals^k$. |
+| $\hat\xvec_i$ | Reconstruction $\bar\xvec + \Umat_k\zvec_i$. |
+
+From here on the data are centred, $\bar\xvec = \zeros$, so $\Smat = \frac1n\sum_i \xvec_i\xvec_i^\top$.
+
+## First view: maximum variance
+
+Project every point onto a unit vector $\uvec$. The projections $\uvec^\top\xvec_i$ have mean zero and variance
+
+$$
+\frac1n\sum_{i=1}^n (\uvec^\top\xvec_i)^2 = \uvec^\top\paren{\frac1n\sum_i \xvec_i\xvec_i^\top}\uvec =
+\uvec^\top\Smat\uvec.
+$$
+
+Hotelling's first principal direction maximises this variance over unit vectors <Cite id="hotelling1933" />. With a
+Lagrange multiplier $\lambda$ for the constraint $\uvec^\top\uvec = 1$, the stationarity condition of
+$\uvec^\top\Smat\uvec - \lambda(\uvec^\top\uvec - 1)$ is
+
+$$
+2\Smat\uvec - 2\lambda\uvec = \zeros \quad\Longleftrightarrow\quad \Smat\uvec = \lambda\uvec.
+$$
+
+So every stationary direction is an eigenvector of $\Smat$. At an eigenvector the variance is
+$\uvec^\top\Smat\uvec = \lambda\uvec^\top\uvec = \lambda$. The maximum is therefore the largest eigenvalue
+$\lambda_1$, attained at its eigenvector $\uvec_1$.
+
+The second direction maximises $\uvec^\top\Smat\uvec$ over unit vectors orthogonal to $\uvec_1$. Expand any such
+$\uvec$ in the orthonormal eigenbasis, $\uvec = \sum_{j \ge 2} c_j\uvec_j$ with $\sum_j c_j^2 = 1$. Then
+$\uvec^\top\Smat\uvec = \sum_{j \ge 2} \lambda_j c_j^2 \le \lambda_2$, with equality at $\uvec = \uvec_2$. By the same
+argument the $j$-th direction is $\uvec_j$. The scores along different directions are uncorrelated, because
+$\frac1n\sum_i (\uvec_j^\top\xvec_i)(\uvec_l^\top\xvec_i) = \uvec_j^\top\Smat\uvec_l = \lambda_l\uvec_j^\top\uvec_l = 0$
+for $j \ne l$.
+
+## Second view: minimum reconstruction error
+
+Pearson asked for the line, or plane, that lies closest to the points in squared perpendicular distance
+<Cite id="pearson1901" />. For a $k$-dimensional subspace with orthonormal basis $\Umat_k$, the closest point to
+$\xvec$ is its <NoteLink to="orthogonal-projection">orthogonal projection</NoteLink> $\Pmat\xvec$ with
+$\Pmat = \Umat_k\Umat_k^\top$. The projection and the residual are orthogonal, so by Pythagoras
+
+$$
+\norm{\xvec_i}^2 = \norm{\Pmat\xvec_i}^2 + \norm{\xvec_i - \Pmat\xvec_i}^2.
+$$
+
+Average over the points. The left side is $\frac1n\sum_i\norm{\xvec_i}^2 = \trace(\Smat)$, the total variance. The
+first term on the right is the variance retained by the projection, $\trace(\Umat_k^\top\Smat\Umat_k) =
+\sum_{j=1}^k \uvec_j^\top\Smat\uvec_j$. The second is the mean squared reconstruction error. Hence
+
+$$
+\underbrace{\frac1n\sum_{i=1}^n \norm{\xvec_i - \Umat_k\Umat_k^\top\xvec_i}^2}_{\text{reconstruction error}} =
+\trace(\Smat) - \underbrace{\trace(\Umat_k^\top\Smat\Umat_k)}_{\text{retained variance}}.
+$$
+
+The total variance does not depend on the subspace. **Minimising the reconstruction error and maximising the retained
+variance are the same problem.** The optimum is the span of $\uvec_1, \dots, \uvec_k$: the retained variance is at
+most $\lambda_1 + \dots + \lambda_k$ (derivation below), and those eigenvectors attain it. The minimum error is the sum
+of the discarded eigenvalues, $\sum_{j > k}\lambda_j$.
+
+<ProjectionAxis />
+
+<Derivation title="Why no k-dimensional subspace retains more than the top k eigenvalues (Ky Fan)">
+Let $\Umat_k$ have orthonormal columns and put $\Bmat = \Umat^\top\Umat_k$, where $\Umat$ holds all eigenvectors of
+$\Smat$. $\Bmat$ also has orthonormal columns. Then
+
+$$
+\trace(\Umat_k^\top\Smat\Umat_k) = \trace(\Bmat^\top\Lambdamat\Bmat) = \sum_{j=1}^d \lambda_j c_j, \qquad
+c_j = \sum_{m=1}^k B_{jm}^2.
+$$
+
+Each $c_j$ is a diagonal entry of the projection $\Bmat\Bmat^\top$, so $0 \le c_j \le 1$, and
+$\sum_j c_j = \trace(\Bmat^\top\Bmat) = k$. A weighted sum of $\lambda_1 \ge \dots \ge \lambda_d$ with weights in
+$[0, 1]$ that sum to $k$ is at most $\lambda_1 + \dots + \lambda_k$, reached by putting weight 1 on the first $k$.
+</Derivation>
+
+## Computing PCA with the SVD
+
+Take the <NoteLink to="singular-value-decomposition">singular value decomposition</NoteLink> of the centred data
+matrix, $\Xmat = \Qmat\Sigmamat\Vmat^\top$, with singular values $\sigma_1 \ge \sigma_2 \ge \dots$. Then
+
+$$
+\Smat = \frac1n\Xmat^\top\Xmat = \frac1n\Vmat\Sigmamat\Qmat^\top\Qmat\Sigmamat\Vmat^\top =
+\Vmat\,\frac{\Sigmamat^2}{n}\,\Vmat^\top.
+$$
+
+This is an eigendecomposition of $\Smat$. The principal directions are the right singular vectors, $\uvec_j =
+\vvec_j$, and the variances are $\lambda_j = \sigma_j^2/n$. The scores are $\Xmat\Vmat = \Qmat\Sigmamat$: the left
+singular vectors scaled by the singular values. Truncating to $k$ terms gives $\Xmat_k = \Qmat_k\Sigmamat_k\Vmat_k^\top$,
+the rank-$k$ matrix closest to $\Xmat$ in Frobenius norm (the Eckart–Young theorem) <Cite id="eckart1936" />, which is
+the reconstruction-error view restated for the whole data matrix.
+
+The SVD route never forms $\Xmat^\top\Xmat$, whose condition number is the square of that of $\Xmat$, so it is more
+accurate. It costs $O(nd\min(n, d))$. Randomised and iterative methods compute only the top $k$ components, in about
+$O(ndk)$.
+
+## Choosing the number of components
+
+- **Explained variance.** Component $j$ explains the fraction $\lambda_j/\sum_l\lambda_l$ of the total variance. Keep
+  enough components to reach a target such as 90% or 95%.
+- **Scree plot.** Plot $\lambda_j$ against $j$ and keep the components before the curve levels off into a flat
+  "scree" of noise.
+- **Kaiser's rule.** On standardised data, keep components with $\lambda_j > 1$: those that explain more than one
+  original feature does. It often keeps too many <Cite id="jolliffe2002" />.
+- **Downstream performance.** When PCA feeds a model, choose $k$ by cross-validating the model.
+
+<ScreePlot />
+
+## Standardisation
+
+PCA is not invariant to the scale of each feature. A feature measured in millimetres has $100^2$ times the variance of
+the same feature in decimetres, and it dominates the first component. When features have different units, divide each
+by its standard deviation first. This is PCA of the correlation matrix instead of the covariance matrix. When features
+share units and their variances are meaningful, as for pixel intensities, keep the covariance
+<Cite id="jolliffe2016" />.
+
+## Worked example
+
+Five centred points in the plane: $(-2, -1)$, $(-1, -1)$, $(0, 0)$, $(1, 1)$, $(2, 1)$. Then
+$\sum_i x_{i1}^2 = 10$, $\sum_i x_{i1}x_{i2} = 6$ and $\sum_i x_{i2}^2 = 4$, so
+
+$$
+\Smat = \frac15\begin{pmatrix} 10 & 6 \\ 6 & 4 \end{pmatrix} = \begin{pmatrix} 2 & 1.2 \\ 1.2 & 0.8 \end{pmatrix}.
+$$
+
+- **Eigenvalues.** $\trace\Smat = 2.8$ and $\det\Smat = 1.6 - 1.44 = 0.16$, so
+  $\lambda^2 - 2.8\lambda + 0.16 = 0$ and $\lambda_{1,2} = 1.4 \pm \sqrt{1.96 - 0.16} = 1.4 \pm 1.342$, that is
+  $\lambda_1 = 2.742$ and $\lambda_2 = 0.058$.
+- **Direction.** $(\Smat - \lambda_1\Imat)\uvec = \zeros$ gives $u_2/u_1 = (\lambda_1 - 2)/1.2 = 0.618$, so
+  $\uvec_1 = (0.851, 0.526)$, at $31.7°$ to the first axis.
+- **Scores.** $z_i = \uvec_1^\top\xvec_i = -2.227, -1.376, 0, 1.376, 2.227$. Their mean square is $2.742 = \lambda_1$.
+- **Explained variance.** The first component explains $2.742/2.8 = 97.9\%$ of the variance. The mean squared
+  reconstruction error with one component is $\lambda_2 = 0.058$.
+- **SVD.** The singular values of the $5 \times 2$ data matrix are $3.703$ and $0.540$; $3.703^2/5 = 2.742$ and
+  $0.540^2/5 = 0.058$, as the SVD route predicts.
+
+## Relatives
+
+- A linear <NoteLink to="autoencoder">autoencoder</NoteLink> with squared error learns the same subspace as PCA.
+- <NoteLink to="probabilistic-pca">Probabilistic PCA</NoteLink> is a latent-variable model whose maximum-likelihood
+  solution is PCA, and <NoteLink to="factor-analysis">factor analysis</NoteLink> relaxes its isotropic noise.
+- <NoteLink to="multidimensional-scaling">Classical multidimensional scaling</NoteLink> with Euclidean distances gives
+  the same coordinates as the PCA scores.
+- <NoteLink to="latent-semantic-analysis">Latent semantic analysis</NoteLink> is a truncated SVD of a term–document
+  matrix, usually without centring.
+- Kernel PCA replaces $\Xmat\Xmat^\top$ by a kernel matrix and finds nonlinear components; see the
+  <NoteLink to="kernel-trick">kernel trick</NoteLink>.
+
+## Pitfalls
+
+- **Centre first.** Without centring, the first direction points toward the mean rather than along the spread.
+- **Signs are arbitrary.** $\uvec_j$ and $-\uvec_j$ are both unit eigenvectors. Different libraries return different
+  signs.
+- **Variance is not relevance.** The high-variance directions need not be the ones that predict a target or separate
+  classes. <NoteLink to="linear-discriminant-analysis">Linear discriminant analysis</NoteLink> uses the labels instead.
+- **Outliers.** Squared error lets a few extreme points rotate the components toward them.
+- **Linear only.** PCA finds a flat subspace. Data on a curved manifold needs a nonlinear method such as
+  <NoteLink to="isomap">Isomap</NoteLink> or <NoteLink to="t-sne">t-SNE</NoteLink>.

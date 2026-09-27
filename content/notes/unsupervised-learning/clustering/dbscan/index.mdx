@@ -1,0 +1,131 @@
+---
+title: DBSCAN
+kind: concept
+summary: 'DBSCAN clusters points by density. A point with at least minPts points within distance $\varepsilon$ is a core point; clusters are core points linked through overlapping neighbourhoods, plus the border points they reach. Points in no cluster are noise. HDBSCAN removes the single global $\varepsilon$.'
+tags: [clustering, unsupervised, density-based, worked-example]
+aliases: [density-based spatial clustering of applications with noise, HDBSCAN, core point, border point, density-reachable, mutual reachability distance, k-distance plot]
+requires: [pairwise-distances-and-cosine-similarity]
+related: [k-means, hierarchical-clustering, spectral-clustering, kernel-density-estimation, nearest-neighbour-search]
+references: [ester1996, schubert2017, campello2013]
+status: draft
+updated: 2026-09-27
+---
+
+import { DbscanExplorer } from './DbscanExplorer'
+
+<Definition>
+**DBSCAN** (density-based spatial clustering of applications with noise) takes points $\xvec_1, \dots, \xvec_n$, a
+distance $d$, a radius $\varepsilon > 0$ and an integer $\text{minPts}$ <Cite id="ester1996" />. The
+$\varepsilon$-neighbourhood of a point is $N_\varepsilon(\xvec) = \set{\xvec_j : d(\xvec, \xvec_j) \le \varepsilon}$,
+which includes $\xvec$ itself.
+
+- A **core point** has $\abs{N_\varepsilon(\xvec)} \ge \text{minPts}$.
+- A **border point** is not a core point but lies in the neighbourhood of one.
+- A **noise point** is neither.
+
+A cluster is a maximal set of core points that can be chained together by steps of length at most $\varepsilon$,
+together with the border points within $\varepsilon$ of them.
+</Definition>
+
+## Density instead of distance to a centre
+
+<NoteLink to="k-means">k-means</NoteLink> assigns every point to its nearest centre, so its clusters are convex cells
+and every outlier belongs to some cluster. DBSCAN defines a cluster as a region where points are dense, separated from
+other clusters by regions where they are sparse. Clusters can have any shape. The number of clusters is an output,
+not an input. Points in sparse regions are labelled noise instead of being forced into a cluster.
+
+$\varepsilon$ and $\text{minPts}$ together set a density threshold: at least $\text{minPts}$ points in a ball of radius
+$\varepsilon$. A core point is a point where a crude density estimate, the count in its ball, exceeds that
+threshold. Up to a constant factor, that count is a
+<NoteLink to="kernel-density-estimation">kernel density estimate</NoteLink> with a box kernel of radius
+$\varepsilon$.
+
+## Reachability and connectivity
+
+The formal definitions make "chained together" precise <Cite id="ester1996" />:
+
+- $\yvec$ is **directly density-reachable** from $\xvec$ if $\xvec$ is a core point and $\yvec \in
+  N_\varepsilon(\xvec)$.
+- $\yvec$ is **density-reachable** from $\xvec$ if there is a chain $\xvec = \pvec_1, \dots, \pvec_m = \yvec$ in
+  which each $\pvec_{l+1}$ is directly density-reachable from $\pvec_l$. Every point of the chain except possibly the
+  last is a core point.
+- $\xvec$ and $\yvec$ are **density-connected** if some point $\zvec$ reaches both.
+
+A cluster is a non-empty set $C$ that contains every point density-reachable from any of its points (maximality) and
+whose points are pairwise density-connected (connectivity). Density-reachability is not symmetric: a border point is
+reachable from a core point, but nothing is reachable from a border point. Density-connectivity is symmetric, which
+is why it defines the clusters.
+
+For core points, density-connectivity is an equivalence relation: two core points are connected exactly when a chain
+of core points joins them. The clusters' core points are therefore the connected components of the graph whose nodes
+are core points and whose edges join core points within $\varepsilon$. This is also what the algorithm computes.
+
+## Algorithm
+
+1. For every point, find $N_\varepsilon(\xvec_i)$ and mark it as core if the neighbourhood has at least $\text{minPts}$
+   points.
+2. Take an unlabelled core point, give it a new cluster label, and grow the cluster by breadth-first search. Every
+   point reached gets the label. Only core points expand the search further.
+3. Repeat step 2 until every core point has a label. Points still unlabelled are noise.
+
+Each point's neighbourhood is queried once. With a spatial index such as a k-d tree the queries are fast in low
+dimensions, and the total cost is often close to $O(n \log n)$. The worst case, and the usual case in high dimensions,
+is $O(n^2)$ distance computations <Cite id="schubert2017" />.
+
+A border point within $\varepsilon$ of core points from two clusters gets the label of whichever cluster reaches it
+first. Core points and noise are determined uniquely; border points can depend on the processing order.
+
+<DbscanExplorer />
+
+## Choosing ε and minPts
+
+- **minPts** controls how much noise is tolerated. A common default is $\text{minPts} = 2d$ for $d$-dimensional data,
+  and at least $d + 1$ <Cite id="schubert2017" />. Larger values smooth the density estimate and label more points
+  noise.
+- **ε** is read off the **k-distance plot**. Compute each point's distance to its $k$-th nearest neighbour with
+  $k = \text{minPts} - 1$, sort the values, and plot them. Points inside clusters have small $k$-distances and noise
+  points large ones. Choose $\varepsilon$ near the knee where the sorted curve turns sharply upward.
+
+## Worked example
+
+Seven points on a line, $0, 1, 2, 6, 7, 8, 15$, with $\varepsilon = 1.5$ and $\text{minPts} = 3$.
+
+- The neighbourhoods are $N(0) = \set{0, 1}$, $N(1) = \set{0, 1, 2}$, $N(2) = \set{1, 2}$, and the same pattern for
+  $6, 7, 8$. $N(15) = \set{15}$.
+- Only $1$ and $7$ have three points in their neighbourhoods, so they are the core points.
+- $0$ and $2$ are border points reached from $1$; $6$ and $8$ are border points reached from $7$.
+- The core points $1$ and $7$ are $6$ apart, more than $\varepsilon$, so they are in different clusters.
+
+The result is two clusters, $\set{0, 1, 2}$ and $\set{6, 7, 8}$, and one noise point, $15$. scikit-learn's
+`DBSCAN(eps=1.5, min_samples=3)` gives the same labels. With $\text{minPts} = 4$ no point is core, and all seven points
+are noise.
+
+## HDBSCAN
+
+A single $\varepsilon$ fits one density level. When clusters have different densities, an $\varepsilon$ small enough
+to separate the dense clusters leaves the sparse ones as noise, and one large enough to find the sparse ones merges
+the dense ones. **HDBSCAN** considers every $\varepsilon$ at once <Cite id="campello2013" />.
+
+1. The **core distance** $\operatorname{core}(\xvec)$ is the distance from $\xvec$ to its $\text{minPts}$-th nearest
+   neighbour, counting $\xvec$ itself. It is the smallest $\varepsilon$ at which $\xvec$ is a core point.
+2. The **mutual reachability distance** is
+   $d_{\text{mr}}(\xvec, \yvec) = \max\paren{\operatorname{core}(\xvec), \operatorname{core}(\yvec), d(\xvec, \yvec)}$.
+   It pushes points in sparse regions away from everything, while leaving distances within dense regions unchanged.
+3. Single-linkage <NoteLink to="hierarchical-clustering">hierarchical clustering</NoteLink> on $d_{\text{mr}}$, computed
+   through its minimum spanning tree, gives the DBSCAN clustering (without border points) for every $\varepsilon$ at
+   once: cutting the tree at height $\varepsilon$ reproduces DBSCAN with that radius.
+4. The tree is condensed by ignoring splits that shed fewer than a minimum cluster size of points. HDBSCAN then selects
+   the set of non-overlapping clusters with the largest total **stability**, the sum over a cluster's points of how
+   long, in units of $1/\varepsilon$, each point stays in the cluster.
+
+HDBSCAN needs only $\text{minPts}$ and a minimum cluster size. It can return clusters of different densities in one
+run.
+
+## Pitfalls
+
+- **Varying density.** Plain DBSCAN cannot separate clusters of very different densities with one $\varepsilon$.
+- **High dimensions.** Distances concentrate as the dimension grows, so the density contrast that DBSCAN relies on
+  fades. Reduce the dimension first, or use a distance suited to the data.
+- **Scaling.** $\varepsilon$ is in the units of the distance. Standardise features, or the widest feature dominates.
+- **Bridges.** A thin line of points between two clusters can make them density-connected, the same chaining effect as
+  single linkage.

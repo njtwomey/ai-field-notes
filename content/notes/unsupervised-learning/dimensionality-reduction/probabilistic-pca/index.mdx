@@ -1,0 +1,173 @@
+---
+title: Probabilistic PCA
+kind: concept
+summary: 'Probabilistic PCA models $\xvec = \Wmat\zvec + \muvec + \epsilonvec$ with $\zvec \sim \Gauss(\zeros, \Imat_q)$ and isotropic noise $\epsilonvec \sim \Gauss(\zeros, \sigma^2\Imat)$. Its maximum-likelihood $\Wmat$ spans the top $q$ principal directions, and $\sigma^2$ is the mean of the discarded eigenvalues.'
+tags: [dimensionality-reduction, unsupervised, latent-variable-models, probabilistic, gaussian, worked-example]
+aliases: [PPCA, probabilistic principal component analysis, Tipping–Bishop model]
+requires: [principal-component-analysis, multivariate-normal-distribution]
+related: [expectation-maximisation, automatic-relevance-determination, linear-gaussian-state-space-models, variational-autoencoder]
+references: [tipping1999, bishop2006, roweis1999]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Probabilistic principal component analysis** (PPCA) is a latent-variable model for $\xvec \in \reals^d$ with a
+latent $\zvec \in \reals^q$, $q < d$ <Cite id="tipping1999" />:
+
+$$
+\zvec \sim \Gauss(\zeros, \Imat_q), \qquad \xvec \mid \zvec \sim \Gauss(\Wmat\zvec + \muvec, \sigma^2\Imat_d).
+$$
+
+The parameters are the $d \times q$ loading matrix $\Wmat$, the mean $\muvec \in \reals^d$ and the noise variance
+$\sigma^2 > 0$. Integrating out $\zvec$ gives the marginal $\xvec \sim \Gauss(\muvec, \Cmat)$ with
+$\Cmat = \Wmat\Wmat^\top + \sigma^2\Imat_d$.
+</Definition>
+
+## Why a probabilistic version
+
+<NoteLink to="principal-component-analysis">PCA</NoteLink> is a projection with no noise model. PPCA turns it into a
+Gaussian density with $dq + 1 + d$ parameters, less $q(q - 1)/2$ for the rotational freedom described below. A full
+covariance needs $d(d + 1)/2 + d$. The density gives PCA a likelihood, which allows:
+
+- comparing models and choosing $q$ by likelihood on held-out data, or by Bayesian methods;
+- fitting with missing values, through EM;
+- mixtures of PPCA models, each with its own local subspace;
+- scoring new points by their likelihood, for example for anomaly detection.
+
+The covariance $\Cmat$ has a low-rank part $\Wmat\Wmat^\top$, which captures correlations through the $q$ latent
+directions, and an isotropic part $\sigma^2\Imat$, which gives equal variance to every direction the latent space
+does not cover.
+
+## Maximum-likelihood solution
+
+Let $\Smat = \frac1n\sum_i(\xvec_i - \bar\xvec)(\xvec_i - \bar\xvec)^\top$ be the sample covariance, with eigenvalues
+$\lambda_1 \ge \dots \ge \lambda_d$ and orthonormal eigenvectors $\uvec_1, \dots, \uvec_d$. The log-likelihood of
+$n$ independent points is
+
+$$
+\ell(\Wmat, \muvec, \sigma^2) = -\frac n2\LB d\log 2\pi + \log\abs{\Cmat} + \trace\paren{\Cmat^{-1}\Smat_{\muvec}}\RB,
+$$
+
+where $\Smat_{\muvec} = \frac1n\sum_i(\xvec_i - \muvec)(\xvec_i - \muvec)^\top$. The maximiser in $\muvec$ is the
+sample mean $\bar\xvec$, as for any Gaussian, and then $\Smat_{\muvec} = \Smat$.
+
+**Stationarity in $\Wmat$.** Using $\partial\log\abs{\Cmat} = \trace(\Cmat^{-1}\partial\Cmat)$ and
+$\partial\Cmat^{-1} = -\Cmat^{-1}(\partial\Cmat)\Cmat^{-1}$ with $\partial\Cmat = (\partial\Wmat)\Wmat^\top +
+\Wmat(\partial\Wmat)^\top$,
+
+$$
+\frac{\partial\ell}{\partial\Wmat} = n\paren{\Cmat^{-1}\Smat\Cmat^{-1}\Wmat - \Cmat^{-1}\Wmat} = \zeros
+\quad\Longleftrightarrow\quad \Smat\Cmat^{-1}\Wmat = \Wmat.
+$$
+
+The push-through identity $(\Wmat\Wmat^\top + \sigma^2\Imat)\Wmat = \Wmat(\Wmat^\top\Wmat + \sigma^2\Imat)$ gives
+$\Cmat^{-1}\Wmat = \Wmat(\Wmat^\top\Wmat + \sigma^2\Imat)^{-1}$. The condition becomes
+
+$$
+\Smat\Wmat = \Wmat(\sigma^2\Imat + \Wmat^\top\Wmat).
+$$
+
+Write the <NoteLink to="singular-value-decomposition">singular value decomposition</NoteLink> of the loadings as
+$\Wmat = \Lmat\Dmat\Rmat^\top$, where $\Lmat$ ($d \times q$) has orthonormal columns $\lvec_j$, $\Dmat =
+\diag(\delta_1, \dots, \delta_q)$ and $\Rmat$ is a $q \times q$ rotation. Then $\Wmat^\top\Wmat = \Rmat\Dmat^2\Rmat^\top$
+and the condition reads $\Smat\Lmat\Dmat\Rmat^\top = \Lmat\Dmat(\sigma^2\Imat + \Dmat^2)\Rmat^\top$. Multiply on the
+right by $\Rmat$ and look at column $j$:
+
+$$
+\delta_j\,\Smat\lvec_j = \delta_j(\sigma^2 + \delta_j^2)\,\lvec_j.
+$$
+
+For every nonzero $\delta_j$, $\lvec_j$ is an eigenvector of $\Smat$ with eigenvalue $\lambda = \sigma^2 + \delta_j^2$,
+so $\delta_j = \sqrt{\lambda - \sigma^2}$. Every stationary point therefore has the form
+
+$$
+\Wmat = \Umat_q\paren{\Lambdamat_q - \sigma^2\Imat}^{1/2}\Rmat,
+$$
+
+where the columns of $\Umat_q$ are $q$ eigenvectors of $\Smat$, $\Lambdamat_q$ holds their eigenvalues, and $\Rmat$ is
+any rotation.
+
+**The noise variance.** Substitute this $\Wmat$. $\Cmat$ has eigenvalue $\lambda_j$ along each retained eigenvector
+and $\sigma^2$ along the other $d - q$, so $\log\abs{\Cmat} = \sum_{\text{kept}}\log\lambda_j + (d - q)\log\sigma^2$
+and $\trace(\Cmat^{-1}\Smat) = q + \sum_{\text{discarded}}\lambda_j/\sigma^2$. Setting the derivative of $\ell$ in
+$\sigma^2$ to zero, $(d - q)/\sigma^2 - \sum_{\text{discarded}}\lambda_j/\sigma^4 = 0$, gives
+
+$$
+\sigma^2_{\text{ML}} = \frac{1}{d - q}\sum_{\text{discarded } j}\lambda_j.
+$$
+
+**Which eigenvectors.** With $\sigma^2$ at its optimum, the terms of $-2\ell/n$ that depend on the choice are
+$(d - q)\log\bar\lambda_{\text{disc}} - \sum_{\text{disc}}\log\lambda_j$, up to a constant, where
+$\bar\lambda_{\text{disc}}$ is the mean of the discarded eigenvalues. By Jensen's inequality this is non-negative, and
+it is small when the discarded eigenvalues are small and similar. Tipping and Bishop show that the global maximum
+keeps the $q$ largest eigenvalues, and that every other stationary point is a saddle <Cite id="tipping1999" />. The
+maximum-likelihood subspace is the PCA subspace.
+
+## Posterior over the latent variables
+
+Given $\xvec$, the latent variable has a Gaussian posterior. With the $q \times q$ matrix
+$\Mmat = \Wmat^\top\Wmat + \sigma^2\Imat$,
+
+$$
+\zvec \mid \xvec \sim \Gauss\paren{\Mmat^{-1}\Wmat^\top(\xvec - \muvec),\; \sigma^2\Mmat^{-1}}.
+$$
+
+As $\sigma^2 \to 0$, the posterior mean tends to $(\Wmat^\top\Wmat)^{-1}\Wmat^\top(\xvec - \muvec)$: the coordinates of
+the orthogonal projection onto the column space of $\Wmat$, which is PCA. For $\sigma^2 > 0$ the posterior mean is
+shrunk toward zero, because the prior on $\zvec$ pulls it in. The rotation $\Rmat$ does not affect the density, so the
+individual latent coordinates are identified only up to rotation; the subspace is identified.
+
+## EM algorithm
+
+The closed form needs an eigendecomposition of $\Smat$. EM avoids forming $\Smat$ and handles missing entries
+<Cite id="tipping1999" /> <Cite id="roweis1999" />. With centred data $\tilde\xvec_i = \xvec_i - \bar\xvec$:
+
+**E-step.** $\expect[\zvec_i] = \Mmat^{-1}\Wmat^\top\tilde\xvec_i$ and
+$\expect[\zvec_i\zvec_i^\top] = \sigma^2\Mmat^{-1} + \expect[\zvec_i]\expect[\zvec_i]^\top$.
+
+**M-step.**
+
+$$
+\Wmat_{\text{new}} = \paren{\sum_i \tilde\xvec_i\expect[\zvec_i]^\top}\paren{\sum_i\expect[\zvec_i\zvec_i^\top]}^{-1},
+$$
+
+$$
+\sigma^2_{\text{new}} = \frac{1}{nd}\sum_i\LB\norm{\tilde\xvec_i}^2 - 2\expect[\zvec_i]^\top\Wmat_{\text{new}}^\top
+\tilde\xvec_i + \trace\paren{\expect[\zvec_i\zvec_i^\top]\Wmat_{\text{new}}^\top\Wmat_{\text{new}}}\RB.
+$$
+
+Each iteration costs $O(ndq)$, so EM is cheaper than an eigendecomposition when $d$ is large and $q$ small. The
+general properties of the algorithm are in <NoteLink to="expectation-maximisation">expectation–maximisation</NoteLink>.
+
+## Worked example
+
+A sample covariance in $d = 4$ dimensions has eigenvalues $5, 2, 1, 0.5$. Fit PPCA with $q = 1$.
+
+- **Noise.** $\sigma^2_{\text{ML}} = (2 + 1 + 0.5)/3 = 1.167$.
+- **Loadings.** $\Wmat = \sqrt{5 - 1.167}\,\uvec_1 = 1.958\,\uvec_1$, up to sign.
+- **Fitted covariance.** Along $\uvec_1$ the model variance is $1.958^2 + 1.167 = 3.833 + 1.167 = 5$, exactly the
+  sample variance. Along each of the other three eigenvectors it is $1.167$, the average of $2$, $1$ and $0.5$.
+- **Parameters.** The covariance uses $dq + 1 = 5$ numbers instead of the $d(d + 1)/2 = 10$ of a full covariance.
+
+The model reproduces the leading direction exactly and replaces the rest of the spectrum by its mean.
+
+## Relatives
+
+- <NoteLink to="factor-analysis">Factor analysis</NoteLink> uses the same model with a diagonal noise covariance
+  $\Psimat$ instead of $\sigma^2\Imat$. It has no closed-form solution.
+- A <NoteLink to="linear-gaussian-state-space-models">linear-Gaussian state-space model</NoteLink> with no dynamics
+  and isotropic observation noise is PPCA applied independently at each time step.
+- Placing a Gaussian prior on each column of $\Wmat$ with its own precision, and learning the precisions, switches off
+  unneeded columns. This Bayesian PCA chooses $q$ by
+  <NoteLink to="automatic-relevance-determination">automatic relevance determination</NoteLink> <Cite id="bishop2006" />.
+- The <NoteLink to="variational-autoencoder">variational autoencoder</NoteLink> replaces the linear map $\Wmat\zvec$
+  with a neural network.
+
+## Pitfalls
+
+- **Isotropic noise.** PPCA assumes the same noise variance on every feature. A feature with large independent noise
+  looks like signal to PPCA. Standardise, or use factor analysis.
+- **Rotational ambiguity.** Only the subspace is identified. Do not interpret individual latent coordinates without
+  fixing the rotation, for instance by taking $\Rmat = \Imat$.
+- **Gaussianity.** The likelihood assumes Gaussian data. Heavy tails inflate the noise estimate.

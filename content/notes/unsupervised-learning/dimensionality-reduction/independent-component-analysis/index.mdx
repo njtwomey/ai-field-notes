@@ -1,0 +1,162 @@
+---
+title: Independent component analysis
+kind: concept
+summary: 'ICA models observed signals as $\xvec = \Amat\svec$, a linear mixture of statistically independent, non-Gaussian sources $\svec$, and estimates an unmixing matrix $\Wmat \approx \Amat^{-1}$. After whitening, it rotates the data to make each output as non-Gaussian as possible, for example with FastICA.'
+tags: [dimensionality-reduction, unsupervised, signal-processing, blind-source-separation, worked-example]
+aliases: [ICA, FastICA, negentropy, infomax, whitening transform]
+requires: [principal-component-analysis, independence]
+related: [audio-source-separation, entropy, differential-entropy]
+references: [hyvarinen2000, hyvarinen1999, comon1994, bell1995]
+status: draft
+updated: 2026-09-27
+---
+
+import { UnmixingDirection } from './UnmixingDirection'
+
+<Definition>
+**Independent component analysis** (ICA) assumes that each observation $\xvec \in \reals^d$ is a linear mixture of $d$
+unobserved sources, $\xvec = \Amat\svec$, where $\Amat$ is an unknown invertible $d \times d$ **mixing matrix** and the
+components $s_1, \dots, s_d$ of $\svec$ are statistically independent and non-Gaussian. From samples of $\xvec$ alone,
+ICA estimates an **unmixing matrix** $\Wmat$ such that $\yvec = \Wmat\xvec$ recovers the sources up to order, sign
+and scale <Cite id="comon1994" />.
+</Definition>
+
+## The cocktail party problem
+
+Two microphones in a room each record a different weighted sum of two speakers. The recordings are $x_1 = a_{11}s_1 +
+a_{12}s_2$ and $x_2 = a_{21}s_1 + a_{22}s_2$. Neither the weights nor the voices are known. Recovering the voices
+from the recordings is **blind source separation**. ICA solves it by assuming only that the speakers are independent
+and that their signals are not Gaussian <Cite id="hyvarinen2000" />. The same model separates artefacts such as eye
+blinks from brain signals in EEG, and it finds localised, edge-like features in natural images.
+
+## Ambiguities
+
+Two ambiguities cannot be resolved by any method:
+
+- **Scale and sign.** $\Amat\svec = (\Amat\Dmat^{-1})(\Dmat\svec)$ for any invertible diagonal $\Dmat$. The sources
+  are conventionally scaled to unit variance, which leaves the sign undetermined.
+- **Order.** Permuting the sources and the columns of $\Amat$ together gives the same $\xvec$.
+
+## Why the sources must be non-Gaussian
+
+Suppose the sources are independent standard Gaussians, $\svec \sim \Gauss(\zeros, \Imat)$. For any orthogonal
+matrix $\Qmat$, the vector $\Qmat\svec$ is also $\Gauss(\zeros, \Qmat\Qmat^\top) = \Gauss(\zeros, \Imat)$: its
+components are again independent standard Gaussians. The mixtures $\Amat\svec = (\Amat\Qmat^\top)(\Qmat\svec)$ are
+then explained equally well by mixing matrix $\Amat\Qmat^\top$ and sources $\Qmat\svec$. The distribution of $\xvec$
+determines $\Amat$ only up to a rotation, the same ambiguity as in
+<NoteLink to="factor-analysis">factor analysis</NoteLink>. Comon showed that the model is identifiable, up to order and
+scale, when at most one source is Gaussian <Cite id="comon1994" />.
+
+## Whitening reduces the problem to a rotation
+
+Centre the data and **whiten** it: with the eigendecomposition $\cov(\xvec) = \Emat\Lambdamat\Emat^\top$, set
+$\zvec = \Vmat\xvec$ with $\Vmat = \Lambdamat^{-1/2}\Emat^\top$, so that $\cov(\zvec) = \Imat$. This is
+<NoteLink to="principal-component-analysis">PCA</NoteLink> followed by scaling each component to unit variance. Then
+$\zvec = (\Vmat\Amat)\svec$, and with unit-variance sources
+
+$$
+\Imat = \cov(\zvec) = (\Vmat\Amat)\cov(\svec)(\Vmat\Amat)^\top = (\Vmat\Amat)(\Vmat\Amat)^\top,
+$$
+
+so the new mixing matrix $\Vmat\Amat$ is orthogonal. Whitening uses the second-order statistics and removes all but a
+rotation. ICA must find that rotation from higher-order statistics. In two dimensions the rotation is a single angle.
+
+## Non-Gaussianity as the objective
+
+Consider one output $y = \wvec^\top\zvec$ with $\norm{\wvec} = 1$. Write it in terms of the sources:
+$y = \qvec^\top\svec$ with $\qvec = (\Vmat\Amat)^\top\wvec$, also a unit vector because $\Vmat\Amat$ is orthogonal.
+Unless $\qvec$ has a single nonzero entry, $y$ is a sum of independent variables. The central limit theorem suggests
+that such a sum is closer to Gaussian than its terms. Making $y$ as non-Gaussian as possible should therefore make
+$\qvec$ a coordinate vector, so that $y = \pm s_j$ for one source.
+
+**Kurtosis makes this exact.** For a zero-mean, unit-variance variable the excess kurtosis is
+$\kappa(y) = \expect[y^4] - 3$, which is 0 for a Gaussian. Expand $\expect[(\sum_i q_i s_i)^4]$. By independence and
+zero means, only terms with each index appearing an even number of times survive:
+
+$$
+\expect[y^4] = \sum_i q_i^4\expect[s_i^4] + 3\sum_{i \ne j} q_i^2 q_j^2
+= \sum_i q_i^4(\kappa_i + 3) + 3\paren{\paren{\sum_i q_i^2}^2 - \sum_i q_i^4}.
+$$
+
+With $\sum_i q_i^2 = 1$ this simplifies to
+
+$$
+\kappa(y) = \sum_i q_i^4\,\kappa_i.
+$$
+
+Now $\sum_i q_i^4 \le \paren{\sum_i q_i^2}^2 = 1$, with equality only when one $q_i$ is $\pm 1$ and the rest are 0.
+If all sources have kurtosis of the same sign, $\abs{\kappa(y)} \le \max_i\abs{\kappa_i}$, and the extremes are reached
+exactly at the sources. Mixing pulls the kurtosis toward 0.
+
+<UnmixingDirection />
+
+**Negentropy** is a more robust measure. Among all distributions with a given variance, the Gaussian has the largest
+<NoteLink to="differential-entropy">differential entropy</NoteLink>. The negentropy
+$J(y) = \entropy(y_{\text{Gauss}}) - \entropy(y)$ is therefore non-negative and zero only for a Gaussian. It is
+approximated by $J(y) \propto \paren{\expect[G(y)] - \expect[G(\nu)]}^2$ with $\nu \sim \Gauss(0, 1)$ and a smooth
+contrast such as $G(u) = \log\cosh u$ <Cite id="hyvarinen2000" />. Kurtosis weights values by $u^4$, so a few outliers
+dominate it; $\log\cosh$ grows only linearly.
+
+## FastICA
+
+FastICA maximises $\expect[G(\wvec^\top\zvec)]$, or minimises it for sub-Gaussian sources, subject to $\norm{\wvec} = 1$
+<Cite id="hyvarinen1999" />. Let $g = G'$. With a Lagrange multiplier $\beta$, the optimum satisfies
+
+$$
+F(\wvec) = \expect\LB\zvec\,g(\wvec^\top\zvec)\RB - \beta\wvec = \zeros.
+$$
+
+Newton's method needs the Jacobian $\expect\LB\zvec\zvec^\top g'(\wvec^\top\zvec)\RB - \beta\Imat$. Because $\zvec$ is
+white, approximate $\expect[\zvec\zvec^\top g'(\wvec^\top\zvec)] \approx \expect[\zvec\zvec^\top]\,\expect[g'(\wvec^\top
+\zvec)] = \expect[g'(\wvec^\top\zvec)]\,\Imat$. The Jacobian becomes the scalar $\expect[g'] - \beta$, and the Newton
+step is $\wvec^+ = \wvec - \paren{\expect[\zvec g(\wvec^\top\zvec)] - \beta\wvec}/(\expect[g'] - \beta)$. Multiplying
+by $\beta - \expect[g']$, which only rescales, and then normalising gives the fixed-point iteration
+
+$$
+\wvec \leftarrow \expect\LB\zvec\,g(\wvec^\top\zvec)\RB - \expect\LB g'(\wvec^\top\zvec)\RB\,\wvec, \qquad
+\wvec \leftarrow \wvec/\norm{\wvec}.
+$$
+
+With the kurtosis contrast $G(u) = u^4/4$, $g(u) = u^3$ and $\expect[g'] = 3\expect[y^2] = 3$, so
+$\wvec \leftarrow \expect[\zvec(\wvec^\top\zvec)^3] - 3\wvec$. The iteration has no step size, and for kurtosis it
+converges cubically <Cite id="hyvarinen1999" />.
+
+To extract several components, run the iteration for several vectors and keep them orthogonal after each step, either
+one at a time by Gram–Schmidt (deflation) or all together by $\Wmat \leftarrow (\Wmat\Wmat^\top)^{-1/2}\Wmat$
+(symmetric orthogonalisation).
+
+## Maximum likelihood and infomax
+
+If the source densities $p_i$ are known, the log-likelihood of the unmixing matrix is, by the change-of-variables
+formula,
+
+$$
+\ell(\Wmat) = n\log\abs{\det\Wmat} + \sum_{t=1}^n\sum_{i=1}^d \log p_i(\wvec_i^\top\xvec_t).
+$$
+
+Bell and Sejnowski derived the same objective by maximising the information transmitted through a network with
+sigmoid outputs, the **infomax** principle <Cite id="bell1995" />. A fixed super-Gaussian density such as
+$p(s) \propto 1/\cosh s$ works for speech-like sources, which have heavy tails.
+
+## Worked example
+
+- **Kurtosis of the sources.** A sine wave scaled to unit variance, $\sqrt2\sin\theta$ with $\theta$ uniform, has
+  $\expect[4\sin^4\theta] = 4 \cdot \tfrac38 = 1.5$, so $\kappa = -1.5$. A uniform variable on $[-\sqrt3, \sqrt3]$ has
+  $\expect[s^4] = 9/5$, so $\kappa = -1.2$. Both are sub-Gaussian.
+- **An equal mixture.** With $\qvec = (1/\sqrt2, 1/\sqrt2)$, $\kappa(y) = \tfrac14(-1.5) + \tfrac14(-1.2) = -0.675$.
+  The mixture is closer to Gaussian than either source.
+- **In the figure.** Over 400 samples the sine has $\kappa = -1.500$ and the sawtooth $-1.186$. The kurtosis curve of
+  the whitened mixture has its minimum, $-1.501$, along the sine, and its maximum, $-0.643$, near the midway direction.
+  Starting at $20°$, FastICA with the kurtosis contrast reaches the sawtooth direction in two steps: the correlation of
+  the output with the sawtooth is $0.985$ after one step and above $0.9999$ from the second step on.
+
+## Pitfalls
+
+- **Gaussian sources.** At most one source may be Gaussian. Near-Gaussian sources are separated poorly.
+- **Order and scale are arbitrary.** The components come out in no particular order, with arbitrary sign. Match them to
+  sources by inspection or correlation.
+- **Linear, instantaneous mixing.** Real rooms add echoes and delays, which make the mixing convolutive; basic ICA does
+  not model them.
+- **More sources than sensors.** With fewer observed signals than sources, $\Amat$ is not invertible and the basic
+  model fails.
+- **Dependent sources.** ICA finds the most independent components it can, whether or not independent sources exist.
