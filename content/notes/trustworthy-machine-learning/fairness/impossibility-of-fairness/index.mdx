@@ -1,0 +1,127 @@
+---
+title: Impossibility of fairness
+kind: concept
+summary: 'With unequal base rates, a classifier cannot equalise precision and both error rates across groups, and a score cannot be calibrated within groups and balanced for both classes, unless prediction is perfect (Chouldechova 2017; Kleinberg et al. 2017).'
+tags: [fairness, classification, worked-example]
+aliases: [Chouldechova impossibility, Kleinberg impossibility theorem, balance for the positive class, balance for the negative class, fairness trade-off]
+requires: [fairness-criteria, sensitivity-specificity-and-predictive-values]
+related: [group-fairness-metrics, calibration-definitions, bayes-theorem]
+references: [chouldechova2017, kleinberg2017, pleiss2017, barocas2023]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The **impossibility of fairness** is a pair of results about two groups with different base rates $p_1 \ne p_2$, where
+the base rate $p_a$ is the fraction of group $a$ with $Y = 1$. For binary predictions, equal positive predictive value,
+equal false-negative rate and equal false-positive rate cannot hold together <Cite id="chouldechova2017" />. For scores,
+calibration within groups, balance for the positive class and balance for the negative class cannot hold together unless
+the score is perfect <Cite id="kleinberg2017" />.
+</Definition>
+
+## Intuition
+
+A risk score used in two groups is asked to satisfy two natural demands. The score should mean the same in each group: of
+the people flagged high-risk, the same fraction should reoffend, whichever group they belong to. And the score should err
+equally: people who will not reoffend should be flagged at the same rate in each group. The two demands are linked by
+Bayes' theorem through the base rate. If one group has a higher base rate, a flag carries more evidence of the outcome
+in that group. Keeping precision equal then forces the error rates apart. The results were prompted by the debate over the
+COMPAS recidivism score, which was calibrated across racial groups but had unequal false-positive rates
+<Cite id="chouldechova2017" />.
+
+## Binary predictions: Chouldechova's identity
+
+Fix one group with base rate $p$, and write $\text{TPR}$, $\text{FPR}$ and $\text{FNR} = 1 - \text{TPR}$ for its true-positive,
+false-positive and false-negative rates. The fraction of the group predicted positive and truly positive is
+$p\,\text{TPR}$; the fraction predicted positive and truly negative is $(1 - p)\,\text{FPR}$. The positive predictive value
+is the share of the first among all predicted positives:
+
+$$
+\text{PPV} = \frac{p\,\text{TPR}}{p\,\text{TPR} + (1 - p)\,\text{FPR}}.
+$$
+
+Solving for $\text{FPR}$ gives $(1 - p)\,\text{FPR}\,\text{PPV} = p\,\text{TPR}\,(1 - \text{PPV})$, so
+
+$$
+\text{FPR} = \frac{p}{1 - p}\cdot\frac{1 - \text{PPV}}{\text{PPV}}\cdot(1 - \text{FNR}).
+$$
+
+This holds in every group. If two groups share $\text{PPV}$ and $\text{FNR}$, the right-hand side differs only through
+the factor $p/(1 - p)$, which is strictly increasing in $p$. Unequal base rates therefore force unequal false-positive
+rates <Cite id="chouldechova2017" />. The only escapes are $\text{PPV} = 1$ with $\text{FPR} = 0$ in both groups, or
+$\text{TPR} = 0$, which predicts nobody positive.
+
+## Scores: the result of Kleinberg, Mullainathan and Raghavan
+
+Let a score $s \in [0, 1]$ be assigned to each person. Kleinberg et al. define three conditions
+<Cite id="kleinberg2017" />:
+
+- **Calibration within groups.** In every group, among the people assigned score $v$, a fraction $v$ are positive.
+- **Balance for the negative class.** The average score of negatives, $x_a$, is the same in every group.
+- **Balance for the positive class.** The average score of positives, $y_a$, is the same in every group.
+
+The balance conditions are the score analogues of equal false-positive and true-positive rates.
+
+**Proof that the three conditions force equal base rates or perfect prediction.** Consider group $a$, with $N_a$ people,
+of whom $n_a = p_a N_a$ are positive. Calibration within groups says that each score value $v$ holds a fraction $v$ of
+positives. Summing the scores of everyone in the group, each bin of $m$ people with score $v$ contributes $v m$, which is
+the number of positives in that bin. So the total score equals the number of positives:
+
+$$
+\sum_{i \in a} s_i = n_a.
+$$
+
+The same total, split by true class, is $(N_a - n_a)\,x_a + n_a\,y_a$. Equating the two and dividing by $N_a$,
+
+$$
+(1 - p_a)\,x_a = p_a\,(1 - y_a).
+$$
+
+Balance for both classes sets $x_a = x$ and $y_a = y$ in both groups. Two cases remain.
+
+- If $y < 1$, dividing gives $x / (1 - y) = p_a / (1 - p_a)$ for both groups. The map $p \mapsto p/(1 - p)$ is strictly
+  increasing, so $p_1 = p_2$: the base rates are equal.
+- If $y = 1$, then $(1 - p_a)\,x = 0$, so $x = 0$ whenever $p_a < 1$. Every positive has score 1 and every negative has
+  score 0: prediction is perfect.
+
+Geometrically, each group constrains $(x, y)$ to a line through $(0, 1)$ with slope set by its base rate, and two lines
+with different slopes meet only at $(0, 1)$ <Cite id="kleinberg2017" />. Kleinberg et al. also show that the conditions
+cannot hold approximately unless the base rates are approximately equal or prediction is approximately perfect.
+
+## Worked example
+
+**Binary predictions.** Two groups have base rates $p_1 = 0.4$ and $p_2 = 0.2$. A classifier has $\text{PPV} = 0.7$ and
+$\text{FNR} = 0.3$ in both. By the identity, group 1 has $\text{FPR} = \frac{0.4}{0.6}\cdot\frac{0.3}{0.7}\cdot 0.7 = 0.2$
+and group 2 has $\text{FPR} = \frac{0.2}{0.8}\cdot\frac{0.3}{0.7}\cdot 0.7 = 0.075$. Negatives in group 1 are flagged
+$2.67$ times as often as negatives in group 2, although the flag is equally reliable in both.
+
+**Calibrated scores.** Group 1 has 100 people: 50 scored $0.2$ and 50 scored $0.6$. Calibration puts $10 + 30 = 40$
+positives in it, so $p_1 = 0.4$. Group 2 has 100 people: 50 scored $0.1$ and 50 scored $0.3$, with $5 + 15 = 20$ positives,
+so $p_2 = 0.2$.
+
+| group | base rate $p_a$ | mean score of positives $y_a$ | mean score of negatives $x_a$ | $(1 - p_a)\,x_a$ | $p_a\,(1 - y_a)$ |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 0.4 | $(10 \cdot 0.2 + 30 \cdot 0.6)/40 = 0.5$ | $(40 \cdot 0.2 + 20 \cdot 0.6)/60 = 0.333$ | 0.2 | 0.2 |
+| 2 | 0.2 | $(5 \cdot 0.1 + 15 \cdot 0.3)/20 = 0.25$ | $(45 \cdot 0.1 + 35 \cdot 0.3)/80 = 0.1875$ | 0.15 | 0.15 |
+
+Both scores are calibrated, and the identity $(1 - p_a)\,x_a = p_a\,(1 - y_a)$ holds in each group. Balance fails for both
+classes: positives in group 2 receive half the average score of positives in group 1.
+
+## Consequences
+
+- **A choice is unavoidable.** With unequal base rates, a practitioner must choose which of sufficiency and separation
+  to give up, or accept a trade-off between them. The <NoteLink to="fairness-criteria">fairness criteria</NoteLink> note
+  proves the general form: separation and sufficiency are incompatible whenever $A$ and $Y$ are dependent and every
+  joint event has positive probability.
+- **Relaxations do not escape.** Pleiss et al. show that calibration is compatible with equalising a single weighted
+  combination of the false-positive and false-negative rates, and that achieving it requires withholding information:
+  randomly replacing some predictions in one group with the group's base rate <Cite id="pleiss2017" />.
+- **Equal base rates remove the conflict** only in the population where they are equal. Base rates measured on a
+  different population, or on labels recorded with bias, do not settle the question.
+
+## Pitfalls
+
+- **Reading the result as "fairness is impossible".** It says that three particular statistical conditions cannot hold
+  together. Which condition matters depends on the decision being made.
+- **Ignoring estimation error.** Base rates, precision and error rates estimated on small groups are uncertain; an
+  apparent violation can be sampling noise.

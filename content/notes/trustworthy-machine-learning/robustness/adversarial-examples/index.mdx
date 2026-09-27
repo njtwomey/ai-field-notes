@@ -1,0 +1,154 @@
+---
+title: Adversarial examples
+kind: concept
+summary: 'An adversarial example is an input $\xvec + \deltavec$ with a small perturbation, $\norm{\deltavec}_\infty \le \epsilon$, that changes a model''s prediction. FGSM takes $\deltavec = \epsilon\,\sgn(\nabla_{\xvec} L)$; PGD iterates it; adversarial training minimises the worst-case loss.'
+tags: [robustness, deep-learning, optimisation, security, worked-example]
+aliases: [adversarial example, adversarial perturbation, fast gradient sign method, FGSM, projected gradient descent attack, PGD attack, robust optimisation, obfuscated gradients, gradient masking, threat model]
+requires: [gradient, backpropagation, vector-norms]
+related: [certified-robustness, robustness-to-distribution-shift, logistic-regression, data-augmentation, counterfactual-explanations]
+references: [szegedy2014, goodfellow2015, madry2018, athalye2018, tsipras2019]
+status: draft
+updated: 2026-09-27
+---
+
+import { FgsmLinear } from './FgsmLinear'
+
+<Definition>
+Let $f$ be a classifier, $L(\thetavec, \xvec, y)$ its training loss with parameters $\thetavec$, and $\Scal$ a set of
+allowed perturbations, usually the ball $\set{\deltavec : \norm{\deltavec}_p \le \epsilon}$. An **adversarial example**
+for a correctly classified input $(\xvec, y)$ is a point $\xvec + \deltavec$ with $\deltavec \in \Scal$ and
+$f(\xvec + \deltavec) \ne y$ <Cite id="szegedy2014" />. An **attack** searches $\Scal$ for such a $\deltavec$, usually by
+maximising $L(\thetavec, \xvec + \deltavec, y)$. **Adversarial robustness** at $\xvec$ is the absence of any such point
+in $\Scal$.
+</Definition>
+
+## Intuition
+
+Szegedy et al. found that image classifiers with human-level test accuracy change their prediction under perturbations
+too small for a person to see, and that a perturbation found for one network often fools another network trained
+separately <Cite id="szegedy2014" />. The set $\Scal$ is the **threat model**: it states what the adversary may change.
+The $\ell_\infty$ ball says every pixel may move by at most $\epsilon$. On images with 8-bit pixels scaled to $[0, 1]$,
+$\epsilon = 8/255$ is a common choice.
+
+The size of the ball is not the whole story. In $n$ dimensions, many coordinates each moved by a tiny amount add up to a
+large change in any linear function of the input. High-dimensional inputs therefore leave room for perturbations that are
+small per coordinate and large in effect.
+
+The search for an adversarial example is the same optimisation as the search for a
+<NoteLink to="counterfactual-explanations">counterfactual explanation</NoteLink>: the smallest change to an input that
+changes the prediction. The two differ in intent and in the distance used, not in the mathematics.
+
+## The linear explanation
+
+Goodfellow, Shlens and Szegedy argued that adversarial examples come from the linear behaviour of networks, not from
+their nonlinearity <Cite id="goodfellow2015" />. Take a linear score $s(\xvec) = \wvec^\top\xvec + b$ with
+$\wvec \in \reals^n$. A perturbation $\deltavec$ changes the score by $\wvec^\top\deltavec$. The largest change allowed by
+$\norm{\deltavec}_\infty \le \epsilon$ solves
+
+$$
+\max_{\norm{\deltavec}_\infty \le \epsilon} \wvec^\top\deltavec = \max_{\abs{\delta_i} \le \epsilon}
+\sum_{i=1}^n w_i\delta_i.
+$$
+
+The sum separates over coordinates. Each term $w_i\delta_i$ is largest at $\delta_i = \epsilon\,\sgn(w_i)$, where it
+equals $\epsilon\abs{w_i}$. The maximiser is $\deltavec^\star = \epsilon\,\sgn(\wvec)$ and the maximum is
+
+$$
+\wvec^\top\deltavec^\star = \epsilon\norm{\wvec}_1.
+$$
+
+If the weights have average magnitude $m$, then $\norm{\wvec}_1 = mn$ and the change is $\epsilon mn$. The perturbation
+size $\norm{\deltavec^\star}_\infty = \epsilon$ does not grow with $n$, but its effect grows linearly in $n$. The same
+argument gives the distance from $\xvec$ to the decision boundary $s = 0$ in the $\ell_\infty$ norm:
+$\abs{s(\xvec)}/\norm{\wvec}_1$. The Euclidean distance is $\abs{s(\xvec)}/\norm{\wvec}_2$. Since
+$\norm{\wvec}_1$ can be up to $\sqrt n$ times $\norm{\wvec}_2$, a point far from the boundary in Euclidean distance can be
+close to it in $\ell_\infty$ distance.
+
+<FgsmLinear />
+
+## Fast gradient sign method
+
+A network is not linear, but ReLU networks are piecewise linear and are trained to operate in near-linear regimes. The
+**fast gradient sign method** (FGSM) linearises the loss around $\xvec$:
+$L(\thetavec, \xvec + \deltavec, y) \approx L(\thetavec, \xvec, y) + \nabla_{\xvec}L^\top\deltavec$. Maximising the linear
+term over the $\ell_\infty$ ball is the problem above with $\wvec = \nabla_{\xvec}L$, so
+
+$$
+\xvec_{\text{adv}} = \xvec + \epsilon\,\sgn\big(\nabla_{\xvec}L(\thetavec, \xvec, y)\big).
+$$
+
+One backward pass computes the gradient with respect to the input <Cite id="goodfellow2015" />. With $\epsilon = 0.25$
+on MNIST, FGSM gave a shallow softmax classifier an error rate of 99.9% and a maxout network an error rate of 89.4%.
+The authors also showed the famous panda image: GoogLeNet labelled it "panda" with 57.7% confidence and, after an FGSM
+perturbation with $\epsilon = 0.007$, "gibbon" with 99.3% confidence <Cite id="goodfellow2015" />.
+
+## Projected gradient descent
+
+FGSM takes one linear step. The loss is not linear over the whole ball, so iterating smaller steps finds stronger
+attacks. **Projected gradient descent** (PGD) on the negative loss, for the $\ell_\infty$ ball, repeats
+
+$$
+\xvec^{(t+1)} = \proj_{\Scal(\xvec)}\Big(\xvec^{(t)} + a\,\sgn\big(\nabla_{\xvec}L(\thetavec, \xvec^{(t)}, y)\big)\Big),
+$$
+
+with step size $a$ and $\proj_{\Scal(\xvec)}$ the projection onto
+$\set{\xvec' : \norm{\xvec' - \xvec}_\infty \le \epsilon}$. For a box this projection clips each coordinate of
+$\xvec' - \xvec$ to $[-\epsilon, \epsilon]$. Madry et al. start PGD from a random point in the ball and restart it
+several times <Cite id="madry2018" />. They found that the maxima PGD reaches from many random starts have similar loss
+values, and they treat PGD as the strongest attack that uses only first-order information.
+
+## Adversarial training
+
+Robust training replaces the expected loss by the expected worst-case loss over the threat model. Madry et al. write it
+as a saddle-point problem <Cite id="madry2018" />:
+
+$$
+\min_{\thetavec}\ \rho(\thetavec), \qquad
+\rho(\thetavec) = \expect_{(\xvec, y) \sim \Dcal}\Big[\max_{\deltavec \in \Scal} L(\thetavec, \xvec + \deltavec, y)\Big].
+$$
+
+The inner maximisation is an attack. The outer minimisation is training. Danskin's theorem justifies the practical
+algorithm: when the inner maximiser $\deltavec^\star$ is unique, the gradient of the inner maximum with respect to
+$\thetavec$ is $\nabla_{\thetavec}L(\thetavec, \xvec + \deltavec^\star, y)$. Each training step therefore runs PGD on the
+minibatch and takes an ordinary gradient step on the loss at the resulting adversarial inputs. Goodfellow et al. used
+the cheaper FGSM inner step <Cite id="goodfellow2015" />.
+
+Madry et al. trained networks this way against $\ell_\infty$ attacks. On MNIST with $\epsilon = 0.3$, the lowest accuracy
+across the attacks they tried was 89.3%. On CIFAR-10 with $\epsilon = 8$ on the 0–255 pixel scale, clean accuracy was
+87.3% and the lowest accuracy under attack was 45.8% <Cite id="madry2018" />. Adversarial training costs one PGD run per
+step, so it is several times slower than standard training.
+
+## Worked example
+
+A linear classifier on $224 \times 224$ colour images has $n = 3 \cdot 224 \cdot 224 = 150{,}528$ inputs. Suppose its
+weights have average magnitude $m = 0.01$ and it gives an image the logit $s = 4.6$, a probability
+$\sigma(4.6) = 0.990$ of the correct class, with $\sigma$ the logistic function. An $\ell_\infty$ perturbation of one
+grey level, $\epsilon = 1/255$, moves the logit by up to
+
+$$
+\epsilon mn = \frac{0.01 \cdot 150{,}528}{255} = 5.90.
+$$
+
+The logit falls to $4.6 - 5.90 = -1.30$ and the predicted probability to $\sigma(-1.30) = 0.214$. The prediction flips,
+yet no pixel changed by more than one grey level.
+
+## Assumptions
+
+- The threat model is part of the claim. Robustness to $\ell_\infty$ perturbations of size $8/255$ says nothing about
+  rotations, translations, colour shifts or perturbations of size $16/255$.
+- Attacks assume access to gradients (white-box) or to many queries of the model (black-box). Transfer from a
+  substitute model gives black-box attacks with no queries at all <Cite id="szegedy2014" />.
+
+## Pitfalls
+
+- **Gradient masking.** A defence can make gradients useless without making the model robust, for example with
+  non-differentiable preprocessing, randomness or saturated activations. Athalye, Carlini and Wagner examined nine
+  defences from ICLR 2018: seven relied on such **obfuscated gradients**, and adapted attacks circumvented six of them
+  completely and one partially <Cite id="athalye2018" />. A defence must be evaluated with attacks adapted to it.
+- **Weak evaluation.** A few FGSM steps overstate robustness. Report PGD with random restarts, and check that accuracy
+  falls to zero as $\epsilon$ grows.
+- **Robustness costs accuracy.** Tsipras et al. proved that on a simple distribution the standard accuracy of a model
+  and its robustness to adversarial perturbations trade off <Cite id="tsipras2019" />. In practice adversarially
+  trained models lose clean accuracy.
+- **Empirical is not certified.** Surviving known attacks does not prove that no adversarial example exists. Guarantees
+  need <NoteLink to="certified-robustness">certified defences</NoteLink>.

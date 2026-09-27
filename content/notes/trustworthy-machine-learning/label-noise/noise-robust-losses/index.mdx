@@ -1,0 +1,138 @@
+---
+title: Noise-robust losses
+kind: technique
+summary: 'A loss is symmetric if $\sum_{k=1}^K L(f(\xvec), k)$ is constant. Then risk under uniform label noise with rate $\rho < (K-1)/K$ is an increasing affine function of the clean risk, with the same minimiser. MAE is symmetric; cross-entropy is not. Generalised cross-entropy interpolates.'
+tags: [classification, label-noise, robustness, deep-learning, worked-example]
+aliases: [symmetric loss, noise-tolerant loss, MAE loss for classification, generalised cross-entropy, generalized cross entropy, GCE loss, unhinged loss, normalised loss functions, active passive loss]
+requires: [label-noise-models, cross-entropy-and-perplexity]
+related: [learning-with-noisy-labels, surrogate-losses, focal-loss, detecting-and-cleaning-label-errors]
+references: [ghosh2015, ghosh2017, zhang2018gce, vanrooyen2015, ma2020, zhang2017, long2010]
+status: draft
+updated: 2026-09-27
+---
+
+import { LossShapes } from './LossShapes'
+
+<Definition>
+A classification loss $L(f(\xvec), k)$ is **noise-tolerant** for a noise model if the minimiser of its risk on noisy labels
+has the same clean 0–1 accuracy as the minimiser on clean labels <Cite id="ghosh2015" />. A loss is **symmetric** if
+$\sum_{k=1}^K L(f(\xvec), k) = C$ for a constant $C$, for every input $\xvec$ and every model $f$. Symmetric losses are
+noise-tolerant under uniform noise below $(K-1)/K$, whatever the model class <Cite id="ghosh2017" />. **Noise-robust
+losses** are symmetric losses and losses built to approach them.
+</Definition>
+
+## Problem
+
+Cross-entropy $-\log p_y$, where $p_y$ is the predicted probability of the observed label $y$, is unbounded. An example
+whose observed label is wrong, and which the model classifies correctly, has small $p_y$ and a large loss. A flexible
+model reduces that loss by memorising the wrong label. Deep networks can fit completely random labels
+<Cite id="zhang2017" />, and mislabelled examples dominate the gradient late in training. Loss correction removes the
+bias but needs the noise transition matrix (see <NoteLink to="learning-with-noisy-labels">learning with noisy
+labels</NoteLink>). A robust loss needs no estimate of the noise.
+
+## Mechanism
+
+### Symmetric losses under uniform noise
+
+Under uniform noise with rate $\rho$ over $K$ classes, the observed label equals the true label $y$ with probability
+$1 - \rho$ and each of the other $K - 1$ labels with probability $\rho/(K - 1)$. The noisy risk of $f$ is
+
+$$
+\tilde R(f) = \expect_{\xvec, y}\Big[(1 - \rho)\,L(f(\xvec), y) + \frac{\rho}{K - 1}\sum_{k \ne y} L(f(\xvec), k)\Big].
+$$
+
+For a symmetric loss, $\sum_{k \ne y} L(f(\xvec), k) = C - L(f(\xvec), y)$. Substituting,
+
+$$
+\tilde R(f) = (1 - \rho)R(f) + \frac{\rho}{K - 1}\big(C - R(f)\big) = \Big(1 - \frac{\rho K}{K - 1}\Big)R(f) + \frac{\rho C}{K - 1},
+$$
+
+where $R(f) = \expect[L(f(\xvec), y)]$ is the clean risk. The coefficient of $R(f)$ is positive when $\rho < (K - 1)/K$. The
+noisy risk is then an increasing affine function of the clean risk, so every model class $\Fcal$ has the same minimiser
+under both <Cite id="ghosh2017" />. The argument needs no assumption on the data distribution. For $K = 2$ the
+condition is $\rho < 1/2$ and the result is the binary one of Ghosh, Manwani and Sastry <Cite id="ghosh2015" />.
+
+Under class-conditional noise, with $\rho_{ij}$ the probability that class $i$ is labelled $j$ and $\rho_i = \sum_{j \ne i}
+\rho_{ij}$, Ghosh, Kumar and Sastry prove tolerance for a symmetric loss with $0 \le L \le C/(K - 1)$ when $\rho_{ij} < 1 -
+\rho_i$ for all $j \ne i$ and the clean minimum risk is zero <Cite id="ghosh2017" />. The zero-risk condition is
+restrictive; in their experiments symmetric losses were robust without it.
+
+### Which losses are symmetric
+
+With softmax outputs $\pvec(\xvec)$ and one-hot label $\evec_k$:
+
+- **Mean absolute error.** $L(\pvec, k) = \norm{\evec_k - \pvec}_1 = (1 - p_k) + \sum_{j \ne k}p_j = 2 - 2p_k$. Summing over $k$ gives
+  $2K - 2$, a constant, so MAE is symmetric.
+- **Cross-entropy.** $\sum_k -\log p_k$ depends on $\pvec$ and is unbounded, so cross-entropy is not symmetric.
+- **Binary margin losses.** $\psi(v) + \psi(-v)$ is constant for the sigmoid, ramp and unhinged loss $\psi(v) = 1 - v$
+  <Cite id="vanrooyen2015" />, and not for the logistic or hinge loss.
+- **Normalised losses.** Any loss divided by its sum over labels, $L(\pvec, y)/\sum_k L(\pvec, k)$, sums to 1 and is
+  symmetric <Cite id="ma2020" />.
+
+### Why symmetric losses train slowly
+
+The gradients of the two losses with respect to the model parameters $\thetavec$ are
+
+$$
+\nabla_{\thetavec}\big(-\log p_y\big) = -\frac{1}{p_y}\nabla_{\thetavec}p_y, \qquad \nabla_{\thetavec}\big(2 - 2p_y\big) = -2\,\nabla_{\thetavec}p_y.
+$$
+
+Cross-entropy weights each example by $1/p_y$, so examples the model finds hard get the most attention. That speeds
+learning on clean data and is the source of the fragility on noisy data. MAE weights every example equally. On clean
+examples the model has not yet learned, this is too little, and MAE underfits on data sets with many classes
+<Cite id="zhang2018gce" />.
+
+### Generalised cross-entropy
+
+Zhang and Sabuncu interpolate with the negative Box–Cox transform <Cite id="zhang2018gce" />:
+
+$$
+L_q(\pvec, y) = \frac{1 - p_y^{\,q}}{q}, \qquad q \in (0, 1].
+$$
+
+At $q = 1$, $L_1 = 1 - p_y$, half the MAE. As $q \to 0$, $p_y^{\,q} = e^{q\log p_y} = 1 + q\log p_y + O(q^2)$, so $L_q \to -\log
+p_y$, cross-entropy. The gradient is
+
+$$
+\nabla_{\thetavec} L_q = -p_y^{\,q - 1}\,\nabla_{\thetavec} p_y = p_y^{\,q}\,\nabla_{\thetavec}\big(-\log p_y\big),
+$$
+
+cross-entropy's gradient scaled by $p_y^{\,q}$. Examples the model disagrees with are down-weighted, but less than
+under MAE. Zhang and Sabuncu also bound the gap between the GCE minimiser's noisy and clean risk, and add a truncated
+version that ignores examples with $p_y$ below a threshold.
+
+<LossShapes />
+
+## Worked example
+
+Take three classes and an example whose observed label is wrong. The model gives the observed label $p_y = 0.05$. Use
+$q = 0.7$.
+
+| loss | loss value | weight on $-\nabla p_y$ |
+| --- | --- | --- |
+| cross-entropy | $-\log 0.05 = 3.00$ | $1/0.05 = 20$ |
+| MAE | $2(1 - 0.05) = 1.90$ | $2$ |
+| GCE, $q = 0.7$ | $(1 - 0.05^{0.7})/0.7 = 1.25$ | $0.05^{-0.3} = 2.46$ |
+
+A correctly labelled, well-fitted example with $p_y = 0.9$ gets weights $1.11$, $2$ and $1.03$. Under cross-entropy the
+wrong label pulls 18 times as hard as the right one; under GCE, 2.4 times.
+
+For MAE under uniform noise with $\rho = 0.3$, the constant is $C = 2 \cdot 3 - 2 = 4$ and $\tilde R = (1 - 0.3 \cdot 3/2)R + 0.3
+\cdot 4/2 = 0.55R + 0.6$. The noisy and clean risks have the same minimiser.
+
+## Cost
+
+The losses cost the same as cross-entropy per example. The price is in optimisation: MAE, and GCE with $q$ near 1,
+need more epochs or tuned learning rates, and $q$ is a hyperparameter.
+
+## Trade-offs
+
+- **Robustness against fit.** A bounded loss limits the damage of wrong labels and also the signal from hard correct
+  ones. Combinations of an active loss such as normalised cross-entropy with a passive loss such as MAE aim to keep both
+  <Cite id="ma2020" />.
+- **Uniform noise only, in theory.** The guarantee is for uniform noise. Class-conditional noise needs the zero-risk
+  condition or an explicit correction.
+- **Convexity.** Symmetric margin losses other than the unhinged loss are non-convex. With convex, non-symmetric
+  losses, uniform noise can make a restricted class fail completely <Cite id="long2010" />.
+- **Complements, not substitutes.** Robust losses combine with sample selection, early stopping and label cleaning;
+  see <NoteLink to="detecting-and-cleaning-label-errors">detecting and cleaning label errors</NoteLink>.

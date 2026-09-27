@@ -1,0 +1,129 @@
+---
+title: Fairness criteria
+kind: concept
+summary: 'Group fairness criteria are conditional-independence statements about a score $R$, a group attribute $A$ and the target $Y$: independence $R \perp A$, separation $R \perp A \mid Y$ and sufficiency $Y \perp A \mid R$. When $A$ and $Y$ are dependent, no two of them can hold together.'
+tags: [fairness, classification, probability]
+aliases: [independence criterion, separation criterion, sufficiency criterion, calibration within groups, group fairness criteria, non-discrimination criteria]
+requires: [independence, conditional-probability]
+related: [group-fairness-metrics, calibration-definitions, sensitivity-specificity-and-predictive-values]
+references: [barocas2023, hardt2016, chouldechova2017, kleinberg2017]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $Y$ be the target variable, $A$ a protected attribute that splits the population into groups, and $R$ a score or
+prediction computed by a classifier. The three **group fairness criteria** of Barocas, Hardt and Narayanan are
+<Cite id="barocas2023" />:
+
+- **Independence:** $R \perp A$. The distribution of the score is the same in every group.
+- **Separation:** $R \perp A \mid Y$. Within each true class, the distribution of the score is the same in every group.
+- **Sufficiency:** $Y \perp A \mid R$. Given the score, the probability of each outcome is the same in every group.
+
+</Definition>
+
+## Intuition
+
+Each criterion names a different quantity that must not depend on group membership. Independence constrains the
+decisions alone: a lender approves the same share of applicants in each group. Separation constrains the errors: people
+who would repay are approved at the same rate in each group, and people who would default are approved at the same rate
+in each group. Sufficiency constrains the meaning of the score: an applicant scored $0.3$ defaults with the same
+probability whichever group the applicant belongs to.
+
+The criteria are statements about random variables, not about a particular metric. The
+<NoteLink to="group-fairness-metrics">group fairness metrics</NoteLink> measure how far a given classifier is from each
+criterion, as differences or ratios of confusion-matrix rates.
+
+## The criteria for binary predictions and for scores
+
+For a binary prediction $R = \hat Y \in \set{0, 1}$ and a binary target, each criterion reduces to equal rates across
+groups $a$:
+
+| criterion | binary form, equal for all $a$ | named constraint |
+| --- | --- | --- |
+| independence | $\pr(\hat Y = 1 \mid A = a)$ | demographic parity |
+| separation | $\pr(\hat Y = 1 \mid Y = y, A = a)$ for $y = 0, 1$ | equalised odds <Cite id="hardt2016" /> |
+| sufficiency | $\pr(Y = 1 \mid \hat Y = \hat y, A = a)$ for $\hat y = 0, 1$ | equal positive and negative predictive values |
+
+Separation for binary predictions equalises the true-positive rate ($y = 1$) and the false-positive rate ($y = 0$).
+Constraining the true-positive rate alone is the relaxation called equal opportunity <Cite id="hardt2016" />.
+
+For a score $R \in [0, 1]$, sufficiency is closely tied to calibration. A score is **calibrated within groups** when
+$\pr(Y = 1 \mid R = r, A = a) = r$ for every $r$ and $a$. A score calibrated within groups satisfies sufficiency, because
+$\pr(Y = 1 \mid R = r, A = a) = r$ does not depend on $a$. Conversely, if $R$ satisfies sufficiency, the recalibrated
+score $r \mapsto \pr(Y = 1 \mid R = r)$ is calibrated within every group <Cite id="barocas2023" />. Separation for scores
+requires every group to have the same ROC curve, not only the same operating point.
+
+## Why the criteria exclude each other
+
+Suppose the base rates differ between groups, so $A$ and $Y$ are dependent: $A \not\perp Y$. Then each pair of criteria
+is incompatible, except in degenerate cases <Cite id="barocas2023" />. The three proofs below use only the definition of
+conditional independence.
+
+### Independence and sufficiency
+
+Independence gives $p(a \mid r) = p(a)$. Sufficiency gives $p(a \mid y, r) = p(a \mid r)$. Together, for every
+$(a, y, r)$,
+
+$$
+p(a, y, r) = p(a \mid y, r)\,p(y, r) = p(a \mid r)\,p(y, r) = p(a)\,p(y, r).
+$$
+
+So $A \perp (Y, R)$. Summing over $r$ gives $p(a, y) = p(a)\,p(y)$, which is $A \perp Y$. This contradicts the
+assumption $A \not\perp Y$. Independence and sufficiency cannot hold together when base rates differ.
+
+### Independence and separation
+
+Take a binary target and write $\pi_a = \pr(Y = 1 \mid A = a)$ for the base rate of group $a$. By the law of total
+probability, and then by separation, which makes $p(r \mid y, a) = p(r \mid y)$,
+
+$$
+p(r \mid a) = \pi_a\,p(r \mid Y = 1) + (1 - \pi_a)\,p(r \mid Y = 0) = p(r \mid Y = 0) + \pi_a\big[p(r \mid Y = 1) - p(r \mid Y = 0)\big].
+$$
+
+Independence requires $p(r \mid a)$ to be the same for every group $a$. The first term does not depend on $a$. If two
+groups have $\pi_a \ne \pi_{a'}$, the second term is the same for both only when $p(r \mid Y = 1) = p(r \mid Y = 0)$ for
+every $r$, which is $R \perp Y$. So independence and separation hold together, with unequal base rates, only for a score
+that carries no information about $Y$.
+
+### Separation and sufficiency
+
+Assume every combination of $(a, r, y)$ has positive probability. Separation gives $p(a \mid r, y) = p(a \mid y)$, and
+sufficiency gives $p(a \mid r, y) = p(a \mid r)$. So $p(a \mid y) = p(a \mid r)$ for every pair $(r, y)$. The left side does
+not depend on $r$ and the right side does not depend on $y$, so both equal a constant $c_a$ that depends on $a$ only.
+Averaging $p(a \mid y) = c_a$ over $y$ gives $p(a) = c_a$, so $p(a \mid y) = p(a)$ for every $y$. That is $A \perp Y$,
+contradicting the assumption. Separation and sufficiency are therefore incompatible when base rates differ and all
+joint probabilities are positive. A perfect predictor escapes the result because it violates positivity: the events
+$\set{R = 1, Y = 0}$ and $\set{R = 0, Y = 1}$ have probability zero.
+
+The quantitative form of the last result, for binary predictions and for calibrated scores, is the
+<NoteLink to="impossibility-of-fairness">impossibility of fairness</NoteLink> of Chouldechova and of Kleinberg et al.
+<Cite id="chouldechova2017" /> <Cite id="kleinberg2017" />.
+
+## Choosing a criterion
+
+The choice among the criteria is a normative decision about what the score is used for. Independence ignores the target
+entirely, so it can be met by a classifier that is accurate in one group and random in the other. Separation accepts
+different decision rates when base rates differ, but asks that errors fall equally on each group. Sufficiency asks that a
+score mean the same thing for everyone. Sufficiency often holds approximately for an unconstrained model fitted to
+enough data <Cite id="barocas2023" />. If $R = \pr(Y = 1 \mid X)$ is the true posterior and $A$ is a function of the
+features $X$, then $\pr(Y = 1 \mid R = r, A = a) = \expect[\pr(Y = 1 \mid X) \mid R = r, A = a] = r$, so $R$ is calibrated
+within groups.
+
+All three criteria are **observational**: they depend only on the joint distribution of $(R, A, Y)$. Two scenarios with
+the same joint distribution but different causal mechanisms receive the same verdict. Criteria stated for individuals,
+such as <NoteLink to="individual-fairness">individual fairness</NoteLink>, or in terms of a causal model address this.
+
+## Assumptions
+
+- The protected attribute $A$ is recorded and correctly measured for the evaluation data.
+- $Y$ is the outcome that matters. When $Y$ is itself a biased measurement, such as arrests standing in for offences,
+  separation and sufficiency are defined relative to the biased label.
+
+## Pitfalls
+
+- **Satisfying a criterion is not the same as being fair.** Each criterion is a necessary condition under one view of
+  fairness, and each can be met by a harmful classifier.
+- **Criteria hold for groups, not subgroups.** A classifier can satisfy separation for $A$ = sex and for $A$ = race
+  separately while violating it at their intersections.
+- **Estimates are noisy.** Equality of rates is tested on finite samples; small groups need confidence intervals.

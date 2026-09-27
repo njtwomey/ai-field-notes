@@ -1,0 +1,231 @@
+---
+title: Local maximum-likelihood test for class-conditional noise
+kind: test
+summary: 'A nonparametric version of the anchor-point z-test for class-conditional label noise. Local logistic regression estimates the noisy posterior at each anchor, a sandwich variance replaces the Fisher information, and a nonlinear class boundary no longer causes false rejections.'
+tags: [hypothesis-testing, label-noise, classification, nonparametric, worked-example]
+aliases: [nonparametric test for class-conditional noise, local likelihood noise test, local logistic regression test]
+requires: [hypothesis-testing-for-class-conditional-label-noise, local-regression]
+related: [label-noise-models, logistic-regression, kernel-density-estimation, estimating-noise-rates]
+references: [yang2024, poyiadzi2022, loader1999, wasserman2006, frolich2006, vandervaart2000]
+status: draft
+updated: 2026-09-27
+---
+
+import { LocalVsParametric } from './LocalVsParametric'
+
+<Definition>
+The **local maximum-likelihood test** of Yang, Poyiadzi, Twomey and Santos-Rodriguez tests $H_0\colon \alpha = \beta$
+(uniform label noise) against $H_1\colon \alpha \ne \beta$ (class-conditional noise), where
+$\alpha = \Pr(\tilde Y = -1 \mid Y = 1)$ and $\beta = \Pr(\tilde Y = 1 \mid Y = -1)$ <Cite id="yang2024" />. Like the parametric
+test of Poyiadzi et al., it uses expert-supplied anchor points whose true posterior is $1/2$, where the noisy posterior is
+$1/2$ under $H_0$ and $(1 - \alpha + \beta)/2$ under $H_1$ <Cite id="poyiadzi2022" />. It estimates the posterior at each
+anchor by local logistic regression instead of a global one, and uses a sandwich estimate of its variance.
+</Definition>
+
+## Motivation
+
+The parametric test fits one logistic regression to the whole data set and relies on the asymptotic normality of its
+maximum-likelihood estimate (see <NoteLink to="hypothesis-testing-for-class-conditional-label-noise">hypothesis testing
+for class-conditional label noise</NoteLink>). Its null distribution is correct only if the log-odds are linear in the
+inputs. When the true boundary is curved, the fitted line does not pass through the anchors, the fitted posterior there
+is not $1/2$ even without noise, and the test rejects clean data. Yang et al. note that, unless the practitioner
+controls the data-generating process, blind application of the parametric test can give wrong answers. A local
+likelihood fit makes no global assumption about the shape of the log-odds, so it is less exposed to misspecification.
+
+## Local logistic regression
+
+The data are $(\Xmat, \yvec) = \set{(\xvec_i, y_i)}_{i=1}^N$ with $\xvec_i \in \reals^d$. The model is
+$Y_i \sim \Bern(r(\xvec_i))$ with $r(\xvec) = \Pr(Y = 1 \mid X = \xvec)$ a smooth function in $[0, 1]$, and log-odds
+$\xi(\xvec) = \operatorname{logit} r(\xvec) = \log\frac{r(\xvec)}{1 - r(\xvec)}$. Near a target point $\xvec$, the paper approximates
+$r$ at $\zvec$ by a local logistic function <Cite id="loader1999" />:
+
+$$
+r(\zvec) \approx g\big(\inner{\betavec}{A_p(\zvec - \xvec)}\big), \qquad g(u) = \frac{e^u}{1 + e^u},
+$$
+
+where $A_p$ is the vector of polynomial basis functions of order $p$. For two inputs and $p = 2$,
+$A_2([v_0, v_1]) = [1, v_0, v_1, \frac12 v_0^2, v_0 v_1, \frac12 v_1^2]$. The **local log-likelihood** weights each point by
+its distance to $\xvec$:
+
+$$
+\ell_{\xvec}(\betavec) = \sum_{i=1}^N w_{i,h}(\xvec)\,\ell\big(y_i, \inner{\betavec}{A_p(\xvec_i - \xvec)}\big), \qquad w_{i,h}(\xvec) = K\Big(\frac{\xvec - \xvec_i}{h}\Big),
+$$
+
+with $\ell(y, \xi) = y\log g(\xi) + (1 - y)\log(1 - g(\xi))$ the Bernoulli log-likelihood, $K$ the Gaussian kernel and $h$ the
+**bandwidth**. With $\hat\betavec = \argmax_{\betavec}\ell_{\xvec}(\betavec)$, the estimate at $\xvec$ is the intercept's
+probability, $\hat r(\xvec) = e^{\hat\beta_0}/(1 + e^{\hat\beta_0})$, because every other basis function is zero at $\zvec =
+\xvec$. A fresh fit is made at each point of interest; nothing is assumed about $r$ far from $\xvec$. This is
+<NoteLink to="local-regression">local regression</NoteLink> with a Bernoulli likelihood in place of squared error.
+
+The bandwidth is chosen by leave-one-out cross-validated log-likelihood, $\sum_i \ell\big(Y_i, \hat\xi^{(-i)}(\xvec_i)\big)$,
+where $\hat\xi^{(-i)}$ is fitted without point $i$. The paper sub-samples the points to reduce its cost.
+
+## Sandwich variance
+
+Write $\avec_i = A_p(\xvec_i - \xvec)$, $w_i = w_{i,h}(\xvec)$ and $p_i = g(\betavec^\top\avec_i)$. The estimate solves the local
+score equation
+
+$$
+\svec(\hat\betavec) = \sum_{i=1}^N w_i\,(y_i - \hat p_i)\,\avec_i = \zeros.
+$$
+
+A first-order expansion around the target $\betavec$ gives $\zeros \approx \svec(\betavec) - \Bmat(\hat\betavec - \betavec)$, with
+
+$$
+\Bmat = \sum_{i=1}^N w_i\,p_i(1 - p_i)\,\avec_i\avec_i^\top,
+$$
+
+so $\hat\betavec - \betavec \approx \Bmat^{-1}\svec(\betavec)$. The observations are independent with $\var(y_i) = p_i(1 - p_i)$, so
+$\var(\svec) = \sum_i w_i^2\,p_i(1 - p_i)\,\avec_i\avec_i^\top$, estimated by
+
+$$
+\Cmat = \sum_{i=1}^N (y_i - \hat p_i)^2\,w_i^2\,\avec_i\avec_i^\top.
+$$
+
+The result is the sandwich form used by the paper, a consistent estimator for local likelihood models
+<Cite id="frolich2006" />:
+
+$$
+\hat\var[\hat\betavec_{\xvec}] = \Bmat^{-1}\Cmat\Bmat^{-1}.
+$$
+
+For an unweighted, correctly specified global fit, $\Cmat$ estimates $\Bmat$ and the sandwich collapses to $\Bmat^{-1}$, the
+inverse information of the parametric test. With kernel weights, $\Bmat$ carries $w_i$ and $\Cmat$ carries $w_i^2$, so the
+collapse fails and the sandwich is needed.
+
+The delta method with $\hat r = g(\hat\beta_0)$ and $g' = g(1 - g)$ gives
+$\var[\hat\eta(\xvec)] \approx \eta(\xvec)^2(1 - \eta(\xvec))^2\,\hat\var[\hat\betavec_{\xvec}]_{0,0}$. At an anchor, $\eta = 1/2$ and
+
+$$
+\var[\hat\eta(\xvec)] \approx \frac{1}{16}\,v(\xvec), \qquad v(\xvec) = \hat\var[\hat\betavec_{\xvec}]_{0,0}.
+$$
+
+Note that $v$ here is the intercept variance itself; the parametric paper folds the $1/16$ into its $v$.
+
+**Two anchors.** Fits at different anchors $\xvec_j$ and $\xvec_l$ use the same observations, so they are correlated. From
+$\hat\betavec_{\xvec_j} - \betavec_{\xvec_j} \approx \Bmat_{\xvec_j}^{-1}\svec_{\xvec_j}$,
+
+$$
+\cov\big[\hat\betavec_{\xvec_j}, \hat\betavec_{\xvec_l}\big] \approx \Bmat_{\xvec_j}^{-1}\Big(\sum_{i=1}^N w_{i,\xvec_j}w_{i,\xvec_l}\,(y_i - \hat p_{i,\xvec_j})(y_i - \hat p_{i,\xvec_l})\,\avec_{i,\xvec_j}\avec_{i,\xvec_l}^\top\Big)\Bmat_{\xvec_l}^{-1},
+$$
+
+the cross-covariance of the two local score equations (the paper's Eq. 8), and
+$\cov(\hat\eta(\xvec_j), \hat\eta(\xvec_l)) = \frac{1}{16}\cov[\hat\betavec_{\xvec_j}, \hat\betavec_{\xvec_l}]_{0,0}$. Anchors far apart
+relative to $h$ share almost no weight, and their covariance is near zero.
+
+## Hypotheses
+
+$$
+H_0\colon \alpha = \beta \qquad\text{against}\qquad H_1\colon \alpha \ne \beta.
+$$
+
+## Assumptions
+
+- **Smooth posterior.** $r(\xvec)$ is smooth; no parametric form is assumed.
+- **Instance-independent noise**, bounded as in the parametric test.
+- **Anchors** with $\eta(\xvec) = 1/2$ (strict) or $\eta(\xvec) = 1/2 + \epsilon$ with $\epsilon \sim \Unif([-\delta, \delta])$ (relaxed),
+  supplied by the user and surrounded by enough data for a local fit.
+- **Bias ignored.** Smoothing estimators are biased: the confidence interval is centred on $\bar r_n(\xvec) =
+  \expect[\hat r_n(\xvec)]$, not on $r(\xvec)$ <Cite id="wasserman2006" />. Remedies include estimating the bias,
+  undersmoothing and bootstrap bias correction. The paper does nothing about it, for illustration.
+
+## Test statistic
+
+**One strict anchor.** Under $H_0$, $\hat\eta(\xvec) \sim \Gauss\big(\frac12, \frac{1}{16}v(\xvec)\big)$ and
+$z = (\hat\eta(\xvec) - \frac12)/\sqrt{v(\xvec)/16}$.
+
+**$k$ strict anchors.** With $\bar\eta = \frac1k\sum_{i=1}^k\hat\eta_i$, $\expect\bar\eta = \frac12$ and
+
+$$
+\var(\bar\eta) = \frac{1}{k^2}\Big(\sum_{i=1}^k \var\hat\eta_i + 2\sum_{i=1}^k\sum_{j > i}\cov(\hat\eta_i, \hat\eta_j)\Big) = \frac{1}{16k^2}\,\operatorname{var}(\xvec_{[1:k]}),
+$$
+
+where $\operatorname{var}(\xvec_{[1:k]})$ is the paper's shorthand for the sum of all $k^2$ entries $v(\xvec_i)$ and
+$\cov[\hat\betavec_{\xvec_i}, \hat\betavec_{\xvec_j}]_{0,0}$. The statistic is $z = (\bar\eta - \frac12)/\sqrt{\var(\bar\eta)}$.
+
+**$k$ relaxed anchors.** As in the parametric test, the law of total variance adds a term for the spread of the anchors'
+true posteriors, and the factor $\frac{1}{16}$ becomes $\frac{1}{16} - \frac{\delta^2}{6}$. For small $\delta$ the paper keeps
+$\var(\bar\eta) \approx \frac{1}{16k^2}\operatorname{var}(\xvec_{[1:k]})$.
+
+## Decision rule
+
+Reject $H_0$ at level $a$ when $\abs z > z_{1 - a/2}$; the two-sided p-value is $2(1 - \Phi(\abs z))$, with $\Phi$ the standard
+normal CDF.
+
+## Parametric or nonparametric
+
+| topic | parametric test | local test |
+| --- | --- | --- |
+| flexibility | a linear log-odds; wrong if the boundary is curved | any smooth posterior; slower convergence |
+| model fitting | one fit | one fit per anchor, plus bandwidth selection |
+| bias | none if the model is correct | smoothing bias at every anchor |
+| variance | inverse Fisher information | sandwich $\Bmat^{-1}\Cmat\Bmat^{-1}$ |
+
+The paper's guidance: use the parametric test only when the data-generating process is known and its assumptions are
+known to hold; otherwise use the nonparametric one. Whether a linear fit is adequate can itself be tested, for example
+with an F-test of $H_0\colon r(\xvec) = \beta_0 + \beta_1 x$ against a local fit <Cite id="wasserman2006" />.
+
+## Experiments
+
+**Symmetric XOR.** Four unit-scale Gaussians centred at $[2, 2]$ and $[-2, -2]$ (one class) and $[-2, 2]$ and $[2, -2]$
+(the other). Strict anchors are found by optimising the input of the known Bayes classifier until it outputs 0.50;
+relaxed anchors by rejection sampling; all within $[-4, 4]$ in both features. The factors are $N \in \set{200, 500,
+1000}$, $k \in \set{1, 2, 4, 8, 16}$ and $\delta \in \set{0, 0.05, 0.10, 0.20}$, with $\alpha = 0$ and $\beta = 0.10$ in the main
+text and $\alpha \in \set{0.2, 0.3}$ with $\beta = 0.10$ in the appendix. Each combination uses 100 data sets and 10 anchor
+draws per $(k, \delta)$. For the local test, p-values fall as $N$ grows, as $k$ grows and as the anchors become stricter,
+and they fall as $\abs{\alpha - \beta}$ grows. The parametric test also behaves correctly on the symmetric XOR, which the
+authors attribute to the symmetry and overlap of the four Gaussians.
+
+**Asymmetric XOR.** Centres $[4, 4]$ and $[-2, -2]$ for one class and $[-1, 1]$ and $[1, -1]$ for the other, otherwise
+as above. The local test behaves as on the symmetric data. For the parametric test, p-values fall as $N$ and $k$ grow for
+the clean data as well as for the noisy data: it rejects uniform noise when there is no noise at all. The figure
+reproduces this setup.
+
+<LocalVsParametric />
+
+In a simulation of the asymmetric XOR setup with $h = 1$ (100 runs per cell, level 0.05, $N \in \set{500, 1000}$ and
+$k \in \set{1, 4, 16}$), the parametric test rejected clean labels in 18% to 92% of runs and the local test in 4% to 14%.
+With $\beta = 0.1$ the local test rejected in 9% to 59% of runs, more often with more anchors and more data. The local
+test's excess over 5% on clean data is the uncorrected smoothing bias.
+
+**Smart home localisation.** The real-world case study uses data from a smart home with four gateways (living room,
+kitchen, bedroom 1 and the stairs) that record received signal strength (RSSI) from wearables. Room labels are grouped
+by floor to make a binary problem. A technician carried the wearables through every room while recording the location
+in an app, in a walkaround of under 30 minutes. Features come from 5-second windows with 2.5-second overlap; two
+wearables give roughly 1200 points, of which 1000 are sampled per run, for 100 runs. Readings taken on the stairs serve
+as anchors, since the stairs lie between the floors and their posterior should be near $1/2$; $k \in \set{1, 2, 4, 8}$.
+Two settings were compared:
+
+- **Stairs in training and as anchors.** P-values fall below the cut-off as $k$ grows: the test detects
+  class-conditional noise.
+- **Stairs only as anchors.** P-values stay above the cut-offs: no evidence of class-conditional noise.
+
+No label noise was expected in the walkaround. The authors conclude that assigning the stairs to one floor itself
+introduces label noise: in this house the stairs are wide and high enough to bias training when grouped with a floor.
+
+## Worked example
+
+A local fit at each of $k = 4$ anchors gives $\bar\eta = 0.62$, and the sum of all 16 entries of the intercept
+covariance matrix is $1.92$.
+
+- **Variance.** $\var(\bar\eta) = 1.92/(16 \cdot 16) = 0.0075$, so the standard error is $0.0866$.
+- **Statistic.** $z = 0.12/0.0866 = 1.39$, two-sided $p = 0.17$. $H_0$ is retained at $a = 0.05$.
+- **More anchors.** With $k = 16$ anchors spread far apart relative to $h$, the cross-covariances are near zero and the
+  sum grows roughly in proportion to $k$, to about $7.68$. Then $\var(\bar\eta) = 7.68/(16 \cdot 256) = 0.001875$, the standard
+  error is $0.0433$, and the same $\bar\eta = 0.62$ gives $z = 2.77$, $p = 0.006$.
+
+## Pitfalls
+
+- **Empty neighbourhoods.** An anchor far from the data has few points with non-negligible weight, and the local fit is
+  unstable or fails. The authors report meeting the problem in about 1 in 10000 cases in their experiments and leave remedies to
+  future work.
+- **Smoothing bias.** Uncorrected bias shifts $\hat\eta$ at the anchors away from $1/2$ on clean data and inflates the
+  type I error, most where the posterior is curved. Bootstrap bias correction, or a bootstrap estimate of the variance, is
+  the authors' proposed next step.
+- **Bandwidth.** A small $h$ gives few effective points and a large variance; a large $h$ drifts towards a global fit and
+  its misspecification. Cross-validation selects $h$ for prediction, not for the test.
+- **Slower convergence.** Nonparametric estimates converge more slowly than a correctly specified parametric one, so the
+  local test has less power when the parametric model is right.
+- **Anchors still matter.** The test inherits the parametric test's dependence on expert anchors, including the effect of
+  relaxation. The smart home study shows that where the anchors come from, and whether they are also in the training
+  data, can change the conclusion.

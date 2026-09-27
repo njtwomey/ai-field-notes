@@ -1,0 +1,137 @@
+---
+title: Federated learning
+kind: technique
+summary: 'Federated learning trains one model on data that stays on many clients. In FedAvg, a fraction $C$ of clients each run $E$ local epochs of SGD with batch size $B$ from the server model, and the server averages the returned models weighted by client data size.'
+tags: [privacy, distributed-training, optimisation, deep-learning, worked-example]
+aliases: [FedAvg, federated averaging, FedSGD, federated SGD, client drift, FedProx, SCAFFOLD, secure aggregation, cross-device federated learning, cross-silo federated learning, gradient leakage, deep leakage from gradients]
+requires: [stochastic-gradient-descent-theory, gradient-descent]
+related: [differential-privacy, dp-sgd, data-parallelism, membership-inference]
+references: [mcmahan2017, kairouz2021, li2020fedprox, karimireddy2020, bonawitz2017, zhu2019]
+status: draft
+updated: 2026-09-27
+---
+
+import { ClientDrift } from './ClientDrift'
+
+<Definition>
+**Federated learning** trains a shared model on data held by $K$ clients, such as phones or hospitals, without
+collecting the data centrally <Cite id="mcmahan2017" />. A server holds the model and repeats rounds: it sends the
+current model to a sample of clients, each client improves it on its own data, and the server combines the returned
+updates. Only model parameters or updates leave a client. **Federated averaging** (FedAvg) combines them by a weighted
+average of the clients' models.
+</Definition>
+
+## Problem
+
+Data may be too sensitive, too large or too regulated to move, yet a model trained on all of it would be better than one
+trained on any client alone. The setting differs from <NoteLink to="data-parallelism">data-parallel training</NoteLink>
+in a data centre in four ways <Cite id="kairouz2021" />:
+
+- **Non-IID data.** Each client's data reflects its user or site, so client distributions differ.
+- **Unbalanced data.** Clients hold very different numbers of examples.
+- **Massive, unreliable participation.** In **cross-device** federated learning there are millions of phones, few
+  available at once, and they drop out mid-round. **Cross-silo** federated learning has a few reliable organisations.
+- **Expensive communication.** Upload bandwidth, not computation, limits the number of rounds.
+
+## Mechanism
+
+Write the objective as a weighted average of client objectives. Client $k$ holds $n_k$ examples, $n = \sum_k n_k$, and
+its empirical loss is $F_k(\wvec)$. The global loss is
+
+$$
+f(\wvec) = \sum_{k=1}^K \frac{n_k}{n}F_k(\wvec).
+$$
+
+**FedSGD.** The baseline sends $\wvec_t$ to a fraction $C$ of clients. Each computes its full-data gradient
+$\gvec_k = \nabla F_k(\wvec_t)$ and the server steps with $\sum_k \frac{n_k}{n}\gvec_k$, which is $\nabla f(\wvec_t)$ when
+every client participates <Cite id="mcmahan2017" />. McMahan et al. note an equivalent form: each client takes one local
+step, $\wvec^k_{t+1} = \wvec_t - \eta\gvec_k$, and the server averages the resulting models,
+$\wvec_{t+1} = \sum_k \frac{n_k}{n}\wvec^k_{t+1}$. The two agree because averaging is linear.
+
+**FedAvg.** Once the update is written as an average of models, each client can take many local steps before
+averaging. FedAvg has three parameters <Cite id="mcmahan2017" />:
+
+- $C$, the fraction of clients selected each round;
+- $E$, the number of passes each client makes over its local data per round;
+- $B$, the local minibatch size, with $B = \infty$ meaning the full local data set.
+
+Client $k$ therefore takes $u_k = En_k/B$ local SGD steps per round. $B = \infty$ with $E = 1$ is exactly FedSGD. More
+local computation per round means fewer rounds. In experiments with five architectures and four data sets, McMahan et
+al. report 10 to 100 times fewer communication rounds than synchronised SGD <Cite id="mcmahan2017" />. Their tests
+include a pathological non-IID split of MNIST: the data are sorted by digit and cut into 200 shards of 300 examples, and
+each of 100 clients gets two shards, so most clients see only two digits.
+
+## Client drift
+
+Many local steps on non-IID data move each client towards its own optimum, not the global one, and the average of those
+models need not be the global optimum. A one-dimensional example shows the bias exactly. Let client $k$ hold
+$F_k(w) = \frac{a_k}{2}(w - c_k)^2$ with weight $p_k = n_k/n$. The global optimum is the curvature-weighted mean
+
+$$
+w^\star = \frac{\sum_k p_ka_kc_k}{\sum_k p_ka_k}.
+$$
+
+A gradient step with step size $\eta$ gives $w - c_k \mapsto (1 - \eta a_k)(w - c_k)$, so $s$ local steps from the server
+model $w$ return $c_k + r_k(w - c_k)$ with $r_k = (1 - \eta a_k)^s$. The server's update is
+$w \mapsto \sum_k p_k\big(c_k + r_k(w - c_k)\big)$, and its fixed point solves $w = \sum_k p_k(c_k + r_k(w - c_k))$:
+
+$$
+\bar w = \frac{\sum_k p_k(1 - r_k)c_k}{\sum_k p_k(1 - r_k)}.
+$$
+
+With one local step, $1 - r_k = \eta a_k$ and $\bar w = w^\star$. With many steps, $r_k \to 0$ and $\bar w$ tends to
+$\sum_k p_kc_k$, the plain average of the client optima, which ignores how sharply each client's loss curves. The
+difference is **client drift**.
+
+<ClientDrift />
+
+Two corrections are common. **FedProx** adds a proximal term to each client's objective,
+$F_k(\wvec) + \frac{\mu}{2}\norm{\wvec - \wvec_t}^2$, which limits how far local training moves from the server model
+<Cite id="li2020fedprox" />. **SCAFFOLD** keeps a control variate $\cvec_k$ per client and $\cvec$ at the server,
+estimates of the client and global update directions, and corrects each local step to
+$\wvec \leftarrow \wvec - \eta\big(\nabla F_k(\wvec) - \cvec_k + \cvec\big)$ so that local steps follow the global
+direction <Cite id="karimireddy2020" />.
+
+## Worked example
+
+**Local work.** With 100 clients of $n_k = 600$ examples, $B = 10$ and $E = 5$, each selected client takes
+$u_k = 5 \cdot 600/10 = 300$ local steps per round. With $C = 0.1$, 10 clients take part in each round.
+
+**Drift.** Two clients with equal weight have $a_1 = 1$, $c_1 = 0$ and $a_2 = 3$, $c_2 = 1$. The global optimum is
+$w^\star = 3/(1 + 3) = 0.75$. With $\eta = 0.1$ and $s = 10$ local steps, $r_1 = 0.9^{10} = 0.349$ and
+$r_2 = 0.7^{10} = 0.028$, so
+
+$$
+\bar w = \frac{(1 - 0.028) \cdot 1}{(1 - 0.349) + (1 - 0.028)} = \frac{0.972}{1.623} = 0.599.
+$$
+
+With $s = 1$ the fixed point is $0.75$. With $s = 100$ it is $0.500$, the midpoint of the two client optima.
+
+## Privacy
+
+Keeping data on the device is not a formal privacy guarantee. Model updates are functions of the data and can leak it.
+Zhu, Liu and Han reconstructed training images and labels from shared gradients by optimising dummy inputs and labels
+until their gradients matched the real ones <Cite id="zhu2019" />. Two additions address this:
+
+- **Secure aggregation** lets the server learn only the sum of client updates <Cite id="bonawitz2017" />. In its core
+  idea each pair of clients $i < j$ agrees on a random mask $\svec_{ij}$. Client $i$ uploads
+  $\xvec_i + \sum_{j > i}\svec_{ij} - \sum_{j < i}\svec_{ji}$. Each mask appears once with a plus sign and once with a
+  minus sign, so the masks cancel in the sum, while each upload on its own looks random. The protocol of Bonawitz et al.
+  adds secret sharing of the masks so the sum can be recovered when clients drop out.
+- **Differential privacy** bounds what the final model reveals. Clipping each client's update and adding Gaussian noise to
+  the average, as in <NoteLink to="dp-sgd">DP-SGD</NoteLink> with clients in place of examples, protects each client's
+  entire data set <Cite id="kairouz2021" />.
+
+## Cost
+
+- Each round costs one download and one upload of the model per selected client. For large models, compressing,
+  quantising or sparsifying updates matters more than computation.
+- Clients differ in speed, and a round waits for the slowest selected client or drops it.
+
+## Trade-offs
+
+- **Local steps against drift.** More local work per round saves communication and increases drift on non-IID data.
+- **One model against many.** One global model may serve no client well. Fine-tuning the global model locally gives
+  per-client personalisation.
+- **Trust.** Secure aggregation hides individual updates from the server, which also hides malicious updates from any
+  defence that inspects them.

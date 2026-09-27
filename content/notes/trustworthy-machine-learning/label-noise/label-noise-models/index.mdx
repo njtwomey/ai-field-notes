@@ -1,0 +1,204 @@
+---
+title: Label noise models
+kind: concept
+summary: 'Label noise models say what a flip depends on: nothing (uniform), the true class (class-conditional) or also the input (instance-dependent). Binary class-conditional noise gives $\tilde\eta = (1 - \rho_+ - \rho_-)\eta + \rho_-$; the Bayes classifier moves unless $\rho_+ = \rho_-$.'
+tags: [classification, label-noise, robustness, worked-example]
+aliases: [noise transition matrix, random classification noise, class-conditional noise, uniform label noise, symmetric label noise, instance-dependent label noise, mutually contaminated distributions]
+requires: [conditional-probability, bayes-decision-rule]
+related: [learning-with-noisy-labels, roc-curve-and-auc, surrogate-losses, dataset-shift, weak-supervision]
+references: [frenay2014, angluin1988, natarajan2013, menon2015, scott2013, ghosh2015, long2010, poyiadzi2022, xia2019]
+status: draft
+updated: 2026-09-27
+---
+
+import { NoisyBoundary } from '../_shared/NoisyBoundary'
+
+<Definition>
+A **label noise model** describes how an observed label $\tilde y$ is produced from the true label $y$ of an input
+$\xvec$. It is summarised by the **noise transition matrix** $\Tmat(\xvec)$, with entries
+$T_{ij}(\xvec) = \Pr(\tilde y = j \mid y = i, \xvec)$. In **uniform** (symmetric) noise every label is flipped with the
+same probability. In **class-conditional** noise the flip probability depends on the true class only, so
+$\Tmat(\xvec) = \Tmat$. In **instance-dependent** noise it also depends on $\xvec$ <Cite id="frenay2014" />.
+</Definition>
+
+## Intuition
+
+A label can be wrong for different reasons. A tired annotator clicking at random produces noise that ignores both the
+class and the input. A screening test that misses 20% of true cases but raises few false alarms produces noise that
+depends on the class. An annotator who errs on blurry images produces noise that depends on the input. The three
+models differ in what they do to the learning problem. Uniform noise leaves the best decision rule where it was.
+Class-conditional noise moves it. Instance-dependent noise can move it anywhere.
+
+## The transition matrix
+
+Take $K$ classes. The clean posterior is the vector $\pvec(\xvec)$ with $p_i(\xvec) = \Pr(y = i \mid \xvec)$, and the
+noisy posterior is $\tilde\pvec(\xvec)$ with $\tilde p_j(\xvec) = \Pr(\tilde y = j \mid \xvec)$. By the law of total
+probability,
+
+$$
+\tilde p_j(\xvec) = \sum_{i=1}^K \Pr(\tilde y = j \mid y = i, \xvec)\Pr(y = i \mid \xvec) = \sum_{i=1}^K T_{ij}(\xvec)\,p_i(\xvec),
+\qquad \tilde\pvec(\xvec) = \Tmat(\xvec)^\top\pvec(\xvec).
+$$
+
+Each row of $\Tmat$ is a distribution over observed labels, so the rows sum to 1. Common structures, for a flip
+probability $\rho$:
+
+| model | $\Tmat$ | depends on |
+| --- | --- | --- |
+| uniform (symmetric) | $(1 - \rho)\eye + \frac{\rho}{K - 1}(\ones\ones^\top - \eye)$ | nothing |
+| pair flipping | $T_{ii} = 1 - \rho$, $T_{i, i+1} = \rho$ (indices mod $K$) | the class |
+| class-conditional | any row-stochastic $\Tmat$ | the class |
+| instance-dependent | $\Tmat(\xvec)$ | the class and the input |
+
+Frénay and Verleysen call the three rows of increasing generality noisy completely at random, noisy at random and noisy
+not at random, by analogy with missing data <Cite id="frenay2014" />.
+
+## The binary case
+
+With labels $y \in \set{-1, +1}$, class-conditional noise has two parameters,
+$\rho_+ = \Pr(\tilde y = -1 \mid y = +1)$ and $\rho_- = \Pr(\tilde y = +1 \mid y = -1)$. Write
+$\eta(\xvec) = \Pr(y = +1 \mid \xvec)$ and $\tilde\eta(\xvec) = \Pr(\tilde y = +1 \mid \xvec)$. A noisy positive is either a
+positive that kept its label or a negative that was flipped:
+
+$$
+\tilde\eta(\xvec) = (1 - \rho_+)\,\eta(\xvec) + \rho_-\,\big(1 - \eta(\xvec)\big) = (1 - \rho_+ - \rho_-)\,\eta(\xvec) + \rho_-.
+$$
+
+Uniform noise is the special case $\rho_+ = \rho_- = \tau$, which gives $\tilde\eta = (1 - 2\tau)\eta + \tau$. This is
+Angluin and Laird's **random classification noise** <Cite id="angluin1988" />. The condition $\rho_+ + \rho_- < 1$ keeps
+the map increasing, so the noisy labels still carry information about the clean ones. Some papers, including the
+hypothesis tests for class-conditional noise, write $\alpha = \rho_+$ and $\beta = \rho_-$ <Cite id="poyiadzi2022" />.
+
+### Where the Bayes classifier goes
+
+The clean Bayes classifier under 0–1 loss predicts $+1$ where $\eta(\xvec) > 1/2$ (see
+<NoteLink to="bayes-decision-rule">Bayes decision rule</NoteLink>). Solving the affine map for $\eta$ gives
+$\eta = (\tilde\eta - \rho_-)/(1 - \rho_+ - \rho_-)$, so $\eta > 1/2$ exactly when
+
+$$
+\tilde\eta(\xvec) > \frac{1 - \rho_+ - \rho_-}{2} + \rho_- = \frac{1 - \rho_+ + \rho_-}{2}.
+$$
+
+The clean Bayes classifier is therefore the noisy posterior thresholded at $\phi = (1 - \rho_+ + \rho_-)/2$
+<Cite id="natarajan2013" /> <Cite id="menon2015" />.
+
+A learner that ignores the noise estimates $\tilde\eta$ and thresholds it at $1/2$. That noisy Bayes classifier
+predicts $+1$ where $\tilde\eta > 1/2$, which is where
+
+$$
+\eta(\xvec) > \eta^\star = \frac{1/2 - \rho_-}{1 - \rho_+ - \rho_-}.
+$$
+
+- **Uniform noise.** With $\rho_+ = \rho_- = \tau < 1/2$, $\eta^\star = (1/2 - \tau)/(1 - 2\tau) = 1/2$. The noisy Bayes
+  classifier equals the clean one. Noise only reduces the margin $\abs{\tilde\eta - 1/2} = (1 - 2\tau)\abs{\eta - 1/2}$,
+  so more data is needed to estimate the same boundary.
+- **Class-conditional noise.** With $\rho_+ \ne \rho_-$, $\eta^\star \ne 1/2$. The noisy Bayes classifier is the clean
+  posterior thresholded at the wrong level. Every input with $\eta$ between $1/2$ and $\eta^\star$ is misclassified,
+  however much data is collected.
+
+In the figure, $\alpha = \rho_+$ and $\beta = \rho_-$. The two classes are unit-variance Gaussians centred at
+$(1, 1)$ and $(-1, -1)$ with equal priors, so $\operatorname{logit}\eta(\xvec) = 2(x_1 + x_2)$ and the clean boundary is
+$x_1 + x_2 = 0$.
+
+<NoisyBoundary />
+
+### Why uniform noise is harmless only under conditions
+
+The argument above is about the population Bayes classifier. A learner minimises a surrogate loss over a restricted
+model class $\Fcal$, and uniform noise can still move that minimiser. Write a margin loss as
+$\ell(y, f(\xvec)) = \psi(y f(\xvec))$. Under uniform noise with rate $\tau$, the noisy risk of a scorer $f$ is
+
+$$
+\begin{aligned}
+\tilde R(f) &= \expect_{\xvec}\big[\tilde\eta\,\psi(f) + (1 - \tilde\eta)\,\psi(-f)\big] \\
+&= \expect_{\xvec}\big[(1 - 2\tau)\big(\eta\,\psi(f) + (1 - \eta)\,\psi(-f)\big) + \tau\big(\psi(f) + \psi(-f)\big)\big] \\
+&= (1 - 2\tau)\,R(f) + \tau\,\expect_{\xvec}\big[\psi(f(\xvec)) + \psi(-f(\xvec))\big],
+\end{aligned}
+$$
+
+where $R$ is the clean risk, the second line substitutes $\tilde\eta = (1 - 2\tau)\eta + \tau$ and
+$1 - \tilde\eta = (1 - 2\tau)(1 - \eta) + \tau$, and the argument $\xvec$ of $f$ and $\eta$ is dropped. If the loss is
+**symmetric**, $\psi(v) + \psi(-v) = K$ for a constant $K$, the last term is the constant $\tau K$. The noisy risk is then an
+increasing affine function of the clean risk for $\tau < 1/2$, and the two have the same minimiser over any class
+$\Fcal$ <Cite id="ghosh2015" />. The sigmoid loss, the ramp loss and the linear (unhinged) loss are symmetric. The
+logistic, hinge and squared losses are not: for them the extra term depends on $f$ and can move the minimiser within
+a restricted class. Long and Servedio constructed data on which every convex potential booster, trained with uniform
+noise at any positive rate, does no better than chance, although the clean data are linearly separable
+<Cite id="long2010" />. See <NoteLink to="noise-robust-losses">noise-robust losses</NoteLink>.
+
+For a well-specified model that can represent $\tilde\eta$ and a classification-calibrated loss (see
+<NoteLink to="surrogate-losses">surrogate losses</NoteLink>), the minimiser estimates $\tilde\eta$, and uniform noise
+leaves its $1/2$ contour where it was. These are the "mild conditions" under which uniform noise does not bias learning.
+
+### Noise as contaminated class-conditional distributions
+
+Class-conditional flips are equivalent to mixing the class-conditional input distributions. Let $\pi = \Pr(y = +1)$,
+$P$ and $Q$ the distributions of $\xvec$ given $y = +1$ and $y = -1$, and $\tilde\pi = \Pr(\tilde y = +1) = (1 - \rho_+)\pi +
+\rho_-(1 - \pi)$. By Bayes' theorem, the inputs labelled positive are drawn from
+
+$$
+\tilde P = (1 - \alpha')P + \alpha' Q, \quad \alpha' = \frac{\rho_-(1 - \pi)}{\tilde\pi},
+\qquad
+\tilde Q = \beta' P + (1 - \beta')Q, \quad \beta' = \frac{\rho_+\pi}{1 - \tilde\pi}.
+$$
+
+Scott, Blanchard and Handy, and Menon et al., call this **mutually contaminated distributions**
+<Cite id="scott2013" /> <Cite id="menon2015" />. It gives a clean result for ranking. The AUC of a scorer $s$ for a pair
+of distributions, $\operatorname{AUC}(A, B) = \Pr(s(\xvec_A) > s(\xvec_B))$ for independent $\xvec_A \sim A$ and
+$\xvec_B \sim B$ (ignoring ties), is linear in each argument, and $\operatorname{AUC}(A, A) = 1/2$. Expanding both
+mixtures, and using $\operatorname{AUC}(Q, P) = 1 - \operatorname{AUC}(P, Q)$,
+
+$$
+\begin{aligned}
+\operatorname{AUC}(\tilde P, \tilde Q)
+&= (1 - \alpha')\beta'\cdot\tfrac12 + (1 - \alpha')(1 - \beta')\operatorname{AUC}(P, Q) + \alpha'\beta'\big(1 - \operatorname{AUC}(P, Q)\big) + \alpha'(1 - \beta')\cdot\tfrac12 \\
+&= (1 - \alpha' - \beta')\operatorname{AUC}(P, Q) + \frac{\alpha' + \beta'}{2}.
+\end{aligned}
+$$
+
+The noisy AUC is an increasing affine function of the clean AUC whenever $\alpha' + \beta' < 1$. The scorer that ranks
+best on noisy labels ranks best on clean labels. Class-conditional noise damages the threshold, not the ranking
+<Cite id="menon2015" />. See <NoteLink to="roc-curve-and-auc">ROC curve and AUC</NoteLink>.
+
+## Instance-dependent noise
+
+In instance-dependent noise, $\Tmat(\xvec)$ varies with the input. Real annotation noise is usually of this kind: labels
+are wrong more often near the class boundary and on ambiguous inputs. The clean posterior is then not identifiable
+from $\tilde\pvec$ alone without further assumptions, because for each $\xvec$ many pairs $(\Tmat(\xvec), \pvec(\xvec))$ give
+the same $\tilde\pvec(\xvec)$. Methods for this setting bound the noise rate, assume the noise depends on $\xvec$ only through a
+few parts of it, or use a small set of clean labels <Cite id="frenay2014" />.
+
+## Worked example
+
+Take $\rho_+ = 0.2$, $\rho_- = 0.1$ and prior $\pi = 0.5$.
+
+- **Noisy posterior.** $\tilde\eta = 0.7\,\eta + 0.1$.
+- **Clean rule on noisy scores.** Predict $+1$ when $\tilde\eta > (1 - 0.2 + 0.1)/2 = 0.45$.
+- **Naive rule.** Thresholding $\tilde\eta$ at $1/2$ predicts $+1$ only when $\eta > (0.5 - 0.1)/0.7 = 0.571$. Inputs with
+  $0.5 < \eta \le 0.571$ are assigned to the negative class although they are more likely positive.
+- **Contamination.** $\tilde\pi = 0.8 \cdot 0.5 + 0.1 \cdot 0.5 = 0.45$, so $\alpha' = 0.05/0.45 = 0.111$ and
+  $\beta' = 0.1/0.55 = 0.182$.
+- **AUC.** A scorer with clean AUC $0.90$ has noisy AUC $(1 - 0.293)\cdot 0.90 + 0.293/2 = 0.783$. Any scorer with a
+  higher clean AUC has a higher noisy AUC.
+
+## Assumptions
+
+- The noise acts on labels only: $p(\xvec)$ is unchanged. Changes in $p(\xvec)$ are
+  <NoteLink to="dataset-shift">dataset shift</NoteLink>.
+- In the binary case, $\rho_+ + \rho_- < 1$. Otherwise the noisy labels are anti-correlated with the clean ones, and
+  without further information the two cases cannot be told apart.
+- Class-conditional results assume flips are independent of $\xvec$ given $y$.
+
+## Pitfalls
+
+- **"Symmetric" is overloaded.** A symmetric noise model has equal flip rates. A symmetric loss has
+  $\psi(v) + \psi(-v)$ constant. Uniform noise is harmless for any class $\Fcal$ only with a symmetric loss.
+- **Estimating the rates needs extra assumptions.** $\rho_+$ and $\rho_-$ are not identifiable from $\tilde\eta$ alone,
+  since any pair gives a valid affine map. Estimators assume anchor points or irreducibility; see
+  <NoteLink to="estimating-noise-rates">estimating noise rates</NoteLink>.
+- **Testing before correcting.** Whether the noise is uniform or class-conditional decides whether a correction is
+  needed. It can be tested with anchor points where the clean posterior is $1/2$; see
+  <NoteLink to="hypothesis-testing-for-class-conditional-label-noise">hypothesis testing for class-conditional label
+  noise</NoteLink>.
+- **Anchor points may not exist.** Estimators that read $\Tmat$ off inputs with $\eta \in \set{0, 1}$ fail when the classes
+  overlap everywhere <Cite id="xia2019" />.

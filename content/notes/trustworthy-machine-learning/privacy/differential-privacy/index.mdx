@@ -1,0 +1,160 @@
+---
+title: Differential privacy
+kind: concept
+summary: 'A randomised algorithm $M$ is $(\varepsilon, \delta)$-differentially private if for data sets $D, D''$ differing in one record and every output set $S$, $\Pr(M(D) \in S) \le e^\varepsilon \Pr(M(D'') \in S) + \delta$. Laplace or Gaussian noise scaled to the sensitivity achieves it.'
+tags: [privacy, probability, security, worked-example]
+aliases: [DP, epsilon-differential privacy, (ε, δ)-differential privacy, approximate differential privacy, Laplace mechanism, Gaussian mechanism, sensitivity, global sensitivity, privacy budget, privacy loss, composition theorem, advanced composition, post-processing, randomised response, randomized response]
+requires: [laplace-distribution, gaussian-distribution, conditional-probability]
+related: [dp-sgd, membership-inference, federated-learning]
+references: [dwork2006, dwork2014, dwork2010, warner1965, kairouz2015]
+status: draft
+updated: 2026-09-27
+---
+
+import { NeighbouringOutputs } from './NeighbouringOutputs'
+
+<Definition>
+Two data sets $D$ and $D'$ are **neighbouring** if one is obtained from the other by adding, removing or changing one
+record. A randomised algorithm $M$ is **$(\varepsilon, \delta)$-differentially private** if, for every pair of
+neighbouring data sets and every set $S$ of outputs,
+
+$$
+\Pr\big(M(D) \in S\big) \le e^{\varepsilon}\,\Pr\big(M(D') \in S\big) + \delta,
+$$
+
+with probabilities over the randomness of $M$ <Cite id="dwork2006" /> <Cite id="dwork2014" />. The **privacy budget**
+$\varepsilon \ge 0$ bounds how much one record can change the distribution of the output. $\delta \ge 0$ is a small
+probability of exceeding that bound. With $\delta = 0$ the guarantee is **pure** $\varepsilon$-differential privacy.
+</Definition>
+
+## Intuition
+
+Differential privacy is a property of the algorithm, not of a data set or an output. Whatever an observer sees, the
+chance of seeing it would have been almost the same had any one person's record been left out. The observer can
+therefore learn almost nothing about that person that they could not have learnt without the person's data. The
+guarantee holds against any observer with any background knowledge, because it bounds a ratio of probabilities of the
+algorithm's outputs, which no side information changes.
+
+A small $\varepsilon$, such as $0.1$, keeps the ratio $e^\varepsilon$ close to 1. $\varepsilon = \ln 3 \approx 1.1$
+allows one record to triple the probability of an output. $\delta$ must be much smaller than $1/n$ for $n$ records.
+Otherwise the algorithm "publish one random record in full" satisfies the definition with $\delta = 1/n$.
+
+## Sensitivity and the Laplace mechanism
+
+Most private algorithms add noise to a deterministic query $f$, mapping data sets to $\reals^k$. The noise must hide the
+largest change one record can cause. The **$\ell_1$ sensitivity** of $f$ is
+
+$$
+\Delta_1 f = \max_{D, D' \text{ neighbours}}\norm{f(D) - f(D')}_1.
+$$
+
+A count has $\Delta_1 f = 1$: one person changes it by at most one. The **Laplace mechanism** releases
+
+$$
+M(D) = f(D) + (Y_1, \dots, Y_k), \qquad Y_i \iid \Laplace(0, b), \quad b = \frac{\Delta_1 f}{\varepsilon}.
+$$
+
+**Proof of privacy.** The density of $M(D)$ at $\zvec \in \reals^k$ is $p_D(\zvec) = \prod_i \frac{1}{2b}e^{-\abs{z_i -
+f_i(D)}/b}$. For neighbours $D, D'$, the ratio of densities is
+
+$$
+\frac{p_D(\zvec)}{p_{D'}(\zvec)} = \prod_{i=1}^k \exp\Big(\frac{\abs{z_i - f_i(D')} - \abs{z_i - f_i(D)}}{b}\Big)
+\le \prod_{i=1}^k \exp\Big(\frac{\abs{f_i(D) - f_i(D')}}{b}\Big) = \exp\Big(\frac{\norm{f(D) - f(D')}_1}{b}\Big) \le e^{\varepsilon}.
+$$
+
+The first inequality is the triangle inequality $\abs{z - a'} - \abs{z - a} \le \abs{a - a'}$. The last uses the
+definitions of $\Delta_1 f$ and $b$. Integrating $p_D \le e^\varepsilon p_{D'}$ over any set $S$ gives
+$\Pr(M(D) \in S) \le e^\varepsilon\Pr(M(D') \in S)$: pure $\varepsilon$-differential privacy <Cite id="dwork2006" />.
+The logarithm of the density ratio at the observed output is the **privacy loss**. The Laplace mechanism bounds it by
+$\varepsilon$ at every output.
+
+<NeighbouringOutputs />
+
+## The Gaussian mechanism
+
+Gaussian noise has lighter tails and adds up more gracefully over many queries, but its density ratio is unbounded, so
+it needs $\delta > 0$. Let $\Delta_2 f = \max\norm{f(D) - f(D')}_2$ be the $\ell_2$ sensitivity and release
+$M(D) = f(D) + \Gauss(\zeros, s^2\I)$. Write $\vvec = f(D) - f(D')$ and draw the output on $D$ as
+$\zvec = f(D) + s\gvec$ with $\gvec \sim \Gauss(\zeros, \I)$. The privacy loss is
+
+$$
+L = \ln\frac{p_D(\zvec)}{p_{D'}(\zvec)} = \frac{\norm{\vvec + s\gvec}^2 - \norm{s\gvec}^2}{2s^2}
+= \frac{\norm{\vvec}^2}{2s^2} + \frac{\vvec^\top\gvec}{s} \sim \Gauss\Big(\frac{\norm{\vvec}^2}{2s^2}, \frac{\norm{\vvec}^2}{s^2}\Big).
+$$
+
+If $\Pr(L > \varepsilon) \le \delta$, the mechanism is $(\varepsilon, \delta)$-private. To see this, split any output set
+$S$ into the part where $L \le \varepsilon$, where $p_D \le e^\varepsilon p_{D'}$, and the rest, whose probability under
+$D$ is at most $\delta$:
+
+$$
+\Pr(M(D) \in S) \le e^\varepsilon\Pr(M(D') \in S) + \Pr(L > \varepsilon) \le e^\varepsilon\Pr(M(D') \in S) + \delta.
+$$
+
+Bounding the normal tail of $L$ gives Dwork and Roth's sufficient condition: for $\varepsilon \in (0, 1)$,
+$s > \Delta_2 f\sqrt{2\ln(1.25/\delta)}/\varepsilon$ gives $(\varepsilon, \delta)$-differential privacy
+<Cite id="dwork2014" />. The condition is conservative, and exact calibration of $s$ from the tail of $L$ gives smaller
+noise.
+
+## Post-processing and composition
+
+- **Post-processing.** If $M$ is $(\varepsilon, \delta)$-private and $g$ is any function that does not look at the data,
+  then $g \circ M$ is $(\varepsilon, \delta)$-private. For deterministic $g$ the event $g(M(D)) \in S$ is the event
+  $M(D) \in g^{-1}(S)$, and the definition holds for that set. Rounding, thresholding or training a model on private
+  outputs cannot weaken the guarantee.
+- **Basic composition.** Running $M_1, \dots, M_k$ with budgets $(\varepsilon_j, \delta_j)$ on the same data is
+  $(\sum_j\varepsilon_j, \sum_j\delta_j)$-private. For pure privacy with independent mechanisms the density ratios
+  multiply, so the privacy losses add.
+- **Advanced composition.** The privacy losses are random, and their sum concentrates. Dwork, Rothblum and Vadhan showed
+  that $k$ adaptively chosen $(\varepsilon, \delta)$-private mechanisms are $(\varepsilon', k\delta + \delta')$-private
+  for any $\delta' > 0$, with <Cite id="dwork2010" />
+
+$$
+\varepsilon' = \sqrt{2k\ln(1/\delta')}\,\varepsilon + k\varepsilon(e^\varepsilon - 1).
+$$
+
+For small $\varepsilon$ the total grows like $\sqrt k$ instead of $k$. Kairouz, Oh and Viswanath derived the exact
+optimal composition <Cite id="kairouz2015" />.
+
+- **Groups.** Changing $m$ records is $m$ steps between neighbours, so pure $\varepsilon$-privacy protects groups of
+  size $m$ with budget $m\varepsilon$.
+
+## Worked example
+
+**Randomised response.** A survey asks a sensitive yes/no question. Each respondent flips a fair coin. On heads they
+answer truthfully. On tails they flip again and answer "yes" on heads and "no" on tails <Cite id="warner1965" />. A true
+"yes" is reported as "yes" with probability $\frac12 + \frac14 = \frac34$ and a true "no" with probability
+$\frac14$. The largest ratio of the probabilities of one report under the two possible truths is
+$\frac{3/4}{1/4} = 3$, so each response is $\varepsilon = \ln 3 = 1.10$ differentially private, with no trust in the
+survey taker.
+
+If the true proportion of "yes" is $p$, the proportion of reported "yes" is $q = \frac34 p + \frac14(1 - p) =
+\frac12 p + \frac14$, so $\hat p = 2\hat q - \frac12$. Of $n = 1000$ respondents, 400 report "yes": $\hat q = 0.4$ and
+$\hat p = 0.3$. The standard error is $2\sqrt{\hat q(1 - \hat q)/n} = 2\sqrt{0.24/1000} = 0.031$, against
+$\sqrt{0.3 \cdot 0.7/1000} = 0.014$ for a direct survey. Privacy costs a factor of about 2 in standard error here.
+
+**Laplace and Gaussian noise for a count.** With $\varepsilon = 0.5$, a count gets Laplace noise of scale
+$b = 1/0.5 = 2$, standard deviation $\sqrt2 b = 2.83$. With $\delta = 10^{-5}$, the Gaussian mechanism's sufficient
+condition asks for $s > \sqrt{2\ln(1.25 \times 10^5)}/0.5 = 9.69$.
+
+**Composition.** One hundred queries at $\varepsilon = 0.1$ each cost $\varepsilon = 10$ by basic composition. Advanced
+composition with $\delta' = 10^{-5}$ gives $\sqrt{200\ln 10^5}\cdot 0.1 + 100 \cdot 0.1\,(e^{0.1} - 1) = 4.80 + 1.05 =
+5.85$.
+
+## Assumptions
+
+- The unit of privacy is one record. If one person contributes many records, protect the person by bounding their
+  contributions or using group privacy.
+- Sensitivity must be bounded for every possible data set, not only the observed one. Unbounded values are clipped
+  before the query, as in <NoteLink to="dp-sgd">DP-SGD</NoteLink>.
+- The noise must be secret and drawn from the stated distribution. An observer who can predict or reconstruct the noise
+  can subtract it.
+
+## Pitfalls
+
+- **The budget is spent.** Every query, including exploratory ones and hyperparameter searches, consumes budget.
+  Reporting the $\varepsilon$ of the final model alone understates the cost.
+- **Large $\varepsilon$ is weak.** Guarantees with $\varepsilon = 10$ allow one record to change output probabilities by a
+  factor of $e^{10} \approx 22{,}000$. They may still defeat practical attacks such as
+  <NoteLink to="membership-inference">membership inference</NoteLink>, but that is an empirical claim, not a guarantee.
+- **Privacy is not secrecy of aggregates.** Differential privacy allows learning facts about the population, including
+  facts that are sensitive for individuals who share the population's traits.

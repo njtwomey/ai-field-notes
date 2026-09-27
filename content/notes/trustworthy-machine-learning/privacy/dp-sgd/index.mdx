@@ -1,0 +1,144 @@
+---
+title: DP-SGD
+kind: technique
+summary: 'DP-SGD makes training differentially private: clip each example''s gradient to norm $C$, add $\Gauss(\zeros, \sigma^2C^2\I)$ to the sum, and track the privacy loss over steps. Sampling each example with probability $q$ amplifies privacy; the moments accountant composes it tightly.'
+tags: [privacy, deep-learning, optimisation, worked-example]
+aliases: [differentially private SGD, differentially private stochastic gradient descent, DPSGD, per-example gradient clipping, moments accountant, Rényi differential privacy, RDP, privacy amplification by subsampling, noise multiplier]
+requires: [differential-privacy, stochastic-gradient-descent-theory, backpropagation]
+related: [membership-inference, federated-learning, minibatching-and-batch-size]
+references: [abadi2016dp, mironov2017, dwork2014]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Differentially private stochastic gradient descent** (DP-SGD) trains a model with parameters $\thetavec$ so that the
+final parameters are $(\varepsilon, \delta)$-differentially private with respect to the training examples
+<Cite id="abadi2016dp" />. Each step samples a lot of examples, computes each example's gradient, clips it to $\ell_2$
+norm at most $C$, adds Gaussian noise with standard deviation $\sigma C$ to the sum, and takes a step with the noisy
+average. A **privacy accountant** converts the noise multiplier $\sigma$, the sampling probability $q$ and the number of
+steps $T$ into $(\varepsilon, \delta)$.
+</Definition>
+
+## Problem
+
+Neural networks can memorise individual training examples, and attacks such as
+<NoteLink to="membership-inference">membership inference</NoteLink> exploit it. The Gaussian mechanism of
+<NoteLink to="differential-privacy">differential privacy</NoteLink> needs a query with bounded sensitivity, but the
+gradient of a loss has no a priori bound: one outlier can move the parameters arbitrarily far. Training also queries the
+data thousands of times, and a naive composition of that many noisy steps gives a useless budget.
+
+## Mechanism
+
+Abadi et al.'s algorithm, for $N$ examples, lot size $L$, learning rate $\eta_t$, clipping norm $C$ and noise multiplier
+$\sigma$ <Cite id="abadi2016dp" />:
+
+1. **Sample.** Form the lot $\Lcal_t$ by including each example independently with probability $q = L/N$.
+2. **Per-example gradients.** For each $i \in \Lcal_t$ compute $\gvec_i = \nabla_{\thetavec}\ell(\thetavec_t, \xvec_i)$.
+3. **Clip.** Replace each by $\bar\gvec_i = \gvec_i/\max(1, \norm{\gvec_i}_2/C)$, which leaves it unchanged if its norm is
+   at most $C$ and scales it to norm $C$ otherwise.
+4. **Add noise.** $\tilde\gvec_t = \frac{1}{L}\big(\sum_{i \in \Lcal_t}\bar\gvec_i + \Gauss(\zeros, \sigma^2C^2\I)\big)$.
+5. **Step.** $\thetavec_{t+1} = \thetavec_t - \eta_t\tilde\gvec_t$.
+
+**Why clipping gives privacy.** Adding or removing one example changes the clipped sum by that example's clipped
+gradient, whose $\ell_2$ norm is at most $C$. The sum therefore has $\ell_2$ sensitivity $C$, and step 4 is the Gaussian
+mechanism with noise $\sigma$ times the sensitivity. The parameters $\thetavec_{t+1}$ are a function of $\thetavec_t$
+and the noisy sum only, so by post-processing each step is as private as its noisy sum. Dividing by the fixed $L$
+rather than the random lot size keeps the sensitivity at $C/L$ for the average.
+
+**Why sampling helps.** Each example appears in a given lot with probability $q$ only. With probability $1 - q$ the step
+reveals nothing about it. By **privacy amplification by subsampling**, a step that is $(\varepsilon, \delta)$-private
+with respect to its lot, with $\varepsilon \le 1$, is $(O(q\varepsilon), q\delta)$-private with respect to the whole data
+set <Cite id="abadi2016dp" />.
+
+### The moments accountant
+
+Privacy loss adds over steps, and so do its log moments. For a mechanism $M$ and neighbours $D, D'$, let the privacy
+loss at output $o$ be $c(o) = \ln\big(\Pr(M(D) = o)/\Pr(M(D') = o)\big)$ and define the log moment
+
+$$
+\alpha_M(\lambda) = \max_{D, D'}\ \ln\expect_{o \sim M(D)}\big[e^{\lambda c(o)}\big].
+$$
+
+For steps run in sequence with independent noise, the privacy losses of the steps add and their exponentials multiply, so
+$\alpha_M(\lambda) \le \sum_{t=1}^T\alpha_{M_t}(\lambda)$. A tail bound converts moments into $(\varepsilon, \delta)$.
+By Markov's inequality, for any $\lambda > 0$,
+
+$$
+\Pr(c \ge \varepsilon) = \Pr\big(e^{\lambda c} \ge e^{\lambda\varepsilon}\big) \le e^{\alpha_M(\lambda) - \lambda\varepsilon}.
+$$
+
+As in the Gaussian mechanism, a mechanism whose privacy loss exceeds $\varepsilon$ with probability at most $\delta$ is
+$(\varepsilon, \delta)$-private, so $\delta = \min_\lambda\exp(\alpha_M(\lambda) - \lambda\varepsilon)$
+<Cite id="abadi2016dp" />. Abadi et al. bound $\alpha(\lambda)$ for one subsampled Gaussian step by
+$q^2\lambda(\lambda + 1)/((1 - q)\sigma^2) + O(q^3/\sigma^3)$ and prove that there are constants $c_1, c_2$ such
+that, for $\varepsilon < c_1q^2T$, the algorithm is $(\varepsilon, \delta)$-private whenever
+
+$$
+\sigma \ge c_2\,\frac{q\sqrt{T\ln(1/\delta)}}{\varepsilon}.
+$$
+
+The strong composition theorem needs $\sigma$ larger by a factor $\sqrt{\ln(T/\delta)}$ <Cite id="abadi2016dp" />.
+
+**Rényi differential privacy.** The log moment is a Rényi divergence in disguise: $\alpha_M(\lambda) =
+\lambda D_{\lambda + 1}(M(D) \,\|\, M(D'))$, with $D_a(P \,\|\, Q) = \frac{1}{a - 1}\ln\expect_Q[(P/Q)^a]$. Mironov
+defined $M$ to be $(a, \varepsilon_a)$-Rényi private if $D_a(M(D) \,\|\, M(D')) \le \varepsilon_a$ for all neighbours
+<Cite id="mironov2017" />. Rényi privacy of a fixed order composes by adding $\varepsilon_a$. The Markov argument above
+with $\lambda = a - 1$ converts it to $(\varepsilon_a + \ln(1/\delta)/(a - 1), \delta)$-privacy. Modern libraries
+account for DP-SGD this way.
+
+<Derivation title="Rényi divergence of the Gaussian mechanism">
+Let $P = \Gauss(\mu_1, s^2)$ and $Q = \Gauss(\mu_2, s^2)$ with $\Delta = \mu_1 - \mu_2$. Then
+
+$$
+\expect_Q\Big[\Big(\frac{P}{Q}\Big)^a\Big] = \int \frac{1}{\sqrt{2\pi}s}
+\exp\Big(-\frac{a(x - \mu_1)^2 + (1 - a)(x - \mu_2)^2}{2s^2}\Big)\,dx.
+$$
+
+The exponent's quadratic part is $-(x - m)^2/(2s^2)$ with $m = a\mu_1 + (1 - a)\mu_2$, and completing the square leaves
+the constant $a(a - 1)\Delta^2/(2s^2)$ in the exponent. The remaining Gaussian integral is 1, so
+
+$$
+D_a(P \,\|\, Q) = \frac{1}{a - 1}\cdot\frac{a(a - 1)\Delta^2}{2s^2} = \frac{a\Delta^2}{2s^2}.
+$$
+
+For a DP-SGD step without subsampling, $\Delta = C$ and $s = \sigma C$, so $\varepsilon_a = a/(2\sigma^2)$.
+</Derivation>
+
+## Worked example
+
+**Without subsampling.** Full-batch noisy gradient descent with $\sigma = 4$ has Rényi privacy $\varepsilon_a =
+a/(2\sigma^2) = a/32$ per step. After $T = 100$ steps, composition gives $100a/32$, and with $\delta = 10^{-5}$,
+
+$$
+\varepsilon = \min_{a > 1}\Big(\frac{100a}{32} + \frac{\ln 10^5}{a - 1}\Big).
+$$
+
+Setting the derivative to zero gives $a - 1 = \sqrt{\ln 10^5/(100/32)} = 1.92$ and $\varepsilon = 15.1$.
+
+**With subsampling.** Abadi et al. use $q = 0.01$, $\sigma = 4$ and $\delta = 10^{-5}$. An epoch is $1/q = 100$ steps, so
+100 epochs are $T = 10{,}000$ steps, a hundred times as many as above. The moments accountant gives $\varepsilon \approx
+1.26$, against $9.34$ from the strong composition theorem. After 400 epochs the values are $2.55$ and $24.22$
+<Cite id="abadi2016dp" />.
+
+## Cost
+
+- **Accuracy.** On MNIST, with a 60-dimensional PCA input layer, one hidden layer of 1,000 ReLU units and lots of 600, the
+  non-private model reached 98.30%. The private models reached 90%, 95% and 97% test accuracy at
+  $(0.5, 10^{-5})$, $(2, 10^{-5})$ and $(8, 10^{-5})$-differential privacy. On CIFAR-10 they reached 67%, 70% and 73% at
+  $\varepsilon = 2$, 4 and 8 with $\delta = 10^{-5}$ <Cite id="abadi2016dp" />.
+- **Compute and memory.** Per-example gradients break the usual batched backward pass, which sums gradients over the
+  batch. Computing them costs extra memory proportional to the lot size times the number of parameters, or extra time.
+- **Tuning.** Every training run and hyperparameter search on the private data spends budget.
+
+## Trade-offs
+
+- **Clipping norm $C$.** A small $C$ biases the update by shrinking large gradients. A large $C$ requires proportionally
+  more noise, since the noise standard deviation is $\sigma C$.
+- **Lot size.** Larger lots average the fixed noise over more examples, since the noise on the average gradient has
+  standard deviation $\sigma C/L$, but raise $q$ and so the privacy cost per step.
+- **Public data.** Pre-training on public data and fine-tuning privately reaches far better accuracy than private training
+  from scratch. Abadi et al. treat CIFAR-100 as public and pre-train the convolutional layers on it before private
+  training on CIFAR-10 <Cite id="abadi2016dp" />.
+- **What is protected.** The guarantee covers each training example. It says nothing about the privacy of individuals
+  whose data appears in many examples, unless contributions are bounded per individual.

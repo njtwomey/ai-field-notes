@@ -1,0 +1,140 @@
+---
+title: Estimating noise rates
+kind: technique
+summary: 'Class-conditional flip rates are not identifiable from noisy labels alone. With anchor points, where the clean posterior is 0 or 1, the noisy posterior there reads them off: $\rho_- = \min_{\xvec}\tilde\eta(\xvec)$ and $\rho_+ = 1 - \max_{\xvec}\tilde\eta(\xvec)$. Mixture proportion estimation is the distributional form.'
+tags: [classification, label-noise, estimation, worked-example]
+aliases: [anchor points, noise rate estimation, transition matrix estimation, mixture proportion estimation, importance reweighting for label noise, irreducibility]
+requires: [label-noise-models]
+related: [positive-unlabelled-learning, learning-with-noisy-labels, detecting-and-cleaning-label-errors, hypothesis-testing-for-class-conditional-label-noise, prior-shift-correction]
+references: [liu2016, menon2015, patrini2017, scott2013, ramaswamy2016, xia2019, northcutt2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Noise rate estimation** recovers the class-conditional flip probabilities, or the whole noise transition matrix
+$\Tmat$ with $T_{ij} = \Pr(\tilde y = j \mid y = i)$, from data with noisy labels $\tilde y$ only. It needs an assumption
+that makes $\Tmat$ identifiable. The usual one is that **anchor points** exist: inputs $\xvec$ whose clean class is certain,
+$\Pr(y = i \mid \xvec) = 1$ for some $i$ <Cite id="liu2016" /> <Cite id="patrini2017" />. The distributional form of the same
+assumption is **irreducibility**, under which the rates follow from mixture proportion estimation
+<Cite id="scott2013" />.
+</Definition>
+
+## Problem
+
+Loss correction, importance reweighting and threshold adjustment all need the noise rates (see
+<NoteLink to="learning-with-noisy-labels">learning with noisy labels</NoteLink>). In the binary case, with
+$\rho_+ = \Pr(\tilde y = -1 \mid y = +1)$ and $\rho_- = \Pr(\tilde y = +1 \mid y = -1)$, the noisy posterior
+$\tilde\eta(\xvec) = \Pr(\tilde y = +1 \mid \xvec)$ and the clean posterior $\eta(\xvec) = \Pr(y = +1 \mid \xvec)$ satisfy
+
+$$
+\tilde\eta(\xvec) = (1 - \rho_+ - \rho_-)\,\eta(\xvec) + \rho_-.
+$$
+
+Noisy data identify $\tilde\eta$, but not the pair $(\eta, (\rho_+, \rho_-))$. For example, $\tilde\eta(\xvec) = 0.5$ arises from
+$\eta = 0.5$ with no noise and from $\eta = 1$ with $\rho_+ = 0.5$. Some extra assumption must pin down which
+inputs are clean.
+
+## Mechanism
+
+### Anchor points
+
+Because the map from $\eta$ to $\tilde\eta$ is increasing (when $\rho_+ + \rho_- < 1$), $\tilde\eta$ is smallest where $\eta$ is
+smallest and largest where $\eta$ is largest. If some input has $\eta(\xvec) = 0$ and some has $\eta(\xvec) = 1$, then
+
+$$
+\min_{\xvec}\tilde\eta(\xvec) = \rho_-, \qquad \max_{\xvec}\tilde\eta(\xvec) = 1 - \rho_+.
+$$
+
+The noise rates are the floor and the ceiling of the noisy posterior <Cite id="liu2016" /> <Cite id="menon2015" />. The
+estimator fits a probabilistic classifier $\hat{\tilde\eta}$ to the noisy labels and takes its minimum and maximum over
+the training inputs.
+
+In $K$ classes the same argument reads a whole row of $\Tmat$. At an anchor point $\xvec^{(i)}$ of class $i$, the clean
+posterior is the unit vector $\evec_i$, so the noisy posterior is $\tilde\pvec(\xvec^{(i)}) = \Tmat^\top\evec_i$, row $i$ of
+$\Tmat$. Patrini et al. take, for each class $i$, the training input with the highest predicted noisy probability of
+class $i$ (or a high percentile of it, which is less sensitive to outliers) and use its predicted noisy posterior as row
+$i$ <Cite id="patrini2017" />.
+
+### Irreducibility and mixture proportion estimation
+
+Class-conditional noise makes the inputs labelled positive a mixture of the clean class-conditional distributions $P$
+(positives) and $Q$ (negatives): $\tilde P = (1 - \alpha')P + \alpha' Q$ and $\tilde Q = \beta' P + (1 - \beta')Q$, with
+contamination proportions $\alpha'$ and $\beta'$ (see <NoteLink to="label-noise-models">label noise models</NoteLink>).
+The **mixture proportion** of $H$ in $F$ is the largest weight with which $H$ can appear as a component of $F$:
+
+$$
+\kappa^\star(F \mid H) = \sup\set{\kappa \in [0, 1] : F = \kappa H + (1 - \kappa)G \text{ for some distribution } G}.
+$$
+
+$P$ and $Q$ are **mutually irreducible** if neither is a mixture that contains the other, $\kappa^\star(P \mid Q) = \kappa^\star(Q
+\mid P) = 0$ <Cite id="scott2013" />. Then a combination $aP + bQ$ is a non-negative measure only when $a \ge 0$ and $b
+\ge 0$, since a negative coefficient on one distribution would mean the other contains it. Now
+
+$$
+\tilde P - \kappa\tilde Q = (1 - \alpha' - \kappa\beta')\,P + \big(\alpha' - \kappa(1 - \beta')\big)\,Q.
+$$
+
+The $Q$ coefficient reaches zero first as $\kappa$ grows (for $\alpha' + \beta' < 1$), so
+
+$$
+\kappa^\star(\tilde P \mid \tilde Q) = \frac{\alpha'}{1 - \beta'}, \qquad \kappa^\star(\tilde Q \mid \tilde P) = \frac{\beta'}{1 - \alpha'}
+$$
+
+by the symmetric argument. Both left-hand sides are properties of the observed noisy data, and the two equations
+determine $\alpha'$ and $\beta'$. Irreducibility is the distributional version of the anchor-point assumption: it holds
+when there is a region where $P$ has mass and $Q$ has almost none, and vice versa.
+
+Estimating $\kappa^\star$ from samples is **mixture proportion estimation**. Ramaswamy, Scott and Tewari estimate it
+with kernel mean embeddings, with convergence rates <Cite id="ramaswamy2016" />. The same problem appears in
+<NoteLink to="positive-unlabelled-learning">positive-unlabelled learning</NoteLink>, where the unlabelled data are a mixture of positives and negatives and the class prior is
+$\kappa^\star$ of the positive distribution in the unlabelled one.
+
+### Using the rates: importance reweighting
+
+Once $\rho_+$ and $\rho_-$ are known, the clean risk can be written as a weighted noisy risk. For a loss $\ell$, set
+$w(\xvec, \tilde y) = \Pr(y = \tilde y \mid \xvec)/\Pr(\tilde y \mid \xvec)$. Then
+
+$$
+\expect_{\xvec, \tilde y}\big[w(\xvec, \tilde y)\,\ell(f(\xvec), \tilde y)\big] = \expect_{\xvec}\sum_{c}\Pr(\tilde y = c \mid \xvec)\,\frac{\Pr(y = c \mid \xvec)}{\Pr(\tilde y = c \mid \xvec)}\,\ell(f(\xvec), c) = \expect_{\xvec, y}\big[\ell(f(\xvec), y)\big].
+$$
+
+The weights come from the noisy posterior alone: $w(\xvec, +1) = \eta/\tilde\eta = (\tilde\eta - \rho_-)/\big((1 - \rho_+ -
+\rho_-)\tilde\eta\big)$ and $w(\xvec, -1) = (1 - \tilde\eta - \rho_+)/\big((1 - \rho_+ - \rho_-)(1 - \tilde\eta)\big)$. Liu and
+Tao combine this reweighting with the floor-and-ceiling estimates of the rates <Cite id="liu2016" />.
+
+## Worked example
+
+Take $\rho_+ = 0.2$, $\rho_- = 0.1$, prior $\Pr(y = +1) = 0.5$, and a clean posterior that reaches both 0 and 1.
+
+- **Floor and ceiling.** $\tilde\eta = 0.7\,\eta + 0.1$ runs from $0.1$ to $0.8$. The floor is $\rho_- = 0.1$ and the
+  ceiling is $1 - \rho_+ = 0.8$.
+- **Mixture proportions.** The noisy positive rate is $0.8 \cdot 0.5 + 0.1 \cdot 0.5 = 0.45$, so $\alpha' = 0.05/0.45 =
+  0.111$ and $\beta' = 0.1/0.55 = 0.182$. Then $\kappa^\star(\tilde P \mid \tilde Q) = 0.111/0.818 = 0.136$ and
+  $\kappa^\star(\tilde Q \mid \tilde P) = 0.182/0.889 = 0.205$. Solving $\alpha' = 0.136(1 - \beta')$ and
+  $\beta' = 0.205(1 - \alpha')$ returns $\alpha' = 0.111$ and $\beta' = 0.182$.
+- **Back to flip rates.** The clean prior is $\pi = \tilde\pi(1 - \alpha') + \beta'(1 - \tilde\pi) = 0.4 + 0.1 = 0.5$. Then
+  $\rho_- = \alpha'\tilde\pi/(1 - \pi) = 0.05/0.5 = 0.1$ and $\rho_+ = \beta'(1 - \tilde\pi)/\pi = 0.1/0.5 = 0.2$.
+- **Weights.** At an input with $\tilde\eta = 0.6$, the clean posterior is $\eta = 0.5/0.7 = 0.714$. A noisy positive
+  there gets weight $0.714/0.6 = 1.19$ and a noisy negative gets $0.286/0.4 = 0.714$.
+
+## Cost
+
+One probabilistic classifier fitted to the noisy labels, plus a pass over the training inputs to find extremes. Mixture
+proportion estimation by kernel embeddings costs a kernel matrix on the samples used.
+
+## Trade-offs
+
+- **The estimates are extremes of an estimate.** The minimum and maximum of a fitted $\hat{\tilde\eta}$ are dominated by
+  its worst errors, often at outliers. An overconfident model pushes the floor towards 0 and the ceiling towards 1 and
+  so underestimates the noise. Percentiles trade this bias against missing the true anchors.
+- **Anchors may not exist.** When the classes overlap everywhere, $\eta$ never reaches 0 or 1, the floor overestimates
+  $\rho_-$, and the corrected classifier is biased. Xia et al. start from anchor-based estimates and refine $\Tmat$
+  during training, without requiring exact anchors <Cite id="xia2019" />.
+- **Estimation versus testing.** Point estimates of $\rho_\pm$ come without a statement of how far apart they are
+  beyond chance. A hypothesis test for $\rho_+ = \rho_-$ uses a different kind of anchor, inputs with clean posterior
+  $1/2$ (see <NoteLink to="hypothesis-testing-for-class-conditional-label-noise">hypothesis testing for class-conditional
+  label noise</NoteLink>).
+- **Counting instead of fitting.** Confident learning estimates the joint distribution of noisy and clean labels by
+  counting examples whose predicted probability exceeds per-class thresholds <Cite id="northcutt2021" />; see
+  <NoteLink to="detecting-and-cleaning-label-errors">detecting and cleaning label errors</NoteLink>.

@@ -1,0 +1,113 @@
+---
+title: Membership inference
+kind: concept
+summary: 'A membership inference attack decides from a trained model whether a given record was in its training set. Overfitting drives it: a loss-threshold attack gains exactly the generalisation gap. Pure $\varepsilon$-differential privacy caps its true- minus false-positive rate at $\frac{e^\varepsilon - 1}{e^\varepsilon + 1}$.'
+tags: [privacy, security, hypothesis-testing, generalisation, worked-example]
+aliases: [membership inference attack, MIA, shadow models, shadow training, loss-threshold attack, likelihood ratio attack, LiRA, membership advantage]
+requires: [differential-privacy, type-i-and-type-ii-errors]
+related: [dp-sgd, federated-learning, neyman-pearson-lemma, roc-curve-and-auc, bias-variance-decomposition]
+references: [shokri2017, yeom2018, carlini2022, kairouz2015]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **membership inference attack** receives a trained model $h_S$, learnt from a training set $S$ drawn from a
+distribution $\Dcal$, and a record $z = (\xvec, y)$, and outputs a guess of whether $z \in S$
+<Cite id="shokri2017" />. Treating "member" as the positive class, its **membership advantage** is
+
+$$
+\mathrm{Adv} = \mathrm{TPR} - \mathrm{FPR} = \Pr(\text{guess member} \mid z \in S) - \Pr(\text{guess member} \mid z \notin S),
+$$
+
+where non-members are fresh draws from $\Dcal$ <Cite id="yeom2018" />. Random guessing has advantage 0.
+</Definition>
+
+## Intuition
+
+A model behaves differently on the data it was trained on. It is usually more confident and has lower loss there, most
+of all on rare or mislabelled records that it had to memorise. An attacker who can query the model and compare its
+behaviour on a record with its behaviour on typical unseen records learns whether the record was used. Membership alone
+can be sensitive: being in the training set of a model of hospital discharges reveals a hospital stay
+<Cite id="shokri2017" />.
+
+## Attacks
+
+**Shadow models.** Shokri et al. train several shadow models that imitate the target, on data from the same
+distribution, so the attacker knows which records each shadow model saw. The prediction vectors of the shadow models on
+their own training records and on held-out records, labelled "in" and "out", train an attack classifier, one per output
+class <Cite id="shokri2017" />. They attacked models trained by commercial machine-learning services, which exposed only
+predictions.
+
+**Loss threshold.** Yeom et al. analysed a simpler attack <Cite id="yeom2018" />. Suppose the loss is bounded,
+$0 \le \ell \le B$. The attacker computes the model's loss on $z$ and guesses "non-member" with probability
+$\ell(h_S, z)/B$. Then
+
+$$
+\mathrm{Adv} = \Pr(\text{non-member} \mid z \notin S) - \Pr(\text{non-member} \mid z \in S)
+= \frac{\expect_{z \sim \Dcal}[\ell(h_S, z)] - \expect_{z \sim S}[\ell(h_S, z)]}{B}.
+$$
+
+The numerator is the **generalisation gap**, the expected loss on fresh data minus the expected loss on the training
+data. With the 0–1 loss, $B = 1$, and the advantage equals the gap between test and training error. Any overfitting is a
+membership leak. The converse fails: Yeom et al. also construct models that leak membership without any generalisation
+gap, so a small gap does not certify privacy.
+
+**Likelihood ratio attack.** Average accuracy hides what matters: an attack that confidently identifies a few members
+is dangerous even if it guesses at chance on the rest. Carlini et al. argue that attacks should be compared by their
+true-positive rate at a low false-positive rate, such as 0.1% <Cite id="carlini2022" />. Their LiRA treats each record
+as its own hypothesis test. It trains shadow models with and without $z$, fits a Gaussian to the logit-scaled confidence
+$\ln\frac{p}{1 - p}$ on the true label in each group, and scores $z$ by the likelihood ratio of the target model's
+confidence under the two Gaussians. The
+<NoteLink to="neyman-pearson-lemma">Neyman–Pearson lemma</NoteLink> says a likelihood-ratio test is the most powerful
+test of its size, which is why this design works. LiRA is 10 times more powerful than earlier attacks at low
+false-positive rates <Cite id="carlini2022" />.
+
+## The differential privacy bound
+
+<NoteLink to="differential-privacy">Differential privacy</NoteLink> limits every such attack. Fix a record $z$ and two
+neighbouring training sets: $D$ contains $z$ and $D'$ does not. Any attack is a test that answers "member" when the
+trained model lands in some set $\Scal$ of models. Its true-positive rate is $\mathrm{TPR} = \Pr(M(D) \in \Scal)$ and its
+false-positive rate is $\mathrm{FPR} = \Pr(M(D') \in \Scal)$. If training is $\varepsilon$-differentially private, the
+definition applied to $\Scal$ and to its complement gives
+
+$$
+\mathrm{TPR} \le e^\varepsilon\,\mathrm{FPR}, \qquad 1 - \mathrm{FPR} \le e^\varepsilon(1 - \mathrm{TPR}).
+$$
+
+The first line bounds TPR by a line through the origin, the second by a line through $(1, 1)$. The advantage
+$\mathrm{TPR} - \mathrm{FPR}$ is largest where the two lines meet. Solving $e^\varepsilon F = 1 - e^{-\varepsilon}(1 - F)$
+gives $F = 1/(e^\varepsilon + 1)$, $\mathrm{TPR} = e^\varepsilon/(e^\varepsilon + 1)$ and
+
+$$
+\mathrm{Adv} \le \frac{e^\varepsilon - 1}{e^\varepsilon + 1}.
+$$
+
+This region of achievable (FPR, TPR) pairs characterises $\varepsilon$-differential privacy as a hypothesis test
+<Cite id="kairouz2015" />. Yeom et al. prove the looser bound $\mathrm{Adv} \le e^\varepsilon - 1$ for their experiment,
+in which the non-member is a fresh draw <Cite id="yeom2018" />.
+
+## Worked example
+
+A classifier has training error 0.02 and test error 0.15. The loss-threshold attack with 0–1 loss guesses "member"
+exactly when the model classifies $z$ correctly. Its true-positive rate is $1 - 0.02 = 0.98$, its false-positive rate
+$1 - 0.15 = 0.85$, and its advantage $0.98 - 0.85 = 0.13$, the generalisation gap.
+
+If the model had been trained with $\varepsilon = 1$, no attack could exceed advantage
+$(e - 1)/(e + 1) = 0.462$. Yeom et al.'s bound $e - 1 = 1.72$ would be vacuous. At $\varepsilon = 0.1$ the two bounds are
+$0.050$ and $0.105$.
+
+## Assumptions
+
+- The attacker has query access to the model's outputs, sometimes only the predicted label, and data from roughly the
+  training distribution for shadow models or a threshold.
+- Non-members come from the same distribution as members. If they do not, an attack can detect the distribution
+  difference instead of membership.
+
+## Pitfalls
+
+- **Balanced accuracy overstates weak attacks and hides strong ones.** Report TPR at low FPR <Cite id="carlini2022" />.
+- **Averages hide outliers.** Rare records and mislabelled records are the most exposed. A model can leak little on
+  average and much about a few people.
+- **Regularisation is not a guarantee.** Reducing overfitting lowers the advantage of loss-based attacks but bounds no
+  other attack. Only differential privacy, for example through <NoteLink to="dp-sgd">DP-SGD</NoteLink>, gives a bound.

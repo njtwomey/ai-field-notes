@@ -1,0 +1,119 @@
+---
+title: Concept-based explanations
+kind: concept
+summary: 'Concept-based explanations measure a network''s sensitivity to a named concept, not to input features. TCAV learns a concept activation vector $\vvec_C$ separating a layer''s activations for concept examples from random ones, and reports the fraction of a class whose logit rises along $\vvec_C$.'
+tags: [interpretability, explainability, deep-learning, hypothesis-testing, worked-example]
+aliases: [TCAV, testing with concept activation vectors, concept activation vector, CAV, conceptual sensitivity, concept bottleneck model]
+requires: [logistic-regression, gradient]
+partOf: [interpretability]
+related: [multilayer-perceptron, convolutional-layer, multiple-testing, one-sample-t-test]
+references: [kim2018tcav, koh2020]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **concept-based explanation** states how much a model's prediction depends on a concept that a person can name, such
+as "striped" or "wheel", instead of on individual pixels or features. **Testing with concept activation vectors (TCAV)**
+represents a concept $C$ by a direction $\vvec_C^l$ in the activation space of layer $l$ of a network, learned from
+example inputs showing the concept. It scores class $k$ by the fraction of that class's inputs whose logit increases
+when the activations move in the direction $\vvec_C^l$ <Cite id="kim2018tcav" />.
+</Definition>
+
+## Intuition
+
+A pixel attribution for a zebra image highlights pixels. It does not say whether the network relies on stripes, on the
+savannah background or on the animal's shape. The user has a concept in mind, "striped", and wants to test it. TCAV lets
+the user define the concept by examples, such as a few dozen images of striped fabric, and asks the network how its
+zebra logit responds to that concept <Cite id="kim2018tcav" />.
+
+## Concept activation vectors
+
+Split the network at layer $l$ into $f_l : \reals^n \to \reals^m$, mapping an input to the layer's activations, and
+$h_{l,k} : \reals^m \to \reals$, mapping the activations to the logit of class $k$. Collect a set $P_C$ of inputs that
+show concept $C$ and a set $N$ of random inputs. Train a linear classifier, such as
+<NoteLink to="logistic-regression">logistic regression</NoteLink>, to separate $\set{f_l(\xvec) : \xvec \in P_C}$ from
+$\set{f_l(\xvec) : \xvec \in N}$. The **concept activation vector** $\vvec_C^l$ is the unit normal to its decision
+boundary, pointing towards the concept examples. The linear classifier's accuracy on held-out examples measures whether
+layer $l$ represents the concept at all.
+
+## Conceptual sensitivity
+
+The **conceptual sensitivity** of class $k$ to concept $C$ at input $\xvec$ is the directional derivative of the logit
+along the concept direction:
+
+$$
+S_{C,k,l}(\xvec) = \lim_{\epsilon \to 0} \frac{h_{l,k}\big(f_l(\xvec) + \epsilon\,\vvec_C^l\big) - h_{l,k}\big(f_l(\xvec)\big)}{\epsilon}.
+$$
+
+Expanding $h_{l,k}$ to first order around $\avec = f_l(\xvec)$ gives
+$h_{l,k}(\avec + \epsilon\vvec) = h_{l,k}(\avec) + \epsilon\,\nabla h_{l,k}(\avec)^\top\vvec + o(\epsilon)$, so
+
+$$
+S_{C,k,l}(\xvec) = \nabla h_{l,k}\big(f_l(\xvec)\big)^\top\,\vvec_C^l.
+$$
+
+It is one backward pass from the logit to layer $l$ followed by a dot product. A positive $S$ means that making the
+activations more like the concept raises the class logit at this input.
+
+## The TCAV score
+
+For a set $X_k$ of inputs of class $k$, the TCAV score is the fraction with positive sensitivity
+<Cite id="kim2018tcav" />:
+
+$$
+\mathrm{TCAV}_{C,k,l} = \frac{\abs{\set{\xvec \in X_k : S_{C,k,l}(\xvec) > 0}}}{\abs{X_k}} \in [0, 1].
+$$
+
+The score uses only the sign of $S$, so a few inputs with very large sensitivities cannot dominate it. A score near $1$
+says the concept pushes the class up for almost every input of the class, and a score near $0$ that it pushes the class
+down.
+
+## Testing against random concepts
+
+A CAV learned from a random set of images against another random set still points in some direction, and its TCAV score
+is not in general $0.5$. Kim et al. therefore train CAVs for concept $C$ against many different random sets $N$, and also
+CAVs for random "concepts" (random sets against random sets). A two-sided $t$-test compares the two samples of TCAV
+scores. A concept is reported only if its scores differ significantly from the random ones, with a Bonferroni
+correction for the number of concepts tested <Cite id="kim2018tcav" />. See
+<NoteLink to="multiple-testing">multiple testing</NoteLink>.
+
+## Worked example
+
+A layer has two activations. The CAV for "striped" is $\vvec_C = (0.6, 0.8)$, a unit vector. For five zebra images the
+gradients of the zebra logit with respect to the activations are
+
+| image | $\nabla h$ | $S = \nabla h^\top\vvec_C$ |
+| --- | --- | --- |
+| 1 | $(1.0, 0.5)$ | $0.60 + 0.40 = 1.00$ |
+| 2 | $(-0.5, 0.2)$ | $-0.30 + 0.16 = -0.14$ |
+| 3 | $(0.2, 0.3)$ | $0.12 + 0.24 = 0.36$ |
+| 4 | $(-1.0, 0.4)$ | $-0.60 + 0.32 = -0.28$ |
+| 5 | $(0.3, -0.1)$ | $0.18 - 0.08 = 0.10$ |
+
+Three of five sensitivities are positive, so $\mathrm{TCAV} = 0.6$. Whether $0.6$ is evidence of a real dependence
+depends on the spread of the scores of random CAVs; with five images it is not.
+
+## Concept bottleneck models
+
+TCAV explains a trained network post hoc. A **concept bottleneck model** builds concepts into the architecture: one part
+predicts a vector of annotated concepts $\hat{\cvec}$ from the input, and a second part predicts the label from
+$\hat{\cvec}$ alone <Cite id="koh2020" />. Every prediction is then a function of named concepts, and a user can correct a
+wrong concept at test time and see the prediction change. The cost is that every training example needs concept
+annotations.
+
+## Assumptions
+
+- The concept is linearly represented at layer $l$: a single direction separates concept activations from random ones.
+- The example set $P_C$ shows the concept and little else. Striped fabric that is always red defines a concept of
+  "red stripes".
+- The first-order expansion describes $h_{l,k}$ near $f_l(\xvec)$.
+
+## Pitfalls
+
+- **Layer choice.** A concept can be represented at one layer and not at another. Report the CAV's classification
+  accuracy and results for several layers.
+- **Sensitivity is not use.** A positive directional derivative says what would happen if activations moved along
+  $\vvec_C$. It does not show that the network's actual activations for class $k$ contain the concept.
+- **Correlated concepts.** CAVs for correlated concepts, such as "striped" and "zebra-coloured", point in similar
+  directions and cannot be separated by TCAV scores.

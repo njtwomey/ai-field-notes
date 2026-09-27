@@ -1,0 +1,158 @@
+---
+title: Detecting and cleaning label errors
+kind: technique
+summary: 'Label-error detection flags examples whose given label is disputed by a model trained on the noisy data. Confident learning counts examples whose predicted probability of class $j$ reaches the mean self-confidence $t_j$ of class $j$, estimating the joint of given and true labels.'
+tags: [classification, label-noise, data-quality, deep-learning, worked-example]
+aliases: [confident learning, confident joint, label error detection, data cleaning for label noise, cleanlab, small-loss trick, area under the margin, label errors in test sets]
+requires: [label-noise-models, cross-validation]
+related: [estimating-noise-rates, learning-with-noisy-labels, noise-robust-losses, hypothesis-testing-for-class-conditional-label-noise, early-stopping]
+references: [northcutt2021, northcutt2021pervasive, northcutt2017, han2018, pleiss2020, arpit2017, frenay2014]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Label-error detection** flags training or test examples whose given label $\tilde y$ is probably not the true label
+$y^\ast$, using a model trained on the noisy labels themselves. **Cleaning** then removes, down-weights or relabels the
+flagged examples. **Confident learning** is a detection method that estimates the joint distribution
+$Q_{\tilde y, y^\ast}$ of given and true labels by counting examples whose out-of-sample predicted probability for a class
+exceeds that class's average self-confidence, and prunes the examples counted off the diagonal
+<Cite id="northcutt2021" />.
+</Definition>
+
+## Problem
+
+Loss correction and robust losses change how the model learns from wrong labels but leave the wrong labels in place
+(see <NoteLink to="learning-with-noisy-labels">learning with noisy labels</NoteLink>). Wrong labels in a test set are
+worse: they corrupt the measurement that selects the model. Northcutt, Athalye and Mueller estimate an average of at
+least 3.3% label errors across the test sets of 10 commonly used computer vision, language and audio data sets, and at
+least 6% in the ImageNet validation set <Cite id="northcutt2021pervasive" />. Finding the specific wrong examples lets a
+person fix them.
+
+## Mechanism
+
+### Out-of-sample predicted probabilities
+
+Every detector below needs predicted class probabilities $\hat p(\tilde y = j; \xvec)$ for each training example from a
+model that did not train on that example. $K$-fold <NoteLink to="cross-validation">cross-validation</NoteLink> provides
+them: each example is scored by the model fitted on the other folds. In-sample probabilities are useless, because a
+flexible model memorises the wrong labels.
+
+### Confident learning
+
+Let $\Xcal_{\tilde y = i}$ be the examples with given label $i$ and $m$ the number of classes. The **per-class threshold**
+is the average self-confidence of class $j$:
+
+$$
+t_j = \frac{1}{\abs{\Xcal_{\tilde y = j}}}\sum_{\xvec \in \Xcal_{\tilde y = j}}\hat p(\tilde y = j; \xvec).
+$$
+
+An example labelled $i$ is counted as truly of class $j$ if its predicted probability of $j$ reaches $j$'s threshold. When
+several classes pass their thresholds, the one with the largest probability wins:
+
+$$
+\hat\Xcal_{\tilde y = i, y^\ast = j} = \Big\{\xvec \in \Xcal_{\tilde y = i} : \hat p(\tilde y = j; \xvec) \ge t_j,\ j = \argmax_{l : \hat p(\tilde y = l; \xvec) \ge t_l}\hat p(\tilde y = l; \xvec)\Big\}.
+$$
+
+The **confident joint** is the $m \times m$ matrix of counts $C_{\tilde y = i, y^\ast = j} = \abs{\hat\Xcal_{\tilde y = i, y^\ast = j}}$
+<Cite id="northcutt2021" />. Its diagonal counts examples judged correct and its off-diagonal entries count label errors
+by type. An example with near-uniform probabilities passes no threshold and is not counted at all.
+
+The thresholds correct for classes on which the model is systematically over- or under-confident. The simpler rule,
+which takes the true label to be $\argmax_j \hat p(\tilde y = j; \xvec)$ and counts disagreements (a confusion matrix of given
+against predicted labels), sends too many examples to classes the model over-predicts, for example under class
+imbalance. Because it compares probabilities only with thresholds, confident learning relies on how the model ranks
+examples within a class rather than on the exact probability values.
+
+**From counts to the joint.** The counts are calibrated so that each row sums to the number of examples with that given
+label, and then normalised to sum to 1:
+
+$$
+\hat Q_{\tilde y = i, y^\ast = j} = \frac{\dfrac{C_{\tilde y = i, y^\ast = j}}{\sum_{j'} C_{\tilde y = i, y^\ast = j'}}\,\abs{\Xcal_{\tilde y = i}}}{\sum_{i', j}\dfrac{C_{\tilde y = i', y^\ast = j}}{\sum_{j'} C_{\tilde y = i', y^\ast = j'}}\,\abs{\Xcal_{\tilde y = i'}}}.
+$$
+
+The column sums estimate the latent class prior $\hat Q_{y^\ast = j} = \sum_i \hat Q_{\tilde y = i, y^\ast = j}$, and dividing by
+them gives the noise transition matrix $\hat Q_{\tilde y = i \mid y^\ast = j}$. Northcutt, Jiang and Chuang give conditions under
+which the confident joint finds the label errors exactly and estimates $Q_{\tilde y, y^\ast}$ consistently, including some
+with imperfect predicted probabilities <Cite id="northcutt2021" />.
+
+**Pruning.** The paper compares five rules for which examples to remove:
+
+- **Confusion baseline.** Flag examples whose given label is not the argmax prediction.
+- **Confident joint.** Flag the examples counted in off-diagonal entries of $C$.
+- **Prune by class.** For each class $i$, remove the $n\sum_{j \ne i}\hat Q_{\tilde y = i, y^\ast = j}$ examples with the lowest
+  self-confidence $\hat p(\tilde y = i; \xvec)$.
+- **Prune by noise rate.** For each off-diagonal entry, remove the $n\hat Q_{\tilde y = i, y^\ast = j}$ examples labelled $i$ with
+  the largest margin $\hat p(\tilde y = j; \xvec) - \hat p(\tilde y = i; \xvec)$.
+- **Both.** Remove only examples that both previous rules remove.
+
+After pruning, the loss of class $i$ is reweighted by $\hat Q_{y^\ast = i}/\hat Q_{\tilde y = i, y^\ast = i}$ to restore the latent
+class sizes. Rank pruning is the earlier binary version of the same idea <Cite id="northcutt2017" />.
+
+### Training dynamics
+
+A second family uses how examples behave during training. Deep networks fit clean, consistent patterns before they
+memorise wrong labels <Cite id="arpit2017" />.
+
+- **Small-loss selection.** Early in training, examples with large loss are disproportionately mislabelled.
+  Co-teaching trains two networks; each selects the small-loss examples in a mini-batch and passes them to the other to
+  train on, so that the two do not reinforce their own selection errors <Cite id="han2018" />.
+- **Area under the margin (AUM).** For an example with given label $\tilde y$ and logits $z_1(t), \dots, z_m(t)$ at epoch
+  $t$, the margin is $z_{\tilde y}(t) - \max_{i \ne \tilde y}z_i(t)$. Its average over epochs is the AUM. Correct examples
+  quickly gain positive margins; mislabelled ones stay low or negative, because their features pull towards another
+  class. Pleiss et al. set the cut-off by adding an extra class populated with deliberately mislabelled examples and
+  flagging examples whose AUM falls below a high percentile of those examples' AUM <Cite id="pleiss2020" />. On WebVision50 their method
+  removed 17% of the training data and improved test error by 1.6% (absolute); on CIFAR100, removing 13% reduced error
+  by 1.2%.
+
+### Cleaning test sets
+
+Northcutt, Athalye and Mueller ran confident learning on the test sets of 10 benchmarks and had crowd workers check the
+flagged candidates. On average across the data sets, 51% of the algorithmically flagged candidates were indeed
+mislabelled <Cite id="northcutt2021pervasive" />. The errors change which model looks best. On ImageNet with corrected
+labels, ResNet-18 outperforms ResNet-50 if the prevalence of originally mislabelled test examples increases by just 6%.
+On CIFAR-10, VGG-11 outperforms VGG-19 if it increases by 5%.
+
+## Worked example
+
+The confident-learning paper's illustration has three classes, dog, fox and cow, and 400 examples. The confident joint,
+with rows the given label and columns the estimated true label, is
+
+| given $\backslash$ true | dog | fox | cow | given total |
+| --- | --- | --- | --- | --- |
+| dog | 100 | 40 | 20 | 160 |
+| fox | 56 | 60 | 0 | 116 |
+| cow | 32 | 12 | 80 | 124 |
+
+Its rows already sum to the given-label counts, so the calibration leaves it unchanged and $\hat Q = C/400$.
+
+- **Label errors.** The off-diagonal entries sum to $40 + 20 + 56 + 32 + 12 = 160$, an estimated 40% of the labels.
+  The largest single type is 56 examples labelled fox that are dogs.
+- **Latent prior.** Column sums of $\hat Q$: dog $0.47$, fox $0.28$, cow $0.25$. The given labels say $0.40$, $0.29$ and
+  $0.31$.
+- **Transition matrix.** $\hat Q_{\tilde y = \text{fox} \mid y^\ast = \text{dog}} = 0.14/0.47 = 0.298$: about 30% of dogs are
+  labelled fox. $\hat Q_{\tilde y = \text{cow} \mid y^\ast = \text{cow}} = 0.20/0.25 = 0.80$.
+- **Pruning by noise rate** removes, for instance, the 56 fox-labelled examples with the largest margin
+  $\hat p(\text{dog}) - \hat p(\text{fox})$.
+
+## Cost
+
+Confident learning needs out-of-sample probabilities, which cost $K$ model fits for $K$-fold cross-validation. Given the
+probabilities, the thresholds and the confident joint take $O(nm + m^2)$ time and storage for $n$ examples and $m$ classes.
+Training-dynamics methods need one training run (two for co-teaching) and logging of per-example losses or margins.
+
+## Trade-offs
+
+- **Hard examples look like errors.** An example near the class boundary, or genuinely ambiguous, has low
+  self-confidence whether or not its label is right. Pruning it removes information about the boundary. Without
+  assumptions on the class distributions, a mislabelled example cannot be told apart from a correct one with
+  $0 < \eta(\xvec) < 1$ <Cite id="frenay2014" />.
+- **Detection assumes class-conditional noise.** Confident learning's guarantees assume the noise depends only on the
+  true class. Whether the noise is class-conditional at all can be tested; see
+  <NoteLink to="hypothesis-testing-for-class-conditional-label-noise">hypothesis testing for class-conditional label
+  noise</NoteLink>.
+- **Remove, reweight or relabel.** Removing flagged examples is cheap and irreversible. Relabelling by a person is the
+  most accurate and costs annotation time; the test-set study found about half of the flagged candidates were real
+  errors, so human review of candidates is far cheaper than reviewing everything.
+- **The model's biases become the cleaner's biases.** A detector trained on the data flags what it cannot fit. Errors
+  that are systematic and learnable, such as one annotator's consistent confusion, may not be flagged.

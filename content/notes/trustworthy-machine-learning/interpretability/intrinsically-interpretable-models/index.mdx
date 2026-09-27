@@ -1,0 +1,146 @@
+---
+title: Intrinsically interpretable models
+kind: concept
+summary: 'An intrinsically interpretable model is constrained so that its structure is its explanation: sparse linear models, additive models $g(\mu) = \beta_0 + \sum_j f_j(x_j)$, short rule lists and trees, and MIL pooling that writes a time-series prediction as a sum of per-time-point scores.'
+tags: [interpretability, explainability, time-series, worked-example]
+aliases: [interpretable model, glass-box model, white-box model, rule list, Bayesian rule lists, CORELS, certifiably optimal rule list, MIL pooling for interpretability]
+requires: [logistic-regression]
+partOf: [interpretability]
+related: [lasso, generalised-additive-model, explainable-boosting-machines, decision-tree, gam-interpretation, shapelets, millet, multiple-instance-learning]
+references: [caruana2015, rudin2019, tibshirani1996, lou2013, nori2019, letham2015, angelino2017, early2024, ilse2018, zhou2016]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+An **intrinsically interpretable model** is a model whose form is restricted so that a person can read from it how
+each prediction is made, without a second explanation model. Common forms are sparse linear models, generalised
+additive models, decision trees, rule lists and scoring systems. The restriction is on the model class; the fitted
+parameters or rules are the explanation, so the explanation is faithful by construction <Cite id="rudin2019" />.
+</Definition>
+
+## Why constrain the model
+
+A post-hoc explanation approximates a black box and can be wrong about it. Rudin argues that for high-stakes decisions
+on tabular data with meaningful features, interpretable models are often as accurate as black boxes, so the black box
+buys little and costs faithfulness <Cite id="rudin2019" />. Interpretable models also expose errors in the data: a
+readable model of pneumonia risk learned that asthma lowers the risk, because asthmatic patients were sent straight to
+intensive care. The readable term exposed a pattern that a deployed black box would have acted on silently
+<Cite id="caruana2015" />.
+
+## Sparse linear models
+
+A linear model $g(\expect[y \mid \xvec]) = \beta_0 + \sum_j \beta_j x_j$ explains each prediction as a sum of per-feature
+terms $\beta_j x_j$, and the whole model by its coefficients. It is readable when few coefficients are nonzero. The
+<NoteLink to="lasso">lasso</NoteLink> penalty $\lambda\sum_j\abs{\beta_j}$ sets coefficients exactly to zero and so
+selects the features <Cite id="tibshirani1996" />. Coefficients are comparable only when features are on comparable
+scales, and a coefficient is the effect of its feature with the others held fixed, which can differ from the feature's
+marginal association with $y$.
+
+## Additive models
+
+A <NoteLink to="generalised-additive-model">generalised additive model</NoteLink> replaces each linear term by a
+smooth function, $g(\expect[y \mid \xvec]) = \beta_0 + \sum_j f_j(x_j)$. Each $f_j$ is a curve that can be plotted, and a
+prediction is the sum of the curves' values at the input, so the per-feature contributions add up exactly to the
+linear predictor. **Explainable boosting machines** fit the $f_j$ by cyclic boosting of shallow trees and add a few
+pairwise terms $f_{jk}(x_j, x_k)$, each shown as a heatmap <Cite id="lou2013" /> <Cite id="nori2019" />. See
+<NoteLink to="explainable-boosting-machines">explainable boosting machines</NoteLink> and
+<NoteLink to="gam-interpretation">interpreting GAMs</NoteLink>. Additivity is what makes the model readable: a model
+with arbitrary interactions among $d$ features has no low-dimensional picture.
+
+## Trees and rule lists
+
+A <NoteLink to="decision-tree">decision tree</NoteLink> explains a prediction by the path from the root to a leaf. A
+**rule list** is an ordered chain "if $r_1$ then $\hat y_1$, else if $r_2$ then $\hat y_2$, …, else $\hat y_0$", where each
+$r_k$ is a conjunction of conditions on the features. The first rule that holds decides the prediction.
+
+**Bayesian rule lists.** Letham et al. place a prior over rule lists that favours short lists with short rules, choose
+the rules from pre-mined frequent patterns, and sample the posterior. On stroke prediction for patients with atrial
+fibrillation they report a model as interpretable as the clinical CHADS2 score but more accurate
+<Cite id="letham2015" />.
+
+**Certifiably optimal rule lists.** CORELS minimises the regularised risk
+
+$$
+R(d) = \ell(d) + \lambda K
+$$
+
+over rule lists $d$, where $\ell(d)$ is the fraction of training points misclassified, $K$ the number of rules and
+$\lambda$ the price of a rule in training error <Cite id="angelino2017" />. It searches the tree of rule lists by branch
+and bound. Let $d_p$ be a prefix of $K_p$ rules and $\ell_p(d_p)$ the fraction of training points that are captured by
+one of its rules and misclassified. Every list that starts with $d_p$ misclassifies those points too and has at least
+$K_p$ rules, so its risk is at least
+
+$$
+b(d_p) = \ell_p(d_p) + \lambda K_p.
+$$
+
+If $b(d_p)$ is no smaller than the risk of the best list found so far, no extension of $d_p$ can beat that list, and the
+whole subtree of extensions is pruned. With this and further bounds, CORELS returns a rule list together with a
+certificate that no list has lower risk <Cite id="angelino2017" />.
+
+## Worked example: pruning a rule-list search
+
+Take $\lambda = 0.01$. The best list found so far has 2 rules and training error $0.12$, so its risk is
+$0.12 + 0.02 = 0.14$.
+
+- A prefix of 3 rules whose captured points include misclassified ones making up $0.115$ of the data has bound
+  $b = 0.115 + 0.03 = 0.145 \ge 0.14$. Every list that starts with it is pruned without being evaluated.
+- A prefix of 1 rule with captured error $0.05$ has $b = 0.05 + 0.01 = 0.06 < 0.14$. Its extensions stay in the search.
+
+## Multiple instance pooling for time series
+
+A deep time-series classifier maps a series $\Xmat_i = (\xvec_i^1, \dots, \xvec_i^t)$ of $t$ time points to a class. A
+convolutional backbone $\psi_{FE}$ produces one embedding $\zvec_i^j \in \reals^d$ per time point. Standard models average
+the embeddings over time (global average pooling) and apply a classifier $\psi_{CLF}$:
+$\hat\Ymat_i = \psi_{CLF}\big(\frac1t\sum_{j} \zvec_i^j\big)$. The averaging discards which time points mattered.
+
+**MILLET** (multiple instance learning for locally explainable time-series classification) treats each series as a
+bag in the sense of <NoteLink to="multiple-instance-learning">multiple instance learning</NoteLink>, with the time points as its instances, and replaces the averaging by a
+pooling that produces a prediction for each time point <Cite id="early2024" />. The weakly supervised side of the method is in
+<NoteLink to="millet">MILLET</NoteLink>. With an attention head
+$a_i^j = \psi_{ATTN}(\zvec_i^j) \in [0, 1]$, the four poolings are:
+
+| pooling | time-point output | series prediction $\hat\Ymat_i$ |
+| --- | --- | --- |
+| Attention <Cite id="ilse2018" /> | $a_i^j$ | $\psi_{CLF}\big(\frac1t\sum_j a_i^j\zvec_i^j\big)$ |
+| Instance | $\hat\yvec_i^j = \psi_{CLF}(\zvec_i^j)$ | $\frac1t\sum_j \hat\yvec_i^j$ |
+| Additive | $\hat\yvec_i^j = \psi_{CLF}(a_i^j\zvec_i^j)$ | $\frac1t\sum_j \hat\yvec_i^j$ |
+| Conjunctive | $\hat\yvec_i^j = \psi_{CLF}(\zvec_i^j)$ | $\frac1t\sum_j a_i^j\hat\yvec_i^j$ |
+
+For Instance, Additive and Conjunctive pooling the series prediction is an average of per-time-point class scores
+($\hat\yvec_i^j$, or $a_i^j\hat\yvec_i^j$ for Conjunctive). The score of time point $j$ for class $c$ is therefore its exact
+additive share of the class-$c$ output, as a term of an additive model is a share of the linear predictor. A positive
+score supports class $c$ and a negative one refutes it. The explanation comes from the same forward pass as the
+prediction. Attention pooling gives only $a_i^j$, a weight that is the same for every class, so it cannot say which class
+a time point supports <Cite id="early2024" />. In Conjunctive pooling, which Early et al. introduce, attention and
+classification are applied to the embeddings in parallel, so a time point must be judged important by both heads to
+matter.
+
+The additivity is over time points, not over raw inputs: each embedding $\zvec_i^j$ depends on a window of the series
+through the convolutions, so a time point's score describes that window. On the WebTraffic synthetic data set, MILLET
+raised accuracy averaged over three backbones from $0.850$ to $0.874$ and produced its explanations over 800 times faster
+than SHAP. On 85 UCR data sets, Conjunctive pooling raised mean accuracy over global average pooling from
+$0.841 \pm 0.009$ to $0.846 \pm 0.009$ <Cite id="early2024" />. By comparison, class activation mapping
+<Cite id="zhou2016" /> also reads time-point scores from one forward pass, but post hoc, from the weights of a model
+trained with global average pooling.
+
+**Worked example.** A series of $t = 4$ time points has attention $\avec = (0.1, 0.9, 0.8, 0.1)$ and time-point scores for
+class $c$ of $(-0.5, 2.0, 1.5, 0.2)$. Conjunctive pooling gives contributions $a^j\hat y^j_c = (-0.05, 1.8, 1.2, 0.02)$ and
+the series score $(-0.05 + 1.8 + 1.2 + 0.02)/4 = 0.7425$. Time points 2 and 3 contribute $3.0$ of the total $2.97$.
+Time point 1 weakly refutes class $c$.
+
+## Assumptions
+
+- The features are meaningful to the reader. A sparse linear model over thousands of pixel values is not readable.
+- The constrained class is accurate enough for the task. On images, audio and text, the most accurate models are not
+  sparse or additive in the raw inputs.
+
+## Pitfalls
+
+- **Interpretable is not causal.** A readable model shows what it learned from the data, including confounded
+  associations.
+- **Size limits.** A tree with hundreds of leaves or a GAM with hundreds of terms is interpretable in principle and not
+  in practice. Sparsity is part of interpretability.
+- **Collinearity.** When features are correlated, the split of credit between their coefficients or shape functions is
+  unstable across refits.

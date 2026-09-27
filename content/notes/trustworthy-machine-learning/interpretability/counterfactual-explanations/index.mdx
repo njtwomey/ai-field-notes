@@ -1,0 +1,119 @@
+---
+title: Counterfactual explanations
+kind: concept
+summary: 'A counterfactual explanation of a prediction $f(\xvec)$ is a nearby input $\xvec^\prime$ that the model classifies as a desired outcome, found by minimising $\lambda\,(f(\xvec^\prime) - y^\prime)^2 + d(\xvec, \xvec^\prime)$. It states the smallest change that would have altered the decision.'
+tags: [interpretability, explainability, optimisation, worked-example]
+aliases: [counterfactual explanation, algorithmic recourse, actionable recourse, contrastive explanation, DiCE]
+requires: [logistic-regression, vector-norms]
+partOf: [interpretability]
+related: [lasso, linear-programming, gradient-descent, adversarial-examples, fairness-criteria]
+references: [wachter2017, ustun2019, mothilal2020, molnar2022]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Given a model $f$, an input $\xvec$ and a desired output $y^\prime$ different from the model's output at $\xvec$, a
+**counterfactual explanation** is an input $\xvec^\prime$ that is close to $\xvec$ under a distance $d$ and for which
+$f(\xvec^\prime)$ is close to $y^\prime$. Wachter, Mittelstadt and Russell find it by solving
+$\argmin_{\xvec^\prime}\max_{\lambda}\ \lambda\,(f(\xvec^\prime) - y^\prime)^2 + d(\xvec, \xvec^\prime)$ <Cite id="wachter2017" />.
+The explanation reads: "had your features been $\xvec^\prime$ instead of $\xvec$, the decision would have been $y^\prime$."
+</Definition>
+
+## Intuition
+
+A person refused a loan wants to know what would have changed the decision, not the model's internal weights. A
+counterfactual answers that question in the person's own features: "with an income £17,000 higher, the loan would have
+been approved." It needs no access to the model's internals, only the ability to evaluate $f$, and it makes no claim
+about the model's behaviour away from $\xvec$ <Cite id="wachter2017" />.
+
+## The objective
+
+The search must satisfy two demands at once. **Validity**: $f(\xvec^\prime)$ must reach the target $y^\prime$.
+**Proximity**: $\xvec^\prime$ must be close to $\xvec$, so that the change is small. Wachter et al. combine them in a
+penalised objective
+
+$$
+L(\xvec^\prime, \lambda) = \lambda\,\big(f(\xvec^\prime) - y^\prime\big)^2 + d(\xvec, \xvec^\prime).
+$$
+
+For a fixed $\lambda$ the minimiser trades a remaining prediction error against the size of the change. A larger
+$\lambda$ weights validity more. The outer maximisation over $\lambda$ is carried out in practice by minimising for a
+fixed $\lambda$, then increasing $\lambda$ until $\abs{f(\xvec^\prime) - y^\prime} \le \epsilon$ for a chosen tolerance
+$\epsilon$ <Cite id="wachter2017" />. For a differentiable $f$ the inner problem is solved by
+<NoteLink to="gradient-descent">gradient descent</NoteLink> on $\xvec^\prime$, started at $\xvec$.
+
+**The distance.** Features have different units, so a raw Euclidean distance lets the feature with the largest scale
+dominate. Wachter et al. use the $\ell_1$ distance weighted by each feature's inverse **median absolute deviation**
+$\mathrm{MAD}_j = \operatorname{median}_i \abs{x_{ij} - \operatorname{median}_l x_{lj}}$ over the training data:
+
+$$
+d(\xvec, \xvec^\prime) = \sum_{j=1}^d \frac{\abs{x_j - x^\prime_j}}{\mathrm{MAD}_j}.
+$$
+
+The median absolute deviation is a robust measure of each feature's spread. The $\ell_1$ form makes the counterfactual
+**sparse**: it changes few features, which makes the explanation short.
+
+## Why the weighted $\ell_1$ distance changes one feature
+
+Take a linear score $s(\xvec) = \wvec^\top\xvec + b$ with decision $s \ge 0$, and an input with $s(\xvec) < 0$. The
+smallest valid change $\deltavec = \xvec^\prime - \xvec$ solves
+
+$$
+\min_{\deltavec}\ \sum_j \frac{\abs{\delta_j}}{\mathrm{MAD}_j} \quad \text{subject to} \quad \wvec^\top\deltavec = -s(\xvec).
+$$
+
+Changing feature $j$ alone by $\delta_j = -s(\xvec)/w_j$ satisfies the constraint at cost
+$\abs{s(\xvec)}/(\abs{w_j}\,\mathrm{MAD}_j)$. A change spread over several features raises the score by
+$\sum_j w_j\delta_j \le \sum_j \big(\abs{w_j}\,\mathrm{MAD}_j\big)\big(\abs{\delta_j}/\mathrm{MAD}_j\big) \le \max_j\big(\abs{w_j}\,\mathrm{MAD}_j\big)\sum_j \abs{\delta_j}/\mathrm{MAD}_j$.
+So reaching the required increase $\abs{s(\xvec)}$ costs at least $\abs{s(\xvec)}/\max_j(\abs{w_j}\,\mathrm{MAD}_j)$, which
+the single change to the feature with the largest $\abs{w_j}\,\mathrm{MAD}_j$ attains. The optimum changes one feature,
+the one that moves the score most per unit of typical variation. This is a
+<NoteLink to="linear-programming">linear program</NoteLink>, whose optimum lies at a vertex of the weighted $\ell_1$
+ball, and the vertices lie on the coordinate axes. The same geometry makes the <NoteLink to="lasso">lasso</NoteLink>
+sparse. With the Euclidean distance the optimum is instead the orthogonal projection onto the boundary,
+$\deltavec = -s(\xvec)\,\wvec/\norm{\wvec}^2$, which changes every feature with a nonzero weight.
+
+## Worked example
+
+A credit model has score $s = 0.6\,x_1 - 0.9\,x_2 - 1$, with $x_1$ the income in units of £10,000 and $x_2$ the
+number of open loans, and approves when $s \ge 0$. An applicant has $\xvec = (3, 2)$, so $s = 1.8 - 1.8 - 1 = -1$:
+refused. On the training data $\mathrm{MAD}_1 = 1.5$ and $\mathrm{MAD}_2 = 0.5$.
+
+- **Per-feature costs.** $\abs{w_1}\,\mathrm{MAD}_1 = 0.9$ and $\abs{w_2}\,\mathrm{MAD}_2 = 0.45$. Income moves the score
+  more per unit of typical variation.
+- **Weighted $\ell_1$ counterfactual.** Raise income by $1/0.6 = 1.67$ units, to $x_1^\prime = 4.67$ (£46,700), at cost
+  $1.67/1.5 = 1.11$. Reducing loans instead needs $\delta_2 = -1/0.9 = -1.11$ at cost $1.11/0.5 = 2.22$.
+- **Euclidean counterfactual.** $\deltavec = (0.6, -0.9)/1.17 = (0.513, -0.769)$, giving $\xvec^\prime = (3.51, 1.23)$. It
+  changes both features and asks for a fractional number of loans, which the weighted $\ell_1$ answer avoids here.
+
+## Desiderata beyond proximity
+
+- **Plausibility.** $\xvec^\prime$ should look like real data. An unconstrained search can return inputs off the data
+  manifold, such as an image changed by imperceptible noise, which is an
+  <NoteLink to="adversarial-examples">adversarial example</NoteLink> rather than an explanation. Penalties on
+  the density of $\xvec^\prime$ or searches restricted to observed points address this.
+- **Actionability.** Some features cannot be changed (age, place of birth) or can change in only one direction
+  (education level). **Algorithmic recourse** restricts the search to actions the person can take. Ustun, Spangher and
+  Liu solve this exactly for linear classifiers as an integer program, and show that some models give certain people
+  no recourse at all <Cite id="ustun2019" />.
+- **Diversity.** One counterfactual may suggest an impossible change. DiCE returns a set of counterfactuals, adding a
+  determinantal-point-process term that rewards their spread <Cite id="mothilal2020" />.
+- **Causality.** Changing one feature can change others in the world: a raised income alters the debt ratio. A
+  counterfactual computed feature by feature ignores these effects.
+
+## Assumptions
+
+- The model is fixed. A counterfactual holds for the model that produced it and can become invalid when the model is
+  retrained.
+- The distance $d$ reflects how hard each change is for the person. The median absolute deviation is a statistical
+  proxy for that cost, not a measure of effort.
+
+## Pitfalls
+
+- **Many valid counterfactuals.** The objective is not convex for a nonlinear $f$, and different starting points give
+  different answers. Presenting one of them as "the" explanation hides the others <Cite id="molnar2022" />.
+- **Revealing the model.** A stream of counterfactuals near the boundary reveals the decision boundary, which may be
+  confidential or exploitable.
+- **Explanation is not justification.** A counterfactual says what would change the decision. It does not say whether
+  the decision was fair; see <NoteLink to="fairness-criteria">fairness criteria</NoteLink>.

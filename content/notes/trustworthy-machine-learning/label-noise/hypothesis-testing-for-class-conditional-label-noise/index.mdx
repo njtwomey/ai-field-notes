@@ -1,0 +1,268 @@
+---
+title: Hypothesis testing for class-conditional label noise
+kind: test
+summary: 'A z-test of $H_0\colon \alpha = \beta$ (uniform label noise) against class-conditional noise. At anchor points with true posterior $1/2$, the noisy posterior is $(1 - \alpha + \beta)/2$; logistic regression estimates it with asymptotic variance $\frac{1}{16}\xvec^\top\hat\Hmat_n\xvec$.'
+tags: [hypothesis-testing, label-noise, classification, logistic-regression, worked-example]
+aliases: [test for class-conditional label noise, anchor-point z-test, anchor points with posterior one half, label noise hypothesis test]
+requires: [label-noise-models, logistic-regression, z-test]
+related: [local-maximum-likelihood-noise-test, estimating-noise-rates, learning-with-noisy-labels, type-i-and-type-ii-errors, p-value, ratio-metrics-and-delta-method]
+references: [poyiadzi2022, vandervaart2000, casella2002, ghosh2015, natarajan2013, frenay2014, patrini2017, scott2013]
+status: draft
+updated: 2026-09-27
+---
+
+import { NoisyBoundary } from '../_shared/NoisyBoundary'
+
+<Definition>
+The **hypothesis test for class-conditional label noise** of Poyiadzi, Yang, Twomey and Santos-Rodriguez asks whether a
+binary data set with labels $\tilde y \in \set{-1, 1}$ was corrupted by class-conditional noise, flip rates
+$\alpha = \Pr(\tilde Y = -1 \mid Y = 1)$ and $\beta = \Pr(\tilde Y = 1 \mid Y = -1)$ with $\alpha \ne \beta$, as opposed to
+uniform noise, $\alpha = \beta$ <Cite id="poyiadzi2022" />. It needs **anchor points** supplied by an expert: inputs whose
+true posterior $\eta(\xvec) = \Pr(Y = 1 \mid X = \xvec)$ is $1/2$. A logistic regression fitted to the noisy data predicts
+$\hat\eta$ at the anchors. Under uniform noise $\hat\eta$ is asymptotically normal around $1/2$ with a variance known
+from maximum-likelihood theory, which gives a two-sided z-test.
+</Definition>
+
+## Why test
+
+Under uniform noise with rate $\tau < 1/2$ the noisy posterior is $\tilde\eta = (1 - 2\tau)\eta + \tau$, so
+$\tilde\eta > 1/2$ exactly when $\eta > 1/2$ and the Bayes classifier is unchanged. Under class-conditional noise,
+$\tilde\eta = (1 - \alpha - \beta)\eta + \beta$, and the noisy Bayes classifier thresholds the clean posterior at
+$(1/2 - \beta)/(1 - \alpha - \beta) \ne 1/2$, which biases learning (see <NoteLink to="label-noise-models">label noise
+models</NoteLink>). The paper's motivating example is a medical case-control study in which cases and controls are
+labelled with different tests <Cite id="frenay2014" />.
+
+Earlier work estimates the noise rates directly, from anchor points whose posterior is 0 or 1
+<Cite id="scott2013" /> <Cite id="patrini2017" />. Poyiadzi et al. note that such estimates are hard to obtain in practice
+and say nothing about how far to trust them. The test answers a narrower question with a measure of evidence: is there
+class-conditional noise at all? It is meant to run after annotation and before learning. A rejection can lead to
+relabelling, to noise-robust training, or to dropping the data set.
+
+## Anchor points at one half
+
+The paper defines an anchor point as an input whose true posterior is provided. $\Acal^k_s$ is a set of $k$ anchors with
+$\eta(\xvec) = s$. Applying $\tilde\eta = (1 - \alpha - \beta)\eta + \beta$ to the three useful values:
+
+| anchors | clean posterior | noisy posterior |
+| --- | --- | --- |
+| $\Acal^k_1$ | $1$ | $1 - \alpha$ |
+| $\Acal^k_{1/2}$ | $1/2$ | $(1 - \alpha + \beta)/2$ |
+| $\Acal^k_0$ | $0$ | $\beta$ |
+
+The first and last rows are the anchors of noise-rate estimation. The test uses the middle row. Under uniform noise,
+$\alpha = \beta = \tau$ and the noisy posterior at an $\Acal_{1/2}$ anchor is $(1 - \tau + \tau)/2 = 1/2$, as it is without
+noise. Under class-conditional noise it moves to $(1 - \alpha + \beta)/2$, away from $1/2$ by $(\beta - \alpha)/2$. An
+$\Acal_{1/2}$ anchor is an input on which an expert could not do better than a coin flip.
+
+## Hypotheses
+
+$$
+H_0\colon \alpha = \beta \qquad\text{against}\qquad H_1\colon \alpha \ne \beta.
+$$
+
+The null is uniform noise, including no noise. The alternative is left implicit: the test uses its form only to compute
+power.
+
+## Assumptions
+
+- **Logistic model.** Inputs are augmented, $\xvec \to (1, \xvec)$, and the labels follow
+  $y_i \sim \Bern(\eta_i)$ with $\eta_i = \sigma(\thetavec_0^\top\xvec_i) = 1/(1 + \exp(-\thetavec_0^\top\xvec_i))$. The
+  asymptotic results of maximum likelihood hold.
+- **Instance-independent noise.** $\Pr(\tilde Y = -i \mid Y = i, X = \xvec) = \Pr(\tilde Y = -i \mid Y = i)$ for $i \in \set{-1, 1}$.
+- **Bounded noise.** Uniform noise has $\tau < 0.5$; class-conditional noise has $\alpha + \beta < 1$.
+- **Anchors.** The user supplies $k \ge 1$ anchors with $\eta(\xvec) = 1/2$ exactly (strict) or approximately (relaxed).
+
+## Test statistic
+
+### Asymptotic distribution of the fitted posterior
+
+The maximum-likelihood estimate $\hat\thetavec_n$ of logistic regression on $n$ points satisfies
+$\sqrt n(\hat\thetavec_n - \thetavec_0) \to \Gauss(\zeros, \Imat(\thetavec_0)^{-1})$ in distribution, where $\Imat$ is the Fisher information
+<Cite id="vandervaart2000" />. The fitted posterior at $\xvec$ is the smooth function $\hat\eta(\xvec) = \sigma(\hat\thetavec_n^\top\xvec)$,
+with gradient
+
+$$
+\nabla_{\thetavec}\,\sigma(\thetavec^\top\xvec) = \sigma(\thetavec^\top\xvec)\big(1 - \sigma(\thetavec^\top\xvec)\big)\,\xvec = \eta(\xvec)\big(1 - \eta(\xvec)\big)\,\xvec.
+$$
+
+The delta method (a first-order Taylor expansion of $\hat\eta$ around $\thetavec_0$; see
+<NoteLink to="ratio-metrics-and-delta-method">the delta method</NoteLink>) gives
+
+$$
+\sqrt n\big(\hat\eta(\xvec) - \eta(\xvec)\big) \to \Gauss\Big(0,\ \big[\eta(\xvec)\{1 - \eta(\xvec)\}\big]^2\,\xvec^\top\Imat(\thetavec_0)^{-1}\xvec\Big).
+$$
+
+The variance factor $[\eta(1 - \eta)]^2$ vanishes at $\eta \in \set{0, 1}$, so the result is useless at the anchors of
+noise-rate estimation. At $\eta = 1/2$ it is at its maximum, $(1/4)^2 = 1/16$. Replacing the Fisher information by the
+observed information of the fit, the paper writes
+
+$$
+\hat\eta(\xvec) \sim \Gauss\Big(\frac12,\ \frac{1}{16}\,\xvec^\top\hat\Hmat_n\xvec\Big), \qquad \hat\Hmat_n = (\Xmat^\top\Dmat\Xmat)^{-1},
+$$
+
+where $\Xmat$ is the $n \times (d + 1)$ design matrix and $\Dmat$ is diagonal with $D_{ii} = \hat\eta_i(1 - \hat\eta_i)$,
+$\hat\eta_i = \sigma(\xvec_i^\top\hat\thetavec)$. $\hat\Hmat_n$ is the estimated covariance of $\hat\thetavec_n$.
+
+### Under the null and the alternative
+
+For an anchor $\xvec \in \Acal^k_{1/2}$ the noisy posterior is $1/2$ under $H_0$, so the model fitted to noisy labels
+estimates $1/2$ and $[\tilde\eta(1 - \tilde\eta)]^2 = 1/16$ as without noise. Writing $v(\xvec) = \frac{1}{16}\xvec^\top\hat\Hmat\xvec$:
+
+$$
+H_0\colon\ \hat\eta(\xvec) \sim \Gauss\big(\tfrac12,\ v(\xvec)\big), \qquad H_1\colon\ \hat\eta(\xvec) \sim \Gauss\big(\tfrac{1 - \alpha + \beta}{2},\ \tilde v(\xvec)\big).
+$$
+
+Under $H_1$ the same delta-method argument applies at $\tilde\eta = (1 - \alpha + \beta)/2$, where
+$\tilde\eta(1 - \tilde\eta) = (1 - \alpha + \beta)(1 + \alpha - \beta)/4$, with the observed information $\hat{\tilde\Hmat}$ of the
+fit to the noisy labels.
+
+The test statistic is
+
+$$
+z = \frac{\hat\eta(\xvec) - 1/2}{\sqrt{v(\xvec)}},
+$$
+
+which is standard normal under $H_0$.
+
+## Decision rule
+
+At significance level $a$ (the paper writes $a$ for the size, to keep $\alpha$ for a noise rate), retain $H_0$ when
+
+$$
+z_{a/2}\sqrt{v(\xvec)} + \tfrac12 \le \hat\eta(\xvec) \le z_{1 - a/2}\sqrt{v(\xvec)} + \tfrac12,
+$$
+
+with $z_{a/2}$ and $z_{1-a/2}$ the lower and upper standard normal quantiles. Reject otherwise. The two-sided p-value is
+$2(1 - \Phi(\abs z))$, with $\Phi$ the standard normal CDF. Poyiadzi et al. frame the procedure in Neyman–Pearson terms
+and note that the p-value can also be reported as a continuous measure of evidence and combined with other information.
+
+## Effect size and power
+
+The effect is the shift $h = (\beta - \alpha)/2$ of the anchor's noisy posterior. Write $z = z_{1-a/2}$ and let $L$ and
+$U$ be the ends of the retention region. Under $H_1$, $\hat\eta = \frac12 + h + \sqrt{\tilde v}\,\epsilon$ with
+$\epsilon \sim \Gauss(0, 1)$, so the probability of wrongly retaining $H_0$ (the type II error) is
+
+$$
+b_1 = \Pr\Big(\frac{L - \frac12 - h}{\sqrt{\tilde v}} \le \epsilon \le \frac{U - \frac12 - h}{\sqrt{\tilde v}}\Big)
+= \Phi\Big(\frac{z\sqrt{v} + h}{\sqrt{\tilde v}}\Big) - \Phi\Big(\frac{-z\sqrt{v} + h}{\sqrt{\tilde v}}\Big).
+$$
+
+The last form is the paper's Proposition 3.1; it equals $\Phi\big((z\sqrt v - h)/\sqrt{\tilde v}\big) - \Phi\big((-z\sqrt v -
+h)/\sqrt{\tilde v}\big)$ because $\Phi(-t) = 1 - \Phi(t)$. The power is $1 - b_1$. It grows with $\abs{\beta - \alpha}$ and as
+$v$ shrinks, which happens as the sample size $n$ grows, since $\hat\Hmat_n$ scales as $1/n$.
+
+## Multiple anchors
+
+With $k$ strict anchors, average the fitted posteriors, $\bar\eta = \frac1k\sum_{i=1}^k\hat\eta_i$. Its mean is $1/2$
+under $H_0$. By the same delta method, the gradients at the anchors are $\xvec_i/4$, so
+$\cov(\hat\eta_i, \hat\eta_j) = \frac{1}{16}\xvec_i^\top\hat\Hmat\xvec_j$ (the paper obtains this from a second-order expansion).
+Summing all $k^2$ covariances,
+
+$$
+\var(\bar\eta) = \frac{1}{k^2}\sum_{i=1}^k\sum_{j=1}^k\frac{1}{16}\xvec_i^\top\hat\Hmat\xvec_j = \frac{1}{16}\,\bar\xvec^\top\hat\Hmat\bar\xvec,
+\qquad \bar\xvec = \frac1k\sum_{i=1}^k\xvec_i,
+$$
+
+and the test proceeds with $\bar\eta \sim \Gauss\big(\frac12, v(\bar\xvec)\big)$ under $H_0$.
+
+To see why more anchors help, the paper supposes the anchors are drawn independently at random from the set of all
+anchors, with coordinates, in an orthonormal basis aligned with $\thetavec_0$, of mean zero. Then the cross terms
+$\expect[\xvec_i^\top\Hmat\xvec_j]$, $i \ne j$, vanish, and
+
+$$
+\expect_S\, v(\bar\xvec) = \frac1k\,\expect_S\, v(\xvec),
+$$
+
+where $\expect_S$ averages over the choice of anchors. Substituting $v/k$ and $\tilde v/k$ into the power formula, with
+$h = (\beta - \alpha)/2$,
+
+$$
+\frac{b_k}{b_1} = \frac{\Phi\big((z\sqrt v + h\sqrt k)/\sqrt{\tilde v}\big) - \Phi\big((-z\sqrt v + h\sqrt k)/\sqrt{\tilde v}\big)}{\Phi\big((z\sqrt v + h)/\sqrt{\tilde v}\big) - \Phi\big((-z\sqrt v + h)/\sqrt{\tilde v}\big)} \le 1,
+$$
+
+so the type II error falls and the power rises with $k$. In the augmented representation every anchor shares the
+constant coordinate 1, which does not average out; the $1/k$ reduction applies to the part of the variance that varies
+between anchors.
+
+## Relaxed anchors
+
+Exact anchors are hard to find. The paper relaxes them to $\Acal^k_{1/2,\delta}$: $\eta(\xvec_i) = \frac12 + \epsilon_i$ with
+$\epsilon_i \sim \Unif([-\delta, \delta])$ and $0 \le \delta \ll 1$. For one anchor, the fitted posterior has mean $\frac12 +
+\epsilon$ given $\epsilon$, and mean $1/2$ over the choice of anchor. The delta-method variance factor becomes
+
+$$
+\big[\eta(1 - \eta)\big]^2 = \big[(\tfrac12 + \epsilon)(\tfrac12 - \epsilon)\big]^2 = \big(\tfrac14 - \epsilon^2\big)^2 \approx \frac{1}{16} - \frac{\epsilon^2}{2},
+$$
+
+ignoring terms beyond $\epsilon^2$. With $\expect\epsilon^2 = \delta^2/3$, the law of total variance gives
+
+$$
+\var(\bar\eta) = \expect\big[\var(\bar\eta \mid \epsilon)\big] + \var\big(\expect[\bar\eta \mid \epsilon]\big) = \Big(\frac{1}{16} - \frac{\delta^2}{6}\Big)\bar\xvec^\top\Hmat\bar\xvec + \frac{\delta^2}{3k}.
+$$
+
+Dropping the $\delta^2$ terms returns $\bar\eta \approx \Gauss\big(\frac12, \frac{1}{16}\bar\xvec^\top\Hmat\bar\xvec\big)$, and the same test is
+used. The price is a type I error above the nominal level: each relaxed anchor shifts the centre of the retention
+region by its $\epsilon_i$. The shift averages out, and its variance $\delta^2/(3k)$ falls, as $k$ grows.
+
+## Without anchors
+
+Points drawn at random have $\expect_{p(X)}\eta(X) = \pi$, the class prior, so their fitted posteriors are centred on an
+unknown $\pi$ rather than the known $1/2$. That is why the test needs anchors. If the clean prior $\pi$ is known, the
+noisy prior $\tilde\pi = \Pr(\tilde y = 1) = (1 - \alpha - \beta)\pi + \beta$ allows a binomial test for label noise that
+does not rely on maximum-likelihood asymptotics; the paper leaves this to an appendix.
+
+## Experiments
+
+The paper's synthetic data are two Gaussian classes with means $[1, 1]^\top$ and $[-1, -1]^\top$ and identity covariance.
+The anchors lie on the line $x_2 = -x_1$, drawn uniformly with $x_1 \in [-4, 4]$. The factors varied are the training size
+$N \in \set{500, 1000, 2000, 5000}$, the difference $\alpha - \beta \in \set{-0.05, 0.10, 0.20}$, the number of anchors
+$k \in \set{1, 2, 4, 8, 16, 32}$ and the relaxation $\delta \in \set{0, 0.05, 0.10}$. Each combination of $N$ and
+$\alpha - \beta$ is run 500 times, each time fitting logistic regression to a clean and to a corrupted copy of the data.
+The reported findings:
+
+- **Sample size.** Power increases with $N$, as the variance of $\hat\thetavec$ vanishes.
+- **Noise difference.** Power increases with $\abs{\alpha - \beta}$, as Proposition 3.1 predicts.
+- **Number of anchors.** Power increases with $k$, as the ratio $b_k/b_1$ predicts.
+- **Null behaviour.** With strict anchors, p-values on clean data are uniform, so the type I error equals the level $a$.
+- **Relaxation.** Relaxed anchors raise the type I error, and more anchors bring it back down. Power is not affected
+  significantly, and the effect shrinks as $k$ grows.
+
+The figure repeats the setup in the browser. Under uniform noise (tie $\beta$ to $\alpha$) the fitted posterior at the
+anchors stays near $1/2$. Under class-conditional noise the z-score grows with $N$, $k$ and $\abs{\alpha - \beta}$.
+
+<NoisyBoundary withTest />
+
+In a separate simulation of the same setup (300 runs per cell, level 0.05, $\alpha = 0$ and $\beta = 0.1$), the
+rejection rate was 0.45 with one anchor, 0.89 with 8 and 0.98 with 32 at $N = 1000$. On clean labels and under uniform
+noise with $\tau = 0.1$ it stayed between 0.02 and 0.06.
+
+## Worked example
+
+A logistic regression is fitted to $N = 1000$ noisy labels. Eight strict anchors give $\bar\eta = 0.553$ and
+$\bar\xvec^\top\hat\Hmat\bar\xvec = 0.0096$.
+
+- **Null variance.** $v = 0.0096/16 = 0.0006$, so $\sqrt v = 0.0245$.
+- **Statistic.** $z = (0.553 - 0.5)/0.0245 = 2.16$, two-sided $p = 0.030$.
+- **Decision.** At $a = 0.05$ the retention region is $[0.452, 0.548]$; $0.553$ lies outside it, so $H_0$ is rejected in
+  favour of class-conditional noise.
+- **Power.** For $\alpha = 0$ and $\beta = 0.1$, $h = 0.05$ and
+  $\tilde v = v\,[(1.1)(0.9)]^2 = 0.000588$. Then $b_1 = \Phi(4.04) - \Phi(0.08) = 0.467$ and the power is $0.53$.
+
+## Pitfalls
+
+- **Model misspecification.** The null distribution relies on the logistic model being correct. Under the null with
+  $\alpha = \beta > 0$, the noisy posterior $(1 - 2\tau)\eta + \tau$ is no longer a logistic function of a linear score,
+  so the model is misspecified even if it was correct for clean labels. The paper suggests the Huber sandwich estimator
+  of the covariance as a remedy. When the true boundary is not linear, the test can reject on clean data; the
+  <NoteLink to="local-maximum-likelihood-noise-test">local maximum-likelihood test</NoteLink> addresses this.
+- **Beyond logistic regression.** Richer models can be built by polynomial feature expansion. Extending the test to
+  model classes such as Gaussian processes is open.
+- **Multi-class problems.** They reduce to binary ones (one-vs-all, all-vs-all, error-correcting output codes), but what
+  $\eta = 1/2$ means for an anchor is then unclear.
+- **Finding anchors.** Anchors must be supplied by experts. Relaxed anchors inflate the type I error unless there are
+  many.
+- **Instance-dependent noise.** The test addresses class-conditional noise. The paper suggests anchors on other contours,
+  such as $\eta \in \set{0.2, 0.3, \dots, 0.7}$, as a route to tests for instance-dependent noise.
+- **Rejecting is not estimating.** A rejection says the flip rates differ, not by how much or in which direction the
+  boundary moved; the sign of $\bar\eta - 1/2$ gives the direction, and correcting still needs the rates (see
+  <NoteLink to="estimating-noise-rates">estimating noise rates</NoteLink>).

@@ -1,0 +1,151 @@
+---
+title: Certified robustness
+kind: concept
+summary: 'A certificate proves that no perturbation with $\norm{\deltavec} < R$ changes a prediction. Randomised smoothing predicts the class $f(\xvec + \epsilonvec)$ returns most often under noise $\epsilonvec \sim \Gauss(\zeros, \sigma^2\I)$; its $\ell_2$ radius is $\frac{\sigma}{2}(\Phi^{-1}(p_A) - \Phi^{-1}(p_B))$.'
+tags: [robustness, deep-learning, hypothesis-testing, security, worked-example]
+aliases: [randomised smoothing, randomized smoothing, certified defence, certified defense, provable robustness, certified radius, verified robustness, interval bound propagation, IBP]
+requires: [adversarial-examples, gaussian-distribution, neyman-pearson-lemma]
+related: [confidence-intervals, binomial-test, robustness-to-distribution-shift]
+references: [cohen2019, lecuyer2019, clopper1934, gowal2018, wong2018]
+status: draft
+updated: 2026-09-27
+---
+
+import { SmoothingCertificate } from './SmoothingCertificate'
+
+<Definition>
+A classifier $g$ is **certifiably robust** at $\xvec$ with radius $R$ if $g(\xvec + \deltavec) = g(\xvec)$ for every
+$\deltavec$ with $\norm{\deltavec}_2 < R$, and a procedure proves it. **Randomised smoothing** builds $g$ from any base
+classifier $f : \reals^d \to \Ycal$ as
+
+$$
+g(\xvec) = \argmax_{c \in \Ycal}\ \Pr\big(f(\xvec + \epsilonvec) = c\big), \qquad \epsilonvec \sim \Gauss(\zeros, \sigma^2\I).
+$$
+
+If the top class $c_A$ has probability at least $p_A$ and every other class at most $p_B$, then $g$ is robust at $\xvec$
+within $R = \frac{\sigma}{2}\big(\Phi^{-1}(p_A) - \Phi^{-1}(p_B)\big)$, with $\Phi$ the standard normal cdf
+<Cite id="cohen2019" />.
+</Definition>
+
+## Intuition
+
+An empirical defence against <NoteLink to="adversarial-examples">adversarial examples</NoteLink> survives the attacks
+someone tried. A certificate holds for every attack inside the threat model. Randomised smoothing earns it by replacing
+the prediction at a point with a vote over a Gaussian cloud around that point. Moving the input by $\deltavec$ moves the
+cloud by $\deltavec$. Two Gaussian clouds whose centres are close overlap almost completely, so the vote can change only
+a little. How far the input can move before the vote could flip depends on how lopsided the vote was and on the width
+$\sigma$ of the cloud. Nothing about $f$ enters the argument, so $f$ can be any network.
+
+Lecuyer et al. introduced smoothing with a guarantee derived from differential privacy <Cite id="lecuyer2019" />. Cohen,
+Rosenfeld and Kolter proved the tight $\ell_2$ radius derived below <Cite id="cohen2019" />.
+
+## Deriving the radius
+
+Fix $\xvec$ and a perturbation $\deltavec$. Write $X = \xvec + \epsilonvec \sim \Gauss(\xvec, \sigma^2\I)$ and
+$Y = \xvec + \deltavec + \epsilonvec \sim \Gauss(\xvec + \deltavec, \sigma^2\I)$. All that is known about $f$ is that the
+set $A = \set{\zvec : f(\zvec) = c_A}$ has $\Pr(X \in A) \ge p_A$. The question is how small $\Pr(Y \in A)$ can be.
+
+**Step 1: the worst set is a likelihood-ratio set.** Let $\mu_X$ and $\mu_Y$ be the two densities and
+$A^\star = \set{\zvec : \mu_Y(\zvec)/\mu_X(\zvec) \le t}$ with $t$ chosen so that $\Pr(X \in A^\star) = p_A$. Take any
+$A$ with $\Pr(X \in A) \ge p_A$. On $A \setminus A^\star$ the ratio exceeds $t$, so $\mu_Y > t\mu_X$ there; on
+$A^\star \setminus A$ the ratio is at most $t$, so $\mu_Y \le t\mu_X$ there. Hence
+
+$$
+\Pr(Y \in A) - \Pr(Y \in A^\star) = \int_{A \setminus A^\star}\mu_Y - \int_{A^\star \setminus A}\mu_Y
+\ge t\Big(\int_{A \setminus A^\star}\mu_X - \int_{A^\star \setminus A}\mu_X\Big) = t\big(\Pr(X \in A) - p_A\big) \ge 0.
+$$
+
+This is the argument of the <NoteLink to="neyman-pearson-lemma">Neyman–Pearson lemma</NoteLink>: among sets of
+probability at least $p_A$ under $X$, the likelihood-ratio set has the least probability under $Y$.
+
+**Step 2: for Gaussians that set is a half-space.** The log ratio of two isotropic Gaussians with equal variance is
+
+$$
+\log\frac{\mu_Y(\zvec)}{\mu_X(\zvec)} = \frac{\norm{\zvec - \xvec}^2 - \norm{\zvec - \xvec - \deltavec}^2}{2\sigma^2}
+= \frac{\deltavec^\top(\zvec - \xvec)}{\sigma^2} - \frac{\norm{\deltavec}^2}{2\sigma^2},
+$$
+
+which increases in $\deltavec^\top(\zvec - \xvec)$. So $A^\star = \set{\zvec : \deltavec^\top(\zvec - \xvec) \le \tau}$, a
+half-space whose boundary is normal to $\deltavec$. Under $X$, $\deltavec^\top(X - \xvec) \sim
+\Gauss(0, \sigma^2\norm{\deltavec}^2)$, so $\Pr(X \in A^\star) = p_A$ gives $\tau = \sigma\norm{\deltavec}\Phi^{-1}(p_A)$.
+Under $Y$, $\deltavec^\top(Y - \xvec) \sim \Gauss(\norm{\deltavec}^2, \sigma^2\norm{\deltavec}^2)$, so
+
+$$
+\Pr\big(f(Y) = c_A\big) \ge \Pr(Y \in A^\star) = \Phi\Big(\Phi^{-1}(p_A) - \frac{\norm{\deltavec}}{\sigma}\Big).
+$$
+
+**Step 3: the same bound for the runner-up.** For any other class $c_B$, the set $B = \set{f = c_B}$ has
+$\Pr(X \in B) \le p_B$. The same argument with the inequality reversed shows that the set with the most probability under
+$Y$ is the opposite half-space, and $\Pr(f(Y) = c_B) \le \Phi\big(\Phi^{-1}(p_B) + \norm{\deltavec}/\sigma\big)$.
+
+**Step 4: compare.** The smoothed classifier still returns $c_A$ at $\xvec + \deltavec$ if the lower bound for $c_A$
+exceeds the upper bound for every $c_B$. Since $\Phi$ is increasing, this holds when
+$\Phi^{-1}(p_A) - \norm{\deltavec}/\sigma > \Phi^{-1}(p_B) + \norm{\deltavec}/\sigma$, that is when
+
+$$
+\norm{\deltavec}_2 < R = \frac{\sigma}{2}\Big(\Phi^{-1}(p_A) - \Phi^{-1}(p_B)\Big).
+$$
+
+With two classes, or with the bound $p_B = 1 - p_A$, the symmetry $\Phi^{-1}(1 - p) = -\Phi^{-1}(p)$ gives
+$R = \sigma\Phi^{-1}(p_A)$.
+
+The radius is tight. The worst case of Step 2 is attained by a linear base classifier whose boundary is normal to
+$\deltavec$; for that $f$, any perturbation longer than $R$ in the direction of $\deltavec$ changes $g$
+<Cite id="cohen2019" />. The radius grows without bound as $p_A \to 1$, and it scales with $\sigma$.
+
+<SmoothingCertificate />
+
+## Certifying with samples
+
+$p_A$ is a probability over the noise and cannot be computed exactly for a network. Cohen et al.'s CERTIFY procedure
+estimates it by Monte Carlo <Cite id="cohen2019" />:
+
+1. Draw $n_0$ noisy copies of $\xvec$ and take the most frequent label of $f$ as the guess $\hat c_A$.
+2. Draw $n$ fresh copies and count the $k$ with $f = \hat c_A$.
+3. Compute a one-sided $(1 - \alpha)$ lower confidence bound $\underline{p_A}$ for the binomial proportion with the
+   Clopper–Pearson interval <Cite id="clopper1934" />, and set $p_B = 1 - \underline{p_A}$.
+4. If $\underline{p_A} > 1/2$, return $\hat c_A$ with radius $\sigma\Phi^{-1}(\underline{p_A})$; otherwise abstain.
+
+With probability at least $1 - \alpha$ over the sampling, a returned radius is correct. Using fresh samples in step 2
+keeps the selection of $\hat c_A$ from biasing the bound. Cohen et al. used $n_0 = 100$, $n = 100{,}000$ and
+$\alpha = 0.001$. On ImageNet they obtained a smoothed classifier with a certified top-1 accuracy of 49% under $\ell_2$
+perturbations of norm less than $0.5$ (that is, $127/255$) <Cite id="cohen2019" />.
+
+Large radii need many samples. If all $n$ samples agree, the tightest lower bound is $\underline{p_A} = \alpha^{1/n}$ and
+the radius is $\sigma\Phi^{-1}(\alpha^{1/n})$, which grows only like $\sqrt{\log n}$.
+
+## Worked example
+
+Take $\sigma = 0.5$ and $n = 1000$ noisy samples, of which $k = 990$ return $c_A$. The point estimate
+$\hat p_A = 0.99$ would suggest $R = 0.5\,\Phi^{-1}(0.99) = 0.5 \cdot 2.326 = 1.163$. The certificate uses the
+Clopper–Pearson lower bound instead. At $\alpha = 0.001$ it is the $0.001$ quantile of $\Beta(990, 11)$,
+$\underline{p_A} = 0.976$, and the certified radius is $0.5\,\Phi^{-1}(0.976) = 0.989$. With $n = 100{,}000$ samples that
+all agree, $\underline{p_A} = 0.001^{1/100{,}000} = 0.99993$ and $R = 0.5 \cdot 3.811 = 1.906$.
+
+## Other certificates
+
+- **Interval bound propagation** pushes an axis-aligned box of inputs through the network layer by layer, bounding each
+  activation by an interval. If the lower bound of the true logit exceeds the upper bounds of all others, the box is
+  certified. Training against these bounds makes them tight enough to be useful <Cite id="gowal2018" />.
+- **Convex relaxations** replace each ReLU by its convex hull over the known activation interval and solve, or bound
+  through the dual, a linear program for the worst-case margin <Cite id="wong2018" />.
+
+These methods certify $\ell_\infty$ balls deterministically and need access to the architecture. Randomised smoothing
+certifies $\ell_2$ balls for any black-box $f$, holds only with probability $1 - \alpha$, and costs thousands of forward
+passes per prediction.
+
+## Assumptions
+
+- The certificate is about $g$, not $f$. Deploying the base classifier forfeits it.
+- The noise must be applied at test time exactly as in the analysis: isotropic Gaussian with the stated $\sigma$.
+- $f$ must be accurate under noise of that size. Cohen et al. train $f$ with Gaussian data augmentation at the same
+  $\sigma$ <Cite id="cohen2019" />.
+
+## Pitfalls
+
+- **Accuracy against radius.** Larger $\sigma$ allows larger radii but blurs the input, lowering clean accuracy and
+  increasing abstentions. Report certified accuracy as a function of radius, not one number.
+- **Norm mismatch.** An $\ell_2$ certificate of radius $R$ covers an $\ell_\infty$ ball only of radius $R/\sqrt d$. For
+  images with $d = 150{,}528$ that is tiny.
+- **Abstention is not robustness.** A procedure that abstains near every boundary certifies little; count abstentions as
+  errors.
