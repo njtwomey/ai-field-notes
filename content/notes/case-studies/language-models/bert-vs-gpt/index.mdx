@@ -1,0 +1,126 @@
+---
+title: BERT and GPT
+kind: case-study
+summary: GPT (June 2018) and BERT (October 2018) pre-train a 12-layer, 768-wide transformer on unlabelled text and fine-tune it per task. GPT is a decoder trained left to right; BERT is an encoder that predicts masked tokens from both sides. On GLUE, BERT-Base averaged 79.6, GPT 75.1.
+tags: [language-models, transformer, transfer-learning, pre-training]
+requires: [transformer, transfer-learning-and-fine-tuning]
+related:
+  [
+    masked-language-modelling,
+    autoregressive-transformer-language-model,
+    causal-masking,
+    gpt-2-vs-deepseek-v3,
+    llama-family,
+    wordpiece-and-unigram-tokenisation,
+    byte-pair-encoding,
+  ]
+references: [radford2018, devlin2019, radford2019, vaswani2017]
+status: draft
+updated: 2026-09-27
+---
+
+## At a glance
+
+<SpecTable
+  columns={['GPT', 'BERT-Base', 'BERT-Large']}
+  rows={{
+    Released: ['June 2018', 'October 2018', 'October 2018'],
+    'Transformer type': [
+      'Decoder: each token attends to earlier tokens only',
+      'Encoder: each token attends to all tokens',
+      'Encoder: each token attends to all tokens',
+    ],
+    Layers: ['12', '12', '24'],
+    'Hidden size': ['768', '768', '1,024'],
+    'Attention heads': ['12', '12', '16'],
+    'Feed-forward size': ['3,072', '3,072', '4,096'],
+    Parameters: ['117M', '110M', '340M'],
+    'Maximum sequence length': ['512 tokens', '512 tokens', '512 tokens'],
+    Tokeniser: ['BPE, 40,000 merges', 'WordPiece, 30,000 tokens', 'WordPiece, 30,000 tokens'],
+    'Pre-training data': [
+      'BooksCorpus (800M words)',
+      'BooksCorpus (800M words) + English Wikipedia (2,500M words)',
+      'BooksCorpus (800M words) + English Wikipedia (2,500M words)',
+    ],
+    'Pre-training objective': [
+      'Next-token prediction, left to right',
+      'Masked tokens (15%) + next-sentence prediction',
+      'Masked tokens (15%) + next-sentence prediction',
+    ],
+    'Pre-training batch': ['About 32,000 tokens; 100 epochs', '128,000 tokens; 1M steps', '128,000 tokens; 1M steps'],
+    'GLUE test average (8 tasks)': ['75.1', '79.6', '82.1'],
+  }}
+/>
+
+GPT figures are from <Cite id="radford2018" />, except its parameter count, which the GPT-2 paper gives for the
+equivalent smallest GPT-2 model <Cite id="radford2019" />. BERT figures and all GLUE scores are from
+<Cite id="devlin2019" />. The GLUE average excludes the WNLI task; on the official GLUE score, BERT-Large scored 80.5 and
+GPT 72.8 <Cite id="devlin2019" />.
+
+## Architecture
+
+Both models are stacks of <NoteLink to="transformer">transformer</NoteLink> blocks
+<Cite id="vaswani2017" /> with learned position embeddings and GELU activations. BERT-Base was given the same size as
+GPT on purpose, so that the two could be compared <Cite id="devlin2019" />.
+
+**GPT** applies a <NoteLink to="causal-masking">causal mask</NoteLink>: token $t$ attends only to tokens $1, \dots, t$.
+Its representation of a token therefore depends only on the text to its left <Cite id="radford2018" />.
+
+**BERT** has no mask on attention. Every token attends to the whole input, so its representation depends on both sides.
+BERT also adds a learned segment embedding that marks whether a token belongs to the first or the second of two packed
+sentences <Cite id="devlin2019" />.
+
+## Training
+
+**GPT** minimises the negative log-likelihood of each token given the tokens before it, over contiguous 512-token
+passages of BooksCorpus, a collection of over 7,000 unpublished books <Cite id="radford2018" />. For a downstream task,
+the input is rewritten as one token sequence with start, delimiter and end tokens. A linear layer on the final token's
+representation is fine-tuned, with the language-modelling loss kept as an auxiliary objective
+<Cite id="radford2018" />.
+
+**BERT** cannot be trained left to right: with bidirectional attention, each token could see itself in the layers above.
+Instead it uses a <NoteLink to="masked-language-modelling">masked language model</NoteLink>. 15% of token positions are
+chosen at random. Of these, 80% are replaced by a `[MASK]` token, 10% by a random token and 10% are left unchanged, and
+the model predicts the original tokens <Cite id="devlin2019" />. A second objective, **next-sentence prediction**, asks
+whether sentence B followed sentence A in the corpus. For fine-tuning, a classifier reads the final representation of a
+`[CLS]` token placed at the start of every input.
+
+## What is distinctive
+
+**GPT** established the two-stage recipe that both models follow: generative pre-training of one transformer on
+unlabelled text, then supervised fine-tuning of the same network with a small task-specific head. It improved the state
+of the art on 9 of the 12 tasks it studied <Cite id="radford2018" />.
+
+**BERT** showed that, for understanding tasks, conditioning on both sides of each token helps more than model size.
+Its ablations on BERT-Base isolate the objective. Replacing the masked objective by left-to-right training, and dropping
+next-sentence prediction, lowered development-set scores on every task tested <Cite id="devlin2019" />:
+
+| Pre-training (BERT-Base architecture) | MNLI-m | QNLI | MRPC | SST-2 | SQuAD 1.1 (F1) |
+| ------------------------------------- | ------ | ---- | ---- | ----- | -------------- |
+| Masked LM + next sentence             | 84.4   | 88.4 | 86.7 | 92.7  | 88.5           |
+| Masked LM only                        | 83.9   | 84.9 | 86.5 | 92.6  | 87.9           |
+| Left to right only                    | 82.1   | 84.3 | 77.5 | 92.1  | 77.8           |
+
+The largest loss is on SQuAD, where the answer span must be located using text on both sides of it: 10.7 F1 points.
+
+## Comparison
+
+**Direction of context.** GPT's representation of a token sees only its left context; BERT's sees both sides. This is the
+main architectural difference, and the ablation above attributes most of BERT's advantage on these tasks to it.
+
+**Generation.** GPT is a language model: it assigns a probability to every continuation and generates text token by
+token. BERT's masked objective does not define a probability over sequences, so BERT cannot generate text left to right.
+This is why the GPT line, not BERT, led to the <NoteLink to="autoregressive-transformer-language-model">large generative
+language models</NoteLink>.
+
+**Data and batch.** BERT was trained on about four times as many words as GPT, 3,300M against 800M, with four times the
+batch size. BERT's authors list these differences and argue from the ablation that the objective, not the data, explains
+most of the gain <Cite id="devlin2019" />.
+
+**Efficiency of the objective.** GPT receives a training signal at every position. BERT's masked objective predicts only
+the 15% of positions that are masked, so it extracts fewer predictions from each sequence. BERT also introduces a
+mismatch: `[MASK]` appears in pre-training but never in fine-tuning, which the 80/10/10 replacement rule reduces.
+
+**Tokenisers.** GPT uses <NoteLink to="byte-pair-encoding">byte-pair encoding</NoteLink> with 40,000 merges; BERT uses
+<NoteLink to="wordpiece-and-unigram-tokenisation">WordPiece</NoteLink> with a 30,000-token vocabulary. Both split rare
+words into subword units.

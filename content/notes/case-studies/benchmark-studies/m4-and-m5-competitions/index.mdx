@@ -1,0 +1,131 @@
+---
+title: The M4 and M5 forecasting competitions
+kind: case-study
+summary: M4 (2018, 100,000 series) was won by a hybrid of exponential smoothing and an RNN; pure machine-learning entries lost to simple statistical benchmarks. M5 (2020, 42,840 hierarchical Walmart sales series) was won by LightGBM, 22.4% more accurate than the best benchmark.
+tags: [time-series, forecasting, benchmarks, gradient-boosting, ensembles]
+requires: [ets-models, scaled-errors-and-mase]
+related:
+  [
+    percentage-errors,
+    simple-exponential-smoothing,
+    hierarchical-forecast-reconciliation,
+    xgboost-lightgbm-catboost,
+    gradient-boosting,
+    lstm,
+    n-beats,
+    stacking,
+    gradient-boosting-vs-deep-learning-on-tabular-data,
+  ]
+references: [makridakis2020, makridakis2022, smyl2020, monteromanso2020, oreshkin2020, mcompetitions2018, mcompetitions2020]
+status: draft
+updated: 2026-09-27
+---
+
+## At a glance
+
+<SpecTable
+  columns={['M4', 'M5 (Accuracy)']}
+  rows={{
+    Held: ['2018', '2020, on Kaggle'],
+    Series: [
+      '100,000: 23,000 yearly, 24,000 quarterly, 48,000 monthly, 359 weekly, 4,227 daily, 414 hourly',
+      '42,840: Walmart unit sales of 3,049 products in 10 stores in 3 US states, at 12 aggregation levels',
+    ],
+    'Series type': ['Independent series from six domains (micro, industry, macro, finance, demographic, other)', 'One hierarchy: product, department, category, store, state, total'],
+    'Forecast horizon': ['6 yearly, 8 quarterly, 18 monthly, 13 weekly, 14 daily, 48 hourly steps', '28 days'],
+    'Accuracy measure': [
+      'OWA: mean of sMAPE and MASE, each divided by that of the Naive2 benchmark',
+      'WRMSSE: root mean squared scaled error, weighted by sales value, averaged over the 12 levels',
+    ],
+    Entries: ['49 point-forecast submissions and 12 benchmarks', 'Top 50 teams and 24 benchmarks published'],
+    Winner: [
+      'Smyl: hybrid of exponential smoothing and a recurrent network (ES-RNN)',
+      'YJ_STU: equal-weighted combination of LightGBM models',
+    ],
+    'Winning score': ['OWA 0.821 (sMAPE 11.37, MASE 1.536)', 'WRMSSE 0.520'],
+    'Best benchmark': ['Theta, OWA 0.897; combination of exponential smoothing methods, OWA 0.898', 'Bottom-up exponential smoothing, WRMSSE 0.671'],
+    'Winner over best benchmark': ['8.6% lower OWA than the combination benchmark', '22.4% lower WRMSSE'],
+    'Pure machine-learning methods': [
+      'Best submission OWA 0.915 (23rd); MLP and RNN benchmarks 1.642 and 1.482, worse than Naive2',
+      'The winning method',
+    ],
+  }}
+/>
+
+M4 figures are from <Cite id="makridakis2020" /> and its published results <Cite id="mcompetitions2018" />. M5 figures are
+from <Cite id="makridakis2022" /> and its published scores <Cite id="mcompetitions2020" />.
+
+## Setup
+
+**M4** asked for point forecasts, and optionally 95% prediction intervals, for 100,000 series drawn from six domains
+<Cite id="makridakis2020" />. Point forecasts were scored by two scale-free errors. The symmetric mean absolute percentage
+error (see <NoteLink to="percentage-errors">percentage errors</NoteLink>) divides each absolute error by the average of
+the forecast and the actual value. The mean absolute scaled error (see <NoteLink to="scaled-errors-and-mase">MASE</NoteLink>)
+divides the forecast's mean absolute error by the in-sample error of a seasonal naive forecast. The **overall weighted
+average** (OWA) divides each by its value for **Naive2**, a naive forecast applied to seasonally adjusted data, and
+averages the two ratios. Naive2 scores OWA 1 by construction; lower is better.
+
+**M5** used real sales from Walmart: 3,049 products sold in 10 stores in California, Texas and Wisconsin, with prices,
+promotions and a calendar of events <Cite id="mcompetitions2020" />. The 30,490 product-store series aggregate into 12
+levels, from the total down to product-store, giving 42,840 series in all. Many bottom-level series are intermittent, with
+many days of zero sales. The measure is the **weighted root mean squared scaled error** (WRMSSE). Each series' error is
+scaled by the in-sample one-step naive error, weighted by the series' share of dollar sales, and the 12 levels count
+equally <Cite id="makridakis2022" />.
+
+## The winners
+
+**M4: ES-RNN.** Smyl's method fits, for each series, the level and seasonal components of an
+<NoteLink to="ets-models">exponential smoothing</NoteLink> model. It removes them to normalise the series, and feeds the
+normalised values to a recurrent network with dilated <NoteLink to="lstm">LSTM</NoteLink> layers that is trained across
+all series at once <Cite id="smyl2020" />. The exponential-smoothing parameters are learned jointly with the network. The
+statistical part handles each series' scale and seasonality; the network learns patterns shared across series. The
+second-placed method, **FFORMA**, is a meta-learner: it computes features of each series and uses gradient-boosted trees
+to choose weights for combining nine standard forecasting methods <Cite id="monteromanso2020" />.
+
+**M5: LightGBM.** The winner combined, with equal weights, <NoteLink to="xgboost-lightgbm-catboost">LightGBM</NoteLink>
+models trained on the product-store series using data per store, per store and category, and per store and department
+<Cite id="makridakis2022" />. Each model was fitted across
+many series rather than one model per series.
+
+## What each competition showed
+
+**M4: combinations won, pure machine learning lost.** Twelve of the seventeen most accurate methods were combinations of
+forecasts, mostly of statistical methods <Cite id="makridakis2020" />. The two best methods both used machine learning,
+but together with statistical models, not instead of them. Every pure machine-learning method ranked below the
+statistical benchmarks Theta and the combination benchmark. The organisers' own MLP and RNN benchmarks, fitted to each
+series separately, scored OWA 1.642 and 1.482: worse than Naive2 <Cite id="mcompetitions2018" />. A year later, the pure
+deep-learning model <NoteLink to="n-beats">N-BEATS</NoteLink>, trained across all series, reached OWA 0.795 on the M4
+data, 3% better than the winner <Cite id="oreshkin2020" />. The M4 network benchmarks were fitted to each series
+separately; N-BEATS, like the winner, learned from all series at once.
+
+**M5: machine learning won on real, related series.** In M5 the series share products, stores and calendar effects,
+and come with explanatory variables. A tree ensemble trained across series could use all of this. The winner beat the
+best benchmark by 22.4% overall. The gain was uneven across the hierarchy <Cite id="mcompetitions2020" />:
+
+| Level                      | Winner (WRMSSE) | Bottom-up exponential smoothing | Improvement |
+| -------------------------- | --------------- | ------------------------------- | ----------- |
+| Total sales (level 1)      | 0.199           | 0.426                           | 53%         |
+| Product by store (level 12) | 0.884           | 0.915                           | 3%          |
+
+At the product-store level, where most series are intermittent and noisy, the winner was only 3% better than
+exponential smoothing. The large gains came from aggregate levels, where learning shared patterns across series pays off
+most.
+
+## Comparison
+
+**Data.** M4 series are unrelated, mostly short, and carry no covariates. M5 series form one hierarchy, are daily, and
+come with prices, promotions and events. Methods that learn across series have more to exploit in M5.
+
+**Winning method.** Both winners learned across series. M4's winner kept a statistical model per series and learned a
+shared correction; M5's winner used a single gradient-boosted model per group of series with engineered features.
+
+**Role of combinations.** Both competitions confirmed that combining forecasts improves accuracy. The M5 winner itself
+was an equal-weighted combination of several LightGBM models <Cite id="makridakis2022" />.
+
+**Statistical benchmarks.** In M4, simple benchmarks (Theta, the exponential-smoothing combination) beat most
+submissions, including every pure machine-learning one. In M5, the best benchmark was beaten by a wide margin overall,
+but it stayed close at the bottom of the hierarchy.
+
+**Measures shape conclusions.** OWA weights every series equally, so M4 rewards accuracy on the many short yearly and
+quarterly series. WRMSSE weights by sales value and gives each aggregation level equal weight, so M5 rewards accuracy on
+high-selling products and on aggregates.

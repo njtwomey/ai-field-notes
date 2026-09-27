@@ -1,0 +1,148 @@
+---
+title: Proxy and classification-based metric losses
+kind: concept
+summary: 'Proxy losses learn an embedding by comparing each example with one learned vector per class instead of with other examples. Normalised softmax uses logits $s\cos\theta_c$; CosFace trains the true class with $s(\cos\theta_y - m)$ and ArcFace with $s\cos(\theta_y + m)$, forcing an angular gap between classes.'
+tags: [loss-functions, representation-learning, metric-learning, embeddings, face-recognition, worked-example]
+aliases:
+  [
+    proxy loss,
+    Proxy-NCA,
+    proxy-based loss,
+    normalised softmax loss,
+    NormFace,
+    cosine softmax,
+    angular margin loss,
+    additive angular margin,
+    ArcFace,
+    additive cosine margin,
+    CosFace,
+    large margin cosine loss,
+    SphereFace,
+    classification loss for metric learning,
+  ]
+requires: [softmax-and-log-sum-exp, multinomial-logistic-regression, pairwise-distances-and-cosine-similarity]
+related: [triplet-and-margin-losses, metric-learning, contrastive-learning, temperature-scaling]
+references: [movshovitz2017, wang2017, liu2017, wang2018, deng2019, musgrave2020, schroff2015]
+status: draft
+updated: 2026-09-27
+---
+
+import { AngularMargins } from './AngularMargins'
+
+<Definition>
+A **proxy** is a learned vector $\wvec_c \in \reals^d$ that stands for class $c$ in the embedding space. A **proxy loss**
+trains an embedding $f(\xvec) \in \reals^d$ by comparing it with the $C$ proxies instead of with other training examples.
+With $\wvec_c$ and $f(\xvec)$ both normalised to unit length and $\theta_c$ the angle between them, the **normalised
+softmax** loss is the cross-entropy of a softmax over logits $s\cos\theta_c$, with a fixed scale $s > 0$
+<Cite id="wang2017" />. **Margin** variants lower the logit of the true class $y$ during training: SphereFace uses
+$s\cos(m\theta_y)$ <Cite id="liu2017" />, CosFace uses $s(\cos\theta_y - m)$ <Cite id="wang2018" />, and ArcFace uses
+$s\cos(\theta_y + m)$ <Cite id="deng2019" />. After training, the proxies are discarded and the embedding is compared by
+cosine similarity.
+</Definition>
+
+## Why compare with proxies
+
+The <NoteLink to="triplet-and-margin-losses">triplet loss</NoteLink> compares an example with other examples. A dataset of
+$n$ examples has $O(n^3)$ triplets, most of which contribute zero loss, so training depends on mining informative ones.
+A proxy loss compares each example with $C$ proxies, $O(nC)$ comparisons in total, and every comparison contributes a
+gradient. The proxies are trained together with the network.
+
+**Proxy-NCA** assigns one proxy per class and applies the neighbourhood-components softmax to distances between the
+embedding and the proxies <Cite id="movshovitz2017" />:
+
+$$
+L_{\text{Proxy-NCA}}(\xvec, y) = -\ln \frac{\exp\paren{-d(f(\xvec), \wvec_y)}}{\sum_{c \ne y} \exp\paren{-d(f(\xvec), \wvec_c)}} ,
+$$
+
+where $d$ is the squared Euclidean distance between normalised vectors. Movshovitz-Attias et al. showed that a triplet
+loss over proxies bounds the triplet loss over examples, up to how well each proxy approximates its class. On Cars196,
+Proxy-NCA converged about three times as fast as triplet-based losses <Cite id="movshovitz2017" />.
+
+## Classification with normalised weights is a proxy loss
+
+A softmax classifier without bias computes logits $\wvec_c^\top f(\xvec)$. Its weight vectors are proxies. Writing the
+logit as $\norm{\wvec_c}\norm{f(\xvec)}\cos\theta_c$ shows that it mixes three things: the angle, the length of the
+class weight and the length of the embedding. Normalising both vectors leaves only the angle, so the trained embedding
+is organised by the same cosine similarity used at test time <Cite id="wang2017" />.
+
+**Normalised logits need a scale.** With unit vectors, every logit lies in $[-1, 1]$, and the softmax probability of the
+true class cannot approach 1. The best case has each embedding equal to its own proxy ($\cos\theta_y = 1$) and the
+proxies as far apart as possible. For $C$ unit vectors,
+$0 \le \norm{\sum_c \wvec_c}^2 = C + \sum_{c \ne c'} \wvec_c^\top\wvec_{c'}$, so the average cosine between two distinct
+proxies is at least $-1/(C - 1)$, and a regular simplex attains it. In that best case, with scale $s$,
+
+$$
+p_y = \frac{e^{s}}{e^{s} + (C - 1)\, e^{-s/(C - 1)}} .
+$$
+
+Requiring $p_y \ge P$ and solving for $s$ gives
+
+$$
+s \ge \frac{C - 1}{C} \ln\frac{(C - 1) P}{1 - P} .
+$$
+
+With $C = 10{,}000$ classes, $P = 0.9$ needs $s \ge 11.4$; with $C = 10$ it needs only $s \ge 4.0$. Without a scale the
+loss stays high and its gradients do not vanish even for well-separated classes. NormFace derived this bound and learned
+$s$; CosFace and ArcFace fix $s = 64$ <Cite id="wang2017" /> <Cite id="wang2018" /> <Cite id="deng2019" />.
+
+## Margins
+
+The normalised softmax separates classes, but it stops pushing once an embedding is closer in angle to its own proxy
+than to the others. A face-verification system compares embeddings of new identities by a single cosine threshold, so it
+needs each class to be compact and well away from the others. A **margin** lowers the true-class logit during training
+only, so the loss keeps pushing until the embedding clears the rival classes by the margin.
+
+Consider two classes whose proxies are $\phi$ apart, and an embedding in their plane at angle $\theta$ from class 1, so
+at angle $\phi - \theta$ from class 2. Class 1 wins the training softmax where its logit exceeds class 2's.
+
+- **Normalised softmax**: $\cos\theta > \cos(\phi - \theta)$, so the boundary is $\theta = \phi/2$.
+- **ArcFace**: $\cos(\theta + m) > \cos(\phi - \theta)$. Cosine decreases on $[0, \pi]$, so while $\theta + m \le \pi$
+  this holds exactly when $\theta + m < \phi - \theta$, that is $\theta < (\phi - m)/2$. The boundary moves toward class
+  1 by $m/2$ radians. The same holds for class 2 from its side, which leaves an angular gap of exactly $m$ between the
+  two training regions, whatever $\phi$ is <Cite id="deng2019" />.
+- **CosFace**: $\cos\theta - m > \cos(\phi - \theta)$. The margin is constant in cosine, so the angular gap it leaves
+  depends on $\phi$ <Cite id="wang2018" />.
+- **SphereFace**: $\cos(m\theta)$ with an integer $m \ge 2$ multiplies the angle. Its margin grows with $\theta$ and
+  vanishes as $\theta \to 0$ <Cite id="liu2017" />.
+
+At test time the margin is dropped. Embeddings that satisfied it in training sit well inside their class's region, so a
+single cosine threshold separates same-identity from different-identity pairs with room to spare. $\cos(\theta + m)$
+stops decreasing once $\theta + m > \pi$, so implementations substitute a monotone penalty in that range.
+
+<AngularMargins />
+
+## Worked example
+
+An embedding is at $40°$ from its class proxy, $60°$ from a second proxy and $90°$ from two more. The scale is $s = 16$.
+The rival logits are $16\cos 60° = 8$ and $16\cos 90° = 0$ (twice).
+
+| Loss               | True-class logit                | $p_y$ | Loss $-\ln p_y$ |
+| ------------------ | ------------------------------- | ----- | --------------- |
+| Normalised softmax | $16\cos 40° = 12.26$            | 0.986 | 0.014           |
+| CosFace, $m = 0.35$ | $16(\cos 40° - 0.35) = 6.66$   | 0.207 | 1.576           |
+| ArcFace, $m = 0.5$  | $16\cos(40° + 28.6°) = 5.83$   | 0.102 | 2.283           |
+
+The embedding is already classified correctly: $40°$ is closer than $60°$. The normalised softmax loss is nearly zero,
+so training would stop moving it. Under either margin the true-class logit falls below the rival's, and the loss keeps
+pulling the embedding toward its proxy. With $\phi = 90°$, the training boundary is at $\theta = 30.7°$ for CosFace with
+$m = 0.35$ and at $30.7°$ for ArcFace with $m = 0.5$; the two margins are nearly equivalent at this angle.
+
+## Assumptions
+
+- **Class labels exist** for every training example, and there are enough examples per class to place its proxy. Proxy
+  losses do not apply to purely self-supervised pairs.
+- **One proxy per class suffices.** A class with several distinct modes, such as one person with and without glasses,
+  is pulled toward a single point. Variants with several proxies per class relax this.
+- **The proxy matrix fits in memory.** A face dataset with hundreds of thousands of identities needs a $d \times C$
+  weight matrix and a softmax over all $C$ classes at every step.
+
+## Pitfalls
+
+- **Scale too small.** With $s$ below the bound above the loss cannot approach zero, and optimisation keeps pushing
+  well-separated classes.
+- **Margin too large.** A margin that the data cannot satisfy keeps every example active and can prevent convergence.
+  ArcFace uses $m = 0.5$ and CosFace $m = 0.35$ with $s = 64$ <Cite id="deng2019" /> <Cite id="wang2018" />.
+- **Label noise.** A mislabelled example is pulled toward the wrong proxy with the full force of the margin.
+- **Comparisons across papers.** Under one protocol on CUB-200, normalised softmax, CosFace and ArcFace scored MAP@R
+  25.25, 26.70 and 26.45, against 26.53 for the 2006 pair loss <Cite id="musgrave2020" />. Gains attributed to the loss
+  often come from the rest of the training setup.

@@ -1,0 +1,163 @@
+---
+title: Triplet and margin losses
+kind: concept
+summary: 'Margin losses train an embedding $f$ so that matching items lie closer than non-matching ones. The pair loss pulls matches together and pushes non-matches beyond a margin $m$; the triplet loss asks $\norm{f(a) - f(p)}^2 + \alpha \le \norm{f(a) - f(n)}^2$. The margin rules out a collapsed embedding.'
+tags: [loss-functions, representation-learning, metric-learning, embeddings, worked-example]
+aliases:
+  [
+    triplet loss,
+    triplet margin loss,
+    contrastive pair loss,
+    pairwise margin loss,
+    Hadsell contrastive loss,
+    FaceNet,
+    semi-hard negatives,
+    semi-hard negative mining,
+    hard negative mining,
+    batch-hard triplet loss,
+    anchor positive negative,
+  ]
+requires: [pairwise-distances-and-cosine-similarity, gradient-descent]
+related:
+  [metric-learning, contrastive-learning, proxy-and-classification-based-metric-losses, sentence-embeddings, ranking-losses]
+references: [hadsell2006, chopra2005, schroff2015, hermans2017, wu2017, musgrave2020]
+status: draft
+updated: 2026-09-27
+---
+
+import { TripletMargin } from './TripletMargin'
+
+<Definition>
+An **embedding** $f: \Xcal \to \reals^d$ maps each input to a vector. Two inputs **match** if they share a label, for
+example two photographs of the same person. A **margin loss** penalises $f$ whenever a non-matching input is not
+sufficiently farther away than a matching one. The **pair loss** of Hadsell, Chopra and LeCun scores one pair at a time
+and pushes non-matching pairs apart until their distance exceeds a margin $m > 0$ <Cite id="hadsell2006" />. The
+**triplet loss** scores an anchor $a$, a positive $p$ that matches it and a negative $n$ that does not, and requires the
+negative to be farther than the positive by a margin $\alpha > 0$ <Cite id="schroff2015" />.
+</Definition>
+
+## The two losses
+
+Write $D(u, v) = \norm{f(u) - f(v)}$ for the Euclidean distance between two embeddings, and $[z]_+ = \max(0, z)$.
+
+**Pair loss.** A pair $(u, v)$ has label $y = 1$ if it matches and $y = 0$ otherwise. The loss is
+
+$$
+L_{\text{pair}}(u, v, y) = y \cdot \tfrac{1}{2} D(u, v)^2 + (1 - y) \cdot \tfrac{1}{2} \brack{m - D(u, v)}_+^2 .
+$$
+
+A matching pair is pulled together with a force proportional to its distance. A non-matching pair is pushed apart only
+while it is closer than $m$; beyond $m$ it contributes nothing <Cite id="hadsell2006" />. Hadsell et al. write the label
+the other way round ($Y = 0$ for similar pairs); the loss is the same. Chopra, Hadsell and LeCun had used an earlier
+exponential form of the same idea for face verification with a shared ("siamese") network <Cite id="chopra2005" />.
+
+**Triplet loss.** For an anchor $a$, a positive $p$ and a negative $n$, the triplet loss of FaceNet uses squared
+distances <Cite id="schroff2015" />:
+
+$$
+L_{\text{trip}}(a, p, n) = \brack{D(a, p)^2 - D(a, n)^2 + \alpha}_+ .
+$$
+
+It is zero exactly when $D(a, n)^2 \ge D(a, p)^2 + \alpha$. The loss is **relative**: it constrains the order of two
+distances and not either distance on its own. Each identity's embeddings can spread along a manifold, so long as every
+other identity stays at least $\alpha$ farther away. FaceNet preferred it to the pair loss for this reason: the pair loss
+pulls every image of one person toward a single point <Cite id="schroff2015" />. FaceNet also normalises the embedding,
+$\norm{f(x)} = 1$, and sets $\alpha = 0.2$.
+
+## Why the margin prevents collapse
+
+A **collapsed** embedding maps every input to the same vector, $f(x) = c$. It carries no information. A loss function
+must not be minimised by it.
+
+**Without the push term or the margin, collapse is optimal.** If the pair loss had only its first term, $f \equiv c$
+would give $D = 0$ for every pair and a loss of $0$, the global minimum. If the triplet loss had $\alpha = 0$,
+$f \equiv c$ would give $\brack{0 - 0}_+ = 0$ for every triplet: again the global minimum. A loss that only asks for
+distances to be ordered, or only asks matches to be close, is satisfied by making every distance zero.
+
+**With a margin, collapse costs the maximum constant.** Under $f \equiv c$ every non-matching pair has $D = 0$, so each
+contributes $\frac{1}{2}m^2$ to the pair loss, and every triplet contributes $\brack{0 - 0 + \alpha}_+ = \alpha$ to the
+triplet loss. An embedding that separates the classes by the margin scores $0$. Collapse is therefore never a minimiser
+when $m > 0$ or $\alpha > 0$.
+
+**Collapse is still a stationary point of the triplet loss.** For an active triplet, where the bracket is positive,
+
+$$
+\frac{\partial L_{\text{trip}}}{\partial f(p)} = 2\paren{f(p) - f(a)}, \qquad
+\frac{\partial L_{\text{trip}}}{\partial f(n)} = 2\paren{f(a) - f(n)}, \qquad
+\frac{\partial L_{\text{trip}}}{\partial f(a)} = 2\paren{f(n) - f(p)} .
+$$
+
+These follow from $\partial \norm{\uvec - \vvec}^2 / \partial \uvec = 2(\uvec - \vvec)$. Every gradient is a difference of
+embeddings. At $f \equiv c$ all of them vanish, although every triplet is active and the loss is $\alpha$. Near
+collapse the gradients are small in proportion to the distances, so an optimiser that drifts toward $c$ receives little
+signal to leave. FaceNet reports that training on only the hardest negatives can end in exactly this collapsed model
+<Cite id="schroff2015" />. The pair loss behaves differently: the derivative of its push term with respect to the distance is
+$-(m - D)$, which tends to $-m$ as $D \to 0$. Two non-matching embeddings that are close but not identical are pushed
+apart with a force near $m$, however small their distance.
+
+**The margin needs a fixed scale.** Scaling an unnormalised embedding by $s > 1$ multiplies every squared distance by
+$s^2$. Any triplet with $D(a, n) > D(a, p)$ is satisfied for large enough $s$, so the margin could be met by inflating
+the embedding rather than by separating the classes. Constraining $f(x)$ to the unit sphere fixes the scale: squared
+distances lie in $[0, 4]$, and $\alpha$ is a fixed fraction of that range <Cite id="schroff2015" />.
+
+## Hard, semi-hard and easy negatives
+
+For a given anchor and positive, a negative falls in one of three regions:
+
+- **Hard**: $D(a, n)^2 < D(a, p)^2$. The negative is closer than the positive. The triplet is violated.
+- **Semi-hard**: $D(a, p)^2 \le D(a, n)^2 < D(a, p)^2 + \alpha$. The order is right but the margin is not met. The loss
+  is positive.
+- **Easy**: $D(a, n)^2 \ge D(a, p)^2 + \alpha$. The loss and its gradient are zero.
+
+The number of triplets grows as the cube of the number of training examples, and most of them are easy once training
+has progressed. Sampling triplets uniformly therefore wastes most of each batch on zero gradients. **Online mining**
+selects triplets inside each mini-batch. FaceNet put about 40 images per identity into each mini-batch of a few thousand
+examples. It used every anchor-positive pair and, for each, a semi-hard negative
+<Cite id="schroff2015" />. Hermans et al. proposed the **batch-hard** loss: for each anchor, the farthest positive and
+the closest negative in a batch built from $P$ identities with $K$ images each <Cite id="hermans2017" />. Wu et al.
+showed that, in high dimension, distances between random points on a sphere concentrate near $\sqrt{2}$. They sample
+negatives with weights inversely proportional to that distance density, which spreads the chosen negatives over all
+distances <Cite id="wu2017" />.
+
+<TripletMargin />
+
+## Worked example
+
+Embeddings lie on the unit circle, $\alpha = 0.2$, and the pair-loss margin is $m = 1$. The anchor is at angle $0°$ and
+the positive at $40°$. For two unit vectors at angle $\theta$, $D^2 = 2 - 2\cos\theta$. So
+$D(a, p)^2 = 2 - 2\cos 40° = 0.468$ and $D(a, p) = 0.684$. The semi-hard band ends where
+$D(a, n)^2 = 0.668$, which is an angle of $48.2°$.
+
+| Negative at | $D(a, n)^2$ | Region    | $L_{\text{trip}}$ | Pair-loss term $\frac{1}{2}[1 - D(a, n)]_+^2$ |
+| ----------- | ----------- | --------- | ----------------- | --------------------------------------------- |
+| $30°$       | 0.268       | hard      | 0.400             | 0.116                                         |
+| $45°$       | 0.586       | semi-hard | 0.082             | 0.028                                         |
+| $90°$       | 2.000       | easy      | 0                 | 0                                             |
+
+The positive pair adds $\frac{1}{2}D(a, p)^2 = 0.234$ to the pair loss, whatever the negative. For the hard negative the
+triplet gradient with respect to $f(n)$ is $2(f(a) - f(n)) = (0.268, -1.000)$; a descent step moves $f(n)$ in the
+opposite direction, away from the anchor. The easy negative contributes nothing, which is why mining matters: in a
+trained model most negatives look like it.
+
+## Assumptions
+
+- **Labels define similarity.** Matches come from shared class labels or from known pairs, such as two views of one
+  object. The loss learns whatever notion of similarity the labels encode.
+- **Unseen classes at test time.** Margin losses suit open-set problems, where new identities appear after training and
+  are compared by distance, not classified into a fixed set of classes.
+- **A fixed embedding scale.** The margin is meaningful only when the embedding norm is fixed, usually by
+  $L_2$-normalisation.
+
+## Pitfalls
+
+- **Mining the hardest negatives.** The hardest negatives in a large dataset are often mislabelled or badly imaged
+  examples. Training on them alone can collapse the model early in training <Cite id="schroff2015" />.
+- **Margin units.** FaceNet's $\alpha$ is a margin on squared distances; Hadsell's $m$ is a margin on distances. The same
+  number means different things in the two losses.
+- **Benchmarks overstate progress.** Under a common protocol with the same network, embedding size and hyperparameter
+  search, the 2006 pair loss scored MAP@R 26.53 on CUB-200 against 26.45 for ArcFace (2019) and 23.69 for the triplet
+  loss <Cite id="musgrave2020" />. Reported gains between margin-loss variants often reflect differences in training
+  setup.
+- **Contrastive learning uses another loss.** Self-supervised <NoteLink to="contrastive-learning">contrastive
+  learning</NoteLink> usually trains with InfoNCE, a softmax over many negatives, rather than a pair or triplet margin
+  loss.

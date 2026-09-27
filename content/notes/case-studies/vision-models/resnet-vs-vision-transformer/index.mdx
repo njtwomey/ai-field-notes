@@ -1,0 +1,122 @@
+---
+title: ResNet and Vision Transformer
+kind: case-study
+summary: ResNet (2015) is a convolutional network with residual connections; ViT (2020) is a transformer over image patches. Pre-trained on 300M images, ViT-L/16 matched a 928M-parameter ResNet on ImageNet with one fifteenth of the compute. Trained on ImageNet alone, ViT falls behind.
+tags: [computer-vision, image-classification, transformer, convolutional-networks, transfer-learning]
+requires: [residual-network, vision-transformer]
+related:
+  [
+    image-classification,
+    convolutional-layer,
+    classic-cnn-architectures,
+    transformer,
+    transfer-learning-and-fine-tuning,
+    batch-normalisation,
+    bert-vs-gpt,
+  ]
+references: [he2016, dosovitskiy2021, kolesnikov2020, deng2009, russakovsky2015]
+status: draft
+updated: 2026-09-27
+---
+
+## At a glance
+
+<SpecTable
+  columns={['ResNet-152', 'BiT-L (ResNet-152x4)', 'ViT-L/16', 'ViT-H/14']}
+  rows={{
+    Released: ['December 2015', 'December 2019', 'October 2020', 'October 2020'],
+    Architecture: [
+      '152-layer CNN of bottleneck residual blocks',
+      'ResNet-152 at 4 times the width, with group normalisation and weight standardisation',
+      'Transformer encoder: 24 layers, width 1,024, 16 heads, MLP 4,096',
+      'Transformer encoder: 32 layers, width 1,280, 16 heads, MLP 5,120',
+    ],
+    Parameters: ['Not reported', '928M', '307M', '632M'],
+    'Input to the network': [
+      'Pixels, through convolutions',
+      'Pixels, through convolutions',
+      '16×16-pixel patches, linearly embedded',
+      '14×14-pixel patches, linearly embedded',
+    ],
+    'Pre-training data': [
+      'ImageNet-1k: 1.28M images, 1,000 classes',
+      'JFT-300M: about 300M images, 18k classes',
+      'JFT-300M',
+      'JFT-300M',
+    ],
+    'ImageNet top-1 accuracy (%)': ['78.57 (10-crop)', '87.54', '87.76', '88.55'],
+    'Pre-training compute (TPUv3-core-days)': ['Not reported', '9.9k', '0.68k', '2.5k'],
+    'Inference cost at 224×224': ['11.3 billion multiply-adds', 'Not reported', 'Not reported', 'Not reported'],
+  }}
+/>
+
+ResNet-152 figures are from <Cite id="he2016" />; its accuracy is 100% minus its 21.43% top-1 error on the ImageNet
+validation set with 10-crop testing. BiT-L and ViT figures are from the ViT paper, which fine-tuned all three on
+ImageNet after pre-training on JFT-300M <Cite id="dosovitskiy2021" />; BiT-L's parameter count is from
+<Cite id="kolesnikov2020" />.
+
+## Architecture
+
+**ResNet** stacks convolutional layers in residual blocks, $\yvec = \xvec + F(\xvec)$, where $F$ is two or three
+convolutions <Cite id="he2016" />. The identity shortcut lets gradients reach early layers and made networks of more
+than 100 layers trainable (see <NoteLink to="residual-network">residual network</NoteLink>). ResNet-50, 101 and 152 use
+**bottleneck** blocks: a $1 \times 1$ convolution reduces the channels, a $3 \times 3$ convolution processes them and a
+$1 \times 1$ convolution restores them. BiT keeps the ResNet design but replaces batch normalisation with group
+normalisation and standardised weights, which transfer better from large pre-training runs, and widens every layer
+<Cite id="kolesnikov2020" />.
+
+**ViT** cuts a $224 \times 224$ image into $16 \times 16$ patches, giving $N = HW/P^2 = 224^2/16^2 = 196$ patches.
+Each flattened patch is mapped linearly to a vector, a learned position embedding is added, and a learnable class token
+is prepended. A standard <NoteLink to="transformer">transformer</NoteLink> encoder processes the 197 tokens, and a head
+on the class token predicts the label <Cite id="dosovitskiy2021" />. The Base and Large configurations are those of BERT;
+Huge is new. The sequence length grows as the inverse square of the patch size, so ViT-H/14, with $14 \times 14$ patches,
+processes 256 tokens at $224 \times 224$.
+
+## Training
+
+**ResNet** was trained from scratch on ImageNet-1k, 1.28 million labelled images in 1,000 classes
+<Cite id="he2016" /> <Cite id="russakovsky2015" />.
+
+**The ViT study** pre-trained both families on three datasets of increasing size and fine-tuned each model on ImageNet
+<Cite id="dosovitskiy2021" />: ImageNet-1k (1.3M images), ImageNet-21k (14M images, 21k classes) and JFT-300M (303M
+images, 18k classes). The ResNet baselines were BiT models, trained with the same procedure where possible, so the
+comparison isolates the architecture. Compute is reported in TPUv3-core-days: TPU cores used multiplied by days of
+training.
+
+## What is distinctive
+
+**ResNet** made very deep networks trainable. Its convolutions build in two assumptions about images. **Locality**: each
+output depends on a small neighbourhood of pixels. **Translation equivariance**: shifting the image shifts the feature
+map. These hold in every layer, so the network does not have to learn them from data.
+
+**ViT** keeps almost none of this. Only the patch cutting and the position embeddings refer to the two-dimensional
+structure of the image; self-attention is global from the first layer, and spatial relations between patches must be
+learned <Cite id="dosovitskiy2021" />.
+
+## Comparison
+
+**Accuracy depends on the amount of pre-training data.** The ViT paper's central result is that the ranking of the two
+families reverses as data grows <Cite id="dosovitskiy2021" />. Fine-tuned ImageNet top-1 accuracy (%) at 384×384:
+
+| Pre-trained on | ViT-B/16 | ViT-L/16 |
+| -------------- | -------- | -------- |
+| ImageNet-1k    | 77.91    | 76.53    |
+| ImageNet-21k   | 83.97    | 85.15    |
+| JFT-300M       | 84.15    | 87.12    |
+
+Pre-trained on ImageNet-1k alone, the larger ViT-L/16 is worse than ViT-B/16, and both lie below the range of BiT
+ResNets. With ImageNet-21k the two ViT sizes are similar. Only with JFT-300M does the larger model pay off. On random
+subsets of JFT-300M, ResNets were better with 9M and 30M images, and ViT overtook them with 90M and more.
+
+**Compute.** At equal pre-training compute on JFT-300M, ViT is more accurate. ViT-L/16 trained for 7 epochs reached
+86.30% on ImageNet with 783 exaFLOPs; ResNet-152x2 trained for 14 epochs reached 85.56% with 1,126 exaFLOPs
+<Cite id="dosovitskiy2021" />. The headline models differ more: ViT-L/16 matched or beat BiT-L on all seven benchmarks
+in the paper's main table, with 0.68k TPUv3-core-days against 9.9k.
+
+**Inductive bias against data.** Locality and translation equivariance are correct for natural images, so ResNets need
+fewer examples to learn good features. ViT must learn them. With enough data it learns them, and its fewer built-in
+assumptions stop being a handicap. The ViT authors summarise this as large-scale training trumping inductive bias
+<Cite id="dosovitskiy2021" />.
+
+**Cost at inference.** A convolution's cost grows linearly with the number of pixels. Self-attention over $N$ patches
+costs $O(N^2)$, so halving the patch size multiplies the sequence length by 4 and the attention cost by 16.
