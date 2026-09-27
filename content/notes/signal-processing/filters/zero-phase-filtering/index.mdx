@@ -1,0 +1,76 @@
+---
+title: Zero-phase filtering
+kind: technique
+summary: 'Zero-phase filtering runs a filter forward, then backward over the reversed output. The combined response is $\abs{H(e^{i\omega})}^2$: real, so there is no phase shift or delay at any frequency. It is non-causal, squares the magnitude response, and needs care at the edges.'
+tags: [signal-processing, filters, worked-example]
+aliases: [forward-backward filtering, filtfilt, zero-phase filter, two-pass filtering, non-causal filtering]
+requires: [iir-filters, linear-phase-and-group-delay]
+related: [fir-filters, moving-average-and-smoothing-filters, iir-filter-design]
+references: [gustafsson1996, smith2007filters]
+status: draft
+updated: 2026-09-26
+---
+
+import { ZeroPhaseDemo } from './ZeroPhaseDemo'
+
+<Definition>
+Zero-phase filtering of a finite record applies a filter $h$, reverses the result in time, applies $h$ again, and
+reverses once more. The overall system has frequency response
+
+$$
+H_{\mathrm{zp}}(e^{i\omega}) = H(e^{i\omega})\, H^*(e^{i\omega}) = \abs{H(e^{i\omega})}^2,
+$$
+
+which is real and non-negative, so it introduces no phase shift at any frequency <Cite id="smith2007filters" />.
+</Definition>
+
+## Why the phase cancels
+
+Time reversal conjugates the spectrum of a real signal: if $u[n]$ has transform $U(e^{i\omega})$, then $u[-n]$ has
+transform $U(e^{-i\omega}) = U^*(e^{i\omega})$. Follow a signal $x$ through the four steps:
+
+1. Filter: $Y_1 = H X$.
+2. Reverse: $Y_2 = Y_1^* = H^* X^*$.
+3. Filter: $Y_3 = H Y_2 = H H^* X^*$.
+4. Reverse: $Y_4 = Y_3^* = H^* H X = \abs{H}^2 X$.
+
+The phase added on the forward pass is subtracted on the backward pass. The equivalent impulse response is the
+autocorrelation of $h$, symmetric about $n = 0$, which is why it is non-causal: each output depends on inputs after it.
+
+## What changes
+
+- **No delay, no phase distortion.** Edges and peaks stay in place and symmetric pulses stay symmetric, whatever the
+  filter's own phase. An IIR filter used this way gives the sharp magnitude response of feedback with the phase
+  behaviour of a symmetric FIR filter.
+- **Squared magnitude.** Every attenuation in dB doubles. The $-3$ dB cutoff of a Butterworth filter becomes a $-6$ dB
+  point, and a design with 40 dB stopband attenuation gives 80 dB. Passband ripple doubles too. Design for half the
+  requirements, or pre-compensate the cutoff.
+- **Offline only.** The backward pass needs the whole record, so this is for recorded data, not real-time systems.
+
+<ZeroPhaseDemo />
+
+## Edge effects
+
+A causal filter started from rest produces a transient while its internal state fills; the backward pass does the
+same at the other end. Both ends of the output are therefore distorted over roughly the length of the impulse
+response. Two remedies are standard, and SciPy's `filtfilt` uses both: pad the signal at each end, commonly by odd
+reflection about the end value ($2x[0] - x[k]$), and start each pass from the steady-state initial conditions that
+match the first sample. Gustafsson showed how to choose the initial states so that the forward–backward result
+matches the backward–forward one <Cite id="gustafsson1996" />.
+
+## Worked example
+
+A second-order Butterworth low-pass filter with cutoff $0.1\pi$ has gain $1/\sqrt 2$ at the cutoff. Applied forward and
+backward, its gain there is $\abs{H}^2 = 0.5$, or $-6.02$ dB, and its effective order is 4. Filtering a unit step at
+$n = 80$ with a fourth-order Butterworth filter with cutoff $0.08\pi$: the causal output first exceeds 0.5 at
+$n = 91$, eleven samples late, consistent with the filter's group delay of 10.3 samples at low frequencies. The
+zero-phase output crosses 0.5 at $n = 80$, exactly at the step.
+
+## Pitfalls
+
+- **Not for causal analysis.** Zero-phase filtering uses future samples. Features computed from it leak information
+  backwards in time, which invalidates forecasting or event-onset studies.
+- **Short records.** When the record is not much longer than the impulse response, the edge transients dominate;
+  reduce the order or the padding length accordingly.
+- **Different from linear phase.** A linear-phase FIR filter is causal with a constant delay, which can be removed by
+  shifting; forward–backward filtering has zero delay but always squares the magnitude response.

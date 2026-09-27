@@ -1,0 +1,92 @@
+---
+title: Precision-recall curve and average precision
+kind: concept
+summary: 'The precision-recall curve plots precision against recall as the threshold varies. Unlike the ROC curve it depends on prevalence, which makes it the more informative view for rare positives. Average precision summarises it as $\sum_n (R_n - R_{n-1}) P_n$, not by trapezoids.'
+tags: [metrics, classification, ranking, imbalance, information-retrieval, worked-example]
+aliases: [PR curve, precision-recall curve, average precision, AUPRC, area under the precision-recall curve, precision-recall-gain]
+requires: [precision-recall-and-f-score, roc-curve-and-auc]
+related: [mean-average-precision-and-mrr, mean-average-precision-for-detection, operating-points-and-equal-error-rate, choosing-a-metric]
+references: [davis2006, saito2015, boyd2013, flach2015]
+status: draft
+updated: 2026-09-27
+---
+
+import { RocPrCurves } from '../../_shared/RocPrCurves'
+
+<Definition>
+For a scoring classifier with threshold $t$, the precision-recall (PR) curve is the set of points
+$\paren{\text{recall}(t), \text{precision}(t)}$ over all thresholds. Average precision summarises it as
+
+$$
+\text{AP} = \sum_n \paren{R_n - R_{n-1}}\,P_n,
+$$
+
+where $P_n$ and $R_n$ are the precision and recall at the $n$-th threshold, taken in decreasing order of score
+<Cite id="boyd2013" />.
+</Definition>
+
+## Why a second curve
+
+The ROC curve's axes are both rates within a true class, so it ignores the prevalence $\pi$. Precision is a rate within
+the predicted positives,
+
+$$
+\text{precision} = \frac{\pi\,\text{TPR}}{\pi\,\text{TPR} + (1 - \pi)\,\text{FPR}},
+$$
+
+and when positives are rare the false-positive term dominates. A classifier with a false-positive rate of 1% looks
+excellent on an ROC plot, but at a prevalence of 0.1% most of its positive predictions are false. The PR curve shows
+this directly, which is why it is preferred for imbalanced problems <Cite id="saito2015" />.
+
+The two curves carry the same information for a given prevalence: each point on one corresponds to one point on the
+other, and one curve dominates another in ROC space exactly when it dominates in PR space <Cite id="davis2006" />.
+What differs is what the eye sees, and how areas summarise them.
+
+## The chance level and the prevalence
+
+A classifier with uninformative scores has $\text{TPR} = \text{FPR}$ at every threshold, so its precision is $\pi$
+everywhere: the chance level of the PR curve is a horizontal line at the prevalence, not a fixed value. Average
+precision should always be read against $\pi$. For the binormal model with separation $d = 1.5$, the AUROC is 0.856
+at every prevalence, while the average precision is 0.854 at $\pi = 0.5$, 0.478 at $\pi = 0.1$ and 0.116 at
+$\pi = 0.01$.
+
+## Average precision is not a trapezoid
+
+Linear interpolation between points is correct in ROC space but not in PR space. Between two thresholds, as more cases
+are included, precision does not change linearly with recall, so the trapezoidal area overestimates the curve
+<Cite id="davis2006" />. Average precision avoids interpolation: it weights the precision at each threshold by the
+recall gained there. Equivalently, it is the mean of the precision values measured at each positive case, taking the
+positives in order of score.
+
+**Worked example.** With positives scoring 0.9, 0.8, 0.6, 0.55 and negatives 0.7, 0.5, 0.4, 0.3, 0.2 (as in
+<NoteLink to="roc-curve-and-auc">ROC curve and AUC</NoteLink>), the ranked list is P, P, N, P, P, N, N, N, N. The
+precision at each positive is $1/1$, $2/2$, $3/4$ and $4/5$, so
+
+$$
+\text{AP} = \tfrac14\paren{1 + 1 + 0.75 + 0.8} = 0.8875.
+$$
+
+The trapezoidal area under the same points is 0.871.
+
+<RocPrCurves
+  title="Prevalence moves the PR curve"
+  caption="Lower the prevalence and watch the right-hand curve sink towards its chance level, a horizontal line at π, while the ROC curve on the left does not move. Average precision falls with it; AUROC does not."
+  prevalence={0.05}
+/>
+
+## Precision-recall-gain
+
+Flach and Kull argue that PR analysis as usually done has three problems: its chance level moves with prevalence,
+interpolation is non-linear, and areas do not relate to expected $F$-scores. They rescale precision and recall into
+gains relative to the always-positive classifier, $\text{precision gain} = (\text{precision} - \pi)/\paren{(1 - \pi)\,
+\text{precision}}$ and similarly for recall, which makes the curve's chance level fixed, linear interpolation valid,
+and the area under it related to expected $F_1$ <Cite id="flach2015" />.
+
+## Pitfalls
+
+- **Comparing AP across datasets** with different prevalences is not meaningful without the baseline $\pi$.
+- **Library differences.** Scikit-learn's `average_precision_score` uses the step-wise sum above; some tools
+  interpolate. Retrieval and object detection use their own interpolated variants (see
+  <NoteLink to="mean-average-precision-and-mrr">mean average precision</NoteLink>).
+- **Few positives** make the curve jagged and AP unstable; report a
+  <NoteLink to="metric-confidence-intervals">confidence interval</NoteLink>.

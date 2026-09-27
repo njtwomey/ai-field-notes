@@ -1,0 +1,66 @@
+---
+title: Fréchet inception distance
+kind: concept
+summary: 'FID fits Gaussians to network features of real and generated images and reports the Fréchet distance between them, $\norm{\muvec_1 - \muvec_2}^2 + \trace\paren{\Sigmamat_1 + \Sigmamat_2 - 2(\Sigmamat_1\Sigmamat_2)^{1/2}}$. Lower is better.'
+tags: [metrics, generative-models, deep-learning, worked-example]
+aliases: [FID, Fréchet inception distance, Frechet distance between Gaussians, Wasserstein-2 distance between Gaussians]
+related: [inception-score, kernel-inception-distance, precision-and-recall-for-generative-models, multivariate-normal-distribution]
+references: [heusel2017, dowson1982, chong2020]
+status: draft
+updated: 2026-09-27
+---
+
+import { FidGaussians } from './FidGaussians'
+
+<Definition>
+Let $(\muvec_1, \Sigmamat_1)$ and $(\muvec_2, \Sigmamat_2)$ be the mean and covariance of Inception-network features of
+real and generated images. The Fréchet inception distance is <Cite id="heusel2017" />
+
+$$
+\text{FID} = \norm{\muvec_1 - \muvec_2}^2 + \trace\paren{\Sigmamat_1 + \Sigmamat_2 - 2\paren{\Sigmamat_1\Sigmamat_2}^{1/2}} .
+$$
+</Definition>
+
+## Where the formula comes from
+
+The Fréchet distance, also called the Wasserstein-2 distance, between two distributions is the smallest root-mean-square
+distance between paired draws, minimised over all ways of pairing them. For two Gaussians it has the closed form above
+<Cite id="dowson1982" />, and FID is its square. The first term is the squared distance between the means. The second
+is zero exactly when $\Sigmamat_1 = \Sigmamat_2$: for equal covariances $\paren{\Sigmamat^2}^{1/2} = \Sigmamat$ and the
+trace cancels. So FID penalises a generator both for shifting the feature distribution and for changing its spread,
+including shrinking it, which is what mode collapse does.
+
+## The matrix square root
+
+$\Sigmamat_1\Sigmamat_2$ is not symmetric, but it is similar to the symmetric positive semi-definite matrix
+$\Sigmamat_1^{1/2}\Sigmamat_2\Sigmamat_1^{1/2}$, so its eigenvalues $\lambda_i$ are real and non-negative, and
+$\trace\paren{\Sigmamat_1\Sigmamat_2}^{1/2} = \sum_i \sqrt{\lambda_i}$. In two dimensions this has a closed form. With
+$\Mmat = \Sigmamat_1\Sigmamat_2$,
+
+$$
+\paren{\sqrt{\lambda_1} + \sqrt{\lambda_2}}^2 = \lambda_1 + \lambda_2 + 2\sqrt{\lambda_1\lambda_2}
+= \trace\Mmat + 2\sqrt{\det\Mmat}, \quad\text{so}\quad \trace\Mmat^{1/2} = \sqrt{\trace\Mmat + 2\sqrt{\det\Mmat}} .
+$$
+
+In the 2048 dimensions of Inception features the square root is computed numerically, and small imaginary parts from
+round-off are discarded.
+
+**Worked example.** Real features $\Gauss\paren{\zeros, \begin{bmatrix} 1 & 0.5 \\ 0.5 & 1 \end{bmatrix}}$ and generated
+features with mean $(1, 0.5)$ and covariance $\operatorname{diag}(2, 0.5)$. The mean term is $1^2 + 0.5^2 = 1.25$.
+$\Mmat = \Sigmamat_1\Sigmamat_2$ has trace $2.5$ and determinant $0.75$, so $\trace\Mmat^{1/2} = \sqrt{2.5 + 2\sqrt{0.75}}
+= 2.057$, and the covariance term is $2 + 2.5 - 2 \times 2.057 = 0.386$. $\text{FID} = 1.636$, which matches
+`scipy.linalg.sqrtm`.
+
+<FidGaussians />
+
+## Pitfalls
+
+- **Biased with finite samples.** FID estimated from $N$ samples is biased upwards, and the bias depends on the
+  generator, so rankings can change with $N$ <Cite id="chong2020" />. Compare at the same, large $N$ (50,000 is common),
+  or extrapolate to $N \to \infty$. <NoteLink to="kernel-inception-distance">KID</NoteLink> has an unbiased estimator.
+- **Only two moments.** FID sees means and covariances of features, not the full distributions. Very different
+  distributions with the same two moments score 0.
+- **Feature extractor.** The Inception network and its preprocessing define the space. Differences in resizing and
+  image format change FID by several points; use a reference implementation.
+- **One number for two failures.** Low fidelity and low diversity both raise FID. <NoteLink to="precision-and-recall-for-generative-models">Precision
+  and recall</NoteLink> separate them.

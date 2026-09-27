@@ -1,0 +1,58 @@
+---
+title: Sample-rate conversion
+kind: technique
+summary: 'Rational sample-rate conversion by $L/M$ upsamples by $L$, lowpass filters with cutoff $\min(\pi/L, \pi/M)$ and gain $L$, and downsamples by $M$. A polyphase implementation computes only the kept outputs, so 44.1 kHz to 48 kHz ($L/M = 160/147$) stays cheap.'
+tags: [signal-processing, multirate, resampling, audio, worked-example]
+aliases: [resampling, rational resampling, fractional resampling, SRC, 44.1 to 48 kHz conversion]
+requires: [decimation-and-interpolation, polyphase-decomposition]
+related: [filter-banks, fir-filter-design, sampling-theorem]
+references: [crochiere1981, vaidyanathan1993]
+status: draft
+updated: 2026-09-26
+---
+
+<Definition>
+To change the sample rate by a rational factor $L/M$ in lowest terms, upsample by $L$, filter with a lowpass of
+cutoff $\omega_c = \min(\pi/L, \pi/M)$ and gain $L$, and downsample by $M$. The output rate is $f_s L / M$
+<Cite id="crochiere1981" />.
+</Definition>
+
+## Why one filter suffices
+
+Upsampling by $L$ puts the signal at an intermediate rate $L f_s$ and creates images at multiples of $2\pi/L$.
+Downsampling by $M$ from that rate will alias anything above $\pi/M$. A single lowpass at the intermediate rate can
+serve both purposes: its cutoff must be below $\pi/L$ to remove the images and below $\pi/M$ to prevent aliasing,
+hence the minimum. When converting up ($L > M$) the cutoff is $\pi/L$ and the whole input band survives. When
+converting down ($L < M$) it is $\pi/M$, and the input band above the new Nyquist frequency is discarded, as it must
+be.
+
+## Computing only what is kept
+
+The intermediate rate can be enormous, but almost none of it needs computing. After upsampling, all but one in $L$
+samples are zero, so each filter output uses only $P/L$ nonzero products for a filter of $P$ taps. After
+downsampling, only one in $M$ filter outputs is kept. A polyphase implementation combines both savings. The output
+sample $y[n]$ corresponds to intermediate time $nM$; it is computed from the polyphase component
+$e_{(nM) \bmod L}$ applied to the input samples ending at $\lfloor nM / L \rfloor$. Each output costs $P/L$
+multiplications, and the intermediate sequence is never formed.
+
+**Worked example.** Converting 44.1 kHz audio to 48 kHz needs $L/M = 48000/44100 = 160/147$, since
+$\gcd(48000, 44100) = 300$. The intermediate rate is $160 \times 44.1 \text{ kHz} = 7.056$ MHz. The filter cutoff is
+$\min(\pi/160, \pi/147) = \pi/160$ at that rate, which is 22.05 kHz: the input's own Nyquist frequency, because this
+is an up-conversion. A filter with, say, 32 taps per polyphase branch has $P = 160 \times 32 = 5120$ taps in total,
+yet each 48 kHz output sample costs only 32 multiplications, and the 160 branches can be stored as a table.
+
+## Alternatives
+
+- **Multistage conversion.** Factoring $L$ and $M$ into small steps lets early stages use short filters with wide
+  transition bands.
+- **Arbitrary ratios.** When the ratio is irrational or time-varying (asynchronous clocks), the output time falls
+  between input samples at a continuously varying offset. Implementations interpolate between polyphase branches or
+  evaluate a windowed-sinc kernel at the exact offset.
+
+## Pitfalls
+
+- **Imaging when converting up with too wide a filter.** A cutoff above $\pi/L$ lets images through as audible or
+  visible artefacts.
+- **Passband droop and ripple.** Short filters roll off before the band edge; at 44.1 kHz the top kilohertz of audio
+  is where cheap converters differ.
+- **Latency.** A long linear-phase filter adds half its length in delay at the intermediate rate.

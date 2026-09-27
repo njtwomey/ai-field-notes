@@ -1,0 +1,103 @@
+---
+title: Spectral leakage and windows
+kind: concept
+summary: 'Analysing a finite segment multiplies the signal by a window, which convolves its spectrum with the window''s transform. A tone between DFT bins leaks into all of them. Tapered windows trade main-lobe width for sidelobes tens of decibels lower.'
+tags: [signal-processing, fourier, spectral-analysis, worked-example]
+aliases: [spectral leakage, window function, windowing, Hann window, Hamming window, Blackman window, Kaiser window, scalloping loss, equivalent noise bandwidth, ENBW]
+requires: [dft]
+related: [zero-padding-and-resolution, convolution-theorem, periodogram, short-time-fourier-transform, fir-filter-design]
+references: [harris1978, oppenheim2010]
+status: draft
+updated: 2026-09-26
+---
+
+import { WindowedTone } from './WindowedTone'
+
+<Definition>
+Taking $N$ samples of a signal multiplies it by a window $w[n]$ that is zero outside $0 \le n < N$. By the
+<NoteLink to="convolution-theorem">convolution theorem</NoteLink>, the spectrum of the segment is the true spectrum
+convolved with the window's transform:
+
+$$
+X_w(e^{i\omega}) = \frac{1}{2\pi}\int_{-\pi}^{\pi} X(e^{i\theta})\,W(e^{i(\omega - \theta)})\,d\theta.
+$$
+
+Every spectral line is replaced by a copy of $W$. Its main lobe limits resolution, and its sidelobes spread each
+component's energy across all frequencies: spectral leakage <Cite id="harris1978" />.
+</Definition>
+
+## Why a tone leaks
+
+For a complex tone $x[n] = e^{i\omega_0 n}$, the spectrum is a single line, so the windowed spectrum is the window's
+transform shifted to $\omega_0$: $X_w(e^{i\omega}) = W(e^{i(\omega - \omega_0)})$. The DFT samples this at
+$\omega_k = 2\pi k/N$.
+
+For the rectangular window, $W$ is the Dirichlet kernel $\sin(\omega N/2)/\sin(\omega/2)$ up to a phase; see the
+<NoteLink to="dtft">DTFT</NoteLink>. Its zeros sit at every nonzero multiple of $2\pi/N$, exactly on the other bins.
+
+- **On a bin.** If $\omega_0 = 2\pi k_0/N$, every other DFT sample falls on a zero of the kernel. The DFT shows one
+  line and nothing else: the segment holds a whole number of periods, and its periodic extension is seamless.
+- **Between bins.** If $\omega_0$ is off the grid, the samples land on the kernel's sidelobes, which decay only as
+  $1/\abs{\omega - \omega_0}$. Every bin picks up energy. In time, the segment holds a fractional number of periods,
+  and the DFT's periodic extension has a jump at the wrap point.
+
+## Windows
+
+A window that tapers smoothly to zero at both ends removes the jump. Its transform has lower sidelobes that decay
+faster, at the cost of a wider main lobe. The common windows are raised cosines:
+
+$$
+w[n] = a_0 - a_1\cos\frac{2\pi n}{N} + a_2\cos\frac{4\pi n}{N},
+$$
+
+with $(a_0, a_1, a_2) = (1, 0, 0)$ for rectangular, $(0.5, 0.5, 0)$ for Hann, $(0.54, 0.46, 0)$ for Hamming and
+$(0.42, 0.5, 0.08)$ for Blackman. The Kaiser window,
+$w[n] = I_0\paren{\beta\sqrt{1 - (2n/N - 1)^2}}/I_0(\beta)$, has a parameter $\beta$ that sets the trade-off
+continuously.
+
+<WindowedTone />
+
+## Figures of merit
+
+Measured for $N = 64$ periodic windows, the form used for spectral analysis:
+
+| Window | Main lobe, null to null (bins) | Peak sidelobe (dB) | Scalloping loss (dB) | ENBW (bins) |
+| --- | --- | --- | --- | --- |
+| Rectangular | 2 | $-13.3$ | 3.92 | 1.00 |
+| Hann | 4 | $-31.5$ | 1.42 | 1.50 |
+| Hamming | 4 | $-42.4$ | 1.75 | 1.36 |
+| Blackman | 6 | $-58.1$ | 1.10 | 1.73 |
+| Kaiser, $\beta = 8.6$ | 5.8 | $-63.4$ | 1.11 | 1.72 |
+
+- **Main-lobe width** limits resolution: two tones closer than about half the null-to-null width merge into one peak.
+- **Peak sidelobe** limits dynamic range: a weak tone next to a strong one is hidden if it falls below the strong
+  tone's sidelobes.
+- **Scalloping loss** is the worst-case drop in a tone's measured amplitude when it falls halfway between bins,
+  $-20\log_{10}\abs{W(e^{i\pi/N})/W(1)}$.
+- **Equivalent noise bandwidth**, $N\sum w^2/(\sum w)^2$, is the width of the rectangular filter that passes the same
+  white-noise power. It sets how much noise each bin collects.
+
+Hamming minimises its highest sidelobe; Hann's sidelobes are higher at first but fall off faster, at 18 dB per octave
+against Hamming's 6, because Hann is smooth at its ends. Harris's survey remains the standard reference
+<Cite id="harris1978" />.
+
+**Worked example.** A strong tone at 10.5 bins, halfway between two bins, and a tone 40 dB weaker 10 bins away.
+With a rectangular window, the strong tone's leakage around the weak one peaks near $-27$ dB, so the weak tone, at
+$-40$ dB, is buried. With a Hann window the leakage 10 bins out is about $-68$ dB, and the weak tone stands clear.
+
+## Choosing a window
+
+- **Frequency accuracy, strong isolated tones:** rectangular, or no window, if the tones are exactly periodic in the
+  segment; otherwise Hann.
+- **Weak components near strong ones:** Blackman, Blackman–Harris or Kaiser with large $\beta$.
+- **Amplitude measurement:** flat-top windows, which have almost no scalloping loss and very wide main lobes.
+- **Short-time analysis:** Hann, which also sums to a constant when overlapped by half, as
+  <NoteLink to="overlap-add-and-overlap-save">overlap-add</NoteLink> needs.
+
+## Pitfalls
+
+- **Symmetric versus periodic.** A symmetric window of length $N$ has $w[0] = w[N-1]$, suitable for filter design. For
+  spectral analysis the periodic form, the first $N$ samples of a symmetric window of length $N + 1$, gives the exact
+  properties in the table.
+- **Amplitude correction.** A window reduces the measured amplitude of a tone by its coherent gain, $\sum w / N$ (0.5
+  for Hann). Divide by it to read amplitudes, and by the ENBW to read noise densities.

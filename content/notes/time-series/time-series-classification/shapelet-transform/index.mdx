@@ -1,0 +1,98 @@
+---
+title: Shapelet transform
+kind: technique
+summary: 'The shapelet transform picks the $k$ best shapelets from the training data and replaces each time series by its $k$ distances to them. Any classifier is then trained on this $N \times k$ table, which separates finding shapelets from using them.'
+tags: [time-series, classification, feature-extraction, worked-example]
+aliases: [ST, shapelet transformation]
+requires: [shapelets]
+partOf: [shapelets]
+references: [lines2012, hills2014, ye2009, bagnall2017, lines2018]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Given training series $T_1, \dots, T_N$ and a set of $k$ shapelets $S_1, \dots, S_k$, the shapelet transform maps
+series $T_j$ to the vector
+
+$$
+\xvec_j = \paren{d(T_j, S_1), \dots, d(T_j, S_k)} \in \reals^k,
+$$
+
+where $d(T, S)$ is the subsequence distance, the smallest distance between $S$ and any window of $T$ of the same
+length. The shapelets are the $k$ candidate subsequences of the training data that score best under a class
+separation measure. The transformed data is an ordinary $N \times k$ feature table <Cite id="lines2012" />.
+</Definition>
+
+## Problem
+
+The original shapelet classifier embeds the search inside a decision tree <Cite id="ye2009" />. Each node runs a full
+search for one shapelet, on the subset of data that reaches it. Three problems follow.
+
+- A tree uses one shapelet per node, and deep nodes see few series, so their shapelets are chosen from little data.
+- Decision trees are high-variance classifiers. Replacing the tree with a stronger classifier means redesigning the
+  search.
+- A class may be recognised by the combination of several patterns, none of which separates the classes alone.
+
+## Mechanism
+
+The transform performs one search over the whole training set and keeps the best $k$ shapelets instead of the single
+best one <Cite id="lines2012" />.
+
+1. **Enumerate candidates.** Every subsequence of every training series, for lengths in a range
+   $[m_{\min}, m_{\max}]$, is a candidate.
+2. **Score each candidate.** Compute its distance to every training series and measure how well those $N$ distances
+   separate the classes.
+3. **Remove self-similar candidates.** Candidates from the same series that overlap in time are near-copies. For each
+   series, only the best of a group of overlapping candidates is kept.
+4. **Keep the top $k$.** Sort the remaining candidates by score and keep the $k$ best.
+5. **Transform.** Compute $\xvec_j$ for every training and test series, and train any classifier on the vectors.
+
+The quality measure need not be information gain. Hills et al. compared information gain with three statistics of
+the distances grouped by class: the one-way ANOVA F-statistic, the Kruskal–Wallis statistic and Mood's median
+statistic <Cite id="hills2014" />. For $C$ classes, class $c$ holding $N_c$ distances with mean $\bar d_c$, and
+overall mean $\bar d$, the F-statistic is the ratio of between-class to within-class variance:
+
+$$
+F = \frac{\sum_{c=1}^{C} N_c \paren{\bar d_c - \bar d}^2 / (C - 1)}
+{\sum_{c=1}^{C} \sum_{j \in c} \paren{d_j - \bar d_c}^2 / (N - C)}.
+$$
+
+The F-statistic needs no threshold search and handles any number of classes directly. It is therefore cheaper to
+compute than information gain, which must try every threshold on the orderline.
+
+## Worked example
+
+Take six series of length 6, three per class, and two candidate shapelets $S_1 = (0, 2, 0)$ and
+$S_2 = (2, 2, 2)$, with raw Euclidean distances.
+
+| Series | Values           | Class | $d(T, S_1)$ | $d(T, S_2)$ |
+| ------ | ---------------- | ----- | ----------- | ----------- |
+| $T_1$  | 0, 0, 2, 0, 0, 0 | 1     | 0.000       | 2.828       |
+| $T_2$  | 1, 0, 2, 1, 0, 0 | 1     | 1.000       | 2.236       |
+| $T_3$  | 0, 0, 0, 1, 2, 0 | 1     | 1.000       | 2.236       |
+| $T_4$  | 0, 1, 1, 1, 1, 0 | 0     | 1.414       | 1.732       |
+| $T_5$  | 2, 2, 2, 2, 2, 2 | 0     | 2.828       | 0.000       |
+| $T_6$  | 0, 0, 0, 0, 0, 0 | 0     | 2.000       | 3.464       |
+
+The last two columns are the transformed data, a $6 \times 2$ table. For $S_1$, the class means are $0.667$ and
+$2.081$, and the F-statistic is $7.16$. For $S_2$, the class-0 distances spread from $0$ to $3.464$, and the
+F-statistic is $0.47$. $S_1$ is ranked first. A threshold on the $S_1$ column alone classifies all six series
+correctly.
+
+## Cost
+
+Discovery has the cost of exhaustive shapelet search: $O(N^2 n^4)$ for $N$ series of length $n$ over all lengths.
+The transform itself costs $O(k \, n \, m)$ per series for shapelets of length $m$. Implementations reduce discovery
+cost by sampling candidates at random or by searching for a fixed time budget, which in practice loses little
+accuracy because many candidates are near-duplicates.
+
+## Trade-offs
+
+- **Flexibility.** Discovery and classification are independent. Trained with an ensemble of standard classifiers,
+  the shapelet transform was among the most accurate single-representation methods in the 2017 bake off
+  <Cite id="bagnall2017" />. It is the shapelet module of HIVE-COTE <Cite id="lines2018" />.
+- **Interpretability.** A tree over one or two shapelets can be read directly. A classifier over hundreds of shapelet
+  features is harder to explain, although the features themselves remain pieces of real data.
+- **Independence of features.** Each shapelet is scored alone, so two shapelets that are only informative together
+  can both be missed. Learned shapelets optimise the set jointly instead.

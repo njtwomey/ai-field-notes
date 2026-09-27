@@ -1,0 +1,103 @@
+---
+title: ROC curve and AUC
+kind: concept
+summary: 'The ROC curve plots the true-positive rate against the false-positive rate as a classifier''s threshold varies. The area under it, AUROC, is the probability that a random positive scores above a random negative; it ignores the threshold and the class prevalence.'
+tags: [metrics, classification, ranking, worked-example]
+aliases: [ROC curve, receiver operating characteristic, AUROC, AUC, area under the ROC curve, Mann-Whitney AUC, c-statistic, concordance statistic]
+requires: [sensitivity-specificity-and-predictive-values]
+related:
+  [
+    precision-recall-curve-and-average-precision,
+    operating-points-and-equal-error-rate,
+    confusion-matrix,
+    metric-confidence-intervals,
+    choosing-a-metric,
+    cost-sensitive-learning,
+    rank-correlation,
+  ]
+references: [fawcett2006, hanley1982, mann1947, delong1988, flach2003, hand2009]
+status: draft
+updated: 2026-09-27
+---
+
+import { RocPrCurves } from '../../_shared/RocPrCurves'
+
+<Definition>
+A scoring classifier predicts positive when its score $s(\xvec)$ exceeds a threshold $t$. Its receiver operating
+characteristic (ROC) curve is the set of points $\paren{\text{FPR}(t), \text{TPR}(t)}$ as $t$ runs from $+\infty$ to
+$-\infty$. The area under the curve is
+
+$$
+\text{AUROC} = \int_0^1 \text{TPR}\;d\,\text{FPR} = P\paren{s(X^+) > s(X^-)},
+$$
+
+the probability that a randomly drawn positive scores higher than a randomly drawn negative, counting ties as half
+<Cite id="fawcett2006" />.
+</Definition>
+
+## The curve
+
+At a very high threshold nothing is predicted positive, the point $(0, 0)$. As the threshold falls, positives and
+negatives cross it and the point moves up (a positive crosses) or right (a negative crosses), until at a very low
+threshold everything is positive, the point $(1, 1)$. A classifier whose scores carry no information moves up and right
+in proportion, along the diagonal $\text{TPR} = \text{FPR}$. A perfect classifier passes through $(0, 1)$.
+
+Both axes are rates within a true class, so the curve does not depend on the prevalence. It depends only on the two
+class-conditional score distributions, and it is unchanged by any strictly increasing transformation of the scores:
+only their order matters.
+
+## AUROC as a probability
+
+For an empirical curve with $n_+$ positives and $n_-$ negatives, sort the cases by score and walk down the list. Each
+time a negative is passed, the curve moves right by $1/n_-$ at a height equal to the fraction of positives already
+passed, which is the fraction of positives that outscore that negative. The area is the average of those heights:
+
+$$
+\text{AUROC} = \frac{1}{n_+ n_-}\sum_{i \in +}\sum_{j \in -}\paren{\indicator[s_i > s_j] + \tfrac12\indicator[s_i = s_j]}.
+$$
+
+The double sum counts the pairs in which the positive outscores the negative. It is the Mann–Whitney $U$ statistic
+divided by $n_+ n_-$ <Cite id="mann1947" />, so AUROC is the probability that the classifier orders a random
+positive–negative pair correctly <Cite id="hanley1982" />. In medical statistics it is called the $c$-statistic.
+
+For the binormal model with negatives $\sim \Gauss(0, 1)$ and positives $\sim \Gauss(d, 1)$, the difference of a
+positive and a negative score is $\Gauss(d, 2)$, so $\text{AUROC} = \Phi(d/\sqrt 2)$, with $\Phi$ the standard normal
+cdf. At $d = 1.5$ it is $\Phi(1.061) = 0.856$.
+
+## Worked example
+
+Four positives score 0.9, 0.8, 0.6 and 0.55; five negatives score 0.7, 0.5, 0.4, 0.3 and 0.2. Of the 20
+positive–negative pairs, the positives win 18: the two top positives beat all five negatives, and 0.6 and 0.55 beat all
+but 0.7. So $\text{AUROC} = 18/20 = 0.90$. Walking down the sorted scores traces the curve through $(0, 0.25)$,
+$(0, 0.5)$, $(0.2, 0.5)$, $(0.2, 1)$ and on to $(1, 1)$, whose area is $0.2 \times 0.5 + 0.8 \times 1 = 0.90$.
+
+<RocPrCurves
+  title="The ROC curve does not see the prevalence"
+  caption="Scores are N(0, 1) for negatives and N(d, 1) for positives. Drag the operating point along the ROC curve to choose a threshold. Change the prevalence: the ROC curve and AUROC stay fixed, because both axes are rates within a class, while the precision-recall curve on the right moves. Increase d to separate the classes."
+/>
+
+## Operating points and costs
+
+A point on the curve is a classifier with a threshold. Which point is best depends on the costs of the two errors and
+the prevalence. Expected cost is constant along straight lines in ROC space whose slope is
+$(c_{\text{FP}}\,(1 - \pi))/(c_{\text{FN}}\,\pi)$, and the best threshold is where such an iso-cost line touches the
+curve <Cite id="flach2003" />. Only points on the convex hull of the curve can be optimal for some costs. See
+<NoteLink to="operating-points-and-equal-error-rate">operating points and the equal error rate</NoteLink> and
+<NoteLink to="cost-sensitive-learning">cost-sensitive learning</NoteLink>.
+
+## Multiclass AUROC
+
+For $K$ classes, compute one-against-rest AUROCs and average them, or average the pairwise AUROCs over all pairs of
+classes (the Hand–Till measure). The first depends on class proportions through the "rest" group; the second does not.
+
+## Pitfalls
+
+- **AUROC can look good when precision is poor.** With rare positives, a small false-positive rate still means many
+  false positives. The <NoteLink to="precision-recall-curve-and-average-precision">precision-recall curve</NoteLink>
+  shows this; the ROC curve does not.
+- **AUROC summarises all thresholds equally,** including ones no one would use. Partial AUROC over a range of low
+  false-positive rates, or a metric at the operating threshold, is often more relevant.
+- **Crossing curves.** Two classifiers with equal AUROC can be better in different regions. Compare curves, not only
+  areas; Hand's H-measure is a coherent alternative when costs are uncertain <Cite id="hand2009" />.
+- **Comparing AUROCs on the same data** needs a paired method such as DeLong's <Cite id="delong1988" /> (see
+  <NoteLink to="metric-confidence-intervals">confidence intervals for metrics</NoteLink>).

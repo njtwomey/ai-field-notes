@@ -1,0 +1,88 @@
+---
+title: Perceptual audio coding
+kind: concept
+summary: 'Perceptual coders such as MP3 and AAC quantise a critically sampled MDCT spectrum coarsely wherever a psychoacoustic model says the quantisation noise will be masked. Time-domain aliasing cancellation makes the MDCT invertible; masking thresholds decide the bits.'
+tags: [audio, compression, psychoacoustics, worked-example]
+aliases: [MP3, AAC, MDCT, modified discrete cosine transform, TDAC, time-domain aliasing cancellation, psychoacoustic model, masking threshold, bit allocation, lossy audio coding]
+requires: [auditory-scales]
+related: [filter-banks, perfect-reconstruction-filter-banks, dft, quantisation]
+references: [painter2000, princen1987, terhardt1979]
+status: draft
+updated: 2026-09-26
+---
+
+import { MaskingThreshold } from './MaskingThreshold'
+
+<Definition>
+A perceptual audio coder transforms the signal into frequency components, quantises each component with as few bits as
+possible while keeping the resulting quantisation noise below a masking threshold computed from a model of human
+hearing, and entropy-codes the result <Cite id="painter2000" />. The transform in MP3's hybrid filter bank, AAC, Vorbis
+and Opus's music mode is the modified discrete cosine transform.
+</Definition>
+
+## Masking
+
+A loud sound makes quieter sounds at nearby frequencies inaudible. Three facts shape the threshold of audibility:
+
+- **The threshold in quiet.** Even in silence, sounds below about $T(f) = 3.64 (f/\mathrm{kHz})^{-0.8} -
+  6.5\,e^{-0.6(f/\mathrm{kHz} - 3.3)^2} + 10^{-3}(f/\mathrm{kHz})^4$ dB SPL are inaudible, with the ear most sensitive
+  near 3 to 4 kHz <Cite id="terhardt1979" />.
+- **Simultaneous masking.** A masker raises the threshold within its critical band and, more weakly, in neighbouring
+  bands. On the Bark scale the spread has a roughly fixed shape; a common model is Schroeder's spreading function
+  $\mathrm{SF}(\Delta z) = 15.81 + 7.5(\Delta z + 0.474) - 17.5\sqrt{1 + (\Delta z + 0.474)^2}$ dB. It is asymmetric:
+  masking extends much further to higher frequencies than to lower.
+- **Temporal masking.** Masking also extends a few milliseconds before a loud sound and tens of milliseconds after it.
+
+The psychoacoustic model estimates, per frame and band, the global masking threshold: the thresholds of all maskers,
+each spread across bands and lowered by an offset that depends on whether the masker is tonal or noise-like, summed in
+power with the threshold in quiet.
+
+## Bit allocation
+
+Uniform quantisation with $b$ bits gives a signal-to-noise ratio of about $6.02\,b$ dB. The signal-to-mask ratio
+$\mathrm{SMR} = L_{\text{signal}} - L_{\text{mask}}$ in a band is how far the signal sits above the threshold, so noise
+stays masked with about $\mathrm{SMR}/6.02$ bits. Bands with negative SMR need no bits at all. The encoder
+distributes the available bits to keep the noise-to-mask ratio at or below 0 dB everywhere, and shapes noise into the
+bands where it is least audible when the bit budget is too small.
+
+**Worked example.** A 1 kHz tone at 70 dB SPL lies at 8.5 Bark. With a masking offset of 10 dB, the threshold it
+creates is 60 dB at 1 kHz, 45.6 dB at 800 Hz, 54.3 dB at 1.2 kHz and 23.4 dB at 2 kHz: higher above the masker than
+below it at a similar Bark distance. The threshold in quiet at those frequencies is between $-0.3$ and 4 dB SPL. A band component 20 dB
+above its mask needs about $20/6.02 = 3.3$ bits, where 16-bit PCM spends 16.
+
+<MaskingThreshold />
+
+## The MDCT and time-domain aliasing cancellation
+
+Coding needs a transform that is critically sampled, producing as many coefficients as input samples, and uses
+overlapping, smoothly tapered windows, which avoid block-edge artefacts. The MDCT has both. Each block of $2N$ samples,
+overlapping its neighbours by half, gives $N$ coefficients:
+
+$$
+X[k] = \sum_{n=0}^{2N-1} w[n]\, x[n] \cos\brack{\frac{\pi}{N}\paren{n + \frac12 + \frac{N}{2}}\paren{k + \frac12}},
+\qquad k = 0, \dots, N - 1.
+$$
+
+With $N$ coefficients from $2N$ samples a single block cannot be inverted. Its inverse transform returns the windowed
+block plus a time-reversed copy: in the first half, sample $n$ is corrupted by $-x[N - 1 - n]$; in the second half, by
+$+x[3N - 1 - n]$. When consecutive blocks are windowed again and overlap-added, the alias in one block's second half and
+the next block's first half have opposite signs and cancel, provided the window satisfies the Princen–Bradley condition
+
+$$
+w^2[n] + w^2[n + N] = 1, \qquad w[n] = w[2N - 1 - n].
+$$
+
+This is time-domain aliasing cancellation <Cite id="princen1987" />. The sine window $w[n] = \sin\paren{\pi(n +
+\frac12)/(2N)}$ satisfies it, since $\sin^2 + \cos^2 = 1$. With $N = 16$ and this window, a random signal is reconstructed
+to within $10^{-14}$. Coders switch between long blocks, for frequency resolution on tonal music, and short blocks, to
+confine pre-echo around transients.
+
+## Pitfalls
+
+- **Pre-echo.** Quantisation noise spreads over the whole block. Before a sharp attack it is not masked, since
+  backward masking lasts only a few milliseconds, and is heard as a smear. Block switching and temporal noise shaping
+  address it.
+- **Tandem coding.** Decoding and re-encoding, or encoding with different coders in sequence, accumulates noise that
+  each stage's model assumed was masked.
+- **Models are averages.** Thresholds describe typical listeners and levels. Coders are tuned and validated by
+  listening tests, not by objective error measures alone.

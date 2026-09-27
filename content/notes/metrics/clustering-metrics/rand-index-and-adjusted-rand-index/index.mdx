@@ -1,0 +1,99 @@
+---
+title: Rand index and adjusted Rand index
+kind: concept
+summary: 'The Rand index is the fraction of pairs of items that two clusterings treat alike, both together or both apart. It stays high for random labels, so the adjusted Rand index subtracts its expected value under random labelling with fixed cluster sizes: 0 is chance, 1 is identical.'
+tags: [metrics, clustering, worked-example]
+aliases: [Rand index, RI, adjusted Rand index, ARI, pair counting, Hubert–Arabie adjusted Rand index]
+related: [information-theoretic-clustering-metrics, fowlkes-mallows-index, internal-clustering-indices, k-means, gaussian-mixture-model, confusion-matrix]
+references: [rand1971, hubert1985, pedregosa2011]
+status: draft
+updated: 2026-09-27
+---
+
+import { ClusteringCorruption } from './ClusteringCorruption'
+
+<Definition>
+Two clusterings $U$ and $V$ of the same $n$ items induce a contingency table $n_{ij}$: the number of items in cluster
+$i$ of $U$ and cluster $j$ of $V$, with row sums $a_i$ and column sums $b_j$. Of the $\binom n2$ pairs of items, let
+$\text{TP}$ be the pairs together in both, $\text{TN}$ the pairs apart in both. The **Rand index** is
+$\operatorname{RI} = (\text{TP} + \text{TN})/\binom n2$ <Cite id="rand1971" />. The **adjusted Rand index** is
+<Cite id="hubert1985" />
+
+$$
+\operatorname{ARI} = \frac{\sum_{ij}\binom{n_{ij}}2 - \dfrac{\sum_i\binom{a_i}2\sum_j\binom{b_j}2}{\binom n2}}
+{\dfrac12\paren{\sum_i\binom{a_i}2 + \sum_j\binom{b_j}2} - \dfrac{\sum_i\binom{a_i}2\sum_j\binom{b_j}2}{\binom n2}}.
+$$
+</Definition>
+
+## Comparing clusterings by pairs
+
+Cluster labels are arbitrary. Calling the clusters $\set{1, 2}$ or $\set{2, 1}$ describes the same partition, so a
+score must not depend on the names. Pairs of items avoid the problem: for any pair, a clustering either puts both in
+the same cluster or not, whatever the clusters are called.
+
+Every pair falls into one of four cells, like a <NoteLink to="confusion-matrix">confusion matrix</NoteLink> with the
+true clustering as the reference:
+
+| | Together in $V$ | Apart in $V$ |
+| --- | --- | --- |
+| Together in $U$ | TP | FN |
+| Apart in $U$ | FP | TN |
+
+The counts come from the contingency table. $\text{TP} = \sum_{ij}\binom{n_{ij}}2$ counts pairs within a cell;
+$\sum_i\binom{a_i}2 = \text{TP} + \text{FN}$ counts pairs together in $U$; and
+$\sum_j\binom{b_j}2 = \text{TP} + \text{FP}$ counts pairs together in $V$. The Rand index is the accuracy of this
+pairwise classification.
+
+## Why adjust
+
+Most pairs are apart in any clustering with several clusters, so TN is large for almost any labelling, and the Rand
+index stays high even when the clustering is random. For three equal clusters of 30 points and fully random labels,
+the Rand index averages 0.56.
+
+Hubert and Arabie correct this in the usual way for chance-corrected scores: subtract the expected value and rescale
+so that the maximum is 1 <Cite id="hubert1985" />.
+
+$$
+\operatorname{ARI} = \frac{\text{Index} - \expect[\text{Index}]}{\text{Max} - \expect[\text{Index}]}, \qquad
+\text{Index} = \sum_{ij}\binom{n_{ij}}2.
+$$
+
+**The expected index.** Under the permutation model, the cluster sizes $a_i$ and $b_j$ are fixed and labels are
+assigned at random. A particular pair of items is together in $U$ with probability $\sum_i\binom{a_i}2/\binom n2$, and
+independently together in $V$ with probability $\sum_j\binom{b_j}2/\binom n2$. Multiplying by the number of pairs,
+
+$$
+\expect[\text{Index}] = \frac{\sum_i\binom{a_i}2\,\sum_j\binom{b_j}2}{\binom n2}.
+$$
+
+The maximum is taken as the average of the two marginal counts, $\frac12\paren{\sum_i\binom{a_i}2 +
+\sum_j\binom{b_j}2}$, which the index reaches only when the two clusterings agree. So ARI is 1 for identical
+clusterings, about 0 on average for random ones, and negative for clusterings that agree less than chance.
+
+<ClusteringCorruption />
+
+## Worked example
+
+The true clustering is $\set{1,2,3}, \set{4,5,6}, \set{7,8,9}$ and the prediction is $\set{1,2,9}, \set{3,4,5,6},
+\set{7,8}$. The contingency table has rows $(2, 1, 0)$, $(0, 3, 0)$ and $(1, 0, 2)$.
+
+- $\text{TP} = \binom22 + \binom32 + \binom22 = 5$.
+- Pairs together in the truth: $3\binom32 = 9$, so $\text{FN} = 4$. Pairs together in the prediction:
+  $\binom32 + \binom42 + \binom22 = 10$, so $\text{FP} = 5$. Of the 36 pairs, $\text{TN} = 22$.
+- $\operatorname{RI} = (5 + 22)/36 = 0.75$.
+- $\expect[\text{Index}] = 9 \cdot 10/36 = 2.5$ and the maximum is $(9 + 10)/2 = 9.5$, so
+  $\operatorname{ARI} = (5 - 2.5)/(9.5 - 2.5) = 0.357$.
+
+The prediction looks 75% right by the Rand index, but only a third of the way from chance to perfect by the adjusted
+index. scikit-learn's `rand_score` and `adjusted_rand_score` give the same values <Cite id="pedregosa2011" />.
+
+## Pitfalls
+
+- **Unequal cluster sizes.** The pair counts are dominated by large clusters, so ARI rewards getting the big clusters
+  right and barely notices errors in small ones.
+- **Different numbers of clusters.** ARI penalises splitting a true cluster and merging two true clusters, but not
+  symmetrically; compare with the <NoteLink to="information-theoretic-clustering-metrics">information-theoretic
+  scores</NoteLink>, which separate the two failures.
+- **External scores need ground truth.** ARI compares with known labels. Without them, use
+  <NoteLink to="internal-clustering-indices">internal indices</NoteLink>, which judge a clustering by its geometry
+  alone.

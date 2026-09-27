@@ -1,0 +1,57 @@
+---
+title: Translation edit rate
+kind: concept
+summary: 'Translation edit rate (TER) is the number of edits needed to turn a candidate into a reference, divided by the average reference length. Unlike word error rate it allows block shifts, so moving a phrase costs one edit rather than many.'
+tags: [metrics, nlp, machine-translation, worked-example]
+aliases: [TER, HTER, translation error rate, human-targeted TER, shift edit]
+related: [word-and-character-error-rates, bleu, chrf]
+references: [snover2006]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The translation edit rate of a candidate against one or more references is
+
+$$
+\mathrm{TER} = \frac{\text{minimum number of edits}}{\text{average number of reference words}},
+$$
+
+where an edit is the insertion, deletion or substitution of a single word, or a shift of a contiguous sequence of
+words to another position, each counting as one edit. With several references, the number of edits is that to the
+closest reference <Cite id="snover2006" />. TER is 0 for an exact match; lower is better.
+</Definition>
+
+## Why shifts
+
+Word order differs legitimately between translations. <NoteLink to="word-and-character-error-rates">Word error
+rate</NoteLink> counts a moved phrase of $k$ words as up to $2k$ edits, a deletion and an insertion per word. TER
+charges one edit for the whole block, which matches how a human post-editor would fix it.
+
+Allowing arbitrary shifts makes finding the true minimum edit sequence NP-hard. TER therefore uses a greedy search:
+it repeatedly applies the shift that most reduces the Levenshtein distance of the remaining alignment, under
+constraints (the shifted words must match the reference at the destination and must not already be correctly
+aligned), then counts the remaining edits by dynamic programming <Cite id="snover2006" />. The result is an upper
+bound on the true minimum, and in practice close to it.
+
+## Worked example
+
+Reference "the cat sat on the mat", candidate "on the mat the cat sat" (6 words each).
+
+- **Without shifts.** The minimum word-level Levenshtein distance is 6, a WER of 1.0: every position is wrong.
+- **With a shift.** Moving the block "on the mat" to the end reproduces the reference, one edit. TER is $1/6 = 0.167$.
+
+## HTER
+
+Human-targeted TER measures the edits needed to turn the output into a new reference written by a person who edits
+the system output as little as possible to make it fluent and correct. HTER counts the edits a reader would actually
+need, and Snover et al. found it correlates with human judgements better than BLEU or TER against independent
+references <Cite id="snover2006" />. It is expensive, since it needs a human post-edit for every system output.
+
+## Pitfalls
+
+- **Shifts are found greedily.** Two implementations with different shift constraints give different scores; use a
+  standard implementation.
+- **Normalisation matters as for WER.** Tokenisation, case and punctuation change the counts.
+- **TER is an error rate.** It can exceed 1 when the candidate is much longer than the reference, and lower is
+  better, the opposite direction from BLEU.

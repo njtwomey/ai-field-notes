@@ -1,0 +1,313 @@
+---
+title: Kalman filter
+kind: concept
+summary: 'The Kalman filter computes the posterior $p(\zvec_t \mid \xvec_{1:t})$ of a linear-Gaussian state-space model exactly, one step at a time. Each step predicts the state through the dynamics, then corrects the prediction by the gain $\Kmat_t$ times the innovation $\xvec_t - \Cmat\muvec_{t \mid t-1}$.'
+tags: [time-series, state-space-models, filtering, bayesian, gaussian, worked-example]
+aliases: [Kalman gain, linear quadratic estimation, LQE, innovation sequence, Joseph form, discrete algebraic Riccati equation, steady-state Kalman filter]
+requires: [multivariate-normal-distribution, bayes-theorem]
+related: [schur-complement, completing-the-square, bayesian-linear-regression, rls-filter, wiener-filter, hidden-markov-model]
+references: [kalman1960, sarkka2013, bishop2006]
+status: draft
+updated: 2026-09-27
+---
+
+import { KalmanTracking } from './KalmanTracking'
+
+<Definition>
+A **linear-Gaussian state-space model** describes observations $\xvec_1, \dots, \xvec_T \in \reals^p$ through hidden
+states $\zvec_1, \dots, \zvec_T \in \reals^d$:
+
+$$
+\zvec_t = \Amat\zvec_{t-1} + \wvec_t, \qquad \xvec_t = \Cmat\zvec_t + \vvec_t, \qquad
+\wvec_t \sim \Gauss(\zeros, \Qmat), \quad \vvec_t \sim \Gauss(\zeros, \Rmat),
+$$
+
+with $\zvec_0 \sim \Gauss(\muvec_0, \Pmat_0)$ and all noise terms independent. $\Amat$ ($d \times d$) is the transition
+matrix, $\Cmat$ ($p \times d$) the observation matrix, $\Qmat$ the process-noise covariance and $\Rmat$ the
+measurement-noise covariance. The **Kalman filter** computes the filtering distribution
+$p(\zvec_t \mid \xvec_{1:t}) = \Gauss(\muvec_{t \mid t}, \Pmat_{t \mid t})$ recursively in $t$ <Cite id="kalman1960" />.
+</Definition>
+
+## Notation
+
+The subscript $t \mid s$ means "at time $t$, given the observations up to time $s$". The filter carries two Gaussians
+per step:
+
+- the **prediction** $p(\zvec_t \mid \xvec_{1:t-1}) = \Gauss(\muvec_{t \mid t-1}, \Pmat_{t \mid t-1})$, before
+  $\xvec_t$ is seen;
+- the **filtered** or **posterior** distribution $p(\zvec_t \mid \xvec_{1:t}) = \Gauss(\muvec_{t \mid t}, \Pmat_{t \mid t})$,
+  after $\xvec_t$ is seen.
+
+The recursion starts from $\muvec_{0 \mid 0} = \muvec_0$ and $\Pmat_{0 \mid 0} = \Pmat_0$. The matrices $\Amat$,
+$\Cmat$, $\Qmat$ and $\Rmat$ may change with $t$; the equations below hold unchanged with time subscripts added. The
+notation follows Bishop <Cite id="bishop2006" />, with $\Pmat$ for state covariances as in the engineering literature.
+
+## Filtering as recursive Bayesian estimation
+
+The model's graph is a chain: $\zvec_t$ depends only on $\zvec_{t-1}$, and $\xvec_t$ only on $\zvec_t$. Two
+conditional independences follow. Given $\zvec_{t-1}$, the new state $\zvec_t$ is independent of the past
+observations $\xvec_{1:t-1}$. Given $\zvec_t$, the new observation $\xvec_t$ is independent of the past observations.
+With them, <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink> splits each step of filtering into two operations:
+
+$$
+\underbrace{p(\zvec_t \mid \xvec_{1:t-1}) = \int p(\zvec_t \mid \zvec_{t-1})\, p(\zvec_{t-1} \mid \xvec_{1:t-1})\,
+d\zvec_{t-1}}_{\text{predict}}, \qquad
+\underbrace{p(\zvec_t \mid \xvec_{1:t}) \propto p(\xvec_t \mid \zvec_t)\, p(\zvec_t \mid \xvec_{1:t-1})}_{\text{update}}.
+$$
+
+This recursion holds for any state-space model. In general the integral and the normalising constant have no closed
+form. In the linear-Gaussian model every distribution in the recursion is Gaussian, so each step reduces to updating
+a mean vector and a covariance matrix. The Kalman filter is that update.
+
+## Predict
+
+Suppose $\zvec_{t-1} \mid \xvec_{1:t-1} \sim \Gauss(\muvec_{t-1 \mid t-1}, \Pmat_{t-1 \mid t-1})$. The next state
+$\zvec_t = \Amat\zvec_{t-1} + \wvec_t$ is a linear function of $\zvec_{t-1}$ plus independent Gaussian noise, so it
+is Gaussian. Its mean is
+
+$$
+\muvec_{t \mid t-1} = \expect[\Amat\zvec_{t-1} + \wvec_t] = \Amat\muvec_{t-1 \mid t-1}.
+$$
+
+Its covariance is the covariance of $\Amat\zvec_{t-1}$ plus that of $\wvec_t$, because the two are independent. For
+any fixed matrix $\Amat$, $\cov(\Amat\zvec) = \expect[\Amat(\zvec - \muvec)(\zvec - \muvec)^\top\Amat^\top] =
+\Amat\cov(\zvec)\Amat^\top$. Therefore
+
+$$
+\Pmat_{t \mid t-1} = \Amat\Pmat_{t-1 \mid t-1}\Amat^\top + \Qmat.
+$$
+
+The dynamics move and reshape the uncertainty through $\Amat$, and the process noise adds $\Qmat$ to it. Prediction
+alone never reduces uncertainty.
+
+## Update
+
+The update conditions the prediction on the new observation $\xvec_t = \Cmat\zvec_t + \vvec_t$. Given
+$\xvec_{1:t-1}$, the pair $(\zvec_t, \xvec_t)$ is a linear function of the independent Gaussians $\zvec_t$ and
+$\vvec_t$, so it is jointly Gaussian. Write $\muvec^- = \muvec_{t \mid t-1}$ and $\Pmat^- = \Pmat_{t \mid t-1}$. The
+joint mean is $(\muvec^-, \Cmat\muvec^-)$. The blocks of the joint covariance are
+$\cov(\zvec_t) = \Pmat^-$, $\cov(\zvec_t, \xvec_t) = \cov(\zvec_t, \Cmat\zvec_t) = \Pmat^-\Cmat^\top$ and
+$\cov(\xvec_t) = \Cmat\Pmat^-\Cmat^\top + \Rmat$:
+
+$$
+\begin{bmatrix} \zvec_t \\ \xvec_t \end{bmatrix} \Bigm| \xvec_{1:t-1} \sim
+\Gauss\paren{\begin{bmatrix} \muvec^- \\ \Cmat\muvec^- \end{bmatrix},
+\begin{bmatrix} \Pmat^- & \Pmat^-\Cmat^\top \\ \Cmat\Pmat^- & \Cmat\Pmat^-\Cmat^\top + \Rmat \end{bmatrix}}.
+$$
+
+Conditioning a joint Gaussian on one block gives a Gaussian whose mean shifts by the cross-covariance times the
+inverse covariance of the observed block, and whose covariance is the
+<NoteLink to="schur-complement">Schur complement</NoteLink> of the observed block. Applied here, with three named
+quantities:
+
+$$
+\evec_t = \xvec_t - \Cmat\muvec^-, \qquad \Smat_t = \Cmat\Pmat^-\Cmat^\top + \Rmat, \qquad
+\Kmat_t = \Pmat^-\Cmat^\top\Smat_t^{-1},
+$$
+
+the filtered distribution is
+
+$$
+\muvec_{t \mid t} = \muvec^- + \Kmat_t\evec_t, \qquad
+\Pmat_{t \mid t} = \Pmat^- - \Kmat_t\Smat_t\Kmat_t^\top = (\eye - \Kmat_t\Cmat)\Pmat^-.
+$$
+
+The last equality uses $\Kmat_t\Smat_t\Kmat_t^\top = \Pmat^-\Cmat^\top\Smat_t^{-1}\Cmat\Pmat^- = \Kmat_t\Cmat\Pmat^-$.
+
+- The **innovation** $\evec_t$ is the part of the observation that the prediction did not anticipate. Its
+  covariance is $\Smat_t$ ($p \times p$): the predicted state uncertainty seen through $\Cmat$, plus the sensor noise.
+- The **Kalman gain** $\Kmat_t$ ($d \times p$) is the coefficient of the regression of the state on the observation,
+  $\cov(\zvec_t, \xvec_t)\cov(\xvec_t)^{-1}$. It converts a surprise in observation space into a correction in state
+  space.
+- The covariance update subtracts the part of the state's variance that the observation explains. It does not depend
+  on the value of $\xvec_t$, so the whole sequence $\Pmat_{t \mid t}$, and with it every gain, can be computed before
+  any data arrive.
+
+The gain balances the two sources of information. In one dimension with $\Cmat = 1$, the gain is
+$k = P^- / (P^- + R)$ and the filtered mean is $(1 - k)\mu^- + k x_t$, a weighted average of prediction and
+observation. A noisy sensor ($R \gg P^-$) gives $k \to 0$, and the filter keeps its prediction. An uncertain
+prediction ($P^- \gg R$) gives $k \to 1$, and the filter follows the observation.
+
+<Derivation title="The same update by completing the square">
+The update can also be read directly from Bayes' theorem. As a function of $\zvec_t$, the log posterior is, up to a
+constant,
+
+$$
+-\tfrac12(\xvec_t - \Cmat\zvec_t)^\top\Rmat^{-1}(\xvec_t - \Cmat\zvec_t)
+- \tfrac12(\zvec_t - \muvec^-)^\top(\Pmat^-)^{-1}(\zvec_t - \muvec^-).
+$$
+
+The quadratic term in $\zvec_t$ is $-\tfrac12\zvec_t^\top\paren{(\Pmat^-)^{-1} + \Cmat^\top\Rmat^{-1}\Cmat}\zvec_t$
+and the linear term is $\zvec_t^\top\paren{(\Pmat^-)^{-1}\muvec^- + \Cmat^\top\Rmat^{-1}\xvec_t}$.
+<NoteLink to="completing-the-square">Completing the square</NoteLink> gives a Gaussian with
+
+$$
+\Pmat_{t \mid t}^{-1} = (\Pmat^-)^{-1} + \Cmat^\top\Rmat^{-1}\Cmat, \qquad
+\muvec_{t \mid t} = \Pmat_{t \mid t}\paren{(\Pmat^-)^{-1}\muvec^- + \Cmat^\top\Rmat^{-1}\xvec_t}.
+$$
+
+This is the **information form**: precisions add. The Woodbury identity turns the precision sum into the covariance
+form above, $\paren{(\Pmat^-)^{-1} + \Cmat^\top\Rmat^{-1}\Cmat}^{-1} = \Pmat^- - \Pmat^-\Cmat^\top\Smat_t^{-1}\Cmat\Pmat^-$.
+The covariance form inverts the $p \times p$ matrix $\Smat_t$. The information form inverts $d \times d$ matrices, and
+it handles an uninformative prior, $(\Pmat^-)^{-1} = \zeros$, which the covariance form cannot represent.
+</Derivation>
+
+## The algorithm
+
+For $t = 1, \dots, T$:
+
+$$
+\begin{aligned}
+\muvec_{t \mid t-1} &= \Amat\muvec_{t-1 \mid t-1}, & \Pmat_{t \mid t-1} &= \Amat\Pmat_{t-1 \mid t-1}\Amat^\top + \Qmat, \\
+\evec_t &= \xvec_t - \Cmat\muvec_{t \mid t-1}, & \Smat_t &= \Cmat\Pmat_{t \mid t-1}\Cmat^\top + \Rmat, \\
+\Kmat_t &= \Pmat_{t \mid t-1}\Cmat^\top\Smat_t^{-1}, & & \\
+\muvec_{t \mid t} &= \muvec_{t \mid t-1} + \Kmat_t\evec_t, & \Pmat_{t \mid t} &= (\eye - \Kmat_t\Cmat)\Pmat_{t \mid t-1}.
+\end{aligned}
+$$
+
+Each step costs $O(d^3 + p^3)$ time, independent of $t$, and the filter stores only the current mean and covariance.
+A missing observation skips the update: the filtered distribution is then the prediction.
+
+The innovations also give the likelihood of the data. By the chain rule,
+$p(\xvec_{1:T}) = \prod_t p(\xvec_t \mid \xvec_{1:t-1})$, and each factor is the marginal of $\xvec_t$ in the joint
+Gaussian above, $\Gauss(\xvec_t;\, \Cmat\muvec_{t \mid t-1}, \Smat_t)$. So
+
+$$
+\log p(\xvec_{1:T}) = -\frac12 \sum_{t=1}^{T} \paren{\evec_t^\top\Smat_t^{-1}\evec_t + \log\det\Smat_t + p\log 2\pi}.
+$$
+
+Maximising this over $\Amat$, $\Cmat$, $\Qmat$ and $\Rmat$ fits the model to data. Under a correct model the
+innovations are independent with covariances $\Smat_t$. Innovations that are autocorrelated, or larger than $\Smat_t$
+predicts, are the standard diagnostic of a mis-specified filter.
+
+## Worked example: a random walk
+
+A scalar state follows a random walk and is observed with noise: $A = C = 1$, $Q = 1$, $R = 1$. The prior is
+$\mu_0 = 0$, $P_0 = 1$. The observations are $x_{1:4} = (1, 3, 2, 2.5)$. The scalar filter is
+$P^- = P + Q$, $k = P^- / (P^- + R)$, $\mu = \mu^- + k(x - \mu^-)$, $P = (1 - k)P^-$.
+
+| $t$ | $x_t$ | $P_{t \mid t-1}$ | $k_t$         | innovation $e_t$ | $\mu_{t \mid t}$ | $P_{t \mid t}$ |
+| --- | ----- | ---------------- | ------------- | ---------------- | ---------------- | -------------- |
+| 1   | 1     | 2                | 2/3 = 0.667   | 1                | 0.667            | 0.667          |
+| 2   | 3     | 1.667            | 5/8 = 0.625   | 2.333            | 2.125            | 0.625          |
+| 3   | 2     | 1.625            | 13/21 = 0.619 | $-0.125$         | 2.048            | 0.619          |
+| 4   | 2.5   | 1.619            | 34/55 = 0.618 | 0.452            | 2.327            | 0.618          |
+
+The first step takes two thirds of the way from the prior mean 0 to the observation 1. The second observation, 3,
+is a large surprise, and the estimate moves $0.625 \times 2.333 = 1.458$ towards it. The gains are ratios of
+consecutive Fibonacci numbers, because with $Q = R = 1$ the recursion is $k_{t+1} = (k_t + 1)/(k_t + 2)$. They
+converge to $1/\varphi = 0.618$, where $\varphi = (1 + \sqrt5)/2$ is the golden ratio. The next section derives the
+limit.
+
+## Figure: tracking in the plane
+
+The figure tracks an object moving in the plane. The state is position and velocity, $\zvec = (x, y, v_x, v_y)$, and
+the time step is 1. The motion model is constant velocity with random accelerations:
+
+$$
+\Amat = \begin{bmatrix} \eye & \eye \\ \zeros & \eye \end{bmatrix}, \qquad
+\Qmat = q\begin{bmatrix} \tfrac13\eye & \tfrac12\eye \\ \tfrac12\eye & \eye \end{bmatrix}, \qquad
+\Cmat = \begin{bmatrix} \eye & \zeros \end{bmatrix},
+$$
+
+with $2 \times 2$ blocks. $\Qmat$ is the covariance that white-noise acceleration of intensity $q$ accumulates over
+one step. The sensor reports position only, with covariance $\Rmat = r\eye$ (round) or an elongated $\Rmat$ tilted at
+45°. Velocity is never observed. The filter infers it from how positions change, through the off-diagonal blocks of
+$\Pmat$.
+
+<KalmanTracking />
+
+## Steady state and the Riccati equation
+
+The covariance recursion does not involve the data. Substituting the update into the next prediction gives a
+recursion for the predicted covariance alone:
+
+$$
+\Pmat_{t+1 \mid t} = \Amat\Pmat_{t \mid t-1}\Amat^\top
+- \Amat\Pmat_{t \mid t-1}\Cmat^\top\paren{\Cmat\Pmat_{t \mid t-1}\Cmat^\top + \Rmat}^{-1}\Cmat\Pmat_{t \mid t-1}\Amat^\top
++ \Qmat.
+$$
+
+This is a discrete-time **Riccati recursion**. For a time-invariant model in which every unstable mode of $\Amat$ is
+observed through $\Cmat$ and excited by $\Qmat$ (detectability and stabilisability), it converges from any initial
+$\Pmat_0$ to the unique stabilising solution of the fixed-point equation, the **discrete algebraic Riccati equation**
+<Cite id="sarkka2013" />. The gain then converges to a constant $\Kmat_\infty$, and the filter becomes a fixed linear
+time-invariant system. The steady-state filter is often used on its own, because it avoids propagating the
+covariance.
+
+For the scalar random walk the fixed point satisfies $P = P - P^2/(P + R) + Q$, that is $P^2 = Q(P + R)$, so
+
+$$
+P_\infty^- = \frac{Q + \sqrt{Q^2 + 4QR}}{2}, \qquad k_\infty = \frac{P_\infty^-}{P_\infty^- + R}.
+$$
+
+With $Q = R = 1$ this gives $P_\infty^- = \varphi$ and $k_\infty = \varphi/(\varphi + 1) = 1/\varphi$, the limit of
+the worked example. The steady-state update $\mu_t = (1 - k_\infty)\mu_{t-1} + k_\infty x_t$ is simple exponential
+smoothing, with the smoothing constant fixed by the ratio $Q/R$.
+
+## Optimality
+
+Under the model's assumptions the filtered distribution is the exact posterior, so its mean $\muvec_{t \mid t}$ is
+the minimum mean-squared-error estimate of $\zvec_t$ among all functions of $\xvec_{1:t}$, linear or not. Kalman's
+original derivation needs less. If the noise terms are only uncorrelated, zero-mean and of known covariance, but not
+Gaussian, the same recursion gives the best estimate among linear functions of the observations, and
+$\Pmat_{t \mid t}$ is its error covariance <Cite id="kalman1960" />. A nonlinear estimator can then do better, which
+is the motivation for the particle filter.
+
+## Numerical practice
+
+The update $\Pmat_{t \mid t} = (\eye - \Kmat_t\Cmat)\Pmat^-$ subtracts two nearly equal matrices when the
+observation is precise. Rounding can then make the result asymmetric or indefinite, and the filter diverges. The
+**Joseph form**
+
+$$
+\Pmat_{t \mid t} = (\eye - \Kmat_t\Cmat)\Pmat^-(\eye - \Kmat_t\Cmat)^\top + \Kmat_t\Rmat\Kmat_t^\top
+$$
+
+is the covariance of $\muvec_{t \mid t}$'s error for any gain $\Kmat_t$, not only the optimal one. It is a sum of two
+positive semidefinite terms, so it stays symmetric and positive semidefinite in finite precision. At the optimal gain
+it equals the short form. Square-root filters go further and propagate a Cholesky factor of $\Pmat$, which doubles the
+effective precision. The figure above uses the Joseph form.
+
+## Relations
+
+- **Recursive least squares and Bayesian linear regression.** Take a constant state, $\Amat = \eye$ and
+  $\Qmat = \zeros$, and a time-varying observation row $\Cmat_t = \uvec_t^\top$. The state is a weight vector, each
+  observation is $x_t = \uvec_t^\top\zvec + v_t$, and the Kalman filter computes the posterior over the weights one
+  observation at a time. That is sequential
+  <NoteLink to="bayesian-linear-regression">Bayesian linear regression</NoteLink>. The same recursion, written with
+  the inverse correlation matrix, is the <NoteLink to="rls-filter">recursive least squares</NoteLink> filter.
+  Forgetting in RLS corresponds to inflating $\Pmat$ at each step, a form of process noise.
+- **Hidden Markov models.** The forward pass of a
+  <NoteLink to="hidden-markov-model">hidden Markov model</NoteLink> runs the same predict and update recursion over a
+  finite set of states. The integral over $\zvec_{t-1}$ becomes a sum over previous states, weighted by the transition
+  matrix, and the update multiplies by the emission probabilities. The Kalman filter is the forward pass for a
+  continuous state with Gaussian transitions and emissions.
+- **The Wiener filter.** For a stationary process the steady-state Kalman filter equals the causal
+  <NoteLink to="wiener-filter">Wiener filter</NoteLink>. The Kalman filter also handles nonstationary processes,
+  time-varying models and the transient from the initial condition.
+- **Optimal control.** The filter's Riccati recursion is the Riccati recursion of the linear-quadratic regulator with
+  $\Amat$ replaced by $\Amat^\top$, $\Cmat^\top$ in place of the control matrix, and time reversed. Kalman noted this
+  duality in the original paper <Cite id="kalman1960" />. Combining the two gives linear-quadratic-Gaussian control:
+  estimate the state with a Kalman filter, then apply the regulator to the estimate.
+
+## Assumptions
+
+- The dynamics and the observation map are linear, with known $\Amat$, $\Cmat$, $\Qmat$ and $\Rmat$.
+- The process noise, the measurement noise and the initial state are Gaussian and mutually independent. Noise terms at
+  different times are independent.
+- Nonlinear models need an approximation: linearisation (the extended Kalman filter), sigma points (the unscented
+  Kalman filter), or sampling (the particle filter).
+
+## Pitfalls
+
+- **Mis-specified noise.** $\Qmat$ and $\Rmat$ set the gain. A $\Qmat$ that is too small makes the filter
+  overconfident: $\Pmat$ shrinks, the gain falls, and the estimate stops following real changes in the state. A
+  $\Qmat$ that is too large makes the estimate follow the measurement noise. The figure shows both.
+- **Overconfidence is invisible in $\Pmat$.** $\Pmat_{t \mid t}$ is computed from the assumed model, not from the data,
+  so a wrong model still reports a small covariance. Check the innovations against $\Smat_t$.
+- **Outliers.** A single gross measurement error moves the estimate by $\Kmat_t\evec_t$, without bound. Gating, which
+  rejects observations whose normalised innovation $\evec_t^\top\Smat_t^{-1}\evec_t$ exceeds a $\chi^2_p$ threshold,
+  or heavy-tailed noise models, limit the damage.
+- **Initialisation.** A small $\Pmat_0$ around a wrong $\muvec_0$ makes the early gains too small, and the filter takes
+  a long time to forget the prior.

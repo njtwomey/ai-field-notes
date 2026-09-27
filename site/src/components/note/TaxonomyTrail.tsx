@@ -69,15 +69,20 @@ function CategoryCrumb({ node, siblings }: { node: CategoryNode; siblings: Categ
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuLabel>Alongside</DropdownMenuLabel>
-              {siblings.map((s) => (
-                <DropdownMenuItem key={s.path} onClick={() => navigate(browseUrl({ c: s.path }))}>
-                  <Check className={cn(s.path !== node.path && 'invisible')} />
-                  {s.title}
-                  <span className="ml-auto pl-4 text-xs text-muted-foreground tabular-nums">
-                    {notesInCategory(s.path).length}
-                  </span>
-                </DropdownMenuItem>
-              ))}
+              {siblings.map((s) => {
+                const count = notesInCategory(s.path).length
+                return (
+                  <DropdownMenuItem
+                    key={s.path}
+                    onClick={() => navigate(browseUrl({ c: s.path }))}
+                    className={cn(count === 0 && 'text-muted-foreground')}
+                  >
+                    <Check className={cn(s.path !== node.path && 'invisible')} />
+                    {s.title}
+                    <span className="ml-auto pl-4 text-xs text-muted-foreground tabular-nums">{count}</span>
+                  </DropdownMenuItem>
+                )
+              })}
             </DropdownMenuGroup>
           </>
         )}

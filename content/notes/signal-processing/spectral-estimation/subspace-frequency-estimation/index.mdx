@@ -1,0 +1,95 @@
+---
+title: Subspace frequency estimation
+kind: technique
+summary: 'MUSIC and ESPRIT estimate the frequencies of sinusoids in noise from the eigenvectors of the sample correlation matrix. The signal and noise subspaces separate, so frequencies can be resolved closer than the Fourier limit $2\pi/N$ when the signal-to-noise ratio is high.'
+tags: [signal-processing, spectral-estimation, linear-algebra, worked-example]
+aliases: [MUSIC, multiple signal classification, ESPRIT, root-MUSIC, Pisarenko harmonic decomposition, signal subspace, noise subspace, high-resolution spectral estimation]
+requires: [eigendecomposition, autocorrelation-and-wiener-khinchin]
+related: [periodogram, parametric-spectral-estimation]
+references: [schmidt1986, roy1989, stoica2005]
+status: draft
+updated: 2026-09-26
+---
+
+import { MusicDemo } from './MusicDemo'
+
+<Definition>
+For a signal made of $K$ complex exponentials in white noise, $x[n] = \sum_{k=1}^{K} A_k e^{i(\omega_k n + \phi_k)} +
+e[n]$, the $M \times M$ correlation matrix of snapshots $\xvec_n = (x[n], \dots, x[n + M - 1])$ is
+
+$$
+R = \sum_{k=1}^{K} P_k\, \avec(\omega_k)\avec(\omega_k)^{H} + \sigma^2 \eye,
+\qquad \avec(\omega) = \paren{1, e^{i\omega}, \dots, e^{i(M-1)\omega}},
+$$
+
+with $P_k = A_k^2$. Subspace methods estimate the $\omega_k$ from the eigenvectors of an estimate of $R$: MUSIC by
+searching for steering vectors orthogonal to the noise eigenvectors <Cite id="schmidt1986" />, ESPRIT from the shift
+structure of the signal eigenvectors <Cite id="roy1989" />.
+</Definition>
+
+## Signal and noise subspaces
+
+The first term of $R$ has rank $K$ and its column space is spanned by the steering vectors
+$\avec(\omega_1), \dots, \avec(\omega_K)$, which are linearly independent for distinct frequencies when $M > K$. Adding
+$\sigma^2\eye$ shifts every eigenvalue by $\sigma^2$ and leaves the eigenvectors unchanged. So the eigenvalues of $R$
+are $\lambda_1 \ge \dots \ge \lambda_K > \sigma^2$, followed by $M - K$ eigenvalues equal to $\sigma^2$. The first $K$
+eigenvectors span the signal subspace, the span of the steering vectors. The remaining $M - K$ span its orthogonal
+complement, the noise subspace, collected as columns of $E_n$. Every true steering vector is therefore orthogonal to
+the noise subspace:
+
+$$
+E_n^{H}\avec(\omega_k) = \zeros, \qquad k = 1, \dots, K .
+$$
+
+A real sinusoid $\cos(\omega n + \phi)$ is the sum of two complex exponentials at $\pm\omega$, so $K$ real sinusoids
+give a signal subspace of dimension $2K$.
+
+## MUSIC
+
+Multiple signal classification scans frequency and measures how nearly $\avec(\omega)$ lies in the signal subspace:
+
+$$
+P_{\mathrm{MUSIC}}(\omega) = \frac{1}{\norm{E_n^{H}\avec(\omega)}^2} .
+$$
+
+The denominator is zero at the true frequencies for the exact $R$, and small near them for an estimate, so the
+pseudospectrum has sharp peaks there. It is not a power spectrum: its peak heights say nothing about power. Its
+resolution is not limited by the window length, because it uses the structure of $R$, not a Fourier transform of the
+data. Root-MUSIC finds the peaks as roots of the polynomial $\avec(z)^{H} E_n E_n^{H}\avec(z)$ nearest the unit
+circle, avoiding the grid search.
+
+## ESPRIT
+
+Estimation of signal parameters via rotational invariance uses the signal subspace directly. Let $A$ be the matrix of
+steering vectors, and let $A_1$ and $A_2$ be $A$ without its last and without its first row. Shifting a steering
+vector by one sample multiplies it by $e^{i\omega}$, so $A_2 = A_1\Phi$ with $\Phi = \diag(e^{i\omega_1}, \dots,
+e^{i\omega_K})$. The signal eigenvectors $E_s$ span the same space, $E_s = AT$ for some invertible $T$, so
+
+$$
+E_{s,2} = E_{s,1}\,\Psi, \qquad \Psi = T^{-1}\Phi T .
+$$
+
+Solving this least-squares problem for $\Psi$ and taking its eigenvalues gives $e^{i\omega_k}$ directly: no search,
+and no spurious peaks <Cite id="roy1989" />.
+
+<MusicDemo />
+
+## Worked example
+
+Take two unit-amplitude real sinusoids at $0.20\pi$ and $0.22\pi$ rad/sample with random phases, in white noise at 20
+dB SNR per sinusoid, and $N = 64$ samples. The separation, $0.02\pi = 0.063$ rad, is below the Fourier limit
+$2\pi/64 = 0.098$ rad. Snapshots of length $M = 24$ with forward–backward averaging give a correlation matrix whose
+eigenvalues start 3.44, 2.92, 1.00, 0.96, then drop to 0.011: four signal eigenvalues, one pair per real sinusoid,
+above a noise floor near $\sigma^2 = 0.005$. MUSIC places its two peaks at $0.2018\pi$ and $0.2186\pi$, and ESPRIT
+gives $0.2016\pi$ and $0.2191\pi$. The Hann-windowed periodogram of the same data shows two peaks at $0.181\pi$ and
+$0.239\pi$: the two components interfere inside one main lobe, and the peaks it shows are displaced by about as much
+as the separation itself.
+
+## Pitfalls
+
+- **The model order must be right.** Too small a signal subspace loses components; too large one lets noise
+  eigenvectors into it and adds false peaks. Criteria based on the eigenvalue gap, such as MDL, estimate it.
+- **Coloured noise.** The subspace split assumes white noise. Coloured noise must be whitened first.
+- **Coherent sources.** Fully correlated components, such as a signal and its echo, reduce the rank of the signal
+  term; forward–backward averaging and spatial smoothing restore it.
+- **Low SNR.** Below a threshold SNR the noise and signal eigenvalues mix and the method breaks down abruptly.

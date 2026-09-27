@@ -1,0 +1,99 @@
+---
+title: Procrustes analysis
+kind: concept
+summary: 'Procrustes analysis finds the rotation, and optionally translation and scaling, that best superimposes one set of matched points on another. The optimal rotation is $\Rmat = \Vmat\Umat^\top$ from the SVD $\Amat\Bmat^\top = \Umat\Sigmamat\Vmat^\top$; the leftover squared error, the disparity, measures shape difference.'
+tags: [metrics, shape-analysis, alignment, linear-algebra, worked-example]
+aliases: [orthogonal Procrustes problem, Kabsch algorithm, Procrustes disparity, generalised Procrustes analysis, shape alignment]
+requires: [singular-value-decomposition]
+related: [pairwise-distances-and-cosine-similarity, spectral-theorem]
+references: [schonemann1966, kabsch1976, gower1975, detlefsen2022]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Given matrices $\Amat, \Bmat \in \reals^{d \times n}$ whose columns are $n$ matched points in $d$ dimensions, the
+**orthogonal Procrustes problem** is
+
+$$
+\min_{\Rmat} \norm{\Rmat\Amat - \Bmat}_F^2 \quad \text{subject to } \Rmat^\top\Rmat = \eye.
+$$
+
+Its solution is $\Rmat = \Vmat\Umat^\top$, where $\Amat\Bmat^\top = \Umat\Sigmamat\Vmat^\top$ is a
+<NoteLink to="singular-value-decomposition">singular value decomposition</NoteLink> <Cite id="schonemann1966" />.
+</Definition>
+
+## Deriving the rotation
+
+Expanding the Frobenius norm with $\norm{\Mmat}_F^2 = \trace(\Mmat^\top\Mmat)$ and using $\Rmat^\top\Rmat = \eye$,
+
+$$
+\norm{\Rmat\Amat - \Bmat}_F^2 = \norm{\Amat}_F^2 + \norm{\Bmat}_F^2 - 2\trace\paren{\Rmat\Amat\Bmat^\top}.
+$$
+
+The first two terms do not depend on $\Rmat$, so the problem is to maximise $\trace(\Rmat\Amat\Bmat^\top)$. Substitute
+the SVD and use the cyclic property of the trace:
+
+$$
+\trace\paren{\Rmat\Umat\Sigmamat\Vmat^\top} = \trace\paren{\Vmat^\top\Rmat\Umat\,\Sigmamat} = \sum_k z_{kk}\,\sigma_k,
+$$
+
+where $\Zmat = \Vmat^\top\Rmat\Umat$ is orthogonal. Every entry of an orthogonal matrix has magnitude at most 1, and
+the singular values are non-negative, so the sum is at most $\sum_k \sigma_k$. It reaches that bound at $\Zmat = \eye$,
+that is at $\Rmat = \Vmat\Umat^\top$.
+
+**Rotations only.** $\Vmat\Umat^\top$ may be a reflection, with determinant $-1$. When only proper rotations are
+allowed, as for molecules or rigid bodies, the best rotation flips the direction paired with the smallest singular
+value: $\Rmat = \Vmat\,\diag(1, \dots, 1, \det(\Vmat\Umat^\top))\,\Umat^\top$. This is the Kabsch algorithm
+<Cite id="kabsch1976" />.
+
+## Translation and scale
+
+Full Procrustes analysis also removes differences in position and size. Centring both point sets makes the best
+translation zero. For a scale factor $s$, minimising $\norm{s\Rmat\Amat - \Bmat}_F^2$ over $s$ after finding $\Rmat$
+gives
+
+$$
+s = \frac{\trace(\Rmat\Amat\Bmat^\top)}{\norm{\Amat}_F^2} = \frac{\sum_k \sigma_k}{\norm{\Amat}_F^2}.
+$$
+
+**Disparity.** If both centred sets are also scaled to unit Frobenius norm, the minimum squared error after the best
+rotation and scaling is
+
+$$
+d = 1 - \paren{\sum_k \sigma_k}^2,
+$$
+
+which lies in $[0, 1]$. It is 0 when one shape is an exact rotated, scaled and shifted copy of the other. This is the
+disparity reported by SciPy's `procrustes` and TorchMetrics' `procrustes_disparity` <Cite id="detlefsen2022" />.
+
+## Worked example
+
+Take the four points $(0, 0)$, $(1, 0)$, $(1, 1)$ and $(0, 2)$, and rotate them by $30°$.
+
+- Orthogonal Procrustes recovers the rotation exactly: $30.0°$.
+- A copy scaled by 2 and shifted by $(3, -1)$ has disparity $10^{-31}$: the same shape.
+- Adding perturbations of about 0.1 to the rotated points gives disparity 0.0056, a fitted rotation of $31.2°$ and a
+  fitted scale of 1.05.
+- A mirror image has $\det(\Vmat\Umat^\top) = -1$: the unconstrained solution is a reflection, and the Kabsch
+  correction is needed if reflections are not allowed.
+
+## Uses
+
+- **Comparing shapes.** Landmark coordinates of skulls, leaves or faces are compared after removing position, size and
+  orientation. Generalised Procrustes analysis aligns many shapes to a common mean shape by alternating alignment and
+  averaging <Cite id="gower1975" />.
+- **Aligning embedding spaces.** Two embeddings of the same items, trained separately, are defined only up to a
+  rotation. The Procrustes rotation fitted on a set of anchor items maps one space onto the other, for example word
+  embeddings of two languages matched through a small dictionary.
+- **Comparing learned representations.** The disparity between two models' representations of the same inputs is a
+  similarity measure that ignores rotation and scale.
+- **Structural biology.** The root-mean-square deviation between two protein structures is computed after Kabsch
+  alignment.
+
+## Pitfalls
+
+- **Matched points only.** Procrustes needs the correspondence between points. Without it, the problem is point-set
+  registration, which alternates between matching and alignment.
+- **Reflections.** Decide whether mirror images count as the same shape, and use the Kabsch correction if not.
+- **Outliers.** The Frobenius norm is a sum of squares, so one badly matched point can pull the fitted rotation.

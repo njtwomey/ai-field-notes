@@ -1,0 +1,119 @@
+---
+title: Wiener filter
+kind: concept
+summary: 'The Wiener filter is the linear filter that minimises the mean-squared error between its output and a desired signal. Its FIR form solves the Wiener–Hopf equations $\Rmat\wvec = \pvec$; its noncausal frequency response is $S_{xd}(\omega)/S_{xx}(\omega)$.'
+tags: [signal-processing, estimation, filtering, worked-example]
+aliases: [Wiener–Hopf equations, optimal linear filter, MMSE filter, Wiener deconvolution]
+related: [linear-prediction, lms-filter, rls-filter, matched-filter, spectral-subtraction-and-denoising, autocorrelation-and-wiener-khinchin, orthogonal-projection]
+references: [wiener1949, sayed2008, levinson1946]
+status: draft
+updated: 2026-09-26
+---
+
+import { WienerDenoising } from './WienerDenoising'
+
+<Definition>
+Let $x[n]$ be an observed wide-sense stationary signal and $d[n]$ a desired signal jointly stationary with it. The
+Wiener filter is the linear time-invariant filter $h$ whose output $y[n] = \sum_k h[k]\,x[n - k]$ minimises the
+mean-squared error $\expect\brack{e^2[n]}$, with $e[n] = d[n] - y[n]$ <Cite id="wiener1949" />. With $M$ taps the
+coefficients $\wvec = (h[0], \dots, h[M-1])$ solve the Wiener–Hopf equations
+
+$$
+\Rmat \wvec = \pvec, \qquad [\Rmat]_{jk} = r_{xx}[j - k], \qquad [\pvec]_j = r_{dx}[j] = \expect\brack{d[n]\,x[n - j]}.
+$$
+</Definition>
+
+Two settings share this definition. In **denoising**, $x = s + v$ and $d = s$. In **prediction**, $d[n] = x[n + 1]$,
+which is <NoteLink to="linear-prediction">linear prediction</NoteLink>. In **deconvolution**, $x$ is a blurred and noisy
+version of $d$.
+
+## The orthogonality principle
+
+Collect the $M$ most recent inputs into $\xvec[n] = (x[n], x[n-1], \dots, x[n-M+1])$, so $y[n] = \wvec^\top\xvec[n]$
+and
+
+$$
+J(\wvec) = \expect\brack{\paren{d[n] - \wvec^\top\xvec[n]}^2} = \sigma_d^2 - 2\wvec^\top\pvec + \wvec^\top\Rmat\wvec,
+$$
+
+with $\Rmat = \expect[\xvec\xvec^\top]$ and $\pvec = \expect[d\,\xvec]$. This is a quadratic in $\wvec$ with a
+positive semidefinite Hessian $2\Rmat$. Setting the gradient $-2\pvec + 2\Rmat\wvec$ to zero gives the Wiener–Hopf
+equations $\Rmat\wvec = \pvec$. Because the input is stationary, $[\Rmat]_{jk} = r_{xx}[j-k]$ depends only on $j - k$:
+$\Rmat$ is a symmetric Toeplitz matrix.
+
+The same condition, read differently, is the orthogonality principle. The gradient is $-2\expect[e[n]\,\xvec[n]]$, so at
+the optimum
+
+$$
+\expect\brack{e[n]\,x[n - j]} = 0 \quad \text{for } j = 0, \dots, M - 1:
+$$
+
+the error is uncorrelated with every input the filter uses. Geometrically, $y[n]$ is the
+<NoteLink to="orthogonal-projection">orthogonal projection</NoteLink> of $d[n]$ onto the span of the inputs, in the
+inner product $\inner{u}{v} = \expect[uv]$. The minimum error follows by substituting $\Rmat\wvec = \pvec$:
+
+$$
+J_{\min} = \sigma_d^2 - \wvec^\top\pvec = \sigma_d^2 - \pvec^\top\Rmat^{-1}\pvec.
+$$
+
+## The frequency-domain form
+
+Let the filter be unconstrained: noncausal and infinitely long. The orthogonality condition must hold at every lag,
+$\expect[e[n]\,x[n - j]] = 0$ for all $j$, which reads $r_{dx}[j] = \sum_k h[k]\, r_{xx}[j - k]$. This is a convolution,
+$r_{dx} = h * r_{xx}$. Taking the DTFT of both sides turns it into a product of power spectra, so
+
+$$
+H(e^{i\omega}) = \frac{S_{dx}(\omega)}{S_{xx}(\omega)}.
+$$
+
+For denoising, with $x = s + v$ and noise $v$ uncorrelated with $s$, $S_{dx} = S_{ss}$ and $S_{xx} = S_{ss} + S_{vv}$,
+so
+
+$$
+H(e^{i\omega}) = \frac{S_{ss}(\omega)}{S_{ss}(\omega) + S_{vv}(\omega)} = \frac{\mathrm{SNR}(\omega)}{1 + \mathrm{SNR}(\omega)}.
+$$
+
+The gain is close to 1 at frequencies where the signal dominates and close to 0 where the noise does. It never
+exceeds 1, and it has zero phase. The causal Wiener filter needs spectral factorisation of $S_{xx}$, which Wiener
+solved in his original treatment.
+
+## Worked example: an AR(1) signal in white noise
+
+Let $s[n] = 0.9\,s[n-1] + w[n]$ with unit-variance white $w$, so $\sigma_s^2 = 1/(1 - 0.81) = 5.263$ and
+$r_{ss}[k] = 5.263 \times 0.9^{\abs{k}}$. Add white noise $v$ with $\sigma_v^2 = 5.263$, an SNR of 0 dB. Then
+$r_{xx}[k] = r_{ss}[k] + \sigma_v^2\,\delta[k]$ and $p[k] = r_{ss}[k]$.
+
+- **One tap.** $w_0 = r_{ss}[0]/r_{xx}[0] = 5.263/10.526 = 0.5$, and $J_{\min} = 5.263 - 0.5 \times 5.263 = 2.632$:
+  half the signal power.
+- **Two taps.** Solving
+  $\begin{bmatrix} 10.526 & 4.737 \\ 4.737 & 10.526 \end{bmatrix}\wvec = \begin{bmatrix} 5.263 \\ 4.737 \end{bmatrix}$
+  gives $\wvec = (0.373, 0.282)$ and $J_{\min} = 1.963$.
+- **More taps.** With 5 taps $J_{\min} = 1.619$, and with 10 taps $1.598$: the causal filter converges quickly because
+  the signal's correlation decays as $0.9^k$.
+- **Noncausal.** Integrating $S_{ss}S_{vv}/(S_{ss} + S_{vv})$ over frequency gives $J_{\min} = 1.147$. Using future
+  samples as well as past ones lowers the error further.
+
+<WienerDenoising />
+
+## Relations
+
+- **Least squares.** Replacing expectations by sample averages turns the Wiener–Hopf equations into the normal
+  equations of least squares. The <NoteLink to="rls-filter">RLS filter</NoteLink> solves them recursively.
+- **Adaptive filters.** The <NoteLink to="lms-filter">LMS filter</NoteLink> is stochastic gradient descent on
+  $J(\wvec)$, converging to the Wiener solution without estimating $\Rmat$ and $\pvec$.
+- **Toeplitz structure.** When $d[n] = x[n+1]$, the right-hand side is itself a shifted autocorrelation and the
+  Levinson recursion solves the system in $O(M^2)$ operations <Cite id="levinson1946" />.
+- **Spectral subtraction.** The frequency-domain gain $\mathrm{SNR}/(1 + \mathrm{SNR})$, applied frame by frame to a
+  short-time spectrum with an estimated SNR, is the Wiener rule used in
+  <NoteLink to="spectral-subtraction-and-denoising">speech enhancement</NoteLink>.
+
+## Pitfalls
+
+- **Second-order statistics must be known.** In practice $\Rmat$ and $\pvec$ are estimated. For denoising,
+  $r_{ss}$ is not observable directly; it is usually obtained as $r_{xx} - \sigma_v^2\delta$ with a noise estimate.
+- **Linear and stationary only.** The Wiener filter is the best linear estimator. For Gaussian signals it is also
+  the best estimator of any form; otherwise nonlinear estimators can do better. For nonstationary signals it must be
+  recomputed or replaced by an adaptive or Kalman filter.
+- **Ill-conditioning.** When the input spectrum has deep nulls, $\Rmat$ is nearly singular and the taps become large
+  and noise-sensitive. Diagonal loading, adding a small multiple of $\eye$, regularises the solution
+  <Cite id="sayed2008" />.

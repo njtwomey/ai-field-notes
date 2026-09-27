@@ -1,0 +1,89 @@
+---
+title: Sampling theorem
+kind: concept
+summary: 'A signal band-limited to below $f_s/2$ is determined exactly by its samples at rate $f_s$, and is recovered by sinc interpolation, $x(t) = \sum_n x[n] \operatorname{sinc}(f_s t - n)$. Sampling below twice the bandwidth aliases.'
+tags: [signal-processing, sampling, worked-example]
+aliases: [Nyquist–Shannon sampling theorem, Nyquist rate, Nyquist frequency, Whittaker–Shannon interpolation, sinc interpolation, band-limited signal]
+related: [aliasing, quantisation, fourier-transform, dtft]
+references: [shannon1949, nyquist1928, oppenheim2010]
+status: draft
+updated: 2026-09-26
+---
+
+import { SampleAndReconstruct } from './SampleAndReconstruct'
+
+<Definition>
+Let $x(t)$ be band-limited: its Fourier transform $X(f)$ is zero for $\abs{f} \ge B$. If $x$ is sampled at rate
+$f_s > 2B$, with period $T = 1/f_s$, the samples $x[n] = x(nT)$ determine $x$ exactly, and
+
+$$
+x(t) = \sum_{n=-\infty}^{\infty} x[n] \operatorname{sinc}\paren{\frac{t - nT}{T}}, \qquad
+\operatorname{sinc}(u) = \frac{\sin \pi u}{\pi u}.
+$$
+
+The rate $2B$ is the Nyquist rate, and $f_s/2$ is the Nyquist frequency <Cite id="shannon1949" />.
+</Definition>
+
+## Sampling in frequency
+
+Model sampling as multiplying $x(t)$ by an impulse train, $x_s(t) = x(t)\sum_n \delta(t - nT)$. The impulse train is
+periodic with period $T$, so it has a Fourier series; its coefficients are all $1/T$, which gives the pair
+
+$$
+\sum_n \delta(t - nT) \;\longleftrightarrow\; \frac{1}{T}\sum_k \delta\paren{f - k f_s}.
+$$
+
+Multiplication in time is convolution in frequency, and convolving with a shifted impulse shifts the spectrum. So
+
+$$
+X_s(f) = \frac{1}{T}\sum_{k=-\infty}^{\infty} X\paren{f - k f_s}.
+$$
+
+Sampling replicates the spectrum at every multiple of $f_s$. If $X(f)$ is zero outside $(-B, B)$ and $f_s > 2B$, the
+replicas do not overlap: the copy centred at zero is intact, separated from its neighbours by a gap of width
+$f_s - 2B$. If $f_s < 2B$, neighbouring copies overlap and add, and no filter can separate them: that is
+<NoteLink to="aliasing">aliasing</NoteLink>.
+
+## Reconstruction
+
+When the replicas do not overlap, an ideal low-pass filter with gain $T$ for $\abs{f} < f_s/2$ and zero elsewhere
+keeps only the central copy, which is $X(f)$ itself. The filter's impulse response is the inverse transform of that
+rectangle,
+
+$$
+h(t) = T \int_{-f_s/2}^{f_s/2} e^{i 2\pi f t}\,df = T \cdot \frac{\sin(\pi f_s t)}{\pi t} = \operatorname{sinc}\paren{\frac{t}{T}}.
+$$
+
+Filtering the impulse train convolves each impulse $x[n]\,\delta(t - nT)$ with $h$, which places a shifted sinc at each
+sample:
+
+$$
+x(t) = \sum_n x[n]\, \operatorname{sinc}\paren{\frac{t - nT}{T}}.
+$$
+
+Each sinc is 1 at its own sample time and 0 at every other sample time, so the sum passes through every sample and
+interpolates between them.
+
+<SampleAndReconstruct />
+
+**Worked example.** Audio on compact discs is sampled at 44.1 kHz. The Nyquist frequency is 22.05 kHz, just above
+the roughly 20 kHz limit of human hearing. The gap between 20 and 22.05 kHz is the transition band left for the
+analogue anti-aliasing filter, which must pass 20 kHz and block everything above 22.05 kHz before the converter.
+
+## In practice
+
+- **No real signal is band-limited.** A signal of finite duration has a spectrum that extends to infinity. An
+  anti-aliasing filter before the sampler removes content above $f_s/2$ so that the theorem applies to what remains.
+- **Ideal reconstruction is non-causal.** The sinc extends forever in both directions and decays only as $1/t$.
+  Real converters use a zero-order hold followed by a finite analogue filter, or oversample so that a gentle filter
+  suffices.
+- **The sinc sum converges slowly.** Truncating the sum to a window of samples leaves errors near the edges; the
+  figure sums 40 samples beyond each end of the plot for this reason.
+
+## Pitfalls
+
+- **The boundary case $f_s = 2B$ fails.** A sinusoid at exactly $f_s/2$ is sampled at the same phase every other
+  sample; $\sin(\pi f_s t)$ is sampled as all zeros. The theorem needs the strict inequality $f_s > 2B$.
+- **Bandwidth, not highest frequency, can be what matters.** A band-pass signal occupying $[f_1, f_2]$ can be sampled
+  at a rate set by its bandwidth $f_2 - f_1$ rather than by $f_2$, provided the replicas land in the gaps. This is
+  band-pass sampling <Cite id="oppenheim2010" />.

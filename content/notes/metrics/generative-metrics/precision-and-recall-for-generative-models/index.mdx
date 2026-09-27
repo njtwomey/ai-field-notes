@@ -1,0 +1,56 @@
+---
+title: Precision and recall for generative models
+kind: concept
+summary: 'Precision for a generator is the fraction of generated samples that lie on the real data manifold (fidelity); recall is the fraction of real samples that lie on the generated manifold (diversity). The manifolds are estimated with $k$-nearest-neighbour balls in feature space.'
+tags: [metrics, generative-models, deep-learning, worked-example]
+aliases: [improved precision and recall, PRD, precision recall for distributions, fidelity and diversity, density and coverage]
+related: [frechet-inception-distance, kernel-inception-distance, precision-recall-and-f-score]
+references: [sajjadi2018, kynkaanniemi2019, naeem2020]
+status: draft
+updated: 2026-09-27
+---
+
+import { ManifoldPrecisionRecall } from './ManifoldPrecisionRecall'
+
+<Definition>
+Let $\Phi_r$ and $\Phi_g$ be the feature vectors of real and generated samples. For a set $\Phi$, let
+$\text{NND}_k(\phivec)$ be the distance from $\phivec \in \Phi$ to its $k$-th nearest neighbour in $\Phi$, and define
+the estimated manifold $M(\Phi) = \bigcup_{\phivec \in \Phi} B\paren{\phivec, \text{NND}_k(\phivec)}$. Then
+<Cite id="kynkaanniemi2019" />
+
+$$
+\text{precision} = \frac{1}{\abs{\Phi_g}}\sum_{\phivec \in \Phi_g} \indicator\brack{\phivec \in M(\Phi_r)}, \qquad
+\text{recall} = \frac{1}{\abs{\Phi_r}}\sum_{\phivec \in \Phi_r} \indicator\brack{\phivec \in M(\Phi_g)} .
+$$
+</Definition>
+
+## Two failure modes, two numbers
+
+A single distance such as <NoteLink to="frechet-inception-distance">FID</NoteLink> cannot say whether a generator is
+poor because its samples look wrong or because it covers only part of the data. Precision measures the first: the
+share of generated samples that fall where real data live. Recall measures the second: the share of real data that the
+generator can produce. A generator that produces a few perfect images has high precision and low recall; one that
+produces everything including garbage has high recall and low precision. The analogy with
+<NoteLink to="precision-recall-and-f-score">classification precision and recall</NoteLink> is that generated samples play
+the role of predictions and real samples the role of positives.
+
+The first formulation defined precision and recall between distributions as a whole curve, trading one against the
+other <Cite id="sajjadi2018" />. The $k$-nearest-neighbour version gives one number each and is the one in common use.
+
+**Worked example.** Real features $\set{(0,0), (1,0), (0,1), (1,1)}$ and generated features $\set{(0.1,0.1),
+(0.9,0.1), (3,3)}$, with $k = 1$. Each real point's ball has radius 1. The first two generated points fall inside real
+balls and $(3, 3)$ does not, so precision is $2/3$. The generated balls have radii $0.8$, $0.8$ and $3.58$ (the
+outlier's nearest neighbour is far away). Three of the four real points fall inside one of them, so recall is $3/4$.
+Without the outlier, precision would be 1 and recall only $1/2$: the single outlier lowered precision but raised recall,
+because its large ball swallowed a real point.
+
+<ManifoldPrecisionRecall />
+
+## Pitfalls
+
+- **Outliers inflate the manifolds.** As the example shows, an outlier's large ball covers much of the space, raising
+  recall (for generated outliers) or precision (for real outliers). Density and coverage replace the union of balls by
+  counts of how many balls contain each sample, and are more robust <Cite id="naeem2020" />.
+- **The choice of $k$.** Larger $k$ makes the manifolds larger and both numbers higher. Compare at the same $k$ and
+  sample size (the original uses $k = 3$).
+- **Feature space.** The results depend on the embedding network, as for FID.

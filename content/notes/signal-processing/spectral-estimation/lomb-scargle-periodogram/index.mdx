@@ -1,0 +1,153 @@
+---
+title: Lomb–Scargle periodogram
+kind: technique
+summary: 'The Lomb–Scargle periodogram estimates the spectrum of irregularly sampled data by least-squares fitting a sinusoid at each frequency. A time offset $\tau$ with $\tan 2\omega\tau = \sum_j \sin 2\omega t_j / \sum_j \cos 2\omega t_j$ decouples the fit; no interpolation to a grid is needed.'
+tags: [signal-processing, spectral-estimation, time-series, worked-example]
+aliases: [Lomb periodogram, Lomb-Scargle, least-squares spectral analysis, LSSA, generalised Lomb-Scargle, floating-mean periodogram, unevenly sampled spectrum]
+requires: [periodogram]
+related: [linear-regression, sampling-theorem, aliasing, welch-method]
+references: [lomb1976, scargle1982, zechmeister2009, vanderplas2018, laguna1998]
+status: draft
+updated: 2026-09-26
+---
+
+import { LombScargleDemo } from './LombScargleDemo'
+
+<Definition>
+Given samples $y_j$ at arbitrary times $t_j$, $j = 1, \dots, N$, with the mean removed, the Lomb–Scargle periodogram at
+angular frequency $\omega$ is
+
+$$
+P(\omega) = \frac{1}{2}\brack{\frac{\paren{\sum_j y_j \cos\omega(t_j - \tau)}^2}{\sum_j \cos^2\omega(t_j - \tau)}
++ \frac{\paren{\sum_j y_j \sin\omega(t_j - \tau)}^2}{\sum_j \sin^2\omega(t_j - \tau)}},
+\qquad \tan 2\omega\tau = \frac{\sum_j \sin 2\omega t_j}{\sum_j \cos 2\omega t_j} .
+$$
+
+It equals half the reduction in the residual sum of squares achieved by fitting $a\cos\omega t + b\sin\omega t$ to the
+data by least squares <Cite id="lomb1976" /> <Cite id="scargle1982" />.
+</Definition>
+
+## Why irregular sampling needs its own method
+
+Many measurements are not taken on a grid: astronomical observations are interrupted by daylight and weather,
+heartbeats arrive at irregular intervals, sensors drop samples. The DFT-based
+<NoteLink to="periodogram">periodogram</NoteLink> assumes equally spaced samples, and the two obvious workarounds both
+distort the spectrum.
+
+- **The direct transform.** Evaluating $\frac{1}{N}\abs{\sum_j y_j e^{-i\omega t_j}}^2$ at the actual times is
+  possible, but on an irregular grid the cosine and sine sums are no longer orthogonal. The estimate then has no
+  simple distribution under noise, and it changes if the time origin is shifted.
+- **Interpolating to a grid.** Resampling onto a regular grid and using the FFT fills gaps with invented values.
+  Interpolation is also a smoothing operation: linear interpolation approximately convolves the data with a triangle,
+  whose transform $\operatorname{sinc}^2$ attenuates high frequencies. Power is shifted towards low frequencies, and
+  the estimate is biased where the gaps are long.
+
+## Least squares at each frequency
+
+At a fixed $\omega$, fit $y_j \approx a\cos\omega(t_j - \tau) + b\sin\omega(t_j - \tau)$ by least squares, with a time
+offset $\tau$ still to be chosen. Writing $c_j = \cos\omega(t_j - \tau)$ and $s_j = \sin\omega(t_j - \tau)$, the normal
+equations are
+
+$$
+\begin{bmatrix} \sum c_j^2 & \sum c_j s_j \\ \sum c_j s_j & \sum s_j^2 \end{bmatrix}
+\begin{bmatrix} a \\ b \end{bmatrix}
+= \begin{bmatrix} \sum y_j c_j \\ \sum y_j s_j \end{bmatrix} .
+$$
+
+The offset $\tau$ is chosen to make the off-diagonal zero. Since $c_j s_j = \tfrac12\sin 2\omega(t_j - \tau)$, the
+condition $\sum_j \sin 2\omega(t_j - \tau) = 0$ expands to
+$\cos 2\omega\tau \sum_j \sin 2\omega t_j = \sin 2\omega\tau \sum_j \cos 2\omega t_j$, which is Lomb's definition of
+$\tau$. With the columns orthogonal, the equations decouple:
+
+$$
+\hat a = \frac{\sum_j y_j c_j}{\sum_j c_j^2}, \qquad \hat b = \frac{\sum_j y_j s_j}{\sum_j s_j^2} .
+$$
+
+For a least-squares fit, the reduction in the residual sum of squares equals the explained sum of squares,
+$\hat a \sum y_j c_j + \hat b \sum y_j s_j$. Substituting the estimates gives
+$(\sum y_j c_j)^2 / \sum c_j^2 + (\sum y_j s_j)^2/\sum s_j^2$, which is twice $P(\omega)$. So the Lomb–Scargle
+periodogram is the least-squares power of the best-fitting sinusoid at each frequency.
+
+Three properties follow:
+
+- **Time-shift invariance.** $\tau$ moves with the data, so shifting every $t_j$ by the same amount leaves $P$
+  unchanged.
+- **Agreement with the classical periodogram.** On an even grid at a DFT frequency, $\sum c_j^2 = \sum s_j^2 = N/2$,
+  and $P(\omega)$ reduces to $\frac{1}{N}\abs{\sum_j y_j e^{-i\omega t_j}}^2$.
+- **A simple null distribution.** For Gaussian white noise of known variance $\sigma^2$, the two decoupled terms are
+  independent squared Gaussians, so $P(\omega)/\sigma^2$ is exponentially distributed with mean 1 at any single
+  frequency. This is what Scargle set out to achieve <Cite id="scargle1982" />.
+
+<LombScargleDemo />
+
+## Significance and false alarms
+
+Normalise by the variance, $P_N(\omega) = P(\omega)/\hat\sigma^2$. Under pure noise, at one frequency chosen in
+advance, $\Pr(P_N > z) = e^{-z}$. Searching many frequencies raises the chance that some peak exceeds $z$ by
+accident. If the search covers $M$ independent frequencies, the false-alarm probability of the highest peak is <Cite id="scargle1982" />
+
+$$
+\operatorname{FAP}(z) = 1 - \paren{1 - e^{-z}}^M .
+$$
+
+The difficulty is $M$. On an even grid the independent frequencies are the $N/2$ Fourier frequencies. For irregular
+sampling, neighbouring frequencies are correlated in a way that depends on the sampling pattern, and scanning a finely
+oversampled grid does not produce independent tests. $M$ is therefore usually estimated by simulating noise at the
+actual sample times, or the false-alarm level is computed by bootstrap. Using the variance estimated from the same
+data, rather than a known $\sigma^2$, also changes the tail; the exponential law is the large-$N$ limit.
+
+## The generalised, floating-mean periodogram
+
+The classical form subtracts the sample mean first and fits only a sinusoid. When the sampling is uneven, the sample
+mean is not the mean of the underlying signal: if observations cluster at one phase of the oscillation, subtracting
+their average removes part of the signal and biases the fit. The generalised Lomb–Scargle periodogram fits
+$y_j \approx a\cos\omega t_j + b\sin\omega t_j + c$ with the constant $c$ estimated jointly at each frequency, and
+weights each point by $1/\sigma_j^2$ when measurement errors differ <Cite id="zechmeister2009" />. It is the same idea
+with one more column in the least-squares problem, and it is the version to use when the data are few, noisy, or
+unevenly phased.
+
+## Frequency grid and the Nyquist limit
+
+- **Grid spacing.** The frequency resolution is set by the total time span $T = t_N - t_1$: peaks narrower than about
+  $2\pi/T$ rad/s cannot be separated. Evaluate on a grid finer than this, typically 5 to 10 points per $2\pi/T$, so
+  that no peak falls between grid points.
+- **Upper limit.** Irregular sampling has no single Nyquist frequency. A common heuristic uses the pseudo-Nyquist
+  frequency $\pi/\overline{\Delta t}$ from the mean spacing, but irregular sampling can recover some information above
+  it, and regular structure in the sampling, such as observations only at night, creates strong aliases. The pattern
+  of aliases is the spectral window $\abs{\sum_j e^{-i\omega t_j}}^2$, which is worth computing alongside the
+  periodogram <Cite id="vanderplas2018" />. The true limit is set by the finest common spacing of the times; if every
+  $t_j$ is a multiple of $p$, frequencies above $\pi/p$ cannot be distinguished from lower ones.
+
+## Application: heart-rate variability
+
+The intervals between successive heartbeats (RR intervals) are sampled at the beats themselves, so the series is
+irregular by construction, and ectopic or missed beats create further gaps. Heart-rate variability analysis measures
+the power in bands such as 0.04–0.15 Hz and 0.15–0.4 Hz. Laguna, Moody and Mark compared least-squares spectral
+estimation of unevenly sampled heart-rate signals with FFT spectra of resampled series, on simulated and recorded
+data <Cite id="laguna1998" />. The least-squares approach avoids the low-pass bias that interpolation introduces at
+the higher frequencies, and it handles removed beats without inventing values.
+
+## Worked example
+
+Take seven samples at $t = (0, 1, 3, 4.5, 7, 8.2, 10.1)$ of $\sin 0.9t + 0.2\cos 2.3t$, with the mean removed, and
+evaluate at $\omega = 0.9$. Lomb's condition gives $\tau = 0.296$. The decoupled coefficients are $\hat a = 0.226$ and
+$\hat b = 0.894$, an amplitude of 0.922 for the fitted sinusoid, close to the true 1. The periodogram value is
+$P(0.9) = 0.97488$, which equals half the reduction in residual sum of squares from the two-column least-squares fit to
+the precision shown, and matches `scipy.signal.lombscargle(t, y, [0.9])`. SciPy takes angular frequencies and, with
+`normalize=True`, divides by $\tfrac12\sum y_j^2$, giving 0.7795: the fraction of the variance the sinusoid explains.
+
+In the figure's setting, with 240 samples at jittered times and the mean spacing 1 s, a component at $0.8\pi$ rad/s
+with half the amplitude of one at $0.3\pi$ should sit 6.0 dB lower. Lomb–Scargle puts it 5.5 dB lower. A Hann
+periodogram of the linearly interpolated series puts it 10.0 dB lower: about 4 dB of extra attenuation, matching the
+$\operatorname{sinc}^2$ loss of linear interpolation at that frequency.
+
+## Pitfalls
+
+- **Angular or cyclic frequency.** SciPy's `lombscargle` expects angular frequency in rad per time unit, while
+  Astropy's `LombScargle` uses cyclic frequency. Mixing them shifts every peak by a factor of $2\pi$.
+- **Oversampled grids are not independent tests.** A finer grid makes peaks look smoother but adds no independent
+  frequencies; the false-alarm probability does not improve with it.
+- **Aliases from the sampling pattern.** Daily, seasonal or duty-cycled sampling produces aliases at the sampling
+  pattern's frequencies. Check the spectral window before interpreting secondary peaks.
+- **Non-sinusoidal signals.** The method fits one sinusoid per frequency; sharp, non-sinusoidal periodic signals put
+  power into harmonics, and multi-term or phase-dispersion methods may detect them better.

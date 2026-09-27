@@ -1,0 +1,80 @@
+---
+title: Calibration error
+kind: concept
+summary: 'A classifier is calibrated if, among cases given probability $p$, a fraction $p$ are positive. Expected calibration error estimates the average gap by binning predictions; it depends on the binning, and classwise variants extend it beyond the top-label confidence.'
+tags: [metrics, probabilistic, calibration, worked-example]
+aliases: [ECE, expected calibration error, maximum calibration error, MCE, reliability diagram, classwise ECE, confidence calibration, adaptive calibration error]
+requires: [log-loss-and-brier-score]
+related: [precision-recall-and-f-score, choosing-a-metric, metric-confidence-intervals, cost-sensitive-learning]
+references: [degroot1983, naeini2015, guo2017, kull2019, nixon2019]
+status: draft
+updated: 2026-09-27
+---
+
+import { ReliabilityDiagram } from './ReliabilityDiagram'
+
+<Definition>
+A binary classifier reporting probability $p(\xvec)$ for the positive class is calibrated if
+$P\paren{Y = 1 \mid p(\xvec) = p} = p$ for every $p$. Its expected calibration error is the mean absolute gap
+$\expect\abs{P(Y = 1 \mid p(\xvec)) - p(\xvec)}$, estimated by binning the predictions into $M$ bins $B_m$:
+
+$$
+\text{ECE} = \sum_{m=1}^M \frac{\abs{B_m}}{n}\,\abs{\bar y(B_m) - \bar p(B_m)},
+$$
+
+where $\bar p(B_m)$ is the mean prediction and $\bar y(B_m)$ the fraction of positives in bin $m$
+<Cite id="naeini2015" />.
+</Definition>
+
+## What calibration means
+
+Calibration asks whether predicted probabilities can be taken at face value. Of the days a calibrated forecaster says
+"70% chance of rain", it rains on 70%. Calibration is separate from discrimination: a model that always predicts the
+base rate is perfectly calibrated and useless, and a model with a perfect ranking can be badly calibrated. Decisions
+based on probabilities, such as the expected-cost thresholds of <NoteLink to="cost-sensitive-learning">cost-sensitive
+learning</NoteLink>, are only optimal if the probabilities are calibrated.
+
+A reliability diagram plots $\bar y(B_m)$ against $\bar p(B_m)$ for each bin <Cite id="degroot1983" />. A calibrated
+model lies on the diagonal. An overconfident model, whose probabilities are too close to 0 and 1, gives a curve flatter
+than the diagonal; an underconfident one gives a steeper curve.
+
+<ReliabilityDiagram />
+
+## Worked example
+
+Ten binary predictions and outcomes, in five equal-width bins:
+
+| bin | predictions | mean $\bar p$ | outcomes | frequency $\bar y$ | gap |
+| --- | --- | --- | --- | --- | --- |
+| $[0, 0.2)$ | 0.10, 0.15 | 0.125 | 0, 0 | 0.0 | 0.125 |
+| $[0.2, 0.4)$ | 0.25, 0.30 | 0.275 | 0, 1 | 0.5 | 0.225 |
+| $[0.4, 0.6)$ | 0.45, 0.55 | 0.500 | 0, 1 | 0.5 | 0.000 |
+| $[0.6, 0.8)$ | 0.70, 0.75 | 0.725 | 0, 1 | 0.5 | 0.225 |
+| $[0.8, 1]$ | 0.85, 0.95 | 0.900 | 1, 1 | 1.0 | 0.100 |
+
+Every bin holds two of the ten cases, so $\text{ECE} = 0.2 \times (0.125 + 0.225 + 0 + 0.225 + 0.1) = 0.135$. The
+maximum calibration error, the largest gap, is 0.225.
+
+## Variants
+
+- **Maximum calibration error (MCE)** takes the largest bin gap instead of the weighted mean <Cite id="naeini2015" />.
+  It matters where any miscalibrated region is unacceptable.
+- **Confidence ECE** for multiclass models bins only the top predicted probability and compares it with accuracy. It
+  was popularised by Guo et al., who showed that modern neural networks are overconfident and that temperature scaling
+  largely fixes it <Cite id="guo2017" />.
+- **Classwise ECE** applies the binary ECE to each class's predicted probability and averages over classes. It detects
+  miscalibration in the probabilities of classes other than the predicted one, which confidence ECE ignores
+  <Cite id="kull2019" />.
+- **Adaptive binning** uses equal-mass bins, each holding the same number of predictions, so bins are never nearly
+  empty <Cite id="nixon2019" />.
+
+## Pitfalls
+
+- **ECE depends on the binning.** Different numbers of bins, and equal-width against equal-mass bins, give different
+  values on the same predictions. Report the scheme.
+- **ECE is biased upwards with finite data.** Even a perfectly calibrated model has a positive ECE from sampling noise,
+  larger with more bins and fewer cases. Compare against that noise level, for example by resampling labels from the
+  predicted probabilities.
+- **ECE is not a proper scoring rule.** A model can lower its ECE by predicting the base rate for everything. Report a
+  proper score such as log loss or the Brier score alongside it (see
+  <NoteLink to="log-loss-and-brier-score">log loss and Brier score</NoteLink>).

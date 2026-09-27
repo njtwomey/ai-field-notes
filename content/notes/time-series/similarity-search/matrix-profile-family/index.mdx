@@ -1,0 +1,140 @@
+---
+title: Matrix profile family
+kind: overview
+summary: 'The matrix profile family is a line of time-series methods, mostly from the "Matrix Profile I, II, …" papers, built on one computation: each subsequence''s nearest-neighbour distance. Faster, anytime, streaming, joined, multi-length and trillion-scale variants reuse that core.'
+tags: [time-series, similarity-search, anomaly-detection]
+aliases: [matrix profile papers, Matrix Profile I, Matrix Profile series, UCR matrix profile]
+related: [shapelets, symbolic-aggregate-approximation, dynamic-time-warping, change-point-detection]
+references: [keogh-matrix-profile, yeh2016, zhu2016, mueen2013, wu2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The matrix profile family is a set of time-series data-mining methods that share one computation. That computation is
+the all-pairs similarity join over the subsequences of a series. Every subsequence of length $m$ is compared with
+every other one under z-normalised Euclidean distance, and only the distance to its nearest neighbour and that
+neighbour's position are kept. Most members were published by Eamonn Keogh's group at UC Riverside and collaborators
+as a numbered paper series, "Matrix Profile I" onwards <Cite id="keogh-matrix-profile" />.
+</Definition>
+
+## The shared core
+
+Every member computes some variant of the same quantity. Write $T_i$ for the length-$m$ subsequence of a series $x$
+starting at position $i$, and $d(i, j)$ for the Euclidean distance between $T_i$ and $T_j$ after each is
+z-normalised to mean 0 and standard deviation 1. The <NoteLink to="matrix-profile">matrix profile</NoteLink> stores
+$P_i = \min_{j} d(i, j)$ over positions $j$ outside an exclusion zone around $i$. Its index $I_i$ stores the
+minimising $j$.
+
+Three facts make the family possible.
+
+- $d(i, j)^2 = 2m\paren{1 - \rho_{ij}}$, where $\rho_{ij}$ is the Pearson correlation of $T_i$ and $T_j$. The
+  distance needs only a dot product and the means and standard deviations of the two subsequences.
+- The dot products of one subsequence with all others are a convolution. The FFT computes them in $O(n \log n)$
+  for a series of length $n$. This is the <NoteLink to="distance-profile-and-mass">distance profile and MASS</NoteLink>.
+- Along a diagonal of the distance matrix, the dot product changes by one subtraction and one addition. All $n^2$
+  distances therefore cost $O(n^2)$ time, independent of $m$, and $O(n)$ memory.
+
+The members differ in what they compute from the join (motifs, discords, chains, segment boundaries), in which pairs
+they join (one series, two series, many dimensions, many lengths) and in how they schedule the work (exactly, in
+anytime order, incrementally, on GPUs).
+
+## Lineage
+
+The table lists the numbered papers whose title, venue and year were confirmed against their DOI records, in
+publication order. The number is the one the paper carries in its own title, or on the UCR matrix profile page where
+the published title omits it. The series continues beyond the rows shown; the UCR page lists every numbered paper
+<Cite id="keogh-matrix-profile" />.
+
+| No.   | Method                               | Year | Problem solved                                             | What is new                                                                                             |
+| ----- | ------------------------------------ | ---- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| I     | Matrix profile, STAMP, STAMPI        | 2016 | Motifs, discords and joins as one computation              | Defines the matrix profile; STAMP computes it row by row with MASS in anytime order; STAMPI adds points |
+| II    | STOMP, GPU-STOMP                     | 2016 | Exact matrix profiles of long series                       | $O(1)$ dot-product update along diagonals; $O(n^2)$ time independent of $m$; GPUs                      |
+| VI    | mSTAMP                               | 2017 | Motifs in multidimensional series                          | Profiles for every number of dimensions $k$ at once, by sorting per-dimension distances                 |
+| VII   | Time series chains                   | 2017 | Patterns that drift over time                              | Left and right matrix profiles; chains of bidirectional nearest neighbours                              |
+| VIII  | FLUSS, FLOSS                         | 2017 | Segmenting a series into regimes, offline and online       | The arc curve of nearest-neighbour links, corrected by its expectation under no structure               |
+| X     | VALMOD                               | 2018 | Motifs over a range of lengths                             | Lower bounds that carry distance information from one length to the next                                |
+| XI    | SCRIMP, PreSCRIMP, SCRIMP++          | 2018 | Motifs at interactive speed                                | Anytime computation in random diagonal order, seeded by a fast approximate pass                         |
+| XII   | MPdist                               | 2018 | Comparing whole series that share parts in different order | A distance between series read from their two join profiles                                             |
+| XIII  | Snippets                             | 2018 | Summarising a series by a few representative subsequences  | Greedy coverage under MPdist; each snippet reports the fraction of the series it represents             |
+| XIV   | SCAMP                                | 2019 | Scaling to GPUs and cloud clusters                         | A numerically stable centred-covariance update; tiling across devices                                   |
+| XV    | Consensus motifs, Ostinato           | 2019 | A pattern shared by a set of series                        | The radius: the largest nearest-neighbour distance from a candidate to the other series                 |
+| XX    | Pan matrix profile, SKIMP            | 2019 | Motifs of all lengths, and choosing $m$                    | Matrix profiles for every length, normalised to one scale and computed in anytime order                 |
+| XXI   | MERLIN                               | 2020 | Discords of all lengths                                    | Parameter-free discord search over a length range, reusing the distance threshold between lengths      |
+| XXIV  | DAMP                                 | 2022 | Anomaly detection on trillions of points and fast streams  | The left matrix profile, computed with backward search and forward pruning                              |
+
+Sources by number: I <Cite id="yeh2016" />, II <Cite id="zhu2016" />, VI <Cite id="yeh2017" />,
+VII <Cite id="zhu2017" />, VIII <Cite id="gharghabi2017" />, X <Cite id="linardi2018" />, XI
+<Cite id="zhu2018" />, XII <Cite id="gharghabi2018" />, XIII <Cite id="imani2018" />, XIV
+<Cite id="zimmerman2019" />, XV <Cite id="kamgar2019" />, XX <Cite id="madrid2019" />, XXI
+<Cite id="nakamura2020" /> and XXIV <Cite id="lu2022" />. The MERLIN paper's published title omits its number; the
+UCR page lists it as XXI.
+
+## Progression
+
+### One join for many problems
+
+Matrix Profile I reframed motif discovery (repeated patterns), discord discovery (anomalies) and similarity joins
+between two series as the same computation <Cite id="yeh2016" />. Before it, each problem had its own algorithms,
+indexes and parameters. The matrix profile answers all of them from one vector of $n - m + 1$ numbers, with $m$ as the
+only parameter. STAMP, the first algorithm, computes one row of the distance matrix at a time with MASS and processes
+rows in random order, so an approximate profile is available at any moment. STAMPI updates the profile as points
+arrive.
+
+### Faster exact algorithms
+
+Matrix Profile II replaced the $O(n \log n)$ FFT per row with an $O(1)$ update per entry along diagonals. STOMP costs
+$O(n^2)$ in total and runs on GPUs <Cite id="zhu2016" />. SCRIMP kept the diagonal update but processed diagonals in
+random order, which restores the anytime property. PreSCRIMP adds a cheap approximate first pass
+<Cite id="zhu2018" />. SCAMP rewrote the update in terms of centred covariances, which stays accurate in single
+precision over long diagonals, and distributed the work across GPUs and cloud machines
+<Cite id="zimmerman2019" />. The note on <NoteLink to="matrix-profile-algorithms">matrix profile algorithms</NoteLink>
+derives each update.
+
+### Streams, joins and many dimensions
+
+The join need not be a self-join. Joining two series $A$ and $B$ finds what they share and what each has that the
+other lacks. Joining each subsequence only with earlier ones gives the left matrix profile, which can be maintained as
+points arrive (<NoteLink to="streaming-and-incremental-matrix-profile">streaming matrix profile</NoteLink>). mSTAMP
+extends the join to multidimensional series and chooses how many dimensions a motif spans <Cite id="yeh2017" />
+(<NoteLink to="matrix-profile-joins">joins and multidimensional profiles</NoteLink>).
+
+### New primitives from the index
+
+The profile index $I$ holds more structure than the profile values. Time series chains follow left and right nearest
+neighbours to find a pattern that evolves (<NoteLink to="time-series-chains">time series chains</NoteLink>). FLUSS
+counts the index links that cross each position; few crossings mark a regime boundary
+(<NoteLink to="matrix-profile-segmentation">segmentation</NoteLink>). MPdist turns two join profiles into a distance
+between whole series, and snippets use it to summarise a series (<NoteLink to="time-series-snippets">snippets</NoteLink>).
+
+### Every length
+
+A single $m$ is a guess about the length of the pattern. MOEN enumerated motifs of all lengths with lower bounds across
+lengths <Cite id="mueen2013" />, before the numbered series. VALMOD computes the motifs over a length range with
+similar bounds <Cite id="linardi2018" />. The pan matrix profile stacks matrix profiles for every length on a common
+scale <Cite id="madrid2019" />. Consensus motifs extend the search from one series to a set
+<Cite id="kamgar2019" />. MERLIN does for discords what the pan matrix profile does for motifs
+<Cite id="nakamura2020" />. These are collected in <NoteLink to="motif-discovery-variants">motif discovery
+variants</NoteLink> and <NoteLink to="discord-discovery-at-scale">discord discovery at scale</NoteLink>.
+
+### Anomalies at scale
+
+DAMP computes the left matrix profile only where it can matter for the top discord. It searches backward from each
+new subsequence for a close enough earlier match and prunes future subsequences that are already too similar to the
+current one. The result scales discord discovery to trillions of points and to streams that arrive faster than a
+matrix profile could be updated <Cite id="lu2022" />. Alongside it, Wu and Keogh showed that popular anomaly
+benchmarks are flawed and can make weak detectors look strong <Cite id="wu2021" />.
+
+## Components
+
+The notes in this family declare themselves part of it and are listed in the right-hand column. Each reads on its own.
+The <NoteLink to="matrix-profile">matrix profile</NoteLink> note is the entry point.
+
+## Relations to other time-series methods
+
+Matrix profile methods compare raw subsequences under z-normalised Euclidean distance. Two other lines of work make
+different choices. <NoteLink to="dynamic-time-warping">Dynamic time warping</NoteLink> allows local stretching of the
+time axis at a higher cost per comparison. <NoteLink to="symbolic-aggregate-approximation">SAX</NoteLink> discretises
+subsequences into words, which trades exactness for speed and indexing. <NoteLink to="shapelets">Shapelets</NoteLink>
+use the same nearest-subsequence distance as the matrix profile to separate classes; Matrix Profile I describes
+shapelet discovery as a join between the series of two classes <Cite id="yeh2016" />.

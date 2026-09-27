@@ -1,0 +1,113 @@
+---
+title: Motif discovery variants
+kind: concept
+summary: 'Matrix profile motif discovery generalises beyond one best pair at one length: top-$k$ motifs with exclusion zones, motifs over a length range (MOEN, VALMOD), motifs of all lengths (pan matrix profile) and consensus motifs shared by a set of series (Ostinato).'
+tags: [time-series, similarity-search, worked-example]
+aliases: [top-k motifs, VALMOD, MOEN, pan matrix profile, SKIMP, consensus motif, Ostinato, variable-length motifs]
+requires: [matrix-profile, matrix-profile-joins]
+partOf: [matrix-profile-family]
+related: [matrix-profile-algorithms, discord-discovery-at-scale]
+references: [mueen2013, linardi2018, madrid2019, kamgar2019, yeh2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { PanMatrixProfileFigure } from './PanMatrixProfileFigure'
+
+<Definition>
+A time series motif of length $m$ is a pair of non-overlapping subsequences with small z-normalised distance. The
+matrix profile $P$ gives the best pair directly: $\argmin_i P_i$ and its nearest neighbour <Cite id="yeh2016" />.
+The variants in this note relax one assumption each. Top-$k$ discovery returns several distinct motifs. MOEN and
+VALMOD search a range of lengths <Cite id="mueen2013" /> <Cite id="linardi2018" />. The pan matrix profile computes
+the matrix profile at every length <Cite id="madrid2019" />. Consensus motifs look for one pattern shared by every
+series in a set <Cite id="kamgar2019" />.
+</Definition>
+
+## Intuition
+
+The top motif of a single matrix profile answers a narrow question: which two subsequences of length $m$ are most
+alike? Real questions are broader. A series may contain several different repeated behaviours. The right length is
+rarely known in advance. A pattern of interest may occur once in each of many recordings rather than twice in one.
+Each variant widens the question while keeping the matrix profile's exactness and its one-computation structure.
+
+## Details
+
+### Top-$k$ motifs
+
+Take the minimum of $P$ and its neighbour as the first motif. Set $P$ to $\infty$ within an exclusion zone around both
+members, so that the next minimum is not a shifted copy of the same pattern. Repeat $k$ times. Each motif can also be
+widened to a set: every subsequence within a radius of the pair, for example twice the pair's distance, joins the
+motif. The cost after the matrix profile is $O(kn)$, plus one distance profile per motif for the radius search.
+
+### Motifs over a range of lengths: MOEN and VALMOD
+
+Computing a separate matrix profile for each length from $m_{\min}$ to $m_{\max}$ costs $O(n^2)$ per length. MOEN
+enumerates the best motif of every length in the range with lower bounds <Cite id="mueen2013" />. The distance
+between two subsequences at length $m$ bounds, from below, their distance at longer lengths after a correction for the
+change in normalisation. Most pairs can then be discarded at longer lengths without recomputing their distance.
+
+VALMOD (Variable Length Motif Discovery) computes the full matrix profile at $m_{\min}$ and keeps, for each
+subsequence, a few of its smallest distance-profile entries together with lower bounds for longer lengths
+<Cite id="linardi2018" />. At each longer length it updates only those candidates. When the best updated candidate is
+below the smallest lower bound of the discarded ones, the new profile entry is exact; otherwise that distance profile
+is recomputed. VALMOD reports a variable-length matrix profile in which each entry is the best motif distance over all
+lengths, normalised by $\sqrt{m}$ so that lengths compare.
+
+### All lengths: the pan matrix profile
+
+The pan matrix profile stacks the matrix profiles for every length in a range into a two-dimensional array, one row
+per length <Cite id="madrid2019" />. The figure divides each row by $2\sqrt{m}$, the largest possible z-normalised
+distance at length $m$, so every row lies in $[0, 1]$. Dark cells mark subsequences with close matches at that
+length, and reading down a column shows over which lengths a subsequence has a close match.
+
+The pan matrix profile addresses the choice of $m$ by showing all choices at once. A motif that is dark over a wide
+band of lengths is robust to the choice. The companion algorithm SKIMP computes the rows in an anytime order: it
+starts with lengths spread across the range and fills in between them, so the overall picture is visible early and
+refines as rows are added.
+
+<PanMatrixProfileFigure />
+
+### Consensus motifs: Ostinato
+
+Given a set of series $T^{(1)}, \dots, T^{(K)}$, a consensus motif is a subsequence that has a close match in every
+other series. For a candidate subsequence $S$ in series $a$, its radius is the largest of its nearest-neighbour
+distances into the other series,
+
+$$
+r(S) = \max_{b \ne a} \min_{j} d\paren{S, T^{(b)}_j} .
+$$
+
+The consensus motif minimises $r$ over all candidates in all series <Cite id="kamgar2019" />. A small radius means the
+pattern occurs, closely, in every series. Each inner minimum is an entry of an AB-join profile between series $a$ and
+series $b$. A candidate can be abandoned as soon as one of its nearest-neighbour distances exceeds the best radius
+found so far, which makes the search much cheaper than computing every join in full.
+
+## Worked example
+
+**Consensus motif.** Generate three series of 50 points of Gaussian noise with standard deviation 0.3 and add a
+12-point pattern, a sine period with rising amplitude scaled by 2, at positions 16, 30 and 20 (counting from 1). Search
+all length-12 subsequences of all three series. The consensus motif is the subsequence at position 31 of the second
+series, one step from its planted copy, with radius 0.992: its nearest neighbours in the first and third series are
+at most 0.992 away.
+
+**Pan matrix profile.** In the figure's default series, a sawtooth of length 20 is planted at positions 41 and 322 and
+a slower wave of length 72 at positions 122 and 389 (counting from 0). At $m = 20$ the top motif is the sawtooth pair,
+at positions 41 and 322. At $m = 72$ the top motif is the wave pair, starting at 108 and 376: each window starts 13 or 14
+samples before its copy and covers most of it. A matrix profile at either single length would report only one of the
+two patterns.
+
+## Assumptions
+
+- **Z-normalised Euclidean distance.** All variants compare shapes point by point. A motif whose occurrences differ by
+  local stretching needs a warping distance instead.
+- **Lower bounds need z-normalisation.** The bounds that make MOEN and VALMOD efficient are derived for z-normalised
+  distances and do not transfer to other distances unchanged.
+
+## Pitfalls
+
+- **Comparing lengths.** Raw distances grow with $m$. Profiles at different lengths must be normalised before their
+  minima are compared, or longer motifs always look worse.
+- **Trivial variants.** Without exclusion zones, the second-best motif is usually the first shifted by one sample.
+- **Consensus from outliers.** The radius is a maximum, so one series without the pattern makes every candidate's
+  radius large. A radius taken over all but the farthest one or two series tolerates such outliers, at the cost of a
+weaker guarantee.

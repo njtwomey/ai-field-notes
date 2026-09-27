@@ -1,0 +1,141 @@
+---
+title: Time-series classification benchmarks
+kind: concept
+summary: 'Time-series classifiers are compared on the UCR archive (128 univariate datasets) by average rank. The 2017 bake off found few methods beat 1-NN DTW; HIVE-COTE combined five representations to lead on accuracy; ROCKET matched it with random convolutions in a fraction of the time.'
+tags: [time-series, classification, benchmarks, model-evaluation, worked-example]
+aliases: [UCR archive, UCR time series archive, UEA archive, the great time series classification bake off, bake off, HIVE-COTE, COTE, ROCKET, random convolutional kernel transform, critical difference diagram]
+related: [dynamic-time-warping, shapelets, convolution, ridge-regression]
+references: [dau2019, bagnall2017, lines2018, dempster2020]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A time-series classification benchmark is a fixed collection of labelled datasets, each with a train and test split,
+on which classifiers are compared by accuracy. The standard collection for univariate series is the UCR time-series
+archive, which holds 128 datasets since its 2018 expansion from 85 <Cite id="dau2019" />. Results over many datasets
+are summarised by each classifier's average rank and tested with rank-based statistics.
+</Definition>
+
+## Intuition
+
+No single time-series classifier is best on every problem. A method built for local shapes wins on some datasets, a
+method built for frequencies on others. A claim that one method is better therefore needs many datasets, a fixed
+protocol and a test that accounts for the variation across datasets. A shared archive makes results from different
+papers comparable, and a shared baseline makes it clear whether a new method adds anything.
+
+## The UCR archive
+
+The UCR archive was started by Keogh's group at the University of California, Riverside, and is maintained with
+collaborators including Bagnall's group at the University of East Anglia <Cite id="dau2019" />. Each dataset holds
+univariate series from one domain: sensor readings, image outlines turned into series, spectrograms, motion capture,
+electrocardiograms and simulated data. Each has a fixed train and test split, so that published accuracies can be
+compared directly.
+
+For every dataset the archive reports the error of three baselines: 1-NN with Euclidean distance, 1-NN with
+unconstrained dynamic time warping, and 1-NN with dynamic time warping in a window learned on the training data
+<Cite id="dau2019" />. The 2018 expansion added 43 datasets.
+
+## The bake off
+
+The great time-series classification bake off re-implemented 18 recently published algorithms in one Java framework
+and ran each on the 85 datasets of the archive at the time <Cite id="bagnall2017" />. Instead of the single
+fixed split, every dataset was resampled into 100 random train and test splits of the original sizes. Averaging over
+resamples reduces the risk that a method looks good because of one lucky split.
+
+The two benchmarks were 1-NN DTW with a cross-validated window and a rotation forest on the raw values. Only 9 of the
+18 algorithms were significantly more accurate than both benchmarks. The collective of transformation-based ensembles
+(COTE), which combines classifiers built on several representations of the series, was significantly more accurate
+than all the others <Cite id="bagnall2017" />.
+
+The comparison across datasets used ranks. On each dataset the classifiers are ranked by mean accuracy, rank 1 being
+best. The Friedman test asks whether the average ranks differ more than chance allows. The post-hoc Nemenyi test then
+finds which pairs differ <Cite id="bagnall2017" />. The result is drawn as a critical difference diagram: classifiers
+on an axis of average rank, with bars joining groups whose ranks are not significantly different.
+
+## Worked example
+
+Three classifiers, with made-up accuracies on $N = 6$ datasets, are ranked on each dataset:
+
+| Dataset      | Accuracy A | Accuracy B | Accuracy C | Ranks (A, B, C) |
+| ------------ | ---------- | ---------- | ---------- | --------------- |
+| 1            | 0.80       | 0.85       | 0.90       | 3, 2, 1         |
+| 2            | 0.70       | 0.72       | 0.71       | 3, 1, 2         |
+| 3            | 0.95       | 0.96       | 0.99       | 3, 2, 1         |
+| 4            | 0.60       | 0.58       | 0.66       | 2, 3, 1         |
+| 5            | 0.88       | 0.91       | 0.93       | 3, 2, 1         |
+| 6            | 0.75       | 0.80       | 0.79       | 3, 1, 2         |
+| Average rank |            |            |            | 2.833, 1.833, 1.333 |
+
+With $k = 3$ classifiers and average ranks $\bar R_1, \dots, \bar R_k$, the Friedman statistic is
+
+$$
+\chi^2_F = \frac{12 N}{k (k + 1)} \paren{\sum_{c=1}^{k} \bar R_c^2 - \frac{k (k + 1)^2}{4}}
+= \frac{72}{12} \paren{8.028 + 3.361 + 1.778 - 12} = 7.00.
+$$
+
+Under the null hypothesis of equal ranks, $\chi^2_F$ follows a $\chi^2$ distribution with $k - 1 = 2$ degrees of
+freedom, which gives $p = 0.030$. The Nemenyi critical difference at the 5% level is
+
+$$
+\mathrm{CD} = q_{0.05} \sqrt{\frac{k (k + 1)}{6 N}} = 2.343 \times \sqrt{\frac{12}{36}} = 1.353,
+$$
+
+where $q_{0.05} = 2.343$ is the critical value of the studentised range for $k = 3$, divided by $\sqrt{2}$. A and C
+differ in average rank by $1.5 > 1.353$, so C is significantly better than A. The other two differences, $1.0$ and
+$0.5$, are not significant. With so few datasets, even a consistent winner is hard to separate from the rest.
+
+## HIVE-COTE
+
+The hierarchical vote collective of transformation-based ensembles (HIVE-COTE) <Cite id="lines2018" /> reorganised
+COTE. The flat version pooled 35 classifiers over four representations. HIVE-COTE builds one ensemble module per
+representation and combines the modules by a weighted vote of their class probabilities. Each module's weight is set
+from its accuracy estimated on the training data. It uses five representations.
+
+| Module                                | Representation         | What it captures                                           |
+| ------------------------------------- | ---------------------- | ---------------------------------------------------------- |
+| Elastic ensemble                      | Whole series           | Similarity under DTW and other elastic distances           |
+| Shapelet transform                    | Shapelet distances     | Local shapes anywhere in the series                        |
+| Bag of SFA symbols (BOSS)             | Dictionary of words    | Frequency of short repeated patterns                       |
+| Time series forest (TSF)              | Interval statistics    | Mean, spread and slope of fixed intervals                  |
+| Random interval spectral ensemble     | Spectral features      | Frequency content of random intervals                      |
+
+HIVE-COTE was significantly more accurate than flat COTE and than all other classifiers its authors knew of, over 100
+resamples of the 85 datasets <Cite id="lines2018" />. Its cost is high: the elastic ensemble and the shapelet
+transform scale badly with series length and training-set size, so HIVE-COTE is impractical for large datasets.
+
+## ROCKET
+
+ROCKET (random convolutional kernel transform) <Cite id="dempster2020" /> reaches accuracy comparable to HIVE-COTE at
+a small fraction of the cost. It applies 10,000 random one-dimensional convolution kernels to each series and trains a
+linear classifier on two summary features per kernel. Each kernel's parameters are drawn at random and never trained:
+
+- **Length** is 7, 9 or 11 with equal probability.
+- **Weights** are drawn from $\Gauss(0, 1)$ and then centred to mean 0.
+- **Bias** is drawn from $\Unif(-1, 1)$.
+- **Dilation** is $\lfloor 2^x \rfloor$ with $x \sim \Unif(0, A)$, where $A = \log_2 \paren{(\ell_{\text{input}} - 1) /
+  (\ell_{\text{kernel}} - 1)}$. The spread-out kernel can then cover up to the whole series, so kernels respond to
+  patterns at many scales.
+- **Padding** is used or not with equal probability.
+
+Each kernel's output series is reduced to its maximum and to the proportion of positive values (ppv), giving 20,000
+features. A ridge-regression classifier with cross-validated regularisation is trained on them. Restricted to one CPU
+core, training and testing on all 85 bake-off datasets took 1 hour 50 minutes, against more than 11 days for each of
+two other state-of-the-art methods. ROCKET learned from 1 million series in 1 hour 15 minutes <Cite id="dempster2020" />.
+
+The random kernels play the role that learned features play elsewhere. A kernel with a given dilation responds to a
+pattern at one scale, the bias sets which responses count as positive, and ppv measures how much of the series
+contains the pattern. The linear classifier selects the few useful kernels from the many random ones.
+
+## Pitfalls
+
+- **Overfitting the archive.** Methods are designed and tuned while their authors look at archive results, so the
+  archive is not a truly held-out test. A gain of a fraction of a rank on the archive may not transfer to new data.
+- **Fixed split versus resamples.** Accuracies on the single published split vary a lot for small datasets.
+  Resampling gives more stable comparisons but differs from the numbers other papers report.
+- **Average rank hides magnitudes.** A method can have a better average rank while losing badly on the datasets that
+  matter for an application. Pairwise win counts and per-dataset accuracy complement the rank.
+- **Nemenyi is conservative.** With many classifiers the critical difference grows, and genuine differences go
+  undetected. Pairwise Wilcoxon signed-rank tests with a multiple-testing correction are a common alternative.
+- **Univariate only.** The UCR archive holds univariate series of mostly equal length. Multivariate, variable-length
+  and streaming problems need other collections and can change the ranking.

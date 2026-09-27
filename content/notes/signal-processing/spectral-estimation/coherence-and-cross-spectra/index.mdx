@@ -1,0 +1,91 @@
+---
+title: Coherence and cross-spectra
+kind: concept
+summary: 'The cross-spectral density $S_{xy}(\omega)$ of two jointly stationary signals is the transform of their cross-covariance; its phase measures delay. The magnitude-squared coherence $\abs{S_{xy}}^2/(S_{xx}S_{yy}) \in [0, 1]$ is the fraction of power linearly related at each frequency.'
+tags: [signal-processing, spectral-estimation, worked-example]
+aliases: [cross-spectral density, cross-spectrum, CSD, magnitude-squared coherence, MSC, cross-covariance, transfer function estimation]
+requires: [autocorrelation-and-wiener-khinchin, welch-method]
+related: [frequency-response, variance-and-covariance, lti-systems]
+references: [carter1973, stoica2005]
+status: draft
+updated: 2026-09-26
+---
+
+import { CoherenceDemo } from './CoherenceDemo'
+
+<Definition>
+For jointly wide-sense stationary signals $x[n]$ and $y[n]$ with cross-covariance
+$r_{xy}[m] = \expect\brack{\paren{y[n + m] - \mu_y}\paren{x[n] - \mu_x}}$, the cross-spectral density and the
+magnitude-squared coherence are
+
+$$
+S_{xy}(\omega) = \sum_m r_{xy}[m]\, e^{-i\omega m}, \qquad
+C_{xy}(\omega) = \frac{\abs{S_{xy}(\omega)}^2}{S_{xx}(\omega)\, S_{yy}(\omega)} .
+$$
+
+$S_{xy}$ is complex in general. $C_{xy}(\omega)$ lies between 0 and 1 and measures how much of the power at frequency
+$\omega$ is linearly related between the two signals <Cite id="stoica2005" />.
+</Definition>
+
+## Cross-spectrum as a frequency-by-frequency covariance
+
+In the finite-sample picture, $S_{xy}(\omega)$ is the limit of $\frac{1}{N}\expect\brack{X^{*}(e^{i\omega})
+Y(e^{i\omega})}$, where $X$ and $Y$ are the transforms of $N$ samples, by the same argument as the Wiener–Khinchin
+theorem. It is the covariance between the frequency-$\omega$ components of the two signals. Its magnitude says how
+strongly they co-vary at that frequency; its phase says how far one leads the other. For a pure delay,
+$y[n] = x[n - d]$, the cross-covariance is $r_{xy}[m] = r_{xx}[m - d]$, so $S_{xy}(\omega) = e^{-i\omega d} S_{xx}(\omega)$:
+the phase falls linearly with slope $-d$.
+
+## Coherence bounds and meaning
+
+By the Cauchy–Schwarz inequality applied to the frequency-$\omega$ components,
+$\abs{\expect[X^*Y]}^2 \le \expect\abs{X}^2\,\expect\abs{Y}^2$, so $0 \le C_{xy}(\omega) \le 1$. The bound is reached
+when $y$ is a linear filtering of $x$ with no added noise.
+
+The meaning is clearest for a linear system with noise. Let $y = h \ast x + v$, with $v$ uncorrelated with $x$. Then
+
+$$
+S_{xy} = H\, S_{xx}, \qquad S_{yy} = \abs{H}^2 S_{xx} + S_{vv}, \qquad
+C_{xy} = \frac{\abs{H}^2 S_{xx}}{\abs{H}^2 S_{xx} + S_{vv}} .
+$$
+
+Coherence is the fraction of $y$'s power at $\omega$ that is explained by $x$ through a linear filter, the
+frequency-by-frequency analogue of $R^2$ in regression. Writing $\mathrm{SNR}(\omega) = \abs{H}^2S_{xx}/S_{vv}$ gives
+$C = \mathrm{SNR}/(1 + \mathrm{SNR})$. The first relation also gives the standard transfer-function estimate
+$\hat H(\omega) = \hat S_{xy}(\omega)/\hat S_{xx}(\omega)$, which is unbiased by noise on the output.
+
+## Estimation needs averaging
+
+Cross-spectra are estimated like auto-spectra, usually by <NoteLink to="welch-method">Welch's method</NoteLink>:
+average $X_k^* Y_k$ over windowed segments $k$ <Cite id="carter1973" />. Averaging is not optional for coherence. From
+a single segment,
+
+$$
+\hat C_{xy} = \frac{\abs{X^* Y}^2}{\abs{X}^2\abs{Y}^2} = 1
+$$
+
+at every frequency, for any two signals, because a single pair of complex numbers is always perfectly linearly
+related. With $K$ independent segments, two unrelated signals give coherence estimates with mean about $1/K$, and the
+distribution of $\hat C$ under zero true coherence gives a significance threshold: $\Pr(\hat C > c) = (1 - c)^{K-1}$.
+
+<CoherenceDemo />
+
+## Worked example
+
+Let $x$ be unit-variance white noise and $y[n] = x[n - 5] + v[n]$, with $v$ white of variance $\sigma_v^2 = 0.25$. Then
+$H = e^{-5i\omega}$, $S_{xx} = 1$, $S_{vv} = 0.25$, and the coherence is $1/(1 + 0.25) = 0.8$ at every frequency. The
+cross-spectrum's phase is $-5\omega$. Welch estimates from 65,536 samples with Hann segments of 128 give a mean
+coherence of 0.783 and a fitted phase slope of $-4.98$. The estimate falls slightly below 0.8 because a delay of 5
+samples moves part of each segment's content outside the matching segment of the other signal. Two independent noise
+signals of 1,024 samples split into 8 non-overlapping segments give a mean coherence of 0.117, close to $1/8$.
+
+## Pitfalls
+
+- **Delays bias coherence down.** Delays that are a noticeable fraction of the segment length misalign the segments
+  and reduce the estimate. Align the signals, or use segments much longer than the delay.
+- **Leakage from strong peaks.** A strong spectral peak in one signal can leak into neighbouring bins and create
+  apparent coherence; tapering and adequate resolution matter as for auto-spectra.
+- **Coherence is not causation or direction.** It is symmetric in $x$ and $y$ and linear. Directed measures, such as
+  Granger causality or partial directed coherence, address direction; nonlinear coupling needs other tools.
+- **Phase wraps.** The phase of $S_{xy}$ is known modulo $2\pi$; unwrap it before fitting a delay, and only where the
+  coherence is high.

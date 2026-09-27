@@ -69,6 +69,8 @@ export const categoryIcons = [
   'gamepad',
   'languages',
   'eye',
+  'sliders',
+  'library',
 ] as const
 export type CategoryIcon = (typeof categoryIcons)[number]
 

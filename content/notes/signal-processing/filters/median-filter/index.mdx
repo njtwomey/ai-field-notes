@@ -1,0 +1,96 @@
+---
+title: Median filter
+kind: technique
+summary: 'The median filter replaces each sample by the median of the $2m + 1$ samples around it. It is nonlinear. It removes impulses lasting at most $m$ samples and keeps step edges sharp. On Gaussian noise it is less efficient than the moving average, with variance about $\pi\sigma^2/(2L)$.'
+tags: [signal-processing, filters, robust-statistics, worked-example]
+aliases: [running median, rolling median, moving median, medfilt, salt-and-pepper noise removal, impulse noise filter]
+requires: [moving-average-and-smoothing-filters]
+related: [fir-filters, zero-phase-filtering]
+references: [arce2005, gallagher1981, tukey1977]
+status: draft
+updated: 2026-09-26
+---
+
+import { MedianVsMean } from './MedianVsMean'
+
+<Definition>
+The median filter of half-width $m$ maps a signal $x[n]$ to
+
+$$
+y[n] = \operatorname{median}\set{x[n - m], \dots, x[n], \dots, x[n + m]},
+$$
+
+the middle value of the $L = 2m + 1$ samples in the window once they are sorted. Tukey introduced running medians for
+smoothing data <Cite id="tukey1977" />.
+</Definition>
+
+## Nonlinear, so no frequency response
+
+The median is not linear: $\operatorname{median}(\xvec + \uvec) \neq \operatorname{median}(\xvec) +
+\operatorname{median}(\uvec)$ in general. For the windows $(0, 0, 1)$ and $(1, 0, 0)$ each median is 0, but the
+median of their sum $(1, 0, 1)$ is 1. The median filter therefore has no impulse response and no frequency response,
+and it cannot be analysed by the tools for LTI filters. It does commute with scaling by a positive constant, with adding
+a constant, and with any monotone increasing transformation of the amplitude, since those preserve the order of the
+samples.
+
+## What it removes and what it keeps
+
+- **Impulses.** An outlier is replaced unless it is the middle value of the sorted window. If a window contains at most
+  $m$ outliers among $2m + 1$ samples, the median is one of the good samples or lies between two of them. A burst of
+  up to $m$ consecutive impulses is therefore removed completely, whatever the impulses' amplitude. A linear filter
+  instead spreads each impulse over its whole impulse response, in proportion to its amplitude.
+- **Edges.** An ideal step passes unchanged: at every position the window holds more samples from one side of the step
+  than the other, and the median is that side's value. A monotone ramp also passes unchanged. A moving average turns
+  the same step into a ramp $L$ samples wide.
+- **Thin features.** A pulse lasting $m$ samples or fewer is treated like an impulse and removed. Corners are rounded.
+
+Signals that a median filter leaves unchanged are its **root signals**. Gallagher and Wise showed that a signal is a
+root of the filter with window $2m + 1$ exactly when it is built from constant runs of at least $m + 1$ samples joined
+by monotone segments, and that repeated filtering of any finite signal reaches a root after a finite number of passes
+<Cite id="gallagher1981" />.
+
+## Efficiency on Gaussian noise
+
+For independent Gaussian noise of variance $\sigma^2$, the mean of $L$ samples has variance $\sigma^2/L$ and the median
+has variance approximately $\pi\sigma^2/(2L)$ for large $L$. The median is the less efficient estimator by a factor
+$2/\pi \approx 0.64$. Simulation gives $1.35\,\sigma^2/L$ for $L = 3$, $1.49\,\sigma^2/L$ for $L = 9$ and
+$1.53\,\sigma^2/L$ for $L = 21$, approaching $\pi/2 = 1.57$. The median filter is the right choice when the noise has
+heavy tails or contains outliers, and the moving average is the better one for Gaussian noise on smooth signals
+<Cite id="arce2005" />.
+
+<MedianVsMean />
+
+## Computation
+
+Sorting each window costs $O(L \log L)$ per sample. A running median keeps the window's samples in a sorted structure
+and, per new sample, removes the oldest and inserts the newest, for $O(\log L)$ per sample with two heaps or a balanced
+tree. For 8-bit images, a histogram of the window updated column by column gives constant time per pixel. The
+two-dimensional median filter over a square or cross-shaped window is the standard remedy for salt-and-pepper noise in
+images.
+
+## Worked example
+
+With $m = 1$ ($L = 3$), filter $\xvec = (1, 1, 9, 1, 1, 5, 5, 5)$, padding each end with one zero as SciPy's `medfilt`
+does:
+
+| $n$           | 0   | 1   | 2   | 3   | 4   | 5   | 6   | 7   |
+| ------------- | --- | --- | --- | --- | --- | --- | --- | --- |
+| $x[n]$        | 1   | 1   | 9   | 1   | 1   | 5   | 5   | 5   |
+| window at $n$ | 0,1,1 | 1,1,9 | 1,9,1 | 9,1,1 | 1,1,5 | 1,5,5 | 5,5,5 | 5,5,0 |
+| median $y[n]$ | 1   | 1   | 1   | 1   | 1   | 5   | 5   | 5   |
+
+The impulse at $n = 2$ is removed and the step at $n = 5$ stays exactly where it was. The 3-point moving average of the
+same input gives $3.67$ at $n = 1, 2, 3$, spreading the impulse over three samples, and $2.33$, $3.67$, $5$ at
+$n = 4, 5, 6$, blurring the step. SciPy's `medfilt(x, 3)` gives the same output as the table.
+
+## Pitfalls
+
+- **Window too short for the bursts.** Impulses in clusters longer than $m$ survive; widen the window, at the cost of
+  removing thin genuine features.
+- **Not a low-pass filter.** The median filter does not attenuate a band of frequencies. A sinusoid with period longer
+  than about $2L$ passes almost unchanged; a faster one is distorted into a clipped, flat-topped wave rather than
+  reduced in amplitude.
+- **Edges of the record.** Zero padding, as in `medfilt`, pulls the output toward 0 at the ends when the signal is far
+  from 0. Repeating the end samples, as in the figure, avoids this.
+- **Combine with a linear filter.** A common pipeline removes outliers with a short median filter, then smooths the
+  remaining Gaussian noise with a linear low-pass filter.

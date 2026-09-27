@@ -1,0 +1,88 @@
+---
+title: Mel-frequency cepstral coefficients
+kind: technique
+summary: 'MFCCs are the discrete cosine transform of log mel-filter-bank energies, $c_k = \sum_m \log E_m \cos\paren{\pi k (m - \tfrac12)/M}$ up to scale, truncated to about 13 coefficients. They describe the spectral envelope compactly, with nearly decorrelated coefficients.'
+tags: [audio, speech, feature-extraction, worked-example]
+aliases: [MFCC, MFCCs, mel cepstrum, cepstral coefficients, delta features, delta-delta, cepstral liftering]
+requires: [mel-filter-bank, cepstrum]
+related: [mel-spectrogram, linear-prediction, spectral-features]
+references: [davis1980, ahmed1974, furui1981]
+status: draft
+updated: 2026-09-26
+---
+
+import { MfccEnvelope } from './MfccEnvelope'
+
+<Definition>
+For a frame with mel filter-bank energies $E_1, \dots, E_M$, the mel-frequency cepstral coefficients are the type-II
+discrete cosine transform of the log energies,
+
+$$
+c_k = \sqrt{\frac{2 - \delta_{k0}}{M}}\ \sum_{m=1}^{M} \log E_m\ \cos\paren{\frac{\pi k\,(m - \tfrac12)}{M}}, \qquad
+k = 0, \dots, K - 1,
+$$
+
+keeping the first $K \ll M$ coefficients, typically 13 of 20 to 40 bands. This orthonormal scaling is one of
+several in use <Cite id="davis1980" />.
+</Definition>
+
+## The pipeline
+
+1. **Pre-emphasis** (optional). Filter with $1 - 0.97 z^{-1}$ to boost high frequencies, which have less energy in
+   voiced speech.
+2. **Frames and power spectra.** Window 20 to 30 ms frames every 10 ms and take $\abs{X_t[k]}^2$.
+3. **Mel filter bank.** Sum power into $M$ mel-spaced triangular bands, giving $E_m$.
+4. **Logarithm.** $\log E_m$: loudness compression, and it turns a fixed channel response into an additive offset.
+5. **DCT.** Transform the log energies and keep the first $K$ coefficients.
+6. **Liftering, deltas, normalisation** (optional). Reweight, append time derivatives, and remove per-utterance means.
+
+Steps 2 to 4 are the <NoteLink to="mel-spectrogram">log-mel spectrogram</NoteLink>. The DCT is what makes the result a
+cepstrum: an inverse transform of a log spectrum, as in the <NoteLink to="cepstrum">cepstrum</NoteLink>, but on a
+mel-warped, filter-bank-smoothed spectrum.
+
+## Why the DCT
+
+**It separates envelope from detail.** The log-mel energies of neighbouring bands vary slowly with band index where
+the envelope is smooth. Low-order cosines capture this slow variation: $c_0$ is proportional to the total log
+energy, $c_1$ to the overall spectral tilt, and the next few to the formant pattern. High-order coefficients capture
+rapid variation across bands, which is mostly harmonic ripple and noise. Truncating to $K$ coefficients keeps the
+envelope and discards the detail, so the features depend on what is said much more than on the speaker's pitch.
+
+**It nearly decorrelates the features.** Neighbouring log-mel energies are strongly correlated. For a stationary
+first-order Markov sequence with correlation $\rho$ close to 1, the DCT basis approaches the Karhunen–Loève transform,
+the eigenvectors of the covariance matrix, which decorrelates exactly <Cite id="ahmed1974" />. Nearly uncorrelated
+coefficients suited the diagonal-covariance Gaussian mixture models of classical speech recognition, which could not
+afford full covariances.
+
+**Worked example.** Take $M = 4$ log energies $(2.0, 1.5, 0.5, 0.0)$, falling with frequency. The orthonormal DCT-II
+gives $\cvec = (2.000, 1.577, 0.000, -0.112)$. $c_0 = (2.0 + 1.5 + 0.5 + 0.0)/2 = 2.0$ is the scaled mean; $c_1 = 1.577$
+is large and positive because the energies fall steadily; $c_2 = 0$ because the sequence is antisymmetric about its
+centre after removing the mean; $c_3$ is small. For a 20-band model with neighbour correlation $\rho = 0.95$, the
+off-diagonal share of the covariance's squared entries falls from 91% for the raw bands to 0.8% after the DCT.
+
+<MfccEnvelope />
+
+## Liftering and deltas
+
+**Liftering.** High-order coefficients have small variance, and some recognisers weight them up with a sinusoidal
+lifter, $c'_k = \paren{1 + \tfrac{L}{2}\sin\paren{\pi k / L}}\, c_k$, with $L = 22$ in HTK. The weights rise from 1
+at $k = 0$ to 12 at $k = 11$, equalising the coefficients' ranges.
+
+**Deltas.** A single frame describes a static spectrum. Appending time derivatives, estimated by regression over
+$\pm N$ frames,
+
+$$
+\Delta c_{k,t} = \frac{\sum_{n=1}^{N} n\,\paren{c_{k,t+n} - c_{k,t-n}}}{2\sum_{n=1}^{N} n^2},
+$$
+
+and the same again for delta-deltas, adds dynamics <Cite id="furui1981" />. The classical speech feature vector is 13
+MFCCs with deltas and delta-deltas: 39 numbers per 10 ms frame.
+
+## Pitfalls
+
+- **Implementations differ.** Mel formula, filter normalisation, log base, DCT scaling, whether $c_0$ or the frame
+  log-energy is used, and the lifter all vary between toolkits.
+- **Noise sensitivity.** Additive noise is not additive after the logarithm, so MFCCs degrade quickly in noise. Mean
+  and variance normalisation per utterance helps with channel effects but not with additive noise.
+- **Not for every model.** Neural networks trained on log-mel spectrograms usually do as well or better, since the DCT
+  destroys the local frequency structure that convolutions exploit.

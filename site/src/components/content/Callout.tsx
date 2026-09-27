@@ -32,7 +32,9 @@ export function Callout({
         <Icon className="size-3.5" aria-hidden />
         {title ?? label}
       </div>
-      <div className="space-y-2 font-prose text-[1.0625rem] leading-relaxed [&_.katex-display]:my-2">{children}</div>
+      <div className="callout-body space-y-2 font-prose text-[1.0625rem] leading-relaxed [&_.katex-display]:my-2">
+        {children}
+      </div>
     </aside>
   )
 }

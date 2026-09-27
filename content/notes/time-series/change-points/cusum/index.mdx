@@ -1,0 +1,116 @@
+---
+title: CUSUM
+kind: technique
+summary: 'CUSUM detects a shift in a stream by accumulating log-likelihood ratios and resetting at zero, $S_n = \max(0,\, S_{n-1} + \ell_n)$, alarming when $S_n > h$. The threshold $h$ trades detection delay against the time between false alarms.'
+tags: [time-series, changepoints, sequential-analysis, quality-control, worked-example]
+aliases: [cumulative sum, Page's CUSUM, CUSUM chart, cumulative sum control chart]
+requires: [null-and-alternative-hypotheses]
+partOf: [change-point-detection]
+related: [bayesian-online-changepoint-detection, gaussian-distribution]
+references: [page1954, siegmund1985, lorden1971, moustakides1986]
+status: draft
+updated: 2026-09-26
+---
+
+import { CusumChart } from './CusumChart'
+
+<Definition>
+The cumulative sum (CUSUM) procedure of Page <Cite id="page1954" /> monitors a stream $x_1, x_2, \dots$ for a change
+from a known distribution $f_0$ to a known alternative $f_1$. It accumulates the log-likelihood ratios
+$\ell_n = \log\paren{f_1(x_n)/f_0(x_n)}$, resetting at zero,
+
+$$
+S_0 = 0, \qquad S_n = \max\paren{0,\; S_{n-1} + \ell_n},
+$$
+
+and raises an alarm at the first $n$ with $S_n > h$.
+</Definition>
+
+## Where the recursion comes from
+
+Suppose the change, if it has happened, happened at an unknown time $\tau \le n$. For a fixed $\tau$, the evidence for
+"change at $\tau$" against "no change" is the log-likelihood ratio of the observations since $\tau$,
+
+$$
+\Lambda_n(\tau) = \sum_{i=\tau}^{n} \ell_i,
+$$
+
+since observations before $\tau$ have the same distribution under both hypotheses and cancel. The unknown $\tau$ is
+replaced by its most favourable value, and "no change yet" contributes 0:
+
+$$
+S_n = \max\paren{0,\; \max_{1 \le \tau \le n} \sum_{i=\tau}^{n} \ell_i}.
+$$
+
+This maximum obeys the recursion in the definition. Split the candidates into $\tau = n$ and $\tau < n$. The
+candidate $\tau = n$ contributes $\ell_n$. Every candidate $\tau < n$ contributes $\ell_n$ plus a sum that ends at
+$n - 1$, and the largest such sum, together with 0, is exactly $S_{n-1}$. So
+
+$$
+S_n = \max\paren{0,\; \ell_n,\; \ell_n + \max_{\tau < n}\sum_{i=\tau}^{n-1} \ell_i} = \max\paren{0,\; \ell_n + S_{n-1}}.
+$$
+
+The statistic therefore needs one number of memory and one addition per observation. The reset at zero is what lets
+it forget a long stretch of in-control data that would otherwise have to be overcome before an alarm.
+
+## A shift in a Gaussian mean
+
+For a change in mean from $\Gauss(0, \sigma^2)$ to $\Gauss(\delta, \sigma^2)$, the log-likelihood ratio is linear in
+the observation:
+
+$$
+\ell_n = \frac{x_n^2 - (x_n - \delta)^2}{2\sigma^2} = \frac{\delta}{\sigma^2}\paren{x_n - \frac{\delta}{2}}.
+$$
+
+Dividing by the positive constant $\delta/\sigma^2$ changes only the scale of the threshold, so the standard form uses
+increments $x_n - k$ with reference value $k = \delta/2$, halfway between the two means (for $\sigma = 1$). Before
+the change the increments have mean $-k$ and the statistic drifts down onto zero; after it they have mean $+k$ and it
+climbs.
+
+To detect a decrease as well, run a second CUSUM on $-x_n$ and alarm when either exceeds $h$. This is the two-sided
+CUSUM.
+
+**Worked example.** With $\sigma = 1$, a shift of size $\delta = 1$ gives $k = 0.5$. For the observations
+$(0.2, -0.5, 0.8, 1.9, 1.2, 0.7, 1.6)$ the statistic is
+
+$$
+S = (0,\; 0,\; 0.3,\; 1.7,\; 2.4,\; 2.6,\; 3.7).
+$$
+
+The first two increments are negative and the statistic stays at zero. With threshold $h = 2$ the alarm sounds at
+$n = 5$, when $S_5 = 1.7 + (1.2 - 0.5) = 2.4$.
+
+<CusumChart />
+
+## Choosing the threshold
+
+The threshold sets two average run lengths (ARL). $\text{ARL}_0$ is the expected number of in-control observations
+before a false alarm; $\text{ARL}_1$ is the expected delay before detecting a real shift. Raising $h$ lengthens both.
+
+For unit-variance Gaussian observations with mean $\mu$, reference $k$ and threshold $h$, Siegmund's approximation
+is <Cite id="siegmund1985" />
+
+$$
+\text{ARL}(\mu) \approx \frac{e^{-2\Delta b} + 2\Delta b - 1}{2\Delta^2}, \qquad \Delta = \mu - k,\; b = h + 1.166,
+$$
+
+with $\text{ARL} \approx b^2$ when $\Delta = 0$. For $k = 0.5$ and $h = 4$ it gives $\text{ARL}_0 \approx 338$ at
+$\mu = 0$ and $\text{ARL}_1 \approx 8.3$ at $\mu = 1$; simulation of 4,000 runs gives 340 and 8.3. Raising the
+threshold to $h = 5$ gives about 938 and 10.3: roughly three times fewer false alarms for two extra steps of delay.
+
+Among procedures with a given false-alarm rate, CUSUM minimises the worst-case expected detection delay for a shift
+between two known distributions. Lorden showed it is asymptotically optimal in this sense <Cite id="lorden1971" />,
+and Moustakides that it is exactly optimal <Cite id="moustakides1986" />. Both results assume $f_0$ and $f_1$ are
+known.
+
+## Pitfalls
+
+- **The reference value is tuned to one shift.** CUSUM with $k = \delta/2$ is optimal for a shift of $\delta$. It
+  detects much larger shifts slowly relative to what a detector tuned to them would achieve, and much smaller shifts
+  very slowly. When the shift size is unknown, running several CUSUMs or a generalised likelihood ratio helps.
+- **Known in-control distribution.** The false-alarm rate depends on $f_0$ being right. An in-control mean or variance
+  estimated from a short sample makes the realised $\text{ARL}_0$ much shorter than planned.
+- **Autocorrelation.** The run-length calculations assume independent observations. Positive autocorrelation makes
+  the statistic wander and produces false alarms; monitor the residuals of a time-series model instead.
+- **An alarm is not a location.** The alarm time lags the change. The most recent time the statistic left zero,
+  the maximising $\tau$, estimates when the change began.

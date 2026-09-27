@@ -1,0 +1,87 @@
+---
+title: Difference equations
+kind: concept
+summary: 'A linear constant-coefficient difference equation $\sum_k a_k y[n-k] = \sum_k b_k x[n-k]$ defines a digital filter with transfer function $H(z) = B(z)/A(z)$. With feedback ($A \ne 1$) it is IIR; without, FIR.'
+tags: [signal-processing, systems, filters, worked-example]
+aliases: [linear constant-coefficient difference equation, direct form]
+requires: [z-transform]
+related: [poles-and-zeros, fir-filters, iir-filters, lti-systems]
+references: [oppenheim2010]
+status: draft
+updated: 2026-09-26
+---
+
+<Definition>
+A linear constant-coefficient difference equation relates an input $x[n]$ and output $y[n]$ by
+
+$$
+\sum_{k=0}^{N} a_k\, y[n - k] = \sum_{k=0}^{M} b_k\, x[n - k], \qquad a_0 = 1.
+$$
+
+Solved for the newest output, it is a recipe for computing each output from the current and past inputs and the past
+outputs <Cite id="oppenheim2010" />:
+
+$$
+y[n] = \sum_{k=0}^{M} b_k\, x[n - k] - \sum_{k=1}^{N} a_k\, y[n - k].
+$$
+</Definition>
+
+## Transfer function
+
+Take the z-transform of both sides. A delay by $k$ samples multiplies the transform by $z^{-k}$, so
+
+$$
+Y(z)\sum_{k=0}^{N} a_k z^{-k} = X(z)\sum_{k=0}^{M} b_k z^{-k}
+\qquad\Longrightarrow\qquad
+H(z) = \frac{Y(z)}{X(z)} = \frac{B(z)}{A(z)} = \frac{\sum_{k=0}^{M} b_k z^{-k}}{1 + \sum_{k=1}^{N} a_k z^{-k}}.
+$$
+
+The coefficients $b_k$ set the zeros and the $a_k$ set the poles; see
+<NoteLink to="poles-and-zeros">poles and zeros</NoteLink>. Evaluating on the unit circle gives the frequency response.
+
+## FIR and IIR
+
+- **FIR (finite impulse response).** If $A(z) = 1$, there is no feedback, and the output is a weighted sum of the last
+  $M + 1$ inputs. The impulse response is $h[n] = b_n$, of length $M + 1$. FIR filters are always stable and can have
+  exactly linear phase. See <NoteLink to="fir-filters">FIR filters</NoteLink>.
+- **IIR (infinite impulse response).** If some $a_k \ne 0$, past outputs feed back, and a single impulse keeps
+  echoing through the recursion. The impulse response is infinitely long. IIR filters reach sharp responses with few
+  coefficients but can be unstable and cannot have exactly linear phase if causal and stable. See
+  <NoteLink to="iir-filters">IIR filters</NoteLink>.
+
+## Impulse response by recursion
+
+Setting $x = \delta$ and running the recursion from rest ($y[n] = 0$ for $n < 0$) produces $h[n]$ directly.
+
+**Worked example.** For $y[n] = x[n] + x[n-1] + 0.5\,y[n-1]$, so $b = (1, 1)$ and $a = (1, -0.5)$:
+
+| $n$ | $x[n]$ | $y[n] = x[n] + x[n-1] + 0.5\,y[n-1]$ |
+| --- | --- | --- |
+| 0 | 1 | $1 + 0 + 0 = 1$ |
+| 1 | 0 | $0 + 1 + 0.5 = 1.5$ |
+| 2 | 0 | $0 + 0 + 0.75 = 0.75$ |
+| 3 | 0 | $0.375$ |
+
+From $n = 1$ on, each value is half the previous one: $h[n] = 1.5 \cdot 0.5^{n-1}$ for $n \ge 1$. The transfer
+function is $H(z) = (1 + z^{-1})/(1 - 0.5 z^{-1})$, with a zero at $z = -1$, which nulls the Nyquist frequency, and a
+pole at $z = 0.5$, which makes it low-pass.
+
+## Structures
+
+The same $H(z)$ can be computed in several arrangements, which differ in memory and in sensitivity to rounding.
+
+- **Direct form I** applies the feed-forward sum and then the feedback sum, with separate delay lines for $x$ and
+  $y$: $M + N$ delays.
+- **Direct form II** swaps the order, since the two parts commute, and shares one delay line: $\max(M, N)$ delays.
+- **Transposed forms** reverse the signal flow, which improves numerical behaviour in floating point.
+- **Second-order sections.** A high-order filter is factored into a cascade of biquads, each
+  $(b_0 + b_1 z^{-1} + b_2 z^{-2})/(1 + a_1 z^{-1} + a_2 z^{-2})$ holding one conjugate pair of poles and zeros.
+  Small coefficient errors then move each pole only a little. This is the standard way to implement IIR filters.
+
+## Pitfalls
+
+- **Sign conventions for $a_k$.** Some texts and libraries write the feedback with a plus sign,
+  $y[n] = \dots + \sum a_k y[n-k]$. SciPy and MATLAB use the form above, with $a_0 = 1$ and a minus sign in the
+  recursion.
+- **Initial conditions.** The recursion needs past outputs. Starting from zero produces a transient; filtering a
+  signal that does not start from rest calls for matching initial states.

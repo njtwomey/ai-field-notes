@@ -1,0 +1,109 @@
+---
+title: Linear prediction
+kind: concept
+summary: 'Linear prediction estimates $x[n]$ from its past as $\hat x[n] = \sum_{k=1}^p a_k x[n-k]$. The coefficients solve Toeplitz normal equations, which the Levinson–Durbin recursion solves in $O(p^2)$, and $1/\abs{A(e^{i\omega})}$ is an all-pole model of the spectral envelope.'
+tags: [signal-processing, speech, spectral-estimation, worked-example]
+aliases: [LPC, linear predictive coding, Levinson–Durbin recursion, Yule–Walker equations, reflection coefficients, autoregressive modelling]
+requires: [wiener-filter]
+related: [parametric-spectral-estimation, cepstrum, lms-filter, autocorrelation-and-wiener-khinchin]
+references: [makhoul1975, levinson1946, durbin1960, rabiner2007]
+status: draft
+updated: 2026-09-26
+---
+
+import { LpcEnvelope } from './LpcEnvelope'
+
+<Definition>
+The order-$p$ linear predictor of a wide-sense stationary signal $x[n]$ is
+
+$$
+\hat x[n] = \sum_{k=1}^{p} a_k\, x[n-k],
+$$
+
+with the coefficients chosen to minimise the mean-squared prediction error $E = \expect\brack{e^2[n]}$, where
+$e[n] = x[n] - \hat x[n]$. The prediction-error filter $A(z) = 1 - \sum_{k=1}^p a_k z^{-k}$ maps $x$ to $e$, and the
+all-pole filter $1/A(z)$ maps $e$ back to $x$ <Cite id="makhoul1975" />.
+</Definition>
+
+## The normal equations
+
+Linear prediction is the <NoteLink to="wiener-filter">Wiener filter</NoteLink> with desired signal $d[n] = x[n]$ and
+inputs $x[n-1], \dots, x[n-p]$. The orthogonality principle requires the error to be uncorrelated with every input,
+$\expect\brack{e[n]\,x[n-j]} = 0$ for $j = 1, \dots, p$. Substituting $e[n]$ gives
+
+$$
+\sum_{k=1}^{p} a_k\, r[j - k] = r[j], \qquad j = 1, \dots, p,
+$$
+
+with $r[k] = \expect\brack{x[n]\,x[n-k]}$. In matrix form $\Rmat\avec = \rvec$, with $\Rmat$ the $p \times p$
+symmetric Toeplitz matrix of $r[0], \dots, r[p-1]$ and $\rvec = (r[1], \dots, r[p])$. These are the Yule–Walker
+equations of an autoregressive model. The minimum error is
+
+$$
+E_p = r[0] - \sum_{k=1}^{p} a_k\, r[k].
+$$
+
+## The Levinson–Durbin recursion
+
+Solving a general $p \times p$ system costs $O(p^3)$. The Toeplitz structure allows the order-$m$ solution to be built
+from the order-$(m-1)$ one in $O(m)$ operations, so all orders up to $p$ cost $O(p^2)$ together
+<Cite id="levinson1946" /> <Cite id="durbin1960" />. Starting from $E_0 = r[0]$, for $m = 1, \dots, p$:
+
+$$
+k_m = \frac{r[m] - \sum_{j=1}^{m-1} a_j^{(m-1)} r[m-j]}{E_{m-1}}, \qquad
+a_m^{(m)} = k_m, \qquad
+a_j^{(m)} = a_j^{(m-1)} - k_m\, a_{m-j}^{(m-1)}, \qquad
+E_m = E_{m-1}\paren{1 - k_m^2}.
+$$
+
+The update works because of a symmetry of Toeplitz systems: the backward predictor, which predicts $x[n-m]$ from the
+$m-1$ samples after it, has the same coefficients in reverse order. The new coefficient $k_m$ is chosen so that the
+combined forward-and-backward correction makes the new error orthogonal to $x[n-m]$ as well. The $k_m$ are the
+reflection coefficients, or partial correlations: $k_m$ is the correlation between the forward and backward prediction
+errors of order $m-1$.
+
+Two consequences follow from $E_m = E_{m-1}(1 - k_m^2)$. The error never increases with order. And since
+$E_m \ge 0$, every $\abs{k_m} \le 1$; with a valid autocorrelation sequence, $\abs{k_m} < 1$ for all $m$, and then
+$A(z)$ has all its zeros inside the unit circle, so the all-pole filter $1/A(z)$ is stable.
+
+**Worked example.** Let $r = (1, 0.5, 0.2)$. Order 1: $k_1 = 0.5$, $a_1^{(1)} = 0.5$, $E_1 = 1 - 0.25 = 0.75$. Order 2:
+$k_2 = (0.2 - 0.5 \times 0.5)/0.75 = -0.0667$, $a_2^{(2)} = -0.0667$,
+$a_1^{(2)} = 0.5 - (-0.0667)(0.5) = 0.5333$, and $E_2 = 0.75\,(1 - 0.0044) = 0.7467$. Solving
+$\begin{bmatrix} 1 & 0.5 \\ 0.5 & 1 \end{bmatrix}\avec = (0.5, 0.2)$ directly gives the same $\avec = (0.5333, -0.0667)$.
+
+## The spectral envelope
+
+If the prediction error is white with power $E_p$, the signal is modelled as white noise through $1/A(z)$, and its
+power spectrum is
+
+$$
+\hat S(\omega) = \frac{E_p}{\abs{A(e^{i\omega})}^2}.
+$$
+
+This all-pole spectrum matches the first $p + 1$ autocorrelation values of the signal exactly. It fits peaks better
+than valleys, because the error criterion weights regions where the signal spectrum exceeds the model more heavily.
+For speech this is what is wanted: the peaks are the formants, the resonances of the vocal tract, and a predictor of
+order about twice the number of formants in the band traces them while ignoring the individual harmonics of the voice
+<Cite id="rabiner2007" />.
+
+<LpcEnvelope />
+
+## Uses
+
+- **Speech coding.** Codecs transmit the predictor, as reflection coefficients or line spectral frequencies, plus a
+  compact description of the error signal. Code-excited linear prediction (CELP) underlies most mobile-phone speech
+  codecs.
+- **Spectral estimation.** The all-pole spectrum is a high-resolution
+  <NoteLink to="parametric-spectral-estimation">parametric spectral estimate</NoteLink>, the autoregressive or
+  maximum-entropy method.
+- **Features.** LPC coefficients, or the cepstrum derived from them, were standard speech-recognition features before
+  <NoteLink to="mfcc">MFCCs</NoteLink>.
+
+## Pitfalls
+
+- **Autocorrelation or covariance method.** Estimating $r[k]$ from a windowed frame, the autocorrelation method,
+  guarantees a stable filter. Minimising the error over the frame without windowing, the covariance method, fits
+  better but can give an unstable $1/A(z)$.
+- **Order.** Too low an order merges formants; too high an order fits harmonics and noise.
+- **High-pitched voices.** When harmonics are widely spaced, the envelope is sampled coarsely and formant estimates
+  are biased toward the nearest harmonic.

@@ -1,0 +1,93 @@
+---
+title: Spectral subtraction and denoising
+kind: technique
+summary: 'Spectral subtraction removes an estimate of the noise power from each short-time spectrum, $\abs{\hat S}^2 = \max\paren{\abs{X}^2 - \alpha\hat\sigma_v^2,\ \beta\abs{X}^2}$, and keeps the noisy phase. Its fluctuating residue, musical noise, is reduced by Wiener gains with decision-directed SNR estimates.'
+tags: [audio, speech, denoising, worked-example]
+aliases: [spectral subtraction, speech enhancement, musical noise, decision-directed approach, Ephraim–Malah, noise suppression, short-time Wiener filter]
+requires: [short-time-fourier-transform]
+related: [wiener-filter, audio-source-separation, overlap-add-and-overlap-save]
+references: [boll1979, ephraim1984]
+status: draft
+updated: 2026-09-26
+---
+
+import { SpectralSubtraction } from './SpectralSubtraction'
+
+<Definition>
+For a noisy signal $x = s + v$ with additive noise uncorrelated with the signal, spectral subtraction estimates the
+clean short-time spectrum frame by frame as
+
+$$
+\abs{\hat S_t[k]}^2 = \max\paren{\abs{X_t[k]}^2 - \alpha\,\hat\sigma_v^2[k],\ \beta\abs{X_t[k]}^2}, \qquad
+\hat S_t[k] = \abs{\hat S_t[k]}\, e^{i\arg X_t[k]},
+$$
+
+where $\hat\sigma_v^2[k]$ is the estimated noise power in bin $k$, $\alpha \ge 1$ an over-subtraction factor and $\beta$
+a spectral floor. The enhanced signal is resynthesised by overlap-add <Cite id="boll1979" />.
+</Definition>
+
+## Why subtract powers
+
+With the noise uncorrelated with the signal, $\expect\abs{X}^2 = \abs{S}^2 + \sigma_v^2$ in each bin. Subtracting the
+expected noise power gives an estimate of the signal power, correct on average. The phase is left noisy: for moderate
+SNR the ear is insensitive to phase errors within a frame, and the noisy phase is the best simple estimate.
+
+## The noise estimate
+
+The noise power spectrum must be estimated without the clean signal. Common sources are frames flagged as speech-free
+by a voice-activity detector, a leading noise-only segment, or minimum statistics: the minimum of the smoothed power
+over a window of a second or two, corrected for its bias, tracks the noise floor even during continuous speech.
+
+## Musical noise
+
+$\abs{X}^2$ in a noise-only bin fluctuates around $\sigma_v^2$, exponentially distributed for Gaussian noise. After
+subtraction, most noise-only cells go to zero, but the ones where the noise happened to exceed its mean survive as
+isolated peaks scattered in time and frequency. They are heard as short tones popping in and out: musical noise.
+
+Two parameters trade it against speech distortion:
+
+- **Over-subtraction** $\alpha > 1$ removes more than the mean noise, killing most random peaks, but also removes weak
+  speech components.
+- **A spectral floor** $\beta > 0$ keeps a little of the noisy spectrum everywhere, so the residue is a steady low-level
+  hiss that masks the remaining peaks, instead of silence punctuated by tones.
+
+## The Wiener rule and decision-directed estimation
+
+Writing the enhancement as a gain, $\hat S = G\,X$, the frequency-domain <NoteLink to="wiener-filter">Wiener
+filter</NoteLink> is
+
+$$
+G_t[k] = \frac{\xi_t[k]}{1 + \xi_t[k]},
+$$
+
+with $\xi = \abs{S}^2/\sigma_v^2$ the a priori SNR. Estimating $\xi$ from the current frame alone reproduces spectral
+subtraction's fluctuations. The decision-directed estimate blends the previous frame's enhanced power with the current
+frame's evidence <Cite id="ephraim1984" />:
+
+$$
+\hat\xi_t[k] = a\,\frac{\abs{\hat S_{t-1}[k]}^2}{\hat\sigma_v^2[k]} + (1 - a)\max\paren{\gamma_t[k] - 1,\ 0}, \qquad
+\gamma_t[k] = \frac{\abs{X_t[k]}^2}{\hat\sigma_v^2[k]},
+$$
+
+with $a \approx 0.98$. In noise-only regions the first term is small and changes slowly, so the gain stays low and
+smooth instead of flickering, which largely removes musical noise. Ephraim and Malah derived the full MMSE short-time
+spectral amplitude estimator; the Wiener gain with this $\hat\xi$ is its common simplification.
+
+## Worked example
+
+A gliding harmonic tone, from 200 to 300 Hz with 8 harmonics, in white noise at 0 dB SNR, sampled at 8 kHz and analysed
+with 256-sample Hann frames at hop 128. The first 0.3 s is noise only and gives $\hat\sigma_v^2$. Measured as the SNR of
+the enhanced magnitudes against the clean magnitudes, the noisy input scores $-0.2$ dB. Power subtraction with
+$\alpha = 2$ and $\beta = 0.02$ raises it to 6.0 dB, and the Wiener gain with the decision-directed estimate to 7.8 dB,
+with much less visible musical noise.
+
+<SpectralSubtraction />
+
+## Pitfalls
+
+- **Nonstationary noise.** A fixed noise estimate fails when the noise changes; the estimate must track it without
+  absorbing speech.
+- **Speech distortion at low SNR.** Weak consonants sit below the noise and are removed along with it. Every method
+  trades noise reduction against distortion; listening tests and intelligibility measures, not SNR alone, decide.
+- **Magnitude-only processing.** Noisy phase limits the achievable quality at low SNR. Modern systems estimate complex
+  masks or waveforms directly with neural networks.

@@ -1,0 +1,87 @@
+---
+title: Intersection over union and its variants
+kind: concept
+summary: 'IoU is the area of overlap of two regions divided by the area of their union. GIoU, DIoU and CIoU subtract penalties for the enclosing box, the distance between centres and the mismatch in aspect ratio, so they keep a gradient when boxes do not overlap.'
+tags: [metrics, computer-vision, object-detection, worked-example]
+aliases: [IoU, Jaccard index for boxes, GIoU, DIoU, CIoU, generalized IoU, distance IoU, complete IoU, IoU loss]
+related: [mean-average-precision-for-detection, dice-and-segmentation-overlap, panoptic-quality, hamming-jaccard-and-exact-match]
+references: [jaccard1912, rezatofighi2019, zheng2020]
+status: draft
+updated: 2026-09-27
+---
+
+import { BoxOverlap } from './BoxOverlap'
+
+<Definition>
+For two regions $A$ and $B$, the intersection over union is
+
+$$
+\text{IoU}(A, B) = \frac{\abs{A \cap B}}{\abs{A \cup B}} \in [0, 1].
+$$
+
+For axis-aligned boxes $B$ (prediction) and $B^{\text{gt}}$ (ground truth), with $C$ the smallest box enclosing both,
+$\bvec$ and $\bvec^{\text{gt}}$ their centres, $\rho$ the Euclidean distance and $c$ the diagonal length of $C$
+<Cite id="rezatofighi2019" /> <Cite id="zheng2020" />:
+
+$$
+\text{GIoU} = \text{IoU} - \frac{\abs{C \setminus (B \cup B^{\text{gt}})}}{\abs{C}}, \qquad
+\text{DIoU} = \text{IoU} - \frac{\rho^2(\bvec, \bvec^{\text{gt}})}{c^2}, \qquad
+\text{CIoU} = \text{DIoU} - \alpha v .
+$$
+</Definition>
+
+## IoU
+
+IoU is the Jaccard index of two sets, applied to regions of the plane <Cite id="jaccard1912" />. It is 1 for identical
+regions and 0 for disjoint ones, and it is invariant to the scale of the scene: doubling every coordinate leaves it
+unchanged, so a 5-pixel error on a small box costs more than on a large one. That scale invariance is why detection
+benchmarks threshold IoU (a detection counts as correct at $\text{IoU} \ge 0.5$) rather than threshold coordinate
+errors. $1 - \text{IoU}$ is a proper distance on sets: it satisfies the triangle inequality.
+
+**Worked example.** $A = [0, 4] \times [0, 4]$ and $B = [2, 6] \times [2, 6]$ overlap in a $2 \times 2$ square. The
+intersection is 4 and the union $16 + 16 - 4 = 28$, so $\text{IoU} = 4/28 = 0.143$.
+
+## Why variants are needed
+
+Using $1 - \text{IoU}$ as a loss for box regression fails when the boxes do not overlap: IoU is 0 for every
+non-overlapping placement, so its gradient is 0 and the loss cannot tell a near miss from a distant one. It also
+cannot tell how two boxes with the same overlap are arranged.
+
+**GIoU** subtracts the fraction of the enclosing box $C$ that neither box covers. When the boxes separate, $C$ grows
+with the gap, so GIoU keeps decreasing. It lies in $(-1, 1]$ and equals IoU when one box contains the other, because
+then $C$ is the union. In the example, $C = [0, 6] \times [0, 6]$ has area 36 and the uncovered part is $36 - 28 = 8$,
+so $\text{GIoU} = 0.143 - 8/36 = -0.079$.
+
+**DIoU** subtracts the squared distance between centres, normalised by the squared diagonal of $C$. It penalises
+misplacement directly, and converges faster in training because the penalty points straight at the target centre. In
+the example the centres $(2, 2)$ and $(4, 4)$ are $\sqrt 8$ apart and $c^2 = 72$, so
+$\text{DIoU} = 0.143 - 8/72 = 0.032$.
+
+**CIoU** adds a term for the aspect ratio,
+
+$$
+v = \frac{4}{\pi^2}\paren{\arctan\frac{w^{\text{gt}}}{h^{\text{gt}}} - \arctan\frac{w}{h}}^2, \qquad
+\alpha = \frac{v}{(1 - \text{IoU}) + v},
+$$
+
+where $w$ and $h$ are width and height. $v \in [0, 1]$ measures the difference in angle of the diagonals, and $\alpha$
+gives it more weight as the overlap improves. For the two squares of the example $v = 0$ and CIoU equals DIoU. If $B$
+is stretched to $[2, 6] \times [2, 8]$, then $\text{IoU} = 0.111$, $\text{DIoU} = -0.019$, and the aspect penalty
+$\alpha v$ lowers CIoU slightly further, to $-0.0192$.
+
+<BoxOverlap />
+
+## As losses and as metrics
+
+The variants were introduced as training losses, $1 - \text{GIoU}$ and so on. Evaluation still uses plain IoU, to
+decide whether a detection matches a ground-truth object (see <NoteLink to="mean-average-precision-for-detection">mean
+average precision for detection</NoteLink>). For segmentation masks, IoU per class is averaged into mean IoU (see
+<NoteLink to="dice-and-segmentation-overlap">Dice and segmentation overlap</NoteLink>).
+
+## Pitfalls
+
+- **Small objects.** Because IoU is scale-invariant, a fixed pixel error hurts small objects much more. A 2-pixel shift
+  of a $10 \times 10$ box gives IoU 0.67; of a $100 \times 100$ box, 0.96.
+- **Pixel conventions.** Some datasets count box sizes inclusively ($x_1 - x_0 + 1$), which changes IoU noticeably for
+  small boxes. Match the convention of the benchmark.
+- **Rotated boxes.** The formulas above assume axis-aligned boxes. Rotated boxes need polygon intersection.

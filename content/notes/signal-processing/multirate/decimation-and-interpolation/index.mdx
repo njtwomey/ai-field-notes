@@ -1,0 +1,93 @@
+---
+title: Decimation and interpolation
+kind: concept
+summary: 'Downsampling by $M$ keeps every $M$-th sample and folds the spectrum into $M$ stretched copies, so content above $\pi/M$ aliases. Upsampling by $L$ inserts zeros and creates $L - 1$ spectral images. Decimation and interpolation add the lowpass filters that prevent both.'
+tags: [signal-processing, multirate, sampling, worked-example]
+aliases: [downsampling, upsampling, decimator, interpolator, anti-aliasing filter, anti-imaging filter, sample rate reduction]
+requires: [dtft, aliasing]
+related: [polyphase-decomposition, sample-rate-conversion, filter-banks, fir-filter-design, sampling-theorem]
+references: [crochiere1981, vaidyanathan1993, oppenheim2010]
+status: draft
+updated: 2026-09-26
+---
+
+import { DownsamplingSpectrum } from './DownsamplingSpectrum'
+
+<Definition>
+The **downsampler** by an integer $M$ keeps every $M$-th sample, $y[n] = x[Mn]$. The **upsampler** by an integer $L$
+inserts $L - 1$ zeros between samples, $y[n] = x[n/L]$ when $L$ divides $n$ and $0$ otherwise. **Decimation** is
+lowpass filtering to $\abs{\omega} < \pi/M$ followed by downsampling; **interpolation** is upsampling followed by
+lowpass filtering to $\abs{\omega} < \pi/L$ with gain $L$ <Cite id="crochiere1981" />.
+</Definition>
+
+## Downsampling in frequency
+
+The spectrum of the downsampled sequence is an average of $M$ stretched and shifted copies of the input spectrum:
+
+$$
+Y(e^{i\omega}) = \frac{1}{M} \sum_{k=0}^{M-1} X\paren{e^{i(\omega - 2\pi k)/M}}.
+$$
+
+**Derivation.** Split the operation into two steps. First multiply $x$ by the comb $c[n]$ that is 1 when $M$ divides
+$n$ and 0 otherwise, which zeroes the samples to be discarded. The comb has the discrete Fourier series
+$c[n] = \frac{1}{M} \sum_{k=0}^{M-1} e^{i 2\pi k n / M}$, because the sum of the $M$-th roots of unity raised to the
+power $n$ is $M$ when $M$ divides $n$ and 0 otherwise. So $v[n] = x[n] c[n]$ has
+
+$$
+V(e^{i\omega}) = \sum_n x[n] c[n] e^{-i\omega n} = \frac{1}{M} \sum_{k=0}^{M-1} \sum_n x[n] e^{-i(\omega - 2\pi k/M)n}
+= \frac{1}{M} \sum_{k=0}^{M-1} X\paren{e^{i(\omega - 2\pi k / M)}}.
+$$
+
+Second, compress: $y[n] = v[Mn]$. Since $v$ is zero except at multiples of $M$,
+$Y(e^{i\omega}) = \sum_n v[Mn] e^{-i\omega n} = \sum_m v[m] e^{-i(\omega/M) m} = V(e^{i\omega/M})$. Substituting
+gives the formula above.
+
+Each copy is the input spectrum stretched by a factor $M$ in frequency. The copy for $k = 0$ maps the band
+$\abs{\omega} < \pi/M$ onto the whole output band $\abs{\omega} < \pi$. The other copies overlap it unless
+$X(e^{i\omega}) = 0$ for $\pi/M \le \abs{\omega} \le \pi$. Any input content in that range therefore folds into the
+output band. This is aliasing, the same effect as sampling a continuous signal too slowly: downsampling by $M$ is
+resampling at $f_s/M$ <Cite id="oppenheim2010" />.
+
+**Worked example.** A tone at $\omega_0 = 0.7\pi$ is downsampled by $M = 2$. The output sees it at
+$2\omega_0 = 1.4\pi$, which is the same as $1.4\pi - 2\pi = -0.6\pi$: a tone at $0.6\pi$. At $f_s = 48$ kHz the input
+tone is at $0.35 \cdot 48 = 16.8$ kHz; after downsampling to 24 kHz, whose Nyquist frequency is 12 kHz, it appears at
+$24 - 16.8 = 7.2$ kHz. A lowpass filter with cutoff $\pi/2$ before the downsampler removes the tone instead.
+
+<DownsamplingSpectrum />
+
+## Upsampling in frequency
+
+Upsampling compresses the spectrum and creates images. With $y[n] = x[n/L]$ at multiples of $L$ and zero elsewhere,
+
+$$
+Y(e^{i\omega}) = \sum_n x[n] e^{-i\omega L n} = X(e^{i\omega L}).
+$$
+
+$X(e^{i\omega L})$ has period $2\pi / L$, so the band $\abs{\omega} < \pi$ holds $L$ copies of the input spectrum,
+each compressed by $L$. The copy centred at 0 is the wanted signal at the higher rate; the other $L - 1$ are images.
+An anti-imaging lowpass with cutoff $\pi/L$ removes them. It needs gain $L$. The DTFT of a sampled signal is
+$1/T$ times the periodised continuous-time spectrum, so sampling the same signal $L$ times as fast multiplies its DTFT
+by $L$, while upsampling leaves $X(e^{i\omega L})$ unscaled. Equivalently, the zeros lower the average level by a
+factor $L$, which the gain restores.
+
+## Decimators and interpolators
+
+A **decimator** filters with a lowpass $H(e^{i\omega})$ that passes $\abs{\omega} < \pi/M$ and stops
+$\pi/M \le \abs{\omega} \le \pi$, then downsamples. An **interpolator** upsamples, then filters with a lowpass of
+cutoff $\pi/L$ and gain $L$. In practice the transition band must fit below the cutoff, and a finite stopband
+attenuation leaves residual aliasing or imaging at that level.
+
+Computing the filter output and then discarding $M - 1$ of every $M$ samples wastes work. The
+<NoteLink to="polyphase-decomposition">polyphase decomposition</NoteLink> computes only the kept outputs, at $1/M$ of
+the cost.
+
+## Pitfalls
+
+- **Downsampling without filtering** aliases every component above $\pi/M$, including noise. Noise above the new
+  Nyquist frequency folds in and raises the noise floor even when the signal itself is band-limited.
+- **The order of operations matters.** Filtering then downsampling is not the same as downsampling then filtering;
+  the second has already aliased. The noble identities in the polyphase note say exactly which exchanges are valid.
+- **Interpolation needs the gain.** Omitting the factor $L$ in the anti-imaging filter leaves the output a factor $L$
+  too small.
+- **Group delay.** A linear-phase FIR anti-aliasing filter of length $P$ delays the signal by $(P - 1)/2$ input
+  samples, which is $(P - 1)/(2M)$ output samples.

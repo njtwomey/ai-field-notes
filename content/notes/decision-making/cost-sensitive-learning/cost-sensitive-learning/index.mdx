@@ -1,0 +1,231 @@
+---
+title: Cost-sensitive learning
+kind: concept
+summary: 'When errors cost different amounts, predict the class with the least expected cost. For two classes this is a threshold $p^* = (c_{10} - c_{00})/(c_{10} - c_{00} + c_{01} - c_{11})$ on $P(j = 1 \mid x)$, and rebalancing the training set or adjusting for a new base rate reaches the same decisions.'
+tags: [decision-theory, classification, class-imbalance, worked-example]
+aliases: [cost matrix, cost-sensitive classification, misclassification costs, threshold moving, class rebalancing, Elkan's theorem, base-rate adjustment, prior shift]
+requires: [bayes-theorem, expectation]
+related: [medical-diagnosis-base-rate, logistic-regression, type-i-and-type-ii-errors]
+references: [elkan2001, domingos1999, zadrozny2003]
+status: draft
+updated: 2026-09-26
+---
+
+import { CostCurve } from './CostCurve'
+
+<Definition>
+A cost matrix $C$ gives the cost $C(i, j)$ of predicting class $i$ when the true class is $j$. The optimal prediction
+for an example $x$ is the class $i$ that minimises the expected cost
+
+$$
+L(x, i) = \sum_j P(j \mid x)\, C(i, j)
+$$
+
+<Cite id="elkan2001" />. Cost-sensitive learning is the problem of making these decisions well: estimating
+$P(j \mid x)$ and turning it into the minimum-expected-cost decision, or training a classifier so that its decisions
+already are.
+</Definition>
+
+## The cost matrix
+
+This note follows Elkan's convention: rows are predicted classes and columns are actual classes, so the $(i, j)$
+entry is the cost of predicting $i$ when the truth is $j$. With two classes, 0 (negative) and 1 (positive),
+
+| | actual negative | actual positive |
+| --- | --- | --- |
+| predict negative | $C(0, 0) = c_{00}$ | $C(0, 1) = c_{01}$ |
+| predict positive | $C(1, 0) = c_{10}$ | $C(1, 1) = c_{11}$ |
+
+So $c_{10}$ is the cost of a false positive and $c_{01}$ the cost of a false negative. Costs need not be money: time,
+harm or any other quantity measured against a fixed baseline will do.
+
+**Reasonableness.** Labelling an example incorrectly should cost more than labelling it correctly:
+$c_{10} > c_{00}$ and $c_{01} > c_{11}$. If the first condition fails while the second holds, predicting positive is
+never worse, so the optimal policy labels everything positive; symmetrically for the other. More generally, row $m$
+dominates row $n$ when $C(m, j) \ge C(n, j)$ for every $j$; a dominating row is never the optimal prediction, and for
+two classes the reasonableness conditions say exactly that neither row dominates the other.
+
+**Invariances.** The optimal decisions do not change if every entry is multiplied by a positive constant (a change of
+units) or if a constant is added to every entry (a change of baseline) <Cite id="elkan2001" />. Using both, any
+reasonable two-class matrix can be reduced to one with $c_{00} = 0$ and $c_{10} = 1$, which leaves two free
+entries.
+
+A stronger invariance holds. Adding a constant $a$ to column $j$ alone changes every $L(x, i)$ by the same amount,
+$a\, P(j \mid x)$, because every prediction pays it when the truth is $j$. The ordering of the $L(x, i)$, and so the
+decision, is unchanged. Subtracting $c_{00}$ from column 0 and $c_{11}$ from column 1, then dividing by
+$c_{10} - c_{00}$, leaves a matrix with zeros on the diagonal, 1 for a false positive and
+$(c_{01} - c_{11})/(c_{10} - c_{00})$ for a false negative. For decision-making a two-class cost matrix therefore has
+one degree of freedom, the ratio of the two error costs, which is what the threshold below depends on.
+
+**One baseline for every entry.** Elkan's example is the German credit dataset, whose matrix charges 1 for refusing a
+good applicant, 5 for approving a bad one, and 0 otherwise. The 1 is a forgone profit and the 5 a lost principal:
+they are measured from different baselines. In a consistent matrix, refusing a loan has the same consequence whether
+the applicant was good or bad, so both entries in the "refuse" row must be equal.
+
+## The optimal decision for two classes
+
+Write $p = P(j = 1 \mid x)$. Predicting positive is optimal when its expected cost is no larger:
+
+$$
+(1 - p)\, c_{10} + p\, c_{11} \le (1 - p)\, c_{00} + p\, c_{01}.
+$$
+
+Both sides are linear in $p$ and cross at the threshold $p^*$ where they are equal,
+$(1 - p^*)c_{10} + p^* c_{11} = (1 - p^*)c_{00} + p^* c_{01}$. Collecting terms,
+
+$$
+p^* = \frac{c_{10} - c_{00}}{c_{10} - c_{00} + c_{01} - c_{11}}.
+$$
+
+The reasonableness conditions make the denominator positive, and the optimal prediction is positive exactly when
+$p \ge p^*$ <Cite id="elkan2001" />. When correct decisions cost nothing, $p^* = c_{10}/(c_{10} + c_{01})$: a false
+negative 19 times as costly as a false positive gives $p^* = 1/20$. The threshold depends on the matrix only through
+the ratio $(c_{01} - c_{11})/(c_{10} - c_{00})$, as the column invariance predicts.
+
+A classifier that maximises accuracy thresholds at $0.5$, which is optimal only when the two error costs are equal.
+It can be right to act as though the less probable class is true: to block a transaction that is probably
+legitimate, because letting a fraud through costs far more.
+
+<CostCurve />
+
+## Rebalancing the training set
+
+A standard learner yields a classifier that decides at some fixed threshold $p_0$, usually $0.5$. To make it decide
+at the target $p^*$ instead, change the proportion of classes it is trained on.
+
+**Theorem 1 (Elkan).** To make a target probability threshold $p^*$ correspond to a given probability threshold
+$p_0$, the number of negative examples in the training set should be multiplied by
+
+$$
+\frac{p^*}{1 - p^*}\,\frac{1 - p_0}{p_0}.
+$$
+
+In the common case $p_0 = 0.5$ and $c_{00} = c_{11} = 0$, the factor is $p^*/(1 - p^*) = c_{10}/c_{01}$. The
+theorem says how to change the negatives only, which suits the usual situation where positives are rare and every one
+of them should be kept. If the learner accepts example weights, weight each negative by the factor; otherwise
+oversample or undersample.
+
+The proof rests on how a probability changes with the base rate, the next result.
+
+## Probabilities under a new base rate
+
+Suppose $p = P(j = 1 \mid x)$ is correct for a population with base rate $b = P(j = 1)$, and the example is in fact
+drawn from a population with base rate $b'$. Assume only the class proportions change: within each class,
+$P'(x \mid j) = P(x \mid j)$.
+
+**Theorem 2 (Elkan).** The probability in the new population is
+
+$$
+p' = b'\,\frac{p - pb}{b - pb + b'p - bb'}.
+$$
+
+**Derivation.** Write $c = P(x \mid j = 1)$, $d = P(x \mid j = 0)$ and $e = d/c$. By
+<NoteLink to="bayes-theorem">Bayes' theorem</NoteLink>,
+
+$$
+p = \frac{cb}{cb + d(1 - b)} = \frac{b}{b + e(1 - b)}, \qquad p' = \frac{b'}{b' + e(1 - b')}.
+$$
+
+The class-conditional likelihoods, and so $e$, are the same in both populations. Solving the first equation for
+$e$ gives $e = (b - pb)/(p - pb)$. Substituting into the second and simplifying the denominator,
+
+$$
+b' + e(1 - b') = \frac{b - pb + b'p - bb'}{p - pb},
+$$
+
+which gives the theorem. Only the ratio $e$ of the likelihoods matters, never the likelihoods themselves, so the
+result needs no model of $x$ at all. The same statement in odds is compact: the posterior odds are multiplied by the
+ratio of the prior odds,
+
+$$
+\frac{p'}{1 - p'} = \frac{p}{1 - p} \cdot \frac{b'/(1 - b')}{b/(1 - b)}.
+$$
+
+**Proof of Theorem 1.** A classifier trained at base rate $b$ decides at probability $p_0$. Changing the training
+base rate to $b'$ changes that probability by Theorem 2. Choose $b'$ so the decision boundary, $p = p_0$ at base rate
+$b$, lands on $p' = p^*$. Inverting Theorem 2 and writing $b = 1/(1 + n)$ and $b' = 1/(1 + n')$, where $n$ and $n'$
+count negatives per positive, the required change $n'/n$ simplifies to $\frac{p^*}{1 - p^*}\frac{1 - p_0}{p_0}$. The
+proof in the paper carries out the algebra in full <Cite id="elkan2001" />.
+
+## Rebalance or move the threshold?
+
+Theorem 1 and the threshold $p^*$ reach the same decisions in principle. In practice Elkan recommends moving the
+threshold: learn a classifier from the training set as given, then apply the decision rule with $p^*$ directly
+<Cite id="elkan2001" />. His analysis shows why rebalancing achieves little for common learners. A Bayesian
+classifier learns each class-conditional model separately, so changing the class frequencies only changes the prior
+term. A decision tree grown with the impurity $2\sqrt{p(1 - p)}$ chooses the same splits whatever the base rate, and
+other impurity measures change little.
+
+Threshold moving needs probabilities that mean what they say. A classifier whose scores are not calibrated, such as
+naive Bayes with its overconfident estimates, must be calibrated first, or its threshold tuned on held-out data. See
+the notes on classifier calibration in the decision-theory topic.
+
+## Relation to ROC analysis
+
+With costs fixed, each point on a classifier's ROC curve, $(\text{FPR}, \text{TPR})$, has expected cost
+
+$$
+(1 - \pi)\paren{\text{FPR}\, c_{10} + (1 - \text{FPR})\, c_{00}} + \pi\paren{\text{TPR}\, c_{11} + (1 - \text{TPR})\, c_{01}},
+$$
+
+where $\pi$ is the base rate. The cost is constant along lines of slope
+
+$$
+\frac{d\,\text{TPR}}{d\,\text{FPR}} = \frac{(1 - \pi)(c_{10} - c_{00})}{\pi\,(c_{01} - c_{11})}.
+$$
+
+These iso-cost lines are parallel, and the optimal operating point is where the lowest one touches the ROC curve.
+Costs and class priors enter only through this one slope, which is the geometric form of the equivalence between
+changing costs and changing base rates.
+
+## Worked example
+
+A card issuer flags transactions for fraud review. Positive means fraud. Reviewing any flagged transaction costs 5,
+missing a fraud costs 100, and passing a legitimate transaction costs nothing:
+
+| | legitimate | fraud |
+| --- | --- | --- |
+| pass | $c_{00} = 0$ | $c_{01} = 100$ |
+| flag | $c_{10} = 5$ | $c_{11} = 5$ |
+
+Both reasonableness conditions hold: $5 > 0$ and $100 > 5$. The threshold is
+
+$$
+p^* = \frac{5 - 0}{5 - 0 + 100 - 5} = \frac{5}{100} = 0.05.
+$$
+
+A transaction with $p = 0.2$ has expected cost $0.8 \times 5 + 0.2 \times 5 = 5$ if flagged and
+$0.8 \times 0 + 0.2 \times 100 = 20$ if passed, so it is flagged even though it is probably legitimate. An
+accuracy-maximising classifier, thresholding at $0.5$, would pass it.
+
+To make a learner that thresholds at $p_0 = 0.5$ decide at $p^* = 0.05$, Theorem 1 multiplies the negatives by
+$\frac{0.05}{0.95} \cdot \frac{0.5}{0.5} \approx 0.0526$: keep about one legitimate transaction in 19.
+
+Suppose instead the model was trained on a balanced sample, $b = 0.5$, and deployed where 1% of transactions are
+fraud, $b' = 0.01$. A score of $p = 0.8$ corresponds to
+
+$$
+p' = 0.01 \cdot \frac{0.8 - 0.4}{0.5 - 0.4 + 0.008 - 0.005} = \frac{0.004}{0.103} \approx 0.039.
+$$
+
+Below $p^* = 0.05$: the transaction should be passed. Reading the balanced model's $0.8$ at face value would flag it.
+
+## Other methods
+
+- **MetaCost** relabels each training example with its minimum-expected-cost class, using probabilities from a
+  bagged ensemble, and retrains any learner on the relabelled data <Cite id="domingos1999" />.
+- **Cost-proportionate weighting** reduces cost-sensitive learning with example-dependent costs to ordinary
+  classification: weight each example by its misclassification cost, or subsample examples with probability
+  proportional to it <Cite id="zadrozny2003" />.
+- **Example-dependent costs.** Costs can vary by example: the loss from approving a fraudulent transaction grows with
+  its amount. The expected cost $L(x, i)$ is computed the same way, with $C$ depending on $x$.
+
+## Pitfalls
+
+- **Inconsistent baselines.** Mixing opportunity costs and actual losses in one matrix gives decisions that are
+  wrong under any accounting. Measure every entry from the same baseline, or work with benefits instead of costs.
+- **Uncalibrated probabilities.** $p^*$ is optimal only for probabilities that are correct. Ranking scores, margins
+  or overconfident estimates need calibrating first.
+- **Forgetting the base rate.** Probabilities learned on a rebalanced or otherwise unrepresentative sample must be
+  adjusted to the deployment base rate before thresholding, as in the worked example. See the
+  <NoteLink to="medical-diagnosis-base-rate">base-rate example</NoteLink> for the same effect in diagnosis.

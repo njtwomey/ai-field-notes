@@ -1,0 +1,112 @@
+---
+title: Matthews correlation coefficient
+kind: concept
+summary: 'The Matthews correlation coefficient is the Pearson correlation between predicted and true binary labels. It uses all four cells of the confusion matrix, ranges from $-1$ to $1$ with $0$ for chance, and equals the geometric mean of informedness and markedness.'
+tags: [metrics, classification, imbalance, worked-example]
+aliases: [MCC, phi coefficient, Matthews correlation, mean square contingency coefficient]
+requires: [confusion-matrix]
+related:
+  [
+    sensitivity-specificity-and-predictive-values,
+    precision-recall-and-f-score,
+    accuracy-and-balanced-accuracy,
+    cohens-kappa,
+    pearson-correlation,
+    nominal-association,
+  ]
+references: [matthews1975, powers2011, chicco2020]
+status: draft
+updated: 2026-09-27
+---
+
+import { ConfusionExplorer } from '../../_shared/ConfusionExplorer'
+
+<Definition>
+For a binary confusion matrix,
+
+$$
+\text{MCC} = \frac{\text{TP}\cdot\text{TN} - \text{FP}\cdot\text{FN}}
+{\sqrt{(\text{TP} + \text{FP})(\text{TP} + \text{FN})(\text{TN} + \text{FP})(\text{TN} + \text{FN})}}.
+$$
+
+It is the Pearson correlation between the true label and the predicted label, each coded 0 or 1. It equals 1 for
+perfect prediction, 0 for a classifier no better than chance, and $-1$ for perfect disagreement
+<Cite id="matthews1975" />.
+</Definition>
+
+## A correlation of two binary variables
+
+Code the truth as $y \in \set{0, 1}$ and the prediction as $\hat y \in \set{0, 1}$. Over $n$ cases, the Pearson
+correlation is $\cov(y, \hat y)/\sqrt{\var(y)\var(\hat y)}$. For 0/1 variables, $\expect[y\hat y] = \text{TP}/n$,
+$\expect[y] = (\text{TP} + \text{FN})/n$ and $\expect[\hat y] = (\text{TP} + \text{FP})/n$, so
+
+$$
+n^2 \cov(y, \hat y) = n\,\text{TP} - (\text{TP} + \text{FN})(\text{TP} + \text{FP}) = \text{TP}\cdot\text{TN} - \text{FP}\cdot\text{FN},
+$$
+
+using $n = \text{TP} + \text{FN} + \text{FP} + \text{TN}$. The variances are $n^2\var(y) = P \cdot N =
+(\text{TP} + \text{FN})(\text{FP} + \text{TN})$ and similarly for $\hat y$, which gives the definition. The same
+quantity is the phi coefficient of the $2 \times 2$ table in statistics, and $n\,\text{MCC}^2$ is its $\chi^2$
+statistic.
+
+Because it is a correlation, MCC is symmetric in its two arguments and unchanged when both the positive and negative
+labels are swapped. It is high only when the classifier does well on both classes, in both directions of conditioning.
+
+## The geometric mean of informedness and markedness
+
+Informedness $B = \text{TPR} + \text{TNR} - 1$ measures how the prediction depends on the truth; markedness
+$M = \text{PPV} + \text{NPV} - 1$ measures how the truth depends on the prediction. Powers showed
+$\text{MCC}^2 = B \cdot M$ <Cite id="powers2011" />. To see it, write $a = \text{TP}\cdot\text{TN} - \text{FP}\cdot\text{FN}$
+and put each over a common denominator:
+
+$$
+B = \frac{\text{TP}}{\text{TP} + \text{FN}} - \frac{\text{FP}}{\text{FP} + \text{TN}}
+= \frac{a}{(\text{TP} + \text{FN})(\text{FP} + \text{TN})}, \qquad
+M = \frac{a}{(\text{TP} + \text{FP})(\text{FN} + \text{TN})}.
+$$
+
+Their product is $a^2$ over the product of all four marginals, which is $\text{MCC}^2$. So MCC is high only if both
+directions of prediction are informative, and it has the sign of $a$.
+
+## Worked example
+
+On the screening data (TP = 40, FN = 10, FP = 90, TN = 860):
+
+$$
+\text{MCC} = \frac{40 \cdot 860 - 90 \cdot 10}{\sqrt{130 \cdot 50 \cdot 950 \cdot 870}}
+= \frac{33{,}500}{73{,}296} = 0.457.
+$$
+
+Informedness is $0.705$ and markedness $0.296$, and $\sqrt{0.705 \times 0.296} = 0.457$. Accuracy (0.900) and
+balanced accuracy (0.853) look better because they do not register how few of the flagged cases are positive; $F_1$
+(0.444) registers that but not the true negatives. The classifier that predicts negative for everyone has an undefined
+MCC, because $\text{TP} + \text{FP} = 0$; by convention it is set to 0, the chance value.
+
+<ConfusionExplorer
+  title="MCC against accuracy and F₁"
+  caption="Lower the prevalence at a fixed threshold. Accuracy rises towards the negative share; F₁ falls with the precision; MCC falls too, but stays zero only for a classifier that ignores its input. Swap the roles of the classes mentally: MCC and accuracy would not change, F₁ would."
+  metrics={['accuracy', 'f1', 'mcc', 'informedness', 'markedness']}
+/>
+
+## Multiclass MCC
+
+For $K$ classes, the definition generalises through the correlation of one-hot label vectors. With confusion matrix
+$\Cmat$, row sums $t_k$ (true counts), column sums $p_k$ (predicted counts), $c = \sum_k C_{kk}$ correct predictions
+and $n$ cases,
+
+$$
+\text{MCC} = \frac{c\,n - \sum_k p_k t_k}{\sqrt{\paren{n^2 - \sum_k p_k^2}\paren{n^2 - \sum_k t_k^2}}}.
+$$
+
+For $K = 2$ this reduces to the binary formula. Its minimum is between $-1$ and $0$, depending on the class
+distribution. The three-class example in <NoteLink to="averaging-multiclass-metrics">averaging multiclass
+metrics</NoteLink> has multiclass MCC 0.507.
+
+## Pitfalls
+
+- **Undefined margins.** Any empty row or column of the binary table makes MCC undefined. Libraries return 0.
+- **Not a probability or a rate.** MCC has no direct operational meaning such as "fraction correct". It is best used to
+  rank classifiers on the same data, and reported alongside interpretable rates.
+- **Chicco and Jurman argue for MCC as the default binary metric** because it is high only when all four cells are good
+  <Cite id="chicco2020" />. It still weighs false positives and false negatives by the table's structure, not by their
+  costs; with known costs, use expected cost instead.

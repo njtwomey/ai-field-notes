@@ -1,21 +1,20 @@
-import { ArrowRight, Search, Waypoints } from 'lucide-react'
+import { ArrowRight, ChevronDown, Search, Waypoints } from 'lucide-react'
+import { useState } from 'react'
 import { Link } from 'react-router'
 import { categoryIcon } from '@/components/layout/category-icon'
-import { kindIcons } from '@/components/layout/kind-icon'
 import { openSearch } from '@/components/layout/SearchCommand'
 import { Kbd } from '@/components/ui/kbd'
-import { browseUrl, kindLabels, notes, notesInCategory, noteUrl, references, taxonomy, topicOf } from '@/lib/content'
+import { browseUrl, notes, notesInCategory, references, taxonomy, type CategoryNode } from '@/lib/content'
 import { cn } from '@/lib/utils'
 
-/** Landing page: search, then every topic with its subtopics, then what changed recently. */
+/** Landing page: search, then every topic with its subtopics. */
 export function HomePage() {
-  const recent = [...notes].sort((a, b) => b.updated.localeCompare(a.updated)).slice(0, 6)
   return (
-    <main className="mx-auto max-w-6xl px-4 pt-14 pb-20 lg:px-8">
+    <main className="px-4 pt-14 pb-20 lg:px-8">
       <section className="mx-auto max-w-2xl space-y-6 text-center">
         <h1 className="font-prose text-5xl font-bold">AI Field Notes</h1>
         <p className="font-prose text-lg text-muted-foreground">
-          Notes on AI and machine learning gathered over a research career, digitised and curated in one place.
+          Machine learning notes, collected over my career, tidied up with Claude and put online so I stop losing them.
         </p>
         <button
           type="button"
@@ -42,60 +41,73 @@ export function HomePage() {
         </div>
       </section>
 
-      <section className="mt-16 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {taxonomy.map((topic) => {
-          const Icon = categoryIcon(topic.icon)
-          return (
-            <div key={topic.path} className="flex flex-col rounded-xl border p-5">
-              <Link to={browseUrl({ c: topic.path })} className="group mb-3 flex items-center gap-2.5">
-                <span className="flex size-8 items-center justify-center rounded-lg bg-muted">
-                  <Icon className="size-4" aria-hidden />
-                </span>
-                <span className="flex-1 font-medium group-hover:underline">{topic.title}</span>
-                <span className="text-xs text-muted-foreground tabular-nums">{notesInCategory(topic.path).length}</span>
-              </Link>
-              <ul className="space-y-1">
-                {topic.children.map((child) => {
-                  const count = notesInCategory(child.path).length
-                  return (
-                    <li key={child.path}>
-                      <Link
-                        to={browseUrl({ c: child.path })}
-                        className={cn(
-                          '-mx-2 flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-muted',
-                          count === 0 && 'text-muted-foreground',
-                        )}
-                      >
-                        <span className="flex-1 truncate">{child.title}</span>
-                        <span className="text-xs text-muted-foreground tabular-nums">{count}</span>
-                      </Link>
-                    </li>
-                  )
-                })}
-              </ul>
-            </div>
-          )
-        })}
-      </section>
-
-      <section className="mt-16">
-        <h2 className="mb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">Recently updated</h2>
-        <ul className="divide-y rounded-xl border">
-          {recent.map((n) => {
-            const Kind = kindIcons[n.kind]
-            return (
-              <li key={n.slug}>
-                <Link to={noteUrl(n.slug)} className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/50">
-                  <Kind className="size-4 shrink-0 text-muted-foreground" aria-label={kindLabels[n.kind]} />
-                  <span className="font-medium">{n.title}</span>
-                  <span className="hidden truncate text-muted-foreground sm:inline">{topicOf(n).title}</span>
-                  <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">{n.updated}</span>
-                </Link>
-              </li>
-            )
-          })}
-        </ul>
+      <section className="mt-16 grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+        {taxonomy.map((topic) => (
+          <TopicTile key={topic.path} topic={topic} />
+        ))}
       </section>
     </main>
+  )
+}
+
+/** Subtopics shown before a tile is expanded. Every collapsed tile reserves exactly this many rows, so all match. */
+const TILE_ROWS = 6
+
+function TopicTile({ topic }: { topic: CategoryNode }) {
+  const [open, setOpen] = useState(false)
+  const Icon = categoryIcon(topic.icon)
+  const extra = topic.children.length - TILE_ROWS
+  const shown = open ? topic.children : topic.children.slice(0, TILE_ROWS)
+  // Invisible rows pad short tiles to the same height as full ones.
+  const padding = Math.max(0, TILE_ROWS - shown.length)
+  return (
+    <div className="flex flex-col rounded-xl border p-5">
+      <Link to={browseUrl({ c: topic.path })} className="group mb-3 flex items-center gap-2.5">
+        <span className="flex size-8 items-center justify-center rounded-lg bg-muted">
+          <Icon className="size-4" aria-hidden />
+        </span>
+        <span className="flex-1 font-medium group-hover:underline">{topic.title}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">{notesInCategory(topic.path).length}</span>
+      </Link>
+      <ul className="space-y-1">
+        {shown.map((child) => {
+          const count = notesInCategory(child.path).length
+          return (
+            <li key={child.path}>
+              <Link
+                to={browseUrl({ c: child.path })}
+                className={cn(
+                  '-mx-2 flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-muted',
+                  count === 0 && 'text-muted-foreground',
+                )}
+              >
+                <span className="flex-1 truncate">{child.title}</span>
+                <span className="text-xs text-muted-foreground tabular-nums">{count}</span>
+              </Link>
+            </li>
+          )
+        })}
+        {Array.from({ length: padding }, (_, k) => (
+          <li key={`pad-${k}`} aria-hidden className="invisible px-2 py-1 text-sm">
+            &nbsp;
+          </li>
+        ))}
+      </ul>
+      {extra > 0 ? (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="-mx-2 mt-2 flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <ChevronDown className={cn('size-3.5 transition-transform', open && 'rotate-180')} aria-hidden />
+          {open ? 'Show fewer' : `Show all ${topic.children.length}`}
+        </button>
+      ) : (
+        <div aria-hidden className="invisible mt-2 px-2 py-1 text-xs">
+          &nbsp;
+        </div>
+      )}
+    </div>
   )
 }

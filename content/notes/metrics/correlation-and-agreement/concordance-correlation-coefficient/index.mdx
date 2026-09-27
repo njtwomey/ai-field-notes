@@ -1,0 +1,89 @@
+---
+title: Concordance correlation coefficient
+kind: concept
+summary: 'Lin''s concordance correlation $\rho_c = 2\sigma_{xy}/(\sigma_x^2 + \sigma_y^2 + (\mu_x - \mu_y)^2)$ measures agreement with the line $y = x$, not just linear association. It equals Pearson''s $r$ times a bias factor that penalises differences in mean and scale.'
+tags: [metrics, correlation, agreement, regression, worked-example]
+aliases: [CCC, Lin's concordance correlation coefficient, concordance correlation, reproducibility index]
+requires: [pearson-correlation]
+related: [r-squared-and-explained-variance, mse-rmse-and-mae, cohens-kappa, fleiss-kappa]
+references: [lin1989, detlefsen2022]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For paired measurements $(X, Y)$ with means $\mu_x$, $\mu_y$, variances $\sigma_x^2$, $\sigma_y^2$ and covariance
+$\sigma_{xy}$, the concordance correlation coefficient is <Cite id="lin1989" />
+
+$$
+\rho_c = \frac{2\sigma_{xy}}{\sigma_x^2 + \sigma_y^2 + (\mu_x - \mu_y)^2}.
+$$
+
+The sample version plugs in sample moments with divisor $n$. $\rho_c = 1$ exactly when every pair satisfies $y = x$.
+</Definition>
+
+## Agreement, not association
+
+Pearson correlation is 1 whenever the points lie on any rising line, $y = a + bx$. Two instruments that always disagree
+by a factor of 2, or a model whose predictions are all off by 10, can have perfect correlation. When the question is
+whether two measurements are interchangeable, or whether predictions equal the truth, the relevant line is $y = x$.
+
+$\rho_c$ scores closeness to that line. Start from the expected squared difference, which is 0 only for perfect
+agreement:
+
+$$
+\expect\brack{(X - Y)^2} = (\mu_x - \mu_y)^2 + \sigma_x^2 + \sigma_y^2 - 2\sigma_{xy}.
+$$
+
+If $X$ and $Y$ kept the same means and variances but were uncorrelated, the covariance term would vanish. Scaling the
+actual squared difference by that uncorrelated value,
+
+$$
+\rho_c = 1 - \frac{\expect\brack{(X - Y)^2}}{(\mu_x - \mu_y)^2 + \sigma_x^2 + \sigma_y^2},
+$$
+
+which simplifies to the definition. So $\rho_c$ is 1 for perfect agreement, 0 when the pairs do no better than
+unrelated measurements with the same moments, and $-1$ when $y = -x$ with zero means.
+
+## Correlation times a bias correction
+
+Let $r = \sigma_{xy}/(\sigma_x\sigma_y)$ be the Pearson correlation, $v = \sigma_x/\sigma_y$ the ratio of scales and
+$u = (\mu_x - \mu_y)/\sqrt{\sigma_x\sigma_y}$ the shift in means relative to the scales. Dividing the numerator and
+denominator of $\rho_c$ by $\sigma_x\sigma_y$ gives
+
+$$
+\rho_c = r \cdot C_b, \qquad C_b = \frac{2}{v + 1/v + u^2} \in (0, 1].
+$$
+
+$r$ measures **precision**, how tightly the points hug their own best line. $C_b$ measures **accuracy**, how close that
+line is to $y = x$. $C_b = 1$ exactly when $v = 1$ and $u = 0$: equal scales and equal means.
+
+## Worked example
+
+With $x = (1, 2, 3, 4, 5)$, population moments $\mu_x = 3$ and $\sigma_x^2 = 2$:
+
+| Second measurement | Pearson $r$ | $\rho_c$ |
+| --- | --- | --- |
+| $y = x$ | 1 | 1 |
+| $y = x + 1$ | 1 | $2 \cdot 2/(2 + 2 + 1) = 0.8$ |
+| $y = 2x$ | 1 | $2 \cdot 4/(2 + 8 + 9) = 0.421$ |
+
+For $y = 2x$: $v = \sqrt 2/\sqrt 8 = 0.5$ and $u = (3 - 6)/\sqrt{\sqrt 2 \cdot \sqrt 8} = -1.5$, so
+$C_b = 2/(0.5 + 2 + 2.25) = 0.421$. The correlation is perfect and the agreement is poor.
+
+## In machine learning
+
+$\rho_c$ is the standard evaluation score for continuous-valued prediction where calibration of level and scale
+matters, such as predicting emotional arousal and valence, and in medicine for comparing a new measurement method
+with a reference. Unlike $R^2$ it is symmetric in its two arguments and bounded in $[-1, 1]$. $1 - \rho_c$ is also used
+directly as a training loss, which pushes predictions to match the target's mean and variance as well as its
+ordering. TorchMetrics implements it as `ConcordanceCorrCoef` <Cite id="detlefsen2022" />.
+
+## Pitfalls
+
+- **It depends on the spread of the data.** Like Pearson's $r$, $\rho_c$ rises with the between-subject variance for
+  the same measurement error. Compare values only across data with similar ranges.
+- **One number hides two failures.** Report $r$ and $C_b$, or a plot of differences against means, to show whether
+  poor agreement comes from noise or from a systematic shift or scale error.
+- **Sample size.** Lin's estimator uses divisor $n$; with small samples its sampling distribution is wide, and
+  intervals should come from the asymptotic variance in Lin's paper or from a bootstrap.

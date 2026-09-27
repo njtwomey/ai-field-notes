@@ -1,0 +1,76 @@
+---
+title: Permutation-invariant training and evaluation
+kind: technique
+summary: 'Source separation returns unordered outputs, so a loss or metric must match outputs to sources before comparing them. Permutation invariance takes the best assignment, $\min_\pi \tfrac1S\sum_j \ell\paren{\svec_j, \hat\svec_{\pi(j)}}$, found by enumeration or the Hungarian algorithm.'
+tags: [metrics, audio, speech, source-separation, worked-example]
+aliases: [PIT, uPIT, utterance-level PIT, permutation invariant training, label permutation problem, speaker assignment]
+requires: [snr-and-si-sdr]
+related: [audio-source-separation, pesq-and-stoi]
+references: [yu2017, kolbaek2017, kuhn1955]
+status: draft
+updated: 2026-09-27
+---
+
+import { OutputOrder } from './OutputOrder'
+
+<Definition>
+For $S$ reference sources $\svec_1, \dots, \svec_S$, estimates $\hat\svec_1, \dots, \hat\svec_S$ and a per-pair loss
+$\ell$, the permutation-invariant loss is
+
+$$
+\mathcal{L}_{\text{PIT}} = \min_{\pi \in \mathcal{S}_S} \frac{1}{S} \sum_{j=1}^{S} \ell\paren{\svec_j, \hat\svec_{\pi(j)}},
+$$
+
+where $\mathcal{S}_S$ is the set of permutations of $\set{1, \dots, S}$ <Cite id="yu2017" />. For a metric where higher
+is better, such as SI-SDR, the maximum over permutations is used.
+</Definition>
+
+## The label permutation problem
+
+A system that separates two speakers from a mixture has two output channels, but nothing in the mixture says which
+speaker belongs on which channel. The speakers are interchangeable. If training fixes an order, say speaker 1 on
+channel 1, the network receives contradictory targets for similar mixtures and cannot learn a consistent rule. If
+evaluation fixes an order, a perfect separation delivered in the other order scores as a failure.
+
+Permutation invariance removes the arbitrary choice: the loss or metric is computed for every assignment of outputs
+to sources and the best one is kept. The network is then free to use any consistent order, and the score reflects
+separation quality alone. Yu et al. introduced this for training deep separation models <Cite id="yu2017" />.
+
+## Utterance-level assignment
+
+The first formulation chose the assignment for each short segment. The assignment could then change from one segment
+to the next, so a speaker could jump between output channels in the middle of an utterance. Utterance-level PIT fixes
+one permutation for the whole utterance, which forces each channel to track one speaker throughout
+<Cite id="kolbaek2017" />.
+
+## Cost of the search
+
+Enumerating all permutations costs $S!$ loss evaluations of the assignment, which is 2 for two sources and 120 for
+five. When the loss is a sum of pairwise terms, as above, the problem is a linear assignment problem on the $S \times S$
+matrix of pairwise losses $\ell(\svec_j, \hat\svec_k)$. The Hungarian algorithm solves it in $O(S^3)$ time
+<Cite id="kuhn1955" />. Either way, the $S^2$ pairwise losses are computed once and the search reuses them.
+
+## Worked example
+
+Two sources, a tone and a sawtooth, and two outputs that each contain mostly one source with 15% leakage from the other
+and a little noise. The separator returns them in swapped order. For one noise realisation, the matrix of SI-SDR in
+decibels, rows being outputs and columns sources, is
+
+$$
+\begin{bmatrix} -13.9 & 13.0 \\ 15.8 & -17.1 \end{bmatrix}.
+$$
+
+Scoring in the fixed order, output 1 against source 1 and output 2 against source 2, averages the diagonal:
+$-15.5$ dB. The other permutation averages the off-diagonal: $14.4$ dB. PIT reports $14.4$ dB, the separation quality,
+and the assignment output 1 → source 2.
+
+<OutputOrder />
+
+## Pitfalls
+
+- **Unknown number of sources.** PIT assumes the number of outputs equals the number of sources. Systems for a varying
+  number of speakers need an additional mechanism, such as outputting silence on unused channels.
+- **The metric inherits the loss's blind spots.** PIT only removes the ordering problem; an SI-SDR-based PIT score is
+  still insensitive to gain and sensitive to delay, as <NoteLink to="snr-and-si-sdr">SI-SDR</NoteLink> is.
+- **Report the same assignment for all metrics.** Choosing a different best permutation for each metric can flatter a
+  system; fix the assignment by one criterion and evaluate every metric under it.

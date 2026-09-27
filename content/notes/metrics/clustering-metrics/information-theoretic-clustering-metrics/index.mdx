@@ -1,0 +1,104 @@
+---
+title: Mutual information, NMI, AMI and V-measure for clustering
+kind: concept
+summary: 'Information-theoretic scores compare two clusterings by the mutual information between their labels. NMI divides it by a mean of the two entropies; V-measure, the harmonic mean of homogeneity and completeness, is NMI with the arithmetic mean; AMI subtracts the chance value.'
+tags: [metrics, clustering, information-theory, worked-example]
+aliases: [NMI, AMI, normalised mutual information, adjusted mutual information, V-measure, homogeneity, completeness, variation of information]
+requires: [mutual-information]
+related: [rand-index-and-adjusted-rand-index, fowlkes-mallows-index, entropy, nominal-association, k-means, gaussian-mixture-model]
+references: [vinh2010, rosenberg2007, meila2007, pedregosa2011]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $C$ be the true class and $K$ the assigned cluster of a randomly chosen item, with joint distribution given by the
+contingency table $n_{ij}/n$. Then:
+
+- the mutual information is $I(C; K)$ and the entropies are $\entropy(C)$ and $\entropy(K)$;
+- $\operatorname{NMI} = I(C; K)/m(\entropy(C), \entropy(K))$ for a mean $m$ (arithmetic, geometric, maximum or minimum);
+- homogeneity is $h = I(C; K)/\entropy(C)$, completeness is $c = I(C; K)/\entropy(K)$, and the V-measure is their
+  harmonic mean <Cite id="rosenberg2007" />;
+- $\operatorname{AMI} = \paren{I - \expect[I]}/\paren{m(\entropy(C), \entropy(K)) - \expect[I]}$, with $\expect[I]$
+  taken over random labellings with the same cluster sizes <Cite id="vinh2010" />.
+</Definition>
+
+## Mutual information between labels
+
+Treat the two labels of a random item as random variables. Their
+<NoteLink to="mutual-information">mutual information</NoteLink> measures how much knowing the cluster reduces
+uncertainty about the class. It is 0 when the clustering is independent of the classes and reaches
+$\min(\entropy(C), \entropy(K))$ when one determines the other. Like the pair-counting scores, it ignores the names of
+the clusters: relabelling permutes the table without changing any probability.
+
+Raw mutual information is not comparable across problems, because its maximum depends on the entropies. Dividing by a
+mean of the two entropies gives a score in $[0, 1]$, the normalised mutual information. The four common means give
+different values when the entropies differ.
+
+## Homogeneity, completeness and V-measure
+
+The two ways a clustering can fail get separate scores <Cite id="rosenberg2007" />.
+
+- **Homogeneity** asks whether each cluster contains a single class: $h = 1 - \entropy(C \mid K)/\entropy(C)
+  = I(C; K)/\entropy(C)$. Merging two classes into one cluster lowers it.
+- **Completeness** asks whether each class sits in a single cluster: $c = 1 - \entropy(K \mid C)/\entropy(K) =
+  I(C; K)/\entropy(K)$. Splitting a class across clusters lowers it.
+
+Homogeneity is Theil's uncertainty coefficient of the classes given the clusters; see
+<NoteLink to="nominal-association">nominal association</NoteLink>. Putting every item in its own cluster gives
+perfect homogeneity; putting all items in one cluster gives perfect completeness. Neither alone is enough.
+
+**V-measure is NMI.** The harmonic mean of $h$ and $c$ simplifies:
+
+$$
+V = \frac{2hc}{h + c}
+= \frac{2\,I^2/\paren{\entropy(C)\entropy(K)}}{I/\entropy(C) + I/\entropy(K)}
+= \frac{2I}{\entropy(C) + \entropy(K)},
+$$
+
+which is the NMI normalised by the arithmetic mean of the entropies. The two names describe the same number.
+
+## Correcting for chance
+
+NMI and V-measure are not zero for random clusterings, and their chance value grows with the number of clusters
+relative to the number of items. For 60 items and five clusters, random labellings average about 0.10; with many small
+clusters the bias is larger. A clustering with more clusters can therefore score higher without being better.
+
+AMI subtracts the expected mutual information under the permutation model, which fixes the cluster sizes and assigns
+items at random <Cite id="vinh2010" />. The expectation has a closed form as a sum over the possible cell counts,
+weighted by hypergeometric probabilities. AMI is then about 0 for random clusterings and 1 for identical ones, like the
+<NoteLink to="rand-index-and-adjusted-rand-index">adjusted Rand index</NoteLink>. The correction matters most when
+clusters are small or numerous relative to the number of items.
+
+## A true metric
+
+The variation of information $\operatorname{VI} = \entropy(C) + \entropy(K) - 2I(C; K) = \entropy(C \mid K) +
+\entropy(K \mid C)$ is a distance between clusterings: it satisfies the triangle inequality, so it can be used where a
+metric space of clusterings is needed <Cite id="meila2007" />. It is in nats and bounded by $\log n$, so values are not
+comparable across data sets of different sizes.
+
+## Worked example
+
+The true clustering is $\set{1,2,3}, \set{4,5,6}, \set{7,8,9}$ and the prediction is $\set{1,2,9}, \set{3,4,5,6},
+\set{7,8}$, as in the <NoteLink to="rand-index-and-adjusted-rand-index">Rand index</NoteLink> example. In nats:
+
+| Score | Value |
+| --- | --- |
+| $I(C; K)$ | 0.637 |
+| homogeneity $h$ | 0.579 |
+| completeness $c$ | 0.600 |
+| V-measure = NMI (arithmetic) | 0.590 |
+| NMI (geometric) | 0.590 |
+| AMI | 0.409 |
+
+The predicted cluster $\set{3,4,5,6}$ mixes two classes, which costs homogeneity; class $\set{7,8,9}$ is split, which
+costs completeness. AMI is well below NMI: with nine items, chance alone produces substantial mutual information. These
+match scikit-learn <Cite id="pedregosa2011" />.
+
+## Pitfalls
+
+- **State the normalisation.** NMI with the maximum, geometric or arithmetic mean are different numbers. Libraries
+  differ in their defaults.
+- **Do not compare NMI across different numbers of clusters** without chance correction. Use AMI.
+- **Cost.** The expected mutual information sums over every possible cell count, so AMI is much slower than NMI for
+  large $n$ and many clusters.

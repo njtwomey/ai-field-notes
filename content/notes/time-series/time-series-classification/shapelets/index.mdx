@@ -1,0 +1,129 @@
+---
+title: Shapelets
+kind: overview
+summary: 'A shapelet is a short subsequence whose minimum distance to a time series predicts its class. A series is described by its distance to each of $k$ shapelets; the family of methods differs in how shapelets are found (search, sampling, gradient descent) and used.'
+tags: [time-series, classification, interpretability, worked-example]
+aliases: [time series shapelets, shapelet discovery, shapelet decision tree, logical shapelets, fast shapelets, unsupervised shapelets, u-shapelets]
+related: [dynamic-time-warping, symbolic-aggregate-approximation, matrix-profile, time-series-classification-benchmarks, mutual-information]
+references: [ye2009, ye2011, mueen2011, rakthanmanon2013, lines2012, hills2014, grabocka2014, zakaria2012, yeh2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { ShapeletSplit } from './ShapeletSplit'
+
+<Definition>
+Let $T = (t_1, \dots, t_n)$ be a time series and $S = (s_1, \dots, s_m)$ a shorter series with $m < n$. The
+subsequence distance between them is the smallest Euclidean distance between $S$ and any length-$m$ window of $T$:
+
+$$
+d(T, S) = \min_{1 \le i \le n - m + 1} \sqrt{\sum_{k=1}^{m} \paren{t_{i+k-1} - s_k}^2}.
+$$
+
+A shapelet is a subsequence $S$, together with a threshold $\tau$, such that $d(T, S) < \tau$ predicts the class of
+$T$. Shapelets were introduced by Ye and Keogh as the node tests of a decision tree <Cite id="ye2009" />.
+</Definition>
+
+## The idea
+
+Many classes of time series are distinguished by a local shape rather than by the whole series. An electrocardiogram
+is abnormal because of the form of one beat, not because of its overall level. A gesture is recognised by one
+characteristic stroke, wherever in the recording it occurs. Whole-series distances such as the Euclidean distance or
+<NoteLink to="dynamic-time-warping">dynamic time warping</NoteLink> compare every sample and so dilute a short
+discriminative pattern with irrelevant variation.
+
+A shapelet isolates that pattern. The minimum in $d(T, S)$ makes the feature independent of where the pattern occurs
+in $T$: the feature is phase-invariant. The shapelet itself is a piece of real data, so the learned classifier can
+be shown to a domain expert: "series of this class contain this shape".
+
+Most implementations z-normalise $S$ and each window before comparing them, so that the distance measures shape and
+ignores offset and scale. Many also divide the sum by $m$, so that distances to shapelets of different lengths are
+comparable.
+
+<ShapeletSplit />
+
+## Finding a shapelet by search
+
+The original algorithm enumerates every subsequence of every training series, for every length in a range, as a
+candidate $S$ <Cite id="ye2009" />. For each candidate it computes $d(T_j, S)$ for every training series $T_j$ and
+places the series on a line ordered by distance, the orderline. Each gap on the orderline is a candidate threshold
+$\tau$. The threshold splits the training set into series closer than $\tau$ and series farther away. The quality of
+the split is its information gain, the drop in class entropy $H$:
+
+$$
+\mathrm{IG}(S, \tau) = H(\Dcal) - \frac{\abs{\Dcal_{<}}}{\abs{\Dcal}} H(\Dcal_{<})
+- \frac{\abs{\Dcal_{\ge}}}{\abs{\Dcal}} H(\Dcal_{\ge}),
+$$
+
+where $\Dcal$ is the training set and $\Dcal_{<}$, $\Dcal_{\ge}$ are the series with $d(T, S) < \tau$ and
+$d(T, S) \ge \tau$. The best pair $(S, \tau)$ becomes the test at a decision-tree node, and the search repeats on each
+side of the split.
+
+The search is expensive. With $N$ training series of length $n$, there are $O(N n^2)$ candidates over all lengths.
+Each candidate needs a subsequence distance to every series, which costs $O(n^2)$ per series without tricks. The total
+is $O(N^2 n^4)$ <Cite id="yeh2016" />. Ye and Keogh reduced the constant with two forms of pruning: a distance
+computation stops as soon as its partial sum exceeds the best distance found so far, and a candidate is abandoned
+once an optimistic bound on its information gain falls below the best gain found so far <Cite id="ye2011" />.
+
+## Worked example
+
+Take six series of length $n = 6$ and the shapelet $S = (0, 2, 0)$, with raw Euclidean distances. Class 1 contains a
+peak; class 0 does not.
+
+| Series | Values             | Class | Closest window | $d(T, S)$         |
+| ------ | ------------------ | ----- | -------------- | ----------------- |
+| $T_1$  | 0, 0, 2, 0, 0, 0   | 1     | 0, 2, 0        | $0$               |
+| $T_2$  | 1, 0, 2, 1, 0, 0   | 1     | 0, 2, 1        | $1$               |
+| $T_3$  | 0, 0, 0, 1, 2, 0   | 1     | 1, 2, 0        | $1$               |
+| $T_4$  | 0, 1, 1, 1, 1, 0   | 0     | 0, 1, 1        | $\sqrt{2} = 1.414$ |
+| $T_5$  | 0, 0, 0, 0, 0, 0   | 0     | 0, 0, 0        | $2$               |
+| $T_6$  | 2, 2, 2, 2, 2, 2   | 0     | 2, 2, 2        | $\sqrt{8} = 2.828$ |
+
+The class entropy of the whole set is $H(\Dcal) = 1$ bit, since the classes are balanced. The threshold
+$\tau = 1.207$, midway between $1$ and $1.414$, puts $T_1, T_2, T_3$ on one side and $T_4, T_5, T_6$ on the other. Both
+sides are pure, so the information gain is $1$ bit, the maximum. The threshold $\tau = 1.707$ instead puts $T_4$ with
+class 1. The near side then holds three series of class 1 and one of class 0, with entropy $0.811$ bits. The gain
+is $1 - \tfrac{4}{6} \times 0.811 = 0.459$ bits.
+
+## The family
+
+Ye and Keogh's shapelet started a line of work, much of it from Keogh's group and from Bagnall's group at the
+University of East Anglia. Each member keeps the subsequence distance and changes how shapelets are found or how
+they are used.
+
+| Method                                                                  | Year | What is new                                                                                                           |
+| ----------------------------------------------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------- |
+| Shapelet decision tree <Cite id="ye2009" />                             | 2009 | Exhaustive search with information gain; one shapelet per tree node; early abandoning and entropy pruning.            |
+| Logical shapelets <Cite id="mueen2011" />                               | 2011 | Node tests combine shapelets with AND and OR; computation is reused between candidates to speed up the search.        |
+| Unsupervised shapelets <Cite id="zakaria2012" />                        | 2012 | No labels: a u-shapelet separates the data into series that contain it and series that do not, for clustering.       |
+| Shapelet transform <Cite id="lines2012" />                              | 2012 | The $k$ best shapelets become $k$ features; any classifier is trained on them. Separates discovery from use.          |
+| Fast shapelets <Cite id="rakthanmanon2013" />                           | 2013 | Candidates are reduced to SAX words; random masking and hashing rank them; only the top few are scored exactly.       |
+| Shapelet transform with other quality measures <Cite id="hills2014" /> | 2014 | Compares information gain with the F-statistic, Kruskal–Wallis and Mood's median; estimates the range of lengths from the data. |
+| Learned shapelets <Cite id="grabocka2014" />                            | 2014 | Shapelets are parameters, not data: learned jointly with a logistic classifier by gradient descent through a soft-min. |
+| Matrix-profile shapelets <Cite id="yeh2016" />                          | 2016 | Join each class with itself and with the other class; where the two profiles differ most suggests candidates.        |
+
+The progression moves the cost and the flexibility in two directions.
+
+- **Faster discovery.** Pruning, SAX hashing and matrix-profile joins all reduce the number of candidates that are
+  scored exactly. They keep the original output, a shapelet that is a real subsequence of the training data.
+- **Richer use.** The transform decouples the shapelets from the tree, so ensembles and linear models can combine
+  many weak shapelets. Learned shapelets drop the requirement that a shapelet is a subsequence of the data at all, in
+  exchange for a differentiable objective.
+
+The <NoteLink to="matrix-profile">matrix profile</NoteLink> gives the link between motifs and shapelets. A motif is a
+subsequence that has a close match elsewhere in the same series. A shapelet is a subsequence that has close matches in
+one class and not in the other, a supervised motif <Cite id="yeh2016" />. For class A and class B concatenated into
+series $T_A$ and $T_B$, the profile $P_{AA}$ of $T_A$ joined with itself is low wherever a pattern recurs within A.
+The profile $P_{AB}$ of $T_A$ joined with $T_B$ is low wherever that pattern also appears in B. Positions where
+$P_{AB} - P_{AA}$ is large are patterns that recur in A and are absent from B, which are candidate shapelets.
+
+## Pitfalls
+
+- **Length.** The best shapelet length is not known in advance. A search over all lengths multiplies the cost by
+  $n$; a fixed short length misses long patterns.
+- **Redundancy.** Overlapping windows of one series look alike, so the top-ranked candidates are often near-copies.
+  Transforms remove candidates that overlap an already selected shapelet from the same series.
+- **Normalisation choices.** Z-normalising each window discards level and amplitude. If the class depends on the
+  level of the pattern, normalisation removes the signal.
+- **Overfitting with small training sets.** With $O(N n^2)$ candidates and $N$ series, some candidate separates the
+  training data by chance. Evaluation needs held-out data or resampling.

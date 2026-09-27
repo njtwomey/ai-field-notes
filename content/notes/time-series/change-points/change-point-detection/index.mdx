@@ -1,0 +1,104 @@
+---
+title: Change-point detection
+kind: overview
+summary: 'Change-point detection finds the times at which the distribution generating a sequence changes. Offline methods segment a whole series, often by minimising a penalised cost; online methods such as CUSUM and Bayesian online changepoint detection flag changes as data arrive.'
+tags: [time-series, changepoints, segmentation]
+aliases: [changepoint detection, change-point analysis, segmentation, PELT, optimal partitioning, binary segmentation, regime change]
+related: [hidden-markov-model, occasionally-dishonest-casino, null-and-alternative-hypotheses]
+references: [killick2012, adams2007, page1954]
+status: draft
+updated: 2026-09-26
+---
+
+<Definition>
+A change point is a time at which the distribution generating a sequence $x_1, \dots, x_n$ changes: before it the
+observations follow one distribution, after it another. Change-point detection estimates how many change points
+there are and where, either after seeing the whole series (offline segmentation) or as each observation arrives
+(online detection) <Cite id="killick2012" />.
+</Definition>
+
+## Kinds of problem
+
+- **Offline or online.** Offline segmentation sees the whole series and places every change point using data on both
+  sides of it. Online detection must decide at each time, from the past only, whether a change has already happened,
+  and pays for certainty with delay.
+- **One change or many.** Testing for a single change is a hypothesis test at each candidate time. With many
+  changes, the number of segments is itself unknown and must be chosen.
+- **What changes.** The mean, the variance, the autocorrelation, the frequency content or the whole distribution.
+  The model or cost function decides which of these count as changes.
+
+## Segmentation by penalised cost
+
+Offline methods usually score a segmentation $0 = \tau_0 < \tau_1 < \dots < \tau_m < \tau_{m+1} = n$ by the sum of
+a cost per segment plus a penalty per change point:
+
+$$
+\sum_{i=1}^{m+1} C\paren{x_{(\tau_{i-1}+1):\tau_i}} + \beta m.
+$$
+
+The cost $C$ is typically twice the negative maximised log-likelihood of the segment. For a change in mean with
+known variance $\sigma^2$ it is $C(x_{a:b}) = \sum_{t=a}^{b}(x_t - \bar x_{a:b})^2/\sigma^2$, the within-segment sum
+of squares. Without the penalty, every observation would become its own segment; the penalty $\beta$ sets the price
+of an extra change point.
+
+**Optimal partitioning.** Let $F(s)$ be the minimum penalised cost of segmenting $x_{1:s}$. The last change point
+before $s$ is at some $t < s$, and the segmentation before it must itself be optimal, so
+
+$$
+F(s) = \min_{0 \le t < s} \brack{F(t) + C\paren{x_{(t+1):s}} + \beta}, \qquad F(0) = -\beta.
+$$
+
+Computing $F(1), \dots, F(n)$ in order and remembering each minimising $t$ recovers the exact optimum in $O(n^2)$
+evaluations of $C$.
+
+**PELT.** Killick, Fearnhead and Eckley showed that many candidates $t$ can be discarded for good
+<Cite id="killick2012" />. Suppose adding a change point never increases the cost by more than a constant $K$:
+$C(x_{(t+1):s}) + C(x_{(s+1):T}) + K \le C(x_{(t+1):T})$ for all $t < s < T$. Then if
+
+$$
+F(t) + C\paren{x_{(t+1):s}} + K \ge F(s),
+$$
+
+the time $t$ can never be the last change point in an optimal segmentation of any longer series. For any $T > s$,
+splitting the final segment at $s$ is at least as cheap:
+$F(t) + C(x_{(t+1):T}) \ge F(t) + C(x_{(t+1):s}) + C(x_{(s+1):T}) + K \ge F(s) + C(x_{(s+1):T})$. So $t$ is pruned. The
+result is still exact, and when change points keep occurring throughout the series the expected cost is linear in
+$n$.
+
+**Binary segmentation.** A faster, approximate alternative: find the single best change point, split there, and
+repeat on each part while the gain exceeds the penalty. It costs $O(n \log n)$ but can miss changes that are only
+visible jointly, such as a short segment inside a longer one.
+
+## Choosing the penalty
+
+The penalty controls the number of change points. A penalty proportional to $p \log n$, where $p$ is the number of
+parameters per segment, follows the Bayesian information criterion and gives consistent estimates when changes are
+well separated. Smaller penalties find more changes and more false ones. Plotting the number of change points
+against $\beta$ and choosing a value in a stable range is a common practical check.
+
+## Online detection
+
+- **<NoteLink to="cusum">CUSUM</NoteLink>** accumulates log-likelihood ratios for a known shift and alarms when the
+  sum crosses a threshold <Cite id="page1954" />. It is optimal for detecting one known change quickly at a given
+  false-alarm rate.
+- **<NoteLink to="bayesian-online-changepoint-detection">Bayesian online changepoint detection</NoteLink>** keeps the
+  full posterior over the time since the last change, handles repeated changes of unknown size, and yields a
+  predictive distribution for the next observation <Cite id="adams2007" />.
+
+## Evaluating a detector
+
+- **Detection delay.** How long after a change it is flagged.
+- **False alarms.** How often a change is flagged when none occurred, often reported as the average run length
+  between false alarms.
+- **Localisation.** For offline methods, whether each true change is found within a tolerance window, summarised as
+  precision and recall of the located change points.
+
+Delay and false alarms trade off through the detector's threshold, penalty or hazard, so they are best reported
+together, as a curve over that setting.
+
+## Related models
+
+A <NoteLink to="hidden-markov-model">hidden Markov model</NoteLink> with sticky transitions describes a series that
+switches between a small number of recurring regimes, as in the <NoteLink to="occasionally-dishonest-casino">occasionally
+dishonest casino</NoteLink>. Change-point models instead assume each segment has fresh parameters that need not
+recur. Anomaly detection looks for individual unusual observations; a change point is a persistent change.

@@ -1,0 +1,80 @@
+---
+title: Onset detection and beat tracking
+kind: technique
+summary: 'Onset detection turns audio into an onset envelope, most often the half-wave-rectified spectral flux $\sum_k \max\paren{0, \abs{X_t[k]} - \abs{X_{t-1}[k]}}$, and picks its peaks. The envelope''s periodicity gives the tempo, and dynamic programming aligns beats to it.'
+tags: [audio, music, rhythm, worked-example]
+aliases: [onset detection, onset strength, novelty function, spectral flux onset, peak picking, tempo estimation, beat tracking]
+requires: [short-time-fourier-transform]
+related: [spectral-features, autocorrelation-and-wiener-khinchin, chroma-features]
+references: [bello2005, ellis2007, muller2015]
+status: draft
+updated: 2026-09-26
+---
+
+import { OnsetTempo } from './OnsetTempo'
+
+<Definition>
+An onset is the start of a musical event, such as a note's attack. Onset detection computes an onset envelope, or
+novelty function, that rises sharply when new energy enters the signal, and marks its prominent peaks as onsets
+<Cite id="bello2005" />. Beat tracking then finds the regular pulse that the onsets imply: first the tempo, then the
+beat times.
+</Definition>
+
+## Onset envelopes
+
+Onsets bring a rapid increase of energy, often broadband, at the attack. Several envelopes capture this:
+
+- **Energy.** The rise in frame energy, $\max(0, E_t - E_{t-1})$. Simple, but blind to a new note that does not raise
+  the total level.
+- **Spectral flux.** The summed increase in magnitude across frequency bins,
+
+  $$
+  \Phi_t = \sum_{k} \max\paren{0,\ \log\paren{1 + \gamma\abs{X_t[k]}} - \log\paren{1 + \gamma\abs{X_{t-1}[k]}}}.
+  $$
+
+  Half-wave rectification keeps only increases, since offsets are not onsets. Logarithmic compression with a constant
+  $\gamma$ lets quiet high-frequency attacks count alongside loud low-frequency ones. Computing the flux on mel bands
+  instead of bins, and taking the difference over one or two frames, are common refinements.
+- **Phase deviation and complex domain.** A steady partial's phase advances predictably from frame to frame; at an
+  onset the prediction fails. These catch soft onsets, like a legato violin note, that barely change the magnitude.
+
+## Peak picking
+
+Onsets are local maxima of the envelope that exceed an adaptive threshold, typically a moving median or mean over a
+few hundred milliseconds plus a fixed margin. A minimum spacing between onsets suppresses double detections. The
+moving threshold follows the music's dynamics, so quiet passages are not missed and loud ones do not flood the output.
+
+## Tempo and beats
+
+The onset envelope of rhythmic music is approximately periodic at the beat period $T$. Its autocorrelation
+$R(\ell) = \sum_t \tilde\Phi_t \tilde\Phi_{t+\ell}$, computed on the mean-removed envelope $\tilde\Phi$, peaks at
+$\ell = T$ and its multiples. Weighting the autocorrelation by a prior on tempo, often centred near 120 BPM, and taking
+the maximum gives the tempo. A tempogram repeats this over sliding windows to follow tempo changes.
+
+Given the tempo, beat tracking chooses beat times $b_1 < b_2 < \dots$ to maximise the onset strength at the beats minus
+a penalty for inter-beat intervals that deviate from $T$:
+
+$$
+C(\set{b_i}) = \sum_i \Phi_{b_i} - \alpha\sum_i \log^2\paren{\frac{b_i - b_{i-1}}{T}}.
+$$
+
+The objective decomposes over consecutive beats, so dynamic programming finds the best sequence in one pass
+<Cite id="ellis2007" />.
+
+## Worked example
+
+With a sample rate of 8 kHz and a hop of 64 samples, the onset envelope has 125 frames per second. At 110 BPM the beat
+period is $60/110 = 0.545$ s, or $0.545 \times 125 = 68.2$ frames. The autocorrelation peaks at lag 68, giving
+$60 \times 125/68 = 110.3$ BPM. The tempo resolution at this hop is about 1.6 BPM near 110 BPM; a smaller hop, or
+parabolic interpolation around the peak, refines it.
+
+<OnsetTempo />
+
+## Pitfalls
+
+- **Octave errors in tempo.** The autocorrelation also peaks at $2T$ and $T/2$, and listeners themselves disagree
+  between tapping at 60 or 120 BPM. Evaluations accept either within a tolerance, or report both.
+- **Soft onsets and vibrato.** Slow attacks give weak flux; vibrato and tremolo give spurious flux. Envelope choice
+  depends on the instruments.
+- **Frame timing.** An onset's detected time lags its true time by up to half a frame, plus any delay from the
+  envelope's smoothing. Report times at the frame centre and compensate for known delays.

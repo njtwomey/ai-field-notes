@@ -1,0 +1,166 @@
+---
+title: Dynamic time warping
+kind: concept
+summary: 'Dynamic time warping aligns two series by the cheapest monotone path through their $n \times m$ cost matrix, so a pattern that is stretched or shifted in time still matches. A window of half-width $r$ constrains the path; LB_Keogh bounds it cheaply; 1-NN DTW is the standard baseline.'
+tags: [time-series, classification, similarity-search, dynamic-programming, worked-example]
+aliases: [DTW, Sakoe-Chiba band, LB_Keogh, UCR suite, 1-NN DTW, elastic distance, warping path]
+related: [symbolic-aggregate-approximation, matrix-profile, pairwise-distances-and-cosine-similarity]
+references: [sakoe1978, keogh2002, keogh2005, rakthanmanon2012, bagnall2017, dau2019]
+status: draft
+updated: 2026-09-27
+---
+
+import { DtwAlignment } from './DtwAlignment'
+
+<Definition>
+For series $\avec = (a_1, \dots, a_n)$ and $\bvec = (b_1, \dots, b_m)$, a warping path is a sequence of
+index pairs $(i_1, j_1), \dots, (i_K, j_K)$ that starts at $(1, 1)$, ends at $(n, m)$, and at each step increases $i$,
+$j$ or both by exactly 1. The dynamic time warping (DTW) distance is the smallest total cost over all warping paths,
+
+$$
+\mathrm{DTW}(\avec, \bvec) = \min_{\text{paths}} \sqrt{\sum_{k=1}^{K} \paren{a_{i_k} - b_{j_k}}^2}.
+$$
+
+A Sakoe–Chiba window of half-width $r$ admits only pairs with $\abs{i - j} \le r$ <Cite id="sakoe1978" />.
+</Definition>
+
+## Intuition
+
+The Euclidean distance compares $a_i$ with $b_i$ for every $i$. Two recordings of the same gesture, heartbeat or
+spoken word rarely proceed at the same speed throughout, so the Euclidean distance compares a peak in one with a
+slope in the other and reports a large distance for similar shapes. DTW lets one sample of $\avec$ match several
+consecutive samples of $\bvec$ and the reverse, which stretches and compresses the time axis locally until the
+shapes line up.
+
+The conditions on the path keep the alignment meaningful. Starting at $(1, 1)$ and ending at $(n, m)$ matches the
+ends of the series. Steps of at most 1 in each index mean that no sample is skipped. Non-decreasing indices mean
+that the order of events is preserved.
+
+<DtwAlignment />
+
+## The recursion
+
+Let $D(i, j)$ be the smallest cumulative squared cost of a path from $(1, 1)$ to $(i, j)$. The last step into
+$(i, j)$ comes from $(i-1, j)$, $(i, j-1)$ or $(i-1, j-1)$, and the cheapest path to $(i, j)$ extends the cheapest
+path to one of them. With $D(0, 0) = 0$ and $D(i, 0) = D(0, j) = \infty$ for $i, j \ge 1$,
+
+$$
+D(i, j) = \paren{a_i - b_j}^2 + \min\set{D(i-1, j),\ D(i, j-1),\ D(i-1, j-1)},
+$$
+
+and $\mathrm{DTW}(\avec, \bvec) = \sqrt{D(n, m)}$. Filling the $n \times m$ table row by row costs $O(nm)$ time.
+The path itself is recovered by walking back from $(n, m)$ to the predecessor with the smallest $D$ at each step.
+
+**The Sakoe–Chiba window.** Setting $D(i, j) = \infty$ whenever $\abs{i - j} > r$ restricts the path to a diagonal
+band <Cite id="sakoe1978" />. The table then has $O(n r)$ finite entries, and the cost falls from $O(n^2)$ to
+$O(n r)$ for $n = m$. The window also prevents pathological alignments, in which one sample matches a long stretch of
+the other series. With $r = 0$ the only admissible path is the diagonal, and DTW equals the Euclidean distance. With
+$r \ge n - 1$ the window has no effect.
+
+## Worked example
+
+Take $\avec = (0, 1, 3, 1, 0, 0)$ and $\bvec = (0, 0, 1, 2, 1, 0)$. $\bvec$ has a lower peak one step later. The
+Euclidean distance is $\sqrt{0 + 1 + 4 + 1 + 1 + 0} = \sqrt{7} = 2.646$. The cumulative cost table $D(i, j)$, with
+rows for $a_i$ and columns for $b_j$, is:
+
+|             | $b_1 = 0$ | $b_2 = 0$ | $b_3 = 1$ | $b_4 = 2$ | $b_5 = 1$ | $b_6 = 0$ |
+| ----------- | --------- | --------- | --------- | --------- | --------- | --------- |
+| $a_1 = 0$   | 0         | 0         | 1         | 5         | 6         | 6         |
+| $a_2 = 1$   | 1         | 1         | 0         | 1         | 1         | 2         |
+| $a_3 = 3$   | 10        | 10        | 4         | 1         | 5         | 10        |
+| $a_4 = 1$   | 11        | 11        | 4         | 2         | 1         | 2         |
+| $a_5 = 0$   | 11        | 11        | 5         | 6         | 2         | 1         |
+| $a_6 = 0$   | 11        | 11        | 6         | 9         | 3         | 1         |
+
+For example, $D(3, 4) = (3 - 2)^2 + \min\set{D(2, 4), D(3, 3), D(2, 3)} = 1 + \min\set{1, 4, 0} = 1$. The final
+entry is $D(6, 6) = 1$, so $\mathrm{DTW}(\avec, \bvec) = 1$. The optimal path matches each point of $\avec$ with
+the point of $\bvec$ one step later, and the only cost is the difference between the peaks, $(3 - 2)^2 = 1$.
+
+With $r = 1$ the same path fits inside the window, and the windowed distance is also 1. With $r = 0$ the distance is
+the Euclidean $\sqrt{7}$.
+
+## Lower bounds and LB_Keogh
+
+Nearest-neighbour search under DTW compares a query with many candidates. Each full DTW computation costs $O(n r)$.
+A lower bound that costs $O(n)$ can rule out most candidates without computing DTW: if the bound already exceeds the
+best distance found so far, the candidate cannot be the nearest neighbour.
+
+LB_Keogh <Cite id="keogh2002" /> wraps the candidate $\bvec$ in an envelope of the same window half-width $r$:
+
+$$
+U_i = \max_{\abs{j - i} \le r} b_j, \qquad L_i = \min_{\abs{j - i} \le r} b_j,
+$$
+
+and charges the query $\avec$ only where it leaves the envelope:
+
+$$
+\mathrm{LB\_Keogh}(\avec, \bvec) = \sqrt{\sum_{i=1}^{n}
+\begin{cases}
+(a_i - U_i)^2 & \text{if } a_i > U_i, \\
+(a_i - L_i)^2 & \text{if } a_i < L_i, \\
+0 & \text{otherwise}.
+\end{cases}}
+$$
+
+**Proof sketch** <Cite id="keogh2005" />. Take any warping path inside the window, for series of equal length $n$.
+
+1. Every index $i$ of $\avec$ appears in at least one pair $(i, j)$ of the path, because the path starts at $i = 1$,
+   ends at $i = n$ and increases $i$ by at most 1 per step.
+2. For any such pair, $\abs{i - j} \le r$, so $b_j$ lies between $L_i$ and $U_i$ by the definition of the envelope.
+3. If $a_i > U_i$, then $a_i - b_j \ge a_i - U_i > 0$, so $(a_i - b_j)^2 \ge (a_i - U_i)^2$. The case $a_i < L_i$ is
+   symmetric, and the charge is 0 otherwise.
+4. Keeping one pair per index $i$ and dropping the others can only lower the sum, because every term is
+   non-negative.
+
+So the squared cost of every admissible path is at least the squared LB_Keogh, and so is their minimum, the squared
+windowed DTW. In the worked example with $r = 1$, the envelope of $\bvec$ is $U = (0, 1, 2, 2, 2, 1)$ and
+$L = (0, 0, 0, 1, 0, 0)$. Only $a_3 = 3$ leaves it, by 1, so LB_Keogh $= 1$, equal to the windowed DTW distance here.
+
+## The UCR suite
+
+The UCR suite <Cite id="rakthanmanon2012" /> searches a long series for the subsequence closest to a query under
+windowed DTW. It combines four ideas, each of which removes work without changing the answer.
+
+- **Early-abandoning z-normalisation.** Each subsequence is z-normalised as it is compared, with running sums for its
+  mean and standard deviation, instead of normalising all subsequences in advance.
+- **Reordering.** Distance terms are accumulated in decreasing order of the query's absolute z-normalised values.
+  Those terms tend to be largest, so the running sum crosses the best-so-far sooner and the computation stops earlier.
+- **Reversing the roles.** LB_Keogh is computed with the envelope around the query and, when that fails to prune,
+  with the envelope around the candidate. The two bounds differ, and the larger one prunes more.
+- **Cascading bounds.** A constant-time bound from the first and last points is tried first, then the two LB_Keogh
+  variants in $O(n)$, and full DTW only for the candidates that survive. The DTW computation itself abandons early,
+  adding the remaining LB_Keogh terms to its partial cost.
+
+With these ideas the authors searched a trillion subsequences, and reported exact DTW search faster than earlier
+approximate methods <Cite id="rakthanmanon2012" />.
+
+## Why 1-NN DTW is the baseline
+
+The one-nearest-neighbour classifier with DTW (1-NN DTW) labels a test series with the class of its closest training
+series. Its only parameter is the window half-width $r$, usually set by leave-one-out cross-validation on the training
+data. It has no training phase beyond that choice, needs no feature design, and makes the classification decision
+traceable to one training example.
+
+Across the UCR archive, 1-NN DTW with a cross-validated window is more accurate than 1-NN Euclidean on most datasets,
+and it was hard to beat for many years. The archive reports its error rate for every dataset alongside those of
+Euclidean distance and unconstrained DTW <Cite id="dau2019" />. The 2017 bake off used 1-NN DTW as one of its two
+benchmarks, and found that only 9 of 18 recent algorithms were significantly more accurate than both benchmarks
+<Cite id="bagnall2017" />. A new time-series classifier is expected to report its accuracy against 1-NN DTW.
+
+## Assumptions
+
+- The series are comparable after local stretching. DTW does not account for patterns that differ in amplitude or
+  offset, so series are usually z-normalised first.
+- Corresponding events occur in the same order in both series. DTW cannot align events that are swapped.
+
+## Pitfalls
+
+- **DTW is not a metric.** It violates the triangle inequality, so metric-tree indexes do not apply. Lower bounds
+  such as LB_Keogh are the standard route to fast search instead.
+- **Unconstrained warping.** Without a window, a flat stretch can absorb a long feature of the other series at little
+  cost, and accuracy often drops. A window of about 10% of the series length is a common default, but the best value
+  varies by dataset and is best chosen by cross-validation.
+- **Endpoint effects.** The path must match the first and last points. Series cut at arbitrary points, with a pattern
+  partly outside the window, are penalised for the unmatched part.
+- **Cost.** Even with a window, DTW costs $O(n r)$ per pair. 1-NN DTW on a large training set is slow at test time
+  without lower-bound pruning.

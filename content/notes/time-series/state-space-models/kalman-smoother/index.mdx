@@ -1,0 +1,163 @@
+---
+title: Kalman smoother
+kind: concept
+summary: 'The Kalman smoother computes $p(\zvec_t \mid \xvec_{1:T})$ for every $t$ in a linear-Gaussian state-space model, using observations before and after $t$. The Rauch–Tung–Striebel form runs the Kalman filter forwards, then corrects each estimate in one backward pass.'
+tags: [time-series, state-space-models, filtering, smoothing, bayesian, gaussian, worked-example]
+aliases: [Rauch–Tung–Striebel smoother, RTS smoother, Rauch-Tung-Striebel smoother, fixed-interval smoother, smoother gain, fixed-lag smoothing]
+requires: [kalman-filter]
+related: [hidden-markov-model, schur-complement]
+references: [rauch1965, sarkka2013, bishop2006]
+status: draft
+updated: 2026-09-27
+---
+
+import { SmootherTracking } from './SmootherTracking'
+
+<Definition>
+In the linear-Gaussian state-space model $\zvec_t = \Amat\zvec_{t-1} + \wvec_t$, $\xvec_t = \Cmat\zvec_t + \vvec_t$,
+with $\wvec_t \sim \Gauss(\zeros, \Qmat)$ and $\vvec_t \sim \Gauss(\zeros, \Rmat)$, the **smoothing distribution** is
+$p(\zvec_t \mid \xvec_{1:T}) = \Gauss(\muvec_{t \mid T}, \Pmat_{t \mid T})$ for $t = 1, \dots, T$: the posterior of
+each state given the whole sequence. The **Rauch–Tung–Striebel (RTS) smoother** computes it with the
+<NoteLink to="kalman-filter">Kalman filter</NoteLink> followed by the backward recursion
+
+$$
+\Gmat_t = \Pmat_{t \mid t}\Amat^\top\Pmat_{t+1 \mid t}^{-1}, \qquad
+\muvec_{t \mid T} = \muvec_{t \mid t} + \Gmat_t\paren{\muvec_{t+1 \mid T} - \muvec_{t+1 \mid t}}, \qquad
+\Pmat_{t \mid T} = \Pmat_{t \mid t} + \Gmat_t\paren{\Pmat_{t+1 \mid T} - \Pmat_{t+1 \mid t}}\Gmat_t^\top,
+$$
+
+run for $t = T - 1, \dots, 1$ from $\muvec_{T \mid T}$ and $\Pmat_{T \mid T}$ <Cite id="rauch1965" />.
+</Definition>
+
+## Filtering, prediction and smoothing
+
+The subscript $t \mid s$ means "the state at time $t$, given observations up to time $s$". Three problems differ only
+in $s$:
+
+- **Prediction**, $s < t$: forecast a future state.
+- **Filtering**, $s = t$: estimate the current state from the past and present. The Kalman filter solves it online.
+- **Smoothing**, $s > t$: estimate a past state using later observations too.
+
+Smoothing is the right problem whenever the whole record is available before the estimate is needed: offline
+analysis of a recorded trajectory, reconstructing a signal, or the E-step of fitting the model by expectation
+maximisation. Three variants exist. **Fixed-interval** smoothing estimates every $\zvec_t$ from a fixed record
+$\xvec_{1:T}$; this note is about it. **Fixed-lag** smoothing estimates $\zvec_{t - L}$ from $\xvec_{1:t}$, trading a
+delay of $L$ steps for accuracy in an online system. **Fixed-point** smoothing refines the estimate of one chosen
+state as data keep arriving.
+
+## Derivation
+
+The filter has already computed, for every $t$, the filtered $\muvec_{t \mid t}$, $\Pmat_{t \mid t}$ and the
+predicted $\muvec_{t+1 \mid t}$, $\Pmat_{t+1 \mid t}$. At $t = T$ the smoothing and filtering distributions coincide.
+The recursion goes backwards from there in two steps.
+
+**Step 1: condition on the next state.** Given $\zvec_{t+1}$, the state $\zvec_t$ is independent of the later
+observations $\xvec_{t+1:T}$, because every path from $\zvec_t$ to them in the chain passes through $\zvec_{t+1}$. So
+
+$$
+p(\zvec_t \mid \zvec_{t+1}, \xvec_{1:T}) = p(\zvec_t \mid \zvec_{t+1}, \xvec_{1:t}).
+$$
+
+Given $\xvec_{1:t}$, the pair $(\zvec_t, \zvec_{t+1})$ is jointly Gaussian. $\zvec_t$ has the filtered mean and
+covariance. $\zvec_{t+1} = \Amat\zvec_t + \wvec_{t+1}$ has the predicted mean and covariance, and its covariance with
+$\zvec_t$ is $\cov(\zvec_t, \Amat\zvec_t) = \Pmat_{t \mid t}\Amat^\top$:
+
+$$
+\begin{bmatrix} \zvec_t \\ \zvec_{t+1} \end{bmatrix} \Bigm| \xvec_{1:t} \sim
+\Gauss\paren{\begin{bmatrix} \muvec_{t \mid t} \\ \muvec_{t+1 \mid t} \end{bmatrix},
+\begin{bmatrix} \Pmat_{t \mid t} & \Pmat_{t \mid t}\Amat^\top \\ \Amat\Pmat_{t \mid t} & \Pmat_{t+1 \mid t} \end{bmatrix}}.
+$$
+
+Conditioning on $\zvec_{t+1}$ (the Gaussian conditioning formula, whose covariance is a
+<NoteLink to="schur-complement">Schur complement</NoteLink>) gives
+
+$$
+\zvec_t \mid \zvec_{t+1}, \xvec_{1:t} \sim
+\Gauss\paren{\muvec_{t \mid t} + \Gmat_t(\zvec_{t+1} - \muvec_{t+1 \mid t}),\;
+\Pmat_{t \mid t} - \Gmat_t\Pmat_{t+1 \mid t}\Gmat_t^\top}, \qquad
+\Gmat_t = \Pmat_{t \mid t}\Amat^\top\Pmat_{t+1 \mid t}^{-1}.
+$$
+
+The **smoother gain** $\Gmat_t$ ($d \times d$) is the coefficient of the regression of $\zvec_t$ on $\zvec_{t+1}$.
+
+**Step 2: average over the next state.** Suppose $\zvec_{t+1} \mid \xvec_{1:T} \sim \Gauss(\muvec_{t+1 \mid T},
+\Pmat_{t+1 \mid T})$, known from the previous backward step. Then
+
+$$
+p(\zvec_t \mid \xvec_{1:T}) = \int p(\zvec_t \mid \zvec_{t+1}, \xvec_{1:t})\, p(\zvec_{t+1} \mid \xvec_{1:T})\,
+d\zvec_{t+1}.
+$$
+
+Step 1 wrote $\zvec_t$ as a linear function of $\zvec_{t+1}$ plus independent Gaussian noise of covariance
+$\Pmat_{t \mid t} - \Gmat_t\Pmat_{t+1 \mid t}\Gmat_t^\top$. Averaging over $\zvec_{t+1}$ therefore gives a Gaussian
+with mean $\muvec_{t \mid t} + \Gmat_t(\muvec_{t+1 \mid T} - \muvec_{t+1 \mid t})$ and covariance
+$\Gmat_t\Pmat_{t+1 \mid T}\Gmat_t^\top + \Pmat_{t \mid t} - \Gmat_t\Pmat_{t+1 \mid t}\Gmat_t^\top$. These are the
+RTS equations in the definition.
+
+The recursion corrects each filtered estimate by how much the smoothed estimate of the next state differs from its
+prediction. When later data move $\muvec_{t+1 \mid T}$ away from $\muvec_{t+1 \mid t}$, the correction passes back to
+$\zvec_t$ in proportion to how strongly the two states covary.
+
+The backward pass uses only the filter's stored means and covariances, not the observations. Its cost is
+$O(T d^3)$, the same order as the filter. The smoother also gives the lag-one cross-covariance
+$\cov(\zvec_t, \zvec_{t+1} \mid \xvec_{1:T}) = \Gmat_t\Pmat_{t+1 \mid T}$, which the M-step of expectation
+maximisation for the model's parameters needs <Cite id="sarkka2013" />.
+
+## Why smoothing never increases uncertainty
+
+$\Pmat_{t \mid T} \preceq \Pmat_{t \mid t}$ for every $t$: the smoothed covariance is never larger, in the
+positive semidefinite order, than the filtered one. By induction from $t = T$, where the two are equal: suppose
+$\Pmat_{t+1 \mid T} \preceq \Pmat_{t+1 \mid t+1}$. The filter's update never increases uncertainty and its prediction
+never decreases it, so $\Pmat_{t+1 \mid t+1} \preceq \Pmat_{t+1 \mid t}$. Hence
+$\Pmat_{t+1 \mid T} - \Pmat_{t+1 \mid t} \preceq \zeros$, the correction term
+$\Gmat_t(\Pmat_{t+1 \mid T} - \Pmat_{t+1 \mid t})\Gmat_t^\top$ is negative semidefinite, and
+$\Pmat_{t \mid T} \preceq \Pmat_{t \mid t}$.
+
+The gain is largest in the middle of the record, where a state has observations on both sides. At $t = T$ there is
+nothing after, and the two coincide. Near $t = 1$ there is little data before, so the smoothed variance also rises
+there.
+
+## Worked example
+
+Continue the scalar random walk of the Kalman filter note: $A = C = 1$, $Q = R = 1$, prior $\Gauss(0, 1)$,
+observations $x_{1:4} = (1, 3, 2, 2.5)$. For a random walk the prediction is the previous filtered mean,
+$\mu_{t+1 \mid t} = \mu_{t \mid t}$, and $P_{t+1 \mid t} = P_{t \mid t} + 1$. The filter gives
+$\mu_{t \mid t} = (0.667, 2.125, 2.048, 2.327)$ and $P_{t \mid t} = (0.667, 0.625, 0.619, 0.618)$. The backward pass
+starts from $\mu_{4 \mid 4} = 2.327$, $P_{4 \mid 4} = 0.618$:
+
+| $t$ | $G_t = P_{t \mid t} / P_{t+1 \mid t}$ | $\mu_{t \mid 4}$ | $P_{t \mid 4}$ | $P_{t \mid t}$ |
+| --- | ------------------------------------- | ---------------- | -------------- | -------------- |
+| 4   |                                       | 2.327            | 0.618          | 0.618          |
+| 3   | 13/34 = 0.382                         | 2.155            | 0.473          | 0.619          |
+| 2   | 5/13 = 0.385                          | 2.136            | 0.455          | 0.625          |
+| 1   | 2/5 = 0.4                             | 1.255            | 0.473          | 0.667          |
+
+At $t = 3$: $\mu_{3 \mid 4} = 2.048 + 0.382 \times (2.327 - 2.048) = 2.155$ and
+$P_{3 \mid 4} = 0.619 + 0.382^2 \times (0.618 - 1.619) = 0.473$. The largest change is at $t = 1$. The filter put
+$z_1$ at 0.667, between the prior mean 0 and $x_1 = 1$. The later observations, all near 2 to 3, pull the smoothed
+estimate up to 1.255. The smoothed variances are smallest in the middle, at $t = 2$.
+
+## Figure
+
+The figure tracks an object moving in the plane with constant velocity and random accelerations, observed with
+position noise $\Rmat = r\eye$. It compares the filter's estimates with the smoother's on the same record.
+
+<SmootherTracking />
+
+## Relations
+
+- **The HMM forward–backward algorithm.** The Kalman filter is the forward pass of a chain with Gaussian states, and
+  the RTS smoother is a backward pass. The <NoteLink to="hidden-markov-model">hidden Markov model</NoteLink>'s
+  backward pass usually propagates messages $\beta_t$ and multiplies them into the forward ones. The RTS form instead
+  propagates the smoothed posterior itself, which avoids representing a Gaussian message that may not be normalisable.
+- **Two-filter smoothing.** Running one filter forwards and one backwards, and combining their estimates at each $t$,
+  gives the same smoothed distribution.
+
+## Pitfalls
+
+- **Invertibility.** $\Gmat_t$ needs $\Pmat_{t+1 \mid t}^{-1}$. With $\Qmat$ singular and a deterministic state
+  component, $\Pmat_{t+1 \mid t}$ can be singular. A pseudo-inverse or a square-root implementation is then needed.
+- **The smoother inherits the model.** Wrong $\Qmat$ or $\Rmat$ produce the same errors as in the filter: too little
+  process noise gives a smoothed path that is too straight.
+- **Offline only.** The smoothed estimate at $t$ changes whenever data after $t$ arrive. An online system that needs
+  some of the benefit uses a fixed-lag smoother and accepts the delay.

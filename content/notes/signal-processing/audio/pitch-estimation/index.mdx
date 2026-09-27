@@ -1,0 +1,91 @@
+---
+title: Pitch estimation
+kind: technique
+summary: 'Pitch estimators find the fundamental period of a harmonic sound: by the autocorrelation peak, by YIN''s normalised difference function $d''(\tau)$, by the cepstral peak, or by the harmonic product spectrum. The hard part is avoiding octave errors.'
+tags: [audio, speech, music, worked-example]
+aliases: [fundamental frequency estimation, f0 estimation, pitch detection, pitch tracking, YIN, harmonic product spectrum, autocorrelation pitch, octave errors]
+related: [cepstrum, autocorrelation-and-wiener-khinchin, chroma-features, linear-prediction]
+references: [decheveigne2002, noll1967, schroeder1968]
+status: draft
+updated: 2026-09-26
+---
+
+import { YinPitch } from './YinPitch'
+
+<Definition>
+A periodic signal satisfies $x[n] = x[n + P]$ for its period $P$, and its fundamental frequency is $f_0 = f_s/P$. A
+harmonic sound has spectral peaks at $f_0, 2f_0, 3f_0, \dots$ Pitch estimation finds $P$ or $f_0$ frame by frame,
+from the signal's self-similarity in time or the regular spacing of its harmonics in frequency. Perceived pitch
+follows $f_0$ even when the component at $f_0$ itself is missing.
+</Definition>
+
+## Autocorrelation
+
+The short-time autocorrelation $r(\tau) = \sum_{j=0}^{W-1} x[j]\,x[j + \tau]$ has peaks at $\tau = P, 2P, 3P, \dots$,
+because the signal lines up with itself at every multiple of the period. The largest peak after $\tau = 0$, within
+a search range, estimates $P$. The weakness is that the peaks at multiples of $P$ are nearly as high as the one at
+$P$, so noise or a near-integer multiple can win: a sub-harmonic error, reporting $f_0/2$ or $f_0/3$. Peaks at
+fractions of $P$, from strong harmonics, give octave errors upwards.
+
+## YIN
+
+YIN replaces the autocorrelation with a difference function and normalises it in two steps
+<Cite id="decheveigne2002" />.
+
+**Difference function.** For a periodic signal, $x[j] - x[j + P] = 0$, so
+
+$$
+d(\tau) = \sum_{j=0}^{W-1}\paren{x[j] - x[j + \tau]}^2 = r_0(0) + r_\tau(0) - 2r(\tau)
+$$
+
+is zero at the period, where $r_\tau(0)$ is the energy of the window starting at $\tau$. Unlike $r(\tau)$ it accounts
+for changes in the window's energy with lag.
+
+**Cumulative mean normalisation.** $d(\tau)$ is zero at $\tau = 0$ and tends to dip at every multiple of $P$, so its
+global minimum is ambiguous. YIN divides by the running mean of $d$ up to $\tau$:
+
+$$
+d'(\tau) = \begin{cases} 1, & \tau = 0,\\[2pt] \dfrac{d(\tau)}{\frac{1}{\tau}\sum_{j=1}^{\tau} d(j)}, & \tau > 0.\end{cases}
+$$
+
+This removes the dip at zero lag, starting $d'$ at 1, and makes $d'$ small only where $d$ is small relative to its
+typical value so far. The first lag where $d'(\tau)$ falls below an absolute threshold, typically 0.1, is taken, then
+followed down to the local minimum. Choosing the first qualifying dip, not the deepest, is what prevents sub-harmonic
+errors: the true period comes before its multiples.
+
+**Parabolic interpolation.** Fitting a parabola through $d'$ at $\tau - 1, \tau, \tau + 1$ refines the period below one
+sample, to $\hat\tau = \tau + \frac{d'(\tau - 1) - d'(\tau + 1)}{2\paren{d'(\tau - 1) - 2d'(\tau) + d'(\tau + 1)}}$.
+Without it, the resolution at high $f_0$ is poor: at 16 kHz, lags 72 and 73 are 222.2 and 219.2 Hz.
+
+## Worked example
+
+Take a 220 Hz tone with ten harmonics at amplitudes $1/h$, sampled at 16 kHz, and a 512-sample window. The true period
+is $16000/220 = 72.73$ samples.
+
+- **Autocorrelation.** The largest peak between lags 40 and 400 is at lag 218, three periods ($3 \times 72.73 = 218.2$,
+  almost an integer), giving 73.4 Hz: a sub-harmonic error.
+- **YIN.** $d'$ first falls below 0.1 at lag 73, where $d'(73) = 0.0018$. Parabolic interpolation gives
+  $\hat\tau = 72.72$ and $f_0 = 220.01$ Hz.
+- **Missing fundamental.** Removing the 220 Hz component, keeping harmonics 2 to 10, leaves the period unchanged, and
+  YIN still returns 220.01 Hz.
+
+<YinPitch />
+
+## Frequency-domain methods
+
+- **Cepstrum.** The log spectrum of a harmonic sound ripples with period $f_0$ in frequency; its inverse transform, the
+  <NoteLink to="cepstrum">cepstrum</NoteLink>, peaks at quefrency $1/f_0$ <Cite id="noll1967" />.
+- **Harmonic product spectrum.** Downsample the magnitude spectrum by factors $1, 2, \dots, R$ and multiply:
+  $\mathrm{HPS}(f) = \prod_{r=1}^{R}\abs{X(rf)}$. Only at $f = f_0$ do all $R$ factors land on harmonics, so the product
+  peaks there <Cite id="schroeder1968" />. It resists missing fundamentals but is prone to octave errors upward when
+  odd harmonics are weak.
+
+## Pitfalls
+
+- **Octave errors are the main failure.** Every method has a characteristic direction of error. Tracking over time,
+  with continuity constraints or a hidden Markov model over candidate pitches, removes most of them.
+- **Voicing decisions.** Unvoiced speech and noise have no pitch. A confidence measure, such as the value of $d'$ at the
+  chosen lag, decides whether a frame is voiced.
+- **Window length.** The window must hold at least two periods of the lowest $f_0$ searched: 40 ms for 50 Hz. Longer
+  windows blur fast pitch changes.
+- **Polyphony.** These methods assume one periodic source. Several simultaneous notes need multi-pitch methods.

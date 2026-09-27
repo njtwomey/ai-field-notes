@@ -1,0 +1,75 @@
+---
+title: Wavelet denoising
+kind: technique
+summary: 'Wavelet denoising transforms a noisy signal with an orthogonal wavelet transform, sets small detail coefficients to zero or shrinks them, and transforms back. The universal threshold $\sigma\sqrt{2 \ln N}$ removes almost all pure-noise coefficients while keeping the few large ones that carry edges.'
+tags: [signal-processing, wavelets, denoising, nonparametric-regression, worked-example]
+aliases: [wavelet shrinkage, wavelet thresholding, hard thresholding, VisuShrink, universal threshold, SureShrink, Donoho–Johnstone]
+requires: [discrete-wavelet-transform]
+related: [wavelet-families, wavelet-packets, spectral-subtraction-and-denoising]
+references: [donoho1994, donoho1995, mallat2009]
+status: draft
+updated: 2026-09-26
+---
+
+import { DenoiseExplorer } from './DenoiseExplorer'
+
+<Definition>
+For observations $y[n] = f[n] + \sigma z[n]$ with white Gaussian noise $z$, **wavelet shrinkage** computes the
+orthogonal discrete wavelet transform of $y$, applies a threshold rule to each detail coefficient, and inverts. The
+**hard** rule keeps coefficients with $\abs{c} > \lambda$ and zeroes the rest; the **soft** rule
+$\eta_\lambda(c) = \operatorname{sgn}(c) \max(\abs{c} - \lambda, 0)$ also shrinks the survivors by $\lambda$. The
+**universal threshold** is $\lambda = \sigma \sqrt{2 \ln N}$ <Cite id="donoho1994" />.
+</Definition>
+
+## Why thresholding works
+
+An orthogonal transform maps white Gaussian noise to white Gaussian noise with the same variance: every coefficient
+of $\sigma z$ is $\sigma$ times a standard normal, independently. A piecewise-smooth signal behaves differently. Its
+details vanish wherever it is locally close to a polynomial of degree below the wavelet's number of vanishing
+moments, so its energy concentrates in a few large coefficients near edges and in the coarse approximation. The
+noise is spread thinly over all $N$ coefficients; the signal is concentrated in a few. A threshold slightly above the
+noise level therefore removes most of the noise and little of the signal, and, unlike a linear lowpass filter, it
+keeps edges sharp, because the large coefficients at an edge survive.
+
+## The universal threshold
+
+The largest of $N$ independent standard normals grows like $\sqrt{2 \ln N}$. Precisely,
+$P\paren{\max_{k \le N} \abs{z_k} > \sqrt{2 \ln N}} \to 0$ as $N \to \infty$, so with a threshold of
+$\sigma\sqrt{2 \ln N}$ the probability that any pure-noise coefficient survives tends to zero. The resulting estimate
+is, with high probability, at least as smooth as the true signal. Donoho and Johnstone showed that soft thresholding
+at this level has a risk within a factor of order $\ln N$ of an ideal oracle that knows which coefficients to keep,
+over wide classes of functions <Cite id="donoho1994" /> <Cite id="donoho1995" />.
+
+The noise level is rarely known. The finest detail coefficients are mostly noise, so it is estimated robustly by
+their median absolute deviation, $\hat\sigma = \operatorname{median}\abs{d_1[k]} / 0.6745$, where 0.6745 is the upper
+quartile of the standard normal.
+
+## Worked example
+
+For $N = 1024$ the universal threshold is $\sqrt{2 \ln 1024}\, \sigma \approx 3.72\, \sigma$; for $N = 4096$ it is
+$4.08\, \sigma$. The convergence is slow: with $N = 1024$ pure-noise coefficients, the probability that at least one
+exceeds $3.72$ in magnitude is still about 0.18.
+
+For Donoho and Johnstone's HeaviSine signal, $f(t) = 4\sin(4\pi t) - \operatorname{sgn}(t - 0.3) -
+\operatorname{sgn}(0.72 - t)$, sampled at 1024 points with $\sigma = 0.5$ and a six-level db4 transform with periodic
+extension, the mean squared error averaged over 50 noise draws is 0.248 for the noisy data, 0.038 after soft
+thresholding at the universal threshold, and 0.027 after hard thresholding. Soft thresholding shrinks the large
+coefficients too, which biases the jumps; hard thresholding keeps them intact but leaves isolated noise spikes where a
+noise coefficient just exceeds the threshold.
+
+<DenoiseExplorer />
+
+## Choosing the threshold
+
+- **Universal** (VisuShrink): simple, conservative, visually smooth; tends to over-smooth.
+- **SURE** (SureShrink): chooses a threshold per level to minimise Stein's unbiased estimate of the risk, adapting to
+  how sparse each level is.
+- **Cross-validation and Bayesian shrinkage** fit the threshold to the data at more cost.
+
+## Pitfalls
+
+- **Shift variance.** Thresholding a decimated transform produces artefacts near edges that depend on the signal's
+  alignment with the dyadic grid. Averaging the estimates over all circular shifts, cycle spinning, removes most of
+  them.
+- **Coloured noise** has a different level in each band; estimate $\sigma$ per level.
+- **Leave the approximation alone.** The coarse coefficients carry the signal's trend; thresholding them removes it.

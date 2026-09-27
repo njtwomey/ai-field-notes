@@ -1,0 +1,197 @@
+---
+title: Particle filter
+kind: concept
+summary: 'A particle filter approximates the filtering distribution $p(\zvec_t \mid \xvec_{1:t})$ of any state-space model by $N$ weighted samples. Each step moves the particles through the dynamics, reweights them by the likelihood of the new observation, and resamples them when the weights degenerate.'
+tags: [time-series, state-space-models, filtering, monte-carlo, nonlinear, bayesian, worked-example]
+aliases: [sequential Monte Carlo, SMC, bootstrap filter, sequential importance resampling, SIR filter, sequential importance sampling, effective sample size, systematic resampling, condensation algorithm]
+requires: [bayes-theorem, expectation]
+related: [kalman-filter, extended-and-unscented-kalman-filters, rejection-sampling, hidden-markov-model]
+references: [gordon1993, sarkka2013]
+status: draft
+updated: 2026-09-27
+---
+
+import { ParticleTracking } from './ParticleTracking'
+
+<Definition>
+A **particle filter** represents the filtering distribution of a state-space model by a set of $N$ samples
+$\zvec_t^{(i)}$, the **particles**, with normalised weights $w_t^{(i)}$:
+
+$$
+p(\zvec_t \mid \xvec_{1:t}) \approx \sum_{i=1}^{N} w_t^{(i)}\,\delta\paren{\zvec_t - \zvec_t^{(i)}}, \qquad
+\sum_{i=1}^{N} w_t^{(i)} = 1.
+$$
+
+The model is any pair of a transition density $p(\zvec_t \mid \zvec_{t-1})$ that can be sampled and an observation
+density $p(\xvec_t \mid \zvec_t)$ that can be evaluated. The **bootstrap filter** updates the particles by sampling
+each from the transition, multiplying its weight by the likelihood of the new observation, and resampling
+<Cite id="gordon1993" />.
+</Definition>
+
+## The problem it solves
+
+Filtering alternates two steps: predict with the dynamics, then update with the new observation by
+<NoteLink to="bayes-theorem">Bayes' theorem</NoteLink>. For a linear-Gaussian model both steps stay Gaussian, and the
+<NoteLink to="kalman-filter">Kalman filter</NoteLink> computes them exactly. For a nonlinear or non-Gaussian model the
+filtering distribution can be skewed, heavy-tailed or multimodal, and the prediction integral has no closed form.
+The <NoteLink to="extended-and-unscented-kalman-filters">extended and unscented Kalman filters</NoteLink> force it to
+be Gaussian. A particle filter instead represents the distribution by samples, and its accuracy improves without
+limit as $N$ grows, at a cost of $O(N)$ per step.
+
+## Importance sampling
+
+The particle filter is built on importance sampling. To estimate $\expect_p[\phi(\zvec)]$ under a target density $p$
+that is hard to sample, draw $\zvec^{(i)} \sim q$ from a **proposal** $q$ that is easy to sample, and correct for the
+mismatch with weights:
+
+$$
+\expect_p[\phi(\zvec)] = \int \phi(\zvec)\frac{p(\zvec)}{q(\zvec)}\, q(\zvec)\, d\zvec
+\approx \frac1N \sum_{i=1}^{N} \phi(\zvec^{(i)})\,\frac{p(\zvec^{(i)})}{q(\zvec^{(i)})}.
+$$
+
+The equality holds whenever $q > 0$ wherever $p > 0$; the approximation is the Monte Carlo average of the integrand
+under $q$. In Bayesian problems $p$ is usually known only up to its normalising constant,
+$p = \tilde p / Z$. Replacing $1/N$ by the normalised weights
+$w^{(i)} = \tilde w^{(i)} / \sum_j \tilde w^{(j)}$ with $\tilde w^{(i)} = \tilde p(\zvec^{(i)}) / q(\zvec^{(i)})$
+estimates $Z$ by the same samples and cancels it. This **self-normalised** estimate
+$\sum_i w^{(i)}\phi(\zvec^{(i)})$ is biased for finite $N$ but consistent as $N \to \infty$. Like
+<NoteLink to="rejection-sampling">rejection sampling</NoteLink>, importance sampling turns samples from an easy
+distribution into information about a hard one; it keeps every sample and weights it instead of discarding some.
+
+## Sequential importance sampling
+
+Apply importance sampling to the whole path $\zvec_{0:t}$ with target $p(\zvec_{0:t} \mid \xvec_{1:t})$. By the
+Markov structure of the model, the target factorises recursively:
+
+$$
+p(\zvec_{0:t} \mid \xvec_{1:t}) \propto p(\xvec_t \mid \zvec_t)\, p(\zvec_t \mid \zvec_{t-1})\,
+p(\zvec_{0:t-1} \mid \xvec_{1:t-1}).
+$$
+
+Choose a proposal with the same recursive form: keep each particle's past path, and extend it by drawing
+$\zvec_t^{(i)} \sim q(\zvec_t \mid \zvec_{t-1}^{(i)}, \xvec_t)$. The ratio of target to proposal then factorises too,
+and the old weight carries over:
+
+$$
+\tilde w_t^{(i)} = w_{t-1}^{(i)}\,
+\frac{p(\xvec_t \mid \zvec_t^{(i)})\, p(\zvec_t^{(i)} \mid \zvec_{t-1}^{(i)})}{q(\zvec_t^{(i)} \mid \zvec_{t-1}^{(i)}, \xvec_t)}.
+$$
+
+Normalising gives $w_t^{(i)}$. Dropping the past of each path leaves weighted samples of the filtering distribution
+$p(\zvec_t \mid \xvec_{1:t})$. The update needs only the previous particles and weights, so the cost per step does not
+grow with $t$.
+
+**The bootstrap proposal.** The simplest proposal is the transition itself,
+$q(\zvec_t \mid \zvec_{t-1}, \xvec_t) = p(\zvec_t \mid \zvec_{t-1})$. The transition terms cancel and the weight
+update becomes
+
+$$
+\tilde w_t^{(i)} = w_{t-1}^{(i)}\, p(\xvec_t \mid \zvec_t^{(i)}).
+$$
+
+Predict by simulating the dynamics; update by multiplying by the likelihood. This is the filtering recursion with the
+integral replaced by simulation <Cite id="gordon1993" />. The bootstrap proposal ignores $\xvec_t$ when moving the
+particles, so it wastes particles when the observation is much more informative than the prediction. Proposals that
+use $\xvec_t$, such as a local Gaussian approximation of the posterior, need fewer particles.
+
+## Degeneracy and resampling
+
+Multiplying weights step after step makes their spread grow. After a few steps one particle holds almost all the
+weight and the others contribute nothing: the approximation has collapsed to a single sample. This is **weight
+degeneracy**. It is measured by the **effective sample size**
+
+$$
+\mathrm{ESS} = \frac{1}{\sum_{i=1}^{N} \paren{w_t^{(i)}}^2}.
+$$
+
+With equal weights $w^{(i)} = 1/N$ the sum is $N \cdot 1/N^2 = 1/N$ and $\mathrm{ESS} = N$. With all weight on one
+particle the sum is 1 and $\mathrm{ESS} = 1$. In between, ESS approximates the number of independent samples from the
+target that would give an estimate of similar variance.
+
+**Resampling** removes degeneracy. Draw $N$ new particles from the current set, each chosen with probability equal to
+its weight, and reset every weight to $1/N$. Heavy particles are copied several times and light ones disappear. The
+weighted distribution is unchanged in expectation, and the computation now concentrates on the probable region
+<Cite id="gordon1993" />. The schemes differ in how much random variation they add <Cite id="sarkka2013" />:
+
+- **Multinomial resampling** draws $N$ independent indices from the weights.
+- **Systematic resampling** draws one uniform $u \in [0, 1/N)$ and takes the particles whose cumulative weights first
+  exceed $u, u + 1/N, \dots, u + (N-1)/N$. Each particle is copied either $\lfloor N w^{(i)} \rfloor$ or
+  $\lceil N w^{(i)} \rceil$ times, so it adds less variance and costs $O(N)$.
+- **Stratified** and **residual** resampling lie between the two.
+
+Resampling at every step adds noise when the weights are nearly equal. A common rule resamples only when
+$\mathrm{ESS} < N/2$. Resampling has its own failure mode, **sample impoverishment**: after it, many particles are
+copies, and if the process noise is small they stay nearly identical. Adding a small random move after resampling,
+for example a Markov chain Monte Carlo step that leaves the posterior invariant, restores diversity.
+
+## The algorithm
+
+For $t = 1, \dots, T$, starting from particles drawn from $p(\zvec_0)$ with weights $1/N$:
+
+1. **Propagate.** For each $i$, draw $\zvec_t^{(i)} \sim p(\zvec_t \mid \zvec_{t-1}^{(i)})$.
+2. **Weight.** Set $\tilde w_t^{(i)} = w_{t-1}^{(i)}\, p(\xvec_t \mid \zvec_t^{(i)})$ and normalise. Work with
+   log-weights and subtract the largest before exponentiating, since likelihoods underflow easily.
+3. **Estimate.** Report $\sum_i w_t^{(i)}\phi(\zvec_t^{(i)})$ for any quantity $\phi$ of interest, such as the mean.
+4. **Resample** if $\mathrm{ESS} < N/2$, and reset the weights to $1/N$.
+
+Estimate before resampling: resampling only adds noise to the current estimate.
+
+The normalising constants give the likelihood of the data too:
+$p(\xvec_t \mid \xvec_{1:t-1}) \approx \sum_i w_{t-1}^{(i)}\, p(\xvec_t \mid \zvec_t^{(i)})$. The product over $t$ is an
+unbiased estimate of $p(\xvec_{1:T})$, which parameter-estimation methods build on.
+
+## Worked example: one update
+
+A scalar state is observed through $x = z^2/20 + v$ with $v \sim \Gauss(0, 1)$, so an observation cannot distinguish
+$z$ from $-z$. Three equally weighted particles, after propagation, sit at $z = (-4, 1, 4)$. The observation is
+$x = 0.8$.
+
+- **Predicted observations.** $z^2/20 = (0.8, 0.05, 0.8)$.
+- **Likelihoods.** $\exp\paren{-(x - z^2/20)^2/2} = (1, 0.755, 1)$. The constant $1/\sqrt{2\pi}$ cancels on
+  normalising.
+- **Weights.** $(1, 0.755, 1)/2.755 = (0.363, 0.274, 0.363)$.
+- **Estimates.** The posterior mean is $0.363 \times (-4) + 0.274 \times 1 + 0.363 \times 4 = 0.274$. The effective
+  sample size is $1/(0.363^2 + 0.274^2 + 0.363^2) = 2.95$.
+
+The observation favours $\abs{z} = 4$ equally on both sides, so the filtering distribution has two modes, at $-4$ and
+$4$. The mean, 0.274, lies between them, where the state is unlikely to be. The particles still represent both modes.
+A Gaussian filter cannot: it must place its single mean and covariance somewhere, and a mean with a covariance does not
+describe two separated peaks.
+
+## Figure
+
+The figure uses a benchmark from the particle-filtering literature, the model that Gordon, Salmond and Smith used to
+compare the bootstrap filter with the extended Kalman filter <Cite id="gordon1993" />:
+
+$$
+z_t = \frac{z_{t-1}}{2} + \frac{25\, z_{t-1}}{1 + z_{t-1}^2} + 8\cos(1.2\, t) + w_t, \qquad
+x_t = \frac{z_t^2}{20} + v_t,
+$$
+
+with $w_t \sim \Gauss(0, 10)$, $v_t \sim \Gauss(0, 1)$ and $z_0 \sim \Gauss(0, 5)$. The dynamics can send the state
+across zero, and the squared observation cannot see its sign.
+
+<ParticleTracking />
+
+## Assumptions and cost
+
+- The transition density must be sampleable and the likelihood computable up to a constant. Neither needs to be
+  linear, Gaussian or differentiable.
+- The Monte Carlo error of an estimate at a fixed time falls as $1/\sqrt{N}$.
+- The number of particles needed grows quickly with the dimension of the state, because the likelihood of a
+  high-dimensional observation is sharply peaked and few particles land where it is large. Particle filters are
+  most effective for states of a few dimensions. Models with a linear-Gaussian part can filter that part exactly with
+  a Kalman filter per particle (Rao–Blackwellisation) and sample only the rest.
+
+## Pitfalls
+
+- **Too few particles for the likelihood.** A precise sensor gives a narrow likelihood. If no particle falls inside
+  it, all weights are near zero and the ESS collapses at once. Increase $N$, or use a proposal that looks at
+  $\xvec_t$.
+- **The mean of a multimodal posterior.** The weighted mean can lie between modes, as in the worked example. Report
+  the modes or the full particle set when the posterior is multimodal.
+- **Path degeneracy.** Repeated resampling means that, looking back, all particles descend from a few ancestors. The
+  particles represent $p(\zvec_t \mid \xvec_{1:t})$ well but $p(\zvec_{0:t} \mid \xvec_{1:t})$ poorly. Smoothing needs a
+  separate backward pass.
+- **Randomness in the results.** Two runs with different seeds give different estimates. Compare filters by averaging
+  over repeated runs.

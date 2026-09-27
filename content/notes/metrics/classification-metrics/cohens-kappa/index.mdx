@@ -1,0 +1,97 @@
+---
+title: Cohen's kappa
+kind: concept
+summary: "Cohen's kappa measures agreement between two raters, or between predictions and labels, beyond what chance would produce: $\\kappa = (p_o - p_e)/(1 - p_e)$. Weighted kappa gives partial credit for near misses on ordinal scales."
+tags: [metrics, classification, agreement, worked-example]
+aliases: [Cohen's kappa, kappa statistic, weighted kappa, quadratic weighted kappa, chance-corrected agreement, inter-rater agreement]
+requires: [confusion-matrix]
+related: [fleiss-kappa, matthews-correlation-coefficient, accuracy-and-balanced-accuracy, nominal-association]
+references: [cohen1960, cohen1968, landis1977, feinstein1990]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For two raters who each assign one of $K$ categories to the same $n$ items, let $p_o$ be the observed proportion of
+items on which they agree and $p_e$ the proportion expected if they rated independently with their observed marginal
+frequencies. Then
+
+$$
+\kappa = \frac{p_o - p_e}{1 - p_e}.
+$$
+
+$\kappa = 1$ for perfect agreement and $\kappa = 0$ for agreement at the chance level <Cite id="cohen1960" />.
+</Definition>
+
+## Correcting agreement for chance
+
+With the agreement table $\Cmat$, whose entry $C_{jk}$ counts items put in category $j$ by the first rater and $k$ by
+the second, the observed agreement is the diagonal share $p_o = \frac1n\sum_k C_{kk}$. If the raters chose
+independently, each with their own category frequencies $r_k = \frac1n\sum_j C_{kj}$ and $c_k = \frac1n\sum_j C_{jk}$,
+they would agree on category $k$ with probability $r_k c_k$, so
+
+$$
+p_e = \sum_k r_k c_k.
+$$
+
+$\kappa$ is the observed agreement beyond chance, $p_o - p_e$, as a fraction of the largest possible agreement beyond
+chance, $1 - p_e$. Negative values mean agreement below chance.
+
+For a classifier, the two raters are the true labels and the predictions, and $p_o$ is the accuracy. Kappa then
+discounts the accuracy that the classifier would get by predicting with the right marginal frequencies but no
+information.
+
+## Worked examples
+
+**Classifier.** On the screening data (TP = 40, FN = 10, FP = 90, TN = 860), $p_o = 0.900$. The truth is positive for
+5% of cases and the classifier predicts positive for 13%, so
+
+$$
+p_e = 0.05 \times 0.13 + 0.95 \times 0.87 = 0.833, \qquad \kappa = \frac{0.900 - 0.833}{1 - 0.833} = 0.401.
+$$
+
+Most of the 90% accuracy is what two uninformed raters with these marginals would achieve.
+
+**Two raters, ordinal grades.** Two clinicians grade 70 cases as mild, moderate or severe:
+
+| | B: mild | B: moderate | B: severe |
+| --- | --- | --- | --- |
+| **A: mild** | 20 | 5 | 1 |
+| **A: moderate** | 4 | 15 | 5 |
+| **A: severe** | 1 | 4 | 15 |
+
+They agree on $50/70 = 0.714$ of cases; chance agreement is $p_e = 0.336$, so $\kappa = 0.570$.
+
+## Weighted kappa
+
+On an ordinal scale, a disagreement between mild and moderate is smaller than one between mild and severe. Weighted
+kappa assigns each pair of categories a disagreement weight $w_{jk}$, zero on the diagonal, and compares the observed
+and chance-expected weighted disagreement <Cite id="cohen1968" />:
+
+$$
+\kappa_w = 1 - \frac{\sum_{j,k} w_{jk}\,C_{jk}/n}{\sum_{j,k} w_{jk}\, r_j c_k}.
+$$
+
+Linear weights $w_{jk} = \abs{j - k}$ and quadratic weights $w_{jk} = (j - k)^2$ are the usual choices; with 0/1
+weights, $\kappa_w$ reduces to $\kappa$. For the clinicians' table, linear weights give $0.642$ and quadratic weights
+$0.715$: most disagreements are between neighbouring grades. Quadratic weighted kappa is close to the intraclass
+correlation of the grades treated as numbers, and is a common metric for ordinal prediction tasks.
+
+## Interpreting the value
+
+Landis and Koch proposed verbal bands: 0.41–0.60 moderate, 0.61–0.80 substantial, above 0.80 almost perfect
+<Cite id="landis1977" />. They are conventions, not derived thresholds, and kappa values from different tasks are not
+comparable.
+
+## Pitfalls
+
+- **High agreement, low kappa.** When one category dominates, $p_e$ is large and kappa is small even with high agreement.
+  Two raters who agree on 90 of 100 items, with 90% of their ratings in one category, have $p_e = 0.82$ and
+  $\kappa = 0.44$ <Cite id="feinstein1990" />. The kappa is not wrong: most of their agreement is what the base rate
+  gives for free. But it is not comparable to a kappa from balanced data.
+- **Kappa depends on the marginals.** Two pairs of raters with the same underlying accuracy can have different kappas if
+  their category frequencies differ.
+- **Two raters only.** For many raters, or different raters per item, use <NoteLink to="fleiss-kappa">Fleiss'
+  kappa</NoteLink>.
+- **Versus MCC.** For binary classification both correct for chance. MCC is a correlation and symmetric in the two
+  directions of prediction; kappa measures agreement. They coincide when the predicted and true marginals are equal.

@@ -1,0 +1,96 @@
+---
+title: Spearman and Kendall rank correlation
+kind: concept
+summary: 'Rank correlations measure monotone association using only the order of the data. Spearman''s $\rho$ is Pearson correlation of the ranks; Kendall''s $\tau$ is the share of concordant pairs minus discordant pairs. Both ignore any strictly increasing transform and resist outliers.'
+tags: [metrics, correlation, nonparametric, ranking, worked-example]
+aliases: [Spearman's rho, Spearman correlation, Kendall's tau, Kendall tau-b, rank correlation coefficient, concordant pairs]
+requires: [pearson-correlation]
+related: [concordance-correlation-coefficient, ndcg, roc-curve-and-auc]
+references: [spearman1904, kendall1938, pedregosa2011]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $R_i$ and $S_i$ be the ranks of $x_i$ among the $x$ values and of $y_i$ among the $y$ values, with tied values given
+the mean of their ranks. **Spearman's** $\rho$ is the Pearson correlation of $(R_i, S_i)$ <Cite id="spearman1904" />.
+
+A pair $i < j$ is **concordant** if $x_i - x_j$ and $y_i - y_j$ have the same sign and **discordant** if they have
+opposite signs. With $C$ concordant and $D$ discordant pairs among the $\binom n2$ pairs and no ties, **Kendall's**
+$\tau$ is <Cite id="kendall1938" />
+
+$$
+\tau = \frac{C - D}{\binom n2}.
+$$
+</Definition>
+
+## What order-based measures buy
+
+Both coefficients depend on the data only through the ranks. So they are unchanged by any strictly increasing
+transformation of either variable: $\log x$, $x^3$ or $e^x$ give the same values. They measure **monotone**
+association: both equal 1 exactly when larger $x$ always goes with larger $y$, however curved the relationship, and
+$-1$ when it always goes with smaller $y$.
+
+Ranks also bound the influence of any single point. A point can move at most from the lowest rank to the highest,
+however extreme its value. That is why rank correlation discounts the single distant point that creates Anscombe's
+fourth correlation; see <NoteLink to="pearson-correlation">Pearson correlation</NoteLink>.
+
+## Spearman's formula
+
+Without ties, the ranks $R_i$ and $S_i$ are each a permutation of $1, \dots, n$. Both have mean $(n+1)/2$ and the same
+sum of squared deviations,
+
+$$
+\sum_i \paren{R_i - \tfrac{n+1}2}^2 = \frac{n(n^2 - 1)}{12}.
+$$
+
+Write $d_i = R_i - S_i$. Expanding $\sum_i d_i^2$ around the common mean gives
+$\sum d_i^2 = 2\cdot\frac{n(n^2-1)}{12} - 2\sum_i (R_i - \bar R)(S_i - \bar S)$. Dividing the covariance term by
+$n(n^2-1)/12$ gives $\rho$, so
+
+$$
+\rho = 1 - \frac{6\sum_i d_i^2}{n(n^2 - 1)}.
+$$
+
+With ties this shortcut is inexact; compute the Pearson correlation of the averaged ranks instead.
+
+## Kendall's τ as a probability
+
+Pick two observations at random. $\tau$ is the probability that they are concordant minus the probability that they
+are discordant. It has a direct reading: $\tau = 0.6$ means that ordering a random pair by $x$ agrees with ordering it
+by $y$ 80% of the time and disagrees 20% of the time, when there are no ties.
+
+**Ties.** $\tau_b$ corrects for tied pairs, which count as neither concordant nor discordant:
+$\tau_b = (C - D)/\sqrt{(n_0 - T_x)(n_0 - T_y)}$, with $n_0 = \binom n2$ and $T_x$, $T_y$ the numbers of pairs tied in
+$x$ and in $y$. This is the version SciPy and pandas report.
+
+Kendall's $\tau$ is usually smaller in magnitude than Spearman's $\rho$ on the same data. The two measure different
+things and should not be compared on the same scale.
+
+## Worked example
+
+Take $x = (1, 2, 3, 4, 5)$ and $y = (2, 1, 4, 3, 5)$, which are already ranks. The rank differences are
+$d = (-1, 1, -1, 1, 0)$, so $\sum d_i^2 = 4$ and $\rho = 1 - 24/120 = 0.8$.
+
+Of the 10 pairs, only $(1, 2)$ and $(3, 4)$ are discordant, so $C = 8$, $D = 2$ and $\tau = 6/10 = 0.6$: a random pair
+is ordered the same way by both variables 80% of the time.
+
+With ties, $x = (1, 2, 3, 4, 5)$ and $y = (2, 4, 5, 4, 5)$ give $\rho = 0.738$ and $\tau_b = 0.671$, against a
+Pearson correlation of 0.775. These match SciPy's `spearmanr` and `kendalltau`.
+
+## In machine learning
+
+- **Ranking evaluation.** When only the order of predictions matters, as in recommendation or retrieval, rank
+  correlation between predicted and true scores measures ranking quality; see <NoteLink to="ndcg">NDCG</NoteLink> for a
+  score that weights the top of the list.
+- **AUROC** is a rank statistic of the same family: the probability that a random positive outranks a random negative;
+  see <NoteLink to="roc-curve-and-auc">ROC curves</NoteLink>.
+- **Metric agreement.** Comparing two evaluation metrics, or a model's predicted scores with human judgements, is
+  usually done with Spearman or Kendall correlation, since only the ranking of systems matters.
+
+## Pitfalls
+
+- **Monotone is not linear.** $\rho = 1$ says nothing about the shape of the relationship or the size of the effect.
+- **Many ties.** With heavily tied data, such as ratings on a 1–5 scale, the tie-corrected versions differ noticeably
+  from the textbook formulas. State which one is reported.
+- **Non-monotone dependence.** A U-shaped relationship can have rank correlation near zero, just as with Pearson.

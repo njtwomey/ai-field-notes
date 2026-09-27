@@ -1,0 +1,81 @@
+---
+title: Dice coefficient and segmentation overlap
+kind: concept
+summary: 'The Dice coefficient $2\abs{A \cap B}/(\abs{A} + \abs{B})$ measures the overlap of a predicted and a true segmentation. It equals the F1 score of pixel labels and is a monotone function of IoU. Generalised Dice and mean IoU extend it to many classes.'
+tags: [metrics, computer-vision, segmentation, medical-imaging, worked-example]
+aliases: [Dice, Dice score, Dice similarity coefficient, DSC, Sørensen–Dice, F1 for segmentation, generalised Dice, generalized Dice, mean IoU, mIoU, soft Dice loss]
+related: [intersection-over-union, hausdorff-distance, precision-recall-and-f-score, panoptic-quality]
+references: [dice1945, sudre2017]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For a predicted region $A$ and a true region $B$, the Dice coefficient is <Cite id="dice1945" />
+
+$$
+D = \frac{2\abs{A \cap B}}{\abs{A} + \abs{B}} \in [0, 1].
+$$
+
+For a segmentation into classes, the generalised Dice score weights each class $l$ by $w_l = 1/\paren{\sum_n r_{ln}}^2$,
+where $r_{ln}$ indicates that pixel $n$ belongs to class $l$ <Cite id="sudre2017" />, and mean IoU averages the
+per-class IoU.
+</Definition>
+
+## Dice is the F1 score
+
+Treat each pixel as a binary prediction. The pixels in $A \cap B$ are true positives, those in $A$ only are false
+positives, and those in $B$ only are false negatives. Then $\abs{A} + \abs{B} = 2\text{TP} + \text{FP} + \text{FN}$, so
+
+$$
+D = \frac{2\,\text{TP}}{2\,\text{TP} + \text{FP} + \text{FN}} ,
+$$
+
+which is the F1 score of the pixel labels (see <NoteLink to="precision-recall-and-f-score">precision, recall and F-score</NoteLink>).
+True negatives, the background pixels both agree on, do not appear. That is why Dice suits segmentation, where the
+background usually dwarfs the object: pixel accuracy would be close to 1 for a prediction that misses the object
+entirely.
+
+## Dice and IoU
+
+IoU is $J = \text{TP}/(\text{TP} + \text{FP} + \text{FN})$. Writing Dice in the same terms,
+
+$$
+D = \frac{2J}{1 + J}, \qquad J = \frac{D}{2 - D}.
+$$
+
+The map $J \mapsto 2J/(1 + J)$ is increasing, so Dice and IoU rank segmentations identically; Dice is always at least
+IoU, with equality only at 0 and 1. The two differ as averages, though: the mean Dice over images is not the Dice of
+the mean IoU.
+
+**Worked example.** Two $3 \times 4$ rectangles on a grid each cover 12 pixels and overlap in 6. Then
+$D = 12/24 = 0.5$ and $J = 6/18 = 0.333$, and indeed $2J/(1 + J) = 0.5$.
+
+## Many classes
+
+**Mean IoU** computes IoU per class over the whole test set, then averages over classes. Every class counts equally,
+so a rare class matters as much as the background.
+
+**Generalised Dice** pools the classes into one ratio,
+
+$$
+\text{GD} = \frac{2\sum_l w_l \sum_n r_{ln} p_{ln}}{\sum_l w_l \sum_n (r_{ln} + p_{ln})}, \qquad w_l = \frac{1}{\paren{\sum_n r_{ln}}^2} ,
+$$
+
+where $p_{ln}$ is the predicted label or probability. The inverse-squared-volume weights stop large classes dominating,
+which matters for small structures such as lesions.
+
+## As a loss
+
+With predicted probabilities $p_n \in [0, 1]$ in place of hard labels, $1 - D$ becomes the soft Dice loss, which is
+differentiable. It optimises the overlap directly and copes with class imbalance better than per-pixel cross-entropy,
+though its gradients are less stable when a structure is very small. The two are often summed.
+
+## Pitfalls
+
+- **Empty masks.** If both $A$ and $B$ are empty, Dice is $0/0$. Libraries return 1, 0, or skip the case, which changes
+  averages over images where the structure is absent.
+- **Boundary errors.** Dice measures volume overlap; a prediction with a thin spur far from the object loses little
+  Dice. Pair it with a boundary metric such as the <NoteLink to="hausdorff-distance">Hausdorff distance</NoteLink>.
+- **Size bias.** A few pixels of error are a large Dice loss for a small structure and a negligible one for a large
+  organ. Report per-structure results.

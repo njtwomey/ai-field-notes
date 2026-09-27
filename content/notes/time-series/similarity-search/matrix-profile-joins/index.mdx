@@ -1,0 +1,120 @@
+---
+title: Matrix profile joins
+kind: concept
+summary: 'An AB-join gives, for each subsequence of series $A$, the distance to its nearest subsequence of series $B$. Its minima are patterns the two series share; the maxima of the reverse join are what $B$ has and $A$ lacks. mSTAMP extends the join to multidimensional series.'
+tags: [time-series, similarity-search, worked-example]
+aliases: [AB-join, AB join, similarity join, mSTAMP, multidimensional matrix profile, multidimensional motif]
+requires: [matrix-profile]
+partOf: [matrix-profile-family]
+related: [distance-profile-and-mass, shapelets, time-series-snippets]
+references: [yeh2016, yeh2017]
+status: draft
+updated: 2026-09-27
+---
+
+import { AbJoinFigure } from './AbJoinFigure'
+
+<Definition>
+Let $A$ and $B$ be time series with $N_A$ and $N_B$ subsequences of length $m$, and $d$ the z-normalised Euclidean
+distance. The AB-join matrix profile is $P^{AB}_i = \min_{1 \le j \le N_B} d(A_i, B_j)$ for $i = 1, \dots, N_A$, where
+$A_i$ and $B_j$ are the subsequences starting at $i$ and $j$. Its index $I^{AB}_i$ records the minimising $j$. No
+exclusion zone applies, because a subsequence of $A$ cannot trivially match one of $B$. The self-join, with $B = A$ and
+an exclusion zone, is the ordinary matrix profile <Cite id="yeh2016" />.
+</Definition>
+
+## Intuition
+
+A self-join asks what repeats within one series. A join asks what one series has in common with another. The two
+directions answer different questions.
+
+- **Shared patterns.** A small $P^{AB}_i$ means $A_i$ has a close match somewhere in $B$. The minimum of $P^{AB}$ is
+  the pair of subsequences, one from each series, that match best: the join motif.
+- **Novelty.** A large $P^{BA}_j$ means $B_j$ has no close match anywhere in $A$. The maximum of $P^{BA}$ is the part
+  of $B$ least explained by $A$. If $A$ is a reference period and $B$ a new one, that is what changed.
+- **Asymmetry.** $P^{AB}$ and $P^{BA}$ are different vectors, of different lengths if the series differ in length. A
+  pattern present in $B$ and absent from $A$ raises $P^{BA}$ but can leave $P^{AB}$ unchanged, because no
+  subsequence of $A$ needs that pattern as its nearest neighbour.
+
+<AbJoinFigure />
+
+## Details
+
+### Computing a join
+
+Every algorithm for the self-join applies with small changes <Cite id="yeh2016" />. STAMP runs MASS with each
+subsequence of $A$ as the query against all of $B$. STOMP-style algorithms walk the diagonals of the
+$N_A \times N_B$ distance matrix, $j - i = k$ for $k$ from $-(N_A - 1)$ to $N_B - 1$, updating dot products with
+$Q_{i+1, j+1} = Q_{ij} - a_i b_j + a_{i+m} b_{j+m}$. Each diagonal yields entries of both $P^{AB}$ (row minima) and
+$P^{BA}$ (column minima), so one pass gives both joins in $O(N_A N_B)$ time.
+
+### Uses
+
+- **Conserved patterns across series.** The join motif between two recordings finds behaviour common to both.
+- **Differences.** The maxima of $P^{BA}$ find new behaviour in $B$. Comparing $P^{BA}$ with $P^{BB}$, the
+  self-join of $B$, separates subsequences that are rare in $B$ from subsequences that are common in $B$ but absent
+  from $A$.
+- **Shapelets.** Matrix Profile I describes candidate <NoteLink to="shapelets">shapelets</NoteLink> for a
+  two-class problem as subsequences whose join distance to the other class greatly exceeds their self-join distance
+  within their own class <Cite id="yeh2016" />.
+- **Whole-series distance.** MPdist summarises the two join profiles into one distance between series
+  (<NoteLink to="time-series-snippets">time series snippets</NoteLink>).
+
+### Multidimensional series: mSTAMP
+
+A $D$-dimensional series has $D$ aligned channels, such as the three axes of an accelerometer. A motif in such a
+series need not span every channel: a gesture may show on two axes while the third records noise. Averaging the
+distance over all $D$ channels lets irrelevant channels hide the motif. Matrix Profile VI defines a profile for every
+number of channels $k$ at once <Cite id="yeh2017" />.
+
+For subsequences starting at $i$ and $j$, let $d^{(1)}, \dots, d^{(D)}$ be the per-channel z-normalised distances,
+sorted in ascending order, $d^{(1)} \le \dots \le d^{(D)}$. The $k$-dimensional distance is the mean of the $k$
+smallest:
+
+$$
+d_k(i, j) = \frac{1}{k} \sum_{c=1}^{k} d^{(c)}(i, j) .
+$$
+
+Among all subsets of $k$ channels, the $k$ smallest distances give the smallest sum, so $d_k$ is the distance under
+the best choice of $k$ channels for that pair. The $k$-dimensional matrix profile is
+$P^{(k)}_i = \min_{j} d_k(i, j)$ over $j$ outside the exclusion zone. mSTAMP computes all $D$ profiles in one pass: for
+each row, it computes $D$ distance profiles, sorts the $D$ values at each position and takes cumulative means. The
+cost is $D$ times that of a one-dimensional profile plus a sort of $D$ values per entry.
+
+### Choosing the number of dimensions
+
+$P^{(k)}$ is non-decreasing in $k$ at each position, because adding a channel adds a distance at least as large as those
+already averaged. So the smallest $k$ always gives the smallest distance, and comparing raw distances across $k$
+cannot choose $k$. mSTAMP instead chooses $k$ with the minimum description length principle
+<Cite id="yeh2017" />. Each extra channel must pay for itself: it is included only if encoding one motif member
+given the other in that channel saves more bits than describing the channel costs.
+
+## Worked example
+
+**AB-join.** Take $A = (0, 1, 3, 2, 0, 0, 1, 0, 0)$ and $B = (2, 2, 0, 1, 3, 2, 0, 4, 0, 4)$ with $m = 4$, positions
+counted from 1. $A$ has 6 subsequences and $B$ has 7.
+
+- $P^{AB} = (0, 0, 1.018, 1.614, 1.018, 1.343)$ with $I^{AB} = (3, 4, 1, 2, 6, 4)$. $A_1 = (0, 1, 3, 2)$ occurs in
+  $B$ as $B_3$, and $A_2 = (1, 3, 2, 0)$ as $B_4$. The join motif has distance 0.
+- $P^{BA} = (1.018, 1.614, 0, 0, 1.643, 1.018, 1.839)$. Its maximum is at $B_7 = (0, 4, 0, 4)$, an alternating
+  pattern with no counterpart in $A$.
+- $P^{AB}$ never exceeds 1.614, and no entry of it points to $B_7$: no subsequence of $A$ has $B_7$ as its nearest
+  neighbour. Only the reverse join sees the novelty.
+
+**mSTAMP.** Suppose a pair of subsequences has per-channel distances $(0.4, 3.1, 0.6)$ on three channels. Sorted, they
+are $(0.4, 0.6, 3.1)$, so $d_1 = 0.4$, $d_2 = 0.5$ and $d_3 = 1.367$. The pair is a good one-channel and two-channel
+match. The third channel, averaged in, more than doubles the distance.
+
+## Assumptions
+
+- **Comparable sampling.** Both series must share a sampling rate and the pattern must have about the same duration
+  in both, because $m$ is fixed.
+- **Aligned channels.** mSTAMP compares channel $c$ of one subsequence only with channel $c$ of the other, at the same
+  time offsets.
+
+## Pitfalls
+
+- **Reading the wrong direction.** The novel parts of $B$ are the maxima of $P^{BA}$, not of $P^{AB}$.
+- **Short reference series.** If $A$ is short, few patterns of $B$ have a close match in it, and $P^{BA}$ is high
+  everywhere. A maximum then says little.
+- **All channels by default.** Averaging over all $D$ channels, which is $P^{(D)}$, hides motifs that span only some of
+  them.

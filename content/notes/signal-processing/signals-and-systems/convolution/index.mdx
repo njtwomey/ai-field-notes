@@ -1,0 +1,87 @@
+---
+title: Convolution
+kind: concept
+summary: 'The convolution $(x * h)[n] = \sum_k x[k]\,h[n - k]$ is the output of a linear time-invariant system with impulse response $h$. It is commutative, associative and distributive, turns into multiplication in the frequency domain, and costs $O(NM)$ directly.'
+tags: [signal-processing, systems, worked-example]
+aliases: [discrete convolution, linear convolution, convolution sum, flip and slide, cross-correlation]
+requires: [lti-systems]
+related: [convolution-theorem, fir-filters, overlap-add-and-overlap-save, z-transform]
+references: [oppenheim2010]
+status: draft
+updated: 2026-09-26
+---
+
+import { FlipAndSlide } from './FlipAndSlide'
+
+<Definition>
+The convolution of two sequences $x$ and $h$ is
+
+$$
+(x * h)[n] = \sum_{k=-\infty}^{\infty} x[k]\,h[n - k].
+$$
+
+It is the output of the <NoteLink to="lti-systems">linear time-invariant system</NoteLink> with impulse response
+$h$ when the input is $x$ <Cite id="oppenheim2010" />. If $x$ has length $N$ and $h$ has length $M$, both starting
+at index 0, the convolution has length $N + M - 1$.
+</Definition>
+
+## Reading the sum
+
+For a fixed output index $n$, the sum pairs $x[k]$ with $h[n - k]$. As a function of $k$, $h[n - k]$ is $h$ reversed
+and shifted so that its origin sits at $k = n$. The output sample is the sum of the pointwise products. Increasing $n$
+slides the reversed response to the right.
+
+The equivalent reading swaps the roles: each input sample $x[k]$ launches a copy of the impulse response, scaled by
+$x[k]$ and starting at time $k$, and the output is the sum of all the copies. This is the superposition that
+defines an LTI system.
+
+<FlipAndSlide />
+
+**Worked example.** With $x = (1, 2, 1.5, 0.5, -1, -0.5, 0.25)$ and $h = (1, 0.6, 0.36, 0.216)$,
+
+$$
+y[3] = x[0]h[3] + x[1]h[2] + x[2]h[1] + x[3]h[0] = 0.216 + 0.72 + 0.9 + 0.5 = 2.336.
+$$
+
+The full output has $7 + 4 - 1 = 10$ samples:
+$(1, 2.6, 3.06, 2.336, 0.272, -0.596, -0.302, -0.246, -0.018, 0.054)$.
+
+## Properties
+
+Each follows from reindexing the sum.
+
+- **Commutative.** $x * h = h * x$: substitute $m = n - k$.
+- **Associative.** $(x * h_1) * h_2 = x * (h_1 * h_2)$: two systems in series equal one system whose impulse
+  response is the convolution of theirs.
+- **Distributive.** $x * (h_1 + h_2) = x * h_1 + x * h_2$: systems in parallel add their impulse responses.
+- **Identity and shift.** $x * \delta = x$, and $x * \delta[\cdot - n_0]$ delays $x$ by $n_0$ samples.
+- **Transforms.** Convolution in time is multiplication in frequency, $Y(e^{i\omega}) = X(e^{i\omega})
+  H(e^{i\omega})$, and in the z-domain, $Y(z) = X(z)H(z)$. See the
+  <NoteLink to="convolution-theorem">convolution theorem</NoteLink>.
+
+## Cost
+
+Computed directly, a length-$N$ input and a length-$M$ response need $NM$ multiplications. For long responses, the
+<NoteLink to="fft">FFT</NoteLink> is cheaper: pad both to length $L \ge N + M - 1$, transform, multiply and invert,
+for $O(L \log L)$ operations. For long or streaming inputs, block methods such as
+<NoteLink to="overlap-add-and-overlap-save">overlap-add and overlap-save</NoteLink> apply the FFT in pieces.
+
+## Correlation
+
+The cross-correlation of $x$ and $y$,
+
+$$
+r_{xy}[\ell] = \sum_n x[n + \ell]\,y[n],
+$$
+
+has no reversal: it slides one sequence along the other without flipping it. It equals the convolution of $x$ with
+$y$ reversed, $r_{xy}[\ell] = (x * \tilde y)[\ell]$ with $\tilde y[n] = y[-n]$. The layers called convolutional in
+neural networks usually compute cross-correlation. Because their kernels are learned, the missing flip makes no
+difference to what they can represent.
+
+## Pitfalls
+
+- **Edges.** Library functions offer "full" (length $N + M - 1$), "same" (length $N$, centred) and "valid" (only
+  where the sequences fully overlap) outputs. Mixing them up shifts or truncates the result.
+- **Circular versus linear.** Multiplying DFTs of length $L$ gives circular convolution, which wraps the tail of the
+  output around to the start unless $L \ge N + M - 1$.

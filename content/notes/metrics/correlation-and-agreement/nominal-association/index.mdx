@@ -1,0 +1,92 @@
+---
+title: Cramér's V, Tschuprow's T and Theil's U
+kind: concept
+summary: 'Association between two categorical variables. Cramér''s V and Tschuprow''s T rescale the chi-squared statistic to $[0, 1]$; Pearson''s contingency coefficient does so imperfectly; Theil''s U is the fraction of one variable''s entropy explained by the other, and is asymmetric.'
+tags: [metrics, association, categorical-data, information-theory, worked-example]
+aliases: [Cramér's V, Cramer's V, Tschuprow's T, Theil's U, uncertainty coefficient, contingency coefficient, nominal association]
+requires: [mutual-information]
+related: [chi-squared-distribution, entropy, matthews-correlation-coefficient, information-theoretic-clustering-metrics, fleiss-kappa]
+references: [cramer1946, theil1970, bergsma2013, cover2006]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $n_{ij}$ count the observations in row $i$ and column $j$ of an $r \times c$ contingency table, with total $n$, and
+let $\chi^2 = \sum_{ij} (n_{ij} - e_{ij})^2/e_{ij}$ with $e_{ij} = n_{i+}n_{+j}/n$ be Pearson's chi-squared statistic.
+Then
+
+$$
+V = \sqrt{\frac{\chi^2}{n\,\min(r - 1, c - 1)}}, \qquad
+T = \sqrt{\frac{\chi^2}{n\sqrt{(r - 1)(c - 1)}}}, \qquad
+C = \sqrt{\frac{\chi^2}{\chi^2 + n}},
+$$
+
+are Cramér's $V$, Tschuprow's $T$ and Pearson's contingency coefficient <Cite id="cramer1946" />. With $X$ the row
+variable and $Y$ the column variable, Theil's uncertainty coefficient is $U(Y \mid X) = I(X; Y)/\entropy(Y)$
+<Cite id="theil1970" />.
+</Definition>
+
+## Scaling chi-squared
+
+$\chi^2$ grows with the sample size, so on its own it measures evidence against independence, not strength of
+association. Divided by $n$ it becomes the mean squared contingency $\phi^2$. In proportions $p_{ij} = n_{ij}/n$,
+
+$$
+\phi^2 = \frac{\chi^2}{n} = \sum_{ij} \frac{p_{ij}^2}{p_{i+}\,p_{+j}} - 1.
+$$
+
+**Why the bound is $\min(r - 1, c - 1)$.** Each cell satisfies $p_{ij} \le p_{i+}$, so
+$p_{ij}^2/(p_{i+}p_{+j}) \le p_{ij}/p_{+j}$. Summing over all cells, $\sum_{ij} p_{ij}/p_{+j} = \sum_j 1 = c$, so
+$\phi^2 \le c - 1$. The same argument with columns gives $\phi^2 \le r - 1$. Equality holds when each row, or each
+column, has a single non-empty cell: when one variable determines the other.
+
+Cramér's $V$ divides by exactly this maximum, so $V$ reaches 1 for perfect association in any table shape, and 0 for
+independence. Tschuprow's $T$ divides by $\sqrt{(r-1)(c-1)}$ instead, which is the geometric mean of the two bounds;
+it can reach 1 only in square tables. The contingency coefficient $C$ never reaches 1: for a $k \times k$ table its
+maximum is $\sqrt{(k-1)/k}$, so values from tables of different sizes cannot be compared.
+
+For a $2 \times 2$ table, $V$ equals the absolute value of the phi coefficient, the Pearson correlation of the two
+binary variables; on a confusion matrix this is the
+<NoteLink to="matthews-correlation-coefficient">Matthews correlation coefficient</NoteLink>.
+
+## Theil's U: an asymmetric measure
+
+$V$ is symmetric and says nothing about direction. Theil's $U$ asks how much knowing $X$ reduces uncertainty about
+$Y$:
+
+$$
+U(Y \mid X) = \frac{\entropy(Y) - \entropy(Y \mid X)}{\entropy(Y)} = \frac{I(X; Y)}{\entropy(Y)}.
+$$
+
+It is 0 when $X$ tells nothing about $Y$ and 1 when $X$ determines $Y$. Because the
+<NoteLink to="mutual-information">mutual information</NoteLink> is divided by the entropy of the predicted variable,
+$U(Y \mid X)$ and $U(X \mid Y)$ differ whenever the two variables have different entropies. A fine-grained variable
+such as postcode can determine a coarse one such as region ($U = 1$) while telling you little in reverse.
+
+## Worked example
+
+Take the table with rows $(20, 10, 5)$ and $(10, 20, 15)$, so $n = 80$, $r = 2$ and $c = 3$. Then
+$\chi^2 = 10.58$ and:
+
+| Measure | Value |
+| --- | --- |
+| Cramér's $V = \sqrt{10.58/(80 \cdot 1)}$ | 0.364 |
+| Tschuprow's $T = \sqrt{10.58/(80\sqrt 2)}$ | 0.306 |
+| Contingency coefficient $C$ | 0.342 |
+| $I(X; Y)$ | 0.067 nats |
+| $U(Y \mid X)$, columns given rows | 0.062 |
+| $U(X \mid Y)$, rows given columns | 0.098 |
+
+The row variable has only two values, so it has less entropy than the three-valued column variable, and knowing the
+column explains a larger share of it. These values match `scipy.stats.contingency.association`.
+
+## Pitfalls
+
+- **Small samples inflate V.** Under independence $\expect[\chi^2] \approx (r-1)(c-1)$, not 0, so $V$ is biased upward
+  in small samples or large tables. Bergsma's bias-corrected versions of $V$ and $T$ subtract this expected value
+  first <Cite id="bergsma2013" />.
+- **Association is not agreement.** Two raters who swap every label have $V = 1$. Agreement needs the categories to
+  match: see <NoteLink to="fleiss-kappa">Fleiss' kappa</NoteLink>.
+- **Ordered categories.** For ordinal data these measures discard the order; a rank correlation or a weighted kappa
+  uses it.

@@ -1,0 +1,76 @@
+---
+title: Chroma features
+kind: technique
+summary: 'A chroma vector folds a spectrum onto the 12 pitch classes of the equal-tempered scale, adding together all octaves of each note. It describes harmony while ignoring octave and timbre, and is the standard input for chord recognition, key detection and audio alignment.'
+tags: [audio, music, feature-extraction, worked-example]
+aliases: [chroma, chromagram, pitch class profile, PCP, harmonic pitch class profile]
+related: [constant-q-transform, pitch-estimation, short-time-fourier-transform, spectral-features]
+references: [muller2015]
+status: draft
+updated: 2026-09-26
+---
+
+import { ChromaChord } from './ChromaChord'
+
+<Definition>
+The chroma vector of a frame is a 12-dimensional vector $\cvec = (c_0, \dots, c_{11})$ with one entry per pitch
+class, C, C♯, …, B. Each entry sums the spectral energy at all frequencies whose nearest equal-tempered pitch belongs to
+that class, over every octave:
+
+$$
+c_q = \sum_{k \,:\, \mathrm{pc}(f_k) = q} \abs{X[k]}^2, \qquad \mathrm{pc}(f) = \mathrm{round}\paren{69 + 12\log_2\frac{f}{440\ \mathrm{Hz}}} \bmod 12,
+$$
+
+usually normalised to unit maximum or unit norm <Cite id="muller2015" />. A sequence of chroma vectors over time is a
+chromagram.
+</Definition>
+
+## Why fold octaves
+
+Human pitch has two dimensions: height, which rises steadily with frequency, and chroma, which repeats every octave.
+Notes an octave apart sound alike and play the same harmonic role. Harmony depends on which pitch classes sound, not on
+the octaves or instruments that play them. Folding the spectrum onto 12 classes discards height and much of timbre, and
+keeps exactly the information that chords and keys are made of.
+
+## Computing chroma
+
+1. **A pitch-aligned spectrum.** Either a long-window STFT, whose bins are then assigned to their nearest pitch class
+   as in the definition, or a <NoteLink to="constant-q-transform">constant-Q transform</NoteLink> with 12 or 36 bins
+   per octave, which aligns bins with semitones directly and has the same relative resolution in every octave.
+2. **Fold.** Sum the energy of every bin belonging to each pitch class, over a range of about 60 Hz to 5 kHz.
+3. **Normalise.** Scale each frame to unit maximum or norm, so chroma depends on the balance of classes, not loudness.
+   Logarithmic compression before folding, and smoothing over time, make chroma more robust.
+
+A long window is needed at low frequencies: adjacent semitones near 65 Hz are about 4 Hz apart, so resolving them needs
+a window of a quarter of a second or more.
+
+## Worked example
+
+A C major triad in the fourth octave has fundamentals C4 = 261.63 Hz, E4 = 329.63 Hz and G4 = 392.00 Hz. Their MIDI
+numbers are $69 + 12\log_2(261.63/440) = 60$, 64 and 67, so their pitch classes are $60 \bmod 12 = 0$ (C), 4 (E) and
+7 (G). A4 = 440 Hz is MIDI 69, class 9 (A).
+
+The harmonics of a single note are not all in its own class. The 2nd and 4th harmonics of C4 are C5 and C6. The 3rd,
+784.9 Hz, is closest to G5 (783.99 Hz), class 7. The 5th, 1308.1 Hz, is closest to E6 (1318.5 Hz), class 4. So even a
+single C adds energy to G and E, the notes of its own major triad, and bright instruments smear chroma more than
+pure tones do.
+
+<ChromaChord />
+
+## Uses
+
+- **Chord recognition.** Compare each chroma vector with binary templates of the 24 major and minor triads, or feed
+  chromagrams to a sequence model; smoothing over time, often with an HMM, enforces chord continuity.
+- **Key detection.** Correlate a piece's average chroma with key profiles.
+- **Alignment and cover-song detection.** Chromagrams of two performances can be aligned by dynamic time warping,
+  since they share harmony even when tempo, instrumentation and octave differ. Circularly shifting the vector
+  transposes the key.
+
+## Pitfalls
+
+- **Tuning.** Recordings not tuned to A4 = 440 Hz shift energy between neighbouring classes. Estimate the tuning offset
+  first and shift the pitch mapping accordingly.
+- **Harmonic leakage.** As in the example, overtones feed other classes. Harmonic-sum or log-compressed chroma, and
+  learned chroma, reduce the effect.
+- **Percussion and noise.** Broadband sounds spread energy over all classes. Harmonic–percussive separation before
+  folding cleans the chromagram.

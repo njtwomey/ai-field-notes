@@ -1,0 +1,127 @@
+---
+title: Filter banks
+kind: concept
+summary: 'A filter bank splits a signal into subbands with analysis filters, usually downsamples each, and recombines them with synthesis filters. A uniform DFT filter bank modulates one prototype lowpass to $K$ centre frequencies and runs as a polyphase network plus an FFT.'
+tags: [signal-processing, multirate, filter-banks, subband-coding, worked-example]
+aliases: [subband decomposition, analysis filter bank, synthesis filter bank, DFT filter bank, uniform filter bank, channeliser]
+requires: [decimation-and-interpolation, polyphase-decomposition]
+related: [perfect-reconstruction-filter-banks, short-time-fourier-transform, discrete-wavelet-transform, mel-filter-bank, gammatone-filter-bank]
+references: [vaidyanathan1993, vetterli1995, crochiere1981]
+status: draft
+updated: 2026-09-27
+---
+
+import { SubbandBreakdown } from './SubbandBreakdown'
+
+<Definition>
+A **filter bank** is a set of filters $H_0, \dots, H_{K-1}$ whose outputs, the **subband signals**, divide the
+spectrum of the input into bands. In a **maximally decimated** or **critically sampled** bank each subband is
+downsampled by $M = K$, so the total sample rate is unchanged. A **synthesis bank** of filters $G_k$, after
+upsampling, recombines the subbands <Cite id="vaidyanathan1993" />.
+</Definition>
+
+## Analysis and synthesis
+
+The analysis bank computes $v_k = (h_k * x)$ downsampled by $M$. The synthesis bank upsamples each $v_k$ by $M$,
+filters with $g_k$ and sums. Between them, a coder can quantise each band to a different precision, or an equaliser
+can scale each band.
+
+In the $z$-domain, each branch applies $H_k$, downsamples and upsamples, then applies $G_k$. Downsampling followed by
+upsampling by $M$ replaces $V(z)$ by $\frac1M \sum_{l=0}^{M-1} V\paren{z W^l}$ with $W = e^{-i2\pi/M}$: it keeps the
+samples at multiples of $M$, and the sum of roots of unity is the comb that does so. The output is therefore
+
+$$
+\hat X(z) = \frac{1}{M} \sum_{l=0}^{M-1} X\paren{zW^l} \sum_{k=0}^{K-1} G_k(z)\, H_k\paren{zW^l}.
+$$
+
+The $l = 0$ term is the wanted, filtered signal. The terms $l \ne 0$ are aliasing. Designing a bank means choosing
+filters so the aliasing terms cancel and the $l = 0$ term is a pure delay; the
+<NoteLink to="perfect-reconstruction-filter-banks">perfect-reconstruction note</NoteLink> derives the conditions for
+two channels.
+
+## Uniform DFT filter banks
+
+The most used design modulates a single prototype lowpass $h[n]$ to equally spaced centre frequencies:
+
+$$
+h_k[n] = h[n]\, e^{i 2\pi k n / K}, \qquad H_k(z) = H\paren{z\, e^{-i 2\pi k / K}}, \qquad k = 0, \dots, K - 1.
+$$
+
+The $k$-th output at time $n$ is $\sum_m h[m]\, x[n - m]\, e^{i 2\pi k m / K}$. Write $m = rK + q$ and use
+$e^{i2\pi k (rK + q)/K} = e^{i2\pi kq/K}$:
+
+$$
+y_k[n] = \sum_{q=0}^{K-1} e^{i 2\pi k q / K} \underbrace{\sum_r h[rK + q]\, x[n - rK - q]}_{u_q[n]}.
+$$
+
+The inner sums $u_q$ are the outputs of the $K$ polyphase components of the prototype. The outer sum is an inverse
+DFT of length $K$ over $q$. So all $K$ channels together cost one pass through the polyphase network, which costs as
+much as filtering once with the prototype, plus one $K$-point FFT. This is how channelisers in radio receivers and
+many audio coders are built <Cite id="crochiere1981" />.
+
+The short-time Fourier transform is a DFT filter bank whose prototype is the analysis window, time-reversed; see
+<NoteLink to="short-time-fourier-transform">short-time Fourier transform</NoteLink>.
+
+**Worked example.** A $K = 8$ channel DFT bank with a 64-tap prototype, decimated by $M = 8$. Filtering with eight
+separate 64-tap filters costs $8 \times 64 = 512$ multiplications per input sample before decimation. With the
+polyphase network running at the low rate, the eight 8-tap components cost 64 multiplications per block of eight
+inputs, and an 8-point FFT adds about $\tfrac{8}{2} \log_2 8 = 12$ complex multiplications per block. Per input
+sample that is $8$ real multiplications plus $1.5$ complex ones, instead of 512.
+
+## Worked example: a signal in bands
+
+Take half a second of audio sampled at $f_s = 8$ kHz, made of four events in turn: a 500 Hz tone, a chirp rising
+from 1 to 3.5 kHz, a click, and finally two tones at 1.5 kHz and 3 kHz sounding together. Pass it through a
+$K = 16$ channel DFT filter bank. Channel $k$ is centred on $k f_s / K = 500k$ Hz and is $f_s / K = 500$ Hz wide, so
+the bank reads the spectrum in 500 Hz slices, and each slice is a signal in time:
+
+- **The tone** at 500 Hz sits in band 1. For the first 0.15 s, band 1 carries a steady output and the others are
+  nearly silent.
+- **The chirp** moves through the bands. Its instantaneous frequency rises by 12.5 kHz per second, so it crosses one
+  500 Hz band every 40 ms, and bands 2 to 7 light up in turn.
+- **The click** lasts one millisecond. A signal that short has a broad spectrum, so every band responds at once, for
+  about the length of the prototype filter.
+- **The two final tones** land in different bands, 3 and 6. They are separate signals in the bank's output although
+  they overlap completely in time.
+
+A tone between two band centres appears in both neighbouring bands, because the prototype's passband is not a
+brick wall: its response falls smoothly across each band edge. A tone at 700 Hz, near the 750 Hz edge between bands 1
+and 2, shows up in both. Longer prototypes with steeper edges reduce this leakage.
+
+<SubbandBreakdown />
+
+This is the same picture a spectrogram draws, and for the same reason: a short-time Fourier transform is a DFT
+filter bank. The bank's band width sets its frequency resolution, and the prototype's length sets how far an event
+is smeared in time. Doubling $K$ halves the band width and doubles the prototype length, which trades time
+resolution for frequency resolution, as the channel slider shows.
+
+**Putting the bands back together.** Summing all $K$ undecimated channels gives
+
+$$
+\sum_{k=0}^{K-1} y_k[n] = \sum_j h[j]\, x[n - j] \sum_{k=0}^{K-1} e^{i 2\pi k j / K} = K \sum_{r} h[rK]\, x[n - rK],
+$$
+
+because the inner sum of roots of unity is $K$ when $K$ divides $j$ and 0 otherwise. So the bands add back to the
+input exactly when the prototype is a **Nyquist($K$) filter**: its taps at a spacing of $K$ from its centre $D$ are
+zero, except $h[D] = 1/K$. Then $\sum_k y_k[n] = x[n - D]$, a pure delay. A windowed sinc with cutoff $\pi/K$ has this
+property by construction: $\operatorname{sinc}\paren{(j - D)/K}$ vanishes at every nonzero multiple of $K$ from the
+centre, and the window leaves the zeros in place. In the figure the recombined signal matches the delayed input to
+rounding error. Once the channels are decimated, exact reconstruction needs more: the synthesis filters must also
+cancel the aliasing terms of the previous section.
+
+## Other designs
+
+- **Cosine-modulated filter banks** use real cosine modulation and are the basis of MPEG audio coding and the
+  modified discrete cosine transform. See <NoteLink to="perceptual-audio-coding">perceptual audio coding</NoteLink>.
+- **Tree-structured banks** iterate a two-channel split, usually on the lowpass branch only, giving octave bands:
+  this is the <NoteLink to="discrete-wavelet-transform">discrete wavelet transform</NoteLink>.
+- **Auditory filter banks** space bands on a perceptual scale, such as the
+  <NoteLink to="mel-filter-bank">mel filter bank</NoteLink> or the
+  <NoteLink to="gammatone-filter-bank">gammatone filter bank</NoteLink>. They are usually not decimated or inverted.
+
+## Pitfalls
+
+- **Critical sampling leaves no room.** With $M = K$, any error in the aliasing cancellation, such as quantising a
+  subband, reappears as aliasing in the output. Oversampled banks ($M < K$) trade rate for robustness.
+- **Prototype design sets everything.** Stopband attenuation of the prototype bounds the separation between channels
+  and, in a critically sampled bank, the residual aliasing.

@@ -1,0 +1,95 @@
+---
+title: Pairwise distances and cosine similarity
+kind: concept
+summary: 'The Minkowski distances $\norm{\xvec - \yvec}_p$ (Manhattan, Euclidean, Chebyshev) measure how far apart two vectors are; cosine similarity measures the angle between them and ignores length. On unit vectors the two agree: $\norm{\uvec - \vvec}^2 = 2(1 - \cos\theta)$.'
+tags: [metrics, distance, similarity, embeddings, worked-example]
+aliases: [Euclidean distance, Manhattan distance, Chebyshev distance, Minkowski distance, angular distance, pairwise distance matrix, Mahalanobis distance]
+requires: [vector-norms, dot-product]
+related: [pearson-correlation, k-means, kernel-trick, procrustes-analysis, internal-clustering-indices]
+references: [pedregosa2011, detlefsen2022]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For vectors $\xvec, \yvec \in \reals^d$ and $p \ge 1$, the **Minkowski distance** is
+$\norm{\xvec - \yvec}_p = \paren{\sum_k \abs{x_k - y_k}^p}^{1/p}$. It is the Manhattan distance at $p = 1$, the
+Euclidean distance at $p = 2$, and the Chebyshev distance $\max_k \abs{x_k - y_k}$ as $p \to \infty$.
+
+The **cosine similarity** is $\cos\theta = \xvec^\top\yvec/(\norm{\xvec}\,\norm{\yvec})$, and the **cosine distance**
+is $1 - \cos\theta$.
+</Definition>
+
+## Distance or direction
+
+The Minkowski distances are the <NoteLink to="vector-norms">ℓp norms</NoteLink> of the difference $\xvec - \yvec$, and
+inherit their geometry. Manhattan distance adds coordinate differences, so a large difference in one coordinate costs
+the same as many small ones. Euclidean distance is invariant to rotation of the space. Chebyshev distance is set by
+the single worst coordinate. All three are true metrics: zero only for identical vectors, symmetric, and satisfying
+the triangle inequality.
+
+Cosine similarity ignores length and keeps only direction. Two documents with the same word proportions, one twice as
+long, have cosine similarity 1 but a large Euclidean distance. That makes it the default for text vectors and learned
+embeddings, where length often reflects frequency or confidence rather than meaning. For centred vectors it is
+exactly <NoteLink to="pearson-correlation">Pearson correlation</NoteLink>.
+
+**On unit vectors the two views coincide.** For $\norm{\uvec} = \norm{\vvec} = 1$,
+
+$$
+\norm{\uvec - \vvec}^2 = \norm{\uvec}^2 + \norm{\vvec}^2 - 2\uvec^\top\vvec = 2(1 - \cos\theta).
+$$
+
+So after normalising embeddings to unit length, ranking neighbours by Euclidean distance and by cosine similarity give
+the same order. Nearest-neighbour libraries rely on this to search by cosine with Euclidean indexes.
+
+**Cosine distance is not a metric.** It can violate the triangle inequality. For unit vectors at angles $0°$, $45°$ and
+$90°$, the distance between the outer two is 1, but the two steps through the middle one sum to
+$2(1 - \cos 45°) = 0.59$. The angular distance $\theta/\pi = \arccos(\cos\theta)/\pi$ is a true metric.
+
+## Computing all pairs
+
+For $m$ points $\xvec_i$ and $n$ points $\yvec_j$, the matrix of squared Euclidean distances expands as
+
+$$
+\norm{\xvec_i - \yvec_j}^2 = \norm{\xvec_i}^2 + \norm{\yvec_j}^2 - 2\,\xvec_i^\top\yvec_j,
+$$
+
+so all $mn$ distances come from one matrix product $\Xmat\Ymat^\top$ and two vectors of squared norms. This is how
+libraries compute distance matrices fast <Cite id="pedregosa2011" />. TorchMetrics exposes the Euclidean, Manhattan,
+Minkowski, cosine and linear-kernel versions as pairwise functions <Cite id="detlefsen2022" />.
+
+The expansion loses precision when the points are far from the origin and close to each other. For the points
+$(10^8 + 1, 10^8)$ and $(10^8, 10^8 + 1)$, the squared distance is 2, but in double precision the expansion subtracts
+two numbers near $4 \times 10^{16}$ and returns 0. Centre the data first, or compute differences directly for small
+problems.
+
+## Worked example
+
+For $\xvec = (1, 2, 3)$ and $\yvec = (4, 0, 3)$, the difference is $(-3, 2, 0)$:
+
+| Distance | Value |
+| --- | --- |
+| Manhattan, $p = 1$ | $3 + 2 + 0 = 5$ |
+| Euclidean, $p = 2$ | $\sqrt{13} = 3.606$ |
+| Minkowski, $p = 3$ | $(27 + 8)^{1/3} = 3.271$ |
+| Chebyshev, $p = \infty$ | 3 |
+
+The dot product is $4 + 0 + 9 = 13$ and the lengths are $\sqrt{14}$ and $5$, so $\cos\theta = 13/(5\sqrt{14}) = 0.695$
+and the cosine distance is 0.305. SciPy's `cdist` gives the same values.
+
+## Other distances
+
+- **Mahalanobis distance** $\sqrt{(\xvec - \yvec)^\top\Sigmamat^{-1}(\xvec - \yvec)}$ accounts for correlated and
+  differently scaled features: it is Euclidean distance after whitening with the covariance $\Sigmamat$.
+- **Kernels** such as the linear kernel $\xvec^\top\yvec$ or the RBF kernel are similarities rather than distances;
+  see the <NoteLink to="kernel-trick">kernel trick</NoteLink>.
+- **Distances between sets of points**, such as Procrustes disparity, are covered in
+  <NoteLink to="procrustes-analysis">Procrustes analysis</NoteLink>.
+
+## Pitfalls
+
+- **Feature scale.** Minkowski distances are dominated by the features with the largest range. Standardise features
+  before clustering or nearest-neighbour search.
+- **High dimensions.** For random points in many dimensions, all pairwise distances concentrate around the same value,
+  so the nearest neighbour is barely nearer than the farthest.
+- **Zero vectors.** Cosine similarity is undefined when either vector is zero.

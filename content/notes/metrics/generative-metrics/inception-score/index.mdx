@@ -1,0 +1,55 @@
+---
+title: Inception score
+kind: concept
+summary: 'The Inception score rates generated images by a classifier''s predictions: $\exp \expect_x \KL(p(y \mid x) \,\|\, p(y))$. It rewards confident predictions for each image and varied predictions across images, and equals the exponential of the mutual information between image and label.'
+tags: [metrics, generative-models, deep-learning, worked-example]
+aliases: [IS, inception score]
+related: [frechet-inception-distance, kernel-inception-distance, kl-divergence, mutual-information, entropy]
+references: [salimans2016, barratt2018]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $p(y \mid x)$ be the class probabilities an Inception network assigns to image $x$, and
+$p(y) = \expect_x[p(y \mid x)]$ their average over generated images. The Inception score is <Cite id="salimans2016" />
+
+$$
+\text{IS} = \exp\paren{\expect_{x}\brack{\KL\paren{p(y \mid x) \,\|\, p(y)}}} .
+$$
+</Definition>
+
+## What it rewards
+
+Two properties raise the score. Each image should be classified confidently, so $p(y \mid x)$ has low entropy; and
+across images the classes should vary, so the marginal $p(y)$ has high entropy. The KL divergence between a sharp
+conditional and a broad marginal is large on both counts.
+
+The two properties are exactly the two terms of a mutual information. Expanding the KL divergence and averaging over
+$x$,
+
+$$
+\expect_x \KL\paren{p(y \mid x) \,\|\, p(y)} = \expect_x \sum_y p(y \mid x)\log p(y \mid x) - \sum_y p(y)\log p(y)
+= H(y) - H(y \mid x) = I(x; y),
+$$
+
+because $\expect_x \sum_y p(y \mid x) \log p(y) = \sum_y p(y)\log p(y)$. So $\text{IS} = e^{I(x; y)}$ (see
+<NoteLink to="mutual-information">mutual information</NoteLink>). Since $0 \le I(x; y) \le H(y) \le \log K$ for $K$
+classes, $1 \le \text{IS} \le K$: the maximum is reached when each image is certain of one class and all classes are
+equally frequent.
+
+**Worked example.** Three generated images and three classes, each image assigning 0.9 to a different class and 0.05
+to the others: the marginal is uniform and $\text{IS} = 2.02$. If all three images assign 0.9 to the same class, the
+marginal equals each conditional, every KL divergence is 0, and $\text{IS} = 1$, the value for a generator that has
+collapsed to one kind of image.
+
+## Pitfalls
+
+- **No comparison with real data.** IS never looks at the training images. A generator can score well by producing one
+  sharp image per ImageNet class, whatever the target data are; <NoteLink to="frechet-inception-distance">FID</NoteLink>
+  compares with real data instead.
+- **Blind to diversity within a class.** Many near-identical images of each class score as well as varied ones.
+- **Only for ImageNet-like images.** The classifier's classes must fit the data; on faces or bedrooms the score means
+  little.
+- **Implementation-sensitive.** The value depends on the network weights, image resizing and the number of splits used
+  to average; scores from different code are not comparable <Cite id="barratt2018" />.

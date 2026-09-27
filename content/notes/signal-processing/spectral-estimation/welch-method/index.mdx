@@ -1,0 +1,99 @@
+---
+title: Welch's method
+kind: technique
+summary: 'Welch''s method estimates a power spectral density by splitting the signal into overlapping windowed segments and averaging their periodograms. Averaging $K$ segments divides the variance by about $K$, at the cost of the resolution of the shorter segments.'
+tags: [signal-processing, spectral-estimation, worked-example]
+aliases: [Welch periodogram, averaged periodogram, Bartlett's method, weighted overlapped segment averaging, WOSA]
+requires: [periodogram]
+related: [multitaper-spectral-estimation, spectral-leakage-and-windows, coherence-and-cross-spectra, short-time-fourier-transform]
+references: [welch1967, stoica2005]
+status: draft
+updated: 2026-09-26
+---
+
+import { WelchTradeoff } from './WelchTradeoff'
+
+<Definition>
+Welch's method splits $N$ samples into $K$ segments of length $L$, each starting $D$ samples after the previous one,
+multiplies each segment by a window $w[n]$, and averages the resulting modified periodograms <Cite id="welch1967" />:
+
+$$
+\hat S_W(\omega) = \frac{1}{K}\sum_{k=0}^{K-1} \frac{1}{U}\abs{\sum_{n=0}^{L-1} w[n]\, x[n + kD]\, e^{-i\omega n}}^2,
+\qquad U = \sum_{n=0}^{L-1} w[n]^2 .
+$$
+
+With a rectangular window and no overlap ($D = L$) it is Bartlett's method.
+</Definition>
+
+## Why averaging helps
+
+A single <NoteLink to="periodogram">periodogram</NoteLink> has a standard deviation equal to its mean at every
+frequency, however long the record. If the $K$ segment periodograms were independent, each approximately
+$S(\omega)\chi^2_2/2$, their average would have mean $S(\omega)$ and variance
+
+$$
+\var\brack{\hat S_W(\omega)} \approx \frac{S(\omega)^2}{K},
+$$
+
+since the variance of a mean of $K$ independent variables is $1/K$ times theirs. The average is
+$S(\omega)\chi^2_{2K}/(2K)$, a distribution with $\nu = 2K$ degrees of freedom, which gives confidence intervals:
+$\nu \hat S_W / \chi^2_{\nu, 1-\alpha/2} \le S \le \nu \hat S_W / \chi^2_{\nu, \alpha/2}$.
+
+## What it costs
+
+The expected value of each modified periodogram is the true spectrum convolved with the window's spectral kernel
+$\abs{W(e^{i\omega})}^2 / U$, and $W$ is the transform of a window only $L$ samples long. Its main lobe is several
+times $2\pi/L$ wide: for a Hann window, the half-power width is about $1.44 \cdot 2\pi/L$. Two spectral peaks closer
+than this merge. The trade-off is therefore fixed by the segment length:
+
+| Segment length $L$ | Segments $K$ (no overlap) | Resolution | Variance |
+| --- | --- | --- | --- |
+| long | few | fine, $\propto 1/L$ | high, $\propto 1/K$ |
+| short | many | coarse | low |
+
+With $N$ samples and no overlap, $K = N/L$, so resolution times the relative variance is roughly constant: halving $L$
+doubles $K$ and halves the variance, but doubles the width of every spectral feature.
+
+<WelchTradeoff />
+
+## Overlap
+
+Welch's contribution beyond Bartlett was to overlap tapered segments. A window discards the data near each segment's
+edges, so non-overlapping windowed segments waste information. Overlapping recovers it: with $D = L/2$, nearly twice
+as many segments fit in the record. Overlapping segments are correlated, so the variance does not halve, but the
+correlation is small for smooth windows. For segments $j$ steps apart, the correlation of their periodograms for white
+noise is approximately
+
+$$
+\rho(j) = \paren{\frac{\sum_n w[n]\, w[n + jD]}{\sum_n w[n]^2}}^2,
+$$
+
+and Welch's variance formula is
+
+$$
+\frac{\var\brack{\hat S_W}}{S^2} \approx \frac{1}{K}\brack{1 + 2\sum_{j=1}^{K-1}\paren{1 - \frac{j}{K}}\rho(j)} .
+$$
+
+For a Hann window at 50% overlap, $\rho(1) = 0.0278$ and $\rho(j) = 0$ for $j \ge 2$, so the overlapped segments are
+almost as good as independent ones. Overlap beyond 50% adds little for Hann windows <Cite id="welch1967" />.
+
+## Worked example
+
+Take $N = 4{,}096$ samples of unit-variance white noise, Hann segments of $L = 256$, and 50% overlap. Then
+$K = 2N/L - 1 = 31$ segments. The formula gives a relative variance of
+$\tfrac{1}{31}(1 + 2 \cdot \tfrac{30}{31} \cdot 0.0278) = 0.0340$, a relative standard deviation of 0.184. A simulated
+record gives an estimate with mean 1.011 and standard deviation 0.196, against 1 and 1 for the raw periodogram of the
+same data. The resolution is about $1.44 \cdot 2\pi/256 \approx 0.035$ rad/sample.
+
+## Pitfalls
+
+- **Choose $L$ from the resolution you need.** Decide the narrowest feature that must be resolved, set $L$ from it, and
+  accept the variance that follows; then add data if the estimate is still too noisy.
+- **Scale by the window.** Dividing by $U = \sum w^2$ keeps the estimate unbiased for broadband noise. Dividing by
+  $(\sum w)^2$ instead preserves the height of pure sinusoids. The two differ by the window's equivalent noise
+  bandwidth.
+- **Detrend each segment.** A mean or slow trend in a segment leaks into low frequencies; SciPy detrends each segment
+  by default.
+- **Non-stationary signals.** Averaging assumes the spectrum is the same in every segment. When it changes, the
+  individual segment spectra are a spectrogram; see the <NoteLink to="short-time-fourier-transform">short-time Fourier
+  transform</NoteLink>.

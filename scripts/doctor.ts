@@ -78,6 +78,20 @@ for (const rel of sourceFiles) {
       errors.push(`${path.relative(root, file)}: figure "${id}" has no generated data (run make assets)`)
     }
   }
+  // A module binding named after a browser global shadows it in that file, which breaks code (including the dev
+  // server's hot-reload preamble) that relies on the global. The DSP window function is called makeWindow for this.
+  for (const [, names] of source.matchAll(/import\s*\{([^}]*)\}\s*from/g)) {
+    for (const raw of names.split(',')) {
+      const local = raw
+        .trim()
+        .split(/\s+as\s+/)
+        .pop()
+        ?.replace(/^type\s+/, '')
+      if (local && ['window', 'document', 'self', 'globalThis'].includes(local)) {
+        errors.push(`${path.relative(root, file)}: import binding "${local}" shadows the browser global; rename it`)
+      }
+    }
+  }
   // Notes never import from another note: shared code goes in site/src or a `_shared` folder.
   if (rel.startsWith('notes/')) {
     const noteDir = path.dirname(

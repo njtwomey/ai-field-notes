@@ -1,0 +1,111 @@
+---
+title: Matrix profile segmentation (FLUSS and FLOSS)
+kind: technique
+summary: 'FLUSS segments a time series into regimes from its matrix profile index. Each subsequence draws an arc to its nearest neighbour; few arcs cross a regime boundary. The arc count divided by its expectation $2i(n-i)/n$ under no structure dips near 0 there. FLOSS runs it online.'
+tags: [time-series, similarity-search, change-points, worked-example]
+aliases: [FLUSS, FLOSS, arc curve, corrected arc curve, CAC, semantic segmentation of time series]
+requires: [matrix-profile]
+partOf: [matrix-profile-family]
+related: [change-point-detection, bayesian-online-changepoint-detection, cusum, streaming-and-incremental-matrix-profile]
+references: [gharghabi2017]
+status: draft
+updated: 2026-09-27
+---
+
+import { ArcCurveFigure } from './ArcCurveFigure'
+
+<Definition>
+Let $I_1, \dots, I_n$ be the matrix profile index of a series: $I_i$ is the start of the nearest neighbour of the
+subsequence starting at $i$. Draw an arc from each $i$ to $I_i$. The arc curve $AC_k$ counts the arcs that pass over
+position $k$, that is, arcs with $\min(i, I_i) < k < \max(i, I_i)$. FLUSS (Fast Low-cost Unipotent Semantic
+Segmentation) divides it by the idealised arc curve $IAC_k = 2k(n - k)/n$, its expectation when neighbours are placed
+at random, to give the corrected arc curve $CAC_k = \min(AC_k / IAC_k, 1)$. Positions where $CAC$ is close to 0 are
+regime boundaries. FLOSS is the online version <Cite id="gharghabi2017" />.
+</Definition>
+
+## Problem
+
+Semantic segmentation divides a series into regimes that correspond to different states of the process: walking,
+then running; sleep stage 2, then REM; a machine idling, then loaded. Statistical
+<NoteLink to="change-point-detection">change-point detection</NoteLink> looks for shifts in a model's parameters, such
+as the mean or variance. Many regime changes preserve both. A switch between two gaits can leave the mean and variance
+of an accelerometer unchanged while changing the shape of every cycle. FLUSS detects changes in shape, needs only the
+subsequence length $m$ and the number of regimes, and reuses the matrix profile index.
+
+## Mechanism
+
+### Arcs rarely cross a boundary
+
+If a series consists of regime A followed by regime B, the nearest neighbour of a subsequence in A is almost always
+another subsequence in A, because B contains different shapes. The same holds for B. Arcs therefore stay on their own
+side, and the count of arcs over the boundary is close to 0. Away from boundaries, arcs from both sides of a
+position pass over it, and the count is large.
+
+The raw count cannot be read directly. Near the ends of the series few arcs can pass over any position, because there
+is little room on one side. A dip near an edge is expected even with no boundary. Dividing by the expected count
+removes this effect.
+
+### The idealised arc curve
+
+Assume the series has no regime structure, so that each $I_i$ is a uniformly random position among the $n$
+positions. An arc from $i$ passes over $k$ when $i$ and $I_i$ lie on opposite sides of $k$. For $i < k$ that happens
+when $I_i > k$, with probability about $(n - k)/n$. For $i > k$ it happens when $I_i < k$, with probability about
+$k/n$. There are about $k$ positions before $k$ and $n - k$ after it, so the expected count is
+
+$$
+IAC_k = \expect\brack{AC_k} \approx k \cdot \frac{n - k}{n} + (n - k) \cdot \frac{k}{n} = \frac{2k(n - k)}{n} .
+$$
+
+This idealised arc curve is a parabola that is 0 at both ends and peaks at $n/2$ at the centre.
+
+The corrected arc curve $CAC_k = \min(AC_k / IAC_k, 1)$ is near 1 where arcs cross as often as
+chance predicts and near 0 where almost none cross. Within a few subsequence lengths of either end, $IAC$ is too small
+for the ratio to be reliable, and $CAC$ is set to 1 there <Cite id="gharghabi2017" />.
+
+### Extracting boundaries
+
+The position of the minimum of $CAC$ is the first boundary. To find $r$ regimes, FLUSS takes the minimum, excludes a
+zone of several subsequence lengths around it and repeats until $r - 1$ boundaries are found. The value of the minimum
+also says how strong the boundary is. Values near 0 are unambiguous; values near 1 mean the series has no clear
+second regime.
+
+<ArcCurveFigure />
+
+### FLOSS: online segmentation
+
+In a stream the right half of each arc is unknown: a subsequence's nearest neighbour may not have arrived yet. FLOSS
+(Fast Low-cost Online Semantic Segmentation) uses only arcs that point to the past, from each subsequence to its left
+nearest neighbour, over a sliding window of recent data <Cite id="gharghabi2017" />. These arcs never change once
+drawn (<NoteLink to="streaming-and-incremental-matrix-profile">left matrix profile</NoteLink>). One-directional arcs
+have a different expected count, so FLOSS corrects the arc curve with the idealised curve for that case. The cost per
+new point is that of one incremental matrix profile update.
+
+## Worked example
+
+In the figure's default series, $n = 600$ points form two regimes that meet at position 300, and $m = 40$ gives 561
+subsequences.
+
+- Only 24 of the 561 arcs cross position 300, and no arc joins a subsequence that starts before 260 to one that starts
+  after 300.
+- At position 275, $AC = 0$ while $IAC = 2 \cdot 275 \cdot 286 / 561 = 280.4$, so $CAC = 0$. That is the minimum, and it
+  lies 25 positions before the true change: subsequences starting there span the boundary.
+- Away from the boundary, at position 100, $AC = 70$ and $IAC = 164.3$, so $CAC = 0.43$. The value is below 1 because
+  the series is periodic, and each subsequence's nearest neighbour is usually only a few beats away. Short arcs pass
+  over fewer positions than random ones.
+
+## Cost
+
+FLUSS costs one matrix profile, $O(n^2)$, plus $O(n)$ for the arc curve. The count is computed with a difference array:
+add 1 at $\min(i, I_i) + 1$, subtract 1 at $\max(i, I_i)$, and take a running sum. FLOSS costs $O(w)$ per new point for
+a window of $w$ points.
+
+## Trade-offs
+
+- **Only shape changes.** Regimes that differ only in level or amplitude look identical after z-normalisation. A
+  statistical change-point detector such as <NoteLink to="cusum">CUSUM</NoteLink> finds those.
+- **Repeated regimes.** If regime A returns after B, subsequences in the second A find neighbours in the first, and
+  their arcs cross B. The dips at the boundaries of B become shallow.
+- **The boundary is approximate.** The minimum can sit up to one subsequence length before the true change, where
+  windows straddle the two regimes.
+- **Short regimes.** A regime shorter than a few subsequence lengths contains too few subsequences to form its own
+  cluster of arcs.

@@ -1,0 +1,87 @@
+---
+title: Confidence intervals for metrics
+kind: technique
+summary: 'A metric computed on a test set is an estimate with sampling error. For a proportion such as accuracy the Wilson interval gives its uncertainty; for $F_1$, AUROC and other metrics the bootstrap resamples the test set. Comparisons between classifiers should use paired methods.'
+tags: [metrics, evaluation, uncertainty, bootstrap, worked-example]
+aliases: [metric uncertainty, bootstrap confidence interval for a metric, standard error of accuracy, test set size, comparing classifiers]
+requires: [confusion-matrix, confidence-intervals]
+related: [standard-error, choosing-a-metric, roc-curve-and-auc, binomial-test]
+references: [wilson1927, efron1979, delong1988]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A metric evaluated on a finite test set of $n$ cases is a random quantity: a different test set drawn from the same
+population would give a different value. A confidence interval for the metric is a range that contains the population
+value of the metric with a stated probability over repeated test sets. Accuracy-type metrics are proportions and have
+closed-form intervals; other metrics are handled by the bootstrap <Cite id="efron1979" />.
+</Definition>
+
+## Proportions
+
+Accuracy, recall, precision and specificity are each a proportion of some number of cases $m$: all cases for accuracy,
+the positives for recall, the predicted positives for precision. If the cases are independent, the count of successes
+is binomial, and the standard error of an observed proportion $\hat p$ is $\sqrt{\hat p(1 - \hat p)/m}$ (see
+<NoteLink to="standard-error">standard error</NoteLink>).
+
+The Wald interval $\hat p \pm z\sqrt{\hat p(1 - \hat p)/m}$ is poor near 0 or 1 and for small $m$. The Wilson interval
+inverts the score test instead <Cite id="wilson1927" />:
+
+$$
+\frac{\hat p + \frac{z^2}{2m}}{1 + \frac{z^2}{m}} \pm \frac{z}{1 + \frac{z^2}{m}}\sqrt{\frac{\hat p(1 - \hat p)}{m} + \frac{z^2}{4m^2}},
+$$
+
+with $z = 1.96$ for 95%. It never leaves $[0, 1]$ and keeps close to its nominal coverage.
+
+The denominator matters. Recall on 50 positives is much less certain than accuracy on 1,000 cases, even though both come
+from the same test set.
+
+## The bootstrap
+
+Metrics such as $F_1$, MCC and AUROC are not proportions of a fixed set of cases. The percentile bootstrap estimates
+their sampling distribution by resampling:
+
+1. Draw $n$ cases with replacement from the test set.
+2. Compute the metric on the resample.
+3. Repeat $B$ times, for example $B = 10{,}000$, and take the 2.5th and 97.5th percentiles of the $B$ values.
+
+The resampling must respect the data's structure. If cases come in groups (several images per patient, several
+sentences per document), resample whole groups; otherwise the interval is too narrow.
+
+## Worked example
+
+On the screening data (1,000 cases, TP = 40, FN = 10, FP = 90, TN = 860):
+
+- **Accuracy** 0.900. The Wald interval is $0.900 \pm 0.019 = [0.881, 0.919]$; the Wilson interval is
+  $[0.880, 0.917]$.
+- **Recall** $40/50 = 0.80$ rests on only 50 positives, so its interval is much wider: the Wilson interval is
+  $[0.67, 0.89]$.
+- **$F_1$** 0.444. Ten thousand bootstrap resamples give a standard deviation of 0.046 and a 95% percentile interval of
+  $[0.35, 0.53]$.
+
+To estimate an accuracy near 0.9 to within $\pm 0.01$ at 95% confidence, $n \approx 1.96^2 \times 0.9 \times 0.1 /
+0.01^2 \approx 3{,}460$ test cases are needed.
+
+## Comparing two classifiers
+
+Two classifiers evaluated on the same test set are correlated: they tend to get the same easy cases right. Comparing
+their separate intervals ignores this and is too conservative. Paired methods use it:
+
+- **Accuracy:** McNemar's test uses only the cases where the classifiers disagree.
+- **Any metric:** bootstrap the difference, resampling cases once and computing both classifiers' metrics on each
+  resample.
+- **AUROC:** DeLong's method estimates the covariance of two correlated AUROCs without resampling
+  <Cite id="delong1988" />.
+
+When many classifiers or metrics are compared, the multiple-comparison issues of
+<NoteLink to="multiple-testing">multiple testing</NoteLink> apply.
+
+## Pitfalls
+
+- **Intervals describe test-set sampling only.** They do not cover variation from retraining with a different seed or
+  training set, or a shift between test and deployment data.
+- **Tuning on the test set** makes any interval on it optimistic. Use a separate validation set for choices, and
+  evaluate once on the test set.
+- **Rare classes** give wide intervals for every metric that conditions on them. Report the number of positives
+  alongside the metric.

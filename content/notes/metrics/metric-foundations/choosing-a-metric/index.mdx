@@ -1,0 +1,79 @@
+---
+title: Choosing a metric
+kind: overview
+summary: 'A metric should measure what the model will be used for. Decide whether decisions, rankings or probabilities matter, what errors cost, and what the deployment prevalence is; then choose the metric that answers that question, and report the baselines it needs.'
+tags: [metrics, evaluation, classification]
+aliases: [metric selection, evaluation metric choice, which metric to use, Goodhart's law in evaluation]
+related:
+  [
+    confusion-matrix,
+    accuracy-and-balanced-accuracy,
+    precision-recall-and-f-score,
+    matthews-correlation-coefficient,
+    roc-curve-and-auc,
+    precision-recall-curve-and-average-precision,
+    log-loss-and-brier-score,
+    calibration-error,
+    cost-sensitive-learning,
+    metric-confidence-intervals,
+    averaging-multiclass-metrics,
+  ]
+references: [ferri2009, hand2009, sokolova2009]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A metric is a function of a model's outputs and the true labels that summarises performance in one number. Choosing
+one means choosing which aspect of performance counts: correct decisions at one threshold, the ordering of cases by
+score, or the quality of predicted probabilities. Metrics that measure different aspects rank models differently, so
+the choice follows from how the model will be used <Cite id="ferri2009" />.
+</Definition>
+
+## Three kinds of classification metric
+
+Ferri, Hernández-Orallo and Modroiu found that classification metrics fall into three families that disagree with
+each other but agree within a family <Cite id="ferri2009" />:
+
+| family | question it answers | examples |
+| --- | --- | --- |
+| threshold metrics | how good are the decisions at this threshold? | accuracy, $F_1$, MCC, $\kappa$, balanced accuracy |
+| ranking metrics | how well do the scores order positives above negatives? | AUROC, average precision |
+| probabilistic metrics | how good are the predicted probabilities? | log loss, Brier score, calibration error |
+
+A model used to make yes/no decisions at a known threshold should be judged by a threshold metric at that threshold.
+A model used to rank or to triage, where the threshold is chosen later or varies, should be judged by a ranking metric.
+A model whose probabilities feed into further decisions, such as expected-cost calculations, should be judged by a
+probabilistic metric, and its calibration checked.
+
+## Questions that decide the choice
+
+1. **Do the errors cost the same?** If false positives and false negatives have known, different costs, the right
+   metric is the expected cost itself, and the right threshold follows from the costs (see
+   <NoteLink to="cost-sensitive-learning">cost-sensitive learning</NoteLink>). Single-number metrics such as $F_1$ or
+   MCC encode implicit, fixed trade-offs that rarely match the real costs.
+2. **What is the deployment prevalence?** Precision, $F_1$ and average precision depend on it; recall, specificity,
+   balanced accuracy and AUROC do not. Evaluate prevalence-dependent metrics at the prevalence the model will face.
+3. **Do the true negatives matter?** In retrieval they do not, and precision, recall and $F_1$ fit. In most
+   classification problems they do, and MCC or balanced accuracy are safer.
+4. **Does every class matter equally?** If so, macro-average; if every case matters equally, micro-average (see
+   <NoteLink to="averaging-multiclass-metrics">averaging multiclass metrics</NoteLink>).
+5. **Is the metric a sum over cases?** Accuracy, log loss and expected cost are, so they decompose and can be
+   optimised directly. AUROC and $F_1$ are not, which makes them awkward to optimise and to average across folds.
+
+## Report baselines and uncertainty
+
+Every metric needs a reference point. Report what a trivial classifier scores: the majority class for accuracy, the
+prevalence for precision and average precision, 0.5 for AUROC and balanced accuracy, the entropy of the base rate for
+log loss. Report a <NoteLink to="metric-confidence-intervals">confidence interval</NoteLink>, which is wide for any
+metric that conditions on a rare class.
+
+## Pitfalls
+
+- **Goodhart's law.** A metric that becomes the target is optimised at the expense of what it was meant to measure.
+  Keep the evaluation metric tied to the use, and check several.
+- **Ranking metrics hide the threshold.** A model with a high AUROC can still make bad decisions at the threshold
+  actually used. Hand argued that AUROC also implies a different cost distribution for different classifiers, and
+  proposed the H-measure as a coherent alternative <Cite id="hand2009" />.
+- **Metric and loss need not match.** A model trained with cross-entropy is often evaluated with accuracy or $F_1$.
+  That is fine, but tune the threshold for the evaluation metric on validation data.

@@ -1,0 +1,70 @@
+---
+title: Remote sensing image quality metrics
+kind: concept
+summary: 'Multispectral and pansharpened images are scored per pixel spectrum and per band. SAM is the angle between spectral vectors; ERGAS and RASE combine per-band relative errors; QNR scores pansharpening without a reference from spectral and spatial distortions.'
+tags: [metrics, image-quality, remote-sensing, worked-example]
+aliases: [SAM, spectral angle mapper, ERGAS, RASE, QNR, D_lambda, D_s, spectral distortion, spatial distortion, pansharpening metrics]
+related: [psnr, ssim, pairwise-distances-and-cosine-similarity]
+references: [kruse1993, alparone2008]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For a reference multispectral image and an estimate with $K$ bands, and $\xvec_n, \hat{\xvec}_n \in \reals^K$ the
+spectra of pixel $n$:
+
+$$
+\text{SAM}_n = \arccos\frac{\xvec_n^\top \hat{\xvec}_n}{\norm{\xvec_n}\,\norm{\hat{\xvec}_n}}, \qquad
+\text{ERGAS} = 100\,\frac{h}{l}\sqrt{\frac{1}{K}\sum_{k=1}^{K}\paren{\frac{\text{RMSE}_k}{\mu_k}}^2},
+$$
+
+where $\text{RMSE}_k$ and $\mu_k$ are the root-mean-squared error and the mean of band $k$, and $h/l$ is the ratio of
+the high-resolution to the low-resolution pixel size <Cite id="kruse1993" />.
+</Definition>
+
+## Spectral angle mapper
+
+SAM treats each pixel's spectrum as a vector and measures the angle between the reference and the estimate, averaged
+over pixels. The angle ignores the vector's length, so it is insensitive to overall illumination or gain and sensitive
+only to the shape of the spectrum, which carries the material information. SAM is 0 for spectra that are exact multiples
+of each other. It is the angular form of cosine similarity (see
+<NoteLink to="pairwise-distances-and-cosine-similarity">pairwise distances and cosine similarity</NoteLink>).
+
+## ERGAS and RASE
+
+ERGAS, the relative dimensionless global error in synthesis introduced by Wald, normalises each band's RMSE by the
+band's mean, so bands with different radiometric levels count equally, and scales by the resolution ratio so that
+results at different resolution ratios are comparable. Lower is better; values below about 3 are often taken as
+good. RASE, the relative average spectral error, instead normalises the pooled RMSE by the mean radiance $\mu$ over all
+bands:
+
+$$
+\text{RASE} = \frac{100}{\mu}\sqrt{\frac{1}{K}\sum_{k=1}^{K}\text{RMSE}_k^2} .
+$$
+
+**Worked example.** Two pixels with three bands have reference spectra $(100, 80, 60)$ and $(90, 85, 70)$ and estimates
+$(98, 84, 58)$ and $(95, 80, 72)$. The spectral angles are $1.98^\circ$ and $2.90^\circ$, a mean SAM of $2.44^\circ$.
+The per-band RMSEs are $3.81$, $4.53$ and $2.00$ against band means $95$, $82.5$ and $65$; with $h/l = 1/4$,
+$\text{ERGAS} = 1.08$. The overall mean is $80.83$, and $\text{RASE} = 4.46$.
+
+## Scoring without a reference
+
+Pansharpening fuses a low-resolution multispectral image with a high-resolution panchromatic one, and at full resolution
+there is no reference image to compare with. QNR (quality with no reference) combines two distortion indices computed
+from the inputs <Cite id="alparone2008" />: $D_\lambda$ measures how much the relationships between bands in the fused
+image differ from those in the original multispectral image (spectral distortion), and $D_s$ how much each band's
+relationship to the panchromatic image changes across scales (spatial distortion). Then
+
+$$
+\text{QNR} = (1 - D_\lambda)^{\alpha}(1 - D_s)^{\beta},
+$$
+
+usually with $\alpha = \beta = 1$; 1 is ideal.
+
+## Pitfalls
+
+- **Degree or radian.** SAM is reported in either; state the unit.
+- **The resolution ratio.** ERGAS values are only comparable at the same, correctly stated $h/l$.
+- **Reduced-resolution protocols.** Reference-based scores are often computed by degrading the inputs and treating the
+  originals as references (Wald's protocol). Performance at reduced resolution need not carry over to full resolution.

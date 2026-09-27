@@ -1,0 +1,75 @@
+---
+title: Aliasing
+kind: concept
+summary: 'Sampling at rate $f_s$ cannot distinguish frequencies that differ by a multiple of $f_s$, so a component above $f_s/2$ appears at a folded frequency $\abs{f - k f_s}$ in $[0, f_s/2]$. It is prevented by filtering before sampling, never after.'
+tags: [signal-processing, sampling, worked-example]
+aliases: [frequency folding, alias, wagon-wheel effect, spectral folding]
+requires: [sampling-theorem]
+related: [dft, decimation-and-interpolation, quantisation]
+references: [oppenheim2010]
+status: draft
+updated: 2026-09-26
+---
+
+import { FoldingDiagram } from './FoldingDiagram'
+
+<Definition>
+Aliasing is the ambiguity introduced by sampling: two continuous-time sinusoids whose frequencies differ by a whole
+multiple of the sample rate $f_s$ produce identical samples. After sampling, a component at frequency $f$ is
+indistinguishable from one at $f - k f_s$ for every integer $k$, and a real component above $f_s/2$ appears at the
+folded frequency in $[0, f_s/2]$ <Cite id="oppenheim2010" />.
+</Definition>
+
+## Why frequencies alias
+
+Sample the complex exponential $e^{i 2\pi f t}$ at times $t = n/f_s$:
+
+$$
+x[n] = e^{i 2\pi f n / f_s}.
+$$
+
+Replace $f$ by $f + k f_s$ for any integer $k$:
+
+$$
+e^{i 2\pi (f + k f_s) n / f_s} = e^{i 2\pi f n / f_s}\, e^{i 2\pi k n} = e^{i 2\pi f n / f_s},
+$$
+
+because $e^{i 2\pi k n} = 1$ for integer $k$ and $n$. The samples are identical, so the frequencies $f + k f_s$ form an
+equivalence class, and discrete time only sees the class. In normalised angular frequency $\omega = 2\pi f/f_s$ this is
+the statement that $e^{i\omega n}$ is $2\pi$-periodic in $\omega$.
+
+## Folding for real signals
+
+A real sinusoid $\cos(2\pi f t)$ contains the two exponentials at $\pm f$. Their aliases are $\pm f + k f_s$, and the
+one landing in $[0, f_s/2]$ is the representative that is seen:
+
+$$
+f_{\text{apparent}} = \abs{f - k f_s}, \qquad k = \operatorname{round}(f / f_s).
+$$
+
+As $f$ increases from 0, the apparent frequency rises to $f_s/2$, then falls back to 0 at $f_s$, rises again to $f_s/2$
+at $1.5 f_s$, and so on: the frequency axis folds back and forth at every multiple of $f_s/2$. A component between
+$f_s/2$ and $f_s$ also has its phase negated, since it is the image of the negative-frequency exponential.
+
+<FoldingDiagram />
+
+**Worked example.** At $f_s = 10$ Hz, a 13 Hz cosine has $k = \operatorname{round}(1.3) = 1$ and appears at
+$\abs{13 - 10} = 3$ Hz. A 17 Hz cosine has $k = 2$ and appears at $\abs{17 - 20} = 3$ Hz as well. After sampling, 3,
+13 and 17 Hz are the same signal.
+
+## Preventing it
+
+Aliasing cannot be undone once the samples exist, because the aliased component and the genuine one at the same
+frequency have added together. The only remedy is to remove content above $f_s/2$ before sampling, with an analogue
+anti-aliasing low-pass filter. The same rule applies inside a digital system: before reducing the sample rate by a
+factor $M$, a digital low-pass filter must remove content above the new Nyquist frequency, $\pi/M$ in normalised
+frequency. See <NoteLink to="decimation-and-interpolation">decimation and interpolation</NoteLink>.
+
+## Where it shows up
+
+- **Wagon wheels in film.** A camera sampling at 24 frames per second shows a wheel rotating at nearly 24 turns per
+  second as turning slowly, or backwards.
+- **Spectral estimates.** A harmonic above the Nyquist frequency lands in the spectrum as a spurious peak at its
+  folded frequency, with nothing to mark it as an alias.
+- **Machine learning on sensor data.** Downsampling a signal by keeping every $M$-th sample, without filtering first,
+  folds high-frequency noise into the band the model sees.

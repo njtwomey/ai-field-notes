@@ -1,0 +1,94 @@
+---
+title: R² and explained variance
+kind: concept
+summary: 'The coefficient of determination $R^2 = 1 - \mathrm{SSE}/\mathrm{SST}$ compares a model with predicting the mean: 1 is perfect, 0 matches the mean, and negative is worse than the mean. Explained variance ignores a constant bias, so it can look good for a shifted model.'
+tags: [metrics, regression, worked-example]
+aliases: [R squared, R², coefficient of determination, explained variance score, adjusted R²]
+requires: [mse-rmse-and-mae]
+related: [pearson-correlation, linear-regression, variance-and-covariance, concordance-correlation-coefficient]
+references: [hastie2009, pedregosa2011]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For true values $y_i$ with mean $\bar y$ and predictions $\hat y_i$, the coefficient of determination is
+
+$$
+R^2 = 1 - \frac{\operatorname{SSE}}{\operatorname{SST}}
+= 1 - \frac{\sum_i (y_i - \hat y_i)^2}{\sum_i (y_i - \bar y)^2}.
+$$
+
+The explained variance score replaces the sum of squared errors by the variance of the errors,
+$\operatorname{EV} = 1 - \var(y - \hat y)/\var(y)$ <Cite id="hastie2009" />.
+</Definition>
+
+## Reading R²
+
+$R^2$ compares the model with the simplest possible baseline: predicting $\bar y$ for every case. That baseline has
+$\operatorname{SSE} = \operatorname{SST}$, so it scores exactly 0. Perfect predictions score 1. Dividing numerator and
+denominator by $n$ gives $R^2 = 1 - \operatorname{MSE}/\var(y)$, with the population variance: $R^2$ is mean squared
+error as a fraction of the target's variance, subtracted from 1.
+
+**R² can be negative.** Nothing bounds SSE by SST. A model whose squared error exceeds that of the mean, for example
+one evaluated on data unlike its training data, has $R^2 < 0$. With $y = (3, -0.5, 2, 7)$ and the predictions
+$(7, 2, -0.5, 3)$, which put the right values in the wrong places, $R^2 = -0.52$.
+
+**When R² equals a squared correlation.** For ordinary least squares with an intercept, evaluated on its own training
+data, the residuals $e_i = y_i - \hat y_i$ are orthogonal to the fitted values and to the constant. Expanding
+$y_i - \bar y = (\hat y_i - \bar y) + e_i$ and squaring, the cross term $\sum_i (\hat y_i - \bar y) e_i$ vanishes, so
+
+$$
+\operatorname{SST} = \sum_i (\hat y_i - \bar y)^2 + \operatorname{SSE}.
+$$
+
+$R^2$ is then the share of the total sum of squares carried by the fitted values, and it equals the squared Pearson
+correlation between $y$ and $\hat y$. Out of sample, without an intercept, or for any other model, the cross term does
+not vanish, and $R^2$ and $r^2$ differ. See <NoteLink to="pearson-correlation">Pearson correlation</NoteLink>.
+
+## Explained variance and bias
+
+The explained variance score ignores a constant offset. Writing $e = y - \hat y$ with mean $\bar e$, the mean squared
+error is $\var(e) + \bar e^2$, so
+
+$$
+\operatorname{EV} - R^2 = \frac{\bar e^2}{\var(y)} \ge 0.
+$$
+
+The two agree exactly when the predictions are unbiased on average. A model that is right up to a constant shift keeps
+a high explained variance while its $R^2$ falls.
+
+## Worked example
+
+With $y = (3, -0.5, 2, 7)$ and $\hat y = (2.5, 0, 2, 8)$: $\bar y = 2.875$, $\operatorname{SST} = 29.19$ and
+$\operatorname{SSE} = 1.5$, so $R^2 = 1 - 1.5/29.19 = 0.949$.
+
+The errors $e = (0.5, -0.5, 0, -1)$ have mean $\bar e = -0.25$. With $\var(y) = 29.19/4 = 7.297$, the gap is
+$0.0625/7.297 = 0.0086$, so $\operatorname{EV} = 0.957$.
+
+Adding 1 to every prediction leaves the explained variance at 0.957, because it only shifts the errors, but drops
+$R^2$ to 0.743. Predicting $\bar y$ everywhere gives $R^2 = 0$. These values match scikit-learn's `r2_score` and
+`explained_variance_score` <Cite id="pedregosa2011" />.
+
+## Adjusted R²
+
+On training data, adding a predictor to a least-squares model can never lower $R^2$. Adjusted $R^2$ charges for each
+of the $p$ predictors:
+
+$$
+R^2_{\text{adj}} = 1 - (1 - R^2)\,\frac{n - 1}{n - p - 1}.
+$$
+
+It replaces SSE and SST by their unbiased variance estimates, with $n - p - 1$ and $n - 1$ degrees of freedom. It is a
+crude complexity penalty; held-out $R^2$ or cross-validation measures generalisation directly.
+
+## Pitfalls
+
+- **R² depends on the spread of the targets.** The same errors give a higher $R^2$ on data with a wider range of $y$,
+  because SST grows. $R^2$ cannot compare models across datasets.
+- **A high R² is not a good fit.** A curved relationship fitted by a line can have a high $R^2$ with systematic
+  residuals. Plot residuals against predictions.
+- **Multi-output averaging.** For several targets, the average of per-target $R^2$ values and an average weighted by
+  each target's variance can differ widely when one target dominates the variance.
+- **R² is not agreement.** $R^2$ against a baseline measures predictive value, not whether predictions and truth
+  coincide; see <NoteLink to="concordance-correlation-coefficient">concordance correlation</NoteLink>.

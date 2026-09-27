@@ -1,0 +1,98 @@
+---
+title: Time series chains
+kind: concept
+summary: 'A time series chain is a sequence of subsequences $T_{c_1}, T_{c_2}, \dots$ in time order where each is the right nearest neighbour of the one before and the left nearest neighbour of the one after. Chains find patterns that drift, where the first and last members may differ greatly.'
+tags: [time-series, similarity-search, worked-example]
+aliases: [time series chain, evolving motif, anchored time series chain, unanchored chain, ATSC, ALLC]
+requires: [matrix-profile, streaming-and-incremental-matrix-profile]
+partOf: [matrix-profile-family]
+related: [matrix-profile-joins]
+references: [zhu2017]
+status: draft
+updated: 2026-09-27
+---
+
+import { ChainFigure } from './ChainFigure'
+
+<Definition>
+Let $T_i$ be the length-$m$ subsequences of a series, and let $R_i$ and $L_i$ be the indices of the right and left
+nearest neighbours of $T_i$: the closest subsequences under z-normalised distance that start after, respectively
+before, $T_i$, outside an exclusion zone. A time series chain is a sequence of indices $c_1 < c_2 < \dots < c_K$ with
+
+$$
+R_{c_k} = c_{k+1} \quad \text{and} \quad L_{c_{k+1}} = c_k \qquad \text{for } k = 1, \dots, K - 1 .
+$$
+
+Every link must be confirmed from both ends. The anchored chain from $c_1$ follows links from a given start; the
+unanchored chain is the longest chain in the series <Cite id="zhu2017" />.
+</Definition>
+
+## Intuition
+
+A motif is a pair of subsequences that look alike. Many real patterns change slowly instead of repeating exactly: a
+machine's vibration signature as a bearing wears, the shape of a step as a patient recovers, the daily profile of a
+web page's traffic as its audience grows. Consecutive occurrences look alike, but the first and the last may not.
+Motif discovery finds only the closest pair. A chain follows the whole progression, one nearest-neighbour step at a
+time.
+
+The direction of each step matters. Following nearest neighbours alone, without regard to time, jumps back and forth
+between occurrences. The right nearest neighbour $R_i$ always moves forward in time, and the left nearest neighbour
+$L_i$ always moves back. Requiring $R_{c_k} = c_{k+1}$ and $L_{c_{k+1}} = c_k$ means $T_{c_{k+1}}$ is the closest
+later subsequence to $T_{c_k}$, and $T_{c_k}$ is the closest earlier subsequence to $T_{c_{k+1}}$. A pattern drifting
+in one direction produces exactly such mutual links. Random similarities rarely do.
+
+<ChainFigure />
+
+## Details
+
+### Computing chains
+
+The left and right matrix profile indices come from any matrix profile algorithm at no extra asymptotic cost: while
+computing $d(i, j)$ for $i < j$, the algorithm updates the right neighbour of $i$ and the left neighbour of $j$
+(<NoteLink to="streaming-and-incremental-matrix-profile">left and right matrix profiles</NoteLink>). Given the two
+index vectors, the anchored chain from $c_1$ is found by following $R$ while the reverse link $L$ confirms each step:
+
+1. Set $k = 1$.
+2. While $L_{R_{c_k}} = c_k$, set $c_{k+1} = R_{c_k}$ and increase $k$.
+
+Each step is $O(1)$, so an anchored chain costs $O(K)$ after the $O(n^2)$ matrix profile. The set of all chains
+(ALLC in the original paper) starts one chain at each index that no confirmed link points into. Every index belongs to
+exactly one such chain, so all chains together cost $O(n)$. The unanchored chain is the longest of them
+<Cite id="zhu2017" />.
+
+## Worked example
+
+Take the series $x = (47, 32, 1, 22, 2, 58, 3, 36, 4, -5, 5, 40)$ with $m = 1$ and distance $\abs{x_i - x_j}$ in
+place of the z-normalised distance, which is undefined for single points. Positions count from 1, and every other
+position is allowed as a neighbour.
+
+- Right neighbours: $R = (12, 8, 5, 8, 7, 12, 9, 12, 11, 11, 12, -)$. For example, the value 1 at position 3 has
+  later values 22, 2, 58, … and the closest is 2 at position 5.
+- Left neighbours: $L = (-, 1, 2, 2, 3, 1, 5, 2, 7, 3, 9, 8)$.
+- From position 3: $R_3 = 5$ and $L_5 = 3$, a confirmed link. Then $R_5 = 7$, $L_7 = 5$; $R_7 = 9$, $L_9 = 7$;
+  $R_9 = 11$, $L_{11} = 9$. Finally $R_{11} = 12$ but $L_{12} = 8$, so the chain stops.
+- The chain is positions $(3, 5, 7, 9, 11)$, values $(1, 2, 3, 4, 5)$: a slowly rising pattern hidden among large
+  values. A second chain, positions $(2, 8, 12)$ with values $(32, 36, 40)$, rises in steps of 4.
+- Position 10, value $-5$, has right neighbour 11 (value 5), but $L_{11} = 9$, so the link is rejected. Without the
+  reverse check, $-5$ would join the chain.
+
+In the figure, the chain recovers all eight drifting copies of the planted pattern in order for most seeds. The chain
+members start a fixed number of samples before each copy: the window that best matches its neighbours includes the
+same stretch of background before every copy.
+
+## Assumptions
+
+- **Monotone drift.** The pattern changes in one direction. A pattern that changes and then returns produces links
+  that point back to earlier occurrences, and the chain breaks.
+- **Slow drift relative to spacing.** Each occurrence must be closer to the next one than to any unrelated
+  subsequence.
+- **Fixed length.** All members have length $m$. A pattern that stretches in time as well as changing shape is matched
+  only as long as the stretch stays small compared with $m$.
+
+## Pitfalls
+
+- **Chance chains.** Any series has short chains. Length alone is weak evidence for a drifting pattern; the members
+  should be inspected.
+- **Noise breaks links.** A single occurrence corrupted by noise can lose its mutual link and split one long chain into
+  two short ones.
+- **Direction is time.** Reversing the series swaps the roles of $L$ and $R$ and yields the same chains in reverse.

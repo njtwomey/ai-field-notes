@@ -1,0 +1,89 @@
+---
+title: Hilbert transform and analytic signal
+kind: concept
+summary: 'The Hilbert transform shifts every positive frequency by $-90°$. Adding $i$ times it to a real signal gives the analytic signal, with no negative frequencies, whose magnitude is the envelope and whose phase gives the instantaneous frequency.'
+tags: [signal-processing, fourier, worked-example]
+aliases: [Hilbert transform, analytic signal, envelope, quadrature, Bedrosian theorem]
+requires: [fourier-transform]
+related: [instantaneous-frequency, dft, empirical-mode-decomposition, short-time-fourier-transform]
+references: [gabor1946, marple1999, oppenheim2010]
+status: draft
+updated: 2026-09-26
+---
+
+import { AnalyticEnvelope } from './AnalyticEnvelope'
+
+<Definition>
+The Hilbert transform $\mathcal{H}\{x\}$ of a real signal multiplies its spectrum by $-i\,\operatorname{sgn}(f)$:
+positive frequencies are delayed by $90°$ and negative ones advanced by $90°$, with magnitudes unchanged. In time it
+is convolution with $1/(\pi t)$, taken as a principal value. The analytic signal
+
+$$
+z(t) = x(t) + i\,\mathcal{H}\{x\}(t)
+$$
+
+has the spectrum $2X(f)$ for $f > 0$ and $0$ for $f < 0$ <Cite id="gabor1946" />.
+</Definition>
+
+## Why the negative frequencies vanish
+
+A real signal's spectrum is conjugate-symmetric, so the negative frequencies carry no information the positive ones
+do not. In $Z(f) = X(f) + i\cdot\paren{-i\operatorname{sgn}(f)}X(f) = \paren{1 + \operatorname{sgn}(f)}X(f)$, the factor
+is 2 for $f > 0$ and 0 for $f < 0$.
+
+For a single cosine the picture is exact: $\mathcal{H}\{\cos\omega t\} = \sin\omega t$, so
+$z(t) = \cos\omega t + i\sin\omega t = e^{i\omega t}$. The analytic signal of a real oscillation is a rotating phasor.
+
+## Envelope and instantaneous frequency
+
+Write the analytic signal in polar form, $z(t) = A(t)\,e^{i\phi(t)}$. Then
+
+$$
+A(t) = \abs{z(t)}, \qquad f_i(t) = \frac{1}{2\pi}\frac{d\phi}{dt},
+$$
+
+are the instantaneous amplitude, or envelope, and the instantaneous frequency. For an amplitude-modulated signal
+$x(t) = a(t)\cos(\omega_c t)$, with $a(t) > 0$ varying slowly, $z(t) = a(t)\,e^{i\omega_c t}$, so $A(t) = a(t)$ and
+$f_i = \omega_c/2\pi$. The condition is Bedrosian's: the spectrum of $a(t)$ must lie entirely below $\omega_c$, so that
+the product's positive-frequency part is exactly $a(t)$ times the carrier's. When the modulation's bandwidth reaches
+the carrier frequency, the lower sideband crosses zero frequency and the envelope estimate breaks down. See
+<NoteLink to="instantaneous-frequency">instantaneous frequency</NoteLink>.
+
+## Computing it with the FFT
+
+The standard discrete method builds the analytic signal directly from the DFT <Cite id="marple1999" />:
+
+1. compute $X[k]$, the $N$-point DFT of $x$;
+2. keep $X[0]$ and $X[N/2]$ unchanged, double $X[k]$ for $1 \le k < N/2$, and set $X[k] = 0$ for $N/2 < k < N$;
+3. take the inverse DFT.
+
+The result's real part is $x$ again, and its imaginary part is the discrete Hilbert transform. Keeping DC and Nyquist
+once, rather than doubling them, is what makes the real part equal $x$ exactly.
+
+<AnalyticEnvelope />
+
+**Worked example.** A 60 Hz carrier modulated at 4 Hz with depth 0.6, sampled at 1 kHz for 1,024 samples: the FFT
+envelope matches $1 + 0.6\cos(2\pi \cdot 4\, t)$ to within about 0.014 away from the first and last 100 samples.
+SciPy's `hilbert` gives the same numbers. The residual error comes from the segment not holding a whole number of
+cycles.
+
+## Uses
+
+- **Envelope detection.** Amplitude demodulation, onset detection in audio, and features such as the envelope of a
+  vibration or EEG band.
+- **Phase and synchrony.** The instantaneous phase of band-passed signals is used to measure phase locking between
+  channels, for example in neuroscience.
+- **Single-sideband modulation and quadrature signals.** Communications systems transmit the analytic signal's
+  positive-frequency half to halve the bandwidth.
+- **Hilbert–Huang transform.** Applied to the components from
+  <NoteLink to="empirical-mode-decomposition">empirical mode decomposition</NoteLink>, it gives a time-frequency
+  representation.
+
+## Pitfalls
+
+- **It only means something for narrow-band signals.** For a broadband signal the envelope and instantaneous frequency
+  are defined but are not the amplitude and frequency of any component. Band-pass filter first.
+- **Edge effects.** The FFT method assumes the segment repeats, so the envelope is distorted near both ends. Pad or
+  discard the edges.
+- **Instantaneous frequency can be negative or exceed the band.** Where the envelope is near zero, the phase can jump
+  and its derivative spike. Smooth or weight by amplitude.

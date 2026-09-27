@@ -1,0 +1,92 @@
+---
+title: Polyphase decomposition
+kind: technique
+summary: 'The polyphase decomposition $H(z) = \sum_{m=0}^{M-1} z^{-m} E_m(z^M)$ splits a filter into $M$ subfilters of every $M$-th coefficient. With the noble identities it lets a decimator or interpolator run its filters at the low rate, cutting the cost by a factor $M$.'
+tags: [signal-processing, multirate, filters, efficient-computation, worked-example]
+aliases: [polyphase filter, polyphase components, noble identities, polyphase decimator, polyphase interpolator]
+requires: [decimation-and-interpolation, z-transform]
+related: [sample-rate-conversion, filter-banks, fir-filters]
+references: [vaidyanathan1993, crochiere1981]
+status: draft
+updated: 2026-09-26
+---
+
+<Definition>
+The **type-1 polyphase decomposition** of a filter $H(z) = \sum_n h[n] z^{-n}$ with respect to $M$ is
+
+$$
+H(z) = \sum_{m=0}^{M-1} z^{-m} E_m\paren{z^M}, \qquad E_m(z) = \sum_n h[nM + m] z^{-n}.
+$$
+
+The $m$-th **polyphase component** $e_m[n] = h[nM + m]$ keeps every $M$-th coefficient of $h$, starting at $m$
+<Cite id="vaidyanathan1993" />.
+</Definition>
+
+## Where the identity comes from
+
+Group the terms of $H(z)$ by the remainder of their index modulo $M$. Every integer is uniquely $n = kM + m$ with
+$0 \le m < M$, so
+
+$$
+H(z) = \sum_{m=0}^{M-1} \sum_k h[kM + m] z^{-(kM + m)} = \sum_{m=0}^{M-1} z^{-m} \sum_k e_m[k] \paren{z^M}^{-k}
+= \sum_{m=0}^{M-1} z^{-m} E_m\paren{z^M}.
+$$
+
+Nothing is approximated: the decomposition is a relabelling of the coefficients.
+
+## The noble identities
+
+Two exchanges let a filter move across a rate changer:
+
+$$
+\text{downsample by } M \text{, then } G(z) \;\equiv\; G\paren{z^M} \text{, then downsample by } M,
+$$
+
+$$
+G(z) \text{, then upsample by } L \;\equiv\; \text{upsample by } L \text{, then } G\paren{z^L}.
+$$
+
+**Derivation of the first.** $G(z^M)$ has impulse response $g$ upsampled by $M$: nonzero only at multiples of $M$.
+Filtering with it, $v[n] = \sum_k g[k]\, x[n - kM]$, and downsampling gives
+$v[Mn] = \sum_k g[k]\, x[(n - k)M]$. That is $g$ applied to the downsampled sequence $x[Mn]$, which is the left-hand
+side. The second identity is the transpose of the first. Filters of the form $G(z^M)$ are exactly what the polyphase
+decomposition produces, which is why the two combine.
+
+## The polyphase decimator
+
+A decimator computes $y[n] = \sum_k h[k] x[nM - k]$ and keeps one output in $M$. Substitute the polyphase
+decomposition, $h[kM + m] = e_m[k]$:
+
+$$
+y[n] = \sum_{m=0}^{M-1} \sum_k e_m[k]\, x[(n - k)M - m] = \sum_{m=0}^{M-1} (e_m * x_m)[n],
+\qquad x_m[n] = x[nM - m].
+$$
+
+The input is dealt round-robin into $M$ low-rate streams $x_0, x_1, \dots$, each is filtered by its own short
+subfilter at the output rate, and the results are summed. Every multiplication contributes to a kept output. For a
+filter of $P$ taps the direct decimator spends $P$ multiplications per input sample, and the polyphase form spends
+$P / M$.
+
+The polyphase interpolator is the transpose: one input stream feeds $L$ subfilters $e_m$ running at the input rate,
+and a commutator interleaves their outputs.
+
+**Worked example.** A 96-tap anti-aliasing filter for decimation by $M = 4$ has four polyphase components of 24 taps.
+The direct form computes 96 multiplications for every input sample and discards three quarters of the results. The
+polyphase form computes $4 \times 24 = 96$ multiplications per output sample, which is 24 per input sample, a
+four-fold saving with bit-identical output. The equality of the two forms was checked numerically to within
+$10^{-14}$ on random inputs.
+
+## Uses
+
+- **Efficient decimators and interpolators**, the main application.
+- **Rational sample-rate conversion**, where a polyphase interpolator computes only the outputs the downsampler
+  keeps. See <NoteLink to="sample-rate-conversion">sample-rate conversion</NoteLink>.
+- **DFT filter banks**, which combine a polyphase network with an FFT. See
+  <NoteLink to="filter-banks">filter banks</NoteLink>.
+
+## Pitfalls
+
+- **Index conventions.** Type-1 and type-2 decompositions differ in whether the delays are $z^{-m}$ or
+  $z^{-(M - 1 - m)}$; mixing them misaligns the commutator by one sample.
+- **Filter length.** When $P$ is not a multiple of $M$, the subfilters have unequal lengths; pad $h$ with zeros to a
+  multiple of $M$.

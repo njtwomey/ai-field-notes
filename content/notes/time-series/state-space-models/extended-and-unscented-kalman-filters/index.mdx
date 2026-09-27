@@ -1,0 +1,175 @@
+---
+title: Extended and unscented Kalman filters
+kind: concept
+summary: 'The extended and unscented Kalman filters apply the Kalman filter to nonlinear state-space models. The extended filter linearises the model with Jacobians at the current mean; the unscented filter passes a few deterministic sigma points through the functions.'
+tags: [time-series, state-space-models, filtering, nonlinear, gaussian, worked-example]
+aliases: [EKF, UKF, extended Kalman filter, unscented Kalman filter, unscented transform, sigma points, iterated extended Kalman filter]
+requires: [kalman-filter, jacobian]
+related: [taylor-series, multivariate-normal-distribution]
+references: [julier1997, julier2004, sarkka2013]
+status: draft
+updated: 2026-09-27
+---
+
+import { UnscentedTransform } from './UnscentedTransform'
+
+<Definition>
+A **nonlinear state-space model** with additive Gaussian noise is
+
+$$
+\zvec_t = f(\zvec_{t-1}) + \wvec_t, \qquad \xvec_t = h(\zvec_t) + \vvec_t, \qquad
+\wvec_t \sim \Gauss(\zeros, \Qmat), \quad \vvec_t \sim \Gauss(\zeros, \Rmat),
+$$
+
+with differentiable $f: \reals^d \to \reals^d$ and $h: \reals^d \to \reals^p$. The filtering distribution
+$p(\zvec_t \mid \xvec_{1:t})$ is then not Gaussian. The **extended Kalman filter** (EKF) and the **unscented Kalman
+filter** (UKF) approximate it by a Gaussian $\Gauss(\muvec_{t \mid t}, \Pmat_{t \mid t})$, and apply the
+<NoteLink to="kalman-filter">Kalman filter</NoteLink>'s predict and update steps with approximate moments. The EKF
+obtains the moments by linearising $f$ and $h$. The UKF obtains them by the unscented transform
+<Cite id="julier1997" />.
+</Definition>
+
+## The common problem
+
+Both filters must answer the same question twice per step: if $\zvec \sim \Gauss(\muvec, \Pmat)$, what are the mean
+and covariance of $g(\zvec)$ for a nonlinear $g$? In the predict step $g = f$. In the update step $g = h$, and the
+filter also needs the cross-covariance $\cov(\zvec, h(\zvec))$. For linear $g$ the answers are exact and give the
+Kalman filter. For nonlinear $g$ the transformed distribution is not Gaussian, and its moments are integrals with no
+closed form in general.
+
+Once the three moments are available, the update is the Gaussian conditioning of the Kalman filter. With predicted
+mean $\muvec^-$ and covariance $\Pmat^-$, write $\hat\xvec = \expect[h(\zvec_t)]$,
+$\Smat = \cov(h(\zvec_t)) + \Rmat$ and $\Pmat_{zx} = \cov(\zvec_t, h(\zvec_t))$, all under $\Gauss(\muvec^-, \Pmat^-)$.
+Then
+
+$$
+\Kmat = \Pmat_{zx}\Smat^{-1}, \qquad \muvec_{t \mid t} = \muvec^- + \Kmat(\xvec_t - \hat\xvec), \qquad
+\Pmat_{t \mid t} = \Pmat^- - \Kmat\Smat\Kmat^\top.
+$$
+
+The two filters differ only in how they compute $\hat\xvec$, $\Smat$, $\Pmat_{zx}$ and the predicted moments.
+
+## Extended Kalman filter: linearise
+
+The EKF replaces each function by its first-order <NoteLink to="taylor-series">Taylor expansion</NoteLink> about the
+current mean. With the <NoteLink to="jacobian">Jacobian</NoteLink> $\Jmat_g(\muvec)$ of $g$ at $\muvec$,
+
+$$
+g(\zvec) \approx g(\muvec) + \Jmat_g(\muvec)(\zvec - \muvec).
+$$
+
+The right side is linear in $\zvec$, so for $\zvec \sim \Gauss(\muvec, \Pmat)$ it has mean $g(\muvec)$, covariance
+$\Jmat_g\Pmat\Jmat_g^\top$ and cross-covariance $\Pmat\Jmat_g^\top$ with $\zvec$. Write
+$\Fmat_t = \Jmat_f(\muvec_{t-1 \mid t-1})$ and $\Hmat_t = \Jmat_h(\muvec_{t \mid t-1})$. The EKF is the Kalman filter
+with $\Amat$ and $\Cmat$ replaced by these Jacobians, except that the means pass through the nonlinear functions:
+
+$$
+\begin{aligned}
+\muvec_{t \mid t-1} &= f(\muvec_{t-1 \mid t-1}), & \Pmat_{t \mid t-1} &= \Fmat_t\Pmat_{t-1 \mid t-1}\Fmat_t^\top + \Qmat, \\
+\Smat_t &= \Hmat_t\Pmat_{t \mid t-1}\Hmat_t^\top + \Rmat, & \Kmat_t &= \Pmat_{t \mid t-1}\Hmat_t^\top\Smat_t^{-1}, \\
+\muvec_{t \mid t} &= \muvec_{t \mid t-1} + \Kmat_t\paren{\xvec_t - h(\muvec_{t \mid t-1})}, &
+\Pmat_{t \mid t} &= (\eye - \Kmat_t\Hmat_t)\Pmat_{t \mid t-1}.
+\end{aligned}
+$$
+
+The error of linearisation shows in one dimension. For $z \sim \Gauss(\mu, \sigma^2)$, take expectations of the
+second-order expansion $g(z) \approx g(\mu) + g'(\mu)(z - \mu) + \tfrac12 g''(\mu)(z - \mu)^2$. The linear term has
+mean zero, and $\expect[(z - \mu)^2] = \sigma^2$, so
+
+$$
+\expect[g(z)] \approx g(\mu) + \tfrac12 g''(\mu)\sigma^2.
+$$
+
+The EKF keeps only $g(\mu)$. Its predicted mean is biased by about $\tfrac12 g''(\mu)\sigma^2$, which grows with the
+curvature of $g$ and with the variance. The EKF is accurate when $g$ is close to linear over the region where the
+state is likely to be, a few standard deviations around $\muvec$.
+
+The **iterated EKF** reduces the update's linearisation error. It relinearises $h$ at the updated mean and repeats the
+update, which is a Gauss–Newton iteration for the posterior mode.
+
+## Unscented Kalman filter: propagate sigma points
+
+The unscented transform chooses a small set of points, the **sigma points**, whose weighted sample mean and
+covariance equal $\muvec$ and $\Pmat$. It passes each point through $g$ exactly and takes the weighted moments of
+the images <Cite id="julier1997" />. It needs no derivatives, and $g$ need not even be differentiable.
+
+**The scalar case.** Take $z \sim \Gauss(\mu, \sigma^2)$ and three points placed symmetrically: $\mu$ with weight
+$w_0$, and $\mu \pm a\sigma$ with weight $w$ each. Choose $a$, $w_0$ and $w$ so that the points reproduce the first
+moments of the Gaussian. By symmetry every odd central moment of the points is 0, as for the Gaussian. The even ones
+give three equations:
+
+$$
+w_0 + 2w = 1, \qquad 2w\,a^2\sigma^2 = \sigma^2, \qquad 2w\,a^4\sigma^4 = 3\sigma^4.
+$$
+
+The first says the weights sum to 1. The second matches the variance. The third matches the fourth central moment of
+a Gaussian, $3\sigma^4$. Dividing the third by the second gives $a^2 = 3$. Then $w = 1/6$ and $w_0 = 2/3$. So the
+points $\mu$, $\mu \pm \sqrt3\,\sigma$ with weights $2/3, 1/6, 1/6$ match every central moment of the Gaussian up to
+the fifth. For any polynomial $g$ of degree at most 5, $\expect[g(z)]$ is a combination of those moments, so the
+weighted average of $g$ at the three points equals $\expect[g(z)]$ exactly. These points and weights are the
+three-point Gauss–Hermite quadrature rule.
+
+**In $d$ dimensions.** The unscented transform uses $2d + 1$ points. With a matrix square root
+$\Lmat\Lmat^\top = (d + \kappa)\Pmat$, for example the Cholesky factor, and $\lvec_i$ the $i$-th column
+of $\Lmat$,
+
+$$
+\chivec_0 = \muvec, \qquad \chivec_{\pm i} = \muvec \pm \lvec_i, \qquad
+W_0 = \frac{\kappa}{d + \kappa}, \qquad W_{\pm i} = \frac{1}{2(d + \kappa)}.
+$$
+
+The weighted mean of the points is $\muvec$, and their weighted covariance is
+$\sum_i 2W_i\lvec_i\lvec_i^\top = \Lmat\Lmat^\top/(d + \kappa) = \Pmat$. With $d = 1$ and
+$\kappa = 2$ this is the scalar rule above; $\kappa = 3 - d$ is the general choice that matches the Gaussian's
+fourth moments along each axis <Cite id="julier1997" />. The transformed moments are
+
+$$
+\hat\xvec = \sum_i W_i\, g(\chivec_i), \qquad
+\cov(g(\zvec)) \approx \sum_i W_i\paren{g(\chivec_i) - \hat\xvec}\paren{g(\chivec_i) - \hat\xvec}^\top, \qquad
+\Pmat_{zx} \approx \sum_i W_i\paren{\chivec_i - \muvec}\paren{g(\chivec_i) - \hat\xvec}^\top.
+$$
+
+The predicted mean is correct to second order in the Taylor expansion of $g$ for any nonlinearity, so the
+$\tfrac12 g''\sigma^2$ term that the EKF drops is included <Cite id="julier2004" />. The **UKF** runs this transform
+through $f$ in the predict step (adding $\Qmat$ to the covariance) and through $h$ in the update step (adding
+$\Rmat$ to $\Smat$), then applies the Gaussian update above. A step costs $2d + 1$ evaluations of each function and
+one Cholesky factorisation. Practical UKFs often use a scaled variant with parameters $\alpha$, $\beta$, $\kappa$,
+which moves the points closer to the mean for large $d$ <Cite id="sarkka2013" />.
+
+<UnscentedTransform />
+
+## Worked example: a sine observation
+
+A sensor observes the sine of a phase, $x = \sin z + v$, and the predicted phase is $z \sim \Gauss(\pi/2, 1)$. The
+exact moments of $y = \sin z$ follow from $\expect[e^{iz}] = e^{i\mu - \sigma^2/2}$: the mean is
+$e^{-1/2}\sin(\pi/2) = 0.607$, and the standard deviation is $0.447$.
+
+- **Linearised.** The slope of $\sin$ at $\pi/2$ is $\cos(\pi/2) = 0$. The EKF predicts the observation mean
+  $\sin(\pi/2) = 1$ with variance $0^2 \times 1 = 0$. The mean is off by 0.39, and the observation's only predicted
+  uncertainty is the sensor noise $\Rmat$.
+- **Unscented.** The sigma points are $\pi/2$ and $\pi/2 \pm \sqrt3$, with images $1$ and $\cos\sqrt3 = -0.161$
+  twice. The mean is $\tfrac23 \times 1 + \tfrac13 \times (-0.161) = 0.613$, and the standard deviation is $0.547$.
+  The mean is off by 0.007.
+
+For $g(z) = z^2$ with $z \sim \Gauss(0, 1)$ the contrast is starker. The exact mean and variance are 1 and 2. The
+linearisation at 0 has slope 0 and gives mean 0 and variance 0. The unscented transform gives exactly 1 and 2, because
+$z^2$ and $z^4$ are polynomials of degree at most 5.
+
+## When each fails
+
+- **The EKF** fails when the functions curve strongly over the spread of the state, when the Jacobians are
+  inaccurate or expensive, and when the state estimate is poor, because the linearisation point is then wrong too.
+  Its covariance is often too small, and an overconfident filter ignores the observations that would correct it.
+- **At a stationary point of $h$**, as in the sine example, the EKF's $\Hmat_t$ is zero, so its gain is zero and the
+  observation changes nothing. The UKF does no better there: by symmetry its cross-covariance $\Pmat_{zx}$ is also
+  zero. The observation says how far $z$ is from $\pi/2$ but not on which side, and a Gaussian update cannot use that.
+- **Both** keep a single Gaussian. When the posterior is multimodal, as when a sensor measures $z^2$ and cannot tell
+  $z$ from $-z$, no Gaussian approximation is adequate. Sampling methods such as the particle filter represent such
+  posteriors directly, at a higher cost.
+
+## Assumptions
+
+- The noise is additive and Gaussian. Non-additive noise is handled by appending the noise to the state before
+  applying the unscented transform.
+- The EKF needs differentiable $f$ and $h$ and their Jacobians. The UKF needs only function evaluations.
+- Both assume the filtering distribution is close to Gaussian. Neither can represent skew or multiple modes.

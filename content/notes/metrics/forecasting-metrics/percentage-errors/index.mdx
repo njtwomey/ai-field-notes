@@ -1,0 +1,91 @@
+---
+title: Percentage errors (MAPE, sMAPE and WMAPE)
+kind: concept
+summary: 'Mean absolute percentage error $\frac1n\sum_t \abs{y_t - \hat y_t}/\abs{y_t}$ is scale-free but undefined at zero, unbounded for over-forecasts, and rewards forecasts below the median. sMAPE and WMAPE fix some of these problems and introduce others.'
+tags: [metrics, forecasting, time-series, worked-example]
+aliases: [MAPE, sMAPE, WMAPE, mean absolute percentage error, symmetric MAPE, weighted MAPE, percentage error]
+requires: [mse-rmse-and-mae]
+related: [scaled-errors-and-mase, crps-and-interval-scores, robust-and-distributional-regression-losses]
+references: [hyndman2006, makridakis1993, pedregosa2011]
+status: draft
+updated: 2026-09-27
+---
+
+import { PercentageAsymmetry } from './PercentageAsymmetry'
+
+<Definition>
+For actual values $y_t$ and forecasts $\hat y_t$, $t = 1, \dots, n$:
+
+$$
+\operatorname{MAPE} = \frac{100\%}{n}\sum_t \frac{\abs{y_t - \hat y_t}}{\abs{y_t}}, \qquad
+\operatorname{sMAPE} = \frac{100\%}{n}\sum_t \frac{2\abs{y_t - \hat y_t}}{\abs{y_t} + \abs{\hat y_t}}, \qquad
+\operatorname{WMAPE} = \frac{\sum_t \abs{y_t - \hat y_t}}{\sum_t \abs{y_t}}.
+$$
+
+MAPE and sMAPE average errors relative to each actual value; WMAPE divides total absolute error by total actual
+volume <Cite id="hyndman2006" />.
+</Definition>
+
+## Why percentages
+
+Absolute errors are in the units of the series, so they cannot compare forecasts of sales in units with forecasts of
+revenue in pounds, or a small product with a large one. Dividing by the actual value removes the scale. A 10% error
+means the same for every series, which makes MAPE easy to explain and common in business forecasting.
+
+## What goes wrong
+
+**Zeros and near-zeros.** The error is divided by $y_t$, so any zero actual makes MAPE infinite, and small actuals
+make it huge. Intermittent demand, with many zero periods, cannot be scored by MAPE at all.
+
+**Asymmetry.** For a positive actual and a non-negative forecast, a forecast that is too low has an absolute percentage
+error of at most 100%, reached by forecasting 0. A forecast that is too high has no upper limit: forecasting 300 for
+100 is a 200% error. The same absolute miss costs the same percentage, but the ceiling applies only to one side.
+
+**It rewards forecasting low.** The forecast $c$ that minimises the expected absolute percentage error minimises
+$\expect\brack{\abs{Y - c}/Y}$: an absolute error with weight $1/Y$ on each outcome. By the argument that makes the
+median optimal for absolute error, the optimum is the median of the distribution reweighted by $1/y$. Small outcomes
+get more weight, so the optimum moves down. For a log-normal target with parameters $\mu$ and $\sigma$, multiplying the
+density by $1/y$ gives another log-normal density with parameter $\mu - \sigma^2$, so
+
+$$
+c^\star = e^{\mu - \sigma^2} < e^{\mu} = \text{median} < e^{\mu + \sigma^2/2} = \text{mean}.
+$$
+
+With $\sigma = 0.5$ the MAPE-optimal forecast is 78% of the median. A forecaster judged by MAPE is paid to forecast
+systematically low.
+
+<PercentageAsymmetry />
+
+## The alternatives
+
+**sMAPE** divides by the average of actual and forecast instead of the actual alone <Cite id="makridakis1993" />. It is
+bounded, between 0% and 200%, and no longer infinite when $y_t = 0$ unless the forecast is also 0. But it is not
+symmetric in the sense its name suggests. With an actual of 100, forecasts of 50 and 150 miss by the same amount, yet
+their symmetric errors are 67% and 40%: a low forecast is penalised more. Several incompatible definitions circulate,
+including one without the factor of 2 that ranges from 0% to 100%; state which is used.
+
+**WMAPE** divides total absolute error by total actual volume, so it is MAE relative to the mean level of the series.
+Large actuals dominate, zeros cause no problem unless every actual is zero, and it measures the error in the quantity
+that usually matters to the business: total units mis-forecast as a share of total units. It is minimised by the
+median, not a shrunken value.
+
+## Worked example
+
+Actuals $(100, 50, 20, 80)$ and forecasts $(110, 40, 30, 80)$ have absolute errors $(10, 10, 10, 0)$.
+
+- The absolute percentage errors are $(10\%, 20\%, 50\%, 0\%)$, so $\operatorname{MAPE} = 20\%$. The single miss of 10
+  on an actual of 20 contributes most of it.
+- $\operatorname{sMAPE} = 17.9\%$.
+- $\operatorname{WMAPE} = 30/250 = 12\%$: the same three misses of 10, measured against the total volume.
+
+scikit-learn's `mean_absolute_percentage_error` returns 0.2, as a fraction rather than a percentage
+<Cite id="pedregosa2011" />.
+
+## Pitfalls
+
+- **Comparing across series.** Averaging MAPE over many series lets the smallest series dominate. Use WMAPE or
+  <NoteLink to="scaled-errors-and-mase">scaled errors</NoteLink> for collections of series.
+- **Scale versus percentage.** Percentages are meaningful only for quantities with a true zero. Temperatures in Celsius
+  have no meaningful percentage error.
+- **Choosing the forecast to fit the score.** Because MAPE rewards low forecasts, optimising a model for MAPE and then
+  using it to plan stock leads to shortages. Match the score to the decision the forecast feeds.

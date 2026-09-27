@@ -1,0 +1,100 @@
+---
+title: Perfect-reconstruction filter banks
+kind: concept
+summary: 'A two-channel filter bank reconstructs its input exactly, up to a delay, when the synthesis filters cancel the aliasing and the remaining transfer function is $c z^{-d}$. Choosing $G_0(z) = H_1(-z)$, $G_1(z) = -H_0(-z)$ cancels aliasing; orthogonal designs then need a halfband product filter.'
+tags: [signal-processing, multirate, filter-banks, wavelets, worked-example]
+aliases: [PR filter bank, two-channel filter bank, quadrature mirror filter, QMF, conjugate quadrature filter, CQF, alias cancellation, halfband filter]
+requires: [filter-banks, z-transform]
+related: [discrete-wavelet-transform, multiresolution-analysis, wavelet-families, polyphase-decomposition]
+references: [vaidyanathan1993, smith1986, vetterli1995, daubechies1992]
+status: draft
+updated: 2026-09-26
+---
+
+<Definition>
+A two-channel filter bank splits $x$ with analysis filters $H_0$ (lowpass) and $H_1$ (highpass), downsamples each
+branch by 2, then upsamples, filters with synthesis filters $G_0$, $G_1$ and adds. It has **perfect reconstruction**
+when the output is $\hat x[n] = c\, x[n - d]$ for a constant $c \ne 0$ and a delay $d$ <Cite id="vaidyanathan1993" />.
+</Definition>
+
+## The input–output relation
+
+Downsampling by 2 then upsampling by 2 zeroes the odd samples, so it maps $V(z)$ to $\tfrac12 \brack{V(z) + V(-z)}$:
+the term $V(-z)$ has coefficients $(-1)^n v[n]$, and averaging with $V(z)$ cancels the odd ones. Applying this to
+both branches,
+
+$$
+\hat X(z) = \underbrace{\tfrac12 \brack{G_0(z) H_0(z) + G_1(z) H_1(z)}}_{T(z)} X(z)
++ \underbrace{\tfrac12 \brack{G_0(z) H_0(-z) + G_1(z) H_1(-z)}}_{A(z)} X(-z).
+$$
+
+$X(-z)$ is the input spectrum shifted by $\pi$: its appearance is aliasing, introduced by the downsamplers. $T(z)$ is
+the transfer function of the alias-free part. Perfect reconstruction needs two conditions:
+
+- **Alias cancellation:** $A(z) = 0$.
+- **No distortion:** $T(z) = c\, z^{-d}$.
+
+## Cancelling the aliasing
+
+The choice
+
+$$
+G_0(z) = H_1(-z), \qquad G_1(z) = -H_0(-z)
+$$
+
+makes $A(z) = \tfrac12 \brack{H_1(-z) H_0(-z) - H_0(-z) H_1(-z)} = 0$ for any analysis filters. The aliasing that
+leaks through each branch is cancelled exactly by the other branch, even though neither filter is ideal. The
+remaining condition is then on the analysis filters alone:
+
+$$
+T(z) = \tfrac12 \brack{H_0(z) H_1(-z) - H_1(z) H_0(-z)} = c\, z^{-d}.
+$$
+
+## Three classic designs
+
+- **Quadrature mirror filters (QMF).** Take $H_1(z) = H_0(-z)$, the lowpass mirrored about $\pi/2$. Then
+  $T(z) = \tfrac12 \brack{H_0(z)^2 - H_0(-z)^2}$. With a linear-phase FIR $H_0$ this cannot be a pure delay except
+  for the trivial two-tap case, so QMF banks cancel aliasing exactly but only approximate the magnitude condition.
+- **Orthogonal (conjugate quadrature) filters.** Take an even-length $H_0$ of length $N + 1$ and
+  $h_1[n] = (-1)^n h_0[N - n]$, that is $H_1(z) = -z^{-N} H_0(-z^{-1})$ <Cite id="smith1986" />. Substituting,
+  $T(z) = \tfrac12 z^{-N} \brack{P(z) + P(-z)}$ with $P(z) = H_0(z) H_0(z^{-1})$. Perfect reconstruction therefore
+  needs $P(z) + P(-z) = 2$: $P$ must be a **halfband filter**, whose even-indexed coefficients around the centre are
+  zero except the centre itself. The synthesis filters are the time-reversed analysis filters, and the bank
+  implements an orthogonal transform.
+- **Biorthogonal filters.** Dropping orthogonality allows symmetric, linear-phase filters with perfect
+  reconstruction, at the cost of an analysis and a synthesis basis that differ. The CDF 9/7 pair used in JPEG 2000 is
+  an example <Cite id="vetterli1995" />.
+
+## Worked examples
+
+**Haar.** $H_0(z) = (1 + z^{-1})/\sqrt2$ and $H_1(z) = (1 - z^{-1})/\sqrt2$. Then $H_1(-z) = H_0(z)$ and
+$H_0(-z) = H_1(z)$, so
+
+$$
+T(z) = \tfrac12 \brack{H_0(z)^2 - H_1(z)^2} = \tfrac14 \brack{(1 + z^{-1})^2 - (1 - z^{-1})^2} = z^{-1}.
+$$
+
+The Haar bank reconstructs exactly with a one-sample delay. It is the only case in which a QMF and an orthogonal
+design coincide.
+
+**Daubechies db2.** With $h_0 = (0.4830,\, 0.8365,\, 0.2241,\, -0.1294)$, the product filter is
+$P(z) = \tfrac{1}{16}\paren{-z^{3} + 9z + 16 + 9z^{-1} - z^{-3}}$: its only nonzero even-offset coefficient is the
+centre, so it is halfband, and the bank reconstructs with $T(z) = z^{-3}$ and $A(z) = 0$, as a direct numerical
+check of both formulas confirms.
+
+## Connection to wavelets
+
+Iterating an orthogonal two-channel bank on its lowpass output gives the
+<NoteLink to="discrete-wavelet-transform">discrete wavelet transform</NoteLink>. The halfband condition on
+$P(z) = \abs{H_0(e^{i\omega})}^2$, together with a zero of order $N$ at $\omega = \pi$, is the design equation of the
+Daubechies wavelets <Cite id="daubechies1992" />. See
+<NoteLink to="wavelet-families">wavelet families</NoteLink> and
+<NoteLink to="multiresolution-analysis">multiresolution analysis</NoteLink>.
+
+## Pitfalls
+
+- **Perfect reconstruction is fragile to processing.** Alias cancellation relies on both subbands arriving intact.
+  Quantising or discarding a band breaks the cancellation, which is why coders shape quantisation noise to stay below
+  masking thresholds.
+- **Frequency selectivity is not guaranteed.** The PR conditions say nothing about how well $H_0$ separates the bands;
+  short PR filters such as Haar overlap heavily.

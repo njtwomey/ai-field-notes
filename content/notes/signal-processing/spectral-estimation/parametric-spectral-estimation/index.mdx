@@ -1,0 +1,120 @@
+---
+title: Parametric spectral estimation
+kind: technique
+summary: 'Parametric spectral estimation fits an autoregressive model $x[n] = \sum_k a_k x[n-k] + e[n]$ and reports its spectrum $\sigma^2 / \abs{1 - \sum_k a_k e^{-i\omega k}}^2$. Yule–Walker, Levinson–Durbin and Burg fit it; it resolves sharp peaks from short records.'
+tags: [signal-processing, spectral-estimation, time-series, worked-example]
+aliases: [autoregressive spectral estimation, AR spectrum, Burg's method, maximum entropy spectral analysis]
+requires: [autocorrelation-and-wiener-khinchin]
+related: [periodogram, linear-prediction, subspace-frequency-estimation]
+references: [stoica2005, levinson1947, durbin1960]
+status: draft
+updated: 2026-09-26
+---
+
+import { ArSpectrumFit } from './ArSpectrumFit'
+
+<Definition>
+An autoregressive process of order $p$ is $x[n] = \sum_{k=1}^{p} a_k\, x[n-k] + e[n]$, where $e[n]$ is white noise of
+variance $\sigma^2$. Its power spectral density is
+
+$$
+S(\omega) = \frac{\sigma^2}{\abs{1 - \sum_{k=1}^{p} a_k e^{-i\omega k}}^2} .
+$$
+
+Parametric spectral estimation fits $a_1, \dots, a_p$ and $\sigma^2$ to data and reports this spectrum
+<Cite id="stoica2005" />.
+</Definition>
+
+## Why a model helps
+
+Nonparametric estimates, from the <NoteLink to="periodogram">periodogram</NoteLink> to Welch and multitaper, see the
+spectrum through a window of length $N$ and cannot resolve features closer than about $2\pi/N$. An AR model instead
+assumes a form for the spectrum, a smooth all-pole function with at most $p/2$ peaks, and estimates $p + 1$ numbers.
+When the assumption fits, sharp peaks come out sharp from a short record, with no sidelobes. The AR form is also
+general: any continuous spectrum can be approximated by an AR spectrum of high enough order.
+
+The spectrum follows from the model because the process is white noise passed through the all-pole filter
+$H(z) = 1/(1 - \sum_k a_k z^{-k})$, and filtering multiplies a spectrum by $\abs{H(e^{i\omega})}^2$.
+
+## Yule–Walker equations
+
+Multiply the model by $x[n - m]$ for $m \ge 1$ and take expectations. The noise $e[n]$ is uncorrelated with past
+values $x[n - m]$, so
+
+$$
+r[m] = \sum_{k=1}^{p} a_k\, r[m - k], \qquad m = 1, \dots, p,
+$$
+
+and for $m = 0$ the same step gives $\sigma^2 = r[0] - \sum_k a_k\, r[k]$. In matrix form, $R\,\avec = \rvec$, where
+$R_{jk} = r[j - k]$ is a symmetric Toeplitz matrix. Replacing $r$ by the biased sample autocovariance gives the
+Yule–Walker estimate. The biased estimator matters: it keeps $R$ positive definite, which guarantees a stable fitted
+model.
+
+## Levinson–Durbin recursion
+
+The Toeplitz structure solves the equations in $O(p^2)$ operations instead of $O(p^3)$, by building the order-$m$
+solution from the order-$(m - 1)$ one <Cite id="levinson1947" /> <Cite id="durbin1960" />. With $\sigma_0^2 = r[0]$,
+for $m = 1, \dots, p$:
+
+$$
+\kappa_m = \frac{r[m] - \sum_{k=1}^{m-1} a_k^{(m-1)} r[m - k]}{\sigma_{m-1}^2}, \quad
+a_k^{(m)} = a_k^{(m-1)} - \kappa_m\, a_{m-k}^{(m-1)}, \quad a_m^{(m)} = \kappa_m, \quad
+\sigma_m^2 = \sigma_{m-1}^2\paren{1 - \kappa_m^2} .
+$$
+
+The $\kappa_m$ are the reflection coefficients, also the partial autocorrelations. Because each $\sigma_m^2$ is a
+prediction-error variance and cannot be negative, $\abs{\kappa_m} \le 1$; and $\abs{\kappa_m} < 1$ for all $m$ is
+exactly the condition for the fitted filter to be stable. The recursion also returns every lower-order model on the
+way, which makes order selection cheap.
+
+## Burg's method
+
+Yule–Walker estimates the autocovariance first, and the biased estimator's taper on large lags blurs the result for
+short records. Burg's method estimates each reflection coefficient directly from the data instead, choosing $\kappa_m$
+to minimise the sum of forward and backward prediction-error powers:
+
+$$
+\kappa_m = \frac{2\sum_n f_{m-1}[n]\, b_{m-1}[n-1]}{\sum_n \paren{f_{m-1}[n]^2 + b_{m-1}[n-1]^2}},
+$$
+
+then updating the errors $f_m[n] = f_{m-1}[n] - \kappa_m b_{m-1}[n-1]$ and $b_m[n] = b_{m-1}[n-1] - \kappa_m f_{m-1}[n]$.
+By the arithmetic–geometric mean inequality, $\abs{\kappa_m} \le 1$, so the model is always stable. Burg's estimates
+are also the maximum-entropy spectrum: of all spectra whose inverse transform matches the first $p + 1$
+autocovariances, the AR($p$) spectrum has the greatest entropy, so it assumes the least about the unmeasured lags.
+
+<ArSpectrumFit />
+
+## Choosing the order
+
+Too low an order cannot produce all the peaks; too high an order fits the noise and splits peaks into spurious ones.
+Criteria balance the prediction-error variance against the number of parameters:
+
+$$
+\operatorname{AIC}(p) = N\log\hat\sigma_p^2 + 2p, \qquad \operatorname{BIC}(p) = N\log\hat\sigma_p^2 + p\log N .
+$$
+
+AIC tends to choose orders that are too high for spectral work on long records; BIC and the minimum description length
+criterion penalise order more heavily.
+
+## Worked example
+
+Take the AR(2) process $x[n] = 1.3\,x[n-1] - 0.8\,x[n-2] + e[n]$ with $\sigma^2 = 1$. Its poles are the roots of
+$z^2 - 1.3z + 0.8$, namely $0.65 \pm 0.614i$, with radius $\sqrt{0.8} = 0.894$ and angle 0.757 rad. Its autocovariances
+are $r[0] = 5.806$, $r[1] = 4.194$ and $r[2] = 0.806$. Levinson–Durbin on these values gives
+
+- $\kappa_1 = r[1]/r[0] = 0.7222$ and $\sigma_1^2 = 5.806\,(1 - 0.7222^2) = 2.778$;
+- $\kappa_2 = (r[2] - 0.7222\, r[1])/2.778 = -0.8$, then $a_1 = 0.7222 - (-0.8)(0.7222) = 1.3$, $a_2 = -0.8$, and
+  $\sigma_2^2 = 2.778\,(1 - 0.64) = 1$.
+
+The recursion recovers the model exactly from exact autocovariances. The spectrum peaks at $\omega = 0.751$ rad, close
+to the pole angle but not equal to it, with $S = 53.0$, or 17.2 dB. From 20,000 simulated samples, Burg's method
+estimates $(1.302, -0.802)$ and Yule–Walker $(1.302, -0.801)$.
+
+## Pitfalls
+
+- **Peaks are not frequencies.** A spectral peak sits near, not at, the angle of its pole pair; for close or broad
+  peaks the difference matters.
+- **Line splitting and bias.** Yule–Walker on short records biases peak locations; Burg can split a single sinusoid's
+  peak in two, especially with a nonzero initial phase.
+- **Noise in the data.** An AR process observed in additive white noise is an ARMA process, and a pure AR fit
+  flattens its peaks.

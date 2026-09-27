@@ -1,0 +1,66 @@
+---
+title: Perceptual image quality metrics
+kind: concept
+summary: 'Perceptual metrics aim to match human judgments of image similarity better than pixel errors. UQI and VIF are hand-designed from statistics and information theory; LPIPS and DISTS compare deep network features and are calibrated or trained on human judgments.'
+tags: [metrics, image-quality, computer-vision, deep-learning, worked-example]
+aliases: [LPIPS, learned perceptual image patch similarity, DISTS, VIF, visual information fidelity, UQI, universal quality index, perceptual similarity]
+related: [ssim, psnr, frechet-inception-distance]
+references: [wang2002, sheikh2006, zhang2018, ding2020]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A full-reference perceptual image metric scores a distorted image $y$ against a reference $x$ so that the score orders
+pairs of images the way people do. The main families are statistical indices such as UQI <Cite id="wang2002" />,
+information-theoretic measures such as VIF <Cite id="sheikh2006" />, and deep-feature distances such as LPIPS
+<Cite id="zhang2018" /> and DISTS <Cite id="ding2020" />.
+</Definition>
+
+## Universal quality index
+
+UQI is the predecessor of <NoteLink to="ssim">SSIM</NoteLink>: the same product of luminance, contrast and structure
+comparisons, but without the stabilising constants,
+
+$$
+Q = \frac{4\sigma_{xy}\mu_x\mu_y}{(\sigma_x^2 + \sigma_y^2)(\mu_x^2 + \mu_y^2)} .
+$$
+
+It is undefined for flat patches, where the denominators vanish, which is what SSIM's $C_1$ and $C_2$ fix. For the
+patches $x = (50, 60, 70, 80)$ and $y = (52, 58, 75, 79)$, $Q = 0.970$, slightly below their SSIM of $0.975$.
+
+## Visual information fidelity
+
+VIF treats the reference as the output of a natural-image source passed through a model of the visual system, and the
+distorted image as the same source passed through a distortion channel and then the visual system. It is the ratio of
+the information the viewer can extract from the distorted image to the information they can extract from the
+reference, computed with a Gaussian scale-mixture model in a wavelet domain. VIF is 1 for identical images, falls toward
+0 with distortion, and can exceed 1 for contrast enhancement that adds visible information.
+
+## LPIPS
+
+LPIPS passes both images through a network trained for image classification (AlexNet, VGG or SqueezeNet), normalises
+each layer's activations to unit length across channels, and compares them:
+
+$$
+d(x, y) = \sum_{l} \frac{1}{H_l W_l}\sum_{h, w} \norm{\wvec_l \odot \paren{\hat{\yvec}^{\,l}_{hw}(x) - \hat{\yvec}^{\,l}_{hw}(y)}}^2 .
+$$
+
+The per-channel weights $\wvec_l$ are fitted to a dataset of human two-alternative forced-choice judgments. Deep
+features turn out to predict human similarity judgments far better than PSNR or SSIM, including for distortions such
+as warps that pixel metrics handle badly. Lower is better.
+
+## DISTS
+
+DISTS also compares deep features, but splits the comparison into structure (correlation of feature maps) and texture
+(their means and variances), in the spirit of SSIM. Because texture is compared through statistics rather than
+position, DISTS tolerates resampled textures such as grass or hair, which look the same to a viewer but differ pixel by
+pixel.
+
+## Pitfalls
+
+- **Backbone dependence.** LPIPS values from different networks are not comparable; report the backbone and version.
+- **Adversarial exploitation.** A model trained to minimise a learned metric can find images the metric likes but people
+  do not. Evaluate with a different metric from the one used for training.
+- **Domain shift.** Learned metrics are fitted to natural photographs; on medical, satellite or synthetic images their
+  agreement with human judgment is unknown.

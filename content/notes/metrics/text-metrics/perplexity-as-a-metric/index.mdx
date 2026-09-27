@@ -1,0 +1,71 @@
+---
+title: Perplexity as an evaluation metric
+kind: concept
+summary: 'Perplexity is the exponential of a language model''s average negative log-likelihood per token on held-out text, $\exp\paren{-\tfrac1T\sum_t \log p(x_t \mid x_{<t})}$. It depends on the tokeniser, so comparisons need the same tokenisation or a per-byte normalisation.'
+tags: [metrics, nlp, language-models, worked-example]
+aliases: [PPL, bits per character, bits per byte, word-level perplexity, token-level perplexity]
+requires: [cross-entropy-and-perplexity]
+related: [entropy, source-coding-theorem, kl-divergence]
+references: [jelinek1977]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For a model $p$ evaluated on held-out tokens $x_1, \dots, x_T$,
+
+$$
+\mathrm{PPL} = \exp\paren{-\frac{1}{T} \sum_{t=1}^{T} \log p\paren{x_t \mid x_{<t}}}.
+$$
+
+The exponent is the average negative log-likelihood per token, the cross-entropy of the model on the data. PPL is at
+least 1, and lower is better <Cite id="jelinek1977" />.
+</Definition>
+
+## What the number means
+
+The derivation of perplexity from cross-entropy is in <NoteLink to="cross-entropy-and-perplexity">cross-entropy and
+perplexity</NoteLink>. As an evaluation metric the useful reading is the effective branching factor: a model with
+perplexity $k$ is as uncertain, on average, as one choosing uniformly among $k$ tokens at every step. A uniform model
+over a vocabulary of $V$ tokens has perplexity exactly $V$, and a model that assigns probability 1 to every correct
+token has perplexity 1.
+
+If a model assigns the probabilities $0.5, 0.25, 0.25, 0.125$ to the four tokens of a held-out text, the average
+negative log-likelihood is $\tfrac14(\ln 2 + \ln 4 + \ln 4 + \ln 8) = 2\ln 2$ nats, which is 2 bits per token, and the
+perplexity is $e^{2\ln 2} = 4$.
+
+## The unit is the tokeniser's
+
+The average is taken per token, so perplexity depends on what a token is. Two models with different tokenisers
+spread the same total log-likelihood over different numbers of tokens. The total negative log-likelihood $L$ of a text
+is the quantity that can be compared; the normalisation is a choice.
+
+For a text of $T$ tokens and $W$ words,
+
+$$
+\mathrm{PPL}_{\text{word}} = e^{L/W} = \paren{e^{L/T}}^{T/W} = \mathrm{PPL}_{\text{token}}^{\,T/W}.
+$$
+
+A text of 8 words split into 12 tokens, with token-level perplexity 4, has word-level perplexity $4^{12/8} = 8$.
+Normalising by characters or bytes instead gives bits per character or bits per byte, $L / (\text{bytes} \cdot \ln
+2)$, which is comparable across tokenisers and connects the model to compression: by the
+<NoteLink to="source-coding-theorem">source coding theorem</NoteLink>, an arithmetic coder driven by the model
+compresses the text to about $L/\ln 2$ bits.
+
+## How it is measured
+
+- **Held-out data only.** Perplexity on training data measures memorisation.
+- **Context length.** A model with a fixed context window must evaluate long texts in chunks. Non-overlapping chunks
+  give the tokens at the start of each chunk almost no context, which inflates perplexity; a sliding window with a
+  stride shorter than the context gives every token a long context at more cost.
+- **Special tokens and padding.** Beginning- and end-of-sequence tokens and padding must be counted or excluded
+  consistently.
+
+## Pitfalls
+
+- **Not comparable across vocabularies.** Compare per-token perplexity only between models with the same tokeniser;
+  otherwise use bits per byte or the total log-likelihood.
+- **Low perplexity is not good generation.** Perplexity measures how well the model predicts held-out text. It does
+  not measure factual accuracy, instruction following or the quality of sampled text, and it can be lowered by
+  predicting frequent tokens well.
+- **Domain dependence.** Perplexity on one corpus says little about another. Report the evaluation corpus.

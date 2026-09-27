@@ -114,7 +114,11 @@ export const db = (magnitude: number, floor = -200) => Math.max(floor, 20 * Math
 
 export type WindowName = 'rectangular' | 'hann' | 'hamming' | 'blackman'
 
-export function window(name: WindowName, n: number, periodic = false): Float64Array {
+/**
+ * A window of length n. Named makeWindow, not window: a module binding called `window` shadows the browser global in
+ * any file that imports it, which breaks code (including the dev server's hot-reload preamble) that relies on it.
+ */
+export function makeWindow(name: WindowName, n: number, periodic = false): Float64Array {
   const w = new Float64Array(n)
   const m = periodic ? n : n - 1
   for (let i = 0; i < n; i++) {
@@ -230,7 +234,7 @@ export function stft(
   win: WindowName = 'hann',
   nfft = nextPowerOfTwo(size),
 ) {
-  const w = window(win, size, true)
+  const w = makeWindow(win, size, true)
   const frames: Float64Array[] = []
   const centres: number[] = []
   for (let start = 0; start + size <= x.length; start += hop) {

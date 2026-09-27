@@ -1,0 +1,85 @@
+---
+title: Convolution theorem
+kind: concept
+summary: 'Convolution in time is multiplication in frequency: the transform of $x * h$ is $X H$. For the DFT the convolution is circular, so computing a linear convolution with FFTs needs zero-padding to at least $N + M - 1$ samples.'
+tags: [signal-processing, fourier, worked-example]
+aliases: [fast convolution, circular convolution, cyclic convolution, FFT convolution, multiplication property]
+requires: [convolution, dft]
+related: [fft, overlap-add-and-overlap-save, fir-filters, fourier-transform]
+references: [oppenheim2010]
+status: draft
+updated: 2026-09-26
+---
+
+import { CircularWrap } from './CircularWrap'
+
+<Definition>
+For every Fourier transform, convolution in one domain is multiplication in the other. For sequences and the DTFT,
+
+$$
+y = x * h \quad\Longleftrightarrow\quad Y(e^{i\omega}) = X(e^{i\omega})\,H(e^{i\omega}).
+$$
+
+For the $N$-point DFT the corresponding convolution is circular: $Y[k] = X[k]H[k]$ exactly when
+$y[n] = \sum_{m=0}^{N-1} x[m]\,h[(n - m) \bmod N]$ <Cite id="oppenheim2010" />.
+</Definition>
+
+## Proof for the DTFT
+
+Substitute the convolution into the transform and exchange the sums, which is valid when both sequences are
+absolutely summable:
+
+$$
+Y(e^{i\omega}) = \sum_n \sum_m x[m]\,h[n - m]\,e^{-i\omega n}
+= \sum_m x[m]\,e^{-i\omega m} \sum_n h[n - m]\,e^{-i\omega (n - m)} = X(e^{i\omega})\,H(e^{i\omega}).
+$$
+
+The inner sum is $H(e^{i\omega})$ for every $m$, after substituting $\ell = n - m$. The same steps with integrals prove
+the continuous-time version, and with sums modulo $N$ the DFT version.
+
+The dual statement also holds: multiplying two signals convolves their spectra. For the DTFT the spectral convolution
+is periodic, $\frac{1}{2\pi}\int_{-\pi}^{\pi} X(e^{i\theta}) W(e^{i(\omega - \theta)})\,d\theta$. This is why
+windowing a signal smears its spectrum; see
+<NoteLink to="spectral-leakage-and-windows">spectral leakage and windows</NoteLink>.
+
+## Circular convolution
+
+The DFT treats a length-$N$ sequence as one period of a periodic one. Multiplying DFTs therefore convolves the two
+periodic sequences over one period: indices are taken modulo $N$, and anything that would land at index $N$ or beyond
+wraps around to the start.
+
+A linear convolution of lengths $N_x$ and $N_h$ has $N_x + N_h - 1$ samples. If both sequences are padded with zeros to
+a length
+
+$$
+L \ge N_x + N_h - 1,
+$$
+
+the circular convolution has room for the whole result and nothing wraps, so it equals the linear convolution.
+
+<CircularWrap />
+
+**Worked example.** Convolving six ones with $(1, 0.75, 0.5, 0.25)$ linearly gives
+$(1, 1.75, 2.25, 2.5, 2.5, 2.5, 1.5, 0.75, 0.25)$, nine samples. With $N = 6$, the last three samples wrap onto the
+first three, giving $(2.5, 2.5, 2.5, 2.5, 2.5, 2.5)$: every output equals the full sum of $h$, because a constant
+signal convolved circularly sees the whole response at every position. With $N = 9$ or more the result is exact.
+
+## Fast convolution
+
+Direct convolution costs $N_x N_h$ multiplications. With the FFT:
+
+1. pad $x$ and $h$ to length $L \ge N_x + N_h - 1$, usually a power of two;
+2. compute their FFTs;
+3. multiply the spectra point by point;
+4. take the inverse FFT.
+
+This costs $O(L \log L)$. It wins when the response is long, above a few dozen samples. For a long or streaming
+input, the signal is processed in blocks, each convolved by FFT and then stitched together; see
+<NoteLink to="overlap-add-and-overlap-save">overlap-add and overlap-save</NoteLink>.
+
+## Pitfalls
+
+- **Unpadded FFT filtering.** Multiplying the FFT of a signal by a frequency response and inverting, without padding,
+  wraps the filter's tail onto the start of the block.
+- **Filtering in frequency by zeroing bins.** Setting DFT bins to zero is multiplication by a rectangular response,
+  which is circular convolution with a periodic sinc. It rings in time and wraps around.

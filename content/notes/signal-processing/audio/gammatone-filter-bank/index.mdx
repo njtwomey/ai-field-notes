@@ -1,0 +1,77 @@
+---
+title: Gammatone filter bank
+kind: concept
+summary: 'A gammatone filter has impulse response $t^{n-1}e^{-2\pi b t}\cos(2\pi f_c t)$: a tone in a gamma-shaped envelope. With order $n = 4$ and $b = 1.019\,\mathrm{ERB}(f_c)$, a bank of them spaced on the ERB scale is a standard linear model of cochlear filtering.'
+tags: [audio, psychoacoustics, filter-banks, worked-example]
+aliases: [gammatone, gammatone filters, auditory filter bank, cochlear filter bank, gammatone-frequency cepstral coefficients, GFCC]
+requires: [auditory-scales]
+related: [mel-filter-bank, filter-banks, fir-filters]
+references: [glasberg1990, lyon2017]
+status: draft
+updated: 2026-09-26
+---
+
+import { GammatoneBank } from './GammatoneBank'
+
+<Definition>
+The gammatone filter of order $n$, centre frequency $f_c$ and bandwidth parameter $b$ has impulse response
+
+$$
+g(t) = a\, t^{n-1} e^{-2\pi b t} \cos\paren{2\pi f_c t + \phi}, \qquad t \ge 0.
+$$
+
+The envelope $t^{n-1}e^{-2\pi bt}$ is the shape of a gamma density, hence the name. Order $n = 4$ with
+$b = 1.019\,\mathrm{ERB}(f_c)$, where $\mathrm{ERB}(f) = 24.7(4.37f/1000 + 1)$ Hz, matches measured human auditory
+filters <Cite id="glasberg1990" /> <Cite id="lyon2017" />.
+</Definition>
+
+## The frequency response
+
+The impulse response is a complex exponential envelope times a carrier, so its transform is the envelope's transform
+shifted to $\pm f_c$. The envelope $t^{n-1}e^{-2\pi bt}$ has Fourier transform $(n-1)!/(2\pi(b + if))^n$. Near
+$f_c$, ignoring the image at $-f_c$,
+
+$$
+\abs{G(f)} \propto \brack{1 + \paren{\frac{f - f_c}{b}}^2}^{-n/2}.
+$$
+
+This is $n$ first-order resonances in cascade: a symmetric, rounded passband whose skirts fall at $6n$ dB per octave of
+detuning far from the centre. Order 4 matches the shape of auditory filters measured with notched noise.
+
+## Where 1.019 comes from
+
+The equivalent rectangular bandwidth of a filter is the width of a rectangle with the same peak power gain and the same
+area under $\abs{G}^2$. Integrating the response above,
+
+$$
+\int_{-\infty}^{\infty}\brack{1 + \paren{\frac{f - f_c}{b}}^2}^{-n}\, df = b\,\frac{\pi\,(2n - 2)!}{2^{2n-2}\,\paren{(n-1)!}^2},
+$$
+
+which for $n = 4$ is $b \times \pi \times 720/(64 \times 36) = 0.982\,b$. Setting this equal to the measured
+$\mathrm{ERB}(f_c)$ gives $b = \mathrm{ERB}(f_c)/0.982 = 1.019\,\mathrm{ERB}(f_c)$.
+
+**Worked example.** At $f_c = 1$ kHz, $\mathrm{ERB} = 24.7 \times 5.37 = 132.6$ Hz and $b = 135.2$ Hz. The envelope
+$t^3e^{-2\pi bt}$ peaks where its derivative vanishes, at $t = 3/(2\pi b) = 3.5$ ms. Integrating the squared magnitude
+of a filter sampled at 48 kHz numerically gives an ERB of 132.7 Hz, matching the target.
+
+<GammatoneBank />
+
+## The bank
+
+Centre frequencies are spaced equally in ERB number, typically one filter per ERB or finer, from about 50 Hz to the
+Nyquist frequency. The outputs are half-wave rectified and smoothed to model hair-cell transduction, or summed in
+frames to give a cochleagram, the auditory analogue of a spectrogram. Cepstral coefficients of log gammatone energies
+(GFCCs) are an alternative to <NoteLink to="mfcc">MFCCs</NoteLink> that is somewhat more robust to noise.
+
+**Implementation.** The impulse response is not a rational function of time, but the all-pole approximation, a
+cascade of four complex one-pole filters at $f_c$ with pole radius $e^{-2\pi b/f_s}$, reproduces the magnitude
+response closely at a few multiplies per sample.
+
+## Pitfalls
+
+- **A linear model.** Real cochlear filters are nonlinear: they sharpen at low levels and broaden at high ones, and
+  their gain is compressive. Gammatone banks ignore this; gammachirp and dynamic compressive models add it.
+- **Phase alignment.** Filters with different $f_c$ have different group delays, the low ones longest. Summing their
+  outputs without compensation smears transients.
+- **Sampling at high frequencies.** When $f_c + 3b$ approaches the Nyquist frequency, the sampled impulse response
+  aliases and the response is no longer symmetric.

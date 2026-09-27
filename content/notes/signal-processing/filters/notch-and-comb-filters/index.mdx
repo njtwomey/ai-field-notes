@@ -1,0 +1,105 @@
+---
+title: Notch and comb filters
+kind: technique
+summary: 'A notch filter places zeros on the unit circle at $e^{\pm i\omega_0}$ and poles just inside at $re^{\pm i\omega_0}$, removing one frequency with a $-3$ dB bandwidth of about $2(1 - r)$ rad/sample. A comb filter repeats the notch at every multiple of $2\pi/D$.'
+tags: [signal-processing, filters, worked-example]
+aliases: [notch filter, band-stop filter, comb filter, mains hum removal, powerline interference, 50 Hz filter, 60 Hz filter]
+requires: [iir-filters, frequency-response]
+related: [iir-filter-design, fir-filters, zero-phase-filtering, moving-average-and-smoothing-filters]
+references: [smith2007filters]
+status: draft
+updated: 2026-09-26
+---
+
+import { NotchDemo } from './NotchDemo'
+
+<Definition>
+The second-order notch filter with notch frequency $\omega_0$ (rad/sample) and pole radius $0 < r < 1$ is
+
+$$
+H(z) = \frac{1 - 2\cos\omega_0\, z^{-1} + z^{-2}}{1 - 2r\cos\omega_0\, z^{-1} + r^2 z^{-2}}
+= \frac{(1 - e^{i\omega_0}z^{-1})(1 - e^{-i\omega_0}z^{-1})}{(1 - re^{i\omega_0}z^{-1})(1 - re^{-i\omega_0}z^{-1})} .
+$$
+
+Its zeros lie on the unit circle at $e^{\pm i\omega_0}$, so $H(e^{i\omega_0}) = 0$. Its poles lie at $re^{\pm i\omega_0}$,
+just inside, so the gain returns to almost 1 away from $\omega_0$ <Cite id="smith2007filters" />.
+</Definition>
+
+## Why the poles make the notch narrow
+
+Zeros alone give a notch, but a wide one: the FIR filter $1 - 2\cos\omega_0\,z^{-1} + z^{-2}$ has gain
+$2\abs{\cos\omega - \cos\omega_0}$, which varies over the whole band. Each pole sits next to a zero, at the same angle.
+At a frequency $\omega$ far from $\omega_0$, the point $e^{i\omega}$ is at almost the same distance from the zero as
+from the pole, and the ratio of distances, which is the gain, is almost 1. Only near $\omega_0$, where the distance to
+the zero goes to 0 while the distance to the pole stays at least $1 - r$, does the gain fall.
+
+The bandwidth follows from this geometry. Write $\omega = \omega_0 + \delta$ with $\abs{\delta}$ small. The factor for
+the conjugate pair at $-\omega_0$ is close to 1 when $\omega_0$ is not near 0 or $\pi$. The remaining factor is
+
+$$
+\frac{e^{i\omega} - e^{i\omega_0}}{e^{i\omega} - re^{i\omega_0}}
+\approx \frac{i\delta\, e^{i\omega_0}}{e^{i\omega_0}\paren{i\delta + (1 - r)}}
+\quad\Longrightarrow\quad
+\abs{H(e^{i\omega})}^2 \approx \frac{\delta^2}{\delta^2 + (1 - r)^2} ,
+$$
+
+using $e^{i\delta} \approx 1 + i\delta$. The gain is $1/\sqrt 2$ at $\delta = \pm(1 - r)$, so the $-3$ dB bandwidth
+of the notch is
+
+$$
+\Delta\omega \approx 2(1 - r) \ \text{rad/sample}, \qquad \Delta f \approx \frac{(1 - r) f_s}{\pi} \ \text{Hz}
+$$
+
+at sampling rate $f_s$. A narrower notch costs time: the poles' impulse response decays as $r^n$, a time constant of
+about $1/(1 - r)$ samples, so a narrow notch takes long to settle after the interference starts or changes.
+
+## Comb filters
+
+A comb filter has a periodic frequency response with period $2\pi/D$ for an integer delay $D$.
+
+- **Feedforward comb.** $y[n] = x[n] - x[n - D]$ has $H(z) = 1 - z^{-D}$ and
+  $\abs{H(e^{i\omega})} = 2\abs{\sin(\omega D/2)}$, with zeros at $\omega = 2\pi k/D$ for $k = 0, \dots, D - 1$. It
+  removes a fundamental of $2\pi/D$ rad/sample, all its harmonics, and the mean. The sum $x[n] + x[n - D]$ instead has
+  zeros at the odd multiples $(2k + 1)\pi/D$.
+- **Feedback comb.** $y[n] = x[n] + \alpha\, y[n - D]$, with $\abs{\alpha} < 1$, has $H(z) = 1/(1 - \alpha z^{-D})$:
+  $D$ poles at radius $\abs{\alpha}^{1/D}$, which produce peaks at the multiples of $2\pi/D$. It models echoes and
+  resonant tubes, and is a building block of artificial reverberation.
+- **Comb notch.** Combining both, $H(z) = g\,(1 - z^{-D})/(1 - \rho z^{-D})$ with $\rho = r^D$, puts zeros at
+  $e^{i2\pi k/D}$ and poles at $re^{i2\pi k/D}$. This is $D$ notches of the kind above at once, each with bandwidth
+  about $2(1 - r)$. The gain $g = (1 + \rho)/2$ sets the gain between notches to 1.
+
+The comb notch needs the interference period to be an integer number of samples. When $f_s/f_0$ is not an integer, the
+notches drift away from the harmonics, and a cascade of second-order notches at each harmonic is used instead.
+
+<NotchDemo />
+
+## Worked example: removing 50 Hz mains hum
+
+An electrocardiogram sampled at $f_s = 1000$ Hz carries 50 Hz interference from the power line. The notch frequency is
+$\omega_0 = 2\pi \cdot 50/1000 = 0.1\pi$ rad/sample. With $r = 0.99$, the coefficients are
+
+$$
+H(z) = \frac{1 - 1.9021\,z^{-1} + z^{-2}}{1 - 1.8831\,z^{-1} + 0.9801\,z^{-2}} ,
+$$
+
+since $2\cos(0.1\pi) = 1.9021$. The approximate bandwidth is $2(1 - r) = 0.02$ rad/sample, or
+$0.02 \cdot 1000/(2\pi) = 3.18$ Hz. The exact $-3$ dB bandwidth, measured from the frequency response, is
+0.02006 rad/sample, or 3.19 Hz, from about 48.4 to 51.6 Hz. At 7 Hz the gain is 0.99994, so the signal of interest is
+untouched. The time constant is $1/(1 - r) = 100$ samples, or 0.1 s. With $r = 0.98$ the bandwidth doubles to 6.38 Hz
+and the settling time halves.
+
+Mains hum is rarely a pure sinusoid: rectifiers and transformers add harmonics at 100, 150, 200 Hz and above. Since
+$f_s/f_0 = 20$ is an integer, the comb notch with $D = 20$ removes all of them in one filter. It also removes 0 Hz, which
+is harmless for an ECG whose baseline is removed anyway, but wrong for signals whose mean matters.
+
+## Pitfalls
+
+- **Mains frequency drifts.** Grid frequency varies by about $\pm 0.1$ Hz and more on weak grids. A notch narrower than
+  the drift misses the interference; a wider one removes more signal. Adaptive notch filters track the frequency.
+- **Phase distortion near the notch.** The phase changes by $\pi$ across the notch, so components near $\omega_0$ are
+  delayed and distorted. Apply the notch forward and backward when offline, or accept the distortion; see
+  <NoteLink to="zero-phase-filtering">zero-phase filtering</NoteLink>.
+- **Notching removes signal too.** Any genuine content in the notch band is lost. For an ECG, a 50 Hz notch slightly
+  distorts the sharp QRS complex, whose spectrum reaches past 50 Hz.
+- **Quantisation.** With $r$ close to 1 the poles sit close to the unit circle, and coefficient rounding in fixed-point
+  arithmetic can move them outside it. Implement in second-order sections and check the pole radius after quantisation.

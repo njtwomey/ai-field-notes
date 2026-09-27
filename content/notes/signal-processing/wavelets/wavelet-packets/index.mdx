@@ -1,0 +1,80 @@
+---
+title: Wavelet packets
+kind: technique
+summary: 'Wavelet packets split the detail bands as well as the approximations, giving a full binary tree of subbands and a library of at least $2^{2^{J-1}}$ orthonormal bases for depth $J$. The best-basis algorithm picks the one that minimises an additive cost, such as entropy, in $O(N \log N)$ time.'
+tags: [signal-processing, wavelets, filter-banks, adaptive-methods, worked-example]
+aliases: [wavelet packet transform, WPT, wavelet packet decomposition, best basis, best-basis algorithm, Coifman–Wickerhauser]
+requires: [discrete-wavelet-transform]
+related: [multiresolution-analysis, filter-banks, wavelet-denoising, perfect-reconstruction-filter-banks]
+references: [coifman1992, mallat2009]
+status: draft
+updated: 2026-09-26
+---
+
+<Definition>
+The **wavelet packet decomposition** applies the two-channel split of the
+<NoteLink to="discrete-wavelet-transform">discrete wavelet transform</NoteLink> to every subband, not only the
+lowpass one. After $J$ levels it forms a full binary tree whose $2^j$ nodes at depth $j$ are subbands of equal width
+$\pi / 2^j$. Any set of nodes whose frequency intervals tile $[0, \pi]$ without overlap gives an orthonormal basis
+<Cite id="coifman1992" />.
+</Definition>
+
+## The tree and its bases
+
+Each node holds the coefficients of one subband. Splitting a node with the orthogonal lowpass and highpass filters
+and downsampling produces its two children, and the children together represent exactly the same signal as the
+parent, because each split is an orthogonal transform. So any **admissible tree**, a set of leaves obtained by
+choosing, at each node, either to stop or to split, gives an orthonormal basis.
+
+The ordinary discrete wavelet transform is one such tree: it splits only the lowpass branch. The uniform tree that
+splits everything to depth $J$ gives $2^J$ equal-width bands, like a short-time Fourier transform. Every choice in
+between adapts the time-frequency tiling to the signal.
+
+## How many bases
+
+Let $B_J$ be the number of admissible trees of depth at most $J$ below a node. A node either stays a leaf, or splits
+into two children each with $B_{J-1}$ choices, so
+
+$$
+B_J = B_{J-1}^2 + 1, \qquad B_0 = 1.
+$$
+
+This grows doubly exponentially: $B_J \ge 2^{2^{J-1}}$ for $J \ge 1$, with equality only at $J = 1$.
+
+**Worked example.** The recursion gives $B_1 = 2$, $B_2 = 5$, $B_3 = 26$, $B_4 = 677$ and $B_5 = 458{,}330$ bases.
+A depth-5 tree over 1024 samples already holds nearly half a million orthonormal bases; searching them by brute
+force would be pointless.
+
+## The best-basis algorithm
+
+Choose an additive cost $\mathcal{C}$ of a coefficient vector, $\mathcal{C}(c) = \sum_k \phi(c_k)$. A common choice
+is the entropy-like $\phi(c) = -c^2 \log c^2$, applied to coefficients normalised by the signal's energy. Additivity
+makes the cost of a basis the sum of the costs of its leaves. The best basis is then found bottom-up by dynamic
+programming:
+
+1. Compute all nodes of the full tree, which costs $O(L N)$ per level and $O(L N J)$ in total.
+2. At the deepest level, each node's best cost is its own cost.
+3. Moving up, compare each node's own cost with the sum of its two children's best costs. Keep the smaller, and mark
+   the node as a leaf or a split accordingly.
+4. The marks at the root define the best basis.
+
+Every node is visited once, so the search is linear in the size of the tree, $O(N \log N)$ for $J = \log_2 N$ levels
+<Cite id="coifman1992" />. Additivity is what makes the local decision globally optimal: the best subtree under a
+node does not depend on anything outside it.
+
+## Uses
+
+- **Compression and denoising** of signals whose energy sits in bands that the octave split of the ordinary DWT
+  divides badly, such as narrowband components at high frequency.
+- **Feature extraction**, taking energies of the best-basis subbands.
+- **Audio coding**, where adaptive packet trees can approximate critical bands.
+
+## Pitfalls
+
+- **Frequency order of the tree.** Splitting a highpass branch reverses the frequency order of its children, because
+  downsampling folds the band. The natural (Paley) order of the tree is not frequency order; the Gray-code permutation
+  restores it.
+- **Leakage between packets.** Short filters split the band imperfectly, and packets deep in the tree inherit the
+  leakage of every split above them.
+- **The cost decides the basis.** Entropy favours sparse representations; other costs, such as the number of
+  coefficients above a threshold, pick different trees.

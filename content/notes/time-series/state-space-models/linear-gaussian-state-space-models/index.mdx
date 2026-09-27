@@ -1,0 +1,185 @@
+---
+title: Linear-Gaussian state-space models
+kind: concept
+summary: 'A linear-Gaussian state-space model explains a time series $\xvec_t = \Cmat\zvec_t + \vvec_t$ by a hidden state with linear dynamics $\zvec_t = \Amat\zvec_{t-1} + \wvec_t$ and Gaussian noise. Inference is exact by Kalman filtering and smoothing, and EM learns $\Amat$, $\Cmat$, $\Qmat$, $\Rmat$ in closed form.'
+tags: [time-series, state-space-models, latent-variable-models, gaussian, expectation-maximisation, worked-example]
+aliases: [linear dynamical system, LDS, linear Gaussian state space model, dynamic linear model, DLM, Kalman filter model, Shumway–Stoffer EM]
+requires: [multivariate-normal-distribution, kalman-smoother]
+related: [expectation-maximisation, hidden-markov-model, gaussian-mixture-model]
+references: [shumway1982, ghahramani1996, roweis1999, bishop2006]
+status: draft
+updated: 2026-09-27
+---
+
+import { EmFit } from './EmFit'
+
+<Definition>
+A **linear-Gaussian state-space model**, or **linear dynamical system** (LDS), models observations
+$\xvec_1, \dots, \xvec_T \in \reals^p$ through hidden states $\zvec_0, \dots, \zvec_T \in \reals^d$:
+
+$$
+\zvec_0 \sim \Gauss(\muvec_0, \Pmat_0), \qquad
+\zvec_t = \Amat\zvec_{t-1} + \wvec_t, \qquad
+\xvec_t = \Cmat\zvec_t + \vvec_t, \qquad
+\wvec_t \sim \Gauss(\zeros, \Qmat), \quad \vvec_t \sim \Gauss(\zeros, \Rmat),
+$$
+
+with all noise terms independent. The parameters are $\theta = (\Amat, \Cmat, \Qmat, \Rmat, \muvec_0, \Pmat_0)$. Every
+joint and conditional distribution of states and observations is Gaussian <Cite id="roweis1999" />.
+</Definition>
+
+## The model
+
+The model makes two assumptions. The state is Markov: given $\zvec_{t-1}$, the state $\zvec_t$ does not depend on
+earlier states. Each observation depends only on the current state. The joint density therefore factorises as
+
+$$
+p(\zvec_{0:T}, \xvec_{1:T}) = p(\zvec_0) \prod_{t=1}^{T} p(\zvec_t \mid \zvec_{t-1})\, p(\xvec_t \mid \zvec_t),
+$$
+
+with $p(\zvec_t \mid \zvec_{t-1}) = \Gauss(\zvec_t;\, \Amat\zvec_{t-1}, \Qmat)$ and
+$p(\xvec_t \mid \zvec_t) = \Gauss(\xvec_t;\, \Cmat\zvec_t, \Rmat)$. This is the graph of a
+<NoteLink to="hidden-markov-model">hidden Markov model</NoteLink>, with a continuous Gaussian state in place of a
+discrete one. Because the whole vector $(\zvec_{0:T}, \xvec_{1:T})$ is a linear function of independent Gaussians, it
+is jointly Gaussian. Every inference question is a Gaussian conditioning, and the chain structure lets it be answered
+in $O(T d^3)$ time instead of $O(T^3 d^3)$.
+
+The three inference problems have exact recursive solutions:
+
+- **filtering**, $p(\zvec_t \mid \xvec_{1:t})$: the <NoteLink to="kalman-filter">Kalman filter</NoteLink>;
+- **smoothing**, $p(\zvec_t \mid \xvec_{1:T})$: the <NoteLink to="kalman-smoother">Kalman smoother</NoteLink>;
+- **prediction**, $p(\zvec_{t+k} \mid \xvec_{1:t})$: the Kalman filter's predict step applied $k$ times.
+
+The Kalman filter's innovations also give the log-likelihood $\log p(\xvec_{1:T} \mid \theta)$ exactly.
+
+## What the model contains
+
+Many familiar models are linear-Gaussian state-space models with particular parameters <Cite id="roweis1999" />.
+
+- **Factor analysis and probabilistic PCA.** With $\Amat = \zeros$, the states are independent draws from
+  $\Gauss(\zeros, \Qmat)$ and each observation is $\xvec_t = \Cmat\zvec_t + \vvec_t$. That is factor analysis when
+  $\Rmat$ is diagonal, and probabilistic principal component analysis when $\Rmat = \sigma^2\eye$. The linear dynamical
+  system is factor analysis whose factors evolve in time.
+- **Autoregressive and ARMA processes.** An autoregression of order $k$,
+  $x_t = \phi_1 x_{t-1} + \dots + \phi_k x_{t-k} + \epsilon_t$, is an LDS with state
+  $\zvec_t = (x_t, x_{t-1}, \dots, x_{t-k+1})$, a companion matrix $\Amat$ with $(\phi_1, \dots, \phi_k)$ in its first
+  row and ones below the diagonal, $\Cmat = (1, 0, \dots, 0)$ and $\Rmat = 0$. Every ARMA process has a state-space
+  form of this kind. Writing it that way gives the exact likelihood, and handles missing values, through the Kalman
+  filter.
+- **Structural time-series models.** A local level (a random walk observed with noise), a local linear trend, and
+  seasonal components are each small LDSs. Stacking them block-diagonally gives a model whose states are
+  interpretable components of the series.
+- **Tracking models.** Constant-velocity and constant-acceleration motion models are LDSs with position, velocity and
+  acceleration in the state.
+
+## Learning the parameters by EM
+
+When $\theta$ is unknown it can be estimated by maximising $\log p(\xvec_{1:T} \mid \theta)$. The states are missing
+data, so <NoteLink to="expectation-maximisation">expectation maximisation</NoteLink> applies. Shumway and Stoffer
+derived it for this model <Cite id="shumway1982" />, and Ghahramani and Hinton gave the general form with $\Cmat$
+learned too <Cite id="ghahramani1996" />. EM alternates two steps and never decreases the likelihood.
+
+**E-step.** Run the Kalman smoother with the current parameters. It gives, for every $t$, the smoothed mean
+$\hat\zvec_t = \expect[\zvec_t \mid \xvec_{1:T}]$, the smoothed covariance $\Pmat_{t \mid T}$, and the lag-one
+covariance $\Pmat_{t, t-1 \mid T} = \cov(\zvec_t, \zvec_{t-1} \mid \xvec_{1:T}) = \Gmat_{t-1}\Pmat_{t \mid T}$, where
+$\Gmat_{t-1}$ is the smoother gain. From them come the expected sufficient statistics
+
+$$
+\expect[\zvec_t\zvec_t^\top] = \Pmat_{t \mid T} + \hat\zvec_t\hat\zvec_t^\top, \qquad
+\expect[\zvec_t\zvec_{t-1}^\top] = \Pmat_{t, t-1 \mid T} + \hat\zvec_t\hat\zvec_{t-1}^\top.
+$$
+
+**M-step.** Maximise the expected complete-data log-likelihood
+
+$$
+\Qcal(\theta) = \expect\left[\log p(\zvec_0) + \sum_{t=1}^{T} \log \Gauss(\zvec_t;\, \Amat\zvec_{t-1}, \Qmat)
++ \sum_{t=1}^{T} \log \Gauss(\xvec_t;\, \Cmat\zvec_t, \Rmat)\right].
+$$
+
+The dynamics term involves only $\Amat$ and $\Qmat$. Up to a constant it is
+
+$$
+-\frac{T}{2}\log\det\Qmat - \frac12\sum_{t=1}^{T}
+\expect\left[(\zvec_t - \Amat\zvec_{t-1})^\top\Qmat^{-1}(\zvec_t - \Amat\zvec_{t-1})\right].
+$$
+
+Its gradient with respect to $\Amat$ is $\Qmat^{-1}\sum_t\paren{\expect[\zvec_t\zvec_{t-1}^\top] -
+\Amat\,\expect[\zvec_{t-1}\zvec_{t-1}^\top]}$. Setting it to zero gives a least-squares regression of each state on
+the previous one, with expectations in place of the unknown states. Setting the gradient with respect to
+$\Qmat^{-1}$ to zero gives the average expected residual covariance. The observation term gives $\Cmat$ and $\Rmat$ the
+same way:
+
+$$
+\begin{aligned}
+\Amat &= \paren{\sum_{t=1}^{T}\expect[\zvec_t\zvec_{t-1}^\top]}\paren{\sum_{t=1}^{T}\expect[\zvec_{t-1}\zvec_{t-1}^\top]}^{-1}, &
+\Qmat &= \frac1T\sum_{t=1}^{T}\paren{\expect[\zvec_t\zvec_t^\top] - \Amat\,\expect[\zvec_{t-1}\zvec_t^\top]}, \\
+\Cmat &= \paren{\sum_{t=1}^{T}\xvec_t\hat\zvec_t^\top}\paren{\sum_{t=1}^{T}\expect[\zvec_t\zvec_t^\top]}^{-1}, &
+\Rmat &= \frac1T\sum_{t=1}^{T}\paren{\xvec_t\xvec_t^\top - \Cmat\hat\zvec_t\xvec_t^\top}.
+\end{aligned}
+$$
+
+The $\Qmat$ and $\Rmat$ updates use the new $\Amat$ and $\Cmat$. The initial-state parameters update to
+$\muvec_0 = \hat\zvec_0$ and $\Pmat_0 = \Pmat_{0 \mid T}$, although with a single sequence they are usually held fixed,
+since one sample cannot estimate a covariance <Cite id="ghahramani1996" />.
+
+<Derivation title="The Q update">
+Write $\Mmat = \sum_t \expect[(\zvec_t - \Amat\zvec_{t-1})(\zvec_t - \Amat\zvec_{t-1})^\top]$. Using
+$\vvec^\top\Qmat^{-1}\vvec = \trace(\Qmat^{-1}\vvec\vvec^\top)$, the dynamics term is
+$\tfrac{T}{2}\log\det\Qmat^{-1} - \tfrac12\trace(\Qmat^{-1}\Mmat)$. The gradient with respect to $\Qmat^{-1}$ is
+$\tfrac{T}{2}\Qmat - \tfrac12\Mmat$, using $\partial\log\det\Xmat/\partial\Xmat = \Xmat^{-1}$ for symmetric $\Xmat$.
+Setting it to zero gives $\Qmat = \Mmat/T$. Expanding $\Mmat$ gives four terms. At the optimal $\Amat$,
+$\Amat\sum_t\expect[\zvec_{t-1}\zvec_{t-1}^\top] = \sum_t\expect[\zvec_t\zvec_{t-1}^\top]$, so the term
+$\Amat\sum_t\expect[\zvec_{t-1}\zvec_{t-1}^\top]\Amat^\top$ cancels one of the two cross terms, leaving
+$\Mmat = \sum_t\paren{\expect[\zvec_t\zvec_t^\top] - \Amat\,\expect[\zvec_{t-1}\zvec_t^\top]}$.
+</Derivation>
+
+## Worked example
+
+The figure below fits a scalar model, $z_t = a z_{t-1} + w_t$ and $x_t = z_t + v_t$, with $\Cmat = 1$ held fixed and
+three parameters $a$, $q$ and $r$. The scalar M-step is
+
+$$
+a = \frac{\sum_t \expect[z_t z_{t-1}]}{\sum_t \expect[z_{t-1}^2]}, \qquad
+q = \frac1T\sum_t\paren{\expect[z_t^2] - a\,\expect[z_t z_{t-1}]}, \qquad
+r = \frac1T\sum_t\paren{x_t^2 - 2x_t\hat z_t + \expect[z_t^2]}.
+$$
+
+The data are 200 steps simulated with $a = 0.9$, $q = 0.5$ and $r = 1$. EM starts from $a = 0.2$, $q = 2$,
+$r = 0.2$, where the log-likelihood is $-435.5$. After one iteration $a = 0.744$ and the log-likelihood is $-359.8$:
+most of the gain comes from correcting the dynamics. The next 50 iterations raise the log-likelihood by only another
+9, to $-350.7$, while $q$ falls from 2.04 to 0.66 and $r$ rises from 0.21 to 0.89. After 150 iterations the estimates
+are $a = 0.935$, $q = 0.509$, $r = 1.011$, with log-likelihood $-350.45$.
+
+The slow phase is typical. A larger $q$ with a smaller $r$ and a smaller $q$ with a larger $r$ explain the same data
+almost equally well, because both attribute the same total variance to the observations. The likelihood surface has a
+long, shallow ridge in the $(q, r)$ plane, and EM moves along it slowly.
+
+<EmFit />
+
+## Identifiability
+
+The parameters are not unique. For any invertible $d \times d$ matrix $\Mmat$, the substitution
+$\zvec_t \to \Mmat\zvec_t$ with $\Amat \to \Mmat\Amat\Mmat^{-1}$, $\Cmat \to \Cmat\Mmat^{-1}$,
+$\Qmat \to \Mmat\Qmat\Mmat^\top$ and $(\muvec_0, \Pmat_0)$ transformed alike gives exactly the same distribution of
+the observations. So the state has no fixed coordinate system unless one is imposed. Common constraints are
+$\Qmat = \eye$, or fixing $\Cmat$ as in the worked example, or giving the state a physical meaning (position,
+velocity) that fixes $\Amat$ and $\Cmat$ from domain knowledge and leaves only the noise covariances to learn.
+
+## Relations
+
+- **Hidden Markov models** share the graph and the forward–backward structure. The HMM's state is discrete; the
+  LDS's is continuous and Gaussian. Both are learned by EM with the smoother in the E-step.
+- **Gaussian mixture models** relate to hidden Markov models as factor analysis relates to the LDS: the static model
+  has independent latent variables, and the dynamic model links them in a Markov chain <Cite id="roweis1999" />.
+- **Switching linear dynamical systems** combine the two: a discrete Markov chain selects which of several LDSs
+  generates each step. Exact inference is then intractable, because the number of Gaussian components grows
+  exponentially with $T$.
+
+## Pitfalls
+
+- **Local maxima and slow convergence.** EM converges to a local maximum, and along ridges it can take hundreds of
+  iterations. Several restarts, or switching to direct optimisation of the likelihood near convergence, help.
+- **Choosing the state dimension.** $d$ is not learned by EM. Compare held-out likelihood, or an information
+  criterion, over several values of $d$.
+- **Stability is not enforced.** The M-step can return an $\Amat$ with eigenvalues outside the unit circle, which
+  makes forecasts explode. Constrained M-steps or post-hoc projection keep the system stable when that matters.

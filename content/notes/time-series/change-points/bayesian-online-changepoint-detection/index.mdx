@@ -1,0 +1,204 @@
+---
+title: Bayesian online changepoint detection
+kind: technique
+summary: 'Bayesian online changepoint detection tracks the posterior over the run length $r_t$, the time since the last changepoint. After each observation an exact recursion grows each run or resets it with the hazard probability, weighting both by how well the run predicted $x_t$.'
+tags: [time-series, changepoints, bayesian, online-learning, worked-example]
+aliases: [BOCPD, Adams and MacKay, run-length posterior, online changepoint detection, hazard function]
+requires: [bayes-theorem, law-of-total-probability]
+partOf: [change-point-detection]
+related: [cusum, hidden-markov-model, geometric-distribution, gaussian-distribution, student-t-distribution, exponential-family, sufficient-statistic]
+references: [adams2007, fearnhead2007]
+status: draft
+updated: 2026-09-26
+---
+
+import { RunLengthPosterior } from './RunLengthPosterior'
+
+<Definition>
+Bayesian online changepoint detection (BOCPD) models a sequence $x_1, x_2, \dots$ as segments whose parameters are
+drawn independently, and infers after each new observation the posterior $P(r_t \mid x_{1:t})$ over the run length
+$r_t$: the number of observations since the most recent changepoint <Cite id="adams2007" />. A message-passing
+recursion updates this posterior exactly, one observation at a time, in time and memory linear in $t$.
+</Definition>
+
+## The model
+
+A changepoint is an abrupt change in the parameters that generate the data. The model divides the sequence into
+non-overlapping segments. Within segment $\rho$ the observations are independent and identically distributed,
+$x_t \sim P(x \mid \etavec_\rho)$, and the parameters $\etavec_1, \etavec_2, \dots$ of different segments are
+independent draws from a prior. The lengths of the segments, the gaps between changepoints, have a prior
+distribution $P_{\text{gap}}(g)$.
+
+The run length $r_t$ summarises everything about the changepoints that matters for prediction. If $r_t = r$, the
+current segment contains the last $r$ observations, written $\xvec_t^{(r)}$, and nothing before them is relevant to
+its parameters. The predictive distribution of the next observation therefore averages over the run length:
+
+$$
+P(x_{t+1} \mid x_{1:t}) = \sum_{r_t} P\paren{x_{t+1} \mid r_t, \xvec_t^{(r)}}\, P(r_t \mid x_{1:t}).
+$$
+
+The inner term is the underlying predictive model for a single segment. The outer weights are the run-length
+posterior, which the algorithm maintains.
+
+## The recursion
+
+Write the joint distribution of the current run length and the data seen so far by summing over the previous run
+length, and factorise:
+
+$$
+P(r_t, x_{1:t}) = \sum_{r_{t-1}} P(r_t \mid r_{t-1})\; P\paren{x_t \mid r_{t-1}, \xvec_t^{(r)}}\; P(r_{t-1}, x_{1:t-1}).
+$$
+
+Two conditional independences give this form. The run length evolves by a Markov chain that does not depend on the
+data, so $P(r_t \mid r_{t-1}, x_{1:t-1}) = P(r_t \mid r_{t-1})$. And given the previous run length, the new
+observation depends on the past only through the observations of that run, $\xvec_t^{(r)}$. Adams and MacKay write
+the second factor as $\pi_t^{(r)} = P(x_t \mid r_{t-1}, \xvec_t^{(r)})$, the predictive probability of $x_t$ under run
+$r_{t-1}$.
+
+The transition $P(r_t \mid r_{t-1})$ has only two non-zero entries. Either the run continues and grows by one, or a
+changepoint occurs and it resets to zero:
+
+$$
+P(r_t \mid r_{t-1}) =
+\begin{cases}
+H(r_{t-1} + 1) & r_t = 0, \\
+1 - H(r_{t-1} + 1) & r_t = r_{t-1} + 1, \\
+0 & \text{otherwise.}
+\end{cases}
+$$
+
+Substituting splits the sum into the two outcomes. Each existing run either grows,
+
+$$
+P(r_t = r_{t-1} + 1,\, x_{1:t}) = P(r_{t-1}, x_{1:t-1})\, \pi_t^{(r)} \paren{1 - H(r_{t-1} + 1)},
+$$
+
+or all of them feed a single changepoint,
+
+$$
+P(r_t = 0,\, x_{1:t}) = \sum_{r_{t-1}} P(r_{t-1}, x_{1:t-1})\, \pi_t^{(r)}\, H(r_{t-1} + 1).
+$$
+
+The evidence $P(x_{1:t}) = \sum_{r_t} P(r_t, x_{1:t})$ normalises the joint into the posterior
+$P(r_t \mid x_{1:t}) = P(r_t, x_{1:t})/P(x_{1:t})$. Each step touches every current run length once, so step $t$
+costs $O(t)$ in time and memory.
+
+### The hazard function
+
+$H(\tau)$ is the hazard: the probability that a segment ends after exactly $\tau$ observations, given that it has
+lasted that long,
+
+$$
+H(\tau) = \frac{P_{\text{gap}}(g = \tau)}{\sum_{t = \tau}^{\infty} P_{\text{gap}}(g = t)}.
+$$
+
+The common choice is a constant hazard, and it corresponds to geometric gaps. If
+$P_{\text{gap}}(g) = p(1 - p)^{g-1}$, the tail sum is $\sum_{t \ge \tau} p(1-p)^{t-1} = (1 - p)^{\tau - 1}$, so
+$H(\tau) = p(1-p)^{\tau-1}/(1-p)^{\tau-1} = p$ for every $\tau$. A <NoteLink to="geometric-distribution">geometric
+distribution</NoteLink> with mean gap $\lambda = 1/p$ is therefore the memoryless prior with hazard $H = 1/\lambda$:
+the chance of a changepoint does not depend on how long the current segment has lasted.
+
+### Starting the recursion
+
+If a changepoint is known to occur just before the first observation, all prior mass starts at $r_0 = 0$. If the
+data begin partway through a segment, the prior over the initial run length is the normalised survival function
+$S(\tau) = \sum_{t > \tau} P_{\text{gap}}(g = t)$ <Cite id="adams2007" />.
+
+## The per-run predictive model
+
+The algorithm needs $\pi_t^{(r)}$ for every current run. With a conjugate-exponential model, the posterior over a
+segment's parameters depends on its observations only through a count and a running sum of sufficient statistics.
+Each run length then carries a small fixed state, and a new observation updates it by adding one term: run $r$ grows
+into run $r + 1$ by absorbing $x_t$, and a new run at $r = 0$ starts from the prior. See
+<NoteLink to="exponential-family">exponential family</NoteLink> and <NoteLink to="sufficient-statistic">sufficient
+statistic</NoteLink>.
+
+For a Gaussian with known variance $\sigma^2$ and a Normal prior $\mu \sim \Gauss(\mu_0, \sigma_0^2)$ on the segment
+mean, a run of $r$ observations with sum $s_r$ has posterior precision and mean
+
+$$
+\tau_r = \frac{1}{\sigma_0^2} + \frac{r}{\sigma^2}, \qquad
+\mu_r = \frac{1}{\tau_r}\paren{\frac{\mu_0}{\sigma_0^2} + \frac{s_r}{\sigma^2}},
+$$
+
+and the predictive distribution of the next observation adds the noise to the uncertainty in the mean:
+
+$$
+\pi^{(r)} = \Gauss\paren{x_t \mid \mu_r,\; \tau_r^{-1} + \sigma^2}.
+$$
+
+With unknown variance as well, a Normal-Gamma prior makes the predictive a
+<NoteLink to="student-t-distribution">Student $t$ distribution</NoteLink>, whose heavier tails make the detector
+less quick to call a changepoint on one outlier.
+
+## The algorithm
+
+1. **Initialise** $P(r_0 = 0) = 1$, with run 0 holding the prior's statistics.
+2. **Observe** $x_t$.
+3. **Predict** $\pi_t^{(r)}$ for every current run length.
+4. **Grow**: $P(r_t = r_{t-1} + 1, x_{1:t}) = P(r_{t-1}, x_{1:t-1})\, \pi_t^{(r)} \paren{1 - H}$.
+5. **Reset**: $P(r_t = 0, x_{1:t}) = \sum_{r_{t-1}} P(r_{t-1}, x_{1:t-1})\, \pi_t^{(r)} H$.
+6. **Normalise** by the evidence to get $P(r_t \mid x_{1:t})$.
+7. **Update** each run's statistics with $x_t$ and start a fresh run from the prior.
+8. **Forecast** $P(x_{t+1} \mid x_{1:t})$ as the run-length mixture, and return to step 2.
+
+The run-length vector grows by one entry per step. Discarding run lengths whose total probability falls below a
+threshold, such as $10^{-4}$, keeps the cost per step near the expected run length rather than $t$
+<Cite id="adams2007" />.
+
+<RunLengthPosterior />
+
+## Worked example
+
+Take $\sigma = 1$, prior $\mu \sim \Gauss(0, 2^2)$, a constant hazard $H = 0.2$, a changepoint just before the first
+observation, and the data $x = (0.1,\, -0.4,\, 0.3,\, 3.2,\, 2.8,\, 3.1)$: three values near 0, then three near 3.
+
+**Step 1.** Only run length $r_0 = 0$ exists, with the prior predictive $\Gauss(0,\, 2^2 + 1^2)$. Its density at
+$x_1 = 0.1$ is $\pi_1^{(0)} = 0.1782$. The growth branch receives $1 \times 0.1782 \times 0.8$ and the reset branch
+$1 \times 0.1782 \times 0.2$. Normalising gives $P(r_1 = 0 \mid x_1) = 0.2$ and $P(r_1 = 1 \mid x_1) = 0.8$.
+
+**Later steps.** The full posteriors, each row over $r_t = 0, 1, 2, \dots$:
+
+| $t$ | $x_t$ | $P(r_t \mid x_{1:t})$ | most probable $r_t$ |
+| --- | --- | --- | --- |
+| 1 | 0.1 | 0.200, 0.800 | 1 |
+| 2 | −0.4 | 0.200, 0.109, 0.691 | 2 |
+| 3 | 0.3 | 0.200, 0.101, 0.083, 0.616 | 3 |
+| 4 | 3.2 | 0.200, **0.501**, 0.103, 0.028, 0.167 | 1 |
+| 5 | 2.8 | 0.200, 0.066, **0.597**, 0.082, 0.011, 0.045 | 2 |
+| 6 | 3.1 | 0.200, 0.046, 0.054, **0.627**, 0.057, 0.004, 0.011 | 3 |
+
+At $t = 4$ the value 3.2 is poorly predicted by the long run of values near 0, whose predictive is centred near 0,
+and well predicted by a fresh run's broad prior. The most probable run length drops from 3 to 1: the model has
+placed a changepoint just before $x_4$, and each later step moves the ridge up the diagonal.
+
+**Why the $r_t = 0$ entry stays at 0.2.** With a constant hazard, the reset branch collects every run's predictive
+probability times $H$, and the evidence collects the same probabilities times $H + (1 - H) = 1$. So
+$P(r_t = 0 \mid x_{1:t}) = H\sum \pi\, P / \sum \pi\, P = H$ at every step. In this formulation $x_t$ is scored under
+the old run before the reset, so a changepoint shows up one step later, as mass moving to run length 1.
+
+## Relation to other methods
+
+- **Hidden Markov models.** The run length is the hidden state of a Markov chain whose transitions only grow or
+  reset, and the recursion is the forward pass of a <NoteLink to="hidden-markov-model">hidden Markov model</NoteLink>
+  with an unbounded state space. The emission model changes with the state, because each run has its own posterior
+  over the segment's parameters.
+- **Fearnhead and Liu.** At the same time, Fearnhead and Liu derived exact online inference for multiple changepoint
+  models and used resampling to bound its cost <Cite id="fearnhead2007" />.
+- **CUSUM.** <NoteLink to="cusum">CUSUM</NoteLink> detects a single known shift with a likelihood-ratio statistic.
+  BOCPD handles repeated changes of unknown size and returns probabilities rather than an alarm.
+
+Adams and MacKay demonstrated the method on well-log measurements (changes in mean), on daily Dow Jones returns
+from 1972 to 1975 (changes in variance), and on the intervals between coal-mining disasters modelled as a Poisson
+process <Cite id="adams2007" />.
+
+## Pitfalls
+
+- **The model sets what counts as a change.** A mean-only model sees a change in variance as a burst of spurious
+  mean changes. Choose the per-segment model to match the changes that matter.
+- **Outliers look like changepoints.** Under a Gaussian predictive a single extreme value can start a new run. A
+  Student $t$ predictive, or a model with heavier tails, reduces this.
+- **The hazard trades delay against false alarms.** A high hazard reacts quickly and fires more often; a low hazard
+  needs more evidence. The hazard can also be chosen by maximising the evidence $P(x_{1:t})$, which the recursion computes anyway.
+- **Known-parameter assumptions.** Fixing $\sigma$ or the prior too tightly makes every surprising observation look
+  like a change. A prior on the segment mean that is too narrow makes genuine changes hard to accept.

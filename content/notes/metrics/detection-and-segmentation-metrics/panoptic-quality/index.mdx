@@ -1,0 +1,66 @@
+---
+title: Panoptic quality
+kind: concept
+summary: 'Panoptic quality scores a segmentation that labels every pixel with a class and an instance. Segments match when their IoU exceeds 0.5, which makes matching unique, and $\text{PQ} = \text{SQ} \times \text{RQ}$: mean IoU of matches times an F1-style recognition score.'
+tags: [metrics, computer-vision, segmentation, worked-example]
+aliases: [PQ, panoptic quality, segmentation quality, SQ, recognition quality, RQ, panoptic segmentation metric]
+related: [intersection-over-union, dice-and-segmentation-overlap, mean-average-precision-for-detection, precision-recall-and-f-score]
+references: [kirillov2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For one class, match predicted segments $p$ to ground-truth segments $g$ with $\text{IoU}(p, g) > 0.5$. The matches are
+true positives (TP), unmatched predictions are false positives (FP), and unmatched ground-truth segments are false
+negatives (FN). Then <Cite id="kirillov2019" />
+
+$$
+\text{PQ} = \frac{\sum_{(p, g) \in \text{TP}} \text{IoU}(p, g)}{\abs{\text{TP}} + \tfrac12\abs{\text{FP}} + \tfrac12\abs{\text{FN}}}
+= \underbrace{\frac{\sum_{\text{TP}} \text{IoU}(p, g)}{\abs{\text{TP}}}}_{\text{SQ}} \times
+\underbrace{\frac{\abs{\text{TP}}}{\abs{\text{TP}} + \tfrac12\abs{\text{FP}} + \tfrac12\abs{\text{FN}}}}_{\text{RQ}},
+$$
+
+averaged over classes.
+</Definition>
+
+## The task
+
+Panoptic segmentation unifies two tasks: semantic segmentation labels every pixel with a class, including amorphous
+"stuff" such as sky and road; instance segmentation separates countable "things" such as people and cars. A panoptic
+prediction assigns every pixel a class and, for things, an instance identity, with no overlaps. PQ scores both parts
+with one number.
+
+## Why the 0.5 threshold makes matching unique
+
+Within one image, predicted segments do not overlap, and neither do ground-truth segments. Suppose $\text{IoU}(p, g) >
+0.5$. Since $\abs{p \cup g} \ge \abs{g}$,
+
+$$
+\abs{p \cap g} > \tfrac12\abs{p \cup g} \ge \tfrac12\abs{g} ,
+$$
+
+so $p$ covers more than half of $g$. Two disjoint predicted segments cannot both cover more than half of $g$, so at
+most one prediction matches each ground-truth segment, and by the same argument at most one ground truth matches each
+prediction. The matching is therefore unique and needs no assignment algorithm or confidence ordering, unlike
+<NoteLink to="mean-average-precision-for-detection">detection mAP</NoteLink>.
+
+## Two factors
+
+**Segmentation quality** SQ is the mean IoU of the matched pairs: how well the found segments are delineated.
+**Recognition quality** RQ is the <NoteLink to="precision-recall-and-f-score">F1 score</NoteLink> of the matching,
+$2\text{TP}/(2\text{TP} + \text{FP} + \text{FN})$: how many segments were found without spurious ones. The product
+shows which part of a system is weak.
+
+**Worked example.** One class has three matches with IoU 0.9, 0.7 and 0.6, one unmatched prediction and two unmatched
+ground-truth segments. Then $\text{SQ} = 2.2/3 = 0.733$, $\text{RQ} = 3/(3 + 0.5 + 1) = 0.667$, and
+$\text{PQ} = 0.489$.
+
+## Pitfalls
+
+- **Stuff and things.** PQ is often reported separately for stuff and thing classes, because stuff classes are easier
+  to match. The overall number can hide weak instance separation.
+- **Small segments.** A segment that is small relative to its annotation error rarely reaches IoU 0.5, and counts as
+  both a false positive and a false negative.
+- **Void regions.** Unlabelled pixels are removed from predicted segments before matching, and predictions mostly in
+  void regions are ignored. Implementations must follow this rule to reproduce benchmark numbers.

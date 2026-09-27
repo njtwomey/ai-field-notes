@@ -1,0 +1,109 @@
+---
+title: Confusion matrix
+kind: concept
+summary: 'A confusion matrix counts predictions against true classes. For two classes it holds the true positives, false negatives, false positives and true negatives, and every threshold metric (accuracy, precision, recall, $F_1$, MCC) is a function of those four counts.'
+tags: [metrics, classification, worked-example]
+aliases: [contingency table of predictions, error matrix, TP FP TN FN, true positives, true negatives]
+related:
+  [
+    accuracy-and-balanced-accuracy,
+    precision-recall-and-f-score,
+    sensitivity-specificity-and-predictive-values,
+    matthews-correlation-coefficient,
+    cohens-kappa,
+    type-i-and-type-ii-errors,
+    medical-diagnosis-base-rate,
+  ]
+references: [fawcett2006, powers2011, sokolova2009]
+status: draft
+updated: 2026-09-27
+---
+
+import { ConfusionExplorer } from '../../_shared/ConfusionExplorer'
+
+<Definition>
+For a classifier with $K$ classes evaluated on $n$ cases, the confusion matrix $\Cmat$ is the $K \times K$ table whose
+entry $C_{jk}$ counts the cases of true class $j$ predicted as class $k$. Its diagonal holds the correct predictions and
+its off-diagonal entries the errors, split by which class was confused with which <Cite id="fawcett2006" />.
+</Definition>
+
+## The binary case
+
+With two classes, one called positive, the four cells have names:
+
+| | predicted positive | predicted negative |
+| --- | --- | --- |
+| **actually positive** | true positives (TP) | false negatives (FN) |
+| **actually negative** | false positives (FP) | true negatives (TN) |
+
+The row sums are fixed by the data: $\text{TP} + \text{FN} = P$ positives and $\text{FP} + \text{TN} = N$ negatives,
+with $n = P + N$. The column sums depend on the classifier: $\text{TP} + \text{FP}$ cases are predicted positive. So a
+binary confusion matrix has two degrees of freedom once the class counts are fixed, and every threshold metric is a
+function of two rates, for example the true-positive rate $\text{TP}/P$ and the false-positive rate $\text{FP}/N$,
+together with the prevalence $\pi = P/n$.
+
+In statistical testing the same table appears with different names: a false positive is a type I error and a false
+negative a type II error (see <NoteLink to="type-i-and-type-ii-errors">Type I and Type II errors</NoteLink>).
+
+## Reading a matrix
+
+**Worked example.** A screening classifier is evaluated on 1,000 cases, of which 50 are positive (prevalence 5%). It
+flags 130 cases:
+
+| | predicted positive | predicted negative | total |
+| --- | --- | --- | --- |
+| **positive** | TP = 40 | FN = 10 | 50 |
+| **negative** | FP = 90 | TN = 860 | 950 |
+| **total** | 130 | 870 | 1,000 |
+
+Reading along the rows gives rates conditioned on the truth: it finds $40/50 = 80\%$ of the positives, and wrongly flags
+$90/950 = 9.5\%$ of the negatives. Reading down the columns gives rates conditioned on the prediction: only
+$40/130 = 30.8\%$ of the flagged cases are positive, while $860/870 = 98.9\%$ of the cleared cases are negative. The same
+matrix reappears in the notes on each metric, and every metric computed from it is summarised here:
+
+| metric | value | note |
+| --- | --- | --- |
+| accuracy | 0.900 | <NoteLink to="accuracy-and-balanced-accuracy" /> |
+| balanced accuracy | 0.853 | <NoteLink to="accuracy-and-balanced-accuracy" /> |
+| precision | 0.308 | <NoteLink to="precision-recall-and-f-score" /> |
+| recall | 0.800 | <NoteLink to="precision-recall-and-f-score" /> |
+| $F_1$ | 0.444 | <NoteLink to="precision-recall-and-f-score" /> |
+| specificity | 0.905 | <NoteLink to="sensitivity-specificity-and-predictive-values" /> |
+| MCC | 0.457 | <NoteLink to="matthews-correlation-coefficient" /> |
+| Cohen's $\kappa$ | 0.401 | <NoteLink to="cohens-kappa" /> |
+| Jaccard index | 0.286 | <NoteLink to="hamming-jaccard-and-exact-match" /> |
+
+A classifier that predicts negative for everything scores accuracy 0.95 on the same data and finds no positives at all.
+The single number that looks best is the least informative, which is why a metric must be chosen with the task and the
+prevalence in mind (see <NoteLink to="choosing-a-metric">choosing a metric</NoteLink>).
+
+## From scores to a matrix
+
+Most classifiers output a score, and the confusion matrix depends on the threshold that turns scores into labels.
+Raising the threshold moves cases from the predicted-positive column to the predicted-negative column: false positives
+fall and false negatives rise. The ROC and precision-recall curves summarise the matrices for all thresholds at once
+(see <NoteLink to="roc-curve-and-auc">ROC curve and AUC</NoteLink>).
+
+<ConfusionExplorer metrics={['accuracy', 'precision', 'recall', 'specificity', 'f1', 'mcc']} />
+
+## More than two classes
+
+A $K$-class matrix has $K^2$ cells. Each class $k$ has its own one-against-rest binary matrix: its true positives are
+$C_{kk}$, its false negatives the rest of row $k$, its false positives the rest of column $k$, and its true negatives
+everything else. Per-class metrics come from these, and are combined by micro, macro or weighted averaging (see
+<NoteLink to="averaging-multiclass-metrics">averaging multiclass metrics</NoteLink>). The off-diagonal pattern itself is
+often the most useful output: it shows which classes are confused with which.
+
+Row-normalising the matrix (dividing each row by its total) gives per-class recall on the diagonal and is invariant to
+class prevalence; column-normalising gives per-class precision and is not. State which normalisation a plotted matrix
+uses.
+
+## Pitfalls
+
+- **Which class is positive.** Precision, recall and $F_1$ change when the labels are swapped; accuracy, MCC and
+  $\kappa$ do not. Name the positive class.
+- **Counts depend on the test set's prevalence.** A matrix from a balanced test set does not predict precision on a
+  deployment population with a different prevalence. The row rates (TPR, FPR) transfer; the column rates do not.
+- **Thresholded at 0.5 by default.** A matrix computed at the default threshold describes that threshold only. With
+  unequal error costs the right threshold is elsewhere (see
+  <NoteLink to="cost-sensitive-learning">cost-sensitive learning</NoteLink>).

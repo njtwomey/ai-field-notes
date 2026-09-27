@@ -1,0 +1,74 @@
+---
+title: Quantisation
+kind: concept
+summary: 'Quantisation rounds each sample to one of $2^b$ levels. Modelled as white noise of power $\Delta^2/12$, it limits a full-scale sine to an SNR of about $6.02b + 1.76$ dB. Dither makes that model exact at the cost of a little extra noise.'
+tags: [signal-processing, sampling, worked-example]
+aliases: [quantization, quantisation noise, bit depth, signal-to-quantisation-noise ratio, SQNR, dither, 6 dB per bit]
+related: [sampling-theorem, aliasing, parseval-theorem]
+references: [widrow2008, oppenheim2010]
+status: draft
+updated: 2026-09-26
+---
+
+import { QuantiseSine } from './QuantiseSine'
+
+<Definition>
+Quantisation maps each sample of a continuous-amplitude signal to one of a finite set of levels. A uniform $b$-bit
+quantiser on the range $[-1, 1]$ has $2^b$ levels spaced by the step $\Delta = 2/2^b$. The difference between the
+quantised and the true sample is the quantisation error $e[n] = Q(x[n]) - x[n]$, which lies in
+$[-\Delta/2, \Delta/2]$ when the signal stays inside the range <Cite id="widrow2008" />.
+</Definition>
+
+## The noise model
+
+The standard model treats $e[n]$ as white noise, uniform on $[-\Delta/2, \Delta/2]$ and independent of the signal.
+Its mean is zero and its power is the variance of that uniform distribution:
+
+$$
+\sigma_e^2 = \frac{1}{\Delta}\int_{-\Delta/2}^{\Delta/2} e^2\,de = \frac{\Delta^2}{12}.
+$$
+
+The model is good when the signal is busy compared with $\Delta$: it crosses many levels between samples and has no
+simple relation to the grid. It fails for slowly varying or periodic signals at low bit depths, where the error is a
+deterministic function of the signal and appears as harmonics rather than as noise.
+
+## Six decibels per bit
+
+A full-scale sine, $x[n] = \sin(\omega n)$ with amplitude 1, has power $1/2$. With $\Delta = 2/2^b$,
+
+$$
+\text{SNR} = \frac{1/2}{\Delta^2/12} = \frac{1/2}{4 \cdot 4^{-b}/12} = \frac{3}{2}\, 4^{b},
+\qquad
+10\log_{10}\text{SNR} = 10\log_{10}\tfrac32 + b \cdot 20\log_{10} 2 \approx 1.76 + 6.02\,b \text{ dB}.
+$$
+
+Each extra bit halves $\Delta$, which quarters the noise power: 6.02 dB per bit.
+
+**Worked example.** At 16 bits the formula gives $1.76 + 96.3 = 98.1$ dB, the figure usually quoted for compact
+discs. At 8 bits it gives 49.9 dB; the figure's simulated sine at 8 bits measures 49.8 dB.
+
+<QuantiseSine />
+
+## Dither
+
+At low bit depths the error of a periodic signal is periodic too, and its power collects at harmonics of the signal,
+where it is audible or visible as distortion. Dither adds a small random signal $d[n]$ before quantising. With
+triangular (TPDF) dither, the sum of two independent uniforms on $[-\Delta/2, \Delta/2]$, the first two moments of the
+total error become independent of the signal: the error is white, with power
+
+$$
+\frac{\Delta^2}{12} + 2 \cdot \frac{\Delta^2}{12} = \frac{\Delta^2}{4},
+$$
+
+three times the undithered noise, a loss of $10\log_{10} 3 = 4.77$ dB. Dither trades a little noise for the removal
+of distortion <Cite id="widrow2008" />.
+
+## Pitfalls
+
+- **Clipping is not quantisation noise.** A signal that exceeds the range is clipped, which produces large errors
+  outside $[-\Delta/2, \Delta/2]$. Headroom below full scale costs SNR at 6 dB per halving of amplitude, but avoids
+  clipping.
+- **The formula assumes a full-scale sine.** A signal that uses a tenth of the range loses 20 dB. Signals with a high
+  crest factor, such as speech, sit well below their peak level.
+- **Rounding before a nonlinearity.** Quantising early in a processing chain lets later gain amplify the error.
+  Keep extra bits through intermediate steps and quantise once at the end.

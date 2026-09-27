@@ -1,0 +1,97 @@
+---
+title: Accuracy and balanced accuracy
+kind: concept
+summary: 'Accuracy is the fraction of correct predictions. It is dominated by the majority class, so under imbalance a trivial classifier can score highly. Balanced accuracy averages the recall of each class, so a trivial classifier scores $1/K$ whatever the prevalence.'
+tags: [metrics, classification, imbalance, worked-example]
+aliases: [classification accuracy, error rate, misclassification rate, accuracy paradox, balanced accuracy, macro-averaged recall]
+requires: [confusion-matrix]
+related: [sensitivity-specificity-and-predictive-values, matthews-correlation-coefficient, averaging-multiclass-metrics, choosing-a-metric]
+references: [sokolova2009, powers2011]
+status: draft
+updated: 2026-09-27
+---
+
+import { ConfusionExplorer } from '../../_shared/ConfusionExplorer'
+
+<Definition>
+For predictions $\hat y_i$ of labels $y_i$ on $n$ cases, accuracy is
+
+$$
+\text{accuracy} = \frac{1}{n}\sum_{i=1}^n \indicator[\hat y_i = y_i],
+$$
+
+and the error rate is $1 - \text{accuracy}$. Balanced accuracy is the mean of the per-class recalls,
+
+$$
+\text{balanced accuracy} = \frac{1}{K}\sum_{k=1}^K \frac{C_{kk}}{\sum_j C_{kj}},
+$$
+
+where $C_{kj}$ counts cases of class $k$ predicted as class $j$ <Cite id="sokolova2009" />.
+</Definition>
+
+## Accuracy is a prevalence-weighted average
+
+For two classes, write the true-positive rate $\text{TPR} = \text{TP}/P$, the true-negative rate
+$\text{TNR} = \text{TN}/N$ and the prevalence $\pi = P/n$. Then
+
+$$
+\text{accuracy} = \frac{\text{TP} + \text{TN}}{n} = \frac{P}{n}\cdot\frac{\text{TP}}{P} + \frac{N}{n}\cdot\frac{\text{TN}}{N}
+= \pi\,\text{TPR} + (1 - \pi)\,\text{TNR}.
+$$
+
+Accuracy weights each class's recall by that class's share of the data. When one class dominates, its recall dominates
+the score. A classifier that always predicts the majority class has recall 1 on that class and 0 on the other, so its
+accuracy equals the majority share, $\max(\pi, 1 - \pi)$. This is the accuracy paradox: under imbalance a useless
+classifier can have high accuracy.
+
+Balanced accuracy replaces the prevalence weights with equal weights,
+
+$$
+\text{balanced accuracy} = \tfrac12\paren{\text{TPR} + \text{TNR}},
+$$
+
+so its value does not change when the prevalence changes and the per-class rates do not. Any classifier that ignores
+its input, including the majority-class predictor and random guessing at any rate, has $\text{TPR} + \text{TNR} = 1$ and
+scores exactly $1/2$; with $K$ classes the chance level is $1/K$. Balanced accuracy minus its chance level, rescaled,
+is informedness $\text{TPR} + \text{TNR} - 1$ (see
+<NoteLink to="sensitivity-specificity-and-predictive-values">sensitivity, specificity and predictive values</NoteLink>).
+
+## Worked example
+
+On the screening data of the <NoteLink to="confusion-matrix">confusion matrix</NoteLink> note (TP = 40, FN = 10,
+FP = 90, TN = 860, prevalence 5%):
+
+$$
+\text{accuracy} = \frac{40 + 860}{1000} = 0.900, \qquad
+\text{balanced accuracy} = \tfrac12\paren{\frac{40}{50} + \frac{860}{950}} = \tfrac12(0.800 + 0.905) = 0.853.
+$$
+
+The classifier that predicts negative for everyone scores accuracy $0.950$, higher than the real classifier, and balanced
+accuracy $0.500$, far lower. For the three-class example in
+<NoteLink to="averaging-multiclass-metrics">averaging multiclass metrics</NoteLink>, accuracy is 0.820 and balanced
+accuracy 0.647: the minority classes are recalled far less well than the majority.
+
+<ConfusionExplorer
+  title="Accuracy under imbalance"
+  caption="Lower the prevalence with the separation fixed. Accuracy climbs towards the share of negatives, driven by the easy majority, while balanced accuracy stays put. Raise the threshold far to the right: the classifier predicts negative for nearly everyone, accuracy approaches 1 − π, and balanced accuracy drops to 0.5."
+  metrics={['accuracy', 'balancedAccuracy', 'recall', 'specificity']}
+  prevalence={0.05}
+/>
+
+## When accuracy is appropriate
+
+Accuracy answers a clear question: what fraction of decisions will be right, on data drawn like the test set. It is
+the right metric when every error costs the same and the test set's class mix matches deployment. Balanced accuracy
+answers a different question: how well the classifier recognises each class, as if the classes were equally common. It
+suits imbalanced problems where every class matters equally, and comparisons across datasets with different
+prevalences.
+
+## Pitfalls
+
+- **Comparing across prevalences.** An accuracy of 0.9 means little without the majority share. Report the
+  majority-class baseline alongside it.
+- **Balanced accuracy ignores precision.** It is built from recalls only, so it does not see how many predicted
+  positives are wrong. On a rare class a classifier can have high balanced accuracy and low precision, as in the
+  example (0.853 against 0.308).
+- **Multiclass balanced accuracy is macro-averaged recall.** Scikit-learn's `balanced_accuracy_score` computes exactly
+  this; an optional adjustment rescales it so that chance scores 0.

@@ -1,0 +1,153 @@
+---
+title: Learned shapelets
+kind: concept
+summary: 'Learned shapelets treat the $K$ shapelets as parameters and fit them jointly with a logistic classifier by gradient descent. A soft-minimum with sharpness $\alpha < 0$ replaces the minimum over positions, so the loss is differentiable in every shapelet value.'
+tags: [time-series, classification, gradient-descent, worked-example]
+aliases: [learning time-series shapelets, LTS, shapelet learning, soft-minimum]
+requires: [shapelets, logistic-regression, gradient-descent]
+partOf: [shapelets]
+related: [shapelet-transform]
+references: [grabocka2014, yeh2016, lines2012]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Learned shapelets <Cite id="grabocka2014" /> classify a time series $T_i$ of length $n$ with a linear model on $K$
+shapelet features,
+
+$$
+\hat y_i = w_0 + \sum_{k=1}^{K} w_k M_{i,k},
+$$
+
+where $M_{i,k}$ is a differentiable approximation to the distance between series $T_i$ and shapelet
+$S_k = (s_{k,1}, \dots, s_{k,L})$. The shapelet values $s_{k,l}$ and the weights $w_{k}$ are fitted together by
+stochastic gradient descent on the logistic loss. The shapelets need not be subsequences of the training data.
+</Definition>
+
+## Intuition
+
+Search-based methods choose shapelets from a finite pool: the subsequences of the training series. The best shape for
+separating the classes may lie between those candidates, for example the average of several noisy occurrences of a
+pattern. Treating the shapelet values as continuous parameters lets an optimiser move each shapelet towards that
+shape.
+
+The obstacle is the minimum over positions in the subsequence distance. The minimum is piecewise differentiable, and
+its gradient reaches only the single best-matching window. Grabocka et al. replace it with a soft-minimum, a weighted
+average of the distances at every position that puts almost all its weight on the smallest ones.
+
+## The model
+
+For series $T_i = (t_{i,1}, \dots, t_{i,n})$ and shapelet $S_k$ of length $L$, the distance at position $j$ is the
+mean squared difference over the window,
+
+$$
+D_{i,k,j} = \frac{1}{L} \sum_{l=1}^{L} \paren{t_{i,j+l-1} - s_{k,l}}^2, \qquad j = 1, \dots, J = n - L + 1.
+$$
+
+The feature is the soft-minimum of these $J$ values with sharpness $\alpha < 0$:
+
+$$
+M_{i,k} = \frac{\sum_{j=1}^{J} D_{i,k,j} \, e^{\alpha D_{i,k,j}}}{\sum_{j=1}^{J} e^{\alpha D_{i,k,j}}}
+= \sum_{j=1}^{J} \psi_{j} D_{i,k,j}, \qquad
+\psi_j = \frac{e^{\alpha D_{i,k,j}}}{\sum_{q=1}^{J} e^{\alpha D_{i,k,q}}}.
+$$
+
+The weights $\psi_j$ are a softmax of $\alpha D_{i,k,j}$. They are positive and sum to 1, so $M_{i,k}$ is a weighted
+average of the distances and satisfies $\min_j D_{i,k,j} \le M_{i,k}$. As $\alpha \to -\infty$ all the weight moves to
+the smallest distance and $M_{i,k} \to \min_j D_{i,k,j}$, the hard minimum.
+
+For binary labels $y_i \in \set{0, 1}$ and the sigmoid $\sigma$, the per-series loss is the logistic loss with an
+$\ell_2$ penalty on the weights:
+
+$$
+\ell_i = -y_i \log \sigma(\hat y_i) - (1 - y_i) \log\paren{1 - \sigma(\hat y_i)}
++ \frac{\lambda}{N} \sum_{k=1}^{K} w_k^2,
+$$
+
+with $N$ the number of training series and $\lambda \ge 0$. Multi-class problems use one such model per class
+(one-versus-all) with shared shapelets <Cite id="grabocka2014" />.
+
+## The gradient
+
+The gradient of $\ell_i$ with respect to one shapelet value $s_{k,l}$ passes through four factors, by the chain rule:
+
+$$
+\frac{\partial \ell_i}{\partial s_{k,l}}
+= \frac{\partial \ell_i}{\partial \hat y_i} \,
+\frac{\partial \hat y_i}{\partial M_{i,k}}
+\sum_{j=1}^{J} \frac{\partial M_{i,k}}{\partial D_{i,k,j}} \,
+\frac{\partial D_{i,k,j}}{\partial s_{k,l}}.
+$$
+
+Three of the factors are standard. The logistic loss gives $\partial \ell_i / \partial \hat y_i = \sigma(\hat y_i) -
+y_i$. The linear model gives $\partial \hat y_i / \partial M_{i,k} = w_k$. The squared distance gives
+
+$$
+\frac{\partial D_{i,k,j}}{\partial s_{k,l}} = \frac{2}{L} \paren{s_{k,l} - t_{i,j+l-1}}.
+$$
+
+The remaining factor is the derivative of the soft-minimum. Write $D_j$ for $D_{i,k,j}$ and $M$ for $M_{i,k}$. The
+softmax weights have derivative $\partial \psi_q / \partial D_j = \alpha \psi_q (\delta_{qj} - \psi_j)$, where
+$\delta_{qj}$ is 1 if $q = j$ and 0 otherwise. Differentiating $M = \sum_q \psi_q D_q$ by the product rule gives
+
+$$
+\frac{\partial M}{\partial D_j}
+= \psi_j + \sum_{q=1}^{J} D_q \, \alpha \psi_q \paren{\delta_{qj} - \psi_j}
+= \psi_j + \alpha \psi_j D_j - \alpha \psi_j \sum_{q=1}^{J} \psi_q D_q
+= \psi_j \paren{1 + \alpha \paren{D_j - M}}.
+$$
+
+The derivative has three properties.
+
+- **It is local.** Each position's gradient is scaled by its weight $\psi_j$. Positions whose distance is far above the
+  minimum receive almost no gradient, so the shapelet is pulled towards the windows that best match it.
+- **It sums to 1.** $\sum_j \psi_j = 1$ and $\sum_j \psi_j (D_j - M) = 0$, so $\sum_j \partial M / \partial D_j = 1$.
+  Adding the same constant to every distance raises $M$ by exactly that constant, as it would raise the hard minimum.
+- **It can be negative.** For $D_j > M$ the factor $1 + \alpha(D_j - M)$ is below 1 and becomes negative once
+  $D_j - M > 1 / \abs{\alpha}$. Raising a distance that is above the average moves weight towards the smaller
+  distances, so $M$ falls.
+
+## Worked example
+
+Take one series and one shapelet with $J = 3$ window distances $D = (0.5, 1.0, 3.0)$. The hard minimum is $0.5$.
+
+| $\alpha$ | $\psi$                  | $M$     | $\partial M / \partial D$     |
+| -------- | ----------------------- | ------- | ----------------------------- |
+| $-1$     | $(0.592, 0.359, 0.049)$ | $0.801$ | $(0.771, 0.288, -0.058)$      |
+| $-4$     | $(0.881, 0.119, 0.000)$ | $0.560$ | $(1.091, -0.091, -0.000)$     |
+| $-16$    | $(1.000, 0.000, 0.000)$ | $0.500$ | $(1.002, -0.002, -0.000)$     |
+
+For $\alpha = -4$, $M = 0.5 \times 0.881 + 1.0 \times 0.119 + 3.0 \times 0.000 = 0.560$, which is $0.060$ above the
+hard minimum. The derivative with respect to the second distance is $0.119 \times (1 - 4 \times (1.0 - 0.560)) =
+-0.091$. In each row the three derivatives sum to 1. As $\alpha$ becomes more negative, $M$ approaches the hard
+minimum and the gradient concentrates on the best-matching window.
+
+## Details
+
+- **Initialisation.** The loss is not convex in the shapelets. Grabocka et al. initialise the shapelets with the
+  centroids of a $k$-means clustering of all training windows of length $L$, and the weights at random
+  <Cite id="grabocka2014" />.
+- **Several lengths.** Shapelets of $R$ lengths $L_{\min}, 2 L_{\min}, \dots, R \, L_{\min}$ are learned together,
+  with $K$ shapelets per length, and all feed the same linear model.
+- **Cost.** One pass over the data costs $O(N \, K \, R \, n \, L)$: every window of every series is compared with
+  every shapelet. Search-based discovery is $O(N^2 n^4)$ <Cite id="yeh2016" />, so learning is much cheaper for long
+  series, at the price of a local rather than exhaustive optimum.
+
+## Assumptions
+
+- The classes differ in local shapes whose position varies, which is the premise of every shapelet method.
+- A linear model on $K$ distances separates the classes. Interactions between shapelets are not modelled.
+- Distances are not z-normalised per window, so level and scale are part of the shape. Series are typically
+  z-normalised as a whole beforehand.
+
+## Pitfalls
+
+- **The choice of $\alpha$.** A small $\abs{\alpha}$ gives a smooth objective whose feature is far from the minimum.
+  A large $\abs{\alpha}$ makes the feature almost the hard minimum, and the gradient reaches only one window, so
+  learning slows. $\alpha$ is a hyperparameter. In floating point, the exponentials must be
+  computed after subtracting the smallest $\alpha D_j$ to avoid underflow.
+- **Interpretability.** A learned shapelet may not resemble any real subsequence. Unlike a searched shapelet
+  <Cite id="lines2012" />, it cannot be traced back to a training example.
+- **Hyperparameters.** $K$, $L_{\min}$, $R$, $\lambda$, $\alpha$, the learning rate and the number of epochs all
+  interact, and the method is sensitive to them on small training sets.

@@ -1,0 +1,97 @@
+---
+title: Multitaper spectral estimation
+kind: technique
+summary: 'Thomson''s multitaper method averages the periodograms of one record multiplied by $K$ orthogonal Slepian tapers, each maximally concentrated in a band of half-width $W$. It cuts variance by about $K$ with low leakage, at a resolution of $2W$.'
+tags: [signal-processing, spectral-estimation, worked-example]
+aliases: [multitaper method, Thomson's method, Slepian tapers, discrete prolate spheroidal sequences, DPSS]
+requires: [periodogram, spectral-leakage-and-windows]
+related: [welch-method, parametric-spectral-estimation]
+references: [thomson1982, slepian1978, stoica2005]
+status: draft
+updated: 2026-09-26
+---
+
+import { MultitaperDemo } from './MultitaperDemo'
+
+<Definition>
+Thomson's multitaper estimate of a power spectral density from $N$ samples is
+
+$$
+\hat S_{MT}(\omega) = \frac{1}{K}\sum_{k=0}^{K-1}\abs{\sum_{n=0}^{N-1} v_k[n]\, x[n]\, e^{-i\omega n}}^2,
+$$
+
+where $v_0, \dots, v_{K-1}$ are the first $K$ discrete prolate spheroidal sequences (Slepian tapers) for a chosen
+half-bandwidth $W$: orthonormal sequences whose spectra are as concentrated as possible in $\abs{f} \le W$
+<Cite id="thomson1982" />.
+</Definition>
+
+## The problem it solves
+
+A single tapered <NoteLink to="periodogram">periodogram</NoteLink> uses a window to control leakage, but its variance
+equals its mean squared, whatever the window. <NoteLink to="welch-method">Welch's method</NoteLink> reduces the
+variance by cutting the record into segments, which throws away resolution: each segment is shorter than the record.
+The multitaper method keeps the full record and instead computes several spectra from it with different tapers. If the
+tapers are orthogonal and each has low leakage, the $K$ spectra are nearly uncorrelated, and averaging them divides the
+variance by about $K$.
+
+## Slepian tapers
+
+Frequencies here are in cycles per sample, $f = \omega/2\pi$. For a sequence $v$ of length $N$ with transform
+$V(f) = \sum_n v[n] e^{-i 2\pi f n}$, the fraction of its energy inside the band $\abs{f} \le W$ is
+
+$$
+\lambda = \frac{\int_{-W}^{W} \abs{V(f)}^2\, df}{\int_{-1/2}^{1/2} \abs{V(f)}^2\, df}
+= \frac{v^\top A\, v}{v^\top v}, \qquad A_{nm} = \frac{\sin\paren{2\pi W(n - m)}}{\pi(n - m)},
+$$
+
+with $A_{nn} = 2W$. The second form follows by expanding $\abs{V}^2$ as a double sum and integrating each term over the
+band. $\lambda$ is a Rayleigh quotient, so it is maximised by the leading eigenvector of $A$, and the eigenvectors in
+order of eigenvalue are the best-concentrated orthonormal sequences in turn <Cite id="slepian1978" />. These are the
+Slepian tapers $v_k$, with concentrations $\lambda_0 > \lambda_1 > \dots$.
+
+Two facts make them practical:
+
+- **About $2NW$ of them are well concentrated.** The eigenvalues stay close to 1 up to $k \approx 2NW - 1$ and then
+  drop sharply towards 0. Only these first $K \le 2NW - 1$ tapers are used.
+- **They are cheap to compute.** $A$ commutes with a symmetric tridiagonal matrix with diagonal
+  $\paren{\tfrac{N - 1 - 2n}{2}}^2 \cos 2\pi W$ and off-diagonal $\tfrac{n(N - n)}{2}$, so they share eigenvectors, and
+  the tridiagonal problem is fast and numerically stable. The figure below computes them this way.
+
+## Resolution and variance
+
+Each eigenspectrum is the true spectrum smoothed by $\abs{V_k(f)}^2$, which is concentrated in $\abs{f} \le W$. The
+estimate therefore resolves features about $2W$ apart, the full bandwidth. $W$ is chosen through the time-bandwidth
+product $NW$: typical values are 2 to 4, giving $K = 3$ to 7 tapers and a resolution of $2W = 2NW/N$ cycles per
+sample. For white noise the eigenspectra are uncorrelated, since $\sum_n v_j[n] v_k[n] = 0$, and the estimate is
+approximately $S(\omega)\chi^2_{2K}/(2K)$, with relative standard deviation $1/\sqrt{K}$.
+
+Compared with Welch at the same variance, multitaper keeps better resolution, because every taper spans the whole
+record. Its leakage is also low: all used tapers put almost all their energy in the band.
+
+<MultitaperDemo />
+
+## Worked example
+
+For $N = 128$ and $NW = 4$, the half-bandwidth is $W = 4/128 = 0.03125$ cycles per sample, or
+$2\pi W \approx 0.196$ rad/sample. The concentrations of the first eight tapers are 1.00000, 1.00000, 1.00000, 0.99997,
+0.99942, 0.99256, 0.93686 and 0.69905: seven tapers, $K = 2NW - 1$, keep at least 93.7% of their energy in the band,
+and the eighth does not. With those seven, a simulated white-noise record gives an estimate whose standard deviation is
+0.383 of its mean, against the theoretical $1/\sqrt{7} = 0.378$.
+
+## Extensions
+
+- **Adaptive weighting.** Thomson weights each eigenspectrum by frequency so that the higher-order tapers, which leak
+  more, count less where the spectrum is steep <Cite id="thomson1982" />.
+- **Harmonic F-test.** The same tapers give a test for a pure sinusoid at each frequency, separating line components
+  from the continuous spectrum.
+- **Jackknife confidence intervals.** Leaving out one taper at a time gives variance estimates without distributional
+  assumptions.
+
+## Pitfalls
+
+- **Too many tapers.** Tapers beyond $2NW - 1$ are poorly concentrated and leak badly; using them raises the bias for
+  little gain in variance.
+- **Resolution is set by $W$, not $N$.** Increasing $NW$ smooths the spectrum; features narrower than $2W$ are
+  flattened.
+- **Normalisation.** Tapers must have unit energy for the average to estimate the spectrum on the same scale as the
+  periodogram.

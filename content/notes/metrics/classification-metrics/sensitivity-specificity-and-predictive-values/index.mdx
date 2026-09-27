@@ -1,0 +1,134 @@
+---
+title: Sensitivity, specificity and predictive values
+kind: concept
+summary: 'Sensitivity and specificity are the rates of correct decisions within each true class; the positive and negative predictive values are the rates within each predicted class. The first pair is a property of the test, the second depends on prevalence through Bayes theorem.'
+tags: [metrics, classification, diagnostics, worked-example]
+aliases:
+  [
+    sensitivity,
+    specificity,
+    true positive rate,
+    true negative rate,
+    false positive rate,
+    fall-out,
+    miss rate,
+    negative predictive value,
+    likelihood ratios,
+    diagnostic odds ratio,
+    informedness,
+    Youden's J,
+    markedness,
+  ]
+requires: [confusion-matrix]
+related:
+  [
+    precision-recall-and-f-score,
+    matthews-correlation-coefficient,
+    roc-curve-and-auc,
+    medical-diagnosis-base-rate,
+    bayes-theorem,
+    type-i-and-type-ii-errors,
+  ]
+references: [youden1950, powers2011]
+status: draft
+updated: 2026-09-27
+---
+
+import { ConfusionExplorer } from '../../_shared/ConfusionExplorer'
+
+<Definition>
+From the binary confusion matrix, with $P = \text{TP} + \text{FN}$ positives and $N = \text{FP} + \text{TN}$ negatives:
+
+| rate | formula | conditioned on |
+| --- | --- | --- |
+| sensitivity, recall, true-positive rate (TPR) | $\text{TP}/P$ | true positives |
+| specificity, true-negative rate (TNR) | $\text{TN}/N$ | true negatives |
+| false-positive rate (FPR), fall-out | $\text{FP}/N = 1 - \text{TNR}$ | true negatives |
+| false-negative rate (FNR), miss rate | $\text{FN}/P = 1 - \text{TPR}$ | true positives |
+| positive predictive value (PPV), precision | $\text{TP}/(\text{TP} + \text{FP})$ | predicted positives |
+| negative predictive value (NPV) | $\text{TN}/(\text{TN} + \text{FN})$ | predicted negatives |
+
+</Definition>
+
+## Rows and columns
+
+Sensitivity and specificity condition on the true class: they read along the rows of the confusion matrix. Each
+depends only on how the classifier treats one class, so neither changes when the proportion of positives in the data
+changes. They describe the test.
+
+The predictive values condition on the prediction: they read down the columns. They answer the question a user of the
+test asks, "given this result, how likely is it right?", and they depend on the prevalence $\pi$. By
+<NoteLink to="bayes-theorem">Bayes' theorem</NoteLink>,
+
+$$
+\text{PPV} = \frac{\pi\,\text{TPR}}{\pi\,\text{TPR} + (1 - \pi)\,\text{FPR}}, \qquad
+\text{NPV} = \frac{(1 - \pi)\,\text{TNR}}{(1 - \pi)\,\text{TNR} + \pi\,\text{FNR}}.
+$$
+
+The same test has a low PPV where the condition is rare and a high PPV where it is common; this is the base-rate effect
+of <NoteLink to="medical-diagnosis-base-rate">medical diagnosis and the base rate</NoteLink>.
+
+## Likelihood ratios
+
+The likelihood ratios combine the two rates of one test result into a factor that updates the odds, free of
+prevalence:
+
+$$
+\text{LR}^+ = \frac{\text{TPR}}{\text{FPR}}, \qquad \text{LR}^- = \frac{\text{FNR}}{\text{TNR}}, \qquad
+\text{posterior odds} = \text{LR} \times \text{prior odds}.
+$$
+
+The diagnostic odds ratio $\text{LR}^+/\text{LR}^- = (\text{TP}\cdot\text{TN})/(\text{FP}\cdot\text{FN})$ summarises
+the test in one prevalence-free number.
+
+## Informedness and markedness
+
+Youden's index, also called informedness, adds the two class-conditional rates and subtracts chance
+<Cite id="youden1950" />:
+
+$$
+J = \text{TPR} + \text{TNR} - 1 = \text{TPR} - \text{FPR}.
+$$
+
+A classifier that ignores its input predicts positive at some rate $q$ whatever the class, so $\text{TPR} = \text{FPR}
+= q$ and $J = 0$. A perfect classifier has $J = 1$. In ROC space $J$ is the vertical height of the operating point
+above the chance diagonal. Markedness is the analogous quantity for the predictive values,
+$\text{PPV} + \text{NPV} - 1$. Powers showed that the
+<NoteLink to="matthews-correlation-coefficient">Matthews correlation coefficient</NoteLink> is their geometric mean
+<Cite id="powers2011" />.
+
+## Worked example
+
+On the screening data (TP = 40, FN = 10, FP = 90, TN = 860):
+
+| quantity | value |
+| --- | --- |
+| sensitivity | $40/50 = 0.800$ |
+| specificity | $860/950 = 0.905$ |
+| FPR | $0.095$ |
+| PPV | $40/130 = 0.308$ |
+| NPV | $860/870 = 0.989$ |
+| $\text{LR}^+$ | $0.800/0.0947 = 8.44$ |
+| $\text{LR}^-$ | $0.200/0.905 = 0.221$ |
+| diagnostic odds ratio | $(40 \cdot 860)/(90 \cdot 10) = 38.2$ |
+| informedness | $0.800 + 0.905 - 1 = 0.705$ |
+| markedness | $0.308 + 0.989 - 1 = 0.296$ |
+
+A positive result multiplies the odds of disease by 8.4: from the prior odds $5 : 95$ to $42.2 : 95$, a posterior
+probability of $0.308$, which is the PPV.
+
+<ConfusionExplorer
+  title="Rates within classes and within predictions"
+  caption="Change the prevalence with the threshold fixed. Sensitivity and specificity do not move; PPV and NPV do. Informedness moves only with the threshold and the separation, never with the prevalence."
+  metrics={['recall', 'specificity', 'precision', 'npv', 'informedness', 'markedness']}
+/>
+
+## Pitfalls
+
+- **Reporting PPV from a case-control study.** If positives were over-sampled for the study, the observed PPV reflects
+  the study's prevalence, not the population's. Recompute it from sensitivity, specificity and the true prevalence.
+- **Sensitivity and specificity are not always prevalence-free.** They are invariant only if the classifier's behaviour
+  within each class does not change. When the case mix shifts, for example milder cases in a screening population,
+  sensitivity changes too.
+- **Naming.** Sensitivity is recall is TPR; PPV is precision. Different fields use different names for the same four
+  numbers; the definitions table is the reference.

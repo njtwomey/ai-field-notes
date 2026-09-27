@@ -1,0 +1,85 @@
+---
+title: Averaging multiclass metrics
+kind: concept
+summary: 'Binary metrics extend to many classes by scoring each class against the rest and averaging. Micro averaging pools the counts, macro averaging weights every class equally, and weighted averaging weights classes by frequency; on imbalanced data they give very different numbers.'
+tags: [metrics, classification, multi-label, imbalance, worked-example]
+aliases: [micro average, macro average, weighted average, micro-F1, macro-F1, one-vs-rest metrics, sample averaging]
+requires: [confusion-matrix, precision-recall-and-f-score]
+related: [accuracy-and-balanced-accuracy, hamming-jaccard-and-exact-match, choosing-a-metric, matthews-correlation-coefficient]
+references: [sokolova2009, manning2008, forman2010]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For a metric $m$ defined on a binary confusion matrix and a $K$-class problem, let $\text{TP}_k, \text{FP}_k,
+\text{FN}_k$ be the counts for class $k$ against the rest, and $n_k$ the number of cases of class $k$. Then
+
+$$
+m_{\text{micro}} = m\paren{\textstyle\sum_k \text{TP}_k, \sum_k \text{FP}_k, \sum_k \text{FN}_k}, \qquad
+m_{\text{macro}} = \frac1K\sum_k m(\text{TP}_k, \text{FP}_k, \text{FN}_k), \qquad
+m_{\text{weighted}} = \sum_k \frac{n_k}{n}\, m(\text{TP}_k, \text{FP}_k, \text{FN}_k).
+$$
+
+</Definition>
+
+## One-against-rest counts
+
+Each class $k$ defines a binary problem, "class $k$ or not", with its own confusion matrix read off the $K$-class matrix
+$\Cmat$: $\text{TP}_k = C_{kk}$, $\text{FN}_k$ is the rest of row $k$, and $\text{FP}_k$ the rest of column $k$.
+Precision, recall and $F_1$ are then defined per class. Averaging chooses how much each class counts.
+
+## Three averages
+
+**Micro averaging** adds the counts over classes, then computes the metric once. Every case counts equally, so frequent
+classes dominate. In single-label multiclass classification every wrong prediction is a false positive for one class
+and a false negative for another, so $\sum_k \text{FP}_k = \sum_k \text{FN}_k$ = the number of errors. Micro precision,
+micro recall and micro $F_1$ are therefore all equal to accuracy.
+
+**Macro averaging** computes the metric per class, then takes the unweighted mean. Every class counts equally,
+whatever its size, so rare classes that are handled badly pull the score down. Macro recall is balanced accuracy.
+
+**Weighted averaging** computes the metric per class and weights it by the class's frequency. It follows the class
+distribution like micro averaging, but averages per-class metrics rather than pooling counts.
+
+For multi-label data a fourth option, sample averaging, computes the metric per case over that case's labels and
+averages over cases (see <NoteLink to="hamming-jaccard-and-exact-match">Hamming loss, Jaccard index and exact
+match</NoteLink>).
+
+## Worked example
+
+A three-class classifier on 100 cases, with classes of 80, 15 and 5:
+
+| | pred. A | pred. B | pred. C | recall |
+| --- | --- | --- | --- | --- |
+| **A** (80) | 70 | 6 | 4 | 0.875 |
+| **B** (15) | 4 | 10 | 1 | 0.667 |
+| **C** (5) | 2 | 1 | 2 | 0.400 |
+| **precision** | 0.921 | 0.588 | 0.286 | |
+
+The per-class $F_1$ scores are 0.897, 0.625 and 0.333.
+
+| average | precision | recall | $F_1$ |
+| --- | --- | --- | --- |
+| micro | 0.820 | 0.820 | 0.820 |
+| macro | 0.598 | 0.647 | 0.619 |
+| weighted | 0.839 | 0.820 | 0.828 |
+
+Micro averaging reports 0.82, the accuracy, dominated by class A. Macro averaging reports about 0.62, dragged down by
+class C, which is recalled only 40% of the time. The two numbers describe the same predictions; which one is right
+depends on whether the rare classes matter as much as the common one.
+
+## Two definitions of macro-$F_1$
+
+Macro-$F_1$ is usually the mean of the per-class $F_1$ scores, 0.619 here. Some papers instead take the harmonic mean
+of macro precision and macro recall, $2(0.598)(0.647)/(0.598 + 0.647) = 0.622$. The two differ, and the second is not a
+mean of per-class scores. State which is used; scikit-learn computes the first.
+
+## Pitfalls
+
+- **Classes with no predictions.** A class that is never predicted has undefined precision. Whether it contributes 0 or
+  is dropped changes the macro average.
+- **Averaging across folds.** The mean of per-fold $F_1$ scores is not the $F_1$ of the pooled predictions, and the two
+  can differ substantially when some folds contain few positives <Cite id="forman2010" />. Pool the counts, or state
+  which average is reported.
+- **Micro averaging is not neutral.** On imbalanced data it is almost entirely about the majority class.

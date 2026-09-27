@@ -1,0 +1,99 @@
+---
+title: Discrete Fourier transform
+kind: concept
+summary: 'The DFT $X[k] = \sum_{n=0}^{N-1} x[n] e^{-i 2\pi k n / N}$ maps $N$ samples to $N$ frequency coefficients. It samples the DTFT at $\omega_k = 2\pi k/N$, is a unitary matrix up to scale, and treats its input as one period of a periodic sequence.'
+tags: [signal-processing, fourier, worked-example]
+aliases: [DFT, discrete Fourier transform, DFT matrix, frequency bins, circular shift, inverse DFT]
+requires: [dtft]
+related: [fft, convolution-theorem, zero-padding-and-resolution, spectral-leakage-and-windows, parseval-theorem]
+references: [oppenheim2010, smith2007]
+status: draft
+updated: 2026-09-26
+---
+
+import { DftSamplesDtft } from './DftSamplesDtft'
+
+<Definition>
+The discrete Fourier transform of $N$ samples $x[0], \dots, x[N-1]$ and its inverse are
+
+$$
+X[k] = \sum_{n=0}^{N-1} x[n]\, e^{-i 2\pi k n / N}, \qquad
+x[n] = \frac{1}{N}\sum_{k=0}^{N-1} X[k]\, e^{i 2\pi k n / N},
+$$
+
+for $k, n = 0, \dots, N-1$. Coefficient $X[k]$ measures the component at frequency $\omega_k = 2\pi k/N$ radians per
+sample, or $k f_s / N$ hertz <Cite id="smith2007" />.
+</Definition>
+
+## Sampling the DTFT
+
+For a sequence of length $N$, the <NoteLink to="dtft">DTFT</NoteLink> is
+$X(e^{i\omega}) = \sum_{n=0}^{N-1} x[n] e^{-i\omega n}$. Setting $\omega = 2\pi k/N$ gives the DFT formula exactly:
+
+$$
+X[k] = X(e^{i\omega})\Big|_{\omega = 2\pi k / N}.
+$$
+
+The DFT is the DTFT sampled at $N$ equally spaced frequencies around the unit circle. Padding the sequence with zeros
+to length $L > N$ samples the same curve at $L$ points; see
+<NoteLink to="zero-padding-and-resolution">zero-padding and resolution</NoteLink>.
+
+<DftSamplesDtft />
+
+## The inverse, by orthogonality
+
+The vectors $\evec_k = (e^{i 2\pi k n/N})_{n=0}^{N-1}$ are orthogonal:
+
+$$
+\sum_{n=0}^{N-1} e^{i 2\pi (k - m) n/N} = \begin{cases} N & k \equiv m \pmod N, \\ 0 & \text{otherwise,} \end{cases}
+$$
+
+because for $k \ne m$ the terms are the $N$-th roots of unity raised to the power $k - m$, which sum to zero as a
+geometric series: $\paren{1 - e^{i 2\pi(k-m)}}/\paren{1 - e^{i 2\pi (k-m)/N}} = 0$. Substituting the forward formula
+into the inverse therefore returns $x[n]$.
+
+## Matrix form
+
+Write $W = e^{-i 2\pi / N}$. The DFT is multiplication by the $N \times N$ matrix $\Fmat$ with entries
+$F_{kn} = W^{kn}$, taking the vector of samples $\xvec$ to the vector of coefficients $\hat\xvec$:
+
+$$
+\hat\xvec = \Fmat \xvec, \qquad \xvec = \frac{1}{N}\Fmat^{\mathsf H}\hat\xvec,
+$$
+
+where $^{\mathsf H}$ is the conjugate transpose. Orthogonality says $\Fmat^{\mathsf H}\Fmat = N\eye$, so
+$\Fmat/\sqrt N$ is unitary. Computing $\Fmat\xvec$ directly
+costs $N^2$ multiplications; the <NoteLink to="fft">FFT</NoteLink> factors $\Fmat$ into sparse matrices and needs
+$O(N\log N)$.
+
+## Periodicity
+
+Both formulas are periodic: $X[k + N] = X[k]$ and the inverse gives $x[n + N] = x[n]$. The DFT treats its input as one
+period of an infinitely repeating sequence. Two consequences follow.
+
+- **Shifts are circular.** Delaying by $m$ samples multiplies $X[k]$ by $W^{km}$ and rotates the sequence, with
+  samples that fall off the end reappearing at the start.
+- **Products give circular convolution.** $X[k] H[k]$ is the DFT of the circular convolution of $x$ and $h$, which
+  wraps around unless the sequences are padded; see the <NoteLink to="convolution-theorem">convolution
+  theorem</NoteLink>.
+
+A signal whose first and last samples do not join smoothly has, in effect, a jump at the wrap point, which spreads
+energy across all bins: <NoteLink to="spectral-leakage-and-windows">leakage</NoteLink>.
+
+## Worked example
+
+For $x = (1, 2, 3, 4)$, $W = e^{-i\pi/2} = -i$:
+
+$$
+X[0] = 10, \quad X[1] = 1 - 2i - 3 + 4i = -2 + 2i, \quad X[2] = 1 - 2 + 3 - 4 = -2, \quad X[3] = -2 - 2i.
+$$
+
+$X[0]$ is the sum, and $X[3] = \overline{X[1]}$ because $x$ is real. For real input, bins $k$ and $N - k$ are
+conjugates, so only $N/2 + 1$ bins carry independent information.
+
+## Pitfalls
+
+- **Bin $k$ above $N/2$ is a negative frequency.** Bin $N - k$ represents $-2\pi k/N$. Plots of "frequency against
+  bin" beyond $N/2$ show the negative half.
+- **Scaling conventions.** The $1/N$ may sit in the inverse (as here and in NumPy), in the forward transform, or be
+  split as $1/\sqrt N$ in both. Amplitudes read from a spectrum depend on which.

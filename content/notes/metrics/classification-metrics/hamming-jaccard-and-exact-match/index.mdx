@@ -1,0 +1,75 @@
+---
+title: Hamming loss, Jaccard index and exact match
+kind: concept
+summary: 'Three ways to score a set of predicted labels against a true set in multi-label classification: exact match asks for the whole set, Hamming loss counts wrong label decisions, and the Jaccard index is the overlap $\abs{A \cap B}/\abs{A \cup B}$ of the two sets.'
+tags: [metrics, classification, multi-label, worked-example]
+aliases: [Hamming loss, Jaccard index, Jaccard similarity, intersection over union for sets, subset accuracy, exact match ratio, multi-label metrics]
+requires: [confusion-matrix]
+related: [precision-recall-and-f-score, averaging-multiclass-metrics, intersection-over-union, dice-and-segmentation-overlap]
+references: [hamming1950, jaccard1912, tsoumakas2007]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+In multi-label classification each case $i$ has a set of true labels $Y_i$ and a set of predicted labels $\hat Y_i$,
+drawn from $L$ possible labels. Over $n$ cases:
+
+$$
+\text{exact match} = \frac1n\sum_i \indicator\brack{\hat Y_i = Y_i}, \qquad
+\text{Hamming loss} = \frac{1}{nL}\sum_i \abs{\hat Y_i \,\triangle\, Y_i}, \qquad
+\text{Jaccard} = \frac1n\sum_i \frac{\abs{\hat Y_i \cap Y_i}}{\abs{\hat Y_i \cup Y_i}},
+$$
+
+where $\triangle$ is the symmetric difference, the labels in one set but not the other <Cite id="tsoumakas2007" />.
+</Definition>
+
+## Three levels of strictness
+
+Represent each case's labels as a binary vector of length $L$. The three metrics treat errors in that vector
+differently.
+
+- **Exact match**, also called subset accuracy, gives credit only when the whole vector is right. One wrong label out of
+  twenty counts the same as twenty. It is the strictest, and it falls quickly as $L$ grows.
+- **Hamming loss** is the fraction of individual label decisions that are wrong, the Hamming distance between the
+  vectors divided by their length <Cite id="hamming1950" />. It treats the task as $nL$ independent binary decisions.
+  With many labels and few positives per case, predicting no labels at all can give a low Hamming loss.
+- **Jaccard index** divides the correct labels by all the labels either set contains <Cite id="jaccard1912" />. Labels
+  that are absent from both sets, the true negatives, do not count, so predicting nothing scores 0 on every case with a
+  true label.
+
+For a single binary class, the Jaccard index is $\text{TP}/(\text{TP} + \text{FP} + \text{FN})$ and relates to $F_1$ by
+$F_1 = 2J/(1 + J)$, so the two rank classifiers identically (see
+<NoteLink to="precision-recall-and-f-score">precision, recall and the F-score</NoteLink>). In images the same ratio of
+areas is the <NoteLink to="intersection-over-union">intersection over union</NoteLink>.
+
+## Averaging the Jaccard index
+
+The definition above averages the per-case index, called sample averaging. Micro averaging pools the intersections and
+unions over all cases and labels first, and macro averaging computes the index per label and averages over labels (see
+<NoteLink to="averaging-multiclass-metrics">averaging multiclass metrics</NoteLink>). They differ whenever cases or
+labels have very different numbers of positives.
+
+## Worked example
+
+Four cases, three labels, as binary vectors:
+
+| case | true | predicted | correct? | wrong decisions | Jaccard |
+| --- | --- | --- | --- | --- | --- |
+| 1 | (1, 0, 1) | (1, 0, 0) | no | 1 | $1/2$ |
+| 2 | (0, 1, 0) | (0, 1, 0) | yes | 0 | $1$ |
+| 3 | (1, 1, 0) | (1, 1, 0) | yes | 0 | $1$ |
+| 4 | (0, 0, 1) | (1, 0, 1) | no | 1 | $1/2$ |
+
+Exact match is $2/4 = 0.5$. Hamming loss is $2/12 = 0.167$: two wrong decisions out of twelve. The sample-averaged
+Jaccard index is $(0.5 + 1 + 1 + 0.5)/4 = 0.75$. Micro-averaged, the pooled intersection is 5 labels and the pooled
+union 7, giving $0.714$; macro-averaged over the three labels it is $0.722$.
+
+## Pitfalls
+
+- **Exact match punishes large label sets.** With 50 labels, a classifier that gets each right 99% of the time and errs
+  independently has exact match $0.99^{50} = 0.61$.
+- **Hamming loss rewards predicting nothing** when labels are sparse. Report it with a metric that ignores true
+  negatives, such as Jaccard or $F_1$.
+- **Empty sets.** When both $Y_i$ and $\hat Y_i$ are empty the Jaccard ratio is $0/0$. Libraries define it as 1, or
+  as 0, or warn.

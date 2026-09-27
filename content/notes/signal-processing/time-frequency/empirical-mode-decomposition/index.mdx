@@ -1,0 +1,66 @@
+---
+title: Empirical mode decomposition
+kind: technique
+summary: 'Empirical mode decomposition splits a signal into intrinsic mode functions by sifting: repeatedly subtracting the mean of spline envelopes through its extrema. Adaptive and basis-free, it underlies the Hilbert–Huang transform, but it has no theory and suffers from mode mixing.'
+tags: [signal-processing, time-frequency, adaptive-methods, worked-example]
+aliases: [EMD, Hilbert–Huang transform, HHT, intrinsic mode function, IMF, sifting, ensemble EMD, EEMD, mode mixing]
+requires: [instantaneous-frequency]
+related: [reassignment-and-synchrosqueezing, wavelet-packets, hilbert-transform]
+references: [huang1998, rilling2008, wu2009, daubechies2011]
+status: draft
+updated: 2026-09-26
+---
+
+<Definition>
+**Empirical mode decomposition** writes a signal as a sum of **intrinsic mode functions** (IMFs) and a residue,
+$x(t) = \sum_{j=1}^{J} c_j(t) + r(t)$. An IMF is a function whose numbers of extrema and zero crossings differ by at
+most one, and whose upper and lower envelopes are symmetric about zero. The IMFs are found by **sifting** and ordered
+from the fastest oscillation to the slowest <Cite id="huang1998" />.
+</Definition>
+
+## Sifting
+
+To extract the first IMF from $x$:
+
+1. Find the local maxima and minima of the current signal $h$, starting with $h = x$.
+2. Interpolate the maxima with a cubic spline to form the upper envelope $u(t)$, and the minima to form the lower
+   envelope $l(t)$.
+3. Subtract their mean: $h \leftarrow h - \tfrac12 (u + l)$.
+4. Repeat until $h$ satisfies the IMF conditions or a stopping rule, such as a fixed number of iterations or a small
+   mean envelope.
+
+The result is $c_1 = h$. Subtract it, $x \leftarrow x - c_1$, and repeat to find $c_2$, and so on, until the residue
+is monotonic or has too few extrema to continue. Each sift removes the local mean, so what remains oscillates
+symmetrically about zero at the fastest local scale, and each IMF has a well-behaved instantaneous frequency.
+
+## The Hilbert–Huang transform
+
+The IMFs are designed to be narrowband enough for the analytic signal to give meaningful amplitude and phase. The
+**Hilbert spectrum** plots the instantaneous amplitude of each IMF against time and its instantaneous frequency, one
+curve per IMF. Unlike a spectrogram, it has no window and so no fixed resolution trade-off; its resolution is limited
+only by how well the IMFs separate the signal's components. See
+<NoteLink to="instantaneous-frequency">instantaneous frequency</NoteLink>.
+
+## When components separate
+
+Sifting acts locally like a filter bank, but not a linear one, and whether two components end up in separate IMFs
+depends on their frequency and amplitude ratios. For two tones, separation fails as the frequency ratio approaches 1:
+both tones are then extracted together in one IMF <Cite id="rilling2008" />.
+
+**Worked example.** Two unit-amplitude tones with frequency ratio $f_2/f_1$, sampled at 200 samples per period of the
+faster tone and sifted 20 times with cubic-spline envelopes, give a first IMF whose relative error from the faster tone
+is 0.5% at ratio 0.3, 1.9% at 0.5 and 7.4% at 0.6. At ratio 0.7 the error jumps to 54%, and at 0.8 to 91%: the two
+tones are no longer separated. The exact crossover depends on the amplitude ratio and the stopping rule.
+
+## Pitfalls and remedies
+
+- **Mode mixing.** A single IMF can contain oscillations of very different scales, for example when an intermittent
+  high-frequency burst appears in only part of the signal. **Ensemble EMD** adds many realisations of white noise,
+  decomposes each, and averages the IMFs, so the noise populates every scale and the signal's components settle into
+  consistent IMFs <Cite id="wu2009" />.
+- **End effects.** Splines extrapolate badly beyond the first and last extrema, and errors propagate inward through
+  successive sifts. Mirroring the signal at its ends reduces them.
+- **No mathematical foundation.** The decomposition is defined by an algorithm, not an objective, so its output
+  depends on the spline, the stopping rule and the number of sifts. Synchrosqueezing was proposed as a transform with
+  similar aims and a proper theory <Cite id="daubechies2011" />; variational mode decomposition is another alternative.
+- **Not orthogonal.** IMFs are only approximately orthogonal, and their energies need not add to the signal's energy.

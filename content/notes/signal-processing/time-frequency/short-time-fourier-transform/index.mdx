@@ -1,0 +1,79 @@
+---
+title: Short-time Fourier transform
+kind: concept
+summary: 'The short-time Fourier transform takes the DFT of successive windowed frames, $X[m, k] = \sum_n x[n]\, w[n - mR]\, e^{-i 2\pi k n / N}$. Its magnitude squared is the spectrogram. The window length fixes one time and one frequency resolution for the whole plane.'
+tags: [signal-processing, time-frequency, spectrogram, audio, worked-example]
+aliases: [STFT, spectrogram, sliding-window DFT, windowed Fourier transform, Gabor transform]
+requires: [dft, spectral-leakage-and-windows]
+related: [time-frequency-uncertainty, overlap-add-and-overlap-save, filter-banks, continuous-wavelet-transform, wigner-ville-distribution, mel-spectrogram, reassignment-and-synchrosqueezing]
+references: [allen1977, oppenheim2010, gabor1946, griffin1984]
+status: draft
+updated: 2026-09-26
+---
+
+import { StftExplorer } from './StftExplorer'
+
+<Definition>
+For a window $w[n]$ of length $L$, a hop size $R$ and a DFT size $N \ge L$, the **short-time Fourier transform** of
+$x[n]$ is
+
+$$
+X[m, k] = \sum_{n} x[n]\, w[n - mR]\, e^{-i 2\pi k (n - mR) / N}, \qquad k = 0, \dots, N - 1,
+$$
+
+the $N$-point DFT of the $m$-th frame, the signal multiplied by the window shifted to start at $mR$. The
+**spectrogram** is $\abs{X[m, k]}^2$ <Cite id="allen1977" />.
+</Definition>
+
+The phase reference in this definition is the start of each frame. An alternative uses absolute time,
+$e^{-i 2\pi k n / N}$, which multiplies $X[m, k]$ by $e^{-i 2\pi k m R / N}$; magnitudes and spectrograms are
+unaffected, but the phase conventions matter for reconstruction and for reassignment.
+
+## What each coefficient measures
+
+For a fixed frequency bin $k$, the sequence $X[\cdot, k]$ is the output of a bandpass filter sampled every $R$
+samples. Written as a convolution in $n$, $X[m, k]$ is the input filtered by $w[-n]\, e^{i2\pi k n/N}$, the reversed
+window modulated to frequency $2\pi k / N$. The STFT is therefore a uniform DFT
+<NoteLink to="filter-banks">filter bank</NoteLink> whose prototype lowpass is the window, and each bin's frequency
+response is the window's transform centred on $2\pi k / N$.
+
+That transform sets the frequency resolution. A tone at $\omega_0$ appears in frame $m$ as the window's spectrum
+shifted to $\omega_0$: a main lobe whose width scales as $1/L$, with sidelobes set by the window's shape. See
+<NoteLink to="spectral-leakage-and-windows">spectral leakage and windows</NoteLink>. In time, an impulse appears in
+every frame whose window covers it, a span of $L$ samples. Longer windows give narrower main lobes and wider time
+smearing; shorter windows the reverse. The product of the two spreads cannot fall below a fixed bound; see
+<NoteLink to="time-frequency-uncertainty">time-frequency uncertainty</NoteLink>.
+
+## Parameters
+
+- **Window length $L$** sets the resolution trade-off.
+- **Window shape** sets sidelobe level against main-lobe width: Hann for general use, Blackman or Kaiser when weak
+  components sit next to strong ones.
+- **Hop $R$** sets how often frames are taken. Smaller hops oversample in time and cost more; for reconstruction the
+  window and hop must satisfy an overlap-add condition. See
+  <NoteLink to="overlap-add-and-overlap-save">overlap-add and overlap-save</NoteLink>.
+- **DFT size $N$** larger than $L$ zero-pads each frame. That interpolates the spectrum on a finer grid but does not
+  improve resolution, which the window fixes.
+
+## Worked example
+
+Speech analysis at $f_s = 8$ kHz with a 256-sample Hann window uses frames of $256/8000 = 32$ ms. The bin spacing is
+$f_s / L = 31.25$ Hz and the Hann main lobe is four bins wide between nulls, 125 Hz. Two tones 100 Hz apart, at 1.2
+and 1.3 kHz, fall inside one main lobe and merge. Separating them needs a main lobe narrower than about 100 Hz
+between nulls, $4 f_s / L < 100$, so $L > 320$ samples, or 40 ms. With a 512-sample window they separate; the
+figure shows both cases, and what the longer window does to a click and a chirp.
+
+<StftExplorer />
+
+## Pitfalls
+
+- **Resolution is uniform.** Every frequency gets the same time and frequency resolution. Signals with slow low
+  frequencies and fast high-frequency events suit a constant-Q representation better; see
+  <NoteLink to="constant-q-transform">constant-Q transform</NoteLink> and
+  <NoteLink to="continuous-wavelet-transform">continuous wavelet transform</NoteLink>.
+- **The spectrogram discards phase.** Because frames overlap, the STFT of a signal is redundant, and a modified
+  magnitude is usually not the magnitude of any signal. Resynthesis needs a phase consistent with it, for example
+  from the Griffin–Lim iteration <Cite id="griffin1984" />.
+- **Frame boundaries and edges.** The first and last frames see a partial window unless the signal is padded.
+- **Units.** Spectrogram values depend on the window's energy; divide by $\sum_n w[n]^2$ for a power spectral density
+  estimate.

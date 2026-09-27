@@ -13,12 +13,14 @@ import {
   GitFork,
   GraduationCap,
   Languages,
+  LibraryBig,
   Gauge,
   Microscope,
   Network,
   Radar,
   Ruler,
   Shapes,
+  SlidersHorizontal,
   Sigma,
   Target,
   TrendingDown,
@@ -51,6 +53,8 @@ const icons: Record<CategoryIcon, LucideIcon> = {
   gamepad: Gamepad2,
   languages: Languages,
   eye: Eye,
+  sliders: SlidersHorizontal,
+  library: LibraryBig,
 }
 
 export function categoryIcon(icon: CategoryIcon | undefined): LucideIcon {

@@ -1,0 +1,75 @@
+---
+title: Mel spectrogram
+kind: technique
+summary: 'A mel spectrogram is a short-time power spectrum passed through a mel filter bank and compressed with a logarithm: $S[m, t] = \log \sum_k H_m[k]\,\abs{X_t[k]}^2$. It is the standard time-frequency input for speech and audio models.'
+tags: [audio, feature-extraction, time-frequency, worked-example]
+aliases: [log-mel spectrogram, mel-frequency spectrogram, filter-bank features, fbank, log mel filterbank energies]
+requires: [mel-filter-bank, short-time-fourier-transform]
+related: [mfcc, spectrogram-augmentation, auditory-scales, time-frequency-uncertainty]
+references: [davis1980, slaney1998]
+status: draft
+updated: 2026-09-26
+---
+
+import { MelSpectrogramView } from './MelSpectrogramView'
+
+<Definition>
+Given frames $x_t[n]$ of a signal, windowed by $w[n]$, the mel spectrogram is
+
+$$
+S[m, t] = \log\paren{\epsilon + \sum_{k=0}^{N/2} H_m[k]\,\abs{X_t[k]}^2}, \qquad
+X_t[k] = \sum_{n=0}^{N-1} w[n]\, x_t[n]\, e^{-i2\pi kn/N},
+$$
+
+where $H_m[k]$ is filter $m$ of a <NoteLink to="mel-filter-bank">mel filter bank</NoteLink> sampled on the DFT bins,
+and $\epsilon$ a small floor. Rows are mel bands and columns are frames.
+</Definition>
+
+## The pipeline
+
+1. **Frame and window.** Split the signal into frames of $N$ samples every $H$ samples (the hop), and multiply each by
+   a tapering window, usually Hann. This is the
+   <NoteLink to="short-time-fourier-transform">short-time Fourier transform</NoteLink>.
+2. **Power spectrum.** Take the DFT of each frame and its squared magnitude, keeping bins $0, \dots, N/2$.
+3. **Mel filter bank.** Sum the power in each of $M$ triangular bands spaced on the mel scale. This reduces
+   $N/2 + 1$ bins to $M$ band energies and matches the frequency axis to the ear's resolution.
+4. **Compress.** Take the logarithm, or $10\log_{10}$ for decibels. Loudness perception is roughly logarithmic, and
+   the logarithm turns the multiplicative effect of a fixed channel or microphone response into an additive offset.
+
+## Parameters and their effects
+
+- **Window length $N$.** Sets the trade-off between frequency and time resolution. The frequency resolution is about
+  $f_s/N$: 31 Hz for $N = 512$ at 16 kHz. The time resolution is about $N/f_s$: 32 ms. Speech commonly uses 20 to 32 ms,
+  short enough that the vocal tract is roughly stationary within a frame. See
+  <NoteLink to="time-frequency-uncertainty">time-frequency uncertainty</NoteLink>.
+- **Hop $H$.** Typically $N/4$ to $N/2$; speech front ends use 10 ms. A smaller hop gives more frames without improving
+  the underlying resolution.
+- **Number of bands $M$.** 40 is common for speech recognition, 64 to 128 for music and for neural networks, which can
+  exploit finer detail.
+- **Range.** A lower edge of 20 to 60 Hz discards hum and DC; an upper edge below $f_s/2$ discards content above a
+  telephone band or a codec's cut-off.
+- **Floor $\epsilon$.** Prevents $\log 0$ in silence. In dB, clipping to 80 dB below the maximum is common.
+
+## Worked example
+
+At $f_s = 16$ kHz with $N = 512$, $H = 128$ and $M = 64$, one second of audio gives $\lfloor (16000 - 512)/128 \rfloor
++ 1 = 122$ frames. Each frame's 257 power bins become 64 band energies, so the spectrogram is a $64 \times 122$ image:
+about a quarter of the size of the linear power spectrogram, with most of the rows allocated below 2 kHz.
+
+<MelSpectrogramView />
+
+## Mel spectrograms and MFCCs
+
+<NoteLink to="mfcc">MFCCs</NoteLink> take a further discrete cosine transform of each log-mel column and keep the first
+dozen coefficients. The DCT decorrelates the bands, which suited diagonal-covariance Gaussian models. Convolutional and
+transformer models work directly on log-mel spectrograms: they learn their own decorrelation, and the spectrogram keeps
+the local time-frequency structure that the DCT spreads out.
+
+## Pitfalls
+
+- **Library conventions differ.** Mel formula, filter normalisation, power or magnitude, natural log or dB, window
+  centring and padding all vary. Features from different tools are not interchangeable unless every setting matches.
+- **Phase is discarded.** A mel spectrogram cannot be inverted exactly; reconstructing audio needs phase estimation or
+  a neural vocoder.
+- **Normalisation.** Per-utterance or per-band mean and variance normalisation of the log energies removes channel
+  effects and level differences, and usually matters as much as the other settings.

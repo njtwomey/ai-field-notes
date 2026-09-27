@@ -1,0 +1,82 @@
+---
+title: Operating points and the equal error rate
+kind: concept
+summary: 'An operating point is the threshold a deployed classifier uses. It can be chosen by fixing one error rate (recall at a fixed precision, TPR at a fixed FPR), by balancing them (the equal error rate, Youden index) or by minimising expected cost.'
+tags: [metrics, classification, thresholds, worked-example]
+aliases: [operating point, decision threshold, equal error rate, EER, recall at fixed precision, precision at fixed recall, sensitivity at fixed specificity, threshold selection]
+requires: [roc-curve-and-auc]
+related: [precision-recall-curve-and-average-precision, sensitivity-specificity-and-predictive-values, cost-sensitive-learning, confusion-matrix]
+references: [fawcett2006, youden1950, flach2003]
+status: draft
+updated: 2026-09-27
+---
+
+import { RocPrCurves } from '../../_shared/RocPrCurves'
+
+<Definition>
+An operating point is a choice of threshold $t$ for a scoring classifier, giving one point on its ROC curve and one
+confusion matrix. Common rules for choosing it are: fix one rate and read off the other (for example the recall at a
+precision of 0.9), balance the two error rates (the equal error rate, where $\text{FPR} = \text{FNR}$), or minimise the
+expected cost of errors <Cite id="fawcett2006" />.
+</Definition>
+
+## Rates at a fixed constraint
+
+Many applications have a hard constraint on one error. A screening test may need a sensitivity of at least 0.95; a
+fraud system may tolerate at most 1% false alarms; a search engine may need precision above 0.9. The metric is then
+the other rate at the lowest threshold that meets the constraint: specificity at 95% sensitivity, TPR at 1% FPR,
+recall at 90% precision. These read one point off the curve, the point the system will actually run at, and ignore the
+rest.
+
+## The equal error rate
+
+The equal error rate is the error rate at the threshold where the false-positive rate equals the false-negative rate.
+On the ROC curve it is where the curve crosses the anti-diagonal $\text{TPR} = 1 - \text{FPR}$. It is standard in
+biometric verification and speaker recognition, where one number must summarise a system whose threshold is set later.
+
+For the binormal model with negatives $\sim \Gauss(0, 1)$ and positives $\sim \Gauss(d, 1)$, the false-positive rate at
+threshold $t$ is $1 - \Phi(t)$ and the false-negative rate is $\Phi(t - d)$. They are equal when $t = d - t$, so at
+$t = d/2$, and
+
+$$
+\text{EER} = \Phi(-d/2).
+$$
+
+At $d = 1.5$ the EER is $\Phi(-0.75) = 0.227$.
+
+## Youden's index
+
+Youden's index picks the threshold that maximises $J = \text{TPR} - \text{FPR}$, the vertical distance above the chance
+diagonal <Cite id="youden1950" />. At the maximum, $d\,\text{TPR}/d\,\text{FPR} = 1$: the curve's slope is 1, which is
+where the two class densities, unweighted by prevalence, are equal. In the equal-variance binormal model this is again
+$t = d/2$, with $J = 2\Phi(d/2) - 1 = 0.547$ at $d = 1.5$. Maximising $J$ is the same as minimising the expected cost
+when both errors cost the same and the classes are equally likely, which is rarely the real situation.
+
+## Minimum expected cost
+
+With a cost $c_{\text{FP}}$ per false positive, $c_{\text{FN}}$ per false negative and prevalence $\pi$, the expected
+cost per case at a point on the ROC curve is
+
+$$
+\pi\, c_{\text{FN}}\paren{1 - \text{TPR}} + (1 - \pi)\, c_{\text{FP}}\,\text{FPR}.
+$$
+
+It is constant along straight lines of slope $\paren{(1 - \pi)\,c_{\text{FP}}}/\paren{\pi\,c_{\text{FN}}}$, and the best
+operating point is where such a line touches the ROC curve's convex hull <Cite id="flach2003" />. With calibrated
+probabilities the same point is a threshold on the probability itself (see
+<NoteLink to="cost-sensitive-learning">cost-sensitive learning</NoteLink>). Equal error rate and Youden's index are the
+special cases of particular cost and prevalence assumptions.
+
+<RocPrCurves
+  title="The equal error rate"
+  caption="The dashed anti-diagonal is where FPR equals FNR. The equal error rate is where the ROC curve crosses it, at the marked point. Increase the separation d and the crossing moves towards the top-left corner. Drag the operating point to compare other thresholds."
+  showEer
+/>
+
+## Pitfalls
+
+- **Choosing the threshold on the test set** makes the reported rates optimistic. Choose it on validation data and
+  report the test-set rates at that fixed threshold.
+- **Fixed-rate metrics are unstable with few cases.** At 1% FPR with 500 negatives, the constraint is set by five cases.
+- **The EER is a summary, not an operating point** anyone necessarily uses. It is useful for comparing systems, not for
+  deploying one.

@@ -1,0 +1,73 @@
+---
+title: Mel filter bank
+kind: technique
+summary: 'A mel filter bank is a set of overlapping triangular filters with edges equally spaced in mel. Weighting a power spectrum by each filter and summing gives a short vector of band energies on a perceptual frequency scale: the input to mel spectrograms and MFCCs.'
+tags: [audio, feature-extraction, signal-processing, worked-example]
+aliases: [mel filterbank, triangular filter bank, mel bands, mel-scale filters]
+requires: [auditory-scales]
+related: [mel-spectrogram, mfcc, gammatone-filter-bank, filter-banks, short-time-fourier-transform]
+references: [davis1980, slaney1998]
+status: draft
+updated: 2026-09-26
+---
+
+import { MelBank } from './MelBank'
+
+<Definition>
+A mel filter bank with $M$ filters over $[f_{\min}, f_{\max}]$ places $M + 2$ edge frequencies $b_0 < b_1 < \dots <
+b_{M+1}$ equally spaced on the mel scale. Filter $m = 1, \dots, M$ is the triangle that rises linearly from 0 at
+$b_{m-1}$ to 1 at $b_m$ and falls back to 0 at $b_{m+1}$:
+
+$$
+H_m(f) = \max\paren{0,\ \min\paren{\frac{f - b_{m-1}}{b_m - b_{m-1}},\ \frac{b_{m+1} - f}{b_{m+1} - b_m}}}.
+$$
+
+Applied to a power spectrum $P[k]$ sampled at bin frequencies $f_k$, it gives the band energies
+$E_m = \sum_k H_m(f_k)\,P[k]$ <Cite id="davis1980" />.
+</Definition>
+
+## Construction, step by step
+
+1. **Choose the range and count.** Typical speech settings are $f_{\min} = 0$ or 20 Hz, $f_{\max} = f_s/2$, and
+   $M = 20$ to $40$ filters for 16 kHz audio. Music and neural-network front ends often use 64 to 128.
+2. **Space the edges in mel.** Convert the range with $m(f) = 2595\log_{10}(1 + f/700)$, take $M + 2$ equally spaced
+   points between $m(f_{\min})$ and $m(f_{\max})$, and convert back to hertz. Equal spacing in mel means narrow,
+   closely spaced filters at low frequencies and wide ones at high frequencies, matching the ear's resolution.
+3. **Build the triangles.** Each filter's centre is the next edge, and its feet are the neighbouring edges. Adjacent
+   filters therefore overlap by half: at every frequency between the first and last centres, exactly two filters are
+   active and their peak-normalised weights sum to 1.
+4. **Sample on the FFT grid.** Evaluate each triangle at the bin frequencies $f_k = k f_s/N_{\mathrm{FFT}}$,
+   $k = 0, \dots, N_{\mathrm{FFT}}/2$, giving an $M \times (N_{\mathrm{FFT}}/2 + 1)$ weight matrix $\Wmat$.
+5. **Apply.** For each frame's power spectrum $\pvec$, the band energies are $\evec = \Wmat\pvec$.
+
+## Normalisation
+
+Two conventions differ in the triangles' heights:
+
+- **Peak normalisation** (HTK): every triangle peaks at 1. Wide high-frequency filters then sum more bins, so for white
+  noise their energies grow with bandwidth.
+- **Area normalisation** (Slaney): each triangle is scaled by $2/(b_{m+1} - b_{m-1})$ so that its area in hertz is 1
+  <Cite id="slaney1998" />. For white noise every band then has the same energy, and the band energies approximate a
+  power spectral density on the mel axis.
+
+The choice rescales each band by a constant. After a logarithm it becomes an additive offset per band, which
+downstream normalisation often removes, but the two do not produce identical features.
+
+## Worked example
+
+Take $M = 10$ filters from 0 to 8000 Hz. The top edge is $m(8000) = 2595\log_{10}(1 + 8000/700) = 2840.0$ mel, so the
+12 edges are spaced $2840.0/11 = 258.2$ mel apart. Converting back to hertz, the edges are 0, 180, 407, 692, 1050,
+1501, 2067, 2780, 3676, 4802, 6219 and 8000 Hz. Filter 1 spans 0 to 407 Hz, centred at 180 Hz. Filter 10 spans 4802 to
+8000 Hz, centred at 6219 Hz, and is almost 8 times wider.
+
+<MelBank />
+
+## Pitfalls
+
+- **Empty filters.** With many filters and a short FFT, the lowest triangles can be narrower than the bin spacing
+  $f_s/N_{\mathrm{FFT}}$ and catch no bins at all. Their energies are then zero and their logarithm undefined. Use a
+  longer FFT, fewer filters or a higher $f_{\min}$.
+- **Mel formula and normalisation vary between libraries.** Fix both, and check against a reference implementation,
+  before comparing features across tools.
+- **Power or magnitude.** Filter banks are usually applied to the power spectrum $\abs{X}^2$; some pipelines apply
+  them to the magnitude. The resulting log energies differ by a factor of 2 and a band-dependent offset.

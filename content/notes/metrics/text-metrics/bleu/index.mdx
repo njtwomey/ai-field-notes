@@ -1,0 +1,106 @@
+---
+title: BLEU
+kind: concept
+summary: 'BLEU scores a candidate text against references as $\mathrm{BP} \cdot \exp\paren{\tfrac14\sum_{n=1}^4 \log p_n}$: the geometric mean of clipped n-gram precisions for $n = 1$ to $4$, times a brevity penalty. It is a corpus-level machine-translation metric.'
+tags: [metrics, nlp, machine-translation, worked-example]
+aliases: [BLEU score, bilingual evaluation understudy, SacreBLEU, modified n-gram precision, brevity penalty, sentence BLEU]
+related: [chrf, rouge, translation-edit-rate, bertscore, precision-recall-and-f-score]
+references: [papineni2002, post2018, chen2014, detlefsen2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { TextPairExplorer } from '../_shared/TextPairExplorer'
+
+<Definition>
+For a corpus of candidate translations, each with one or more references, BLEU is
+
+$$
+\mathrm{BLEU} = \mathrm{BP} \cdot \exp\paren{\sum_{n=1}^{N} w_n \log p_n}, \qquad
+\mathrm{BP} = \begin{cases} 1 & c > r, \\ e^{1 - r/c} & c \le r, \end{cases}
+$$
+
+where $p_n$ is the clipped n-gram precision pooled over the corpus, $c$ is the total candidate length, $r$ is the
+total effective reference length, and the standard weights are $w_n = 1/4$ for $n = 1, \dots, 4$
+<Cite id="papineni2002" />. It lies in $[0, 1]$, often reported times 100, and higher is better.
+</Definition>
+
+## Clipped n-gram precision
+
+Plain n-gram precision, the fraction of candidate n-grams that appear in a reference, rewards repetition. The
+candidate "the the the the the the the" against the reference "the cat is on the mat" has unigram precision
+$7/7$. BLEU clips each candidate n-gram's count at the largest number of times it occurs in any single reference:
+
+$$
+p_n = \frac{\sum_{\text{candidates}} \sum_{g \in \text{n-grams}} \min\paren{\mathrm{count}(g),\ \max_{\text{refs}} \mathrm{count}_{\text{ref}}(g)}}
+{\sum_{\text{candidates}} \sum_{g \in \text{n-grams}} \mathrm{count}(g)}.
+$$
+
+With the two references "the cat is on the mat" and "there is a cat on the mat", "the" occurs at most twice in one
+reference, so the degenerate candidate scores $p_1 = 2/7$ <Cite id="papineni2002" />.
+
+The counts are summed over the whole corpus before dividing. BLEU is not the average of sentence scores.
+
+## Why a geometric mean and a brevity penalty
+
+Unigram precision measures whether the right words appear; higher orders measure fluency and word order. The
+geometric mean is the exponential of the average log precision, so a system must do reasonably at every order: a low
+$p_4$ cannot be offset by a high $p_1$ as it could in an arithmetic mean.
+
+Precision alone rewards short candidates. A candidate of three correct words has perfect precision whatever it omits.
+Recall is awkward with several references, since a good translation should not have to contain every word of every
+reference, so BLEU uses a length penalty instead. With $c$ the candidate length and $r$ the effective reference length
+(for each sentence, the reference length closest to the candidate's), the penalty is $e^{1 - r/c}$ when $c \le r$ and 1
+otherwise. Its logarithm is $1 - r/c$, which is 0 at $c = r$ and falls steeply as the candidate shrinks. Longer
+candidates are not penalised directly; they already lose precision through their extra, unmatched n-grams.
+
+## Worked example
+
+Reference "the cat is on the mat", candidate "the cat sat on the mat", one sentence.
+
+| order $n$ | candidate n-grams | clipped matches | $p_n$ |
+| --- | --- | --- | --- |
+| 1 | 6 | 5 | $5/6$ |
+| 2 | 5 | 3 (the cat, on the, the mat) | $3/5$ |
+| 3 | 4 | 1 (on the mat) | $1/4$ |
+| 4 | 3 | 0 | 0 |
+
+Both sentences have 6 words, so $\mathrm{BP} = 1$. Because $p_4 = 0$, $\log p_4 = -\infty$ and the sentence-level
+BLEU is **0**, although five of six words are right.
+
+Add a second sentence pair, "there is a dog in the garden" against "there is a dog in the yard". Pooled over both
+sentences the precisions are $11/13$, $8/11$, $5/9$ and $3/7$, and the corpus BLEU is $0.619$. A zero on one
+sentence does not zero the corpus, because the counts are pooled before the logarithm.
+
+Shortening the first candidate to "the cat is on" gives $p_1 = \dots = p_4 = 1$ but $\mathrm{BP} = e^{1 - 6/4} =
+0.607$, so BLEU is $0.607$.
+
+<TextPairExplorer focus="bleu" />
+
+## Sentence-level BLEU and smoothing
+
+BLEU was designed for corpora. On one sentence, any order without a match makes the score zero, and short sentences
+have few higher-order n-grams to match. Smoothing adds a small amount to the counts. Adding one to the matched and
+total counts for $n \ge 2$, one of the methods compared by Chen and Cherry, turns the example above into
+$p = (5/6, 4/6, 2/5, 1/4)$ and a sentence BLEU of $0.485$ <Cite id="chen2014" />. Smoothed sentence BLEU is useful as a
+per-example signal, for instance as a reward, but it is a different number from corpus BLEU and should be labelled so.
+
+## Reporting BLEU
+
+BLEU depends on tokenisation, lowercasing, the number of references and the n-gram weights. Scores computed with
+different preprocessing differ by more than many reported improvements. SacreBLEU fixes the tokenisation and reports a
+signature string that records every setting, so that scores can be compared across papers <Cite id="post2018" />.
+Libraries such as TorchMetrics expose both the original computation and the SacreBLEU one
+<Cite id="detlefsen2022" />.
+
+## Pitfalls
+
+- **It is a precision metric with a length patch.** BLEU never checks that the content of the reference is covered,
+  only that the candidate's n-grams appear and that it is long enough.
+- **No credit for synonyms or morphology.** "sat" and "sits" count as a miss. Character-level metrics such as
+  <NoteLink to="chrf">chrF</NoteLink> and embedding-based ones such as <NoteLink to="bertscore">BERTScore</NoteLink>
+  address this.
+- **Sentence-level scores are noisy.** Differences of a point or two on small test sets are often not significant;
+  bootstrap resampling of the test set gives a confidence interval.
+- **Scores are not comparable across preprocessing.** Report the SacreBLEU signature, or at least the tokenisation and
+  casing.

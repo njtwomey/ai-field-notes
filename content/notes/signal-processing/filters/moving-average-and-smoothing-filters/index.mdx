@@ -1,0 +1,82 @@
+---
+title: Moving-average and smoothing filters
+kind: technique
+summary: 'The $L$-point moving average has response $\frac{1}{L}\frac{\sin(L\omega/2)}{\sin(\omega/2)}e^{-i\omega(L-1)/2}$: simple and optimal for white-noise reduction in time, but a poor low-pass filter. Savitzky–Golay filters fit a local polynomial by least squares and preserve peaks better.'
+tags: [signal-processing, filters, worked-example]
+aliases: [moving average filter, boxcar filter, running mean, rolling mean, Savitzky-Golay filter, polynomial smoothing, local polynomial regression, CIC filter]
+requires: [fir-filters, frequency-response]
+related: [median-filter, zero-phase-filtering, iir-filters, linear-regression]
+references: [savitzky1964, smith2007filters]
+status: draft
+updated: 2026-09-26
+---
+
+import { SmoothingCompare } from './SmoothingCompare'
+
+<Definition>
+The $L$-point moving average replaces each sample by the mean of the $L$ most recent inputs,
+$y[n] = \frac{1}{L}\sum_{k=0}^{L-1} x[n - k]$. A Savitzky–Golay filter instead fits a polynomial of degree $d$ by least
+squares to the $2m + 1$ samples around each point and outputs the fitted value at the centre, which is again a fixed
+linear combination of the samples <Cite id="savitzky1964" />.
+</Definition>
+
+## The moving average's frequency response
+
+Summing the geometric series,
+
+$$
+H(e^{i\omega}) = \frac{1}{L}\sum_{k=0}^{L-1} e^{-i\omega k} = \frac{1}{L}\,\frac{1 - e^{-i\omega L}}{1 - e^{-i\omega}}
+= e^{-i\omega(L-1)/2}\;\frac{\sin(L\omega/2)}{L\sin(\omega/2)} .
+$$
+
+The factor in front is a delay of $(L - 1)/2$ samples; the rest is the Dirichlet kernel. It has zeros at
+$\omega = 2\pi k/L$ for $k = 1, \dots, L - 1$, so it removes exactly the sinusoids that complete a whole number of
+cycles in the window. Between the zeros its sidelobes decay only as $1/\omega$: the first is about $-13$ dB for any
+reasonable $L$. As a low-pass filter it is poor, letting through a good deal of high-frequency energy.
+
+It is nevertheless optimal at something: among filters with unit DC gain and $L$ taps, the equal-weight average gives
+the smallest output variance for white noise, $\sigma^2/L$, because $\sum_k h_k^2$ is minimised subject to
+$\sum_k h_k = 1$ by equal weights. It is the best filter for reducing random noise while keeping a step response as
+sharp as possible, not for separating frequency bands.
+
+A running sum computes it in constant time per sample: $y[n] = y[n - 1] + (x[n] - x[n - L])/L$. Cascaded running sums
+are the basis of cascaded integrator–comb (CIC) decimators.
+
+## Savitzky–Golay: local polynomial fitting
+
+Fitting $p(t) = \sum_{j=0}^{d} c_j t^j$ to samples $x[n + t]$, $t = -m, \dots, m$, is linear least squares with the
+design matrix $V_{tj} = t^j$. The fitted value at the centre is $c_0 = \evec_0^\top(V^\top V)^{-1}V^\top\xvec$, where
+$\xvec$ collects the window's samples. The vector $\hvec^\top = \evec_0^\top(V^\top V)^{-1}V^\top$ does not depend on
+the data, so smoothing by local polynomial fitting is convolution with fixed coefficients $\hvec$.
+
+The fit reproduces any polynomial of degree up to $d$ exactly, so the filter preserves the first $d$ moments of a peak:
+its area, position and width are distorted far less than by a moving average, which is the degree-0 case. The price is
+less noise reduction for the same window, and a response with weaker stopband attenuation. Derivatives come from the
+same fit: $c_j\, j!$ estimates the $j$-th derivative at the centre.
+
+<SmoothingCompare />
+
+## Worked example
+
+For a 5-point window and degree 2, the least-squares solution gives the classic coefficients
+
+$$
+\hvec = \tfrac{1}{35}\paren{-3, 12, 17, 12, -3},
+$$
+
+identical to SciPy's `savgol_coeffs(5, 2)`. They sum to 1, so constants pass unchanged, and they are symmetric, so
+straight lines pass unchanged too; the negative outer weights are what let a parabola through. For 15 points, the
+white-noise variance gain $\sum h_k^2$ is $1/15 = 0.067$ for the moving average and 0.151 for Savitzky–Golay of degree
+2: the moving average removes more noise, Savitzky–Golay keeps more of the signal's shape. The first sidelobe of a
+21-point moving average is $-13.2$ dB.
+
+## Pitfalls
+
+- **The moving average delays.** A causal $L$-point average lags by $(L - 1)/2$ samples; centre the window, or
+  compensate, when timing matters.
+- **Choosing the window.** A window wider than the narrowest feature will distort it; for Savitzky–Golay, keep $2m + 1$
+  comparable to the feature width and raise the degree to preserve sharper shapes.
+- **Edges.** Near the ends there are not enough samples; SciPy's `savgol_filter` fits the polynomial to the edge
+  window by default, rather than padding with zeros.
+- **Exponential smoothing is different.** The exponential moving average is a one-pole IIR filter, with a smoother
+  frequency response but an infinitely long, asymmetric memory; see <NoteLink to="iir-filters">IIR filters</NoteLink>.

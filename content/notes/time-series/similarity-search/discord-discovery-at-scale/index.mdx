@@ -1,0 +1,122 @@
+---
+title: Discord discovery at scale
+kind: concept
+summary: 'A time series discord is the subsequence farthest from its nearest neighbour, a parameter-light anomaly. MERLIN finds discords of every length in a range. DAMP finds left discords, unlike anything earlier, in trillion-point series and fast streams by pruning most comparisons.'
+tags: [time-series, anomaly-detection, similarity-search, worked-example]
+aliases: [MERLIN, DAMP, left discord, discord aware matrix profile, twin freak, anomaly benchmarks]
+requires: [matrix-profile, streaming-and-incremental-matrix-profile]
+partOf: [matrix-profile-family]
+related: [motif-discovery-variants, change-point-detection]
+references: [yeh2016, nakamura2020, lu2022, wu2021]
+status: draft
+updated: 2026-09-27
+---
+
+import { LeftDiscordFigure } from './LeftDiscordFigure'
+
+<Definition>
+A time series discord of length $m$ is the subsequence $T_i$ whose z-normalised distance to its nearest
+non-overlapping neighbour is largest: $\argmax_i P_i$, where $P$ is the matrix profile <Cite id="yeh2016" />. A
+left discord uses the left matrix profile $P^L_i$, the distance to the nearest earlier subsequence, and so asks
+whether $T_i$ is unlike everything before it. MERLIN finds discords of every length in a range
+<Cite id="nakamura2020" />. DAMP (Discord Aware Matrix Profile) finds left discords while computing only a small part
+of the left matrix profile <Cite id="lu2022" />.
+</Definition>
+
+## Intuition
+
+A discord is an anomaly defined by the data alone. No model of normal behaviour is fitted and no labels are needed.
+If every other stretch of a series has a close match somewhere and one stretch does not, that stretch is the
+discord. Two parameters remain: the length $m$, and the reference against which "somewhere" is judged.
+
+The reference matters when an anomaly repeats. Two identical abnormal beats in an electrocardiogram are each other's
+nearest neighbour, so both have small matrix profile values, and neither is the discord. This is the twin freak
+problem. The left matrix profile avoids it for the first occurrence: when the first abnormal beat appears, no earlier
+subsequence matches it. The second occurrence matches the first and is, correctly, no longer new.
+
+<LeftDiscordFigure />
+
+## Details
+
+### Discords of every length: MERLIN
+
+The best discord length is rarely known, and a discord at one length need not be one at another. MERLIN returns the
+top discord for every length in a range $[m_{\min}, m_{\max}]$ <Cite id="nakamura2020" />. It builds on a two-phase
+search that takes a distance threshold $r$:
+
+1. **Candidate selection.** Scan the series once. Keep $T_i$ as a candidate unless it has a match closer than $r$
+   among the subsequences already scanned. When a new subsequence matches a kept candidate within $r$, remove that
+   candidate too.
+2. **Refinement.** Scan again and compute each surviving candidate's exact nearest-neighbour distance, removing any
+   candidate that turns out to have a match within $r$. The survivors are exactly the subsequences whose
+   nearest-neighbour distance exceeds $r$, and the largest of them is the discord.
+
+If $r$ is below the discord distance, the search is correct but keeps many candidates and is slow. If $r$ is above
+it, no candidate survives and the search must be repeated with a smaller $r$. MERLIN chooses $r$ at each length from
+the discord distances already found at nearby lengths, which are close to the new one, and lowers it when a search
+returns nothing. The only inputs are the length range.
+
+### Trillion-scale left discords: DAMP
+
+DAMP processes subsequences in time order after a training prefix and keeps the best-so-far discord score
+$b$, the largest left-profile value found so far <Cite id="lu2022" />. For each new subsequence $T_i$, only one
+question matters: is $P^L_i > b$? That is cheaper to answer than computing $P^L_i$.
+
+- **Backward processing.** Compute the distance profile of $T_i$ against the chunk of the past immediately before
+  it, of length a small multiple of $m$, with MASS. If some distance in that chunk is below $b$, then
+  $P^L_i < b$, and $T_i$ cannot be the top discord. Stop. Otherwise double the chunk length and search further back.
+  If the search reaches the start of the series, the minimum found is the exact $P^L_i$, which then becomes the new
+  $b$ if it is larger.
+- **Forward pruning.** Compute the distance profile of $T_i$ against a chunk of the future. Any future subsequence
+  $T_j$ with $d(i, j) < b$ has an earlier match closer than $b$, namely $T_i$, so $P^L_j < b$ and $T_j$ can be skipped
+  when its turn comes.
+
+Most subsequences in real data resemble their recent past, so the backward search usually stops in the first chunk,
+and forward pruning skips many subsequences entirely. The cost per point is then close to constant, and DAMP scales to
+trillions of points and to streams arriving faster than a full matrix profile could be updated <Cite id="lu2022" />.
+The output is an approximate left matrix profile, exact for every subsequence that could be the top discord.
+
+### Benchmarks
+
+Wu and Keogh examined the benchmark datasets most used to evaluate time series anomaly detectors and found four
+flaws <Cite id="wu2021" />.
+
+- **Triviality.** Many benchmark anomalies can be found with one line of code, such as a threshold on the absolute
+  first difference. Success on them says little about a sophisticated method.
+- **Unrealistic anomaly density.** Some datasets label a large share of points, or many contiguous regions, as
+  anomalous, which blurs the distinction between anomaly detection and classification.
+- **Mislabelled ground truth.** Some labels mark normal data as anomalous, or miss clear anomalies.
+- **Run-to-failure bias.** In many datasets the anomalies sit near the end of the series, so a detector that favours
+  late positions scores well.
+
+They proposed a new archive of datasets, each with one anomaly, designed to avoid these flaws <Cite id="wu2021" />.
+Discord methods such as DAMP are evaluated on it <Cite id="lu2022" />.
+
+## Worked example
+
+In the figure's default series, 480 points of heartbeat-like beats contain the same abnormal beat at positions 204
+and 407 (counting from 0), with $m = 40$ and a training prefix of 120 samples.
+
+- The full matrix profile at the two abnormal beats is 1.373 and 1.374: each is the other's nearest neighbour. Its
+  maximum, 4.326, lies at position 339, a normal beat distorted by noise and length jitter.
+- The left matrix profile at the first abnormal beat is 6.487, because no earlier subsequence resembles it. Its
+  maximum, 6.656, lies at position 219, a window overlapping the same beat. At the second abnormal beat the left
+  profile is 1.374, since the first one is now an earlier match.
+
+The full matrix profile misses the twin anomaly; the left matrix profile finds its first occurrence.
+
+## Assumptions
+
+- **Anomalies are unusual shapes.** Discords compare z-normalised shapes. An anomaly that is only a change of level or
+  scale is invisible to them.
+- **Enough normal history.** The left matrix profile needs a training prefix long enough to contain the normal
+  behaviour. Before that, every new pattern looks novel.
+
+## Pitfalls
+
+- **Repeated anomalies.** The full matrix profile misses anomalies that occur twice; the left matrix profile flags
+  only the first occurrence. Counting anomalies needs another method.
+- **Noise as discord.** In a series with no true anomaly, the top discord is the noisiest stretch. The discord score
+  must be compared with the distribution of the profile, not read as a probability.
+- **Benchmark claims.** A detector's reported advantage on a flawed benchmark may not survive on data without trivial
+  or mislabelled anomalies <Cite id="wu2021" />.

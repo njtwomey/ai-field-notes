@@ -1,0 +1,77 @@
+---
+title: Discrete wavelet transform
+kind: concept
+summary: 'The discrete wavelet transform samples wavelet scales at powers of two and computes the coefficients with Mallat''s pyramid: at each level, split the approximation with a lowpass and a highpass filter and downsample by two. For orthogonal wavelets it is orthogonal and $O(N)$.'
+tags: [signal-processing, wavelets, filter-banks, worked-example]
+aliases: [DWT, fast wavelet transform, Mallat algorithm, pyramid algorithm, dyadic wavelet transform, wavelet decomposition, Haar transform]
+requires: [perfect-reconstruction-filter-banks, continuous-wavelet-transform]
+related: [multiresolution-analysis, wavelet-families, wavelet-packets, wavelet-denoising, filter-banks]
+references: [mallat1989, mallat2009, daubechies1992]
+status: draft
+updated: 2026-09-26
+---
+
+<Definition>
+The **discrete wavelet transform** represents a signal in an orthonormal basis of wavelets
+$\psi_{j,k}(t) = 2^{-j/2}\, \psi(2^{-j} t - k)$ on the dyadic grid of scales $2^j$ and positions $k 2^j$. For sampled
+signals it is computed by **Mallat's algorithm**: at each level, filter the current approximation $a_j$ with a lowpass
+filter $h$ and a highpass filter $g$, and downsample both by two <Cite id="mallat1989" />:
+
+$$
+a_{j+1}[k] = \sum_n h[n - 2k]\, a_j[n], \qquad d_{j+1}[k] = \sum_n g[n - 2k]\, a_j[n],
+$$
+
+with $a_0 = x$ and $g[n] = (-1)^n h[L - 1 - n]$ for a filter of length $L$.
+</Definition>
+
+## The pyramid
+
+Level 1 splits the signal into an approximation $a_1$ and details $d_1$, each half as long. Level 2 splits $a_1$
+again, and so on. After $J$ levels the transform is $\set{d_1, d_2, \dots, d_J, a_J}$, with $N/2 + N/4 + \dots +
+N/2^J + N/2^J = N$ coefficients in total, the same number as the signal. The details $d_j$ hold the content in the
+octave $\pi/2^{j} < \abs{\omega} < \pi/2^{j-1}$ of the original rate; $a_J$ holds everything below $\pi / 2^J$.
+
+Each level is one stage of a two-channel <NoteLink to="perfect-reconstruction-filter-banks">perfect-reconstruction
+filter bank</NoteLink>, applied to the lowpass branch only. When $h$ and $g$ form an orthogonal pair, each stage is an
+orthogonal transform, and so is the whole pyramid: energy is preserved,
+$\sum_n x[n]^2 = \sum_j \sum_k d_j[k]^2 + \sum_k a_J[k]^2$, and the inverse runs the stages backwards with the same
+filters, upsampling and summing.
+
+## Cost
+
+Level $j$ processes a signal of length $N / 2^{j-1}$ with two filters of $L$ taps and keeps half the outputs, costing
+about $L N / 2^{j-1}$ multiplications. Summing the geometric series over all levels gives less than $2 L N$: the
+whole transform is $O(N)$, cheaper than an FFT's $O(N \log N)$.
+
+## Worked example
+
+The Haar filters are $h = (1, 1)/\sqrt2$ and $g = (1, -1)/\sqrt2$: each level replaces pairs of samples by their
+scaled sum and difference. For $x = (4, 6, 10, 12, 8, 6, 5, 5)$:
+
+- Level 1: $a_1 = (10, 22, 14, 10)/\sqrt2 \approx (7.071, 15.556, 9.899, 7.071)$ and
+  $d_1 = (-2, -2, 2, 0)/\sqrt2 \approx (-1.414, -1.414, 1.414, 0)$.
+- Level 2, from $a_1$: $a_2 = (32, 24)/2 = (16, 12)$ and $d_2 = (-12, 4)/2 = (-6, 2)$.
+- Level 3, from $a_2$: $a_3 = 28/\sqrt2 \approx 19.799$ and $d_3 = 4/\sqrt2 \approx 2.828$.
+
+The energy of the signal is $16 + 36 + 100 + 144 + 64 + 36 + 25 + 25 = 446$. The coefficients give
+$392 + 8 + 36 + 4 + 2 + 2 + 2 + 0 = 446$, as orthogonality requires. Most of the energy sits in the single coarse
+coefficient $a_3$, which is $\sqrt8$ times the mean; the details are small where the signal is locally smooth. This
+concentration is what makes wavelet transforms useful for compression and denoising.
+
+## Uses
+
+- **Compression.** Piecewise-smooth signals and images have few large wavelet coefficients; JPEG 2000 codes a
+  biorthogonal wavelet transform.
+- **Denoising.** Thresholding the details removes noise while keeping edges. See
+  <NoteLink to="wavelet-denoising">wavelet denoising</NoteLink>.
+- **Features.** Energies of the detail bands summarise a signal's content by octave.
+
+## Pitfalls
+
+- **Boundaries.** Filtering a finite signal needs an extension at its ends. Periodic extension keeps the transform
+  orthogonal but creates a jump where the ends meet; symmetric extension avoids the jump but needs symmetric,
+  biorthogonal filters to stay invertible.
+- **Shift variance.** Downsampling makes the coefficients depend on the alignment of the signal with the dyadic grid;
+  shifting the input by one sample can change the coefficients completely. The undecimated (stationary) wavelet
+  transform removes the downsampling and is shift invariant, at the cost of redundancy.
+- **Length.** A $J$-level transform needs a length divisible by $2^J$, or padding.

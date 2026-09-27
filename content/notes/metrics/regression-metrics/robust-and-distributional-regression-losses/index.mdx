@@ -1,0 +1,99 @@
+---
+title: Log-cosh, squared log error and Tweedie deviance
+kind: concept
+summary: 'Three regression scores beyond squared and absolute error: log-cosh behaves like squared error for small misses and absolute error for large ones; squared log error scores relative misses; Tweedie deviance matches errors to targets whose variance grows as $\mu^p$.'
+tags: [metrics, regression, loss-functions, robust-statistics, worked-example]
+aliases: [log-cosh loss, MSLE, mean squared log error, RMSLE, Tweedie deviance, Poisson deviance, gamma deviance, pinball loss, quantile loss, Huber loss]
+requires: [mse-rmse-and-mae]
+related: [exponential-family, poisson-distribution, gamma-distribution, crps-and-interval-scores, percentage-errors]
+references: [jorgensen1987, pedregosa2011, hastie2009]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+With errors $e_i = y_i - \hat y_i$:
+
+- **Log-cosh** is $\frac1n\sum_i \log\cosh e_i$.
+- **Mean squared log error** is $\frac1n\sum_i \paren{\log(1 + y_i) - \log(1 + \hat y_i)}^2$, for $y_i, \hat y_i \ge 0$.
+- **Tweedie deviance** with power $p$ is $\frac1n\sum_i d_p(y_i, \hat y_i)$, where for $p \notin \set{0, 1, 2}$
+
+$$
+d_p(y, \mu) = 2\paren{\frac{y^{2-p}}{(1-p)(2-p)} - \frac{y\,\mu^{1-p}}{1-p} + \frac{\mu^{2-p}}{2-p}},
+$$
+
+and the limits give squared error at $p = 0$, the Poisson deviance $2\paren{y \log(y/\mu) - y + \mu}$ at $p = 1$, and
+the gamma deviance $2\paren{\log(\mu/y) + y/\mu - 1}$ at $p = 2$ <Cite id="jorgensen1987" />.
+</Definition>
+
+## Log-cosh: smooth and robust
+
+For small errors, $\cosh e = 1 + e^2/2 + O(e^4)$, so $\log\cosh e \approx e^2/2$: half the squared error. For large
+errors, $\cosh e \approx e^{\abs e}/2$, so $\log\cosh e \approx \abs e - \log 2$: absolute error minus a constant. At
+$e = 0.1$ the loss is 0.00499 against $e^2/2 = 0.00500$; at $e = 5$ it is 4.30690 against $5 - \log 2 = 4.30685$.
+
+Its derivative, $\tanh e$, is bounded by 1. A single large error therefore pulls a fitted model no harder than a
+moderate one, as with absolute error, while the loss stays twice differentiable everywhere. That makes it a smooth
+alternative to the Huber loss, which is quadratic up to a threshold $\delta$ and linear beyond it.
+
+## Squared log error: relative misses
+
+Taking logs turns ratios into differences: $\log(1 + y) - \log(1 + \hat y) = \log\frac{1 + y}{1 + \hat y}$. So MSLE
+scores the ratio of prediction to truth, not the difference. Predicting 110 for 100 and predicting 1.1 for 1 cost about
+the same. The $+1$ keeps zeros finite and makes the score close to squared error for small targets.
+
+The score is asymmetric in absolute terms. Under-predicting by 50 (predicting 50 for 100) gives a log ratio of 0.68;
+over-predicting by 50 (predicting 150) gives 0.40. So MSLE penalises under-prediction more than over-prediction of the
+same absolute size. Minimising MSLE targets the geometric mean of $1 + Y$, below the arithmetic mean.
+
+## Tweedie deviance: matching the variance
+
+Many targets have variance that grows with their mean: counts, claim amounts, rainfall. The Tweedie family of
+exponential dispersion models has variance $\var(Y) = \phi\,\mu^p$ <Cite id="jorgensen1987" />. The deviance $d_p$ is
+twice the gap in log-likelihood between a model that fits $y$ exactly and one with mean $\mu$.
+
+**The mean is the best prediction for every $p$.** Differentiating,
+
+$$
+\frac{\partial d_p(y, \mu)}{\partial \mu} = 2\paren{\mu^{1-p} - y\,\mu^{-p}} = -\frac{2\,(y - \mu)}{\mu^p}.
+$$
+
+The expected derivative is $-2\,(\expect[Y] - \mu)/\mu^p$, which is zero at $\mu = \expect[Y]$ whatever the power.
+Changing $p$ does not change which prediction is optimal; it changes how errors at different scales are weighted. A
+miss of fixed size counts less where $\mu$ is large, by the factor $1/\mu^p$, matching the larger variance there. With
+$p = 0$ every miss counts the same; with $p = 2$ only relative misses matter. Values $1 < p < 2$ describe compound
+Poisson–gamma data with exact zeros, such as insurance claims.
+
+## Worked example
+
+With $y = (1, 2, 4, 8)$ and $\hat y = (1.5, 2, 3, 10)$, verified with scikit-learn <Cite id="pedregosa2011" />:
+
+| Score | Value |
+| --- | --- |
+| Mean Tweedie deviance, $p = 0$ (squared error) | 1.3125 |
+| Mean Tweedie deviance, $p = 1$ (Poisson) | 0.2301 |
+| Mean Tweedie deviance, $p = 1.5$ | 0.1179 |
+| Mean Tweedie deviance, $p = 2$ (gamma) | 0.0705 |
+| Mean squared log error | 0.0350 |
+| Log-cosh | 0.4697 |
+
+The miss of 2 at $y = 8$ contributes 4 of the 5.25 total squared error. Under the gamma deviance it contributes the
+least of the three misses, 0.046, because it is only 25% too high; the miss of 0.5 at $y = 1$, which is 50% too high,
+contributes the most, 0.144.
+
+## Quantile loss
+
+The pinball loss at level $\tau$ scores a prediction $q$ by $\tau\,(y - q)$ when $y \ge q$ and $(1 - \tau)(q - y)$ when
+$y < q$. Its expected value is minimised by the $\tau$-quantile of $Y$, by the argument that locates the median for
+absolute error: the derivative is $P(Y < q) - \tau$. With $\tau = 0.5$ it is half the absolute error. Averaging it over
+many levels gives the <NoteLink to="crps-and-interval-scores">continuous ranked probability score</NoteLink>. For the
+example above at $\tau = 0.9$ it is 0.2875.
+
+## Pitfalls
+
+- **Log error needs non-negative values.** MSLE is undefined for $y$ or $\hat y$ below $-1$, and scikit-learn refuses
+  negative inputs.
+- **Deviance needs a matching support.** The Poisson deviance needs $\mu > 0$; the gamma deviance needs $y > 0$ and
+  $\mu > 0$. Evaluate with the power the target's variance suggests, not the one that makes the model look best.
+- **Robust is not always right.** A bounded-gradient loss down-weights large errors. If large errors are the costly
+  ones, squared error is the honest score.

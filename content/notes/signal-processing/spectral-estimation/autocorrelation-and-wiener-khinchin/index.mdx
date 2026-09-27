@@ -1,0 +1,100 @@
+---
+title: Autocorrelation and the Wiener–Khinchin theorem
+kind: concept
+summary: 'The power spectral density of a wide-sense stationary process is the Fourier transform of its autocovariance, $S(\omega) = \sum_m r[m] e^{-i\omega m}$ (Wiener–Khinchin), and equals the limit of the expected periodogram. The biased sample autocovariance is the one whose transform is non-negative.'
+tags: [signal-processing, spectral-estimation, stochastic-processes, worked-example]
+aliases: [Wiener-Khinchin theorem, Wiener–Khintchine theorem, autocovariance, autocorrelation function, power spectral density, PSD]
+requires: [dtft, variance-and-covariance]
+related: [periodogram, parametric-spectral-estimation, coherence-and-cross-spectra]
+references: [stoica2005]
+status: draft
+updated: 2026-09-26
+---
+
+import { AutocovarianceEstimators } from './AutocovarianceEstimators'
+
+<Definition>
+A process $x[n]$ is wide-sense stationary when its mean $\mu = \expect[x[n]]$ is constant and its autocovariance
+
+$$
+r[m] = \expect\brack{\paren{x[n + m] - \mu}\paren{x[n] - \mu}}
+$$
+
+depends only on the lag $m$. Its power spectral density is $S(\omega) = \sum_{m=-\infty}^{\infty} r[m]\, e^{-i\omega m}$,
+with inverse $r[m] = \frac{1}{2\pi}\int_{-\pi}^{\pi} S(\omega)\, e^{i\omega m}\, d\omega$. The Wiener–Khinchin theorem
+states that this transform is also the limit of the expected periodogram, so $S(\omega)$ is the density of the
+process's power over frequency <Cite id="stoica2005" />.
+</Definition>
+
+## Properties of the autocovariance
+
+- **Even.** $r[-m] = r[m]$, by stationarity: shift the time index by $m$.
+- **Bounded by the variance.** $\abs{r[m]} \le r[0]$, by the Cauchy–Schwarz inequality applied to the two centred
+  samples.
+- **Positive semidefinite.** For any coefficients $c_n$, $\sum_{j,k} c_j c_k\, r[j - k] = \var\brack{\sum_j c_j x[j]}
+  \ge 0$. So every Toeplitz matrix $[r[j - k]]$ is positive semidefinite.
+
+## The theorem
+
+For samples $x[0], \dots, x[N-1]$ of a zero-mean process, the expected periodogram is (see
+<NoteLink to="periodogram">periodogram</NoteLink>)
+
+$$
+\expect\brack{\frac{1}{N}\abs{\sum_{n=0}^{N-1} x[n] e^{-i\omega n}}^2}
+= \sum_{\abs{m} < N}\paren{1 - \frac{\abs{m}}{N}} r[m]\, e^{-i\omega m} .
+$$
+
+If $\sum_m \abs{r[m]} < \infty$, each term tends to $r[m]e^{-i\omega m}$ as $N \to \infty$ and is bounded by
+$\abs{r[m]}$, so by dominated convergence the sum tends to $S(\omega)$. This is the Wiener–Khinchin theorem:
+$S(\omega)$ defined as the transform of $r[m]$ is the same quantity as the long-run average power per unit
+frequency. Two consequences:
+
+- **$S(\omega) \ge 0$.** It is a limit of expectations of squared magnitudes. Equivalently, positive semidefinite
+  sequences are exactly those with non-negative transforms (Herglotz's theorem).
+- **Power adds up.** Setting $m = 0$ in the inverse transform gives
+  $r[0] = \var(x) = \frac{1}{2\pi}\int_{-\pi}^{\pi} S(\omega)\, d\omega$: the variance is the total area under the
+  spectrum.
+
+Sinusoids fit only in the generalised sense. A sinusoid with random phase, $A\cos(\omega_0 n + \phi)$, has
+$r[m] = \tfrac{A^2}{2}\cos(\omega_0 m)$, which is not summable. Its spectrum is a pair of Dirac deltas of area
+$\pi A^2/2$ each at $\pm\omega_0$: a line spectrum.
+
+## Estimating the autocovariance
+
+Two estimators are standard, after subtracting the sample mean:
+
+$$
+\hat r_b[m] = \frac{1}{N}\sum_{n=0}^{N-1-\abs{m}} x[n]\, x[n + \abs{m}], \qquad
+\hat r_u[m] = \frac{1}{N - \abs{m}}\sum_{n=0}^{N-1-\abs{m}} x[n]\, x[n + \abs{m}].
+$$
+
+- **Unbiased** $\hat r_u$ has $\expect[\hat r_u[m]] = r[m]$, apart from the effect of the estimated mean, but at lags
+  near $N$ it averages very few products, and its variance grows without bound.
+- **Biased** $\hat r_b = (1 - \abs{m}/N)\,\hat r_u$ shrinks large lags towards 0. Its bias is small where
+  $\abs{m} \ll N$, its mean squared error is usually lower, and it is positive semidefinite, because its transform is
+  the periodogram, which is never negative. Spectral estimators and Yule–Walker equations therefore use $\hat r_b$.
+
+<AutocovarianceEstimators />
+
+## Worked example
+
+An AR(1) process $x[n] = a\, x[n-1] + e[n]$ with white $e[n]$ of variance $\sigma^2$ has $r[m] = \sigma^2 a^{\abs{m}}/(1 -
+a^2)$: multiply the recursion by $x[n - m]$ and take expectations to get $r[m] = a\, r[m - 1]$ for $m \ge 1$, and use
+$r[0] = a^2 r[0] + \sigma^2$. Its spectrum is
+
+$$
+S(\omega) = \sum_m \frac{\sigma^2 a^{\abs{m}}}{1 - a^2} e^{-i\omega m} = \frac{\sigma^2}{\abs{1 - a e^{-i\omega}}^2},
+$$
+
+summing the two geometric series for $m \ge 0$ and $m < 0$. For $a = 0.8$ and $\sigma^2 = 1$: $r[0] = 2.778$,
+$S(0) = 1/(1 - 0.8)^2 = 25$ and $S(\pi) = 1/(1.8)^2 = 0.309$. Positive $a$ concentrates the power at low frequencies,
+and the integral of $S$ over $[-\pi, \pi)$ divided by $2\pi$ returns $r[0] = 2.778$.
+
+## Pitfalls
+
+- **Correlation or covariance.** Some fields call $r[m]$ the autocorrelation even with the mean removed; signal
+  processing often uses $\expect[x[n+m]x[n]]$ without centring. The difference is a spike at $\omega = 0$.
+- **Normalised autocorrelation.** Dividing by $r[0]$ gives values in $[-1, 1]$ but removes the scale needed for the
+  spectrum.
+- **Non-stationarity.** Trends and changing variance violate the assumptions; a slowly decaying sample autocovariance
+  is often a sign of a trend rather than long memory.

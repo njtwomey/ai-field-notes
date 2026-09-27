@@ -1,0 +1,58 @@
+---
+title: Hausdorff distance
+kind: concept
+summary: 'The Hausdorff distance between two sets is the largest distance from a point of either set to the nearest point of the other. It measures the worst boundary error of a segmentation, which makes it sensitive to single outliers; HD95 uses the 95th percentile instead.'
+tags: [metrics, computer-vision, segmentation, medical-imaging, worked-example]
+aliases: [Hausdorff distance, HD, HD95, 95th percentile Hausdorff distance, directed Hausdorff distance, average surface distance, ASSD]
+related: [dice-and-segmentation-overlap, intersection-over-union]
+references: [huttenlocher1993]
+status: draft
+updated: 2026-09-27
+---
+
+import { OutlierSensitivity } from './OutlierSensitivity'
+
+<Definition>
+For finite sets $X$ and $Y$ of points, the directed Hausdorff distance and the Hausdorff distance are
+<Cite id="huttenlocher1993" />
+
+$$
+h(X, Y) = \max_{\xvec \in X} \min_{\yvec \in Y} \norm{\xvec - \yvec}, \qquad
+H(X, Y) = \max\set{h(X, Y),\, h(Y, X)} .
+$$
+</Definition>
+
+## Reading the definition
+
+$h(X, Y)$ finds, for each point of $X$, the nearest point of $Y$, and reports the worst of those distances. It is not
+symmetric: every point of $X$ can be close to $Y$ while some point of $Y$ is far from $X$. Taking the larger of the two
+directions gives a symmetric quantity. $H$ is a metric on non-empty compact sets, and $H(X, Y) \le \varepsilon$ says
+exactly that each set lies within distance $\varepsilon$ of the other.
+
+For segmentation, $X$ and $Y$ are the boundary pixels of the predicted and true regions. $H$ is then the largest
+boundary error anywhere, the complement of volume-overlap measures such as
+<NoteLink to="dice-and-segmentation-overlap">Dice</NoteLink>, which barely notice a thin error far from the object.
+
+**Worked example.** $X = \set{(0,0), (1,0), (2,0)}$ and $Y = \set{(0,1), (1,1), (2,1), (5,1)}$. Every point of $X$ is 1
+from $Y$, so $h(X, Y) = 1$. The point $(5, 1)$ is $\sqrt{10} = 3.162$ from its nearest point $(2, 0)$ of $X$, so
+$h(Y, X) = 3.162$ and $H = 3.162$: the single stray point decides the value.
+
+## Robust versions
+
+Because $H$ is a maximum, one mislabelled pixel can dominate it. Two variants use the whole distribution of boundary
+distances instead:
+
+- **HD95** replaces the maximum over both directions by the 95th percentile of all boundary-to-boundary distances.
+  It is standard in medical image segmentation challenges.
+- **Average symmetric surface distance** (ASSD) averages all the distances from each boundary to the other.
+
+<OutlierSensitivity />
+
+## Pitfalls
+
+- **Units.** Report distances in physical units (millimetres), using the voxel spacing, not in voxels; anisotropic
+  voxels distort distances otherwise.
+- **Empty predictions.** $H$ is undefined when one set is empty. Challenges substitute a fixed large value, which then
+  dominates averages.
+- **Percentile definitions differ.** Some implementations take the 95th percentile of each direction and then the
+  maximum, others pool both directions first. State which.

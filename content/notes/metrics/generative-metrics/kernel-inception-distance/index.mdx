@@ -1,0 +1,58 @@
+---
+title: Kernel inception distance
+kind: concept
+summary: 'KID is the squared maximum mean discrepancy between network features of real and generated images, with the kernel $k(\xvec, \yvec) = (\xvec^\top\yvec/d + 1)^3$. Unlike FID it has an unbiased estimator and makes no Gaussian assumption.'
+tags: [metrics, generative-models, deep-learning, kernel-methods, worked-example]
+aliases: [KID, kernel inception distance, MMD, maximum mean discrepancy]
+related: [frechet-inception-distance, inception-score, kernel-trick]
+references: [binkowski2018, gretton2012]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For real features $\xvec_1, \dots, \xvec_m$ and generated features $\yvec_1, \dots, \yvec_n$ in $\reals^d$, with kernel
+$k(\xvec, \yvec) = (\xvec^\top\yvec/d + 1)^3$, the kernel inception distance is the unbiased estimate of the squared
+maximum mean discrepancy <Cite id="binkowski2018" />:
+
+$$
+\widehat{\text{KID}} = \frac{1}{m(m-1)}\sum_{i \ne j} k(\xvec_i, \xvec_j) + \frac{1}{n(n-1)}\sum_{i \ne j} k(\yvec_i, \yvec_j)
+- \frac{2}{mn}\sum_{i, j} k(\xvec_i, \yvec_j) .
+$$
+</Definition>
+
+## Maximum mean discrepancy
+
+For a kernel $k$ with feature map $\phivec$, the maximum mean discrepancy between distributions $P$ and $Q$ is the
+distance between their mean embeddings, $\text{MMD}^2 = \norm{\expect_P \phivec(\xvec) - \expect_Q \phivec(\yvec)}^2$
+<Cite id="gretton2012" />. Expanding the square with $\phivec(\xvec)^\top\phivec(\yvec) = k(\xvec, \yvec)$ gives
+
+$$
+\text{MMD}^2 = \expect\brack{k(\xvec, \xvec')} + \expect\brack{k(\yvec, \yvec')} - 2\,\expect\brack{k(\xvec, \yvec)},
+$$
+
+with $\xvec, \xvec' \sim P$ and $\yvec, \yvec' \sim Q$ independent. Replacing each expectation by an average over
+distinct pairs gives the estimator in the definition. Leaving out the $i = j$ terms makes it unbiased, because
+$k(\xvec_i, \xvec_i)$ is not an unbiased estimate of $\expect[k(\xvec, \xvec')]$.
+
+The cubic polynomial kernel compares the first three moments of the feature distributions, so KID sees skewness that
+<NoteLink to="frechet-inception-distance">FID</NoteLink>, which uses means and covariances only, does not.
+
+**Worked example.** In one dimension ($d = 1$) with real features $\set{0, 1}$ and generated features $\set{1, 2}$,
+$k(x, y) = (xy + 1)^3$. The within-real term averages $k(0, 1) = 1$; the within-generated term averages $k(1, 2) = 27$;
+the cross terms are $k(0, 1) = 1$, $k(0, 2) = 1$, $k(1, 1) = 8$ and $k(1, 2) = 27$, averaging $9.25$. So
+$\widehat{\text{KID}} = 1 + 27 - 2 \times 9.25 = 9.5$.
+
+## Why unbiasedness matters
+
+FID's estimate shifts with the number of samples, so FID values at different sample sizes are not comparable, and small
+test sets bias it. KID's estimate is correct in expectation at any sample size, so it can be computed on a few thousand
+images and averaged over random subsets, which also gives a standard error. The price is higher variance per estimate.
+
+## Pitfalls
+
+- **Can be negative.** As an unbiased estimate of a non-negative quantity, $\widehat{\text{KID}}$ is sometimes slightly
+  below 0 when the distributions are close. Do not clip it before averaging.
+- **Scale.** KID values are small (often quoted $\times 10^3$) and depend on $d$ and the feature extractor; compare only
+  within one setup.
+- **Cost.** The estimator is quadratic in the number of samples; subsets of about 1,000 are averaged in practice.

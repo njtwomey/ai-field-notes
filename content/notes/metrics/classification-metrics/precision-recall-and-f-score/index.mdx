@@ -1,0 +1,114 @@
+---
+title: Precision, recall and the F-score
+kind: concept
+summary: 'Precision is the fraction of predicted positives that are positive; recall is the fraction of positives found. The $F_\beta$ score is their weighted harmonic mean, $F_1$ weighting them equally. None of the three counts true negatives.'
+tags: [metrics, classification, information-retrieval, worked-example]
+aliases: [precision, recall, F1 score, F-measure, F-beta score, harmonic mean of precision and recall, positive predictive value]
+requires: [confusion-matrix]
+related:
+  [
+    sensitivity-specificity-and-predictive-values,
+    precision-recall-curve-and-average-precision,
+    matthews-correlation-coefficient,
+    averaging-multiclass-metrics,
+    hamming-jaccard-and-exact-match,
+  ]
+references: [vanrijsbergen1979, powers2011, chicco2020, flach2015]
+status: draft
+updated: 2026-09-27
+---
+
+import { ConfusionExplorer } from '../../_shared/ConfusionExplorer'
+
+<Definition>
+For a positive class with $\text{TP}$ true positives, $\text{FP}$ false positives and $\text{FN}$ false negatives,
+
+$$
+\text{precision} = \frac{\text{TP}}{\text{TP} + \text{FP}}, \qquad
+\text{recall} = \frac{\text{TP}}{\text{TP} + \text{FN}}, \qquad
+F_\beta = \frac{(1 + \beta^2)\,\text{precision}\cdot\text{recall}}{\beta^2\,\text{precision} + \text{recall}}.
+$$
+
+$F_1$ is the harmonic mean of precision and recall; $\beta > 1$ weights recall more, $\beta < 1$ precision more
+<Cite id="vanrijsbergen1979" />.
+</Definition>
+
+## Two questions about the positive class
+
+Precision and recall come from information retrieval, where the positives are the relevant documents. Recall asks
+what fraction of the relevant documents were retrieved. Precision asks what fraction of the retrieved documents are
+relevant. Recall conditions on the truth and is the true-positive rate; precision conditions on the prediction and is
+the positive predictive value.
+
+Neither involves the true negatives. In retrieval that is deliberate: the irrelevant documents that were correctly not
+returned are uncountable and uninteresting. In classification it means precision, recall and $F$ are blind to how well
+the negative class is handled, and they change when the labels are swapped.
+
+Precision depends on prevalence and recall does not. With prevalence $\pi$, true-positive rate $\text{TPR}$ and
+false-positive rate $\text{FPR}$,
+
+$$
+\text{precision} = \frac{\pi\,\text{TPR}}{\pi\,\text{TPR} + (1 - \pi)\,\text{FPR}}.
+$$
+
+This is Bayes' theorem: precision is the posterior probability of the positive class given a positive prediction, as in
+<NoteLink to="medical-diagnosis-base-rate">medical diagnosis and the base rate</NoteLink>. At fixed TPR and FPR,
+precision falls as positives become rarer.
+
+## Why the harmonic mean
+
+Combining precision $p$ and recall $r$ into one number, the harmonic mean
+$F_1 = 2pr/(p + r) = \paren{\tfrac12(1/p + 1/r)}^{-1}$ is dominated by the smaller of the two. The arithmetic mean of
+$p = 1$ and $r = 0.01$ is about 0.5; $F_1$ is about 0.02. A classifier cannot score well by being excellent on one and
+useless on the other.
+
+$F_\beta$ comes from van Rijsbergen's effectiveness measure $E = 1 - \paren{\alpha/p + (1 - \alpha)/r}^{-1}$, with
+$\alpha = 1/(1 + \beta^2)$. Writing $F_\beta = 1 - E$ and substituting,
+
+$$
+F_\beta = \frac{1}{\dfrac{1}{1 + \beta^2}\cdot\dfrac1p + \dfrac{\beta^2}{1 + \beta^2}\cdot\dfrac1r}
+= \frac{(1 + \beta^2)\,pr}{\beta^2 p + r}.
+$$
+
+The parameter $\beta$ is the ratio of recall to precision at which the user is indifferent to a small trade between
+them. Substituting the counts gives a form without precision and recall:
+
+$$
+F_\beta = \frac{(1 + \beta^2)\,\text{TP}}{(1 + \beta^2)\,\text{TP} + \beta^2\,\text{FN} + \text{FP}}, \qquad
+F_1 = \frac{2\,\text{TP}}{2\,\text{TP} + \text{FP} + \text{FN}}.
+$$
+
+$F_1$ is also a monotone function of the <NoteLink to="hamming-jaccard-and-exact-match">Jaccard index</NoteLink>
+$J = \text{TP}/(\text{TP} + \text{FP} + \text{FN})$: $F_1 = 2J/(1 + J)$.
+
+## Worked example
+
+On the screening data (TP = 40, FN = 10, FP = 90):
+
+$$
+\text{precision} = \frac{40}{130} = 0.308, \qquad \text{recall} = \frac{40}{50} = 0.800, \qquad
+F_1 = \frac{2 \cdot 40}{80 + 90 + 10} = 0.444.
+$$
+
+$F_2 = 0.606$ weights the high recall more; $F_{0.5} = 0.351$ weights the low precision more. The Jaccard index is
+$40/140 = 0.286$, and $2(0.286)/(1.286) = 0.444$ recovers $F_1$.
+
+<ConfusionExplorer
+  title="Trading precision against recall"
+  caption="Drag the threshold. Moving it right predicts fewer positives: precision rises and recall falls. F₁ peaks in between. Lower the prevalence and precision falls at every threshold while recall is unchanged."
+  metrics={['precision', 'recall', 'f1', 'jaccard']}
+/>
+
+## Pitfalls
+
+- **Precision is undefined with no positive predictions** ($\text{TP} + \text{FP} = 0$), and $F$ follows. Libraries
+  substitute 0 or 1, or warn; the choice changes averages across folds or classes.
+- **$F_1$ ignores true negatives.** Two classifiers with very different false-positive rates can have the same $F_1$
+  when the negative class is large. The <NoteLink to="matthews-correlation-coefficient">Matthews correlation
+  coefficient</NoteLink> uses all four cells <Cite id="chicco2020" />.
+- **The F-score's chance level depends on prevalence.** A classifier that predicts every case positive has recall 1 and
+  precision $\pi$, so $F_1 = 2\pi/(1 + \pi)$. Compare against that baseline, not against 0.
+- **F-scores are not linear in the threshold's consequences.** Averaging $F_1$ across folds or classes, or
+  interpolating it between points on a curve, is not the same as computing it from pooled counts. Flach and Kull's
+  precision-recall-gain framework rescales precision and recall so that such averages behave linearly
+  <Cite id="flach2015" />.

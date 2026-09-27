@@ -1,0 +1,122 @@
+---
+title: Distance profile and MASS
+kind: technique
+summary: 'The distance profile of a query $Q$ of length $m$ holds its z-normalised distance to every length-$m$ subsequence of a series. MASS computes it in $O(n \log n)$: one FFT convolution gives all dot products, and running means and standard deviations turn them into distances.'
+tags: [time-series, similarity-search, worked-example]
+aliases: [distance profile, MASS, Mueen's algorithm for similarity search, sliding dot product]
+requires: [matrix-profile]
+partOf: [matrix-profile-family]
+related: [fft, convolution-theorem, convolution, pearson-correlation]
+references: [mueen-mass, yeh2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { DistanceProfileExplorer } from './DistanceProfileExplorer'
+
+<Definition>
+Let $x_1, \dots, x_n$ be a time series and $Q = (q_0, \dots, q_{m-1})$ a query of length $m \le n$. Write
+$T_i = (x_i, \dots, x_{i+m-1})$ for the subsequence starting at $i$. The distance profile of $Q$ is the vector
+$D_i = d(Q, T_i)$ for $i = 1, \dots, n - m + 1$, where $d$ is the Euclidean distance after z-normalising both
+arguments to mean 0 and standard deviation 1. MASS (Mueen's Algorithm for Similarity Search) computes the whole
+vector in $O(n \log n)$ time with the fast Fourier transform <Cite id="mueen-mass" />.
+</Definition>
+
+## Problem
+
+A distance profile answers "where in this series does the query occur, up to offset and scale?". Its minima are the
+query's matches. When $Q$ is itself a subsequence $T_j$ of the series, the distance profile is row $j$ of the full
+distance matrix, and its minimum outside an exclusion zone around $j$ is the matrix profile entry $P_j$
+<Cite id="yeh2016" />. Computing each of the $n - m + 1$ distances directly costs $O(m)$, so the direct profile costs
+$O(nm)$. For long queries this is slow, and computing the matrix profile row by row multiplies the cost by $n$.
+
+## Mechanism
+
+### Distance from a dot product
+
+For a query with mean $\mu_Q$ and standard deviation $\sigma_Q$, and a subsequence $T_i$ with mean $\mu_i$ and
+standard deviation $\sigma_i$, write the dot product as $QT_i = \sum_{k=0}^{m-1} q_k x_{i+k}$. The z-normalised vectors
+$\hat Q$ and $\hat T_i$ each have squared norm $m$. Their dot product is $m$ times the Pearson correlation
+$\rho_i$:
+
+$$
+\hat Q^\top \hat T_i = \sum_{k=0}^{m-1} \frac{q_k - \mu_Q}{\sigma_Q} \cdot \frac{x_{i+k} - \mu_i}{\sigma_i}
+= \frac{QT_i - m \mu_Q \mu_i}{\sigma_Q \sigma_i} = m \rho_i .
+$$
+
+The middle step expands the product and uses $\sum_k q_k = m \mu_Q$ and $\sum_k x_{i+k} = m \mu_i$. Expanding the
+squared distance then gives the z-normalisation identity
+
+$$
+D_i^2 = \norm{\hat Q - \hat T_i}^2 = m + m - 2 m \rho_i = 2m \paren{1 - \frac{QT_i - m \mu_Q \mu_i}{m \sigma_Q \sigma_i}} .
+$$
+
+The query statistics $\mu_Q, \sigma_Q$ are computed once. The statistics of all $n - m + 1$ subsequences come from
+cumulative sums $S_k = \sum_{t \le k} x_t$ and $S^{(2)}_k = \sum_{t \le k} x_t^2$: $\mu_i = (S_{i+m-1} - S_{i-1})/m$
+and $\sigma_i^2 = (S^{(2)}_{i+m-1} - S^{(2)}_{i-1})/m - \mu_i^2$. That costs $O(n)$. What remains is the vector of
+sliding dot products $QT_i$.
+
+### Sliding dot products by convolution
+
+Reverse the query: $r_k = q_{m-1-k}$ for $k = 0, \dots, m-1$. The full linear convolution of $x$ with $r$ is
+$(x * r)_t = \sum_k r_k x_{t-k}$. At $t = i + m - 1$, substituting $k = m - 1 - s$ gives
+
+$$
+(x * r)_{i+m-1} = \sum_{s=0}^{m-1} q_s \, x_{i+s} = QT_i .
+$$
+
+So the sliding dot products are entries $m$ through $n$ of the convolution, counting from 1. By the
+<NoteLink to="convolution-theorem">convolution theorem</NoteLink>, a linear convolution equals the inverse discrete
+Fourier transform of the product of the two transforms, provided both sequences are zero-padded to a length
+$L \ge n + m - 1$ so that the circular wrap-around does not overlap the result. With the
+<NoteLink to="fft">fast Fourier transform</NoteLink>, each of the two forward transforms and the inverse costs
+$O(L \log L) = O(n \log n)$.
+
+### The algorithm
+
+1. Compute $\mu_i$ and $\sigma_i$ for all $i$ from cumulative sums, in $O(n)$.
+2. Zero-pad $x$ and the reversed query to length $L$, a power of two at least $n + m - 1$.
+3. Multiply their FFTs elementwise and invert. Read $QT_i$ from positions $m$ to $n$.
+4. Return $D_i = \sqrt{2m \paren{1 - (QT_i - m \mu_Q \mu_i)/(m \sigma_Q \sigma_i)}}$.
+
+The cost is $O(n \log n)$ and does not depend on $m$. Later versions of MASS split long series into pieces sized
+for the hardware, and one replaces the FFT with a discrete cosine transform to avoid rounding error from
+frequency-domain aliasing <Cite id="mueen-mass" />.
+
+<DistanceProfileExplorer />
+
+## Worked example
+
+Take $x = (0, 1, 3, 2, 0, 1, 3, 2, 1, 0, 1, 4, 2, 0)$, so $n = 14$, and the query $Q = (1, 3, 2, 0) = T_2$, so
+$m = 4$. The query has $\mu_Q = 1.5$ and $\sigma_Q = 1.118$. Positions count from 1.
+
+- The sliding dot products for $i = 1, \dots, 11$ are $QT = (9, 14, 9, 4, 9, 14, 11, 5, 3, 11, 17)$. The FFT route,
+  with $L = 32$, reproduces them to within $5 \times 10^{-16}$.
+- The distance profile is $D = (2.828, 0, 2.828, 4.000, 2.828, 0.670, 2.191, 3.245, 3.893, 2.719, 0.372)$.
+- $D_2 = 0$ because $T_2$ is the query itself. $D_4 = 4 = 2\sqrt{m}$ is the largest possible distance:
+  $T_4 = (2, 0, 1, 3)$ has correlation $-1$ with the query.
+- The best non-trivial match is $T_{11} = (1, 4, 2, 0)$ at distance $0.372$. $T_{11}$ is not an exact copy of the
+  query, but after z-normalisation its shape is close. $T_6 = (1, 3, 2, 1)$ matches at $0.670$.
+
+The value at $T_{11}$ checks the identity. $QT_{11} = 1 + 12 + 4 + 0 = 17$, $\mu_{11} = 1.75$ and
+$\sigma_{11} = 1.479$, so $\rho_{11} = (17 - 4 \cdot 1.5 \cdot 1.75)/(4 \cdot 1.118 \cdot 1.479) = 0.983$ and
+$D_{11} = \sqrt{8 \cdot 0.017} = 0.372$.
+
+## Cost
+
+| Method                           | Time          | Notes                                            |
+| -------------------------------- | ------------- | ------------------------------------------------ |
+| Direct, one distance at a time   | $O(nm)$       | Early abandoning helps on average, not in the worst case |
+| MASS (FFT)                       | $O(n \log n)$ | Independent of $m$; memory $O(n)$                |
+| Matrix profile by MASS per row   | $O(n^2 \log n)$ | STAMP; STOMP's diagonal update removes the $\log n$ |
+
+## Trade-offs
+
+- **Floating-point error.** The identity subtracts nearly equal numbers when $\rho$ is close to 1, and the FFT adds
+  rounding error of order $10^{-15}$ times the magnitude of the dot products. Near-exact matches can come out with a
+  small positive distance, or with a negative value under the square root that must be clamped to 0.
+- **Near-constant subsequences.** When $\sigma_i$ is close to 0, the division amplifies noise. Implementations flag
+  such windows or assign them a fixed distance.
+- **Short queries.** For small $m$, the $O(nm)$ direct method has a smaller constant and can be faster than three FFTs.
+- **One query at a time.** MASS answers one query. The full matrix profile needs all $n - m + 1$ rows, and the diagonal
+  update of STOMP computes them more cheaply than $n$ calls to MASS.

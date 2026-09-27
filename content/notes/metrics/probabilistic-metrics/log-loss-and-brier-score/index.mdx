@@ -1,0 +1,109 @@
+---
+title: Log loss and Brier score
+kind: concept
+summary: 'Log loss and the Brier score evaluate predicted probabilities rather than decisions. Log loss charges $-\log q$ for probability $q$ on the outcome that occurred; the Brier score is the squared distance between the probability vector and the one-hot outcome. Both are strictly proper.'
+tags: [metrics, probabilistic, classification, scoring-rules, worked-example]
+aliases: [logarithmic score, log-likelihood score, Brier score, quadratic score, probability score, strictly proper scoring rule, Murphy decomposition]
+requires: [confusion-matrix]
+related: [calibration-error, cross-entropy-and-perplexity, kl-divergence, choosing-a-metric, logistic-regression]
+references: [brier1950, gneiting2007, murphy1973]
+status: draft
+updated: 2026-09-27
+---
+
+import { PenaltyCurves } from './PenaltyCurves'
+
+<Definition>
+For $n$ cases, true classes $y_i \in \set{1, \dots, K}$ and predicted probability vectors $\qvec_i$, with one-hot
+outcome vectors $\evec_{y_i}$:
+
+$$
+\text{log loss} = -\frac1n\sum_{i=1}^n \log q_{i, y_i}, \qquad
+\text{Brier score} = \frac1n\sum_{i=1}^n \norm{\qvec_i - \evec_{y_i}}^2 = \frac1n\sum_{i=1}^n\sum_{k=1}^K \paren{q_{ik} - \indicator[y_i = k]}^2.
+$$
+
+Both are strictly proper scoring rules: their expected value is minimised only by reporting the true distribution
+<Cite id="gneiting2007" />.
+</Definition>
+
+## Scoring probabilities, not decisions
+
+Threshold metrics such as accuracy discard the probability a model reports: 0.51 and 0.99 give the same decision. A
+scoring rule instead charges each case according to the probability given to what happened. Log loss is the mean
+negative log-likelihood of the observed labels under the model, the same quantity as the cross-entropy between the
+empirical and predicted distributions (see <NoteLink to="cross-entropy-and-perplexity">cross-entropy and
+perplexity</NoteLink>). The Brier score is the mean squared error of the probability vector <Cite id="brier1950" />.
+
+For two classes, many libraries report the Brier score as $\frac1n\sum_i (p_i - y_i)^2$ with $p_i$ the probability of the
+positive class; Brier's original definition sums over both classes and is exactly twice that.
+
+## Why properness matters
+
+A scoring rule $S(\qvec, y)$ is proper if, when outcomes are drawn from a distribution $\pvec$, the expected score
+$\expect_{y \sim \pvec} S(\qvec, y)$ is minimised by $\qvec = \pvec$, and strictly proper if $\pvec$ is the only
+minimiser. A strictly proper rule cannot be gamed: reporting anything but your actual beliefs does worse on average.
+
+For log loss, the expected score minus its value at $\qvec = \pvec$ is
+
+$$
+-\sum_k p_k \log q_k + \sum_k p_k \log p_k = \KL(\pvec \,\Vert\, \qvec) \ge 0,
+$$
+
+with equality only at $\qvec = \pvec$ (see <NoteLink to="kl-divergence">Kullback–Leibler divergence</NoteLink>). For the
+Brier score, expanding $\expect_{y}\norm{\qvec - \evec_y}^2$ with $\expect[\evec_y] = \pvec$ gives
+
+$$
+\expect_y \norm{\qvec - \evec_y}^2 = \norm{\qvec - \pvec}^2 + \expect_y\norm{\pvec - \evec_y}^2,
+$$
+
+a squared distance from the truth plus a term that does not depend on $\qvec$. Again the minimum is at $\qvec = \pvec$.
+The theory of proper scoring rules in general belongs with decision theory and calibration.
+
+## Unbounded against bounded
+
+The two rules punish confident mistakes very differently. Giving probability $q$ to the outcome that occurs costs
+$-\ln q$ in log loss and, for two classes, $(1 - q)^2$ in the per-class Brier score:
+
+| $q$ | log loss | Brier |
+| --- | --- | --- |
+| 0.9 | 0.105 | 0.010 |
+| 0.1 | 2.303 | 0.810 |
+| 0.01 | 4.605 | 0.980 |
+
+Log loss is unbounded: a single prediction of probability near 0 for something that happens can dominate the mean.
+The Brier score is bounded by 1 per case for two classes, so it is more robust to occasional confident errors, and
+less sensitive to the tails of the predicted distribution.
+
+<PenaltyCurves />
+
+## Calibration and refinement
+
+Murphy decomposed the Brier score of binned binary forecasts into three parts <Cite id="murphy1973" />. Group the
+cases into bins $b$ of $n_b$ cases with a common forecast $f_b$, observed frequency $\bar o_b$ and overall base rate
+$\bar o$:
+
+$$
+\text{Brier} = \underbrace{\frac1n\sum_b n_b\paren{f_b - \bar o_b}^2}_{\text{reliability}}
+- \underbrace{\frac1n\sum_b n_b\paren{\bar o_b - \bar o}^2}_{\text{resolution}}
++ \underbrace{\bar o(1 - \bar o)}_{\text{uncertainty}}.
+$$
+
+Reliability is a calibration error (see <NoteLink to="calibration-error">calibration error</NoteLink>); resolution
+rewards forecasts that separate cases with different outcome rates; uncertainty is the Brier score of always forecasting
+the base rate. A model can be well calibrated and useless (always forecasting $\bar o$ has perfect reliability and zero
+resolution), which is why calibration alone is not a quality measure.
+
+## Worked example
+
+Ten binary predictions $0.10, 0.15, 0.25, 0.30, 0.45, 0.55, 0.70, 0.75, 0.85, 0.95$ with outcomes
+$0, 0, 0, 1, 0, 1, 0, 1, 1, 1$ have log loss 0.466 and Brier score 0.157 (binary form). A model that always predicts the
+base rate 0.5 scores $\ln 2 = 0.693$ and $0.25$: the baselines to compare against.
+
+## Pitfalls
+
+- **Clip probabilities** when computing log loss. A predicted 0 for an observed class gives infinite loss; libraries
+  clip to a small $\epsilon$, which changes the value.
+- **Compare against the base rate,** not against 0. The entropy of the class distribution is the log loss of the
+  best uninformed model.
+- **Proper scores reward calibration and refinement together.** Two models with the same log loss can differ in both;
+  inspect a reliability diagram as well.

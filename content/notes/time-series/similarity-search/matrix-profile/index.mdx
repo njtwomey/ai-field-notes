@@ -1,0 +1,119 @@
+---
+title: Matrix profile
+kind: concept
+summary: 'The matrix profile of a time series stores, for every subsequence of length $m$, the z-normalised distance to its nearest non-overlapping neighbour. Its minima are motifs (repeated patterns) and its maxima are discords (anomalies), found with one parameter and no training.'
+tags: [time-series, anomaly-detection, similarity-search, worked-example]
+aliases: [matrix profile, motif discovery, time series discords, all-pairs similarity join]
+partOf: [matrix-profile-family]
+related: [pearson-correlation, dot-product, fft]
+references: [yeh2016, zhu2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { MatrixProfileExplorer } from './MatrixProfileExplorer'
+
+<Definition>
+Let $x_1, \dots, x_n$ be a time series and $m$ a subsequence length. Write $T_i = (x_i, \dots, x_{i+m-1})$ for the
+subsequence starting at $i$, and $d(i, j)$ for the Euclidean distance between $T_i$ and $T_j$ after each is
+z-normalised to mean 0 and standard deviation 1. The matrix profile is the vector
+
+$$
+P_i = \min_{j \,:\, \abs{i - j} > e} d(i, j), \qquad i = 1, \dots, n - m + 1,
+$$
+
+and the matrix profile index $I_i$ records the minimising $j$. The exclusion zone $e$, typically $m/4$, rules out
+trivial matches: subsequences that overlap $T_i$ and so resemble it for no interesting reason <Cite id="yeh2016" />.
+</Definition>
+
+## What it answers
+
+Many time-series questions are questions about nearest neighbours between subsequences. Which pattern repeats? Which
+stretch is unlike everything else? Where does the behaviour change? Answering them naively means comparing every
+subsequence with every other one. The matrix profile computes that all-pairs comparison once, and keeps only the one
+number per subsequence that most questions need: the distance to its nearest neighbour.
+
+- **Motifs.** The smallest values of $P$ mark subsequences that have a close match elsewhere. The global minimum and
+  its index give the best-matching pair, the top motif.
+- **Discords.** The largest values mark subsequences whose nearest neighbour is still far away. The global maximum is
+  the top discord, a strong candidate anomaly.
+- **Segmentation.** The index $I$ shows where each subsequence finds its match. Arcs from $i$ to $I_i$ that rarely
+  cross a point suggest that the regimes on either side of it differ.
+
+The only parameter is $m$, the length of pattern of interest. There is no model to fit and no training set.
+
+<MatrixProfileExplorer />
+
+## Why z-normalise, and why it is cheap
+
+Z-normalisation compares shapes, not levels or amplitudes: a heartbeat at a higher baseline, or a larger version of
+the same gesture, still counts as a match. It also makes the distance a function of correlation. For subsequences of
+length $m$ with means $\mu_i, \mu_j$, standard deviations $\sigma_i, \sigma_j$ and dot product
+$Q_{ij} = \sum_{k=0}^{m-1} x_{i+k} x_{j+k}$, the Pearson correlation is
+
+$$
+\rho_{ij} = \frac{Q_{ij} - m \mu_i \mu_j}{m \sigma_i \sigma_j}.
+$$
+
+Expanding the squared distance between the z-normalised vectors $\hat T_i$ and $\hat T_j$, each of which has squared
+norm $m$, gives
+
+$$
+d(i, j)^2 = \norm{\hat T_i}^2 + \norm{\hat T_j}^2 - 2\,\hat T_i^\top \hat T_j = m + m - 2 m \rho_{ij}
+= 2m\paren{1 - \rho_{ij}}.
+$$
+
+So the distance needs only the dot product and the running means and standard deviations. The means and standard
+deviations of all subsequences come from cumulative sums in $O(n)$. The dot products are where the algorithms
+differ.
+
+- **One subsequence against all others.** The dot products of one query with every subsequence form a sliding dot
+  product, which is a convolution. The FFT computes it in $O(n \log n)$; this is the MASS algorithm, and it gives one
+  row of the distance matrix, the distance profile of that query.
+- **All pairs (STOMP).** Along a diagonal of the distance matrix the dot product updates in constant time,
+  $Q_{i+1, j+1} = Q_{ij} - x_i x_j + x_{i+m} x_{j+m}$. Computing the first row by FFT and then walking the diagonals
+  gives the whole matrix profile in $O(n^2)$ time and $O(n)$ memory, independent of $m$ <Cite id="zhu2016" />.
+
+The figure above uses the naive $O(n^2 m)$ loop, which is fine at a few hundred points and keeps the definition
+visible. The same $O(n^2)$ structure, applied in parallel on GPUs or computed incrementally as new points arrive,
+scales the method to time series of hundreds of millions of points <Cite id="zhu2016" />.
+
+## Worked example
+
+Take a series of 50 standard-normal values and $m = 8$. For the subsequences starting at positions 3 and 20, the
+direct z-normalised distance and the formula $\sqrt{2m(1 - \rho)}$ both give $3.216$. Computing the full matrix
+profile with an exclusion zone of $\lceil m/4 \rceil = 2$ positions places the top motif at position 4, at distance
+$1.098$ from its match, and the top discord at position 19, at distance $2.523$. For pure noise these extremes mean
+little; on real data with repeated structure, the gap between the motif distance and the typical distance is what
+makes a motif meaningful.
+
+The distance is bounded: $\rho \in [-1, 1]$ gives $0 \le d \le 2\sqrt{m}$. Dividing by $\sqrt{m}$, or comparing
+against the distribution of $P$ itself, puts profiles computed with different $m$ on a common scale.
+
+## Pitfalls
+
+- **The choice of $m$.** A window much shorter than the pattern matches fragments that recur by chance; a much
+  longer one dilutes the pattern with its surroundings. Scanning several values of $m$ is common practice.
+- **Flat subsequences.** Where a subsequence is almost constant, $\sigma$ is near 0 and z-normalisation amplifies noise
+  into a spurious shape. Implementations treat near-constant windows specially.
+- **Discords are relative.** A discord is unusual only relative to the rest of the series. A second occurrence of the
+  same anomaly makes each the other's nearest neighbour, and both disappear from the top of the profile. Variants
+  that look for the $k$-th nearest neighbour address this.
+- **Trivial matches.** Without the exclusion zone, every subsequence's nearest neighbour is its immediate shift, and
+  the profile is uniformly close to 0.
+
+## Family
+
+The matrix profile is the core of a family of methods, most published as the numbered "Matrix Profile" papers
+(<NoteLink to="matrix-profile-family">matrix profile family</NoteLink>). Each extends one part of this note.
+
+- <NoteLink to="distance-profile-and-mass">Distance profile and MASS</NoteLink>: one row of the distance matrix by FFT.
+- <NoteLink to="matrix-profile-algorithms">Matrix profile algorithms</NoteLink>: STAMP, STOMP, SCRIMP and SCAMP.
+- <NoteLink to="streaming-and-incremental-matrix-profile">Streaming matrix profile</NoteLink>: incremental updates and
+  the left and right profiles.
+- <NoteLink to="matrix-profile-joins">Matrix profile joins</NoteLink>: two series, and multidimensional series.
+- <NoteLink to="time-series-chains">Time series chains</NoteLink>: patterns that drift.
+- <NoteLink to="matrix-profile-segmentation">Segmentation</NoteLink>: regime boundaries from the index.
+- <NoteLink to="time-series-snippets">MPdist and snippets</NoteLink>: distances between whole series and summaries.
+- <NoteLink to="motif-discovery-variants">Motif discovery variants</NoteLink>: top-$k$, all lengths, consensus motifs.
+- <NoteLink to="discord-discovery-at-scale">Discord discovery at scale</NoteLink>: MERLIN and DAMP.

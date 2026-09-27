@@ -1,0 +1,86 @@
+---
+title: Word and character error rates
+kind: concept
+summary: 'Word error rate is the minimum number of substitutions, deletions and insertions that turn a transcript into the reference, divided by the reference length: $(S + D + I)/N$. CER does the same on characters; MER, WIL and WIP are bounded variants.'
+tags: [metrics, speech, nlp, worked-example]
+aliases: [WER, CER, word error rate, character error rate, MER, match error rate, WIL, word information lost, WIP, word information preserved, edit distance, Levenshtein distance]
+related: [translation-edit-rate, bleu, chrf]
+references: [morris2004, detlefsen2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { TextPairExplorer } from '../_shared/TextPairExplorer'
+
+<Definition>
+Align a hypothesis transcript to a reference of $N$ words with the fewest edits, and count $H$ matched words
+(hits), $S$ substitutions, $D$ deletions and $I$ insertions, so that $N = H + S + D$. The word error rate is
+
+$$
+\mathrm{WER} = \frac{S + D + I}{N}.
+$$
+
+The character error rate (CER) is the same computation over characters. Both are 0 for a perfect transcript and
+have no upper bound.
+</Definition>
+
+## The alignment
+
+$S + D + I$ is the Levenshtein edit distance between the two word sequences: the fewest single-word edits that turn
+one into the other. It is computed by dynamic programming. With $d_{i,j}$ the distance between the first $i$
+reference words and the first $j$ hypothesis words, $d_{i,0} = i$, $d_{0,j} = j$ and
+
+$$
+d_{i,j} = \min\paren{d_{i-1,j} + 1,\ \ d_{i,j-1} + 1,\ \ d_{i-1,j-1} + [r_i \ne h_j]},
+$$
+
+whose three cases are a deletion, an insertion, and a match or substitution. Tracing back the minimising choices
+recovers the alignment and hence $H$, $S$, $D$ and $I$. Several alignments can tie; the error count is the same for
+all of them, but the split between substitutions and insertion–deletion pairs can differ.
+
+## Why WER is not bounded
+
+The denominator is the reference length, but insertions are not limited by it. The reference "yes" and the
+hypothesis "no no no" need one substitution and two insertions, so $\mathrm{WER} = 3$. WER is also asymmetric: the
+reference and hypothesis cannot be swapped. It is an error rate, not a percentage of words wrong, and it is not an
+accuracy; $1 - \mathrm{WER}$ can be negative.
+
+## Bounded relatives
+
+Morris, Maier and Green proposed measures that lie in $[0, 1]$ <Cite id="morris2004" />:
+
+- **Match error rate**, the fraction of aligned positions that are errors:
+  $\mathrm{MER} = \dfrac{S + D + I}{H + S + D + I}$.
+- **Word information preserved**, the product of the fraction of reference words recovered and the fraction of
+  hypothesis words that are correct: $\mathrm{WIP} = \dfrac{H}{N} \cdot \dfrac{H}{P}$, with $P = H + S + I$ the
+  hypothesis length.
+- **Word information lost**, $\mathrm{WIL} = 1 - \mathrm{WIP}$.
+
+WIP penalises a hypothesis both for missing words and for adding wrong ones, like the product of recall and
+precision. TorchMetrics implements all of WER, CER, MER, WIL and WIP with these definitions <Cite id="detlefsen2022" />.
+
+## Worked example
+
+Reference "the quick brown fox jumps over the lazy dog" ($N = 9$), hypothesis "the quick brown fox jumped over a
+lazy dog today" ($P = 10$). The minimum-edit alignment has $H = 7$ hits, $S = 2$ substitutions (jumps → jumped, the →
+a), $D = 0$ and $I = 1$ (today). Then
+
+$$
+\mathrm{WER} = \tfrac{3}{9} = 0.333, \quad \mathrm{MER} = \tfrac{3}{10} = 0.3, \quad
+\mathrm{WIP} = \tfrac{7}{9} \cdot \tfrac{7}{10} = 0.544, \quad \mathrm{WIL} = 0.456.
+$$
+
+At the character level, "jumps" → "jumped" is one substitution and one insertion, so it costs 2 characters of 5
+rather than a whole word: CER gives partial credit for near misses.
+
+<TextPairExplorer focus="wer" />
+
+## Pitfalls
+
+- **Normalise before scoring.** Case, punctuation, numerals ("twenty" or "20") and contractions change WER by several
+  points. Apply the same normaliser to both texts and report it.
+- **CER for languages without spaces.** WER is undefined for languages written without word boundaries, such as
+  Chinese and Japanese; CER is used instead.
+- **Average over the corpus, not over sentences.** Corpus WER is total edits divided by total reference words. The
+  mean of per-sentence WERs weights short sentences as heavily as long ones.
+- **All errors cost the same.** Dropping "not" and dropping "the" each cost one edit.

@@ -1,0 +1,123 @@
+---
+title: Periodogram
+kind: concept
+summary: 'The periodogram $\hat S(\omega) = \frac{1}{N}\abs{\sum_n x[n] e^{-i\omega n}}^2$ estimates a power spectral density from $N$ samples. It is asymptotically unbiased but not consistent: its variance does not shrink as $N$ grows.'
+tags: [signal-processing, spectral-estimation, worked-example]
+aliases: [periodogram estimate, sample spectrum, raw spectrum, modified periodogram]
+requires: [dft, autocorrelation-and-wiener-khinchin]
+related: [welch-method, multitaper-spectral-estimation, spectral-leakage-and-windows, parametric-spectral-estimation]
+references: [stoica2005, harris1978]
+status: draft
+updated: 2026-09-26
+---
+
+import { PeriodogramNoise } from './PeriodogramNoise'
+
+<Definition>
+The periodogram of samples $x[0], \dots, x[N-1]$ of a wide-sense stationary process is
+
+$$
+\hat S(\omega) = \frac{1}{N}\abs{\sum_{n=0}^{N-1} x[n]\, e^{-i\omega n}}^2 .
+$$
+
+It estimates the power spectral density $S(\omega) = \sum_m r[m] e^{-i\omega m}$, where $r[m]$ is the autocovariance.
+Evaluated at the DFT frequencies $\omega_k = 2\pi k/N$ it is $\abs{X[k]}^2/N$, computed with one FFT
+<Cite id="stoica2005" />.
+</Definition>
+
+## The periodogram is the transform of the sample autocovariance
+
+Expand the squared magnitude as a double sum, $\abs{X}^2 = \sum_n \sum_{n'} x[n] x[n'] e^{-i\omega(n - n')}$, and group
+the terms by the lag $m = n - n'$:
+
+$$
+\hat S(\omega) = \sum_{m=-(N-1)}^{N-1} \hat r[m]\, e^{-i\omega m}, \qquad
+\hat r[m] = \frac{1}{N}\sum_{n=0}^{N-1-\abs{m}} x[n]\, x[n + \abs{m}].
+$$
+
+So the periodogram is the Fourier transform of the biased sample autocovariance $\hat r[m]$, which divides by $N$
+rather than by the number of terms $N - \abs{m}$. This mirrors the definition of $S(\omega)$ as the transform of
+$r[m]$, which is why the periodogram is the natural first estimate. Because it is a squared magnitude, it is never
+negative.
+
+## Bias: a smoothed spectrum
+
+For a zero-mean process, $\expect[x[n]x[n+m]] = r[m]$, so $\expect[\hat r[m]] = (1 - \abs{m}/N)\, r[m]$ for
+$\abs{m} < N$. Taking expectations term by term,
+
+$$
+\expect\brack{\hat S(\omega)} = \sum_{\abs{m} < N}\paren{1 - \frac{\abs{m}}{N}} r[m]\, e^{-i\omega m}
+= \frac{1}{2\pi}\int_{-\pi}^{\pi} S(\nu)\, F_N(\omega - \nu)\, d\nu .
+$$
+
+The second form follows because multiplying $r[m]$ by the triangle $1 - \abs{m}/N$ convolves $S$ with the triangle's
+transform, the Fejér kernel
+
+$$
+F_N(\omega) = \frac{1}{N}\paren{\frac{\sin(N\omega/2)}{\sin(\omega/2)}}^2 .
+$$
+
+$F_N$ has a main lobe of width $4\pi/N$ and sidelobes that fall off slowly, the first about 13 dB below the peak. The
+expected periodogram is therefore the true spectrum seen through this kernel. Two consequences follow:
+
+- **Resolution.** Two spectral peaks closer than about $2\pi/N$ rad/sample merge into one.
+- **Leakage.** Power from strong peaks spreads through the sidelobes and can bury weak components far away in
+  frequency. Tapering the data with a window before the transform, the *modified periodogram*, trades a wider main
+  lobe for lower sidelobes <Cite id="harris1978" />; see <NoteLink to="spectral-leakage-and-windows">spectral leakage
+  and windows</NoteLink>.
+
+As $N \to \infty$ the kernel concentrates at 0, and $\expect[\hat S(\omega)] \to S(\omega)$ wherever $S$ is
+continuous. The periodogram is asymptotically unbiased.
+
+## Variance: the periodogram is not consistent
+
+Take Gaussian white noise with variance $\sigma^2$, so $S(\omega) = \sigma^2$. At a DFT frequency $\omega_k$ with
+$0 < k < N/2$, the real and imaginary parts of $X[k]$ are sums of independent Gaussians:
+
+$$
+\operatorname{Re} X[k] = \sum_n x[n] \cos(\omega_k n), \qquad \operatorname{Im} X[k] = -\sum_n x[n]\sin(\omega_k n).
+$$
+
+Both have mean 0. Their variances are $\sigma^2 \sum_n \cos^2(\omega_k n) = \sigma^2 N/2$ and likewise
+$\sigma^2 N/2$, and their covariance is proportional to $\sum_n \cos(\omega_k n)\sin(\omega_k n) = 0$, by the
+orthogonality of the DFT basis. So
+
+$$
+\hat S(\omega_k) = \frac{(\operatorname{Re} X[k])^2 + (\operatorname{Im} X[k])^2}{N}
+= \frac{\sigma^2}{2}\paren{Z_1^2 + Z_2^2}, \qquad Z_1, Z_2 \iid \Gauss(0, 1).
+$$
+
+$Z_1^2 + Z_2^2$ is $\chi^2_2$, an exponential variable with mean 2. The periodogram value is therefore exponential with
+mean $\sigma^2$ and standard deviation $\sigma^2$, for every $N$. The relative error is 100%, however much data there
+is. More data only produces more frequency bins, and values at different DFT frequencies are independent, so the
+estimate gets more jagged, not smoother. The same holds approximately for coloured spectra:
+$\hat S(\omega) \approx S(\omega)\, \chi^2_2 / 2$ <Cite id="stoica2005" />.
+
+<PeriodogramNoise />
+
+The fix is to trade frequency resolution for variance by averaging. <NoteLink to="welch-method">Welch's method</NoteLink>
+averages periodograms of segments; <NoteLink to="multitaper-spectral-estimation">multitaper estimation</NoteLink>
+averages periodograms of the same data under orthogonal tapers; smoothing the periodogram across neighbouring
+frequencies does the same job directly.
+
+## Worked example
+
+Take $x = (1, 0, -1, 0)$, so $N = 4$. Its DFT is $X[k] = 1 - e^{-i\pi k}$, which gives $X = (0, 2, 0, 2)$. The
+periodogram at the DFT frequencies $\omega_k = \pi k/2$ is $\abs{X[k]}^2/4 = (0, 1, 0, 1)$: all the power sits at
+$\omega = \pi/2$, the frequency of the sequence, and its mirror image. Parseval's theorem checks the scaling: the mean
+of the periodogram values is $\tfrac{1}{4}(0 + 1 + 0 + 1) = 0.5$, which equals the mean power
+$\tfrac{1}{4}\sum x[n]^2 = 0.5$.
+
+For white noise, the interior periodogram values of a simulated record of 4,096 unit-variance samples have mean 0.997
+and standard deviation 0.975, close to the theoretical 1 and 1. With 256 samples the figures are 1.02 and 1.09: the
+spread does not shrink.
+
+## Pitfalls
+
+- **Scaling conventions differ.** Libraries report one-sided densities (doubling interior bins), use frequency in Hz
+  (dividing by the sample rate), or omit the $1/N$. Check that the integral of the estimate over frequency equals the
+  signal's variance.
+- **The mean leaks.** A nonzero mean puts a large spike at $\omega = 0$ whose sidelobes leak into low frequencies.
+  Subtract the mean, and remove trends, first.
+- **Zero-padding does not add resolution.** Padding evaluates the same smoothed estimate on a finer grid; see
+  <NoteLink to="zero-padding-and-resolution">zero-padding and resolution</NoteLink>.

@@ -1,0 +1,87 @@
+---
+title: Group fairness metrics
+kind: concept
+summary: 'Group fairness metrics compare a classifier''s behaviour across groups defined by a protected attribute: positive-prediction rates (demographic parity), error rates (equalised odds, equal opportunity) or precision (predictive parity). When base rates differ, they conflict.'
+tags: [metrics, fairness, classification, worked-example]
+aliases: [demographic parity, statistical parity, equalised odds, equalized odds, equal opportunity, predictive parity, disparate impact, fairness impossibility]
+requires: [sensitivity-specificity-and-predictive-values]
+related: [confusion-matrix, roc-curve-and-auc, operating-points-and-equal-error-rate, calibration-error, cost-sensitive-learning]
+references: [hardt2016, chouldechova2017, kleinberg2017, barocas2023]
+status: draft
+updated: 2026-09-27
+---
+
+import { GroupThresholds } from './GroupThresholds'
+
+<Definition>
+Let $A$ be a protected attribute defining groups, $Y$ the true label and $\hat Y$ a binary prediction. Common group
+fairness criteria require equality across groups $a$ of:
+
+| criterion | requires, for all groups $a$ | compares |
+| --- | --- | --- |
+| demographic parity | $P(\hat Y = 1 \mid A = a)$ equal | positive-prediction rates |
+| equal opportunity | $P(\hat Y = 1 \mid Y = 1, A = a)$ equal | true-positive rates |
+| equalised odds | $P(\hat Y = 1 \mid Y = y, A = a)$ equal for $y = 0, 1$ | true- and false-positive rates |
+| predictive parity | $P(Y = 1 \mid \hat Y = 1, A = a)$ equal | precision |
+
+The corresponding metrics are the differences or ratios of these quantities between groups <Cite id="hardt2016" />.
+</Definition>
+
+## Three families
+
+Barocas, Hardt and Narayanan group the criteria by which independence they require <Cite id="barocas2023" />.
+
+- **Independence:** the prediction is independent of the group, $\hat Y \perp A$. Demographic parity. The disparate
+  impact ratio, the ratio of the groups' positive-prediction rates, is its multiplicative form.
+- **Separation:** the prediction is independent of the group given the truth, $\hat Y \perp A \mid Y$. Equalised
+  odds, and its relaxation equal opportunity, which constrains only the true-positive rate
+  <Cite id="hardt2016" />. In ROC terms, every group must operate at the same point.
+- **Sufficiency:** the truth is independent of the group given the prediction, $Y \perp A \mid \hat Y$. Predictive
+  parity for binary predictions; for scores, calibration within each group.
+
+Each criterion is a comparison of the confusion-matrix rates of the groups (see
+<NoteLink to="sensitivity-specificity-and-predictive-values">sensitivity, specificity and predictive values</NoteLink>):
+rows for separation, columns for sufficiency, the prediction marginal for independence.
+
+## Why they conflict
+
+Precision, the true- and false-positive rates and the base rate $\pi$ of a group are linked by Bayes' theorem.
+Rearranged, with false-negative rate $\text{FNR} = 1 - \text{TPR}$,
+
+$$
+\text{FPR} = \frac{\pi}{1 - \pi}\cdot\frac{1 - \text{PPV}}{\text{PPV}}\cdot\paren{1 - \text{FNR}}.
+$$
+
+If two groups have different base rates $\pi$, then equal precision (sufficiency) and equal FNR force different FPRs:
+the classifier cannot satisfy predictive parity and equalised odds at once, unless it is perfect or the base rates
+are equal <Cite id="chouldechova2017" />. Kleinberg, Mullainathan and Raghavan proved the corresponding result for
+scores: calibration within groups and balance of the scores given the class cannot all hold except in degenerate
+cases <Cite id="kleinberg2017" />. Choosing a fairness metric is therefore a choice between incompatible notions of
+fairness, not a technical detail.
+
+## Worked example
+
+A classifier applied to two groups of 100 people each:
+
+| group | base rate | TP | FN | FP | TN | positive rate | TPR | FPR | precision |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| A | 0.40 | 30 | 10 | 10 | 50 | 0.40 | 0.75 | 0.167 | 0.75 |
+| B | 0.20 | 12 | 8 | 8 | 72 | 0.20 | 0.60 | 0.100 | 0.60 |
+
+The demographic parity gap is $0.40 - 0.20 = 0.20$, the equal-opportunity (TPR) gap $0.15$, the FPR gap $0.067$ and the
+precision gap $0.15$. For group A the identity gives $\text{FPR} = \frac{0.4}{0.6}\cdot\frac{0.25}{0.75}\cdot 0.75 = 0.167$,
+matching the table. Moving group B's threshold can close one gap only by opening another.
+
+<GroupThresholds />
+
+## Pitfalls
+
+- **The metric encodes a value judgement.** Demographic parity ignores differences in base rates; equalised odds
+  accepts them; predictive parity makes predictions mean the same thing in each group. Which is appropriate depends on
+  the application and cannot be settled by the data.
+- **Group definitions matter.** Parity across broad groups can hide disparities within subgroups and at their
+  intersections.
+- **Equalising at the chosen threshold only.** A gap measured at one operating point says nothing about others; and
+  equalising thresholds per group may be restricted by law in some settings.
+- **Small groups** make every rate uncertain; report counts and
+  <NoteLink to="metric-confidence-intervals">confidence intervals</NoteLink>.

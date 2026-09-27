@@ -304,5 +304,8 @@ Frontmatter (validated; see `site/src/lib/content-schema.ts`): `title`, `kind`, 
   names drift and sub- and superscripts render at full size.
 - `EChart` calls `setOption` without `lazyUpdate`. A lazy update leaves the chart without coordinate systems until the
   next frame, so converting a pointer position to data coordinates (handles, `onPlotClick`) fails mid-drag.
+- Render pages headlessly only with `npm run check:render -- <slug> ...` (dev server on port 5180; `--port` to change).
+  It runs one page at a time and kills Chrome when the DOM is dumped or after 30 s. Never hand-roll a headless Chrome
+  loop: `--dump-dom` often leaves Chrome running, and parallel browsers overload the dev server.
 - Handle dragging uses DOM pointer events with pointer capture, not zrender's events. Listeners are removed on
   unmount; StrictMode mounts twice on the same element.

@@ -1,0 +1,94 @@
+---
+title: Overlap-add and overlap-save
+kind: technique
+summary: 'Overlap-add and overlap-save compute long convolutions block by block with FFTs, handling the $P - 1$ samples each block spills over. Weighted overlap-add also inverts the short-time Fourier transform when the windows satisfy $\sum_m w[n - mR] = C$.'
+tags: [signal-processing, time-frequency, convolution, fft, worked-example]
+aliases: [OLA, OLS, block convolution, weighted overlap-add, WOLA, COLA, constant overlap-add, STFT inversion]
+requires: [convolution-theorem, fft]
+related: [short-time-fourier-transform, fir-filters, convolution]
+references: [allen1977, oppenheim2010, griffin1984]
+status: draft
+updated: 2026-09-26
+---
+
+<Definition>
+**Overlap-add** splits the input into non-overlapping blocks of length $B$, convolves each with a filter of length
+$P$ by FFTs of size $N \ge B + P - 1$, and adds the overlapping $P - 1$ output samples of consecutive blocks.
+**Overlap-save** takes overlapping input blocks of length $N$ advancing by $N - P + 1$, computes their circular
+convolution with the filter, and discards the first $P - 1$ outputs of each block, which are wrapped around
+<Cite id="oppenheim2010" />.
+</Definition>
+
+## Why blocks are needed
+
+The FFT turns convolution into multiplication, but only circular convolution: the product of two $N$-point DFTs is
+the DFT of the circular convolution of the two sequences, in which outputs past the end wrap to the start. A linear
+convolution of a block of $B$ samples with $P$ filter taps has length $B + P - 1$, so an FFT of that size or larger
+computes it without wrap-around. A stream of unknown length is handled one block at a time; the two methods differ in
+how they deal with the samples that cross block boundaries.
+
+## Overlap-add
+
+Write the input as a sum of blocks, $x = \sum_r x_r$ with $x_r[n] = x[n]$ for $rB \le n < (r + 1)B$ and 0 otherwise.
+Convolution is linear, so
+
+$$
+y = h * x = \sum_r h * x_r.
+$$
+
+Each $h * x_r$ is nonzero on $B + P - 1$ samples starting at $rB$, computed exactly by zero-padding both to $N \ge B
++ P - 1$ and multiplying their FFTs. Consecutive block outputs overlap by $P - 1$ samples, and adding them gives the
+linear convolution exactly.
+
+## Overlap-save
+
+Take input blocks of length $N$ that overlap by $P - 1$ samples. The circular convolution of a block with the
+zero-padded filter equals the linear convolution everywhere except in its first $P - 1$ outputs, where the tail of
+the linear convolution has wrapped around. Those outputs are discarded; the remaining $N - P + 1$ are correct and
+contiguous from block to block. Overlap-save avoids the additions of overlap-add at the cost of re-reading $P - 1$
+input samples per block.
+
+## Cost
+
+A direct FIR filter costs $P$ multiplications per output sample. With FFTs, each block of $B = N - P + 1$ new outputs
+costs one forward FFT, one pointwise product and one inverse FFT; the filter's FFT is computed once.
+
+**Worked example.** A 129-tap filter with $N = 512$ gives $B = 384$ new samples per block. Counting about
+$\tfrac{N}{2}\log_2 N = 2304$ complex multiplications per FFT, four real multiplications per complex one, and the 512
+complex products, a block costs about $2 \times 2304 \times 4 + 512 \times 4 = 20{,}480$ real multiplications, or
+about 53 per output sample, against 129 for direct convolution. The advantage grows with $P$: the FFT cost per sample
+grows as $\log N$, the direct cost as $P$.
+
+## Inverting the short-time Fourier transform
+
+The same idea inverts a <NoteLink to="short-time-fourier-transform">short-time Fourier transform</NoteLink>. Take the
+inverse DFT of each frame, which returns the windowed segment $x[n]\, w[n - mR]$, and add the segments at their
+positions:
+
+$$
+\sum_m x[n]\, w[n - mR] = x[n] \sum_m w[n - mR].
+$$
+
+The input is recovered exactly, up to a constant, when the shifted windows sum to a constant:
+
+$$
+\sum_m w[n - mR] = C \quad \text{for all } n.
+$$
+
+This is the **constant overlap-add** (COLA) condition <Cite id="allen1977" />. When a synthesis window $v$ is applied
+as well, which smooths the joins after the spectrum has been modified, the condition becomes
+$\sum_m w[n - mR]\, v[n - mR] = C$.
+
+**Worked example.** The periodic Hann window of length $L = 8$, $w[n] = \tfrac12 - \tfrac12 \cos(2\pi n / 8)$,
+satisfies COLA with hop $R = 4$: shifted copies sum to exactly 1 at every sample, because the cosines of adjacent
+frames are in antiphase and cancel. The symmetric Hann window, whose endpoints are both zero, does not sum to a
+constant at 50% overlap; for analysis-synthesis the periodic form is the right one.
+
+## Pitfalls
+
+- **Too small an FFT** causes time-domain aliasing: overlap-add blocks wrap into themselves, and overlap-save discards
+  the wrong samples.
+- **Modifying the spectrum breaks exactness.** After a spectrum is changed, as in denoising, the modified frames are
+  no longer the STFT of any signal. Weighted overlap-add with a synthesis window gives the least-squares estimate
+  <Cite id="griffin1984" />, and the join artefacts depend on the window and hop.
+- **Latency.** Block methods delay the output by at least one block.

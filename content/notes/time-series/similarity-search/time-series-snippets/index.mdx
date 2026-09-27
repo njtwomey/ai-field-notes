@@ -1,0 +1,101 @@
+---
+title: MPdist and time series snippets
+kind: concept
+summary: 'MPdist measures the distance between two series as a small order statistic of their joined matrix profiles, so series sharing their subsequences are close in any order or phase. Time series snippets use MPdist to pick the few subsequences that best represent a long series.'
+tags: [time-series, similarity-search, worked-example]
+aliases: [MPdist, matrix profile distance, time series snippets, snippets]
+requires: [matrix-profile, matrix-profile-joins]
+partOf: [matrix-profile-family]
+related: [dynamic-time-warping, symbolic-aggregate-approximation]
+references: [gharghabi2018, imani2018]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $A$ and $B$ be time series of lengths $n_A$ and $n_B$, and $L$ a subsequence length. Let $P^{AB}$ and $P^{BA}$ be
+their two join matrix profiles under z-normalised Euclidean distance, and $P^{ABBA}$ their concatenation. MPdist is
+the $k$-th smallest value of $P^{ABBA}$, with $k = \lceil \tau (n_A + n_B) \rceil$ for a small fraction $\tau$ (0.05
+in the original paper), or the largest value if $P^{ABBA}$ has fewer than $k$ entries <Cite id="gharghabi2018" />.
+Time series snippets are $s$ subsequences of a series, chosen greedily so that every part of the series is close
+under MPdist to at least one of them <Cite id="imani2018" />.
+</Definition>
+
+## Intuition
+
+Euclidean distance between two whole series compares point $t$ of one with point $t$ of the other. A small shift in
+time or a different order of the same activities makes two similar series far apart.
+<NoteLink to="dynamic-time-warping">Dynamic time warping</NoteLink> allows local stretching but still aligns the two
+series from start to end.
+
+MPdist compares series by their parts. Two series are similar if most subsequences of each have a close match
+somewhere in the other, in any position and any order. The join profiles $P^{AB}$ and $P^{BA}$ record, for every
+subsequence of each series, the distance to its best match in the other. Taking a small order statistic of their
+union, rather than the maximum or the mean, tolerates a minority of unmatched subsequences. Taking the $k$-th smallest
+rather than the smallest prevents one lucky match from making the two series look identical.
+
+## Details
+
+### MPdist
+
+1. Compute $P^{AB}$ ($n_A - L + 1$ entries) and $P^{BA}$ ($n_B - L + 1$ entries). One pass over the diagonals of the
+   distance matrix yields both.
+2. Concatenate them into $P^{ABBA}$ and sort.
+3. Return the $k$-th smallest value, $k = \lceil \tau (n_A + n_B) \rceil$.
+
+The cost is that of one AB-join, $O(n_A n_B)$. MPdist is not a metric: two different series that consist of the same
+subsequences in a different order have MPdist 0, and the triangle inequality can fail. It is a dissimilarity suited to
+clustering and nearest-neighbour search where the order of events within a series should not matter
+<Cite id="gharghabi2018" />.
+
+The parameter $\tau$ sets how much of the two series may lack a counterpart. With $\tau = 0.05$, MPdist is small if at
+least 5 % of the combined subsequences have close matches. The inner subsequence length $L$ is shorter than the series
+being compared and sets the scale of the parts that must match.
+
+### Snippets
+
+A long series, such as a day of accelerometer data, often consists of a few recurring behaviours. Motifs report the
+closest repeated pairs, which may be rare. Snippets report the typical behaviours and the share of the series each one
+represents <Cite id="imani2018" />.
+
+1. Split the series into non-overlapping candidate segments of length $m$.
+2. For each candidate $c$, compute its MPdist profile $M_c$: the MPdist between the candidate and every length-$m$
+   subsequence of the series, using an inner length $L < m$.
+3. Greedily choose snippets. The first is the candidate whose profile has the smallest area,
+   $\sum_i M_{c,i}$. Each next one is the candidate that most reduces the area under the elementwise minimum of the
+   chosen profiles, $\sum_i \min_{c \in S} M_{c,i}$, where $S$ is the set chosen so far.
+4. Report, for each snippet, the fraction of positions $i$ at which its profile is the minimum. The fractions sum to 1
+   and describe how much of the series each snippet represents.
+
+The greedy choice reduces the area under the minimum profile at each step. It needs one MPdist profile per candidate,
+about $n/m$ profiles for a series of length $n$.
+
+## Worked example
+
+Take three series of 100 points each, sampled at unit steps with added Gaussian noise of standard deviation 0.1:
+$A$ is a sine of period 25; $B$ is the same sine shifted by 9 steps; $C$ is a square wave of period 25 in phase with
+$A$. Use $L = 20$ and $\tau = 0.05$, so $k = \lceil 0.05 \cdot 200 \rceil = 10$ of the 162 joined profile values.
+
+| Pair     | Euclidean distance after z-normalisation | MPdist |
+| -------- | ---------------------------------------- | ------ |
+| $A$, $B$ | 18.04                                    | 0.561  |
+| $A$, $C$ | 4.78                                     | 1.660  |
+
+Euclidean distance ranks the square wave as the closer series, because it is in phase with $A$ and the phase shift of
+$B$ moves every point. MPdist ranks the shifted sine as closer, because every length-20 window of $B$ has a near copy
+in $A$ at a different offset, while no window of the square wave looks like a window of a sine.
+
+## Assumptions
+
+- **Order does not matter.** MPdist deliberately ignores the order of subsequences. If the order of events carries the
+  meaning, as in a sequence of steps in a procedure, MPdist discards it.
+- **A shared scale.** The inner length $L$ must be long enough to capture the recurring shapes and short enough that
+  each series contains many of them.
+
+## Pitfalls
+
+- **Not a metric.** Indexing structures that rely on the triangle inequality do not apply.
+- **Very different lengths.** When one series is much shorter, $k$ is dominated by the longer series' length, and the
+  short series' profile makes up a small share of $P^{ABBA}$.
+- **Snippet length.** Snippets of length $m$ describe behaviours of that duration. A behaviour much longer than $m$ is
+  split across several snippets.

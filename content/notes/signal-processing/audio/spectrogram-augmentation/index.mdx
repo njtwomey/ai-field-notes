@@ -1,0 +1,71 @@
+---
+title: Spectrogram augmentation
+kind: technique
+summary: 'SpecAugment augments training data directly on log-mel spectrograms: it warps the time axis, masks random bands of $f \sim U[0, F]$ mel channels and random spans of $t \sim U[0, T]$ frames. Cheap and label-preserving, it regularises speech and audio models strongly.'
+tags: [audio, speech, data-augmentation, deep-learning, worked-example]
+aliases: [SpecAugment, frequency masking, time masking, time warping, spectrogram masking]
+requires: [mel-spectrogram]
+related: [mfcc]
+references: [park2019]
+status: draft
+updated: 2026-09-26
+---
+
+import { SpecAugmentDemo } from './SpecAugmentDemo'
+
+<Definition>
+SpecAugment is a family of random transformations applied to the log-mel spectrogram of each training example, not to
+the waveform <Cite id="park2019" />. For a spectrogram with $\nu$ mel channels and $\tau$ frames, it applies:
+
+- **time warping** with parameter $W$;
+- $m_F$ **frequency masks**, each zeroing $f$ consecutive channels $[f_0, f_0 + f)$, with $f \sim U[0, F]$ and
+  $f_0 \sim U[0, \nu - f)$;
+- $m_T$ **time masks**, each zeroing $t$ consecutive frames $[t_0, t_0 + t)$, with $t \sim U[0, T]$,
+  $t_0 \sim U[0, \tau - t)$, and $t \le p\,\tau$.
+</Definition>
+
+## The three operations
+
+**Time warping.** A random point on the time axis, inside $(W, \tau - W)$, is moved left or right by a distance drawn
+uniformly from $[0, W)$, and the spectrogram is stretched on one side and compressed on the other to follow. It
+imitates small local changes of speaking rate. The original implementation uses an image-warping routine with
+anchor points on the image boundary; a piecewise-linear resampling of the time axis has the same effect.
+
+**Frequency masking.** Setting a band of channels to the mean value removes, for example, part of the formant
+structure or a range of harmonics. The model must recognise the input from the remaining bands, which mimics partial
+frequency loss from channels, codecs and noise. After per-channel mean normalisation the mean is 0, so masks are zeros.
+
+**Time masking.** Zeroing a span of frames removes a short stretch of speech, forcing the model to use context from
+either side. The upper bound $t \le p\tau$ keeps masks from covering most of a short utterance.
+
+## Why it works
+
+The transformations do not change the label: a warped or partly masked utterance still says the same words. They are
+applied on the fly, cost almost nothing, and work on the features the network actually sees, so no audio
+resynthesis is needed. Masking acts like structured dropout on the input, pushing the model away from relying on any
+single band or instant. On LibriSpeech and Switchboard it turned recognisers that overfit into ones that underfit,
+which then benefited from larger models and longer training <Cite id="park2019" />.
+
+## Worked example
+
+The published policies, for 80-channel inputs <Cite id="park2019" />:
+
+| Policy | $W$ | $F$ | $m_F$ | $T$ | $p$ | $m_T$ |
+| --- | --- | --- | --- | --- | --- | --- |
+| LB | 80 | 27 | 1 | 100 | 1.0 | 1 |
+| LD | 80 | 27 | 2 | 100 | 1.0 | 2 |
+| SM | 40 | 15 | 2 | 70 | 0.2 | 2 |
+| SS | 40 | 27 | 2 | 70 | 0.2 | 2 |
+
+Under LD, each frequency mask covers on average $27/2 = 13.5$ of 80 channels, and two of them about a third of the
+spectrum at most. With a 10 ms hop, a time mask of up to 100 frames removes up to a second of audio.
+
+<SpecAugmentDemo />
+
+## Pitfalls
+
+- **Masks must match the normalisation.** Zero means "average" only after mean normalisation. On unnormalised log-mel
+  features, zero is a specific energy level, and masks become artificial loud or quiet bands.
+- **Too strong for small inputs.** Policies tuned for long utterances can erase most of a one-second keyword or sound
+  event. Scale $T$ and $F$ to the input size.
+- **Training only.** Augmentation is applied during training; evaluation uses unaugmented spectrograms.

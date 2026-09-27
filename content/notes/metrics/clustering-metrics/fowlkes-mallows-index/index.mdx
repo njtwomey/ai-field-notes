@@ -1,0 +1,73 @@
+---
+title: Fowlkes–Mallows index
+kind: concept
+summary: 'The Fowlkes–Mallows index compares two clusterings by the pairs of items they put together: it is the geometric mean of pairwise precision and pairwise recall, $\text{TP}/\sqrt{(\text{TP} + \text{FP})(\text{TP} + \text{FN})}$. It ignores pairs kept apart and is not corrected for chance.'
+tags: [metrics, clustering, worked-example]
+aliases: [FMI, Fowlkes–Mallows score, pairwise F-score, B index]
+requires: [rand-index-and-adjusted-rand-index]
+related: [information-theoretic-clustering-metrics, precision-recall-and-f-score, k-means, gaussian-mixture-model]
+references: [fowlkes1983, pedregosa2011]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Compare a predicted clustering with a reference clustering by pairs of items. Let $\text{TP}$ be the number of pairs
+together in both, $\text{FP}$ the pairs together only in the prediction, and $\text{FN}$ the pairs together only in
+the reference. The Fowlkes–Mallows index is <Cite id="fowlkes1983" />
+
+$$
+\operatorname{FMI} = \frac{\text{TP}}{\sqrt{(\text{TP} + \text{FP})(\text{TP} + \text{FN})}}.
+$$
+</Definition>
+
+## Pairwise precision and recall
+
+Treat "these two items belong together" as a binary prediction made for every pair. The pairwise precision
+$\text{TP}/(\text{TP} + \text{FP})$ is the fraction of pairs the prediction groups that the reference also groups. The
+pairwise recall $\text{TP}/(\text{TP} + \text{FN})$ is the fraction of reference pairs the prediction recovers. The
+Fowlkes–Mallows index is the geometric mean of the two:
+
+$$
+\operatorname{FMI} = \sqrt{\frac{\text{TP}}{\text{TP} + \text{FP}} \cdot \frac{\text{TP}}{\text{TP} + \text{FN}}}.
+$$
+
+The geometric mean is close to the harmonic mean, the pairwise
+<NoteLink to="precision-recall-and-f-score">F-score</NoteLink>, when precision and recall are similar. Merging clusters
+raises recall and lowers precision; splitting does the reverse. FMI is 1 only when the two clusterings are identical.
+
+In terms of the contingency table $n_{ij}$ with row sums $a_i$ and column sums $b_j$,
+$\text{TP} = \sum_{ij}\binom{n_{ij}}2$, $\text{TP} + \text{FN} = \sum_i\binom{a_i}2$ and
+$\text{TP} + \text{FP} = \sum_j\binom{b_j}2$, so FMI takes one pass over the table.
+
+## Pairs kept apart do not count
+
+Unlike the <NoteLink to="rand-index-and-adjusted-rand-index">Rand index</NoteLink>, FMI ignores true negatives, the pairs
+both clusterings keep apart. With many clusters almost all pairs are true negatives, and they push the Rand index
+towards 1 regardless of quality. FMI avoids that inflation.
+
+FMI is still not corrected for chance. A random labelling with the same cluster sizes puts some pairs together by
+accident. For 90 items in three equal clusters, random labels give an FMI of about 0.33; for 60 items in five clusters,
+about 0.20. Fowlkes and Mallows derived the expectation and variance of the index under random labelling and used them
+to judge hierarchical clusterings level by level <Cite id="fowlkes1983" />. For a single chance-corrected number, use
+the adjusted Rand index or adjusted mutual information.
+
+## Worked example
+
+The true clustering is $\set{1,2,3}, \set{4,5,6}, \set{7,8,9}$ and the prediction is $\set{1,2,9}, \set{3,4,5,6},
+\set{7,8}$. The pair counts are $\text{TP} = 5$, $\text{FP} = 5$ and $\text{FN} = 4$.
+
+- Pairwise precision is $5/10 = 0.5$.
+- Pairwise recall is $5/9 = 0.556$.
+- $\operatorname{FMI} = 5/\sqrt{10 \cdot 9} = 0.527$.
+
+The adjusted Rand index of the same pair is 0.357: after subtracting chance, the agreement looks weaker. scikit-learn's
+`fowlkes_mallows_score` gives 0.527 <Cite id="pedregosa2011" />.
+
+## Pitfalls
+
+- **Singletons.** If the prediction puts every item alone, $\text{TP} + \text{FP} = 0$ and FMI is undefined; libraries
+  return 0.
+- **Few clusters.** One cluster containing everything has pairwise recall 1 and precision equal to the fraction of
+  pairs that truly belong together, which can be large when there are few classes.
+- **Not chance-corrected.** Compare FMI only between clusterings with similar numbers and sizes of clusters.

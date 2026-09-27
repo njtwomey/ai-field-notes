@@ -1,0 +1,93 @@
+---
+title: Audio source separation
+kind: technique
+summary: 'Source separation recovers individual sources from a mixture. Single-channel methods factorise the magnitude spectrogram, as in NMF $\Vmat \approx \Wmat\Hmat$, and separate with time-frequency masks; multichannel methods such as ICA exploit the different ways sources reach each microphone.'
+tags: [audio, music, speech, matrix-factorisation, worked-example]
+aliases: [blind source separation, NMF, non-negative matrix factorisation, time-frequency masking, soft mask, ideal binary mask, ICA for audio, cocktail party problem]
+requires: [short-time-fourier-transform]
+related: [spectral-subtraction-and-denoising, wiener-filter, kl-divergence]
+references: [lee1999, lee2001, smaragdis2003, hyvarinen2000]
+status: draft
+updated: 2026-09-26
+---
+
+import { NmfSeparation } from './NmfSeparation'
+
+<Definition>
+A mixture $x(t) = \sum_{j=1}^{J} s_j(t)$, or with several microphones $\xvec(t) = \Amat\,\svec(t)$, is observed; source
+separation estimates the sources $s_j$. Most single-channel methods work on the magnitude spectrogram, estimating each
+source's share of every time-frequency cell and applying it as a mask to the mixture's short-time Fourier transform.
+</Definition>
+
+## Non-negative matrix factorisation
+
+Arrange the mixture's magnitude spectrogram as a non-negative matrix $\Vmat \in \reals_{\ge0}^{F \times T}$, frequency
+by time. NMF approximates it as
+
+$$
+\Vmat \approx \Wmat\Hmat, \qquad \Wmat \in \reals_{\ge0}^{F \times K},\ \Hmat \in \reals_{\ge0}^{K \times T}.
+$$
+
+Each column of $\Wmat$ is a spectral template, such as a note's harmonic pattern, and the matching row of $\Hmat$ says
+how strongly it sounds in each frame. Non-negativity makes the model additive: parts combine without cancelling, so the
+factors tend to be interpretable parts of the sound <Cite id="lee1999" />. For music, each template often corresponds
+to one pitch of one instrument <Cite id="smaragdis2003" />.
+
+**Multiplicative updates.** For the generalised Kullback–Leibler divergence
+$D(\Vmat \,\|\, \Wmat\Hmat) = \sum_{ft}\brack{V_{ft}\log\frac{V_{ft}}{(\Wmat\Hmat)_{ft}} - V_{ft} + (\Wmat\Hmat)_{ft}}$,
+the gradient with respect to $H_{kt}$ is $\sum_f W_{fk} - \sum_f W_{fk}V_{ft}/(\Wmat\Hmat)_{ft}$, a positive part minus
+a negative part. Taking a gradient step with the element-wise step size $H_{kt}/\sum_f W_{fk}$ cancels the positive part
+and leaves a multiplicative update:
+
+$$
+\Hmat \leftarrow \Hmat \odot \frac{\Wmat^\top\paren{\Vmat \oslash \Wmat\Hmat}}{\Wmat^\top\ones}, \qquad
+\Wmat \leftarrow \Wmat \odot \frac{\paren{\Vmat \oslash \Wmat\Hmat}\Hmat^\top}{\ones\Hmat^\top},
+$$
+
+with $\odot$ and $\oslash$ element-wise. Products and ratios of non-negative numbers stay non-negative, so no
+projection is needed, and an auxiliary-function argument, like the one behind EM, shows that each update never
+increases the divergence <Cite id="lee2001" />. The squared-error version replaces the ratios by
+$\Wmat^\top\Vmat / \Wmat^\top\Wmat\Hmat$.
+
+## Masks
+
+Given estimates of each source's magnitude, $\hat V_j = \Wmat_j\Hmat_j$ for the templates assigned to source $j$, the
+soft or Wiener-like mask
+
+$$
+M_j(f, t) = \frac{\hat V_j(f, t)}{\sum_i \hat V_i(f, t)}
+$$
+
+splits every cell of the mixture's complex STFT in proportion, $\hat S_j = M_j \odot X$, keeping the mixture's phase,
+and the inverse STFT gives the waveform. The masks sum to 1, so the separated sources sum to the mixture. With power
+spectrograms in place of magnitudes it is exactly the <NoteLink to="wiener-filter">Wiener filter</NoteLink> gain. The
+ideal binary mask, 1 where a source dominates and 0 elsewhere, is a common oracle target.
+
+## Worked example
+
+Mix a repeated low note at 196 Hz, sounding every half second, with a sustained note at 523 Hz, and factorise the
+magnitude spectrogram (97 bins below 1.5 kHz, 92 frames) with rank $K = 2$ and 120 KL updates. One component learns the
+low note's harmonic template and pulses every half second; the other learns the high note. Masking the mixture with the
+first component's share gives a spectrogram whose cosine similarity with the low note's own spectrogram is 0.998, and the
+remainder matches the high note equally well. With $K = 1$ the single template must average both notes and nothing is
+separated.
+
+<NmfSeparation />
+
+## Several microphones
+
+With $M$ microphones and instantaneous mixing $\xvec(t) = \Amat\svec(t)$, independent component analysis finds an
+unmixing matrix $\Wmat \approx \Amat^{-1}$ by making the outputs as statistically independent as possible, for example
+by maximising their non-Gaussianity <Cite id="hyvarinen2000" />. Real rooms mix by convolution, not by a matrix; applying
+ICA in each frequency band of the STFT turns convolution into per-band multiplication, at the cost of aligning the
+permutation and scaling of sources across bands.
+
+## Pitfalls
+
+- **Choosing $K$.** Too few components merge sources; too many split one source over several, which must then be
+  grouped, by clustering the templates or by supervision.
+- **Magnitude additivity is approximate.** Magnitudes of overlapping sources do not add exactly, because their phases
+  interfere. Masks applied with the mixture phase leave artefacts where sources overlap.
+- **Supervision helps a lot.** Learning templates from isolated examples of each source first, then fixing them while
+  fitting the activations, separates far better than blind factorisation. Neural networks trained to predict masks
+  now dominate practical systems.

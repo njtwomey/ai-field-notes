@@ -1,0 +1,123 @@
+---
+title: Internal clustering indices
+kind: concept
+summary: 'Internal indices score a clustering from the data alone, without true labels, by comparing how tight clusters are with how far apart they are. The silhouette, Calinski–Harabasz, Davies–Bouldin and Dunn indices are used mainly to choose the number of clusters.'
+tags: [metrics, clustering, model-selection, worked-example]
+aliases: [silhouette score, silhouette coefficient, Calinski–Harabasz index, variance ratio criterion, Davies–Bouldin index, Dunn index, cluster validity index]
+related: [k-means, gaussian-mixture-model, rand-index-and-adjusted-rand-index, information-theoretic-clustering-metrics, pairwise-distances-and-cosine-similarity]
+references: [rousseeuw1987, calinski1974, davies1979, dunn1973, pedregosa2011]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+An internal clustering index is a function of the data $\xvec_1, \dots, \xvec_n$ and their cluster assignments only. It
+rewards clusters that are compact (small distances within a cluster) and separated (large distances between clusters).
+</Definition>
+
+## Scoring without labels
+
+External scores such as the <NoteLink to="rand-index-and-adjusted-rand-index">adjusted Rand index</NoteLink> need a
+reference clustering. In most clustering problems there is none. Internal indices judge a clustering by its geometry
+instead. Every index encodes an assumption about what a good cluster looks like, usually compact and roughly convex. A
+clustering that suits the data but violates that assumption, such as two interleaved rings, scores badly.
+
+The four indices below use a distance $d$ between points, Euclidean unless stated. Let $C_1, \dots, C_k$ be the
+clusters, $\muvec_j$ the centroid of $C_j$, and $\muvec$ the overall mean.
+
+## Silhouette
+
+For a point $\xvec_i$ in cluster $C$, let $a_i$ be its mean distance to the other points of $C$, and $b_i$ its mean
+distance to the points of the nearest other cluster. The silhouette of the point is <Cite id="rousseeuw1987" />
+
+$$
+s_i = \frac{b_i - a_i}{\max(a_i, b_i)} \in [-1, 1].
+$$
+
+A value near 1 means the point is much closer to its own cluster than to any other. A value near 0 means it lies
+between two clusters. A negative value means it is closer, on average, to another cluster. A point alone in its cluster
+gets $s_i = 0$ by convention. The silhouette score is the mean of $s_i$ over all points. Per-point silhouettes, plotted
+by cluster, show which clusters are poorly separated. The cost is $O(n^2)$ distances.
+
+## Calinski–Harabasz
+
+The Calinski–Harabasz index, or variance ratio criterion, compares the between-cluster dispersion
+$B = \sum_j \abs{C_j}\,\norm{\muvec_j - \muvec}^2$ with the within-cluster dispersion
+$W = \sum_j \sum_{\xvec \in C_j} \norm{\xvec - \muvec_j}^2$ <Cite id="calinski1974" />:
+
+$$
+\operatorname{CH} = \frac{B/(k - 1)}{W/(n - k)}.
+$$
+
+The degrees of freedom $k - 1$ and $n - k$ play the same role as in the $F$ statistic of a one-way analysis of variance.
+Higher is better. $W$ is the quantity <NoteLink to="k-means">k-means</NoteLink> minimises, and $B + W$ is the fixed
+total dispersion, so CH favours the same compact, spherical clusters. The cost is $O(nk)$.
+
+## Davies–Bouldin
+
+Let $S_j$ be the mean distance of the points of $C_j$ to $\muvec_j$, and $M_{jl} = d(\muvec_j, \muvec_l)$. For each
+cluster, take its worst ratio of combined spread to separation, and average <Cite id="davies1979" />:
+
+$$
+\operatorname{DB} = \frac1k \sum_{j=1}^k \max_{l \ne j} \frac{S_j + S_l}{M_{jl}}.
+$$
+
+Lower is better; 0 is the ideal. Each term punishes a cluster that has a wide, close neighbour.
+
+## Dunn
+
+The Dunn index divides the smallest distance between points of different clusters by the largest cluster diameter
+<Cite id="dunn1973" />:
+
+$$
+\operatorname{D} = \frac{\min_{j \ne l} \min_{\xvec \in C_j, \xvec' \in C_l} d(\xvec, \xvec')}
+{\max_j \max_{\xvec, \xvec' \in C_j} d(\xvec, \xvec')}.
+$$
+
+Higher is better. A value above 1 means every cluster is narrower than the gap to its nearest neighbour. Because it
+uses a single minimum and a single maximum, one outlier can change the index completely.
+
+## Choosing the number of clusters
+
+The main use of internal indices is to choose $k$: fit the clustering for several $k$ and pick the best score. Raw
+within-cluster dispersion $W$ cannot do this, because it always falls as $k$ grows. The indices balance compactness
+against separation, so they can peak. For a <NoteLink to="gaussian-mixture-model">Gaussian mixture</NoteLink>,
+likelihood-based criteria are an alternative.
+
+The indices do not always agree. For 300 points drawn from four overlapping Gaussian blobs (scikit-learn's
+`make_blobs` with `cluster_std=1.5` and `random_state=0`) clustered by k-means:
+
+| $k$ | Silhouette | Calinski–Harabasz | Davies–Bouldin |
+| --- | --- | --- | --- |
+| 2 | **0.416** | 284.6 | 0.905 |
+| 3 | 0.375 | 269.7 | 0.953 |
+| 4 | 0.383 | **286.7** | **0.848** |
+| 5 | 0.357 | 257.6 | 0.909 |
+| 6 | 0.327 | 249.2 | 0.941 |
+
+Calinski–Harabasz and Davies–Bouldin pick the true $k = 4$. The silhouette prefers $k = 2$, because two pairs of blobs
+overlap and merging them gives cleaner separation. Values computed with scikit-learn <Cite id="pedregosa2011" />.
+
+## Worked example
+
+Five points on a line: $0, 1$ in cluster 1 and $5, 6, 7$ in cluster 2. The centroids are 0.5 and 6; the overall mean
+is 3.8.
+
+- **Silhouette.** For the point 0, $a = 1$ and $b = (5 + 6 + 7)/3 = 6$, so $s = 1 - 1/6 = 0.833$. For the point 5,
+  $a = (1 + 2)/2 = 1.5$ and $b = (5 + 4)/2 = 4.5$, so $s = 0.667$. The other points give 0.8, 0.818 and 0.769, and the
+  mean is 0.777.
+- **Calinski–Harabasz.** $B = 2 \cdot 3.3^2 + 3 \cdot 2.2^2 = 36.3$ and $W = 0.5 + 2 = 2.5$. With $k = 2$ and $n = 5$,
+  $\operatorname{CH} = (36.3/1)/(2.5/3) = 43.56$.
+- **Davies–Bouldin.** $S_1 = 0.5$, $S_2 = 2/3$ and $M_{12} = 5.5$, so $\operatorname{DB} = (0.5 + 0.667)/5.5 = 0.212$.
+- **Dunn.** The closest points of different clusters are 1 and 5, distance 4. The widest cluster is $\set{5, 6, 7}$,
+  diameter 2. $\operatorname{D} = 4/2 = 2$.
+
+## Pitfalls
+
+- **Shape assumptions.** All four indices prefer compact, convex clusters. They mislead for density-based clusterings
+  and elongated or nested clusters.
+- **Scale.** Distances depend on feature scaling. Standardise features, or choose a distance on purpose; see
+  <NoteLink to="pairwise-distances-and-cosine-similarity">pairwise distances</NoteLink>.
+- **Comparing algorithms.** An index that shares the objective of one algorithm favours it: CH rewards whatever
+  k-means optimises.
+- **One cluster.** None of the indices is defined for $k = 1$, so none can say that the data has no cluster structure.

@@ -1,0 +1,73 @@
+---
+title: BERTScore
+kind: concept
+summary: 'BERTScore compares a candidate and a reference through contextual token embeddings. Each token is matched greedily to its most similar token in the other text by cosine similarity; the average best-match similarity gives precision and recall, and their harmonic mean is the score.'
+tags: [metrics, nlp, embeddings, worked-example]
+aliases: [BERT score, embedding-based text metric, greedy matching, token-level cosine similarity]
+requires: [dot-product]
+related: [bleu, rouge, chrf, precision-recall-and-f-score]
+references: [zhang2020]
+status: draft
+updated: 2026-09-27
+---
+
+import { GreedyMatching } from './GreedyMatching'
+
+<Definition>
+Let $\xvec_1, \dots, \xvec_k$ be the contextual embeddings of the reference tokens and $\hat\xvec_1, \dots,
+\hat\xvec_l$ those of the candidate tokens, each normalised to unit length. BERTScore is
+
+$$
+R = \frac{1}{k} \sum_{i=1}^{k} \max_{j} \xvec_i^\top \hat\xvec_j, \qquad
+P = \frac{1}{l} \sum_{j=1}^{l} \max_{i} \xvec_i^\top \hat\xvec_j, \qquad
+F = \frac{2PR}{P + R}
+$$
+
+<Cite id="zhang2020" />. For unit vectors, $\xvec^\top\hat\xvec$ is the cosine similarity. Higher is better.
+</Definition>
+
+## Matching meaning instead of strings
+
+N-gram metrics such as <NoteLink to="bleu">BLEU</NoteLink> give no credit for a synonym or a paraphrase. BERTScore
+replaces exact string matching with similarity of contextual embeddings from a pretrained transformer. Because the
+embeddings are contextual, the same word in different sentences gets different vectors, and related words with
+similar roles get nearby vectors.
+
+The matching is greedy: each reference token takes its most similar candidate token for recall, and each candidate
+token its most similar reference token for precision. Several tokens may share one match. There is no alignment
+constraint and no n-gram order, so word order enters only through the context captured in the embeddings. The
+similarity is the <NoteLink to="dot-product">dot product</NoteLink> of unit vectors.
+
+## Refinements
+
+- **Importance weighting.** Rare words carry more information than frequent ones. Weighting each token's best-match
+  similarity by its inverse document frequency, computed on the reference corpus, down-weights function words.
+- **Baseline rescaling.** Cosine similarities between contextual embeddings cluster in a narrow high range, so raw
+  scores all look close to 1. Rescaling with $(s - b)/(1 - b)$, where $b$ is the average score of random sentence
+  pairs, spreads them out without changing their ranking.
+- **Layer and model choice.** Different transformer layers give different scores. Zhang et al. chose a layer per
+  model on a validation set, and the score is only comparable between runs with the same model and layer
+  <Cite id="zhang2020" />.
+
+## Worked example
+
+The figure uses toy two-dimensional embeddings, each word a unit vector at an angle, with related words at nearby
+angles. Against the reference "the cat sat":
+
+- **"a kitten sits down".** Every reference token has a close match (the–a, cat–kitten, sat–sits), so recall is
+  $0.989$. "down" has no close match, which lowers precision to $0.902$. F is $0.943$, although the two texts share
+  no word.
+- **"the cat sat".** An exact copy scores 1 on all three.
+- **"a dog sat".** The toy embedding puts "dog" near "cat", so F is $0.964$, higher than the paraphrase. Embedding
+  similarity cannot tell a correct paraphrase from a fluent substitution of the wrong entity.
+
+<GreedyMatching />
+
+## Pitfalls
+
+- **Similar is not correct.** Negations, numbers and named entities that differ in one token can keep a high score.
+  BERTScore measures closeness in embedding space, not factual agreement.
+- **Model-dependent.** Scores change with the model, the layer, the tokeniser and whether rescaling and idf weighting
+  are used. Report all of them.
+- **Scores cluster.** Without rescaling, most pairs score between about 0.8 and 1, so small absolute differences can
+  be meaningful and large ones rare.

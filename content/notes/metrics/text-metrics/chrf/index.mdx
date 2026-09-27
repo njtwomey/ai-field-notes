@@ -1,0 +1,69 @@
+---
+title: chrF
+kind: concept
+summary: 'chrF is the $F_\beta$ score of character n-gram precision and recall, averaged over $n = 1$ to $6$ with spaces removed. Matching characters rather than words gives partial credit for inflections and compounds, which suits morphologically rich languages.'
+tags: [metrics, nlp, machine-translation, worked-example]
+aliases: [chrF, chrF++, chrF2, chrF3, character n-gram F-score]
+related: [bleu, rouge, translation-edit-rate, precision-recall-and-f-score]
+references: [popovic2015, popovic2017]
+status: draft
+updated: 2026-09-27
+---
+
+import { TextPairExplorer } from '../_shared/TextPairExplorer'
+
+<Definition>
+With spaces removed from both strings, let $\mathrm{chrP}_n$ be the fraction of the candidate's character n-grams that
+also occur in the reference and $\mathrm{chrR}_n$ the fraction of the reference's character n-grams that occur in the
+candidate, counts clipped as in <NoteLink to="bleu">BLEU</NoteLink>. With $\mathrm{chrP}$ and $\mathrm{chrR}$ their
+arithmetic means over $n = 1, \dots, N$,
+
+$$
+\mathrm{chrF}_\beta = (1 + \beta^2)\,\frac{\mathrm{chrP} \cdot \mathrm{chrR}}{\beta^2\,\mathrm{chrP} + \mathrm{chrR}},
+$$
+
+with $N = 6$ <Cite id="popovic2015" />. It lies in $[0, 1]$, often reported times 100, and higher is better.
+</Definition>
+
+## Why characters
+
+Word n-gram metrics treat "sat" and "sits", or "Haus" and "Hauses", as unrelated. Most of their characters agree, and
+character n-grams see that. The effect is largest for languages with rich inflection or compounding, where one word
+carries what English spreads over several. Popović compared word 4-grams with character n-grams of lengths up to 6 and
+found character 6-grams correlated best with human rankings; treating the space as a character did not help, so spaces
+are removed <Cite id="popovic2015" />.
+
+Averaging over $n = 1$ to 6 mixes short n-grams, which reward the right letters and word fragments, with longer ones,
+which reward whole words and word boundaries.
+
+## The weight on recall
+
+$\beta$ sets how much more recall counts than precision: $\beta = 1$ is the harmonic mean, and larger $\beta$ favours
+covering the reference. The 2015 paper compared $\beta = 1$ and $\beta = 3$ and found $\beta = 3$ better at the segment
+level <Cite id="popovic2015" />. Later experiments against direct human assessments settled on $\beta = 2$, and added
+word unigrams and bigrams to the character n-grams to form chrF++ <Cite id="popovic2017" />. The SacreBLEU
+implementation uses $\beta = 2$ by default, so "chrF" in recent papers usually means chrF2.
+
+## Worked example
+
+Reference "the cat is on the mat", candidate "the cat sat on the mat". Without spaces they are "thecatisonthemat" (16
+characters) and "thecatsatonthemat" (17 characters). Averaging the six orders gives $\mathrm{chrP} = 0.611$ and
+$\mathrm{chrR} = 0.655$, so
+
+$$
+\mathrm{chrF}_2 = 5 \cdot \frac{0.611 \times 0.655}{4 \times 0.611 + 0.655} = 0.646.
+$$
+
+The same pair has sentence-level BLEU 0 because no 4-gram matches, while chrF gives substantial credit for the
+five shared words and the shared "at" in "cat" and "sat". With $\beta = 1$ and $\beta = 3$ the score is $0.632$ and
+$0.650$: recall is slightly higher than precision here, so weighting it more raises the score.
+
+<TextPairExplorer focus="chrf" />
+
+## Pitfalls
+
+- **Character overlap is not meaning.** Two words that share letters are not necessarily related, and a paraphrase
+  with different words scores low.
+- **Word order matters only through n-grams up to length 6.** A long-range reordering that keeps local fragments
+  intact is barely penalised.
+- **State β and the n-gram settings.** chrF1, chrF2, chrF3 and chrF++ are different numbers; report which.
