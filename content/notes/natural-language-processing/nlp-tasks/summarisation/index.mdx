@@ -1,0 +1,108 @@
+---
+title: Summarisation
+kind: concept
+summary: 'Summarisation shortens a text but keeps its main content. Extractive methods select source sentences. Abstractive methods generate new text; the pointer-generator mixes generating from a vocabulary with copying source words. Faithfulness to the source is a separate requirement.'
+tags: [nlp, sequence-to-sequence, text-generation, worked-example]
+aliases: [text summarisation, text summarization, automatic summarisation, extractive summarisation, abstractive summarisation, pointer-generator network, copy mechanism, coverage mechanism]
+requires: [sequence-to-sequence, bahdanau-attention]
+related: [rouge, bertscore, hallucination-and-faithfulness, natural-language-inference, machine-translation, transformer, prompting]
+references: [see2017, maynez2020, lin2004, raffel2020, radford2019, jurafsky2025]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Summarisation maps a source document $x = (x_1, \dots, x_n)$ of $n$ tokens to a summary $y$ that is much shorter and
+keeps the source's most important content. **Extractive** summarisation builds $y$ from sentences or phrases copied
+from $x$. **Abstractive** summarisation generates $y$ token by token and may use words and sentences that do not appear
+in $x$ <Cite id="jurafsky2025" />.
+</Definition>
+
+## Intuition
+
+Extraction is safe but rigid: every sentence it outputs is true to the source, but it cannot compress, merge or
+paraphrase. Generation can write a concise summary in its own words, but it can also write things the source does not
+say. Most of the history of summarisation is a trade between those two properties.
+
+## Extractive summarisation
+
+An extractive system scores each source sentence and selects a subset that fits a length budget. Scores can come from
+position, word frequency, similarity to the document centroid, or a trained classifier that labels each sentence as in
+or out of the summary. Selection penalises redundancy, so that two near-identical sentences are not both chosen. On news,
+where writers put the key facts first, taking the first three sentences (the **lead-3** baseline) is hard to beat.
+
+## Abstractive summarisation
+
+Abstractive summarisation is a <NoteLink to="sequence-to-sequence">sequence-to-sequence</NoteLink> problem. An encoder
+reads $x$ and an attentional decoder generates $y$ with $p(y \mid x) = \prod_t p(y_t \mid y_{<t}, x)$. Two failure
+modes of the plain attentional model motivated the pointer-generator network <Cite id="see2017" />. It reproduced rare
+source words, such as names and numbers, inaccurately, because they are out of its vocabulary or have poorly trained
+embeddings. It also repeated itself.
+
+### The pointer-generator
+
+At decoder step $t$, <NoteLink to="bahdanau-attention">attention</NoteLink> gives weights $a^t_i \ge 0$ over source
+positions $i$, with $\sum_i a^t_i = 1$, and a vocabulary distribution $P_{\text{vocab}}(w)$. The model also computes a
+**generation probability** $p_{\text{gen}} \in [0, 1]$ from the context vector, the decoder state and the decoder input,
+through a sigmoid. It treats the next word as coming from one of two sources: generate from the vocabulary with
+probability $p_{\text{gen}}$, or copy the word at a source position drawn from the attention distribution with
+probability $1 - p_{\text{gen}}$. Marginalising over the two sources and over copy positions gives
+
+$$
+P(w) = p_{\text{gen}}\, P_{\text{vocab}}(w) + (1 - p_{\text{gen}}) \sum_{i \,:\, x_i = w} a^t_i.
+$$
+
+The distribution is over the union of the fixed vocabulary and the words of this source document. A source word
+outside the vocabulary has $P_{\text{vocab}}(w) = 0$ and can still be produced by copying <Cite id="see2017" />.
+
+**Coverage.** The coverage vector $c^t_i = \sum_{t' < t} a^{t'}_i$ records how much attention each source position has
+received so far. It is fed into the attention computation, and a coverage loss $\sum_i \min(a^t_i, c^t_i)$ penalises
+attending again to positions already covered. The loss is bounded by 1 at each step and discourages repetition
+<Cite id="see2017" />.
+
+### Worked example
+
+At one decoder step $p_{\text{gen}} = 0.6$. The source mentions the surname "Okonkwo" at two positions, which receive
+attention 0.3 and 0.1. "Okonkwo" is not in the vocabulary, so its probability is
+$P = 0.6 \times 0 + 0.4 \times (0.3 + 0.1) = 0.16$. The word "said" does not appear in the source and has
+$P_{\text{vocab}} = 0.05$, so $P = 0.6 \times 0.05 = 0.03$.
+
+### Pretrained models and prompting
+
+Pretrained transformer encoder-decoders fine-tuned on summarisation pairs replaced task-specific architectures. T5
+casts every task as text to text and summarises when its input is prefixed with "summarize:" <Cite id="raffel2020" />.
+Large decoder-only language models summarise from an instruction, with no summarisation-specific training. GPT-2
+produced summaries when the text "TL;DR:" was appended to an article <Cite id="radford2019" />. See
+<NoteLink to="prompting">prompting</NoteLink>.
+
+## Evaluation
+
+<NoteLink to="rouge">ROUGE</NoteLink> measures $n$-gram and longest-common-subsequence overlap between a system summary
+and reference summaries, with recall as the primary quantity <Cite id="lin2004" />. ROUGE rewards content selection but
+does not check whether the summary's claims are supported by the source. <NoteLink to="bertscore">BERTScore</NoteLink>
+matches tokens by contextual embeddings, which tolerates paraphrase but also does not check support.
+
+## Faithfulness
+
+A summary is **faithful** if every claim in it is supported by the source. Maynez et al. had annotators label summaries
+from several neural abstractive systems on the XSum dataset and found substantial amounts of hallucinated content in
+the output of every system <Cite id="maynez2020" />. They distinguished **intrinsic** hallucinations, which misrepresent
+information in the source, from **extrinsic** hallucinations, which add information that cannot be verified from the
+source. Some extrinsic content was factually true, but it was still unfaithful. Pretrained models were more faithful as
+well as better by ROUGE, and a textual entailment score correlated better with human faithfulness judgments than ROUGE
+did <Cite id="maynez2020" />. Entailment-based checking is described in
+<NoteLink to="natural-language-inference">natural language inference</NoteLink>, and the general problem in
+<NoteLink to="hallucination-and-faithfulness">hallucination and faithfulness</NoteLink>.
+
+A cause lies in the training data. XSum's reference summaries are single sentences written by journalists, and they
+often contain information that is not in the article body. A model trained to reproduce such references learns to
+add unsupported content <Cite id="maynez2020" />.
+
+## Pitfalls
+
+- **Reference summaries are one of many good summaries.** Low ROUGE does not imply a bad summary, and a high score does
+  not imply a faithful one.
+- **Position bias.** On news, models learn to summarise the lead. The same model on documents whose key content comes
+  late, such as scientific papers or meeting transcripts, misses it.
+- **Long inputs.** Transformer attention cost grows quadratically with length, so long documents are truncated or split,
+  and truncated content cannot appear in the summary.

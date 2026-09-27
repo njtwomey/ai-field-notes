@@ -1,0 +1,109 @@
+---
+title: Prompting
+kind: concept
+summary: 'Prompting specifies a task to a language model through its input text: an instruction, optional demonstrations and the query, laid out by a template. The generated text, or the most probable candidate answer, is the prediction. Wording, format and example order change results.'
+tags: [nlp, large-language-models, prompting, worked-example]
+aliases: [prompt, prompt engineering, prompt template, zero-shot prompting, few-shot prompting, system prompt, chat template, contextual calibration]
+requires: [autoregressive-transformer-language-model]
+related: [instruction-tuning-and-alignment, decoding-strategies, language-model-evaluation, temperature-scaling]
+references: [brown2020, radford2019, liu2023, zhao2021, ouyang2022]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A prompt is the text that a language model conditions on before it generates. Prompting solves a task by writing that
+text so that the model's continuation is the task's answer. A prompt $c$ is built by a **template** from an
+**instruction** that describes the task, zero or more **demonstrations** (solved examples), and the **query** $x$. The
+prediction is the generated continuation, or the candidate answer $y$ with the highest $p(y \mid c)$
+<Cite id="liu2023" />.
+</Definition>
+
+## Intuition
+
+A pretrained language model assigns probabilities to continuations of any text. Many tasks can be phrased as
+continuations: a translation follows "French:", a summary follows "TL;DR:", a label follows "Sentiment:". Prompting
+reuses one model for many tasks by changing the text in front of the query instead of the weights. GPT-2 produced
+summaries of news articles when "TL;DR:" was appended, with no training for summarisation <Cite id="radford2019" />.
+
+## Kinds of prompt
+
+- **Zero-shot.** The instruction and the query only. The model must infer the output format from the instruction.
+- **Few-shot.** $k$ demonstrations $(x_1, y_1), \dots, (x_k, y_k)$ precede the query, in the same format. GPT-3 showed
+  that accuracy often rises with $k$ without any gradient update <Cite id="brown2020" />. How the model uses the
+  demonstrations is the subject of <NoteLink to="in-context-learning">in-context learning</NoteLink>.
+- **Instruction prompts for chat models.** Models fine-tuned to follow instructions
+  (<NoteLink to="instruction-tuning-and-alignment">instruction tuning</NoteLink>) respond to requests written as they
+  would be to a person, and need fewer demonstrations <Cite id="ouyang2022" />.
+- **Reasoning prompts.** Demonstrations with worked rationales, or an instruction to reason step by step, make the model
+  write intermediate steps; see <NoteLink to="chain-of-thought">chain-of-thought prompting</NoteLink>.
+
+## Templates
+
+A template is a function from task fields to text. For sentiment classification one template is
+
+```text
+Review: {x}
+Sentiment: {y}
+```
+
+repeated for each demonstration, with the last $y$ left blank. A **verbaliser** maps each label to the word that stands
+for it, such as positive and negative. Chat models are trained on text in which each turn is wrapped in role markers
+(system, user, assistant) with special tokens. A prompt for such a model must use the same **chat template**, or the
+input is out of the training distribution. The system turn holds instructions that apply to the whole conversation.
+
+## Scoring rules
+
+There are two ways to read a prediction from the model.
+
+- **Generate and parse.** Decode a continuation and extract the answer from it. This works for any output format but
+  needs a parser, and a parsing failure counts as an error.
+- **Rank candidates.** For a closed answer set $\mathcal{Y}$, compute $\log p(v(y) \mid c)$ for each candidate's
+  verbaliser $v(y)$ and take the argmax. This always returns a valid answer. Candidates with more tokens get lower
+  log-probabilities, so scores are sometimes divided by length.
+
+## Sensitivity and contextual calibration
+
+Few-shot accuracy depends on the choice of template, the choice of demonstrations and their order. Zhao et al.
+attributed much of this variance to three biases in the model's predicted label distribution <Cite id="zhao2021" />.
+**Majority label bias**: the model favours labels frequent among the demonstrations. **Recency bias**: it favours the
+label of the last demonstrations. **Common token bias**: it favours verbalisers that are frequent in pretraining text.
+
+These biases shift the label distribution by a prompt-dependent amount regardless of the query. Suppose the model's
+label probabilities factor as
+
+$$
+p(y \mid c, x) \propto b_y(c)\, q(y \mid x),
+$$
+
+where $b_y(c) > 0$ is a bias that depends on the prompt only and $q(y \mid x)$ is the evidence from the query. For a
+**content-free** query $x_\varnothing$ such as "N/A", which carries no evidence, $q$ is uniform, so the prediction is
+proportional to the bias: $p_{\text{cf}} = p(\cdot \mid c, x_\varnothing) \propto \bvec(c)$. Dividing by it removes the
+bias:
+
+$$
+\hat p(y \mid c, x) = \frac{p(y \mid c, x) / p_{\text{cf}, y}}{\sum_{y'} p(y' \mid c, x) / p_{\text{cf}, y'}}
+\propto q(y \mid x).
+$$
+
+This is **contextual calibration** <Cite id="zhao2021" />. It is the diagonal linear map
+$\Wmat = \operatorname{diag}(p_{\text{cf}})^{-1}$ applied to the probability vector and renormalised, and it maps the
+content-free input to the uniform distribution. It needs one extra forward pass per prompt and no labelled data.
+
+### Worked example
+
+A two-label sentiment prompt gives $p_{\text{cf}} = (0.7, 0.3)$ for (positive, negative) on the content-free input "N/A".
+A test review gets $(0.6, 0.4)$, and the uncalibrated prediction is positive. Dividing elementwise gives
+$(0.6/0.7, 0.4/0.3) = (0.857, 1.333)$, which normalises to $(0.391, 0.609)$. The calibrated prediction is negative: the
+review received less positive probability than a text with no content does under the same prompt.
+
+## Pitfalls
+
+- **Prompts are hyperparameters.** Selecting a template on the test set overstates accuracy. Choose it on held-out data,
+  and report the template with the result; see <NoteLink to="language-model-evaluation">language model
+  evaluation</NoteLink>.
+- **Untrusted text in the prompt.** A prompt that includes a user's document or a web page gives that text the same
+  standing as the instruction. Instructions embedded in the included text can override the intended task (prompt
+  injection).
+- **Context length.** Demonstrations and retrieved text consume the model's fixed context window and increase cost
+  linearly in their length.

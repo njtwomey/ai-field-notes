@@ -1,0 +1,99 @@
+---
+title: Natural language inference
+kind: concept
+summary: 'Natural language inference labels a premise-hypothesis pair as entailment, contradiction or neutral: whether a reader of the premise would infer the hypothesis is true, false or undetermined. Entailment models also classify zero-shot and check faithfulness.'
+tags: [nlp, classification, benchmarks, worked-example]
+aliases: [NLI, recognising textual entailment, recognizing textual entailment, RTE, textual entailment, SNLI, MultiNLI, MNLI, hypothesis-only baseline, annotation artefacts]
+requires: [text-classification]
+related: [transformer, masked-language-modelling, sentence-embeddings]
+references: [dagan2006, bowman2015, williams2018, gururangan2018, devlin2019, yin2019, maynez2020]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Natural language inference (NLI) takes a **premise** $p$ and a **hypothesis** $h$, both sentences, and assigns one of
+three labels. **Entailment**: a typical human reading $p$ would infer that $h$ is most likely true. **Contradiction**:
+they would infer that $h$ is most likely false. **Neutral**: neither follows <Cite id="dagan2006" />
+<Cite id="bowman2015" />. The relation is judged by ordinary reading, not by strict logical proof.
+</Definition>
+
+## Intuition
+
+Deciding whether one sentence follows from another requires lexical knowledge (a dog is an animal), handling of
+negation and quantifiers, and world knowledge about what situations are compatible. NLI packs these abilities into one
+classification task with a simple input and output, which made it a standard test of sentence understanding.
+
+## Datasets
+
+The PASCAL Recognising Textual Entailment (RTE) challenges posed the two-way version, entailment or not, with a few
+hundred to a few thousand examples per round <Cite id="dagan2006" />. The Stanford NLI corpus (SNLI) scaled the task to
+570,000 human-written pairs <Cite id="bowman2015" />. Crowd workers were shown an image caption as the premise and wrote
+three hypotheses: one definitely true, one that might be true and one definitely false given the caption. MultiNLI used
+the same protocol with premises from ten genres of written and spoken English, 433,000 pairs in all
+<Cite id="williams2018" />. Its test data has a **matched** section, from genres seen in training, and a **mismatched**
+section, from genres not seen, to measure cross-genre generalisation.
+
+| premise | hypothesis | label |
+| --- | --- | --- |
+| A man is playing a guitar on stage. | A man is performing music. | entailment |
+| A man is playing a guitar on stage. | The man is asleep in bed. | contradiction |
+| A man is playing a guitar on stage. | The man is a famous musician. | neutral |
+
+## Models
+
+A **cross-encoder** reads both sentences together. BERT takes `[CLS]` $p$ `[SEP]` $h$ `[SEP]` and applies a softmax
+layer with three outputs to the final `[CLS]` vector <Cite id="devlin2019" />. Self-attention compares every token of
+$p$ with every token of $h$ in every layer. This is the standard architecture and the most accurate.
+
+A **sentence encoder** maps $p$ and $h$ to vectors $\uvec$ and $\vvec$ separately and classifies a combination such as
+$[\uvec; \vvec; \abs{\uvec - \vvec}; \uvec \odot \vvec]$, where $[\cdot\,;\cdot]$ is concatenation and $\odot$ the
+elementwise product. It is less accurate, but each sentence is encoded once. Training sentence encoders on NLI data
+was an early route to general-purpose <NoteLink to="sentence-embeddings">sentence embeddings</NoteLink>.
+
+## Annotation artefacts
+
+Crowd workers writing a contradiction often negate the premise, and workers writing an entailment often generalise it.
+The hypothesis alone therefore carries information about the label. A text classifier that sees only the hypothesis
+labelled about 67% of SNLI and 53% of MultiNLI test pairs correctly, against 33% for chance on three balanced classes
+<Cite id="gururangan2018" />. Words such as "nobody", "sleeping" and "never" signalled contradiction, and generic words
+such as "animal" and "outdoors" signalled entailment. A model can exploit these cues without comparing the two
+sentences, so benchmark accuracy overstates inference ability. A **hypothesis-only baseline** is the standard check: a
+model's gain over it measures what the model gets from reading the premise.
+
+## Uses
+
+**Zero-shot classification.** To assign text $d$ one of $K$ labels, write a hypothesis for each label, such as "This
+text is about $\langle$label$\rangle$", and run an NLI model with $d$ as premise. The label whose hypothesis has the
+highest entailment probability wins <Cite id="yin2019" />. No training data for the target labels is needed, only
+descriptive label names.
+
+**Faithfulness checking.** A generated sentence is supported by a source if the source entails it. Maynez et al. found
+that an entailment score correlated better with human judgments of summary faithfulness than
+<NoteLink to="rouge">ROUGE</NoteLink> did <Cite id="maynez2020" />. See
+<NoteLink to="hallucination-and-faithfulness">hallucination and faithfulness</NoteLink>.
+
+### Worked example
+
+A news sentence, "The striker scored twice in the second half", is to be labelled sport, politics or technology. An NLI
+model gives these logits (entailment, neutral, contradiction) for the three hypotheses "This text is about
+$\langle$label$\rangle$":
+
+| label | logits | $P(\text{entailment})$ |
+| --- | --- | --- |
+| sport | $(2.1, 0.3, -1.5)$ | 0.838 |
+| politics | $(-0.4, 1.0, 0.9)$ | 0.115 |
+| technology | $(0.8, 1.1, -0.2)$ | 0.368 |
+
+Each row's entailment probability is the softmax of its logits at the first position. The prediction is sport. The
+three entailment probabilities sum to 1.321, not 1, because each comes from a separate three-way softmax. Dividing by
+the sum gives a distribution over labels, $(0.635, 0.087, 0.279)$.
+
+## Pitfalls
+
+- **Label noise at the boundary.** Neutral and entailment are often confused by annotators, because "most likely true"
+  is a judgment. Inter-annotator agreement bounds achievable accuracy.
+- **Artefacts transfer poorly.** A model that learned negation words as contradiction cues fails on pairs where the
+  hypothesis has negation but is entailed.
+- **Zero-shot NLI depends on the hypothesis template.** "This text is about sport" and "This is a sports article" can
+  give different predictions.

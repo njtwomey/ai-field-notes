@@ -1,0 +1,150 @@
+---
+title: Machine translation
+kind: concept
+summary: 'Machine translation maps a sentence $f$ in one language to a sentence $e$ in another. Statistical MT factorised $p(e \mid f) \propto p(e)\,p(f \mid e)$ by the noisy-channel model with word alignments; neural MT models $p(e \mid f)$ directly with an attentional encoder-decoder.'
+tags: [nlp, sequence-to-sequence, machine-translation, worked-example]
+aliases: [MT, statistical machine translation, SMT, neural machine translation, NMT, noisy-channel model, IBM Model 1, word alignment, back-translation]
+requires: [bayes-theorem, sequence-to-sequence]
+related: [bahdanau-attention, transformer, bleu, byte-pair-encoding, expectation-maximisation, decoding-strategies, n-gram-language-model]
+references: [brown1993, koehn2009, bahdanau2015, vaswani2017, sennrich2016b, sennrich2016, papineni2002, jurafsky2025]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Machine translation (MT) takes a source sentence $f = (f_1, \dots, f_m)$ of $m$ tokens and produces a target sentence
+$e = (e_1, \dots, e_l)$ of $l$ tokens with the same meaning in another language. A probabilistic MT system defines
+$p(e \mid f)$ and outputs an approximation to $\hat e = \argmax_e p(e \mid f)$, found by a search over target sentences
+called **decoding** <Cite id="koehn2009" />.
+</Definition>
+
+## Intuition
+
+Translation is hard to learn as one step. Early systems split it into two easier models: one that knows what fluent
+target text looks like, and one that knows which source words correspond to which target words. Neural systems learn one
+conditional model end to end, with an attention mechanism that plays the role of the word correspondence.
+
+## The noisy-channel model
+
+By <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink>, $p(e \mid f) = p(e)\, p(f \mid e) / p(f)$. The denominator
+does not depend on $e$, so
+
+$$
+\hat e = \argmax_{e} \; p(e)\, p(f \mid e).
+$$
+
+The noisy-channel reading imagines that the source sentence $f$ was once the target sentence $e$ and was corrupted by a
+channel. The **language model** $p(e)$, for example an <NoteLink to="n-gram-language-model">$n$-gram model</NoteLink>,
+is trained on monolingual target text and rewards fluent output. The **translation model** $p(f \mid e)$ is trained on
+parallel text and rewards adequacy: the output must account for the source words. The split lets a poor translation
+model be rescued by a good language model, which can be trained on far more data <Cite id="brown1993" />.
+
+### IBM Model 1
+
+The IBM models of Brown et al. define $p(f \mid e)$ through a hidden **alignment** $a = (a_1, \dots, a_m)$, where
+$a_j \in \{0, 1, \dots, l\}$ names the target word that generated source word $f_j$ and position 0 is a special NULL
+word $e_0$ for source words with no counterpart <Cite id="brown1993" />. Model 1, the simplest, draws each $a_j$
+uniformly and then each $f_j$ from a word translation table $t(f_j \mid e_{a_j})$:
+
+$$
+p(f, a \mid e) = \frac{\epsilon}{(l+1)^m} \prod_{j=1}^{m} t(f_j \mid e_{a_j}),
+$$
+
+where $\epsilon$ is the probability of the source length $m$. The alignment is not observed, so it is summed out. The
+sum over all $(l+1)^m$ alignments factorises, because each factor depends on one $a_j$ only:
+
+$$
+p(f \mid e) = \frac{\epsilon}{(l+1)^m} \sum_{a_1=0}^{l} \cdots \sum_{a_m=0}^{l} \prod_{j=1}^{m} t(f_j \mid e_{a_j})
+= \frac{\epsilon}{(l+1)^m} \prod_{j=1}^{m} \sum_{i=0}^{l} t(f_j \mid e_i).
+$$
+
+The table $t$ is fitted by <NoteLink to="expectation-maximisation">expectation-maximisation</NoteLink>. The same
+factorisation makes the posterior over alignments factorise too, so each $a_j$ has posterior
+
+$$
+p(a_j = i \mid f, e) = \frac{t(f_j \mid e_i)}{\sum_{i'=0}^{l} t(f_j \mid e_{i'})}.
+$$
+
+The E-step adds this posterior to the expected count $c(f_j, e_i)$ for every word pair in every sentence pair. The M-step
+sets $t(f \mid e) = c(f, e) / \sum_{f'} c(f', e)$. The log-likelihood of Model 1 is concave in $t$, so EM reaches a
+global maximum <Cite id="brown1993" />.
+
+### Worked example
+
+The parallel corpus has three German–English pairs: "das Haus" / "the house", "das Buch" / "the book" and "ein Buch" /
+"a book". The NULL word is omitted for brevity. There are four German words, so EM starts from $t(f \mid e) = 1/4$ for
+all pairs.
+
+- **Iteration 1.** In "das Haus" / "the house", each German word splits its count equally between "the" and "house".
+  "the" collects counts $\tfrac12$ for das and $\tfrac12$ for Haus from the first pair, and $\tfrac12$ each for das and
+  Buch from the second. Its total is 2, so $t(\text{das} \mid \text{the}) = 1/2$ and
+  $t(\text{Haus} \mid \text{the}) = t(\text{Buch} \mid \text{the}) = 1/4$. By the same count,
+  $t(\text{Buch} \mid \text{book}) = 1/2$.
+- **Iteration 2.** "das" is now more probable under "the" than under "house", so in the first pair it sends more of its
+  count to "the" and "Haus" sends more to "house". The estimates become $t(\text{das} \mid \text{the}) = 0.636$ and
+  $t(\text{Haus} \mid \text{house}) = 0.571$.
+- **Iteration 3.** $t(\text{das} \mid \text{the}) = t(\text{Buch} \mid \text{book}) = 0.748$ and
+  $t(\text{Haus} \mid \text{house}) = t(\text{ein} \mid \text{a}) = 0.653$.
+
+Co-occurrence across sentences resolves the ambiguity: "das" appears with "the" twice, and "Buch" with "book" twice.
+Words seen only once, "Haus" and "ein", are resolved because their partner is explained away by the other word.
+
+### Phrase-based translation
+
+Word-level models cannot translate idioms or reorder well. Phrase-based systems translate contiguous multi-word phrases,
+extracted from word alignments, and score a candidate by a log-linear combination of features: phrase translation
+probabilities in both directions, the language model, a reordering penalty and a length penalty. Feature weights are
+tuned to maximise <NoteLink to="bleu">BLEU</NoteLink> on held-out data, and a beam search builds the output left to
+right <Cite id="koehn2009" />.
+
+## Neural machine translation
+
+Neural MT models the conditional directly, one target token at a time:
+
+$$
+p(e \mid f) = \prod_{i=1}^{l} p(e_i \mid e_{<i}, f).
+$$
+
+A <NoteLink to="sequence-to-sequence">sequence-to-sequence</NoteLink> model encodes $f$ with one network and generates
+$e$ with another. Compressing the whole source into one fixed vector limits quality on long sentences.
+<NoteLink to="bahdanau-attention">Bahdanau attention</NoteLink> lets the decoder, at each output step, form a weighted
+average of the encoder states, with weights computed from the decoder state <Cite id="bahdanau2015" />. The attention
+weights are a soft, learned alignment: they replace the hard alignment variable $a_j$ of the IBM models and are trained
+jointly with the rest of the network.
+
+The <NoteLink to="transformer">transformer</NoteLink> was introduced as an MT model. It replaced recurrence with
+self-attention in the encoder and decoder and cross-attention between them. It reached 28.4 BLEU on the WMT 2014
+English–German task, more than 2 BLEU above the previous best systems, at a fraction of their training cost
+<Cite id="vaswani2017" />.
+
+**Open vocabulary.** A fixed word vocabulary cannot represent rare names or compounds. Segmenting words into subword
+units by <NoteLink to="byte-pair-encoding">byte-pair encoding</NoteLink> lets the model copy and compose unseen words
+from pieces <Cite id="sennrich2016" />.
+
+**Decoding.** The argmax over sentences is intractable. Beam search keeps the $B$ highest-scoring partial translations
+at each step. Log-probabilities are summed over tokens, which favours short outputs, so scores are usually divided by
+the length or a function of it. See <NoteLink to="decoding-strategies">decoding strategies</NoteLink>.
+
+### Back-translation
+
+Parallel text is scarce; monolingual target-language text is plentiful. Neural MT has no separate language model to
+absorb it. Back-translation trains a reverse model $p(f \mid e)$ on the parallel data, translates target-language
+monolingual sentences into synthetic source sentences, and adds the synthetic pairs to the training data
+<Cite id="sennrich2016b" />. The target side of every synthetic pair is real text, so the decoder learns to produce
+fluent target sentences even though the source side is noisy. Sennrich et al. reported gains of 2.8 to 3.7 BLEU on WMT
+2015 English↔German and 2.1 to 3.4 BLEU on IWSLT 2014 Turkish→English <Cite id="sennrich2016b" />.
+
+## Evaluation
+
+Human judgments of adequacy and fluency are the reference standard. <NoteLink to="bleu">BLEU</NoteLink> is the standard
+automatic metric: a geometric mean of modified $n$-gram precisions against one or more reference translations, times a
+brevity penalty <Cite id="papineni2002" />. BLEU is meaningful for comparing systems on a whole test set, not for judging
+single sentences.
+
+## Pitfalls
+
+- **Translations must be judged against the source.** A fluent output can omit or invent content, and fluency makes
+  such errors harder to spot without reading the source.
+- **Domain shift.** A model trained on news or parliamentary text translates medical or colloquial text poorly.
+- **BLEU scores depend on tokenisation and references.** Numbers from different papers are comparable only when the
+  test set, reference count and tokenisation match.

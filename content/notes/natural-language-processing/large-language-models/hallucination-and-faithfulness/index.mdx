@@ -1,0 +1,119 @@
+---
+title: Hallucination and faithfulness
+kind: concept
+summary: 'A hallucination is fluent generated text unsupported by its source or by fact. Intrinsic ones contradict the source; extrinsic ones add unverifiable content. Detection checks outputs against sources, measures agreement between samples, or uses the model''s calibrated confidence.'
+tags: [nlp, large-language-models, text-generation, evaluation, calibration, worked-example]
+aliases: [hallucination, LLM hallucination, confabulation, faithfulness, factuality, intrinsic hallucination, extrinsic hallucination, semantic entropy, SelfCheckGPT, P(True), P(IK)]
+requires: [autoregressive-transformer-language-model, entropy]
+related: [retrieval-augmented-generation, calibration-error, classifier-calibration, temperature-scaling, decoding-strategies, chain-of-thought]
+references: [ji2023, maynez2020, kadavath2022, manakul2023, farquhar2024, kalai2024]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A hallucination is content in generated text that is not supported by the source the text should be based on, or not
+true of the world, presented as fluently as supported content <Cite id="ji2023" />. **Faithfulness** is consistency with
+a given source, such as the document being summarised. **Factuality** is consistency with world knowledge. An
+**intrinsic** hallucination contradicts the source; an **extrinsic** hallucination adds information that the source
+neither supports nor contradicts <Cite id="maynez2020" />.
+</Definition>
+
+## Intuition
+
+A language model is trained to produce likely text, not true text. When the training data make a continuation likely,
+it is usually also true. When the model lacks the relevant knowledge, a likely-sounding continuation is still available:
+a plausible name, a plausible date, a plausible citation. Nothing in the generated text marks the difference, because
+the same process produces both.
+
+## Types
+
+The source and the task decide what counts as a hallucination <Cite id="ji2023" />.
+
+- **Source-grounded tasks** (summarisation, translation, retrieval-augmented answering) are judged by faithfulness. An
+  extrinsic addition is unfaithful even when it happens to be true. Maynez et al. found hallucinated content in the
+  output of every neural summariser they evaluated, and some extrinsic hallucinations were factually correct
+  <Cite id="maynez2020" />.
+- **Open-ended tasks** (closed-book question answering, dialogue, writing) have no source, and are judged by
+  factuality. Invented citations, biographical details and quotations are typical.
+
+## Causes
+
+- **Data.** Training pairs whose target contains information absent from the input teach the model to add information.
+  Reference summaries that go beyond their articles are an example <Cite id="maynez2020" />.
+- **The objective.** Maximum likelihood rewards putting probability on plausible continuations. For arbitrary facts that
+  cannot be inferred from other data, such as a person's birthday, Kalai and Vempala proved that a model calibrated in a
+  suitable sense must hallucinate at a rate close to the fraction of such facts that appear exactly once in the training
+  data <Cite id="kalai2024" />. The intuition is the Good–Turing estimate: the fraction of facts seen once estimates the
+  probability that a new fact of that kind is one never seen. A calibrated model must generate unseen facts of that kind
+  about that often, and it cannot know which of them are true. Facts that appear many times, and facts that follow
+  from rules, carry no such bound.
+- **Decoding.** Sampling at a high temperature draws from the low-probability tail, where errors are more likely. Once
+  an error is generated, later tokens condition on it and elaborate it. See
+  <NoteLink to="decoding-strategies">decoding strategies</NoteLink>.
+
+## Detection
+
+### Against a source
+
+When a source exists, check that it supports each generated claim. A <NoteLink to="natural-language-inference">natural
+language inference</NoteLink> model can score whether the source entails each output sentence. Maynez et al. found that
+an entailment score correlated better with human faithfulness judgments than ROUGE did <Cite id="maynez2020" />.
+
+### Agreement between samples
+
+Without a source, sample several answers to the same prompt. A model that knows a fact tends to state it consistently; a
+model that is guessing produces different guesses. SelfCheckGPT samples several responses and scores each sentence of
+the main response by how well the samples support it <Cite id="manakul2023" />.
+
+**Semantic entropy** makes the idea quantitative <Cite id="farquhar2024" />. The entropy of the answer strings is a poor
+measure of uncertainty, because one answer can be phrased many ways: "Paris", "It's Paris" and "The capital is Paris"
+are three strings with one meaning. Semantic entropy groups sampled answers into clusters $C$ of equal meaning, with
+two answers in the same cluster when each entails the other, and computes the entropy over meanings:
+
+$$
+\operatorname{SE}(x) = -\sum_{C} p(C \mid x) \log p(C \mid x), \qquad p(C \mid x) = \sum_{s \in C} p(s \mid x).
+$$
+
+With $M$ samples, $p(C \mid x)$ can be estimated by the fraction of samples in $C$. High semantic entropy flags
+questions on which the model's answers disagree in meaning, which are likely to be confabulations.
+
+### Worked example
+
+Ten sampled answers to one question fall into three meaning clusters of sizes 6, 3 and 1. The semantic entropy is
+$-(0.6 \ln 0.6 + 0.3 \ln 0.3 + 0.1 \ln 0.1) = 0.898$ nats. For a second question, the ten answers are ten different
+phrasings of one fact. The entropy over strings is $\ln 10 = 2.303$ nats, the maximum for ten samples, but the semantic
+entropy is 0. The string entropy would flag the confident answer as the uncertain one.
+
+### Asking the model
+
+Kadavath et al. studied whether models know what they know <Cite id="kadavath2022" />. Larger models were well
+calibrated on multiple-choice and true/false questions presented in a suitable format, with lettered options, meaning that among
+answers given probability 0.7, about 70% were correct. For open-ended answers, the model can propose an answer and then
+be asked whether it is true. The probability it assigns to "True", called P(True), was informative and fairly well
+calibrated, and improved when the model saw several of its own samples before judging one. Models could also be trained
+to predict P(IK), the probability that they know the answer, before answering; P(IK) rose appropriately when relevant
+source material was placed in the context, but its calibration degraded on new tasks <Cite id="kadavath2022" />.
+
+Calibration is measured as for any classifier, with reliability diagrams and the expected calibration error; see
+<NoteLink to="calibration-error">calibration error</NoteLink>. A calibrated confidence lets a system abstain or defer
+below a threshold. Recalibration methods such as <NoteLink to="temperature-scaling">temperature scaling</NoteLink> apply
+to a model's answer probabilities when a labelled validation set is available.
+
+## Mitigation
+
+- **Ground the answer.** <NoteLink to="retrieval-augmented-generation">Retrieval-augmented generation</NoteLink> supplies
+  evidence in the context and makes claims traceable to it.
+- **Abstain.** Answer only when a confidence score, such as low semantic entropy or high P(True), passes a threshold.
+- **Decode conservatively.** Lower temperatures reduce tail errors in factual answers.
+- **Verify.** Check claims against sources or tools after generation, and cite the evidence.
+
+## Pitfalls
+
+- **Fluency is not evidence.** Hallucinated text is as fluent and confident in tone as correct text.
+- **Overlap metrics do not measure faithfulness.** ROUGE and BLEU reward shared words; a summary with one wrong number or
+  name can score almost perfectly.
+- **Consistency is not correctness.** A model can repeat the same wrong answer in every sample. Sample agreement detects
+  uncertainty, not systematic errors.
+- **Labels depend on the source.** The same sentence can be a hallucination in a summary, because the article does not
+  support it, and correct as a general statement.

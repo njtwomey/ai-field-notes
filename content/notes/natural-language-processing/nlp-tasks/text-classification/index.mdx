@@ -1,0 +1,137 @@
+---
+title: Text classification
+kind: concept
+summary: 'Text classification assigns a document one label from a fixed set, such as a sentiment or a topic. Classical models are linear in bag-of-words counts; fine-tuned encoders put a softmax layer on a transformer; large language models classify zero-shot by scoring each label.'
+tags: [nlp, classification, supervised-learning, worked-example]
+aliases: [document classification, sentiment analysis, topic classification, spam filtering, zero-shot classification, label verbaliser]
+requires: [bag-of-words-and-tf-idf, bayes-theorem]
+related: [naive-bayes, logistic-regression, multinomial-logistic-regression, transfer-learning-and-fine-tuning, masked-language-modelling, sentence-embeddings, prompting]
+references: [jurafsky2025, mccallum1998, devlin2019, brown2020, yin2019, manning2008]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Text classification maps a document $d$, a sequence of tokens, to one label $y$ from a finite set $\mathcal{Y}$ of $K$
+classes. A classifier outputs scores or probabilities $p(y \mid d)$ for every $y \in \mathcal{Y}$ and predicts the
+highest. Sentiment analysis ($\mathcal{Y} = \{\text{positive}, \text{negative}\}$), topic labelling, spam filtering and
+intent detection are text classification tasks <Cite id="jurafsky2025" />.
+</Definition>
+
+## Intuition
+
+A classifier needs a fixed-length representation of a variable-length text. The three families of methods differ in
+where that representation comes from. Bag-of-words models count words. Fine-tuned encoders learn a vector for the whole
+text from a pretrained transformer. Large language models read the text and a description of the labels in a prompt,
+and the label is whatever the model predicts next.
+
+## Bag-of-words models
+
+A <NoteLink to="bag-of-words-and-tf-idf">bag-of-words</NoteLink> representation replaces $d$ by the vector
+$\xvec \in \reals^{V}$ of counts $n_w$ of each vocabulary word $w$, for a vocabulary of $V$ words. Word order is lost.
+For topic and sentiment, which words appear carries most of the signal.
+
+**Multinomial naive Bayes.** A generative model treats the document's tokens as independent draws from a class-specific
+distribution $\thetavec_y$ over the vocabulary, where $\theta_{y,w}$ is the probability that a token of class $y$ is
+$w$ <Cite id="mccallum1998" />. By <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink>,
+
+$$
+p(y \mid d) \propto p(y) \prod_{w} \theta_{y,w}^{n_w}.
+$$
+
+The maximum-likelihood estimate of $\theta_{y,w}$ is the fraction of class-$y$ tokens that are $w$. A word never seen
+with class $y$ would get probability zero and veto that class, so the estimate is smoothed. With add-one (Laplace)
+smoothing,
+
+$$
+\hat\theta_{y,w} = \frac{N_{y,w} + 1}{N_y + V},
+$$
+
+where $N_{y,w}$ counts occurrences of $w$ in training documents of class $y$ and $N_y = \sum_w N_{y,w}$. The
+<NoteLink to="naive-bayes">naive Bayes</NoteLink> note covers the model in general.
+
+**The decision is linear in the counts.** For two classes, take logarithms of the ratio of posteriors:
+
+$$
+\log \frac{p(y = 1 \mid d)}{p(y = 0 \mid d)} = \underbrace{\log \frac{p(y=1)}{p(y=0)}}_{b} +
+\sum_{w} n_w \underbrace{\log \frac{\theta_{1,w}}{\theta_{0,w}}}_{\beta_w} = b + \betavec^\top \xvec.
+$$
+
+Naive Bayes is therefore a linear classifier in $\xvec$. <NoteLink to="logistic-regression">Logistic regression</NoteLink>
+has the same form, $p(y = 1 \mid d) = \sigma(b + \betavec^\top \xvec)$ with $\sigma$ the logistic function.
+The two models differ in how they fit $b$ and $\betavec$. Naive Bayes sets each $\beta_w$ from counts of $w$
+alone, in one pass over the data. Logistic regression maximises the conditional likelihood of the labels, which
+adjusts correlated words jointly. With $K > 2$ classes the same argument gives $K$ linear scores and a softmax, which is
+<NoteLink to="multinomial-logistic-regression">multinomial logistic regression</NoteLink>. TF-IDF weights, word bigrams
+and binary presence features often improve both models.
+
+### Worked example
+
+Two training documents are positive, "great fun film" and "great acting". Two are negative, "boring film" and "dull
+boring plot". The vocabulary has $V = 7$ words, each class has $N_y = 5$ tokens, and the priors are $1/2$. Smoothed
+estimates have denominator $5 + 7 = 12$:
+
+| word | $\hat\theta_{+,w}$ | $\hat\theta_{-,w}$ | $\beta_w = \log(\hat\theta_{+,w} / \hat\theta_{-,w})$ |
+| --- | --- | --- | --- |
+| great | $3/12$ | $1/12$ | $\log 3$ |
+| fun | $2/12$ | $1/12$ | $\log 2$ |
+| boring | $1/12$ | $3/12$ | $-\log 3$ |
+| film | $2/12$ | $2/12$ | $0$ |
+
+The test document "great fun but boring film" contains "but", which is not in the vocabulary and is dropped. The log
+odds are $0 + \log 3 + \log 2 - \log 3 + 0 = \log 2$, so the posterior odds are $2 : 1$ and
+$p(+ \mid d) = 2/3$. "great" and "boring" cancel, "film" is neutral, and "fun" decides the label.
+
+## Fine-tuned encoders
+
+A pretrained encoder such as BERT maps the token sequence to one vector per token. BERT prepends a special `[CLS]`
+token, and its final hidden state $\hvec \in \reals^{H}$ serves as the representation of the whole text
+<Cite id="devlin2019" />. A classification layer gives
+
+$$
+p(y \mid d) = \operatorname{softmax}(\Wmat \hvec + \bvec)_y, \qquad \Wmat \in \reals^{K \times H},
+$$
+
+and all parameters, the encoder's included, are trained on labelled examples by cross-entropy. The encoder was
+pretrained by <NoteLink to="masked-language-modelling">masked language modelling</NoteLink> on unlabelled text, so it
+already represents word order, negation and context. Fine-tuning needs far fewer labelled examples than training from
+scratch; see <NoteLink to="transfer-learning-and-fine-tuning">transfer learning and fine-tuning</NoteLink>. Mean-pooled
+<NoteLink to="sentence-embeddings">sentence embeddings</NoteLink> with a linear classifier on top are a cheaper
+alternative that leaves the encoder frozen.
+
+## Zero-shot and few-shot classification with language models
+
+A generative language model can classify with no task-specific training. A prompt states the task and the text, and
+each label $y$ is written as a word or phrase $v(y)$, its **verbaliser**, such as "positive" and "negative". The model
+scores each label by the probability of its verbaliser as the continuation,
+
+$$
+\hat y = \argmax_{y \in \mathcal{Y}} \; \log p_{\text{LM}}\big(v(y) \mid \text{prompt}(d)\big),
+$$
+
+summing token log-probabilities when a verbaliser has several tokens. Adding a few labelled examples to the prompt gives
+few-shot classification <Cite id="brown2020" />; see <NoteLink to="prompting">prompting</NoteLink> and
+<NoteLink to="in-context-learning">in-context learning</NoteLink>. A model trained for
+<NoteLink to="natural-language-inference">natural language inference</NoteLink> gives another zero-shot classifier: it
+scores how strongly the text entails a hypothesis such as "This text is about sport" for each label
+<Cite id="yin2019" />.
+
+## Assumptions
+
+- **One label per document.** Multi-label tasks, where a document can have several topics, use $K$ independent binary
+  classifiers with sigmoid outputs instead of one softmax.
+- **Training and test texts come from the same distribution.** A sentiment classifier trained on film reviews degrades
+  on product reviews, because the vocabulary that signals sentiment changes.
+- **Naive Bayes assumes tokens are independent given the class.** Repeated and correlated words are counted as separate
+  evidence, which pushes its probabilities towards 0 and 1.
+
+## Pitfalls
+
+- **Imbalanced classes.** Accuracy rewards predicting the majority class. Report per-class precision and recall or
+  macro-averaged F1 <Cite id="manning2008" />.
+- **Probabilities are not calibrated by default.** Naive Bayes is overconfident, and fine-tuned networks often are too.
+  Recalibrate before thresholding; see <NoteLink to="classifier-calibration">classifier calibration</NoteLink>.
+- **Verbaliser choice changes zero-shot results.** "good" and "positive" have different prior probabilities under the
+  model, which biases the argmax toward one label.
+- **Shortcuts.** A model can learn cues that correlate with the label in the training set, such as a product name or a
+  user handle, instead of the content.
