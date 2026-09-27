@@ -1,0 +1,151 @@
+---
+title: Denoising, sparse and contractive autoencoders
+kind: concept
+summary: Regularised autoencoders learn useful codes even when the code is as wide as the input. A denoising autoencoder reconstructs clean inputs from corrupted ones, a sparse autoencoder penalises active code units, and a contractive autoencoder penalises the encoder Jacobian $\norm{\partial \hvec / \partial \xvec}_F^2$.
+tags: [deep-learning, generative-models, representation-learning, regularisation, unsupervised-learning, worked-example]
+aliases: [denoising autoencoder, DAE, sparse autoencoder, contractive autoencoder, CAE, regularised autoencoder, regularized autoencoder]
+requires: [autoencoder]
+related: [score-based-generative-models, jacobian, kl-divergence, lasso]
+references: [vincent2008, vincent2011, ng2011, rifai2011, bengio2013]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **regularised autoencoder** adds a constraint or penalty to the reconstruction objective of an
+<NoteLink to="autoencoder">autoencoder</NoteLink>, so that the identity map is no longer optimal even when the code
+dimension $k$ is at least the input dimension $d$. Three classical forms are:
+
+- **denoising**: reconstruct $\xvec$ from a corrupted copy $\tilde{\xvec} \sim C(\tilde{\xvec} \mid \xvec)$
+  <Cite id="vincent2008" />;
+- **sparse**: penalise the average activation of each code unit <Cite id="ng2011" />;
+- **contractive**: penalise the squared Frobenius norm of the encoder's Jacobian <Cite id="rifai2011" />.
+</Definition>
+
+## Why a bottleneck is not the only option
+
+An undercomplete autoencoder limits capacity through the code width $k < d$. That is a blunt constraint: a width large
+enough for good reconstructions may also be large enough to memorise. A regularised autoencoder can use a wide code and
+instead restricts how the code may depend on the input. Each method below states a different property that a good
+code should have.
+
+## Denoising autoencoder
+
+**Objective.** Corrupt each input with a known process, and train the network to undo it:
+
+$$
+L_{\text{DAE}} = \expect_{\xvec}\, \expect_{\tilde{\xvec} \sim C(\cdot \mid \xvec)} \brack{\norm{\xvec -
+g_{\thetavec}(f_{\phivec}(\tilde{\xvec}))}^2}.
+$$
+
+Vincent et al. used masking noise, which sets a random fraction of the input components to zero
+<Cite id="vincent2008" />. Additive Gaussian noise $\tilde{\xvec} = \xvec + \sigma\epsilonvec$ with $\epsilonvec \sim
+\Gauss(\zeros, \Imat)$ is the other common choice.
+
+**Why it cannot copy.** The identity map returns $\tilde{\xvec}$, whose expected error is the noise variance
+$d\sigma^2$ under Gaussian noise. The network lowers the loss only by learning which inputs are plausible and moving
+corrupted points back towards them.
+
+**What it learns.** With squared error, the optimal reconstruction of $\tilde{\xvec}$ is the conditional mean
+$\expect\brack{\xvec \mid \tilde{\xvec}}$, because the mean minimises expected squared error. For Gaussian noise
+this conditional mean satisfies Tweedie's formula,
+
+$$
+\expect\brack{\xvec \mid \tilde{\xvec}} = \tilde{\xvec} + \sigma^2 \nabla_{\tilde{\xvec}} \log p_\sigma(\tilde{\xvec}),
+$$
+
+where $p_\sigma$ is the density of the noisy data. The residual $r(\tilde{\xvec}) - \tilde{\xvec}$ of an optimal
+denoiser $r$ is therefore $\sigma^2$ times the **score** of the noised data distribution. Vincent made this link
+precise: training a denoising autoencoder with Gaussian noise is equivalent to score matching on the smoothed density
+<Cite id="vincent2011" />. This equivalence is the basis of <NoteLink to="score-based-generative-models">score-based
+generative models</NoteLink> and diffusion models.
+
+<Derivation title="Tweedie's formula for Gaussian noise">
+Write $p_\sigma(\tilde{\xvec}) = \int p(\xvec)\, \Gauss(\tilde{\xvec}; \xvec, \sigma^2\Imat)\, d\xvec$. The gradient of
+the Gaussian density with respect to $\tilde{\xvec}$ is $\Gauss(\tilde{\xvec}; \xvec, \sigma^2\Imat)\,(\xvec -
+\tilde{\xvec})/\sigma^2$. Differentiating under the integral,
+
+$$
+\nabla p_\sigma(\tilde{\xvec}) = \frac{1}{\sigma^2}\int (\xvec - \tilde{\xvec})\, p(\xvec)\, \Gauss(\tilde{\xvec};
+\xvec, \sigma^2\Imat)\, d\xvec.
+$$
+
+Divide by $p_\sigma(\tilde{\xvec})$. By Bayes' theorem $p(\xvec)\Gauss(\tilde{\xvec}; \xvec, \sigma^2\Imat) /
+p_\sigma(\tilde{\xvec}) = p(\xvec \mid \tilde{\xvec})$, so
+
+$$
+\nabla \log p_\sigma(\tilde{\xvec}) = \frac{1}{\sigma^2}\paren{\expect\brack{\xvec \mid \tilde{\xvec}} -
+\tilde{\xvec}}.
+$$
+
+Rearranging gives the formula in the text.
+</Derivation>
+
+## Sparse autoencoder
+
+**Objective.** Let $h_j(\xvec) \in (0, 1)$ be the activation of code unit $j$, e.g. a sigmoid, and
+$\hat{\rho}_j = \frac1n \sum_i h_j(\xvec_i)$ its average over the training set. Choose a small target activation $\rho$,
+such as $0.05$. The sparse autoencoder adds a penalty that keeps every $\hat{\rho}_j$ near $\rho$
+<Cite id="ng2011" />:
+
+$$
+L_{\text{sparse}} = \frac1n \sum_i \norm{\xvec_i - \hat{\xvec}_i}^2 + \beta \sum_{j=1}^k \KL(\rho \,\|\, \hat{\rho}_j),
+\qquad \KL(\rho \,\|\, \hat{\rho}) = \rho \log\frac{\rho}{\hat{\rho}} + (1 - \rho)\log\frac{1 - \rho}{1 - \hat{\rho}}.
+$$
+
+The penalty is the <NoteLink to="kl-divergence">KL divergence</NoteLink> between two Bernoulli distributions with means
+$\rho$ and $\hat{\rho}_j$. It is zero when $\hat{\rho}_j = \rho$ and grows steeply as $\hat{\rho}_j$ approaches 1. The
+weight $\beta > 0$ sets its strength. An $\ell_1$ penalty $\lambda \sum_j \abs{h_j}$ on ReLU activations is a
+common alternative.
+
+**Effect.** Each input activates only a few code units. Units specialise on features that occur in a small part of the
+data, similar to sparse coding. On natural image patches, sparse autoencoders learn localised, oriented edge detectors.
+
+## Contractive autoencoder
+
+**Objective.** Penalise how strongly the code responds to small changes of the input:
+
+$$
+L_{\text{CAE}} = \frac1n \sum_i \paren{\norm{\xvec_i - \hat{\xvec}_i}^2 + \lambda \norm{\Jmat_f(\xvec_i)}_F^2},
+\qquad \Jmat_f(\xvec) = \frac{\partial f_{\phivec}(\xvec)}{\partial \xvec} \in \reals^{k \times d}.
+$$
+
+$\norm{\Jmat}_F^2 = \sum_{j, m} J_{jm}^2$ is the squared Frobenius norm of the <NoteLink to="jacobian">Jacobian</NoteLink>.
+For a one-layer sigmoid encoder $\hvec = \sigma(\Wmat\xvec + \bvec)$, the Jacobian is
+$\Jmat = \diag\paren{\hvec \odot (\ones - \hvec)}\,\Wmat$, so the penalty is cheap:
+
+$$
+\norm{\Jmat}_F^2 = \sum_{j=1}^k \paren{h_j(1 - h_j)}^2 \sum_{m=1}^d W_{jm}^2.
+$$
+
+**Effect.** Reconstruction pulls the code to vary with the input; the penalty pulls it to be constant. The balance
+makes the encoder sensitive only along directions in which the training data actually vary, the tangent directions of
+the data manifold, and insensitive in all other directions <Cite id="rifai2011" />.
+
+**Relation to denoising.** For small Gaussian corruption, a denoising autoencoder penalises the Jacobian of the whole
+reconstruction map $g \circ f$. The contractive autoencoder penalises the Jacobian of the encoder alone, analytically
+and without sampling noise <Cite id="rifai2011" />.
+
+## Worked example
+
+A contractive encoder has two sigmoid units with $\Wmat = \begin{pmatrix} 1 & -2 \\ 0.5 & 0.5 \end{pmatrix}$ and
+$\bvec = \zeros$. For $\xvec = (1, 0.5)$ the pre-activations are $\Wmat\xvec = (0, 0.75)$, so
+$\hvec = (0.5, 0.679)$. The slopes are $h_j(1 - h_j) = (0.25, 0.218)$. The Jacobian rows are $0.25 \times (1, -2) =
+(0.25, -0.5)$ and $0.218 \times (0.5, 0.5) = (0.109, 0.109)$. The penalty is
+
+$$
+\norm{\Jmat}_F^2 = 0.25^2 + 0.5^2 + 0.109^2 + 0.109^2 = 0.336.
+$$
+
+The first unit sits at its steepest point and contributes $0.3125$ of the total. Moving its pre-activation away from 0
+would shrink its slope and the penalty.
+
+## Pitfalls
+
+- **None of these is a sampler.** Like a plain autoencoder, a regularised autoencoder has no prior over codes. Its
+  generative use comes indirectly, e.g. through the score interpretation of denoising.
+- **Noise level.** A denoising autoencoder with tiny noise is nearly an identity map; with very large noise it learns
+  little more than the data mean. The noise scale is a hyperparameter to tune.
+- **Dead units.** A strong sparsity penalty can switch some units off for every input.
+- **Cost of the contractive penalty in deep encoders.** For a deep encoder the Jacobian no longer has the cheap
+  closed form above, and its exact Frobenius norm costs one backward pass per code dimension.

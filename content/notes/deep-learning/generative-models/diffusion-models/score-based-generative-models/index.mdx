@@ -1,0 +1,212 @@
+---
+title: Score matching and score-based generative models
+kind: concept
+summary: A score-based model learns the score $\nabla_{\xvec} \log p(\xvec)$ of data blurred by noise at many levels, by denoising score matching, and samples by following the score from noise to data with Langevin dynamics or a reverse-time SDE. Diffusion models are one instance.
+tags: [deep-learning, generative-models, diffusion-models, score-matching, stochastic-differential-equations, worked-example]
+aliases: [score matching, denoising score matching, score function of a density, Stein score, noise-conditional score network, NCSN, Langevin dynamics, annealed Langevin dynamics, score SDE, reverse-time SDE, probability flow ODE, VP SDE, VE SDE]
+requires: [denoising-diffusion-probabilistic-models, gradient]
+related: [regularised-autoencoders, ddim, integration-by-parts, change-of-variables, score-function-estimator]
+references: [hyvarinen2005, vincent2011, song2019, song2021, anderson1982, karras2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { NoisedMixture } from '../_shared/NoisedMixture'
+
+<Definition>
+The **score** of a density $p$ on $\reals^d$ is the gradient of its logarithm, $\svec(\xvec) = \nabla_{\xvec} \log
+p(\xvec)$, a vector field on $\reals^d$. A **score-based generative model** trains a network
+$\svec_{\thetavec}(\xvec, \sigma)$ to approximate the score of the data distribution convolved with Gaussian noise of
+scale $\sigma$, for a range of scales, and generates samples by moving noise along the learned score field
+<Cite id="song2019" /> <Cite id="song2021" />. The score here is a gradient with respect to the data $\xvec$. It is not
+the gradient with respect to parameters used by the <NoteLink to="score-function-estimator">score-function
+estimator</NoteLink>.
+</Definition>
+
+## Why learn the score
+
+An energy-based density $p_{\thetavec}(\xvec) = \exp(-E_{\thetavec}(\xvec)) / Z(\thetavec)$ has a normalising constant
+$Z(\thetavec) = \int \exp(-E_{\thetavec}(\xvec))\, d\xvec$ that is intractable in high dimensions. Maximum likelihood
+needs it. The score does not:
+
+$$
+\nabla_{\xvec} \log p_{\thetavec}(\xvec) = -\nabla_{\xvec} E_{\thetavec}(\xvec) - \underbrace{\nabla_{\xvec} \log
+Z(\thetavec)}_{=\,0}.
+$$
+
+The score also suffices for sampling. Langevin dynamics draws samples from $p$ using only $\nabla \log p$: with step
+size $\eta > 0$ and $\zvec_k \sim \Gauss(\zeros, \Imat)$,
+
+$$
+\xvec_{k+1} = \xvec_k + \frac{\eta}{2}\, \nabla_{\xvec} \log p(\xvec_k) + \sqrt{\eta}\, \zvec_k.
+$$
+
+As $\eta \to 0$ and the number of steps grows, the distribution of $\xvec_k$ converges to $p$ under regularity
+conditions. The gradient term climbs towards high density; the noise keeps the chain from collapsing onto a mode.
+
+## Score matching
+
+The obvious objective, $\tfrac12\expect_p\norm{\svec_{\thetavec}(\xvec) - \nabla \log p(\xvec)}^2$, contains the
+unknown score of the data. Hyvärinen showed that it equals, up to a constant that does not depend on $\thetavec$,
+
+$$
+J(\thetavec) = \expect_{p}\brack{\tfrac12\norm{\svec_{\thetavec}(\xvec)}^2 + \trace\paren{\nabla_{\xvec}
+\svec_{\thetavec}(\xvec)}},
+$$
+
+which needs only samples from $p$ <Cite id="hyvarinen2005" />. The proof in one dimension: expanding the square gives
+$\tfrac12 s_{\thetavec}^2$, a term free of $\thetavec$, and the cross term $-\expect_p\brack{s_{\thetavec}(x)\,(\log
+p)'(x)}$. Since $p\,(\log p)' = p'$, <NoteLink to="integration-by-parts">integration by parts</NoteLink> moves the
+derivative onto $s_{\thetavec}$:
+
+$$
+-\int s_{\thetavec}(x)\, p'(x)\, dx = -\brack{s_{\thetavec}\, p}_{-\infty}^{\infty} + \int s_{\thetavec}'(x)\, p(x)\, dx
+= \expect_p\brack{s_{\thetavec}'(x)},
+$$
+
+assuming $s_{\thetavec}(x)p(x) \to 0$ in the tails. In $d$ dimensions the same step applies to each coordinate and the
+derivatives sum to the trace. The trace of the Jacobian needs $d$ backward passes, which is too expensive for images.
+
+## Denoising score matching
+
+Perturb each data point with Gaussian noise, $\tilde{\xvec} = \xvec + \sigma\epsilonvec$. The perturbed density is
+$q_\sigma(\tilde{\xvec}) = \int p(\xvec)\, \Gauss(\tilde{\xvec}; \xvec, \sigma^2\Imat)\, d\xvec$. Vincent showed that
+matching its score is equivalent, up to a constant, to regressing onto the score of the known noise kernel
+<Cite id="vincent2011" />:
+
+$$
+J_{\text{DSM}}(\thetavec) = \tfrac12\, \expect_{\xvec,\, \tilde{\xvec}}\brack{\norm{\svec_{\thetavec}(\tilde{\xvec}) -
+\nabla_{\tilde{\xvec}} \log \Gauss(\tilde{\xvec}; \xvec, \sigma^2\Imat)}^2} = \tfrac12\, \expect_{\xvec,
+\epsilonvec}\brack{\norm{\svec_{\thetavec}(\xvec + \sigma\epsilonvec) + \frac{\epsilonvec}{\sigma}}^2}.
+$$
+
+Everything in this loss is computable. The network learns to point from a noisy sample back towards the clean one,
+scaled by $1/\sigma$, which is the task of a denoising autoencoder. Because the optimum is $\svec_{\thetavec} = \nabla
+\log q_\sigma$, the learned field is the score of the smoothed density, not of $p$ itself; the two agree as
+$\sigma \to 0$.
+
+<Derivation title="Why denoising score matching targets the smoothed score">
+Expand $\tfrac12\expect_{q_\sigma}\norm{\svec_{\thetavec}(\tilde{\xvec}) - \nabla \log q_\sigma(\tilde{\xvec})}^2$.
+The only term that couples $\thetavec$ and the unknown score is $-\expect_{q_\sigma}\brack{\svec_{\thetavec}^\top
+\nabla \log q_\sigma}$. Using $q_\sigma \nabla \log q_\sigma = \nabla q_\sigma$ and differentiating under the integral,
+
+$$
+\int \svec_{\thetavec}(\tilde{\xvec})^\top \nabla q_\sigma(\tilde{\xvec})\, d\tilde{\xvec} = \iint
+\svec_{\thetavec}(\tilde{\xvec})^\top \nabla_{\tilde{\xvec}} \log \Gauss(\tilde{\xvec}; \xvec, \sigma^2\Imat)\;
+\Gauss(\tilde{\xvec}; \xvec, \sigma^2\Imat)\, p(\xvec)\, d\xvec\, d\tilde{\xvec}.
+$$
+
+The right side is the cross term of $J_{\text{DSM}}$. The squared-norm terms in $\svec_{\thetavec}$ are identical in
+both objectives, and the remaining terms do not depend on $\thetavec$. So the two objectives differ by a constant. The
+kernel score is $\nabla_{\tilde{\xvec}} \log \Gauss(\tilde{\xvec}; \xvec, \sigma^2\Imat) = -(\tilde{\xvec} -
+\xvec)/\sigma^2 = -\epsilonvec/\sigma$.
+</Derivation>
+
+## Many noise levels and annealed Langevin dynamics
+
+A score learned at a single small $\sigma$ fails for sampling, for two reasons identified by Song and Ermon
+<Cite id="song2019" />. In regions of low data density there are few training points, so the score estimate is poor
+exactly where a chain started from noise begins. And Langevin dynamics mixes slowly between separated modes, so it
+recovers their relative weights badly.
+
+Large noise fills the space and connects the modes, but blurs the data. The noise-conditional score network (NCSN)
+therefore trains one network $\svec_{\thetavec}(\xvec, \sigma)$ on a geometric sequence $\sigma_1 > \sigma_2 > \dots
+> \sigma_L$, with the denoising loss at level $\sigma$ weighted by $\sigma^2$ so that all levels contribute similarly.
+**Annealed Langevin dynamics** samples by running a few Langevin steps at $\sigma_1$, using the result to start the
+chain at $\sigma_2$, and so on down to $\sigma_L$ <Cite id="song2019" />.
+
+<NoisedMixture initialView="score" />
+
+In the figure's score view, the field at small $t$ has steep, separate basins around each mode and is nearly flat in
+the gaps between them. At large $t$ it is close to the straight line $-x$, the score of $\Gauss(0, 1)$, and a sampler
+started anywhere is pulled towards the centre.
+
+## The stochastic differential equation view
+
+Song et al. took the number of noise levels to infinity <Cite id="song2021" />. A **forward SDE** diffuses data into
+noise over $t \in [0, T]$:
+
+$$
+d\xvec = \fvec(\xvec, t)\, dt + g(t)\, d\wvec,
+$$
+
+where $\wvec$ is a standard Wiener process, $\fvec$ the drift and $g$ the diffusion coefficient. Write $p_t$ for the
+marginal density of $\xvec_t$. Anderson showed that the process run backwards in time is also a diffusion
+<Cite id="anderson1982" />:
+
+$$
+d\xvec = \brack{\fvec(\xvec, t) - g(t)^2\, \nabla_{\xvec} \log p_t(\xvec)}\, dt + g(t)\, d\bar{\wvec},
+$$
+
+where $dt$ is a negative time step and $\bar{\wvec}$ a Wiener process in reverse time. The only unknown is the score of
+each marginal. A network $\svec_{\thetavec}(\xvec, t)$ is trained by denoising score matching at random $t$, and a
+numerical SDE solver integrates the reverse SDE from $\xvec_T \sim p_T$ to $t = 0$.
+
+Two families of forward SDEs recover the earlier models:
+
+- **Variance preserving (VP):** $d\xvec = -\tfrac12\beta(t)\,\xvec\, dt + \sqrt{\beta(t)}\, d\wvec$. It is the
+  continuous limit of the DDPM step $\xvec_t = \sqrt{1 - \beta_t}\,\xvec_{t-1} + \sqrt{\beta_t}\,\zvec$, since
+  $\sqrt{1 - \beta} \approx 1 - \beta/2$ for small $\beta$.
+- **Variance exploding (VE):** $d\xvec = \sqrt{d\sigma^2(t)/dt}\; d\wvec$. It is the continuous limit of NCSN, whose
+  noise scale grows without a shrinking drift.
+
+In the VP case the <NoteLink to="denoising-diffusion-probabilistic-models">DDPM</NoteLink> noise predictor and the score
+are the same network up to scale: $\svec_{\thetavec}(\xvec_t, t) = -\epsilonvec_{\thetavec}(\xvec_t, t) / \sqrt{1 -
+\bar\alpha_t}$.
+
+**Probability flow ODE.** The deterministic ODE
+
+$$
+\frac{d\xvec}{dt} = \fvec(\xvec, t) - \tfrac12\, g(t)^2\, \nabla_{\xvec} \log p_t(\xvec)
+$$
+
+has the same marginals $p_t$ as the SDE <Cite id="song2021" />. It maps each noise sample to one data sample and back,
+so it defines a continuous normalising flow: exact log-likelihoods follow from the instantaneous
+<NoteLink to="change-of-variables">change of variables</NoteLink>, and high-order ODE solvers need far fewer steps than
+the SDE. <NoteLink to="ddim">DDIM</NoteLink> is a discretisation of this ODE.
+
+<Derivation title="Why the reverse SDE and the probability flow ODE have the right marginals">
+The marginals of the forward SDE obey the Fokker–Planck equation
+
+$$
+\partial_t p_t = -\nabla \cdot (\fvec\, p_t) + \tfrac12 g^2\, \Delta p_t.
+$$
+
+Since $\Delta p_t = \nabla \cdot (p_t \nabla \log p_t)$, the diffusion term can be moved into the drift:
+
+$$
+\partial_t p_t = -\nabla \cdot \brack{\paren{\fvec - \tfrac12 g^2 \nabla \log p_t}\, p_t}.
+$$
+
+This is the continuity equation of the ODE $d\xvec/dt = \fvec - \tfrac12 g^2 \nabla \log p_t$, which proves the
+probability flow claim. For the reverse SDE, write the same equation as
+$\partial_t p_t = -\nabla \cdot \brack{\paren{\fvec - g^2 \nabla \log p_t}\, p_t} - \tfrac12 g^2 \Delta p_t$. In the
+reversed time $\tau = T - t$ this reads $\partial_\tau p = -\nabla \cdot \brack{-\paren{\fvec - g^2\nabla \log p}\, p} +
+\tfrac12 g^2 \Delta p$, the Fokker–Planck equation of an SDE with drift $-(\fvec - g^2 \nabla \log p)$ and diffusion
+$g$ in $\tau$. Converting back to $t$ gives the reverse SDE. Anderson's result is stronger: it matches whole paths, not
+only marginals <Cite id="anderson1982" />.
+</Derivation>
+
+## Worked example
+
+For a Gaussian $p = \Gauss(\mu, \sigma^2)$ in one dimension the score is $s(x) = -(x - \mu)/\sigma^2$: it points
+towards the mean with strength proportional to the distance.
+
+- **Langevin step.** For $p = \Gauss(0, 1)$, start at $x = 2$ with $\eta = 0.1$ and noise draw $z = 0.5$. The update
+  is $x = 2 + 0.05 \times (-2) + \sqrt{0.1} \times 0.5 = 2 - 0.1 + 0.158 = 2.058$. The drift moves the sample towards
+  the mode; this noise draw happens to push it further out.
+- **Denoising target.** With $\sigma = 0.5$, a clean point $x = 1$ and $\epsilon = 0.4$, the noisy input is
+  $\tilde{x} = 1.2$ and the regression target is $-\epsilon/\sigma = -0.8$.
+- **Score of the smoothed density.** If the data are $\Gauss(0, 1)$, the perturbed density is $\Gauss(0, 1 + \sigma^2)
+  = \Gauss(0, 1.25)$ and its score at $\tilde{x} = 1.2$ is $-1.2/1.25 = -0.96$. The single-sample target $-0.8$
+  differs from it; the average of the target over all clean points consistent with $\tilde{x} = 1.2$ equals $-0.96$.
+
+## Pitfalls
+
+- **The trace term does not scale.** Exact score matching needs the Jacobian trace; use denoising or sliced score
+  matching for high-dimensional data.
+- **Noise-level design matters.** The largest $\sigma$ must be comparable to the largest distance between data points,
+  or chains stay trapped. Karras et al. showed that noise schedules, loss weights and samplers can be chosen
+  separately, and tuned them jointly for large gains in quality per network evaluation <Cite id="karras2022" />.
+- **Learned scores are not conservative.** A network output need not be the gradient of any function. Sampling works
+  regardless, but the energy interpretation is only approximate.

@@ -1,0 +1,122 @@
+---
+title: DDIM and fast diffusion sampling
+kind: technique
+summary: DDIM samples from a trained diffusion model in tens of steps instead of a thousand. It uses a non-Markovian forward process with the same marginals $q(\xvec_t \mid \xvec_0)$, so no retraining is needed, and its deterministic form is an Euler discretisation of the probability flow ODE.
+tags: [deep-learning, generative-models, diffusion-models, sampling, ordinary-differential-equations, worked-example]
+aliases: [DDIM, denoising diffusion implicit models, deterministic diffusion sampler, DDIM inversion, fast diffusion sampling, eta parameter]
+requires: [denoising-diffusion-probabilistic-models]
+related: [score-based-generative-models, diffusion-guidance, latent-diffusion]
+references: [song2021b, song2021, karras2022]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Denoising diffusion implicit models** (DDIM) are a family of samplers for a diffusion model trained with the DDPM
+noise-prediction loss <Cite id="song2021b" />. From $\xvec_t$, the network's noise estimate
+$\hat{\epsilonvec} = \epsilonvec_{\thetavec}(\xvec_t, t)$ gives a prediction of the clean data
+$\hat{\xvec}_0 = \paren{\xvec_t - \sqrt{1 - \bar\alpha_t}\,\hat{\epsilonvec}} / \sqrt{\bar\alpha_t}$, and the sampler
+moves to an earlier step $s < t$ by
+
+$$
+\xvec_s = \sqrt{\bar\alpha_s}\,\hat{\xvec}_0 + \sqrt{1 - \bar\alpha_s - \sigma^2}\;\hat{\epsilonvec} + \sigma\zvec,
+\qquad \zvec \sim \Gauss(\zeros, \Imat).
+$$
+
+With $\sigma = 0$ the sampler is deterministic. The steps $s$ and $t$ need not be adjacent, so a sampler can visit a
+short subsequence of the training steps.
+</Definition>
+
+## Problem
+
+A <NoteLink to="denoising-diffusion-probabilistic-models">DDPM</NoteLink> sampler reverses the forward chain one step
+at a time. Each step is valid only because it is small, so sampling needs all $T$ steps, often $T = 1000$ network
+evaluations per sample. Skipping steps in the DDPM update gives poor samples.
+
+## Mechanism
+
+**The training loss depends only on the marginals.** The DDPM objective $L_{\text{simple}}$ uses only $q(\xvec_t \mid
+\xvec_0) = \Gauss(\sqrt{\bar\alpha_t}\,\xvec_0, (1 - \bar\alpha_t)\Imat)$. It never uses the step-to-step transitions
+$q(\xvec_t \mid \xvec_{t-1})$. Any other forward process with the same marginals leads to the same objective and the
+same trained network. DDIM picks a process whose reverse steps can be large <Cite id="song2021b" />.
+
+**A family of reverse steps that preserves the marginals.** For $s < t$ define
+
+$$
+q_\sigma(\xvec_s \mid \xvec_t, \xvec_0) = \Gauss\paren{\sqrt{\bar\alpha_s}\,\xvec_0 + \sqrt{1 - \bar\alpha_s -
+\sigma^2}\;\frac{\xvec_t - \sqrt{\bar\alpha_t}\,\xvec_0}{\sqrt{1 - \bar\alpha_t}},\; \sigma^2\Imat}.
+$$
+
+Check that it is consistent with the marginals. Suppose $\xvec_t = \sqrt{\bar\alpha_t}\,\xvec_0 + \sqrt{1 -
+\bar\alpha_t}\,\epsilonvec$ with $\epsilonvec \sim \Gauss(\zeros, \Imat)$. The fraction in the mean is then exactly
+$\epsilonvec$, so
+
+$$
+\xvec_s = \sqrt{\bar\alpha_s}\,\xvec_0 + \sqrt{1 - \bar\alpha_s - \sigma^2}\;\epsilonvec + \sigma\zvec.
+$$
+
+The last two terms are independent zero-mean Gaussians with total variance $(1 - \bar\alpha_s - \sigma^2) + \sigma^2 =
+1 - \bar\alpha_s$. Hence $\xvec_s \mid \xvec_0 \sim \Gauss(\sqrt{\bar\alpha_s}\,\xvec_0, (1 - \bar\alpha_s)\Imat)$,
+the required marginal, for every $\sigma^2 \le 1 - \bar\alpha_s$ and every pair $s < t$.
+
+**Sampling.** The true $\xvec_0$ and $\epsilonvec$ are unknown when sampling. Replacing them by the network's
+estimates $\hat{\xvec}_0$ and $\hat{\epsilonvec}$ gives the update in the definition. Choose a decreasing subsequence
+$\tau_S > \dots > \tau_1$ of $\set{1, \dots, T}$, start from $\xvec_{\tau_S} \sim \Gauss(\zeros, \Imat)$, and apply
+the update from each $\tau_i$ to $\tau_{i-1}$, ending with $\hat{\xvec}_0$.
+
+**The noise level.** Song et al. parameterise $\sigma$ by $\eta \ge 0$:
+
+$$
+\sigma_{t \to s} = \eta\, \sqrt{\frac{1 - \bar\alpha_s}{1 - \bar\alpha_t}}\, \sqrt{1 - \frac{\bar\alpha_t}{\bar\alpha_s}}.
+$$
+
+With $\eta = 1$ and adjacent steps, $\sigma^2$ equals the DDPM posterior variance $\tilde\beta_t$ and the update is the
+DDPM sampler. With $\eta = 0$ the sampler is deterministic, and the model is an implicit generative model: a fixed map
+from $\xvec_T$ to $\xvec_0$ <Cite id="song2021b" />.
+
+## The ODE behind deterministic DDIM
+
+Divide the $\eta = 0$ update by $\sqrt{\bar\alpha_s}$ and substitute $\hat{\xvec}_0$:
+
+$$
+\frac{\xvec_s}{\sqrt{\bar\alpha_s}} = \frac{\xvec_t}{\sqrt{\bar\alpha_t}} + \paren{\sqrt{\frac{1 -
+\bar\alpha_s}{\bar\alpha_s}} - \sqrt{\frac{1 - \bar\alpha_t}{\bar\alpha_t}}}\hat{\epsilonvec}.
+$$
+
+In the variables $\bar{\xvec} = \xvec / \sqrt{\bar\alpha}$ and $\lambda = \sqrt{(1 - \bar\alpha)/\bar\alpha}$, the
+update is $\bar{\xvec}_s = \bar{\xvec}_t + (\lambda_s - \lambda_t)\,\epsilonvec_{\thetavec}$, one Euler step of the
+ODE $d\bar{\xvec}/d\lambda = \epsilonvec_{\thetavec}$. This ODE is the
+<NoteLink to="score-based-generative-models">probability flow ODE</NoteLink> of the variance-preserving diffusion,
+written in these variables <Cite id="song2021b" /> <Cite id="song2021" />. Seen this way, fast sampling is numerical
+integration of an ODE, and larger steps trade accuracy for speed. The trajectories are smooth, which is why a few dozen
+Euler steps suffice.
+
+## Worked example
+
+Take the linear DDPM schedule with $T = 1000$ and jump from $t = 500$ to $s = 250$, where $\bar\alpha_{500} = 0.0786$
+and $\bar\alpha_{250} = 0.524$. A one-dimensional sample is $x_{500} = 1.2$, and the network predicts
+$\hat\epsilon = 0.5$.
+
+- Predicted clean value: $\hat{x}_0 = (1.2 - \sqrt{0.921} \times 0.5) / \sqrt{0.0786} = (1.2 - 0.480) / 0.280 = 2.569$.
+- Deterministic update ($\eta = 0$): $x_{250} = \sqrt{0.524} \times 2.569 + \sqrt{0.476} \times 0.5 = 1.860 + 0.345 =
+  2.204$.
+
+A 50-step DDIM sampler repeats this with jumps of 20 training steps.
+
+## Cost
+
+One network evaluation per visited step. Song et al. reported DDIM samples of higher quality than DDPM samples at equal
+small numbers of steps, and a 10× to 50× reduction in wall-clock sampling time for comparable quality
+<Cite id="song2021b" />.
+
+## Trade-offs
+
+- **Deterministic versus stochastic.** $\eta = 0$ gives the best quality in few steps. Injecting noise can correct
+  errors accumulated along the trajectory and often helps when many steps are affordable.
+- **Inversion.** Running the $\eta = 0$ update forwards maps a real image to the noise that regenerates it. Image
+  editing methods use this: invert, change the condition, regenerate.
+- **Consistent latents.** Because the map from $\xvec_T$ to $\xvec_0$ is fixed, the same noise gives the same sample,
+  and interpolating two noise vectors gives a smooth path between two samples <Cite id="song2021b" />.
+- **Better solvers.** Euler is a first-order method. Higher-order solvers cut steps further; Karras et al. used Heun's
+  second-order method on the probability flow ODE <Cite id="karras2022" />. Distillation methods train a student
+  network to take large steps directly.

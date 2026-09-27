@@ -1,0 +1,93 @@
+---
+title: Conditional variational autoencoder
+kind: concept
+summary: A conditional VAE models $p_{\thetavec}(\xvec \mid \yvec)$ by conditioning the prior, the decoder and the encoder on side information $\yvec$, such as a class label or a partial input. It maximises a conditional ELBO and generates varied outputs for one condition by sampling the latent.
+tags: [deep-learning, generative-models, variational-inference, conditional-generation, structured-prediction, worked-example]
+aliases: [CVAE, conditional VAE, conditional variational auto-encoder]
+requires: [variational-autoencoder]
+related: [beta-vae, diffusion-guidance, evidence-lower-bound]
+references: [sohn2015, kingma2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **conditional variational autoencoder** (CVAE) is a <NoteLink to="variational-autoencoder">variational
+autoencoder</NoteLink> in which every distribution is conditioned on an observed variable $\yvec$ <Cite id="sohn2015" />:
+
+- a **prior network** $p_{\psivec}(\zvec \mid \yvec)$, often simply $\Gauss(\zeros, \Imat)$;
+- a **decoder** $p_{\thetavec}(\xvec \mid \zvec, \yvec)$;
+- an **encoder** $q_{\phivec}(\zvec \mid \xvec, \yvec)$.
+
+The networks maximise the conditional evidence lower bound
+
+$$
+\Lcal(\xvec, \yvec) = \expect_{q_{\phivec}(\zvec \mid \xvec, \yvec)}\brack{\log p_{\thetavec}(\xvec \mid \zvec,
+\yvec)} - \KL\paren{q_{\phivec}(\zvec \mid \xvec, \yvec) \,\|\, p_{\psivec}(\zvec \mid \yvec)} \;\le\; \log
+p(\xvec \mid \yvec).
+$$
+</Definition>
+
+## Problem
+
+Many prediction tasks have more than one correct output for an input. Completing the missing half of a handwritten
+digit, predicting a future video frame and segmenting an ambiguous image are examples. A network trained with squared
+error predicts the conditional mean, which blends the possible outputs into one blurred answer. A conditional
+generative model instead represents the whole distribution $p(\xvec \mid \yvec)$ and returns a different plausible
+output for each sample of the latent. Sohn et al. introduced the CVAE for this kind of structured output prediction
+<Cite id="sohn2015" />.
+
+## Deriving the conditional ELBO
+
+The derivation is that of the unconditional ELBO with $\yvec$ carried along as a fixed conditioning variable. For any
+$q(\zvec \mid \xvec, \yvec)$,
+
+$$
+\log p(\xvec \mid \yvec) = \expect_q\brack{\log \frac{p_{\thetavec}(\xvec \mid \zvec, \yvec)\, p_{\psivec}(\zvec \mid
+\yvec)}{q(\zvec \mid \xvec, \yvec)}} + \KL\paren{q(\zvec \mid \xvec, \yvec) \,\|\, p(\zvec \mid \xvec, \yvec)}.
+$$
+
+The second term is non-negative, so the first term is a lower bound. Splitting the logarithm of the product gives the
+reconstruction term minus the KL divergence from the encoder to the conditional prior, as in the definition.
+
+## Mechanism
+
+**Conditioning.** In practice $\yvec$ is fed to each network as an extra input. A class label is one-hot encoded and
+concatenated with $\xvec$ in the encoder and with $\zvec$ in the decoder. An image condition is processed by a shared
+convolutional feature extractor.
+
+**Training.** Each example is a pair $(\xvec, \yvec)$. The encoder sees both, draws $\zvec$ with the
+<NoteLink to="reparameterisation-trick">reparameterisation trick</NoteLink>, and the decoder reconstructs $\xvec$ from
+$\zvec$ and $\yvec$.
+
+**Generation.** Given only $\yvec$, draw $\zvec \sim p_{\psivec}(\zvec \mid \yvec)$ and decode. Different draws give
+different outputs for the same condition. With a label-conditioned MNIST CVAE, fixing $\zvec$ and changing the label
+keeps the handwriting style and changes the digit, because the label carries the class and $\zvec$ carries the rest.
+
+## Worked example
+
+Suppose a CVAE on digit images uses a standard Gaussian prior that ignores $\yvec$, a $k = 2$ latent, and the label as
+a one-hot vector. For one training pair the encoder outputs $\muvec = (0.8, -0.4)$ and $\sigmavec^2 = (0.25, 1)$. The
+KL term is
+
+$$
+\tfrac12\brack{(0.64 + 0.25 - 1 - \log 0.25) + (0.16 + 1 - 1 - \log 1)} = \tfrac12\brack{1.276 + 0.16} = 0.718
+\text{ nats}.
+$$
+
+The second coordinate matches the prior in variance, so it contributes only through its mean. At test time the
+decoder receives a fresh $\zvec \sim \Gauss(\zeros, \Imat)$ together with the requested label.
+
+## Trade-offs
+
+- **Train–test mismatch.** During training $\zvec$ comes from the encoder, which sees the target $\xvec$. At test time
+  it comes from the prior. If the two differ, generated outputs are worse than reconstructions. Sohn et al. reduced the
+  gap with a hybrid objective. It adds to the conditional ELBO the loss of a Gaussian stochastic neural network, which
+  trains the decoder on latents drawn from the prior network <Cite id="sohn2015" />.
+- **Latent ignored when $\yvec$ is informative.** If $\yvec$ nearly determines $\xvec$, the decoder can ignore $\zvec$
+  and the model returns almost the same output for every sample.
+- **A learned prior versus a fixed one.** A conditional prior $p_{\psivec}(\zvec \mid \yvec)$ lets the latent region
+  depend on the condition. A fixed $\Gauss(\zeros, \Imat)$ is simpler and makes the latent carry only what $\yvec$
+  does not explain.
+- **Other conditional generators.** Diffusion models condition on $\yvec$ in the same way and add
+  <NoteLink to="diffusion-guidance">guidance</NoteLink> to strengthen the condition at sampling time.

@@ -1,0 +1,208 @@
+---
+title: Variational autoencoder
+kind: concept
+summary: A variational autoencoder is a latent-variable model $p_{\thetavec}(\xvec \mid \zvec)\,p(\zvec)$ trained jointly with an encoder $q_{\phivec}(\zvec \mid \xvec)$ by maximising the evidence lower bound, a reconstruction term minus $\KL(q_{\phivec}(\zvec \mid \xvec) \,\|\, p(\zvec))$, with gradients from the reparameterisation trick.
+tags: [deep-learning, generative-models, variational-inference, latent-variable-models, representation-learning, worked-example]
+aliases: [VAE, variational auto-encoder, auto-encoding variational Bayes, AEVB, amortised variational inference, inference network, posterior collapse]
+requires: [evidence-lower-bound, reparameterisation-trick, kl-divergence]
+partOf: [deep-generative-models]
+related: [autoencoder, mean-field-variational-inference, score-function-estimator, multivariate-normal-distribution, em-as-variational-inference]
+references: [kingma2014, rezende2014, kingma2019, bowman2016, murphy2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { LatentPosteriors } from '../_shared/LatentPosteriors'
+
+<Definition>
+A **variational autoencoder** (VAE) is a latent-variable generative model together with an approximate-inference
+network, both trained by maximising the evidence lower bound (ELBO) <Cite id="kingma2014" /> <Cite id="rezende2014" />.
+
+- The **generative model**, or **decoder**, draws a latent $\zvec \in \reals^k$ from a prior $p(\zvec) =
+  \Gauss(\zeros, \Imat)$ and then an observation $\xvec \in \reals^d$ from $p_{\thetavec}(\xvec \mid \zvec)$, a simple
+  distribution whose parameters are the output of a neural network with weights $\thetavec$.
+- The **encoder**, or inference network, maps $\xvec$ to an approximate posterior $q_{\phivec}(\zvec \mid \xvec) =
+  \Gauss\paren{\muvec_{\phivec}(\xvec), \diag \sigmavec^2_{\phivec}(\xvec)}$, where $\muvec_{\phivec}$ and
+  $\sigmavec_{\phivec}$ are neural network outputs with weights $\phivec$.
+
+Both networks maximise $\sum_i \Lcal(\thetavec, \phivec; \xvec_i)$ over the training set, where
+
+$$
+\Lcal(\thetavec, \phivec; \xvec) = \expect_{q_{\phivec}(\zvec \mid \xvec)}\brack{\log p_{\thetavec}(\xvec \mid \zvec)}
+- \KL\paren{q_{\phivec}(\zvec \mid \xvec) \,\|\, p(\zvec)} \;\le\; \log p_{\thetavec}(\xvec).
+$$
+</Definition>
+
+## The problem the VAE solves
+
+A latent-variable model defines the density of an observation by integrating over the latent:
+
+$$
+p_{\thetavec}(\xvec) = \int p_{\thetavec}(\xvec \mid \zvec)\, p(\zvec)\, d\zvec.
+$$
+
+When $p_{\thetavec}(\xvec \mid \zvec)$ is a neural network, this integral has no closed form. Maximum likelihood needs
+it. The posterior $p_{\thetavec}(\zvec \mid \xvec) = p_{\thetavec}(\xvec \mid \zvec)\,p(\zvec) / p_{\thetavec}(\xvec)$
+is also intractable, so the <NoteLink to="expectation-maximisation">EM algorithm</NoteLink>, which needs the exact
+posterior, does not apply. Classical <NoteLink to="mean-field-variational-inference">variational inference</NoteLink>
+would fit separate variational parameters to each data point by an inner optimisation loop. The VAE makes three
+changes that make the approach scale to large data sets and deep networks:
+
+1. **Amortised inference.** One encoder network outputs the variational parameters for any $\xvec$ in a single forward
+   pass. There is no per-point optimisation.
+2. **A single objective.** The ELBO is maximised over the decoder weights $\thetavec$ and the encoder weights $\phivec$
+   together by stochastic gradient ascent on minibatches.
+3. **Low-variance gradients.** The expectation over $q_{\phivec}$ is differentiated with the reparameterisation trick.
+
+## Deriving the evidence lower bound
+
+For any distribution $q(\zvec \mid \xvec)$ that is positive wherever the posterior is, the log evidence splits exactly
+into two terms. Since $\log p_{\thetavec}(\xvec)$ does not depend on $\zvec$, it equals its own expectation under $q$.
+Bayes' theorem gives $p_{\thetavec}(\xvec) = p_{\thetavec}(\xvec, \zvec) / p_{\thetavec}(\zvec \mid \xvec)$ for every
+$\zvec$. Multiply and divide by $q$ inside the logarithm:
+
+$$
+\begin{aligned}
+\log p_{\thetavec}(\xvec)
+&= \expect_{q}\brack{\log \frac{p_{\thetavec}(\xvec, \zvec)}{p_{\thetavec}(\zvec \mid \xvec)}}
+ = \expect_{q}\brack{\log \frac{p_{\thetavec}(\xvec, \zvec)}{q(\zvec \mid \xvec)}}
+ + \expect_{q}\brack{\log \frac{q(\zvec \mid \xvec)}{p_{\thetavec}(\zvec \mid \xvec)}} \\
+&= \Lcal + \KL\paren{q(\zvec \mid \xvec) \,\|\, p_{\thetavec}(\zvec \mid \xvec)}.
+\end{aligned}
+$$
+
+The <NoteLink to="kl-divergence">KL divergence</NoteLink> is non-negative, so $\Lcal \le \log p_{\thetavec}(\xvec)$,
+with equality exactly when $q$ equals the true posterior. Two conclusions follow.
+
+- Maximising $\Lcal$ over $\phivec$ with $\thetavec$ fixed minimises the KL divergence from $q_{\phivec}$ to the true
+  posterior, because the left-hand side does not depend on $\phivec$.
+- Maximising $\Lcal$ over $\thetavec$ pushes up a lower bound on the log-likelihood.
+
+The first term of the split is the ELBO. Expanding $p_{\thetavec}(\xvec, \zvec) = p_{\thetavec}(\xvec \mid
+\zvec)\,p(\zvec)$ separates it into the two terms of the definition:
+
+$$
+\Lcal = \underbrace{\expect_{q_{\phivec}(\zvec \mid \xvec)}\brack{\log p_{\thetavec}(\xvec \mid
+\zvec)}}_{\text{reconstruction}} \;-\; \underbrace{\KL\paren{q_{\phivec}(\zvec \mid \xvec) \,\|\,
+p(\zvec)}}_{\text{regulariser}}.
+$$
+
+The reconstruction term is the expected log-likelihood of $\xvec$ after encoding it to a random code and decoding the
+code. With a Gaussian decoder $p_{\thetavec}(\xvec \mid \zvec) = \Gauss(\xvec; \hat{\xvec}_{\thetavec}(\zvec),
+s^2\Imat)$ it equals $-\norm{\xvec - \hat{\xvec}_{\thetavec}(\zvec)}^2 / (2s^2)$ plus a constant, the squared error of
+an <NoteLink to="autoencoder">autoencoder</NoteLink>. With a Bernoulli decoder it is the negative binary
+cross-entropy. The regulariser keeps each encoder distribution close to the prior. It penalises codes that carry
+more information about $\xvec$ than the reconstruction gain justifies, and it keeps the codes of the training data in
+the region the prior covers, so decoding prior samples gives realistic outputs.
+
+## Gradients through the sample
+
+The reconstruction term is an expectation over $q_{\phivec}$, which depends on $\phivec$, and it is estimated by
+sampling. A sampled $\zvec$ is not a differentiable function of $\phivec$. The
+<NoteLink to="reparameterisation-trick">reparameterisation trick</NoteLink> writes the sample as a deterministic
+function of $\phivec$ and parameter-free noise:
+
+$$
+\zvec = \muvec_{\phivec}(\xvec) + \sigmavec_{\phivec}(\xvec) \odot \epsilonvec, \qquad \epsilonvec \sim
+\Gauss(\zeros, \Imat),
+$$
+
+where $\odot$ is the elementwise product. Then $\expect_{q_{\phivec}}\brack{\log p_{\thetavec}(\xvec \mid \zvec)} =
+\expect_{\epsilonvec}\brack{\log p_{\thetavec}(\xvec \mid \muvec_{\phivec} + \sigmavec_{\phivec} \odot \epsilonvec)}$.
+The distribution of $\epsilonvec$ does not depend on $\phivec$, so the gradient moves inside the expectation. A
+single draw of $\epsilonvec$ per data point gives an unbiased estimate that backpropagation computes through the
+decoder and the encoder. The <NoteLink to="score-function-estimator">score-function estimator</NoteLink> is also
+unbiased but has much higher variance here <Cite id="kingma2014" />.
+
+The KL term needs no sampling. For a diagonal Gaussian encoder and a standard Gaussian prior it has a closed form
+(derivation below):
+
+$$
+\KL\paren{\Gauss(\muvec, \diag\sigmavec^2) \,\|\, \Gauss(\zeros, \Imat)} = \frac12 \sum_{j=1}^k \paren{\mu_j^2 +
+\sigma_j^2 - 1 - \log \sigma_j^2}.
+$$
+
+<Derivation title="KL divergence between a diagonal Gaussian and the standard Gaussian">
+Both distributions factorise over the $k$ coordinates, and the KL divergence of product distributions is the sum of
+the coordinate-wise divergences. Take one coordinate, $q = \Gauss(\mu, \sigma^2)$ and $p = \Gauss(0, 1)$. The log
+densities are
+
+$$
+\log q(z) = -\tfrac12 \log(2\pi\sigma^2) - \frac{(z - \mu)^2}{2\sigma^2}, \qquad \log p(z) = -\tfrac12\log(2\pi) -
+\frac{z^2}{2}.
+$$
+
+Take expectations under $q$, using $\expect_q\brack{(z - \mu)^2} = \sigma^2$ and $\expect_q\brack{z^2} = \mu^2 +
+\sigma^2$:
+
+$$
+\KL(q \,\|\, p) = \expect_q\brack{\log q(z) - \log p(z)} = -\tfrac12\log\sigma^2 - \tfrac12 + \tfrac12(\mu^2 +
+\sigma^2).
+$$
+
+Summing over coordinates gives the formula. It is zero exactly when $\mu = 0$ and $\sigma = 1$.
+</Derivation>
+
+## Training
+
+Each step takes a minibatch, encodes it, draws one $\epsilonvec$ per example, decodes, and ascends the ELBO:
+
+```python
+import torch
+import torch.nn.functional as F
+
+def vae_loss(x, encoder, decoder):
+    mu, log_var = encoder(x)                         # each (batch, k)
+    z = mu + torch.exp(0.5 * log_var) * torch.randn_like(mu)   # reparameterised sample
+    logits = decoder(z)                              # Bernoulli decoder for pixels in [0, 1]
+    recon = F.binary_cross_entropy_with_logits(logits, x, reduction="sum")
+    kl = 0.5 * torch.sum(mu**2 + log_var.exp() - 1 - log_var)
+    return (recon + kl) / x.shape[0]                # negative ELBO per example
+```
+
+The encoder outputs $\log \sigma^2$ rather than $\sigma$ so that the variance stays positive without a constraint.
+
+**Generation.** Draw $\zvec \sim \Gauss(\zeros, \Imat)$ and pass it through the decoder. The encoder is not used.
+
+<LatentPosteriors />
+
+The figure uses a one-dimensional model small enough to solve exactly: prior $\Gauss(0, 1)$ and a fixed linear
+decoder $p(x \mid z) = \Gauss(2z, 0.5^2)$. At weight $\beta = 1$ the optimal Gaussian encoder is the true posterior, the
+KL gap vanishes, and the mean ELBO equals the mean log evidence. Weights other than 1 give the
+<NoteLink to="beta-vae">β-VAE</NoteLink>.
+
+## Worked example
+
+Use the model in the figure: $p(z) = \Gauss(0, 1)$ and $p(x \mid z) = \Gauss(wz, s^2)$ with $w = 2$ and $s = 0.5$. The
+marginal is $p(x) = \Gauss(0, w^2 + s^2) = \Gauss(0, 4.25)$, so for $x = 1$ the log evidence is
+$-\tfrac12\log(2\pi \times 4.25) - 1/(2 \times 4.25) = -1.760$.
+
+The exact posterior is Gaussian with precision $1 + w^2/s^2 = 17$ and mean $(wx/s^2)/17 = 8/17 = 0.471$. Take this as
+the encoder distribution $q(z \mid x) = \Gauss(0.471, 1/17)$, with $\sigma^2 = 0.0588$.
+
+- KL term: $\tfrac12(0.471^2 + 0.0588 - 1 - \log 0.0588) = 1.057$.
+- Reconstruction term: $\expect_q\brack{(x - wz)^2} = (1 - 2 \times 0.471)^2 + 4 \times 0.0588 = 0.239$, so
+  $\expect_q\brack{\log p(x \mid z)} = -\tfrac12\log(2\pi \times 0.25) - 0.239/(2 \times 0.25) = -0.703$.
+- ELBO: $-0.703 - 1.057 = -1.760$, equal to $\log p(x)$ because $q$ is the exact posterior.
+
+## Assumptions
+
+- **A factorised Gaussian posterior.** The diagonal covariance cannot represent correlations between latent
+  coordinates in the true posterior. The shortfall is part of the KL gap.
+- **One encoder for all inputs.** The amortised encoder may fit individual posteriors worse than per-point optimisation
+  would. This extra loss is called the amortisation gap.
+- **A simple decoder distribution.** A factorised Gaussian or Bernoulli decoder treats pixels as independent given
+  $\zvec$.
+
+## Pitfalls
+
+- **Blurry samples.** A factorised Gaussian decoder with a fixed variance penalises squared error, whose optimum under
+  uncertainty is an average of plausible outputs. Averages of images look blurred.
+- **Posterior collapse.** With a powerful autoregressive decoder, the model can ignore $\zvec$: the encoder outputs the
+  prior for every input, the KL term is zero, and the decoder models $\xvec$ alone. Bowman et al. observed this in
+  text VAEs and reduced it by increasing the KL weight from 0 to 1 during training <Cite id="bowman2016" />.
+- **The ELBO is not the likelihood.** Comparing models by the ELBO mixes model quality with the quality of the
+  encoder. Estimate $\log p(\xvec)$ with importance sampling, using $q_{\phivec}$ as the proposal, to compare models.
+- **Summing versus averaging.** The reconstruction term is a sum over $d$ pixels and the KL term a sum over $k$
+  latents. Averaging the reconstruction over pixels, as some library losses do by default, silently changes their
+  relative weight.

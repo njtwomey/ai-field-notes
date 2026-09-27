@@ -1,0 +1,152 @@
+---
+title: Autoencoder
+kind: concept
+summary: An autoencoder is a network trained to reproduce its input through a narrow code, $\hat{\xvec} = g(f(\xvec))$, by minimising reconstruction error. With a linear encoder and decoder and squared error, the optimal code spans the top principal subspace of the data, as in PCA.
+tags: [deep-learning, generative-models, representation-learning, dimensionality-reduction, unsupervised-learning, worked-example]
+aliases: [autoencoder, auto-encoder, undercomplete autoencoder, bottleneck network, encoder–decoder reconstruction]
+requires: [backpropagation]
+related: [singular-value-decomposition, eigendecomposition, orthogonal-projection, variational-autoencoder, regularised-autoencoders]
+references: [hinton2006, baldi1989, bengio2013, murphy2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { LinearAutoencoder } from './LinearAutoencoder'
+
+<Definition>
+An **autoencoder** is a pair of functions trained together: an **encoder** $f_{\phivec} : \reals^d \to \reals^k$ that
+maps an input $\xvec$ to a **code** $\zvec = f_{\phivec}(\xvec)$, and a **decoder** $g_{\thetavec} : \reals^k \to
+\reals^d$ that maps the code back to a reconstruction $\hat{\xvec} = g_{\thetavec}(\zvec)$. Both are neural networks.
+Their parameters minimise the average reconstruction loss over a data set $\set{\xvec_1, \dots, \xvec_n}$:
+
+$$
+\min_{\phivec, \thetavec}\; \frac1n \sum_{i=1}^n \ell\paren{\xvec_i,\, g_{\thetavec}(f_{\phivec}(\xvec_i))}.
+$$
+
+The usual loss is the squared error $\ell(\xvec, \hat{\xvec}) = \norm{\xvec - \hat{\xvec}}^2$. For binary data it is
+the binary cross-entropy. An **undercomplete** autoencoder has $k < d$, so the code is a compressed representation
+of the input <Cite id="hinton2006" />.
+</Definition>
+
+## Intuition
+
+The identity map reconstructs every input perfectly and learns nothing. The bottleneck $k < d$ rules the identity out.
+The network must keep the directions of variation that matter most for reconstruction and discard the rest. The code
+$\zvec$ is then a learned, nonlinear dimensionality reduction of $\xvec$.
+
+An autoencoder is not a generative model by itself. It has no distribution over codes, so there is no principled way
+to pick a new $\zvec$ and decode it. Codes of the training data occupy an irregular region of $\reals^k$, and decoding
+a point outside that region gives an arbitrary output. The <NoteLink to="variational-autoencoder">variational
+autoencoder</NoteLink> adds a prior over codes and turns the architecture into a generative model.
+
+## The linear autoencoder is PCA
+
+Take a linear encoder $\zvec = \Amat\xvec$ with $\Amat \in \reals^{k \times d}$, a linear decoder
+$\hat{\xvec} = \Wmat\zvec$ with $\Wmat \in \reals^{d \times k}$, zero-mean data, and squared error. Write
+$\Smat = \frac1n \sum_i \xvec_i\xvec_i^\top$ for the $d \times d$ sample covariance. The loss is
+
+$$
+L(\Amat, \Wmat) = \frac1n \sum_{i=1}^n \norm{\xvec_i - \Wmat\Amat\xvec_i}^2.
+$$
+
+**Step 1: the best encoder for a fixed decoder is a projection.** Fix $\Wmat$ with full column rank $k$. For each
+input the decoder can only output points in the column space $\col(\Wmat)$. The closest such point to $\xvec_i$ is its
+<NoteLink to="orthogonal-projection">orthogonal projection</NoteLink> $\Pmat\xvec_i$, with
+$\Pmat = \Wmat(\Wmat^\top\Wmat)^{-1}\Wmat^\top$. The encoder $\Amat = (\Wmat^\top\Wmat)^{-1}\Wmat^\top$ produces
+exactly this reconstruction, since $\Wmat\Amat = \Pmat$. No other encoder does better on any input, so this encoder is
+optimal.
+
+**Step 2: the error of a projection.** $\Pmat$ is symmetric and idempotent, so
+$\norm{\xvec - \Pmat\xvec}^2 = \xvec^\top(\Imat - \Pmat)\xvec$. Averaging over the data and using
+$\xvec^\top\Mmat\xvec = \trace(\Mmat\xvec\xvec^\top)$,
+
+$$
+L = \trace\paren{(\Imat - \Pmat)\Smat} = \trace(\Smat) - \trace(\Pmat\Smat).
+$$
+
+**Step 3: the best subspace.** Minimising $L$ means maximising $\trace(\Pmat\Smat)$ over all rank-$k$ orthogonal
+projections. Write $\Pmat = \Umat\Umat^\top$ with $\Umat \in \reals^{d \times k}$ orthonormal columns, so
+$\trace(\Pmat\Smat) = \sum_{j=1}^k \uvec_j^\top\Smat\uvec_j$. The maximum is $\lambda_1 + \dots + \lambda_k$, the sum
+of the $k$ largest eigenvalues of $\Smat$, attained when $\col(\Umat)$ is spanned by the corresponding eigenvectors
+(Derivation below). The minimum loss is the sum of the discarded eigenvalues:
+
+$$
+L^\star = \sum_{j=k+1}^d \lambda_j.
+$$
+
+The eigenvectors of $\Smat$ with the largest eigenvalues are the principal directions, and they are the right singular
+vectors of the centred data matrix (<NoteLink to="singular-value-decomposition">singular value
+decomposition</NoteLink>). The optimal linear autoencoder therefore reconstructs through the same subspace as PCA
+<Cite id="baldi1989" />.
+
+The weights are not unique. For any invertible $k \times k$ matrix $\Mmat$, the pair $(\Mmat\Amat, \Wmat\Mmat^{-1})$
+gives the same $\Wmat\Amat$ and the same loss. Gradient descent recovers the principal subspace but not, in general, the
+individual principal axes. Baldi and Hornik showed that the loss has no local minima other than the global one: every
+other critical point is a saddle <Cite id="baldi1989" />.
+
+<Derivation title="Why the top eigenvectors maximise the trace (Ky Fan)">
+Diagonalise $\Smat = \Vmat\Lambdamat\Vmat^\top$ with eigenvalues $\lambda_1 \ge \dots \ge \lambda_d \ge 0$. Put
+$\Bmat = \Vmat^\top\Umat$, which also has orthonormal columns. Then
+
+$$
+\trace(\Umat^\top\Smat\Umat) = \trace(\Bmat^\top\Lambdamat\Bmat) = \sum_{j=1}^d \lambda_j c_j, \qquad
+c_j = \sum_{m=1}^k B_{jm}^2.
+$$
+
+Each $c_j$ is the squared norm of row $j$ of $\Bmat$. Because $\Bmat$ has orthonormal columns, $\Bmat\Bmat^\top$ is a
+projection, so its diagonal entries satisfy $0 \le c_j \le 1$. Their sum is $\trace(\Bmat^\top\Bmat) = k$. A weighted
+sum $\sum_j \lambda_j c_j$ with weights in $[0, 1]$ summing to $k$ is largest when the weight 1 goes to each of the
+$k$ largest $\lambda_j$ and 0 to the rest. The value is $\lambda_1 + \dots + \lambda_k$. It is attained by
+$\Umat = [\vvec_1, \dots, \vvec_k]$, for which $\Bmat$ is the first $k$ columns of the identity.
+</Derivation>
+
+<LinearAutoencoder />
+
+## Worked example
+
+Two-dimensional zero-mean data have covariance
+$\Smat = \begin{pmatrix} 3 & 1 \\ 1 & 2 \end{pmatrix}$, and the code has $k = 1$ dimension. The characteristic
+polynomial is $\lambda^2 - 5\lambda + 5$, so the eigenvalues are $\lambda_{1,2} = (5 \pm \sqrt5)/2$, that is
+$3.618$ and $1.382$. The first eigenvector is $(0.851, 0.526)$, at $31.7°$ to the $x_1$ axis.
+
+- The best linear autoencoder encodes $z = 0.851 x_1 + 0.526 x_2$ and decodes $\hat{\xvec} = (0.851, 0.526)\, z$. Its
+  mean squared error per point is $\trace(\Smat) - \lambda_1 = 5 - 3.618 = 1.382 = \lambda_2$.
+- Encoding along the $x_1$ axis instead, $\uvec = (1, 0)$, gives error $\trace(\Smat) - \uvec^\top\Smat\uvec = 5 - 3 = 2$.
+
+## Nonlinear autoencoders
+
+With nonlinear activations and several layers, the encoder and decoder can represent curved low-dimensional structure
+that no linear projection captures. Hinton and Salakhutdinov trained deep autoencoders with 30-dimensional codes on
+images of faces and handwritten digits. The reconstructions were more accurate than those of PCA with the same number
+of dimensions <Cite id="hinton2006" />. The objective is non-convex, and the guarantees of the linear case no longer
+hold.
+
+Common architectural choices:
+
+- **Symmetric design.** The decoder mirrors the encoder, e.g. convolution with downsampling in the encoder and
+  transposed convolution or upsampling in the decoder.
+- **Tied weights.** In a fully connected autoencoder, the decoder can reuse the encoder's weights transposed, which
+  halves the parameter count.
+- **Output nonlinearity matched to the loss.** A sigmoid output with binary cross-entropy for data in $[0, 1]$; a
+  linear output with squared error for real-valued data.
+
+## Uses
+
+- **Dimensionality reduction and visualisation**, with $k = 2$ or $3$.
+- **Pretraining.** Layer-wise pretraining of deep networks with autoencoders preceded modern initialisation schemes
+  <Cite id="bengio2013" />.
+- **Anomaly detection.** Inputs unlike the training data reconstruct badly, so the reconstruction error is an anomaly
+  score.
+- **Compression for other generative models.** <NoteLink to="latent-diffusion">Latent diffusion</NoteLink> and
+  <NoteLink to="vq-vae">VQ-VAE</NoteLink> train a generative model on the codes of an autoencoder.
+
+## Pitfalls
+
+- **Overcomplete codes copy the input.** With $k \ge d$ and no other constraint, the autoencoder can learn the identity.
+  <NoteLink to="regularised-autoencoders">Regularised autoencoders</NoteLink> make overcomplete codes useful by adding
+  noise, sparsity or a contraction penalty.
+- **Low loss does not mean a useful code.** A very flexible decoder can reconstruct well from codes that are entangled
+  or discontinuous in $\xvec$.
+- **Decoding arbitrary codes.** A plain autoencoder does not define which codes are valid. Sampling random codes and
+  decoding them usually gives outputs unlike the data.
+- **Centring.** The equivalence with PCA assumes zero-mean data or a decoder with a bias term.

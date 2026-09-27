@@ -1,0 +1,91 @@
+---
+title: Deep generative models
+kind: overview
+summary: Deep generative models fit a distribution $p_{\thetavec}(\xvec)$ to data with neural networks and draw new samples from it. The families (autoregressive models, VAEs, flows, GANs, diffusion) differ in exactness of likelihood, sampling speed and latent space.
+tags: [deep-learning, generative-models, density-estimation, overview]
+aliases: [deep generative model, generative model families, likelihood-based generative models, implicit generative models]
+related: [autoencoder, gaussian-mixture-model, frechet-inception-distance, precision-and-recall-for-generative-models]
+references: [murphy2022, papamakarios2021, kingma2019, song2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **deep generative model** is a probability distribution $p_{\thetavec}(\xvec)$ over high-dimensional data, such as
+images, audio or text, whose parameters $\thetavec$ are those of one or more neural networks. It is trained on samples
+from the data distribution $p_{\text{data}}$ so that $p_{\thetavec} \approx p_{\text{data}}$. It must support drawing
+new samples, and some families also evaluate the density $p_{\thetavec}(\xvec)$ of a given point.
+</Definition>
+
+## Components
+
+Every family turns simple randomness into structured data, and each chooses a different way to make training
+tractable.
+
+- **<NoteLink to="autoregressive-generative-models">Autoregressive models</NoteLink>** factorise $p(\xvec) = \prod_i
+  p(x_i \mid x_{<i})$ and predict each factor with a masked network.
+- **<NoteLink to="variational-autoencoder">Variational autoencoders</NoteLink>** introduce a latent $\zvec$, decode it
+  with $p_{\thetavec}(\xvec \mid \zvec)$, and maximise the evidence lower bound with an encoder
+  $q_{\phivec}(\zvec \mid \xvec)$. <NoteLink to="vq-vae">VQ-VAE</NoteLink> uses a discrete latent and a separately
+  fitted prior.
+- **<NoteLink to="normalising-flow">Normalising flows</NoteLink>** map noise to data through an invertible network and
+  compute the likelihood by change of variables.
+- **<NoteLink to="generative-adversarial-network">Generative adversarial networks</NoteLink>** train a sampler against
+  a discriminator and never evaluate a density.
+- **<NoteLink to="denoising-diffusion-probabilistic-models">Diffusion models</NoteLink>** add noise to data over many
+  steps and learn to reverse it; <NoteLink to="score-based-generative-models">score-based models</NoteLink> describe
+  the same process through the score $\nabla_{\xvec} \log p_t(\xvec)$.
+
+Each family is described in its own note. The comparison below states the classical form of each family; many
+current models combine several.
+
+| Family            | Likelihood                                   | Sampling                                 | Latent space                                        | Training objective                                |
+| ----------------- | -------------------------------------------- | ---------------------------------------- | --------------------------------------------------- | ------------------------------------------------- |
+| Autoregressive    | Exact                                        | Slow: one network pass per element       | None                                                | Maximum likelihood (sum of cross-entropies)       |
+| VAE               | Lower bound (ELBO); estimate by sampling     | Fast: one decoder pass                   | Low-dimensional, continuous, with a Gaussian prior  | Maximise the ELBO                                 |
+| VQ-VAE            | Bound, via the prior over codes              | Slow if the prior is autoregressive      | Discrete grid of codebook indices                   | Reconstruction plus codebook and commitment losses, then prior likelihood |
+| Normalising flow  | Exact                                        | Fast: one inverse pass                   | Same dimension as the data, invertible              | Maximum likelihood                                |
+| GAN               | None                                         | Fast: one generator pass                 | Low-dimensional noise, no encoder                   | Minimax game against a discriminator              |
+| Diffusion / score | Lower bound, or exact via the probability flow ODE | Slow: tens to a thousand network passes | Noise of the same dimension as the data             | Denoising (noise-prediction) regression           |
+
+Reading the table:
+
+- **Likelihood.** Exact likelihood allows model comparison by held-out log-likelihood, compression and anomaly
+  scoring. A GAN supports none of these, and its quality is judged by sample metrics such as
+  <NoteLink to="frechet-inception-distance">FID</NoteLink>.
+- **Sampling speed.** Single-pass samplers (VAE, flow, GAN) are fast. Autoregressive and diffusion models trade
+  sequential computation for sample quality. <NoteLink to="ddim">DDIM</NoteLink> and ODE solvers reduce diffusion
+  sampling to tens of steps.
+- **Latent space.** Only VAEs, and to a degree GANs, provide a compact latent in which interpolation and editing are
+  meaningful. Flows and diffusion models have latents as large as the data; the deterministic DDIM map still makes
+  their latents usable for inversion and interpolation.
+- **Objective.** Likelihood-based objectives cover all modes of the data but can spend capacity on imperceptible
+  detail. The adversarial objective produces sharp samples but can drop modes.
+
+## Data flow
+
+Sampling in every family follows one pattern: draw simple noise, then apply a learned transformation.
+
+1. **Noise.** A standard Gaussian vector (VAE, flow, GAN, diffusion), uniform random numbers for sampling categorical
+   conditionals (autoregressive), or both.
+2. **Transformation.** One network pass (VAE decoder, flow, GAN generator), a sequential loop over elements
+   (autoregressive), or an iterative denoising loop (diffusion).
+3. **Output.** A sample in data space, optionally decoded from a latent space (VQ-VAE,
+   <NoteLink to="latent-diffusion">latent diffusion</NoteLink>).
+
+Training differs more than sampling. Likelihood-based families maximise $\log p_{\thetavec}(\xvec)$ or a bound on it;
+GANs replace the likelihood by a learned discriminator; diffusion models reduce training to regression on denoising
+targets.
+
+## Variants
+
+- **Two-stage models** compress data with an autoencoder and fit a second generative model to the codes: VQ-VAE with
+  an autoregressive prior, and <NoteLink to="latent-diffusion">latent diffusion</NoteLink>.
+- **Conditional models** learn $p(\xvec \mid \cvec)$ for a label, text or image $\cvec$:
+  <NoteLink to="conditional-variational-autoencoder">conditional VAEs</NoteLink>, conditional GANs, and diffusion
+  models with <NoteLink to="diffusion-guidance">guidance</NoteLink>.
+- **Hybrids** combine families: VAEs with flow posteriors or autoregressive decoders, and autoencoders trained with
+  adversarial losses.
+- **Links between families.** A diffusion model's probability flow ODE is a continuous normalising flow
+  <Cite id="song2021" />. An autoregressive model with Gaussian conditionals is a flow
+  <Cite id="papamakarios2021" />. A diffusion model is a hierarchical VAE with a fixed encoder.

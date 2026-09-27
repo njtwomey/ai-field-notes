@@ -1,0 +1,122 @@
+---
+title: Classifier and classifier-free guidance
+kind: technique
+summary: Guidance makes a conditional diffusion model follow its condition $\cvec$ more closely by sampling with the score of $p(\xvec \mid \cvec)\, p(\cvec \mid \xvec)^w$. Classifier guidance adds a classifier's gradient; classifier-free guidance extrapolates between two noise predictions of one network.
+tags: [deep-learning, generative-models, diffusion-models, conditional-generation, sampling, worked-example]
+aliases: [classifier guidance, classifier-free guidance, CFG, guidance scale, guidance weight, conditioning dropout]
+requires: [denoising-diffusion-probabilistic-models, score-based-generative-models, bayes-theorem]
+related: [ddim, latent-diffusion, conditional-variational-autoencoder, inception-score, frechet-inception-distance]
+references: [dhariwal2021, ho2022, song2021]
+status: draft
+updated: 2026-09-27
+---
+
+import { GuidedDensity } from './GuidedDensity'
+
+<Definition>
+Let $\cvec$ be a condition, such as a class label or a text prompt, and $\xvec_t$ a noisy sample at diffusion step
+$t$. **Guidance** replaces the conditional score $\nabla_{\xvec_t} \log p_t(\xvec_t \mid \cvec)$ during sampling by
+
+$$
+\nabla_{\xvec_t} \log p_t(\xvec_t \mid \cvec) + w\, \nabla_{\xvec_t} \log p_t(\cvec \mid \xvec_t), \qquad w \ge 0.
+$$
+
+- **Classifier guidance** computes the second term with a separately trained classifier $p_{\phivec}(\cvec \mid
+  \xvec_t, t)$ <Cite id="dhariwal2021" />.
+- **Classifier-free guidance** (CFG) computes it from one diffusion network evaluated with and without the condition,
+  giving the guided noise prediction <Cite id="ho2022" />
+
+$$
+\tilde{\epsilonvec}_{\thetavec}(\xvec_t, \cvec) = (1 + w)\,\epsilonvec_{\thetavec}(\xvec_t, \cvec) -
+w\,\epsilonvec_{\thetavec}(\xvec_t, \varnothing).
+$$
+</Definition>
+
+## Problem
+
+A conditional diffusion model trained on pairs $(\xvec, \cvec)$ learns $p(\xvec \mid \cvec)$, and its samples are
+diverse but often only loosely related to the condition. Images of a class may be ambiguous; images for a text prompt
+may miss parts of it. GANs had a truncation trick that trades diversity for quality. Guidance is the corresponding
+control for diffusion models.
+
+## Mechanism
+
+**Classifier guidance.** By Bayes' theorem, $\log p(\xvec \mid \cvec) = \log p(\xvec) + \log p(\cvec \mid \xvec) - \log
+p(\cvec)$. The last term does not depend on $\xvec$, so it vanishes under the gradient:
+
+$$
+\nabla_{\xvec} \log p(\xvec \mid \cvec) = \nabla_{\xvec} \log p(\xvec) + \nabla_{\xvec} \log p(\cvec \mid \xvec).
+$$
+
+Scaling the classifier term by $\gamma$ gives $\nabla_{\xvec}\log p(\xvec) + \gamma\nabla_{\xvec}\log p(\cvec \mid
+\xvec)$, the score of the tilted density $p(\xvec)\, p(\cvec \mid \xvec)^\gamma$, renormalised. With $\gamma > 1$ the
+sampler favours inputs that the classifier assigns to $\cvec$ with high confidence. Dhariwal and Nichol trained a
+classifier on noisy images $\xvec_t$ with the timestep as input and added its gradient to the mean of each reverse step
+<Cite id="dhariwal2021" />. Starting from a conditional model instead of $p(\xvec)$ gives the form in the definition
+with $w = \gamma - 1$.
+
+**Classifier-free guidance.** Bayes' theorem also gives the classifier's gradient in terms of two generative scores,
+$\nabla \log p(\cvec \mid \xvec) = \nabla \log p(\xvec \mid \cvec) - \nabla \log p(\xvec)$. Substituting into the
+guided score,
+
+$$
+\nabla \log p(\xvec \mid \cvec) + w\paren{\nabla \log p(\xvec \mid \cvec) - \nabla \log p(\xvec)} = (1 + w)\nabla \log
+p(\xvec \mid \cvec) - w\,\nabla \log p(\xvec).
+$$
+
+A noise predictor is a scaled negative score, $\epsilonvec_{\thetavec}(\xvec_t) = -\sqrt{1 - \bar\alpha_t}\,\nabla
+\log p_t(\xvec_t)$, so the same combination of noise predictions gives $\tilde{\epsilonvec}_{\thetavec}$. Ho and
+Salimans train a single network for both terms: during training the condition is replaced by a null token
+$\varnothing$ with a fixed probability, 0.1 or 0.2 in their experiments <Cite id="ho2022" />. At sampling time the
+network is evaluated twice per step, once with $\cvec$ and once with $\varnothing$, and $\tilde{\epsilonvec}$ replaces
+$\epsilonvec_{\thetavec}$ in any sampler, such as <NoteLink to="ddim">DDIM</NoteLink>.
+
+<GuidedDensity />
+
+The figure shows the tilted density $p(x \mid A)\,p(A \mid x)^w$ that guidance aims at, for two overlapping classes.
+The factor $p(A \mid x)^w$ is near 1 where only class A has mass and small where class B is likely, so increasing $w$
+removes the ambiguous region.
+
+## Worked example
+
+**Tilted densities.** In the figure's model the classes are $\Gauss(-1, 1)$ and $\Gauss(1, 1)$ with equal prior
+probability, so $p(A \mid x) = 1/(1 + e^{2x})$. Numerical integration of the tilted density gives:
+
+| $w$ | mean   | standard deviation | mean $p(A \mid x)$ |
+| --- | ------ | ------------------ | ------------------ |
+| 0   | −1.00  | 1.00               | 0.775              |
+| 1   | −1.29  | 0.863              | 0.855              |
+| 2   | −1.44  | 0.803              | 0.890              |
+| 4   | −1.62  | 0.743              | 0.923              |
+| 8   | −1.81  | 0.689              | 0.949              |
+
+Each increase in $w$ makes samples more confidently class A and less diverse.
+
+**One guided prediction.** At one step and one pixel, the conditional prediction is $\epsilon_{\thetavec}(x_t, c) =
+0.3$ and the unconditional one is $\epsilon_{\thetavec}(x_t, \varnothing) = 0.1$. With $w = 3$, the guided prediction
+is $4 \times 0.3 - 3 \times 0.1 = 0.9$. The guided prediction extrapolates past the conditional one, away from the
+unconditional one.
+
+## Cost
+
+- Classifier guidance: one diffusion network evaluation and one classifier forward and backward pass per step, plus a
+  separately trained noise-aware classifier.
+- Classifier-free guidance: two diffusion network evaluations per step, often batched together. No extra model.
+  Training is unchanged apart from dropping the condition at random.
+
+## Trade-offs
+
+- **Fidelity against diversity.** Larger $w$ raises per-sample quality and agreement with the condition, and lowers
+  diversity. On ImageNet, increasing the guidance weight improved the <NoteLink to="inception-score">inception
+  score</NoteLink> steadily, while the <NoteLink to="frechet-inception-distance">FID</NoteLink>, which also penalises
+  lost diversity, was best at a small weight <Cite id="ho2022" />.
+- **Weight conventions differ.** Ho and Salimans write $(1 + w)$ and $w$. Many libraries instead expose a guidance
+  scale $\gamma = 1 + w$, so that $\gamma = 1$ means no guidance.
+- **Artefacts at large weights.** Very large weights push pixel values outside the data range and give oversaturated,
+  high-contrast images.
+- **Not exact sampling.** The guided score at each noise level is not the score of the noised tilted distribution, so
+  the sampler does not draw exactly from $p(\xvec \mid \cvec)\, p(\cvec \mid \xvec)^w$. The tilted density describes
+  the direction of the effect, not the exact output distribution.
+- **Classifier gradients can be adversarial.** Gradients of a classifier can increase its confidence through
+  imperceptible changes rather than meaningful ones. Classifier-free guidance avoids a separate classifier and has
+  largely replaced classifier guidance.

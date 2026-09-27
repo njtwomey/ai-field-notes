@@ -1,0 +1,111 @@
+---
+title: β-VAE and disentanglement
+kind: concept
+summary: A β-VAE multiplies the KL term of the VAE objective by $\beta$. With $\beta > 1$ the codes carry less information about the input and, with a factorised prior, tend to align single latent coordinates with single factors of variation, at the cost of worse reconstructions.
+tags: [deep-learning, generative-models, variational-inference, representation-learning, disentanglement, worked-example]
+aliases: [beta-VAE, β-VAE, disentangled representation, rate–distortion trade-off in VAEs, KL annealing]
+requires: [variational-autoencoder]
+related: [kl-divergence, mutual-information, conditional-variational-autoencoder]
+references: [higgins2017, burgess2018, alemi2018, locatello2019]
+status: draft
+updated: 2026-09-27
+---
+
+import { LatentPosteriors } from '../_shared/LatentPosteriors'
+
+<Definition>
+A **β-VAE** is a <NoteLink to="variational-autoencoder">variational autoencoder</NoteLink> trained to maximise
+
+$$
+\Lcal_\beta(\thetavec, \phivec; \xvec) = \expect_{q_{\phivec}(\zvec \mid \xvec)}\brack{\log p_{\thetavec}(\xvec
+\mid \zvec)} - \beta\, \KL\paren{q_{\phivec}(\zvec \mid \xvec) \,\|\, p(\zvec)},
+$$
+
+with a weight $\beta > 0$ on the KL term <Cite id="higgins2017" />. $\beta = 1$ is the ordinary VAE. Higgins et al.
+used $\beta > 1$ to learn **disentangled** representations, in which each latent coordinate $z_j$ responds to one
+generative factor of the data, such as position, scale or rotation, and is insensitive to the others.
+</Definition>
+
+## Rate and distortion
+
+Average the two terms over the data distribution and name them:
+
+$$
+D = -\expect_{\xvec}\,\expect_{q_{\phivec}(\zvec \mid \xvec)}\brack{\log p_{\thetavec}(\xvec \mid \zvec)}, \qquad
+R = \expect_{\xvec}\, \KL\paren{q_{\phivec}(\zvec \mid \xvec) \,\|\, p(\zvec)}.
+$$
+
+$D$ is the **distortion**, the expected reconstruction loss. $R$ is the **rate**, measured in nats. $R$ is an upper
+bound on the <NoteLink to="mutual-information">mutual information</NoteLink> between $\xvec$ and $\zvec$ under the
+encoder, so it limits how much the code can say about the input <Cite id="alemi2018" />. The β-VAE minimises
+$D + \beta R$. The ordinary ELBO is $-(D + R)$, and many $(R, D)$ pairs can give the same ELBO: a model with an
+ignored latent ($R = 0$) and a model with a highly informative latent can score alike <Cite id="alemi2018" />. The
+weight $\beta$ selects a point on the trade-off. Higgins et al. motivated the objective as the Lagrangian of maximising
+the reconstruction term subject to the constraint $\KL \le \epsilon$ <Cite id="higgins2017" />.
+
+## The optimal encoder for a given β
+
+For a fixed decoder and a fixed $\xvec$, the best encoder distribution has a closed form. Write
+$\tilde{p}_\beta(\zvec \mid \xvec) = p(\zvec)\, p_{\thetavec}(\xvec \mid \zvec)^{1/\beta} / Z_\beta(\xvec)$, where
+$Z_\beta(\xvec)$ normalises it. Then for any $q$,
+
+$$
+\expect_q\brack{\log p_{\thetavec}(\xvec \mid \zvec)} - \beta\,\KL(q \,\|\, p) = \beta\,\expect_q\brack{\log
+\frac{p(\zvec)\, p_{\thetavec}(\xvec \mid \zvec)^{1/\beta}}{q(\zvec)}} = \beta \log Z_\beta(\xvec) - \beta\,\KL\paren{q
+\,\|\, \tilde{p}_\beta(\cdot \mid \xvec)}.
+$$
+
+The first equality moves $\log p_{\thetavec}(\xvec \mid \zvec)$ into the logarithm as the power $1/\beta$ after
+factoring out $\beta$. The second substitutes $Z_\beta\,\tilde{p}_\beta$ for the numerator. The objective is largest
+when $q = \tilde{p}_\beta$. The likelihood enters with exponent $1/\beta$. With $\beta > 1$ it is flattened and the
+optimal $q$ lies closer to the prior; with $\beta < 1$ it is sharpened and $q$ is narrower than the posterior. At
+$\beta = 1$, $\tilde{p}_1$ is the exact posterior.
+
+<LatentPosteriors initialLogBeta={0.6} />
+
+In the figure's linear-Gaussian model, $p(z) = \Gauss(0, 1)$ and $p(x \mid z) = \Gauss(wz, s^2)$, so $\tilde{p}_\beta$
+is Gaussian with precision $1 + w^2/(\beta s^2)$ and mean $\paren{wx/(\beta s^2)} / \paren{1 + w^2/(\beta s^2)}$.
+Raising $\beta$ widens every encoder distribution and pulls its mean towards 0. The rate falls and the distortion
+rises.
+
+## Why a larger β can disentangle
+
+The prior $\Gauss(\zeros, \Imat)$ has independent coordinates. The KL term penalises each coordinate's deviation from
+its prior separately. When the rate budget is tight, the cheapest way to reconstruct well is to spend information on
+the few factors that explain most of the reconstruction error, each in its own coordinate, and leave the other
+coordinates at the prior. Burgess et al. describe the effect as an information bottleneck: under limited capacity the
+model encodes first the factor that gives the largest improvement in reconstruction, then the next
+<Cite id="burgess2018" />. They also proposed raising a target capacity $C$ gradually during training, with objective
+$\expect_q\brack{\log p_{\thetavec}(\xvec \mid \zvec)} - \gamma\abs{\KL - C}$, so that factors are added one at a
+time <Cite id="burgess2018" />.
+
+Disentanglement is inspected with **latent traversals**: encode an image, vary one coordinate $z_j$ across a range
+with the others fixed, and decode. In a disentangled model each traversal changes one attribute.
+
+## Worked example
+
+Take the model in the figure with $w = 2$, $s = 0.5$ and a single data point $x = 1$. The optimal encoder, rate and
+expected negative log-likelihood (distortion) are:
+
+| $\beta$ | mean of $q$ | standard deviation of $q$ | rate (nats) | distortion (nats) |
+| ------- | ----------- | ------------------------- | ----------- | ----------------- |
+| 0.25    | 0.492       | 0.124                     | 1.716       | 0.349             |
+| 1       | 0.471       | 0.243                     | 1.057       | 0.703             |
+| 4       | 0.400       | 0.447                     | 0.485       | 1.906             |
+| 16      | 0.250       | 0.707                     | 0.128       | 4.726             |
+
+The ELBO $-(D + R)$ is $-1.760$ at $\beta = 1$, equal to $\log p(x)$. At $\beta = 4$ it is $-2.391$ and at
+$\beta = 0.25$ it is $-2.065$: moving $\beta$ either way from 1 lowers the ELBO, since the ELBO is maximised by the
+exact posterior.
+
+## Pitfalls
+
+- **Disentanglement is not identifiable without inductive biases.** Locatello et al. proved that, without assumptions
+  on the model and the data, unsupervised disentanglement is impossible: infinitely many entangled representations
+  give the same marginal distribution of the data. In a large study they found that random seeds and hyperparameters
+  mattered more than the choice of method <Cite id="locatello2019" />.
+- **Worse reconstructions and samples.** $\beta > 1$ raises distortion. Images become blurrier.
+- **β depends on the scale of the likelihood.** The reconstruction term is a sum over pixels, so the same $\beta$
+  means different trade-offs for images of different sizes or for different decoder variances.
+- **Warm-up is a different use.** Increasing the KL weight from 0 to 1 during training (KL annealing) fights posterior
+  collapse. The final model is an ordinary VAE, not a β-VAE.

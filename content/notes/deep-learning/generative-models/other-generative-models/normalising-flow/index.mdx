@@ -1,0 +1,131 @@
+---
+title: Normalising flow
+kind: concept
+summary: A normalising flow models data as an invertible, differentiable transformation of simple noise, $\xvec = f(\zvec)$. The change-of-variables formula gives the exact log-likelihood, and coupling layers make both the inverse and the Jacobian determinant cheap to compute.
+tags: [deep-learning, generative-models, normalising-flows, density-estimation, jacobian, worked-example]
+aliases: [normalizing flow, flow-based generative model, RealNVP, real NVP, affine coupling layer, additive coupling layer, NICE, Glow, invertible neural network]
+requires: [change-of-variables, jacobian, determinant]
+partOf: [deep-generative-models]
+related: [autoregressive-generative-models, score-based-generative-models, variational-autoencoder, maximum-entropy-distributions]
+references: [dinh2015, dinh2017, kingma2018, rezende2015, papamakarios2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **normalising flow** defines a density on $\reals^d$ by transforming a base distribution $p_{\zvec}$, usually
+$\Gauss(\zeros, \Imat)$, through an invertible, differentiable map $f_{\thetavec} : \reals^d \to \reals^d$:
+$\xvec = f_{\thetavec}(\zvec)$ <Cite id="papamakarios2021" />. The map is a composition $f = f_K \circ \dots \circ
+f_1$ of simple invertible layers. With $\zvec = f^{-1}(\xvec)$ and intermediate values $\hvec_k$, the log-density is
+
+$$
+\log p_{\xvec}(\xvec) = \log p_{\zvec}\paren{f^{-1}(\xvec)} + \sum_{k=1}^K \log\abs{\det
+\frac{\partial f_k^{-1}(\hvec_k)}{\partial \hvec_k}},
+$$
+
+and the flow is trained by maximising the exact log-likelihood of the data.
+</Definition>
+
+## Intuition
+
+Start with a Gaussian cloud and deform space until the cloud has the shape of the data. Where the deformation
+compresses volume, probability density rises; where it expands volume, density falls. Invertibility means no
+probability mass is created or lost, so the density of any data point can be computed by mapping it back to the base
+space and correcting for the change in volume along the way. "Normalising" refers to the reverse direction: the flow
+turns the data distribution into a normal one.
+
+## Exact likelihood by change of variables
+
+For invertible $f$ with $\xvec = f(\zvec)$, the <NoteLink to="change-of-variables">change-of-variables formula</NoteLink>
+gives
+
+$$
+p_{\xvec}(\xvec) = p_{\zvec}\paren{f^{-1}(\xvec)}\, \abs{\det \Jmat_{f^{-1}}(\xvec)},
+$$
+
+where $\Jmat_{f^{-1}}$ is the $d \times d$ <NoteLink to="jacobian">Jacobian</NoteLink> of the inverse map. The
+determinant measures how $f^{-1}$ scales a small volume around $\xvec$. For a composition, the chain rule makes the
+Jacobian a product of the layers' Jacobians, and the <NoteLink to="determinant">determinant</NoteLink> of a product is
+the product of determinants. The log-determinants of the layers therefore add, which gives the sum in the definition.
+
+Two operations must be cheap for the model to be practical:
+
+- **The inverse**, to map data to the base space for training, and the forward map, to sample.
+- **The log-determinant.** For a general $d \times d$ Jacobian it costs $O(d^3)$, far too much for images with
+  $d \approx 10^5$.
+
+Flow architectures are designed around these two constraints.
+
+## Coupling layers
+
+A **coupling layer** splits the input into two parts, $\xvec = (\xvec_A, \xvec_B)$, passes $\xvec_A$ through
+unchanged, and transforms $\xvec_B$ with parameters computed from $\xvec_A$. RealNVP uses an **affine coupling**
+<Cite id="dinh2017" />:
+
+$$
+\yvec_A = \xvec_A, \qquad \yvec_B = \xvec_B \odot \exp\paren{\svec(\xvec_A)} + \tvec(\xvec_A),
+$$
+
+where $\svec$ (scale) and $\tvec$ (translation) are arbitrary neural networks and $\odot$ is the elementwise product.
+
+**The inverse is explicit.** $\yvec_A$ equals $\xvec_A$, so $\svec$ and $\tvec$ can be recomputed from the output:
+
+$$
+\xvec_A = \yvec_A, \qquad \xvec_B = \paren{\yvec_B - \tvec(\yvec_A)} \odot \exp\paren{-\svec(\yvec_A)}.
+$$
+
+The networks $\svec$ and $\tvec$ never need to be inverted, so they can be as complex as desired.
+
+**The determinant is a sum.** Order the coordinates as $(A, B)$. The Jacobian is block lower triangular:
+
+$$
+\frac{\partial \yvec}{\partial \xvec} = \begin{pmatrix} \Imat & \zeros \\ \dfrac{\partial \yvec_B}{\partial \xvec_A} &
+\diag\paren{\exp \svec(\xvec_A)} \end{pmatrix}.
+$$
+
+The determinant of a triangular matrix is the product of its diagonal entries, so
+
+$$
+\log\abs{\det \frac{\partial \yvec}{\partial \xvec}} = \sum_j s_j(\xvec_A).
+$$
+
+The off-diagonal block, which contains the derivatives of the networks, never enters. The cost is linear in $d$.
+
+**Mixing the coordinates.** One coupling layer leaves $\xvec_A$ unchanged, so successive layers alternate which part is
+transformed. RealNVP uses checkerboard and channel-wise masks for images, with a multi-scale architecture that factors
+out half of the dimensions at intervals <Cite id="dinh2017" />. NICE, the predecessor, used additive coupling
+($\svec = \zeros$), which preserves volume <Cite id="dinh2015" />. Glow adds learned invertible $1 \times 1$
+convolutions between couplings, a learned permutation of channels whose log-determinant costs $O(c^3)$ for $c$
+channels per layer <Cite id="kingma2018" />.
+
+## Worked example
+
+A two-dimensional flow maps data to base space by one affine coupling: $z_1 = x_1$ and $z_2 = x_2\, e^{s(x_1)} +
+t(x_1)$. Suppose the networks output $s(1) = 0.5$ and $t(1) = -1$. For $\xvec = (1, 2)$:
+
+- Base point: $z_1 = 1$ and $z_2 = 2e^{0.5} - 1 = 2 \times 1.649 - 1 = 2.297$.
+- Log-determinant of the map from $\xvec$ to $\zvec$: $s(x_1) = 0.5$.
+- Log-density: $\log \Gauss(1; 0, 1) + \log \Gauss(2.297; 0, 1) + 0.5 = -1.419 - 3.557 + 0.5 = -4.477$.
+- Inverse check: $x_2 = (2.297 - (-1))\, e^{-0.5} = 3.297 \times 0.607 = 2.000$.
+
+## Other flow families
+
+- **Autoregressive flows** transform coordinate $j$ with a scale and shift that depend on coordinates $1, \dots, j - 1$.
+  Their Jacobian is triangular too. They are exact <NoteLink to="autoregressive-generative-models">autoregressive
+  models</NoteLink> with Gaussian conditionals, and one direction (density or sampling) is sequential
+  <Cite id="papamakarios2021" />.
+- **Flows for variational inference** transform the approximate posterior of a VAE to make it more flexible than a
+  diagonal Gaussian <Cite id="rezende2015" />.
+- **Continuous flows** define $f$ as the solution of an ODE. The probability flow ODE of a
+  <NoteLink to="score-based-generative-models">score-based diffusion model</NoteLink> is one.
+
+## Pitfalls
+
+- **No dimensionality reduction.** $\zvec$ has the same dimension as $\xvec$, so the latent space is as large as the
+  data and is not a compressed code.
+- **Topology is preserved.** A continuous bijection cannot turn one connected Gaussian blob into several disconnected
+  clusters. Flows approximate separated modes with thin bridges of low density.
+- **Discrete data need dequantisation.** Pixel values are integers. A continuous density on them can grow without
+  bound, so uniform noise is added to each value before training <Cite id="papamakarios2021" />.
+- **Sample quality lags.** Flows give exact likelihoods, but their samples have generally been less sharp than those of
+  GANs and diffusion models of similar size.
