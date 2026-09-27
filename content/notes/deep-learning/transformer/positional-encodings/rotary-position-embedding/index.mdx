@@ -1,0 +1,171 @@
+---
+title: Rotary position embedding
+kind: concept
+summary: Rotary position embedding (RoPE) rotates each pair of query and key coordinates by an angle $m\theta_i$ proportional to the token's position $m$, with $\theta_i = 10000^{-2i/d}$. Because rotations compose, the score $\tilde\qvec_m^{\tr} \tilde\kvec_n$ depends on the positions only through $n - m$.
+tags: [deep-learning, transformer, positional-encoding, attention, language-models, worked-example]
+aliases: [RoPE, rotary positional embedding, rotary position encoding, rotary embedding, RoFormer, partial rotary, rotary base, rope theta]
+requires: [scaled-dot-product-attention, sinusoidal-positional-encoding]
+partOf: [positional-encoding]
+related: [xpos-and-rope-variants, long-context-methods, alibi, multi-head-latent-attention, kv-cache, llama-family]
+references: [su2021, touvron2023, black2022, grattafiori2024, kazemnejad2023, press2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { RopeOffset } from './RopeOffset'
+import { RopeDecay } from './RopeDecay'
+
+<Definition>
+Split a query or key $\xvec \in \reals^{d}$ into $d/2$ pairs $(x_{2i}, x_{2i+1})$. Rotary position embedding at position
+$m$ rotates pair $i$ by the angle $m\theta_i$:
+$$
+\begin{bmatrix} \tilde x_{2i} \\ \tilde x_{2i+1} \end{bmatrix} =
+\begin{bmatrix} \cos m\theta_i & -\sin m\theta_i \\ \sin m\theta_i & \cos m\theta_i \end{bmatrix}
+\begin{bmatrix} x_{2i} \\ x_{2i+1} \end{bmatrix},
+\qquad \theta_i = 10000^{-2i/d}.
+$$
+It is applied to the queries and keys of every attention layer, after their projections and before the dot product.
+Values are not rotated <Cite id="su2021" />.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="sinusoidal-positional-encoding">sinusoidal encoding</NoteLink> places a clock on every position: pair
+$i$ of $\pvec_t$ points at angle $\omega_i t$. RoPE uses the same clock but, instead of adding its hands to the token
+vector, turns the query and the key themselves. The dot product of two vectors depends only on their lengths and the
+angle between them. Turning the query by $m\theta_i$ and the key by $n\theta_i$ changes the angle between them by
+$(n - m)\theta_i$, whatever $m$ and $n$ are. The score therefore sees how far apart the two tokens are, not where they
+are.
+
+## Derivation
+
+Su et al. ask for position-dependent maps $f_q, f_k$ such that the score depends on the positions only through their
+difference: $f_q(\qvec, m)^{\tr} f_k(\kvec, n) = g(\qvec, \kvec, n - m)$ for some function $g$ <Cite id="su2021" />.
+
+**Two dimensions.** Identify $(a, b) \in \reals^2$ with the complex number $a + \mathrm{i} b$. Then the dot product of
+two vectors $u, v \in \reals^2$ is $\operatorname{Re}(u \bar v)$: $(a + \mathrm{i}b)(c - \mathrm{i}d)$ has real part
+$ac + bd$. Rotation by an angle $\phi$ is multiplication by $e^{\mathrm{i}\phi}$. Set
+$f_q(q, m) = q\, e^{\mathrm{i} m\theta}$ and $f_k(k, n) = k\, e^{\mathrm{i} n\theta}$. Then
+
+$$
+f_q(q, m)^{\tr} f_k(k, n)
+= \operatorname{Re}\brack{q\, e^{\mathrm{i} m\theta}\ \overline{k\, e^{\mathrm{i} n\theta}}}
+= \operatorname{Re}\brack{q \bar k\, e^{\mathrm{i}(m - n)\theta}}.
+$$
+
+The positions appear only through $m - n$. In matrix form, with $\Rmat_\phi$ the rotation by $\phi$,
+$(\Rmat_{m\theta} \qvec)^{\tr} (\Rmat_{n\theta} \kvec) = \qvec^{\tr} \Rmat_{m\theta}^{\tr} \Rmat_{n\theta} \kvec =
+\qvec^{\tr} \Rmat_{(n-m)\theta} \kvec$, because $\Rmat_\phi^{\tr} = \Rmat_{-\phi}$ and rotations of the plane add their
+angles.
+
+**Any even width.** Apply a different frequency $\theta_i$ to each pair. The full rotation
+$\Rmat_m = \diag(\Rmat_{m\theta_0}, \dots, \Rmat_{m\theta_{d/2-1}})$ is block-diagonal and orthogonal, and the argument
+holds block by block:
+
+$$
+(\Rmat_m \qvec)^{\tr} (\Rmat_n \kvec) = \qvec^{\tr} \Rmat_{n-m} \kvec
+= \sum_{i=0}^{d/2-1} \operatorname{Re}\brack{q^{(i)} \overline{k^{(i)}}\, e^{\mathrm{i}(m-n)\theta_i}},
+$$
+
+where $q^{(i)} = q_{2i} + \mathrm{i} q_{2i+1}$ and likewise for $k^{(i)}$. With a projected query
+$\qvec_m = \Wmat_Q^{\tr} \xvec_m$, the score becomes $\xvec_m^{\tr} \Wmat_Q \Rmat_{n-m} \Wmat_K^{\tr} \xvec_n$: content
+through $\Wmat_Q, \Wmat_K$, position through $\Rmat_{n-m}$ alone.
+
+**What RoPE does not change.** Rotations preserve length, so $\norm{\Rmat_m \qvec} = \norm{\qvec}$. The values are
+untouched, so position shapes the attention weights but not the vectors being averaged. There are no learned
+parameters.
+
+<RopeOffset />
+
+## Implementation
+
+The rotation needs no matrix. For each pair, $\tilde x_{2i} = x_{2i} \cos m\theta_i - x_{2i+1} \sin m\theta_i$ and
+$\tilde x_{2i+1} = x_{2i+1} \cos m\theta_i + x_{2i} \sin m\theta_i$. Written for the whole vector,
+
+$$
+\tilde\xvec = \xvec \odot \cvec_m + \xvec' \odot \svec_m, \qquad
+\xvec' = (-x_1, x_0, -x_3, x_2, \dots),
+$$
+
+where $\cvec_m$ and $\svec_m$ hold $\cos m\theta_i$ and $\sin m\theta_i$, each repeated for both members of pair $i$. The
+cost is $O(d)$ per query or key, negligible beside the $O(d^2)$ projections. The tables of $\cos$ and $\sin$ are
+computed once per position.
+
+**Partial rotary.** Some models rotate only a fraction of each head's dimensions and leave the rest unrotated.
+GPT-NeoX-20B rotates the first 25% <Cite id="black2022" />. The unrotated dimensions give a head a content-only score
+component that does not change with distance.
+
+## Long-term decay
+
+Su et al. show that the rotary score tends to shrink as the distance grows <Cite id="su2021" />. Write
+$h_i = q^{(i)} \overline{k^{(i)}}$ and $S_j = \sum_{i=0}^{j-1} e^{\mathrm{i}(m-n)\theta_i}$, with $S_0 = 0$ and
+$h_{d/2} = 0$. Since $e^{\mathrm{i}(m-n)\theta_i} = S_{i+1} - S_i$, summation by parts (Abel summation) gives
+
+$$
+\sum_{i=0}^{d/2-1} h_i\, e^{\mathrm{i}(m-n)\theta_i} = \sum_{i=0}^{d/2-1} h_i (S_{i+1} - S_i)
+= -\sum_{i=0}^{d/2-1} S_{i+1} (h_{i+1} - h_i).
+$$
+
+Taking absolute values,
+
+$$
+\abs{\sum_{i} h_i\, e^{\mathrm{i}(m-n)\theta_i}} \le \paren{\max_i \abs{h_{i+1} - h_i}} \sum_{j=1}^{d/2} \abs{S_j}.
+$$
+
+The first factor depends on the content. The second depends only on the distance $m - n$. At distance 0 every term of
+$S_j$ is 1, so $\abs{S_j} = j$. At large distances the phases $(m - n)\theta_i$ spread around the circle and partly
+cancel, so $\abs{S_j}$ is smaller. For $d = 128$ and base 10,000, the mean of $\abs{S_j}$ is $32.5$ at distance 0,
+$17.9$ at 10, $10.2$ at 100 and $4.5$ at 1000. The decay is a bound, not a law: particular queries and keys can still
+score highly at long range.
+
+<RopeDecay />
+
+## The base
+
+The frequencies $\theta_i = b^{-2i/d}$ run from 1 radian per token down to $b^{-(d-2)/d}$. The slowest pair has wavelength
+$2\pi b^{(d-2)/d}$: about 54,000 tokens for $b = 10{,}000$ and $d = 128$. RoFormer and Llama 2 use $b = 10{,}000$
+<Cite id="su2021" /> <Cite id="touvron2023" />. Llama 3 uses $b = 500{,}000$ to support longer contexts
+<Cite id="grattafiori2024" />.
+
+A trained model has seen only the angles $m\theta_i$ for $m$ below its training length. Beyond that, the slow pairs reach
+angles never seen in training, and quality falls. Rescaling positions or frequencies so that no angle leaves the
+trained range is the basis of position interpolation, NTK-aware scaling and YaRN; see
+<NoteLink to="long-context-methods">long-context methods</NoteLink>.
+
+## Worked example
+
+Take $d = 4$, so $\theta_0 = 1$ and $\theta_1 = 10000^{-1/2} = 0.01$. Let $\qvec = (1, 0, 1, 0)$ and $\kvec = (1, 0, 0, 1)$.
+
+Place the query at $m = 2$ and the key at $n = 5$. Rotating gives $\tilde\qvec = (-0.416, 0.909, 1.000, 0.020)$ and
+$\tilde\kvec = (0.284, -0.959, -0.050, 0.999)$, and $\tilde\qvec^{\tr}\tilde\kvec = -1.020$.
+
+Move both by 8, to $m = 10$ and $n = 13$. The rotated vectors are different:
+$\tilde\qvec = (-0.839, -0.544, 0.995, 0.100)$ and $\tilde\kvec = (0.907, 0.420, -0.130, 0.992)$. The score is again
+$-1.020$.
+
+The formula $\qvec^{\tr} \Rmat_{n-m} \kvec$ predicts it. Pair 0 contributes $(1, 0) \cdot \Rmat_{3}(1, 0) = \cos 3 =
+-0.990$. Pair 1 contributes $(1, 0) \cdot \Rmat_{0.03}(0, 1) = -\sin 0.03 = -0.030$. The sum is $-1.020$.
+
+Swapping the roles, query at 5 and key at 2, gives $\cos(-3) + \sin 0.03 = -0.960$. The score depends on the signed
+offset, so RoPE distinguishes earlier from later tokens.
+
+## Assumptions
+
+- Positions are integers on a line. Images and video need several position coordinates; see
+  <NoteLink to="xpos-and-rope-variants">xPos and RoPE variants</NoteLink>.
+- The relevant relation between two tokens depends on their offset.
+
+## Pitfalls
+
+- **Pairing convention.** Implementations pair dimensions either as $(2i, 2i+1)$ or as $(i, i + d/2)$. Both are valid
+  rotary embeddings, but weights trained under one convention give wrong outputs under the other.
+- **Changing the base changes the model.** Every score depends on $\theta_i$. Changing $b$ in a trained model needs
+  fine-tuning.
+- **Length generalisation is limited.** Press et al. found rotary models degrade beyond their training length, and
+  Kazemnejad et al. found them to generalise to longer inputs little better than absolute embeddings
+  <Cite id="press2022" /> <Cite id="kazemnejad2023" />.
+- **Rotate before caching.** In a <NoteLink to="kv-cache">KV cache</NoteLink>, each key is stored after rotation by its
+  own position. It stays valid as new tokens arrive, because its angle depends only on its own position.
+- **Low-rank key compression.** A rotation depends on position, so it cannot be absorbed into a fixed projection matrix.
+  <NoteLink to="multi-head-latent-attention">Multi-head latent attention</NoteLink> works around this by carrying RoPE on
+  a separate small key.

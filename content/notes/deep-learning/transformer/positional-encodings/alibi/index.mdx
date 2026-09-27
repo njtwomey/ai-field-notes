@@ -1,0 +1,98 @@
+---
+title: ALiBi
+kind: technique
+summary: Attention with linear biases (ALiBi) subtracts $m_h (i - j)$ from the score of query $i$ and earlier key $j$, with a fixed slope $m_h = 2^{-8h/H}$ for head $h$ of $H$. It adds no position vectors and no parameters, and lets a model trained on short sequences run on longer ones.
+tags: [deep-learning, transformer, positional-encoding, attention, long-context, worked-example]
+aliases: [attention with linear biases, linear position bias, ALiBi slopes]
+requires: [scaled-dot-product-attention, causal-masking]
+partOf: [positional-encoding]
+related: [t5-relative-position-bias, rotary-position-embedding, xpos-and-rope-variants, long-context-methods, sliding-window-and-sparse-attention]
+references: [press2022, haviv2022, kazemnejad2023]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+In a causal attention layer with $H$ heads, ALiBi computes the logit of query position $i$ and key position $j \le i$ in
+head $h \in \set{1, \dots, H}$ as
+$$
+e_{ij} = \frac{\qvec_i^{\tr} \kvec_j}{\sqrt{d_k}} - m_h\, (i - j), \qquad m_h = 2^{-8h/H}.
+$$
+The slopes are fixed before training and never learned. No positional encoding is added anywhere else in the network
+<Cite id="press2022" />.
+</Definition>
+
+## Problem
+
+A language model trained on sequences of length $L$ should ideally work on longer inputs at inference. Press et al. found
+that sinusoidal models have very limited ability to do so, that rotary embeddings do somewhat better, and that the T5
+bias does better still but is considerably slower <Cite id="press2022" />. Training on longer sequences instead is expensive,
+because attention cost grows with the square of the length.
+
+## Mechanism
+
+**A penalty proportional to distance.** Each head lowers the logit of a key by $m_h$ for every position it lies behind
+the query. The bias for query $i$ is the row $m_h \cdot (-(i-1), \dots, -2, -1, 0)$ over keys $1, \dots, i$.
+
+**Multiplicative decay.** Exponentiating shows what the bias does to the weights:
+
+$$
+\alpha_{ij} \propto \exp\paren{\frac{\qvec_i^{\tr} \kvec_j}{\sqrt{d_k}}} \cdot e^{-m_h (i - j)}.
+$$
+
+Each head multiplies the content weight by an exponential decay in distance, with half-life $\ln 2 / m_h$ tokens. A key
+$\ln 2 / m_h$ positions back needs a content score higher by $\ln 2$ to receive the same weight as the adjacent key.
+
+**Slopes.** For $H$ heads the slopes are the geometric sequence that starts at $2^{-8/H}$ with ratio $2^{-8/H}$. With 8
+heads they are $\tfrac{1}{2}, \tfrac{1}{4}, \dots, \tfrac{1}{256}$. With 16 heads they are
+$2^{-0.5}, 2^{-1}, \dots, 2^{-8}$. The half-lives for 8 heads run from $2 \ln 2 = 1.4$ tokens to $256 \ln 2 = 177$
+tokens, so some heads are local and others look far back. Press et al. tried learned slopes; they extrapolated worse and
+slowed training by 3% <Cite id="press2022" />.
+
+**Why it extrapolates.** A position embedding at an unseen position is an input the model has never seen. An ALiBi
+bias at an unseen distance is just a larger penalty of the same form, and it drives the weight of far keys towards 0.
+Beyond a head's effective range, extra keys contribute almost nothing, so the model behaves much as it did on training
+lengths.
+
+**Relative by construction.** The bias depends only on $i - j$, so ALiBi is a relative scheme. The bias matrix is a
+Toeplitz matrix: constant along each diagonal.
+
+## Evidence
+
+A 1.3-billion-parameter model trained with ALiBi on 1024-token inputs matched, on 2048-token inputs, the perplexity of
+a sinusoidal model trained on 2048 tokens. It trained 11% faster and used 11% less memory <Cite id="press2022" />. On
+WikiText-103, ALiBi models kept improving perplexity for up to 200 tokens beyond a training length of 512, and did not
+degrade beyond that.
+
+At fixed length, Haviv et al. measured validation perplexity on the Pile for 1.3-billion-parameter models with
+1024-token inputs: 12.51 for ALiBi, 12.93 for sinusoids, 13.05 for learned embeddings and 13.10 for no position
+information <Cite id="haviv2022" />.
+
+## Worked example
+
+Take $H = 8$ heads. Head 1 has $m_1 = 2^{-1} = 0.5$ and head 8 has $m_8 = 2^{-8} = 0.0039$.
+
+A query at position $i = 4$ attends to keys $j = 4, 3, 2, 1$, at distances $0, 1, 2, 3$. Suppose all four content
+scores are equal. In head 1 the logits are $0, -0.5, -1.0, -1.5$ relative to the nearest key, and the softmax gives
+weights $0.455, 0.276, 0.167, 0.102$. In head 8 the logits differ by at most $3 \times 0.0039 = 0.012$, so the weights
+are almost uniform, about $0.25$ each.
+
+At distance 1000, head 1 multiplies the content weight by $e^{-500}$, effectively zero, while head 8 multiplies it by
+$e^{-3.9} = 0.02$. Head 8 can still reach a key that far back if its content score is about 4 higher than that of nearby
+keys.
+
+## Cost
+
+The bias is a closed-form function of $i - j$ and the head, so it adds one subtraction per logit and no parameters. It
+can be generated inside an attention kernel instead of being stored. Press et al. measured a memory increase of 0 to
+0.7% over the sinusoidal model at the same length <Cite id="press2022" />.
+
+## Trade-offs
+
+- **Recency bias.** Every head prefers nearby tokens. Tasks that need a distant token to dominate must overcome the
+  penalty with content. Kazemnejad et al. found ALiBi generalised poorly to longer inputs on synthetic reasoning tasks,
+  behind the T5 bias and no encoding at all <Cite id="kazemnejad2023" />.
+- **Extrapolation without use.** Perplexity stays flat beyond the training length partly because far tokens are ignored.
+  A flat perplexity curve does not show that the model uses the extra context.
+- **Causal form.** The published form is defined for causal attention. Bidirectional variants must choose how to treat
+  keys after the query, for example with $\abs{i - j}$.

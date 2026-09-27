@@ -1,0 +1,167 @@
+---
+title: Transformer layer by layer
+kind: example
+summary: 'A forward pass through one encoder block of the original transformer, with $d = 4$, one head and four tokens, computed by hand: embeddings plus sinusoids, queries, keys and values, scaled scores, softmax weights, residual sums, layer norms and the ReLU feed-forward network.'
+tags: [deep-learning, transformer, attention, worked-example]
+aliases: [transformer forward pass, transformer worked example, encoder block by hand, transformer by hand]
+requires: [transformer]
+related: [scaled-dot-product-attention, multi-head-attention, sinusoidal-positional-encoding, layer-normalisation, causal-masking]
+references: [vaswani2017, ba2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { LayerExplorer } from './LayerExplorer'
+
+<Definition>
+Four tokens, "the cat sat down", at positions $t = 0, 1, 2, 3$, enter one encoder block of the
+<NoteLink to="transformer">transformer</NoteLink> with model width $d = 4$, one attention head ($d_k = d_v = 4$) and
+feed-forward width $d_{ff} = 8$. Compute the block's output $\Ymat \in \reals^{4 \times 4}$ from the embeddings
+$$
+\Emat = \begin{bmatrix} 0.5 & 0 & 0.5 & 0 \\ 0 & 0.5 & 0 & 0.5 \\ 0.5 & 0.5 & 0 & 0 \\ 0 & 0 & 0.5 & 0.5 \end{bmatrix}
+\begin{matrix} \text{the} \\ \text{cat} \\ \text{sat} \\ \text{down} \end{matrix}
+$$
+and the weights $\Wmat_Q = \Wmat_V = \Wmat_O = \eye$,
+$$
+\Wmat_K = \begin{bmatrix} 0 & 1 & 0 & 0 \\ 1 & 0 & 0 & 0 \\ 0 & 0 & 0 & 1 \\ 0 & 0 & 1 & 0 \end{bmatrix}, \qquad
+\Wmat_1 = \frac{1}{2}\begin{bmatrix}
+1 & 0 & 0 & 0 & 1 & 0 & -1 & 0 \\
+0 & 1 & 0 & 0 & 0 & 1 & 0 & -1 \\
+0 & 0 & 1 & 0 & -1 & 0 & 1 & 0 \\
+0 & 0 & 0 & 1 & 0 & -1 & 0 & 1
+\end{bmatrix}, \qquad \Wmat_2 = \Wmat_1^{\tr},
+$$
+with all biases 0, layer-norm scale 1 and shift 0, and no dropout.
+</Definition>
+
+## Setup
+
+The block is the post-norm encoder block of Vaswani et al. <Cite id="vaswani2017" />:
+
+$$
+\begin{aligned}
+\Xmat &= \sqrt{d}\,\Emat + \Pmat, \\
+\Zmat &= \operatorname{LN}\paren{\Xmat + \operatorname{softmax}\paren{\Xmat \Wmat_Q (\Xmat \Wmat_K)^{\tr} / \sqrt{d_k}} \Xmat \Wmat_V \Wmat_O}, \\
+\Ymat &= \operatorname{LN}\paren{\Zmat + \max(0, \Zmat \Wmat_1) \Wmat_2}.
+\end{aligned}
+$$
+
+$\Pmat$ holds the <NoteLink to="sinusoidal-positional-encoding">sinusoidal encodings</NoteLink> of positions 0 to 3.
+$\operatorname{LN}$ subtracts each row's mean and divides by its standard deviation, computed over the row's $d$ entries
+with divisor $d$ <Cite id="ba2016" />. The swap matrix $\Wmat_K$ exchanges the two features in each pair, so a key
+differs from its query and the score matrix is not a plain Gram matrix. The widths are far below the base model's
+$d = 512$, $h = 8$ and $d_{ff} = 2048$, and $d_{ff} = 2d$ instead of $4d$ keeps $\Wmat_1$ small. Every operation is the
+same. All numbers are rounded to three decimals and were checked with NumPy.
+
+## Solution
+
+**1. Input.** With $d = 4$ the frequencies are $\omega_0 = 1$ and $\omega_1 = 0.01$, so
+$\pvec_t = (\sin t, \cos t, \sin 0.01t, \cos 0.01t)$. The embeddings are scaled by $\sqrt{4} = 2$ and the encodings
+added:
+
+$$
+\Xmat = \begin{bmatrix}
+1 & 1 & 1 & 1 \\
+0.841 & 1.540 & 0.010 & 2 \\
+1.909 & 0.584 & 0.020 & 1 \\
+0.141 & -0.990 & 1.030 & 2
+\end{bmatrix}.
+$$
+
+Row 1 is "cat": $2 \times (0, 0.5, 0, 0.5) + (0.841, 0.540, 0.010, 1.000)$.
+
+**2. Queries, keys and values.** $\Qmat = \Vmat = \Xmat$. Each key is its row of $\Xmat$ with the pairs swapped; for
+"cat", $\kvec_1 = (1.540, 0.841, 2, 0.010)$.
+
+**3. Scores.** $\Smat = \Qmat \Kmat^{\tr} / \sqrt{4}$. For example
+$S_{10} = \qvec_1^{\tr} \kvec_0 / 2 = (0.841 + 1.540 + 0.010 + 2)/2 = 2.196$, since $\kvec_0 = (1, 1, 1, 1)$. In full,
+
+$$
+\Smat = \begin{bmatrix}
+2.000 & 2.196 & 1.756 & 1.090 \\
+2.196 & 1.316 & 1.741 & 0.732 \\
+1.756 & 1.741 & 1.135 & -0.369 \\
+1.090 & 0.732 & -0.369 & 1.920
+\end{bmatrix}.
+$$
+
+**4. Weights.** The softmax of each row:
+
+$$
+\Amat = \begin{bmatrix}
+0.294 & 0.357 & 0.230 & 0.118 \\
+0.438 & 0.182 & 0.278 & 0.101 \\
+0.379 & 0.373 & 0.203 & 0.045 \\
+0.237 & 0.165 & 0.055 & 0.543
+\end{bmatrix}.
+$$
+
+"cat" puts most weight on "the" (0.438) and least on "down" (0.101). "down" attends mostly to itself (0.543). Every row
+sums to 1. With a <NoteLink to="causal-masking">causal mask</NoteLink>, row 1 would keep only its first two scores and
+become $\operatorname{softmax}(2.196, 1.316) = (0.707, 0.293, 0, 0)$.
+
+**5. Attention output.** $\ovec_1 = \sum_j A_{1j} \xvec_j = 0.438\,\xvec_0 + 0.182\,\xvec_1 + 0.278\,\xvec_2 + 0.101\,\xvec_3
+= (1.137, 0.781, 0.550, 1.283)$. With $\Wmat_V = \Wmat_O = \eye$ this is the sublayer's output.
+
+**6. First residual and layer norm.** $\xvec_1 + \ovec_1 = (1.979, 2.321, 0.560, 3.283)$. Its mean is $2.036$ and its
+standard deviation $0.977$, so
+
+$$
+\zvec_1 = \frac{(1.979, 2.321, 0.560, 3.283) - 2.036}{0.977} = (-0.059, 0.292, -1.510, 1.277).
+$$
+
+**7. Feed-forward network.** $\zvec_1 \Wmat_1 = (-0.029, 0.146, -0.755, 0.638, 0.726, -0.492, -0.726, 0.492)$. The
+ReLU zeroes the four negative entries: $(0, 0.146, 0, 0.638, 0.726, 0, 0, 0.492)$. Multiplying by $\Wmat_2 = \Wmat_1^{\tr}$
+gives $\operatorname{FFN}(\zvec_1) = (0.363, -0.173, -0.363, 0.565)$.
+
+**8. Second residual and layer norm.** $\zvec_1 + \operatorname{FFN}(\zvec_1) = (0.304, 0.119, -1.873, 1.842)$, with mean
+$0.098$ and standard deviation $1.320$. Normalising gives the block's output for "cat":
+
+$$
+\yvec_1 = (0.156, 0.016, -1.493, 1.321).
+$$
+
+The full output is
+
+$$
+\Ymat = \begin{bmatrix}
+0.430 & -0.507 & -1.295 & 1.372 \\
+0.156 & 0.016 & -1.493 & 1.321 \\
+1.269 & -0.370 & -1.411 & 0.512 \\
+-0.385 & -1.316 & 0.269 & 1.431
+\end{bmatrix}.
+$$
+
+Each row has mean 0 and standard deviation 1, as the final layer norm guarantees. In a six-layer encoder, $\Ymat$ would
+be the next block's $\Xmat$.
+
+## Simulation
+
+<LayerExplorer />
+
+## What it illustrates
+
+- **Attention is the only place tokens meet.** Up to step 2 and from step 5 onwards every operation acts on one row at
+  a time. Only $\Amat$ mixes rows. Changing one token's embedding in the figure changes its own rows of $\Xmat$,
+  $\Qmat$, $\Kmat$ and $\Vmat$, and then every row from $\Smat$ on. See
+  <NoteLink to="scaled-dot-product-attention">scaled dot-product attention</NoteLink>.
+- **Residual sums keep the input.** Step 6 adds the attention output to $\Xmat$ rather than replacing it; see
+  <NoteLink to="residual-connections">residual connections</NoteLink>.
+- **Post-norm resets the scale.** The rows of the two residual sums have standard deviations from 0.38 to 1.71, and
+  each layer norm returns them to exactly 1; see <NoteLink to="layer-normalisation">layer normalisation</NoteLink>.
+- **Position enters only through $\Pmat$.** Turning the positional encoding off in the figure makes $\Xmat = 2\Emat$.
+  The block then maps each token to the same output whatever its position, reordered with the input.
+- **The feed-forward layer is sparse.** The ReLU zeroes four of the eight hidden units for every token here, and which
+  four depends on the token.
+
+## Variations
+
+- **Several heads.** With $h = 2$ heads of width 2, each head computes its own $2$-dimensional queries and keys and its
+  own $4 \times 4$ weight matrix, and $\Wmat_O$ mixes the two outputs; see
+  <NoteLink to="multi-head-attention">multi-head attention</NoteLink>.
+- **A sharper or flatter softmax.** Multiplying $\Wmat_Q$ by $c$ multiplies every score by $c$. As $c$ grows each row of
+  $\Amat$ approaches a one-hot vector on its largest score; at $c = 0$ every weight is $1/4$. The query–key scale slider
+  in the figure does this.
+- **Pre-norm.** A modern block computes $\Xmat + \operatorname{Attn}(\operatorname{LN}(\Xmat))$ instead, so the
+  residual sums are not normalised and grow from block to block; see <NoteLink to="pre-norm-and-post-norm">pre-norm and
+  post-norm</NoteLink>.

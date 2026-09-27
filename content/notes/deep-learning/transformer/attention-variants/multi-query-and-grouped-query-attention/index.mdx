@@ -1,0 +1,112 @@
+---
+title: Multi-query and grouped-query attention
+kind: technique
+summary: Grouped-query attention splits $h$ query heads into $g$ groups that each share one key head and one value head. Multi-query attention is $g = 1$ and multi-head attention $g = h$. The KV cache shrinks by $h/g$, which speeds up memory-bound decoding at a small cost in quality.
+tags: [deep-learning, transformer, attention, inference, memory, worked-example]
+aliases: [MQA, GQA, multi-query attention, grouped-query attention, shared key-value heads, KV heads, uptraining]
+requires: [multi-head-attention, kv-cache]
+related: [multi-head-latent-attention, llama-family, modern-decoder-block, flash-attention]
+references: [shazeer2019, ainslie2023, touvron2023, jiang2023mistral, gemmateam2024, pope2022]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Grouped-query attention (GQA) with $h$ query heads and $g$ key–value heads, where $g$ divides $h$, computes head $i$ as
+$$
+\text{head}_i = \operatorname{Attention}\paren{\Xmat \Wmat_Q^{i},\ \Xmat \Wmat_K^{\gamma(i)},\ \Xmat \Wmat_V^{\gamma(i)}},
+\qquad \gamma(i) = \left\lfloor \frac{i}{h/g} \right\rfloor,
+$$
+so each group of $h/g$ consecutive query heads shares one key projection and one value projection. Multi-query attention
+(MQA) is the case $g = 1$ <Cite id="shazeer2019" />; multi-head attention is $g = h$. GQA was introduced by Ainslie et
+al. <Cite id="ainslie2023" />.
+</Definition>
+
+## Problem
+
+Autoregressive decoding generates one token per step. Each step reads every layer's cached keys and values for all
+earlier tokens (see <NoteLink to="kv-cache">KV caching</NoteLink>) but does little arithmetic with them. The step is
+limited by memory bandwidth, not by compute.
+
+Shazeer makes this precise for one attention layer of width $d$ with $h$ heads of width $d_k = d/h$, batch size $b$ and
+$n$ decoding steps <Cite id="shazeer2019" />. Over the $n$ steps the arithmetic is $\Theta(b n d^2)$, dominated by the
+projections. The memory traffic is $\Theta(b n^2 d + n d^2)$: each step reads the whole cache, $b \cdot n \cdot d$
+numbers, and the projection weights, $d^2$. The ratio of memory access to arithmetic is
+
+$$
+\Theta\paren{\frac{b n^2 d + n d^2}{b n d^2}} = \Theta\paren{\frac{n}{d} + \frac{1}{b}}.
+$$
+
+A large batch drives $1/b$ down, but $n/d$ approaches 1 once the context is as long as the model is wide, and the
+hardware then waits on memory. With a single key–value head the cache per token is $d_k = d/h$ instead of $d$, and the
+ratio becomes $\Theta(1/d + n/(dh) + 1/b)$: the offending $n/d$ term shrinks by a factor of $h$.
+
+## Mechanism
+
+**Sharing.** Every query head still has its own $\Wmat_Q^i$, so the heads still compute different attention weights.
+Only the vectors they compare against and average are shared within a group. In implementation the $g$ key and value
+heads are computed once and broadcast to the $h/g$ query heads of their group.
+
+**Cache size.** Per token and layer, multi-head attention caches $2 h d_k$ numbers. GQA caches $2 g d_k$, a reduction by
+$h/g$. MQA caches $2 d_k$, a reduction by $h$.
+
+**Parameters.** The key and value projections shrink from $2 d \cdot h d_k$ to $2 d \cdot g d_k$ weights. Shazeer
+widened the feed-forward layers from 4096 to 5440 hidden units to keep the parameter count equal to the baseline's
+<Cite id="shazeer2019" />.
+
+**Uptraining.** A trained multi-head checkpoint can be converted rather than retrained. Ainslie et al. build each group's
+key and value projections by mean-pooling the projections of the original heads in that group, then continue
+pretraining for a fraction $\alpha$ of the original steps <Cite id="ainslie2023" />. Mean-pooling worked better than
+keeping the first head of each group or initialising randomly. GQA already performed reasonably right after conversion;
+MQA needed the extra training. Both gained from $\alpha = 5\%$, with diminishing returns at 10%.
+
+## Evidence
+
+**Multi-query, translation.** On WMT 2014 English–German, a multi-query model scored 26.5 BLEU on the development set
+against 26.7 for multi-head attention. Incremental decoding took $3.8\ \mu$s per token instead of $46\ \mu$s. Reducing
+the number of heads or their width in a multi-head model to save the same memory cost more quality
+<Cite id="shazeer2019" />.
+
+**Grouped-query, uptrained T5-XXL.** Averaged over summarisation, translation and question answering
+<Cite id="ainslie2023" />:
+
+| Model               | Inference time per sample (s) | Average score |
+| ------------------- | ----------------------------- | ------------- |
+| MHA, T5-Large       | 0.37                          | 46.0          |
+| MHA, T5-XXL         | 1.51                          | 47.2          |
+| MQA, T5-XXL, uptrained | 0.24                       | 46.6          |
+| GQA-8, T5-XXL, uptrained | 0.28                     | 47.1          |
+
+GQA-8 is within 0.1 of multi-head quality at nearly the speed of MQA.
+
+**Adoption.** Llama 2 uses GQA in its 34B and 70B models <Cite id="touvron2023" />, Mistral 7B uses 8 key–value heads
+for 32 query heads <Cite id="jiang2023mistral" />, and Gemma 2 uses GQA throughout <Cite id="gemmateam2024" />.
+
+## Worked example
+
+Mistral 7B has $L = 32$ layers, $h = 32$ query heads of width $d_k = 128$ and $g = 8$ key–value heads
+<Cite id="jiang2023mistral" />.
+
+- **Multi-head cache per token:** $2 L h d_k = 2 \times 32 \times 32 \times 128 = 262{,}144$ numbers, 0.5 MiB in 16-bit
+  floats.
+- **GQA cache per token:** $2 L g d_k = 65{,}536$ numbers, 128 KiB. The reduction is $h/g = 4$.
+- **One sequence of 8192 tokens:** 4 GiB with multi-head attention, 1 GiB with GQA.
+- **MQA** would need $2 L d_k = 8192$ numbers per token, 16 KiB, another factor of 8.
+
+The query heads in each group of four compute four different weight patterns over the same 8 keys-and-values per token.
+
+## Cost
+
+Compute per token is unchanged in the attention scores and slightly lower in the projections. The savings are in memory
+capacity, which allows larger batches or longer contexts, and in memory bandwidth, which speeds up each decoding step.
+In tensor-parallel serving, $g$ key–value heads split cleanly across up to $g$ devices; with MQA the single head must be
+replicated on every device, which gives back part of the saving <Cite id="ainslie2023" /> <Cite id="pope2022" />.
+
+## Trade-offs
+
+- **Quality against memory.** MQA loses some quality and can make training less stable. GQA with $g = 8$ recovers most
+  of the gap. Ainslie et al. found time per sample grows only modestly from $g = 1$ to $g = 8$ and faster beyond.
+- **Encoder self-attention gains nothing.** Encoders process the whole input in parallel and keep no cache, so GQA was
+  applied only to decoder self-attention and cross-attention.
+- **Alternatives.** <NoteLink to="multi-head-latent-attention">Multi-head latent attention</NoteLink> compresses keys
+  and values into a shared latent vector instead of sharing heads, with a cache comparable to GQA with 2.25 groups.

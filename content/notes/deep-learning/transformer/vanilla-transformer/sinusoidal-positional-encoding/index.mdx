@@ -1,0 +1,148 @@
+---
+title: Sinusoidal positional encoding
+kind: concept
+summary: The original transformer adds $\pvec_t$ to the token embedding at position $t$, with $p_{t,2i} = \sin(\omega_i t)$, $p_{t,2i+1} = \cos(\omega_i t)$ and $\omega_i = 10000^{-2i/d}$. Each shift by $k$ positions is a fixed rotation of every pair, so $\pvec_{t+k}$ is a linear function of $\pvec_t$.
+tags: [deep-learning, transformer, positional-encoding, embeddings, worked-example]
+aliases: [sinusoidal position encoding, sinusoidal position embedding, sine-cosine positional encoding, fixed positional encoding, timing signal]
+requires: [dot-product, matrix-vector-product]
+partOf: [transformer, positional-encoding]
+related: [rotary-position-embedding, learned-absolute-position-embeddings, relative-position-representations]
+references: [vaswani2017, kazemnejad2019, ke2021, press2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { EncodingHeatmap } from './EncodingHeatmap'
+
+<Definition>
+For a model of even width $d$, the sinusoidal encoding of position $t = 0, 1, 2, \dots$ is the vector
+$\pvec_t \in \reals^d$ with, for $i = 0, 1, \dots, d/2 - 1$,
+$$
+p_{t,2i} = \sin(\omega_i t), \qquad p_{t,2i+1} = \cos(\omega_i t), \qquad \omega_i = 10000^{-2i/d}.
+$$
+The transformer adds $\pvec_t$ to the scaled token embedding at position $t$, once, before the first layer
+<Cite id="vaswani2017" />.
+</Definition>
+
+## Intuition
+
+Each pair of dimensions $(p_{t,2i}, p_{t,2i+1})$ is a point on the unit circle at angle $\omega_i t$. As $t$ increases
+the point turns at a fixed rate $\omega_i$ radians per token. Pair 0 turns by 1 radian per token and completes a turn
+every $2\pi \approx 6.3$ tokens. Later pairs turn geometrically slower. Fast pairs tell neighbouring positions apart.
+Slow pairs tell distant positions apart. Read together, the pairs work like the hands of a clock with many hands, each
+slower than the last by the same factor.
+
+The encoding is fixed, not learned, and it is defined for every $t$. The paper chose it over learned embeddings because
+it "may allow the model to extrapolate to sequence lengths longer than the ones encountered during training"
+<Cite id="vaswani2017" />.
+
+<EncodingHeatmap />
+
+## Wavelengths
+
+Pair $i$ has wavelength $\lambda_i = 2\pi / \omega_i = 2\pi \cdot 10000^{2i/d}$. Consecutive wavelengths differ by the
+constant factor $10000^{2/d}$, so they form a geometric progression. It runs from $\lambda_0 = 2\pi$ to
+$\lambda_{d/2-1} = 2\pi \cdot 10000^{(d-2)/d}$, just under $10000 \cdot 2\pi$. For $d = 512$ the factor is $1.0366$ and the
+longest wavelength is about $60{,}600$ tokens.
+
+The norm of every encoding is the same. Each pair contributes $\sin^2 + \cos^2 = 1$, so $\norm{\pvec_t}^2 = d/2$ for all
+$t$. Position changes the direction of $\pvec_t$, never its length.
+
+## A shift is a rotation
+
+Vaswani et al. chose sinusoids because, for any fixed offset $k$, $\pvec_{t+k}$ is a linear function of $\pvec_t$
+<Cite id="vaswani2017" />. The angle-addition formulas show it. For pair $i$,
+
+$$
+\begin{aligned}
+\sin(\omega_i (t + k)) &= \sin(\omega_i t) \cos(\omega_i k) + \cos(\omega_i t) \sin(\omega_i k), \\
+\cos(\omega_i (t + k)) &= \cos(\omega_i t) \cos(\omega_i k) - \sin(\omega_i t) \sin(\omega_i k).
+\end{aligned}
+$$
+
+In matrix form,
+
+$$
+\begin{bmatrix} p_{t+k,2i} \\ p_{t+k,2i+1} \end{bmatrix} =
+\underbrace{\begin{bmatrix} \cos \omega_i k & \sin \omega_i k \\ -\sin \omega_i k & \cos \omega_i k \end{bmatrix}}_{\Rmat_i(k)}
+\begin{bmatrix} p_{t,2i} \\ p_{t,2i+1} \end{bmatrix}.
+$$
+
+$\Rmat_i(k)$ depends on $k$ and not on $t$. It is orthogonal with determinant $\cos^2 + \sin^2 = 1$, so it is a
+rotation, by angle $\omega_i k$. Placing the $d/2$ blocks on the diagonal gives one orthogonal matrix $\Rmat(k)$ with
+
+$$
+\pvec_{t+k} = \Rmat(k)\, \pvec_t \quad \text{for every } t.
+$$
+
+A linear layer can therefore represent "the position $k$ steps later" by one matrix that works at every position
+<Cite id="kazemnejad2019" />. The rotations also compose: $\Rmat(k)\Rmat(l) = \Rmat(k + l)$, since rotations in the same
+plane add their angles.
+
+## Similarity depends only on the offset
+
+The same identity makes the dot product of two encodings a function of the offset alone:
+
+$$
+\pvec_t^{\tr} \pvec_{t+k}
+= \sum_{i=0}^{d/2-1} \brack{\sin(\omega_i t) \sin(\omega_i (t+k)) + \cos(\omega_i t) \cos(\omega_i (t+k))}
+= \sum_{i=0}^{d/2-1} \cos(\omega_i k).
+$$
+
+Each bracket equals $\cos(\omega_i (t + k) - \omega_i t)$ by the cosine difference formula. The sum equals $d/2$ at
+$k = 0$, is symmetric in $k$, and tends to fall as $\abs{k}$ grows because more and more pairs have turned through large
+angles. The fall is not monotone: fast pairs make it wobble.
+For $d = 512$ it is 256 at $k = 0$, 249.1 at $k = 1$, 173.8 at $k = 10$, 112.0 at $k = 100$ and 45.0 at $k = 1000$,
+whatever the value of $t$.
+
+## The structure is diluted in the model
+
+The first layer does not see $\pvec_t$ alone. It sees $\xvec_t + \pvec_t$, and the query–key score between positions $m$
+and $n$ expands into four terms. With $\Mmat = \Wmat_Q \Wmat_K^{\tr}$,
+
+$$
+(\xvec_m + \pvec_m)^{\tr} \Mmat (\xvec_n + \pvec_n) =
+\xvec_m^{\tr} \Mmat \xvec_n + \xvec_m^{\tr} \Mmat \pvec_n + \pvec_m^{\tr} \Mmat \xvec_n + \pvec_m^{\tr} \Mmat \pvec_n.
+$$
+
+The last term depends on the offset only if $\Mmat$ commutes with every $\Rmat(k)$, which a learned $\Mmat$ need not do.
+The two middle terms mix a token's content with another token's absolute position. Ke et al. argued that these cross
+terms add noise to the attention of a pretrained BERT, and removed them <Cite id="ke2021" />. Relative encodings and
+<NoteLink to="rotary-position-embedding">rotary embeddings</NoteLink> build offset dependence into the score directly.
+
+## Worked example
+
+Take $d = 4$. The frequencies are $\omega_0 = 1$ and $\omega_1 = 10000^{-1/2} = 0.01$. The first four encodings, to three
+decimals, are
+
+| $t$ | $\sin t$ | $\cos t$ | $\sin 0.01t$ | $\cos 0.01t$ |
+| --- | -------- | -------- | ------------ | ------------ |
+| 0   | 0        | 1        | 0            | 1            |
+| 1   | 0.841    | 0.540    | 0.010        | 1.000        |
+| 2   | 0.909    | −0.416   | 0.020        | 1.000        |
+| 3   | 0.141    | −0.990   | 0.030        | 1.000        |
+
+The shift by one position is the block-diagonal rotation with $\Rmat_0(1)$ by 1 radian and $\Rmat_1(1)$ by 0.01 radians.
+Applied to $\pvec_0 = (0, 1, 0, 1)$ it gives $(\sin 1, \cos 1, \sin 0.01, \cos 0.01) = (0.841, 0.540, 0.010, 1.000)$,
+which is $\pvec_1$. Applied to $\pvec_2$ it gives $(0.141, -0.990, 0.030, 1.000) = \pvec_3$: the same matrix moves every
+position forward by one.
+
+With $d = 4$ the second pair barely moves over short sequences. Real models use $d = 512$ or more, which spreads the
+frequencies over four orders of magnitude.
+
+## Assumptions
+
+- Positions form a single line. Images, tables and graphs need other encodings.
+- Distance is measured in tokens. Two tokens the same number of positions apart get the same offset rotation whatever
+  lies between them.
+
+## Pitfalls
+
+- **Extrapolation is not free.** The encoding exists at every $t$, but a model trained on short sequences has not seen
+  the angle combinations of longer ones. Press et al. found sinusoidal models degrade quickly beyond their training
+  length <Cite id="press2022" />.
+- **Layout conventions.** Some implementations interleave sine and cosine as above; others put all sines first and all
+  cosines second. The two differ by a fixed permutation of dimensions, which matters only when loading weights trained
+  under the other layout.
+- **Base and width are coupled.** Changing $d$ changes every frequency $\omega_i = 10000^{-2i/d}$. A position table
+  computed for one width cannot be truncated to serve another.

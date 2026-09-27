@@ -1,0 +1,104 @@
+---
+title: QK normalisation and logit soft-capping
+kind: technique
+summary: Attention logits $\qvec^{\tr}\kvec$ grow with the norms of the query and key weights, and very large logits make attention one-hot and training unstable. QK normalisation normalises queries and keys before the dot product; soft-capping maps each logit $s$ to $c \tanh(s/c)$.
+tags: [deep-learning, transformer, attention, training-stability, worked-example]
+aliases: [QK-norm, QK-LayerNorm, qk-layernorm, query-key normalisation, query-key normalization, QKNorm, logit soft-capping, soft-capping, attention logit capping, attention logit growth, attention entropy collapse]
+requires: [scaled-dot-product-attention, layer-normalisation]
+related: [training-stability-at-scale, pre-norm-and-post-norm, rmsnorm-in-transformers, softmax-and-log-sum-exp]
+references: [dehghani2023, henry2020, wortsman2023, zhai2023entropy, gemmateam2024, gemmateam2025, bello2016]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**QK normalisation** applies a normalisation $N$, usually layer normalisation or RMSNorm per head, to the queries and keys
+before the scores are formed:
+$$
+\operatorname{softmax}\paren{\frac{N(\Xmat \Wmat_Q)\, N(\Xmat \Wmat_K)^{\tr}}{\sqrt{d_k}}}
+$$
+<Cite id="dehghani2023" />. **Logit soft-capping** replaces each logit $s$ by $c \tanh(s / c)$ for a constant $c > 0$,
+so every logit lies in $(-c, c)$ <Cite id="gemmateam2024" />.
+</Definition>
+
+## Problem
+
+**Logits grow with the weights.** The score between positions $a$ and $b$ is
+$\xvec_a^{\tr} \Wmat_Q \Wmat_K^{\tr} \xvec_b / \sqrt{d_k}$. Scaling both $\Wmat_Q$ and $\Wmat_K$ by $c$ scales every score
+by $c^2$. By the Cauchy–Schwarz inequality, $\abs{\qvec^{\tr} \kvec} \le \norm{\qvec} \norm{\kvec}$, and nothing in
+the architecture bounds the norms of queries and keys. The inputs are normalised in a pre-norm block, but the
+projection weights are not. As their norms grow during training, the largest logits can grow quadratically.
+
+**Large logits stall learning.** Large logit gaps make the softmax nearly one-hot. The Jacobian of the softmax,
+$\diag(\alphavec) - \alphavec \alphavec^{\tr}$, then has every entry near 0, so the gradient reaching the queries and keys
+vanishes (see <NoteLink to="scaled-dot-product-attention">scaled dot-product attention</NoteLink>). Zhai et al. call
+this **attention entropy collapse** and link it to oscillating or diverging loss <Cite id="zhai2023entropy" />.
+
+**Observed at scale.** Training ViT-22B, Dehghani et al. saw the loss diverge after a few thousand steps in models of
+about 8 billion parameters. Without normalisation, attention logits grew above 50,000 in magnitude and the attention
+weights became one-hot <Cite id="dehghani2023" />. Wortsman et al. reproduced this **attention logit growth** instability
+in small models trained at high learning rates, and found QK layer normalisation equally effective there
+<Cite id="wortsman2023" />.
+
+## Mechanism
+
+**QK normalisation bounds the logits.** Layer normalisation without its learned gain gives each normalised vector
+entries with mean 0 and variance 1, so its norm is exactly $\sqrt{d_k}$. By Cauchy–Schwarz,
+
+$$
+\abs{\frac{N(\qvec)^{\tr} N(\kvec)}{\sqrt{d_k}}} \le \frac{\sqrt{d_k} \cdot \sqrt{d_k}}{\sqrt{d_k}} = \sqrt{d_k}.
+$$
+
+With learned gains $\gammavec_q, \gammavec_k$ the bound becomes $\sqrt{d_k}\, \max_i \abs{\gamma_{q,i}} \max_i
+\abs{\gamma_{k,i}}$. The logits can still grow, but only through a few gain parameters rather than through the full
+projection matrices. The same holds for RMSNorm.
+
+**Henry et al.'s variant.** QKNorm divides queries and keys by their $\ell_2$ norms, so the score is the cosine
+similarity, and multiplies by a learned scalar $g$ in place of $1/\sqrt{d_k}$. Every logit then lies in $[-g, g]$
+<Cite id="henry2020" />.
+
+**Soft-capping bounds the logits directly.** For $\abs{s} \ll c$, $\tanh(s/c) \approx s/c - (s/c)^3/3$, so
+
+$$
+c \tanh\paren{\frac{s}{c}} \approx s - \frac{s^3}{3c^2},
+$$
+
+which is almost the identity. For $\abs{s} \gg c$ the output approaches $\pm c$. The derivative is
+$\operatorname{sech}^2(s/c)$: 1 at $s = 0$, $0.42$ at $s = c$ and near 0 beyond. Large logits therefore stop changing the
+output and receive almost no gradient. Soft-capping on output logits goes back to Bello et al.'s pointer networks
+<Cite id="bello2016" />.
+
+**Where they are used.** Gemma 2 soft-caps attention logits at $c = 50$ and the final vocabulary logits at $c = 30$
+<Cite id="gemmateam2024" />. Gemma 3 replaced the attention soft-capping with QK normalisation
+<Cite id="gemmateam2025" />.
+
+## Worked example
+
+**Soft-capping at $c = 50$.** A logit of 1 stays $1.000$. A logit of 10 becomes $50 \tanh(0.2) = 9.869$, with gradient
+factor $0.961$. A logit of 60 becomes $41.68$, with gradient factor $0.305$. A logit of $200$ becomes $49.97$, with
+gradient factor $0.001$. At $c = 30$, as on Gemma 2's output logits, a logit of 100 becomes $29.92$.
+
+The cap still allows sharp attention: two logits at $+50$ and $-50$ give a weight ratio of $e^{100}$. Soft-capping
+removes the extreme logits, not the ability to focus.
+
+**QK normalisation at $d_k = 128$.** Without gains the largest possible logit is $\sqrt{128} = 11.3$. Two keys whose
+logits differ by that much get weights in the ratio $e^{11.3} \approx 8 \times 10^4$, enough for a head to focus
+almost entirely on one key, but far from the logits above 50,000 reported without normalisation.
+
+## Cost
+
+QK normalisation adds two normalisations per head per token, $O(n d)$ work beside the $O(n^2 d)$ of attention, and
+$2 d_k$ gain parameters per layer if gains are shared across heads. Soft-capping adds a $\tanh$ per logit. Both are
+cheap in arithmetic, but a per-logit function must be supported inside a fused attention kernel, whereas QK
+normalisation happens before the kernel.
+
+## Trade-offs
+
+- **Bounded logits limit sharpness.** QK normalisation without gains caps how peaked a head can be. The learned gains or
+  scale restore the range, and the bound on them is what keeps training stable.
+- **Interaction with RoPE.** In rotary models the normalisation can be applied before or after the rotation. Rotations
+  preserve norms, so the bound holds either way.
+- **Other remedies.** Zhai et al. reparametrise every linear layer with spectral normalisation and a learned scale,
+  which lower-bounds attention entropy <Cite id="zhai2023entropy" />. Lower learning rates also delay logit growth, at
+  the cost of slower training. See <NoteLink to="training-stability-at-scale">training stability at scale</NoteLink>
+  for the other instabilities, such as output-logit divergence, and their fixes.

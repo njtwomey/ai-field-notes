@@ -1,0 +1,105 @@
+---
+title: Attention sinks
+kind: concept
+summary: An attention sink is a token, usually the first, that receives a large share of attention whatever its content. Softmax weights sum to 1, so a head with nothing to retrieve parks weight there. Evicting sinks from a sliding-window cache breaks generation; keeping four fixes it.
+tags: [deep-learning, transformer, attention, inference, long-context, worked-example]
+aliases: [attention sink, StreamingLLM, sink token, softmax off by one, softmax1, register tokens, vision transformer registers]
+requires: [scaled-dot-product-attention, causal-masking, kv-cache]
+related: [sliding-window-and-sparse-attention, nope-and-implicit-position, differential-and-other-attention-variants, vision-transformer]
+references: [xiao2024, gu2025sink, sun2024massive, miller2023, darcet2024]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+An attention sink is a key position that receives a large fraction of the attention weight in many heads and layers,
+for most queries, regardless of its content. In autoregressive language models the sinks are the first few tokens of
+the sequence <Cite id="xiao2024" />.
+</Definition>
+
+## Intuition
+
+A softmax row is a probability distribution: its weights are positive and sum to 1. A head sometimes has nothing
+useful to retrieve for a given query, for example a head that tracks quotation marks when there are none. It cannot
+output "no attention". It can, however, put most of its weight on a token whose value vector contributes little, so the
+weighted average is close to zero. The model learns to reserve a token for that purpose.
+
+In a causal model the first token is the natural choice. Every later query can see it, while a token at position $t$ is
+visible only to queries at $t$ and after. A single consistent dumping ground is therefore easiest to learn at the start
+<Cite id="xiao2024" />.
+
+## Details
+
+**Sinks act like key biases.** Gu et al. found that sink tokens behave like a learned bias on the keys: they collect
+extra attention while their values contribute little to the output. The phenomenon emerged after sufficient training,
+was encouraged by weight decay, and disappeared in models up to 1 billion parameters when softmax attention was
+replaced by sigmoid attention without normalisation <Cite id="gu2025sink" />. Sun et al. traced sinks to a few
+**massive activations**, a few hidden-state entries about 10,000 times the median magnitude in Llama 2 7B, located at the starting
+token and a few delimiter tokens and nearly independent of the input. They act as fixed bias terms and concentrate
+attention on their tokens <Cite id="sun2024massive" />.
+
+**Position, not meaning.** Replacing the first four tokens of Llama-2-13B's input with line breaks left the model still
+attending heavily to them. Keeping those line breaks in a 1024-token window gave perplexity 5.60, close to the 5.40 with
+the original tokens. The sink is defined by its position <Cite id="xiao2024" />.
+
+**A zero sink is softmax off by one.** Adding 1 to the softmax denominator,
+
+$$
+\operatorname{softmax}_1(\svec)_j = \frac{e^{s_j}}{1 + \sum_l e^{s_l}},
+$$
+
+lets the weights sum to less than 1 <Cite id="miller2023" />. This is exactly ordinary softmax over one extra key with
+score 0 and value $\zeros$: that key's term $e^0 = 1$ enters the denominator, and its contribution to the output is
+$\frac{1}{1 + \sum_l e^{s_l}} \cdot \zeros = \zeros$. The weight not given to real tokens goes to nothing.
+
+**Vision transformers.** Darcet et al. found high-norm tokens in low-information background patches of supervised and
+self-supervised vision transformers, repurposed for internal computation. Adding a few extra learnable **register**
+tokens to the input gave those computations a home and removed the artefacts from the attention maps
+<Cite id="darcet2024" />.
+
+## Streaming with sinks
+
+**Window attention fails.** Keeping only the most recent $w$ tokens' keys and values in the
+<NoteLink to="kv-cache">KV cache</NoteLink> bounds memory for long streams. When the first tokens are evicted, the heads
+that parked weight on them must redistribute it over the remaining tokens, and the model's outputs change sharply. For
+Llama-2-13B with a 1024-token window, perplexity on the first book of PG19 rose to 5158 <Cite id="xiao2024" />.
+
+**StreamingLLM keeps the sinks.** Xiao et al. keep the keys and values of the first four tokens permanently, plus a
+rolling window of recent tokens. With four sink tokens and 1020 recent ones, the same Llama-2-13B setting had
+perplexity 5.40. Positions are assigned by place in the cache, not in the original text, so rotary or ALiBi offsets stay
+within the trained range. Models including Llama-2, MPT, Falcon and Pythia then modelled streams of 4 million tokens
+with stable perplexity, up to 22.2 times faster per token than recomputing a sliding window <Cite id="xiao2024" />.
+
+**One sink is enough if trained for.** Llama-2 prefixes documents before chunking, so a random token often sits at
+position 0 during training, and the models learned to use several initial tokens as sinks. Xiao et al. pretrained
+160-million-parameter models with a dedicated learnable sink token at the start of every sample. Keeping only that token
+plus 1023 recent ones gave perplexity 18.01, the same as keeping four initial tokens in the baseline (18.05)
+<Cite id="xiao2024" />.
+
+## Worked example
+
+A head at query position 5 has scores $4.0, 0.5, 0.2, 1.0, 0.3$ over keys 1 to 5, where key 1 is a sink with a value
+near $\zeros$. The softmax gives weights $0.887, 0.027, 0.020, 0.044, 0.022$. The head's output is essentially
+$0.113$ times an average of the real tokens' values: it is mostly idle.
+
+Evict key 1, as window attention does, and renormalise over keys 2 to 5: the weights become
+$0.238, 0.176, 0.392, 0.195$. The same head now outputs a full-strength average of the other tokens: their total weight
+rises from $0.113$ to 1, a factor of almost 9. Every layer above receives an input unlike those it saw in training.
+
+With $\operatorname{softmax}_1$ over keys 2 to 5 instead, the weights are $0.208, 0.154, 0.342, 0.170$, summing to
+$0.874$: the head can stay partly idle without a sink token.
+
+## Assumptions
+
+- The model uses softmax attention. The explanation rests on the constraint that weights sum to 1.
+- Sink behaviour is learned. It varies between models, layers and heads, and some heads attend to content as usual.
+
+## Pitfalls
+
+- **Streaming does not extend memory.** StreamingLLM keeps generation stable over long streams, but tokens that have
+  left the window are gone. It does not let the model recall them.
+- **Positions within the cache.** Reusing the original text positions after eviction creates gaps in the rotary
+  offsets. StreamingLLM re-applies position encodings by cache slot.
+- **Sinks cannot be removed after training.** They are part of how a trained model computes. Changing the softmax or
+  evicting sink tokens alters every layer's inputs. Alternatives such as a dedicated sink token or sigmoid attention
+  must be chosen before pretraining <Cite id="gu2025sink" />.

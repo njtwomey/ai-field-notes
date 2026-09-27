@@ -1,0 +1,115 @@
+---
+title: NoPE and implicit position
+kind: concept
+summary: 'A causal decoder with no positional encoding (NoPE) can still infer position: the causal mask lets query $t$ see exactly $t$ keys, and uniform attention to a start token yields $1/t$. Such language models nearly match those with explicit encodings. Bidirectional encoders cannot.'
+tags: [deep-learning, transformer, positional-encoding, attention, language-models, worked-example]
+aliases: [NoPE, NoPos, no positional encoding, implicit positional information, position-free transformer]
+requires: [causal-masking, scaled-dot-product-attention]
+partOf: [positional-encoding]
+related: [alibi, t5-relative-position-bias, attention-sinks, decoder-only-transformers]
+references: [haviv2022, kazemnejad2023]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A NoPE transformer is a transformer with no positional encoding of any kind: no vectors added to the input, no position
+term in any attention score. In a causally masked decoder, position $t$ attends to exactly the keys at positions
+$1, \dots, t$, and this asymmetry lets the network compute position from the data
+<Cite id="haviv2022" /> <Cite id="kazemnejad2023" />.
+</Definition>
+
+## Intuition
+
+Without a mask, self-attention is permutation-equivariant: shuffle the input and the outputs shuffle with it (see
+<NoteLink to="positional-encoding">positional encoding</NoteLink>). A causal mask breaks the symmetry. The first token
+sees one token, the second sees two, the hundredth sees a hundred. Anything that depends on how many tokens a position
+can see, such as an average over them, differs from position to position. The network can turn that difference into a
+position signal.
+
+## How a causal layer computes position
+
+**Counting with a start token.** Kazemnejad et al. prove that the first layer of a NoPE decoder can write the absolute
+position into its hidden state <Cite id="kazemnejad2023" />. A simplified version of their construction:
+
+1. Let every input begin with a start token, and let the embeddings have a feature that is 1 for the start token and 0
+   for every other token.
+2. Set the head's query projection to 0. Every score is then 0, and with the causal mask the weights of query $t$ are
+   uniform over its $t$ visible keys: $\alpha_{tj} = 1/t$ for $j \le t$.
+3. Let the value projection copy the start-token feature. The head's output at position $t$ is
+   $\sum_{j \le t} \frac{1}{t}\, [\text{token } j \text{ is the start token}] = \frac{1}{t}$.
+
+Position $t$ now carries the number $1/t$, which is distinct for every $t$. The feed-forward sublayer can map it to
+other functions of $t$. Kazemnejad et al. also show that later layers can then implement a relative scheme, with scores
+of the form $f_{\text{content}}(\qvec, \kvec) + f_{\text{rel}}(n - m)$.
+
+**Counting without a start token.** Averages carry position even without a special token. If the token embeddings
+$\xvec_j$ are independent with mean $\zeros$ and covariance $\sigma^2 \eye_d$, the uniform average
+$\bar\xvec_t = \frac{1}{t} \sum_{j \le t} \xvec_j$ has
+
+$$
+\expect\norm{\bar\xvec_t}^2 = \frac{1}{t^2} \sum_{j \le t} \expect\norm{\xvec_j}^2 = \frac{d \sigma^2}{t}.
+$$
+
+The cross terms vanish because distinct embeddings are independent with mean zero. The norm of the average shrinks
+like $1/\sqrt{t}$, so a later layer can read an estimate of position from it.
+
+**Why encoders cannot.** With no mask, every query sees all $n$ keys, and the equivariance argument applies to every
+layer. A bidirectional model without position information computes a function of the multiset of tokens. Haviv et al.
+trained masked language models without position information and they failed to converge <Cite id="haviv2022" />.
+
+## Evidence
+
+**Perplexity.** Haviv et al. trained causal language models on the Pile with 1024-token inputs. At 1.3 billion
+parameters the validation perplexities were <Cite id="haviv2022" />:
+
+| Position information | Perplexity |
+| -------------------- | ---------- |
+| None (NoPos)         | 13.10      |
+| Learned absolute     | 13.05      |
+| Sinusoidal           | 12.93      |
+| ALiBi                | 12.51      |
+
+The gap to learned embeddings was 0.11 at 125 million parameters (22.15 against 22.04) and 0.05 at 1.3 billion.
+Probing classifiers recovered each token's absolute position from the hidden states of the NoPos model about as
+accurately as from a model with learned embeddings.
+
+**Length generalisation.** Kazemnejad et al. trained small decoder-only models from scratch on synthetic reasoning and
+arithmetic tasks and tested them on longer instances. NoPE generalised better than absolute embeddings, rotary
+embeddings, ALiBi and the T5 bias, and its attention patterns most resembled those of the T5 bias. In a later
+experiment with 1-billion-parameter code models trained on 1024-token contexts, NoPE and ALiBi kept a stable perplexity
+up to almost twice the training length while rotary perplexity exploded <Cite id="kazemnejad2023" />.
+
+## Worked example
+
+Take the input "⟨s⟩ the cat sat" with one head whose query projection is 0 and whose value reads the start-token
+feature. The scores are all 0. With the causal mask the weights are
+
+$$
+\Amat = \begin{bmatrix}
+1 & 0 & 0 & 0 \\
+\tfrac12 & \tfrac12 & 0 & 0 \\
+\tfrac13 & \tfrac13 & \tfrac13 & 0 \\
+\tfrac14 & \tfrac14 & \tfrac14 & \tfrac14
+\end{bmatrix},
+$$
+
+and the values are $(1, 0, 0, 0)$. The outputs are $1, \tfrac12, \tfrac13, \tfrac14$: each position now knows how many
+tokens precede it. Without the mask every row would be $(\tfrac14, \tfrac14, \tfrac14, \tfrac14)$ and every output
+$\tfrac14$.
+
+## Assumptions
+
+- The model is causal. The argument does not apply to bidirectional encoders.
+- Position can be recovered from counts. The $1/t$ signal becomes hard to resolve for large $t$: $1/1000$ and $1/1001$
+  differ by about $10^{-6}$, which limits precision at long range.
+
+## Pitfalls
+
+- **Not free extrapolation.** NoPE has no position table to run out of, but the counting signal at lengths beyond
+  training takes values the network has not seen.
+- **Padding and packing.** Left padding or packing several documents into one sequence changes how many keys each
+  position sees, and so changes the implicit position unless masks separate the documents.
+- **Scale of the evidence.** The strongest length-generalisation results come from small models on synthetic tasks.
+  Large-scale language modelling results show NoPE close to, not better than, explicit encodings at the training
+  length <Cite id="haviv2022" />.

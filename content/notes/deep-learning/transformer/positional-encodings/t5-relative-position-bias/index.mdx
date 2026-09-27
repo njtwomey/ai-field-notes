@@ -1,0 +1,96 @@
+---
+title: T5 relative position bias
+kind: technique
+summary: T5 adds one learned scalar $b_h(\beta(j - i))$ to each attention score, where $\beta$ maps the offset to one of 32 buckets, exact for short offsets and logarithmically wider for long ones, with every offset beyond a limit in one bucket. The table is per head and shared by all layers.
+tags: [deep-learning, transformer, positional-encoding, attention, worked-example]
+aliases: [T5 bias, T5 relative attention bias, relative attention bias, bucketed relative position, relative position buckets]
+requires: [scaled-dot-product-attention]
+partOf: [positional-encoding]
+related: [relative-position-representations, alibi, encoder-decoder-transformers, nope-and-implicit-position]
+references: [raffel2020, t5relativebucketcode, shaw2018, press2022, kazemnejad2023]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The T5 relative position bias adds a learned scalar to every attention logit:
+$$
+e_{ij} = \qvec_i^{\tr} \kvec_j + b_h\paren{\beta(j - i)},
+$$
+where $h$ is the head, $\beta$ maps the offset $j - i$ to one of 32 buckets and $b_h$ is a learned table of 32 scalars
+per head. The table is shared across all layers of a stack. No position vector is added to the input
+<Cite id="raffel2020" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="relative-position-representations">Relative position representations</NoteLink> make attention depend on
+offsets, but each offset gets a $d_k$-dimensional vector, and computing $\qvec_i^{\tr} \avec_{j-i}$ for every pair
+costs as much as a second score matrix. Most of that capacity may be unnecessary: a head often needs only to know
+whether a key is near or far, and in which direction.
+
+## Mechanism
+
+**A scalar per offset.** The position term no longer depends on the query's content. Each head learns, for each bucket,
+how much to raise or lower the logit. The bias matrix $\Bmat_h$ with entries $b_h(\beta(j - i))$ is the same for every
+input and is a Toeplitz matrix: constant along each diagonal.
+
+**Buckets.** The bucket function in the released code works as follows for the bidirectional encoder
+<Cite id="t5relativebucketcode" />. Half of the 32 buckets are used for keys after the query and half for keys before
+it. Within each half of 16, write $r = \abs{j - i}$:
+
+- For $r < 8$, the bucket is $r$ itself: offsets 0 to 7 each get their own bucket.
+- For $r \ge 8$, the bucket is $8 + \lfloor 8 \ln(r/8) / \ln 16 \rfloor$, capped at 15.
+
+The second rule places bucket boundaries at $r = 8 \cdot 16^{k/8} = 8 \cdot 2^{k/2}$ for $k = 0, 1, \dots$: at $8$,
+$11.3$, $16$, $22.6$, $32$, $45.3$, $64$ and $90.5$. Each bucket spans $\sqrt{2}$ times the offsets of the one before.
+The paper describes the buckets as growing logarithmically "up to an offset of 128" <Cite id="raffel2020" />; with the
+integer truncation in the code, every offset from 91 up shares the last bucket.
+
+The causal decoder uses all 32 buckets for keys at or before the query: offsets 0 to 15 are exact and 16 to 112 are
+logarithmic, with 113 and beyond sharing the last bucket.
+
+**No score scaling.** T5 computes $\qvec_i^{\tr} \kvec_j$ without dividing by $\sqrt{d_k}$; the released code sets the
+scale to 1 and relies on initialisation to keep the logits in range <Cite id="t5relativebucketcode" />.
+
+**Depth recovers long range.** One layer cannot tell offset 100 from offset 1000. Raffel et al. note that later layers
+can still become sensitive to larger offsets by combining local information from earlier layers <Cite id="raffel2020" />.
+
+## Worked example
+
+The bidirectional buckets for keys before the query are:
+
+| Bucket | 0 to 7            | 8     | 9     | 10    | 11    | 12    | 13    | 14    | 15          |
+| ------ | ----------------- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----------- |
+| $r$    | one each, 0 to 7  | 8–11  | 12–15 | 16–22 | 23–31 | 32–45 | 46–63 | 64–90 | 91 and more |
+
+Check one entry: $r = 20$ gives $8 \ln(20/8) / \ln 16 = 8 \times 0.916 / 2.773 = 2.64$, so the bucket is $8 + 2 = 10$.
+
+Suppose head $h$ has learned $b_h = 1.0$ for bucket 1, $0.2$ for bucket 10 and $-2.0$ for bucket 15, and the content
+scores $\qvec_i^{\tr} \kvec_j$ of three keys at distances $r = 1, 20, 500$ before the query are all 0.5. The logits are
+$1.5$, $0.7$ and $-1.5$. The softmax over these three gives weights $0.67$, $0.30$ and $0.03$. The head prefers the
+adjacent token, and all tokens beyond 90 positions are treated identically.
+
+**Parameters.** T5-Base has 12 heads, so each stack's table has $12 \times 32 = 384$ scalars, 768 for encoder and
+decoder together. A table of <NoteLink to="relative-position-representations">Shaw-style</NoteLink> vectors with
+$d_k = 64$ would need 64 numbers per offset per head.
+
+## Cost
+
+The bias is computed once per sequence length and added to every layer's logits, $O(n^2 h)$ additions per layer.
+Memory for the $n \times n \times h$ bias tensor can dominate at long lengths if it is materialised. Press et al. found
+the T5 bias considerably slower than sinusoidal embeddings in their implementation, while extrapolating better than
+sinusoids or rotary embeddings <Cite id="press2022" />.
+
+## Trade-offs
+
+- **Length generalisation.** On synthetic reasoning tasks with small decoder-only models, Kazemnejad et al. found the T5
+  bias the best explicit encoding for generalising to longer inputs, behind only using no encoding at all
+  <Cite id="kazemnejad2023" />.
+- **Content-independent position.** A head cannot learn "attend to the previous token only if it is a verb" through the
+  bias alone; the content term must do that part.
+- **Coarse long range.** All far offsets share a few buckets. Precise long-range position must be computed by composing
+  layers.
+- **Fused kernels.** An additive bias per pair is supported by many attention kernels, but it must be computed or
+  stored for every pair, unlike <NoteLink to="alibi">ALiBi</NoteLink>, whose bias is a closed-form function of the
+  offset.

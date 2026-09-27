@@ -1,0 +1,94 @@
+---
+title: Learned absolute position embeddings
+kind: concept
+summary: A learned absolute position embedding is a trained table $\Pmat \in \reals^{T_{\max} \times d}$ whose row $t$ is added to the token embedding at position $t$. BERT and GPT-2 use it. It costs $T_{\max} d$ parameters and has no row for positions beyond $T_{\max}$.
+tags: [deep-learning, transformer, positional-encoding, embeddings, worked-example]
+aliases: [learned positional embedding, learned position embedding, absolute position embedding, APE, trainable position embedding, position embedding table]
+requires: [scaled-dot-product-attention]
+partOf: [positional-encoding]
+related: [sinusoidal-positional-encoding, relative-position-representations, masked-language-modelling, autoregressive-transformer-language-model]
+references: [devlin2019, radford2019, vaswani2017, haviv2022, ke2021, press2022]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A learned absolute position embedding is a matrix $\Pmat \in \reals^{T_{\max} \times d}$ trained with the rest of the
+model. The input to the first layer at position $t \in \set{0, \dots, T_{\max} - 1}$ is
+$$
+\xvec_t = \evec_{w_t} + \pvec_t,
+$$
+where $\evec_{w_t}$ is the embedding of the token $w_t$ and $\pvec_t$ is row $t$ of $\Pmat$. Positions $t \ge T_{\max}$
+have no embedding.
+</Definition>
+
+## Intuition
+
+Position is treated like a vocabulary of $T_{\max}$ symbols. Position 17 has its own vector, just as the word "cat"
+has its own vector, and gradient descent decides what each vector should contain. Nothing ties $\pvec_{17}$ to
+$\pvec_{18}$ except what the data teaches. The scheme makes no assumption about how positions relate, so it can learn any
+position pattern the training data supports, and none that it does not.
+
+## Details
+
+**Where it is used.** BERT adds learned embeddings for 512 positions <Cite id="devlin2019" />. GPT-2 uses a context of
+1024 tokens and learned embeddings for each <Cite id="radford2019" />. The original transformer tried them as an
+ablation and found them almost identical to sinusoids: 25.7 BLEU against 25.8 on newstest2013
+<Cite id="vaswani2017" />.
+
+**Parameters.** The table has $T_{\max} d$ entries. For BERT-base, $512 \times 768 = 393{,}216$, about 0.4% of its 110
+million parameters. For GPT-2's largest model, $1024 \times 1600 = 1{,}638{,}400$.
+
+**Which rows get trained.** The gradient of the loss with respect to $\pvec_t$ is the sum of the gradients with respect
+to the inputs at position $t$, over every training sequence that reaches position $t$. A sequence of length $n$ updates
+rows $0, \dots, n - 1$ only. If most training sequences are short, the late rows receive few updates. BERT trained on
+128-token sequences for 90% of its steps and on 512-token sequences for the remaining 10%, in part to learn the
+embeddings of the later positions <Cite id="devlin2019" />.
+
+**Position and content mix in the scores.** The first layer's query–key score between positions $m$ and $n$ expands
+into four terms,
+
+$$
+(\evec_m + \pvec_m)^{\tr} \Wmat_Q \Wmat_K^{\tr} (\evec_n + \pvec_n)
+= \underbrace{\evec_m^{\tr} \Mmat \evec_n}_{\text{content}}
++ \underbrace{\evec_m^{\tr} \Mmat \pvec_n + \pvec_m^{\tr} \Mmat \evec_n}_{\text{content} \times \text{position}}
++ \underbrace{\pvec_m^{\tr} \Mmat \pvec_n}_{\text{position}},
+$$
+
+with $\Mmat = \Wmat_Q \Wmat_K^{\tr}$ and token subscripts shortened to positions. The position term can depend on $m$
+and $n$ in any way, not only on $n - m$. Ke et al. argued that the mixed terms add noise and proposed computing the
+content and position terms with separate projections <Cite id="ke2021" />.
+
+**Comparison at scale.** For 1.3-billion-parameter causal language models on the Pile with 1024-token contexts, Haviv et
+al. measured validation perplexities of 13.05 with learned embeddings, 12.93 with sinusoids, 12.51 with ALiBi and 13.10
+with no positional information at all <Cite id="haviv2022" />.
+
+## Worked example
+
+A model with $T_{\max} = 4$ and $d = 2$ has a $4 \times 2$ table. Suppose training has produced
+
+$$
+\Pmat = \begin{bmatrix} 0.3 & -0.1 \\ 0.2 & 0.4 \\ -0.5 & 0.1 \\ 0.0 & -0.3 \end{bmatrix}.
+$$
+
+The sentence "dog bites" enters as $(\evec_{\text{dog}} + (0.3, -0.1),\ \evec_{\text{bites}} + (0.2, 0.4))$. The
+sentence "bites dog" enters as $(\evec_{\text{bites}} + (0.3, -0.1),\ \evec_{\text{dog}} + (0.2, 0.4))$. The two inputs
+now differ as multisets of vectors, so attention can tell them apart. A five-token input has no row for $t = 4$ and
+cannot be processed at all.
+
+## Assumptions
+
+- Every input is at most $T_{\max}$ tokens long.
+- The training data covers each position often enough to train its row.
+- Absolute position carries the useful signal. Relative structure, such as "the previous token", must be learned
+  separately at every position.
+
+## Pitfalls
+
+- **No extrapolation.** Rows beyond $T_{\max}$ do not exist. The table can be extended and the model fine-tuned, but the
+  new rows start untrained. Schemes defined at every position, such as ALiBi, were designed to avoid this
+  <Cite id="press2022" />.
+- **Undertrained tail.** Late rows are trained on fewer examples than early ones. A model can behave worse near the end
+  of its context for this reason alone.
+- **Shifted inputs.** The same phrase at position 3 and at position 300 is represented differently in the first layer.
+  The model must learn translation invariance from data, position by position.

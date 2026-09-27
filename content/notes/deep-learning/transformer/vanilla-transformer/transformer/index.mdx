@@ -1,38 +1,81 @@
 ---
 title: Transformer
-kind: concept
-summary: The transformer is a sequence model built from stacked blocks of multi-head self-attention and a position-wise feed-forward network, each with a residual connection and layer normalisation. An encoder stack reads the input and a causally masked decoder stack generates the output.
-tags: [deep-learning, transformer, attention, sequence-models, nlp, worked-example]
-aliases: [transformer architecture, transformer block, encoder-decoder transformer, encoder-only transformer, decoder-only transformer, pre-LN transformer, post-LN transformer, position-wise feed-forward network]
-requires: [multi-head-attention, residual-network]
-related: [positional-encoding, causal-masking, kv-cache, sequence-to-sequence, message-passing-neural-network]
-references: [vaswani2017, ba2016, xiong2020]
+kind: overview
+summary: The transformer of Vaswani et al. (2017) is an encoder–decoder built only from attention and position-wise feed-forward layers. Six post-norm encoder blocks read the source, six causally masked decoder blocks write the target, and sinusoidal encodings supply word order.
+tags: [deep-learning, transformer, attention, sequence-models, nlp, machine-translation, worked-example]
+aliases:
+  [
+    Attention Is All You Need,
+    original transformer,
+    vanilla transformer,
+    transformer architecture,
+    transformer block,
+    encoder-decoder transformer,
+    Transformer base,
+    Transformer big,
+    position-wise feed-forward network,
+    inverse square root learning rate schedule,
+    Noam schedule,
+  ]
+requires: [residual-connections, layer-normalisation]
+related:
+  [
+    transformer-layer-by-layer,
+    modern-decoder-block,
+    sequence-to-sequence,
+    bahdanau-attention,
+    machine-translation,
+    kv-cache,
+    message-passing-neural-network,
+  ]
+references: [vaswani2017, ba2016, he2016, szegedy2016, kingma2015, srivastava2014, sennrich2016, xiong2020]
 status: draft
 updated: 2026-09-27
 ---
 
 <Definition>
-A transformer maps a sequence of $n$ token vectors in $\reals^d$ to a sequence of $n$ vectors in $\reals^d$ through a
-stack of identical blocks. Each block has two sublayers, multi-head self-attention and a position-wise feed-forward
-network. Each sublayer has a residual connection and layer normalisation. The original encoder–decoder transformer
-stacks $N$ encoder blocks over the input and $N$ decoder blocks over the output generated so far; decoder blocks add a
-causally masked self-attention and a cross-attention to the encoder's output <Cite id="vaswani2017" />.
+The transformer is a sequence-to-sequence model built only from attention and position-wise feed-forward layers, with
+no recurrence and no convolution <Cite id="vaswani2017" />. An encoder of $N = 6$ identical blocks maps the $n$ source
+tokens to $n$ vectors in $\reals^{d}$, with $d = 512$ in the base model. A decoder of $N = 6$ blocks generates the target
+one token at a time. Each decoder block reads the target prefix through causally masked self-attention and the source
+through cross-attention. Every sublayer is wrapped as $\operatorname{LN}(\xvec + \operatorname{Sublayer}(\xvec))$.
 </Definition>
 
-## Intuition
+This note describes the model exactly as published in 2017. Most later transformers change several of its parts; the
+table at the end lists each change and the note that covers it.
 
-A recurrent network passes information between positions one step at a time. Relating the first and last words of a
-sentence takes $n$ steps, and the steps cannot run in parallel. A transformer relates every pair of positions directly,
-in one layer, with <NoteLink to="scaled-dot-product-attention">attention</NoteLink>. All positions are processed at
-once with matrix products.
+## Components
 
-The architecture alternates two operations. **Attention mixes information across positions**: each token gathers what
-it needs from the others. **The feed-forward network processes each position on its own**: it transforms what the token
-gathered. Residual connections let each sublayer add a correction to a running representation instead of replacing it.
+| Part                                                                                        | What it does                                                                    |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| <NoteLink to="scaled-dot-product-attention">Scaled dot-product attention</NoteLink>         | Each query takes a softmax-weighted average of values, with $1/\sqrt{d_k}$ scaling |
+| <NoteLink to="multi-head-attention">Multi-head attention</NoteLink>                         | $h = 8$ attentions of width $d_k = d/h = 64$ in parallel, merged by $\Wmat_O$   |
+| <NoteLink to="causal-masking">Causal masking</NoteLink>                                     | Stops decoder position $t$ from reading target positions after $t$            |
+| <NoteLink to="encoder-decoder-cross-attention">Encoder–decoder cross-attention</NoteLink>   | Decoder queries read the encoder's output                                       |
+| <NoteLink to="sinusoidal-positional-encoding">Sinusoidal positional encoding</NoteLink>     | Adds a fixed vector $\pvec_t$ to the embedding of the token at position $t$     |
+| Position-wise feed-forward network                                                          | The same two-layer ReLU network applied to every position                      |
+| <NoteLink to="residual-connections">Residual connections</NoteLink> and <NoteLink to="layer-normalisation">layer normalisation</NoteLink> | Wrap every sublayer, post-norm |
 
-## The block
+<NoteLink to="transformer-layer-by-layer">Transformer layer by layer</NoteLink> runs one encoder block on four tokens
+with every intermediate matrix written out.
 
-Let $\Xmat \in \reals^{n \times d}$ hold one row per position. An encoder block computes
+## Data flow
+
+Write $\Xmat \in \reals^{n \times d}$ for a sequence of $n$ vectors, one per row.
+
+**Embedding.** A learned matrix $\Emat \in \reals^{V \times d}$ maps each of the $V$ vocabulary items to a vector. The
+embedding of the token at position $t$ is multiplied by $\sqrt{d}$ and the positional encoding $\pvec_t$ is added:
+
+$$
+\xvec_t = \sqrt{d}\, \evec_{w_t} + \pvec_t.
+$$
+
+Here $w_t$ is the token's index and $\evec_{w_t}$ is row $w_t$ of $\Emat$. The paper states the $\sqrt{d}$ factor
+without a reason. One effect is arithmetic. If the entries of $\Emat$ have standard deviation $d^{-1/2}$, each row has
+norm about 1, and after the factor each entry has standard deviation 1. The entries of $\pvec_t$ lie in $[-1, 1]$, so
+the token and the position then contribute on the same scale. Dropout with rate $0.1$ is applied to the sum.
+
+**Encoder block.** Two sublayers, each followed by a residual addition and layer normalisation:
 
 $$
 \begin{aligned}
@@ -41,104 +84,189 @@ $$
 \end{aligned}
 $$
 
-The pieces:
+$\operatorname{LN}$ normalises each row to mean 0 and variance 1 and then applies a learned scale $\gammavec$ and shift
+$\betavec$ <Cite id="ba2016" />. This arrangement, with the normalisation after the addition, is called **post-norm**.
 
-- **<NoteLink to="multi-head-attention">Multi-head self-attention</NoteLink>.** Queries, keys and values are all
-  projections of $\Xmat$.
-- **Position-wise feed-forward network.** The same two-layer network is applied to each row:
-  $\operatorname{FFN}(\xvec) = \max(0, \xvec \Wmat_1 + \bvec_1) \Wmat_2 + \bvec_2$, with $\Wmat_1 \in \reals^{d \times d_{ff}}$
-  and $\Wmat_2 \in \reals^{d_{ff} \times d}$. The original uses $d_{ff} = 4d$.
-- **Residual connections.** Each sublayer's output is added to its input, as in a
-  <NoteLink to="residual-network">residual network</NoteLink>, so gradients have an identity path through every block.
-- **Layer normalisation.** For each position separately, $\operatorname{LN}(\xvec) = \gammavec \odot (\xvec - \mu) /
-  \sigma + \betavec$, where $\mu$ and $\sigma$ are the mean and standard deviation of the $d$ entries of $\xvec$ and
-  $\gammavec, \betavec \in \reals^d$ are learned <Cite id="ba2016" />. It keeps the scale of the residual stream stable.
+**Feed-forward sublayer.** Each row is transformed separately by
 
-A decoder block has three sublayers: causally masked self-attention over the decoder's inputs, cross-attention whose
-queries come from the decoder and whose keys and values are the encoder's final output, then the feed-forward network.
-The <NoteLink to="causal-masking">causal mask</NoteLink> keeps position $t$ from seeing later outputs.
+$$
+\operatorname{FFN}(\xvec) = \max(0, \xvec \Wmat_1 + \bvec_1)\, \Wmat_2 + \bvec_2,
+\qquad \Wmat_1 \in \reals^{d \times d_{ff}},\ \Wmat_2 \in \reals^{d_{ff} \times d},
+$$
 
-## The full model
+with $d_{ff} = 4d = 2048$. The weights are shared across positions and differ between layers. The paper describes the
+sublayer as two convolutions with kernel size 1.
 
-1. **Embedding.** Each input token is mapped to a learned vector in $\reals^d$ and multiplied by $\sqrt{d}$.
-2. **Position.** Attention is unchanged by permuting its inputs, so the model adds a
-   <NoteLink to="positional-encoding">positional encoding</NoteLink> to give each position a distinct signature.
-3. **Encoder.** $N$ encoder blocks transform the input sequence.
-4. **Decoder.** $N$ decoder blocks transform the shifted output sequence, reading the encoder output through
-   cross-attention.
-5. **Output.** A linear map to vocabulary size and a softmax give $p(y_t \mid y_{<t}, \xvec)$. The output matrix shares
-   its weights with the embedding.
+**Decoder block.** Three sublayers. The first is self-attention over the target prefix with a causal mask. The second
+is cross-attention: queries come from the decoder, keys and values from the final encoder output $\Hmat$. The third
+is the feed-forward network. With $\Smat$ the decoder input,
 
-The base model has $N = 6$, $d = 512$, $h = 8$ heads and $d_{ff} = 2048$ <Cite id="vaswani2017" />.
+$$
+\begin{aligned}
+\Amat &= \operatorname{LN}\paren{\Smat + \operatorname{MaskedMultiHead}(\Smat, \Smat, \Smat)}, \\
+\Bmat &= \operatorname{LN}\paren{\Amat + \operatorname{MultiHead}(\Amat, \Hmat, \Hmat)}, \\
+\Ymat &= \operatorname{LN}\paren{\Bmat + \operatorname{FFN}(\Bmat)}.
+\end{aligned}
+$$
+
+**Output.** The target sequence is shifted right by one position, so the decoder output at position $t$ predicts
+token $t + 1$. A linear map to $V$ logits and a softmax give $p(y_{t+1} \mid y_{\le t}, \xvec)$. The output matrix is
+$\Emat^{\tr}$: the source embedding, the target embedding and the pre-softmax projection share one matrix. Sharing is
+possible because the English–German and English–French experiments used one vocabulary for both languages.
+
+**Dropout.** The output of every sublayer passes through dropout with $P_{\text{drop}} = 0.1$ before it is added to the
+residual <Cite id="srivastava2014" />.
+
+## Configurations
+
+| Model | $N$ | $d$  | $d_{ff}$ | $h$ | $d_k = d_v$ | $P_{\text{drop}}$ | Steps | Parameters |
+| ----- | --- | ---- | -------- | --- | ----------- | ----------------- | ----- | ---------- |
+| Base  | 6   | 512  | 2048     | 8   | 64          | 0.1               | 100k  | 65 M       |
+| Big   | 6   | 1024 | 4096     | 16  | 64          | 0.3               | 300k  | 213 M      |
+
+The big English–French model used $P_{\text{drop}} = 0.1$ <Cite id="vaswani2017" />.
 
 ## Why attention rather than recurrence
 
-Compare one layer of each on a sequence of length $n$ and width $d$ <Cite id="vaswani2017" />:
+Vaswani et al. compare layer types on a sequence of length $n$ and width $d$ <Cite id="vaswani2017" />:
 
-- **Sequential operations.** A recurrent layer needs $n$ steps in sequence. A self-attention layer needs a constant
-  number, since every row of $\Qmat \Kmat^{\tr}$ is computed at once.
-- **Path length.** A signal from position 1 reaches position $n$ through $n - 1$ recurrent steps, and gradients along
-  that path decay as described in <NoteLink to="backpropagation-through-time">backpropagation through time</NoteLink>.
-  In self-attention the path has length 1.
-- **Cost per layer.** A recurrent layer costs $O(n d^2)$. Self-attention costs $O(n^2 d)$.
+| Layer          | Cost per layer      | Sequential operations | Longest path between positions |
+| -------------- | ------------------- | --------------------- | ------------------------------ |
+| Self-attention | $O(n^2 d)$          | $O(1)$                | $O(1)$                         |
+| Recurrent      | $O(n d^2)$          | $O(n)$                | $O(n)$                         |
+| Convolutional  | $O(k n d^2)$        | $O(1)$                | $O(\log_k n)$ with dilation    |
 
-**When attention dominates the cost.** Count multiply-adds in one encoder block. The four projections of multi-head
-attention cost $4nd^2$. The scores $\Qmat \Kmat^{\tr}$ and the weighted sum of values cost $n^2 d$ each, $2n^2 d$ in
-total. The feed-forward network costs $2 n d\, d_{ff} = 8nd^2$. The quadratic term exceeds the linear ones when
+A recurrent layer must process positions one after another, so it cannot use a parallel processor on one sequence.
+Self-attention computes every row of $\Qmat \Kmat^{\tr}$ at once. A signal from position 1 reaches position $n$ in one
+attention step. Through a recurrent network it passes $n - 1$ steps, and the gradient along that path decays as
+described in <NoteLink to="backpropagation-through-time">backpropagation through time</NoteLink>.
+
+**When the attention term dominates.** Count multiply-adds in one encoder block. The four projections of multi-head
+attention cost $4nd^2$. The scores $\Qmat \Kmat^{\tr}$ and the weighted sum of values cost $n^2 d$ each. The
+feed-forward network costs $2nd\,d_{ff} = 8nd^2$. The quadratic term exceeds the rest when
 
 $$
 2n^2 d > 12 n d^2 \iff n > 6d.
 $$
 
-For $d = 512$ that is $n > 3072$ tokens. Shorter sequences spend most of their compute in the projections and the
-feed-forward network, not in attention.
+For $d = 512$ this is $n > 3072$ tokens. Translation sentences are far shorter, so the base model spends most of its
+compute in the projections and the feed-forward network.
+
+## Training
+
+**Data.** WMT 2014 English–German has about 4.5 million sentence pairs, encoded with byte-pair encoding into a shared
+vocabulary of about 37,000 tokens <Cite id="sennrich2016" />. English–French has 36 million sentences and a 32,000
+word-piece vocabulary. Each batch held about 25,000 source and 25,000 target tokens.
+
+**Optimiser.** Adam with $\beta_1 = 0.9$, $\beta_2 = 0.98$ and $\epsilon = 10^{-9}$ <Cite id="kingma2015" />. The
+learning rate at step $s$ is
+
+$$
+\eta(s) = d^{-1/2} \min\paren{s^{-1/2},\ s \cdot s_w^{-3/2}}, \qquad s_w = 4000.
+$$
+
+For $s < s_w$ the second term is the smaller: $s \cdot s_w^{-3/2} < s^{-1/2}$ is equivalent to $s^{3/2} < s_w^{3/2}$.
+So the rate rises linearly for $s_w$ steps, then decays as $s^{-1/2}$. The two terms meet at $s = s_w$, where the peak is
+$\eta = (d\, s_w)^{-1/2}$. For the base model this is $(512 \times 4000)^{-1/2} = 6.99 \times 10^{-4}$. The factor
+$d^{-1/2}$ gives wider models a smaller peak: $4.94 \times 10^{-4}$ for $d = 1024$. The warm-up is not optional. A
+post-norm transformer has large gradients near its output at initialisation and can diverge without it
+<Cite id="xiong2020" />.
+
+**Label smoothing.** The target distribution for each token is $q' = (1 - \epsilon)\,\delta_y + \epsilon / V$ instead of
+the one-hot $\delta_y$, with $\epsilon = 0.1$ <Cite id="szegedy2016" />. The cross-entropy $-\sum_k q'_k \log p_k$ over
+the probability simplex is minimised at $p = q'$ (Gibbs' inequality), so training pushes the probability of the correct
+token towards $0.9 + 0.1/V \approx 0.9$ instead of 1. A model that reaches this target has per-token perplexity at least
+$1/0.9 \approx 1.11$ on the true tokens. The paper reports the consequence: smoothing hurts perplexity but improves
+accuracy and BLEU.
+
+**Hardware.** One machine with 8 NVIDIA P100 GPUs. The base model trained for 100,000 steps in 12 hours, at about 0.4 s
+per step. The big model trained for 300,000 steps in 3.5 days.
+
+**Decoding.** The base model averages the last 5 checkpoints, written at 10-minute intervals, and the big model the
+last 20. Beam search uses beam size 4 and length penalty $\alpha = 0.6$, with a maximum output length of the input
+length plus 50.
+
+## Results
+
+On newstest2014 <Cite id="vaswani2017" />:
+
+| Model                 | EN–DE BLEU | EN–FR BLEU | Training cost (FLOPs), EN–DE |
+| --------------------- | ---------- | ---------- | ---------------------------- |
+| ConvS2S ensemble      | 26.36      | 41.29      | $7.7 \times 10^{19}$         |
+| GNMT + RL ensemble    | 26.30      | 41.16      | $1.8 \times 10^{20}$         |
+| Transformer (base)    | 27.3       | 38.1       | $3.3 \times 10^{18}$         |
+| Transformer (big)     | 28.4       | 41.8       | $2.3 \times 10^{19}$         |
+
+The big model beat the best earlier English–German result, an ensemble, by more than 2 BLEU. The English–French score
+of the big model is 41.8 in the paper's Table 2 and 41.0 in its results text.
+
+The ablations on newstest2013 (base model, 25.8 BLEU) show which choices mattered:
+
+- **Heads.** One head of width 512 scored 24.9. Sixteen heads of width 32 scored 25.8 and 32 heads of width 16 scored
+  25.4.
+- **Key width.** Reducing $d_k$ to 16 with 8 heads scored 25.1. The authors read this as evidence that the dot product is
+  a limited compatibility function.
+- **Size.** $d = 1024$ scored 26.0 and $d_{ff} = 4096$ scored 26.2.
+- **Dropout.** No dropout scored 24.6.
+- **Label smoothing.** No smoothing scored 25.3 BLEU with a better perplexity, 4.67 against 4.92.
+- **Positions.** Learned position embeddings instead of sinusoids scored 25.7.
+
+A four-layer transformer with $d = 1024$ also reached 91.3 F1 on English constituency parsing trained on the Wall
+Street Journal alone.
 
 ## Worked example
 
-Count the parameters of the base model, with biases and the two layer-norm vectors $\gammavec, \betavec$ per sublayer.
+Count the parameters of the base model, including biases and the two vectors $\gammavec, \betavec$ of each layer norm.
 
-- **Multi-head attention:** $4d^2 + 4d = 4 \cdot 512^2 + 4 \cdot 512 = 1{,}050{,}624$.
+- **Multi-head attention:** four $d \times d$ matrices and four bias vectors, $4d^2 + 4d = 1{,}050{,}624$.
 - **Feed-forward network:** $2 d\, d_{ff} + d_{ff} + d = 2 \cdot 512 \cdot 2048 + 2048 + 512 = 2{,}099{,}712$.
-- **Encoder block:** one of each plus two layer norms of $2d$: $1{,}050{,}624 + 2{,}099{,}712 + 2048 = 3{,}152{,}384$.
-- **Decoder block:** an encoder block plus a cross-attention and its layer norm:
-  $3{,}152{,}384 + 1{,}050{,}624 + 1024 = 4{,}204{,}032$.
-- **Six of each:** $6 \cdot 3{,}152{,}384 + 6 \cdot 4{,}204{,}032 = 44{,}138{,}496$.
-- **Shared embedding** over a vocabulary of about 37,000 tokens: $37{,}000 \cdot 512 = 18{,}944{,}000$.
+- **Encoder block:** one of each plus two layer norms of $2d$ each: $3{,}152{,}384$.
+- **Decoder block:** an encoder block plus a cross-attention and its layer norm: $3{,}152{,}384 + 1{,}050{,}624 + 1024
+  = 4{,}204{,}032$.
+- **Six of each:** $6 \times 3{,}152{,}384 + 6 \times 4{,}204{,}032 = 44{,}138{,}496$.
+- **Shared embedding:** $37{,}000 \times 512 = 18{,}944{,}000$.
 
-The total is about 63 million; the paper reports 65 million. Two thirds of each encoder block's weights are in the
-feed-forward network.
+The total is $63.1$ million against the reported 65 million. The same count for the big model ($d = 1024$,
+$d_{ff} = 4096$) gives $176{,}357{,}376 + 37{,}000 \times 1024 = 214.2$ million against the reported 213 million. The
+paper gives the vocabulary only as "about 37000", so the embedding term carries an uncertainty of a few million. The
+blocks are exact. Two thirds of each encoder block's weights are in the feed-forward network, since
+$2 \cdot 512 \cdot 2048 / 3{,}152{,}384 = 0.67$.
 
-## Training and results
+## What later models changed
 
-The model was trained with Adam and a learning rate that rises linearly for 4000 warm-up steps and then decays as the
-inverse square root of the step number. Dropout of 0.1 and label smoothing of 0.1 regularised it. The large model
-reached 28.4 BLEU on WMT'14 English to German and 41.8 on English to French, better than earlier recurrent and
-convolutional models at a fraction of their training cost <Cite id="vaswani2017" />.
+Almost every part of the 2017 design has a common replacement. Each row links to the note that derives it.
 
-## Variants
+| Part                   | 2017 choice                                  | Common later choice                                    | Note |
+| ---------------------- | -------------------------------------------- | ------------------------------------------------------ | ---- |
+| Overall shape          | Encoder–decoder                              | Decoder-only for generation; encoder-only for encoding | <NoteLink to="decoder-only-transformers" />, <NoteLink to="encoder-only-transformers" />, <NoteLink to="encoder-decoder-transformers" /> |
+| Norm placement         | Post-norm, $\operatorname{LN}(\xvec + f(\xvec))$ | Pre-norm, $\xvec + f(\operatorname{LN}(\xvec))$     | <NoteLink to="pre-norm-and-post-norm" /> |
+| Normalisation          | LayerNorm with bias                          | RMSNorm                                                | <NoteLink to="rmsnorm-in-transformers" /> |
+| Feed-forward layer     | ReLU, $d_{ff} = 4d$                          | SwiGLU, $d_{ff} \approx 8d/3$                          | <NoteLink to="gated-feed-forward-layers" /> |
+| Block layout           | Attention then feed-forward                  | Sometimes both in parallel                             | <NoteLink to="parallel-attention-and-feed-forward" /> |
+| Position               | Sinusoids added to the input                 | Rotary embedding on queries and keys; ALiBi; none      | <NoteLink to="positional-encoding" />, <NoteLink to="rotary-position-embedding" /> |
+| Key–value heads        | One per query head                           | Shared by a group of query heads, or compressed        | <NoteLink to="multi-query-and-grouped-query-attention" />, <NoteLink to="multi-head-latent-attention" /> |
+| Attention logits       | Unbounded                                    | Normalised queries and keys, or soft-capped            | <NoteLink to="qk-normalisation-and-logit-soft-capping" /> |
+| Biases and dropout     | Biases everywhere; dropout 0.1               | No biases; no dropout in large-scale pretraining       | <NoteLink to="bias-terms-and-dropout-in-modern-transformers" /> |
+| Embeddings             | Tied, scaled by $\sqrt{d}$                   | Often untied, unscaled                                 | <NoteLink to="embeddings-and-output-heads" /> |
+| Schedule and stability | Adam, warm-up then $s^{-1/2}$ decay          | AdamW, warm-up then cosine decay; stability measures   | <NoteLink to="training-stability-at-scale" /> |
+| Attention kernel       | Full $n \times n$ matrix in memory           | Fused, tiled kernels                                   | <NoteLink to="flash-attention" /> |
 
-- **Pre-LN.** Most later models normalise before each sublayer: $\Xmat + \operatorname{Sublayer}(\operatorname{LN}(\Xmat))$.
-  The residual path is then an exact identity from input to output. Pre-LN transformers train stably without the
-  learning-rate warm-up that the original post-LN arrangement needs <Cite id="xiong2020" />.
-- **Encoder-only** models, such as BERT, keep the encoder stack and drop the decoder. Every position sees the whole
-  input <Cite id="devlin2019" />.
-- **Decoder-only** models, such as GPT, keep only causally masked self-attention blocks and train on next-token
-  prediction. They are the standard design for language models.
-- **Other domains.** Splitting an image into patches and treating them as tokens gives the vision transformer
-  <Cite id="dosovitskiy2021" />. Restricting attention to the edges of a graph gives a
-  <NoteLink to="graph-attention-network">graph attention network</NoteLink>.
+<NoteLink to="modern-decoder-block">The modern decoder block</NoteLink> assembles the right-hand column into one block
+and compares it with the 2017 block line by line.
 
 ## Assumptions
 
-- Relations between positions can be expressed as weighted averages chosen by content. Order enters only through the
-  positional encoding.
-- The whole sequence fits in memory: attention stores $n^2$ weights per head per layer during training.
+- Relations between positions are weighted averages chosen by content. Order enters only through the added positional
+  encoding.
+- The whole sequence fits in memory. Training stores $n^2$ weights per head per layer.
+- Source and target share a vocabulary, which the three-way weight tying requires.
 
 ## Pitfalls
 
-- **Quadratic cost in length.** Doubling the context quadruples attention time and memory. Long contexts need
-  memory-efficient attention kernels or sparse and linear variants.
-- **No inherent order.** Without a positional encoding the model is equivariant to permutations and cannot tell "dog
-  bites man" from "man bites dog".
-- **Post-LN instability.** The original arrangement can diverge early in training without a warm-up of the learning
-  rate <Cite id="xiong2020" />.
+- **Warm-up is part of the architecture.** Post-norm blocks can diverge early in training at the paper's learning rate
+  unless the rate is warmed up <Cite id="xiong2020" />.
+- **Quadratic cost in length.** Doubling the context quadruples attention time and memory.
+- **Label smoothing and perplexity.** A smoothed model's perplexity is not comparable with an unsmoothed one's. Smoothing
+  makes perplexity worse by construction while improving BLEU.
+- **Reported parameter counts.** The 65 M and 213 M figures match a count that includes the shared embedding once.
+  Counting the source embedding, target embedding and output projection separately would add two more copies.

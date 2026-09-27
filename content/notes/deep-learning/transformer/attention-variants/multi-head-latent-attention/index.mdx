@@ -1,0 +1,107 @@
+---
+title: Multi-head latent attention
+kind: technique
+summary: Multi-head latent attention (MLA), from DeepSeek-V2, caches one compressed vector $\cvec_t$ of width $d_c$ per token and layer, from which every head's keys and values are reconstructed by up-projections that fold into the query and output weights. Position rides on a small shared RoPE key.
+tags: [deep-learning, transformer, attention, inference, memory, language-models, worked-example]
+aliases: [MLA, latent attention, low-rank key-value compression, decoupled RoPE, decoupled rotary key, weight absorption]
+requires: [multi-head-attention, kv-cache, rotary-position-embedding]
+related: [multi-query-and-grouped-query-attention, gpt-2-vs-deepseek-v3, singular-value-decomposition]
+references: [deepseek2024v2, deepseek2024, ainslie2023, su2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For the hidden state $\hvec_t \in \reals^{d}$ of token $t$, MLA computes a latent vector
+$\cvec_t = \Wmat^{DKV} \hvec_t \in \reals^{d_c}$ and, for each head $i$ of width $d_h$, keys and values
+$$
+\kvec^{C}_{t,i} = \Wmat^{UK}_i \cvec_t, \qquad \vvec_{t,i} = \Wmat^{UV}_i \cvec_t,
+$$
+with $d_c \ll n_h d_h$. A separate key $\kvec^{R}_t = \operatorname{RoPE}(\Wmat^{KR} \hvec_t) \in \reals^{d_h^R}$, shared by
+all heads, carries position. Only $\cvec_t$ and $\kvec^R_t$ are cached: $d_c + d_h^R$ numbers per token and layer
+<Cite id="deepseek2024v2" />.
+</Definition>
+
+## Problem
+
+The KV cache of multi-head attention holds $2 n_h d_h$ numbers per token and layer. Sharing key–value heads, as in
+<NoteLink to="multi-query-and-grouped-query-attention">grouped-query attention</NoteLink>, shrinks the cache but forces
+query heads in a group to compare against identical keys. DeepSeek-AI sought a cache as small as that of GQA with few
+groups while keeping per-head keys and values.
+
+## Mechanism
+
+**Low-rank joint compression.** One down-projection $\Wmat^{DKV} \in \reals^{d_c \times d}$ produces the latent
+$\cvec_t$. Up-projections $\Wmat^{UK}, \Wmat^{UV} \in \reals^{n_h d_h \times d_c}$ reconstruct all heads' keys and values
+from it. The keys and values of all heads together have rank at most $d_c$, which is the price of the compression.
+
+**Absorbing the up-projections.** The reconstructed keys never need to be formed. For head $i$ with query
+$\qvec^C_{t,i} = \Wmat^{UQ}_i \cvec^Q_t$ from a compressed query latent $\cvec^Q_t$, the content score with the token at
+position $s$ is
+
+$$
+\paren{\qvec^C_{t,i}}^{\tr} \kvec^C_{s,i}
+= \paren{\cvec^Q_t}^{\tr} \underbrace{\paren{\Wmat^{UQ}_i}^{\tr} \Wmat^{UK}_i}_{\text{fixed } d'_c \times d_c} \cvec_s.
+$$
+
+The product of the two projections is a fixed matrix, so the score is computed directly against the cached latent
+$\cvec_s$. The value side works the same way. Head $i$'s output is
+$\sum_s \alpha_{ts} \vvec_{s,i} = \Wmat^{UV}_i \sum_s \alpha_{ts} \cvec_s$, and $\Wmat^{UV}_i$ merges with the rows of the
+output projection that belong to head $i$. Attention runs in the $d_c$-dimensional latent space.
+
+**Why position needs its own key.** Apply RoPE to the reconstructed keys and the score becomes
+$\paren{\cvec^Q_t}^{\tr} \paren{\Wmat^{UQ}_i}^{\tr} \Rmat_{s-t} \Wmat^{UK}_i \cvec_s$, with the rotation $\Rmat_{s-t}$
+between the two projections. The middle matrix now depends on the positions, so it cannot be precomputed, and the keys
+of every earlier token would have to be rebuilt at each step <Cite id="deepseek2024v2" />. MLA therefore splits each
+head's query and key into two parts:
+
+$$
+\qvec_{t,i} = \brack{\qvec^C_{t,i};\ \qvec^R_{t,i}}, \qquad \kvec_{s,i} = \brack{\kvec^C_{s,i};\ \kvec^R_{s}},
+\qquad \text{score} = \frac{\qvec_{t,i}^{\tr} \kvec_{s,i}}{\sqrt{d_h + d_h^R}}.
+$$
+
+The content parts carry no position and absorb as above. The rotary parts carry position; the key part
+$\kvec^R_s$ is computed from $\hvec_s$, rotated by RoPE and shared by all heads, so the cache adds only $d_h^R$ numbers.
+Because the score is a sum of the two dot products, the rotary part contributes a term that depends on the offset, as in
+<NoteLink to="rotary-position-embedding">RoPE</NoteLink>.
+
+**Query compression.** DeepSeek-V2 also compresses queries through a latent of width $d'_c$. This does not shrink the
+cache; it reduces activation memory during training.
+
+## Worked example
+
+DeepSeek-V2 has 60 layers, $n_h = 128$ heads of width $d_h = 128$, $d_c = 512 = 4 d_h$, $d_h^R = 64 = d_h / 2$ and
+$d'_c = 1536$ <Cite id="deepseek2024v2" />.
+
+- **MLA cache per token and layer:** $d_c + d_h^R = 512 + 64 = 576$ numbers.
+- **Multi-head cache with the same heads:** $2 n_h d_h = 2 \times 128 \times 128 = 32{,}768$ numbers. MLA stores
+  $576 / 32{,}768 = 1.76\%$ of it, 57 times less.
+- **Equivalent GQA:** GQA with $g$ groups caches $2 g d_h$. Setting $2 g d_h = 4.5 d_h$ gives $g = 2.25$ groups.
+- **Whole model, per token:** $576 \times 60 = 34{,}560$ numbers, against $1{,}966{,}080$ for multi-head attention.
+- **A 128K-token context** ($131{,}072$ tokens) in 16-bit floats needs $9.1$ GB of MLA cache, against $515$ GB for
+  multi-head attention.
+
+Compared with DeepSeek 67B, DeepSeek-V2 reduced the KV cache by 93.3% and raised maximum generation throughput 5.76-fold
+<Cite id="deepseek2024v2" />. DeepSeek-V3 uses the same attention dimensions <Cite id="deepseek2024" />; see
+<NoteLink to="gpt-2-vs-deepseek-v3">GPT-2 against DeepSeek-V3</NoteLink>.
+
+## Cost
+
+With absorption, each head's score against a cached token is a dot product of width $d_c + d_h^R = 576$ rather than
+$d_h + d_h^R = 192$. MLA spends more arithmetic per cached token to read far fewer bytes. Decoding is memory-bound (see
+<NoteLink to="multi-query-and-grouped-query-attention">multi-query and grouped-query attention</NoteLink>), so the trade
+favours MLA at long contexts. During training, when keys and values are formed for all tokens at once, the
+up-projections can be applied explicitly instead.
+
+## Trade-offs
+
+- **Quality.** DeepSeek-AI report MLA outperforming multi-head attention in their ablations while caching as little as
+  GQA with 2.25 groups <Cite id="deepseek2024v2" />.
+- **Complexity.** Two query paths, a shared rotary key, absorbed weights for inference and explicit weights for
+  training make MLA harder to implement than GQA. Extra RMSNorm layers after the latent vectors were needed for stable
+  scaling.
+- **Context extension.** Rotary scaling methods apply only to the small rotary key. DeepSeek-V2 applied YaRN to
+  $\kvec^R$ alone to extend its context from 4K to 128K tokens; see
+  <NoteLink to="long-context-methods">long-context methods</NoteLink>.
+- **Rank limit.** All heads' keys lie in a $d_c$-dimensional subspace per token. Heads can still attend differently
+  because each has its own $\Wmat^{UQ}_i$ and $\Wmat^{UK}_i$, but they cannot draw on information outside $\cvec_t$.

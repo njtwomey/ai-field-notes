@@ -3,9 +3,10 @@ title: Scaled dot-product attention
 kind: concept
 summary: Scaled dot-product attention computes $\operatorname{softmax}(\Qmat \Kmat^{\tr} / \sqrt{d_k})\, \Vmat$. Each query takes a weighted average of the values, with weights from the dot products of the query with the keys. Dividing by $\sqrt{d_k}$ keeps the score variance at 1, so the softmax does not saturate.
 tags: [deep-learning, transformer, attention, worked-example]
-aliases: [dot-product attention, self-attention, cross-attention, query key value, QKV attention, softmax attention]
+aliases: [dot-product attention, self-attention, query key value, QKV attention, softmax attention, attention temperature]
 requires: [dot-product, softmax-and-log-sum-exp]
-related: [bahdanau-attention, multi-head-attention, transformer, positional-encoding]
+partOf: [multi-head-attention]
+related: [bahdanau-attention, encoder-decoder-cross-attention, transformer-layer-by-layer, qk-normalisation-and-logit-soft-capping, positional-encoding]
 references: [vaswani2017, luong2015]
 status: draft
 updated: 2026-09-27
@@ -40,8 +41,8 @@ $$
 
 In **self-attention**, queries, keys and values are all linear projections of the same sequence $\Xmat$:
 $\Qmat = \Xmat \Wmat_Q$, $\Kmat = \Xmat \Wmat_K$, $\Vmat = \Xmat \Wmat_V$. Every position reads from every other
-position. In **cross-attention**, queries come from one sequence and keys and values from another, as in the decoder
-of an encoder–decoder <NoteLink to="transformer">transformer</NoteLink>.
+position. In <NoteLink to="encoder-decoder-cross-attention">cross-attention</NoteLink>, queries come from one sequence
+and keys and values from another, as in the decoder of the encoder–decoder <NoteLink to="transformer">transformer</NoteLink>.
 
 ## Why divide by the square root of the dimension
 
@@ -61,6 +62,15 @@ $$
 
 The standard deviation of the scores grows as $\sqrt{d_k}$. Dividing by $\sqrt{d_k}$ gives scores with variance 1 for
 every $d_k$ <Cite id="vaswani2017" />.
+
+If the components have variances $\sigma_q^2$ and $\sigma_k^2$ instead of 1, the same argument gives
+$\var(\qvec^{\tr}\kvec) = d_k \sigma_q^2 \sigma_k^2$. The $\sqrt{d_k}$ factor removes the dependence on width but not
+on scale. Queries and keys whose norms grow during training still push the scores apart; see
+<NoteLink to="qk-normalisation-and-logit-soft-capping">QK normalisation and logit soft-capping</NoteLink>.
+
+Dividing the scores by a constant $\tau$ is a softmax **temperature**. The scaled form is
+$\operatorname{softmax}(\svec / \tau)$ with $\tau = \sqrt{d_k}$. As $\tau \to \infty$ the weights tend to uniform,
+$1/m$ each. As $\tau \to 0$ they concentrate on the largest score.
 
 Large scores harm training because of the shape of the softmax. With weights $\alphavec = \operatorname{softmax}(\svec)$,
 differentiating $\alpha_i = e^{s_i} / \sum_l e^{s_l}$ with the quotient rule gives

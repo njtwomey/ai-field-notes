@@ -3,10 +3,11 @@ title: Multi-head attention
 kind: concept
 summary: Multi-head attention runs $h$ scaled dot-product attentions in parallel on learned projections of width $d/h$ and merges their outputs with a final projection. It costs about as much as one full-width head, and each position gathers $h$ separate weighted averages.
 tags: [deep-learning, transformer, attention, worked-example]
-aliases: [MHA, attention heads, multi-query attention, MQA, grouped-query attention, GQA]
+aliases: [MHA, attention heads, attention head, head dimension]
 requires: [scaled-dot-product-attention]
-related: [transformer, kv-cache, graph-attention-network]
-references: [vaswani2017, shazeer2019, ainslie2023, michel2019]
+partOf: [transformer]
+related: [multi-query-and-grouped-query-attention, multi-head-latent-attention, kv-cache, graph-attention-network]
+references: [vaswani2017, michel2019]
 status: draft
 updated: 2026-09-27
 ---
@@ -73,16 +74,26 @@ The base transformer has $d = 512$ and $h = 8$ heads, so each head has $d_k = d_
 In the paper's ablation, one head of width 512 scored 0.9 BLEU lower than eight heads of width 64. Very many narrow
 heads, 32 of width 16, were also worse than eight <Cite id="vaswani2017" />.
 
-## Variants that share keys and values
+## Each head is a low-rank bilinear form
 
-During autoregressive decoding, each layer caches the keys and values of all earlier tokens (see
-<NoteLink to="kv-cache">KV caching</NoteLink>). The cache holds $2 h d_k$ numbers per token per layer.
+Head $i$ scores query position $a$ against key position $b$ by
 
-- **Multi-query attention** keeps $h$ query heads but a single key head and a single value head, shared by all query
-  heads. The cache shrinks by a factor of $h$ <Cite id="shazeer2019" />.
-- **Grouped-query attention** divides the query heads into $g$ groups, each sharing one key and value head. It
-  interpolates between multi-head ($g = h$) and multi-query ($g = 1$) attention and recovers most of the quality of
-  multi-head attention <Cite id="ainslie2023" />.
+$$
+\qvec_a^{\tr} \kvec_b = \xvec_a^{\tr} \Wmat_Q^i (\Wmat_K^i)^{\tr} \xvec_b.
+$$
+
+The $d \times d$ matrix $\Wmat_Q^i (\Wmat_K^i)^{\tr}$ has rank at most $d_k$. A head therefore compares positions
+through a bilinear form of rank $d_k = d/h$: it can react to at most $d_k$ directions of the input. The value side is
+the same: $\Wmat_V^i \Wmat_O^i$, with $\Wmat_O^i$ the rows of $\Wmat_O$ that belong to head $i$, is a $d \times d$ map
+of rank at most $d_v$. Splitting $d$ into $h$ heads trades one full-rank comparison for $h$ low-rank ones.
+
+## Variants
+
+The $h$ key and value heads dominate the memory of autoregressive decoding, because every generated token's keys and
+values are cached (see <NoteLink to="kv-cache">KV caching</NoteLink>). Later models share one key–value head among
+several query heads, in <NoteLink to="multi-query-and-grouped-query-attention">multi-query and grouped-query
+attention</NoteLink>, or compress keys and values into a latent vector, in
+<NoteLink to="multi-head-latent-attention">multi-head latent attention</NoteLink>.
 
 ## Assumptions
 
