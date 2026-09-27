@@ -1,0 +1,141 @@
+---
+title: Hierarchical Gaussian process anomaly detection
+kind: technique
+summary: HGP anomaly detection fits a hierarchical Gaussian process to a class of time series and scores a new series by its negative log marginal likelihood $S(\yvec_*) = -\ln p(\yvec_* \mid \xvec_*, \thetavec)$ under that model. Curves unlike the class get high scores; ranking by score finds anomalous series.
+tags: [anomaly-detection, gaussian-process, time-series, hierarchical-model, bayesian]
+aliases: [HGPAD, hierarchical Gaussian process anomaly detection, GP marginal likelihood anomaly score, anomalous time series detection with GPs]
+requires: [hierarchical-gaussian-process, gp-hyperparameter-learning]
+partOf: [anomaly-detection]
+related: [forecast-residual-anomaly-detection, time-series-anomaly-types, evaluating-anomaly-detectors, mahalanobis-distance-outliers, discord-discovery-at-scale]
+references: [twomey2019, chen2018hgp, hensman2013hgp, rasmussen2006, chandola2009, rebbapragada2009]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Hierarchical Gaussian process anomaly detection (HGPAD) finds whole time series that do not conform to a collection
+<Cite id="twomey2019" />. It fits a <NoteLink to="hierarchical-gaussian-process">hierarchical Gaussian process</NoteLink>
+to training series of one class, treating each series as a replicate of a shared latent function, with hyperparameters
+$\thetavec$ set by maximum marginal likelihood. It scores a test series $\yvec_*$, observed at inputs $\xvec_*$, by
+$S(\yvec_*) = -\ln p(\yvec_* \mid \xvec_*, \thetavec)$ under the fitted model, and ranks series by score.
+</Definition>
+
+## Problem
+
+The task is to find anomalous series within a collection, not anomalous points within one series. Examples are a
+light curve of a periodic variable star that has been assigned the wrong class <Cite id="twomey2019" />, or a heart
+rate record unlike the others. Point-wise detectors such as <NoteLink to="forecast-residual-anomaly-detection">forecast-residual
+detection</NoteLink> answer a different question. Distance-based methods compare a series with a few centroids and need
+the number of centroids and a distance chosen in advance <Cite id="rebbapragada2009" />. A likelihood under a fitted
+generative model is a natural score for whole series: a series that the model finds improbable is unlike the data the
+model was fitted to <Cite id="chandola2009" />.
+
+A single Gaussian process fitted to one series cannot represent a class. A Gaussian process fitted to the pooled points
+of many series treats them as noisy samples of one function and attributes all between-series variation to noise. The
+hierarchical Gaussian process separates the two: a shared function for the class shape, a deviation kernel for how
+members of the class differ, and a noise level for measurement error.
+
+## Mechanism
+
+### 1. Fit a class model
+
+Take $n$ training series of one class. Series $i$ has inputs $\xvec_i$ (times, or phases for folded periodic data) and
+values $\yvec_i$. The model is
+
+$$
+g \sim \GP(0, k_g), \qquad f_i \mid g \sim \GP(g, k_f), \qquad y_{it} = f_i(x_{it}) + \varepsilon_{it}, \quad \varepsilon_{it} \sim \Gauss(0, \tau^{-1}).
+$$
+
+The stacked training data $\hat{\yvec}$ have covariance $\Sigmamat$ with blocks
+$\Kmat_g(\xvec_i, \xvec_j) + \delta_{ij}\paren{\Kmat_f(\xvec_i, \xvec_i) + \tau^{-1}\eye}$. The hyperparameters
+$\thetavec$ of $k_g$, $k_f$ and $\tau$ maximise $\ln\Gauss(\hat{\yvec} \mid \zeros, \Sigmamat)$ by following its
+analytic gradient <Cite id="twomey2019" /> (see <NoteLink to="gp-hyperparameter-learning">hyperparameter learning</NoteLink>).
+Twomey et al. use Matérn kernels (the Matérn 3/2 form) for both $k_g$ and $k_f$, since light curves show both
+low-frequency oscillation and high-frequency noise <Cite id="twomey2019" />.
+
+### 2. Predictive density of a new series
+
+A test series is a new replicate $f_*$ of the class, with its own deviation $h_* \sim \GP(0, k_f)$ independent of the
+training data. Its observations $\yvec_* = g(\xvec_*) + h_*(\xvec_*) + \varepsilonvec_*$ are jointly Gaussian with
+$\hat{\yvec}$, with
+
+$$
+\cov[\yvec_*, \hat{\yvec}] = \Kmat_g(\xvec_*, \hat{\xvec}), \qquad
+\cov[\yvec_*] = \Kmat_g(\xvec_*, \xvec_*) + \Kmat_f(\xvec_*, \xvec_*) + \tau^{-1}\eye.
+$$
+
+The cross-covariance has no $k_f$ term because $h_*$ is independent of every training deviation. Gaussian conditioning
+gives the predictive distribution $\yvec_* \mid \hat{\yvec} \sim \Gauss(\mvec_*, \Smat_*)$:
+
+$$
+\mvec_* = \Kmat_g(\xvec_*, \hat{\xvec})\,\Sigmamat^{-1}\hat{\yvec}, \qquad
+\Smat_* = \underbrace{\Kmat_g(\xvec_*, \xvec_*) - \Kmat_g(\xvec_*, \hat{\xvec})\,\Sigmamat^{-1}\Kmat_g(\hat{\xvec}, \xvec_*)}_{\text{posterior covariance of } g} + \Kmat_f(\xvec_*, \xvec_*) + \tau^{-1}\eye.
+$$
+
+The mean is the posterior mean of the shared function. The covariance is the remaining uncertainty about $g$ plus the
+spread of a class member around $g$ plus noise. As the number of training series grows, the first term shrinks and
+$\Smat_*$ approaches $\Kmat_f + \tau^{-1}\eye$.
+
+### 3. Score
+
+The anomaly score is the negative log density of the whole test series <Cite id="twomey2019" />:
+
+$$
+S(\yvec_*) = -\ln p(\yvec_* \mid \xvec_*, \thetavec) = \tfrac12\, \rvec_*^\top\Smat_*^{-1}\rvec_* + \tfrac12\ln\abs{\Smat_*} + \tfrac{T_*}{2}\ln 2\pi, \qquad \rvec_* = \yvec_* - \mvec_*,
+$$
+
+where $T_*$ is the length of the test series. Twomey et al. write this as equations (13) and (14), with the
+covariance parameters inferred from the training data, and call the method HGPAD <Cite id="twomey2019" />. The
+earlier conference version builds its score from the same log marginal likelihood <Cite id="chen2018hgp" />.
+
+The score has a direct reading. When every test series lies on the same inputs, $\ln\abs{\Smat_*}$ and the constant
+are the same for all of them, and ranking by $S$ is ranking by the Mahalanobis distance $\rvec_*^\top\Smat_*^{-1}\rvec_*$
+of the series from the class prediction (see
+<NoteLink to="mahalanobis-distance-outliers">Mahalanobis-distance outliers</NoteLink>). The distance weights each
+direction of departure by how much the class varies in that direction. A departure that class members commonly show,
+such as a small smooth amplitude change, costs little. A departure in a direction of small predictive variance, such as a
+sharp feature the class lacks, costs a lot. If $\yvec_*$ is drawn from the model, $\rvec_*^\top\Smat_*^{-1}\rvec_*$
+follows a $\chi^2_{T_*}$ distribution, so $\expect[S] = \frac{T_*}{2}(1 + \ln 2\pi) + \frac12\ln\abs{\Smat_*}$. This
+gives a reference level for the score of a typical member.
+
+### 4. Rank and flag
+
+Series are sorted by score. In an unsupervised setting the highest-scoring series are passed to an expert
+<Cite id="twomey2019" />. When the number of true anomalies $n_a$ in a test set is known, Twomey et al. report
+precision in the top $n_a$ ranked series <Cite id="twomey2019" />. This metric equals recall at the same cutoff (see
+<NoteLink to="evaluating-anomaly-detectors">evaluating anomaly detectors</NoteLink>).
+
+### Cleaning a contaminated training set
+
+Anomalies in the training data widen the class model and lower the scores of similar test anomalies. Twomey et al.
+chain two models to reduce this <Cite id="twomey2019" />. A first HGP is fitted to a small training set, about 1% of
+the data. It scores a validation set. The fraction $Q$ of validation series with the lowest scores trains a second
+HGP, which scores the test set. In their experiment, precision degrades once $Q$ rises above about 80%, which the
+authors read as anomalies entering the training data <Cite id="twomey2019" />.
+
+## Cost
+
+Fitting costs $O(N^3)$ per evaluation of the marginal likelihood and its gradient, for $N$ stacked training points,
+exactly as for a single GP on the pooled data. Scoring one test series of length $T_*$ costs $O(N^2T_* + T_*^3)$ with the
+training factorisation reused. The cubic cost limited Twomey et al. to at most 10% of the OGLE light curves
+<Cite id="twomey2019" />. When all series share one grid of $T$ inputs, the mean curve is sufficient for $g$ and both
+fitting and scoring need only $T \times T$ factorisations (see the common-grid derivation in
+<NoteLink to="hierarchical-gaussian-process">hierarchical Gaussian process</NoteLink>). Twomey et al. list low-rank
+and inducing-point approximations as future work <Cite id="twomey2019" />.
+
+## Trade-offs
+
+- **Few parameters, no grid search.** The model has the hyperparameters of two kernels and a noise level, learned by
+  gradient ascent on the marginal likelihood. Distance-based baselines need a number of centroids chosen by a
+  criterion such as BIC <Cite id="twomey2019" />.
+- **Small training sets.** The class model is a posterior with uncertainty, and the score accounts for it through
+  $\Smat_*$. Twomey et al. report near-perfect precision from as few as seven training series
+  <Cite id="twomey2019" />.
+- **Alignment is assumed.** The model compares series input by input. Series that are phase-shifted or time-warped
+  copies of the class shape receive high scores. Periodic data must be phase-folded to a common epoch first.
+- **One model per class.** Scores from different class models are not on a common scale, since
+  $\ln\abs{\Smat_*}$ differs between classes. Compare series within a class, or calibrate each class's scores
+  separately.
+- **Stationary kernels.** The kernels assume the same smoothness everywhere along the series. Twomey et al. argue this
+  suits star light curves, which are stable processes, but note that sensor faults can need non-stationary kernels
+  <Cite id="twomey2019" />.

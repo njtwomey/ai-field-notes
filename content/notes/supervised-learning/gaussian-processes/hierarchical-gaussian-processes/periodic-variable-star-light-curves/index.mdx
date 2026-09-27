@@ -1,0 +1,209 @@
+---
+title: Anomalous light curves of periodic variable stars
+kind: example
+summary: Phase-folded light curves of Cepheid, RR Lyrae and eclipsing-binary stars are modelled per class by a hierarchical Gaussian process, and each curve is scored by its negative log marginal likelihood. On OGLE data this finds eclipsing binaries among the others with precision 0.99.
+tags: [worked-example, anomaly-detection, gaussian-process, time-series, astronomy, hierarchical-model]
+aliases: [star light curve anomaly detection, OGLE light curves, StarLightCurves dataset, variable star light curves, phase-folded light curves, HGPAD on light curves]
+requires: [hierarchical-gaussian-process]
+related: [hgp-anomaly-detection, lomb-scargle-periodogram, covariance-functions, gp-hyperparameter-learning, evaluating-anomaly-detectors, time-series-classification-benchmarks, discord-discovery-at-scale, k-means]
+references: [twomey2019, chen2018hgp, hensman2013hgp, rebbapragada2009, sterken2005, dau2019]
+status: draft
+updated: 2026-09-27
+---
+
+import { StarAnomaly } from './StarAnomaly'
+
+<Definition>
+The data are light curves of periodic variable stars from the Optical Gravitational Lensing Experiment (OGLE), as
+distributed by the UCR time-series archive: 1329 Cepheids (CEPH), 2580 eclipsing binaries (EB) and 5326 RR Lyrae
+(RRL), each a single phase-folded period resampled to 1024 points <Cite id="twomey2019" />. Some curves may carry the
+wrong class label. The task is to rank the curves of a class so that curves that do not conform to the class come
+first. The method is to fit a <NoteLink to="hierarchical-gaussian-process">hierarchical Gaussian process</NoteLink> to
+training curves of the class and score each curve by its negative log marginal likelihood under that model
+<Cite id="twomey2019" />. With labels available, EB curves are planted as known anomalies among CEPH and RRL curves,
+and the ranking is scored by precision.
+</Definition>
+
+## Setup
+
+### Light curves and periodic variable stars
+
+A light curve is a time series of the brightness of one celestial object. Astronomers record brightness as a magnitude
+$m = -2.5\log_{10} F + \text{const}$, where $F$ is the measured flux, so a brighter star has a smaller magnitude. A
+periodic variable star repeats its light curve with a fixed period $P$. The three classes in the data vary for
+different physical reasons <Cite id="sterken2005" />:
+
+- **Cepheids** are pulsating supergiant stars with periods of days to months. The light curve rises quickly to
+  maximum and declines slowly. The period of a Cepheid is tied to its luminosity, which makes Cepheids calibrators of
+  the extragalactic distance scale <Cite id="twomey2019" />.
+- **RR Lyrae** stars are pulsating stars with periods under about one day. Their light curves have a shape similar to
+  Cepheid light curves, which makes the two classes hard to separate by shape alone <Cite id="twomey2019" />.
+- **Eclipsing binaries** are pairs of stars whose orbit passes one in front of the other as seen from Earth. The light
+  curve is nearly flat, with a dip at each eclipse. The EB curves are distinct from the other two classes
+  <Cite id="twomey2019" />.
+
+### Period finding and phase folding
+
+A survey observes each star at irregular times $t_1, \dots, t_M$, spread over many periods. The period is estimated
+first, for example with the <NoteLink to="lomb-scargle-periodogram">Lomb–Scargle periodogram</NoteLink>, which fits
+sinusoids to unevenly sampled data. Given a period $P$ and a reference epoch $t_0$, each observation is assigned a
+phase
+
+$$
+\phi_k = \frac{t_k - t_0}{P} - \left\lfloor \frac{t_k - t_0}{P} \right\rfloor \in [0, 1).
+$$
+
+Plotting brightness against $\phi_k$ folds all cycles onto one. The folded curve is then resampled onto a fixed grid.
+In the UCR version of the OGLE data every curve has 1024 points and all curves share the same start and end
+<Cite id="twomey2019" />. Choosing $t_0$ at a fixed feature, such as maximum brightness, aligns the phases of
+different stars.
+
+### The class model
+
+For one class, let $\yvec_i \in \reals^{T}$ be curve $i$ on the common grid of $T = 1024$ inputs $\xvec$. The model is
+the two-level hierarchy of Twomey et al., their equation (9) <Cite id="twomey2019" />:
+
+$$
+g(x) \sim \GP\paren{0, k_g(x, x')}, \qquad f_i(x) \sim \GP\paren{g(x), k_f(x, x')}, \qquad \yvec_i = f_i(\xvec) + \varepsilonvec_i, \quad \varepsilonvec_i \sim \Gauss(\zeros, \tau^{-1}\eye).
+$$
+
+The shared function $g$ is the prototypical light curve of the class. Each $f_i$ is one star's curve. It differs from
+$g$ through properties of the star and through observing conditions such as the weather <Cite id="twomey2019" />.
+Both covariance functions are Matérn kernels, chosen because the curves show both low-frequency oscillation and
+high-frequency noise <Cite id="twomey2019" />. The hyperparameters are fitted by maximising the log marginal likelihood
+of the stacked training curves with its analytic gradient.
+
+### The anomaly score
+
+A test curve $\yvec_*$ is scored by
+
+$$
+S(\yvec_*) = -\ln p(\yvec_* \mid \xvec_*, \thetavec),
+$$
+
+the negative log marginal likelihood under the class model with hyperparameters $\thetavec$ inferred from the
+training curves <Cite id="twomey2019" />. Under the model a new star is a new replicate, so its curve is Gaussian with
+mean equal to the posterior mean of $g$ and covariance equal to the posterior covariance of $g$ plus
+$\Kmat_f + \tau^{-1}\eye$. The derivation and the reading of $S$ as a Mahalanobis distance are in
+<NoteLink to="hgp-anomaly-detection">HGP anomaly detection</NoteLink>. The method is called HGPAD.
+
+## Solution
+
+### Periodic or non-periodic kernel
+
+The curves are periodic, so a periodic covariance function on the shared level is a natural candidate. Twomey et al.
+tried a periodic Matérn 3/2 kernel, summed with a squared exponential of long length-scale to capture the tilted shape,
+for $k_g$, with the Matérn 3/2 kernel for $k_f$ <Cite id="twomey2019" />. Each curve holds roughly one period, so the
+periodic structure adds little information. The fitted model found a period of around 22, which fits local
+quasi-periodic fluctuations rather than the single long period. That solution had a log marginal likelihood of around $-1537$, well below the $-1287$ of
+the standard Matérn kernel. After tens of optimisation restarts, a solution with the correct period and a log
+marginal likelihood of $-1210$ appeared. It was unstable, since the optimiser did not generally converge to it, and its
+error bars around the shared function looked overly tight. The paper therefore uses the non-periodic kernels
+<Cite id="twomey2019" />. The comparison is an instance of model selection by marginal likelihood (see
+<NoteLink to="gp-hyperparameter-learning">hyperparameter learning</NoteLink>) and of its multiple local optima.
+
+### Datasets and protocol
+
+Two datasets from the UCR time-series archive are used <Cite id="twomey2019" /> <Cite id="dau2019" />:
+
+- **MALLAT** is synthetic. It has eight classes of 300 series, each with 1024 time points. Classes 3 and 6 look alike
+  and are the inliers. Class 7 lacks a peak that the other two have and is the outlier class.
+- **OGLE** has the three star classes above. CEPH and RRL are the inliers and EB is the outlier class.
+
+HGPAD is fitted on a fraction of the inlier series. A test set of 10% outliers and 90% inliers is scored. With $n_a$
+outliers in the test set, precision is the fraction of outliers among the $n_a$ highest-scoring series
+<Cite id="twomey2019" />.
+
+### Baselines
+
+Both baselines come from Rebbapragada et al., who designed them for periodic light curves <Cite id="rebbapragada2009" />.
+
+- **PCAD** (periodic curve anomaly detection) is <NoteLink to="k-means">$k$-means</NoteLink> with maximal
+  cross-correlation as the similarity, which also estimates each curve's phase shift. The OGLE curves are already
+  synchronised, so Twomey et al. implement a simplified version without the phase-updating step, called SPCAD. The
+  number of centroids $K$ is chosen by BIC on validation data. A curve's score is
+  $\sum_{k=1}^K \frac{\abs{n_k}}{n} r^2_{\yvec_*, \cvec_k}$, where $\abs{n_k}$ is the number of training curves closest
+  to centroid $\cvec_k$, $n$ is the dataset size and $r_{\yvec_*, \cvec_k}$ is the cross-correlation distance
+  <Cite id="twomey2019" />.
+- **RAND-C** draws $K$ centroids uniformly from the data and keeps them fixed. It scores curves as PCAD does.
+
+### Results
+
+Precision on both datasets <Cite id="twomey2019" />:
+
+|        | RAND-C | SPCAD | HGPAD |
+| ------ | ------ | ----- | ----- |
+| MALLAT | 0.02   | 0.02  | 1.00  |
+| OGLE   | 0.44   | 0.16  | 0.99  |
+
+Precision against the fraction of the data used for training <Cite id="twomey2019" /> <Cite id="chen2018hgp" />:
+
+|           | MALLAT 0.4 | MALLAT 0.7 | MALLAT 1.0 | OGLE 0.01 | OGLE 0.08 | OGLE 0.1 |
+| --------- | ---------- | ---------- | ---------- | --------- | --------- | -------- |
+| RAND-C    | 0.01       | 0.03       | 0.01       | 0.57      | 0.59      | 0.77     |
+| SPCAD     | 0.01       | 0.01       | 0.01       | 0.40      | 0.16      | 0.12     |
+| HGPAD     | 1.00       | 1.00       | 1.00       | 0.98      | 0.99      | 0.99     |
+
+At most 10% of the OGLE data were used because of the computational cost. For OGLE training there are 725 instances,
+and 1% of them is enough for HGPAD to detect anomalies well <Cite id="twomey2019" />. The paper summarises this as
+near-perfect precision from as few as seven instances. The authors attribute the stability to the model's uncertainty
+quantification, which reduces overfitting, and to its use of covariance between all pairs of instances rather than
+instance-to-centroid correlations. They suggest that the baselines may suffer from an unstable dataset, from a poor
+choice of $K$ by BIC, and from averaging curves to update centroids under a cross-correlation distance. On MALLAT,
+the outlier class is not dissimilar enough in shape for the distance-based methods to work <Cite id="twomey2019" />.
+
+In the contamination experiment, a first HGPAD model trained on about 1% of the data ranks a validation set, and the
+lowest-scoring fraction $Q$ trains a second model. Precision on the test set stays high when only a small fraction is
+kept and degrades once more than about 80% is kept, as anomalies enter the training data <Cite id="twomey2019" />.
+
+### Unknown anomalies
+
+Without labels, precision cannot be measured. Twomey et al. fit HGPAD to one class at a time, rank the held-out curves
+of that class by score and inspect both ends of the ranking <Cite id="twomey2019" />. For each of CEPH, EB and RRL,
+the five lowest-scoring curves closely match the inferred shared function $g$. The highest-scoring curves do not
+resemble any of the prototypical curves and are likely to be real outliers. The paper proposes that an expert check
+them, and either assign each to another existing class or classify it as a new class of star
+<Cite id="twomey2019" />. The paper shows these curves as figures and does not list the stars by identifier.
+
+## Simulation
+
+The figure builds a small synthetic version of the problem. Three classes of six stars each have templates shaped like a
+Cepheid (a smoothed sawtooth), an RR Lyrae star (a steeper sawtooth) and an eclipsing binary (two dips half a period
+apart). Every star adds its own smooth deviation, drawn from a Matérn 3/2 process, and noise, on 40 phase points. The
+sixth Cepheid-like star is distorted by an amount $d$. Each star is scored leave-one-out: the class model is the HGP
+posterior from the other five stars of its class, computed with the common-grid formulas.
+
+<StarAnomaly />
+
+At $d = 0$ the sixth star is an ordinary member and ranks tenth of 18. Blending it three quarters of the way toward
+the eclipse shape, or adding a dip of three quarters of the full depth, moves it to the top of the ranking. A phase
+shift of one eighth of a cycle ($d = 0.25$) puts it at the top at once, although its shape is unchanged. The
+comparison is point by point in phase, so misalignment looks the same as a change of shape.
+
+## What it illustrates
+
+- **Replicates of a shared function.** Stars of one class are replicates of a class shape, which is the setting of the
+  <NoteLink to="hierarchical-gaussian-process">hierarchical Gaussian process</NoteLink>. The model separates the class
+  shape, the star-to-star variation and the measurement noise.
+- **Likelihood as an anomaly score.** The score is a log predictive density, and on a common grid it ranks curves by a
+  Mahalanobis distance from the class prediction (see <NoteLink to="hgp-anomaly-detection">HGP anomaly detection</NoteLink>).
+- **Phase folding before comparison.** The comparison is point by point in phase, so period estimation with the
+  <NoteLink to="lomb-scargle-periodogram">Lomb–Scargle periodogram</NoteLink> and a common epoch are prerequisites.
+- **Kernel choice by marginal likelihood.** The periodic kernel matches the physics but not the data layout of one
+  period per curve. The marginal likelihood prefers the non-periodic kernel at the optimum that is usually found (see
+  <NoteLink to="covariance-functions">covariance functions</NoteLink> and
+  <NoteLink to="gp-hyperparameter-learning">hyperparameter learning</NoteLink>).
+- **Evaluation with planted anomalies.** Precision in the top $n_a$ is measured by planting a known class as anomalies,
+  and training contamination lowers it (see <NoteLink to="evaluating-anomaly-detectors">evaluating anomaly detectors</NoteLink>).
+
+## Variations
+
+- **Unaligned phases.** If the epochs $t_0$ differ between stars, identical shapes differ by a cyclic shift and the
+  HGP scores them as anomalous. PCAD's phase search handles this case <Cite id="rebbapragada2009" />. With an HGP, the
+  curves must be aligned first, for example by cross-correlation with the current estimate of $g$.
+- **Irregular folded samples.** The HGP does not need a common grid. Each star can keep its own folded phases, at the
+  cost of an $N \times N$ covariance over all observations instead of the common-grid shortcut.
+- **Sub-classes.** A class with distinct sub-types, such as RR Lyrae stars pulsating in different modes, fits a deeper
+  hierarchy with one function per sub-type between the class function and the stars <Cite id="hensman2013hgp" />.
+- **Periodic kernel with more than one period.** A periodic kernel has more to gain when each series covers several
+  cycles, as in unfolded survey data.

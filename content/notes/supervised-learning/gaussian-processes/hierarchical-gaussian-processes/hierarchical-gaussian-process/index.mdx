@@ -1,0 +1,319 @@
+---
+title: Hierarchical Gaussian process
+kind: concept
+summary: A hierarchical Gaussian process models replicate curves as $f_i \mid g \sim \GP(g, k_f)$ around a shared function $g \sim \GP(0, k_g)$. Then $\cov[f_i(x), f_j(x')] = k_g(x, x') + \delta_{ij} k_f(x, x')$, so one ordinary GP on the stacked data fits every replicate and the shared curve.
+tags: [gaussian-process, bayesian, hierarchical-model, time-series, multi-output, shrinkage, worked-example]
+aliases: [HGP, hierarchical GP, hierarchical Gaussian processes, replicated Gaussian process, GP with replicates, multi-level Gaussian process]
+requires: [gaussian-process, covariance-functions]
+related: [hierarchical-models, gp-hyperparameter-learning, multivariate-normal-distribution, schur-complement, law-of-total-expectation, hierarchical-clustering]
+references: [hensman2013hgp, twomey2019, chen2018hgp, rasmussen2006, bonilla2008, alvarez2012, gelman2013]
+status: draft
+updated: 2026-09-27
+---
+
+import { HgpReplicates } from './HgpReplicates'
+
+<Definition>
+A hierarchical Gaussian process (HGP) models $n$ related functions $f_1, \dots, f_n$, called replicates, as
+deviations from one shared function $g$ <Cite id="hensman2013hgp" />:
+
+$$
+g \sim \GP\paren{0, k_g}, \qquad f_i \mid g \sim \GP\paren{g, k_f}, \quad i = 1, \dots, n.
+$$
+
+The covariance function $k_g$ sets the prior on the shared function and $k_f$ sets the prior on each replicate's
+deviation from it. Replicate $i$ is observed at inputs $x_{i1}, \dots, x_{iT_i}$ as
+$y_{it} = f_i(x_{it}) + \varepsilon_{it}$, with independent noise $\varepsilon_{it} \sim \Gauss(0, \tau^{-1})$ of
+precision $\tau$. The model is again a Gaussian process, indexed by the pair (replicate, input), with covariance
+$k_g(x, x') + \delta_{ij}\, k_f(x, x')$ between $f_i(x)$ and $f_j(x')$.
+</Definition>
+
+## Intuition
+
+Repeated measurements of one process rarely coincide. Gene expression time courses from several biological
+replicates follow one underlying profile, but each replicate is shifted and distorted a little
+<Cite id="hensman2013hgp" />. Light curves of stars of one type follow one prototypical shape, and each star departs
+from it through its own physical properties and the observing conditions <Cite id="twomey2019" />. Averaging the
+replicates discards the replicate-specific structure and needs every replicate sampled at the same inputs. Fitting
+each replicate alone wastes what the replicates share.
+
+An HGP does both at once. The shared function $g$ carries what all replicates have in common. Each $f_i$ is $g$
+plus a smooth deviation of its own. Data from every replicate inform $g$, and $g$ fills in each replicate wherever that
+replicate has few or no observations. The balance is set by the two kernel variances: $\sigma_g^2$, the variance of
+$g$, and $\sigma_f^2$, the variance of a replicate's deviation.
+
+<HgpReplicates />
+
+## The implied covariance
+
+The conditional statement $f_i \mid g \sim \GP(g, k_f)$ says that $h_i = f_i - g$ is a zero-mean Gaussian process with
+covariance $k_f$, independent of $g$ and of the other deviations. So each replicate is a sum of independent processes,
+
+$$
+f_i = g + h_i, \qquad g \sim \GP(0, k_g), \qquad h_i \sim \GP(0, k_f), \qquad g, h_1, \dots, h_n \text{ independent}.
+$$
+
+Every $f_i(x)$ is a linear combination of jointly Gaussian variables, so the collection $\set{f_i(x)}$ is jointly
+Gaussian with mean zero. Its covariance follows from bilinearity:
+
+$$
+\cov[f_i(x), f_j(x')] = \cov[g(x), g(x')] + \cov[g(x), h_j(x')] + \cov[h_i(x), g(x')] + \cov[h_i(x), h_j(x')].
+$$
+
+The two middle terms are zero because $g$ is independent of every deviation. The last term is $k_f(x, x')$ when
+$i = j$ and zero when $i \ne j$, because distinct deviations are independent. Therefore
+
+$$
+\cov[f_i(x), f_j(x')] = k_g(x, x') + \delta_{ij}\, k_f(x, x'),
+$$
+
+with $\delta_{ij} = 1$ when $i = j$ and $0$ otherwise. Two points on the same replicate covary through both
+kernels. Two points on different replicates covary only through the shared function. The same argument gives the
+covariances with the shared function itself:
+
+$$
+\cov[f_i(x), g(x')] = k_g(x, x'), \qquad \cov[g(x), g(x')] = k_g(x, x').
+$$
+
+## The stacked data
+
+Write $\xvec_i \in \reals^{T_i}$ and $\yvec_i \in \reals^{T_i}$ for the inputs and observations of replicate $i$, and
+stack them as $\hat{\xvec} = (\xvec_1, \dots, \xvec_n)$ and $\hat{\yvec} = (\yvec_1, \dots, \yvec_n)$, vectors of
+length $N = \sum_i T_i$. For two matrices of inputs write $\Kmat_g(\xvec_i, \xvec_j)$ for the $T_i \times T_j$ matrix
+with entries $k_g(x_{is}, x_{jt})$, and similarly $\Kmat_f$. Adding independent noise to the covariance above gives
+$\hat{\yvec} \sim \Gauss(\zeros, \Sigmamat)$, where the block of $\Sigmamat$ for replicates $i$ and $j$ is
+
+$$
+\Sigmamat_{[i, j]} =
+\begin{cases}
+\Kmat_g(\xvec_i, \xvec_i) + \Kmat_f(\xvec_i, \xvec_i) + \tau^{-1}\eye & i = j, \\
+\Kmat_g(\xvec_i, \xvec_j) & i \ne j.
+\end{cases}
+$$
+
+This is equation (8) of Hensman, Lawrence and Rattray <Cite id="hensman2013hgp" />. The diagonal blocks hold the
+within-replicate covariance and the off-diagonal blocks hold the covariance shared through $g$. The replicates may be
+observed at different inputs and in different numbers, since each block is evaluated at its own inputs. The log
+marginal likelihood is the usual Gaussian process expression with $\Sigmamat$ in place of the Gram matrix plus noise:
+
+$$
+\ln p(\hat{\yvec} \mid \hat{\xvec}, \thetavec) = -\tfrac12\, \hat{\yvec}^\top\Sigmamat^{-1}\hat{\yvec} - \tfrac12 \ln\abs{\Sigmamat} - \tfrac{N}{2}\ln 2\pi,
+$$
+
+where $\thetavec$ collects the hyperparameters of $k_g$, of $k_f$ and the noise precision $\tau$.
+
+## Posterior over the shared and replicate functions
+
+Prediction is Gaussian conditioning on $\hat{\yvec}$, exactly as in ordinary
+<NoteLink to="gaussian-process">Gaussian process regression</NoteLink>. Only the cross-covariances change. Let
+$\kvec_g(x_*) \in \reals^N$ have entries $k_g(\hat{x}_m, x_*)$. For the shared function,
+$\cov[\hat{\yvec}, g(x_*)] = \kvec_g(x_*)$, so
+
+$$
+\expect[g(x_*) \mid \hat{\yvec}] = \kvec_g(x_*)^\top\Sigmamat^{-1}\hat{\yvec}, \qquad
+\var[g(x_*) \mid \hat{\yvec}] = k_g(x_*, x_*) - \kvec_g(x_*)^\top\Sigmamat^{-1}\kvec_g(x_*).
+$$
+
+For replicate $j$, the cross-covariance adds $k_f$ on the rows that belong to replicate $j$:
+$\cvec_j(x_*) = \kvec_g(x_*) + \kvec_f^{(j)}(x_*)$, where $\kvec_f^{(j)}(x_*)$ has entries $k_f(\hat{x}_m, x_*)$ on
+replicate $j$'s rows and zeros elsewhere. Then
+
+$$
+\expect[f_j(x_*) \mid \hat{\yvec}] = \cvec_j(x_*)^\top\Sigmamat^{-1}\hat{\yvec}, \qquad
+\var[f_j(x_*) \mid \hat{\yvec}] = k_g(x_*, x_*) + k_f(x_*, x_*) - \cvec_j(x_*)^\top\Sigmamat^{-1}\cvec_j(x_*).
+$$
+
+One Cholesky factor of $\Sigmamat$ serves $g$ and all $n$ replicates.
+
+### Shrinkage toward the shared function
+
+The replicate posterior has a second form that shows how it borrows from the others. Condition first on $g$. Given
+$g$, the data of replicate $j$ are $\yvec_j - g(\xvec_j) = h_j(\xvec_j) + \varepsilonvec_j$, and the other replicates
+carry no information about $h_j$. Ordinary GP regression of $h_j$ on these residuals gives
+
+$$
+\expect[h_j(x_*) \mid \hat{\yvec}, g] = \kvec_f(x_*, \xvec_j)^\top\Amat_j^{-1}\paren{\yvec_j - g(\xvec_j)}, \qquad \Amat_j = \Kmat_f(\xvec_j, \xvec_j) + \tau^{-1}\eye.
+$$
+
+This is linear in $g$. Averaging over $g \mid \hat{\yvec}$ by the
+<NoteLink to="law-of-total-expectation">law of total expectation</NoteLink> replaces $g$ with its posterior mean
+$\hat g = \expect[g \mid \hat{\yvec}]$:
+
+$$
+\expect[f_j(x_*) \mid \hat{\yvec}] = \hat g(x_*) + \kvec_f(x_*, \xvec_j)^\top\Amat_j^{-1}\paren{\yvec_j - \hat g(\xvec_j)}.
+$$
+
+Each replicate's estimate is the shared estimate plus a GP smooth of that replicate's own residuals from it. Where
+replicate $j$ has no nearby observations, $\kvec_f(x_*, \xvec_j) \approx \zeros$ and the estimate equals $\hat g$.
+In the figure this happens on the right half of replicate 4.
+
+### Worked example
+
+Take $n = 3$ replicates, each observed once at the same input, with $y_1 = 1.0$, $y_2 = 1.4$, $y_3 = 0.4$. At one
+input the kernels reduce to their variances: $\sigma_g^2 = 1$, $\sigma_f^2 = 0.25$ and $\tau^{-1} = 0.25$. The
+covariance of $\yvec$ is $\sigma_g^2 \ones\ones^\top + (\sigma_f^2 + \tau^{-1})\eye$. Conditioning gives
+
+$$
+\hat g = \frac{n\sigma_g^2}{n\sigma_g^2 + \sigma_f^2 + \tau^{-1}}\, \bar y = \frac{3}{3.5} \times 0.9333 = 0.8000, \qquad
+\var[g \mid \yvec] = \frac{\sigma_g^2 (\sigma_f^2 + \tau^{-1})}{n\sigma_g^2 + \sigma_f^2 + \tau^{-1}} = \frac{0.5}{3.5} = 0.1429,
+$$
+
+where $\bar y = 0.9333$ is the mean of the three observations. With one input, $\kvec_f^\top\Amat_j^{-1}$ is the
+scalar $w = \sigma_f^2 / (\sigma_f^2 + \tau^{-1}) = 0.5$, so
+
+$$
+\hat f_j = (1 - w)\, \hat g + w\, y_j: \qquad \hat f_1 = 0.9, \quad \hat f_2 = 1.1, \quad \hat f_3 = 0.6.
+$$
+
+Each replicate moves halfway from its observation toward the shared estimate. A smaller deviation variance
+$\sigma_f^2$ moves it further. With $\sigma_f^2 = 0$ all three estimates equal $\hat g$.
+
+<Derivation title="Shrinkage by frequency when the kernels share a shape">
+Suppose all replicates are observed on a common grid $\xvec$ of $T$ inputs and both kernels share one correlation
+function $c$: $\Kmat_g = \sigma_g^2\Cmat$ and $\Kmat_f = \sigma_f^2\Cmat$, with eigendecomposition
+$\Cmat = \Umat\Lambdamat\Umat^\top$. The smoother in the shrinkage form is
+
+$$
+\Kmat_f\Amat_j^{-1} = \sigma_f^2\Cmat\paren{\sigma_f^2\Cmat + \tau^{-1}\eye}^{-1} = \Umat\, \diag\paren{\frac{\sigma_f^2\lambda_m}{\sigma_f^2\lambda_m + \tau^{-1}}}\Umat^\top.
+$$
+
+Along eigenvector $m$ of $\Cmat$ the replicate keeps a fraction $\sigma_f^2\lambda_m / (\sigma_f^2\lambda_m + \tau^{-1})$
+of its residual from $\hat g$ and gives the rest up to the shared estimate. For a smooth stationary kernel the large
+eigenvalues belong to slowly varying eigenvectors. A replicate therefore keeps its own slow departures from $g$ and
+is shrunk to $g$ in its fast, noise-dominated components. At one input $\Cmat = 1$ and the weight is the scalar $w$ of
+the worked example.
+</Derivation>
+
+## Parameters and cost
+
+An HGP with one kernel per level has the hyperparameters of two kernels and one noise precision. With squared
+exponential or Matérn kernels these are $\sigma_g$, $\ell_g$, $\sigma_f$, $\ell_f$ and $\tau$: five numbers, against
+three ($\sigma$, $\ell$, $\tau$) for a single Gaussian process. The count does not grow with the number of replicates,
+because every replicate shares $k_f$. The hyperparameters are set by maximising the log marginal likelihood with its
+analytic gradient, as for any Gaussian process (see
+<NoteLink to="gp-hyperparameter-learning">hyperparameter learning</NoteLink>), so no grid search is needed
+<Cite id="twomey2019" />.
+
+Hensman, Lawrence and Rattray describe the model as having "only a few additional parameters over a regular GP" and
+"negligible additional complexity" <Cite id="hensman2013hgp" />. The precise statement is this. Fitting an ordinary GP to
+the $N$ pooled observations needs the Cholesky factor of an $N \times N$ matrix, at $O(N^3)$ time and $O(N^2)$ memory.
+The HGP needs the Cholesky factor of $\Sigmamat$, which is also $N \times N$. Only the entries change: the diagonal
+blocks add one evaluation of $k_f$ per entry. Posterior inference and optimisation use the same code as a standard
+GP <Cite id="twomey2019" />. The HGP is more expensive than fitting $n$ separate GPs, one per replicate, which costs
+$O(\sum_i T_i^3)$, because it couples the replicates.
+
+<Derivation title="Replicates on a common grid: cost O(T³) instead of O((nT)³)">
+When all $n$ replicates are observed on the same $T$ inputs, $\Sigmamat = \ones\ones^\top \otimes \Kmat_g + \eye_n \otimes \Amat$,
+where $\otimes$ is the Kronecker product and $\Amat = \Kmat_f + \tau^{-1}\eye_T$. Let $\Qmat$ be an $n \times n$
+orthogonal matrix whose first column is $\ones/\sqrt{n}$. Then $\Qmat^\top\ones\ones^\top\Qmat = \diag(n, 0, \dots, 0)$
+and
+
+$$
+(\Qmat \otimes \eye)^\top\Sigmamat(\Qmat \otimes \eye) = \diag\paren{n\Kmat_g + \Amat,\ \Amat,\ \dots,\ \Amat}.
+$$
+
+The rotated data are $\sqrt{n}\,\bar{\yvec}$, with $\bar{\yvec} = \frac1n\sum_i \yvec_i$, and $n - 1$ contrasts whose total
+squared $\Amat^{-1}$-norm is $\sum_i \yvec_i^\top\Amat^{-1}\yvec_i - n\bar{\yvec}^\top\Amat^{-1}\bar{\yvec}$. Hence
+
+$$
+\ln\abs{\Sigmamat} = \ln\abs{n\Kmat_g + \Amat} + (n - 1)\ln\abs{\Amat},
+$$
+
+$$
+\hat{\yvec}^\top\Sigmamat^{-1}\hat{\yvec} = n\,\bar{\yvec}^\top\paren{n\Kmat_g + \Amat}^{-1}\bar{\yvec} + \sum_{i=1}^n \yvec_i^\top\Amat^{-1}\yvec_i - n\,\bar{\yvec}^\top\Amat^{-1}\bar{\yvec}.
+$$
+
+Two $T \times T$ factorisations replace one $nT \times nT$ factorisation. Only the first rotated component involves
+$g$, so the mean curve $\bar{\yvec}$ is sufficient for $g$:
+
+$$
+g(\xvec) \mid \hat{\yvec} \sim \Gauss\paren{\Kmat_g\paren{\Kmat_g + \Amat/n}^{-1}\bar{\yvec},\ \Kmat_g - \Kmat_g\paren{\Kmat_g + \Amat/n}^{-1}\Kmat_g}.
+$$
+
+Hensman et al. derive the analogous identity for a cluster of genes measured at common times, which reduces the cost
+from $O(N_i^3D^3)$ to $O(D^3)$ for $N_i$ genes on $D$ time points <Cite id="hensman2013hgp" />.
+</Derivation>
+
+## Deeper hierarchies
+
+The construction nests. Each level's mean is the function one level up, and each level adds its own kernel
+<Cite id="hensman2013hgp" />. For clusters of genes with replicates, cluster $c$ has a function $h_c$, gene $n$ in the
+cluster has $g_n$, and replicate $r$ of that gene has $f_{nr}$:
+
+$$
+h_c \sim \GP(0, k_h), \qquad g_n \mid h_c \sim \GP(h_c, k_g), \qquad f_{nr} \mid g_n \sim \GP(g_n, k_f).
+$$
+
+The same decomposition into independent pieces gives
+
+$$
+\cov[f_{nr}(x), f_{n'r'}(x')] = k_h(x, x') + \delta_{nn'}\, k_g(x, x') + \delta_{nn'}\delta_{rr'}\, k_f(x, x')
+$$
+
+for two replicates in one cluster. The covariance of a cluster's data is block-structured at two levels. Hensman et al.
+cluster genes by greedy agglomerative merging that maximises the summed log marginal likelihood of the clusters, and
+re-optimise the hyperparameters between rounds <Cite id="hensman2013hgp" />. Each extra level adds one kernel's
+hyperparameters.
+
+## Relation to multi-output Gaussian processes
+
+A multi-output Gaussian process models $n$ correlated functions jointly. The intrinsic coregionalisation model (ICM)
+takes $\cov[f_i(x), f_j(x')] = B_{ij}\, c(x, x')$, with one correlation function $c$ and a positive semi-definite
+$n \times n$ coregionalisation matrix $\Bmat$ <Cite id="bonilla2008" /> <Cite id="alvarez2012" />. The linear model of
+coregionalisation (LMC) is a sum of such terms, $\sum_q B^{(q)}_{ij}\, c_q(x, x')$.
+
+The HGP covariance is an LMC with two terms:
+
+$$
+k_g(x, x') + \delta_{ij}\, k_f(x, x') = [\ones\ones^\top]_{ij}\, k_g(x, x') + [\eye]_{ij}\, k_f(x, x').
+$$
+
+When the two kernels share one correlation function, $k_g = \sigma_g^2 c$ and $k_f = \sigma_f^2 c$, the two terms
+merge into a single ICM:
+
+$$
+\cov[f_i(x), f_j(x')] = \paren{\sigma_g^2 + \delta_{ij}\sigma_f^2}\, c(x, x') = B_{ij}\, c(x, x'), \qquad \Bmat = \sigma_g^2\ones\ones^\top + \sigma_f^2\eye.
+$$
+
+The matrix $\Bmat$ has eigenvalue $\sigma_f^2 + n\sigma_g^2$ on $\ones$ and eigenvalue $\sigma_f^2$ on the
+$(n-1)$-dimensional space orthogonal to $\ones$, so it is positive definite whenever $\sigma_f^2 > 0$. On a common
+grid the stacked covariance is the Kronecker product $\Bmat \otimes \Cmat$. Conversely, an ICM whose $\Bmat$ has equal
+diagonal entries $\sigma_g^2 + \sigma_f^2$ and equal off-diagonal entries $\sigma_g^2 \ge 0$ is an HGP with kernels of
+shared shape.
+
+The difference is in what is learned. A free-form $\Bmat$ has $n(n+1)/2$ parameters and a separate row for every
+output. The HGP ties $\Bmat$ to two numbers, so the replicates are exchangeable. Its parameter count does not grow with
+$n$, and a new replicate that was not in the training data has a known covariance with the others. This last property
+is what lets an HGP score a new time series against a fitted population, as in
+<NoteLink to="hgp-anomaly-detection">HGP anomaly detection</NoteLink>.
+
+## Relation to hierarchical models in statistics
+
+At a single input the HGP is the normal random-effects model of
+<NoteLink to="hierarchical-models">hierarchical Bayesian statistics</NoteLink>: group values $f_i$ are drawn around a
+population value $g$ with variance $\sigma_f^2$, and each is observed with noise $\tau^{-1}$. The worked example above is
+partial pooling. Each estimate lies between the replicate's own observation (no pooling, $\sigma_f^2 \to \infty$) and
+the shared estimate (complete pooling, $\sigma_f^2 = 0$) <Cite id="gelman2013" />. The HGP extends this from scalars to
+functions. The pooling weight becomes the smoother $\Kmat_f\Amat_j^{-1}$, which pools by input location and, for a
+shared kernel shape, by frequency.
+
+## Assumptions
+
+- **Exchangeable replicates.** Every replicate deviates from $g$ with the same kernel $k_f$. Replicates of different
+  quality or scale need their own variances, or another level in the hierarchy.
+- **Additive, aligned deviations.** A replicate differs from $g$ by an additive function of the same input. A
+  replicate that is a time-shifted or time-warped copy of $g$ is not in the model and needs many deviation
+  components to be represented.
+- **Gaussian noise.** As in ordinary GP regression, the closed form needs a Gaussian likelihood.
+
+## Pitfalls
+
+- **Identifiability of the variance split.** With few replicates the marginal likelihood cannot separate $\sigma_g^2$
+  from $\sigma_f^2$ well, and length-scales that are similar at the two levels trade off against each other. Report
+  the fitted split with caution. Restart the optimiser from several initial values.
+- **Cubic cost in the total number of points.** Stacking $n$ replicates of length $T$ gives an $nT \times nT$ matrix.
+  Exploit a common grid (derivation above) or use
+  <NoteLink to="sparse-gaussian-processes">sparse approximations</NoteLink> for large collections.
+- **Shared function is not the mean curve.** $\hat g$ shrinks the average $\bar{\yvec}$ toward the prior mean zero by
+  a factor near $n\sigma_g^2 / (n\sigma_g^2 + \sigma_f^2 + \tau^{-1})$. Centre the data, or add a mean function, when
+  the curves share a large offset.
