@@ -111,6 +111,7 @@ export function PerceptronTraining() {
             min={0}
             max={Math.max(updates, 1)}
             step={1}
+            withArrows
           />
           <div className="flex items-end">
             <ParamButton
