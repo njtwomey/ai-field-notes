@@ -1,0 +1,144 @@
+---
+title: Local outlier factor
+kind: concept
+summary: 'The local outlier factor (LOF) divides the mean local density of a point''s $k$ nearest neighbours by the point''s own local density. It is about 1 inside a cluster of any density and well above 1 for a point sparser than its neighbours.'
+tags: [anomaly-detection, nearest-neighbours, nonparametric, worked-example]
+aliases: [LOF, local reachability density, reachability distance, lrd, local outliers]
+requires: [k-nearest-neighbour-anomaly-score]
+partOf: [anomaly-detection]
+related: [k-nearest-neighbours, nearest-neighbour-search, isolation-forest]
+references: [breunig2000, schubert2012]
+status: draft
+updated: 2026-09-27
+---
+
+import { LocalDensityFigure } from '../_shared/LocalDensityFigure'
+
+<Definition>
+The local outlier factor of Breunig, Kriegel, Ng and Sander <Cite id="breunig2000" /> scores a point $\xvec$ by the ratio
+of its neighbours' local density to its own. The local density is the inverse of the mean reachability distance from
+$\xvec$ to its $k$ nearest neighbours. A LOF near 1 means $\xvec$ is as dense as its neighbourhood; a LOF well above 1
+means $\xvec$ is sparser than its neighbourhood and is a local outlier.
+</Definition>
+
+## Intuition
+
+A global score such as the <NoteLink to="k-nearest-neighbour-anomaly-score">k-NN distance</NoteLink> compares every
+point with one scale. Data often contain clusters of different density. A point one unit from a tight cluster whose
+points are a tenth of a unit apart is anomalous. A point one unit from its neighbours in a diffuse cluster whose points
+are all a unit apart is normal. The k-NN distance cannot tell these apart.
+
+LOF compares a point with its own neighbourhood. It asks how much sparser the point is than the points next to it.
+The answer does not depend on how dense the neighbourhood is in absolute terms.
+
+## Definitions
+
+Fix $k$ and a distance $\delta$. Let $\Dcal$ be the data.
+
+1. The **k-distance** of a point $\ovec$, written $\kappa(\ovec)$, is its distance to its $k$-th nearest neighbour.
+2. The **k-neighbourhood** $N_k(\xvec)$ is the set of points within distance $\kappa(\xvec)$ of $\xvec$, excluding
+   $\xvec$. It has $k$ members, or more when distances tie.
+3. The **reachability distance** of $\xvec$ from a neighbour $\ovec$ is
+   $$
+   \text{rd}(\xvec, \ovec) = \max\paren{\kappa(\ovec),\ \delta(\xvec, \ovec)}.
+   $$
+4. The **local reachability density** is the inverse mean reachability distance to the neighbours,
+   $$
+   \text{lrd}(\xvec) = \LB \frac{1}{\abs{N_k(\xvec)}} \sum_{\ovec \in N_k(\xvec)} \text{rd}(\xvec, \ovec) \RB^{-1}.
+   $$
+5. The **local outlier factor** is the mean ratio of the neighbours' density to the point's own:
+   $$
+   \text{LOF}(\xvec) = \frac{1}{\abs{N_k(\xvec)}} \sum_{\ovec \in N_k(\xvec)} \frac{\text{lrd}(\ovec)}{\text{lrd}(\xvec)}.
+   $$
+
+### Why the reachability distance
+
+The reachability distance replaces a small distance by the neighbour's k-distance. All points closer to $\ovec$ than
+$\kappa(\ovec)$ are treated as if they were exactly $\kappa(\ovec)$ away. Inside a cluster, the distance between two
+close points fluctuates a lot from pair to pair. Clamping it at $\kappa(\ovec)$ removes that fluctuation, so points
+deep in one cluster get nearly equal densities. For a point far from $\ovec$, the reachability distance is the ordinary
+distance, so outliers are unaffected. The asymmetry, using $\kappa(\ovec)$ and not $\kappa(\xvec)$, is deliberate: the
+neighbour's scale sets the floor.
+
+### Why LOF is close to 1 inside any cluster
+
+LOF is a ratio of densities, so it does not change when all distances are multiplied by a constant $c > 0$. Every
+k-distance and every reachability distance is multiplied by $c$, every lrd is divided by $c$, and each ratio
+$\text{lrd}(\ovec)/\text{lrd}(\xvec)$ is unchanged. A diffuse cluster that is a scaled copy of a tight cluster has the
+same LOF values.
+
+Deep inside a cluster where the density is roughly constant, a point and its neighbours have neighbourhoods of the same
+size, so their lrd values are about equal and the ratio is about 1. Breunig and colleagues proved bounds of this kind:
+for a point deep in a cluster, LOF lies between $1/(1 + \varepsilon)$ and $1 + \varepsilon$, where $\varepsilon$
+measures the variation of reachability distances within the cluster <Cite id="breunig2000" />. A point sparser than its
+neighbours has a smaller lrd than they do, so the ratio exceeds 1.
+
+## Worked example
+
+Take nine points on a line, with absolute difference as the distance and $k = 2$:
+
+- a tight cluster $A = \set{0, 0.1, 0.2, 0.3}$,
+- a diffuse cluster $B = \set{5, 6, 7, 8}$,
+- a point $x = 1.0$ just outside $A$.
+
+$B$ is $A$ multiplied by 10 and shifted by 5, so the two clusters differ only in scale.
+
+**k-distances.** In $A$, the end points $0$ and $0.3$ have $\kappa = 0.2$ and the interior points $\kappa = 0.1$. In
+$B$, the values are ten times larger: $2$ and $1$. The point $x$ has neighbours $0.3$ and $0.2$, so $\kappa(x) = 0.8$.
+The k-NN score ranks $5$ and $8$ (score $2$) above $x$ (score $0.8$).
+
+**Densities.** For the point $0$, the neighbours are $0.1$ and $0.2$, each with $\kappa = 0.1$. The reachability
+distances are $\max(0.1, 0.1) = 0.1$ and $\max(0.1, 0.2) = 0.2$, with mean $0.15$, so $\text{lrd}(0) = 6.67$. Every
+point in $A$ gets $6.67$. By the scaling argument, every point in $B$ gets $0.667$. For $x$, the reachability
+distances are $\max(\kappa(0.3), 0.7) = \max(0.2, 0.7) = 0.7$ and $\max(\kappa(0.2), 0.8) = \max(0.1, 0.8) = 0.8$, with
+mean $0.75$, so $\text{lrd}(x) = 1.33$.
+
+**LOF.** Each point in $A$ has neighbours in $A$ with the same lrd, so its LOF is exactly $1$. The same holds in $B$.
+The neighbours of $x$ both have lrd $6.67$, so
+
+$$
+\text{LOF}(x) = \frac{6.67}{1.33} = 5.
+$$
+
+LOF ranks $x$ first. Every other point gets a LOF of $1$, whatever the density of its cluster.
+
+## Local against global scores
+
+<LocalDensityFigure initialScore="lof" />
+
+The figure plants two anomalies just outside a tight cluster and one far from everything. Under LOF, all three are the
+top-scored points for every $k$ from 3 to 30. Under the k-NN distance, the fringe of the diffuse cluster outranks the
+two local anomalies. The LOF shading is near 1 over both clusters and rises only around the tight cluster's edge and
+far from all data.
+
+## Choosing k
+
+$k$ sets the size of the neighbourhood that counts as local. Breunig and colleagues recommend $k$ of at least 10 to
+avoid unstable densities, and at most the size of the smallest group of points that should count as a cluster rather
+than as outliers. They suggest computing LOF over a range of $k$ and keeping each point's maximum
+<Cite id="breunig2000" />.
+
+## Cost
+
+LOF needs the $k$ nearest neighbours of every point. Brute force costs $O(n^2 p)$ time. Spatial indices reduce this in
+low dimension. The lrd of every point must be computed before any LOF, so scoring a new point requires the stored
+k-distances and lrd values of the training data.
+
+## Assumptions
+
+- **Density varies slowly within a cluster.** LOF compares a point with its neighbours. If density changes sharply
+  inside a cluster, the points where it changes get LOF values above 1.
+- **Neighbours are meaningful.** As with any nearest-neighbour method, distances must be informative. In high
+  dimension neighbourhoods become unstable.
+
+## Pitfalls
+
+- **No universal threshold.** LOF is a ratio without a reference distribution. A value of 1.5 can be a clear outlier
+  in one data set and a normal fluctuation in another. Rank by LOF, or calibrate a threshold on held-out data.
+- **Duplicates.** When more than $k$ points coincide, their k-distance is zero and their lrd is infinite. Implementations
+  either deduplicate or add a small constant.
+- **Border points.** Points on the boundary between a dense and a sparse cluster have neighbours in both and can get
+  LOF values above 1 without being anomalous.
+- **Many variants.** Connectivity-based, probabilistic and influence-based variants change how the neighbourhood and the
+  reference set are chosen. Schubert, Zimek and Kriegel show that they share the same pattern: a local model of each
+  point and a comparison with a reference set <Cite id="schubert2012" />.

@@ -1,0 +1,115 @@
+---
+title: Anomaly detector ensembles
+kind: technique
+summary: 'An anomaly detector ensemble combines the scores of several base detectors that differ in algorithm, parameters, feature subset or subsample. Scores are normalised to a common scale, then averaged, maximised or combined by rank. Averaging reduces score variance.'
+tags: [anomaly-detection, ensembles, worked-example]
+aliases: [outlier ensembles, feature bagging for outlier detection, score normalisation, score combination, average of maximum, AOM]
+requires: [anomaly-detection]
+partOf: [anomaly-detection]
+related: [isolation-forest, local-outlier-factor, bagging, random-forest]
+references: [lazarevic2005, aggarwal2015, aggarwal2017, kriegel2011, zimek2014]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+An anomaly detector ensemble runs $B$ base detectors on the same data, converts each detector's scores to a common
+scale, and combines them into one score per point. The base detectors differ in algorithm, hyperparameters, feature
+subset or training subsample. Common combination rules are the mean, the maximum and the mean rank.
+</Definition>
+
+## Problem
+
+Unsupervised anomaly detection has no labels for choosing a detector or tuning it. The choice of $k$ in a
+<NoteLink to="local-outlier-factor" />, the kernel width of a <NoteLink to="one-class-svm" /> or the features used
+can change the ranking completely, and no validation set says which setting is right. The ranking of detectors also
+changes from one data set to another. An ensemble hedges against a poor choice by combining many reasonable ones.
+
+## Mechanism
+
+### Why averaging helps
+
+Aggarwal and Sathe treat an anomaly score as an estimate of an unknown ideal score and split its error into bias and
+variance <Cite id="aggarwal2015" />. Randomised base detectors, such as detectors fitted to random subsamples or random
+feature subsets, have variance from the randomisation. Averaging reduces it.
+
+Let the $B$ base scores of a point be random variables $S_1, \dots, S_B$ with common variance $\sigma^2$ and common
+pairwise correlation $\rho$. The variance of their mean is
+
+$$
+\var\paren{\frac{1}{B}\sum_{b=1}^{B} S_b} = \frac{1}{B^2}\LB B\sigma^2 + B(B - 1)\rho\sigma^2 \RB
+= \rho\sigma^2 + \frac{(1 - \rho)\,\sigma^2}{B}.
+$$
+
+The first term does not shrink with $B$. Diverse base detectors, with low $\rho$, gain the most. With $\rho = 0.3$ and
+$B = 10$ the variance falls to $0.37\sigma^2$; with $B = 100$ it falls only to $0.307\sigma^2$. The same formula explains
+why a <NoteLink to="random-forest" /> decorrelates its trees.
+
+The <NoteLink to="isolation-forest" /> is an ensemble of this kind. One isolation tree is a very noisy detector; the
+average over a hundred trees is a stable one.
+
+### Feature bagging
+
+Lazarevic and Kumar introduced feature bagging for outlier detection <Cite id="lazarevic2005" />. In each of $B$
+rounds, draw a number $d'$ uniformly between $\lfloor d/2 \rfloor$ and $d - 1$, pick $d'$ of the $d$ features at
+random, and run LOF on those features only. Combine the $B$ score vectors by their sum, or by interleaving the rankings
+of the rounds.
+
+Random feature subsets help in two ways. They lower the correlation between rounds. They also give rounds in which
+irrelevant features are absent, so anomalies visible in a few features are not drowned by noise in the others.
+
+### Normalising scores
+
+Base scores are rarely on one scale. A k-NN distance is in the units of the data. LOF is a ratio near 1. An isolation
+forest score lies in $(0, 1)$. Averaging raw scores lets the detector with the largest range dominate. Kriegel and
+colleagues proposed two steps <Cite id="kriegel2011" />:
+
+1. **Regularise.** Transform each score so that 0 means normal and larger means more anomalous. For a ratio score such
+   as LOF, use $\max(0, \text{LOF} - 1)$ or its logarithm. For a score that decreases with abnormality, negate it.
+2. **Normalise.** Map each detector's scores to $[0, 1]$. Gaussian scaling uses the detector's mean $\mu$ and standard
+   deviation $\sigma$ over the data: $\max\paren{0,\ \operatorname{erf}\paren{(s - \mu)/(\sigma\sqrt{2})}}$.
+
+Simpler options are z-scores and ranks. Min-max scaling is fragile here: the maximum is usually the most anomalous
+point, so one extreme score compresses all the others.
+
+### Combining scores
+
+- **Mean.** Reduces variance. A point that only one detector finds gets its high score divided by $B$.
+- **Maximum.** Keeps a point that any detector finds, but adds the false alarms of every detector.
+- **Average of maximum (AOM).** Split the detectors into groups, take the maximum within each group and average the
+  maxima. It trades between the two <Cite id="aggarwal2015" />.
+
+## Worked example
+
+Two detectors score six points. Detector A sees an anomaly at point 4; detector B, using other features, sees one at
+point 5.
+
+| point               | 1     | 2     | 3     | 4        | 5        | 6     |
+| ------------------- | ----- | ----- | ----- | -------- | -------- | ----- |
+| A (distance)        | 0.5   | 0.6   | 0.4   | **3.0**  | 0.7      | 0.5   |
+| B (ratio)           | 1.0   | 1.1   | 0.9   | 1.3      | **2.5**  | 1.0   |
+| raw mean            | 0.75  | 0.85  | 0.65  | 2.15     | 1.60     | 0.75  |
+| z-score A           | −0.49 | −0.38 | −0.60 | 2.22     | −0.27    | −0.49 |
+| z-score B           | −0.54 | −0.36 | −0.73 | 0.00     | 2.18     | −0.54 |
+| mean of z-scores    | −0.52 | −0.37 | −0.66 | 1.11     | 0.95     | −0.52 |
+| max of z-scores     | −0.49 | −0.36 | −0.60 | 2.22     | 2.18     | −0.49 |
+
+The z-scores use each detector's mean and population standard deviation over the six points. After normalisation,
+both detectors contribute equally. The mean ranks points 4 and 5 first but halves their margin over the rest. The
+maximum keeps both at the level each detector gave them.
+
+## Cost
+
+An ensemble of $B$ detectors costs $B$ times one detector. Subsampling each base detector, as the isolation forest
+does, makes the total cost of $B$ detectors on subsamples of size $\psi$ comparable to one detector on all $n$ points
+when $B\psi \approx n$.
+
+## Trade-offs
+
+- **Diversity against accuracy.** Diversity lowers the correlation term, but a base detector that is worse than random
+  adds bias. With no labels, there is no direct check on base accuracy. Zimek, Campello and Sander discuss this as the
+  central open problem of unsupervised ensembles <Cite id="zimek2014" />.
+- **Mean against maximum.** The mean suits detectors that find the same anomalies with independent noise. The maximum
+  suits detectors that find different anomalies, such as detectors on different feature subsets.
+- **Interpretability.** A combined score cannot say which feature or which detector found the anomaly unless the base
+  scores are kept.

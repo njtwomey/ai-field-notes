@@ -1,0 +1,143 @@
+---
+title: PCA reconstruction error
+kind: concept
+summary: 'PCA splits an observation into a projection onto the top $k$ principal components and a residual. Hotelling''s $T^2 = \sum_{j \le k} t_j^2/\lambda_j$ flags unusual values inside the subspace; the $Q$ statistic, the squared residual $\norm{\xvec - \hat{\xvec}}^2$, flags points that break the correlation structure.'
+tags: [anomaly-detection, linear-algebra, process-monitoring, worked-example]
+aliases: [Q statistic, squared prediction error, SPE, Hotelling T-squared, PCA anomaly detection, PCA residual, Jackson–Mudholkar limit]
+requires: [principal-component-analysis]
+partOf: [anomaly-detection]
+related: [mahalanobis-distance-outliers, autoencoder-anomaly-detection, chi-squared-distribution]
+references: [jackson1979, box1954, macgregor1995, tracy1992, hubert2005]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Fit PCA to normal data with mean $\muvec$, covariance eigenvalues $\lambda_1 \ge \dots \ge \lambda_p$ and unit
+eigenvectors $\vvec_1, \dots, \vvec_p$, and keep the first $k$ components. For an observation $\xvec$ with scores
+$t_j = \vvec_j^\top(\xvec - \muvec)$, two statistics are computed:
+
+$$
+T^2 = \sum_{j=1}^{k} \frac{t_j^2}{\lambda_j}, \qquad Q = \norm{\xvec - \hat{\xvec}}^2 = \sum_{j=k+1}^{p} t_j^2,
+$$
+
+where $\hat{\xvec} = \muvec + \sum_{j \le k} t_j \vvec_j$ is the reconstruction from $k$ components. A large $T^2$ or a
+large $Q$ flags an anomaly.
+</Definition>
+
+## Intuition
+
+Many monitored systems produce many correlated measurements: temperatures along a pipe, sensors on an engine, pixels of
+an image. The normal data then lie close to a subspace of much lower dimension, which PCA finds. An observation can be
+unusual in two different ways.
+
+- **Unusual within the subspace.** The measurements keep their normal relationships but take extreme values, such as
+  every temperature being high together. $T^2$ measures this. It is the
+  <NoteLink to="mahalanobis-distance-outliers">Mahalanobis distance</NoteLink> computed within the subspace.
+- **Off the subspace.** The measurements break their normal relationships, such as one sensor disagreeing with the
+  rest. The reconstruction from $k$ components cannot reproduce such a point, and $Q$ measures the error.
+
+The two statistics answer different questions and are monitored together <Cite id="macgregor1995" />.
+
+## How the two statistics split the distance
+
+Because the eigenvectors form an orthonormal basis, the squared Mahalanobis distance separates by component:
+
+$$
+d^2(\xvec) = (\xvec - \muvec)^\top \Sigmamat^{-1} (\xvec - \muvec) = \sum_{j=1}^{p} \frac{t_j^2}{\lambda_j}
+= T^2 + \sum_{j=k+1}^{p} \frac{t_j^2}{\lambda_j}.
+$$
+
+$T^2$ is the first $k$ terms. The residual terms divide by the small eigenvalues $\lambda_j$, $j > k$, which are poorly
+estimated and dominated by noise. $Q$ sums the residual scores without that division. It stays stable when the small
+eigenvalues are close to zero, and it can be computed without inverting anything.
+
+## Worked example
+
+Two measurements have covariance with eigenvalue $\lambda_1 = 4$ along $\vvec_1 = (1, 1)/\sqrt{2}$ and $\lambda_2 = 0.25$
+along $\vvec_2 = (1, -1)/\sqrt{2}$, mean zero, and $k = 1$ component kept.
+
+| point          | $t_1$ | $t_2$ | $T^2 = t_1^2/4$ | $Q = t_2^2$ | Euclidean distance |
+| -------------- | ----- | ----- | --------------- | ----------- | ------------------ |
+| $(3, 3)$       | 4.24  | 0     | 4.5             | 0           | 4.24               |
+| $(0.5, -0.5)$  | 0     | 0.71  | 0               | 0.5         | 0.71               |
+| $(1, -1)$      | 0     | 1.41  | 0               | 2.0         | 1.41               |
+
+If the normal data are Gaussian, $T^2 \sim \ChiSq(1)$ and $Q/\lambda_2 \sim \ChiSq(1)$. At a false-alarm rate of 1% the
+limits are $T^2 = 6.63$ and $Q = 0.25 \times 6.63 = 1.66$. The point $(3, 3)$ is far out along the normal direction of
+variation and passes both tests. The point $(1, -1)$ is closer to the mean in Euclidean distance, but it breaks the
+correlation between the two measurements and exceeds the $Q$ limit.
+
+## Control limits for Q
+
+Under Gaussian normal data with known parameters, $t_j/\sqrt{\lambda_j}$ are independent standard normals, so
+
+$$
+Q = \sum_{j > k} \lambda_j z_j^2, \qquad z_j \iid \Gauss(0, 1),
+$$
+
+a weighted sum of $\ChiSq(1)$ variables. Its distribution has no closed form, but its moments do. Write
+$\theta_r = \sum_{j > k} \lambda_j^r$. Each $z_j^2$ has mean 1 and variance 2, so
+
+$$
+\expect[Q] = \theta_1, \qquad \var(Q) = 2\theta_2.
+$$
+
+**Box's approximation.** Approximate $Q$ by $g\,\chi^2_h$, a scaled chi-square with $h$ degrees of freedom
+<Cite id="box1954" />. Matching the mean gives $g h = \theta_1$ and matching the variance gives $2g^2 h = 2\theta_2$.
+Dividing the second by the first gives
+
+$$
+g = \frac{\theta_2}{\theta_1}, \qquad h = \frac{\theta_1^2}{\theta_2},
+$$
+
+and the limit at false-alarm rate $\alpha$ is $Q_\alpha = g\,\chi^2_{h,\,1-\alpha}$.
+
+**Jackson and Mudholkar's limit.** Jackson and Mudholkar used a normal approximation to a power transformation of
+$Q$ <Cite id="jackson1979" />. With $h_0 = 1 - 2\theta_1\theta_3/(3\theta_2^2)$ and the standard normal quantile
+$c_\alpha$,
+
+$$
+Q_\alpha = \theta_1 \LB \frac{c_\alpha\sqrt{2\theta_2 h_0^2}}{\theta_1} + 1 + \frac{\theta_2 h_0 (h_0 - 1)}{\theta_1^2} \RB^{1/h_0}.
+$$
+
+**Example.** For discarded eigenvalues $(0.5, 0.3, 0.2)$, $\theta_1 = 1$, $\theta_2 = 0.38$, $g = 0.38$ and
+$h = 2.63$. At $\alpha = 0.01$ Box's limit is $4.02$ and Jackson and Mudholkar's is $4.22$. The true 99th percentile,
+from $2 \times 10^6$ simulated draws, is $4.11$.
+
+## Control limits for T²
+
+With known parameters, $T^2 \sim \ChiSq(k)$ by the whitening argument for the Mahalanobis distance. When the mean and
+covariance are estimated from $n$ normal observations, a new observation has
+
+$$
+T^2 \sim \frac{k(n - 1)(n + 1)}{n(n - k)}\,F_{k,\,n-k},
+$$
+
+which is wider than $\ChiSq(k)$ for small $n$ and approaches it as $n$ grows <Cite id="tracy1992" />.
+
+## Choosing the number of components
+
+$k$ decides what counts as normal variation. Too few components push normal variation into the residual and inflate
+$Q$ for normal points. Too many absorb anomalous directions into the subspace, where the $T^2$ term divides them by
+small eigenvalues. Common rules keep enough components to explain a fixed share of the variance, or choose $k$ by
+cross-validated reconstruction error on normal data.
+
+## Assumptions
+
+- **Linear structure.** Normal data lie near a linear subspace. Curved structure needs a nonlinear reconstruction,
+  such as an <NoteLink to="autoencoder-anomaly-detection">autoencoder</NoteLink>. A linear autoencoder trained with
+  squared error recovers the PCA subspace.
+- **Gaussian scores, for the limits.** The $\ChiSq$ and $F$ limits assume Gaussian data. Otherwise use empirical
+  quantiles of $T^2$ and $Q$ on held-out normal data.
+- **Stationary operation.** Process monitoring assumes that the normal correlation structure does not drift.
+
+## Pitfalls
+
+- **Outliers in the training data.** Classical PCA is as sensitive to outliers as the sample covariance. A few
+  anomalies can rotate a component toward themselves, after which they have small $Q$. Robust PCA methods such as
+  ROBPCA fit the subspace to the clean core of the data <Cite id="hubert2005" />.
+- **Scaling.** PCA on raw measurements is dominated by the variables with the largest variance. Standardise variables
+  unless their units are comparable.
+- **Finding the cause.** A large $Q$ says that the correlation structure broke, not where. Contribution plots, which
+  show each variable's share of $\norm{\xvec - \hat{\xvec}}^2$, point to the variables involved.

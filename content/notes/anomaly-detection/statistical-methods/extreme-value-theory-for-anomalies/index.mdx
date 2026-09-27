@@ -1,0 +1,165 @@
+---
+title: Extreme value theory for anomaly thresholds
+kind: concept
+summary: 'Extreme value theory models only the tail of a score distribution. Excesses over a high threshold $t$ follow a generalised Pareto distribution, so the score exceeded with small probability $q$ is $z_q = t + \frac{\sigma}{\xi}\paren{(qn/N_t)^{-\xi} - 1}$, even beyond the observed data.'
+tags: [anomaly-detection, extreme-value-theory, distributions, worked-example]
+aliases: [EVT, peaks over threshold, POT, generalised Pareto distribution, GPD, generalized extreme value distribution, GEV, block maxima, SPOT, DSPOT, Pickands–Balkema–de Haan theorem, Fisher–Tippett–Gnedenko theorem]
+requires: [gaussian-distribution]
+partOf: [anomaly-detection]
+related: [z-score-and-robust-outlier-detection, forecast-residual-anomaly-detection, student-t-distribution]
+references: [coles2001, fisher1928, gnedenko1943, pickands1975, balkema1974, siffer2017]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Extreme value theory (EVT) describes the distribution of the largest values of a random variable without assuming the
+form of the whole distribution. Two limit theorems give its models. Maxima of large blocks follow a generalised extreme
+value (GEV) distribution. Excesses over a high threshold follow a generalised Pareto distribution (GPD). In anomaly
+detection, a GPD fitted to the largest anomaly scores gives the score threshold for a chosen false-alarm probability
+$q$.
+</Definition>
+
+## Intuition
+
+A threshold for a false-alarm rate of $10^{-4}$ is the $1 - 10^{-4}$ quantile of the score of normal data. Two direct
+estimates fail. A Gaussian model of the score gets the tail wrong when the score is skewed or heavy-tailed, and the
+error grows the further into the tail it extrapolates. The empirical quantile needs many more than $10^4$ observations
+to be stable, and it cannot go beyond the largest value observed.
+
+EVT uses the observations that carry information about the tail, the largest ones, and fits a model whose form is
+justified by a limit theorem. Only the tail's shape and scale are estimated, not the whole distribution.
+
+## Block maxima and the GEV distribution
+
+Let $M_n = \max(X_1, \dots, X_n)$ for independent draws from a distribution function $F$. If constants $a_n > 0$ and
+$b_n$ exist such that $(M_n - b_n)/a_n$ converges in distribution to a non-degenerate limit $G$, then $G$ is a GEV
+distribution <Cite id="fisher1928" /> <Cite id="gnedenko1943" />:
+
+$$
+G(z) = \exp\LB -\paren{1 + \xi\,\frac{z - \mu}{\sigma}}^{-1/\xi} \RB, \qquad 1 + \xi\,\frac{z - \mu}{\sigma} > 0,
+$$
+
+with location $\mu$, scale $\sigma > 0$ and shape $\xi$. The shape sets the tail type.
+
+- $\xi = 0$, read as the limit $G(z) = \exp\paren{-e^{-(z - \mu)/\sigma}}$, is the Gumbel type. It is the limit for
+  distributions with exponentially decaying tails, such as the Gaussian and the exponential.
+- $\xi > 0$ is the Fréchet type, for tails that decay as a power, such as Student's $t$ with $\nu$ degrees of freedom,
+  for which $\xi = 1/\nu$.
+- $\xi < 0$ is the reversed Weibull type, for distributions with a finite upper end point, such as the uniform.
+
+Fitting a GEV to the maxima of fixed blocks, such as daily maxima, discards every observation that is not a block
+maximum. The peaks-over-threshold approach uses the data more efficiently.
+
+## Peaks over threshold and the GPD
+
+Fix a high threshold $t$ and consider the excess $Y = X - t$ given $X > t$. The Pickands–Balkema–de Haan theorem
+<Cite id="pickands1975" /> <Cite id="balkema1974" /> states that, for every $F$ whose maxima have a GEV limit, the
+excess distribution approaches a generalised Pareto distribution as $t$ approaches the upper end of $F$:
+
+$$
+\prob(X - t > y \mid X > t) \approx \paren{1 + \frac{\xi y}{\sigma_t}}^{-1/\xi}, \qquad y > 0,
+$$
+
+with the same shape $\xi$ as the GEV and a scale $\sigma_t$ that depends on $t$. For $\xi = 0$ the right side is
+$e^{-y/\sigma_t}$: excesses over a high threshold are exponential.
+
+<Derivation title="Why excesses are generalised Pareto">
+This is the heuristic argument in Coles <Cite id="coles2001" />. Suppose $F^n(z) \approx G(z)$ for large $n$, with $G$ a
+GEV distribution. Taking logarithms, $n \log F(z) \approx -\paren{1 + \xi (z - \mu)/\sigma}^{-1/\xi}$. For large $z$,
+$F(z)$ is close to 1, so $\log F(z) \approx -(1 - F(z))$ and
+
+$$
+1 - F(z) \approx \frac{1}{n}\paren{1 + \xi\,\frac{z - \mu}{\sigma}}^{-1/\xi}.
+$$
+
+Apply this at $z = t + y$ and at $z = t$, and divide:
+
+$$
+\prob(X > t + y \mid X > t) = \frac{1 - F(t + y)}{1 - F(t)}
+\approx \LB \frac{1 + \xi (t + y - \mu)/\sigma}{1 + \xi (t - \mu)/\sigma} \RB^{-1/\xi}
+= \paren{1 + \frac{\xi y}{\sigma_t}}^{-1/\xi},
+$$
+
+with $\sigma_t = \sigma + \xi (t - \mu)$.
+</Derivation>
+
+## Setting a threshold from the tail model
+
+Let $n$ be the number of observations and $N_t$ the number that exceed $t$. The probability of exceeding $t$ is
+estimated by $N_t/n$. For $z > t$, split the event $X > z$ into exceeding $t$, then exceeding $z$ given $t$:
+
+$$
+\prob(X > z) = \prob(X > t)\,\prob(X > z \mid X > t) \approx \frac{N_t}{n}\paren{1 + \frac{\xi (z - t)}{\sigma}}^{-1/\xi},
+$$
+
+writing $\sigma$ for $\sigma_t$. Setting this equal to the target false-alarm probability $q$ and solving for $z$:
+
+$$
+\paren{1 + \frac{\xi (z_q - t)}{\sigma}}^{-1/\xi} = \frac{q n}{N_t}
+\quad\Longrightarrow\quad
+z_q = t + \frac{\sigma}{\xi}\LB \paren{\frac{q n}{N_t}}^{-\xi} - 1 \RB.
+$$
+
+As $\xi \to 0$ the bracket divided by $\xi$ tends to $-\log(qn/N_t)$, so $z_q = t - \sigma \log(qn/N_t)$, the quantile
+of an exponential tail. In practice $\xi$ and $\sigma$ are fitted by maximum likelihood to the $N_t$ excesses. $t$ is a
+moderately high empirical quantile, such as the 98th percentile, which leaves enough excesses for the fit.
+
+## Streaming thresholds: SPOT and DSPOT
+
+Siffer and colleagues turned this procedure into a streaming detector, SPOT <Cite id="siffer2017" />. A calibration
+batch sets $t$ as an empirical quantile and fits the GPD to the excesses, giving $z_q$. Each new value $x$ is then
+handled in one of three ways.
+
+- $x > z_q$: flag $x$ as an anomaly and leave the model unchanged, so that anomalies do not enter the tail estimate.
+- $t < x \le z_q$: add $x - t$ to the excesses, refit $\xi$ and $\sigma$, and update $z_q$.
+- $x \le t$: update only $n$.
+
+DSPOT handles drift by applying SPOT to the difference between each value and a moving average of recent normal
+values. Both need only the false-alarm probability $q$ as input.
+
+## Worked example
+
+Draw $n = 10{,}000$ values from Student's $t$ with 3 degrees of freedom, a heavy-tailed score distribution with true
+shape $\xi = 1/3$. The target is $q = 10^{-4}$, whose true quantile is $22.2$.
+
+In one sample, the 98th percentile is $t = 3.385$ with $N_t = 200$ excesses. The maximum-likelihood fit gives
+$\hat\xi = 0.473$ and $\hat\sigma = 1.194$. Then $qn/N_t = 0.005$ and
+
+$$
+z_q = 3.385 + \frac{1.194}{0.473}\paren{0.005^{-0.473} - 1} = 3.385 + 2.528 \times 11.22 = 31.8.
+$$
+
+The estimate is too high in this sample because $\hat\xi$ overshoots $1/3$. Across 200 independent samples, the median
+POT estimate is $21.4$, and 80% of estimates fall between $16.7$ and $29.0$. A Gaussian model fitted to the same data
+puts the threshold at $6.3$, and would flag the normal tail of the distribution as anomalous. The empirical $1 - q$
+quantile rests on the single largest value or two in the sample.
+
+## Choosing the initial threshold
+
+The choice of $t$ trades bias against variance. A low $t$ gives many excesses but a poor GPD approximation. A high $t$
+gives a good approximation from few excesses.
+
+The mean excess gives a diagnostic. For a GPD with $\xi < 1$, $\expect(X - u \mid X > u) = \sigma_u/(1 - \xi)$, and
+the scale changes with the threshold as $\sigma_u = \sigma_t + \xi (u - t)$ for $u > t$. The mean excess is therefore
+linear in $u$ with slope $\xi/(1 - \xi)$ above any threshold where the GPD holds. Plotting the empirical mean excess
+against $u$ and choosing $t$ where the plot becomes linear is the standard check <Cite id="coles2001" />.
+
+## Assumptions
+
+- **Independent, identically distributed scores.** Clustered exceedances, common in time series, violate independence
+  and make the fit overconfident. Declustering keeps one peak per cluster.
+- **A GEV limit exists.** This holds for almost every continuous distribution met in practice, but not for all
+  distributions.
+- **A stationary tail.** The tail model is fitted to past scores. Drift in the score distribution needs a detrended
+  score, as in DSPOT, or a moving window.
+
+## Pitfalls
+
+- **Large variance in $\hat\xi$.** The shape parameter is estimated from a few hundred excesses at most, and the
+  threshold is sensitive to it, as the worked example shows. Report an interval, or constrain $\xi$ when the type of
+  tail is known.
+- **Anomalies in the calibration data.** Anomalies among the excesses inflate $\hat\xi$ and raise the threshold. Clean
+  the calibration batch or use a robust fit.
+- **Very rare targets.** Extrapolating to $q$ far below $1/n$ multiplies the model error. The theorem justifies the form
+  of the tail, not an arbitrarily distant extrapolation.

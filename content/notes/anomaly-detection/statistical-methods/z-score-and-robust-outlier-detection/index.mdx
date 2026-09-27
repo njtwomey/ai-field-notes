@@ -1,0 +1,152 @@
+---
+title: Z-score and robust outlier detection
+kind: concept
+summary: 'The z-score $(x - \bar{x})/s$ flags values far from the mean in standard deviations, but outliers inflate $s$ and hide themselves. The robust z-score $(x - \operatorname{med})/(1.4826\,\text{MAD})$ uses the median and median absolute deviation, which outliers barely move.'
+tags: [anomaly-detection, robust-statistics, worked-example]
+aliases: [z-score outlier test, three-sigma rule, modified z-score, median absolute deviation, MAD, Hampel identifier, Hampel filter, robust z-score, Tukey fences]
+requires: [gaussian-distribution]
+partOf: [anomaly-detection]
+related: [grubbs-test, mahalanobis-distance-outliers, median-filter]
+references: [hampel1974, iglewicz1993, rousseeuw1993, leys2013, pearson2002, tukey1977]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For observations $x_1, \dots, x_n$ with sample mean $\bar{x}$ and sample standard deviation $s$, the z-score of $x_i$ is
+$z_i = (x_i - \bar{x})/s$. The robust z-score replaces the mean by the median $m = \operatorname{med}_j x_j$ and the
+standard deviation by the scaled median absolute deviation,
+
+$$
+r_i = \frac{x_i - m}{1.4826\,\text{MAD}}, \qquad \text{MAD} = \operatorname{med}_j \abs{x_j - m}.
+$$
+
+An observation is flagged when $\abs{z_i}$ or $\abs{r_i}$ exceeds a threshold, usually 3 or 3.5.
+</Definition>
+
+## Intuition
+
+A z-score measures how far a value lies from the centre of the data, in units of the data's spread. For Gaussian data,
+$\abs{z} > 3$ occurs with probability $0.0027$, so a value beyond three standard deviations is unusual.
+
+The weakness is that the centre and spread are estimated from the same data that contain the outliers. One large
+value pulls the mean toward itself and inflates the standard deviation by an even larger factor, because deviations
+are squared. The outlier's own z-score falls. Several outliers can each hide the others. This effect is called
+masking.
+
+The median and the median absolute deviation (MAD) resist this. The median is the middle value, so moving the
+largest value further out does not change it. The MAD is the median of the absolute deviations from the median, so it
+is also unchanged by a minority of extreme values.
+
+## A z-score has a ceiling
+
+In a sample of size $n$, no z-score can exceed $(n - 1)/\sqrt{n}$, however extreme the value is. This bound is
+Samuelson's inequality. It follows from Cauchy–Schwarz.
+
+Shift the data so that $\bar{x} = 0$ and let $d = x_i$ be the value under study. The other $n - 1$ values sum to
+$-d$. By the Cauchy–Schwarz inequality, $n - 1$ numbers with sum $-d$ have a sum of squares of at least
+$d^2/(n - 1)$. The total sum of squares therefore satisfies
+
+$$
+\sum_j x_j^2 \ge d^2 + \frac{d^2}{n - 1} = \frac{n\,d^2}{n - 1}.
+$$
+
+Dividing by $n - 1$ gives $s^2 \ge n\,d^2/(n - 1)^2$, so
+
+$$
+\abs{z_i} = \frac{\abs{d}}{s} \le \frac{n - 1}{\sqrt{n}}.
+$$
+
+Equality holds when all other values are equal. For $n = 10$ the ceiling is $2.85$, so the rule $\abs{z} > 3$ can
+never flag anything in a sample of ten. For $n = 12$ the ceiling is $3.18$.
+
+## The consistency constant 1.4826
+
+The MAD of Gaussian data is smaller than the standard deviation. The constant rescales it so that it estimates
+$\sigma$ when the data are Gaussian.
+
+Let $X \sim \Gauss(\mu, \sigma^2)$. The population MAD is the value $M$ with $\prob(\abs{X - \mu} \le M) = 1/2$.
+Standardising with $Z = (X - \mu)/\sigma$ and the standard normal distribution function $\Phi$,
+
+$$
+\prob\paren{\abs{Z} \le M/\sigma} = 2\Phi(M/\sigma) - 1 = \tfrac{1}{2}
+\quad\Longrightarrow\quad \Phi(M/\sigma) = \tfrac{3}{4}
+\quad\Longrightarrow\quad M = \Phi^{-1}(0.75)\,\sigma = 0.6745\,\sigma.
+$$
+
+So $\sigma = M/0.6745 = 1.4826\,M$. The same constant appears in the modified z-score of Iglewicz and Hoaglin,
+$0.6745\,(x_i - m)/\text{MAD}$, which equals $r_i$ <Cite id="iglewicz1993" />. They recommend flagging values with a
+modified z-score above 3.5 in absolute value. For Gaussian data that threshold flags a fraction $0.00047$ of
+observations.
+
+## Breakdown point
+
+The breakdown point of an estimator is the smallest fraction of observations that, moved arbitrarily far, can move the
+estimate arbitrarily far. The mean and the standard deviation have breakdown point $1/n$: one observation suffices. The
+median and the MAD have breakdown point close to $1/2$ <Cite id="hampel1974" />. The robust z-score therefore
+keeps a sensible centre and scale until almost half the data are outliers.
+
+The price is efficiency. For Gaussian data the scaled MAD has an asymptotic efficiency of 37% relative to the standard
+deviation, so it is noisier from the same sample. Rousseeuw and Croux proposed the scale estimators $S_n$ and $Q_n$,
+which keep the 50% breakdown point with efficiencies of 58% and 82% <Cite id="rousseeuw1993" />.
+
+## Worked example
+
+Twelve measurements are
+
+$$
+9.8,\ 10.1,\ 10.0,\ 9.9,\ 10.2,\ 10.0,\ 9.7,\ 10.3,\ 10.1,\ 9.9,\ 14.0,\ 15.0.
+$$
+
+The last two are outliers. The sample mean is $\bar{x} = 10.75$ and the sample standard deviation is $s = 1.77$. The
+z-scores of $14.0$ and $15.0$ are $1.83$ and $2.40$. Neither passes the threshold 3, and neither could pass it by much,
+since the ceiling for $n = 12$ is $3.18$.
+
+The median is $m = 10.05$. The absolute deviations from it, sorted, are
+
+$$
+0.05,\ 0.05,\ 0.05,\ 0.05,\ 0.15,\ 0.15,\ 0.15,\ 0.25,\ 0.25,\ 0.35,\ 3.95,\ 4.95.
+$$
+
+The MAD is the mean of the sixth and seventh values, $0.15$, and the robust scale is $1.4826 \times 0.15 = 0.222$. The
+robust z-scores of $14.0$ and $15.0$ are $17.8$ and $22.3$. Every other robust z-score lies between $-1.57$ and $1.12$.
+Both outliers are flagged by a wide margin, and no normal value is flagged.
+
+## Hampel identifier and Hampel filter
+
+The Hampel identifier flags $x_i$ when $\abs{x_i - m} > t \cdot 1.4826\,\text{MAD}$, which is the rule
+$\abs{r_i} > t$ with $t = 3$ by default. Applied to a time series in a sliding window of $2w + 1$ points centred on
+each observation, with $m$ and the MAD computed within the window, it becomes the Hampel filter
+<Cite id="pearson2002" />. A flagged value is replaced by the window median. The Hampel filter is a
+<NoteLink to="median-filter" /> that changes only the values it judges to be outliers, so it leaves clean stretches of
+the signal untouched.
+
+## Tukey's fences
+
+Tukey's boxplot rule flags values below $Q_1 - 1.5\,\text{IQR}$ or above $Q_3 + 1.5\,\text{IQR}$, where $Q_1$ and $Q_3$
+are the quartiles and $\text{IQR} = Q_3 - Q_1$ <Cite id="tukey1977" />. The quartiles have breakdown point
+$1/4$. For Gaussian data $Q_3 - \mu = 0.6745\,\sigma$ and $\text{IQR} = 1.349\,\sigma$, so the upper fence lies at
+$\mu + 2.698\,\sigma$. The rule flags a fraction $0.0070$ of Gaussian observations, more than the $0.0027$ of the
+three-sigma rule.
+
+## Assumptions
+
+- **A symmetric bulk.** The median and the MAD describe a symmetric distribution well. For skewed data, a symmetric
+  threshold flags too many values on the long side and too few on the short side. Transforming the data first, for
+  example by a logarithm for positive right-skewed data, restores symmetry.
+- **A Gaussian bulk, for the false-alarm rate.** The constant $1.4826$ and the tail probabilities above assume that
+  the normal observations are Gaussian. For heavier-tailed data the same threshold flags more normal values.
+- **One variable at a time.** Each variable is screened separately. An observation can be unremarkable on every
+  variable and still anomalous jointly; the <NoteLink to="mahalanobis-distance-outliers">Mahalanobis
+  distance</NoteLink> handles that case.
+
+## Pitfalls
+
+- **Masking by the mean and standard deviation.** The classical z-score is unreliable for outlier detection even with
+  one outlier in a small sample, as the ceiling $(n - 1)/\sqrt{n}$ shows. Leys and colleagues recommend the MAD in its
+  place <Cite id="leys2013" />.
+- **A zero MAD.** When more than half the values are identical, the MAD is zero and every other value has an infinite
+  robust z-score. Discrete or heavily rounded data need another scale, such as $Q_n$ or a small floor on the MAD.
+- **Many tests at once.** Screening $n$ values at a per-value false-alarm rate $\alpha$ gives about $n\alpha$ false
+  alarms. For a sample-wide error rate, test the most extreme value with the <NoteLink to="grubbs-test" /> or divide
+  $\alpha$ by $n$.

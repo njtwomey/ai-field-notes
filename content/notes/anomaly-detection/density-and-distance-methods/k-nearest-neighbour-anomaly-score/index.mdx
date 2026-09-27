@@ -1,0 +1,106 @@
+---
+title: k-nearest-neighbour anomaly score
+kind: concept
+summary: 'The k-NN anomaly score of a point is its distance to its $k$-th nearest neighbour, or the mean distance to its $k$ nearest neighbours. It ranks points by an implicit density estimate $\hat{p}(\xvec) \propto r_k(\xvec)^{-p}$, so isolated points score highest.'
+tags: [anomaly-detection, nearest-neighbours, nonparametric, worked-example]
+aliases: [kNN anomaly score, k-NN outlier score, distance-based outliers, k-distance outlier, kNN distance outlier detection, DB outliers]
+requires: [k-nearest-neighbours]
+partOf: [anomaly-detection]
+related: [local-outlier-factor, nearest-neighbour-search, curse-of-dimensionality-for-neighbours]
+references: [knorr1998, ramaswamy2000, angiulli2002, bay2003]
+status: draft
+updated: 2026-09-27
+---
+
+import { LocalDensityFigure } from '../_shared/LocalDensityFigure'
+
+<Definition>
+For a data set $\Dcal = \set{\xvec_1, \dots, \xvec_n}$ in $\reals^p$ and a distance $\delta$, let $r_k(\xvec)$ be the
+distance from $\xvec$ to its $k$-th nearest neighbour in $\Dcal$, not counting $\xvec$ itself. The k-NN anomaly score
+is $s(\xvec) = r_k(\xvec)$ <Cite id="ramaswamy2000" />. A common variant averages the distances to all $k$ nearest
+neighbours <Cite id="angiulli2002" />. Points with the largest scores are reported as anomalies.
+</Definition>
+
+## Intuition
+
+A normal point sits among other points, so its nearest neighbours are close. An anomaly sits apart, so even its
+nearest neighbours are far. The score needs no model of the data's shape: clusters may be curved, elongated or
+many.
+
+Distance-based outlier detection began with Knorr and Ng, who called a point a $DB(\pi, D)$ outlier when at least a
+fraction $\pi$ of the data lies farther than $D$ from it <Cite id="knorr1998" />. That definition gives a yes-or-no
+label and needs the radius $D$. Ramaswamy, Rastogi and Shim replaced it with a ranking by $r_k$, which needs only $k$
+and returns the top-$m$ outliers for any $m$ <Cite id="ramaswamy2000" />.
+
+## The score is an inverse density estimate
+
+The k-NN distance ranks points by an estimate of the data density. Let the data have density $f$. The ball of radius
+$r$ around $\xvec$ has volume $V_p r^p$, where $V_p$ is the volume of the unit ball in $\reals^p$. For a small ball the
+probability mass inside it is about $f(\xvec) V_p r^p$, so among $n$ points about $n f(\xvec) V_p r^p$ fall inside.
+The ball of radius $r_k(\xvec)$ contains $k$ points by construction. Setting the two equal and solving for $f$ gives
+the k-NN density estimate
+
+$$
+\hat{f}(\xvec) = \frac{k}{n\,V_p\,r_k(\xvec)^p}.
+$$
+
+For fixed $k$, $n$ and $p$, $\hat{f}$ is a decreasing function of $r_k$. Ranking points by decreasing $r_k$ is the same
+as ranking them by increasing estimated density. The k-NN score is a low-density score. A kernel density estimate
+gives a similar ranking with a fixed bandwidth in place of an adaptive radius.
+
+## Worked example
+
+Take five points on a line, $\set{0, 1, 2, 3, 10}$, with absolute difference as the distance.
+
+| point | nearest distances | $r_1$ | $r_2$ | mean of 2 |
+| ----- | ----------------- | ----- | ----- | --------- |
+| 0     | 1, 2              | 1     | 2     | 1.5       |
+| 1     | 1, 1              | 1     | 1     | 1         |
+| 2     | 1, 1              | 1     | 1     | 1         |
+| 3     | 1, 2              | 1     | 2     | 1.5       |
+| 10    | 7, 8              | 7     | 8     | 7.5       |
+
+Every score ranks $10$ first. With $k = 2$ the end points $0$ and $3$ score higher than the interior points $1$ and
+$2$, because a point at the edge of a cluster has neighbours on one side only.
+
+Now add a second anomaly at $10.5$. With $k = 1$ the two anomalies are each other's nearest neighbour, and both get
+$r_1 = 0.5$, the lowest score in the set. With $k = 2$ their second neighbours are the points $3$, at distances $7$ and
+$7.5$, and they rank first again. $k$ must exceed the size of the largest group of anomalies that sit together.
+
+## Clusters of different density
+
+The score compares every point's neighbourhood with a single global scale. When normal data form clusters of different
+density, the points of a sparse cluster have larger k-NN distances than an anomaly just outside a dense cluster. The
+score then ranks the sparse cluster's fringe above the anomaly.
+
+<LocalDensityFigure initialScore="knn" />
+
+The figure's default setting uses the k-NN distance. Only the far anomaly reaches the top three for any $k$; the two
+anomalies beside the tight cluster are outranked by the fringe of the diffuse cluster. Switching to LOF, which divides
+each point's density by its neighbours' density, ranks all three first (see <NoteLink to="local-outlier-factor" />).
+
+## Cost
+
+Computing $r_k$ for all $n$ points by brute force costs $O(n^2 p)$. Spatial indices such as k-d trees reduce this in low
+dimension (see <NoteLink to="nearest-neighbour-search" />). When only the top $m$ outliers are needed, a point can be
+discarded as soon as $k$ neighbours closer than the current $m$-th largest score are found. With the data in random
+order this pruning makes the search close to linear in $n$ in practice <Cite id="bay2003" />.
+
+## Assumptions
+
+- **Anomalies are isolated.** A point is anomalous because it is far from others. An anomaly inside a dense region,
+  or a large group of anomalies, is not found.
+- **One density scale.** Normal data are assumed to have similar density everywhere. Local methods remove this
+  assumption.
+- **A meaningful distance.** Features must be scaled so that the distance weighs them sensibly. Standardising each
+  feature is the usual default.
+
+## Pitfalls
+
+- **High dimension.** As the dimension grows, distances to the nearest and farthest points become similar, and the
+  k-NN score loses contrast (see <NoteLink to="curse-of-dimensionality-for-neighbours" />). Irrelevant features add
+  noise to every distance.
+- **Choosing $k$.** Too small a $k$ lets small groups of anomalies hide each other, as the worked example shows. Too
+  large a $k$ merges small normal clusters with their surroundings and flags them.
+- **Duplicates.** Repeated identical points have zero distance to one another. With $k$ below the number of copies, a
+  duplicated anomaly scores zero.

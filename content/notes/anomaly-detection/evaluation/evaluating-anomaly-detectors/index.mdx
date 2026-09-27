@@ -1,0 +1,139 @@
+---
+title: Evaluating anomaly detectors
+kind: concept
+summary: 'Anomalies are rare, so detectors are judged by precision at low false-alarm rates and by average precision, whose chance level is the contamination $\pi$. Label noise, contaminated training data and point-adjusted scoring of time series all inflate results.'
+tags: [anomaly-detection, metrics, evaluation, class-imbalance, worked-example]
+aliases: [anomaly detection evaluation, point adjustment, point-adjust, PA%K, F1-PA, range-based precision and recall, outlier detection benchmarks]
+requires: [precision-recall-curve-and-average-precision, roc-curve-and-auc]
+partOf: [anomaly-detection]
+related: [evaluating-imbalanced-classifiers, precision-recall-and-f-score, discord-discovery-at-scale, class-imbalance]
+references: [campos2016, xu2018, kim2022, wu2021, tatbul2018]
+status: draft
+updated: 2026-09-27
+---
+
+import { PointAdjustFigure } from './PointAdjustFigure'
+
+<Definition>
+Evaluating an anomaly detector means measuring how well its scores rank labelled anomalies above normal observations,
+and how many false alarms it raises at the operating point where it will be used. Because anomalies are a small
+fraction $\pi$ of the data, metrics that depend on $\pi$, such as precision and average precision, are the informative
+ones. Time-series evaluation adds the question of how to credit a detection inside a labelled anomalous segment.
+</Definition>
+
+## Intuition
+
+A detector's value is set by the alarms it raises. An operator can inspect a fixed number of alarms per day. If most
+are false, the operator stops looking. The question is therefore how many of the raised alarms are real at a false-alarm
+rate the operator can tolerate, not how well the detector separates the classes on average.
+
+## Precision at low false-alarm rates
+
+Let a detector at some threshold have true-positive rate $\text{TPR}$ (recall) and false-positive rate $\text{FPR}$,
+and let anomalies make up a fraction $\pi$ of the data. Of $n$ observations, $\pi n\,\text{TPR}$ are true alarms and
+$(1 - \pi) n\,\text{FPR}$ are false alarms, so
+
+$$
+\text{precision} = \frac{\pi\,\text{TPR}}{\pi\,\text{TPR} + (1 - \pi)\,\text{FPR}}.
+$$
+
+When $\pi$ is small, the false-alarm term dominates unless $\text{FPR}$ is smaller still.
+
+**Worked example.** With $\pi = 0.001$, a detector that finds 90% of anomalies at a false-positive rate of 1% has
+precision
+
+$$
+\frac{0.001 \times 0.9}{0.001 \times 0.9 + 0.999 \times 0.01} = 0.083.
+$$
+
+Eleven of every twelve alarms are false. The same detector could have an area under the ROC curve above 0.99, since the
+ROC curve is built from $\text{TPR}$ and $\text{FPR}$ alone and does not see $\pi$. The operating region that matters,
+$\text{FPR}$ well below $\pi$, occupies a thin strip at the left edge of the ROC plot.
+
+This is why detectors are compared by:
+
+- **Average precision (AP)**, the area under the precision-recall curve computed as a step sum. A random score has
+  expected AP equal to $\pi$, so an AP must be read against the contamination (see
+  <NoteLink to="precision-recall-curve-and-average-precision" />).
+- **Precision at $n$**, the fraction of true anomalies among the $n$ highest scores. With $n$ equal to the number of
+  labelled anomalies, it is also called R-precision. Campos and colleagues recommend versions of these measures
+  adjusted for chance, so that values are comparable across data sets with different $\pi$ <Cite id="campos2016" />.
+- **Recall at a fixed alarm budget**, such as the recall at one false alarm per day. This is the measure closest to
+  deployment.
+
+The note <NoteLink to="evaluating-imbalanced-classifiers" /> treats the dependence of these metrics on prevalence in
+general.
+
+## Contamination and label noise
+
+Anomaly labels are less reliable than class labels in most classification data.
+
+- **Unlabelled anomalies.** Real data sets contain anomalies nobody labelled. A detector that finds one is charged
+  with a false positive. Measured precision is then a lower bound on true precision, and the best detector can rank
+  below one that agrees with the labeller's blind spots.
+- **Anomalies by construction.** Many benchmarks are built by taking a classification data set and declaring a
+  downsampled class to be the anomalies. Such anomalies may not be unusual in the sense a detector measures, and
+  results depend strongly on which class was chosen <Cite id="campos2016" />.
+- **Contaminated training data.** A semi-supervised detector evaluated in a benchmark whose training split contains
+  anomalies is being tested in the unsupervised setting. Report the contamination of the training split alongside the
+  results.
+- **Threshold chosen on test labels.** Reporting the best F1 over all thresholds uses the test labels to choose the
+  operating point. The number is an upper bound, not an estimate of deployed performance.
+
+## Time series: the point-adjust protocol
+
+Time-series anomaly benchmarks label segments: contiguous runs of anomalous time steps. A detector outputs a score per
+step. Point-wise evaluation treats every step as a separate example, which punishes a detector that flags only part
+of a segment.
+
+The point-adjust protocol, used in the evaluation of the Donut detector <Cite id="xu2018" /> and widely adopted
+afterwards, credits a whole segment once any step in it is flagged. All steps of a segment with at least one alarm
+count as true positives; steps outside segments are scored as usual. F1 computed this way is written F1-PA.
+
+### Why point adjustment inflates scores
+
+Kim and colleagues showed that point adjustment rewards random detection <Cite id="kim2022" />. Consider a series of
+$N$ steps with $S$ labelled segments of length $L$, and a detector that ignores the data and flags each step
+independently with probability $p$.
+
+- **Point-wise.** Precision is $\pi = SL/N$, the anomalous share, and recall is $p$. For small $p$ both are small.
+- **Point-adjusted.** A segment is detected when at least one of its $L$ steps is flagged, which happens with
+  probability $1 - (1 - p)^L$. Each detection turns $L$ steps into true positives. Expected recall is
+  $1 - (1 - p)^L$, which approaches 1 when $pL$ is a few units. False positives remain $p(N - SL)$ in expectation.
+
+**Worked example.** Take $N = 10{,}000$ steps and $S = 5$ segments of $L = 100$ steps, so $\pi = 0.05$. With $p = 0.05$
+the point-wise F1 is $0.05$. Under point adjustment each segment is detected with probability $1 - 0.95^{100} = 0.994$.
+The expected true positives are $500 \times 0.994 = 497$ and the expected false positives are $0.05 \times 9{,}500 =
+475$, giving precision $0.51$ and F1-PA $0.68$. Lowering $p$ to $0.021$ raises F1-PA to $0.77$. A detector that ignores
+its input matches many published results.
+
+<PointAdjustFigure />
+
+### Remedies
+
+- **PA%K.** Kim and colleagues proposed crediting a segment only when at least $K\%$ of its steps are flagged, and
+  reporting the area under the F1-PA%K curve over $K$ from 0 to 100 <Cite id="kim2022" />. In the example, the random
+  detector's F1 falls from $0.68$ at $K = 0$ to $0.46$ at $K = 5$ and to $0.07$ at $K = 10$.
+- **Range-based precision and recall.** Tatbul and colleagues defined precision and recall over ranges, with tunable
+  rewards for existence, overlap size and position of the detection within a segment <Cite id="tatbul2018" />.
+- **A random baseline.** Report the score of a random detector under the same protocol, so that readers can see how
+  much of a result the protocol itself explains.
+
+## Flawed benchmarks
+
+Wu and Keogh examined the most used time-series anomaly benchmarks and found four flaws: many anomalies are trivial,
+found by a one-line rule such as a threshold on a difference; some data sets label an unrealistically large share of
+steps as anomalous; some labels are wrong; and anomalies tend to sit near the end of the series, which favours
+detectors that flag late points <Cite id="wu2021" />. Their conclusion is that benchmark gains can be illusory. The note
+<NoteLink to="discord-discovery-at-scale" /> describes the archive they proposed in response.
+
+## Pitfalls
+
+- **Reporting only ROC AUC.** At low contamination it hides a high false-alarm load, as the worked example on
+  precision shows.
+- **Averaging across data sets without baselines.** AP and precision depend on $\pi$, which varies between data sets.
+  Average chance-adjusted versions, or ranks.
+- **Tuning on the test set.** Unsupervised detectors have hyperparameters too. Choosing them by test-set performance,
+  even informally, overstates results.
+- **Ignoring detection delay.** For streaming detection, an alarm an hour after a segment starts may be worthless. Add
+  a delay limit or a reward that decreases with delay.

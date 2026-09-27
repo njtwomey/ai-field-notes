@@ -1,0 +1,161 @@
+---
+title: Grubbs' test
+kind: test
+summary: "Grubbs' test asks whether the most extreme value in a Gaussian sample is an outlier. Its statistic is $G = \\max_i \\abs{x_i - \\bar{x}}/s$. The critical value follows from a Student $t$ quantile with $n - 2$ degrees of freedom at level $\\alpha/(2n)$."
+tags: [anomaly-detection, hypothesis-testing, worked-example]
+aliases: [Grubbs test, Grubbs's test, maximum normed residual test, extreme studentized deviate test, ESD test, generalized ESD test]
+requires: [student-t-distribution, null-and-alternative-hypotheses]
+partOf: [anomaly-detection]
+related: [z-score-and-robust-outlier-detection, multiple-testing]
+references: [grubbs1950, grubbs1969, rosner1983, iglewicz1993]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Grubbs' test decides whether the observation farthest from the mean of a univariate sample is an outlier, assuming that
+the other observations are independent draws from one Gaussian distribution <Cite id="grubbs1950" />. The test
+statistic is the largest absolute z-score in the sample, and the critical value is derived from the Student $t$
+distribution. The test examines one observation at a time.
+</Definition>
+
+## Hypotheses
+
+For observations $x_1, \dots, x_n$:
+
+- $H_0$: all $n$ observations are independent draws from $\Gauss(\mu, \sigma^2)$ for some unknown $\mu$ and $\sigma$.
+- $H_1$: exactly one observation comes from a different distribution with a shifted mean.
+
+The two-sided version looks at the largest absolute deviation. One-sided versions look only at the maximum or only at
+the minimum.
+
+## Assumptions
+
+- The observations other than the suspect are independent and Gaussian. The test is sensitive to this. A sample from a
+  heavy-tailed distribution produces large values of $G$ without any outlier.
+- There is at most one outlier. With two or more, the test can fail (see Pitfalls).
+- $n \ge 3$. The statistic is undefined for smaller samples.
+
+## Test statistic
+
+With sample mean $\bar{x}$ and sample standard deviation $s$ (divisor $n - 1$),
+
+$$
+G = \frac{\max_i \abs{x_i - \bar{x}}}{s}.
+$$
+
+$G$ is the largest absolute z-score. It cannot exceed $(n - 1)/\sqrt{n}$, a consequence of Cauchy–Schwarz (see
+<NoteLink to="z-score-and-robust-outlier-detection" />).
+
+## Decision rule
+
+Reject $H_0$ at level $\alpha$ when $G > G_\text{crit}$, with
+
+$$
+G_\text{crit} = \frac{n - 1}{\sqrt{n}} \sqrt{\frac{t^2}{n - 2 + t^2}}, \qquad t = t_{1 - \alpha/(2n),\, n - 2},
+$$
+
+where $t_{q,\nu}$ is the $q$ quantile of Student's $t$ with $\nu$ degrees of freedom. For the one-sided versions,
+replace $\alpha/(2n)$ by $\alpha/n$.
+
+### Where the critical value comes from
+
+The statistic $G$ is a maximum of $n$ dependent quantities, so its distribution is awkward to write down directly. The
+derivation relates each observation's z-score to a $t$ statistic with a known distribution, then bounds the maximum.
+
+**Step 1: a leave-one-out $t$ statistic.** Fix an index $i$. Let $\bar{x}_{-i}$ and $s_{-i}$ be the mean and standard
+deviation of the other $n - 1$ observations. Under $H_0$, $x_i$ is independent of $\bar{x}_{-i}$ and $s_{-i}$, and
+$x_i - \bar{x}_{-i} \sim \Gauss\paren{0, \sigma^2 (1 + 1/(n - 1))}$. Dividing by the matching estimate of its standard
+deviation gives a prediction $t$ statistic,
+
+$$
+t_i = \frac{x_i - \bar{x}_{-i}}{s_{-i}\sqrt{n/(n - 1)}} \sim t_{n - 2},
+$$
+
+with $n - 2$ degrees of freedom because $s_{-i}$ is estimated from $n - 1$ values.
+
+**Step 2: $\abs{t_i}$ determines the z-score of $x_i$.** Write $d = x_i - \bar{x}$ and let $S$ and $S_{-i}$ be the sums
+of squared deviations about the mean, with and without $x_i$. Removing $x_i$ moves the mean to
+$\bar{x}_{-i} = \bar{x} - d/(n - 1)$, so $x_i - \bar{x}_{-i} = n\,d/(n - 1)$. Adding one point to a sample raises its
+sum of squares by $\frac{n - 1}{n}(x_i - \bar{x}_{-i})^2$, so with $u = n\,d^2/(n - 1)$,
+
+$$
+S = S_{-i} + u.
+$$
+
+Substituting $s_{-i}^2 = S_{-i}/(n - 2)$ into $t_i^2$ gives
+
+$$
+t_i^2 = \frac{n^2 d^2/(n - 1)^2}{\frac{S - u}{n - 2} \cdot \frac{n}{n - 1}} = \frac{(n - 2)\,u}{S - u},
+\qquad\text{so}\qquad S = u\,\frac{n - 2 + t_i^2}{t_i^2}.
+$$
+
+The squared z-score of $x_i$ is $z_i^2 = d^2 (n - 1)/S = u\,(n - 1)^2/(n S)$. Substituting $S$,
+
+$$
+z_i^2 = \frac{(n - 1)^2}{n}\cdot\frac{t_i^2}{n - 2 + t_i^2}.
+$$
+
+The right side increases with $\abs{t_i}$. So $\abs{z_i} > G_\text{crit}$ holds exactly when $\abs{t_i} > t$, with
+$G_\text{crit}$ and $t$ related as in the decision rule.
+
+**Step 3: a union bound over the $n$ observations.** $G > G_\text{crit}$ holds when some $\abs{t_i} > t$. By the union
+bound,
+
+$$
+\prob(G > G_\text{crit}) \le \sum_{i=1}^{n} \prob(\abs{t_i} > t) = n \cdot 2 \cdot \frac{\alpha}{2n} = \alpha.
+$$
+
+The bound is nearly tight for small $\alpha$, because two observations rarely have extreme $t$ statistics at the same
+time. In a simulation of 200,000 Gaussian samples of size 12 at $\alpha = 0.05$, the test rejected in 4.9% of samples.
+
+## Worked example
+
+Twelve measurements are
+
+$$
+9.8,\ 10.1,\ 10.0,\ 9.9,\ 10.2,\ 10.0,\ 9.7,\ 10.3,\ 10.1,\ 9.9,\ 14.0,\ 15.0.
+$$
+
+The mean is $10.75$ and the standard deviation is $1.772$. The most extreme value is $15.0$, so
+$G = 4.25/1.772 = 2.398$. At $\alpha = 0.05$ with $n = 12$, the $t$ quantile is $t_{1 - 0.05/24,\,10} = 3.691$ and
+
+$$
+G_\text{crit} = \frac{11}{\sqrt{12}}\sqrt{\frac{3.691^2}{10 + 3.691^2}} = 2.412.
+$$
+
+$G = 2.398 < 2.412$, so the test does not reject $H_0$. Both $14.0$ and $15.0$ are far from the other ten values, yet the
+test finds no outlier. The value $14.0$ inflates $s$ and hides $15.0$.
+
+Remove $14.0$ and test again: now $n = 11$, $G = 2.995$ and $G_\text{crit} = 2.355$, and $15.0$ is rejected. Keeping
+$14.0$ and removing $15.0$ instead gives $G = 2.984$, also rejected. Each outlier is detected alone; together they mask
+each other.
+
+## Several outliers: the generalised ESD test
+
+Rosner's generalised extreme studentised deviate (ESD) test handles up to $r$ outliers <Cite id="rosner1983" />. It
+computes $G$, removes the most extreme observation, and repeats on the remaining sample, giving statistics
+$R_1, \dots, R_r$. Step $j$ has sample size $n - j + 1$ and its own critical value $\lambda_j$ from the formula above
+with $n$ replaced by $n - j + 1$. The number of outliers is the largest $j$ with $R_j > \lambda_j$, even if some earlier
+$R_{j'}$ fell below its critical value. Taking the largest such $j$, not the first failure, is what defeats masking.
+
+In the example with $r = 2$: $R_1 = 2.398 < \lambda_1 = 2.412$, but after removing $15.0$, $R_2 = 2.984$ (the value
+$14.0$ in the sample of 11) exceeds $\lambda_2 = 2.355$. The test declares two outliers.
+
+## Effect size
+
+$G$ itself is the effect size: the distance of the suspect from the mean, in standard deviations. Report it with the
+sample size, since its maximum possible value $(n - 1)/\sqrt{n}$ grows with $n$.
+
+## Pitfalls
+
+- **Masking.** Two or more outliers on the same side inflate $s$ and can hide one another, as in the worked example.
+  Use the generalised ESD test or robust scores based on the median absolute deviation.
+- **Repeated testing.** Applying Grubbs' test again after each rejection, until nothing is rejected, runs a new test at
+  level $\alpha$ in each round and inflates the overall error rate. The generalised ESD test fixes the number of rounds
+  in advance.
+- **Non-Gaussian bulk.** For skewed or heavy-tailed data the test flags normal observations. Check the shape of the
+  bulk first, or transform the data <Cite id="iglewicz1993" />.
+- **Small samples.** The critical value sits close to the ceiling $(n - 1)/\sqrt{n}$ for small $n$. At $\alpha = 0.05$,
+  $G_\text{crit} = 1.1543$ against a ceiling of $1.1547$ for $n = 3$, and $1.887$ against $2.041$ for $n = 6$. Only
+  a sample in which the other values are almost identical can reject, so power is low.

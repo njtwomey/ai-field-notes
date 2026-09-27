@@ -1,0 +1,101 @@
+---
+title: Forecast-residual anomaly detection
+kind: technique
+summary: 'Forecast-residual detection predicts each value from its past, standardises the residual as $z_t = (y_t - \hat{y}_{t \mid t-1})/\hat{\sigma}_t$, and flags $\abs{z_t} > \tau$. The forecast supplies the context, so values unusual for their time of day or season are found.'
+tags: [anomaly-detection, time-series, forecasting, worked-example]
+aliases: [residual-based anomaly detection, prediction-based anomaly detection, forecast error anomaly detection, S-H-ESD, seasonal hybrid ESD, nonparametric dynamic thresholding, innovation outlier test]
+requires: [prediction-intervals]
+partOf: [anomaly-detection]
+related: [time-series-anomaly-types, time-series-decomposition, kalman-filter, probabilistic-forecasting, extreme-value-theory-for-anomalies, cusum]
+references: [hundman2018, hochenbaum2017, rosner1983, hyndman2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Forecast-residual anomaly detection fits a forecasting model to the normal behaviour of a time series. At each time
+$t$ it computes the one-step forecast $\hat{y}_{t \mid t-1}$ and an estimate $\hat{\sigma}_t$ of the forecast's
+standard deviation, and flags $y_t$ when the standardised residual
+
+$$
+z_t = \frac{y_t - \hat{y}_{t \mid t-1}}{\hat{\sigma}_t}
+$$
+
+exceeds a threshold $\tau$ in absolute value. Equivalently, it flags values outside a
+<NoteLink to="prediction-intervals">prediction interval</NoteLink>.
+</Definition>
+
+## Problem
+
+A threshold on the raw values of a series cannot find contextual anomalies. Web traffic of 5,000 requests per minute
+is normal at noon and anomalous at 4 a.m. A detector needs the expected value at each time, which depends on trend,
+seasonality and recent history. A forecasting model computes exactly that.
+
+## Mechanism
+
+1. **Fit a model of normal behaviour.** Any forecasting model works: seasonal naive, exponential smoothing, ARIMA,
+   a state-space model or a neural forecaster. The model must capture the regular patterns, since everything it
+   misses ends up in the residual.
+2. **Forecast one step ahead.** At time $t$, forecast $y_t$ from $y_1, \dots, y_{t-1}$.
+3. **Standardise the residual.** Divide by the forecast's standard deviation. For a Gaussian state-space model the
+   <NoteLink to="kalman-filter" /> gives it exactly as the innovation variance. Otherwise estimate it from recent
+   residuals with a robust scale such as $1.4826$ times the median absolute deviation, so that earlier anomalies do not
+   inflate it.
+4. **Threshold.** Flag $\abs{z_t} > \tau$.
+5. **Protect the model's state.** Before the model updates on a flagged value, replace the value by its forecast.
+
+Step 5 matters because of how anomalies propagate. For an autoregressive model, a single anomalous value at $t_0$
+enters the forecast of $y_{t_0 + 1}$ and produces a residual of the opposite sign one step later (see
+<NoteLink to="time-series-anomaly-types" />). Updating a smoothing model on an anomaly shifts its level and hides the
+anomalies that follow.
+
+## Choosing the threshold
+
+The threshold sets the false-alarm rate per time step, and a series has many steps. For Gaussian residuals,
+$\prob(\abs{z_t} > \tau) = 2\paren{1 - \Phi(\tau)}$, where $\Phi$ is the standard normal distribution function.
+
+**Worked example.** A metric sampled once per minute has 1,440 values per day. The common choice $\tau = 3$ has a
+per-step false-alarm rate of $0.0027$ and gives $1{,}440 \times 0.0027 = 3.9$ false alarms per day. For one false alarm
+per 30 days, the per-step rate must be $\alpha = 1/(30 \times 1{,}440) = 1/43{,}200$. Solving
+$2\paren{1 - \Phi(\tau)} = \alpha$ gives $\tau = \Phi^{-1}(1 - \alpha/2) = 4.23$.
+
+Residuals are rarely exactly Gaussian. Their tails are usually heavier, which makes Gaussian thresholds too low. Two
+alternatives avoid the assumption.
+
+- **Extreme value theory.** Fit a generalised Pareto distribution to the largest $\abs{z_t}$ and set $\tau$ for the
+  target rate (see <NoteLink to="extreme-value-theory-for-anomalies" />).
+- **Nonparametric dynamic thresholding.** Hundman and colleagues forecast spacecraft telemetry with LSTM networks and
+  smoothed the absolute residuals with an exponentially weighted moving average <Cite id="hundman2018" />. Candidate
+  thresholds are $\mu + c\sigma$ over a window, for a range of $c$. The chosen threshold is the one whose removal of the
+  values above it reduces the mean and standard deviation of the smoothed residuals the most, penalised by the number
+  of values and contiguous sequences it flags. A pruning step then drops flagged sequences whose peak residual is
+  close to that of the next-highest one.
+
+## Decomposition instead of a forecast
+
+A seasonal decomposition gives a residual without a forecasting model. The seasonal hybrid ESD test (S-H-ESD) of
+Hochenbaum, Vallis and Kejariwal removes the seasonal component found by STL decomposition and the median of the
+series, then applies Rosner's generalised extreme studentised deviate test to the remainder with the median and the
+median absolute deviation in place of the mean and standard deviation <Cite id="hochenbaum2017" /> <Cite id="rosner1983" />.
+It is an offline method: the decomposition uses the whole window, including values after each candidate anomaly. See
+<NoteLink to="time-series-decomposition" /> and <NoteLink to="grubbs-test" />.
+
+## Cost
+
+The cost is that of running the forecaster once per step plus a constant for the test. Online forecasters such as
+exponential smoothing and the Kalman filter update in constant time per step. Neural forecasters cost one forward
+pass per step after training.
+
+## Trade-offs
+
+- **Model quality sets detection quality.** A model that misses the weekly pattern turns every weekend into an
+  anomaly. A model that fits too closely, or adapts too fast, forecasts the anomaly itself and reports a small
+  residual.
+- **Level shifts.** After a persistent shift, every residual is large until the model adapts. The detector raises a
+  long run of alarms for a single change. Pairing it with a change-point detector such as <NoteLink to="cusum" />
+  separates the two.
+- **One step against many.** Some anomalies, such as a slow drift, are small at each step and large only in
+  accumulation. One-step residuals miss them; residuals of $h$-step forecasts, or cumulative sums of residuals, find
+  them.
+- **Multivariate series.** Forecasting each channel separately ignores anomalies in the relations between channels.
+  A multivariate model with a joint residual covariance, tested with a Mahalanobis distance, catches them.

@@ -1,0 +1,149 @@
+---
+title: Mahalanobis distance for outliers
+kind: concept
+summary: 'The squared Mahalanobis distance $(\xvec - \muvec)^\top \Sigmamat^{-1} (\xvec - \muvec)$ measures distance from the centre in units of the data''s covariance. For Gaussian data it follows $\ChiSq(p)$, which sets the threshold. A robust fit such as the minimum covariance determinant prevents masking.'
+tags: [anomaly-detection, robust-statistics, multivariate, worked-example]
+aliases: [Mahalanobis outlier detection, minimum covariance determinant, MCD, FAST-MCD, robust Mahalanobis distance, chi-square outlier threshold, robust covariance]
+requires: [multivariate-normal-distribution, chi-squared-distribution]
+partOf: [anomaly-detection]
+related: [z-score-and-robust-outlier-detection, pca-reconstruction-error, pairwise-distances-and-cosine-similarity]
+references: [mahalanobis1936, rousseeuw1984, rousseeuw1999, hubert2010]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For a $p$-dimensional observation $\xvec$ and a distribution with mean $\muvec$ and covariance $\Sigmamat$, the squared
+Mahalanobis distance is
+
+$$
+d^2(\xvec) = (\xvec - \muvec)^\top \Sigmamat^{-1} (\xvec - \muvec).
+$$
+
+As an outlier score it flags $\xvec$ when $d^2(\xvec)$ exceeds a quantile of the $\ChiSq(p)$ distribution. In
+unsupervised use, $\muvec$ and $\Sigmamat$ are replaced by robust estimates so that the outliers do not distort them.
+</Definition>
+
+## Intuition
+
+Euclidean distance treats every direction alike. Correlated data spread out along some directions and are thin along
+others. A point that is a short Euclidean distance from the centre, but lies across the thin direction, is more
+unusual than a point far out along the long direction.
+
+The Mahalanobis distance measures distance in standard deviations along each principal direction of the data. Its
+contours are the ellipses of constant Gaussian density <Cite id="mahalanobis1936" />. For $p = 1$ it reduces to the
+absolute z-score, $d = \abs{x - \mu}/\sigma$.
+
+**Example.** Take $\muvec = \zeros$ and unit variances with correlation $0.8$, so
+$\Sigmamat = \begin{pmatrix} 1 & 0.8 \\ 0.8 & 1 \end{pmatrix}$. The point $(2, 2)$ lies along the long axis. Its
+Euclidean distance from the centre is $2.83$ and its Mahalanobis distance is $2.11$. The point $(1.5, -1.5)$ lies
+across the short axis. Its Euclidean distance is only $2.12$, but its Mahalanobis distance is $4.74$.
+
+## The chi-square threshold
+
+If $\xvec \sim \MvGauss(\muvec, \Sigmamat)$ with known $\muvec$ and $\Sigmamat$, then $d^2(\xvec) \sim \ChiSq(p)$.
+
+The proof whitens the data. $\Sigmamat$ is symmetric positive definite, so it has a Cholesky factorisation
+$\Sigmamat = \Lmat\Lmat^\top$ with $\Lmat$ invertible. Define $\zvec = \Lmat^{-1}(\xvec - \muvec)$. It is Gaussian with
+mean $\zeros$ and covariance
+
+$$
+\Lmat^{-1}\Sigmamat\Lmat^{-\top} = \Lmat^{-1}\Lmat\Lmat^\top\Lmat^{-\top} = \eye,
+$$
+
+so its $p$ components are independent standard normal variables. Since
+$\Sigmamat^{-1} = \Lmat^{-\top}\Lmat^{-1}$,
+
+$$
+d^2(\xvec) = (\xvec - \muvec)^\top \Lmat^{-\top}\Lmat^{-1}(\xvec - \muvec) = \zvec^\top\zvec = \sum_{j=1}^{p} z_j^2,
+$$
+
+a sum of $p$ squared independent standard normals, which is the definition of $\ChiSq(p)$.
+
+The threshold for a false-alarm rate $\alpha$ is therefore the quantile $\chi^2_{p,\,1-\alpha}$. For $p = 2$ the
+$\ChiSq(2)$ distribution is exponential with mean 2, so $\prob(d^2 > c) = e^{-c/2}$ and the threshold is
+$c = -2\log\alpha$. At $\alpha = 0.025$ this gives $c = 7.38$, or $d = 2.72$. The threshold grows with dimension: the
+same $\alpha$ gives $c = 12.83$ for $p = 5$.
+
+With $\muvec$ and $\Sigmamat$ estimated from the same $n$ observations, the $\ChiSq(p)$ distribution holds only
+approximately. The approximation is poor when $p$ is not small compared with $n$.
+
+## Masking
+
+The sample mean and sample covariance are as sensitive to outliers as the univariate mean and standard deviation. A
+cluster of outliers pulls the mean toward itself and stretches the covariance ellipse toward it. The outliers then
+have moderate distances and are not flagged. This is masking.
+
+**Worked example.** Draw 170 points from the Gaussian above (correlation $0.8$) and add 30 outliers in a tight cluster
+at $(2, -2)$, across the short axis. The outliers' true Mahalanobis distance is $d = 6.3$, far beyond the threshold
+$2.72$. With the classical estimates from all 200 points, the sample correlation falls from about $0.8$ to $0.08$ and
+none of the 30 outliers exceeds the $\chi^2_{2,\,0.975}$ threshold. With the minimum covariance determinant estimate
+below, all 30 exceed it, along with 7 of the 170 normal points. At a false-alarm rate of 2.5%, about 4 of 170 are
+expected.
+
+## Minimum covariance determinant
+
+The minimum covariance determinant (MCD) estimator of Rousseeuw <Cite id="rousseeuw1984" /> fits the mean and
+covariance to the most concentrated part of the data. For a subset size $h$ with $n/2 \le h < n$, it finds the subset
+$H$ of $h$ observations whose sample covariance matrix has the smallest determinant. The MCD location is the mean of
+$H$ and the MCD scatter is its covariance, multiplied by a factor that makes it consistent for Gaussian data.
+
+The determinant measures the volume of the covariance ellipsoid, so the MCD subset is the tightest ellipsoidal core of
+the data. Up to $n - h$ observations can be moved anywhere without moving the estimate arbitrarily far. With
+$h \approx (n + p + 1)/2$ the breakdown point is close to 50%.
+
+### FAST-MCD
+
+The exact MCD requires searching over all $\binom{n}{h}$ subsets. The FAST-MCD algorithm of Rousseeuw and Van Driessen
+<Cite id="rousseeuw1999" /> replaces the search with a concentration step, the C-step:
+
+1. Start from a subset $H_1$ of size $h$, with mean $\mvec_1$ and covariance $\Smat_1$ (divisor $h$).
+2. Compute $d_1^2(\xvec_i) = (\xvec_i - \mvec_1)^\top \Smat_1^{-1} (\xvec_i - \mvec_1)$ for all $n$ points.
+3. Let $H_2$ be the $h$ points with the smallest $d_1^2$. Compute its mean $\mvec_2$ and covariance $\Smat_2$.
+
+Each C-step satisfies $\det\Smat_2 \le \det\Smat_1$, so iterating converges in a few steps. FAST-MCD runs C-steps from
+many random starting subsets of size $p + 1$ and keeps the result with the smallest determinant. A final reweighting
+step refits the mean and covariance to all points with $d^2 \le \chi^2_{p,\,0.975}$, which raises statistical
+efficiency.
+
+<Derivation title="Why a C-step cannot increase the determinant">
+Write $\Amat = \Smat_1^{-1}$. For points in $H_1$, $\sum_{i \in H_1} d_1^2(\xvec_i) = \sum_{i \in H_1}
+\trace\paren{\Amat (\xvec_i - \mvec_1)(\xvec_i - \mvec_1)^\top} = h \trace(\Amat\Smat_1) = h p$. $H_2$ holds the $h$
+smallest distances, so $\sum_{i \in H_2} d_1^2(\xvec_i) \le h p$.
+
+The mean of a set minimises the sum of any positive definite quadratic form about a centre. Replacing $\mvec_1$ by
+$\mvec_2$ therefore does not increase the sum over $H_2$:
+
+$$
+h \trace(\Amat\Smat_2) = \sum_{i \in H_2} (\xvec_i - \mvec_2)^\top \Amat (\xvec_i - \mvec_2)
+\le \sum_{i \in H_2} d_1^2(\xvec_i) \le h p.
+$$
+
+So $\trace(\Smat_1^{-1}\Smat_2) \le p$. The eigenvalues $\lambda_1, \dots, \lambda_p$ of $\Smat_1^{-1}\Smat_2$ are
+positive. By the inequality of arithmetic and geometric means,
+
+$$
+\paren{\frac{\det\Smat_2}{\det\Smat_1}}^{1/p} = \paren{\prod_j \lambda_j}^{1/p} \le \frac{1}{p}\sum_j \lambda_j \le 1.
+$$
+
+Hence $\det\Smat_2 \le \det\Smat_1$.
+</Derivation>
+
+## Assumptions
+
+- **Elliptical, unimodal normal data.** The distance measures departure from one ellipsoidal bulk. Data with several
+  clusters or curved structure need a local method such as the <NoteLink to="local-outlier-factor" />.
+- **Gaussian tails, for the threshold.** The $\ChiSq(p)$ quantile sets the false-alarm rate only for Gaussian data.
+  Heavier tails produce more large distances.
+- **$n$ well above $p$.** The covariance must be invertible, and the MCD needs a subset size $h > p$
+  <Cite id="hubert2010" />.
+
+## Pitfalls
+
+- **Classical estimates on contaminated data.** A non-robust fit hides clustered outliers, as the worked example
+  shows. Use the MCD or another robust estimator whenever the data may contain outliers.
+- **Swamping.** A robust fit can also flag too many normal points, because the consistency correction is exact only
+  for Gaussian data. The worked example flagged 7 normal points where 4 were expected.
+- **High dimension.** In high dimension the chi-square quantiles grow and distances concentrate. A few directions
+  carry the signal; <NoteLink to="pca-reconstruction-error" /> splits the distance into a part inside a principal
+  subspace and a residual part.

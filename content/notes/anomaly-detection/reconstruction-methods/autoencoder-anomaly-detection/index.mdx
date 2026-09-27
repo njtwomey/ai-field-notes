@@ -1,0 +1,100 @@
+---
+title: Autoencoder anomaly detection
+kind: technique
+summary: 'An autoencoder trained on normal data reconstructs normal inputs well and, ideally, anomalies badly, so the reconstruction error $\norm{\xvec - g(f(\xvec))}^2$ is an anomaly score. It fails when the network generalises well enough to reconstruct anomalies too.'
+tags: [anomaly-detection, deep-learning, representation-learning, worked-example]
+aliases: [reconstruction error anomaly score, autoencoder outlier detection, AE anomaly detection, memory-augmented autoencoder, MemAE]
+requires: [autoencoder]
+partOf: [anomaly-detection]
+related: [pca-reconstruction-error, regularised-autoencoders, variational-autoencoder, support-vector-data-description]
+references: [sakurada2014, gong2019, nalisnick2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Autoencoder anomaly detection trains an autoencoder, an encoder $f$ and a decoder $g$ joined by a low-dimensional code,
+to reconstruct normal training data. The anomaly score of an input $\xvec$ is its reconstruction error
+$s(\xvec) = \norm{\xvec - g(f(\xvec))}^2$, and inputs whose error exceeds a threshold set on normal data are flagged.
+</Definition>
+
+## Problem
+
+<NoteLink to="pca-reconstruction-error">PCA reconstruction error</NoteLink> detects points that leave a linear subspace
+of normal variation. Images, spectra, audio frames and multichannel sensor data have normal variation along curved,
+low-dimensional manifolds that a linear subspace describes poorly. The residual of a linear fit then contains normal
+variation and hides anomalies.
+
+## Mechanism
+
+An autoencoder is a nonlinear generalisation of PCA. The encoder compresses the input into a code of dimension
+$m < p$, and the decoder expands it back. Training minimises the mean reconstruction error over normal data, so the
+network learns to reproduce the structure that normal inputs share. An input that does not share that structure is,
+in the hope of the method, mapped to a code of some normal input and reconstructed as that normal input. The
+difference is the error.
+
+1. Train the autoencoder on normal data, or on data in which anomalies are rare.
+2. Compute the reconstruction errors of held-out normal data.
+3. Set the threshold at a high quantile of those errors, or fit their tail with extreme value theory.
+4. Flag new inputs whose error exceeds the threshold.
+
+With a linear encoder and decoder and squared error, the optimal code spans the top $m$ principal components, and the
+reconstruction error equals the $Q$ statistic of PCA. Sakurada and Yairi compared autoencoders with linear and kernel
+PCA on spacecraft telemetry and simulated data <Cite id="sakurada2014" />. The autoencoders detected anomalies that
+linear PCA missed, and denoising autoencoders, trained to reconstruct clean inputs from corrupted ones, improved
+detection further.
+
+## Worked example: the error ignores the subspace
+
+The reconstruction error measures distance from the learned manifold, not position along it. A linear autoencoder with
+a one-dimensional code, trained on two-dimensional data spread along the direction $(1, 1)/\sqrt{2}$ with mean zero,
+reconstructs $\xvec$ as its projection onto that line.
+
+- The normal point $(1.2, 0.8)$ has projection $(1, 1)$ and error $0.2^2 + 0.2^2 = 0.08$.
+- The point $(1, -1)$, off the line, has projection $(0, 0)$ and error $2$.
+- The point $(10, 10)$ lies on the line, far beyond any training value. Its projection is itself and its error is $0$.
+
+The third point is the most anomalous of the three and gets the lowest score. PCA monitoring catches it with the
+$T^2$ statistic; the reconstruction error alone does not. A nonlinear autoencoder has the same blind spot along its
+manifold, and one that extrapolates smoothly beyond the training range can reproduce such points exactly.
+
+## The failure mode: reconstructing anomalies too well
+
+The method assumes that the autoencoder cannot reconstruct what it has not seen. Deep networks generalise, and that
+assumption often fails.
+
+- **Shared low-level structure.** Images of anomalies share edges, textures and colours with normal images. A network
+  that has learned to reproduce these reconstructs an unseen object fairly well. Gong and colleagues observed this on
+  video and image benchmarks <Cite id="gong2019" />.
+- **Too much capacity.** A wide code or a weakly regularised network can approach the identity map, which reconstructs
+  everything. A code that is too narrow fails the other way and reconstructs normal detail badly.
+- **Contaminated training data.** Anomalies in the training set are learned along with normal data and then
+  reconstructed well.
+
+Remedies restrict what the decoder can produce. The memory-augmented autoencoder (MemAE) of Gong and colleagues passes
+the code through a memory of prototype codes learned from normal data and reconstructs from a sparse combination of
+them. An anomalous input is then reconstructed as a mixture of normal prototypes, which enlarges its error
+<Cite id="gong2019" />. Other remedies add the distance of the code from the normal codes to the score, in the manner of
+<NoteLink to="support-vector-data-description">Deep SVDD</NoteLink>, or use a
+<NoteLink to="regularised-autoencoders">regularised autoencoder</NoteLink> that is less able to copy its input.
+
+A related failure affects generative models scored by likelihood. Nalisnick and colleagues found that flow-based
+models, variational autoencoders and autoregressive models trained on one image data set can assign higher likelihood
+to images from another data set than to their own test images <Cite id="nalisnick2019" />.
+
+## Cost
+
+Training cost is that of the autoencoder, typically many epochs over the normal data. Scoring is one forward pass per
+input, which is fast enough for streaming data. The threshold needs a held-out set of normal data.
+
+## Trade-offs
+
+- **Code size.** A small code detects more anomalies and also flags more normal inputs whose detail it cannot
+  reproduce. The code size is the main hyperparameter and cannot be tuned without some labelled anomalies or a proxy
+  for them.
+- **Error metric.** The squared error weights every feature equally. Features with large normal variation dominate
+  the score. Standardising features, or using a per-feature error normalised by its variance on normal data, balances
+  them. For images, errors in structural or perceptual metrics can track the anomaly better than pixel error.
+- **Against simpler baselines.** On tabular data with a few dozen features, <NoteLink to="isolation-forest" /> and
+  <NoteLink to="pca-reconstruction-error">PCA</NoteLink> are cheap, need little tuning and are often competitive.
+  Autoencoders pay off on high-dimensional structured inputs.

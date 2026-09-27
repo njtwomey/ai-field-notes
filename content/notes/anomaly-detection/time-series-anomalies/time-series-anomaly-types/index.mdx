@@ -1,0 +1,107 @@
+---
+title: Types of time-series anomaly
+kind: concept
+summary: 'Time-series anomalies are point anomalies (unusual values), contextual anomalies (values unusual at their time) and collective anomalies (unusual subsequences). Additive and innovational outliers differ in how they propagate through the series.'
+tags: [anomaly-detection, time-series, worked-example]
+aliases: [time series anomaly, time series outlier, additive outlier, innovational outlier, level shift, temporary change, contextual anomaly, collective anomaly, point anomaly]
+requires: [autoregressive-model]
+partOf: [anomaly-detection]
+related: [discord-discovery-at-scale, matrix-profile, change-point-detection, cusum, forecast-residual-anomaly-detection]
+references: [chandola2009, blazquez2021, fox1972, chen1993]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A time-series anomaly is a value or a stretch of values that does not fit the pattern of the rest of the series. The
+standard taxonomy distinguishes point anomalies, contextual anomalies and collective anomalies
+<Cite id="chandola2009" />. Persistent changes in the generating process, such as a shift in level, are change points
+rather than anomalies, although many detectors report both.
+</Definition>
+
+## Intuition
+
+In a set of independent observations, a value is anomalous or not by itself. In a time series, the order of values
+carries information. A value can be ordinary in size and still anomalous in its place: high for a Sunday, a spike at a
+time of day when spikes never occur, a heartbeat of normal amplitude but the wrong shape. The time index supplies a
+context, and neighbouring values supply a shape.
+
+## The three kinds
+
+- **Point anomaly.** A single value is unusual with respect to the whole series. A temperature sensor that reads
+  $-273\,^\circ\text{C}$ for one sample has a point anomaly. Robust univariate rules such as the
+  <NoteLink to="z-score-and-robust-outlier-detection">Hampel filter</NoteLink> find these.
+- **Contextual anomaly.** A value is unusual given its context and normal in another. Electricity demand at a weekday
+  level on a public holiday, or a warm January day, is a contextual anomaly. The context is usually time of day, day of
+  week or season. Detection needs a model of the expected value at each time, typically a forecasting model; see
+  <NoteLink to="forecast-residual-anomaly-detection" />.
+- **Collective anomaly.** A subsequence is unusual as a whole, although its individual values are not. A premature
+  ventricular contraction in an electrocardiogram, a flat stretch in a normally oscillating signal, or a repeated
+  keystroke pattern are examples. The subsequence whose nearest neighbour is farthest away, the discord, captures this
+  kind directly; see <NoteLink to="matrix-profile" /> and <NoteLink to="discord-discovery-at-scale" />.
+
+Blázquez-García and colleagues extend the taxonomy to multivariate series, where an anomaly can appear in one channel,
+in several together, or only in the relationship between channels <Cite id="blazquez2021" />.
+
+## Outlier models in a time-series model
+
+Time-series statistics describes transient anomalies as interventions added to a model of the normal series. Fox
+defined the two basic types <Cite id="fox1972" />, and Chen and Liu added level shifts and temporary changes
+<Cite id="chen1993" />. Let $x_t$ be the normal series and $\omega$ the size of the anomaly at time $t_0$.
+
+- **Additive outlier (AO).** One observation is corrupted and the process itself is untouched:
+  $y_t = x_t + \omega\,\indicator[t = t_0]$. A recording error is an additive outlier.
+- **Innovational outlier (IO).** The shock enters the process's innovation at $t_0$ and propagates through its
+  dynamics. A sudden demand spike that the system then absorbs gradually is an innovational outlier.
+- **Level shift (LS).** $y_t = x_t + \omega\,\indicator[t \ge t_0]$. The shift persists. This is a change point.
+- **Temporary change (TC).** $y_t = x_t + \omega\,\delta^{t - t_0}\,\indicator[t \ge t_0]$ with $0 < \delta < 1$. The
+  shift decays geometrically.
+
+### Additive against innovational in an AR(1) series
+
+Take the autoregressive model $x_t = \phi x_{t-1} + \varepsilon_t$ with $\abs{\phi} < 1$. The one-step residual of
+the fitted model is $e_t = y_t - \phi y_{t-1}$. When the model is correct and no anomaly is present, $e_t = \varepsilon_t$.
+
+For an additive outlier, $y_{t_0} = x_{t_0} + \omega$ and all other $y_t = x_t$. The residuals are
+
+$$
+e_{t_0} = \varepsilon_{t_0} + \omega, \qquad e_{t_0 + 1} = x_{t_0+1} - \phi(x_{t_0} + \omega) = \varepsilon_{t_0+1} - \phi\omega,
+$$
+
+and $e_t = \varepsilon_t$ afterwards. The series itself shows a single spike. The residuals show a spike followed by an
+echo of the opposite sign.
+
+For an innovational outlier, the innovation at $t_0$ is $\varepsilon_{t_0} + \omega$. The series carries the shock
+forward: $y_t = x_t + \omega\phi^{t - t_0}$ for $t \ge t_0$. The residuals are $e_{t_0} = \varepsilon_{t_0} + \omega$
+and $e_t = \varepsilon_t$ for all other $t$, because the model predicts the propagated part exactly.
+
+**Worked example.** With $\phi = 0.8$ and $\omega = 5$, an additive outlier raises the series by $5$ at $t_0$ only. The
+residuals carry $+5$ at $t_0$ and $-4$ at $t_0 + 1$. An innovational outlier raises the series by $5$, $4$, $3.2$,
+$2.56$, … at $t_0, t_0 + 1, t_0 + 2, t_0 + 3$. The residuals carry $+5$ at $t_0$ and nothing else.
+
+The two types need different treatment. An additive outlier should be removed or replaced before fitting a model,
+since it biases the estimate of $\phi$ toward zero. An innovational outlier is part of the process; removing only the
+value at $t_0$ leaves its echo in later values. Chen and Liu's procedure fits the model, tests each time for each type
+of effect, removes the most significant effects and refits <Cite id="chen1993" />.
+
+## Anomalies against change points
+
+A change point is a time after which the process behaves differently for good. A level shift is a change point; a
+point anomaly is not. The distinction decides what to do next. After an anomaly the model of normal behaviour still
+holds; after a change point it must be refitted. Change points are detected by
+<NoteLink to="change-point-detection" /> methods such as <NoteLink to="cusum" />, which accumulate evidence over many
+observations and are slow to react to a single spike. Anomaly detectors that use a forecasting model are the reverse:
+they react to a spike and, after a level shift, flag every value until the model adapts.
+
+## Pitfalls
+
+- **Labels depend on the kind.** A benchmark labelled for point anomalies penalises a detector that reports the whole
+  collective anomaly around them, and the reverse.
+- **Online and offline detection differ.** Offline, a detector sees the values after an anomaly, which helps decide
+  its type. Online, it sees only the past, so an innovational outlier and the start of a level shift look alike at
+  $t_0$.
+- **Repeated anomalies.** A collective anomaly that occurs twice is its own nearest neighbour, so the discord score
+  misses it. The left matrix profile, which compares each subsequence only with earlier ones, finds its first
+  occurrence.
+- **Seasonality as context.** A value that is extreme for the whole series may be normal for its season, and the
+  reverse. Detect on deseasonalised data or with a seasonal model.

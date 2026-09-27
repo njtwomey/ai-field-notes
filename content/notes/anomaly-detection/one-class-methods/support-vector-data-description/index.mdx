@@ -1,0 +1,141 @@
+---
+title: Support vector data description
+kind: concept
+summary: 'Support vector data description (SVDD) encloses the data in the smallest hypersphere of a kernel feature space, allowing points outside at cost $C$. Points outside are anomalies. For kernels with constant $k(\xvec, \xvec)$, such as the Gaussian, it equals the one-class SVM.'
+tags: [anomaly-detection, kernels, novelty-detection, worked-example]
+aliases: [SVDD, minimum enclosing ball, minimum enclosing hypersphere, Deep SVDD, one-class deep SVDD]
+requires: [support-vector-machine, kernel-trick]
+partOf: [anomaly-detection]
+related: [one-class-svm, kernel-svm, autoencoder-anomaly-detection]
+references: [tax2004, scholkopf2001b, ruff2018]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Support vector data description, introduced by Tax and Duin <Cite id="tax2004" />, finds a hypersphere with centre
+$\avec$ and radius $R$ in the feature space of a kernel $k$ that contains most of the training data and has the
+smallest possible volume. Points outside the sphere are allowed at a cost $C$ per unit of squared excess distance. A
+new point is anomalous when its feature-space image lies outside the sphere.
+</Definition>
+
+## Intuition
+
+A sphere is the simplest closed boundary around a set of points. In input space a sphere is too rigid to describe most
+data. In the feature space of a Gaussian kernel, a sphere pulled back to input space becomes a flexible boundary that
+follows the shape of the data. The boundary is defined by a few support vectors on its surface, as in a
+<NoteLink to="support-vector-machine" />.
+
+## Primal problem
+
+For training points $\xvec_1, \dots, \xvec_n$ with feature map $\phi$, SVDD solves
+
+$$
+\min_{R,\, \avec,\, \xivec}\ R^2 + C\sum_{i=1}^{n} \xi_i
+\quad\text{subject to}\quad \norm{\phi(\xvec_i) - \avec}^2 \le R^2 + \xi_i,\ \ \xi_i \ge 0.
+$$
+
+$C$ trades the volume of the sphere against the number of points left outside.
+
+## Dual problem
+
+With multipliers $\alpha_i \ge 0$ for the sphere constraints and $\gamma_i \ge 0$ for $\xi_i \ge 0$, the Lagrangian is
+
+$$
+L = R^2 + C\sum_i \xi_i - \sum_i \alpha_i\paren{R^2 + \xi_i - \norm{\phi(\xvec_i) - \avec}^2} - \sum_i \gamma_i \xi_i.
+$$
+
+Setting the derivatives with respect to $R$, $\avec$ and $\xi_i$ to zero gives
+
+$$
+\sum_i \alpha_i = 1, \qquad \avec = \sum_i \alpha_i \phi(\xvec_i), \qquad 0 \le \alpha_i \le C.
+$$
+
+The centre is a weighted mean of the mapped points. Substituting these conditions eliminates $R$, $\avec$ and $\xi$.
+Expanding $\norm{\phi(\xvec_i) - \avec}^2$ with $\avec = \sum_j \alpha_j \phi(\xvec_j)$ and $\sum_i \alpha_i = 1$
+leaves
+
+$$
+\max_{\alphavec}\ \sum_i \alpha_i k(\xvec_i, \xvec_i) - \sum_{i,j} \alpha_i \alpha_j k(\xvec_i, \xvec_j)
+\quad\text{subject to}\quad 0 \le \alpha_i \le C,\ \ \sum_i \alpha_i = 1.
+$$
+
+The constraints are feasible only if $nC \ge 1$. A point with $\alpha_i = C$ lies outside or on the sphere, so at most
+$1/C$ points lie outside. Writing $C = 1/(\nu n)$ turns this into the same bound as the one-class SVM's: at most a
+fraction $\nu$ of the training points are outside.
+
+The squared distance of a new point $\zvec$ from the centre needs only kernel evaluations:
+
+$$
+\norm{\phi(\zvec) - \avec}^2 = k(\zvec, \zvec) - 2\sum_i \alpha_i k(\xvec_i, \zvec) + \sum_{i,j} \alpha_i \alpha_j k(\xvec_i, \xvec_j).
+$$
+
+$\zvec$ is flagged when this exceeds $R^2$, where $R^2$ is the squared distance of any support vector with
+$0 < \alpha_i < C$.
+
+## Worked example
+
+With the linear kernel $k(x, x') = x x'$ on the real line, the dual objective
+$\sum_i \alpha_i x_i^2 - \paren{\sum_i \alpha_i x_i}^2$ is the variance of the points under the weights $\alpha_i$.
+SVDD with a linear kernel finds the weighting of largest variance, and that variance is $R^2$.
+
+Take the points $-1, 0, 2$ and a large $C$ (no points outside). Putting weight $\tfrac{1}{2}$ on each of $-1$ and $2$
+gives the weighted mean $0.5$ and the weighted variance $\tfrac{1}{2}(1 + 4) - 0.5^2 = 2.25$. No weighting does better,
+since the variance of values in $[-1, 2]$ is at most $(2 - (-1))^2/4 = 2.25$. So $\avec = 0.5$ and $R = 1.5$: the
+smallest interval containing the points, $[-1, 2]$. The point $0$ has $\alpha = 0$ and does not affect the solution.
+
+## Equivalence with the one-class SVM
+
+When $k(\xvec, \xvec) = \kappa$ is the same constant for every $\xvec$, SVDD and the
+<NoteLink to="one-class-svm" /> give the same solution. Translation-invariant kernels such as the Gaussian kernel,
+with $\kappa = 1$, have this property.
+
+**Same dual.** With $\sum_i \alpha_i = 1$, the first term of the SVDD dual is $\sum_i \alpha_i \kappa = \kappa$, a
+constant. Maximising the dual is then the same as minimising $\sum_{i,j} \alpha_i \alpha_j k(\xvec_i, \xvec_j)$ under
+$0 \le \alpha_i \le C$ and $\sum_i \alpha_i = 1$. That is the one-class SVM dual with $C = 1/(\nu n)$, up to a factor of
+$\tfrac{1}{2}$ that does not change the minimiser.
+
+**Same decision function.** With equal $\alpha$, the sphere test reads
+
+$$
+\kappa - 2\sum_i \alpha_i k(\xvec_i, \zvec) + \sum_{i,j} \alpha_i \alpha_j k(\xvec_i, \xvec_j) \le R^2
+\quad\Longleftrightarrow\quad
+\sum_i \alpha_i k(\xvec_i, \zvec) \ge \frac{1}{2}\paren{\kappa + \sum_{i,j} \alpha_i \alpha_j k(\xvec_i, \xvec_j) - R^2}.
+$$
+
+The right side is a constant, which plays the role of the one-class SVM's offset $\rho$. Both methods flag the same
+points <Cite id="scholkopf2001b" /> <Cite id="tax2004" />. For kernels whose $k(\xvec, \xvec)$ varies, such as
+polynomial kernels, the two differ.
+
+## Kernel width
+
+With the Gaussian kernel $k(\xvec, \xvec') = \exp\paren{-\norm{\xvec - \xvec'}^2/s^2}$, the width $s$ sets the
+flexibility of the boundary <Cite id="tax2004" />. For $s$ much smaller than the distances between points, all
+kernel values between distinct points are near zero, every point becomes a support vector with equal weight, and the
+description behaves like a kernel density estimate thresholded at a level. For $s$ much larger than the data's extent,
+the kernel is close to a quadratic function of distance and the description approaches a rigid sphere in input space.
+Tax and Duin choose $s$ so that the fraction of support vectors, which estimates the leave-one-out error on normal
+data, matches a target.
+
+## Deep SVDD
+
+Ruff and colleagues replaced the kernel with a neural network $\phi(\xvec; \Wmat)$ trained to map normal data close to
+a fixed centre $\cvec$, minimising $\frac{1}{n}\sum_i \norm{\phi(\xvec_i; \Wmat) - \cvec}^2$ plus weight decay
+<Cite id="ruff2018" />. The distance to $\cvec$ is the anomaly score. The network must not have bias terms and $\cvec$
+must not be learned: otherwise the trivial map $\phi \equiv \cvec$ reaches zero loss for all inputs, a failure called
+hypersphere collapse.
+
+## Assumptions
+
+- **Normal data form one connected region in feature space.** With a Gaussian kernel of moderate width this still
+  allows several clusters in input space.
+- **Mostly clean training data.** $C$, or $\nu$, must allow at least as many points outside as there are anomalies in
+  the training set.
+
+## Pitfalls
+
+- **Width and $C$ interact.** Both control how tightly the boundary follows the data, and neither can be tuned with
+  labels in the unsupervised setting.
+- **Cost.** Like the one-class SVM, training solves a quadratic programme with $n$ variables and needs the $n \times n$
+  kernel matrix.
+- **Feature scaling.** A single isotropic kernel width assumes features on comparable scales.

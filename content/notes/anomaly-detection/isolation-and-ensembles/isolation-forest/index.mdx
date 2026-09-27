@@ -1,0 +1,141 @@
+---
+title: Isolation forest
+kind: concept
+summary: 'An isolation forest isolates points with random axis-aligned cuts. Anomalies are isolated in fewer cuts, so the score is $s = 2^{-\expect[h(\xvec)]/c(\psi)}$, where $h$ is the path length in a random tree and $c(\psi) = 2H(\psi - 1) - 2(\psi - 1)/\psi$ normalises for subsample size $\psi$.'
+tags: [anomaly-detection, trees, ensembles, worked-example]
+aliases: [iForest, isolation tree, iTree, path length anomaly score, extended isolation forest]
+requires: [decision-tree]
+partOf: [anomaly-detection]
+related: [random-forest, extremely-randomised-trees, anomaly-detector-ensembles, local-outlier-factor]
+references: [liu2008, liu2012, hariri2021]
+status: draft
+updated: 2026-09-27
+---
+
+import { IsolationForestFigure } from './IsolationForestFigure'
+
+<Definition>
+An isolation forest <Cite id="liu2008" /> is an ensemble of random binary trees, each grown on a small random subsample
+of the data. Every internal node splits on a randomly chosen feature at a value drawn uniformly between that feature's
+minimum and maximum in the node. The anomaly score of a point is a decreasing function of its average depth over the
+trees: points isolated near the root are anomalies.
+</Definition>
+
+## Intuition
+
+Most detectors model normal data and flag what does not fit. An isolation forest skips the model and measures how easy
+a point is to separate from the rest.
+
+Anomalies are few, and their feature values differ from those of normal points. A random cut through the data's range
+is therefore more likely to fall between an anomaly and everything else than between two points in a dense cluster.
+Repeated random cuts isolate an anomaly after a few splits. A point deep inside a cluster needs many, because every
+cut that separates it must fall in the small gap between it and its neighbours.
+
+## Algorithm
+
+**Training.** For each of $t$ trees:
+
+1. Draw a subsample of $\psi$ points without replacement.
+2. Grow an isolation tree (iTree) recursively. At a node holding more than one point, pick a feature $q$ uniformly at
+   random and a split value $v$ uniformly between the node's minimum and maximum of feature $q$. Send points with
+   $x_q < v$ left and the rest right.
+3. Stop a branch when its node holds one point, or when the depth reaches $\lceil \log_2 \psi \rceil$, the average
+   depth of a balanced tree on $\psi$ points.
+
+**Scoring.** Pass a point $\xvec$ down each tree. Its path length $h(\xvec)$ is the number of edges from the root to
+the leaf it reaches, plus $c(m)$ if the leaf still holds $m > 1$ training points, to account for the subtree that
+the depth limit did not grow. Average over trees to get $\expect[h(\xvec)]$ and compute
+
+$$
+s(\xvec, \psi) = 2^{-\expect[h(\xvec)]/c(\psi)}.
+$$
+
+The defaults in the original papers are $t = 100$ trees and $\psi = 256$ <Cite id="liu2012" />.
+
+## The normalising constant
+
+A path length on its own is hard to interpret, because it grows with the subsample size. It is divided by $c(\psi)$,
+the average path length of a point in a random tree on $\psi$ points.
+
+Liu, Ting and Zhou take $c$ from the analysis of binary search trees, where an unsuccessful search in a random tree of
+$\psi - 1$ keys has the same structure as reaching a leaf of an iTree with $\psi$ leaves <Cite id="liu2008" />. The
+constant follows from one assumption: a split sends a uniformly random number of the $n$ points to the left, anywhere
+from $1$ to $n - 1$. This holds exactly for binary search trees built from a random order and approximately for iTrees.
+
+Let $D(n)$ be the expected sum of leaf depths in a fully grown tree with $n$ leaves, so the average depth is
+$a(n) = D(n)/n$. A tree with one leaf has $D(1) = 0$. At the root, all $n$ leaves move one level deeper, and the
+subtrees have $j$ and $n - j$ leaves with $j$ uniform on $\set{1, \dots, n - 1}$:
+
+$$
+D(n) = n + \frac{1}{n - 1}\sum_{j=1}^{n-1} \LB D(j) + D(n - j) \RB = n + \frac{2}{n - 1}\sum_{j=1}^{n-1} D(j).
+$$
+
+Multiply by $n - 1$ and subtract the same equation written for $n + 1$:
+
+$$
+n\,D(n + 1) - (n - 1)\,D(n) = (n + 1)n - n(n - 1) + 2D(n) = 2n + 2D(n).
+$$
+
+So $n\,D(n + 1) = (n + 1)\,D(n) + 2n$. Dividing by $n(n + 1)$ gives a recursion for the average depth:
+
+$$
+a(n + 1) = a(n) + \frac{2}{n + 1}.
+$$
+
+Starting from $a(2) = 1$, the sum telescopes to $a(n) = 2\sum_{j=2}^{n} 1/j = 2(H_n - 1)$, where
+$H_n = \sum_{j=1}^{n} 1/j$ is the $n$-th harmonic number. Since $H_n = H_{n-1} + 1/n$,
+
+$$
+c(n) = a(n) = 2H(n - 1) - \frac{2(n - 1)}{n}.
+$$
+
+For large $n$, $H(n) \approx \log n + 0.5772$, so $c(n)$ grows like $2\log n$. For $\psi = 256$, $c(256) = 10.25$.
+
+## Reading the score
+
+The exponent is the average path length measured in units of the typical one.
+
+- $\expect[h] \to 0$ gives $s \to 1$: the point is isolated at once, a clear anomaly.
+- $\expect[h] = c(\psi)$ gives $s = 0.5$: the point is as hard to isolate as a typical one.
+- $\expect[h] \to \psi - 1$, the deepest possible path, gives $s \to 0$.
+
+Liu and colleagues read the scores as follows. Points with $s$ close to 1 are definite anomalies. Points with $s$ well
+below $0.5$ are safely normal. If every point scores about $0.5$, the sample has no distinct anomaly.
+
+**Worked example.** With $\psi = 256$ and $c(256) = 10.25$, a point with average path length 3 scores
+$2^{-3/10.25} = 0.82$. A point with average path length 6 scores $0.67$. A point with average path length 12, deeper
+than typical, scores $0.44$.
+
+<IsolationForestFigure />
+
+## Why subsample
+
+Subsampling is part of the method, not only a shortcut. Liu and colleagues identify two failure modes of isolation on
+the full data <Cite id="liu2008" />.
+
+- **Swamping.** Normal points close to anomalies are hard to separate from them, and get high scores too.
+- **Masking.** A dense group of anomalies needs many cuts to isolate each member, so the group looks normal.
+
+A small subsample thins out both the clusters and the groups of anomalies, which makes anomalies easier to isolate.
+In the figure, lowering $\psi$ from 256 to 32 changes the score map little. Small subsamples also make the
+forest cheap: training costs $O(t\,\psi\log\psi)$ and scoring $n$ points costs $O(n\,t\log\psi)$, independent of the
+size of the training data beyond the sampling.
+
+## Assumptions
+
+- **Anomalies are few and different.** A large fraction of anomalies, or anomalies that are not separated from normal
+  data by the range of any feature, are not isolated early.
+- **Axis-aligned structure is enough.** Cuts are parallel to the axes. Normal data concentrated along a diagonal leave
+  empty corners that axis-aligned cuts do not reach early, which produces artefacts in the score.
+
+## Pitfalls
+
+- **Axis-parallel artefacts.** The score map shows bands of low scores along the axes of dense clusters, where cuts
+  pass through the cluster's range. The extended isolation forest of Hariri, Kind and Brunner uses cuts with random
+  slopes to remove them <Cite id="hariri2021" />.
+- **Irrelevant features.** A cut on a feature that carries no anomaly signal wastes a level of the tree. With many such
+  features, anomalies need longer paths and scores lose contrast.
+- **Setting the contamination.** Libraries often threshold the score at a quantile implied by a `contamination`
+  parameter. That sets the flagged fraction directly. It does not estimate how many anomalies the data contain.
+- **Categorical features.** The uniform split between minimum and maximum assumes ordered numeric features. Encoded
+  categories need care.

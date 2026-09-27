@@ -1,0 +1,151 @@
+---
+title: One-class support vector machine
+kind: concept
+summary: 'The one-class SVM separates the data from the origin of a kernel feature space with maximum margin. Its decision function $\sum_i \alpha_i k(\xvec_i, \xvec) - \rho$ is positive where the data lie. $\nu$ bounds the fraction of training outliers above and of support vectors below.'
+tags: [anomaly-detection, kernels, novelty-detection, worked-example]
+aliases: [one-class SVM, OC-SVM, OCSVM, nu-SVM for novelty detection, support estimation, ν-property]
+requires: [support-vector-machine, kernel-trick]
+partOf: [anomaly-detection]
+related: [support-vector-data-description, kernel-svm, reproducing-kernel-hilbert-space]
+references: [scholkopf2001b, scholkopf2002]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The one-class support vector machine of Schölkopf and colleagues <Cite id="scholkopf2001b" /> estimates a region of
+input space that contains most of the training data. It maps the data into a feature space with a kernel $k$ and finds
+the hyperplane that separates the data from the origin with maximum margin, allowing a fraction of points on the wrong
+side. A new point is normal when it lands on the data's side of the hyperplane. A parameter $\nu \in (0, 1]$ controls
+the fraction of training points left outside.
+</Definition>
+
+## Intuition
+
+A supervised <NoteLink to="support-vector-machine" /> separates two classes. Novelty detection has one class. The
+one-class SVM makes the origin of feature space play the role of the second class.
+
+The trick works best with the Gaussian kernel $k(\xvec, \xvec') = \exp\paren{-\gamma\norm{\xvec - \xvec'}^2}$. Every
+mapped point $\phi(\xvec)$ then has $\norm{\phi(\xvec)}^2 = k(\xvec, \xvec) = 1$, so all points lie on the unit sphere
+of feature space. All inner products $k(\xvec, \xvec')$ are positive, so the points lie within one orthant. A
+hyperplane that cuts off the origin cuts a cap from the sphere, and the cap contains the data. Pulled back to input
+space, the cap is a region with a smooth, possibly curved and disconnected boundary around the data.
+
+## Primal problem
+
+For training points $\xvec_1, \dots, \xvec_n$ with feature map $\phi$, the one-class SVM solves
+
+$$
+\min_{\wvec,\, \xivec,\, \rho}\ \frac{1}{2}\norm{\wvec}^2 + \frac{1}{\nu n}\sum_{i=1}^{n} \xi_i - \rho
+\quad\text{subject to}\quad \inner{\wvec}{\phi(\xvec_i)} \ge \rho - \xi_i,\ \ \xi_i \ge 0.
+$$
+
+The hyperplane is $\inner{\wvec}{\phi(\xvec)} = \rho$ and its distance from the origin is $\rho/\norm{\wvec}$.
+Minimising $\tfrac{1}{2}\norm{\wvec}^2 - \rho$ pushes the hyperplane away from the origin. The slack $\xi_i$ lets
+point $i$ fall on the origin's side at cost $\xi_i/(\nu n)$. The decision function is
+
+$$
+f(\xvec) = \inner{\wvec}{\phi(\xvec)} - \rho,
+$$
+
+with $f(\xvec) \ge 0$ for normal points and $f(\xvec) < 0$ for anomalies. $-f(\xvec)$ serves as an anomaly score.
+
+## Dual problem
+
+Introduce multipliers $\alpha_i \ge 0$ for the margin constraints and $\beta_i \ge 0$ for $\xi_i \ge 0$. The Lagrangian
+is
+
+$$
+L = \frac{1}{2}\norm{\wvec}^2 + \frac{1}{\nu n}\sum_i \xi_i - \rho
+- \sum_i \alpha_i\paren{\inner{\wvec}{\phi(\xvec_i)} - \rho + \xi_i} - \sum_i \beta_i \xi_i.
+$$
+
+Setting the derivatives to zero gives three conditions:
+
+$$
+\frac{\partial L}{\partial \wvec} = 0 \Rightarrow \wvec = \sum_i \alpha_i \phi(\xvec_i), \qquad
+\frac{\partial L}{\partial \xi_i} = 0 \Rightarrow \alpha_i = \frac{1}{\nu n} - \beta_i, \qquad
+\frac{\partial L}{\partial \rho} = 0 \Rightarrow \sum_i \alpha_i = 1.
+$$
+
+Since $\beta_i \ge 0$, the second condition gives $0 \le \alpha_i \le 1/(\nu n)$. Substituting back eliminates $\xi$,
+$\rho$ and $\beta$ and leaves the dual
+
+$$
+\min_{\alphavec}\ \frac{1}{2}\sum_{i,j} \alpha_i \alpha_j k(\xvec_i, \xvec_j)
+\quad\text{subject to}\quad 0 \le \alpha_i \le \frac{1}{\nu n},\ \ \sum_i \alpha_i = 1.
+$$
+
+The data enter only through the kernel. The decision function becomes
+
+$$
+f(\xvec) = \sum_i \alpha_i k(\xvec_i, \xvec) - \rho,
+$$
+
+a weighted sum of kernels centred on the support vectors, the points with $\alpha_i > 0$. The offset $\rho$ is
+recovered from any support vector with $0 < \alpha_i < 1/(\nu n)$, which lies exactly on the hyperplane:
+$\rho = \sum_j \alpha_j k(\xvec_j, \xvec_i)$.
+
+With the Gaussian kernel, $\sum_i \alpha_i k(\xvec_i, \xvec)$ is a kernel density estimate with weights $\alpha_i$
+concentrated on the boundary. The region $f \ge 0$ is a level set of that weighted estimate.
+
+## The ν-property
+
+The parameter $\nu$ has a direct meaning <Cite id="scholkopf2001b" />:
+
+1. $\nu$ is an upper bound on the fraction of training points outside the region (outliers).
+2. $\nu$ is a lower bound on the fraction of training points that are support vectors.
+
+Both follow from the dual constraints. Complementary slackness requires $\beta_i \xi_i = 0$. A point outside the
+region has $\xi_i > 0$, so $\beta_i = 0$ and $\alpha_i = 1/(\nu n)$, the upper bound. Let $n_\text{out}$ be the number
+of such points. Since all $\alpha_i \ge 0$ and they sum to 1,
+
+$$
+1 = \sum_i \alpha_i \ge \frac{n_\text{out}}{\nu n} \quad\Longrightarrow\quad \frac{n_\text{out}}{n} \le \nu.
+$$
+
+Every support vector has $0 < \alpha_i \le 1/(\nu n)$. With $n_\text{SV}$ support vectors,
+
+$$
+1 = \sum_i \alpha_i \le \frac{n_\text{SV}}{\nu n} \quad\Longrightarrow\quad \frac{n_\text{SV}}{n} \ge \nu.
+$$
+
+Under mild conditions on the data distribution, both fractions converge to $\nu$ as $n$ grows. In the unsupervised
+setting, $\nu$ is therefore set to the expected contamination.
+
+## Worked example
+
+Draw 200 points from a standard two-dimensional Gaussian and fit a one-class SVM with the Gaussian kernel,
+$\gamma = 0.5$, solved to a tolerance of $10^{-8}$.
+
+| $\nu$ | $\nu n$ | outliers $n_\text{out}$ | support vectors $n_\text{SV}$ |
+| ----- | ------- | ----------------------- | ----------------------------- |
+| 0.05  | 10      | 1                       | 24                            |
+| 0.1   | 20      | 13                      | 29                            |
+| 0.2   | 40      | 35                      | 47                            |
+| 0.5   | 100     | 98                      | 102                           |
+
+In every row $n_\text{out} \le \nu n \le n_\text{SV}$. In this sample, the number of outliers also equals the number of points at the
+upper bound $\alpha_i = 1/(\nu n)$. At $\nu = 0.05$ the bounds are loose; at $\nu = 0.5$ they nearly meet.
+
+## Assumptions
+
+- **Clean or lightly contaminated training data.** The method was designed for novelty detection. With contamination
+  it still works if $\nu$ is at least the contamination.
+- **A suitable kernel width.** The region's shape depends strongly on $\gamma$. A large $\gamma$ wraps each point in
+  its own small region and flags every new point. A small $\gamma$ gives an ellipsoid-like region that ignores
+  structure. No labels are available to tune it; heuristics set $1/\gamma$ near the median squared distance between
+  points.
+- **Features on comparable scales**, since the kernel uses a single isotropic width.
+
+## Pitfalls
+
+- **ν is not a threshold on new data.** It bounds the training fraction. The false-alarm rate on new normal data is
+  close to $\nu$ only when $n$ is large and the test data follow the training distribution.
+- **Cost.** The dual is a quadratic programme in $n$ variables. Training costs between $O(n^2)$ and $O(n^3)$ and the
+  kernel matrix needs $O(n^2)$ memory. For large $n$, subsample or use random features (see
+  <NoteLink to="kernel-trick" />).
+- **Kernels without constant norm.** With a polynomial or linear kernel, points do not lie on a sphere and separating
+  them from the origin has no clear density interpretation.
+- **Equivalence with SVDD.** For kernels with constant $k(\xvec, \xvec)$, such as the Gaussian kernel, the one-class
+  SVM and the <NoteLink to="support-vector-data-description" /> give the same solution.
