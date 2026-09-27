@@ -1,0 +1,162 @@
+---
+title: Explainable boosting machines
+kind: concept
+summary: 'An explainable boosting machine is a GAM with selected pairwise interactions, $g(\mu) = \beta_0 + \sum_j f_j(x_j) + \sum_{(j,k)} f_{jk}(x_j, x_k)$, whose terms are step functions built by boosting shallow one-feature trees with a small learning rate, cycling through the features.'
+tags: [generalised-additive-models, gradient-boosting, interpretability, decision-trees, interactions, worked-example]
+aliases: [EBM, GA2M, GA²M, explainable boosting machine, InterpretML, FAST interaction detection, cyclic gradient boosting]
+requires: [gradient-boosting, decision-tree]
+partOf: [generalised-additive-model]
+related: [shap-values-for-trees, tensor-product-smooths, shape-constrained-gams]
+references: [lou2012, lou2013, nori2019, caruana2015, lengerich2020, friedman2001]
+status: draft
+updated: 2026-09-27
+---
+
+import { EbmShapes } from './EbmShapes'
+
+<Definition>
+A **GA²M** is a generalised additive model with a small set $\Pcal$ of pairwise interactions,
+
+$$
+g\paren{\expect[y \mid \xvec]} = \beta_0 + \sum_{j=1}^d f_j(x_j) + \sum_{(j,k) \in \Pcal}f_{jk}(x_j, x_k)
+$$
+
+<Cite id="lou2013" />. An **explainable boosting machine** (EBM) fits a GA²M by gradient boosting: it cycles through
+the terms, and for each one fits a shallow tree on that term's features alone to the current pseudo-residuals, adding it
+with a small learning rate. Each fitted term is a piecewise-constant function of one or two features
+<Cite id="nori2019" />.
+</Definition>
+
+## From spline GAMs to boosted shape functions
+
+A spline GAM represents each $f_j$ in a smooth basis and controls its wiggliness with a quadratic penalty. Lou, Caruana
+and Gehrke compared other ways to build the shape functions of an additive model <Cite id="lou2012" />. They paired
+several shape families (regression splines, single trees, bagged trees, boosted trees) with several fitting procedures
+(penalised least squares, backfitting, gradient boosting). The most accurate combination on their benchmarks built each
+shape function from many shallow trees, fitted by gradient boosting that cycles through the features, with bagging on
+top. A tree on one feature is a step function of that feature, and a sum of step functions is again a step function, so
+the model stays additive and every term can be drawn as a curve.
+
+## Cyclic boosting
+
+Bin each feature $x_j$ into at most $B$ ordered bins. Start from the constant $F = \beta_0$, the mean response (or its
+link transform). Then, for rounds $m = 1, \dots, M$ and for each feature $j = 1, \dots, d$ in turn:
+
+1. Compute the pseudo-residuals $r_i = -\partial\ell(y_i, F_i)/\partial F_i$; for squared loss, $r_i = y_i - F_i$.
+2. Fit a tree with a few leaves to $\rvec$ using feature $j$ only. A split is a cut between two adjacent bins.
+3. Update $f_j \leftarrow f_j + \nu h$ and $F_i \leftarrow F_i + \nu h(x_{ij})$ with a small learning rate $\nu$.
+
+This is <NoteLink to="gradient-boosting">gradient boosting</NoteLink> <Cite id="friedman2001" /> with the base learner
+restricted to one feature per step and the features visited in a fixed cycle.
+
+**Why cycle, and why a small $\nu$.** Greedy boosting picks the feature with the best split at every step. When two
+features are correlated, the first one chosen absorbs their shared signal, and the shape functions then depend on an
+early choice. Visiting every feature in turn, with steps too small to capture much at once, lets correlated features
+share the signal as the rounds accumulate. The final shapes then hardly depend on the order of the features. With $\nu =
+1$ and full bin-level trees the cycle is backfitting with a bin-mean smoother; with small $\nu$ it is a damped version
+of it.
+
+**What it converges to.** Take squared loss and two-leaf trees. Let $S_L$ and $S_R$ be the residual sums in the two
+leaves and $n_L$, $n_R$ their sizes. Adding the leaf means with step $\nu$ changes the residual sum of squares in the
+left leaf by $\sum(r_i - c)^2 - \sum r_i^2 = -2cS_L + n_Lc^2$ with $c = \nu S_L/n_L$, which is $-\nu(2 - \nu)S_L^2/n_L$.
+The total reduction is
+
+$$
+\nu(2 - \nu)\paren{\frac{S_L^2}{n_L} + \frac{S_R^2}{n_R}}.
+$$
+
+The residuals sum to zero after the intercept is fitted, and each update keeps it so, so $S_R = -S_L$. At a fixed point
+no cut reduces the error, so $S_L = 0$ for every cut of every feature: every cumulative residual sum over the bins of
+every feature is zero, and hence every bin's residual sum is zero. Those are the normal equations of least squares on
+the indicator columns of all bins of all features. The limit of the boosting is the unpenalised least-squares additive
+step-function fit. Regularisation comes from stopping before that limit, on a validation set, and from averaging over
+bags. There is no penalty on roughness.
+
+**Worked example.** Suppose feature $j$ has four bins with two points each and residual sums $(-3, -1, 1, 3)$. The
+cumulative sums at the three possible cuts are $-3$, $-4$ and $-3$. With $S_R = -S_L$ the gain is $S_L^2(1/n_L + 1/n_R)$:
+$9(1/2 + 1/6) = 6$, $16(1/4 + 1/4) = 8$ and $9(1/6 + 1/2) = 6$. The tree cuts between bins 2 and 3, with leaf means
+$-4/4 = -1$ and $+1$. With $\nu = 0.1$ it adds $-0.1$ to $f_j$ on bins 1 and 2 and $+0.1$ on bins 3 and 4, and the
+residual sum of squares falls by $0.1 \times 1.9 \times 8 = 1.52$.
+
+<EbmShapes />
+
+## Pairwise interactions: FAST
+
+A GA²M with all $\binom d2$ pairs would lose the model's readability and cost too much. Lou, Caruana, Gehrke and Hooker
+rank the pairs first and keep the best few <Cite id="lou2013" />. After the main effects are fitted, each candidate pair
+$(j, k)$ is scored by the best reduction in residual sum of squares that a simple interaction model achieves on the
+residuals. The model cuts $x_j$ once and $x_k$ once and predicts the mean residual in each of the four quadrants.
+
+The score is cheap because of cumulative sums. Bin the residuals into a $B_j \times B_k$ histogram of sums and counts in
+$O(n)$. Form the two-dimensional prefix sums $H(a, b) = \sum_{a' \le a,\,b' \le b}(\text{bin sums})$ in $O(B_jB_k)$. For
+cuts $(a, b)$ the four quadrant sums are then $H(a, b)$, $H(a, B_k) - H(a, b)$, $H(B_j, b) - H(a, b)$ and the remainder,
+each in $O(1)$, and the same holds for the counts. The best quadrant model has reduction $\sum_q S_q^2/n_q$, so scoring a
+pair costs $O(n + B_jB_k)$. The top pairs are added as terms $f_{jk}$ and boosted on the residuals of the main effects,
+with trees that split on both features.
+
+## InterpretML's EBM
+
+InterpretML implements EBMs as `ExplainableBoostingRegressor` and `ExplainableBoostingClassifier`
+<Cite id="nori2019" />. Beyond the algorithm above it:
+
+- bins each feature, using up to 1024 bins for main effects and 64 per feature for interactions in version 0.7;
+- holds out a validation set (15% by default) and stops when the validation loss has not improved for a set number of
+  rounds;
+- repeats the whole fit on several bootstrap samples ("outer bags", 14 by default) and averages the shape functions,
+  which smooths them and gives an error band from the spread between bags;
+- detects interactions with FAST, with the number of pairs set as a multiple of the number of features;
+- centres every term to weighted mean zero over the training data and moves the means into the intercept. Full
+  **purification**, which also moves a pair's marginal means into the main effects so that $f_{jk}$ averages to zero
+  over each of its features, is the functional ANOVA convention <Cite id="lengerich2020" />; version 0.7 implements it
+  but does not apply it by default;
+- offers monotone constraints, and a post-hoc `monotonize` that replaces a term by its isotonic regression.
+
+The defaults change between versions. Version 0.7 uses learning rates of 0.04 for regression and 0.015 for
+classification and trees with two leaves. It starts with heavily regularised rounds that set the basic shapes, then
+mixes the cyclic rounds with greedy steps that boost whichever term currently gains most.
+
+## Intelligibility in practice
+
+Caruana and colleagues fitted a GA²M to data on patients with pneumonia, to predict the risk of death
+<Cite id="caruana2015" />. Its accuracy was close to that of the best black-box models on that task. Its term for asthma
+lowered the predicted risk. The pattern was real in the data: patients with asthma were admitted directly to intensive
+care and treated aggressively, which lowered their observed mortality. A model used to decide who can be treated at home
+would have sent them home. A black-box model would have learned the same pattern without showing it. In the additive
+model the term could be read, discussed with clinicians and edited. This is the case for **intelligible** models: each
+term is a plot that a domain expert can check against knowledge, and a wrong term can be removed or corrected without
+refitting the rest.
+
+## Spline GAMs and EBMs compared
+
+| | Penalised spline GAM | EBM |
+| --- | --- | --- |
+| Shape of each term | smooth piecewise polynomial | step function on bins |
+| Complexity control | quadratic roughness penalty, one $\lambda$ per term | learning rate, early stopping, bagging |
+| Choosing the amount of smoothing | REML or GCV, from the training data | a held-out validation set |
+| Uncertainty | Bayesian posterior bands, approximate p-values, effective degrees of freedom | spread across bootstrap bags |
+| Interactions | chosen by the analyst: `te`, `ti` | detected automatically by FAST |
+| Categorical and missing values | factor terms; missing values handled outside | bins, with a separate bin for missing |
+| Beyond the data range | continues the penalty's null space, usually linearly | constant beyond the last bin |
+| Shape constraints | penalty or reparameterisation | constrained boosting or post-hoc isotonic regression |
+| Scaling in $n$ | $O(np^2)$ per iteration for $p$ basis functions | $O(n)$ per boosting step, many steps |
+
+The two meet in the middle. A spline GAM gives smooth terms and principled inference. An EBM captures jumps and
+thresholds without choosing knots, handles many features and pairs automatically, and needs a validation set in place
+of a likelihood-based criterion. For an additive model, each term's contribution to a prediction is its exact
+attribution, so the explanations that <NoteLink to="shap-values-for-trees">SHAP values</NoteLink> approximate for a
+general model are read off directly.
+
+## Assumptions
+
+- The response depends on the features through main effects and a few pairwise interactions.
+- The binning is fine enough to follow each effect, and the training data cover each bin.
+
+## Pitfalls
+
+- **Ragged shapes.** Step functions follow noise in sparsely populated bins. Bagging and more data smooth them; a sharp
+  jump in a plot is not evidence of a real threshold unless it is stable across bags.
+- **Confounded terms.** As in the pneumonia example, a term shows an association in the data, not the effect of an
+  intervention.
+- **Correlated features.** Cycling spreads the shared signal between correlated features, but how it is split is still
+  not identified by the data. Read two correlated terms together.
+- **Constant extrapolation.** Beyond the training range the prediction is flat, whatever the trend at the edge.

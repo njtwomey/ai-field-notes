@@ -1,12 +1,12 @@
 ---
 title: Generalised additive model
-kind: concept
-summary: 'A generalised additive model replaces the linear predictor of a GLM with a sum of smooth functions, $g(\mu) = \alpha + \sum_j f_j(x_j)$. Each $f_j$ is a penalised spline; the model is fitted by backfitting or, as in mgcv, by penalised IRLS with smoothing parameters chosen by REML.'
+kind: overview
+summary: 'A generalised additive model sets $g(\expect[y \mid \xvec]) = \beta_0 + \sum_j f_j(x_j)$ for an exponential-family response. Each smooth is a basis expansion $f_j = \Bmat_j\betavec_j$ with a roughness penalty $\lambda_j\betavec_j^\top\Smat_j\betavec_j$, and the model is fitted by penalised IRLS.'
 tags: [generalised-additive-models, regression, splines, smoothing, interpretability]
-aliases: [GAM, generalized additive model, additive model, backfitting, local scoring, penalised IRLS, mgcv]
+aliases: [GAM, generalized additive model, additive model, backfitting, local scoring, identifiability constraint, sum-to-zero constraint]
 requires: [generalised-linear-model, smoothing-splines]
-related: [basis-expansions, regression-splines, iteratively-reweighted-least-squares]
-references: [hastie1986, hastie1990, buja1989, wood2017, wood2011]
+related: [basis-expansions, regression-splines, iteratively-reweighted-least-squares, ridge-regression]
+references: [hastie1986, hastie1990, buja1989, wood2017, wood2011, serven2018]
 status: draft
 updated: 2026-09-27
 ---
@@ -17,115 +17,234 @@ import { AdditiveFit } from '../_shared/AdditiveFit'
 A **generalised additive model** (GAM) for a response $y$ with features $x_1, \dots, x_d$ is
 
 $$
-g\paren{\expect[y \mid \xvec]} = \alpha + f_1(x_1) + f_2(x_2) + \dots + f_d(x_d),
+g\paren{\expect[y \mid \xvec]} = \beta_0 + f_1(x_1) + f_2(x_2) + \dots + f_d(x_d),
 $$
 
 where $y$ follows an exponential-dispersion family as in a
-<NoteLink to="generalised-linear-model">generalised linear model</NoteLink>, $g$ is a link function, and each $f_j$
-is an unknown smooth function estimated from the data <Cite id="hastie1986" />. With the identity link and Gaussian
-errors it is an **additive model**.
+<NoteLink to="generalised-linear-model">generalised linear model</NoteLink>, $g$ is a monotone link function, and each
+$f_j$ is an unknown smooth function estimated from the data <Cite id="hastie1986" />. Each $f_j$ is represented by a
+spline basis and estimated with a roughness penalty. With the identity link and Gaussian errors the model is an
+**additive model**.
 </Definition>
 
 ## Why additive
 
-A fully nonparametric regression $f(x_1, \dots, x_d)$ needs data that fill a $d$-dimensional space, and the amount
-needed grows exponentially with $d$. An additive model estimates $d$ one-dimensional functions, each at the rate of a
-one-dimensional smoother. It gives up interactions between features in exchange. Each $f_j$ can be plotted on its own,
-so the fitted model can be read term by term, like the coefficients of a linear model. Linear terms, factors and
-selected two-dimensional smooths $f_{jk}(x_j, x_k)$ can be mixed in.
+A fully nonparametric regression $f(x_1, \dots, x_d)$ needs data that fill a $d$-dimensional space. The amount of data
+needed for a given accuracy grows exponentially with $d$. An additive model estimates $d$ functions of one variable,
+each at the rate of a one-dimensional smoother. It gives up interactions between features in exchange. Each $f_j$ can
+be plotted on its own, so the fitted model can be read term by term, like the coefficients of a linear model.
+Selected interactions $f_{jk}(x_j, x_k)$, linear terms and factors can be added back as further terms.
 
-The $f_j$ are identifiable only up to constants: adding $c$ to $f_1$ and subtracting it from $f_2$ changes nothing. The
-standard constraint centres each smooth, $\sum_i f_j(x_{ij}) = 0$, so that $\alpha$ carries the overall level.
+## The term algebra
 
-## Penalised least squares
+A GAM is written as a sum of terms. Each term contributes columns to one model matrix and, if it is smooth, a block
+to one penalty. The two main software implementations use nearly the same algebra: the R package mgcv
+<Cite id="wood2017" /> and the Python package pyGAM <Cite id="serven2018" />.
 
-Take the additive model with Gaussian errors. Represent each smooth in a spline basis, $f_j(x) = \sum_k
-\beta_{jk}b_{jk}(x)$, with design matrix $\Bmat_j$ and roughness penalty matrix $\Omegamat_j$, so that $\betavec_j^\top
-\Omegamat_j\betavec_j = \int f_j''(x)^2dx$. Estimate by minimising
+| Term                               | mgcv                      | pyGAM                     | Columns                                  | Penalty                            |
+| ---------------------------------- | ------------------------- | ------------------------- | ---------------------------------------- | ---------------------------------- |
+| smooth of one feature              | `s(x)`                    | `s(0)`                    | spline basis, $k$ functions              | $\lambda\int f''(x)^2dx$ or differences |
+| linear effect                      | `x`                       | `l(0)`                    | the feature itself                       | none                               |
+| factor (categorical) effect        | `g`, or `s(g, bs = "re")` | `f(0)`                    | one indicator per level                  | none, or a ridge penalty           |
+| smooth interaction                 | `te(x, z)`, `ti(x, z)`    | `te(0, 1)`                | products of the marginal bases           | one penalty per margin             |
+| varying coefficient $z\,f(x)$      | `s(x, by = z)`            | `s(0, by=1)`              | the basis of $x$ times $z$               | as for $f$                         |
+| cyclic smooth                      | `s(x, bs = "cc")`         | `s(0, basis="cp")`        | basis with equal ends                    | wraps around                       |
+
+The features are named in mgcv and indexed by column in pyGAM. `ti` is mgcv's pure interaction: the tensor product
+with the main effects removed, so that `s(x) + s(z) + ti(x, z)` separates the main effects from the interaction.
+Tensor products, cyclic, factor and `by` terms, shape constraints and the thin-plate basis have their own notes:
+<NoteLink to="tensor-product-smooths">tensor-product smooths</NoteLink>,
+<NoteLink to="cyclic-factor-and-by-terms">cyclic, factor and by terms</NoteLink>,
+<NoteLink to="shape-constrained-gams">shape-constrained GAMs</NoteLink> and
+<NoteLink to="thin-plate-regression-splines">thin-plate regression splines</NoteLink>.
+
+A Poisson GAM with two smooths, an interaction and a factor reads, in the two packages,
+
+```r
+gam(y ~ s(x1) + s(x2) + te(x3, x4) + g, family = poisson, method = "REML")   # mgcv
+```
+
+```python
+PoissonGAM(s(0) + s(1) + te(2, 3) + f(4))                                     # pyGAM
+```
+
+## Basis and penalty
+
+Every smooth term is a basis expansion. Term $j$ has $p_j$ basis functions $b_{j1}, \dots, b_{jp_j}$ and coefficients
+$\betavec_j \in \reals^{p_j}$:
 
 $$
-\norm{\yvec - \alpha\ones - \sum_{j=1}^d \Bmat_j\betavec_j}^2 + \sum_{j=1}^d \lambda_j\,\betavec_j^\top\Omegamat_j\betavec_j,
+f_j(x) = \sum_{k=1}^{p_j}\beta_{jk}\,b_{jk}(x), \qquad \fvec_j = \Bmat_j\betavec_j,
 $$
 
-with one smoothing parameter $\lambda_j \ge 0$ per term. This is a quadratic in all the coefficients together. It can
-be minimised directly, or one block at a time.
+where $\Bmat_j$ is the $n \times p_j$ matrix with entries $b_{jk}(x_{ij})$ and $\fvec_j$ is the vector of the term's
+values at the $n$ observations. Stacking the columns of all terms gives one model matrix $\Xmat = [\ones, \Bmat_1,
+\dots, \Bmat_d]$ and one coefficient vector $\betavec = (\beta_0, \betavec_1, \dots, \betavec_d)$. The linear
+predictor is $\etavec = \Xmat\betavec$. A GAM with fixed bases is therefore a GLM with many columns.
 
-## Backfitting
-
-Set the gradient with respect to one block $\betavec_j$ to zero, holding the other blocks fixed:
+The columns are too many to fit without control. Each smooth carries a roughness penalty that is quadratic in its
+coefficients, $\lambda_j\betavec_j^\top\Smat_j\betavec_j$, with a fixed positive semi-definite matrix $\Smat_j$ and a
+smoothing parameter $\lambda_j \ge 0$. For a cubic spline, $\betavec_j^\top\Smat_j\betavec_j = \int f_j''(x)^2dx$.
+<NoteLink to="smoothing-penalties-and-curvature">Smoothing penalties and curvature</NoteLink> derives $\Smat_j$ and
+its null space, and <NoteLink to="p-splines">P-splines</NoteLink> replace the integral by differences of adjacent
+coefficients. Embedding each $\Smat_j$ in the rows and columns of term $j$ gives the total penalty
+$\Smat_\lambda = \sum_j \lambda_j\Smat_j$, a block-diagonal matrix. With Gaussian errors and the identity link, the
+estimate minimises
 
 $$
--2\Bmat_j^\top\paren{\yvec - \alpha\ones - \sum_{k}\Bmat_k\betavec_k} + 2\lambda_j\Omegamat_j\betavec_j = \zeros.
+\norm{\yvec - \Xmat\betavec}^2 + \betavec^\top\Smat_\lambda\betavec, \qquad \hat\betavec = \paren{\Xmat^\top\Xmat +
+\Smat_\lambda}^{-1}\Xmat^\top\yvec.
 $$
 
-Move the $k = j$ term to the left. The solution for block $j$ is
+The solution is a generalised ridge regression. The basis dimension $p_j$ sets an upper limit on the flexibility of
+term $j$; the penalty chooses how much of it is used. Typical bases have 10 to 20 functions per term: mgcv's default
+is $k = 10$ and pyGAM's is `n_splines=20`.
+
+## Identifiability
+
+The intercept and the smooths overlap. A constant can be moved from $\beta_0$ into any $f_j$ without changing the
+model. With a spline basis this overlap is exact in the model matrix, and the penalty does not remove it.
+
+**The model matrix is rank deficient.** B-splines form a partition of unity: $\sum_k b_{jk}(x) = 1$ for every $x$ in
+the range of the basis. So $\Bmat_j\ones_{p_j} = \ones_n$, and the vector
 
 $$
-\betavec_j = \paren{\Bmat_j^\top\Bmat_j + \lambda_j\Omegamat_j}^{-1}\Bmat_j^\top\rvec_j, \qquad \rvec_j = \yvec - \alpha\ones
-- \sum_{k \ne j}\Bmat_k\betavec_k.
+\vvec = (1, \; -\ones_{p_j}^\top, \; \zeros^\top)^\top
 $$
 
-So the fitted values $\fvec_j = \Bmat_j\betavec_j$ are the one-dimensional smoother $\Smat^{(j)} = \Bmat_j(\Bmat_j^\top
-\Bmat_j + \lambda_j\Omegamat_j)^{-1}\Bmat_j^\top$ applied to the **partial residual** $\rvec_j$: the response with every
-other term removed. **Backfitting** cycles through the terms, replacing each $\fvec_j$ by $\Smat^{(j)}\rvec_j$ and
-centring it, until nothing changes <Cite id="hastie1986" />:
+(one in the intercept, minus one on every coefficient of term $j$, zero elsewhere) satisfies $\Xmat\vvec = \ones_n -
+\Bmat_j\ones_{p_j} = \zeros$. Each smooth adds one such direction. In a check with an intercept and two smooths of
+10 B-splines each, $\Xmat$ has 21 columns and rank 19.
 
-1. Set $\hat\alpha = \bar y$ and $\hat\fvec_j = \zeros$ for all $j$.
-2. For $j = 1, \dots, d$: $\hat\fvec_j \leftarrow \Smat^{(j)}\paren{\yvec - \hat\alpha\ones - \sum_{k \ne j}
-   \hat\fvec_k}$, then subtract its mean.
-3. Repeat step 2 until the $\hat\fvec_j$ stop changing.
+**The penalty does not help.** A constant function has zero curvature, so $\Smat_j\ones_{p_j} = \zeros$ and
+$\vvec^\top\Smat_\lambda\vvec = 0$. Along $\vvec$ both the fit and the penalty are unchanged: if $\hat\betavec$
+minimises the penalised criterion, so does $\hat\betavec + c\vvec$ for every $c$. The matrix
+$\Xmat^\top\Xmat + \Smat_\lambda$ is singular, and the individual $\hat f_j$ are not determined. Their sum is.
 
-Each update exactly minimises the convex criterion over one block, so backfitting is block coordinate descent, and the
-criterion never increases. For symmetric smoothers with eigenvalues in $[0, 1]$, such as penalised splines, it converges
-to a solution of the joint problem <Cite id="buja1989" />. Any linear smoother can play the role of $\Smat^{(j)}$:
-splines, <NoteLink to="local-regression">local regression</NoteLink> or a running mean.
+**The constraint.** The standard fix requires each smooth to sum to zero over the data:
+
+$$
+\sum_{i=1}^n f_j(x_{ij}) = \ones^\top\Bmat_j\betavec_j = \cvec_j^\top\betavec_j = 0, \qquad \cvec_j = \Bmat_j^\top\ones.
+$$
+
+The constraint rules out the direction $\vvec$, because $\cvec_j^\top(-\ones_{p_j}) = -\sum_i\sum_k b_{jk}(x_{ij}) = -n
+\ne 0$. It also makes each $\hat\fvec_j$ orthogonal to the intercept column. With Gaussian errors, the unpenalised
+intercept's normal equation is $\ones^\top(\yvec - \Xmat\hat\betavec) = 0$. Every $\ones^\top\Bmat_j\hat\betavec_j$ is
+zero, so $\hat\beta_0 = \bar y$. The intercept carries the overall level and each $\hat f_j$ carries only shape. The
+centred smooth also has the narrowest confidence band of all the vertical shifts of $f_j$, because the uncertainty in
+the level sits in $\hat\beta_0$ <Cite id="wood2017" />.
+
+**Absorbing the constraint by a QR decomposition.** A linear constraint on $\betavec_j$ can be removed by
+reparameterising. Take the QR decomposition of the $p_j \times 1$ matrix $\cvec_j$:
+
+$$
+\cvec_j = \Qmat_j\begin{pmatrix} r \\ \zeros\end{pmatrix}, \qquad \Qmat_j = [\qvec_1, \Zmat_j],
+$$
+
+with $\Qmat_j$ orthogonal, so $\qvec_1 = \cvec_j/r$ and the $p_j - 1$ columns of $\Zmat_j$ are orthonormal and
+orthogonal to $\cvec_j$. A vector satisfies $\cvec_j^\top\betavec_j = 0$ exactly when it is orthogonal to $\qvec_1$,
+which is exactly when it lies in the span of $\Zmat_j$. So every constrained $\betavec_j$ is $\Zmat_j\tilde\betavec_j$
+for one unconstrained $\tilde\betavec_j \in \reals^{p_j - 1}$. Substituting,
+
+$$
+\Bmat_j\betavec_j = (\Bmat_j\Zmat_j)\tilde\betavec_j, \qquad \betavec_j^\top\Smat_j\betavec_j =
+\tilde\betavec_j^\top(\Zmat_j^\top\Smat_j\Zmat_j)\tilde\betavec_j.
+$$
+
+The term is refitted with basis $\Bmat_j\Zmat_j$ and penalty $\Zmat_j^\top\Smat_j\Zmat_j$, and no constraint remains.
+In the check above, the 19 columns after absorption have rank 19, and every column of $\Bmat_j\Zmat_j$ has mean zero to
+$10^{-16}$. mgcv applies $\Zmat_j$ as a Householder reflection without forming it <Cite id="wood2017" />. Each smooth
+loses one coefficient: `s(x, k = 10)` has 9 free coefficients and at most 9 effective degrees of freedom.
+
+pyGAM does not impose the constraint. It adds $\sqrt{\epsilon}\,\eye$, with $\epsilon$ the machine precision, to the
+penalty, which picks one solution along each direction $\vvec$ <Cite id="serven2018" />. Its term curves therefore
+carry arbitrary vertical offsets, and its intercept usually has an effective degree of freedom near zero. Differences
+$\hat f_j(a) - \hat f_j(b)$ are unaffected.
+
+## Fitting
+
+For fixed smoothing parameters, a Gaussian additive model is fitted by the closed form above. For other families, the
+penalised log-likelihood is maximised by **penalised iteratively reweighted least squares** (PIRLS). Each iteration
+solves a penalised weighted least-squares problem,
+
+$$
+\betavec^{(t+1)} = \paren{\Xmat^\top\Wmat\Xmat + \Smat_\lambda}^{-1}\Xmat^\top\Wmat\zvec,
+$$
+
+where $\zvec$ is the working response and $\Wmat$ the diagonal matrix of working weights of
+<NoteLink to="iteratively-reweighted-least-squares">IRLS</NoteLink>, both evaluated at $\betavec^{(t)}$.
+<NoteLink to="penalised-irls-for-gams">Penalised IRLS</NoteLink> derives the step, its convergence and its failure
+under separation. The smoothing parameters are chosen in an outer loop by GCV, UBRE or REML; see
+<NoteLink to="gam-smoothing-parameter-selection">smoothing parameter selection</NoteLink>. Each PIRLS iteration costs
+$O(np^2)$ for $n$ observations and $p$ coefficients in total.
+
+## Backfitting and local scoring
+
+Before penalised regression splines were practical, GAMs were fitted by **backfitting** <Cite id="hastie1986" />.
+Setting the gradient of the penalised criterion with respect to one block $\betavec_j$ to zero, with the other blocks
+fixed, gives
+
+$$
+\hat\fvec_j = \Amat_j\,\rvec_j, \qquad \Amat_j = \Bmat_j\paren{\Bmat_j^\top\Bmat_j + \lambda_j\Smat_j}^{-1}\Bmat_j^\top,
+\qquad \rvec_j = \yvec - \hat\beta_0\ones - \sum_{k \ne j}\hat\fvec_k.
+$$
+
+$\Amat_j$ is the one-dimensional smoother of term $j$ and $\rvec_j$ is the **partial residual**: the response with
+every other term removed. Backfitting sets $\hat\beta_0 = \bar y$, then cycles through the terms, replacing each
+$\hat\fvec_j$ by $\Amat_j\rvec_j$ minus its mean, until nothing changes. Each update exactly minimises the convex
+criterion over one block, so backfitting is block coordinate descent and the criterion never increases. For symmetric
+smoothers with eigenvalues in $[0, 1]$, such as penalised splines, it converges to a solution of the joint problem
+<Cite id="buja1989" />. Any linear smoother can play the role of $\Amat_j$, including
+<NoteLink to="local-regression">local regression</NoteLink>. For GLM families, **local scoring** runs a weighted
+backfit on the working response inside each IRLS iteration <Cite id="hastie1990" />.
 
 <AdditiveFit initialRho={0} />
 
-Convergence is fast when the features are unrelated, because each smooth sees nearly the same partial residual in every
-sweep. When one feature is close to a smooth function of another, the smooths can trade signal, and backfitting needs
-many sweeps. This is **concurvity**; see <NoteLink to="gam-interpretation">interpreting GAMs</NoteLink>.
+Backfitting converges slowly when one feature is close to a smooth function of another (**concurvity**; see
+<NoteLink to="gam-interpretation">interpreting GAMs</NoteLink>). It also gives no direct route to standard errors or
+to the automatic choice of several smoothing parameters. Solving for all coefficients at once, as mgcv and pyGAM do,
+provides both <Cite id="wood2011" />.
 
-## Non-Gaussian responses: local scoring
+## The chapter
 
-For a GLM family, the smooths enter through the link. Hastie and Tibshirani's **local scoring** algorithm wraps
-backfitting inside <NoteLink to="iteratively-reweighted-least-squares">IRLS</NoteLink>. At each outer iteration, form
-the working response $z_i = \eta_i + (y_i - \mu_i)\,d\eta_i/d\mu_i$ and weights $w_i = (d\mu_i/d\eta_i)^2/V(\mu_i)$, then
-fit a weighted additive model to $\zvec$ by backfitting with weighted smoothers. Repeat until the deviance stops
-changing <Cite id="hastie1990" />.
-
-## Penalised IRLS and mgcv
-
-Wood's approach, implemented in the R package mgcv, avoids backfitting <Cite id="wood2017" />. Each smooth gets a
-low-rank penalised regression spline basis of moderate size, typically 10 to 20 functions. Examples are cubic
-regression splines, P-splines and thin-plate regression splines, which extend to several inputs. The identifiability
-constraints are absorbed into the bases. All bases are then stacked into one model matrix $\Xmat$, with a
-block-diagonal total penalty $\Omegamat_\lambda = \sum_j\lambda_j\Omegamat_j$. Given $\lambda$, **penalised IRLS** iterates
-
-$$
-\hat\betavec = \paren{\Xmat^\top\Wmat\Xmat + \Omegamat_\lambda}^{-1}\Xmat^\top\Wmat\zvec,
-$$
-
-which is IRLS with a ridge-type penalty. The smoothing parameters are chosen by REML or GCV in an outer optimisation
-<Cite id="wood2011" />; see <NoteLink to="gam-smoothing-parameter-selection">smoothing parameter selection</NoteLink>.
-The penalised fit also gives a Bayesian posterior covariance for $\betavec$, which yields confidence bands for every
-smooth.
-
-In mgcv's formula language, `gam(y ~ s(x1) + s(x2) + x3, family = poisson, method = "REML")` fits a Poisson GAM with
-two smooth terms and one linear term. `te(x1, x2)` adds a tensor-product smooth of two inputs.
+- **Penalties and bases.** <NoteLink to="smoothing-penalties-and-curvature">Smoothing penalties and curvature</NoteLink>
+  explains why $\int f''^2$ measures roughness, what it leaves unpenalised, and the Demmler–Reinsch view of
+  shrinkage. <NoteLink to="p-splines">P-splines</NoteLink> use difference penalties on equally spaced B-splines, the
+  default in pyGAM. <NoteLink to="thin-plate-regression-splines">Thin-plate regression splines</NoteLink> are mgcv's
+  default basis.
+- **Fitting.** <NoteLink to="penalised-irls-for-gams">Penalised IRLS</NoteLink> for non-Gaussian families, and
+  <NoteLink to="gam-smoothing-parameter-selection">smoothing parameter selection</NoteLink> by GCV, UBRE and REML.
+- **Inference and checking.**
+  <NoteLink to="gam-inference-and-effective-degrees-of-freedom">GAM inference and effective degrees of freedom</NoteLink>
+  covers per-term edf, Bayesian credible bands and p-values.
+  <NoteLink to="gam-model-checking-and-term-selection">Model checking and term selection</NoteLink> covers basis
+  dimension checks, residuals and the double penalty.
+  <NoteLink to="gam-interpretation">Interpreting GAMs</NoteLink> covers partial effects and concurvity.
+- **Term types.** <NoteLink to="tensor-product-smooths">Tensor-product smooths</NoteLink>,
+  <NoteLink to="cyclic-factor-and-by-terms">cyclic, factor and by terms</NoteLink> and
+  <NoteLink to="shape-constrained-gams">shape-constrained GAMs</NoteLink>.
+- **Variants.** <NoteLink to="expectile-gams">Expectile GAMs</NoteLink> model conditional expectiles instead of the
+  mean.
+  <NoteLink to="generalised-additive-models-for-location-scale-and-shape">GAMLSS</NoteLink> give every parameter of
+  the response distribution its own additive predictor. <NoteLink to="explainable-boosting-machines">Explainable boosting machines</NoteLink> fit additive models with
+  pairwise interactions by boosting shallow trees.
+- **Practice.** <NoteLink to="gams-in-practice">GAMs in practice</NoteLink> maps pyGAM onto mgcv and gives a workflow.
 
 ## Assumptions
 
-- The effects of the features on $g(\mu)$ add up. Interactions not in the model are absorbed into the other terms or
-  the residual.
-- Each $f_j$ is smooth at the scale set by its basis size and penalty.
-- The response family and link are correct, as in any GLM.
+- The effects of the features on $g(\mu)$ add up. An interaction that is not in the model is absorbed into the other
+  terms or left in the residual.
+- Each $f_j$ is smooth at the scale set by its basis dimension and penalty.
+- The response family and link are correct, and the observations are independent given the features, as in any GLM.
 
 ## Pitfalls
 
-- **Basis too small.** The penalty can only reduce flexibility. If the basis has too few functions, the fit is too
-  stiff whatever $\lambda$ is. Check that the effective degrees of freedom of each term is well below its basis size.
-- **Extrapolation.** Outside the data, a penalised cubic spline continues linearly. Predictions there rest on that
-  convention, not on data.
+- **Basis too small.** The penalty can only remove flexibility. If a term's effective degrees of freedom are close to
+  its number of free coefficients, the basis may be limiting the fit; see
+  <NoteLink to="gam-model-checking-and-term-selection">model checking</NoteLink>.
+- **Extrapolation.** Outside the data, a penalised cubic spline continues along its end slope. Predictions there follow
+  the penalty's null space, not the data.
+- **Uncentred term plots.** Software that does not centre its smooths, such as pyGAM, shows each term up to an
+  arbitrary constant. Compare differences, not levels.
 - **Reading effects causally.** An additive term shows how the prediction changes with $x_j$ with the other features
   held fixed. With correlated features, that is not what happens when $x_j$ changes in the world.

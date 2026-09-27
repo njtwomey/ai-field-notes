@@ -1,0 +1,211 @@
+---
+title: Tensor-product smooths
+kind: concept
+summary: 'A tensor-product smooth models $f(x, z)$ with the products $a_i(x)b_j(z)$ of two marginal spline bases and gives each direction its own penalty, $\lambda_1\betavec^\top(\Smat_1 \otimes \eye)\betavec + \lambda_2\betavec^\top(\eye \otimes \Smat_2)\betavec$. The fit then does not depend on the units of $x$ and $z$.'
+tags: [generalised-additive-models, splines, smoothing, interactions, worked-example]
+aliases: [tensor product spline, te smooth, ti smooth, tensor product interaction, row-wise Kronecker product, smoothing spline ANOVA]
+requires: [regression-splines, smoothing-splines]
+partOf: [generalised-additive-model]
+related: [thin-plate-regression-splines, cyclic-factor-and-by-terms]
+references: [wood2006, wood2017, eilers2003, stone1994, serven2018]
+status: draft
+updated: 2026-09-27
+---
+
+import { TensorSmooth } from './TensorSmooth'
+
+<Definition>
+Let $\avec(x) = (a_1(x), \dots, a_{k_1}(x))^\top$ and $\bvec(z) = (b_1(z), \dots, b_{k_2}(z))^\top$ be spline bases for
+smooth functions of $x$ and of $z$, with penalty matrices $\Smat_1$ ($k_1 \times k_1$) and $\Smat_2$ ($k_2 \times k_2$).
+The **tensor-product smooth** of $x$ and $z$ is
+
+$$
+f(x, z) = \sum_{i=1}^{k_1}\sum_{j=1}^{k_2}\beta_{ij}\,a_i(x)\,b_j(z),
+$$
+
+estimated with the penalty $\lambda_1\betavec^\top(\Smat_1 \otimes \eye_{k_2})\betavec +
+\lambda_2\betavec^\top(\eye_{k_1} \otimes \Smat_2)\betavec$, one smoothing parameter per direction <Cite id="wood2006" />.
+It is mgcv's `te(x, z)` and pyGAM's `te(0, 1)`.
+</Definition>
+
+## Building the basis
+
+Start from a smooth of $x$ alone, $f_x(x) = \sum_i \alpha_i a_i(x)$. To let the shape in $x$ change with $z$, let every
+coefficient $\alpha_i$ be a smooth function of $z$ in the second basis, $\alpha_i(z) = \sum_j \beta_{ij}b_j(z)$.
+Substituting gives
+
+$$
+f(x, z) = \sum_i\paren{\sum_j\beta_{ij}b_j(z)}a_i(x) = \avec(x)^\top\Cmat\,\bvec(z),
+$$
+
+where $\Cmat$ is the $k_1 \times k_2$ matrix of coefficients $\beta_{ij}$. Starting from $z$ and letting its coefficients
+vary with $x$ gives the same function, so the construction is symmetric in the two variables.
+
+Stack $\Cmat$ row by row into $\betavec = (\beta_{11}, \dots, \beta_{1k_2}, \beta_{21}, \dots, \beta_{k_1k_2})^\top$,
+so that the index of $z$ runs fastest. The basis function multiplying $\beta_{ij}$ is $a_i(x)b_j(z)$, so the row of the
+model matrix for observation $(x_n, z_n)$ is the Kronecker product of the two marginal rows:
+
+$$
+\Xmat_{n\cdot} = \avec(x_n)^\top \otimes \bvec(z_n)^\top.
+$$
+
+The whole model matrix is the **row-wise Kronecker product** of the marginal model matrices $\Amat$ ($N \times k_1$) and
+$\Bmat$ ($N \times k_2$): row $n$ of $\Xmat$ is the Kronecker product of row $n$ of $\Amat$ and row $n$ of $\Bmat$. $\Xmat$
+has $k_1k_2$ columns. pyGAM computes it this way, as `a[:, :, None] * b[:, None, :]` reshaped to $N \times k_1k_2$
+<Cite id="serven2018" />.
+
+Two properties carry over from the marginal bases. B-splines sum to 1 at every point, and so do their products:
+$\sum_{ij}a_i(x)b_j(z) = \sum_i a_i(x)\sum_j b_j(z) = 1$. A cubic B-spline row has at most 4 non-zero entries, so a
+tensor-product row has at most $4 \times 4 = 16$.
+
+**Worked example.** Take linear B-splines (hat functions) as both marginal bases. Suppose a point lies a quarter of the
+way along a knot interval in $x$, so its non-zero marginal values are $(0.75, 0.25)$, and 60% of the way along an
+interval in $z$, with values $(0.4, 0.6)$. Its four non-zero model-matrix entries are
+$0.75 \times 0.4 = 0.30$, $0.75 \times 0.6 = 0.45$, $0.25 \times 0.4 = 0.10$ and $0.25 \times 0.6 = 0.15$, which sum
+to 1. They are the weights of bilinear interpolation between the four surrounding coefficients.
+
+## One penalty per direction
+
+A roughness measure in the $x$ direction is the integrated squared second derivative across the whole surface. With
+$f = \avec(x)^\top\Cmat\bvec(z)$,
+
+$$
+\frac{\partial^2 f}{\partial x^2} = \avec''(x)^\top\Cmat\,\bvec(z),
+$$
+
+so
+
+$$
+\int\!\!\int\paren{\frac{\partial^2 f}{\partial x^2}}^2dx\,dz = \int\bvec(z)^\top\Cmat^\top\paren{\int\avec''(x)\avec''(x)^\top
+dx}\Cmat\,\bvec(z)\,dz = \trace\paren{\Cmat^\top\Smat_1\Cmat\,\Gmat_2},
+$$
+
+with the marginal penalty $\Smat_1 = \int\avec''\avec''^\top dx$ and the marginal Gram matrix
+$\Gmat_2 = \int\bvec\bvec^\top dz$. Expanding the trace, $\trace(\Cmat^\top\Smat_1\Cmat\Gmat_2) =
+\sum_{ijkl}\beta_{ij}(\Smat_1)_{ik}(\Gmat_2)_{jl}\beta_{kl} = \betavec^\top(\Smat_1 \otimes \Gmat_2)\betavec$ in the
+row-major ordering.
+
+Wood's construction replaces $\Gmat_2$ by the identity <Cite id="wood2006" />. It reparameterises each marginal basis so
+that its coefficients are values of the function at evenly spaced points. Then $\betavec^\top(\Smat_1 \otimes
+\eye)\betavec = \sum_j \Cmat_{\cdot j}^\top\Smat_1\Cmat_{\cdot j}$ applies the one-dimensional penalty to the curve in $x$
+held at each of the $k_2$ reference values of $z$, and sums. That sum is a Riemann-sum approximation of the integral over
+$z$, with the grid spacing absorbed into $\lambda_1$. With P-spline marginals, the same penalty arises directly as the
+sum of squared second differences along every column of $\Cmat$ <Cite id="eilers2003" />. The $z$ direction is
+treated in the same way, so the fit minimises
+
+$$
+\norm{\yvec - \Xmat\betavec}^2 + \lambda_1\betavec^\top(\Smat_1 \otimes \eye_{k_2})\betavec +
+\lambda_2\betavec^\top(\eye_{k_1} \otimes \Smat_2)\betavec,
+$$
+
+with solution $\hat\betavec = (\Xmat^\top\Xmat + \lambda_1\Smat_1 \otimes \eye + \lambda_2\eye \otimes
+\Smat_2)^{-1}\Xmat^\top\yvec$. For a GLM response the same penalty enters
+<NoteLink to="penalised-irls-for-gams">penalised IRLS</NoteLink>. pyGAM builds exactly this sum: for each margin $m$ it
+forms the Kronecker product of identities with $\lambda_m$ times that margin's penalty in slot $m$, and adds the results.
+
+**What is left unpenalised.** Take second-difference (or second-derivative) marginal penalties, whose null spaces are the
+coefficient sequences linear in the index. The first penalty is zero when every column of $\Cmat$ is linear in $i$. The
+second is zero when every row is linear in $j$. Both hold when $\beta_{ij} = p + qi + rj + sij$, a bilinear function of
+the indices, so the joint null space has dimension $2 \times 2 = 4$. Evenly spaced B-splines reproduce linear functions
+from linear coefficient sequences, so as $\lambda_1, \lambda_2 \to \infty$ the fit tends to the least-squares surface
+$p + qx + rz + sxz$.
+
+## Scale invariance
+
+Suppose $z$ is re-expressed in other units, $z' = cz$ (metres to millimetres is $c = 1000$). The marginal knots are
+placed on the range or quantiles of the data, so they move with the data, and $b_j'(z') = b_j(z'/c) = b_j(z)$. The model
+matrix does not change. The second derivative picks up $c^{-2}$ and $dz' = c\,dz$, so the marginal derivative penalty
+becomes $\Smat_2' = c^{-3}\Smat_2$. The penalty $\lambda_2\betavec^\top(\eye \otimes \Smat_2')\betavec$ equals
+$(c^{-3}\lambda_2)\betavec^\top(\eye \otimes \Smat_2)\betavec$: every fit available in the old units is available in
+the new ones, at $\lambda_2' = c^3\lambda_2$. A smoothing parameter selected by GCV or REML over all $(\lambda_1,
+\lambda_2)$ moves by that factor, and the fitted surface is identical. A difference penalty does not involve units at
+all, so for P-spline marginals nothing changes. The tensor-product smooth is **scale invariant**.
+
+An isotropic smoother lacks this property. The thin-plate penalty for two variables is
+$J(f) = \int\!\!\int (f_{xx}^2 + 2f_{xz}^2 + f_{zz}^2)\,dx\,dz$; see
+<NoteLink to="thin-plate-regression-splines">thin-plate regression splines</NoteLink>. Write the same function in the new
+units as $g(x, z') = f(x, z'/c)$. Then $g_{xx} = f_{xx}$, $g_{xz'} = f_{xz}/c$ and $g_{z'z'} = f_{zz}/c^2$, and
+
+$$
+J(g) = c\int\!\!\int\paren{f_{xx}^2 + \frac{2}{c^2}f_{xz}^2 + \frac{1}{c^4}f_{zz}^2}dx\,dz.
+$$
+
+The three terms are reweighted relative to each other, in the ratio $1 : c^{-2} : c^{-4}$. The single $\lambda$
+multiplies all of them, so no choice of $\lambda$ restores the original balance. In millimetres, curvature in $z$ is
+weighted $10^{-12}$ relative to curvature in $x$. The fitted surface is then almost unpenalised in $z$ and stiff in $x$,
+purely because of the units. Isotropy is right when both inputs are measured on the same scale, such as the two
+coordinates of a map. It is wrong for pairs such as temperature and time.
+
+<TensorSmooth />
+
+## Interaction terms and the functional ANOVA decomposition
+
+A surface $f(x, z)$ can be split as
+
+$$
+f(x, z) = f_0 + f_1(x) + f_2(z) + f_{12}(x, z),
+$$
+
+into a constant, two **main effects** and an **interaction**. The split is unique once each part is centred against the
+others: $\sum_n f_1(x_n) = 0$, $\sum_n f_2(z_n) = 0$, and $f_{12}$ sums to zero over $x$ at every $z$ and over $z$ at every
+$x$. This is the **functional ANOVA decomposition** <Cite id="stone1994" />. Fitting its parts as separate terms answers
+a question that `te` alone cannot: is there an interaction at all, or do the effects add?
+
+mgcv's `ti(x, z)` fits $f_{12}$ alone <Cite id="wood2017" />. It centres each marginal basis first. Let $\Amat$ be the
+$N \times k_1$ marginal model matrix. The constraint $\ones^\top\Amat\alphavec = 0$ is one linear condition on
+$\alphavec$. Let $\Zmat_1$ be a $k_1 \times (k_1 - 1)$ matrix whose columns span the null space of $\ones^\top\Amat$. The
+centred basis $\tilde\avec(x) = \Zmat_1^\top\avec(x)$ has $k_1 - 1$ functions, each summing to zero over the data:
+$\sum_n\tilde\avec(x_n) = \Zmat_1^\top\Amat^\top\ones = \zeros$. Build $\tilde\bvec$ in the same way and take the
+tensor product of the centred bases. Every function in it has the required property. At any fixed $z$,
+
+$$
+\sum_n f_{12}(x_n, z) = \sum_{k,l}\beta_{kl}\,\tilde b_l(z)\sum_n\tilde a_k(x_n) = 0,
+$$
+
+and the same holds with the roles of $x$ and $z$ swapped.
+
+The pieces fit together exactly. B-splines sum to 1, so the span of $\avec$ is the span of $\tilde\avec$ plus the
+constant function, and likewise for $\bvec$. Multiplying out,
+
+$$
+\Span(\avec \otimes \bvec) = \Span(1) \oplus \Span(\tilde\avec) \oplus \Span(\tilde\bvec) \oplus \Span(\tilde\avec
+\otimes \tilde\bvec),
+$$
+
+with dimensions $1 + (k_1 - 1) + (k_2 - 1) + (k_1 - 1)(k_2 - 1) = k_1k_2$. So `y ~ s(x) + s(z) + ti(x, z)` spans the same
+functions as `y ~ te(x, z)` when the bases match. It gives the main effects and the interaction their own smoothing
+parameters, and each term can be tested or dropped on its own. pyGAM 0.12 has no `ti` term. Its `te` term also absorbs
+no centring constraint and relies on a tiny ridge on all coefficients to separate the constant from the intercept.
+
+The figure reads the decomposition off a fitted `te` surface by averaging over an evenly spaced grid, which is the same
+split with the uniform measure in place of the data.
+
+## Basis size and cost
+
+A tensor product of $d$ marginal bases has $\prod_m k_m$ coefficients. Two margins with 10 functions each give 100; three
+give 1000. mgcv's default is $k = 5$ per margin, so `te(x, z)` has 25 coefficients and `te(x, z, w)` has 125
+<Cite id="wood2017" />. pyGAM's default is 10 splines per margin. Each margin can have its own size, and should, when
+one direction needs more flexibility: pyGAM takes `te(0, 1, n_splines=[10, 5])` and mgcv takes `te(x, z, k = c(10,
+5))`.
+
+Forming $\Xmat^\top\Xmat$ costs $O(N p^2)$ for $p = \prod_m k_m$ columns in general, less when the sparsity of B-spline
+rows is used, and the solve costs $O(p^3)$. The penalty matrices themselves are sparse Kronecker products and never need
+to be formed densely.
+
+## Assumptions
+
+- The surface is smooth in each direction, at scales set by the separate $\lambda_m$.
+- The marginal basis sizes are large enough in every direction. The penalty can only remove flexibility.
+- The data cover the region where the surface is interpreted. A tensor product is defined on the whole rectangle of the
+  two ranges, and in empty corners it extrapolates the penalty's null space.
+
+## Pitfalls
+
+- **Isotropic smooths of mixed units.** A thin-plate `s(x, z)` of variables in different units depends on the units.
+  Use `te` unless both inputs share a scale.
+- **Coefficient count.** Three or more margins multiply quickly. Reduce the marginal $k$ rather than dropping to an
+  isotropic smooth.
+- **Reading `te` as an interaction.** A `te` term contains the main effects. To ask whether an interaction exists, fit
+  `s(x) + s(z) + ti(x, z)` and look at the `ti` term.
+- **Concurvity with main effects.** Adding `s(x)` beside `te(x, z)` duplicates the main effect of $x$. The model is then
+  identifiable only through the penalties.

@@ -1,0 +1,148 @@
+---
+title: Expectile GAMs
+kind: concept
+summary: 'An expectile GAM fits the $\tau$-expectile of $y$ given $\xvec$, the minimiser of the asymmetric squared loss $\abs{\tau - \indicator[u < 0]}\,u^2$ of the residual $u$; $\tau = 1/2$ gives the mean. It is fitted by iteratively reweighted penalised least squares.'
+tags: [generalised-additive-models, regression, smoothing, distributional-regression, worked-example]
+aliases: [expectile regression, ExpectileGAM, asymmetric least squares, LAWS, expectile, fit_quantile]
+requires: [regression-losses, smoothing-splines]
+partOf: [generalised-additive-model]
+related: [iteratively-reweighted-least-squares, generalised-additive-models-for-location-scale-and-shape]
+references: [newey1987, jones1994, schnabel2009, schnabel2013, sobotka2012, serven2018, koenker1978]
+status: draft
+updated: 2026-09-27
+---
+
+import { ExpectileCurves } from './ExpectileCurves'
+
+<Definition>
+For $\tau \in (0, 1)$, the **asymmetric squared loss** of a residual $u$ is $\rho_\tau(u) = \abs{\tau - \indicator[u <
+0]}\,u^2$: $\tau u^2$ above the prediction and $(1 - \tau)u^2$ below it. The **$\tau$-expectile** of a random variable
+$Y$ with finite mean is $e_\tau = \argmin_m\expect[\rho_\tau(Y - m)]$ <Cite id="newey1987" />. An **expectile GAM**
+models the conditional expectile as an additive predictor, $e_\tau(\xvec) = \alpha + \sum_jf_j(x_j)$, with penalised
+smooth terms.
+</Definition>
+
+## The expectile and its first-order condition
+
+The loss $\rho_\tau$ is continuously differentiable, with $\rho_\tau'(u) = 2\abs{\tau - \indicator[u < 0]}\,u$; the two
+one-sided derivatives at $u = 0$ are both 0. Write $L(m) = \expect[(m - Y)^+]$ for the expected shortfall below $m$ and
+$U(m) = \expect[(Y - m)^+]$ for the expected excess above it. Differentiating $\expect[\rho_\tau(Y - m)]$ with respect to
+$m$ and setting the result to zero gives
+
+$$
+\tau\,U(m) = (1 - \tau)\,L(m).
+$$
+
+Rearranged,
+
+$$
+\tau = \frac{L(m)}{L(m) + U(m)} = \frac{\expect[(m - Y)^+]}{\expect\abs{Y - m}}.
+$$
+
+The expectile is the point at which the expected shortfall below it is the fraction $\tau$ of the expected absolute
+deviation. $L$ is non-decreasing, with $L'(m) = \pr(Y \le m)$, and $U$ is non-increasing, with $U'(m) = -\pr(Y > m)$.
+So the right side increases strictly with $m$, and for each $\tau$ there is exactly one expectile. For $\tau = 1/2$ the
+condition is $U(m) = L(m)$, that is $\expect[Y - m] = 0$: the $\frac12$-expectile is the mean. The same ratio, read as a
+function of $m$, is a distribution function, so expectiles are the quantiles of a transformed distribution
+<Cite id="jones1994" />.
+
+Compare the pinball loss $\abs{\tau - \indicator[u < 0]}\,\abs{u}$, whose minimiser satisfies $\tau = \pr(Y \le m)$ and is
+the $\tau$-quantile (see <NoteLink to="regression-losses">regression losses</NoteLink>). A quantile depends only on how
+much probability lies on each side. An expectile depends on how far the mass lies, like a mean.
+
+**Worked example.** Take the five values $1, 2, 3, 4, 10$. The mean, the $\frac12$-expectile, is 4. For $\tau = 0.7$
+try $m$ between 4 and 10. Then $U = (10 - m)/5$ and $L = (4m - 10)/5$, and the condition $0.7(10 - m) = 0.3(4m - 10)$
+gives $7 - 0.7m = 1.2m - 3$, so $e_{0.7} = 10/1.9 = 5.263$. Check: $0.7 \times 4.737 = 3.316$ and $0.3 \times (4.263 +
+3.263 + 2.263 + 1.263) = 3.316$. The pinball loss at the same level is minimised by the fourth smallest value, 4, since
+$n\tau = 3.5$. The single large value pulls the expectile up and leaves the quantile where it is.
+
+For a standard normal $Z$, $L(m) = m\Phi(m) + \phi(m)$ and $U(m) = \phi(m) - m(1 - \Phi(m))$, with $\Phi$ and $\phi$ the
+normal distribution and density functions. The 0.9-expectile is $0.862$, which is the $\Phi(0.862) = 0.806$ quantile.
+Conversely the 0.95-quantile, $1.645$, is the 0.988-expectile. Expectiles are closer to the mean than quantiles of the
+same level.
+
+**Equivariance.** Replace $Y$ by $a + bY$ with $b > 0$. Both $L$ and $U$ scale by $b$ about the shifted point, so the
+condition is unchanged and $e_\tau(a + bY) = a + b\,e_\tau(Y)$.
+
+## Fitting by asymmetric least squares
+
+With a penalised basis $e_\tau(\xvec_i) = \bvec_i^\top\betavec$, the estimate minimises
+
+$$
+\sum_{i=1}^n w_i\paren{y_i - \bvec_i^\top\betavec}^2 + \betavec^\top\Smat_\lambda\betavec, \qquad w_i = \begin{cases}\tau
+& y_i > \bvec_i^\top\betavec, \\ 1 - \tau & \text{otherwise,}\end{cases}
+$$
+
+where $\Smat_\lambda = \sum_j\lambda_j\Smat_j$ is the total smoothing penalty. The weights depend on $\betavec$, so the
+fit iterates: fix the weights at the current residual signs, solve the weighted penalised least-squares problem
+$\hat\betavec = (\Bmat^\top\Wmat\Bmat + \Smat_\lambda)^{-1}\Bmat^\top\Wmat\yvec$, recompute the signs, and repeat until
+no point changes side. This is **least asymmetrically weighted squares** (LAWS) <Cite id="schnabel2009" />, the
+penalised form of Newey and Powell's asymmetric least squares <Cite id="newey1987" />.
+
+The iteration is Newton's method. The objective is convex, continuously differentiable and piecewise quadratic: it is an
+exact quadratic on each region where the residual signs are fixed. On the current region, the weighted problem is that
+quadratic, so each step jumps to the minimiser of the local quadratic model, which is what a Newton step does. When the
+signs no longer change, the gradient is zero and the fit is the global minimiser. In practice the signs settle within a
+handful of iterations. For $\tau = \frac12$ all weights are equal and the fit is the ordinary penalised least-squares
+smooth. The smoothing parameters can be chosen by cross-validating the asymmetric loss, or by treating the penalties as
+random effects and using the mixed-model machinery with the weights fixed <Cite id="sobotka2012" />.
+
+<ExpectileCurves />
+
+## pyGAM's ExpectileGAM
+
+pyGAM's `ExpectileGAM(terms, expectile=τ)` is a Gaussian GAM with identity link whose penalised IRLS weights are
+multiplied by $\tau$ where $y_i > \hat\mu_i$ and by $1 - \tau$ where $y_i \le \hat\mu_i$ <Cite id="serven2018" />. The
+weights are recomputed at every iteration, which is the LAWS iteration above.
+
+Its method `fit_quantile(X, y, quantile, max_iter=20, tol=0.01)` searches for the expectile level whose curve has a
+target share of the training data below it. It fits at the current `expectile` (0.5 by default) if the model is not yet
+fitted, then runs a bisection on the interval $[0, 1]$:
+
+1. Compute the ratio $r$, the fraction of training points with $y_i$ strictly below the prediction.
+2. If $\abs{r - q} \le$ `tol`, stop.
+3. If $r < q$, the current expectile becomes the lower end of the interval; otherwise it becomes the upper end.
+4. Set `expectile` to the midpoint of the interval and refit, starting from the previous coefficients.
+5. Repeat, at most `max_iter` times.
+
+The search matches the overall share of points below the curve, not the share at each $x$. It gives the conditional
+quantile at every $x$ when the conditional distributions differ only in location and scale, $Y = \mu(\xvec) +
+s(\xvec)\varepsilon$ with $\varepsilon$ independent of $\xvec$. By equivariance the $\tau$-expectile curve is then $\mu +
+s\,e_\tau(\varepsilon)$ and the $q$-quantile curve is $\mu + s\,q_q(\varepsilon)$, so the single $\tau$ with
+$e_\tau(\varepsilon) = q_q(\varepsilon)$ matches the quantile at every $x$. When the shape of the noise changes with
+$\xvec$, the curve is correct only on average.
+
+## Expectile or quantile regression
+
+| | Expectile regression | Quantile regression <Cite id="koenker1978" /> |
+| --- | --- | --- |
+| Loss | asymmetric squared, smooth | asymmetric absolute (pinball), kinked at 0 |
+| Estimation | reweighted penalised least squares | linear programming, or smoothing of the kink |
+| Meaning of level $\tau$ | balance of expected shortfall and excess | probability below the curve |
+| Sensitivity to extreme $y$ | high, like the mean | low |
+| Tail information | uses the size of tail values | uses only their count |
+
+Expectiles are the better choice when the size of tail values matters, as for a tail-mean risk measure, or when the
+smooth loss makes fitting and smoothing parameter selection easier. Quantiles are the better choice when the curve must
+have a probability meaning, such as a reference range that should contain 90% of healthy patients.
+
+## Crossing
+
+In the population, curves for different $\tau$ never cross: at every $\xvec$ the expectile increases strictly with $\tau$,
+as shown above. Curves fitted separately for each $\tau$ can cross in a sample, most often at extreme $\tau$ where few
+points carry the large weight, or when each curve has its own smoothing parameter. One remedy fits all levels together
+in a location-scale form, $e_\tau(\xvec) = \mu(\xvec) + c_\tau\,s(\xvec)$ with $s(\xvec) > 0$ and $c_\tau$ increasing in
+$\tau$. Then $e_\tau - e_{\tau'} = (c_\tau - c_{\tau'})s(\xvec) > 0$ for $\tau > \tau'$ at every $\xvec$, so the curves
+cannot cross <Cite id="schnabel2013" />.
+
+## Assumptions
+
+- The conditional distribution of $y$ has a finite mean at every $\xvec$.
+- The expectile curve for each $\tau$ is smooth, with the usual GAM additivity.
+
+## Pitfalls
+
+- **Reading an expectile as a quantile.** A 0.9-expectile curve does not have 90% of the data below it. Check the empirical
+  share, or use `fit_quantile` and remember that it matches the share only on average over $\xvec$.
+- **Extreme levels.** At $\tau$ near 0 or 1 a few points carry nearly all the weight, and the curve follows them.
+- **Heavy tails.** Like the mean, the expectile moves with outliers. A robust fit needs quantiles.

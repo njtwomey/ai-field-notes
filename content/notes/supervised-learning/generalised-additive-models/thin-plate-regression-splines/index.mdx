@@ -1,0 +1,178 @@
+---
+title: Thin-plate regression splines
+kind: concept
+summary: 'The thin-plate spline minimises $\norm{\yvec - \fvec}^2 + \lambda\int\!\!\int (f_{xx}^2 + 2f_{xz}^2 + f_{zz}^2)$; its solution is a sum of radial functions $r^2\log r$ plus a plane. A thin-plate regression spline keeps the top $k$ eigenvectors of that basis: a low-rank, isotropic smooth needing no knots.'
+tags: [generalised-additive-models, splines, smoothing, spatial-statistics, kernel-methods, worked-example]
+aliases: [thin plate spline, TPRS, thin-plate smoothing spline, Duchon spline, bending energy, biharmonic spline, polyharmonic spline]
+requires: [smoothing-splines, reproducing-kernel-hilbert-space]
+partOf: [generalised-additive-model]
+related: [tensor-product-smooths, gaussian-process, representer-theorem]
+references: [duchon1977, wood2003, wahba1990, green1994, wood2017]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Given data $(\xvec_i, y_i)$, $i = 1, \dots, n$, with $\xvec_i \in \reals^d$, the **thin-plate smoothing spline** is the
+function $\hat f$ that minimises
+
+$$
+\sum_{i=1}^n\paren{y_i - f(\xvec_i)}^2 + \lambda J_{md}(f),
+$$
+
+where $J_{md}$ is the integrated sum of squares of all $m$-th order partial derivatives of $f$ over $\reals^d$, with
+$2m > d$ <Cite id="duchon1977" />. For $d = 2$, $m = 2$ and inputs $(x, z)$, $J_{22}(f) =
+\int\!\!\int(f_{xx}^2 + 2f_{xz}^2 + f_{zz}^2)\,dx\,dz$. A **thin-plate regression spline** (TPRS) approximates it with a
+rank-$k$ basis taken from the leading eigenvectors of the full solution's basis <Cite id="wood2003" />. It is the default
+smooth `s()` in mgcv.
+</Definition>
+
+## The thin-plate energy
+
+$J_{22}$ is the bending energy of a thin metal plate deformed to the height $f(x, z)$, for small deflections. It is the
+integral of the squared Frobenius norm of the Hessian $\Hmat_f$:
+
+$$
+f_{xx}^2 + 2f_{xz}^2 + f_{zz}^2 = \norm{\Hmat_f}_F^2 = \trace\paren{\Hmat_f^2}.
+$$
+
+The energy does not depend on the orientation of the axes. Rotate the inputs, $\xvec = \Rmat\uvec$ with $\Rmat$
+orthogonal, and let $g(\uvec) = f(\Rmat\uvec)$. The chain rule gives $\Hmat_g = \Rmat^\top\Hmat_f\Rmat$, and
+$\trace(\Hmat_g^2) = \trace(\Rmat^\top\Hmat_f\Rmat\Rmat^\top\Hmat_f\Rmat) = \trace(\Hmat_f^2)$. The penalty is also
+unchanged by translations. A penalty with this property is **isotropic**: it treats every direction in the input space
+the same.
+
+The functions with zero energy have $\Hmat_f = \zeros$ everywhere, so they are the planes $\alpha_1 + \alpha_2x +
+\alpha_3z$. They form the **null space** of the penalty, and a thin-plate spline with $\lambda \to \infty$ is the
+least-squares plane. In general the null space of $J_{md}$ is the set of polynomials of degree less than $m$ in $d$
+variables, of dimension $M = \binom{m + d - 1}{d}$. The condition $2m > d$ makes point values $f(\xvec_i)$ well
+defined for functions of finite energy; for $d = 3$ it forces $m \ge 2$ and for $d = 4$ it forces $m \ge 3$.
+
+## The solution: radial functions and a plane
+
+Set the first variation of the criterion to zero. Perturb $f$ to $f + \epsilon g$ and differentiate at $\epsilon = 0$:
+
+$$
+-2\sum_i\paren{y_i - f(\xvec_i)}g(\xvec_i) + 2\lambda\int\!\!\int\paren{f_{xx}g_{xx} + 2f_{xz}g_{xz} + f_{zz}g_{zz}} = 0
+$$
+
+for every $g$. Integrating by parts twice moves all derivatives onto $f$, and the integral becomes $\int\!\!\int
+(\Delta^2 f)\,g$, where $\Delta^2 = (\partial_{xx} + \partial_{zz})^2$ is the biharmonic operator. The identity must hold
+for every $g$, so
+
+$$
+\lambda\,\Delta^2 f = \sum_i\paren{y_i - f(\xvec_i)}\,\delta_{\xvec_i},
+$$
+
+with $\delta_{\xvec_i}$ the Dirac delta at $\xvec_i$. The right side is a set of point loads, one at each data point.
+So $f$ is a sum of copies of the response to a single point load, the Green's function $\eta$ with $\Delta^2\eta =
+\delta_{\zeros}$, plus any function with $\Delta^2 p = 0$ and finite energy, which must be a plane:
+
+$$
+f(\xvec) = \sum_{i=1}^n\delta_i\,\eta\paren{\norm{\xvec - \xvec_i}} + \alpha_1 + \alpha_2x + \alpha_3z, \qquad \delta_i =
+\frac{y_i - f(\xvec_i)}{\lambda}.
+$$
+
+**Why $\eta(r) = r^2\log r/(8\pi)$.** For a radial function $u(r)$ in two dimensions the Laplacian is $u'' + u'/r$. With
+$u = r^2\log r$, $u' = 2r\log r + r$ and $u'' = 2\log r + 3$, so $\Delta u = 4\log r + 4$. The Laplacian of the constant
+is zero, and $\Delta\log r = 2\pi\delta_{\zeros}$ in the plane, because $\log r/(2\pi)$ is the fundamental solution of
+Laplace's equation. Hence $\Delta^2 u = 8\pi\delta_{\zeros}$, and $\eta = u/(8\pi)$. For general $m$ and even $d$ the
+same calculation gives $\eta_{md}(r) \propto r^{2m-d}\log r$; for odd $d$, $\eta_{md}(r) \propto r^{2m-d}$
+<Cite id="duchon1977" />. For $d = 1$ and $m = 2$ this is $r^3/12$, and the thin-plate spline is the cubic
+<NoteLink to="smoothing-splines">smoothing spline</NoteLink>.
+
+**The side condition.** The plane coefficients $\alphavec$ are unpenalised, so the derivative of the criterion with
+respect to them is zero at the optimum: $\sum_i(y_i - f(\xvec_i))\,p(\xvec_i) = 0$ for $p = 1, x, z$. Since $\delta_i$ is
+proportional to $y_i - f(\xvec_i)$, the weights satisfy $\Tmat^\top\deltavec = \zeros$, where $\Tmat$ is the $n \times 3$
+matrix with rows $(1, x_i, z_i)$.
+
+**The energy of the solution.** Let $\Emat$ be the $n \times n$ matrix $E_{ij} = \eta(\norm{\xvec_i - \xvec_j})$.
+Integrating by parts once more, $J(f) = \int\!\!\int f\,\Delta^2 f = \sum_i\delta_if(\xvec_i) =
+\deltavec^\top(\Emat\deltavec + \Tmat\alphavec) = \deltavec^\top\Emat\deltavec$, the last step by the side condition. The
+infinite-dimensional problem is therefore the finite one
+
+$$
+\min_{\deltavec, \alphavec}\norm{\yvec - \Emat\deltavec - \Tmat\alphavec}^2 + \lambda\,\deltavec^\top\Emat\deltavec
+\quad\text{subject to}\quad \Tmat^\top\deltavec = \zeros,
+$$
+
+with $n + 3$ unknowns <Cite id="wahba1990" /> <Cite id="green1994" />.
+
+**Worked example.** Take the four corners of the unit square and its centre, with $y = 0$ at the corners and $y = 1$ at
+the centre, and let $\lambda \to 0$ so the spline interpolates. The corner-to-corner distances are 1 and $\sqrt2$, and
+corner-to-centre is $1/\sqrt2$, so the non-zero entries of $\Emat$ are $\eta(\sqrt2) = 0.02758$ and $\eta(1/\sqrt2) =
+-0.00689$; $\eta(1) = 0$. Solving the interpolation equations $\Emat\deltavec + \Tmat\alphavec = \yvec$ and
+$\Tmat^\top\deltavec = \zeros$ gives $\delta = -12.086$ at each corner, $\delta = 48.345$ at the centre, and the plane
+$\alphavec = (2/3, 0, 0)$. The weights sum to zero and balance about each axis, as the side condition requires. The
+bending energy is $\deltavec^\top\Emat\deltavec = 48.35$. At $(0.25, 0.25)$, halfway between a corner and the centre, the
+surface is 0.589, above the linear interpolate 0.5, because a plate bends smoothly over the central peak.
+
+## Connection to reproducing kernels
+
+$\Emat$ is not positive definite: in the example its eigenvalues are $-0.0276$ (twice), $-0.0057$, $0.0276$ and $0.0333$.
+It is positive definite on the subspace $\Tmat^\top\deltavec = \zeros$, which is where the energy lives. A function with
+this property is **conditionally positive definite** of order $m$. The thin-plate energy is a squared semi-norm whose
+null space is the polynomials, and on the complement of the null space it behaves as the norm of a
+<NoteLink to="reproducing-kernel-hilbert-space">reproducing kernel Hilbert space</NoteLink>. The solution's form, a
+combination of kernel functions centred at the data plus a null-space term, is the semi-parametric form of the
+<NoteLink to="representer-theorem">representer theorem</NoteLink> <Cite id="wahba1990" />.
+
+## Low-rank approximation
+
+The full thin-plate spline has $n + M$ coefficients and costs $O(n^3)$. Wood's thin-plate regression spline keeps only
+the part of the basis that matters most <Cite id="wood2003" />. Eigen-decompose $\Emat = \Umat\Dmat\Umat^\top$ with the
+eigenvalues ordered by decreasing absolute value, and keep the first $k$: $\Umat_k$ ($n \times k$) and $\Dmat_k$. Restrict
+$\deltavec = \Umat_k\deltavec_k$. The problem becomes
+
+$$
+\min\norm{\yvec - \Umat_k\Dmat_k\deltavec_k - \Tmat\alphavec}^2 + \lambda\,\deltavec_k^\top\Dmat_k\deltavec_k \quad
+\text{subject to} \quad \Tmat^\top\Umat_k\deltavec_k = \zeros.
+$$
+
+The $M$ linear constraints are absorbed by writing $\deltavec_k = \Zmat\tilde\deltavec$, where the columns of $\Zmat$
+span the null space of $\Tmat^\top\Umat_k$ (from a QR decomposition of $\Umat_k^\top\Tmat$). That leaves $k - M$
+coefficients $\tilde\deltavec$ plus $M$ plane coefficients, $k$ in total, independent of $n$.
+
+**Why the leading eigenvectors.** Replacing $\Emat$ by the rank-$k$ matrix $\Emat_k = \Umat_k\Dmat_k\Umat_k^\top$ changes
+the fitted values $\Emat\deltavec$ by $(\Emat - \Emat_k)\deltavec$ and the penalty by $\deltavec^\top(\Emat -
+\Emat_k)\deltavec$. The worst cases over all $\deltavec$ of unit length are the spectral norm $\norm{\Emat - \Emat_k}_2$.
+For a symmetric matrix, the Eckart–Young–Mirsky theorem says that among all matrices of rank $k$ this norm is smallest
+for the truncated eigen-decomposition that keeps the $k$ eigenvalues of largest absolute value, and its value is
+$\abs{d_{k+1}}$. So the TPRS basis is the rank-$k$ basis that minimises the worst possible change in fitted values and in
+wiggliness caused by the truncation <Cite id="wood2003" />.
+
+The construction needs no knots. The bases for increasing $k$ are nested. The eigenvectors are computed by Lanczos
+iteration in $O(n^2k)$ operations rather than $O(n^3)$. For large $n$, mgcv computes the basis from a random subsample of
+2000 data points by default <Cite id="wood2017" />.
+
+## In mgcv
+
+`s(x)` and `s(x, z)` are thin-plate regression splines (`bs = "tp"`) unless another basis is named. The default order is
+the smallest $m$ with $2m > d + 1$, so $m = 2$ for one and two covariates and $m = 3$ for three. The default basis
+dimension is $k = M + 8$ for one covariate, $M + 27$ for two and $M + 100$ for more: 10, 30 and 110 <Cite id="wood2017" />.
+`bs = "ts"` adds a small penalty on the null space, so that a whole term can be shrunk to zero during term selection.
+`bs = "ds"` gives Duchon's generalisations with other penalty orders. pyGAM has no thin-plate basis; its bivariate smooth
+is the tensor product `te()`.
+
+## Isotropy: when to use it
+
+Isotropy is a modelling assumption. It is right when the covariates are measured in the same units and no direction is
+special, as for the two coordinates of a map in metres. It is wrong when the covariates have different units, such as
+temperature and time: rescaling one of them changes the relative weights of $f_{xx}^2$, $f_{xz}^2$ and $f_{zz}^2$ in the
+penalty, and no single $\lambda$ can undo it. A <NoteLink to="tensor-product-smooths">tensor-product smooth</NoteLink>
+has one smoothing parameter per covariate and is invariant to such rescaling.
+
+## Assumptions
+
+- The function is equally smooth in every direction of the input space.
+- The covariates share units, or have been scaled so that equal distances mean equal changes.
+- The basis dimension $k$ is large enough. The penalty can only reduce flexibility below $k$.
+
+## Pitfalls
+
+- **Mixed units.** An isotropic smooth of covariates in different units depends on the units chosen. Use a tensor
+  product.
+- **Extrapolation.** Outside the convex hull of the data the fit tends to the null-space plane, with a $r^2\log r$
+  correction that grows with distance. Predictions there rest on that form, not on data.
+- **Cost at large $n$.** The eigen-decomposition uses all distinct points unless subsampled. A random subsample changes the
+  basis slightly between runs unless its seed is fixed.

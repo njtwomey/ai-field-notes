@@ -1,0 +1,181 @@
+---
+title: Smoothing penalties and curvature
+kind: concept
+summary: 'The roughness penalty $\int f''''(x)^2dx$ is the linearised bending energy of the curve $y = f(x)$. For $f = \sum_k \beta_k b_k$ it equals $\betavec^\top\Smat\betavec$ with $S_{kl} = \int b_k''''b_l''''\,dx$. Straight lines cost nothing, and each Demmler–Reinsch component of the fit is shrunk by $1/(1 + \lambda d_k)$.'
+tags: [generalised-additive-models, splines, smoothing, regularisation]
+aliases: [roughness penalty, curvature penalty, penalty matrix, bending energy, penalty null space, Demmler–Reinsch basis, derivative penalty]
+requires: [regression-splines, ridge-regression]
+partOf: [generalised-additive-model]
+related: [smoothing-splines, p-splines, effective-degrees-of-freedom, gam-model-checking-and-term-selection]
+references: [green1994, wahba1990, deboor1978, demmler1975, wood2017, eilers1996]
+status: draft
+updated: 2026-09-27
+---
+
+import { PenaltyMatrix, PenaltyShrinkage } from './CurvaturePenalty'
+
+<Definition>
+The **roughness penalty** of order $m$ of a function $f$ on $[a, b]$ is $J_m(f) = \int_a^b f^{(m)}(x)^2\,dx$, with
+$m = 2$ the usual choice. For a function in a basis, $f(x) = \sum_{k=1}^p \beta_k b_k(x)$, it is the quadratic form
+$J_m(f) = \betavec^\top\Smat\betavec$ with **penalty matrix** $S_{kl} = \int_a^b b_k^{(m)}(x)\,b_l^{(m)}(x)\,dx$. A
+penalised fit minimises $\norm{\yvec - \Bmat\betavec}^2 + \lambda\betavec^\top\Smat\betavec$, where $\Bmat$ is the
+$n \times p$ matrix of basis functions at the data and $\lambda \ge 0$ is the smoothing parameter
+<Cite id="green1994" />.
+</Definition>
+
+## Curvature and bending energy
+
+Let $\theta(x) = \arctan f'(x)$ be the angle of the tangent to the curve $y = f(x)$, and $s$ the arc length along it,
+with $ds/dx = \sqrt{1 + f'(x)^2}$. The **curvature** is the rate at which the tangent turns per unit length of curve:
+
+$$
+\kappa = \frac{d\theta}{ds} = \frac{d\theta/dx}{ds/dx} = \frac{f''/(1 + f'^2)}{\sqrt{1 + f'^2}} = \frac{f''}{(1 +
+f'^2)^{3/2}}.
+$$
+
+The numerator is $d\theta/dx$, from $\frac{d}{dx}\arctan u = u'/(1 + u^2)$ with $u = f'$. When the slope is small, $\abs{f'} \ll 1$,
+the denominator is close to 1 and $\kappa \approx f''$.
+
+A thin elastic beam bent into the shape $y = f(x)$ stores the **bending energy** $\frac{EI}{2}\int\kappa^2\,ds$, where
+$E$ is the Young's modulus of the material and $I$ the second moment of area of its cross-section. With small slopes,
+$ds \approx dx$ and $\kappa \approx f''$, so the energy is $\frac{EI}{2}\int f''(x)^2\,dx$. A draughtsman's spline is
+such a beam, a thin strip of wood held at chosen points by weights. It settles in the shape of least energy, which is
+the interpolating cubic spline: among all interpolants, the natural cubic spline minimises $\int f''^2$ (proved in
+<NoteLink to="smoothing-splines">smoothing splines</NoteLink>). The penalty $J_2$ is the linearised bending energy, and
+$\lambda$ plays the role of the beam's stiffness <Cite id="green1994" />.
+
+The linearisation is what makes the penalty useful for estimation. $\int\kappa^2\,ds$ is not a quadratic function of
+$f$, while $\int f''^2$ is. A quadratic penalty added to a quadratic loss keeps the estimate linear in $\yvec$.
+
+The penalty depends on the units of $x$. Let $x = u/c$ and $g(u) = f(u/c)$, the same curve on a stretched axis. Then
+$g''(u) = f''(x)/c^2$ and $du = c\,dx$, so $\int g''(u)^2\,du = c^{-3}\int f''(x)^2\,dx$. Rescaling $x$ by $c$ rescales
+the penalty by $c^{-3}$, and the $\lambda$ that gives the same fit by $c^3$. Smoothing parameters are therefore not
+comparable across terms. Effective degrees of freedom are.
+
+## The penalty matrix
+
+Write $f = \sum_k\beta_k b_k$, so $f'' = \sum_k\beta_k b_k''$ and
+
+$$
+\int_a^b f''(x)^2\,dx = \int_a^b\sum_{k,l}\beta_k\beta_l\,b_k''(x)\,b_l''(x)\,dx = \sum_{k,l}\beta_k\beta_l S_{kl} =
+\betavec^\top\Smat\betavec.
+$$
+
+$\Smat$ is the Gram matrix of the functions $b_k''$ under the inner product $\inner{u}{v} = \int_a^b uv\,dx$, so it is
+symmetric and positive semi-definite. For cubic B-splines, each $b_k''$ is piecewise linear and nonzero on four knot
+spans. $S_{kl}$ is zero when the supports of $b_k$ and $b_l$ do not overlap, that is when $\abs{k - l} \ge 4$, so
+$\Smat$ is banded with seven nonzero diagonals. On each knot span the integrand $b_k''b_l''$ is a quadratic, and a
+two-point Gauss–Legendre rule on each span computes $\Smat$ exactly <Cite id="wood2017" />.
+
+<PenaltyMatrix />
+
+## The null space
+
+The penalty is zero exactly for straight lines. If $\betavec^\top\Smat\betavec = \int f''^2 = 0$, then $f'' = 0$ on
+$[a, b]$, because $f''$ is continuous for a cubic spline, so $f$ is linear. Conversely, every straight line lies in the
+span of a B-spline basis of degree $q \ge 1$: the B-splines sum to one, and $\sum_k \tau_k b_k(x) = x$, where the
+**Greville abscissa** $\tau_k$ is the mean of the $q$ interior knots of $b_k$ <Cite id="deboor1978" />. So the null
+space of $\Smat$ is two-dimensional, spanned by $\ones$ and $\tauvec = (\tau_1, \dots, \tau_p)$, and
+$\rank\Smat = p - 2$.
+
+**The fit tends to a straight line as $\lambda \to \infty$.** Let $\hat\betavec_\lambda$ be the penalised estimate and
+$\ell$ the least-squares line, whose coefficients lie in the null space and whose residual sum of squares is
+$\mathrm{RSS}_\ell$. The penalised criterion at $\hat\betavec_\lambda$ is no larger than at $\ell$, where the penalty
+is zero:
+
+$$
+\norm{\yvec - \Bmat\hat\betavec_\lambda}^2 + \lambda\hat\betavec_\lambda^\top\Smat\hat\betavec_\lambda \le
+\mathrm{RSS}_\ell.
+$$
+
+Both terms on the left are non-negative, so $\int\hat f_\lambda''^2 \le \mathrm{RSS}_\ell/\lambda \to 0$. The limit has
+zero curvature, so it is a line, and among lines the criterion is minimised by the least-squares line. A heavily
+penalised smooth term becomes the linear term $\beta x$, never the zero function. The slope $\beta$ is not shrunk at
+all. Removing a term needs a penalty on the null space as well; see
+<NoteLink to="gam-model-checking-and-term-selection">term selection</NoteLink>.
+
+## Other derivative orders
+
+The penalty $J_m$ is zero exactly when $f^{(m)} = 0$, that is when $f$ is a polynomial of degree at most $m - 1$. Its
+null space has dimension $m$:
+
+| $m$ | penalises | null space | limit as $\lambda \to \infty$ | exact minimiser over all $f$ |
+| --- | --------- | ---------- | ----------------------------- | ---------------------------- |
+| 1   | slope     | constants  | the mean $\bar y$             | linear spline                |
+| 2   | curvature | lines      | least-squares line            | natural cubic spline         |
+| 3   | change of curvature | quadratics | least-squares quadratic | natural quintic spline     |
+
+The last column is the solution of the smoothing problem over all functions with a square-integrable $m$-th
+derivative: a natural spline of degree $2m - 1$ with knots at the data <Cite id="wahba1990" />. A basis of degree $q$
+supports penalties up to $m = q$, because $f^{(m)}$ must be square-integrable. For cubic B-splines, $m = 3$ makes
+$f'''$ piecewise constant, and $m = 4$ is not available. The order is chosen by what should be free: $m = 1$ lets a
+term shrink to a constant, $m = 2$ to a line, $m = 3$ to a quadratic.
+
+## The Demmler–Reinsch basis
+
+A change of basis makes the penalised fit diagonal, and shows exactly what the penalty does to each component of the
+data. Assume $\Bmat^\top\Bmat$ is positive definite and take its Cholesky factorisation $\Bmat^\top\Bmat =
+\Lmat\Lmat^\top$. The symmetric positive semi-definite matrix $\Lmat^{-1}\Smat\Lmat^{-\top}$ has an eigendecomposition
+
+$$
+\Lmat^{-1}\Smat\Lmat^{-\top} = \Umat\Dmat\Umat^\top, \qquad \Dmat = \diag(d_1, \dots, d_p), \quad 0 \le d_1 \le \dots
+\le d_p,
+$$
+
+with $\Umat$ orthogonal. Change coefficients to $\gammavec = \Umat^\top\Lmat^\top\betavec$, so $\betavec =
+\Lmat^{-\top}\Umat\gammavec$, and let $\tilde\Xmat = \Bmat\Lmat^{-\top}\Umat$. The new columns are orthonormal:
+
+$$
+\tilde\Xmat^\top\tilde\Xmat = \Umat^\top\Lmat^{-1}\paren{\Lmat\Lmat^\top}\Lmat^{-\top}\Umat = \eye.
+$$
+
+The penalty is diagonal: $\betavec^\top\Smat\betavec = \gammavec^\top\Umat^\top\Lmat^{-1}\Smat\Lmat^{-\top}\Umat
+\gammavec = \gammavec^\top\Dmat\gammavec$. Let $\svec = \tilde\Xmat^\top\yvec$ be the coordinates of the data in the
+new basis. Because the columns are orthonormal, $\norm{\yvec - \tilde\Xmat\gammavec}^2 = \norm{\yvec -
+\tilde\Xmat\svec}^2 + \norm{\svec - \gammavec}^2$, and the criterion separates into one scalar problem per component:
+
+$$
+\norm{\yvec - \tilde\Xmat\svec}^2 + \sum_{k=1}^p\brack{(s_k - \gamma_k)^2 + \lambda d_k\gamma_k^2}.
+$$
+
+Setting the derivative of each bracket to zero gives $-2(s_k - \gamma_k) + 2\lambda d_k\gamma_k = 0$, so
+
+$$
+\hat\gamma_k = \frac{s_k}{1 + \lambda d_k}, \qquad \hat\yvec = \sum_{k=1}^p\frac{1}{1 + \lambda d_k}\,s_k\,\tilde\xvec_k.
+$$
+
+The unpenalised fit keeps every $s_k$. The penalised fit multiplies component $k$ by the **shrinkage factor**
+$1/(1 + \lambda d_k)$. The effective degrees of freedom are the trace of the map from $\yvec$ to $\hat\yvec$,
+$\sum_k 1/(1 + \lambda d_k)$ <Cite id="demmler1975" />.
+
+**What $d_k$ measures.** The $k$-th basis function $\phi_k = \sum_l(\Lmat^{-\top}\Umat)_{lk}\,b_l$ has
+$\sum_i\phi_k(x_i)^2 = 1$ and $\int\phi_k''^2 = d_k$. So $d_k$ is the curvature of a function of unit size on the
+data: its wiggliness. The first two eigenvalues are zero and $\phi_1, \phi_2$ span the straight lines, whose factor is
+1 for every $\lambda$. The later $\phi_k$ oscillate with roughly $k - 1$ sign changes, like sinusoids of increasing
+frequency, and $d_k$ grows quickly with $k$. For 80 uniform points and 23 cubic B-splines on $[0, 1]$, $d_3 = 5.6$,
+$d_4 = 44$, $d_5 = 204$ and $d_{23} = 1.5 \times 10^6$. Components with $\lambda d_k \ll 1$ pass almost unchanged and
+components with $\lambda d_k \gg 1$ are removed. The penalised spline is a low-pass filter with a soft cutoff near
+$d_k = 1/\lambda$.
+
+<PenaltyShrinkage />
+
+The figure plots the fit, its $m$-th derivative and the shrinkage factors. For $m = 2$, raising $\lambda$ flattens
+$f''$ towards zero while the first two factors stay at 1. Switching to $m = 1$ or $m = 3$ changes the number of
+factors pinned at 1 and the dashed limit from a constant to a quadratic.
+
+## Assumptions
+
+- The basis spans the functions of interest well enough: the penalty can only remove flexibility, never add it.
+- $\Bmat^\top\Bmat$ is positive definite for the Demmler–Reinsch construction. With empty knot spans, it is not, and a
+  small ridge or fewer basis functions restore it.
+
+## Pitfalls
+
+- **Units.** $\lambda$ scales with the cube of the units of $x$ for $m = 2$. Compare terms by effective degrees of
+  freedom, not by $\lambda$.
+- **A large $\lambda$ is not zero.** A heavily penalised term is a polynomial of degree $m - 1$ with unshrunk
+  coefficients. A term that should vanish needs a null-space penalty.
+- **Extrapolation.** Outside the data the fit follows the null space of the penalty: a line for $m = 2$, a quadratic
+  for $m = 3$. Higher $m$ extrapolates more aggressively.
+- **Derivative order and basis degree.** A penalty of order $m$ needs a basis of degree at least $m$. P-splines replace
+  the integral by coefficient differences; see <NoteLink to="p-splines">P-splines</NoteLink>.
