@@ -1,0 +1,141 @@
+---
+title: Leverage and influence
+kind: concept
+summary: 'The leverage $h_{ii} = \xvec_i^\top(\Xmat^\top\Xmat)^{-1}\xvec_i$ measures how far observation $i$ lies from the other inputs and how strongly it pulls its own fitted value. Influence combines leverage with the residual: Cook''s distance $D_i = r_i^2 h_{ii}/(p(1 - h_{ii}))$.'
+tags: [regression, linear-models, diagnostics, outliers, worked-example]
+aliases: [leverage, hat values, high-leverage point, influential observation, Cook's distance, Cook's D, DFBETAS, DFFITS, leave-one-out regression, influence diagnostics]
+requires: [ols-inference, orthogonal-projection]
+related: [residual-diagnostics, multicollinearity, cross-validation, linear-regression]
+references: [cook1977, hoaglin1978, belsley1980]
+status: draft
+updated: 2026-09-27
+---
+
+import { InfluenceDrag } from './InfluenceDrag'
+
+<Definition>
+In a least-squares fit with $n \times p$ design $\Xmat$ and hat matrix $\Hmat = \Xmat(\Xmat^\top\Xmat)^{-1}\Xmat^\top$,
+the **leverage** of observation $i$ is the diagonal entry $h_{ii} = \xvec_i^\top(\Xmat^\top\Xmat)^{-1}\xvec_i$, where
+$\xvec_i^\top$ is row $i$ of $\Xmat$ <Cite id="hoaglin1978" />. An observation is **influential** if deleting it
+changes the fit substantially. **Cook's distance** measures the change in all fitted values when observation $i$ is
+deleted <Cite id="cook1977" />:
+
+$$
+D_i = \frac{\norm{\hat\yvec - \hat\yvec_{(i)}}^2}{p\,s^2},
+$$
+
+where $\hat\yvec_{(i)} = \Xmat\hat\betavec_{(i)}$ uses the coefficients fitted without observation $i$ and $s^2$ is the
+residual variance of the full fit.
+</Definition>
+
+## Intuition
+
+Leverage is potential. A point whose inputs are far from the rest acts like a long lever on the fitted plane: the fit
+must pass close to it. Whether that potential is used depends on the response. A high-leverage point that lies on the
+trend of the other points confirms the fit and changes nothing when removed. The same point displaced from the trend
+rotates the fit toward itself. An **outlier** (a large residual) at low leverage shifts the fit a little and is easy to
+spot. The dangerous case is high leverage with a displaced response: the fit moves toward the point, so its own
+residual stays small and hides it.
+
+<InfluenceDrag />
+
+## Leverage
+
+**Leverage is self-sensitivity.** The fitted values are $\hat\yvec = \Hmat\yvec$, so $\hat y_i = \sum_j h_{ij}y_j$ and
+$\partial\hat y_i/\partial y_i = h_{ii}$. Leverage is the fraction by which a change in $y_i$ moves its own fitted
+value.
+
+**Range.** $\Hmat$ is symmetric and idempotent, so $h_{ii} = (\Hmat\Hmat)_{ii} = \sum_j h_{ij}^2 = h_{ii}^2 +
+\sum_{j \ne i} h_{ij}^2 \ge h_{ii}^2$. Hence $0 \le h_{ii} \le 1$. $h_{ii} = 1$ means the fit passes exactly through
+point $i$.
+
+**Average.** $\sum_i h_{ii} = \trace(\Hmat) = \trace\paren{(\Xmat^\top\Xmat)^{-1}\Xmat^\top\Xmat} = \trace(\Imat_p) = p$,
+using the cyclic property of the trace. The mean leverage is $p/n$, and $h_{ii} > 2p/n$ is a common flag.
+
+**Simple regression.** With an intercept and one predictor, $h_{ii} = \frac1n + \frac{(x_i - \bar x)^2}{\sum_j (x_j -
+\bar x)^2}$. Leverage grows with squared distance from the mean input and does not depend on $y$ at all. In several
+dimensions $h_{ii} - 1/n$ is a scaled Mahalanobis distance of $\xvec_i$ from the centroid of the inputs, so a point can
+have high leverage while being unremarkable on each predictor separately.
+
+## Deleting one observation
+
+Refitting without observation $i$ does not require a new regression. Write $\Amat = \Xmat^\top\Xmat$ and $\xvec =
+\xvec_i$. Deleting the observation gives $\Amat - \xvec\xvec^\top$ and $\Xmat^\top\yvec - \xvec y_i$. The
+Sherman–Morrison formula gives
+
+$$
+(\Amat - \xvec\xvec^\top)^{-1} = \Amat^{-1} + \frac{\Amat^{-1}\xvec\xvec^\top\Amat^{-1}}{1 - h_{ii}},
+$$
+
+since $\xvec^\top\Amat^{-1}\xvec = h_{ii}$. Multiply it by $\Xmat^\top\yvec - \xvec y_i$ and use $\Amat^{-1}\Xmat^\top\yvec
+= \hat\betavec$ and $\xvec^\top\hat\betavec = \hat y_i$:
+
+$$
+\hat\betavec_{(i)} = \hat\betavec - \Amat^{-1}\xvec\,y_i + \frac{\Amat^{-1}\xvec\,(\hat y_i - h_{ii}y_i)}{1 - h_{ii}}
+= \hat\betavec - \frac{\Amat^{-1}\xvec\,\paren{(1 - h_{ii})y_i - \hat y_i + h_{ii}y_i}}{1 - h_{ii}}.
+$$
+
+The bracket is $y_i - \hat y_i = e_i$, so
+
+$$
+\hat\betavec - \hat\betavec_{(i)} = \frac{(\Xmat^\top\Xmat)^{-1}\xvec_i\, e_i}{1 - h_{ii}}.
+$$
+
+The change is proportional to the residual and amplified by $1/(1 - h_{ii})$. The same identity gives the
+leave-one-out residual $y_i - \hat y_{(i)} = e_i/(1 - h_{ii})$, which is why leave-one-out
+<NoteLink to="cross-validation">cross-validation</NoteLink> of least squares needs no refitting.
+
+## Cook's distance
+
+Substitute the deletion formula into the definition. $\hat\yvec - \hat\yvec_{(i)} = \Xmat(\hat\betavec -
+\hat\betavec_{(i)})$, so
+
+$$
+\norm{\hat\yvec - \hat\yvec_{(i)}}^2 = \frac{e_i^2\,\xvec_i^\top\Amat^{-1}\Xmat^\top\Xmat\Amat^{-1}\xvec_i}{(1 - h_{ii})^2}
+= \frac{e_i^2\,h_{ii}}{(1 - h_{ii})^2}.
+$$
+
+Dividing by $p s^2$ and writing $r_i = e_i/(s\sqrt{1 - h_{ii}})$ for the standardised residual,
+
+$$
+D_i = \frac{r_i^2}{p}\cdot\frac{h_{ii}}{1 - h_{ii}}.
+$$
+
+Influence is the product of outlyingness in $y$ ($r_i^2$) and outlyingness in $\xvec$ ($h_{ii}/(1 - h_{ii})$). Either
+alone can be harmless. Cook compared $D_i$ with the quantiles of the $F_{p,\, n-p}$ distribution, because $D_i$ has the
+form of the F statistic for moving $\betavec$ from $\hat\betavec$ to $\hat\betavec_{(i)}$. $D_i$ above the median of
+$F_{p, n-p}$ (about 0.7 to 1 for most designs) means deleting the point moves the estimate outside a 50% confidence
+region.
+
+**Coefficient-level measures.** $\text{DFBETAS}_{ij} = (\hat\beta_j - \hat\beta_{j(i)})/(s_{(i)}\sqrt{v_{jj}})$, with
+$v_{jj}$ the diagonal of $(\Xmat^\top\Xmat)^{-1}$ and $s_{(i)}$ the residual standard deviation without observation
+$i$, measures the change in one coefficient in standard errors; $\abs{\text{DFBETAS}} > 2/\sqrt n$ is a common flag
+<Cite id="belsley1980" />. $\text{DFFITS}_i$ is the analogous change in the observation's own fitted value.
+
+## Worked example
+
+Eight points $x = 1, \dots, 8$, $y = 3.1, 3.9, 6.8, 6.2, 9.5, 10.1, 13.4, 12.9$ have the fit $\hat y = 1.311 + 1.539\,x$.
+Add a ninth point in three places ($n = 9$, $p = 2$, median of $F_{2,7} = 0.77$):
+
+| Ninth point | $h_{99}$ | Studentised residual | Cook's $D$ | New fit |
+| --- | --- | --- | --- | --- |
+| $(16, 26.0)$, on the trend | 0.766 | 0.03 | 0.002 | $1.295 + 1.543\,x$ |
+| $(16, 14.0)$, off the trend | 0.766 | $-6.11$ | 9.87 | $4.404 + 0.774\,x$ |
+| $(4.5, 14.0)$, central outlier | 0.111 | 5.75 | 0.37 | $1.951 + 1.539\,x$ |
+
+The two points at $x = 16$ have the same leverage, because leverage ignores $y$. The one on the trend leaves the fit
+unchanged. The one off the trend halves the slope; its DFBETAS for the slope is $-10.2$. Its raw residual, $-2.79$, is
+not remarkable, because the fit has moved toward it; only the studentised residual, which uses $s_{(i)}$, and Cook's
+distance reveal it. The central outlier has the largest raw residual but lies at the mean of the other $x$ values, so
+the slope does not change at all and only the intercept moves.
+
+## Pitfalls
+
+- **Deleting influential points automatically.** Influence is a reason to investigate, not to delete. The point may be
+  a recording error, a different population, or the most informative observation in the data.
+- **Masking.** Two high-leverage points close together each hide the other: deleting either one leaves the other to
+  hold the fit in place. Single-deletion diagnostics miss them.
+- **Screening residuals only.** A high-leverage outlier pulls the fit toward itself and can have a small raw residual.
+  Look at leverage and Cook's distance too.
+- **Extrapolation.** A new input with $\xvec_0^\top(\Xmat^\top\Xmat)^{-1}\xvec_0$ larger than every $h_{ii}$ is outside
+  the region the data support, and its prediction interval is wide for that reason.

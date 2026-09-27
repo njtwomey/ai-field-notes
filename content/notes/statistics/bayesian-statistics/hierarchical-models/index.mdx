@@ -1,0 +1,169 @@
+---
+title: Hierarchical models
+kind: concept
+summary: 'A hierarchical model gives group parameters a shared prior, $\theta_j \sim \Gauss(\mu, \tau^2)$, and learns $\mu$ and $\tau$ from all groups. Each estimate is shrunk toward the grand mean by $B_j = \sigma_j^2/(\sigma_j^2 + \tau^2)$: partial pooling between no pooling and complete pooling.'
+tags: [bayesian, inference, shrinkage, worked-example]
+aliases: [hierarchical model, multilevel model, Bayesian hierarchical model, partial pooling, random effects, hyperprior, shrinkage estimator, James–Stein estimator, Stein's paradox]
+requires: [bayesian-inference, conjugate-priors]
+related: [probabilistic-programming, bayesian-linear-regression, markov-chain-monte-carlo, shrinkage-covariance-estimation, prior-choice]
+references: [gelman2013, rubin1981b, james1961, efron1975, gelman2006]
+status: draft
+updated: 2026-09-27
+---
+
+import { Shrinkage } from './Shrinkage'
+
+<Definition>
+A **hierarchical model** (multilevel model) has parameters $\theta_1, \dots, \theta_J$ for $J$ related groups, drawn
+from a common population distribution $p(\theta_j \mid \phi)$ whose **hyperparameters** $\phi$ have their own prior
+$p(\phi)$. The joint posterior is
+
+$$
+p(\phi, \thetavec \mid y) \propto p(\phi) \prod_{j=1}^J p(\theta_j \mid \phi)\, p(y_j \mid \theta_j),
+$$
+
+so the data of every group inform $\phi$, and $\phi$ informs every $\theta_j$ <Cite id="gelman2013" />.
+</Definition>
+
+## Intuition
+
+Consider $J$ groups, each with an estimate $y_j$ of its own effect $\theta_j$. There are three ways to combine them.
+
+- **No pooling** estimates each $\theta_j$ by $y_j$. Groups with little data get noisy estimates.
+- **Complete pooling** assumes every $\theta_j$ is the same and estimates the common value from all groups. Real
+  differences between groups are lost.
+- **Partial pooling** treats the $\theta_j$ as draws from a population with mean $\mu$ and spread $\tau$. Each
+  estimate is a compromise between $y_j$ and $\mu$. The data decide the compromise through $\tau$: if the $y_j$ vary no
+  more than their noise explains, $\tau$ is small and the estimates pool strongly.
+
+## The normal–normal model
+
+Group $j$ has an estimate $y_j$ with known standard error $\sigma_j$. The model is
+
+$$
+y_j \mid \theta_j \sim \Gauss(\theta_j, \sigma_j^2), \qquad \theta_j \mid \mu, \tau \sim \Gauss(\mu, \tau^2), \qquad
+j = 1, \dots, J.
+$$
+
+**Conditional posterior of one group.** Given $\mu$ and $\tau$, the prior $\Gauss(\mu, \tau^2)$ and the single
+observation $y_j$ form a normal–normal pair. Precisions add and the posterior mean is precision-weighted
+(<NoteLink to="conjugate-priors">conjugate priors</NoteLink>):
+
+$$
+\theta_j \mid \mu, \tau, y \sim \Gauss\paren{\frac{y_j/\sigma_j^2 + \mu/\tau^2}{1/\sigma_j^2 + 1/\tau^2},\;
+\frac{1}{1/\sigma_j^2 + 1/\tau^2}}.
+$$
+
+Multiply the numerator and denominator of the mean by $\sigma_j^2\tau^2$. The mean becomes
+
+$$
+\expect[\theta_j \mid \mu, \tau, y] = B_j\,\mu + (1 - B_j)\,y_j, \qquad B_j = \frac{\sigma_j^2}{\sigma_j^2 + \tau^2}.
+$$
+
+The **shrinkage factor** $B_j \in [0, 1]$ is the fraction of the way from $y_j$ to $\mu$ that the estimate moves. It is
+large when the group's own estimate is noisy ($\sigma_j$ large) or the groups are similar ($\tau$ small). $\tau \to 0$
+gives $B_j = 1$, complete pooling. $\tau \to \infty$ gives $B_j = 0$, no pooling.
+
+**Learning $\mu$ and $\tau$.** Integrating $\theta_j$ out gives $y_j \mid \mu, \tau \sim \Gauss(\mu, \sigma_j^2 +
+\tau^2)$: the observed spread is the sampling noise plus the true spread. With a flat prior on $\mu$, the conditional
+posterior of $\mu$ is Gaussian with mean and variance
+
+$$
+\hat\mu(\tau) = \frac{\sum_j w_j y_j}{\sum_j w_j}, \qquad V_\mu(\tau) = \frac{1}{\sum_j w_j}, \qquad w_j =
+\frac{1}{\sigma_j^2 + \tau^2}.
+$$
+
+The marginal posterior of $\tau$ follows from $p(\tau \mid y) = p(\mu, \tau \mid y)/p(\mu \mid \tau, y)$, evaluated at
+any $\mu$:
+
+$$
+p(\tau \mid y) \propto p(\tau)\, V_\mu^{1/2} \prod_{j=1}^J (\sigma_j^2 + \tau^2)^{-1/2}
+\exp\paren{-\frac{(y_j - \hat\mu)^2}{2(\sigma_j^2 + \tau^2)}}.
+$$
+
+The full posterior is obtained by drawing $\tau$ from this one-dimensional density on a grid, then $\mu$ given $\tau$,
+then each $\theta_j$ given $\mu$ and $\tau$.
+
+<Derivation title="The marginal posterior of τ">
+The joint posterior of $(\mu, \tau)$ is $p(\tau)\,p(\mu)\prod_j \Gauss(y_j; \mu, \sigma_j^2 + \tau^2)$ with $p(\mu)
+\propto 1$. As a function of $\mu$ the product is the exponential of a quadratic:
+$-\frac12\sum_j w_j(y_j - \mu)^2 = -\frac12\sum_j w_j (y_j - \hat\mu)^2 - \frac12(\mu - \hat\mu)^2\sum_j w_j$, since the
+cross term $\sum_j w_j(y_j - \hat\mu)$ is zero by the definition of $\hat\mu$. So $\mu \mid \tau, y \sim
+\Gauss(\hat\mu, V_\mu)$. Dividing the joint density by this conditional density, both evaluated at $\mu = \hat\mu$,
+removes the $\mu$ dependence and leaves $p(\tau)\,\prod_j w_j^{1/2}\exp\paren{-\frac12 w_j(y_j - \hat\mu)^2}$ times
+$\sqrt{2\pi V_\mu}$, which is the stated formula up to a constant.
+</Derivation>
+
+## Worked example: eight schools
+
+Eight schools ran randomised experiments on a coaching programme for a standardised test <Cite id="rubin1981b" />.
+Each reports an estimated effect $y_j$ and standard error $\sigma_j$, in test points:
+
+| School | A | B | C | D | E | F | G | H |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| $y_j$ | 28 | 8 | −3 | 7 | −1 | 1 | 18 | 12 |
+| $\sigma_j$ | 15 | 10 | 16 | 11 | 9 | 11 | 10 | 18 |
+
+The standard errors are as large as the spread of the estimates. A chi-squared test of equal effects gives
+$\sum_j (y_j - \hat\mu(0))^2/\sigma_j^2 = 4.7$ on 7 degrees of freedom ($p = 0.70$), so the data are consistent with
+no variation. Complete pooling gives $\hat\mu(0) = 7.7$ with standard error 4.1 for every school. No pooling says school
+A's effect is 28.
+
+<Shrinkage />
+
+At $\tau = 10$ the shrinkage factors range from 0.45 (school E, $\sigma = 9$) to 0.76 (school H, $\sigma = 18$), and
+school A's estimate is 14.2. With a uniform prior on $\tau$, the marginal posterior $p(\tau \mid y)$ has its mode at
+$\tau = 0$, median 5.2 and 95th percentile 17. Averaging over this posterior, school A's posterior mean effect is 11.4,
+not 28. The hierarchical model reports that the programme has a modest average effect whose variation across schools
+cannot be separated from noise.
+
+## Shrinkage beats separate estimates
+
+Partial pooling improves estimates even when the groups have nothing in common except a shared scale. Let $y_j \sim
+\Gauss(\theta_j, \sigma^2)$ independently for $j = 1, \dots, J$ with $\sigma$ known. For $J \ge 3$ the **James–Stein
+estimator** $\hat\theta_j^{\text{JS}} = \paren{1 - (J - 2)\sigma^2/\sum_k y_k^2}\,y_j$ has lower total squared error
+$\expect\sum_j(\hat\theta_j - \theta_j)^2$ than $\hat\theta_j = y_j$ for every $\thetavec$ <Cite id="james1961" />.
+For $J \ge 4$ the same holds for the version that shrinks toward the sample mean $\bar y$ instead of 0,
+
+$$
+\hat\theta_j = \bar y + \paren{1 - \frac{(J - 3)\sigma^2}{\sum_k (y_k - \bar y)^2}}(y_j - \bar y).
+$$
+
+This estimator has the form $B\bar y + (1 - B)y_j$ with $B$ estimated from the
+spread of the $y_j$: an empirical-Bayes version of the normal–normal model <Cite id="efron1975" />. The separate
+estimates are inadmissible, a result known as Stein's paradox. The fully Bayesian model differs by averaging over the
+uncertainty in $\tau$ rather than plugging in one estimate.
+
+## Priors on the group-level scale
+
+The prior on $\tau$ matters when $J$ is small. A uniform prior on $\log\tau$ gives an improper posterior: the likelihood
+tends to a positive constant as $\tau \to 0$, and $\int_0 d\tau/\tau$ diverges. The conjugate-looking
+$\InvGamma(\epsilon, \epsilon)$ prior on $\tau^2$ with small $\epsilon$ concentrates near zero and dominates the
+posterior when the data do not rule out small $\tau$. A uniform or half-Cauchy prior on $\tau$ is a better default
+<Cite id="gelman2006" />; see <NoteLink to="prior-choice">prior choice</NoteLink>.
+
+## Computation
+
+- **Centred and non-centred forms.** When $\tau$ is small, the posterior of $(\theta_j, \tau)$ is funnel-shaped:
+  $\theta_j$ is confined near $\mu$, and <NoteLink to="hamiltonian-monte-carlo">Hamiltonian Monte Carlo</NoteLink>
+  struggles to enter the neck. Writing $\theta_j = \mu + \tau\eta_j$ with $\eta_j \sim \Gauss(0, 1)$ (non-centred)
+  removes the dependence and is the usual fix.
+- **Beyond normal likelihoods.** Hierarchical logistic or Poisson regressions have no closed form and are fitted with
+  MCMC or variational methods, usually in a <NoteLink to="probabilistic-programming">probabilistic programming</NoteLink>
+  language.
+
+## Assumptions
+
+- **Exchangeability of the groups.** Before seeing the data, no group is expected to differ from the others in a known
+  direction. When a covariate predicts the group effects, it belongs in the model for $\theta_j$, as in
+  $\theta_j \sim \Gauss(\xvec_j^\top\betavec, \tau^2)$.
+- The within-group model and standard errors are correct. The eight-schools analysis treats $\sigma_j$ as known.
+
+## Pitfalls
+
+- **Estimating $\tau$ by maximum likelihood and plugging it in.** With few groups the estimate is often exactly 0, which
+  claims complete pooling with false certainty.
+- **Shrinking a group that really is different.** Partial pooling pulls outlying groups toward the mean. A
+  heavier-tailed population distribution, such as a Student t, lets an outlier keep more of its own estimate.
+- **Reading shrinkage as bias correction for one group.** Shrinkage lowers the total error across groups. For a
+  particular group whose true effect is far from $\mu$, the shrunk estimate is biased toward $\mu$.

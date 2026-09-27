@@ -1,0 +1,221 @@
+---
+title: Conjugate priors
+kind: concept
+summary: 'A prior is conjugate to a likelihood when the posterior is in the same family as the prior. Beta–Binomial, Gamma–Poisson, Normal–Normal and Normal–Inverse-Gamma updates add sufficient statistics to prior hyperparameters, which act as pseudo-observations.'
+tags: [bayesian, inference, exponential-family, worked-example]
+aliases: [conjugate prior, conjugacy, conjugate family, Beta–Binomial model, Gamma–Poisson model, Normal–Inverse-Gamma prior, pseudo-counts, pseudo-observations]
+requires: [bayesian-inference, beta-distribution]
+related:
+  [
+    exponential-family,
+    gamma-distribution,
+    inverse-gamma-distribution,
+    binomial-distribution,
+    poisson-distribution,
+    bayesian-linear-regression,
+    thompson-sampling,
+  ]
+references: [gelman2013, murphy2012]
+status: draft
+updated: 2026-09-27
+---
+
+import { BetaUpdate } from './BetaUpdate'
+
+<Definition>
+A family $\Fcal$ of prior distributions is **conjugate** to a likelihood $p(y \mid \theta)$ if, for every prior in
+$\Fcal$ and every data set $y$, the posterior $p(\theta \mid y) \propto p(y \mid \theta)\,p(\theta)$ is also in
+$\Fcal$. The update then maps prior hyperparameters to posterior hyperparameters in closed form, with no integration
+<Cite id="gelman2013" />.
+</Definition>
+
+## Intuition
+
+Bayes' rule multiplies the prior density by the likelihood. If the prior density has the same functional form in
+$\theta$ as the likelihood, the product keeps that form and only the exponents change. The prior then behaves like data
+already seen: its hyperparameters count **pseudo-observations**, and the posterior adds the real observations to them.
+This makes the strength of a prior concrete. A $\Beta(3, 7)$ prior on a success probability carries the weight of 10
+earlier trials with 3 successes.
+
+## Beta–Binomial
+
+Let $k$ be the number of successes in $n$ independent trials with success probability $\theta$, so
+$p(k \mid \theta) = \binom{n}{k}\theta^k(1 - \theta)^{n - k}$. Take the prior $\theta \sim \Beta(a, b)$, with density
+$\theta^{a - 1}(1 - \theta)^{b - 1}/B(a, b)$ on $[0, 1]$. Drop every factor that does not involve $\theta$:
+
+$$
+p(\theta \mid k) \propto \theta^k (1 - \theta)^{n - k} \cdot \theta^{a - 1}(1 - \theta)^{b - 1}
+= \theta^{a + k - 1}(1 - \theta)^{b + n - k - 1}.
+$$
+
+The right-hand side is the kernel of a Beta density. A density is determined by its kernel, because the normalising
+constant is fixed by the requirement that it integrates to 1. So
+
+$$
+\theta \mid k \sim \Beta(a + k,\; b + n - k).
+$$
+
+The prior counts $a$ successes and $b$ failures. The posterior mean is
+
+$$
+\expect[\theta \mid k] = \frac{a + k}{a + b + n} = \frac{a + b}{a + b + n}\cdot\frac{a}{a + b} + \frac{n}{a + b + n}\cdot\frac{k}{n},
+$$
+
+a weighted average of the prior mean $a/(a + b)$ and the sample proportion $k/n$. The weight on the data is
+$n/(\kappa + n)$ with **prior strength** $\kappa = a + b$. The posterior variance
+$(a + k)(b + n - k)/[(\kappa + n)^2(\kappa + n + 1)]$ shrinks at rate $1/n$.
+
+<BetaUpdate />
+
+The posterior predictive probability of $\tilde k$ successes in $m$ new trials is the **beta-binomial** distribution,
+
+$$
+p(\tilde k \mid k) = \int_0^1 \binom{m}{\tilde k}\theta^{\tilde k}(1 - \theta)^{m - \tilde k}\, p(\theta \mid k)\, d\theta
+= \binom{m}{\tilde k}\frac{B(a + k + \tilde k,\; b + n - k + m - \tilde k)}{B(a + k,\; b + n - k)}.
+$$
+
+The integral is the normalising constant of a Beta density with the exponents added, divided by the posterior's
+constant.
+
+## Gamma–Poisson
+
+Let $y_1, \dots, y_n$ be independent counts with $y_i \sim \Poisson(\lambda)$, and take $\lambda \sim \GammaD(\alpha,
+\beta)$ with shape $\alpha$ and rate $\beta$, density proportional to $\lambda^{\alpha - 1}e^{-\beta\lambda}$. The
+likelihood is $\prod_i \lambda^{y_i}e^{-\lambda}/y_i! \propto \lambda^{S}e^{-n\lambda}$ with $S = \sum_i y_i$. Then
+
+$$
+p(\lambda \mid y) \propto \lambda^{S}e^{-n\lambda}\cdot\lambda^{\alpha - 1}e^{-\beta\lambda}
+= \lambda^{\alpha + S - 1}e^{-(\beta + n)\lambda},
+\qquad \lambda \mid y \sim \GammaD(\alpha + S,\; \beta + n).
+$$
+
+The prior counts $\alpha$ events in $\beta$ units of exposure. The posterior mean $(\alpha + S)/(\beta + n)$ is a
+weighted average of the prior mean $\alpha/\beta$ and the sample mean $\bar y = S/n$, with weight $n/(\beta + n)$ on
+the data. The posterior predictive distribution of a new count is negative binomial.
+
+**Worked example.** The prior $\GammaD(2, 1)$ has mean 2. Five days give counts $3, 5, 4, 6, 2$, so $S = 20$ and
+$n = 5$. The posterior is $\GammaD(22, 6)$, with mean $22/6 = 3.67$ and central 95% interval $[2.30, 5.35]$. The sample
+mean is 4.0; the prior pulls the estimate toward 2 with weight $1/6$.
+
+## Normal–Normal with known variance
+
+Let $y_1, \dots, y_n \iid \Gauss(\mu, \sigma^2)$ with $\sigma^2$ known, and take $\mu \sim \Gauss(\mu_0, \tau_0^2)$.
+Writing $\sum_i (y_i - \mu)^2 = \sum_i (y_i - \bar y)^2 + n(\bar y - \mu)^2$ and dropping terms free of $\mu$,
+
+$$
+\log p(\mu \mid y) = -\frac{(\mu - \mu_0)^2}{2\tau_0^2} - \frac{n(\mu - \bar y)^2}{2\sigma^2} + \text{const}.
+$$
+
+This is a quadratic in $\mu$ with leading coefficient $-\tfrac12\paren{1/\tau_0^2 + n/\sigma^2}$, so the posterior is
+Gaussian. Matching it to $-(\mu - \mu_n)^2/(2\tau_n^2)$ by completing the square gives
+
+$$
+\frac{1}{\tau_n^2} = \frac{1}{\tau_0^2} + \frac{n}{\sigma^2}, \qquad
+\mu_n = \tau_n^2\paren{\frac{\mu_0}{\tau_0^2} + \frac{n\bar y}{\sigma^2}}.
+$$
+
+Precisions add, and the posterior mean is the precision-weighted average of the prior mean and the sample mean. The
+prior is worth $\sigma^2/\tau_0^2$ observations. For $\mu_0 = 0$, $\tau_0^2 = 1$, $\sigma^2 = 4$, $n = 4$ and $\bar y =
+2$, the two precisions are both 1, the posterior precision is 2, and $\mu \mid y \sim \Gauss(1, 0.5)$.
+
+## Normal–Inverse-Gamma
+
+When both $\mu$ and $\sigma^2$ are unknown, the conjugate prior is
+
+$$
+\sigma^2 \sim \InvGamma(a_0, b_0), \qquad \mu \mid \sigma^2 \sim \Gauss(\mu_0, \sigma^2/\kappa_0).
+$$
+
+The prior variance of $\mu$ scales with $\sigma^2$, so $\kappa_0$ counts prior observations of the mean. The posterior
+has the same form with
+
+$$
+\kappa_n = \kappa_0 + n, \quad \mu_n = \frac{\kappa_0\mu_0 + n\bar y}{\kappa_n}, \quad a_n = a_0 + \frac n2, \quad
+b_n = b_0 + \frac12\sum_i (y_i - \bar y)^2 + \frac{\kappa_0 n(\bar y - \mu_0)^2}{2\kappa_n}.
+$$
+
+Integrating out $\sigma^2$, the marginal posterior of $\mu$ is a Student t distribution with $2a_n$ degrees of freedom,
+location $\mu_n$ and squared scale $b_n/(a_n\kappa_n)$. The heavier-than-Gaussian tails come from the uncertainty in
+$\sigma^2$. The same prior on regression weights and noise variance gives the conjugate
+<NoteLink to="bayesian-linear-regression">Bayesian linear regression</NoteLink>.
+
+<Derivation title="The Normal–Inverse-Gamma update">
+Write $s = \sigma^2$. The joint prior density is proportional to
+
+$$
+s^{-a_0 - 1}e^{-b_0/s}\cdot s^{-1/2}\exp\paren{-\frac{\kappa_0(\mu - \mu_0)^2}{2s}},
+$$
+
+and the likelihood is $s^{-n/2}\exp\paren{-\frac{1}{2s}\brack{\sum_i (y_i - \bar y)^2 + n(\mu - \bar y)^2}}$.
+Their product is $s^{-(a_0 + n/2) - 1}\,s^{-1/2}\exp(-Q/s)$ with
+
+$$
+Q = b_0 + \frac12\sum_i (y_i - \bar y)^2 + \frac12\brack{\kappa_0(\mu - \mu_0)^2 + n(\mu - \bar y)^2}.
+$$
+
+Complete the square in $\mu$:
+$\kappa_0(\mu - \mu_0)^2 + n(\mu - \bar y)^2 = \kappa_n(\mu - \mu_n)^2 + \frac{\kappa_0 n}{\kappa_n}(\bar y - \mu_0)^2$,
+which can be checked by expanding both sides. So $Q = b_n + \frac{\kappa_n}{2}(\mu - \mu_n)^2$, and the posterior is
+
+$$
+s^{-a_n - 1}e^{-b_n/s}\cdot s^{-1/2}\exp\paren{-\frac{\kappa_n(\mu - \mu_n)^2}{2s}},
+$$
+
+which is $\InvGamma(a_n, b_n)$ for $s$ times $\Gauss(\mu_n, s/\kappa_n)$ for $\mu$ given $s$.
+
+For the marginal of $\mu$, integrate $s$ out. The integrand is an unnormalised inverse-gamma density in $s$ with shape
+$a_n + \tfrac12$ and scale $b_n + \tfrac{\kappa_n}{2}(\mu - \mu_n)^2$, so the integral is proportional to
+
+$$
+\paren{b_n + \frac{\kappa_n}{2}(\mu - \mu_n)^2}^{-(a_n + 1/2)} \propto
+\paren{1 + \frac{1}{2a_n}\cdot\frac{(\mu - \mu_n)^2}{b_n/(a_n\kappa_n)}}^{-(2a_n + 1)/2},
+$$
+
+the kernel of a Student t density with $\nu = 2a_n$ degrees of freedom, location $\mu_n$ and squared scale
+$b_n/(a_n\kappa_n)$.
+</Derivation>
+
+## Why these families: the exponential family
+
+Every <NoteLink to="exponential-family">exponential family</NoteLink> likelihood has a conjugate prior. Write the
+likelihood of one observation as $p(y \mid \theta) = h(y)\exp\paren{\eta(\theta)^\top T(y) - A(\theta)}$, with
+natural parameter $\eta(\theta)$, sufficient statistic $T(y)$ and log-partition $A(\theta)$. The family
+
+$$
+p(\theta \mid \chi, \nu) \propto \exp\paren{\eta(\theta)^\top\chi - \nu A(\theta)}
+$$
+
+is conjugate. Multiplying by the likelihood of $n$ independent observations adds $\sum_i T(y_i)$ to $\chi$ and $n$ to
+$\nu$:
+
+$$
+p(\theta \mid y) \propto \exp\paren{\eta(\theta)^\top\paren{\chi + \textstyle\sum_i T(y_i)} - (\nu + n)A(\theta)}.
+$$
+
+$\nu$ is the number of pseudo-observations and $\chi$ their summed sufficient statistics. Each update above is this
+rule. For the Bernoulli, $\eta = \log\frac{\theta}{1 - \theta}$, $T(y) = y$ and $A = -\log(1 - \theta)$, and the
+conjugate family is the Beta.
+
+| Likelihood | Conjugate prior | Posterior |
+| --- | --- | --- |
+| $\Binom(n, \theta)$ | $\Beta(a, b)$ | $\Beta(a + k, b + n - k)$ |
+| $\Poisson(\lambda)$, $n$ counts | $\GammaD(\alpha, \beta)$ | $\GammaD(\alpha + \sum y_i, \beta + n)$ |
+| $\Gauss(\mu, \sigma^2)$, $\sigma^2$ known | $\Gauss(\mu_0, \tau_0^2)$ | $\Gauss(\mu_n, \tau_n^2)$ |
+| $\Gauss(\mu, \sigma^2)$, both unknown | Normal–Inverse-Gamma | Normal–Inverse-Gamma |
+| $\Cat(\thetavec)$, counts $\nvec$ | $\Dir(\alphavec)$ | $\Dir(\alphavec + \nvec)$ |
+| $\Exp(\lambda)$, $n$ times | $\GammaD(\alpha, \beta)$ | $\GammaD(\alpha + n, \beta + \sum y_i)$ |
+
+## Assumptions
+
+- The observations are conditionally independent given $\theta$, with the stated likelihood.
+- The prior belongs to the conjugate family. Conjugacy is a convenience of computation. A prior should be chosen to
+  express knowledge, and a mixture of conjugate priors is still conjugate when a single member cannot express it.
+
+## Pitfalls
+
+- **Choosing the family for convenience.** A Beta prior cannot put mass on two separated regions; a Gamma prior cannot
+  have a heavy left tail. When the conjugate family does not express the prior knowledge, use a different prior and
+  approximate the posterior numerically.
+- **Hidden prior strength.** $\Beta(50, 50)$ looks innocuous but is worth 100 trials. State $\kappa$ next to $n$.
+- **Parameterisations.** The Gamma distribution has shape–rate and shape–scale forms. The update adds $n$ to the rate,
+  which is $1/\text{scale}$.

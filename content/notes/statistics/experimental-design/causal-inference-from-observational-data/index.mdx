@@ -1,0 +1,155 @@
+---
+title: Causal inference from observational data
+kind: concept
+summary: 'Without randomisation, treated and untreated groups differ by confounders. If a measured set $X$ blocks every back-door path, the effect is identified by the adjustment formula $\sum_x P(x)\,(\expect[Y \mid x, 1] - \expect[Y \mid x, 0])$, estimated by stratification, regression or propensity-score weighting.'
+tags: [causal-inference, experimental-design, confounding, worked-example]
+aliases: [observational study, observational causal inference, confounder, confounding bias, adjustment formula, back-door criterion, backdoor adjustment, unconfoundedness, conditional exchangeability, no unmeasured confounding, propensity score weighting, inverse propensity weighting, IPTW, collider bias]
+requires: [randomised-controlled-experiments, conditional-probability]
+related:
+  [
+    simpsons-paradox,
+    bayesian-network,
+    reweighting-biased-samples,
+    logging-policies-and-propensities,
+    off-policy-evaluation,
+    blocking-and-stratification,
+  ]
+references: [rosenbaum1983, pearl2009, imbens2015, hernan2020, rubin1974]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Causal inference from observational data** estimates the effect of a treatment $W$ on an outcome $Y$ when the
+treatment was not assigned at random. A **confounder** is a variable that affects both treatment and outcome. With
+potential outcomes $Y(1)$ and $Y(0)$, the average treatment effect $\tau = \expect[Y(1) - Y(0)]$ is identified from
+observational data if a set of measured covariates $X$ satisfies **unconfoundedness**, $(Y(0), Y(1)) \perp W \mid X$,
+and **positivity**, $0 < P(W = 1 \mid X = x) < 1$ for every $x$ <Cite id="imbens2015" /> <Cite id="hernan2020" />.
+</Definition>
+
+## Intuition
+
+In a <NoteLink to="randomised-controlled-experiments">randomised experiment</NoteLink>, the coin that assigns treatment
+knows nothing about the units, so the groups are comparable. In observational data, the people who chose or were given
+treatment differ from those who were not: sicker patients get the aggressive therapy, keener users adopt the new
+feature. The raw comparison mixes the effect of treatment with the effect of those differences. If all the differences
+that matter are measured, the comparison can be made within groups of units that share the same values of those
+variables. Within each such group treatment is "as if random", and the group-level effects can be averaged.
+
+## The adjustment formula
+
+Assume unconfoundedness given $X$, positivity, and consistency ($Y = Y(w)$ when $W = w$). For each treatment level $w$,
+
+$$
+\expect[Y(w)] = \expect_X\brack{\expect[Y(w) \mid X]} = \expect_X\brack{\expect[Y(w) \mid X, W = w]} =
+\expect_X\brack{\expect[Y \mid X, W = w]}.
+$$
+
+The first step is the law of total expectation. The second uses unconfoundedness: given $X$, $Y(w)$ does not depend on
+$W$. The third uses consistency. Positivity makes $\expect[Y \mid X = x, W = w]$ defined for every $x$. Therefore
+
+$$
+\tau = \sum_x P(X = x)\paren{\expect[Y \mid X = x, W = 1] - \expect[Y \mid X = x, W = 0]},
+$$
+
+with an integral for continuous $X$. Every quantity on the right is observable. The formula weights the within-stratum
+effects by the stratum's share of the **whole** population, not of the treated group.
+
+## Which variables to adjust for
+
+Pearl's **back-door criterion** answers this from a causal graph (a <NoteLink to="bayesian-network">directed acyclic
+graph</NoteLink> with an arrow from each cause to its effects) <Cite id="pearl2009" />. A back-door path is a path from
+$W$ to $Y$ that starts with an arrow into $W$. A set $Z$ satisfies the criterion if
+
+1. no variable in $Z$ is a descendant of $W$, and
+2. $Z$ blocks every back-door path from $W$ to $Y$.
+
+A path is blocked by $Z$ if it contains a non-collider in $Z$ (a chain $A \to B \to C$ or fork $A \leftarrow B \to C$
+with $B \in Z$), or a **collider** $A \to B \leftarrow C$ such that neither $B$ nor any of its descendants is in $Z$.
+Then $P(y \mid \operatorname{do}(w)) = \sum_z P(y \mid w, z)\,P(z)$, the adjustment formula.
+
+The criterion rules out three common mistakes:
+
+- **Adjusting for a mediator.** A variable on the causal path $W \to M \to Y$ is a descendant of $W$. Conditioning on
+  it removes part of the effect being estimated.
+- **Adjusting for a collider.** If $W \to C \leftarrow Y$ or $W \to C \leftarrow U \to Y$, conditioning on $C$ opens a
+  path and creates bias where there was none. Selecting a sample on $C$ does the same.
+- **Adjusting for everything available.** More covariates are not always safer; the right set depends on the graph.
+
+## Propensity scores
+
+The **propensity score** is $e(x) = P(W = 1 \mid X = x)$ <Cite id="rosenbaum1983" />.
+
+**Balancing property.** $W \perp X \mid e(X)$. Proof: $P(W = 1 \mid X, e(X)) = P(W = 1 \mid X) = e(X)$, because $e(X)$ is
+a function of $X$. Averaging over $X$ given $e(X)$ gives $P(W = 1 \mid e(X)) = \expect[e(X) \mid e(X)] = e(X)$. The two
+agree, so given $e(X)$ the treatment carries no further information about $X$.
+
+**Sufficiency for adjustment.** If unconfoundedness holds given $X$, it holds given $e(X)$ alone:
+
+$$
+P\paren{W = 1 \mid Y(0), Y(1), e(X)} = \expect\brack{P(W = 1 \mid Y(0), Y(1), X) \mid Y(0), Y(1), e(X)} =
+\expect\brack{e(X) \mid Y(0), Y(1), e(X)} = e(X).
+$$
+
+The middle step uses unconfoundedness given $X$. A high-dimensional $X$ can be replaced by one number for matching or
+stratification.
+
+**Inverse propensity weighting.** Weighting each treated unit by $1/e(X)$ recovers the mean treated outcome of the whole
+population:
+
+$$
+\expect\brack{\frac{WY}{e(X)}} = \expect\brack{\frac{W\,Y(1)}{e(X)}} = \expect\brack{\frac{\expect[W \mid X, Y(1)]\,Y(1)}{e(X)}}
+= \expect\brack{\frac{e(X)\,Y(1)}{e(X)}} = \expect[Y(1)],
+$$
+
+where the third step uses unconfoundedness, $\expect[W \mid X, Y(1)] = e(X)$. Similarly $\expect[(1 - W)Y/(1 - e(X))] =
+\expect[Y(0)]$. The same weights appear in <NoteLink to="reweighting-biased-samples">reweighting biased samples</NoteLink>
+and in <NoteLink to="off-policy-evaluation">off-policy evaluation</NoteLink>. Doubly robust estimators combine the
+weights with an outcome regression and stay consistent if either model is correct.
+
+## Worked example
+
+A hospital records 600 patients. Severity is the only confounder: severe cases are more often treated and recover less
+often.
+
+| Severity | Treated: recovered / total | Untreated: recovered / total | Effect in stratum | $e(x)$ |
+| --- | --- | --- | --- | --- |
+| Mild (300) | 81 / 90 = 0.90 | 168 / 210 = 0.80 | $+0.10$ | 0.30 |
+| Severe (300) | 126 / 210 = 0.60 | 45 / 90 = 0.50 | $+0.10$ | 0.70 |
+| All (600) | 207 / 300 = 0.69 | 213 / 300 = 0.71 | $-0.02$ | |
+
+The crude comparison says treatment lowers recovery by 2 points. Within each severity level it raises recovery by 10
+points. The adjustment formula gives $0.5 \times 0.10 + 0.5 \times 0.10 = 0.10$. Inverse propensity weighting gives the
+same answer: the weighted treated mean is $\frac{1}{600}\paren{81/0.3 + 126/0.7} = 0.75$, the weighted untreated mean is
+$\frac{1}{600}\paren{168/0.7 + 45/0.3} = 0.65$, and the difference is 0.10. This reversal is an instance of
+<NoteLink to="simpsons-paradox">Simpson's paradox</NoteLink>. Whether the adjusted or crude figure is right depends on the
+causal graph: severity is a cause of treatment, not a consequence, so it is a confounder and adjustment is correct.
+
+## Assumptions
+
+- **Unconfoundedness** (no unmeasured confounding). It cannot be tested from the data. It is a substantive claim that
+  every common cause of treatment and outcome has been measured.
+- **Positivity.** Every covariate pattern has a chance of both treatments. Propensities near 0 or 1 give huge weights,
+  high variance, and results that rest on extrapolation.
+- **Consistency and no interference.** Each unit's observed outcome is its potential outcome under the treatment it
+  received, and does not depend on others' treatments.
+- **Correct models.** Regression and propensity models must be flexible enough; a misspecified model leaves residual
+  confounding.
+
+## When unconfoundedness is not credible
+
+Designs that use other sources of variation in treatment: **instrumental variables** (a variable that shifts treatment
+but affects the outcome only through it), **difference-in-differences** (parallel trends before and after a change),
+and **regression discontinuity** (treatment assigned by a threshold on a score). Each replaces unconfoundedness by a
+different untestable assumption. A **sensitivity analysis** reports how strong an unmeasured confounder would have to be
+to explain away the estimate.
+
+## Pitfalls
+
+- **Controlling for post-treatment variables**, including mediators and colliders.
+- **Reading every coefficient of an adjustment regression causally.** The covariates' coefficients are not causal
+  effects; only the treatment's coefficient has the adjustment set built for it.
+- **Checking balance only on means.** After matching or weighting, compare the covariate distributions of the groups,
+  including variances and tails.
+- **Treating a good predictive model as a causal one.** A model can predict $Y$ from $W$ and $X$ well while $W$ has no
+  effect on $Y$.

@@ -1,0 +1,176 @@
+---
+title: Randomised controlled experiments
+kind: concept
+summary: 'Each unit has potential outcomes $Y_i(1)$ and $Y_i(0)$, of which only one is observed. Random assignment makes treatment independent of them, so the difference in group means is unbiased for the average treatment effect, with Neyman variance $S_1^2/n_1 + S_0^2/n_0 - S_\tau^2/n$.'
+tags: [experimental-design, causal-inference, inference, worked-example]
+aliases: [randomised controlled trial, randomized controlled trial, RCT, randomised experiment, potential outcomes, Rubin causal model, Neyman–Rubin model, average treatment effect, ATE, Neyman variance, difference-in-means estimator, complete randomisation]
+requires: [expectation, standard-error]
+related:
+  [
+    blocking-and-stratification,
+    factorial-designs,
+    causal-inference-from-observational-data,
+    permutation-tests,
+    ab-test,
+    randomisation-and-analysis-units,
+    interference-and-cluster-randomisation,
+    cuped,
+  ]
+references: [neyman1990, rubin1974, fisher1935b, imbens2015]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+In the **potential outcomes** model, each of $n$ units has two outcomes: $Y_i(1)$ if treated and $Y_i(0)$ if not. The
+unit-level effect is $\tau_i = Y_i(1) - Y_i(0)$ and the **average treatment effect** is $\tau = \frac1n\sum_i \tau_i$.
+Only $Y_i = W_iY_i(1) + (1 - W_i)Y_i(0)$ is observed, where $W_i \in \set{0, 1}$ is the assignment. A **randomised
+controlled experiment** chooses $W$ by a known random mechanism, independently of the potential outcomes
+<Cite id="neyman1990" /> <Cite id="rubin1974" />.
+</Definition>
+
+## Intuition
+
+A causal effect compares what happens to the same unit under two conditions, but each unit experiences only one of
+them. This is the fundamental problem of causal inference: $\tau_i$ is never observed. Averages can still be estimated.
+If the treated group is a random subset of the units, the treated units' outcomes are a fair sample of what everyone's
+treated outcomes would have been, and the same holds for the control group. Randomisation replaces the unknowable
+comparison within units with a comparison between groups that differ only by chance.
+
+## Why comparisons without randomisation fail
+
+The difference in mean outcomes between treated and untreated units splits into two parts. Adding and subtracting
+$\expect[Y(0) \mid W = 1]$,
+
+$$
+\expect[Y \mid W = 1] - \expect[Y \mid W = 0] =
+\underbrace{\expect[Y(1) - Y(0) \mid W = 1]}_{\text{effect on the treated}} +
+\underbrace{\expect[Y(0) \mid W = 1] - \expect[Y(0) \mid W = 0]}_{\text{selection bias}}.
+$$
+
+The selection bias is the difference the groups would have shown with no treatment at all. If sicker patients are more
+often treated, it is negative and can mask a beneficial treatment. Nothing in the observed data measures it.
+
+## Why randomisation identifies the effect
+
+If $W$ is independent of $(Y(0), Y(1))$, conditioning on $W$ does not change the distribution of either potential
+outcome: $\expect[Y(0) \mid W = 1] = \expect[Y(0) \mid W = 0] = \expect[Y(0)]$. The selection bias is zero, the effect
+on the treated equals the average effect, and
+
+$$
+\expect[Y \mid W = 1] - \expect[Y \mid W = 0] = \expect[Y(1)] - \expect[Y(0)] = \tau.
+$$
+
+Independence holds by construction, because the experimenter's random number generator does not know the potential
+outcomes. It holds for every characteristic of the units, measured or not.
+
+## The difference-in-means estimator
+
+Under **complete randomisation**, $n_1$ of the $n$ units are chosen for treatment uniformly at random from all
+$\binom{n}{n_1}$ subsets, and $n_0 = n - n_1$ are controls. The estimator is
+
+$$
+\hat\tau = \frac{1}{n_1}\sum_i W_iY_i - \frac{1}{n_0}\sum_i (1 - W_i)Y_i = \bar Y_1 - \bar Y_0.
+$$
+
+**Unbiasedness.** Treat the potential outcomes as fixed; the only randomness is $W$. Each unit is treated with
+probability $\expect W_i = n_1/n$. Since $W_iY_i = W_iY_i(1)$,
+
+$$
+\expect\brack{\frac{1}{n_1}\sum_i W_iY_i(1)} = \frac{1}{n_1}\sum_i \frac{n_1}{n}Y_i(1) = \frac1n\sum_i Y_i(1),
+$$
+
+and similarly for the control mean. So $\expect\hat\tau = \tau$ exactly, for any $n$, with no model for the outcomes.
+
+**Variance.** Define the finite-population variances $S_1^2 = \frac{1}{n-1}\sum_i (Y_i(1) - \bar Y(1))^2$, $S_0^2$
+likewise, and $S_\tau^2 = \frac{1}{n-1}\sum_i (\tau_i - \tau)^2$, the variance of the unit-level effects. Neyman
+showed
+
+$$
+\var(\hat\tau) = \frac{S_1^2}{n_1} + \frac{S_0^2}{n_0} - \frac{S_\tau^2}{n}.
+$$
+
+The first two terms can be estimated by the sample variances $s_1^2$ and $s_0^2$ within each group. $S_\tau^2$ cannot,
+because no unit reveals both potential outcomes. The **Neyman variance estimator** drops it:
+
+$$
+\hat V = \frac{s_1^2}{n_1} + \frac{s_0^2}{n_0}.
+$$
+
+Its expectation exceeds the true variance by $S_\tau^2/n \ge 0$. It is conservative, and exact when the effect is the
+same for every unit. It is the same formula as the Welch standard error, now justified by the randomisation alone.
+
+<Derivation title="Neyman's variance formula">
+Write $\hat\tau = \sum_i W_ia_i - \frac{1}{n_0}\sum_i Y_i(0)$ with $a_i = Y_i(1)/n_1 + Y_i(0)/n_0$; the second sum is
+fixed. The treated units are a simple random sample of size $n_1$ without replacement from the $n$ units, and for such
+a sample the variance of the sample total of any fixed quantity $a_i$ is $\frac{n_1 n_0}{n}S_a^2$, with $S_a^2 =
+\frac{1}{n-1}\sum_i (a_i - \bar a)^2$. Here $a_i - \bar a = (Y_i(1) - \bar Y(1))/n_1 + (Y_i(0) - \bar Y(0))/n_0$, so
+
+$$
+S_a^2 = \frac{S_1^2}{n_1^2} + \frac{S_0^2}{n_0^2} + \frac{2S_{10}}{n_1n_0},
+$$
+
+with $S_{10}$ the finite-population covariance of the two potential outcomes. Multiply by $n_1n_0/n$ and substitute
+$2S_{10} = S_1^2 + S_0^2 - S_\tau^2$, which follows from expanding $S_\tau^2$:
+
+$$
+\var(\hat\tau) = \frac{n_0 S_1^2}{n n_1} + \frac{n_1 S_0^2}{n n_0} + \frac{S_1^2 + S_0^2 - S_\tau^2}{n}
+= \frac{S_1^2}{n_1} + \frac{S_0^2}{n_0} - \frac{S_\tau^2}{n},
+$$
+
+using $\frac{n_0}{n n_1} + \frac1n = \frac{1}{n_1}$ and its counterpart for $n_0$.
+</Derivation>
+
+## Worked example
+
+Six units with hypothetical potential outcomes, of which an experiment would reveal only one per unit:
+
+| Unit | 1 | 2 | 3 | 4 | 5 | 6 |
+| --- | --- | --- | --- | --- | --- | --- |
+| $Y_i(0)$ | 10 | 12 | 8 | 15 | 9 | 14 |
+| $Y_i(1)$ | 13 | 14 | 9 | 19 | 10 | 19 |
+| $\tau_i$ | 3 | 2 | 1 | 4 | 1 | 5 |
+
+The average treatment effect is $\tau = 16/6 = 2.67$. Assign three units to treatment. Across all $\binom63 = 20$
+possible assignments:
+
+- The estimates $\hat\tau$ range from $-3.0$ to $8.3$ and average exactly 2.67.
+- With $S_1^2 = 18.4$, $S_0^2 = 7.87$ and $S_\tau^2 = 2.67$, Neyman's formula gives $\var(\hat\tau) = 6.13 + 2.62 -
+  0.44 = 8.31$, which matches the variance of the 20 estimates.
+- The Neyman estimator $\hat V$ averages 8.76 across the 20 assignments, above 8.31 by $S_\tau^2/n = 0.44$.
+
+The spread of the estimates is large because the units differ much more from each other (outcomes from 8 to 19) than
+the effect varies. <NoteLink to="blocking-and-stratification">Blocking</NoteLink> on a variable that predicts the
+outcome removes most of that spread.
+
+## Two modes of inference
+
+- **Neyman (repeated sampling).** Estimate $\tau$ by $\hat\tau$ and form the interval $\hat\tau \pm z_{1-\alpha/2}\sqrt{\hat
+  V}$. Its validity relies on the design and on the central limit theorem for large $n$.
+- **Fisher (randomisation test).** Test the sharp null hypothesis $Y_i(1) = Y_i(0)$ for every unit. Under it all
+  potential outcomes are known, so the distribution of any statistic over all possible assignments can be computed
+  exactly. This is a <NoteLink to="permutation-tests">permutation test</NoteLink> whose permutations are the
+  assignments the design could have produced <Cite id="fisher1935b" />.
+
+## Assumptions
+
+- **SUTVA** (stable unit treatment value assumption). A unit's outcome depends only on its own assignment, and there is
+  one version of each treatment. Social networks, marketplaces and shared resources violate the first part;
+  <NoteLink to="interference-and-cluster-randomisation">interference and cluster randomisation</NoteLink> covers the
+  remedies.
+- **Compliance.** Units receive the treatment they are assigned. With non-compliance, $\hat\tau$ estimates the
+  intention-to-treat effect of assignment, not of receipt.
+- **No differential attrition.** If outcomes go missing at rates that depend on treatment and outcome, the observed
+  groups are no longer random subsets.
+
+## Pitfalls
+
+- **Analysing at the wrong level.** When whole clusters are randomised, the unit of analysis must match; see
+  <NoteLink to="randomisation-and-analysis-units">randomisation and analysis units</NoteLink>.
+- **Checking balance with significance tests.** Randomisation guarantees balance in expectation, not in every sample.
+  An imbalance on a prognostic covariate is better handled by adjusting for it (as in
+  <NoteLink to="cuped">CUPED</NoteLink>) or by blocking in the design.
+- **Subgroup fishing.** Randomisation protects the pre-specified comparison. Effects found by searching many subgroups
+  need a <NoteLink to="multiple-testing">multiple-testing</NoteLink> correction.
+- **Generalising beyond the experimental units.** The estimate is the effect for the units in the experiment. Applying
+  it to a different population needs an argument that effects do not vary with the ways the populations differ.

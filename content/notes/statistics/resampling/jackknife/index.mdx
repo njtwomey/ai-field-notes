@@ -1,0 +1,108 @@
+---
+title: Jackknife
+kind: technique
+summary: 'The jackknife recomputes an estimator $n$ times, leaving out one observation each time. The bias estimate $(n-1)(\hat\theta_{(\cdot)} - \hat\theta)$ removes the $1/n$ term of the bias, and $\frac{n-1}{n}\sum_i(\hat\theta_{(i)} - \hat\theta_{(\cdot)})^2$ estimates the variance. It fails for non-smooth statistics such as the median.'
+tags: [resampling, estimation, nonparametric, worked-example]
+aliases: [Quenouille–Tukey jackknife, jackknife variance estimate, jackknife bias correction, leave-one-out estimates, pseudo-values, delete-d jackknife]
+requires: [standard-error]
+related: [bootstrap, cross-validation]
+references: [quenouille1949, tukey1958, efron1981, efron1993]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $\hat\theta = s(x_1, \dots, x_n)$ be an estimator from $n$ independent observations. The **jackknife** computes
+the $n$ leave-one-out estimates $\hat\theta_{(i)} = s(x_1, \dots, x_{i-1}, x_{i+1}, \dots, x_n)$ and their mean
+$\hat\theta_{(\cdot)} = \frac1n\sum_i \hat\theta_{(i)}$. Its bias and variance estimates are
+
+$$
+\widehat{\text{bias}}_{\text{jack}} = (n - 1)\paren{\hat\theta_{(\cdot)} - \hat\theta}, \qquad
+\hat v_{\text{jack}} = \frac{n - 1}{n}\sum_{i=1}^n \paren{\hat\theta_{(i)} - \hat\theta_{(\cdot)}}^2.
+$$
+
+Quenouille introduced the bias correction <Cite id="quenouille1949" /> and Tukey the variance estimate
+<Cite id="tukey1958" />.
+</Definition>
+
+## Problem
+
+Many estimators are biased in small samples, with bias of order $1/n$: the plug-in variance, a ratio of means, a
+maximum-likelihood estimate of a nonlinear function. Their variance may have no formula. The jackknife estimates both
+from the data alone, with exactly $n$ recomputations and no randomness.
+
+## Mechanism
+
+**Bias.** Suppose the bias has an expansion in powers of $1/n$:
+
+$$
+\expect\hat\theta_n = \theta + \frac{a}{n} + \frac{b}{n^2} + O(n^{-3}),
+$$
+
+where $a$ and $b$ do not depend on $n$. Each leave-one-out estimate uses $n - 1$ observations, so
+$\expect\hat\theta_{(\cdot)} = \theta + a/(n - 1) + b/(n - 1)^2 + O(n^{-3})$. The difference of expectations is
+
+$$
+\expect\brack{\hat\theta_{(\cdot)} - \hat\theta} = a\paren{\frac{1}{n - 1} - \frac1n} + O(n^{-3}) =
+\frac{a}{n(n - 1)} + O(n^{-3}).
+$$
+
+Multiplying by $n - 1$ gives $a/n$ to leading order, the bias itself. The bias-corrected estimator
+
+$$
+\tilde\theta = \hat\theta - \widehat{\text{bias}}_{\text{jack}} = n\hat\theta - (n - 1)\hat\theta_{(\cdot)}
+$$
+
+has expectation $n(\theta + a/n + b/n^2) - (n - 1)(\theta + a/(n - 1) + b/(n - 1)^2) + O(n^{-2}) = \theta + O(n^{-2})$.
+The $1/n$ term cancels exactly. When the bias is exactly $a/n$, $\tilde\theta$ is unbiased.
+
+**Variance.** For the sample mean, $\hat\theta_{(i)} = (n\bar x - x_i)/(n - 1)$, so $\hat\theta_{(\cdot)} = \bar x$
+and $\hat\theta_{(i)} - \hat\theta_{(\cdot)} = -(x_i - \bar x)/(n - 1)$. Then
+
+$$
+\sum_i \paren{\hat\theta_{(i)} - \hat\theta_{(\cdot)}}^2 = \frac{\sum_i (x_i - \bar x)^2}{(n - 1)^2} =
+\frac{s^2}{n - 1},
+$$
+
+with $s^2$ the sample variance. Leave-one-out estimates vary much less than independent estimates would, because any
+two of them share $n - 2$ observations. The factor $(n - 1)/n$ in $\hat v_{\text{jack}}$ is chosen to undo this
+exactly for the mean: $\hat v_{\text{jack}} = s^2/n$, the usual squared <NoteLink to="standard-error">standard
+error</NoteLink>. For other smooth statistics the same factor gives a consistent estimate, because a smooth statistic
+behaves locally like a mean of per-observation contributions (its influence function). Efron and Stein showed that
+$\hat v_{\text{jack}}$ is biased upward in expectation for any statistic, so it errs on the conservative side
+<Cite id="efron1981" />.
+
+**Pseudo-values.** Tukey's pseudo-values $\tilde\theta_i = n\hat\theta - (n - 1)\hat\theta_{(i)}$ have mean
+$\tilde\theta$, and $\hat v_{\text{jack}}$ equals their sample variance divided by $n$. The jackknife treats them as
+approximately independent observations, which motivates the interval $\tilde\theta \pm t_{n-1}\sqrt{\hat v_{\text{jack}}}$.
+
+## Worked example
+
+Ten observations: $1.2, 2.5, 0.8, 3.9, 1.7, 6.3, 2.1, 0.9, 4.4, 1.5$.
+
+- **Plug-in variance.** $\hat\sigma^2 = \frac1n\sum_i (x_i - \bar x)^2 = 2.894$. Its bias is exactly $-\sigma^2/n$, a
+  pure $1/n$ term. The jackknife bias estimate is $-0.322$, and the corrected estimate $2.894 + 0.322 = 3.216$ equals
+  the unbiased sample variance $s^2$ with divisor $n - 1$.
+- **Mean.** The jackknife standard error is 0.567, equal to $s/\sqrt{10}$.
+- **Median.** The sample median is 1.9. Deleting one of the five smallest values gives a leave-one-out median of 2.1;
+  deleting one of the five largest gives 1.7. The jackknife standard error computed from these two values is 0.60; the
+  <NoteLink to="bootstrap">bootstrap</NoteLink> standard error of the same median is 0.68.
+
+## Cost
+
+Exactly $n$ evaluations of the statistic, deterministic. For estimators with a closed-form leave-one-out update, such
+as least squares, the $n$ refits cost little more than one fit.
+
+## Trade-offs
+
+- **Non-smooth statistics.** The jackknife variance estimate is inconsistent for the median and other quantiles: the
+  leave-one-out values take only two distinct values, and $\hat v_{\text{jack}}$ does not converge to the true
+  variance as $n$ grows. The **delete-$d$ jackknife**, which leaves out $d$ observations at a time with $\sqrt n < d <
+  n$, repairs this at higher cost.
+- **Against the bootstrap.** The jackknife is a linear approximation to the bootstrap <Cite id="efron1993" />. It is
+  cheaper and deterministic, and its bias correction is exact for $1/n$ bias; the bootstrap handles non-smooth
+  statistics and gives whole distributions and intervals. The jackknife also supplies the acceleration constant of the
+  bootstrap BCa interval.
+- **Bias correction increases variance.** Removing a small bias can increase mean squared error. Correct only when the
+  bias is large relative to the standard error.
+- **Dependent data.** Leaving out single observations ignores correlation; leave out blocks or clusters instead.

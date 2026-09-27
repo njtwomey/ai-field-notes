@@ -1,0 +1,125 @@
+---
+title: Multicollinearity
+kind: concept
+summary: 'Multicollinearity is strong linear dependence among predictors. It inflates the variance of each least-squares coefficient by the variance inflation factor $\operatorname{VIF}_j = 1/(1 - R_j^2)$, where $R_j^2$ comes from regressing predictor $j$ on the others. Predictions within the data are unaffected.'
+tags: [regression, linear-models, diagnostics, worked-example]
+aliases: [collinearity, variance inflation factor, tolerance, near-collinearity, ill-conditioned design, condition index]
+requires: [ols-inference]
+related: [ridge-regression, condition-number, leverage-and-influence, principal-component-analysis]
+references: [marquardt1970, belsley1980, seber2003]
+status: draft
+updated: 2026-09-27
+---
+
+import { CollinearEstimates } from './CollinearEstimates'
+
+<Definition>
+Predictors are **multicollinear** when some linear combination of the columns of the design matrix $\Xmat$ is nearly
+zero. For predictor $j$, let $R_j^2$ be the coefficient of determination from regressing $\xvec_j$ on the other
+predictors and an intercept. The **variance inflation factor** is
+
+$$
+\operatorname{VIF}_j = \frac{1}{1 - R_j^2},
+$$
+
+the factor by which $\var(\hat\beta_j)$ exceeds its value for a predictor uncorrelated with the others
+<Cite id="marquardt1970" />. Its reciprocal $1 - R_j^2$ is the **tolerance**.
+</Definition>
+
+## Intuition
+
+A regression coefficient $\beta_j$ is the effect of changing $x_j$ with the other predictors held fixed. If $x_j$ is
+almost a linear function of the others, the data contain little variation in $x_j$ with the others held fixed. The
+estimate of $\beta_j$ then rests on that small residual variation and is noisy. The fit as a whole can still be good:
+the data determine the combined effect of the correlated predictors, not how to split it among them.
+
+<CollinearEstimates />
+
+## Derivation of the VIF
+
+Under the model $\yvec = \Xmat\betavec + \epsilonvec$ with $\cov(\epsilonvec) = \sigma^2\Imat$, the coefficient
+variance is $\var(\hat\beta_j) = \sigma^2\brack{(\Xmat^\top\Xmat)^{-1}}_{jj}$
+(<NoteLink to="ols-inference">OLS inference</NoteLink>). Order the columns as $\Xmat = [\xvec_j\ \ \Xmat_{-j}]$, where
+$\Xmat_{-j}$ holds the intercept and the other predictors. By the formula for the inverse of a partitioned matrix, the
+top-left entry of $(\Xmat^\top\Xmat)^{-1}$ is the reciprocal of the Schur complement,
+
+$$
+\brack{(\Xmat^\top\Xmat)^{-1}}_{jj} = \frac{1}{\xvec_j^\top\xvec_j - \xvec_j^\top\Xmat_{-j}(\Xmat_{-j}^\top\Xmat_{-j})^{-1}\Xmat_{-j}^\top\xvec_j}
+= \frac{1}{\xvec_j^\top(\Imat - \Hmat_{-j})\xvec_j},
+$$
+
+where $\Hmat_{-j}$ projects onto the columns of $\Xmat_{-j}$. The denominator is the residual sum of squares
+$\text{RSS}_j$ from regressing $\xvec_j$ on the other predictors. By the definition of $R_j^2$, $\text{RSS}_j =
+\text{SST}_j(1 - R_j^2)$, with $\text{SST}_j = \sum_i (x_{ij} - \bar x_j)^2$. Therefore
+
+$$
+\var(\hat\beta_j) = \frac{\sigma^2}{\text{SST}_j}\cdot\frac{1}{1 - R_j^2}.
+$$
+
+The first factor is the variance for a predictor uncorrelated with the others ($R_j^2 = 0$). The second is
+$\operatorname{VIF}_j$. The standard error grows by $\sqrt{\operatorname{VIF}_j}$, and a confidence interval for
+$\beta_j$ widens by the same factor.
+
+The same Schur complement shows why: $\hat\beta_j$ equals the slope from regressing $\yvec$ on the residual of
+$\xvec_j$ after removing the other predictors (the Frisch–Waugh–Lovell theorem), and that residual has sum of squares
+$\text{RSS}_j$.
+
+## Two predictors
+
+With two predictors of correlation $\rho$, $R_1^2 = R_2^2 = \rho^2$ and $\operatorname{VIF} = 1/(1 - \rho^2)$:
+
+| $\rho$ | 0.5 | 0.9 | 0.95 | 0.99 |
+| --- | --- | --- | --- | --- |
+| VIF | 1.33 | 5.26 | 10.3 | 50.3 |
+| SE factor $\sqrt{\text{VIF}}$ | 1.15 | 2.29 | 3.20 | 7.09 |
+
+For standardised predictors (mean 0, variance 1) and $n$ observations, $\cov(\hat\beta_1, \hat\beta_2) =
+\frac{\sigma^2}{n(1 - \rho^2)}\begin{pmatrix} 1 & -\rho \\ -\rho & 1 \end{pmatrix}$. Two combinations behave very
+differently:
+
+$$
+\var(\hat\beta_1 + \hat\beta_2) = \frac{2\sigma^2(1 - \rho)}{n(1 - \rho^2)} = \frac{2\sigma^2}{n(1 + \rho)}, \qquad
+\var(\hat\beta_1 - \hat\beta_2) = \frac{2\sigma^2}{n(1 - \rho)}.
+$$
+
+With $\rho = 0.9$, $n = 50$ and $\sigma = 1$, each coefficient has standard deviation 0.32 and their sum has 0.15. The
+sum is estimated more precisely than with uncorrelated predictors (0.20); the difference has standard deviation
+0.63.
+
+## Other diagnostics
+
+- **Pairwise correlations** detect only dependence between two predictors. Three predictors can be exactly collinear
+  ($x_3 = x_1 + x_2$) with modest pairwise correlations. The VIF catches every linear dependence involving $x_j$.
+- **Condition number.** Scale the columns of $\Xmat$ to unit length and compute the ratio of the largest to smallest
+  singular value, $\kappa = \sigma_{\max}/\sigma_{\min}$ (<NoteLink to="condition-number">condition number</NoteLink>).
+  Belsley, Kuh and Welsch treat condition indices above 30 as a sign of strong dependence, and use the share of each
+  coefficient's variance attached to each small singular value to find which predictors are involved
+  <Cite id="belsley1980" />.
+- **Rules of thumb.** VIF above 5 or 10 is often called high. The threshold matters less than whether the resulting
+  standard errors are too wide for the question asked.
+
+## Remedies
+
+Multicollinearity is a property of the data, not a violation of any assumption. The estimates remain unbiased and the
+standard errors remain correct; they are large because the data are uninformative about the separate effects.
+
+- **Do nothing** if the goal is prediction for inputs that follow the same correlation pattern, or if the coefficient of
+  interest is not among the correlated ones.
+- **Estimate the combination** the data determine, such as $\beta_1 + \beta_2$, or combine the predictors into one
+  index.
+- **Collect data that break the correlation,** or design the experiment so that predictors vary independently.
+- **Regularise.** <NoteLink to="ridge-regression">Ridge regression</NoteLink> adds $\lambda\Imat$ to $\Xmat^\top\Xmat$,
+  which bounds the variance at the cost of bias <Cite id="marquardt1970" />. Principal-component regression drops the
+  directions of smallest variance.
+- **Drop a predictor** only if the model without it still answers the question; dropping a confounder biases the
+  others.
+
+## Pitfalls
+
+- **Reading insignificant coefficients as absent effects.** Two correlated predictors can each have $p > 0.5$ while the
+  F test that both are zero gives $p < 0.001$.
+- **Unstable signs.** A coefficient can change sign when a correlated predictor is added or a few observations change.
+- **Extrapolating off the data's pattern.** Predictions where the correlated predictors move independently are highly
+  uncertain, because the data never saw such inputs.
+- **Polynomial and interaction terms.** $x$ and $x^2$ are highly correlated when $x$ is far from 0. Centring $x$
+  before forming powers and products removes most of this, without changing the fitted values.

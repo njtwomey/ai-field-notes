@@ -1,0 +1,124 @@
+---
+title: Blocking and stratification
+kind: concept
+summary: 'Blocking groups similar units and randomises treatment separately within each group. Differences between blocks then cancel from the estimated effect, cutting its variance by the fraction of outcome variance they explain. A paired design is blocking with blocks of two.'
+tags: [experimental-design, variance-reduction, causal-inference, worked-example]
+aliases: [blocking, randomised block design, randomized block design, stratified randomisation, stratified randomization, block randomisation, matched-pairs design, paired design, stratified estimator]
+requires: [randomised-controlled-experiments]
+related: [paired-t-test, cuped, reweighting-biased-samples, simpsons-paradox, factorial-designs]
+references: [box2005, fisher1935b, imbens2015]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **randomised block design** partitions the $n$ experimental units into blocks $b = 1, \dots, B$ of units expected to
+respond similarly, and randomises treatment independently within each block, assigning $n_{1b}$ of the block's $n_b$
+units to treatment. The **stratified estimator** of the average treatment effect weights the within-block differences
+in means by block size,
+
+$$
+\hat\tau_{\text{block}} = \sum_{b=1}^B \frac{n_b}{n}\paren{\bar Y_{1b} - \bar Y_{0b}}.
+$$
+
+Blocks of size two are a **matched-pairs** or **paired** design <Cite id="box2005" />.
+</Definition>
+
+## Intuition
+
+In a completely randomised experiment, the estimated effect varies from one randomisation to the next partly because
+the treated group happens to contain more units with high outcomes. If a variable predicts the outcome (age, baseline
+severity, the plot of land, last month's activity), randomising within groups defined by that variable makes the two
+arms balanced on it in every randomisation, not only on average. The between-block differences then cancel from
+every within-block comparison. Box, Hunter and Hunter summarise the rule as "block what you can, randomise what you
+cannot" <Cite id="box2005" />.
+
+## Unbiasedness
+
+Within block $b$, treatment is completely randomised, so by the argument for
+<NoteLink to="randomised-controlled-experiments">randomised experiments</NoteLink> $\bar Y_{1b} - \bar Y_{0b}$ is unbiased
+for the block's average effect $\tau_b$. The overall effect is $\tau = \sum_b (n_b/n)\tau_b$, so
+$\hat\tau_{\text{block}}$ is unbiased for $\tau$. Randomisations in different blocks are independent, so
+
+$$
+\var(\hat\tau_{\text{block}}) = \sum_{b=1}^B \paren{\frac{n_b}{n}}^2\paren{\frac{S_{1b}^2}{n_{1b}} + \frac{S_{0b}^2}{n_{0b}} - \frac{S_{\tau b}^2}{n_b}},
+$$
+
+each term being Neyman's variance for one block, with $S_{1b}^2$, $S_{0b}^2$ and $S_{\tau b}^2$ the within-block
+variances of the treated outcomes, control outcomes and unit effects.
+
+## How much blocking saves
+
+Take a simple model: the effect is a constant $\tau$, and $Y_i(0) = \alpha_{b(i)} + \epsilon_i$, where the block
+effects $\alpha_b$ have variance $\sigma_\alpha^2$ across blocks and the unit-level variation $\epsilon_i$ has variance
+$\sigma_\epsilon^2$. Half of all units are treated.
+
+- **Complete randomisation.** The treated and control means each average over units from many blocks, and their
+  difference carries both sources of variation: $\var(\hat\tau) \approx 4(\sigma_\alpha^2 + \sigma_\epsilon^2)/n$.
+- **Blocking with half of each block treated.** Within block $b$, $\bar Y_{1b} - \bar Y_{0b} = \tau + \bar\epsilon_{1b} -
+  \bar\epsilon_{0b}$: the block effect $\alpha_b$ appears in both means and cancels. So $\var(\hat\tau_{\text{block}})
+  \approx 4\sigma_\epsilon^2/n$.
+
+The ratio of the two variances is
+
+$$
+\frac{\var(\hat\tau_{\text{block}})}{\var(\hat\tau)} \approx \frac{\sigma_\epsilon^2}{\sigma_\alpha^2 + \sigma_\epsilon^2} = 1 - \rho,
+$$
+
+where $\rho$ is the fraction of outcome variance explained by the blocks (the intraclass correlation). Blocks that
+explain 80% of the variance cut the variance of the estimate by 80%, equivalent to five times as many units. Blocks
+unrelated to the outcome ($\rho = 0$) leave the variance unchanged.
+
+## Paired designs
+
+With blocks of two units, one treated and one control, the estimate is the mean of the within-pair differences $d_i$.
+For $m$ pairs with outcome variances $\sigma_1^2$ and $\sigma_0^2$ and within-pair correlation $\rho$,
+
+$$
+\var(\bar d) = \frac{\sigma_1^2 + \sigma_0^2 - 2\rho\sigma_1\sigma_0}{m}.
+$$
+
+Positive correlation between partners reduces the variance. The analysis is the
+<NoteLink to="paired-t-test">paired t-test</NoteLink> on the differences. A **crossover** or within-subject design,
+where each unit receives both treatments in random order, is the extreme case: each unit is its own pair.
+
+## Worked example
+
+Six units with hypothetical potential outcomes (only one of each pair of outcomes would be observed):
+
+| Unit | 1 | 2 | 3 | 4 | 5 | 6 |
+| --- | --- | --- | --- | --- | --- | --- |
+| $Y_i(0)$ | 10 | 12 | 8 | 15 | 9 | 14 |
+| $Y_i(1)$ | 13 | 14 | 9 | 19 | 10 | 19 |
+
+The average effect is 2.67. Complete randomisation of three units to treatment has 20 possible assignments, and the
+variance of $\hat\tau$ over them is 8.31. Pair the units by similar control outcomes, $\set{3, 5}$, $\set{1, 2}$ and
+$\set{4, 6}$, and treat one unit of each pair at random. There are $2^3 = 8$ assignments. The estimate still averages
+2.67, and its variance is 0.39. Pairing removed 95% of the variance, because most of the variation among the six units
+is between pairs.
+
+## Post-stratification and regression adjustment
+
+When a prognostic variable is known but was not used in the design, a completely randomised experiment can be analysed
+with the stratified estimator anyway (**post-stratification**), or with a regression on the covariate (as in
+<NoteLink to="cuped">CUPED</NoteLink>). For large samples this recovers most of the precision of blocking. Blocking is
+still better in small experiments, because it guarantees balance rather than correcting for imbalance after the fact.
+<NoteLink to="reweighting-biased-samples">Reweighting biased samples</NoteLink> uses the same stratum weights for a
+different purpose: matching the experiment's mix to a target population.
+
+## Assumptions
+
+- The blocking variable is measured before randomisation and is not affected by treatment.
+- Units within a block are exchangeable with respect to treatment; randomisation within each block is independent.
+
+## Pitfalls
+
+- **Ignoring the blocks in the analysis.** Analysing a blocked design as if it were completely randomised uses the
+  wrong variance, usually too large, and throws away the gain.
+- **Unequal treatment fractions across blocks.** If blocks are treated at different rates, the pooled difference in
+  means mixes the treatment effect with block differences, as in
+  <NoteLink to="simpsons-paradox">Simpson's paradox</NoteLink>. Use the stratified estimator, which weights each block by
+  its size.
+- **Blocking on noise.** With a paired design the $t$ test has $m - 1$ degrees of freedom instead of $2m - 2$. If the
+  pairing variable does not predict the outcome, the lost degrees of freedom cost a little power.
+- **Too many small blocks with missing units.** When one unit of a pair drops out, the pair's comparison is lost.

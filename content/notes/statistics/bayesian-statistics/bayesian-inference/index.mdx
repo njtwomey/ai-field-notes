@@ -1,0 +1,169 @@
+---
+title: Bayesian inference
+kind: concept
+summary: 'Bayesian inference treats unknown parameters as random. The posterior $p(\theta \mid y) \propto p(y \mid \theta)\,p(\theta)$ combines prior and likelihood; predictions average the model over the posterior, $p(\tilde y \mid y) = \int p(\tilde y \mid \theta)\,p(\theta \mid y)\,d\theta$.'
+tags: [bayesian, inference, estimation, worked-example]
+aliases: [Bayesian statistics, Bayesian updating, posterior distribution, posterior predictive distribution, prior predictive distribution, posterior predictive check, Bayesian workflow]
+requires: [bayes-theorem]
+related:
+  [
+    confidence-intervals,
+    markov-chain-monte-carlo,
+    variational-inference,
+    probabilistic-programming,
+    bayesian-linear-regression,
+  ]
+references: [gelman2013, mcelreath2020, gelman2020]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Bayesian inference** describes an unknown parameter $\theta$ by a probability distribution. A **prior** $p(\theta)$
+states what is known before the data $y$. A **likelihood** $p(y \mid \theta)$ states how the data arise for each
+$\theta$. The **posterior**
+
+$$
+p(\theta \mid y) = \frac{p(y \mid \theta)\, p(\theta)}{p(y)}, \qquad p(y) = \int p(y \mid \theta)\, p(\theta)\, d\theta,
+$$
+
+is the conditional distribution of $\theta$ given the observed $y$. Every conclusion (an estimate, an interval, a
+prediction, a decision) is a summary of the posterior <Cite id="gelman2013" />.
+</Definition>
+
+## Intuition
+
+A Bayesian model is a joint distribution $p(y, \theta) = p(y \mid \theta)\,p(\theta)$ over data and parameters.
+Observing $y$ fixes one slice of that joint distribution. The posterior is that slice, renormalised to integrate to 1.
+The normalising constant $p(y)$ does not depend on $\theta$, so the shape of the posterior is the product of prior and
+likelihood:
+
+$$
+p(\theta \mid y) \propto p(y \mid \theta)\, p(\theta).
+$$
+
+Where the likelihood is flat, the posterior follows the prior. Where the likelihood is sharp, the posterior follows the
+data. As the number of independent observations $n$ grows, the log-likelihood is a sum of $n$ terms and the log-prior
+is one term, so the data dominate any prior that puts positive density near the true value.
+
+The frequentist view treats $\theta$ as fixed and the data as random, and judges procedures by their behaviour over
+repeated samples. The Bayesian view conditions on the one observed data set and makes probability statements about
+$\theta$ directly. A 95% <NoteLink to="credible-intervals-and-hpd">credible interval</NoteLink> contains $\theta$ with
+posterior probability 0.95. A 95% <NoteLink to="confidence-intervals">confidence interval</NoteLink> comes from a
+procedure that covers $\theta$ in 95% of repeated samples.
+
+## Sequential updating
+
+Data can be processed in batches. Suppose $y_1$ and $y_2$ are conditionally independent given $\theta$. Then
+
+$$
+p(\theta \mid y_1, y_2) \propto p(y_2 \mid \theta)\, p(y_1 \mid \theta)\, p(\theta) \propto p(y_2 \mid \theta)\, p(\theta \mid y_1).
+$$
+
+The posterior after $y_1$ is the prior for $y_2$. The order of the batches does not matter, and updating once with all
+the data gives the same posterior as updating in steps.
+
+## The posterior predictive distribution
+
+A prediction for a new observation $\tilde y$ must account for the uncertainty in $\theta$. Assume $\tilde y$ and $y$
+are conditionally independent given $\theta$, so that $p(\tilde y \mid \theta, y) = p(\tilde y \mid \theta)$.
+Marginalising $\theta$ out of the joint posterior of $(\tilde y, \theta)$ gives
+
+$$
+p(\tilde y \mid y) = \int p(\tilde y, \theta \mid y)\, d\theta = \int p(\tilde y \mid \theta)\, p(\theta \mid y)\, d\theta.
+$$
+
+This is the **posterior predictive distribution**. It is a mixture of the sampling distributions $p(\tilde y \mid
+\theta)$, weighted by the posterior. By the <NoteLink to="law-of-total-expectation">law of total variance</NoteLink>,
+
+$$
+\var(\tilde y \mid y) = \expect\brack{\var(\tilde y \mid \theta) \mid y} + \var\brack{\expect(\tilde y \mid \theta) \mid y}.
+$$
+
+The first term is the noise of a single observation. The second is the uncertainty about $\theta$. A **plug-in**
+prediction $p(\tilde y \mid \hat\theta)$ at a point estimate $\hat\theta$ keeps only the first term, so its
+intervals are too narrow when $n$ is small.
+
+Before the data are seen, the same integral with the prior in place of the posterior gives the **prior predictive
+distribution** $p(y) = \int p(y \mid \theta)\,p(\theta)\,d\theta$. It is the distribution of data sets the model
+considers plausible, and it is also the marginal likelihood used in
+<NoteLink to="bayes-factors-and-model-comparison">Bayes factors</NoteLink>.
+
+## Worked example: a coin
+
+A coin lands heads with unknown probability $\theta \in [0, 1]$. The prior is $\theta \sim \Beta(2, 2)$, which has
+mean 0.5 and mild preference for values near the middle. In $n = 10$ tosses the coin shows $k = 7$ heads. The
+likelihood is $p(k \mid \theta) = \binom{10}{7}\theta^7(1 - \theta)^3$. Multiplying by the prior density
+$\theta(1 - \theta)/B(2, 2)$ and dropping every factor that does not involve $\theta$,
+
+$$
+p(\theta \mid k) \propto \theta^{7}(1 - \theta)^{3} \cdot \theta^{1}(1 - \theta)^{1} = \theta^{8}(1 - \theta)^{4}.
+$$
+
+This is the kernel of the $\Beta(9, 5)$ density, so the posterior is $\Beta(9, 5)$; the
+<NoteLink to="conjugate-priors">conjugate priors</NoteLink> note derives this update in general. Its mean is
+$9/14 = 0.643$. The maximum-likelihood estimate is $7/10 = 0.7$. The prior pulls the estimate toward 0.5 by the weight
+of four pseudo-observations. The central 95% posterior interval is $[0.386, 0.861]$.
+
+The probability that the next five tosses are all heads is a posterior predictive probability:
+
+$$
+P(\text{5 heads} \mid k) = \int_0^1 \theta^5\, p(\theta \mid k)\, d\theta = \frac{B(14, 5)}{B(9, 5)}
+= \frac{9 \cdot 10 \cdot 11 \cdot 12 \cdot 13}{14 \cdot 15 \cdot 16 \cdot 17 \cdot 18} = 0.150.
+$$
+
+Plugging the posterior mean into the sampling model gives $0.643^5 = 0.110$, which is too low. The average of
+$\theta^5$ exceeds the fifth power of the average of $\theta$, because $\theta^5$ is convex (Jensen's inequality).
+For the number of heads $\tilde k$ in the next 10 tosses, the variance decomposition has two terms. The expected
+binomial variance is $\expect[10\,\theta(1 - \theta) \mid k] = 2.14$. The uncertainty about $\theta$ adds
+$\var(10\,\theta \mid k) = 100 \times 0.0153 = 1.53$. The posterior predictive variance is their sum, 3.67. The
+plug-in binomial variance at $\theta = 0.643$ is only 2.30.
+
+## Computing the posterior
+
+The posterior has a closed form only for <NoteLink to="conjugate-priors">conjugate</NoteLink> pairs and a few other
+models. Otherwise the integral $p(y)$ is intractable, and the posterior is approximated:
+
+- **Grid approximation** evaluates prior times likelihood on a grid of $\theta$ values and normalises. It works for one
+  or two parameters.
+- **Laplace approximation** fits a Gaussian at the posterior mode, with covariance equal to the inverse Hessian of
+  $-\log p(\theta \mid y)$.
+- <NoteLink to="markov-chain-monte-carlo">Markov chain Monte Carlo</NoteLink> draws dependent samples whose
+  distribution converges to the posterior. It needs only the unnormalised density $p(y \mid \theta)\,p(\theta)$.
+- <NoteLink to="variational-inference">Variational inference</NoteLink> fits the closest member of a tractable family
+  by optimisation.
+
+With draws $\theta^{(1)}, \dots, \theta^{(S)}$ from the posterior, every summary is a Monte Carlo average: the posterior
+mean is $\frac1S\sum_s \theta^{(s)}$, and a posterior predictive draw is $\tilde y^{(s)} \sim p(\tilde y \mid
+\theta^{(s)})$. <NoteLink to="probabilistic-programming">Probabilistic programming</NoteLink> languages automate this.
+
+## The Bayesian workflow
+
+Fitting one model is one step of an iterative process <Cite id="gelman2020" /> <Cite id="mcelreath2020" />:
+
+1. **Build the model.** Write the likelihood and priors. Simulate data from the prior predictive distribution. If the
+   simulated data are implausible (negative counts, heights of 10 metres), the priors are wrong.
+2. **Fit.** Compute or sample the posterior. For MCMC, check convergence with
+   <NoteLink to="mcmc-diagnostics">MCMC diagnostics</NoteLink> before reading any result.
+3. **Check.** A **posterior predictive check** draws replicated data sets $y^{\text{rep}}$ from $p(y^{\text{rep}} \mid
+   y)$ and compares a test statistic $T(y^{\text{rep}})$ with $T(y)$. The **posterior predictive p-value**
+   $P(T(y^{\text{rep}}) \ge T(y) \mid y)$ near 0 or 1 shows a feature of the data that the model does not reproduce.
+4. **Compare and expand.** Change the model where the checks fail. Compare candidates by predictive accuracy
+   (<NoteLink to="bayes-factors-and-model-comparison">LOO and WAIC</NoteLink>) and report how conclusions change.
+
+## Assumptions
+
+- The likelihood is a correct description of how the data arise, up to the unknown $\theta$. The posterior is only as
+  good as the model.
+- The prior is proper, or the posterior is checked to be proper; see <NoteLink to="prior-choice">prior choice</NoteLink>.
+- The posterior predictive formula assumes new data are exchangeable with the observed data given $\theta$.
+
+## Pitfalls
+
+- **Reporting only the posterior mode.** The mode (the MAP estimate) is not invariant to reparameterisation and ignores
+  the spread of the posterior. Report intervals or the whole distribution.
+- **Reading a credible interval as a confidence interval.** A credible interval conditions on the data; its coverage
+  over repeated samples depends on the prior and is not guaranteed.
+- **Plug-in prediction.** Predicting with a point estimate drops the parameter uncertainty and gives intervals that are
+  too narrow.
+- **Unchecked computation.** An MCMC run that has not converged returns numbers that look like a posterior but are not.

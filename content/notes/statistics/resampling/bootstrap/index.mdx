@@ -1,0 +1,147 @@
+---
+title: Bootstrap
+kind: technique
+summary: 'The bootstrap estimates the sampling distribution of a statistic by recomputing it on $B$ resamples of size $n$ drawn with replacement from the data. It gives standard errors and percentile, basic and BCa intervals where no formula exists, but fails for extremes and dependent data.'
+tags: [resampling, estimation, inference, nonparametric, worked-example]
+aliases: [nonparametric bootstrap, Efron's bootstrap, bootstrap standard error, percentile interval, basic bootstrap interval, BCa interval, bias-corrected and accelerated interval, bootstrap-t interval, studentised bootstrap, plug-in principle]
+requires: [standard-error, confidence-intervals]
+related: [jackknife, parametric-bootstrap-and-bootstrap-hypothesis-tests, permutation-tests, metric-confidence-intervals, bagging]
+references: [efron1979, efron1993, efron1987, davison1997, bickel1981]
+status: draft
+updated: 2026-09-27
+---
+
+import { BootstrapIntervals } from './BootstrapIntervals'
+
+<Definition>
+Let $x_1, \dots, x_n$ be independent draws from an unknown distribution $F$, and let $\hat\theta = s(x_1, \dots,
+x_n)$ estimate a parameter $\theta$. The **bootstrap** draws $B$ resamples $x_1^*, \dots, x_n^*$, each by sampling $n$
+times with replacement from the data, and computes $\hat\theta^{*b} = s(x^{*b})$ for $b = 1, \dots, B$. The spread of
+the replicates $\hat\theta^{*b}$ around $\hat\theta$ estimates the spread of $\hat\theta$ around $\theta$
+<Cite id="efron1979" />.
+</Definition>
+
+## Problem
+
+A standard error or confidence interval needs the sampling distribution of $\hat\theta$: its variation across
+repeated samples from $F$. Formulas exist for means and for a few other statistics under assumptions such as normality.
+For a median, a correlation coefficient, a ratio, an AUROC or a trimmed mean there is often no usable formula. Only one
+sample is available, so the sampling distribution cannot be observed directly.
+
+## Mechanism
+
+**The plug-in principle.** Write the parameter as a functional of the distribution, $\theta = t(F)$. The empirical
+distribution $\hat F_n$ puts mass $1/n$ on each observation. The plug-in estimate is $\hat\theta = t(\hat F_n)$. The
+bootstrap applies the same substitution to the sampling process itself: the unknown relation between $F$ and a sample
+drawn from it is imitated by the known relation between $\hat F_n$ and a sample drawn from $\hat F_n$. Sampling $n$
+values from $\hat F_n$ is sampling $n$ values with replacement from the data. So
+
+$$
+\text{distribution of } \hat\theta - \theta \text{ under } F \;\approx\; \text{distribution of } \hat\theta^* -
+\hat\theta \text{ under } \hat F_n.
+$$
+
+The right-hand side is computable by Monte Carlo. The approximation has two errors: $\hat F_n \ne F$ (statistical
+error, which shrinks with $n$) and $B < \infty$ (Monte Carlo error, which shrinks with $B$).
+
+**Bootstrap standard error and bias.** The bootstrap standard error is the standard deviation of the replicates,
+
+$$
+\widehat{\text{se}}_B = \sqrt{\frac{1}{B - 1}\sum_{b=1}^B \paren{\hat\theta^{*b} - \bar\theta^*}^2}, \qquad
+\bar\theta^* = \frac1B\sum_b \hat\theta^{*b},
+$$
+
+and the bootstrap bias estimate is $\bar\theta^* - \hat\theta$.
+
+**The mean as a check.** For $\hat\theta = \bar x$ the bootstrap distribution can be computed exactly. Each resampled
+value $x_i^*$ is drawn from $\hat F_n$, which has mean $\bar x$ and variance $\hat\sigma^2 = \frac1n\sum_i (x_i -
+\bar x)^2$. The $n$ draws are independent, so
+
+$$
+\var^*(\bar x^*) = \frac{\hat\sigma^2}{n}, \qquad \widehat{\text{se}}_\infty = \frac{\hat\sigma}{\sqrt n} =
+\sqrt{\frac{n - 1}{n}}\cdot\frac{s}{\sqrt n},
+$$
+
+where $s$ is the sample standard deviation with divisor $n - 1$. The ideal bootstrap ($B \to \infty$) reproduces the
+textbook <NoteLink to="standard-error">standard error</NoteLink> up to the factor $\sqrt{(n - 1)/n}$, which comes from
+the plug-in variance.
+
+## Bootstrap confidence intervals
+
+Let $\hat\theta^*_{(q)}$ denote the $q$-quantile of the replicates.
+
+- **Percentile interval.** $[\hat\theta^*_{(\alpha/2)},\ \hat\theta^*_{(1-\alpha/2)}]$. It is correct if some
+  monotone transformation $\phi = m(\theta)$ makes $\hat\phi - \phi$ symmetric about 0 with the same distribution for
+  every $\phi$; the interval for $\phi$ then maps back through $m^{-1}$, and quantiles commute with $m$, so $m$ need not
+  be known.
+- **Basic interval.** Assume the distribution of $\hat\theta - \theta$ is approximated by that of $\hat\theta^* -
+  \hat\theta$. With $a$ and $b$ the $\alpha/2$ and $1 - \alpha/2$ quantiles of $\hat\theta^* - \hat\theta$,
+  $P(a \le \hat\theta - \theta \le b) \approx 1 - \alpha$. Rearranging for $\theta$ gives
+  $[\hat\theta - b,\ \hat\theta - a] = [2\hat\theta - \hat\theta^*_{(1-\alpha/2)},\ 2\hat\theta -
+  \hat\theta^*_{(\alpha/2)}]$. It reflects the bootstrap distribution about $\hat\theta$.
+- **Bootstrap-t.** Replace $\hat\theta - \theta$ by the studentised pivot $(\hat\theta - \theta)/\widehat{\text{se}}$,
+  computing $\widehat{\text{se}}$ inside each resample. It is more accurate when a stable standard-error formula exists.
+- **BCa (bias-corrected and accelerated).** Use the percentile interval with adjusted tail probabilities
+  <Cite id="efron1987" />. The bias correction $z_0 = \Phi^{-1}\paren{\#\set{\hat\theta^{*b} < \hat\theta}/B}$
+  measures the median bias of $\hat\theta^*$. The acceleration $a$, estimated from the
+  <NoteLink to="jackknife">jackknife</NoteLink> values $\hat\theta_{(i)}$ with mean $\hat\theta_{(\cdot)}$ as
+  $a = \sum_i (\hat\theta_{(\cdot)} - \hat\theta_{(i)})^3 / \brack{6\paren{\sum_i (\hat\theta_{(\cdot)} -
+  \hat\theta_{(i)})^2}^{3/2}}$, measures how fast the standard error changes with $\theta$. The endpoints are the
+  replicate quantiles at
+
+$$
+\alpha_{1,2} = \Phi\paren{z_0 + \frac{z_0 + z_{\alpha/2,\,1-\alpha/2}}{1 - a\paren{z_0 + z_{\alpha/2,\,1-\alpha/2}}}}.
+$$
+
+With $z_0 = a = 0$ it reduces to the percentile interval. For each endpoint separately, the coverage error of BCa
+and bootstrap-t intervals is of order $1/n$; that of the percentile and basic intervals is of order $1/\sqrt n$
+<Cite id="efron1993" />.
+
+<BootstrapIntervals />
+
+## Worked example
+
+Ten observations: $1.2, 2.5, 0.8, 3.9, 1.7, 6.3, 2.1, 0.9, 4.4, 1.5$. The mean is 2.53 and $s = 1.79$, so the formula
+standard error is $s/\sqrt{10} = 0.567$ and the ideal bootstrap standard error is $\sqrt{0.9}\times 0.567 = 0.538$.
+With $B = 10{,}000$ resamples (seed 1 in numpy):
+
+| Statistic | Estimate | Bootstrap SE | Percentile 95% | Basic 95% | BCa 95% |
+| --- | --- | --- | --- | --- | --- |
+| Mean | 2.53 | 0.536 | $[1.56, 3.65]$ | $[1.41, 3.50]$ | $[1.69, 3.83]$ |
+| Median | 1.90 | 0.683 | $[1.2, 3.9]$ | $[-0.1, 2.6]$ | $[1.2, 3.9]$ |
+
+The t interval for the mean is $[1.25, 3.81]$. The data are right-skewed, and the BCa interval for the mean shifts
+right accordingly. The basic interval for the median includes negative values, although every observation is positive:
+reflecting a skewed bootstrap distribution about $\hat\theta$ moves the long tail to the wrong side.
+
+## Cost
+
+Each replicate recomputes the statistic, so the cost is $B$ times one evaluation. About $B = 200$ replicates give a
+stable standard error. Percentile and BCa intervals use tail quantiles and need $B \ge 2{,}000$. Replicates are
+independent and parallelise trivially.
+
+## When it fails
+
+The bootstrap needs $\hat F_n$ to imitate $F$ in the respect the statistic depends on, and the statistic to depend
+smoothly on the distribution <Cite id="bickel1981" />.
+
+- **Extremes.** For $\hat\theta = \max_i x_i$, a resample contains the observed maximum with probability
+  $1 - (1 - 1/n)^n \to 1 - e^{-1} \approx 0.632$, so 63% of replicates equal $\hat\theta$ exactly. The true sampling
+  distribution of the maximum of a continuous variable has no atom. The bootstrap distribution is wrong for every $n$.
+- **Infinite variance.** For heavy-tailed data without a finite variance the bootstrap distribution of the mean does
+  not converge to the right limit.
+- **Dependent data.** Resampling individual observations destroys serial or cluster correlation, and the standard
+  error comes out too small. Resample blocks of consecutive observations (block bootstrap) or whole clusters.
+- **Small samples.** $\hat F_n$ has at most $n$ support points. With $n = 10$ the bootstrap cannot know about the
+  tails of $F$.
+- **Parameters on a boundary.** A variance component estimated at 0 has a nonstandard sampling distribution, and the
+  nonparametric bootstrap misrepresents it.
+
+## Trade-offs
+
+- Compared with a formula, the bootstrap needs no derivation and no normality assumption, but costs $B$ evaluations
+  and still relies on independence and on $n$ being large enough for $\hat F_n$ to resemble $F$.
+- Compared with the <NoteLink to="jackknife">jackknife</NoteLink>, it handles non-smooth statistics such as the
+  median, and costs more.
+- A <NoteLink to="parametric-bootstrap-and-bootstrap-hypothesis-tests">parametric bootstrap</NoteLink> resamples from
+  a fitted model instead of $\hat F_n$. It is more accurate when the model is right, and wrong when it is not.

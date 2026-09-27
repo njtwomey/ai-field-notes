@@ -1,0 +1,95 @@
+---
+title: Parametric bootstrap and bootstrap hypothesis tests
+kind: technique
+summary: 'The parametric bootstrap simulates new data sets from a fitted model instead of resampling the data. A bootstrap hypothesis test simulates from a distribution satisfying the null, usually the recentred data, and uses a studentised statistic; its p-value is $(1 + b)/(1 + B)$.'
+tags: [resampling, hypothesis-testing, inference, worked-example]
+aliases: [parametric bootstrap, model-based bootstrap, bootstrap test, bootstrap hypothesis test, bootstrap p-value, null-resampling bootstrap, Monte Carlo test]
+requires: [bootstrap, p-value]
+related: [permutation-tests, one-sample-t-test, confidence-intervals, jackknife]
+references: [efron1993, davison1997, hall1991]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The **parametric bootstrap** fits a model $F_{\hat\theta}$ to the data, draws $B$ synthetic data sets of size $n$
+from $F_{\hat\theta}$, and recomputes the statistic on each. A **bootstrap hypothesis test** draws the synthetic data
+sets from an estimate of the data distribution that satisfies the null hypothesis, computes the test statistic $T^{*b}$
+on each, and reports $\hat p = (1 + \#\set{b : T^{*b} \ge T})/(1 + B)$, where $T$ is the observed statistic
+<Cite id="efron1993" />.
+</Definition>
+
+## Problem
+
+The nonparametric <NoteLink to="bootstrap">bootstrap</NoteLink> resamples the observed values, so it cannot produce a
+value outside the sample. With small $n$ it misrepresents the tails, and it cannot handle statistics whose behaviour
+depends on the tails, such as extreme quantiles. When a parametric model is credible, simulating from the fitted model
+uses that information.
+
+Testing is a separate problem. A p-value is a probability computed under the null hypothesis. Resampling the raw data
+reproduces the distribution the data came from, which satisfies the null only if the null is true. The null
+distribution of a statistic must be simulated from a distribution that satisfies the null by construction.
+
+## Mechanism
+
+**Parametric bootstrap.**
+
+1. Fit the model: $\hat\theta$ from the data.
+2. For $b = 1, \dots, B$, draw $x_1^{*b}, \dots, x_n^{*b} \iid F_{\hat\theta}$ and compute the statistic $s^{*b}$.
+3. Use the spread of the $s^{*b}$ as for the nonparametric bootstrap: standard deviation, quantiles, bias.
+
+A common use is a **parametric bootstrap test** of a composite null. To test whether data follow an exponential
+distribution with Kolmogorov–Smirnov distance $D$, the tabulated null distribution of $D$ assumes a fully specified
+rate; with the rate estimated, the true null distribution is more concentrated and the tabulated p-values are too
+large. Fit the rate, simulate data sets from the fitted exponential, re-estimate the rate and recompute $D$ on each, and
+compare the observed $D$ with the simulated values. The same approach calibrates likelihood-ratio tests whose chi-squared
+approximation fails, such as a test that a variance component is zero.
+
+**Bootstrap tests.** Hall and Wilson give two guidelines <Cite id="hall1991" />.
+
+1. **Resample under the null.** For $H_0: \mu = \mu_0$, recentre the data, $\tilde x_i = x_i - \bar x + \mu_0$, and
+   resample from $\tilde x_1, \dots, \tilde x_n$. The recentred empirical distribution has mean exactly $\mu_0$ and the
+   same shape as the data. For two samples with $H_0: \mu_A = \mu_B$, recentre each group on the pooled mean.
+2. **Use a pivotal statistic.** Use $T = (\bar x - \mu_0)/(s/\sqrt n)$, recomputing $s$ in every resample, not the raw
+   difference $\bar x - \mu_0$. A statistic whose null distribution depends little on unknown parameters makes the
+   bootstrap p-value more accurate, with error of order $1/n$ rather than $1/\sqrt n$.
+
+The p-value counts resamples at least as extreme as the observed statistic, $|T^{*b}| \ge |T|$ for a two-sided test.
+The $+1$ in numerator and denominator counts the observed data set as one draw from the null, which keeps the test
+valid for finite $B$, as for random-permutation tests.
+
+**Duality with intervals.** A two-sided bootstrap test of $\mu = \mu_0$ at level $\alpha$ is equivalent to asking
+whether $\mu_0$ lies outside the $(1 - \alpha)$ bootstrap-t interval, when both use the same pivot.
+
+## Worked example
+
+Ten observations: $1.2, 2.5, 0.8, 3.9, 1.7, 6.3, 2.1, 0.9, 4.4, 1.5$, with $\bar x = 2.53$ and $s = 1.79$.
+
+**Test of $\mu = 1.5$.** The observed statistic is $T = (2.53 - 1.5)/(1.79/\sqrt{10}) = 1.82$. The
+<NoteLink to="one-sample-t-test">one-sample t-test</NoteLink> gives $p = 0.103$. Recentring gives $\tilde x_i = x_i -
+1.03$. With $B = 20{,}000$ resamples of the recentred data (numpy seed 2) and $T^*$ recomputed on each, the two-sided
+bootstrap p-value is $0.127$. For right-skewed data the studentised mean is skewed to the left, because a resample
+with a large mean also tends to have a large $s$. The bootstrap null distribution of $T$ has 2.5% and 97.5% quantiles
+$-4.03$ and $1.80$, against $\pm 2.26$ for Student's t with 9 degrees of freedom. Its long left tail raises the
+two-sided p-value.
+
+**Parametric bootstrap of a median.** Suppose the data are modelled as exponential. The fitted mean is 2.53, and the
+estimated median is $2.53\ln 2 = 1.75$. Simulating 20,000 exponential samples of size 10 with that mean gives a
+standard error of the sample median of 0.79. The nonparametric bootstrap gives 0.68. The two differ because the
+exponential model has a longer right tail than the observed values suggest; which answer is better depends on whether
+the model is right.
+
+## Cost
+
+$B$ simulations and recomputations, as for the nonparametric bootstrap, plus a model fit per resample when the
+statistic involves re-estimation. Tests at $\alpha = 0.05$ need $B \ge 1{,}000$; smaller $\alpha$ needs more.
+
+## Trade-offs
+
+- **Parametric against nonparametric.** The parametric bootstrap is more accurate when the model is right and can
+  extrapolate beyond the observed values. It inherits every error of the model. Check the fit first.
+- **Bootstrap against permutation tests.** A <NoteLink to="permutation-tests">permutation test</NoteLink> is exact
+  under exchangeability but tests equality of distributions. A bootstrap test targets a specific parameter, such as a
+  mean, while other features differ, and is only approximately valid.
+- **Pitfall: resampling the raw data for a test.** Resampling without recentring gives the distribution of $T$ under
+  the alternative that generated the data. Its p-values have no meaning as tail probabilities under $H_0$.

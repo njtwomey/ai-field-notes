@@ -1,0 +1,130 @@
+---
+title: Factorial designs
+kind: concept
+summary: 'A factorial design runs every combination of the levels of several factors. In a $2^k$ design each main effect and interaction is a contrast of all $N$ runs with variance $4\sigma^2/N$. A fractional factorial runs a subset of $2^{k-p}$ combinations, at the cost of aliasing effects together.'
+tags: [experimental-design, regression, worked-example]
+aliases: [factorial design, factorial experiment, full factorial design, 2^k design, two-level factorial design, main effect, interaction effect, fractional factorial design, aliasing, confounding in factorial designs, design resolution, defining relation]
+requires: [randomised-controlled-experiments]
+related: [blocking-and-stratification, ols-inference, multicollinearity]
+references: [box2005, fisher1935b]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **factorial design** studies $k$ factors at once by running every combination of their levels. In a **$2^k$
+design** each factor has two levels, coded $-1$ and $+1$, and the $N = 2^k$ runs cover all sign patterns. The **main
+effect** of factor A is the average response at A $= +1$ minus the average at A $= -1$. The **interaction** of A and
+B is half the difference between the effect of A at B $= +1$ and its effect at B $= -1$. A **fractional factorial**
+$2^{k-p}$ design runs a chosen $1/2^p$ fraction of the combinations <Cite id="box2005" />.
+</Definition>
+
+## Intuition
+
+The traditional alternative changes one factor at a time while holding the others fixed. That approach uses each run
+for one comparison only and cannot see interactions: if temperature helps only at high catalyst concentration, varying
+temperature at the default concentration finds nothing. A factorial design varies all factors together in a balanced
+pattern. Every run contributes to the estimate of every effect, and the pattern also estimates how the effect of one
+factor depends on the others. Fisher argued for factorial experiments on these grounds <Cite id="fisher1935b" />.
+
+## Effects as contrasts
+
+Write the design as a table with one column of signs per factor. The column for an interaction is the elementwise
+product of its factors' columns. For a $2^3$ design in standard order (A changes fastest):
+
+| Run | A | B | C | AB | AC | BC | ABC |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | $-$ | $-$ | $-$ | $+$ | $+$ | $+$ | $-$ |
+| 2 | $+$ | $-$ | $-$ | $-$ | $-$ | $+$ | $+$ |
+| 3 | $-$ | $+$ | $-$ | $-$ | $+$ | $-$ | $+$ |
+| 4 | $+$ | $+$ | $-$ | $+$ | $-$ | $-$ | $-$ |
+| 5 | $-$ | $-$ | $+$ | $+$ | $-$ | $-$ | $+$ |
+| 6 | $+$ | $-$ | $+$ | $-$ | $+$ | $-$ | $-$ |
+| 7 | $-$ | $+$ | $+$ | $-$ | $-$ | $+$ | $-$ |
+| 8 | $+$ | $+$ | $+$ | $+$ | $+$ | $+$ | $+$ |
+
+Every effect is the same kind of contrast. With $c_i \in \set{-1, +1}$ the entries of an effect's column and $y_i$ the
+response of run $i$,
+
+$$
+\text{effect} = \frac{1}{N/2}\sum_{i=1}^N c_i y_i = \bar y_{+} - \bar y_{-}.
+$$
+
+For a main effect, this is the difference of averages over the runs at each level. For AB, the runs with AB $= +1$ are
+those where A and B have the same sign, and the formula equals half the change in the effect of A between the two
+levels of B, which matches the definition.
+
+**Orthogonality.** Any two distinct columns agree in sign on exactly half of the runs, so their dot product is 0. In a
+regression of $y$ on the columns, $\Xmat^\top\Xmat = N\Imat$. Each coefficient is $\hat\beta = \frac1N\sum_i c_iy_i$,
+half the effect, and the estimates do not depend on which other terms are in the model.
+
+**Precision.** If the runs have independent errors with variance $\sigma^2$, an effect is a sum of $N$ terms with
+coefficients $\pm 2/N$, so
+
+$$
+\var(\text{effect}) = N\cdot\frac{4}{N^2}\sigma^2 = \frac{4\sigma^2}{N}.
+$$
+
+This is the variance of a two-group comparison with $N/2$ runs per group, for every one of the $2^k - 1$ effects at
+once. Estimating three main effects one at a time with the same precision would need a separate two-group comparison
+for each, three times as many runs, and would say nothing about interactions.
+
+## Worked example
+
+A $2^3$ experiment with factors A, B and C gives, in the standard order above,
+
+$$
+y = 60, 72, 54, 68, 52, 83, 45, 80.
+$$
+
+| Effect | A | B | C | AB | AC | BC | ABC |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Estimate | 23.0 | $-5.0$ | 1.5 | 1.5 | 10.0 | 0.0 | 0.5 |
+
+For A: the runs at A $= +1$ average $(72 + 68 + 83 + 80)/4 = 75.75$ and those at A $= -1$ average $52.75$, a difference
+of 23. The AC interaction of 10 means the effect of A depends on C. At C $= -1$ the effect of A is $((72 - 60) + (68 -
+54))/2 = 13$; at C $= +1$ it is $((83 - 52) + (80 - 45))/2 = 33$. Half their difference is 10. Reporting the main effect
+of A alone (23) would hide that A matters much more at the high level of C.
+
+The eight runs give one observation per combination and no replication, so $\sigma$ cannot be estimated from pure
+error. Two common approaches: assume the highest-order interactions are negligible and use them to estimate $\sigma^2$,
+or plot the ordered effects against normal quantiles, where negligible effects fall on a line through 0 and real
+effects stand off it.
+
+## Fractional factorials
+
+With many factors, $2^k$ runs are too many: 7 factors need 128. Most high-order interactions are negligible, so a
+fraction suffices. A $2^{3-1}$ half fraction keeps the four runs with ABC $= +1$ (runs 2, 3, 5 and 8). The equation
+**I = ABC** that selects them is the **defining relation**. In those four runs the A column equals the BC column, B
+equals AC and C equals AB. Each contrast estimates a sum of two effects, and the pairs are **aliases**:
+
+$$
+\hat\ell_A = A + BC, \qquad \hat\ell_B = B + AC, \qquad \hat\ell_C = C + AB.
+$$
+
+Multiplying the defining relation by a factor gives its alias, using $A^2 = I$: $A \cdot ABC = BC$. With the data
+above, the half fraction ($y = 72, 54, 52, 80$) gives $\hat\ell_A = 23.0$, $\hat\ell_B = 5.0$ and $\hat\ell_C = 3.0$. The
+first is right because $BC = 0$. The second has the wrong sign: $B = -5$ is masked by its alias $AC = 10$.
+
+The **resolution** of a fraction is the length of the shortest word in its defining relation. In a resolution III
+design (such as I = ABC) main effects are aliased with two-factor interactions. In resolution IV they are aliased only
+with three-factor interactions, and two-factor interactions with each other. In resolution V, main effects and
+two-factor interactions are all clear of each other. Choose the fraction so that the effects believed to matter are not
+aliased with each other.
+
+## Assumptions
+
+- Run order is randomised, so drifts in time do not align with any effect column.
+- The response is roughly linear between the two levels of each factor. A two-level design cannot detect curvature;
+  centre points (all factors at a middle level) test for it.
+- Errors are independent with constant variance, as for any <NoteLink to="ols-inference">least-squares analysis</NoteLink>.
+
+## Pitfalls
+
+- **Interpreting main effects in the presence of a large interaction.** The main effect averages over the other
+  factor's levels and may describe no real condition.
+- **Forgetting the alias structure.** A large contrast in a fractional design estimates a sum of aliased effects. Follow
+  up with a second fraction (a fold-over) when the aliases cannot be ruled out.
+- **Blocking a factorial.** When the runs do not fit in one homogeneous batch, assign the blocks by the sign of a
+  high-order interaction column, which is then confounded with the block difference instead of a main effect
+  (<NoteLink to="blocking-and-stratification">blocking</NoteLink>).
