@@ -7,9 +7,10 @@ type Doc = { id: string; title: string; aliases: string; summary: string; tags: 
 let index: MiniSearch<Doc> | undefined
 
 /**
- * The search index covers each note's title, aliases, summary, tags and section headings, all already loaded as note
- * metadata. Note bodies are not indexed: a well-named note is found by these fields, and indexing the full text of
- * a thousand notes made the palette slow to open. Built on first use, in milliseconds.
+ * Two indexes. The metadata index covers title, aliases, summary, tags and headings, which are already loaded, so it
+ * answers at once. The body index covers the full text; its data is a separate chunk fetched the first time the
+ * palette opens and indexed in small asynchronous chunks, so the palette never waits for it. Body-only matches are
+ * appended below the metadata matches once it is ready.
  */
 function searchIndex(): MiniSearch<Doc> {
   if (!index) {
@@ -35,6 +36,26 @@ function searchIndex(): MiniSearch<Doc> {
     )
   }
   return index
+}
+
+let bodyIndex: MiniSearch<{ id: string; body: string }> | undefined
+let bodyLoading: Promise<void> | undefined
+
+/** Fetch and index the note bodies in the background; resolves when full-text search is available. */
+export function loadBodyIndex(): Promise<void> {
+  bodyLoading ??= import('virtual:search').then(async ({ default: bodies }) => {
+    const ms = new MiniSearch<{ id: string; body: string }>({
+      fields: ['body'],
+      storeFields: [],
+      searchOptions: { prefix: true, fuzzy: 0.1, combineWith: 'AND' },
+    })
+    await ms.addAllAsync(
+      Object.entries(bodies).map(([id, body]) => ({ id, body })),
+      { chunkSize: 25 },
+    )
+    bodyIndex = ms
+  })
+  return bodyLoading
 }
 
 /** Every tag with the number of notes that carry it, most used first. */
@@ -80,8 +101,14 @@ export function suggestTags(fragment: string, limit = 12): { tag: string; count:
   return [...starts, ...contains].slice(0, limit)
 }
 
-/** Notes matching every `#tag` in the query and, if there is text, the text search (ranked); tag-only lists by title. */
-export function search(query: string, limit = 30): NoteMeta[] {
+/**
+ * Notes matching every `#tag` in the query and, if there is text, the text search (ranked); tag-only lists by title.
+ * With `fullText`, body-only matches from the background index are appended once it is ready.
+ */
+export function search(
+  query: string,
+  { limit = 30, fullText = false }: { limit?: number; fullText?: boolean } = {},
+): NoteMeta[] {
   const { tags, text } = parseQuery(query)
   const hasTags = (n: NoteMeta) => tags.every((t) => n.tags.includes(t))
   if (!text.trim()) {
@@ -92,9 +119,20 @@ export function search(query: string, limit = 30): NoteMeta[] {
       .slice(0, limit)
   }
   const bySlug = new Map(notes.map((n) => [n.slug, n]))
-  return searchIndex()
+  const found = searchIndex()
     .search(text)
-    .map((r) => bySlug.get(r.id as string))
+    .map((r) => r.id as string)
+  const seen = new Set(found)
+  // Full-text matches the metadata missed, ranked after every metadata match.
+  const extra =
+    fullText && bodyIndex
+      ? bodyIndex
+          .search(text)
+          .map((r) => r.id as string)
+          .filter((id) => !seen.has(id))
+      : []
+  return [...found, ...extra]
+    .map((id) => bySlug.get(id))
     .filter((n): n is NoteMeta => !!n && hasTags(n))
     .slice(0, limit)
 }

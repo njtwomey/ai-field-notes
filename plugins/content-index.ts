@@ -1,6 +1,8 @@
 /**
  * Builds the content index from content/ at dev and build time.
  *
+ * - `virtual:search` exposes plain-text note bodies for full-text search. It is loaded in the background the first
+ *   time the search palette opens; the palette answers from note metadata until it is ready.
  * - `virtual:content` exposes note metadata, references and the taxonomy. It is small and loaded eagerly.
  *
  * Frontmatter, taxonomy and references are validated here with zod. Any broken slug, citation key or category fails
@@ -25,6 +27,7 @@ import { macroExample, macroGroups, macros } from '../content/macros.ts'
 import { plainMath } from '../site/src/lib/math-text.ts'
 
 const CONTENT_ID = 'virtual:content'
+const SEARCH_ID = 'virtual:search'
 
 /** A note found on disk: its slug (the folder name), its folder relative to notes/, and the category its path implies. */
 type NoteDir = { slug: string; dir: string; category: string }
@@ -270,7 +273,7 @@ export function contentIndex({ contentDir }: { contentDir: string }): Plugin {
       s.watcher.add(contentDir)
       const refresh = (file: string) => {
         if (!file.startsWith(contentDir) || !/\.(mdx|ya?ml)$/.test(file)) return
-        for (const id of [CONTENT_ID]) {
+        for (const id of [CONTENT_ID, SEARCH_ID]) {
           const mod = server?.moduleGraph.getModuleById(resolved(id))
           if (mod) server?.moduleGraph.invalidateModule(mod)
         }
@@ -281,12 +284,13 @@ export function contentIndex({ contentDir }: { contentDir: string }): Plugin {
       s.watcher.on('unlink', refresh)
     },
     resolveId(id) {
-      if (id === CONTENT_ID) return resolved(id)
+      if (id === CONTENT_ID || id === SEARCH_ID) return resolved(id)
     },
     load(id) {
-      if (id !== resolved(CONTENT_ID)) return
+      if (id !== resolved(CONTENT_ID) && id !== resolved(SEARCH_ID)) return
       // The dev server stays up on content errors and lists them in the page; builds stay strict.
-      const { notes, references, taxonomy, errors } = buildIndex(contentDir, { strict: !server })
+      const { notes, references, taxonomy, bodies, errors } = buildIndex(contentDir, { strict: !server })
+      if (id === resolved(SEARCH_ID)) return `export default ${JSON.stringify(bodies)}`
       return [
         `export const notes = ${JSON.stringify(notes)}`,
         `export const references = ${JSON.stringify(references)}`,

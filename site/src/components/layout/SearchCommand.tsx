@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/command'
 import { Kbd } from '@/components/ui/kbd'
 import { browseUrl, category, kindLabels, noteUrl, prefetchNote, taxonomy, type NoteMeta } from '@/lib/content'
-import { parseQuery, search, suggestTags, tagCounts } from '@/lib/search'
+import { loadBodyIndex, parseQuery, search, suggestTags, tagCounts } from '@/lib/search'
 import { kindIcons } from './kind-icon'
 import { MathText } from '@/components/content/MathText'
 
@@ -53,8 +53,19 @@ export function SearchCommand() {
     }
   }, [])
 
+  // Search runs on a debounced copy of the query; the input itself stays immediate.
+  const [debounced, setDebounced] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(query), 150)
+    return () => clearTimeout(t)
+  }, [query])
+  // Full-text search becomes available in the background after the palette first opens.
+  const [bodyReady, setBodyReady] = useState(false)
+  useEffect(() => {
+    if (open && !bodyReady) loadBodyIndex().then(() => setBodyReady(true))
+  }, [open, bodyReady])
   const parsed = parseQuery(query)
-  const results = useMemo(() => search(query), [query])
+  const results = useMemo(() => search(debounced, { fullText: bodyReady }), [debounced, bodyReady])
   const suggestions = parsed.partialTag !== undefined ? suggestTags(parsed.partialTag) : []
   // The top result is the likeliest choice; start loading it while the reader decides.
   useEffect(() => {
@@ -96,7 +107,7 @@ export function SearchCommand() {
         <Command shouldFilter={false}>
           <CommandInput
             autoFocus
-            placeholder="Search titles, summaries and tags · #tag to filter by tag"
+            placeholder="Search notes · #tag to filter by tag"
             value={query}
             onValueChange={setQuery}
           />
