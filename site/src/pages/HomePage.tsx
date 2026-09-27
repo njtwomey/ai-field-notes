@@ -14,7 +14,7 @@ export function HomePage() {
       <section className="mx-auto max-w-2xl space-y-6 text-center">
         <h1 className="font-prose text-5xl font-bold">AI Field Notes</h1>
         <p className="font-prose text-lg text-muted-foreground">
-          Machine learning notes, collected over my career, tidied up with Claude and put online so I stop losing them.
+          Machine learning notes from my research career, digitised and made interactive.
         </p>
         <button
           type="button"
