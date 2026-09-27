@@ -1,0 +1,149 @@
+---
+title: Mixed-precision training
+kind: technique
+summary: Mixed-precision training runs matrix products in 16-bit floating point while keeping a 32-bit master copy of the weights. The master copy keeps small updates from rounding away; loss scaling keeps small fp16 gradients from rounding to zero. bf16 needs no scaling.
+tags: [deep-learning, training, numerical-methods, floating-point, gpu, memory, worked-example]
+aliases: [mixed precision, fp16 training, bf16, bfloat16, half precision, loss scaling, dynamic loss scaling, master weights, FP8 training, automatic mixed precision, AMP]
+requires: [backpropagation, gradient-descent]
+related: [floating-point-arithmetic, zero-and-sharded-optimisers, model-quantisation]
+references: [micikevicius2018, kalamkar2019, micikevicius2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { LossScaling } from './LossScaling'
+
+<Definition>
+Mixed-precision training stores activations, weights for the forward and backward passes, and gradients in a 16-bit
+floating-point format, and runs matrix products in that format with 32-bit accumulation. It keeps a 32-bit **master
+copy** of the weights to which updates are applied, and computes numerically sensitive reductions in 32 bits. With the
+fp16 format it also multiplies the loss by a **loss scale** before backpropagation and divides the gradients by it
+before the update <Cite id="micikevicius2018" />.
+</Definition>
+
+## Problem
+
+A 16-bit number takes half the memory and half the memory bandwidth of a 32-bit number, and accelerators run 16-bit
+matrix products many times faster than 32-bit ones. Training entirely in 16 bits, however, often diverges or loses
+accuracy. The two causes are the limited precision and the limited range of 16-bit formats.
+
+## Mechanism
+
+### Floating-point formats
+
+A binary floating-point number with $e$ exponent bits and $p$ fraction bits represents
+$\pm (1.f_1 f_2 \dots f_p)_2 \times 2^{E}$. Between $2^E$ and $2^{E+1}$ there are $2^p$ equally spaced numbers, so the
+spacing is $2^{E - p}$ and the relative precision is about $2^{-p}$. The exponent bits set the range. Below the smallest
+normal number, **subnormal** numbers fill the gap to zero with fewer significant bits.
+The <NoteLink to="floating-point-arithmetic">floating-point arithmetic</NoteLink> note covers the format in general.
+
+| Format | Exponent / fraction bits | Largest finite       | Smallest normal         | Smallest subnormal     | Spacing at 1                   |
+| ------ | ------------------------ | -------------------- | ----------------------- | ---------------------- | ------------------------------ |
+| fp32   | 8 / 23                   | $3.4 \times 10^{38}$ | $2^{-126}$              | $2^{-149}$             | $2^{-23} \approx 1.2 \times 10^{-7}$ |
+| fp16   | 5 / 10                   | 65,504               | $2^{-14} \approx 6.1 \times 10^{-5}$ | $2^{-24} \approx 6.0 \times 10^{-8}$ | $2^{-10} \approx 9.8 \times 10^{-4}$ |
+| bf16   | 8 / 7                    | $3.4 \times 10^{38}$ | $2^{-126}$              | $2^{-133}$             | $2^{-7} \approx 7.8 \times 10^{-3}$  |
+
+fp16 has more precision and much less range. bf16 keeps fp32's 8 exponent bits, so it has the same range, and gives up
+precision <Cite id="kalamkar2019" />.
+
+### Why updates need a 32-bit master copy
+
+Gradient descent updates $w \leftarrow w - \eta g$. Suppose $\abs{w}$ lies in $[2^E, 2^{E+1})$. In a format with $p$
+fraction bits, neighbouring representable numbers near $w$ are $2^{E-p}$ apart. Round-to-nearest maps $w + u$ back to $w$
+whenever $\abs{u}$ is less than half of that spacing:
+
+$$
+\abs{u} < 2^{E - p - 1} \le \abs{w} \, 2^{-p - 1}.
+$$
+
+In fp16, $p = 10$, so an update smaller than about $\abs{w} / 2048$ can be lost entirely <Cite id="micikevicius2018" />.
+Late in training, learning rates are small and $\abs{\eta g}$ is often thousands of times smaller than $\abs{w}$. Every
+such step is silently discarded, and the discarded amounts do not accumulate. In bf16, $p = 7$ and the threshold is
+$\abs{w}/256$, so the problem is worse.
+
+The fix is to keep the weights that receive updates in fp32, where the threshold is $\abs{w}/2^{24}$, and to cast them
+to 16 bits for each forward and backward pass. The optimiser state, such as Adam's moments, is kept in fp32 as well.
+Micikevicius et al. also found that about 5% of the weight gradients in a speech model had magnitudes below $2^{-24}$
+and would become zero in fp16 before even being multiplied by the learning rate <Cite id="micikevicius2018" />.
+
+### Why fp16 gradients need loss scaling
+
+Backpropagated gradients of activations are often tiny. In fp16, magnitudes below $2^{-25}$ round to zero and those
+just above $2^{-24}$ keep only one significant bit. In a Multibox SSD detector trained in fp32, 67% of the activation
+gradient values were zero, and many of the non-zero values lay below the fp16 range <Cite id="micikevicius2018" />.
+
+Backpropagation is linear in the gradient of the loss. Multiplying the loss by a constant $S$ multiplies every
+intermediate gradient by $S$, by the chain rule:
+
+$$
+\frac{\partial (S L)}{\partial \theta} = S \frac{\partial L}{\partial \theta}
+$$
+
+for every parameter and activation $\theta$. Choosing $S = 2^k$ shifts every gradient's exponent up by $k$ without
+changing any fraction bits, so values below the fp16 range move into it. Before the optimiser step, the fp32 gradients
+are divided by $S$, which restores their true values exactly. The only constraint is overflow: the largest scaled
+gradient must stay below 65,504 <Cite id="micikevicius2018" />.
+
+**Dynamic loss scaling** chooses $S$ automatically. Start with a large $S$. If any gradient is infinite or NaN after
+backpropagation, skip the update and halve $S$. After a fixed number of steps without overflow, double $S$. The scale
+then hovers just below the overflow threshold.
+
+<LossScaling />
+
+bf16's exponent range equals fp32's, so gradients neither underflow nor overflow any more often than in fp32, and bf16
+training usually needs no loss scaling <Cite id="kalamkar2019" />.
+
+### Which operations stay in 32 bits
+
+- **Accumulation in matrix products.** Tensor cores multiply 16-bit inputs and accumulate the sum in fp32, then round
+  the result to 16 bits. Accumulating a long dot product in fp16 would lose the small terms.
+- **Reductions.** Sums over many elements, such as the mean and variance in normalisation layers and the softmax
+  denominator, are computed in fp32.
+- **The loss and the update.** The loss value, the unscaled gradients and the optimiser step use fp32.
+
+### FP8
+
+8-bit floating-point formats extend the idea. The E4M3 format (4 exponent bits, 3 fraction bits, largest value 448)
+is used for weights and activations, and E5M2 (largest value 57,344) for gradients, which need more range. Each tensor
+gets its own scale factor, a per-tensor version of loss scaling <Cite id="micikevicius2022" />.
+
+## Cost
+
+### Worked example
+
+A weight $w = 1$ receives an update $u = -\eta g$ with $\eta = 10^{-3}$ and $g = 0.05$, so $u = -5 \times 10^{-5}$.
+
+- In fp16 the spacing near 1 is $2^{-10} = 9.8 \times 10^{-4}$. Half of it, $4.9 \times 10^{-4}$, is ten times larger
+  than $\abs{u}$, so $1 + u$ rounds to $1$ and the step is lost.
+- In bf16 the spacing near 1 is $2^{-7} = 7.8 \times 10^{-3}$. Any update smaller than $3.9 \times 10^{-3}$ is lost.
+- In fp32 the spacing near 1 is $1.2 \times 10^{-7}$, and $1 + u = 0.99995$ is stored almost exactly.
+
+A gradient of $3 \times 10^{-9}$ is zero in fp16. With a loss scale of $2^{16}$ it becomes $1.97 \times 10^{-4}$, a
+normal fp16 number with full 11-bit precision. Dividing by $2^{16}$ in fp32 afterwards returns $3 \times 10^{-9}$.
+
+### Memory
+
+Per parameter, mixed-precision Adam stores 2 bytes of 16-bit weights, 2 bytes of gradients, and 12 bytes of fp32 master
+weights and moments: 16 bytes, against 16 bytes for fp32 Adam with fp32 weights, gradients and moments. The saving is not
+in model state but in activations, which are stored in 16 bits, and in memory bandwidth and arithmetic speed. See
+<NoteLink to="zero-and-sharded-optimisers">ZeRO</NoteLink> for sharding these 16 bytes.
+
+## Trade-offs
+
+- **fp16 against bf16.** fp16 has three more bits of precision but needs loss scaling and careful handling of overflow.
+  bf16 needs no scaling and is the usual choice on hardware that supports it.
+- **Precision against speed.** Lower precision runs faster and stores more activations per gigabyte. Operations whose
+  results depend on small differences, such as reductions and updates, must stay in fp32.
+- **Static against dynamic scaling.** A fixed scale is simpler but must be tuned per model. Dynamic scaling adapts but
+  skips occasional steps.
+
+## Pitfalls
+
+- **Clipping scaled gradients.** Gradient-norm clipping must happen after dividing by the loss scale, or the threshold
+  is effectively multiplied by $S$.
+- **Silent skipped steps.** With dynamic scaling, a model that overflows every step never updates. Log the scale and the
+  number of skipped steps.
+- **Casting the optimiser state.** Storing Adam's second moment in 16 bits can underflow for small gradients and
+  produce huge steps.
+- **Comparing fp16 and fp32 runs bitwise.** Mixed-precision results differ in low-order bits and can diverge over long
+  runs; compare metrics, not weights.

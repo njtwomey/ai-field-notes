@@ -1,0 +1,132 @@
+---
+title: Model monitoring
+kind: technique
+summary: Model monitoring tracks a deployed model's service health, input data, predictions and, when labels arrive, its accuracy, and alerts when any departs from expectations. For a calibrated model, mean predicted probability equals the positive rate, which gives label-free checks.
+tags: [deployment, monitoring, mlops, worked-example]
+aliases: [ML monitoring, production monitoring, training–serving skew, delayed labels, label latency, proxy metrics, prediction bias, feedback loops, model staleness]
+requires: [dataset-shift]
+related: [drift-detection, calibration-definitions, reliability-diagrams-and-consistency-bars]
+references: [sculley2015, breck2017, rabanser2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Model monitoring is the continuous measurement of a deployed model and the data flowing through it, with alerts when a
+measurement leaves an expected range. It covers the serving system, the inputs, the predictions, the model's accuracy
+once true outcomes are known, and the downstream effect on the product.
+</Definition>
+
+## Problem
+
+A model is validated once, on historical data, and then runs for months on new data. Its accuracy can fall without any
+error being raised: the service still returns a well-formed prediction for every request. Sculley et al. list the ways
+production ML systems degrade silently, including shifts in the data, changes in upstream data sources and feedback
+loops in which the model influences its own future training data <Cite id="sculley2015" />. Monitoring turns these
+silent failures into alerts.
+
+Accuracy itself is often the hardest thing to measure. The label for a loan decision arrives when the loan is repaid or
+defaults, months later. A fraud label arrives when a chargeback is filed, weeks later. A recommendation that was not
+shown has no label at all. Monitoring must therefore combine direct measurements that arrive late with indirect ones
+that arrive at once.
+
+## Mechanism
+
+### What to monitor
+
+From fastest to slowest signal:
+
+1. **Service health.** Request rate, error rate, latency percentiles, memory and throughput. The ML Test Score rubric
+   includes checks that training speed, serving latency, throughput and memory have not regressed
+   <Cite id="breck2017" />.
+2. **Data quality.** Schema, missing-value rates, value ranges, category sets and numerical sanity such as NaN and
+   infinite values. Invariants that held in training data should hold in serving inputs <Cite id="breck2017" />.
+3. **Training–serving skew.** The same raw input must produce the same features in the training pipeline and the
+   serving path. Breck et al. single out this check as the one responsible for production issues across a wide range of
+   systems <Cite id="breck2017" />. It is tested by logging served features and recomputing them offline.
+4. **Input and prediction distributions.** Two-sample tests between recent windows and a reference (see
+   <NoteLink to="drift-detection">drift detection</NoteLink>). A change in the distribution of predictions is often the
+   most informative single signal <Cite id="rabanser2019" />.
+5. **Model quality.** Accuracy, calibration and business metrics on labelled outcomes as they arrive, overall and by
+   slices such as region, device or customer segment.
+6. **Staleness.** The age of the model and of its training data, against a limit set by how fast performance decayed in
+   the past <Cite id="breck2017" />.
+
+### Label-free checks from calibration
+
+A classifier is **calibrated** if, among inputs where it predicts probability $c$ for the positive class, a fraction
+$c$ are positive: $\pr(Y = 1 \mid \hat p(X) = c) = c$ (see
+<NoteLink to="calibration-definitions">calibration definitions</NoteLink>). Taking expectations over $\hat p(X)$,
+
+$$
+\expect\brack{\hat p(X)} = \expect\brack{\expect\brack{Y \mid \hat p(X)}} = \expect[Y] = \pr(Y = 1).
+$$
+
+The mean predicted probability therefore equals the positive rate. Sculley et al. call a departure from this equality
+**prediction bias** and recommend monitoring it, sliced by input groups <Cite id="sculley2015" />. The check needs
+labels only in aggregate, so it can use a delayed batch or a small audited sample.
+
+The same argument estimates accuracy without labels. For a multi-class classifier that predicts the class
+$\hat y = \argmax_k \hat p_k(X)$ with confidence $\hat c = \max_k \hat p_k(X)$, top-label calibration means
+$\pr(Y = \hat y \mid \hat c) = \hat c$. Then
+
+$$
+\pr(Y = \hat y) = \expect\brack{\pr(Y = \hat y \mid \hat c)} = \expect[\hat c],
+$$
+
+so the average confidence on current inputs estimates current accuracy. The estimate stays valid under covariate shift
+only if the model's probabilities remain calibrated on the new inputs, which is not guaranteed far from the training
+data; under a change in $p(y \mid x)$ it fails. A falling average confidence is still a useful early warning.
+
+### Delayed labels and proxy metrics
+
+When labels arrive late, performance can be tracked by **cohort**: group predictions by the day they were made and
+report each cohort's accuracy once its labels have matured. The latest complete cohort is always some weeks old, but
+the series shows trends.
+
+**Proxy metrics** are observed quickly and correlated with the true outcome: a click for a recommendation's eventual
+purchase, an early missed payment for a default, a human reviewer's verdict on a sample of automated decisions. A proxy
+can drift away from the outcome it stands for, so its relation to the true label must itself be checked when labels
+arrive.
+
+### Alerting
+
+Every monitored series needs a threshold and an owner. Thresholds set from the series' own history, such as a control
+limit on the daily mean, adapt to each metric's noise. Too many alerts are ignored, and too few miss incidents. Alerts
+on metrics that users feel, such as errors and latency, should page someone; alerts on distribution changes usually
+open an investigation instead. Sequential methods such as <NoteLink to="cusum">CUSUM</NoteLink> detect small persistent
+changes sooner than fixed thresholds on each day's value.
+
+## Cost
+
+### Worked example
+
+A binary fraud model was calibrated on data with a 2% fraud rate. Its labels arrive after 30 days.
+
+- **Prediction bias.** Today, over 50,000 transactions, the mean predicted fraud probability is 0.031. If the model is
+  still calibrated, today's fraud rate is about 3.1%, half as much again as in training. Either fraud has increased or
+  the model has become miscalibrated; both need investigation before labels arrive.
+- **Estimated accuracy.** A five-class document classifier makes predictions today with confidences
+  $0.9, 0.8, 0.6, 0.95$ and $0.7$. Their mean is $0.79$, the estimated accuracy on these documents if the model is
+  calibrated. On its validation set the mean confidence was $0.90$, so it is less sure of today's inputs.
+- **Cohorts.** The cohort of predictions made 35 days ago now has mature labels. Its recall is compared with the
+  validation recall; a drop confirms or rules out the alarm raised a month earlier.
+
+## Trade-offs
+
+- **Coverage against noise.** Monitoring every feature and slice catches more problems and raises more false alarms.
+  Rank signals by how closely they track user-visible harm.
+- **Speed against certainty.** Label-free signals arrive at once but depend on assumptions such as calibration; labelled
+  metrics are definitive but late.
+- **Automatic against human response.** Automatic rollback or retraining reacts in minutes, but can also react to a
+  pipeline bug by training on corrupted data.
+
+## Pitfalls
+
+- **Feedback loops.** A model that decides which cases are reviewed, which loans are granted or which items are shown
+  only receives labels for the cases it chose. Monitored accuracy then describes the selected cases, not the population
+  <Cite id="sculley2015" />.
+- **Aggregates hide slices.** A stable overall accuracy can hide a collapse in one region or one type of device.
+- **Monitoring the monitor.** A broken logging job looks like a sudden drop in traffic or a shift in every feature.
+  Check that the monitoring data themselves are complete.
+- **Thresholds set once.** Thresholds from launch week go stale as the product grows. Review them with the model.

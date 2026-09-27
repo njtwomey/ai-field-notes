@@ -1,0 +1,164 @@
+---
+title: Pruning and sparsity
+kind: technique
+summary: Pruning sets a fraction of a trained network's weights to zero, usually those of smallest magnitude, then fine-tunes the rest. A second-order expansion gives the loss increase $\tfrac12 H_{qq} w_q^2$. Unstructured sparsity saves most weights; structured and 2:4 sparsity also save time.
+tags: [deep-learning, inference, compression, memory, worked-example]
+aliases:
+  [
+    network pruning,
+    weight pruning,
+    magnitude pruning,
+    unstructured sparsity,
+    structured pruning,
+    2:4 sparsity,
+    N:M sparsity,
+    lottery ticket hypothesis,
+    Optimal Brain Damage,
+    Optimal Brain Surgeon,
+    SparseGPT,
+  ]
+requires: [multilayer-perceptron]
+related: [model-quantisation, knowledge-distillation]
+references: [han2015, lecun1990, hassibi1993, frankle2019, zhu2017b, mishra2021, frantar2023b]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Pruning removes parameters from a trained neural network by fixing them at zero with a binary mask $\mvec$, so that the
+network computes with $\mvec \odot \wvec$ instead of $\wvec$. The **sparsity** is the fraction of zeros. Unstructured
+pruning chooses individual weights; structured pruning removes whole rows, columns, channels, attention heads or
+layers. The remaining weights are usually fine-tuned to recover accuracy.
+</Definition>
+
+## Problem
+
+Trained networks are over-parameterised. Han et al. removed 89% of the weights of AlexNet, from 61 million to 6.7
+million, and 92% of VGG-16's, from 138 million to 10.3 million, with no loss of ImageNet accuracy
+<Cite id="han2015" />. The zero weights need not be stored or multiplied, so a sparse network can be smaller, faster and
+cheaper to run. Pruning must decide which weights to remove, how to recover the accuracy lost, and how to arrange the
+zeros so that hardware can exploit them.
+
+## Mechanism
+
+### Which weights to remove: the second-order saliency
+
+Let $L(\wvec)$ be the training loss at the trained weights $\wvec$. A small change $\deltavec$ changes the loss by
+
+$$
+L(\wvec + \deltavec) - L(\wvec) = \gvec^\tr \deltavec + \tfrac12 \deltavec^\tr \Hmat \deltavec + O\paren{\norm{\deltavec}^3},
+$$
+
+where $\gvec = \nabla L(\wvec)$ is the gradient and $\Hmat = \nabla^2 L(\wvec)$ the Hessian. Training has converged to a
+local minimum, so $\gvec \approx \zeros$. Removing weight $q$ alone sets $\deltavec = -w_q \evec_q$, where $\evec_q$ is
+the $q$-th unit vector. The first-order term vanishes and the quadratic term gives the **saliency**
+
+$$
+\Delta L_q \approx \tfrac12 w_q^2 H_{qq}.
+$$
+
+Optimal Brain Damage prunes the weights of smallest saliency, computing the diagonal of $\Hmat$ by a backpropagation-like
+pass <Cite id="lecun1990" />. If the diagonal entries $H_{qq}$ are similar across a layer, the saliency ranks weights by
+$w_q^2$, which is **magnitude pruning**: remove the weights with the smallest $\abs{w_q}$. Magnitude pruning needs no
+second derivatives, and is the standard baseline.
+
+The saliency ignores two things. Other weights can move to compensate for the removed one, and weights are removed many
+at a time, so their interactions through off-diagonal entries of $\Hmat$ matter.
+
+<Derivation title="Optimal Brain Surgeon: compensating with the other weights">
+
+Remove weight $q$ and let every other weight move by the best amount. The change $\deltavec$ must satisfy
+$\evec_q^\tr \deltavec = -w_q$ and should minimise $\tfrac12 \deltavec^\tr \Hmat \deltavec$. The Lagrangian is
+$\tfrac12 \deltavec^\tr \Hmat \deltavec + \lambda\paren{\evec_q^\tr \deltavec + w_q}$. Setting its gradient in
+$\deltavec$ to zero gives $\deltavec = -\lambda \Hmat^{-1} \evec_q$. The constraint gives
+$-\lambda \brack{\Hmat^{-1}}_{qq} = -w_q$, so $\lambda = w_q / \brack{\Hmat^{-1}}_{qq}$. Substituting,
+
+$$
+\deltavec = -\frac{w_q}{\brack{\Hmat^{-1}}_{qq}} \Hmat^{-1} \evec_q, \qquad
+\Delta L_q = \tfrac12 \deltavec^\tr \Hmat \deltavec = \frac{w_q^2}{2 \brack{\Hmat^{-1}}_{qq}}.
+$$
+
+Optimal Brain Surgeon removes the weight with smallest $\Delta L_q$ and applies $\deltavec$ to the others
+<Cite id="hassibi1993" />. When $\Hmat$ is diagonal, $\brack{\Hmat^{-1}}_{qq} = 1 / H_{qq}$, the compensation is zero,
+and the result reduces to Optimal Brain Damage. SparseGPT applies this update layer by layer, with the Hessian
+$2\Xmat\Xmat^\tr$ of a linear layer's squared reconstruction error on calibration inputs $\Xmat$
+<Cite id="frantar2023b" />.
+
+</Derivation>
+
+### Recovering accuracy: prune, then fine-tune
+
+Removing many weights at once moves the network far from the minimum where the quadratic model holds. Han et al. train
+the dense network, prune the smallest-magnitude weights, and retrain the survivors with the mask fixed; repeating prune
+and retrain in several rounds reaches higher sparsity than one round <Cite id="han2015" />.
+
+Gradual pruning removes weights during training on a schedule. Zhu and Gupta raise the sparsity from $s_i$ to a target
+$s_f$ over $n$ pruning steps spaced $\Delta t$ apart, starting at step $t_0$:
+
+$$
+s_t = s_f + (s_i - s_f)\paren{1 - \frac{t - t_0}{n \Delta t}}^3.
+$$
+
+The cubic prunes quickly while many redundant weights remain and slowly near the target. They found that a large model
+pruned to a given number of non-zero weights consistently beat a small dense model with the same number
+<Cite id="zhu2017b" />.
+
+For large language models, retraining is expensive. SparseGPT prunes 175-billion-parameter models to 50% unstructured
+sparsity in one shot, without retraining and with little loss in perplexity, and reaches 60% with a negligible increase
+<Cite id="frantar2023b" />.
+
+### The lottery ticket hypothesis
+
+Frankle and Carbin asked whether the sparse sub-network found by pruning could have been trained from the start. Their
+procedure trains a network from initial weights $\wvec_0$, prunes a fraction of the smallest-magnitude weights, and
+resets the survivors to their values in $\wvec_0$, not to new random values; iterating this finds sub-networks of 10–20%
+of the original size or less that train to the same accuracy as the full network on MNIST and CIFAR-10. Reinitialised
+randomly, the same sparse architectures train worse <Cite id="frankle2019" />. The result suggests that dense networks
+train well partly because they contain many candidate sub-networks with lucky initial weights.
+
+### Structure of the zeros
+
+- **Unstructured** sparsity allows any pattern. It reaches the highest sparsity for a given accuracy, but general
+  hardware multiplies dense blocks, so irregular zeros save little time unless the sparsity is very high.
+- **Structured** pruning removes whole output channels, attention heads or layers. The result is a smaller dense
+  network that runs faster on any hardware, but removing whole units costs more accuracy per removed weight
+  <Cite id="mishra2021" />.
+- **N:M** sparsity keeps at most $N$ non-zeros in every group of $M$ consecutive weights. NVIDIA Ampere GPUs execute
+  2:4 sparse matrix products at twice the throughput of dense ones <Cite id="mishra2021" />. The pattern is regular
+  enough for hardware and fine-grained enough to keep accuracy close to the dense model after fine-tuning.
+
+## Cost
+
+### Worked example: when does sparsity save memory?
+
+A $4096 \times 4096$ matrix in 16-bit precision holds $16{,}777{,}216$ weights in 32 MiB.
+
+- **Compressed sparse row** storage keeps each non-zero value (2 bytes) and its column index. The column index needs
+  $\log_2 4096 = 12$ bits, so it is stored in 2 bytes. Each non-zero costs 4 bytes, twice a dense entry, plus about
+  16 KiB of row pointers. At 50% sparsity the matrix still needs 32 MiB, no saving. At 90% sparsity it needs
+  $1{,}677{,}722 \times 4 \text{ bytes} = 6.4$ MiB, 20% of dense.
+- **2:4 sparsity** stores the 8,388,608 kept values in 16 MiB and a 2-bit position for each, another 2 MiB. The total is
+  18 MiB, or $(0.5 \times 16 + 0.5 \times 2)/16 = 56.25\%$ of dense, with a 2× speed-up in the matrix product.
+
+Unstructured sparsity must therefore be high to pay for its indices, and speed-ups on GPUs need specialised kernels.
+2:4 sparsity saves less memory but runs on existing tensor cores.
+
+## Trade-offs
+
+- **Sparsity against accuracy.** Moderate unstructured sparsity is often free after fine-tuning; beyond a model-specific
+  level, accuracy falls quickly.
+- **Granularity against speed.** Finer patterns keep more accuracy; coarser patterns run faster on standard hardware.
+- **One-shot against iterative.** One-shot methods with second-order compensation avoid retraining. Iterative prune and
+  fine-tune cycles reach higher sparsity at the cost of training time.
+- **Compared with other compression.** <NoteLink to="model-quantisation">Quantisation</NoteLink> reduces bits per weight;
+  pruning reduces the number of weights; <NoteLink to="knowledge-distillation">distillation</NoteLink> trains a smaller
+  dense model. The three combine: a distilled model can be pruned and then quantised.
+
+## Pitfalls
+
+- **Sparsity is not speed.** An unstructured 50% sparse model runs no faster, and needs no less memory, on a GPU with
+  dense kernels.
+- **Uniform per-layer sparsity.** Layers differ in redundancy. The first and last layers are usually most sensitive, and
+  a single global magnitude threshold prunes layers unevenly.
+- **Pruning after quantisation.** Pruning changes weight ranges; quantisation scales must be set after the final mask.
+- **Evaluating on the wrong metric.** Average accuracy can hide large drops on rare classes or long-tail inputs.

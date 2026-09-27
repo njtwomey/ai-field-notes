@@ -1,0 +1,196 @@
+---
+title: Drift detection
+kind: technique
+summary: Drift detection compares a window of recent model inputs or predictions with a reference sample using a two-sample test, such as Kolmogorov–Smirnov per feature, MMD for vectors, or the population stability index $\sum_i (a_i - e_i)\ln(a_i/e_i)$ over binned shares.
+tags: [deployment, monitoring, hypothesis-testing, two-sample, worked-example]
+aliases:
+  [
+    data drift detection,
+    distribution shift detection,
+    two-sample test,
+    Kolmogorov–Smirnov test,
+    KS test,
+    population stability index,
+    PSI,
+    MMD two-sample test,
+    black-box shift detection,
+    prediction drift,
+  ]
+requires: [dataset-shift, p-value]
+related: [change-point-detection, cusum, multiple-testing, permutation-tests, anomaly-detection]
+references: [rabanser2019, gretton2012, yurdakul2018, smirnov1948, massey1951, lipton2018]
+status: draft
+updated: 2026-09-27
+---
+
+import { DriftTests } from './DriftTests'
+
+<Definition>
+Drift detection tests whether recent data differ in distribution from a reference sample. A **reference window**
+$x_1, \dots, x_n$, typically the training or validation data, is compared with a **current window** $y_1, \dots, y_m$
+of recent inputs, or of the model's outputs on them, using a two-sample test of $H_0: p_{\text{ref}} = p_{\text{cur}}$.
+An alarm is raised when the test statistic exceeds a threshold.
+</Definition>
+
+## Problem
+
+A deployed model's accuracy falls when the data it sees drift away from its training distribution (see
+<NoteLink to="dataset-shift">dataset shift</NoteLink>). Measuring accuracy directly needs labels, which often arrive days
+or months late, or never. Inputs and predictions are available immediately. Testing them for a change in distribution
+gives an early, label-free warning. It cannot say whether the change harms accuracy, and it cannot see a change in
+$p(y \mid x)$ alone.
+
+## Mechanism
+
+### What to test
+
+- **Each input feature**, with a univariate test, then combine the results over features.
+- **A low-dimensional summary of the inputs**, such as principal components or an autoencoder's code.
+- **The model's predictions.** Black-box shift detection tests the distribution of the classifier's outputs. Under
+  label shift, a change in the class proportions changes the distribution of predictions, so a shift in predictions
+  signals it <Cite id="lipton2018" />.
+
+Rabanser et al. compared these options on image data with synthetic shifts. Two-sample tests on the softmax outputs of
+a pretrained classifier worked best across a wide range of shifts, and univariate tests on each dimension combined with
+a Bonferroni correction performed about as well as multivariate tests <Cite id="rabanser2019" />.
+
+### Kolmogorov–Smirnov test
+
+For empirical cumulative distribution functions $\hat F_{\text{ref}}$ and $\hat F_{\text{cur}}$, the two-sample
+Kolmogorov–Smirnov statistic is the largest vertical gap between them,
+
+$$
+D = \sup_x \abs{\hat F_{\text{ref}}(x) - \hat F_{\text{cur}}(x)}.
+$$
+
+**Why the null distribution does not depend on the data's distribution.** Let the common distribution under $H_0$ have
+a continuous cdf $F$. Replace every observation $x$ by $u = F(x)$. Since $F$ is continuous and non-decreasing, $x \le t$
+exactly when $F(x) \le F(t)$ for every $t$ in the support, so each empirical cdf at $t$ equals the empirical cdf of the
+transformed sample at $F(t)$, and the supremum over $t$ becomes a supremum over $F(t) \in [0, 1]$. By the probability
+integral transform, $u = F(x)$ is uniform on $[0, 1]$. The statistic $D$ therefore has the same distribution as for two
+uniform samples of the same sizes, whatever $F$ is.
+
+For large samples, with $n_e = nm/(n + m)$,
+
+$$
+\pr\paren{\sqrt{n_e}\, D > t} \to 2 \sum_{k=1}^{\infty} (-1)^{k-1} e^{-2k^2 t^2},
+$$
+
+the Kolmogorov distribution <Cite id="smirnov1948" />. The level-$\alpha$ critical value is about
+$c(\alpha) / \sqrt{n_e}$ with $c(0.05) = 1.358$ <Cite id="massey1951" />. The test uses no bins and no parameters, which
+makes it the usual per-feature test for continuous features. For a categorical feature, a chi-squared test on the
+category counts plays the same role.
+
+### Population stability index
+
+Split the feature's range into $B$ bins, often the reference sample's deciles. Let $e_i$ be the reference share and
+$a_i$ the current share in bin $i$. The population stability index is
+
+$$
+\operatorname{PSI} = \sum_{i=1}^{B} (a_i - e_i) \ln \frac{a_i}{e_i}.
+$$
+
+PSI is the symmetrised <NoteLink to="kl-divergence">Kullback–Leibler divergence</NoteLink> between the binned
+distributions, because
+
+$$
+\KL(\avec \,\|\, \evec) + \KL(\evec \,\|\, \avec) = \sum_i a_i \ln \frac{a_i}{e_i} + \sum_i e_i \ln \frac{e_i}{a_i} = \sum_i (a_i - e_i) \ln \frac{a_i}{e_i}.
+$$
+
+Credit-risk practice reads $\operatorname{PSI} < 0.1$ as little shift, $0.1$ to $0.25$ as moderate and above $0.25$ as
+a significant shift requiring action. These thresholds carry no stated error rates <Cite id="yurdakul2018" />.
+
+**What PSI looks like under no drift.** Write $a_i = e_i + \delta_i$ with $\delta_i$ small. Then
+$\ln(a_i/e_i) = \ln(1 + \delta_i / e_i) \approx \delta_i / e_i$, and
+
+$$
+\operatorname{PSI} \approx \sum_{i=1}^{B} \frac{\delta_i^2}{e_i} = \sum_{i=1}^{B} \frac{(a_i - e_i)^2}{e_i},
+$$
+
+which is Pearson's chi-squared statistic divided by the sample size. For two independent samples of sizes $n$ and $m$
+from the same distribution, $\operatorname{PSI} / (1/n + 1/m)$ is therefore approximately $\chi^2_{B - 1}$. With
+$n = m = 1000$ and ten bins, the 95th percentile of PSI under no drift is $\chi^2_{9, 0.95} \times 0.002 = 0.034$. A
+fixed threshold of 0.1 is therefore a very strict test for windows of thousands and a loose one for windows of tens.
+
+### Maximum mean discrepancy
+
+For multivariate inputs, the **maximum mean discrepancy** with a kernel $k$ compares the mean embeddings of the two
+distributions,
+
+$$
+\operatorname{MMD}^2 = \expect\brack{k(x, x')} + \expect\brack{k(y, y')} - 2\expect\brack{k(x, y)},
+$$
+
+with $x, x'$ independent from the reference distribution and $y, y'$ from the current one. With a characteristic
+kernel such as the Gaussian kernel, $\operatorname{MMD} = 0$ exactly when the distributions are equal. Its unbiased
+estimate averages the kernel over pairs within and between the samples, and the threshold comes from a
+<NoteLink to="permutation-tests">permutation test</NoteLink> that reshuffles the pooled sample <Cite id="gretton2012" />.
+The estimate costs $O((n + m)^2)$ kernel evaluations.
+
+<DriftTests />
+
+### Windows and repeated testing
+
+The reference window is either fixed (the training data, or a healthy period after launch) or itself slides, lagging
+the current one. A fixed reference detects slow cumulative drift; a sliding reference detects only changes faster than
+its lag.
+
+The size of the current window trades detection delay against sensitivity. For a unit-variance normal feature whose
+mean shifts by $\delta$, the population cdfs differ by at most
+$\Phi(\delta/2) - \Phi(-\delta/2) \approx \delta/\sqrt{2\pi}$
+at $x = \delta/2$, where $\Phi$ is the standard normal cdf. The KS test at $\alpha = 0.05$ with $n = m$ has a
+critical value of $1.358\sqrt{2/n}$, and the population gap reaches it when
+
+$$
+\delta \approx 1.358 \sqrt{2\pi} \sqrt{2/n} \approx \frac{4.8}{\sqrt n}.
+$$
+
+The detectable shift therefore scales as $1/\sqrt n$: halving it needs four times the data, and so four times the wait.
+For a window of 1000 this scale is $0.15$ standard deviations.
+
+Monitoring runs the test again for every new window. Each test has false-alarm probability $\alpha$, so over many
+windows false alarms accumulate, as with <NoteLink to="peeking-and-optional-stopping">peeking</NoteLink> in A/B tests.
+Testing $K$ features at once multiplies the problem, and a Bonferroni threshold $\alpha / K$ controls the chance of any
+false alarm (see <NoteLink to="multiple-testing">multiple testing</NoteLink>). Sequential methods such as
+<NoteLink to="cusum">CUSUM</NoteLink> and <NoteLink to="change-point-detection">change-point detection</NoteLink> are
+designed for streams: they control the false-alarm rate over time and estimate when the change happened.
+
+## Cost
+
+### Worked example
+
+**PSI.** A score's quartiles in the reference sample give $e = (0.25, 0.25, 0.25, 0.25)$. This week the shares are
+$a = (0.1, 0.2, 0.3, 0.4)$:
+
+$$
+\operatorname{PSI} = -0.15 \ln 0.4 - 0.05 \ln 0.8 + 0.05 \ln 1.2 + 0.15 \ln 1.6 = 0.137 + 0.011 + 0.009 + 0.071 = 0.228.
+$$
+
+By the rule of thumb this is a moderate shift. With $n = m = 1000$, the chi-squared approximation gives
+$0.228 / 0.002 = 114$ on 3 degrees of freedom, far beyond any usual critical value.
+
+**KS.** With $n = m = 1000$, the 5% critical value is $1.358 \sqrt{2/1000} = 0.061$. A mean shift of $0.2$ standard
+deviations gives a population gap of $0.080$, and in simulation the test detects it 97% of the time. A shift of $0.1$
+gives a gap of $0.040$ and is detected about half the time: the sample statistic $D$ fluctuates above the population
+gap.
+
+## Trade-offs
+
+- **Sensitivity against relevance.** With enough data every test rejects, because real data are never exactly
+  stationary. A detected shift is not necessarily a harmful one. Monitor an effect size such as $D$ or PSI alongside the
+  p-value, and set thresholds from the shifts that past incidents produced.
+- **Univariate against multivariate.** Per-feature tests are cheap and point to the feature that moved, but miss
+  changes in the dependence between features. MMD and classifier-based tests see those, at higher cost.
+- **Inputs against predictions.** Prediction drift focuses on changes the model responds to; input drift also catches
+  changes in features the model ignores today but may use after retraining.
+- **Window length.** Longer windows detect smaller shifts but respond later.
+
+## Pitfalls
+
+- **Seasonality.** Daily and weekly cycles look like drift against a reference from a different time of day or week.
+  Compare like with like.
+- **Empty bins.** PSI is infinite when a bin is empty in one sample; add a small count to every bin or merge bins.
+- **Pipeline bugs look like drift.** A unit change, a new default value or a broken join shifts the feature
+  distribution. Drift alarms are often the first sign of such bugs, which need fixing, not retraining.
+- **Concept shift is invisible.** A change in $p(y \mid x)$ with unchanged inputs passes every input test; only labelled
+  outcomes reveal it.

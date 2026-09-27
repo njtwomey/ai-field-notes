@@ -1,0 +1,185 @@
+---
+title: Model parallelism
+kind: technique
+summary: Model parallelism splits one network across devices. Tensor parallelism splits each layer's matrices, with one all-reduce per block. Pipeline parallelism gives each device a run of layers and streams $m$ micro-batches through $p$ stages, idle for $(p-1)/(m+p-1)$ of the time.
+tags: [deep-learning, distributed-training, transformer, gpu, worked-example]
+aliases:
+  [
+    tensor parallelism,
+    tensor model parallelism,
+    Megatron-LM,
+    pipeline parallelism,
+    pipeline bubble,
+    GPipe,
+    1F1B schedule,
+    PipeDream-Flush,
+    interleaved pipeline schedule,
+    3D parallelism,
+    micro-batching,
+  ]
+requires: [transformer, data-parallelism]
+related: [multi-head-attention, gradient-checkpointing]
+references: [shoeybi2019, huang2019, narayanan2021, korthikanti2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { PipelineSchedule } from './PipelineSchedule'
+
+<Definition>
+Model parallelism places different parts of one model on different devices. **Tensor parallelism** splits the weight
+matrices inside each layer across $t$ devices, which compute each layer together. **Pipeline parallelism** assigns a
+contiguous run of layers, a **stage**, to each of $p$ devices, and passes activations forward and gradients backward
+between neighbouring stages. The two are combined with <NoteLink to="data-parallelism">data parallelism</NoteLink>.
+</Definition>
+
+## Problem
+
+<NoteLink to="data-parallelism">Data parallelism</NoteLink> keeps a full copy of the model on every device. A model
+with $6.7 \times 10^9$ parameters already needs about 107 GB for its weights, gradients and Adam state in mixed
+precision, more than one 80 GB accelerator holds. Even when the state is sharded, one layer's activations and weights can
+exceed a device. The model itself must be divided, and the division must keep every device busy and the communication
+small.
+
+## Mechanism
+
+### Tensor parallelism of a transformer MLP
+
+The feed-forward block of a <NoteLink to="transformer">transformer</NoteLink> computes
+
+$$
+\Ymat = \operatorname{GeLU}(\Xmat \Amat), \qquad \Zmat = \Ymat \Bmat,
+$$
+
+with input $\Xmat \in \reals^{n \times h}$ for $n$ tokens of width $h$, $\Amat \in \reals^{h \times 4h}$ and
+$\Bmat \in \reals^{4h \times h}$. Megatron-LM splits it over $t$ devices as follows <Cite id="shoeybi2019" />.
+
+**Split $\Amat$ by columns.** Write $\Amat = [\Amat_1, \dots, \Amat_t]$ with $\Amat_i \in \reals^{h \times 4h/t}$ on
+device $i$. Then $\Xmat \Amat = [\Xmat \Amat_1, \dots, \Xmat \Amat_t]$, and because GeLU acts element by element,
+
+$$
+\operatorname{GeLU}(\Xmat \Amat) = \brack{\operatorname{GeLU}(\Xmat \Amat_1), \dots, \operatorname{GeLU}(\Xmat \Amat_t)}.
+$$
+
+Device $i$ computes its slice $\Ymat_i = \operatorname{GeLU}(\Xmat \Amat_i)$ with no communication, given a copy of
+$\Xmat$.
+
+Splitting $\Amat$ by rows would fail here. With $\Amat$ split by rows and $\Xmat$ by columns, each device holds a
+partial product $\Xmat_i \Amat_i$ with $\Xmat \Amat = \sum_i \Xmat_i \Amat_i$, but
+$\operatorname{GeLU}\paren{\sum_i \Xmat_i \Amat_i} \ne \sum_i \operatorname{GeLU}(\Xmat_i \Amat_i)$, so the partial
+products would have to be summed across devices before the non-linearity.
+
+**Split $\Bmat$ by rows.** Write $\Bmat$ as the stack of blocks $\Bmat_i \in \reals^{4h/t \times h}$. Block matrix
+multiplication gives
+
+$$
+\Zmat = [\Ymat_1, \dots, \Ymat_t] \begin{bmatrix} \Bmat_1 \\ \vdots \\ \Bmat_t \end{bmatrix} = \sum_{i=1}^{t} \Ymat_i \Bmat_i.
+$$
+
+Each device computes $\Ymat_i \Bmat_i$ from what it already holds, and one **all-reduce** sums the $t$ partial results.
+The whole block needs one all-reduce in the forward pass. In the backward pass the gradient with respect to $\Xmat$ is
+likewise a sum of per-device terms, needing one more.
+
+**Attention** splits the same way. The heads of <NoteLink to="multi-head-attention">multi-head attention</NoteLink> are
+independent, so each device computes the queries, keys and values of $h_{\text{heads}}/t$ heads (a column split of the
+projection matrices) and its heads' attention, and the output projection is split by rows, followed by one all-reduce.
+A transformer layer thus needs two all-reduces of an $n \times h$ activation in the forward pass and two in the backward
+pass <Cite id="shoeybi2019" />.
+
+These all-reduces sit on the critical path of every layer, so tensor parallelism is used within a server, where devices
+share fast links, typically with $t \le 8$. Megatron-LM trained an 8.3-billion-parameter model on 512 GPUs at
+15.1 PetaFLOP/s, 76% scaling efficiency relative to one GPU, combining 8-way tensor parallelism with data parallelism
+<Cite id="shoeybi2019" />.
+
+### Pipeline parallelism
+
+Split the $L$ layers into $p$ stages of $L/p$ layers on $p$ devices. A single batch would occupy one stage at a time
+and leave the other $p - 1$ idle. GPipe splits each mini-batch into $m$ **micro-batches** and streams them through the
+stages, so different stages work on different micro-batches at once, and accumulates gradients over all $m$ before one
+synchronous update <Cite id="huang2019" />.
+
+**The bubble.** Let one micro-batch take time $t_f$ forward and $t_b$ backward on one stage. Micro-batch $j$
+($j = 1, \dots, m$) starts on stage $s$ ($s = 1, \dots, p$) at time $(s - 1 + j - 1) t_f$, because it must wait for
+stage $s - 1$ to finish it and for stage $s$ to finish micro-batch $j - 1$. The last micro-batch leaves the last stage
+at $(m + p - 1) t_f$. The backward pass runs through the stages in reverse and by the same argument takes
+$(m + p - 1) t_b$. The step takes
+
+$$
+T_{\text{pipe}} = (m + p - 1)(t_f + t_b),
+$$
+
+while the useful work on each stage is $m (t_f + t_b)$. Each stage is idle for $(p - 1)(t_f + t_b)$, a fraction
+
+$$
+\frac{(p - 1)(t_f + t_b)}{(m + p - 1)(t_f + t_b)} = \frac{p - 1}{m + p - 1}
+$$
+
+of the step. Relative to the ideal time, the overhead is $(p - 1)/m$ <Cite id="narayanan2021" />. The bubble shrinks
+only by using many more micro-batches than stages.
+
+**Activation memory and 1F1B.** GPipe runs all $m$ forward passes before any backward pass, so each stage stores the
+activations of all $m$ micro-batches. The **1F1B** schedule starts the backward pass of a micro-batch as soon as it has
+left the last stage. After a warm-up of at most $p - 1$ forward passes, each stage alternates one forward and one
+backward pass, so it holds the activations of at most $p$ micro-batches. The step time and bubble are unchanged
+<Cite id="narayanan2021" />.
+
+<PipelineSchedule />
+
+**Interleaving.** If each device holds $v$ non-adjacent chunks of layers instead of one contiguous stage, a micro-batch
+passes through each device $v$ times, each pass $v$ times shorter. The bubble falls to $(p - 1)/(v m)$ of the ideal
+time, at the cost of $v$ times more point-to-point communication <Cite id="narayanan2021" />.
+
+Pipeline parallelism sends only the activations at stage boundaries, one $n \times h$ tensor per micro-batch per
+boundary, between two devices. That is much less than tensor parallelism's all-reduces, so pipeline stages can span
+servers.
+
+### Combining the three: 3D parallelism
+
+Large models combine all three: tensor parallelism of degree $t$ within a server, pipeline parallelism of degree $p$
+across servers, and data parallelism of degree $d$ over replicas of the whole pipeline, on $t \cdot p \cdot d$ devices.
+Narayanan et al. trained a model with one trillion parameters on 3072 GPUs at 502 PetaFLOP/s, 52% of the GPUs' peak
+throughput, with this combination and the interleaved schedule <Cite id="narayanan2021" />.
+
+Tensor parallelism leaves some activations replicated: layer normalisation and dropout operate on the full $n \times h$
+tensor on every device. **Sequence parallelism** splits those operations along the token dimension, which replaces each
+all-reduce with a reduce-scatter and an all-gather of the same total volume and divides their activation memory by $t$
+<Cite id="korthikanti2022" />.
+
+## Cost
+
+### Worked example
+
+**Bubble.** With $p = 8$ stages and $m = 32$ micro-batches, the bubble is $7/39 = 18\%$ of the step. Reducing it to 5%
+requires $(p - 1)/(m + p - 1) \le 0.05$, that is $m \ge 19 (p - 1) = 133$ micro-batches. With micro-batches of one
+sequence, that fixes a global batch of at least 133 sequences per pipeline replica.
+
+**Tensor-parallel MLP.** GPT-3 has width $h = 12288$ <Cite id="korthikanti2022" />. One MLP holds
+$2 \times 12288 \times 49152 = 1.21 \times 10^9$ weights, 2.4 GB in 16-bit precision. With $t = 8$, each device holds
+302 MB of it. For a micro-batch of one sequence of 2048 tokens, each all-reduce carries a $2048 \times 12288$
+activation, 50 MB in 16-bit precision, and a layer needs two in the forward pass and two in the backward pass.
+
+## Trade-offs
+
+| Scheme            | Splits              | Communication                                 | Main cost                            |
+| ----------------- | ------------------- | --------------------------------------------- | ------------------------------------ |
+| Data parallel     | the batch           | all-reduce of all gradients once per step     | replicated weights and optimiser state |
+| Tensor parallel   | each weight matrix  | all-reduce of activations, several per layer  | needs fast links; small matrices per device |
+| Pipeline parallel | the layers          | point-to-point activations at stage boundaries | the bubble; balancing stages          |
+
+- **Tensor-parallel degree.** Larger $t$ fits bigger layers but shrinks each device's matrices, lowering arithmetic
+  efficiency, and multiplies communication. Beyond one server, the links are too slow.
+- **Pipeline depth.** More stages cut memory per device but enlarge the bubble unless the number of micro-batches grows
+  with them, which raises the global batch size.
+- **Stage balance.** The slowest stage sets the pace. The embedding and output layers are often much larger or smaller
+  than a transformer block and must be balanced by hand.
+
+## Pitfalls
+
+- **Weight-tied layers across stages.** A shared input embedding and output projection on different stages need their
+  gradients summed across those stages.
+- **Random state.** Dropout inside a tensor-parallel region must use the same random numbers on every device for
+  replicated tensors and different ones for split tensors.
+- **Too few micro-batches.** A pipeline with $m < p$ is idle most of the time; with $m = 1$ it is no faster than one
+  device.
+- **Pipeline flushes with non-synchronous schedules.** Schedules that update weights without a flush use stale weights
+  for some micro-batches, which changes the optimiser's behaviour.

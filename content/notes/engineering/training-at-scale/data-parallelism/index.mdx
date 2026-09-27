@@ -1,0 +1,142 @@
+---
+title: Data parallelism
+kind: technique
+summary: Data parallelism trains one model on $N$ devices, each holding a full replica and a $1/N$ share of every mini-batch. After the backward pass an all-reduce averages the gradients. A ring all-reduce sends $2(N-1)/N$ times the gradient size per device, almost independent of $N$.
+tags: [deep-learning, distributed-training, gpu, worked-example]
+aliases: [data-parallel training, distributed data parallel, DDP, all-reduce, ring all-reduce, reduce-scatter, all-gather, gradient bucketing, synchronous SGD]
+requires: [gradient-descent, backpropagation]
+related: [adam]
+references: [patarasuk2009, li2020, goyal2017]
+status: draft
+updated: 2026-09-27
+---
+
+import { RingAllReduce } from './RingAllReduce'
+
+<Definition>
+Data parallelism replicates a model on $N$ devices, called workers. Each training step splits a mini-batch of $B$
+examples into $N$ shards of $B/N$, and each worker computes the gradient on its own shard. An **all-reduce** operation
+then leaves every worker with the average of the $N$ gradients, and every worker applies the same optimiser update, so
+the replicas stay identical.
+</Definition>
+
+## Problem
+
+A training run of $S$ optimiser steps with mini-batch $B$ processes $SB$ examples. On one device the time per step is
+proportional to $B$. Spreading each mini-batch over $N$ devices cuts the compute time per step by a factor of $N$, as
+long as the devices can combine their results quickly. The model and optimiser state must fit on each device, because
+every worker holds a full copy.
+
+## Mechanism
+
+### Averaging shard gradients gives the mini-batch gradient
+
+The mini-batch gradient of the average loss is
+
+$$
+\gvec = \frac{1}{B} \sum_{j=1}^{B} \nabla_{\wvec} \ell_j(\wvec).
+$$
+
+Split the indices into $N$ disjoint shards $\Scal_1, \dots, \Scal_N$ of equal size $B/N$, and let worker $k$ compute
+$\gvec_k = \frac{N}{B} \sum_{j \in \Scal_k} \nabla_{\wvec} \ell_j(\wvec)$. Then
+
+$$
+\frac{1}{N} \sum_{k=1}^{N} \gvec_k = \frac{1}{N} \sum_{k=1}^{N} \frac{N}{B} \sum_{j \in \Scal_k} \nabla_{\wvec} \ell_j(\wvec) = \frac{1}{B} \sum_{j=1}^{B} \nabla_{\wvec} \ell_j(\wvec) = \gvec.
+$$
+
+Synchronous data parallelism is therefore mathematically the same algorithm as single-device training with mini-batch
+$B$. Only the order of floating-point additions changes. The exception is any layer that computes statistics over the
+batch, such as <NoteLink to="batch-normalisation">batch normalisation</NoteLink>, which sees only $B/N$ examples per
+worker unless its statistics are also synchronised.
+
+### All-reduce
+
+An all-reduce takes a vector $\xvec_k$ of $S$ bytes on each of $N$ workers and leaves $\sum_k \xvec_k$ on all of them.
+The simplest scheme sends every vector to one worker, which sums and sends the result back. That worker receives
+$(N-1)S$ bytes and sends as many, so its link is the bottleneck and the time grows linearly with $N$.
+
+### Ring all-reduce
+
+Arrange the workers in a ring, each sending only to its right-hand neighbour. Split each worker's vector into $N$ chunks
+of $S/N$ bytes.
+
+1. **Reduce-scatter**, $N - 1$ steps. In step $k$, worker $i$ sends chunk $(i - k) \bmod N$ to worker $i + 1$, which
+   adds it to its own copy of that chunk. A chunk's partial sum travels round the ring gaining one term per step. After
+   $N - 1$ steps it has visited every worker, so worker $i$ holds chunk $(i + 1) \bmod N$ summed over all $N$ workers.
+2. **All-gather**, $N - 1$ steps. The completed chunks travel round the ring the same way and are copied instead of
+   added. After $N - 1$ steps every worker holds every completed chunk.
+
+Every step sends $S/N$ bytes from each worker, all links working at once. The data sent by each worker is
+
+$$
+2 (N - 1) \cdot \frac{S}{N} = 2 \frac{N - 1}{N} S,
+$$
+
+which approaches $2S$ as $N$ grows and never exceeds it. With a per-message latency $\alpha$ and a link bandwidth
+$\beta$ bytes per second, the time is
+
+$$
+T_{\text{ring}} = 2 (N - 1) \paren{\alpha + \frac{S}{N \beta}}.
+$$
+
+The bandwidth term $2 (N-1) S / (N \beta)$ is almost independent of $N$, and is the minimum possible: Patarasuk and Yuan
+prove that any all-reduce must send at least $2 (N - 1) S / N$ bytes through some worker's link
+<Cite id="patarasuk2009" />. The latency term grows linearly with $N$, which is why very large clusters use tree or
+hierarchical variants for small messages.
+
+<RingAllReduce />
+
+### Overlapping communication with the backward pass
+
+Backpropagation produces the gradients of the last layers first. The gradient of a layer is final as soon as its
+backward step finishes, so its all-reduce can start while earlier layers are still being differentiated. PyTorch's
+distributed data parallel groups gradients into buckets of about 25 MB, launches an all-reduce for each bucket as soon as
+all its gradients are ready, and so hides most of the communication behind computation <Cite id="li2020" />.
+
+### Larger batches need retuned optimisers
+
+With $N$ workers each processing a fixed per-device batch, the global batch $B$ grows with $N$ and the number of steps
+per epoch falls. Goyal et al. trained ResNet-50 on ImageNet with $B = 8192$ on 256 GPUs in one hour without loss of
+accuracy, by multiplying the learning rate by $k$ when multiplying the batch size by $k$, and by increasing the learning
+rate gradually over the first five epochs <Cite id="goyal2017" />. Beyond some batch size, which depends on the problem,
+larger batches no longer reduce the number of steps needed and extra workers stop paying off.
+
+## Cost
+
+### Worked example
+
+Train a model with $6.7 \times 10^9$ parameters and 16-bit gradients on $N = 8$ GPUs connected in a ring with
+$\beta = 100$ GB/s per direction. The gradient is $S = 13.4$ GB.
+
+- Ring all-reduce: each GPU sends $2 \times \tfrac78 \times 13.4 = 23.45$ GB, taking $0.23$ s, ignoring latency.
+- With $N = 64$ the same GPU sends $2 \times \tfrac{63}{64} \times 13.4 = 26.4$ GB, only 13% more.
+- A central worker would instead receive $7 \times 13.4 = 93.8$ GB from the other seven GPUs, taking $0.94$ s, four
+  times as long as the ring. At $N = 64$ it would receive 844 GB and take 8.4 s, 32 times as long as the ring.
+
+If the backward pass takes longer than $0.23$ s, bucketing can hide the ring all-reduce almost completely.
+
+### Memory
+
+Every worker holds the full weights, gradients and optimiser state. For mixed-precision training with Adam that is
+about 16 bytes per parameter, 107 GB for this model, more than one 80 GB GPU holds. Data parallelism alone therefore
+cannot train it (see <NoteLink to="memory-footprint-of-training">memory footprint of training</NoteLink>). The state
+must be sharded across workers, as in <NoteLink to="zero-and-sharded-optimisers">ZeRO</NoteLink>, or the model split
+across devices by <NoteLink to="model-parallelism">model parallelism</NoteLink>.
+
+## Trade-offs
+
+- **Simplicity against memory.** Data parallelism needs no change to the model, but replicates all of its state.
+- **Communication against batch size.** Communication per step is fixed by the model size, while computation per step
+  shrinks as the per-device batch shrinks. Small per-device batches leave devices waiting on the network.
+- **Synchronous against asynchronous.** Asynchronous schemes let workers apply stale gradients without waiting, which
+  avoids stragglers but changes the optimisation algorithm. Synchronous all-reduce is the standard for large models.
+- **Gradient accumulation.** Summing gradients over several micro-batches before one all-reduce trades memory for fewer
+  communication rounds, and gives the same result as a larger batch.
+
+## Pitfalls
+
+- **Different random states.** Workers must shard the data differently, but initialise the model identically.
+- **Unsynchronised batch statistics.** Batch normalisation computed per worker changes the model when $B/N$ is small.
+- **Loss scaling by the wrong count.** Averaging over $N$ workers and over the per-worker batch must reproduce the mean
+  over the global batch, including when the last batch of an epoch is smaller.
+- **Stragglers.** One slow worker delays every synchronous step for all.

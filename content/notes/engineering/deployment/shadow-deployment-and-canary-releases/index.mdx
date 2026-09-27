@@ -1,0 +1,132 @@
+---
+title: Shadow deployment and canary releases
+kind: technique
+summary: A shadow deployment runs a new model on copies of live requests without serving its outputs. A canary release serves it to a small share $f$ of traffic and compares that share with the rest. Precision grows as $\sqrt{f(1-f)}$ while exposure grows as $f$, so canaries stay small.
+tags: [deployment, monitoring, ab-testing, experimentation, mlops, worked-example]
+aliases: [shadow mode, shadow testing, dark launch, traffic mirroring, canary, canary deployment, canary analysis, staged rollout, progressive rollout, online evaluation, rollback]
+requires: [ab-test]
+related: [model-monitoring, ab-test-power, off-policy-evaluation, overall-evaluation-criterion]
+references: [warner2018, kohavi2020, sculley2015]
+status: draft
+updated: 2026-09-27
+---
+
+import { CanarySizing } from './CanarySizing'
+
+<Definition>
+A **shadow deployment** sends a copy of each production request to a candidate model, records its output and discards
+it; users see only the current model's outputs. A **canary release** serves the candidate to a small, randomly chosen
+share $f$ of production traffic, compares that share with the rest on health and quality metrics for a limited time,
+and then either widens the share or rolls the candidate back <Cite id="warner2018" />.
+</Definition>
+
+## Problem
+
+Offline evaluation scores a new model on held-out historical data. It misses whatever differs in production: the
+serving code path, feature pipelines, latency limits, current inputs, and the effect of the model's outputs on users.
+Replacing the production model all at once exposes every user to any of these failures. The two techniques introduce a
+model in stages, each exposing it to more of production at a known, bounded risk.
+
+## Mechanism
+
+### Shadow deployment
+
+The serving system mirrors each request to the candidate, asynchronously so that the candidate cannot slow the
+response. Both models' outputs and latencies are logged. Shadow mode measures, with no user impact:
+
+- **Operational fitness**: latency percentiles, error and timeout rates, memory and cost under real load.
+- **Training–serving consistency**: features computed by the serving path, compared with the same features recomputed
+  offline.
+- **Agreement**: how often the candidate's prediction differs from the production model's, and on which inputs. Every
+  disagreement is a case where exactly one of the two is wrong, so a sample of disagreements is the most informative set
+  to label.
+- **Accuracy on outcomes that do not depend on the served decision**, such as the actual demand for a forecast, which
+  arrives whichever model predicted it.
+
+Shadow mode cannot measure how users respond to the candidate's outputs. If the production model decides which items are
+shown, which transactions are blocked or which loans are granted, the outcomes observed are those of the production
+model's decisions. The candidate's decisions were never acted on, so their outcomes are counterfactual. Estimating them
+from logged data is <NoteLink to="off-policy-evaluation">off-policy evaluation</NoteLink>, which requires the production
+policy to have randomised its decisions and fails where the candidate chooses actions the production model never takes.
+
+### Canary release
+
+A router assigns each request, or better each user so that a user sees one model consistently, to the canary with
+probability $f$ and to the control otherwise. Metrics are computed separately for the two populations over the same
+time window, and the canary is judged by the difference. Comparing the whole system before and after a full release is
+risky, because metrics also change with time of day, traffic mix and other deployments; a concurrent control removes
+those effects <Cite id="warner2018" />.
+
+A canary is an <NoteLink to="ab-test">A/B test</NoteLink> with a different purpose. An A/B test estimates the effect on
+an <NoteLink to="overall-evaluation-criterion">overall evaluation criterion</NoteLink> with enough power to detect small
+improvements, usually at a 50/50 split over one or more weeks <Cite id="kohavi2020" />. A canary aims to detect breakage
+quickly while exposing as few users as possible, and looks at guardrail metrics that a bad release moves a lot: error
+rates, latency, crash rates, empty results, and the model's prediction distribution. Model releases often do both in
+sequence: shadow, then canary at 1–5%, then a full A/B test of the quality metrics, then a ramp to 100%.
+
+### How large a canary must be
+
+Let the control's error rate be $p$ and the canary's $p + \Delta$, and let $N$ requests arrive in the evaluation window,
+$fN$ to the canary and $(1 - f)N$ to the control. The difference of the two observed rates has variance
+
+$$
+\var\paren{\hat p_{\text{canary}} - \hat p_{\text{control}}} \approx \frac{p(1-p)}{fN} + \frac{p(1-p)}{(1-f)N} = \frac{p(1-p)}{N f (1 - f)}.
+$$
+
+A two-sided test at level $\alpha$ with power $1 - \beta$ detects the increase when
+$\Delta \ge (z_{1-\alpha/2} + z_{1-\beta}) \sqrt{p(1-p) / (N f(1-f))}$, the same calculation as for
+<NoteLink to="ab-test-power">A/B test power</NoteLink>. The variance is smallest at $f = 1/2$, but the number of requests
+exposed to a bad release is $fN$, proportional to $f$. The detectable effect shrinks as $1/\sqrt{f}$ for small $f$, so
+the first few per cent of traffic buy most of the precision.
+
+The damage a bad canary can do is also proportional to $f$. If a release fails 20% of requests, a 5% canary adds
+$0.05 \times 0.20 = 1\%$ to the overall error rate for the duration of the canary, instead of 20%
+<Cite id="warner2018" />.
+
+<CanarySizing />
+
+### Ramping and rollback
+
+A staged rollout raises $f$ in steps, for example 1%, 5%, 25%, 50% and 100%, and holds each step long enough to evaluate
+it. Each step's decision is automatic where possible: proceed if every guardrail metric is within its tolerance, roll
+back otherwise. Rollback must be fast and must not depend on the candidate itself, so the previous model stays deployed
+and ready until the rollout completes.
+
+## Cost
+
+### Worked example
+
+A service handles $N = 10^6$ requests in a one-hour canary window with a baseline error rate of $p = 1\%$. With
+$\alpha = 0.05$ two-sided and 80% power, $z_{0.975} + z_{0.8} = 2.80$.
+
+- With $f = 0.05$: the standard error of the difference is $\sqrt{0.0099 / (10^6 \times 0.05 \times 0.95)} = 0.00046$,
+  and the detectable increase is $2.80 \times 0.00046 = 0.0013$. An error rate of 1.13% or more in the canary is
+  detected. 50,000 requests go to the canary.
+- With $f = 0.01$: the detectable increase is $0.0028$, an error rate of 1.28%, with 10,000 requests exposed.
+- With $f = 0.5$: the detectable increase is $0.00056$, but half the traffic is exposed.
+
+A release that doubles the error rate to 2% is caught even by the 1% canary. Subtle quality regressions of a few per
+cent relative are not; those need a full A/B test.
+
+## Trade-offs
+
+- **Shadow against canary.** Shadow mode risks nothing but cannot observe user responses or the outcomes of the
+  candidate's decisions. A canary observes them at a small, bounded risk.
+- **Canary size against exposure.** Larger canaries detect smaller regressions sooner, and expose more users to a bad
+  release.
+- **Duration against speed.** Longer windows accumulate more requests and cover daily cycles, but slow every release.
+- **Metric count.** Each extra guardrail metric raises the chance of a false alarm; a canary with dozens of metrics
+  fails often by chance unless thresholds account for multiple comparisons.
+
+## Pitfalls
+
+- **Shared resources.** A canary that overloads a shared cache or database also degrades the control, hiding the
+  difference between them <Cite id="warner2018" />.
+- **Unrepresentative canaries.** A canary on one data centre, one region or internal users only measures that
+  population.
+- **Sample ratio mismatch.** If the canary receives a different share of traffic from the one configured, the assignment
+  is broken and the comparison is biased (see <NoteLink to="sample-ratio-mismatch">sample ratio mismatch</NoteLink>).
+- **Shadow side effects.** A shadow model must not write to shared state, send messages or trigger actions; mirrored
+  requests must be read-only.
+- **Feedback loops after release.** Once the new model serves all traffic, its own decisions shape the data it will be
+  retrained on <Cite id="sculley2015" />.

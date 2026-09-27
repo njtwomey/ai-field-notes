@@ -1,0 +1,147 @@
+---
+title: Knowledge distillation
+kind: technique
+summary: Distillation trains a small student network to match a large teacher's output distribution softened by a temperature $T$, as well as the labels. Soft-target gradients shrink as $1/T^2$, so that loss is multiplied by $T^2$. At high $T$ it becomes logit matching.
+tags: [deep-learning, inference, compression, worked-example]
+aliases: [distillation, teacher–student training, soft targets, dark knowledge, distillation temperature, model compression, DistilBERT]
+requires: [softmax-and-log-sum-exp, cross-entropy-and-perplexity]
+related: [kl-divergence, temperature-scaling, model-quantisation]
+references: [hinton2015, bucilua2006, sanh2019]
+status: draft
+updated: 2026-09-27
+---
+
+import { SoftTargets } from './SoftTargets'
+
+<Definition>
+Knowledge distillation trains a **student** model on the outputs of a trained **teacher** model. Both models' logits
+are divided by a temperature $T \ge 1$ before the softmax. The student minimises a weighted sum of the cross-entropy
+between the teacher's and its own softened distributions, scaled by $T^2$, and the ordinary cross-entropy with the true
+labels at $T = 1$. At deployment the student runs at $T = 1$ <Cite id="hinton2015" />.
+</Definition>
+
+## Problem
+
+The most accurate model for a task is often too large or too slow to serve: an ensemble of many networks, or one very
+large network. A smaller network trained on the same labelled data from scratch is usually much less accurate than the
+large model, even when it has enough capacity to represent a similar function.
+
+The trained large model knows more than its top-1 predictions. For an image of a handwritten 7, it assigns small but
+very different probabilities to the wrong classes: perhaps $10^{-3}$ to 2 and $10^{-7}$ to 6. These ratios say which
+classes resemble each other, and a one-hot label carries none of this information. Buciluǎ, Caruana and Niculescu-Mizil
+showed that a small network trained to mimic a large ensemble on a large unlabelled transfer set could match the
+ensemble's accuracy <Cite id="bucilua2006" />. Distillation turns this idea into a loss function.
+
+## Mechanism
+
+### Softened distributions
+
+For logits $\zvec \in \reals^N$ over $N$ classes, the softmax at temperature $T$ is
+
+$$
+p_i(T) = \frac{\exp(z_i / T)}{\sum_{j=1}^{N} \exp(z_j / T)}.
+$$
+
+At $T = 1$ it is the ordinary softmax. As $T$ grows, the logits are compressed towards each other and the distribution
+flattens towards uniform, while the ranking of the classes stays the same. Small probabilities such as $10^{-7}$ and
+$10^{-3}$, whose logarithms differ by about 9, become large enough to affect a cross-entropy loss.
+
+<SoftTargets />
+
+### The loss
+
+Let $\zvec$ be the teacher's logits and $\vvec$ the student's, and let $\pvec(T)$ and $\qvec(T)$ be their softmaxes at
+temperature $T$. For a labelled example $(x, y)$, the distillation loss is
+
+$$
+\Lcal = (1 - \lambda)\paren{-\log q_y(1)} + \lambda \, T^2 \paren{-\sum_{i=1}^{N} p_i(T) \log q_i(T)},
+$$
+
+with a weight $\lambda \in [0, 1]$. The soft term is the cross-entropy from the teacher's softened distribution to the
+student's. It differs from $\KL\paren{\pvec(T) \,\|\, \qvec(T)}$ only by the teacher's entropy, which does not depend on
+the student, so both give the same gradients. The soft term needs no labels, so it can use extra unlabelled transfer
+data. Hinton, Vinyals and Dean found that a considerably lower weight on the hard-label term worked best
+<Cite id="hinton2015" />.
+
+### Why the soft loss is multiplied by $T^2$
+
+Write the soft cross-entropy as $C = -\sum_i p_i \log q_i$ with $q_i = \exp(v_i/T) / \sum_j \exp(v_j/T)$. The
+derivative of $\log q_i$ with respect to $v_k$ is $\paren{\indicator\set{i = k} - q_k} / T$. Hence
+
+$$
+\frac{\partial C}{\partial v_k} = -\sum_i p_i \frac{\indicator\set{i = k} - q_k}{T} = \frac{1}{T}\paren{q_k - p_k},
+$$
+
+using $\sum_i p_i = 1$. There is one explicit factor $1/T$. A second factor comes from $q_k - p_k$ itself. For $T$ large
+compared with the logits, $\exp(v/T) \approx 1 + v/T$, so
+
+$$
+q_k \approx \frac{1 + v_k / T}{N + \sum_j v_j / T}.
+$$
+
+If both sets of logits have mean zero, which can be arranged by subtracting the mean because the softmax is unchanged by
+it, the denominators equal $N$ and
+
+$$
+\frac{\partial C}{\partial v_k} \approx \frac{1}{T} \cdot \frac{v_k - z_k}{N T} = \frac{1}{N T^2}\paren{v_k - z_k}.
+$$
+
+The soft-target gradient therefore shrinks as $1/T^2$. Multiplying the soft loss by $T^2$ keeps its gradients on the
+same scale as the hard-label term's whichever temperature is chosen, so $\lambda$ and the learning rate need not be
+retuned when $T$ changes <Cite id="hinton2015" />.
+
+The same expansion shows what distillation becomes at high temperature. The gradient $(v_k - z_k)/N$ of the scaled loss
+is the gradient of $\frac{1}{2N} \sum_k (v_k - z_k)^2$, so the student matches the teacher's mean-centred logits by
+squared error, which is the logit-matching method of Buciluǎ et al. At intermediate temperatures, distillation pays less
+attention to logits far below the mean. These logits are poorly constrained by the teacher's training, so ignoring them
+can help <Cite id="hinton2015" />.
+
+### Worked example
+
+Take $N = 4$ classes, teacher logits $\zvec = (5, 2, 1, -1)$ and student logits $\vvec = (4, 3, 0, -2)$.
+
+- At $T = 1$ the teacher's distribution is $(0.934, 0.047, 0.017, 0.002)$. At $T = 4$ it is
+  $(0.485, 0.229, 0.178, 0.108)$: the same order, but the second and third classes are now visible.
+- The soft-loss gradient at $T = 4$ is $(\qvec - \pvec)/T = (-0.0157, 0.0249, -0.0058, -0.0035)$. Multiplied by
+  $T^2 = 16$ it becomes $(-0.25, 0.40, -0.09, -0.06)$.
+- At $T = 100$ the raw gradient has entries near $10^{-5}$, but $T^2$ times it is $(-0.13, 0.38, -0.13, -0.12)$. The
+  high-temperature limit $(v_k - z_k)/N$ on mean-centred logits is $(-0.125, 0.375, -0.125, -0.125)$.
+
+Without the $T^2$ factor, the soft term's gradients would fall by a factor of about $10^4$ between $T = 1$ and
+$T = 100$, and the hard-label term would dominate.
+
+## Cost
+
+Distillation costs one teacher forward pass per training example, or one pass over the transfer set if the teacher's
+logits are stored. Storing the full distribution over a vocabulary of $V$ tokens for every position of a language
+model's training set is expensive, so teacher outputs are either computed on the fly or truncated to the top few
+classes.
+
+The results show what the teacher adds. On MNIST, a large regularised network made 67 test errors. A smaller network
+with two hidden layers of 800 units and no regularisation made 146 errors when trained on the labels, and 74 errors when
+trained to match the large network's soft targets at $T = 20$ <Cite id="hinton2015" />. DistilBERT, a BERT model with
+half the layers trained with a distillation loss during pre-training, is 40% smaller and 60% faster than BERT and keeps
+97% of its language-understanding performance <Cite id="sanh2019" />.
+
+## Trade-offs
+
+- **Temperature.** Low $T$ transfers only the top class and approaches training on the teacher's hard predictions.
+  Very high $T$ matches all logits, including the unreliable very negative ones. Values between about 2 and 20 are
+  common; the best value is found by validation.
+- **Student capacity.** Hinton et al. found that when the student is very small, intermediate temperatures work best,
+  because it cannot match every logit <Cite id="hinton2015" />.
+- **Transfer data.** The soft loss needs no labels, so any unlabelled data from the input distribution can be used. Data
+  far from that distribution teaches the student the teacher's behaviour where the teacher itself is unreliable.
+- **Compared with other compression.** <NoteLink to="model-quantisation">Quantisation</NoteLink> keeps the architecture
+  and stores fewer bits per weight. Distillation changes the architecture and needs a training run. The two combine: a
+  distilled student can then be quantised.
+
+## Pitfalls
+
+- **The student inherits the teacher's errors.** Soft targets transfer systematic mistakes and biases along with the
+  useful similarity structure.
+- **Mismatched temperatures.** The teacher's and the student's logits must be divided by the same $T$ during training,
+  and the student must be evaluated at $T = 1$.
+- **Forgetting the $T^2$ factor.** Without it, changing $T$ silently changes the relative weight of the two loss terms.
+- **Calibration.** A student trained at high temperature can be over- or under-confident at $T = 1$.
+  <NoteLink to="temperature-scaling">Temperature scaling</NoteLink> on held-out data fixes this after training.

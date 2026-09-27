@@ -1,0 +1,145 @@
+---
+title: ZeRO and sharded optimisers
+kind: technique
+summary: ZeRO removes the redundant copies of model state in data-parallel training by sharding it across the $N$ devices. Mixed-precision Adam needs $16\Psi$ bytes for $\Psi$ parameters; sharding optimiser states, gradients and weights cuts this to $4\Psi + 12\Psi/N$, $2\Psi + 14\Psi/N$ and $16\Psi/N$.
+tags: [deep-learning, distributed-training, memory, gpu, worked-example]
+aliases:
+  [
+    Zero Redundancy Optimizer,
+    ZeRO-1,
+    ZeRO-2,
+    ZeRO-3,
+    optimiser state sharding,
+    fully sharded data parallel,
+    FSDP,
+    sharded data parallelism,
+  ]
+requires: [data-parallelism, adam]
+related: [model-parallelism]
+references: [rajbhandari2020, zhao2023, micikevicius2018]
+status: draft
+updated: 2026-09-27
+---
+
+import { ZeroMemory } from './ZeroMemory'
+
+<Definition>
+ZeRO (Zero Redundancy Optimizer) is a form of data parallelism in which each of $N$ devices stores only a $1/N$ shard
+of the model state instead of a full copy. Stage 1 shards the optimiser states, stage 2 also the gradients, and stage 3
+also the parameters. Collective communication gathers each piece where and when it is needed, and the result of every
+step is the same as with ordinary data parallelism <Cite id="rajbhandari2020" />.
+</Definition>
+
+## Problem
+
+In <NoteLink to="data-parallelism">data parallelism</NoteLink> every device holds identical copies of the weights, the
+gradients and the optimiser state, and all $N$ devices update all of them identically. Only one copy is needed.
+
+Mixed-precision training with <NoteLink to="adam">Adam</NoteLink> keeps, for $\Psi$ parameters
+<Cite id="micikevicius2018" />:
+
+- 16-bit weights for the forward and backward passes: $2\Psi$ bytes;
+- 16-bit gradients: $2\Psi$ bytes;
+- the optimiser state in 32-bit precision: a master copy of the weights, the first moment and the second moment,
+  $4\Psi + 4\Psi + 4\Psi = 12\Psi$ bytes.
+
+The total is $16\Psi$ bytes per device, whatever $N$ is. Writing $K = 12$ for the optimiser's bytes per parameter, the
+optimiser state alone is three quarters of it. A model with $7.5 \times 10^9$ parameters needs 120 GB per device before
+any activations, more than an 80 GB accelerator holds, even with 64 devices <Cite id="rajbhandari2020" />.
+
+## Mechanism
+
+### Stage 1: shard the optimiser states
+
+Partition the parameters into $N$ equal shards and make device $i$ responsible for shard $i$. Device $i$ keeps the
+32-bit master weights and Adam moments only for its shard. After the backward pass, it needs only the averaged
+gradients of its shard, so the all-reduce is replaced by its first half, a **reduce-scatter**, which leaves device $i$
+with the summed gradients of shard $i$. Device $i$ updates its shard in 32 bits and casts it to 16 bits, and an
+**all-gather** sends every updated shard to every device, which rebuilds the full 16-bit weights for the next step.
+
+Per device, the 16-bit weights and gradients stay full size and the optimiser state shrinks by $N$:
+
+$$
+M_1 = 2\Psi + 2\Psi + \frac{K\Psi}{N} = 4\Psi + \frac{12\Psi}{N}.
+$$
+
+### Stage 2: also shard the gradients
+
+A device needs the gradients only of its own shard. As soon as a bucket of gradients has been reduced to its owner, the
+other devices free it. Only the owner keeps a 16-bit gradient for each parameter:
+
+$$
+M_2 = 2\Psi + \frac{(2 + K)\Psi}{N} = 2\Psi + \frac{14\Psi}{N}.
+$$
+
+### Stage 3: also shard the parameters
+
+Each device stores only its shard of the 16-bit weights too. Before a layer's forward pass, an all-gather assembles the
+layer's full weights; after the layer runs, the non-owned parts are freed. The backward pass gathers them again. The
+whole model state is divided by $N$:
+
+$$
+M_3 = \frac{(2 + 2 + K)\Psi}{N} = \frac{16\Psi}{N}.
+$$
+
+Only one or two layers' full weights exist on a device at any moment, so stage 3 fits models whose state is far larger
+than one device's memory, provided that $N$ is large enough. PyTorch's fully sharded data parallel (FSDP) implements
+the same scheme, gathering the weights of one wrapped group of layers at a time and prefetching the next group during
+computation <Cite id="zhao2023" />.
+
+### Communication volume
+
+Measure communication by the data each device sends, in units of $\Psi$ numbers. A ring
+<NoteLink to="data-parallelism">all-reduce</NoteLink> is a reduce-scatter followed by an all-gather, and each half moves
+about $\Psi$ per device, since $(N-1)/N \approx 1$. Standard data parallelism therefore moves $2\Psi$ per step.
+
+- **Stages 1 and 2** reduce-scatter the gradients ($\Psi$) and all-gather the updated weights ($\Psi$): $2\Psi$, the
+  same as standard data parallelism <Cite id="rajbhandari2020" />. The memory saving is free in communication.
+- **Stage 3** all-gathers the weights before the forward pass ($\Psi$), again before the backward pass ($\Psi$), and
+  reduce-scatters the gradients ($\Psi$): $3\Psi$, 1.5 times standard data parallelism <Cite id="rajbhandari2020" />.
+
+The extra gathers can overlap with computation by fetching the next layer's weights while the current one runs.
+
+<ZeroMemory />
+
+## Cost
+
+### Worked example
+
+Take $\Psi = 7.5 \times 10^9$ parameters on $N = 64$ devices, the example of Rajbhandari et al.
+<Cite id="rajbhandari2020" />:
+
+| Setting          | Formula              | Per device |
+| ---------------- | -------------------- | ---------- |
+| Data parallelism | $16\Psi$             | 120 GB     |
+| Stage 1          | $4\Psi + 12\Psi/N$   | 31.4 GB    |
+| Stage 2          | $2\Psi + 14\Psi/N$   | 16.6 GB    |
+| Stage 3          | $16\Psi/N$           | 1.9 GB     |
+
+For stage 1, $4 \times 7.5 = 30$ GB of 16-bit weights and gradients plus $12 \times 7.5/64 = 1.4$ GB of optimiser
+state. Stages 1 and 2 are bounded below by the full 16-bit weights and gradients, $4\Psi$ and $2\Psi$, however many
+devices are used. Stage 3 has no such floor: with 1024 devices, each holds 117 MB of model state.
+
+The table leaves out activations, temporary buffers and memory fragmentation, which ZeRO treats separately. For long
+sequences, activations can exceed the sharded model state.
+
+## Trade-offs
+
+- **Memory against communication.** Stages 1 and 2 save memory at no extra communication and are almost always worth
+  using. Stage 3 saves the most but moves 50% more data and adds latency to every layer.
+- **Compared with model parallelism.** <NoteLink to="model-parallelism">Tensor and pipeline parallelism</NoteLink>
+  also divide the weights, and additionally divide activations and computation within a layer, but require changes to
+  the model and a bubble or per-layer all-reduces. ZeRO keeps the simplicity of data parallelism: each device runs the
+  whole model on its own data.
+- **Scale of the data-parallel group.** ZeRO's savings grow with $N$, so it pairs naturally with large data-parallel
+  groups. At small $N$, stage 3 cannot fit a model that tensor parallelism could.
+- **Offloading.** Optimiser states and even parameters can be moved further, to CPU memory or disk, trading PCIe
+  bandwidth for accelerator memory.
+
+## Pitfalls
+
+- **Global operations on sharded state.** Gradient-norm clipping needs the norm over all shards, so each device's local
+  sum of squares must be all-reduced before clipping.
+- **Checkpoints.** Each device saves only its shard. Loading into a different number of devices requires re-sharding.
+- **Small wrapped units in stage 3.** Gathering weights layer by layer in tiny pieces makes each collective
+  latency-bound; units must be large enough to use the bandwidth.

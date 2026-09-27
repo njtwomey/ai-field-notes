@@ -1,0 +1,185 @@
+---
+title: Batching and serving throughput
+kind: technique
+summary: A language-model server decodes many sequences in one batch, because each step must read every weight regardless of batch size. Throughput grows almost linearly with batch size until arithmetic or cache reads dominate. Continuous batching swaps sequences in and out at every step.
+tags: [deep-learning, transformer, inference, systems, gpu, worked-example]
+aliases:
+  [
+    continuous batching,
+    iteration-level scheduling,
+    in-flight batching,
+    static batching,
+    dynamic batching,
+    chunked prefill,
+    time to first token,
+    TTFT,
+    time per output token,
+    LLM serving,
+  ]
+requires: [kv-cache]
+related: [flash-attention, model-quantisation, speculative-decoding]
+references: [yu2022, kwon2023, agrawal2024, pope2022, nvidia2020]
+status: draft
+updated: 2026-09-27
+---
+
+import { ServingRoofline } from './ServingRoofline'
+
+<Definition>
+Batching runs the forward passes of several requests together so that each weight read from memory is used for several
+sequences. **Static batching** fixes a batch of requests and runs it until the longest one finishes. **Continuous
+batching**, also called iteration-level scheduling, re-forms the batch after every decoding step: finished sequences
+leave and waiting requests join <Cite id="yu2022" />.
+</Definition>
+
+## Problem
+
+A decoder-only language model generates one token per sequence per forward pass, using a
+<NoteLink to="kv-cache">KV cache</NoteLink> for the earlier tokens. A server must answer many users at once, and it is
+judged by two numbers that pull against each other:
+
+- **Latency**: the time to the first token (TTFT), dominated by processing the prompt, and the time per output token
+  (TPOT) after that;
+- **Throughput**: the number of tokens generated per second across all users, which sets the cost per token.
+
+Batching raises throughput. How far it can go, and what it costs in latency, follows from what limits one decoding step.
+
+## Mechanism
+
+### Why one decoding step is memory-bound
+
+Take a model with $P$ parameters stored in $b$ bytes each, running on an accelerator with memory bandwidth $W$ bytes per
+second and peak arithmetic rate $F$ operations per second. One decoding step for a batch of $B$ sequences must
+
+- read every weight once: $P b$ bytes, independent of $B$;
+- read each sequence's cached keys and values: $B n \kappa$ bytes, for $n$ cached tokens per sequence and $\kappa$ bytes
+  of cache per token;
+- perform about 2 operations (a multiply and an add) per weight per sequence: $2 P B$ operations.
+
+Memory transfers and arithmetic overlap, so the step takes about
+
+$$
+t(B) \approx \max\paren{\frac{P b + B n \kappa}{W},\; \frac{2 P B}{F}}.
+$$
+
+Ignore the cache for a moment. The memory term is constant in $B$ and the arithmetic term grows linearly, so the step
+is memory-bound until
+
+$$
+\frac{P b}{W} = \frac{2 P B^*}{F} \quad\Longrightarrow\quad B^* = \frac{F b}{2 W}.
+$$
+
+Below $B^*$, adding sequences to the batch costs almost no time, so throughput $B / t(B)$ rises almost linearly. Above
+$B^*$ the step becomes compute-bound and throughput levels off at $F / 2P$ tokens per second <Cite id="pope2022" />.
+The cache term grows with $B$ too, so at long contexts it caps throughput near $W / (n \kappa)$ before the arithmetic
+limit is reached.
+
+### Worked example
+
+An NVIDIA A100 80 GB has $W = 2.039$ TB/s and $F = 312$ TFLOP/s in 16-bit arithmetic <Cite id="nvidia2020" />. Llama 2
+7B has $P = 6.7 \times 10^9$ parameters; in 16-bit precision, $b = 2$ and the weights take 13.4 GB. Its KV cache takes
+$\kappa = 512$ KiB per token (see <NoteLink to="kv-cache">KV caching</NoteLink>). Take $n = 1024$ cached tokens per
+sequence.
+
+- The crossover batch size ignoring the cache is
+  $B^* = (312 \times 10^{12} \times 2)/(2 \times 2.039 \times 10^{12}) = 153$.
+- At $B = 1$ the step reads 13.9 GB and takes 6.8 ms: 146 tokens per second.
+- At $B = 64$ it reads 13.4 GB of weights and 34.4 GB of cache, and takes 23.4 ms. Each user waits 3.4 times longer per
+  token, and the server produces 2,730 tokens per second, 19 times more.
+- The cache limits the batch: $(80 - 13.4)$ GB of free memory holds the caches of 124 sequences of 1024 tokens. The
+  arithmetic term, 5.3 ms at $B = 124$, never becomes the bottleneck.
+
+<ServingRoofline />
+
+The figure shows the levers. Grouped-query attention cuts $\kappa$ by a factor of 4 here, which both raises the largest
+batch and raises the throughput ceiling set by cache reads. Quantising the weights cuts the fixed $P b$ term, which
+lowers latency most at small batch sizes. <NoteLink to="model-quantisation">Quantisation</NoteLink> of the cache cuts
+$\kappa$.
+
+### Static batching wastes slots
+
+Requests produce outputs of very different lengths. A static batch holds each slot until the longest sequence in the
+batch finishes, and new requests wait for the whole batch.
+
+If output lengths $L_1, \dots, L_B$ are independent, the fraction of slot-steps that do useful work is
+
+$$
+u = \frac{\expect\brack{\sum_i L_i}}{B \, \expect\brack{\max_i L_i}} = \frac{\expect[L]}{\expect\brack{\max_i L_i}}.
+$$
+
+For exponentially distributed lengths with mean $\mu$, $\expect\brack{\max_i L_i} = \mu H_B$, where
+$H_B = 1 + \tfrac12 + \dots + \tfrac1B$ is the $B$-th harmonic number, so $u = 1/H_B$. For $B = 32$, $H_{32} = 4.06$
+and only 25% of the batch does useful work; the rest are finished sequences occupying slots.
+
+<Derivation title="Why the expected maximum of B exponentials is μ times the harmonic number">
+
+Let $L_1, \dots, L_B$ be independent exponential variables with rate $\lambda = 1/\mu$. The minimum of $k$ independent
+exponentials with rate $\lambda$ is exponential with rate $k\lambda$, because
+$\pr(\min > t) = \paren{e^{-\lambda t}}^k = e^{-k \lambda t}$. By memorylessness, once the first variable finishes the
+remaining $B - 1$ restart as fresh exponentials. The maximum is therefore the sum of $B$ independent waiting times with
+rates $B\lambda, (B-1)\lambda, \dots, \lambda$, and
+
+$$
+\expect\brack{\max_i L_i} = \sum_{k=1}^{B} \frac{1}{k \lambda} = \mu H_B.
+$$
+
+</Derivation>
+
+### Continuous batching
+
+Orca schedules at the granularity of one iteration: after every forward pass, sequences that emitted an end token
+return their results and free their slots, and queued requests join the batch <Cite id="yu2022" />. No slot waits for
+another sequence, so utilisation approaches 1 whenever requests are queued, and a new request starts as soon as a slot
+frees up.
+
+Sequences in a continuous batch are at different positions and have different lengths, which a single padded tensor
+handles badly. Orca's **selective batching** flattens the tokens of all sequences into one matrix for the linear layers
+and the feed-forward network, which do not mix positions, and runs attention separately for each sequence. On a
+175-billion-parameter model Orca reported 36.9 times the throughput of NVIDIA FasterTransformer at the same latency
+<Cite id="yu2022" />.
+
+Continuous batching needs the cache of every sequence in the batch to be in memory at once. PagedAttention stores caches
+in fixed-size blocks allocated on demand, which removes the waste from reserving memory for the maximum length and
+allows larger batches; vLLM combines it with continuous batching <Cite id="kwon2023" />.
+
+### Prefill and decode interference
+
+A new request's prompt is processed in one **prefill** pass over all its tokens. Prefill of a long prompt is
+compute-bound and takes much longer than a decoding step. If the server runs it as a separate step, every sequence in
+the decode batch stalls for that time, and users see a pause between tokens. **Chunked prefill** splits a long prompt
+into pieces of a fixed token budget and adds one piece to each decoding step. The decode steps then have a nearly
+constant duration, and the spare arithmetic capacity of memory-bound decode steps is used for the prompt
+<Cite id="agrawal2024" />.
+
+## Cost
+
+Throughput and latency trade along the curve of $t(B)$:
+
+| Regime                           | Throughput         | Latency per token     |
+| -------------------------------- | ------------------ | --------------------- |
+| $B \ll B^*$, short context       | $\propto B$        | nearly constant       |
+| cache reads dominate             | approaches $W / n\kappa$ | grows with $B n$ |
+| $B > B^*$, compute-bound         | $F / 2P$           | grows linearly in $B$ |
+
+A server usually sets a latency target, for example a maximum time per output token, and runs the largest batch that
+meets it. Throughput measured only for requests that meet their latency targets is sometimes called **goodput**.
+
+## Trade-offs
+
+- **Batch size against latency.** Larger batches cut cost per token until memory or arithmetic saturates, but every
+  user's tokens arrive more slowly.
+- **Memory for cache against memory for weights.** Every gigabyte freed by quantising or sharding the weights holds more
+  cached tokens and so allows a larger batch.
+- **Prefill priority.** Running prompts eagerly lowers time to first token for new users but stalls tokens for existing
+  ones; chunking balances the two.
+- **Speculative decoding.** <NoteLink to="speculative-decoding">Speculative decoding</NoteLink> verifies several draft
+  tokens in one forward pass, using the spare arithmetic of a memory-bound step to cut latency. At large batch sizes the
+  step is closer to compute-bound and the spare capacity is gone, so its benefit shrinks.
+
+## Pitfalls
+
+- **Measuring throughput at batch size 1.** Single-request benchmarks describe latency, not the cost of serving.
+- **Padding.** Static batches padded to the longest prompt or output waste both arithmetic and cache memory.
+- **Admission without memory checks.** Admitting more sequences than the cache can hold forces the server to evict and
+  later recompute caches, which can reduce throughput below that of a smaller batch.
+- **Mean latency.** Users notice the tail. Report percentiles of time to first token and of time per output token.

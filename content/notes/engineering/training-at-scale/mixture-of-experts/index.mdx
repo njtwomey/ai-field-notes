@@ -1,0 +1,189 @@
+---
+title: Mixture of experts
+kind: technique
+summary: A mixture-of-experts layer holds $N$ expert networks and a router that sends each token to its top $k$ of them, so parameters grow with $N$ while computation per token grows with $k$. An auxiliary loss $\alpha N \sum_i f_i P_i$ or a routing bias keeps the experts' loads balanced.
+tags: [deep-learning, transformer, distributed-training, inference, worked-example]
+aliases:
+  [
+    MoE,
+    sparse mixture of experts,
+    sparsely-gated mixture of experts,
+    top-k routing,
+    expert routing,
+    router,
+    load-balancing loss,
+    auxiliary-loss-free load balancing,
+    expert parallelism,
+    capacity factor,
+    Switch Transformer,
+  ]
+requires: [transformer]
+related: [model-parallelism, gpt-2-vs-deepseek-v3]
+references: [shazeer2017, fedus2022, lepikhin2021, dai2024, deepseek2024, jacobs1991]
+status: draft
+updated: 2026-09-27
+---
+
+import { ExpertLoad } from './ExpertLoad'
+
+<Definition>
+A sparse mixture-of-experts (MoE) layer replaces one feed-forward network with $N$ expert networks $E_1, \dots, E_N$
+and a router. For an input token $\xvec$, the router computes a weight $g_i(\xvec)$ for each expert, keeps the $k$
+largest, and the layer returns
+
+$$
+\yvec = \sum_{i \in \operatorname{TopK}(\xvec)} g_i(\xvec) \, E_i(\xvec).
+$$
+
+Only the $k$ selected experts run, so the number of parameters grows with $N$ while the computation per token grows
+with $k$ <Cite id="shazeer2017" />.
+</Definition>
+
+## Problem
+
+The accuracy of a <NoteLink to="transformer">transformer</NoteLink> language model improves with its number of
+parameters, but in a dense model every parameter is used for every token, so compute per token grows in proportion.
+Conditional computation decouples the two: different tokens use different parts of the network. Mixtures of experts
+were introduced as ensembles of networks with a learned gating network that weights all of them
+<Cite id="jacobs1991" />. The sparse version evaluates only the few experts the gate selects, which is what makes it
+cheaper.
+
+The difficulty is that the router is trained along with the experts. Experts that are chosen more often are trained
+more, become better, and are chosen even more often. Without a counterweight, a few experts receive most tokens, the
+rest are wasted, and the devices holding the popular experts become a bottleneck.
+
+## Mechanism
+
+### Routing
+
+In a transformer, the MoE layer replaces the feed-forward block of some or all layers; attention is unchanged. The
+router is a linear map $\Wmat_r \in \reals^{N \times h}$ from the token's hidden state to one logit per expert.
+
+**Top-$k$ gating.** Shazeer et al. keep the $k$ largest logits, set the others to $-\infty$ and apply a softmax, so the
+$k$ selected weights sum to 1 <Cite id="shazeer2017" />:
+
+$$
+\gvec(\xvec) = \operatorname{softmax}\paren{\operatorname{KeepTopK}\paren{\Wmat_r \xvec, k}}.
+$$
+
+They add Gaussian noise with a learned, input-dependent scale to the logits during training, which spreads tokens over
+more experts. The gradient reaches the router through the weights $g_i$ of the selected experts. The Switch Transformer
+uses $k = 1$, which halves the router's computation and communication relative to $k = 2$ and simplifies the
+implementation <Cite id="fedus2022" />.
+
+**Fine-grained and shared experts.** DeepSeekMoE splits each expert into several smaller ones and routes to
+proportionally more of them, which allows more combinations of experts per token, and adds **shared experts** that
+every token uses to hold common knowledge <Cite id="dai2024" />. DeepSeek-V3 has one shared expert and 256 routed experts
+per MoE layer and routes each token to 8 of them. It has 671 billion parameters, of which 37 billion, 5.5%, are active
+for each token <Cite id="deepseek2024" />.
+
+### The load-balancing loss
+
+The Switch Transformer adds an auxiliary loss to the training objective. For a batch of $T$ tokens, let
+
+$$
+f_i = \frac{1}{T} \sum_{t=1}^{T} \indicator\set{\text{token } t \text{ is routed to expert } i}, \qquad
+P_i = \frac{1}{T} \sum_{t=1}^{T} p_i(\xvec_t),
+$$
+
+where $p_i(\xvec_t)$ is the router's softmax probability for expert $i$. $f_i$ is the fraction of tokens expert $i$
+actually receives and $P_i$ the average probability the router gives it. The loss is
+
+$$
+\Lcal_{\text{aux}} = \alpha N \sum_{i=1}^{N} f_i P_i,
+$$
+
+with $\alpha = 10^{-2}$ in the Switch Transformer <Cite id="fedus2022" />.
+
+**Why the product.** $f_i$ counts discrete choices and has no gradient. $P_i$ is differentiable. The derivative of the
+loss with respect to $P_i$ is $\alpha N f_i$, so gradient descent lowers the router probability of each expert in
+proportion to the load it already carries: overloaded experts are pushed down hardest.
+
+**Why its minimum is uniform routing.** If routing follows the probabilities, $f_i \approx P_i$, and the loss is
+$\alpha N \sum_i P_i^2$. By the Cauchy–Schwarz inequality,
+
+$$
+1 = \paren{\sum_{i=1}^{N} 1 \cdot P_i}^2 \le N \sum_{i=1}^{N} P_i^2,
+$$
+
+with equality exactly when all $P_i$ are equal. The loss is therefore at least $\alpha$, and equals $\alpha$ exactly
+when every expert receives $1/N$ of the tokens and probability. Multiplying by $N$ makes this minimum independent of
+the number of experts.
+
+**Bias-based balancing.** A balancing loss competes with the language-modelling loss, and a large weight hurts quality.
+DeepSeek-V3 instead adds a bias $b_i$ to expert $i$'s affinity score when choosing the top $k$, but not when computing
+the gate weights. After each training step it decreases $b_i$ by a fixed amount $\gamma$ if expert $i$ was overloaded
+and increases it by $\gamma$ if underloaded. The router's choices move towards balance without any gradient through the
+language-modelling objective. A sequence-level balance loss with a very small weight remains as a safeguard
+<Cite id="deepseek2024" />.
+
+<ExpertLoad />
+
+### Capacity and dropped tokens
+
+For efficient batched computation, each expert processes a fixed-size buffer. Its **expert capacity** is
+
+$$
+C = \text{capacity factor} \times \frac{k T}{N}
+$$
+
+tokens per batch <Cite id="fedus2022" />. A capacity factor above 1 leaves slack for imbalance. Tokens routed to a full
+expert are dropped from that layer: their representation passes on unchanged through the residual connection. A larger
+capacity factor drops fewer tokens but pads more slots with nothing, wasting computation and memory. DeepSeek-V3 balances
+its load well enough that it drops no tokens during training <Cite id="deepseek2024" />.
+
+### Expert parallelism
+
+The experts of a layer are placed on different devices, $N/D$ experts on each of $D$ devices, while attention and the
+router are replicated or split in the usual ways. After routing, an **all-to-all** exchange sends each token's hidden
+state to the devices holding its selected experts; after the experts run, a second all-to-all returns the outputs to the
+token's original device. GShard scaled this to a 600-billion-parameter translation model on 2048 TPU v3 accelerators
+<Cite id="lepikhin2021" />. The all-to-all traffic is proportional to $k$ times the number of tokens, which is why
+DeepSeek-V3 limits each token to experts on at most 4 nodes <Cite id="deepseek2024" />.
+
+## Cost
+
+### Worked example
+
+**Auxiliary loss.** Take $N = 4$ experts with $\alpha = 0.01$. If routing is skewed, with
+$(f_1, \dots, f_4) = (0.7, 0.1, 0.1, 0.1)$ and $(P_1, \dots, P_4) = (0.6, 0.15, 0.15, 0.1)$, then
+
+$$
+N \sum_i f_i P_i = 4 \times (0.42 + 0.015 + 0.015 + 0.01) = 1.84,
+$$
+
+and the loss is $0.0184$. Balanced routing gives $4 \times 4 \times \tfrac14 \times \tfrac14 = 1$, a loss of $0.01$. The
+gradient with respect to $P_1$ is $\alpha N f_1 = 0.028$, seven times that for each of the other experts.
+
+**Capacity.** A batch of $T = 4096$ tokens routed top-1 to $N = 64$ experts with capacity factor 1.25 gives each
+expert room for $1.25 \times 4096 / 64 = 80$ tokens. An expert chosen by 100 tokens drops 20 of them.
+
+**Parameters and compute.** A dense model with DeepSeek-V3's 671 billion parameters would use about $2 \times 671$
+GFLOP per token in the forward pass. DeepSeek-V3 uses about $2 \times 37 = 74$ GFLOP, 5.5% of that
+<Cite id="deepseek2024" />. All 671 billion parameters must still be stored, so memory, not arithmetic, sets the number
+of devices needed to serve it.
+
+### Results
+
+The sparsely gated MoE layer increased model capacity more than 1000-fold with minor losses in computational
+efficiency, with up to 137 billion parameters <Cite id="shazeer2017" />. The Switch Transformer reached the same quality
+as T5-Base up to 7 times faster in pre-training with the same computation per token <Cite id="fedus2022" />.
+
+## Trade-offs
+
+- **Parameters against memory.** An MoE model has the compute of a small dense model and the memory of a large one.
+  It is cheapest where memory is plentiful and arithmetic is the bottleneck, as in large-batch training and serving.
+- **Balance against quality.** Strong balancing forces tokens away from the experts that suit them best. Weak balancing
+  wastes experts and devices.
+- **Communication.** Expert parallelism adds two all-to-all exchanges per MoE layer, which dominate when devices are
+  connected by slow links.
+- **$k$.** Larger $k$ improves quality per layer and costs proportionally more computation and communication.
+
+## Pitfalls
+
+- **Router collapse.** Without balancing, most tokens go to a few experts early in training and the rest never learn.
+- **Training instability.** Large router logits make the softmax saturate. The Switch Transformer computes the router in
+  fp32 for stability <Cite id="fedus2022" />.
+- **Token dropping at inference.** Capacity limits suited to training batches can drop tokens when serving batches are
+  small or unusual, changing the model's outputs.
+- **Counting parameters.** Quoting total parameters overstates compute; quoting active parameters understates memory.

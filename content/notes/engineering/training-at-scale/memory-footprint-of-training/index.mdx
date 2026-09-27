@@ -1,0 +1,145 @@
+---
+title: Memory footprint of training
+kind: concept
+summary: Training memory is model state plus activations. Mixed-precision Adam needs 16 bytes per parameter for weights, gradients and optimiser state. A transformer layer stores about $sbh(34 + 5as/h)$ bytes of activations for $b$ sequences of $s$ tokens, width $h$ and $a$ heads.
+tags: [deep-learning, training, memory, transformer, gpu, worked-example]
+aliases: [training memory, activation memory, model state memory, GPU memory budget, selective activation recomputation, sequence parallelism]
+requires: [backpropagation, transformer]
+related: [gradient-checkpointing, zero-and-sharded-optimisers, mixed-precision-training, model-parallelism, data-parallelism]
+references: [korthikanti2022, rajbhandari2020, chen2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { TrainingMemory } from './TrainingMemory'
+
+<Definition>
+The memory needed to train a neural network on one device is the sum of the **model state** (weights, gradients and
+optimiser state), the **activations** saved during the forward pass for use in the backward pass, and **temporary
+buffers** for intermediate results and communication. Model state scales with the number of parameters; activations
+scale with the batch size, the sequence length and the model's width and depth.
+</Definition>
+
+## Model state
+
+Backpropagation needs the weights and produces one gradient per weight. The optimiser adds its own state. For $\Psi$
+parameters, mixed-precision training with Adam stores
+
+| Item                          | Precision | Bytes per parameter |
+| ----------------------------- | --------- | ------------------- |
+| weights for forward/backward  | 16-bit    | 2                   |
+| gradients                     | 16-bit    | 2                   |
+| master weights                | 32-bit    | 4                   |
+| Adam first moment             | 32-bit    | 4                   |
+| Adam second moment            | 32-bit    | 4                   |
+| **total**                     |           | **16**              |
+
+so model state takes $16\Psi$ bytes <Cite id="rajbhandari2020" />. Training in fp32 with Adam also needs 16 bytes per
+parameter: 4 each for weights, gradients and the two moments. SGD with momentum needs one moment instead of two. A model
+with $7 \times 10^9$ parameters needs 112 GB of model state, before any activations. Inference needs only the 2 bytes of
+16-bit weights, which is why a model can often be served on hardware where it cannot be trained.
+
+<NoteLink to="zero-and-sharded-optimisers">ZeRO</NoteLink> shards this state across data-parallel devices, and
+<NoteLink to="model-parallelism">tensor and pipeline parallelism</NoteLink> split it across the devices that share a
+model.
+
+## Activations
+
+### Why activations are stored
+
+The backward pass of a layer $\yvec = f(\xvec; \wvec)$ needs $\partial \yvec / \partial \wvec$ and
+$\partial \yvec / \partial \xvec$, which depend on the layer's input and sometimes its output. For a linear layer
+$\yvec = \Wmat \xvec$, the weight gradient is $\bar{\yvec} \xvec^\tr$, where $\bar{\yvec}$ is the gradient arriving from
+above, so the input $\xvec$ must be kept. Every such tensor saved during the forward pass stays in memory until the
+backward pass reaches its layer. Activation memory therefore grows with depth, batch size and sequence length.
+
+### Activation memory of a transformer layer
+
+Korthikanti et al. count the bytes stored by one layer of a <NoteLink to="transformer">transformer</NoteLink> with $b$
+sequences of $s$ tokens, hidden width $h$ and $a$ attention heads, with activations in 16-bit precision (2 bytes) and
+dropout masks in 1 byte <Cite id="korthikanti2022" />. Each $s \times b \times h$ tensor of 16-bit numbers costs $2sbh$
+bytes.
+
+**Attention block.**
+
+- The query, key and value projections share one input: $2sbh$.
+- The product $\Qmat\Kmat^\tr$ needs $\Qmat$ and $\Kmat$: $4sbh$.
+- The softmax output, $a$ matrices of size $s \times s$ per sequence: $2as^2b$.
+- The dropout mask on the attention probabilities: $as^2b$.
+- The product with $\Vmat$ needs the dropped-out probabilities and $\Vmat$: $2as^2b + 2sbh$.
+- The output projection needs its input: $2sbh$. Its dropout mask: $sbh$.
+
+The total is $11sbh + 5as^2b$ bytes.
+
+**MLP block.** The two linear layers store their inputs, of widths $h$ and $4h$: $2sbh + 8sbh$. The GeLU needs its
+input: $8sbh$. The dropout mask: $sbh$. The total is $19sbh$ bytes.
+
+**Layer normalisation.** Each of the two stores its input: $4sbh$.
+
+Summing,
+
+$$
+\text{activation bytes per layer} = 34 sbh + 5 a s^2 b = sbh\paren{34 + \frac{5as}{h}}.
+$$
+
+The first term is linear in sequence length; the second, from the attention matrices, is quadratic. The ratio
+$5as/h$ decides which dominates. For GPT-3, with $a = 96$, $s = 2048$ and $h = 12288$, it is 80, more than twice the
+linear term <Cite id="korthikanti2022" />.
+
+### Reducing activation memory
+
+- **Full recomputation.** Store only each layer's input, $2sbh$ bytes, and recompute the layer's internals during the
+  backward pass. This is <NoteLink to="gradient-checkpointing">gradient checkpointing</NoteLink> at layer granularity
+  <Cite id="chen2016" />. It costs about one extra forward pass, roughly a third more computation.
+- **Selective recomputation.** The quadratic $5as^2b$ term comes from operations that take little arithmetic to recompute:
+  the softmax, its dropout and the attention-weighted sum. Recomputing only these leaves $34sbh$ bytes per layer at a
+  small extra cost <Cite id="korthikanti2022" />. Kernels that never store the attention matrix, such as
+  <NoteLink to="flash-attention">FlashAttention</NoteLink>, remove this term as well.
+- **Tensor and sequence parallelism.** With tensor parallelism of degree $t$, the attention and MLP internals are split
+  across devices, but layer normalisation and dropout remain replicated. Sequence parallelism splits those along the
+  token dimension, and the per-device activation memory becomes $sbh(34 + 5as/h)/t$ <Cite id="korthikanti2022" />.
+- **Smaller micro-batches.** Activations are linear in $b$. Gradient accumulation over several micro-batches keeps the
+  effective batch size.
+
+### The output layer
+
+The final projection to a vocabulary of $V$ tokens produces $s \times b \times V$ logits, and the loss needs them. For
+$V = 50{,}257$ and $s = 2048$, the logits of one sequence take 412 MB in 32-bit precision, as much as a few transformer
+layers. Computing the loss in chunks over tokens avoids holding them all at once.
+
+<TrainingMemory />
+
+## Worked example
+
+GPT-3 175B has $L = 96$ layers, $h = 12288$ and $a = 96$, and was trained on sequences of $s = 2048$ tokens. With a
+micro-batch of $b = 1$:
+
+- Activations per layer: $2048 \times 12288 \times (34 + 80) = 2.87$ GB. Over 96 layers: 275 GB.
+- With selective recomputation: $2048 \times 12288 \times 34 \times 96 = 82$ GB.
+- With full recomputation: $2 \times 2048 \times 12288 \times 96 = 4.8$ GB.
+- Model state: $16 \times 175 \times 10^9 = 2.8$ TB.
+
+Both must be divided across many devices. With tensor and sequence parallelism of degree 8, the stored activations fall
+to 34 GB per device and selective recomputation to 10 GB. The model state must additionally be split by pipeline
+parallelism or ZeRO.
+
+For a 7-billion-parameter model ($L = 32$, $h = 4096$, $a = 32$) at $s = 4096$, the ratio $5as/h$ is 160, and the
+attention term makes stored activations 104 GB per sequence, against 18 GB with selective recomputation.
+
+## Other contributions
+
+- **Temporary buffers.** Communication buckets for gradient all-reduces, workspace for matrix kernels and the fused
+  gradient of a large layer can each take gigabytes.
+- **Fragmentation.** Tensors of different lifetimes freed and allocated in different orders leave unusable gaps, so the
+  peak usable memory is below the device's capacity.
+- **Peak, not total.** Memory is limited by the peak during a step. For activations, the peak is at the start of the
+  backward pass, when every layer's activations are held.
+
+## Pitfalls
+
+- **Counting parameters, not state.** "The model is 14 GB in 16-bit" describes inference, not training, which needs
+  eight times as much for model state alone.
+- **Ignoring sequence length.** Activation memory is quadratic in $s$ unless attention matrices are recomputed or never
+  stored; doubling the context can more than double memory.
+- **Ignoring the vocabulary.** Large vocabularies make the logits and their gradient a large share of activation
+  memory.

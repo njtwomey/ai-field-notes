@@ -1,0 +1,223 @@
+---
+title: Neural network quantisation
+kind: technique
+summary: Quantisation stores weights and activations as $b$-bit integers $q$ with a real scale $s$ and integer zero-point $z$, so $x \approx s(q - z)$. Rounding adds error of variance $s^2/12$, and each extra bit halves $s$. Eight bits rarely costs accuracy; four bits needs per-group scales, GPTQ or AWQ.
+tags: [deep-learning, inference, memory, compression, worked-example]
+aliases:
+  [
+    model quantisation,
+    weight quantisation,
+    int8 inference,
+    uniform affine quantisation,
+    zero-point,
+    post-training quantisation,
+    PTQ,
+    quantisation-aware training,
+    QAT,
+    per-channel quantisation,
+    GPTQ,
+    AWQ,
+    LLM.int8(),
+  ]
+requires: [multilayer-perceptron]
+related: [quantisation, kv-cache]
+references: [jacob2018, nagel2021, frantar2023, lin2024, dettmers2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { QuantisationExplorer } from './QuantisationExplorer'
+
+<Definition>
+Quantisation maps each real-valued weight or activation $x$ to an integer $q$ with $b$ bits, using a real **scale**
+$s > 0$ and an integer **zero-point** $z$:
+
+$$
+q = \operatorname{clamp}\paren{\operatorname{round}(x / s) + z,\; 0,\; 2^b - 1}, \qquad \hat x = s\,(q - z).
+$$
+
+The quantised model stores $q$, $s$ and $z$ instead of $x$, and computes matrix products in integer arithmetic. The
+approximation $\hat x$ differs from $x$ by a rounding error inside the representable range and by a clipping error
+outside it.
+</Definition>
+
+## Problem
+
+A trained network stores its weights as 32-bit or 16-bit floating-point numbers. A model with $P$ parameters in 16-bit
+precision needs $2P$ bytes: 14 GB for $P = 7 \times 10^9$. During autoregressive decoding every weight is read from
+memory once per generated token, so the time per token is set mostly by the number of bytes read, not by arithmetic
+(see <NoteLink to="kv-cache">KV caching</NoteLink>). Integer arithmetic units are also smaller and use less energy than
+floating-point units of the same width <Cite id="nagel2021" />.
+
+Storing each weight in $b < 16$ bits cuts memory and memory traffic by a factor of $16 / b$. The same 7-billion
+parameter model needs 7 GB at 8 bits and 3.5 GB at 4 bits, before the small overhead of the scales. The question is how
+to choose the integer grid so that the network's outputs barely change.
+
+## Mechanism
+
+### Uniform affine quantisation
+
+Let the values to be quantised lie in a chosen **clipping range** $[\alpha, \beta]$. A $b$-bit unsigned integer takes
+$2^b$ values, $0, \dots, 2^b - 1$, so $2^b - 1$ equal steps span the range. The scale is the width of one step,
+
+$$
+s = \frac{\beta - \alpha}{2^b - 1}.
+$$
+
+The zero-point is the integer that represents the real number 0:
+
+$$
+z = \operatorname{round}\paren{-\alpha / s}.
+$$
+
+Dividing by $s$ converts $x$ to units of steps. Adding $z$ shifts the grid so that $\alpha$ maps near 0 and $\beta$
+near $2^b - 1$. Rounding picks the nearest grid point, and clamping maps values outside the range to the end points.
+Dequantisation inverts the affine map: $\hat x = s(q - z)$.
+
+The zero-point is an integer, not the real number $-\alpha/s$, so that $x = 0$ is represented exactly: $q = z$ gives
+$\hat x = 0$. Zero is the value of padding, of ReLU outputs below threshold, and of pruned weights, so an error there
+would bias every sum that contains it <Cite id="jacob2018" />.
+
+**Symmetric quantisation** fixes $z = 0$ and uses signed integers $-(2^{b-1} - 1), \dots, 2^{b-1} - 1$ with
+$s = c / (2^{b-1} - 1)$ for a range $[-c, c]$. Weights are roughly symmetric about zero, so symmetric quantisation
+wastes little range on them. Activations after a ReLU are non-negative, and an asymmetric range doubles their
+resolution.
+
+### Rounding error has variance $s^2 / 12$
+
+Take a value $x$ inside the clipping range. Rounding moves $x/s$ to the nearest integer, so the error
+$e = \hat x - x$ lies in $[-s/2, s/2]$. When the values are spread over many steps and the distribution is smooth at the
+scale of one step, the fractional part of $x/s$ is close to uniform, so $e$ is close to uniform on $[-s/2, s/2]$. Its
+mean is zero and its variance is
+
+$$
+\expect\brack{e^2} = \frac{1}{s} \int_{-s/2}^{s/2} e^2 \, de = \frac{1}{s} \cdot \frac{2}{3} \paren{\frac{s}{2}}^3 = \frac{s^2}{12}.
+$$
+
+For a fixed range, one more bit roughly halves $s$, so the error variance falls by a factor of 4. On a decibel scale
+that is $10 \log_{10} 4 \approx 6.02$ dB per bit, the same rule as for
+<NoteLink to="quantisation">quantisation of signals</NoteLink>.
+
+### Clipping trades range for resolution
+
+Values outside $[\alpha, \beta]$ are clamped to the end points and incur an error equal to their distance from the
+range. The total mean squared error for a symmetric range $[-c, c]$ is
+
+$$
+\operatorname{MSE}(c) = \underbrace{\frac{s(c)^2}{12} \pr\paren{\abs{x} \le c}}_{\text{rounding}} + \underbrace{\expect\brack{(\abs{x} - c)^2 \, \indicator\set{\abs{x} > c}}}_{\text{clipping}}, \qquad s(c) = \frac{c}{2^{b-1} - 1}.
+$$
+
+The rounding term grows as $c^2$ and the clipping term falls as $c$ grows, so there is an interior minimum. Setting $c$
+to the largest absolute value, the simplest choice, makes the clipping term zero but lets a single outlier widen every
+step. For two million standard Gaussian weights at 4 bits, the largest value is $5.35$ standard deviations and gives an
+MSE of $0.049$. The minimising range is $c = 2.45$ standard deviations and gives $0.013$, about a quarter. Range-setting
+methods therefore search over $c$, by grid search or golden-section search, for the minimum of the MSE on the tensor
+itself or on a calibration batch <Cite id="nagel2021" />.
+
+<QuantisationExplorer />
+
+### Integer matrix products
+
+A linear layer computes $y_i = \sum_k W_{ik} x_k$. Quantise the weights with scale $s_w$ and zero-point $z_w$, and the
+input with $s_x$ and $z_x$. Substituting $W_{ik} \approx s_w(q^w_{ik} - z_w)$ and $x_k \approx s_x(q^x_k - z_x)$ gives
+
+$$
+y_i \approx s_w s_x \sum_k \paren{q^w_{ik} - z_w}\paren{q^x_k - z_x}
+= s_w s_x \paren{\sum_k q^w_{ik} q^x_k - z_x \sum_k q^w_{ik} - z_w \sum_k q^x_k + K z_w z_x},
+$$
+
+where $K$ is the length of the sum. The first sum is an integer dot product, accumulated in 32 bits to avoid overflow.
+The second term depends only on the weights and is precomputed. The third costs one sum over the input per product.
+With symmetric weights ($z_w = 0$) the third and fourth terms vanish, which is why weights are usually quantised
+symmetrically <Cite id="jacob2018" />. The single multiplication by the real factor $s_w s_x$, often folded into the
+next layer's scale, is the only floating-point step.
+
+### Granularity: per tensor, per channel, per group
+
+One scale per tensor is cheapest but lets the output channel with the widest range set the step for all the others.
+**Per-channel** quantisation gives each output row $i$ of $\Wmat$ its own scale $s_{w,i}$. The factor $s_{w,i} s_x$ in
+the expansion above still multiplies whole sums, so the integer kernel is unchanged, and per-channel weight scales are
+the standard choice at 8 bits <Cite id="nagel2021" />. At 4 bits, weights are split into **groups** of 64 or 128
+consecutive inputs, each with its own scale. A 16-bit scale per group of 128 adds $16/128 = 0.125$ bits per weight.
+
+Activations cannot have per-input-channel scales, because a per-$k$ scale sits inside the sum over $k$ and cannot be
+factored out. This matters for large language models: beyond about 6.7 billion parameters, a few hidden dimensions carry
+activations up to about 20 times larger than the rest in almost every layer, and per-tensor activation quantisation
+then fails <Cite id="dettmers2022" />. LLM.int8() keeps those outlier dimensions in 16-bit arithmetic and quantises the
+other 99.9% of values to 8 bits.
+
+### Post-training quantisation
+
+Post-training quantisation (PTQ) quantises a trained model using at most a small calibration set of unlabelled inputs
+to set activation ranges. Simple rounding to nearest works well at 8 bits for most networks. At 4 bits and below, the
+errors of many weights add up in each output, and methods that choose the rounding to minimise the error of each
+layer's output, not of each weight, do much better <Cite id="nagel2021" />.
+
+- **GPTQ** quantises a linear layer's weights one input column at a time to minimise
+  $\norm{\Wmat \Xmat - \hat\Wmat \Xmat}_F^2$ on calibration inputs $\Xmat$. After a column is rounded, the remaining
+  unquantised columns are adjusted to cancel its error, using the inverse of the Hessian $\Hmat = 2 \Xmat \Xmat^\tr$ of
+  that squared error. GPTQ quantises a 175-billion-parameter model to 3 or 4 bits in about four GPU hours with a small
+  loss in perplexity <Cite id="frantar2023" />.
+- **AWQ** observes that about 1% of weight channels, those that multiply large activations, cause most of the output
+  error. It multiplies each such input channel of $\Wmat$ by a factor $\sigma > 1$ and divides the matching activation by
+  $\sigma$, which leaves the product unchanged. The group scale barely moves, so the relative rounding error of the
+  salient weights falls by about $\sigma$ <Cite id="lin2024" />. AWQ needs no backpropagation and no weight updates.
+
+### Quantisation-aware training
+
+Quantisation-aware training (QAT) inserts the quantise–dequantise operation $x \mapsto \hat x$ into the forward pass
+during training or fine-tuning, so that the network learns weights that survive rounding <Cite id="jacob2018" />. The
+rounding function has zero derivative almost everywhere. Training therefore uses the straight-through estimator: the
+backward pass treats $\partial \hat x / \partial x$ as 1 inside the clipping range and 0 outside it. The scales can be
+learned as parameters too. QAT recovers more accuracy than PTQ at 4 bits and below, at the cost of a training run and
+access to training data <Cite id="nagel2021" />.
+
+## Cost
+
+### Worked example
+
+Quantise $\xvec = (-1.2, -0.3, 0, 0.45, 2.1)$ to $b = 4$ unsigned bits with range $[\alpha, \beta] = [-1.2, 2.1]$.
+
+- Scale: $s = 3.3 / 15 = 0.22$.
+- Zero-point: $-\alpha / s = 5.45$, so $z = 5$.
+- Codes: $x / s = (-5.45, -1.36, 0, 2.05, 9.55)$ rounds to $(-5, -1, 0, 2, 10)$. Adding $z$ gives
+  $q = (0, 4, 5, 7, 15)$.
+- Reconstruction: $\hat x = 0.22 \, (q - 5) = (-1.10, -0.22, 0, 0.44, 2.20)$.
+
+The errors are $(0.10, 0.08, 0, -0.01, 0.10)$. Zero is exact, as designed. Rounding $z$ from $5.45$ to $5$ shifted the
+grid by $0.45$ steps, so the end points are no longer exactly representable. The largest possible rounding error is
+$s/2 = 0.11$, and the uniform model predicts an error variance of $s^2 / 12 = 0.0040$; the five errors have mean square
+$0.0053$.
+
+### Memory and speed
+
+| Format                       | Bits per weight | 7B model | Typical accuracy effect                     |
+| ---------------------------- | --------------- | -------- | ------------------------------------------- |
+| bf16                         | 16              | 14 GB    | reference                                   |
+| int8, per channel            | 8               | 7 GB     | negligible for most models                  |
+| int4, groups of 128 (+scale) | 4.125           | 3.6 GB   | small with GPTQ or AWQ, larger with rounding |
+
+Weight-only quantisation speeds up memory-bound decoding roughly in proportion to the bytes saved, because the weights
+are dequantised on the fly inside the matrix kernel. It does not speed up compute-bound prefill unless the activations
+are quantised too, so that the product runs on integer or 8-bit floating-point units.
+
+## Trade-offs
+
+- **Bits against accuracy.** Error variance falls by a factor of 4 per bit. Eight bits is usually free; four bits needs
+  finer granularity or error-aware rounding; below three bits most models lose noticeable accuracy without QAT.
+- **Granularity against overhead.** Smaller groups track local ranges better but store more scales and complicate the
+  kernel.
+- **PTQ against QAT.** PTQ needs minutes to hours and no labels. QAT needs a training pipeline and data but reaches
+  lower bit widths.
+- **Weights against activations.** Weight ranges are known in advance. Activation ranges depend on the input and have
+  outliers, so activation quantisation needs calibration data and often per-token scales or outlier handling.
+
+## Pitfalls
+
+- **Calibration data must match deployment.** Activation ranges set on unrepresentative inputs clip real inputs.
+- **Accumulators must be wide.** Each product of two signed 8-bit integers needs up to 15 bits, and a sum of 4096 of them
+  needs up to 27 bits; accumulating in 16 bits overflows.
+- **Batch normalisation must be folded first.** Folding the normalisation's scale into the weights after quantisation
+  changes the weight ranges and invalidates the scales <Cite id="jacob2018" />.
+- **Perplexity hides failures.** A quantised language model can keep its average perplexity while failing on long
+  reasoning chains or rare languages; evaluate the downstream task.

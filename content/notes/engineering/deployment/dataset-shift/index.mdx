@@ -1,0 +1,140 @@
+---
+title: Dataset shift
+kind: concept
+summary: Dataset shift is any difference between the joint distribution $p(x, y)$ of the training data and that of the data a model meets in use. Covariate shift changes $p(x)$ only, label shift changes $p(y)$ only, and concept shift changes the relation between $x$ and $y$.
+tags: [deployment, generalisation, probability, worked-example]
+aliases: [distribution shift, covariate shift, concept shift, concept drift, data drift, domain shift, train–test mismatch, importance weighting]
+requires: [bayes-theorem]
+related: [prior-shift-correction, importance-sampling]
+references: [quinonero2009, morenotorres2012, shimodaira2000, gama2014, lipton2018]
+status: draft
+updated: 2026-09-27
+---
+
+import { CovariateShift } from './CovariateShift'
+
+<Definition>
+Let a model be trained on examples drawn from a **source** distribution $p_s(x, y)$ over inputs $x$ and targets $y$, and
+used on examples from a **target** distribution $p_t(x, y)$. **Dataset shift** is the case $p_s(x, y) \ne p_t(x, y)$
+<Cite id="quinonero2009" />. Writing the joint distribution as $p(x)\,p(y \mid x)$ or as $p(y)\,p(x \mid y)$ gives three
+named cases:
+
+- **covariate shift**: $p_s(x) \ne p_t(x)$ and $p_s(y \mid x) = p_t(y \mid x)$;
+- **label shift**, or prior probability shift: $p_s(y) \ne p_t(y)$ and $p_s(x \mid y) = p_t(x \mid y)$;
+- **concept shift**: the relation between inputs and targets changes, $p_s(y \mid x) \ne p_t(y \mid x)$ with $p(x)$
+  unchanged, or $p_s(x \mid y) \ne p_t(x \mid y)$ with $p(y)$ unchanged.
+</Definition>
+
+## Why it matters
+
+Supervised learning minimises the average loss over training examples, which estimates the **source risk**
+$\expect_{p_s}\brack{\ell(f(x), y)}$. Held-out test sets drawn from the same data estimate the same quantity. A model
+is judged in use by the **target risk** $\expect_{p_t}\brack{\ell(f(x), y)}$. The two agree only if $p_s = p_t$. Every
+guarantee derived from a test set assumes that the test data come from the distribution the model will meet.
+
+Shift is common in deployed systems. Users, sensors, prices and policies change; a model trained on one hospital is used
+in another; a fraud model changes the behaviour of the fraudsters it catches. Shift that develops over time in a data
+stream is usually called **drift**, and is described by its speed: sudden, gradual, incremental or recurring
+<Cite id="gama2014" />.
+
+## The three kinds
+
+### Which factorisation to use
+
+The three definitions differ in which factor of the joint distribution stays fixed, and the natural factorisation
+follows the causal direction. In an $X \to Y$ problem the inputs cause the target, as when symptoms are recorded and an
+outcome follows; $p(y \mid x)$ is the stable mechanism, and $p(x)$ may change. In a $Y \to X$ problem the target
+causes the inputs, as when a disease produces symptoms or a spoken word produces a sound; $p(x \mid y)$ is stable and
+$p(y)$ may change. Moreno-Torres et al. define covariate shift only for $X \to Y$ problems and prior probability shift
+only for $Y \to X$ problems for this reason <Cite id="morenotorres2012" />.
+
+### Covariate shift
+
+Under covariate shift, $p(y \mid x)$ is unchanged, so the ideal prediction for each input is unchanged too. What changes
+is which inputs matter. The target risk can be rewritten as an expectation over the source distribution:
+
+$$
+\expect_{p_t}\brack{\ell(f(x), y)}
+= \int p_t(x) \, p(y \mid x) \, \ell(f(x), y) \, dx\, dy
+= \int p_s(x) \, p(y \mid x) \, \frac{p_t(x)}{p_s(x)} \, \ell(f(x), y) \, dx\, dy
+= \expect_{p_s}\brack{w(x) \, \ell(f(x), y)},
+$$
+
+with **importance weight** $w(x) = p_t(x) / p_s(x)$, defined where $p_s(x) > 0$. The second step uses the unchanged
+conditional. Minimising the weighted training loss $\frac1n \sum_i w(x_i)\,\ell(f(x_i), y_i)$ therefore minimises an
+unbiased estimate of the target risk <Cite id="shimodaira2000" />. This is
+<NoteLink to="importance-sampling">importance sampling</NoteLink> applied to the risk.
+
+Covariate shift harms a model only if the model is **misspecified**. If the model class contains the true regression
+function, the unweighted fit converges to it wherever $p_s(x) > 0$, and the prediction is right for any input
+distribution on that support. If the class is too simple, the best approximation depends on which inputs are weighted
+most, and the fit to the source is not the best fit to the target <Cite id="shimodaira2000" />.
+
+The weights cost variance. When the distributions differ strongly, a few training points get very large weights and
+the weighted estimate is noisy. Shimodaira proposed weights $w(x)^\lambda$ with $0 \le \lambda \le 1$, trading bias
+($\lambda = 0$) against variance ($\lambda = 1$) <Cite id="shimodaira2000" />. A common diagnostic is the effective
+sample size $\paren{\sum_i w_i}^2 / \sum_i w_i^2$.
+
+<CovariateShift />
+
+Covariate shift also has a limit that no weighting fixes: where $p_t(x) > 0$ but $p_s(x) = 0$, the training data say
+nothing, and $w$ is undefined.
+
+### Label shift
+
+Under label shift, $p(x \mid y)$ is unchanged and the class proportions change, for example a disease becoming more
+common during an epidemic. By <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink>, with class weights
+$w(y) = p_t(y)/p_s(y)$,
+
+$$
+p_t(y \mid x) = \frac{p(x \mid y)\,p_t(y)}{\sum_{y'} p(x \mid y')\,p_t(y')}
+= \frac{p_s(y \mid x)\, w(y)}{\sum_{y'} p_s(y' \mid x)\, w(y')},
+$$
+
+where the second form divides numerator and denominator by $p_s(x)$ and uses $p(x \mid y) p_s(y) / p_s(x) = p_s(y \mid x)$.
+A calibrated source classifier can therefore be corrected by reweighting its outputs and renormalising, without
+retraining. The target proportions $p_t(y)$ are usually unknown, but they can be estimated from unlabelled target data
+by inverting the classifier's confusion matrix, as in black-box shift estimation <Cite id="lipton2018" />. The
+<NoteLink to="prior-shift-correction">prior-shift correction</NoteLink> note covers the estimators.
+
+### Concept shift
+
+Concept shift changes the mapping itself: the same input now has a different correct output. A spam filter meets new
+kinds of spam; a credit model meets a new economic regime; the definition of a label changes. Unlabelled target data
+cannot reveal concept shift in an $X \to Y$ problem, because $p(x)$ may not change at all. Only new labels show it, and
+the remedy is to retrain or adapt on labelled data from the new regime.
+
+## Worked example
+
+A classifier is trained on data where 10% of cases are positive, $p_s(y = 1) = 0.1$, and is well calibrated there. It is
+deployed where 30% are positive, and the class-conditional input distributions are unchanged. The class weights are
+$w(1) = 0.3/0.1 = 3$ and $w(0) = 0.7/0.9 = 0.778$.
+
+For an input where the source classifier outputs $p_s(y = 1 \mid x) = 0.5$, the corrected probability is
+
+$$
+p_t(y = 1 \mid x) = \frac{0.5 \times 3}{0.5 \times 3 + 0.5 \times 0.778} = \frac{1.5}{1.889} = 0.794.
+$$
+
+A threshold of 0.5 on the uncorrected output would call this input a toss-up; after correction it is positive with
+probability 0.79. The ranking of inputs by score is unchanged, because the correction is monotone in the source
+probability, so ranking metrics such as AUC are unaffected by label shift while calibration and thresholded accuracy are
+not.
+
+## Detection and response
+
+- **Detect.** Compare recent inputs, and the model's predictions, with a reference sample from training using
+  two-sample tests.
+- **Diagnose.** Check whether the shift is in inputs, in label proportions or in the relation between them; the three
+  call for different remedies.
+- **Respond.** Reweight or recalibrate for covariate and label shift, and retrain on recent labelled data for concept
+  shift.
+
+## Pitfalls
+
+- **Assuming i.i.d. test sets predict deployment.** A random split of historical data estimates the source risk only.
+  A split by time, site or user group estimates performance under the shifts those splits contain.
+- **Estimating weights in high dimensions.** Density ratios of images or text are hard to estimate directly. A
+  classifier trained to distinguish source from target inputs gives the ratio through its odds, and fails when the two
+  are almost perfectly separable.
+- **Confusing the kinds.** Correcting for label shift when the real change is in $p(y \mid x)$ makes predictions worse.
