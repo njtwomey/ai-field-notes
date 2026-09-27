@@ -1,0 +1,141 @@
+---
+title: Neural forecasting models
+kind: overview
+summary: 'Neural forecasting models are deep networks fitted to many related time series at once. They run from recurrent likelihood and quantile models through convolutional, fully connected and attention networks to pretrained foundation models that forecast unseen series zero-shot.'
+tags: [time-series, forecasting, neural-forecasting]
+aliases:
+  [deep learning for time series forecasting, deep forecasting models, neural forecasters, global forecasting models]
+related:
+  [
+    probabilistic-forecasting,
+    crps-and-interval-scores,
+    time-series-cross-validation,
+    autoregressive-model,
+    kalman-filter,
+  ]
+references:
+  [
+    salinas2020,
+    wen2017,
+    rangapuram2018,
+    wang2019,
+    bai2018,
+    oreshkin2020,
+    challu2023,
+    lim2021,
+    zhou2021,
+    wu2021b,
+    nie2023,
+    zeng2023,
+    ansari2024,
+    das2024,
+    woo2024,
+    rasul2023,
+  ]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+  A **neural forecasting model** maps the observed history of a time series, together with covariates, to a forecast of
+  its next $H$ values using a neural network. The network's parameters are usually **global**: one set is fitted to a
+  collection of related series, rather than one set per series as in ARIMA or exponential smoothing. The output is a
+  point forecast, a set of quantiles, or the parameters of a predictive distribution for each future step.
+</Definition>
+
+## What the models share
+
+Every model in this family answers the same five design questions. The answers, more than the backbone, separate one
+model from the next.
+
+- **Global or local parameters.** A global model shares its weights across all series, so a pattern seen in many
+  series is learnt once and a series with little history borrows strength from the rest. Some models add a per-series
+  component: <NoteLink to="deep-state-space-models">deep state space models</NoteLink> and
+  <NoteLink to="deep-factor-models">deep factor models</NoteLink> keep a classical local model inside a global network.
+- **What is output.** A likelihood model outputs the parameters of a distribution and is trained by maximum
+  likelihood, as in <NoteLink to="deepar">DeepAR</NoteLink>. A quantile model outputs chosen quantiles and is trained on
+  the quantile (pinball) loss, as in <NoteLink to="mq-rnn">MQ-RNN</NoteLink>. A point model outputs one value per step
+  and is trained on squared or absolute error, as in <NoteLink to="n-beats">N-BEATS</NoteLink> and most long-horizon
+  transformers.
+- **How the horizon is produced.** A **recursive** model predicts one step, feeds the prediction back as an input, and
+  repeats $H$ times. A **direct multi-horizon** model outputs all $H$ steps from one pass. Recursive models give joint
+  sample paths but let errors compound over the horizon. Direct models avoid the feedback but give only marginal
+  forecasts per step.
+- **Which covariates are allowed.** Inputs fall into three kinds: static attributes of a series (a product category),
+  inputs known in advance for the whole horizon (a calendar, a planned promotion), and inputs observed only up to the
+  forecast origin (past sales of related items). Models differ in which kinds they accept and how they route them.
+- **How scale is handled.** Series in one collection can differ in level by orders of magnitude. Most models divide
+  each input window by a per-series scale (a mean, a mean absolute value, or a standard deviation) and multiply the
+  output back.
+
+## Backbones
+
+- **Recurrent networks.** An <NoteLink to="lstm">LSTM</NoteLink> reads the history one step at a time and carries a
+  hidden state forward. DeepAR, DeepState, Deep Factors and MQ-RNN use one.
+- **Dilated causal convolutions.** A stack of convolutions whose dilation doubles per layer sees an input window that
+  grows exponentially with depth, and it trains in parallel over time. See
+  <NoteLink to="temporal-convolutional-networks">temporal convolutional networks</NoteLink>.
+- **Fully connected stacks.** N-BEATS and <NoteLink to="n-hits">N-HiTS</NoteLink> map a fixed look-back window to the
+  horizon with residual stacks of multilayer perceptrons that emit coefficients of basis functions.
+- **Attention.** The <NoteLink to="temporal-fusion-transformer">temporal fusion transformer</NoteLink> combines an LSTM
+  with interpretable attention. <NoteLink to="transformer-forecasters">Informer, Autoformer and PatchTST</NoteLink>
+  adapt the <NoteLink to="transformer">transformer</NoteLink> to long look-back windows and long horizons.
+- **Linear maps.** A single linear layer from the look-back window to the horizon is the baseline that
+  <NoteLink to="dlinear">DLinear</NoteLink> showed to beat several long-horizon transformers.
+- **Pretrained foundation models.** Transformers trained once on large, varied corpora of series and applied to new
+  series without retraining. See <NoteLink to="forecasting-foundation-models">forecasting foundation models</NoteLink>.
+
+## Lineage
+
+The table lists each model by the year of the publication cited for it.
+
+| Year | Model                          | Backbone                              | Output                     | What is new                                                                                         |
+| ---- | ------------------------------ | ------------------------------------- | -------------------------- | --------------------------------------------------------------------------------------------------- |
+| 2017 | MQ-RNN                         | LSTM encoder, MLP decoders            | Quantiles, all horizons    | Direct multi-horizon quantile outputs; forking sequences train on every forecast origin in one pass |
+| 2018 | Deep state space models        | LSTM emitting state space parameters  | Gaussian via Kalman filter | Per-series linear-Gaussian model with parameters produced by a shared network                       |
+| 2018 | Temporal convolutional network | Dilated causal convolutions, residual | Per-step output            | A generic convolutional sequence model that matched or beat LSTMs on standard sequence tasks        |
+| 2019 | Deep factor models             | Global RNN factors plus local model   | Likelihood                 | Global deep factors mixed per series, plus a classical local random effect for uncertainty          |
+| 2020 | DeepAR                         | LSTM, autoregressive                  | Likelihood, sample paths   | One global recurrent likelihood model for thousands of series, with scale handling                  |
+| 2020 | N-BEATS                        | Residual MLP stacks                   | Point                      | Backcast and forecast branches; polynomial and Fourier bases for an interpretable decomposition     |
+| 2021 | Temporal fusion transformer    | LSTM encoder–decoder plus attention   | Quantiles, all horizons    | Gated residual networks, variable selection, static context vectors, interpretable attention        |
+| 2021 | Informer                       | Sparse-attention transformer          | Point                      | ProbSparse attention in $O(L \log L)$, distilling layers, one-pass generative decoder               |
+| 2021 | Autoformer                     | Transformer with decomposition blocks | Point                      | Moving-average decomposition inside the network; autocorrelation in place of attention              |
+| 2023 | N-HiTS                         | Residual MLP stacks                   | Point                      | Multi-rate input pooling and interpolation of few coefficients per block                            |
+| 2023 | DLinear                        | One linear layer per component        | Point                      | Shows a linear map beats the long-horizon transformers of 2021–2022 on their own benchmarks         |
+| 2023 | PatchTST                       | Transformer encoder on patches        | Point                      | Patches of the series as tokens; channel independence                                               |
+| 2023 | Lag-Llama                      | Decoder-only transformer              | Student-$t$, sample paths  | Lagged values as token features; pretrained for zero-shot probabilistic forecasting                 |
+| 2024 | Chronos                        | T5 language model on quantised values | Categorical, sample paths  | Series scaled and quantised into a 4096-token vocabulary; cross-entropy training                    |
+| 2024 | TimesFM                        | Decoder-only transformer on patches   | Point                      | Output patches longer than input patches; pretrained on about 100 billion time points               |
+| 2024 | Moirai                         | Masked encoder transformer            | Mixture distribution       | Several patch sizes by frequency; any number of variates in one sequence                            |
+
+DeepAR's cited version is the 2020 journal paper. Its preprint appeared in 2017, before MQ-RNN, which compares
+against it <Cite id="salinas2020" /> <Cite id="wen2017" />.
+
+## Data flow
+
+A training example is a window cut from one series at a **forecast origin** $t$. The window holds the look-back values
+$y_{t-L+1:t}$, the covariates over the look-back and the horizon, and the targets $y_{t+1:t+H}$. The model scales the
+window, maps it to outputs for the $H$ future steps, rescales them and scores them against the targets. Windows from
+all series and many origins are mixed in each minibatch. At forecast time the same pipeline runs once from the last
+observed origin.
+
+Evaluation must respect time order: models are fitted on data before a cutoff and scored on data after it, often at
+several rolling origins. See <NoteLink to="time-series-cross-validation">time-series cross-validation</NoteLink>.
+Probabilistic outputs are scored with proper scoring rules such as the
+
+<NoteLink to="crps-and-interval-scores">CRPS and the quantile loss</NoteLink>.
+
+## Where they stand
+
+- N-BEATS, a network with no time-series-specific components in its generic form, beat the statistical benchmarks
+  and the hybrid winner of the M4 competition on the M4 data. Its authors describe it as the first pure deep-learning
+  model to do so <Cite id="oreshkin2020" />.
+- On the long-horizon benchmarks (electricity transformer temperature, electricity load, traffic, weather, exchange
+  rates, influenza), a linear map from the look-back window outperformed the transformers of 2021–2022
+  <Cite id="zeng2023" />. PatchTST and N-HiTS then beat the linear baseline on the larger of these datasets
+  <Cite id="nie2023" /> <Cite id="challu2023" />.
+- Pretrained foundation models forecast unseen series without training, with accuracy close to supervised models
+  fitted to each dataset <Cite id="das2024" /> <Cite id="ansari2024" />.
+- For a single short series, classical local models such as the
+  <NoteLink to="autoregressive-model">autoregressive model</NoteLink> or exponential smoothing remain strong baselines.
+  Every neural model should be compared with them and with a seasonal naive forecast.

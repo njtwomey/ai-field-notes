@@ -1,0 +1,142 @@
+---
+title: N-HiTS
+kind: concept
+summary: 'N-HiTS is N-BEATS adapted to long horizons. Each block max-pools its input by a factor $k_\ell$ and outputs only $\lceil r_\ell H \rceil$ forecast coefficients, which are interpolated to the $H$ steps. Early blocks pool hard and output few points, so each block forecasts one frequency band.'
+tags: [time-series, forecasting, neural-forecasting, long-horizon-forecasting, worked-example]
+aliases:
+  [
+    NHITS,
+    neural hierarchical interpolation for time series,
+    multi-rate signal sampling,
+    hierarchical interpolation,
+    expressiveness ratio,
+  ]
+requires: [n-beats]
+partOf: [neural-forecasting-models]
+related: [decimation-and-interpolation, multiresolution-analysis, transformer-forecasters, dlinear]
+references: [challu2023, oreshkin2020]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**N-HiTS** (neural hierarchical interpolation for time series) forecasts the next $H$ values of a series from its last
+$L$ values with a sequence of fully connected blocks joined by backcast and forecast residuals, as in N-BEATS
+<Cite id="challu2023" />. Block $\ell$ adds two operations:
+
+- **multi-rate sampling:** its input is max-pooled with kernel size and stride $k_\ell$ before the network reads it;
+- **hierarchical interpolation:** it outputs $\lceil r_\ell H \rceil$ forecast coefficients, for an **expressiveness
+  ratio** $r_\ell \le 1$, and interpolates them to the $H$ forecast steps.
+
+Blocks near the input use large $k_\ell$ and small $r_\ell$. They see a coarse version of the history and emit a smooth
+forecast. Later blocks see finer detail and add finer corrections.
+
+</Definition>
+
+## Problem
+
+N-BEATS maps a look-back window of length $L$ to a forecast of length $H$ with blocks whose output layer has $H$ units
+
+<Cite id="oreshkin2020" />. Long-horizon benchmarks ask for $H$ up to 720 steps with $L$ several times larger. Two
+problems follow.
+
+- **Cost.** Every block's first layer has $L$ inputs and its output layer $H$ outputs. Parameters and computation grow
+  with both.
+- **Volatility.** A block can set each of the $H$ forecast values independently. Nothing ties neighbouring steps
+  together, and the forecast can be jagged. Most of that freedom is unnecessary: the component of a series that varies
+  over weeks is described by a handful of numbers, not by $H$ hourly values.
+
+## Mechanism
+
+Write $\yvec_\ell$ for the input to block $\ell$, with $\yvec_1$ the look-back window $y_{t-L+1:t}$. Block $\ell$
+computes
+
+$$
+\yvec^{(p)}_\ell = \operatorname{MaxPool}(\yvec_\ell, k_\ell), \qquad
+\hvec_\ell = \operatorname{MLP}_\ell(\yvec^{(p)}_\ell), \qquad
+\thetavec^f_\ell = \Wmat^f_\ell \hvec_\ell, \qquad \thetavec^b_\ell = \Wmat^b_\ell \hvec_\ell.
+$$
+
+$\thetavec^f_\ell$ holds $\lceil r_\ell H \rceil$ values placed at evenly spaced knots across the horizon. The partial
+forecast at each step $\tau = t+1, \dots, t+H$ is read off by linear interpolation between the two nearest knots,
+$\hat y_{\tau,\ell} = g(\tau, \thetavec^f_\ell)$. The backcast $\tilde\yvec_\ell$ is built the same way from
+$\thetavec^b_\ell$ over the look-back window. The blocks are joined as in N-BEATS:
+
+$$
+\yvec_{\ell+1} = \yvec_\ell - \tilde\yvec_\ell, \qquad \hat\yvec_{t+1:t+H} = \sum_\ell \hat\yvec_{t+1:t+H,\ell}.
+$$
+
+Each block removes from the window what it has explained, and the forecast is the sum of every block's partial
+forecast.
+
+**Multi-rate sampling.** Max pooling with kernel $k_\ell$ replaces each run of $k_\ell$ inputs by its maximum. The block
+then reads a window of $\lceil L / k_\ell \rceil$ values: a coarser view of the same $L$ steps. The receptive field is
+unchanged, but the first layer is $k_\ell$ times narrower, and fast fluctuations are suppressed so the block attends to
+slow ones. The paper found max pooling more accurate than average pooling.
+
+**Hierarchical interpolation.** Linear interpolation between knots is a basis expansion. Let $\phi_j$ be the hat
+function that equals $1$ at knot $j$, falls linearly to $0$ at the neighbouring knots, and is $0$ elsewhere. The
+interpolated forecast is
+
+$$
+\hat y_{\tau,\ell} = \sum_{j} \theta^f_{\ell,j}\, \phi_j(\tau).
+$$
+
+N-HiTS is therefore N-BEATS with a fixed piecewise-linear basis of $\lceil r_\ell H \rceil$ functions in block
+$\ell$.
+
+## Why each block forecasts one frequency band
+
+Knots in block $\ell$ are about $\Delta_\ell = 1 / r_\ell$ steps apart. A piecewise-linear function through knots
+$\Delta_\ell$ apart can rise and fall at most once per pair of knots, so it cannot represent a cycle shorter than
+$2\Delta_\ell$ steps. A sinusoid of period below $2\Delta_\ell$ sampled at the knots is aliased to a slower one, the
+same limit that sampling at interval $\Delta_\ell$ imposes on any signal. Block $\ell$ can therefore only output
+components of period at least about $2 / r_\ell$ steps.
+
+The pooling kernel imposes the matching limit on the input: after pooling by $k_\ell$ the block sees one value per
+$k_\ell$ steps. Choosing $k_\ell$ and $r_\ell$ together makes the first block model the slowest band, such as weekly
+behaviour in hourly data, and pass the rest on through its backcast residual. The next block models a faster band in
+what remains, and the last block, with $r = 1$ and $k = 1$, handles detail at the original resolution. The forecast is
+assembled from coarse to fine, like a multiresolution decomposition.
+
+The paper proves that this construction loses no generality for smooth targets. If the forecast, viewed as a function
+on a dense horizon, has a smooth projection onto a multiresolution family of functions (piecewise constants, piecewise
+linear functions or splines), a finite set of coefficients predicted from the look-back window approximates it to any
+accuracy <Cite id="challu2023" />.
+
+## Worked example
+
+Take hourly data, horizon $H = 720$ (30 days) and look-back $L = 5H = 3600$, with three blocks. Use pooling kernels
+$(k_1, k_2, k_3) = (16, 8, 1)$ and inverse expressiveness ratios $(1/r_1, 1/r_2, 1/r_3) = (168, 24, 1)$, one of the
+configurations in the paper's search.
+
+| Block | Pooled input width | Forecast coefficients       | Knot spacing        |
+| ----- | ------------------ | --------------------------- | ------------------- |
+| 1     | $3600 / 16 = 225$  | $\lceil 720/168 \rceil = 5$ | 168 hours, one week |
+| 2     | $3600 / 8 = 450$   | $720 / 24 = 30$             | 24 hours, one day   |
+| 3     | $3600$             | $720$                       | 1 hour              |
+
+The three blocks output $5 + 30 + 720 = 755$ numbers. Three N-BEATS blocks with the same horizon output
+$3 \times 720 = 2160$. With first hidden layers of 512 units, the first block's input layer has $225 \times 512 =
+115{,}200$ weights in place of $3600 \times 512 = 1{,}843{,}200$. Block 1 can express only variation slower than about
+two weeks, and block 2 only variation slower than about two days.
+
+## Configuration and results
+
+The paper's models used three stacks of one block each, two hidden layers of 512 units per block, $L = 5H$, and linear
+interpolation. Linear interpolation beat nearest-neighbour interpolation and, averaged over datasets, cubic
+interpolation. Ordering the blocks from coarse to fine mattered: reversing the schedule of expressiveness ratios made
+forecasts less accurate <Cite id="challu2023" />.
+
+On six long-horizon datasets (electricity transformer temperature, exchange rates, electricity, traffic, weather and
+influenza-like illness), N-HiTS reduced the error of the best transformer baseline by 14% in MAE and 16% in MSE on
+average. The gains grew with the horizon. Training on one dataset (ETTm2) was 45 times faster than Autoformer's. Against
+N-BEATS it was 1.26 times faster with 54% of the parameters.
+
+## Trade-offs
+
+- The pooling kernels and expressiveness ratios are hyperparameters. They work best when matched to the data's known
+  cycles, such as daily and weekly periods.
+- Coarse blocks make the forecast smoother and cheaper but cannot express sharp events such as a single-hour spike.
+  Only the finest block can.
+- Like N-BEATS, the paper's N-HiTS is univariate, with weights shared across series. It reads no covariates.

@@ -1,0 +1,143 @@
+---
+title: DLinear
+kind: concept
+summary: 'DLinear splits the look-back window into a moving-average trend and a remainder and maps each to the $H$-step forecast with one linear layer. This single linear map beat the long-horizon transformers of 2021–2022 on their own benchmarks, often by 20% to 50% in MSE.'
+tags: [time-series, forecasting, neural-forecasting, long-horizon-forecasting, baselines, worked-example]
+aliases:
+  [
+    LTSF-Linear,
+    NLinear,
+    linear forecasting baseline,
+    are transformers effective for time series forecasting,
+    direct linear forecaster,
+  ]
+requires: [linear-regression]
+partOf: [neural-forecasting-models]
+related:
+  [transformer-forecasters, n-hits, autoregressive-model, time-series-decomposition, time-series-cross-validation]
+references: [zeng2023, zhou2021, wu2021b, nie2023]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**LTSF-Linear** is a family of forecasters that map a look-back window $\xvec \in \reals^{L}$ of one variable to its
+next $H$ values with a single linear layer, $\hat\yvec = \Wmat\xvec$ with $\Wmat \in \reals^{H \times L}$
+<Cite id="zeng2023" />. Two variants preprocess the window first.
+
+- **DLinear** splits $\xvec$ into a trend $\xvec_t$, a moving average of $\xvec$, and a remainder
+  $\xvec_s = \xvec - \xvec_t$, and forecasts $\hat\yvec = \Wmat_t\xvec_t + \Wmat_s\xvec_s$.
+- **NLinear** subtracts the last value $x_L$ from the window, applies a linear layer and adds $x_L$ back:
+  $\hat\yvec = \Wmat(\xvec - x_L\ones) + x_L\ones$.
+
+The same weights are used for every variable of a multivariate series.
+
+</Definition>
+
+## The question
+
+Between 2019 and 2022, a series of transformer models for long-horizon forecasting (LogTrans, Informer, Autoformer,
+Pyraformer, FEDformer) each reported large gains over its predecessors on the same benchmarks: electricity transformer
+temperature (ETT), electricity load, traffic occupancy, weather, exchange rates and influenza-like illness, with
+horizons up to 720 steps <Cite id="zhou2021" /> <Cite id="wu2021b" />.
+
+Zeng et al. noticed that the non-transformer baselines in those comparisons forecast **recursively**: they predict one
+step, feed it back, and repeat, so errors accumulate over hundreds of steps. The transformers forecast **directly**,
+outputting all $H$ steps at once. The gains could therefore come from the direct strategy rather than from attention.
+The test is to compare the transformers against the simplest possible direct forecaster, a linear map from the window
+to the horizon <Cite id="zeng2023" />.
+
+A second argument concerns order. Self-attention without positional information is permutation-equivariant:
+permuting the input tokens permutes the outputs in the same way, so the layer itself has no notion of order.
+Positional and time-stamp embeddings restore some of it. A forecaster's most important input is the order of the
+values.
+
+## Why a linear map is a strong model class
+
+A linear direct forecaster contains the classical forecasts that long-horizon data mostly need.
+
+**Linear autoregressions.** Let $y_t$ follow an autoregression of order $p$,
+$y_t = \sum_{i=1}^{p} \phi_i y_{t-i} + \varepsilon_t$ with zero-mean noise. Stack the last $p$ values into
+$\svec_t = (y_t, y_{t-1}, \dots, y_{t-p+1})^\top$. Then $\svec_{t+1} = \Amat\svec_t + \varepsilon_{t+1}\evec_1$, where
+$\Amat$ is the companion matrix with first row $(\phi_1, \dots, \phi_p)$ and ones on the subdiagonal. Taking
+expectations given the past and iterating $h$ times,
+
+$$
+\expect[y_{t+h} \mid y_{1:t}] = \evec_1^\top \Amat^h \svec_t,
+$$
+
+because every future noise term has mean zero. The minimum mean squared error forecast at every horizon is a linear
+function of the last $p$ values. A matrix $\Wmat$ with $L \ge p$ whose row $h$ is $\evec_1^\top\Amat^h$, padded with
+zeros, gives all $H$ optimal forecasts at once. See <NoteLink to="autoregressive-model">autoregressive model</NoteLink>.
+
+**Seasonal naive and trend extrapolation.** The seasonal naive forecast $\hat y_{t+h} = y_{t+h-m}$ for period $m \le L$
+is a $\Wmat$ with a single $1$ in each row. Fitting a straight line to the window and extending it is also linear in
+$\xvec$: least-squares coefficients are linear in the data, and so is their extrapolation.
+
+**DLinear is still one linear map.** A moving average with edge padding is a linear operator: $\xvec_t = \Mmat\xvec$
+for a fixed $L \times L$ matrix $\Mmat$. Then
+
+$$
+\hat\yvec = \Wmat_t\Mmat\xvec + \Wmat_s(\Imat - \Mmat)\xvec = \big(\Wmat_t\Mmat + \Wmat_s(\Imat - \Mmat)\big)\xvec.
+$$
+
+DLinear can represent no forecast that the plain linear layer cannot. The decomposition changes how the weights are
+parameterised and learnt, which helps when the data have a clear trend.
+
+**NLinear follows level shifts exactly.** Add a constant $c$ to every value of the window. NLinear's output becomes
+$\Wmat(\xvec + c\ones - (x_L + c)\ones) + (x_L + c)\ones = \hat\yvec + c\ones$. The forecast moves
+with the level, whatever $\Wmat$ is. This helps when the test period's level differs from anything seen in training, as
+in exchange rates.
+
+## Findings
+
+<Cite id="zeng2023" /> reports the following on nine benchmark datasets.
+
+- **Accuracy.** LTSF-Linear outperformed the transformer models in every multivariate setting, often by 20% to 50% in
+  MSE against FEDformer, the strongest of them. The linear models do not model any interaction between variables.
+- **A naive forecast beat them on exchange rates.** Repeating the last value outperformed all the transformers on the
+  exchange-rate data by about 45%. The transformers extrapolated spurious trends fitted to noise.
+- **Longer windows did not help the transformers.** As the look-back window grew from 24 to 720 steps, the
+  transformers' error stayed flat or rose. The linear models' error fell steadily.
+- **Order barely mattered to them.** Shuffling the input window left Informer's error on exchange rates almost
+  unchanged, while the linear model's error rose by 27% on average. On ETTh1, where periodicity is strong, shuffling
+  did hurt Autoformer and FEDformer, which build decomposition or frequency structure into their layers.
+- **Removing parts of Informer improved it.** Replacing attention with linear layers, then dropping the remaining
+  modules, then reducing the model to one linear layer lowered the error at each step. On exchange rates at horizon 96,
+  MSE fell from 0.847 for Informer to 0.084 for the linear layer.
+
+The DLinear moving-average kernel has width 25, the same as Autoformer's decomposition. The linear models used a
+look-back of $L = 336$; the transformers used their default $L = 96$, at which they performed best.
+
+## Worked example
+
+With $L = 336$ and $H = 720$, the plain linear layer has $HL = 720 \times 336 = 241{,}920$ weights and DLinear has
+$2HL = 483{,}840$, before biases. Both are shared across all variables.
+
+For an AR(1) series $y_t = 0.9\,y_{t-1} + \varepsilon_t$, the companion matrix is the scalar $0.9$, and the optimal
+forecasts from $y_t = 10$ are $0.9 \times 10 = 9$, $0.9^2 \times 10 = 8.1$ and $0.9^3 \times 10 = 7.29$. The optimal
+$\Wmat$ is zero except in its last column, which holds $0.9, 0.81, 0.729, \dots$.
+
+For NLinear with $\Wmat$ fixed, the windows $(0, 2, 4)$ and $(100, 102, 104)$ differ by a constant $100$. After
+subtracting the last value, both become $(-4, -2, 0)$. The linear layer produces the same output for both, and adding
+back $4$ or $104$ makes their forecasts differ by exactly $100$ at every horizon.
+
+## What the result says
+
+- **The benchmarks reward trend and periodicity.** Long-horizon accuracy on these datasets depends mostly on getting
+  the level, trend and dominant cycles right. A linear map captures these with few parameters. Models with many more
+  parameters overfit the noise in the look-back window.
+- **Baselines must use the same strategy.** Comparing a direct model with recursive baselines confounds the
+  architecture with the multi-step strategy. Every new model should be compared with a direct linear model, a seasonal
+  naive forecast and, for short series, classical local models, under the same look-back window.
+- **It is not a proof that attention is useless.** PatchTST, which uses patches of the series as tokens and treats each
+  variable separately, later outperformed DLinear, most clearly on the larger weather, traffic and electricity datasets
+  <Cite id="nie2023" />. See <NoteLink to="transformer-forecasters">transformer forecasters</NoteLink>.
+
+## Pitfalls
+
+- A linear map cannot represent interactions, such as a promotion whose effect depends on the season, or thresholds.
+- The weights are shared across variables and no variable sees another. Cross-series dependence is ignored.
+- The results hold on a small set of public benchmarks, several of which are highly periodic. Conclusions about
+  architectures should be checked with rolling-origin evaluation on the data at hand; see
+  <NoteLink to="time-series-cross-validation">time-series cross-validation</NoteLink>.

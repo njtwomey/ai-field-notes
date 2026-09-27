@@ -1,13 +1,5 @@
 import { useMemo } from 'react'
-import {
-  Interactive,
-  ParamSlider,
-  Readout,
-  XYChart,
-  formatNumber,
-  useParam,
-  type XYSeries,
-} from '@/components/viz'
+import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, type XYSeries } from '@/components/viz'
 import { rng } from '@/lib/math'
 
 /** Forecast horizon H and look-back length L = 3H, in time steps. */
@@ -22,7 +14,14 @@ const tOf = (n: number) => n / H
 /** Noise-free signal: a gently curved trend plus a seasonal cycle of period H with three harmonics. */
 const trueSignal = (n: number) => {
   const t = tOf(n)
-  return 20 + 3 * t + 1.2 * t * t + 4 * Math.sin(2 * Math.PI * t) + 1.5 * Math.cos(4 * Math.PI * t) + 0.8 * Math.sin(6 * Math.PI * t)
+  return (
+    20 +
+    3 * t +
+    1.2 * t * t +
+    4 * Math.sin(2 * Math.PI * t) +
+    1.5 * Math.cos(4 * Math.PI * t) +
+    0.8 * Math.sin(6 * Math.PI * t)
+  )
 }
 const TRUTH = STEPS.map(trueSignal)
 
@@ -30,7 +29,10 @@ const TRUTH = STEPS.map(trueSignal)
 const trendBasis = (p: number) => (n: number) => Array.from({ length: p + 1 }, (_, j) => tOf(n) ** j)
 /** Fourier seasonality basis [cos 2πit, sin 2πit], i = 1..K. The constant column is left to the trend stack. */
 const seasonBasis = (K: number) => (n: number) =>
-  Array.from({ length: K }, (_, j) => [Math.cos(2 * Math.PI * (j + 1) * tOf(n)), Math.sin(2 * Math.PI * (j + 1) * tOf(n))]).flat()
+  Array.from({ length: K }, (_, j) => [
+    Math.cos(2 * Math.PI * (j + 1) * tOf(n)),
+    Math.sin(2 * Math.PI * (j + 1) * tOf(n)),
+  ]).flat()
 
 /** Least squares by the normal equations and Gaussian elimination with partial pivoting; bases here are small. */
 function lstsq(rows: number[][], y: number[]): number[] {

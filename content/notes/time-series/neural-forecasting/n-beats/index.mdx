@@ -1,0 +1,165 @@
+---
+title: N-BEATS
+kind: concept
+summary: 'N-BEATS forecasts $H$ steps from a look-back window with stacks of MLP blocks. Each block emits basis coefficients for a backcast, subtracted from its input, and a partial forecast, added to the output. Polynomial and Fourier bases give a trend and a seasonal component.'
+tags: [time-series, forecasting, neural-forecasting, interpretability, worked-example]
+aliases: [neural basis expansion analysis, N-BEATS-G, N-BEATS-I, doubly residual stacking, backcast and forecast]
+requires: [multilayer-perceptron, residual-network]
+partOf: [neural-forecasting-models]
+related: [n-hits, time-series-decomposition, fourier-series, holt-winters, scaled-errors-and-mase]
+references: [oreshkin2020, he2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { BasisFit } from './BasisFit'
+
+<Definition>
+**N-BEATS** (neural basis expansion analysis for time series) maps a look-back window $\xvec \in \reals^{L}$ of one
+series to a forecast $\hat\yvec \in \reals^{H}$ of its next $H$ values <Cite id="oreshkin2020" />. It is a sequence of
+blocks. Block $\ell$ reads its input $\xvec_\ell$, computes expansion coefficients $\thetavec^b_\ell$ and
+$\thetavec^f_\ell$ with a fully connected network, and turns them into a **backcast** $\hat\xvec_\ell$ and a **partial
+forecast** $\hat\yvec_\ell$ through basis layers. Blocks are joined by **doubly residual stacking**:
+
+$$
+\xvec_1 = \xvec, \qquad \xvec_{\ell+1} = \xvec_\ell - \hat\xvec_\ell, \qquad \hat\yvec = \sum_\ell \hat\yvec_\ell.
+$$
+
+</Definition>
+
+## Motivation
+
+In the 2018 M4 competition, the most accurate entry was a hybrid of an LSTM network and Holt-Winters exponential
+smoothing. The competition's organisers concluded that hybrids and combinations were the way forward. N-BEATS was built
+to test whether a network with no time-series-specific components could do better, and whether constraining its
+outputs could make its forecasts interpretable <Cite id="oreshkin2020" />. It forecasts one univariate series at a
+time, from its own past values only, with weights shared across all series of a dataset.
+
+## The block
+
+Block $\ell$ has two parts.
+
+**Coefficient network.** Four fully connected layers with ReLU activations, followed by two linear heads:
+
+$$
+\hvec_{\ell} = \operatorname{FC}_{\ell,4}\big(\operatorname{FC}_{\ell,3}(\operatorname{FC}_{\ell,2}(
+\operatorname{FC}_{\ell,1}(\xvec_\ell)))\big), \qquad
+\thetavec^b_\ell = \Wmat^b_\ell \hvec_\ell, \qquad \thetavec^f_\ell = \Wmat^f_\ell \hvec_\ell.
+$$
+
+**Basis layers.** Each coefficient vector weights a set of basis vectors:
+
+$$
+\hat\yvec_\ell = \sum_{i} \theta^f_{\ell,i}\, \vvec^f_i, \qquad \hat\xvec_\ell = \sum_i \theta^b_{\ell,i}\, \vvec^b_i.
+$$
+
+The forecast basis vectors $\vvec^f_i \in \reals^H$ are waveforms over the horizon, and the backcast basis vectors
+$\vvec^b_i \in \reals^L$ are waveforms over the look-back window. The basis is either learnt or fixed.
+
+## Doubly residual stacking
+
+A standard residual network adds each layer's input to its output. N-BEATS has two residual branches.
+
+- **Backcast branch.** Each block subtracts its backcast from its input and passes the remainder on. Unrolling the
+  recursion gives $\xvec_{\ell+1} = \xvec - \sum_{j \le \ell} \hat\xvec_j$. Block $\ell + 1$ sees only the part of the
+  window that earlier blocks have not explained. The backcast is not a forecast target. Its job is to remove what the
+  block has already accounted for.
+- **Forecast branch.** Each block's partial forecast is added to the total, $\hat\yvec = \sum_\ell \hat\yvec_\ell$.
+  Blocks are grouped into stacks, and the partial forecasts can be summed per stack.
+
+Both branches are sums, so gradients reach every block directly, which lets the network be very deep. The generic
+configuration has 30 stacks of one block each.
+
+## Generic and interpretable bases
+
+**Generic.** The basis layers are learnt linear maps, $\hat\yvec_\ell = \Vmat^f_\ell\thetavec^f_\ell + \bvec^f_\ell$
+with $\Vmat^f_\ell \in \reals^{H \times \dim\thetavec^f_\ell}$. Its columns are waveforms over the horizon, but nothing
+constrains their shape, and the learnt ones show no structure. This is **N-BEATS-G**.
+
+**Interpretable.** Fixed bases force stacks to produce the components of a classical decomposition. This is
+**N-BEATS-I**. Time over the horizon is $\tvec = (0, 1, \dots, H-1)/H$, which runs from $0$ to $(H-1)/H$.
+
+- **Trend stack.** The basis is a polynomial of small degree $p$:
+
+  $$
+  \hat\yvec^{\,\mathrm{tr}}_\ell = \Tmat\,\thetavec^f_\ell, \qquad \Tmat = [\ones, \tvec, \tvec^2, \dots, \tvec^p],
+  $$
+
+  where powers are elementwise. With $p$ equal to 2 or 3 the output varies slowly across the horizon, as a trend should.
+
+- **Seasonality stack.** The basis is a truncated Fourier series:
+
+  $$
+  \hat y^{\,\mathrm{seas}}_{\ell}(t) = \sum_{i=0}^{\lfloor H/2 \rfloor - 1} \theta^f_{\ell,i} \cos(2\pi i t) +
+  \theta^f_{\ell,i+\lfloor H/2 \rfloor} \sin(2\pi i t).
+  $$
+
+  Harmonic $i$ completes $i$ cycles over the horizon. The backcast uses the same functions over the look-back window.
+
+The interpretable model has a trend stack followed by a seasonality stack, three blocks each. Within a stack, all blocks
+share their weights as well as their basis.
+
+**Why the stack outputs are a trend and a seasonal component.** Every block in the trend stack outputs a vector in the
+column space of $\Tmat$. A sum of polynomials of degree at most $p$ is a polynomial of degree at most $p$, so the trend
+stack's total output $\sum_{\ell \in \mathrm{trend}} \Tmat\thetavec^f_\ell = \Tmat \sum_\ell \thetavec^f_\ell$ is
+again a single polynomial of degree at most $p$ in $t$. Likewise, every seasonal block's output is a combination of
+$\cos(2\pi i t)$ and $\sin(2\pi i t)$, and so is their sum. Each such function has period $1/i$ in $t$, which divides
+$1$, so the seasonal stack's output is a periodic function whose period divides the window length. The forecast is
+therefore exactly
+
+$$
+\hat\yvec = \underbrace{\Tmat\,\alphavec}_{\text{trend}} + \underbrace{\Smat\,\betavec}_{\text{seasonality}},
+$$
+
+with coefficients $\alphavec$ and $\betavec$ chosen by the networks for each input window. The order of
+the stacks matters. The trend stack's backcast is subtracted before the seasonality stack runs, so the seasonality
+stack models a detrended window.
+
+<BasisFit />
+
+## Training and ensembling
+
+Each model is trained on windows sampled from the most recent part of each series' training data. The loss is a
+scale-free forecast error: symmetric MAPE, MASE or MAPE. The reported forecasts are the median of an ensemble of 180
+models, which differ in three ways: the loss (three choices), the look-back length ($L = 2H, 3H, \dots, 7H$, six
+choices) and the random initialisation
+
+<Cite id="oreshkin2020" />. The authors found the ensemble a stronger regulariser than dropout or weight decay, which
+improved single models but hurt the ensemble.
+
+## Worked example
+
+Take a horizon $H = 4$, so $\tvec = (0, 0.25, 0.5, 0.75)$, and a trend basis of degree $p = 2$:
+
+$$
+\Tmat = \begin{pmatrix} 1 & 0 & 0 \\ 1 & 0.25 & 0.0625 \\ 1 & 0.5 & 0.25 \\ 1 & 0.75 & 0.5625 \end{pmatrix}.
+$$
+
+If the trend stack's coefficients sum to $\alphavec = (1, 2, -1)$, its output is $1 + 2t - t^2$ at each time:
+$(1, 1.4375, 1.75, 1.9375)$. The first seasonal harmonic over the same grid is $\cos(2\pi t) = (1, 0, -1, 0)$ and
+$\sin(2\pi t) = (0, 1, 0, -1)$. A seasonal coefficient of $2$ on the cosine and $0$ on the sine gives $(2, 0, -2, 0)$.
+The forecast is the sum, $(3, 1.4375, -0.25, 1.9375)$, and the two stack outputs are its trend and seasonal parts.
+
+## Results reported
+
+On the 100,000 series of M4, the ensemble of generic and interpretable models reached a symmetric MAPE of 11.135 and an
+overall weighted average (OWA) of 0.795. The competition winner scored 11.374 and 0.821. OWA averages symmetric MAPE and
+MASE, each divided by that of a seasonally adjusted naive forecast, so lower is better and $1$ is naive. The paper
+reports an 11% improvement over the statistical benchmark and 3% over the winner. N-BEATS was also the most accurate
+model on the M3 and TOURISM datasets. The interpretable model's accuracy was close to the generic model's: 11.174
+against 11.168 on M4 <Cite id="oreshkin2020" />.
+
+## Assumptions
+
+- The look-back length $L$ is fixed for a trained model. Series shorter than $L$ are padded with zeros and masked.
+- The model is univariate and uses no covariates. Known future inputs such as holidays cannot enter.
+- The seasonal basis has harmonics of the horizon length. A seasonal period that does not divide the horizon is
+  represented only approximately.
+
+## Pitfalls
+
+- The output layer has $H$ units per block and the input $L$ units, and both grow with the horizon. For horizons of
+  hundreds of steps the model becomes large and its forecasts can be jagged. <NoteLink to="n-hits">N-HiTS</NoteLink>
+  addresses this with pooling and interpolation.
+- Interpretability holds only for the fixed bases. The generic model's stacks are not trend and seasonality.
+- The accuracy figures come from a large ensemble. A single N-BEATS model is less accurate than the reported median.

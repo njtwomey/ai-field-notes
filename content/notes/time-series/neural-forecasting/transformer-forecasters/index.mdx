@@ -1,0 +1,226 @@
+---
+title: Informer, Autoformer and PatchTST
+kind: case-study
+summary: 'Three transformers for long-horizon forecasting. Informer (2021) keeps only $O(\ln L)$ active queries and halves the sequence per layer. Autoformer (2021) decomposes trend inside the network and attends by autocorrelation. PatchTST (2023) turns patches of each channel into tokens.'
+tags: [time-series, forecasting, neural-forecasting, transformer, attention, long-horizon-forecasting, worked-example]
+aliases:
+  [
+    Informer,
+    Autoformer,
+    PatchTST,
+    ProbSparse attention,
+    self-attention distilling,
+    auto-correlation mechanism,
+    series decomposition block,
+    patching,
+    channel independence,
+    long-sequence time-series forecasting,
+    LSTF,
+  ]
+requires: [transformer]
+partOf: [neural-forecasting-models]
+related:
+  [dlinear, n-hits, temporal-fusion-transformer, acf-and-pacf, time-series-decomposition, forecasting-foundation-models]
+references: [zhou2021, wu2021b, nie2023, zeng2023, vaswani2017]
+status: draft
+updated: 2026-09-27
+---
+
+## At a glance
+
+<SpecTable
+  columns={['Informer', 'Autoformer', 'PatchTST']}
+  rows={{
+    Published: ['AAAI 2021', 'NeurIPS 2021', 'ICLR 2023'],
+    Token: ['one time step, all variables', 'one time step, all variables', 'one patch of 16 steps, one variable'],
+    'Mixing across time': ['ProbSparse self-attention', 'auto-correlation over lags', 'full self-attention'],
+    'Cost per layer, length L': ['O(L log L)', 'O(L log L)', 'O(N²) for N ≈ L / S patches'],
+    'Trend handling': ['none', 'moving-average decomposition in every block', 'instance normalisation per series'],
+    'Multivariate input': [
+      'variables embedded together',
+      'variables embedded together',
+      'each variable separately, shared weights',
+    ],
+    Decoder: [
+      'masked decoder, whole horizon in one pass',
+      'decomposition decoder, whole horizon in one pass',
+      'none: flatten and linear head',
+    ],
+    Loss: ['MSE', 'MSE', 'MSE'],
+    'Reported gain': [
+      'large MSE reductions over LSTM and earlier transformers',
+      '38% lower MSE than previous best',
+      '21% lower MSE than best transformer',
+    ],
+  }}
+/>
+
+All three target **long-sequence forecasting**: horizons of hundreds of steps on benchmarks such as electricity
+transformer temperature (ETT), electricity load, traffic occupancy and weather, with a look-back window of $L$ steps and
+a horizon of $H$ steps. All three produce the whole horizon in one forward pass rather than one step at a time.
+
+## The problem with a plain transformer
+
+A <NoteLink to="transformer">transformer</NoteLink> layer computes attention between every pair of its $L$ tokens, so
+time and memory per layer are $O(L^2)$ <Cite id="vaswani2017" />. Its autoregressive decoder generates one step per
+pass, so a horizon of $H$ steps takes $H$ passes and accumulates errors. With one token per time step, $L$ is the
+number of past steps. Seeing a week of 15-minute data means $L = 672$ tokens and $672^2 \approx 450{,}000$ attention
+scores per head per layer.
+
+## Informer
+
+Informer attacks all three costs: attention, depth and decoding <Cite id="zhou2021" />.
+
+**ProbSparse self-attention.** In trained transformers, most queries attend almost uniformly over the keys, and only
+a few have sharply peaked attention. A uniform query adds little beyond an average of the values. Informer scores each
+query $\qvec_i$ by how far its attention is from uniform:
+
+$$
+M(\qvec_i, \Kmat) = \ln\sum_{j=1}^{L_K} e^{\qvec_i\kvec_j^\top/\sqrt d}
+- \frac{1}{L_K}\sum_{j=1}^{L_K}\frac{\qvec_i\kvec_j^\top}{\sqrt d}.
+$$
+
+The first term is the log-sum-exp of the query's scores and the second is their mean. By Jensen's inequality the
+difference is at least $\ln L_K$, with equality exactly when all scores are equal. Computing $M$ needs all scores, so
+Informer replaces the log-sum-exp by the maximum, $\bar M(\qvec_i, \Kmat) = \max_j \qvec_i\kvec_j^\top/\sqrt d -
+\text{mean}$, and estimates it from about $L \ln L$ randomly sampled query–key pairs. Only the top
+$u = c \ln L$ queries by $\bar M$ enter the attention product; the rest are left out of it. With $c$ fixed
+(the paper uses $c = 5$), each of the $u$ active queries costs $O(L)$, so the layer costs $O(L \ln L)$.
+
+**Self-attention distilling.** Between encoder layers, a width-3 convolution, an ELU and a max pool with stride 2
+halve the sequence length. Layer $j$ then holds $L / 2^{j-1}$ tokens, and total memory across layers is at most
+$L(1 + \tfrac12 + \tfrac14 + \dots) < 2L$ tokens. The encoder combines a 3-layer stack on the full input with a 1-layer
+stack on a quarter of it and concatenates their outputs.
+
+**Generative decoder.** The decoder input is a start token of $L_{\mathrm{token}}$ known values just before the
+horizon, followed by $H$ zero placeholders that carry only time stamps. Masked attention and one forward pass fill in
+all $H$ outputs at once. To forecast 168 hours, for example, the start token is the preceding 5 days.
+
+## Autoformer
+
+Autoformer builds decomposition and periodicity into the architecture <Cite id="wu2021b" />.
+
+**Series decomposition block.** A moving average with padding splits any length-$L$ sequence $\Xmat$ into a
+trend-cyclical part and a seasonal remainder:
+
+$$
+\Xmat_t = \operatorname{AvgPool}(\operatorname{Padding}(\Xmat)), \qquad \Xmat_s = \Xmat - \Xmat_t.
+$$
+
+The block appears after every attention and feed-forward layer, so the network decomposes its hidden states
+progressively rather than decomposing the raw input once. The encoder keeps only seasonal parts. The decoder carries
+two streams: a seasonal stream refined by attention, and a trend stream that accumulates the trend parts extracted at
+each layer. The final forecast is their sum. For the decoder's input, the latter half of the look-back window is
+decomposed and followed by placeholders: zeros for the seasonal part and the window's mean for the trend. See
+
+<NoteLink to="time-series-decomposition">time-series decomposition</NoteLink> for the moving-average method.
+
+**Auto-correlation instead of attention.** For a stationary process, the autocorrelation
+$R_{XX}(\tau) = \lim_{L \to \infty} \frac1L\sum_t X_t X_{t-\tau}$ is large at lags $\tau$ near a period. Autoformer
+computes $R_{\Qmat,\Kmat}(\tau)$ between queries and keys for every lag $\tau = 1, \dots, L$, keeps the
+$k = \lfloor c \ln L \rfloor$ lags with the largest values, and aggregates whole shifted copies of the values:
+
+$$
+\operatorname{AutoCorrelation}(\Qmat, \Kmat, \Vmat) = \sum_{i=1}^{k} \operatorname{Roll}(\Vmat, \tau_i)\,\hat R(\tau_i),
+\qquad \hat R(\tau_1), \dots, \hat R(\tau_k) = \operatorname{Softmax}\paren{R(\tau_1), \dots, R(\tau_k)}.
+$$
+
+$\operatorname{Roll}(\Vmat, \tau)$ shifts the sequence by $\tau$ steps and wraps the overflow to the front. Attention
+links individual time points. Auto-correlation links whole sub-series that sit at the same phase of a period, such as
+the same hour on earlier days.
+
+All $L$ lags cost $O(L \log L)$ together, because the autocorrelation is the inverse Fourier transform of the power
+spectrum: $R_{XX}(\tau) = \mathcal{F}^{-1}\big(\mathcal{F}(X)\,\overline{\mathcal{F}(X)}\big)(\tau)$, computed with
+the fast Fourier transform.
+
+<Derivation title="Why the autocorrelation is the inverse transform of the power spectrum">
+Take the circular autocorrelation of a length-$L$ sequence, $R(\tau) = \sum_{t=0}^{L-1} x_t\, x_{(t-\tau) \bmod L}$,
+and its discrete Fourier transform $X_f = \sum_t x_t e^{-2\pi \mathrm{i} f t / L}$. The transform of $R$ is
+
+$$
+\sum_\tau R(\tau) e^{-2\pi \mathrm{i} f\tau/L}
+= \sum_t x_t \sum_\tau x_{(t-\tau) \bmod L}\, e^{-2\pi \mathrm{i} f\tau/L}.
+$$
+
+Substitute $s = (t - \tau) \bmod L$, so $\tau \equiv t - s$ and $e^{-2\pi \mathrm{i} f\tau/L} = e^{-2\pi \mathrm{i} f
+t/L} e^{2\pi \mathrm{i} f s/L}$ because the exponential has period $L$ in $\tau$. The double sum factorises:
+
+$$
+\sum_t x_t e^{-2\pi \mathrm{i} f t/L}\sum_s x_s e^{2\pi \mathrm{i} f s/L} = X_f\,\overline{X_f} = \abs{X_f}^2
+$$
+
+for real $x$. Inverting the transform gives $R = \mathcal{F}^{-1}(\abs{X}^2)$. This is the Wiener–Khinchin relation in
+discrete, circular form. Two fast Fourier transforms of cost $O(L \log L)$ replace $L$ dot products of cost $O(L)$.
+
+</Derivation>
+
+## PatchTST
+
+PatchTST keeps a standard transformer encoder and changes what a token is <Cite id="nie2023" />.
+
+**Patching.** Each univariate series of length $L$ is cut into patches of length $P$ with stride $S$. After padding the
+end with $S$ copies of the last value, the number of patches is
+
+$$
+N = \left\lfloor \frac{L - P}{S} \right\rfloor + 2.
+$$
+
+Each patch is mapped to a $D$-dimensional token by a shared linear layer, and a learnt position encoding is added. The
+number of tokens falls from $L$ to about $L/S$, so the attention map shrinks by a factor of about $S^2$. A token now
+carries a local shape, such as a rise over 16 steps, instead of a single value whose meaning depends on its
+neighbours.
+
+**Channel independence.** A multivariate series with $M$ variables is split into $M$ univariate series. Each passes
+through the same encoder and head, with shared weights, and none sees the others. Every series is normalised to zero
+mean and unit variance over its look-back window before patching, and the statistics are added back to the output.
+
+**Head.** The encoder's $N$ output vectors are flattened and a linear layer maps them to the $H$ forecast values.
+
+**Self-supervised pretraining.** With non-overlapping patches, a random subset of patches is zeroed and the encoder is
+trained to reconstruct them. Fine-tuning the pretrained encoder for forecasting beat supervised training from scratch
+on the larger datasets, and representations pretrained on one dataset transferred to others.
+
+## Worked example
+
+Take $L = 336$ hourly values, patch length $P = 16$ and stride $S = 8$, the default PatchTST/42 setting. The number of
+patches is $\lfloor (336 - 16)/8 \rfloor + 2 = 40 + 2 = 42$. A transformer with one token per step computes
+$336^2 = 112{,}896$ attention scores per head per layer. PatchTST computes $42^2 = 1{,}764$, which is $64 = 8^2$ times
+fewer. With $L = 512$ the same patching gives $\lfloor 496/8 \rfloor + 2 = 64$ tokens, the PatchTST/64 setting.
+
+For Informer with $c = 5$ and $L = 96$, the number of active queries is $u = 5 \ln 96 \approx 22.8$, so about 23 of the
+96 queries compute full attention. At $L = 720$, $u = 5 \ln 720 \approx 32.9$: the active queries grow by fewer than 11
+while the sequence grows by 624.
+
+## Training
+
+All three are trained with mean squared error on normalised data, with Adam, on the same public benchmarks. Informer
+and Autoformer embed each time step's values together with time-stamp features such as hour and day. Autoformer used a
+look-back of 96 steps (36 for influenza-like illness), 2 encoder layers and 1 decoder layer. PatchTST used a look-back
+of 336 or 512 steps.
+
+## What is distinctive
+
+- **Informer** makes attention sparse by choosing which queries matter, and makes decoding a single pass. It
+  introduced the ETT datasets that later long-horizon models were compared on.
+- **Autoformer** replaces attention between points with aggregation of lagged sub-series, and builds trend extraction
+  into every block. Its authors report a 38% average reduction in MSE over the previous best model across six
+  benchmarks.
+- **PatchTST** changes the tokens rather than the attention. It reported 21.0% lower MSE and 16.7% lower MAE than the
+  best transformer baselines with $L = 512$, and still beat the linear baseline DLinear, particularly on the large
+  weather, traffic and electricity datasets.
+
+## Comparison
+
+Zeng et al., whose preprint appeared between Autoformer and PatchTST, showed that a single linear layer from the
+look-back window to the horizon outperformed Informer, Autoformer and their successors on these benchmarks, often by 20%
+to 50% <Cite id="zeng2023" />. Shuffling the input order barely changed Informer's error on exchange-rate data, which
+suggests it used little of the temporal order. Informer and Autoformer also did not improve as the look-back window
+grew. See
+
+<NoteLink to="dlinear">DLinear</NoteLink>.
+
+PatchTST responds to both findings. A patch preserves the order within it, so shuffling tokens no longer destroys all
+temporal information. Fewer tokens make long look-back windows affordable, and PatchTST's error falls as $L$ grows.
+Channel independence also cut overfitting relative to mixing all variables in one token. Informer's sparse attention
+and Autoformer's auto-correlation made each token cheaper. PatchTST made the tokens fewer and more informative, which
+proved the more effective of the two directions on these benchmarks <Cite id="nie2023" />.

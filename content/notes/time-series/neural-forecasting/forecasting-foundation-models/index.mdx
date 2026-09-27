@@ -1,0 +1,218 @@
+---
+title: Chronos, TimesFM, Moirai and Lag-Llama
+kind: case-study
+summary: 'Four transformers pretrained on large corpora of time series and applied to new series without training. They differ in the token (a quantised value, a patch or a vector of lags), in the output (categorical, point or parametric) and in whether they model several variables.'
+tags:
+  [
+    time-series,
+    forecasting,
+    neural-forecasting,
+    transformer,
+    foundation-models,
+    probabilistic-forecasting,
+    worked-example,
+  ]
+aliases:
+  [
+    time-series foundation models,
+    Chronos,
+    TimesFM,
+    Moirai,
+    Lag-Llama,
+    zero-shot forecasting,
+    pretrained forecasting models,
+    LOTSA,
+    any-variate attention,
+    KernelSynth,
+    TSMixup,
+  ]
+requires: [transformer]
+partOf: [neural-forecasting-models]
+related:
+  [
+    transformer-forecasters,
+    deepar,
+    probabilistic-forecasting,
+    crps-and-interval-scores,
+    student-t-distribution,
+    negative-binomial-distribution,
+  ]
+references: [ansari2024, das2024, woo2024, rasul2023, nie2023, salinas2020]
+status: draft
+updated: 2026-09-27
+---
+
+## At a glance
+
+<SpecTable
+  columns={['Chronos', 'TimesFM', 'Moirai', 'Lag-Llama']}
+  rows={{
+    Released: ['2024 (TMLR)', '2024 (ICML)', '2024 (ICML)', '2023 (preprint)'],
+    Architecture: [
+      'T5 encoder–decoder',
+      'decoder-only transformer',
+      'masked encoder transformer',
+      'decoder-only transformer (LLaMA)',
+    ],
+    Parameters: ['20M, 46M, 200M, 710M', '200M (also 17M, 70M)', '14M, 91M, 311M', 'about 2.4M'],
+    Token: [
+      'one scaled, quantised value',
+      'patch of 32 values',
+      'patch of 8 to 128 values, by frequency',
+      'one time step: lagged values and date features',
+    ],
+    Output: [
+      'categorical over 4094 bins',
+      'point forecast, patch of 128 values',
+      'mixture of four distributions',
+      'Student-t',
+    ],
+    Loss: ['cross-entropy', 'mean squared error', 'negative log-likelihood', 'negative log-likelihood'],
+    'Pretraining data': [
+      '28 public datasets, TSMixup and Gaussian-process synthetic series',
+      'about 100 billion points: Google Trends, Wikipedia views, synthetic, public',
+      'LOTSA: over 27 billion observations, nine domains',
+      '27 datasets, 7,965 series, about 352 million windows',
+    ],
+    Variables: ['univariate', 'univariate', 'any number, plus covariates', 'univariate'],
+    Decoding: [
+      'sample one value at a time',
+      'one output patch at a time',
+      'whole horizon in one pass',
+      'sample one value at a time',
+    ],
+  }}
+/>
+
+A **forecasting foundation model** is trained once on many series from many domains and frequencies, then forecasts a
+new series from its context alone, with no gradient updates. This is **zero-shot** forecasting. The four models here
+were published within months of each other and share the transformer backbone. They differ in how a series becomes
+tokens, what the output head predicts, and how they cope with differences in scale, frequency and dimension across
+their corpora.
+
+## Architecture
+
+**Chronos** reuses a language model unchanged apart from its vocabulary <Cite id="ansari2024" />. A series is scaled
+and quantised into a vocabulary of $4096$ tokens: $4094$ value bins plus padding and end-of-sequence tokens. The main
+models are T5 encoder–decoders; a GPT-2 decoder-only variant also works. Calendar and frequency information are
+deliberately ignored: the model sees only the sequence of tokens.
+
+**TimesFM** is a decoder-only transformer over patches <Cite id="das2024" />. The context is cut into non-overlapping
+input patches of 32 values. A residual MLP maps each patch to a token, positional encodings are added, and 20 causally
+masked transformer layers (model width 1280, 16 heads) process the tokens. Each output token is mapped by another
+residual MLP to an **output patch** of 128 values: the forecast for the 128 steps after that input patch.
+
+**Moirai** is a masked encoder <Cite id="woo2024" />. The context and horizon are cut into patches whose size depends on
+the data's frequency, from 8 for yearly and quarterly data to 64 or 128 for minute-level data, with one input and one
+output projection per patch size. Horizon patches are replaced by a learnt mask embedding, and the encoder fills in
+the distribution parameters for every masked patch in one pass. Every variable of a multivariate series, including
+covariates, is flattened into one token sequence.
+
+**Lag-Llama** follows the LLaMA decoder: RMSNorm pre-normalisation and rotary position encodings
+
+<Cite id="rasul2023" />. Its token at time $t$ is a vector of past values at a fixed set of lags, chosen to cover
+quarterly, monthly, weekly, daily, hourly and second-level cycles, together with date-time features and summary
+statistics of the window. A distribution head outputs the degrees of freedom, location and scale of a
+<NoteLink to="student-t-distribution">Student-$t$</NoteLink> for the next value.
+
+## Scaling and tokenisation
+
+Pretraining corpora mix series whose levels differ by orders of magnitude, so every model normalises each context
+window.
+
+- **Chronos** divides by the mean absolute value of the context, $s = \frac1C\sum_{i=1}^{C}\abs{x_i}$, and keeps zeros
+  as zeros. It then quantises each scaled value to the nearest of $B = 4094$ bin centres spaced uniformly on
+  $[-15, 15]$. The bin width is $30 / 4093 \approx 0.0073$ in scaled units.
+- **TimesFM** subtracts the mean and divides by the standard deviation of the first input patch of the context.
+- **Moirai** and **Lag-Llama** standardise each window. Lag-Llama found a robust version, subtracting the median and
+  dividing by the interquartile range, to work well, and passes the window's statistics to the model as features.
+
+Quantisation turns forecasting into classification. Chronos predicts a probability for each bin and is trained with
+cross-entropy against the bin of the true next value. A categorical output can take any shape, including several
+modes. The price is that the loss ignores the order of the bins: predicting the bin next to the true one costs as much
+as predicting one far away.
+
+**The bins bound the forecast.** A value maps to one of the bins between $c_1 = -15$ and $c_B = 15$, so after
+rescaling no forecast can exceed $15\,s$ in absolute value. A series whose future grows beyond fifteen times the mean
+absolute level of its context cannot be forecast correctly, whatever the network learns. The Chronos authors note this
+limit for series with strong trends.
+
+## Training
+
+- **Chronos** trains on 28 public datasets. Two augmentations add diversity. **TSMixup** takes convex combinations of up
+  to three series from different datasets, with weights from a symmetric Dirichlet distribution, to make 10 million new
+  series. **KernelSynth** samples 1 million series from Gaussian processes whose kernels are random combinations of
+  linear kernels for trend, radial-basis kernels for smooth variation and periodic kernels for seasonality. The context
+  is 512 values and the prediction length 64.
+- **TimesFM** trains on about 100 billion time points: Google Trends queries, Wikipedia page views, synthetic series
+  (autoregressive processes, sinusoids, trends and steps) and public benchmarks. Batches are 80% real and 20% synthetic,
+  with equal weight on hourly, daily, weekly and monthly data. The model predicts the next output patch after every
+  input patch in parallel, as a language model predicts every next token. Random masking of the start of the context
+  teaches it every context length from 1 to 512.
+- **Moirai** trains on LOTSA, a collection of open datasets with over 27 billion observations across nine domains,
+  with context and prediction lengths sampled at random.
+- **Lag-Llama** trains on 27 datasets from six domains, sampling datasets in proportion to their number of series and
+  applying frequency-mixing and frequency-masking augmentation.
+
+## What is distinctive
+
+**Chronos: a language model for numbers.** It changes nothing in the transformer and shows that tokenisation plus
+cross-entropy is enough for probabilistic forecasting. Forecasts are sample paths drawn one token at a time, then
+dequantised and rescaled; quantiles come from the samples. On datasets in its training corpus it outperformed local
+and task-specific models. On 27 datasets it had not seen, its zero-shot accuracy was comparable to, and sometimes
+better than, models trained on those datasets <Cite id="ansari2024" />.
+
+**TimesFM: long output patches.** A language model generates one token per pass. Direct multi-horizon prediction is more
+accurate for long horizons, but a foundation model does not know the horizon in advance. An output patch four times as
+long as the input patch is the compromise. Forecasting 256 steps from a 256-step context takes two passes, one for steps
+257 to 384 and one for 385 to 512, where an output patch of 32 would take eight. Zero-shot, TimesFM had the lowest
+scaled error on 18 Monash datasets, within significance of N-BEATS. On the Darts collection it was within significance
+of the best models. On four ETT datasets it was the most accurate, with a supervised PatchTST within significance of it
+
+<Cite id="das2024" /> <Cite id="nie2023" />.
+
+**Moirai: any number of variables.** Flattening all variables into one sequence needs attention that knows which
+tokens share a variable but does not depend on the variables' order. Moirai's attention score between the token at
+time $i$ of variable $m$ and the token at time $j$ of variable $n$ is
+
+$$
+E_{ij,mn} = (\Wmat_Q\xvec_{i,m})^\top \Rmat_{i-j} (\Wmat_K\xvec_{j,n})
++ u^{(1)}\,\indicator\{m = n\} + u^{(2)}\,\indicator\{m \ne n\},
+$$
+
+where $\Rmat_{i-j}$ is the rotary matrix for the time offset and $u^{(1)}, u^{(2)}$ are learnt scalars. The variable
+term depends only on whether two tokens share a variable, never on which variable. Relabelling the variables therefore
+leaves every score unchanged, and any number of variables fits. The output is a mixture
+$p(y) = \sum_{c} w_c\,p_c(y)$ of a Student-$t$ for general data, a
+
+<NoteLink to="negative-binomial-distribution">negative binomial</NoteLink> for counts, a log-normal for right-skewed
+data and a low-variance normal for near-certain values, so one head can fit data of any type. Zero-shot, Moirai was
+competitive with or better than models trained on each target dataset <Cite id="woo2024" />.
+
+**Lag-Llama: lags as tokens.** Each token carries values from a week, a month or a year earlier, so seasonal context is
+present at every step without a long attention span. The head is a
+
+<NoteLink to="deepar">DeepAR</NoteLink>-style parametric likelihood <Cite id="salinas2020" />, and forecasts are sample
+paths. It is by far the smallest of the four. Zero-shot it was competitive, and after fine-tuning on a small fraction of
+a new dataset it reached state-of-the-art accuracy <Cite id="rasul2023" />.
+
+## Worked example
+
+Chronos receives the context $(10, 20, 30)$. The scale is $s = (10 + 20 + 30)/3 = 20$, so the scaled values are
+$(0.5, 1, 1.5)$. Bin centres are $c_j = -15 + (j - 1) \times 30/4093$. The value $1$ lies $16$ units above $-15$, which
+is $16 / 0.00733 \approx 2182.9$ bin widths, so it falls in bin $j = 2184$ with centre $1.0005$. The three values fall
+in bins $2116$, $2184$ and $2252$. Mapped back and multiplied by $s$, they become $10.04$, $20.01$ and $29.98$: the
+quantisation error is at most half a bin width, $0.0037 \times 20 \approx 0.073$ in the original units. No forecast
+from this context can exceed $15 \times 20 = 300$.
+
+## Comparison
+
+- **Probabilistic output.** Chronos, Moirai and Lag-Llama give full predictive distributions. The TimesFM paper trains
+  a point forecaster and notes that quantile heads could be added. Score the probabilistic ones with the
+  <NoteLink to="crps-and-interval-scores">CRPS</NoteLink> or the quantile loss, not only with point errors.
+- **Multivariate structure.** Only Moirai models several variables and covariates jointly. The others forecast each
+  series alone.
+- **Cost at inference.** Chronos and Lag-Llama sample one value per forward pass and need many sample paths. TimesFM
+  needs one pass per 128 steps. Moirai needs one pass for the whole horizon.
+- **Evaluation risk.** A zero-shot claim holds only for datasets absent from pretraining. Large corpora overlap public
+  benchmarks, so the papers separate in-corpus and held-out results. Any comparison should check the overlap.

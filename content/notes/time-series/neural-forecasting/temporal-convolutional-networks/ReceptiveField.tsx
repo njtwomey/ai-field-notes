@@ -71,7 +71,13 @@ export function ReceptiveField() {
     const inputs = [...reached[0]].sort((a, b) => a - b)
     const series: XYSeries[] = [
       grid,
-      { name: 'hidden unit on a path', type: 'scatter', x: hidden.map((p) => p[0]), y: hidden.map((p) => p[1]), slot: 1 },
+      {
+        name: 'hidden unit on a path',
+        type: 'scatter',
+        x: hidden.map((p) => p[0]),
+        y: hidden.map((p) => p[1]),
+        slot: 1,
+      },
       { name: 'input in the receptive field', type: 'scatter', x: inputs, y: inputs.map(() => 0), slot: 0 },
       { name: 'output', type: 'scatter', x: [output.value], y: [depth.value], emphasis: true },
     ]
@@ -81,7 +87,9 @@ export function ReceptiveField() {
     return { ds, edges, series, R, reachedCount: inputs.length, holes }
   }, [schedule, depth.value, output.value, k])
 
-  const handles: Handle[] = [{ kind: 'x', at: output.value, label: 'output t', onDrag: (x) => output.set(Math.round(x)) }]
+  const handles: Handle[] = [
+    { kind: 'x', at: output.value, label: 'output t', onDrag: (x) => output.set(Math.round(x)) },
+  ]
 
   return (
     <Interactive
