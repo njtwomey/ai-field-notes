@@ -1,0 +1,177 @@
+---
+title: Weight initialisation
+kind: technique
+summary: 'Weight initialisation draws each layer''s weights with a variance that keeps signals at a constant scale through depth. With fan-in $n_{\text{in}}$ and fan-out $n_{\text{out}}$, Xavier initialisation uses variance $2/(n_{\text{in}} + n_{\text{out}})$ for tanh and linear units; He uses $2/n_{\text{in}}$ for ReLU.'
+tags: [deep-learning, training, initialisation, gradients, worked-example]
+aliases: [Xavier initialisation, Glorot initialisation, He initialisation, Kaiming initialisation, LeCun initialisation, fan-in, fan-out, variance-preserving initialisation]
+requires: [multilayer-perceptron, backpropagation, variance-and-covariance]
+related: [batch-normalisation]
+references: [glorot2010, he2015, lecun1998, sutskever2013, goodfellow2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { SignalPropagation } from '../_shared/SignalPropagation'
+
+<Definition>
+**Weight initialisation** sets the starting weights of a neural network by independent random draws with mean zero and
+a variance chosen from the layer's fan-in $n_{\text{in}}$ (inputs per unit) and fan-out $n_{\text{out}}$ (units fed by
+each input). **Xavier** (or Glorot) initialisation uses $\var(W_{ij}) = 2/(n_{\text{in}} + n_{\text{out}})$
+<Cite id="glorot2010" />. **He** (or Kaiming) initialisation uses $\var(W_{ij}) = 2/n_{\text{in}}$ for ReLU layers
+<Cite id="he2015" />. Biases start at zero. Both variances are chosen so that the second moment of the activations and
+of the gradients stays constant from layer to layer.
+</Definition>
+
+## Problem
+
+A layer of a <NoteLink to="multilayer-perceptron">multilayer perceptron</NoteLink> computes pre-activations
+$\avec_\ell = \Wmat_\ell\hvec_{\ell-1}$ and activations $\hvec_\ell = \phi(\avec_\ell)$. The forward pass multiplies the
+input by $L$ random matrices. The backward pass of <NoteLink to="backpropagation">backpropagation</NoteLink> multiplies
+the output gradient by their transposes. If each layer scales the signal by a factor $c$ on average, the signal at
+depth $L$ has scale $c^L$. With $c = 0.9$ and $L = 50$ the factor is $0.005$. With $c = 1.1$ it is $117$.
+
+The weights must be random, and not all equal. Units in a layer with identical incoming weights compute the same
+function and receive the same gradient, so they stay identical for the whole of training. Random draws break this
+symmetry. The remaining choice is the variance of the draws, and the scale factor $c$ depends on it.
+
+## Mechanism
+
+### Forward pass
+
+Take one layer with $n_{\text{in}}$ inputs. Assume the weights $W_{ij}$ are independent, with mean 0 and variance
+$\sigma^2$, and independent of the layer's input $\hvec$. The pre-activation of unit $i$ is
+$a_i = \sum_{j=1}^{n_{\text{in}}} W_{ij} h_j$. Each term has mean $\expect[W_{ij}]\expect[h_j] = 0$, so $a_i$ has mean
+zero. The terms are uncorrelated, since $\expect[W_{ij}h_j W_{ik}h_k] = \expect[W_{ij}]\expect[W_{ik}]\expect[h_jh_k] = 0$
+for $j \ne k$. The variance of the sum is the sum of the variances:
+
+$$
+\var(a_i) = \sum_{j=1}^{n_{\text{in}}} \expect[W_{ij}^2]\,\expect[h_j^2] = n_{\text{in}}\,\sigma^2\,\expect[h^2].
+$$
+
+The factor on the right is the **second moment** $\expect[h^2]$ of the input, not its variance. The two are equal only
+when the inputs have mean zero.
+
+**Linear and tanh units.** Near the origin $\tanh(a) \approx a$, so $\expect[h^2] \approx \var(a)$ for the previous
+layer. The recursion becomes $\var(a_\ell) = n_{\text{in}}\sigma^2 \var(a_{\ell-1})$. The variance is constant across
+layers when
+
+$$
+n_{\text{in}}\,\sigma^2 = 1, \qquad \sigma^2 = \frac{1}{n_{\text{in}}}.
+$$
+
+This is **LeCun initialisation** <Cite id="lecun1998" />.
+
+**ReLU units.** The pre-activation $a$ of the previous layer is a sum of terms $W_{ij}h_j$ that are symmetric about zero,
+because $W_{ij}$ is. So $a$ is symmetric about zero, and $\mathrm{ReLU}(a)^2 = a^2$ on the half of the distribution with
+$a > 0$ and $0$ on the other half. Hence
+
+$$
+\expect[h^2] = \expect[\mathrm{ReLU}(a)^2] = \tfrac12\,\expect[a^2] = \tfrac12\var(a).
+$$
+
+The recursion becomes $\var(a_\ell) = \tfrac12 n_{\text{in}}\sigma^2 \var(a_{\ell-1})$, and the variance is constant
+when
+
+$$
+\tfrac12\,n_{\text{in}}\,\sigma^2 = 1, \qquad \sigma^2 = \frac{2}{n_{\text{in}}}.
+$$
+
+This is **He initialisation** <Cite id="he2015" />. ReLU discards half of the signal's second moment, and the factor 2
+restores it. ReLU outputs have a positive mean, so He initialisation keeps the second moment of $\hvec_\ell$ constant but
+not its variance.
+
+### Backward pass
+
+Write $g_j = \partial\ell/\partial h_j$ for the gradient of the loss $\ell$ with respect to an input of the layer, and
+$\delta_i = \partial\ell/\partial a_i = \phi'(a_i)\,\partial\ell/\partial h^{\text{out}}_i$ for the gradient at a
+pre-activation. The chain rule gives $g_j = \sum_{i=1}^{n_{\text{out}}} W_{ij}\delta_i$, a sum over the
+$n_{\text{out}}$ units that input $j$ feeds. The same argument as the forward pass, assuming the weights are
+independent of the $\delta_i$, gives
+
+$$
+\var(g_j) = n_{\text{out}}\,\sigma^2\,\expect[\delta^2].
+$$
+
+For linear units $\phi' = 1$ and $\expect[\delta^2] = \var(g^{\text{out}})$, so the gradient keeps its variance when
+$n_{\text{out}}\sigma^2 = 1$. For ReLU units $\phi'(a)$ is 1 on half of the inputs and 0 on the other half, so
+$\expect[\delta^2] = \tfrac12\var(g^{\text{out}})$ and the condition is $\tfrac12 n_{\text{out}}\sigma^2 = 1$.
+
+### Xavier: the compromise
+
+The forward pass wants $\sigma^2 = 1/n_{\text{in}}$ and the backward pass wants $\sigma^2 = 1/n_{\text{out}}$. Both
+hold only when $n_{\text{in}} = n_{\text{out}}$. Glorot and Bengio take the harmonic mean of the two
+<Cite id="glorot2010" />:
+
+$$
+\sigma^2 = \frac{2}{n_{\text{in}} + n_{\text{out}}}.
+$$
+
+A uniform distribution on $[-r, r]$ has variance $r^2/3$. Setting $r^2/3 = 2/(n_{\text{in}} + n_{\text{out}})$ gives the
+common uniform form
+
+$$
+W_{ij} \sim \Unif\paren{-\sqrt{\frac{6}{n_{\text{in}} + n_{\text{out}}}},\ \sqrt{\frac{6}{n_{\text{in}} + n_{\text{out}}}}}.
+$$
+
+He et al. show that for ReLU networks either the forward condition or the backward condition suffices
+<Cite id="he2015" />. With fan-in scaling, the backward pass through layer $\ell$ scales the gradient's variance by
+$n_{\text{out},\ell}/n_{\text{in},\ell}$. Since $n_{\text{out},\ell} = n_{\text{in},\ell+1}$, the product over all
+layers telescopes to $n_{\text{in},L+1}/n_{\text{in},1}$, a ratio of two widths that does not grow with depth.
+
+### What the simulation shows
+
+The figure below builds a 30-layer network of width 128 and passes a batch of 32 standard-normal inputs through it. The
+right panel sends a standard-normal gradient back from the top. The curves plot the root mean square (RMS) of each
+layer's activations and gradients. The RMS is the square root of the second moment, which is the quantity the
+conditions above preserve.
+
+<SignalPropagation variant="init" defaultActivation="relu" />
+
+## Worked example: scale after 30 layers of width 128
+
+All layers have $n_{\text{in}} = n_{\text{out}} = n = 128$, so Xavier's variance is $1/n$, with standard deviation
+$1/\sqrt{128} = 0.0884$. He's standard deviation is $\sqrt{2/128} = 0.125$. A common naive choice is a fixed standard
+deviation of 0.01.
+
+For linear units the forward recursion multiplies the RMS by $\sqrt{n}\,\sigma$ per layer. The last column is the RMS
+of $\hvec_{30}$ in the figure above, for the linear activation and the first draw of the weights; the input has RMS
+1.01.
+
+| Initialisation      | $\sigma$ | Factor per layer, linear      | After 30 layers        | Figure, linear |
+| ------------------- | -------- | ----------------------------- | ---------------------- | --------- |
+| fixed $0.01$        | 0.01     | $0.01\sqrt{128} = 0.113$      | $0.113^{30} = 4.1\times10^{-29}$ | $4.7\times10^{-29}$ |
+| Xavier              | 0.0884   | 1                             | 1                      | 1.15      |
+| He                  | 0.125    | $\sqrt 2$                     | $2^{15} = 32\,768$     | $37\,600$ |
+
+For ReLU units each factor gains a further $1/\sqrt2$. He's factor becomes 1. Xavier's becomes $1/\sqrt2$, which gives
+$2^{-15} = 3.1 \times 10^{-5}$ after 30 layers, and the figure gives
+$3.1 \times 10^{-5}$. The fixed $\sigma = 0.01$ gives $0.080^{30} = 1.2 \times 10^{-33}$, and the figure gives
+$1.2 \times 10^{-33}$. A gradient of size $10^{-33}$ is
+five orders of magnitude above the smallest normal 32-bit floating-point number, about $10^{-38}$, so it is still
+represented. Every weight update it produces is negligible.
+
+## Cost
+
+Initialisation costs one random draw per weight, once. The choice of variance is free. The price of a wrong choice is a
+network that does not train, or that trains only after many wasted steps while the optimiser rescales the weights.
+
+## Trade-offs
+
+- **Assumptions of the derivation.** The derivation treats the weights as independent of the activations and the
+  activations within a layer as uncorrelated. At initialisation both hold. After training starts they do not, and the
+  variance conditions say nothing about later layers' scale.
+- **Finite width.** The conditions preserve the expected second moment. At finite width each layer multiplies the
+  second moment by a random factor with mean 1, so the log of the scale performs a random walk. Across 40 draws of the
+  30-layer ReLU network above, the mean square of the last layer's activations was 0.97 and the median RMS was 0.81.
+  Pressing "New weights" shows the spread.
+- **Activation-specific gains.** Frameworks express the rule as $\sigma = \text{gain}/\sqrt{n}$, with gain 1 for linear
+  units, $\sqrt2$ for ReLU and $5/3$ for tanh. Tanh with gain 1 still shrinks slowly with depth, because
+  $\abs{\tanh(a)} < \abs{a}$ for every $a \ne 0$.
+- **Sigmoid.** Sigmoid outputs have mean $1/2$ and a derivative of at most $1/4$. No variance makes both passes stable;
+  in the figure the sigmoid activations settle near 0.5 while the gradients shrink by about a factor of 4 per layer.
+- **Other schemes.** Orthogonal matrices preserve the norm of every vector exactly in a linear network, not only on
+  average. Architectures with normalisation layers or residual connections depend much less on the initial scale; see
+  <NoteLink to="batch-normalisation">batch normalisation</NoteLink> and
+  <NoteLink to="residual-connections">residual connections</NoteLink>.
+- **Initialisation interacts with the optimiser.** A good scale and momentum together were needed to train deep and
+  recurrent networks without pre-training <Cite id="sutskever2013" />.

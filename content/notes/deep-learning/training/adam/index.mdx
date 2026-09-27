@@ -1,0 +1,155 @@
+---
+title: Adam
+kind: technique
+summary: 'Adam keeps exponential moving averages of the gradient, $\mvec_t$, and of its elementwise square, $\vvec_t$, corrects both for their zero initialisation by dividing by $1 - \beta^t$, and steps $\thetavec \leftarrow \thetavec - \alpha\,\hat\mvec_t/(\sqrt{\hat\vvec_t} + \epsilon)$. Each coordinate moves by about $\alpha$, whatever its gradient scale.'
+tags: [optimisation, deep-learning, training, adaptive-learning-rate, worked-example]
+aliases: [Adam optimiser, adaptive moment estimation, bias correction, AMSGrad]
+requires: [gradient-descent, adagrad-and-rmsprop, momentum-and-nesterov]
+related: [decoupled-weight-decay, learning-rate-schedules]
+references: [kingma2015, tieleman2012, reddi2018, loshchilov2019, liu2020, wilson2017, goodfellow2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { OptimiserComparison } from '../_shared/OptimiserComparison'
+
+<Definition>
+**Adam** updates parameters $\thetavec$ from gradients $\gvec_t = \nabla L(\thetavec_{t-1})$ at steps
+$t = 1, 2, \dots$, starting from $\mvec_0 = \vvec_0 = \zeros$ <Cite id="kingma2015" />:
+
+$$
+\begin{aligned}
+\mvec_t &= \beta_1\mvec_{t-1} + (1 - \beta_1)\,\gvec_t, &
+\hat\mvec_t &= \frac{\mvec_t}{1 - \beta_1^t}, \\
+\vvec_t &= \beta_2\vvec_{t-1} + (1 - \beta_2)\,\gvec_t \odot \gvec_t, &
+\hat\vvec_t &= \frac{\vvec_t}{1 - \beta_2^t}, \\
+\thetavec_t &= \thetavec_{t-1} - \alpha\,\frac{\hat\mvec_t}{\sqrt{\hat\vvec_t} + \epsilon}. &&
+\end{aligned}
+$$
+
+Square root and division act on each coordinate. The defaults are step size $\alpha = 10^{-3}$, decay rates
+$\beta_1 = 0.9$ and $\beta_2 = 0.999$, and $\epsilon = 10^{-8}$.
+</Definition>
+
+## Problem
+
+Momentum averages gradients over time, which cancels oscillation and accumulates consistent progress; see
+<NoteLink to="momentum-and-nesterov">momentum</NoteLink>. RMSProp divides each coordinate by a running root mean square
+of its gradient, which equalises step sizes across parameters with very different gradient scales; see
+<NoteLink to="adagrad-and-rmsprop">AdaGrad and RMSProp</NoteLink>. Adam combines the two. It also fixes a bias that
+both moving averages have at the start of training because they are initialised at zero.
+
+## Mechanism
+
+$\mvec_t$ estimates the first moment $\expect[\gvec]$ of the gradient, and $\vvec_t$ estimates the second moment
+$\expect[\gvec \odot \gvec]$, both averaged over roughly the last $1/(1 - \beta)$ steps: 10 steps for $\beta_1 = 0.9$
+and 1000 for $\beta_2 = 0.999$. The step in coordinate $k$ is $\alpha$ times the ratio $\hat m_{t,k}/\sqrt{\hat v_{t,k}}$,
+a signal-to-noise ratio of the gradient in that coordinate. When the gradient is consistent, $\hat m^2 \approx \hat v$ and
+the step is about $\alpha$. When the gradient is mostly noise with mean near zero, $\hat m^2 \ll \hat v$ and the step is
+small.
+
+### Bias correction
+
+Unrolling the recursion for $\mvec_t$ from $\mvec_0 = \zeros$ gives
+
+$$
+\mvec_t = (1 - \beta_1)\sum_{i=1}^t \beta_1^{t-i}\,\gvec_i.
+$$
+
+Suppose the gradients have a constant expectation, $\expect[\gvec_i] = \expect[\gvec]$ for all $i$. Taking expectations
+and summing the geometric series,
+
+$$
+\expect[\mvec_t] = (1 - \beta_1)\sum_{i=1}^t \beta_1^{t-i}\;\expect[\gvec] =
+(1 - \beta_1)\,\frac{1 - \beta_1^t}{1 - \beta_1}\;\expect[\gvec] = (1 - \beta_1^t)\,\expect[\gvec].
+$$
+
+The weights $(1 - \beta_1)\beta_1^{t-i}$ sum to $1 - \beta_1^t$, not to 1: the missing weight $\beta_1^t$ is the weight
+that the initial value $\mvec_0 = \zeros$ still carries. Dividing by $1 - \beta_1^t$ gives an estimate with expectation
+$\expect[\gvec]$. The same argument with $\gvec \odot \gvec$ in place of $\gvec$ gives
+$\expect[\vvec_t] = (1 - \beta_2^t)\,\expect[\gvec \odot \gvec]$ and the correction for $\vvec_t$
+<Cite id="kingma2015" />. If the expectations drift slowly, the equalities hold approximately.
+
+The correction matters most for $\vvec$, because $\beta_2$ is close to 1. At $t = 1$ the uncorrected
+$\vvec_1 = 0.001\,\gvec_1 \odot \gvec_1$ has root $0.0316\,\abs{\gvec_1}$, while $\mvec_1 = 0.1\,\gvec_1$. The uncorrected
+ratio would be $0.1/0.0316 = 3.16$ times the sign of the gradient. With the correction, $\hat\mvec_1 = \gvec_1$ and
+$\sqrt{\hat\vvec_1} = \abs{\gvec_1}$, and the first step is exactly $-\alpha\,\sgn(\gvec_1)$ for $\epsilon \to 0$.
+
+### Bounded steps
+
+Kingma and Ba bound the step in each coordinate. If $(1 - \beta_1) > \sqrt{1 - \beta_2}$ then
+$\abs{\Delta\theta_{t,k}} \le \alpha(1 - \beta_1)/\sqrt{1 - \beta_2}$, which is $3.16\alpha$ for the defaults; the bound is
+reached only when a single large gradient follows a long run of zeros. In the common case the step is at most about
+$\alpha$ <Cite id="kingma2015" />. The step size $\alpha$ therefore sets a trust region in parameter space, and a
+parameter that should move by about 1 needs on the order of $1/\alpha$ steps.
+
+The update is invariant to rescaling the gradient: multiplying every $\gvec_t$ by $c > 0$ multiplies $\hat\mvec_t$ by
+$c$ and $\sqrt{\hat\vvec_t}$ by $c$, and leaves the step unchanged (for $\epsilon \to 0$). The same holds for each
+coordinate separately.
+
+## Rotation
+
+The per-coordinate division is a diagonal preconditioner. It removes differences in curvature that lie along the
+coordinate axes and does nothing for curvature along combinations of coordinates. The figure below runs Adam against
+gradient descent, Nesterov momentum and RMSProp on a valley $L = \tfrac12(x^2 + 25y^2)$ with condition number 25, and
+on the same valley rotated by $45°$.
+
+<OptimiserComparison initial={['sgd', 'nesterov', 'rmsprop', 'adam']} />
+
+With the default step sizes, $0.03$ for the gradient-descent family and $\alpha = 0.1$ for the adaptive methods, the loss
+falls below $10^{-3}$ after:
+
+| Method           | Valley, axis-aligned | Valley, rotated 45° |
+| ---------------- | -------------------- | ------------------- |
+| gradient descent | 133                  | 133                 |
+| Nesterov         | 30                   | 30                  |
+| Adam             | 31                   | 132                 |
+
+Gradient descent and Nesterov momentum are unchanged by the rotation, because rotating the parameters rotates their
+gradients and their updates with them. Adam, on the rotated valley, is no faster than plain gradient descent. With
+$\alpha$ tuned separately for each valley over a grid, Adam needs 31 steps on the axis-aligned valley and 45 on the
+rotated one; tuned Nesterov momentum needs 10 on both. The Rosenbrock surface in the figure has a curved valley, whose
+direction changes along its length, so no fixed coordinate system aligns with it.
+
+Neural-network losses have a partly axis-aligned structure: different layers, and different embeddings, have gradients
+of very different scales. That is where Adam's per-coordinate scaling pays off.
+
+## Worked example: bias correction under a constant gradient
+
+Let one coordinate's gradient be the constant $g = 2$ at every step, with the defaults $\beta_1 = 0.9$ and
+$\beta_2 = 0.999$. Then $m_t = (1 - 0.9^t)\cdot 2$ and $v_t = (1 - 0.999^t)\cdot 4$, and the uncorrected ratio is
+$m_t/\sqrt{v_t} = (1 - 0.9^t)/\sqrt{1 - 0.999^t}$.
+
+| Step $t$ | $1 - 0.9^t$ | $1 - 0.999^t$ | Uncorrected $m_t/\sqrt{v_t}$ | Corrected $\hat m_t/\sqrt{\hat v_t}$ |
+| -------- | ----------- | ------------- | ---------------------------- | ------------------------------------ |
+| 1        | 0.100       | 0.00100       | 3.16                         | 1                                    |
+| 10       | 0.651       | 0.00996       | 6.53                         | 1                                    |
+| 100      | 1.000       | 0.0952        | 3.24                         | 1                                    |
+| 1000     | 1.000       | 0.632         | 1.26                         | 1                                    |
+
+Without the correction the first thousand steps are several times larger than intended, peaking near step 10. The
+correction makes the step exactly $\alpha$ from the first step on.
+
+## Cost
+
+Two extra vectors of the size of the parameters, so the optimiser state is twice the size of the model. For a model with
+$10^9$ parameters in 32-bit floating point, the state takes 8 GB in addition to the 4 GB of weights and 4 GB of
+gradients.
+
+## Trade-offs
+
+- **Weight decay.** Adding an L2 penalty to the loss sends the penalty's gradient through the division by
+  $\sqrt{\hat\vvec}$, which weakens the decay of parameters with large gradients. Decoupling the decay from the gradient
+  step fixes this; see <NoteLink to="decoupled-weight-decay">decoupled weight decay</NoteLink>
+  <Cite id="loshchilov2019" />.
+- **Early instability.** In the first steps $\hat\vvec$ is estimated from few gradients and is noisy, so the step size
+  varies widely between coordinates. A warmup of the step size limits the damage; see
+  <NoteLink to="learning-rate-schedules">learning-rate schedules</NoteLink> <Cite id="liu2020" />.
+- **Non-convergence.** Because $\hat\vvec$ can decrease, Adam's effective step can grow. Reddi et al. constructed a
+  convex problem on which Adam converges to a highly suboptimal point. AMSGrad keeps the running maximum of $\vvec_t$ in the
+  denominator and restores a convergence guarantee <Cite id="reddi2018" />.
+- **Generalisation.** On some image-classification benchmarks, well-tuned SGD with momentum reaches better test accuracy
+  than Adam <Cite id="wilson2017" />. For transformers Adam, in its decoupled form AdamW, is the default.
+- **The $\epsilon$ hyperparameter.** $\epsilon$ is added to $\sqrt{\hat\vvec}$, which has the units of the gradient. When
+  gradients are tiny, $\epsilon$ dominates the denominator and Adam becomes gradient descent with step size
+  $\alpha/\epsilon$.

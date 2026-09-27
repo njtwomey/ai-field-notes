@@ -1,0 +1,150 @@
+---
+title: Momentum and Nesterov momentum
+kind: technique
+summary: 'Momentum keeps a velocity $\vvec \leftarrow \beta\vvec - \eta\nabla L(\thetavec)$ and steps $\thetavec \leftarrow \thetavec + \vvec$, so consistent gradient directions accumulate and oscillating ones cancel. Nesterov momentum evaluates the gradient at the look-ahead point $\thetavec + \beta\vvec$, which damps oscillations in steep directions.'
+tags: [optimisation, deep-learning, training, momentum, worked-example]
+aliases: [Polyak momentum, Nesterov accelerated gradient, NAG, Nesterov momentum, accelerated gradient descent, SGD with momentum]
+requires: [gradient-descent, eigendecomposition]
+related: [adagrad-and-rmsprop, condition-number, learning-rate-schedules]
+references: [polyak1964, nesterov1983, nesterov2004, sutskever2013, goh2017, lessard2016, goodfellow2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { OptimiserComparison } from '../_shared/OptimiserComparison'
+
+<Definition>
+**Momentum** (the heavy-ball method) updates parameters $\thetavec$ with a velocity $\vvec$, starting from
+$\vvec = \zeros$:
+
+$$
+\vvec \leftarrow \beta\vvec - \eta\nabla L(\thetavec), \qquad \thetavec \leftarrow \thetavec + \vvec,
+$$
+
+with step size $\eta > 0$ and momentum coefficient $\beta \in [0, 1)$ <Cite id="polyak1964" />. **Nesterov momentum**
+evaluates the gradient at the look-ahead point instead: $\vvec \leftarrow \beta\vvec - \eta\nabla L(\thetavec + \beta\vvec)$
+<Cite id="nesterov1983" /> <Cite id="sutskever2013" />. With $\beta = 0$ both are plain
+<NoteLink to="gradient-descent">gradient descent</NoteLink>.
+</Definition>
+
+## Problem
+
+Gradient descent on a function whose curvature differs greatly between directions is slow. The step size must be below
+$2/\lambda_{\max}$, where $\lambda_{\max}$ is the largest eigenvalue of the Hessian, or the iterates diverge along the
+steepest direction. With that step, progress along the flattest direction, of curvature $\lambda_{\min}$, shrinks the
+error by only $1 - 2\lambda_{\min}/\lambda_{\max}$ per step. The ratio $\kappa = \lambda_{\max}/\lambda_{\min}$ is the
+<NoteLink to="condition-number">condition number</NoteLink>, and the best rate of gradient descent on a quadratic is
+$(\kappa - 1)/(\kappa + 1)$ per step. The loss surfaces of neural networks have condition numbers in the thousands and
+more.
+
+## Mechanism
+
+Unrolling the velocity from $\vvec_0 = \zeros$ gives a weighted sum of all past gradients:
+
+$$
+\vvec_t = -\eta\sum_{k=0}^{t-1}\beta^k\,\nabla L(\thetavec_{t-1-k}).
+$$
+
+Along a direction in which the gradient keeps its sign, the terms add, and the step approaches
+$\eta/(1 - \beta)$ times the gradient: ten times the plain step for $\beta = 0.9$. Along a direction in which the
+gradient alternates in sign, as across a narrow valley, the terms cancel. Momentum lengthens the steps that make
+consistent progress and shortens the steps that oscillate <Cite id="goh2017" />.
+
+### Rate on a quadratic
+
+Take $L(\thetavec) = \tfrac12\thetavec^\top\Amat\thetavec$ with $\Amat$ symmetric positive definite and eigenvalues in
+$[\lambda_{\min}, \lambda_{\max}]$. In the eigenbasis of $\Amat$ the coordinates decouple. For one coordinate $x$ with
+curvature $\lambda$, the gradient is $\lambda x$, and eliminating $v$ from the update gives the recursion
+
+$$
+x_{t+1} = (1 + \beta - \eta\lambda)\,x_t - \beta\,x_{t-1}.
+$$
+
+A linear recursion of this form has solutions $x_t = c_1 z_1^t + c_2 z_2^t$, where $z_1, z_2$ are the roots of the
+characteristic polynomial
+
+$$
+z^2 - (1 + \beta - \eta\lambda)\,z + \beta = 0.
+$$
+
+The error shrinks at the rate $\max(\abs{z_1}, \abs{z_2})$. The product of the roots is $\beta$. When the roots are
+complex they are conjugates, so both have modulus exactly $\sqrt\beta$, independent of $\lambda$. The roots are complex
+when the discriminant is negative, $(1 + \beta - \eta\lambda)^2 < 4\beta$, which rearranges to
+
+$$
+(1 - \sqrt\beta)^2 < \eta\lambda < (1 + \sqrt\beta)^2.
+$$
+
+If this interval holds for every eigenvalue, every coordinate converges at the same rate $\sqrt\beta$. Choose $\eta$ and
+$\beta$ to make the interval exactly cover $[\lambda_{\min}, \lambda_{\max}]$:
+$\eta\lambda_{\min} = (1 - \sqrt\beta)^2$ and $\eta\lambda_{\max} = (1 + \sqrt\beta)^2$. Dividing the two and taking
+square roots, $\sqrt\kappa = (1 + \sqrt\beta)/(1 - \sqrt\beta)$, so
+
+$$
+\sqrt\beta = \frac{\sqrt\kappa - 1}{\sqrt\kappa + 1}, \qquad
+\eta = \frac{(1 + \sqrt\beta)^2}{\lambda_{\max}} = \frac{4}{\paren{\sqrt{\lambda_{\max}} + \sqrt{\lambda_{\min}}}^2}.
+$$
+
+The rate $(\sqrt\kappa - 1)/(\sqrt\kappa + 1)$ has $\sqrt\kappa$ where gradient descent has $\kappa$
+<Cite id="polyak1964" />. For $\kappa = 10^4$ the number of steps to reduce the error by a fixed factor falls by a factor
+of about 100.
+
+### Nesterov momentum
+
+Nesterov's update computes the gradient where the momentum is about to carry the parameters, at
+$\thetavec + \beta\vvec$, rather than where they are. On the quadratic coordinate, the gradient at the look-ahead point
+is $\lambda(x_t + \beta v_t)$, and eliminating $v$ gives
+
+$$
+x_{t+1} = (1 + \beta)(1 - \eta\lambda)\,x_t - \beta(1 - \eta\lambda)\,x_{t-1}.
+$$
+
+The product of the roots is now $\beta(1 - \eta\lambda)$, so in the complex regime both roots have modulus
+$\sqrt{\beta(1 - \eta\lambda)}$. The effective momentum shrinks in steep directions, where $\eta\lambda$ is large. If
+the momentum has carried the parameters up the far wall of a valley, the gradient at the look-ahead point already
+points back, and the velocity is corrected one step earlier than with heavy-ball momentum <Cite id="sutskever2013" />.
+
+For smooth convex functions that are not strongly convex, Nesterov's method reduces $L(\thetavec_t) - L^*$ as
+$O(1/t^2)$, where gradient descent achieves $O(1/t)$ <Cite id="nesterov1983" />. No method whose steps are linear
+combinations of past gradients can do better than $O(1/t^2)$ on this class in the worst case <Cite id="nesterov2004" />.
+
+<OptimiserComparison initial={['sgd', 'momentum', 'nesterov']} />
+
+## Worked example: a valley with condition number 25
+
+Take $L(x, y) = \tfrac12(x^2 + 25y^2)$, so $\lambda_{\min} = 1$, $\lambda_{\max} = 25$ and $\kappa = 25$.
+
+- **Gradient descent**, with its best step $\eta = 2/(\lambda_{\min} + \lambda_{\max}) = 0.0769$, contracts the error
+  by $24/26 = 0.923$ per step. Reducing it by a factor of 1000 takes $\ln 1000/(-\ln 0.923) = 86$ steps.
+- **Momentum**, tuned by the formulas above: $\sqrt\beta = (5 - 1)/(5 + 1) = 0.667$, so $\beta = 0.444$ and
+  $\eta = (1.667)^2/25 = 0.111$. Every eigen-direction contracts by $0.667$ per step, and a factor of 1000 takes
+  $\ln 1000/(-\ln 0.667) = 17$ steps.
+- **Untuned momentum**, $\eta = 0.03$ and $\beta = 0.9$, as in the figure's defaults. Both directions are in the complex
+  regime, so both contract by $\sqrt{0.9} = 0.949$ per step. Nesterov with the same settings contracts the flat
+  direction by $\sqrt{0.9 \times 0.97} = 0.934$ and the steep one by $\sqrt{0.9 \times 0.25} = 0.474$.
+
+In the figure, from the default start, the loss falls below $10^{-3}$ after 133 steps of gradient descent, 66 of
+momentum and 30 of Nesterov momentum. On the rotated valley the counts are the same, because all three methods are
+unchanged by a rotation of the parameters.
+
+## Cost
+
+One extra vector of the size of the parameters, and one extra addition per step. Nesterov momentum also needs one
+gradient per step, evaluated at a different point.
+
+## Trade-offs
+
+- **The loss is not monotone.** With $\beta$ near 1 the iterate overshoots and returns, so the loss rises and falls. An
+  oscillating loss curve is not by itself a sign of a bad step size.
+- **Heavy ball is optimal only on quadratics.** The tuned rate assumes known curvature bounds. With $\eta$ and $\beta$
+  chosen for a quadratic, heavy-ball momentum can fail to converge on other strongly convex functions <Cite id="lessard2016" />.
+  Nesterov's method has guarantees for all smooth convex functions.
+- **Stochastic gradients.** With noisy gradients, the velocity also averages the noise over about $1/(1 - \beta)$
+  steps. Momentum does not remove the noise floor; a decreasing step size does; see
+  <NoteLink to="learning-rate-schedules">learning-rate schedules</NoteLink>.
+- **Conventions differ.** Many libraries use $\vvec \leftarrow \beta\vvec + \nabla L$, $\thetavec \leftarrow \thetavec -
+  \eta\vvec$. This is the same method with the step size factored out of the velocity. The two differ when $\eta$
+  changes during training.
+- **Schedules for $\beta$.** Sutskever et al. trained deep autoencoders and recurrent networks with plain stochastic
+  gradients, using Nesterov momentum with $\beta$ raised towards $0.99$ over training and a careful initialisation
+  <Cite id="sutskever2013" />.

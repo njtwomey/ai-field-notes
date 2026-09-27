@@ -1,0 +1,156 @@
+---
+title: Vanishing and exploding gradients
+kind: concept
+summary: 'In a deep network the gradient at layer $\ell$ is a product of one Jacobian per layer above it. If each scales the gradient by $c$ on average, the gradient scales as $c^{L-\ell}$: it vanishes for $c < 1$ and explodes for $c > 1$. Initialisation, normalisation and residual connections keep $c$ near 1.'
+tags: [deep-learning, training, gradients, worked-example]
+aliases: [vanishing gradient problem, exploding gradient problem, gradient norm clipping, signal propagation]
+requires: [backpropagation, multilayer-perceptron, jacobian]
+related: [weight-initialisation, backpropagation-through-time]
+references: [bengio1994, glorot2010, pascanu2013, he2015, goodfellow2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { SignalPropagation } from '../_shared/SignalPropagation'
+
+<Definition>
+In a network of $L$ layers, the gradient of the loss $\ell$ with respect to the activations $\hvec_\ell$ of layer $\ell$ is
+the gradient at the output multiplied by the Jacobians of every layer above $\ell$. The gradient **vanishes** when this
+product shrinks geometrically with the number of layers, so that the lower layers receive updates too small to learn
+from. It **explodes** when the product grows geometrically, so that updates are large enough to destroy what has been
+learned or to overflow <Cite id="bengio1994" />.
+</Definition>
+
+## Intuition
+
+<NoteLink to="backpropagation">Backpropagation</NoteLink> passes the gradient down through the layers by the chain
+rule. Each layer multiplies it by a matrix. A product of $L$ numbers that are each around $0.8$ is $0.8^{L}$, which is
+$0.0012$ for $L = 30$. A product of $L$ numbers around $1.2$ is $237$ for $L = 30$. Matrices behave like numbers here in
+an average sense: what matters is how much each one stretches or shrinks a typical vector. Only a per-layer factor very
+close to 1 gives a gradient whose size does not depend on depth.
+
+The same product governs the forward pass. Activations at depth $L$ are the input transformed by $L$ layers, and they
+too shrink or grow geometrically. The gradient problem is the backward face of a general fact: in a deep composition,
+per-layer scale factors compound.
+
+## The Jacobian product
+
+Take a <NoteLink to="multilayer-perceptron">multilayer perceptron</NoteLink> with pre-activations
+$\avec_\ell = \Wmat_\ell\hvec_{\ell-1}$ and activations $\hvec_\ell = \phi(\avec_\ell)$ for $\ell = 1, \dots, L$. The
+Jacobian of one layer is
+
+$$
+\Jmat_\ell = \frac{\partial\hvec_\ell}{\partial\hvec_{\ell-1}} = \diag\paren{\phi'(\avec_\ell)}\,\Wmat_\ell,
+$$
+
+because $\partial\avec_\ell/\partial\hvec_{\ell-1} = \Wmat_\ell$ and the elementwise $\phi$ contributes a diagonal
+matrix of derivatives. By the chain rule the gradient with respect to the activations of layer $\ell$ is
+
+$$
+\frac{\partial\ell}{\partial\hvec_\ell} = \Jmat_{\ell+1}^\top \Jmat_{\ell+2}^\top \cdots \Jmat_L^\top\,
+\frac{\partial\ell}{\partial\hvec_L}.
+$$
+
+The gradient of the weights of layer $\ell$ is $\deltavec_\ell\hvec_{\ell-1}^\top$, with
+$\deltavec_\ell = \phi'(\avec_\ell) \odot \partial\ell/\partial\hvec_\ell$. It inherits the scale of this product.
+
+**A bound.** The spectral norm $\norm{\Amat}_2$ is the largest factor by which $\Amat$ stretches any vector, and it is
+submultiplicative: $\norm{\Amat\Bmat}_2 \le \norm{\Amat}_2\norm{\Bmat}_2$. Therefore
+
+$$
+\norm{\frac{\partial\ell}{\partial\hvec_\ell}}_2 \le \prod_{m=\ell+1}^{L} \norm{\diag\paren{\phi'(\avec_m)}}_2\,
+\norm{\Wmat_m}_2\;\norm{\frac{\partial\ell}{\partial\hvec_L}}_2 .
+$$
+
+If every factor $\norm{\diag(\phi'(\avec_m))}_2\norm{\Wmat_m}_2$ is at most some $c < 1$, the gradient at layer $\ell$
+is at most $c^{L-\ell}$ times the gradient at the top. It must vanish geometrically. For the logistic sigmoid
+$\phi' \le 1/4$, so any sigmoid network whose weight matrices have spectral norm below 4 has vanishing gradients
+<Cite id="pascanu2013" />. The converse does not hold: factors above 1 are necessary for explosion but not sufficient,
+because the stretched direction of one layer need not align with that of the next.
+
+## The average factor
+
+The bound describes the worst direction. The typical size of the gradient follows from a variance calculation. Assume
+the weights of layer $m$ are independent draws with mean 0 and variance $\sigma^2$, and let the layer have width $n$.
+Let $\gvec = \partial\ell/\partial\hvec_m$ be the gradient that arrives from above, independent of the weights. The $j$-th entry of $\Jmat_m^\top\gvec$ is
+$\sum_{i=1}^{n} W_{m,ij}\,\phi'(a_{m,i})\,g_i$, a sum of $n$ uncorrelated terms with mean zero. Its second moment is
+
+$$
+\expect\brack{\paren{\Jmat_m^\top\gvec}_j^2} = n\,\sigma^2\,\expect\brack{\phi'(a)^2}\,\expect\brack{g^2}.
+$$
+
+Each layer multiplies the mean square of the gradient by
+
+$$
+\chi = n\,\sigma^2\,\expect\brack{\phi'(a)^2},
+$$
+
+and after $L - \ell$ layers the root mean square of the gradient has been scaled by $\chi^{(L-\ell)/2}$. The gradient
+vanishes when $\chi < 1$ and explodes when $\chi > 1$. The factor $\chi$ has two parts: the weight scale $n\sigma^2$,
+which initialisation controls, and the mean squared slope $\expect[\phi'(a)^2]$, which the activation and the scale of
+its input control.
+
+- **Linear units.** $\phi' = 1$, so $\chi = n\sigma^2$. Xavier initialisation, $\sigma^2 = 1/n$, gives $\chi = 1$.
+- **ReLU.** $\phi'$ is 1 on half of the inputs and 0 on the other half, so $\expect[\phi'^2] = 1/2$ and
+  $\chi = n\sigma^2/2$. He initialisation, $\sigma^2 = 2/n$, gives $\chi = 1$.
+- **Sigmoid.** $\phi' \le 1/4$, so $\expect[\phi'^2] \le 1/16$ and a weight scale near 1 gives $\chi$ far below 1.
+- **Tanh.** Large weights push inputs into the flat tails of tanh, where $\phi' \approx 0$; small weights shrink the
+  forward signal. Only a narrow range of scales keeps $\chi$ near 1.
+
+<NoteLink to="weight-initialisation">Weight initialisation</NoteLink> derives the variance conditions in full.
+
+## Simulation
+
+The figure below passes a batch through a 30-layer network of width 128 and sends a standard-normal gradient back from
+the top. It plots the root mean square of the activations and gradients at every layer, for three weight scales.
+Switch the activation to see the regimes: sigmoid gradients vanish under every initialisation, linear gradients vanish,
+stay level or explode depending on the scale, and ReLU is level only under He initialisation.
+
+<SignalPropagation variant="init" defaultActivation="sigmoid" />
+
+## Worked example: a sigmoid network
+
+Take width $n = 128$, Xavier weights with $n\sigma^2 = 1$, sigmoid units, and 30 layers. The sigmoid's outputs are
+positive, with mean near $1/2$, so the second moment of the activations settles at a fixed point $q$ satisfying
+$q = \expect[\sigma(a)^2]$ with $a \sim \Gauss(0, q)$. Iterating this equation numerically gives $q = 0.265$. At that
+input scale the mean squared slope is $\expect[\sigma'(a)^2] = 0.0557$. So $\chi = 0.0557$, and each layer scales the
+root mean square of the gradient by $\sqrt{0.0557} = 0.236$, a factor of about $1/4.2$.
+
+After 30 layers the predicted factor is $0.236^{30} = 1.6 \times 10^{-19}$. The simulation with width 128 and batch 32
+gives $1.5 \times 10^{-19}$. The activations do not vanish: their root mean square stays between $0.50$ and $0.52$ at every hidden layer.
+A network can have well-scaled activations and vanished gradients at the same time.
+
+## Remedies
+
+- **Initialisation.** Choose $\sigma^2$ so that $\chi = 1$ at the start of training; see
+  <NoteLink to="weight-initialisation">weight initialisation</NoteLink> <Cite id="glorot2010" /> <Cite id="he2015" />.
+- **Activations.** ReLU and its variants have $\phi' = 1$ on the active side, so they do not saturate there; see
+  <NoteLink to="activation-functions">activation functions</NoteLink>.
+- **Normalisation.** <NoteLink to="batch-normalisation">Batch normalisation</NoteLink> and
+  <NoteLink to="layer-normalisation">layer normalisation</NoteLink> rescale every layer's pre-activations to unit scale,
+  so the scale of the weights stops compounding in the forward pass.
+- **Residual connections.** A block $\hvec_\ell = \hvec_{\ell-1} + F(\hvec_{\ell-1})$ has Jacobian $\I + \partial F/\partial\hvec$.
+  The identity term carries the gradient down unchanged; see
+  <NoteLink to="residual-connections">residual connections</NoteLink>.
+- **Gating in recurrent networks.** An unrolled recurrent network is a deep network with the same weight matrix at every
+  layer, so the Jacobian product is a matrix power. LSTM and GRU cells add a gated additive path for the same reason
+  residual connections do; see <NoteLink to="backpropagation-through-time">backpropagation through time</NoteLink>.
+- **Gradient clipping.** Explosion can be capped directly. If the gradient norm $\norm{\gvec}$ exceeds a threshold
+  $c$, rescale the gradient to $\gvec \cdot c/\norm{\gvec}$ <Cite id="pascanu2013" />. The rescaling keeps the gradient's
+  direction and bounds the length of every step at $\eta c$ for step size $\eta$.
+
+## Assumptions
+
+- The variance calculation assumes weights independent of the activations and of the incoming gradient. This holds at
+  initialisation. During training the weights adapt to the data and the calculation no longer applies directly.
+- The factor $\chi$ is an average. At finite width each layer's factor is random, so two networks with the same $\chi$
+  can differ in gradient scale by a factor of a few after tens of layers.
+
+## Pitfalls
+
+- **Confusing vanishing with converging.** A small gradient at the lower layers can mean those layers have learned, or
+  that the signal never reaches them. Compare per-layer gradient norms at the start of training, not only at the end.
+- **Clipping hides a bad scale.** Clipping prevents one large step, but a network whose gradients explode at every step
+  is still badly scaled. Clipping is a guard, not a fix.
+- **Only looking at the loss.** A deep network with vanished gradients trains its top layers and ignores the rest. The
+  loss still falls, slowly, and the problem is visible only in the per-layer gradient norms.

@@ -1,0 +1,139 @@
+---
+title: AdaGrad and RMSProp
+kind: technique
+summary: 'AdaGrad and RMSProp divide each gradient coordinate by the root of an accumulated squared gradient, $\theta_k \leftarrow \theta_k - \eta\,g_k/(\sqrt{s_k} + \epsilon)$. AdaGrad sums all past $g_k^2$, so its steps shrink over time; RMSProp uses an exponential moving average, so they do not. Both rescale coordinates, not directions.'
+tags: [optimisation, deep-learning, training, adaptive-learning-rate, worked-example]
+aliases: [AdaGrad, Adagrad, RMSProp, RMSprop, adaptive learning rate, per-parameter learning rate, diagonal preconditioning]
+requires: [gradient-descent]
+related: [condition-number, learning-rate-schedules]
+references: [duchi2011, tieleman2012, kingma2015, goodfellow2016, ruder2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { OptimiserComparison } from '../_shared/OptimiserComparison'
+
+<Definition>
+Let $\gvec_t = \nabla L(\thetavec_t)$ be the gradient at step $t$, and let all operations on vectors act on each
+coordinate $k$. **AdaGrad** accumulates squared gradients and scales each coordinate's step by their root
+<Cite id="duchi2011" />:
+
+$$
+\svec_t = \svec_{t-1} + \gvec_t \odot \gvec_t, \qquad
+\thetavec_{t+1} = \thetavec_t - \eta\,\frac{\gvec_t}{\sqrt{\svec_t} + \epsilon}.
+$$
+
+**RMSProp** replaces the sum with an exponential moving average with decay $\rho \in (0, 1)$, typically $0.9$
+<Cite id="tieleman2012" />:
+
+$$
+\svec_t = \rho\,\svec_{t-1} + (1 - \rho)\,\gvec_t \odot \gvec_t, \qquad
+\thetavec_{t+1} = \thetavec_t - \eta\,\frac{\gvec_t}{\sqrt{\svec_t} + \epsilon}.
+$$
+
+Both start from $\svec_0 = \zeros$. The constant $\epsilon$, typically $10^{-8}$, prevents division by zero.
+</Definition>
+
+## Problem
+
+<NoteLink to="gradient-descent">Gradient descent</NoteLink> uses one step size $\eta$ for every parameter. Parameters
+whose gradients are large need a small step for stability, and parameters whose gradients are small then barely move.
+In a network this happens between layers, whose gradient scales differ, and within a layer, between weights attached to
+frequent and rare input features. A word that appears once in a thousand examples receives a gradient once in a thousand
+steps. With one global step size its embedding hardly learns.
+
+## Mechanism
+
+### Per-coordinate step sizes
+
+Coordinate $k$ moves by $\eta\,g_{t,k}/\sqrt{s_{t,k}}$. The denominator has the units of the gradient, so the ratio is
+dimensionless and the step has the size of $\eta$. Two consequences follow.
+
+- **Scale invariance per coordinate.** If every gradient of coordinate $k$ is multiplied by $c > 0$, then $s_{t,k}$ is
+  multiplied by $c^2$ and the step $\eta\,c\,g_{t,k}/(c\sqrt{s_{t,k}})$ is unchanged (for $\epsilon \to 0$). A
+  coordinate with gradients of size $100$ and one with gradients of size $0.01$ move by comparable amounts.
+- **Rare features catch up.** A coordinate that has seen few nonzero gradients has a small $s_{t,k}$, so its next
+  nonzero gradient produces a large step.
+
+On the first step both methods move every coordinate by exactly $\eta$ in the direction of $-\sgn(g_{1,k})$ when
+$\epsilon$ is negligible: AdaGrad has $s_{1,k} = g_{1,k}^2$, so $g_{1,k}/\sqrt{s_{1,k}} = \sgn(g_{1,k})$. RMSProp has
+$s_{1,k} = (1 - \rho)g_{1,k}^2$, so its first step is $\eta/\sqrt{1 - \rho} = 3.16\,\eta$ for $\rho = 0.9$.
+
+### AdaGrad's decreasing steps
+
+The sum $s_{t,k}$ never decreases. If the gradients of coordinate $k$ have a roughly constant mean square $G^2$, then
+$s_{t,k} \approx tG^2$ and the step size is $\eta/\sqrt{t}$ in units of the gradient. A step size that decays as
+$1/\sqrt t$ gives AdaGrad a regret bound of order $\sqrt T$ over $T$ steps for convex online problems, and for sparse
+gradients the bound improves with the sparsity <Cite id="duchi2011" />. In training a neural network the early gradients
+are large and the loss is not convex. The accumulated sum from early training keeps the steps small long after they need
+to be, and AdaGrad often stops making progress.
+
+### RMSProp's moving average
+
+RMSProp forgets old gradients. The moving average weights the gradient $j$ steps ago by $(1 - \rho)\rho^j$, so it
+reflects roughly the last $1/(1 - \rho)$ steps: 10 steps for $\rho = 0.9$. The denominator tracks the current
+gradient scale. When the gradient of a coordinate shrinks, $s_{t,k}$ shrinks with it, and the step stays of order $\eta$.
+Tieleman and Hinton presented it as a mini-batch version of Rprop, which uses only the sign of each gradient coordinate
+<Cite id="tieleman2012" />.
+
+Because the step stays of order $\eta$, RMSProp with a fixed $\eta$ does not settle into a minimum. Near the minimum the
+gradient is small, but so is its running root mean square, and the ratio remains near 1 in size. The iterates hover at
+a distance set by $\eta$. A decreasing step size removes this; see
+<NoteLink to="learning-rate-schedules">learning-rate schedules</NoteLink>.
+
+## Coordinates, not directions
+
+Dividing by $\sqrt{\svec}$ multiplies the gradient by the diagonal matrix $\Dmat = \diag(\svec)^{-1/2}$. This is a
+diagonal preconditioner. On a quadratic $L(\thetavec) = \tfrac12\thetavec^\top\Amat\thetavec$ the gradient is
+$\Amat\thetavec$, and preconditioned gradient descent converges at a rate set by the condition number of
+$\Dmat^{1/2}\Amat\Dmat^{1/2}$ instead of $\Amat$.
+
+**Axis-aligned curvature.** Let $\Amat = \diag(\lambda_1, \lambda_2)$. The gradient of coordinate $k$ is
+$\lambda_k\theta_k$, so the running root mean square in coordinate $k$ is proportional to $\lambda_k$ times the size of
+$\theta_k$. The preconditioner divides each coordinate by roughly its own curvature, and the condition number of the
+preconditioned problem is close to 1.
+
+**Rotated curvature.** Rotate the same quadratic by $45°$. With $\lambda_1 = 1$ and $\lambda_2 = 25$ the Hessian becomes
+
+$$
+\Amat = \frac12\begin{pmatrix} 1 + 25 & 1 - 25 \\ 1 - 25 & 1 + 25 \end{pmatrix} = \begin{pmatrix} 13 & -12 \\ -12 & 13 \end{pmatrix}.
+$$
+
+Its eigenvalues are still 1 and 25, but its diagonal entries are equal. Both coordinates see gradients of the same
+typical size, so the preconditioner is close to a multiple of the identity. A multiple of the identity does not change
+the condition number, which stays 25. A diagonal preconditioner can only correct curvature that is aligned with the
+coordinate axes.
+
+<OptimiserComparison initial={['sgd', 'adagrad', 'rmsprop']} />
+
+## Worked example
+
+In the figure, with the default step sizes of $0.03$ for gradient descent ($\eta$ in the figure) and $0.1$ for the
+adaptive methods ($\alpha$ in the figure), and 150 steps, the step counts to reach a loss below $10^{-3}$ are:
+
+| Method           | Valley, axis-aligned | Valley, rotated 45° |
+| ---------------- | -------------------- | ------------------- |
+| gradient descent | 133                  | 133                 |
+| RMSProp          | 34                   | 57                  |
+| AdaGrad          | not within 150       | not within 150      |
+
+AdaGrad's steps at $\eta = 0.1$ decay too quickly: after 150 steps its loss is still $0.24$ on the axis-aligned valley.
+With each method's step size tuned separately over a grid for the fewest steps, AdaGrad needs 6 steps on the
+axis-aligned valley ($\eta \approx 1.4$) and 75 on the rotated one. RMSProp needs 6 ($\eta \approx 0.40$) and 38.
+Nesterov momentum, tuned the same way, needs 10 on both. On the axis-aligned valley the adaptive methods beat every
+method that ignores coordinates; on the rotated valley their advantage is gone.
+
+## Cost
+
+One extra vector the size of the parameters, and an elementwise square, square root and division per step.
+
+## Trade-offs
+
+- **AdaGrad suits sparse, convex problems.** Linear models over sparse features, such as text classifiers, benefit from
+  its per-feature steps and its decay. For deep networks its decay is usually too aggressive.
+- **RMSProp needs a schedule to converge.** With a constant $\eta$ it hovers near a minimum. A decaying step size or
+  averaging the iterates removes the hovering.
+- **Only axis-aligned benefit.** Adaptive methods help when the scales that matter are those of individual parameters.
+  For curvature along combinations of parameters, they behave like gradient descent with a rescaled step size.
+- **Momentum.** RMSProp is often combined with momentum on the scaled gradient. Adding a moving average of the gradient
+  and a bias correction gives <NoteLink to="adam">Adam</NoteLink> <Cite id="kingma2015" />.

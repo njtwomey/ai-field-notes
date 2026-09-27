@@ -1,0 +1,127 @@
+---
+title: Dropout
+kind: technique
+summary: 'Dropout zeroes each unit''s output with probability $p$ in training and scales the rest by $1/(1 - p)$, keeping each activation''s expected value. At test time the network is unchanged. Each step trains one of $2^n$ weight-sharing subnetworks; the test network approximates their average.'
+tags: [deep-learning, training, regularisation, worked-example]
+aliases: [inverted dropout, dropout rate, drop probability, weight scaling inference rule, Monte Carlo dropout, MC dropout]
+requires: [multilayer-perceptron, bernoulli-distribution]
+related: [ridge-regression, data-augmentation, early-stopping, batch-normalisation]
+references: [srivastava2014, hinton2012, gal2016, goodfellow2016]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+During training, **dropout** replaces a layer's activations $\hvec \in \reals^n$ by
+
+$$
+\tilde\hvec = \frac{1}{1 - p}\,\mvec \odot \hvec, \qquad m_k \overset{\text{iid}}{\sim} \Bern(1 - p),
+$$
+
+drawing a new mask $\mvec$ for every example and every step. The **drop probability** $p \in [0, 1)$ is a
+hyperparameter. At test time $\tilde\hvec = \hvec$ <Cite id="srivastava2014" />. This is **inverted dropout**. The
+original formulation left the training activations unscaled and multiplied the outgoing weights by $1 - p$ at test time,
+which gives the same network.
+</Definition>
+
+## Problem
+
+A large network can fit its training set by building units that only work in combination with specific other units.
+Hinton et al. called such dependencies co-adaptations: a feature is useful only in the presence of others, and the
+combination fits noise in the training data <Cite id="hinton2012" />. Averaging the predictions of many separately
+trained networks reduces this overfitting, but training and running many large networks is expensive.
+
+## Mechanism
+
+### Expected activation
+
+Each mask entry $m_k$ is 1 with probability $1 - p$ and 0 with probability $p$, so $\expect[m_k] = 1 - p$ and
+
+$$
+\expect[\tilde h_k] = \frac{1}{1 - p}\,\expect[m_k]\,h_k = h_k.
+$$
+
+The scaling by $1/(1 - p)$ makes the dropped-out activation an unbiased estimate of the original, so the layer above
+sees inputs of the same expected size in training and at test time. The variance is
+$\var(\tilde h_k) = h_k^2\,\var(m_k)/(1 - p)^2 = h_k^2\,p/(1 - p)$: equal to $h_k^2$ for $p = 1/2$.
+
+### The ensemble view
+
+A layer of $n$ units has $2^n$ possible masks. Each mask defines a thinned subnetwork, and all subnetworks share the same
+weights. Each training step trains one randomly sampled subnetwork on one example. Dropout is therefore bagging over an
+exponential number of models with complete weight sharing <Cite id="srivastava2014" />.
+
+The ensemble's prediction would average all $2^n$ subnetworks. Running the full network with unscaled weights, the
+**weight scaling inference rule**, approximates this average in one pass. For some architectures it is exact.
+
+- **Linear layer.** A linear function commutes with expectation: $\expect[\wvec^\top\tilde\hvec] = \wvec^\top\hvec$.
+  The test network's output is exactly the mean output of the ensemble.
+- **Softmax output.** Let the logits of a subnetwork be $\zvec_{\mvec} = \Wmat(\mvec \odot \hvec)$ and consider the
+  geometric mean of the subnetworks' class distributions, renormalised. Its logarithm is, up to a constant,
+
+  $$
+  \frac{1}{2^n}\sum_{\mvec}\log\operatorname{softmax}(\zvec_{\mvec})_c = \frac{1}{2^n}\sum_{\mvec} z_{\mvec,c} -
+  \frac{1}{2^n}\sum_{\mvec}\log\sum_{c'} e^{z_{\mvec,c'}}.
+  $$
+
+  The second term is the same for every class $c$ and disappears in the renormalisation. The first is the average
+  logit, $\Wmat\,\expect[\mvec \odot \hvec] = \Wmat\,(1 - p)\hvec$ for $p = 1/2$, where every mask is equally likely.
+  The renormalised geometric mean is therefore the softmax of the logits of the weight-scaled network
+  <Cite id="hinton2012" />.
+- **Deeper nonlinear networks.** The rule is an approximation, and the test network is not the exact ensemble average.
+  Srivastava et al. compared it with averaging over sampled masks and found the two agreed closely once about 50 masks
+  were averaged <Cite id="srivastava2014" />.
+
+### Dropout as a penalty
+
+For linear regression with dropout on the inputs, the dropout noise can be averaged out analytically, and dropout turns
+into a penalty on the weights.
+
+<Derivation title="Dropout in linear regression is a scaled ridge penalty">
+Let the prediction for one example be $\hat y = \sum_j w_j\tilde x_j$ with $\tilde x_j = m_jx_j/(1 - p)$. Each
+$\tilde x_j$ has mean $x_j$ and variance $x_j^2\,p/(1 - p)$, and the $\tilde x_j$ are independent. So $\hat y$ has mean
+$\wvec^\top\xvec$ and variance $\frac{p}{1 - p}\sum_j w_j^2x_j^2$. The expected squared error is the squared bias plus the
+variance:
+
+$$
+\expect\brack{(y - \hat y)^2} = (y - \wvec^\top\xvec)^2 + \frac{p}{1 - p}\sum_j w_j^2x_j^2.
+$$
+
+Summed over the training set, the penalty on $w_j$ is weighted by $\sum_i x_{ij}^2$, the energy of feature $j$. This is
+<NoteLink to="ridge-regression">ridge regression</NoteLink> with a penalty scaled per feature by the feature's second
+moment, and with strength $p/(1 - p)$ <Cite id="srivastava2014" />.
+</Derivation>
+
+## Worked example
+
+A layer outputs $\hvec = (2, 0, 1, 3)$ and uses $p = 0.5$, so survivors are scaled by 2.
+
+- The mask $\mvec = (1, 0, 0, 1)$ gives $\tilde\hvec = (4, 0, 0, 6)$.
+- Averaged over all 16 masks, each entry of $\tilde\hvec$ equals the corresponding entry of $\hvec$.
+- For a linear regression with weights $\wvec = (1, -2, 0.5, 1)$, input $\xvec = (2, 0, 1, 3)$ and target $y = 3$, the
+  prediction without dropout is $\wvec^\top\xvec = 5.5$ and the squared error is $6.25$. The penalty is
+  $\frac{0.5}{0.5}(1 \cdot 4 + 4 \cdot 0 + 0.25 \cdot 1 + 1 \cdot 9) = 13.25$. The expected squared error under dropout
+  is $6.25 + 13.25 = 19.5$. Averaging the squared error over all 16 masks directly gives $19.5$.
+
+## Cost
+
+Sampling a mask costs one random number per unit per example, and the layer does no extra arithmetic at test time.
+Training is slower in a different way: each step updates a noisy subnetwork, and dropout networks typically need two to
+three times as many steps to converge <Cite id="srivastava2014" />.
+
+## Trade-offs
+
+- **Choice of $p$.** Srivastava et al. used $p = 0.5$ for hidden units and $p = 0.2$ for input units
+  <Cite id="srivastava2014" />. They also suggested widening a layer by the factor $1/(1 - p)$ when adding dropout, so
+  that the expected number of active units stays the same.
+- **Train and test modes differ.** A network left in training mode at test time makes random predictions.
+- **Uncertainty.** Keeping dropout on at test time and averaging $T$ stochastic passes gives a predictive mean and a
+  spread. Gal and Ghahramani interpret this Monte Carlo dropout as approximate Bayesian inference in a Gaussian process
+  <Cite id="gal2016" />.
+- **Recurrent and convolutional layers.** Dropping independent entries of a feature map removes little information,
+  because neighbouring positions are correlated. Variants drop whole channels, or reuse one mask across time steps in a
+  recurrent network.
+- **Other regularisers.** Dropout combines with <NoteLink to="data-augmentation">data augmentation</NoteLink>,
+  <NoteLink to="early-stopping">early stopping</NoteLink> and weight decay. Networks with
+  <NoteLink to="batch-normalisation">batch normalisation</NoteLink> often need less of it, because batch noise already
+  regularises.

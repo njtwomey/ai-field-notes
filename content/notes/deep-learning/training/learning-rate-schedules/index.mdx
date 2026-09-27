@@ -1,0 +1,129 @@
+---
+title: Learning-rate schedules
+kind: technique
+summary: 'A learning-rate schedule varies the step size $\eta_t$ during training. Large early steps make fast progress; small late steps lower the noise floor of stochastic gradients, which scales with $\eta$. Common shapes are step decay, cosine decay and linear warmup. Warmup protects early steps.'
+tags: [optimisation, deep-learning, training, stochastic-gradient-descent, worked-example]
+aliases: [learning rate schedule, step size schedule, learning rate decay, step decay, cosine annealing, cosine decay, learning rate warmup, warmup, warm restarts, SGDR, inverse square root schedule, linear scaling rule]
+requires: [gradient-descent]
+related: [sgd-for-linear-models, layer-normalisation]
+references: [robbins1951, loshchilov2017, goyal2017, vaswani2017, liu2020, xiong2020, kingma2015]
+status: draft
+updated: 2026-09-27
+---
+
+import { ScheduleExplorer } from './ScheduleExplorer'
+
+<Definition>
+A **learning-rate schedule** is a function $t \mapsto \eta_t$ giving the step size used at training step $t$, in
+place of a constant $\eta$. It is usually written as a peak value $\eta_{\max}$ times a shape that depends on $t$ and on
+the planned number of steps $T$. The shape typically rises during a short **warmup** and then **decays** towards zero.
+</Definition>
+
+## Problem
+
+A stochastic gradient is the true gradient plus noise from sampling the mini-batch. With a constant step size the noise
+never averages out, and the iterates settle into a cloud around the minimum whose size grows with $\eta$. A large
+$\eta$ reaches the cloud fast and leaves the loss high. A small $\eta$ gets a lower loss and takes far longer to get
+there.
+
+### The noise floor
+
+Take a one-dimensional quadratic $L(\theta) = \tfrac12\lambda\theta^2$ with curvature $\lambda > 0$, and a stochastic
+gradient $\lambda\theta_t + \xi_t$ whose noise $\xi_t$ has mean 0 and variance $\sigma^2$, independent across steps.
+One step of stochastic gradient descent gives
+
+$$
+\theta_{t+1} = (1 - \eta\lambda)\,\theta_t - \eta\,\xi_t.
+$$
+
+The mean obeys $\expect[\theta_{t+1}] = (1 - \eta\lambda)\expect[\theta_t]$ and decays geometrically, faster for larger
+$\eta$ (up to $\eta\lambda = 1$). The noise term is independent of $\theta_t$, so the second moment obeys
+$\expect[\theta_{t+1}^2] = (1 - \eta\lambda)^2\expect[\theta_t^2] + \eta^2\sigma^2$. For $0 < \eta\lambda < 2$ this
+converges to the fixed point $V$ with $V = (1 - \eta\lambda)^2 V + \eta^2\sigma^2$:
+
+$$
+V = \frac{\eta^2\sigma^2}{1 - (1 - \eta\lambda)^2} = \frac{\eta\,\sigma^2}{\lambda\,(2 - \eta\lambda)}, \qquad
+\expect[L] = \tfrac12\lambda V = \frac{\eta\,\sigma^2}{2\,(2 - \eta\lambda)} \approx \frac{\eta\,\sigma^2}{4}.
+$$
+
+The expected loss at stationarity is proportional to $\eta$. Speed wants a large $\eta$ and final accuracy wants a small
+one. A schedule gets both by starting large and ending small.
+
+For the iterates to converge to the minimiser, the steps must satisfy $\sum_t \eta_t = \infty$ and
+$\sum_t \eta_t^2 < \infty$ <Cite id="robbins1951" />. The first condition lets the iterates travel any distance; the
+second makes the accumulated noise variance, $\sum_t\eta_t^2\sigma^2$, finite. The schedule $\eta_t \propto 1/t$
+satisfies both. Deep-learning schedules are designed for a fixed budget of $T$ steps instead, and do not aim for these
+asymptotic conditions.
+
+## Mechanism
+
+<ScheduleExplorer />
+
+- **Step decay.** Multiply $\eta$ by a factor, usually $0.1$, at fixed points in training. ResNets on ImageNet were
+  trained for 90 epochs with drops at epochs 30, 60 and 80 <Cite id="goyal2017" />. Each drop produces a visible fall in
+  the loss, as the noise cloud shrinks to its new, smaller size.
+- **Cosine decay.** $\eta_t = \eta_{\min} + \tfrac12(\eta_{\max} - \eta_{\min})\paren{1 + \cos(\pi t/T)}$
+  <Cite id="loshchilov2017" />. It stays near the peak for the first part of training, falls fastest in the middle and
+  flattens near $\eta_{\min}$ at the end. It has one hyperparameter besides the peak: the length $T$.
+- **Warm restarts.** SGDR repeats the cosine decay in cycles, resetting $\eta$ to the peak at the start of each, with
+  each cycle optionally longer than the last. The model at the end of each cycle is a usable snapshot
+  <Cite id="loshchilov2017" />.
+- **Inverse square root.** The original transformer used
+  $\eta_t = d^{-1/2}\min\paren{t^{-1/2},\ t\,W^{-3/2}}$ for model width $d$ and $W$ warmup steps: linear growth to
+  step $W$, then decay as $1/\sqrt t$ <Cite id="vaswani2017" />.
+- **Linear warmup.** Any of these can start with $\eta_t = \eta_{\max}\,t/W$ for the first $W$ steps.
+
+## Why warmup helps
+
+**Adam's first steps.** <NoteLink to="adam">Adam</NoteLink> divides each coordinate of the averaged gradient by the root
+of an average of squared gradients. At step 1, after bias correction, the first average is $\gvec_1$ and the second is
+$\gvec_1 \odot \gvec_1$, so the step is $-\alpha\,\sgn(\gvec_1)$: every parameter moves by exactly $\alpha$, whatever its
+gradient's size. For the next few steps the second-moment estimate is an average of a handful of squared gradients. Its
+reciprocal square root has high variance, and parameters whose early gradients happened to be small receive steps many
+times larger than they will later. Liu et al. showed that this variance is unbounded in the first steps and shrinks as
+the estimate accumulates samples, and that warmup works by keeping $\alpha$ small while it is large
+<Cite id="liu2020" />. With a linear warmup over $W$ steps, the first step has size $\alpha/W$ instead of $\alpha$.
+
+**Large batches.** Goyal et al. trained ResNet-50 with batches of 8192 images by scaling the learning rate in proportion
+to the batch size, the linear scaling rule. Starting at the scaled rate hurt optimisation early in training, when the
+network changes fastest. Increasing the rate linearly from the small-batch value over the first 5 epochs fixed this, and matched
+the small-batch accuracy <Cite id="goyal2017" />.
+
+**Post-LN transformers.** In a transformer that normalises after each residual addition, the gradients of the parameters
+near the output are large at initialisation. Without warmup the first updates are too large. Moving the normalisation
+inside the residual branch removes the need for warmup <Cite id="xiong2020" />; see
+<NoteLink to="layer-normalisation">layer normalisation</NoteLink>.
+
+## Worked example: the noise floor
+
+Take $\lambda = 1$, $\sigma = 1$ and a start at $\theta_0 = 1$.
+
+| $\eta$ | Steps to shrink the mean 100-fold, $\ln 100/(-\ln(1 - \eta))$ | Stationary $V = \eta/(2 - \eta)$ | Stationary $\expect[L]$ |
+| ------ | ------------------------------------------------------------- | -------------------------------- | ----------------------- |
+| 0.1    | 44                                                            | 0.0526                           | 0.0263                  |
+| 0.01   | 458                                                           | 0.00503                          | 0.00251                 |
+
+A simulation of 20 000 independent chains for 3000 steps gives stationary variances $0.0519$ and $0.00504$. The larger
+step reaches its floor ten times faster, and its floor is ten times higher. Running 44 steps at $\eta = 0.1$ and then
+switching to $\eta = 0.01$ reaches the lower floor within a few hundred more steps, and the loss falls by a factor of 10
+shortly after the switch. This is the drop seen in the loss curve of step-decay training.
+
+## Cost
+
+A schedule costs nothing to compute. It adds hyperparameters: the peak, the warmup length, the decay shape and, for
+cosine and step decay, the planned length $T$. A schedule tuned for one $T$ must be re-tuned if training is extended,
+because cosine and step decay are defined relative to it.
+
+## Trade-offs
+
+- **Fixed horizon.** Cosine decay reaches its minimum only at step $T$. Stopping early leaves a large step size, and
+  continuing past $T$ requires a new decay. Schedules that hold a constant rate and decay only at the end avoid this.
+- **Warmup length.** Too short a warmup does not prevent early instability; too long wastes steps at a small step size.
+  Warmup of a few percent of training is common.
+- **Interaction with momentum and weight decay.** The effective step of momentum is $\eta/(1 - \beta)$, so changing
+  $\beta$ changes the schedule's effect. With decoupled weight decay, decay per step is proportional to $\eta_t$, so the
+  schedule also schedules the regularisation; see
+  <NoteLink to="decoupled-weight-decay">decoupled weight decay</NoteLink>.
+- **Schedules and linear models.** For convex problems such as
+  <NoteLink to="sgd-for-linear-models">SGD for linear models</NoteLink>, the classical $1/t$ schedules with guarantees
+  are the norm; the budgeted schedules above come from deep-learning practice.

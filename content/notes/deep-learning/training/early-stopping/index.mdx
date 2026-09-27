@@ -1,0 +1,91 @@
+---
+title: Early stopping
+kind: technique
+summary: 'Early stopping tracks a validation loss during training, stops once it has not improved for a set number of evaluations, and returns the best parameters. For gradient descent on a quadratic, stopping after $\tau$ steps of size $\eta$ acts like an L2 penalty of strength about $1/(\tau\eta)$.'
+tags: [deep-learning, training, regularisation, model-selection, worked-example]
+aliases: [patience, validation-based early stopping, best checkpoint]
+requires: [gradient-descent, ridge-regression]
+related: [data-augmentation, learning-rate-schedules, time-series-cross-validation]
+references: [prechelt1998, goodfellow2016]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Early stopping** splits off a validation set, evaluates the validation loss every $k$ training steps, and keeps a copy
+of the parameters with the lowest validation loss seen so far. Training stops when the validation loss has not improved
+for $P$ consecutive evaluations, the **patience**. The returned model is the saved copy, not the last iterate
+<Cite id="prechelt1998" />.
+</Definition>
+
+## Problem
+
+A network with enough parameters to memorise its training set reaches low training loss by fitting noise. The training
+loss falls throughout training. The loss on unseen data typically falls, reaches a minimum, and rises as the network
+starts to fit the noise. The number of training steps is therefore a hyperparameter that controls capacity, and the best
+value is not known in advance.
+
+## Mechanism
+
+Training from small initial weights, the parameters move away from the initialisation step by step. Stopping early
+limits how far they travel. For a quadratic loss the limit is equivalent to an L2 penalty
+<Cite id="goodfellow2016" />.
+
+Take the loss $L(\thetavec) = \tfrac12(\thetavec - \thetavec^*)^\top\Hmat(\thetavec - \thetavec^*)$ with minimiser
+$\thetavec^*$ and Hessian $\Hmat$ with eigenvalues $\lambda_k > 0$, and start gradient descent at $\thetavec_0 = \zeros$
+with step size $\eta < 1/\lambda_{\max}$. In the eigenbasis of $\Hmat$ each coordinate evolves independently:
+$\theta_{t+1,k} - \theta_k^* = (1 - \eta\lambda_k)(\theta_{t,k} - \theta_k^*)$. After $\tau$ steps,
+
+$$
+\theta_{\tau,k} = \brack{1 - (1 - \eta\lambda_k)^\tau}\,\theta_k^*.
+$$
+
+Adding the penalty $\tfrac{\alpha}{2}\norm{\thetavec}^2$ and minimising exactly, as in
+<NoteLink to="ridge-regression">ridge regression</NoteLink>, gives
+$\theta_k = \lambda_k\theta_k^*/(\lambda_k + \alpha) = \brack{1 - \alpha/(\lambda_k + \alpha)}\theta_k^*$. The two
+shrinkage factors agree when $(1 - \eta\lambda_k)^\tau = \alpha/(\lambda_k + \alpha)$. For $\eta\lambda_k \ll 1$ and
+$\lambda_k \ll \alpha$, take logarithms and use $\ln(1 + x) \approx x$ for small $x$:
+$\tau\ln(1 - \eta\lambda_k) \approx -\tau\eta\lambda_k$ and $\ln\paren{\alpha/(\lambda_k + \alpha)} \approx -\lambda_k/\alpha$.
+Equating,
+
+$$
+\alpha \approx \frac{1}{\tau\eta}.
+$$
+
+Directions of high curvature are fitted within a few steps; directions of low curvature, where the data carries little
+information about $\thetavec$, stay near zero. The number of steps plays the role of the inverse penalty strength.
+
+## Worked example
+
+With $\eta = 0.01$ and $\tau = 100$, the matching penalty is $\alpha \approx 1/(100 \times 0.01) = 1$. The fraction of
+$\theta_k^*$ recovered in each eigen-direction:
+
+| Curvature $\lambda_k$ | Early stopping, $1 - (1 - 0.01\lambda_k)^{100}$ | Ridge, $\lambda_k/(\lambda_k + 1)$ |
+| --------------------- | ------------------------------------------------ | ---------------------------------- |
+| 0.01                  | 0.0100                                           | 0.0099                             |
+| 0.1                   | 0.0952                                           | 0.0909                             |
+| 1                     | 0.634                                            | 0.500                              |
+| 10                    | 1.000                                            | 0.909                              |
+
+The two agree where $\lambda_k \ll \alpha$, as the derivation assumed. In high-curvature directions early stopping shrinks
+less than ridge. It behaves more like a sharp cut-off: directions with $\lambda_k \gg \alpha$ are recovered almost fully.
+
+## Cost
+
+Evaluating the validation loss costs one forward pass over the validation set per evaluation, and keeping the best copy
+costs one extra set of parameters. Early stopping saves the training steps after the stopping point, which often
+outweighs both.
+
+## Trade-offs
+
+- **Noisy validation curves.** The validation loss of a network rarely has a single minimum. It fluctuates and can have
+  several local minima. Prechelt compared stopping criteria based on the relative rise above the best loss, on that rise
+  relative to training progress, and on consecutive increases, and found that slower criteria bought small improvements
+  in generalisation at a large cost in training time <Cite id="prechelt1998" />.
+- **Data spent on validation.** The validation set is not used for training. A common remedy is to record the stopping
+  step, then retrain on all the data for that many steps.
+- **Interaction with schedules.** With a decaying
+  <NoteLink to="learning-rate-schedules">learning-rate schedule</NoteLink>, the validation loss often drops at the end of
+  the schedule. Stopping in the middle of a cosine schedule leaves a model trained at a large step size.
+- **Selection bias.** Choosing the best of many validation evaluations makes the reported validation loss optimistic.
+  Report performance on a separate test set.

@@ -1,0 +1,114 @@
+---
+title: Decoupled weight decay
+kind: technique
+summary: 'Decoupled weight decay shrinks every weight by a fixed fraction per step, $\thetavec \leftarrow \thetavec - \eta\lambda\thetavec$, outside the gradient step. For SGD this equals an L2 penalty. For Adam it does not: the penalty''s gradient is divided by $\sqrt{\hat\vvec}$, weakening decay where gradients are large. AdamW decays directly.'
+tags: [optimisation, deep-learning, training, regularisation, worked-example]
+aliases: [AdamW, decoupled weight decay regularization, L2 regularisation versus weight decay, SGDW]
+requires: [adam, ridge-regression]
+related: [learning-rate-schedules, adagrad-and-rmsprop]
+references: [loshchilov2019, kingma2015, vanlaarhoven2017]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Weight decay** multiplies the parameters by $1 - \eta\lambda$ at every step, with decay rate $\lambda \ge 0$ and step
+size $\eta$, in addition to the optimiser's gradient step. **Decoupled** weight decay applies this shrinkage outside
+the optimiser's gradient processing. For Adam, the decoupled method is **AdamW**:
+
+$$
+\thetavec_t = \thetavec_{t-1} - \eta_t\paren{\alpha\,\frac{\hat\mvec_t}{\sqrt{\hat\vvec_t} + \epsilon} + \lambda\,\thetavec_{t-1}},
+$$
+
+where $\hat\mvec_t$ and $\hat\vvec_t$ are Adam's bias-corrected moment estimates, computed from the loss gradient only,
+and $\eta_t$ is a schedule multiplier <Cite id="loshchilov2019" />.
+</Definition>
+
+## Problem
+
+An L2 penalty $\tfrac{\lambda}{2}\norm{\thetavec}^2$ added to the loss pulls every weight towards zero, as in
+<NoteLink to="ridge-regression">ridge regression</NoteLink>. Deep-learning libraries long implemented "weight decay" in
+every optimiser by adding $\lambda\thetavec$ to the gradient, which is exactly the gradient of that penalty. For
+gradient descent the two are the same. For adaptive optimisers they are not, and the L2 version regularises poorly
+<Cite id="loshchilov2019" />.
+
+## Mechanism
+
+### Gradient descent: the two coincide
+
+With the penalty, the gradient is $\gvec_t + \lambda\thetavec_{t-1}$, where $\gvec_t$ is the gradient of the unpenalised
+loss. One step of gradient descent is
+
+$$
+\thetavec_t = \thetavec_{t-1} - \eta\paren{\gvec_t + \lambda\thetavec_{t-1}} = (1 - \eta\lambda)\,\thetavec_{t-1} - \eta\,\gvec_t.
+$$
+
+This is a gradient step on the unpenalised loss plus a shrinkage by the factor $1 - \eta\lambda$. An L2 penalty with
+coefficient $\lambda$ and a weight decay of $\eta\lambda$ per step are the same algorithm. The same holds with momentum,
+up to the momentum's averaging of the penalty term.
+
+### Adam: the penalty is rescaled per coordinate
+
+Adam divides its averaged gradient by $\sqrt{\hat\vvec_t}$ coordinatewise; see <NoteLink to="adam">Adam</NoteLink>.
+With the penalty folded into the gradient, the averaged gradient includes $\lambda\thetavec$, and since the averaging
+is linear the penalty's share of the step in coordinate $k$ is approximately
+
+$$
+\alpha\,\frac{\lambda\,\theta_k}{\sqrt{\hat v_k} + \epsilon}.
+$$
+
+The effective decay rate of coordinate $k$ is $\alpha\lambda/\sqrt{\hat v_k}$. It depends on the history of that
+coordinate's gradients. Weights whose loss gradients are large, or have been large, have a large $\hat v_k$ and are
+barely decayed. Weights whose gradients are small are decayed strongly. No choice of $\lambda$ gives a uniform
+shrinkage, so the L2 penalty in Adam is not equivalent to weight decay of any rate <Cite id="loshchilov2019" />. The
+same argument applies to AdaGrad and RMSProp.
+
+### AdamW
+
+AdamW computes $\hat\mvec_t$ and $\hat\vvec_t$ from the loss gradient alone and subtracts $\eta_t\lambda\thetavec_{t-1}$
+separately. Every coordinate shrinks by the same factor $1 - \eta_t\lambda$ per step. The decay is multiplied by the
+schedule $\eta_t$, so it decays with the learning rate; see
+<NoteLink to="learning-rate-schedules">learning-rate schedules</NoteLink>. Loshchilov and Hutter found that with
+decoupled decay, the best $\lambda$ depends much less on the step size, so the two can be tuned separately, and that
+decoupled decay let Adam compete with SGD with momentum in test error on image classification
+<Cite id="loshchilov2019" />.
+
+## Worked example
+
+Take two weights, both equal to 1, in a model trained with Adam at $\alpha = 10^{-3}$ and $\lambda = 10^{-2}$. For
+AdamW, use the library convention in which the decay per step is $\alpha\lambda = 10^{-5}$.
+Suppose the running root mean square of the loss gradient is $\sqrt{\hat v_1} = 10$ for the first weight and
+$\sqrt{\hat v_2} = 0.01$ for the second, and that the penalty is too small to change these values.
+
+| Method              | Decay of weight 1 per step            | Decay of weight 2 per step               |
+| ------------------- | ------------------------------------- | ---------------------------------------- |
+| L2 penalty in Adam  | $10^{-3}\cdot10^{-2}/10 = 10^{-6}$    | $10^{-3}\cdot10^{-2}/0.01 = 10^{-3}$     |
+| AdamW, decay $\alpha\lambda$ | $10^{-3}\cdot10^{-2} = 10^{-5}$ | $10^{-5}$                          |
+
+Under the L2 penalty the second weight decays 1000 times faster than the first, and 100 times faster than intended. After
+1000 steps the first weight has lost $0.1\%$ of its value to the penalty and the second about $63\%$, since
+$(1 - 10^{-3})^{1000} = 0.368$. Under AdamW both have lost $1 - (1 - 10^{-5})^{1000} = 1.0\%$.
+
+## Weight decay with normalisation layers
+
+A weight matrix followed by <NoteLink to="batch-normalisation">batch normalisation</NoteLink> or layer normalisation
+can be scaled by any $c > 0$ without changing the network's output. For such weights, weight decay does not constrain
+the function the network computes. It does change training: the gradient of a scale-invariant loss is orthogonal to the
+weights and scales as $1/\norm{\thetavec}$, so the change in direction per step is proportional to
+$\eta/\norm{\thetavec}^2$. Shrinking $\norm{\thetavec}$ raises this effective learning rate. Weight decay on normalised
+layers acts through the learning rate, not as a regulariser of the function <Cite id="vanlaarhoven2017" />.
+
+## Cost
+
+One multiply-add per parameter per step, the same as the L2 gradient term.
+
+## Trade-offs
+
+- **Which parameters to decay.** Biases and the gains of normalisation layers have few degrees of freedom and do not
+  benefit from shrinkage towards zero. Many training recipes exclude them from decay.
+- **Two conventions for the rate.** In the formula above the decay per step is $\eta_t\lambda$, with $\eta_t$ a
+  multiplier that is 1 at the schedule's peak. Libraries such as PyTorch multiply $\lambda$ by the learning rate itself,
+  so $\lambda$ values do not transfer between conventions without rescaling.
+- **Interpretation.** For gradient descent, weight decay is the L2 penalty of ridge regression and has a Bayesian reading
+  as a Gaussian prior on the weights. For AdamW it has no such reading: it is a shrinkage step, not the gradient of a
+  term in the loss that Adam minimises.

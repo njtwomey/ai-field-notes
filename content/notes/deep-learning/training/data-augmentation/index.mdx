@@ -1,0 +1,88 @@
+---
+title: Data augmentation
+kind: technique
+summary: 'Data augmentation trains on randomly transformed copies $(T(\xvec), y)$ of each example, using transformations $T$ that preserve the label, such as crops and flips. It encodes known invariances and regularises: for a linear model, input noise of variance $\sigma^2$ is exactly an L2 penalty $\sigma^2\norm{\wvec}^2$.'
+tags: [deep-learning, training, regularisation, computer-vision, worked-example]
+aliases: [augmentation, training with noise, noise injection, label-preserving transformation, test-time augmentation]
+requires: [ridge-regression]
+related: [spectrogram-augmentation, classic-cnn-architectures]
+references: [shorten2019, simard2003, krizhevsky2012, bishop1995]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Data augmentation** replaces each training example $(\xvec, y)$ at each use by $(T(\xvec), y)$, where $T$ is drawn at
+random from a family $\mathcal{T}$ of transformations chosen so that they do not change the correct label. Training
+minimises the expected loss over both the data and the transformations,
+$\expect_{(\xvec, y)}\expect_{T}\brack{\ell(f(T(\xvec)), y)}$ <Cite id="shorten2019" />.
+</Definition>
+
+## Problem
+
+A model with many parameters overfits a small training set. Collecting more labelled data is the direct fix and is
+often expensive. Many tasks come with invariances known in advance: a cat photographed slightly to the left, or
+mirrored, is still a cat. A model has to learn such invariances from data unless they are built into the architecture or
+the data.
+
+## Mechanism
+
+Each epoch shows the model a different transformed version of every example, so the effective training set is much
+larger than the stored one, and the model is penalised for any output that changes under a transformation in
+$\mathcal{T}$.
+
+Common families:
+
+- **Images.** Random crops and horizontal flips, colour and brightness changes, small rotations and elastic distortions.
+  Elastic distortions set the state of the art for handwritten digits in 2003 <Cite id="simard2003" />. The 2012
+  ImageNet network of Krizhevsky et al. trained on random $224 \times 224$ crops of $256 \times 256$ images and their
+  mirror images, enlarging the training set by a factor of 2048, and on perturbations of the colour intensities
+  <Cite id="krizhevsky2012" />.
+- **Audio.** Time shifts, added noise, speed changes, and masking of frequency bands and time intervals in the
+  spectrogram; see <NoteLink to="spectrogram-augmentation">spectrogram augmentation</NoteLink>.
+- **Text.** Replacing words with synonyms, or translating to another language and back.
+- **Any input.** Adding small random noise.
+
+### Noise as a penalty
+
+Adding noise to the inputs is the simplest augmentation, and its effect can be computed. Let the model be linear,
+$f(\xvec) = \wvec^\top\xvec$, and train on $\tilde\xvec = \xvec + \epsilonvec$ with $\expect[\epsilonvec] = \zeros$ and
+$\cov(\epsilonvec) = \sigma^2\I$, drawn independently of the data. The squared error is
+$(y - \wvec^\top\xvec - \wvec^\top\epsilonvec)^2$. Expanding and taking the expectation over $\epsilonvec$, the cross term
+vanishes because $\expect[\epsilonvec] = \zeros$, and $\expect[(\wvec^\top\epsilonvec)^2] = \wvec^\top\cov(\epsilonvec)\wvec
+= \sigma^2\norm{\wvec}^2$. So
+
+$$
+\expect_{\epsilonvec}\brack{(y - \wvec^\top\tilde\xvec)^2} = (y - \wvec^\top\xvec)^2 + \sigma^2\norm{\wvec}^2.
+$$
+
+Training with input noise minimises the squared error plus an L2 penalty on the weights: it is
+<NoteLink to="ridge-regression">ridge regression</NoteLink> with penalty $\sigma^2$ per example. For a nonlinear model a
+second-order Taylor expansion gives, to order $\sigma^2$, a penalty $\sigma^2\norm{\nabla_{\xvec} f}^2$ on the model's
+sensitivity to its input, plus a term that is negligible near the minimum of the training loss <Cite id="bishop1995" />.
+Augmentation with other transformations penalises sensitivity along the directions those transformations move the
+input.
+
+## Worked example
+
+Take $\wvec = (1, -2)$, $\xvec = (1, 1)$, $y = 0$ and noise with $\sigma = 0.5$. Without noise, $\wvec^\top\xvec = -1$
+and the squared error is 1. The penalty is $\sigma^2\norm{\wvec}^2 = 0.25 \times 5 = 1.25$, so the expected squared error
+under noise is $2.25$. Averaging the squared error over 2 million noise draws gives $2.2499$.
+
+## Cost
+
+Transformations are computed on the fly, usually on the CPU while the accelerator trains on the previous batch. They
+add no parameters and no inference cost. Training may need more epochs, because each epoch sees a harder, more varied
+dataset.
+
+## Trade-offs
+
+- **Label-preserving is task-specific.** A horizontal flip preserves "cat" but turns the letter "b" into "d" and reverses
+  the reading direction of text. A rotation by $180°$ turns a 6 into a 9. Every transformation must be checked against the
+  task.
+- **Strength.** Weak transformations add little; strong ones move examples off the data distribution and can lower
+  accuracy on clean inputs.
+- **Test-time augmentation.** Averaging the predictions for several transformed copies of a test input often improves
+  accuracy, at a proportional inference cost.
+- **Not a substitute for coverage.** Augmentation can only express invariances that someone specified. It does not
+  supply variation that the transformations cannot generate, such as new object types or new recording conditions.

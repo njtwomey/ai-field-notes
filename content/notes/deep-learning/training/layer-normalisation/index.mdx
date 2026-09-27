@@ -1,0 +1,136 @@
+---
+title: Layer normalisation
+kind: technique
+summary: 'Layer normalisation standardises the $d$ features of one example, $\hat\xvec = (\xvec - \mu)/\sqrt{\sigma^2 + \epsilon}$ with $\mu$ and $\sigma^2$ taken over features, then applies a learned per-feature scale and shift. It does not depend on the batch. RMSNorm divides by the root mean square only, without centring.'
+tags: [deep-learning, training, normalisation, transformers, worked-example]
+aliases: [LayerNorm, LN, layer norm, RMSNorm, root mean square normalisation, root mean square layer normalization]
+requires: [multilayer-perceptron, backpropagation]
+related: [transformer, recurrent-neural-network, residual-connections]
+references: [ba2016, zhang2019, xiong2020, ioffe2015]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For one example's vector of pre-activations $\xvec \in \reals^d$, **layer normalisation** computes
+
+$$
+\mu = \frac1d\sum_{k=1}^d x_k, \qquad \sigma^2 = \frac1d\sum_{k=1}^d (x_k - \mu)^2, \qquad
+\operatorname{LN}(\xvec) = \gammavec \odot \frac{\xvec - \mu\ones}{\sqrt{\sigma^2 + \epsilon}} + \betavec,
+$$
+
+where $\gammavec, \betavec \in \reals^d$ are learned and $\epsilon$ is a small constant <Cite id="ba2016" />.
+**RMSNorm** drops the centring and the shift: $\operatorname{RMSNorm}(\xvec) = \gammavec \odot \xvec/r$ with
+$r = \sqrt{\frac1d\sum_k x_k^2 + \epsilon}$ <Cite id="zhang2019" />. Both compute the same function in training and at
+inference.
+</Definition>
+
+## Problem
+
+<NoteLink to="batch-normalisation">Batch normalisation</NoteLink> standardises each feature using statistics of the
+mini-batch. That makes each example's output depend on the other examples, requires running averages for inference,
+and fails with small batches. It also fits recurrent networks poorly: the statistics would have to be kept separately
+for every time step, and sequences in a batch have different lengths. Layer normalisation keeps the benefit of a
+controlled scale and removes the dependence on the batch <Cite id="ba2016" />.
+
+## Mechanism
+
+Layer normalisation takes its statistics across the features of one example, where batch normalisation takes them
+across the examples of one feature. For a batch stored as a $B \times d$ matrix, batch normalisation normalises each
+column and layer normalisation each row. Each example is processed independently, so the layer is identical in training
+and inference and works with a batch of one.
+
+In a <NoteLink to="transformer">transformer</NoteLink> the normalisation is applied to each token's vector separately.
+In a <NoteLink to="recurrent-neural-network">recurrent network</NoteLink> it is applied to the summed inputs of the
+recurrent cell at each time step, with the same $\gammavec$ and $\betavec$ at every step.
+
+### Invariances
+
+The output of $\operatorname{LN}$ is unchanged when the input $\xvec$ is shifted by a constant $c\ones$, since $\mu$ shifts by $c$ and
+$\sigma$ does not change. It is unchanged when $\xvec$ is scaled by $a > 0$, since both $\xvec - \mu\ones$ and $\sigma$
+scale by $a$ (ignoring $\epsilon$). If $\xvec = \Wmat\hvec$, scaling the whole weight matrix $\Wmat$ therefore has no
+effect, and the gradient with respect to $\Wmat$ is orthogonal to $\Wmat$, by the same argument as for batch
+normalisation. Layer normalisation is not invariant to rescaling one feature, or one row of $\Wmat$: that changes $\mu$
+and $\sigma$ for every feature. Batch normalisation is invariant to rescaling one feature, because each feature has its
+own statistics <Cite id="ba2016" />.
+
+| Property                             | Batch norm     | Layer norm | RMSNorm    |
+| ------------------------------------ | -------------- | ---------- | ---------- |
+| statistics over                      | examples       | features   | features   |
+| same in training and inference       | no             | yes        | yes        |
+| invariant to scaling all of $\Wmat$  | yes            | yes        | yes        |
+| invariant to scaling one row of $\Wmat$ | yes         | no         | no         |
+| invariant to shifting $\xvec$ by $c\ones$ | no | yes | no |
+
+### Backward pass
+
+Write $s = \sqrt{\sigma^2 + \epsilon}$, $\hat\xvec = (\xvec - \mu\ones)/s$, and $\gvec' = \gammavec \odot \gvec$ for
+the incoming gradient $\gvec = \partial\ell/\partial\operatorname{LN}(\xvec)$ scaled by the gains. The derivation is the one for batch
+normalisation with the roles of examples and features exchanged:
+
+$$
+\frac{\partial\ell}{\partial\xvec} = \frac1s\paren{\gvec' - \frac1d\paren{\ones^\top\gvec'}\ones -
+\frac1d\paren{\hat\xvec^\top\gvec'}\hat\xvec}.
+$$
+
+The result is orthogonal to $\ones$ and to $\hat\xvec$, which is the differential form of the two invariances.
+
+## RMSNorm
+
+RMSNorm keeps the scale invariance and drops the shift invariance. Its gradient follows from
+$y_k = \gamma_k x_k/r$ and $\partial r/\partial x_k = x_k/(d\,r)$. With $\hat\xvec = \xvec/r$,
+
+$$
+\frac{\partial\ell}{\partial x_k} = \frac{\gamma_k g_k}{r} - \sum_{j=1}^d \frac{\gamma_j g_j x_j}{r^2}\,\frac{x_k}{d\,r}
+= \frac1r\paren{g'_k - \hat x_k\,\frac1d\,\hat\xvec^\top\gvec'}.
+$$
+
+This is the layer-normalisation gradient without the mean term. It is orthogonal to $\xvec$, so it cannot change the
+scale of $\xvec$ to first order. Zhang and Sennrich argued that the re-centring of layer normalisation is not what makes
+it work, and found that RMSNorm matched its accuracy while reducing running time by 7% to 64% across their models
+<Cite id="zhang2019" />. RMSNorm needs one reduction over the features instead of two, and has half the parameters.
+Many recent large language models use it.
+
+## Worked example
+
+Take one example with $d = 4$ features $\xvec = (1, 2, 3, 6)$, $\gammavec = \ones$, $\betavec = \zeros$ and
+$\epsilon = 0$.
+
+- **Layer normalisation.** $\mu = 3$ and $\sigma^2 = (4 + 1 + 0 + 9)/4 = 3.5$, so $s = 1.871$ and
+  $\operatorname{LN}(\xvec) = (-1.069, -0.535, 0, 1.604)$. The output has mean 0 and mean square 1.
+- **RMSNorm.** $r = \sqrt{(1 + 4 + 9 + 36)/4} = \sqrt{12.5} = 3.536$, so
+  $\operatorname{RMSNorm}(\xvec) = (0.283, 0.566, 0.849, 1.697)$. The output has mean square 1 but mean $0.849$: the
+  offset of the input survives.
+
+For the loss $\ell = y_1$ under RMSNorm, $\gvec = (1, 0, 0, 0)$, $\hat\xvec^\top\gvec/d = 0.283/4 = 0.0707$, and the
+formula gives $\partial\ell/\partial\xvec = (0.277, -0.011, -0.017, -0.034)$, which matches a finite-difference check.
+Its dot product with $\xvec$ is zero.
+
+## Placement in residual networks
+
+A residual block can normalise after the addition or inside the branch.
+
+- **Post-LN**, as in the original transformer: $\xvec_{\ell+1} = \operatorname{LN}(\xvec_\ell + F(\xvec_\ell))$. Every block's
+  output passes through a normalisation, so there is no pure identity path from the output back to the input.
+- **Pre-LN**: $\xvec_{\ell+1} = \xvec_\ell + F(\operatorname{LN}(\xvec_\ell))$. The residual stream is a sum of branch outputs, and
+  the identity path is exact.
+
+Xiong et al. showed that at initialisation the gradients of the last layers of a post-LN transformer are large, which is
+why post-LN needs a learning-rate warmup. Pre-LN transformers have well-behaved gradients at initialisation and train
+without warmup <Cite id="xiong2020" />. See <NoteLink to="residual-connections">residual connections</NoteLink> and
+<NoteLink to="learning-rate-schedules">learning-rate schedules</NoteLink>.
+
+## Cost
+
+Two reductions over the $d$ features per example (one for RMSNorm) and $2d$ parameters ($d$ for RMSNorm). The layer is
+memory-bound rather than compute-bound, so its cost in practice is dominated by reading and writing the activations.
+
+## Trade-offs
+
+- **Convolutional networks.** Normalising all channels and positions of an image together removes differences between
+  channels that the network may need. Batch normalisation remains the usual choice in convolutional networks trained
+  with large batches.
+- **Pre-LN output scale.** In a pre-LN stack nothing normalises the residual stream itself, which grows with depth. A
+  final normalisation layer before the output head is needed.
+- **Mixed precision.** The mean square $\frac1d\sum x_k^2$ can overflow in 16-bit arithmetic for large activations.
+  Implementations accumulate it in 32 bits.
