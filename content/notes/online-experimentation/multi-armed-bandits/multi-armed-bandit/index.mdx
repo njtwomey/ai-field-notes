@@ -1,0 +1,216 @@
+---
+title: Multi-armed bandit
+kind: concept
+summary: 'A multi-armed bandit is a sequential decision problem. In each of $T$ rounds a learner picks one of $K$ arms and sees only that arm''s random reward. Regret, $R_T = T\mu^* - \expect[\sum_t X_t]$, is the reward lost to not always pulling the best arm; good algorithms keep it of order $\log T$.'
+tags: [bandits, experimentation, online-learning, sequential-decision-making]
+aliases: [multi-armed bandit problem, MAB, stochastic bandit, K-armed bandit, pseudo-regret, exploration-exploitation trade-off, Lai–Robbins lower bound, regret decomposition]
+requires: [expectation, kl-divergence]
+related: [ab-test, bernoulli-distribution]
+references: [lattimore2020, lai1985, robbins1952, bubeck2012, nie2018]
+status: draft
+updated: 2026-09-27
+---
+
+import { BanditSimulator } from '../_shared/BanditSimulator'
+
+<Definition>
+A **stochastic $K$-armed bandit** is a set of $K$ reward distributions $\nu_1, \dots, \nu_K$ on $\reals$ with means
+$\mu_1, \dots, \mu_K$. In each round $t = 1, \dots, T$ a learner chooses an arm $A_t \in \set{1, \dots, K}$, using
+only the arms and rewards of rounds $1$ to $t - 1$, and receives a reward $X_t$ drawn from $\nu_{A_t}$, independent of
+everything else given $A_t$. The learner's **regret** after $T$ rounds is
+
+$$
+R_T = T\mu^* - \expect\brack{\sum_{t=1}^{T} X_t}, \qquad \mu^* = \max_i \mu_i,
+$$
+
+the expected reward lost to not pulling an optimal arm in every round <Cite id="lattimore2020" />.
+</Definition>
+
+## The problem
+
+The name comes from a row of slot machines, each a "one-armed bandit", with unknown payout rates. A gambler with $T$
+coins wants to win as much as possible. Each coin spent on an arm returns a reward from that arm only, so the gambler
+learns about an arm only by playing it. Robbins posed the problem in this form in 1952, as a model of the sequential
+design of experiments <Cite id="robbins1952" />.
+
+The same structure appears whenever choices are made repeatedly and each choice reveals information about itself only.
+
+- A website shows one of $K$ page layouts to each visitor and observes whether that visitor converts.
+- A clinical trial assigns each patient one of $K$ treatments and observes that patient's outcome.
+- A recommender chooses one item to show and observes a click or no click on that item.
+
+The learner faces the **exploration-exploitation trade-off**. Exploiting means pulling the arm with the highest
+estimated mean, which earns reward now. Exploring means pulling an arm whose estimate is uncertain, which may earn
+less now but improves later choices. An algorithm that never explores can lock onto a suboptimal arm forever after an
+unlucky start. An algorithm that explores at a constant rate keeps paying for information it no longer needs.
+
+## Policies and feedback
+
+A **policy** maps the history $H_{t-1} = (A_1, X_1, \dots, A_{t-1}, X_{t-1})$ to a distribution over arms, from which
+$A_t$ is drawn. The feedback is **bandit feedback**: the learner sees $X_t$ but not the rewards the other arms would
+have paid. This is what separates a bandit from supervised learning, where every label is revealed, and from the
+full-information "experts" setting, where the rewards of all arms are revealed after each round.
+
+Two counts appear throughout the theory. $N_i(t) = \sum_{s=1}^{t} \indicator\set{A_s = i}$ is the number of pulls of
+arm $i$ in the first $t$ rounds. $\hat\mu_i(t)$ is the average of the rewards from those pulls, the **empirical mean**
+of arm $i$.
+
+## Regret and the gaps
+
+The **gap** of arm $i$ is $\Delta_i = \mu^* - \mu_i \ge 0$. An arm with $\Delta_i = 0$ is optimal, and pulling it costs
+nothing in expectation.
+
+The **pseudo-regret** is the random quantity $\bar R_T = \sum_{t=1}^{T} \Delta_{A_t} = T\mu^* - \sum_{t=1}^{T}\mu_{A_t}$.
+It charges each round the expected shortfall of the arm chosen, not the shortfall of the reward actually drawn. The
+expected regret equals the expected pseudo-regret. Given the history, the reward $X_t$ has mean $\mu_{A_t}$, so by the
+<NoteLink to="law-of-total-expectation">law of total expectation</NoteLink>
+$\expect[X_t] = \expect[\expect[X_t \mid H_{t-1}, A_t]] = \expect[\mu_{A_t}]$, and therefore
+
+$$
+R_T = T\mu^* - \sum_{t=1}^{T}\expect[\mu_{A_t}] = \expect\brack{\bar R_T}.
+$$
+
+Grouping the rounds by the arm pulled gives the **regret decomposition**. The pseudo-regret is a sum over rounds of
+$\Delta_{A_t} = \sum_i \Delta_i \indicator\set{A_t = i}$. Swapping the two sums,
+
+$$
+\bar R_T = \sum_{t=1}^{T}\sum_{i=1}^{K}\Delta_i\indicator\set{A_t = i} = \sum_{i=1}^{K}\Delta_i N_i(T), \qquad
+R_T = \sum_{i=1}^{K}\Delta_i\,\expect[N_i(T)].
+$$
+
+Regret is small exactly when every suboptimal arm is pulled rarely. The whole analysis of a bandit algorithm reduces
+to bounding $\expect[N_i(T)]$ for each suboptimal arm $i$. An arm with a large gap costs a lot per pull but is easy
+to rule out. An arm with a small gap is hard to rule out but costs little per pull.
+
+<Callout variant="note">
+Regret is not the same as the error of the final recommendation. A learner that must name the best arm after an
+exploration budget, and is scored only on that choice, solves a different problem:
+best-arm identification. Regret charges every round of learning.
+</Callout>
+
+## Linear, logarithmic and square-root regret
+
+Regret is at most $T\Delta_{\max}$, where $\Delta_{\max}$ is the largest gap, and every algorithm that ignores the
+data achieves order $T$. Uniform random play, the design of a classical
+<NoteLink to="ab-test">A/B test</NoteLink>, has regret $T \cdot \frac1K\sum_i \Delta_i$. The question is how much
+better an adaptive policy can do. Two kinds of bound answer it.
+
+- An **instance-dependent** bound depends on the gaps of the particular problem. The best achievable order is
+  $\sum_{i:\Delta_i > 0} \log T / \Delta_i$ up to constants, which grows only logarithmically in $T$.
+- A **worst-case** or **minimax** bound holds for every problem with rewards in $[0, 1]$. The best achievable order is
+  $\sqrt{KT}$. The worst case has gaps of order $\sqrt{K/T}$, small enough that the arms are hard to tell apart in $T$
+  rounds but large enough that confusing them costs of order $\sqrt{KT}$.
+
+Both bounds are sublinear, so the average regret per round $R_T / T$ tends to zero: the learner eventually plays as
+well as someone who knew the best arm.
+
+## The Lai–Robbins lower bound
+
+Lai and Robbins found how slowly regret can grow on a fixed problem <Cite id="lai1985" />. Call a policy **consistent**
+on a family of reward distributions if, on every problem in the family, $\expect[N_i(T)] = o(T^a)$ for every
+suboptimal arm $i$ and every $a > 0$. Consistency rules out policies that ignore the data to do well on one problem.
+For a family of distributions indexed by their mean, such as Bernoulli or Gaussian with known variance, every
+consistent policy satisfies, for every suboptimal arm $i$,
+
+$$
+\liminf_{T \to \infty} \frac{\expect[N_i(T)]}{\log T} \ge \frac{1}{\KL(\nu_i \,\|\, \nu^*)},
+$$
+
+where $\nu^*$ is the distribution of an optimal arm and $\KL$ is the
+<NoteLink to="kl-divergence">Kullback–Leibler divergence</NoteLink>. With the regret decomposition this gives
+
+$$
+\liminf_{T \to \infty} \frac{R_T}{\log T} \ge \sum_{i:\Delta_i > 0} \frac{\Delta_i}{\KL(\nu_i \,\|\, \nu^*)}.
+$$
+
+For Bernoulli arms $\KL(\nu_i \,\|\, \nu^*) = \mu_i \log\frac{\mu_i}{\mu^*} + (1 - \mu_i)\log\frac{1 - \mu_i}{1 - \mu^*}$.
+For unit-variance Gaussian arms it is $\Delta_i^2 / 2$, and the constant becomes $\sum_i 2/\Delta_i$. An algorithm
+whose regret matches this constant is **asymptotically optimal**. KL-UCB and Thompson sampling are; UCB1 matches the
+$\log T$ rate with a larger constant.
+
+The bound is asymptotic. For small $T$ and close arms the curve $\sum_i \Delta_i \log T / \KL(\nu_i \,\|\, \nu^*)$ can
+lie above the regret of a good algorithm, because the $o(1)$ terms have not yet vanished. The figure shows this for
+three arms with means 0.6, 0.5 and 0.45.
+
+<Derivation title="Why about log T / KL pulls are needed">
+The argument is a change of measure <Cite id="lattimore2020" />. Fix a suboptimal arm $i$. Build a second problem
+$\nu'$ that equals $\nu$ except that arm $i$'s distribution is replaced by $\nu_i'$ with mean slightly above $\mu^*$,
+so that in $\nu'$ arm $i$ is the unique best arm. The two problems differ only in arm $i$. The KL divergence between
+the laws of the whole history under $\nu$ and $\nu'$ is therefore
+$\expect_\nu[N_i(T)]\,\KL(\nu_i \,\|\, \nu_i')$: each pull of arm $i$ contributes one term, and pulls of the other
+arms contribute nothing.
+
+A consistent policy must behave very differently on the two problems. On $\nu$ it pulls arm $i$ only $o(T^a)$ times.
+On $\nu'$ it must pull arm $i$ in all but $o(T^a)$ rounds, so it pulls it more than $T/2$ times. Take the event
+$E = \set{N_i(T) > T/2}$. Its probability is small under $\nu$ and close to one under $\nu'$. The Bretagnolle–Huber
+inequality states that for any event $E$ and laws $P, Q$,
+$P(E) + Q(E^c) \ge \tfrac12\exp(-\KL(P \,\|\, Q))$. Both probabilities on the left are $O(T^{a-1})$ by consistency
+and Markov's inequality, so
+
+$$
+\expect_\nu[N_i(T)]\,\KL(\nu_i \,\|\, \nu_i') \ge (1 - a)\log T - O(1).
+$$
+
+Dividing by $\log T$, letting $T \to \infty$, then $a \to 0$ and $\nu_i' \to \nu^*$ gives the bound. The intuition:
+unless arm $i$ has been sampled about $\log T / \KL$ times, the data cannot rule out with confidence $1 - 1/T$ that
+arm $i$ is the best, and being wrong about that on the alternative costs of order $T$.
+</Derivation>
+
+## The minimax lower bound
+
+The worst-case counterpart does not need consistency. For every policy and every $T \ge K - 1$, there is a $K$-armed
+problem with unit-variance Gaussian rewards on which $R_T \ge \frac{1}{27}\sqrt{(K - 1)T}$ <Cite id="lattimore2020" />.
+The hard problem gives one arm a gap of about $\sqrt{K/T}$ over the others. Distinguishing the arms then needs about
+$T/K$ pulls of each, and each of those pulls costs $\sqrt{K/T}$, for a total of order $\sqrt{KT}$. No policy can
+guarantee better than order $\sqrt{KT}$ over all problems. UCB1 achieves $O(\sqrt{KT\log T})$ and MOSS achieves
+$O(\sqrt{KT})$ <Cite id="bubeck2012" />.
+
+## Simulation
+
+<BanditSimulator
+  algorithms={['uniform', 'egreedy', 'ucb1', 'klucb', 'ts']}
+  lowerBound
+  title="Regret of bandit algorithms"
+/>
+
+Uniform play, the allocation of a fixed-horizon A/B test, has a straight regret line whose slope is the mean gap.
+Constant $\varepsilon$-greedy flattens quickly but keeps a positive slope $\varepsilon\sum_i \Delta_i / K$ forever.
+UCB1, KL-UCB and Thompson sampling bend over like $\log t$. The bars show where the regret goes: an algorithm with low
+regret pulls the best arm almost always and the others about $\log T / \KL$ times each.
+
+## Variants
+
+The stochastic $K$-armed bandit is the base of a family of problems. Each changes one assumption.
+
+- **Structured arms.** In a linear bandit each arm is a feature vector and its mean is linear in the features. The
+  learner shares information across arms, so the number of arms can be large or infinite.
+- **Contexts.** In a contextual bandit the learner sees a feature vector
+  before each choice, and the best arm depends on it.
+- **Changing rewards.** In a non-stationary bandit the means drift or
+  jump, and the learner must forget old data.
+- **Adversarial rewards.** In an adversarial bandit an opponent chooses the rewards,
+  and regret is measured against the best fixed arm in hindsight.
+- **Pure exploration.** In best-arm identification only the final
+  recommendation is scored.
+- **Bayesian bandits.** With a prior over the means, the problem of maximising expected discounted reward has an exact
+  solution, the Gittins index. Bayesian and frequentist
+  bandits compares the two views.
+
+## Assumptions
+
+- The reward distributions do not change over time, and rewards are independent across rounds given the arms.
+- The learner observes the reward of the chosen arm immediately, before the next choice. Delayed or batched feedback
+  changes the algorithms but not the lower bounds.
+- Rewards are bounded, often in $[0, 1]$, or sub-Gaussian. Heavy-tailed rewards need robust mean estimators.
+- The choice of arm does not change the future state of the world. When it does, the problem is a Markov decision
+  process, the subject of reinforcement learning.
+
+## Pitfalls
+
+- **Regret is relative to the best single arm.** If the best arm differs between user segments, a context-free bandit
+  converges to the best arm on average and leaves the segment differences unexploited.
+- **Adaptive allocation biases naive estimates.** The empirical means at the end of a bandit run are biased downwards
+  for arms that were abandoned after an unlucky start, because the algorithm stopped sampling them while they looked
+  bad <Cite id="nie2018" />. Standard confidence intervals and $t$-tests do not hold for adaptively collected data.
+- **The horizon matters.** An algorithm tuned for $T$ rounds, such as explore-then-commit, can do badly when run for a
+  different number of rounds. Anytime algorithms such as UCB1 and Thompson sampling do not need $T$.

@@ -1,0 +1,142 @@
+---
+title: Explore-then-commit
+kind: concept
+summary: 'Explore-then-commit pulls every arm $m$ times, then plays the arm with the highest sample mean for the remaining rounds. With $m$ tuned to the gap $\Delta$ and horizon $T$ its regret is $O(\log(T\Delta^2)/\Delta)$; without knowing $\Delta$ the best guarantee is $O(T^{2/3})$.'
+tags: [bandits, experimentation, worked-example]
+aliases: [ETC, explore-first, epsilon-first, test-then-commit]
+requires: [multi-armed-bandit]
+related: [ab-test, epsilon-greedy]
+references: [lattimore2020, garivier2016etc]
+status: draft
+updated: 2026-09-27
+---
+
+import { EtcTradeoff } from './EtcTradeoff'
+
+<Definition>
+**Explore-then-commit** (ETC) is a policy for a $K$-armed bandit with a known horizon $T$ and a parameter $m$, the
+number of exploration pulls per arm. In rounds $1$ to $mK$ it pulls the arms in turn, so each arm is pulled $m$ times.
+It then computes each arm's sample mean $\hat\mu_i$ and pulls $\hat\imath = \argmax_i \hat\mu_i$ in every remaining
+round <Cite id="lattimore2020" />.
+</Definition>
+
+## Intuition
+
+ETC is the policy behind a classical <NoteLink to="ab-test">A/B test</NoteLink> followed by a launch decision: run a
+balanced experiment of fixed size, then ship the winner to everyone. It separates learning from earning. The
+exploration phase costs $m\Delta_i$ for each suboptimal arm $i$ with gap $\Delta_i = \mu^* - \mu_i$, whatever the data
+say. The commit phase costs nothing if the right arm wins, and $\Delta_i$ per round if arm $i$ wins by mistake.
+
+The only decision is $m$. A small $m$ makes a wrong commitment likely, and a wrong commitment costs of order $T$. A
+large $m$ makes the commitment reliable but spends many rounds on bad arms. The right $m$ depends on the gap: two arms
+far apart need few pulls to separate, two close arms need many.
+
+## Regret
+
+Assume the rewards of each arm are 1-sub-Gaussian around their mean, which covers unit-variance Gaussian rewards and,
+with room to spare, rewards in $[0, 1]$. By the regret decomposition of the
+<NoteLink to="multi-armed-bandit">multi-armed bandit</NoteLink>, $R_T = \sum_i \Delta_i\expect[N_i(T)]$. A suboptimal
+arm $i$ is pulled $m$ times while exploring, and $T - mK$ more times if it wins the comparison:
+
+$$
+\expect[N_i(T)] = m + (T - mK)\,\prob(\hat\imath = i) \le m + (T - mK)\,\prob(\hat\mu_i \ge \hat\mu_1),
+$$
+
+where arm 1 is optimal. The difference $\hat\mu_i - \hat\mu_1$ has mean $-\Delta_i$ and is the average-of-$m$ difference
+of two independent 1-sub-Gaussian variables, so it is $\sqrt{2/m}$-sub-Gaussian. The sub-Gaussian tail bound gives
+$\prob(\hat\mu_i - \hat\mu_1 + \Delta_i \ge \Delta_i) \le \exp(-m\Delta_i^2/4)$. Therefore
+
+$$
+R_T \le m\sum_{i=1}^{K}\Delta_i + (T - mK)\sum_{i=1}^{K}\Delta_i\exp\paren{-\frac{m\Delta_i^2}{4}}.
+$$
+
+The first sum is the price of exploring. The second is the price of committing wrongly, and it falls exponentially in
+$m$.
+
+### Tuning m with the gap known
+
+For two arms with gap $\Delta$ the bound is at most $m\Delta + T\Delta\exp(-m\Delta^2/4)$. Its derivative in $m$ is
+$\Delta - T\Delta\frac{\Delta^2}{4}\exp(-m\Delta^2/4)$, which is zero at
+
+$$
+m^* = \frac{4}{\Delta^2}\log\frac{T\Delta^2}{4}.
+$$
+
+Substituting, the second term equals $T\Delta \cdot \frac{4}{T\Delta^2} = 4/\Delta$, and the regret is at most
+
+$$
+R_T \le \Delta + \frac{4}{\Delta}\paren{1 + \log\frac{T\Delta^2}{4}}
+$$
+
+when $T\Delta^2 > 4$, where the extra $\Delta$ absorbs rounding $m^*$ up to an integer <Cite id="lattimore2020" />.
+This is logarithmic in $T$, the same order as the Lai–Robbins lower bound, but it needs both $T$ and $\Delta$ in
+advance. The gap is exactly what the learner does not know.
+
+### Tuning m without the gap
+
+With $\Delta$ unknown, $m$ must work for every gap. For two arms the bound is at most
+$m\Delta + T\Delta e^{-m\Delta^2/4}$. The function $\Delta e^{-m\Delta^2/4}$ is largest at $\Delta = \sqrt{2/m}$, where
+it equals $\sqrt{2/(em)}$. With rewards in $[0, 1]$, $\Delta \le 1$, so
+
+$$
+R_T \le m + T\sqrt{\frac{2}{em}}.
+$$
+
+The two terms balance at $m$ of order $T^{2/3}$, which gives $R_T = O(T^{2/3})$. This is worse than the $O(\sqrt{T})$
+worst-case regret of UCB1 or Thompson sampling. Separating exploration from exploitation costs a factor in $T$ when
+the gap is unknown. Garivier, Kaufmann and Lattimore show more: for two Gaussian arms, every strategy that explores
+up to a stopping time and then commits has a larger asymptotic regret constant than the best fully sequential policy,
+whether or not the gap is known <Cite id="garivier2016etc" />.
+
+## Figure
+
+For two unit-variance Gaussian arms the probability of a wrong commitment is exact: $\hat\mu_2 - \hat\mu_1$ is
+$\Gauss(-\Delta, 2/m)$, so $\prob(\text{wrong}) = \Phi(-\Delta\sqrt{m/2})$, where $\Phi$ is the standard normal
+distribution function. The exact expected regret is
+
+$$
+R_T(m) = m\Delta + (T - 2m)\,\Delta\,\Phi\paren{-\Delta\sqrt{m/2}}.
+$$
+
+<EtcTradeoff />
+
+## Worked example
+
+Two page designs have mean rewards $\Delta = 0.2$ apart, with unit-variance Gaussian noise, and the horizon is
+$T = 10{,}000$ visitors.
+
+- With $m = 50$ per arm, $\prob(\text{wrong}) = \Phi(-0.2\sqrt{25}) = \Phi(-1) = 0.159$. The expected regret is
+  $50 \times 0.2 + 9{,}900 \times 0.2 \times 0.159 = 324$.
+- The formula gives $m^* = (4/0.04)\log(10{,}000 \times 0.04/4) = 100\log 100 = 461$. The exact expected regret there
+  is $94.4$.
+- The exact optimum is $m = 279$, with expected regret $73.0$. The bound is loose: its minimiser explores more than
+  necessary, because $\exp(-m\Delta^2/4)$ overstates the Gaussian tail $\Phi(-\Delta\sqrt{m/2})$.
+- With $m = 1{,}000$ the commitment is almost certainly right, and the regret is essentially the exploration cost
+  $1{,}000 \times 0.2 = 200$.
+- Committing without data, $m = 0$, picks an arm at random and has regret $T\Delta/2 = 1{,}000$.
+
+## Relation to other policies
+
+- **$\varepsilon$-greedy** spreads the exploration over time instead of front-loading it. See
+  <NoteLink to="epsilon-greedy">ε-greedy</NoteLink>.
+- **Successive elimination** runs the exploration phase adaptively: it keeps sampling all arms that are still
+  plausibly best and drops the others as soon as confidence intervals separate. It does not need $\Delta$. See
+  best-arm identification.
+- **UCB1 and Thompson sampling** never commit. They keep a small, shrinking chance of revisiting every arm, which is
+  what removes the need to know $\Delta$ and $T$.
+
+## Assumptions
+
+- The horizon $T$ is known in advance. With an unknown horizon the doubling trick restarts ETC at horizons
+  $1, 2, 4, \dots$, at the cost of a constant factor.
+- The reward distributions are stationary. A change after the commit is never detected.
+- Rewards are sub-Gaussian with a known scale, which sets the constant in $m^*$.
+
+## Pitfalls
+
+- **The winner of a short test is often wrong when arms are close.** With $\Delta\sqrt{m/2} = 1$, one commitment in
+  six goes to the worse arm.
+- **Reusing the exploration data for inference.** The data of the exploration phase are a balanced randomised
+  experiment, so its estimates and tests are valid. Estimates from the commit phase describe only the chosen arm.
+- **Peeking to stop early.** Stopping the exploration phase when the arms look separated, without a sequential test,
+  inflates the probability of a wrong commitment.

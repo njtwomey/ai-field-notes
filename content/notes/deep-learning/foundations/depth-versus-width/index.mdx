@@ -1,0 +1,103 @@
+---
+title: Depth versus width
+kind: concept
+summary: 'Some functions that a deep ReLU network computes with $O(k)$ units need $2^k$ units in one hidden layer. On one input, a network of width $m$ and depth $L$ has at most $(2m)^L$ linear pieces, so pieces grow exponentially with depth but only linearly with width.'
+tags: [neural-networks, deep-learning, expressivity, approximation-theory, worked-example]
+aliases: [depth separation, benefits of depth, sawtooth function, Telgarsky sawtooth, linear regions]
+requires: [multilayer-perceptron, universal-approximation-theorem]
+related: [activation-functions]
+references: [telgarsky2016, eldan2016, montufar2014, lu2017, goodfellow2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { Sawtooth } from './Sawtooth'
+
+<Definition>
+The **depth** of a feedforward network is its number of layers and the **width** is the number of units per layer. A
+**depth separation** is a function that a network of depth $L$ computes with a number of units polynomial in some
+size parameter, while every network of smaller depth needs a number of units exponential in it
+<Cite id="telgarsky2016" />. Depth separations show that depth buys expressivity that width can buy only at
+exponential cost.
+</Definition>
+
+## The question
+
+The <NoteLink to="universal-approximation-theorem">universal approximation theorem</NoteLink> shows that one hidden
+layer suffices to approximate any continuous function, given enough units. It does not say how many. A deep network
+and a wide shallow network with the same number of parameters can represent very different sets of functions.
+
+## Counting linear pieces
+
+A ReLU network with one input $x$ computes a continuous piecewise-linear function of $x$. The number of linear pieces
+measures how much it can bend. Three facts bound that number.
+
+1. **Sums add pieces.** If $f$ has $p$ pieces and $g$ has $q$, then $f + g$ is linear between consecutive breakpoints
+   of either, so it has at most $p + q$ pieces.
+2. **A ReLU at most doubles pieces.** On each linear piece of $f$, $\max(0, f)$ changes slope at most once, where $f$
+   crosses zero. So $\max(0, f)$ has at most $2p$ pieces.
+3. **One hidden layer is linear in width.** A unit $\max(0, wx + b)$ has at most 2 pieces with one breakpoint. A sum of
+   $m$ such units has at most $m$ breakpoints, so at most $m + 1$ pieces.
+
+Now stack $L$ hidden layers of width $m$. Suppose every unit in layer $\ell - 1$ has at most $P$ pieces. Each
+pre-activation in layer $\ell$ is a weighted sum of $m$ such units, so it has at most $mP$ pieces by fact 1. Its ReLU has
+at most $2mP$ by fact 2. Starting from $P = 1$ for the input, induction gives at most $(2m)^L$ pieces after $L$ layers
+<Cite id="telgarsky2016" />. The count is exponential in depth and polynomial in width. For $d$ inputs the linear
+regions of a deep ReLU network likewise grow exponentially with depth <Cite id="montufar2014" />.
+
+## The sawtooth
+
+The bound is nearly attained. The **tent map** on $[0, 1]$,
+
+$$
+T(x) = 2\max(0, x) - 4\max\paren{0, x - \tfrac12} = \begin{cases} 2x, & 0 \le x \le \tfrac12, \\ 2 - 2x, & \tfrac12
+\le x \le 1, \end{cases}
+$$
+
+is one hidden layer of two ReLU units. It maps $[0, 1]$ onto $[0, 1]$, rising on the left half and falling on the
+right. Composing it with itself, $T^k = T \circ \dots \circ T$ ($k$ times), gives a sawtooth. Each application of $T$
+runs twice over the output range of $T^{k-1}$, once rising and once falling, so every linear piece of $T^{k-1}$ becomes
+two pieces of $T^k$. By induction $T^k$ has $2^k$ pieces with $2^{k-1}$ teeth, all of height 1.
+
+A network of $k$ hidden layers, each with 2 units, computes $T^k$ exactly with $2k$ units. By fact 3, a network with one
+hidden layer needs at least $2^k - 1$ units to compute it exactly. For $k = 20$ that is 40 units against more than a
+million.
+
+<Sawtooth />
+
+Exact representation is a strong requirement, but the separation survives approximation. A function with few pieces
+cannot follow many oscillations: between two breakpoints it is linear, so it misses most of the teeth it spans.
+Telgarsky proved that for every $k$ some network with $O(k^3)$ layers and $O(1)$ units per layer cannot be approximated
+within a constant error in $L^1([0,1])$ by any network with $O(k)$ layers and fewer than $2^k$ units
+<Cite id="telgarsky2016" />.
+
+## Other separations
+
+- **Depth 3 against depth 2.** Eldan and Shamir constructed a radial function on $\reals^d$ that a 3-layer network
+  approximates with a number of units polynomial in $d$, while any 2-layer network needs a number exponential in $d$
+  <Cite id="eldan2016" />.
+- **Width cannot be removed entirely.** Depth does not replace width completely. ReLU networks of width at most $d$ on
+  $\reals^d$ are not universal approximators, whatever their depth, while width $d + 4$ suffices for $L^1$
+  approximation <Cite id="lu2017" />.
+
+## Consequences in practice
+
+Deep networks reach a given accuracy with fewer parameters than shallow ones on functions with compositional
+structure, such as images built from edges, parts and objects <Cite id="goodfellow2016" />. The benefit comes with a
+cost in training: gradients pass through more layers, so deep networks need careful
+initialisation, normalisation and
+residual connections to train at all.
+
+## Assumptions
+
+- The piece-counting results are for ReLU and other piecewise-linear activations. Smooth activations have analogous
+  results in terms of oscillations and polynomial degree.
+- The separations are worst case over functions. They show that some functions favour depth, not that every task does.
+
+## Pitfalls
+
+- **Counting pieces is not measuring accuracy.** The $(2m)^L$ bound is an upper limit. Trained networks typically use
+  far fewer regions than the maximum.
+- **Oscillating constructions are fragile.** The sawtooth has exponentially large derivative, $2^k$, so a tiny change
+  of a weight in an early layer changes its output substantially. Functions that need depth for this reason are not
+  necessarily those that deep networks learn well from data.

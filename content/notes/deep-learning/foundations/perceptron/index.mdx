@@ -1,0 +1,137 @@
+---
+title: Perceptron
+kind: concept
+summary: 'The perceptron is a linear classifier $\hat y = \sgn(\wvec^\top\xvec)$ trained by adding $y_i\xvec_i$ to $\wvec$ after each mistake. On data separable with margin $\gamma$ inside a ball of radius $R$, it makes at most $(R/\gamma)^2$ mistakes, then stops.'
+tags: [neural-networks, classification, linear-models, online-learning, worked-example]
+aliases: [Rosenblatt perceptron, perceptron learning rule, perceptron convergence theorem, Novikoff theorem, threshold logic unit]
+requires: [dot-product]
+related: [logistic-regression, activation-functions]
+references: [rosenblatt1958, novikoff1962, minsky1969, goodfellow2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { PerceptronTraining } from './PerceptronTraining'
+
+<Definition>
+A **perceptron** maps an input $\xvec \in \reals^d$ to a label in $\set{-1, +1}$ by thresholding a linear score:
+$\hat y = \sgn(\wvec^\top\xvec + b)$, with weights $\wvec \in \reals^d$ and bias $b \in \reals$. The **perceptron
+learning rule** visits the training pairs $(\xvec_i, y_i)$ one at a time. When a pair is misclassified, the rule adds
+$y_i\xvec_i$ to $\wvec$ and $y_i$ to $b$; otherwise it changes nothing <Cite id="rosenblatt1958" />.
+</Definition>
+
+## The model
+
+Rosenblatt introduced the perceptron in 1958 as a model of a neuron that fires when a weighted sum of its inputs
+exceeds a threshold <Cite id="rosenblatt1958" />. The decision boundary $\wvec^\top\xvec + b = 0$ is a hyperplane. The
+weight vector $\wvec$ is normal to that hyperplane and points towards the region labelled $+1$.
+
+The bias is absorbed by appending a constant 1 to every input. With $\tilde\xvec = (\xvec, 1)$ and
+$\tilde\wvec = (\wvec, b)$, the score is $\tilde\wvec^\top\tilde\xvec$. The rest of this note uses the augmented form
+and drops the tildes.
+
+A pair $(\xvec_i, y_i)$ is classified correctly when $y_i\,\wvec^\top\xvec_i > 0$. The product $y_i\,\wvec^\top\xvec_i$
+is positive on the correct side of the boundary and negative on the wrong side.
+
+## The learning rule
+
+Start from $\wvec_0 = \zeros$. Cycle through the training set. At each pair with $y_i\,\wvec^\top\xvec_i \le 0$,
+update
+
+$$
+\wvec \leftarrow \wvec + y_i\xvec_i.
+$$
+
+The update raises the score of the misclassified pair by $\norm{\xvec_i}^2$ in the direction of its label:
+$y_i(\wvec + y_i\xvec_i)^\top\xvec_i = y_i\,\wvec^\top\xvec_i + \norm{\xvec_i}^2$. One update does not always fix the
+pair, and it can break pairs that were correct. The convergence theorem shows that on separable data this does not
+continue forever.
+
+The rule is <NoteLink to="sgd-for-linear-models">stochastic gradient descent</NoteLink> with step size 1 on the
+**perceptron loss** $\ell(\wvec) = \max(0, -y\,\wvec^\top\xvec)$. The gradient of that loss is $-y\xvec$ on a mistake
+and $\zeros$ otherwise. Scaling the step size scales every $\wvec_k$ by the same factor, so the sequence of predictions
+does not depend on it.
+
+## Convergence theorem
+
+The data are **linearly separable with margin** $\gamma > 0$ if some unit vector $\uvec$ satisfies
+$y_i\,\uvec^\top\xvec_i \ge \gamma$ for every $i$. Let $R = \max_i \norm{\xvec_i}$.
+
+**Theorem** (Novikoff). On data separable with margin $\gamma$, the perceptron makes at most $(R/\gamma)^2$ updates,
+in any order of presentation <Cite id="novikoff1962" />.
+
+The proof tracks two quantities after the $k$-th update, $\wvec_k = \wvec_{k-1} + y\xvec$ for some misclassified pair
+$(\xvec, y)$.
+
+1. **Alignment with $\uvec$ grows linearly.** $\uvec^\top\wvec_k = \uvec^\top\wvec_{k-1} + y\,\uvec^\top\xvec \ge
+   \uvec^\top\wvec_{k-1} + \gamma$. From $\wvec_0 = \zeros$, induction gives $\uvec^\top\wvec_k \ge k\gamma$.
+2. **Length grows at most like $\sqrt{k}$.** $\norm{\wvec_k}^2 = \norm{\wvec_{k-1}}^2 + 2y\,\wvec_{k-1}^\top\xvec +
+   \norm{\xvec}^2$. The middle term is at most 0, because the pair was misclassified. The last term is at most $R^2$.
+   Induction gives $\norm{\wvec_k}^2 \le kR^2$.
+
+The Cauchy–Schwarz inequality with $\norm{\uvec} = 1$ gives $\uvec^\top\wvec_k \le \norm{\wvec_k}$. Combining the two
+bounds:
+
+$$
+k\gamma \le \uvec^\top\wvec_k \le \norm{\wvec_k} \le \sqrt{k}\,R
+\quad\Longrightarrow\quad
+k \le \paren{\frac{R}{\gamma}}^2.
+$$
+
+The bound depends on neither the dimension $d$ nor the number of training pairs. It depends only on the ratio of the
+data's radius to its margin. After at most $(R/\gamma)^2$ updates no pair is misclassified, and a full pass without an
+update ends training.
+
+<PerceptronTraining />
+
+## Worked example: logical AND
+
+The four inputs of AND, with labels $-1$ for false and $+1$ for true, augmented with a constant 1, are
+
+$$
+\xvec_1 = (0, 0, 1),\ y_1 = -1; \quad
+\xvec_2 = (0, 1, 1),\ y_2 = -1; \quad
+\xvec_3 = (1, 0, 1),\ y_3 = -1; \quad
+\xvec_4 = (1, 1, 1),\ y_4 = +1.
+$$
+
+**First pass.** From $\wvec_0 = (0, 0, 0)$, every score is 0, which counts as a mistake. Pair 1 gives
+$\wvec_1 = (0, 0, -1)$. Pairs 2 and 3 now score $-1$ with label $-1$, so they are correct. Pair 4 scores $-1$ with
+label $+1$, so $\wvec_2 = (0, 0, -1) + (1, 1, 1) = (1, 1, 0)$.
+
+**Later passes.** Cycling continues for 18 updates in 8 passes. The ninth pass makes no update, and training ends at
+$\wvec = (3, 2, -4)$. The scores of the four inputs are $-4, -2, -1, +1$, all with the correct sign.
+
+**The bound.** The unit vector $\uvec = (2, 2, -3)/\sqrt{17}$ gives $y_i\,\uvec^\top\xvec_i = (3, 1, 1, 1)/\sqrt{17}$,
+so the margin is $\gamma = 1/\sqrt{17}$. The largest input is $\xvec_4$, with $R^2 = 3$. The theorem guarantees at
+most $(R/\gamma)^2 = 3 \times 17 = 51$ updates. The 18 observed updates are within the bound.
+
+## XOR and the limits of one layer
+
+XOR labels $(0, 1)$ and $(1, 0)$ as $+1$ and $(0, 0)$ and $(1, 1)$ as $-1$. No line separates them. Suppose
+$w_1x_1 + w_2x_2 + b$ were positive at the first two points and negative at the last two. Adding the two positive
+inequalities gives $w_1 + w_2 + 2b > 0$. Adding the two negative ones gives $w_1 + w_2 + 2b < 0$. The contradiction
+shows that no perceptron computes XOR.
+
+On non-separable data the perceptron never stops. Its weight vector cycles through a bounded set, and the final
+iterate depends on when training is halted. Minsky and Papert catalogued such limits of single-layer perceptrons
+<Cite id="minsky1969" />. A hidden layer removes them: XOR is the AND of OR and NAND, each of which one perceptron
+computes. The <NoteLink to="multilayer-perceptron">multilayer perceptron</NoteLink> stacks such units, with
+differentiable activations in place of the sign so that it can be trained by gradient descent.
+
+## Assumptions
+
+- The labels are $\pm 1$ and the classes are linearly separable, for convergence. Without separability there is no
+  guarantee of any kind for the last iterate.
+- The theorem measures the margin in the augmented space, so the bias enters $R$ and $\gamma$. Centring the inputs
+  reduces $R$ and the bound.
+
+## Pitfalls
+
+- **The solution is not unique.** The perceptron stops at the first separating hyperplane it finds, often close to
+  some training points. <NoteLink to="logistic-regression">Logistic regression</NoteLink> and the support vector
+  machine choose among separating hyperplanes; the perceptron does not.
+- **Order dependence.** A different presentation order gives a different final $\wvec$. Averaging the weight vectors
+  over all steps, the averaged perceptron, reduces this variance.
+- **Scale of the score.** $\wvec^\top\xvec$ has no probabilistic meaning. The perceptron outputs a label, never a
+  probability.

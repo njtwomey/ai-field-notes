@@ -1,0 +1,162 @@
+---
+title: Universal approximation theorem
+kind: concept
+summary: 'A network with one hidden layer, $g(\xvec) = \sum_{j=1}^N \alpha_j\,\sigma(\wvec_j^\top\xvec + b_j)$, can approximate any continuous function on a compact set to any accuracy, provided the activation $\sigma$ is not a polynomial. The theorem says nothing about how large $N$ must be or how to find the weights.'
+tags: [neural-networks, deep-learning, approximation-theory, expressivity, worked-example]
+aliases: [universal approximation, Cybenko theorem, Hornik theorem, universal approximator, Leshno theorem]
+requires: [multilayer-perceptron, activation-functions]
+related: [depth-versus-width, fourier-series]
+references: [cybenko1989, hornik1989, hornik1991, leshno1993, barron1993, goodfellow2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { StepApproximation } from './StepApproximation'
+
+<Definition>
+Let $K \subset \reals^n$ be compact and $\sigma : \reals \to \reals$ continuous. The **universal approximation
+theorem** states that for every continuous $f : K \to \reals$ and every $\varepsilon > 0$ there exist $N$ and
+parameters $\alpha_j, b_j \in \reals$, $\wvec_j \in \reals^n$ such that
+
+$$
+g(\xvec) = \sum_{j=1}^N \alpha_j\,\sigma(\wvec_j^\top\xvec + b_j)
+\quad\text{satisfies}\quad
+\sup_{\xvec \in K} \abs{f(\xvec) - g(\xvec)} < \varepsilon,
+$$
+
+if and only if $\sigma$ is not a polynomial <Cite id="leshno1993" />. The function $g$ is a
+<NoteLink to="multilayer-perceptron">multilayer perceptron</NoteLink> with one hidden layer of $N$ units and a linear
+output.
+</Definition>
+
+## History
+
+Cybenko proved the theorem in 1989 for continuous **sigmoidal** activations, meaning $\sigma(t) \to 1$ as
+$t \to \infty$ and $\sigma(t) \to 0$ as $t \to -\infty$ <Cite id="cybenko1989" />. Hornik, Stinchcombe and White proved
+it the same year for squashing functions <Cite id="hornik1989" />. Hornik then showed that the activation matters only
+through being bounded and non-constant, and that the multilayer architecture, not the specific activation, gives the
+power <Cite id="hornik1991" />. Leshno, Lin, Pinkus and Schocken closed the question: a continuous activation gives
+universal approximation exactly when it is not a polynomial, which admits the unbounded ReLU <Cite id="leshno1993" />.
+
+Polynomials fail for a simple reason. If $\sigma$ is a polynomial of degree $d$, every $\sigma(\wvec^\top\xvec + b)$ is
+a polynomial of degree at most $d$ in $\xvec$. So is any finite sum of them. Polynomials of bounded degree form a
+finite-dimensional space, which cannot approximate, for example, a polynomial of degree $d + 1$.
+
+## A constructive argument in one dimension
+
+Take $K = [0, 1]$, a continuous $f$, and $N$ hidden units. A continuous function on a closed interval is uniformly
+continuous: its modulus of continuity $\omega(h) = \sup_{\abs{x - y} \le h} \abs{f(x) - f(y)}$ tends to 0 as
+$h \to 0$.
+
+**Step 1: a staircase.** Place knots $t_j = j/N$ for $j = 0, \dots, N$, and midpoints $s_j = (t_{j-1} + t_j)/2$.
+With $H$ the unit step, define
+
+$$
+S(x) = f(t_0) + \sum_{j=1}^N \paren{f(t_j) - f(t_{j-1})}\,H(x - s_j).
+$$
+
+For $x$ between $s_j$ and $s_{j+1}$, the sum telescopes to $S(x) = f(t_j)$, and $\abs{x - t_j} \le 1/(2N)$. Therefore
+
+$$
+\abs{f(x) - S(x)} = \abs{f(x) - f(t_j)} \le \omega\paren{\tfrac{1}{2N}} \quad\text{for every } x \in [0, 1].
+$$
+
+**Step 2: sigmoids for steps.** A sigmoidal $\sigma$ approaches the step: $\sigma(k(x - s_j)) \to H(x - s_j)$ as
+$k \to \infty$, uniformly on the set where $\abs{x - s_j} \ge \delta$ for any $\delta > 0$. Replacing each $H$ by a
+steep sigmoid changes $S$ only within a small distance of each midpoint, and there by at most the size of that step,
+which is itself at most $\omega(1/N)$. The resulting $g$ has the form in the definition, with $N$ hidden units,
+$w_j = k$, $b_j = -ks_j$, $\alpha_j = f(t_j) - f(t_{j-1})$, and the constant $f(t_0)$ as the output bias.
+
+**Step 3: take $N$ large.** Both errors are bounded by multiples of $\omega(1/N)$, which tends to 0. For any
+$\varepsilon$, some $N$ makes the error below $\varepsilon$.
+
+With ReLU units the same knots give the piecewise-linear interpolant of $f$: one unit $\max(0, x - t_j)$ per knot,
+weighted by the change of slope there. For twice-differentiable $f$ the interpolation error is at most
+$\max\abs{f''}/(8N^2)$.
+
+<StepApproximation />
+
+**Worked numbers.** For $f(x) = \sin(2\pi x)$ the Lipschitz constant is $2\pi$, so the staircase bound is
+$\omega(1/(2N)) \le \pi/N$. With $N = 10$ hard steps the bound is $0.314$ and the measured largest error is $0.304$.
+Ten ReLU units give the interpolant, with bound $(2\pi)^2/(8 \cdot 100) = 0.0493$ and measured error $0.0489$. Softer
+sigmoids, with slope near $5N$, blur the steps into a smoother curve and reach an error of $0.054$ with ten units.
+
+## Several inputs
+
+In $n$ dimensions, each hidden unit is a **ridge function**: $\sigma(\wvec^\top\xvec + b)$ varies only along
+$\wvec$ and is constant on every hyperplane orthogonal to it. The argument has two stages.
+
+1. **Sums of ridge functions are dense.** The span of $\set{\cos(\wvec^\top\xvec + b)}$ contains the constants
+   ($\wvec = \zeros$) and is closed under products, since
+   $2\cos u \cos v = \cos(u + v) + \cos(u - v)$. It separates points: for $\xvec \ne \yvec$, some $\wvec$ gives
+   $\cos(\wvec^\top\xvec) \ne \cos(\wvec^\top\yvec)$. The Stone–Weierstrass theorem then makes it dense in the
+   continuous functions on $K$. So $f$ is within $\varepsilon/2$ of a finite sum $\sum_m c_m\cos(\wvec_m^\top\xvec +
+   b_m)$.
+2. **Each ridge function is a one-dimensional problem.** On compact $K$, $t = \wvec_m^\top\xvec + b_m$ ranges over a
+   bounded interval. The one-dimensional construction approximates $\cos t$ there by
+   $\sum_j \alpha_j\sigma(k_j t + c_j)$, and $\sigma(k_j(\wvec_m^\top\xvec + b_m) + c_j)$ is a hidden unit with weight
+   vector $k_j\wvec_m$. Approximating each of the finitely many cosines within $\varepsilon/(2\sum_m\abs{c_m})$ keeps
+   the total error below $\varepsilon$.
+
+The union of all these hidden units is one hidden layer. Cybenko's original proof is non-constructive and shorter.
+
+<Derivation title="Cybenko's argument by duality">
+Let $S$ be the closure in $C(K)$ of all finite sums $\sum_j \alpha_j\sigma(\wvec_j^\top\xvec + b_j)$. $S$ is a closed
+linear subspace. Suppose $S \ne C(K)$.
+
+**A functional that vanishes on $S$.** By the Hahn–Banach theorem there is a bounded linear functional $F$ on $C(K)$,
+not identically zero, with $F(h) = 0$ for all $h \in S$. By the Riesz representation theorem,
+$F(h) = \int_K h\,d\mu$ for a finite signed measure $\mu \ne 0$. In particular,
+
+$$
+\int_K \sigma(\wvec^\top\xvec + b)\,d\mu(\xvec) = 0 \quad\text{for all } \wvec, b.
+$$
+
+**The measure of every half-space is zero.** Fix $\wvec, b$ and $c$, and let
+$\sigma_\lambda(\xvec) = \sigma(\lambda(\wvec^\top\xvec + b) + c)$. As $\lambda \to \infty$, $\sigma_\lambda$ tends to 1
+on the open half-space $P = \set{\wvec^\top\xvec + b > 0}$, to 0 on the other side, and to $\sigma(c)$ on the
+hyperplane $Z = \set{\wvec^\top\xvec + b = 0}$. The functions are uniformly bounded, so the bounded convergence theorem
+gives $0 = \mu(P) + \sigma(c)\,\mu(Z)$ for every $c$. Since $\sigma(c)$ takes more than one value, $\mu(P) = \mu(Z) =
+0$ for every half-space and hyperplane.
+
+**The measure is zero.** Fix $\wvec$ and define, for bounded measurable $h : \reals \to \reals$, the linear functional
+$G(h) = \int_K h(\wvec^\top\xvec)\,d\mu(\xvec)$. $G$ vanishes on the indicator of every interval, because
+$\set{\xvec : \wvec^\top\xvec \in [\theta_1, \theta_2)}$ is a difference of half-spaces with hyperplane boundaries.
+Hence $G$ vanishes on step functions, and by uniform limits on every bounded continuous $h$, including $\cos$ and
+$\sin$. Therefore
+
+$$
+\int_K e^{i\wvec^\top\xvec}\,d\mu(\xvec) = 0 \quad\text{for every } \wvec \in \reals^n.
+$$
+
+The Fourier transform of $\mu$ is identically zero, so $\mu = 0$. This contradicts $\mu \ne 0$, so $S = C(K)$
+<Cite id="cybenko1989" />.
+</Derivation>
+
+## What the theorem does not say
+
+- **How many units.** The constructions above use a number of units that grows like $(1/\varepsilon)^n$ for a generic
+  Lipschitz function of $n$ inputs. Barron showed that functions whose Fourier transform has a finite first moment
+  $C_f$ can be approximated in mean square with error $O(C_f/\sqrt{N})$, with no exponential dependence on $n$
+  <Cite id="barron1993" />. For general continuous functions, no such rate holds.
+- **How to find the weights.** The theorem guarantees existence. Gradient descent on a finite training set may not
+  find the approximating weights, and a network that fits the training data may not generalise.
+- **Why depth helps.** One hidden layer suffices in principle, but some functions that a deep network represents with
+  few units need exponentially many units in one layer; see <NoteLink to="depth-versus-width">depth versus
+  width</NoteLink>.
+
+## Assumptions
+
+- The domain $K$ is compact and the target is continuous. Outside $K$ the approximation carries no guarantee: a
+  network fitted on $[0, 1]$ can be arbitrarily wrong at $x = 2$.
+- The error is measured by the supremum on $K$. Versions for $L^p$ norms with respect to a finite measure also hold
+  <Cite id="hornik1991" />.
+
+## Pitfalls
+
+- **Reading it as a reason to use one hidden layer.** The theorem is about expressivity in the limit of unlimited
+  width. Practical networks are deep because depth reaches the same accuracy with far fewer parameters and trains
+  well with modern techniques.
+- **Reading it as a guarantee of learnability.** Every sufficiently rich model class, including polynomials of
+  unbounded degree and Fourier series, is a universal approximator. The theorem does not distinguish neural networks
+  from these.

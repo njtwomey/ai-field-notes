@@ -1,0 +1,145 @@
+---
+title: Activation functions
+kind: concept
+summary: 'An activation function $\phi$ is the fixed nonlinearity applied to each pre-activation of a neural network. Its derivative $\phi''$ scales each gradient passing back through it, so where $\phi''$ is near zero (saturation) learning stalls. ReLU, GELU and SiLU avoid saturation for positive inputs.'
+tags: [neural-networks, deep-learning, activation-functions, gradients, worked-example]
+aliases: [activation function, nonlinearity, ReLU, rectified linear unit, leaky ReLU, ELU, GELU, SiLU, Swish, softplus, tanh, sigmoid activation, saturation, dying ReLU]
+requires: [multilayer-perceptron, derivative]
+related: [logistic-regression]
+references: [goodfellow2016, lecun1998, nair2010, glorot2011, hendrycks2016, elfwing2018, ramachandran2017]
+status: draft
+updated: 2026-09-27
+---
+
+import { ActivationExplorer } from './ActivationExplorer'
+
+<Definition>
+An **activation function** is a fixed function $\phi : \reals \to \reals$ applied to each entry of a layer's
+pre-activation $\avec = \Wmat\hvec + \bvec$ in a neural network, giving the layer's output $\phi(\avec)$. It supplies
+the network's nonlinearity. Its derivative $\phi'$ multiplies every gradient that
+<NoteLink to="backpropagation">backpropagation</NoteLink> sends back through the unit.
+</Definition>
+
+## Role in the network
+
+Without an activation, a stack of affine layers equals one affine layer; see
+<NoteLink to="multilayer-perceptron">multilayer perceptron</NoteLink>. Any continuous activation that is not a
+polynomial makes wide networks able to approximate any continuous function on a compact set
+<Cite id="leshno1993" />. Expressive power is therefore not what separates the common choices. They differ in how
+well gradients flow through them, what they cost to compute, and the range of their outputs.
+
+The backward pass of a layer multiplies the incoming gradient elementwise by $\phi'(\avec)$:
+$\partial\ell/\partial\avec = \phi'(\avec) \odot \partial\ell/\partial\hvec$. A unit whose $\phi'$ is near zero at its
+current input passes almost no gradient to the weights below it. That unit is **saturated**. Through $L$ layers the
+gradient is multiplied by $L$ such factors, so an activation whose derivative is small over much of its input range
+makes deep networks hard to train.
+
+<ActivationExplorer />
+
+## Sigmoid and tanh
+
+The **logistic sigmoid** is $\sigma(x) = 1/(1 + e^{-x})$, with outputs in $(0, 1)$. Differentiating the quotient,
+
+$$
+\sigma'(x) = \frac{e^{-x}}{(1 + e^{-x})^2} = \frac{1}{1 + e^{-x}} \cdot \frac{e^{-x}}{1 + e^{-x}}
+= \sigma(x)\paren{1 - \sigma(x)}.
+$$
+
+The product $\sigma(1 - \sigma)$ of two numbers that sum to 1 is largest when both equal $1/2$, at $x = 0$. The
+largest derivative is therefore $\sigma'(0) = 1/4$. Through ten sigmoid layers, even at the best-case input, the
+activations alone shrink a gradient by $4^{-10} \approx 10^{-6}$. For $\abs{x} = 5$ the derivative is $0.0066$.
+
+The **hyperbolic tangent** $\tanh(x) = (e^x - e^{-x})/(e^x + e^{-x})$ is a rescaled sigmoid. Multiplying the
+numerator and denominator by $e^{-x}$ gives $\tanh(x) = (1 - e^{-2x})/(1 + e^{-2x}) = 2\sigma(2x) - 1$. Its outputs lie
+in $(-1, 1)$ and its derivative is
+
+$$
+\tanh'(x) = 4\sigma'(2x) = 4\sigma(2x)\paren{1 - \sigma(2x)} = 1 - \tanh^2(x),
+$$
+
+using $\sigma(2x) = (1 + \tanh x)/2$. The largest derivative is 1, at $x = 0$. Near the origin tanh behaves like the
+identity, which makes it easier to initialise than the sigmoid. It still saturates: $\tanh'(3) = 0.0099$.
+
+The outputs of a sigmoid are all positive, with mean near $1/2$. The gradient of the loss with respect to the weights
+of the next unit, $\delta\,\hvec$, then has the same sign in every entry for a given example, so those weights can
+only all increase or all decrease together. Zero-centred activations such as tanh avoid this, and training converges
+faster <Cite id="lecun1998" />. Sigmoid and tanh remain in use where a bounded output is the point: gates in LSTMs and
+output probabilities.
+
+## ReLU and its variants
+
+The **rectified linear unit** is $\mathrm{ReLU}(x) = \max(0, x)$ <Cite id="nair2010" />. Its derivative is 1 for
+$x > 0$ and 0 for $x < 0$; at $x = 0$ implementations use 0. On the active side the gradient passes through unchanged
+however large the input, so ReLU does not saturate there. It costs one comparison. For inputs drawn from a symmetric
+distribution about zero, half the units output exactly zero, which gives sparse representations <Cite id="glorot2011" />.
+Deep networks of ReLUs trained from scratch as well as networks with unsupervised pre-training did, which made ReLU the
+default activation <Cite id="glorot2011" />.
+
+A ReLU network computes a continuous piecewise-linear function. Each unit splits its input space with the hyperplane
+$a = 0$, and the network is affine on each region of the resulting partition.
+
+The zero side has a cost. A unit whose pre-activation is negative for every training input receives no gradient and
+never recovers. Such **dead units** appear after a large update pushes the bias far negative. Variants keep a small
+gradient for $x < 0$:
+
+- **Leaky ReLU**: $\phi(x) = x$ for $x > 0$ and $\alpha x$ otherwise, typically $\alpha = 0.01$
+  <Cite id="maas2013" />.
+- **ELU**: $\phi(x) = x$ for $x > 0$ and $e^x - 1$ otherwise <Cite id="clevert2016" />. Both one-sided derivatives
+  equal 1 at 0, so its derivative is continuous. It saturates to $-1$ for large negative inputs, which pushes the mean
+  activation towards zero.
+- **Softplus**: $\phi(x) = \log(1 + e^x)$, a smooth ReLU. Its derivative is $\sigma(x)$.
+
+## GELU and SiLU
+
+The **Gaussian error linear unit** weights the input by the standard normal cdf $\Phi$ <Cite id="hendrycks2016" />:
+
+$$
+\mathrm{GELU}(x) = x\,\Phi(x), \qquad \mathrm{GELU}'(x) = \Phi(x) + x\,\varphi(x),
+$$
+
+where $\varphi$ is the standard normal density. It is the expected output of a stochastic unit that passes $x$ with
+probability $\Phi(x)$ and outputs 0 otherwise: $\expect[x \cdot m] = x\,\Phi(x)$ for $m \sim \Bern(\Phi(x))$. Large
+positive inputs pass almost unchanged and large negative inputs are almost zeroed, as in ReLU. Near zero the function
+is smooth and slightly negative, with minimum $-0.170$ at $x = -0.752$. The tanh approximation
+$\tfrac12 x\paren{1 + \tanh\paren{\sqrt{2/\pi}\,(x + 0.044715\,x^3)}}$ differs from the exact function by at most
+$5 \times 10^{-4}$ on $[-5, 5]$.
+
+The **sigmoid linear unit**, also called Swish, replaces $\Phi$ with the logistic sigmoid
+<Cite id="elfwing2018" /> <Cite id="ramachandran2017" />:
+
+$$
+\mathrm{SiLU}(x) = x\,\sigma(x), \qquad
+\mathrm{SiLU}'(x) = \sigma(x) + x\,\sigma(x)\paren{1 - \sigma(x)} = \sigma(x)\paren{1 + x\paren{1 - \sigma(x)}}.
+$$
+
+Its minimum is $-0.278$ at $x = -1.278$. Both GELU and SiLU are non-monotonic, and both have derivatives slightly above
+1 for moderate positive inputs (maxima $1.129$ and $1.100$). They are the usual activations in transformers.
+
+## Summary of properties
+
+| Activation | Range                | $\phi'(0)$ | Largest $\phi'$ | Saturates for        |
+| ---------- | -------------------- | ---------- | --------------- | -------------------- |
+| sigmoid    | $(0, 1)$             | 1/4        | 1/4             | both sides           |
+| tanh       | $(-1, 1)$            | 1          | 1               | both sides           |
+| ReLU       | $[0, \infty)$        | 0 or 1     | 1               | $x < 0$ (exact zero) |
+| leaky ReLU | $\reals$             | $\alpha$ or 1 | 1            | never                |
+| ELU        | $(-1, \infty)$       | 1          | 1               | $x \to -\infty$      |
+| GELU       | $[-0.170, \infty)$   | 1/2        | 1.129           | $x \to -\infty$      |
+| SiLU       | $[-0.278, \infty)$   | 1/2        | 1.100           | $x \to -\infty$      |
+
+## Assumptions
+
+- The analysis of saturation assumes pre-activations of order 1. The scale of the pre-activations is set by the
+  weights; see weight initialisation, which chooses variances to keep
+  them there for a given activation.
+
+## Pitfalls
+
+- **Sigmoid hidden layers in deep networks.** The derivative is at most 1/4, so gradients shrink geometrically with
+  depth; see vanishing and exploding gradients.
+- **Dead ReLUs.** A high learning rate or a large negative bias can silence a unit permanently. Monitor the fraction of
+  units that are zero for every input in a batch.
+- **Mismatched initialisation.** Variance-preserving initialisations depend on the activation: ReLU zeroes half its
+  input, so it needs twice the weight variance of tanh.
+- **Non-differentiable points.** ReLU has no derivative at 0. Frameworks return 0 or 1 there by convention; with
+  continuous inputs the point is hit with probability zero, so the choice rarely matters.

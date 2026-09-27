@@ -1,0 +1,162 @@
+---
+title: Multilayer perceptron
+kind: concept
+summary: 'A multilayer perceptron alternates affine maps and elementwise nonlinearities: $\hvec_\ell = \phi(\Wmat_\ell\hvec_{\ell-1} + \bvec_\ell)$ for $\ell = 1, \dots, L$, starting from $\hvec_0 = \xvec$. Without the nonlinearities the whole network collapses to one affine map.'
+tags: [neural-networks, deep-learning, feedforward-networks, worked-example]
+aliases: [MLP, feedforward neural network, fully connected network, dense network, forward pass, hidden layer]
+requires: [perceptron, matrix-vector-product]
+related: [backpropagation]
+references: [rumelhart1986, goodfellow2016, bishop2006]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **multilayer perceptron** (MLP) with $L$ layers maps an input $\xvec \in \reals^{n_0}$ to an output
+$\hvec_L \in \reals^{n_L}$ through hidden vectors $\hvec_\ell \in \reals^{n_\ell}$:
+
+$$
+\hvec_0 = \xvec, \qquad \avec_\ell = \Wmat_\ell\hvec_{\ell-1} + \bvec_\ell, \qquad \hvec_\ell = \phi_\ell(\avec_\ell),
+\qquad \ell = 1, \dots, L.
+$$
+
+Each $\Wmat_\ell$ is an $n_\ell \times n_{\ell-1}$ weight matrix, $\bvec_\ell \in \reals^{n_\ell}$ a bias vector, and
+$\phi_\ell$ a fixed nonlinear function applied to each entry. The vectors $\avec_\ell$ are the **pre-activations** and
+$\hvec_\ell$ the **activations**. The parameters $\thetavec = \set{\Wmat_\ell, \bvec_\ell}_{\ell=1}^L$ are fitted by
+gradient descent on a loss, with gradients from backpropagation <Cite id="rumelhart1986" />.
+</Definition>
+
+## The forward pass
+
+Evaluating the network from $\xvec$ to $\hvec_L$ is the **forward pass**. The network is a composition of $L$ layer
+functions,
+
+$$
+f(\xvec) = f_L \circ f_{L-1} \circ \dots \circ f_1(\xvec), \qquad f_\ell(\hvec) = \phi_\ell(\Wmat_\ell\hvec + \bvec_\ell).
+$$
+
+Layer $\ell$ has $n_\ell(n_{\ell-1} + 1)$ parameters: $n_\ell n_{\ell-1}$ weights and $n_\ell$ biases. Layers
+$1, \dots, L - 1$ are **hidden layers** and $n_\ell$ is the **width** of layer $\ell$. The number of layers $L$ is the
+**depth**. Each entry of $\hvec_\ell$ is one **unit**, or neuron: a
+<NoteLink to="perceptron">perceptron</NoteLink> with a differentiable activation in place of the sign.
+
+For a batch of $B$ inputs stacked as the rows of $\Xmat \in \reals^{B \times n_0}$, one layer is a matrix product:
+$\Hmat_\ell = \phi_\ell(\Hmat_{\ell-1}\Wmat_\ell^\top + \ones\bvec_\ell^\top)$. The forward pass of a batch is $L$
+matrix multiplications, which is why MLPs run efficiently on hardware built for them.
+
+**Parameter count.** A classifier for $28 \times 28$ images with widths $784, 256, 128, 10$ has
+
+$$
+784 \cdot 256 + 256 \;+\; 256 \cdot 128 + 128 \;+\; 128 \cdot 10 + 10 = 200\,960 + 32\,896 + 1\,290 = 235\,146
+$$
+
+parameters. The first layer holds 85% of them, because it has the widest input.
+
+## Why the nonlinearity is needed
+
+Remove every $\phi_\ell$. Two affine layers compose to one affine map:
+
+$$
+\Wmat_2(\Wmat_1\xvec + \bvec_1) + \bvec_2 = (\Wmat_2\Wmat_1)\xvec + (\Wmat_2\bvec_1 + \bvec_2).
+$$
+
+By induction, any number of affine layers equals a single affine layer with weight matrix
+$\Wmat_L \cdots \Wmat_1$. A deep linear network represents nothing that
+<NoteLink to="linear-regression">linear regression</NoteLink> cannot. Its product of matrices has rank at most
+$\min_\ell n_\ell$, so a narrow linear layer only restricts it further.
+
+An elementwise nonlinearity breaks this collapse. With any continuous $\phi$ that is not a polynomial, the set of functions representable by one
+hidden layer of sufficient width is dense in the continuous functions on a compact set; see the
+<NoteLink to="universal-approximation-theorem">universal approximation theorem</NoteLink>. The choice of $\phi$ is
+covered in <NoteLink to="activation-functions">activation functions</NoteLink>.
+
+## Worked example: XOR with two hidden units
+
+XOR maps $(0, 0)$ and $(1, 1)$ to 0 and $(0, 1)$ and $(1, 0)$ to 1. No single perceptron computes it, because no line
+separates the two classes. One hidden layer of two ReLU units, $\phi(a) = \max(0, a)$, followed by a linear output
+does <Cite id="goodfellow2016" />:
+
+$$
+\Wmat_1 = \begin{pmatrix} 1 & 1 \\ 1 & 1 \end{pmatrix}, \quad
+\bvec_1 = \begin{pmatrix} 0 \\ -1 \end{pmatrix}, \quad
+\wvec_2 = \begin{pmatrix} 1 \\ -2 \end{pmatrix}, \quad b_2 = 0.
+$$
+
+Both hidden units compute a shifted copy of $s = x_1 + x_2$: $h_1 = \max(0, s)$ and $h_2 = \max(0, s - 1)$. The
+output is $y = h_1 - 2h_2$.
+
+| $\xvec$  | $s$ | $h_1$ | $h_2$ | $y = h_1 - 2h_2$ |
+| -------- | --- | ----- | ----- | ---------------- |
+| $(0, 0)$ | 0   | 0     | 0     | 0                |
+| $(0, 1)$ | 1   | 1     | 0     | 1                |
+| $(1, 0)$ | 1   | 1     | 0     | 1                |
+| $(1, 1)$ | 2   | 2     | 1     | 0                |
+
+The hidden layer maps the four inputs to three points, $(0, 0)$, $(1, 0)$ and $(2, 1)$. The two inputs with label 1
+land on the same point, and in the hidden space a line separates the classes. The hidden layer has learned a
+representation in which the problem is linear.
+
+## Output layer and loss
+
+The last layer's activation $\phi_L$ matches the target:
+
+- **Regression.** $\phi_L$ is the identity, and the loss is the squared error.
+- **Binary classification.** $\phi_L$ is the logistic sigmoid, which gives $P(y = 1 \mid \xvec)$, and the loss is the
+  cross-entropy, as in <NoteLink to="logistic-regression">logistic regression</NoteLink>.
+- **Multiclass classification.** $\phi_L$ is the softmax over $n_L$ classes, and the loss is the
+  <NoteLink to="cross-entropy-and-perplexity">cross-entropy</NoteLink>. The softmax is not elementwise; see
+  <NoteLink to="softmax-and-log-sum-exp">softmax and log-sum-exp</NoteLink>.
+
+An MLP for classification is therefore a generalised linear model applied to learned features $\hvec_{L-1}$.
+
+## Training
+
+The loss is averaged over training pairs and minimised by stochastic gradient descent or a variant such as
+Adam. The gradient with respect to every weight comes from
+<NoteLink to="backpropagation">backpropagation</NoteLink>, which applies the chain rule from the loss back through the
+layers. For an MLP, the chain rule takes a compact matrix form.
+
+<Derivation title="Backpropagation through an MLP">
+Let $\ell(\hvec_L)$ be the loss for one input, and define the error at layer $\ell$ as
+$\deltavec_\ell = \partial \ell / \partial \avec_\ell$, a vector of length $n_\ell$.
+
+Since $\hvec_\ell = \phi_\ell(\avec_\ell)$ elementwise, the Jacobian $\partial\hvec_\ell / \partial\avec_\ell$ is the
+diagonal matrix $\diag(\phi_\ell'(\avec_\ell))$. Since $\avec_{\ell+1} = \Wmat_{\ell+1}\hvec_\ell + \bvec_{\ell+1}$, the
+Jacobian $\partial\avec_{\ell+1} / \partial\hvec_\ell$ is $\Wmat_{\ell+1}$. The chain rule gives
+
+$$
+\deltavec_L = \phi_L'(\avec_L) \odot \frac{\partial \ell}{\partial \hvec_L}, \qquad
+\deltavec_\ell = \phi_\ell'(\avec_\ell) \odot \paren{\Wmat_{\ell+1}^\top\deltavec_{\ell+1}}, \quad \ell < L,
+$$
+
+where $\odot$ is the elementwise product. The weight $W_{\ell, ij}$ enters the loss only through $a_{\ell, i} =
+\sum_j W_{\ell, ij} h_{\ell-1, j} + b_{\ell, i}$, so
+
+$$
+\frac{\partial \ell}{\partial \Wmat_\ell} = \deltavec_\ell\,\hvec_{\ell-1}^\top, \qquad
+\frac{\partial \ell}{\partial \bvec_\ell} = \deltavec_\ell.
+$$
+
+The backward pass costs one multiplication by each $\Wmat_\ell^\top$, the same order as the forward pass. It needs
+every $\avec_\ell$ and $\hvec_\ell$ from the forward pass, which is why training stores activations.
+</Derivation>
+
+The backward recursion multiplies by $\Wmat_{\ell+1}^\top$ and by $\phi'$ once per layer. Across many layers this
+product can shrink or grow geometrically, the problem described in
+vanishing and exploding gradients. Careful
+weight initialisation keeps it near 1 at the start of training.
+
+## Assumptions
+
+- Every unit in layer $\ell$ sees every unit of layer $\ell - 1$. The network has no built-in structure such as
+  locality or weight sharing, so it treats the input as an unordered vector.
+- The input has a fixed size $n_0$. Sequences and images of varying size need other architectures or padding.
+
+## Pitfalls
+
+- **Symmetric initialisation.** If all weights in a layer start equal, every unit in it receives the same gradient and
+  the units stay identical. Weights are initialised randomly to break the symmetry.
+- **Parameter count.** A dense layer between two wide layers has $n_\ell n_{\ell-1}$ weights. Flattening an image into
+  the input makes the first layer very large and ignores the image's spatial structure.
+- **Linear output for bounded targets.** A probability predicted with an identity output can leave $[0, 1]$. Use the
+  output activation that matches the target's range.
