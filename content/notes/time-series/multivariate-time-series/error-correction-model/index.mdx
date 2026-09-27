@@ -1,0 +1,122 @@
+---
+title: Error-correction model
+kind: concept
+summary: 'An error-correction model writes the change in $y_t$ as short-run responses to changes in its drivers plus a pull $\alpha(y_{t-1} - \beta x_{t-1})$ back towards the long-run relation $y = \beta x$. Cointegrated series always have this form (Granger representation theorem).'
+tags: [time-series, multivariate, econometrics, non-stationarity, worked-example]
+aliases: [ECM, equilibrium-correction model, vector error-correction model, VECM, Granger representation theorem, speed of adjustment]
+requires: [cointegration]
+related: [vector-autoregression, granger-causality, linear-regression]
+references: [engle1987, johansen1988, lutkepohl2005, hamilton1994]
+status: draft
+updated: 2026-09-27
+---
+
+import { EcmSimulator } from './EcmSimulator'
+
+<Definition>
+For two I(1) series $y_t$ and $x_t$ with cointegrating relation $y = \beta x$, the **error-correction model** (ECM) is
+
+$$
+\Delta y_t = c + \alpha\paren{y_{t-1} - \beta x_{t-1}} + \sum_{i=1}^{m} \gamma_i\Delta y_{t-i} + \sum_{i=0}^{m}
+\delta_i\Delta x_{t-i} + \varepsilon_t,
+$$
+
+where $\Delta$ is the first difference and $\varepsilon_t$ is white noise. The term $z_{t-1} = y_{t-1} - \beta x_{t-1}$
+is the previous period's deviation from equilibrium, and $\alpha < 0$ is the **speed of adjustment**: the fraction of
+the deviation that $y$ removes each period <Cite id="engle1987" />.
+</Definition>
+
+## Intuition
+
+Differencing I(1) series makes them stationary but throws away the information in their levels, including the
+long-run relation between them. A regression in levels keeps that relation but risks the spurious-regression problem.
+The ECM uses both. Every term in it is stationary: the differences are, and when the series are
+<NoteLink to="cointegration">cointegrated</NoteLink> so is the deviation $z_{t-1}$. The model therefore describes
+short-run dynamics through the differenced terms and long-run behaviour through the equilibrium relation. If $y$ is
+above its equilibrium value, $z_{t-1} > 0$, and $\alpha < 0$ pushes $\Delta y_t$ down.
+
+## Derivation from a dynamic regression
+
+Start from an autoregressive distributed-lag model with one lag, where $\abs{a} < 1$:
+
+$$
+y_t = c + a y_{t-1} + b_0 x_t + b_1 x_{t-1} + \varepsilon_t.
+$$
+
+Subtract $y_{t-1}$ from both sides, and add and subtract $b_0 x_{t-1}$ on the right:
+
+$$
+\Delta y_t = c + b_0\Delta x_t - (1 - a)y_{t-1} + (b_0 + b_1)x_{t-1} + \varepsilon_t
+= c + b_0\Delta x_t - (1 - a)\paren{y_{t-1} - \theta x_{t-1}} + \varepsilon_t,
+$$
+
+with $\theta = (b_0 + b_1)/(1 - a)$. This is an ECM with $\alpha = -(1 - a)$, $\beta = \theta$ and $\delta_0 = b_0$.
+Nothing has been assumed beyond rearrangement, so the ECM is the same model written in terms that separate the
+immediate effect $b_0$ of a change in $x$ from its long-run effect $\theta$.
+
+The long-run effect follows from the steady state. If $x$ stays at $x^*$ and the noise is switched off, $y$ settles at
+$y^*$ with $y^* = c + a y^* + (b_0 + b_1)x^*$. Solving gives $y^* = c/(1 - a) + \theta x^*$, so $\theta$ is the total
+change in $y$ per unit permanent change in $x$.
+
+## The Granger representation theorem
+
+Engle and Granger proved that the link runs both ways: a vector of I(1) series is cointegrated if and only if it has
+an error-correction representation in which at least one adjustment coefficient is non-zero <Cite id="engle1987" />.
+Cointegration without error correction is impossible, because without a pull back towards equilibrium the deviation
+$z_t$ would itself be I(1). Error correction without cointegration is impossible, because the regression would then
+equate a stationary $\Delta y_t$ with a non-stationary level term.
+
+## Vector error-correction model
+
+With $K$ series, a <NoteLink to="vector-autoregression">VAR($p$)</NoteLink> in levels,
+$\yvec_t = \cvec + \sum_{i=1}^p \Amat_i\yvec_{t-i} + \uvec_t$, can be rewritten exactly as
+
+$$
+\Delta\yvec_t = \cvec + \Pimat\yvec_{t-1} + \sum_{i=1}^{p-1}\Gammamat_i\Delta\yvec_{t-i} + \uvec_t, \qquad
+\Pimat = -\paren{\eye - \Amat_1 - \dots - \Amat_p}, \quad \Gammamat_i = -\sum_{j=i+1}^p \Amat_j.
+$$
+
+The rewrite follows the same add-and-subtract step as above, applied lag by lag. The rank of $\Pimat$ classifies the
+system <Cite id="johansen1988" />:
+
+- rank $K$: $\Pimat$ is invertible, and the VAR is stationary in levels;
+- rank $0$: $\Pimat = \zeros$, there is no cointegration, and the model is a VAR in differences;
+- rank $r$ between: $\Pimat = \alphavec\betavec^\top$ with $\alphavec$ and $\betavec$ of size $K \times r$. The columns
+  of $\betavec$ are the cointegrating vectors and $\alphavec$ holds the adjustment speeds of each variable towards each
+  equilibrium.
+
+This is the vector error-correction model (VECM). Johansen's method estimates it by maximum likelihood and tests $r$
+<Cite id="johansen1988" />.
+
+<EcmSimulator />
+
+## Estimation
+
+**Engle–Granger two-step.** Estimate $\beta$ by the cointegrating regression of $y_t$ on $x_t$ in levels. Form the
+residuals $\hat z_t = y_t - \hat\alpha_0 - \hat\beta x_t$. Then fit the ECM by ordinary least squares with $\hat z_{t-1}$
+in place of $z_{t-1}$ <Cite id="engle1987" />. Because $\hat\beta$ converges at rate $1/T$, faster than the
+second-stage coefficients, the second-stage estimates and their t statistics have the same asymptotic distribution as
+if $\beta$ were known.
+
+**Single-equation estimation.** Estimating the rearranged dynamic regression directly by nonlinear least squares gives
+$\alpha$ and $\beta$ jointly and avoids the finite-sample bias of the static first-stage regression.
+
+## Worked example
+
+Take the dynamic regression $y_t = 0.8y_{t-1} + 0.3x_t + 0.1x_{t-1} + \varepsilon_t$.
+
+- The ECM form has $\alpha = -(1 - 0.8) = -0.2$ and $\beta = (0.3 + 0.1)/0.2 = 2$: $\Delta y_t = 0.3\Delta x_t -
+  0.2(y_{t-1} - 2x_{t-1}) + \varepsilon_t$.
+- Starting from equilibrium at zero, let $x$ rise permanently by 1 at $t = 0$. The immediate response is
+  $y_0 = 0.3$. The deviation $y_0 - 2x_0 = -1.7$ then shrinks by the factor $0.8$ each period, so
+  $y_h = 2 - 1.7 \times 0.8^h$: $0.64$ at $h = 1$, $1.44$ at $h = 5$ and $1.82$ at $h = 10$.
+- The half-life of a deviation is $\log 0.5 / \log 0.8 = 3.1$ periods.
+
+## Pitfalls
+
+- **Sign and size of $\alpha$.** An estimated $\alpha$ of the wrong sign, or with $\abs{\alpha} > 2$ in a single
+  equation, means the model does not correct towards equilibrium; the series may not be cointegrated.
+- **Weak exogeneity.** A single-equation ECM for $y$ assumes that $x$ does not adjust to the deviation. If both adjust,
+  estimate the system as a VECM.
+- **Normalisation.** $\betavec$ in a VECM is identified only up to an invertible $r \times r$ transformation. Report a
+  normalisation, such as a coefficient of 1 on one variable.

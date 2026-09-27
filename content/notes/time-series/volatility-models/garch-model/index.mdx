@@ -1,0 +1,158 @@
+---
+title: GARCH model
+kind: concept
+summary: 'GARCH(1,1) sets the conditional variance of $r_t = \sigma_t\varepsilon_t$ to $\sigma_t^2 = \omega + \alpha r_{t-1}^2 + \beta\sigma_{t-1}^2$. The persistence $\alpha + \beta$ sets how slowly volatility shocks decay; if it is below 1, the unconditional variance is $\omega / (1 - \alpha - \beta)$.'
+tags: [time-series, volatility, finance, heteroscedasticity, maximum-likelihood, worked-example]
+aliases: [GARCH, 'GARCH(1,1)', generalised autoregressive conditional heteroscedasticity, generalized ARCH, IGARCH, GJR-GARCH, EGARCH, volatility persistence]
+requires: [arch-model]
+related: [volatility-clustering, stochastic-volatility, arma-model]
+references: [bollerslev1986, engle1982, nelson1990, nelson1991, glosten1993, hamilton1994]
+status: draft
+updated: 2026-09-27
+---
+
+import { GarchSimulator } from './GarchSimulator'
+
+<Definition>
+A series $r_t$ follows a **GARCH($p$, $q$)** process, for generalised autoregressive conditional heteroscedasticity, when
+<Cite id="bollerslev1986" />
+
+$$
+r_t = \sigma_t\varepsilon_t, \qquad
+\sigma_t^2 = \omega + \sum_{i=1}^q \alpha_i r_{t-i}^2 + \sum_{j=1}^p \beta_j\sigma_{t-j}^2, \qquad
+\varepsilon_t \iid \Gauss(0, 1),
+$$
+
+with $\omega > 0$ and $\alpha_i, \beta_j \ge 0$. The conditional variance depends on past squared returns, as in the
+<NoteLink to="arch-model">ARCH model</NoteLink>, and on its own past values. The case used in practice is
+**GARCH(1,1)**: $\sigma_t^2 = \omega + \alpha r_{t-1}^2 + \beta\sigma_{t-1}^2$.
+</Definition>
+
+## Intuition
+
+GARCH(1,1) updates a volatility estimate. The new variance is a weighted combination of a long-run level, yesterday's
+squared return and yesterday's variance. The coefficient $\alpha$ is the **reaction**: how much one surprise moves the
+variance. The sum $\alpha + \beta$ is the **persistence**: how much of today's variance deviation survives to tomorrow.
+Daily financial returns typically give $\alpha$ between $0.03$ and $0.15$ and $\alpha + \beta$ between $0.9$ and
+$0.99$: small reactions that last a long time.
+
+## GARCH(1,1) is ARCH with infinitely many lags
+
+Substitute the variance equation into itself repeatedly. With $\beta < 1$,
+
+$$
+\sigma_t^2 = \omega + \alpha r_{t-1}^2 + \beta\paren{\omega + \alpha r_{t-2}^2 + \beta\sigma_{t-2}^2} = \dots =
+\frac{\omega}{1 - \beta} + \alpha\sum_{j=1}^\infty \beta^{j-1} r_{t-j}^2.
+$$
+
+The conditional variance is an ARCH($\infty$) whose lag weights $\alpha\beta^{j-1}$ decay geometrically. Three
+parameters replace the long, unconstrained lag polynomial that a pure ARCH model needs to match slowly decaying
+clustering <Cite id="bollerslev1986" />. With $\omega = 0$ and $\alpha = 1 - \beta$, the formula is an exponentially
+weighted moving average of squared returns, the RiskMetrics estimator.
+
+## Unconditional variance and persistence
+
+Write $\Fcal_{t-1}$ for the information in $r_{t-1}, r_{t-2}, \dots$. Since $\expect[r_t^2 \mid \Fcal_{t-1}] =
+\sigma_t^2$, the tower property gives $\expect[r_t^2] = \expect[\sigma_t^2]$. Suppose the process is stationary with
+$\sigma^2 = \expect[r_t^2] = \expect[\sigma_t^2]$ for all $t$. Taking expectations of the variance equation:
+
+$$
+\sigma^2 = \omega + \alpha\sigma^2 + \beta\sigma^2 \quad\Longrightarrow\quad \sigma^2 = \frac{\omega}{1 - \alpha - \beta}.
+$$
+
+A finite positive variance requires $\alpha + \beta < 1$, and that condition is also sufficient for weak stationarity
+<Cite id="bollerslev1986" />.
+
+**Forecasts decay at rate $\alpha + \beta$.** Replace $\omega$ by $\sigma^2(1 - \alpha - \beta)$ and subtract
+$\sigma^2$ from both sides:
+
+$$
+\sigma_{t+1}^2 - \sigma^2 = \alpha\paren{r_t^2 - \sigma^2} + \beta\paren{\sigma_t^2 - \sigma^2}.
+$$
+
+For $h \ge 2$, take expectations given $\Fcal_t$. The future squared return $r_{t+h-1}^2$ has conditional expectation
+$\expect[\sigma_{t+h-1}^2 \mid \Fcal_t]$, so both terms on the right become the same forecast:
+
+$$
+\expect[\sigma_{t+h}^2 \mid \Fcal_t] - \sigma^2 = (\alpha + \beta)\paren{\expect[\sigma_{t+h-1}^2 \mid \Fcal_t] -
+\sigma^2} = (\alpha + \beta)^{h-1}\paren{\sigma_{t+1}^2 - \sigma^2}.
+$$
+
+A deviation of the variance from its long-run level shrinks by the factor $\alpha + \beta$ per step. Its
+**half-life** is $\log(1/2) / \log(\alpha + \beta)$ steps. This is why $\alpha + \beta$ is called the persistence.
+
+**The squares are an <NoteLink to="arma-model">ARMA(1,1)</NoteLink>.** Define $\nu_t = r_t^2 - \sigma_t^2$, which has conditional mean zero. Substituting
+$\sigma_t^2 = r_t^2 - \nu_t$ and $\sigma_{t-1}^2 = r_{t-1}^2 - \nu_{t-1}$ into the variance equation gives
+
+$$
+r_t^2 = \omega + (\alpha + \beta) r_{t-1}^2 + \nu_t - \beta\nu_{t-1}.
+$$
+
+The autoregressive coefficient is the persistence, which is why the autocorrelation of $r_t^2$ decays at the geometric
+rate $\alpha + \beta$ from lag 1 onward.
+
+<Derivation title="Kurtosis of GARCH(1,1)">
+Write $\rho = \alpha + \beta$ for the persistence and $m_2 = \omega / (1 - \rho)$ for the unconditional variance.
+Write $\sigma_{t+1}^2 = \omega + (\alpha\varepsilon_t^2 + \beta)\sigma_t^2$. Squaring and taking expectations, with
+$\varepsilon_t$ independent of $\sigma_t$, $\expect[\varepsilon_t^2] = 1$ and $\expect[\varepsilon_t^4] = 3$:
+
+$$
+\expect[\sigma^4] = \omega^2 + 2\omega\rho\,m_2 + (3\alpha^2 + 2\alpha\beta + \beta^2)\expect[\sigma^4]
+= \omega^2 + 2\omega\rho\,m_2 + (\rho^2 + 2\alpha^2)\expect[\sigma^4].
+$$
+
+So $\expect[\sigma^4] = \omega^2(1 + \rho)/\paren{(1 - \rho)(1 - \rho^2 - 2\alpha^2)}$, finite only when
+$\rho^2 + 2\alpha^2 < 1$. The kurtosis of $r_t$ is $3\expect[\sigma^4]/m_2^2$:
+
+$$
+\frac{\expect[r_t^4]}{\paren{\expect[r_t^2]}^2} = 3\,\frac{1 - (\alpha + \beta)^2}{1 - (\alpha + \beta)^2 - 2\alpha^2}.
+$$
+
+It exceeds 3 whenever $\alpha > 0$. At fixed persistence, a larger reaction $\alpha$ gives heavier tails.
+</Derivation>
+
+<GarchSimulator />
+
+## Estimation
+
+The parameters $\theta = (\omega, \alpha, \beta)$ are estimated by maximising the Gaussian log-likelihood
+
+$$
+\ell(\theta) = -\frac12\sum_{t=1}^T \paren{\log 2\pi + \log\sigma_t^2(\theta) + \frac{r_t^2}{\sigma_t^2(\theta)}},
+$$
+
+where $\sigma_t^2(\theta)$ is computed by running the variance recursion over the data from a starting value such as
+the sample variance. The optimisation enforces $\omega > 0$, $\alpha, \beta \ge 0$ and usually $\alpha + \beta < 1$.
+**Variance targeting** fixes $\omega = \hat\sigma^2(1 - \alpha - \beta)$ with $\hat\sigma^2$ the sample variance, which
+leaves a two-parameter search. When the shocks are not Gaussian, the same objective gives consistent
+quasi-maximum-likelihood estimates; a Student t shock distribution is the common alternative <Cite id="hamilton1994" />.
+
+## Worked example
+
+Take $\omega = 0.05$, $\alpha = 0.1$ and $\beta = 0.85$, with returns in percent per day.
+
+- The persistence is $0.95$ and the unconditional variance is $0.05 / (1 - 0.95) = 1$, a daily volatility of 1%.
+- The half-life of a variance shock is $\log 0.5 / \log 0.95 = 13.5$ days.
+- Suppose tomorrow's conditional variance is $\sigma_{t+1}^2 = 4$, a volatility of 2%. The forecasts are
+  $1 + 0.95^{h-1} \times 3$: $4$, $3.85$, $3.44$, $2.89$ and $2.13$ for $h = 1, 2, 5, 10, 20$.
+- The kurtosis is $3(1 - 0.9025)/(1 - 0.9025 - 0.02) = 3.77$.
+
+## Variants
+
+- **IGARCH.** With $\alpha + \beta = 1$, variance shocks never decay and the unconditional variance is infinite. The
+  process is still strictly stationary for $\omega > 0$ <Cite id="nelson1990" />.
+- **GJR-GARCH** adds $\gamma\,r_{t-1}^2\indicator\set{r_{t-1} < 0}$ to the variance equation, so negative returns raise
+  volatility more than positive ones <Cite id="glosten1993" />.
+- **EGARCH** models $\log\sigma_t^2$, which removes the positivity constraints and allows asymmetric responses
+  <Cite id="nelson1991" />.
+
+## Pitfalls
+
+- **Near-unit persistence.** Estimates of $\alpha + \beta$ close to 1 are common. Structural breaks in the volatility
+  level push estimates towards 1 even when the true persistence within each regime is lower.
+- **Positivity constraints bind.** An estimate at $\alpha = 0$ or $\beta = 0$ is on the boundary of the parameter space,
+  where the usual standard errors and likelihood-ratio tests do not apply.
+- **Starting values.** $\sigma_1^2$ must be chosen. For short series and high persistence the choice affects the
+  likelihood.
+- **Symmetric response.** Plain GARCH ignores the sign of $r_{t-1}$. Test the residuals for a leverage effect before
+  relying on it for equities.

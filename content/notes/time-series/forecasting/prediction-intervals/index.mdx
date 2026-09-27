@@ -1,0 +1,128 @@
+---
+title: Prediction intervals
+kind: concept
+summary: 'A $(1 - \alpha)$ prediction interval for $y_{T+h}$ contains the future value with probability $1 - \alpha$. For linear models it is $\hat y_{T+h} \pm z\,\sigma_h$ with $\sigma_h^2 = \sigma^2\sum_{j<h}\psi_j^2$. Residual bootstraps and conformal methods drop the Gaussian assumption.'
+tags: [time-series, forecasting, uncertainty-quantification, bootstrap, conformal-prediction, worked-example]
+aliases: [forecast interval, forecast uncertainty, bootstrapped prediction interval, residual bootstrap, split conformal prediction, conformal prediction interval, fan chart]
+requires: [gaussian-distribution]
+related: [probabilistic-forecasting, time-series-cross-validation, crps-and-interval-scores, arma-model, autoregressive-model, garch-model, kalman-filter]
+references: [hyndman2021, thombs1990, lei2018, vovk2005, hamilton1994]
+status: draft
+updated: 2026-09-27
+---
+
+import { IntervalFan } from './IntervalFan'
+
+<Definition>
+Given observations $y_1, \dots, y_T$, a **$(1 - \alpha)$ prediction interval** for the value $h$ steps ahead is a pair
+of statistics $[\ell_{T+h}, u_{T+h}]$ such that
+
+$$
+\prob\paren{\ell_{T+h} \le y_{T+h} \le u_{T+h}} = 1 - \alpha.
+$$
+
+It describes the uncertainty of a future observation, which includes the noise still to come. A confidence interval
+describes the uncertainty of a fixed parameter and is narrower.
+</Definition>
+
+## Analytic intervals for linear models
+
+Many forecasting models, including ARIMA and linear exponential smoothing, can be written with future values as a
+linear function of future shocks. If the shocks $\varepsilon_t$ are independent with variance $\sigma^2$, the $h$-step
+forecast error has the form
+
+$$
+y_{T+h} - \hat y_{T+h \mid T} = \sum_{j=0}^{h-1} \psi_j\varepsilon_{T+h-j}, \qquad \psi_0 = 1,
+$$
+
+where the weights $\psi_j$ are the model's moving-average ($\psi$) weights, as in the <NoteLink to="arma-model">ARMA model</NoteLink>. The shocks after time $T$ are independent,
+so the forecast error variance is the sum of their variances:
+
+$$
+\sigma_h^2 = \sigma^2\sum_{j=0}^{h-1} \psi_j^2.
+$$
+
+If the shocks are Gaussian, the forecast error is Gaussian, and the interval is
+
+$$
+\hat y_{T+h \mid T} \pm z_{1-\alpha/2}\,\sigma_h,
+$$
+
+with $z_{1-\alpha/2}$ the standard-normal quantile: $1.28$ for 80% and $1.96$ for 95% <Cite id="hyndman2021" />.
+
+Two special cases show the range of behaviour.
+
+- **<NoteLink to="autoregressive-model">AR(1)</NoteLink>**, $y_t = \phi y_{t-1} + \varepsilon_t$ with $\abs{\phi} < 1$. Substituting the model into itself gives
+  $\psi_j = \phi^j$, so $\sigma_h^2 = \sigma^2(1 - \phi^{2h})/(1 - \phi^2)$. The interval widens with $h$ and
+  approaches the stationary variance $\sigma^2/(1 - \phi^2)$.
+- **<NoteLink to="white-noise-and-random-walk">Random walk</NoteLink>**, $\phi = 1$. Every $\psi_j = 1$, so $\sigma_h^2 = h\sigma^2$. The interval widens like $\sqrt h$ without
+  bound.
+
+<IntervalFan />
+
+## What the analytic interval leaves out
+
+The formula treats the model and its parameters as known. In practice $\sigma$, the coefficients and the model form
+are all estimated. Parameter uncertainty adds a term of order $1/T$ to the variance, which matters for short series
+and long horizons. Model uncertainty is usually larger and is not captured by any single-model formula. Empirical
+coverage of nominal 95% intervals is often well below 95% for this reason <Cite id="hyndman2021" />. The Gaussian
+assumption also fails for heavy-tailed or skewed shocks, and constant $\sigma$ fails when volatility clusters, as
+modelled by <NoteLink to="garch-model">GARCH</NoteLink>.
+
+## Bootstrapped intervals
+
+The residual bootstrap replaces the Gaussian assumption with the empirical distribution of the fitted residuals
+$\hat\varepsilon_1, \dots, \hat\varepsilon_T$ <Cite id="thombs1990" />:
+
+1. Simulate a future path by running the fitted model forward from time $T$, drawing each shock with replacement from
+   the residuals.
+2. Repeat $B$ times, for example $B = 1000$.
+3. At each horizon $h$, take the $\alpha/2$ and $1 - \alpha/2$ empirical quantiles of the simulated values.
+
+The intervals inherit the skewness and tail weight of the residuals, and they apply to nonlinear models whose forecast
+distribution has no closed form. To include parameter uncertainty, each replicate also refits the model to a
+bootstrap series generated from the fitted model, and simulates the future from the refitted parameters
+<Cite id="thombs1990" />.
+
+## Conformal intervals
+
+Split conformal prediction gives a finite-sample coverage guarantee without distributional assumptions
+<Cite id="vovk2005" /> <Cite id="lei2018" />. Hold out $n$ calibration points that the model did not see, with
+absolute errors $s_1, \dots, s_n$, called conformity scores. Let $s_{(k)}$ be the $k$-th smallest, with
+$k = \lceil (n + 1)(1 - \alpha) \rceil$. The interval for a new point is $\hat y \pm s_{(k)}$.
+
+**Why the coverage holds.** Suppose the $n$ calibration scores and the new point's score $s_{n+1}$ are exchangeable:
+their joint distribution does not change when they are permuted. Then $s_{n+1}$ is equally likely to occupy each of
+the $n + 1$ rank positions, ignoring ties. The new value falls inside the interval exactly when $s_{n+1} \le s_{(k)}$,
+which happens when its rank among all $n + 1$ scores is at most $k$. That has probability at least
+$k/(n + 1) \ge 1 - \alpha$.
+
+Time series are not exchangeable: errors are autocorrelated, and their scale drifts. The guarantee then holds only
+approximately. Practical versions calibrate separately for each horizon on rolling-origin errors from
+<NoteLink to="time-series-cross-validation">time-series cross-validation</NoteLink>, and use recent errors or
+weighting to track changes in scale.
+
+## Worked example
+
+An AR(1) with $\phi = 0.8$, $\sigma = 1$ and mean zero is observed at $y_T = 3$. The point forecasts are
+$\hat y_{T+h} = 0.8^h \times 3$ and the standard deviations are $\sigma_h = \sqrt{(1 - 0.64^h)/0.36}$.
+
+| $h$ | Forecast | $\sigma_h$ | 95% interval |
+| --- | --- | --- | --- |
+| 1 | 2.40 | 1.00 | $[0.44, 4.36]$ |
+| 2 | 1.92 | 1.28 | $[-0.59, 4.43]$ |
+| 5 | 0.98 | 1.57 | $[-2.10, 4.07]$ |
+| 10 | 0.32 | 1.66 | $[-2.93, 3.57]$ |
+
+As $h$ grows the interval approaches the unconditional interval $0 \pm 1.96 \times 1.67 = \pm 3.27$: the forecast has
+forgotten $y_T$.
+
+## Pitfalls
+
+- **Evaluating coverage.** Check the proportion of held-out values inside the intervals, separately for each horizon.
+  Coverage alone rewards wide intervals, so also score width with the
+  <NoteLink to="crps-and-interval-scores">interval score</NoteLink>.
+- **Transformations.** An interval computed on $\log y$ and back-transformed is a valid interval for $y$, because
+  quantiles are preserved by monotone maps. The back-transformed point forecast is the median, not the mean.
+- **Simultaneous coverage.** A 95% interval at each of $h$ horizons does not contain the whole future path with
+  probability 95%. Path-wise statements need simulated paths.

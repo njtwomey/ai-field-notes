@@ -1,0 +1,123 @@
+---
+title: Probabilistic forecasting
+kind: concept
+summary: 'A probabilistic forecast gives a predictive distribution for $y_{T+h}$, as a density, quantiles or sample paths. A good one is as sharp as possible while staying calibrated. Quantile forecasts are fitted with the pinball loss, whose expectation is minimised at the true quantile.'
+tags: [time-series, forecasting, uncertainty-quantification, quantile-regression, scoring-rules, worked-example]
+aliases: [distributional forecasting, density forecasting, quantile forecasting, quantile forecast, probability integral transform, PIT histogram, calibration and sharpness]
+requires: [expectation]
+related: [prediction-intervals, crps-and-interval-scores, robust-and-distributional-regression-losses, time-series-cross-validation, hierarchical-forecast-reconciliation, log-loss-and-brier-score]
+references: [gneiting2014, gneiting2007, koenker1978, hyndman2021]
+status: draft
+updated: 2026-09-27
+---
+
+import { PinballExplorer } from './PinballExplorer'
+
+<Definition>
+A **probabilistic forecast** of $y_{T+h}$ made at time $T$ is a predictive distribution $F_{T+h \mid T}$ for the future
+value, rather than a single number <Cite id="gneiting2014" />. It can be given as a parametric distribution, as a set of
+quantiles $q_{\tau_1} < \dots < q_{\tau_K}$ at levels $\tau_k \in (0, 1)$, or as sample paths drawn from a
+simulation. A point forecast and a prediction interval are summaries of it.
+</Definition>
+
+## Why a distribution
+
+Decisions depend on more than the expected value. A retailer sets stock at a high quantile of demand, because running
+out costs more than holding a spare unit. A grid operator plans reserves for the upper tail of load. Both need
+quantiles, and different decisions need different quantiles of the same forecast. A predictive distribution supplies
+all of them at once, and it also states how much the forecaster knows: a wide distribution warns that the point
+forecast is unreliable.
+
+## Calibration and sharpness
+
+Gneiting and co-authors state the goal as **maximising sharpness subject to calibration** <Cite id="gneiting2014" />.
+
+- **Calibration** is statistical consistency between the forecasts and the outcomes. Events forecast with probability
+  $p$ happen with frequency $p$; 90% intervals contain 90% of outcomes; the $\tau$-quantile is exceeded a fraction
+  $1 - \tau$ of the time.
+- **Sharpness** is the concentration of the forecast distributions. It is a property of the forecasts alone. Among
+  calibrated forecasters, the sharper one is more useful.
+
+The climatological forecast, the same unconditional distribution every time, is calibrated but not sharp. A forecast
+that is sharp but miscalibrated is overconfident.
+
+**The probability integral transform checks calibration.** If $y$ is drawn from a continuous distribution $F$, then
+$F(y)$ is uniform on $[0, 1]$, because $\prob(F(y) \le u) = \prob(y \le F^{-1}(u)) = F(F^{-1}(u)) = u$. So if the
+forecasts are the true conditional distributions, the values $u_t = F_{t \mid t-h}(y_t)$ over many forecasts are
+uniform. A histogram of the $u_t$ diagnoses the failure: a U shape means the forecasts are too narrow, a hump means too
+wide, and a slope means biased.
+
+## Quantile forecasts and the pinball loss
+
+A quantile forecast $q$ at level $\tau$ is scored by the **pinball loss**
+
+$$
+\rho_\tau(y - q) = \begin{cases} \tau\,(y - q) & y \ge q, \\ (1 - \tau)(q - y) & y < q. \end{cases}
+$$
+
+An outcome above the forecast costs $\tau$ per unit and one below costs $1 - \tau$ per unit. For $\tau = 0.9$,
+under-forecasting is nine times as expensive as over-forecasting, which pushes the forecast up.
+
+**The expected pinball loss is minimised at the $\tau$-quantile.** Let $Y$ have a continuous distribution $F$ with
+density $f$. The expected loss of a forecast $q$ is
+
+$$
+L(q) = \expect[\rho_\tau(Y - q)] = \tau\int_q^\infty (y - q) f(y)\,dy + (1 - \tau)\int_{-\infty}^q (q - y) f(y)\,dy.
+$$
+
+Differentiate under the integral sign. The integrands vanish at $y = q$, so the boundary terms are zero, and
+
+$$
+L'(q) = -\tau\int_q^\infty f(y)\,dy + (1 - \tau)\int_{-\infty}^q f(y)\,dy = -\tau(1 - F(q)) + (1 - \tau)F(q) =
+F(q) - \tau.
+$$
+
+$L'(q)$ is negative for $F(q) < \tau$ and positive for $F(q) > \tau$, so $L$ is convex with its minimum where
+$F(q) = \tau$: at the $\tau$-quantile $F^{-1}(\tau)$. The pinball loss is therefore a consistent scoring function for
+quantiles, and minimising its sample average over a model's parameters estimates conditional quantiles. This is
+quantile regression <Cite id="koenker1978" />. At $\tau = 0.5$ the loss is half the absolute error, and the minimiser is
+the median.
+
+<PinballExplorer />
+
+A model that outputs several quantiles, such as the 10th, 50th and 90th percentiles, is trained on the sum of their
+pinball losses. Averaged over all levels $\tau \in (0, 1)$, twice the pinball loss equals the
+<NoteLink to="crps-and-interval-scores">continuous ranked probability score</NoteLink>, so a set of quantile forecasts
+is scored as a whole by the average pinball loss over its levels <Cite id="gneiting2007" />.
+
+## Producing probabilistic forecasts
+
+- **Parametric models.** ARIMA, exponential smoothing and state-space models give a Gaussian predictive distribution
+  whose variance grows with the horizon, the basis of analytic
+  <NoteLink to="prediction-intervals">prediction intervals</NoteLink>. Count data use Poisson or negative binomial
+  predictive distributions.
+- **Simulation.** Running a fitted model forward with resampled or simulated shocks gives sample paths. Paths preserve
+  the dependence across horizons, which is needed for totals over several periods.
+- **Direct quantile models.** Gradient-boosted trees or neural networks trained on the pinball loss output quantiles
+  directly, with no distributional assumption <Cite id="hyndman2021" />.
+
+## Worked example
+
+Suppose $Y \sim \Gauss(10, 2^2)$ and a forecaster must give the 0.9 quantile.
+
+- The optimal forecast is $10 + 2 \times 1.2816 = 12.56$, with expected pinball loss $0.351$.
+- Forecasting the median, $q = 10$, gives expected loss $0.798$, more than twice as large: at $\tau = 0.9$ the loss
+  penalises the frequent outcomes above 10 heavily.
+- Over-shooting to $q = 14$ gives $0.417$. The loss rises more slowly above the quantile than below it, because each
+  unit of over-forecast costs only $1 - \tau = 0.1$.
+
+For a Gaussian the expected loss has the closed form
+$L(q) = \tau(\mu - q) + \sigma\paren{\phi(z) + z\,\Phi(z)}$ with $z = (q - \mu)/\sigma$, where $\phi$ and $\Phi$ are the
+standard-normal density and distribution function.
+
+## Pitfalls
+
+- **Quantile crossing.** Separately estimated quantiles can cross, giving a 90% quantile below the 80% one. Sort them,
+  or constrain the model to produce increasing quantiles.
+- **Coverage is not enough.** An interval can reach its nominal coverage by being wide at calm times and narrow at
+  volatile ones in the wrong proportions. Check calibration conditionally, for example by season or by forecast
+  level, and score with a proper scoring rule.
+- **Aggregating quantiles.** The sum of 90% quantiles of several series is not the 90% quantile of their sum unless
+  the series are perfectly dependent. Aggregate sample paths instead.
+- **Point summaries.** The mean of a predictive distribution minimises squared error and the median minimises
+  absolute error. Report the summary that matches the loss used for evaluation.

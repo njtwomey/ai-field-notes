@@ -1,0 +1,178 @@
+---
+title: Vector autoregression
+kind: concept
+summary: 'A VAR($p$) models a vector series as $\yvec_t = \cvec + \sum_{i=1}^p \Amat_i\yvec_{t-i} + \uvec_t$. It is stable when every eigenvalue of its companion matrix lies inside the unit circle. Each equation is fitted by least squares, and impulse responses trace how a shock propagates.'
+tags: [time-series, multivariate, econometrics, least-squares, worked-example]
+aliases: [VAR, 'VAR(p)', vector autoregressive model, companion matrix, impulse response function, orthogonalised impulse response, forecast error variance decomposition]
+requires: [linear-regression, eigendecomposition]
+related: [autoregressive-model, stationarity, granger-causality, cointegration, error-correction-model, cholesky-decomposition, linear-gaussian-state-space-models]
+references: [sims1980, lutkepohl2005, hamilton1994]
+status: draft
+updated: 2026-09-27
+---
+
+import { VarImpulse } from './VarImpulse'
+
+<Definition>
+A **vector autoregression of order $p$**, VAR($p$), models a $K$-dimensional series $\yvec_t \in \reals^K$ as
+<Cite id="sims1980" />
+
+$$
+\yvec_t = \cvec + \Amat_1\yvec_{t-1} + \dots + \Amat_p\yvec_{t-p} + \uvec_t,
+$$
+
+where $\cvec \in \reals^K$ is an intercept, each $\Amat_i$ is a $K \times K$ coefficient matrix, and the errors
+$\uvec_t$ are white noise: mean zero, covariance $\Sigmamat_u$ ($K \times K$), and uncorrelated across time. Every
+variable is regressed on $p$ lags of every variable.
+</Definition>
+
+## Intuition
+
+A scalar <NoteLink to="autoregressive-model">autoregression</NoteLink> predicts a series from its own past. A VAR predicts each of $K$ series from the past of all
+of them. The entry $(\Amat_i)_{jk}$ is the effect of variable $k$ at lag $i$ on variable $j$ now. Sims proposed VARs
+for macroeconomics as an alternative to large structural models whose exclusion restrictions he considered incredible:
+the VAR imposes no restrictions beyond the lag length and lets the data determine the dynamics
+<Cite id="sims1980" />. The contemporaneous correlation between variables sits in $\Sigmamat_u$, not in the
+coefficients.
+
+## Companion form and stability
+
+Any VAR($p$) can be written as a VAR(1) in a stacked state. Define the $Kp$-vector
+$\tilde\yvec_t = (\yvec_t, \yvec_{t-1}, \dots, \yvec_{t-p+1})$ and the $Kp \times Kp$ **companion matrix**
+
+$$
+\Fmat = \begin{bmatrix}
+\Amat_1 & \Amat_2 & \cdots & \Amat_{p-1} & \Amat_p \\
+\eye & \zeros & \cdots & \zeros & \zeros \\
+\zeros & \eye & \cdots & \zeros & \zeros \\
+\vdots & & \ddots & & \vdots \\
+\zeros & \zeros & \cdots & \eye & \zeros
+\end{bmatrix}.
+$$
+
+The first block row of $\tilde\yvec_t = \nuvec + \Fmat\tilde\yvec_{t-1} + \tilde\uvec_t$ is the VAR equation. The other rows only shift
+the lags down, and $\nuvec = (\cvec, \zeros, \dots)$, $\tilde\uvec_t = (\uvec_t, \zeros, \dots)$.
+
+Iterating the recursion $j$ times gives
+
+$$
+\tilde\yvec_t = \sum_{i=0}^{j-1} \Fmat^i(\nuvec + \tilde\uvec_{t-i}) + \Fmat^j\tilde\yvec_{t-j}.
+$$
+
+The influence of the distant past, $\Fmat^j\tilde\yvec_{t-j}$, vanishes as $j \to \infty$ exactly when $\Fmat^j \to \zeros$.
+By the <NoteLink to="eigendecomposition">eigendecomposition</NoteLink> (or the Jordan form when $\Fmat$ is not
+diagonalisable), $\Fmat^j \to \zeros$ if and only if every eigenvalue $\lambda$ of $\Fmat$ satisfies $\abs{\lambda} < 1$.
+The VAR is then **stable**: the infinite sum converges, the process is <NoteLink to="stationarity">stationary</NoteLink>, and
+
+$$
+\yvec_t = \muvec + \sum_{i=0}^\infty \Phimat_i\uvec_{t-i}, \qquad
+\muvec = \paren{\eye - \Amat_1 - \dots - \Amat_p}^{-1}\cvec,
+$$
+
+where $\Phimat_i$ is the top-left $K \times K$ block of $\Fmat^i$ <Cite id="lutkepohl2005" />. The eigenvalues of
+$\Fmat$ are the reciprocals of the roots of $\det(\eye - \Amat_1 z - \dots - \Amat_p z^p) = 0$, so stability is
+equivalently the condition that this polynomial has no roots on or inside the unit circle.
+
+## Estimation by least squares, one equation at a time
+
+Collect the regressors of time $t$ in $\zvec_t = (1, \yvec_{t-1}, \dots, \yvec_{t-p}) \in \reals^{Kp+1}$ and the
+coefficients in $\Bmat = [\cvec, \Amat_1, \dots, \Amat_p]$ ($K \times (Kp+1)$). With $T$ usable observations, stack
+the columns $\yvec_t$ into $\Ymat$ ($K \times T$) and $\zvec_t$ into $\Zmat$ ($(Kp+1) \times T$). The model is
+$\Ymat = \Bmat\Zmat + \Umat$, and the least-squares estimate is
+
+$$
+\hat\Bmat = \Ymat\Zmat^\top\paren{\Zmat\Zmat^\top}^{-1}.
+$$
+
+Row $j$ of $\hat\Bmat$ is the ordinary <NoteLink to="linear-regression">least-squares</NoteLink> fit of variable $j$ on
+$\zvec_t$. The whole VAR is therefore $K$ separate regressions sharing one design matrix. The error covariance is
+estimated from the residuals $\hat\Umat = \Ymat - \hat\Bmat\Zmat$ by $\hat\Sigmamat_u = \hat\Umat\hat\Umat^\top /
+(T - Kp - 1)$.
+
+The errors of different equations are correlated, so one might expect a joint (generalised least squares) estimator to
+be more efficient. It is not: because every equation has the same regressors, GLS reduces to equation-by-equation OLS.
+With Gaussian errors, OLS is also the conditional maximum-likelihood estimator <Cite id="lutkepohl2005" />.
+
+<Derivation title="Why GLS equals OLS in a VAR">
+Vectorise the model with $\operatorname{vec}(\Bmat\Zmat) = (\Zmat^\top \otimes \eye_K)\operatorname{vec}(\Bmat)$. The
+stacked errors $\operatorname{vec}(\Umat)$ have covariance $\eye_T \otimes \Sigmamat_u$. The GLS estimator is
+
+$$
+\operatorname{vec}(\hat\Bmat) = \paren{(\Zmat \otimes \eye_K)(\eye_T \otimes \Sigmamat_u^{-1})(\Zmat^\top \otimes
+\eye_K)}^{-1}(\Zmat \otimes \eye_K)(\eye_T \otimes \Sigmamat_u^{-1})\operatorname{vec}(\Ymat).
+$$
+
+The mixed-product rule $(\Amat \otimes \Bmat)(\Cmat \otimes \Dmat) = \Amat\Cmat \otimes \Bmat\Dmat$ simplifies the
+matrix to invert to $\Zmat\Zmat^\top \otimes \Sigmamat_u^{-1}$ and the right-hand factor to
+$\Zmat \otimes \Sigmamat_u^{-1}$. Then
+
+$$
+\operatorname{vec}(\hat\Bmat) = \paren{(\Zmat\Zmat^\top)^{-1} \otimes \Sigmamat_u}\paren{\Zmat \otimes
+\Sigmamat_u^{-1}}\operatorname{vec}(\Ymat) = \paren{(\Zmat\Zmat^\top)^{-1}\Zmat \otimes \eye_K}\operatorname{vec}(\Ymat)
+= \operatorname{vec}\paren{\Ymat\Zmat^\top(\Zmat\Zmat^\top)^{-1}}.
+$$
+
+$\Sigmamat_u$ cancels, so GLS gives the OLS estimate whatever the error covariance.
+</Derivation>
+
+**Choosing $p$.** A VAR($p$) has $K^2p + K$ mean parameters, which grows fast: five variables and four lags already
+give 105. The lag order is usually chosen by minimising $\AIC$ or $\BIC$,
+$\log\det\hat\Sigmamat_u(p) + (\text{penalty}) \times K^2p / T$, with penalty $2$ for $\AIC$ and $\log T$ for $\BIC$.
+
+## Impulse responses
+
+The moving-average coefficients $\Phimat_i$ answer the question: if $\uvec_t$ increases by a vector $\dvec$ and no
+other shock occurs, how does $\yvec_{t+h}$ change? The answer is $\Phimat_h\dvec$. The matrices follow from the
+recursion $\Phimat_0 = \eye$ and $\Phimat_h = \sum_{i=1}^{\min(h, p)} \Phimat_{h-i}\Amat_i$, obtained by matching
+coefficients in $\yvec_t = \sum_i \Amat_i\yvec_{t-i} + \uvec_t$. For a VAR(1), $\Phimat_h = \Amat_1^h$.
+
+A unit shock to one element of $\uvec_t$ alone is unrealistic when the errors are correlated: a surprise in one
+variable usually comes with a surprise in another. **Orthogonalised impulse responses** use the lower-triangular
+<NoteLink to="cholesky-decomposition">Cholesky factor</NoteLink> $\Pmat$ of $\Sigmamat_u = \Pmat\Pmat^\top$. The
+vector $\wvec_t = \Pmat^{-1}\uvec_t$ has identity covariance, and $\uvec_t = \Pmat\wvec_t$. The response of
+$\yvec_{t+h}$ to a one-standard-deviation shock in $w_{jt}$ is column $j$ of $\Thetamat_h = \Phimat_h\Pmat$. Because
+$\Pmat$ is lower triangular, the first variable's shock moves every variable at $h = 0$, and the last variable's shock
+moves only itself. The results therefore depend on the order of the variables <Cite id="sims1980" />.
+
+The **forecast error variance decomposition** follows from the same matrices. The $h$-step forecast error is
+$\sum_{i=0}^{h-1}\Thetamat_i\wvec_{t+h-i}$, so the share of variable $j$'s forecast error variance due to shock $k$ is
+$\sum_{i<h}(\Thetamat_i)_{jk}^2 / \sum_{i<h}\sum_{m}(\Thetamat_i)_{jm}^2$.
+
+<VarImpulse />
+
+## Worked example
+
+Take $K = 2$, $p = 1$, $\cvec = \zeros$ and
+
+$$
+\Amat = \begin{bmatrix} 0.5 & 0.2 \\ 0.3 & 0.4 \end{bmatrix}, \qquad
+\Sigmamat_u = \begin{bmatrix} 1 & 0.5 \\ 0.5 & 1 \end{bmatrix}.
+$$
+
+- **Stability.** The eigenvalues solve $\lambda^2 - 0.9\lambda + 0.14 = 0$ (trace $0.9$, determinant
+  $0.2 - 0.06 = 0.14$), so $\lambda = 0.7$ and $0.2$. Both are inside the unit circle, and the VAR is stable.
+- **Impulse responses.** $\Phimat_1 = \Amat$ and $\Phimat_2 = \Amat^2 = \begin{bmatrix} 0.31 & 0.18 \\ 0.27 & 0.22
+  \end{bmatrix}$. A unit shock to $u_1$ moves $\yvec$ by $(1, 0)$ at $h = 0$, $(0.5, 0.3)$ at $h = 1$ and
+  $(0.31, 0.27)$ at $h = 2$. The responses decay roughly like $0.7^h$, the largest eigenvalue.
+- **Orthogonalised responses.** $\Pmat = \begin{bmatrix} 1 & 0 \\ 0.5 & 0.866 \end{bmatrix}$. A one-standard-deviation
+  shock to the first orthogonal component moves $\yvec$ by $(1, 0.5)$ at $h = 0$, $(0.6, 0.5)$ at $h = 1$ and
+  $(0.4, 0.38)$ at $h = 2$. A shock to the second component moves $\yvec$ by $(0, 0.866)$ at $h = 0$ and
+  $(0.173, 0.346)$ at $h = 1$.
+
+## Assumptions
+
+- The process is stable, or has been transformed to be stable, by differencing or by a
+  <NoteLink to="error-correction-model">vector error-correction model</NoteLink> when the variables are cointegrated.
+- The errors are white noise with constant covariance. Residual autocorrelation suggests too few lags.
+- The relationships are linear and constant over the sample.
+
+## Pitfalls
+
+- **Parameter count.** With many variables and lags, OLS overfits. Shrinkage (Bayesian VARs with a Minnesota prior, or
+  ridge and lasso penalties) is standard for $K$ above a handful.
+- **Ordering.** Orthogonalised impulse responses change when the variables are reordered. Report the ordering and
+  check the robustness of conclusions to it.
+- **Differencing cointegrated series.** A VAR in differences of cointegrated series omits the long-run relation and is
+  misspecified. A VAR in levels remains consistent but its test statistics have non-standard distributions.
+- **Interpretation.** Reduced-form responses describe correlations in the data. Calling them causal effects requires
+  identifying assumptions, of which the Cholesky ordering is one.

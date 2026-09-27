@@ -1,0 +1,110 @@
+---
+title: Stochastic volatility model
+kind: concept
+summary: 'A stochastic volatility model gives the log-variance its own shock: $r_t = e^{h_t/2}\varepsilon_t$ with $h_t = \mu + \phi(h_{t-1} - \mu) + \sigma_\eta\eta_t$. The volatility is a latent AR(1), so the likelihood needs filtering, unlike GARCH.'
+tags: [time-series, volatility, finance, state-space-models, latent-variable-models]
+aliases: [SV model, stochastic volatility, log-normal stochastic volatility, autoregressive stochastic volatility]
+requires: [volatility-clustering, linear-gaussian-state-space-models]
+related: [garch-model, arch-model, kalman-filter, particle-filter, log-normal-distribution, autoregressive-model]
+references: [harvey1994, kim1998, cont2001]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The basic **stochastic volatility** (SV) model describes returns $r_1, \dots, r_T$ through a latent log-variance $h_t$
+<Cite id="kim1998" />:
+
+$$
+r_t = e^{h_t/2}\varepsilon_t, \qquad h_t = \mu + \phi(h_{t-1} - \mu) + \sigma_\eta\eta_t, \qquad
+\varepsilon_t, \eta_t \iid \Gauss(0, 1),
+$$
+
+with $\varepsilon$ and $\eta$ independent. $\mu$ is the mean log-variance, $\phi \in (-1, 1)$ its persistence and
+$\sigma_\eta > 0$ the volatility of volatility. The conditional variance of $r_t$ given $h_t$ is $e^{h_t}$.
+</Definition>
+
+## Intuition
+
+In the <NoteLink to="garch-model">GARCH model</NoteLink>, tomorrow's variance is a fixed function of today's data: once
+the returns up to $t - 1$ are known, $\sigma_t^2$ is known. In the SV model the variance has a shock $\eta_t$ of its
+own, so it cannot be recovered exactly from past returns. Volatility is a hidden state, and the returns are noisy
+measurements of it. The model is a nonlinear <NoteLink to="linear-gaussian-state-space-models">state-space
+model</NoteLink> with state $h_t$.
+
+## Moments
+
+The log-variance is a stationary Gaussian <NoteLink to="autoregressive-model">AR(1)</NoteLink>. Its stationary variance $\sigma_h^2$ solves
+$\sigma_h^2 = \phi^2\sigma_h^2 + \sigma_\eta^2$, so
+
+$$
+h_t \sim \Gauss\paren{\mu, \sigma_h^2}, \qquad \sigma_h^2 = \frac{\sigma_\eta^2}{1 - \phi^2}.
+$$
+
+The variance $e^{h_t}$ is therefore log-normal. For a Gaussian $h$, $\expect[e^{kh}] = e^{k\mu + k^2\sigma_h^2/2}$.
+Using the independence of $\varepsilon_t$ and $h_t$:
+
+$$
+\expect[r_t^2] = \expect[e^{h_t}] = e^{\mu + \sigma_h^2/2}, \qquad
+\expect[r_t^4] = 3\,\expect[e^{2h_t}] = 3\,e^{2\mu + 2\sigma_h^2}.
+$$
+
+The kurtosis is $\expect[r_t^4]/\paren{\expect[r_t^2]}^2 = 3e^{\sigma_h^2}$. It exceeds 3 whenever $\sigma_\eta > 0$,
+and all moments exist for every $\phi \in (-1, 1)$. With $\phi = 0.95$ and $\sigma_\eta = 0.2$, $\sigma_h^2 = 0.41$ and
+the kurtosis is $4.52$.
+
+The returns are uncorrelated because $\varepsilon_t$ has mean zero and is independent of everything else. The squared
+returns are autocorrelated because they share the persistent $h_t$. For $k \ge 1$,
+$\expect[r_t^2 r_{t-k}^2] = \expect[e^{h_t + h_{t-k}}]$, and $h_t + h_{t-k}$ is Gaussian with variance
+$2\sigma_h^2(1 + \phi^k)$, so
+
+$$
+\cov(r_t^2, r_{t-k}^2) = e^{2\mu + \sigma_h^2}\paren{e^{\sigma_h^2\phi^k} - 1}.
+$$
+
+The covariance decays with $\phi^k$ inside an exponential, which is roughly geometric at rate $\phi$ for small
+$\sigma_h^2$.
+
+## Estimation
+
+The likelihood $p(r_{1:T}) = \int p(r_{1:T} \mid h_{1:T})\,p(h_{1:T})\,dh_{1:T}$ is a $T$-dimensional integral with
+no closed form, because the observation $r_t$ depends on the state through $e^{h_t/2}$.
+
+**Quasi-maximum likelihood through linearisation.** Squaring and taking logs makes the model linear in the state
+<Cite id="harvey1994" />:
+
+$$
+\log r_t^2 = h_t + \log\varepsilon_t^2.
+$$
+
+For a standard Gaussian $\varepsilon_t$, $\log\varepsilon_t^2$ has mean $-1.27$ and variance $\pi^2/2 \approx 4.93$.
+Treating $\log\varepsilon_t^2 + 1.27$ as Gaussian noise with that variance turns the model into a linear-Gaussian
+state-space model, and the <NoteLink to="kalman-filter">Kalman filter</NoteLink> gives an approximate likelihood.
+The noise $\log\varepsilon_t^2$ is strongly left-skewed, so the approximation loses efficiency. Returns of exactly zero
+must be offset before taking logs.
+
+**Simulation-based inference.** Markov chain Monte Carlo samples the states and parameters jointly. Kim, Shephard and
+Chib approximate the distribution of $\log\varepsilon_t^2$ by a seven-component mixture of Gaussians, which makes the
+model conditionally linear-Gaussian and allows all states to be drawn at once <Cite id="kim1998" />. A
+<NoteLink to="particle-filter">particle filter</NoteLink> estimates the likelihood directly and tracks $h_t$ online.
+
+## Comparison with GARCH
+
+| | GARCH(1,1) | Stochastic volatility |
+| --- | --- | --- |
+| Variance given past returns | Known exactly | Uncertain (a filtering distribution) |
+| Likelihood | Explicit recursion | Integral over latent states |
+| Kurtosis with Gaussian shocks | $3\,\dfrac{1 - (\alpha + \beta)^2}{1 - (\alpha + \beta)^2 - 2\alpha^2}$, may be infinite | $3e^{\sigma_h^2}$, always finite |
+| Link to continuous-time finance | Indirect | Discretises log-volatility diffusions |
+
+With the same number of parameters, SV models often fit daily returns at least as well as GARCH, at a higher
+computational cost <Cite id="kim1998" />.
+
+## Pitfalls
+
+- **Identification of $\sigma_\eta$.** When $\sigma_\eta$ is small, the data carry little information about it, and
+  estimates of $\phi$ and $\sigma_\eta$ are strongly correlated.
+- **Linearised likelihood.** The Kalman-filter QML estimator is consistent but inefficient. Its filtered volatilities
+  are biased in small samples.
+- **Leverage.** The basic model has $\varepsilon_t$ independent of $\eta_t$. Negative correlation between them, as seen
+  in equities <Cite id="cont2001" />, needs an extended model.

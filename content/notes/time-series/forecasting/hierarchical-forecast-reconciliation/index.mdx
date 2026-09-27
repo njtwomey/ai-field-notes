@@ -1,0 +1,134 @@
+---
+title: Hierarchical forecast reconciliation
+kind: concept
+summary: 'Series that sum up a hierarchy, $\yvec_t = \Smat\bvec_t$, need forecasts that add up too. Reconciliation maps incoherent base forecasts $\hat\yvec$ to $\Smat\Gmat\hat\yvec$. Bottom-up and top-down fix $\Gmat$; MinT picks the $\Gmat$ that minimises total error variance.'
+tags: [time-series, forecasting, hierarchical-forecasting, generalised-least-squares, worked-example]
+aliases: [hierarchical forecasting, forecast reconciliation, MinT, minimum trace reconciliation, bottom-up forecasting, top-down forecasting, middle-out forecasting, summing matrix, coherent forecasts, grouped time series]
+requires: [linear-regression, variance-and-covariance]
+related: [time-series-cross-validation, prediction-intervals, probabilistic-forecasting]
+references: [hyndman2011, wickramasuriya2019, hyndman2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **hierarchical time series** is a collection of $n$ series in which some are sums of others, such as sales by store,
+region and country. Stack all series at time $t$ in $\yvec_t \in \reals^n$ and the $m$ most disaggregated (bottom)
+series in $\bvec_t \in \reals^m$. The **summing matrix** $\Smat$ ($n \times m$, entries 0 or 1) gives
+$\yvec_t = \Smat\bvec_t$. Forecasts are **coherent** when they satisfy the same constraint. **Reconciliation** maps
+base forecasts $\hat\yvec_h$ of every series, produced independently, to coherent forecasts
+$\tilde\yvec_h = \Smat\Gmat\hat\yvec_h$ for some $m \times n$ matrix $\Gmat$ <Cite id="hyndman2011" />.
+</Definition>
+
+## Intuition
+
+Forecasting each series separately uses the best model for each level: the total is smooth and easy to forecast,
+the bottom series are noisy. But independent forecasts do not add up, and plans made at different levels then
+contradict each other. Reconciliation keeps one forecast per bottom series, $\Gmat\hat\yvec_h$, formed from the base
+forecasts at all levels, and sums it up with $\Smat$. Coherent forecasts are exactly the vectors in the column space of
+$\Smat$, so reconciliation is a projection of $\hat\yvec_h$ onto that $m$-dimensional subspace.
+
+For a total $T$ with two children $A$ and $B$:
+
+$$
+\begin{bmatrix} y_T \\ y_A \\ y_B \end{bmatrix} = \begin{bmatrix} 1 & 1 \\ 1 & 0 \\ 0 & 1 \end{bmatrix}
+\begin{bmatrix} y_A \\ y_B \end{bmatrix}.
+$$
+
+## Single-level methods
+
+- **Bottom-up.** Forecast only the bottom series and add them up: $\Gmat = [\zeros_{m \times (n-m)}, \eye_m]$. Nothing
+  is lost by aggregation, but bottom series are often noisy or intermittent, and their forecasts ignore the
+  information in the aggregates.
+- **Top-down.** Forecast the total and split it with proportions $\pvec$, often historical shares:
+  $\Gmat = [\pvec, \zeros_{m \times (n-1)}]$. It is simple and stable, but it cannot reflect different dynamics in the
+  children, such as one growing and one shrinking.
+- **Middle-out** forecasts one intermediate level, sums upward and splits downward.
+
+## Unbiasedness
+
+Suppose the base forecasts are unbiased, $\expect[\hat\yvec_h] = \Smat\expect[\bvec_{t+h}]$. The reconciled forecasts
+are unbiased when $\expect[\Smat\Gmat\hat\yvec_h] = \Smat\Gmat\Smat\expect[\bvec_{t+h}]$ equals
+$\Smat\expect[\bvec_{t+h}]$ for every mean. Since $\Smat$ has full column rank, this holds exactly when
+
+$$
+\Gmat\Smat = \eye_m.
+$$
+
+The constraint says that already-coherent forecasts are left unchanged. Bottom-up satisfies it. Top-down does not:
+$\Gmat\Smat = \pvec\ones^\top$, which has rank 1, so top-down forecasts are biased whenever the children's shares
+change <Cite id="hyndman2011" />.
+
+## Minimum trace reconciliation
+
+Let $\Wmat_h = \cov(\yvec_{t+h} - \hat\yvec_h)$ be the covariance of the base forecast errors. If $\Gmat\Smat = \eye$,
+the reconciled error is $\yvec_{t+h} - \Smat\Gmat\hat\yvec_h = \Smat\Gmat(\yvec_{t+h} - \hat\yvec_h)$, using
+$\yvec_{t+h} = \Smat\Gmat\Smat\bvec_{t+h} = \Smat\Gmat\yvec_{t+h}$. Its covariance is
+
+$$
+\cov(\yvec_{t+h} - \tilde\yvec_h) = \Smat\Gmat\Wmat_h\Gmat^\top\Smat^\top.
+$$
+
+The **MinT** reconciliation chooses $\Gmat$ to minimise the trace of this matrix, the sum of the error variances of
+all $n$ series, subject to $\Gmat\Smat = \eye$. The solution is <Cite id="wickramasuriya2019" />
+
+$$
+\Gmat^* = \paren{\Smat^\top\Wmat_h^{-1}\Smat}^{-1}\Smat^\top\Wmat_h^{-1}.
+$$
+
+**Why $\Gmat^*$ is optimal.** $\Gmat^*$ satisfies the constraint, since $\Gmat^*\Smat = \eye$. Any other feasible
+$\Gmat$ can be written $\Gmat = \Gmat^* + \Dmat$ with $\Dmat\Smat = \zeros$. Expanding,
+
+$$
+\Gmat\Wmat_h\Gmat^\top = \Gmat^*\Wmat_h\Gmat^{*\top} + \Dmat\Wmat_h\Gmat^{*\top} + \Gmat^*\Wmat_h\Dmat^\top +
+\Dmat\Wmat_h\Dmat^\top.
+$$
+
+The cross term vanishes: $\Gmat^*\Wmat_h\Dmat^\top = \paren{\Smat^\top\Wmat_h^{-1}\Smat}^{-1}\Smat^\top\Dmat^\top =
+\paren{\Smat^\top\Wmat_h^{-1}\Smat}^{-1}(\Dmat\Smat)^\top = \zeros$. So
+$\Gmat\Wmat_h\Gmat^\top = \Gmat^*\Wmat_h\Gmat^{*\top} + \Dmat\Wmat_h\Dmat^\top$, and the second term is positive
+semidefinite. Multiplying by $\Smat$ on the left and $\Smat^\top$ on the right keeps the ordering. Every reconciled
+series' error variance is therefore smallest under $\Gmat^*$, and so is the trace. This is the same argument as the
+Gauss–Markov theorem: $\Gmat^*$ is the generalised least-squares estimate of $\bvec$ in the regression
+$\hat\yvec_h = \Smat\bvec + \text{error}$.
+
+## Estimating $\Wmat_h$
+
+$\Wmat_h$ is an $n \times n$ covariance, often with $n$ in the thousands, and must be estimated. Common choices
+<Cite id="wickramasuriya2019" /> <Cite id="hyndman2021" />:
+
+- **OLS:** $\Wmat_h \propto \eye$. The reconciliation is the orthogonal projection onto the column space of $\Smat$
+  <Cite id="hyndman2011" />.
+- **WLS, structural scaling:** $\Wmat_h$ diagonal with entry $i$ equal to the number of bottom series that series $i$
+  sums. It needs no residuals, so it works when some series are too short to estimate variances.
+- **WLS, variance scaling:** $\Wmat_h$ diagonal with the in-sample one-step residual variances.
+- **MinT-shrink:** the sample covariance of one-step residuals, shrunk towards its diagonal so that it is invertible
+  and stable. The $h$-step covariance is assumed proportional to the one-step covariance.
+
+## Worked example
+
+A total and two children have base forecasts $\hat y_T = 100$, $\hat y_A = 55$ and $\hat y_B = 40$. They are
+incoherent by $5$. Suppose the base error variances are $16$, $4$ and $9$, with errors uncorrelated.
+
+| Method | $\tilde y_T$ | $\tilde y_A$ | $\tilde y_B$ | Sum of error variances |
+| --- | --- | --- | --- | --- |
+| Bottom-up | 95.00 | 55.00 | 40.00 | 26.00 |
+| Top-down, shares 0.6 and 0.4 | 100.00 | 60.00 | 40.00 | (biased) |
+| OLS | 98.33 | 56.67 | 41.67 | 19.33 |
+| MinT with the true $\Wmat$ | 97.24 | 55.69 | 41.55 | 16.83 |
+
+OLS splits the discrepancy of 5 equally: the total falls by $1.67$ and each child rises by $1.67$. MinT moves each
+forecast in proportion to its uncertainty. The total, with variance 16, moves by $2.76$; $A$, with variance 4, moves
+by only $0.69$. The bottom-up variance of the total is $4 + 9 = 13$, larger than MinT's $7.17$, because bottom-up
+ignores the total's own forecast.
+
+## Pitfalls
+
+- **Unreconciled evaluation.** Compare methods on all levels. Bottom-up can win at the bottom and lose badly at the
+  top.
+- **Negative forecasts.** Reconciliation is linear and can produce negative values for non-negative series. Constrained
+  versions solve a quadratic programme instead.
+- **Covariance estimation.** A full sample covariance with $n$ larger than the number of residuals is singular. Use
+  shrinkage or a diagonal $\Wmat_h$.
+- **Probabilistic forecasts.** Reconciling means does not make quantiles coherent. Reconcile sample paths, or
+  distributions, rather than individual quantiles.

@@ -1,0 +1,98 @@
+---
+title: Cointegration
+kind: concept
+summary: 'Non-stationary series are cointegrated when a linear combination of them is stationary: $y_t$ and $x_t$ each wander like random walks, but $y_t - \beta x_t$ does not. The Engle–Granger test regresses $y_t$ on $x_t$ and tests the residuals for a unit root.'
+tags: [time-series, multivariate, econometrics, non-stationarity, hypothesis-testing, worked-example]
+aliases: [cointegrated series, cointegrating vector, Engle–Granger test, Engle-Granger two-step, spurious regression, Johansen test, integrated of order one]
+requires: [linear-regression, differencing-and-unit-roots]
+related: [error-correction-model, vector-autoregression, granger-causality, white-noise-and-random-walk]
+references: [engle1987, granger1974, dickey1979, mackinnon2010, johansen1988, hamilton1994]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A series is **integrated of order one**, written I(1), if it is non-stationary but its first difference
+$\Delta y_t = y_t - y_{t-1}$ is stationary. A <NoteLink to="white-noise-and-random-walk">random walk</NoteLink> is the standard example. A vector of I(1) series
+$\yvec_t \in \reals^K$ is **cointegrated** if some non-zero vector $\betavec \in \reals^K$ makes $\betavec^\top\yvec_t$
+stationary <Cite id="engle1987" />. $\betavec$ is a **cointegrating vector**, and the number of linearly independent
+cointegrating vectors, $r \le K - 1$, is the **cointegrating rank**.
+</Definition>
+
+## Intuition
+
+Two I(1) series each drift without a fixed mean. In general any linear combination of them also drifts. Cointegration
+is the special case in which they share a common stochastic trend, so a suitable combination cancels the trend and
+leaves a stationary deviation. The combination is a long-run equilibrium: the series can move apart for a while, but
+the gap $y_t - \beta x_t$ keeps returning to its mean. Spot and futures prices of one commodity, short and long
+interest rates, and consumption and income are standard examples. With $K$ series and cointegrating rank $r$, there are
+$K - r$ common stochastic trends.
+
+## Spurious regression
+
+Regressing one I(1) series on another that is unrelated to it produces misleading results. Granger and Newbold showed
+by simulation that the t statistic on the slope rejects the true null of no relationship far more often than its
+nominal level, often with a high $R^2$ and strongly autocorrelated residuals <Cite id="granger1974" />. With two
+independent Gaussian random walks of length 200, a nominal 5% t test rejects in about 83% of samples. The residuals
+of such a regression are themselves I(1), so the usual standard errors, which assume stationary errors, are wrong.
+
+Cointegration separates the two cases. If $y_t$ and $x_t$ are cointegrated with $y_t = \alpha + \beta x_t + u_t$ and
+$u_t$ stationary, the regression is meaningful. If they are not, the error $u_t$ is I(1) and the regression is
+spurious. Testing for cointegration is therefore testing whether the regression error has a unit root.
+
+## The Engle–Granger two-step test
+
+For two series $y_t$ and $x_t$, both I(1) <Cite id="engle1987" />:
+
+1. **Estimate the cointegrating regression** $y_t = \alpha + \beta x_t + u_t$ by ordinary least squares, and keep the
+   residuals $\hat u_t = y_t - \hat\alpha - \hat\beta x_t$.
+2. **Test the residuals for a <NoteLink to="differencing-and-unit-roots">unit root</NoteLink>** with the augmented Dickey–Fuller regression
+   $\Delta\hat u_t = \gamma\hat u_{t-1} + \sum_{i=1}^m \delta_i\Delta\hat u_{t-i} + e_t$ <Cite id="dickey1979" />.
+   The null of no cointegration is $\gamma = 0$ (a unit root in $u_t$); the alternative is $\gamma < 0$ (a stationary
+   $u_t$). Reject when the t statistic of $\hat\gamma$ is below the critical value.
+
+**Why the estimate of $\beta$ is good.** Under cointegration, OLS in step 1 is **superconsistent**: $\hat\beta - \beta$
+shrinks at rate $1/T$, not the usual $1/\sqrt T$ <Cite id="engle1987" />. The reason is that $x_t$ is I(1), so
+$\sum_t (x_t - \bar x)^2$ grows like $T^2$, while $\sum_t (x_t - \bar x)u_t$ grows only like $T$. The ratio, which is
+$\hat\beta - \beta$, is of order $1/T$. Any wrong $\beta$ leaves an I(1) residual whose sum of squares grows like
+$T^2$, so least squares locates the cointegrating vector quickly.
+
+**Why the critical values differ from Dickey–Fuller.** The residuals $\hat u_t$ are chosen by OLS to have the smallest
+possible variance. That makes them look more stationary than the true errors, so the unit-root statistic is pushed
+towards rejection. The Dickey–Fuller critical values are too lenient. The asymptotic 5% critical value for two
+variables with a constant is $-3.34$, against $-2.86$ for a single observed series <Cite id="mackinnon2010" />.
+MacKinnon gives response-surface formulas for any sample size and number of variables.
+
+## Worked example
+
+Simulate $T = 200$ observations: $x_t$ a Gaussian random walk, $u_t = 0.6u_{t-1} + e_t$ with $e_t \iid \Gauss(0, 1)$,
+and $y_t = 1 + 2x_t + u_t$. Both $y_t$ and $x_t$ are I(1); $y_t - 2x_t$ is stationary.
+
+- Step 1 gives $\hat\alpha = 1.07$ and $\hat\beta = 2.020$. The slope is within 1% of the truth, as superconsistency
+  predicts.
+- Step 2, a Dickey–Fuller regression on $\hat u_t$ without lags, gives $t_{\hat\gamma} = -7.35$.
+- The finite-sample 5% critical value for $T = 200$ and two variables is $-3.37$. Since $-7.35 < -3.37$, the null of
+  no cointegration is rejected.
+
+## More than two variables
+
+With $K > 2$ series there may be several cointegrating vectors, and the Engle–Granger regression finds only one, whose
+identity depends on which variable is put on the left. The Johansen procedure estimates a
+<NoteLink to="error-correction-model">vector error-correction model</NoteLink> by maximum likelihood and tests the
+cointegrating rank $r$ directly, through the eigenvalues of a canonical-correlation problem between $\Delta\yvec_t$
+and $\yvec_{t-1}$ <Cite id="johansen1988" />.
+
+## Assumptions
+
+- Each series is I(1). Test this first with a unit-root test on the levels and on the differences.
+- The cointegrating relation is linear and constant over the sample.
+- The ADF lag length $m$ is large enough to make $e_t$ white noise.
+
+## Pitfalls
+
+- **Low power.** Unit-root tests struggle to tell a unit root from a root of $0.95$ in a few hundred observations. A
+  failure to reject is weak evidence of no cointegration.
+- **Normalisation.** Regressing $y$ on $x$ and $x$ on $y$ can give different conclusions in finite samples.
+- **Structural breaks.** A shift in the equilibrium relation makes a cointegrated pair look non-cointegrated.
+- **Inference on $\hat\beta$.** $\hat\beta$ is superconsistent, but its OLS t statistic does not have a t distribution.
+  Use a dynamic OLS or an error-correction model for inference.

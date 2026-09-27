@@ -1,0 +1,115 @@
+---
+title: Time-series cross-validation
+kind: technique
+summary: 'Time-series cross-validation evaluates a forecaster on many forecast origins, training each time only on data before the origin and testing on the next $h$ observations. The training window expands or slides. It prevents the leakage from the future that random $k$-fold splits allow.'
+tags: [time-series, forecasting, model-evaluation, data-leakage, worked-example]
+aliases: [rolling-origin evaluation, rolling forecast origin, backtesting, walk-forward validation, expanding window, sliding window, evaluation on a rolling forecasting origin]
+requires: []
+related: [scaled-errors-and-mase, percentage-errors, crps-and-interval-scores, prediction-intervals, probabilistic-forecasting]
+references: [tashman2000, bergmeir2018, hyndman2021]
+status: draft
+updated: 2026-09-27
+---
+
+import { CvFolds } from './CvFolds'
+
+<Definition>
+**Time-series cross-validation**, also called rolling-origin evaluation or backtesting, measures forecast accuracy by
+repeating a forecast from many **origins** $n_1 < n_2 < \dots < n_F$. At origin $n$, the model is fitted to
+observations up to time $n$ and forecasts $y_{n+1}, \dots, y_{n+h}$. The errors at each horizon $1, \dots, h$ are
+averaged over the origins <Cite id="tashman2000" />. The training data always precede the test data.
+</Definition>
+
+## Problem
+
+Standard $k$-fold cross-validation assigns observations to folds at random. For a time series that has two
+consequences.
+
+- **Training on the future.** A fold's model is fitted on observations after the ones it is tested on. In deployment
+  the future is never available, so the estimate is optimistic for any model that exploits trends, seasonality or
+  slowly moving levels.
+- **Dependence across the split.** Neighbouring observations are correlated. A test point whose neighbours on both
+  sides are in the training set is easier to predict than a genuine future value.
+
+A single train–test split at one date avoids both problems but gives one noisy estimate that depends on what happened
+in that one test period. Rolling-origin evaluation keeps the time order and averages over many periods.
+
+## Mechanism
+
+Choose an initial training size $n_1$, a step $s$ between origins, a forecast horizon $h$ and a window type. The
+origins are $n_1, n_1 + s, n_1 + 2s, \dots$, up to the last origin $n_F$ with $n_F + h \le T$. The number of folds is
+
+$$
+F = \left\lfloor \frac{T - n_1 - h}{s} \right\rfloor + 1.
+$$
+
+At each origin $n$:
+
+1. Fit the model to the training window: $y_1, \dots, y_n$ for an **expanding window**, or
+   $y_{n-w+1}, \dots, y_n$ for a **sliding window** of fixed width $w$.
+2. Forecast $\hat y_{n+j \mid n}$ for $j = 1, \dots, h$.
+3. Record the errors $e_{n,j} = y_{n+j} - \hat y_{n+j \mid n}$, or a score of the full predictive distribution.
+
+The accuracy at horizon $j$ is the average of a loss over origins, for example $\frac1F\sum_{f=1}^F \abs{e_{n_f, j}}$.
+Reporting accuracy separately for each horizon matters, because errors almost always grow with $j$
+<Cite id="hyndman2021" />. Scale-free measures such as
+<NoteLink to="scaled-errors-and-mase">MASE</NoteLink> allow averaging over several series; interval and distribution
+forecasts are scored with <NoteLink to="crps-and-interval-scores">the interval score and CRPS</NoteLink>.
+
+<CvFolds />
+
+**Expanding or sliding.** An expanding window uses all available history, which lowers the variance of the fitted
+parameters. A sliding window discards old data, which lets the model track a changing process and makes every fold's
+training set the same size, so errors are comparable across folds.
+
+**A gap between training and test.** Features built from lags or rolling statistics, and targets defined over several
+periods (such as a 7-day total), can make the last training rows overlap the first test rows. Leaving a gap of $g$
+observations after each origin removes that overlap, at the price of testing horizons $g + 1$ to $g + h$.
+
+**When random folds are valid.** For a purely autoregressive model, in which $y_t$ is regressed on a fixed set of its
+own lags and the errors are uncorrelated, ordinary $k$-fold cross-validation over the rows (target and lagged
+features) gives valid estimates of the forecast error, and it uses the data more efficiently than rolling origins
+<Cite id="bergmeir2018" />. The condition fails when the model is misspecified and its residuals are autocorrelated,
+so the residuals should be checked.
+
+## Sources of leakage
+
+Leakage is any path by which information from the test period reaches the fitted model.
+
+- **Preprocessing on the full series.** Scaling, detrending, imputation or outlier thresholds computed on the whole
+  series use test-period statistics. Recompute them inside each training window.
+- **Centred smoothing.** A centred moving average or a two-sided filter at time $t$ uses values after $t$. Use trailing
+  windows for features.
+- **Tuning on the test folds.** Choosing hyperparameters by the backtest error and then reporting that error is
+  optimistic. Nest a second rolling-origin split inside each training window, or hold out the final period entirely.
+- **Revised data.** Economic and business data are often revised after first release. A backtest on the final revised
+  values uses information that was unavailable at the forecast origin. Use the data vintage available at each origin
+  when it exists.
+- **Future covariates.** An exogenous regressor that is known only after the fact, such as realised temperature, must
+  be replaced by its forecast when evaluating a real forecast.
+
+## Worked example
+
+A series has $T = 100$ observations. With $n_1 = 60$, $h = 5$ and $s = 5$, the number of folds is
+$\lfloor (100 - 60 - 5)/5 \rfloor + 1 = 8$, at origins $60, 65, \dots, 95$. The last fold trains on
+$y_1, \dots, y_{95}$ and tests on $y_{96}, \dots, y_{100}$. Each horizon $j$ is scored on 8 forecasts, 40 test
+forecasts in total. With $s = 1$ there would be 36 folds and 36 forecasts per horizon, at the price of 36 model fits.
+
+## Cost
+
+The model is refitted $F$ times. With an expanding window, the total training data processed is
+$\sum_f n_f$, roughly $F\bar n$ for a mean training size $\bar n$. Three measures reduce the cost:
+
+- a larger step $s$ between origins;
+- refitting only every few origins and updating the forecasts with the new observations in between, which is cheap for
+  state-space and exponential-smoothing models;
+- fixing hyperparameters found on the earliest folds.
+
+## Trade-offs
+
+- **Few folds, high variance.** A long seasonal period or long horizon leaves few origins. Accuracy estimates from a
+  handful of folds have wide uncertainty; compare models on the same folds and look at paired differences.
+- **Early folds are unrepresentative.** With an expanding window, the first folds train on much less data than the
+  final model will. Weight or exclude them when the model is data-hungry.
+- **Stationarity.** Averaging over origins assumes that accuracy is comparable across periods. A regime change inside
+  the backtest mixes two different error distributions.
