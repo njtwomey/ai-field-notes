@@ -167,9 +167,8 @@ export function XYChart({
     }
     const legend = out.filter((s) => !String(s.name).startsWith('__')).map((s) => s.name as string)
     return {
-      // Equal horizontal and vertical margin totals, so the plot area has exactly the container's proportions.
-      ...(equalAspect ? { grid: ASPECT_GRID } : {}),
-      ...(bare ? { grid: { left: 8, right: 8, top: 32, bottom: 8 } } : {}),
+      // With equalAspect the chart height is derived from this grid's margins (see below).
+      ...(equalAspect || bare ? { grid: bare ? BARE_GRID : ASPECT_GRID } : {}),
       legend: { data: legend, show: legend.length > 1 },
       tooltip: {
         trigger: 'item',
@@ -207,8 +206,10 @@ export function XYChart({
   if (x0 === undefined || x1 === undefined || y0 === undefined || y1 === undefined) {
     throw new Error('XYChart equalAspect needs xRange and yRange')
   }
-  const plotWidth = Math.max(width - ASPECT_MARGIN, 0)
-  const aspectHeight = Math.round((plotWidth * (y1 - y0)) / (x1 - x0)) + ASPECT_MARGIN
+  // Size the container so the plot area, after the grid's own margins, has the data's aspect ratio.
+  const grid = bare ? BARE_GRID : ASPECT_GRID
+  const plotWidth = Math.max(width - grid.left - grid.right, 0)
+  const aspectHeight = Math.round((plotWidth * (y1 - y0)) / (x1 - x0)) + grid.top + grid.bottom
   return (
     <div ref={wrapper} className="w-full">
       {width > 0 && (
@@ -225,8 +226,8 @@ export function XYChart({
 }
 
 const ASPECT_GRID = { left: 52, right: 28, top: 36, bottom: 44 }
-/** Horizontal and vertical margin totals of ASPECT_GRID; both are 80. */
-const ASPECT_MARGIN = 80
+/** Margins with the axes hidden: room for the legend above. */
+const BARE_GRID = { left: 8, right: 8, top: 32, bottom: 8 }
 
 /** Log-axis tick label: 10⁻³ rather than 0.001. */
 function formatPower(v: number): string {
