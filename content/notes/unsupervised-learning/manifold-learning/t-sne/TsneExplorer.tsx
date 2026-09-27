@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber } from '@/components/viz'
 import { covariance, eigSymmetric } from '../../_shared/linalg'
 import { CLUSTER_NAMES, clusters } from './data'
-import { affinities, squaredDistances, tsne } from './tsne'
+import { affinities, squaredDistances, tsne } from '../../_shared/tsne'
 
 const ITERATIONS = 500
 const EVERY = 10

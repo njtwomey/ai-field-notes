@@ -1,0 +1,116 @@
+---
+title: Self-organising maps
+kind: concept
+summary: 'A self-organising map puts prototypes $\wvec_j$ at the nodes of a fixed low-dimensional lattice. For each input it finds the nearest prototype $c$ and moves every prototype toward the input by $\eta\,h_{cj}$, where $h_{cj}$ decays with lattice distance from $c$.'
+tags: [manifold-learning, dimensionality-reduction, unsupervised, clustering, neural-networks, visualisation, worked-example]
+aliases: [SOM, Kohonen map, Kohonen network, self-organizing map, self-organizing feature map, best-matching unit, U-matrix, batch SOM]
+requires: [k-means]
+partOf: [dimensionality-reduction]
+related: [principal-component-analysis, evaluating-embeddings]
+references: [kohonen1982, kohonen1990, kohonen2013]
+status: draft
+updated: 2026-09-27
+---
+
+import { SomUnfolding } from './SomUnfolding'
+
+<Definition>
+A **self-organising map** (SOM) has $u$ units at fixed positions $\rvec_1, \dots, \rvec_u$ on a lattice, usually a
+two-dimensional square or hexagonal grid, and a prototype $\wvec_j \in \reals^D$ for each unit
+<Cite id="kohonen1982" />. For each training input $\xvec$ it finds the **best-matching unit**
+$c = \argmin_j\norm{\xvec - \wvec_j}$ and updates every prototype:
+
+$$
+\wvec_j \leftarrow \wvec_j + \eta(t)\,h_{cj}(t)\,(\xvec - \wvec_j), \qquad h_{cj}(t) = \exp\paren{-\frac{\norm{\rvec_j
+- \rvec_c}^2}{2\sigma(t)^2}},
+$$
+
+with a learning rate $\eta(t)$ and a neighbourhood width $\sigma(t)$, in lattice units, that both shrink over training.
+A point is mapped to the lattice position $\rvec_c$ of its best-matching unit.
+</Definition>
+
+## Competition and cooperation
+
+The SOM combines two rules. **Competition**: only the unit closest to the input wins. Moving only the winner toward the
+input is online <NoteLink to="k-means">k-means</NoteLink>, which spreads prototypes over the data but puts them in no
+particular order. **Cooperation**: the winner's lattice neighbours move too, by an amount that falls off with their
+distance from the winner on the lattice, not in data space. Units adjacent on the lattice are repeatedly pulled toward
+the same inputs, so their prototypes end up near each other. The lattice then lies over the data like a sheet, and
+nearby lattice positions describe nearby regions of the input space. This is the **topology-preserving** property: the
+map from inputs to lattice positions keeps neighbourhoods.
+
+<SomUnfolding />
+
+## Where the update comes from
+
+Fix the winner $c$ for one input. The update is a stochastic gradient step on the local cost
+
+$$
+e(\xvec) = \frac12\sum_j h_{cj}\norm{\xvec - \wvec_j}^2,
+$$
+
+because $\partial e/\partial\wvec_j = -h_{cj}(\xvec - \wvec_j)$, and a step of size $\eta$ against it is exactly the SOM
+rule. Each prototype is pulled toward the input with weight $h_{cj}$. The winner $c$ itself depends on the
+prototypes and changes abruptly when an input crosses the boundary between two units' regions, so the sum of $e$ over
+the data is not a smooth function of the prototypes. The SOM is therefore not plain gradient descent on a fixed cost,
+and its convergence is analysed differently from that of k-means.
+
+**The k-means limit.** When $\sigma \to 0$, $h_{cj} = 1$ for $j = c$ and 0 otherwise. Only the winner moves, by
+$\eta(\xvec - \wvec_c)$. With $\eta = 1/n_c$, where $n_c$ counts the inputs unit $c$ has won, $\wvec_c$ is the running
+mean of those inputs: online k-means.
+
+**The batch SOM.** At convergence, the expected update over the data is zero for every unit. With a fixed assignment
+$c(i)$ of each training point to its winner, $\sum_i h_{c(i)j}(\xvec_i - \wvec_j) = \zeros$ gives
+
+$$
+\wvec_j = \frac{\sum_i h_{c(i)j}\,\xvec_i}{\sum_i h_{c(i)j}},
+$$
+
+a weighted mean of the points won by unit $j$ and its lattice neighbours. The **batch map** alternates this update
+with reassigning the winners, as k-means alternates means and assignments <Cite id="kohonen2013" />. It needs no
+learning rate.
+
+## Training schedule
+
+Kohonen describes two phases <Cite id="kohonen1990" />:
+
+- **Ordering.** A wide neighbourhood, a large part of the lattice, and a learning rate near 0.5. Each update moves
+  large parts of the map together, which untangles the lattice and sets its global orientation.
+- **Convergence.** A neighbourhood of one or two units and a small learning rate, for many more steps. Prototypes
+  settle on the local structure of the data.
+
+If $\sigma$ shrinks too fast, the lattice can freeze with a twist or a fold, a topological defect that later
+updates cannot remove.
+
+## Reading a map
+
+- **Component planes.** Colour the lattice by one coordinate of the prototypes to see how a feature varies across the
+  map.
+- **U-matrix.** Colour each unit by the mean distance between its prototype and its lattice neighbours' prototypes.
+  Large values mark gaps in the data, so clusters appear as regions of small values separated by ridges.
+- **Quality.** The **quantisation error** is the mean distance from each point to its best-matching prototype. The
+  **topographic error** is the fraction of points whose best and second-best units are not adjacent on the lattice. A
+  low topographic error means the lattice is not folded over the data.
+
+## Worked example
+
+Three units on a line at lattice positions $0, 1, 2$ with prototypes $w = (0, 0.5, 1)$ in one dimension. The input
+is $x = 0.6$, with $\eta = 0.5$ and $\sigma = 1$.
+
+- The best-matching unit is unit 2, at distance $0.1$.
+- The neighbourhood weights are $h = (e^{-1/2}, 1, e^{-1/2}) = (0.607, 1, 0.607)$.
+- The updates are $w_1 = 0 + 0.5 \times 0.607 \times 0.6 = 0.182$, $w_2 = 0.5 + 0.5 \times 0.1 = 0.55$ and
+  $w_3 = 1 + 0.5 \times 0.607 \times (-0.4) = 0.879$.
+
+Units 1 and 3 moved, although they did not win, and the order $w_1 < w_2 < w_3$ is kept. Online k-means would have
+moved only unit 2.
+
+## Pitfalls
+
+- **Fixed lattice.** The number of units and the shape of the lattice are chosen in advance. A lattice of lower
+  dimension than the data folds to fill it, as the chain of 40 units does in the figure.
+- **Border effects.** Units on the edge of the lattice have neighbours on one side only and are pulled inward. In the
+  figure the outer prototypes stop short of the edges of the square.
+- **No density model.** A SOM gives no likelihood and no principled way to choose its size. Distances on the lattice
+  are not distances in the data.
+- **Scale.** As with k-means, features must be on comparable scales before training.

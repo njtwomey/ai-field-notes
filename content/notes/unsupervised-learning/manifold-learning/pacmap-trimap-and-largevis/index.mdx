@@ -1,0 +1,157 @@
+---
+title: PaCMAP, TriMap and LargeVis
+kind: concept
+summary: 'Neighbour embeddings attract points joined in a $k$-nearest-neighbour graph and repel the rest. LargeVis samples edges and negative pairs, TriMap orders triplets, PaCMAP also attracts mid-range pairs. Scaling attraction by $\rho$ spans t-SNE, UMAP and Laplacian eigenmaps.'
+tags: [manifold-learning, dimensionality-reduction, unsupervised, visualisation, graphs, worked-example]
+aliases: [PaCMAP, pairwise controlled manifold approximation, TriMap, LargeVis, neighbour embedding, neighbor embedding, attraction–repulsion spectrum, exaggeration, ForceAtlas2, mid-near pairs, negative sampling in embeddings]
+requires: [t-sne, umap]
+partOf: [dimensionality-reduction]
+related: [laplacian-eigenmaps, evaluating-embeddings, parametric-and-neural-embeddings, triplet-and-margin-losses, tree-based-ann]
+references: [tang2016, amid2019, wang2021b, bohm2022, damrich2021, kobak2021, vandermaaten2008, mcinnes2018]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **neighbour embedding** places points $\yvec_1, \dots, \yvec_n \in \reals^2$ by minimising a loss with an
+attractive term over pairs that are neighbours in a $k$-nearest-neighbour graph of the data and a repulsive term over
+other pairs. <NoteLink to="t-sne">t-SNE</NoteLink> and <NoteLink to="umap">UMAP</NoteLink> are the best known.
+**LargeVis** maximises the likelihood of graph edges with sampled negative pairs <Cite id="tang2016" />. **TriMap**
+asks each sampled triplet $(i, j, k)$ to keep $j$ closer to $i$ than $k$ <Cite id="amid2019" />. **PaCMAP** attracts
+neighbours and sampled mid-range pairs and repels random pairs, with weights that change over three phases
+<Cite id="wang2021b" />.
+</Definition>
+
+## The shared recipe
+
+Every method in this family does four things:
+
+1. Build a $k$-nearest-neighbour graph of the data, exactly or approximately.
+2. Choose which pairs or triplets enter the loss: graph edges for attraction, and non-edges, usually sampled, for
+   repulsion.
+3. Choose a similarity kernel in the embedding, usually the Cauchy kernel $s(d) = (1 + d^2)^{-1}$ of t-SNE.
+4. Optimise from an initial layout, often PCA or Laplacian eigenmaps, by gradient descent.
+
+The methods differ in steps 2 and 3, and those choices decide the balance between local and global structure.
+
+## LargeVis
+
+Tang and colleagues built the neighbour graph with random projection trees refined by neighbour exploring: the
+neighbours of a point's neighbours are candidate neighbours of the point <Cite id="tang2016" />. Edge weights $w_{ij}$
+are t-SNE's symmetrised affinities. The probability of an edge in the embedding is $f(\norm{\yvec_i - \yvec_j})$ with
+$f(d) = (1 + d^2)^{-1}$, and the objective is
+
+$$
+\sum_{(i, j) \in E} w_{ij}\log f\paren{\norm{\yvec_i - \yvec_j}} + \sum_{(i, j) \notin E}\gamma\log\paren{1 -
+f\paren{\norm{\yvec_i - \yvec_j}}},
+$$
+
+maximised by stochastic gradient ascent. Each step samples an edge with probability proportional to $w_{ij}$ and a few
+negative points $j'$ from a noise distribution, instead of summing over all $n^2$ non-edges. The cost per step does
+not depend on $n$. UMAP's optimisation follows the same scheme.
+
+## TriMap
+
+TriMap keeps relative, not absolute, similarities <Cite id="amid2019" />. For a triplet $(i, j, k)$ in which $j$ is
+nearer to $i$ than $k$ is, the loss is
+
+$$
+\ell_{ijk} = \frac{s(\yvec_i, \yvec_k)}{s(\yvec_i, \yvec_j) + s(\yvec_i, \yvec_k)}, \qquad s(\yvec, \yvec') = \paren{1
++ \norm{\yvec - \yvec'}^2}^{-1}.
+$$
+
+$\ell_{ijk}$ lies in $(0, 1)$. It approaches 0 when $k$ is placed much farther from $i$ than $j$ is, and 1 when the
+order is reversed. Most triplets pair a near neighbour $j$ with a random point $k$; a few pair two random points, which
+carries information about large distances. Each triplet is weighted by how clearly its order holds in the data. TriMap
+starts from PCA and uses full-batch gradient descent with momentum.
+
+## PaCMAP
+
+Wang, Huang, Rudin and Shaposhnik compared the losses of t-SNE, UMAP, TriMap and others by plotting their gradients on
+triplets, and derived principles that good losses share <Cite id="wang2021b" />. Attraction on neighbours should
+dominate once the far point of a triplet is reasonably far, and repulsion should dominate only when the far point is
+too close. Their loss uses $\tilde d_{ab} = \norm{\yvec_a - \yvec_b}^2 + 1$ and three kinds of pairs:
+
+$$
+\mathrm{Loss} = w_{NB}\sum_{\text{neighbours}}\frac{\tilde d_{ij}}{10 + \tilde d_{ij}} + w_{MN}\sum_{\text{mid-near}}
+\frac{\tilde d_{ik}}{10000 + \tilde d_{ik}} + w_{FP}\sum_{\text{further}}\frac{1}{1 + \tilde d_{il}}.
+$$
+
+- **Neighbour pairs.** Each point's 10 nearest neighbours, by a distance scaled by the local density.
+- **Mid-near pairs.** For each point, sample 6 other points and keep the second nearest. These pairs are close, but
+  not neighbours, and they carry the arrangement of groups.
+- **Further pairs.** Random pairs, repelled.
+
+**The forces.** The magnitude of each force is the derivative of its term with respect to the embedding distance $d$.
+Since $\tilde d = d^2 + 1$, the neighbour force is $20d/(11 + d^2)^2$. It rises from 0, peaks at $d = \sqrt{11/3} =
+1.91$ and then decays as $20/d^3$: a neighbour placed far away is barely pulled back, so one bad pair cannot drag a
+cluster. The mid-near force is $20000d/(10001 + d^2)^2$, which grows almost linearly up to $d = 58$, far beyond any
+cluster: a weak spring between groups. The repulsive force is $2d/(2 + d^2)^2$, which peaks at $d = 0.82$ and is
+negligible beyond a few units: it separates points that overlap, not clusters that are already apart.
+
+**The schedule.** For the first 100 iterations $w_{NB} = 2$, $w_{FP} = 1$ and $w_{MN}$ falls linearly from 1000 to 3.
+The strong mid-near springs arrange the clusters globally. For iterations 101 to 200, $w_{NB} = 3$ and $w_{MN} = 3$.
+For iterations 201 to 450, $w_{MN} = 0$ and $w_{NB} = 1$, so the last phase refines local structure alone. PaCMAP
+starts from PCA.
+
+## The attraction–repulsion spectrum
+
+Böhm, Berens and Kobak placed t-SNE, UMAP, ForceAtlas2 and Laplacian eigenmaps on one axis <Cite id="bohm2022" />.
+Write t-SNE's gradient with the attractive term multiplied by an **exaggeration** $\rho$:
+
+$$
+\frac{\partial L}{\partial\yvec_i} \propto \rho\sum_j p_{ij}w_{ij}(\yvec_i - \yvec_j) - \frac1Z\sum_j w_{ij}^2(\yvec_i -
+\yvec_j), \qquad w_{ij} = \paren{1 + \norm{\yvec_i - \yvec_j}^2}^{-1}.
+$$
+
+$\rho = 1$ is t-SNE, and $\rho = 12$ is the early exaggeration of its first iterations. Increasing $\rho$
+strengthens attraction:
+
+- **$\rho \approx 4$** gives embeddings very similar to UMAP's.
+- **$\rho \approx 30$** gives embeddings similar to ForceAtlas2, a force-directed graph layout.
+- **$\rho \to \infty$.** Strong attraction shrinks the embedding until all neighbour distances are small, so
+  $w_{ij} \approx 1$. The attractive term becomes $\rho\sum_j p_{ij}(\yvec_i - \yvec_j)$, the gradient of
+  $\frac\rho2\sum_{i,j}p_{ij}\norm{\yvec_i - \yvec_j}^2$. That is the cost of
+  <NoteLink to="laplacian-eigenmaps">Laplacian eigenmaps</NoteLink>, with repulsion acting only to fix the scale.
+
+The trade-off is between continuous and discrete structure. More attraction joins clusters and shows continuous
+trajectories; more repulsion separates clusters and keeps local neighbourhoods. On MNIST, the fraction of each point's
+15 nearest neighbours that remain neighbours in the embedding fell from 0.34 at $\rho = 1$ to 0.12 at $\rho = 4$ and
+0.06 at $\rho = 30$.
+
+**Why UMAP sits at $\rho \approx 4$.** In the full gradient, each attractive force on a point is matched by about
+$n/k$ repulsive ones, one for every non-neighbour. UMAP's negative sampling draws a fixed number $m$ of repulsive
+partners per attractive edge, usually 5. The effective repulsion is therefore scaled down by about $km/n$, which falls
+as $n$ grows <Cite id="bohm2022" />. UMAP does not minimise the cross-entropy it states; Damrich and Hamprecht derived the
+loss that its sampling actually optimises <Cite id="damrich2021" />.
+
+## Local and global structure
+
+- **Initialisation carries global structure.** t-SNE and UMAP started from PCA or Laplacian eigenmaps keep much more of
+  the arrangement of clusters than when started at random <Cite id="kobak2021" />.
+- **Mid-range information.** TriMap's random triplets and PaCMAP's mid-near pairs put some large-scale distances into
+  the loss itself, so the global layout depends less on the initialisation <Cite id="wang2021b" />.
+- **No method keeps everything.** Stronger attraction or more mid-range terms cost local accuracy, as the spectrum
+  shows. Measure both with the tools of <NoteLink to="evaluating-embeddings">evaluating embeddings</NoteLink>.
+
+## Worked example
+
+The forces of the PaCMAP loss at embedding distances $d = 1, 3, 10$, per unit weight:
+
+| $d$ | Neighbour pull $\frac{20d}{(11 + d^2)^2}$ | Mid-near pull, $w_{MN} = 1000$ | Repulsion $\frac{2d}{(2 + d^2)^2}$ |
+| --- | --- | --- | --- |
+| 1 | 0.139 | 0.200 | 0.222 |
+| 3 | 0.150 | 0.599 | 0.050 |
+| 10 | 0.016 | 1.960 | 0.002 |
+
+At $d = 1$ repulsion is the strongest force. At $d = 10$ repulsion has almost vanished, the neighbour pull is about a
+ninth of its value at $d = 1$, and in the first phase the mid-near springs dominate. This ordering of forces with
+distance lets the first phase arrange clusters and the last phase refine them.
+
+## Pitfalls
+
+- **Same reading rules as t-SNE.** Cluster sizes and gaps remain unreliable, whichever loss is used.
+- **Parameters are the method.** Exaggeration, the number of negative samples and the pair ratios move an embedding
+  along the attraction–repulsion spectrum. Two embeddings that disagree may both be faithful to different scales.
+- **No out-of-sample map.** None of these methods gives a function for new points; see
+  <NoteLink to="parametric-and-neural-embeddings">parametric embeddings</NoteLink>.

@@ -1,0 +1,170 @@
+---
+title: Random projections
+kind: concept
+summary: 'A random projection multiplies data by a $k \times D$ matrix of independent random entries scaled by $1/\sqrt{k}$. By the Johnson–Lindenstrauss lemma, $k = O(\log n/\varepsilon^2)$ dimensions keep all pairwise distances among $n$ points within a factor $1 \pm \varepsilon$, whatever $D$ is.'
+tags: [dimensionality-reduction, randomised-algorithms, concentration-inequalities, linear-algebra, worked-example]
+aliases: [random projection, Johnson–Lindenstrauss lemma, JL lemma, Johnson–Lindenstrauss transform, sparse random projection, Achlioptas projection, very sparse random projections, fast Johnson–Lindenstrauss transform]
+requires: [chi-squared-distribution, moment-generating-function]
+partOf: [dimensionality-reduction]
+related: [principal-component-analysis, locality-sensitive-hashing, chernoff-bounds, tree-based-ann, random-fourier-features, curse-of-dimensionality-for-neighbours]
+references: [johnson1984, dasgupta2003, achlioptas2003, li2006, larsen2017, kane2014, ailon2009]
+status: draft
+updated: 2026-09-27
+---
+
+import { DistortionHistogram } from './DistortionHistogram'
+
+<Definition>
+A **random projection** maps $\xvec \in \reals^D$ to $\Rmat\xvec \in \reals^k$, where $\Rmat$ is a $k \times D$ matrix
+of independent entries with mean 0 and variance $1/k$, for example $R_{lj} \sim \Gauss(0, 1/k)$. The
+**Johnson–Lindenstrauss lemma** states that for any $0 < \varepsilon < 1$ and any $n$ points in $\reals^D$, if
+$k \ge 4\ln n/(\varepsilon^2/2 - \varepsilon^3/3)$ then a linear map $f : \reals^D \to \reals^k$ exists with
+
+$$
+(1 - \varepsilon)\norm{\xvec_i - \xvec_j}^2 \le \norm{f(\xvec_i) - f(\xvec_j)}^2 \le (1 + \varepsilon)
+\norm{\xvec_i - \xvec_j}^2 \quad \text{for all } i, j,
+$$
+
+and a Gaussian random projection is such a map with probability at least $1/n$ <Cite id="johnson1984" />
+<Cite id="dasgupta2003" />.
+</Definition>
+
+## Dimension that depends on the number of points only
+
+PCA finds the best $k$-dimensional subspace for a particular data set, but it gives no guarantee for any individual
+pair of points: two points that differ only along a discarded direction are mapped to the same place. A random
+projection ignores the data. It keeps every pairwise distance up to a small factor, and the dimension it needs grows
+with the logarithm of the number of points $n$. The ambient dimension $D$ does not appear in the bound at all. Ten
+thousand points in a million dimensions and ten thousand points in a hundred thousand dimensions need the same $k$.
+
+## Proof of the lemma
+
+The proof follows Dasgupta and Gupta <Cite id="dasgupta2003" />. Fix one vector $\uvec = \xvec_i - \xvec_j \ne
+\zeros$. The argument shows that $\norm{\Rmat\uvec}^2$ is close to $\norm{\uvec}^2$ with overwhelming probability, and
+then takes a union bound over all pairs.
+
+**The projection is unbiased.** Row $l$ of $\Rmat$ gives the coordinate $(\Rmat\uvec)_l = \sum_j R_{lj}u_j$. Its mean
+is 0, and its variance is $\sum_j \var(R_{lj})u_j^2 = \norm{\uvec}^2/k$ because the entries are independent. Hence
+
+$$
+\expect\norm{\Rmat\uvec}^2 = \sum_{l=1}^k \expect(\Rmat\uvec)_l^2 = k\cdot\frac{\norm{\uvec}^2}{k} = \norm{\uvec}^2.
+$$
+
+This holds for any entry distribution with mean 0 and variance $1/k$.
+
+**Gaussian entries give a chi-squared law.** With Gaussian entries, each coordinate $(\Rmat\uvec)_l$ is a sum of
+independent Gaussians, so $(\Rmat\uvec)_l \sim \Gauss(0, \norm{\uvec}^2/k)$, independently across $l$. Therefore
+
+$$
+Y = \frac{k\norm{\Rmat\uvec}^2}{\norm{\uvec}^2} \sim \chi^2_k,
+$$
+
+a <NoteLink to="chi-squared-distribution">chi-squared variable</NoteLink> with $k$ degrees of freedom and mean $k$. Its
+<NoteLink to="moment-generating-function">moment generating function</NoteLink> is
+$\expect e^{tY} = (1 - 2t)^{-k/2}$ for $t < \frac12$.
+
+**Upper tail.** For any $0 < t < \frac12$, Markov's inequality applied to $e^{tY}$ gives
+
+$$
+\pr\paren{Y \ge (1 + \varepsilon)k} \le e^{-t(1 + \varepsilon)k}(1 - 2t)^{-k/2}.
+$$
+
+The exponent $-t(1 + \varepsilon)k - \frac k2\ln(1 - 2t)$ has derivative $-(1 + \varepsilon)k + k/(1 - 2t)$, which
+vanishes at $1 - 2t = 1/(1 + \varepsilon)$, that is $t = \varepsilon/(2(1 + \varepsilon))$. Substituting,
+
+$$
+\pr\paren{Y \ge (1 + \varepsilon)k} \le \paren{(1 + \varepsilon)e^{-\varepsilon}}^{k/2} \le
+\exp\paren{-k\paren{\frac{\varepsilon^2}{4} - \frac{\varepsilon^3}{6}}},
+$$
+
+where the last step uses $\ln(1 + \varepsilon) \le \varepsilon - \varepsilon^2/2 + \varepsilon^3/3$.
+
+**Lower tail.** Similarly, for $t > 0$, $\pr\paren{Y \le (1 - \varepsilon)k} \le e^{t(1 - \varepsilon)k}(1 +
+2t)^{-k/2}$. The optimum is at $1 + 2t = 1/(1 - \varepsilon)$, and
+
+$$
+\pr\paren{Y \le (1 - \varepsilon)k} \le \paren{(1 - \varepsilon)e^{\varepsilon}}^{k/2} \le
+\exp\paren{-\frac{k\varepsilon^2}{4}},
+$$
+
+using $\ln(1 - \varepsilon) \le -\varepsilon - \varepsilon^2/2$. This is smaller than the upper-tail bound.
+
+**Union bound.** Each of the $n(n-1)/2$ pairs fails in one of two tails with probability at most
+$2\exp\paren{-k(\varepsilon^2/4 - \varepsilon^3/6)}$. If $k \ge 4\ln n/(\varepsilon^2/2 - \varepsilon^3/3)$, then
+$k(\varepsilon^2/4 - \varepsilon^3/6) \ge 2\ln n$, and each pair fails with probability at most $2/n^2$. The
+probability that any pair fails is at most $n(n-1)/2 \cdot 2/n^2 = 1 - 1/n$. So a random $\Rmat$ succeeds with
+probability at least $1/n$, which proves that a suitable map exists. Drawing $\Rmat$ again until every pair passes takes
+$n$ draws on average. Raising the constant 4 to $4 + 2\beta$ makes a single draw fail with probability at most
+$n^{-\beta}$.
+
+The bound $k = O(\log n/\varepsilon^2)$ cannot be improved in general: Larsen and Nelson constructed $n$ points for
+which every linear or nonlinear map with distortion $1 \pm \varepsilon$ needs $\Omega(\log n/\varepsilon^2)$ dimensions
+<Cite id="larsen2017" />.
+
+## Sparse and structured projections
+
+Multiplying by a dense Gaussian matrix costs $O(kD)$ per point. Achlioptas showed that entries
+$\sqrt{3/k}\cdot\set{+1, 0, -1}$ with probabilities $\frac16, \frac23, \frac16$, or simply $\pm 1/\sqrt k$ with equal
+probability, satisfy the same bound <Cite id="achlioptas2003" />. The first has two thirds of its entries zero and
+saves two thirds of the multiplications. Li, Hastie and Church went further: nonzero entries with probability $1/s$,
+with $s = \sqrt D$, save a factor $\sqrt D$ <Cite id="li2006" />.
+
+The price of sparsity appears in the variance. Write the unscaled entries as $r_j$ with $\expect r_j = 0$,
+$\expect r_j^2 = 1$ and $\expect r_j^4 = \kappa$, and let $z = \sum_j r_ju_j$. Expanding $z^4$ and keeping the terms
+with nonzero mean,
+
+$$
+\expect z^4 = \kappa\sum_j u_j^4 + 3\sum_{j \ne m}u_j^2u_m^2 = 3\norm{\uvec}^4 + (\kappa - 3)\sum_j u_j^4,
+$$
+
+so $\var(z^2) = 2\norm{\uvec}^4 + (\kappa - 3)\sum_j u_j^4$. Averaging $k$ independent rows,
+
+$$
+\var\paren{\frac{\norm{\Rmat\uvec}^2}{\norm{\uvec}^2}} = \frac1k\paren{2 + (\kappa - 3)\frac{\sum_j
+u_j^4}{\norm{\uvec}^4}}.
+$$
+
+Gaussian entries and Achlioptas's three-valued entries both have $\kappa = 3$, so their variance is $2/k$ for every
+vector. Random signs have $\kappa = 1$ and a smaller variance. Entries with sparsity $s$ have $\kappa = s$: on a dense
+vector the ratio $\sum_j u_j^4/\norm{\uvec}^4$ is of order $1/D$ and the extra term is negligible, but on a vector
+with a few large coordinates the ratio is near 1, and the projection often misses those coordinates entirely.
+
+Structured transforms reduce the cost further. The fast Johnson–Lindenstrauss transform first spreads each vector out
+with a randomised Hadamard transform, in $O(D\log D)$, and then applies a sparse projection <Cite id="ailon2009" />.
+Kane and Nelson gave projections with only $O(\varepsilon^{-1}\log n)$ nonzeros per column <Cite id="kane2014" />.
+
+<DistortionHistogram />
+
+## Worked example
+
+- **Target dimension.** For $n = 10^6$ points and $\varepsilon = 0.1$, the lemma asks for
+  $k \ge 4\ln(10^6)/(0.005 - 0.000333) = 4 \times 13.816/0.004667 = 11{,}842$ dimensions. For $\varepsilon = 0.5$ it
+  asks for $4 \times 13.816/(0.125 - 0.0417) = 664$. Both hold for $D = 10^5$ and $D = 10^9$ alike. For $n = 10^4$ and
+  $\varepsilon = 0.1$ the requirement drops to 7,895.
+- **The tail bound is loose.** For $k = 100$ and $\varepsilon = 0.2$, the exact probability that $\chi^2_{100}$
+  exceeds 120 is 0.084. The bound $\exp(-100(0.01 - 0.00133)) = 0.420$ is five times larger. In the figure, a Gaussian
+  projection of the dense points to 400 dimensions keeps all 1770 pairs within a factor $1 \pm 0.254$, while the
+  guarantee is only $1 \pm 0.32$.
+- **Spread.** With Gaussian entries the ratio $\norm{\Rmat\uvec}^2/\norm{\uvec}^2$ has standard deviation
+  $\sqrt{2/k}$: 0.20 at $k = 50$ and 0.071 at $k = 400$.
+
+## Relatives
+
+- **Locality-sensitive hashing.** The signs of random projections, $\sgn(\rvec_l^\top\xvec)$, are the random-hyperplane
+  hash functions of <NoteLink to="locality-sensitive-hashing">locality-sensitive hashing</NoteLink> for cosine
+  similarity.
+- **Random projection trees** split space along random directions; see
+  <NoteLink to="tree-based-ann">tree-based nearest-neighbour search</NoteLink>.
+- **Random features.** <NoteLink to="random-fourier-features">Random Fourier features</NoteLink> are a random
+  projection followed by a cosine, and approximate a shift-invariant kernel.
+
+## Pitfalls
+
+- **Not for visualisation.** The guarantee needs hundreds or thousands of dimensions. A random projection to two
+  dimensions preserves nothing reliably.
+- **Squared distances, not structure.** Distances are kept approximately, but a projection chosen without looking at
+  the data does not concentrate signal in the first coordinates, as PCA does.
+- **Inner products.** Inner products are preserved only up to an additive error proportional to
+  $\varepsilon\norm{\xvec}\norm{\yvec}$, which is large relative to small inner products.
+- **Sparse data and sparse matrices.** Very sparse projections of vectors with a few large entries have much larger
+  variance; see the formula above.

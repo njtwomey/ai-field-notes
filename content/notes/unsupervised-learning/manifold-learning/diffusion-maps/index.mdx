@@ -1,0 +1,139 @@
+---
+title: Diffusion maps
+kind: concept
+summary: 'Diffusion maps run a random walk on the data with transition matrix $\Pmat = \Dmat^{-1}\Kmat$ from a Gaussian kernel. The coordinates $(\lambda_l^t\psi_l(\xvec))_l$, from the right eigenvectors of $\Pmat$, have Euclidean distances equal to diffusion distances: how differently $t$-step walks from two points spread.'
+tags: [manifold-learning, dimensionality-reduction, unsupervised, graphs, markov-chains, worked-example]
+aliases: [diffusion map, diffusion distance, Coifman–Lafon diffusion maps, alpha-normalisation, anisotropic diffusion kernel]
+requires: [markov-chain, eigendecomposition]
+partOf: [dimensionality-reduction]
+related: [laplacian-eigenmaps, spectral-clustering, random-walk, kernel-pca, isomap]
+references: [coifman2006, belkin2003, bengio2003b]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Given points $\xvec_1, \dots, \xvec_n$ and a kernel $k_\varepsilon(\xvec, \yvec) = \exp\paren{-\norm{\xvec -
+\yvec}^2/\varepsilon}$, a **diffusion map** with normalisation $\alpha \in [0, 1]$ forms $q_i = \sum_j
+k_\varepsilon(\xvec_i, \xvec_j)$, the renormalised kernel $K^{(\alpha)}_{ij} = k_\varepsilon(\xvec_i, \xvec_j)/(q_i
+q_j)^\alpha$, its row sums $d_i$ and the Markov matrix $\Pmat = \Dmat^{-1}\Kmat^{(\alpha)}$
+<Cite id="coifman2006" />. With right eigenvectors $\Pmat\psivec_l = \lambda_l\psivec_l$, $1 = \lambda_0 >
+\abs{\lambda_1} \ge \abs{\lambda_2} \ge \dots$, the diffusion map at time $t$ sends point $i$ to
+
+$$
+\Psi_t(\xvec_i) = \paren{\lambda_1^t\psi_1(i), \lambda_2^t\psi_2(i), \dots, \lambda_m^t\psi_m(i)}.
+$$
+</Definition>
+
+## A random walk on the data
+
+Row $i$ of $\Pmat$ is a probability distribution over the points: from point $i$, a walker steps to point $j$ with
+probability $p_{ij} = K^{(\alpha)}_{ij}/d_i$, which is large only for near neighbours. The matrix power $\Pmat^t$ gives
+the $t$-step probabilities $p_t(i, j)$. Short steps follow the manifold, so after $t$ steps the walk from point $i$
+has spread over a region of the manifold around $i$, not over a ball in the ambient space.
+
+Two points are similar at scale $t$ when walks started from them spread in the same way. The **diffusion distance**
+compares the two rows of $\Pmat^t$:
+
+$$
+D_t(i, j)^2 = \sum_{z=1}^n \frac{\paren{p_t(i, z) - p_t(j, z)}^2}{\pi(z)},
+$$
+
+where $\pi(z) = d_z/\sum_l d_l$ is the stationary distribution of the walk. Dividing by $\pi$ gives more weight to
+differences in sparsely visited regions. The diffusion distance sums over all paths of length $t$, not only the
+shortest one, so a single noisy edge between two folds changes it little. The geodesic distance of
+<NoteLink to="isomap">Isomap</NoteLink>, which follows the single shortest path, can change a great deal.
+
+## Why eigenvectors give diffusion distances
+
+$\Pmat$ is not symmetric, but it is similar to a symmetric matrix. Since $\Kmat^{(\alpha)}$ is symmetric, so is
+$\Smat = \Dmat^{-1/2}\Kmat^{(\alpha)}\Dmat^{-1/2} = \Dmat^{1/2}\Pmat\Dmat^{-1/2}$. Let
+$\Smat = \sum_l \lambda_l\vvec_l\vvec_l^\top$ with orthonormal $\vvec_l$. Then
+
+$$
+\Pmat^t = \Dmat^{-1/2}\Smat^t\Dmat^{1/2} = \sum_l \lambda_l^t\,(\Dmat^{-1/2}\vvec_l)(\Dmat^{1/2}\vvec_l)^\top.
+$$
+
+The eigenvalues of $\Pmat$ are real, and the vectors $\Dmat^{-1/2}\vvec_l$ are its right eigenvectors. Scale them as
+$\psivec_l = \sqrt{V}\,\Dmat^{-1/2}\vvec_l$, where $V = \sum_l d_l$. Then $\psivec_0 = \ones$, because
+$\vvec_0 = \Dmat^{1/2}\ones/\sqrt V$. Similarly $\Dmat^{1/2}\vvec_l = \sqrt{V}\,\Pimat\psivec_l$ with
+$\Pimat = \diag(\pi)$. Entry by entry,
+
+$$
+p_t(i, z) = \sum_l \lambda_l^t\,\psi_l(i)\,\psi_l(z)\,\pi(z).
+$$
+
+Subtract the same expression for $j$, square, divide by $\pi(z)$ and sum over $z$:
+
+$$
+D_t(i, j)^2 = \sum_{l, l'} \lambda_l^t\lambda_{l'}^t\paren{\psi_l(i) - \psi_l(j)}\paren{\psi_{l'}(i) -
+\psi_{l'}(j)}\sum_z \pi(z)\psi_l(z)\psi_{l'}(z).
+$$
+
+The inner sum is $\sum_z \pi(z)\psi_l(z)\psi_{l'}(z) = V\sum_z \frac{d_z}{V}\frac{v_l(z)v_{l'}(z)}{d_z} =
+\vvec_l^\top\vvec_{l'}$, which is 1 if $l = l'$ and 0 otherwise. Only the diagonal terms remain, and the $l = 0$ term
+vanishes because $\psivec_0$ is constant:
+
+$$
+D_t(i, j)^2 = \sum_{l \ge 1} \lambda_l^{2t}\paren{\psi_l(i) - \psi_l(j)}^2 = \norm{\Psi_t(\xvec_i) -
+\Psi_t(\xvec_j)}^2.
+$$
+
+With all $n - 1$ nontrivial eigenvectors, Euclidean distance in the diffusion map equals diffusion distance exactly.
+Because $\abs{\lambda_l} < 1$, the terms decay geometrically in $l$ at rate $\abs{\lambda_l}^{2t}$. Keeping the $m$
+largest gives an approximation whose error is at most $\abs{\lambda_{m+1}}^{2t}$ times a bounded factor. Larger $t$
+makes the spectrum decay faster, so fewer coordinates suffice: $t$ acts as a scale parameter.
+
+## The α-normalisation
+
+A random walk on a sample spends more time where points are dense. With $\alpha = 0$, $\Pmat = \Dmat^{-1}\Kmat$ is the
+walk of <NoteLink to="laplacian-eigenmaps">Laplacian eigenmaps</NoteLink>: $\Lmat\fvec = \mu\Dmat\fvec$ is the same as
+$\Pmat\fvec = (1 - \mu)\fvec$, so the eigenvectors coincide. Its eigenvectors then depend on both the geometry of the
+manifold and the density of the sample.
+
+Dividing the kernel by $(q_iq_j)^\alpha$ first removes some of the density. $q_i$ is a kernel density estimate at
+$\xvec_i$, up to a constant factor. Coifman and Lafon showed that as $n \to \infty$ and $\varepsilon \to 0$, the
+generator $(\Imat - \Pmat)/\varepsilon$ converges to a differential operator whose form depends on $\alpha$
+<Cite id="coifman2006" />:
+
+- $\alpha = 0$: the normalised graph Laplacian, which mixes geometry with the density.
+- $\alpha = \frac12$: the backward Fokker–Planck operator of a diffusion in the potential given by the density, useful
+  for dynamical systems.
+- $\alpha = 1$: the Laplace–Beltrami operator of the manifold, independent of the density. The embedding then reflects
+  geometry alone, which is what dimensionality reduction usually wants.
+
+The explorer in <NoteLink to="dimensionality-reduction">dimensionality reduction</NoteLink> uses $\alpha = 1$ and
+$t = 1$.
+
+## Worked example
+
+Four points in a chain, each joined to itself and its neighbours with weight 1, and $\alpha = 0$:
+
+$$
+\Kmat = \begin{pmatrix} 1 & 1 & 0 & 0 \\ 1 & 1 & 1 & 0 \\ 0 & 1 & 1 & 1 \\ 0 & 0 & 1 & 1 \end{pmatrix}, \quad
+\Pmat = \begin{pmatrix} \frac12 & \frac12 & 0 & 0 \\ \frac13 & \frac13 & \frac13 & 0 \\ 0 & \frac13 & \frac13 &
+\frac13 \\ 0 & 0 & \frac12 & \frac12 \end{pmatrix}.
+$$
+
+- The degrees are $(2, 3, 3, 2)$, so $\pi = (0.2, 0.3, 0.3, 0.2)$.
+- The eigenvalues of $\Pmat$ are $1, 0.729, 0.167, -0.229$. The first nontrivial right eigenvector, scaled so that
+  $\sum_z \pi(z)\psi_1(z)^2 = 1$, is $\psivec_1 = (1.379, 0.631, -0.631, -1.379)$.
+- At $t = 1$ the diffusion distance between the end points, computed from rows 1 and 4 of $\Pmat$, is
+  $D_1(1, 4) = \sqrt{4.167} = 2.041$. From the eigenvectors, $0.729^2 \times 2.759^2 + 0.167^2 \times 0^2 + 0.229^2
+  \times 1.546^2 = 4.041 + 0 + 0.125 = 4.167$, the same.
+- Between neighbours, $D_1(1, 2) = 0.776$. The ratio $D_t(1, 4)/D_t(1, 2)$ is $2.63$ at $t = 1$, $3.55$ at $t = 2$
+  and $3.69$ at $t = 8$. As $t$ grows only $\psivec_1$ survives, and the ratio tends to
+  $\abs{\psi_1(1) - \psi_1(4)}/\abs{\psi_1(1) - \psi_1(2)} = 2.759/0.748 = 3.69$.
+
+## Pitfalls
+
+- **Kernel width.** $\varepsilon$ must connect neighbours along the manifold without bridging its folds. On sparse
+  samples no single width does both, and a $k$-nearest-neighbour graph is used to truncate the kernel.
+- **Harmonics.** As for Laplacian eigenmaps, on an elongated manifold the second coordinate can be a function of the
+  first. Select eigenvectors that are not functions of earlier ones, or inspect several.
+- **Negative eigenvalues.** $\lambda_l$ can be negative. For odd $t$ the sign of $\lambda_l^t$ flips the coordinate,
+  which leaves distances unchanged; for embedding, the eigenvalues largest in absolute value are kept.
+- **Not a generative diffusion model.** Diffusion maps are unrelated to denoising diffusion models for image
+  generation, apart from the name.
+- **New points** need the Nyström extension, $\psi_l(\xvec) = \lambda_l^{-1}\sum_j p(\xvec, \xvec_j)\psi_l(j)$
+  <Cite id="bengio2003b" />.

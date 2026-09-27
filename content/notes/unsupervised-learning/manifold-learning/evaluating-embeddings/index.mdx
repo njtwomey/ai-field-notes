@@ -1,0 +1,145 @@
+---
+title: Evaluating embeddings
+kind: concept
+summary: 'An embedding is scored by comparing neighbour ranks before and after. Trustworthiness penalises points that become neighbours without being near in the data; continuity penalises neighbours pushed away. Both are read off the co-ranking matrix.'
+tags: [manifold-learning, dimensionality-reduction, evaluation, visualisation, worked-example]
+aliases: [trustworthiness, continuity, trustworthiness and continuity, co-ranking matrix, coranking matrix, neighbourhood preservation, kNN recall, Q_NX, Shepard diagram, reading t-SNE plots]
+requires: [k-nearest-neighbours]
+partOf: [dimensionality-reduction]
+related: [embedding-evaluation, t-sne, umap, pacmap-trimap-and-largevis, multidimensional-scaling]
+references: [venna2006, venna2010, lee2009, wattenberg2016, chari2023, bohm2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { CoRanking } from './CoRanking'
+
+<Definition>
+Let $\rho_{ij}$ be the rank of point $j$ among the neighbours of point $i$ in the data (1 for the nearest) and
+$r_{ij}$ its rank in the embedding. For a neighbourhood size $K < n/2$, let $U_K(i)$ be the points among $i$'s $K$
+nearest in the embedding but not in the data, and $V_K(i)$ the points among its $K$ nearest in the data but not in the
+embedding. **Trustworthiness** and **continuity** are <Cite id="venna2006" />
+
+$$
+T(K) = 1 - \frac{2}{nK(2n - 3K - 1)}\sum_{i=1}^n\sum_{j \in U_K(i)}(\rho_{ij} - K), \qquad C(K) = 1 -
+\frac{2}{nK(2n - 3K - 1)}\sum_{i=1}^n\sum_{j \in V_K(i)}(r_{ij} - K).
+$$
+
+Both equal 1 for an embedding that keeps every $K$-neighbourhood. The **co-ranking matrix** $\Qmat$ counts pairs by
+their two ranks, $Q_{kl} = \abs{\set{(i, j) : \rho_{ij} = k,\ r_{ij} = l}}$ <Cite id="lee2009" />.
+</Definition>
+
+## Two kinds of error
+
+An embedding used for visualisation is read by looking at which points sit together. Two things can go wrong:
+
+- **Intrusions.** Points far apart in the data are drawn next to each other. A reader then trusts a neighbourhood
+  that does not exist. Trustworthiness measures this.
+- **Extrusions.** Points near each other in the data are drawn apart. A reader misses a relation that exists.
+  Continuity measures this.
+
+Venna and colleagues related the two to precision and recall: in retrieving each point's neighbours from the display,
+intrusions are false positives and extrusions are misses <Cite id="venna2010" />. A method can trade one for the other.
+Folding a sheet in two creates intrusions; tearing it creates extrusions.
+
+## Trustworthiness from ranks
+
+A pair counts as an intrusion for point $i$ when $j$ is among the $K$ nearest in the embedding but has data rank
+$\rho_{ij} > K$. Its penalty is $\rho_{ij} - K$, how far outside the true neighbourhood it lies, so a slight
+misordering costs little and bringing in a distant point costs a lot.
+
+**The normalising constant.** The largest possible penalty for one point arises when all $K$ of its embedding
+neighbours are its $K$ farthest points in the data, with ranks $n - 1, n - 2, \dots, n - K$. The penalty is then
+
+$$
+\sum_{m=1}^K (n - m - K) = K(n - K) - \frac{K(K+1)}{2} = \frac{K(2n - 3K - 1)}{2}.
+$$
+
+Over $n$ points the maximum is $nK(2n - 3K - 1)/2$, and $T(K)$ subtracts the actual penalty as a fraction of it. The
+worst case needs the $K$ farthest points to lie outside the true neighbourhood, $n - K > K$, hence $K < n/2$.
+Continuity is the same construction with the roles of the data and the embedding swapped.
+
+## The co-ranking matrix
+
+Every pair $(i, j)$ has a data rank $k$ and an embedding rank $l$. Lee and Verleysen collect them in the
+$(n-1) \times (n-1)$ matrix $\Qmat$ <Cite id="lee2009" />. A perfect embedding puts all $n(n-1)$ pairs on the
+diagonal. Split $\Qmat$ at rank $K$ into four blocks:
+
+- $k \le K$ and $l \le K$: neighbours kept.
+- $k > K$ and $l \le K$: intrusions. $T(K)$ weights them by $k - K$.
+- $k \le K$ and $l > K$: extrusions. $C(K)$ weights them by $l - K$.
+- $k > K$ and $l > K$: non-neighbours in both, which count for nothing.
+
+The simplest summary is the fraction of neighbours kept,
+
+$$
+Q_{NX}(K) = \frac{1}{nK}\sum_{k \le K}\sum_{l \le K} Q_{kl},
+$$
+
+the average $K$-nearest-neighbour recall. It needs a baseline. If the embedding placed points at random, each of a
+point's $K$ data neighbours would land among its $K$ embedding neighbours with probability $K/(n-1)$, so a random
+embedding has $\expect Q_{NX}(K) = K/(n-1)$. $Q_{NX}(K)$ always reaches 1 at $K = n - 1$, so values at large $K$ must be
+compared with that baseline.
+
+<CoRanking />
+
+## Global structure
+
+Rank measures at small $K$ say nothing about the arrangement of distant groups. Global checks include:
+
+- **Shepard diagram.** Plot embedding distance against data distance for all pairs. A tight monotone band means
+  distances are kept.
+- **Distance correlation.** The Spearman correlation between the two sets of pairwise distances, or between the
+  distances of cluster centroids.
+- **Stress.** The residual $\sum_{i<j}(d_{ij} - \norm{\yvec_i - \yvec_j})^2$ that
+  <NoteLink to="multidimensional-scaling">metric MDS</NoteLink> minimises, after optimal scaling.
+
+Local and global quality often move in opposite directions. Increasing the attraction in t-SNE joins clusters and
+recovers continuous structure, but on MNIST it lowered the 15-nearest-neighbour recall from 0.34 to 0.06
+<Cite id="bohm2022" />.
+
+## Reading t-SNE and UMAP plots
+
+Wattenberg, Viégas and Johnson catalogued what a t-SNE plot does and does not show <Cite id="wattenberg2016" />:
+
+- **Cluster sizes are not densities.** Each point gets about the same number of effective neighbours, so a tight
+  cluster and a diffuse one are drawn at similar sizes.
+- **Gaps between clusters are not distances.** Two clusters far apart in the plot need not be farther apart in the data
+  than two that are close.
+- **Random data can look clustered** at small perplexity.
+- **Shapes depend on hyperparameters and on the run.** Conclusions should survive several perplexities and seeds.
+
+Chari and Pachter argued that embedding thousands of dimensions into two must distort most distances, and showed it
+on single-cell data: neighbour rankings and distances between cell types correlated poorly with those of the original
+space <Cite id="chari2023" />. They also built embeddings in the shape of an elephant that matched t-SNE and UMAP on
+the usual correlation measures. A good score on one measure therefore does not certify a picture.
+
+## Worked example
+
+Five points on a line at $0, 1, 3, 7, 12$, labelled $a, b, c, d, e$. The embedding swaps $d$ and $e$, placing them at
+$12$ and $7$. Take $K = 1$, so the normaliser is $2/(5 \times 1 \times (10 - 3 - 1)) = 1/15$.
+
+- In the data, $d$'s nearest neighbour is $c$ and $e$'s is $d$. In the embedding, $d$ at 12 has nearest neighbour $e$
+  at 7, and $e$ at 7 has nearest neighbour $c$ at 3. The other three points keep their nearest neighbours.
+- **Intrusions.** $e$ is $d$'s embedding neighbour but has data rank 2 from $d$, penalty $2 - 1 = 1$. $c$ is $e$'s
+  embedding neighbour with data rank 2 from $e$, penalty 1. $T(1) = 1 - 2/15 = 0.867$.
+- **Extrusions.** $d$'s data neighbour $c$ has embedding rank 2, and $e$'s data neighbour $d$ has embedding rank 2.
+  $C(1) = 1 - 2/15 = 0.867$.
+- **Neighbours kept.** Three of five nearest neighbours survive: $Q_{NX}(1) = 0.6$, against a chance level of
+  $1/4$.
+- At $K = 2$ the swap does no harm: every point's two nearest neighbours are the same set in both, and
+  $T(2) = C(2) = Q_{NX}(2) = 1$.
+
+The same embedding scores differently at different $K$. Always report the neighbourhood size.
+
+## Pitfalls
+
+- **The data ranks are not the truth.** Ranks computed from straight-line distances in the input space treat the
+  next layer of a Swiss roll as a neighbour. An embedding that correctly unrolls the roll is then penalised at large
+  $K$, as the figure shows.
+- **One number hides the curve.** Plot $T$, $C$ and $Q_{NX}$ against $K$. Methods cross over as $K$ grows.
+- **Cost.** Full ranks cost $O(n^2\log n)$. For large $n$, evaluate on a random subset of points, with ranks among all
+  points computed by nearest-neighbour search.
+- **Different question from probing.** These measures ask whether a picture is faithful to the data. Whether an
+  embedding is useful as features for a task is a separate question; see
+  <NoteLink to="embedding-evaluation">embedding evaluation</NoteLink> for linear and nearest-neighbour probes.

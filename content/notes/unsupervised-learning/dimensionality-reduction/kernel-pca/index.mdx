@@ -1,0 +1,164 @@
+---
+title: Kernel PCA
+kind: concept
+summary: 'Kernel PCA runs PCA in the feature space of a kernel $k$. The principal directions are combinations $\sum_i \alpha_i\phi(\xvec_i)$ whose coefficients are eigenvectors of the double-centred $n \times n$ kernel matrix, so a point''s scores are $\sum_i \alpha_i k(\xvec_i, \xvec)$ and the features are never computed.'
+tags: [dimensionality-reduction, unsupervised, kernels, linear-algebra, worked-example]
+aliases: [kernel principal component analysis, KPCA, nonlinear PCA, pre-image problem, centred kernel matrix]
+requires: [principal-component-analysis, kernel-trick]
+partOf: [dimensionality-reduction]
+related: [multidimensional-scaling, isomap, laplacian-eigenmaps, random-fourier-features, reproducing-kernel-hilbert-space, spectral-clustering]
+references: [scholkopf1998, mika1998, kwok2004, ham2004, bengio2003b]
+status: draft
+updated: 2026-09-27
+---
+
+import { KernelPcaRings } from './KernelPcaRings'
+
+<Definition>
+Let $k(\xvec, \xvec') = \phi(\xvec)^\top\phi(\xvec')$ be a positive semidefinite kernel with feature map $\phi$ into a
+space $\Hcal$, and let $\Kmat$ be the $n \times n$ kernel matrix of the data, $K_{ij} = k(\xvec_i, \xvec_j)$.
+**Kernel PCA** is PCA of the points $\phi(\xvec_1), \dots, \phi(\xvec_n)$ <Cite id="scholkopf1998" />. It
+double-centres the kernel matrix, $\tilde\Kmat = \Jmat\Kmat\Jmat$ with $\Jmat = \Imat - \frac1n\ones\ones^\top$,
+takes its eigenvectors $\alphavec^{(1)}, \alphavec^{(2)}, \dots$ with eigenvalues $\mu_1 \ge \mu_2 \ge \dots$, scales
+them so that $\mu_l\norm{\alphavec^{(l)}}^2 = 1$, and gives any point $\xvec$ the score
+$z_l(\xvec) = \sum_{i=1}^n \alpha^{(l)}_i\,\tilde k(\xvec_i, \xvec)$ on component $l$.
+</Definition>
+
+## PCA in a space that is never built
+
+PCA finds directions of maximum variance, and those directions are straight lines. Data on two concentric rings have
+no straight direction that separates the rings. After the map $\phi(x_1, x_2) = (x_1, x_2, x_1^2 + x_2^2)$, the squared
+radius is a coordinate, and PCA in the new space can find it. For richer maps, such as the infinite-dimensional feature
+map of the Gaussian kernel $k(\xvec, \xvec') = \exp\paren{-\norm{\xvec - \xvec'}^2/2\sigma^2}$, the features cannot be
+listed. Kernel PCA shows that PCA needs only inner products between feature vectors, which the kernel supplies. This is
+the <NoteLink to="kernel-trick">kernel trick</NoteLink> applied to PCA.
+
+## Derivation through the kernel matrix
+
+Assume first that the features are centred, $\sum_i\phi(\xvec_i) = \zeros$. Write $\phi_i = \phi(\xvec_i)$. The
+covariance operator in feature space is $\Cmat = \frac1n\sum_i\phi_i\phi_i^\top$, and PCA solves $\Cmat\vvec = \lambda\vvec$.
+
+**The directions lie in the span of the data.** For $\lambda > 0$,
+
+$$
+\vvec = \frac{1}{n\lambda}\sum_{i=1}^n \phi_i\,(\phi_i^\top\vvec),
+$$
+
+so $\vvec = \sum_i \alpha_i\phi_i$ for some coefficients $\alpha_i$. The unknown is now the vector
+$\alphavec \in \reals^n$, not a vector in $\Hcal$.
+
+**The eigenproblem becomes one for $\Kmat$.** Substitute $\vvec = \sum_j\alpha_j\phi_j$ into
+$\Cmat\vvec = \lambda\vvec$ and take the inner product with $\phi_m$ for each $m$:
+
+$$
+\frac1n\sum_{i}(\phi_m^\top\phi_i)\sum_j(\phi_i^\top\phi_j)\alpha_j = \lambda\sum_j(\phi_m^\top\phi_j)\alpha_j
+\quad\Longleftrightarrow\quad \Kmat^2\alphavec = n\lambda\,\Kmat\alphavec.
+$$
+
+Every solution of $\Kmat\alphavec = \mu\alphavec$ with $\mu = n\lambda$ solves this. Other solutions differ from these
+by a vector $\deltavec$ with $\Kmat\deltavec = \zeros$, which adds $\sum_i\delta_i\phi_i$ to $\vvec$. That vector has
+squared length $\deltavec^\top\Kmat\deltavec = 0$, so it is zero, and the direction $\vvec$ is unchanged. The principal
+directions therefore come from the eigenvectors of the $n \times n$ matrix $\Kmat$, and the feature-space variances are
+$\lambda_l = \mu_l/n$.
+
+**Normalisation.** $\vvec$ must have unit length: $\vvec^\top\vvec = \sum_{i,j}\alpha_i\alpha_jK_{ij} =
+\alphavec^\top\Kmat\alphavec = \mu\norm{\alphavec}^2 = 1$. A unit eigenvector $\uvec$ of $\Kmat$ is therefore rescaled
+to $\alphavec = \uvec/\sqrt{\mu}$.
+
+**Scores.** The projection of any point on $\vvec$ is
+
+$$
+z(\xvec) = \vvec^\top\phi(\xvec) = \sum_{i=1}^n \alpha_i\,k(\xvec_i, \xvec).
+$$
+
+For a training point the scores are $\Kmat\alphavec = \mu\alphavec = \sqrt{\mu}\,\uvec$: the unit eigenvector scaled
+by the square root of its eigenvalue. The formula for $z(\xvec)$ maps new points with $n$ kernel evaluations each.
+
+## Centring in feature space
+
+The features are not centred in general, and their mean $\bar\phi = \frac1n\sum_j\phi_j$ cannot be computed. The
+kernel matrix of the centred features can. Its entries are
+
+$$
+\tilde K_{ij} = (\phi_i - \bar\phi)^\top(\phi_j - \bar\phi) = K_{ij} - \frac1n\sum_l K_{lj} - \frac1n\sum_l K_{il} +
+\frac1{n^2}\sum_{l,m}K_{lm},
+$$
+
+which is $\tilde\Kmat = \Jmat\Kmat\Jmat$ in matrix form. A new point is centred the same way:
+$\tilde k(\xvec_i, \xvec) = k(\xvec_i, \xvec) - \frac1n\sum_l k(\xvec_l, \xvec) - \frac1n\sum_l K_{il} +
+\frac1{n^2}\sum_{l,m}K_{lm}$. Kernel PCA uses $\tilde\Kmat$ and $\tilde k$ in place of $\Kmat$ and $k$ in every formula
+above.
+
+With the linear kernel $k(\xvec, \xvec') = \xvec^\top\xvec'$, $\tilde\Kmat$ is the Gram matrix of the centred data,
+and kernel PCA returns the ordinary <NoteLink to="principal-component-analysis">PCA</NoteLink> scores. Unlike linear
+PCA, kernel PCA can return up to $n$ components, not $D$, because the feature space can have more dimensions than
+there are points.
+
+<KernelPcaRings />
+
+## Spectral embeddings as kernel PCA
+
+Classical <NoteLink to="multidimensional-scaling">multidimensional scaling</NoteLink> takes the top eigenvectors of
+$\Bmat = -\tfrac12\Jmat\Dmat^{(2)}\Jmat$ scaled by $\sqrt{\lambda}$. That is kernel PCA with the double-centred matrix
+$-\tfrac12\Dmat^{(2)}$ as the centred kernel matrix. <NoteLink to="isomap">Isomap</NoteLink> is the same with geodesic
+distances. Ham, Lee, Mika and Schölkopf showed that <NoteLink to="locally-linear-embedding">LLE</NoteLink> and
+<NoteLink to="laplacian-eigenmaps">Laplacian eigenmaps</NoteLink> are also kernel PCA, with kernels built from the
+pseudo-inverse of the graph Laplacian and from the LLE matrix <Cite id="ham2004" />. The difference is that those kernels
+are computed from the data set as a whole, so evaluating them at a new point needs the Nyström extension
+<Cite id="bengio2003b" />. Kernel PCA with a fixed kernel has the out-of-sample map built in.
+
+## The pre-image problem
+
+A component in feature space is a vector $\sum_i\gamma_i\phi_i$, which in general is not the image $\phi(\zvec)$ of
+any input point. Denoising by kernel PCA projects $\phi(\xvec)$ onto the first few components and then needs a point
+$\zvec$ with $\phi(\zvec)$ close to the projection. This is the **pre-image problem** <Cite id="mika1998" />.
+
+Let the projection be $\Pmat\phi(\xvec) = \sum_l z_l(\xvec)\vvec_l = \sum_i\gamma_i\phi_i$ with
+$\gamma_i = \sum_l z_l(\xvec)\alpha^{(l)}_i$ (ignoring centring for clarity). The squared distance to $\phi(\zvec)$ is
+
+$$
+\norm{\phi(\zvec) - \sum_i\gamma_i\phi_i}^2 = k(\zvec, \zvec) - 2\sum_i\gamma_i k(\zvec, \xvec_i) + \text{const}.
+$$
+
+For the Gaussian kernel $k(\zvec, \zvec) = 1$, so the task is to maximise $\rho(\zvec) = \sum_i\gamma_i k(\zvec, \xvec_i)$.
+Its gradient is $\sigma^{-2}\sum_i\gamma_i k(\zvec, \xvec_i)(\xvec_i - \zvec)$. Setting it to zero gives the fixed
+point iteration of Mika and colleagues:
+
+$$
+\zvec \leftarrow \frac{\sum_i\gamma_i k(\zvec, \xvec_i)\,\xvec_i}{\sum_i\gamma_i k(\zvec, \xvec_i)}.
+$$
+
+Each step moves $\zvec$ to a weighted mean of the training points near it. The iteration can stall at local optima,
+and the denominator can approach zero. Kwok and Tsang instead estimate the distances from $\zvec$ to its nearest
+training points from feature-space distances and place $\zvec$ by an MDS-like solve <Cite id="kwok2004" />.
+
+## Worked example
+
+Three points on a line, $x = -1, 0, 1$, with the kernel $k(x, x') = (xx')^2$. Its feature map is $\phi(x) = x^2$, a
+single feature.
+
+- $\Kmat$ has $K_{ij} = x_i^2x_j^2$: rows $(1, 0, 1)$, $(0, 0, 0)$, $(1, 0, 1)$. Its row means are $\frac23, 0,
+  \frac23$ and its grand mean is $\frac49$.
+- Double centring gives $\tilde\Kmat = \frac19\begin{pmatrix} 1 & -2 & 1 \\ -2 & 4 & -2 \\ 1 & -2 & 1
+  \end{pmatrix}$, of rank 1 with eigenvalue $\mu = \frac23$ and unit eigenvector $\uvec = (1, -2, 1)/\sqrt6$.
+- The feature-space variance is $\lambda = \mu/n = \frac29$. The centred features are
+  $x^2 - \frac23 = (\frac13, -\frac23, \frac13)$, whose mean square is indeed $\frac29$.
+- $\alphavec = \uvec/\sqrt{\mu} = (0.5, -1, 0.5)$, and the training scores $\tilde\Kmat\alphavec = (\frac13, -\frac23,
+  \frac13)$ are the centred features.
+- A new point $x = 2$ has $k(x_i, 2) = (4, 0, 4)$. Centring subtracts its mean $\frac83$ and the row means
+  $(\frac23, 0, \frac23)$ and adds $\frac49$, giving $\tilde k = (\frac{10}9, -\frac{20}9, \frac{10}9)$. Its score is
+  $\tilde k^\top\alphavec = \frac{10}3 = 2^2 - \frac23$, the centred feature of the new point.
+
+Linear PCA would order the points as $-1, 0, 1$. Kernel PCA with this kernel places $-1$ and $1$ together, because it
+sees only $x^2$.
+
+## Pitfalls
+
+- **Cost.** $\Kmat$ has $n^2$ entries and the eigendecomposition costs $O(n^3)$. For large $n$, approximate the kernel
+  with a subset of points (Nyström) or with <NoteLink to="random-fourier-features">random Fourier features</NoteLink>
+  and run linear PCA on the approximate features.
+- **The kernel decides everything.** The figure shows that a Gaussian kernel that is too narrow or too wide finds
+  nothing useful. Choose the width by a downstream task, or by reconstruction error after pre-imaging.
+- **Variance is not structure.** Kernel PCA still maximises variance, now in feature space. With a Gaussian kernel the
+  leading components on a Swiss roll describe its extent, not its unrolled coordinates.
+- **No direct inverse.** Mapping components back to input space needs a pre-image, which is approximate.

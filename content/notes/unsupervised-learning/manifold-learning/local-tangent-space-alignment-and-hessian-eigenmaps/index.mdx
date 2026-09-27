@@ -1,0 +1,137 @@
+---
+title: Local tangent space alignment and Hessian eigenmaps
+kind: concept
+summary: 'LTSA fits a $d$-dimensional tangent space to each neighbourhood by local PCA and finds global coordinates that each neighbourhood reproduces by an affine map. Hessian eigenmaps penalise second derivatives instead. Both need bottom eigenvectors of a sparse matrix.'
+tags: [manifold-learning, dimensionality-reduction, unsupervised, linear-algebra, worked-example]
+aliases: [LTSA, local tangent space alignment, Hessian eigenmaps, Hessian LLE, HLLE, tangent space alignment, local PCA]
+requires: [locally-linear-embedding, principal-component-analysis, singular-value-decomposition]
+partOf: [dimensionality-reduction]
+related: [isomap, laplacian-eigenmaps, hessian, diffusion-maps]
+references: [zhang2004b, donoho2003, roweis2000, tenenbaum2000]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $\xvec_1, \dots, \xvec_n \in \reals^D$ lie near a $d$-dimensional manifold, and let $N_i$ be the $k$ nearest
+neighbours of $\xvec_i$, including $\xvec_i$. **Local tangent space alignment** (LTSA) computes local coordinates
+$\Thetamat_i \in \reals^{d \times k}$ for each $N_i$ by PCA and finds global coordinates $\Ymat \in \reals^{d \times
+n}$ that minimise $\sum_i \min_{\cvec_i, \Lmat_i}\norm{\Ymat_i - \cvec_i\ones^\top - \Lmat_i\Thetamat_i}_F^2$, where
+$\Ymat_i$ holds the columns of $\Ymat$ in $N_i$ <Cite id="zhang2004b" />. **Hessian eigenmaps** (Hessian LLE) find
+coordinates whose Hessians along the manifold are as small as possible, by estimating each neighbourhood's Hessian
+from a local quadratic fit <Cite id="donoho2003" />.
+</Definition>
+
+## Local charts glued together
+
+A manifold of dimension $d$ is covered by patches that each look like a piece of $\reals^d$. Local PCA on a small
+neighbourhood finds the patch's tangent plane and gives each neighbour $d$ coordinates in it. These local coordinates
+are correct only up to a rotation, a shift and a rescaling that differ from patch to patch. The global coordinates are
+what remains when all patches agree: a single set of $d$ numbers per point that every patch reproduces through its own
+affine map. <NoteLink to="locally-linear-embedding">LLE</NoteLink> glues patches through reconstruction weights. LTSA
+glues them through the tangent coordinates directly, and Hessian eigenmaps through second derivatives.
+
+## LTSA: derivation
+
+**Local coordinates.** Stack the neighbours of point $i$ as the columns of $\Xmat_i \in \reals^{D \times k}$ and centre
+them with $\Jmat_k = \Imat - \frac1k\ones\ones^\top$. Take the SVD $\Xmat_i\Jmat_k = \Umat\Sigmamat\Vmat^\top$ and keep
+the top $d$ terms. The local coordinates are $\Thetamat_i = \Sigmamat_d\Vmat_d^\top$: the projections of the centred
+neighbours on the top $d$ principal directions.
+
+**Alignment error.** The global coordinates of the neighbourhood, $\Ymat_i \in \reals^{d \times k}$, should equal an
+affine image $\cvec_i\ones^\top + \Lmat_i\Thetamat_i$ of the local ones. The best shift $\cvec_i$ is the mean of the
+columns of $\Ymat_i$, since $\Thetamat_i$ is centred. What remains is a least-squares fit of $\Ymat_i\Jmat_k$ by
+$\Lmat_i\Thetamat_i$. The best $\Lmat_i$ is $\Ymat_i\Jmat_k\Thetamat_i^+$, and the residual is
+$\Ymat_i\Jmat_k(\Imat - \Thetamat_i^+\Thetamat_i)$. Here $\Thetamat_i^+\Thetamat_i = \Vmat_d\Vmat_d^\top$, the projection
+onto the rows of $\Thetamat_i$. The columns of $\Vmat_d$ are orthogonal to $\ones$ because the data were centred, so
+
+$$
+\Jmat_k(\Imat - \Vmat_d\Vmat_d^\top) = \Imat - \Gmat_i\Gmat_i^\top = \Wmat_i, \qquad \Gmat_i = \LB\tfrac{1}{\sqrt
+k}\ones,\ \Vmat_d\RB.
+$$
+
+$\Wmat_i$ is the projection onto the complement of the constant vector and the local coordinates. The error of
+neighbourhood $i$ is $\norm{\Ymat_i\Wmat_i}_F^2$.
+
+**Global problem.** Let $\Smat_i \in \set{0, 1}^{n \times k}$ select the neighbourhood, so that $\Ymat_i = \Ymat\Smat_i$.
+Using $\Wmat_i\Wmat_i^\top = \Wmat_i$,
+
+$$
+\sum_i\norm{\Ymat\Smat_i\Wmat_i}_F^2 = \trace\paren{\Ymat\Bmat\Ymat^\top}, \qquad \Bmat = \sum_i
+\Smat_i\Wmat_i\Smat_i^\top.
+$$
+
+To exclude the collapsed solution, LTSA requires $\Ymat\Ymat^\top = \Imat$. The minimiser is given by the bottom
+eigenvectors of $\Bmat$. $\Bmat\ones = \zeros$, because each $\Wmat_i$ annihilates the constant vector, so the bottom
+eigenvector is constant and is discarded; the next $d$ give the embedding. $\Bmat$ has about $nk^2$ nonzero entries.
+
+**When LTSA is exact.** If the points are an affine image of $d$-dimensional coordinates $\tauvec_i$, local PCA
+recovers each neighbourhood's coordinates up to an affine map. The true coordinates then give zero error in every
+neighbourhood, so they and the constant vector lie in the null space of $\Bmat$. LTSA returns them up to an affine
+transformation.
+
+## Hessian eigenmaps: derivation
+
+Donoho and Grimes asked which functions on a manifold are the coordinates. Suppose the manifold $\Mcal$ is locally
+isometric to a connected open set $\Theta \subset \reals^d$, with isometric coordinates $\thetavec$
+<Cite id="donoho2003" />. For a smooth function $f$ on $\Mcal$, let $H_f(\mvec)$ be its Hessian in local orthonormal
+coordinates of the tangent space at $\mvec$, and define
+
+$$
+\Hcal(f) = \int_\Mcal \norm{H_f(\mvec)}_F^2\,d\mvec.
+$$
+
+**The null space of $\Hcal$ is the coordinates.** Because the map from $\Theta$ to $\Mcal$ is a local isometry, the
+tangent Hessian of $f$ at a point equals the ordinary Hessian of $g(\thetavec) = f(\mvec(\thetavec))$. $\Hcal(f) = 0$
+exactly when $g$ has zero Hessian everywhere on $\Theta$. A function with zero Hessian on a connected open set is
+affine, $g(\thetavec) = a_0 + \avec^\top\thetavec$. The null space of $\Hcal$ is therefore $(d+1)$-dimensional, spanned by
+the constant function and the $d$ isometric coordinates.
+
+This argument needs $\Theta$ to be connected, not convex. <NoteLink to="isomap">Isomap</NoteLink> assumes that
+geodesic distances on $\Mcal$ equal Euclidean distances in $\Theta$, which fails when $\Theta$ has a hole, because
+geodesics bend around it <Cite id="tenenbaum2000" />. Hessian eigenmaps recover the coordinates of a sheet with a hole
+cut out.
+
+**Discretisation.** For each neighbourhood, compute local tangent coordinates $\uvec_1, \dots, \uvec_k \in \reals^d$ by
+local PCA, as in LTSA. Fit a quadratic in them by least squares: build the $k \times (1 + d + d(d+1)/2)$ matrix with
+columns $\ones$, the $d$ coordinates and the $d(d+1)/2$ products $u_au_b$ for $a \le b$, and orthonormalise its
+columns in that order. The last $d(d+1)/2$ orthonormal columns, transposed, form $\Hmat_i$: applied to the values of $f$
+on the neighbourhood, it returns the coefficients of the quadratic part, which estimate the Hessian entries. Summing
+$\Smat_i\Hmat_i^\top\Hmat_i\Smat_i^\top$ over neighbourhoods gives a sparse positive semidefinite matrix whose bottom
+$d + 1$ eigenvectors span the estimated null space. Discarding the constant and orthonormalising the rest gives the
+embedding. The quadratic fit needs $k \ge 1 + d(d+3)/2$ neighbours: at least 6 for a surface.
+
+## Worked example
+
+Three neighbours at $(0, 0)$, $(1, 1)$ and $(2, 2)$, with $d = 1$.
+
+- Centred, they are $(-1, -1)$, $(0, 0)$, $(1, 1)$. Local PCA gives the tangent coordinates
+  $\Thetamat = (-\sqrt2, 0, \sqrt2)$, and $\Vmat_1 = (-1, 0, 1)/\sqrt2$.
+- $\Gmat = \LB\frac{1}{\sqrt3}\ones, \Vmat_1\RB$, so $\Wmat = \Imat - \Gmat\Gmat^\top$ is the projection onto the
+  remaining direction $(1, -2, 1)/\sqrt6$:
+  $\Wmat = \frac16\begin{pmatrix} 1 & -2 & 1 \\ -2 & 4 & -2 \\ 1 & -2 & 1 \end{pmatrix}$.
+- The alignment error of candidate coordinates $\yvec$ is $\yvec^\top\Wmat\yvec = (y_1 - 2y_2 + y_3)^2/6$. For
+  $\yvec = (0, 1, 2)$ and for $\yvec = (5, 3, 1)$ it is 0: both are affine in the true position. For
+  $\yvec = (0, 1, 3)$ it is $1/6$.
+
+For equally spaced points the LTSA error is the squared second difference $y_1 - 2y_2 + y_3$, a discrete second
+derivative. This is the quantity that Hessian eigenmaps penalise directly.
+
+## Comparison
+
+| | LLE | LTSA | Hessian eigenmaps |
+| --- | --- | --- | --- |
+| Local model | Affine reconstruction weights | Tangent coordinates by local PCA | Quadratic fit in tangent coordinates |
+| Penalises | Deviation from the weights | Deviation from an affine map of the tangent coordinates | Second derivatives |
+| Minimum $k$ | $d + 1$ | $d + 1$ | $1 + d(d+3)/2$ |
+| Recovers | Coordinates up to a distortion | Affine image of flat coordinates | Isometric coordinates on non-convex domains |
+
+## Pitfalls
+
+- **Intrinsic dimension must be known.** Both methods fix $d$ in the local PCA. A wrong $d$ fits the wrong tangent
+  spaces.
+- **Noise and curvature.** Local PCA needs neighbourhoods small enough to be flat and large enough to average noise.
+  Hessian eigenmaps need even more neighbours, and their second-derivative estimates amplify noise.
+- **Near-degenerate eigenvalues.** The bottom eigenvalues of $\Bmat$ can be close together, and the embedding then
+  mixes directions. The sparse eigensolvers used for large $n$ can also converge slowly near zero.
+- **Scale.** Neither method preserves absolute distances: LTSA is exact up to an affine map, which can stretch one axis.

@@ -1,0 +1,123 @@
+---
+title: Parametric and neural embeddings
+kind: concept
+summary: 'A parametric embedding trains a function $f_{\thetavec} : \reals^D \to \reals^m$, usually a neural network, instead of free coordinates per point. Parametric t-SNE and UMAP minimise the t-SNE or UMAP loss through the network; autoencoders minimise reconstruction error.'
+tags: [manifold-learning, dimensionality-reduction, unsupervised, neural-networks, representation-learning, worked-example]
+aliases: [parametric t-SNE, parametric UMAP, neural embedding, out-of-sample embedding, amortised embedding, UMAP autoencoder]
+requires: [t-sne, umap, backpropagation]
+partOf: [dimensionality-reduction]
+related: [autoencoder, variational-autoencoder, gaussian-process-latent-variable-model, back-constrained-gplvm, pacmap-trimap-and-largevis, contrastive-learning]
+references: [vandermaaten2009, sainburg2021, hinton2006, bengio2003b]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **parametric embedding** is a function $f_{\thetavec} : \reals^D \to \reals^m$ with parameters $\thetavec$, trained so
+that the points $\yvec_i = f_{\thetavec}(\xvec_i)$ minimise an embedding loss $L(\yvec_1, \dots, \yvec_n)$.
+**Parametric t-SNE** uses the t-SNE loss <Cite id="vandermaaten2009" />, **parametric UMAP** the UMAP loss
+<Cite id="sainburg2021" />, and an **autoencoder** the error of reconstructing $\xvec_i$ from $\yvec_i$ with a
+decoder <Cite id="hinton2006" />. A new point is embedded as $f_{\thetavec}(\xvec)$.
+</Definition>
+
+## Coordinates or a function
+
+<NoteLink to="t-sne">t-SNE</NoteLink> and <NoteLink to="umap">UMAP</NoteLink> optimise one free vector $\yvec_i$ per
+training point. The result is a table of coordinates. A new point has no entry, and embedding it means rerunning the
+optimisation or fitting it against the fixed layout. A parametric method replaces the table by a function. Every
+point, seen or unseen, is embedded by the same map, and nearby inputs get nearby outputs whenever $f_{\thetavec}$ is
+smooth.
+
+The non-parametric method is the special case in which $f$ is a lookup table with $nm$ free numbers. A network with
+fewer parameters than that cannot place every point freely, so it trades some fit on the training points for a map
+that generalises.
+
+## Training through the network
+
+Any embedding loss $L$ that is differentiable in the coordinates can train the network. By the chain rule,
+
+$$
+\frac{\partial L}{\partial\thetavec} = \sum_{i=1}^n \paren{\frac{\partial\yvec_i}{\partial\thetavec}}^\top
+\frac{\partial L}{\partial\yvec_i}.
+$$
+
+The vector $\partial L/\partial\yvec_i$ is the force the non-parametric method would apply to point $i$, for t-SNE
+$4\sum_j(p_{ij} - q_{ij})(\yvec_i - \yvec_j)/(1 + \norm{\yvec_i - \yvec_j}^2)$. Backpropagation pushes these forces
+into the weights. Instead of moving points, gradient descent moves the function so that the points it produces
+feel smaller forces.
+
+## Parametric t-SNE
+
+Van der Maaten trained a feed-forward network with layers of $784 - 500 - 500 - 2000 - m$ units on MNIST, first
+pretrained as a stack of restricted Boltzmann machines and then fine-tuned on the t-SNE loss
+<Cite id="vandermaaten2009" />. The input affinities $p_{ij}$ are computed within each mini-batch. The number of pairs
+grows quadratically with the batch size, so batches hold a few thousand points.
+
+The embedding kernel is a Student-t distribution with $\alpha$ degrees of freedom:
+
+$$
+q_{ij} \propto \paren{1 + \frac{\norm{f(\xvec_i) - f(\xvec_j)}^2}{\alpha}}^{-(\alpha+1)/2}.
+$$
+
+$\alpha = 1$ is ordinary t-SNE. In an $m$-dimensional latent space the volume available grows exponentially with $m$,
+and a very heavy tail spreads clusters too far apart. Lighter tails, from larger $\alpha$, correct for this. Van der
+Maaten considered a fixed $\alpha = 1$, the linear rule $\alpha = m - 1$, and learning $\alpha$ by gradient descent
+along with the weights.
+
+## Parametric UMAP
+
+Sainburg, McInnes and Gentner kept UMAP's fuzzy $k$-nearest-neighbour graph and cross-entropy loss, and optimised the
+weights of a network instead of the coordinates <Cite id="sainburg2021" />. Each mini-batch samples graph edges for
+attraction and random pairs for repulsion, exactly as UMAP's own optimiser does, so the loss needs no normalisation
+over all pairs. Embedding held-out points with the trained network was several orders of magnitude faster than with
+non-parametric t-SNE or UMAP, and only slightly slower than PCA. Because the loss is a sum over a batch, other terms can be added to it:
+
+- **Reconstruction.** A decoder from $\yvec$ back to $\xvec$ and a reconstruction loss make the network an autoencoder
+  whose latent space also respects the neighbour graph.
+- **Global structure.** A loss that correlates pairwise distances in the data and the embedding pulls the layout
+  toward global faithfulness.
+- **Labels.** A classifier on top of the embedding, trained on the labelled points, gives a semi-supervised model.
+
+## Autoencoders
+
+An <NoteLink to="autoencoder">autoencoder</NoteLink> pairs an encoder $f_{\thetavec}$ with a decoder $g_{\phivec}$ and
+minimises $\sum_i\norm{\xvec_i - g_{\phivec}(f_{\thetavec}(\xvec_i))}^2$. With linear maps and squared error, the optimal
+encoder spans the same subspace as <NoteLink to="principal-component-analysis">PCA</NoteLink>. With nonlinear layers it
+can capture curved structure. Hinton and Salakhutdinov showed that a deep autoencoder, pretrained layer by layer, gives
+lower reconstruction error than PCA with the same number of codes on images and documents <Cite id="hinton2006" />.
+
+Reconstruction is a global objective: it rewards keeping enough information to rebuild the input, not keeping
+neighbours together. Autoencoder codes therefore separate clusters less sharply than t-SNE or UMAP. The
+<NoteLink to="variational-autoencoder">variational autoencoder</NoteLink> adds a prior on the codes and gives a
+generative model.
+
+## Mapping in the other direction
+
+A <NoteLink to="gaussian-process-latent-variable-model">Gaussian process latent variable model</NoteLink> learns a
+smooth map from latent points to data, the decoder alone, with the latent points as free parameters. It has the same
+out-of-sample problem as t-SNE. The <NoteLink to="back-constrained-gplvm">back-constrained GP-LVM</NoteLink> writes
+each latent point as a smooth function of its observation, which adds an encoder and keeps nearby data close in the
+latent space.
+
+## Worked example
+
+- **Parameter counts.** Non-parametric t-SNE of the 70,000 MNIST images in two dimensions optimises
+  $70{,}000 \times 2 = 140{,}000$ numbers. The $784 - 500 - 500 - 2000 - 2$ network has
+  $784 \times 500 + 500 \times 500 + 500 \times 2000 + 2000 \times 2 = 1{,}646{,}000$ weights and $3002$ biases. The
+  network has more parameters, but they are shared across points, so it cannot place points independently, and it maps
+  any new image.
+- **Tails.** For two latent points at distance 3, the unnormalised kernel is $(1 + 9/\alpha)^{-(\alpha+1)/2}$: $0.100$
+  for $\alpha = 1$, $0.078$ for $\alpha = 2$ and $0.031$ for $\alpha = 9$. Raising $\alpha$ to $m - 1$ for a
+  ten-dimensional latent space makes moderately distant pairs a third as similar as ordinary t-SNE would, which reduces
+  the separation of clusters.
+
+## Pitfalls
+
+- **Capacity.** A network too small for the data gives a smoother but less faithful embedding than the
+  non-parametric method. One too large overfits the training layout.
+- **Batch effects.** Parametric t-SNE computes affinities within batches, so the perplexity refers to a batch, not to
+  the whole data set.
+- **Distribution shift.** $f_{\thetavec}$ is reliable only near the training data. Inputs far from it are mapped
+  somewhere, with no warning.
+- **Spectral alternatives.** For spectral methods, the Nyström extension maps new points without a network
+  <Cite id="bengio2003b" />.
