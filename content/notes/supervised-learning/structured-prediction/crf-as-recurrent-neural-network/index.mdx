@@ -1,0 +1,139 @@
+---
+title: CRFs as recurrent neural networks (CRF-RNN)
+kind: concept
+summary: 'CRF-RNN writes each mean-field update of a fully connected CRF with Gaussian pairwise potentials as CNN layers: filtering, weighting, a label-compatibility transform, adding unaries and a softmax. Unrolling $T$ updates gives a recurrent network trained end to end with a CNN.'
+tags: [structured-prediction, graphical-models, deep-learning, computer-vision, worked-example]
+aliases: [CRF-RNN, conditional random fields as recurrent neural networks, mean-field as an RNN, dense CRF, fully connected CRF]
+requires: [conditional-random-field, mean-field-variational-inference, convolutional-layer]
+partOf: [structured-prediction]
+related: [crf-variants, semantic-segmentation, recurrent-neural-network, backpropagation-through-time, markov-random-field]
+references: [zheng2015, krahenbuhl2011, adams2010, long2015]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A fully connected (dense) CRF over the $N$ pixels of an image assigns label $x_i \in \Lcal = \set{1, \dots, L}$ to pixel
+$i$ with energy
+
+$$
+E(\xvec) = \sum_i \psi_u(x_i) + \sum_{i < j} \psi_p(x_i, x_j), \qquad
+\psi_p(l, l') = \mu(l, l') \sum_{m=1}^{M} w^{(m)} k^{(m)}(\fvec_i, \fvec_j),
+$$
+
+where $\psi_u$ is a unary cost from a network, $\mu$ is a label-compatibility function, $k^{(m)}$ are Gaussian kernels on
+pixel features $\fvec_i$ (position, and position with colour) and $w^{(m)}$ their weights. CRF-RNN computes approximate
+marginals by mean-field inference and writes each mean-field iteration as a stack of CNN layers. $T$ iterations form a
+recurrent network whose parameters, $w^{(m)}$ and $\mu$, are learnt jointly with the CNN that supplies the unaries
+<Cite id="zheng2015" />.
+</Definition>
+
+## The problem
+
+A fully convolutional network labels every pixel from its receptive field and does not enforce agreement between
+neighbouring labels, so its segmentations have coarse, blobby boundaries <Cite id="long2015" />. A dense CRF encourages
+pixels that are close and similar in colour to take compatible labels, which snaps labels to image edges
+<Cite id="krahenbuhl2011" />. Used as a separate post-processing step, the CRF cannot influence what the network learns.
+CRF-RNN makes CRF inference a differentiable part of the network.
+
+## Mean-field inference for the dense CRF
+
+The CRF defines $P(\xvec) \propto \exp\{-E(\xvec)\}$. Exact marginals are intractable because every pixel is connected to
+every other. Mean field approximates $P$ by a product of independent per-pixel distributions,
+$Q(\xvec) = \prod_i Q_i(x_i)$, chosen to minimise $\KL(Q \,\|\, P)$. The coordinate update for one factor holds the others
+fixed and sets $\log Q_i(l)$ to the expected log-probability under them (see
+<NoteLink to="mean-field-variational-inference">mean-field variational inference</NoteLink>):
+
+$$
+\log Q_i(l) = \expect_{Q_{-i}}\big[-E(\xvec) \mid x_i = l\big] + \text{const}.
+$$
+
+Only the terms of $E$ that involve $x_i$ depend on $l$. The unary term contributes $-\psi_u(l)$. Each pairwise term with
+pixel $j$ contributes $-\sum_{l'} Q_j(l')\, \psi_p(l, l')$. Write $U_i(l) = -\psi_u(l)$ for the network's score.
+Substituting the Gaussian form of $\psi_p$ and exchanging the sums,
+
+$$
+Q_i(l) = \frac{1}{Z_i} \exp\Big\{ U_i(l) - \sum_{l' \in \Lcal} \mu(l, l') \sum_{m=1}^{M} w^{(m)}
+\sum_{j \neq i} k^{(m)}(\fvec_i, \fvec_j)\, Q_j(l') \Big\},
+$$
+
+with $Z_i$ normalising over labels. The update needs, for each label and each kernel, the sum
+$\sum_{j \neq i} k^{(m)}(\fvec_i, \fvec_j) Q_j(l')$. That is a Gaussian filter applied to the map $Q(l')$, computed in
+time linear in $N$ with the permutohedral lattice <Cite id="adams2010" /> <Cite id="krahenbuhl2011" />.
+
+## One iteration as CNN layers
+
+Reading the update from the inside out gives five operations, each an ordinary network layer
+<Cite id="zheng2015" />:
+
+| Step | Operation | As a layer | Parameters |
+| --- | --- | --- | --- |
+| Message passing | $\tilde Q^{(m)}_i(l) = \sum_{j \neq i} k^{(m)}(\fvec_i, \fvec_j) Q_j(l)$ | $M$ Gaussian filters (one spatial, one bilateral) | kernel widths, fixed |
+| Weighting | $\check Q_i(l) = \sum_m w^{(m)} \tilde Q^{(m)}_i(l)$ | $1 \times 1$ convolution, $M$ channels in | $w^{(m)}$, one set per label |
+| Compatibility | $\hat Q_i(l) = \sum_{l'} \mu(l, l') \check Q_i(l')$ | $1 \times 1$ convolution, $L$ channels in and out | $\mu$, learnt |
+| Adding unaries | $\breve Q_i(l) = U_i(l) - \hat Q_i(l)$ | element-wise subtraction | none |
+| Normalising | $Q_i(l) = \operatorname{softmax}_l\, \breve Q_i(l)$ | softmax over labels | none |
+
+Every step is differentiable in its inputs and parameters. The Gaussian filter's gradient is the same filter applied to
+the incoming gradient, because the kernel matrix is symmetric. The compatibility $\mu$ is initialised to the Potts model,
+$\mu(l, l') = [l \neq l']$, and then learnt, so it can penalise label pairs that rarely touch more than pairs that often
+do; the learnt matrix is not required to be symmetric <Cite id="zheng2015" />.
+
+## Unrolling into a recurrent network
+
+Let $f_{\thetavec}(U, Q, I)$ be one iteration, with $\thetavec$ the weights $w^{(m)}$ and $\mu$, and $I$ the image. The
+iterations form a recurrent network with hidden state $Q$:
+
+$$
+H_1(t) = \begin{cases} \operatorname{softmax}(U), & t = 0,\\ H_2(t - 1), & 0 < t \le T, \end{cases}
+\qquad H_2(t) = f_{\thetavec}(U, H_1(t), I),
+$$
+
+with the output $H_2(T)$ after $T$ iterations. The same parameters are used at every step, as in any
+<NoteLink to="recurrent-neural-network">recurrent network</NoteLink>, and their gradients are sums over steps computed by
+<NoteLink to="backpropagation-through-time">backpropagation through time</NoteLink>. The unaries $U$ enter every step,
+so the gradient reaches the CNN both directly and through each iteration. Mean field on the dense CRF converges in
+fewer than about 10 iterations, so the unrolled network is shallow in time and does not suffer badly from vanishing or
+exploding gradients. Zheng et al. trained with $T = 5$ and tested with $T = 10$ <Cite id="zheng2015" />.
+
+## Worked example
+
+Take three pixels on a line at positions $f = 0, 1, 2$, two labels, one Gaussian kernel $k(f_i, f_j) = \exp\{-(f_i -
+f_j)^2/2\}$ with $w = 1$, the Potts compatibility, and unary scores $U_1 = (2, 0)$, $U_2 = (0.2, 0)$, $U_3 = (0, 1.5)$.
+Pixel 1 strongly prefers label 1, pixel 3 prefers label 2, and pixel 2 is almost undecided.
+
+- The kernel weights are $k_{12} = k_{23} = 0.607$ and $k_{13} = 0.135$.
+- Initialisation, $Q = \operatorname{softmax}(U)$: $Q_1 = (0.881, 0.119)$, $Q_2 = (0.550, 0.450)$, $Q_3 = (0.182, 0.818)$.
+- Messages to pixel 2: $\tilde Q_2 = k_{21} Q_1 + k_{23} Q_3 = (0.645, 0.568)$. With the Potts model the penalty for
+  label $l$ is the message for the other label, $\hat Q_2 = (0.568, 0.645)$.
+- Update: $Q_2 \propto \exp\{(0.2 - 0.568,\ 0 - 0.645)\}$, so $Q_2 = (0.569, 0.431)$.
+- After three iterations, $Q_1 = (0.882, 0.118)$, $Q_2 = (0.578, 0.422)$, $Q_3 = (0.213, 0.787)$.
+
+Pixel 2 moves towards label 1 because its label-1 neighbour is more confident than its label-2 neighbour. Pixel 3 is
+pulled slightly towards label 1 for the same reason. In CRF-RNN the widths, the weight $w$ and the compatibility would be
+learnt so that such smoothing improves the segmentation loss.
+
+## Results
+
+On the reduced PASCAL VOC 2012 validation set, mean intersection over union rose from 61.3% for FCN-8s alone, to 63.7%
+with a dense CRF applied afterwards, to 69.6% with CRF-RNN trained end to end (68.3%, 69.5% and 72.9% with additional
+COCO training data). On the VOC 2012 test set CRF-RNN reached 72.0% without COCO and 74.7% with it
+<Cite id="zheng2015" />.
+
+## Relation to other CRF models
+
+The linear-chain <NoteLink to="conditional-random-field">CRF</NoteLink> is a tree, so forward–backward gives exact
+marginals and a neural CRF can backpropagate through exact inference (see
+<NoteLink to="crf-variants">CRF variants</NoteLink>). The dense CRF is a loopy graph over millions of pixel pairs, so
+inference must be approximate; CRF-RNN backpropagates through a fixed number of approximate inference steps instead.
+The same idea, training a model through an unrolled inference algorithm, applies to loopy belief propagation and other
+iterative procedures.
+
+## Pitfalls
+
+- **Truncation is part of the model.** The network is trained for a fixed $T$. The parameters learnt make the $T$-step
+  approximation good, not the exact CRF marginals.
+- **Mean-field overconfidence.** Minimising $\KL(Q \,\|\, P)$ under-represents uncertainty, so the output marginals are
+  sharper than the true CRF marginals.
+- **Memory.** Backpropagation through time stores $Q$ for every iteration, $O(TNL)$ memory for $N$ pixels and $L$
+  labels.
