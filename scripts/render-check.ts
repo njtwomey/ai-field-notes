@@ -5,7 +5,7 @@
  *   node scripts/render-check.ts --port 5173 matrix-profile
  *   node scripts/render-check.ts '/browse?c=maths'           # any page path, with a leading slash
  *   node scripts/render-check.ts --save /tmp/dom k-means   # also write each page's DOM to <dir>/<slug>.html
- *   node scripts/render-check.ts --shot /tmp/png --height 3000 k-means   # also save a PNG screenshot per page
+ *   node scripts/render-check.ts --shot /tmp/png --height 3000 --width 800 k-means   # also save a PNG per page
  *
  * This is the only sanctioned way to render pages headlessly. Pages run one at a time, and each Chrome is killed after
  * a hard timeout: `--virtual-time-budget` alone can wait forever on the dev server's open HMR socket, and ad-hoc loops
@@ -24,12 +24,14 @@ let port = 5180
 let save: string | undefined
 let shot: string | undefined
 let height = 2400
+let width = 1400
 const slugs: string[] = []
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--port') port = Number(args[++i])
   else if (args[i] === '--save') save = args[++i]
   else if (args[i] === '--shot') shot = args[++i]
   else if (args[i] === '--height') height = Number(args[++i])
+  else if (args[i] === '--width') width = Number(args[++i])
   else slugs.push(args[i])
 }
 if (slugs.length === 0) {
@@ -85,7 +87,7 @@ function screenshot(url: string, file: string): Promise<boolean> {
         '--disable-gpu',
         '--hide-scrollbars',
         `--user-data-dir=${profile}`,
-        `--window-size=1400,${height}`,
+        `--window-size=${width},${height}`,
         '--virtual-time-budget=10000',
         `--screenshot=${file}`,
         url,

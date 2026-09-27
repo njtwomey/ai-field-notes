@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { useTheme } from '@/components/theme-provider'
 import { MathText } from '@/components/content/MathText'
 import { chrome, seriesColor, type Mode } from '@/components/viz/palette'
@@ -190,39 +190,25 @@ function trapezoid(n: DiagramNode, u: number): string {
   return `${cx - hw * t},${cy - hh} ${cx + hw * t},${cy - hh} ${cx + hw * b},${cy + hh} ${cx - hw * b},${cy + hh}`
 }
 
-function Label({
-  text,
-  box,
-  small,
-  colour,
-  align = 'center',
-}: {
-  text: string
+/** A label drawn as HTML over the SVG, positioned in the diagram's pixel coordinates. */
+type Overlay = {
+  key: string
   box: Box
-  small?: boolean
-  colour: string
-  align?: 'start' | 'center' | 'end'
-}) {
-  const lines = text.split('\n')
+  /** Font size in diagram pixels; it scales with the rendered diagram. */
+  size: number
+  align: 'start' | 'center' | 'end'
+  content: ReactNode
+}
+
+function labelLines(text: string, colour: string): ReactNode {
   return (
-    <foreignObject x={box.x0} y={box.y0} width={box.x1 - box.x0} height={box.y1 - box.y0} overflow="visible">
-      <div
-        className={`flex h-full w-full flex-col justify-center font-prose leading-tight ${
-          align === 'start'
-            ? 'items-start text-left'
-            : align === 'end'
-              ? 'items-end text-right'
-              : 'items-center text-center'
-        }`}
-        style={{ fontSize: small ? 11 : 13, color: colour }}
-      >
-        {lines.map((l, i) => (
-          <div key={i} className="whitespace-nowrap">
-            <MathText text={l} />
-          </div>
-        ))}
-      </div>
-    </foreignObject>
+    <div className="leading-tight" style={{ color: colour }}>
+      {text.split('\n').map((l, i) => (
+        <div key={i} className="whitespace-nowrap">
+          <MathText text={l} />
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -246,7 +232,9 @@ function groupBox(g: DiagramGroup, byId: Map<string, DiagramNode>): Box {
 
 /**
  * Renders a hand-specified diagram as SVG. Colours come from the data palette and the chrome tokens, so the diagram
- * follows the light and dark themes. Labels are HTML inside `foreignObject`, so `$…$` maths renders with KaTeX.
+ * follows the light and dark themes. Labels are HTML laid over the SVG, positioned in percentages of the diagram and
+ * sized in container units, so `$…$` maths renders with KaTeX and stays aligned at any scale in every browser
+ * (SVG `foreignObject` is misplaced by WebKit when the SVG is scaled).
  */
 export function Diagram({
   spec,
@@ -285,20 +273,17 @@ export function Diagram({
   const width = (view.x1 - view.x0) * u
   const height = (view.y1 - view.y0) * u
   const scaled = (b: Box): Box => ({ x0: b.x0 * u, y0: b.y0 * u, x1: b.x1 * u, y1: b.y1 * u })
+  const overlays: Overlay[] = []
+  const vx = view.x0 * u
+  const vy = view.y0 * u
+  const pct = (v: number) => `${v * 100}%`
 
-  return (
+  const svg = (
     <svg
       viewBox={`${view.x0 * u} ${view.y0 * u} ${width} ${height}`}
       role="img"
       aria-label={ariaLabel}
-      className={className}
-      style={{
-        width: '100%',
-        maxWidth: width * (spec.maxScale ?? 1.4),
-        height: 'auto',
-        margin: '0 auto',
-        display: 'block',
-      }}
+      style={{ width: '100%', height: 'auto', display: 'block' }}
     >
       {layout.groups.map(({ g, box }) => {
         const colour = toneColour(mode, g.tone ?? 'neutral')
@@ -311,6 +296,21 @@ export function Diagram({
         const labelBox: Box = at.startsWith('top')
           ? { x0: lx, y0: b.y0 + 2, x1: lx + span, y1: b.y0 + LABEL_H * u }
           : { x0: lx, y0: b.y1 - LABEL_H * u, x1: lx + span, y1: b.y1 - 2 }
+        if (g.label)
+          overlays.push({
+            key: `g-${g.id}`,
+            box: labelBox,
+            size: 11,
+            align: right ? 'end' : 'start',
+            content: (
+              <div
+                className="font-sans font-medium tracking-wide whitespace-nowrap uppercase"
+                style={{ color: colour }}
+              >
+                <MathText text={g.label} />
+              </div>
+            ),
+          })
         return (
           <g key={g.id}>
             <rect
@@ -325,22 +325,6 @@ export function Diagram({
               strokeOpacity={0.55}
               strokeDasharray={g.dashed ? '5 4' : undefined}
             />
-            {g.label && (
-              <foreignObject
-                overflow="visible"
-                x={labelBox.x0}
-                y={labelBox.y0}
-                width={labelBox.x1 - labelBox.x0}
-                height={labelBox.y1 - labelBox.y0}
-              >
-                <div
-                  className={`flex h-full items-center text-[11px] font-medium tracking-wide whitespace-nowrap uppercase ${right ? 'justify-end' : ''}`}
-                  style={{ color: colour }}
-                >
-                  <MathText text={g.label} />
-                </div>
-              </foreignObject>
-            )}
           </g>
         )
       })}
@@ -401,6 +385,18 @@ export function Diagram({
             }
           }
         }
+        if (e.label && labelAt)
+          overlays.push({
+            key: `e-${i}`,
+            box: labelAt,
+            size: 11,
+            align: labelAt.start ? 'start' : 'center',
+            content: (
+              <span className="rounded px-1" style={{ background: c.surface, color: c.inkSecondary }}>
+                <MathText text={e.label} />
+              </span>
+            ),
+          })
         return (
           <g key={i}>
             <path
@@ -419,24 +415,6 @@ export function Diagram({
             )}
             {(arrow === 'start' || arrow === 'both') && (
               <polygon points={arrowHead(px[0], before('start'), head)} fill={colour} />
-            )}
-            {e.label && labelAt && (
-              <foreignObject
-                x={labelAt.x0}
-                y={labelAt.y0}
-                width={labelAt.x1 - labelAt.x0}
-                height={labelAt.y1 - labelAt.y0}
-                overflow="visible"
-              >
-                <div className={`flex h-full items-center ${labelAt.start ? 'justify-start' : 'justify-center'}`}>
-                  <span
-                    className="rounded px-1 font-prose text-[11px]"
-                    style={{ background: c.surface, color: c.inkSecondary }}
-                  >
-                    <MathText text={e.label} />
-                  </span>
-                </div>
-              </foreignObject>
             )}
           </g>
         )
@@ -470,6 +448,14 @@ export function Diagram({
           if (s === 'e') return { x0: b.x1 + gap, y0: n.y * u - lh / 2, x1: b.x1 + gap + lw, y1: n.y * u + lh / 2 }
           return { x0: b.x0 - gap - lw, y0: n.y * u - lh / 2, x1: b.x0 - gap, y1: n.y * u + lh / 2 }
         }
+        if (n.label)
+          overlays.push({
+            key: `n-${n.id}`,
+            box: side ? outside(side) : b,
+            size: n.small ? 11 : 13,
+            align: side === 'e' ? 'start' : side === 'w' ? 'end' : 'center',
+            content: labelLines(n.label, labelColour),
+          })
         let body = null
         if (shape === 'factor') {
           body = <rect x={b.x0} y={b.y0} width={w} height={h} fill={colour} />
@@ -526,18 +512,46 @@ export function Diagram({
             style={onNodeClick ? { cursor: 'pointer' } : undefined}
           >
             {body}
-            {n.label && (
-              <Label
-                text={n.label}
-                box={side ? outside(side) : b}
-                small={n.small}
-                colour={labelColour}
-                align={side === 'e' ? 'start' : side === 'w' ? 'end' : 'center'}
-              />
-            )}
           </g>
         )
       })}
     </svg>
+  )
+
+  return (
+    <div
+      className={className}
+      style={{
+        position: 'relative',
+        width: '100%',
+        maxWidth: width * (spec.maxScale ?? 1.4),
+        margin: '0 auto',
+        containerType: 'inline-size',
+      }}
+    >
+      {svg}
+      {overlays.map((o) => (
+        <div
+          key={o.key}
+          className="font-prose"
+          style={{
+            position: 'absolute',
+            left: pct((o.box.x0 - vx) / width),
+            top: pct((o.box.y0 - vy) / height),
+            width: pct((o.box.x1 - o.box.x0) / width),
+            height: pct((o.box.y1 - o.box.y0) / height),
+            // Container units: the font scales with the rendered width, exactly as the SVG does.
+            fontSize: `${(o.size / width) * 100}cqw`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: o.align === 'start' ? 'flex-start' : o.align === 'end' ? 'flex-end' : 'center',
+            textAlign: o.align === 'start' ? 'left' : o.align === 'end' ? 'right' : 'center',
+            pointerEvents: 'none',
+          }}
+        >
+          {o.content}
+        </div>
+      ))}
+    </div>
   )
 }
