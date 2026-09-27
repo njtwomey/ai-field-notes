@@ -1,0 +1,172 @@
+---
+title: Inverted file index
+kind: technique
+summary: 'An inverted file index clusters the data with k-means into $k''$ cells and files each vector under its nearest centroid. A query scans only the $w$ lists with the closest centroids (nprobe), about $w/k''$ of the data. IVFADC stores product-quantised residuals.'
+tags: [nearest-neighbours, similarity-search, clustering, indexing, worked-example]
+aliases:
+  [
+    IVF,
+    IVF index,
+    inverted file,
+    IVFADC,
+    IVFPQ,
+    IVF-PQ,
+    IVFFlat,
+    nprobe,
+    nlist,
+    coarse quantiser,
+    residual encoding,
+    inverted multi-index,
+    IMI,
+    multi-sequence algorithm,
+  ]
+requires: [k-means, nearest-neighbour-search]
+partOf: [approximate-nearest-neighbour-search]
+related: [hnsw, curse-of-dimensionality-for-neighbours]
+references: [jegou2011, sivic2003, babenko2012, johnson2019, faissdocs, baranchuk2018, sun2023soar]
+status: draft
+updated: 2026-09-27
+---
+
+import { IvfProbe } from './IvfProbe'
+
+<Definition>
+An **inverted file index** (IVF) partitions $\reals^d$ with a **coarse quantiser**: $k'$ centroids
+$\cvec_1, \dots, \cvec_{k'}$ learnt by k-means. Each database vector is appended to the **inverted list** of its nearest
+centroid. A query $\qvec$ finds its $w$ nearest centroids and computes distances only to the vectors in those $w$
+lists. The parameter $w$ is called **nprobe**, and $k'$ is called **nlist**. **IVFADC** stores in each list the
+<NoteLink to="product-quantisation">product-quantisation</NoteLink> code of the residual $\xvec - \cvec(\xvec)$ instead
+of the vector itself <Cite id="jegou2011" />.
+</Definition>
+
+## Problem
+
+Exhaustive search, even over compressed codes, touches all $n$ vectors per query. For $n = 10^9$ and 16-byte codes
+that is 16 GB of memory traffic per query. Nearest neighbours of a query tend to lie in the same region of space as the
+query. A partition of the space lets a query skip the regions that are far away.
+
+The name comes from text retrieval, where an inverted file maps each word to the list of documents containing it.
+Sivic and Zisserman applied it to images by quantising local descriptors into "visual words" with k-means
+<Cite id="sivic2003" />. The IVF index for vector search uses the same structure with the cluster index as the word.
+
+## Mechanism
+
+### Build
+
+1. Train k-means with $k'$ centroids on a sample of the data. FAISS recommends $k'$ between $4\sqrt n$ and $16\sqrt n$
+   and between $30k'$ and $256k'$ training vectors <Cite id="faissdocs" />.
+2. For each database vector, find its nearest centroid and append the vector's identifier and payload to that list.
+   The payload is the full vector (**IVF-Flat**), a scalar-quantised vector, or a PQ code of the residual (**IVF-PQ**).
+
+Adding vectors later needs no retraining, as long as the new data follow the distribution the centroids were trained
+on.
+
+### Search
+
+1. Compute the $k'$ distances $\norm{\qvec - \cvec_j}$ and keep the $w$ smallest.
+2. Scan the $w$ lists and keep the $k$ best candidates.
+
+A true neighbour is missed when it sits in a cell that is not among the query's $w$ closest. This happens for queries
+near a cell boundary. Raising $w$ trades speed for recall.
+
+<IvfProbe />
+
+### Residual encoding
+
+The residual $\rvec = \xvec - \cvec(\xvec)$ of a vector from its centroid has a much smaller spread than $\xvec$
+itself, because k-means has already removed the between-cluster variation. A product quantiser trained on residuals
+therefore reaches lower error for the same code size. The residual codebooks are shared by all lists.
+
+For a query probing list $j$, the ADC distance to a vector with coarse centroid $\cvec_j$ and residual reconstruction
+$\hat\rvec$ is
+
+$$
+\norm{\qvec - \cvec_j - \hat\rvec}^2 = \underbrace{\norm{\qvec - \cvec_j}^2}_{\text{coarse distance}}
++ \underbrace{\norm{\hat\rvec}^2 + 2\cvec_j^\top\hat\rvec}_{\text{independent of } \qvec}
+- \underbrace{2\qvec^\top\hat\rvec}_{\text{independent of } j}.
+$$
+
+The first term was computed when choosing the lists. Because $\hat\rvec$ is a concatenation of sub-centroids, the
+second and third terms split into sums over sub-quantisers, and each becomes a lookup table. The second depends only on
+the list and the code, so it is precomputed once for the whole index, with $k' \times M \times K$ entries. The third
+costs $Kd$ multiply-adds per query and is shared by all probed lists. Building the tables per list from scratch would
+cost $wKd$ multiply-adds <Cite id="johnson2019" />.
+
+### Expected work and the choice of $k'$
+
+Suppose the lists are balanced, each holding $n/k'$ vectors. A query costs $k' d$ operations for the coarse step and
+$w n / k'$ list entries of cost $M$ each for the scan:
+
+$$
+C(k') = k' d + \frac{w n M}{k'}.
+$$
+
+The first term grows with $k'$ and the second shrinks. Setting $C'(k') = d - wnM/k'^2 = 0$ gives
+
+$$
+k'^{*} = \sqrt{\frac{w n M}{d}}, \qquad C(k'^{*}) = 2\sqrt{w n M d}.
+$$
+
+The optimal number of lists grows as $\sqrt n$, and the query cost grows as $\sqrt n$ instead of $n$. For $n = 10^9$,
+$w = 16$, $M = 16$ and $d = 128$: $k'^{*} = \sqrt{2 \times 10^9} \approx 45\,000$. In practice the coarse step is itself
+accelerated with an <NoteLink to="hnsw">HNSW</NoteLink> index over the centroids, which makes its cost nearly
+independent of $k'$ and pushes the best $k'$ higher: FAISS recommends $2^{16}$ to $2^{20}$ lists for 10 million to
+a billion vectors <Cite id="faissdocs" />.
+
+**Imbalance.** If list $j$ holds a fraction $p_j$ of the data and is probed with probability $s_j$, a query scans
+$n\sum_j p_j s_j$ vectors on average. When queries follow the data, large lists are also probed more often, so an
+imbalanced partition costs more than $w n/k'$. FAISS reports this as the imbalance factor $k'\sum_j p_j^2$, which is 1
+for equal lists.
+
+## The inverted multi-index
+
+A finer partition means fewer vectors per list but more centroids to compare. Babenko and Lempitsky split the vector
+into two halves and quantise each half with its own codebook of $K$ centroids <Cite id="babenko2012" />. The cells are
+the $K^2$ pairs $(i, j)$, for example $2^{28}$ cells from two codebooks of $2^{14}$. The distance from the query to cell
+$(i, j)$ is $d_1(i) + d_2(j)$, the sum of the two half distances. Sort $d_1$ and $d_2$ separately; the
+**multi-sequence algorithm** then visits cells in increasing order of $d_1(i) + d_2(j)$ with a priority queue, starting
+from $(1, 1)$ and pushing the neighbours $(i + 1, j)$ and $(i, j + 1)$ of each popped cell. Coarse-level cost stays at
+$2K$ distance computations while the partition has $K^2$ cells.
+
+Later work returned to the single inverted index. Baranchuk, Babenko and Malkov built a system on the plain inverted index that
+beats the multi-index at equal memory, reaching the same recall several times faster on a billion deep descriptors <Cite id="baranchuk2018" />. Sun et al. also store each vector in a second, "spilled" list, trained
+with a loss that makes the second assignment cover the queries for which the first would miss the vector
+<Cite id="sun2023soar" />.
+
+## Worked example
+
+The <NoteLink to="faiss">FAISS</NoteLink> note measures an IVF-Flat index with $k' = 1024$ lists on $10^5$ synthetic
+vectors of dimension 64, with 1000 queries on one CPU thread. The queries per second include the coarse step.
+
+| nprobe $w$ | fraction of lists scanned | 1-recall@1 | queries per second |
+| ---------- | ------------------------- | ---------- | ------------------ |
+| exhaustive | 100%                      | 1.000      | 1 828              |
+| 1          | 0.1%                      | 0.681      | 136 590            |
+| 2          | 0.2%                      | 0.891      | 111 458            |
+| 4          | 0.4%                      | 0.990      | 88 625             |
+| 8          | 0.8%                      | 1.000      | 66 083             |
+| 64         | 6.3%                      | 1.000      | 13 434             |
+
+With $w = 1$ almost a third of queries lose their nearest neighbour to a boundary. Four lists find it for 99% of
+queries at 48 times the speed of the exhaustive scan. In 64 dimensions boundary effects are much stronger than in the 2-D figure, because a
+query's neighbour ball meets many more cells.
+
+## Cost
+
+| quantity             | IVF-Flat                        | IVF-PQ ($M$-byte codes)                          |
+| -------------------- | ------------------------------- | ------------------------------------------------ |
+| memory per vector    | $4d$ bytes + id                 | $M$ bytes + id                                   |
+| training             | k-means with $k'$ centroids     | k-means, then PQ on residuals                    |
+| query                | $k'd + w(n/k')d$                | $k'd + Kd + w(n/k')M$                            |
+| updates              | append to a list                | append to a list                                 |
+
+## Trade-offs
+
+- **nprobe is the recall knob.** It can be set per query without rebuilding the index.
+- **Training data must match.** Centroids trained on one distribution produce unbalanced lists on another, which slows
+  search.
+- **Deletion is cheap** compared with graph indexes: remove the entry from its list.
+- **GPU-friendly.** Scanning contiguous lists is regular work. Johnson, Douze and Jégou built billion-scale IVF-PQ
+  search on GPUs this way <Cite id="johnson2019" />.
+- **Boundary losses.** Recall at small $w$ drops as the dimension grows. Graph indexes such as HNSW often reach high
+  recall with fewer distance computations, at a higher memory cost.

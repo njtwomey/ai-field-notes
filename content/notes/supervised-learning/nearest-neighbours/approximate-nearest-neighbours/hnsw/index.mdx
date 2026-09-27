@@ -1,0 +1,155 @@
+---
+title: Hierarchical navigable small world graphs
+kind: technique
+summary: 'HNSW stores vectors in a stack of proximity graphs. Each point reaches layer $\ell$ with probability $M^{-\ell}$, so upper layers are sparse and carry long links. A query descends greedily from the top and finishes with a beam search of width $ef$ on the full bottom layer.'
+tags: [nearest-neighbours, similarity-search, graphs, indexing, worked-example]
+aliases:
+  [
+    HNSW,
+    hierarchical navigable small world,
+    navigable small world,
+    NSW,
+    efSearch,
+    efConstruction,
+    neighbour selection heuristic,
+    greedy graph search,
+  ]
+requires: [nearest-neighbour-search]
+partOf: [approximate-nearest-neighbour-search]
+related: [graph-based-ann, faiss, ann-benchmarking]
+references: [malkov2018, malkov2014, kleinberg2000, pugh1990, faissdocs, aumuller2020]
+status: draft
+updated: 2026-09-27
+---
+
+import { HnswSearch } from './HnswSearch'
+
+<Definition>
+A **hierarchical navigable small world** (HNSW) index is a sequence of graphs over the stored vectors, layer 0 holding
+every point and each higher layer a random subset of the one below <Cite id="malkov2018" />. Each point is assigned a
+top layer $\ell = \lfloor -\ln(U)\, m_L \rfloor$ with $U \sim \Unif(0, 1)$ and $m_L = 1/\ln M$, and on every layer up to
+$\ell$ it is linked to about $M$ nearby points. A query starts at a fixed entry point on the top layer, moves greedily
+towards the query on each layer, and on layer 0 runs a best-first search that keeps the $ef$ closest points found.
+</Definition>
+
+## Problem
+
+A **proximity graph** links each stored point to some of its near neighbours. Greedy routing on such a graph starts
+anywhere, repeatedly moves to the neighbour closest to the query, and stops when no neighbour is closer. On a graph of
+short links only, a query far from the start needs many hops. On the Delaunay graph greedy routing always reaches the
+true nearest neighbour, but in high dimensions the Delaunay graph is almost complete, so it cannot be stored.
+
+**Navigable small world** (NSW) graphs <Cite id="malkov2014" /> add points one at a time and link each to the $M$
+closest points found by a greedy search. Early insertions link points that are far apart, because few points exist yet.
+These long links let greedy routing cross the space in few hops, as in Kleinberg's analysis of navigable small worlds
+<Cite id="kleinberg2000" />. The hops still grow with $n$, and hubs accumulate many links, so the number of distance
+computations grows polylogarithmically <Cite id="malkov2018" />.
+
+HNSW separates the links by length scale into layers, in the manner of a **skip list** <Cite id="pugh1990" />: sparse
+upper layers hold long links, and every layer caps the number of links per node.
+
+## Mechanism
+
+### Layer assignment
+
+The top layer of a point is
+
+$$
+\ell = \lfloor -\ln(U)\, m_L \rfloor, \qquad U \sim \Unif(0, 1).
+$$
+
+The point reaches layer $l$ or higher when $-\ln(U)\, m_L \ge l$, that is when $U \le e^{-l/m_L}$:
+
+$$
+\pr(\ell \ge l) = e^{-l/m_L}.
+$$
+
+With $m_L = 1/\ln M$ this is $e^{-l \ln M} = M^{-l}$. Each layer holds on average a fraction $1/M$ of the points of the
+layer below, the same ratio as the number of links per node, which matches the skip list with $p = 1/M$
+<Cite id="malkov2018" />. Three consequences follow.
+
+- **Expected number of upper layers per point.** $\expect[\ell] = \sum_{l \ge 1} \pr(\ell \ge l) = \sum_{l \ge 1} M^{-l}
+  = 1/(M - 1)$. For $M = 16$ that is $0.067$: almost all the memory sits on layer 0.
+- **Height.** Layer $l$ holds about $n M^{-l}$ points, so the top non-empty layer is about $\log_M n$. For $n = 10^6$
+  and $M = 16$ that is 5 layers above the base.
+- **Expected steps per layer are constant.** The layers are independent of position. Each node visited on layer $l$
+  also belongs to layer $l + 1$ with probability $1/M$, and the greedy search on layer $l$ must stop before reaching
+  such a node, since otherwise the search on layer $l + 1$ would have stopped there. The chance of taking more than $s$
+  steps is at most $M^{-s}$, so the expected number of steps on a layer is at most $1/(1 - 1/M)$
+  <Cite id="malkov2018" />.
+
+With a bounded number of links per node, the work per layer is bounded, and the number of layers is $O(\log n)$. Under
+the idealisation that each layer is an exact Delaunay graph of bounded degree, search costs $O(\log n)$ distance
+computations. The graphs HNSW actually builds only approximate this, and the logarithmic scaling is an empirical
+observation for low-dimensional data <Cite id="malkov2018" />.
+
+### Search
+
+For a query $\qvec$:
+
+1. Start at the global entry point on the top layer $L$.
+2. On each layer from $L$ down to 1, move greedily: go to the neighbour closest to $\qvec$ while one is closer than the
+   current node. The local minimum becomes the start of the next layer down.
+3. On layer 0, run a best-first search with two lists: a candidate queue ordered by distance, and a result list of the
+   $ef$ closest points seen. Repeatedly expand the closest unexpanded candidate, adding its unvisited neighbours to both
+   lists when they beat the worst result. Stop when the closest candidate is farther than the worst of the $ef$ results.
+4. Return the $k \le ef$ closest results.
+
+Larger $ef$ (called **efSearch**) lets the search back out of local minima on layer 0, at more distance computations.
+
+<HnswSearch />
+
+### Construction
+
+Points are inserted one at a time. A new point with top layer $\ell$ is routed greedily down to layer $\ell$ as in
+search. On each layer from $\ell$ down to 0, a beam search of width **efConstruction** finds candidate neighbours, and
+$M$ of them are chosen as links (up to $M_{\max 0} = 2M$ on layer 0, which the authors found works well
+<Cite id="malkov2018" />). Links are bidirectional. When a neighbour's list exceeds its cap, it is pruned with the same
+selection rule.
+
+The **neighbour selection heuristic** takes candidates closest first and keeps a candidate $\evec$ only if $\evec$ is
+closer to the new point than to every link already kept. A candidate that is closer to a kept neighbour lies roughly
+behind it, in a direction that neighbour already covers. Rejecting it spends the $M$ links on different directions.
+On clustered data this keeps links between clusters that the $M$ plain nearest neighbours, all inside one cluster,
+would omit. The rule is the pruning test of the relative neighbourhood graph (see
+<NoteLink to="graph-based-ann">graph-based search</NoteLink>).
+
+## Worked example
+
+On the synthetic benchmark of the <NoteLink to="faiss">FAISS</NoteLink> note ($10^5$ vectors of dimension 64, 1000
+queries, one CPU thread), `HNSW32` gives the following. Exhaustive search runs at 1 828 queries per second.
+
+| efSearch | 1-recall@1 | 10-recall@10 | queries per second |
+| -------- | ---------- | ------------ | ------------------ |
+| 10       | 0.945      | 0.937        | 66 646             |
+| 32       | 0.971      | 0.971        | 28 462             |
+| 64       | 0.983      | 0.983        | 18 296             |
+| 128      | 0.991      | 0.991        | 11 739             |
+| 256      | 0.995      | 0.995        | 6 263              |
+
+From efSearch 32 upwards, each doubling removes about half of the remaining misses and lowers throughput by 35 to
+50%. With $M = 32$ and
+$d = 64$, FAISS stores $4d + 8M = 512$ bytes per vector: 256 for the vector and 256 for the layer-0 links
+<Cite id="faissdocs" />.
+
+## Cost
+
+| quantity          | HNSW                                                                     |
+| ----------------- | ------------------------------------------------------------------------ |
+| memory per vector | the vector plus about $2M$ links on layer 0 and $M/(M-1)$ above          |
+| build             | $n$ insertions, each a search with efConstruction: about $O(n \log n)$   |
+| query             | about $O(\log n)$ distance computations for fixed recall, empirically     |
+| insertion         | supported online                                                         |
+| deletion          | not native; marked as deleted and skipped, or repaired by relinking      |
+
+## Trade-offs
+
+- **Recall per distance computation is high.** On public benchmarks HNSW is among the fastest methods at high recall
+  when the vectors fit in RAM <Cite id="aumuller2020" />.
+- **Memory.** The links cost as much as a 64-dimensional float vector. HNSW over compressed codes (for example
+  `HNSW32,PQ16` in FAISS) reduces the vector part, but distance estimates then lose accuracy and the graph walk becomes
+  less reliable.
+- **Random memory access.** Every hop jumps to an unrelated address, which suits RAM but not disks or GPUs.
+- **Build time.** Construction is a search per point and is slower than training an inverted file.
+- **Data dependence.** On strongly clustered data an inverted file can be faster at equal recall; in the same benchmark,
+  IVF-Flat with 4 of 1024 lists reached 0.990 recall at 88 625 queries per second.

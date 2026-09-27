@@ -1,0 +1,143 @@
+---
+title: Maximum inner product search
+kind: concept
+summary: 'Maximum inner product search returns $\argmax_i \qvec^\top\xvec_i$. Inner product is not a metric, but appending $\sqrt{\phi^2 - \norm{\xvec}^2}$ to each stored vector, with $\phi$ the largest norm, and 0 to the query turns it into nearest-neighbour search: $\norm{\tilde\qvec - \tilde\xvec}^2 = \norm{\qvec}^2 + \phi^2 - 2\qvec^\top\xvec$.'
+tags: [nearest-neighbours, similarity-search, embeddings, worked-example]
+aliases:
+  [
+    MIPS,
+    inner product search,
+    dot-product search,
+    maximum inner-product search,
+    asymmetric LSH,
+    ALSH,
+    simple-LSH,
+    Xbox transform,
+    MIPS to NNS reduction,
+    cone trees,
+  ]
+requires: [nearest-neighbour-search, dot-product]
+partOf: [approximate-nearest-neighbour-search]
+related: [locality-sensitive-hashing, pairwise-distances-and-cosine-similarity, hnsw]
+references: [bachrach2014, shrivastava2014, neyshabur2015, ram2012, guo2016, guo2020]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Maximum inner product search** (MIPS) returns, for a query $\qvec \in \reals^d$ and stored vectors
+$\xvec_1, \dots, \xvec_n$, the index $\argmax_i \qvec^\top\xvec_i$, or the $k$ indices with the largest inner products.
+It differs from nearest-neighbour search whenever the stored vectors have different norms.
+</Definition>
+
+## Intuition
+
+Many models score a pair by a dot product: a query embedding against item embeddings, a hidden state against the rows
+of an output layer. Finding the top-scoring items is MIPS. Nearest-neighbour indexes rely on the triangle inequality
+and on each point being its own nearest neighbour. The inner product has neither property. A stored vector $\xvec$ need
+not have the largest inner product with itself: any $\yvec = 2\xvec$ scores $\xvec^\top\yvec = 2\norm{\xvec}^2$, more
+than $\xvec^\top\xvec$. Long vectors dominate the results regardless of direction.
+
+The identity
+
+$$
+\norm{\qvec - \xvec}^2 = \norm{\qvec}^2 + \norm{\xvec}^2 - 2\qvec^\top\xvec
+$$
+
+shows the link. For a fixed query, $\norm{\qvec}^2$ is a constant. If every stored vector has the same norm, the
+smallest distance and the largest inner product pick the same point, and so does the largest cosine similarity. The
+norms $\norm{\xvec}^2$ are what separate the problems. The reductions below make all stored norms equal by adding a
+coordinate.
+
+## Details
+
+### Reduction by one extra coordinate
+
+Let $\phi = \max_i \norm{\xvec_i}$. Bachrach et al. map stored vectors and queries to $\reals^{d+1}$
+<Cite id="bachrach2014" />:
+
+$$
+\tilde\xvec = \Big(\sqrt{\phi^2 - \norm{\xvec}^2},\ \xvec\Big), \qquad \tilde\qvec = (0,\ \qvec).
+$$
+
+Every transformed stored vector has norm $\phi$, because
+$\norm{\tilde\xvec}^2 = \phi^2 - \norm{\xvec}^2 + \norm{\xvec}^2 = \phi^2$. The extra coordinate of the query is 0, so
+$\tilde\qvec^\top\tilde\xvec = \qvec^\top\xvec$ and $\norm{\tilde\qvec} = \norm{\qvec}$. Substituting into the identity,
+
+$$
+\norm{\tilde\qvec - \tilde\xvec}^2 = \norm{\qvec}^2 + \phi^2 - 2\qvec^\top\xvec.
+$$
+
+The first two terms are the same for every stored vector. The nearest $\tilde\xvec$ to $\tilde\qvec$ is therefore the
+$\xvec$ with the largest inner product. Any nearest-neighbour index, exact or approximate, applied to the $\tilde\xvec$
+solves MIPS.
+
+### Symmetric and asymmetric LSH
+
+Neyshabur and Srebro scale the data so that $\norm{\xvec} \le 1$ and use one transform for both sides,
+$P(\xvec) = \big(\xvec, \sqrt{1 - \norm{\xvec}^2}\big)$, with a unit-norm query mapped to $(\qvec, 0)$
+<Cite id="neyshabur2015" />. All transformed vectors are unit vectors, $P(\qvec)^\top P(\xvec) = \qvec^\top\xvec$, and
+random-hyperplane <NoteLink to="locality-sensitive-hashing">LSH</NoteLink> for angles applies directly. They called
+this **simple-LSH**; it is the same augmentation as above with $\phi = 1$.
+
+Shrivastava and Li proposed earlier an **asymmetric** pair of transforms <Cite id="shrivastava2014" />. After scaling so
+that $\norm{\xvec} \le U < 1$ and normalising the query,
+
+$$
+P(\xvec) = \big(\xvec,\ \norm{\xvec}^2,\ \norm{\xvec}^4,\ \dots,\ \norm{\xvec}^{2^m}\big), \qquad
+Q(\qvec) = \big(\qvec,\ \tfrac12,\ \dots,\ \tfrac12\big).
+$$
+
+Then $\norm{P(\xvec)}^2 = \norm{\xvec}^2 + \norm{\xvec}^4 + \dots + \norm{\xvec}^{2^{m+1}}$, $\norm{Q(\qvec)}^2 = 1 + m/4$
+and $Q(\qvec)^\top P(\xvec) = \qvec^\top\xvec + \tfrac12\big(\norm{\xvec}^2 + \dots + \norm{\xvec}^{2^m}\big)$. In
+$\norm{Q - P}^2 = \norm{Q}^2 + \norm{P}^2 - 2Q^\top P$ all norm powers but the last cancel:
+
+$$
+\norm{Q(\qvec) - P(\xvec)}^2 = 1 + \frac m4 - 2\qvec^\top\xvec + \norm{\xvec}^{2^{m+1}}.
+$$
+
+Since $\norm{\xvec} < 1$, the last term vanishes quickly as $m$ grows, and Euclidean nearest-neighbour search on
+$P(\xvec)$ ranks by inner product up to that small error.
+
+### Direct methods
+
+MIPS can also be solved without a reduction.
+
+- **Trees.** Ram and Gray bound the largest inner product achievable inside a ball or a cone of stored vectors and
+  prune branches that cannot beat the current best <Cite id="ram2012" />.
+- **Quantisation.** Additive and product codes estimate $\qvec^\top\xvec$ as a sum of look-ups, which needs no norm
+  term. Guo et al. quantise for inner products directly <Cite id="guo2016" />, and
+  <NoteLink to="scann-and-anisotropic-quantisation">ScaNN</NoteLink> weights the quantisation error by its effect on
+  large inner products <Cite id="guo2020" />.
+- **Graphs and inverted files with an inner-product score.** HNSW and IVF indexes run unchanged with $-\qvec^\top\xvec$
+  in place of the distance. They lose their geometric justification but often work well in practice.
+
+## Worked example
+
+Take the query $\qvec = (1, 0)$ and two stored vectors $\xvec_a = (0.9, 0.1)$ and $\xvec_b = (2, 2)$. By Euclidean
+distance, $\xvec_a$ is nearer: $\norm{\qvec - \xvec_a} = 0.141$ and $\norm{\qvec - \xvec_b} = 2.236$. By inner product,
+$\xvec_b$ wins: $\qvec^\top\xvec_a = 0.9$ and $\qvec^\top\xvec_b = 2$.
+
+The largest norm is $\phi = \norm{\xvec_b} = \sqrt 8 = 2.828$. The augmented vectors are
+$\tilde\xvec_a = (\sqrt{8 - 0.82},\ 0.9,\ 0.1) = (2.680,\ 0.9,\ 0.1)$, $\tilde\xvec_b = (0,\ 2,\ 2)$ and
+$\tilde\qvec = (0,\ 1,\ 0)$. The squared distances are
+$\norm{\tilde\qvec - \tilde\xvec_a}^2 = 7.18 + 0.01 + 0.01 = 7.2$ and $\norm{\tilde\qvec - \tilde\xvec_b}^2 = 0 + 1 + 4 = 5$,
+matching $\norm{\qvec}^2 + \phi^2 - 2\qvec^\top\xvec = 1 + 8 - 1.8$ and $1 + 8 - 4$. The nearest augmented vector is now
+$\tilde\xvec_b$, the inner-product winner.
+
+## Assumptions
+
+- **A known maximum norm.** $\phi$ must bound every stored norm. Inserting a longer vector later requires a new $\phi$
+  and re-transforming the data, or a margin chosen in advance.
+- **Scores comparable across items.** MIPS returns the largest raw inner products. If the model's scores need
+  calibration or a per-item bias, that bias can be appended as one more coordinate, with a 1 in the query.
+
+## Pitfalls
+
+- **Distorted geometry.** Vectors with small norms receive a large extra coordinate and sit far from every query in the
+  augmented space. When norms vary widely, most points crowd at similar distances, and approximate indexes lose recall.
+  Splitting the data into ranges of similar norm and reducing each range separately limits this.
+- **Cosine is a different problem.** If the model is trained with cosine similarity, normalise the vectors and use
+  ordinary nearest-neighbour search. MIPS on unnormalised vectors of such a model favours long vectors.
+- **Normalising queries is harmless.** Scaling $\qvec$ by a positive constant scales every inner product by the same
+  factor, so the ranking, and the MIPS answer, is unchanged.

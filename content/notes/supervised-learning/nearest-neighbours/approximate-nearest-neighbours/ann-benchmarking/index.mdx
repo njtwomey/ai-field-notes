@@ -1,0 +1,136 @@
+---
+title: Benchmarking approximate nearest-neighbour search
+kind: concept
+summary: 'ANN indexes are compared by the Pareto frontier of recall against queries per second, one point per search-parameter setting. ann-benchmarks does this at million scale on one CPU thread; big-ann-benchmarks adds billion-scale, SSD, filtered and streaming tracks.'
+tags: [nearest-neighbours, similarity-search, benchmarks, evaluation, worked-example]
+aliases:
+  [
+    ann-benchmarks,
+    big-ann-benchmarks,
+    BigANN,
+    k-recall@k,
+    recall@k for ANN,
+    queries per second,
+    QPS,
+    recall-QPS curve,
+    NeurIPS'21 billion-scale ANN challenge,
+    Big ANN NeurIPS'23,
+    filtered vector search,
+  ]
+requires: [approximate-nearest-neighbour-search]
+partOf: [approximate-nearest-neighbour-search]
+related: [inverted-file-index]
+references: [aumuller2020, annbenchmarks, simhadri2022, simhadri2024, bigannbenchmarks, jegou2011, li2020annsurvey]
+status: draft
+updated: 2026-09-27
+---
+
+import { RecallQps } from './RecallQps'
+
+<Definition>
+An **approximate nearest-neighbour benchmark** runs each index over a range of its search parameters on a fixed dataset
+and query set, and records for each setting the **recall**, the fraction of the true nearest neighbours returned, and
+the **throughput** in queries per second (QPS). The result for an index is a curve of recall against QPS. Indexes are
+compared by their curves, and the best achievable trade-offs across all indexes form the **Pareto frontier**.
+</Definition>
+
+## Intuition
+
+Every approximate index has a knob that trades accuracy for speed: nprobe for an inverted file, efSearch for HNSW, the
+number of tables or probes for LSH. A single number such as "0.9 recall at 10 000 QPS" says nothing about the rest of the
+range, and any index can be made fast by lowering its recall. The meaningful statement is the whole curve: at each recall
+level, which index is fastest.
+
+## Details
+
+### Recall
+
+Let $G_q$ be the true $k$ nearest neighbours of query $q$, computed by exact search, and $A_q$ the $k$ results the index
+returns. Then
+
+$$
+k\text{-recall@}k = \frac{1}{\abs{Q}} \sum_{q \in Q} \frac{\abs{A_q \cap G_q}}{k}.
+$$
+
+**1-recall@1** asks only whether the single nearest neighbour came first. Jégou, Douze and Schmid use a different
+quantity, **recall@$R$**: the fraction of queries whose true nearest neighbour appears among the first $R$ results
+<Cite id="jegou2011" />. The two agree for $R = 1$ and $k = 1$ and differ otherwise, so papers must say which they use.
+Distances can tie, so a returned point at the same distance as the $k$-th true neighbour should count as correct;
+ann-benchmarks allows a small tolerance for this.
+
+### Cost
+
+- **Queries per second**, single-threaded or with all cores, one query at a time or in batches. Batches favour indexes
+  that turn search into matrix multiplication.
+- **Latency percentiles**, such as the 99th, for services that answer one query at a time.
+- **Distance computations per query**, a hardware-independent proxy for search cost.
+- **Index size in memory** and **build time**, which the recall–QPS plot hides.
+
+### ann-benchmarks
+
+Aumüller, Bernhardsson and Faithfull built **ann-benchmarks**, the standard public comparison at million scale
+<Cite id="aumuller2020" /> <Cite id="annbenchmarks" />. Each library runs in its own Docker container on a single CPU
+thread, over parameter grids set in configuration files, many contributed by the library authors, on datasets such as SIFT, GIST, GloVe, NYTimes, MNIST and
+Fashion-MNIST, with Euclidean, angular and Hamming distances. Results are plotted as recall against QPS, with index size
+and build time as separate plots.
+
+### big-ann-benchmarks
+
+The **NeurIPS'21 challenge on billion-scale ANN search** moved the comparison to $10^9$ points
+<Cite id="simhadri2022" /> <Cite id="bigannbenchmarks" />. Six datasets of a billion vectors were used: BIGANN (SIFT),
+Facebook SimSearchNet++, Microsoft Turing-ANNS, Microsoft SPACEV, Yandex DEEP and Yandex Text-to-Image, four of them
+released for the challenge. There were three tracks:
+
+| track | hardware                                   | baseline |
+| ----- | ------------------------------------------ | -------- |
+| T1    | standard machine with limited DRAM         | FAISS    |
+| T2    | limited DRAM plus an SSD                   | DiskANN  |
+| T3    | any hardware (GPUs, custom accelerators)   | FAISS    |
+
+The **Big ANN NeurIPS'23** challenge turned to variants that production systems meet: filtered search, where each query
+carries a label constraint; out-of-distribution queries; sparse vectors; and streaming insertions and deletions
+<Cite id="simhadri2024" />.
+
+<RecallQps />
+
+## Worked example
+
+The figure plots a parameter sweep on the data of the <NoteLink to="faiss">FAISS</NoteLink> note, with the same
+indexes, each timing the best of three runs on one thread. At a target of 0.95
+10-recall@10:
+
+| index               | fastest setting reaching 0.95 | QPS    | speed-up over exact |
+| ------------------- | ----------------------------- | ------ | ------------------- |
+| IVF1024,Flat        | nprobe 4                      | 88 625 | 48                  |
+| HNSW32              | efSearch 16                   | 45 581 | 25                  |
+| IVF1024,PQ16,RFlat  | nprobe 4                      | 39 187 | 21                  |
+| IVF1024,PQ16        | never                         | –      | –                   |
+
+The exact scan ran at 1 828 QPS. The ranking is specific to this data: 256 well-separated Gaussian clusters suit
+k-means partitioning, so the inverted file wins. On public embedding datasets HNSW is usually at or near the frontier at
+high recall <Cite id="aumuller2020" />. The table also leaves out memory. IVF-Flat and HNSW keep the full 256-byte vectors,
+HNSW adds 256 bytes of links, and plain IVF-PQ needs 16 bytes, which is why it is used at all despite its recall
+ceiling.
+
+## Assumptions
+
+- **Exact ground truth.** Recall is measured against an exact search, which must be computed once for the query set,
+  at billion scale with a GPU or a cluster.
+- **Queries like production.** Query sets drawn from the same distribution as the data overstate recall when real
+  queries differ, as when text queries search image embeddings.
+
+## Pitfalls
+
+- **Tuning parity.** A library tuned by its authors against one tuned with defaults is not a fair comparison.
+  ann-benchmarks runs each implementation as its authors intended, and many configurations were contributed by those
+  authors <Cite id="aumuller2020" />.
+- **Thread and batch settings.** Single-threaded and multi-threaded, batched and one-at-a-time results rank indexes
+  differently. Report the setting.
+- **Hidden costs.** Build time, memory and update cost decide many deployments and do not appear in a recall–QPS plot.
+- **Filters.** Applying a metadata filter after the search returns fewer than $k$ results when the filter is selective,
+  and applying it before discards the index. Filtered search needs its own benchmark, which the NeurIPS'23 track
+  provides <Cite id="simhadri2024" />.
+- **Updates and deletions.** Many indexes are evaluated only after a single bulk build. Recall can drift under a stream
+  of insertions and deletions, which static benchmarks do not show.
+- **One dataset is not enough.** Li et al. evaluated 16 methods on 20 datasets under several query
+  workloads, and the relative performance of the methods varied with the dataset <Cite id="li2020annsurvey" />.

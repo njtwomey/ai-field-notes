@@ -1,0 +1,149 @@
+---
+title: Optimised product quantisation
+kind: technique
+summary: 'Optimised product quantisation learns an orthogonal rotation $\Rmat$ applied before product quantisation, so that the sub-vectors are decorrelated and carry balanced variance. It alternates k-means on the rotated data with an orthogonal Procrustes step, $\Rmat = \Vmat\Umat^\top$ from an SVD.'
+tags: [nearest-neighbours, similarity-search, quantisation, compression, worked-example]
+aliases: [OPQ, optimized product quantization, Cartesian k-means, eigenvalue allocation, rotated product quantisation]
+requires: [product-quantisation, singular-value-decomposition]
+partOf: [approximate-nearest-neighbour-search]
+related: [procrustes-analysis, principal-component-analysis, additive-and-residual-quantisation]
+references: [ge2013, ge2014, norouzi2013, schonemann1966]
+status: draft
+updated: 2026-09-27
+---
+
+import { PqPlane } from '../_shared/PqPlane'
+
+<Definition>
+**Optimised product quantisation** (OPQ) chooses an orthogonal matrix $\Rmat \in \reals^{d \times d}$ and product
+quantisation codebooks $\Ccal_1, \dots, \Ccal_M$ that jointly minimise the reconstruction error of the rotated data,
+
+$$
+\min_{\Rmat,\ \Ccal_1, \dots, \Ccal_M} \sum_{i=1}^{n} \norm{\Rmat\xvec_i - \hat\cvec(\Rmat\xvec_i)}^2
+\quad \text{subject to } \Rmat^\top\Rmat = \eye,
+$$
+
+where $\hat\cvec(\cdot)$ is the nearest codeword in the product codebook $\Ccal_1 \times \dots \times \Ccal_M$
+<Cite id="ge2013" />. Queries and database vectors are rotated by $\Rmat$ before encoding and search. Norouzi and Fleet
+proposed the same model as Cartesian k-means <Cite id="norouzi2013" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="product-quantisation">Product quantisation</NoteLink> splits $\xvec$ into $M$ fixed groups of coordinates
+and quantises each group independently. Two properties of the data then waste bits.
+
+- **Correlation between groups.** If coordinate 1 in group 1 and coordinate 70 in group 2 move together, the product
+  codebook spends codewords on combinations that never occur.
+- **Unbalanced variance.** If one group carries most of the variance, its codebook of $K$ centroids is overloaded while
+  another group's codebook quantises almost nothing.
+
+A rotation does not change distances, since $\norm{\Rmat\xvec - \Rmat\yvec} = \norm{\xvec - \yvec}$ for orthogonal
+$\Rmat$. So the search can happen in any rotated frame, and OPQ picks the frame in which the product codebook fits the
+data best.
+
+## Mechanism
+
+### Alternating optimisation
+
+Collect the training vectors as the columns of $\Xmat \in \reals^{d \times n}$. OPQ alternates two steps, each of which
+cannot increase the objective <Cite id="ge2013" />.
+
+1. **Fix $\Rmat$, update the codebooks.** Rotate the data, $\hat\Xmat = \Rmat\Xmat$. This is plain product
+   quantisation of $\hat\Xmat$: run k-means in each subspace and encode. Collect the reconstructions (the concatenated
+   chosen centroids) as the columns of $\Ymat \in \reals^{d \times n}$.
+2. **Fix the codes, update $\Rmat$.** The reconstructions $\Ymat$ are now constants. Solve
+
+   $$
+   \min_{\Rmat} \norm{\Rmat\Xmat - \Ymat}_F^2 \quad \text{subject to } \Rmat^\top\Rmat = \eye.
+   $$
+
+This is the **orthogonal Procrustes problem** <Cite id="schonemann1966" />. Expand the Frobenius norm with
+$\norm{\Amat}_F^2 = \trace(\Amat^\top\Amat)$:
+
+$$
+\norm{\Rmat\Xmat - \Ymat}_F^2 = \trace(\Xmat^\top\Rmat^\top\Rmat\Xmat) + \norm{\Ymat}_F^2 - 2\trace(\Ymat^\top\Rmat\Xmat)
+= \norm{\Xmat}_F^2 + \norm{\Ymat}_F^2 - 2\trace(\Rmat\Xmat\Ymat^\top).
+$$
+
+The first two terms do not depend on $\Rmat$ because $\Rmat^\top\Rmat = \eye$. The problem is to maximise
+$\trace(\Rmat\Xmat\Ymat^\top)$. Take the <NoteLink to="singular-value-decomposition">singular value
+decomposition</NoteLink> $\Xmat\Ymat^\top = \Umat\Smat\Vmat^\top$, with $\Smat = \diag(s_1, \dots, s_d)$ and
+$s_j \ge 0$. By the cyclic property of the trace,
+
+$$
+\trace(\Rmat\Umat\Smat\Vmat^\top) = \trace(\Vmat^\top\Rmat\Umat\,\Smat) = \sum_{j=1}^{d} z_{jj}\, s_j,
+\qquad \Zmat = \Vmat^\top\Rmat\Umat.
+$$
+
+$\Zmat$ is a product of orthogonal matrices, so it is orthogonal and every entry satisfies $\abs{z_{jj}} \le 1$. The sum
+is therefore at most $\sum_j s_j$, attained when $\Zmat = \eye$, that is
+
+$$
+\Rmat = \Vmat\Umat^\top.
+$$
+
+The alternation converges to a local minimum that depends on the starting rotation. Ge et al. warm-start each k-means
+from the previous codebooks, running a single k-means iteration per outer step, and report that about 100 outer
+iterations suffice <Cite id="ge2013" />.
+
+### A parametric starting point
+
+If the data are Gaussian, $\xvec \sim \Gauss(\zeros, \Sigmamat)$, rate-distortion theory bounds the mean squared error
+of any quantiser of a $d'$-dimensional Gaussian with $K$ codewords by
+$E \ge K^{-2/d'}\, d' \,\abs{\Sigmamat}^{1/d'}$, and k-means comes within about 5% of this bound in Ge et al.'s
+experiments <Cite id="ge2013" />. Applied to each of the $M$ subspaces of dimension $d' = d/M$, with
+$\hat\Sigmamat_{mm}$ the covariance block of subspace $m$ after rotation, the total error is proportional to
+
+$$
+\sum_{m=1}^{M} \abs{\hat\Sigmamat_{mm}}^{M/d}.
+$$
+
+Two inequalities bound this sum from below. The arithmetic–geometric mean inequality gives
+$\sum_m \abs{\hat\Sigmamat_{mm}}^{M/d} \ge M \prod_m \abs{\hat\Sigmamat_{mm}}^{1/d}$, with equality when all the
+$\abs{\hat\Sigmamat_{mm}}$ are equal. Fischer's inequality for positive definite matrices gives
+$\prod_m \abs{\hat\Sigmamat_{mm}} \ge \abs{\hat\Sigmamat} = \abs{\Sigmamat}$, with equality when the off-diagonal blocks
+are zero. Together,
+
+$$
+\sum_{m=1}^{M} \abs{\hat\Sigmamat_{mm}}^{M/d} \ge M \abs{\Sigmamat}^{1/d}.
+$$
+
+The bound is met by a rotation with two properties: **independence** (the subspaces are uncorrelated, which a rotation
+onto the principal axes achieves) and **balance** (the product of eigenvalues is the same in every subspace). Ge et al.
+reach both with **eigenvalue allocation**: sort the eigenvalues of $\Sigmamat$ in decreasing order and assign each in
+turn to the subspace whose eigenvalue product is currently smallest, among those not yet full. The principal directions,
+grouped by subspace, define $\Rmat$. This parametric solution is optimal for Gaussian data and initialises the
+alternating algorithm for real data.
+
+<PqPlane rotateByDefault />
+
+## Worked example
+
+Take $d = 4$, $M = 2$ and principal variances $8, 4, 2, 1$. Keeping the principal axes in order puts $\set{8, 4}$ in
+subspace 1 and $\set{2, 1}$ in subspace 2. The objective is $\sqrt{32} + \sqrt{2} = 5.657 + 1.414 = 7.071$.
+
+Eigenvalue allocation places 8 in subspace 1, then 4 in subspace 2 (product 1 is smaller than 8), then 2 in subspace 2
+(product 4 is smaller than 8), then 1 in subspace 1, the only one not full. The subspaces are $\set{8, 1}$ and
+$\set{4, 2}$, both with product 8. The objective is $\sqrt 8 + \sqrt 8 = 5.657$, equal to the lower bound
+$2 \times 64^{1/4} = 5.657$. The Gaussian distortion bound falls by a factor $5.657/7.071 = 0.80$: 20% lower error at
+the same code size.
+
+## Cost
+
+- **Training.** Each outer iteration costs one k-means pass per subspace, the rotation $\Rmat\Xmat$ in $O(d^2 n)$, and
+  an SVD of a $d \times d$ matrix in $O(d^3)$.
+- **Encoding and search.** Every vector and every query is multiplied by $\Rmat$ once, $O(d^2)$ each. Search is then
+  unchanged product quantisation.
+- **Dimension change.** In FAISS the transform `OPQ16_64` learns a $64 \times d$ matrix with orthonormal rows, so it
+  can also reduce the dimension before a 16-sub-quantiser PQ (see <NoteLink to="faiss">FAISS</NoteLink>).
+
+## Trade-offs
+
+- **Gain depends on the data.** The rotation helps most when variance is concentrated in a few directions or strongly
+  correlated across the default groups. For data whose coordinates are already independent and balanced it changes
+  little.
+- **Local optimum.** The alternating algorithm depends on its start. The eigenvalue allocation start is cheap and good.
+- **A linear transform only.** OPQ keeps the product structure. <NoteLink to="additive-and-residual-quantisation">Additive
+  quantisers</NoteLink> remove the split altogether and reach lower error at the same code size, at a higher encoding
+  cost.

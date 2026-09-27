@@ -1,0 +1,209 @@
+---
+title: Locality-sensitive hashing
+kind: concept
+summary: 'Locality-sensitive hashing uses random hash functions under which near points collide more often than far ones. Concatenating $k$ hashes and using $L$ tables finds a near neighbour with $O(n^\rho)$ distance computations, where $\rho = \ln(1/p_1)/\ln(1/p_2) < 1$.'
+tags: [nearest-neighbours, similarity-search, hashing, randomised-algorithms, worked-example]
+aliases:
+  [
+    LSH,
+    random hyperplane hashing,
+    SimHash,
+    MinHash,
+    min-wise hashing,
+    p-stable LSH,
+    E2LSH,
+    multi-probe LSH,
+    cross-polytope LSH,
+    FALCONN,
+    bit sampling,
+  ]
+requires: [nearest-neighbour-search]
+partOf: [approximate-nearest-neighbour-search]
+related: [pairwise-distances-and-cosine-similarity, hamming-jaccard-and-exact-match]
+references: [indyk1998, gionis1999, charikar2002, datar2004, broder1997, broder2000minwise, lv2007, andoni2008, andoni2015falconn, odonnell2014, aumuller2020]
+status: draft
+updated: 2026-09-27
+---
+
+import { LshSCurve } from './LshSCurve'
+
+<Definition>
+A family $\Hcal$ of hash functions is **$(r, cr, p_1, p_2)$-sensitive** for a distance $D$ if, for $h$ drawn at
+random from $\Hcal$ and any two points $\xvec, \yvec$: when $D(\xvec, \yvec) \le r$, $\pr(h(\xvec) = h(\yvec)) \ge p_1$;
+when $D(\xvec, \yvec) \ge cr$, $\pr(h(\xvec) = h(\yvec)) \le p_2$; and $p_1 > p_2$. Here $c > 1$ is the approximation
+factor. **Locality-sensitive hashing** (LSH) builds $L$ hash tables, each keyed by $k$ concatenated functions from
+$\Hcal$, and answers a query by checking the exact distance to every point that shares a bucket with it in some table
+<Cite id="indyk1998" />.
+</Definition>
+
+## Intuition
+
+An ordinary hash function scatters similar keys to unrelated buckets. A locality-sensitive hash does the opposite: it
+puts similar points in the same bucket with high probability. A query then looks only in its own bucket, so it examines
+a small candidate set instead of all $n$ stored points.
+
+One hash separates near from far pairs only weakly: $p_1$ and $p_2$ are often close, for example $0.83$ and $0.5$.
+Two operations sharpen the separation. **AND**: a bucket key made of $k$ hashes matches only if all $k$ match, which
+makes every collision rarer but far ones much rarer. **OR**: $L$ independent tables give a near pair $L$ chances to
+meet. Together they turn a gentle slope into a steep S-curve.
+
+## Hash families
+
+### Bit sampling for Hamming distance
+
+For binary vectors in $\set{0, 1}^d$, the function $h(\xvec) = x_i$ with $i$ uniform on $\set{1, \dots, d}$
+collides exactly when the sampled coordinate agrees. Two vectors at Hamming distance $D$ collide with probability
+$1 - D/d$. This was the family of the original analysis <Cite id="indyk1998" /> <Cite id="gionis1999" />.
+
+### Random hyperplanes for angles
+
+Draw $\avec \sim \Gauss(\zeros, \eye)$ in $\reals^d$ and set $h(\xvec) = \sgn(\avec^\top\xvec)$
+<Cite id="charikar2002" />. The hash separates $\xvec$ and $\yvec$ when the hyperplane with normal $\avec$ passes
+between them. The Gaussian is rotation-invariant, so the projection of $\avec$ onto the plane spanned by $\xvec$ and
+$\yvec$ points in a uniformly random direction. The hyperplane meets that plane in a uniformly random line through the
+origin. The line separates the two vectors exactly when it falls inside the angle $\theta$ between them, on one side of
+the origin or the other: two arcs of length $\theta$ out of $2\pi$. So
+
+$$
+\pr\big(h(\xvec) = h(\yvec)\big) = 1 - \frac{\theta}{\pi}.
+$$
+
+This family is called **SimHash**. The fraction of disagreeing bits among $b$ such hashes estimates $\theta/\pi$, which
+is how binary sketches estimate cosine similarity (see
+<NoteLink to="scalar-quantisation-and-binary-codes">binary codes</NoteLink>).
+
+### p-stable projections for Euclidean distance
+
+Datar, Immorlica, Indyk and Mirrokni hash $\xvec \in \reals^d$ to an integer
+<Cite id="datar2004" />:
+
+$$
+h(\xvec) = \left\lfloor \frac{\avec^\top\xvec + b}{w} \right\rfloor,
+\qquad \avec \sim \Gauss(\zeros, \eye), \quad b \sim \Unif(0, w).
+$$
+
+The line is cut into buckets of width $w$ and shifted by a random offset $b$. For two points at distance
+$u = \norm{\xvec - \yvec}$, the projected difference $\avec^\top(\xvec - \yvec)$ is $\Gauss(0, u^2)$, because a Gaussian
+vector projected on any direction is Gaussian with variance equal to the squared length of that direction. Write
+$t = \abs{\avec^\top(\xvec - \yvec)}$. Given $t < w$, the random offset puts a bucket boundary between the two
+projections with probability $t/w$, so they collide with probability $1 - t/w$; for $t \ge w$ they never collide.
+Averaging over $t$, whose density is $\frac{1}{u} f(t/u)$ with $f$ the density of $\abs{Z}$ for $Z \sim \Gauss(0,1)$:
+
+$$
+p(u) = \int_0^{w} \frac{1}{u} f\!\left(\frac{t}{u}\right)\left(1 - \frac{t}{w}\right) dt,
+$$
+
+which decreases in $u$. A Gaussian is 2-stable: a weighted sum of independent standard Gaussians is Gaussian with
+standard deviation equal to the Euclidean norm of the weights. Replacing the Gaussian by the Cauchy distribution, which
+is 1-stable, gives the same construction for the Manhattan distance.
+
+### MinHash for sets
+
+For sets $A, B$ drawn from a universe $U$, apply a random permutation $\pi$ of $U$ and let
+$h(A) = \min_{a \in A} \pi(a)$ <Cite id="broder1997" /> <Cite id="broder2000minwise" />. The smallest element of
+$A \cup B$ under $\pi$ is equally likely to be any of its $\abs{A \cup B}$ elements. Both minima coincide exactly when
+that element lies in $A \cap B$. So
+
+$$
+\pr\big(h(A) = h(B)\big) = \frac{\abs{A \cap B}}{\abs{A \cup B}},
+$$
+
+the Jaccard similarity. MinHash is the standard tool for near-duplicate detection over documents represented as sets
+of word sequences.
+
+## Amplification: the S-curve
+
+Let one hash collide with probability $p$ for a given pair. A key $g = (h_1, \dots, h_k)$ of $k$ independent hashes
+collides only if all $k$ do, with probability $p^k$. With $L$ independent tables the pair fails to collide in every
+table with probability $(1 - p^k)^L$. The pair is therefore retrieved with probability
+
+$$
+P_{k, L}(p) = 1 - (1 - p^k)^L.
+$$
+
+As a function of $p$ this is an S-curve. Its knee sits near $p^k = 1/L$, where
+$P_{k,L} = 1 - (1 - 1/L)^L \ge 1 - 1/e \approx 0.63$. Larger $k$ steepens the curve and moves it towards $p = 1$;
+larger $L$ moves it back towards $p = 0$.
+
+<LshSCurve />
+
+## The query exponent $\rho$
+
+Suppose $n$ points are stored and the task is to return any point within distance $cr$ of the query, provided some
+point lies within $r$. Two costs matter: far points that collide with the query in some table (wasted distance checks)
+and the number of tables.
+
+Choose $k$ so that each table admits on average at most one far point: $n p_2^k = 1$, which gives
+$k = \log_{1/p_2} n = \ln n / \ln(1/p_2)$. A near point then collides in one table with probability
+
+$$
+p_1^k = \exp\!\left(-\ln\frac{1}{p_1} \cdot \frac{\ln n}{\ln(1/p_2)}\right) = n^{-\rho},
+\qquad
+\rho = \frac{\ln(1/p_1)}{\ln(1/p_2)}.
+$$
+
+Take $L = n^\rho$ tables. The near point is found with probability $1 - (1 - n^{-\rho})^{n^\rho} \ge 1 - 1/e$, and the
+expected number of far candidates is at most $L$. A query computes $kL$ hashes and $O(L) = O(n^\rho)$ distances, and the
+index stores $L$ tables, $O(n^{1+\rho})$ entries in all <Cite id="indyk1998" /> <Cite id="gionis1999" />. Because
+$p_1 > p_2$, $\rho < 1$: the query time is sublinear in $n$. Repeating the structure a few times drives the failure
+probability down geometrically.
+
+The exponent depends on the family.
+
+| family                               | distance    | $\rho$ as a function of $c$                                           |
+| ------------------------------------ | ----------- | --------------------------------------------------------------------- |
+| bit sampling                         | Hamming     | $\le 1/c$ <Cite id="gionis1999" />                                    |
+| p-stable (Gaussian) projections      | Euclidean   | $< 1/c$ for $c \in (1, 10]$ <Cite id="datar2004" />                   |
+| ball carving (Andoni–Indyk)          | Euclidean   | $1/c^2 + o(1)$ <Cite id="andoni2008" />                               |
+| lower bound for any LSH family       | Euclidean   | $\ge 1/c^2 - o(1)$ <Cite id="odonnell2014" />                         |
+
+Andoni, Indyk, Laarhoven, Razenshteyn and Schmidt showed that **cross-polytope LSH**, which rotates the vector
+randomly and hashes it to the nearest signed standard basis vector, attains the optimal exponent for angular distance
+and is fast in practice; their library is FALCONN <Cite id="andoni2015falconn" />.
+
+## Multi-probe LSH
+
+Many tables cost memory: each table holds a pointer per stored point. **Multi-probe LSH** keeps fewer tables and, in
+each one, also probes the buckets whose keys differ from the query's in a few hash values that were close to a
+boundary <Cite id="lv2007" />. A near point that just missed the query's bucket is likely to sit in one of these
+neighbouring buckets. Lv et al. report that to reach recall above 0.9, multi-probe LSH needs 14 to 18 times fewer tables
+than basic LSH at similar query time.
+
+## Worked example
+
+Use random hyperplanes. Call a pair near if its angle is $30^\circ$ and far if it is $90^\circ$. One hash collides with
+probability $p_1 = 1 - 30/180 = 0.833$ for the near pair and $p_2 = 1 - 90/180 = 0.5$ for the far pair, so
+$\rho = \ln(1/0.833)/\ln 2 = 0.263$.
+
+| key bits $k$, tables $L$ | near pair retrieved | far pair retrieved |
+| ------------------------ | ------------------- | ------------------ |
+| $k = 10$, $L = 1$        | 0.162               | 0.001              |
+| $k = 5$, $L = 5$         | 0.923               | 0.147              |
+| $k = 10$, $L = 20$       | 0.970               | 0.019              |
+
+One 10-bit table rejects almost every far point but also misses most near ones. Twenty such tables find the near point
+97% of the time and pass under 2% of far points on to the exact check.
+
+The recipe of the previous section for $n = 10^6$ gives $k = \log_2 10^6 \approx 20$ bits and
+$L = n^{0.263} \approx 38$ tables. A near point is retrieved with probability $1 - (1 - 0.833^{20})^{38} = 0.63$. The
+expected number of far candidates is $38 \times 10^6 \times 2^{-20} \approx 36$: a query computes about 36 exact
+distances instead of a million.
+
+## Assumptions
+
+- **A fixed radius.** The guarantee is for the $(r, c)$ problem: one radius $r$. Nearest-neighbour search over all
+  scales builds structures for a geometric sequence of radii, or tunes $k$ and $L$ for the distances seen in the data.
+- **Independence.** The analysis assumes the $kL$ hash functions are independent draws from $\Hcal$.
+- **Data-independent hashes.** The functions ignore the data distribution. This makes the guarantees worst-case, but it
+  wastes bits on directions where the data do not vary.
+
+## Pitfalls
+
+- **Memory.** $L$ tables of $n$ entries each dominate the index. Tens of tables over a billion points do not fit in RAM.
+- **Tuning.** Recall depends on the ratio of near to far distances in the data, which is unknown in advance. $k$ and
+  $L$ must be tuned on sample queries.
+- **Weaker in practice than data-dependent methods.** On public benchmarks of dense embeddings, LSH reaches a given
+  recall with more distance computations and more memory than <NoteLink to="hnsw">graph indexes</NoteLink> or
+  <NoteLink to="inverted-file-index">inverted files</NoteLink> with <NoteLink to="product-quantisation">product
+  quantisation</NoteLink>, whose partitions and codebooks are learnt from the data <Cite id="aumuller2020" />. LSH remains the method of choice when
+  worst-case guarantees matter, for streaming data where nothing can be trained, and for set similarity via MinHash.

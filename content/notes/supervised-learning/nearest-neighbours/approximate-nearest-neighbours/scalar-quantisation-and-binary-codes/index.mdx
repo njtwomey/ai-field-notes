@@ -1,0 +1,157 @@
+---
+title: Scalar quantisation and binary codes
+kind: technique
+summary: 'Scalar quantisation stores each coordinate in 8 or 4 bits. Binary codes keep one bit per projection and compare vectors by Hamming distance, an XOR and a popcount per 64 bits. Random hyperplane bits estimate angles; ITQ learns a rotation that makes the bits lose less.'
+tags: [nearest-neighbours, similarity-search, quantisation, hashing, compression, worked-example]
+aliases:
+  [
+    SQ8,
+    SQ4,
+    scalar quantizer,
+    binary codes,
+    binary hashing,
+    learning to hash,
+    Hamming distance search,
+    spectral hashing,
+    iterative quantisation,
+    iterative quantization,
+    ITQ,
+    multi-index hashing,
+    Hamming embedding,
+    semantic hashing,
+    RaBitQ,
+    binary quantisation,
+  ]
+requires: [nearest-neighbour-search]
+partOf: [approximate-nearest-neighbour-search]
+related:
+  [model-quantisation, quantisation, locality-sensitive-hashing, product-quantisation, optimised-product-quantisation, procrustes-analysis]
+references: [charikar2002, weiss2008, gong2011, gong2013itq, norouzi2012, jegou2008, salakhutdinov2009, gao2024rabitq, faissdocs]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **scalar quantiser** encodes each coordinate $x_j$ of $\xvec \in \reals^d$ separately as one of $2^b$ levels on a
+range $[a_j, a_j + \Delta_j]$ learnt from the data, using $b$ bits per coordinate, typically $b = 8$ (SQ8) or $b = 4$
+(SQ4). A **binary code** maps $\xvec$ to $\bvec \in \set{0, 1}^B$, usually by thresholding $B$ linear projections,
+$b_k = \indicator[\wvec_k^\top\xvec > t_k]$. Binary codes are compared by **Hamming distance**, the number of differing
+bits. **Learning to hash** chooses the projections so that Hamming distances between codes preserve the neighbourhoods
+of the original vectors.
+</Definition>
+
+## Problem
+
+Float32 vectors cost $4d$ bytes each, and computing their distances dominates search time. Two simple compressions are
+often enough. Rounding each coordinate to a byte keeps distances almost exact at a quarter of the memory. Going further,
+to a few bits per vector, requires codes whose distances can still rank neighbours, and binary codes are the cheapest
+to compare: on a 64-bit machine, two 64-bit codes are compared with one XOR and one population count.
+
+## Mechanism
+
+### Scalar quantisation
+
+For coordinate $j$ with training range $[a_j, a_j + \Delta_j]$ and $2^b$ levels of spacing
+$s_j = \Delta_j/(2^b - 1)$, the code is $q_j = \operatorname{round}\big((x_j - a_j)/s_j\big)$ and the reconstruction is
+$\hat x_j = a_j + s_j q_j$. When rounding errors are spread evenly over one step, each error is uniform on
+$[-s_j/2, s_j/2]$ with variance $s_j^2/12$, the same analysis as in <NoteLink to="model-quantisation">neural network
+quantisation</NoteLink>. With 8 bits the root-mean-square error per coordinate is $\Delta_j/(255\sqrt{12})$, about 0.11%
+of the range. Each bit removed doubles the step.
+
+Distances are computed by decoding on the fly, or directly on the integer codes when all coordinates share one range.
+FAISS offers `SQ8`, `SQ6`, `SQ4` and `SQfp16`, with ranges per coordinate or shared, flat or inside an inverted file
+<Cite id="faissdocs" />. On the synthetic benchmark of the <NoteLink to="faiss">FAISS</NoteLink> note, `SQ8` kept
+1-recall@1 at 0.948 with a fourth of the memory. It was slower than the exact scan there, because the exact scan of a
+batch of queries runs as one matrix multiplication while `SQ8` decodes vector by vector. Its gain is memory, and speed
+once the data no longer fit in RAM or cache.
+
+### Binary codes from random hyperplanes
+
+Take $B$ random Gaussian directions $\avec_1, \dots, \avec_B$ and set $b_k = \indicator[\avec_k^\top\xvec > 0]$. By the
+random-hyperplane argument of <NoteLink to="locality-sensitive-hashing">locality-sensitive hashing</NoteLink>
+<Cite id="charikar2002" />, each bit differs between $\xvec$ and $\yvec$ with probability $\theta/\pi$, where $\theta$ is
+their angle. The bits are independent, so the Hamming distance $H$ is binomial:
+
+$$
+H \sim \Binom(B, \theta/\pi), \qquad \hat\theta = \pi H/B, \qquad
+\operatorname{sd}(\hat\theta) = \pi\sqrt{\frac{(\theta/\pi)(1 - \theta/\pi)}{B}}.
+$$
+
+The estimate of the angle is unbiased, and its error shrinks as $1/\sqrt B$. Random codes spend bits on every direction
+equally, including directions in which the data hardly vary; learnt codes aim to do better at the same $B$.
+
+### Spectral hashing
+
+Weiss, Torralba and Fergus asked for codes in which points that are similar under a Gaussian affinity get codes at small
+Hamming distance, with each bit on for half the data and bits uncorrelated <Cite id="weiss2008" />. Relaxing the binary
+constraint turns the objective into an eigenvector problem of a graph Laplacian. To encode new points they assume the
+data are uniform along their principal axes, for which the Laplacian's eigenfunctions are known in closed form: sinusoids
+along each principal direction. The $B$ eigenfunctions with the smallest eigenvalues, thresholded at zero, are the bits.
+
+### Iterative quantisation
+
+Gong and Lazebnik first project the centred data onto the top $B$ principal directions, giving $\Vmat \in \reals^{n \times B}$
+<Cite id="gong2011" />. Taking the sign of each principal coordinate wastes bits, because the first few components carry
+most of the variance. **Iterative quantisation** (ITQ) instead looks for an orthogonal $\Rmat \in \reals^{B \times B}$
+and codes $\Bmat \in \set{-1, 1}^{n \times B}$ that minimise the quantisation loss
+
+$$
+Q(\Bmat, \Rmat) = \norm{\Bmat - \Vmat\Rmat}_F^2 = \norm{\Bmat}_F^2 + \norm{\Vmat}_F^2 - 2\trace(\Bmat^\top\Vmat\Rmat).
+$$
+
+The equality uses $\norm{\Vmat\Rmat}_F = \norm{\Vmat}_F$ for orthogonal $\Rmat$. Since every entry of $\Bmat$ is
+$\pm 1$, $\norm{\Bmat}_F^2 = nB$ is constant, and ITQ alternates two exact steps <Cite id="gong2013itq" />.
+
+- **Fix $\Rmat$.** Maximise $\trace(\Bmat^\top\Vmat\Rmat) = \sum_{ik} B_{ik}(\Vmat\Rmat)_{ik}$. Each term is largest when
+  $B_{ik}$ has the sign of $(\Vmat\Rmat)_{ik}$, so $\Bmat = \sgn(\Vmat\Rmat)$.
+- **Fix $\Bmat$.** Maximise $\trace(\Bmat^\top\Vmat\Rmat)$ over orthogonal $\Rmat$. This is the orthogonal Procrustes
+  problem solved in <NoteLink to="optimised-product-quantisation">optimised product quantisation</NoteLink>: with the SVD
+  $\Bmat^\top\Vmat = \Smat\Omegamat\hat\Smat^\top$, the optimum is $\Rmat = \hat\Smat\Smat^\top$.
+
+Neither step increases $Q$, so the loss decreases monotonically to a local minimum. ITQ is the binary analogue of OPQ:
+rotate first, then quantise each coordinate to one bit.
+
+### Other learnt codes
+
+**Semantic hashing** trains a deep autoencoder whose code layer is binary <Cite id="salakhutdinov2009" />. **Hamming
+embedding** attaches a short binary signature to each vector inside an inverted-file cell and filters candidates by
+Hamming distance <Cite id="jegou2008" />. **RaBitQ** normalises each vector about a centroid, applies a random
+rotation, keeps one bit per dimension, and estimates distances with a correction that makes them unbiased with a
+probabilistic error bound <Cite id="gao2024rabitq" />; FAISS includes RaBitQ indexes.
+
+### Exact search in Hamming space
+
+A linear scan over binary codes is already fast, but for billions of codes Norouzi, Punjani and Fleet index them with
+**multi-index hashing** <Cite id="norouzi2012" />. Split each $B$-bit code into $m$ disjoint substrings. If two codes
+differ in at most $r$ bits, then at least one substring pair differs in at most $\lfloor r/m \rfloor$ bits: otherwise
+every one of the $m$ substrings would differ in at least $\lfloor r/m \rfloor + 1$ bits, for a total of at least
+$m(\lfloor r/m \rfloor + 1) > r$. Build one hash table per substring. Probe each table
+with every bit string within $\lfloor r/m \rfloor$ bits of the matching substring of the query. The union of the
+buckets found contains every code within Hamming distance $r$ of the query, so the search is exact.
+
+## Worked example
+
+Two vectors meet at $\theta = 60^\circ$. With $B = 64$ random-hyperplane bits, each bit differs with probability
+$60/180 = 1/3$, so the expected Hamming distance is $64/3 \approx 21.3$. The standard deviation of the angle estimate is
+$180^\circ \times \sqrt{(1/3)(2/3)/64} = 10.6^\circ$. A simulation of 20 000 random code pairs gave a mean of
+$60.05^\circ$ and a standard deviation of $10.56^\circ$. Sixty-four bits, 8 bytes, pin the angle down only to about
+$\pm 10^\circ$; four times as many bits halve that.
+
+## Cost
+
+| code         | bytes per vector ($d = 768$) | distance                          |
+| ------------ | ---------------------------- | --------------------------------- |
+| float32      | 3072                         | $d$ multiply-adds                 |
+| SQfp16       | 1536                         | $d$ multiply-adds after decoding  |
+| SQ8          | 768                          | $d$ multiply-adds after decoding  |
+| SQ4          | 384                          | $d$ multiply-adds after decoding  |
+| binary, $B$ bits | $B/8$                    | $B/64$ XORs and popcounts         |
+
+## Trade-offs
+
+- **SQ8 is nearly free in accuracy.** It is the standard first compression for embeddings, alone or inside an inverted
+  file or graph.
+- **Binary codes are coarse.** At equal bytes, <NoteLink to="product-quantisation">product quantisation</NoteLink> with
+  asymmetric distances usually ranks better, because its query stays exact and its codebooks are learnt. Binary codes
+  win on raw comparison speed and simplicity, and are often used as a first filter before re-ranking.
+- **Learnt projections need training data** from the same distribution as the queries. Random projections need none.

@@ -1,0 +1,127 @@
+---
+title: Tree-based approximate nearest-neighbour search
+kind: concept
+summary: 'Tree indexes split space recursively and search the most promising leaves first. Stopping early, or pruning nodes that cannot hold a point closer than $r/(1+\epsilon)$, makes them approximate. Forests of randomised trees (FLANN, Annoy) recover recall one tree loses.'
+tags: [nearest-neighbours, similarity-search, trees, indexing, worked-example]
+aliases:
+  [
+    randomised k-d trees,
+    randomized kd-tree forest,
+    FLANN,
+    Annoy,
+    random projection tree,
+    RP tree,
+    best-bin-first,
+    BBF,
+    priority search,
+    priority search k-means tree,
+    hierarchical k-means tree,
+    cover tree,
+    epsilon-approximate nearest neighbour,
+  ]
+requires: [nearest-neighbour-search]
+partOf: [approximate-nearest-neighbour-search]
+related: [curse-of-dimensionality-for-neighbours, inverted-file-index, k-means, locality-sensitive-hashing]
+references: [weber1998, arya1998, beis1997, silpaanan2008, muja2009, muja2014, dasgupta2008, annoy, beygelzimer2006]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **tree index** partitions the stored vectors recursively, each internal node splitting its points between children
+by a rule such as a coordinate threshold, a hyperplane or a nearest-centre assignment. **Approximate tree search**
+visits leaves in order of their distance bound from the query and stops early: after a fixed budget of leaves or
+points, or when no unvisited node can contain a point closer than $r/(1+\epsilon)$, where $r$ is the current best
+distance. A **forest** searches several independently randomised trees through one shared priority queue.
+</Definition>
+
+## Intuition
+
+An exact <NoteLink to="nearest-neighbour-search">k-d tree</NoteLink> search finds a good candidate quickly, in the
+query's own leaf, and then spends most of its time proving that no other leaf holds a better one. In high dimensions
+that proof fails: the ball of radius $r$ around the query crosses the boundaries of almost every box, so nothing is
+pruned. Weber, Schek and Blott found that partitioning and clustering indexes of this kind are on average slower than a
+plain sequential scan above about 10 dimensions <Cite id="weber1998" />.
+
+The candidate found early is often the true neighbour, or close to it. Approximate tree search keeps the fast first
+phase and cuts short the expensive proof. Randomising the trees makes their mistakes independent, so a query that falls
+near a split boundary in one tree is likely to fall well inside a cell in another.
+
+## Details
+
+### $(1+\epsilon)$-approximate search
+
+Arya, Mount, Netanyahu, Silverman and Wu prune a node when its lower bound on the distance to the query exceeds
+$r/(1+\epsilon)$ rather than $r$ <Cite id="arya1998" />. The answer is then within a factor $1 + \epsilon$ of optimal. If
+the true nearest neighbour, at distance $d^*$, had been in a pruned node, that node's lower bound would satisfy
+$d^* \ge \text{bound} > r/(1+\epsilon)$, so the returned distance $r < (1+\epsilon)d^*$. If it was not pruned, the search
+found it. Larger $\epsilon$ prunes more and runs faster.
+
+### Best-bin-first
+
+Beis and Lowe search a k-d tree in **best-bin-first** order <Cite id="beis1997" />. The query descends to its leaf, and
+every branch not taken is pushed onto a priority queue keyed by its distance from the query. The search pops the
+closest pending branch, descends it, and repeats, stopping after a fixed number of leaves. This order examines first
+the cells most likely to hold the neighbour, and the budget caps the query time.
+
+### Randomised k-d forests
+
+Silpa-Anan and Hartley build several k-d trees that differ by random choices, and search them together with one
+priority queue <Cite id="silpaanan2008" />. Muja and Lowe choose each split dimension at random among the 5 coordinates
+of highest variance at that node <Cite id="muja2009" /> <Cite id="muja2014" />. Each tree
+partitions the space differently, and the shared queue spends the leaf budget on whichever tree's cells are closest to
+the query.
+
+### Priority search k-means trees and FLANN
+
+The **priority search k-means tree** clusters the points into $K$ groups with k-means, recurses into each group, and
+searches with the same priority queue keyed by distance to the cluster centres <Cite id="muja2014" />. Its cells follow
+the data rather than the coordinate axes, which helps on clustered data; an
+<NoteLink to="inverted-file-index">inverted file</NoteLink> is the one-level version of this tree.
+
+**FLANN** (Fast Library for Approximate Nearest Neighbors) implements randomised k-d forests, the k-means tree and
+exact search, and **selects the algorithm and its parameters automatically**: it samples the data, measures search
+time, build time and memory for candidate configurations at the requested precision, and picks the one with the lowest
+weighted cost <Cite id="muja2009" />.
+
+### Random projection trees and Annoy
+
+A **random projection tree** splits each node along a random direction instead of a coordinate axis. Dasgupta and Freund
+proved that such trees adapt to the intrinsic dimension of the data: cell diameters shrink at a rate set by the
+dimension of the manifold the data lie on, not the ambient dimension <Cite id="dasgupta2008" />.
+
+**Annoy** (Spotify) builds a forest of such trees <Cite id="annoy" />. At each node it samples two points and splits by
+the hyperplane equidistant between them, which places the split where the data are. A query pushes the roots of all
+trees onto one priority queue and inspects up to `search_k` nodes, by default the number of trees times the number of
+neighbours requested; the candidates from all trees are then ranked by exact distance. The index is a static file that
+is memory-mapped, so several processes can share it.
+
+### Cover trees
+
+A **cover tree** is an exact index for any metric <Cite id="beygelzimer2006" />. Each level $i$ holds a subset of the
+points that covers the level below within radius $2^i$, and points on the same level are more than $2^i$ apart. For
+data of bounded intrinsic dimension, measured by the growth of ball sizes, a nearest-neighbour query takes $O(\log n)$
+time, and space is $O(n)$ with no assumption.
+
+## Worked example
+
+Suppose an exact search has found a candidate at distance $r = 3$, and the next node in the queue has a lower bound of
+$2.5$. Exact search must open it, since it might contain a point closer than 3. With $\epsilon = 0.5$ the threshold is
+$r/(1+\epsilon) = 2$, the bound $2.5$ exceeds it, and the node is pruned. If the true neighbour was inside, its
+distance is at least $2.5$, so the returned point at distance 3 is within a factor $3/2.5 = 1.2$ of optimal, inside
+the guaranteed $1.5$.
+
+## Assumptions
+
+- **Low intrinsic dimension.** Tree methods do well when the data lie near a low-dimensional manifold, whatever the
+  ambient dimension. On data that fill a high-dimensional space, every method needs many candidates.
+- **A static dataset.** Trees are built once. Annoy files are immutable; FLANN trees degrade as points are added
+  without rebalancing.
+
+## Pitfalls
+
+- **Memory for many trees.** Each tree stores every point id and a split per node. Forests of tens of trees cost more
+  memory than the data themselves at moderate dimension.
+- **Superseded for dense embeddings.** On benchmarks of dense embeddings with hundreds of dimensions, graph indexes and
+  quantisation-based inverted files reach a given recall with fewer distance computations. Trees remain useful for low
+  and moderate dimensions, for exact search in metric spaces, and where a simple static file index is convenient.

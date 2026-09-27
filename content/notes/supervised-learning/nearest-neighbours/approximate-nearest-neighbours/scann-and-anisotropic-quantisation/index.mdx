@@ -1,0 +1,135 @@
+---
+title: ScaNN and anisotropic vector quantisation
+kind: technique
+summary: 'For inner-product search, quantisation error parallel to a vector $\xvec$ changes the scores of the queries that matter (those with large $\qvec^\top\xvec$) far more than error orthogonal to it. ScaNN trains codebooks on the loss $h_\parallel\norm{\rvec_\parallel}^2 + h_\perp\norm{\rvec_\perp}^2$ with $h_\parallel > h_\perp$.'
+tags: [nearest-neighbours, similarity-search, quantisation, worked-example]
+aliases:
+  [
+    ScaNN,
+    anisotropic vector quantisation,
+    anisotropic quantization,
+    score-aware quantisation loss,
+    SOAR,
+    spilling with orthogonality-amplified residuals,
+  ]
+requires: [product-quantisation, maximum-inner-product-search]
+partOf: [approximate-nearest-neighbour-search]
+related: [inverted-file-index, additive-and-residual-quantisation, faiss]
+references: [guo2020, guo2016, sun2023soar, scanncode]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Anisotropic vector quantisation** trains a quantiser for
+<NoteLink to="maximum-inner-product-search">maximum inner product search</NoteLink> by minimising, for each data point
+$\xvec$ and its reconstruction $\hat\xvec$, the **score-aware loss**
+
+$$
+\ell(\xvec, \hat\xvec) = h_\parallel \norm{\rvec_\parallel}^2 + h_\perp \norm{\rvec_\perp}^2,
+\qquad \rvec = \xvec - \hat\xvec,
+$$
+
+where $\rvec_\parallel$ is the component of the residual along $\xvec$, $\rvec_\perp = \rvec - \rvec_\parallel$, and
+$h_\parallel \ge h_\perp$ <Cite id="guo2020" />. **ScaNN** (Scalable Nearest Neighbors) is Google's library built around
+this quantiser, a partitioning step and exact re-scoring <Cite id="scanncode" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="product-quantisation">Product quantisation</NoteLink> and k-means minimise the reconstruction error
+$\norm{\xvec - \hat\xvec}^2$, which treats every direction of error alike. For inner-product search the quantity that
+matters is the score error $\qvec^\top\xvec - \qvec^\top\hat\xvec = \qvec^\top\rvec$, and only for queries that might
+rank $\xvec$ near the top. A query with a small or negative score for $\xvec$ will not return $\xvec$ however large
+the error. Error that barely moves the high scores is cheap; error that moves them is expensive.
+
+## Mechanism
+
+### Why parallel error matters more
+
+Take unit vectors for simplicity, $\norm{\xvec} = \norm{\qvec} = 1$, in $\reals^d$. Write the query's score as
+$t = \qvec^\top\xvec$ and decompose the query as
+
+$$
+\qvec = t\,\xvec + \sqrt{1 - t^2}\,\uvec,
+$$
+
+where $\uvec$ is a unit vector orthogonal to $\xvec$. For queries spread uniformly on the sphere, given $t$, the
+direction $\uvec$ is uniform on the unit sphere of the $(d-1)$-dimensional space orthogonal to $\xvec$. The score error
+is
+
+$$
+\qvec^\top\rvec = t\,\xvec^\top\rvec_\parallel + \sqrt{1 - t^2}\,\uvec^\top\rvec_\perp,
+$$
+
+since $\xvec$ is orthogonal to $\rvec_\perp$ and $\uvec$ is orthogonal to $\rvec_\parallel$. Here
+$\abs{\xvec^\top\rvec_\parallel} = \norm{\rvec_\parallel}$. A uniform unit vector in $d - 1$ dimensions has mean zero
+and $\expect[(\uvec^\top\vvec)^2] = \norm{\vvec}^2/(d - 1)$ for any fixed $\vvec$ in that space, because the $d - 1$
+squared coordinates of $\uvec$ have equal expectations summing to one. The cross term therefore averages to zero, and
+
+$$
+\expect\big[(\qvec^\top\rvec)^2 \,\big|\, t\big] = t^2\norm{\rvec_\parallel}^2 + \frac{1 - t^2}{d - 1}\norm{\rvec_\perp}^2.
+$$
+
+Parallel error is weighted by $t^2$ and orthogonal error by $(1 - t^2)/(d - 1)$. For a query that scores $\xvec$ highly,
+$t$ is well above $1/\sqrt d$, and the parallel weight dominates by a factor that grows with $d$.
+
+### The loss
+
+Average this over the queries that matter. ScaNN counts only queries with $t \ge T$ for a threshold $T$, which gives
+the loss above with
+
+$$
+\eta = \frac{h_\parallel}{h_\perp} = (d - 1)\frac{\expect[t^2 \mid t \ge T]}{\expect[1 - t^2 \mid t \ge T]}.
+$$
+
+As $d$ grows, $t$ given $t \ge T$ concentrates at $T$, and Guo et al. prove that
+$\eta/(d - 1) \to T^2/(1 - T^2)$; they use $\eta \approx (d - 1)T^2/(1 - T^2)$ in practice <Cite id="guo2020" />. At
+$T = 0$ every query counts and $\eta = 1$: the ordinary isotropic loss. As $T \to 1$, $\eta \to \infty$ and only the
+parallel error matters.
+
+### Training
+
+The loss replaces squared distance in k-means or product quantisation training. The assignment step encodes each
+point to the codeword with the smallest $\ell(\xvec, \cvec)$ instead of the smallest distance. The update step solves a
+weighted least-squares problem for the codewords, since $\ell$ is a quadratic form in $\hat\xvec$:
+$\ell = \rvec^\top\big(h_\perp\eye + (h_\parallel - h_\perp)\xvec\xvec^\top/\norm{\xvec}^2\big)\rvec$. The result
+is a quantiser that pushes each reconstruction to preserve its point's length along its own direction, at the cost of
+more error sideways.
+
+### The ScaNN pipeline
+
+ScaNN answers a query in three stages <Cite id="scanncode" />.
+
+1. **Partition** (optional). A k-means tree splits the data into about $\sqrt n$ leaves, and the query searches only
+   the nearest ones, as in an <NoteLink to="inverted-file-index">inverted file</NoteLink>. **SOAR** stores each vector in
+   more than one partition and trains the extra assignment with an "orthogonality-amplified" residual loss, so that it
+   covers the cases in which the first assignment's residual would make the vector be missed <Cite id="sun2023soar" />.
+2. **Score.** Asymmetric hashing, which is product quantisation trained with the anisotropic loss, typically with 2
+   dimensions per sub-quantiser, scores the candidates with SIMD look-up tables.
+3. **Rescore** (optional). The best $k'$ candidates are re-scored more accurately, for example with exact vectors, and
+   the top $k$ are returned.
+
+## Worked example
+
+Take $d = 100$ and $T = 0.2$. The formula gives $\eta \approx 99 \times 0.04/0.96 = 4.125$, the value Guo et al. use on
+GloVe-100 <Cite id="guo2020" />. A simulation with $2 \times 10^6$ uniform unit queries kept the 2.3% with $t \ge 0.2$
+and compared two residuals of the same length 0.1, one along $\xvec$ and one orthogonal to it. The mean squared score
+error was $5.67 \times 10^{-4}$ for the parallel residual and $9.54 \times 10^{-5}$ for the orthogonal one: a ratio of
+5.95. The exact ratio exceeds the asymptotic 4.125 because at $d = 100$ the selected queries have $t$ spread above
+$T$, and $\expect[t^2 \mid t \ge T] > T^2$. For a single query with $t = 0.3$ the ratio is $99 \times 0.09/0.91 = 9.8$.
+
+## Cost
+
+Training costs the same order as product quantisation, with a slightly more expensive update. Search is unchanged:
+anisotropic codes are scored with the same look-up tables.
+
+## Trade-offs
+
+- **For inner products.** The derivation assumes the score is an inner product. For Euclidean search with unit-norm
+  data the ranking is the same as for inner product, so the loss still applies; for data of varying norm it does not.
+- **$T$ is a tuning parameter.** It encodes which scores count as high. Too high a value overfits the parallel
+  direction and leaves large orthogonal errors.
+- **Recall at fixed speed.** On the 1.2-million-vector GloVe dataset, Guo et al. compared ScaNN with 11 baselines
+  pre-tuned by ann-benchmarks and found it fastest in the high-recall regime <Cite id="guo2020" />. Such rankings depend
+  on the dataset and change as libraries improve.

@@ -1,12 +1,12 @@
 ---
 title: Nearest-neighbour search
 kind: technique
-summary: 'Nearest-neighbour search finds the training points closest to a query faster than the $O(nd)$ scan. Space-partitioning trees (k-d, ball) are exact and fast in low dimensions; hashing (LSH), graphs (HNSW) and quantisation trade exactness for speed in high dimensions.'
+summary: 'Nearest-neighbour search finds the stored points closest to a query faster than the $O(nd)$ scan. Space-partitioning trees (k-d trees, ball trees) prune regions that cannot beat the current best: exact and fast in low dimensions, overtaken by approximate methods in high ones.'
 tags: [nearest-neighbours, algorithms, similarity-search, information-retrieval, worked-example]
-aliases: [k-d tree, kd-tree, ball tree, locality-sensitive hashing, LSH, HNSW, hierarchical navigable small world, approximate nearest neighbour search, ANN search, random hyperplane hashing, product quantisation]
+aliases: [k-d tree, kd-tree, ball tree, metric tree, exact nearest-neighbour search, brute-force nearest-neighbour search, branch and bound search]
 requires: [k-nearest-neighbours]
 related: [curse-of-dimensionality-for-neighbours, pairwise-distances-and-cosine-similarity, matrix-profile]
-references: [bentley1975, friedman1977, indyk1998, datar2004, malkov2018, jegou2011]
+references: [bentley1975, friedman1977, weber1998]
 status: draft
 updated: 2026-09-27
 ---
@@ -51,85 +51,43 @@ $\norm{\qvec - \xvec} \ge \norm{\qvec - \cvec} - \rho$. If this lower bound exce
 ball is pruned. The bound uses only distances, so ball trees work for any metric, and balls adapt to data that lie
 near a low-dimensional manifold better than axis-aligned boxes do.
 
-### Locality-sensitive hashing
+### Beyond exact search
 
-**Locality-sensitive hashing** (LSH) uses random hash functions that make near points collide more often than far
-ones <Cite id="indyk1998" />. A family $\Hcal$ is **$(r, cr, p_1, p_2)$-sensitive** if, for $h$ drawn from $\Hcal$,
-points within distance $r$ collide with probability at least $p_1$ and points farther than $cr$ collide with
-probability at most $p_2 < p_1$.
+In high dimensions no exact index beats a scan by much: Weber, Schek and Blott found that partitioning and clustering
+indexes are on average slower than a sequential scan above about 10 dimensions <Cite id="weber1998" />. Search then
+becomes <NoteLink to="approximate-nearest-neighbour-search">approximate nearest-neighbour search</NoteLink>, which
+returns most of the true neighbours in a small fraction of the time. Its main families have their own notes:
+<NoteLink to="locality-sensitive-hashing">locality-sensitive hashing</NoteLink>,
+<NoteLink to="inverted-file-index">inverted files</NoteLink>, <NoteLink to="product-quantisation">product
+quantisation</NoteLink>, graph indexes such as <NoteLink to="hnsw">HNSW</NoteLink>, and
+<NoteLink to="tree-based-ann">approximate tree search</NoteLink>.
 
-**Random hyperplanes for angles.** Draw $\avec \sim \Gauss(\zeros, \eye)$ and set $h(\xvec) = \sgn(\avec^\top\xvec)$.
-The hash separates $\xvec$ and $\yvec$ when the random hyperplane with normal $\avec$ passes between them. The
-direction of $\avec$ is uniform, so projected onto the plane spanned by $\xvec$ and $\yvec$ it is a uniformly random
-direction, and the hyperplane cuts the plane in a uniformly random line through the origin. That line separates the
-two vectors exactly when it falls inside the angle $\theta$ between them, on one side or the other, which has
-probability $2\theta/(2\pi) = \theta/\pi$. So
+## Worked example
 
-$$
-\Pr\big(h(\xvec) = h(\yvec)\big) = 1 - \frac{\theta}{\pi}.
-$$
+**A k-d tree prune.** A query $\qvec = (0.5, 0.2)$ sits in the left child of a split $x_1 \le 0.6$. The best point found
+in its leaf is at distance $r = 0.15$. The distance from $\qvec$ to the splitting line is $\abs{0.5 - 0.6} = 0.1 < 0.15$,
+so the right child might hold a closer point and must be searched. Had the leaf yielded $r = 0.08$, the right child
+would be pruned, since every point in it is at least $0.1$ away.
 
-**Random projections for Euclidean distance.** Datar et al. use $h(\xvec) = \lfloor(\avec^\top\xvec + b)/w\rfloor$ with
-Gaussian $\avec$ and $b$ uniform on $[0, w)$. The projection $\avec^\top(\xvec - \yvec)$ is Gaussian with standard
-deviation $\norm{\xvec - \yvec}$, so close points tend to fall in the same bucket of width $w$ <Cite id="datar2004" />.
-
-**Amplification.** One hash separates near from far weakly. Concatenating $m$ hashes into a key
-$g = (h_1, \dots, h_m)$ makes collisions rarer for everyone: near points collide with probability $p_1^m$ and far points
-with $p_2^m$, a much larger ratio. Building $L$ independent tables and returning any point that collides with $\qvec$
-in at least one of them restores the chance of finding near points: $1 - (1 - p_1^m)^L$. The candidates are then
-checked by exact distance. With suitable $m$ and $L$, a query costs $O(n^\rho)$ distance computations with
-$\rho = \log(1/p_1)/\log(1/p_2) < 1$ <Cite id="indyk1998" />.
-
-### Graph-based search
-
-**Hierarchical navigable small world** (HNSW) graphs connect each point to a few of its near neighbours
-<Cite id="malkov2018" />. A query walks greedily through the graph, always moving to the neighbour closest to
-$\qvec$, and keeps a candidate list of size $ef$. To make long jumps possible, points are also inserted into sparser
-upper layers, each point reaching layer $\ell$ with probability decaying exponentially in $\ell$. Search starts at the
-top layer, descends greedily, and refines on the dense bottom layer, much like a skip list. HNSW gives the best
-recall for a given speed on most public benchmarks, at the price of memory for the graph and slow insertion.
-
-### Compression
-
-**Product quantisation** splits each vector into $M$ sub-vectors and replaces each by the index of its nearest
-centroid in a small codebook learnt by <NoteLink to="k-means">k-means</NoteLink> <Cite id="jegou2011" />. A vector
-becomes $M$ bytes, and distances to a query are computed from $M$ table look-ups. Combined with an inverted file,
-which clusters the vectors and searches only the clusters nearest the query, it scales search to billions of vectors in
-memory.
-
-## Worked example: LSH amplification
-
-Use random hyperplanes, and call a pair near if its angle is $30^\circ$ and far if it is $90^\circ$. One hash collides
-with probability $p_1 = 1 - 30/180 = 0.833$ for the near pair and $p_2 = 1 - 90/180 = 0.5$ for the far pair, so
-$\rho = \log(1/0.833)/\log 2 = 0.263$.
-
-| keys of $m$ bits, $L$ tables | near pair retrieved | far pair retrieved |
-| ---------------------------- | ------------------- | ------------------ |
-| $m = 10$, $L = 1$            | 0.162               | 0.001              |
-| $m = 5$, $L = 5$             | 0.923               | 0.147              |
-| $m = 10$, $L = 20$           | 0.970               | 0.019              |
-
-One 10-bit table rejects almost every far point but also misses most near ones. Twenty such tables find the near
-point 97% of the time while retrieving under 2% of far points for exact checking.
+**A ball tree prune.** A ball has centre $\cvec$ at distance $\norm{\qvec - \cvec} = 2.0$ from the query and radius
+$\rho = 0.5$. Every point in it is at least $2.0 - 0.5 = 1.5$ from $\qvec$. With a current best of $r = 1.2$ the ball is
+pruned without computing any of its distances; with $r = 1.7$ it must be opened.
 
 ## Cost
 
-| method        | build                  | query                           | exact? |
-| ------------- | ---------------------- | ------------------------------- | ------ |
-| brute force   | none                   | $O(nd)$                         | yes    |
-| $k$-d tree    | $O(n \log n)$          | $O(\log n)$ in low $d$          | yes    |
-| ball tree     | $O(n \log n)$          | sublinear in low intrinsic $d$  | yes    |
-| LSH           | $O(nLm)$ hash evaluations | $O(n^\rho)$ candidates       | no     |
-| HNSW          | about $O(n \log n)$    | about $O(\log n)$ empirically   | no     |
+| method      | build         | query                          | exact? |
+| ----------- | ------------- | ------------------------------ | ------ |
+| brute force | none          | $O(nd)$                        | yes    |
+| $k$-d tree  | $O(n \log n)$ | $O(\log n)$ in low $d$         | yes    |
+| ball tree   | $O(n \log n)$ | sublinear in low intrinsic $d$ | yes    |
 
 ## Trade-offs
 
 - **Dimension.** Exact trees fail as the <NoteLink to="curse-of-dimensionality-for-neighbours">curse of
-  dimensionality</NoteLink> sets in, because almost nothing can be pruned. Above a few tens of dimensions,
-  approximate methods or brute force on a GPU are the practical choices.
-- **Recall against speed.** Approximate methods expose a knob, such as $L$ for LSH or $ef$ for HNSW, that trades the
-  fraction of true neighbours found against query time. Measure recall on held-out queries.
-- **Memory.** HNSW stores tens of edges per point. Product quantisation shrinks the vectors at the cost of distance
-  accuracy.
-- **Updates.** Trees and hash tables accept insertions cheaply; HNSW insertion is costlier, and deletions are awkward
-  for most graph indexes.
+  dimensionality</NoteLink> sets in, because almost nothing can be pruned. Above a few tens of dimensions, approximate
+  methods or brute force on a GPU are the practical choices.
+- **Metric.** $k$-d trees need coordinates and axis-aligned splits. Ball trees need only a metric, so they also serve
+  distances such as edit distance on strings.
+- **Batch size.** For many queries at once, a brute-force scan written as a matrix multiplication often beats a tree,
+  even in moderate dimensions, because it runs at the machine's peak arithmetic rate.
+- **Updates.** Trees accept insertions, but many insertions unbalance them and slow queries until they are rebuilt.

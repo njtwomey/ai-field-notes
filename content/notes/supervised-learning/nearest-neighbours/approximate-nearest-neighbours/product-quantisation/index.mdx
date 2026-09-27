@@ -1,0 +1,177 @@
+---
+title: Product quantisation
+kind: technique
+summary: 'Product quantisation splits a vector into $M$ sub-vectors and replaces each by the index of its nearest centroid in a small k-means codebook. A vector becomes $M$ bytes, and its distance to a query is a sum of $M$ precomputed table entries (asymmetric distance computation).'
+tags: [nearest-neighbours, similarity-search, quantisation, compression, worked-example]
+aliases:
+  [
+    product quantization,
+    asymmetric distance computation,
+    ADC,
+    symmetric distance computation,
+    SDC,
+    PQ codes,
+    sub-quantiser,
+    codebook lookup table,
+  ]
+requires: [k-means, nearest-neighbour-search]
+partOf: [approximate-nearest-neighbour-search]
+related: [inverted-file-index, vq-vae]
+references: [jegou2011, andre2015, andre2017]
+status: draft
+updated: 2026-09-27
+---
+
+import { PqPlane } from '../_shared/PqPlane'
+
+<Definition>
+**Product quantisation** (PQ) compresses a vector $\xvec \in \reals^d$ by splitting it into $M$ sub-vectors
+$\xvec = (\xvec^1, \dots, \xvec^M)$ of dimension $d/M$ and quantising each with its own codebook
+$\Ccal_m = \set{\cvec_{m,1}, \dots, \cvec_{m,K}}$ learnt by k-means <Cite id="jegou2011" />. The code of $\xvec$ is the
+tuple of indices $(i_1, \dots, i_M)$ with $i_m = \argmin_j \norm{\xvec^m - \cvec_{m,j}}$, stored in $M \log_2 K$ bits.
+The reconstruction $\hat\xvec$ is the concatenation of the chosen centroids. Distances from a query to all codes are
+computed from $M$ lookup tables.
+</Definition>
+
+## Problem
+
+A dataset of $10^9$ vectors of dimension 128 in 32-bit floats occupies 512 GB. Exact search scans all of it for every
+query. To fit such a dataset in RAM, each vector must shrink to a few tens of bytes, and distances must be computable
+from the compressed form without decompressing it.
+
+**Vector quantisation** maps each vector to the nearest of $K'$ centroids and stores the centroid's index in
+$\log_2 K'$ bits. A 64-bit code needs $K' = 2^{64}$ centroids. k-means with that many centroids cannot be trained,
+stored or searched. Product quantisation obtains $2^{64}$ reproduction values from a structured codebook that stores
+only a few thousand centroids.
+
+## Mechanism
+
+### Encoding
+
+Split the $d$ coordinates into $M$ contiguous groups of $d/M$. Run <NoteLink to="k-means">k-means</NoteLink> with $K$
+centroids separately on each group of the training vectors. The effective codebook is the Cartesian product
+$\Ccal = \Ccal_1 \times \dots \times \Ccal_M$ of size $K^M$, but only $M \cdot K$ centroids of dimension $d/M$, that is
+$K d$ numbers, are stored. The common choice $K = 256$ makes each index one byte, so the code is $M$ bytes.
+
+The squared Euclidean distance is a sum over coordinates, so it splits over sub-vectors:
+
+$$
+\norm{\xvec - \cvec}^2 = \sum_{m=1}^{M} \norm{\xvec^m - \cvec^m}^2
+\quad \text{for } \cvec = (\cvec^1, \dots, \cvec^M) \in \Ccal.
+$$
+
+Each term depends only on the choice made in its own codebook. Minimising the sum over the $K^M$ product codewords
+therefore reduces to minimising each term separately: encoding each sub-vector to its nearest sub-centroid finds the
+nearest of all $K^M$ codewords with only $MK$ sub-vector distance computations. For the same reason the mean squared
+reconstruction error is the sum of the $M$ sub-quantisers' errors.
+
+### Asymmetric distance computation
+
+To rank database codes for a query $\qvec$, PQ approximates $\norm{\qvec - \xvec}$ by $\norm{\qvec - \hat\xvec}$: the
+query stays exact and only the database vector is quantised. By the split above,
+
+$$
+\norm{\qvec - \hat\xvec}^2 = \sum_{m=1}^{M} \norm{\qvec^m - \cvec_{m, i_m(\xvec)}}^2 = \sum_{m=1}^{M} T_m[i_m(\xvec)],
+\qquad T_m[j] = \norm{\qvec^m - \cvec_{m,j}}^2.
+$$
+
+The $M$ tables $T_m$ of $K$ entries depend only on the query, so they are computed once per query. Filling them costs
+$M \cdot K \cdot (d/M) = Kd$ multiply-adds. After that, each database vector costs $M$ table look-ups and $M - 1$
+additions, instead of $d$ multiply-adds on the uncompressed vector. For $n$ vectors the query cost falls from $nd$ to
+$Kd + nM$. This is **asymmetric distance computation** (ADC).
+
+**Symmetric distance computation** (SDC) quantises the query too and reads $\norm{\cvec_{m,i} - \cvec_{m,j}}^2$ from
+$M$ fixed $K \times K$ tables computed at training time. SDC saves the per-query table construction but adds the
+query's own quantisation error, so ADC is the default <Cite id="jegou2011" />.
+
+### Error bound
+
+By the triangle inequality,
+$\norm{\qvec - \hat\xvec} \le \norm{\qvec - \xvec} + \norm{\xvec - \hat\xvec}$ and
+$\norm{\qvec - \xvec} \le \norm{\qvec - \hat\xvec} + \norm{\hat\xvec - \xvec}$. Together,
+
+$$
+\big|\, \norm{\qvec - \hat\xvec} - \norm{\qvec - \xvec} \,\big| \le \norm{\xvec - \hat\xvec}.
+$$
+
+The ADC distance errs by at most the reconstruction error of the database vector. For SDC the same argument gives the
+bound $\norm{\xvec - \hat\xvec} + \norm{\qvec - \hat\qvec}$. The distance error is controlled by the reconstruction
+error, which is what k-means minimises. Lower quantisation error therefore means better ranking, which is why PQ
+variants are compared by their mean squared reconstruction error <Cite id="jegou2011" />.
+
+<Derivation title="ADC underestimates squared distances on average">
+Consider one sub-quantiser; the argument applies to each term of the ADC sum. Drop the superscript $m$, fix one cell
+with centroid $\cvec$, and let $\xvec$ range over the training sub-vectors in it. k-means places
+$\cvec$ at their mean, so $\expect[\xvec - \cvec] = \zeros$ over the cell. Expand
+
+$$
+\norm{\qvec - \cvec}^2 = \norm{\qvec - \xvec}^2 + 2(\qvec - \xvec)^\top(\xvec - \cvec) + \norm{\xvec - \cvec}^2.
+$$
+
+Write $\qvec - \xvec = (\qvec - \cvec) - (\xvec - \cvec)$. The cross term has expectation
+$2(\qvec - \cvec)^\top\expect[\xvec - \cvec] - 2\expect\norm{\xvec - \cvec}^2 = -2\expect\norm{\xvec - \cvec}^2$.
+So
+
+$$
+\expect\norm{\qvec - \cvec}^2 = \expect\norm{\qvec - \xvec}^2 - \expect\norm{\xvec - \cvec}^2 .
+$$
+
+Averaged over the points of a cell, the ADC squared distance is smaller than the true one by the cell's mean squared
+error. The bias is the same for every query, so it rarely changes rankings between points of similar cells, but it
+matters when distances are compared against a fixed threshold.
+</Derivation>
+
+<PqPlane />
+
+## Worked example
+
+Take $d = 4$, $M = 2$ and $K = 2$. The codebooks are
+
+$$
+\Ccal_1 = \set{(0, 0),\ (1, 2)}, \qquad \Ccal_2 = \set{(-1, 1),\ (0, -1)}.
+$$
+
+Point $a$ has code $(2, 1)$, so $\hat\xvec_a = (1, 2, -1, 1)$. Point $b$ has code $(1, 2)$, so
+$\hat\xvec_b = (0, 0, 0, -1)$. The query is $\qvec = (1, 1, 0, -1)$, with sub-vectors $\qvec^1 = (1, 1)$ and
+$\qvec^2 = (0, -1)$.
+
+The tables are $T_1 = [\,2,\ 1\,]$, from $\norm{(1,1) - (0,0)}^2 = 2$ and $\norm{(1,1) - (1,2)}^2 = 1$, and
+$T_2 = [\,5,\ 0\,]$, from $\norm{(0,-1) - (-1,1)}^2 = 5$ and $\norm{(0,-1) - (0,-1)}^2 = 0$.
+
+The ADC distances are $T_1[2] + T_2[1] = 1 + 5 = 6$ for $a$ and $T_1[1] + T_2[2] = 2 + 0 = 2$ for $b$. Direct
+computation agrees: $\norm{\qvec - \hat\xvec_a}^2 = 0 + 1 + 1 + 4 = 6$ and
+$\norm{\qvec - \hat\xvec_b}^2 = 1 + 1 + 0 + 0 = 2$. Building the tables took $Kd = 8$ multiply-adds; each database
+vector then took one addition.
+
+At realistic sizes, $d = 128$, $M = 8$ and $K = 256$: a vector takes 8 bytes instead of 512 (64 times smaller), the
+tables take $256 \times 128 = 32\,768$ multiply-adds per query, and each database vector costs 8 look-ups instead of
+128 multiply-adds. The product codebook has $256^8 = 2^{64}$ codewords.
+
+## Cost
+
+| quantity                     | exact (float32) | PQ with $M$ sub-quantisers of $K$ centroids |
+| ---------------------------- | --------------- | ------------------------------------------- |
+| memory per vector            | $4d$ bytes      | $M \log_2 K / 8$ bytes                      |
+| codebook storage             | none            | $Kd$ floats                                 |
+| training                     | none            | $M$ k-means runs on $d/M$-dimensional data  |
+| per-query set-up             | none            | $Kd$ multiply-adds for the tables           |
+| per database vector          | $d$ multiply-adds | $M$ look-ups and additions               |
+
+## Trade-offs
+
+- **Code size against accuracy.** More sub-quantisers (larger $M$) or larger codebooks (larger $K$) lower the
+  distortion and raise recall, at more bytes per vector. The table in <NoteLink to="faiss">the FAISS note</NoteLink>
+  shows recall on synthetic data at 16 and 32 bytes.
+- **Exhaustive by itself.** ADC still visits every code. At scale, PQ is combined with an
+  <NoteLink to="inverted-file-index">inverted file</NoteLink> that restricts the scan to a few clusters, and the codes
+  then encode residuals from the cluster centroid.
+- **Re-ranking.** The ADC ranking is approximate. Retrieving a short list of a few hundred candidates and re-ranking it
+  with exact vectors, or with finer codes, recovers most of the lost recall.
+- **Unbalanced subspaces.** Contiguous coordinate groups may carry very different variance, and correlations between
+  groups are ignored. <NoteLink to="optimised-product-quantisation">Optimised product quantisation</NoteLink> learns a
+  rotation that balances and decorrelates the groups. <NoteLink to="additive-and-residual-quantisation">Additive
+  quantisers</NoteLink> drop the split and let every codebook span the whole space.
+- **Memory access.** With $K = 256$ the tables hold $256M$ floats and sit in L1 cache, but each look-up is a
+  data-dependent memory access. **PQ fast-scan** uses $K = 16$ (4-bit codes) so that a table of 16 entries, quantised to
+  8-bit integers, fits in one SIMD register, and replaces memory look-ups by in-register shuffles
+  <Cite id="andre2015" /> <Cite id="andre2017" />. It trades some accuracy per bit for several times faster scans.

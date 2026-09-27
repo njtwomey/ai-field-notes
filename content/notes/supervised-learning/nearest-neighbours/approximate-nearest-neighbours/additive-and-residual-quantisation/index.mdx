@@ -1,0 +1,167 @@
+---
+title: Additive and residual quantisation
+kind: technique
+summary: 'Additive quantisers approximate a vector by a sum of $M$ full-length codewords, one per codebook: $\hat\xvec = \sum_m \cvec_{m, i_m}$. Residual quantisation picks them greedily; additive quantisation, LSQ and the neural QINCo pick them jointly, beating product quantisation at equal code size.'
+tags: [nearest-neighbours, similarity-search, quantisation, compression, worked-example]
+aliases:
+  [
+    additive quantisation,
+    additive quantization,
+    AQ,
+    residual quantisation,
+    residual quantization,
+    residual vector quantisation,
+    RVQ,
+    local search quantisation,
+    LSQ,
+    LSQ++,
+    QINCo,
+    QINCo2,
+    multi-codebook quantisation,
+  ]
+requires: [product-quantisation]
+partOf: [approximate-nearest-neighbour-search]
+related: [inverted-file-index, vq-vae]
+references: [chen2010rvq, babenko2014, martinez2016, martinez2018, huijben2024, vallaeys2025, douze2024]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+An **additive quantiser** has $M$ codebooks $\Ccal_1, \dots, \Ccal_M$, each of $K$ vectors in the full space
+$\reals^d$, and approximates $\xvec$ by
+
+$$
+\hat\xvec = \sum_{m=1}^{M} \cvec_{m, i_m}, \qquad \cvec_{m, i_m} \in \Ccal_m,
+$$
+
+storing the indices $(i_1, \dots, i_M)$ in $M\log_2 K$ bits. **Residual quantisation** (RQ) chooses the indices one at
+a time, each quantising what the previous ones left <Cite id="chen2010rvq" />. **Additive quantisation** (AQ)
+<Cite id="babenko2014" /> and **local search quantisation** (LSQ) <Cite id="martinez2016" /> choose them jointly.
+<NoteLink to="product-quantisation">Product quantisation</NoteLink> is the special case in which codebook $m$ is zero
+outside the $m$-th block of coordinates.
+</Definition>
+
+## Problem
+
+Product quantisation quantises disjoint blocks of coordinates independently. It cannot use the dependence between
+blocks, and a rotation (<NoteLink to="optimised-product-quantisation">OPQ</NoteLink>) removes only linear
+dependence. Structure such as clusters, which couples all coordinates at once, is left to each block separately.
+Additive quantisers let every codebook span all $d$ dimensions, so the $K^M$ sums can be placed where the data are.
+
+## Mechanism
+
+### Residual quantisation
+
+RQ encodes greedily. Set $\rvec_0 = \xvec$. For $m = 1, \dots, M$, pick the codeword nearest to the current residual
+and subtract it:
+
+$$
+i_m = \argmin_j \norm{\rvec_{m-1} - \cvec_{m,j}}^2, \qquad \rvec_m = \rvec_{m-1} - \cvec_{m, i_m}.
+$$
+
+The reconstruction error is $\norm{\rvec_M}^2$. Training follows the same order: run k-means on the data to get
+$\Ccal_1$, encode, run k-means on the residuals to get $\Ccal_2$, and so on. Each stage refines the previous one, as a
+coarse-to-fine hierarchy. The <NoteLink to="inverted-file-index">inverted file</NoteLink> with residual PQ is a
+two-stage instance: the coarse quantiser is stage 1.
+
+Greedy encoding is suboptimal, because an early choice that looks best alone can leave a residual the later codebooks
+represent badly. **Beam search** keeps the $B$ best partial encodings at each stage instead of one, at $B$ times the
+cost. FAISS's RQ encoder keeps such a beam, whose size sets the trade-off between encoding time and accuracy
+<Cite id="douze2024" />.
+
+### Additive quantisation: joint encoding
+
+For fixed codebooks, the best code minimises
+
+$$
+\norm{\xvec - \sum_m \cvec_{m,i_m}}^2
+= \norm{\xvec}^2 - 2\sum_m \xvec^\top\cvec_{m,i_m} + \sum_m \norm{\cvec_{m,i_m}}^2
++ 2\sum_{m < m'} \cvec_{m,i_m}^\top\cvec_{m',i_{m'}}.
+$$
+
+The unary terms depend on one index each, and the pairwise terms couple every pair of indices. Minimising over
+$(i_1, \dots, i_M)$ is inference in a fully connected discrete Markov random field with $K$ states per variable, which is
+hard in general. In product quantisation the codebooks live on disjoint coordinates, every pairwise term is zero, and the
+problem separates. Babenko and Lempitsky encode with beam search over this energy <Cite id="babenko2014" />.
+
+**LSQ** (local search quantisation) encodes by **iterated conditional modes**: repeatedly re-optimise one index with the
+others fixed, which only needs the unary term and the $M - 1$ pairwise terms for that index, with random
+perturbations to escape local minima <Cite id="martinez2016" /> <Cite id="martinez2018" />.
+
+### Codebook update
+
+With the codes fixed, the codebooks solve a linear least-squares problem. Stack the codewords as the rows of
+$\Cmat \in \reals^{MK \times d}$ and encode each training vector as a row of a binary matrix
+$\Bmat \in \set{0, 1}^{n \times MK}$ with a one in each of its $M$ chosen positions. Then
+$\hat\Xmat = \Bmat\Cmat$, and
+
+$$
+\Cmat^\star = \argmin_{\Cmat} \norm{\Xmat - \Bmat\Cmat}_F^2 = (\Bmat^\top\Bmat)^{-1}\Bmat^\top\Xmat,
+$$
+
+the normal equations of <NoteLink to="linear-regression">least squares</NoteLink>, with $\Bmat^\top\Bmat$ of size
+$MK \times MK$ (regularised in practice when some codewords are rarely used). Training alternates encoding and this
+update, as k-means alternates assignment and averaging.
+
+### Search with additive codes
+
+The squared distance to a query $\qvec$ is
+
+$$
+\norm{\qvec - \hat\xvec}^2 = \norm{\qvec}^2 - 2\sum_{m=1}^{M} \qvec^\top\cvec_{m,i_m} + \norm{\hat\xvec}^2.
+$$
+
+The middle term is a sum of look-ups in $M$ tables $T_m[j] = \qvec^\top\cvec_{m,j}$, which cost $MKd$ multiply-adds per
+query, $M$ times more than for PQ because the codewords are full-length. The last term does not split into per-codebook
+look-ups, because $\norm{\hat\xvec}^2$ contains the $M(M-1)/2$ cross terms $\cvec_{m,i_m}^\top\cvec_{m',i_{m'}}$. FAISS
+computes it at encoding time and stores it beside the code, as a float or quantised to 8 or 4 bits, or rebuilds it at
+search time from precomputed codeword inner products at a cost that grows as $M^2$ <Cite id="douze2024" />. For maximum inner product
+search only the middle term is needed, and the norm need not be stored.
+
+### Neural codebooks: QINCo
+
+In RQ each stage uses one fixed codebook, whatever the earlier stages chose. **QINCo** (Huijben, Douze, Muckley, van
+Sloun and Verbeek) makes the codebook of step $m$ a function of the partial reconstruction: a neural network maps a base
+codebook and $\hat\xvec_{m-1} = \sum_{l < m}\cvec_{l,i_l}$ to a codebook specialised for that region
+<Cite id="huijben2024" />. Encoding stays greedy (or beam search), but each residual is quantised with centroids adapted
+to where the vector already lies. The authors report that QINCo with 12-byte codes is more accurate for nearest-neighbour
+search than the previous best neural quantiser with 16-byte codes, on the BigANN1M and Deep1M benchmarks.
+**QINCo2** improves encoding and decoding, and reports 44% lower mean squared error at 16 bytes on BigANN
+<Cite id="vallaeys2025" />.
+
+## Worked example
+
+Additive quantisers matter most when the data have structure that couples all coordinates. The synthetic benchmark of
+the <NoteLink to="faiss">FAISS</NoteLink> note draws 64-dimensional vectors from 256 Gaussian clusters; the total
+variance per vector is 67.4. Training on 20 000 vectors and encoding 5 000 others gives these mean squared
+reconstruction errors.
+
+| code size | PQ    | OPQ + PQ | RQ ($K = 256$, beam search) |
+| --------- | ----- | -------- | --------------------------- |
+| 8 bytes   | 5.36  | 4.93     | 0.74                        |
+| 16 bytes  | 3.38  | 2.99     | 0.22                        |
+
+RQ's first codebook of 256 full-length codewords lands on the 256 cluster centres, and the remaining stages quantise
+the small within-cluster spread. PQ must describe the cluster centre with 8 or 16 independent sub-codes, which is
+far less efficient. The rotation of OPQ helps by about 10%. On data without such structure the gap is smaller. Encoding
+also cost more: RQ took about 5 to 12 times longer than PQ to encode here.
+
+## Cost
+
+| quantity             | PQ                     | additive (RQ, AQ, LSQ)                       |
+| -------------------- | ---------------------- | -------------------------------------------- |
+| codebook storage     | $Kd$ floats            | $MKd$ floats                                 |
+| encoding             | $Kd$ per vector        | $MKd$ times the beam width, or ICM sweeps    |
+| per-query tables     | $Kd$                   | $MKd$                                        |
+| per database vector  | $M$ look-ups           | $M$ look-ups plus a stored norm              |
+
+## Trade-offs
+
+- **Accuracy per bit.** Additive quantisers reach lower error than PQ at the same code size, most clearly at small
+  codes.
+- **Encoding cost.** Encoding is slower by a factor of about $M$ times the beam width, which matters when adding
+  billions of vectors.
+- **Norm storage.** Euclidean search needs the extra stored norm.
+- **Composable.** Additive quantisers combine with an inverted file and with fast-scan look-up tables. FAISS also offers
+  product versions that split the vector into a few blocks and run an additive quantiser on each <Cite id="douze2024" />.

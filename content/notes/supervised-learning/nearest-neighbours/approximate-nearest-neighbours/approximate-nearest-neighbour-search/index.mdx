@@ -1,0 +1,132 @@
+---
+title: Approximate nearest-neighbour search
+kind: overview
+summary: 'Approximate nearest-neighbour (ANN) search returns most of a query''s true nearest neighbours in far less than the $O(nd)$ time of a scan. Methods hash, compress, partition or link the stored vectors, trading recall against speed and memory.'
+tags: [nearest-neighbours, similarity-search, indexing, overview]
+aliases:
+  [
+    approximate nearest neighbour search,
+    approximate nearest neighbor search,
+    ANN search,
+    ANNS,
+    vector search,
+    vector similarity search,
+    vector index,
+    c-approximate nearest neighbour,
+    range search,
+  ]
+requires: [nearest-neighbour-search]
+related: [curse-of-dimensionality-for-neighbours, k-nearest-neighbours, sentence-embeddings, contrastive-learning, metric-learning]
+references: [indyk1998, jegou2011, malkov2018, subramanya2019, guo2020, johnson2019, douze2024, aumuller2020, weber1998]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Approximate nearest-neighbour search** (ANN search) answers nearest-neighbour queries over a fixed set of vectors
+$\set{\xvec_1, \dots, \xvec_n} \subset \reals^d$ without guaranteeing exact answers. Given a query $\qvec$, it returns
+$k$ points that are, with high probability or on most queries, the $k$ closest under a distance or similarity. The
+stored set is preprocessed into an **index** once, so that each query touches only a small part of the data. Quality is
+measured by **recall**, the fraction of true neighbours returned, and cost by **queries per second** and **memory per
+vector**.
+</Definition>
+
+## The problem
+
+Three query types share the same machinery.
+
+- **$k$-nearest neighbours**: the $k$ stored points with the smallest $D(\qvec, \xvec_i)$, usually for Euclidean
+  distance or cosine similarity.
+- **Range search**: every stored point with $D(\qvec, \xvec_i) \le r$.
+- **Maximum inner product search**: the $k$ largest $\qvec^\top\xvec_i$, for models that score by dot products (see
+  <NoteLink to="maximum-inner-product-search">maximum inner product search</NoteLink>).
+
+Theory uses the **$c$-approximate** version: if some point lies within distance $r$ of $\qvec$, return a point within
+$cr$, for an approximation factor $c > 1$ <Cite id="indyk1998" />. Practice instead measures **$k$-recall@$k$**: the
+fraction of the true $k$ nearest neighbours that the index returns, averaged over queries.
+
+Exact search is hard because of the <NoteLink to="curse-of-dimensionality-for-neighbours">curse of
+dimensionality</NoteLink>. Exact <NoteLink to="nearest-neighbour-search">space-partitioning trees</NoteLink> prune
+nothing in high dimensions, and above about 10 dimensions they are slower on average than a plain scan
+<Cite id="weber1998" />. A scan costs $nd$ multiply-adds per query: for $10^9$ vectors of dimension 128, about
+$1.3 \times 10^{11}$, and 512 GB of float32 data to read. Embeddings from
+<NoteLink to="sentence-embeddings">text encoders</NoteLink>, <NoteLink to="contrastive-learning">contrastive
+models</NoteLink> and image models have hundreds of dimensions and are stored by the millions or billions, so almost all
+practical vector search is approximate.
+
+## The trade-off triangle
+
+Every index trades three quantities.
+
+- **Accuracy**: recall at $k$, and the error in the returned distances.
+- **Speed**: queries per second at a given number of threads, or latency per query.
+- **Memory**: bytes per vector, including the index structure.
+
+A full scan of float32 vectors is exact but slow. An inverted file scanning 1% of the data is fast but misses neighbours
+near cell boundaries. Compressing vectors to 16 bytes fits a billion of them in 16 GB but blurs distances. A graph index
+reaches high recall quickly but stores tens of links per vector. Every index has search-time parameters that move along
+the accuracy–speed edge; the memory corner is fixed when the index is built. Methods are compared by curves of recall
+against speed at a stated memory budget (see <NoteLink to="ann-benchmarking">benchmarking</NoteLink>).
+
+## Families of methods
+
+| family | idea | representatives | memory per vector | strengths | weaknesses |
+| --- | --- | --- | --- | --- | --- |
+| hashing | random hashes that collide for near points | <NoteLink to="locality-sensitive-hashing">LSH</NoteLink>, SimHash, MinHash, multi-probe LSH | $L$ table entries | guarantees, no training, sets and streams | many tables, lower recall per byte |
+| partitioning | cluster, then search the nearest clusters | <NoteLink to="inverted-file-index">IVF</NoteLink>, inverted multi-index | vector + id | cheap to build and update, GPU-friendly | misses at cell boundaries |
+| compression | encode vectors in a few bytes, compare codes | <NoteLink to="product-quantisation">PQ</NoteLink>, <NoteLink to="optimised-product-quantisation">OPQ</NoteLink>, <NoteLink to="additive-and-residual-quantisation">RQ, AQ, LSQ, QINCo</NoteLink>, <NoteLink to="scalar-quantisation-and-binary-codes">SQ8, binary codes</NoteLink>, <NoteLink to="scann-and-anisotropic-quantisation">anisotropic VQ</NoteLink> | 4 to 64 bytes | billions of vectors in RAM | approximate distances, needs re-ranking |
+| graphs | link each vector to well-chosen neighbours and walk greedily | <NoteLink to="hnsw">HNSW</NoteLink>, NSW, <NoteLink to="graph-based-ann">NSG, Vamana/DiskANN, NGT</NoteLink> | vector + $2M$ links | best recall per distance computation | memory, slow build, deletions |
+| trees | split space recursively, search leaves best-first | <NoteLink to="tree-based-ann">randomised k-d forests, FLANN, Annoy, RP trees</NoteLink> | vector + tree nodes | simple, static files, low dimensions | weak in high dimensions |
+
+The families combine. The most common production index is a partition with compressed codes, the inverted file with
+product quantisation <Cite id="jegou2011" />. Graphs are used over compressed vectors, as the coarse quantiser of an
+inverted file, and on SSDs with compressed codes in RAM <Cite id="subramanya2019" />. Libraries package the combinations:
+<NoteLink to="faiss">FAISS</NoteLink> composes them from a factory string <Cite id="douze2024" />, and ScaNN chains a
+partition, anisotropic quantisation and re-scoring <Cite id="guo2020" />.
+
+## Lineage
+
+| year | method | contribution |
+| --- | --- | --- |
+| 1975–77 | k-d tree | exact logarithmic search in low dimensions |
+| 1997 | best-bin-first, MinHash | approximate tree search; hashing for set similarity |
+| 1998 | LSH (Indyk–Motwani) | sublinear $O(n^\rho)$ query time with guarantees |
+| 1998 | Weber et al. | trees lose to a scan above about 10 dimensions |
+| 2002 | SimHash | random hyperplanes for angles |
+| 2004 | p-stable LSH | LSH for Euclidean distance |
+| 2007 | multi-probe LSH | fewer tables by probing nearby buckets |
+| 2008 | random k-d forests, spectral hashing, RP trees | multiple randomised trees; learnt binary codes |
+| 2009 | FLANN | automatic choice of algorithm and parameters |
+| 2011 | product quantisation, IVFADC, ITQ | compressed codes with asymmetric distances; learnt rotation for binary codes |
+| 2012 | inverted multi-index | $K^2$ cells from two codebooks |
+| 2013 | OPQ | learnt rotation before PQ |
+| 2014 | NSW, additive quantisation, ALSH | navigable graphs; codes as sums; MIPS reductions |
+| 2015–17 | PQ fast-scan, polysemous codes, FAISS | SIMD look-ups; Hamming filtering of PQ codes; billion-scale GPU search |
+| 2016 | HNSW (journal version 2018) | hierarchical navigable small-world graphs |
+| 2018 | Link and code | graphs over compressed vectors |
+| 2019 | NSG, DiskANN, spreading vectors | monotonic graphs; $\alpha$-pruned graphs on SSD; learnt uniform embeddings |
+| 2020 | ScaNN, ann-benchmarks paper | score-aware quantisation; standard benchmark |
+| 2021, 2023 | Big ANN challenges | billion-scale, SSD, filtered and streaming tracks |
+| 2024 | The Faiss library, QINCo, RaBitQ | library design; neural codebooks; binary codes with error bounds |
+
+## How to choose
+
+The right index follows from four questions: how many vectors, how much memory, how often the data change, and what
+hardware is available. The pointers below summarise the notes and the FAISS guidelines.
+
+- **Under about $10^4$ to $10^5$ vectors, or few queries.** A full scan, on a GPU if available, is exact and fast
+  enough. An index costs more to build than it saves.
+- **Up to about $10^7$ vectors, memory available.** HNSW gives high recall at low latency. An inverted file with full or
+  scalar-quantised vectors is cheaper to build and update, and is competitive on clustered data.
+- **$10^8$ to $10^9$ vectors in RAM.** An inverted file with product or additive quantisation of residuals, an HNSW
+  coarse quantiser over $2^{16}$ to $2^{20}$ centroids, fast-scan codes, and re-ranking of a short list.
+- **Billions of vectors on one machine with an SSD.** DiskANN: a graph and full vectors on disk, compressed codes in RAM.
+- **Inner-product scores.** Use an index that supports inner product directly, or reduce to Euclidean search by adding
+  one coordinate.
+- **Frequent updates and deletions.** Inverted files handle both cheaply. Graphs need a repair scheme such as
+  FreshDiskANN's.
+- **GPU.** Exact search, IVF-Flat and IVF-PQ run well on GPUs <Cite id="johnson2019" />; graph walks are harder to
+  parallelise.
+
+Whatever the choice, measure recall on held-out queries against exact ground truth, and compare indexes by recall
+against speed at equal memory <Cite id="aumuller2020" />.
