@@ -1,0 +1,191 @@
+---
+title: Stochastic calculus
+kind: overview
+summary: 'Stochastic calculus is calculus for functions driven by Brownian motion $W_t$. Brownian paths have no derivative, and $(dW)^2 = dt$, so the chain rule gains a second-order term. The theory describes how a cloud of noisy particles moves, and it is the mathematics of diffusion models.'
+tags: [probability, stochastic-processes, stochastic-differential-equations, diffusion-models]
+aliases: [Itô calculus, stochastic analysis, calculus of Brownian motion]
+requires: [brownian-motion]
+related: [ordinary-differential-equations, heat-equation, langevin-dynamics, score-based-generative-models, random-walk, martingale]
+references: [oksendal2003, sarkka2019, karatzas1998, song2021]
+status: draft
+updated: 2026-09-27
+---
+
+import { RoughPath, SectionMap } from './StochasticCalculusFigures'
+
+<Definition>
+**Stochastic calculus** is the calculus of processes driven by a <NoteLink to="brownian-motion">Brownian
+motion</NoteLink> $W_t$. It defines integrals $\int_0^T H_t\, dW_t$ against Brownian increments, gives the chain rule
+for $f(X_t)$ when $X_t$ is noisy (Itô's lemma), and uses both to make sense of stochastic differential equations
+$dX_t = f(X_t, t)\,dt + g(X_t, t)\,dW_t$ <Cite id="oksendal2003" />. Its central fact is that over a short time $dt$
+the squared Brownian increment $(dW_t)^2$ equals $dt$, not zero.
+</Definition>
+
+## A particle that jitters
+
+Drop a speck of pollen into water. Water molecules hit the speck from every side, many times a second, and the speck
+jitters. Over a short time $h$ its displacement is the sum of many tiny independent kicks, so by the
+<NoteLink to="central-limit-theorem">central limit theorem</NoteLink> it is Gaussian with variance proportional to $h$.
+In one dimension, with unit variance per unit time, the displacement over time $h$ is $\Delta W \sim \Gauss(0, h)$.
+This is Brownian motion.
+
+Now add a force, such as a spring pulling the speck back to the centre. The speck's motion now has two parts, and each
+is an idea met earlier.
+
+**The drift is an ordinary differential equation.** Without the water, the spring alone moves the speck by the rule
+$\dot x = f(x, t)$, an <NoteLink to="ordinary-differential-equations">ordinary differential equation</NoteLink> whose
+right-hand side is a <NoteLink to="vector-fields-and-flows">vector field</NoteLink> telling the speck which way to go
+and how fast. For a spring of stiffness $\theta$, $f(x) = -\theta x$: the
+<NoteLink to="first-order-linear-odes">exponential decay</NoteLink> $x(t) = x_0 e^{-\theta t}$. With $\theta = 2$ and
+$x_0 = 1$, the speck is at $e^{-2} \approx 0.135$ after one unit of time. Over a short time $h$ the drift moves the speck
+by $f(x, t)\,h$, which is one step of <NoteLink to="numerical-ode-solvers">Euler's method</NoteLink>.
+
+**The noise is the Brownian kick.** Without the spring, the water alone moves the speck by $\Delta W \sim \Gauss(0, h)$,
+scaled by a noise level $g(x, t)$. With $g = \sigma$ constant this is Brownian motion with variance $\sigma^2$ per unit
+time, and its density spreads out as the <NoteLink to="heat-equation">heat equation</NoteLink> describes.
+
+**Together.** Over a short time $h$ the speck moves by the drift step plus the kick:
+
+$$
+X_{t+h} = X_t + f(X_t, t)\,h + g(X_t, t)\,\Delta W, \qquad \Delta W \sim \Gauss(0, h).
+$$
+
+With $\theta = 2$, $\sigma = 0.5$, $X_t = 1$ and $h = 0.01$, the drift contributes $-2 \cdot 1 \cdot 0.01 = -0.02$. A
+standard normal draw $z = 0.8$ gives the kick $0.5 \cdot \sqrt{0.01} \cdot 0.8 = 0.04$. So $X_{t+h} = 1.02$: in this
+step the kick outweighed the pull. The kick scales as $\sqrt h$ and the drift as $h$, so over a single short step the
+noise dominates. Over many steps the drift accumulates steadily while the kicks partly cancel, and the spring wins on
+average: the speck settles into a cloud around the centre with variance $\sigma^2 / (2\theta) = 0.0625$ instead of
+collapsing to 0.
+
+Letting $h$ shrink turns the step into a **stochastic differential equation** (SDE):
+
+$$
+dX_t = \underbrace{f(X_t, t)\,dt}_{\text{drift: the ODE}} + \underbrace{g(X_t, t)\,dW_t}_{\text{noise: Brownian kicks}}.
+$$
+
+The two limits recover what came before. With $g = 0$ it is the ODE $\dot x = f$. With $f = 0$ and $g = 1$ it is
+Brownian motion. The spring example, $f = -\theta x$ and $g = \sigma$, is the
+<NoteLink to="ornstein-uhlenbeck-process">Ornstein–Uhlenbeck process</NoteLink>, and the step above is the
+<NoteLink to="euler-maruyama-method">Euler–Maruyama method</NoteLink> for simulating it.
+
+Ordinary calculus cannot read this equation, because $dW_t$ has no $dt$ to divide by. The rest of this note explains
+why, and maps the notes that fix it.
+
+## Why ordinary calculus breaks
+
+The kick $\Delta W$ over time $h$ has standard deviation $\sqrt h$. For small $h$, $\sqrt h$ is much larger than $h$:
+at $h = 10^{-4}$ the kick is about $10^{-2}$. Two consequences follow.
+
+**The path has no slope.** The difference quotient $\Delta W / h$ has standard deviation $\sqrt h / h = 1/\sqrt h$,
+which grows without bound as $h \to 0$. Its mean absolute value is $\sqrt{2/(\pi h)}$, because
+$\expect\abs{Z} = \sqrt{2/\pi}$ for a standard normal $Z$. No limit exists, so $dW/dt$ is meaningless. With probability
+1 a Brownian path is differentiable at no time at all. An equation like $dX = g\,dW$ cannot be divided by $dt$ and
+solved as an ordinary differential equation.
+
+**Squared increments do not vanish.** In ordinary calculus a squared increment $(\Delta x)^2$ is of order $h^2$ and
+disappears in the limit. For Brownian motion $\expect[(\Delta W)^2] = h$ and $\var[(\Delta W)^2] = 2h^2$. Split
+$[0, T]$ into $n$ steps of length $h = T/n$. The squared increments are independent, so their sum has
+
+$$
+\expect\brack{\sum_{j=1}^n (\Delta W_j)^2} = nh = T, \qquad \var\brack{\sum_{j=1}^n (\Delta W_j)^2} = 2nh^2 =
+\frac{2T^2}{n} \to 0.
+$$
+
+The sum of squared increments over $[0, T]$ converges to the constant $T$. Each $(\Delta W)^2$ is random, but their
+fluctuations average out, and in sums they behave exactly like $h$. This is the rule
+
+$$
+(dW_t)^2 = dt, \qquad dW_t\,dt = 0, \qquad (dt)^2 = 0,
+$$
+
+which is the whole of the difference between stochastic and ordinary calculus. The other two products vanish because
+$\sum \abs{\Delta W_j}\, h \approx \sqrt h\, T \to 0$ and $\sum h^2 = hT \to 0$.
+
+<RoughPath />
+
+In the figure the steps shrink from $h = 1/2$ to $h = 2^{-16}$. At $k = 16$ the mean slope is about 200 and still
+growing like $1/\sqrt h$, while the sum of squared increments stays within a few per cent of 1.
+
+## What goes wrong if the rule is ignored
+
+Take $f(w) = w^2$. The ordinary chain rule says $d(W^2) = 2W\,dW$. The right side has mean zero, because $dW$ is a
+fresh increment independent of $W$. So the ordinary chain rule predicts $\expect[W_t^2] = 0$ for all $t$. The truth is
+$\expect[W_t^2] = t$. The missing term is the second-order Taylor term $\tfrac12 f''(W)(dW)^2 = \tfrac12 \cdot 2 \cdot
+dt = dt$, which ordinary calculus discards and Itô calculus keeps:
+
+$$
+d(W_t^2) = 2W_t\,dW_t + dt.
+$$
+
+Taking expectations gives $d\expect[W_t^2] = dt$, so $\expect[W_t^2] = t$. Every result in this section is a
+consequence of keeping that one term.
+
+## The section
+
+<SectionMap />
+
+The notes build on one another in this order. Each reads on its own, given its prerequisites.
+
+1. <NoteLink to="ito-integral">The Itô integral</NoteLink> defines $\int_0^T H_t\,dW_t$ as a limit of sums that
+   evaluate $H$ at the left end of each step. It computes $\int_0^T W\,dW = \tfrac12(W_T^2 - T)$, shows that the
+   evaluation point changes the answer, and proves the Itô isometry.
+2. <NoteLink to="itos-lemma">Itô's lemma</NoteLink> is the chain rule with the extra $\tfrac12 g^2 f''\,dt$ term. It
+   solves geometric Brownian motion and computes moments such as $\expect[e^{W_t}] = e^{t/2}$.
+3. <NoteLink to="stochastic-differential-equations">Stochastic differential equations</NoteLink> are drift plus noise,
+   read as integral equations. The note covers existence and uniqueness and solves Brownian motion with drift and
+   geometric Brownian motion exactly.
+4. <NoteLink to="euler-maruyama-method">The Euler–Maruyama method</NoteLink> simulates any SDE: one drift step plus
+   one Gaussian kick of variance $g^2 h$. It converges with strong order $\tfrac12$ and weak order 1.
+5. <NoteLink to="ornstein-uhlenbeck-process">The Ornstein–Uhlenbeck process</NoteLink>
+   $dX = -\theta X\,dt + \sigma\,dW$ is the spring-and-noise model. It is Gaussian at every time, forgets its start at
+   rate $\theta$, and is the forward noising process of a variance-preserving diffusion model.
+6. <NoteLink to="fokker-planck-equation">The Fokker–Planck equation</NoteLink> switches from particles to densities: it
+   is the partial differential equation that the density $p_t(x)$ of $X_t$ obeys. For Brownian motion it is the heat
+   equation.
+7. <NoteLink to="reverse-time-stochastic-differential-equations">The reverse-time SDE</NoteLink> runs a diffusion
+   backwards. Its drift gains the term $-g^2\nabla\log p_t$, so reversing noise into data needs only the score.
+8. <NoteLink to="probability-flow-ode">The probability-flow ODE</NoteLink> is a deterministic flow with the same
+   densities $p_t$ as the SDE. It gives exact likelihoods and deterministic samplers.
+9. <NoteLink to="tweedies-formula">Tweedie's formula</NoteLink>
+   $\expect[x \mid y] = y + \sigma^2\nabla_y\log p(y)$ says that the best denoiser and the score are the same object.
+10. <NoteLink to="diffusion-models-as-stochastic-differential-equations">Diffusion models as SDEs</NoteLink> assembles
+    the pieces: a forward SDE, a score network trained by denoising, and a reverse-time SDE or probability-flow ODE for
+    sampling <Cite id="song2021" />.
+11. <NoteLink to="girsanov-theorem">Girsanov's theorem</NoteLink> compares two SDEs with different drifts. It gives
+    likelihood ratios and Kullback–Leibler divergences between whole paths.
+
+## Two views of one process
+
+Every note in the section moves between two descriptions of the same random motion.
+
+- **Particles.** Follow one path $X_t$. The tools are Itô integrals, Itô's lemma and the Euler–Maruyama simulation.
+  This view is how samples are generated.
+- **Densities.** Follow the distribution $p_t$ of $X_t$ over all paths. The tool is the Fokker–Planck equation, a
+  deterministic partial differential equation. This view is how a diffusion model is analysed and how it is trained.
+
+The two views meet in the probability-flow ODE, which moves individual particles deterministically so that their
+density follows the same $p_t$ as the noisy SDE.
+
+## Where it is used in machine learning
+
+- **Diffusion models** add noise with a forward SDE and generate by solving the reverse SDE or the probability-flow
+  ODE with a learned score <Cite id="song2021" />; see
+  <NoteLink to="score-based-generative-models">score-based generative models</NoteLink> and
+  <NoteLink to="denoising-diffusion-probabilistic-models">DDPM</NoteLink>.
+- **Langevin sampling** runs the SDE $dX = \nabla\log p(X)\,dt + \sqrt2\,dW$, whose stationary density is $p$; see
+  <NoteLink to="langevin-dynamics">Langevin dynamics</NoteLink> and
+  <NoteLink to="energy-based-models">energy-based models</NoteLink>.
+- **Stochastic gradient descent** with a small learning rate behaves approximately like an SDE, with noise set by the
+  mini-batch gradient covariance.
+- **Filtering and time series.** The Ornstein–Uhlenbeck process is the continuous-time AR(1) model, and
+  continuous-discrete Kalman filters propagate SDE moments between observations <Cite id="sarkka2019" />.
+
+## Assumptions and conventions
+
+- Noise is Brownian: Gaussian, independent increments, continuous paths. Jump noise needs other tools.
+- Integrals are Itô integrals, which evaluate the integrand at the start of each step. The Stratonovich convention,
+  which uses the midpoint, obeys the ordinary chain rule but changes the drift; the
+  <NoteLink to="ito-integral">Itô integral</NoteLink> note converts between them.
+- Limits are taken in mean square. The measure theory that makes them rigorous is in Øksendal
+  <Cite id="oksendal2003" /> and Karatzas and Shreve <Cite id="karatzas1998" />. Särkkä and Solin give an applied
+  treatment aimed at simulation and inference <Cite id="sarkka2019" />.

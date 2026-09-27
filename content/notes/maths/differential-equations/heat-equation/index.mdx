@@ -1,0 +1,239 @@
+---
+title: Heat equation
+kind: concept
+summary: 'The heat (diffusion) equation $\partial_tu = D\,\partial_x^2u$ is the limit of a random walk with step variance $2D\,\Delta t$. From a point source its solution is a Gaussian with variance $2Dt$, so it evolves any density by Gaussian convolution: the density of $X_0 + \sqrt{2D}\,B_t$ for Brownian motion $B_t$.'
+tags: [differential-equations, partial-differential-equations, diffusion, stochastic-processes, gaussian, diffusion-models, worked-example]
+aliases: [diffusion equation, heat kernel, fundamental solution of the heat equation, Gaussian kernel, Fick's second law, finite-difference method, explicit Euler scheme for the heat equation, von Neumann stability analysis, Crank–Nicolson method]
+requires: [partial-differential-equations, random-walk, gaussian-distribution, taylor-series]
+partOf: [partial-differential-equations]
+related: [brownian-motion, fokker-planck-equation, transport-and-continuity-equations, convolution, fourier-transform, score-based-generative-models, langevin-dynamics, numerical-ode-solvers]
+references: [evans2010, einstein1905, leveque2007, crank1947, song2021]
+status: draft
+updated: 2026-09-27
+---
+
+import { FiniteDifference } from './FiniteDifference'
+import { HeatParticles } from './HeatParticles'
+
+<Definition>
+The **heat equation** in one dimension, with diffusion coefficient $D > 0$, is
+
+$$
+\partial_tu(x, t) = D\,\partial_x^2u(x, t).
+$$
+
+In $d$ dimensions the second derivative becomes the Laplacian, $\partial_tu = D\,\Delta u$ with
+$\Delta u = \sum_i \partial^2u/\partial x_i^2$. On the whole line with initial condition $u(x, 0) = u_0(x)$, the
+solution is the convolution $u(\cdot, t) = G_t * u_0$ with the **heat kernel**
+
+$$
+G_t(x) = \frac{1}{\sqrt{4\pi Dt}}\exp\paren{-\frac{x^2}{4Dt}},
+$$
+
+the density of $\Gauss(0, 2Dt)$ <Cite id="evans2010" />.
+</Definition>
+
+## Intuition
+
+Put a drop of ink in a glass of still water. The ink spreads into a cloud that grows and fades. No current carries it:
+each ink molecule is knocked about at random by water molecules, and the cloud is the histogram of where all the
+molecules have wandered. The heat equation is the rule that this histogram obeys. Heat spreads through a metal rod the
+same way, carried by random molecular motion, which is where the name comes from.
+
+The equation says the density at a point rises when the point is lower than the average of its neighbours
+($\partial_x^2u > 0$) and falls when it is higher. Peaks sink, troughs fill, and the profile smooths.
+
+## From a random walk to the heat equation
+
+Let many independent particles move on a grid of spacing $\Delta x$. Every $\Delta t$, each particle steps left or right
+with probability $\tfrac12$ each. Let $p(x, t)$ be the fraction of particles at $x$ at time $t$. To be at $x$ at time
+$t + \Delta t$, a particle was at $x - \Delta x$ and stepped right, or at $x + \Delta x$ and stepped left:
+
+$$
+p(x, t + \Delta t) = \tfrac12\,p(x - \Delta x, t) + \tfrac12\,p(x + \Delta x, t).
+$$
+
+Expand both sides in a <NoteLink to="taylor-series">Taylor series</NoteLink>. On the left,
+$p(x, t + \Delta t) = p + \Delta t\,\partial_tp + O(\Delta t^2)$. On the right the first-derivative terms cancel:
+
+$$
+\begin{aligned}
+&\tfrac12\brack{p - \Delta x\,\partial_xp + \tfrac12\Delta x^2\,\partial_x^2p} + \tfrac12\brack{p + \Delta x\,\partial_xp +
+\tfrac12\Delta x^2\,\partial_x^2p} + O(\Delta x^4) \\
+&\qquad = p + \tfrac12\Delta x^2\,\partial_x^2p + O(\Delta x^4).
+\end{aligned}
+$$
+
+Subtract $p$ from both sides and divide by $\Delta t$:
+
+$$
+\partial_tp = \frac{\Delta x^2}{2\Delta t}\,\partial_x^2p + O(\Delta t) + O\paren{\frac{\Delta x^4}{\Delta t}}.
+$$
+
+Now let $\Delta x$ and $\Delta t$ shrink together with $D = \Delta x^2/(2\Delta t)$ held fixed. The error terms vanish
+and the heat equation remains. The scaling is the essential point: space steps must shrink like the square root of time
+steps. That is the scaling of <NoteLink to="brownian-motion">Brownian motion</NoteLink>, whose displacement over time
+$h$ is of size $\sqrt h$. Einstein used this argument in 1905 to connect the diffusion coefficient of pollen grains to
+molecular motion <Cite id="einstein1905" />.
+
+<HeatParticles />
+
+## The fundamental solution is a Gaussian
+
+A single particle starting at 0 has, after $n = t/\Delta t$ steps, a position that is a sum of $n$ independent
+$\pm\Delta x$ steps. Its mean is 0 and its variance is $n\,\Delta x^2 = t\,\Delta x^2/\Delta t = 2Dt$. By the
+<NoteLink to="central-limit-theorem">central limit theorem</NoteLink> its distribution tends to $\Gauss(0, 2Dt)$. So
+the density that starts as a spike at 0 should be
+
+$$
+G_t(x) = \frac{1}{\sqrt{4\pi Dt}}\exp\paren{-\frac{x^2}{4Dt}}.
+$$
+
+This can be checked directly. Write $G$ for $G_t(x)$. Differentiating,
+
+$$
+\partial_tG = G\paren{-\frac{1}{2t} + \frac{x^2}{4Dt^2}}, \qquad \partial_xG = -\frac{x}{2Dt}\,G, \qquad
+\partial_x^2G = G\paren{-\frac{1}{2Dt} + \frac{x^2}{4D^2t^2}}.
+$$
+
+Multiplying the last by $D$ gives exactly $\partial_tG$, so $G$ solves the heat equation. As $t \to 0$ it concentrates
+all its unit mass at $x = 0$. The variance $2Dt$ grows linearly in time, so the width grows like $\sqrt t$. With
+$D = \tfrac12$ the kernel is $\Gauss(0, t)$, the density of standard Brownian motion at time $t$.
+
+**Worked example (why tea is stirred).** Sugar molecules in water have $D \approx 5 \times 10^{-10}$ m²/s. The
+typical distance diffused, the standard deviation $\sqrt{2Dt}$, is $\sqrt{2 \times 5 \times 10^{-10} \times 3600} =
+1.9$ mm after an hour and $9.3$ mm after a day. Diffusion alone is hopeless over the width of a cup. Doubling the
+distance takes four times as long.
+
+<Derivation title="The Gaussian from the Fourier transform">
+Take the <NoteLink to="fourier-transform">Fourier transform</NoteLink> in $x$,
+$\hat u(k, t) = \int u(x, t)\,e^{-ikx}\,dx$. Each $x$-derivative becomes a factor $ik$, so $\partial_x^2$ becomes
+$-k^2$ and the PDE becomes an ODE for each frequency:
+
+$$
+\partial_t\hat u(k, t) = -Dk^2\,\hat u(k, t) \quad\Longrightarrow\quad \hat u(k, t) = e^{-Dk^2t}\,\hat u_0(k).
+$$
+
+A product of transforms is the transform of a convolution, so $u = G_t * u_0$ where $\hat G_t(k) = e^{-Dk^2t}$. That
+is the characteristic function of $\Gauss(0, 2Dt)$, since a Gaussian with variance $\sigma^2$ has
+$\expect\brack{e^{-ikX}} = e^{-\sigma^2k^2/2}$.
+</Derivation>
+
+## Solutions as Gaussian convolution
+
+The heat equation is linear, so solutions add. Any initial density $u_0$ is a superposition of point sources, a source
+of strength $u_0(y)\,dy$ at each $y$. Each spreads into $u_0(y)\,G_t(x - y)$, and adding them gives
+
+$$
+u(x, t) = \int u_0(y)\,G_t(x - y)\,dy = \paren{G_t * u_0}(x).
+$$
+
+The probabilistic meaning is direct. If $X_0$ has density $u_0$ and $B_t$ is an independent Brownian motion, then
+$X_t = X_0 + \sqrt{2D}\,B_t$ adds independent $\Gauss(0, 2Dt)$ noise, and the density of a sum of independent
+variables is the <NoteLink to="convolution">convolution</NoteLink> of their densities. **Running the heat equation for
+time $t$ is adding Gaussian noise of variance $2Dt$.**
+
+**Worked example (two sources).** Start with half the mass at $-1$ and half at $+1$, with $D = \tfrac12$. At time $t$
+the density is $\tfrac12\Gauss(x; -1, t) + \tfrac12\Gauss(x; 1, t)$. At $t = 1$ the density at 0 is
+$\tfrac12\varphi(1) + \tfrac12\varphi(1) = 0.242$, where $\varphi$ is the standard normal density. For $t < 1$ the
+density has two peaks. At $t = 1$ they merge, and for $t \ge 1$ it has a single peak at 0. An equal mixture of
+$\Gauss(\pm\mu, \sigma^2)$ is unimodal exactly when $\mu \le \sigma$.
+
+That example is a diffusion model's forward process in miniature. A **variance-exploding** diffusion model noises data
+by $\xvec_t = \xvec_0 + \sigma(t)\,\zvec$, so the density of $\xvec_t$ is the data distribution run through the heat
+equation to time $t$ with $2Dt = \sigma(t)^2$ <Cite id="song2021" />. At large noise levels the modes of the data merge
+into one Gaussian, which is easy to sample; the generative model learns to undo the smoothing.
+
+## Smoothing in frequency
+
+The Fourier derivation shows what the heat equation does to each frequency $k$: it multiplies it by $e^{-Dk^2t}$.
+Frequency $2k$ decays four times faster than frequency $k$. Sharp edges, which are made of high frequencies, blur
+first; broad shapes last. This is **Gaussian blur** in image processing, where the blur radius $\sigma$ corresponds to
+$\sqrt{2Dt}$. Blurring twice with widths $\sigma_1$ and $\sigma_2$ equals blurring once with width
+$\sqrt{\sigma_1^2 + \sigma_2^2}$, because running the equation for $t_1$ and then $t_2$ runs it for $t_1 + t_2$.
+
+## Properties
+
+- **Mass is conserved.** $\frac{d}{dt}\int u\,dx = D\int\partial_x^2u\,dx = D\brack{\partial_xu}_{-\infty}^{\infty} =
+  0$ for densities that decay at infinity. Particles are neither created nor destroyed.
+- **Positivity and the maximum principle.** A convolution with a positive kernel keeps densities positive, and the
+  solution never exceeds the maximum of its initial values.
+- **Infinite speed.** For any $t > 0$, $G_t(x) > 0$ for every $x$: a disturbance is felt everywhere at once, though
+  far away it is exponentially small.
+- **Irreversibility.** Running the equation backwards multiplies frequency $k$ by $e^{+Dk^2t}$, which amplifies
+  small high-frequency errors without bound. The backward heat equation is ill posed. Reversing diffusion needs
+  extra information about the density, which is what the score $\nabla\log p_t$ provides in the
+  <NoteLink to="reverse-time-stochastic-differential-equations">reverse-time SDE</NoteLink> of
+  <NoteLink to="score-based-generative-models">score-based generative models</NoteLink>.
+
+## The heat equation as a continuity equation
+
+The heat equation can be written as the <NoteLink to="transport-and-continuity-equations">continuity equation</NoteLink>
+of a velocity field. Since $\partial_xu = u\,\partial_x\log u$,
+
+$$
+\partial_tu = D\,\partial_x^2u = \partial_x\paren{D\,u\,\partial_x\log u} = -\partial_x\paren{u\,v}, \qquad v(x, t) =
+-D\,\partial_x\log u(x, t).
+$$
+
+So the density evolves exactly as if each particle moved deterministically with velocity $v = -D\,\partial_x\log u$,
+down the gradient of the log-density. Random particles and these deterministic particles have the same density at every
+time, although individual paths differ. With a drift added, the heat equation becomes the
+<NoteLink to="fokker-planck-equation">Fokker–Planck equation</NoteLink>, and the same rewriting turns it into the
+<NoteLink to="probability-flow-ode">probability flow ODE</NoteLink> of a diffusion model.
+
+## Finite differences
+
+To solve the heat equation on a computer, put $u$ on a grid $x_j = j\,\Delta x$, $t_n = n\,\Delta t$, and replace
+derivatives by differences. The forward difference in time and the centred second difference in space give the
+**explicit scheme**
+
+$$
+u_j^{n+1} = u_j^n + r\paren{u_{j+1}^n - 2u_j^n + u_{j-1}^n}, \qquad r = \frac{D\,\Delta t}{\Delta x^2}.
+$$
+
+It is Euler's method applied to the system of ODEs obtained by discretising space. Its error is $O(\Delta t) +
+O(\Delta x^2)$ <Cite id="leveque2007" />.
+
+**Stability.** Rewrite the update as $u_j^{n+1} = r\,u_{j-1}^n + (1 - 2r)\,u_j^n + r\,u_{j+1}^n$. When $r \le \tfrac12$
+all three weights are non-negative and sum to 1: each new value is an average of old values, so the scheme cannot
+create new maxima. It is the random walk from the start of this note, with probability $1 - 2r$ of staying put.
+
+When $r > \tfrac12$ the centre weight is negative. To see what goes wrong, try a single Fourier mode
+$u_j^n = \xi^n e^{ikj\Delta x}$. Substituting gives the amplification factor per step:
+
+$$
+\xi = 1 + r\paren{e^{ik\Delta x} - 2 + e^{-ik\Delta x}} = 1 - 2r\paren{1 - \cos k\Delta x} = 1 - 4r\sin^2\frac{k
+\Delta x}{2}.
+$$
+
+The worst mode is the saw-tooth $k\Delta x = \pi$, alternating signs from point to point, with $\xi = 1 - 4r$. Stability
+needs $\abs{\xi} \le 1$ for every $k$, which holds exactly when $r \le \tfrac12$:
+
+$$
+\Delta t \le \frac{\Delta x^2}{2D}.
+$$
+
+**Worked example.** With $D = 1$ and $\Delta x = 0.1$, the time step must satisfy $\Delta t \le 0.005$. Halving
+$\Delta x$ to get a finer picture forces $\Delta t$ down by a factor of 4, so the cost of reaching a fixed time rises
+by a factor of 8. The **Crank–Nicolson** scheme averages the explicit and implicit updates, is stable for every
+$\Delta t$ and has error $O(\Delta t^2) + O(\Delta x^2)$, at the price of a tridiagonal solve per step
+<Cite id="crank1947" />.
+
+<FiniteDifference />
+
+## Assumptions
+
+- The medium is uniform: $D$ does not depend on $x$, $t$ or $u$. With variable $D(x)$ the equation becomes
+  $\partial_tu = \partial_x\paren{D(x)\,\partial_xu}$.
+- The solution formula $G_t * u_0$ is for the whole line. On a bounded interval, boundary conditions change the
+  solution, and separation of variables or images replaces the single Gaussian.
+
+## Pitfalls
+
+- **Variance $2Dt$, not $Dt$.** Physics writes $\partial_tu = D\,\partial_x^2u$ with variance $2Dt$. Probability often
+  writes $\partial_tp = \tfrac12\,\partial_x^2p$ for Brownian motion, which is $D = \tfrac12$ and variance $t$.
+- **Explicit schemes on fine grids.** The stability limit $\Delta t \le \Delta x^2/(2D)$ makes explicit schemes very
+  slow on fine grids. The heat equation is stiff once discretised.
+- **Running it backwards.** Deblurring by solving the heat equation in reverse amplifies noise exponentially in
+  frequency. It needs regularisation or a prior.

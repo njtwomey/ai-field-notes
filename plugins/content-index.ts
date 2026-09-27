@@ -126,6 +126,7 @@ function flattenCategories(nodes: CategoryInput[], prefix = ''): CategoryNode[] 
       title: n.title,
       description: n.description,
       icon: n.icon,
+      index: n.index === true ? n.id : n.index || undefined,
       children: flattenCategories(n.children ?? [], p),
     }
   })
@@ -281,6 +282,24 @@ export function buildIndex(
       if (!(key in references)) errors.push(`${where}: unknown reference "${key}" (see references.yaml)`)
     }
   }
+  // A category's index note must exist and live inside that category.
+  const byNoteSlug = new Map(notes.map((n) => [n.slug, n]))
+  const indexed = new Map<string, string>()
+  const checkIndex = (nodes: CategoryNode[]) =>
+    nodes.forEach((c) => {
+      if (c.index) {
+        const other = indexed.get(c.index)
+        if (other) errors.push(`content/taxonomy.yaml: "${c.index}" is the index of both ${other} and ${c.path}`)
+        indexed.set(c.index, c.path)
+        const n = byNoteSlug.get(c.index)
+        if (!n) errors.push(`content/taxonomy.yaml: ${c.path} index → unknown note "${c.index}"`)
+        else if (n.category !== c.path && !n.category.startsWith(`${c.path}/`))
+          errors.push(`content/taxonomy.yaml: ${c.path} index "${c.index}" is in ${n.category}, outside the category`)
+      }
+      checkIndex(c.children)
+    })
+  checkIndex(taxonomy)
+
   if (errors.length && strict) throw new Error(`Content validation failed:\n${errors.join('\n')}`)
 
   // Lenient: remove dangling references so components never look up something that does not exist.

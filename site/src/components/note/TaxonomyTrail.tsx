@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronRight, CornerDownRight, LayoutGrid } from 'lucide-react'
+import { BookOpen, Check, ChevronDown, ChevronRight, CornerDownRight, LayoutGrid } from 'lucide-react'
 import { Fragment } from 'react'
 import { Link, useNavigate } from 'react-router'
 import {
@@ -13,6 +13,8 @@ import {
 import { kindIcons } from '@/components/layout/kind-icon'
 import {
   browseUrl,
+  categoryIndexNote,
+  indexFirst,
   kindLabels,
   categoryTrail,
   notesInCategory,
@@ -89,6 +91,7 @@ function CategoryCrumb({
   className?: string
 }) {
   const navigate = useNavigate()
+  const lead = categoryIndexNote(node.path)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -104,6 +107,12 @@ function CategoryCrumb({
         <ChevronDown className="size-3 shrink-0 opacity-60" aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-auto min-w-56">
+        {lead && (
+          <DropdownMenuItem onClick={() => navigate(noteUrl(lead.slug))} className="font-medium">
+            <BookOpen /> {lead.title}
+            <span className="ml-auto pl-4 text-xs text-muted-foreground">start here</span>
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem onClick={() => navigate(browseUrl({ c: node.path }))}>
           <LayoutGrid /> Browse {node.title}
           <span className="ml-auto pl-4 text-xs text-muted-foreground tabular-nums">
@@ -162,7 +171,12 @@ function CategoryCrumb({
 /** The current note, opening the other notes filed in the same category. */
 export function NoteCrumb({ note, className }: { note: NoteMeta; className?: string }) {
   const navigate = useNavigate()
-  const siblings = notesInCategory(note.category, false).sort((a, b) => a.title.localeCompare(b.title))
+  // The category's index note leads, set apart; the rest follow alphabetically.
+  const siblings = indexFirst(
+    notesInCategory(note.category, false).sort((a, b) => a.title.localeCompare(b.title)),
+    note.category,
+  )
+  const lead = categoryIndexNote(note.category)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger aria-current="page" className={cn(triggerClass, 'font-semibold text-foreground', className)}>
@@ -173,10 +187,17 @@ export function NoteCrumb({ note, className }: { note: NoteMeta; className?: str
         <DropdownMenuGroup>
           <DropdownMenuLabel>{categoryTrail(note.category).at(-1)?.title}</DropdownMenuLabel>
           {siblings.map((n) => (
-            <DropdownMenuItem key={n.slug} onClick={() => navigate(noteUrl(n.slug))}>
-              <Check className={cn(n.slug !== note.slug && 'invisible')} />
-              <span className="truncate">{n.title}</span>
-            </DropdownMenuItem>
+            <Fragment key={n.slug}>
+              <DropdownMenuItem
+                onClick={() => navigate(noteUrl(n.slug))}
+                className={cn(n.slug === lead?.slug && 'font-medium')}
+              >
+                <Check className={cn(n.slug !== note.slug && 'invisible')} />
+                <span className="truncate">{n.title}</span>
+                {n.slug === lead?.slug && <span className="ml-auto pl-4 text-xs text-muted-foreground">overview</span>}
+              </DropdownMenuItem>
+              {n.slug === lead?.slug && siblings.length > 1 && <DropdownMenuSeparator />}
+            </Fragment>
           ))}
         </DropdownMenuGroup>
       </DropdownMenuContent>

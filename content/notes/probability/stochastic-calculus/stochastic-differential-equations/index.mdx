@@ -1,0 +1,156 @@
+---
+title: Stochastic differential equations
+kind: concept
+summary: 'A stochastic differential equation $dX_t = f(X_t, t)\,dt + g(X_t, t)\,dW_t$ moves a state by a deterministic drift $f$ plus Brownian noise scaled by $g$. It means the integral equation $X_t = X_0 + \int_0^t f\,ds + \int_0^t g\,dW$, with an Itô integral for the noise.'
+tags: [probability, stochastic-processes, stochastic-differential-equations, diffusion-models, worked-example]
+aliases: [SDE, SDEs, diffusion process, Itô diffusion, drift and diffusion coefficients, geometric Brownian motion, Brownian motion with drift]
+requires: [itos-lemma, ito-integral, brownian-motion]
+related: [euler-maruyama-method, ornstein-uhlenbeck-process, fokker-planck-equation, ordinary-differential-equations, langevin-dynamics]
+references: [oksendal2003, sarkka2019, karatzas1998]
+status: draft
+updated: 2026-09-27
+---
+
+import { DriftAndNoise } from './DriftAndNoise'
+
+<Definition>
+A **stochastic differential equation** (SDE) for a process $X_t \in \reals^d$ is
+
+$$
+dX_t = f(X_t, t)\,dt + g(X_t, t)\,dW_t, \qquad X_0 = x_0,
+$$
+
+where $f$ is the **drift**, $g$ the **diffusion coefficient** and $W_t$ a <NoteLink to="brownian-motion">Brownian
+motion</NoteLink>. The equation is shorthand for the integral equation
+
+$$
+X_t = x_0 + \int_0^t f(X_s, s)\,ds + \int_0^t g(X_s, s)\,dW_s,
+$$
+
+whose second integral is an <NoteLink to="ito-integral">Itô integral</NoteLink>. A solution is a process adapted to the
+Brownian motion that satisfies this equation for all $t$ with probability 1 <Cite id="oksendal2003" />.
+</Definition>
+
+## Intuition: an ODE with kicks
+
+An <NoteLink to="ordinary-differential-equations">ordinary differential equation</NoteLink> $dx/dt = f(x, t)$ says how
+a state moves: over a short time $h$ it moves by $f\,h$. An SDE adds a random kick: over time $h$ the state moves by
+
+$$
+X_{t+h} - X_t \approx f(X_t, t)\,h + g(X_t, t)\,\sqrt h\,Z, \qquad Z \sim \Gauss(0, 1).
+$$
+
+The drift is the average velocity. The diffusion coefficient scales the kick, whose standard deviation is $g\sqrt h$.
+Over a short time the kick dominates, because $\sqrt h \gg h$. Over a long time the drift dominates in the mean,
+because drift accumulates like $t$ while independent kicks accumulate like $\sqrt t$.
+
+Examples of drift and noise:
+
+- A cup of tea cooling in a draughty room: the drift pulls the temperature towards the room temperature, and the
+  draughts add noise.
+- A share price: the drift is the expected return, and the noise is proportional to the price.
+- A data point in a diffusion model: the drift shrinks it towards zero, and the noise gradually replaces it with a
+  Gaussian draw.
+
+Two things cannot be done with an SDE. It cannot be divided by $dt$, because Brownian paths have no derivative. And it
+cannot be solved by the ordinary chain rule, because the rule misses the $\tfrac12 g^2 f''$ term of
+<NoteLink to="itos-lemma">Itô's lemma</NoteLink>.
+
+## Existence and uniqueness
+
+If $f$ and $g$ are Lipschitz in $x$ and grow at most linearly, $\abs{f(x, t)} + \abs{g(x, t)} \le C(1 + \abs{x})$,
+then the SDE has exactly one solution for every starting point, and it has finite variance at every time
+<Cite id="oksendal2003" />. The proof is the same Picard iteration that proves existence for ordinary differential
+equations, with the Itô isometry controlling the noise term. Drifts that grow faster, such as $f(x) = x^2$, can blow up
+in finite time, as in the deterministic case.
+
+The solution is a **Markov process**: given $X_s$, the future after time $s$ depends only on the Brownian increments
+after $s$. It is also called a **diffusion process**.
+
+## Worked example 1: Brownian motion with drift
+
+The SDE $dX = \mu\,dt + \sigma\,dW$ has constant coefficients. The integral equation integrates directly:
+
+$$
+X_t = x_0 + \mu t + \sigma W_t \sim \Gauss\paren{x_0 + \mu t,\ \sigma^2 t}.
+$$
+
+With $x_0 = 0$, $\mu = 0.3$ and $\sigma = 0.8$, the state at $t = 5$ has mean $1.5$ and standard deviation
+$0.8\sqrt5 = 1.79$. The probability that it is below the start is $\Phi(-1.5/1.79) = \Phi(-0.84) = 0.20$. The drift
+wins over the noise on average, but one path in five still ends below zero.
+
+## Worked example 2: geometric Brownian motion
+
+The SDE $dX = \mu X\,dt + \sigma X\,dW$ has noise proportional to the state. <NoteLink to="itos-lemma">Itô's
+lemma</NoteLink> applied to $\log X$ gives $d\log X = (\mu - \tfrac12\sigma^2)\,dt + \sigma\,dW$, a Brownian motion
+with drift. Exponentiating,
+
+$$
+X_t = x_0 \exp\paren{\paren{\mu - \tfrac12\sigma^2}t + \sigma W_t}.
+$$
+
+Check that it solves the SDE: apply Itô's lemma to $h(w, t) = x_0\exp\paren{(\mu - \tfrac12\sigma^2)t + \sigma w}$. The
+derivatives are $\partial_t h = (\mu - \tfrac12\sigma^2)h$, $\partial_w h = \sigma h$ and $\partial_w^2 h = \sigma^2
+h$, so
+
+$$
+dX = \paren{\mu - \tfrac12\sigma^2 + \tfrac12\sigma^2}X\,dt + \sigma X\,dW = \mu X\,dt + \sigma X\,dW.
+$$
+
+Two statistics behave differently.
+
+- The **mean** obeys $\frac{d}{dt}\expect X = \mu\,\expect X$, so $\expect X_t = x_0 e^{\mu t}$. Noise does not
+  affect it.
+- The **median** is $x_0 e^{(\mu - \sigma^2/2)t}$. Noise lowers it.
+
+With $x_0 = 1$, $\mu = 0.1$ and $\sigma = 0.5$, the log drift is $0.1 - 0.125 = -0.025$. After 10 years the mean is
+$e^{1} = 2.72$ and the median is $e^{-0.25} = 0.78$. The probability of ending below the start is
+$\Phi(0.025 \times 10 / (0.5\sqrt{10})) = \Phi(0.158) = 0.56$. As $t \to \infty$ almost every path tends to zero while
+the mean grows without bound: the mean is carried by a shrinking fraction of paths that grow very large.
+
+<DriftAndNoise />
+
+## Worked example 3: a linear SDE with state-dependent drift
+
+The <NoteLink to="ornstein-uhlenbeck-process">Ornstein–Uhlenbeck process</NoteLink> $dX = -\theta X\,dt + \sigma\,dW$
+has a drift that pulls towards zero. Its mean obeys $m' = -\theta m$ and its variance obeys $v' = -2\theta v +
+\sigma^2$, which follow from Itô's lemma applied to $x$ and $x^2$:
+
+$$
+d(X^2) = 2X\,dX + (dX)^2 = \paren{-2\theta X^2 + \sigma^2}dt + 2\sigma X\,dW.
+$$
+
+Taking expectations gives the variance equation. The variance settles at $\sigma^2/(2\theta)$, where the pull and the
+noise balance. The Ornstein–Uhlenbeck note solves the process exactly.
+
+## Particles and densities
+
+Every SDE has two readings.
+
+- **Pathwise.** Each run of the noise gives one path. Paths are generated with the
+  <NoteLink to="euler-maruyama-method">Euler–Maruyama method</NoteLink>, which applies the short-time update above with
+  a finite step.
+- **Distributional.** Over all runs of the noise, $X_t$ has a density $p_t(x)$. The density obeys a deterministic
+  partial differential equation, the <NoteLink to="fokker-planck-equation">Fokker–Planck equation</NoteLink>
+  $\partial_t p = -\partial_x(fp) + \tfrac12\partial_x^2(g^2p)$.
+
+Diffusion models use both: they train on the distributional description and generate with the pathwise one.
+
+## Assumptions
+
+- **Itô convention.** The noise integral evaluates $g$ at the start of each step. A Stratonovich SDE with the same $f$
+  and $g$ describes a different process; its Itô drift is $f + \tfrac12 g\,\partial_x g$
+  <Cite id="oksendal2003" />.
+- **Gaussian, continuous noise.** Brownian motion has no jumps. Processes with jumps, such as a Poisson-driven
+  model, need jump terms.
+- **Regularity.** Uniqueness can fail when $f$ or $g$ is not Lipschitz; for example, $g(x) = \sqrt{\abs x}$ needs a
+  separate argument.
+
+## Pitfalls
+
+- **Reading $dW/dt$ as a function.** White noise $dW/dt$ is not a function, and the SDE is only meaningful as an
+  integral equation.
+- **Confusing mean and typical path.** In multiplicative-noise models such as geometric Brownian motion, the mean and
+  the median can move in opposite directions.
+- **Units of $g$.** The noise over time $h$ has standard deviation $g\sqrt h$, so $g$ has units of state per square
+  root of time. Halving the time step does not halve the noise.

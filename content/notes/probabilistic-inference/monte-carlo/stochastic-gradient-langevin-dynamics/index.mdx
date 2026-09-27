@@ -1,0 +1,171 @@
+---
+title: Stochastic gradient Langevin dynamics
+kind: technique
+summary: 'Stochastic gradient Langevin dynamics samples a posterior over $N$ data points by taking minibatch gradient steps of size $\epsilon_t$ on the log posterior and adding $\Gauss(\zeros, \epsilon_t\eye)$ noise. As $\epsilon_t \to 0$ the injected noise swamps the minibatch noise, and SGD turns into a sampler.'
+tags: [monte-carlo, sampling, markov-chains, bayesian, gradients, worked-example]
+aliases: [SGLD, stochastic gradient MCMC, SG-MCMC, preconditioned SGLD, pSGLD, cyclical stochastic gradient MCMC, cSG-MCMC, stochastic gradient Hamiltonian Monte Carlo, SGHMC]
+requires: [langevin-dynamics, stochastic-gradient-descent-theory, bayesian-inference]
+related: [hamiltonian-monte-carlo, stochastic-variational-inference, adagrad-and-rmsprop, learning-rate-schedules, logistic-regression]
+references: [welling2011, teh2016, li2016psgld, zhang2020csgmcmc, chen2014sghmc]
+status: draft
+updated: 2026-09-27
+---
+
+import { SgldLogistic } from './SgldLogistic'
+
+<Definition>
+Let $\thetavec \in \reals^d$ have prior $p(\thetavec)$ and let the data $x_1, \dots, x_N$ be independent given
+$\thetavec$. **Stochastic gradient Langevin dynamics** (SGLD) draws a random minibatch $S_t$ of $n$ indices at step $t$
+and updates
+
+$$
+\thetavec_{t+1} = \thetavec_t + \frac{\epsilon_t}{2}\paren{\nabla\log p(\thetavec_t) + \frac{N}{n}\sum_{i \in S_t}
+\nabla\log p(x_i \mid \thetavec_t)} + \etavec_t, \qquad \etavec_t \sim \Gauss(\zeros, \epsilon_t\eye),
+$$
+
+with step sizes that satisfy $\sum_t \epsilon_t = \infty$ and $\sum_t \epsilon_t^2 < \infty$. It skips the
+Metropolis–Hastings test. As $t \to \infty$ the iterates sample the posterior $p(\thetavec \mid x_{1:N})$
+<Cite id="welling2011" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="langevin-dynamics">Langevin dynamics</NoteLink> samples a posterior using its gradient, but every step
+needs the gradient of the full log likelihood, a sum over all $N$ data points. MALA's acceptance test needs the full log
+posterior as well. On a dataset of millions of points, one exact step costs a pass over the data, and thousands of steps
+are needed. Stochastic gradient descent optimises the same objective with a cheap unbiased gradient from a minibatch.
+SGLD asks what happens when Langevin dynamics uses that cheap gradient.
+
+## Mechanism
+
+### Two sources of noise
+
+The minibatch sum, scaled by $N/n$, is an unbiased estimate of the full-data gradient
+$\gvec(\thetavec) = \sum_{i=1}^N \nabla\log p(x_i \mid \thetavec)$. For a minibatch drawn with replacement its
+covariance is $\frac{N^2}{n}\Vmat(\thetavec)$, where $\Vmat(\thetavec)$ is the covariance of a single per-example
+gradient $\nabla\log p(x_i \mid \thetavec)$ over a uniformly chosen $i$. Sampling without replacement multiplies it by
+$1 - (n - 1)/(N - 1)$, which is 0 at $n = N$.
+
+Write the SGLD step as the exact Langevin step plus an error:
+
+$$
+\thetavec_{t+1} = \thetavec_t + \frac{\epsilon_t}{2}\nabla\log p(\thetavec_t \mid x_{1:N}) +
+\underbrace{\frac{\epsilon_t}{2}\paren{\hat\gvec_t - \gvec(\thetavec_t)}}_{\text{minibatch noise}} +
+\underbrace{\etavec_t}_{\text{injected noise}}.
+$$
+
+The two noise terms have covariances
+
+$$
+\frac{\epsilon_t^2}{4}\,\frac{N^2}{n}\,\Vmat(\thetavec_t) \qquad\text{and}\qquad \epsilon_t\eye.
+$$
+
+The minibatch term is of order $\epsilon_t^2$ and the injected term of order $\epsilon_t$. Their ratio along a direction
+where a per-example gradient has variance $v$ is
+
+$$
+\frac{\epsilon_t N^2 v}{4n},
+$$
+
+which tends to 0 as $\epsilon_t \to 0$. At small steps the update is therefore the Langevin update with step
+$h = \epsilon_t/2$, driven by the correct amount of Gaussian noise, and the minibatch error is negligible beside it
+<Cite id="welling2011" />. The same argument removes the need for a Metropolis test: the discretisation error of a
+Langevin step vanishes as the step shrinks, so the acceptance probability of MALA would tend to 1.
+
+### The step-size schedule
+
+A fixed step leaves two biases: the discretisation bias of the unadjusted Langevin algorithm, of order $\epsilon$, and
+the extra spread from minibatch noise, whose ratio to the injected noise is proportional to $\epsilon$. A decreasing
+schedule removes both. The two conditions play the same roles as in the Robbins–Monro analysis of SGD:
+
+- $\sum_t \epsilon_t = \infty$. Each step advances the underlying diffusion by time $\epsilon_t/2$, so the total
+  simulated time is infinite and the chain can reach every part of the posterior from any start.
+- $\sum_t \epsilon_t^2 < \infty$. The total variance contributed by minibatch noise, $\sum_t \epsilon_t^2 N^2 v/(4n)$,
+  is finite, so its effect on late iterates dies out.
+
+Welling and Teh used $\epsilon_t = a(b + t)^{-\gamma}$ with $\gamma \in (0.5, 1]$ <Cite id="welling2011" />. Teh,
+Thiery and Vollmer proved consistency and a central limit theorem, and showed that the mean squared error of a
+posterior average is smallest with $\epsilon_t \propto t^{-1/3}$, where it falls as $t^{-1/3}$ <Cite id="teh2016" />.
+That rate is slower than the $t^{-1}$ of exact MCMC, the price of skipping the Metropolis test.
+
+Because consecutive iterates advance the diffusion by different amounts of time, a posterior expectation is estimated
+with step-size weights,
+
+$$
+\expect\brack{f(\thetavec) \mid x_{1:N}} \approx \frac{\sum_t \epsilon_t f(\thetavec_t)}{\sum_t \epsilon_t},
+$$
+
+so that each iterate counts in proportion to the time it represents <Cite id="welling2011" />.
+
+### From optimisation to sampling
+
+Early in a run the steps are large. The drift $\frac{\epsilon_t}{2}\nabla\log p$ moves the iterate a distance of order
+$\epsilon_t$ per step, while the injected noise moves it only $\sqrt{\epsilon_t}$ in a random direction, and far from
+the mode the drift wins. The minibatch noise also exceeds the injected noise while $\epsilon_t > 4n/(N^2 v)$. SGLD then
+behaves like <NoteLink to="stochastic-gradient-descent-theory">stochastic gradient descent</NoteLink> and heads to a
+region of high posterior density. Near the mode the drift shrinks, the step decays and the injected noise takes over, so
+the iterates spread out over the posterior instead of converging to a point. Welling and Teh proposed discarding
+iterates until the minibatch-to-injected noise ratio, computed with the largest eigenvalue of $\Vmat$, falls below a
+small threshold, and collecting samples after that <Cite id="welling2011" />. One program is both a MAP optimiser
+and a posterior sampler; only the stage of the schedule differs.
+
+<SgldLogistic />
+
+## Worked example: when the injected noise takes over
+
+Take $N = 10{,}000$ examples, minibatches of $n = 100$, and a direction in which a per-example gradient has variance
+$v = 1$. The ratio of minibatch to injected noise variance is $\epsilon N^2 v/(4n) = \epsilon \times 10^8/400 = 2.5
+\times 10^5\, \epsilon$.
+
+- At $\epsilon = 10^{-4}$ the ratio is 25. The minibatch noise dominates. The total noise per step has 26 times
+  the variance Langevin dynamics prescribes, which on a Gaussian posterior samples at temperature 26: about
+  $\sqrt{26} \approx 5$ times too wide.
+- The two are equal at $\epsilon^* = 4n/(N^2 v) = 4 \times 10^{-6}$.
+- At $\epsilon = 10^{-6}$ the ratio is 0.25. The injected noise dominates and SGLD is close to exact Langevin dynamics.
+
+If each example contributes Fisher information 1 in that direction, the posterior standard deviation is about
+$1/\sqrt{N} = 0.01$. At $\epsilon = 10^{-6}$ one step moves the iterate by noise of standard deviation
+$\sqrt{\epsilon} = 0.001$, a tenth of the posterior width. A random walk needs about $(0.01/0.001)^2 = 100$ steps to
+cross the posterior. The step must be small enough for the injected noise to dominate, and that makes mixing slow in
+directions where the posterior is wide.
+
+## Variants
+
+- **Preconditioned SGLD** (pSGLD). The posterior of a deep network has very different curvature in different
+  directions, and one step size cannot suit all of them. Li et al. scale the drift by a diagonal matrix $\Gmat_t$ built
+  from a running average of squared gradients, as in <NoteLink to="adagrad-and-rmsprop">RMSprop</NoteLink>, and inject
+  noise with covariance $\epsilon_t\Gmat_t$ to match <Cite id="li2016psgld" />. A correction term involving the
+  derivative of $\Gmat$ is needed for exactness; it is small when the preconditioner changes slowly and is often
+  dropped.
+- **Cyclical SG-MCMC** (cSG-MCMC). Zhang et al. restart the step size periodically with a cosine schedule. Each cycle
+  begins with large steps that behave like optimisation and move the iterate to a new region, and ends with small steps
+  that sample around the mode found <Cite id="zhang2020csgmcmc" />. The cycles visit several modes of a multimodal
+  posterior, which a single decreasing schedule rarely does.
+- **Stochastic gradient Hamiltonian Monte Carlo** (SGHMC). Replacing the gradient in
+  <NoteLink to="hamiltonian-monte-carlo">Hamiltonian Monte Carlo</NoteLink> by a minibatch estimate adds noise to the
+  momentum, and the dynamics no longer leave the target invariant; without a Metropolis test the momentum grows and
+  the chain drifts away. Chen, Fox and Guestrin add a friction term $-\Cmat\Mmat^{-1}\rvec\, dt$ to the momentum
+  equation and reduce the injected noise to $\Gauss(\zeros, 2(\Cmat - \hat\Bmat)\,dt)$, where $\hat\Bmat$ estimates the
+  minibatch noise, so that friction and noise balance <Cite id="chen2014sghmc" />. The result is second-order Langevin
+  dynamics with momentum, analogous to SGD with momentum.
+
+## Cost
+
+One SGLD step costs one minibatch gradient and $d$ Gaussian draws, the same as an SGD step. No full-data pass and no
+acceptance test are needed. Storing samples is the dominant extra cost for large models: each sample of a neural
+network is a full copy of its weights, so samples are thinned and only a few tens are kept for prediction.
+
+## Trade-offs
+
+- **Bias at any finite step.** Without a Metropolis test, SGLD is exact only in the limit of vanishing steps. In
+  practice schedules stop decaying at a small constant, and the samples carry a bias of order that step.
+- **Slow mixing at small steps.** Keeping the minibatch noise below the injected noise requires
+  $\epsilon \lesssim 4n/(N^2 v)$, which shrinks with the square of the dataset size. Directions of large posterior
+  variance then take many steps to explore.
+- **Bayesian deep learning.** SGLD and its variants give a posterior over network weights at roughly the cost of
+  training. Predictions average the network's output over the stored samples, $p(y \mid \xvec) \approx \frac{1}{S}
+  \sum_s p(y \mid \xvec, \thetavec_s)$, which improves calibration and uncertainty on inputs far from the data compared
+  with a single trained network <Cite id="zhang2020csgmcmc" />. Deep ensembles and variational methods compete for the
+  same role.
+- **Tuning.** The initial step, decay rate, burn-in and thinning all affect the result, and standard MCMC diagnostics
+  are weaker because the chain is not exactly reversible.

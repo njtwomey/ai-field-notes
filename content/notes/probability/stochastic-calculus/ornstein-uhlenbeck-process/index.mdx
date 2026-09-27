@@ -1,0 +1,183 @@
+---
+title: Ornstein–Uhlenbeck process
+kind: concept
+summary: 'The Ornstein–Uhlenbeck process $dX = -\theta(X - \mu)\,dt + \sigma\,dW$ is Brownian noise with a linear pull towards $\mu$. It is Gaussian at every time, forgets its start at rate $\theta$, has stationary law $\Gauss(\mu, \sigma^2/(2\theta))$, and is the forward process of variance-preserving diffusion.'
+tags: [probability, stochastic-processes, stochastic-differential-equations, gaussian, diffusion-models, time-series, worked-example]
+aliases: [OU process, Ornstein-Uhlenbeck process, mean-reverting process, Vasicek model, continuous-time AR(1), Langevin equation]
+requires: [stochastic-differential-equations, itos-lemma, ito-integral]
+related: [autoregressive-model, langevin-dynamics, covariance-functions, kalman-filter, first-order-linear-odes, denoising-diffusion-probabilistic-models]
+references: [uhlenbeck1930, oksendal2003, sarkka2019, song2021, ho2020]
+status: draft
+updated: 2026-09-27
+---
+
+import { OrnsteinUhlenbeckPaths } from './OrnsteinUhlenbeckPaths'
+
+<Definition>
+The **Ornstein–Uhlenbeck process** with rate $\theta > 0$, mean $\mu$ and noise scale $\sigma > 0$ solves
+
+$$
+dX_t = -\theta\paren{X_t - \mu}\,dt + \sigma\,dW_t,
+$$
+
+where $W_t$ is a <NoteLink to="brownian-motion">Brownian motion</NoteLink>. Given $X_0 = x_0$, the state at time $t$
+is Gaussian:
+
+$$
+X_t \sim \Gauss\paren{\mu + (x_0 - \mu)e^{-\theta t},\ \frac{\sigma^2}{2\theta}\paren{1 - e^{-2\theta t}}},
+$$
+
+and as $t \to \infty$ it converges to the stationary law $\Gauss\paren{\mu, \sigma^2/(2\theta)}$
+<Cite id="uhlenbeck1930" />.
+</Definition>
+
+## Intuition: a ball on a spring in a gale
+
+Tie a ball to a post with a spring and leave it in gusty wind. The spring pulls the ball back with a force
+proportional to its distance from the post. The wind pushes it about at random. Without wind the ball returns to the
+post along an exponential decay. Without the spring the ball wanders off like a Brownian particle, its spread growing
+like $\sqrt t$. With both, the ball jitters around the post in a cloud of fixed size, where the pull on the far-flung
+positions balances the spreading by the wind.
+
+Uhlenbeck and Ornstein introduced the process for the velocity of a Brownian particle, where the "spring" is friction
+<Cite id="uhlenbeck1930" />. Other readings of the same equation:
+
+- A cup of tea cooling in a draughty room, with $\mu$ the room temperature and $1/\theta$ the cooling time.
+- An interest rate that drifts back to a long-run level (the Vasicek model).
+- A data point being noised in a diffusion model, pulled to 0 while Gaussian noise replaces it.
+
+## Solving it exactly
+
+Set $\mu = 0$ to simplify; the general case follows by replacing $X$ with $X - \mu$. The drift is linear, so the
+integrating factor of a <NoteLink to="first-order-linear-odes">first-order linear ODE</NoteLink> works. Apply
+<NoteLink to="itos-lemma">Itô's lemma</NoteLink> to $Y_t = e^{\theta t}X_t$. The function $f(x, t) = e^{\theta t}x$
+is linear in $x$, so $f'' = 0$ and there is no correction:
+
+$$
+dY_t = \theta e^{\theta t}X_t\,dt + e^{\theta t}\,dX_t = \theta e^{\theta t}X_t\,dt + e^{\theta t}\paren{-\theta X_t\,dt
++ \sigma\,dW_t} = \sigma e^{\theta t}\,dW_t.
+$$
+
+The drift cancels. Integrate from 0 to $t$ and multiply by $e^{-\theta t}$:
+
+$$
+X_t = x_0 e^{-\theta t} + \sigma\int_0^t e^{-\theta(t - s)}\,dW_s.
+$$
+
+The first term is the deterministic decay. The second is an <NoteLink to="ito-integral">Itô integral</NoteLink> of a
+deterministic function, so it is Gaussian with mean zero, and the Itô isometry gives its variance:
+
+$$
+\var(X_t) = \sigma^2\int_0^t e^{-2\theta(t - s)}\,ds = \frac{\sigma^2}{2\theta}\paren{1 - e^{-2\theta t}}.
+$$
+
+This proves the definition's transition law. Three facts follow.
+
+- **Memory decays at rate $\theta$.** The mean moves from $x_0$ to 0 along $e^{-\theta t}$. The half-life is
+  $\ln 2/\theta$.
+- **Variance saturates.** For small $t$, $\var(X_t) \approx \sigma^2 t$, as for Brownian motion. For large $t$ it
+  approaches $\sigma^2/(2\theta)$.
+- **Stationary covariance.** Started from the stationary law, $\cov(X_s, X_{s+\tau}) = \frac{\sigma^2}{2\theta}
+  e^{-\theta\abs\tau}$. The same integral representation gives it: the two states share the noise up to time $s$,
+  discounted by $e^{-\theta\tau}$.
+
+<OrnsteinUhlenbeckPaths />
+
+## Worked example: the numbers at one time
+
+Take $\theta = 2$, $\sigma = 1$, $\mu = 0$ and $x_0 = 3$. At $t = 0.5$:
+
+- mean $3e^{-1} = 1.104$;
+- variance $\tfrac14\paren{1 - e^{-2}} = 0.216$, standard deviation $0.465$;
+- stationary variance $\sigma^2/(2\theta) = 0.25$, so after half a unit of time the variance is already at 86% of its
+  stationary value, while the mean still remembers 37% of the start;
+- half-life $\ln 2/2 = 0.347$.
+
+A simulation of $2 \times 10^5$ paths with the exact transition gives mean $1.103$ and variance $0.217$.
+
+## Worked example: the moments from their differential equations
+
+The mean and variance can be found without solving the SDE. Taking expectations of the SDE gives
+$m'(t) = -\theta m(t)$. Itô's lemma for $x^2$ gives $d(X^2) = \paren{-2\theta X^2 + \sigma^2}dt + 2\sigma X\,dW$, so
+the second moment $s(t) = \expect X_t^2$ obeys $s' = -2\theta s + \sigma^2$, and the variance $v = s - m^2$ obeys
+
+$$
+v' = -2\theta v + \sigma^2.
+$$
+
+Its fixed point is $v = \sigma^2/(2\theta)$: the pull removes variance at rate $2\theta v$ and the noise adds it at rate
+$\sigma^2$. Solving the linear equation from $v(0) = 0$ gives $v(t) = \frac{\sigma^2}{2\theta}(1 - e^{-2\theta t})$
+again. Moment equations of this kind are how continuous-discrete Kalman filters propagate uncertainty between
+observations <Cite id="sarkka2019" />.
+
+## The link to AR(1)
+
+Sample the process every $h$ time units. The exact solution over one interval gives
+
+$$
+X_{k+1} = e^{-\theta h}X_k + \epsilon_k, \qquad \epsilon_k \sim \Gauss\paren{0, \tfrac{\sigma^2}{2\theta}\paren{1 -
+e^{-2\theta h}}},
+$$
+
+an <NoteLink to="autoregressive-model">autoregressive model of order 1</NoteLink> with coefficient
+$\phi = e^{-\theta h}$. The Ornstein–Uhlenbeck process is the continuous-time AR(1) model, and this discretisation is
+exact for every $h$, not an approximation. A daily AR(1) fit with $\phi = 0.9$ corresponds to
+$\theta = -\ln 0.9 = 0.105$ per day, a half-life of $6.6$ days.
+
+The stationary covariance $e^{-\theta\abs\tau}$ is the exponential (Matérn-½) kernel, so a
+<NoteLink to="gaussian-process">Gaussian process</NoteLink> with that kernel is a stationary Ornstein–Uhlenbeck process;
+see <NoteLink to="covariance-functions">covariance functions</NoteLink>.
+
+## The link to Langevin dynamics
+
+<NoteLink to="langevin-dynamics">Langevin dynamics</NoteLink> for a density $p$ is the SDE $dX = \nabla\log p(X)\,dt +
+\sqrt2\,dW$. For a Gaussian $p = \Gauss(0, s^2)$ the score is $-x/s^2$, so the SDE is Ornstein–Uhlenbeck with
+$\theta = 1/s^2$ and $\sigma = \sqrt2$. Its stationary variance is $\sigma^2/(2\theta) = 2/(2/s^2) = s^2$, which
+confirms that Langevin dynamics targets $p$. The potential $U(x) = x^2/(2s^2)$ is quadratic, and the pull
+$-U'(x)$ is the linear spring. Every Langevin sampler behaves like an Ornstein–Uhlenbeck process near a mode where
+$\log p$ is close to quadratic.
+
+## The forward process of diffusion models
+
+The variance-preserving forward SDE of a diffusion model is <Cite id="song2021" />
+
+$$
+dX_t = -\tfrac12\beta(t)\,X_t\,dt + \sqrt{\beta(t)}\,dW_t,
+$$
+
+an Ornstein–Uhlenbeck process with time-varying rate $\theta = \beta/2$ and noise $\sigma^2 = \beta$. Its stationary
+variance is $\sigma^2/(2\theta) = 1$ for every $\beta$. The same integrating factor, now $\exp\paren{\tfrac12\int_0^t
+\beta(s)\,ds}$, gives
+
+$$
+X_t \mid X_0 \sim \Gauss\paren{\sqrt{\bar\alpha(t)}\,X_0,\ 1 - \bar\alpha(t)}, \qquad \bar\alpha(t) =
+\exp\paren{-\int_0^t \beta(s)\,ds}.
+$$
+
+This is the one-shot noising formula $\xvec_t = \sqrt{\bar\alpha_t}\,\xvec_0 + \sqrt{1 - \bar\alpha_t}\,\epsilonvec$ of
+<NoteLink to="denoising-diffusion-probabilistic-models">DDPM</NoteLink> <Cite id="ho2020" />. If $X_0$ has unit
+variance, every $X_t$ does too, hence "variance preserving". As $\bar\alpha \to 0$ the state forgets the data and
+becomes $\Gauss(0, 1)$, the starting point for generation. With constant $\beta = 1$ the data signal decays with
+half-life $2\ln 2 = 1.39$, and $\bar\alpha(5) = e^{-5} = 0.0067$.
+
+Because the forward process is linear, a Gaussian mixture stays a Gaussian mixture, so its score is analytic at every
+time. The <NoteLink to="reverse-time-stochastic-differential-equations">reverse-time SDE</NoteLink> and
+<NoteLink to="probability-flow-ode">probability-flow ODE</NoteLink> notes use this to run a diffusion model with the
+exact score.
+
+## Assumptions
+
+- $\theta > 0$. With $\theta = 0$ the process is Brownian motion and has no stationary law; with $\theta < 0$ it is
+  pushed away from $\mu$ and its variance grows exponentially.
+- Constant $\sigma$. With a state-dependent noise such as $\sigma\sqrt{X}$ (the Cox–Ingersoll–Ross model) the process
+  is no longer Gaussian.
+
+## Pitfalls
+
+- **Rate or coefficient.** Some texts write the drift as $\theta(\mu - X)$, others as $-X/\tau$ with a time constant
+  $\tau = 1/\theta$. The stationary variance $\sigma^2/(2\theta)$ changes accordingly.
+- **Simulating with Euler–Maruyama.** The <NoteLink to="euler-maruyama-method">Euler–Maruyama method</NoteLink>
+  inflates the stationary variance by $1/(1 - \theta h/2)$ and is unstable for $h > 2/\theta$. The exact AR(1)
+  transition has neither problem.
+- **Confusing the SDE with its discretisation.** DDPM's discrete $\beta_t$ per step and the continuous $\beta(t)$ per
+  unit time differ by the number of steps: $\beta_t \approx \beta(t)/N$ for $N$ steps on $[0, 1]$.

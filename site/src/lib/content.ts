@@ -98,6 +98,27 @@ export function categoryTrail(path: string): CategoryNode[] {
   return parts.map((_, i) => categoryIndex.get(parts.slice(0, i + 1).join('/'))).filter((c) => !!c)
 }
 
+/** Category path each index note introduces (taxonomy.yaml `index`). */
+const indexedCategory = new Map<string, string>()
+for (const c of categoryIndex.values()) if (c.index) indexedCategory.set(c.index, c.path)
+
+/** The note that introduces a category, if taxonomy.yaml names one. */
+export function categoryIndexNote(path: string): NoteMeta | undefined {
+  const slug = categoryIndex.get(path)?.index
+  return slug ? notesBySlug.get(slug) : undefined
+}
+
+/** The category a note introduces, if it is that category's index note. */
+export function indexOfCategory(slug: string): string | undefined {
+  return indexedCategory.get(slug)
+}
+
+/** Notes in the order a list shows them: the category's index note first, the rest in their existing order. */
+export function indexFirst(list: NoteMeta[], path: string): NoteMeta[] {
+  const lead = category(path)?.index
+  return lead ? [...list.filter((n) => n.slug === lead), ...list.filter((n) => n.slug !== lead)] : list
+}
+
 export function notesInCategory(path: string, deep = true): NoteMeta[] {
   return notes.filter((n) => n.category === path || (deep && n.category.startsWith(`${path}/`)))
 }

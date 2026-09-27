@@ -295,6 +295,11 @@ Frontmatter (validated; see `site/src/lib/content-schema.ts`): `title`, `kind`, 
   Bayes' theorem is probability theory even though every model uses it. Categories are for browsing; one note has one
   category, and cross-cutting links are relations and tags. Lists follow taxonomy order (`categoryOrder`), never
   alphabetical order.
+- **Index notes.** A category may name the note that introduces it with `index` in `taxonomy.yaml`: `index: true`
+  for the note whose slug is the category id (e.g. `stochastic-calculus`), or `index: <slug>` for another note inside
+  the category. The index note leads the category on the browse page, marked "Start here", and heads the breadcrumb
+  dropdowns. The content check fails if the note is missing or outside the category. Give a new category an index note
+  once it has an overview.
 - **Relations** are typed: `requires` (prerequisites), `partOf` (component of a larger system), `related` (see also).
   Backlinks and component lists are computed; declare each relation only on one side.
 - **Tags** are cross-cutting kebab-case labels.

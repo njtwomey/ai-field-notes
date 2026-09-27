@@ -92,6 +92,8 @@ export type CategoryInput = {
   title: string
   description?: string
   icon?: CategoryIcon
+  /** The category's index note: `true` for the note whose slug is the category id, or another slug in the category. */
+  index?: boolean | string
   children?: CategoryInput[]
 }
 export const categorySchema: z.ZodType<CategoryInput> = z.lazy(() =>
@@ -101,6 +103,7 @@ export const categorySchema: z.ZodType<CategoryInput> = z.lazy(() =>
       title: z.string(),
       description: z.string().optional(),
       icon: z.enum(categoryIcons).optional(),
+      index: z.union([z.boolean(), slug]).optional(),
       children: z.array(categorySchema).optional(),
     })
     .strict(),
@@ -127,6 +130,8 @@ export type CategoryNode = {
   title: string
   description?: string
   icon?: CategoryIcon
+  /** Slug of the note that introduces the category and is listed first; see `index` in taxonomy.yaml. */
+  index?: string
   children: CategoryNode[]
 }
 

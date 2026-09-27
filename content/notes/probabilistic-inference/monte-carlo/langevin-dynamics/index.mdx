@@ -1,0 +1,241 @@
+---
+title: Langevin dynamics
+kind: technique
+summary: 'Langevin dynamics samples a density $p$ with the diffusion $d\xvec = \nabla\log p(\xvec)\,dt + \sqrt2\,d\wvec$, whose stationary density is $p$. Its Euler step, gradient ascent on $\log p$ plus Gaussian noise, is biased by the step size; a Metropolis–Hastings test (MALA) removes the bias.'
+tags: [monte-carlo, sampling, markov-chains, gradients, stochastic-differential-equations, worked-example]
+aliases: [Langevin diffusion, overdamped Langevin dynamics, Langevin Monte Carlo, unadjusted Langevin algorithm, ULA, Metropolis-adjusted Langevin algorithm, MALA]
+requires: [markov-chain-monte-carlo, metropolis-hastings, gradient, brownian-motion]
+related: [hamiltonian-monte-carlo, score-based-generative-models, simulated-annealing, gradient-descent]
+references: [roberts1996, roberts1998, neal2011, welling2011, song2019]
+status: draft
+updated: 2026-09-27
+---
+
+import { LangevinSampler } from './LangevinSampler'
+
+<Definition>
+Let $p$ be a density on $\reals^d$ that is known up to a constant and has a differentiable logarithm. The **overdamped
+Langevin diffusion** is the stochastic differential equation
+
+$$
+d\xvec_t = \nabla\log p(\xvec_t)\, dt + \sqrt2\, d\wvec_t,
+$$
+
+where $\wvec_t$ is a standard <NoteLink to="brownian-motion">Brownian motion</NoteLink> in $\reals^d$. Its stationary
+density is $p$. The **unadjusted Langevin algorithm** (ULA) simulates it with steps of size $h > 0$,
+
+$$
+\xvec_{k+1} = \xvec_k + h\, \nabla\log p(\xvec_k) + \sqrt{2h}\, \xivec_k, \qquad \xivec_k \sim \Gauss(\zeros, \eye),
+$$
+
+and the **Metropolis-adjusted Langevin algorithm** (MALA) uses the same step as a proposal in
+<NoteLink to="metropolis-hastings">Metropolis–Hastings</NoteLink> <Cite id="roberts1996" />.
+</Definition>
+
+## Problem
+
+A <NoteLink to="metropolis-hastings">random-walk Metropolis</NoteLink> sampler proposes moves blind to the shape of the
+target, so most large moves land in low density and are rejected. The gradient $\nabla\log p$ points towards higher
+density and costs about as much as one evaluation of $\log p$ when computed by automatic differentiation. Langevin
+dynamics uses the gradient to bias each move uphill and adds exactly enough Gaussian noise that the chain spreads out
+over $p$ instead of climbing to a mode. The normalising constant of $p$ never appears, because
+$\nabla\log(p/Z) = \nabla\log p$.
+
+## Mechanism
+
+### Stationarity from the Fokker–Planck equation
+
+Write $\bvec(\xvec) = \nabla\log p(\xvec)$ for the drift and $\rho_t$ for the density of $\xvec_t$. The first step
+derives the equation that $\rho_t$ obeys. Take any smooth test function $f$ that vanishes outside a bounded set. Itô's
+formula for $d\xvec_t = \bvec\, dt + \sqrt2\, d\wvec_t$ gives
+
+$$
+df(\xvec_t) = \paren{\nabla f^\top \bvec + \Delta f}\, dt + \sqrt2\, \nabla f^\top d\wvec_t,
+$$
+
+where $\Delta f = \sum_i \partial^2 f / \partial x_i^2$ is the Laplacian. The factor on $\Delta f$ is 1 because the
+noise has variance $2\,dt$ per coordinate and Itô's formula contributes half the variance times the second derivative.
+The Brownian term has mean zero. Taking expectations,
+
+$$
+\frac{d}{dt} \int f\, \rho_t\, d\xvec = \int \paren{\nabla f^\top \bvec + \Delta f}\, \rho_t\, d\xvec
+= \int f\, \brack{-\nabla \cdot (\bvec\, \rho_t) + \Delta \rho_t}\, d\xvec,
+$$
+
+where the second equality integrates by parts once in the drift term and twice in the Laplacian term; the boundary
+terms vanish because $f$ does. The identity holds for every $f$, so
+
+$$
+\partial_t \rho_t = -\nabla \cdot (\bvec\, \rho_t) + \Delta \rho_t.
+$$
+
+This is the **Fokker–Planck equation**. Substitute $\bvec = \nabla\log p$ and use $\Delta\rho = \nabla\cdot\nabla\rho =
+\nabla \cdot (\rho\, \nabla\log\rho)$:
+
+$$
+\partial_t \rho_t = \nabla \cdot \brack{\rho_t\, \paren{\nabla\log\rho_t - \nabla\log p}} = \nabla \cdot
+\brack{\rho_t\, \nabla\log\frac{\rho_t}{p}}.
+$$
+
+At $\rho_t = p$ the ratio $\rho_t/p$ is 1, its logarithm is 0 and the right side vanishes. So $p$ is stationary. The
+probability current $\rho\, \nabla\log(\rho/p)$ is zero at $p$, not merely divergence-free, which is the continuous
+analogue of detailed balance.
+
+<Derivation title="The distance to p never increases">
+Differentiate the Kullback–Leibler divergence $\KL(\rho_t \,\|\, p) = \int \rho_t \log(\rho_t/p)\, d\xvec$ in time.
+Since $\int \partial_t \rho_t\, d\xvec = 0$,
+
+$$
+\frac{d}{dt}\KL(\rho_t \,\|\, p) = \int \partial_t \rho_t\, \log\frac{\rho_t}{p}\, d\xvec
+= -\int \rho_t\, \norm{\nabla\log\frac{\rho_t}{p}}^2 d\xvec \le 0,
+$$
+
+by the Fokker–Planck equation and one integration by parts. The right side, the relative Fisher information, is zero
+only when $\rho_t/p$ is constant, that is when $\rho_t = p$. So the divergence decreases strictly until the chain
+reaches $p$, and $p$ is the only stationary density. How fast it decreases depends on the tails and curvature of $p$;
+Roberts and Tweedie give conditions for exponential convergence <Cite id="roberts1996" />.
+</Derivation>
+
+### Euler–Maruyama discretisation: the unadjusted Langevin algorithm
+
+The diffusion cannot be simulated exactly for a general $p$. The Euler–Maruyama scheme freezes the drift over a step of
+length $h$ and replaces the Brownian increment by its exact law $\Gauss(\zeros, h\eye)$, giving the ULA update in the
+definition. Writing $U = -\log p$ for the energy,
+
+$$
+\xvec_{k+1} = \xvec_k - h\, \nabla U(\xvec_k) + \sqrt{2h}\, \xivec_k.
+$$
+
+The update is <NoteLink to="gradient-descent">gradient descent</NoteLink> on $U$ with learning rate $h$ plus Gaussian
+noise of variance $2h$. Some texts write the step size as $\eta = 2h$, which gives
+$\xvec_{k+1} = \xvec_k + \frac{\eta}{2}\nabla\log p(\xvec_k) + \sqrt\eta\, \xivec_k$, the form used in
+<NoteLink to="score-based-generative-models">score-based generative models</NoteLink> <Cite id="song2019" />.
+
+Freezing the drift for a whole step makes the chain's stationary density differ from $p$. The worked example below
+computes the error exactly for a Gaussian: the variance is inflated by a factor $1/(1 - h/(2\sigma^2))$, an error of
+order $h$. Two further failures come from the same approximation:
+
+- **Instability.** If $h$ exceeds twice the variance of $p$ in its narrowest direction ($h \ge 2\sigma^2$ for a
+  Gaussian), the linearised step amplifies deviations and the chain diverges.
+- **Light tails.** For $p(x) \propto e^{-x^4}$ the drift is $-4x^3$. From a start with $4h x^2 > 2$ the deterministic
+  part of the step overshoots to a larger $\abs{x}$, and the chain escapes to infinity for every fixed $h$, even though
+  the diffusion itself converges <Cite id="roberts1996" />.
+
+### Metropolis correction: MALA
+
+MALA treats the ULA step as a proposal, $\yvec \sim q(\cdot \mid \xvec) = \Gauss(\xvec + h\nabla\log p(\xvec),
+2h\eye)$, and accepts it with the Metropolis–Hastings probability
+
+$$
+\alpha(\xvec, \yvec) = \min\set{1,\ \frac{p(\yvec)\, q(\xvec \mid \yvec)}{p(\xvec)\, q(\yvec \mid \xvec)}}.
+$$
+
+The proposal is not symmetric: the forward move is centred on a point uphill of $\xvec$, and the reverse move on a
+point uphill of $\yvec$. The Gaussian densities have the same normalising constant, so their ratio is
+
+$$
+\log\frac{q(\xvec \mid \yvec)}{q(\yvec \mid \xvec)} = \frac{\norm{\yvec - \xvec - h\nabla\log p(\xvec)}^2 -
+\norm{\xvec - \yvec - h\nabla\log p(\yvec)}^2}{4h}.
+$$
+
+The Metropolis–Hastings rule satisfies detailed balance for any proposal, so MALA leaves $p$ exactly invariant for every
+step size. The step size now controls only efficiency. For a product of $d$ identical components, the proposal variance
+must shrink like $d^{-1/3}$ to keep the acceptance rate fixed, against $d^{-1}$ for random-walk Metropolis, and the
+most efficient acceptance rate is about 0.574 <Cite id="roberts1998" />.
+
+<LangevinSampler />
+
+### Temperature, gradient descent and noise scale
+
+Scale the noise by a factor $s \ge 0$:
+
+$$
+\xvec_{k+1} = \xvec_k + h\, \nabla\log p(\xvec_k) + s\sqrt{2h}\, \xivec_k.
+$$
+
+Rewrite the step with $h' = hs^2$ and $\nabla\log p = s^2\, \nabla\log p^{1/s^2}$:
+
+$$
+\xvec_{k+1} = \xvec_k + h'\, \nabla\log p^{1/s^2}(\xvec_k) + \sqrt{2h'}\, \xivec_k.
+$$
+
+This is ULA with step $h'$ on the density $p^{1/T} \propto e^{-U/T}$ at temperature $T = s^2$. Reduced noise therefore
+samples a sharpened copy of $p$, concentrated around its modes. At $s = 0$ the update is plain gradient ascent on
+$\log p$, which converges to a local mode and stays there. Lowering $T$ gradually towards 0 turns the sampler into an
+optimiser, the continuous counterpart of <NoteLink to="simulated-annealing">simulated annealing</NoteLink>. Training
+of energy-based models often runs Langevin updates with $s$ far below 1, which is this sharpened sampler.
+
+### Relation to Hamiltonian Monte Carlo
+
+<NoteLink to="hamiltonian-monte-carlo">Hamiltonian Monte Carlo</NoteLink> with identity mass matrix and a single
+leapfrog step of size $\epsilon$ is MALA. Draw $\pvec \sim \Gauss(\zeros, \eye)$ and take one leapfrog step. The
+position update is
+
+$$
+\qvec' = \qvec + \epsilon\paren{\pvec - \frac{\epsilon}{2}\nabla U(\qvec)} = \qvec - \frac{\epsilon^2}{2}\nabla U(\qvec)
++ \epsilon\pvec.
+$$
+
+This is the Langevin proposal with $h = \epsilon^2/2$, and the Hamiltonian acceptance test equals the MALA test <Cite
+id="neal2011" />. HMC gains by taking many leapfrog steps with the same momentum, which moves the chain in a consistent
+direction; Langevin dynamics draws fresh noise every step and so explores by a random walk.
+
+## Worked example: ULA and MALA on a Gaussian
+
+Take $p = \Gauss(0, \sigma^2)$ in one dimension, so $\nabla\log p(x) = -x/\sigma^2$. The ULA step is
+
+$$
+x_{k+1} = \paren{1 - \frac{h}{\sigma^2}} x_k + \sqrt{2h}\, \xi_k,
+$$
+
+a first-order autoregression. It is stable when $\abs{1 - h/\sigma^2} < 1$, that is for $0 < h < 2\sigma^2$. Its
+stationary distribution is Gaussian with mean 0. The stationary variance $v$ satisfies $v = (1 - h/\sigma^2)^2 v + 2h$,
+so
+
+$$
+v = \frac{2h}{1 - (1 - h/\sigma^2)^2} = \frac{2h}{(h/\sigma^2)(2 - h/\sigma^2)} = \frac{\sigma^2}{1 - h/(2\sigma^2)}.
+$$
+
+The variance exceeds $\sigma^2$ for every $h > 0$ and tends to $\sigma^2$ as $h \to 0$. With $\sigma = 1$:
+
+| step $h$ | ULA stationary variance | ULA lag-1 autocorrelation $1 - h$ |
+| -------- | ----------------------- | --------------------------------- |
+| 0.05     | 1.026                   | 0.95                              |
+| 0.2      | 1.111                   | 0.8                               |
+| 0.5      | 1.333                   | 0.5                               |
+| 1        | 2                       | 0                                 |
+| 2        | diverges                |                                   |
+
+At $h = 1$ each ULA state is an independent draw from $\Gauss(0, 2)$, twice the target variance.
+
+**One MALA step.** Take $\sigma = 1$, $h = 0.5$, current state $x = 1$ and noise draw $\xi = 1.5$. The proposal is
+$y = 1 + 0.5 \times (-1) + \sqrt{1} \times 1.5 = 2$. The target term is $\log p(y) - \log p(x) = -(4 - 1)/2 = -1.5$. The
+forward move was centred on $0.5$, so $\norm{y - 0.5}^2 = 2.25$. The reverse move from $y = 2$ is centred on
+$2 - 0.5 \times 2 = 1$, which is exactly $x$, so its squared distance is 0. The proposal term is
+$(2.25 - 0)/(4 \times 0.5) = 1.125$, and $\log r = -1.5 + 1.125 = -0.375$. The move is accepted with probability
+$e^{-0.375} = 0.687$. Over many steps at $h = 0.5$, MALA accepts about 92% of proposals, and its stationary variance is
+exactly 1.
+
+## Cost
+
+Each step costs one gradient of $\log p$; MALA also needs $\log p$ at the proposal, which automatic differentiation
+returns alongside the gradient. Consecutive states are correlated, with autocorrelation close to $1 - h/\sigma^2$ along
+a direction of variance $\sigma^2$. The step size must be below the smallest variance scale for stability, so a
+direction with a large variance $\sigma_{\max}^2$ needs about $\sigma_{\max}^2 / \sigma_{\min}^2$ steps to decorrelate.
+A preconditioner, a matrix $\Mmat$ in $\xvec_{k+1} = \xvec_k + h\Mmat\nabla\log p + \sqrt{2h}\,\Mmat^{1/2}\xivec_k$,
+removes much of this for correlated targets.
+
+## Trade-offs
+
+- **ULA is biased; MALA is exact.** ULA's error is of order $h$ and never disappears at a fixed step. It is used when
+  a Metropolis test is too expensive, for example with minibatch gradients in
+  <NoteLink to="stochastic-gradient-langevin-dynamics">stochastic gradient Langevin dynamics</NoteLink>
+  <Cite id="welling2011" />, or when approximate samples suffice.
+- **Needs gradients.** The target must be differentiable, as for Hamiltonian Monte Carlo.
+- **Random-walk exploration.** Fresh noise every step makes progress diffusive. HMC's long trajectories cover more
+  distance per gradient on smooth targets.
+- **Multimodality.** Crossing a region of low density between two modes requires a run of noise draws against the
+  gradient. The waiting time grows exponentially with the depth of the barrier in $U$. Annealed noise levels, as in
+  score-based models, or tempering address this.
+- **Tails and stiffness.** Light tails and steep curvature make ULA unstable for a fixed step. MALA stays correct but
+  rejects most proposals from such regions.

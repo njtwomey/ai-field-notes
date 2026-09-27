@@ -1,0 +1,174 @@
+---
+title: Reverse-time stochastic differential equations
+kind: concept
+summary: 'A diffusion $dX = f\,dt + g\,dW$ with marginal densities $p_t$ run backwards in time is again a diffusion, with drift $f - g^2\nabla\log p_t$ and the same noise (Anderson, 1982). Reversing noise into data therefore needs only the score $\nabla\log p_t$; this is how diffusion models generate.'
+tags: [probability, stochastic-differential-equations, diffusion-models, score-matching, generative-models, worked-example]
+aliases: [reverse-time SDE, reverse SDE, time reversal of a diffusion, Anderson's theorem, reverse diffusion, Brownian bridge]
+requires: [fokker-planck-equation, stochastic-differential-equations, ornstein-uhlenbeck-process]
+related: [probability-flow-ode, score-based-generative-models, denoising-diffusion-probabilistic-models, diffusion-models-as-stochastic-differential-equations, tweedies-formula, euler-maruyama-method]
+references: [anderson1982, song2021, haussmann1986, sarkka2019]
+status: draft
+updated: 2026-09-27
+---
+
+import { ReverseDiffusion } from './ReverseDiffusion'
+
+<Definition>
+Let $\xvec_t$ solve the **forward SDE** $d\xvec_t = \fvec(\xvec_t, t)\,dt + g(t)\,d\wvec_t$ on $[0, T]$, with marginal
+densities $p_t$. The time-reversed process $\yvec_s = \xvec_{T-s}$ solves the **reverse-time SDE**
+
+$$
+d\yvec_s = \brack{-\fvec(\yvec_s, T - s) + g(T - s)^2\,\nabla\log p_{T-s}(\yvec_s)}ds + g(T - s)\,d\bar{\wvec}_s,
+$$
+
+where $\bar{\wvec}$ is a Brownian motion and $\yvec_0 \sim p_T$. Written in the original clock, with time running from
+$T$ down to 0 and $dt < 0$, the same statement reads
+
+$$
+d\xvec = \brack{\fvec(\xvec, t) - g(t)^2\,\nabla\log p_t(\xvec)}dt + g(t)\,d\bar{\wvec}.
+$$
+
+The reversed process has the same law over whole paths as the forward one <Cite id="anderson1982" />
+<Cite id="haussmann1986" />.
+</Definition>
+
+## Intuition: the film of dye played backwards
+
+Film a drop of dye spreading in water, then play the film backwards. The cloud contracts into a drop. Each molecule
+still jitters, because in the reversed film its motion is still a random walk. But the jitter now has a bias towards
+where the dye is concentrated. That bias is exactly what is needed for the cloud to shrink rather than keep spreading.
+
+Where does the bias point? In the forward film, molecules drift out of dense regions because noise pushes more of them
+out than in. Reversing time turns that outflow into an inflow, towards higher density. The direction of increasing
+density is the gradient of $\log p_t$, the **score**. The reverse drift therefore adds $g^2\nabla\log p_t$ to the
+reversed forward drift $-\fvec$: noise strength times the direction uphill in density.
+
+The reverse drift needs the density at every time, but only through its score. The normalising constant of $p_t$
+cancels in $\nabla\log p_t$. This is why diffusion models learn a score network and never a density.
+
+## Derivation in one dimension via Fokker–Planck
+
+Take $dX = f(X, t)\,dt + g(t)\,dW$ with noise that depends on time only. The marginals obey the
+<NoteLink to="fokker-planck-equation">Fokker–Planck equation</NoteLink>
+
+$$
+\partial_t p_t = -\partial_x(f\,p_t) + \tfrac12 g^2\,\partial_x^2 p_t.
+$$
+
+The key step rewrites the diffusion term. Because $\partial_x p = p\,\partial_x\log p$,
+
+$$
+\tfrac12 g^2\,\partial_x^2 p = g^2\,\partial_x^2 p - \tfrac12 g^2\,\partial_x^2 p = \partial_x\paren{g^2 p\,\partial_x\log
+p} - \tfrac12 g^2\,\partial_x^2 p.
+$$
+
+Substituting,
+
+$$
+\partial_t p_t = -\partial_x\brack{\paren{f - g^2\,\partial_x\log p_t}p_t} - \tfrac12 g^2\,\partial_x^2 p_t.
+$$
+
+Now reverse the clock. Let $q_s = p_{T-s}$, so $\partial_s q_s = -\partial_t p_t$ at $t = T - s$:
+
+$$
+\partial_s q_s = -\partial_x\brack{\paren{-f + g^2\,\partial_x\log q_s}q_s} + \tfrac12 g^2\,\partial_x^2 q_s.
+$$
+
+This is the Fokker–Planck equation of an SDE in the time $s$ with drift $-f + g^2\,\partial_x\log q_s$ and diffusion
+coefficient $g$. Started from $q_0 = p_T$, that SDE has marginals $q_s = p_{T-s}$ for every $s$, so it runs the forward
+marginals backwards. The sign of the diffusion term is positive, so the reversed equation is a well-posed diffusion
+rather than a backward heat equation, which would be unstable. The score term is what turns the ill-posed "un-diffusion"
+into an ordinary diffusion with an extra drift.
+
+The argument matches marginals at each time. Anderson's theorem is stronger: the joint law of the whole reversed path
+is that of the reverse SDE <Cite id="anderson1982" />.
+
+## Worked example 1: reversing Brownian motion gives a Brownian bridge
+
+Take $dX = dW$ from $X_0 = 0$ on $[0, T]$. Then $p_t = \Gauss(0, t)$ and the score is $-x/t$. The reverse drift in the
+time $s$ is $-f + g^2\,\partial_x\log p_{T-s} = -Y/(T - s)$:
+
+$$
+dY_s = -\frac{Y_s}{T - s}\,ds + d\bar W_s, \qquad Y_0 \sim \Gauss(0, T).
+$$
+
+This is the SDE of a Brownian bridge pinned at 0 at time $s = T$. The pull $-Y/(T - s)$ grows without bound as
+$s \to T$, which forces every reversed path back to the starting point 0. The reverse SDE recovers the point mass it
+started from.
+
+## Worked example 2: an Ornstein–Uhlenbeck process with a Gaussian start
+
+Take the variance-preserving process $dX = -\tfrac12\beta X\,dt + \sqrt\beta\,dW$ with $X_0 \sim \Gauss(0, v_0)$. Its
+marginals are Gaussian, $p_t = \Gauss(0, v_t)$ with $v_t = 1 + (v_0 - 1)e^{-\beta t}$; see the
+<NoteLink to="ornstein-uhlenbeck-process">Ornstein–Uhlenbeck process</NoteLink>. The score is $-x/v_t$, and the
+reverse SDE in the time $s$ is
+
+$$
+dY = \paren{\tfrac12\beta\,Y - \frac{\beta}{v_{T-s}}Y}ds + \sqrt\beta\,d\bar W.
+$$
+
+**Check the variance.** For a linear SDE $dY = aY\,ds + b\,dW$ the variance $u$ obeys $u' = 2au + b^2$. Here
+$2a = \beta - 2\beta/v$ and $b^2 = \beta$. If $u = v_{T-s}$ then
+
+$$
+u' = \paren{\beta - \frac{2\beta}{v}}v + \beta = \beta(v - 1),
+$$
+
+which is exactly $\frac{d}{ds}v_{T-s} = -\frac{d}{dt}v_t = \beta(v_t - 1)$. So the reverse SDE retraces the forward
+variances. With $\beta = 1$, $v_0 = 0.25$ and $T = 3$: $v_T = 1 - 0.75e^{-3} = 0.963$. Simulating $2 \times 10^5$
+reverse paths with 3,000 Euler–Maruyama steps from $\Gauss(0, 0.963)$ gives a final variance of $0.251$, against the
+target $0.25$.
+
+**Drop the score term** and the reverse drift is only $-f = +\tfrac12\beta Y$. The variance then obeys $u' = \beta u +
+\beta$, so $u(T) = (v_T + 1)e^{\beta T} - 1 = 38.4$. The simulation gives $38.5$. Reversing the drift alone does not
+reverse a diffusion: the noise keeps spreading, and only the score term pulls the particles back together.
+
+## Worked example 3: a two-mode density
+
+Take data from the mixture $0.35\,\Gauss(-2, 0.35^2) + 0.65\,\Gauss(1.5, 0.5^2)$ and the forward process
+$dX = -\tfrac12X\,dt + dW$. Given $x_0$, $X_t \sim \Gauss(a_t x_0, 1 - a_t^2)$ with $a_t = e^{-t/2}$, so $p_t$ is
+again a two-component mixture with means $a_t\mu_k$ and variances $a_t^2\sigma_k^2 + 1 - a_t^2$. Its score is
+analytic:
+
+$$
+\partial_x\log p_t(x) = \frac{\sum_k \pi_k\,\Gauss(x; m_k, s_k^2)\,(m_k - x)/s_k^2}{\sum_k \pi_k\,\Gauss(x; m_k,
+s_k^2)}, \qquad m_k = a_t\mu_k,\ s_k^2 = a_t^2\sigma_k^2 + 1 - a_t^2.
+$$
+
+At $T = 5$, $a_T^2 = e^{-5} = 0.0067$ and $p_T$ is within a Kullback–Leibler divergence of $3 \times 10^{-4}$ of
+$\Gauss(0, 1)$. Starting $10^5$ particles from $\Gauss(0, 1)$ and running the reverse SDE with 250 Euler–Maruyama steps
+puts $65.1\%$ of them in the right-hand mode, against $65\%$ in the data, and gives a mean of $0.276$ and variance
+$2.99$, against the data's $0.275$ and $2.99$.
+
+<ReverseDiffusion />
+
+## How diffusion models use it
+
+A diffusion model fixes a forward SDE that turns data into Gaussian noise, such as the variance-preserving
+<NoteLink to="ornstein-uhlenbeck-process">Ornstein–Uhlenbeck process</NoteLink>. The score $\nabla\log p_t$ of real
+data is unknown, so a network $\svec_{\thetavec}(\xvec, t)$ is trained to approximate it by denoising score matching;
+<NoteLink to="tweedies-formula">Tweedie's formula</NoteLink> explains why a denoiser gives the score. Generation draws
+$\xvec_T \sim \Gauss(\zeros, \eye)$ and integrates the reverse SDE with $\svec_{\thetavec}$ in place of the score,
+typically with the <NoteLink to="euler-maruyama-method">Euler–Maruyama method</NoteLink> <Cite id="song2021" />.
+DDPM's ancestral sampler is a discretisation of this reverse SDE; see
+<NoteLink to="diffusion-models-as-stochastic-differential-equations">diffusion models as SDEs</NoteLink>. The
+deterministic alternative with the same marginals is the <NoteLink to="probability-flow-ode">probability-flow
+ODE</NoteLink>.
+
+## Assumptions
+
+- **Known terminal law.** The reverse SDE must start from $p_T$. In practice it starts from $\Gauss(\zeros, \eye)$,
+  which is close to $p_T$ only when the forward process has run long enough.
+- **Smooth, positive densities.** The score must exist. For data on a low-dimensional set, $p_0$ has no density and
+  the score blows up as $t \to 0$; samplers stop at a small $t = \epsilon > 0$.
+- **State-dependent noise.** When $g$ depends on $\xvec$ the reverse drift gains a further term,
+  $\nabla\cdot(g^2)$ in one dimension <Cite id="anderson1982" />. Diffusion models use noise that depends on time only.
+
+## Pitfalls
+
+- **Sign and clock.** In the original clock the drift is $\fvec - g^2\nabla\log p_t$ with $dt < 0$; in the reversed
+  clock it is $-\fvec + g^2\nabla\log p_{T-s}$ with $ds > 0$. Mixing the two flips the sign of the score term.
+- **Using the score of the data.** The reverse drift at time $t$ needs the score of the noised density $p_t$, not of
+  $p_0$. A network conditioned on $t$ provides it.
+- **Reversing the drift is not enough.** Running $-\fvec$ backwards with noise spreads the particles further, as
+  worked example 2 shows. All the information about the data enters through the score.

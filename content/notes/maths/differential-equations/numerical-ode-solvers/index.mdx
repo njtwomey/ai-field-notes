@@ -1,0 +1,230 @@
+---
+title: Numerical ODE solvers
+kind: concept
+summary: 'A numerical ODE solver advances $\dot{\xvec} = \fvec(t, \xvec)$ in steps of size $h$. Euler''s method $\xvec_{n+1} = \xvec_n + h\fvec(t_n, \xvec_n)$ has global error $O(h)$; Runge–Kutta methods sample $\fvec$ several times per step for error $O(h^p)$. Stiff equations need implicit steps, and adaptive solvers choose $h$ from an error estimate.'
+tags: [differential-equations, ordinary-differential-equations, numerical-methods, worked-example]
+aliases: [Euler method, forward Euler, explicit Euler, backward Euler, implicit Euler, midpoint method, Runge–Kutta method, RK4, RK45, Dormand–Prince, embedded Runge–Kutta, adaptive step size, stiff equation, stiffness, order of accuracy, local truncation error, global error, stability region, A-stability]
+requires: [ordinary-differential-equations, taylor-series]
+partOf: [ordinary-differential-equations]
+related: [euler-maruyama-method, numerical-integration, numerical-stability-and-conditioning, gradient-descent, denoising-diffusion-implicit-models, neural-ordinary-differential-equations]
+references: [hairer1993, hairer1996, dormand1980, suli2003]
+status: draft
+updated: 2026-09-27
+---
+
+import { SolverComparison } from './SolverComparison'
+
+<Definition>
+A **one-step solver** for the initial value problem $\dot{\xvec} = \fvec(t, \xvec)$, $\xvec(t_0) = \xvec_0$ produces
+approximations $\xvec_n \approx \xvec(t_n)$ on a grid $t_n = t_0 + nh$ by a rule $\xvec_{n+1} = \xvec_n +
+h\,\Phi(t_n, \xvec_n, h)$. The simplest is **Euler's method**, $\Phi = \fvec(t_n, \xvec_n)$. A solver has **order**
+$p$ if its error at a fixed final time is $O(h^p)$. An **explicit** solver evaluates $\fvec$ only at known states; an
+**implicit** solver's rule involves $\xvec_{n+1}$ on both sides and needs an equation solve each step
+<Cite id="hairer1993" />.
+</Definition>
+
+## Intuition
+
+A hiker crosses fog with a compass that shows the slope of the ground underfoot. The hiker walks a fixed distance in
+the direction the compass shows, stops, reads it again, and repeats. Each leg is straight, so the route drifts from the
+true curved path wherever the direction changes during a leg. Shorter legs drift less but take more readings. That is
+Euler's method, and every other solver is a smarter way to choose the direction of each leg.
+
+## Euler's method from the Taylor series
+
+The <NoteLink to="taylor-series">Taylor expansion</NoteLink> of the exact solution over one step is
+
+$$
+\xvec(t + h) = \xvec(t) + h\,\dot{\xvec}(t) + \frac{h^2}{2}\ddot{\xvec}(\xi) = \xvec(t) + h\,\fvec(t, \xvec(t)) +
+O(h^2),
+$$
+
+for some $\xi$ between $t$ and $t + h$. Dropping the $O(h^2)$ term gives Euler's method:
+
+$$
+\xvec_{n+1} = \xvec_n + h\,\fvec(t_n, \xvec_n).
+$$
+
+The dropped term is the **local truncation error**, the error made in one step from an exact starting value. It is
+$\tfrac{h^2}{2}\ddot{\xvec}$, so it is $O(h^2)$.
+
+**Worked example.** For $\dot x = -x$, $x(0) = 1$, Euler's step is $x_{n+1} = (1 - h)\,x_n$. With $h = 0.25$ the
+iterates are $1, 0.75, 0.5625, 0.4219, 0.3164$, so $x_4 = 0.3164$ approximates $x(1) = e^{-1} = 0.3679$ with error
+$0.0515$. With $h = 0.1$, $x_{10} = 0.9^{10} = 0.3487$ and the error is $0.0192$. With $h = 0.05$ it is $0.0094$.
+Halving $h$ roughly halves the error.
+
+### From local to global error
+
+Reaching a fixed time $T$ takes $N = T/h$ steps. Each step adds a local error of order $h^2$, and $N$ of them add up to
+order $N h^2 = T h$. So Euler's method has **global error** $O(h)$ and is a first-order method.
+
+The argument must also account for errors made early being carried forward and possibly amplified. Let
+$e_n = \norm{\xvec_n - \xvec(t_n)}$ and let $L$ be the Lipschitz constant of $\fvec$. Subtracting the exact Taylor step
+from the Euler step gives
+
+$$
+e_{n+1} \le (1 + hL)\,e_n + Ch^2,
+$$
+
+where $C$ bounds $\tfrac12\norm{\ddot{\xvec}}$. The first term is the old error, stretched by at most $1 + hL$ because
+$\fvec$ differs by at most $L e_n$ between the two states. Unrolling from $e_0 = 0$ gives a geometric sum:
+
+$$
+e_N \le Ch^2\sum_{k=0}^{N-1}(1 + hL)^k = Ch^2\,\frac{(1 + hL)^N - 1}{hL} \le \frac{Ch}{L}\paren{e^{LT} - 1},
+$$
+
+using $(1 + hL)^N \le e^{NhL} = e^{LT}$. The error is proportional to $h$, with a constant that can grow exponentially
+in the time horizon <Cite id="suli2003" />.
+
+## Runge–Kutta methods
+
+Euler uses the slope at the start of the step. A better step uses the slope at the middle. The **midpoint method**
+takes a half Euler step to estimate the midpoint, then uses the slope there for the full step:
+
+$$
+\kvec_1 = \fvec(t_n, \xvec_n), \qquad \kvec_2 = \fvec\paren{t_n + \tfrac h2, \xvec_n + \tfrac h2\kvec_1}, \qquad
+\xvec_{n+1} = \xvec_n + h\,\kvec_2.
+$$
+
+Expanding $\kvec_2$ in a Taylor series shows that the step matches the exact solution through the $h^2$ term, so the
+local error is $O(h^3)$ and the method has order 2.
+
+<Derivation title="Why the midpoint method has order 2">
+Write $\fvec$ for $\fvec(t_n, \xvec_n)$ and use subscripts for its partial derivatives there. Then
+$\kvec_2 = \fvec + \tfrac h2\paren{\fvec_t + \fvec_{\xvec}\fvec} + O(h^2)$. The exact solution has
+$\ddot{\xvec} = \fvec_t + \fvec_{\xvec}\fvec$ by the chain rule, so
+
+$$
+\xvec(t_n + h) = \xvec_n + h\fvec + \tfrac{h^2}{2}\paren{\fvec_t + \fvec_{\xvec}\fvec} + O(h^3) = \xvec_n + h\kvec_2 +
+O(h^3).
+$$
+
+The two agree up to $h^2$. Euler's step $\xvec_n + h\fvec$ misses the $h^2$ term.
+</Derivation>
+
+For $\dot x = -x$ with $h = 0.5$, one midpoint step gives $1 - 0.5 + 0.125 = 0.625$ against the exact $e^{-0.5} =
+0.607$. Euler gives $0.5$.
+
+The **classical fourth-order Runge–Kutta method** (RK4) samples four slopes per step:
+
+$$
+\begin{aligned}
+\kvec_1 &= \fvec(t_n, \xvec_n), & \kvec_2 &= \fvec\paren{t_n + \tfrac h2, \xvec_n + \tfrac h2\kvec_1}, \\
+\kvec_3 &= \fvec\paren{t_n + \tfrac h2, \xvec_n + \tfrac h2\kvec_2}, & \kvec_4 &= \fvec(t_n + h, \xvec_n + h\kvec_3),
+\end{aligned}
+$$
+
+$$
+\xvec_{n+1} = \xvec_n + \tfrac h6\paren{\kvec_1 + 2\kvec_2 + 2\kvec_3 + \kvec_4}.
+$$
+
+For $\fvec$ independent of $\xvec$ this is Simpson's rule from <NoteLink to="numerical-integration">numerical
+integration</NoteLink>. Its global error is $O(h^4)$: halving $h$ divides the error by about 16.
+
+**Worked example (the three methods on $\dot x = -x$ to $T = 1$).** On a linear equation each method multiplies the
+state by a polynomial in $h$ per step: $1 - h$ for Euler, $1 - h + h^2/2$ for midpoint, and the Taylor polynomial of
+$e^{-h}$ to degree 4 for RK4.
+
+| $h$  | Euler error | midpoint error         | RK4 error              |
+| ---- | ----------- | ---------------------- | ---------------------- |
+| 0.25 | 0.0515      | $4.6 \times 10^{-3}$   | $1.5 \times 10^{-5}$   |
+| 0.1  | 0.0192      | $6.6 \times 10^{-4}$   | $3.3 \times 10^{-7}$   |
+| 0.05 | 0.0094      | $1.6 \times 10^{-4}$   | $2.0 \times 10^{-8}$   |
+
+From $h = 0.1$ to $0.05$ the errors fall by factors of 2.0, 4.2 and 16.7, the orders 1, 2 and 4. RK4 uses four
+evaluations of $\fvec$ per step against Euler's one, but at equal cost it is still far more accurate.
+
+## Stability and stiffness
+
+Accuracy is about small $h$. Stability is about what happens at a given $h$ over many steps. Apply a solver to the
+**test equation** $\dot x = \lambda x$ with $\lambda < 0$, whose exact solution decays. Euler gives
+$x_{n+1} = (1 + h\lambda)\,x_n$, which decays only if $\abs{1 + h\lambda} < 1$, that is if
+
+$$
+h < \frac{2}{\abs\lambda}.
+$$
+
+Beyond that step size the iterates oscillate with growing amplitude, although the true solution decays. RK4's limit on
+the negative real axis is $h < 2.785/\abs\lambda$. For complex $\lambda$ the condition is that $h\lambda$ lies in the
+method's **stability region**, the set of $z$ with $\abs{R(z)} \le 1$ where $R$ is the per-step polynomial.
+
+**Worked example (Euler on an oscillator).** For $\ddot x = -x$ written as a system, $\lambda = \pm i$ and Euler
+multiplies the amplitude by $\abs{1 \pm ih} = \sqrt{1 + h^2} > 1$ every step. With $h = 0.1$ over $t \in [0, 10]$ the
+amplitude grows by $1.01^{50} = 1.64$, although the true oscillation has constant amplitude. The imaginary axis lies
+outside Euler's stability region for every $h > 0$.
+
+An equation is **stiff** when it has a fast decaying component that is not needed for accuracy but still limits the
+step size through stability. The equation
+
+$$
+\dot x = -50\,(x - \cos t)
+$$
+
+has a solution that tracks $\cos t$ closely after a transient lasting about $1/50$. Accuracy would allow steps of 0.1.
+Euler is stable only for $h < 2/50 = 0.04$. At $h = 0.05$ the multiplier is $1 - 2.5 = -1.5$ and the iterates explode:
+starting from $x(0) = 0$, Euler at $t = 1$ gives $-3325$ where the exact value is $0.557$.
+
+**Implicit Euler** evaluates the slope at the end of the step:
+
+$$
+\xvec_{n+1} = \xvec_n + h\,\fvec(t_{n+1}, \xvec_{n+1}).
+$$
+
+On the test equation $x_{n+1} = x_n/(1 - h\lambda)$, and $\abs{1/(1 - h\lambda)} < 1$ for every $h > 0$ when
+$\mathrm{Re}\,\lambda < 0$. The method is **A-stable**: stable for any step size on any decaying linear mode. On the
+stiff equation above it gives $0.5566$ at $t = 1$ with $h = 0.05$, and $0.5563$ even with $h = 0.1$. The price is an
+equation solve per step, usually by Newton's method with the Jacobian of $\fvec$ <Cite id="hairer1996" />. Stiff solvers
+such as `Radau`, `BDF` and Crank–Nicolson for PDEs are implicit.
+
+<SolverComparison />
+
+## Adaptive step size
+
+A fixed $h$ wastes effort where the solution is smooth and loses accuracy where it changes quickly. An **adaptive**
+solver estimates its local error each step and adjusts $h$. **Embedded Runge–Kutta** pairs compute two estimates of
+different orders from the same slope evaluations, for example orders 5 and 4 in the **Dormand–Prince** method
+(RK45) <Cite id="dormand1980" />. Their difference $\hat e$ estimates the local error of the lower-order one. If
+$\norm{\hat e}$ exceeds a tolerance the step is rejected and retried with a smaller $h$; otherwise it is accepted. In
+both cases the next step size is
+
+$$
+h_{\text{new}} = h \cdot s \cdot \paren{\frac{\text{tol}}{\norm{\hat e}}}^{1/5},
+$$
+
+with a safety factor $s \approx 0.9$. The exponent is $1/(q + 1)$ for a lower order $q = 4$, since the local error of
+that estimate scales as $h^5$.
+
+**Worked example.** SciPy's `solve_ivp` uses RK45 by default. On the oscillator over $[0, 10]$ with relative tolerance
+$10^{-6}$ it takes 52 steps and 368 evaluations of $\fvec$, and the final error is $1.3 \times 10^{-6}$. On the stiff
+equation over $[0, 200]$ it needs 9438 steps, because stability rather than accuracy caps its step size. The implicit
+`Radau` solver needs 1249.
+
+## In machine learning
+
+- **Gradient descent is Euler's method** on gradient flow $\dot{\wvec} = -\nabla L(\wvec)$, with learning rate as step
+  size. Near a minimum with Hessian eigenvalues $h_i$, the stability condition $\eta < 2/\max_i h_i$ is the classic
+  learning-rate limit, and a loss with widely spread curvatures is a stiff problem.
+- **Diffusion model samplers.** <NoteLink to="denoising-diffusion-implicit-models">DDIM</NoteLink> is an Euler-type
+  step on the probability flow ODE, and higher-order solvers such as Heun's method (a second-order Runge–Kutta method)
+  reduce the number of network evaluations needed per sample.
+- **Stochastic equations.** Adding a Gaussian increment with variance proportional to $h$ to each Euler step gives the
+  <NoteLink to="euler-maruyama-method">Euler–Maruyama method</NoteLink> for stochastic differential equations. Its strong order is $\tfrac12$, not 1, because the noise
+  over a step has size $\sqrt h$.
+- **Neural ODEs.** A <NoteLink to="neural-ordinary-differential-equations">neural ODE</NoteLink> is evaluated with an
+  adaptive solver, so the number of network evaluations depends on the input and the tolerance.
+- **Residual networks.** A residual block $\xvec + \fvec(\xvec)$ is one Euler step with $h = 1$.
+
+## Assumptions
+
+- The error bounds assume $\fvec$ is smooth enough: order $p$ needs $p$ continuous derivatives of the solution.
+- Adaptive control keeps the local error per step near the tolerance. It does not bound the global error, which can
+  still grow with the time horizon.
+
+## Pitfalls
+
+- **Stability is not accuracy.** Implicit Euler is stable at any step but only first-order accurate. A large stable
+  step can be badly wrong.
+- **Round-off at tiny steps.** Below a certain $h$ the error stops falling and rises, because each step adds rounding
+  error and the number of steps grows as $1/h$.
+- **Energy drift.** Standard Runge–Kutta methods do not conserve energy. Long simulations of Hamiltonian systems use
+  symplectic methods such as leapfrog, as in <NoteLink to="hamiltonian-monte-carlo">Hamiltonian Monte Carlo</NoteLink>.

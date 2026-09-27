@@ -1,0 +1,184 @@
+---
+title: "Tweedie's formula"
+kind: concept
+summary: "Tweedie's formula gives the posterior mean of a signal $\\xvec$ observed with Gaussian noise, $\\yvec = \\xvec + \\sigma\\epsilonvec$, from the density of $\\yvec$ alone: $\\expect[\\xvec \\mid \\yvec] = \\yvec + \\sigma^2\\nabla_{\\yvec}\\log p(\\yvec)$. So the best denoiser and the score of the noisy data are the same object."
+tags: [probability, bayesian, empirical-bayes, shrinkage, denoising, score-matching, diffusion-models, worked-example]
+aliases: [Tweedie formula, Tweedie's formula for posterior means, Robbins–Tweedie formula, Miyasawa's theorem, second-order Tweedie formula, denoiser–score identity]
+requires: [bayes-theorem, gaussian-distribution, gradient]
+related: [score-based-generative-models, denoising-diffusion-probabilistic-models, denoising-diffusion-implicit-models, diffusion-models-as-stochastic-differential-equations, reverse-time-stochastic-differential-equations, gamma-and-tweedie-regression, shrinkage-covariance-estimation]
+references: [robbins1956, efron2011, vincent2011, kadkhodaie2021, song2021, ho2020]
+status: draft
+updated: 2026-09-27
+---
+
+import { TweedieDenoiser } from './TweedieDenoiser'
+
+<Callout title="Not Tweedie distributions">
+This note is about Tweedie's formula for posterior means under Gaussian noise. The Tweedie family of distributions,
+with variance $\phi\mu^p$, is a different result by the same statistician, Maurice Tweedie; see
+<NoteLink to="gamma-and-tweedie-regression">gamma and Tweedie regression</NoteLink>.
+</Callout>
+
+<Definition>
+Let $\xvec \in \reals^d$ have any prior density or distribution, and observe $\yvec = \xvec + \sigma\epsilonvec$ with
+$\epsilonvec \sim \Gauss(\zeros, \eye)$ independent of $\xvec$ and $\sigma$ known. Let $p(\yvec)$ be the marginal
+density of $\yvec$. **Tweedie's formula** states
+
+$$
+\expect[\xvec \mid \yvec] = \yvec + \sigma^2\,\nabla_{\yvec}\log p(\yvec).
+$$
+
+More generally, for $\yvec = a\xvec + s\epsilonvec$ with known $a > 0$ and $s > 0$,
+$\expect[\xvec \mid \yvec] = \paren{\yvec + s^2\nabla\log p(\yvec)}/a$. Robbins published it in 1956 and credited it to
+Tweedie <Cite id="robbins1956" />; Efron revived it for large-scale inference <Cite id="efron2011" />.
+</Definition>
+
+## Intuition: move towards where observations are common
+
+A noisy observation $y$ is the true value plus noise. If observations near $y$ are more common on its left than on its
+right, then $y$ is more likely a value from the left pushed right by noise than the reverse, simply because there are
+more candidates on the left. The best guess of the true value is therefore to the left of $y$. The slope of
+$\log p(y)$ says which side has more candidates and by how much, and the noise variance $\sigma^2$ says how far noise
+could have moved the value.
+
+The remarkable part is what the formula does not need. It never uses the prior of $x$. The density of the noisy
+observations already contains all the information about the prior that the posterior mean needs. The density of
+observations can be estimated from the observations themselves, which is the basis of empirical Bayes.
+
+## Derivation
+
+The marginal density of $\yvec$ is a Gaussian blur of the prior:
+
+$$
+p(\yvec) = \int p(\xvec)\,\varphi_\sigma(\yvec - \xvec)\,d\xvec, \qquad \varphi_\sigma(\uvec) = (2\pi\sigma^2)^{-d/2}
+e^{-\norm{\uvec}^2/(2\sigma^2)}.
+$$
+
+The Gaussian kernel has gradient $\nabla_{\yvec}\varphi_\sigma(\yvec - \xvec) = -\frac{\yvec - \xvec}{\sigma^2}
+\varphi_\sigma(\yvec - \xvec)$. Differentiate under the integral:
+
+$$
+\nabla p(\yvec) = \int p(\xvec)\,\frac{\xvec - \yvec}{\sigma^2}\,\varphi_\sigma(\yvec - \xvec)\,d\xvec.
+$$
+
+Divide by $p(\yvec)$. By <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink>
+$p(\xvec)\varphi_\sigma(\yvec - \xvec)/p(\yvec) = p(\xvec \mid \yvec)$, so
+
+$$
+\nabla\log p(\yvec) = \frac{\nabla p(\yvec)}{p(\yvec)} = \int \frac{\xvec - \yvec}{\sigma^2}\,p(\xvec \mid \yvec)\,
+d\xvec = \frac{\expect[\xvec \mid \yvec] - \yvec}{\sigma^2}.
+$$
+
+Rearranging gives the formula. The only property of the noise used is that the gradient of the Gaussian kernel is the
+kernel times a linear function; for other exponential-family noise the same argument gives a similar formula.
+
+<Derivation title="Second-order Tweedie: the posterior covariance">
+Differentiate $\nabla\log p(\yvec) = (\expect[\xvec \mid \yvec] - \yvec)/\sigma^2$ once more. Differentiating the
+posterior mean under the integral, with $\nabla_{\yvec}\log p(\xvec \mid \yvec) = (\xvec - \yvec)/\sigma^2 -
+\nabla\log p(\yvec)$, gives $\nabla_{\yvec}\expect[\xvec \mid \yvec] = \cov[\xvec \mid \yvec]/\sigma^2$. Hence
+
+$$
+\cov[\xvec \mid \yvec] = \sigma^2\paren{\eye + \sigma^2\,\nabla^2\log p(\yvec)}.
+$$
+
+For the Gaussian prior of worked example 1 the Hessian is $-1/(\tau^2 + \sigma^2)$, and the formula gives
+$\sigma^2\tau^2/(\tau^2 + \sigma^2)$, the familiar posterior variance.
+</Derivation>
+
+## Worked example 1: a Gaussian prior recovers shrinkage
+
+Let $x \sim \Gauss(\mu_0, \tau^2)$. Then $y \sim \Gauss(\mu_0, \tau^2 + \sigma^2)$ and
+$\frac{d}{dy}\log p(y) = -(y - \mu_0)/(\tau^2 + \sigma^2)$. Tweedie's formula gives
+
+$$
+\expect[x \mid y] = y - \frac{\sigma^2(y - \mu_0)}{\tau^2 + \sigma^2} = \frac{\tau^2\,y + \sigma^2\,\mu_0}{\tau^2 +
+\sigma^2},
+$$
+
+the usual precision-weighted average: the observation is shrunk towards the prior mean by the factor
+$\sigma^2/(\tau^2 + \sigma^2)$. With $\mu_0 = 0$, $\tau^2 = 1$, $\sigma^2 = 1$ and $y = 2$, the posterior mean is 1:
+half the observation is attributed to noise.
+
+## Worked example 2: a two-point prior
+
+Let $x = \pm1$ with probability $\tfrac12$ each. Then $p(y) = \tfrac12\varphi_\sigma(y - 1) + \tfrac12\varphi_\sigma(y +
+1)$, and
+
+$$
+\frac{d}{dy}\log p(y) = \frac{-(y - 1)\varphi_\sigma(y - 1) - (y + 1)\varphi_\sigma(y + 1)}{\sigma^2\paren{\varphi_\sigma(y
+- 1) + \varphi_\sigma(y + 1)}} = \frac{-y + \tanh(y/\sigma^2)}{\sigma^2},
+$$
+
+using $\varphi_\sigma(y - 1)/\varphi_\sigma(y + 1) = e^{2y/\sigma^2}$. Tweedie's formula gives
+$\expect[x \mid y] = \tanh(y/\sigma^2)$, which is also what Bayes' rule gives directly: the posterior probability of
+$+1$ is $1/(1 + e^{-2y/\sigma^2})$. With $\sigma = 1$ and $y = 2$ the posterior mean is $\tanh 2 = 0.964$. The
+denoiser is not linear: it snaps observations to the nearer of the two prior values, softly when noise is large.
+
+**A mixture check.** For the prior $0.3\,\Gauss(-1.5, 0.3^2) + 0.7\,\Gauss(1, 0.3^2)$, noise $\sigma = 0.6$ and
+$y = 0.2$, integrating Bayes' rule on a grid and applying Tweedie's formula with a finite-difference slope of
+$\log p(y)$ both give $0.772$.
+
+<TweedieDenoiser />
+
+## Empirical Bayes and selection bias
+
+Robbins' point was that $p(y)$ can be estimated from many observations without any model for the prior
+<Cite id="robbins1956" />. Efron applied this to selection bias <Cite id="efron2011" />. When thousands of effects are
+measured with noise and the largest are reported, the largest observations are mostly lucky noise, and they
+overestimate their true effects.
+
+A simulation shows the size of the effect. Draw 1,000 true effects $x_i \sim \Gauss(0, 1)$ and observe
+$y_i = x_i + \epsilon_i$ with $\epsilon_i \sim \Gauss(0, 1)$. The 20 largest observations average $3.51$, but their true
+effects average only $1.89$. Now estimate $\log p(y)$ by fitting a degree-4 polynomial to the log of the histogram
+counts of the $y_i$ (a Poisson regression, as Efron does), differentiate it, and apply Tweedie's formula to each of the
+20. The corrected estimates average $1.82$, close to the truth, and close to the $1.76$ that the true posterior mean
+$y/2$ would give. The correction used no knowledge of the prior.
+
+## Why a denoiser is a score estimator
+
+Train a function $D(\yvec)$ to remove noise by minimising $\expect\norm{D(\xvec + \sigma\epsilonvec) - \xvec}^2$ over
+clean data $\xvec$ and noise $\epsilonvec$. The minimiser of a squared error is the conditional mean, so the optimal
+denoiser is $D^*(\yvec) = \expect[\xvec \mid \yvec]$. By Tweedie's formula,
+
+$$
+\nabla\log p_\sigma(\yvec) = \frac{D^*(\yvec) - \yvec}{\sigma^2},
+$$
+
+where $p_\sigma$ is the density of the noisy data. A trained denoiser therefore gives the score of the noised data
+distribution, and the residual $D(\yvec) - \yvec$ points uphill in density. This is the identity behind denoising score
+matching <Cite id="vincent2011" />, and it is why a denoiser implicitly contains a prior that can be sampled from
+<Cite id="kadkhodaie2021" />.
+
+In a variance-preserving diffusion model the noised sample is $\xvec_t = \sqrt{\bar\alpha_t}\,\xvec_0 + \sqrt{1 -
+\bar\alpha_t}\,\epsilonvec$, the scaled form with $a = \sqrt{\bar\alpha_t}$ and $s^2 = 1 - \bar\alpha_t$. Tweedie's
+formula gives two equivalent predictions:
+
+$$
+\hat\xvec_0 = \expect[\xvec_0 \mid \xvec_t] = \frac{\xvec_t + (1 - \bar\alpha_t)\,\nabla\log p_t(\xvec_t)}{\sqrt{\bar
+\alpha_t}}, \qquad \expect[\epsilonvec \mid \xvec_t] = -\sqrt{1 - \bar\alpha_t}\;\nabla\log p_t(\xvec_t).
+$$
+
+The second follows from the first and $\epsilonvec = (\xvec_t - \sqrt{\bar\alpha_t}\,\xvec_0)/\sqrt{1 -
+\bar\alpha_t}$. So a network trained to predict the noise, as in <NoteLink to="denoising-diffusion-probabilistic-models">
+DDPM</NoteLink> <Cite id="ho2020" />, is a scaled score network, and its prediction of the clean image $\hat\xvec_0$ is
+Tweedie's posterior mean. <NoteLink to="denoising-diffusion-implicit-models">DDIM</NoteLink> steps through this
+$\hat\xvec_0$, and the <NoteLink to="reverse-time-stochastic-differential-equations">reverse-time SDE</NoteLink>
+consumes the same score <Cite id="song2021" />.
+
+## Assumptions
+
+- **Gaussian noise of known variance**, independent of the signal. The noise variance must be the one at which $p$ is
+  evaluated: the score of $p_\sigma$ for one $\sigma$ does not give the posterior mean at another.
+- **Additive noise.** For Poisson counts the analogue is Robbins' formula $\expect[\lambda \mid y] = (y + 1)\,p(y +
+  1)/p(y)$, which uses the ratio of neighbouring frequencies instead of a derivative <Cite id="robbins1956" />.
+
+## Pitfalls
+
+- **The mean is not a sample.** $\expect[\xvec \mid \yvec]$ averages over all clean signals consistent with $\yvec$. For
+  images at high noise it is a blurry average, which is why diffusion models take many small steps instead of jumping to
+  $\hat\xvec_0$.
+- **Noisy slopes.** In empirical Bayes the formula needs the derivative of an estimated log-density. Derivatives of
+  density estimates are noisy in the tails, exactly where the largest observations sit; a smooth parametric fit, such as
+  a low-degree log-polynomial, is more stable than a histogram.
+- **Scaling.** For $\yvec = a\xvec + s\epsilonvec$ the formula divides by $a$ and uses $s^2$, not $\sigma^2$. Forgetting
+  the division by $\sqrt{\bar\alpha_t}$ is a common bug in diffusion code.

@@ -1,11 +1,20 @@
 import { Link } from 'react-router'
 import { kindIcons } from '@/components/layout/kind-icon'
-import { category, kindLabels, noteUrl, prefetchNote, type NoteMeta } from '@/lib/content'
+import { category, indexOfCategory, kindLabels, noteUrl, prefetchNote, type NoteMeta } from '@/lib/content'
 import { cn } from '@/lib/utils'
 import { MathText } from '@/components/content/MathText'
 
 /** A note at a glance: kind and title first, then where it sits, then one or two lines of summary. */
-export function NoteCard({ note, className }: { note: NoteMeta; className?: string }) {
+export function NoteCard({
+  note,
+  className,
+  lead = false,
+}: {
+  note: NoteMeta
+  className?: string
+  /** The category's index note: set apart from the rest of the list. */
+  lead?: boolean
+}) {
   const Icon = kindIcons[note.kind]
   return (
     <Link
@@ -14,6 +23,7 @@ export function NoteCard({ note, className }: { note: NoteMeta; className?: stri
       onFocus={() => prefetchNote(note.slug)}
       className={cn(
         'group flex flex-col gap-1.5 rounded-lg border p-4 transition-colors hover:border-foreground/30 hover:bg-muted/40',
+        lead && 'border-foreground/25 bg-muted/40',
         className,
       )}
     >
@@ -23,7 +33,9 @@ export function NoteCard({ note, className }: { note: NoteMeta; className?: stri
         {note.status === 'stub' && <span className="ml-auto text-[10px] text-muted-foreground italic">stub</span>}
       </div>
       <span className="pl-6 text-xs text-muted-foreground">
-        {kindLabels[note.kind]} · {category(note.category)?.title}
+        {lead
+          ? `Start here · overview of ${category(indexOfCategory(note.slug) ?? note.category)?.title}`
+          : `${kindLabels[note.kind]} · ${category(note.category)?.title}`}
       </span>
       <p className="line-clamp-2 pl-6 text-sm text-muted-foreground">
         <MathText text={note.summary} />

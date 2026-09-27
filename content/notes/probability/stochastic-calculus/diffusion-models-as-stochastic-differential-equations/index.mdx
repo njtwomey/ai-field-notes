@@ -1,0 +1,149 @@
+---
+title: Diffusion models as stochastic differential equations
+kind: concept
+summary: 'A diffusion model fixes a forward SDE that turns data into Gaussian noise, trains a network to approximate the score $\nabla\log p_t$ of each noised marginal, and generates by solving the reverse-time SDE or the probability-flow ODE from noise. DDPM is a discretised VP SDE.'
+tags: [diffusion-models, generative-models, stochastic-differential-equations, score-matching, deep-learning, worked-example]
+aliases: [score SDE, score-based diffusion, VP SDE, VE SDE, sub-VP SDE, variance-preserving SDE, variance-exploding SDE, predictor–corrector sampler, continuous-time diffusion model]
+requires: [reverse-time-stochastic-differential-equations, probability-flow-ode, ornstein-uhlenbeck-process, tweedies-formula]
+related: [score-based-generative-models, denoising-diffusion-probabilistic-models, denoising-diffusion-implicit-models, diffusion-guidance, latent-diffusion, euler-maruyama-method, girsanov-theorem, langevin-dynamics]
+references: [song2021, ho2020, song2019, song2021b, song2021mle, karras2022, vincent2011, anderson1982]
+status: draft
+updated: 2026-09-27
+---
+
+import { NoiseSchedules } from './NoiseSchedules'
+
+<Definition>
+A **score-based diffusion model** has three parts <Cite id="song2021" />:
+
+1. a fixed **forward SDE** $d\xvec = \fvec(\xvec, t)\,dt + g(t)\,d\wvec$ on $t \in [0, T]$ that carries the data
+   distribution $p_0$ to a simple distribution $p_T$, close to a Gaussian;
+2. a **score network** $\svec_{\thetavec}(\xvec, t) \approx \nabla\log p_t(\xvec)$, trained by denoising score
+   matching on noised data;
+3. a **sampler** that draws $\xvec_T$ from the Gaussian and integrates the
+   <NoteLink to="reverse-time-stochastic-differential-equations">reverse-time SDE</NoteLink>
+   $d\xvec = \brack{\fvec - g^2\svec_{\thetavec}}dt + g\,d\bar{\wvec}$, or the
+   <NoteLink to="probability-flow-ode">probability-flow ODE</NoteLink>
+   $d\xvec/dt = \fvec - \tfrac12 g^2\svec_{\thetavec}$, from $t = T$ to $t = 0$.
+</Definition>
+
+## Intuition: destroy slowly, learn to undo
+
+Watch a sandcastle erode in the wind until it is a flat, featureless heap. The erosion is easy to simulate: every grain
+moves a little at random. Played backwards, the film shows a castle assembling itself from a heap, which seems to need
+knowledge of castles. The mathematics of time reversal says exactly what knowledge: at every moment, the direction in
+which the current heap becomes more castle-like, which is the score of the density of heaps at that moment. A
+diffusion model learns that direction for every amount of erosion, from a dataset of castles and a known erosion
+process.
+
+The earlier discrete models fit inside this picture. <NoteLink to="denoising-diffusion-probabilistic-models">DDPM</NoteLink>
+adds Gaussian noise in 1,000 small steps <Cite id="ho2020" />; the noise-conditional score networks of
+<NoteLink to="score-based-generative-models">score-based models</NoteLink> use a ladder of noise levels
+<Cite id="song2019" />. Both are discretisations of an SDE, and the SDE view explains their samplers, their training
+losses and their likelihoods with one set of tools.
+
+## The forward SDEs
+
+Three forward processes are standard. Each has additive noise and a linear drift, so its transition law is Gaussian,
+$\xvec_t \mid \xvec_0 \sim \Gauss\paren{m(t)\,\xvec_0,\ s(t)^2\eye}$, and training can jump to any $t$ in one draw.
+
+- **Variance preserving (VP).** $d\xvec = -\tfrac12\beta(t)\,\xvec\,dt + \sqrt{\beta(t)}\,d\wvec$. This is an
+  <NoteLink to="ornstein-uhlenbeck-process">Ornstein–Uhlenbeck process</NoteLink> with time-varying rate. With
+  $B(t) = \int_0^t \beta(u)\,du$, the integrating factor gives $m = e^{-B/2}$ and $s^2 = 1 - e^{-B}$. If the data have
+  unit variance, so does $\xvec_t$ at every time.
+- **Variance exploding (VE).** $d\xvec = \sqrt{d\sigma^2(t)/dt}\;d\wvec$. There is no drift, so $m = 1$, and the noise
+  variance accumulates to $s^2 = \sigma^2(t) - \sigma^2(0)$. The final noise $\sigma(T)$ must be larger than the spread
+  of the data.
+- **Sub-VP.** $d\xvec = -\tfrac12\beta(t)\,\xvec\,dt + \sqrt{\beta(t)\paren{1 - e^{-2B(t)}}}\,d\wvec$. It has the VP
+  mean and the smaller variance $s^2 = (1 - e^{-B})^2$, which Song et al. found gave better likelihoods.
+
+With Song et al.'s schedules, $\beta(t)$ rising linearly from 0.1 to 20 on $[0, 1]$ gives $B(1) = 10.05$, a signal
+scale $m(1) = 0.0066$ and noise scale $s(1) = 1.000$ for VP. The VE schedule $\sigma(t) = 0.01 \times 5000^t$ rises
+from 0.01 to 50.
+
+<NoiseSchedules />
+
+## DDPM is a discretised VP-SDE
+
+DDPM's forward step is $\xvec_i = \sqrt{1 - \beta_i}\,\xvec_{i-1} + \sqrt{\beta_i}\,\zvec_i$ for $i = 1, \dots, N$.
+Put the steps on a grid $t_i = i/N$ with $\Delta t = 1/N$ and set $\beta_i = \beta(t_i)\,\Delta t$. For small $\beta_i$,
+$\sqrt{1 - \beta_i} \approx 1 - \tfrac12\beta_i$, so
+
+$$
+\xvec_i - \xvec_{i-1} \approx -\tfrac12\beta(t_i)\,\xvec_{i-1}\,\Delta t + \sqrt{\beta(t_i)}\,\sqrt{\Delta t}\,\zvec_i,
+$$
+
+which is one <NoteLink to="euler-maruyama-method">Euler–Maruyama</NoteLink> step of the VP-SDE. Ho et al.'s schedule,
+$\beta_1 = 10^{-4}$ to $\beta_N = 0.02$ with $N = 1000$, is exactly $\beta(t) = 0.1 + 19.9t$ divided by $N$. Its
+cumulative product $\bar\alpha_N = \prod_i(1 - \beta_i) = 4.04 \times 10^{-5}$ is close to the continuous
+$e^{-B(1)} = 4.32 \times 10^{-5}$, and $\sqrt{\bar\alpha_i}$ never differs from $m(t_i)$ by more than 0.001. In the
+same way, NCSN's ladder of noise levels is a discretised VE-SDE.
+
+## Training: denoising score matching at every time
+
+The score of the marginal $p_t$ is unknown, but the score of the transition kernel is known:
+$\nabla_{\xvec_t}\log\Gauss(\xvec_t; m\xvec_0, s^2\eye) = -(\xvec_t - m\xvec_0)/s^2 = -\epsilonvec/s$ when
+$\xvec_t = m\xvec_0 + s\epsilonvec$. Denoising score matching regresses the network on this target
+<Cite id="vincent2011" />:
+
+$$
+\Lcal(\thetavec) = \expect_{t}\,\lambda(t)\,\expect_{\xvec_0,\,\epsilonvec}\brack{\norm{\svec_{\thetavec}(m\xvec_0 +
+s\epsilonvec,\ t) + \epsilonvec/s}^2},
+$$
+
+with $t$ uniform on $[0, T]$ and a weight $\lambda(t) > 0$. The minimiser is the conditional mean of the target given
+$\xvec_t$, which by <NoteLink to="tweedies-formula">Tweedie's formula</NoteLink> is exactly $\nabla\log p_t(\xvec_t)$.
+Writing $\svec_{\thetavec} = -\epsilonvec_{\thetavec}/s$ and choosing $\lambda = s^2$ turns the loss into DDPM's
+noise-prediction loss $\expect\norm{\epsilonvec_{\thetavec} - \epsilonvec}^2$. With $\lambda(t) = g(t)^2$ the loss is an
+upper bound on the negative log-likelihood of the reverse-SDE model, a consequence of
+<NoteLink to="girsanov-theorem">Girsanov's theorem</NoteLink> <Cite id="song2021mle" />.
+
+## Sampling
+
+- **Reverse SDE.** Integrate $d\xvec = [\fvec - g^2\svec_{\thetavec}]\,dt + g\,d\bar\wvec$ backwards with
+  Euler–Maruyama. For the VP-SDE this is close to DDPM's ancestral sampler.
+- **Predictor–corrector.** After each reverse step (the predictor), run a few
+  <NoteLink to="langevin-dynamics">Langevin</NoteLink> steps with the score at the current time (the corrector), which
+  pull the samples back towards $p_t$ and reduce accumulated error <Cite id="song2021" />.
+- **Probability-flow ODE.** Integrate $d\xvec/dt = \fvec - \tfrac12 g^2\svec_{\thetavec}$ with an ODE solver. It is
+  deterministic and invertible, and gives exact likelihoods. Deterministic
+  <NoteLink to="denoising-diffusion-implicit-models">DDIM</NoteLink> is its first-order discretisation
+  <Cite id="song2021b" />, and second-order solvers reach high quality in a few dozen network evaluations
+  <Cite id="karras2022" />.
+- **Conditioning.** For a condition $\yvec$, Bayes' rule gives $\nabla\log p_t(\xvec \mid \yvec) = \nabla\log
+  p_t(\xvec) + \nabla\log p_t(\yvec \mid \xvec)$. Adding a classifier's gradient to the score steers the sampler;
+  see <NoteLink to="diffusion-guidance">classifier and classifier-free guidance</NoteLink>.
+
+## Worked example: one-dimensional Gaussian data
+
+Let the data be $x_0 \sim \Gauss(2, 0.5^2)$ and use the VP-SDE with the schedule above. At $t = 0.25$,
+$B = 0.025 + 9.95 \times 0.0625 = 0.647$, so $m = e^{-0.323} = 0.724$ and $s^2 = 1 - e^{-0.647} = 0.476$.
+
+- **Marginal.** $p_{0.25} = \Gauss(0.724 \times 2,\ 0.724^2 \times 0.25 + 0.476) = \Gauss(1.447, 0.607)$.
+- **Score.** At $x = 1$ the score is $-(1 - 1.447)/0.607 = 0.737$: the density increases to the right.
+- **Denoised estimate.** Tweedie's formula gives $\hat x_0 = (x + s^2 \times \text{score})/m = (1 + 0.476 \times
+  0.737)/0.724 = 1.867$. Conjugate Gaussian updating of the prior $\Gauss(2, 0.25)$ with the observation
+  $x_t = mx_0 + s\epsilon$ gives the same $1.867$.
+- **Noise estimate.** The ideal noise predictor outputs $-s \times \text{score} = -0.690 \times 0.737 = -0.508$.
+- **Reverse drift.** With $\beta(0.25) = 5.075$, the reverse-SDE drift is $f - g^2 \times \text{score} = -\tfrac12
+  \times 5.075 \times 1 - 5.075 \times 0.737 = -6.28$ per unit time. Moving backwards in time ($dt < 0$) the particle
+  moves by $+6.28\,\abs{dt}$, towards the data. The probability-flow ODE uses half the score term: $-2.54 - 1.87 =
+  -4.41$.
+
+## Assumptions
+
+- **Long enough forward process.** $p_T$ must be close to the Gaussian the sampler starts from. The VP schedule above
+  leaves $m(1)\,\xvec_0$ with scale $0.0066$ times the data scale.
+- **Score accuracy where the sampler goes.** The network is trained on noised data, so it is accurate near $p_t$. Large
+  step sizes or strong guidance push samples off $p_t$, where the score is poor.
+- **A cut-off near zero.** Real data sit near low-dimensional sets, where the score of $p_t$ blows up as $t \to 0$.
+  Samplers stop at a small $t = \epsilon$ and output the denoised estimate.
+
+## Pitfalls
+
+- **Discrete versus continuous $\beta$.** A per-step $\beta_i$ and a rate $\beta(t)$ per unit time differ by the
+  factor $N$. Changing $N$ without rescaling changes the forward process.
+- **Score or noise.** $\svec_{\thetavec} = -\epsilonvec_{\thetavec}/s(t)$. Using $\epsilonvec_{\thetavec}$ in place of
+  the score in the reverse SDE drives the sampler with the wrong scale and sign.
+- **The ODE likelihood is the ODE's.** The likelihood computed with the probability-flow ODE belongs to the model
+  defined by the learned ODE, which differs from the stochastic sampler's model when the score is imperfect.

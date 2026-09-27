@@ -1,0 +1,184 @@
+---
+title: Neural ordinary differential equations
+kind: concept
+summary: 'A neural ODE defines a hidden state by $\dot{\hvec} = \fvec_{\thetavec}(\hvec, t)$ with a network $\fvec_{\thetavec}$ and outputs $\hvec(T)$ from an ODE solver. Gradients come from the adjoint ODE $\dot{\avec} = -\avec^\top\partial\fvec/\partial\hvec$, solved backwards in time. As a density model, $\frac{d}{dt}\log p = -\nabla\cdot\fvec$.'
+tags: [differential-equations, ordinary-differential-equations, deep-learning, normalising-flows, generative-models, worked-example]
+aliases: [neural ODE, NODE, ODE-Net, continuous-depth network, adjoint method, adjoint sensitivity method, continuous normalising flow, CNF, FFJORD, instantaneous change of variables, Hutchinson trace estimator, augmented neural ODE]
+requires: [vector-fields-and-flows, numerical-ode-solvers, backpropagation]
+partOf: [ordinary-differential-equations]
+related: [residual-network, normalising-flow, change-of-variables, transport-and-continuity-equations, score-based-generative-models, pontryagin-maximum-principle]
+references: [chen2018, grathwohl2019, dupont2019, kidger2022, hutchinson1989, lipman2023]
+status: draft
+updated: 2026-09-27
+---
+
+import { ContinuousFlow1d } from './ContinuousFlow1d'
+
+<Definition>
+A **neural ordinary differential equation** maps an input $\hvec(0) = \xvec$ to an output $\hvec(T)$ by solving
+
+$$
+\dot{\hvec}(t) = \fvec_{\thetavec}\paren{\hvec(t), t}, \qquad t \in [0, T],
+$$
+
+where $\fvec_{\thetavec}$ is a neural network with parameters $\thetavec$ and the solution is computed by a numerical
+ODE solver. The gradient of a loss $L(\hvec(T))$ with respect to $\thetavec$ is computed by the **adjoint method**,
+which solves a second ODE backwards from $T$ to $0$ <Cite id="chen2018" />.
+</Definition>
+
+## Intuition
+
+A residual network updates its hidden state layer by layer,
+
+$$
+\hvec_{k+1} = \hvec_k + \fvec_{\thetavec}(\hvec_k, k).
+$$
+
+That is one step of <NoteLink to="numerical-ode-solvers">Euler's method</NoteLink> with step size 1 for the ODE
+$\dot{\hvec} = \fvec_{\thetavec}(\hvec, t)$. A neural ODE takes the limit of many small layers: depth becomes a
+continuous time, and the network specifies a <NoteLink to="vector-fields-and-flows">vector field</NoteLink> rather than
+a sequence of updates. The forward pass carries the input along the field's flow. The solver, not the architect,
+decides how many evaluations of $\fvec_{\thetavec}$ that takes.
+
+## Forward pass
+
+Any solver can compute $\hvec(T)$. In practice an adaptive Runge–Kutta solver such as Dormand–Prince is used, so the
+number of evaluations of $\fvec_{\thetavec}$ adapts to how hard the trajectory is to follow. Because the output is the
+flow map $\phi_T$ of a Lipschitz field, the map from $\hvec(0)$ to $\hvec(T)$ is invertible: running the ODE backwards
+recovers the input.
+
+## The adjoint method
+
+Backpropagating through every internal step of the solver works, but it stores every intermediate state. The adjoint
+method computes the same gradient with memory that does not grow with the number of steps.
+
+Define the **adjoint** $\avec(t) = \partial L/\partial\hvec(t)$, the sensitivity of the loss to the state at time $t$.
+Its value at the end is known: $\avec(T) = \partial L/\partial\hvec(T)$. The question is how it changes going
+backwards.
+
+**Derivation through Euler steps.** Discretise with step $h$: $\hvec_{k+1} = \hvec_k + h\,\fvec(\hvec_k)$. The
+chain rule (ordinary <NoteLink to="backpropagation">backpropagation</NoteLink>) gives, with $\avec_k$ as a row vector,
+
+$$
+\avec_k = \avec_{k+1}\,\frac{\partial\hvec_{k+1}}{\partial\hvec_k} = \avec_{k+1}\paren{\Imat + h\,\frac{\partial
+\fvec}{\partial\hvec}(\hvec_k)}.
+$$
+
+Rearranging, $(\avec_{k+1} - \avec_k)/h = -\avec_{k+1}\,\partial\fvec/\partial\hvec$. As $h \to 0$ this becomes the
+**adjoint equation**
+
+$$
+\dot{\avec}(t) = -\avec(t)\,\frac{\partial\fvec_{\thetavec}}{\partial\hvec}\paren{\hvec(t), t}.
+$$
+
+The parameters are shared by every step, so their gradient sums the contribution of each step. Step $k$ depends on
+$\thetavec$ through $h\,\fvec_{\thetavec}(\hvec_k)$, contributing $\avec_{k+1}\,h\,\partial\fvec/\partial\thetavec$.
+The sum becomes an integral:
+
+$$
+\frac{dL}{d\thetavec} = \int_0^T \avec(t)\,\frac{\partial\fvec_{\thetavec}}{\partial\thetavec}\paren{\hvec(t), t}\,dt.
+$$
+
+Both right sides are vector–Jacobian products, the operation reverse-mode automatic differentiation computes in one
+backward pass through $\fvec_{\thetavec}$, without forming a Jacobian.
+
+The backward pass solves three ODEs together from $T$ to $0$: the state $\hvec(t)$ backwards (recomputing it rather
+than storing it), the adjoint $\avec(t)$, and the running parameter-gradient integral. It needs memory for one state,
+not for the whole trajectory. The same equations appear in optimal control, where the adjoint is the costate of the
+<NoteLink to="pontryagin-maximum-principle">Pontryagin maximum principle</NoteLink>.
+
+**Worked example (a one-parameter ODE).** Let $\dot h = \theta h$ with $h(0) = h_0$ and loss $L = h(T)$. The exact
+answer is $h(T) = h_0e^{\theta T}$, so $dL/d\theta = T h_0e^{\theta T}$. The adjoint method gives the same:
+
+- $a(T) = \partial L/\partial h(T) = 1$ and $\partial f/\partial h = \theta$, so $\dot a = -\theta a$ and
+  $a(t) = e^{\theta(T - t)}$.
+- $\partial f/\partial\theta = h(t) = h_0e^{\theta t}$, so
+  $dL/d\theta = \int_0^T e^{\theta(T - t)}h_0e^{\theta t}\,dt = \int_0^T h_0e^{\theta T}\,dt = T h_0e^{\theta T}$.
+
+With $\theta = 0.5$, $T = 2$ and $h_0 = 1$: $L = e = 2.718$ and $dL/d\theta = 2e = 5.437$.
+
+## Continuous normalising flows
+
+Suppose $\zvec(0)$ has a known density $p_0$, such as a standard Gaussian, and $\zvec(T) = \phi_T(\zvec(0))$ is the
+output of the ODE. The density of $\zvec(t)$ along one trajectory obeys the **instantaneous change of variables**
+
+$$
+\frac{d}{dt}\log p_t\paren{\zvec(t)} = -\nabla\cdot\fvec = -\trace\paren{\frac{\partial\fvec}{\partial\zvec}}.
+$$
+
+The reason is Liouville's formula from <NoteLink to="vector-fields-and-flows">vector fields and flows</NoteLink>: the
+flow scales small volumes at rate $\nabla\cdot\fvec$, and probability mass is conserved, so the density falls at that
+rate. Integrating gives
+
+$$
+\log p_T\paren{\zvec(T)} = \log p_0\paren{\zvec(0)} - \int_0^T \trace\paren{\frac{\partial\fvec}{\partial\zvec}}\,dt.
+$$
+
+A **continuous normalising flow** trains $\fvec_{\thetavec}$ by maximum likelihood with this formula. To score a data
+point $\xvec$, the ODE is solved backwards from $\zvec(T) = \xvec$ to $\zvec(0)$, accumulating the trace integral on
+the way. Compared with a discrete <NoteLink to="normalising-flow">normalising flow</NoteLink>, which needs a
+determinant, only a trace is needed, and $\fvec_{\thetavec}$ can be any network.
+
+**Worked example (a linear field).** For $\fvec(\zvec) = \Amat\zvec$ with $\Amat = \diag(0.5, -0.2)$, the trace is
+$0.3$ everywhere. Every trajectory loses $0.3$ nats of log-density per unit time. After $t = 1$ the density at
+$\zvec(1)$ is $e^{-0.3} = 0.741$ times the density at $\zvec(0)$, because the flow has stretched areas by
+$e^{0.5}e^{-0.2} = e^{0.3}$.
+
+<ContinuousFlow1d />
+
+**The trace is still expensive.** The exact trace of a $d \times d$ Jacobian needs $d$ vector–Jacobian products. The
+**Hutchinson estimator** replaces it by an unbiased estimate from one product <Cite id="hutchinson1989" />. For a random
+vector $\epsilonvec$ with $\expect[\epsilonvec\epsilonvec^\top] = \Imat$, such as independent $\pm1$ entries,
+
+$$
+\expect\brack{\epsilonvec^\top\Jmat\epsilonvec} = \trace\paren{\Jmat\,\expect\brack{\epsilonvec\epsilonvec^\top}} =
+\trace\Jmat.
+$$
+
+FFJORD uses this estimate inside the ODE, which makes continuous flows practical in high dimensions
+<Cite id="grathwohl2019" />.
+
+**Worked example (Hutchinson by hand).** For $\Jmat = \begin{bmatrix} 1 & 2 \\ 3 & 4 \end{bmatrix}$, the four sign
+vectors give $\epsilonvec^\top\Jmat\epsilonvec = 10$ for $(1, 1)$ and $(-1, -1)$, and $0$ for $(1, -1)$ and $(-1, 1)$.
+Their average is $5 = \trace\Jmat$. A single draw is either 10 or 0, so the estimate is unbiased but noisy.
+
+## What a neural ODE cannot represent
+
+The flow of a Lipschitz field is a homeomorphism: continuous, invertible, and in one dimension order-preserving.
+Trajectories cannot cross. So no neural ODE on $\reals$ maps $1 \mapsto -1$ and $-1 \mapsto 1$. In two dimensions, no
+flow followed by a linear read-out can separate the points of a disc from the points of a ring that surrounds it, since
+the flow cannot move the disc out through the ring <Cite id="dupont2019" />. A residual network can, because a finite Euler step with a
+large $\fvec$ can jump trajectories past each other.
+
+**Augmented neural ODEs** add extra zero-initialised dimensions to the state, so trajectories can move around each
+other in the larger space.
+
+## Training without simulation
+
+Maximum-likelihood training of a continuous flow solves an ODE for every example at every step. **Flow matching**
+avoids this <Cite id="lipman2023" />. It chooses a path of densities $p_t$ from noise to data and a velocity field
+$\uvec_t$ that carries it, meaning that $p_t$ and $\uvec_t$ satisfy the
+<NoteLink to="transport-and-continuity-equations">continuity equation</NoteLink>. It then fits
+$\fvec_{\thetavec}(\xvec, t) \approx \uvec_t(\xvec)$ by regression. Sampling still solves the learned ODE, but training
+needs no solver. The <NoteLink to="probability-flow-ode">probability flow ODE</NoteLink> of a <NoteLink to="score-based-generative-models">score-based diffusion
+model</NoteLink> is a continuous normalising flow of the same kind, whose field is built from a learned score.
+
+## In machine learning
+
+- **Irregular time series.** A latent ODE evolves a hidden state between observations at arbitrary times, rather than
+  in fixed steps.
+- **Generative models.** Continuous normalising flows, flow matching and probability-flow samplers all use a neural
+  ODE to map a Gaussian to data.
+- **Memory-limited training.** The adjoint method trades memory for an extra backward solve.
+- **Physical models.** Part of $\fvec$ can be a known physical law and part a network, with the solver respecting the
+  structure of both <Cite id="kidger2022" />.
+
+## Pitfalls
+
+- **Adjoint gradients are approximate.** Solving $\hvec(t)$ backwards reconstructs the forward trajectory only up to
+  solver error, and for dissipative dynamics the backward solve is unstable. The adjoint gradient can then disagree
+  with the gradient of what the forward solver computed. Backpropagating through the solver, with checkpointing,
+  gives the exact gradient of the discrete computation.
+- **Cost grows during training.** As $\fvec_{\thetavec}$ becomes more complex, adaptive solvers take more steps.
+  Regularising the field's smoothness keeps the number of evaluations down.
+- **Stiff learned dynamics.** A trained field can become stiff, and explicit solvers then need tiny steps.

@@ -1,0 +1,176 @@
+---
+title: Energy-based models
+kind: concept
+summary: 'An energy-based model defines $p_{\thetavec}(\xvec) = \exp(-E_{\thetavec}(\xvec))/Z_{\thetavec}$ with any scalar network $E_{\thetavec}$. The log-likelihood gradient lowers the energy of data and raises it at model samples, drawn by Langevin dynamics; the constant $Z_{\thetavec}$ is never computed.'
+tags: [deep-learning, generative-models, density-estimation, sampling, gradients, worked-example]
+aliases: [energy-based model, energy function, unnormalised density model, contrastive divergence, persistent contrastive divergence, PCD, short-run MCMC, positive phase, negative phase]
+requires: [langevin-dynamics, gradient]
+partOf: [deep-generative-models]
+related: [score-based-generative-models, markov-random-field, exponential-family, joint-energy-models, stochastic-gradient-langevin-dynamics, generative-adversarial-network]
+references: [lecun2006, hinton2002poe, tieleman2008, du2019, nijkamp2019, hyvarinen2005, song2019, gutmann2010]
+status: draft
+updated: 2026-09-27
+---
+
+import { EbmTraining } from './EbmTraining'
+
+<Definition>
+An **energy-based model** (EBM) assigns every input $\xvec \in \reals^d$ a scalar **energy** $E_{\thetavec}(\xvec)$,
+computed by any function with parameters $\thetavec$, typically a neural network, and defines the density
+
+$$
+p_{\thetavec}(\xvec) = \frac{\exp(-E_{\thetavec}(\xvec))}{Z_{\thetavec}}, \qquad Z_{\thetavec} = \int
+\exp(-E_{\thetavec}(\xvec))\, d\xvec.
+$$
+
+Low energy means high probability. The normalising constant $Z_{\thetavec}$ is an integral over the whole input space
+and is intractable for images or other high-dimensional data. Training and sampling therefore use only energy
+differences and energy gradients <Cite id="lecun2006" />.
+</Definition>
+
+## Intuition
+
+Most generative models constrain their architecture so that the density is normalised by construction: an
+autoregressive model multiplies normalised conditionals, and a normalising flow must be invertible. An EBM drops the
+constraint. Any network that outputs a number defines a valid density, provided $Z_{\thetavec}$ is finite. The cost
+moves to training and sampling, which must work without knowing $Z_{\thetavec}$.
+
+The energy is a landscape over input space. Training carves valleys where the data lie and raises ridges elsewhere.
+Sampling rolls points downhill with noise. Classical models are special cases: a
+<NoteLink to="markov-random-field">Markov random field</NoteLink> has an energy that is a sum of clique potentials, and
+an <NoteLink to="exponential-family">exponential family</NoteLink> has an energy linear in its parameters,
+$E_{\thetavec}(\xvec) = -\thetavec^\top \phivec(\xvec)$.
+
+## Details
+
+### The maximum-likelihood gradient
+
+The log-likelihood of one point is $\log p_{\thetavec}(\xvec) = -E_{\thetavec}(\xvec) - \log Z_{\thetavec}$. The
+gradient of the first term is available by backpropagation. For the second, differentiate under the integral:
+
+$$
+\nabla_{\thetavec} \log Z_{\thetavec} = \frac{1}{Z_{\thetavec}} \int \nabla_{\thetavec}\, e^{-E_{\thetavec}(\xvec')}\,
+d\xvec' = -\int \frac{e^{-E_{\thetavec}(\xvec')}}{Z_{\thetavec}}\, \nabla_{\thetavec} E_{\thetavec}(\xvec')\, d\xvec' =
+-\expect_{\xvec' \sim p_{\thetavec}}\brack{\nabla_{\thetavec} E_{\thetavec}(\xvec')}.
+$$
+
+Averaging over the data distribution $p_{\text{data}}$ gives the gradient of the expected log-likelihood:
+
+$$
+\nabla_{\thetavec}\, \expect_{p_{\text{data}}}\brack{\log p_{\thetavec}(\xvec)} = \underbrace{-\expect_{\xvec \sim
+p_{\text{data}}}\brack{\nabla_{\thetavec} E_{\thetavec}(\xvec)}}_{\text{positive phase}} + \underbrace{\expect_{\xvec'
+\sim p_{\thetavec}}\brack{\nabla_{\thetavec} E_{\thetavec}(\xvec')}}_{\text{negative phase}}.
+$$
+
+A step along this gradient lowers the energy at data points (the positive phase) and raises it at points the model
+currently finds likely (the negative phase). The gradient is zero when the model's samples and the data give the same
+expected $\nabla_{\thetavec} E$. For an exponential family this is moment matching: $\expect_{p_{\thetavec}}[\phivec]
+= \expect_{p_{\text{data}}}[\phivec]$. In code the gradient is obtained from the surrogate loss
+
+$$
+\Lcal(\thetavec) = \frac1B \sum_{b=1}^B E_{\thetavec}(\xvec_b^+) - \frac1B \sum_{b=1}^B
+E_{\thetavec}(\operatorname{sg}(\xvec_b^-)),
+$$
+
+with data points $\xvec^+$, model samples $\xvec^-$ and a stop-gradient $\operatorname{sg}$, because the samples are
+treated as fixed inputs <Cite id="du2019" />.
+
+### Sampling the negative phase with Langevin dynamics
+
+The negative phase needs samples from $p_{\thetavec}$. The score of an EBM is $\nabla_{\xvec} \log p_{\thetavec}(\xvec)
+= -\nabla_{\xvec} E_{\thetavec}(\xvec)$, free of $Z_{\thetavec}$, and one backward pass computes it. So
+<NoteLink to="langevin-dynamics">Langevin dynamics</NoteLink> applies directly:
+
+$$
+\xvec_{k+1} = \xvec_k - h\, \nabla_{\xvec} E_{\thetavec}(\xvec_k) + \sqrt{2h}\, \xivec_k, \qquad \xivec_k \sim
+\Gauss(\zeros, \eye).
+$$
+
+Each training step therefore contains an inner sampling loop of $K$ Langevin steps, each costing about one forward and
+backward pass. Running every chain to convergence at every parameter update is unaffordable, and the practical methods
+differ in how they cut this cost.
+
+<EbmTraining />
+
+### Contrastive divergence
+
+Hinton's **contrastive divergence** (CD-$k$) starts each negative chain at a training point and runs only $k$ steps,
+often one <Cite id="hinton2002poe" />. A model that already fits the data leaves data points almost unchanged after $k$
+steps, so the two phases cancel. A model that does not fit moves them, and the gradient pushes the energy to correct
+that local movement. CD-$k$ is biased: it approximately follows the gradient of
+$\KL(p_{\text{data}} \,\|\, p_{\thetavec}) - \KL(p_k \,\|\, p_{\thetavec})$, where $p_k$ is the distribution after $k$
+steps, not of the likelihood. Its chains never travel far from the data, so the model can keep spurious low-energy
+regions away from the data that the chains never visit. It was introduced for products of experts and restricted
+Boltzmann machines, where the $k$ steps are block Gibbs sweeps rather than Langevin steps.
+
+### Persistent contrastive divergence
+
+**Persistent contrastive divergence** (PCD) keeps one set of chains for the whole of training. Each parameter update
+continues the chains from where the previous update left them <Cite id="tieleman2008" />. The parameters change little
+per update, so the chains stay close to equilibrium for the current model, and a few steps per update accumulate into
+long runs. PCD explores far from the data and removes spurious modes that CD misses. It fails when the learning rate is
+large enough that the model changes faster than the chains can follow.
+
+### Short-run MCMC and its heuristics
+
+Training EBMs on images revived these ideas with Langevin dynamics on convolutional energy networks. Two schools
+emerged, and both use heuristics that the theory does not require.
+
+- **Short-run, non-persistent chains.** Nijkamp et al. start every chain from the same noise distribution and run a
+  fixed number $K$ of Langevin steps, never to convergence <Cite id="nijkamp2019" />. The learned energy together with
+  its $K$-step sampler is a good generator, whose samples match the data, but the energy is then not a faithful density
+  model: running the chains longer drifts away from the data.
+- **Replay buffers.** Du and Mordatch keep a buffer of past negative samples. Each new chain starts from a buffer
+  sample with probability 0.95 and from uniform noise otherwise <Cite id="du2019" />. The buffer acts like PCD's
+  persistent chains, and the 5% of fresh starts keep the samples diverse.
+- **Reduced noise.** Implementations use a gradient step and a noise scale chosen separately, typically with noise far
+  below $\sqrt{2h}$. A Langevin step with gradient coefficient $c$ and noise standard deviation $\sigma$ samples
+  $p_{\thetavec}^{1/T}$ at temperature $T = \sigma^2/(2c)$, a sharpened version of the model. The chains reach
+  low-energy regions in fewer steps at the price of an inexact negative phase.
+- **Regularisation.** Spectral normalisation limits how sharply the energy can change, which keeps Langevin steps
+  stable. A weak penalty on the squared energies of positive and negative samples stops the energy values from
+  drifting to large magnitudes while their difference is unchanged <Cite id="du2019" />.
+
+In the figure, persistent chains with the correct noise approach the maximum-likelihood fit. Short-run chains from
+noise produce samples that match the data while the density itself fits worse. Reduced noise produces samples that sit
+too close to the energy minima, and the model compensates by spreading its density out.
+
+### Score matching: training without samples
+
+<NoteLink to="score-based-generative-models">Score matching</NoteLink> avoids the negative phase altogether. It fits the
+model score $-\nabla_{\xvec} E_{\thetavec}$ to the score of the data by minimising
+$\expect_{p_{\text{data}}}\brack{\tfrac12\norm{\nabla_{\xvec} E_{\thetavec}}^2 - \trace\paren{\nabla_{\xvec}^2
+E_{\thetavec}}}$, which contains neither $Z_{\thetavec}$ nor samples from the model <Cite id="hyvarinen2005" />. The
+trace of the Hessian is expensive in high dimensions; denoising score matching replaces it with a regression onto the
+score of a noise kernel. Score-based diffusion models take this route and learn the score directly, without an explicit
+energy <Cite id="song2019" />. **Noise-contrastive estimation** is a third route: it trains a classifier to separate
+data from samples of a known noise distribution, and the classifier's logit recovers the energy with
+$\log Z_{\thetavec}$ as a learned scalar <Cite id="gutmann2010" />.
+
+## Worked example: one gradient step for a Gaussian energy
+
+Take the one-dimensional energy $E_\theta(x) = \theta x^2/2$ with $\theta > 0$. The model is $\Gauss(0, 1/\theta)$ and
+$\nabla_\theta E_\theta(x) = x^2/2$. Suppose the data have mean 0 and variance 2, and the current parameter is
+$\theta = 1$.
+
+- **Positive phase.** $-\expect_{p_{\text{data}}}[x^2/2] = -2/2 = -1$.
+- **Negative phase.** $\expect_{p_\theta}[x^2/2] = 1/(2\theta) = 0.5$.
+- **Gradient.** $-1 + 0.5 = -0.5$. Gradient ascent decreases $\theta$, which widens the model towards the data.
+
+The gradient is zero when $1/(2\theta) = 1$, at $\theta = 1/2$: the model variance $1/\theta$ equals the data variance
+of 2. A Langevin sampler with step $h$ would instead estimate the negative phase from a stationary variance of
+$1/(\theta(1 - h\theta/2))$, the step-size bias of the unadjusted
+<NoteLink to="langevin-dynamics">Langevin algorithm</NoteLink> on a Gaussian. With $h = 0.5$ at
+$\theta = 1/2$ the estimated variance is $2/(1 - 0.125) = 2.29$. Training settles where the sampler's variance, not the
+model's, equals 2: at $\theta = 2 - \sqrt2 = 0.586$, a model variance of $1.71$, narrower than the data.
+
+## Pitfalls
+
+- **No likelihood to monitor.** $Z_{\thetavec}$ is unknown, so the training log-likelihood cannot be reported.
+  Progress is judged by samples, which come from an approximate sampler.
+- **Instability.** When the energies of samples and data separate by a large margin, gradients grow and training
+  diverges. Large EBMs often need restarts, smaller learning rates or more sampling steps.
+- **Normalisability.** Nothing in an arbitrary network guarantees $Z_{\thetavec} < \infty$. An energy that decreases
+  without bound in some direction lets Langevin chains run off to infinity.
+- **Mixing between modes.** Langevin chains cross low-density regions slowly, so the negative phase can miss modes and
+  misjudge their relative weights.

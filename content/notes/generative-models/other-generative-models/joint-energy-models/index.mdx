@@ -1,0 +1,167 @@
+---
+title: Joint energy-based models
+kind: concept
+summary: 'A joint energy-based model reads a classifier''s logits $f(\xvec)$ as energies: $p(\xvec, y) \propto \exp(f(\xvec)[y])$ and $E(\xvec) = -\log\sum_y \exp f(\xvec)[y]$. The softmax $p(y \mid \xvec)$ is unchanged, and training $\log p(\xvec)$ with Langevin samples as well improves calibration and robustness.'
+tags: [deep-learning, generative-models, classification, calibration, robustness, sampling, worked-example]
+aliases: [JEM, joint energy-based model, your classifier is secretly an energy based model, classifier as an energy-based model, approximate mass score]
+requires: [energy-based-models, softmax-and-log-sum-exp, multinomial-logistic-regression]
+related: [stochastic-gradient-langevin-dynamics, calibration-error, adversarial-examples, deep-anomaly-detection, cross-entropy-and-perplexity]
+references: [grathwohl2020, du2019, nijkamp2019, tieleman2008, welling2011, guo2017, nalisnick2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Callout variant="credit" title="Provenance: Grathwohl et al. (ICLR 2020)">
+This note follows the paper "Your Classifier is Secretly an Energy Based Model and You Should Treat it Like One" by Will
+Grathwohl, Kuan-Chieh Wang, Jörn-Henrik Jacobsen, David Duvenaud, Mohammad Norouzi and Kevin Swersky
+<Cite id="grathwohl2020" />. The reinterpretation of logits, the training objective, the sampler settings and the
+reported benefits and failure modes are theirs. This site added the derivations in its own notation, the temperature
+reading of their sampler and the worked example. It is included because it is very good work that the author of these
+notes wants in their own records.
+</Callout>
+
+<Definition>
+Let $f_{\thetavec} : \reals^d \to \reals^K$ be a classifier network whose output $f_{\thetavec}(\xvec)[y]$ is the logit
+of class $y$. A **joint energy-based model** (JEM) uses the same logits to define an
+<NoteLink to="energy-based-models">energy-based model</NoteLink> of inputs and labels together:
+
+$$
+p_{\thetavec}(\xvec, y) = \frac{\exp\paren{f_{\thetavec}(\xvec)[y]}}{Z_{\thetavec}}, \qquad
+E_{\thetavec}(\xvec) = -\log\sum_{y=1}^K \exp\paren{f_{\thetavec}(\xvec)[y]},
+$$
+
+where $E_{\thetavec}$ is the energy of the input alone, so that $p_{\thetavec}(\xvec) = \exp(-E_{\thetavec}(\xvec)) /
+Z_{\thetavec}$. It is trained to maximise $\log p_{\thetavec}(\xvec) + \log p_{\thetavec}(y \mid \xvec)$
+<Cite id="grathwohl2020" />.
+</Definition>
+
+## Intuition
+
+A softmax classifier ignores one number per input. Adding the same constant $c(\xvec)$ to every logit leaves the
+predicted probabilities unchanged, so an ordinary classifier's logit scale carries no meaning. JEM gives it one: the
+overall level of the logits, measured by their log-sum-exp, becomes the negative energy of the input. Inputs that
+resemble the training data should get high logits for some class; inputs unlike anything seen should get uniformly low
+logits. The classifier and the generative model share every parameter, and the generative objective trains the degree
+of freedom that classification leaves unused.
+
+## Details
+
+### The classifier is unchanged
+
+Marginalise the joint over labels:
+
+$$
+p_{\thetavec}(\xvec) = \sum_y p_{\thetavec}(\xvec, y) = \frac{\sum_y \exp\paren{f_{\thetavec}(\xvec)[y]}}{Z_{\thetavec}}
+= \frac{\exp(-E_{\thetavec}(\xvec))}{Z_{\thetavec}}.
+$$
+
+Divide the joint by this marginal. The constant $Z_{\thetavec}$ cancels:
+
+$$
+p_{\thetavec}(y \mid \xvec) = \frac{p_{\thetavec}(\xvec, y)}{p_{\thetavec}(\xvec)} =
+\frac{\exp\paren{f_{\thetavec}(\xvec)[y]}}{\sum_{y'} \exp\paren{f_{\thetavec}(\xvec)[y']}},
+$$
+
+which is the ordinary softmax of the logits. Any trained classifier is therefore already a JEM; standard training has
+simply left $p_{\thetavec}(\xvec)$ unconstrained. Shifting all logits of an input by $c$ multiplies its unnormalised
+density $\exp(-E_{\thetavec}(\xvec))$ by $e^c$ and leaves $p_{\thetavec}(y \mid \xvec)$ fixed.
+
+### The training objective
+
+The joint log-likelihood factorises as
+
+$$
+\log p_{\thetavec}(\xvec, y) = \log p_{\thetavec}(\xvec) + \log p_{\thetavec}(y \mid \xvec).
+$$
+
+The second term is the negative cross-entropy loss, computed exactly. The first term is an EBM log-likelihood, whose
+gradient is the positive phase minus the negative phase:
+
+$$
+\nabla_{\thetavec} \log p_{\thetavec}(\xvec) = -\nabla_{\thetavec} E_{\thetavec}(\xvec) +
+\expect_{\xvec' \sim p_{\thetavec}}\brack{\nabla_{\thetavec} E_{\thetavec}(\xvec')}.
+$$
+
+The expectation is estimated with samples from a Langevin sampler. Grathwohl et al. chose this factorisation over
+$\log p(\xvec \mid y) + \log p(y)$ so that the sampler's bias affects only the generative term and the classifier is
+trained with an unbiased loss <Cite id="grathwohl2020" />. A model trained as a class-conditional EBM, with a separate
+unknown normaliser for each class, cannot compute $p(y \mid \xvec)$ at all, and the paper reports that this alternative
+classifies much worse.
+
+### The sampler
+
+Negative samples come from Langevin updates on $E_{\thetavec}$, following the practice of Du and Mordatch
+<Cite id="du2019" />:
+
+$$
+\xvec_{k+1} = \xvec_k - \alpha\, \nabla_{\xvec} E_{\thetavec}(\xvec_k) + \sigma\, \xivec_k, \qquad \xivec_k \sim
+\Gauss(\zeros, \eye),
+$$
+
+with inputs scaled to $[-1, 1]$, gradient step $\alpha = 1$, noise $\sigma = 0.01$ and 20 steps per training iteration
+<Cite id="grathwohl2020" />.
+
+- **Persistent chains in a replay buffer.** Each chain starts from a buffer of 10,000 past samples, or with probability
+  0.05 from uniform noise. This is <NoteLink to="energy-based-models">persistent contrastive divergence</NoteLink>
+  <Cite id="tieleman2008" />, with occasional restarts.
+- **Far less noise than the theory requires.** Correct Langevin dynamics with gradient step $\alpha$ needs noise
+  $\sigma = \sqrt{2\alpha} = 1.41$. With $\sigma = 0.01$ the sampler targets $p_{\thetavec}^{1/T}$ at temperature
+  $T = \sigma^2/(2\alpha) = 5 \times 10^{-5}$, which is nearly noisy gradient descent on the energy. The authors state
+  that the sampler is biased and that, at step sizes large enough to be useful, correctly scaled noise swamps the
+  gradient signal <Cite id="grathwohl2020" />.
+- **Cost.** Each Langevin step costs about as much as one classifier training step, so JEM training costs roughly 20
+  times as much per iteration as ordinary classifier training.
+
+### What the generative term buys
+
+- **Calibration.** Classifiers trained by cross-entropy are often overconfident <Cite id="guo2017" />. On CIFAR-100 the
+  JEM trained by Grathwohl et al. had an expected calibration error of 4.9%, against 22.3% for the same architecture
+  trained as a plain classifier <Cite id="grathwohl2020" />. The energy term penalises high logits on inputs the model
+  considers unlikely, which counteracts the drive of cross-entropy to inflate every logit.
+- **Out-of-distribution detection.** Three scores are available: $\log p_{\thetavec}(\xvec) = -E_{\thetavec}(\xvec)$ up
+  to a constant, the maximum softmax probability, and the **approximate mass**
+  $-\norm{\nabla_{\xvec} \log p_{\thetavec}(\xvec)}$. The last one rests on the observation that a point of high density
+  in a tiny region has little probability mass nearby, so the log-density changes steeply around it. Tractable
+  generative models such as flows can assign higher likelihood to out-of-distribution data than to their training data
+  <Cite id="nalisnick2019" />; JEM's density ranks in-distribution data higher on the benchmarks reported.
+- **Robustness.** Adversarial perturbations exploit inputs that lie off the data manifold. JEM is more robust to
+  adversarial attacks than the baseline classifier, and running a few Langevin steps from the input before classifying,
+  which moves it towards higher density, adds more robustness. It remains below dedicated adversarial training at many
+  perturbation sizes.
+- **Samples.** The model generates class-conditional images by Langevin sampling from $p_{\thetavec}(\xvec, y)$.
+
+The price is some accuracy. On CIFAR-10 the JEM reached 92.9% against 95.8% for a standard Wide ResNet classifier.
+Part of the gap comes from removing batch normalisation to make the network's outputs deterministic, which alone raised
+the classifier's error from 4.2% to 6.4% <Cite id="grathwohl2020" />.
+
+## Worked example: logits, energies and the free scale
+
+Take three classes and logits $f(\xvec) = (2, 1, 0)$ for some input.
+
+- **Classifier.** $\sum_y e^{f[y]} = e^2 + e^1 + e^0 = 7.389 + 2.718 + 1 = 11.107$. The softmax is
+  $(0.665, 0.245, 0.090)$.
+- **Energy.** $E(\xvec) = -\log 11.107 = -2.408$.
+- **Shifted logits.** For a second network with logits $(3, 2, 1)$ at the same input, the softmax is the same
+  $(0.665, 0.245, 0.090)$, but $E(\xvec) = -3.408$. The unnormalised density $e^{-E}$ is larger by the factor
+  $e^1 = 2.718$.
+- **An uncertain input.** Logits $(-3, -3, -3)$ give a uniform softmax $(1/3, 1/3, 1/3)$ and energy
+  $E = 3 - \log 3 = 1.901$, a density $e^{-(1.901 + 2.408)} = 0.013$ times that of the first input. JEM training
+  pushes inputs unlike the data towards this regime: low logits for every class, high energy, and a hedged prediction.
+
+## Pitfalls
+
+- **Training is unstable.** The energy gradients can grow by orders of magnitude when a buffer sample with unusually
+  high energy is drawn, and the model diverges. The authors report that runs regularly diverged, that gradient and
+  energy clipping did not fix it without harming performance, and that they recovered by restarting from checkpoints,
+  lowering the learning rate or raising the Langevin steps per iteration from 20 to 40 <Cite id="grathwohl2020" />.
+- **Short-run chains are stabler but slower.** Chains started from noise every iteration needed about 80 steps to train
+  stably, four times the persistent sampler's cost, and still diverged late in training <Cite id="grathwohl2020" />
+  <Cite id="nijkamp2019" />.
+- **No usable likelihood.** $Z_{\thetavec}$ remains unknown, so $\log p_{\thetavec}(\xvec)$ compares inputs under one
+  model but cannot be compared across models or reported as a test likelihood.
+- **Stochastic layers.** Batch normalisation makes the energy of an input depend on the rest of its batch. The reported
+  models removed it to keep the energy a deterministic function of the input; the authors add that later runs trained
+  with batch normalisation and dropout without trouble <Cite id="grathwohl2020" />.
+- **Biased sampler.** At temperature $5 \times 10^{-5}$, the negative samples sit near energy minima rather than
+  following $p_{\thetavec}$. The learned density is therefore not the maximum-likelihood fit that the objective names;
+  the benefits above are empirical.

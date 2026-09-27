@@ -1,0 +1,175 @@
+---
+title: Probability-flow ODE
+kind: concept
+summary: 'The probability-flow ODE $d\xvec/dt = \fvec(\xvec, t) - \tfrac12 g(t)^2\nabla\log p_t(\xvec)$ moves particles deterministically so that their density follows the same marginals $p_t$ as the SDE $d\xvec = \fvec\,dt + g\,d\wvec$. It gives exact likelihoods and deterministic, invertible diffusion samplers.'
+tags: [probability, ordinary-differential-equations, stochastic-differential-equations, diffusion-models, score-matching, generative-models, worked-example]
+aliases: [probability flow ODE, PF ODE, probability flow ordinary differential equation]
+requires: [fokker-planck-equation, stochastic-differential-equations]
+related: [reverse-time-stochastic-differential-equations, transport-and-continuity-equations, vector-fields-and-flows, neural-ordinary-differential-equations, normalising-flow, denoising-diffusion-implicit-models, score-based-generative-models, diffusion-models-as-stochastic-differential-equations]
+references: [song2021, chen2018, grathwohl2019, song2021b, karras2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { FlowVersusDiffusion } from './FlowVersusDiffusion'
+
+<Definition>
+Let $\xvec_t$ solve $d\xvec = \fvec(\xvec, t)\,dt + g(t)\,d\wvec$, with marginal densities $p_t$. The
+**probability-flow ODE** is the ordinary differential equation
+
+$$
+\frac{d\xvec}{dt} = \fvec(\xvec, t) - \tfrac12 g(t)^2\,\nabla\log p_t(\xvec).
+$$
+
+If $\xvec_0 \sim p_0$ and $\xvec_t$ follows this ODE, then $\xvec_t \sim p_t$ for every $t$: the ODE and the SDE have
+the same marginals, although the ODE has no noise <Cite id="song2021" />.
+</Definition>
+
+## Intuition: a crowd leaving a stadium
+
+Watch a crowd from above as it disperses from a stadium. Individual people wander, cross paths and double back. Now
+replace them with people who walk calmly along fixed streamlines, never crossing, each at the local average velocity of
+the crowd. The density of the crowd at every moment is identical in the two pictures. Only the individual trajectories
+differ.
+
+A diffusion spreads a cloud of particles in two ways: the drift $\fvec$ carries it and the noise widens it. Noise
+widens the cloud because more particles leave dense regions than enter them. The same widening can be produced without
+any randomness by moving every particle outward, away from high density, at the velocity
+$-\tfrac12 g^2\nabla\log p_t$. The probability-flow ODE replaces the random spreading by this deterministic outward
+drift.
+
+## Derivation from Fokker–Planck
+
+The marginals of the SDE obey the <NoteLink to="fokker-planck-equation">Fokker–Planck equation</NoteLink>
+
+$$
+\partial_t p_t = -\nabla\cdot(\fvec\,p_t) + \tfrac12 g^2\,\Delta p_t.
+$$
+
+Write the Laplacian as the divergence of a gradient and use $\nabla p = p\,\nabla\log p$:
+
+$$
+\tfrac12 g^2\,\Delta p_t = \nabla\cdot\paren{\tfrac12 g^2\,\nabla p_t} = \nabla\cdot\paren{\tfrac12 g^2\,p_t\,\nabla\log
+p_t}.
+$$
+
+Substituting,
+
+$$
+\partial_t p_t = -\nabla\cdot\brack{\paren{\fvec - \tfrac12 g^2\,\nabla\log p_t}p_t}.
+$$
+
+This has no second-order term. It is the <NoteLink to="transport-and-continuity-equations">continuity
+equation</NoteLink> $\partial_t p + \nabla\cdot(\vvec\,p) = 0$ for the velocity field
+$\vvec = \fvec - \tfrac12 g^2\nabla\log p_t$. A density carried by the deterministic flow $d\xvec/dt = \vvec(\xvec, t)$
+obeys exactly this equation, so the ODE transports $p_0$ through the same $p_t$ as the SDE. The ODE is the
+<NoteLink to="vector-fields-and-flows">flow of a vector field</NoteLink> that depends on the density it moves.
+
+The same rewrite gives a whole family. For any $\lambda \ge 0$ split the diffusion term into two parts,
+$\tfrac12 g^2\Delta p_t = \tfrac{\lambda^2}{2}g^2\,\Delta p_t + \tfrac{1 - \lambda^2}{2}g^2\,\nabla\cdot(p_t\nabla\log
+p_t)$, and move only the second part into the drift. The result is the Fokker–Planck equation of the SDE
+
+$$
+d\xvec = \brack{\fvec - \tfrac{1 - \lambda^2}{2}\,g^2\,\nabla\log p_t}dt + \lambda g\,d\wvec,
+$$
+
+so these SDEs all have marginals $p_t$. At $\lambda = 1$ the family contains the original SDE, and at $\lambda = 0$
+the probability-flow ODE. The <NoteLink to="reverse-time-stochastic-differential-equations">reverse-time SDE</NoteLink>
+comes from the same identity run backwards in time; its score term is $g^2\nabla\log p_t$, twice the ODE's.
+
+## Worked example 1: Brownian motion from a Gaussian
+
+Take $dX = dW$ with $X_0 \sim \Gauss(0, v_0)$. Then $p_t = \Gauss(0, v_0 + t)$ and the score is $-x/(v_0 + t)$. The
+probability-flow ODE is
+
+$$
+\frac{dx}{dt} = -\tfrac12\paren{-\frac{x}{v_0 + t}} = \frac{x}{2(v_0 + t)}.
+$$
+
+Separate variables: $d\log x = \tfrac12\,d\log(v_0 + t)$, so $x(t) = x_0\sqrt{(v_0 + t)/v_0}$. Every particle is
+scaled by the same factor $\sqrt{(v_0 + t)/v_0}$, and a scaled $\Gauss(0, v_0)$ is $\Gauss(0, v_0 + t)$. The ODE
+reproduces the spreading of Brownian motion with no randomness at all. A particle at $x_0 = 1$ with $v_0 = 1$ is at
+$\sqrt2 = 1.414$ at $t = 1$, where the SDE would have put it anywhere in $\Gauss(1, 1)$.
+
+## Worked example 2: exact likelihood for a variance-preserving process
+
+Take $dX = -\tfrac12\beta X\,dt + \sqrt\beta\,dW$ with $X_0 \sim \Gauss(0, v_0)$, so $p_t = \Gauss(0, v_t)$ with
+$v_t = 1 + (v_0 - 1)e^{-\beta t}$. The ODE velocity is
+
+$$
+v(x, t) = -\tfrac12\beta x + \tfrac12\beta\frac{x}{v_t} = \tfrac12\beta x\paren{\frac{1}{v_t} - 1}.
+$$
+
+Its solution is $x_t = x_0\sqrt{v_t/v_0}$; check: $\frac{d}{dt}\log x_t = \frac{v_t'}{2v_t} = \frac{-\beta(v_t - 1)}{2
+v_t}$, which equals $v/x$.
+
+**Likelihood.** Along a trajectory of a flow the log-density changes by minus the divergence of the velocity (the
+instantaneous change of variables <Cite id="chen2018" />):
+
+$$
+\frac{d}{dt}\log p_t(\xvec_t) = -\nabla\cdot\vvec(\xvec_t, t), \qquad \text{so} \qquad \log p_0(\xvec_0) = \log
+p_T(\xvec_T) + \int_0^T \nabla\cdot\vvec(\xvec_t, t)\,dt.
+$$
+
+Here $\partial_x v = \tfrac12\beta(1/v_t - 1)$, whose integral from 0 to $T$ is $\tfrac12\log(v_T/v_0)$. With
+$\beta = 1$, $v_0 = 0.25$, $T = 3$ and $x_0 = 0.8$: $v_T = 0.963$, $x_T = 1.570$, and
+
+$$
+\log\Gauss(1.570; 0, 0.963) + \tfrac12\log(0.963/0.25) = -2.180 + 0.674 = -1.506 = \log\Gauss(0.8; 0, 0.25).
+$$
+
+For a trained diffusion model the same computation integrates the ODE from a data point to $\xvec_T$, evaluates the
+Gaussian log-density there, and adds the integrated divergence. In high dimensions the divergence is estimated with
+Hutchinson's trace estimator, $\nabla\cdot\vvec = \expect_{\epsilonvec}[\epsilonvec^\top(\nabla\vvec)\epsilonvec]$, as
+in FFJORD <Cite id="grathwohl2019" />.
+
+## Worked example 3: sampling a two-mode density
+
+Take the two-mode density $0.35\,\Gauss(-2, 0.35^2) + 0.65\,\Gauss(1.5, 0.5^2)$ noised by $dX = -\tfrac12X\,dt +
+dW$ up to $T = 5$, whose score is analytic at every time. Particles started from $\Gauss(0, 1)$ at $t = 5$ and moved
+backwards with the exact score end in the right-hand mode with frequency:
+
+| sampler                                              | share in right mode (data: 0.650) |
+| ---------------------------------------------------- | --------------------------------- |
+| reverse SDE, 250 steps                               | 0.651                             |
+| probability-flow ODE, 1,000 steps, from $\Gauss(0, 1)$ | 0.641                             |
+| probability-flow ODE, 1,000 steps, from exact $p_5$  | 0.650                             |
+
+The ODE is exact only if it starts from $p_T$. Starting it from $\Gauss(0, 1)$, which differs from $p_5$ by a
+Kullback–Leibler divergence of $3 \times 10^{-4}$, leaves an error of about one percentage point, because a
+deterministic map carries any error in its input to its output. The SDE's noise contracts such errors, and it lands on
+$0.651$.
+
+<FlowVersusDiffusion />
+
+## Uses in machine learning
+
+- **Exact likelihoods.** The ODE turns a diffusion model into a continuous
+  <NoteLink to="normalising-flow">normalising flow</NoteLink>, so its log-likelihood can be computed as in worked
+  example 2 <Cite id="song2021" />. The SDE sampler has no tractable likelihood.
+- **Deterministic sampling.** The deterministic <NoteLink to="denoising-diffusion-implicit-models">DDIM</NoteLink>
+  sampler is a discretisation of the probability-flow ODE of the variance-preserving process <Cite id="song2021b" />.
+  Because the trajectories are smooth, higher-order <NoteLink to="numerical-ode-solvers">ODE solvers</NoteLink> reach
+  good samples in tens of network evaluations rather than hundreds or thousands <Cite id="karras2022" />.
+- **Encoding and editing.** The map from noise to data is invertible. Running the ODE forwards from an image gives its
+  latent noise, which can be interpolated, edited or re-decoded (DDIM inversion).
+- **Neural ODEs and flow matching.** The probability-flow ODE is a
+  <NoteLink to="neural-ordinary-differential-equations">neural ODE</NoteLink> whose velocity comes from a score
+  network instead of being trained by maximum likelihood.
+
+## Assumptions
+
+- **The score is exact.** With a learned score the ODE's marginals are only approximately $p_t$, and the likelihood
+  computed along it is the likelihood of the model defined by the learned ODE, not of the SDE sampler.
+- **Smoothness.** The velocity field must be Lipschitz for the ODE to have unique solutions. Near $t = 0$ the score of
+  real data can be very large, so integration usually stops at a small $t = \epsilon$.
+
+## Pitfalls
+
+- **Same marginals, not the same paths.** The ODE and the SDE agree on the distribution at each time, not on the joint
+  law of a path. A particle's ODE trajectory is not a typical SDE path.
+- **Half, not all, of the score.** The ODE uses $\tfrac12 g^2\nabla\log p_t$; the reverse SDE uses $g^2\nabla\log
+  p_t$. Using the full term without noise over-concentrates the samples.
+- **Errors do not wash out.** Errors in the start distribution or in the score propagate through a deterministic map.
+  Stochastic samplers can correct some of them; this is one reason stochastic samplers sometimes give better samples
+  from the same network <Cite id="karras2022" />.

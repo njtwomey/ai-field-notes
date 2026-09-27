@@ -1,0 +1,153 @@
+---
+title: Euler–Maruyama method
+kind: technique
+summary: 'The Euler–Maruyama method simulates $dX = f(X, t)\,dt + g(X, t)\,dW$ by the update $X_{k+1} = X_k + f(X_k, t_k)\,h + g(X_k, t_k)\sqrt{h}\,Z_k$ with $Z_k \sim \Gauss(0, 1)$. Paths converge with strong order $\tfrac12$ in the step $h$; expectations converge with weak order 1.'
+tags: [stochastic-differential-equations, numerical-methods, simulation, sampling, worked-example]
+aliases: [Euler–Maruyama scheme, Euler scheme for SDEs, Milstein method, strong order of convergence, weak order of convergence]
+requires: [stochastic-differential-equations, brownian-motion]
+related: [numerical-ode-solvers, langevin-dynamics, denoising-diffusion-probabilistic-models, itos-lemma]
+references: [maruyama1955, kloeden1992, higham2001, sarkka2019]
+status: draft
+updated: 2026-09-27
+---
+
+import { EulerMaruyamaConvergence } from './EulerMaruyamaConvergence'
+
+<Definition>
+For the SDE $dX_t = f(X_t, t)\,dt + g(X_t, t)\,dW_t$ on $[0, T]$, choose a step $h = T/n$ and times $t_k = kh$. The
+**Euler–Maruyama method** sets $\hat X_0 = X_0$ and
+
+$$
+\hat X_{k+1} = \hat X_k + f(\hat X_k, t_k)\,h + g(\hat X_k, t_k)\,\Delta W_k, \qquad \Delta W_k = \sqrt h\,Z_k,\quad Z_k
+\sim \Gauss(0, 1) \text{ independent}.
+$$
+
+It is the <NoteLink to="numerical-ode-solvers">Euler method</NoteLink> for the drift plus an exact draw of the Brownian
+increment <Cite id="maruyama1955" />.
+</Definition>
+
+## Problem
+
+Most SDEs have no closed-form solution. A diffusion model's reverse-time SDE has a neural network in its drift, and a
+Langevin sampler has the gradient of an arbitrary log-density. Sampling paths, or estimating an expectation
+$\expect[\phi(X_T)]$, needs a simulation that uses only evaluations of $f$ and $g$.
+
+## Mechanism
+
+Integrate the SDE over one step:
+
+$$
+X_{t_{k+1}} = X_{t_k} + \int_{t_k}^{t_{k+1}} f(X_s, s)\,ds + \int_{t_k}^{t_{k+1}} g(X_s, s)\,dW_s.
+$$
+
+Freeze both integrands at the start of the step. The first integral becomes $f(X_{t_k}, t_k)\,h$. The second becomes
+$g(X_{t_k}, t_k)(W_{t_{k+1}} - W_{t_k})$, and the Brownian increment is exactly $\Gauss(0, h)$, so it is drawn as
+$\sqrt h\,Z_k$. Freezing at the start is the left-point rule of the <NoteLink to="ito-integral">Itô integral</NoteLink>,
+so the scheme is consistent with Itô's convention. Evaluating $g$ at the end of the step would converge to a different
+process.
+
+### Worked example: one step by hand
+
+Take geometric Brownian motion $dX = \mu X\,dt + \sigma X\,dW$ with $\mu = 1$, $\sigma = 0.8$, $X_0 = 1$ and $h = 0.25$.
+Suppose the draw is $\Delta W_0 = 0.3$, which corresponds to $Z_0 = 0.3/\sqrt{0.25} = 0.6$. Then
+
+$$
+\hat X_1 = 1 + 1 \times 1 \times 0.25 + 0.8 \times 1 \times 0.3 = 1.49.
+$$
+
+The exact solution driven by the same increment is $X_{0.25} = \exp\paren{(1 - 0.32) \times 0.25 + 0.8 \times 0.3} =
+e^{0.41} = 1.507$. The one-step error is $0.017$.
+
+### Two kinds of error
+
+A simulation can be judged path by path or in distribution.
+
+- **Strong error** compares each simulated path with the exact path driven by the same Brownian motion:
+  $e_{\text{strong}}(h) = \expect\abs{\hat X_n - X_T}$. The method has **strong order** $\gamma$ if
+  $e_{\text{strong}} \le Ch^\gamma$.
+- **Weak error** compares expectations: $e_{\text{weak}}(h) = \abs{\expect\phi(\hat X_n) - \expect\phi(X_T)}$ for
+  smooth test functions $\phi$. The method has **weak order** $\beta$ if $e_{\text{weak}} \le Ch^\beta$.
+
+Euler–Maruyama has strong order $\tfrac12$ and weak order 1, under Lipschitz and smoothness conditions on $f$ and $g$
+<Cite id="kloeden1992" />. Sampling for a generative model needs only the right distribution, so the weak order is the
+one that matters there. Strong order matters when a path must track a particular realisation of the noise, for example
+in pathwise sensitivity estimates.
+
+### Why the strong order is only one half
+
+Expand the noise integrand one step further with <NoteLink to="itos-lemma">Itô's lemma</NoteLink>:
+$g(X_s) \approx g(X_{t_k}) + g'(X_{t_k})\,g(X_{t_k})\,(W_s - W_{t_k})$. The term the scheme drops is
+
+$$
+g g' \int_{t_k}^{t_{k+1}} (W_s - W_{t_k})\,dW_s = \tfrac12\,g g'\paren{(\Delta W_k)^2 - h},
+$$
+
+using the result $\int W\,dW = \tfrac12(W^2 - t)$ on the step. This error has mean zero and standard deviation of
+order $h$. Over $n = T/h$ steps, independent errors of size $h$ accumulate like $\sqrt n\,h = \sqrt{Th}$, which is
+order $h^{1/2}$. The error has mean zero, so it does not bias expectations to this order, which is why the weak order
+is higher.
+
+Adding the dropped term back gives the **Milstein method**,
+$\hat X_{k+1} = \hat X_k + fh + g\,\Delta W_k + \tfrac12 g g'\paren{(\Delta W_k)^2 - h}$, which has strong order 1. When
+$g$ does not depend on $x$ (additive noise), $g' = 0$ and Euler–Maruyama already is Milstein, with strong order 1. The
+forward and reverse SDEs of diffusion models have additive noise.
+
+## Worked example: convergence on geometric Brownian motion
+
+For $dX = X\,dt + 0.8X\,dW$ on $[0, 1]$ from $X_0 = 1$, the exact solution is $X_1 = \exp(0.68 + 0.8W_1)$, with mean
+$e = 2.718$. The Euler–Maruyama update multiplies by $(1 + h + 0.8\,\Delta W_k)$ at each step. Its factors are
+independent with mean $1 + h$, so its mean is exactly $(1 + h)^n$, which converges to $e$ from below with error about
+$\tfrac12 e\,h$: weak order 1. A simulation of $10^5$ paths, each using the same fine Brownian path at every step size,
+gives:
+
+| steps $n$ | step $h$ | strong error, Euler–Maruyama | strong error, Milstein | weak error $\abs{(1 + h)^n - e}$ |
+| --------- | -------- | ---------------------------- | ---------------------- | -------------------------------- |
+| 4         | 0.25     | 0.489                        | 0.422                  | 0.277                            |
+| 16        | 0.0625   | 0.245                        | 0.126                  | 0.080                            |
+| 64        | 0.0156   | 0.123                        | 0.033                  | 0.021                            |
+| 256       | 0.0039   | 0.061                        | 0.008                  | 0.0053                           |
+
+Each fourfold reduction of $h$ halves the Euler–Maruyama strong error ($h^{1/2}$) and quarters the Milstein strong
+error and the weak error ($h^1$).
+
+<EulerMaruyamaConvergence />
+
+## Stability
+
+The scheme inherits the stability limits of the explicit Euler method. For the
+<NoteLink to="ornstein-uhlenbeck-process">Ornstein–Uhlenbeck process</NoteLink> $dX = -\theta X\,dt + \sigma\,dW$ the
+update is $\hat X_{k+1} = (1 - \theta h)\hat X_k + \sigma\,\Delta W_k$. The mean is multiplied by $1 - \theta h$ each
+step. It decays only if $\abs{1 - \theta h} < 1$, that is $h < 2/\theta$. For larger steps the simulation explodes,
+although the true process is stable. Stiff drifts, with large $\theta$, therefore force small steps or an implicit
+scheme. Even within the stable range the stationary variance of the scheme is $\sigma^2/(2\theta - \theta^2 h)$, larger
+than the true $\sigma^2/(2\theta)$ by a factor $1/(1 - \theta h/2)$, which is a weak error of order $h$.
+
+## In machine learning
+
+- **Langevin sampling.** The unadjusted Langevin algorithm is Euler–Maruyama applied to
+  $dX = \nabla\log p(X)\,dt + \sqrt2\,dW$; its step-size bias is the weak error above
+  (<NoteLink to="langevin-dynamics">Langevin dynamics</NoteLink>).
+- **Diffusion model samplers.** Ancestral sampling in <NoteLink to="denoising-diffusion-probabilistic-models">DDPM</NoteLink>
+  is close to an Euler–Maruyama discretisation of the
+  <NoteLink to="reverse-time-stochastic-differential-equations">reverse-time SDE</NoteLink>. Predictor–corrector
+  samplers alternate an Euler–Maruyama step with Langevin corrections at fixed time <Cite id="song2021" />.
+- **Neural SDEs.** Models whose drift and diffusion are networks are trained by backpropagating through
+  Euler–Maruyama steps, the stochastic analogue of <NoteLink to="neural-ordinary-differential-equations">neural
+  ODEs</NoteLink>.
+
+## Cost
+
+One step costs one evaluation of $f$, one of $g$ and one Gaussian draw. A weak error $\epsilon$ needs
+$n \propto 1/\epsilon$ steps. A Monte Carlo estimate of $\expect\phi(X_T)$ from $M$ paths also has statistical error
+$\propto 1/\sqrt M$, so balancing the two needs $M \propto 1/\epsilon^2$ paths and a total cost $\propto \epsilon^{-3}$.
+Multilevel Monte Carlo lowers this to about $\epsilon^{-2}$ by combining coarse and fine grids driven by the same noise
+<Cite id="higham2001" />.
+
+## Trade-offs
+
+- **Simple and general.** Only $f$, $g$ and Gaussian draws are needed, with no derivatives.
+- **Low strong order under multiplicative noise.** Use Milstein or a higher-order stochastic Runge–Kutta scheme when
+  paths must be accurate.
+- **Exact alternatives.** Linear SDEs such as Ornstein–Uhlenbeck have exact Gaussian transitions. Using them avoids
+  both the bias and the stability limit, and diffusion models do exactly this for their forward process.
+- **Explicit stability limit.** Stiff drifts need small steps or implicit drift updates.

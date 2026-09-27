@@ -1,0 +1,176 @@
+---
+title: Vector fields and flows
+kind: concept
+summary: 'The flow $\phi_t$ of an ODE $\dot{\xvec} = \fvec(\xvec)$ maps each starting point to where it is after time $t$. It is invertible, with $\phi_{-t} = \phi_t^{-1}$, and changes volume by $\det(\partial\phi_t/\partial\xvec) = \exp\paren{\int_0^t \nabla\cdot\fvec\,ds}$, so it transports densities as a normalising flow does.'
+tags: [differential-equations, ordinary-differential-equations, dynamical-systems, normalising-flows, jacobian, worked-example]
+aliases: [flow map, flow of a vector field, phase flow, Liouville's theorem, Jacobi's formula, Abel–Jacobi–Liouville identity, variational equation, divergence of a vector field, volume-preserving flow]
+requires: [ordinary-differential-equations, jacobian, determinant]
+partOf: [ordinary-differential-equations]
+related: [change-of-variables, normalising-flow, neural-ordinary-differential-equations, transport-and-continuity-equations, hamiltonian-monte-carlo]
+references: [hirsch2013, teschl2012, chen2018]
+status: draft
+updated: 2026-09-27
+---
+
+import { FlowCloud } from './FlowCloud'
+
+<Definition>
+Let $\fvec : \reals^d \to \reals^d$ be a Lipschitz **vector field**. Its **flow** is the family of maps
+$\phi_t : \reals^d \to \reals^d$ with $\phi_t(\xvec_0) = \xvec(t)$, the solution of $\dot{\xvec} = \fvec(\xvec)$ with
+$\xvec(0) = \xvec_0$. The flow satisfies
+
+$$
+\phi_0 = \mathrm{id}, \qquad \phi_{t + s} = \phi_t \circ \phi_s, \qquad \phi_{-t} = \phi_t^{-1},
+$$
+
+and its Jacobian determinant obeys $\det\partial\phi_t/\partial\xvec_0 = \exp\paren{\int_0^t
+\nabla\cdot\fvec\paren{\phi_s(\xvec_0)}\,ds}$, where $\nabla\cdot\fvec = \sum_i \partial f_i/\partial x_i$ is the
+divergence <Cite id="hirsch2013" />.
+</Definition>
+
+## Intuition
+
+Drop a handful of leaves on a river. The river's velocity at each point is the vector field $\fvec$. Each leaf follows
+its own path, but all the leaves move at once, and the whole handful is carried along, stretched in one direction and
+squeezed in another. The flow $\phi_t$ is the map from where every leaf starts to where it is after time $t$.
+
+A single solution of an ODE answers "where does this point go?" The flow answers "where does everything go?" That
+second question is the one probability asks. A distribution is a cloud of particles; if each particle obeys the same
+ODE, the flow moves the whole cloud and reshapes its density.
+
+## The flow map
+
+For $\dot x = a\,x$ in one dimension, $\phi_t(x_0) = x_0e^{at}$. For the linear system $\dot{\xvec} = \Amat\xvec$,
+$\phi_t$ is the matrix $e^{\Amat t}$ from
+<NoteLink to="linear-systems-and-the-matrix-exponential">linear systems</NoteLink>. For the logistic equation
+$\dot x = x(1 - x)$, $\phi_t(x_0) = 1/\paren{1 + (1/x_0 - 1)e^{-t}}$.
+
+The three properties in the definition follow from uniqueness of solutions.
+
+- **Identity.** At time 0 no point has moved.
+- **Composition.** The field does not depend on time, so a solution that has run for time $s$ and then restarts from
+  $\phi_s(\xvec_0)$ follows the same path as one that never stopped. Running for $s$ and then for $t$ is running for
+  $t + s$.
+- **Inverse.** Running the ODE backwards, $\dot{\xvec} = -\fvec(\xvec)$, for time $t$ undoes $\phi_t$, because
+  $\phi_{-t} \circ \phi_t = \phi_0 = \mathrm{id}$.
+
+**Worked example (composition for the logistic flow).** Start at $x_0 = 0.1$. After $t = 1$, $\phi_1(0.1) =
+1/(1 + 9e^{-1}) = 0.232$. After another unit of time from there, $\phi_1(0.232) = 1/(1 + 3.31e^{-1}) = 0.451$. Running
+for $t = 2$ directly gives $\phi_2(0.1) = 1/(1 + 9e^{-2}) = 0.451$.
+
+Invertibility has a geometric side: trajectories never cross. If two paths met at a point, running backwards from it
+would have two possible pasts. In one dimension this means a flow preserves order: if $x_0 < y_0$ then
+$\phi_t(x_0) < \phi_t(y_0)$ for all $t$. No one-dimensional flow can map $x$ to $-x$, a limit that matters for
+<NoteLink to="neural-ordinary-differential-equations">neural ODEs</NoteLink>.
+
+## How a flow stretches space
+
+Nearby starting points move apart or together according to the derivative of $\fvec$. Let
+$\Jmat_t = \partial\phi_t(\xvec_0)/\partial\xvec_0$, the <NoteLink to="jacobian">Jacobian</NoteLink> of the flow.
+Differentiating the ODE $\frac{d}{dt}\phi_t(\xvec_0) = \fvec\paren{\phi_t(\xvec_0)}$ with respect to $\xvec_0$, and
+using the chain rule on the right, gives the **variational equation**
+
+$$
+\dot{\Jmat}_t = \nabla\fvec\paren{\phi_t(\xvec_0)}\,\Jmat_t, \qquad \Jmat_0 = \Imat,
+$$
+
+where $\nabla\fvec$ is the Jacobian of the vector field. It is a linear ODE for a matrix, driven along the trajectory.
+
+The determinant of $\Jmat_t$ is the factor by which the flow scales a small volume near $\xvec_0$. Over a short step
+$h$, the variational equation gives $\Jmat_{t + h} = \paren{\Imat + h\nabla\fvec}\Jmat_t + O(h^2)$. The determinant of
+a product is the product of determinants, and expanding $\det(\Imat + h\Bmat)$ to first order in $h$ keeps only the
+diagonal terms:
+
+$$
+\det\paren{\Imat + h\Bmat} = 1 + h\,\trace\Bmat + O(h^2).
+$$
+
+With $\Bmat = \nabla\fvec$, whose trace is the divergence $\nabla\cdot\fvec = \sum_i \partial f_i/\partial x_i$,
+
+$$
+\frac{d}{dt}\det\Jmat_t = \paren{\nabla\cdot\fvec}\,\det\Jmat_t \quad\Longrightarrow\quad \det\Jmat_t =
+\exp\paren{\int_0^t \nabla\cdot\fvec\paren{\phi_s(\xvec_0)}\,ds}.
+$$
+
+This is **Liouville's formula**. The divergence is the rate at which the flow expands volume, per unit volume, at each
+point. The exponential is positive, so the flow never folds space over: $\det\Jmat_t > 0$, and $\phi_t$ is an
+orientation-preserving, invertible, differentiable map.
+
+<Derivation title="Why only the diagonal survives in det(I + hB)">
+The determinant is a sum over permutations $\sigma$ of products $\prod_i (\Imat + h\Bmat)_{i\sigma(i)}$. The identity
+permutation gives $\prod_i (1 + hb_{ii}) = 1 + h\sum_i b_{ii} + O(h^2)$. Any other permutation moves at least two
+indices, so its product contains at least two off-diagonal factors, each of size $O(h)$, and contributes $O(h^2)$.
+</Derivation>
+
+**Worked examples.**
+
+- **Sink.** $\fvec(\xvec) = -0.4\,\xvec$ in two dimensions has $\nabla\cdot\fvec = -0.8$ everywhere. After $t = 1$ every
+  area is multiplied by $e^{-0.8} = 0.449$. Directly: $\phi_t(\xvec) = e^{-0.4t}\xvec$, whose determinant is
+  $(e^{-0.4t})^2 = e^{-0.8t}$.
+- **Rotation.** $\fvec = (-x_2, x_1)$ has $\nabla\cdot\fvec = 0 + 0 = 0$. Rotations preserve area.
+- **Saddle.** $\fvec = (0.5x_1, -0.5x_2)$ also has divergence 0. A square becomes a long thin rectangle of the same
+  area: zero divergence means no net volume change, not no deformation.
+- **Pendulum.** $\fvec(\theta, \omega) = (\omega, -\sin\theta)$ has $\nabla\cdot\fvec = \partial\omega/\partial\theta +
+  \partial(-\sin\theta)/\partial\omega = 0$. Every Hamiltonian system has zero divergence, so it preserves phase-space
+  volume. <NoteLink to="hamiltonian-monte-carlo">Hamiltonian Monte Carlo</NoteLink> relies on this.
+- **Damped pendulum.** Adding friction $-\gamma\omega$ to $\dot\omega$ makes the divergence $-\gamma$. Areas shrink like
+  $e^{-\gamma t}$, and the whole plane collapses onto the stable equilibria.
+- **A non-constant divergence.** For $\dot x = x - x^3$ in one dimension, "volume" is length and
+  $\nabla\cdot f = f'(x) = 1 - 3x^2$. Short intervals near 0 stretch at rate 1; intervals near $\pm1$ shrink at rate 2.
+  Points pile up at the two stable equilibria.
+
+<FlowCloud />
+
+## Flows carry densities
+
+Suppose the starting points are random with density $p_0$. After time $t$ the points $\phi_t(\xvec_0)$ have density
+$p_t$. A small region around $\xvec_0$ holds probability $p_0(\xvec_0)\,dV$, and the flow maps it to a region of volume
+$\det\Jmat_t\,dV$ holding the same probability, since no point is created or lost. So
+
+$$
+p_t\paren{\phi_t(\xvec_0)} = \frac{p_0(\xvec_0)}{\det\Jmat_t(\xvec_0)}, \qquad
+\log p_t\paren{\xvec(t)} = \log p_0(\xvec_0) - \int_0^t \nabla\cdot\fvec\paren{\xvec(s)}\,ds.
+$$
+
+This is the <NoteLink to="change-of-variables">change of variables formula</NoteLink> with the Jacobian determinant
+supplied by Liouville's formula. Following a single particle, its log-density falls at the rate at which the flow
+spreads space around it.
+
+**Worked example (a Gaussian under a linear flow).** Let $\dot x = a\,x$ with $x_0 \sim \Gauss(0, 1)$. Then
+$x(t) = x_0e^{at}$ is Gaussian with variance $e^{2at}$. The formula gives
+$\log p_t(x(t)) = \log p_0(x_0) - at$. Checking directly,
+$\log\Gauss(x_0e^{at}; 0, e^{2at}) = -\tfrac12x_0^2 - \tfrac12\log 2\pi - at$, which matches.
+
+The density equation seen from a fixed point in space, rather than along a particle, is the
+<NoteLink to="transport-and-continuity-equations">continuity equation</NoteLink>
+$\partial_tp + \nabla\cdot(p\,\fvec) = 0$.
+
+## Time-dependent fields
+
+When the field depends on time, $\dot{\xvec} = \fvec(\xvec, t)$, the flow depends on both the start and end times:
+$\phi_{s \to t}$ maps a state at time $s$ to the state at time $t$. Composition becomes
+$\phi_{s \to u} = \phi_{t \to u} \circ \phi_{s \to t}$, and the inverse of $\phi_{s \to t}$ is $\phi_{t \to s}$.
+Liouville's formula holds with $\nabla\cdot\fvec(\xvec(r), r)$ inside the integral. The fields used to generate data
+are of this kind.
+
+## In machine learning
+
+- **Normalising flows.** A <NoteLink to="normalising-flow">normalising flow</NoteLink> composes invertible layers with
+  tractable Jacobians. A flow map is an invertible transformation by construction, and its log-determinant is an
+  integral of the divergence, so no architectural constraint is needed for invertibility.
+- **Continuous normalising flows.** Neural ODEs take $\fvec$ to be a network and use the log-density formula above to
+  compute exact likelihoods <Cite id="chen2018" />.
+- **Residual networks.** A residual block $\xvec + h\,\fvec(\xvec)$ is one Euler step of a flow. It is invertible when
+  $h\,\fvec$ is a contraction, a small-step version of the same fact.
+- **Diffusion sampling.** The <NoteLink to="probability-flow-ode">probability flow ODE</NoteLink> of a
+  <NoteLink to="score-based-generative-models">score-based diffusion model</NoteLink> is a time-dependent flow that maps
+  a Gaussian to the data distribution.
+
+## Pitfalls
+
+- **Divergence is not the stretching.** A divergence-free field such as the saddle can stretch a region enormously in
+  one direction while squeezing it in another.
+- **Finite-time blow-up.** For fields that grow faster than linearly, $\phi_t$ may exist only for small $t$, as for
+  $\dot x = x^2$.
+- **Non-Lipschitz fields.** Where uniqueness fails, as for $\dot x = \sqrt x$ at 0, the flow is not well defined and
+  not invertible.

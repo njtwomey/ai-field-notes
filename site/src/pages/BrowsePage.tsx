@@ -14,6 +14,8 @@ import {
   category,
   categoryOrder,
   categoryTrail,
+  indexFirst,
+  indexOfCategory,
   kindLabels,
   notes,
   type BrowseParams,
@@ -51,10 +53,18 @@ export function BrowsePage() {
 
   // Group cards under their category so a topic's structure is visible without reading.
   const groups = useMemo(() => {
+    // An index note leads the group of the category it introduces, which may be an ancestor of its own folder.
+    const inView = (path: string) => !params.c || path === params.c || path.startsWith(`${params.c}/`)
     const byCategory = new Map<string, typeof matches>()
-    for (const n of matches) byCategory.set(n.category, [...(byCategory.get(n.category) ?? []), n])
-    return [...byCategory.entries()].sort(([a], [b]) => categoryOrder(a) - categoryOrder(b))
-  }, [matches])
+    for (const n of matches) {
+      const introduces = indexOfCategory(n.slug)
+      const home = introduces && inView(introduces) ? introduces : n.category
+      byCategory.set(home, [...(byCategory.get(home) ?? []), n])
+    }
+    return [...byCategory.entries()]
+      .sort(([a], [b]) => categoryOrder(a) - categoryOrder(b))
+      .map(([path, list]) => [path, indexFirst(list, path)] as const)
+  }, [matches, params.c])
 
   const filtered = !!(params.c || params.kind || params.q)
   const scopeTitle = params.c ? category(params.c)?.title : 'All notes'
@@ -145,7 +155,7 @@ export function BrowsePage() {
                   </h2>
                   <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                     {list.map((n) => (
-                      <NoteCard key={n.slug} note={n} />
+                      <NoteCard key={n.slug} note={n} lead={category(path)?.index === n.slug} />
                     ))}
                   </div>
                 </section>
