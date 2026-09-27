@@ -63,7 +63,7 @@ export function BrowsePage() {
     <main className="px-4 py-8 lg:px-8">
       <div className="grid gap-8 lg:grid-cols-[240px_minmax(0,1fr)]">
         <aside className="hidden lg:block">
-          <div className="sticky top-20">
+          <div className="sticky top-20 max-h-[calc(100svh-6rem)] overflow-y-auto overscroll-contain pr-2 pb-6">
             <TopicRail params={params} />
           </div>
         </aside>
