@@ -1,0 +1,151 @@
+---
+title: Embedded topic model
+kind: concept
+summary: 'The embedded topic model (ETM) places each topic at a vector $\alphavec_k$ in a word-embedding space and gives word $v$ probability $\beta_{kv} \propto \exp(\rhovec_v^\top\alphavec_k)$. Documents mix topics as in LDA. The dynamic ETM lets each $\alphavec_k$ drift over time.'
+tags: [topic-models, nlp, deep-learning, variational-inference, embeddings, latent-variable-models, worked-example]
+aliases: [ETM, topic modelling in embedding spaces, dynamic embedded topic model, D-ETM, DETM, topic embedding]
+requires: [latent-dirichlet-allocation, word-embeddings, variational-autoencoder]
+partOf: [neural-topic-models]
+related: [prodlda, neural-variational-document-model, softmax-and-log-sum-exp, multinomial-logistic-regression, contextualised-topic-models]
+references: [dieng2020etm, dieng2019detm, mikolov2013, blei2006dtm, aitchison1980logistic]
+status: draft
+updated: 2026-09-27
+---
+
+import { NtmDiagram } from '../_shared/NtmDiagram'
+import { EtmTopicVector } from './EtmTopicVector'
+
+<Definition>
+The **embedded topic model** (ETM) is a topic model in which every word $v$ has an embedding $\rhovec_v \in \reals^L$
+and every topic $k$ has an embedding $\alphavec_k \in \reals^L$ in the same space <Cite id="dieng2020etm" />. Topic
+$k$'s distribution over the $V$ words is
+
+$$
+\beta_{kv} = \frac{\exp(\rhovec_v^\top\alphavec_k)}{\sum_{u=1}^V\exp(\rhovec_u^\top\alphavec_k)} .
+$$
+
+A document $d$ draws $\hvec_d \sim \Gauss(\zeros, \Imat_K)$ and sets $\thetavec_d = \operatorname{softmax}(\hvec_d)$,
+a logistic-normal draw of topic proportions. Each word draws a topic $z_{dn} \sim \Cat(\thetavec_d)$ and then a word
+$w_{dn} \sim \Cat(\betavec_{z_{dn}})$. Inference is amortised variational inference with an encoder network, and the
+word embeddings are either pretrained and fixed or learnt with the model.
+</Definition>
+
+## Intuition
+
+In <NoteLink to="latent-dirichlet-allocation">LDA</NoteLink> a topic is a free vector of $V$ probabilities. Two words
+that mean the same thing are unrelated parameters, and a rare word's probability under each topic is estimated from its
+few occurrences alone. In the ETM a topic is a single point $\alphavec_k$ in the embedding space, and its distribution
+over words is a log-linear function of where each word sits. Words close to each other in the embedding space, which are
+words used in similar contexts, receive similar probabilities under every topic. A rare word inherits a sensible
+probability from its neighbours.
+
+The ETM's likelihood is the continuous bag-of-words (CBOW) model of
+<NoteLink to="word-embeddings">word embeddings</NoteLink> with a different context. CBOW draws a word from
+$\operatorname{softmax}(\rhovec^\top\alphavec)$ with $\alphavec$ the sum of the embeddings of the surrounding words
+<Cite id="mikolov2013" />. The ETM draws it with $\alphavec$ the embedding of the word's topic, chosen from the
+document's topic proportions. The context is the document's subject, not a window of neighbouring words
+<Cite id="dieng2020etm" />.
+
+<EtmTopicVector />
+
+The logit $\rhovec_v^\top\alphavec_k$ is the projection of the word's embedding onto the topic direction, scaled by the
+length of $\alphavec_k$. The top words of a topic are the words furthest along its direction. The length of
+$\alphavec_k$ is an inverse temperature: a long vector gives a sharp topic, a short one a flat topic.
+
+## The objective
+
+Summing out the topic assignments gives the per-word likelihood as a mixture, as in LDA:
+
+$$
+p(w_{dn} = v \mid \thetavec_d) = \sum_{k=1}^K\theta_{dk}\,\beta_{kv} .
+$$
+
+Let $\wvec_d$ be the vector of word counts, with $w_{dv}$ the count of word $v$. The encoder maps the normalised counts
+$\wvec_d/N_d$ to a Gaussian $q_{\phivec}(\hvec_d \mid \wvec_d) = \Gauss(\muvec_d, \diag\sigmavec_d^2)$; normalising
+lets documents of different lengths share one encoder. The evidence lower bound is
+
+$$
+\Lcal_d = \expect_{q_{\phivec}}\brack{\sum_{v=1}^V w_{dv}\log\sum_{k=1}^K\operatorname{softmax}(\hvec_d)_k\,
+\beta_{kv}} - \KL\paren{\Gauss(\muvec_d, \diag\sigmavec_d^2) \,\|\, \Gauss(\zeros, \Imat)} ,
+$$
+
+with the expectation estimated by one reparameterised sample and the KL term in closed form. The gradient reaches the
+topic embeddings $\alphavec_k$ through every $\beta_{kv}$, and reaches the word embeddings $\rhovec_v$ as well if they
+are learnt. Each step computes the $K \times V$ matrix $\betavec$ from $K$ softmaxes over the vocabulary, once per
+minibatch.
+
+<NtmDiagram variants={['etm']} />
+
+**Parameters.** LDA's topics have $K \times V$ free parameters. The ETM's have $K \times L$ for the topic embeddings plus
+$L \times V$ for the word embeddings, which are shared by all topics and may be fixed. With $V = 10^5$, $K = 300$ and $L
+= 300$, LDA's topics have $3 \times 10^7$ parameters and the ETM's topic embeddings have $9 \times 10^4$.
+
+## Why the ETM tolerates large vocabularies and stop words
+
+- **Rare words.** A word seen a handful of times has a pretrained embedding learnt from a large external corpus, or an
+  embedding shaped by its contexts in the training corpus. Its probability under each topic follows from its position,
+  so rare words need not be pruned from the vocabulary.
+- **Stop words.** In LDA, words such as "the" occur in every document, so every topic must give them high probability
+  to fit the data, and stop words fill every topic's top words. In the ETM, stop words occupy their own region of the
+  embedding space. The model can dedicate a few topics to that region and leave the others clean. Dieng et al. report
+  that on a corpus with all stop words kept, the ETM's topics stay interpretable while LDA's fill with stop words
+  <Cite id="dieng2020etm" />.
+
+Dieng et al. measure **topic quality** as the product of topic coherence and topic diversity, the fraction of unique
+words among the top 25 words of all topics (see <NoteLink to="topic-model-evaluation">evaluating topic models</NoteLink>).
+
+## The dynamic embedded topic model
+
+The **dynamic ETM** (D-ETM) models a corpus whose documents carry timestamps $t_d \in \set{1, \dots, T}$
+<Cite id="dieng2019detm" />. Word embeddings $\rhovec_v$ are fixed across time, and each topic embedding follows a
+Gaussian random walk:
+
+$$
+\alphavec_k^{(t)} \sim \Gauss\paren{\alphavec_k^{(t-1)}, \gamma^2\Imat}, \qquad \alphavec_k^{(0)} \sim \Gauss(\zeros,
+\Imat) .
+$$
+
+The mean of the topic proportions also drifts, $\etavec_t \sim \Gauss(\etavec_{t-1}, \delta^2\Imat)$, and a document
+at time $t_d$ draws $\thetavec_d = \operatorname{softmax}(\hvec_d)$ with $\hvec_d \sim \Gauss(\etavec_{t_d},
+a^2\Imat)$. A word then draws a topic and a word from $\operatorname{softmax}(\rhovec^\top\alphavec_{z_{dn}}^{(t_d)})$.
+The random walk makes each topic's word distribution change smoothly: a topic about computing keeps its direction but
+moves, over decades, towards the embeddings of newer words.
+
+This is the <NoteLink to="dynamic-topic-model">dynamic topic model</NoteLink> of Blei and Lafferty with the random walk
+moved from the $V$-dimensional natural parameters of each topic to its $L$-dimensional embedding
+<Cite id="blei2006dtm" />. The variational family is structured: the proportions' means $\etavec_{1:T}$ have a Gaussian
+posterior whose parameters are produced by an LSTM that reads the average bag of words at each time step, the topic
+embeddings have a mean-field Gaussian posterior, and each document's $\hvec_d$ has an amortised Gaussian posterior
+<Cite id="dieng2019detm" />.
+
+## Worked example
+
+Take $L = 2$ and four words: "goal" at $(2.6, 1.9)$, "bank" at $(-2.4, 1.7)$, "the" at $(0.2, 0.1)$ and "transfer" at
+$(0.3, 2.4)$. A topic has $\alphavec_k = (1, 0.5)$.
+
+- The logits $\rhovec_v^\top\alphavec_k$ are $3.55$, $-1.55$, $0.25$ and $1.50$.
+- The softmax gives $\betavec_k = (0.853, 0.005, 0.032, 0.110)$: a sport topic in which "transfer" is second.
+- Doubling the topic vector to $(2, 1)$ doubles every logit, giving $(0.982, 0.000, 0.001, 0.016)$. The ranking is
+  unchanged and the topic is sharper.
+
+"The", near the origin, gets a logit near zero under every topic of moderate length. It can be the top word only of a
+topic whose vector is short or points towards the origin's neighbourhood.
+
+## Assumptions
+
+- **LDA's mixture likelihood** and bag-of-words documents.
+- **A log-linear topic.** A topic's word distribution is the softmax of a linear function of the embeddings. A topic
+  that needs two separate regions of the embedding space cannot be expressed by one $\alphavec_k$; it needs two topics.
+- **Embeddings that encode the right similarity.** Pretrained embeddings carry the similarities of the corpus they were
+  trained on. Domain-specific senses, such as "cell" in biology against telephony, follow the external corpus.
+- **A logistic-normal prior with identity covariance**, which does not encourage sparse topic proportions the way
+  $\Dir(\alpha)$ with $\alpha < 1$ does.
+
+## Pitfalls
+
+- **Hubs.** Words with large-norm embeddings get high logits under many topics and can dominate several topics' top
+  words. Normalising embeddings, or learning them jointly, reduces this.
+- **Fixed embeddings and new vocabulary.** With pretrained embeddings, a word missing from the embedding vocabulary has
+  no $\rhovec_v$. Either drop it or learn embeddings for it.
+- **Cost of the softmax.** Computing $\betavec$ needs $K$ softmaxes over $V$ words at every step. For very large
+  vocabularies this dominates training.

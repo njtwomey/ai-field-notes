@@ -1,66 +1,200 @@
 ---
 title: Empirical mode decomposition
 kind: technique
-summary: 'Empirical mode decomposition splits a signal into intrinsic mode functions by sifting: repeatedly subtracting the mean of spline envelopes through its extrema. Adaptive and basis-free, it underlies the Hilbert–Huang transform, but it has no theory and suffers from mode mixing.'
-tags: [signal-processing, time-frequency, adaptive-methods, worked-example]
-aliases: [EMD, Hilbert–Huang transform, HHT, intrinsic mode function, IMF, sifting, ensemble EMD, EEMD, mode mixing]
-requires: [instantaneous-frequency]
-related: [reassignment-and-synchrosqueezing, wavelet-packets, hilbert-transform]
-references: [huang1998, rilling2008, wu2009, daubechies2011]
+summary: 'Empirical mode decomposition splits a signal into intrinsic mode functions by sifting: repeatedly subtracting the mean of cubic-spline envelopes through its maxima and minima. It needs no basis, but it is defined only by an algorithm and suffers from end effects and mode mixing.'
+tags: [signal-processing, time-frequency, adaptive-methods, splines, worked-example]
+aliases: [EMD, intrinsic mode function, IMF, sifting, sifting process, mode mixing, SD stopping criterion, S-number, Rilling stopping criterion]
+requires: [instantaneous-frequency, cubic-spline-interpolation]
+related: [hilbert-huang-transform, ensemble-empirical-mode-decomposition, variational-mode-decomposition, reassignment-and-synchrosqueezing, continuous-wavelet-transform, short-time-fourier-transform, wavelet-packets, hilbert-transform, monotone-and-shape-preserving-interpolation]
+references: [huang1998, huang1999, huang2003, rilling2003, rilling2008, wu2009, daubechies2011, dragomiretskiy2014]
 status: draft
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
+import { SiftingExplorer } from './SiftingExplorer'
+
 <Definition>
-**Empirical mode decomposition** writes a signal as a sum of **intrinsic mode functions** (IMFs) and a residue,
-$x(t) = \sum_{j=1}^{J} c_j(t) + r(t)$. An IMF is a function whose numbers of extrema and zero crossings differ by at
-most one, and whose upper and lower envelopes are symmetric about zero. The IMFs are found by **sifting** and ordered
-from the fastest oscillation to the slowest <Cite id="huang1998" />.
+**Empirical mode decomposition** (EMD) writes a signal as a finite sum of **intrinsic mode functions** (IMFs) and a
+residue, $x(t) = \sum_{j=1}^{J} c_j(t) + r(t)$. An IMF is a function whose numbers of extrema and zero crossings differ
+by at most one, and whose upper and lower envelopes are symmetric about zero. The IMFs are extracted one at a time by
+**sifting**, from the fastest oscillation to the slowest, and the residue is a trend with at most one extremum
+<Cite id="huang1998" />.
 </Definition>
 
-## Sifting
+## Problem
 
-To extract the first IMF from $x$:
+The <NoteLink to="instantaneous-frequency">instantaneous frequency</NoteLink> of a signal is meaningful only when the
+signal has one oscillating component at each time. A sum of components gives a phase derivative that oscillates at the
+beat frequency and can go negative. Band-pass filtering can split a signal into components, but only if the bands are
+fixed in advance, and a component whose frequency drifts, or whose waveform is not sinusoidal, then leaks across
+several bands. EMD splits the signal using its own extrema instead. The fastest oscillation present at each time is
+separated from the slower motion it rides on, whatever its frequency, and the procedure repeats on what is left.
 
-1. Find the local maxima and minima of the current signal $h$, starting with $h = x$.
-2. Interpolate the maxima with a cubic spline to form the upper envelope $u(t)$, and the minima to form the lower
-   envelope $l(t)$.
-3. Subtract their mean: $h \leftarrow h - \tfrac12 (u + l)$.
-4. Repeat until $h$ satisfies the IMF conditions or a stopping rule, such as a fixed number of iterations or a small
-   mean envelope.
+## Mechanism
 
-The result is $c_1 = h$. Subtract it, $x \leftarrow x - c_1$, and repeat to find $c_2$, and so on, until the residue
-is monotonic or has too few extrema to continue. Each sift removes the local mean, so what remains oscillates
-symmetrically about zero at the fastest local scale, and each IMF has a well-behaved instantaneous frequency.
+### Intrinsic mode functions
 
-## The Hilbert–Huang transform
+Huang et al. define an IMF by two conditions <Cite id="huang1998" />:
 
-The IMFs are designed to be narrowband enough for the analytic signal to give meaningful amplitude and phase. The
-**Hilbert spectrum** plots the instantaneous amplitude of each IMF against time and its instantaneous frequency, one
-curve per IMF. Unlike a spectrogram, it has no window and so no fixed resolution trade-off; its resolution is limited
-only by how well the IMFs separate the signal's components. See
-<NoteLink to="instantaneous-frequency">instantaneous frequency</NoteLink>.
+1. over the whole signal, the number of local extrema and the number of zero crossings are equal or differ by one;
+2. at every time, the mean of the upper envelope (through the local maxima) and the lower envelope (through the local
+   minima) is zero.
 
-## When components separate
+The first condition forbids riding waves: an oscillation whose local minima are positive, or whose local maxima are
+negative, adds extrema without adding zero crossings. The second condition makes the oscillation locally symmetric
+about zero. Together they make an IMF a zero-mean oscillation with one extremum between consecutive zero crossings,
+whose analytic signal has a well-behaved phase. A pure tone, an amplitude-modulated tone with a slow envelope and a
+chirp are IMFs. A tone plus a constant offset is not.
 
-Sifting acts locally like a filter bank, but not a linear one, and whether two components end up in separate IMFs
-depends on their frequency and amplitude ratios. For two tones, separation fails as the frequency ratio approaches 1:
-both tones are then extracted together in one IMF <Cite id="rilling2008" />.
+### The sifting algorithm
 
-**Worked example.** Two unit-amplitude tones with frequency ratio $f_2/f_1$, sampled at 200 samples per period of the
-faster tone and sifted 20 times with cubic-spline envelopes, give a first IMF whose relative error from the faster tone
-is 0.5% at ratio 0.3, 1.9% at 0.5 and 7.4% at 0.6. At ratio 0.7 the error jumps to 54%, and at 0.8 to 91%: the two
-tones are no longer separated. The exact crossover depends on the amplitude ratio and the stopping rule.
+Sifting extracts one IMF from a signal $x$. Start with $h_0 = x$ and, for $k = 1, 2, \ldots$:
 
-## Pitfalls and remedies
+1. **Find the extrema.** Record the indices of the local maxima of $h_{k-1}$ (samples larger than both neighbours) and
+   of its local minima. A flat run of equal samples counts as one extremum at its middle. If there are fewer than three
+   extrema in total, $h_{k-1}$ has no oscillation left and sifting stops without an IMF.
+2. **Extend the extrema past the ends.** Reflect the two maxima and two minima nearest each end about a symmetry
+   point, so that the envelopes are interpolated over the whole signal rather than extrapolated. The rule is given
+   under end effects below.
+3. **Build the envelopes.** Interpolate the maxima, with the reflected ones, by a cubic spline to get the upper envelope
+   $u_k(t)$. Interpolate the minima in the same way to get the lower envelope $l_k(t)$.
+4. **Subtract the local mean.** Form $m_k(t) = \tfrac12\paren{u_k(t) + l_k(t)}$ and set $h_k = h_{k-1} - m_k$.
+5. **Test for an IMF.** Stop if a stopping criterion holds. Otherwise repeat from step 1 with $h_k$.
 
-- **Mode mixing.** A single IMF can contain oscillations of very different scales, for example when an intermittent
-  high-frequency burst appears in only part of the signal. **Ensemble EMD** adds many realisations of white noise,
-  decomposes each, and averages the IMFs, so the noise populates every scale and the signal's components settle into
-  consistent IMFs <Cite id="wu2009" />.
-- **End effects.** Splines extrapolate badly beyond the first and last extrema, and errors propagate inward through
-  successive sifts. Mirroring the signal at its ends reduces them.
-- **No mathematical foundation.** The decomposition is defined by an algorithm, not an objective, so its output
-  depends on the spline, the stopping rule and the number of sifts. Synchrosqueezing was proposed as a transform with
-  similar aims and a proper theory <Cite id="daubechies2011" />; variational mode decomposition is another alternative.
-- **Not orthogonal.** IMFs are only approximately orthogonal, and their energies need not add to the signal's energy.
+The first IMF is $c_1 = h_k$ at the stop. The next is sifted from $r_1 = x - c_1$, and in general $c_{j+1}$ is sifted
+from $r_j = r_{j-1} - c_j$. The decomposition ends when the residue has fewer than three extrema, or when its range or
+mean absolute value falls below a small tolerance. By construction the IMFs and the residue add up to $x$ exactly.
+
+**Why subtracting the envelope mean isolates the fast component.** Take two tones,
+$x(t) = \cos(\omega_1 t) + a\cos(\omega_2 t)$, with $0 < \omega_2 < \omega_1$ and amplitude ratio $a > 0$. Write
+$f = \omega_2/\omega_1 < 1$. The derivative is $x'(t) = -\omega_1\sin(\omega_1 t) - a\omega_2\sin(\omega_2 t)$. At the
+times where $\sin(\omega_1 t) = \pm 1$, the first term has magnitude $\omega_1$ and the second at most $a\omega_2$. When
+$af < 1$, the sign of $x'$ at those times is set by the fast tone, so $x'$ changes sign between each such pair of
+times: $x$ has an extremum in every half period of the fast tone. When $\omega_2 \ll \omega_1$, those extrema sit
+where $\cos(\omega_1 t) = \pm 1$, and the maxima take the values $1 + a\cos(\omega_2 t)$ while the minima take
+$-1 + a\cos(\omega_2 t)$. The two envelopes are then $\pm 1 + a\cos(\omega_2 t)$, their mean is $a\cos(\omega_2 t)$,
+and $h_1 = x - m_1 = \cos(\omega_1 t)$. The envelopes sample the slow tone only once per period of the fast tone, so
+this works only while the slow tone is slow enough to be interpolated from those samples. As $f$ grows towards one
+half and beyond, the envelope mean misses part of the slow tone, and further sifts cannot recover it.
+
+### Cubic-spline envelopes
+
+The envelopes are <NoteLink to="cubic-spline-interpolation">interpolating cubic splines</NoteLink>. A cubic spline
+through $K$ knots is cubic between knots and twice continuously differentiable, and its second derivatives at the knots
+solve a tridiagonal linear system in $O(K)$ operations. Huang et al. chose cubic splines because the envelopes, and so
+the mean, are then smooth enough that subtracting the mean adds no new extrema of its own <Cite id="huang1998" />.
+Rilling, Flandrin and Gonçalvès report that linear or polynomial interpolation needs more sifts and spreads single
+components over adjacent IMFs <Cite id="rilling2003" />.
+
+The end conditions of the spline matter less once the extrema are mirrored, because the ends of the envelope then lie
+outside the signal. Implementations differ: the widget below uses not-a-knot conditions (a single cubic across the
+first two and the last two intervals), which is SciPy's default, and natural conditions when there are only three
+knots. A cubic spline can overshoot between widely spaced knots, so an upper envelope can dip below the signal. Shape-
+preserving interpolants such as <NoteLink to="monotone-and-shape-preserving-interpolation">PCHIP</NoteLink> or Akima
+splines avoid the overshoot but are only once differentiable.
+
+### Stopping criteria
+
+Sifting forever drives $h_k$ towards a signal of constant amplitude, which erases genuine amplitude modulation, so each
+IMF needs a stopping rule. Three rules are in common use.
+
+- **The SD criterion** <Cite id="huang1998" />. Stop when the size of the last change, relative to the signal,
+  $\mathrm{SD}_k = \sum_t \abs{h_{k-1}(t) - h_k(t)}^2 / h_{k-1}(t)^2$, falls below a threshold, typically 0.2 to 0.3.
+  The pointwise ratio is unstable where $h_{k-1}$ crosses zero, so implementations often use the ratio of sums
+  $\sum_t (h_{k-1} - h_k)^2 / \sum_t h_{k-1}^2$ instead. The SD criterion does not check the IMF conditions.
+- **The S-number** <Cite id="huang1999" />. Stop once the numbers of extrema and zero crossings have differed by at most
+  one for $S$ consecutive sifts. This checks the first IMF condition directly and leaves the second to a fixed amount
+  of extra sifting. Huang et al. studied the spread of the resulting Hilbert spectra over $S$ and recommended values
+  from 4 to 8 <Cite id="huang2003" />.
+- **The Rilling threshold** <Cite id="rilling2003" />. Define the mode amplitude $a(t) = \tfrac12\paren{u(t) - l(t)}$
+  and the evaluation function $\sigma(t) = \abs{m(t)}/a(t)$, the local mean relative to the local amplitude. Stop when
+  $\sigma(t) < \theta_1$ for all but a fraction $\alpha$ of the samples and $\sigma(t) < \theta_2$ everywhere, and the
+  extrema and zero crossings differ by at most one. The defaults are $\theta_1 = 0.05$, $\theta_2 = 10\theta_1$ and
+  $\alpha = 0.05$. The two thresholds demand a small mean almost everywhere while tolerating a few local excursions.
+
+A fixed number of sifts, about 10, is also common. It makes every IMF the output of the same nonlinear operator, which
+<NoteLink to="ensemble-empirical-mode-decomposition">ensemble EMD</NoteLink> relies on when it averages decompositions
+<Cite id="wu2009" />.
+
+**Worked example.** Take $x[n] = \cos(2\pi \cdot 0.06\, n) + 0.8\cos(2\pi \cdot 0.015\, n)$ for $n = 0, \ldots, 399$,
+a fast tone of period 16.7 samples riding on a slow tone of period 66.7 samples. Before the first sift, $\sigma(t)$
+exceeds 0.05 on 96% of the samples, with a maximum of 0.81, so the Rilling rule demands a sift. The first sift gives
+$\mathrm{SD}_1 = 0.38$ (as a ratio of sums), above the 0.2 threshold, and leaves a candidate with 47 extrema and 48 zero
+crossings. The candidate differs from the fast tone by 2.1% in relative root-mean-square error. The envelopes of that
+candidate have $\max_t \sigma(t) = 0.029$, so the Rilling rule stops after one sift. The second sift gives
+$\mathrm{SD}_2 = 3.6 \times 10^{-4}$, so the SD rule stops after two sifts, with an error of 0.9%. Eight more sifts
+reduce the error only to 0.8%, and most of what remains is at the ends.
+
+<SiftingExplorer />
+
+## End effects
+
+The spline through the maxima is anchored only between the first and the last maximum. Beyond them it is extrapolated,
+and a cubic extrapolated over half a period can swing far above or below the signal. The mean envelope is then wrong
+near the ends, the error is subtracted into the IMF, and each further sift and each further IMF propagates it inward.
+
+The standard remedy mirrors extrema <Cite id="rilling2003" />. At the left end, the two maxima and two minima nearest
+the start are reflected about a symmetry point. The symmetry point is the first extremum if the first sample lies
+between the values of the nearest maximum and minimum. Otherwise it is the first sample itself, which then also joins
+the knots of the envelope it lies beyond. If a
+reflected extremum would still land inside the signal, the first sample is used as the symmetry point instead. The
+right end is treated in the same way. The reflected knots lie outside the signal, so the envelopes are interpolated
+over every sample. Other remedies extend the signal itself by mirroring, by periodisation or by an autoregressive
+prediction, and then discard the extension after sifting.
+
+## Mode mixing
+
+**Mode mixing** is one IMF containing oscillations of very different scales, or one oscillation split across several
+IMFs. Its typical cause is intermittency. Suppose a fast burst appears in only part of a slow signal. Where the burst is
+present, the first IMF captures the burst. Where it is absent, the fastest oscillation is the slow one, so the first
+IMF captures the slow signal there. The first IMF then switches between two unrelated components, and every later IMF
+inherits the gap. The IMF still satisfies both IMF conditions, so no stopping rule detects the problem.
+
+The two-tone analysis above gives a second cause. When two components have frequencies within a factor of about 1.5
+of each other, their extrema no longer sample either component well enough, and sifting returns them together as one
+amplitude-modulated IMF <Cite id="rilling2008" />.
+
+**Worked example.** Two unit-amplitude tones with frequency ratio $f = f_2/f_1$, sampled at 200 samples per period of
+the faster tone for 2,000 samples and sifted 20 times, give a first IMF whose relative error from the faster tone, away
+from the first and last 10% of samples, is 0.35% at $f = 0.3$, 3.0% at 0.5 and 8.4% at 0.6. At $f = 0.7$ the error
+jumps to 52%, and at 0.8 to 90%: the two tones are no longer separated. The crossover depends on the amplitude ratio
+and on the stopping rule.
+
+Noise-assisted variants attack intermittency by adding white noise that populates every scale, so that each IMF has a
+consistent band everywhere; see <NoteLink to="ensemble-empirical-mode-decomposition">ensemble EMD</NoteLink>
+<Cite id="wu2009" />. <NoteLink to="variational-mode-decomposition">Variational mode decomposition</NoteLink> avoids
+recursive extraction altogether.
+
+## Cost
+
+One sift costs $O(N)$ for $N$ samples: a pass to find extrema and two tridiagonal solves for the splines, evaluated at
+every sample. A decomposition with $J$ IMFs and $S$ sifts per IMF costs $O(JSN)$. On broadband signals the IMFs halve
+in frequency from one to the next, so $J$ is about $\log_2 N$. EMD is cheap for a single signal; its ensemble variants
+multiply the cost by the ensemble size, typically 50 to 500.
+
+## Where EMD sits
+
+EMD is one of several ways to describe how the frequency content of a signal changes in time. They differ in how much
+of the analysis adapts to the signal and in what can be proved about the result.
+
+| Method | Adaptivity | Theory | Resolution | Typical uses |
+| --- | --- | --- | --- | --- |
+| <NoteLink to="short-time-fourier-transform">Short-time Fourier transform</NoteLink> | none: one window for all times and frequencies | linear, invertible, fully analysed | fixed time-frequency cell set by the window | speech and audio, stationary segments, spectrogram features |
+| <NoteLink to="continuous-wavelet-transform">Wavelet transforms</NoteLink> | scale-dependent: the window shrinks as frequency rises (constant $Q$) | linear, invertible, fully analysed | fine time resolution at high frequency, fine frequency resolution at low frequency | transients, multiscale structure, denoising, compression |
+| EMD with the <NoteLink to="hilbert-huang-transform">Hilbert–Huang transform</NoteLink> | fully data-driven, recursive, no basis | defined only by the algorithm; no uniqueness, orthogonality or stability results | one instantaneous frequency per IMF at every sample; limited by how well components separate | nonlinear and nonstationary data in geophysics, climate and biomedicine; trend removal |
+| <NoteLink to="variational-mode-decomposition">Variational mode decomposition</NoteLink> | data-driven centre frequencies, user-set number of modes and bandwidth penalty | minimiser of a stated objective, solved by ADMM | separates closer tones than EMD and is more robust to noise; modes are band-limited | vibration and fault diagnosis, biomedical rhythms, preprocessing for forecasting |
+| <NoteLink to="reassignment-and-synchrosqueezing">Synchrosqueezing</NoteLink> | fixed linear transform, then reassignment in frequency driven by the signal's phase | provable recovery of well-separated AM-FM components | sharp instantaneous-frequency ridges; invertible, so modes can be extracted along ridges | ECG, respiration and other oscillatory biomedical signals; a principled stand-in for EMD |
+
+## Trade-offs
+
+- **No mathematical foundation.** The decomposition is defined by an algorithm, not by an objective, so its output
+  depends on the extremum detection, the interpolant, the end treatment, the stopping rule and the sampling rate.
+  Synchrosqueezing was proposed as a transform with similar aims and proofs <Cite id="daubechies2011" />, and
+  variational mode decomposition as a decomposition with an explicit objective <Cite id="dragomiretskiy2014" />.
+- **Not orthogonal.** IMFs are only approximately orthogonal, so their energies need not add to the signal's energy.
+- **Sensitivity to noise and sampling.** A small perturbation can add or remove extrema and change every later IMF.
+  Extrema of a sampled signal are only located to within one sample, which needs several samples per period to be
+  accurate.
+- **Nonlinear and non-harmonic waveforms.** A triangle wave or an asymmetric oscillation can be one IMF. Fourier and
+  wavelet analyses spread such a waveform over harmonics, while EMD keeps it whole, and its instantaneous frequency then
+  varies within each period.

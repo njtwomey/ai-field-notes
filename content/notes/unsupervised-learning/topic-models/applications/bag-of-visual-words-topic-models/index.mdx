@@ -1,0 +1,113 @@
+---
+title: Topic models for images
+kind: concept
+summary: 'An image becomes a document by quantising its local patch descriptors against a $k$-means codebook: each patch is a visual word. Topic models on these bags of visual words find recurring parts of scenes and objects, and category-specific priors classify scenes.'
+tags: [topic-models, computer-vision, unsupervised, bayesian, latent-variable-models, worked-example]
+aliases: [visual words, visual vocabulary, theme model, topic models of images]
+requires: [latent-dirichlet-allocation, k-means]
+related: [feature-detection-and-descriptors, bag-of-words, probabilistic-latent-semantic-analysis, image-classification, object-detection]
+references: [feifei2005, sivic2005, sivic2003, lowe2004]
+status: draft
+updated: 2026-09-27
+---
+
+import { Plate } from '../_shared/Plate'
+import { sceneModel } from '../_shared/plates'
+import { VisualWordsPipeline } from './VisualWordsPipeline'
+
+<Definition>
+A **topic model for images** treats an image as a document of **visual words**. Local patches are extracted and
+described by vectors, and each descriptor is replaced by the index of its nearest centre in a codebook learned by
+<NoteLink to="k-means">$k$-means</NoteLink>. The image is then a bag of discrete tokens, and
+<NoteLink to="probabilistic-latent-semantic-analysis">pLSA</NoteLink> or
+<NoteLink to="latent-dirichlet-allocation">LDA</NoteLink> finds **themes**: distributions over visual words that
+recur across images, such as foliage, sky or the parts of an object category.
+</Definition>
+
+## Visual words
+
+Text arrives in discrete words. Images do not, so a vocabulary must be built. The construction was introduced for
+retrieving objects in video <Cite id="sivic2003" />:
+
+1. **Patches.** Take many small regions of each image, either on an evenly spaced grid or around points found by an
+   interest detector.
+2. **Descriptors.** Describe each patch by a vector that is robust to small changes of viewpoint and lighting, such as
+   the 128-dimensional SIFT descriptor <Cite id="lowe2004" />; see
+   <NoteLink to="feature-detection-and-descriptors">feature detection and descriptors</NoteLink>.
+3. **Codebook.** Cluster a large sample of descriptors from training images with $k$-means into $V$ centres. Each
+   centre is a visual word.
+4. **Quantisation.** Map every descriptor to its nearest centre. The image becomes a list of word indices and, ignoring
+   position, a vector of $V$ counts: a <NoteLink to="bag-of-words">bag of words</NoteLink>.
+
+<VisualWordsPipeline />
+
+A visual word is not a word in the linguistic sense. It is a cell of a partition of descriptor space. Two patches of the
+same texture can fall on either side of a boundary between cells, and one cell can contain patches from unrelated
+objects. These are the visual analogues of synonymy and polysemy, and they are the reason that topic models, which
+group co-occurring words, help: a theme gathers the several words that the same material produces.
+
+## Discovering objects without labels
+
+Sivic and co-authors applied pLSA to bags of visual words from unlabelled images of several object categories
+<Cite id="sivic2005" />. The topics that emerged corresponded largely to the categories, such as faces, motorbikes and
+aeroplanes, with a separate topic for background clutter. Because every visual word comes from a known patch, the
+posterior topic of each word shows where in the image a topic is present. Colouring the patches by their most likely
+topic segments the object from the background, without any object having been labelled.
+
+## Scene categories: the theme model
+
+Fei-Fei and Perona used LDA to classify natural scenes <Cite id="feifei2005" />. Their Theme Model 1 adds an observed
+category $c_d$ for each training image. Each category has its own Dirichlet parameters $\alphavec_c$ over $K$ shared
+themes, and the themes $\phivec_k$ are distributions over the $V$ codewords:
+
+1. Choose a category $c_d$.
+2. Draw the image's theme mixture $\thetavec_d \sim \Dir(\alphavec_{c_d})$.
+3. For each patch $n$, draw a theme $z_{dn} \sim \Cat(\thetavec_d)$ and a codeword $x_{dn} \sim \Cat(\phivec_{z_{dn}})$.
+
+<Plate
+  spec={sceneModel}
+  title="The theme model for scene categories in plate notation"
+  caption="The observed category $c_d$ selects one of $C$ Dirichlet parameter vectors $\alphavec_c$, which generates the image's theme mixture $\thetavec_d$. Themes $\phivec_k$ are shared by all categories. Each patch's codeword $x_{dn}$ is generated as a word in LDA."
+/>
+
+A category is thus a characteristic mix of shared themes. A mountain scene mixes rock, sky and snow themes; a coast
+scene mixes water, sand and sky. The same sky theme serves both.
+
+**Classification.** By Bayes' theorem with a uniform prior over categories,
+$p(c \mid \xvec) \propto p(\xvec \mid c)$, where $p(\xvec \mid c)$ is the marginal likelihood of the image's codewords
+under category $c$'s Dirichlet, with $\thetavec$ and $\zvec$ integrated out. That integral is intractable, as in LDA,
+and is replaced by the variational lower bound. The image is assigned to the category with the largest bound. On 13
+scene categories, where chance is 7.7%, the model classified 64% of test images correctly <Cite id="feifei2005" />.
+
+## Worked example
+
+**Document length.** An image of $250 \times 300$ pixels sampled on a grid with 10-pixel spacing has
+$25 \times 30 = 750$ patches, so it is a document of 750 visual words.
+
+**Quantisation.** A two-dimensional descriptor $\xvec = (1, 2)$ and three centres $(0, 0)$, $(2, 2)$ and $(1, 4)$ have
+squared distances $5$, $1$ and $4$. The descriptor becomes visual word 2.
+
+**Classification.** Three categories give log marginal likelihood bounds of $-1510$, $-1502$ and $-1520$ for an image.
+With a uniform prior the posterior probabilities are proportional to $e^{-8}$, $1$ and $e^{-18}$, which normalise to
+$0.0003$, $0.9997$ and $1.5 \times 10^{-8}$. Summed over hundreds of patches, small per-word differences produce a
+near-certain decision.
+
+## Assumptions
+
+- **Bag of words.** The position of each patch is discarded. A face and a scrambled face have the same bag. Spatial
+  extensions add patch coordinates to the model.
+- **A fixed, discrete vocabulary.** The quality of the topics is bounded by the codebook: too few centres merge
+  distinct patches, too many split one appearance across words.
+- **Exchangeable patches.** Overlapping patches from a dense grid are strongly dependent, which the model treats as
+  independent evidence.
+
+## Pitfalls
+
+- **Overconfidence.** As the worked example shows, treating hundreds of dependent patches as independent makes
+  posteriors near-certain even when the classifier is wrong.
+- **Codebook from training data.** The codebook is learned on training descriptors, and test images from another
+  distribution quantise poorly.
+- **Superseded for accuracy.** Learned convolutional features now outperform bags of visual words for
+  <NoteLink to="image-classification">image classification</NoteLink>. The topic-model view remains useful where the
+  aim is unsupervised discovery of recurring parts, and as a clear example of how LDA applies to any data that can be
+  tokenised.

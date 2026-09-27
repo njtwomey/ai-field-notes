@@ -1,0 +1,82 @@
+---
+title: The topic model family
+kind: overview
+summary: 'A map of the models built on LDA. Each changes one assumption: fixed topics over time (DTM, TOT), mixtures owned by documents (author-topic, STM), no response (sLDA, labelled LDA), independent topics (CTM, PAM), a fixed flat set of $K$ topics (HDP, hLDA), or long documents (BTM).'
+tags: [topic-models, unsupervised, bayesian, latent-variable-models, nlp]
+aliases: [LDA extensions, LDA variants, family of topic models, topic model variants]
+related: [latent-dirichlet-allocation, probabilistic-latent-semantic-analysis, neural-topic-models]
+references: [blei2003, blei2006dtm, wang2006tot, rosenzvi2004, blei2007ctm, blei2007slda, ramage2009llda, teh2006hdp, blei2010ncrp, roberts2016stm, yan2013btm, li2006pam]
+status: draft
+updated: 2026-09-27
+---
+
+import { FamilyMap } from './FamilyMap'
+
+<Definition>
+The **topic model family** is the set of probabilistic models that extend
+<NoteLink to="latent-dirichlet-allocation">latent Dirichlet allocation</NoteLink> <Cite id="blei2003" />. LDA assumes
+that a fixed number $K$ of topics, each a fixed distribution over words, are mixed in each document by independent
+Dirichlet proportions, with nothing observed but the words. Each member of the family relaxes one of these assumptions or
+adds an observed variable, and keeps the rest of LDA, including its inference machinery where it can.
+</Definition>
+
+## LDA's assumptions
+
+LDA generates each document by drawing $\thetavec_d \sim \Dir(\alpha)$ and then, for each word, a topic
+$z \sim \Cat(\thetavec_d)$ and a word $w \sim \Cat(\phivec_z)$. Six assumptions are packed into this:
+
+1. **Topics are static.** $\phivec_k$ is the same in every document, whenever it was written.
+2. **The mixture belongs to the document.** Nothing about the author or the source enters $\thetavec_d$.
+3. **Only words are observed.** There is no label, rating or response.
+4. **Topics are independent.** Under a Dirichlet, topic proportions are negatively correlated by an amount fixed by
+   their means, so topics cannot co-occur.
+5. **There are exactly $K$ topics, in a flat list.**
+6. **Documents are long enough** to estimate a $K$-dimensional mixture from their words.
+
+Each extension below changes one of them.
+
+<FamilyMap />
+
+## Components
+
+| Model | Assumption changed | Change to the generative process | Inference |
+| --- | --- | --- | --- |
+| <NoteLink to="dynamic-topic-model">Dynamic topic model</NoteLink> <Cite id="blei2006dtm" /> | 1 | Topic natural parameters follow a Gaussian random walk across time slices | Variational Kalman filter and smoother |
+| <NoteLink to="topics-over-time">Topics over time</NoteLink> <Cite id="wang2006tot" /> | 1 | Each token also emits its timestamp from a beta distribution owned by its topic | Collapsed Gibbs plus moment matching |
+| <NoteLink to="author-topic-model">Author-topic model</NoteLink> <Cite id="rosenzvi2004" /> | 2 | Mixtures belong to authors; each word picks one co-author | Collapsed Gibbs over author and topic |
+| <NoteLink to="structural-topic-model">Structural topic model</NoteLink> <Cite id="roberts2016stm" /> | 2 | Covariates set the mean of logistic-normal proportions and deviate topic words | Variational EM with a Laplace approximation |
+| <NoteLink to="supervised-lda">Supervised LDA</NoteLink> <Cite id="blei2007slda" /> | 3 | A response is regressed on the empirical topic frequencies | Variational EM |
+| <NoteLink to="labelled-lda">Labelled LDA</NoteLink> <Cite id="ramage2009llda" /> | 3 | Observed labels define the topics and restrict each document to its own | Masked collapsed Gibbs |
+| <NoteLink to="correlated-topic-model">Correlated topic model</NoteLink> <Cite id="blei2007ctm" /> | 4 | Logistic-normal proportions with a full covariance | Mean-field variational EM |
+| <NoteLink to="pachinko-allocation-model">Pachinko allocation</NoteLink> <Cite id="li2006pam" /> | 4 | Super-topics are Dirichlets over topics, arranged in a DAG | Collapsed Gibbs over paths |
+| <NoteLink to="hierarchical-dirichlet-process">HDP topic model</NoteLink> <Cite id="teh2006hdp" /> | 5 | Unboundedly many topics, shared through a global Dirichlet process | Chinese restaurant franchise Gibbs |
+| <NoteLink to="hierarchical-lda">Hierarchical LDA</NoteLink> <Cite id="blei2010ncrp" /> | 5 | Topics form a tree; each document takes one root-to-leaf path | Collapsed Gibbs over levels and paths |
+| <NoteLink to="biterm-topic-model">Biterm topic model</NoteLink> <Cite id="yan2013btm" /> | 6 | One corpus-level mixture generates co-occurring word pairs | Collapsed Gibbs over biterms |
+
+## What the changes have in common
+
+**Conjugacy decides the inference.** Models that keep every Dirichlet–categorical pair conjugate (topics over time, the
+author-topic model, labelled LDA, pachinko allocation, the biterm model) are fitted by collapsed Gibbs samplers whose
+updates are LDA's update with one factor changed. The factor is always a ratio of counts, because collapsing a Dirichlet
+turns $\Gamma(n + 1 + a)/\Gamma(n + a)$ into $n + a$. Models that replace a Dirichlet with a Gaussian (the dynamic,
+correlated and structural topic models) lose conjugacy and use variational approximations with a bound or a Laplace
+approximation for the log-sum-exp of the softmax.
+
+**The logistic normal is the workhorse for structure.** Drift over time, correlation between topics and covariate effects
+are all Gaussian ideas. Putting a Gaussian on $\etavec_d$ and mapping it through a softmax lets a topic model borrow
+them: a random walk, a covariance matrix, a linear regression.
+
+**Where metadata enters matters.** Upstream metadata (authors, covariates, labels) shapes the prior of the mixture.
+Downstream metadata (a response) is generated from the assignments. Upstream models describe how metadata explains
+topics; downstream models predict metadata from text.
+
+## Beyond this family
+
+- **Applications outside text.** The same model applies whenever data are bags of discrete tokens grouped into units.
+  <NoteLink to="smart-home-activity-discovery">Sensor events in a smart home</NoteLink>,
+  <NoteLink to="bag-of-visual-words-topic-models">visual words in images</NoteLink>,
+  <NoteLink to="population-structure-admixture">alleles in genomes</NoteLink> and
+  <NoteLink to="collaborative-topic-regression">users' libraries of articles</NoteLink> all have topic models.
+- **Neural topic models.** <NoteLink to="neural-topic-models">Neural topic models</NoteLink> keep the generative story
+  but fit it with an encoder network that predicts each document's posterior, and some place topics in a word-embedding
+  space.

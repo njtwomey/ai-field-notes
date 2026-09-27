@@ -1,0 +1,107 @@
+---
+title: Contextualised topic models
+kind: concept
+summary: 'Contextualised topic models are ProdLDA with a sentence embedding of the raw text as encoder input, alongside the bag of words (CombinedTM) or instead of it (ZeroShotTM). With a multilingual embedder, ZeroShotTM infers topics for languages unseen in training.'
+tags: [topic-models, nlp, deep-learning, variational-inference, embeddings, transformers, cross-lingual]
+aliases: [contextualized topic model, CombinedTM, ZeroShotTM, zero-shot topic model, cross-lingual topic model, multilingual topic model]
+requires: [prodlda, sentence-embeddings]
+partOf: [neural-topic-models]
+related: [embedded-topic-model, clustering-based-topic-models, amortised-inference, bag-of-words]
+references: [bianchi2021ctm, bianchi2021zeroshot, srivastava2017prodlda, reimers2019]
+status: draft
+updated: 2026-09-27
+---
+
+import { NtmDiagram } from '../_shared/NtmDiagram'
+
+<Definition>
+A **contextualised topic model** (CTM) is a <NoteLink to="prodlda">ProdLDA</NoteLink> topic model whose encoder reads a
+contextual embedding of the document's raw text, produced by a pretrained sentence encoder such as Sentence-BERT
+(SBERT) <Cite id="bianchi2021ctm" /> <Cite id="reimers2019" />. Two variants differ only in the encoder's input:
+
+- **CombinedTM** concatenates the bag of words $\wvec_d$ with a projection of the sentence embedding $\svec_d$.
+- **ZeroShotTM** uses the sentence embedding $\svec_d$ alone <Cite id="bianchi2021zeroshot" />.
+
+In both, the decoder is ProdLDA's and reconstructs the bag of words, so topics remain distributions over a fixed
+vocabulary.
+</Definition>
+
+## Intuition
+
+A bag of words discards word order, syntax and the senses that context gives a word. "The bank raised rates" and "the
+river bank flooded" share the word "bank" and nothing else. Every earlier neural topic model's encoder reads only
+counts, so it has to infer a document's topics from co-occurrence statistics of the training corpus alone. A sentence
+encoder pretrained on large text collections maps a passage to a vector $\svec_d \in \reals^E$ that already encodes
+what the passage is about, including word order and synonyms. Feeding $\svec_d$ to the topic model's encoder gives it a
+better starting point for inferring $\thetavec_d$.
+
+The encoder is the only part that changes. The topics are still read off the decoder, which must reproduce the
+document's words, so a topic is still a list of vocabulary words. The pretrained encoder improves *inference*; the
+generative model is untouched.
+
+<NtmDiagram variants={['ctm', 'zeroshot']} />
+
+## The objective
+
+The model is ProdLDA with a different conditioning variable in the approximate posterior. Let $\evec_d$ be the
+encoder's input:
+
+$$
+\evec_d = \begin{cases} \brack{\wvec_d;\; \Wmat\svec_d + \bvec} & \text{CombinedTM,} \\ \svec_d & \text{ZeroShotTM,}
+\end{cases}
+$$
+
+where $[\cdot\,;\cdot]$ is concatenation and $\Wmat \in \reals^{V \times E}$ projects the sentence embedding to the
+vocabulary size. The encoder outputs $q_{\phivec}(\hvec_d \mid \evec_d) = \Gauss(\muvec_{\phivec}(\evec_d),
+\diag\sigmavec^2_{\phivec}(\evec_d))$, and with $\thetavec_d = \operatorname{softmax}(\hvec_d)$ the evidence lower bound
+is
+
+$$
+\Lcal_d = \expect_{q_{\phivec}}\brack{\sum_{v=1}^V w_{dv}\log\operatorname{softmax}\paren{\thetavec_d^\top\Bmat}_v} -
+\KL\paren{q_{\phivec}(\hvec_d \mid \evec_d) \,\|\, \Gauss(\muvec_0, \Sigmamat_0)} ,
+$$
+
+with $\Gauss(\muvec_0, \Sigmamat_0)$ the Laplace approximation of a Dirichlet prior in the softmax basis. It is a valid
+lower bound on $\log p(\wvec_d)$ whatever $q$ is conditioned on, because the ELBO holds for every distribution over
+$\hvec_d$. The true posterior depends on the document only through its counts $\wvec_d$. The sentence embedding helps
+because it makes the amortised map from document to posterior easier to learn, not because the posterior needs the
+information it adds. The sentence encoder is frozen; only the projection $\Wmat$, the encoder network and the topics
+$\Bmat$ are trained.
+
+## Zero-shot cross-lingual topic modelling
+
+ZeroShotTM's encoder never sees the bag of words, so at test time it needs only a sentence embedding. If the sentence
+encoder is **multilingual**, trained so that a passage and its translation map to nearby vectors, the topic model can
+be trained on documents in one language and applied to documents in another <Cite id="bianchi2021zeroshot" />:
+
+1. Train ZeroShotTM on English documents. The decoder learns topics over the English vocabulary.
+2. Embed an Italian document with the same multilingual encoder and pass the embedding through the trained encoder to
+   get $\thetavec_d$.
+3. Describe the Italian document by its topic proportions, whose topics are lists of English words.
+
+The bag of words is needed only to train the decoder. Bianchi et al. tested this on Wikipedia abstracts of the same
+entities in five languages: they compared the topics predicted for an entity's abstracts in Portuguese, Italian, French
+and German with those predicted for its English abstract, and found them coherent and stable across languages
+<Cite id="bianchi2021zeroshot" />. The topic model never
+saw a word of those languages.
+
+## Assumptions
+
+- **A frozen sentence encoder whose similarity matches topical similarity.** The encoder's notion of "about the same
+  thing" is inherited from its training data and objective.
+- **ProdLDA's generative model.** Documents are bags of words given $\thetavec_d$, and the prior is a logistic normal.
+- **Cross-lingual alignment.** Zero-shot transfer assumes that the multilingual encoder maps translations to nearby
+  vectors, and that the test language is one it was trained on.
+
+## Pitfalls
+
+- **Truncation.** Sentence encoders read a bounded number of tokens. The part of a long document beyond the limit is
+  lost to the encoder, although it still counts in the bag of words the decoder reconstructs <Cite id="bianchi2021ctm" />.
+  Split long documents or embed passages separately.
+- **Topics stay in the training language.** ZeroShotTM describes a German document with English topic words. It does not
+  learn German topics.
+- **Preprocessing splits.** The sentence encoder should read the unprocessed text, with stop words and punctuation; the
+  bag of words for the decoder should be preprocessed as for any topic model. Feeding the preprocessed text to both
+  discards the context the encoder is there to use.
+- **The encoder is not the model.** Better sentence embeddings improve the posterior approximation. They cannot make the
+  decoder express a topic that a bag-of-words ProdLDA cannot express.

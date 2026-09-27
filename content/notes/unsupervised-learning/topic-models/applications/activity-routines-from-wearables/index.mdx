@@ -1,0 +1,113 @@
+---
+title: Daily routines from wearable sensors
+kind: concept
+summary: 'LDA finds daily routines in wearable accelerometer data. Activity labels or $k$-means cluster indices of short windows are the words; overlapping 30-minute windows are the documents. Topics are activity patterns, and their proportions over the day trace routines.'
+tags: [topic-models, unsupervised, activity-recognition, sensors, wearables, time-series, worked-example]
+aliases: [daily routine discovery, activity pattern discovery, routine recognition]
+requires: [latent-dirichlet-allocation]
+related: [smart-home-activity-discovery, k-means, naive-bayes, hidden-markov-model, bag-of-visual-words-topic-models]
+references: [huynh2008, blei2003]
+status: draft
+updated: 2026-09-27
+---
+
+import { RoutinePipeline } from './RoutinePipeline'
+
+<Definition>
+**Routine discovery with topic models** applies <NoteLink to="latent-dirichlet-allocation">LDA</NoteLink> to the output
+of wearable sensors <Cite id="huynh2008" />. A classifier or a clustering of short windows of acceleration turns the
+signal into a stream of discrete tokens, one per few seconds. The tokens in a sliding window of about 30 minutes form a
+document. Each topic is a distribution over tokens, an **activity pattern**, and the topic proportions of successive
+windows describe which patterns make up each part of the day: commuting, office work, lunch, dinner.
+</Definition>
+
+## Two time scales
+
+Activities such as walking, sitting or queuing are visible in a few seconds of acceleration. Routines such as office
+work or a lunch break last from tens of minutes to hours, and they are not defined by any one movement. Office work is
+mostly sitting at a desk, with some walking, standing and talking. Lunch is walking, queuing, picking up food and sitting
+to eat. A routine is a characteristic mixture of short activities, and different instances of one routine contain the
+same activities in different orders and amounts.
+
+That is the structure of a topic: a distribution over words that recurs in different proportions across documents. A
+document of 30 minutes of tokens is a mixture of the patterns active during that half hour. LDA finds the patterns and
+infers their mixture for every window, without routine labels.
+
+## Words and documents
+
+**Words from a classifier.** Huynh, Fritz and Schiele trained a naive Bayes classifier on labelled short activities,
+using the mean and variance of acceleration at the wrist and in a pocket, plus the time of day <Cite id="huynh2008" />.
+Each window of a fraction of a second gets a posterior probability for each activity. The words are the activity labels.
+
+**Words without labels.** The same pipeline works with no activity labels at all. The feature vectors are clustered by
+<NoteLink to="k-means">$k$-means</NoteLink> with $N$ clusters, and the words are cluster indices, as visual words are
+cluster indices of image patches.
+
+**Soft counts.** Hard labels propagate every classifier error into the documents. Instead, each sample contributes
+fractional weights to several words: the classifier's posteriors, or for clusters, weights that decay with the distance
+$d_j$ to each centre,
+
+$$
+\omega_j = \frac{\exp(-d_j/\sigma)}{\sum_{j'}\exp(-d_{j'}/\sigma)},
+$$
+
+where $\sigma$ controls how quickly weight falls off. Summing the weights over a window and rounding gives the word
+counts of the document. A sample that lies between two clusters contributes to both.
+
+**Documents.** Windows of 30 minutes, shifted by 2.5 minutes, give one document per time step. Consecutive documents
+overlap heavily. This is deliberate: the document at each time is a summary of the preceding half hour, and its topic
+proportions form a smooth trace over the day.
+
+<RoutinePipeline />
+
+## What the topics show
+
+On one person's recordings, with ten topics and a small Dirichlet parameter $\alpha = 0.01$ that favours few topics per
+window, several topics aligned with annotated routines <Cite id="huynh2008" />. Two desk-activity topics were active
+during office work. Lunch split into two topics, one for the canteen (walking, queuing, picking up food, eating) and one
+for a visit to a café afterwards. A dinner topic contained eating and washing dishes. Commuting appeared as a combination
+of topics rather than a single one. One topic matched no annotated routine and turned out to be a colleague's
+presentation: a genuine pattern the annotation scheme had not anticipated.
+
+To recognise routines, the topic proportions of each window become a feature vector, and a nearest-neighbour classifier
+trained on a few annotated days maps them to routine labels. The topic representation reduces the recognition problem
+from the raw sensor stream to a $T$-dimensional vector per window.
+
+## Worked example
+
+**Soft cluster weights.** A sample lies at distances $0.5$, $1.0$ and $2.0$ from three cluster centres, and
+$\sigma = 0.5$. The unnormalised weights are $e^{-1} = 0.368$, $e^{-2} = 0.135$ and $e^{-4} = 0.018$, which normalise
+to $0.705$, $0.259$ and $0.035$. The sample contributes most of a token to cluster 1 and a quarter of a token to
+cluster 2.
+
+**Window size.** With accelerometer features every 0.4 seconds, a 30-minute document spans $30 \times 60/0.4 = 4500$
+samples. With a 2.5-minute shift, a day of 12 recorded hours gives $12 \times 60/2.5 = 288$ documents.
+
+## Compared with the smart-home model
+
+Both this approach and <NoteLink to="smart-home-activity-discovery">activity discovery in smart homes</NoteLink> turn
+sensor streams into documents, but they make opposite choices:
+
+- **Documents.** Here, fixed overlapping windows; in the smart home, segments cut at changes of location.
+- **Topics per document.** Here, an admixture: a window mixes several patterns. In the smart home, a mixture: a
+  segment is one activity.
+- **Level.** Here, topics sit above activities and describe routines. In the smart home, topics are the activities.
+
+The choice follows from the length of the document relative to the phenomenon. A document longer than one activity
+needs an admixture; a document cut to fit one activity does not.
+
+## Assumptions
+
+- **Order within a window is ignored.** A routine is a bag of activities. Walking then sitting and sitting then walking
+  give the same document.
+- **Independent documents.** Overlapping windows are treated as independent, although they share most of their
+  tokens.
+- **A good token stream.** Topics are only as good as the tokens. Classifier confusions between similar activities
+  appear inside topics.
+
+## Pitfalls
+
+- **Window length.** A window much shorter than a routine sees only part of it; a much longer window mixes routines.
+  Thirty minutes suits routines of tens of minutes to hours.
+- **One subject.** Routines learned for one person need not transfer to another.
+- **Rare routines.** A pattern that occurs once may not form its own topic, or may take one that a common routine needs.

@@ -1,0 +1,79 @@
+---
+title: Multivariate empirical mode decomposition
+kind: technique
+summary: 'Multivariate EMD decomposes several channels jointly. The local mean of the vector signal is the average of envelopes built from the extrema of its projections onto many directions, so every channel gets the same number of IMFs and the $j$-th IMFs share a scale.'
+tags: [signal-processing, time-frequency, adaptive-methods, multichannel]
+aliases: [MEMD, multivariate EMD, bivariate EMD, BEMD, noise-assisted MEMD, NA-MEMD, mode alignment]
+requires: [empirical-mode-decomposition]
+related: [ensemble-empirical-mode-decomposition, hilbert-huang-transform, variational-mode-decomposition]
+references: [rehman2010, rehman2011, rilling2007, huang1998]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Multivariate empirical mode decomposition** (MEMD) extends <NoteLink to="empirical-mode-decomposition">empirical
+mode decomposition</NoteLink> to a signal with $n$ channels, $\xvec(t) \in \reals^n$. At each sifting step it projects
+$\xvec(t)$ onto $V$ unit direction vectors spread over the sphere, finds the maxima of each projection, interpolates the
+whole vector signal through its values at those times to get $V$ envelope curves, and subtracts their average as the
+local mean <Cite id="rehman2010" />.
+</Definition>
+
+## Problem
+
+Applying EMD to each channel of a multichannel recording separately gives decompositions that do not line up. One
+channel may give six IMFs and another eight, and the fourth IMF of one channel may hold a different scale from the
+fourth IMF of another. A common oscillation, such as a rhythm recorded by several EEG electrodes, then lands in IMFs
+with different indices, and its phase or amplitude cannot be compared across channels mode by mode. This is the **mode
+alignment** problem. A multichannel signal needs a local mean defined for the vector signal as a whole, so that every
+channel is sifted by the same operator.
+
+## Mechanism
+
+For one channel, a local maximum is where the signal peaks and a local minimum is where it dips. For a vector signal
+there is no single ordering, but every projection $p_v(t) = \mathbf{d}_v^\top \xvec(t)$ onto a unit direction
+$\mathbf{d}_v$ is an ordinary scalar signal with ordinary maxima. One sifting step of MEMD is:
+
+1. choose $V$ directions $\mathbf{d}_1, \ldots, \mathbf{d}_V$ on the unit sphere in $\reals^n$;
+2. for each direction, find the times $t_i^{(v)}$ of the local maxima of the projection $p_v(t)$;
+3. interpolate the vector samples $\xvec\paren{t_i^{(v)}}$ with a cubic spline in each channel, giving an envelope curve
+   $\mathbf{e}_v(t) \in \reals^n$;
+4. average the envelope curves, $\mathbf{m}(t) = \frac{1}{V}\sum_{v=1}^{V} \mathbf{e}_v(t)$, and subtract it from
+   $\xvec(t)$.
+
+The IMF conditions and the stopping rules are those of EMD, applied to the vector signal. Because a single mean is
+subtracted from all channels, each channel's $j$-th IMF is extracted by the same operator at the same stage, so the
+$j$-th IMFs of all channels hold a common scale.
+
+**MEMD reduces to EMD for one channel.** With $n = 1$ the unit sphere has two points, $+1$ and $-1$. The projection
+onto $+1$ is the signal itself, whose maxima give the upper envelope $u(t)$. The projection onto $-1$ is the negated
+signal, whose maxima are the signal's minima, and interpolating the signal's values there gives the lower envelope
+$l(t)$. The average of the two envelope curves is $\tfrac12\paren{u(t) + l(t)}$, the local mean of ordinary sifting.
+MEMD with $V = 2$ in one channel is therefore EMD, and more directions average more envelopes in higher dimensions.
+
+**Choosing the directions.** The directions must cover the sphere evenly, or the local mean is biased towards the
+over-sampled directions. Rehman and Mandic use a low-discrepancy (Hammersley) point set mapped onto the sphere, with
+$V$ several times larger than $n$ <Cite id="rehman2010" />. For $n = 2$ the directions are angles on a circle, and the
+method matches the bivariate EMD of Rilling, Flandrin, Gonçalves and Lilly, which treats a two-channel signal as a
+complex signal rotating in the plane <Cite id="rilling2007" />.
+
+**Noise-assisted MEMD.** MEMD applied to multichannel white noise behaves as a dyadic filter bank in every channel,
+like EMD applied to one channel. Adding extra channels of independent white noise to the recording, decomposing all
+channels together and discarding the noise channels imposes those octave bands on the signal channels
+<Cite id="rehman2011" />. This reduces mode mixing without adding noise to the signal channels themselves, which is the
+main difference from ensemble EMD.
+
+## Cost
+
+Each sifting step finds extrema of $V$ projections and fits $nV$ splines, so a step costs $O(nVN)$ for $N$ samples,
+against $O(N)$ per channel for EMD. With tens to hundreds of directions, MEMD is tens of times slower than EMD
+applied to each channel separately.
+
+## Trade-offs
+
+- **Aligned modes, shared limitations.** MEMD fixes the alignment of modes across channels, but keeps EMD's end
+  effects, dependence on the stopping rule and lack of an objective.
+- **Choice of $V$.** Too few directions make the local mean depend on their placement; more directions cost time
+  linearly.
+- **Channel scaling.** Projections mix channels, so a channel with much larger amplitude dominates the extrema of most
+  projections. Channels are usually standardised first.

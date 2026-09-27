@@ -54,6 +54,23 @@ for (const n of notes) {
     })
 }
 
+// Sibling files whose names differ only in case (widget.ts next to Widget.tsx) resolve to the wrong file on
+// case-insensitive file systems, such as macOS by default.
+const byFolder = new Map<string, Map<string, string>>()
+for (const rel of fs.globSync('notes/**/*.{ts,tsx,mdx}', { cwd: contentDir })) {
+  const dir = path.dirname(rel)
+  const stem = path
+    .basename(rel)
+    .replace(/\.(tsx?|mdx)$/, '')
+    .toLowerCase()
+  const seen = byFolder.get(dir) ?? new Map<string, string>()
+  const other = seen.get(stem)
+  if (other && other !== path.basename(rel))
+    errors.push(`content/${rel}: clashes with ${other} on a case-insensitive file system; rename one`)
+  seen.set(stem, path.basename(rel))
+  byFolder.set(dir, seen)
+}
+
 // Slug-keyed links into python/ and the generated assets must still resolve after a note moves.
 const exampleIds = new Set(
   [

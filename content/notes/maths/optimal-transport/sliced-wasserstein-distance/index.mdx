@@ -1,0 +1,113 @@
+---
+title: Sliced Wasserstein distance
+kind: concept
+summary: 'The sliced Wasserstein distance projects two distributions on $\reals^d$ onto random directions $\thetavec$, solves each one-dimensional transport problem by sorting, and averages: $SW_p^p = \expect_{\thetavec} W_p^p(\thetavec^\top X, \thetavec^\top Y)$. It is a metric, costs $O(Ln\log n)$ for $L$ directions and is at most $W_p$.'
+tags: [optimal-transport, metrics, generative-models, worked-example]
+aliases: [sliced Wasserstein, SW distance, sliced optimal transport, Radon Wasserstein]
+requires: [wasserstein-distances]
+partOf: [optimal-transport]
+related: [earth-movers-distance, sinkhorn-divergences, wasserstein-barycentres, wasserstein-gan]
+references: [rabin2011, bonneel2015, deshpande2018, kolouri2016, fournier2015]
+status: draft
+updated: 2026-09-27
+---
+
+import { SlicedProjection } from './SlicedProjection'
+
+<Definition>
+Let $\mu$ and $\nu$ be distributions on $\reals^d$ with finite $p$-th moments. For a unit vector $\thetavec$, let
+$\thetavec_\#\mu$ be the distribution of $\thetavec^\top X$ with $X \sim \mu$. The **sliced Wasserstein distance** is
+<Cite id="rabin2011" />
+
+$$
+SW_p(\mu, \nu) = \paren{\int_{\Scal^{d-1}} W_p^p\paren{\thetavec_\#\mu, \thetavec_\#\nu}\, d\sigma(\thetavec)}^{1/p},
+$$
+
+where $\sigma$ is the uniform distribution on the unit sphere $\Scal^{d-1}$. Each $W_p$ inside the integral is between
+distributions on the real line.
+</Definition>
+
+## Intuition
+
+Transport in one dimension is cheap: the optimal plan pairs quantiles, and between two samples of equal size it pairs
+the sorted values. Transport in $d$ dimensions is a linear program. Slicing replaces one hard problem by many easy ones.
+Each direction $\thetavec$ gives a one-dimensional shadow of each distribution, and the distance compares the shadows.
+Two distributions that differ at all differ in the shadow along some direction, so averaging over all directions loses
+no information about whether they are equal. It does lose the joint geometry: the matchings found on different slices
+need not agree with each other or with the $d$-dimensional optimal plan.
+
+<SlicedProjection />
+
+## Computation
+
+Draw $L$ directions $\thetavec_1, \dots, \thetavec_L$ uniformly on the sphere, by normalising standard Gaussian vectors.
+For samples $\xvec_1, \dots, \xvec_n$ and $\yvec_1, \dots, \yvec_n$ with equal weights, each slice costs one projection
+and two sorts:
+
+$$
+\widehat{SW}_p^p = \frac1L \sum_{l=1}^{L} \frac1n \sum_{k=1}^{n} \abs{\paren{\thetavec_l^\top\xvec}_{(k)} -
+\paren{\thetavec_l^\top\yvec}_{(k)}}^p ,
+$$
+
+where $(k)$ denotes the $k$-th smallest value. The total cost is $O(Ldn + Ln\log n)$. Exact $W_p$ between the same
+samples is an assignment problem of cost about $O(n^3)$. The estimate is differentiable almost everywhere in the sample
+positions: for fixed sort orders it is a sum of $p$-th powers of differences. That makes it usable as a training loss
+<Cite id="deshpande2018" />.
+
+## Properties
+
+**$SW_p \le W_p$.** The projection $x \mapsto \thetavec^\top x$ is 1-Lipschitz: $\abs{\thetavec^\top(x - y)} \le
+\norm{x - y}$. Take an optimal coupling $(X, Y)$ for $W_p(\mu, \nu)$. Then $(\thetavec^\top X, \thetavec^\top Y)$
+couples the two shadows, so $W_p^p(\thetavec_\#\mu, \thetavec_\#\nu) \le \expect\abs{\thetavec^\top(X - Y)}^p \le
+\expect\norm{X - Y}^p = W_p^p(\mu, \nu)$. Averaging over $\thetavec$ keeps the inequality.
+
+**$SW_p$ is a metric** <Cite id="bonneel2015" />.
+
+- Symmetry and $SW_p(\mu, \mu) = 0$ follow from the same properties of each one-dimensional $W_p$.
+- Triangle inequality: each slice satisfies $W_p(\thetavec_\#\mu, \thetavec_\#\rho) \le W_p(\thetavec_\#\mu,
+  \thetavec_\#\nu) + W_p(\thetavec_\#\nu, \thetavec_\#\rho)$. Taking the $L^p(\sigma)$ norm over $\thetavec$ of both sides
+  and applying Minkowski's inequality gives $SW_p(\mu, \rho) \le SW_p(\mu, \nu) + SW_p(\nu, \rho)$.
+- $SW_p(\mu, \nu) = 0$ implies $\mu = \nu$. If $SW_p = 0$, then $\thetavec_\#\mu = \thetavec_\#\nu$ for almost every
+  $\thetavec$, and by continuity of characteristic functions for every $\thetavec$. The characteristic function of
+  $\mu$ at $t\thetavec$ is $\expect e^{\mathrm{i}t\thetavec^\top X}$, the characteristic function of $\thetavec_\#\mu$ at
+  $t$. So $\mu$ and $\nu$ have the same characteristic function everywhere and are equal (the Cramér–Wold device).
+
+**Estimation.** Each slice is a one-dimensional problem, for which the empirical $W_p$ does not suffer the $n^{-1/d}$
+rate of the full distance <Cite id="fournier2015" />. This is one reason sliced distances are used as losses in high
+dimension.
+
+## Worked example: a shift in $d$ dimensions
+
+Let $\nu$ be $\mu$ translated by a vector $\deltavec \in \reals^d$. Every shadow is shifted by $\thetavec^\top\deltavec$,
+so $W_2^2(\thetavec_\#\mu, \thetavec_\#\nu) = \paren{\thetavec^\top\deltavec}^2$ and
+
+$$
+SW_2^2(\mu, \nu) = \expect_{\thetavec}\paren{\thetavec^\top\deltavec}^2 = \deltavec^\top\expect\brack{\thetavec\thetavec^\top}\deltavec .
+$$
+
+By symmetry of the sphere, $\expect\brack{\thetavec\thetavec^\top}$ is a multiple of the identity. Its trace is
+$\expect\norm{\thetavec}^2 = 1$, so it equals $\eye / d$. Hence $SW_2 = \norm{\deltavec} / \sqrt{d}$, while $W_2 =
+\norm{\deltavec}$. For $\deltavec = (3, 0, 0, 0, 0)$ in $d = 5$, $SW_2^2 = 9/5 = 1.8$; a Monte Carlo estimate with
+$2 \times 10^5$ directions gives $1.806$. The sliced distance shrinks relative to the full one by $\sqrt d$ even for the
+simplest difference, because most random directions are nearly orthogonal to $\deltavec$ in high dimension.
+
+## Uses
+
+- **Generative models.** Deshpande et al. train a generator by minimising the sliced distance between generated and
+  real samples, a single objective with no adversary. Because most random directions are uninformative on images,
+  they project onto directions learnt by a discriminator-like network <Cite id="deshpande2018" />.
+- **Barycentres and texture mixing.** Averaging distributions by moving samples along the gradients of sliced costs
+  gives fast approximate <NoteLink to="wasserstein-barycentres">Wasserstein barycentres</NoteLink>, used for texture
+  mixing and colour transfer <Cite id="rabin2011" /> <Cite id="bonneel2015" />.
+- **Kernels on distributions.** Because $SW_2$ is built from one-dimensional distances, it is Hilbertian in a way
+  $W_2$ in $d \ge 2$ is not, and a Gaussian of $SW_2^2$ gives a positive definite kernel between distributions
+  <Cite id="kolouri2016" />.
+
+## Pitfalls
+
+- **Uninformative directions.** In high dimension a random direction is nearly orthogonal to the directions in which
+  the distributions differ. The estimate then needs many projections, or directions chosen to be informative (the
+  max-sliced distance takes the worst direction).
+- **Not the same geometry as $W_p$.** $SW_p \le W_p$, and the inequality can be loose by a factor growing with $d$.
+  Rankings by the two distances need not agree.
+- **No transport plan.** Each slice has its own matching. Their average is not a coupling of $\mu$ and $\nu$.

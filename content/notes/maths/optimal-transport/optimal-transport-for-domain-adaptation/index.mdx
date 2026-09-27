@@ -1,0 +1,122 @@
+---
+title: Optimal transport for domain adaptation
+kind: technique
+summary: 'OT domain adaptation computes a transport plan from labelled source samples to unlabelled target samples, moves each source sample to the barycentre of its targets, and trains on them. Class regularisers keep classes apart; JDOT transports features and labels jointly.'
+tags: [optimal-transport, transfer-learning, domain-adaptation, worked-example]
+aliases: [OTDA, OT domain adaptation, barycentric mapping, joint distribution optimal transport, JDOT, DeepJDOT]
+requires: [entropic-regularisation-and-sinkhorn, domain-adaptation-theory]
+partOf: [optimal-transport]
+related: [feature-alignment-methods, domain-adversarial-training, importance-weighting-for-covariate-shift, unbalanced-and-partial-transport, wasserstein-distances]
+references: [courty2017, courty2017jdot, damodaran2018, cuturi2013, flamary2021, sun2016coral]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $\xvec^s_1, \dots, \xvec^s_n$ be labelled source samples with labels $y_1, \dots, y_n$ and weights $\avec$, and
+$\xvec^t_1, \dots, \xvec^t_m$ unlabelled target samples with weights $\bvec$. **Optimal transport domain adaptation**
+computes a transport plan $\Pmat$ between the two samples with cost $C_{ij} = \norm{\xvec^s_i - \xvec^t_j}^2$, usually
+entropically regularised, maps each source sample to
+
+$$
+\hat\xvec^s_i = \frac{1}{a_i}\sum_{j} P_{ij}\,\xvec^t_j ,
+$$
+
+and trains a classifier on the pairs $(\hat\xvec^s_i, y_i)$ <Cite id="courty2017" />.
+</Definition>
+
+## Problem
+
+A classifier trained on a source domain loses accuracy on a target domain whose input distribution differs, for
+example images from another camera or sensor data from another subject. Target labels are unavailable. The methods of
+<NoteLink to="feature-alignment-methods">feature alignment</NoteLink> match statistics of the two domains, such as kernel
+mean embeddings or covariances, and <NoteLink to="domain-adversarial-training">domain-adversarial training</NoteLink>
+learns features a domain classifier cannot separate. Neither says which source sample corresponds to which target
+sample. When the shift is a smooth deformation of the input space (a translation, a rotation, a change of scale),
+optimal transport recovers that correspondence directly.
+
+## Mechanism
+
+### Barycentric mapping
+
+The plan $\Pmat$ says how much of each source sample travels to each target sample. Source sample $i$ sends mass $a_i$
+in total, split over targets in proportions $P_{ij}/a_i$. The **barycentric mapping** replaces $\xvec^s_i$ by the
+weighted mean of its destinations. With uniform weights $a_i = 1/n$, it is $\hat\xvec^s_i = n\sum_j P_{ij}\xvec^t_j$.
+The mapped source samples lie in the target domain and keep their labels, so a classifier trained on them applies to
+target data. For an exact plan between equal-size samples with uniform weights, the plan is a matching, and each
+source sample is moved onto one target sample.
+
+The barycentric mapping is also the minimiser, for each $i$, of $\sum_j P_{ij}\norm{\zvec - \xvec^t_j}^2$ over
+$\zvec$: setting the gradient $2\sum_j P_{ij}(\zvec - \xvec^t_j)$ to zero gives $\zvec = \sum_j P_{ij}\xvec^t_j /
+\sum_j P_{ij}$, and $\sum_j P_{ij} = a_i$.
+
+### Class-based regularisation
+
+An unregularised plan can send source samples of different classes to the same target sample, which then receives
+conflicting labels. Courty et al. add a group-sparsity penalty <Cite id="courty2017" />:
+
+$$
+\min_{\Pmat \in \Pi(\avec, \bvec)} \inner{\Cmat}{\Pmat} - \varepsilon H(\Pmat) + \eta\sum_j\sum_{c}\norm{\Pmat_{\Ical_c, j}}_q^p ,
+$$
+
+where $\Ical_c$ is the set of source samples of class $c$ and $\Pmat_{\Ical_c, j}$ is the part of column $j$ from class
+$c$. With $p < 1$ (or the group lasso, $p = 1$, $q = 2$), the penalty is cheaper when a column's mass comes from a
+single class, so each target sample tends to receive mass from one class. The problem is solved by majorisation:
+linearising the penalty at the current plan gives a modified cost matrix, and each step is a Sinkhorn problem.
+
+### Out-of-sample points
+
+The barycentric mapping is defined only on the training source samples. New source samples are mapped by
+interpolation, for example by moving each by the displacement of its nearest training neighbour, or by fitting a
+smooth map (linear or kernel) to the pairs $(\xvec^s_i, \hat\xvec^s_i)$ <Cite id="courty2017" />.
+
+### Joint distribution optimal transport
+
+JDOT transports the joint distribution of inputs and labels <Cite id="courty2017jdot" />. It learns the target
+classifier $h$ and the plan together, with a cost that compares both features and labels:
+
+$$
+\min_{h,\ \Pmat \in \Pi(\avec, \bvec)}\ \sum_{i,j} P_{ij}\paren{\alpha\norm{\xvec^s_i - \xvec^t_j}^2 + \Lcal\paren{y_i, h(\xvec^t_j)}} .
+$$
+
+The label cost $\Lcal$ is a classification loss. Minimisation alternates between the two blocks. For fixed $h$, the
+cost matrix is fixed and the plan is a transport problem. For fixed $\Pmat$, the objective is a weighted empirical risk
+of $h$ on target inputs, where target sample $j$ carries the label $y_i$ with weight $P_{ij}$. Transport therefore
+assigns soft pseudo-labels to the target, and the classifier in turn changes which matches are cheap. DeepJDOT applies
+the same idea to minibatches with a deep feature extractor <Cite id="damodaran2018" />.
+
+## Cost
+
+- **Plan.** An $n \times m$ transport problem, solved by Sinkhorn's algorithm in $O(nm)$ per iteration
+  <Cite id="cuturi2013" />. Class regularisation multiplies this by the number of majorisation steps.
+- **Memory.** The cost matrix has $nm$ entries, which limits full-batch methods to moderate sample sizes.
+  Minibatch variants such as DeepJDOT trade exactness of the plan for scale.
+- **Software.** POT implements the regularised mappings and their out-of-sample extensions <Cite id="flamary2021" />.
+
+## Trade-offs
+
+- **Assumes a transport-like shift.** The method works when the target is a deformation of the source that moves
+  nearby points to nearby points. If classes swap places, the cheapest plan matches the wrong classes.
+- **Label proportions.** Balanced transport requires the plan to move all source mass onto all target mass. If class
+  proportions differ between domains (label shift), mass of an over-represented source class is forced onto another
+  class. <NoteLink to="unbalanced-and-partial-transport">Unbalanced and partial transport</NoteLink> relax this.
+- **Compared with moment matching.** Matching covariances or kernel mean embeddings is cheaper and scales to
+  minibatches of deep features. Transport uses the whole distribution and a per-sample correspondence.
+
+## Worked example
+
+**Translation in one dimension.** Source samples at $0, 1, 3, 4$ with labels $0, 0, 1, 1$; target samples at $2.5, 3.5,
+5.5, 6.5$, the source shifted by $2.5$. A threshold classifier trained on the source puts the boundary at $2$, between
+the classes, and labels every target sample as class 1: half the target is misclassified. With uniform weights and
+squared cost, the optimal plan is the monotone matching $0 \to 2.5$, $1 \to 3.5$, $3 \to 5.5$, $4 \to 6.5$. The mapped
+source samples are the target samples with labels $0, 0, 1, 1$, and a threshold trained on them lies between $3.5$ and
+$5.5$, classifying the target without error.
+
+**Transport map against CORAL.** For Gaussian domains, both CORAL <Cite id="sun2016coral" /> and optimal transport map
+the source with a linear transformation. Let the source covariance be $\Sigmamat_s = \diag(4, 1)$ and the target
+covariance $\Sigmamat_t = \begin{bmatrix} 2 & 1 \\ 1 & 2 \end{bmatrix}$, both centred. CORAL uses $\Amat_c =
+\Sigmamat_t^{1/2}\Sigmamat_s^{-1/2}$. The transport map uses the symmetric matrix $\Amat = \Sigmamat_s^{-1/2}
+\paren{\Sigmamat_s^{1/2}\Sigmamat_t\Sigmamat_s^{1/2}}^{1/2}\Sigmamat_s^{-1/2}$. Both send $\Gauss(\zeros, \Sigmamat_s)$
+to $\Gauss(\zeros, \Sigmamat_t)$. The mean squared displacement $\expect\norm{\xvec - \Amat\xvec}^2$ is $0.771$ for the
+transport map, equal to $W_2^2$ between the two Gaussians, and $0.804$ for CORAL. CORAL moves samples further than
+necessary, and differently: $\Amat_c$ is not symmetric, so it includes a rotation that the transport map does not.

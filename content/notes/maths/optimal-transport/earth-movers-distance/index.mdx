@@ -1,0 +1,151 @@
+---
+title: Earth mover's distance
+kind: concept
+summary: "The earth mover's distance between two histograms is the least total work, mass times ground distance, needed to reshape one into the other. It is a linear program over transport plans; in one dimension it equals the area between the two CDFs, $\\int \\abs{F(x) - G(x)}\\, dx$."
+tags: [optimal-transport, metrics, optimisation, computer-vision, worked-example]
+aliases: [earth movers distance, EMD between histograms, transportation distance, discrete optimal transport]
+requires: [linear-programming]
+partOf: [optimal-transport]
+related: [pairwise-distances-and-cosine-similarity, f-divergences-and-jensen-shannon, kl-divergence]
+references: [rubner2000, monge1781, kantorovich1942, peyre2019, vallender1974, villani2009, fan2017, flamary2021, kuhn1955, fournier2015]
+status: draft
+updated: 2026-09-27
+---
+
+import { HistogramTransport } from './HistogramTransport'
+
+<Definition>
+Let a histogram $\avec \in \reals_{\ge 0}^n$ sit on points $x_1, \dots, x_n$ and a histogram $\bvec \in \reals_{\ge
+0}^m$ on points $y_1, \dots, y_m$, with equal total mass $\sum_i a_i = \sum_j b_j$. Let $C_{ij} = d(x_i, y_j)$ be the
+**ground distance**. The **earth mover's distance** is the least cost of a transport plan <Cite id="rubner2000" />:
+
+$$
+\operatorname{EMD}(\avec, \bvec) = \min_{\Pmat \in \reals_{\ge 0}^{n \times m}} \sum_{i,j} C_{ij} P_{ij}
+\quad \text{subject to} \quad \Pmat\ones = \avec,\ \ \Pmat^\top\ones = \bvec .
+$$
+
+$P_{ij}$ is the mass moved from $x_i$ to $y_j$. The EMD is the Wasserstein-1 distance between the two histograms.
+</Definition>
+
+## Intuition
+
+Picture $\avec$ as piles of earth and $\bvec$ as holes of the same total volume. Moving mass $P_{ij}$ over distance
+$C_{ij}$ costs $C_{ij} P_{ij}$. The EMD is the cheapest way to fill every hole using every pile. Two histograms that
+differ only by a shift of their mass by distance $s$ are at EMD $s$, however little they overlap. A bin-by-bin
+comparison such as total variation, KL or Jensen–Shannon divergence sees only whether mass sits in the same bin, not how
+far it must travel. It gives the same value for a shift of one bin and a shift of a hundred bins once the supports stop
+overlapping.
+
+<HistogramTransport />
+
+## The linear program
+
+The plan $\Pmat$ has $nm$ nonnegative entries. The $n$ row-sum constraints say that each pile is emptied; the $m$
+column-sum constraints say that each hole is filled. The objective $\inner{\Cmat}{\Pmat} = \sum_{ij} C_{ij}P_{ij}$ is
+linear. So the EMD is a <NoteLink to="linear-programming">linear program</NoteLink> in standard form, the classical
+**transportation problem** <Cite id="kantorovich1942" />. Three consequences follow.
+
+- **A solution exists.** The feasible set is nonempty, because $\Pmat = \avec\bvec^\top / \sum_i a_i$ satisfies both
+  constraints, and it is bounded, because $0 \le P_{ij} \le \min(a_i, b_j)$. A linear objective attains its minimum on a
+  nonempty bounded polytope.
+- **An optimal plan is sparse.** An optimum is attained at a vertex. The constraint matrix has $n + m$ rows but rank
+  $n + m - 1$, because the row sums and the column sums both add to the total mass. A vertex therefore has at most
+  $n + m - 1$ nonzero entries. Most piles send their mass to one hole, and at most $n + m - 1$ pairs carry mass.
+- **It can be solved exactly.** The network simplex method specialises the simplex method to this graph structure. Its
+  cost is roughly $O(n^3 \log n)$ for $n = m$ <Cite id="peyre2019" />. When $n = m$ and every point has mass $1/n$,
+  some optimal plan is a permutation matrix (the vertices of the set of doubly stochastic matrices are permutations), and
+  the problem is the assignment problem solved by the Hungarian algorithm <Cite id="kuhn1955" />.
+
+The EMD is a metric on histograms of equal mass whenever the ground distance is a metric. Symmetry holds because
+$\Pmat^\top$ is a plan from $\bvec$ to $\avec$ with the same cost. The triangle inequality is proved by composing plans
+(see <NoteLink to="wasserstein-distances">Wasserstein distances</NoteLink>).
+
+## One dimension: the area between the CDFs
+
+On the real line with $d(x, y) = \abs{x - y}$, the EMD has a closed form. Let $F$ and $G$ be the cumulative
+distribution functions of the two distributions, normalised to total mass 1. Then <Cite id="vallender1974" />
+
+$$
+\operatorname{EMD} = \int_{-\infty}^{\infty} \abs{F(t) - G(t)}\, dt = \int_0^1 \abs{F^{-1}(u) - G^{-1}(u)}\, du .
+$$
+
+**Derivation.** Write the distance between two points as the length of the interval between them:
+$\abs{x - y} = \int \abs{\indicator\set{x \le t} - \indicator\set{y \le t}}\, dt$. The integrand is 1 exactly for the
+$t$ lying between $x$ and $y$. For any plan $\pi$, a joint distribution of $(X, Y)$ with marginals $F$ and $G$,
+exchanging the order of integration gives
+
+$$
+\expect_\pi\abs{X - Y} = \int \expect_\pi\abs{\indicator\set{X \le t} - \indicator\set{Y \le t}}\, dt
+\ge \int \abs{\expect_\pi\indicator\set{X \le t} - \expect_\pi\indicator\set{Y \le t}}\, dt = \int \abs{F(t) - G(t)}\, dt .
+$$
+
+The inequality is $\expect\abs{Z} \ge \abs{\expect Z}$. So every plan costs at least the area between the CDFs. The
+**monotone plan** attains it. Draw $U \sim \Unif(0, 1)$ and set $X = F^{-1}(U)$, $Y = G^{-1}(U)$. Both are
+nondecreasing functions of the same $U$, so for each $t$ the events $\set{X \le t} = \set{U \le F(t)}$ and
+$\set{Y \le t} = \set{U \le G(t)}$ are nested. The difference $\indicator\set{X \le t} - \indicator\set{Y \le t}$
+then has one sign, and $\expect\abs{Z} = \abs{\expect Z}$ holds for every $t$. The monotone plan is optimal and the
+lower bound is the EMD. The quantile form follows from the same coupling: $\expect\abs{X - Y} = \int_0^1
+\abs{F^{-1}(u) - G^{-1}(u)}\, du$.
+
+For histograms on the equally spaced bins $1, \dots, n$ with CDFs $F_k = \sum_{i \le k} a_i$ and $G_k = \sum_{j \le k}
+b_j$, the integral is a sum, $\operatorname{EMD} = \sum_{k=1}^{n-1} \abs{F_k - G_k}$. The cost is $O(n)$ instead of a
+linear program. For two samples of equal size $N$, the monotone plan pairs the sorted values, so the EMD is
+$\tfrac1N \sum_k \abs{x_{(k)} - y_{(k)}}$ and costs one sort.
+
+The monotone plan is optimal for every convex cost $h(x - y)$, not only for $\abs{x - y}$. For $\abs{x - y}$ it is one of
+several optimal plans: moving one unit from 1 to 3 costs the same as moving it from 1 to 2 and from 2 to 3.
+
+## Worked example
+
+Four bins at $1, 2, 3, 4$ hold $\avec = (0.4, 0.3, 0.2, 0.1)$ and $\bvec = (0.1, 0.2, 0.3, 0.4)$. The CDFs are
+$F = (0.4, 0.7, 0.9, 1)$ and $G = (0.1, 0.3, 0.6, 1)$. The differences are $0.3, 0.4, 0.3, 0$, so
+
+$$
+\operatorname{EMD} = 0.3 + 0.4 + 0.3 = 1.0 .
+$$
+
+The monotone plan fills $\bvec$ from left to right: bin 1 sends $0.1$ to bin 1, $0.2$ to bin 2 and $0.1$ to bin 3; bin
+2 sends $0.2$ to bin 3 and $0.1$ to bin 4; bin 3 sends $0.2$ to bin 4; bin 4 keeps its $0.1$. Its cost is
+$0.2 \cdot 1 + 0.1 \cdot 2 + 0.2 \cdot 1 + 0.1 \cdot 2 + 0.2 \cdot 1 = 1.0$. It has 7 nonzero entries, the maximum
+$n + m - 1$. The linear-programming solver `ot.emd` <Cite id="flamary2021" /> returns the same cost with a different
+plan, which sends $0.3$ from bin 1 directly to bin 4; for the cost $\abs{x - y}$ both are optimal. The total variation
+distance between $\avec$ and $\bvec$ is $0.4$ and would be the same if the bins were ten times further apart; the EMD
+would be ten times larger.
+
+## Image retrieval and signatures
+
+Rubner, Tomasi and Guibas introduced the name and used the EMD to compare colour and texture distributions of images
+<Cite id="rubner2000" />. They represent each image by a **signature**: a short list of cluster centres in a feature
+space, such as colour in CIE-Lab, each with a weight equal to the fraction of pixels in the cluster. Signatures of
+different images have different centres and different lengths, so no bin-by-bin comparison applies. The EMD compares
+them directly, because the ground distance between centres enters the cost. It also tolerates small shifts in colour,
+because nearby colours cost little to match, which bin-by-bin histogram distances do not.
+
+Rubner et al. also allow unequal total masses. They then require the plan to move all the mass of the lighter
+signature, bound the other side by its weights, and divide the cost by the mass moved. With unequal masses this
+normalised version is no longer a metric. <NoteLink to="unbalanced-and-partial-transport">Unbalanced and partial
+transport</NoteLink> treat the unequal-mass case more systematically.
+
+## Point clouds
+
+A point cloud of $N$ points is a histogram with mass $1/N$ on each point. The EMD between two clouds of equal size is
+the assignment problem: the average distance between matched points under the best one-to-one matching. It is used as a
+reconstruction loss for generated point clouds, as is the **Chamfer distance**, the average distance from each point to
+its nearest neighbour in the other cloud, summed in both directions <Cite id="fan2017" />. The Chamfer distance ignores
+how many points go where: a cloud that piles all its points on half of the target can score well. The EMD requires a
+bijection, so it penalises unequal density, at the price of solving an assignment problem.
+
+## Assumptions
+
+- **Equal total mass.** The plan must move all of $\avec$ and fill all of $\bvec$. Histograms are normalised first, or
+  an unbalanced formulation is used.
+- **A meaningful ground distance.** The EMD is only as good as $d$. Between histograms of unordered categories, with
+  $d = 1$ for every pair of distinct categories, the EMD reduces to total variation.
+
+## Pitfalls
+
+- **Cost.** An exact solver costs roughly cubic time in the number of bins, which is prohibitive above a few thousand
+  points. Entropic regularisation (Sinkhorn) and slicing trade exactness for speed.
+- **Sample estimates in high dimension.** The EMD between two samples of size $N$ from the same $d$-dimensional
+  distribution shrinks only like $N^{-1/d}$ <Cite id="fournier2015" />, so it is a biased, slow-converging estimate of the population value.
+- **The name.** Signal processing uses EMD for empirical mode decomposition, which is unrelated.

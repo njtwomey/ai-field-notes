@@ -1,0 +1,152 @@
+---
+title: Wasserstein topic models
+kind: concept
+summary: 'W-LDA trains a topic model as a Wasserstein autoencoder: a deterministic encoder maps each document to $\thetavec_d$, a decoder reconstructs its words, and a maximum mean discrepancy pulls the distribution of all encoded $\thetavec_d$ towards a Dirichlet prior.'
+tags: [topic-models, nlp, deep-learning, kernel-methods, optimal-transport, worked-example]
+aliases: [W-LDA, WLDA, Wasserstein LDA, Wasserstein autoencoder topic model, MMD topic model, information diffusion kernel]
+requires: [latent-dirichlet-allocation, autoencoder, reproducing-kernel-hilbert-space]
+partOf: [neural-topic-models]
+related: [wasserstein-distances, prodlda, variational-autoencoder, dirichlet-distribution, kernel-inception-distance]
+references: [nan2019wlda, tolstikhin2018wae, gretton2012, srivastava2017prodlda]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**W-LDA** is a topic model trained as a Wasserstein autoencoder <Cite id="nan2019wlda" /> <Cite id="tolstikhin2018wae" />.
+An encoder network maps a document's bag of words $\wvec_d$ to topic proportions $\thetavec_d =
+\operatorname{softmax}(f_{\phivec}(\wvec_d))$, deterministically. A decoder maps $\thetavec_d$ to a word distribution
+$\hat\wvec_d = \operatorname{softmax}(\Bmat^\top\thetavec_d + \bvec)$, with $\Bmat \in \reals^{K \times V}$. Training
+minimises
+
+$$
+\frac1D\sum_{d=1}^D c\paren{\wvec_d, \hat\wvec_d} + \lambda\,\operatorname{MMD}_k\paren{Q_\Theta, \Dir(\alphavec)},
+$$
+
+where $c(\wvec, \hat\wvec) = -\sum_v w_v\log\hat w_v$ is the reconstruction cross-entropy, $Q_\Theta$ is the
+distribution of the encoded $\thetavec_d$ over the whole corpus, and $\operatorname{MMD}_k$ is the maximum mean
+discrepancy with a kernel $k$ on the simplex.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="variational-autoencoder">variational autoencoder</NoteLink> penalises the KL divergence from each
+document's posterior $q(\thetavec \mid \wvec_d)$ to the prior. Every document is pulled towards the prior separately.
+That per-document pull is what drives component collapse: an encoder output that matches the prior pays no KL cost, so a
+latent coordinate that is not yet useful is pushed to carry no information.
+
+A Wasserstein autoencoder asks for less. Only the **aggregate** of the encodings, the distribution of $\thetavec_d$ as
+$d$ ranges over the corpus, must look like the prior. Individual documents can be encoded to sharp, specific points,
+as long as the cloud of all points has the prior's shape. For a topic model with a sparse Dirichlet prior, the
+requirement reads: across the corpus, most documents should use few topics, and the topics should be used in the
+proportions the prior implies.
+
+## Where the objective comes from
+
+Tolstikhin et al. showed that for a decoder $g$ that maps a latent code deterministically to the data space, the optimal
+transport cost between the data distribution $P_W$ and the model's distribution can be written as an optimisation over
+encoders <Cite id="tolstikhin2018wae" />:
+
+$$
+W_c(P_W, P_G) = \inf_{Q(\thetavec \mid \wvec):\; Q_\Theta = P_\Theta}\;\expect_{P_W}\expect_{Q(\thetavec \mid
+\wvec)}\brack{c\paren{\wvec, g(\thetavec)}} ,
+$$
+
+where $Q_\Theta = \expect_{P_W}[Q(\thetavec \mid \wvec)]$ is the aggregate posterior and $P_\Theta$ the prior. The
+constraint $Q_\Theta = P_\Theta$ is replaced by a penalty $\lambda D(Q_\Theta, P_\Theta)$ for a divergence $D$ between
+distributions that can be estimated from samples. W-LDA takes $P_\Theta = \Dir(\alphavec)$, the cross-entropy as the
+cost $c$, and the maximum mean discrepancy as $D$ <Cite id="nan2019wlda" />. See
+<NoteLink to="wasserstein-distances">Wasserstein distances</NoteLink> for the transport cost itself.
+
+## Maximum mean discrepancy on the simplex
+
+For a kernel $k$ with feature map $\varphi$ into a <NoteLink to="reproducing-kernel-hilbert-space">reproducing kernel
+Hilbert space</NoteLink> $\Hcal$, the maximum mean discrepancy between distributions $Q$ and $P$ is the distance between
+their mean embeddings <Cite id="gretton2012" />:
+
+$$
+\operatorname{MMD}_k(Q, P) = \norm{\expect_{\thetavec \sim Q}[\varphi(\thetavec)] - \expect_{\thetavec' \sim
+P}[\varphi(\thetavec')]}_{\Hcal} .
+$$
+
+Expanding the squared norm as an inner product and using $\inner{\varphi(\thetavec)}{\varphi(\thetavec')} =
+k(\thetavec, \thetavec')$,
+
+$$
+\operatorname{MMD}_k^2 = \expect_{Q,Q}[k(\thetavec, \tilde\thetavec)] + \expect_{P,P}[k(\thetavec',
+\tilde\thetavec')] - 2\,\expect_{Q,P}[k(\thetavec, \thetavec')] .
+$$
+
+With $m$ encoded documents $\thetavec_1, \dots, \thetavec_m$ from a minibatch and $m$ prior draws $\thetavec'_1,
+\dots, \thetavec'_m$, replacing each expectation by an average over distinct pairs gives an unbiased estimate:
+
+$$
+\widehat{\operatorname{MMD}}^2 = \frac{1}{m(m-1)}\sum_{i \ne j}k(\thetavec_i, \thetavec_j) + \frac{1}{m(m-1)}\sum_{i
+\ne j}k(\thetavec'_i, \thetavec'_j) - \frac{2}{m^2}\sum_{i,j}k(\thetavec_i, \thetavec'_j) .
+$$
+
+No density of $Q_\Theta$ is needed, only samples. This is why the encoder can be deterministic.
+
+**The kernel.** A Gaussian kernel on Euclidean distance treats the simplex as flat, but sparse vectors near its faces
+matter most for topic models. W-LDA uses the **information diffusion kernel**, based on the geodesic distance after the
+map $\theta_k \mapsto \sqrt{\theta_k}$, which sends the simplex onto a piece of the unit sphere
+<Cite id="nan2019wlda" />:
+
+$$
+k(\thetavec, \thetavec') = \exp\paren{-\arccos^2\paren{\sum_{k=1}^K\sqrt{\theta_k\theta'_k}}} .
+$$
+
+The sum inside the arccosine is the Bhattacharyya coefficient of the two distributions, the cosine of the angle between
+their square-root vectors. The geodesic distance is more sensitive near the simplex's boundary than the Euclidean
+distance, which suits sparse topic proportions.
+
+## Training details that matter
+
+- **Dirichlet noise.** Before decoding, W-LDA mixes the encoding with a fresh prior draw, $\thetavec_d^+ = (1 -
+  \eta)\thetavec_d + \eta\,\thetavec^{\text{noise}}$ with $\thetavec^{\text{noise}} \sim \Dir(\alphavec)$, and decodes
+  $\thetavec_d^+$. Nan et al. found that $\eta = 0.5$ gave markedly more coherent topics than no noise. Sparse
+  Dirichlet noise leaves the large entries of $\thetavec_d$ large, so it does not wash out the signal; it spreads the
+  inputs the decoder sees over the simplex <Cite id="nan2019wlda" />.
+- **Scaling the reconstruction.** The cross-entropy of a document of length $s$ is of order $s\log V$, far larger than
+  the MMD. W-LDA divides it by $s\log V$, its value when the decoder is uniform and the document repeats one word, so
+  that $\lambda$ does not need tuning per corpus.
+- **Top words.** Topic $k$ is described by the largest entries of row $k$ of $\Bmat$, the decoder's response to
+  $\thetavec = \evec_k$.
+- **MMD rather than an adversary.** The Wasserstein autoencoder also admits an adversarial divergence, but Nan et al.
+  could not train it on Dirichlet priors: the discriminator's gradients vanished, and the encoder stopped matching the
+  prior.
+
+## Worked example
+
+**One kernel value.** For $\thetavec = (0.8, 0.1, 0.1)$ and $\thetavec' = (0.1, 0.8, 0.1)$, the Bhattacharyya
+coefficient is $\sqrt{0.08} + \sqrt{0.08} + \sqrt{0.01} = 0.666$. Its arccosine is $0.842$ radians, and
+$k = \exp(-0.842^2) = 0.492$.
+
+**What the MMD detects.** Draw $m = 500$ prior samples from $\Dir(0.1, \dots, 0.1)$ with $K = 10$ and compare three
+sets of 500 encodings with the unbiased estimate.
+
+- Encodings drawn from the same prior: $\widehat{\operatorname{MMD}}^2 = 4 \times 10^{-5}$, zero up to sampling
+  error.
+- Every document encoded to the uniform vector $(0.1, \dots, 0.1)$, a collapsed encoder: $0.45$.
+- Encodings drawn from $\Dir(1, \dots, 1)$, spread over the simplex but not sparse: $0.21$.
+
+The penalty is large both for a collapsed encoder and for an encoder whose outputs use too many topics per document.
+
+## Assumptions
+
+- **Deterministic encodings.** W-LDA gives a point estimate of $\thetavec_d$, not a posterior. There is no per-document
+  uncertainty.
+- **A decoder of ProdLDA's form.** The word distribution is a softmax of a linear function of $\thetavec_d$, so topics
+  combine as a product of experts.
+- **Enough samples per minibatch.** The MMD compares distributions from minibatch samples. Small minibatches give noisy
+  estimates.
+
+## Pitfalls
+
+- **No likelihood.** W-LDA is not trained on a bound on $\log p(\wvec)$, so its perplexity is not comparable with that
+  of LDA or VAE-based models. Compare topic coherence and diversity instead.
+- **The unbiased estimate can be negative.** With few samples, the estimate of $\operatorname{MMD}^2$ can fall below
+  zero when the distributions are close. It is still a valid, unbiased gradient signal.
+- **Kernel choice changes what is matched.** The MMD compares distributions only through the kernel. Nan et al. chose
+  the diffusion kernel because Euclidean distances are insensitive to differences near the simplex's faces, where sparse
+  topic proportions live <Cite id="nan2019wlda" />.

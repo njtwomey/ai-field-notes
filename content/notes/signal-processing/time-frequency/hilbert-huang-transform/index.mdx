@@ -1,0 +1,129 @@
+---
+title: Hilbert–Huang transform
+kind: technique
+summary: 'The Hilbert–Huang transform splits a signal into intrinsic mode functions by empirical mode decomposition, then takes each one''s instantaneous amplitude and frequency from its analytic signal. The Hilbert spectrum places that amplitude at that frequency at every time.'
+tags: [signal-processing, time-frequency, adaptive-methods, analytic-signal, worked-example]
+aliases: [HHT, Hilbert spectrum, Hilbert spectral analysis, marginal Hilbert spectrum, marginal spectrum, instantaneous energy, intra-wave frequency modulation]
+requires: [empirical-mode-decomposition, instantaneous-frequency, hilbert-transform]
+related: [short-time-fourier-transform, continuous-wavelet-transform, reassignment-and-synchrosqueezing, wigner-ville-distribution, variational-mode-decomposition, ensemble-empirical-mode-decomposition]
+references: [huang1998, huang1999, huang2003, rilling2008, daubechies2011]
+status: draft
+updated: 2026-09-27
+---
+
+import { HilbertSpectrumExplorer } from './HilbertSpectrumExplorer'
+
+<Definition>
+The **Hilbert–Huang transform** (HHT) is <NoteLink to="empirical-mode-decomposition">empirical mode
+decomposition</NoteLink> followed by Hilbert spectral analysis. Each intrinsic mode function $c_j(t)$ is turned into
+its analytic signal $z_j(t) = c_j(t) + i\,\mathcal{H}\{c_j\}(t) = a_j(t)\, e^{i\theta_j(t)}$, which gives an instantaneous
+amplitude $a_j(t)$ and an instantaneous frequency $\omega_j(t) = \theta_j'(t)$. The **Hilbert spectrum** $H(\omega, t)$
+places the amplitude $a_j(t)$ at the point $(t, \omega_j(t))$ for every IMF and every time <Cite id="huang1998" />.
+</Definition>
+
+## Problem
+
+A Fourier spectrum represents a signal with sinusoids of constant amplitude and frequency that last for the whole
+record. Two kinds of signal break that description. A nonstationary signal, such as a chirp, has a frequency that
+changes in time, and the Fourier spectrum spreads it over the whole band it sweeps. A nonlinear oscillation, such as a
+water wave with sharp crests and flat troughs, repeats with one period but is not a sinusoid, and the Fourier spectrum
+represents it with harmonics at integer multiples of its frequency. The harmonics are real properties of the Fourier
+expansion, but they do not correspond to separate oscillations in the system.
+
+The <NoteLink to="short-time-fourier-transform">short-time Fourier transform</NoteLink> and wavelet transforms follow
+changes in time, but each of their atoms still has a fixed frequency within its window, so their resolution is bounded
+by the window. The HHT describes a signal as a small number of oscillations whose amplitude and frequency are
+functions of time, estimated at every sample.
+
+## Mechanism
+
+### From IMFs to amplitude and frequency
+
+EMD gives $x(t) = \sum_{j=1}^{J} c_j(t) + r(t)$. The real part of each analytic signal is the IMF itself,
+$c_j = \operatorname{Re} z_j$, so
+
+$$
+x(t) = \operatorname{Re} \sum_{j=1}^{J} a_j(t)\, \exp\paren{i \int^t \omega_j(s)\, ds} + r(t).
+$$
+
+The Fourier series of a periodic signal has the same form with every $a_j$ and $\omega_j$ constant. The HHT expansion
+lets both vary in time, which is why a few terms can describe a chirp or a modulated tone. The residue $r(t)$ is a
+trend, not an oscillation, and is left out of the spectrum.
+
+The expansion is only informative if each $\omega_j(t)$ is a meaningful frequency. The
+<NoteLink to="instantaneous-frequency">instantaneous frequency</NoteLink> of a sum of two tones oscillates at their
+beat frequency and can go negative, so it describes neither tone. An IMF has one extremum between consecutive zero
+crossings and a mean envelope of zero, so it is locally a single oscillation about zero, and the phase of its analytic
+signal advances monotonically. EMD is the step that makes the Hilbert transform usable.
+
+In discrete time, with samples $z_j[n]$, the frequency in cycles per sample is estimated from the phase increment
+$\hat f_j[n] = \arg\paren{z_j[n+1]\, z_j^*[n]}/(2\pi)$, which needs no phase unwrapping.
+
+### The Hilbert spectrum and its summaries
+
+The Hilbert spectrum $H(\omega, t)$ is zero everywhere except on the $J$ curves $\omega = \omega_j(t)$, where it equals
+$a_j(t)$. Some authors place the energy $a_j^2(t)$ instead. To display it, the time-frequency plane is divided into
+cells, and each IMF adds its amplitude at each sample to the cell containing $(t, \omega_j(t))$. The cell size is a
+display choice, not a resolution limit set by a window. Two summaries follow <Cite id="huang1998" />:
+
+- the **marginal spectrum** $h(\omega) = \int_0^T H(\omega, t)\, dt$, the total amplitude contributed at each frequency
+  over the record;
+- the **instantaneous energy** $\mathrm{IE}(t) = \int H^2(\omega, t)\, d\omega$, the energy at each time.
+
+The marginal spectrum differs in meaning from the Fourier spectrum. A peak at $\omega$ in $h$ says that oscillations
+with local frequency $\omega$ occurred somewhere in the record, for a total amplitude-time equal to the peak's area. It
+does not say that a sinusoid at $\omega$ lasted the whole record. A chirp from $f_0$ to $f_1$ gives a flat marginal
+spectrum over $[f_0, f_1]$, as the Fourier spectrum does, but its Hilbert spectrum shows a single rising line.
+
+### Intra-wave frequency modulation
+
+For a nonlinear wave the HHT and the Fourier transform disagree about what the frequencies are. Take
+$x(t) = \cos\paren{\omega t + \varepsilon \sin \omega t}$ with $0 < \varepsilon < 1$. The phase
+$\varphi(t) = \omega t + \varepsilon\sin\omega t$ increases monotonically, since
+$\varphi'(t) = \omega\paren{1 + \varepsilon\cos\omega t} > 0$, so $x$ has exactly one crest and one trough per period
+$2\pi/\omega$ and is a single IMF, apart from its mean. Its phase derivative swings between $\omega(1 - \varepsilon)$
+and $\omega(1 + \varepsilon)$ within every period: the crests are sharp because the phase moves fast through them, and
+the troughs are flat because it moves slowly. Huang et al. call this **intra-wave frequency modulation** and read it
+as the signature of a nonlinear oscillator <Cite id="huang1998" />.
+
+The Fourier expansion of the same signal follows from the Jacobi–Anger identity
+$e^{i\varepsilon\sin\theta} = \sum_{k=-\infty}^{\infty} J_k(\varepsilon)\, e^{ik\theta}$, where $J_k$ is the Bessel
+function of the first kind. Multiplying by $e^{i\theta}$ and taking real parts gives
+$x = \sum_k J_k(\varepsilon) \cos\paren{(1+k)\,\omega t}$: a constant, $-J_1(\varepsilon)$ from $k = -1$, and harmonics at
+every integer multiple of $\omega$. The Fourier view and the HHT view describe the same signal. The Fourier view uses
+several constant frequencies; the HHT view uses one varying frequency.
+
+**Worked example.** Take $\varepsilon = 0.5$ and a period of 32 samples, so $\omega/(2\pi) = 1/32 = 0.03125$ cycles
+per sample. The generating phase has a frequency between $0.03125 \times 0.5 = 0.0156$ and
+$0.03125 \times 1.5 = 0.0469$ cycles per sample. EMD of 512 samples returns one IMF, and its analytic signal gives a
+frequency oscillating between 0.018 and 0.048 cycles per sample within each period, away from the ends. The Fourier
+spectrum of the same signal has a constant of $-J_1(0.5) = -0.242$ and amplitudes 0.969, 0.240 and 0.031 at 1, 2 and 3
+times the fundamental. The analytic signal's phase is not exactly the generating phase, because the signal's
+spectrum is not a single narrow band, which is why the two frequency ranges differ slightly.
+
+<HilbertSpectrumExplorer />
+
+## Cost
+
+The Hilbert step costs one FFT and one inverse FFT per IMF, $O(JN\log N)$ for $J$ IMFs of $N$ samples, and is
+negligible next to the sifting. Building the Hilbert spectrum is a single pass that bins $JN$ points.
+
+## Trade-offs
+
+- **The result inherits every weakness of EMD.** Mode mixing puts two components into one IMF, and the instantaneous
+  frequency of that IMF then oscillates at their beat rate. The widget's close tones show this: tones at 0.10 and
+  0.12 cycles per sample come out as one IMF whose frequency swings far outside both. Two tones whose frequencies are
+  within a factor of about 1.5 are not separated <Cite id="rilling2008" />.
+- **No uncertainty trade-off, but no guarantee either.** The frequency is estimated at every sample, so the HHT is not
+  limited by a window. Its accuracy depends instead on how narrowband each IMF is, and nothing in the method bounds
+  the error. Noise perturbs the phase most where the amplitude is small, so the frequency estimates spike at envelope
+  minima.
+- **Edge effects twice over.** Sifting distorts the first and last oscillations, and an FFT-based Hilbert transform
+  assumes the record repeats. Both errors concentrate at the ends.
+- **Statistical meaning.** A single decomposition gives no measure of spread. Huang et al. estimate confidence limits
+  from the variation of the Hilbert spectrum across stopping criteria <Cite id="huang2003" />, and ensemble methods give
+  a spread across noise realisations.
+- **Alternatives.** <NoteLink to="reassignment-and-synchrosqueezing">Synchrosqueezing</NoteLink> produces similarly
+  sharp instantaneous-frequency curves from a linear transform, with proofs of accuracy for well-separated components
+  <Cite id="daubechies2011" />. The <NoteLink to="wigner-ville-distribution">Wigner–Ville distribution</NoteLink>
+  concentrates a single chirp perfectly but adds cross-terms between components.

@@ -1,0 +1,189 @@
+---
+title: Entropic regularisation and Sinkhorn's algorithm
+kind: technique
+summary: 'Adding $\varepsilon$ times an entropy term to optimal transport makes the optimal plan $\Pmat = \diag(\uvec)\Kmat\diag(\vvec)$ with $\Kmat = e^{-\Cmat/\varepsilon}$. Sinkhorn''s algorithm finds $\uvec, \vvec$ by rescaling rows and columns in turn: matrix-vector products, fast on GPUs, differentiable, biased by $O(\varepsilon)$.'
+tags: [optimal-transport, optimisation, duality, numerical-methods, worked-example]
+aliases: [Sinkhorn algorithm, Sinkhorn–Knopp algorithm, Sinkhorn distance, entropic optimal transport, entropy-regularised optimal transport, Gibbs kernel, log-domain Sinkhorn]
+requires: [earth-movers-distance, kantorovich-duality, kl-divergence]
+partOf: [optimal-transport]
+related: [sinkhorn-divergences, lagrangian-duality, coordinate-descent, numerical-stability-and-conditioning]
+references: [cuturi2013, sinkhorn1967, franklin1989, altschuler2017, schmitzer2019, peyre2019, flamary2021]
+status: draft
+updated: 2026-09-27
+---
+
+import { SinkhornClouds } from './SinkhornClouds'
+
+<Definition>
+For histograms $\avec \in \reals_{>0}^n$ and $\bvec \in \reals_{>0}^m$ of total mass 1, a cost matrix $\Cmat$ and
+$\varepsilon > 0$, **entropic optimal transport** solves
+
+$$
+\operatorname{OT}_\varepsilon(\avec, \bvec) = \min_{\Pmat \ge 0,\ \Pmat\ones = \avec,\ \Pmat^\top\ones = \bvec}
+\inner{\Cmat}{\Pmat} + \varepsilon\KL\paren{\Pmat \,\|\, \avec\bvec^\top} .
+$$
+
+The solution is unique and has the form $\Pmat = \diag(\uvec)\,\Kmat\,\diag(\vvec)$ with the **Gibbs kernel**
+$K_{ij} = a_i b_j e^{-C_{ij}/\varepsilon}$. **Sinkhorn's algorithm** finds the scalings by alternating
+$\uvec \leftarrow \avec \oslash \Kmat\vvec$ and $\vvec \leftarrow \bvec \oslash \Kmat^\top\uvec$, where $\oslash$ is
+elementwise division <Cite id="cuturi2013" />.
+</Definition>
+
+## Problem
+
+The <NoteLink to="earth-movers-distance">transport linear program</NoteLink> has $nm$ variables. Exact solvers such as
+the network simplex cost roughly $O(n^3\log n)$ for $n = m$, run sequentially, and return a sparse plan that jumps from
+one vertex to another when the inputs change slightly. The optimal cost is then not differentiable everywhere in the
+point positions. Machine learning needs transport costs between many pairs of batches, on GPUs, inside a loss that is
+differentiated. The entropic problem trades exactness for all three.
+
+## Mechanism
+
+### The regulariser
+
+For a plan with marginals $\avec$ and $\bvec$, $\KL(\Pmat \,\|\, \avec\bvec^\top) = \sum_{ij} P_{ij}
+\log\frac{P_{ij}}{a_i b_j}$ is the mutual information between source and destination under $\Pmat$. It is zero for the
+independent plan $\avec\bvec^\top$ and grows as the plan becomes more deterministic. Since $\KL$ is strictly convex in
+$\Pmat$, the regularised problem is strictly convex and has one solution. Small $\varepsilon$ favours cheap plans; large
+$\varepsilon$ favours diffuse plans.
+
+The KL term equals $-H(\Pmat) + H(\avec) + H(\bvec)$ for every feasible plan, where $H(\Pmat) = -\sum_{ij} P_{ij}\log
+P_{ij}$ is the Shannon entropy. Regularising with $-\varepsilon H(\Pmat)$, as Cuturi did, therefore gives the same
+plan, and the optimal values differ by the constant $\varepsilon\paren{H(\avec) + H(\bvec)}$ <Cite id="cuturi2013" />.
+
+### The form of the solution
+
+Attach multipliers $f_i$ to the row constraints and $g_j$ to the column constraints. The Lagrangian is
+
+$$
+\Lcal = \sum_{ij} C_{ij}P_{ij} + \varepsilon\sum_{ij} P_{ij}\paren{\log\frac{P_{ij}}{a_i b_j} - 1}
++ \sum_i f_i\paren{a_i - \sum_j P_{ij}} + \sum_j g_j\paren{b_j - \sum_i P_{ij}} .
+$$
+
+The $-1$ inside the bracket adds $-\varepsilon$ to the objective for any feasible plan, which changes nothing, and
+simplifies the derivative. Setting the derivative
+$\partial\Lcal / \partial P_{ij} = C_{ij} + \varepsilon\log\frac{P_{ij}}{a_i b_j} - f_i - g_j$ to zero gives
+
+$$
+P_{ij} = e^{f_i/\varepsilon}\; a_i b_j e^{-C_{ij}/\varepsilon}\; e^{g_j/\varepsilon} = u_i K_{ij} v_j ,
+\qquad u_i = e^{f_i/\varepsilon},\ v_j = e^{g_j/\varepsilon} .
+$$
+
+The logarithm forces $P_{ij} > 0$, so the constraint $\Pmat \ge 0$ is inactive and needs no multiplier. The optimal plan
+is the kernel $\Kmat$ with its rows scaled by $\uvec$ and its columns by $\vvec$. Only $n + m$ numbers remain unknown.
+
+### Sinkhorn's iterations
+
+The scalings must satisfy the two marginal constraints:
+
+$$
+\uvec \odot (\Kmat\vvec) = \avec, \qquad \vvec \odot (\Kmat^\top\uvec) = \bvec .
+$$
+
+Each equation is solved exactly for one vector when the other is fixed. Sinkhorn's algorithm alternates:
+
+$$
+\uvec^{(k+1)} = \avec \oslash \Kmat\vvec^{(k)}, \qquad \vvec^{(k+1)} = \bvec \oslash \Kmat^\top\uvec^{(k+1)} .
+$$
+
+After a $\uvec$-update the row sums are exact; after a $\vvec$-update the column sums are. Each iteration is two
+matrix-vector products. Sinkhorn and Knopp proved that this alternating normalisation converges for any matrix with
+positive entries <Cite id="sinkhorn1967" />.
+
+The iterations are also block coordinate ascent on the dual. Substituting the optimal plan back into $\Lcal$ gives the
+concave dual function
+
+$$
+D(\fvec, \gvec) = \avec^\top\fvec + \bvec^\top\gvec - \varepsilon\sum_{ij} a_i b_j\, e^{(f_i + g_j - C_{ij})/\varepsilon}
++ \varepsilon .
+$$
+
+Setting $\partial D / \partial f_i = 0$ for fixed $\gvec$ gives
+
+$$
+f_i = -\varepsilon\log\sum_j b_j\, e^{(g_j - C_{ij})/\varepsilon} ,
+$$
+
+which is the $\uvec$-update in logarithms. As $\varepsilon \to 0$ the right-hand side tends to $\min_j (C_{ij} - g_j)$,
+the $c$-transform of <NoteLink to="kantorovich-duality">Kantorovich duality</NoteLink>. Sinkhorn's algorithm is
+alternating soft $c$-transforms.
+
+### Log-domain stabilisation
+
+For small $\varepsilon$, $e^{-C_{ij}/\varepsilon}$ underflows to zero in floating point: with $C_{ij} = 10$ and
+$\varepsilon = 0.01$ it is $e^{-1000}$, below the smallest double. The scalings $\uvec$, $\vvec$ then overflow. The fix
+is to iterate on the potentials $\fvec$, $\gvec$ with the update above, computing each log-sum-exp by subtracting its
+largest term first. This costs one exponential per entry per iteration instead of one multiplication. Faster schemes
+iterate in the scaling domain and move large factors into the potentials only when they grow, and they drop
+negligible kernel entries to make the problem sparse <Cite id="schmitzer2019" />.
+
+<SinkhornClouds />
+
+## Cost
+
+- **Per iteration.** Two products with an $n \times m$ matrix, $O(nm)$ operations. They are dense linear algebra and
+  run well on GPUs. Many problems of the same size are solved in parallel as a batch.
+- **Structured kernels.** On a regular grid with the squared Euclidean cost, $\Kmat$ is a Gaussian blur, applied by
+  separable convolution without forming the matrix <Cite id="peyre2019" />.
+- **Number of iterations.** The iterations contract at a linear rate in Hilbert's projective metric
+  <Cite id="franklin1989" />. The contraction factor depends on the ratios $K_{ij}K_{kl} / (K_{il}K_{kj})$, which grow
+  like $e^{2\max C/\varepsilon}$. The factor approaches 1, and convergence slows sharply, as $\varepsilon \to 0$.
+  Sinkhorn's algorithm approximates the unregularised cost to additive accuracy $\delta$ in time near-linear in the
+  input size $nm$ for fixed $\delta$ <Cite id="altschuler2017" />.
+- **Memory.** Storing $\Cmat$ costs $O(nm)$. Implementations that recompute cost entries on the fly scale to hundreds
+  of thousands of points.
+
+## Trade-offs
+
+### The bias of $\varepsilon$
+
+Let $\Pmat_\varepsilon$ be the entropic plan and $\Pmat^\star$ an exact optimal plan. Because $\Pmat_\varepsilon$
+minimises $\inner{\Cmat}{\Pmat} - \varepsilon H(\Pmat)$,
+
+$$
+\inner{\Cmat}{\Pmat_\varepsilon} - \varepsilon H(\Pmat_\varepsilon) \le \inner{\Cmat}{\Pmat^\star} - \varepsilon
+H(\Pmat^\star)
+\quad\Longrightarrow\quad
+0 \le \inner{\Cmat}{\Pmat_\varepsilon} - \inner{\Cmat}{\Pmat^\star} \le \varepsilon\paren{H(\Pmat_\varepsilon) -
+H(\Pmat^\star)} .
+$$
+
+The entropy of a joint distribution lies between the larger and the sum of the entropies of its marginals, so
+$H(\Pmat_\varepsilon) - H(\Pmat^\star) \le \min\paren{H(\avec), H(\bvec)} \le \log\min(n, m)$. The transport cost of
+the entropic plan exceeds the optimum by at most $\varepsilon\log\min(n, m)$.
+
+- **$\varepsilon \to 0$**: the entropic plan converges to the exact optimal plan of maximal entropy, but the iterations
+  slow down and need the log domain.
+- **$\varepsilon \to \infty$**: the kernel tends to $\avec\bvec^\top$ and the plan to the independent coupling. The
+  cost tends to $\sum_{ij} a_i b_j C_{ij}$, which ignores the matching altogether.
+
+A common schedule is **$\varepsilon$-scaling**: start with a large $\varepsilon$, run a few iterations, and use the
+potentials to warm-start a smaller $\varepsilon$.
+
+### Other consequences
+
+- **Differentiability.** $\operatorname{OT}_\varepsilon$ is a smooth function of $\avec$, $\bvec$ and $\Cmat$. By the
+  envelope theorem its gradient with respect to $\avec$ is the potential $\fvec$ (up to an additive constant), and its
+  gradient with respect to $C_{ij}$ is $P_{ij}$. Gradients with respect to point positions follow through $\Cmat$.
+- **Dense plans.** Every $P_{ij}$ is positive, so the plan is never a matching. Applications that need a map, such as
+  mapping source points to target points, take the barycentric projection $\sum_j P_{ij}\yvec_j / a_i$.
+- **Bias at equal inputs.** $\operatorname{OT}_\varepsilon(\avec, \avec) > 0$. The
+  <NoteLink to="sinkhorn-divergences">Sinkhorn divergence</NoteLink> subtracts the self-transport terms to remove this
+  bias.
+
+## Worked example
+
+Two points at $0$ and $1$ with masses $\avec = \bvec = (0.5, 0.5)$ and cost $C_{ij} = \abs{x_i - x_j}$, so
+$\Cmat = \begin{bmatrix} 0 & 1 \\ 1 & 0 \end{bmatrix}$. The exact plan keeps every point in place, at cost 0. By
+symmetry the entropic plan is $\Pmat = s\begin{bmatrix} 1 & e^{-1/\varepsilon} \\ e^{-1/\varepsilon} & 1
+\end{bmatrix}$, and the row sums fix $s = 0.5 / (1 + e^{-1/\varepsilon})$. The mass that moves is
+
+$$
+2P_{12} = \frac{1}{1 + e^{1/\varepsilon}} .
+$$
+
+At $\varepsilon = 0.5$ this is $1/(1 + e^2) = 0.119$, and the transport cost is $0.119$ instead of 0. At $\varepsilon
+= 0.1$ it is $4.5 \times 10^{-5}$. As $\varepsilon \to \infty$ it tends to $0.5$, the cost of the independent plan.
+The bias bound above gives $\varepsilon\log 2 = 0.347$ at $\varepsilon = 0.5$, which holds. Sinkhorn's iterations
+started from $\vvec = \ones$ reach this plan in one step, because the kernel is already symmetric; `ot.sinkhorn` from
+POT <Cite id="flamary2021" /> and a log-domain implementation give the same plan.

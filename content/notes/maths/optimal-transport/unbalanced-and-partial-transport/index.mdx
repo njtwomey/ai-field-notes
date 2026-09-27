@@ -1,0 +1,133 @@
+---
+title: Unbalanced and partial optimal transport
+kind: concept
+summary: 'Unbalanced transport replaces the hard marginal constraints by penalties $\tau\KL(\Pmat\ones \,\|\, \avec) + \tau\KL(\Pmat^\top\ones \,\|\, \bvec)$, so mass can be created or destroyed. Partial transport moves only a fixed amount $m$. Both compare measures of different mass and ignore outliers.'
+tags: [optimal-transport, optimisation, robustness, worked-example]
+aliases: [unbalanced optimal transport, partial optimal transport, unbalanced Sinkhorn, Hellinger–Kantorovich distance, Wasserstein–Fisher–Rao distance, optimal partial transport]
+requires: [entropic-regularisation-and-sinkhorn]
+partOf: [optimal-transport]
+related: [earth-movers-distance, kl-divergence, optimal-transport-for-domain-adaptation]
+references: [chizat2018, liero2018, figalli2010, chapel2020, rubner2000, flamary2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $\avec \in \reals_{\ge 0}^n$ and $\bvec \in \reals_{\ge 0}^m$ be nonnegative measures, not necessarily of the same
+total mass, and $\Cmat$ a cost matrix. **Unbalanced optimal transport** with marginal penalty $\tau > 0$ solves
+<Cite id="liero2018" /> <Cite id="chizat2018" />
+
+$$
+\min_{\Pmat \ge 0}\ \inner{\Cmat}{\Pmat} + \tau\KL\paren{\Pmat\ones \,\|\, \avec} + \tau\KL\paren{\Pmat^\top\ones \,\|\, \bvec},
+$$
+
+where $\KL(\pvec \,\|\, \qvec) = \sum_i p_i\log(p_i / q_i) - p_i + q_i$ is the KL divergence between nonnegative
+vectors. **Partial optimal transport** instead fixes the mass to move, $m \le \min\paren{\sum_i a_i, \sum_j b_j}$, and
+solves $\min \inner{\Cmat}{\Pmat}$ subject to $\Pmat\ones \le \avec$, $\Pmat^\top\ones \le \bvec$ and $\ones^\top\Pmat\ones
+= m$ <Cite id="figalli2010" />.
+</Definition>
+
+## Intuition
+
+Balanced optimal transport must move every grain of $\avec$ and fill every hole of $\bvec$. That fails in two common
+situations. The total masses may differ, as when comparing cell counts, image intensities or unnormalised histograms.
+Or a few outliers may sit far from everything else, and the balanced plan must transport them anyway, at a cost that
+dominates the total. Relaxing the marginals lets the plan leave some mass behind. Unbalanced transport charges for
+every unit created or destroyed through a KL penalty; partial transport moves a chosen amount and leaves the rest free.
+
+## The effect of $\tau$
+
+For a single pair of points at distance $\ell$, each of mass 1, compare transporting the unit with deleting it and
+recreating it. Transport costs $c(\ell)$. Destroying mass at the source and creating it at the target costs $\tau$
+for each side in the limit where nothing is moved, since $\KL(0 \,\|\, 1) = 1$. So mass moves only between points whose
+cost is below a threshold of order $2\tau$, and farther pairs are treated as unmatched. $\tau$ is a length scale in
+units of the cost.
+
+- **$\tau \to \infty$**: the penalties force $\Pmat\ones = \avec$ and $\Pmat^\top\ones = \bvec$, and balanced transport
+  is recovered (when the masses are equal).
+- **$\tau \to 0$**: moving anything costs more than the penalty saves, and $\Pmat \to 0$.
+
+With $\tau = 1$ and the cost $c(x, y) = -\log\cos^2\paren{\min(d(x, y), \pi/2)}$, the square root of the optimal value defines a metric on
+nonnegative measures, the Hellinger–Kantorovich or Wasserstein–Fisher–Rao distance. It interpolates between transport
+for nearby mass and a Hellinger comparison for distant mass <Cite id="liero2018" />.
+
+## Unbalanced Sinkhorn
+
+Adding the entropy term $\varepsilon\KL(\Pmat \,\|\, \Kmat)$ with $K_{ij} = e^{-C_{ij}/\varepsilon}$ absorbs the cost
+and gives a problem solved by scaling, as in the balanced case <Cite id="chizat2018" />:
+
+$$
+\min_{\Pmat \ge 0}\ \varepsilon\KL(\Pmat \,\|\, \Kmat) + \tau\KL\paren{\Pmat\ones \,\|\, \avec} + \tau\KL\paren{\Pmat^\top\ones
+\,\|\, \bvec} .
+$$
+
+Write $\rvec = \Pmat\ones$ and $\cvec = \Pmat^\top\ones$. Setting the derivative with respect to $P_{ij}$ to zero gives
+
+$$
+\varepsilon\log\frac{P_{ij}}{K_{ij}} + \tau\log\frac{r_i}{a_i} + \tau\log\frac{c_j}{b_j} = 0
+\quad\Longrightarrow\quad
+P_{ij} = u_i K_{ij} v_j,\ \ u_i = \paren{\frac{a_i}{r_i}}^{\tau/\varepsilon},\ \ v_j = \paren{\frac{b_j}{c_j}}^{\tau/\varepsilon} .
+$$
+
+The plan has the same scaled-kernel form as in the balanced case. With $\vvec$ fixed, the row sums are $r_i = u_i
+(\Kmat\vvec)_i$. Substituting into $u_i = (a_i / r_i)^{\tau/\varepsilon}$ gives $u_i^{1 + \tau/\varepsilon} =
+\paren{a_i / (\Kmat\vvec)_i}^{\tau/\varepsilon}$, so the update is
+
+$$
+\uvec \leftarrow \paren{\avec \oslash \Kmat\vvec}^{\tau/(\tau + \varepsilon)}, \qquad
+\vvec \leftarrow \paren{\bvec \oslash \Kmat^\top\uvec}^{\tau/(\tau + \varepsilon)},
+$$
+
+with powers taken elementwise. As $\tau \to \infty$ the exponent tends to 1 and Sinkhorn's balanced updates are
+recovered. The exponent below 1 damps each update, so the marginals are matched only partly. The cost per iteration is
+unchanged: two matrix-vector products.
+
+## Partial transport as balanced transport
+
+Partial transport reduces to a balanced problem with one dummy point on each side <Cite id="chapel2020" />. Write
+$\abs{\avec} = \sum_i a_i$ and $\abs{\bvec} = \sum_j b_j$.
+
+1. Add a dummy source with mass $\abs{\bvec} - m$ and a dummy target with mass $\abs{\avec} - m$. Both sides now have
+   total mass $\abs{\avec} + \abs{\bvec} - m$.
+2. Moving mass between a dummy and a real point costs 0. Moving mass from the dummy source to the dummy target is
+   forbidden (infinite cost).
+3. Solve the balanced problem and keep the real-to-real block.
+
+The dummy target can absorb at most $\abs{\avec} - m$ of the real sources' mass, and it receives nothing from the dummy
+source, so it receives exactly $\abs{\avec} - m$ from real sources. The rest of the real sources' mass, exactly $m$,
+goes to real targets. Real mass sent to a dummy costs nothing, so the balanced optimum is the cheapest way to move mass
+$m$ between real points.
+
+## Worked example
+
+Four source points at $0, 1, 2, 10$ and four target points at $0.2, 1.2, 2.2, -8$, each with mass $0.25$, and cost
+$\abs{x - y}$. The first three points of each side are close pairs; $10$ and $-8$ are outliers.
+
+- **Balanced.** The optimal plan pairs the sorted points: $-8$ with $0$, $0.2$ with $1$, $1.2$ with $2$, and $2.2$
+  with $10$. Its cost is $0.25 \times (8 + 0.8 + 0.8 + 7.8) = 4.35$. The outliers dominate, and every inlier is matched
+  to the wrong partner.
+- **Partial, $m = 0.75$.** The plan matches $0 \to 0.2$, $1 \to 1.2$ and $2 \to 2.2$ and leaves both outliers
+  untouched. Its cost is $0.75 \times 0.2 = 0.15$.
+
+POT's `ot.partial.partial_wasserstein` <Cite id="flamary2021" /> and the dummy-point construction above both give
+$0.15$.
+
+## Uses
+
+- **Measures of different mass.** Rubner et al. already allowed partial matching of image signatures with unequal
+  weights <Cite id="rubner2000" />. Unnormalised histograms, intensity images and counts are compared without
+  normalising.
+- **Outlier-robust matching.** Point-cloud registration with partial overlap, and domain adaptation in which some
+  classes are missing from one domain, need the plan to leave mass unmatched.
+- **Positive–unlabelled learning.** Partial transport from the positive examples to the unlabelled set, moving only
+  the known class prior's worth of mass, selects the unlabelled points most likely to be positive
+  <Cite id="chapel2020" />.
+
+## Pitfalls
+
+- **$\tau$ and $m$ need choosing.** Both set how much mass is treated as unmatched. Too small a $\tau$ discards real
+  structure; too large a $\tau$ brings back the outlier sensitivity.
+- **Not a metric in general.** The unbalanced cost with arbitrary $\tau$ and cost does not satisfy the triangle
+  inequality. The Hellinger–Kantorovich construction is the exception.
+- **Different objectives.** Unbalanced transport penalises mass differences everywhere, while partial transport picks
+  one amount to move. Results from the two are not interchangeable.

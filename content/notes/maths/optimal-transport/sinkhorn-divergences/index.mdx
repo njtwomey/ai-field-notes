@@ -1,0 +1,125 @@
+---
+title: Sinkhorn divergences
+kind: concept
+summary: 'The Sinkhorn divergence $S_\varepsilon(\alpha, \beta) = \operatorname{OT}_\varepsilon(\alpha, \beta) - \tfrac12\operatorname{OT}_\varepsilon(\alpha, \alpha) - \tfrac12\operatorname{OT}_\varepsilon(\beta, \beta)$ removes the entropic bias, so it is zero only when $\alpha = \beta$. It tends to optimal transport as $\varepsilon \to 0$ and to an MMD as $\varepsilon \to \infty$.'
+tags: [optimal-transport, divergences, kernel-methods, generative-models, worked-example]
+aliases: [Sinkhorn divergence, debiased Sinkhorn, debiased entropic optimal transport, entropic bias]
+requires: [entropic-regularisation-and-sinkhorn]
+partOf: [optimal-transport]
+related: [wasserstein-distances, feature-alignment-methods, kernel-inception-distance, wasserstein-gan]
+references: [genevay2018, feydy2019, genevay2019, cuturi2013, gretton2012, fournier2015]
+status: draft
+updated: 2026-09-27
+---
+
+import { EntropicBias } from './EntropicBias'
+
+<Definition>
+Let $\operatorname{OT}_\varepsilon(\alpha, \beta) = \min_{\pi \in \Pi(\alpha, \beta)} \int c\, d\pi +
+\varepsilon\KL\paren{\pi \,\|\, \alpha \otimes \beta}$ be the entropic transport cost between distributions $\alpha$ and
+$\beta$. The **Sinkhorn divergence** is <Cite id="genevay2018" />
+
+$$
+S_\varepsilon(\alpha, \beta) = \operatorname{OT}_\varepsilon(\alpha, \beta) - \tfrac12\operatorname{OT}_\varepsilon(\alpha, \alpha)
+- \tfrac12\operatorname{OT}_\varepsilon(\beta, \beta) .
+$$
+
+For costs such as $c(x, y) = \norm{x - y}$ or $\norm{x - y}^2$ on $\reals^d$, $S_\varepsilon$ is nonnegative, zero only
+when $\alpha = \beta$, and convex in each argument <Cite id="feydy2019" />.
+</Definition>
+
+## Intuition
+
+The entropic plan blurs every point's mass over its neighbours. Transporting a distribution onto itself then costs
+something, because the blurred plan moves mass by a typical distance of order $\sqrt\varepsilon$ for the squared
+cost. So $\operatorname{OT}_\varepsilon(\alpha, \alpha) > 0$, and $\operatorname{OT}_\varepsilon(\alpha, \cdot)$ is
+not minimised at $\alpha$. Subtracting the two self-transport costs, the price of blurring each distribution onto
+itself, leaves a quantity that is zero at $\alpha = \beta$. The construction resembles the maximum mean discrepancy,
+$\operatorname{MMD}^2 = \expect k(X, X') + \expect k(Y, Y') - 2\expect k(X, Y)$, which also subtracts within-sample
+terms from a cross term.
+
+## Why the entropic cost is biased
+
+The bias is easiest to see at large $\varepsilon$. There the optimal plan tends to the independent coupling
+$\alpha \otimes \beta$, because the KL term dominates, and
+
+$$
+\operatorname{OT}_\varepsilon(\alpha, \beta) \to \iint c(x, y)\, d\alpha(x)\, d\beta(y) = \expect\, c(X, Y),
+\qquad X \sim \alpha,\ Y \sim \beta \text{ independent}.
+$$
+
+For the squared Euclidean cost, $\expect\norm{X - Y}^2 = \norm{\mvec_\alpha - \mvec_\beta}^2 + \trace\Sigmamat_\alpha +
+\trace\Sigmamat_\beta$, where $\mvec$ and $\Sigmamat$ are means and covariances. For fixed $\alpha$ this is minimised by
+a $\beta$ with the mean of $\alpha$ and zero spread: a point mass at $\mvec_\alpha$. Minimising
+$\operatorname{OT}_\varepsilon(\alpha, \beta)$ over $\beta$, as when fitting a generative model, therefore shrinks the
+model towards the mean. For finite $\varepsilon$ the effect is weaker but has the same direction.
+
+<EntropicBias />
+
+## The two limits
+
+**Small $\varepsilon$.** $\operatorname{OT}_\varepsilon(\alpha, \beta) \to \operatorname{OT}_0(\alpha, \beta)$, the
+unregularised cost. For a cost with $c(x, x) = 0$, $\operatorname{OT}_0(\alpha, \alpha) = 0$ through the plan that keeps
+every point in place. So $S_\varepsilon \to \operatorname{OT}_0$, the optimal transport cost; with $c = \norm{x - y}^p$
+that is $W_p^p$.
+
+**Large $\varepsilon$.** Each term tends to its independent-coupling cost, so
+
+$$
+S_\varepsilon(\alpha, \beta) \to \expect\, c(X, Y) - \tfrac12\expect\, c(X, X') - \tfrac12\expect\, c(Y, Y'),
+$$
+
+with $X, X' \sim \alpha$ and $Y, Y' \sim \beta$ all independent. Writing $k = -c$, this is
+$\tfrac12\paren{\expect k(X, X') + \expect k(Y, Y') - 2\expect k(X, Y)}$, half the squared MMD with kernel $-c$
+<Cite id="feydy2019" />. Two cases:
+
+- **$c(x, y) = \norm{x - y}$.** The limit is half the **energy distance**, a proper metric between distributions. The
+  kernel $-\norm{x - y}$ is conditionally positive definite, which is what an MMD needs.
+- **$c(x, y) = \norm{x - y}^2$.** Expanding, $\expect\norm{X - Y}^2 - \tfrac12\expect\norm{X - X'}^2 -
+  \tfrac12\expect\norm{Y - Y'}^2 = \norm{\mvec_\alpha - \mvec_\beta}^2$: the covariance terms cancel. The limit sees only
+  the means. With the squared cost, very large $\varepsilon$ gives a weak divergence.
+
+$\varepsilon$ thus moves $S_\varepsilon$ between optimal transport, which follows the geometry of the space, and a
+kernel distance, which is cheap to estimate. Its square root behaves like a length scale: structures finer than about
+$\sqrt\varepsilon$ (squared cost) or $\varepsilon$ (Euclidean cost) are blurred, and coarser ones are transported.
+
+## Statistical and computational cost
+
+- **Sample complexity.** The plug-in estimate of $W_p$ from $n$ samples in $d$ dimensions converges like $n^{-1/d}$
+  <Cite id="fournier2015" />. For fixed $\varepsilon > 0$, the entropic cost converges at the parametric rate
+  $n^{-1/2}$, with a constant that grows as $\varepsilon$ decreases <Cite id="genevay2019" />. MMD also converges at
+  $n^{-1/2}$ <Cite id="gretton2012" />.
+- **Three Sinkhorn problems.** $S_\varepsilon$ needs $\operatorname{OT}_\varepsilon(\alpha, \beta)$ and the two
+  symmetric problems. The symmetric problems have a single potential, $f = g$, and converge quickly with the averaged
+  update $f \leftarrow \tfrac12\paren{f + \text{soft-}c\text{-transform}(f)}$ <Cite id="feydy2019" />.
+- **Gradients.** Each term is differentiable in the sample positions and weights, with gradients given by the
+  potentials, so $S_\varepsilon$ is used directly as a training loss for generative models <Cite id="genevay2018" />
+  and for fitting shapes and point clouds.
+
+## Worked example
+
+Let $\alpha = \tfrac12\delta_0 + \tfrac12\delta_1$ on the real line, cost $c(x, y) = (x - y)^2$, and $\varepsilon =
+0.5$. The entropic plan of $\alpha$ onto itself moves mass $0.0596$ each way (see
+<NoteLink to="entropic-regularisation-and-sinkhorn">Sinkhorn's algorithm</NoteLink>), so its transport cost is $0.119$.
+Adding $\varepsilon$ times its KL divergence from $\alpha \otimes \alpha$ gives $\operatorname{OT}_\varepsilon(\alpha,
+\alpha) = 0.283$.
+
+Now let $\beta = \delta_{0.5}$, all the mass at the midpoint. The only plan is the product, so
+$\operatorname{OT}_\varepsilon(\alpha, \beta) = 0.25$ with no entropy penalty, and $\operatorname{OT}_\varepsilon(\beta,
+\beta) = 0$. The entropic cost rates the collapsed $\beta$ closer to $\alpha$ ($0.25$) than $\alpha$ itself ($0.283$).
+The Sinkhorn divergence does not:
+
+$$
+S_\varepsilon(\alpha, \alpha) = 0, \qquad S_\varepsilon(\alpha, \beta) = 0.25 - \tfrac12(0.283) - \tfrac12(0) = 0.108 > 0 .
+$$
+
+These values match a log-domain Sinkhorn solver.
+
+## Pitfalls
+
+- **Only $S_\varepsilon$, not $\operatorname{OT}_\varepsilon$, as a loss.** Minimising $\operatorname{OT}_\varepsilon$
+  over a model shrinks the model. Use the debiased form when the cost is a training objective.
+- **The debiased plan does not exist.** $S_\varepsilon$ is a number, not a transport plan. Tasks that need a matching
+  still use the plan of $\operatorname{OT}_\varepsilon(\alpha, \beta)$, which is blurred.
+- **Choice of $\varepsilon$.** $\varepsilon$ is a length scale in the units of the cost. Rescaling the data without
+  rescaling $\varepsilon$ changes where $S_\varepsilon$ sits between transport and MMD.

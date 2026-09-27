@@ -1,0 +1,122 @@
+---
+title: Word mover's distance
+kind: concept
+summary: "The word mover's distance between two documents is the earth mover's distance between their normalised bags of words, with the distance between word embeddings as ground cost. It matches synonyms that share no words. Centroid and relaxed bounds prune nearest-neighbour search."
+tags: [optimal-transport, nlp, metrics, embeddings, worked-example]
+aliases: [WMD, word movers distance, relaxed word mover's distance, RWMD, word centroid distance]
+requires: [earth-movers-distance, word-embeddings, bag-of-words]
+partOf: [optimal-transport]
+related: [k-nearest-neighbours, tf-idf, pairwise-distances-and-cosine-similarity]
+references: [kusner2015, rubner2000, mikolov2013b, flamary2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let a vocabulary of $V$ words have embeddings $\xvec_1, \dots, \xvec_V \in \reals^k$. A document is represented by its
+**normalised bag of words** $\dvec \in \reals^V$, with $d_i = c_i / \sum_{i'} c_{i'}$ where $c_i$ counts word $i$ after
+removing stop words. The **word mover's distance** between documents $\dvec$ and $\dvec'$ is <Cite id="kusner2015" />
+
+$$
+\operatorname{WMD}(\dvec, \dvec') = \min_{\Tmat \ge 0} \sum_{i,j} T_{ij}\norm{\xvec_i - \xvec_j}
+\quad\text{subject to}\quad \Tmat\ones = \dvec,\ \ \Tmat^\top\ones = \dvec' .
+$$
+
+It is the <NoteLink to="earth-movers-distance">earth mover's distance</NoteLink> between the two bags of words with the
+embedding distance as ground distance.
+</Definition>
+
+## Intuition
+
+"Obama speaks to the media in Illinois" and "The President greets the press in Chicago" share no content words, so
+their bag-of-words vectors are orthogonal and their cosine similarity is 0. Each word of the first sentence has a close
+neighbour in the second in a <NoteLink to="word-embeddings">word embedding</NoteLink> space: Obama and President,
+speaks and greets, media and press, Illinois and Chicago. The WMD moves each word's mass to nearby words of the other
+document and charges the embedding distance travelled. It is small when the documents say similar things in different
+words <Cite id="kusner2015" />.
+
+## Details
+
+### The transport problem
+
+The flow $T_{ij}$ is how much of word $i$ in the first document travels to word $j$ in the second. Only words present
+in a document have nonzero mass, so for documents with $p$ and $p'$ distinct words the problem is a $p \times p'$
+transport linear program. A word with more mass than its best partner can absorb splits between several targets. The
+WMD inherits the metric properties of the EMD, because the Euclidean distance between embeddings is a metric (on
+distinct embeddings).
+
+An exact solver costs about $O(p^3\log p)$ for $p$ distinct words <Cite id="kusner2015" />. For $k$-nearest-neighbour
+search over a large corpus this is the bottleneck, which motivates two cheap lower bounds.
+
+### Word centroid distance
+
+Let $\Xmat = \brack{\xvec_1, \dots, \xvec_V}$, so $\Xmat\dvec$ is the weighted mean embedding of the document. For any
+feasible flow,
+
+$$
+\sum_{ij} T_{ij}\norm{\xvec_i - \xvec_j} \ge \norm{\sum_{ij} T_{ij}\paren{\xvec_i - \xvec_j}}
+= \norm{\sum_i d_i\xvec_i - \sum_j d'_j\xvec_j} = \norm{\Xmat\dvec - \Xmat\dvec'} ,
+$$
+
+by the triangle inequality and the marginal constraints. The **word centroid distance** $\operatorname{WCD} =
+\norm{\Xmat\dvec - \Xmat\dvec'}$ is therefore a lower bound on the WMD. It costs $O(k)$ per pair once the centroids are
+stored.
+
+### Relaxed word mover's distance
+
+Dropping the second marginal constraint enlarges the feasible set, so the minimum can only fall. Without it, each word
+$i$ sends all its mass to the nearest word of the other document:
+
+$$
+\ell(\dvec, \dvec') = \sum_i d_i \min_{j : d'_j > 0}\norm{\xvec_i - \xvec_j} \le \operatorname{WMD}(\dvec, \dvec') .
+$$
+
+Dropping the first constraint instead gives $\ell(\dvec', \dvec)$. The **relaxed WMD** is the larger of the two,
+$\operatorname{RWMD} = \max\paren{\ell(\dvec, \dvec'), \ell(\dvec', \dvec)}$. It costs $O(pp')$ distance evaluations
+and is much tighter than the WCD in practice <Cite id="kusner2015" />.
+
+### Pruned nearest-neighbour search
+
+To find the $k$ nearest documents to a query, sort the corpus by WCD and compute the exact WMD for the first $k$
+documents. For every further document, compute the RWMD; if it exceeds the current $k$-th smallest WMD, the document
+cannot enter the top $k$ and is skipped. Otherwise compute its WMD and update the list. Most documents are pruned by
+the cheap bound.
+
+Kusner et al. reported that $k$-nearest-neighbour classification with the WMD gave lower test error than seven
+baselines, including bag-of-words, TF-IDF and topic-model representations, on eight document classification datasets
+<Cite id="kusner2015" />.
+
+## Worked example
+
+Take made-up two-dimensional embeddings: Obama $(1.0, 2.0)$, President $(1.2, 1.6)$, speaks $(3.0, 0.5)$, greets
+$(2.6, 1.0)$, media $(-1.0, 0.5)$, press $(-0.6, 0.2)$, Illinois $(0.2, -2.0)$, Chicago $(0.6, -1.7)$. Document 1 contains
+the words Obama, speaks, media and Illinois; document 2 contains President, greets, press and Chicago. Each word has
+mass $1/4$.
+
+The distances between the matched pairs are $0.447$, $0.640$, $0.500$ and $0.500$. Every other pair is at least $1.88$
+apart, so the optimal flow sends each word to its partner, and
+
+$$
+\operatorname{WMD} = \tfrac14(0.447 + 0.640 + 0.500 + 0.500) = 0.522 .
+$$
+
+The centroids are $(0.8, 0.25)$ and $(0.95, 0.275)$, so $\operatorname{WCD} = 0.152$: a valid but loose bound. Each
+word's nearest neighbour in the other document is its partner, so $\operatorname{RWMD} = 0.522$, equal to the WMD.
+
+Now drop Chicago from document 2, leaving three words of mass $1/3$. Illinois has no near partner left. The first three
+words of document 1 still go to their partners, each filling $1/4$ of a target's $1/3$. Illinois splits its $1/4$
+equally, $1/12$ to each of President, greets and press, over distances $3.74$, $3.84$ and $2.34$. The WMD rises to
+$1.223$. These values match `ot.emd` from POT <Cite id="flamary2021" />.
+
+## Assumptions
+
+- **Embeddings encode meaning by distance.** WMD is only as good as the embedding. Antonyms often have close
+  embeddings, because they appear in similar contexts, so "the film was good" and "the film was bad" are near.
+- **Word order is ignored.** Like any bag-of-words method, WMD cannot tell "dog bites man" from "man bites dog".
+
+## Pitfalls
+
+- **Cost for long documents.** The exact problem grows cubically with the number of distinct words. Long documents
+  need the bounds, entropic regularisation, or truncation to the most frequent words.
+- **Frequent words dominate.** With raw counts, common words carry most of the mass. Removing stop words, or weighting
+  by <NoteLink to="tf-idf">TF-IDF</NoteLink> before normalising, changes the result considerably.

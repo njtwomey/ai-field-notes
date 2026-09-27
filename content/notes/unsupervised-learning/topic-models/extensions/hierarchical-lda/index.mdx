@@ -1,0 +1,142 @@
+---
+title: Hierarchical LDA and the nested Chinese restaurant process
+kind: concept
+summary: 'Hierarchical LDA arranges topics in a tree of unbounded width. Each document draws a root-to-leaf path from the nested Chinese restaurant process, and each of its words draws a level $z \in \set{1, \dots, L}$ on that path. General topics sit near the root and specific ones near the leaves.'
+tags: [topic-models, unsupervised, bayesian, bayesian-nonparametrics, latent-variable-models, nlp, worked-example]
+aliases: [hLDA, nested CRP, nCRP, nested Chinese restaurant process, topic hierarchy]
+requires: [latent-dirichlet-allocation, dirichlet-distribution]
+partOf: [topic-model-family]
+related: [hierarchical-dirichlet-process, pachinko-allocation-model, gibbs-sampling, hierarchical-clustering]
+references: [blei2010ncrp, griffiths2004]
+status: draft
+updated: 2026-09-27
+---
+
+import { Plate } from '../_shared/Plate'
+import { hlda } from '../_shared/plates'
+import { TopicTree } from './TopicTree'
+
+<Definition>
+**Hierarchical LDA** (hLDA) is a topic model whose topics form a tree <Cite id="blei2010ncrp" />. Every node of the
+tree is a topic $\phivec \sim \Dir(\eta)$. Each document draws a path $\cvec_d = (c_{d1}, \dots, c_{dL})$ from the root to
+depth $L$ with the **nested Chinese restaurant process** (nCRP), draws proportions $\thetavec_d$ over the $L$ levels,
+and generates each word from the topic at a level $z_{dn} \sim \Cat(\thetavec_d)$ on its path. The width of the tree is
+unbounded and is inferred.
+</Definition>
+
+## Intuition
+
+Topics in a corpus are not a flat list. "Neuroscience" contains "vision" and "memory", and every scientific paper uses
+words such as "result" and "method". <NoteLink to="latent-dirichlet-allocation">LDA</NoteLink> puts all of these side by
+side, and the general words pollute every topic. hLDA places each document on one branch of a tree. The words a document
+shares with all documents are explained by the root. The words it shares with documents on the same branch are explained
+by the nodes they have in common. Its most specific words are explained by its leaf.
+
+The tree is not fixed in advance. A new document can follow an existing branch or open a new one at any level, so the
+number of children of each node grows with the data.
+
+## The nested Chinese restaurant process
+
+A **Chinese restaurant process** (CRP) with concentration $\gamma$ seats customers one at a time. A customer joins an
+occupied table with probability proportional to the number of people there, or opens a new table with probability
+proportional to $\gamma$. After $m$ customers, with $m_j$ at table $j$,
+
+$$
+p(\text{table } j) = \frac{m_j}{m + \gamma}, \qquad p(\text{new table}) = \frac{\gamma}{m + \gamma}.
+$$
+
+The **nested** CRP has a restaurant at every node of an infinite tree. Each table of a restaurant points to another
+restaurant one level down. A document is a tourist who spends $L$ nights in the city. On the first night it eats at the
+root restaurant and chooses a table by the CRP rule; the table sends it to a restaurant for the second night; and so on.
+Its sequence of tables is a path of length $L$. Documents that choose the same tables share the upper part of their
+paths and diverge below.
+
+<TopicTree />
+
+## Generative process
+
+With depth $L$, nCRP concentration $\gamma$, level prior $\alpha$ and topic prior $\eta$:
+
+1. For each node $k$ of the infinite tree, draw a topic $\phivec_k \sim \Dir(\eta)$.
+2. For each document $d$:
+   1. Draw a path $\cvec_d \sim \operatorname{nCRP}(\gamma)$ from the root to depth $L$, given the paths of the previous
+      documents.
+   2. Draw level proportions $\thetavec_d \sim \Dir(\alpha)$ over $L$ levels.
+   3. For each word position $n$, draw a level $z_{dn} \sim \Cat(\thetavec_d)$ and a word
+      $w_{dn} \sim \Cat(\phivec_{c_{d, z_{dn}}})$.
+
+In the journal version the depth is also unbounded: the level proportions come from a stick-breaking prior over
+infinitely many levels. The fixed-depth version shows the idea and is common in practice.
+
+<Plate
+  spec={hlda}
+  title="Hierarchical LDA in plate notation"
+  caption="Each document chooses a path $\cvec_d$ through the tree by the nested CRP with concentration $\gamma$, and each word chooses a level $z_{dn}$ on the path. The word depends on both: it is drawn from the topic at node $c_{d, z_{dn}}$."
+/>
+
+## Gibbs sampling
+
+The topics and level proportions are integrated out, as in LDA's collapsed sampler <Cite id="griffiths2004" />.
+Two kinds of variable are resampled.
+
+**Levels.** Given the path, a word's level is resampled exactly as an LDA topic, with the $L$ nodes on the path as the
+candidate topics. Let $n_{d\ell}$ be the number of words of document $d$ at level $\ell$, and let $n_{kw}$ and $n_k$ be
+the word counts of node $k$. For word $i$ of type $w$,
+
+$$
+p(z_i = \ell \mid \cdot) \propto \paren{n_{d\ell}^{\neg i} + \alpha}\,
+\frac{n_{c_{d\ell}, w}^{\neg i} + \eta}{n_{c_{d\ell}}^{\neg i} + V\eta}.
+$$
+
+**Paths.** A whole path is resampled at once. By Bayes' theorem, its conditional is the nCRP prior times the likelihood
+of the document's words:
+
+$$
+p(\cvec_d \mid \cdot) \propto p(\cvec_d \mid \cvec_{\neg d})\;p(\wvec_d \mid \cvec_d, \zvec_d, \wvec_{\neg d}, \zvec_{\neg d}).
+$$
+
+The prior is the product of the CRP probabilities of the table chosen at each level, computed from the other documents'
+paths. The likelihood factorises over levels, because the words at level $\ell$ are generated by node $c_{d\ell}$ only.
+The words at one level are a bag of draws from a categorical with a Dirichlet prior, whose posterior given the other
+documents' words at that node is again Dirichlet. The Dirichlet-multinomial marginal gives, for each level,
+
+$$
+\frac{\Gamma\paren{n_{k}^{\neg d} + V\eta}}{\prod_w\Gamma\paren{n_{kw}^{\neg d} + \eta}}\;
+\frac{\prod_w\Gamma\paren{n_{kw}^{\neg d} + n_{d\ell w} + \eta}}{\Gamma\paren{n_{k}^{\neg d} + n_{d\ell} + V\eta}},
+\qquad k = c_{d\ell},
+$$
+
+where $n_{d\ell w}$ counts word $w$ among the document's words at level $\ell$. The product is evaluated for every
+existing path and for every way of branching off into a new subtree; a new node has zero counts. This is the ratio of the
+normalising constants of the Dirichlet posteriors after and before adding the document's words, which is the
+integral used to collapse LDA.
+
+## Worked example
+
+Nine documents have been placed as in the figure, and $\gamma = 1$. A new document chooses its first-level table:
+
+- cell/gene: $5/(9 + 1) = 0.5$; neuron/brain: $0.3$; star/galaxy: $0.1$; a new branch: $0.1$.
+
+Below cell/gene, five documents have been: four went to DNA/sequence and one to antigen/immune. The next choice has
+probabilities $4/6$, $1/6$ and $1/6$ for a new branch. The prior probability of the path root → cell/gene → DNA/sequence
+is $0.5 \times 4/6 = 0.333$. The prior of opening a new branch at the first level, which fixes a new second level too,
+is $0.1$. The likelihood term then weighs these paths by how well the nodes on each path explain the document's words
+at each level.
+
+## Assumptions
+
+- **One path per document.** A document mixes topics only along one branch. A paper that spans genetics and astronomy
+  must explain one of them at a shared ancestor.
+- **Rich get richer.** The CRP favours popular branches, which gives a few wide branches and many thin ones.
+- **Level means generality.** The model assumes general words belong at shallow levels. With $\alpha$ badly set,
+  specific words can drift upwards.
+
+## Pitfalls
+
+- **Slow mixing.** Moving a document to another branch changes many counts at once, and the sampler can stay in one tree
+  for a long time. Several restarts with different seeds are advisable.
+- **Hyperparameters shape the tree.** $\gamma$ controls branching, $\eta$ controls how sharp and hence how numerous
+  topics are, and $\alpha$ controls how words divide between levels.
+- **Relatives.** The <NoteLink to="hierarchical-dirichlet-process">HDP topic model</NoteLink> gives an unbounded flat set
+  of topics. The <NoteLink to="pachinko-allocation-model">pachinko allocation model</NoteLink> uses a fixed directed
+  acyclic graph of topics and lets each word take its own path.

@@ -1,0 +1,139 @@
+---
+title: Ensemble empirical mode decomposition
+kind: technique
+summary: 'Ensemble EMD adds many realisations of white noise to a signal, decomposes each noisy copy by empirical mode decomposition and averages the IMFs, which cures mode mixing. CEEMDAN adds the noise stage by stage and reconstructs the signal exactly.'
+tags: [signal-processing, time-frequency, adaptive-methods, noise-assisted, worked-example]
+aliases: [EEMD, ensemble EMD, noise-assisted EMD, CEEMDAN, complete ensemble EMD with adaptive noise, improved CEEMDAN, ICEEMDAN, EMD filter bank, dyadic filter bank of EMD]
+requires: [empirical-mode-decomposition]
+related: [hilbert-huang-transform, variational-mode-decomposition, filter-banks, multivariate-empirical-mode-decomposition]
+references: [wu2009, flandrin2004, wu2004, torres2011, colominas2014, rilling2003]
+status: draft
+updated: 2026-09-27
+---
+
+import { EnsembleExplorer } from './EnsembleExplorer'
+import { NoiseFilterBank } from './NoiseFilterBank'
+
+<Definition>
+**Ensemble empirical mode decomposition** (EEMD) decomposes $I$ noisy copies $x + \varepsilon\sigma_x w_i$ of a signal
+$x$ by empirical mode decomposition, where the $w_i$ are independent realisations of unit-variance white noise and
+$\sigma_x$ is the standard deviation of $x$, and averages the $j$-th IMF over the copies <Cite id="wu2009" />. The
+**complete ensemble EMD with adaptive noise** (CEEMDAN) extracts one mode at a time, adding at each stage the
+corresponding EMD mode of the noise to the current residue, so that the modes and the final residue add up to $x$
+exactly <Cite id="torres2011" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="empirical-mode-decomposition">Empirical mode decomposition</NoteLink> suffers from **mode mixing**: an
+intermittent component makes one IMF switch between unrelated oscillations. Take a slow sine with two short bursts of a
+fast sine. Inside the bursts, the fastest oscillation is the burst, so the first IMF captures the burst. Outside them,
+the fastest oscillation is the slow sine, so the first IMF captures the slow sine there. The first IMF then holds
+pieces of both components, and every later IMF inherits the gaps. The cause is that sifting separates scales only
+relative to the extrema that happen to be present at each time, and those change when a component switches on or off.
+
+## Mechanism
+
+### EMD of white noise is a dyadic filter bank
+
+White noise has oscillations at every scale and at every time. Flandrin, Rilling and Gonçalvès, and independently Wu
+and Huang, decomposed many realisations of noise and found that EMD then behaves like a fixed bank of band-pass
+filters <Cite id="flandrin2004" /> <Cite id="wu2004" />. The first IMF is a high-pass filter. Each later IMF is a
+band-pass filter of the same shape as the one before, shifted down by one octave, so its mean frequency is half the
+previous one's. The energies of the IMFs after the first also halve from one to the next, so the product of an IMF's
+energy and its mean period is roughly constant.
+
+A heuristic accounts for the factor of two. Sifting subtracts the mean of envelopes whose knots are the extrema of the
+current IMF, two per period. The local mean, which becomes the next residue, is therefore sampled at about twice the
+IMF's frequency. It can hold oscillations up to about half that frequency, as a signal sampled at rate $f_s$ can hold
+frequencies up to $f_s/2$. The next IMF is the fastest oscillation of that residue, so its frequency is about half the
+previous one's. Nothing in the algorithm fixes the ratio exactly, and it drifts with the stopping rule.
+
+**Worked example.** Decompose 200 realisations of 1,024 samples of unit-variance white Gaussian noise with 10 sifts
+per IMF. The mean numbers of zero crossings of the first six IMFs are 714, 343, 169, 84, 42 and 21. The ratios between
+neighbours are 2.08, 2.03, 2.01, 2.01 and 2.01. The mean energies (variances) are 0.64, 0.22, 0.11, 0.058, 0.031 and
+0.016: after the first IMF, each is about half the one before. With PyEMD's default stopping rule instead of 10 sifts
+the zero-crossing ratios rise to 2.1 to 2.5 at the lower modes.
+
+<NoiseFilterBank />
+
+### Why added noise cures mode mixing
+
+When white noise is added to a signal, every scale is populated at every time, so the filter bank of the previous
+section is in force everywhere. A signal component then lands in the IMF whose band contains its scale, in every noisy
+copy and at every time, including the times when the component itself is absent: there, the same IMF holds only noise
+of that band. For the slow sine with fast bursts, the first IMF holds the bursts where they occur and high-frequency
+noise elsewhere, and the slow sine sits in a lower IMF throughout.
+
+Each noisy copy still has its own IMFs contaminated by noise. Averaging over the ensemble removes most of the noise.
+Each copy is decomposed exactly, so $\sum_j c_j^{(i)} + r^{(i)} = x + \varepsilon\sigma_x w_i$ for copy $i$. Averaging
+over the $I$ copies gives
+
+$$
+\sum_j \bar c_j + \bar r = x + \varepsilon\sigma_x \bar w, \qquad \bar w = \frac{1}{I}\sum_{i=1}^{I} w_i .
+$$
+
+The $w_i$ are independent with unit variance, so at every sample $\bar w$ has variance $1/I$. The reconstruction error of
+EEMD is noise with standard deviation $\varepsilon\sigma_x/\sqrt{I}$, which is the rule Wu and Huang give
+<Cite id="wu2009" />. They recommend $\varepsilon \approx 0.2$ and ensembles of about 100 copies. The noise level $\varepsilon$
+trades two effects. If it is too small, the noise adds no extrema and the decomposition is plain EMD. If it is too
+large, each copy is mostly noise, and more copies are needed to average it away.
+
+To average the $j$-th IMF across copies, every copy must be decomposed into the same number of IMFs by the same
+operator. Implementations fix the number of IMFs and use a fixed number of sifts, typically 10, rather than a
+stopping rule that could stop different copies at different points.
+
+**Worked example.** Take the slow sine $\sin(2\pi \cdot 0.01\, n)$ with bursts $0.3\sin(2\pi \cdot 0.2\, n)$ on samples
+151 to 249 and 381 to 419, for $n = 0, \ldots, 511$; the signal's standard deviation is $\sigma_x = 0.709$. Plain EMD
+gives three IMFs. Its first IMF has a root-mean-square value of 0.46 outside the bursts, where it should be zero, and no
+IMF comes within 100% relative error of the bursts. EEMD with $\varepsilon = 0.2$ and $I = 100$ copies puts the bursts
+in the first IMF with a relative error of 21%, and that IMF has an RMS value of 0.016 outside the bursts. The slow sine
+lands in the fourth IMF with an error of 12%. The reconstruction error has an RMS of 0.0137, against the predicted
+$0.2 \times 0.709/\sqrt{100} = 0.0142$.
+
+<EnsembleExplorer />
+
+### CEEMDAN: noise added stage by stage
+
+EEMD has two defects. Its reconstruction carries residual noise, and different copies can produce different numbers of
+IMFs, so averaging slot by slot can mix unrelated modes. CEEMDAN fixes both by extracting one mode at a time and
+averaging at every stage <Cite id="torres2011" />. Let $E_k(\cdot)$ denote the $k$-th IMF produced by EMD. Then:
+
+1. average the first IMF of the noisy copies, $\tilde c_1 = \frac{1}{I}\sum_i E_1(x + \varepsilon_0 w_i)$, and set
+   $r_1 = x - \tilde c_1$;
+2. for $k = 1, 2, \ldots$, add the $k$-th EMD mode of each noise realisation to the residue, average the first IMFs,
+   $\tilde c_{k+1} = \frac{1}{I}\sum_i E_1\paren{r_k + \varepsilon_k E_k(w_i)}$, and set $r_{k+1} = r_k - \tilde c_{k+1}$;
+3. stop when the residue can no longer be decomposed, having at most two extrema.
+
+The modes are defined as differences of residues, so the sum telescopes: $\sum_{k=1}^{K} \tilde c_k + r_K = x$ exactly,
+with no residual noise. Each stage adds noise of the band that the next mode should occupy, $E_k(w_i)$, rather than
+white noise, so the $k$-th stage sees noise only at the scale it is extracting. The weights $\varepsilon_k$ set the
+signal-to-noise ratio at each stage.
+
+Colominas, Schlotthauer and Torres improved the method by averaging local means instead of IMFs
+<Cite id="colominas2014" />. With $M(y) = y - E_1(y)$ the local mean of $y$, the residues are
+$r_k = \frac{1}{I}\sum_i M\paren{r_{k-1} + \beta_{k-1} E_k(w_i)}$ and the modes are $\tilde c_k = r_{k-1} - r_k$, which
+still telescope to $x$. The noise enters each mode only through the local mean's estimate, which reduces residual noise
+in the modes and the spurious modes that appear early in the original version. The widget uses this version, with
+$\beta_k = \varepsilon\,\sigma(r_k)$ and each noise mode scaled by the standard deviation of the first mode of its
+realisation. On the burst signal above, with $\varepsilon = 0.2$ and 50 realisations, it recovers the bursts with a
+relative error of 29% and the slow sine with 4.9%, and reconstructs the signal to within $10^{-16}$.
+
+## Cost
+
+EEMD costs $I$ full EMDs, typically 100 to 500 times the cost of one. CEEMDAN decomposes each noise realisation once,
+then runs $I$ single-mode extractions at each of its $K$ stages, so it costs roughly $2I$ EMDs. Both parallelise over
+the ensemble.
+
+## Trade-offs
+
+- **The averages are not IMFs.** A mean of IMFs need not satisfy the IMF conditions. The averaged modes can be sifted
+  once more to restore them.
+- **Two parameters to choose.** The noise level and the ensemble size are chosen by the user, and the results depend on
+  both. Too little noise leaves mode mixing in place; too much needs a larger ensemble.
+- **Residual noise and splitting in EEMD.** The reconstruction error falls only as $1/\sqrt{I}$, and a component can be
+  split across two neighbouring IMFs when copies disagree about its scale. CEEMDAN removes the first problem and
+  reduces the second.
+- **The filter bank is a property of noise, not of the signal.** Noise imposes octave bands, so two signal components
+  within one octave still share an IMF. <NoteLink to="variational-mode-decomposition">Variational mode
+  decomposition</NoteLink> places its bands where the signal's energy is instead.

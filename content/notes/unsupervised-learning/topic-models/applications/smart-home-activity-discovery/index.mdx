@@ -1,0 +1,188 @@
+---
+title: Topic models for activity discovery in smart homes
+kind: concept
+summary: 'Smart-home sensor events become words (sensor identity plus reading), and segments of the event stream, cut where the resident changes room, become documents. A topic model then finds activities of daily living without labels, each topic a pattern of sensor use.'
+tags: [topic-models, unsupervised, activity-recognition, sensors, smart-homes, healthcare, time-series, worked-example]
+aliases: [ADLTM, ADL topic model, activity discovery, activities of daily living, sensor words, sensor documents]
+requires: [latent-dirichlet-allocation, gibbs-sampling]
+related: [activity-routines-from-wearables, context-modulation-and-sensor-transfer, hidden-markov-model, dirichlet-distribution, k-means]
+references: [chen2016adltm, wallach2006, blei2003, twomey2016sphere, twomey2017topologies]
+status: draft
+updated: 2026-09-27
+---
+
+import { Plate } from '../_shared/Plate'
+import { adltm } from '../_shared/plates'
+import { SmartHomeTopics } from './SmartHomeTopics'
+
+<Definition>
+**Activity discovery with topic models** treats the event stream of a smart home's environmental sensors as a corpus
+<Cite id="chen2016adltm" />. A **word** is one sensor event, the pair of a sensor's identity and its reading, so $M$
+binary sensors give $2M$ words. A **document** is a segment of the stream, cut where the resident changes location. A
+**topic** is a distribution over sensor words, and a topic that explains many segments corresponds to an activity of
+daily living such as sleeping, cooking or using the toilet. Chen, Diethe and Flach's ADL™ model gives each segment a
+single topic, which generates both the segment's events and the transitions between consecutive events.
+</Definition>
+
+## Why topic models suit sensor homes
+
+Smart homes built for health monitoring, such as those of the SPHERE project <Cite id="twomey2016sphere" />, record
+motion sensors, door contacts, pressure mats and appliance switches. These sensors are cheap and less intrusive than
+cameras. Their events are discrete tokens, and an activity shows as a characteristic mix of them: cooking fires the
+fridge door, the hob and the kitchen motion sensor in some order and some proportion. That is the structure a topic model
+looks for: groups of tokens that co-occur within units.
+
+Supervised activity recognition needs labelled data, which is costly to collect in a real home and never covers every
+activity a resident performs. A topic model needs no labels. It finds the recurring patterns, and a person names them
+afterwards, or uses them directly: the durations and times of a "bedroom" pattern are a record of sleep whether or not
+anyone labelled a night as sleep.
+
+## Words from sensors
+
+Each event is a timestamp, a sensor identifier and a reading, such as "M007 ON" at 00:04:09. The word is the
+concatenation of the identifier and the reading, so "M007 ON" and "M007 OFF" are different words. Continuous sensors such
+as thermometers reflect the environment more than the resident and are left out. For $M$ binary sensors the vocabulary
+has $2M$ words, a few dozen in a typical home against tens of thousands in a text corpus. The vocabulary is small, so
+each topic is estimated from many tokens per word.
+
+Other quantities can be tokens too. Chen and co-authors note that the hour of day at each event could be a second,
+parallel stream of words, so that topics also learn when activities happen.
+
+## Documents from segmentation
+
+Sensor data have no natural documents. Fixed sliding windows are the usual choice for supervised learning, but
+consecutive windows share almost all their events, and a topic model would treat them as independent documents. Instead,
+the stream is cut at changes of location, because each room is associated with a small set of activities.
+
+Moving between rooms is not always a change of activity. A person cooking steps into the hall and back. The
+segmentation therefore imposes a minimum duration $t_{\text{th}}$:
+
+1. Walk through the stream one location run at a time, where a run is a maximal sequence of consecutive events in the
+   same room.
+2. At the end of each run, if the current document has lasted longer than $t_{\text{th}}$, close it and start a new one
+   at the next run. Otherwise keep extending it into the next room.
+
+The threshold trades two errors. A short threshold gives pure documents, one activity each, but splits one occurrence of
+an activity into many fragments. A long threshold gives fewer fragments but merges different activities into one
+document. Chen and co-authors measure the first by the segmentation error, the fraction of events in each document that
+do not belong to its dominant activity, and the second by the fragment ratio, the number of documents per occurrence of
+an activity.
+
+## The ADL™ model
+
+An activity occupies the whole of a well-segmented document. The model therefore uses a **mixture**, not LDA's
+admixture: each document $d$ has one topic $z_d$. Two sequences are generated from it:
+
+- **Unigrams** $t_{d1}, \dots, t_{dM_d}$, a bag of sensor words drawn independently from the topic's distribution
+  $\nuvec_{z_d}$ over $H$ unigram types.
+- **Bigrams**, the sequence $w_{d1}, \dots, w_{dN_d}$ read as a first-order Markov chain: each $w_{dn}$ is drawn from
+  row $w_{d,n-1}$ of the topic's $V \times V$ transition matrix $\Phimat_{z_d}$.
+
+The generative process, with a corpus-level $\thetavec$:
+
+1. Draw $\thetavec \sim \Dir(\alpha)$ over $K$ topics.
+2. For each topic $k$, draw $\nuvec_k \sim \Dir(\gamma)$, and each row of $\Phimat_k$ from $\Dir(\beta)$.
+3. For each document $d$: draw $z_d \sim \Cat(\thetavec)$, then each unigram $t_{dm} \sim \Cat(\nuvec_{z_d})$ and each
+   bigram $w_{dn} \sim \Cat(\Phimat_{z_d}[w_{d,n-1}, \cdot])$ for $n \ge 2$.
+
+<Plate
+  spec={adltm}
+  title="The ADL™ model in plate notation"
+  caption="One topic $z_d$ per document, drawn from a corpus-wide mixture $\thetavec$. The topic generates a bag of unigrams $t_{dm}$ from $\nuvec_k$ and a chain of events in which each $w_{dn}$ depends on its predecessor through the transition matrix $\Phimat_k$."
+/>
+
+Bigrams matter because order carries information. Moving from the fridge to the hob says more about cooking than either
+event alone. The bigram part is Wallach's bigram topic model <Cite id="wallach2006" /> restricted to one topic per
+document.
+
+## Collapsed Gibbs sampling
+
+Integrating out $\thetavec$, $\nuvec$ and $\Phimat$ leaves only the document topics. Resampling $z_d$ multiplies three
+factors, by Bayes' theorem:
+
+$$
+p(z_d = k \mid \zvec_{\neg d}, \cdot) \propto p(z_d = k \mid \zvec_{\neg d})\;p(\tvec_d \mid z_d = k, \cdot)\;
+p(\wvec_d \mid z_d = k, \cdot).
+$$
+
+**The topic prior.** Collapsing the Dirichlet over $\thetavec$ gives the Pólya urn: with $C_k^{\neg d}$ other documents
+in topic $k$, $p(z_d = k \mid \zvec_{\neg d}) \propto C_k^{\neg d} + \alpha$.
+
+**The unigrams.** The whole bag moves at once, so its probability is the Dirichlet-multinomial predictive of $M_d$ new
+draws. Adding the tokens one at a time, the $m$-th token $h$ has predictive probability equal to its count so far, plus
+$\gamma$, over the total so far, plus $H\gamma$:
+
+$$
+p(\tvec_d \mid z_d = k, \cdot) = \prod_{m=1}^{M_d}\frac{C_{hk}^{\neg d} + c_{d,<m}(h) + \gamma}{C_{\cdot k}^{\neg d} + (m - 1) + H\gamma},
+\qquad h = t_{dm},
+$$
+
+where $C_{hk}^{\neg d}$ counts unigram $h$ in topic $k$ outside document $d$, and $c_{d,<m}(h)$ counts it among the
+document's first $m - 1$ tokens. The bigram factor is the same product over transitions, with counts of $j \to i$ in
+the numerator and counts of $j \to \text{anything}$ in the denominator, for each row $j$ of $\Phimat_k$.
+
+Chen and co-authors write both factors with only the counts from other documents, dropping $c_{d,<m}$ and $m - 1$. That
+approximation treats the tokens of the document as independent given the other documents' counts. It is close when the
+document is short relative to the topic's counts, and it understates repeated words otherwise, as the worked example
+shows. The figure below uses the exact form.
+
+**Self-transitions.** Most consecutive sensor events come from the same sensor: "M007 ON" is followed by "M007 OFF".
+These self-transitions dominate the bigram counts and say little about the activity. Chen and co-authors count bigrams
+by document frequency, the number of documents containing each transition, rather than the number of occurrences. A
+transition that fires hundreds of times in one document then counts once, and transitions between different sensors
+keep their weight. Unigrams are counted by term frequency.
+
+## Simulation
+
+<SmartHomeTopics />
+
+## What the topics are used for
+
+Once every document has a topic, the stream is compressed into triples of start time, duration and topic. In one of the
+homes studied, about 130,000 events became about 2,800 segments <Cite id="chen2016adltm" />. Simple analyses on the
+triples then answer care questions:
+
+- **Sleep.** The segments of a bedroom topic that last longer than an hour and start at night give sleep times and
+  durations. The frequency of short bathroom segments between them gives night-time toilet visits.
+- **Sub-activities.** A kitchen topic covers breakfast, lunch and dinner. <NoteLink to="k-means">$k$-means</NoteLink> on
+  the start times of its segments separates the three meals.
+- **Anomalies.** A $z$-score on segment durations within a topic flags unusual episodes, such as a kitchen appliance
+  switched on and left for two hours with no other activity.
+
+## Worked example
+
+**Exact against approximate unigram probability.** A topic has 10 unigram tokens outside document $d$, among them
+"bed ON" twice and "bed OFF" twice. The vocabulary has $H = 28$ words and $\gamma = 5/H = 0.179$, so $H\gamma = 5$.
+Document $d$ is "bed ON", "bed OFF", "bed ON", "bed OFF".
+
+- Exact: $\frac{2.179}{15} \cdot \frac{2.179}{16} \cdot \frac{3.179}{17} \cdot \frac{3.179}{18} = 6.53 \times 10^{-4}$.
+  The second "bed ON" sees one earlier copy in the document, so its numerator is $3.179$, and every token raises the
+  denominator by one.
+- Approximate: $(2.179/15)^4 = 4.45 \times 10^{-4}$.
+
+The exact probability is 1.47 times larger. Repeated sensor events are the norm in a segment, and the exact marginal
+rewards a topic for explaining a repeated word once it has seen it, which the approximation does not.
+
+**Segmentation.** In the figure's simulated home, a threshold of zero makes one document per room visit, about 15 a day.
+Raising the threshold to 30 minutes reduces the count to about 9 a day, and the share of events whose topic matches
+their activity falls, because documents begin to span two activities.
+
+## Assumptions
+
+- **One activity per segment.** The mixture assumption is right only when the segmentation is. A document that spans
+  two activities is forced into one topic.
+- **Location signals activity.** Segmentation relies on activities being tied to rooms. Activities that move through
+  the house, such as cleaning, are split.
+- **Single resident.** Two people generate interleaved streams that neither the segmentation nor the one-topic model
+  separates.
+
+## Pitfalls
+
+- **Topics are rooms first.** With location-based documents, topics tend to mirror rooms. Two activities in one room,
+  such as sleeping and dressing, separate only when they use different sensors or different transitions.
+- **Choosing $K$.** Chen and co-authors choose $K$ larger than the number of locations. Too large a $K$ leaves topics
+  that no document uses after convergence, which is harmless; too small a $K$ merges activities.
+- **Naming topics.** Mapping a topic to a named activity still needs some labelled data or a person's inspection of the
+  topic's sensors and timing. <NoteLink to="context-modulation-and-sensor-transfer">Sensor context</NoteLink> and
+  learned sensor topologies <Cite id="twomey2017topologies" /> are complementary ways of injecting the structure of the
+  home.

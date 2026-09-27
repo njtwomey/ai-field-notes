@@ -1,0 +1,115 @@
+---
+title: Author-topic model
+kind: concept
+summary: 'The author-topic model gives each author, not each document, a topic mixture $\thetavec_a \sim \Dir(\alpha)$. Each word picks one of its document''s authors uniformly, then a topic from that author''s mixture, then a word. Collapsed Gibbs sampling assigns each word an author and a topic.'
+tags: [topic-models, unsupervised, bayesian, latent-variable-models, nlp, worked-example]
+aliases: [author topic model, ATM, author–topic model]
+requires: [latent-dirichlet-allocation]
+partOf: [topic-model-family]
+related: [gibbs-sampling, structural-topic-model, dirichlet-distribution]
+references: [rosenzvi2004, griffiths2004]
+status: draft
+updated: 2026-09-27
+---
+
+import { Plate } from '../_shared/Plate'
+import { authorTopic } from '../_shared/plates'
+
+<Definition>
+The **author-topic model** is a topic model for documents with known authors <Cite id="rosenzvi2004" />. Each author
+$a$ has a distribution over $K$ topics, $\thetavec_a \sim \Dir(\alpha)$, and each topic has a distribution over words,
+$\phivec_k \sim \Dir(\beta)$. For each word of document $d$, with author set $\avec_d$, an author $x$ is chosen uniformly
+from $\avec_d$, a topic $z$ is drawn from $\thetavec_x$, and the word from $\phivec_z$. Inference assigns each word
+both an author and a topic.
+</Definition>
+
+## Intuition
+
+In <NoteLink to="latent-dirichlet-allocation">LDA</NoteLink> every document has its own topic mixture, and two
+documents by the same person share nothing except the topics. The author-topic model moves the mixture from the
+document to the author. An author's interests are estimated from everything they wrote. A document with several authors
+is a blend of their interests: each word is attributed to one co-author and explained by that co-author's topics.
+
+The fitted model answers questions that LDA cannot ask directly. Which topics does an author write about? Which authors
+are similar? Which co-author most likely wrote a given passage? How surprising is a new paper for a given author?
+
+## Generative process
+
+With $A$ authors, $K$ topics and vocabulary size $V$:
+
+1. For each author $a$, draw $\thetavec_a \sim \Dir(\alpha)$.
+2. For each topic $k$, draw $\phivec_k \sim \Dir(\beta)$.
+3. For each document $d$ with observed author set $\avec_d$, and each word position $n$:
+   1. Draw an author $x_{dn} \sim \Unif(\avec_d)$.
+   2. Draw a topic $z_{dn} \sim \Cat(\thetavec_{x_{dn}})$.
+   3. Draw a word $w_{dn} \sim \Cat(\phivec_{z_{dn}})$.
+
+<Plate
+  spec={authorTopic}
+  title="The author-topic model in plate notation"
+  caption="The author set $\avec_d$ is observed. Each word chooses an author $x_{dn}$ from it and then a topic from that author's mixture $\thetavec_a$, which sits on its own plate over the $A$ authors."
+/>
+
+Marginalising the author choice, the topic mixture of document $d$ is the average of its authors' mixtures,
+$\frac{1}{\abs{\avec_d}}\sum_{a \in \avec_d}\thetavec_a$. Two special cases bracket the model. If every document has a
+single author who wrote nothing else, $\thetavec_a$ is a per-document mixture and the model is LDA. If every author has
+exactly one topic of their own, $z$ is determined by $x$ and the model reduces to an author model, in which each author
+has a single word distribution.
+
+## The collapsed Gibbs update
+
+Integrating out $\thetavec$ and $\phivec$ uses the same Dirichlet integral as LDA, with counts grouped by author instead
+of by document <Cite id="griffiths2004" />. Let $n_{ak}$ be the number of words attributed to author $a$ and assigned to
+topic $k$, $n_a = \sum_k n_{ak}$, and let $n_{kw}$ and $n_k$ be the topic–word counts. The collapsed joint is
+
+$$
+p(\wvec, \zvec, \xvec \mid \avec) \propto \prod_{d,n}\frac{1}{\abs{\avec_d}}\;
+\prod_{k}\frac{\prod_w\Gamma(n_{kw} + \beta)}{\Gamma(n_k + V\beta)}\;
+\prod_{a}\frac{\prod_k\Gamma(n_{ak} + \alpha)}{\Gamma(n_a + K\alpha)}.
+$$
+
+Word $i$ is word type $w$ in document $d$. Its author and topic are resampled jointly. Adding the word back with author
+$a$ and topic $k$ raises $n_{kw}$, $n_k$, $n_{ak}$ and $n_a$ by one each. With $\Gamma(x + 1) = x\,\Gamma(x)$, each
+gamma ratio reduces to one count, and the author-choice factor $1/\abs{\avec_d}$ is the same for every candidate:
+
+$$
+p(x_i = a, z_i = k \mid \xvec^{\neg i}, \zvec^{\neg i}, \wvec) \propto
+\frac{n_{kw}^{\neg i} + \beta}{n_k^{\neg i} + V\beta}\;\frac{n_{ak}^{\neg i} + \alpha}{n_a^{\neg i} + K\alpha},
+\qquad a \in \avec_d.
+$$
+
+The update differs from LDA's in one respect. In LDA the denominator $n_d + K\alpha$ is the document length and does
+not depend on the topic, so it drops out. Here $n_a + K\alpha$ depends on the candidate author, so it stays: an author
+with few words has a flatter, less confident mixture. After burn-in,
+$\hat\theta_{ak} = (n_{ak} + \alpha)/(n_a + K\alpha)$ and $\hat\phi_{kw} = (n_{kw} + \beta)/(n_k + V\beta)$.
+
+## Worked example
+
+A paper has two authors, $a_1$ and $a_2$. There are $K = 2$ topics, $V = 100$ words, $\alpha = 0.5$ and
+$\beta = 0.01$. Word $i$ is type $w$. With word $i$ removed:
+
+- Topic–word counts: $n_{1w} = 4$, $n_1 = 40$, $n_{2w} = 1$, $n_2 = 30$. The word factors are
+  $4.01/41 = 0.0978$ and $1.01/31 = 0.0326$.
+- Author $a_1$ has 10 words in topic 1 and 2 in topic 2; author $a_2$ has 1 and 9. The author factors are
+  $(10.5/13, 2.5/13) = (0.808, 0.192)$ for $a_1$ and $(1.5/11, 9.5/11) = (0.136, 0.864)$ for $a_2$.
+
+The four unnormalised probabilities are $0.0790$ for $(a_1, 1)$, $0.0063$ for $(a_1, 2)$, $0.0133$ for $(a_2, 1)$
+and $0.0281$ for $(a_2, 2)$. Normalised, $(a_1, 1)$ has probability $0.623$. The word is attributed to $a_1$ with
+probability $0.673$ and to topic 1 with probability $0.729$. The topic-1 word is explained best by the co-author who
+writes about topic 1.
+
+## Assumptions
+
+- **Authors known.** The author sets are observed and complete.
+- **One author per word.** Each word is written by exactly one co-author, chosen uniformly. Unequal contributions are
+  not modelled.
+- **Stable interests.** An author's mixture is the same across all their documents and over time.
+
+## Pitfalls
+
+- **Documents lose their own mixture.** Two papers by the same sole author get the same topic proportions. A
+  distinctive paper is pulled towards the author's average. Adding a fictitious author unique to each document restores
+  a per-document component.
+- **Prolific authors dominate.** Authors with many words have sharp mixtures and absorb words in shared documents.
+- **Relatives.** The <NoteLink to="structural-topic-model">structural topic model</NoteLink> treats authorship as one
+  covariate among many that shift topic prevalence, rather than as the owner of the mixture.

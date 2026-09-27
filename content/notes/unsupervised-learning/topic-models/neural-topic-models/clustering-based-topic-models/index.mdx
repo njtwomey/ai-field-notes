@@ -1,0 +1,143 @@
+---
+title: Clustering-based topic models
+kind: concept
+summary: 'Top2Vec and BERTopic find topics by clustering document embeddings, not by fitting a generative model. BERTopic reduces sentence embeddings with UMAP, clusters them with HDBSCAN, and names each cluster by class-based TF-IDF, $\mathrm{tf}_{t,c}\log(1 + A/f_t)$.'
+tags: [topic-models, nlp, clustering, embeddings, unsupervised, worked-example]
+aliases: [BERTopic, Top2Vec, c-TF-IDF, class-based TF-IDF, embedding clustering topic model, topic vectors]
+requires: [sentence-embeddings, tf-idf]
+partOf: [neural-topic-models]
+related: [umap, dbscan, hierarchical-clustering, word-embeddings, contextualised-topic-models, latent-dirichlet-allocation]
+references: [grootendorst2022bertopic, angelov2020top2vec, reimers2019, mcinnes2018, campello2013, le2014, salton1975]
+status: draft
+updated: 2026-09-27
+---
+
+import { BertopicPipeline } from './BertopicPipeline'
+
+<Definition>
+A **clustering-based topic model** embeds each document with a pretrained neural encoder, clusters the embeddings, and
+treats each cluster as a topic. A topic is then described by words chosen after clustering. **Top2Vec** describes a
+cluster by the word vectors nearest its centroid, in a space where documents and words are embedded jointly
+<Cite id="angelov2020top2vec" />. **BERTopic** describes it by **class-based TF-IDF** (c-TF-IDF), which scores term
+$t$ for cluster $c$ as
+
+$$
+W_{t,c} = \mathrm{tf}_{t,c}\cdot\log\paren{1 + \frac{A}{f_t}},
+$$
+
+where $\mathrm{tf}_{t,c}$ is the frequency of $t$ in the cluster's documents, $f_t$ its frequency in all clusters, and
+$A$ the average number of words per cluster <Cite id="grootendorst2022bertopic" />.
+</Definition>
+
+## Intuition
+
+A probabilistic topic model such as <NoteLink to="latent-dirichlet-allocation">LDA</NoteLink> learns topics and document
+representations together, from word co-occurrence in the corpus alone. A pretrained sentence encoder already maps
+documents about the same subject to nearby vectors, using what it learnt from far larger text collections. If documents
+are already arranged by subject, finding topics reduces to finding dense regions among the document vectors, and
+describing a topic reduces to asking which words distinguish one region from the others.
+
+The two steps are decoupled. The embedding decides which documents belong together; the word statistics decide how the
+group is labelled. Neither step is a likelihood, so there is no generative story, no posterior, and no perplexity.
+
+<BertopicPipeline />
+
+## The pipeline
+
+1. **Embed.** Each document $d$ becomes a vector $\svec_d$. BERTopic uses a <NoteLink to="sentence-embeddings">Sentence-BERT</NoteLink>
+   model <Cite id="reimers2019" />. Top2Vec trains doc2vec, which learns document and word vectors in one space
+   <Cite id="le2014" />, or uses a pretrained sentence encoder.
+2. **Reduce.** <NoteLink to="umap">UMAP</NoteLink> maps the embeddings to a handful of dimensions
+   <Cite id="mcinnes2018" />. Density-based clustering degrades in hundreds of dimensions, where distances concentrate,
+   and UMAP preserves local neighbourhoods well enough for clusters to survive.
+3. **Cluster.** HDBSCAN finds clusters of varying density and labels documents in sparse regions as outliers rather than
+   forcing them into a topic <Cite id="campello2013" />. The number of topics is the number of clusters found, not a
+   parameter. See <NoteLink to="dbscan">DBSCAN</NoteLink> for the density-based idea it extends.
+4. **Describe.** Top2Vec computes each cluster's **topic vector**, the centroid of its documents' embeddings in the
+   original space, and lists the words whose vectors are nearest to it <Cite id="angelov2020top2vec" />. BERTopic
+   concatenates each cluster's documents into one bag of words and ranks the words by c-TF-IDF.
+5. **Reduce the number of topics (optional).** BERTopic repeatedly merges the least frequent topic into the topic whose
+   c-TF-IDF vector is most similar, until a requested number remains <Cite id="grootendorst2022bertopic" />.
+
+## Deriving class-based TF-IDF
+
+Classic <NoteLink to="tf-idf">TF-IDF</NoteLink> scores term $t$ in document $d$ as $\mathrm{tf}_{t,d}\log(N/\mathrm{df}_t)$,
+with $N$ documents and $\mathrm{df}_t$ the number of documents that contain $t$ <Cite id="salton1975" />. The first
+factor rewards terms frequent in $d$; the second penalises terms that appear everywhere.
+
+To describe a cluster, treat all of its documents as one long document. There are then only $C$ "documents", one per
+cluster, and the classic inverse document frequency becomes $\log(C/\mathrm{df}_t)$ with $\mathrm{df}_t \le C$. With a
+few dozen clusters this statistic is too coarse. A word that appears even once in every cluster gets weight zero,
+however unevenly its occurrences are spread, and most moderately common words appear somewhere in every cluster.
+
+The fix is to measure how common a term is by its total frequency, not by the number of clusters it touches. Let
+$f_t = \sum_c\mathrm{tf}_{t,c}$ and let $A = \frac1C\sum_t f_t$ be the average number of words per cluster. Replace
+$N/\mathrm{df}_t$, "how many documents per document containing $t$", by $A/f_t$, "how many words per occurrence of $t$,
+at the scale of one cluster". Writing $p_t = f_t/\sum_u f_u$ for the corpus frequency of $t$,
+
+$$
+\frac{A}{f_t} = \frac{\sum_u f_u}{C\,f_t} = \frac{1}{C\,p_t} .
+$$
+
+A term that makes up a fraction $p_t$ of the corpus is expected $A p_t$ times in a cluster of average size. The
+ratio $A/f_t$ is therefore large for a term that is rare relative to one cluster's worth of text and small for a term
+that occurs many times in every cluster. Adding one inside the logarithm keeps every weight positive
+<Cite id="grootendorst2022bertopic" />:
+
+$$
+W_{t,c} = \mathrm{tf}_{t,c}\,\log\paren{1 + \frac{A}{f_t}} .
+$$
+
+For a rare term, $A/f_t \gg 1$ and $\log(1 + A/f_t) \approx -\log p_t - \log C$: the weight is the term's count in the
+cluster times its surprisal in the corpus, shifted by a constant. For a very frequent term, $A/f_t \ll 1$ and the
+weight shrinks towards $\mathrm{tf}_{t,c}\,A/f_t$, which is small unless the term is extremely frequent in $c$.
+
+The same weights give **dynamic topics** without re-clustering. BERTopic fits the clusters once on the whole corpus,
+then recomputes $\mathrm{tf}_{t,c,i}$ from the documents of time slice $i$ and multiplies it by the global
+$\log(1 + A/f_t)$ <Cite id="grootendorst2022bertopic" />. The same trick describes topics by author or source.
+
+## Worked example
+
+Three clusters, sport, finance and weather, have these word counts:
+
+| term | sport | finance | weather | $f_t$ | $\log(1 + A/f_t)$ |
+| --- | --- | --- | --- | --- | --- |
+| the | 50 | 45 | 40 | 135 | 0.400 |
+| goal | 12 | 0 | 0 | 12 | 1.876 |
+| match | 8 | 1 | 1 | 10 | 2.033 |
+| bank | 0 | 10 | 1 | 11 | 1.950 |
+| rate | 1 | 9 | 2 | 12 | 1.876 |
+| rain | 1 | 0 | 11 | 12 | 1.876 |
+| transfer | 4 | 3 | 0 | 7 | 2.349 |
+
+The clusters hold $199$ words in total, so $A = 199/3 = 66.33$.
+
+- **Classic IDF, one document per cluster.** "match" and "rate" occur in all three clusters, so
+  $\log(3/3) = 0$ and both vanish from every description, although "match" is plainly a sport word. "goal" gets
+  $\log 3 = 1.099$.
+- **c-TF-IDF.** Sport scores "goal" $12 \times 1.876 = 22.5$, "the" $50 \times 0.400 = 20.0$ and "match"
+  $8 \times 2.033 = 16.3$. Finance scores "bank" $19.5$, "the" $18.0$ and "rate" $16.9$. Weather scores "rain" $20.6$
+  and "the" $16.0$.
+
+c-TF-IDF recovers "match" and "rate". It divides the weight of "the" by about five relative to a typical content word,
+but "the" is so frequent that it still ranks second in every cluster. Stop words should therefore be removed from the bag of words used
+for c-TF-IDF, while the sentence encoder still reads the raw text.
+
+## Assumptions
+
+- **One topic per document.** Each document belongs to one cluster, or to none. A document about two subjects is placed
+  in one or labelled an outlier; there are no mixed memberships unless HDBSCAN's soft cluster probabilities are used.
+- **The embedding's similarity is topical similarity.** A sentence encoder may group documents by style, language or
+  sentiment rather than subject.
+- **Clusters are dense regions.** HDBSCAN finds regions denser than their surroundings; a broad, diffuse subject may
+  split into several topics or dissolve into outliers.
+
+## Pitfalls
+
+- **Outliers.** HDBSCAN often labels a large share of documents as noise, which BERTopic reports as topic $-1$.
+  Treating those documents as a topic, or silently dropping them, distorts topic sizes.
+- **Randomness.** UMAP is stochastic, so topics change between runs unless its seed is fixed.
+- **Truncation.** Sentence encoders read a bounded number of tokens; long documents are represented by their beginning.
+- **Coherence is not directly comparable.** Topic words from c-TF-IDF are chosen to be distinctive, not to reconstruct
+  the documents. Comparing their coherence with LDA's measures different things; see
+  <NoteLink to="topic-model-evaluation">evaluating topic models</NoteLink>.

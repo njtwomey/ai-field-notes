@@ -1,0 +1,185 @@
+---
+title: Wasserstein distances
+kind: concept
+summary: 'The $p$-Wasserstein distance $W_p(\mu, \nu) = \paren{\min_\pi \expect_\pi d(X, Y)^p}^{1/p}$ is the cheapest $L^p$ cost of coupling two distributions. It is a metric that stays informative when supports do not overlap; $W_1$ has a dual over 1-Lipschitz functions and $W_2$ has a closed form between Gaussians.'
+tags: [optimal-transport, probability, metrics, divergences, duality, worked-example]
+aliases: [Wasserstein distance, Wasserstein metric, W1 distance, W2 distance, Kantorovich–Rubinstein duality, Kantorovich–Rubinstein distance, Kantorovich metric]
+requires: [earth-movers-distance, multivariate-normal-distribution]
+partOf: [optimal-transport]
+related: [frechet-inception-distance, f-divergences-and-jensen-shannon, kl-divergence, kantorovich-duality, wasserstein-gan]
+references: [villani2009, peyre2019, vallender1974, dowson1982, arjovsky2017, fournier2015, kantorovich1942]
+status: draft
+updated: 2026-09-27
+---
+
+import { DisjointSupports } from './DisjointSupports'
+
+<Definition>
+Let $(\Xcal, d)$ be a metric space, $p \ge 1$, and $\mu, \nu$ probability distributions on $\Xcal$ with finite $p$-th
+moments. The **$p$-Wasserstein distance** is
+
+$$
+W_p(\mu, \nu) = \paren{\min_{\pi \in \Pi(\mu, \nu)} \int d(x, y)^p\, d\pi(x, y)}^{1/p},
+$$
+
+where $\Pi(\mu, \nu)$ is the set of couplings: joint distributions of $(X, Y)$ with $X \sim \mu$ and $Y \sim \nu$
+<Cite id="villani2009" />. $W_p$ is a metric on distributions. $W_1$ between histograms is the <NoteLink
+to="earth-movers-distance">earth mover's distance</NoteLink>.
+</Definition>
+
+## Intuition
+
+A coupling pairs each draw from $\mu$ with a draw from $\nu$. $W_p$ is the smallest $L^p$ norm of the distance between
+paired draws, $\paren{\expect\, d(X, Y)^p}^{1/p}$, over all pairings. Moving a distribution by a vector $\svec$ moves
+every draw by $\norm{\svec}$, so $W_p$ between a distribution and its translate is exactly $\norm{\svec}$ for every
+$p$: pairing each point with its own translate costs $\norm{\svec}$, and no pairing can do better because the means
+differ by $\svec$ (Jensen's inequality gives $\expect\norm{X - Y} \ge \norm{\expect X - \expect Y}$).
+
+The distance sees geometry. It changes continuously as mass moves, whether or not the supports of $\mu$ and $\nu$
+overlap. Divergences that compare densities point by point, such as KL, Jensen–Shannon and total variation, do not.
+
+## $W_p$ is a metric
+
+**Symmetry** holds because swapping the coordinates of a coupling of $(\mu, \nu)$ gives a coupling of $(\nu, \mu)$ with
+the same cost. **Identity**: $W_p(\mu, \mu) = 0$ through the coupling $X = Y$. Conversely, if $W_p(\mu, \nu) = 0$, an
+optimal coupling puts all its mass on $\set{x = y}$, so $X = Y$ almost surely and $\mu = \nu$.
+
+The **triangle inequality** uses the **gluing** of two plans. For histograms $\avec$, $\bvec$, $\cvec$ on points
+$x_i$, $y_j$, $z_k$, let $\Pmat$ be an optimal plan from $\avec$ to $\bvec$ and $\Qmat$ an optimal plan from $\bvec$
+to $\cvec$. Define the three-way array $R_{ijk} = P_{ij} Q_{jk} / b_j$ for $b_j > 0$. It describes random points
+$(X, Y, Z)$ with $(X, Y) \sim \Pmat$ and $(Y, Z) \sim \Qmat$: summing over $k$ gives $P_{ij}$, and summing over $i$
+gives $Q_{jk}$. The marginal of $(X, Z)$ is therefore a coupling of $\avec$ and $\cvec$. Using it, the triangle
+inequality for $d$, and Minkowski's inequality for the $L^p$ norm,
+
+$$
+W_p(\avec, \cvec) \le \paren{\expect\, d(X, Z)^p}^{1/p} \le \paren{\expect\paren{d(X, Y) + d(Y, Z)}^p}^{1/p}
+\le \paren{\expect\, d(X, Y)^p}^{1/p} + \paren{\expect\, d(Y, Z)^p}^{1/p} = W_p(\avec, \bvec) + W_p(\bvec, \cvec).
+$$
+
+For general distributions the same argument uses the gluing lemma, which builds $(X, Y, Z)$ from conditional
+distributions <Cite id="villani2009" />.
+
+Two further properties follow from the definition. $W_p$ increases with $p$: for any coupling, $\paren{\expect\,
+d^p}^{1/p} \le \paren{\expect\, d^q}^{1/q}$ when $p \le q$ by Jensen's inequality, so $W_p \le W_q$. And convergence in
+$W_p$ is equivalent to weak convergence together with convergence of $p$-th moments <Cite id="villani2009" />.
+
+## One dimension
+
+On $\reals$ with $d(x, y) = \abs{x - y}$, the monotone coupling $X = F^{-1}(U)$, $Y = G^{-1}(U)$ with $U \sim
+\Unif(0, 1)$ is optimal for every convex cost $\abs{x - y}^p$ with $p \ge 1$ <Cite id="villani2009" />. Hence
+
+$$
+W_p(\mu, \nu)^p = \int_0^1 \abs{F^{-1}(u) - G^{-1}(u)}^p\, du .
+$$
+
+For $p = 1$ this equals the area between the CDFs, $\int \abs{F - G}$ <Cite id="vallender1974" />; the derivation is
+in the <NoteLink to="earth-movers-distance">earth mover's distance</NoteLink> note. Between two samples of equal size,
+$W_p$ pairs the sorted values.
+
+## $W_1$ and Kantorovich–Rubinstein duality
+
+For $p = 1$ the distance has a dual form in which no coupling appears:
+
+$$
+W_1(\mu, \nu) = \sup_{\norm{f}_{\mathrm{Lip}} \le 1} \paren{\expect_{\mu}\brack{f(X)} - \expect_{\nu}\brack{f(Y)}},
+$$
+
+where the supremum is over functions with $\abs{f(x) - f(y)} \le d(x, y)$ for all $x, y$.
+
+**The easy direction.** For any 1-Lipschitz $f$ and any coupling $\pi$,
+$\expect_\mu f - \expect_\nu f = \expect_\pi\brack{f(X) - f(Y)} \le \expect_\pi\, d(X, Y)$. Minimising the right-hand
+side over $\pi$ gives $\expect_\mu f - \expect_\nu f \le W_1$.
+
+**Equality.** General <NoteLink to="kantorovich-duality">Kantorovich duality</NoteLink> states that the optimal
+transport cost equals the largest value of $\expect_\mu \varphi + \expect_\nu \psi$ over pairs of functions with
+$\varphi(x) + \psi(y) \le c(x, y)$ for all $x, y$. For $c = d$ this reduces to one Lipschitz function in two steps.
+
+1. Replacing $\psi$ by the $c$-transform $\varphi^c(y) = \inf_x \paren{d(x, y) - \varphi(x)}$ keeps the pair feasible
+   and can only increase $\psi$, so it does not lower the objective. $\varphi^c$ is an infimum of functions
+   $y \mapsto d(x, y) - \varphi(x)$, each 1-Lipschitz in $y$ by the triangle inequality, so $\varphi^c$ is
+   1-Lipschitz. Transforming again, $\varphi$ can be replaced by the 1-Lipschitz $(\varphi^c)^c$ in the same way.
+2. For a 1-Lipschitz $f$, $f^c = -f$. Taking $x = y$ in the infimum gives $f^c(y) \le -f(y)$. The Lipschitz bound
+   $f(x) - f(y) \le d(x, y)$ gives $d(x, y) - f(x) \ge -f(y)$ for every $x$, so $f^c(y) \ge -f(y)$.
+
+The dual pair is therefore $(f, -f)$ with $f$ 1-Lipschitz, and the dual objective is $\expect_\mu f - \expect_\nu f$.
+The Wasserstein GAN uses this form: a neural network constrained to be 1-Lipschitz plays the role of $f$
+<Cite id="arjovsky2017" />.
+
+## $W_2$ between Gaussians
+
+For $\mu = \Gauss(\mvec_1, \Sigmamat_1)$ and $\nu = \Gauss(\mvec_2, \Sigmamat_2)$ on $\reals^d$ with the Euclidean
+distance <Cite id="dowson1982" />,
+
+$$
+W_2^2(\mu, \nu) = \norm{\mvec_1 - \mvec_2}^2 + \trace\paren{\Sigmamat_1 + \Sigmamat_2
+- 2\paren{\Sigmamat_1^{1/2}\Sigmamat_2\Sigmamat_1^{1/2}}^{1/2}} .
+$$
+
+**Derivation.** For any coupling of $X \sim \mu$ and $Y \sim \nu$ with cross-covariance $\Kmat = \cov(X, Y)$,
+
+$$
+\expect\norm{X - Y}^2 = \norm{\mvec_1 - \mvec_2}^2 + \trace\Sigmamat_1 + \trace\Sigmamat_2 - 2\trace\Kmat .
+$$
+
+The cost depends on the coupling only through $\trace\Kmat$, which must be maximised. The joint covariance
+$\begin{bmatrix} \Sigmamat_1 & \Kmat \\ \Kmat^\top & \Sigmamat_2 \end{bmatrix}$ must be positive semi-definite. For
+invertible $\Sigmamat_1, \Sigmamat_2$, that holds exactly when $\Kmat = \Sigmamat_1^{1/2}\Mmat\Sigmamat_2^{1/2}$ for a
+matrix $\Mmat$ with all singular values at most 1 (the Schur complement $\eye - \Mmat\Mmat^\top$ must be positive
+semi-definite). Then
+
+$$
+\trace\Kmat = \trace\paren{\Mmat\, \Sigmamat_2^{1/2}\Sigmamat_1^{1/2}} \le \sum_i s_i\paren{\Sigmamat_2^{1/2}\Sigmamat_1^{1/2}} ,
+$$
+
+because the trace of a product with a contraction is at most the sum of singular values $s_i$ (von Neumann's trace
+inequality). Equality holds for $\Mmat = \Vmat\Umat^\top$ built from the singular value decomposition
+$\Sigmamat_2^{1/2}\Sigmamat_1^{1/2} = \Umat\Smat\Vmat^\top$. The squared singular values of
+$\Sigmamat_2^{1/2}\Sigmamat_1^{1/2}$ are the eigenvalues of $\Sigmamat_1^{1/2}\Sigmamat_2\Sigmamat_1^{1/2}$, so the sum
+of singular values is $\trace\paren{\Sigmamat_1^{1/2}\Sigmamat_2\Sigmamat_1^{1/2}}^{1/2}$. A jointly Gaussian pair with
+this cross-covariance exists, which gives the formula. The optimal coupling is the linear map
+$T(\xvec) = \mvec_2 + \Amat(\xvec - \mvec_1)$ with $\Amat = \Sigmamat_1^{-1/2}\paren{\Sigmamat_1^{1/2}\Sigmamat_2
+\Sigmamat_1^{1/2}}^{1/2}\Sigmamat_1^{-1/2}$.
+
+The argument used only the first two moments. For any distributions with these means and covariances, the right-hand
+side is therefore a lower bound on $W_2^2$, attained by the Gaussians. The <NoteLink
+to="frechet-inception-distance">Fréchet inception distance</NoteLink> is this formula applied to Gaussians fitted to
+network features.
+
+**Worked example.** In one dimension the formula is $W_2^2 = (m_1 - m_2)^2 + (\sigma_1 - \sigma_2)^2$. Between
+$\Gauss(0, 1)$ and $\Gauss(1, 4)$, with standard deviations 1 and 2, $W_2^2 = 1 + 1 = 2$ and $W_2 = 1.414$. The optimal
+map is $T(x) = 1 + 2x$, which is also the quantile map $G^{-1}(F(x))$. Sorting $10^5$ draws from each distribution and
+pairing them in order gives a value within 0.02 of 2.
+
+## Disjoint supports
+
+Let $\mu = \delta_0$ and $\nu = \delta_\theta$, point masses at $0$ and $\theta \ne 0$. The only coupling pairs $0$ with
+$\theta$, so $W_p = \abs{\theta}$. The density-based divergences cannot see $\theta$:
+
+- total variation $= 1$ for every $\theta \ne 0$;
+- Jensen–Shannon divergence $= \log 2$ for every $\theta \ne 0$;
+- $\KL(\mu \,\|\, \nu) = \infty$ for every $\theta \ne 0$.
+
+The same holds for two uniform distributions on $[0, 1]$ and $[\theta, \theta + 1]$ once $\abs{\theta} \ge 1$. The
+divergences are constant in $\theta$, so their gradient with respect to $\theta$ is zero or undefined. $W_p$ is
+$\abs{\theta}$, with gradient $\pm 1$ pointing towards the other distribution. This is the argument for training
+generative models with $W_1$: a generator whose samples lie on a low-dimensional set that misses the data still gets a
+useful gradient <Cite id="arjovsky2017" />.
+
+<DisjointSupports />
+
+## Assumptions
+
+- **Finite moments.** $W_p(\mu, \nu)$ is finite when both distributions have finite $p$-th moments. Heavy-tailed
+  distributions can have $W_2 = \infty$ and finite $W_1$.
+- **A ground metric.** The distance is only as meaningful as $d$. Pixels compared with the Euclidean distance make two
+  images of the same object shifted by a few pixels far apart.
+
+## Pitfalls
+
+- **Slow estimation in high dimension.** For a distribution on $\reals^d$ with $d > 2$ and its empirical measure from
+  $N$ samples, $\expect W_1$ decays like $N^{-1/d}$ <Cite id="fournier2015" />. Plug-in estimates are biased and need
+  exponentially many samples in $d$. Entropic regularisation and slicing improve this rate.
+- **Computation.** Exact $W_p$ between $N$-point samples is an assignment problem of cost about $O(N^3)$. The closed
+  forms hold only in one dimension and between Gaussians.
+- **$W_1$ and $W_2$ differ.** They share the metric axioms but not the geometry. $W_2$ has the Riemannian-like
+  structure that gives geodesics and barycentres, and $W_1$ has the Lipschitz dual.

@@ -104,48 +104,51 @@ export function ReferencesPage() {
         {ENTRIES.length} sources cited across the notes. Search by title or author.
       </p>
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="relative min-w-0 flex-1">
-          <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-          <Input
-            value={q}
-            onChange={(e) => set({ q: e.target.value, page: undefined })}
-            placeholder="Search titles and authors"
-            className="pl-8"
-            aria-label="Search references"
-          />
+      {/* The search, sort and pager stay in view under the site header while the table scrolls. */}
+      <div className="sticky top-14 z-10 -mx-4 space-y-3 border-b bg-background/95 px-4 py-3 backdrop-blur lg:-mx-6 lg:px-6">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative min-w-0 flex-1">
+            <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+            <Input
+              value={q}
+              onChange={(e) => set({ q: e.target.value, page: undefined })}
+              placeholder="Search titles and authors"
+              className="pl-8"
+              aria-label="Search references"
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <ToggleGroup
+              value={[by]}
+              onValueChange={(v) =>
+                v[0] && set({ sort: v[0] === 'title' ? 'title' : undefined, dir: undefined, page: undefined })
+              }
+              variant="outline"
+              size="sm"
+              spacing={0}
+              aria-label="Sort by"
+            >
+              <ToggleGroupItem value="year" className="px-3">
+                Year
+              </ToggleGroupItem>
+              <ToggleGroupItem value="title" className="px-3">
+                Title
+              </ToggleGroupItem>
+            </ToggleGroup>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              onClick={() => set({ dir: descending ? 'asc' : 'desc', page: undefined })}
+              aria-label={descending ? 'Descending; switch to ascending' : 'Ascending; switch to descending'}
+              title={descending ? 'Descending' : 'Ascending'}
+            >
+              {descending ? <ArrowDownWideNarrow /> : <ArrowUpNarrowWide />}
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-1.5">
-          <ToggleGroup
-            value={[by]}
-            onValueChange={(v) =>
-              v[0] && set({ sort: v[0] === 'title' ? 'title' : undefined, dir: undefined, page: undefined })
-            }
-            variant="outline"
-            size="sm"
-            spacing={0}
-            aria-label="Sort by"
-          >
-            <ToggleGroupItem value="year" className="px-3">
-              Year
-            </ToggleGroupItem>
-            <ToggleGroupItem value="title" className="px-3">
-              Title
-            </ToggleGroupItem>
-          </ToggleGroup>
-          <Button
-            variant="outline"
-            size="icon-sm"
-            onClick={() => set({ dir: descending ? 'asc' : 'desc', page: undefined })}
-            aria-label={descending ? 'Descending; switch to ascending' : 'Ascending; switch to descending'}
-            title={descending ? 'Descending' : 'Ascending'}
-          >
-            {descending ? <ArrowDownWideNarrow /> : <ArrowUpNarrowWide />}
-          </Button>
-        </div>
-      </div>
 
-      {pager}
+        {pager}
+      </div>
       <div className="my-3 overflow-x-auto rounded-lg border">
         <Table>
           <TableHeader>

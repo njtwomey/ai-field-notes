@@ -1,0 +1,160 @@
+---
+title: Hierarchical Dirichlet process topic model
+kind: concept
+summary: 'The HDP topic model is LDA with unboundedly many topics. A global Dirichlet process draws topic weights $\betavec$; each document draws its own weights $\pivec_d \sim \operatorname{DP}(\alpha_0, \betavec)$ over the same topics. The number of topics used grows with the data.'
+tags: [topic-models, unsupervised, bayesian, bayesian-nonparametrics, latent-variable-models, nlp, worked-example]
+aliases: [HDP, HDP-LDA, hierarchical Dirichlet process, Chinese restaurant franchise, Dirichlet process, stick-breaking construction]
+requires: [latent-dirichlet-allocation, dirichlet-distribution, beta-distribution]
+partOf: [topic-model-family]
+related: [hierarchical-lda, gibbs-sampling, gaussian-mixture-model, hierarchical-models]
+references: [teh2006hdp, griffiths2004]
+status: draft
+updated: 2026-09-27
+---
+
+import { Plate } from '../_shared/Plate'
+import { hdp } from '../_shared/plates'
+import { TopicGrowth } from './TopicGrowth'
+
+<Definition>
+The **hierarchical Dirichlet process** (HDP) topic model replaces LDA's fixed number of topics $K$ with a countably
+infinite set <Cite id="teh2006hdp" />. Global topic weights $\betavec = (\beta_1, \beta_2, \dots)$ are drawn by
+stick-breaking with concentration $\gamma$. Each document draws its own weights
+$\pivec_d \sim \operatorname{DP}(\alpha_0, \betavec)$ over the same topics, each word draws a topic $z_{dn} \sim \pivec_d$,
+and topic $k$ emits words from $\phivec_k \sim \Dir(\eta)$. Any finite corpus uses finitely many topics, and that number
+is inferred.
+</Definition>
+
+## The problem it solves
+
+<NoteLink to="latent-dirichlet-allocation">LDA</NoteLink> needs the number of topics $K$ in advance. Too few merge
+distinct subjects; too many split them or leave topics empty. Choosing $K$ by held-out likelihood means fitting many
+models. A nonparametric prior puts probability on every number of topics and lets the posterior choose, with more
+topics becoming available as the corpus grows.
+
+The difficulty is sharing. Each document needs its own mixture, but all documents must mix the same topics. The HDP
+achieves this with two levels of Dirichlet processes.
+
+## The Dirichlet process
+
+A **Dirichlet process** $\operatorname{DP}(\gamma, H)$ with concentration $\gamma > 0$ and base distribution $H$ is a
+distribution over discrete distributions. The **stick-breaking construction** draws one:
+
+$$
+v_k \sim \Beta(1, \gamma), \qquad \beta_k = v_k\prod_{j<k}(1 - v_j), \qquad \phivec_k \sim H, \qquad
+G = \sum_{k=1}^\infty \beta_k\,\delta_{\phivec_k}.
+$$
+
+Start with a stick of length one. Break off a fraction $v_1$; that piece is $\beta_1$. Break a fraction $v_2$ off the
+remainder; that is $\beta_2$; and so on. The weights sum to one. Since $\expect[v_k] = 1/(1 + \gamma)$, the expected
+weights decay geometrically, $\expect[\beta_k] = \gamma^{k-1}/(1 + \gamma)^k$: a small $\gamma$ puts most weight on the
+first few atoms, a large $\gamma$ spreads it over many. The weight sequence is written $\betavec \sim \operatorname{GEM}(\gamma)$.
+
+**The predictive rule.** Draws from $G$ repeat atoms. Integrating $G$ out, the $(n + 1)$-th draw equals an atom already
+drawn $n_k$ times with probability $n_k/(n + \gamma)$ and is a fresh draw from $H$ with probability $\gamma/(n + \gamma)$.
+This is the **Chinese restaurant process**: customer $n + 1$ joins a table in proportion to its occupancy or opens a new
+one in proportion to $\gamma$.
+
+<Derivation title="The predictive rule from a finite Dirichlet">
+Approximate the DP by $L$ atoms with weights $\betavec \sim \Dir(\gamma/L, \dots, \gamma/L)$. After $n$ draws with counts
+$n_1, \dots, n_L$, conjugacy gives the posterior $\Dir(\gamma/L + n_1, \dots, \gamma/L + n_L)$, whose mean gives the
+predictive $p(\text{atom } k) = (n_k + \gamma/L)/(n + \gamma)$. As $L \to \infty$, an atom already used has probability
+$n_k/(n + \gamma)$. The unused atoms, of which there are almost $L$, have total probability
+$\sum_{\text{unused}}(\gamma/L)/(n + \gamma) \to \gamma/(n + \gamma)$.
+</Derivation>
+
+## Two levels
+
+If every document drew its own $G_d \sim \operatorname{DP}(\alpha_0, H)$ with a continuous $H$, the atoms of different
+documents would differ with probability one, and no topic would be shared. The HDP makes the base distribution itself a
+draw from a Dirichlet process:
+
+$$
+G_0 \sim \operatorname{DP}(\gamma, H), \qquad G_d \mid G_0 \sim \operatorname{DP}(\alpha_0, G_0).
+$$
+
+$G_0 = \sum_k\beta_k\delta_{\phivec_k}$ is discrete, so every atom of $G_d$ is one of $G_0$'s atoms. Each document is a
+reweighting of the same topics, $G_d = \sum_k\pi_{dk}\delta_{\phivec_k}$, with $\pivec_d \sim \operatorname{DP}(\alpha_0,
+\betavec)$ and $\expect[\pivec_d] = \betavec$. The global weights $\betavec$ say how common each topic is in the corpus.
+The concentration $\alpha_0$ says how closely each document follows the corpus-wide weights.
+
+<Plate
+  spec={hdp}
+  title="The HDP topic model in plate notation"
+  caption="Stick-breaking form. Global weights $\betavec \sim \operatorname{GEM}(\gamma)$ are shared by all documents; document weights $\pivec_d$ scatter around them with concentration $\alpha_0$. The topic plate has infinitely many copies."
+/>
+
+**The Chinese restaurant franchise.** Applying the predictive rule at both levels gives a sampling scheme with the
+parameters integrated out. Each document is a restaurant, each word a customer, and each topic a dish on a menu shared by
+the franchise. A customer sits at an occupied table in proportion to its occupancy, or at a new table in proportion to
+$\alpha_0$. A new table orders an existing dish in proportion to the number of tables in the franchise already serving
+it, or a new dish in proportion to $\gamma$. Popular topics are ordered by many tables in many restaurants.
+
+<TopicGrowth />
+
+## How fast the number of topics grows
+
+In a Chinese restaurant process with concentration $\alpha$, customer $i$ opens a new table with probability
+$\alpha/(\alpha + i - 1)$. By linearity of expectation the expected number of tables after $n$ customers is
+
+$$
+\expect[m \mid n] = \sum_{i=1}^n\frac{\alpha}{\alpha + i - 1} \approx \alpha\log\paren{1 + \frac{n}{\alpha}}.
+$$
+
+In the franchise, words open tables within documents at this rate with $\alpha_0$, and tables open topics across the
+corpus at the same rate with $\gamma$. The number of topics therefore grows like $\gamma\log(1 + m/\gamma)$ in the
+number of tables $m$, and so roughly logarithmically in the size of the corpus.
+
+## Inference by direct assignment
+
+Teh and co-authors give several Gibbs samplers <Cite id="teh2006hdp" />. The direct-assignment sampler keeps the global
+weights $\betavec$ explicitly, for the $K$ topics in use plus the remainder $\beta_u = 1 - \sum_{k \le K}\beta_k$ for all
+unused topics. Given $\betavec$, the document weights over the $K + 1$ groups are Dirichlet,
+$\Dir(\alpha_0\beta_1, \dots, \alpha_0\beta_K, \alpha_0\beta_u)$, a finite Dirichlet with the same conjugacy as LDA.
+Collapsing $\pivec_d$ and the topics as in the LDA sampler <Cite id="griffiths2004" /> gives
+
+$$
+p(z_i = k \mid \cdot) \propto
+\begin{cases}
+\paren{n_{dk}^{\neg i} + \alpha_0\beta_k}\,\dfrac{n_{kw}^{\neg i} + \eta}{n_k^{\neg i} + V\eta}, & k \le K,\\[2ex]
+\alpha_0\beta_u\,\dfrac{1}{V}, & k = \text{new}.
+\end{cases}
+$$
+
+LDA's symmetric $\alpha$ becomes $\alpha_0\beta_k$, so a topic common in the corpus is a priori common in every document.
+A new topic has no words yet, and its predictive probability of word $w$ under $\Dir(\eta)$ is $\eta/(V\eta) = 1/V$. When
+a new topic is chosen, $\beta_u$ is split by a fresh stick break, $v \sim \Beta(1, \gamma)$: the new topic takes
+$v\beta_u$ and the remainder becomes $(1 - v)\beta_u$. After a sweep, the number of tables $m_{dk}$ serving topic $k$ in
+each document is sampled, and the global weights are redrawn from
+$(\beta_1, \dots, \beta_K, \beta_u) \sim \Dir(m_{\cdot 1}, \dots, m_{\cdot K}, \gamma)$, with $m_{\cdot k} = \sum_d m_{dk}$.
+
+## Worked example
+
+**Growth.** With $\alpha = 1$ and $n = 100$ customers, the expected number of tables is the harmonic number
+$H_{100} = 5.19$; the approximation $\log 101 = 4.62$ underestimates it by about Euler's constant.
+
+**One Gibbs step.** Two topics are in use, with $\betavec = (0.5, 0.3)$ and $\beta_u = 0.2$, and $\alpha_0 = 1$. In
+document $d$, three other words are in topic 1 and none in topic 2. For the current word $w$, the topic factors are
+$0.05$ and $0.2$, and $V = 1000$.
+
+- Topic 1: $(3 + 0.5) \times 0.05 = 0.175$.
+- Topic 2: $(0 + 0.3) \times 0.2 = 0.060$.
+- New topic: $0.2 \times 0.001 = 0.0002$.
+
+Normalised, $(0.744, 0.255, 0.0009)$. Topic 2 keeps a real chance although the document has not used it, because it is
+common in the corpus and likes the word. A new topic is opened only when no existing topic explains a word.
+
+## Assumptions
+
+- **Exchangeable documents and words.** As in LDA, order is ignored.
+- **Logarithmic growth.** The Dirichlet process implies a specific growth rate and a geometric decay of topic weights.
+  Corpora whose topic frequencies follow a power law are better matched by the Pitman–Yor process.
+
+## Pitfalls
+
+- **$K$ is not free of assumptions.** The inferred number of topics depends strongly on $\gamma$, $\alpha_0$ and the
+  topic prior $\eta$: a small $\eta$ demands sharp topics and yields more of them.
+- **Slow mixing.** Topics are opened and closed one word at a time. Split–merge moves or variational methods help on
+  large corpora.
+- **Relatives.** <NoteLink to="hierarchical-lda">Hierarchical LDA</NoteLink> uses a nested Chinese restaurant process to
+  arrange an unbounded number of topics in a tree.

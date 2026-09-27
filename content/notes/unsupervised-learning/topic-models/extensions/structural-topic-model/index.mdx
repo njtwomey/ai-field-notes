@@ -1,0 +1,131 @@
+---
+title: Structural topic model
+kind: concept
+summary: 'The structural topic model lets document metadata change topics. Prevalence covariates $\xvec_d$ shift the mean of logistic-normal topic proportions, $\etavec_d \sim \Gauss(\Gammamat\transpose\xvec_d, \Sigmamat)$; content covariates change each topic''s word distribution through sparse log-linear deviations.'
+tags: [topic-models, unsupervised, bayesian, latent-variable-models, nlp, social-science, worked-example]
+aliases: [STM, structural topic models, Dirichlet-multinomial regression, DMR topic model, topic prevalence covariates]
+requires: [correlated-topic-model, linear-regression, laplace-approximation]
+partOf: [topic-model-family]
+related: [latent-dirichlet-allocation, author-topic-model, supervised-lda, multinomial-logistic-regression]
+references: [roberts2014stm, roberts2016stm, roberts2019stm, mimno2008dmr]
+status: draft
+updated: 2026-09-27
+---
+
+import { Plate } from '../_shared/Plate'
+import { stm } from '../_shared/plates'
+
+<Definition>
+The **structural topic model** (STM) is a topic model in which observed document covariates affect topics
+<Cite id="roberts2014stm" /> <Cite id="roberts2016stm" />. **Prevalence** covariates $\xvec_d \in \reals^P$ set the mean
+of logistic-normal topic proportions: $\etavec_d \sim \Gauss(\Gammamat\transpose\xvec_d, \Sigmamat)$ and
+$\thetavec_d = \operatorname{softmax}(\etavec_d)$, with a $P \times K$ coefficient matrix $\Gammamat$. A categorical
+**content** covariate $y_d$ changes the word distribution of every topic through additive deviations in log space. With
+no covariates the STM is the <NoteLink to="correlated-topic-model">correlated topic model</NoteLink>.
+</Definition>
+
+## Intuition
+
+Social scientists fit topic models to test hypotheses. Do Republican and Democratic senators write about the same issues
+in the same proportions? Do respondents in a treatment group mention different reasons in open-ended answers? Fitting
+LDA and then regressing the topic proportions on the covariates is the common two-stage approach, but the topics were
+fitted without knowledge of the covariates, and the uncertainty of the proportions is ignored in the regression.
+
+The STM puts the covariates inside the model. Two questions are separated:
+
+- **How much** a document talks about each topic: prevalence, driven by $\xvec_d$.
+- **How** a document talks about a topic: content. Liberal and conservative writers discuss immigration with different
+  words, and a content covariate gives the topic a version for each group.
+
+## Generative process
+
+For each document $d$ with prevalence covariates $\xvec_d$ and content covariate $y_d \in \set{1, \dots, A}$:
+
+1. Draw $\etavec_d \sim \Gauss(\Gammamat\transpose\xvec_d, \Sigmamat)$, with the $K$-th coordinate fixed at zero for
+   identifiability, and set $\thetavec_d = \operatorname{softmax}(\etavec_d)$.
+2. Form the document's topic–word distributions. For topic $k$ and word $v$,
+   $$
+   \beta_{d,k,v} \propto \exp\paren{m_v + \kappa^{(t)}_{k,v} + \kappa^{(c)}_{y_d,v} + \kappa^{(i)}_{y_d,k,v}},
+   $$
+   where $m_v$ is the baseline log frequency of word $v$, $\kappavec^{(t)}$ are topic deviations,
+   $\kappavec^{(c)}$ covariate deviations and $\kappavec^{(i)}$ their interactions.
+3. For each word position $n$, draw $z_{dn} \sim \Cat(\thetavec_d)$ and $w_{dn} \sim \Cat(\betavec_{d, z_{dn}})$.
+
+<Plate
+  spec={stm}
+  title="The structural topic model in plate notation"
+  caption="Prevalence covariates $\xvec_d$ set the mean of the log-proportions $\etavec_d$ through $\Gammamat$. The content covariate $y_d$ and the deviations $\kappavec$ determine the word distribution that generates $w_{dn}$ for the assigned topic."
+/>
+
+The content model is a sparse additive generative model. Every topic, every covariate level and every interaction adds a
+vector of log-frequency deviations to one shared baseline. Deviations have a sparsity-inducing prior, so most are zero:
+a topic's vocabulary differs between groups only in the words that the data support. Without a content covariate,
+$\beta_{k,v} \propto \exp(m_v + \kappa^{(t)}_{k,v})$, which is a reparameterised topic.
+
+A related earlier model, Dirichlet-multinomial regression, lets covariates set the parameters of a Dirichlet prior,
+$\alpha_{dk} = \exp(\xvec_d\transpose\lambdavec_k)$ <Cite id="mimno2008dmr" />. It keeps LDA's conjugacy but, like LDA,
+cannot express correlations between topics.
+
+## Inference
+
+The STM is fitted by variational EM with a Laplace approximation for the logistic normal
+<Cite id="roberts2016stm" />.
+
+**E-step.** For each document, the topic assignments are summed out, which gives the log joint of $\etavec_d$ and the
+words:
+
+$$
+f(\etavec_d) = -\tfrac12(\etavec_d - \muvec_d)\transpose\Sigmamat^{-1}(\etavec_d - \muvec_d) +
+\sum_v c_{dv}\log\sum_k\theta_{dk}\,\beta_{d,k,v} + \text{const},
+$$
+
+with $\muvec_d = \Gammamat\transpose\xvec_d$ and $c_{dv}$ the count of word $v$ in document $d$. The
+<NoteLink to="laplace-approximation">Laplace approximation</NoteLink> finds the mode $\hat\etavec_d$ by quasi-Newton
+optimisation and sets $q(\etavec_d) = \Gauss(\hat\etavec_d, \Hmat_d^{-1})$, where $\Hmat_d$ is the negative Hessian of
+$f$ at the mode. The responsibilities of the topics for word $v$ are
+$r_{dvk} \propto \hat\theta_{dk}\,\beta_{d,k,v}$.
+
+**M-step.**
+
+- **Prevalence.** $\Gammamat$ is the solution of a regression of the modes $\hat\etavec_d$ on $\xvec_d$, one column per
+  topic, with a Gaussian prior on the coefficients. It is linear regression because $\etavec_d$ is Gaussian with mean
+  $\Gammamat\transpose\xvec_d$.
+- **Covariance.** As in the CTM, $\hat\Sigmamat = \frac1D\sum_d\paren{\Hmat_d^{-1} + (\hat\etavec_d - \muvec_d)(\hat\etavec_d -
+  \muvec_d)\transpose}$.
+- **Content.** Each $\kappavec$ is fitted by penalised multinomial logistic regression of the expected word counts
+  $\sum_d c_{dv}r_{dvk}$ on topic and covariate indicators.
+
+**Estimating effects.** The quantity of interest is often the effect of a covariate on the expected proportion of a topic.
+The R package stm estimates it by the method of composition: draw proportions from the approximate posterior of each
+document, regress them on the covariates, and repeat, so that the uncertainty of the proportions enters the standard
+errors <Cite id="roberts2019stm" />.
+
+## Worked example
+
+Three topics, with $\eta_3 = 0$. One binary covariate $x$ (0 or 1) and an intercept. The coefficients are: topic 1,
+intercept $0$, slope $1$; topic 2, intercept $0.5$, slope $-0.5$.
+
+- For $x = 0$, the prior mean is $\muvec = (0, 0.5, 0)$, and its softmax is $(0.274, 0.452, 0.274)$.
+- For $x = 1$, $\muvec = (1, 0, 0)$, and its softmax is $(0.576, 0.212, 0.212)$.
+
+Switching the covariate on doubles the share of topic 1 and halves topic 2 in a typical document. The expected
+proportions differ somewhat from these values, since the softmax of the mean is not the mean of the softmax.
+
+## Assumptions
+
+- **Linear effects in log-ratio space.** Covariates act additively on $\etavec_d$. Nonlinear effects need spline bases in
+  $\xvec_d$.
+- **Categorical content covariate.** One discrete covariate changes the vocabulary.
+- **Covariates are exogenous.** A covariate that is itself caused by the text violates the model's direction of
+  dependence.
+
+## Pitfalls
+
+- **Causal claims.** A prevalence coefficient is an association, as in any regression. A causal reading needs a design,
+  such as randomised treatment.
+- **Topics shaped by the hypothesis.** Because covariates influence which topics are found, a significant effect can
+  partly reflect topics that the covariate helped to create. Validating topics on held-out data, or across
+  specifications, reduces this risk.
+- **Relatives.** <NoteLink to="supervised-lda">Supervised LDA</NoteLink> puts metadata downstream as a response. The
+  <NoteLink to="author-topic-model">author-topic model</NoteLink> is a special case in spirit, with authorship as the
+  only prevalence covariate.

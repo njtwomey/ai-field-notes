@@ -1,0 +1,172 @@
+---
+title: Dynamic topic model
+kind: concept
+summary: 'The dynamic topic model splits a corpus into time slices and lets each topic drift: the natural parameters $\betavec_{t,k}$ of topic $k$ follow a Gaussian random walk, $\betavec_{t,k} \sim \Gauss(\betavec_{t-1,k}, \sigma^2\I)$. Variational Kalman filtering fits the chain.'
+tags: [topic-models, unsupervised, bayesian, latent-variable-models, nlp, time-series, worked-example]
+aliases: [DTM, dynamic topic models, continuous-time dynamic topic model, cDTM]
+requires: [latent-dirichlet-allocation, multivariate-normal-distribution]
+partOf: [topic-model-family]
+related: [kalman-filter, kalman-smoother, topics-over-time, correlated-topic-model, softmax-and-log-sum-exp, variational-inference, random-walk]
+references: [blei2006dtm, wang2008cdtm, blei2003]
+status: draft
+updated: 2026-09-27
+---
+
+import { Plate } from '../_shared/Plate'
+import { dtm } from '../_shared/plates'
+import { TopicDrift } from './TopicDrift'
+
+<Definition>
+The **dynamic topic model** (DTM) is a topic model for documents grouped into ordered time slices $t = 1, \dots, T$
+<Cite id="blei2006dtm" />. Topic $k$ at slice $t$ is a vector of natural parameters $\betavec_{t,k} \in \reals^V$, and
+its word distribution is $\operatorname{softmax}(\betavec_{t,k})$. The natural parameters follow a Gaussian random walk,
+$\betavec_{t,k} \mid \betavec_{t-1,k} \sim \Gauss(\betavec_{t-1,k}, \sigma^2\I)$. Within a slice, documents are
+generated as in <NoteLink to="latent-dirichlet-allocation">LDA</NoteLink>, with logistic-normal topic proportions whose
+mean $\alphavec_t$ also drifts.
+</Definition>
+
+## Intuition
+
+A topic in a long-running corpus changes its vocabulary. An electronics topic in 1920 uses "valve" and "tube"; the same
+topic in 1960 uses "transistor"; in 1990 it uses "chip". LDA fits one fixed word distribution per topic to the whole
+corpus. That fixed distribution averages the eras and describes none of them. Fitting LDA separately to each slice gives
+topics that match their era, but the topics of different slices are not aligned: topic 3 in 1920 has no relation to
+topic 3 in 1960.
+
+The DTM keeps $K$ topics throughout and lets each one move a little between consecutive slices. Topic $k$ is then a
+trajectory, and its word distribution at any slice is estimated from that slice's documents and, through the chain,
+from neighbouring slices.
+
+## Generative process
+
+With $T$ slices, $K$ topics, a vocabulary of $V$ words, drift variances $\sigma^2$ and $\delta^2$, and a
+document-level variance $a^2$:
+
+1. For each topic $k$, draw $\betavec_{1,k}$ from a broad Gaussian, then
+   $\betavec_{t,k} \sim \Gauss(\betavec_{t-1,k}, \sigma^2\I)$ for $t = 2, \dots, T$.
+2. Draw the mean topic proportions $\alphavec_t \sim \Gauss(\alphavec_{t-1}, \delta^2\I)$, a vector in $\reals^K$.
+3. For each document $d$ in slice $t$:
+   1. Draw $\etavec_d \sim \Gauss(\alphavec_t, a^2\I)$ and set $\thetavec_d = \operatorname{softmax}(\etavec_d)$.
+   2. For each word position $n$, draw $z_{dn} \sim \Cat(\thetavec_d)$ and then
+      $w_{dn} \sim \Cat(\operatorname{softmax}(\betavec_{t, z_{dn}}))$.
+
+The softmax maps a vector $\betavec \in \reals^V$ to the probability vector with entries
+$\exp(\beta_w)/\sum_{v}\exp(\beta_v)$.
+
+<Plate
+  spec={dtm}
+  title="The dynamic topic model in plate notation"
+  caption="Three consecutive slices. Within each slice the model is LDA with logistic-normal proportions $\etavec_d$. The topics $\betavec_{t,k}$ (one chain per topic, on the $K$ plate) and the proportion means $\alphavec_t$ are linked across slices by Gaussian random walks."
+/>
+
+The Dirichlet prior of LDA is replaced by Gaussians on natural parameters because a Dirichlet cannot express "close to
+the previous value" with a controllable spread and remain tractable along a chain. A Gaussian random walk can: the
+variance $\sigma^2$ sets how far a topic moves per slice. With $\sigma^2 = 0$ every slice shares one topic, as in a
+static model with a logistic-normal prior. With $\sigma^2 \to \infty$ the slices decouple.
+
+## Inference
+
+The posterior over the chains is intractable, because the softmax links the Gaussian $\betavec_{t,k}$ to categorical
+words. Blei and Lafferty use a variational approximation that makes each topic chain look like a
+<NoteLink to="linear-gaussian-state-space-models">linear-Gaussian state-space model</NoteLink>
+<Cite id="blei2006dtm" />.
+
+**Variational observations.** For each topic and slice, introduce free parameters $\hat\betavec_{t,k}$ and pretend that
+they are noisy observations of the chain, $\hat\betavec_{t,k} \mid \betavec_{t,k} \sim \Gauss(\betavec_{t,k}, \hat\nu^2\I)$.
+The variational posterior $q(\betavec_{1:T,k})$ is defined as the exact posterior of the chain given these pseudo-data.
+That posterior is Gaussian and is computed exactly by a Kalman filter followed by a smoother. The pseudo-observations are
+then moved by gradient ascent on the evidence lower bound, so that the smoothed chain explains the real words.
+
+**The forward filter.** The covariance is isotropic, so each word coordinate runs its own scalar filter. Let
+$m_{t-1}$ and $V_{t-1}$ be the filtered mean and variance of one coordinate $\beta_{t-1}$ given
+$\hat\beta_{1:t-1}$. The random walk adds variance $\sigma^2$, so the prediction for slice $t$ is
+$\beta_t \mid \hat\beta_{1:t-1} \sim \Gauss(m_{t-1}, P_t)$ with $P_t = V_{t-1} + \sigma^2$. Multiplying this prior by
+the pseudo-likelihood $\Gauss(\hat\beta_t \mid \beta_t, \hat\nu^2)$ and completing the square gives a Gaussian whose
+precision is the sum of the two precisions and whose mean is the precision-weighted average:
+
+$$
+V_t = \paren{\frac{1}{P_t} + \frac{1}{\hat\nu^2}}^{-1} = \frac{P_t\,\hat\nu^2}{P_t + \hat\nu^2}, \qquad
+m_t = \frac{\hat\nu^2}{P_t + \hat\nu^2}\,m_{t-1} + \frac{P_t}{P_t + \hat\nu^2}\,\hat\beta_t.
+$$
+
+The weight $P_t/(P_t + \hat\nu^2)$ is the Kalman gain. A large drift variance makes $P_t$ large and the gain close to
+one, so the estimate follows the current slice. A small drift variance keeps the estimate near the previous slice.
+
+**The backward smoother.** The filter uses only past slices. The Rauch–Tung–Striebel smoother adds the future. With
+smoothed moments $\tilde m_t$ and $\tilde V_t$ and gain $J_{t-1} = V_{t-1}/(V_{t-1} + \sigma^2)$,
+
+$$
+\tilde m_{t-1} = m_{t-1} + J_{t-1}\paren{\tilde m_t - m_{t-1}}, \qquad
+\tilde V_{t-1} = V_{t-1} + J_{t-1}^2\paren{\tilde V_t - P_t}.
+$$
+
+<Derivation title="Why the smoother has this form">
+The pair $(\beta_{t-1}, \beta_t)$ given $\hat\beta_{1:t-1}$ is jointly Gaussian with means $(m_{t-1}, m_{t-1})$,
+variances $(V_{t-1}, P_t)$ and covariance $V_{t-1}$, since $\beta_t = \beta_{t-1} + \epsilon$ with independent noise.
+Conditioning a Gaussian on one coordinate gives
+$\expect[\beta_{t-1} \mid \beta_t, \hat\beta_{1:t-1}] = m_{t-1} + (V_{t-1}/P_t)(\beta_t - m_{t-1})$, and future
+pseudo-observations add no information about $\beta_{t-1}$ once $\beta_t$ is known (the chain is Markov). Averaging over
+the smoothed distribution of $\beta_t$ replaces $\beta_t$ by $\tilde m_t$, which is the mean formula with
+$J_{t-1} = V_{t-1}/P_t$. The conditional variance is $V_{t-1} - V_{t-1}^2/P_t$; adding the variance
+$J_{t-1}^2\tilde V_t$ contributed by the uncertain $\beta_t$ gives $V_{t-1} + J_{t-1}^2(\tilde V_t - P_t)$.
+</Derivation>
+
+**The word term.** The evidence lower bound needs $\expect_q[\log p(w \mid \betavec_{t,k})]$ for each word, which
+contains $\expect_q\brack{\log\sum_v \exp\beta_{t,k,v}}$. The logarithm is concave, so it lies below its tangent at any
+$\zeta > 0$: $\log x \le x/\zeta - 1 + \log\zeta$. Under the Gaussian $q$,
+$\expect_q[\exp\beta_v] = \exp(\tilde m_v + \tilde V_v/2)$, so
+
+$$
+\expect_q\brack{\log\sum_v e^{\beta_v}} \le \frac{1}{\zeta}\sum_v \exp\paren{\tilde m_v + \tilde V_v/2} - 1 + \log\zeta,
+$$
+
+which is tight at $\zeta = \sum_v \exp(\tilde m_v + \tilde V_v/2)$. With this bound the lower bound is a smooth function
+of the pseudo-observations, and its gradient flows back through the smoother. Document-level updates for $\etavec_d$ and
+the topic assignments are those of the <NoteLink to="correlated-topic-model">correlated topic model</NoteLink> with a
+diagonal covariance.
+
+<TopicDrift />
+
+## Worked example
+
+**One filter step.** A word coordinate has filtered moments $m_{t-1} = 0$ and $V_{t-1} = 0.5$. The drift variance is
+$\sigma^2 = 0.1$, the pseudo-observation variance is $\hat\nu^2 = 0.4$, and the pseudo-observation at slice $t$ is
+$\hat\beta_t = 1$.
+
+- Prediction: $P_t = 0.5 + 0.1 = 0.6$.
+- Gain: $0.6/(0.6 + 0.4) = 0.6$.
+- Update: $m_t = 0.4 \times 0 + 0.6 \times 1 = 0.6$ and $V_t = 0.6 \times 0.4/1.0 = 0.24$.
+
+The estimate moves 60% of the way to the new pseudo-observation. With $\sigma^2 = 0.01$ the gain is
+$0.51/0.91 = 0.56$, and the estimate moves less.
+
+**Smoothing in the figure.** The figure replaces the fitted pseudo-observations by the log frequencies of each word in
+each slice, with the delta-method variance $1/(n + \tfrac12)$ of a log count $n$. The smoothed curve is then the
+filter-and-smoother output above, mapped back through the softmax. With 60 tokens per slice and $\sigma = 0.3$ the
+smoothed estimate is closer to the truth on average than both the raw frequencies and the static topic.
+
+## Continuous time
+
+Time slices force a choice of granularity. Fine slices give many parameters and few documents per slice; coarse slices
+blur changes. The **continuous-time dynamic topic model** replaces the discrete random walk with Brownian motion
+<Cite id="wang2008cdtm" />. Between timestamps $s_{j-1}$ and $s_j$ the natural parameters change by a Gaussian with
+variance $\sigma^2(s_j - s_{j-1})$, so the prediction step of the filter becomes
+$P_j = V_{j-1} + \sigma^2\,(s_j - s_{j-1})$. Documents can then carry exact timestamps, and slices with no documents cost
+nothing.
+
+## Assumptions
+
+- **A fixed set of $K$ topics.** Topics drift but are never born or retired. A new subject must borrow an existing
+  topic.
+- **Smooth drift.** A Gaussian random walk favours small steps. Abrupt vocabulary shifts are smoothed over several
+  slices.
+- **Exchangeable documents within a slice.** Order inside a slice is ignored.
+
+## Pitfalls
+
+- **Drift variance.** $\sigma^2$ trades smoothness against responsiveness, as the figure shows. It is usually set by
+  hand or by held-out likelihood.
+- **Cost.** Each variational iteration runs a filter and smoother for every topic and every vocabulary word, which is
+  $O(KVT)$ per pass on top of the per-document updates.
+- **Compared with <NoteLink to="topics-over-time">topics over time</NoteLink>.** The DTM changes what a topic says.
+  Topics over time keeps topics fixed and models when each topic is used. The two answer different questions.

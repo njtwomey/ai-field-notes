@@ -1,0 +1,147 @@
+---
+title: Optimal transport
+kind: overview
+summary: 'Optimal transport finds the cheapest way to move one probability distribution onto another, given a cost $c(x, y)$ per unit of mass. Monge asked for a map $T$; Kantorovich relaxed it to a coupling $\pi$ with the two marginals, which always exists and makes the problem a linear program.'
+tags: [optimal-transport, probability, optimisation, duality, worked-example]
+aliases: [Monge problem, Kantorovich problem, Monge–Kantorovich problem, transport plan, coupling, transport map, Kantorovich relaxation]
+requires: [linear-programming]
+related: [lagrangian-duality, f-divergences-and-jensen-shannon, pairwise-distances-and-cosine-similarity]
+references: [monge1781, kantorovich1942, villani2009, peyre2019, santambrogio2015, brenier1991]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $\mu$ be a probability distribution on a space $\Xcal$, $\nu$ one on a space $\Ycal$, and $c(x, y) \ge 0$ the cost
+of moving one unit of mass from $x$ to $y$. The **Monge problem** looks for a map $T : \Xcal \to \Ycal$ that sends
+$\mu$ to $\nu$ and minimises $\int c(x, T(x))\, d\mu(x)$ <Cite id="monge1781" />. The **Kantorovich problem** looks
+instead for a joint distribution $\pi$ on $\Xcal \times \Ycal$ whose marginals are $\mu$ and $\nu$ and minimises
+$\int c\, d\pi$ <Cite id="kantorovich1942" />. Its optimal value is the **optimal transport cost** between $\mu$ and
+$\nu$.
+</Definition>
+
+## Components
+
+- <NoteLink to="earth-movers-distance">Earth mover's distance</NoteLink>: the discrete problem between histograms, a
+  linear program, and its closed form in one dimension.
+- <NoteLink to="wasserstein-distances">Wasserstein distances</NoteLink>: the cost $c = d^p$ turns the optimal value into
+  a metric between distributions.
+- <NoteLink to="kantorovich-duality">Kantorovich duality</NoteLink>: the dual problem over pairs of potentials, and the
+  $c$-transform.
+- <NoteLink to="entropic-regularisation-and-sinkhorn">Entropic regularisation and Sinkhorn</NoteLink>: an entropy term
+  makes the problem strictly convex and solvable by matrix scaling.
+- <NoteLink to="sinkhorn-divergences">Sinkhorn divergences</NoteLink>: the debiased entropic cost, between optimal
+  transport and kernel distances.
+- <NoteLink to="sliced-wasserstein-distance">Sliced Wasserstein distance</NoteLink>: averages one-dimensional transport
+  costs over projections.
+- <NoteLink to="unbalanced-and-partial-transport">Unbalanced and partial transport</NoteLink>: drops the requirement
+  that all mass be moved.
+- <NoteLink to="wasserstein-barycentres">Wasserstein barycentres</NoteLink>: averages of distributions and displacement
+  interpolation.
+- Uses in machine learning: <NoteLink to="word-movers-distance">word mover's distance</NoteLink>, the <NoteLink
+  to="wasserstein-gan">Wasserstein GAN</NoteLink> and <NoteLink to="optimal-transport-for-domain-adaptation">optimal
+  transport for domain adaptation</NoteLink>.
+
+## The Monge problem
+
+Monge posed the problem in 1781 for moving soil from an excavation (the _déblais_) to an embankment (the _remblais_),
+with cost equal to distance <Cite id="monge1781" />. A map $T$ **pushes $\mu$ forward to $\nu$**, written
+$T_\# \mu = \nu$, when every region $B \subseteq \Ycal$ receives exactly the mass that $\mu$ gives its preimage:
+
+$$
+\nu(B) = \mu\paren{T^{-1}(B)} \quad \text{for every measurable } B .
+$$
+
+The Monge problem is
+
+$$
+\min_{T \,:\, T_\#\mu = \nu} \int_{\Xcal} c\paren{x, T(x)}\, d\mu(x) .
+$$
+
+Each grain of soil at $x$ goes to one place, $T(x)$. Mass cannot be split.
+
+Two defects make the Monge problem hard.
+
+- **No admissible map may exist.** Let $\mu = \delta_0$, a unit point mass at $0$, and $\nu = \tfrac12\delta_{-1} +
+  \tfrac12\delta_{1}$. Any map sends all of $\mu$'s mass to the single point $T(0)$, so $T_\#\mu$ is a point mass and can
+  never equal $\nu$. The constraint set is empty.
+- **The constraint is not convex.** For densities, $T_\#\mu = \nu$ is the Jacobian equation
+  $\nu(T(x))\, \abs{\det \nabla T(x)} = \mu(x)$, which is nonlinear in $T$. The average of two admissible maps is
+  generally not admissible, so there is no convexity to exploit.
+
+## The Kantorovich relaxation
+
+Kantorovich replaced the map by a **transport plan**, or **coupling**: a joint distribution $\pi$ on $\Xcal \times
+\Ycal$ with first marginal $\mu$ and second marginal $\nu$ <Cite id="kantorovich1942" />. The value $\pi(A \times B)$ is
+the mass moved from region $A$ to region $B$. The set of plans is
+
+$$
+\Pi(\mu, \nu) = \set{\pi \ge 0 : \pi(A \times \Ycal) = \mu(A),\ \ \pi(\Xcal \times B) = \nu(B) \text{ for all } A, B},
+$$
+
+and the Kantorovich problem is
+
+$$
+\operatorname{OT}_c(\mu, \nu) = \min_{\pi \in \Pi(\mu, \nu)} \int_{\Xcal \times \Ycal} c(x, y)\, d\pi(x, y) .
+$$
+
+The relaxation removes both defects.
+
+- **Plans always exist.** The product $\mu \otimes \nu$, which moves mass as if source and destination were
+  independent, has the right marginals. In the example above, the plan that sends half of the mass at $0$ to $-1$ and
+  half to $1$ is admissible and optimal, with cost $1$ when $c(x, y) = \abs{x - y}$.
+- **The problem is linear.** The objective $\int c\, d\pi$ is linear in $\pi$. The marginal constraints are linear
+  equalities and $\pi \ge 0$ is a cone. The set $\Pi(\mu, \nu)$ is convex. For distributions on finitely many points,
+  $\pi$ is a nonnegative matrix and the problem is a <NoteLink to="linear-programming">linear program</NoteLink>.
+
+Every map $T$ with $T_\#\mu = \nu$ defines the plan $\pi_T = (\mathrm{id}, T)_\#\mu$, the distribution of the pair
+$(X, T(X))$ with $X \sim \mu$. Its cost is $\int c(x, T(x))\, d\mu(x)$, the Monge cost of $T$. The set of plans
+therefore contains every admissible map, so the Kantorovich value is at most the Monge value. When $\mu$ has a density
+and $c(x, y) = \norm{x - y}^2$ on $\reals^d$, Brenier's theorem states that the optimal plan is unique and is induced by
+a map $T = \nabla \varphi$ with $\varphi$ convex, so the two values are equal <Cite id="brenier1991" />.
+
+## Existence of an optimal plan
+
+The Kantorovich problem attains its minimum under mild conditions, which is a further reason for the relaxation. On
+finite spaces $\Pi(\mu, \nu)$ is a bounded polytope and a linear objective attains its minimum at a vertex. More
+generally, if $\Xcal$ and $\Ycal$ are complete separable metric spaces and $c$ is lower semicontinuous and bounded
+below, a minimiser exists <Cite id="villani2009" />. The proof uses two facts. The set of plans is tight, because its
+marginals are fixed, and it is weakly closed, so it is weakly compact. A lower semicontinuous linear functional
+attains its minimum on a compact set.
+
+## Worked example
+
+Three warehouses at positions $x = (0, 1, 3)$ hold masses $\avec = (0.5, 0.3, 0.2)$. Three shops at $y = (1, 2, 4)$ need
+$\bvec = (0.2, 0.5, 0.3)$. The cost is squared distance, $C_{ij} = (x_i - y_j)^2$:
+
+$$
+\Cmat = \begin{bmatrix} 1 & 4 & 16 \\ 0 & 1 & 9 \\ 4 & 1 & 1 \end{bmatrix} .
+$$
+
+A plan is a $3 \times 3$ nonnegative matrix $\Pmat$ with row sums $\avec$ and column sums $\bvec$. The optimal plan is
+
+$$
+\Pmat^\star = \begin{bmatrix} 0.2 & 0.3 & 0 \\ 0 & 0.2 & 0.1 \\ 0 & 0 & 0.2 \end{bmatrix},
+\qquad \sum_{ij} C_{ij} P^\star_{ij} = 0.2 + 1.2 + 0.2 + 0.9 + 0.2 = 2.7 .
+$$
+
+Warehouse 1 splits its mass between shops 1 and 2, and warehouse 2 splits between shops 2 and 3. No map could do this,
+because a map sends each warehouse to one shop. In one dimension with a convex cost, the optimal plan is the monotone
+one, which fills shops left to right from warehouses left to right; $\Pmat^\star$ is that plan. The value $2.7$ matches
+`scipy.optimize.linprog` and `ot.emd` from the POT library.
+
+## Variants
+
+- **Cost.** $c(x, y) = d(x, y)^p$ for a metric $d$ gives the <NoteLink to="wasserstein-distances">Wasserstein
+  distance</NoteLink> $W_p = \operatorname{OT}_{d^p}^{1/p}$. The case $p = 1$ between histograms is the <NoteLink
+  to="earth-movers-distance">earth mover's distance</NoteLink>.
+- **Regularisation.** Adding $\varepsilon$ times the relative entropy of $\pi$ gives a smooth, strictly convex problem
+  that Sinkhorn's algorithm solves on a GPU <Cite id="peyre2019" />.
+- **Mass.** Unbalanced transport replaces the hard marginal constraints by penalties, so the two distributions may have
+  different total mass.
+- **Dimension.** Projecting onto lines, where the problem is solved by sorting, gives the sliced Wasserstein distance.
+- **Multi-marginal and barycentres.** Minimising a weighted sum of transport costs to several distributions defines
+  their Wasserstein barycentre.
+
+Villani's monograph <Cite id="villani2009" /> covers the theory. Santambrogio's book <Cite id="santambrogio2015" /> is
+aimed at applied mathematicians. Peyré and Cuturi <Cite id="peyre2019" /> cover algorithms and machine-learning uses.

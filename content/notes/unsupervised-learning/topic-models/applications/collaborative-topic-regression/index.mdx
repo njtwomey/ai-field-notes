@@ -1,0 +1,140 @@
+---
+title: Collaborative topic regression
+kind: concept
+summary: 'Collaborative topic regression recommends documents by joining LDA to matrix factorisation. An item''s latent vector is its topic proportions plus an offset, $\vvec_j = \thetavec_j + \epsilonvec_j$, and a rating is $\uvec_i\transpose\vvec_j$ plus noise. New items are recommended from their text alone.'
+tags: [topic-models, recommender-systems, collaborative-filtering, cold-start, bayesian, latent-variable-models, worked-example]
+aliases: [CTR, collaborative topic modelling, collaborative topic model]
+requires: [latent-dirichlet-allocation, matrix-factorisation-for-recommendation]
+related: [weighted-matrix-factorisation, alternating-least-squares, cold-start-problem, content-based-filtering, hybrid-recommenders, supervised-lda]
+references: [wang2011ctr, hu2008implicit, blei2003]
+status: draft
+updated: 2026-09-27
+---
+
+import { Plate } from '../_shared/Plate'
+import { ctr } from '../_shared/plates'
+
+<Definition>
+**Collaborative topic regression** (CTR) is a recommendation model for items that have text, such as scientific
+articles <Cite id="wang2011ctr" />. Each item $j$ has LDA topic proportions $\thetavec_j$ and a latent vector
+$\vvec_j = \thetavec_j + \epsilonvec_j$ with $\epsilonvec_j \sim \Gauss(\zeros, \lambda_v^{-1}\I)$. Each user $i$ has a
+latent vector $\uvec_i \sim \Gauss(\zeros, \lambda_u^{-1}\I)$ in the same $K$-dimensional space. A rating is
+$r_{ij} \sim \Gauss(\uvec_i\transpose\vvec_j, c_{ij}^{-1})$. The topics explain the text; the offset $\epsilonvec_j$
+captures what the ratings reveal beyond the text.
+</Definition>
+
+## Two sources of evidence
+
+<NoteLink to="matrix-factorisation-for-recommendation">Matrix factorisation</NoteLink> learns item vectors from ratings
+alone. It predicts well for items that many users have rated, and cannot place an item that nobody has rated, the
+<NoteLink to="cold-start-problem">cold-start problem</NoteLink>. A topic model of the items' text places every item,
+rated or not, but knows nothing about which items the same people like.
+
+CTR puts both in one model by giving them a shared space. The topic proportions $\thetavec_j$ are the prior mean of the
+item's vector. With no ratings, $\vvec_j = \thetavec_j$, and user $i$'s predicted rating is $\uvec_i\transpose\thetavec_j$:
+how much the user likes each topic, weighted by how much the item is about it. As ratings accumulate, $\vvec_j$ moves
+away from $\thetavec_j$. An article about topic models that is read mostly by ecologists acquires an offset towards
+ecology, which its text alone would not show.
+
+## Generative process
+
+1. For each user $i$, draw $\uvec_i \sim \Gauss(\zeros, \lambda_u^{-1}\I)$.
+2. For each item $j$: draw $\thetavec_j \sim \Dir(\alpha)$ and generate the item's words by LDA with topics $\phivec_k$;
+   draw $\epsilonvec_j \sim \Gauss(\zeros, \lambda_v^{-1}\I)$ and set $\vvec_j = \thetavec_j + \epsilonvec_j$.
+3. For each user–item pair, draw $r_{ij} \sim \Gauss(\uvec_i\transpose\vvec_j, c_{ij}^{-1})$.
+
+For implicit feedback, $r_{ij} = 1$ if the user saved the item and $0$ otherwise. The precision $c_{ij}$ is $a$ for
+observed ones and $b < a$ for zeros, because a zero may mean "not seen" rather than "not liked". This is the confidence
+weighting of <NoteLink to="weighted-matrix-factorisation">weighted matrix factorisation</NoteLink> for implicit data
+<Cite id="hu2008implicit" />.
+
+<Plate
+  spec={ctr}
+  title="Collaborative topic regression in plate notation"
+  caption="The item plate ($J$) holds an LDA model of the item's words and its latent vector $\vvec_j$, centred on the topic proportions $\thetavec_j$. The rating $r_{ij}$ lies in the intersection of the item plate and the user plate ($I$) and depends on both latent vectors."
+/>
+
+## Fitting
+
+Wang and Blei maximise the posterior over users, items and topic proportions, with the topics $\phivec$ fixed within
+each pass. With $\Umat$ and $\Vmat$ the $K \times I$ and $K \times J$ matrices of latent vectors, the objective is
+
+$$
+\begin{aligned}
+\Lcal = {} & -\frac{\lambda_u}{2}\sum_i\norm{\uvec_i}^2 - \frac{\lambda_v}{2}\sum_j\norm{\vvec_j - \thetavec_j}^2 \\
+& + \sum_j\sum_n\log\paren{\sum_k\theta_{jk}\phi_{k, w_{jn}}} - \sum_{i,j}\frac{c_{ij}}{2}\paren{r_{ij} - \uvec_i\transpose\vvec_j}^2.
+\end{aligned}
+$$
+
+The first two terms are the Gaussian priors, the third is the LDA likelihood of the item's words with the assignments
+summed out, and the fourth is the rating likelihood.
+
+**User and item updates.** For fixed $\Vmat$, $\Lcal$ is a concave quadratic in $\uvec_i$. Its gradient is
+$-\lambda_u\uvec_i + \sum_j c_{ij}(r_{ij} - \uvec_i\transpose\vvec_j)\vvec_j$. Writing $\Cmat_i$ for the diagonal
+matrix of $c_{ij}$ over items and $\rvec_i$ for the user's ratings, setting the gradient to zero gives
+
+$$
+\uvec_i = \paren{\Vmat\Cmat_i\Vmat\transpose + \lambda_u\I}^{-1}\Vmat\Cmat_i\rvec_i.
+$$
+
+For $\vvec_j$, the prior term adds $-\lambda_v(\vvec_j - \thetavec_j)$ to the gradient, so
+
+$$
+\vvec_j = \paren{\Umat\Cmat_j\Umat\transpose + \lambda_v\I}^{-1}\paren{\Umat\Cmat_j\rvec_j + \lambda_v\thetavec_j}.
+$$
+
+These are the <NoteLink to="alternating-least-squares">alternating least squares</NoteLink> updates of weighted matrix
+factorisation, except that the item vector is shrunk towards $\thetavec_j$ instead of towards zero.
+
+**Topic proportions.** For fixed $\vvec_j$, $\thetavec_j$ maximises
+$-\frac{\lambda_v}{2}\norm{\vvec_j - \thetavec_j}^2 + \sum_n\log\sum_k\theta_{jk}\phi_{k,w_{jn}}$ on the simplex. The
+second term is bounded below with variational responsibilities $r_{jnk} \propto \theta_{jk}\phi_{k,w_{jn}}$, as in the
+E-step of LDA, and the resulting concave problem is solved by projected gradient. The topic proportions are pulled
+towards the item's latent vector, so ratings reshape how an item's text is read. The topics are then refitted from the
+responsibilities, as in LDA.
+
+**The role of $\lambda_v$.** As $\lambda_v \to \infty$ the offset vanishes and $\vvec_j = \thetavec_j$: a content model
+in which users regress on topic proportions. As $\lambda_v \to 0$ the text no longer constrains $\vvec_j$ and the model
+is matrix factorisation, with LDA fitted separately.
+
+## Prediction
+
+- **In-matrix**, for an item with ratings: $\hat r_{ij} = \uvec_i\transpose\vvec_j = \uvec_i\transpose(\thetavec_j + \epsilonvec_j)$.
+- **Out-of-matrix**, for a new item with text only: the offset has prior mean zero, so $\hat r_{ij} = \uvec_i\transpose\thetavec_j$,
+  with $\thetavec_j$ inferred by LDA from the item's words.
+
+Wang and Blei report that CTR improves recall over matrix factorisation for in-matrix prediction and makes out-of-matrix
+prediction possible, where matrix factorisation has nothing to offer <Cite id="wang2011ctr" />. A fitted user vector
+also reads as an interest profile over topics, and the largest offsets identify items whose audience differs from what
+their text suggests.
+
+## Worked example
+
+$K = 2$ topics, $\lambda_v = 1$. Item $j$ has topic proportions $\thetavec_j = (0.2, 0.8)$ and one rating, $r_{ij} = 1$
+with confidence $c_{ij} = 1$, from a user with $\uvec_i = (1, 0)$. All its other entries have negligible confidence.
+
+- Out-of-matrix prediction for this user: $\uvec_i\transpose\thetavec_j = 0.2$.
+- Item update: $\Umat\Cmat_j\Umat\transpose = \uvec_i\uvec_i\transpose = \diag(1, 0)$, so the matrix to invert is
+  $\diag(2, 1)$ and the right-hand side is $\uvec_i + \thetavec_j = (1.2, 0.8)$. Hence $\vvec_j = (0.6, 0.8)$.
+- In-matrix prediction: $\uvec_i\transpose\vvec_j = 0.6$.
+
+The rating moved the item towards the user along the first coordinate, halfway from $0.2$ towards the rating of $1$.
+The second coordinate, which no rating informs, stays at its topic value.
+
+## Assumptions
+
+- **Topics are the latent space.** Each latent dimension of the recommender is tied to one topic. Preferences that do
+  not align with any topic must be carried by the offsets.
+- **Gaussian ratings.** Implicit binary feedback is treated as Gaussian with confidence weights.
+
+## Pitfalls
+
+- **Scale.** Each alternating step solves a $K \times K$ system per user and per item, and the LDA step visits every
+  word. The same computational tricks as for implicit matrix factorisation apply to the user and item updates.
+- **$K$ serves two masters.** A number of topics that describes the text well may be too small or too large for the
+  ratings.
+- **Relatives.** <NoteLink to="supervised-lda">Supervised LDA</NoteLink> regresses one response per document on its
+  topics. CTR regresses many users' responses, each with its own coefficient vector $\uvec_i$, and adds an item offset.
+  <NoteLink to="hybrid-recommenders">Hybrid recommenders</NoteLink> and
+  <NoteLink to="content-based-filtering">content-based filtering</NoteLink> give other ways of combining content with
+  ratings.

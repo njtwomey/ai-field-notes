@@ -1,0 +1,119 @@
+---
+title: DocNADE
+kind: concept
+summary: 'DocNADE models a document as a sequence of words with $p(\vvec) = \prod_i p(v_i \mid \vvec_{1:i-1})$, each factor a softmax of a hidden layer $\hvec_i = g(\cvec + \sum_{k=1}^{i-1}\Wmat_{:,v_k})$. Its likelihood is exact, and the hidden layer serves as the document representation.'
+tags: [topic-models, nlp, deep-learning, autoregressive-models, latent-variable-models, worked-example]
+aliases: [document neural autoregressive distribution estimator, neural autoregressive topic model, DocNADE topic model, Replicated Softmax]
+requires: [bag-of-words, autoregressive-generative-models, softmax-and-log-sum-exp]
+partOf: [neural-topic-models]
+related: [neural-variational-document-model, latent-dirichlet-allocation, word-embeddings]
+references: [larochelle2012docnade, lauly2017docnade, srivastava2017prodlda]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The **document neural autoregressive distribution estimator** (DocNADE) is a model of a document $\vvec = (v_1,
+\dots, v_D)$, a sequence of word indices in $\set{1, \dots, V}$, that factorises the probability by the chain rule
+<Cite id="larochelle2012docnade" />:
+
+$$
+p(\vvec) = \prod_{i=1}^D p(v_i \mid \vvec_{1:i-1}), \qquad p(v_i = w \mid \vvec_{1:i-1}) = \frac{\exp\paren{b_w +
+\Umat_{w,:}\hvec_i}}{\sum_{u=1}^V\exp\paren{b_u + \Umat_{u,:}\hvec_i}}, \qquad \hvec_i = g\paren{\cvec +
+\sum_{k=1}^{i-1}\Wmat_{:,v_k}} .
+$$
+
+Here $\Wmat \in \reals^{H \times V}$ has one column per word, $\Umat \in \reals^{V \times H}$ and $\bvec \in \reals^V$
+define the output softmax, $\cvec \in \reals^H$ is a hidden bias, and $g$ is an elementwise nonlinearity such as the
+sigmoid. The hidden layer is shared by all positions, so every conditional reads the same summary of the words so far.
+</Definition>
+
+## Intuition
+
+<NoteLink to="latent-dirichlet-allocation">LDA</NoteLink> and the VAE-based topic models explain a document through a
+latent variable, $\thetavec_d$, that must be inferred. DocNADE has no latent variable to infer. It predicts each word
+from the words before it, like an <NoteLink to="autoregressive-generative-models">autoregressive model</NoteLink> of
+text, but it summarises the previous words as a bag: $\hvec_i$ depends on $\sum_{k=1}^{i-1}\Wmat_{:,v_k}$, the sum of the
+previous words' columns, not on their order. The sum plays the role that $\thetavec_d$ plays in LDA: an estimate of
+what the document is about, sharpened with every word read.
+
+Because the model is a product of normalised conditionals, $\log p(\vvec)$ is computed exactly in one pass. There is no
+lower bound, no sampling during training, and no amortisation gap.
+
+## Where the architecture comes from
+
+DocNADE is derived from the **Replicated Softmax**, an undirected model of documents with binary hidden units
+$\hvec \in \set{0, 1}^H$ and energy $E(\vvec, \hvec) = -D\,\cvec^\top\hvec - \hvec^\top\Wmat\nvec(\vvec) -
+\bvec^\top\nvec(\vvec)$, where $\nvec(\vvec)$ is the vector of word counts. Its conditionals factorise:
+
+$$
+p(h_j = 1 \mid \vvec) = \sigma\paren{Dc_j + \sum_{i=1}^D W_{j,v_i}}, \qquad p(v_i = w \mid \hvec) =
+\operatorname{softmax}_w\paren{\bvec + \Wmat^\top\hvec} .
+$$
+
+The marginal $p(\vvec)$ needs the partition function, which is intractable, and training relies on contrastive
+divergence. The autoregressive conditional $p(v_i \mid \vvec_{1:i-1})$ of the Replicated Softmax can be approximated by
+mean-field inference, which alternates between updating the hidden units from the words and the unseen words from the
+hidden units. Larochelle and Lauly run **one** such update: start with the unseen words set to zero, compute the hidden
+means from the observed words $\vvec_{1:i-1}$ alone, then compute the distribution of $v_i$ from those hidden means
+<Cite id="larochelle2012docnade" />. That single pass is the formula in the definition, after two further changes: the
+input weights $\Wmat$ and output weights $\Umat$ are untied, and the factor $D$ on the hidden bias is dropped. The
+truncated inference is then trained directly, by maximum likelihood, to be a good model on its own.
+
+## Cost
+
+The hidden pre-activations share their sums: $\avec_{i+1} = \avec_i + \Wmat_{:,v_i}$ with $\avec_1 = \cvec$. All $D$
+hidden layers cost $O(DH)$ together. The softmax over the vocabulary costs $O(VH)$ per position, so a document costs
+$O(DVH)$. Larochelle and Lauly replaced the flat softmax by a binary tree of logistic regressions over the vocabulary,
+which costs $O(H\log V)$ per position <Cite id="larochelle2012docnade" />.
+
+## Order
+
+A bag of words has no order, but the chain rule needs one. Any fixed order gives a valid distribution over sequences,
+and different orders give different probabilities for the same bag. DocNADE is therefore trained on documents whose
+words are shuffled at random, which averages over orders and makes the model approximately invariant to them
+<Cite id="lauly2017docnade" />. The document representation used downstream is the hidden layer after reading every
+word, $\hvec(\vvec) = g(\cvec + \sum_{k=1}^D\Wmat_{:,v_k})$, which does not depend on the order.
+
+## What plays the role of topics
+
+DocNADE has no topic–word matrix. Each hidden unit $j$ responds to words through row $j$ of $\Wmat$, and the words with
+the largest weights $W_{j,w}$ are those that most switch unit $j$ on. Reading those lists as topics works, but a hidden
+unit is not a distribution over words and is not constrained to be sparse or coherent. DocNADE's strengths are its
+exact likelihood, which makes held-out perplexity directly measurable, and its document representation, which works well
+as input to classifiers and retrieval <Cite id="lauly2017docnade" />.
+
+## Worked example
+
+Take $H = 2$ hidden units, $V = 3$ words, the sigmoid for $g$, zero biases, and
+
+$$
+\Wmat = \begin{pmatrix} 2 & 0 & -1 \\ 0 & 1 & 2 \end{pmatrix}, \qquad \Umat = \begin{pmatrix} 1 & 0 \\ 0 & 1 \\ -1 &
+2 \end{pmatrix}.
+$$
+
+The document is $\vvec = (1, 3)$.
+
+- **First word.** $\hvec_1 = \sigma(\zeros) = (0.5, 0.5)$. The logits $\Umat\hvec_1 = (0.5, 0.5, 0.5)$ are equal, so
+  $p(v_1 = 1) = 1/3$.
+- **Second word.** $\hvec_2 = \sigma(\Wmat_{:,1}) = \sigma(2, 0) = (0.881, 0.5)$. The logits are $(0.881, 0.5,
+  0.119)$, and the softmax gives $(0.465, 0.318, 0.217)$, so $p(v_2 = 3 \mid v_1 = 1) = 0.217$.
+- **Document.** $p(\vvec) = 0.333 \times 0.217 = 0.0724$, a log-likelihood of $-2.63$ nats.
+
+Reading the same two words in the order $(3, 1)$ gives $0.0534$. The two orders disagree, which is why training
+averages over random orders.
+
+## Assumptions
+
+- **A bag-of-words summary of the context.** Each conditional sees only the counts of previous words.
+- **A fixed vocabulary** with a softmax, or a tree, over all $V$ words.
+- **Approximate order invariance** from training on shuffled documents, not by construction.
+
+## Pitfalls
+
+- **Comparing perplexities.** DocNADE's perplexity is exact. A VAE-based topic model reports a bound or an importance-
+  sampled estimate. The numbers are comparable only if the VAE's likelihood is estimated tightly.
+- **Interpreting hidden units as topics.** Rows of $\Wmat$ are not normalised, can take both signs, and are not tied
+  to documents' proportions. They are features, not topics in LDA's sense.
+- **Order at test time.** A test document's probability depends on the order in which its words are read. Average over
+  several random orders when estimating it.

@@ -1,0 +1,180 @@
+---
+title: Variational mode decomposition
+kind: technique
+summary: 'Variational mode decomposition splits a signal into $K$ modes, each compact around a centre frequency, by minimising their total bandwidth subject to their sum being the signal. ADMM alternates Wiener-filter updates of the modes with centre-of-gravity updates of their frequencies.'
+tags: [signal-processing, time-frequency, adaptive-methods, optimisation, worked-example]
+aliases: [VMD, variational mode decomposition ADMM, intrinsic mode bandwidth]
+requires: [hilbert-transform, fourier-transform]
+related: [empirical-mode-decomposition, ensemble-empirical-mode-decomposition, hilbert-huang-transform, wiener-filter, penalty-and-barrier-methods, parseval-theorem, reassignment-and-synchrosqueezing]
+references: [dragomiretskiy2014, boyd2011, huang1998, rilling2008]
+status: draft
+updated: 2026-09-27
+---
+
+import { VmdExplorer } from './VmdExplorer'
+
+<Definition>
+**Variational mode decomposition** (VMD) writes a real signal $x(t)$ as a sum of $K$ modes $u_k(t)$, each concentrated
+around a centre frequency $\omega_k$, by solving
+
+$$
+\min_{\{u_k\}, \{\omega_k\}} \sum_{k=1}^{K} \norm{\partial_t \brack{\paren{\delta(t) + \frac{i}{\pi t}} * u_k(t)}
+e^{-i\omega_k t}}_2^2 \quad \text{subject to} \quad \sum_{k=1}^{K} u_k = x .
+$$
+
+The convolution with $\delta(t) + i/(\pi t)$ forms the analytic signal of $u_k$, the factor $e^{-i\omega_k t}$ shifts its
+spectrum down to zero frequency, and the squared norm of the time derivative measures the bandwidth left
+<Cite id="dragomiretskiy2014" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="empirical-mode-decomposition">Empirical mode decomposition</NoteLink> extracts modes one after another by
+an algorithm with no objective. Its errors propagate: a poorly extracted first IMF distorts the residue from which all
+later IMFs are sifted. It is sensitive to noise, because noise adds extrema. It cannot separate two tones whose
+frequencies are within a factor of about 1.5 <Cite id="rilling2008" />. VMD keeps the aim of EMD, a few
+narrowband modes whose frequencies are found from the data, but defines the modes as the minimiser of a stated
+objective and extracts all of them at once.
+
+## Mechanism
+
+### Measuring a mode's bandwidth
+
+Let $\hat u_k(\omega)$ be the Fourier transform of a real mode $u_k$. Its analytic signal
+$u_k^{+} = \paren{\delta + i/(\pi t)} * u_k$ has the spectrum $2\hat u_k(\omega)$ for $\omega > 0$ and zero for
+$\omega < 0$; see <NoteLink to="hilbert-transform">Hilbert transform</NoteLink>. Multiplying by $e^{-i\omega_k t}$
+shifts that spectrum left by $\omega_k$, and differentiating in time multiplies the spectrum by $i\omega$. By
+<NoteLink to="parseval-theorem">Parseval's theorem</NoteLink>, with the transform normalised so that
+$\norm{g}_2^2 = \int \abs{\hat g(\omega)}^2 d\omega$,
+
+$$
+\begin{aligned}
+\norm{\partial_t \brack{u_k^{+}(t)\, e^{-i\omega_k t}}}_2^2
+&= \int_{-\omega_k}^{\infty} \abs{i\omega \cdot 2\hat u_k(\omega + \omega_k)}^2 d\omega \\
+&= 4\int_0^\infty (\omega - \omega_k)^2 \abs{\hat u_k(\omega)}^2 d\omega .
+\end{aligned}
+$$
+
+This is the second moment of the mode's one-sided power spectrum about $\omega_k$. It is small only when the mode's
+power sits close to $\omega_k$, so minimising it makes each mode narrowband around its own centre frequency. A tone at
+$\omega_k$ costs nothing; an amplitude or frequency modulation costs in proportion to the square of its spread.
+
+### The augmented Lagrangian
+
+The constraint $\sum_k u_k = x$ is enforced with a quadratic penalty and a Lagrange multiplier $\lambda(t)$:
+
+$$
+\begin{aligned}
+\mathcal{L}(\{u_k\}, \{\omega_k\}, \lambda) ={}& \alpha \sum_k \norm{\partial_t \brack{u_k^{+} e^{-i\omega_k t}}}_2^2 \\
+&+ \norm{x - \sum_k u_k}_2^2 + \left\langle \lambda,\, x - \sum_k u_k \right\rangle .
+\end{aligned}
+$$
+
+The weight $\alpha > 0$ balances narrow bands against fidelity to $x$. VMD minimises $\mathcal{L}$ over each $u_k$ in
+turn with the others fixed, then over each $\omega_k$, then takes a gradient ascent step on $\lambda$: the alternating
+direction method of multipliers (ADMM) <Cite id="boyd2011" />; see
+<NoteLink to="penalty-and-barrier-methods">penalty and barrier methods</NoteLink>. Each step has a closed form in the
+frequency domain.
+
+### Mode update: a Wiener filter
+
+Fix everything except $u_k$ and write $\hat r_k(\omega) = \hat x(\omega) - \sum_{i \ne k} \hat u_i(\omega) + \hat\lambda(\omega)/2$
+for the residual that mode $k$ should explain. Completing the square turns the last two terms of $\mathcal{L}$ into
+$\norm{r_k - u_k}_2^2$ plus a constant. By Parseval, and because a real signal's spectrum is conjugate-symmetric so that
+the integral over all frequencies is twice the integral over $\omega > 0$, the objective in $u_k$ becomes
+
+$$
+\int_0^\infty \brack{4\alpha (\omega - \omega_k)^2 \abs{\hat u_k(\omega)}^2 + 2 \abs{\hat r_k(\omega) - \hat u_k(\omega)}^2} d\omega .
+$$
+
+The integrand involves $\hat u_k$ at one frequency only, so each frequency is minimised separately. Setting the
+derivative with respect to $\hat u_k^*(\omega)$ to zero gives
+$4\alpha(\omega - \omega_k)^2 \hat u_k - 2(\hat r_k - \hat u_k) = 0$, so
+
+$$
+\hat u_k(\omega) = \frac{\hat x(\omega) - \sum_{i \ne k} \hat u_i(\omega) + \hat\lambda(\omega)/2}{1 + 2\alpha(\omega - \omega_k)^2},
+\qquad \omega > 0 .
+$$
+
+This is a <NoteLink to="wiener-filter">Wiener filter</NoteLink> applied to the residual. A Wiener filter passes
+frequency $\omega$ with gain $S(\omega)/(S(\omega) + N(\omega))$, where $S$ and $N$ are the signal and noise power. The
+gain above has that form with $S/N = 1/\paren{2\alpha(\omega - \omega_k)^2}$: the update treats the mode as a signal
+whose power falls off as the inverse square of the distance from $\omega_k$, observed in flat noise. The filter passes
+$\omega_k$ unchanged and falls to half its gain at $\omega_k \pm 1/\sqrt{2\alpha}$, so $\alpha$ sets every mode's
+bandwidth. Large $\alpha$ gives narrow modes and strong noise rejection; small $\alpha$ gives wide modes that can follow
+modulation but also let noise in.
+
+### Centre-frequency update: a centre of gravity
+
+With the modes fixed, $\omega_k$ appears only in the bandwidth term, $\int_0^\infty (\omega - \omega_k)^2 \abs{\hat u_k(\omega)}^2 d\omega$.
+Its derivative in $\omega_k$ is $-2\int_0^\infty (\omega - \omega_k)\abs{\hat u_k}^2 d\omega$, which is zero at
+
+$$
+\omega_k = \frac{\int_0^\infty \omega\, \abs{\hat u_k(\omega)}^2 d\omega}{\int_0^\infty \abs{\hat u_k(\omega)}^2 d\omega},
+$$
+
+the centre of gravity of the mode's power spectrum. Each iteration therefore filters the residual around the current
+centre frequency and moves the centre frequency to where the filtered power lies. A centre frequency near a spectral
+peak is pulled onto it.
+
+### Multiplier update and the full iteration
+
+The multiplier takes a dual ascent step, $\hat\lambda \leftarrow \hat\lambda + \tau\paren{\hat x - \sum_k \hat u_k}$,
+which drives the modes to reproduce $x$ exactly. For noisy signals exact reconstruction would force the noise into the
+modes, so $\tau = 0$ is used: the multiplier stays zero and the unexplained part is left out.
+
+The whole algorithm works on the one-sided spectrum of the signal. Starting from $\hat u_k = 0$, $\hat\lambda = 0$ and
+initial centre frequencies (zero, or spread evenly over the band), repeat the mode updates for $k = 1, \ldots, K$
+(each using the modes already updated in this sweep), the centre-frequency updates and the multiplier update, until the
+change in the modes between sweeps, $\sum_k \norm{\hat u_k^{n+1} - \hat u_k^{n}}^2$ (relative to
+$\norm{\hat u_k^{n}}^2$ in the paper), falls below a tolerance. The
+modes are the inverse transforms of the $\hat u_k$, extended to negative frequencies by conjugate symmetry. The
+reference implementation first mirrors half of the signal onto each end to reduce boundary effects, and crops the
+modes afterwards <Cite id="dragomiretskiy2014" />.
+
+**Worked example.** Take $x[n] = \cos(2\pi \cdot 0.02\, n) + 0.5\cos(2\pi \cdot 0.1\, n) + 0.3\cos(2\pi \cdot 0.3\, n)$
+for 512 samples, and run VMD with $K = 3$, $\tau = 0$, centre frequencies starting at 0, 1/6 and 1/3 cycles per sample,
+and the reference code's bandwidth weight of 2,000 (the code writes the filter as $1/\paren{1 + \alpha(f - f_k)^2}$
+with $f$ in cycles per sample). After one iteration the centre frequencies are 0.019, 0.104 and 0.300. After two they
+are within 0.0003 of the tones, and after seven the change falls below $10^{-7}$ with the centre frequencies at
+0.0197, 0.0998 and 0.2999. With $K = 2$ the modes lock onto the tones at
+0.02 and 0.3, and the tone at 0.1 is left out: with $\tau = 0$ nothing forces it into a mode. With $K = 4$ the tone at
+0.3 is split between two modes centred at 0.2997 and 0.3010.
+
+<VmdExplorer />
+
+## Comparison with EMD
+
+- **Non-recursive.** VMD updates all modes together, so an error in one mode does not propagate into the next the way a
+  bad IMF propagates into every later residue in EMD.
+- **Bandwidth-limited modes.** A VMD mode is narrowband by construction, with a bandwidth set by $\alpha$. An EMD IMF
+  is defined by its extrema, so it can be a nonlinear waveform, such as a wave with sharp crests, whose Fourier
+  spectrum has harmonics. VMD splits such a waveform into harmonics, as a Fourier analysis would, whereas EMD keeps it
+  whole.
+- **Tone separation.** VMD separates tones that EMD merges. For two unit tones over 512 samples, the first IMF of EMD
+  misses the faster tone by 100% relative error at frequencies 0.10 and 0.12 cycles per sample, while VMD with $K = 2$
+  recovers both tones to within 0.3%. At 0.10 and 0.11 the error is 3.7%, and at 0.10 and 0.105, a separation of 2.6
+  DFT bins, it is 12%.
+- **Robustness to noise.** The Wiener-like update attenuates noise away from each centre frequency, and $\tau = 0$
+  leaves the rest unexplained, whereas in EMD noise creates extrema and IMFs of its own.
+- **Choices made by the user.** VMD needs the number of modes $K$ and the bandwidth weight $\alpha$. EMD needs neither,
+  and its number of IMFs follows from the data. A wrong $K$ drops or splits components.
+- **An objective, but not a convex one.** The problem is convex in the modes for fixed centre frequencies, but not
+  jointly. Different initial centre frequencies can converge to different decompositions.
+
+## Cost
+
+One FFT of the mirrored signal, of length $2N$, then $O(KN)$ operations per iteration, plus one inverse FFT per mode.
+Tens to a few hundred iterations are typical. Close centre frequencies and small $\alpha$ converge slowest: the two
+close tones at 0.10 and 0.105 need 410 iterations at $\alpha = 2{,}000$ to reach a tolerance of $10^{-9}$, and 1,433 at
+$\alpha = 500$.
+
+## Trade-offs
+
+- **Choosing $K$.** Common heuristics increase $K$ until two centre frequencies converge to nearly the same value, or
+  inspect the spectrum for peaks. Neither is guaranteed.
+- **Stationary modes.** Each mode has one centre frequency for the whole record. A chirp sweeping a wide band is
+  either split across several modes or penalised heavily; EMD and synchrosqueezing follow it with one component.
+- **Boundary effects.** Mirroring reduces, but does not remove, distortion at the ends of the record.
+- **Many variants.** Extensions adapt the idea to two-dimensional images, to multichannel data and to time-varying
+  centre frequencies, at the cost of more parameters.

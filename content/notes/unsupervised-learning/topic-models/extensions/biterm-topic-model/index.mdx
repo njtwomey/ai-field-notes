@@ -1,0 +1,115 @@
+---
+title: Biterm topic model
+kind: concept
+summary: 'The biterm topic model fits topics to short texts by modelling unordered word pairs (biterms) that co-occur in a text. One corpus-level mixture $\thetavec$ generates a topic per biterm, and both words are drawn from that topic. It avoids estimating a topic mixture from a handful of words.'
+tags: [topic-models, unsupervised, bayesian, latent-variable-models, nlp, short-text, worked-example]
+aliases: [BTM, biterm, short-text topic model, GSDMM, Dirichlet multinomial mixture]
+requires: [latent-dirichlet-allocation]
+partOf: [topic-model-family]
+related: [gibbs-sampling, bag-of-words, gaussian-mixture-model]
+references: [yan2013btm, yin2014gsdmm, griffiths2004]
+status: draft
+updated: 2026-09-27
+---
+
+import { Plate } from '../_shared/Plate'
+import { btm } from '../_shared/plates'
+
+<Definition>
+The **biterm topic model** (BTM) is a topic model for corpora of short texts such as tweets, queries and titles
+<Cite id="yan2013btm" />. A **biterm** is an unordered pair of distinct word positions in the same short text. The model
+has one topic mixture $\thetavec \sim \Dir(\alpha)$ for the whole corpus. Each biterm draws a topic
+$z \sim \Cat(\thetavec)$, and both of its words are drawn from that topic, $w_1, w_2 \sim \Cat(\phivec_z)$.
+</Definition>
+
+## Why short texts break LDA
+
+<NoteLink to="latent-dirichlet-allocation">LDA</NoteLink> learns topics from word co-occurrence within documents. The
+evidence is carried by each document's mixture $\thetavec_d$: two words go into the same topic if they appear together
+in documents whose mixture favours that topic. A tweet of eight words gives little information about an eight-component
+mixture, and most word pairs co-occur in only one or two texts. The posterior of $\thetavec_d$ stays close to its prior,
+and topics come out noisy.
+
+Two remedies change what the model shares:
+
+- **One topic per text.** The Dirichlet multinomial mixture, fitted by the collapsed sampler GSDMM, assumes each short
+  text has exactly one topic <Cite id="yin2014gsdmm" />. With one topic there is no per-text mixture to estimate.
+- **Corpus-level co-occurrence.** BTM drops documents from the model altogether. It pools all co-occurring pairs from
+  all texts and fits one mixture to them. A pair seen in a hundred tweets is a hundred pieces of evidence that its two
+  words share a topic.
+
+## Generative process
+
+A text of $\ell$ words yields $\ell(\ell - 1)/2$ biterms. The set of biterms of the whole corpus is $\Bcal$.
+
+1. For each topic $k$, draw $\phivec_k \sim \Dir(\beta)$.
+2. Draw one corpus-wide topic mixture $\thetavec \sim \Dir(\alpha)$.
+3. For each biterm $b = (w_{b1}, w_{b2}) \in \Bcal$, draw $z_b \sim \Cat(\thetavec)$, then $w_{b1} \sim \Cat(\phivec_{z_b})$
+   and $w_{b2} \sim \Cat(\phivec_{z_b})$.
+
+<Plate
+  spec={btm}
+  title="The biterm topic model in plate notation"
+  caption="There is no document plate. One topic mixture $\thetavec$ serves the whole corpus; each biterm $b$ draws a topic $z_b$, and both of its words come from that topic."
+/>
+
+A biterm model generates each pair from a single topic, so both words must belong to it. This is the mixture-of-unigrams
+assumption applied to pairs instead of documents: the smallest unit that still carries co-occurrence.
+
+## The collapsed Gibbs update
+
+Integrating out $\thetavec$ and $\phivec$ gives the same Dirichlet integrals as LDA <Cite id="griffiths2004" />, with
+biterms in place of word positions and one "document". Let $n_k$ be the number of biterms assigned to topic $k$ and
+$n_{kw}$ the number of word occurrences of $w$ in those biterms, so $\sum_w n_{kw} = 2n_k$. Resampling biterm $b$ with
+words $w_1 \ne w_2$ adds one biterm to $n_k$ and one occurrence each to $n_{kw_1}$ and $n_{kw_2}$. The topic factor
+$\prod_w\Gamma(n_{kw} + \beta)/\Gamma(2n_k + V\beta)$ gains two words, so its denominator rises by two steps:
+
+$$
+p(z_b = k \mid \zvec^{\neg b}, \Bcal) \propto \paren{n_k^{\neg b} + \alpha}\,
+\frac{\paren{n_{kw_1}^{\neg b} + \beta}\paren{n_{kw_2}^{\neg b} + \beta}}
+{\paren{2n_k^{\neg b} + V\beta}\paren{2n_k^{\neg b} + 1 + V\beta}}.
+$$
+
+If $w_1 = w_2$, the numerator is $(n_{kw}^{\neg b} + \beta)(n_{kw}^{\neg b} + 1 + \beta)$. Yan and co-authors write the
+denominator as $(2n_k + V\beta)^2$, which agrees with the exact form to first order when topics hold many words. After
+sampling, $\hat\theta_k = (n_k + \alpha)/(\abs{\Bcal} + K\alpha)$ and
+$\hat\phi_{kw} = (n_{kw} + \beta)/(2n_k + V\beta)$.
+
+## Topics of a single text
+
+The model has no $\thetavec_d$, so a text's topic proportions are derived afterwards. Each biterm's topic posterior is
+$p(z \mid b) \propto \hat\theta_z\hat\phi_{zw_1}\hat\phi_{zw_2}$. Averaging over the text's biterms, weighted by their
+frequency in the text, gives
+
+$$
+p(z \mid d) = \sum_{b \in d} p(z \mid b)\,p(b \mid d).
+$$
+
+## Worked example
+
+**Counting biterms.** A query "cheap flights to rome" has 4 words and $4 \times 3/2 = 6$ biterms, among them
+(cheap, flights), (flights, rome) and (cheap, rome). A tweet of 12 words has 66.
+
+**One Gibbs update.** There are $K = 2$ topics, $\alpha = 1$, $\beta = 0.01$ and $V = 1000$, so $V\beta = 10$. Biterm
+$b$ is (flights, rome). With $b$ removed, topic 1 has 100 biterms, with "flights" 10 times and "rome" 8 times; topic 2 has
+150 biterms, with "flights" twice and "rome" 20 times.
+
+- Topic 1: $101 \times 10.01 \times 8.01/(210 \times 211) = 0.183$.
+- Topic 2: $151 \times 2.01 \times 20.01/(310 \times 311) = 0.063$.
+
+Normalised, $p(z_b = 1) = 0.744$. Topic 2 favours "rome" but rarely produces "flights", and a biterm needs both words
+from one topic. With the squared denominator the probability is $0.744$ to three places.
+
+## Assumptions
+
+- **Both words from one topic.** Every co-occurring pair is assumed topically coherent. In a long document most pairs
+  are not, which is why BTM is for short texts.
+- **No document-level structure.** Two texts with the same biterms are indistinguishable.
+
+## Pitfalls
+
+- **Quadratic cost.** The number of biterms grows with the square of text length. For longer texts, restrict biterms to
+  words within a sliding window.
+- **Common words.** A frequent word forms biterms with everything. Remove stop words before extracting biterms.
+- **Choosing between BTM and one-topic-per-text models.** When texts are genuinely about one subject, a Dirichlet
+  multinomial mixture is simpler and also clusters the texts. BTM suits texts that can touch several subjects.

@@ -1,0 +1,128 @@
+---
+title: Neural variational document model
+kind: concept
+summary: 'The neural variational document model (NVDM) is a VAE for bags of words: a Gaussian latent $\hvec_d \sim \Gauss(\zeros, \Imat)$ generates each word from $\operatorname{softmax}(\Rmat^\top\hvec_d + \bvec)$, and an encoder network gives $q(\hvec_d \mid \wvec_d)$.'
+tags: [topic-models, nlp, deep-learning, variational-inference, latent-variable-models, worked-example]
+aliases: [NVDM, Gaussian softmax model, GSM topic model, neural variational inference for text]
+requires: [variational-autoencoder, bag-of-words]
+partOf: [neural-topic-models]
+related: [latent-semantic-analysis, softmax-and-log-sum-exp, multinomial-logistic-regression]
+references: [miao2016nvdm, miao2017gsm, srivastava2017prodlda, dieng2020etm]
+status: draft
+updated: 2026-09-27
+---
+
+import { NtmDiagram } from '../_shared/NtmDiagram'
+
+<Definition>
+The **neural variational document model** (NVDM) is a generative model of a document's bag of words with one
+continuous latent vector per document <Cite id="miao2016nvdm" />. For a vocabulary of $V$ words and a latent dimension
+$K$:
+
+1. Draw $\hvec_d \sim \Gauss(\zeros, \Imat_K)$.
+2. For each word position $n = 1, \dots, N_d$, draw $w_{dn} \sim \Cat\paren{\operatorname{softmax}(\Rmat^\top\hvec_d +
+   \bvec)}$, with $\Rmat \in \reals^{K \times V}$ and $\bvec \in \reals^V$.
+
+An encoder network maps the word counts $\wvec_d$ to a diagonal Gaussian $q_{\phivec}(\hvec_d \mid \wvec_d)$. The
+decoder parameters $\Rmat, \bvec$ and the encoder weights $\phivec$ are trained together by maximising the evidence
+lower bound.
+</Definition>
+
+## Intuition
+
+NVDM is the <NoteLink to="variational-autoencoder">variational autoencoder</NoteLink> applied to text with the word order
+thrown away. A document is summarised by a point $\hvec_d$ in $\reals^K$. The decoder is a
+<NoteLink to="multinomial-logistic-regression">multinomial logistic regression</NoteLink> from that point to the
+vocabulary: word $v$ gets the logit $\rvec_v^\top\hvec_d + b_v$, where $\rvec_v$ is column $v$ of $\Rmat$. Documents
+that use similar words are pushed to nearby points, and words used in similar documents get similar columns $\rvec_v$.
+This is <NoteLink to="latent-semantic-analysis">latent semantic analysis</NoteLink> with a probabilistic decoder and an
+inference network in place of the SVD.
+
+NVDM is a document model rather than a topic model. The coordinates of $\hvec_d$ can be negative and do not sum to one,
+so they are not topic proportions, and one coordinate does not correspond to one coherent group of words. NVDM has low
+held-out perplexity, but its "topics", read off the rows of $\Rmat$, are hard to interpret
+<Cite id="srivastava2017prodlda" /> <Cite id="dieng2020etm" />.
+
+<NtmDiagram variants={['nvdm']} />
+
+## The objective
+
+Given $\hvec_d$, the words are independent draws from one categorical distribution, so the likelihood depends on the
+document only through its counts $w_{dv}$, the number of times word $v$ occurs:
+
+$$
+\log p(\wvec_d \mid \hvec_d) = \sum_{n=1}^{N_d}\log p(w_{dn} \mid \hvec_d) = \sum_{v=1}^V w_{dv}\paren{\rvec_v^\top\hvec_d
++ b_v} - N_d\log\sum_{u=1}^V\exp\paren{\rvec_u^\top\hvec_d + b_u} .
+$$
+
+The encoder is a multilayer perceptron $\pivec_d = \text{MLP}_{\phivec}(\wvec_d)$ followed by two linear heads,
+$\muvec_d = \Wmat_1\pivec_d + \cvec_1$ and $\log\sigmavec_d^2 = \Wmat_2\pivec_d + \cvec_2$. The evidence lower bound for one
+document is
+
+$$
+\Lcal_d = \expect_{q_{\phivec}(\hvec_d \mid \wvec_d)}\brack{\log p(\wvec_d \mid \hvec_d)} - \KL\paren{\Gauss(\muvec_d,
+\diag\sigmavec_d^2) \,\|\, \Gauss(\zeros, \Imat)} .
+$$
+
+It is derived exactly as for any VAE: $\log p(\wvec_d) = \Lcal_d + \KL(q \,\|\, p(\hvec_d \mid \wvec_d))$ and the
+second term is non-negative. The KL term between two Gaussians has the closed form $\frac12\sum_{k=1}^K\paren{\mu_{dk}^2 +
+\sigma_{dk}^2 - 1 - \log\sigma_{dk}^2}$. The expectation is estimated with one reparameterised sample $\hvec_d =
+\muvec_d + \sigmavec_d \odot \epsilonvec$, $\epsilonvec \sim \Gauss(\zeros, \Imat)$, which makes the estimate
+differentiable in $\phivec$ (see the <NoteLink to="reparameterisation-trick">reparameterisation trick</NoteLink>).
+
+The cost of one gradient step is dominated by the softmax normaliser, a sum over all $V$ words. It is computed once per
+document, not once per word, because every word in the document shares the same $\hvec_d$.
+
+## From NVDM to a topic model
+
+Miao, Grefenstette and Blunsom turned NVDM into a topic model by inserting the simplex between the Gaussian and the
+decoder <Cite id="miao2017gsm" />. The **Gaussian softmax** construction draws $\xvec_d \sim \Gauss(\muvec_d,
+\diag\sigmavec_d^2)$ and sets $\thetavec_d = \operatorname{softmax}(\Wmat\xvec_d)$, a vector of $K$ topic proportions.
+Each word is then drawn from the mixture $\thetavec_d^\top\Bmat$, with the topic–word matrix $\Bmat \in \reals^{K \times V}$
+built from topic and word vectors, $\Bmat = \operatorname{softmax}(\Tmat\Umat^\top)$ row by row. The same paper derives
+a **stick-breaking** construction, in which a Gaussian draw passed through a sigmoid gives break proportions, and a
+**recurrent stick-breaking** construction whose recurrent network can generate an unbounded number of break
+proportions, so that the number of topics need not be fixed in advance. These constructions keep the Gaussian
+reparameterisation of NVDM and gain interpretable topic proportions.
+
+<NoteLink to="prodlda">ProdLDA</NoteLink> takes the same step but chooses the Gaussian's prior so that
+$\operatorname{softmax}(\hvec_d)$ approximates a Dirichlet.
+
+## Worked example
+
+Take $K = 2$ latent dimensions, $V = 3$ words, $\bvec = \zeros$ and
+
+$$
+\Rmat = \begin{pmatrix} 2 & -1 & 0 \\ 0 & 1 & -2 \end{pmatrix}.
+$$
+
+A document has counts $\wvec_d = (2, 0, 1)$. The encoder outputs $\muvec_d = (0.5, -1)$ and $\sigmavec_d^2 = (0.25,
+0.5)$.
+
+- **Sample.** With $\epsilonvec = (0.4, -0.2)$, $\hvec_d = (0.5 + 0.5 \times 0.4,\; -1 + \sqrt{0.5} \times (-0.2)) =
+  (0.700, -1.141)$.
+- **Decode.** The logits $\Rmat^\top\hvec_d$ are $(1.400, -1.841, 2.283)$. The softmax gives $p = (0.289, 0.011,
+  0.699)$.
+- **Reconstruction term.** $2\log 0.289 + 1 \times \log 0.699 = -2.838$.
+- **KL term.** $\frac12\brack{(0.25 + 0.25 - 1 - \log 0.25) + (1 + 0.5 - 1 - \log 0.5)} = 1.040$.
+- **ELBO estimate.** $-2.838 - 1.040 = -3.878$ nats for this document and this sample.
+
+Gradient ascent on this estimate raises the logits of words 1 and 3 at $\hvec_d$, moves $\muvec_d$ towards codes that
+explain the document, and shrinks the KL term.
+
+## Assumptions
+
+- **Bag of words.** Word order is discarded. All words of a document share one latent vector.
+- **A Gaussian latent.** The prior $\Gauss(\zeros, \Imat)$ has no sparsity: a document tends to use all $K$ directions
+  a little, unlike LDA's Dirichlet with $\alpha < 1$, which concentrates each document on a few topics.
+- **A log-linear decoder.** One linear layer and a softmax. Deeper decoders fit better but make the latent space harder
+  to read.
+
+## Pitfalls
+
+- **Reading rows of $\Rmat$ as topics.** The largest entries of a row of $\Rmat$ are not a coherent topic in general;
+  NVDM's topic coherence is well below LDA's <Cite id="srivastava2017prodlda" />.
+- **Perplexity is not interpretability.** NVDM's low perplexity shows that it models word frequencies well, not that its
+  latent dimensions mean anything (see <NoteLink to="topic-model-evaluation">evaluating topic models</NoteLink>).
+- **Unused latent dimensions.** The KL term pushes coordinates that do not improve reconstruction back to the prior.
+  With large $K$, many coordinates stay inactive.

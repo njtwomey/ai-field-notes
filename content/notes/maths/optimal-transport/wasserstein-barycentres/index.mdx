@@ -1,0 +1,126 @@
+---
+title: Wasserstein barycentres and displacement interpolation
+kind: concept
+summary: 'A Wasserstein barycentre of $\mu_1, \dots, \mu_K$ with weights $\lambda_k$ minimises $\sum_k \lambda_k W_2^2(\mu, \mu_k)$. For two distributions it is McCann''s displacement interpolation, which moves mass along the optimal plan; in 1-D it averages quantile functions. A mixture instead averages densities.'
+tags: [optimal-transport, probability, geometry, worked-example]
+aliases: [Wasserstein barycenter, Wasserstein barycentre, displacement interpolation, McCann interpolation, Wasserstein geodesic, Fréchet mean of distributions]
+requires: [wasserstein-distances]
+partOf: [optimal-transport]
+related: [entropic-regularisation-and-sinkhorn, sliced-wasserstein-distance, gaussian-mixture-model]
+references: [agueh2011, mccann1997, cuturi2014, benamou2015, rabin2011, bonneel2015, villani2009, peyre2019]
+status: draft
+updated: 2026-09-27
+---
+
+import { DisplacementInterpolation } from './DisplacementInterpolation'
+
+<Definition>
+Let $\mu_1, \dots, \mu_K$ be distributions on $\reals^d$ with finite second moments and $\lambda_1, \dots, \lambda_K \ge
+0$ weights that sum to 1. A **Wasserstein barycentre** is a minimiser
+
+$$
+\bar\mu \in \argmin_{\mu} \sum_{k=1}^{K} \lambda_k W_2^2(\mu, \mu_k)
+$$
+
+<Cite id="agueh2011" />. For two distributions $\mu_0, \mu_1$ with weights $(1 - t, t)$, the barycentre is the
+**displacement interpolant** $\mu_t$: the distribution of $(1 - t)X_0 + tX_1$ when $(X_0, X_1)$ is an optimal coupling
+of $\mu_0$ and $\mu_1$ <Cite id="mccann1997" />.
+</Definition>
+
+## Intuition
+
+There are two ways to average two distributions. The **mixture** $(1 - t)\mu_0 + t\mu_1$ averages the probabilities
+assigned to each point. It never moves mass: a mixture of a bump at $0$ and a bump at $4$ has two bumps, and at no
+$t$ does mass appear at $2$. The **displacement interpolant** averages positions. Each piece of mass travels in a
+straight line from its source to its destination under the optimal plan, and at time $t$ it is a fraction $t$ of the
+way. The interpolant of a bump at $0$ and a bump at $4$ is a single bump that slides from $0$ to $4$. In images, a
+mixture of two photographs is a cross-fade; a displacement interpolation is a morph.
+
+<DisplacementInterpolation />
+
+## Displacement interpolation is a geodesic
+
+Let $(X_0, X_1)$ be an optimal coupling, $X_t = (1 - t)X_0 + tX_1$ and $\mu_t$ the distribution of $X_t$. Write
+$W = W_2(\mu_0, \mu_1)$. Then for $0 \le s \le t \le 1$,
+
+$$
+W_2(\mu_s, \mu_t) = (t - s)\, W .
+$$
+
+**Upper bound.** $(X_s, X_t)$ is a coupling of $\mu_s$ and $\mu_t$, and $X_t - X_s = (t - s)(X_1 - X_0)$. So
+$W_2^2(\mu_s, \mu_t) \le \expect\norm{X_t - X_s}^2 = (t - s)^2\expect\norm{X_1 - X_0}^2 = (t - s)^2 W^2$.
+
+**Lower bound.** By the triangle inequality for $W_2$ and the upper bound applied to the outer pieces,
+$W \le W_2(\mu_0, \mu_s) + W_2(\mu_s, \mu_t) + W_2(\mu_t, \mu_1) \le sW + W_2(\mu_s, \mu_t) + (1 - t)W$. Rearranging
+gives $W_2(\mu_s, \mu_t) \ge (t - s)W$.
+
+The path $t \mapsto \mu_t$ therefore has constant speed and length $W$: it is a shortest path, or geodesic, in the
+space of distributions with metric $W_2$. The mixture path is not; along it, $W_2$ to the endpoints does not grow
+linearly.
+
+## The two-point barycentre is the interpolant
+
+For any $\mu$, write $a = W_2(\mu, \mu_0)$ and $b = W_2(\mu, \mu_1)$. The triangle inequality gives $a + b \ge W$. The
+smallest value of $(1 - t)a^2 + tb^2$ subject to $a + b \ge W$ is attained at $a = tW$, $b = (1 - t)W$ and equals
+$t(1 - t)W^2$. The displacement interpolant $\mu_t$ attains exactly these distances by the geodesic property. So $\mu_t$
+minimises $(1 - t)W_2^2(\mu, \mu_0) + tW_2^2(\mu, \mu_1)$: it is the barycentre with weights $(1 - t, t)$.
+
+## Closed forms
+
+**One dimension.** On $\reals$, $W_2^2(\mu, \mu_k) = \int_0^1 \paren{Q(u) - Q_k(u)}^2\, du$, where $Q$ and $Q_k$ are
+quantile functions. The objective $\sum_k \lambda_k\int_0^1 (Q(u) - Q_k(u))^2\, du$ is minimised pointwise in $u$ by
+
+$$
+\bar Q(u) = \sum_{k} \lambda_k Q_k(u) .
+$$
+
+A weighted average of nondecreasing functions is nondecreasing, so $\bar Q$ is a valid quantile function, and it
+defines the barycentre. The barycentre averages quantiles; the mixture averages CDFs.
+
+**Gaussians.** In one dimension the quantile function of $\Gauss(m, \sigma^2)$ is $m + \sigma\Phi^{-1}(u)$, so the
+barycentre of Gaussians is $\Gauss\paren{\sum_k\lambda_k m_k, \paren{\sum_k\lambda_k\sigma_k}^2}$: means and standard
+deviations are averaged. In $d$ dimensions the barycentre of $\Gauss(\mvec_k, \Sigmamat_k)$ is Gaussian with mean
+$\sum_k\lambda_k\mvec_k$ and the covariance $\Sigmamat$ that solves the fixed-point equation
+$\Sigmamat = \sum_k\lambda_k\paren{\Sigmamat^{1/2}\Sigmamat_k\Sigmamat^{1/2}}^{1/2}$ <Cite id="agueh2011" />.
+
+## Worked example
+
+Let $\mu_0 = \Gauss(0, 1)$ and $\mu_1 = \Gauss(4, 0.5^2)$, with $t = 0.5$.
+
+- **Barycentre.** Average the means and the standard deviations: $\Gauss(2, 0.75^2)$. It is one bump at $2$, narrower
+  than $\mu_0$ and wider than $\mu_1$.
+- **Mixture.** $\tfrac12\mu_0 + \tfrac12\mu_1$ has mean $2$ and variance $\tfrac12(1) + \tfrac12(0.25) +
+  \tfrac14(4 - 0)^2 = 4.625$, a standard deviation of $2.15$. It is two bumps with almost no mass near $2$.
+
+Both have mean $2$. The barycentre's standard deviation is $0.75$; the mixture's is almost three times as large,
+because the term $t(1 - t)(m_0 - m_1)^2$ from the separation of the means enters the mixture's variance and not the
+barycentre's.
+
+## Computation
+
+- **Fixed support.** When all distributions live on one grid, the entropic barycentre is computed by iterative Bregman
+  projections, a generalisation of Sinkhorn's algorithm with one scaling pair per input distribution. Each iteration
+  applies the Gibbs kernel to every input and takes a weighted geometric mean of the results <Cite id="benamou2015" />.
+- **Free support.** When the barycentre is a set of $n$ points to be placed, alternate between solving the transport
+  problems to each input and moving each point to the weighted average of the positions it is matched to
+  <Cite id="cuturi2014" />.
+- **Sliced.** Replacing $W_2$ by the sliced distance gives a barycentre computed by gradient descent on sample
+  positions, using only sorts <Cite id="rabin2011" /> <Cite id="bonneel2015" />.
+
+## Uses
+
+- **Averaging shapes, images and textures.** The barycentre of several shapes is a shape. Rabin et al. mix textures by
+  averaging their feature distributions <Cite id="rabin2011" />.
+- **Aggregating distributions.** Posteriors from data shards, predictions from an ensemble, or histograms from several
+  sensors are averaged without the multimodal blur of a mixture <Cite id="peyre2019" />.
+- **Interpolation of densities.** Displacement interpolation is used to create intermediate frames between two
+  distributions, for example in computer graphics.
+
+## Pitfalls
+
+- **Entropic blur.** Entropic barycentres are smoother than the true barycentre by an amount set by $\varepsilon$.
+  Debiased variants correct most of it.
+- **Uniqueness.** The barycentre is unique when at least one input has a density <Cite id="agueh2011" />. Between
+  discrete distributions it can be non-unique.
+- **Not a mixture model.** When the inputs are genuinely different populations, the mixture, not the barycentre, is
+  the right model of their union. The barycentre describes a typical member, not the combined population.

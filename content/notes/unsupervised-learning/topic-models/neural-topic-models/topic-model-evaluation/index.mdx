@@ -1,0 +1,171 @@
+---
+title: Evaluating topic models
+kind: concept
+summary: 'Topic models are evaluated by held-out perplexity, by coherence of each topic''s top words (UMass, NPMI, $C_V$), by topic diversity, and by human tasks such as word intrusion. These measures disagree: lower perplexity can mean less interpretable topics.'
+tags: [topic-models, evaluation, nlp, information-theory, unsupervised, worked-example]
+aliases: [topic coherence, NPMI coherence, C_V coherence, UMass coherence, UCI coherence, word intrusion, topic intrusion, topic diversity, topic quality, held-out perplexity of topic models]
+requires: [latent-dirichlet-allocation, cross-entropy-and-perplexity]
+partOf: [neural-topic-models]
+related: [co-occurrence-matrices-and-pmi, perplexity-as-a-metric, mutual-information, internal-clustering-indices]
+references: [chang2009tealeaves, wallach2009evaluation, newman2010coherence, mimno2011coherence, bouma2009npmi, aletras2013coherence, lau2014coherence, roder2015coherence, dieng2020etm, hoyle2021coherence]
+status: draft
+updated: 2026-09-27
+---
+
+import { NpmiExplorer } from './NpmiExplorer'
+
+<Definition>
+A topic model is **evaluated** along three axes, each with its own measures.
+
+- **Predictive fit.** Held-out **perplexity**, $\exp\paren{-\sum_d\log p(\wvec_d)/\sum_d N_d}$ over test documents
+  $\wvec_d$ of lengths $N_d$: lower means the model assigns more probability to unseen text.
+- **Interpretability of each topic.** **Coherence** scores a topic by how often its top $M$ words co-occur in a
+  reference corpus, for example the mean normalised pointwise mutual information over pairs of top words. **Human
+  judgement** measures it directly, for example by whether people can spot an intruder word inserted among a topic's
+  top words.
+- **Coverage of the topic set.** **Topic diversity** is the fraction of distinct words among the top 25 words of all
+  topics.
+
+The measures disagree often enough that no single one ranks models reliably <Cite id="chang2009tealeaves" />
+<Cite id="hoyle2021coherence" />.
+</Definition>
+
+## Intuition
+
+A topic model has two uses that pull apart. As a density model of text, it should predict held-out words well. As a tool
+for reading a corpus, its topics should be lists of words that a person recognises as one subject. A model can predict
+words well by spreading probability over many generic words, which makes topics blurry, or by using many topics in
+every document, which makes each topic less distinct. Measures of the first use therefore do not certify the second.
+
+## Perplexity
+
+Perplexity is the exponential of the average negative log-likelihood per word, the reciprocal of the geometric mean of
+the probabilities the model gives to the test words (see
+<NoteLink to="cross-entropy-and-perplexity">cross-entropy and perplexity</NoteLink>). A perplexity of $P$ means the
+model is as uncertain, on average, as a uniform choice among $P$ words.
+
+For a topic model, $\log p(\wvec_d) = \log\int p(\wvec_d \mid \thetavec)\,p(\thetavec)\,d\thetavec$ is itself
+intractable. Wallach et al. showed that common estimators, such as the harmonic mean of likelihoods from posterior
+samples, are badly biased, and proposed better ones, including a left-to-right sequential estimator
+<Cite id="wallach2009evaluation" />. A variational model reports its ELBO, which is a lower bound; comparing an ELBO with
+another model's likelihood estimate favours the other model. In **document completion**, the model infers
+$\thetavec_d$ from half of each test document and is scored on the other half, which avoids fitting $\thetavec_d$ to
+the words it is then scored on.
+
+## Human judgement: reading tea leaves
+
+Chang et al. designed two tasks that measure interpretability directly <Cite id="chang2009tealeaves" />.
+
+- **Word intrusion.** Show a person the top five words of a topic plus one **intruder**, a word with low probability in
+  this topic and high probability in another. If the topic is coherent, the intruder stands out. The score is the
+  fraction of people who pick it.
+- **Topic intrusion.** Show a document's title and snippet with its three most probable topics and one improbable
+  topic. The score measures how well people find the improbable one.
+
+Across LDA, pLSA and the correlated topic model on news and encyclopedia corpora, held-out likelihood and the human
+scores were not aligned: the models and settings with better predictive likelihood often produced topics that people
+found less interpretable <Cite id="chang2009tealeaves" />. Perplexity stopped being accepted as a proxy for topic
+quality.
+
+## Coherence
+
+Coherence scores approximate human judgement from word co-occurrence. Let $v_1, \dots, v_M$ be a topic's top $M$ words,
+usually $M = 10$.
+
+**UMass coherence** uses the training corpus itself <Cite id="mimno2011coherence" />. With $D(v)$ the number of
+documents containing $v$ and $D(v, v')$ the number containing both,
+
+$$
+C_{\text{UMass}} = \sum_{m=2}^{M}\sum_{l=1}^{m-1}\log\frac{D(v_m, v_l) + 1}{D(v_l)} .
+$$
+
+Each term is the log of a smoothed conditional probability that a document containing the higher-ranked top word
+$v_l$ also contains $v_m$. The score is at most about zero and larger is better.
+
+**PMI and NPMI coherence** use an external reference corpus, typically Wikipedia, and count co-occurrence within sliding
+windows of a fixed number of words <Cite id="newman2010coherence" />. With $p(v)$ the fraction of windows containing
+$v$ and $p(v, v')$ the fraction containing both, the pointwise mutual information is
+$\operatorname{PMI}(v, v') = \log\frac{p(v, v')}{p(v)\,p(v')}$ (see
+<NoteLink to="co-occurrence-matrices-and-pmi">PMI</NoteLink>). PMI is unbounded and grows for rare pairs, so it is
+normalised <Cite id="bouma2009npmi" />:
+
+$$
+\operatorname{NPMI}(v, v') = \frac{\operatorname{PMI}(v, v')}{-\log p(v, v')} \in [-1, 1] .
+$$
+
+The bounds follow from $p(v, v') \le \min(p(v), p(v'))$. If the words only ever occur together, $p(v, v') = p(v) =
+p(v')$, so $\operatorname{PMI} = \log\frac{1}{p(v, v')} = -\log p(v, v')$ and NPMI is $1$. If they are independent,
+PMI is $0$. As $p(v, v') \to 0$ with the marginals fixed, $\operatorname{PMI} = \log p(v, v') - \log p(v)p(v')$, and
+dividing by $-\log p(v, v')$ gives $-1 + \log(p(v)p(v'))/\log p(v, v') \to -1$. A topic's NPMI coherence is the mean
+over its $\binom{M}{2}$ pairs, and the model's is the mean over topics. NPMI correlates better with human ratings than
+PMI does <Cite id="aletras2013coherence" /> <Cite id="lau2014coherence" />.
+
+<NpmiExplorer />
+
+**$C_V$** is the measure that Röder et al. found to correlate best with human ratings in a systematic search over the
+space of coherence measures <Cite id="roder2015coherence" />. It differs from NPMI coherence in three ways.
+
+1. **Context vectors.** Each top word $v_m$ is represented by the vector of its NPMI with every top word,
+   $\uvec_m = \paren{\operatorname{NPMI}(v_m, v_1), \dots, \operatorname{NPMI}(v_m, v_M)}$.
+2. **One word against the set.** Each $\uvec_m$ is compared with the sum of all context vectors of the topic,
+   $\sum_{m'}\uvec_{m'}$, by cosine similarity. Two words that never co-occur can still support each other if they
+   co-occur with the same other words, which is an indirect confirmation.
+3. **Boolean sliding windows** over the reference corpus estimate the probabilities.
+
+$C_V$ is the mean of the $M$ cosine similarities.
+
+## Topic diversity
+
+A model can score high coherence by repeating one coherent topic many times. **Topic diversity** is the fraction of
+unique words among the top 25 words of all $K$ topics <Cite id="dieng2020etm" />. It is $1$ when no two topics share a
+top word and near $1/K$ when all topics are the same. Dieng et al. define **topic quality** as coherence times
+diversity. Diversity is the direct check for component collapse in neural topic models.
+
+## The automated coherence debate
+
+Coherence measures were validated against human judgement on classical models such as LDA. Neural topic models were
+then compared with each other mainly by automated coherence. Hoyle et al. compared automated coherence with human topic
+ratings and word intrusion for LDA and two neural models on two standard corpora <Cite id="hoyle2021coherence" />. They
+report two gaps.
+
+- **A validation gap.** Automated coherence declared a winning model in cases where the human evaluations did not
+  distinguish the models, so automated scores alone could not establish that one model's topics were better.
+- **A standardisation gap.** Published comparisons used different reference corpora, window sizes, numbers of top words,
+  preprocessing and coherence variants, so reported numbers are rarely comparable across papers.
+
+The practical conclusions are to fix and report every setting of a coherence measure, to compute it on a large external
+reference corpus, to pair it with diversity, and to confirm important differences with a human task such as word
+intrusion.
+
+## Worked example
+
+**Perplexity.** A model assigns probabilities $0.1$, $0.05$ and $0.2$ to the three words of a held-out document. The
+log-likelihood is $\log(0.001) = -6.908$ nats, $-2.303$ per word, so the perplexity is $e^{2.303} = 10$. The geometric
+mean of the three probabilities is $0.1$, and $1/0.1 = 10$.
+
+**NPMI.** In $1000$ windows, word $a$ occurs in $100$, word $b$ in $50$, and both in $20$. Under independence they would
+co-occur in $100 \times 50/1000 = 5$ windows. $\operatorname{PMI} = \log\frac{0.02}{0.1 \times 0.05} = \log 4 = 1.386$
+and $\operatorname{NPMI} = 1.386/(-\log 0.02) = 1.386/3.912 = 0.354$.
+
+**Topic diversity.** Three topics have top-five words (game, team, season, the, said),
+(market, bank, rate, the, said) and (rain, storm, wind, the, said). Of the 15 slots, 11 hold distinct words, so the diversity is $11/15 = 0.733$. The
+shared words "the" and "said" signal that stop words have leaked into every topic.
+
+## Assumptions
+
+- **Top words summarise a topic.** Coherence and intrusion look only at the top $M$ words. A topic with a coherent head
+  and a noisy tail scores well.
+- **Co-occurrence in the reference corpus reflects meaning in the modelled corpus.** Wikipedia co-occurrence may not
+  capture the vocabulary of legal filings or clinical notes.
+- **Perplexity needs a likelihood.** Clustering-based models and Wasserstein autoencoders have none, so perplexity
+  cannot compare them with probabilistic models.
+
+## Pitfalls
+
+- **Choosing $K$ by perplexity alone.** Held-out perplexity often keeps improving as $K$ grows, while topics fragment and
+  become harder to read.
+- **Scoring on the training corpus.** UMass coherence uses the training corpus, which rewards topics that fit its
+  co-occurrences, not topics that are meaningful.
+- **Comparing numbers across papers.** Coherence values depend on the reference corpus, window size, $M$ and
+  preprocessing <Cite id="hoyle2021coherence" />. Recompute every baseline under one protocol.
+- **Coherence without diversity.** Many copies of one coherent topic score well on coherence. Report both.
