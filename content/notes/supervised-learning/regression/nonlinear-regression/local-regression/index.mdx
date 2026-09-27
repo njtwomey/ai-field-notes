@@ -1,0 +1,108 @@
+---
+title: Local regression
+kind: concept
+summary: 'Local regression (LOESS) estimates $f(x_0)$ by fitting a low-degree polynomial to the points near $x_0$ by weighted least squares, with weights that fall to zero at the edge of a window holding a fraction $\alpha$ of the data. Local lines remove the boundary bias of kernel averages.'
+tags: [regression, nonlinear-regression, smoothing, nonparametric, robust-statistics]
+aliases: [LOESS, LOWESS, locally weighted regression, locally weighted scatterplot smoothing, tricube kernel]
+requires: [linear-regression]
+related: [smoothing-splines, regression-splines, moving-average-and-smoothing-filters]
+references: [cleveland1979, cleveland1988, hastie2009]
+status: draft
+updated: 2026-09-27
+---
+
+import { LoessExplorer } from './LoessExplorer'
+
+<Definition>
+**Local regression** estimates a regression function $f$ at a target point $x_0$ by weighted least squares. Each
+observation gets weight $w_i(x_0) = K\paren{\abs{x_i - x_0}/h(x_0)}$, where $K$ is a kernel that decreases to zero at
+1 and $h(x_0)$ is a bandwidth. A polynomial of degree $q$ in $x - x_0$ is fitted with these weights, and its value at
+$x_0$ is the estimate $\hat f(x_0)$. Repeating this at every target point traces a curve. **LOESS** uses the tricube
+kernel $K(u) = (1 - u^3)^3$ for $u < 1$, a nearest-neighbour bandwidth, and $q = 1$ or 2 <Cite id="cleveland1979" />.
+</Definition>
+
+## Mechanism
+
+At target $x_0$, solve
+
+$$
+\hat\betavec(x_0) = \argmin_{\betavec} \sum_{i=1}^n w_i(x_0)\paren{y_i - \sum_{k=0}^q \beta_k (x_i - x_0)^k}^2,
+\qquad \hat f(x_0) = \hat\beta_0(x_0).
+$$
+
+Centring the polynomial at $x_0$ makes the intercept the fitted value at $x_0$. The **span** $\alpha \in (0, 1]$ sets
+the bandwidth: $h(x_0)$ is the distance from $x_0$ to its $\lceil\alpha n\rceil$-th nearest observation. The window
+therefore always contains the same number of points. It widens where data are sparse and narrows where they are dense.
+
+The span controls the bias–variance trade-off. A small span follows the data closely and has high variance. A large
+span averages over a wide window and is biased wherever $f$ curves. $\alpha$ is chosen by eye, by cross-validation, or
+by an information criterion.
+
+<LoessExplorer />
+
+## A linear smoother
+
+Let $\Xmat_0$ be the $n \times (q + 1)$ matrix with rows $(1, x_i - x_0, \dots, (x_i - x_0)^q)$ and $\Wmat_0 =
+\diag(w_i(x_0))$. The weighted least-squares solution gives
+
+$$
+\hat f(x_0) = \evec_1^\top\paren{\Xmat_0^\top\Wmat_0\Xmat_0}^{-1}\Xmat_0^\top\Wmat_0\,\yvec = \sum_{i=1}^n l_i(x_0)\,y_i,
+$$
+
+where $\evec_1 = (1, 0, \dots, 0)^\top$. The weights $l_i(x_0)$ depend on the $x_i$ but not on the $y_i$, so LOESS is
+a linear smoother, like a <NoteLink to="smoothing-splines">smoothing spline</NoteLink>. Stacking $l_i(x_j)$ into a
+matrix $\Lmat$ gives $\hat\yvec = \Lmat\yvec$, and $\trace\Lmat$ is the effective degrees of freedom
+<Cite id="cleveland1988" />.
+
+## Why local lines beat local averages
+
+Degree $q = 0$ gives a weighted local average, the Nadaraya–Watson kernel estimate. It is biased at the edges of the
+data. At the left boundary all neighbours lie to the right of $x_0$. If $f$ is increasing, their average exceeds
+$f(x_0)$.
+
+A local polynomial of degree $q$ fits any polynomial of degree at most $q$ exactly, so its weights reproduce such
+polynomials:
+
+$$
+\sum_i l_i(x_0) = 1, \qquad \sum_i l_i(x_0)\,(x_i - x_0)^k = 0 \quad (k = 1, \dots, q).
+$$
+
+Expand $f$ about $x_0$: $f(x_i) = f(x_0) + f'(x_0)(x_i - x_0) + \tfrac12 f''(x_0)(x_i - x_0)^2 + \dots$. The expected
+estimate is $\sum_i l_i(x_0) f(x_i)$. For $q = 1$, the constraints remove the constant and linear terms, so
+
+$$
+\expect[\hat f(x_0)] - f(x_0) = \tfrac12 f''(x_0)\sum_i l_i(x_0)(x_i - x_0)^2 + \dots.
+$$
+
+The bias depends only on curvature, even at the boundary where the neighbours are one-sided. For $q = 0$ only the first
+constraint holds. The bias then has the term $f'(x_0)\sum_i l_i(x_0)(x_i - x_0)$, which is large at the boundary,
+where all $x_i - x_0$ share one sign <Cite id="hastie2009" />. Local quadratics also remove the curvature term at the
+cost of more variance; they help at peaks and troughs.
+
+## Robustness iterations
+
+Least squares is sensitive to outliers, and so is each local fit. Cleveland's LOWESS adds robustness weights
+<Cite id="cleveland1979" />. After a first fit, compute residuals $r_i$ and their median absolute value $s$. Give each
+point the bisquare weight
+
+$$
+\delta_i = B\paren{\frac{r_i}{6s}}, \qquad B(u) = (1 - u^2)^2 \text{ for } \abs{u} < 1, \text{ else } 0,
+$$
+
+and refit with weights $\delta_i w_i(x_0)$. Two iterations usually suffice. A point with a residual beyond six median
+absolute residuals gets weight zero. The figure's outliers show the effect.
+
+## Several inputs
+
+The same method works for $\xvec \in \reals^d$ with Euclidean distances and a local linear or quadratic surface. It
+degrades quickly with $d$: a neighbourhood that holds a fixed fraction of the data must extend across most of the
+range of each input once $d$ exceeds 3 or 4.
+
+## Pitfalls
+
+- **No closed-form curve.** The fit exists only as values at target points. Predicting at a new point requires the
+  training data and a new local fit.
+- **Cost.** Each target point needs a weighted least-squares fit over its neighbours, so a fit at $m$ points costs
+  about $O(m\alpha n)$. Implementations fit at a grid of vertices and interpolate.
+- **Span too small for the degree.** A local quadratic needs at least three distinct points in each window, and in
+  practice many more. Small spans with $q = 2$ give erratic fits.

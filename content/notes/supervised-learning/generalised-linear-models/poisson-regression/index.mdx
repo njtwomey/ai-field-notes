@@ -1,0 +1,112 @@
+---
+title: Poisson regression
+kind: concept
+summary: 'Poisson regression models a count as Poisson with mean $\mu = t\exp(\xvec^\top\betavec)$, where $t$ is the exposure. $e^{\beta_j}$ is the rate ratio per unit of feature $j$. It assumes the variance equals the mean, which count data often violate.'
+tags: [generalised-linear-models, regression, count-data, worked-example]
+aliases: [log-linear regression, Poisson GLM, rate regression, exposure offset, rate ratio]
+requires: [generalised-linear-model, poisson-distribution]
+related: [negative-binomial-and-overdispersion, deviance-and-glm-diagnostics]
+references: [mccullagh1989, cameron2013]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Poisson regression** is the <NoteLink to="generalised-linear-model">generalised linear model</NoteLink> with a
+Poisson response and the log link. Count $y_i \in \{0, 1, 2, \dots\}$ observed over exposure $t_i > 0$ is modelled as
+
+$$
+y_i \sim \Poisson(\mu_i), \qquad \log\mu_i = \log t_i + \xvec_i^\top\betavec.
+$$
+
+The term $\log t_i$ has a fixed coefficient of 1 and is called an **offset**. The model says that the rate
+$\mu_i / t_i$ is $\exp(\xvec_i^\top\betavec)$ <Cite id="mccullagh1989" />.
+</Definition>
+
+## Interpretation
+
+Increasing feature $j$ by one unit, with the others fixed, multiplies the rate by $e^{\beta_j}$. This factor is the
+**rate ratio** (in epidemiology, the incidence rate ratio). The effects are multiplicative: a model with
+$e^{\beta_1} = 1.5$ and $e^{\beta_2} = 2$ predicts a rate three times higher when both features rise by one.
+
+The exposure is the time, area or population over which the count accumulates: policy-years for insurance claims,
+person-years for disease incidence, page views for clicks. Without the offset, a unit observed twice as long looks
+twice as risky. Putting $\log t_i$ in as a feature with a free coefficient instead tests whether counts really scale
+in proportion to exposure: the coefficient should be near 1.
+
+## Fitting
+
+The log link is the canonical link of the Poisson family. The log-likelihood is
+
+$$
+\ell(\betavec) = \sum_{i=1}^n \brack{y_i\log\mu_i - \mu_i - \log y_i!},
+$$
+
+and its gradient is $\sum_i (y_i - \mu_i)\,\xvec_i$, since $\partial\mu_i/\partial\betavec = \mu_i\xvec_i$. The
+maximum solves
+
+$$
+\Xmat^\top(\yvec - \hat\muvec) = \zeros.
+$$
+
+The Hessian is $-\Xmat^\top\diag(\muvec)\Xmat$, negative definite when $\Xmat$ has full column rank, so the maximum
+is unique when it exists. <NoteLink to="iteratively-reweighted-least-squares">IRLS</NoteLink> with weights $w_i =
+\mu_i$ finds it. The estimated covariance of $\hat\betavec$ is $(\Xmat^\top\diag(\hat\muvec)\Xmat)^{-1}$.
+
+With an intercept, the first score equation is $\sum_i y_i = \sum_i\hat\mu_i$: the model reproduces the total count.
+With an indicator for a group, it reproduces that group's total.
+
+## Worked example: claim rates in two groups
+
+An insurer records 60 claims over 1000 policy-years for group A and 108 claims over 1200 policy-years for group B. Fit
+$\log\mu_i = \log t_i + \beta_0 + \beta_1 x_i$, with $x = 0$ for A and $x = 1$ for B.
+
+The score equations for the intercept and the indicator make each group's fitted total equal its observed total.
+Group A gives $1000\,e^{\beta_0} = 60$, and group B gives $1200\,e^{\beta_0 + \beta_1} = 108$. So
+
+$$
+\hat\beta_0 = \log 0.06 = -2.813, \qquad \hat\beta_1 = \log\frac{0.09}{0.06} = \log 1.5 = 0.405.
+$$
+
+Group B's claim rate is 1.5 times group A's. For the standard error, the information matrix at the fit is
+
+$$
+\Xmat^\top\diag(\hat\muvec)\Xmat = \begin{pmatrix} \hat\mu_A + \hat\mu_B & \hat\mu_B \\ \hat\mu_B & \hat\mu_B
+\end{pmatrix} = \begin{pmatrix} 168 & 108 \\ 108 & 108 \end{pmatrix}.
+$$
+
+The lower-right entry of its inverse is $(\hat\mu_A + \hat\mu_B)/(\hat\mu_A\hat\mu_B) = 1/60 + 1/108$, so
+$\operatorname{se}(\hat\beta_1) = \sqrt{1/60 + 1/108} = 0.161$. The Wald statistic is $z = 0.405/0.161 = 2.52$, with
+two-sided p-value 0.012. The 95% interval for the rate ratio is $\exp(0.405 \pm 1.96 \times 0.161) = [1.09, 2.06]$.
+
+## Overdispersion
+
+The Poisson family fixes $\var(y) = \mu$. Counts are **overdispersed** when their variance exceeds their mean, which is
+common: units differ in ways the features do not capture, and events cluster. The coefficient estimates remain
+consistent if the mean model is right, but the standard errors are too small and tests reject too often.
+
+The check is the Pearson dispersion estimate
+
+$$
+\hat\phi = \frac{1}{n - p}\sum_{i=1}^n\frac{(y_i - \hat\mu_i)^2}{\hat\mu_i},
+$$
+
+which should be near 1 for Poisson data. Values well above 1 call for a quasi-Poisson fit, which multiplies standard
+errors by $\sqrt{\hat\phi}$, or for <NoteLink to="negative-binomial-and-overdispersion">negative binomial
+regression</NoteLink> <Cite id="cameron2013" />.
+
+## Assumptions
+
+- Counts are independent given the features.
+- The log rate is linear in the features.
+- The variance equals the mean.
+- Counts are proportional to exposure.
+
+## Pitfalls
+
+- **Excess zeros.** Data with more zeros than the fitted Poisson predicts, for example because many units can never
+  have an event, need a zero-inflated or hurdle model.
+- **Least squares on log counts.** Regressing $\log(y + 1)$ on $\xvec$ discards the Poisson variance structure and
+  biases the coefficients, and the added 1 is arbitrary.
+- **Omitting the offset.** Without exposure, coefficients mix the effect of a feature on the rate with its association
+  with observation time.

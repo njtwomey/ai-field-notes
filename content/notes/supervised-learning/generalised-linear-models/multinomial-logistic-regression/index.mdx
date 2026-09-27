@@ -1,0 +1,110 @@
+---
+title: Multinomial logistic regression
+kind: concept
+summary: 'Multinomial logistic regression predicts one of $K$ classes with probabilities $\mathrm{softmax}(\Wmat\xvec)_k$, one linear score per class. It is fitted by maximising the likelihood, a convex problem; the log-odds of any two classes are linear in $\xvec$.'
+tags: [generalised-linear-models, classification, linear-models, probabilistic, worked-example]
+aliases: [softmax regression, multinomial logit, multiclass logistic regression, maximum entropy classifier, baseline-category logit]
+requires: [logistic-regression, softmax-and-log-sum-exp]
+related: [categorical-distribution, multinomial-distribution, generalised-linear-model]
+references: [bishop2006, hastie2009, mccullagh1989]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Multinomial logistic regression** models a label $y \in \{1, \dots, K\}$ given features $\xvec \in \reals^d$ as
+
+$$
+P(y = k \mid \xvec) = \frac{\exp(\wvec_k^\top\xvec)}{\sum_{j=1}^K \exp(\wvec_j^\top\xvec)}, \qquad k = 1, \dots, K,
+$$
+
+with one weight vector $\wvec_k$ per class, and $\xvec$ including a constant feature for the intercepts. The right-hand
+side is the softmax of the $K$ scores $\wvec_k^\top\xvec$. For $K = 2$ it is
+<NoteLink to="logistic-regression">logistic regression</NoteLink> <Cite id="bishop2006" />.
+</Definition>
+
+## Identifiability and log-odds
+
+Adding the same vector $\cvec$ to every $\wvec_k$ multiplies numerator and denominator by $e^{\cvec^\top\xvec}$ and
+leaves every probability unchanged. Only differences between weight vectors are identified. The usual fix sets one
+class, the **baseline**, to $\wvec_K = \zeros$. Then
+
+$$
+\log\frac{P(y = k \mid \xvec)}{P(y = K \mid \xvec)} = \wvec_k^\top\xvec, \qquad k = 1, \dots, K - 1,
+$$
+
+so the model has $(K - 1)d$ free parameters. Each $\wvec_k$ holds the log-odds of class $k$ against the baseline. For
+any two classes $j$ and $k$, the log-odds $(\wvec_j - \wvec_k)^\top\xvec$ is linear in $\xvec$, so the boundary between
+them is a hyperplane. With a penalty on the weights, the baseline constraint is unnecessary: the penalty picks a unique
+representative, and every class can be treated symmetrically.
+
+## Worked example: three classes
+
+Three classes have scores $(2, 1, 0)$ at some $\xvec$. The exponentials are $e^2 = 7.389$, $e^1 = 2.718$ and
+$e^0 = 1$, with sum $11.107$. The probabilities are
+
+$$
+P(y = 1 \mid \xvec) = 0.665, \qquad P(y = 2 \mid \xvec) = 0.245, \qquad P(y = 3 \mid \xvec) = 0.090.
+$$
+
+The log-odds of class 1 against class 3 is $\log(0.665/0.090) = 2$, the difference of their scores. Adding 5 to every
+score gives the same probabilities.
+
+## As a generalised linear model
+
+The categorical distribution with probabilities $\pi_1, \dots, \pi_K$ is an exponential family with natural parameters
+$\log(\pi_k/\pi_K)$ for $k < K$ <Cite id="mccullagh1989" />. Multinomial logistic regression sets those natural
+parameters equal to linear predictors, so it is the multivariate
+<NoteLink to="generalised-linear-model">generalised linear model</NoteLink> with the canonical link. The
+properties of canonical links carry over: the log-likelihood is concave and the score is residual times feature.
+
+## Fitting
+
+With one-hot labels $y_{ik} = \indicator[y_i = k]$ and predicted probabilities $p_{ik}$, the log-likelihood is
+
+$$
+\ell(\Wmat) = \sum_{i=1}^n \sum_{k=1}^K y_{ik}\log p_{ik} = \sum_{i=1}^n \brack{\wvec_{y_i}^\top\xvec_i - \log
+\sum_{j=1}^K e^{\wvec_j^\top\xvec_i}}.
+$$
+
+The negative of $\ell / n$ is the mean cross-entropy. Differentiating the log-sum-exp term gives softmax probabilities,
+so
+
+$$
+\nabla_{\wvec_k}\ell = \sum_{i=1}^n (y_{ik} - p_{ik})\,\xvec_i.
+$$
+
+The Hessian block for classes $k$ and $l$ is $-\sum_i p_{ik}(\indicator[k = l] - p_{il})\,\xvec_i\xvec_i^\top$. For
+each $i$, the matrix $\diag(\pvec_i) - \pvec_i\pvec_i^\top$ is the covariance of a one-hot vector, so it is positive
+semi-definite, and the log-likelihood is concave. Newton's method (multivariate IRLS) works for small $Kd$; gradient
+methods such as L-BFGS or stochastic gradient descent are used otherwise <Cite id="hastie2009" />.
+
+<Derivation title="The softmax Jacobian">
+Write $s_k = \wvec_k^\top\xvec$ and $p_k = e^{s_k}/\sum_j e^{s_j}$. Then $\partial p_k/\partial s_l = p_k(\indicator[k
+= l] - p_l)$. The derivative of $\log\sum_j e^{s_j}$ with respect to $s_l$ is $p_l$. Chain these through
+$\partial s_l/\partial\wvec_l = \xvec$ to get the gradient and Hessian above.
+</Derivation>
+
+## Independence of irrelevant alternatives
+
+The odds of class $j$ against class $k$, $\exp((\wvec_j - \wvec_k)^\top\xvec)$, do not depend on the other classes.
+Adding or removing a class leaves them unchanged. This property is the **independence of irrelevant alternatives**. It
+fails when two classes are near substitutes. In the classic example, a traveller chooses between a car and a red bus
+with equal probability. Adding a blue bus identical to the red one should split the bus share, giving car
+$\tfrac12$ and each bus $\tfrac14$. The model instead keeps the car-to-bus odds at 1 for each bus and gives each
+option $\tfrac13$. Nested and mixed logit models relax the assumption.
+
+## One-vs-rest compared
+
+Training $K$ separate binary logistic regressions, each class against all others, gives $K$ scores that do not sum to
+one and are not jointly calibrated. The multinomial model fits all classes together, so its probabilities are
+coherent. One-vs-rest is simpler to parallelise and is common in large-scale linear classifiers.
+
+## Pitfalls
+
+- **Separable data.** As in the binary case, if the classes can be separated perfectly, the weights diverge. A penalty
+  keeps them finite.
+- **Ordered classes.** When classes have a natural order, such as ratings, an ordinal model (cumulative logit) uses the
+  order and needs fewer parameters.
+- **Large $K$.** The denominator sums over all classes for every example. For vocabularies of tens of thousands, it is
+  approximated by sampled or hierarchical softmax.

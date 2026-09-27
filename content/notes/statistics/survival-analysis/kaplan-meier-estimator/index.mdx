@@ -1,0 +1,116 @@
+---
+title: Kaplan–Meier estimator
+kind: concept
+summary: 'The Kaplan–Meier estimator of a survival function from right-censored data is $\hat S(t) = \prod_{t_j \le t}(1 - d_j/n_j)$, where $d_j$ events occur among $n_j$ units at risk at time $t_j$. It is the nonparametric maximum-likelihood estimate; Greenwood''s formula gives its variance.'
+tags: [survival-analysis, nonparametric, estimation, maximum-likelihood, worked-example]
+aliases: [Kaplan-Meier estimator, product-limit estimator, KM curve, Greenwood's formula, survival curve]
+requires: [survival-and-hazard-functions, censoring]
+related: [nelson-aalen-estimator, log-rank-test, confidence-intervals]
+references: [kaplan1958, greenwood1926, kalbfleisch2002]
+status: draft
+updated: 2026-09-27
+---
+
+import { KaplanMeierExplorer } from '../_shared/KaplanMeierExplorer'
+
+<Definition>
+Let $t_1 < t_2 < \dots < t_k$ be the distinct times at which events are observed in right-censored data. At each
+$t_j$, let $n_j$ be the number of units **at risk**, still under observation just before $t_j$, and $d_j$ the number of
+events at $t_j$. The **Kaplan–Meier** or **product-limit** estimator of the survival function is
+
+$$
+\hat S(t) = \prod_{j:\, t_j \le t}\paren{1 - \frac{d_j}{n_j}},
+$$
+
+a step function that starts at 1 and drops only at event times <Cite id="kaplan1958" />.
+</Definition>
+
+## Derivation as a product of conditional survivals
+
+Surviving beyond $t$ means surviving each event time up to $t$ in turn. By the chain rule of probability,
+
+$$
+S(t) = \prod_{j:\, t_j \le t} P(T > t_j \mid T \ge t_j),
+$$
+
+where each factor is the conditional probability of getting through $t_j$ having reached it. Between event times the
+nonparametric estimate of survival does not change. The factor at $t_j$ is estimated by the fraction of the $n_j$
+units at risk that did not have the event, $1 - d_j/n_j$.
+
+Censored units enter this estimate through the risk sets. A unit censored at time $c$ counts in $n_j$ for every
+$t_j \le c$, then leaves. It contributes the information "survived to $c$" and nothing beyond. Censoring times do not
+cause drops in $\hat S$, but they shrink later risk sets, so later drops are larger.
+
+## Derivation as a maximum-likelihood estimate
+
+The same estimator maximises the likelihood over all distributions, without a parametric form. The likelihood is
+maximised by a distribution with mass only at the observed event times, so let $h_j = P(T = t_j \mid T \ge t_j)$ be the
+discrete hazard at $t_j$. A unit with an event at $t_j$ contributes $h_j\prod_{m < j}(1 - h_m)$. A unit censored at
+$c$ contributes $\prod_{m:\, t_m \le c}(1 - h_m)$. Collecting factors by event time, $h_j$ appears once for each of
+the $d_j$ events and $1 - h_j$ once for each of the $n_j - d_j$ other units at risk:
+
+$$
+L(h_1, \dots, h_k) = \prod_{j=1}^k h_j^{d_j}(1 - h_j)^{n_j - d_j}.
+$$
+
+The log-likelihood separates into one term per event time. Setting $\partial\log L/\partial h_j = d_j/h_j - (n_j -
+d_j)/(1 - h_j)$ to zero gives $\hat h_j = d_j/n_j$. By invariance of maximum likelihood, the estimate of $S(t) =
+\prod_{t_j \le t}(1 - h_j)$ is $\hat S(t)$ <Cite id="kaplan1958" />.
+
+## Greenwood's formula
+
+Each $\hat h_j$ is a binomial proportion from $n_j$ trials, with variance approximately $\hat h_j(1 - \hat h_j)/n_j$,
+and the factors at different times are approximately uncorrelated. Take logs, $\log\hat S(t) = \sum_{t_j \le t}\log(1 -
+\hat h_j)$, and apply the delta method with $\frac{d}{dh}\log(1 - h) = -1/(1 - h)$:
+
+$$
+\var\paren{\log\hat S(t)} \approx \sum_{t_j \le t}\frac{\hat h_j(1 - \hat h_j)}{n_j(1 - \hat h_j)^2} = \sum_{t_j \le
+t}\frac{d_j}{n_j(n_j - d_j)}.
+$$
+
+A second delta step, $\var(\hat S) \approx \hat S^2\var(\log\hat S)$, gives **Greenwood's formula**
+<Cite id="greenwood1926" />:
+
+$$
+\widehat{\var}\paren{\hat S(t)} = \hat S(t)^2\sum_{t_j \le t}\frac{d_j}{n_j(n_j - d_j)}.
+$$
+
+Intervals of the form $\hat S \pm 1.96\,\operatorname{se}$ can cross 0 or 1. Intervals computed on the scale
+$\log(-\log S)$ and transformed back stay in $[0, 1]$ and have better coverage in small samples
+<Cite id="kalbfleisch2002" />.
+
+## Worked example
+
+Ten patients have follow-up times in months $3, 5^+, 6, 6, 8, 10^+, 12, 15^+, 17, 20^+$, where $^+$ marks a censored
+time.
+
+| $t_j$ | $n_j$ | $d_j$ | $1 - d_j/n_j$ | $\hat S(t_j)$ | Greenwood se |
+| --- | --- | --- | --- | --- | --- |
+| 3 | 10 | 1 | 0.900 | 0.900 | 0.095 |
+| 6 | 8 | 2 | 0.750 | 0.675 | 0.155 |
+| 8 | 6 | 1 | 0.833 | 0.563 | 0.165 |
+| 12 | 4 | 1 | 0.750 | 0.422 | 0.174 |
+| 17 | 2 | 1 | 0.500 | 0.211 | 0.173 |
+
+The patient censored at 5 months is in the risk set at 3 months but not at 6, so $n_j$ falls from 10 to 8 between
+the first two event times. The estimated median survival is 12 months, the first time $\hat S$ falls to 0.5 or below.
+The last observation, at 20 months, is censored, so $\hat S$ stays at 0.211 after 17 months and is undefined beyond
+20.
+
+<KaplanMeierExplorer />
+
+## Assumptions
+
+- Censoring is independent of the event time: units censored at $c$ have the same future hazard as units still
+  observed at $c$.
+- Units are independent and come from one population. Different groups are estimated separately and compared by the
+  <NoteLink to="log-rank-test">log-rank test</NoteLink>.
+
+## Pitfalls
+
+- **The tail.** Late in follow-up, few units remain at risk, and each event drops $\hat S$ by a large step. Report the
+  numbers at risk under the plot, and do not read much into the right end of the curve.
+- **Competing risks.** When another event prevents the one of interest, $1 - \hat S$ from censoring the other event
+  overestimates the probability that the event of interest occurs. A cumulative incidence function is needed.
+- **Mean survival.** The mean is the area under $\hat S$, which is undefined if the last observation is censored. A
+  restricted mean up to a fixed horizon is reported instead.

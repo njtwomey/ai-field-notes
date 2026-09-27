@@ -1,0 +1,111 @@
+---
+title: Censoring
+kind: concept
+summary: 'An event time is censored when it is only known to lie in a range, usually beyond the end of follow-up (right censoring). Under independent censoring, each unit contributes $f(t)$ if its event was seen and $S(t)$ if not; dropping or ignoring censored units biases survival downwards.'
+tags: [survival-analysis, missing-data, likelihood, worked-example]
+aliases: [right censoring, left censoring, interval censoring, informative censoring, non-informative censoring, left truncation, delayed entry]
+requires: [survival-and-hazard-functions]
+related: [kaplan-meier-estimator, parametric-survival-models]
+references: [kalbfleisch2002, leung1997]
+status: draft
+updated: 2026-09-27
+---
+
+import { KaplanMeierExplorer } from '../_shared/KaplanMeierExplorer'
+
+<Definition>
+An event time $T$ is **censored** when the data show only that $T$ lies in some interval rather than its exact value.
+Under **right censoring**, the most common kind, unit $i$ is observed until time $C_i$, and the data are
+$t_i = \min(T_i, C_i)$ and the event indicator $\delta_i = \indicator[T_i \le C_i]$. A censored unit ($\delta_i = 0$)
+is known to survive past $t_i$ <Cite id="kalbfleisch2002" />.
+</Definition>
+
+## Kinds of censoring
+
+- **Right censoring.** The event has not happened by the last observation: the study ends, the patient moves away,
+  the customer is still active at the data snapshot. $T_i > t_i$.
+- **Left censoring.** The event happened before the first observation, at an unknown time. $T_i \le t_i$.
+- **Interval censoring.** The event happened between two inspections. $a_i < T_i \le b_i$.
+
+Right censoring arises from different mechanisms. **Type I** censoring stops observation at a fixed time.
+**Administrative** censoring stops it at a common calendar date for units that entered at different times. **Type
+II** censoring stops the study after a fixed number of events. **Random** censoring comes from dropout.
+
+**Truncation** differs from censoring. Under **left truncation**, or delayed entry, a unit enters the data only if it
+survived to its entry time; units that failed earlier are never seen. Censored units are in the data with partial
+information. Truncated units are missing entirely, and each observed unit's contribution must be conditioned on its
+survival to entry.
+
+## The likelihood under independent censoring
+
+Assume **independent censoring**: $C_i$ is independent of $T_i$, given the features. Let the censoring times have
+density $g$ and survival function $G$. A unit with an observed event at $t$ has $T = t$ and $C > t$, with probability
+density $f(t)\,G(t)$. A censored unit has $C = t$ and $T > t$, with density $g(t)\,S(t)$. The likelihood of $n$
+independent units is
+
+$$
+\prod_{i=1}^n \brack{f(t_i)\,G(t_i)}^{\delta_i}\brack{g(t_i)\,S(t_i)}^{1 - \delta_i} = \underbrace{\prod_{i=1}^n
+f(t_i)^{\delta_i}S(t_i)^{1 - \delta_i}}_{\text{event-time model}} \times \underbrace{\prod_{i=1}^n g(t_i)^{1 -
+\delta_i}G(t_i)^{\delta_i}}_{\text{censoring model}}.
+$$
+
+If the censoring distribution has no parameters in common with the event-time distribution (**non-informative
+censoring**), the second factor is a constant for inference about $T$. Using $f = hS$, the working likelihood is
+
+$$
+L = \prod_{i=1}^n f(t_i)^{\delta_i}S(t_i)^{1 - \delta_i} = \prod_{i=1}^n h(t_i)^{\delta_i}S(t_i).
+$$
+
+Every unit contributes its survival up to $t_i$. Units with an event also contribute the hazard at $t_i$. Censored units
+are neither discarded nor treated as events. Left- and interval-censored units contribute $F(t_i)$ and $S(a_i) -
+S(b_i)$ instead.
+
+## Why simple fixes are biased
+
+Two tempting shortcuts both bias survival downwards.
+
+**Dropping censored units** keeps only the units whose events were seen, which are those with $T_i \le C_i$. Short
+event times are more likely to be seen before censoring, so the kept sample over-represents them. With exponential
+event times of rate $\lambda$ and exponential censoring of rate $c$, the observed time $\min(T, C)$ is exponential with
+rate $\lambda + c$, independently of which came first. The kept units therefore have mean time $1/(\lambda + c)$
+rather than $1/\lambda$.
+
+**Treating censoring times as event times** uses every unit, but records survivors as failures at their censoring
+time. It also gives mean $1/(\lambda + c)$ in the exponential case, and it counts events that did not happen.
+
+For $\lambda = 0.08$ and $c = 0.05$ per month, the true mean event time is 12.5 months and both shortcuts estimate 7.7
+months.
+
+<Derivation title="The minimum of two independent exponentials">
+$P(\min(T, C) > t) = P(T > t)P(C > t) = e^{-\lambda t}e^{-ct} = e^{-(\lambda + c)t}$, so $\min(T, C) \sim
+\Exp(\lambda + c)$. Also $P(T < C, \min(T, C) > t) = \int_t^\infty \lambda e^{-\lambda s}e^{-cs}\,ds =
+\frac{\lambda}{\lambda + c}e^{-(\lambda + c)t}$, which factorises into $P(T < C) = \lambda/(\lambda + c)$ times
+$P(\min(T, C) > t)$. The minimum is therefore independent of which variable attains it, and conditioning on an
+observed event leaves the distribution of the observed time unchanged at $\Exp(\lambda + c)$.
+</Derivation>
+
+## Worked example
+
+Ten patients have follow-up times in months $3, 5^+, 6, 6, 8, 10^+, 12, 15^+, 17, 20^+$, where $^+$ marks a censored
+time. Estimate $S(12)$, the probability of surviving beyond 12 months.
+
+- **Dropping censored units** leaves 6 event times, of which 1 exceeds 12: $\hat S(12) = 1/6 = 0.17$.
+- **Treating censored times as events** gives 3 of 10 beyond 12: $\hat S(12) = 0.30$.
+- The <NoteLink to="kaplan-meier-estimator">Kaplan–Meier estimator</NoteLink>, which uses each censored patient while
+  at risk, gives $\hat S(12) = 0.42$.
+
+The two shortcuts disagree with each other and with the estimator that uses the censored information correctly.
+
+<KaplanMeierExplorer />
+
+## Pitfalls
+
+- **Informative censoring.** If patients drop out because they are getting worse, the censored patients were at higher
+  risk than those who stayed, and every standard method overestimates survival. Independence of $T$ and $C$ cannot be
+  tested from the data <Cite id="leung1997" />. It must be argued from how censoring arose.
+- **Competing events.** Death from another cause is not censoring for a cause-specific question if the target is the
+  probability of the event actually occurring. Treating it as censoring estimates survival in a world where the
+  competing cause is removed.
+- **Censoring by design in machine-learning data.** Churn and time-to-conversion datasets built from a snapshot are
+  right-censored at the snapshot date. Training a classifier on "churned within 90 days" labels treats recent customers
+  who have not had 90 days yet as non-churners.

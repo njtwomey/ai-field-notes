@@ -1,0 +1,148 @@
+---
+title: Smoothing splines
+kind: concept
+summary: 'A smoothing spline minimises $\sum_i (y_i - f(x_i))^2 + \lambda\int f''''(x)^2\,dx$ over all twice-differentiable $f$. The minimiser is a natural cubic spline with a knot at each distinct $x_i$; the fit is linear in $\yvec$, and its effective degrees of freedom fall from $n$ to 2 as $\lambda$ grows.'
+tags: [regression, nonlinear-regression, splines, smoothing, regularisation]
+aliases: [cubic smoothing spline, roughness penalty, penalised regression spline, effective degrees of freedom, smoother matrix, Reinsch algorithm]
+requires: [regression-splines, ridge-regression]
+related: [gaussian-process, gam-smoothing-parameter-selection, local-regression]
+references: [reinsch1967, green1994, wahba1990, craven1979, silverman1984, kimeldorf1971]
+status: draft
+updated: 2026-09-27
+---
+
+import { SplineExplorer } from '../_shared/SplineExplorer'
+
+<Definition>
+Given data $(x_i, y_i)$, $i = 1, \dots, n$, with $x_i$ in an interval $[a, b]$, the **cubic smoothing spline** with
+smoothing parameter $\lambda > 0$ is the function $\hat f$ that minimises
+
+$$
+\sum_{i=1}^n \paren{y_i - f(x_i)}^2 + \lambda\int_a^b f''(x)^2\,dx
+$$
+
+over all functions with a square-integrable second derivative. The first term rewards closeness to the data. The
+second penalises curvature <Cite id="reinsch1967" />.
+</Definition>
+
+## The minimiser is a natural cubic spline
+
+The search is over an infinite-dimensional set of functions, yet the answer is finite-dimensional. Let
+$t_1 < \dots < t_m$ be the distinct values among the $x_i$.
+
+**Claim.** For any candidate $g$, let $s$ be the natural cubic spline with knots $t_1, \dots, t_m$ that interpolates
+$g$ at the knots, $s(t_j) = g(t_j)$. Then $\int s''^2 \le \int g''^2$, with equality only if $g = s$
+<Cite id="green1994" />.
+
+**Proof.** Let $h = g - s$, so $h(t_j) = 0$ at every knot. Integrate by parts:
+
+$$
+\int_a^b s''h''\,dx = \brack{s''h'}_a^b - \int_a^b s'''h'\,dx.
+$$
+
+A natural spline is linear outside $[t_1, t_m]$, so $s'' = 0$ at $a$ and $b$, and the boundary term vanishes. On
+each interval $(t_j, t_{j+1})$, $s$ is cubic, so $s'''$ is a constant $c_j$; outside $[t_1, t_m]$ it is zero. Hence
+
+$$
+\int_a^b s'''h'\,dx = \sum_{j=1}^{m-1} c_j\brack{h(t_{j+1}) - h(t_j)} = 0.
+$$
+
+So $\int s''h'' = 0$, and
+
+$$
+\int g''^2 = \int (s'' + h'')^2 = \int s''^2 + 2\int s''h'' + \int h''^2 = \int s''^2 + \int h''^2 \ge \int s''^2.
+$$
+
+Equality requires $h'' = 0$, so $h$ is linear; $h$ is zero at two or more knots, so $h = 0$.
+
+Replacing any $g$ by its interpolant $s$ keeps the residual sum of squares, which depends only on the values at the
+knots, and does not increase the penalty. The minimiser is therefore a natural cubic spline with knots at the
+$t_j$.
+
+## The fit is a linear smoother
+
+Write $f(x) = \sum_{j=1}^m \theta_j N_j(x)$ in a basis of natural cubic splines with those knots. Let $\Nmat$ be the
+$n \times m$ matrix $N_{ij} = N_j(x_i)$ and $\Omegamat$ the $m \times m$ matrix $\Omega_{jk} = \int N_j''N_k''$. The
+criterion becomes a generalised ridge problem:
+
+$$
+\norm{\yvec - \Nmat\thetavec}^2 + \lambda\,\thetavec^\top\Omegamat\thetavec, \qquad \hat\thetavec =
+\paren{\Nmat^\top\Nmat + \lambda\Omegamat}^{-1}\Nmat^\top\yvec.
+$$
+
+The fitted values are $\hat\yvec = \Smat_\lambda\yvec$ with the **smoother matrix**
+
+$$
+\Smat_\lambda = \Nmat\paren{\Nmat^\top\Nmat + \lambda\Omegamat}^{-1}\Nmat^\top.
+$$
+
+$\Smat_\lambda$ does not depend on $\yvec$, so the smoothing spline is a **linear smoother**. Unlike a least-squares hat
+matrix, it is not a projection: $\Smat_\lambda^2 \ne \Smat_\lambda$ for $\lambda > 0$.
+
+## Effective degrees of freedom
+
+For a projection, the trace equals the number of fitted parameters. By analogy, the **effective degrees of freedom**
+of a linear smoother is $\operatorname{df}_\lambda = \trace\Smat_\lambda$.
+
+Suppose the $x_i$ are distinct, so $\Nmat$ is square and invertible. Then
+$\Smat_\lambda = (\eye + \lambda\Kmat)^{-1}$ with $\Kmat = \Nmat^{-\top}\Omegamat\Nmat^{-1}$ (the **Reinsch form**).
+$\Kmat$ is symmetric positive semi-definite with eigenvalues $d_1 \le d_2 \le \dots \le d_n$. The two smallest are zero,
+because linear functions have no curvature. The eigenvalues of $\Smat_\lambda$ are $1/(1 + \lambda d_k)$, so
+
+$$
+\operatorname{df}_\lambda = \sum_{k=1}^n \frac{1}{1 + \lambda d_k} = 2 + \sum_{k=3}^n \frac{1}{1 + \lambda d_k}.
+$$
+
+As $\lambda \to 0$, every term tends to 1 and $\operatorname{df} \to n$: the spline interpolates the data. As
+$\lambda \to \infty$, only the two null-space terms remain and $\operatorname{df} \to 2$: the fit becomes the
+least-squares line. Between these limits, $\operatorname{df}_\lambda$ decreases continuously, so it is a more
+interpretable way to set the amount of smoothing than $\lambda$ itself, whose scale depends on the units of $x$.
+
+The eigenvectors of $\Kmat$ behave like sinusoids of increasing frequency. The smoother leaves low-frequency components
+almost untouched and shrinks high-frequency components strongly, which is what smoothing means
+<Cite id="hastie2009" />.
+
+<SplineExplorer initialKnots={20} draggable={false} initialLogLambda={-5} />
+
+The figure approximates the smoothing spline with 20 knots instead of one per data point. Such a **penalised
+regression spline** is almost indistinguishable from the full smoothing spline once the knots are dense relative to
+the curvature of $f$, and its cost does not grow with $n$ <Cite id="wood2017" />.
+
+## Choosing $\lambda$
+
+Leave-one-out cross-validation has a closed form for any linear smoother whose leave-one-out fit equals the full fit
+with $y_i$ replaced by its own prediction, which holds here:
+
+$$
+\operatorname{CV}(\lambda) = \frac1n\sum_{i=1}^n\paren{\frac{y_i - \hat f_\lambda(x_i)}{1 - S_{ii}}}^2.
+$$
+
+**Generalised cross-validation** replaces each $S_{ii}$ by their average $\trace\Smat_\lambda / n$
+<Cite id="craven1979" />:
+
+$$
+\operatorname{GCV}(\lambda) = \frac{n\norm{\yvec - \Smat_\lambda\yvec}^2}{\paren{n - \trace\Smat_\lambda}^2}.
+$$
+
+REML, which treats the penalty as a Gaussian prior, is a common alternative; see
+<NoteLink to="gam-smoothing-parameter-selection">smoothing parameter selection</NoteLink>.
+
+## Computation and other views
+
+The Reinsch algorithm computes the fit in $O(n)$ operations, using the banded structure of the natural spline
+equations <Cite id="reinsch1967" />. B-spline bases give the same banded structure.
+
+- **Equivalent kernel.** Away from the boundaries, a smoothing spline behaves like a kernel smoother with a kernel whose
+  bandwidth varies as $\lambda^{1/4}$ times a power of the local design density <Cite id="silverman1984" />.
+- **Bayesian view.** The smoothing spline is the posterior mean of $f$ under a Gaussian-process prior (an integrated
+  Wiener process) with a flat prior on linear functions <Cite id="kimeldorf1971" /> <Cite id="wahba1990" />. See
+  <NoteLink to="gaussian-process">Gaussian process</NoteLink>.
+
+## Pitfalls
+
+- **Ties in $x$.** With repeated $x$ values, the knots are the distinct values, and the fit uses the means of the tied
+  responses weighted by their counts.
+- **Scale of $\lambda$.** $\lambda$ changes meaning when $x$ or $y$ is rescaled. Report the effective degrees of
+  freedom.
+- **Correlated errors.** Cross-validation assumes independent errors. With autocorrelated residuals, GCV chooses too
+  small a $\lambda$ and the fit follows the noise.

@@ -1,0 +1,107 @@
+---
+title: Isotonic regression
+kind: concept
+summary: 'Isotonic regression fits the non-decreasing function closest to the data in weighted squared error. The solution is a step function whose steps are means of consecutive blocks of responses; the pool-adjacent-violators algorithm computes it in linear time after sorting.'
+tags: [regression, nonlinear-regression, nonparametric, shape-constraints, worked-example]
+aliases: [isotonic least squares, order-restricted regression, antitonic regression, monotone least squares]
+requires: [linear-regression]
+related: [isotonic-calibration, regression-splines, calibration-error]
+references: [ayer1955, brunk1955, deleeuw2009, zhang2002]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Given observations $(x_i, y_i)$ sorted so that $x_1 \le x_2 \le \dots \le x_n$, and positive weights $w_i$,
+**isotonic regression** finds fitted values $\hat f_1, \dots, \hat f_n$ that solve
+
+$$
+\min_{f_1, \dots, f_n} \sum_{i=1}^n w_i\,(y_i - f_i)^2 \quad \text{subject to} \quad f_1 \le f_2 \le \dots \le f_n.
+$$
+
+The fitted function is non-decreasing in $x$ and has no other assumed shape <Cite id="ayer1955" /> <Cite
+id="brunk1955" />. **Antitonic** regression imposes a non-increasing order instead.
+</Definition>
+
+## Structure of the solution
+
+The feasible set $\set{\fvec : f_1 \le \dots \le f_n}$ is a closed convex cone, and the objective is a strictly convex
+quadratic, so the solution exists and is unique. It is the weighted projection of $\yvec$ onto the cone.
+
+The solution is constant on consecutive **blocks** of indices, and on each block it equals the weighted mean of the
+responses in that block. The key step is that adjacent observations in the wrong order share a fitted value.
+Suppose $y_i > y_{i+1}$ but $\hat f_i < \hat f_{i+1}$. Raising $\hat f_i$ alone by a small amount keeps the order,
+so optimality requires $y_i \le \hat f_i$; otherwise the raise would reduce the error. Lowering $\hat f_{i+1}$ alone
+likewise requires $y_{i+1} \ge \hat f_{i+1}$. Together these give $y_i \le \hat f_i < \hat f_{i+1} \le y_{i+1}$,
+which contradicts $y_i > y_{i+1}$. So $\hat f_i = \hat f_{i+1}$. Two observations
+forced to share a value $c$ contribute
+
+$$
+w_i(y_i - c)^2 + w_{i+1}(y_{i+1} - c)^2 = (w_i + w_{i+1})(\bar y - c)^2 + \text{const},
+$$
+
+with $\bar y$ their weighted mean. They act as a single observation at $\bar y$ with weight $w_i + w_{i+1}$. The same
+argument applies to adjacent blocks.
+
+An explicit formula also holds. Let $\operatorname{Av}(s, t)$ be the weighted mean of $y_s, \dots, y_t$. Then
+
+$$
+\hat f_i = \max_{s \le i}\;\min_{t \ge i}\;\operatorname{Av}(s, t).
+$$
+
+Equivalently, plot the cumulative sums $\paren{\sum_{j \le k} w_j, \sum_{j \le k} w_j y_j}$ for $k = 0, \dots, n$.
+$\hat f$ is the slope of the greatest convex minorant of these points <Cite id="brunk1955" />.
+
+## Pool adjacent violators
+
+The pool-adjacent-violators algorithm (PAV) builds the blocks from left to right with a stack.
+
+1. Push observation $i$ as a block with value $y_i$ and weight $w_i$.
+2. While the top block's value is below the value of the block beneath it, pop both and push one block holding their
+   weighted mean and summed weight.
+3. After the last observation, each observation takes the value of its block.
+
+Each observation is pushed once and merged at most once, so PAV runs in $O(n)$ time after an $O(n\log n)$ sort
+<Cite id="deleeuw2009" />. Ties in $x$ are handled by first replacing tied observations with their weighted mean.
+
+## Worked example
+
+Responses $\yvec = (2, 5, 3, 1, 6, 4)$ at increasing $x$, all with weight 1.
+
+| step | read | stack of blocks (value, size) after pooling |
+| --- | --- | --- |
+| 1 | 2 | (2, 1) |
+| 2 | 5 | (2, 1), (5, 1) |
+| 3 | 3 | $5 > 3$: pool to (4, 2). Stack: (2, 1), (4, 2) |
+| 4 | 1 | $4 > 1$: pool to $(4 \cdot 2 + 1)/3 = 3$, giving (3, 3). $2 \le 3$. Stack: (2, 1), (3, 3) |
+| 5 | 6 | (2, 1), (3, 3), (6, 1) |
+| 6 | 4 | $6 > 4$: pool to (5, 2). Stack: (2, 1), (3, 3), (5, 2) |
+
+The fit is $\hat\fvec = (2, 3, 3, 3, 5, 5)$. Step 4 shows a cascade: the new observation first merges with the block
+$\set{5, 3}$, and the merged block is then checked against the block beneath it. The residual sum of squares is
+$0 + 4 + 0 + 4 + 1 + 1 = 10$. The fitted values sum to 21, the same as the responses: each block preserves its sum.
+
+## Statistical properties
+
+For a bounded non-decreasing regression function and noise with finite variance, the mean squared error of isotonic
+regression at the design points is of order $n^{-2/3}$ <Cite id="zhang2002" />. This is the minimax rate for monotone
+functions, and it is achieved without a bandwidth, knots or a smoothing parameter. The price is a step function: the
+fit is flat within blocks and jumps between them. Near the ends of the range it is biased and noisy, because the
+extreme blocks are short.
+
+## Uses
+
+- **Probability calibration.** A classifier's scores are mapped to probabilities by an isotonic fit of the labels on
+  the scores. See <NoteLink to="isotonic-calibration">isotonic calibration</NoteLink>.
+- **Dose–response curves**, where the response must not fall as the dose rises.
+- **Monotone constraints in other models.** Isotonic regression is the projection step in algorithms that estimate
+  monotone single-index models, and a building block of shape-constrained density estimation.
+
+## Pitfalls
+
+- **Overfitting at small $n$.** With few observations per block, the steps follow the noise. A parametric or smooth
+  monotone fit, such as a monotone spline, has lower variance.
+- **Wrong direction.** Fitting a non-decreasing function to decreasing data returns a single flat block at the overall
+  mean. Check the direction first.
+- **Prediction between points.** The fit is defined at the observed $x_i$. Between them, use the step value from the
+  left or interpolate linearly; the choice is a convention, not part of the estimator.

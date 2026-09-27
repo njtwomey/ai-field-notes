@@ -1,0 +1,108 @@
+---
+title: Negative binomial regression and overdispersion
+kind: concept
+summary: 'Count data are overdispersed when their variance exceeds the Poisson mean. Negative binomial regression models the count as Poisson with a gamma-distributed rate, giving $\var(y) = \mu + \alpha\mu^2$; quasi-Poisson regression instead scales the variance, $\var(y) = \phi\mu$.'
+tags: [generalised-linear-models, regression, count-data, worked-example]
+aliases: [overdispersion, NB2 regression, quasi-Poisson regression, negative binomial GLM, extra-Poisson variation]
+requires: [poisson-regression, negative-binomial-distribution]
+related: [law-of-total-expectation, deviance-and-glm-diagnostics]
+references: [lawless1987, cameron2013, hilbe2011, wedderburn1974]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Counts are **overdispersed** relative to a Poisson model when $\var(y_i \mid \xvec_i) > \expect[y_i \mid \xvec_i]$.
+**Negative binomial regression** keeps the log-linear mean $\log\mu_i = \xvec_i^\top\betavec$ of
+<NoteLink to="poisson-regression">Poisson regression</NoteLink> and replaces the Poisson with a negative binomial
+distribution whose variance is $\mu_i + \alpha\mu_i^2$ for a dispersion parameter $\alpha \ge 0$. At $\alpha = 0$ it
+reduces to the Poisson <Cite id="lawless1987" />.
+</Definition>
+
+## Where overdispersion comes from
+
+Two mechanisms are common. **Unobserved heterogeneity**: units with the same features differ in their true rates,
+because of variables that were not measured. **Contagion or clustering**: one event makes the next more likely, as with
+repeat purchases or outbreaks. Both inflate the variance above the mean. A Poisson fit to such data has consistent
+coefficients but standard errors that are too small, often by a factor of two or more <Cite id="cameron2013" />.
+
+## The gamma–Poisson mixture
+
+Let the rate of unit $i$ carry a multiplicative random effect: $y_i \mid \lambda_i \sim \Poisson(\lambda_i)$ with
+$\lambda_i = \mu_i u_i$, where $u_i \sim \GammaD$ has mean 1 and variance $\alpha$. The mean and variance of $y_i$
+follow from the laws of total expectation and total variance:
+
+$$
+\expect[y_i] = \expect\brack{\expect[y_i \mid \lambda_i]} = \expect[\lambda_i] = \mu_i,
+$$
+
+$$
+\var(y_i) = \expect\brack{\var(y_i \mid \lambda_i)} + \var\paren{\expect[y_i \mid \lambda_i]} = \expect[\lambda_i] +
+\var(\lambda_i) = \mu_i + \alpha\mu_i^2.
+$$
+
+Integrating the gamma density against the Poisson pmf gives the marginal distribution in closed form. With
+$k = 1/\alpha$,
+
+$$
+P(y_i = y) = \frac{\Gamma(y + k)}{\Gamma(k)\, y!}\paren{\frac{k}{k + \mu_i}}^k\paren{\frac{\mu_i}{k + \mu_i}}^y,
+$$
+
+the <NoteLink to="negative-binomial-distribution">negative binomial distribution</NoteLink> with mean $\mu_i$. This
+quadratic-variance version is called NB2. The NB1 variant has $\var(y) = (1 + \alpha)\mu$, linear in the mean.
+
+## Fitting
+
+For fixed $\alpha$, the NB2 distribution is an exponential-dispersion family in $\mu$ with variance function
+$V(\mu) = \mu + \alpha\mu^2$. Fitting $\betavec$ is therefore a GLM fit by
+<NoteLink to="iteratively-reweighted-least-squares">IRLS</NoteLink>, with log-link weights
+
+$$
+w_i = \frac{\mu_i^2}{\mu_i + \alpha\mu_i^2} = \frac{\mu_i}{1 + \alpha\mu_i}.
+$$
+
+$\alpha$ is then re-estimated by maximum likelihood, or by moments, and the two steps alternate
+<Cite id="lawless1987" />. The weights show the practical effect: under the Poisson, an observation with a large mean
+gets weight $\mu_i$, proportional to its size. Under the negative binomial, the weight levels off at $1/\alpha$, so a
+few large counts no longer dominate the fit.
+
+## Quasi-Poisson
+
+The alternative keeps the Poisson score equations and assumes only $\var(y_i) = \phi\mu_i$
+<Cite id="wedderburn1974" />. The coefficients are identical to the Poisson estimates, because $\phi$ cancels from the
+score. The dispersion is estimated by the Pearson statistic $\hat\phi = \frac{1}{n - p}\sum_i (y_i - \hat\mu_i)^2 /
+\hat\mu_i$, and every standard error is multiplied by $\sqrt{\hat\phi}$. Quasi-Poisson regression has no likelihood,
+so it has no AIC.
+
+The two models weight observations differently. Quasi-Poisson weights are proportional to $\mu_i$, as in the Poisson.
+Negative binomial weights flatten for large $\mu_i$. When the fitted means span a wide range, the two sets of
+coefficients can differ noticeably. A plot of $(y_i - \hat\mu_i)^2$ against $\hat\mu_i$ shows which variance function
+the data follow: linear for quasi-Poisson, quadratic for NB2 <Cite id="hilbe2011" />.
+
+## Worked example: matching the variance
+
+Counts in one cell of a design have mean 4 and variance 12.
+
+- **Quasi-Poisson:** $12 = \phi \times 4$ gives $\phi = 3$. Poisson standard errors are too small by the factor
+  $\sqrt 3 = 1.73$.
+- **NB2:** $12 = 4 + \alpha \times 4^2$ gives $\alpha = 0.5$, that is $k = 2$. The gamma random effect has standard
+  deviation $\sqrt{0.5} = 0.71$: rates vary by about 70% between units with the same features.
+
+If another cell had mean 20, the quasi-Poisson model would predict variance 60 and NB2 would predict $20 + 0.5 \times
+400 = 220$. Comparing cells with different means distinguishes the two.
+
+## Testing for overdispersion
+
+The Poisson model is the NB2 model with $\alpha = 0$. The likelihood-ratio statistic for $\alpha = 0$ against
+$\alpha > 0$ does not follow $\ChiSq_1$, because $\alpha = 0$ lies on the boundary of the parameter space. Its null
+distribution is an equal mixture of a point mass at 0 and $\ChiSq_1$, so the p-value is half the $\ChiSq_1$ tail
+probability <Cite id="cameron2013" />.
+
+## Pitfalls
+
+- **Overdispersion from a wrong mean.** A missing feature or a wrong link also inflates the Pearson statistic. Fix the
+  mean model before choosing a variance model.
+- **Excess zeros.** A negative binomial with small $k$ produces many zeros, but a separate zero-generating process
+  calls for a zero-inflated or hurdle model instead.
+- **Underdispersion.** Variance below the mean, as in counts with a hard ceiling, cannot be fitted by a negative
+  binomial. Quasi-Poisson with $\phi < 1$ or a binomial model can.

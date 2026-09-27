@@ -1,0 +1,145 @@
+---
+title: Cox proportional hazards model
+kind: concept
+summary: 'The Cox model sets the hazard of a unit with features $\xvec$ to $h_0(t)\exp(\betavec^\top\xvec)$, an unspecified baseline times a relative risk. $\betavec$ is estimated from the partial likelihood, in which $h_0$ cancels; $e^{\beta_j}$ is the hazard ratio per unit of $x_j$.'
+tags: [survival-analysis, regression, semiparametric, maximum-likelihood, worked-example]
+aliases: [Cox regression, proportional hazards model, Cox model, partial likelihood, hazard ratio, Breslow approximation, Efron approximation]
+requires: [survival-and-hazard-functions, censoring]
+related: [log-rank-test, nelson-aalen-estimator, parametric-survival-models, logistic-regression]
+references: [cox1972, cox1975, breslow1974, efron1977, schoenfeld1982, grambsch1994, kalbfleisch2002]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The **Cox proportional hazards model** specifies the hazard of a unit with features $\xvec \in \reals^p$ as
+
+$$
+h(t \mid \xvec) = h_0(t)\exp(\betavec^\top\xvec),
+$$
+
+where $h_0(t)$ is a **baseline hazard** left completely unspecified and $\betavec \in \reals^p$ are coefficients. The
+ratio of the hazards of two units does not depend on time, so their hazards are proportional. $\betavec$ is estimated
+without estimating $h_0$, from the **partial likelihood** <Cite id="cox1972" />.
+</Definition>
+
+## Interpretation
+
+For two units whose features differ only in $x_j$, by one unit,
+
+$$
+\frac{h(t \mid \xvec + \evec_j)}{h(t \mid \xvec)} = e^{\beta_j}
+$$
+
+at every time $t$. $e^{\beta_j}$ is the **hazard ratio**. A hazard ratio of 0.5 for a treatment means that, at any
+time, a treated patient still at risk has half the event rate of an untreated one. It does not mean that survival
+times double, and it does not give the absolute risk, which needs $h_0$. There is no intercept: a constant would be
+absorbed into $h_0$.
+
+## The partial likelihood
+
+Assume no tied event times. Order the observed event times $t_{(1)} < \dots < t_{(k)}$, let $i_j$ be the unit that
+fails at $t_{(j)}$, and let $R_j$ be the **risk set**, the units still at risk just before $t_{(j)}$. Given that exactly
+one unit in $R_j$ fails at $t_{(j)}$, the probability that it is unit $i_j$ is its hazard divided by the total hazard of
+the risk set:
+
+$$
+\frac{h_0(t_{(j)})\exp(\betavec^\top\xvec_{i_j})}{\sum_{l \in R_j}h_0(t_{(j)})\exp(\betavec^\top\xvec_l)} =
+\frac{\exp(\betavec^\top\xvec_{i_j})}{\sum_{l \in R_j}\exp(\betavec^\top\xvec_l)}.
+$$
+
+The baseline hazard cancels because it multiplies every term. The **partial likelihood** is the product of these
+conditional probabilities over event times:
+
+$$
+L_P(\betavec) = \prod_{j=1}^k\frac{\exp(\betavec^\top\xvec_{i_j})}{\sum_{l \in R_j}\exp(\betavec^\top\xvec_l)}.
+$$
+
+Censored units never appear in a numerator, but they appear in the denominators of every event time up to their
+censoring time. Cox argued that the factors omitted from the full likelihood carry little information about
+$\betavec$ when $h_0$ is arbitrary. $L_P$ can be treated as a likelihood: its maximiser is consistent and
+asymptotically normal, with covariance given by the inverse of the observed information <Cite id="cox1975" />.
+
+## Score and information
+
+The log partial likelihood is $\ell_P(\betavec) = \sum_j\brack{\betavec^\top\xvec_{i_j} - \log\sum_{l \in R_j}
+e^{\betavec^\top\xvec_l}}$. Define the weights $\pi_{jl} = e^{\betavec^\top\xvec_l}/\sum_{m \in R_j}
+e^{\betavec^\top\xvec_m}$ over the risk set and the weighted feature mean $\bar\xvec_j = \sum_{l \in R_j}\pi_{jl}
+\xvec_l$. Then
+
+$$
+\uvec(\betavec) = \sum_{j=1}^k\paren{\xvec_{i_j} - \bar\xvec_j}, \qquad \Imat(\betavec) = \sum_{j=1}^k\sum_{l \in
+R_j}\pi_{jl}\paren{\xvec_l - \bar\xvec_j}\paren{\xvec_l - \bar\xvec_j}^\top.
+$$
+
+The score compares each failing unit's features with the risk-weighted average of those at risk. The information is a
+sum of weighted covariance matrices, positive semi-definite, so $\ell_P$ is concave and Newton's method converges to
+the unique maximum when it exists.
+
+**Link to the log-rank test.** With a single group indicator $x \in \set{0, 1}$ and $\beta = 0$, all weights are equal,
+and $\bar x_j = n_{1j}/n_j$, the fraction of the risk set in group 1. The score is then $\sum_j (x_{i_j} -
+n_{1j}/n_j) = O_1 - E_1$, and the information is $\sum_j (n_{1j}/n_j)(1 - n_{1j}/n_j) = V$. The score test of $\beta
+= 0$ is the <NoteLink to="log-rank-test">log-rank test</NoteLink>.
+
+## Tied event times
+
+With $d_j > 1$ events at $t_{(j)}$, the exact conditional probability sums over all subsets of size $d_j$ of the risk
+set, which is expensive. **Breslow's approximation** uses the same denominator for every tied event
+<Cite id="breslow1974" />:
+
+$$
+\frac{\exp\paren{\betavec^\top\svec_j}}{\paren{\sum_{l \in R_j}e^{\betavec^\top\xvec_l}}^{d_j}},
+$$
+
+where $\svec_j$ is the sum of the features of the $d_j$ failing units. **Efron's approximation** removes a growing
+fraction of the tied units' risk from successive denominators and is closer to the exact result when ties are many
+<Cite id="efron1977" />.
+
+## Baseline hazard
+
+Once $\hat\betavec$ is known, **Breslow's estimator** of the cumulative baseline hazard is
+
+$$
+\hat H_0(t) = \sum_{j:\, t_{(j)} \le t}\frac{d_j}{\sum_{l \in R_j}\exp(\hat\betavec^\top\xvec_l)},
+$$
+
+the <NoteLink to="nelson-aalen-estimator">Nelson–Aalen estimator</NoteLink> with each unit at risk weighted by its
+relative hazard <Cite id="breslow1974" />. The predicted survival of a unit with features $\xvec$ is
+$\hat S(t \mid \xvec) = \exp\paren{-\hat H_0(t)e^{\hat\betavec^\top\xvec}}$.
+
+## Worked example
+
+Treated (A, $x = 1$) and control (B, $x = 0$) follow-up times in months, with $^+$ marking censoring:
+
+- A: $6, 9^+, 11, 14, 18^+, 21$
+- B: $2, 4, 5^+, 7, 8, 12$
+
+There are no ties. Maximising $\ell_P(\beta)$ numerically gives $\hat\beta = -1.645$, a hazard ratio
+$e^{\hat\beta} = 0.193$ for treatment. The observed information at $\hat\beta$ gives a standard error of 0.854, so the
+Wald statistic is $z = -1.93$ with p-value 0.054. The likelihood-ratio statistic, $2\brack{\ell_P(\hat\beta) -
+\ell_P(0)} = 4.21$, has p-value 0.040. The score statistic at $\beta = 0$ is $4.49$, equal to the log-rank statistic
+for the same data. With six patients per arm, the three tests disagree about significance at the 5% level. They agree
+only asymptotically.
+
+## Checking proportional hazards
+
+The model's central assumption is that hazard ratios are constant in time. Checks include:
+
+- **Schoenfeld residuals.** For each event, the residual is $\xvec_{i_j} - \bar\xvec_j$ <Cite id="schoenfeld1982" />.
+  If the effect of $x_m$ changes over time, its scaled residuals trend against time. Grambsch and Therneau give a test
+  based on their correlation with time <Cite id="grambsch1994" />.
+- **Log cumulative hazard plots.** For a categorical feature, the curves $\log\hat H(t)$ of the groups should be
+  parallel.
+
+When the assumption fails, a time-varying coefficient $\beta_j(t)$, a stratified model with a separate baseline for
+each stratum, or an accelerated failure time model may fit instead.
+
+## Pitfalls
+
+- **Hazard ratios are not risk ratios.** A hazard ratio of 0.5 can correspond to a small difference in five-year
+  survival if events are rare.
+- **Time-varying features.** Features measured after baseline must enter as time-varying covariates, evaluated in each
+  risk set at the event time. Using a value from the future, such as "received a transplant at some point",
+  creates immortal time bias.
+- **Non-collapsibility.** Adding a prognostic feature changes the hazard ratio of another feature even when the two are
+  independent. Hazard ratios from models with different features are not directly comparable.

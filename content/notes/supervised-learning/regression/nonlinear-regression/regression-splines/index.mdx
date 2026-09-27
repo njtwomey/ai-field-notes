@@ -1,0 +1,91 @@
+---
+title: Regression splines
+kind: concept
+summary: 'A regression spline fits a piecewise polynomial joined smoothly at chosen knots by least squares. A cubic spline with $K$ knots has $K + 4$ basis functions, from a truncated power or B-spline basis; a natural spline is linear beyond the boundary knots and has $K$.'
+tags: [regression, nonlinear-regression, splines, smoothing]
+aliases: [cubic spline, B-spline, B-splines, truncated power basis, natural cubic spline, knots, spline basis]
+requires: [basis-expansions]
+related: [smoothing-splines, local-regression]
+references: [deboor1978, hastie2009, eilers1996]
+status: draft
+updated: 2026-09-27
+---
+
+import { SplineExplorer } from '../_shared/SplineExplorer'
+
+<Definition>
+A **spline of degree $q$** with knots $\xi_1 < \dots < \xi_K$ is a function that is a polynomial of degree at most $q$
+on each interval between consecutive knots and has $q - 1$ continuous derivatives everywhere. A **regression spline**
+is a spline fitted to data by least squares, with the knots fixed in advance. Cubic splines, $q = 3$, are the usual
+choice <Cite id="deboor1978" />.
+</Definition>
+
+## Truncated power basis
+
+The cubic splines with knots $\xi_1, \dots, \xi_K$ form a vector space of dimension $K + 4$. One basis is
+
+$$
+1,\; x,\; x^2,\; x^3,\; (x - \xi_1)^3_+,\; \dots,\; (x - \xi_K)^3_+,
+$$
+
+where $(u)_+ = \max(u, 0)$. Each truncated cubic $(x - \xi_k)^3_+$ is zero left of $\xi_k$ and a cubic to the right.
+Its first derivative $3(x - \xi_k)^2_+$ and second derivative $6(x - \xi_k)_+$ are continuous at $\xi_k$, and its
+third derivative jumps from 0 to 6. A combination $\sum_k \theta_k (x - \xi_k)^3_+$ added to a cubic is therefore a
+cubic spline, whose third derivative jumps by $6\theta_k$ at knot $k$.
+
+These $K + 4$ functions are linearly independent, and the dimension count for piecewise cubics also gives $K + 4$, so
+they span all cubic splines with these knots. The basis is easy to write down but poorly conditioned: for knots close
+together, the columns $(x - \xi_k)^3_+$ are nearly equal, and $\Hmat^\top\Hmat$ is close to singular.
+
+## B-spline basis
+
+**B-splines** span the same space with functions that are local and well conditioned. Extend the knots with boundary
+knots repeated at each end, $t_0 \le t_1 \le \dots$. The degree-0 B-splines are indicators of the knot intervals,
+$B_{j,0}(x) = \indicator[t_j \le x < t_{j+1}]$. Higher degrees follow from the Cox–de Boor recursion
+<Cite id="deboor1978" />:
+
+$$
+B_{j,q}(x) = \frac{x - t_j}{t_{j+q} - t_j} B_{j,q-1}(x) + \frac{t_{j+q+1} - x}{t_{j+q+1} - t_{j+1}}
+B_{j+1,q-1}(x),
+$$
+
+with any term whose denominator is zero set to zero. Three properties follow by induction on $q$:
+
+- **Local support.** $B_{j,q}$ is nonzero only on $[t_j, t_{j+q+1})$, which spans $q + 1$ knot intervals.
+- **Non-negativity.** $B_{j,q}(x) \ge 0$.
+- **Partition of unity.** $\sum_j B_{j,q}(x) = 1$ at every $x$ in the range.
+
+Local support makes $\Hmat^\top\Hmat$ banded, with bandwidth $q + 1$. Each coefficient moves the fit only near its
+own knots, so the least-squares problem is well conditioned and solves in time linear in $n$ and $K$.
+
+<SplineExplorer initialKnots={4} draggable initialLogLambda={-9} />
+
+## Natural cubic splines
+
+A cubic spline fitted by least squares is erratic beyond the outermost knots, where the cubic pieces extrapolate with
+little data to anchor them. A **natural cubic spline** is additionally required to be linear to the left of the first
+knot and to the right of the last. Linearity means the second and third derivatives vanish there: two constraints at
+each end. The dimension falls from $K + 4$ to $K$ <Cite id="hastie2009" />. The saved degrees of freedom can buy more
+interior knots, and the linear tails make extrapolation less wild.
+
+## Choosing knots
+
+The knots control flexibility. The number of knots matters more than their exact positions, and common practice
+places them at quantiles of $x$, so that each interval holds about the same number of points. The number is chosen by
+cross-validation or an information criterion. When the function changes faster in one region, as in the figure,
+knots concentrated there fit better with the same number of parameters.
+
+An alternative avoids the choice: use many knots and add a penalty on the roughness of the fit. With B-splines and a
+difference penalty on adjacent coefficients, this is a **P-spline** <Cite id="eilers1996" />. With a penalty on
+$\int f''(x)^2\,dx$ and a knot at every data point, it is a <NoteLink to="smoothing-splines">smoothing
+spline</NoteLink>. The figure's $\lambda$ slider adds such a penalty. The effective degrees of freedom then fall below the
+basis size.
+
+## Pitfalls
+
+- **Knots outside the data.** An interval with no data leaves its coefficients undetermined, and $\Hmat^\top\Hmat$ is
+  singular.
+- **Degree for smoothness only.** Cubic splines look smooth to the eye because their second derivative is continuous.
+  Higher degrees rarely help.
+- **Interpreting coefficients.** Individual spline coefficients have no direct meaning. Interpret the fitted curve, or
+  its derivative, instead.

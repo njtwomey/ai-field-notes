@@ -1,0 +1,128 @@
+---
+title: Parametric survival models
+kind: concept
+summary: 'A parametric survival model assumes a distribution for the event time, such as exponential, Weibull or log-normal, and fits it by maximising $\prod_i h(t_i)^{\delta_i}S(t_i)$ over censored data. Accelerated failure time models scale time by $e^{\betavec^\top\xvec}$; the Weibull is both AFT and proportional hazards.'
+tags: [survival-analysis, regression, maximum-likelihood, distributions, worked-example]
+aliases: [accelerated failure time model, AFT model, Weibull regression, exponential survival model, time ratio, log-logistic survival model]
+requires: [survival-and-hazard-functions, censoring]
+related: [cox-proportional-hazards, kaplan-meier-estimator, exponential-distribution, log-normal-distribution, gamma-and-tweedie-regression]
+references: [kalbfleisch2002, weibull1951, wei1992]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **parametric survival model** assumes that the event time $T$ has a distribution from a named family, with survival
+function $S(t; \thetavec)$ and hazard $h(t; \thetavec)$, possibly depending on features $\xvec$. With right-censored
+data $(t_i, \delta_i)$, where $\delta_i = 1$ marks an observed event, the parameters maximise
+
+$$
+L(\thetavec) = \prod_{i=1}^n h(t_i; \thetavec)^{\delta_i}\,S(t_i; \thetavec),
+$$
+
+the likelihood under independent, non-informative censoring <Cite id="kalbfleisch2002" />.
+</Definition>
+
+## The likelihood
+
+An observed event at $t_i$ contributes its density $f(t_i) = h(t_i)S(t_i)$. A unit censored at $t_i$ contributes the
+probability of surviving past $t_i$, $S(t_i)$. Both cases are covered by $h(t_i)^{\delta_i}S(t_i)$. On the log scale,
+with $S = e^{-H}$,
+
+$$
+\ell(\thetavec) = \sum_{i=1}^n\brack{\delta_i\log h(t_i; \thetavec) - H(t_i; \thetavec)}.
+$$
+
+Every unit pays its cumulative hazard up to its last observation; units with events also collect the log hazard at
+their event time.
+
+## Exponential model
+
+The constant hazard $h(t) = \lambda$ gives $H(t) = \lambda t$ and
+
+$$
+\ell(\lambda) = d\log\lambda - \lambda\sum_{i=1}^n t_i,
+$$
+
+where $d = \sum_i\delta_i$ is the number of events. Setting $\ell'(\lambda) = d/\lambda - \sum_i t_i$ to zero gives
+
+$$
+\hat\lambda = \frac{d}{\sum_i t_i},
+$$
+
+events divided by total time at risk. The observed information is $d/\lambda^2$, so $\operatorname{se}(\hat\lambda)
+\approx \hat\lambda/\sqrt d$. The precision depends on the number of events, not the number of units.
+
+## Weibull model
+
+The Weibull hazard $h(t) = (k/\sigma)(t/\sigma)^{k-1}$, with shape $k > 0$ and scale $\sigma > 0$, gives
+$S(t) = \exp\paren{-(t/\sigma)^k}$ <Cite id="weibull1951" />. The hazard rises for $k > 1$, is constant for $k = 1$
+(the exponential), and falls for $k < 1$. Because $\log(-\log S(t)) = k\log t - k\log\sigma$, a plot of
+$\log(-\log\hat S)$ against $\log t$, from a Kaplan–Meier estimate, is close to a straight line with slope $k$ when the
+Weibull model fits.
+
+## Worked example
+
+Ten patients have follow-up times in months $3, 5^+, 6, 6, 8, 10^+, 12, 15^+, 17, 20^+$, where $^+$ marks a censored
+time. There are $d = 6$ events and the total time at risk is 102 months.
+
+- **Exponential:** $\hat\lambda = 6/102 = 0.0588$ per month, with standard error $0.0588/\sqrt 6 = 0.024$. The
+  estimated median is $\log 2/\hat\lambda = 11.8$ months and $\hat S(12) = e^{-0.0588 \times 12} = 0.49$.
+- **Weibull:** maximising the likelihood numerically gives $\hat k = 1.69$ and $\hat\sigma = 15.1$ months. The median
+  is $\hat\sigma(\log 2)^{1/\hat k} = 12.1$ months and $\hat S(12) = 0.51$.
+- **Kaplan–Meier:** $\hat S(12) = 0.42$ with standard error 0.17, and median 12 months.
+
+The likelihood-ratio statistic for $k = 1$ within the Weibull model is 1.96, with p-value 0.16 on one degree of
+freedom. Ten patients cannot distinguish a constant hazard from a rising one. All three estimates of $S(12)$ lie well
+within the Kaplan–Meier standard error of each other.
+
+## Accelerated failure time models
+
+An **accelerated failure time** (AFT) model says that features stretch or shrink time:
+
+$$
+T = e^{\betavec^\top\xvec}\,T_0,
+$$
+
+where $T_0$ has a baseline survival function $S_0$. Then
+
+$$
+S(t \mid \xvec) = P\paren{T_0 > t\,e^{-\betavec^\top\xvec}} = S_0\paren{t\,e^{-\betavec^\top\xvec}}.
+$$
+
+Equivalently, $\log T = \betavec^\top\xvec + \log T_0$, a linear regression for log time with a non-Gaussian error. The
+factor $e^{\beta_j}$ is a **time ratio**: a unit increase in $x_j$ multiplies every quantile of the survival time,
+including the median, by $e^{\beta_j}$ <Cite id="wei1992" />. This is often easier to explain than a hazard ratio.
+
+The error distribution names the model: an extreme-value error gives the Weibull, a normal error the log-normal, and a
+logistic error the log-logistic. The log-normal and log-logistic hazards rise and then fall, which suits events such as
+recovery after surgery.
+
+**The Weibull is both AFT and proportional hazards.** With a Weibull baseline $S_0(t) = \exp(-(t/\sigma)^k)$,
+
+$$
+S(t \mid \xvec) = \exp\paren{-\paren{\frac{t\,e^{-\betavec^\top\xvec}}{\sigma}}^k} = \exp\paren{-\paren{\frac t\sigma}^k
+e^{-k\betavec^\top\xvec}}.
+$$
+
+This is the baseline survival raised to the power $e^{-k\betavec^\top\xvec}$, which is the form of a proportional
+hazards model with log hazard ratio $-k\betavec$. A time ratio $e^{\beta}$ and a hazard ratio $e^{-k\beta}$ describe
+the same effect. The Weibull is the only family with both properties <Cite id="kalbfleisch2002" />.
+
+## Parametric or Cox
+
+A parametric model uses the data more efficiently when its form is right, extrapolates beyond the follow-up period,
+and gives smooth estimates of survival, hazard and mean survival. A
+<NoteLink to="cox-proportional-hazards">Cox model</NoteLink> assumes nothing about the baseline hazard and is safer
+when its shape is unknown. Flexible parametric models, with the log cumulative hazard modelled by a spline in $\log t$,
+combine the smooth output of a parametric model with most of the flexibility of Cox regression.
+
+## Pitfalls
+
+- **Extrapolation.** The tail beyond the last observed time is set entirely by the assumed family. Different families
+  that fit the observed period equally well can give very different long-term survival, which matters for lifetime
+  cost estimates.
+- **Choosing by fit alone.** Compare families by AIC and by plots against Kaplan–Meier, but also by whether the hazard
+  shape makes sense for the process.
+- **Exponential by default.** A constant hazard is rarely right over long periods. Check the Nelson–Aalen plot for
+  linearity before assuming it.

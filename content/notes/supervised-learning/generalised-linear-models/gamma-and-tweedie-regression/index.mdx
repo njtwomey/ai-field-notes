@@ -1,0 +1,105 @@
+---
+title: Gamma and Tweedie regression
+kind: concept
+summary: 'Gamma regression models a positive continuous response whose standard deviation grows in proportion to its mean, $\var(y) = \phi\mu^2$. Tweedie regression generalises the variance to $\phi\mu^p$; for $1 < p < 2$ it is a compound Poisson–gamma model with exact zeros, used for insurance losses.'
+tags: [generalised-linear-models, regression, insurance, positive-data]
+aliases: [gamma GLM, gamma regression, Tweedie GLM, compound Poisson–gamma regression, power variance function]
+requires: [generalised-linear-model, gamma-distribution]
+related: [poisson-regression, robust-and-distributional-regression-losses, log-normal-distribution]
+references: [mccullagh1989, jorgensen1987, smyth2002]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Gamma regression** is the <NoteLink to="generalised-linear-model">generalised linear model</NoteLink> with a gamma
+response: $y_i > 0$ has mean $\mu_i$, shape $\nu$ and variance $\mu_i^2/\nu$, and $g(\mu_i) = \xvec_i^\top\betavec$.
+The link is usually the log. **Tweedie regression** uses the family with variance function $V(\mu) = \mu^p$ for a
+power $p$; $p = 2$ is the gamma, $p = 1$ the Poisson and $p = 0$ the Gaussian <Cite id="jorgensen1987" />.
+</Definition>
+
+## Gamma regression
+
+The gamma density with mean $\mu$ and shape $\nu$ is
+
+$$
+f(y) = \frac{1}{\Gamma(\nu)\, y}\paren{\frac{\nu y}{\mu}}^\nu e^{-\nu y/\mu} = \exp\paren{\frac{y\,(-1/\mu) -
+\log\mu}{1/\nu} + c(y, \nu)}.
+$$
+
+This is an exponential-dispersion family with canonical parameter $\theta = -1/\mu$, cumulant function $b(\theta) =
+-\log(-\theta)$ and dispersion $\phi = 1/\nu$. Then $V(\mu) = b''(\theta) = 1/\theta^2 = \mu^2$, so
+
+$$
+\var(y) = \phi\mu^2, \qquad \frac{\operatorname{sd}(y)}{\mu} = \sqrt\phi.
+$$
+
+The coefficient of variation is constant. Gamma regression suits positive quantities whose spread scales with their
+size: costs, durations, rainfall amounts, concentrations. $\phi$ is the squared coefficient of variation and is
+estimated by the Pearson statistic divided by $n - p$.
+
+The canonical link is $-1/\mu$ (often written as the inverse link $1/\mu$), but it does not keep $\mu$ positive. The log
+link does, and makes coefficients multiplicative: $e^{\beta_j}$ is the factor by which the mean changes per unit of
+feature $j$. With the log link, gamma regression and least squares on $\log y$ both describe multiplicative effects.
+They estimate different targets: the GLM models $\log\expect[y]$ and the log-scale regression models
+$\expect[\log y]$. The GLM predicts the mean directly, without a retransformation correction.
+
+## Tweedie models
+
+The Tweedie family is the exponential-dispersion family with $\var(y) = \phi\mu^p$. It exists for $p \le 0$ and
+$p \ge 1$, and $p = 3$ gives the inverse Gaussian <Cite id="jorgensen1987" />. The range $1 < p < 2$ is the useful new
+case: there the distribution is a **compound Poisson–gamma**,
+
+$$
+y = \sum_{k=1}^N Z_k, \qquad N \sim \Poisson(\lambda), \qquad Z_k \iid \GammaD \text{ with shape } \alpha \text{ and
+scale } \gamma,
+$$
+
+with $y = 0$ when $N = 0$. So $P(y = 0) = e^{-\lambda} > 0$, and $y$ is continuous above 0. This is the shape of an
+insurance policy's annual loss: most policies have no claims, and the rest have a random number of claims of random
+size <Cite id="smyth2002" />.
+
+The mean is $\mu = \lambda\alpha\gamma$ and the variance is $\lambda\alpha(\alpha + 1)\gamma^2$. Rewriting these in
+terms of $\mu$ gives the Tweedie form $\phi\mu^p$ with
+
+$$
+p = \frac{\alpha + 2}{\alpha + 1}, \qquad \phi = \frac{\lambda^{1 - p}(\alpha\gamma)^{2 - p}}{2 - p}.
+$$
+
+Since $\alpha > 0$, $p$ lies in $(1, 2)$. Highly variable claim sizes (small $\alpha$) push $p$ towards 2; nearly
+constant claim sizes (large $\alpha$) push it towards 1.
+
+<Derivation title="Mean and variance of the compound Poisson–gamma sum">
+Condition on $N$. Each $Z_k$ has mean $\alpha\gamma$ and variance $\alpha\gamma^2$, so $\expect[y \mid N] =
+N\alpha\gamma$ and $\var(y \mid N) = N\alpha\gamma^2$. By the laws of total expectation and variance, with
+$\expect[N] = \var(N) = \lambda$:
+
+$$
+\expect[y] = \lambda\alpha\gamma, \qquad \var(y) = \lambda\alpha\gamma^2 + \alpha^2\gamma^2\lambda =
+\lambda\alpha(\alpha + 1)\gamma^2.
+$$
+
+With $p = (\alpha + 2)/(\alpha + 1)$ and $\phi$ as above, $\phi\mu^p = \lambda^{1-p}(\alpha\gamma)^{2-p}
+(\lambda\alpha\gamma)^p/(2 - p) = \lambda\alpha^2\gamma^2/(2 - p)$. Since $2 - p = \alpha/(\alpha + 1)$, this equals
+$\lambda\alpha(\alpha + 1)\gamma^2$.
+</Derivation>
+
+## Fitting
+
+For a fixed $p$, the Tweedie model is a GLM, fitted by <NoteLink to="iteratively-reweighted-least-squares">IRLS</NoteLink>
+with the log link. Its density has no closed form, but the score equations need only $V(\mu) = \mu^p$, so the
+coefficients do not require it. The density, needed to choose $p$ by likelihood, is evaluated by series expansions
+<Cite id="smyth2002" />. A common practice is to fit over a grid of $p$ values and keep the best profile likelihood.
+
+A Tweedie model of the total loss gives one model where the alternative is two: a Poisson model for claim counts and a
+gamma model for claim sizes. The single model assumes the same features drive frequency and severity in a linked way.
+The two-part model allows them to differ.
+
+## Pitfalls
+
+- **Zeros in a gamma model.** The gamma density is zero at $y = 0$, so exact zeros cannot be fitted. Use a Tweedie
+  model or a two-part model rather than adding a small constant.
+- **Non-constant coefficient of variation.** If the spread grows more slowly than the mean, a gamma model overweights
+  small observations. A residual plot of $(y - \hat\mu)^2$ against $\hat\mu$ on log–log axes estimates the power $p$
+  directly as its slope.
+- **Canonical link.** The inverse link can produce negative fitted means, and IRLS then fails. Prefer the log link.

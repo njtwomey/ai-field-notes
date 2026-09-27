@@ -1,0 +1,153 @@
+---
+title: Generalised linear model
+kind: concept
+summary: 'A generalised linear model draws each response from an exponential-dispersion family with mean $\mu$ and links the mean to a linear predictor by $g(\mu) = \xvec^\top\betavec$. The family fixes the variance as a function of the mean, $\var(y) = \phi V(\mu)$.'
+tags: [generalised-linear-models, regression, linear-models, probabilistic, maximum-likelihood]
+aliases: [GLM, generalized linear model, link function, canonical link, variance function, exponential dispersion family]
+requires: [exponential-family, linear-regression]
+related: [logistic-regression]
+references: [nelder1972, mccullagh1989, wedderburn1974]
+status: draft
+updated: 2026-09-27
+---
+
+import { GlmExplorer } from '../_shared/GlmExplorer'
+
+<Definition>
+A **generalised linear model** (GLM) for responses $y_1, \dots, y_n$ with feature vectors $\xvec_i \in \reals^p$ has
+three parts <Cite id="nelder1972" />:
+
+1. a **random component**: each $y_i$ is independent and follows an exponential-dispersion family with mean $\mu_i$;
+2. a **systematic component**: the linear predictor $\eta_i = \xvec_i^\top\betavec$, with coefficients
+   $\betavec \in \reals^p$;
+3. a **link function** $g$, smooth and strictly monotone, with $g(\mu_i) = \eta_i$.
+
+Linear regression, logistic regression and Poisson regression are GLMs with different families and links.
+</Definition>
+
+## Exponential-dispersion families
+
+The random component is a density or mass function of the form
+
+$$
+f(y; \theta, \phi) = \exp\paren{\frac{y\theta - b(\theta)}{a(\phi)} + c(y, \phi)}.
+$$
+
+$\theta$ is the **canonical parameter**, $b$ is the **cumulant function**, $\phi > 0$ is the **dispersion
+parameter**, and $a$ and $c$ are known functions. In most families $a(\phi) = \phi$. For fixed $\phi$ this is a
+one-parameter <NoteLink to="exponential-family">exponential family</NoteLink> with sufficient statistic $y$
+<Cite id="mccullagh1989" />.
+
+The mean and variance of $y$ follow from $b$. Write $\ell(\theta) = \log f(y; \theta, \phi)$ for one observation. Two
+identities hold for any regular likelihood: the score has mean zero, $\expect[\ell'(\theta)] = 0$, and
+$\expect[\ell''(\theta)] + \expect[\ell'(\theta)^2] = 0$. Both come from differentiating $\int f\, dy = 1$ with respect
+to $\theta$ once and twice. Here $\ell'(\theta) = (y - b'(\theta))/a(\phi)$ and $\ell''(\theta) = -b''(\theta)/a(\phi)$.
+The first identity gives
+
+$$
+\expect[y] = \mu = b'(\theta).
+$$
+
+The second gives $-b''(\theta)/a(\phi) + \var(y)/a(\phi)^2 = 0$, so
+
+$$
+\var(y) = a(\phi)\, b''(\theta).
+$$
+
+$b'$ is strictly increasing because $b'' > 0$, so $\theta$ is a function of $\mu$. The **variance function** is
+$V(\mu) = b''(\theta(\mu))$. With $a(\phi) = \phi$, $\var(y) = \phi V(\mu)$. The family determines how the variance
+changes with the mean. This mean–variance relation is the main modelling assumption that a GLM adds to the choice of
+link.
+
+| Family | $\theta$ | $b(\theta)$ | $\phi$ | $V(\mu)$ | Canonical link $g(\mu)$ |
+| --- | --- | --- | --- | --- | --- |
+| $\Gauss(\mu, \sigma^2)$ | $\mu$ | $\theta^2/2$ | $\sigma^2$ | $1$ | $\mu$ (identity) |
+| $\Poisson(\mu)$ | $\log\mu$ | $e^\theta$ | $1$ | $\mu$ | $\log\mu$ |
+| $\Bern(\mu)$ | $\log\frac{\mu}{1 - \mu}$ | $\log(1 + e^\theta)$ | $1$ | $\mu(1 - \mu)$ | $\log\frac{\mu}{1 - \mu}$ (logit) |
+| $\GammaD$, mean $\mu$, shape $\nu$ | $-1/\mu$ | $-\log(-\theta)$ | $1/\nu$ | $\mu^2$ | $-1/\mu$ (inverse) |
+| Inverse Gaussian, mean $\mu$, shape $\lambda$ | $-1/(2\mu^2)$ | $-\sqrt{-2\theta}$ | $1/\lambda$ | $\mu^3$ | $-1/(2\mu^2)$ |
+
+**Example: Poisson.** The Poisson pmf is $e^{-\mu}\mu^y/y! = \exp\paren{y\log\mu - \mu - \log y!}$. So $\theta =
+\log\mu$, $b(\theta) = e^\theta$, $a(\phi) = 1$ and $c(y) = -\log y!$. Then $b'(\theta) = e^\theta = \mu$ and
+$V(\mu) = b''(\theta) = \mu$: the variance equals the mean.
+
+## Canonical links
+
+The **canonical link** is the link that makes the linear predictor equal the canonical parameter, $\theta_i = \eta_i$.
+Since $\mu = b'(\theta)$, the canonical link is $g = (b')^{-1}$. The table lists it for each family. The logit is the
+canonical link of the Bernoulli family, which is why <NoteLink to="logistic-regression">logistic regression</NoteLink>
+uses the logistic function.
+
+With the canonical link the log-likelihood of the sample is
+
+$$
+\ell(\betavec) = \sum_{i=1}^n \frac{y_i\,\xvec_i^\top\betavec - b(\xvec_i^\top\betavec)}{a(\phi)} + \text{const}.
+$$
+
+Three consequences follow. The statistic $\Xmat^\top\yvec$ is sufficient for $\betavec$, where $\Xmat$ is the
+$n \times p$ matrix with rows $\xvec_i^\top$. The Hessian $-\Xmat^\top\diag(b''(\eta_i))\Xmat / a(\phi)$ is negative
+semi-definite, so $\ell$ is concave and any stationary point is a global maximum. The score equations are
+
+$$
+\Xmat^\top(\yvec - \muvec) = \zeros.
+$$
+
+With an intercept column, the first equation reads $\sum_i y_i = \sum_i \mu_i$: the fitted means sum to the observed
+total. A non-canonical link is allowed and often preferable, for example the log link for gamma responses, whose
+canonical link $-1/\mu$ cannot keep $\mu$ positive.
+
+## Maximum likelihood
+
+For any link, the chain rule through $\theta_i$, $\mu_i$ and $\eta_i$ gives the score for coefficient $j$:
+
+$$
+\frac{\partial\ell}{\partial\beta_j} = \sum_{i=1}^n \frac{y_i - \mu_i}{a(\phi)\, V(\mu_i)}\,
+\frac{d\mu_i}{d\eta_i}\, x_{ij}.
+$$
+
+The factor $1/V(\mu_i)$ comes from $d\theta/d\mu = 1/b''(\theta) = 1/V(\mu)$. The dispersion $\phi$ multiplies every
+term, so $\hat\betavec$ does not depend on it. The equations are nonlinear in $\betavec$. They are solved by
+<NoteLink to="iteratively-reweighted-least-squares">iteratively reweighted least squares</NoteLink>, which repeats a
+weighted least-squares fit on a linearised response <Cite id="nelder1972" />.
+
+The score depends on the family only through $V(\mu)$. Wedderburn used this to define **quasi-likelihood**: choose a
+link and a variance function without a full distribution, and solve the same equations
+<Cite id="wedderburn1974" />. The estimates remain consistent when only the mean is correctly specified.
+
+<GlmExplorer initialFamily="poisson" />
+
+## Dispersion and inference
+
+For the Poisson and Bernoulli families $\phi = 1$. For the Gaussian, gamma and inverse Gaussian families $\phi$ is
+unknown and is estimated after the fit, usually by the Pearson statistic
+
+$$
+\hat\phi = \frac{1}{n - p}\sum_{i=1}^n \frac{(y_i - \hat\mu_i)^2}{V(\hat\mu_i)}.
+$$
+
+The large-sample covariance of $\hat\betavec$ is $\phi\,(\Xmat^\top\Wmat\Xmat)^{-1}$, where $\Wmat$ is the diagonal
+IRLS weight matrix at convergence. Nested models are compared by the difference in their
+<NoteLink to="deviance-and-glm-diagnostics">deviance</NoteLink>.
+
+## Transforming the response is not the same model
+
+A log link models $\log \expect[y] = \xvec^\top\betavec$. Least squares on $\log y$ models $\expect[\log y] =
+\xvec^\top\betavec$. By Jensen's inequality $\expect[\log y] < \log\expect[y]$ whenever $y$ varies, so the two
+coefficient vectors differ. The transformed fit also cannot use observations with $y = 0$ and assumes constant variance
+on the log scale. The GLM keeps $y$ on its own scale and puts the nonlinearity in the mean.
+
+## Assumptions
+
+- Observations are independent given their features.
+- The link is correct: $g(\mu)$ is linear in the features.
+- The variance function is correct. If it is wrong but the mean is right, $\hat\betavec$ is still consistent, but the
+  standard errors are wrong; a sandwich estimator or quasi-likelihood repairs them.
+
+## Pitfalls
+
+- **Overdispersion.** Count data often have variance well above the Poisson mean. Poisson standard errors are then too
+  small. See <NoteLink to="negative-binomial-and-overdispersion">negative binomial regression and
+  overdispersion</NoteLink>.
+- **Separation.** For binary responses, a feature that separates the classes sends $\hat\betavec$ to infinity.
+- **Coefficients live on the link scale.** With a log link, $e^{\beta_j}$ is a multiplicative effect on the mean. With
+  a logit link, $e^{\beta_j}$ is an odds ratio, not a ratio of probabilities.

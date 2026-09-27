@@ -1,0 +1,131 @@
+---
+title: Iteratively reweighted least squares
+kind: technique
+summary: 'Iteratively reweighted least squares fits a generalised linear model by repeatedly solving a weighted least-squares problem on a linearised working response. Each step is a Fisher-scoring step, and with the canonical link it is exactly a Newton step.'
+tags: [generalised-linear-models, optimisation, maximum-likelihood, least-squares, worked-example]
+aliases: [IRLS, IWLS, Fisher scoring, working response, iteratively reweighted least-squares]
+requires: [generalised-linear-model]
+related: [logistic-regression, linear-regression]
+references: [nelder1972, mccullagh1989, green1984]
+status: draft
+updated: 2026-09-27
+---
+
+import { GlmExplorer } from '../_shared/GlmExplorer'
+
+<Definition>
+**Iteratively reweighted least squares** (IRLS) computes the maximum-likelihood coefficients $\hat\betavec$ of a
+<NoteLink to="generalised-linear-model">generalised linear model</NoteLink>. From the current linear predictor
+$\eta_i = \xvec_i^\top\betavec$ and mean $\mu_i = g^{-1}(\eta_i)$ it forms a working response $z_i$ and a weight
+$w_i$, and sets the next $\betavec$ to the weighted least-squares fit of $\zvec$ on $\Xmat$. It repeats until the
+coefficients stop changing <Cite id="nelder1972" />.
+</Definition>
+
+## Problem
+
+The GLM score equations
+
+$$
+\sum_{i=1}^n \frac{y_i - \mu_i}{a(\phi)\, V(\mu_i)}\, \frac{d\mu_i}{d\eta_i}\, \xvec_i = \zeros
+$$
+
+are nonlinear in $\betavec$, because $\mu_i$, $V(\mu_i)$ and $d\mu_i/d\eta_i$ all depend on it. There is no closed form
+except for the Gaussian family with the identity link. Here $V$ is the variance function, $g$ the link and $a(\phi)$
+the dispersion factor.
+
+## Mechanism
+
+Define, at the current coefficients,
+
+$$
+w_i = \frac{(d\mu_i/d\eta_i)^2}{V(\mu_i)}, \qquad z_i = \eta_i + (y_i - \mu_i)\,\frac{d\eta_i}{d\mu_i}.
+$$
+
+$z_i$ is the **working response**: a first-order Taylor expansion of $g(y_i)$ about $\mu_i$, since
+$g(y_i) \approx g(\mu_i) + (y_i - \mu_i) g'(\mu_i)$ and $g'(\mu) = d\eta/d\mu$. Let $\Wmat = \diag(w_1, \dots, w_n)$.
+The update is
+
+$$
+\betavec^{(t+1)} = \paren{\Xmat^\top\Wmat\Xmat}^{-1}\Xmat^\top\Wmat\zvec.
+$$
+
+**Derivation.** Write the score as a matrix product. Since $(d\mu_i/d\eta_i)/V(\mu_i) = w_i\,(d\eta_i/d\mu_i)$,
+
+$$
+\uvec(\betavec) = \frac{\partial\ell}{\partial\betavec} = \frac{1}{a(\phi)}\sum_i w_i\,(y_i - \mu_i)
+\frac{d\eta_i}{d\mu_i}\,\xvec_i = \frac{1}{a(\phi)}\Xmat^\top\Wmat(\zvec - \etavec).
+$$
+
+The Fisher information is the covariance of the score. The $y_i$ are independent with $\var(y_i) = a(\phi)V(\mu_i)$,
+so
+
+$$
+\Imat(\betavec) = \sum_i \frac{\var(y_i)}{a(\phi)^2 V(\mu_i)^2}\paren{\frac{d\mu_i}{d\eta_i}}^2 \xvec_i\xvec_i^\top =
+\frac{1}{a(\phi)}\Xmat^\top\Wmat\Xmat.
+$$
+
+**Fisher scoring** is Newton's method with the expected information $\Imat$ in place of the negative Hessian:
+$\betavec^{(t+1)} = \betavec^{(t)} + \Imat^{-1}\uvec$. Substituting both expressions, $a(\phi)$ cancels:
+
+$$
+\betavec^{(t+1)} = \betavec^{(t)} + (\Xmat^\top\Wmat\Xmat)^{-1}\Xmat^\top\Wmat(\zvec - \etavec) =
+(\Xmat^\top\Wmat\Xmat)^{-1}\Xmat^\top\Wmat\zvec,
+$$
+
+using $\etavec = \Xmat\betavec^{(t)}$. This is the weighted least-squares solution for response $\zvec$ and weights
+$\Wmat$ <Cite id="mccullagh1989" />.
+
+**Canonical link.** With the canonical link $\theta_i = \eta_i$, the log-likelihood is $\sum_i (y_i\eta_i -
+b(\eta_i))/a(\phi)$, and its Hessian $-\Xmat^\top\diag(b''(\eta_i))\Xmat/a(\phi)$ contains no $y_i$. The observed and
+expected information are equal, so Fisher scoring is Newton's method. Here $w_i = b''(\eta_i) = V(\mu_i)$, since
+$d\mu/d\eta = b''(\theta)$. For logistic regression, $w_i = \mu_i(1 - \mu_i)$.
+
+**Starting values.** The iteration needs a starting $\etavec$, not a starting $\betavec$. A common choice sets
+$\mu_i^{(0)} = y_i$, adjusted away from the boundary, for example $(y_i + 0.5)/2$ for binary data, and
+$\eta_i^{(0)} = g(\mu_i^{(0)})$.
+
+<GlmExplorer initialFamily="binomial" />
+
+## Worked example: an intercept-only Poisson model
+
+Fit $\log\mu = \beta$ to counts with sample mean $\bar y = 3$. The maximum-likelihood answer is $\hat\beta = \log 3 =
+1.0986$. With the log link, $d\mu/d\eta = \mu = e^\beta$, $V(\mu) = \mu$, so $w_i = \mu$ and
+$z_i = \beta + (y_i - \mu)/\mu$. All weights are equal, and weighted least squares on a column of ones returns the
+mean of $\zvec$:
+
+$$
+\beta^{(t+1)} = \beta^{(t)} + \frac{\bar y - e^{\beta^{(t)}}}{e^{\beta^{(t)}}}.
+$$
+
+This is Newton's method for $e^\beta = \bar y$. From $\beta^{(0)} = 0$:
+
+| $t$ | $\beta^{(t)}$ | error $\beta^{(t)} - \log 3$ |
+| --- | --- | --- |
+| 0 | 0 | $-1.099$ |
+| 1 | 2 | $0.901$ |
+| 2 | 1.4060 | $0.307$ |
+| 3 | 1.1414 | $0.0428$ |
+| 4 | 1.0995 | $9.0 \times 10^{-4}$ |
+| 5 | 1.0986 | $4.1 \times 10^{-7}$ |
+
+Once close, the error is roughly squared at each step: quadratic convergence, as for any Newton method.
+
+## Cost
+
+Each iteration forms $\Xmat^\top\Wmat\Xmat$ in $O(np^2)$ time and solves a $p \times p$ system in $O(p^3)$, for
+$n$ observations and $p$ coefficients. A QR decomposition of $\Wmat^{1/2}\Xmat$ is more stable than the normal
+equations and costs the same order. Typical fits converge in 4 to 10 iterations, so IRLS is fast for moderate $p$. For
+very large $p$ or $n$, first-order methods such as stochastic gradient descent avoid forming the $p \times p$ matrix.
+
+## Trade-offs
+
+- **No global guarantee.** Newton and Fisher-scoring steps can overshoot, and with a non-canonical link a step can
+  leave the valid mean space, for example a negative Poisson mean under the identity link. Step halving fixes both: if
+  the deviance rises or a mean becomes invalid, move halfway back to the previous iterate and try again.
+- **Divergence under separation.** For binary data with a separating hyperplane, the maximum does not exist. IRLS
+  weights $\mu_i(1 - \mu_i)$ go to zero and the coefficients grow without bound.
+- **By-products.** At convergence, $(\Xmat^\top\Wmat\Xmat)^{-1}$ scaled by $\phi$ is the estimated covariance of
+  $\hat\betavec$, so standard errors come at no extra cost.
+- **Reuse.** The same scheme, with other weights, fits robust M-estimators and quasi-likelihood models
+  <Cite id="green1984" />. Adding a penalty matrix to $\Xmat^\top\Wmat\Xmat$ gives penalised IRLS, the inner loop of
+  <NoteLink to="generalised-additive-model">generalised additive model</NoteLink> fitting.

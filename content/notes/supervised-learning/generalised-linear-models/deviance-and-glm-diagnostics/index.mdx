@@ -1,0 +1,116 @@
+---
+title: Deviance and GLM diagnostics
+kind: concept
+summary: 'The deviance of a generalised linear model is twice the log-likelihood gap between a saturated model and the fitted model. Deviance differences compare nested models; Pearson, deviance and quantile residuals, leverage and the Pearson dispersion estimate check the fit.'
+tags: [generalised-linear-models, model-selection, diagnostics, residuals, worked-example]
+aliases: [GLM deviance, scaled deviance, analysis of deviance, deviance residuals, Pearson residuals, randomised quantile residuals]
+requires: [generalised-linear-model]
+related: [iteratively-reweighted-least-squares, robust-and-distributional-regression-losses]
+references: [mccullagh1989, pierce1986, dunn1996, akaike1974]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For a <NoteLink to="generalised-linear-model">generalised linear model</NoteLink> with fitted means $\hat\mu_i$, the
+**deviance** is
+
+$$
+D(\yvec, \hat\muvec) = 2\phi\brack{\ell(\yvec; \yvec) - \ell(\hat\muvec; \yvec)} = \sum_{i=1}^n d(y_i, \hat\mu_i),
+$$
+
+where $\ell(\muvec; \yvec)$ is the log-likelihood at means $\muvec$ and $\ell(\yvec; \yvec)$ is the **saturated**
+model, which sets every $\mu_i = y_i$. $\phi$ is the dispersion parameter. The **scaled deviance** is $D/\phi$. Each
+term $d(y_i, \hat\mu_i) \ge 0$ is a **unit deviance** <Cite id="mccullagh1989" />.
+</Definition>
+
+## Unit deviances
+
+For an exponential-dispersion family with canonical parameter $\theta$ and cumulant function $b$, one observation
+contributes $\ell = (y\theta - b(\theta))/\phi + c(y, \phi)$. The $c$ term cancels in the difference, so
+
+$$
+d(y, \mu) = 2\brack{y\,(\tilde\theta - \hat\theta) - b(\tilde\theta) + b(\hat\theta)},
+$$
+
+with $\tilde\theta = \theta(y)$ and $\hat\theta = \theta(\mu)$. For the Poisson, $\theta = \log\mu$ and
+$b(\theta) = e^\theta$, which gives
+
+$$
+d(y, \mu) = 2\brack{y\log\frac{y}{\mu} - (y - \mu)},
+$$
+
+with $y\log y = 0$ at $y = 0$. The same calculation gives the other families:
+
+| Family | $d(y, \mu)$ |
+| --- | --- |
+| Gaussian | $(y - \mu)^2$ |
+| Poisson | $2\brack{y\log(y/\mu) - (y - \mu)}$ |
+| Bernoulli | $2\brack{y\log(y/\mu) + (1 - y)\log\frac{1 - y}{1 - \mu}}$ |
+| Gamma | $2\brack{-\log(y/\mu) + (y - \mu)/\mu}$ |
+
+For the Gaussian family the deviance is the residual sum of squares. The deviance generalises it to any family.
+
+## Comparing nested models
+
+Let model 0 with $p_0$ coefficients be nested in model 1 with $p_1$. The likelihood-ratio statistic is
+$2(\ell_1 - \ell_0) = (D_0 - D_1)/\phi$, because the saturated term cancels. When model 0 is correct and $\phi$ is
+known, it is approximately $\ChiSq_{p_1 - p_0}$ for large $n$. When $\phi$ is estimated, the ratio
+
+$$
+F = \frac{(D_0 - D_1)/(p_1 - p_0)}{\hat\phi}
+$$
+
+is compared to an $\FDist_{p_1 - p_0,\, n - p_1}$ distribution. A table of successive deviance reductions is an
+**analysis of deviance**, the GLM analogue of analysis of variance.
+
+The residual deviance itself, $D/\phi$, is approximately $\ChiSq_{n - p}$ only when every observation carries a lot of
+information: Poisson counts that are not small, or binomial counts with large totals. For Bernoulli data, $D$ depends
+on $\yvec$ only through $\hat\muvec$ and says nothing about fit.
+
+For non-nested models, Akaike's information criterion is
+$\AIC = -2\ell(\hat\muvec) + 2p$ <Cite id="akaike1974" />. With $\phi$ known this is $D/\phi + 2p$ plus a constant.
+
+## Residuals
+
+A residual measures how far $y_i$ is from $\hat\mu_i$ on a scale where a correct model gives values of roughly equal
+spread.
+
+- **Response residual** $y_i - \hat\mu_i$. Its spread grows with $V(\mu)$, so plots of it are hard to read.
+- **Pearson residual** $r^P_i = (y_i - \hat\mu_i)/\sqrt{V(\hat\mu_i)}$. The sum of squares $X^2 = \sum_i (r^P_i)^2$ is
+  the Pearson statistic, and $\hat\phi = X^2/(n - p)$ estimates the dispersion.
+- **Deviance residual** $r^D_i = \sgn(y_i - \hat\mu_i)\sqrt{d(y_i, \hat\mu_i)}$, so that $\sum_i (r^D_i)^2 = D$. It is
+  usually closer to normal than the Pearson residual for skewed families <Cite id="pierce1986" />.
+- **Randomised quantile residual.** Map $y_i$ through the fitted distribution function, $u_i = F(y_i; \hat\mu_i,
+  \hat\phi)$, and set $r^Q_i = \Phi^{-1}(u_i)$. For a discrete response, draw $u_i$ uniformly between $F(y_i^-)$ and
+  $F(y_i)$. If the model is correct, $r^Q_i$ is exactly standard normal, so the usual normal quantile plot applies to
+  any family <Cite id="dunn1996" />.
+
+**Leverage.** The IRLS fit is a weighted least-squares fit, with hat matrix $\Hmat = \Wmat^{1/2}\Xmat(\Xmat^\top
+\Wmat\Xmat)^{-1}\Xmat^\top\Wmat^{1/2}$. Its diagonal $h_{ii}$ is the leverage of observation $i$. Standardised residuals
+divide by $\sqrt{\hat\phi(1 - h_{ii})}$. Cook's distance combines residual and leverage to flag observations that move
+$\hat\betavec$.
+
+## Worked example: four Poisson observations
+
+A Poisson model gives fitted means $\hat\muvec = (2.5, 0.8, 3.6, 3.1)$ for counts $\yvec = (2, 0, 5, 3)$.
+
+| $y$ | $\hat\mu$ | unit deviance $d$ | deviance residual | Pearson residual |
+| --- | --- | --- | --- | --- |
+| 2 | 2.5 | 0.107 | $-0.33$ | $-0.32$ |
+| 0 | 0.8 | 1.600 | $-1.26$ | $-0.89$ |
+| 5 | 3.6 | 0.485 | $0.70$ | $0.74$ |
+| 3 | 3.1 | 0.003 | $-0.06$ | $-0.06$ |
+
+For $y = 0$ the unit deviance reduces to $2\hat\mu = 1.6$. The deviance is $D = 2.196$ and the Pearson statistic is
+$X^2 = 1.448$. The two residual types agree for observations near their mean and differ for the zero count, where the
+Poisson distribution is most skewed.
+
+## Pitfalls
+
+- **Small counts.** With many zeros and ones, neither $D$ nor $X^2$ is close to $\ChiSq_{n - p}$. Use them to compare
+  models, not as absolute goodness-of-fit tests.
+- **Patterns in Pearson residuals of binary data.** Bernoulli residuals take only two values at each $\hat\mu$ and form
+  bands. Quantile residuals or binned residual plots are easier to read.
+- **Deviance is not a loss on new data.** It is computed on the training data, so it always falls as terms are added.
+  Compare models by the deviance on held-out data, by AIC, or by the tests above.

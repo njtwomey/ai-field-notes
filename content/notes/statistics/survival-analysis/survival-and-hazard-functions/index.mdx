@@ -1,0 +1,100 @@
+---
+title: Survival and hazard functions
+kind: concept
+summary: 'For a time to event $T \ge 0$, the survival function is $S(t) = P(T > t)$ and the hazard $h(t) = f(t)/S(t)$ is the event rate at $t$ among those still at risk. With the cumulative hazard $H(t) = \int_0^t h(u)\,du$, $S(t) = e^{-H(t)}$, so any one of $f$, $S$, $h$, $H$ determines the others.'
+tags: [survival-analysis, probability, distributions, worked-example]
+aliases: [survival function, survivor function, cumulative hazard function, instantaneous failure rate, force of mortality, time-to-event distribution]
+requires: [random-variable, expectation]
+related: [exponential-distribution, gamma-distribution, bayesian-online-changepoint-detection]
+references: [kalbfleisch2002, weibull1951]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $T \ge 0$ be the time until an event, with density $f$ and distribution function $F(t) = P(T \le t)$. The
+**survival function** is $S(t) = P(T > t) = 1 - F(t)$. The **hazard function** is
+
+$$
+h(t) = \lim_{\Delta \to 0} \frac{P(t \le T < t + \Delta \mid T \ge t)}{\Delta} = \frac{f(t)}{S(t)},
+$$
+
+the instantaneous event rate at time $t$ among units that have not yet had the event. The **cumulative hazard** is
+$H(t) = \int_0^t h(u)\,du$ <Cite id="kalbfleisch2002" />.
+</Definition>
+
+## Why hazards
+
+A density answers "how likely is the event at $t$, from the start". A hazard answers "how likely is the event in the
+next instant, given that it has not happened yet". The second question is the natural one for failures, deaths and
+customer churn. It is also what data provide: at each time, the units still under observation and the events among
+them. The hazard is a rate, with units of events per unit time, and is not bounded by 1.
+
+## From hazard to survival
+
+The conditional probability in the definition is $\paren{F(t + \Delta) - F(t)}/S(t)$. Dividing by $\Delta$ and letting
+$\Delta \to 0$ gives $h(t) = f(t)/S(t)$. Since $f = F' = -S'$,
+
+$$
+h(t) = -\frac{S'(t)}{S(t)} = -\frac{d}{dt}\log S(t).
+$$
+
+Integrate from 0 to $t$ and use $S(0) = 1$, so $\log S(0) = 0$:
+
+$$
+\log S(t) = -\int_0^t h(u)\,du = -H(t), \qquad S(t) = \exp\paren{-H(t)}.
+$$
+
+The density follows as $f(t) = h(t)\exp(-H(t))$. So any one of $f$, $S$, $h$ and $H$ determines the other three. Any
+non-negative $h$ with $\int_0^\infty h = \infty$ defines a proper distribution. If the integral is finite, a fraction
+$e^{-H(\infty)}$ never has the event, a **cure fraction**.
+
+The mean time to event is the area under the survival curve:
+
+$$
+\expect[T] = \int_0^\infty t\,f(t)\,dt = \int_0^\infty \int_0^t du\, f(t)\,dt = \int_0^\infty \int_u^\infty f(t)\,dt\,du =
+\int_0^\infty S(u)\,du,
+$$
+
+by swapping the order of integration. The median is the time $t$ at which $S(t) = 1/2$.
+
+## Shapes of hazard
+
+- **Constant:** $h(t) = \lambda$ gives $H(t) = \lambda t$ and $S(t) = e^{-\lambda t}$, the
+  <NoteLink to="exponential-distribution">exponential distribution</NoteLink>. The chance of the event in the next
+  instant does not depend on how long the unit has lasted: the distribution is memoryless.
+- **Monotone:** the Weibull hazard $h(t) = (k/\sigma)(t/\sigma)^{k-1}$, with shape $k$ and scale $\sigma$, gives
+  $S(t) = \exp\paren{-(t/\sigma)^k}$ <Cite id="weibull1951" />. It rises for $k > 1$ (wear-out), is constant at
+  $k = 1$, and falls for $k < 1$ (early failures that thin out the weak units).
+- **Bathtub:** high early, low in the middle, high late. Human mortality over a lifetime and many manufactured products
+  follow this pattern. It needs a more flexible form, such as a piecewise-constant hazard.
+
+## Worked example
+
+A component fails with constant hazard $\lambda = 0.1$ per month. Then $S(12) = e^{-1.2} = 0.301$: 30% of components
+last a year. The median lifetime solves $e^{-0.1t} = 1/2$, so $t = \log 2 / 0.1 = 6.93$ months. The mean is
+$\int_0^\infty e^{-0.1t}dt = 10$ months. The mean exceeds the median because the distribution has a long right tail.
+
+A second component has a Weibull lifetime with $k = 2$ and $\sigma = 10$ months. Its hazard $h(t) = t/50$ is 0.1 at 5
+months and 0.2 at 10 months: an old component is twice as likely to fail in the next month as one half its age. The
+median solves $(t/10)^2 = \log 2$, giving $t = 10\sqrt{\log 2} = 8.33$ months.
+
+## Discrete time
+
+When time is measured in discrete periods $1, 2, \dots$, the hazard is a probability, $h_j = P(T = j \mid T \ge j)$.
+Surviving past period $j$ means surviving each period in turn, so
+
+$$
+S(j) = \prod_{m=1}^j (1 - h_m).
+$$
+
+This product is the form of the <NoteLink to="kaplan-meier-estimator">Kaplan–Meier estimator</NoteLink>. For small
+$h_m$, $\log(1 - h_m) \approx -h_m$, and the product approaches $\exp(-\sum_m h_m)$, the continuous-time formula.
+
+## Pitfalls
+
+- **Hazard is not probability.** A hazard of 2 per year does not mean a probability of 2. Over a short interval
+  $\Delta$ the event probability is about $h\Delta$.
+- **Population hazards mix individuals.** If individuals have different constant hazards, the population hazard falls
+  over time, because high-risk individuals leave the risk set first. A falling observed hazard need not mean that any
+  individual's risk falls.

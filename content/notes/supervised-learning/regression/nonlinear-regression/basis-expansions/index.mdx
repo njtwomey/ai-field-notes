@@ -1,0 +1,100 @@
+---
+title: Basis expansions
+kind: concept
+summary: 'A basis expansion models a nonlinear function as a weighted sum $f(x) = \sum_m \beta_m h_m(x)$ of fixed transformations $h_m$ of the input. The model is linear in the weights $\beta_m$, so least squares, ridge penalties and GLM fitting apply unchanged.'
+tags: [regression, nonlinear-regression, linear-models, feature-engineering]
+aliases: [basis function expansion, basis functions, derived features, polynomial regression, piecewise polynomials, linear basis function model]
+requires: [linear-regression]
+related: [ridge-regression, generalised-linear-model]
+references: [hastie2009, bishop2006]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **basis expansion** of an input $x$ is a vector of $M$ fixed functions $\paren{h_1(x), \dots, h_M(x)}$. A model built
+on it is
+
+$$
+f(x) = \sum_{m=1}^M \beta_m h_m(x),
+$$
+
+with coefficients $\beta_m$ fitted to data. The $h_m$ are chosen before fitting and do not depend on the $\beta_m$
+<Cite id="hastie2009" />.
+</Definition>
+
+## Fitting is linear regression
+
+Evaluate the basis at the $n$ training inputs to form the $n \times M$ design matrix $\Hmat$ with entries
+$H_{im} = h_m(x_i)$. The model's predictions are $\Hmat\betavec$, which is linear in $\betavec$. Least squares
+minimises $\norm{\yvec - \Hmat\betavec}^2$ and solves the normal equations
+
+$$
+\Hmat^\top\Hmat\,\hat\betavec = \Hmat^\top\yvec,
+$$
+
+exactly as in <NoteLink to="linear-regression">linear regression</NoteLink> with $\Hmat$ in place of the raw features.
+Every tool for linear models applies: standard errors, a ridge penalty, or a non-Gaussian response through a
+<NoteLink to="generalised-linear-model">generalised linear model</NoteLink>. The fitted values $\hat\yvec = \Smat\yvec$
+come from the hat matrix $\Smat = \Hmat(\Hmat^\top\Hmat)^{-1}\Hmat^\top$. $\Smat$ is a projection of rank $M$, so its
+trace, the degrees of freedom of the fit, is $M$.
+
+The nonlinearity sits entirely in the choice of basis. The fitting problem stays convex, with a unique solution when
+$\Hmat$ has full column rank.
+
+## Common bases
+
+- **Polynomials** $h_m(x) = x^{m-1}$. Global: every coefficient affects the fit everywhere, so a point at one end can
+  change the curve at the other. High degrees oscillate near the edges of the data and extrapolate wildly.
+- **Piecewise constants** $h_m(x) = \indicator[\xi_{m-1} \le x < \xi_m]$ on intervals between **knots** $\xi_m$. The
+  fit is the mean of $y$ in each interval: local, but discontinuous.
+- **Piecewise polynomials with continuity constraints**, that is, splines. See
+  <NoteLink to="regression-splines">regression splines</NoteLink>. They are local like piecewise constants and smooth
+  like polynomials.
+- **Hinge functions** $(x - \xi)_+$ and $(\xi - x)_+$, where $(u)_+ = \max(u, 0)$. Piecewise-linear fits with a kink at
+  each knot, the building block of multivariate adaptive regression splines.
+- **Fourier terms** $\sin(2\pi m x / P)$ and $\cos(2\pi m x / P)$ for periodic effects of period $P$, such as time of
+  day.
+- **Radial basis functions** $\exp\paren{-(x - c_m)^2 / (2s^2)}$ centred at points $c_m$ with width $s$.
+
+## Counting parameters of a piecewise cubic
+
+Splitting the range at $K$ knots gives $K + 1$ intervals. A separate cubic in each interval has $4(K + 1)$ parameters.
+Requiring the function and its first and second derivatives to be continuous at each knot imposes three constraints
+per knot, $3K$ in all. The remaining dimension is $4(K + 1) - 3K = K + 4$. A cubic spline with $K$ knots therefore
+needs $K + 4$ basis functions, for example $1, x, x^2, x^3$ and one truncated cubic $(x - \xi_k)^3_+$ per knot.
+
+## Several inputs
+
+For inputs $\xvec \in \reals^d$ there are two common ways to extend a basis.
+
+- **Additive:** a separate basis for each input, $f(\xvec) = \sum_j f_j(x_j)$. $M$ functions per input give $dM$
+  columns. This is the structure of a <NoteLink to="generalised-additive-model">generalised additive model</NoteLink>.
+- **Tensor product:** all products $h_{m_1}(x_1) h_{m_2}(x_2)\cdots h_{m_d}(x_d)$. These capture interactions, but the
+  count grows as $M^d$. With 10 functions per input and 5 inputs, there are $10^5$ columns.
+
+The exponential growth of tensor-product bases is one form of the curse of dimensionality. It is why flexible
+regression in many dimensions uses additive structure, adaptive selection of basis functions, or kernels, which work
+with an implicit basis.
+
+## Controlling complexity
+
+The number of basis functions sets the flexibility. Too few underfit, too many interpolate the noise. There are three
+ways to control it:
+
+- **Restrict:** fix a small $M$ in advance, for example a cubic spline with a few knots.
+- **Select:** add basis functions one at a time, or remove them, by a criterion such as cross-validation.
+- **Regularise:** use many basis functions and penalise the coefficients, as in
+  <NoteLink to="ridge-regression">ridge regression</NoteLink> or a roughness penalty. The
+  <NoteLink to="smoothing-splines">smoothing spline</NoteLink> takes this to the limit of one basis function per data
+  point.
+
+## Pitfalls
+
+- **Ill-conditioning.** Raw polynomial and truncated-power columns are nearly collinear on an interval such as
+  $[0, 100]$. Rescale the input, or use an orthogonal or B-spline basis, which spans the same functions with a
+  well-conditioned $\Hmat$.
+- **Extrapolation.** A basis fitted on $[a, b]$ says nothing reliable outside it. Polynomials diverge there; natural
+  splines are constrained to be linear there.
+- **Choosing the basis on the test data.** The basis is part of the model. Choosing its size or knots by looking at
+  held-out performance and then reporting that performance is optimistic.
