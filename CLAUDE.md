@@ -136,7 +136,9 @@ stale.
   re-lays out when the article resizes. Hovering a marker highlights its note and the reverse. Below `xl`, markers
   show a hover card instead. Every note ends with a full References list (`ReferenceList`), which is also the target
   of each marker's link.
-- Navigation: the landing page lists every topic as a tile with its subtopics and note counts, never individual notes.
+- Navigation: the landing page lists every topic as a tile with its subtopics and note counts, never individual notes,
+  in the sections of `content/groups.yaml`. The groups must list every top-level topic once, in `taxonomy.yaml` order;
+  the content check fails otherwise, so a new top-level topic needs a group.
   `/browse` is the explorer: a topic rail with counts, kind chips, a text filter and a List / Map toggle, all held in
   the URL (`browseUrl({ c, kind, q, view })`). The Map (`ConceptMap`) draws notes as a force graph coloured and shaped
   by topic, with requires / part-of / related edges. Top-level topics carry an `icon` in `taxonomy.yaml`.

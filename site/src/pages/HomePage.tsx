@@ -4,10 +4,10 @@ import { Link } from 'react-router'
 import { TopicIcon } from '@/components/layout/category-icon'
 import { openSearch } from '@/components/layout/SearchCommand'
 import { Kbd } from '@/components/ui/kbd'
-import { browseUrl, notes, notesInCategory, references, taxonomy, type CategoryNode } from '@/lib/content'
+import { browseUrl, groups, notes, notesInCategory, references, taxonomy, type CategoryNode } from '@/lib/content'
 import { cn } from '@/lib/utils'
 
-/** Landing page: search, then every topic with its subtopics. */
+/** Landing page: search, then every topic with its subtopics, in the groups of content/groups.yaml. */
 export function HomePage() {
   return (
     <main className="px-4 pt-14 pb-20 lg:px-8">
@@ -41,14 +41,31 @@ export function HomePage() {
         </div>
       </section>
 
-      <section className="mt-16 grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-        {taxonomy.map((topic) => (
-          <TopicTile key={topic.path} topic={topic} />
+      <div className="mt-16 space-y-12">
+        {groups.map((group) => (
+          <section key={group.title} aria-labelledby={groupId(group.title)}>
+            <div className="mb-4 flex items-baseline gap-3">
+              <h2 id={groupId(group.title)} className="font-prose text-xl font-bold">
+                {group.title}
+              </h2>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {group.topics.reduce((sum, t) => sum + notesInCategory(t).length, 0)} notes
+              </span>
+              <div className="h-px flex-1 self-center bg-border" />
+            </div>
+            <div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+              {group.topics.map((path) => (
+                <TopicTile key={path} topic={taxonomy.find((t) => t.path === path)!} />
+              ))}
+            </div>
+          </section>
         ))}
-      </section>
+      </div>
     </main>
   )
 }
+
+const groupId = (title: string) => `group-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
 
 /** Subtopics shown before a tile is expanded. Every collapsed tile reserves exactly this many rows, so all match. */
 const TILE_ROWS = 6

@@ -123,5 +123,8 @@ export type CategoryNode = {
   children: CategoryNode[]
 }
 
+/** A home-page group of top-level topics (content/groups.yaml). */
+export type TopicGroup = { title: string; topics: string[] }
+
 export type NoteKind = (typeof noteKinds)[number]
 export type Reference = z.infer<typeof referenceSchema>

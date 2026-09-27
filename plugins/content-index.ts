@@ -19,9 +19,11 @@ import {
   categorySchema,
   frontmatterSchema,
   referenceSchema,
+  slug,
   type CategoryInput,
   type CategoryNode,
   type NoteMeta,
+  type TopicGroup,
 } from '../site/src/lib/content-schema.ts'
 import { macroExample, macroGroups, macros } from '../content/macros.ts'
 import { plainMath } from '../site/src/lib/math-text.ts'
@@ -154,6 +156,28 @@ export function buildIndex(contentDir: string, { strict = true }: { strict?: boo
   const taxonomy = flattenCategories(taxonomyParsed.data)
   const categoryPaths = collectPaths(taxonomy)
 
+  // Home-page groups: every top-level topic in exactly one group, listed in taxonomy order.
+  const groupsFile = path.join(contentDir, 'groups.yaml')
+  const groupsParsed = z
+    .array(z.object({ title: z.string().min(1), topics: z.array(slug).min(1) }).strict())
+    .safeParse(YAML.parse(fs.readFileSync(groupsFile, 'utf8')))
+  if (!groupsParsed.success) throw new Error(formatIssues('content/groups.yaml', groupsParsed.error))
+  const groups: TopicGroup[] = groupsParsed.data
+  const grouped = groups.flatMap((g) => g.topics)
+  const topLevel = taxonomy.map((t) => t.path)
+  if (grouped.join() !== topLevel.join()) {
+    const missing = topLevel.filter((t) => !grouped.includes(t))
+    const unknown = grouped.filter((t) => !topLevel.includes(t))
+    const twice = grouped.filter((t, i) => grouped.indexOf(t) !== i)
+    throw new Error(
+      `content/groups.yaml: groups must list every top-level topic once, in taxonomy.yaml order.` +
+        (missing.length ? ` Missing: ${missing.join(', ')}.` : '') +
+        (unknown.length ? ` Not top-level topics: ${unknown.join(', ')}.` : '') +
+        (twice.length ? ` Listed twice: ${twice.join(', ')}.` : '') +
+        (!missing.length && !unknown.length && !twice.length ? ' The order differs.' : ''),
+    )
+  }
+
   const referencesFile = path.join(contentDir, 'references.yaml')
   const referencesParsed = z
     .record(z.string().regex(/^[a-z][a-z0-9-]*$/), referenceSchema)
@@ -259,7 +283,7 @@ export function buildIndex(contentDir: string, { strict = true }: { strict?: boo
     cited: n.cited.filter((k) => k in references),
     references: n.references.filter((k) => k in references),
   }))
-  return { notes: safe, references, taxonomy, bodies, folders: found.folders, errors }
+  return { notes: safe, references, taxonomy, groups, bodies, folders: found.folders, errors }
 }
 
 export function contentIndex({ contentDir }: { contentDir: string }): Plugin {
@@ -289,12 +313,13 @@ export function contentIndex({ contentDir }: { contentDir: string }): Plugin {
     load(id) {
       if (id !== resolved(CONTENT_ID) && id !== resolved(SEARCH_ID)) return
       // The dev server stays up on content errors and lists them in the page; builds stay strict.
-      const { notes, references, taxonomy, bodies, errors } = buildIndex(contentDir, { strict: !server })
+      const { notes, references, taxonomy, groups, bodies, errors } = buildIndex(contentDir, { strict: !server })
       if (id === resolved(SEARCH_ID)) return `export default ${JSON.stringify(bodies)}`
       return [
         `export const notes = ${JSON.stringify(notes)}`,
         `export const references = ${JSON.stringify(references)}`,
         `export const taxonomy = ${JSON.stringify(taxonomy)}`,
+        `export const groups = ${JSON.stringify(groups)}`,
         `export const contentErrors = ${JSON.stringify(errors)}`,
       ].join('\n')
     },
