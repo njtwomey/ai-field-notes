@@ -31,7 +31,7 @@ export function Interactive({ title, caption, controls, readout, children, class
   )
 }
 
-export function Readout({ label, value }: { label: string; value: ReactNode }) {
+export function Readout({ label, value }: { label: ReactNode; value: ReactNode }) {
   return (
     <span>
       {label} <span className="font-mono text-foreground tabular-nums">{value}</span>
