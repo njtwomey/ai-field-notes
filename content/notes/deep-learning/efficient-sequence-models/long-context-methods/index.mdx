@@ -1,0 +1,149 @@
+---
+title: Long-context methods
+kind: technique
+summary: 'Long-context methods let a transformer use sequences longer than its training length. Position interpolation, NTK-aware scaling and YaRN rescale rotary angles so none leaves the trained range. Ring attention splits the sequence across devices so exact attention fits in memory.'
+tags: [deep-learning, transformer, attention, long-context, positional-encoding, language-models, worked-example]
+aliases:
+  [
+    context extension,
+    context window extension,
+    position interpolation,
+    PI,
+    NTK-aware scaling,
+    NTK-aware RoPE,
+    RoPE scaling,
+    YaRN,
+    NTK-by-parts interpolation,
+    adjusted base frequency,
+    ring attention,
+  ]
+requires: [positional-encoding, scaled-dot-product-attention]
+partOf: [efficient-attention]
+related: [flash-attention, model-parallelism, sliding-window-and-sparse-attention, kv-cache]
+references: [chen2023, peng2024yarn, su2021, press2022, liu2024ring, dao2022]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **long-context method** makes a transformer trained on sequences of at most $L$ tokens work on sequences of length
+$L' > L$. **Context extension** methods for rotary position embedding (RoPE) rescale the rotation angles so that
+positions beyond $L$ produce angles the model has seen: position interpolation divides every position by
+$s = L'/L$ <Cite id="chen2023" />, and NTK-aware scaling and YaRN rescale each frequency by a different amount
+<Cite id="peng2024yarn" />. **Systems** methods such as ring attention distribute exact attention over several devices
+so that the longer sequence fits in memory <Cite id="liu2024ring" />.
+</Definition>
+
+## Problem
+
+Two things stop a model at its training length. Attention's cost grows as $n^2$, which
+<NoteLink to="flash-attention">memory-efficient kernels</NoteLink> and distribution address. And the model has never seen
+position values beyond $L$.
+
+Rotary <NoteLink to="positional-encoding">position embedding</NoteLink> splits each query and key of width $d$ into
+$d/2$ pairs and rotates pair $i$ at position $m$ by the angle $m\theta_i$, with
+
+$$
+\theta_i = b^{-2i/d}, \qquad i = 0, 1, \dots, d/2 - 1,
+$$
+
+and base $b = 10{,}000$ <Cite id="su2021" />. The score between positions $m$ and $n$ then depends on the angles
+$(m - n)\theta_i$. The wavelength of pair $i$ is $\lambda_i = 2\pi/\theta_i = 2\pi b^{2i/d}$ tokens. High-frequency pairs
+(small $i$) complete many rotations within $L$ tokens and see every angle during training. Low-frequency pairs (large
+$i$) have wavelengths longer than $L$; during training they see only a fraction of a turn. At positions beyond $L$
+those pairs take angles never seen in training, and attention scores become erratic. Perplexity rises sharply just
+past $L$ <Cite id="chen2023" />.
+
+## Mechanism
+
+### Position interpolation
+
+Position interpolation replaces position $m$ by $m/s$, with $s = L'/L$ <Cite id="chen2023" />. Every rotation angle
+becomes $m\theta_i/s$. For $m < L'$ the angle is below $L\theta_i$, so it lies in the range seen in training for every
+pair. The model is interpolating between trained positions instead of extrapolating past them.
+
+Chen et al. bound the attention score under interpolation and show the bound is about 600 times smaller than under
+extrapolation. With a short fine-tuning, position interpolation extended LLaMA models to 32,768 tokens
+<Cite id="chen2023" />.
+
+The cost is resolution. Adjacent tokens now differ in angle by $\theta_i/s$ instead of $\theta_i$. For the
+high-frequency pairs, which encode fine local order, the model must tell apart angles $s$ times closer than in training.
+
+### NTK-aware scaling
+
+NTK-aware scaling changes the base instead of the positions: $b' = b\,s^{d/(d-2)}$ <Cite id="peng2024yarn" />. The new
+frequencies are $\theta_i' = b'^{-2i/d} = \theta_i\,s^{-2i/(d-2)}$.
+
+- For $i = 0$, $s^0 = 1$: the highest frequency is unchanged.
+- For the last pair, $i = d/2 - 1$, the exponent is $-(d-2)/(d-2) = -1$: the lowest frequency is divided by exactly
+  $s$, as in position interpolation.
+
+Between the two, the scaling factor changes geometrically. High frequencies are extrapolated, which is harmless because
+they already covered every angle in training. Low frequencies are interpolated. The method was proposed in an online
+post and adopted by Code Llama as "adjusted base frequency"; YaRN documents and extends it <Cite id="peng2024yarn" />.
+
+### YaRN
+
+YaRN chooses the treatment of each pair from how many full rotations it makes within the original context,
+$r_i = L/\lambda_i$ <Cite id="peng2024yarn" />. With thresholds $\alpha < \beta$, define the ramp
+$\gamma(r) = 0$ for $r < \alpha$, $1$ for $r > \beta$, and $(r - \alpha)/(\beta - \alpha)$ in between, and set
+
+$$
+\theta_i' = \paren{1 - \gamma(r_i)}\frac{\theta_i}{s} + \gamma(r_i)\,\theta_i.
+$$
+
+Pairs that rotate fewer than $\alpha$ times are fully interpolated. Pairs that rotate more than $\beta$ times are left
+alone. For LLaMA models, $\alpha = 1$ and $\beta = 32$.
+
+YaRN also sharpens attention. Interpolation makes attention distributions flatter at long range, so YaRN divides the
+logits by a temperature $t$ with $\sqrt{1/t} = 0.1\ln s + 1$. The temperature folds into the rotary embedding, so it
+costs nothing at inference. YaRN needs 10 times fewer tokens and 2.5 times fewer training steps than earlier methods,
+and extended Llama 2 to 128K tokens <Cite id="peng2024yarn" />.
+
+### Worked example
+
+Take head width $d = 128$, base $b = 10{,}000$, training length $L = 4096$ and target $L' = 16{,}384$, so $s = 4$.
+
+- Wavelengths run from $\lambda_0 = 2\pi \approx 6.28$ tokens to $\lambda_{63} = 2\pi \times 10{,}000^{126/128} \approx
+  54{,}410$ tokens. The rotation counts $r_i = 4096/\lambda_i$ run from about 652 down to 0.075.
+- Under YaRN with $\alpha = 1$ and $\beta = 32$, the 21 pairs with $r_i > 32$ keep their frequency, the 18 pairs with
+  $r_i < 1$ are divided by 4, and the 25 in between are blended.
+- NTK-aware scaling instead sets $b' = 10{,}000 \times 4^{128/126} \approx 40{,}890$.
+- YaRN's temperature satisfies $\sqrt{1/t} = 0.1\ln 4 + 1 = 1.139$, so logits are multiplied by $1/t = 1.296$.
+
+### Ring attention
+
+Extending the positions does not make a million-token sequence fit on one accelerator. Even with
+<NoteLink to="flash-attention">FlashAttention</NoteLink>, the activations of every layer grow with $n$. Ring attention
+distributes one sequence over $P$ devices arranged in a ring <Cite id="liu2024ring" />:
+
+1. Split the sequence into $P$ blocks. Device $p$ holds query block $p$ and, at the start, key–value block $p$.
+2. At each of $P$ steps, each device computes attention between its query block and the key–value block it holds, and
+   accumulates the result with the online softmax that FlashAttention uses to merge partial results.
+3. At the same time, each device sends its key–value block to the next device in the ring and receives one from the
+   previous device.
+
+After $P$ steps every query block has seen every key–value block, so the result is exact attention. When computing one
+block takes longer than sending one, the communication hides behind the computation. The feasible context length then
+grows linearly with the number of devices, with no approximation <Cite id="liu2024ring" />. Ring attention is a form of
+sequence parallelism; see <NoteLink to="model-parallelism">model parallelism</NoteLink> for the other ways to split a
+model.
+
+## Cost
+
+Position interpolation, NTK-aware scaling and YaRN change only the rotation frequencies, so inference costs nothing
+extra. They work best with a short fine-tuning at the new length; NTK-aware scaling also works to a degree without
+any <Cite id="peng2024yarn" />. Attention cost at the new length is unchanged: $O(L'^2)$ time per layer and a
+<NoteLink to="kv-cache">KV cache</NoteLink> of $L'$ entries. Ring attention adds communication of $O(nd)$ per layer per
+device and keeps each device's memory proportional to $n/P$.
+
+## Trade-offs
+
+- **Interpolation versus extrapolation.** Interpolation keeps angles in range but compresses local order. Leaving high
+  frequencies alone, as NTK-aware scaling and YaRN do, keeps local order and interpolates only where it is needed.
+- **Nominal versus effective context.** A model that runs at length $L'$ does not necessarily use information from all
+  $L'$ tokens. Check retrieval at every depth, for example with a passkey hidden at a random position, as Chen et al. do.
+- **Other encodings.** ALiBi adds a linear distance penalty to scores and extrapolates somewhat without any change
+  <Cite id="press2022" />. Interpolation methods are specific to RoPE.
+- **Short-context quality.** Changing the frequencies alters the model at every length. YaRN and fine-tuned
+  interpolation keep most short-context quality; untuned scaling can lose some.

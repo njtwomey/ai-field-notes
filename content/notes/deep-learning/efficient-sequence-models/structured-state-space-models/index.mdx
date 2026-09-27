@@ -1,0 +1,266 @@
+---
+title: Structured state-space models (S4)
+kind: concept
+summary: 'A structured state-space layer maps a sequence through a discretised linear system $\hvec_k = \bar{\Amat}\hvec_{k-1} + \bar{\Bmat}u_k$, $y_k = \Cmat\hvec_k$. Unrolled, it is a convolution with kernel $\bar K_k = \Cmat\bar{\Amat}^k\bar{\Bmat}$: training convolves in parallel, generation runs the recurrence in $O(N)$ per step.'
+tags: [deep-learning, sequence-models, state-space-models, long-context, worked-example]
+aliases:
+  [
+    S4,
+    structured state space sequence model,
+    S4D,
+    diagonal state space model,
+    DSS,
+    HiPPO,
+    HiPPO matrix,
+    SSM convolution kernel,
+    linear time-invariant sequence layer,
+  ]
+requires: [state-space-representation, convolution, recurrent-neural-network]
+related: [mamba, parallel-scan, fft, linear-gaussian-state-space-models, z-transform, hybrid-sequence-models]
+references: [gu2022s4, gu2020hippo, gupta2022, gu2022s4d, tay2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { SsmKernel } from './SsmKernel'
+
+<Definition>
+A **structured state-space sequence layer** (S4) maps an input sequence $u_0, \dots, u_{L-1} \in \reals$ to an output
+sequence $y_0, \dots, y_{L-1} \in \reals$ through a hidden state $\hvec_k \in \reals^N$ (or $\complex^N$). It starts
+from a continuous-time linear system with parameters $\Amat \in \reals^{N \times N}$, $\Bmat \in \reals^{N \times 1}$
+and $\Cmat \in \reals^{1 \times N}$, discretises it with a learned step size $\Delta > 0$, and computes
+
+$$
+\hvec_k = \bar{\Amat}\hvec_{k-1} + \bar{\Bmat}u_k, \qquad y_k = \Cmat\hvec_k, \qquad \hvec_{-1} = \zeros.
+$$
+
+The matrix $\Amat$ has a special structure (diagonal plus low rank, or diagonal) that makes the layer's convolution
+kernel cheap to compute. A deep S4 model applies one such layer to each of $D$ channels independently, then mixes
+channels with a linear layer and a nonlinearity <Cite id="gu2022s4" />.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="recurrent-neural-network">recurrent network</NoteLink> reads a sequence one token at a time. It needs
+only a fixed-size state at generation time, but its training cannot run in parallel over time, and a nonlinear
+recurrence makes gradients vanish or explode over long spans. A
+<NoteLink to="convolution">convolution</NoteLink> trains in parallel but sees only as far back as its kernel is long.
+
+A **linear** recurrence has both properties at once. Because the state update is linear and the same at every step, the
+output is a fixed linear function of the past inputs: a convolution. The layer can therefore be trained as a long
+convolution, computed with the <NoteLink to="fft">FFT</NoteLink>, and run at generation time as a recurrence with an
+$N$-dimensional state. The nonlinearity sits between layers, not inside the recurrence.
+
+The continuous-time starting point matters for two reasons. The step size $\Delta$ becomes a learnable time scale,
+separate from the dynamics $\Amat$. And the theory of continuous systems supplies a good initialisation of $\Amat$,
+HiPPO, which makes the state a compressed summary of the input's history.
+
+## Discretisation
+
+The continuous-time system is
+
+$$
+\dot{\hvec}(t) = \Amat\hvec(t) + \Bmat u(t), \qquad y(t) = \Cmat\hvec(t),
+$$
+
+with the usual direct term $\Dmat u(t)$ treated as a separate skip connection. The input sequence is read as samples
+$u_k = u(k\Delta)$ of an underlying signal. Discretisation turns $(\Amat, \Bmat)$ into a pair $(\bar{\Amat}, \bar{\Bmat})$
+that advances the state by one sample.
+
+### Zero-order hold
+
+Assume the input is constant, $u(t) = u_k$, over the interval from $(k-1)\Delta$ to $k\Delta$. The solution of a linear
+system over an interval of length $\Delta$ is (see <NoteLink to="state-space-representation">state-space
+representation</NoteLink>)
+
+$$
+\hvec(k\Delta) = e^{\Delta\Amat}\hvec((k-1)\Delta) + \int_0^{\Delta} e^{s\Amat}\,ds\;\Bmat u_k.
+$$
+
+For invertible $\Amat$, the integral is $\Amat^{-1}(e^{\Delta\Amat} - \eye)$, because the derivative of
+$\Amat^{-1}e^{s\Amat}$ with respect to $s$ is $e^{s\Amat}$. So
+
+$$
+\bar{\Amat} = e^{\Delta\Amat}, \qquad \bar{\Bmat} = \Amat^{-1}\paren{e^{\Delta\Amat} - \eye}\Bmat.
+$$
+
+This is exact for piecewise-constant inputs. It is the same zero-order-hold discretisation used in digital control.
+
+### Bilinear transform
+
+Integrate $\dot{\hvec} = \Amat\hvec + \Bmat u$ over one step and approximate the integral of $\Amat\hvec$ by the
+trapezoidal rule, and the integral of $\Bmat u$ by $\Delta\Bmat u_k$:
+
+$$
+\hvec_k - \hvec_{k-1} = \frac{\Delta}{2}\Amat\paren{\hvec_k + \hvec_{k-1}} + \Delta\Bmat u_k.
+$$
+
+Collect the $\hvec_k$ terms on the left: $(\eye - \tfrac{\Delta}{2}\Amat)\hvec_k = (\eye + \tfrac{\Delta}{2}\Amat)\hvec_{k-1} + \Delta\Bmat u_k$.
+Multiplying by the inverse of the left factor gives
+
+$$
+\bar{\Amat} = \paren{\eye - \tfrac{\Delta}{2}\Amat}^{-1}\paren{\eye + \tfrac{\Delta}{2}\Amat}, \qquad
+\bar{\Bmat} = \paren{\eye - \tfrac{\Delta}{2}\Amat}^{-1}\Delta\Bmat.
+$$
+
+The original S4 uses the bilinear transform <Cite id="gu2022s4" />. S4D reports little empirical difference between
+the two <Cite id="gu2022s4d" />. Both map an eigenvalue $\lambda$ of $\Amat$ with negative real part to an eigenvalue of
+$\bar{\Amat}$ inside the unit circle: $\abs{e^{\Delta\lambda}} = e^{\Delta \operatorname{Re}\lambda} < 1$, and
+$\abs{1 + \Delta\lambda/2} < \abs{1 - \Delta\lambda/2}$ whenever $\operatorname{Re}\lambda < 0$. A stable continuous
+system gives a stable recurrence for every step size.
+
+## The convolution kernel
+
+Unroll the recurrence from $\hvec_{-1} = \zeros$:
+
+$$
+\hvec_0 = \bar{\Bmat}u_0, \qquad
+\hvec_1 = \bar{\Amat}\bar{\Bmat}u_0 + \bar{\Bmat}u_1, \qquad
+\hvec_2 = \bar{\Amat}^2\bar{\Bmat}u_0 + \bar{\Amat}\bar{\Bmat}u_1 + \bar{\Bmat}u_2.
+$$
+
+By induction, $\hvec_k = \sum_{j=0}^{k} \bar{\Amat}^{j}\bar{\Bmat}u_{k-j}$: if it holds for $k-1$, then
+$\bar{\Amat}\hvec_{k-1} + \bar{\Bmat}u_k$ multiplies every term by one more $\bar{\Amat}$ and adds the $j = 0$ term.
+Applying $\Cmat$,
+
+$$
+y_k = \sum_{j=0}^{k} \bar K_j\,u_{k-j}, \qquad
+\bar K = \paren{\Cmat\bar{\Bmat},\ \Cmat\bar{\Amat}\bar{\Bmat},\ \Cmat\bar{\Amat}^2\bar{\Bmat},\ \dots,\ \Cmat\bar{\Amat}^{L-1}\bar{\Bmat}} \in \reals^L.
+$$
+
+The output is the causal convolution $y = \bar K * u$ of the input with the **SSM convolution kernel** $\bar K$
+<Cite id="gu2022s4" />. The kernel depends on the parameters and not on the input. That is the linear time-invariant
+property, and it gives the layer two equivalent modes:
+
+- **Convolutional mode, for training.** Compute $\bar K$ once per forward pass, then convolve. With the FFT, a
+  convolution of length $L$ costs $O(L \log L)$ and runs in parallel over the whole sequence.
+- **Recurrent mode, for generation.** Keep $\hvec_k$ and apply one update per new input. Each step costs a
+  matrix-vector product, independent of how many tokens came before. There is no cache that grows with the sequence,
+  unlike a transformer's <NoteLink to="kv-cache">KV cache</NoteLink>.
+
+The frequency response of the layer follows from the recurrence. Take the
+<NoteLink to="z-transform">z-transform</NoteLink> of $\hvec_k = \bar{\Amat}\hvec_{k-1} + \bar{\Bmat}u_k$ to get
+$\hvec(z) = (\eye - \bar{\Amat}z^{-1})^{-1}\bar{\Bmat}u(z)$, so the transfer function is
+$H(z) = \Cmat(\eye - \bar{\Amat}z^{-1})^{-1}\bar{\Bmat}$. Each eigenvalue $\bar\lambda$ of $\bar{\Amat}$ is a pole. A
+pole near the unit circle gives a long, slowly decaying kernel and a sharp peak in $\abs{H(e^{i\theta})}$ at the
+frequency $\theta = \arg\bar\lambda$.
+
+<SsmKernel />
+
+### Worked example
+
+Take a scalar system, $N = 1$, with $A = -1$, $B = 1$, $C = 1$ and step $\Delta = 0.5$.
+
+- Zero-order hold: $\bar A = e^{-0.5} = 0.6065$ and $\bar B = (e^{-0.5} - 1)/(-1) = 0.3935$. The kernel is
+  $\bar K_k = 0.3935 \times 0.6065^k = (0.3935, 0.2387, 0.1447, 0.0878, \dots)$.
+- Bilinear: $\bar A = (1 - 0.25)/(1 + 0.25) = 0.6$ and $\bar B = 0.5/1.25 = 0.4$. The kernel is
+  $(0.4, 0.24, 0.144, 0.0864, \dots)$, close to the zero-order-hold kernel.
+
+With the zero-order-hold kernel and input $u = (1, 0, 2, 0)$, the recurrence gives $h_0 = 0.3935$,
+$h_1 = 0.6065 \times 0.3935 = 0.2387$, $h_2 = 0.6065 \times 0.2387 + 0.3935 \times 2 = 0.9317$ and
+$h_3 = 0.6065 \times 0.9317 = 0.5651$. The convolution gives $y_2 = \bar K_2 u_0 + \bar K_1 u_1 + \bar K_0 u_2 =
+0.14474 + 0 + 0.78694 = 0.93168$ and $y_3 = \bar K_3 u_0 + \bar K_1 u_2 = 0.08780 + 0.47730 = 0.56510$. The two modes agree.
+
+## Computing the kernel
+
+The convolutional mode is only useful if $\bar K$ is cheap. Computed naively, $\bar K$ needs $L$ successive products with
+the $N \times N$ matrix $\bar{\Amat}$: $O(N^2 L)$ time <Cite id="gu2022s4" />.
+
+If $\Amat$ is diagonal, $\Amat = \diag(\lambda_1, \dots, \lambda_N)$, the discretised matrix is diagonal too, with
+entries $\bar\lambda_n$, and the kernel is a sum of $N$ geometric sequences:
+
+$$
+\bar K_k = \sum_{n=1}^{N} C_n \bar B_n \bar\lambda_n^{\,k}.
+$$
+
+This is a product of the vector $(C_n\bar B_n)_n$ with the $N \times L$ Vandermonde matrix $[\bar\lambda_n^{\,k}]$, which
+costs $O(NL)$ directly <Cite id="gu2022s4d" />. Any diagonalisable $\Amat$ can be brought to this form by a change of
+basis $\hvec = \Vmat\tilde{\hvec}$, which changes $(\Amat, \Bmat, \Cmat)$ to
+$(\Vmat^{-1}\Amat\Vmat, \Vmat^{-1}\Bmat, \Cmat\Vmat)$ and leaves the map from $u$ to $y$ unchanged.
+
+S4 could not use this directly. The HiPPO matrix below is diagonalisable only by a matrix $\Vmat$ with entries that
+grow like $2^{4N/3}$, so the change of basis is numerically useless <Cite id="gu2022s4" />. S4 instead writes the HiPPO
+matrix as **normal plus low rank**, $\Amat = \Vmat\Lambdamat\Vmat^* - \Pmat\Qmat^\tr$ with unitary $\Vmat$ and rank 1 or 2
+for $\Pmat\Qmat^\tr$. It evaluates the kernel's generating function $\sum_k \bar K_k \zeta^k$ at the $L$-th roots of
+unity, where powers of $\bar{\Amat}$ become a matrix inverse. The Woodbury identity removes the low-rank term, the
+diagonal part reduces to a Cauchy kernel $1/(\omega_j - \zeta_k)$, and an inverse FFT recovers $\bar K$. The total is
+$\tilde O(N + L)$ operations <Cite id="gu2022s4" />.
+
+### Diagonal state spaces
+
+Gupta, Gu and Berant found that dropping the low-rank term and keeping only the diagonal part matches S4
+<Cite id="gupta2022" />. S4D then made the diagonal version the standard one <Cite id="gu2022s4d" />:
+
+- $\Amat$ is diagonal and complex. The real part is parameterised as $-e^{a}$, so it is always negative and the layer
+  is always stable.
+- Eigenvalues come in conjugate pairs, so only $N/2$ are stored, and the kernel is twice the real part of the sum over
+  them.
+- Initialisations include **S4D-Lin**, $\lambda_n = -\tfrac12 + i\pi n$, and **S4D-Real**, $\lambda_n = -(n+1)$, which has
+  the same spectrum as the HiPPO matrix.
+
+Each complex pair is a damped oscillator. Its kernel is $e^{-\alpha k\Delta}$ times a sinusoid of frequency $\omega\Delta$
+radians per step, for $\lambda = -\alpha \pm i\omega$. A layer with $N/2$ pairs builds its kernel from $N/2$ such
+components, so it acts as a learned bank of filters at different decay rates and frequencies.
+
+## HiPPO initialisation
+
+A randomly initialised linear SSM performs poorly: the solution of a linear ODE is exponential, so its gradients vanish
+or explode over long sequences. HiPPO (high-order polynomial projection operators) chooses $\Amat$ and $\Bmat$ so that the
+state has a meaning <Cite id="gu2020hippo" />. At every time $t$, $\hvec(t)$ holds the coefficients of the best
+approximation of the input history $u(s)$, $s \le t$, by a degree-$(N-1)$ polynomial, under a chosen weighting of the
+past. For the scaled Legendre measure, which weights the whole history uniformly, the matrix is
+
+$$
+A_{nk} = -\begin{cases}
+(2n+1)^{1/2}(2k+1)^{1/2} & n > k, \\
+n + 1 & n = k, \\
+0 & n < k,
+\end{cases}
+$$
+
+for $n, k = 0, \dots, N-1$. The state then remembers the whole input history at a resolution set by $N$, instead of
+forgetting it exponentially. Replacing a random $\Amat$ by this matrix raised accuracy on sequential MNIST from 60% to
+98% in the work that preceded S4 <Cite id="gu2022s4" />.
+
+## Results and use
+
+S4 was the first model to solve the Path-X task of the Long Range Arena benchmark, a binary classification of images
+flattened to sequences of 16,384 pixels. It reached 91% accuracy on sequential CIFAR-10 without data augmentation, and
+generated autoregressively 60 times faster than a comparable transformer by using the recurrent mode
+<Cite id="gu2022s4" />.
+
+Its weakness is language. A time-invariant kernel applies the same filter whatever the tokens are, so the layer cannot
+decide from the content of a token whether to store or ignore it. <NoteLink to="mamba">Mamba</NoteLink> makes
+$\Delta$, $\Bmat$ and $\Cmat$ functions of the input to fix this, at the cost of the convolutional mode.
+
+<Derivation title="Why the bilinear transform keeps stable poles inside the unit circle">
+For a scalar eigenvalue $\lambda = -\alpha + i\omega$ with $\alpha > 0$, the bilinear map gives
+$\bar\lambda = (1 + \Delta\lambda/2)/(1 - \Delta\lambda/2)$. Write $z = \Delta\lambda/2 = -a + ib$ with $a > 0$. Then
+
+$$
+\abs{1 + z}^2 = (1 - a)^2 + b^2, \qquad \abs{1 - z}^2 = (1 + a)^2 + b^2.
+$$
+
+Their difference is $(1 + a)^2 - (1 - a)^2 = 4a > 0$, so $\abs{\bar\lambda} < 1$. Eigenvalues on the imaginary axis
+($a = 0$) map to the unit circle, and the whole left half-plane maps into the open unit disc. The zero-order hold gives
+$\abs{e^{\Delta\lambda}} = e^{-\alpha\Delta} < 1$ directly.
+</Derivation>
+
+## Assumptions
+
+- **Linearity in time.** The recurrence is linear and its parameters do not depend on the input. Nonlinearity comes
+  only from the layers around it.
+- **Uniform sampling.** One step $\Delta$ per channel is shared by all positions. Changing $\Delta$ at test time adapts
+  the model to a different sampling rate without retraining <Cite id="gu2022s4" />.
+- **Single-input, single-output channels.** Each of the $D$ channels has its own SSM with state size $N$, so a layer
+  holds $DN$ state numbers.
+
+## Pitfalls
+
+- **Unstable parameterisation.** If the real parts of the eigenvalues are free parameters, training can push them
+  positive and the recurrent mode then explodes, even if the truncated kernel looked fine. Parameterise them as
+  negative.
+- **Kernel length.** The convolutional mode materialises a kernel as long as the training sequence. Generation beyond
+  that length needs the recurrent mode, which is exact for any length.
+- **Real versus complex.** Complex diagonal states need the real part of the output taken consistently in both modes.
+  Mixing the conventions gives a factor of 2 error between training and generation.

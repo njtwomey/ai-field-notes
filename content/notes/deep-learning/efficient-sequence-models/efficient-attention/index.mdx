@@ -1,0 +1,141 @@
+---
+title: Efficient attention
+kind: overview
+summary: 'Self-attention over $n$ tokens costs $O(n^2 d)$ time and $O(n^2)$ memory per head. Efficient attention cuts this with sparse patterns (Longformer, BigBird), low-rank projection (Linformer), kernel feature maps (linear attention, Performer) or exact tiling (FlashAttention).'
+tags: [deep-learning, transformer, attention, long-context, sequence-models]
+aliases:
+  [
+    efficient transformer,
+    efficient transformers,
+    subquadratic attention,
+    X-former,
+    Linformer,
+    low-rank attention,
+    quadratic cost of attention,
+    long-sequence transformer,
+  ]
+requires: [scaled-dot-product-attention]
+related:
+  [
+    flash-attention,
+    kv-cache,
+    multi-head-attention,
+    structured-state-space-models,
+    mamba,
+    rwkv-and-retentive-networks,
+    hybrid-sequence-models,
+  ]
+references: [tay2022, vaswani2017, child2019, beltagy2020, zaheer2020, wang2020linformer, katharopoulos2020, choromanski2021, dao2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { AttentionPatterns } from '../_shared/AttentionPatterns'
+
+<Definition>
+**Efficient attention** is the family of methods that compute, approximate or replace
+<NoteLink to="scaled-dot-product-attention">scaled dot-product attention</NoteLink> with less than the $O(n^2)$ time or
+memory of the standard algorithm, where $n$ is the sequence length. The methods restrict which query–key pairs are
+scored, approximate the attention matrix with a low-rank or kernel factorisation, or compute exact attention without
+storing the $n \times n$ matrix <Cite id="tay2022" />.
+</Definition>
+
+## Why attention is quadratic
+
+A self-attention head takes $\Qmat, \Kmat \in \reals^{n \times d}$ and $\Vmat \in \reals^{n \times d_v}$ and computes
+
+$$
+\Omat = \operatorname{softmax}\paren{\frac{\Qmat\Kmat^\tr}{\sqrt d}}\Vmat.
+$$
+
+The score matrix $\Qmat\Kmat^\tr$ has $n^2$ entries, each a dot product of length $d$, so it costs $n^2 d$
+multiply–adds. The product with $\Vmat$ costs another $n^2 d_v$. The softmax normalises each row over all $n$ keys, so
+every entry is needed before any output is final. Standard implementations store the $n \times n$ matrix, and keep it
+for the backward pass <Cite id="vaswani2017" />.
+
+Everything else in a transformer layer is linear in $n$: the projections and the feed-forward network act on each token
+separately. For a layer of width $d$ with a feed-forward hidden width of $4d$, the four projections cost $4nd^2$
+multiply–adds and the feed-forward network $8nd^2$, while attention's two $n \times n$ products cost $2n^2 d$ summed
+over heads. The two are equal at $n = 6d$. Below that length the linear parts dominate; above it, attention does. In 16-bit precision the score matrix of one head for one sequence takes 32 MiB at $n = 4096$,
+2 GiB at $n = 32{,}768$ and 32 GiB at $n = 131{,}072$.
+
+## Components
+
+The approaches differ in what they give up.
+
+### Sparse patterns
+
+Each query attends to a fixed subset of keys: a local window, a few global tokens, strided or random positions. Cost is
+proportional to the number of scored pairs. The Sparse Transformer's strided pattern costs $O(n\sqrt n)$
+<Cite id="child2019" />; Longformer's sliding window plus global tokens and BigBird's window, global and random keys
+cost $O(n)$ <Cite id="beltagy2020" /> <Cite id="zaheer2020" />. Information between distant tokens flows through global
+tokens or through several layers. See
+<NoteLink to="sliding-window-and-sparse-attention">sliding-window and sparse attention</NoteLink>.
+
+<AttentionPatterns initial="bigbird" />
+
+### Low-rank projection
+
+Linformer observes that the attention matrix $\Pmat = \operatorname{softmax}(\Qmat\Kmat^\tr/\sqrt d)$ is close to low
+rank: most of its spectrum is in the first few singular values <Cite id="wang2020linformer" />. It projects the keys and
+values along the sequence dimension with learned matrices $\Emat, \Fmat \in \reals^{k \times n}$:
+
+$$
+\Omat = \operatorname{softmax}\paren{\frac{\Qmat(\Emat\Kmat)^\tr}{\sqrt d}}\Fmat\Vmat.
+$$
+
+The score matrix is now $n \times k$, so time and memory are $O(nk)$. Wang et al. prove that a $k$ independent of $n$
+suffices for a small approximation error with high probability. The projections mix all positions, including future
+ones, so Linformer does not support causal masking, and $\Emat$ and $\Fmat$ fix the sequence length.
+
+### Kernel feature maps
+
+<NoteLink to="linear-attention">Linear attention</NoteLink> writes the similarity as $\phi(\qvec)^\tr\phi(\kvec)$ for a
+feature map $\phi$ into $\reals^m$. The product $\phi(\Qmat)(\phi(\Kmat)^\tr\Vmat)$ is then computed right to left in
+$O(nmd_v)$ time <Cite id="katharopoulos2020" />. The Performer chooses random positive features whose inner product
+estimates the softmax kernel without bias <Cite id="choromanski2021" />. Causal linear attention is a recurrent network
+with a fixed-size state.
+
+### Exact attention with less memory traffic
+
+<NoteLink to="flash-attention">FlashAttention</NoteLink> computes exact softmax attention in tiles held in on-chip
+memory and combines them with an online softmax <Cite id="dao2022" />. It keeps the $O(n^2 d)$ arithmetic but never
+stores the score matrix, so memory is $O(n)$ and the computation is much faster on GPUs, where attention is limited by
+memory bandwidth. Because it is exact, it has largely replaced approximate methods at moderate sequence lengths.
+
+### Replacing attention
+
+Structured state-space layers, <NoteLink to="mamba">Mamba</NoteLink> and linear-recurrent transformers such as
+<NoteLink to="rwkv-and-retentive-networks">RetNet and RWKV</NoteLink> drop attention for a recurrence with a fixed-size
+state. <NoteLink to="hybrid-sequence-models">Hybrid models</NoteLink> keep a few attention layers among them.
+
+## Comparison
+
+Costs are per head for one sequence of $n$ tokens with head width $d$. $w$ is a window size, $k$ a projection rank and
+$m$ a feature dimension.
+
+| Method                                          | Keys per query          | Time               | Memory             | Exact softmax | Causal | Generation state       |
+| ----------------------------------------------- | ----------------------- | ------------------ | ------------------ | ------------- | ------ | ---------------------- |
+| Full attention                                  | $n$                     | $O(n^2 d)$         | $O(n^2)$           | yes           | yes    | KV cache, $O(nd)$      |
+| FlashAttention <Cite id="dao2022" />            | $n$                     | $O(n^2 d)$         | $O(n)$             | yes           | yes    | KV cache, $O(nd)$      |
+| Sparse Transformer <Cite id="child2019" />      | $O(\sqrt n)$            | $O(n\sqrt n\,d)$   | $O(n\sqrt n)$      | on the pattern | yes   | KV cache               |
+| Sliding window <Cite id="beltagy2020" />        | $w$                     | $O(nwd)$           | $O(nw)$            | on the pattern | yes   | last $w$ keys, $O(wd)$ |
+| BigBird <Cite id="zaheer2020" />                | $w + g + r$             | $O(n(w+g+r)d)$     | $O(n(w+g+r))$      | on the pattern | encoder use | —              |
+| Linformer <Cite id="wang2020linformer" />       | $k$ projected keys      | $O(nkd)$           | $O(nk)$            | no            | no     | —                      |
+| Linear attention <Cite id="katharopoulos2020" /> | all, via a summary     | $O(nmd)$           | $O(md)$ causal     | no            | yes    | $m \times d$ matrix    |
+| Performer <Cite id="choromanski2021" />         | all, via a summary      | $O(nmd)$           | $O(md)$ causal     | unbiased estimate | yes | $m \times d$ matrix    |
+
+"On the pattern" means that the softmax is exact over the keys the pattern keeps, and zero elsewhere.
+
+## Choosing a method
+
+- **Moderate lengths, quality first.** Exact attention with FlashAttention. There is no approximation to tune.
+- **Very long documents in an encoder.** Sparse patterns with global tokens, which keep exact softmax locally and give
+  every token a two-hop path to every other.
+- **Long generation with bounded memory.** A sliding window caps the KV cache at $w$ tokens. Linear attention and
+  recurrent layers cap it at a fixed state, and lose exact recall of distant tokens.
+- **Extending a trained model's context.** The cost is only part of the problem. Positions beyond the training length
+  must also be handled; see <NoteLink to="long-context-methods">long-context methods</NoteLink>.
+
+Tay et al. survey many further variants, including bucketing by locality-sensitive hashing, memory tokens and
+downsampling <Cite id="tay2022" />.

@@ -1,0 +1,177 @@
+---
+title: Linear attention
+kind: concept
+summary: 'Linear attention replaces the softmax similarity $\exp(\qvec^\tr\kvec)$ with a kernel $\phi(\qvec)^\tr\phi(\kvec)$. Matrix products then reassociate, cost falls from $O(n^2)$ to $O(n)$, and causal attention becomes an RNN whose state is $\Smat_t = \Smat_{t-1} + \phi(\kvec_t)\vvec_t^\tr$.'
+tags: [deep-learning, transformer, attention, sequence-models, long-context, kernels, worked-example]
+aliases:
+  [
+    linear transformer,
+    kernelised attention,
+    kernel attention,
+    Performer,
+    FAVOR+,
+    positive random features,
+    transformers are RNNs,
+    causal linear attention,
+  ]
+requires: [scaled-dot-product-attention, causal-masking, kernel-trick]
+partOf: [efficient-attention]
+related:
+  [
+    random-fourier-features,
+    recurrent-neural-network,
+    efficient-attention,
+    rwkv-and-retentive-networks,
+    mamba,
+    parallel-scan,
+    kv-cache,
+  ]
+references: [katharopoulos2020, choromanski2021, tay2022]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Linear attention** computes the output at position $i$ as
+
+$$
+\vvec_i' = \frac{\sum_j \phi(\qvec_i)^\tr\phi(\kvec_j)\,\vvec_j}{\sum_j \phi(\qvec_i)^\tr\phi(\kvec_j)}
+= \frac{\phi(\qvec_i)^\tr\sum_j \phi(\kvec_j)\vvec_j^\tr}{\phi(\qvec_i)^\tr\sum_j \phi(\kvec_j)},
+$$
+
+where $\qvec_i, \kvec_j \in \reals^{d}$ are queries and keys, $\vvec_j \in \reals^{d_v}$ values, and
+$\phi: \reals^d \to \reals^{m}$ a feature map with non-negative outputs. The sums over $j$ do not depend on $i$, so they
+are computed once and shared by all queries. Time and memory are linear in the sequence length $n$
+<Cite id="katharopoulos2020" />.
+</Definition>
+
+## Intuition
+
+<NoteLink to="scaled-dot-product-attention">Softmax attention</NoteLink> compares every query with every key. It must
+form the $n \times n$ matrix $\Qmat\Kmat^\tr$, apply the exponential elementwise and normalise each row, and only then
+multiply by $\Vmat$. The exponential sits between the two matrix products, so they cannot be regrouped.
+
+If the similarity is instead a dot product of feature vectors, $\phi(\qvec)^\tr\phi(\kvec)$, the attention matrix is
+$\phi(\Qmat)\phi(\Kmat)^\tr$ and the output is $\phi(\Qmat)\phi(\Kmat)^\tr\Vmat$. Matrix multiplication is associative, so
+$\phi(\Kmat)^\tr\Vmat$, an $m \times d_v$ matrix, can be computed first. Its size does not depend on $n$. Each query
+then reads from this fixed summary of all keys and values.
+
+## Derivation
+
+Write attention with a general non-negative similarity function:
+
+$$
+\vvec_i' = \frac{\sum_{j=1}^{n} \operatorname{sim}(\qvec_i, \kvec_j)\,\vvec_j}{\sum_{j=1}^{n} \operatorname{sim}(\qvec_i, \kvec_j)}.
+$$
+
+Softmax attention is the case $\operatorname{sim}(\qvec, \kvec) = \exp(\qvec^\tr\kvec/\sqrt{d})$. Any similarity that is
+a <NoteLink to="kernel-trick">kernel</NoteLink> with a finite feature map, $\operatorname{sim}(\qvec, \kvec) =
+\phi(\qvec)^\tr\phi(\kvec)$, gives
+
+$$
+\vvec_i'^\tr = \frac{\sum_j \phi(\qvec_i)^\tr\phi(\kvec_j)\,\vvec_j^\tr}{\sum_j \phi(\qvec_i)^\tr\phi(\kvec_j)}
+= \frac{\phi(\qvec_i)^\tr\paren{\sum_j \phi(\kvec_j)\vvec_j^\tr}}{\phi(\qvec_i)^\tr\paren{\sum_j \phi(\kvec_j)}},
+$$
+
+because $\phi(\qvec_i)^\tr$ does not depend on $j$ and can be taken out of both sums. Define
+
+$$
+\Smat = \sum_{j=1}^{n} \phi(\kvec_j)\vvec_j^\tr \in \reals^{m \times d_v}, \qquad
+\zvec = \sum_{j=1}^{n} \phi(\kvec_j) \in \reals^{m}.
+$$
+
+Then $\vvec_i'^\tr = \phi(\qvec_i)^\tr\Smat / \phi(\qvec_i)^\tr\zvec$. Computing $\Smat$ and $\zvec$ costs $O(nmd_v)$, and
+each of the $n$ outputs costs $O(md_v)$. The total is $O(nmd_v)$ time, against $O(n^2 d)$ for softmax attention, and no
+$n \times n$ matrix is stored <Cite id="katharopoulos2020" />.
+
+Katharopoulos et al. use $\phi(\xvec) = \operatorname{elu}(\xvec) + 1$ elementwise, so $m = d$. The feature map must be
+non-negative so that every weight is non-negative and the denominator cannot vanish or change sign.
+
+### Causal linear attention is a recurrent network
+
+With a <NoteLink to="causal-masking">causal mask</NoteLink>, query $i$ sums only over $j \le i$. The sums become prefix
+sums:
+
+$$
+\Smat_i = \sum_{j \le i} \phi(\kvec_j)\vvec_j^\tr = \Smat_{i-1} + \phi(\kvec_i)\vvec_i^\tr, \qquad
+\zvec_i = \zvec_{i-1} + \phi(\kvec_i), \qquad
+\vvec_i'^\tr = \frac{\phi(\qvec_i)^\tr\Smat_i}{\phi(\qvec_i)^\tr\zvec_i},
+$$
+
+with $\Smat_0 = \zeros$ and $\zvec_0 = \zeros$. This is a <NoteLink to="recurrent-neural-network">recurrent
+network</NoteLink> whose hidden state is the matrix $\Smat_i$ and the vector $\zvec_i$ <Cite id="katharopoulos2020" />.
+Generation keeps $m(d_v + 1)$ numbers per head and layer and spends $O(md_v)$ per token, whatever the context length. A
+softmax transformer instead keeps a <NoteLink to="kv-cache">KV cache</NoteLink> that grows by one key and one value per
+token, and spends $O(i\,d)$ at position $i$. Katharopoulos et al. report autoregressive generation up to 4000 times
+faster than a softmax transformer on very long sequences.
+
+For training, the same layer runs in parallel over the sequence. The state update is a linear recurrence, so all
+$\Smat_i$ can be computed with a <NoteLink to="parallel-scan">parallel scan</NoteLink>, or in chunks: within a chunk of
+$C$ positions, use the masked quadratic form $(\phi(\Qmat)\phi(\Kmat)^\tr \circ \Mmat)\Vmat$ with a causal mask $\Mmat$;
+between chunks, pass $\Smat$ forward.
+
+### Worked example
+
+Take three positions with feature vectors already applied, $m = d_v = 2$:
+$\phi(\kvec_1) = (1, 0)$, $\phi(\kvec_2) = (1, 1)$, $\phi(\kvec_3) = (0, 2)$; values $\vvec_1 = (1, 0)$,
+$\vvec_2 = (0, 1)$, $\vvec_3 = (1, 1)$; queries $\phi(\qvec_1) = (1, 1)$, $\phi(\qvec_2) = (1, 0)$, $\phi(\qvec_3) = (0, 1)$.
+
+- $i = 1$: $\Smat_1 = \phi(\kvec_1)\vvec_1^\tr = \begin{pmatrix}1 & 0 \\ 0 & 0\end{pmatrix}$, $\zvec_1 = (1, 0)$. The
+  numerator is $\phi(\qvec_1)^\tr\Smat_1 = (1, 0)$, the denominator $1$, the output $(1, 0)$.
+- $i = 2$: $\Smat_2 = \Smat_1 + \begin{pmatrix}0 & 1 \\ 0 & 1\end{pmatrix} = \begin{pmatrix}1 & 1 \\ 0 & 1\end{pmatrix}$,
+  $\zvec_2 = (2, 1)$. The numerator is $(1, 1)$, the denominator $2$, the output $(0.5, 0.5)$.
+- $i = 3$: $\Smat_3 = \Smat_2 + \begin{pmatrix}0 & 0 \\ 2 & 2\end{pmatrix} = \begin{pmatrix}1 & 1 \\ 2 & 3\end{pmatrix}$,
+  $\zvec_3 = (2, 3)$. The numerator is $(2, 3)$, the denominator $3$, the output $(0.667, 1)$.
+
+The quadratic form gives the same outputs. The masked similarity matrix has rows $(1, 0, 0)$, $(1, 1, 0)$ and
+$(0, 1, 2)$. Row 3 weights the values by $(0, 1, 2)/3$, giving $(0 + 2, 1 + 2)/3 = (0.667, 1)$.
+
+## Approximating softmax with random features
+
+A fixed map such as $\operatorname{elu} + 1$ defines a different similarity from softmax. The Performer instead
+approximates the softmax kernel itself with random features, FAVOR+ <Cite id="choromanski2021" />. For
+$\omegavec_1, \dots, \omegavec_m$ drawn from $\Gauss(\zeros, \eye_d)$, define
+
+$$
+\phi(\xvec) = \frac{1}{\sqrt m}\,e^{-\norm{\xvec}^2/2}\paren{e^{\omegavec_1^\tr\xvec}, \dots, e^{\omegavec_m^\tr\xvec}}.
+$$
+
+Then $\expect[\phi(\qvec)^\tr\phi(\kvec)] = \exp(\qvec^\tr\kvec)$, so $\phi(\qvec)^\tr\phi(\kvec)$ is an unbiased
+estimate of the softmax similarity; scaling $\qvec$ and $\kvec$ by $d^{-1/4}$ gives the $1/\sqrt d$ temperature. Every
+feature is positive, so the estimated weights are positive. The trigonometric
+<NoteLink to="random-fourier-features">random Fourier features</NoteLink> used for shift-invariant kernels can produce
+negative estimates of small weights, which makes the normaliser unstable. Drawing the $\omegavec_i$ orthogonal to one
+another lowers the variance further.
+
+<Derivation title="Why positive random features are unbiased">
+For $\omegavec \sim \Gauss(\zeros, \eye_d)$ and any fixed $\avec \in \reals^d$, the moment-generating function of a
+standard Gaussian gives $\expect[e^{\omegavec^\tr\avec}] = e^{\norm{\avec}^2/2}$. Each term of
+$\phi(\qvec)^\tr\phi(\kvec)$ is $\frac1m e^{-(\norm{\qvec}^2 + \norm{\kvec}^2)/2}e^{\omegavec_i^\tr(\qvec + \kvec)}$, so
+
+$$
+\expect\brack{\phi(\qvec)^\tr\phi(\kvec)} = e^{-(\norm{\qvec}^2 + \norm{\kvec}^2)/2}\,e^{\norm{\qvec + \kvec}^2/2}.
+$$
+
+Expanding $\norm{\qvec + \kvec}^2 = \norm{\qvec}^2 + 2\qvec^\tr\kvec + \norm{\kvec}^2$ cancels the squared norms and leaves
+$e^{\qvec^\tr\kvec}$.
+</Derivation>
+
+## Assumptions
+
+- **Kernel similarity.** Linearity needs a similarity that factorises through a finite feature map. The exact softmax
+  kernel needs infinitely many features, so it is approximated or replaced.
+- **Fixed feature dimension.** The cost is linear in $n$ only while $m$ is fixed. Random-feature approximations need
+  larger $m$ for lower variance.
+
+## Pitfalls
+
+- **Finite memory.** The causal state $\Smat_i$ has $m \times d_v$ entries. It is a sum of outer products, so once more
+  than about $m$ key directions have been written, new associations interfere with old ones. Retrieval of one specific
+  token from a long context is worse than with softmax attention.
+- **Diffuse weights.** Softmax can put almost all weight on one key. A low-dimensional non-negative feature map rarely
+  does, so attention is smoother and less selective. Later models add decay or gates to the state update, as in
+  <NoteLink to="rwkv-and-retentive-networks">RetNet and RWKV</NoteLink> and
+  <NoteLink to="mamba">Mamba-2</NoteLink>.
+- **Numerics of the normaliser.** Without the denominator the outputs grow with the sequence length; with it, a small
+  denominator amplifies noise. Some variants drop the denominator and normalise the output with a layer normalisation
+  instead.

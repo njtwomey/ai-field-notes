@@ -1,0 +1,156 @@
+---
+title: Parallel scan for linear recurrences
+kind: concept
+summary: 'A scan computes every prefix $x_1 \oplus \dots \oplus x_t$ of an associative operator in $O(\log n)$ parallel steps. The linear recurrence $h_t = a_t h_{t-1} + b_t$ is a scan over pairs $(a_t, b_t)$ with $(a, b) \bullet (a'', b'') = (a''a,\ a''b + b'')$, so it runs in parallel over time.'
+tags: [deep-learning, sequence-models, parallel-computing, algorithms, worked-example]
+aliases:
+  [
+    prefix sum,
+    all-prefix-sums,
+    associative scan,
+    Blelloch scan,
+    Hillis–Steele scan,
+    parallel prefix,
+    linear recurrence scan,
+    parallel linear RNN,
+  ]
+requires: [recurrent-neural-network]
+related: [mamba, structured-state-space-models, linear-attention, rwkv-and-retentive-networks]
+references: [blelloch1990, martin2018, gu2023mamba]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Given an associative binary operator $\oplus$ and a sequence $x_1, \dots, x_n$, the **scan** (all-prefix-sums)
+returns $(x_1,\ x_1 \oplus x_2,\ \dots,\ x_1 \oplus x_2 \oplus \dots \oplus x_n)$ <Cite id="blelloch1990" />. A
+**parallel scan** computes all $n$ prefixes in $O(\log n)$ steps on $O(n)$ processors, with $O(n)$ total work. The
+first-order linear recurrence $h_t = a_t h_{t-1} + b_t$ is a scan over the pairs $(a_t, b_t)$, so a sequence model
+whose state update is linear can be evaluated in parallel over time <Cite id="martin2018" />.
+</Definition>
+
+## Intuition
+
+A recurrence looks inherently sequential: $h_t$ needs $h_{t-1}$, which needs $h_{t-2}$. For a sum this is false. To add
+eight numbers one can add them in pairs, then the pairs in pairs, and finish in three rounds instead of seven. The
+rounds work because addition is associative: brackets can be placed anywhere.
+
+A linear recurrence has the same property once each step is seen as a function. Step $t$ is the affine map
+$f_t(h) = a_t h + b_t$. The state after $t$ steps is $h_t = (f_t \circ \dots \circ f_1)(h_0)$. Function composition is
+associative, and the composition of two affine maps is again affine, described by two numbers. So partial compositions
+can be computed in any bracketing, in parallel, and each fits in the same space as one step.
+
+## The operator for a linear recurrence
+
+Represent step $t$ by the pair $e_t = (a_t, b_t)$. Applying $f_s$ first and then $f_t$ gives
+
+$$
+f_t(f_s(h)) = a_t(a_s h + b_s) + b_t = (a_t a_s)\,h + (a_t b_s + b_t).
+$$
+
+Define the combination "$e_s$ then $e_t$" as
+
+$$
+(a_s, b_s) \bullet (a_t, b_t) = (a_t a_s,\ a_t b_s + b_t).
+$$
+
+The operator is associative. For three pairs,
+
+$$
+\begin{aligned}
+\paren{(a_1, b_1) \bullet (a_2, b_2)} \bullet (a_3, b_3) &= (a_2 a_1,\ a_2 b_1 + b_2) \bullet (a_3, b_3)
+= (a_3 a_2 a_1,\ a_3 a_2 b_1 + a_3 b_2 + b_3), \\
+(a_1, b_1) \bullet \paren{(a_2, b_2) \bullet (a_3, b_3)} &= (a_1, b_1) \bullet (a_3 a_2,\ a_3 b_2 + b_3)
+= (a_3 a_2 a_1,\ a_3 a_2 b_1 + a_3 b_2 + b_3).
+\end{aligned}
+$$
+
+Both equal the composition $f_3 \circ f_2 \circ f_1$. The identity element is $(1, 0)$, the map $h \mapsto h$. The
+operator is not commutative: the order of steps matters.
+
+With $h_0 = 0$, the prefix $e_1 \bullet e_2 \bullet \dots \bullet e_t = (A_t, B_t)$ describes the map
+$h_0 \mapsto A_t h_0 + B_t$, so $h_t = B_t$. A nonzero initial state is absorbed by replacing $b_1$ with
+$a_1 h_0 + b_1$. Every state $h_1, \dots, h_n$ is therefore the second component of a scan over $e_1, \dots, e_n$
+with the operator $\bullet$.
+
+## Two parallel algorithms
+
+### Hillis–Steele: $\log_2 n$ steps, $O(n \log n)$ work
+
+In round $r = 0, 1, \dots$, every position $t$ with $t > 2^r$ replaces its value $y_t$ by $y_{t - 2^r} \bullet y_t$,
+all positions at once. After round $r$, position $t$ holds the combination of the $\min(t, 2^{r+1})$ elements ending at
+$t$. The claim holds after round 0, when each $y_t$ covers $e_{t-1}, e_t$. If it holds after round $r - 1$, the
+left operand covers the $2^r$ elements ending at $t - 2^r$ and the right operand the $2^r$ elements ending at $t$, so
+their combination covers $2^{r+1}$ elements. After $\lceil \log_2 n \rceil$ rounds every position holds its full
+prefix. Each round does up to $n$ combinations, so the total work is $O(n \log n)$.
+
+### Blelloch: $2\log_2 n$ steps, $O(n)$ work
+
+Blelloch's scan is **work-efficient**: it does the same $O(n)$ work as the sequential loop <Cite id="blelloch1990" />.
+It uses a balanced binary tree over the $n$ elements.
+
+1. **Up-sweep (reduce).** Combine neighbouring pairs, then pairs of pairs, level by level. Each internal node stores the
+   combination of the leaves beneath it. The levels have $n/2, n/4, \dots, 1$ nodes, so there are $n - 1$ combinations
+   in $\log_2 n$ rounds.
+2. **Down-sweep.** Give the root the identity. Each node passes to its left child the prefix it received, and to its
+   right child that prefix combined with the left child's total from the up-sweep. After $\log_2 n$ rounds each leaf
+   holds the combination of everything before it (an exclusive scan). Combining it with the leaf's own element gives the
+   inclusive prefix.
+
+Both sweeps do $O(n)$ work and each has $\log_2 n$ rounds. With $p$ processors the time is $O(n/p + \log n)$. On a GPU
+the scan is usually blocked: each thread block scans its chunk sequentially or in shared memory, a second scan runs
+over the chunk totals, and a final pass adds each chunk's offset.
+
+### Worked example
+
+Take $n = 4$ steps with $a = (0.5, 2, 0.5, 1)$, $b = (1, 1, 2, -1)$ and $h_0 = 0$. The sequential loop gives
+$h_1 = 1$, $h_2 = 2 \times 1 + 1 = 3$, $h_3 = 0.5 \times 3 + 2 = 3.5$ and $h_4 = 1 \times 3.5 - 1 = 2.5$.
+
+The up-sweep combines neighbours:
+
+- $e_1 \bullet e_2 = (2 \times 0.5,\ 2 \times 1 + 1) = (1, 3)$;
+- $e_3 \bullet e_4 = (1 \times 0.5,\ 1 \times 2 - 1) = (0.5, 1)$;
+- root: $(1, 3) \bullet (0.5, 1) = (0.5,\ 0.5 \times 3 + 1) = (0.5, 2.5)$, so $h_4 = 2.5$.
+
+Hillis–Steele reaches the same states in two rounds. After round 0 the four positions hold
+$e_1 = (0.5, 1)$, $e_1 \bullet e_2 = (1, 3)$, $e_2 \bullet e_3 = (1, 2.5)$ and $e_3 \bullet e_4 = (0.5, 1)$. In round 1,
+position 3 computes $e_1 \bullet (e_2 \bullet e_3) = (0.5, 1) \bullet (1, 2.5) = (0.5, 3.5)$ and position 4 computes
+$(1, 3) \bullet (0.5, 1) = (0.5, 2.5)$. The second components $(1, 3, 3.5, 2.5)$ are $h_1, \dots, h_4$.
+
+## Vector states
+
+For a state $\hvec_t \in \reals^N$ with $\hvec_t = \Amat_t\hvec_{t-1} + \bvec_t$, the operator becomes
+$(\Amat_s, \bvec_s) \bullet (\Amat_t, \bvec_t) = (\Amat_t\Amat_s,\ \Amat_t\bvec_s + \bvec_t)$, by the same derivation. The
+cost of one combination depends on the structure of $\Amat_t$:
+
+- **Dense $\Amat_t$.** A combination multiplies two $N \times N$ matrices, $O(N^3)$ time, and each partial result
+  stores $N^2$ numbers. The parallel scan then costs far more than the $O(N^2)$ sequential step.
+- **Diagonal $\Amat_t$.** The matrix product is elementwise, and the recurrence splits into $N$ independent scalar
+  scans. This is the case for <NoteLink to="structured-state-space-models">diagonal state-space models</NoteLink> and
+  <NoteLink to="mamba">Mamba</NoteLink>.
+- **Scalar times a matrix state.** In <NoteLink to="linear-attention">linear attention</NoteLink> with decay, the state
+  is a matrix $\Smat_t = \gamma_t \Smat_{t-1} + \kvec_t\vvec_t^\tr$ and the coefficient is a scalar, so a combination
+  costs one scaled matrix addition.
+
+This is why efficient recurrent sequence models keep their transition diagonal or scalar. Martin and Cundy applied the
+scan to linear recurrent networks, including a linear surrogate of the LSTM, and reported speed-ups in training and inference of up to
+9 times <Cite id="martin2018" />. Mamba uses a fused, work-efficient scan on the GPU for its input-dependent recurrence
+<Cite id="gu2023mamba" />.
+
+## Assumptions
+
+- **Linearity in the state.** The coefficients $a_t$ and $b_t$ may depend on the input $x_t$, but not on $h_{t-1}$. A
+  nonlinear recurrence such as $h_t = \tanh(W h_{t-1} + U x_t)$ has no closed composition of fixed size and cannot be
+  scanned this way.
+- **All inputs known.** The scan needs the whole sequence at once. It speeds up training and prompt processing, not
+  token-by-token generation, where the plain recurrence is already optimal.
+
+## Pitfalls
+
+- **Underflow of products.** The prefix products $a_t a_{t-1} \cdots a_1$ shrink geometrically when $\abs{a_t} < 1$ and
+  underflow in low precision over long sequences. Implementations scan in chunks, or keep the log of the products as a
+  cumulative sum.
+- **Order of arguments.** The operator is not commutative. Writing $a_s b_t + b_s$ instead of $a_t b_s + b_t$ still
+  gives an associative operator, but it computes the recurrence run backwards.
+- **Work versus depth.** The Hillis–Steele scan has the shortest depth but does $O(n \log n)$ work. When the operator is
+  expensive, as with matrix states, the work-efficient version is faster in practice.
