@@ -1,0 +1,166 @@
+---
+title: Online learning for linear models
+kind: concept
+summary: 'Linear models $\hat y = \wvec^\top\xvec$ can be trained one example at a time. Recursive least squares keeps the exact ridge solution with an $O(d^2)$ Sherman–Morrison update; the perceptron and passive-aggressive updates cost $O(d)$ and fix the latest margin.'
+tags: [online-learning, linear-models, least-squares, classification, streaming, worked-example]
+aliases: [online least squares, online ridge regression, passive-aggressive algorithm, PA-I, PA-II, Vovk–Azoury–Warmuth forecaster, incremental linear regression]
+requires: [linear-regression, matrix-inverse]
+partOf: [online-learning]
+related: [rls-filter, sgd-for-linear-models, perceptron, online-gradient-descent, kalman-filter, logistic-regression, support-vector-machine, sequential-bayesian-updating, surrogate-losses]
+references: [crammer2006, vovk2001, azoury2001, cesabianchi2006, rosenblatt1958]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+An **online linear learner** keeps a weight vector $\wvec_t \in \reals^d$. In round $t$ it receives features
+$\xvec_t \in \reals^d$, predicts $\hat y_t = \wvec_t^\top\xvec_t$ (or its sign, for classification), observes the label
+$y_t$, and updates $\wvec_t$ to $\wvec_{t+1}$ using only $\wvec_t$, a fixed-size state and $(\xvec_t, y_t)$. The memory
+and the cost per update do not grow with the number of examples seen.
+</Definition>
+
+## Notation
+
+$\Xmat_t$ is the $t \times d$ matrix of the first $t$ feature vectors and $\yvec_t$ the vector of their labels.
+$R = \max_t\norm{\xvec_t}$ bounds the feature norms. A comparator is any fixed weight vector $\uvec$. For
+classification, $y_t \in \set{-1, +1}$ and the **hinge loss** is $\ell(\wvec; \xvec, y) = \max(0, 1 - y\wvec^\top\xvec)$.
+
+## Recursive least squares
+
+The ridge regression estimate after $t$ examples is
+
+$$
+\wvec_t = \Amat_t^{-1}\bvec_t, \qquad \Amat_t = a\I + \Xmat_t^\top\Xmat_t = a\I + \sum_{s=1}^{t}\xvec_s\xvec_s^\top, \qquad
+\bvec_t = \sum_{s=1}^{t}y_s\xvec_s,
+$$
+
+with ridge parameter $a > 0$. Recomputing it from scratch costs $O(d^3)$ per example. Both $\Amat_t$ and $\bvec_t$
+change by a rank-one term, so the inverse can be updated instead.
+
+**Update the inverse.** Let $\Pmat_t = \Amat_t^{-1}$. The Sherman–Morrison formula for
+$\Amat_t = \Amat_{t-1} + \xvec_t\xvec_t^\top$ gives
+
+$$
+\Pmat_t = \Pmat_{t-1} - \frac{\Pmat_{t-1}\xvec_t\xvec_t^\top\Pmat_{t-1}}{1 + \xvec_t^\top\Pmat_{t-1}\xvec_t}
+= \Pmat_{t-1} - \kvec_t\xvec_t^\top\Pmat_{t-1}, \qquad
+\kvec_t = \frac{\Pmat_{t-1}\xvec_t}{1 + \xvec_t^\top\Pmat_{t-1}\xvec_t}.
+$$
+
+Multiplying the first form by $\xvec_t$ shows $\Pmat_t\xvec_t = \kvec_t$: the **gain** $\kvec_t$ is the new inverse applied
+to the new input.
+
+**Update the weights.** Using $\bvec_t = \bvec_{t-1} + y_t\xvec_t$,
+
+$$
+\wvec_t = \Pmat_t\bvec_{t-1} + y_t\Pmat_t\xvec_t = \paren{\Pmat_{t-1} - \kvec_t\xvec_t^\top\Pmat_{t-1}}\bvec_{t-1} + y_t\kvec_t
+= \wvec_{t-1} + \kvec_t\paren{y_t - \wvec_{t-1}^\top\xvec_t}.
+$$
+
+The new estimate is the old one plus the gain times the prediction error. Each step costs $O(d^2)$ and the result
+equals batch ridge regression exactly, at every $t$. Starting from $\Pmat_0 = \I/a$ and $\wvec_0 = \zeros$ removes any
+need to store past examples. Recursive least squares is the <NoteLink to="kalman-filter" /> for a static state, and with
+an exponential forgetting factor it is the <NoteLink to="rls-filter">RLS adaptive filter</NoteLink> of signal
+processing.
+
+**Worked example.** Take $a = 1$, so $\Pmat_0 = \I$. The first example is $\xvec_1 = (1, 0)$, $y_1 = 1$: the gain is
+$\kvec_1 = (1, 0)/2$, the error is $1$, and $\wvec_1 = (0.5, 0)$, with $\Pmat_1 = \diag(0.5, 1)$. The second is
+$\xvec_2 = (1, 1)$, $y_2 = 3$: $\Pmat_1\xvec_2 = (0.5, 1)$, $\xvec_2^\top\Pmat_1\xvec_2 = 1.5$, so $\kvec_2 = (0.2, 0.4)$. The
+error is $3 - 0.5 = 2.5$, and $\wvec_2 = (0.5, 0) + 2.5(0.2, 0.4) = (1, 1)$. Batch ridge regression on the two examples,
+$(\Xmat^\top\Xmat + \I)^{-1}\Xmat^\top\yvec$, also gives $(1, 1)$.
+
+**Regret.** A variant that uses the current input before predicting,
+$\hat y_t = \xvec_t^\top\Amat_t^{-1}\bvec_{t-1}$, is the **Vovk–Azoury–Warmuth forecaster**. If $\abs{y_t} \le Y$ for all
+$t$, its cumulative squared error satisfies, for every $\uvec \in \reals^d$,
+
+$$
+\sum_{t=1}^{T}(y_t - \hat y_t)^2 \le \sum_{t=1}^{T}(y_t - \uvec^\top\xvec_t)^2 + a\norm{\uvec}^2 + dY^2\ln\paren{1 + \frac{TR^2}{ad}}
+$$
+
+<Cite id="vovk2001" /> <Cite id="azoury2001" />. The regret grows as $d\ln T$, as for the online Newton step on
+exp-concave losses. The logarithmic term comes from the same determinant argument: the sum of
+$\xvec_t^\top\Amat_t^{-1}\xvec_t$ is at most $\ln\det(\Amat_T)/\det(a\I)$.
+
+## The perceptron as online learning
+
+The <NoteLink to="perceptron" /> predicts $\sgn(\wvec_t^\top\xvec_t)$ and, on a mistake, sets
+$\wvec_{t+1} = \wvec_t + y_t\xvec_t$ <Cite id="rosenblatt1958" />. This is a subgradient step with step size 1 on the
+loss $\max(0, -y\wvec^\top\xvec)$, taken only in rounds with a mistake. If some $\uvec$ with $\norm{\uvec} = 1$
+separates the data with margin $\gamma = \min_ty_t\uvec^\top\xvec_t > 0$, the perceptron makes at most $(R/\gamma)^2$
+mistakes, however long the stream. The proof, in the perceptron note, tracks $\uvec^\top\wvec_t$ and $\norm{\wvec_t}$ in the
+same way that regret proofs track the distance to a comparator.
+
+## Passive-aggressive updates
+
+The perceptron changes $\wvec$ by a fixed amount on every mistake and ignores examples that are correct but with a
+small margin. The **passive-aggressive** (PA) update makes the smallest change that gives the current example a margin
+of 1 <Cite id="crammer2006" />:
+
+$$
+\wvec_{t+1} = \argmin_{\wvec}\frac12\norm{\wvec - \wvec_t}^2 \quad\text{subject to}\quad \ell(\wvec; \xvec_t, y_t) = 0.
+$$
+
+If the hinge loss $\ell_t = \ell(\wvec_t; \xvec_t, y_t)$ is already zero, $\wvec_{t+1} = \wvec_t$ (passive). Otherwise the
+constraint is $y_t\wvec^\top\xvec_t \ge 1$. The Lagrangian $\frac12\norm{\wvec - \wvec_t}^2 + \tau(1 - y_t\wvec^\top\xvec_t)$
+is stationary at $\wvec = \wvec_t + \tau y_t\xvec_t$. Substituting into the active constraint,
+$y_t\wvec_t^\top\xvec_t + \tau\norm{\xvec_t}^2 = 1$, so
+
+$$
+\tau_t = \frac{\ell_t}{\norm{\xvec_t}^2}, \qquad \wvec_{t+1} = \wvec_t + \tau_ty_t\xvec_t.
+$$
+
+The step is large exactly when the loss is large (aggressive). For noisy labels, forcing a margin of 1 on every
+example overreacts to outliers. Two relaxations add a slack penalty with parameter $C > 0$:
+
+- **PA-I** minimises $\frac12\norm{\wvec - \wvec_t}^2 + C\xi$ subject to $\ell \le \xi$, $\xi \ge 0$, which caps the step:
+  $\tau_t = \min(C, \ell_t/\norm{\xvec_t}^2)$.
+- **PA-II** penalises $C\xi^2$ and gives $\tau_t = \ell_t/(\norm{\xvec_t}^2 + 1/(2C))$.
+
+**Bound.** For any $\uvec$, write $\ell_t^\star = \ell(\uvec; \xvec_t, y_t)$. The change in squared distance to $\uvec$ is
+
+$$
+\norm{\wvec_t - \uvec}^2 - \norm{\wvec_{t+1} - \uvec}^2 = 2\tau_ty_t(\uvec - \wvec_t)^\top\xvec_t - \tau_t^2\norm{\xvec_t}^2
+\ge 2\tau_t(\ell_t - \ell_t^\star) - \tau_t^2\norm{\xvec_t}^2,
+$$
+
+using $y_t\uvec^\top\xvec_t \ge 1 - \ell_t^\star$ and $y_t\wvec_t^\top\xvec_t = 1 - \ell_t$ when $\ell_t > 0$. If $\uvec$ has zero loss
+on every example, substitute $\tau_t = \ell_t/\norm{\xvec_t}^2$: the right side is $\ell_t^2/\norm{\xvec_t}^2 \ge \ell_t^2/R^2$.
+Summing, the left side telescopes to at most $\norm{\wvec_1 - \uvec}^2$, so with $\wvec_1 = \zeros$,
+
+$$
+\sum_{t=1}^{T}\ell_t^2 \le R^2\norm{\uvec}^2.
+$$
+
+Every round with a mistake has $\ell_t \ge 1$, so the number of mistakes is at most $R^2\norm{\uvec}^2$, the perceptron's
+bound with $\gamma = 1/\norm{\uvec}$. PA-I has a similar bound in the non-separable case, with the comparator's
+cumulative hinge loss added <Cite id="crammer2006" />.
+
+**Worked example.** From $\wvec_1 = \zeros$, the example $\xvec = (1, 2)$, $y = +1$ has hinge loss 1. Then
+$\tau = 1/5$ and $\wvec_2 = (0.2, 0.4)$, whose margin on the example is $0.2 + 0.8 = 1$ exactly.
+
+## Comparison
+
+| Learner | Loss | Cost per example | Guarantee |
+| --- | --- | --- | --- |
+| Recursive least squares | squared | $O(d^2)$ time and memory | exact ridge solution; regret $O(d\ln T)$ |
+| Online gradient descent | any convex | $O(d)$ | regret $O(\sqrt{T})$ |
+| Perceptron | mistakes | $O(d)$ | $(R/\gamma)^2$ mistakes if separable |
+| Passive-aggressive | hinge | $O(d)$ | $\sum_t\ell_t^2 \le R^2\norm{\uvec}^2$ if separable |
+
+<NoteLink to="online-gradient-descent" /> with the logistic loss gives online <NoteLink to="logistic-regression" />, and
+with the hinge loss plus $\frac\lambda2\norm{\wvec}^2$ an online <NoteLink to="support-vector-machine" /> whose steps
+$\eta_t = 1/(\lambda t)$ give regret $O(\log T)$.
+
+## Assumptions
+
+- Features are bounded, $\norm{\xvec_t} \le R$. Every bound above scales with $R$, so standardise features, but only with
+  statistics available online (running means and variances).
+- The comparator is a fixed $\uvec$. On drifting data, add forgetting (see <NoteLink to="concept-drift-adaptation" />).
+
+## Pitfalls
+
+- **Round-off in recursive least squares.** The subtraction in the $\Pmat_t$ update can lose symmetry and positive
+  definiteness over millions of steps. Symmetrise $\Pmat_t$ periodically, or use a square-root (QR-based) form.
+- **Forgetting in RLS without regularisation.** With a forgetting factor, directions the inputs stop exciting have
+  $\Amat_t$ shrinking towards zero and $\Pmat_t$ blowing up. Keep a floor on the regularisation.
+- **PA on noisy labels.** The unrelaxed PA update fits every mislabelled example with margin 1. Use PA-I or PA-II with a
+  modest $C$.

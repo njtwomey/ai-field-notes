@@ -1,0 +1,155 @@
+---
+title: Concept drift adaptation
+kind: concept
+summary: 'Concept drift is a change over time in the distribution $p_t(\xvec, y)$ a streaming learner models. Learners adapt by forgetting (a sliding window, or a factor $\lambda$ that down-weights old data), by detecting change and resetting (ADWIN), or by reweighting an ensemble.'
+tags: [online-learning, streaming, non-stationarity, monitoring, worked-example]
+aliases: [drift adaptation, learning under concept drift, ADWIN, adaptive windowing, real drift, virtual drift, abrupt drift, gradual drift, recurring concepts, exponential forgetting, dynamic weighted majority]
+requires: [online-learning-for-linear-models, hoeffdings-inequality]
+partOf: [online-learning]
+related: [dataset-shift, drift-detection, change-point-detection, cusum, bayesian-online-changepoint-detection, tracking-the-best-expert, rls-filter, non-stationary-bandits, simple-exponential-smoothing, test-time-adaptation]
+references: [gama2014, widmer1996, bifet2007, kolter2007, hulten2001]
+status: draft
+updated: 2026-09-27
+---
+
+import { DriftFigure } from './DriftFigure'
+
+<Definition>
+A stream $(\xvec_1, y_1), (\xvec_2, y_2), \dots$ has **concept drift** if the examples at time $t$ are drawn from a
+distribution $p_t(\xvec, y)$ that changes with $t$. **Real drift** changes the posterior $p_t(y \mid \xvec)$, so the
+optimal predictor changes. **Virtual drift** changes only $p_t(\xvec)$. **Drift adaptation** is the part of a streaming
+learner that keeps its model close to the current concept: it decides how much of the past to trust
+<Cite id="gama2014" />.
+</Definition>
+
+## Kinds of drift
+
+Drift is described by how the concept moves from an old distribution to a new one <Cite id="gama2014" />.
+
+- **Abrupt.** The concept switches at one time, for example after a policy change or a sensor replacement.
+- **Gradual.** Examples come from the old and new concepts alternately, with the new one increasingly frequent.
+- **Incremental.** The concept moves continuously through intermediate states, as a mean that slides.
+- **Recurring.** An earlier concept returns, as with seasons or weekday and weekend behaviour.
+
+Real drift makes a fixed model wrong. Virtual drift can too, if the model was poor in regions of $\xvec$ that were
+rare before the drift and common after. From the monitoring side the same changes are called
+<NoteLink to="dataset-shift" />, and <NoteLink to="drift-detection" /> tests for them in a deployed model. This note is
+about the learner's side.
+
+<DriftFigure />
+
+## Forgetting: the bias–variance trade-off
+
+A learner that weights all past examples equally averages over every concept it has seen. On the figure's abrupt
+drift, its slope estimate settles between the two concepts. Forgetting down-weights old examples. The two standard
+forms are a **sliding window** of the last $W$ examples, and **exponential forgetting**, which gives the example $k$
+rounds old the weight $\lambda^k$ with $\lambda \in (0, 1)$.
+
+The memory length trades variance against lag. Consider tracking a mean $\mu_t$ from observations
+$x_t = \mu_t + \varepsilon_t$ with noise variance $\sigma^2$, by the exponentially weighted average
+
+$$
+m_t = \lambda m_{t-1} + (1 - \lambda)x_t = (1 - \lambda)\sum_{k \ge 0}\lambda^kx_{t-k}.
+$$
+
+- **Variance.** The weights $(1 - \lambda)\lambda^k$ sum to 1, and the noise terms are independent, so
+  $\var(m_t) = (1 - \lambda)^2\sigma^2\sum_k\lambda^{2k} = \sigma^2\frac{1 - \lambda}{1 + \lambda}$. A long memory
+  ($\lambda \to 1$) averages the noise away.
+- **Lag.** If the mean drifts linearly, $\mu_{t-k} = \mu_t - \delta k$, then
+  $\expect[m_t] - \mu_t = -(1 - \lambda)\delta\sum_kk\lambda^k = -\delta\frac{\lambda}{1 - \lambda}$. A long memory lags behind.
+
+The mean squared error is the sum of the squared lag and the variance,
+
+$$
+\mathrm{MSE}(\lambda) = \delta^2\frac{\lambda^2}{(1 - \lambda)^2} + \sigma^2\frac{1 - \lambda}{1 + \lambda}.
+$$
+
+A window of $W$ examples has variance $\sigma^2/W$ and lag $\delta(W - 1)/2$, and matches the variance of the exponential
+average when $W = (1 + \lambda)/(1 - \lambda)$.
+
+**Worked example.** With $\sigma = 1$ and drift $\delta = 0.01$ per round, the MSE is smallest at $\lambda = 0.930$,
+an effective memory of $1/(1 - \lambda) = 14$ rounds, with MSE $0.054$. A simulation over 200 000 rounds gives
+$0.055$. The best window is $W = 27$, close to $(1 + \lambda)/(1 - \lambda) = 27.5$, with the same MSE. Faster drift or
+less noise shortens the optimal memory. No single $\lambda$ is right for a stream whose drift rate changes, which
+motivates adaptive memory.
+
+The same trade-off governs learning rates. <NoteLink to="online-gradient-descent" /> with a constant step size is a
+form of exponential forgetting; steps that decay as $1/\sqrt{t}$ or $1/t$ give an ever-longer memory and stop
+tracking. For least squares, the <NoteLink to="rls-filter">RLS filter</NoteLink> applies the factor $\lambda$ to the
+normal equations.
+
+## Detect, then adapt: ADWIN
+
+An adaptive learner keeps a long memory while the stream is stable and cuts it when the stream changes. **ADWIN**
+(adaptive windowing) keeps a window $\Wcal$ of recent values of a bounded statistic in $[0, 1]$, such as the 0/1 error
+of the model <Cite id="bifet2007" />. After each new value, it checks every split of $\Wcal$ into an older part
+$\Wcal_0$ and a newer part $\Wcal_1$, of sizes $n_0$ and $n_1$ and means $\hat\mu_0$ and $\hat\mu_1$. It drops $\Wcal_0$
+whenever
+
+$$
+\abs{\hat\mu_0 - \hat\mu_1} \ge \varepsilon_{\text{cut}} = \sqrt{\frac{1}{2m}\ln\frac{4}{\delta'}}, \qquad
+m = \frac{1}{1/n_0 + 1/n_1}, \quad \delta' = \frac{\delta}{n},
+$$
+
+where $n = n_0 + n_1$ and $\delta \in (0, 1)$ is a confidence parameter. It repeats until no split qualifies. The window
+then contains only data consistent with a single mean, and the model is retrained, or its statistics recomputed, on it.
+
+**No false alarms, with probability $1 - \delta$.** Suppose the mean is constant over $\Wcal$. The difference
+$\hat\mu_0 - \hat\mu_1$ is a sum of $n$ independent terms: each of the $n_0$ old values enters with weight $1/n_0$ and
+range $1/n_0$, each new value with range $1/n_1$. The squared ranges sum to $1/n_0 + 1/n_1 = 1/m$. By
+<NoteLink to="hoeffdings-inequality" />,
+
+$$
+\prob\paren{\abs{\hat\mu_0 - \hat\mu_1} \ge \varepsilon} \le 2\exp\paren{-2m\varepsilon^2}.
+$$
+
+At $\varepsilon = \varepsilon_{\text{cut}}$ the right side is $2 \cdot \delta'/4 = \delta'/2$. A union bound over the at
+most $n$ splits gives a probability of any cut of at most $n\delta'/2 = \delta/2$.
+
+**Real changes are found.** Suppose the true means of the two parts differ by more than $2\varepsilon_{\text{cut}}$.
+The same inequality shows that the estimated difference is within $\varepsilon_{\text{cut}}$ of the true difference
+with probability at least $1 - \delta'/2$, so it exceeds $\varepsilon_{\text{cut}}$ and ADWIN cuts.
+
+**Worked example.** With $n_0 = n_1 = 500$ and $\delta = 0.01$, $m = 250$, $\delta' = 10^{-5}$ and
+$\varepsilon_{\text{cut}} = \sqrt{\ln(4 \times 10^5)/500} = 0.161$. An observed error rate of $0.10$ in the older half
+and $0.30$ in the newer half differs by $0.20$ and triggers a cut. The guarantee above promises detection whenever the
+true rates differ by more than $2\varepsilon_{\text{cut}} = 0.32$. With 100 values on each side, the threshold is
+$0.336$.
+
+ADWIN's window grows without bound on a stationary stream, so it keeps all the statistical power the data allow, and
+shrinks only on evidence. Checking every split costs $O(n)$ per step; the published algorithm stores the window in
+exponential histograms, with $O(\log n)$ memory and time <Cite id="bifet2007" />. Other detectors, such as the
+<NoteLink to="cusum" /> and Page–Hinkley tests on the error stream, trade the guarantee for a fixed detection delay.
+<NoteLink to="change-point-detection" /> and <NoteLink to="bayesian-online-changepoint-detection" /> treat detection as
+inference.
+
+## Ensembles
+
+An ensemble keeps several models trained on different stretches of the stream and weights them by recent performance.
+**Dynamic weighted majority** multiplies a member's weight by $\beta < 1$ when it errs, removes members whose weight
+falls below a threshold, and adds a new member, trained from that point, whenever the ensemble errs
+<Cite id="kolter2007" />. The weighting is the <NoteLink to="weighted-majority" /> rule; adding fresh members plays the role
+of fixed share in <NoteLink to="tracking-the-best-expert" />, whose regret bound against a switching sequence is the
+theory behind this design. Ensembles handle recurring drift well, because an old member that fits a returning concept
+can regain weight.
+
+Early work with windows whose size adapts to the observed accuracy, and with stored concepts for recurring contexts,
+is the FLORA family <Cite id="widmer1996" />. For decision trees, CVFDT grows alternative subtrees when the split
+statistics in a sliding window change, and swaps them in when they become more accurate <Cite id="hulten2001" />.
+
+## Assumptions
+
+- The recent past is more like the near future than the distant past is. Forgetting helps only if drift is persistent
+  on the time scale of the memory; it hurts on stationary data.
+- Labels arrive promptly. With delayed labels, error-based detectors see the drift late; monitoring $p_t(\xvec)$ detects
+  only virtual drift.
+- ADWIN's guarantees need a bounded statistic and independent values within a stable period.
+
+## Pitfalls
+
+- **Memory set for the wrong drift rate.** The optimal $\lambda$ depends on the ratio of drift to noise, which usually
+  changes over time. Adaptive windows, or an ensemble over several memory lengths, remove the single choice.
+- **Resetting on false alarms.** Each reset throws away data. With many streams or features monitored at once, correct
+  $\delta$ for multiple testing or the model will be reset constantly.
+- **Evaluating with a random split.** A shuffled test set hides drift. Evaluate prequentially: predict each example
+  before training on it, and report the error over a sliding window or with a fading factor <Cite id="gama2014" />.

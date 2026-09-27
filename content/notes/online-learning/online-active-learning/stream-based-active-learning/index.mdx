@@ -1,0 +1,116 @@
+---
+title: Stream-based active learning
+kind: concept
+summary: 'Stream-based active learning sees unlabelled examples one at a time and decides at once whether to request each label. Querying only where consistent hypotheses disagree learns a threshold on $[0, 1]$ with about $2\ln T$ labels instead of $T$.'
+tags: [online-learning, active-learning, label-efficiency, streaming, worked-example]
+aliases: [stream-based selective sampling, uncertainty sampling on streams, query by committee, QBC, disagreement-based active learning, CAL algorithm, disagreement region, labelling budget]
+requires: [selective-sampling]
+partOf: [online-learning]
+related: [concept-drift-adaptation, weak-supervision, pac-learning, vc-dimension, self-training, active-transfer-learning]
+references: [settles2009, cohn1994, seung1992, freund1997b, lewis1994, zliobaite2014]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+In **stream-based active learning** unlabelled examples $\xvec_1, \xvec_2, \dots$ arrive one at a time, usually drawn
+independently from a distribution $\Dcal$. For each example the learner decides immediately whether to request its
+label; examples not queried are not stored. The aim is a classifier with small error on $\Dcal$ using as few labels
+as possible. It differs from **pool-based** active learning, where the learner may rank a stored pool of unlabelled
+examples and query the best one <Cite id="settles2009" />.
+</Definition>
+
+## Notation
+
+$\Hcal$ is the hypothesis class. The **version space** $V_t \subseteq \Hcal$ is the set of hypotheses consistent with
+the labels queried before round $t$. The **region of disagreement** of $V_t$ is the set of $\xvec$ on which two
+hypotheses in $V_t$ predict differently. $B \in (0, 1]$ is a labelling budget, the fraction of the stream that may be
+labelled.
+
+## Query rules
+
+Three rules cover most stream-based methods.
+
+- **Uncertainty sampling.** Query when the current model is unsure, for example when the largest predicted class
+  probability is below a threshold $\theta$, or the margin of a linear model is small <Cite id="lewis1994" />.
+- **Query by committee.** Keep several models consistent with the labels so far, or trained on bootstrap samples, and
+  query when they disagree <Cite id="seung1992" />.
+- **Disagreement-based querying.** Query exactly when $\xvec_t$ lies in the region of disagreement of the version
+  space. Outside it, every consistent hypothesis gives the same label, so the label can be inferred without asking
+  <Cite id="cohn1994" />.
+
+The last rule, due to Cohn, Atlas and Ladner and called CAL, never loses information in the realisable case: an
+unqueried label is determined by the queried ones, so the learner ends with a labelled sample as informative as the
+passive one.
+
+## Exponential savings on thresholds
+
+Let $\xvec_t = x_t$ be uniform on $[0, 1]$ and let the label be $+1$ if $x_t \ge \theta$ and $-1$ otherwise, for an unknown
+$\theta$. The consistent thresholds after $t$ queries form an interval between the largest point labelled $-1$ and the
+smallest point labelled $+1$. This interval is the region of disagreement.
+
+**How often CAL queries.** Every example that falls outside the interval has an inferred label, so after $t$ rounds the
+interval is the same as if all $t$ labels had been seen. It is the gap in $[0, 1]$ between the two sample points on
+either side of $\theta$, which is made of two adjacent spacings of $t$ uniform points. Each spacing has expected length
+about $1/(t + 1)$, so the interval has expected length about $2/(t + 1)$. Example $t + 1$ is queried if it falls inside,
+which has probability equal to the length. The expected number of queries over $T$ rounds is therefore about
+
+$$
+\sum_{t=1}^{T}\frac{2}{t + 1} \approx 2\ln T.
+$$
+
+**Label complexity.** Any threshold in the final interval has error at most the interval's length, about $2/T$. To reach
+error $\epsilon$ passively takes about $2/\epsilon$ labels; CAL takes about $2\ln(2/\epsilon)$. The saving is exponential.
+
+**Worked example.** Simulating CAL with $\theta = 0.37$ over 300 streams gives 9.0 queries for $T = 100$, 13.7 for
+$T = 1000$ and 18.5 for $T = 10\,000$. The approximation $2\ln T$ gives 9.2, 13.8 and 18.4. A passive learner with
+the same final accuracy labels all $T$.
+
+The saving is not universal. For homogeneous linear separators in $\reals^d$ under the uniform distribution on the
+sphere, query by committee needs $O(d\log(1/\epsilon))$ labels, again exponentially fewer than passive learning
+<Cite id="freund1997b" />. For other classes and distributions the region of disagreement shrinks
+slowly and active learning gives little gain. With label noise the version space may become empty, and the rule must
+be relaxed to a confidence-interval version that keeps hypotheses whose error is not provably worse than the best.
+
+## Committees and information
+
+Query by committee with two members, each drawn at random from the version space, queries with probability equal to
+the probability that they disagree on $\xvec_t$. For the perceptron class under the uniform distribution, each query
+then removes a constant fraction of the version space's volume in expectation, which gives the logarithmic label
+complexity <Cite id="freund1997b" />. Practical committees replace sampling from the version space with an ensemble
+trained on the queried labels, and measure disagreement by vote entropy or by the average divergence between members'
+predicted distributions <Cite id="settles2009" />.
+
+## Budgets and drift
+
+A fixed uncertainty threshold spends labels at a rate that depends on the data. If the stream becomes easier the
+learner stops asking; if it becomes harder it exhausts the budget. On a drifting stream a fixed threshold has a worse
+failure: after a change in a region where the model is confident, the model is confidently wrong there, never queries,
+and never notices.
+
+Žliobaitė and co-authors combine two fixes <Cite id="zliobaite2014" />.
+
+- **A variable threshold.** Keep a running estimate of the fraction of labels spent. When a label is requested, lower
+  $\theta$ by a factor $1 - s$; when not, raise it by $1 + s$. The query rate settles near the budget $B$ whatever the
+  data.
+- **Randomisation.** Multiply the threshold by a random factor drawn around 1 before each decision, so that confident
+  examples are occasionally queried. This lets the learner detect drift anywhere in the input space, at the cost of
+  some labels on uninformative examples.
+
+Randomised querying is also what gives <NoteLink to="selective-sampling" /> its worst-case guarantee.
+
+## Assumptions
+
+- The label oracle is available at the moment of the decision, and the example is discarded if not queried.
+- The savings above assume a realisable, stationary problem. Noise and drift reduce them and require the relaxed or
+  randomised rules.
+
+## Pitfalls
+
+- **Sampling bias.** Queried examples are concentrated near the current boundary. A model trained on them without
+  correction can be biased, and an error estimate computed from them is not an estimate of error on $\Dcal$. Record
+  each query probability and weight each labelled example by its inverse.
+- **Cold start.** With few labels the uncertainty estimates are unreliable. Query at a fixed rate until the model is
+  reasonable.
+- **Comparing against the wrong baseline.** Report accuracy against the number of labels, and compare with passive
+  learning at the same number of labels drawn at random from the stream.

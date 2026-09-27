@@ -1,0 +1,143 @@
+---
+title: Selective sampling
+kind: concept
+summary: 'In selective sampling an online learner predicts on each example and decides whether to pay for its label. The selective-sampling perceptron queries with probability $b/(b + \abs{\hat p_t})$, fewer as the margin grows, with a mistake bound relative to any linear comparator.'
+tags: [online-learning, active-learning, classification, label-efficiency, worked-example]
+aliases: [selective sampling perceptron, label-efficient prediction, margin-based querying, query-on-uncertainty, randomised querying, online active learning]
+requires: [perceptron, online-learning]
+partOf: [online-learning]
+related: [stream-based-active-learning, hedge-and-exponential-weights, exp3, online-learning-for-linear-models, weak-supervision]
+references: [cesabianchi2006b, cesabianchi2005, cesabianchi2006, settles2009]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Selective sampling** is online learning in which labels cost something. In each round the learner receives
+$\xvec_t$ and predicts $\hat y_t$. It then decides, possibly at random, whether to **query** the label $y_t$. If it does
+not query, it never learns $y_t$, though the prediction still counts towards its mistakes. The learner trades the
+number of queries against the number of mistakes (or the regret), on any sequence of examples
+<Cite id="cesabianchi2006b" />.
+</Definition>
+
+## Notation
+
+Labels are $y_t \in \set{-1, +1}$. The linear learner keeps $\wvec_t$, has margin $\hat p_t = \wvec_t^\top\xvec_t$ and
+predicts $\hat y_t = \sgn(\hat p_t)$. $M_t = \indicator\set{\hat y_t \ne y_t}$ marks a mistake and $Z_t \in \set{0, 1}$ a
+query. $R = \max_t\norm{\xvec_t}$. For a comparator $\uvec$, the hinge loss is
+$\ell_t(\uvec) = \max(0, 1 - y_t\uvec^\top\xvec_t)$ and $L(\uvec) = \sum_t\ell_t(\uvec)$.
+
+## Which labels are worth paying for
+
+A linear learner's margin $\abs{\hat p_t}$ measures its confidence. An example with a large margin is almost certainly
+classified correctly, and even if it is not, the perceptron update it would trigger is the same as for any other
+mistake. Examples near the boundary are the ones whose labels change the model most. Selective sampling therefore
+queries more often when the margin is small. A deterministic threshold on the margin can be exploited by an
+adversary that places every example just outside it. Randomising the query decision makes the analysis work on every
+sequence.
+
+## The selective-sampling perceptron
+
+The algorithm has one parameter $b > 0$ <Cite id="cesabianchi2006b" />.
+
+1. Receive $\xvec_t$, compute $\hat p_t = \wvec_t^\top\xvec_t$ and predict $\sgn(\hat p_t)$.
+2. Query with probability $b/(b + \abs{\hat p_t})$.
+3. If the label was queried and the prediction was wrong, set $\wvec_{t+1} = \wvec_t + y_t\xvec_t$. Otherwise
+   $\wvec_{t+1} = \wvec_t$.
+
+A small $b$ queries rarely except at tiny margins. As $b \to \infty$ every label is queried and the algorithm becomes
+the <NoteLink to="perceptron" />.
+
+## The mistake bound
+
+**Distance to a scaled comparator.** Let $\alpha > 0$ and track $\Phi_t = \norm{\alpha\uvec - \wvec_t}^2$. In a round with an
+update ($M_tZ_t = 1$),
+
+$$
+\Phi_t - \Phi_{t+1} = 2\alpha y_t\uvec^\top\xvec_t - 2y_t\hat p_t - \norm{\xvec_t}^2
+\ge 2\alpha(1 - \ell_t(\uvec)) + 2\abs{\hat p_t} - R^2.
+$$
+
+The inequality uses $y_t\uvec^\top\xvec_t \ge 1 - \ell_t(\uvec)$, and $-y_t\hat p_t = \abs{\hat p_t}$ because the prediction was
+wrong. Summing over rounds, $\Phi_1 - \Phi_{T+1} \le \alpha^2\norm{\uvec}^2$ with $\wvec_1 = \zeros$, so
+
+$$
+\sum_{t=1}^{T}M_tZ_t\paren{2\alpha - R^2 + 2\abs{\hat p_t} - 2\alpha\ell_t(\uvec)} \le \alpha^2\norm{\uvec}^2.
+$$
+
+**Take expectations over the queries.** Given the past, $Z_t$ is independent of everything else in round $t$ and has
+mean $b/(b + \abs{\hat p_t})$. Choose $\alpha$ with $2\alpha - R^2 = 2b$. Then
+
+$$
+\expect[Z_t \mid \text{past}]\paren{2b + 2\abs{\hat p_t}} = \frac{b}{b + \abs{\hat p_t}}\cdot 2(b + \abs{\hat p_t}) = 2b,
+$$
+
+whatever the margin. The query probability was chosen so that this cancellation happens: rounds with large margins are
+queried rarely, but when they are, their update makes proportionally more progress. Using
+$b/(b + \abs{\hat p_t}) \le 1$ on the loss term,
+
+$$
+2b\,\expect\brack{\sum_tM_t} - 2\alpha L(\uvec) \le \alpha^2\norm{\uvec}^2.
+$$
+
+With $\alpha = b + R^2/2$, dividing by $2b$,
+
+$$
+\expect\brack{\sum_{t=1}^{T}M_t} \le \paren{1 + \frac{R^2}{2b}}L(\uvec) + \frac{(2b + R^2)^2}{8b}\norm{\uvec}^2
+$$
+
+for every $\uvec$ <Cite id="cesabianchi2006b" />. The expected number of queries is $\sum_t\expect[b/(b + \abs{\hat p_t})]$.
+As the learner improves, most margins grow and the query rate falls.
+
+**The trade-off in $b$.** With $R = 1$, the bound is $6L + 1.8\norm{\uvec}^2$ at $b = 0.1$, $1.5L + 1.1\norm{\uvec}^2$ at
+$b = 1$, and $1.05L + 5.5\norm{\uvec}^2$ at $b = 10$. A large $b$ brings the coefficient of $L$ close to 1 but queries
+nearly every label and pays in the $\norm{\uvec}^2$ term, which grows as $b/2$. A small $b$ queries rarely, and the
+coefficient of $L$ grows as $1/(2b)$.
+
+## Worked example
+
+Take $d = 10$, unit-norm features drawn uniformly on the sphere, labels from a fixed unit vector $\uvec$ with 5% of
+labels flipped, and $T = 10\,000$ rounds. Averaged over 20 runs:
+
+| Learner | Labels queried | Mistakes |
+| --- | --- | --- |
+| Perceptron (every label) | 10 000 | 1751 |
+| Selective sampling, $b = 10$ | 9146 | 1697 |
+| Selective sampling, $b = 1$ | 5009 | 1400 |
+| Selective sampling, $b = 0.1$ | 1087 | 1191 |
+
+Here selective sampling makes fewer mistakes with a tenth of the labels. The flipped labels sit mostly at large
+margins, where the perceptron updates on them and the selective sampler rarely asks. The Bayes-optimal classifier
+makes about 500 mistakes on this stream.
+
+## Label-efficient prediction with experts
+
+The same idea applies to <NoteLink to="hedge-and-exponential-weights">prediction with expert advice</NoteLink>. With a
+budget of about $m$ labels over $T$ rounds, query each round independently with probability $\varepsilon = m/T$, and
+feed Hedge the importance-weighted losses $\hat\ell_{t,i} = \ell_{t,i}Z_t/\varepsilon$, which are unbiased. The Hedge potential
+argument, with $e^{-x} \le 1 - x + x^2/2$ for $x \ge 0$ in place of Hoeffding's lemma, gives
+
+$$
+\expect[R_T] \le \frac{\ln N}{\eta} + \frac{\eta}{2}\sum_t\expect\brack{\sum_ip_{t,i}\hat\ell_{t,i}^2} \le \frac{\ln N}{\eta} + \frac{\eta T}{2\varepsilon},
+$$
+
+because $\expect[\hat\ell_{t,i}^2] = \ell_{t,i}^2/\varepsilon \le 1/\varepsilon$. At $\eta = \sqrt{2\varepsilon\ln N/T}$ the regret is at most
+$\sqrt{2T\ln N/\varepsilon} = T\sqrt{2\ln N/m}$. The average regret per round is of order $\sqrt{\ln N/m}$: it depends on
+the number of labels, not the number of rounds, and this rate cannot be improved <Cite id="cesabianchi2005" />. With
+$T = 10^5$, $N = 10$ and $m = 1000$ the bound is $6786$, an average of $0.068$ per round, against $0.0034$ with every
+label. The derivation is that of <NoteLink to="exp3">EXP3</NoteLink>, with the query decision in place of the arm choice.
+
+## Assumptions
+
+- The learner can decide on each label before the next example arrives, and a label, once declined, is gone.
+- The bounds hold for any sequence of examples and labels; no distribution is assumed.
+- The mistake count includes unqueried rounds, whose mistakes the learner never observes.
+
+## Pitfalls
+
+- **A deterministic margin threshold.** Querying only when $\abs{\hat p_t} < \theta$ saves labels on benign data but has
+  no worst-case guarantee, and it can stop querying in a region where the model is confidently wrong.
+- **Budgets in labels, not probabilities.** The query rate depends on the data. For a hard budget, cap the queries and
+  fall back to a fixed rate, as in <NoteLink to="stream-based-active-learning" />.
+- **Sampling bias.** The queried labels are not a random sample, so they cannot be used as an unbiased estimate of
+  error without reweighting by $1/\prob(Z_t = 1)$.

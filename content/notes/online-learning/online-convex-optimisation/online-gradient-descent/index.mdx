@@ -1,0 +1,160 @@
+---
+title: Online gradient descent
+kind: concept
+summary: 'Online gradient descent steps against the gradient of the latest loss and projects back onto the decision set, $\wvec_{t+1} = \Pi_\Wcal(\wvec_t - \eta_t\gvec_t)$. With $\eta_t = D/(G\sqrt t)$ its regret is at most $\tfrac32 DG\sqrt T$; with $\eta_t = 1/(\lambda t)$ on $\lambda$-strongly convex losses it is $O((G^2/\lambda)\log T)$.'
+tags: [online-learning, regret, optimisation, convexity, gradients, worked-example]
+aliases: [OGD, projected online gradient descent, Zinkevich's algorithm, generalised infinitesimal gradient ascent]
+requires: [online-convex-optimisation, gradient-descent]
+partOf: [online-learning]
+related: [stochastic-gradient-descent-theory, mirror-descent, follow-the-regularised-leader, online-to-batch-conversion]
+references: [zinkevich2003, hazan2007, hazan2016, shalevshwartz2012]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Online gradient descent** (OGD) is an algorithm for <NoteLink to="online-convex-optimisation" />. It starts from any
+$\wvec_1 \in \Wcal$. After playing $\wvec_t$ and observing a subgradient $\gvec_t \in \partial f_t(\wvec_t)$, it sets
+
+$$
+\wvec_{t+1} = \Pi_\Wcal\paren{\wvec_t - \eta_t\gvec_t}, \qquad \Pi_\Wcal(\vvec) = \argmin_{\wvec \in \Wcal}\norm{\wvec - \vvec}_2,
+$$
+
+where $\eta_t > 0$ is the step size and $\Pi_\Wcal$ is the Euclidean projection onto the closed convex set $\Wcal$
+<Cite id="zinkevich2003" />.
+</Definition>
+
+## Notation
+
+$D$ is the diameter of $\Wcal$, $\max_{\wvec, \wvec' \in \Wcal}\norm{\wvec - \wvec'}_2$. $G$ bounds every subgradient,
+$\norm{\gvec_t}_2 \le G$. The regret against a comparator $\uvec \in \Wcal$ is
+$R_T(\uvec) = \sum_{t=1}^{T}\paren{f_t(\wvec_t) - f_t(\uvec)}$. All norms are Euclidean.
+
+## Intuition
+
+The update is gradient descent, but the function changes every round. OGD does not converge to a point, because there
+is no fixed objective to converge to. The guarantee is instead that the distance to any comparator $\uvec$ cannot keep
+falling while the learner keeps losing to it. Each round in which $\wvec_t$ does worse than $\uvec$ on $f_t$, the step
+moves $\wvec_t$ towards $\uvec$. The squared distance $\norm{\wvec_t - \uvec}^2$ is at most $D^2$ and at least $0$, so
+the total progress, and hence the total excess loss, is bounded.
+
+## The regret bound
+
+**Projection does not increase distances to points in $\Wcal$.** Let $\vvec$ be any point and $\pvec = \Pi_\Wcal(\vvec)$.
+The projection minimises $\norm{\wvec - \vvec}^2$ over the convex set, so its first-order optimality condition is
+$\inner{\vvec - \pvec}{\uvec - \pvec} \le 0$ for every $\uvec \in \Wcal$. Expanding
+$\norm{\vvec - \uvec}^2 = \norm{\vvec - \pvec}^2 + \norm{\pvec - \uvec}^2 + 2\inner{\vvec - \pvec}{\pvec - \uvec}$,
+the cross term is non-negative, so $\norm{\pvec - \uvec} \le \norm{\vvec - \uvec}$.
+
+**One round.** Apply this with $\vvec = \wvec_t - \eta_t\gvec_t$:
+
+$$
+\norm{\wvec_{t+1} - \uvec}^2 \le \norm{\wvec_t - \eta_t\gvec_t - \uvec}^2
+= \norm{\wvec_t - \uvec}^2 - 2\eta_t\inner{\gvec_t}{\wvec_t - \uvec} + \eta_t^2\norm{\gvec_t}^2.
+$$
+
+Rearranging, and writing $a_t = \norm{\wvec_t - \uvec}^2$,
+
+$$
+\inner{\gvec_t}{\wvec_t - \uvec} \le \frac{a_t - a_{t+1}}{2\eta_t} + \frac{\eta_t}{2}\norm{\gvec_t}^2.
+$$
+
+By convexity $f_t(\wvec_t) - f_t(\uvec) \le \inner{\gvec_t}{\wvec_t - \uvec}$, so the left side bounds the regret in
+round $t$.
+
+**Constant step.** With $\eta_t = \eta$, summing over $t$ telescopes the first term to
+$(a_1 - a_{T+1})/(2\eta) \le D^2/(2\eta)$:
+
+$$
+R_T(\uvec) \le \frac{D^2}{2\eta} + \frac{\eta G^2 T}{2}.
+$$
+
+The first term penalises small steps, which are slow to reach $\uvec$. The second penalises large steps, which
+overshoot. Their sum is smallest at $\eta = D/(G\sqrt{T})$, where
+
+$$
+R_T(\uvec) \le DG\sqrt{T}.
+$$
+
+**Steps that do not need $T$.** With $\eta_t = D/(G\sqrt{t})$ the sum of the first terms is
+
+$$
+\sum_{t=1}^{T}\frac{a_t - a_{t+1}}{2\eta_t} \le \frac{a_1}{2\eta_1} + \sum_{t=2}^{T}\frac{a_t}{2}\paren{\frac{1}{\eta_t} - \frac{1}{\eta_{t-1}}}
+\le \frac{D^2}{2}\paren{\frac{1}{\eta_1} + \sum_{t=2}^{T}\paren{\frac{1}{\eta_t} - \frac{1}{\eta_{t-1}}}} = \frac{D^2}{2\eta_T} = \frac{DG\sqrt{T}}{2}.
+$$
+
+The first inequality regroups the sum by $a_t$ and drops $-a_{T+1}/(2\eta_T) \le 0$. The second uses $a_t \le D^2$ and
+$1/\eta_t \ge 1/\eta_{t-1}$. The second terms sum to $\tfrac{DG}{2}\sum_{t=1}^{T}t^{-1/2} \le DG\sqrt{T}$, because
+$\sum_{t=1}^{T}t^{-1/2} \le 2\sqrt{T}$. Together, $R_T(\uvec) \le \tfrac32 DG\sqrt{T}$ for every $T$ at once
+<Cite id="zinkevich2003" />.
+
+The rate matches the lower bound $DG\sqrt{T/(2\pi)}$ for random linear losses, derived in <NoteLink
+to="online-convex-optimisation" />, up to a constant.
+
+## Strongly convex losses
+
+A function is **$\lambda$-strongly convex** if
+$f(\uvec) \ge f(\wvec) + \inner{\gvec}{\uvec - \wvec} + \tfrac{\lambda}{2}\norm{\uvec - \wvec}^2$ for every subgradient
+$\gvec \in \partial f(\wvec)$. Regularised losses such as $\ell(\inner{\wvec}{\xvec}, y) + \tfrac{\lambda}{2}\norm{\wvec}^2$
+have this property. For such losses the per-round bound gains a negative term:
+
+$$
+f_t(\wvec_t) - f_t(\uvec) \le \inner{\gvec_t}{\wvec_t - \uvec} - \frac{\lambda}{2}a_t
+\le \frac{a_t - a_{t+1}}{2\eta_t} - \frac{\lambda}{2}a_t + \frac{\eta_t}{2}G^2.
+$$
+
+Summing and collecting the coefficient of each $a_t$,
+
+$$
+R_T(\uvec) \le \sum_{t=1}^{T}a_t\paren{\frac{1}{2\eta_t} - \frac{1}{2\eta_{t-1}} - \frac{\lambda}{2}} + \frac{G^2}{2}\sum_{t=1}^{T}\eta_t,
+$$
+
+with the convention $1/\eta_0 = 0$. The step $\eta_t = 1/(\lambda t)$ makes every coefficient zero:
+$\lambda t/2 - \lambda(t - 1)/2 - \lambda/2 = 0$. What remains is
+
+$$
+R_T(\uvec) \le \frac{G^2}{2\lambda}\sum_{t=1}^{T}\frac{1}{t} \le \frac{G^2}{2\lambda}(1 + \ln T).
+$$
+
+The curvature term $-\tfrac{\lambda}{2}a_t$ cancels the distance terms exactly, so no $D^2/\eta$ penalty remains and
+the steps can shrink as $1/t$ instead of $1/\sqrt{t}$ <Cite id="hazan2007" />. The step size uses $\lambda$ and not $D$.
+
+## Worked example
+
+Take $\Wcal$ a ball of radius 1, so $D = 2$, with $G = 1$ and $T = 10\,000$ rounds.
+
+- Constant step $\eta = D/(G\sqrt{T}) = 0.02$: $R_T \le DG\sqrt{T} = 200$. The average regret per round is at most
+  $0.02$.
+- Anytime steps $\eta_t = 2/\sqrt{t}$: $R_T \le \tfrac32 \cdot 200 = 300$ at $T = 10\,000$, and the same formula
+  holds at every earlier $T$.
+- If each loss is also $1$-strongly convex: $R_T \le \tfrac{1}{2}(1 + \ln 10\,000) = 5.1$. The average regret per round
+  is $5 \times 10^{-4}$, forty times smaller than the convex bound.
+
+## Relation to stochastic gradient descent
+
+If $f_t(\wvec) = \ell(\wvec; \zvec_t)$ with $\zvec_t$ drawn independently from a distribution, OGD is
+<NoteLink to="stochastic-gradient-descent-theory">projected stochastic gradient descent</NoteLink> on the risk
+$L(\wvec) = \expect_{\zvec}\ell(\wvec; \zvec)$. <NoteLink to="online-to-batch-conversion" /> shows that the average
+iterate $\bar\wvec_T$ then has excess risk at most $\expect[R_T]/T$, which gives SGD's $O(DG/\sqrt{T})$ rate as a
+corollary of the regret bound. The online analysis is stronger: it needs no distribution at all.
+
+OGD is also <NoteLink to="follow-the-regularised-leader" /> with the regulariser $\norm{\wvec}^2/(2\eta)$ on linearised
+losses, when $\Wcal = \reals^d$, and it is <NoteLink to="mirror-descent" /> with the Euclidean mirror map.
+
+## Assumptions
+
+- $\Wcal$ is closed and convex, and projection onto it is cheap. For a ball, projection rescales; for a box, it clips
+  each coordinate.
+- The subgradients are bounded by $G$ on $\Wcal$. Squared loss on an unbounded domain violates this.
+- Tuned constants need $D$ and $G$. A wrong $G$ scales the bound by at most $\max(G/G', G'/G)$, where $G'$ is the value used.
+
+## Pitfalls
+
+- **Geometry mismatch.** OGD measures distance in the Euclidean norm. On the probability simplex with $N$ experts,
+  $D = \sqrt{2}$ but $G$ can be $\sqrt{N}$, which gives regret $O(\sqrt{NT})$. Exponential weights, which is mirror
+  descent with the entropy, gets $O(\sqrt{T\log N})$ on the same problem.
+- **Strong convexity with the wrong step.** $\eta_t = 1/(\lambda t)$ with an overestimated $\lambda$ can make early steps
+  too small and the bound invalid. With $\lambda$ underestimated, the bound holds but is loose.
+- **Last iterate versus average.** The regret bound is about the sequence of decisions. For a single output model, use
+  the average iterate, as in online-to-batch conversion. The last iterate carries no such guarantee without further
+  assumptions.

@@ -1,0 +1,124 @@
+---
+title: Online-to-batch conversion
+kind: concept
+summary: 'Online-to-batch conversion runs an online learner once over an i.i.d. sample and outputs the average iterate $\bar\wvec_T$. For convex losses its expected excess risk is at most $\expect[R_T]/T$, and with losses in $[0, 1]$ its risk is within $\sqrt{\ln(1/\delta)/(2T)}$ of the average online loss with probability $1 - \delta$.'
+tags: [online-learning, learning-theory, generalisation, regret, worked-example]
+aliases: [online to batch conversion, online-to-batch, generalisation of online learners, iterate averaging bound, prequential risk estimate]
+requires: [online-convex-optimisation, expectation]
+partOf: [online-learning]
+related: [pac-learning, rademacher-complexity, stochastic-gradient-descent-theory, hoeffdings-inequality, mcdiarmids-inequality, martingale, online-gradient-descent]
+references: [cesabianchi2004, cesabianchi2006, shalevshwartz2012, hazan2016]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $\zvec_1, \dots, \zvec_T$ be drawn independently from a distribution $P$, let $\ell(\wvec; \zvec)$ be a loss and
+$L(\wvec) = \expect_{\zvec \sim P}\ell(\wvec; \zvec)$ its **risk**. **Online-to-batch conversion** feeds the losses
+$f_t(\wvec) = \ell(\wvec; \zvec_t)$ in order to an online learner, which plays $\wvec_1, \dots, \wvec_T$, and returns a
+single hypothesis built from the iterates: the average $\bar\wvec_T = \tfrac1T\sum_t\wvec_t$ for convex losses, or one
+iterate chosen at random or by a validation rule otherwise. Its risk is bounded by the learner's regret divided by $T$
+<Cite id="cesabianchi2004" />.
+</Definition>
+
+## The one fact that makes it work
+
+The online learner chooses $\wvec_t$ from $\zvec_1, \dots, \zvec_{t-1}$ only. The example $\zvec_t$ is independent
+of those, so it is a fresh test point for $\wvec_t$:
+
+$$
+\expect\brack{f_t(\wvec_t) \mid \zvec_{1:t-1}} = \expect_{\zvec \sim P}\brack{\ell(\wvec_t; \zvec)} = L(\wvec_t).
+$$
+
+Each online loss $f_t(\wvec_t)$ is an unbiased estimate of the risk of the hypothesis that incurred it. Summed over
+rounds, the online loss is a validation estimate that uses every example for training and for testing, without
+reusing any example for both at once. This is the **prequential** view: evaluate on each example before learning from
+it.
+
+## Expected excess risk
+
+Fix any comparator $\uvec$ that does not depend on the sample, such as the risk minimiser
+$\uvec^\star = \argmin_{\uvec \in \Wcal}L(\uvec)$. Taking expectations of the fact above and summing,
+$\expect\brack{\sum_t L(\wvec_t)} = \expect\brack{\sum_t f_t(\wvec_t)}$. For the comparator, independence gives
+$\expect\brack{\sum_t f_t(\uvec)} = TL(\uvec)$. Subtracting,
+
+$$
+\expect\brack{\frac1T\sum_{t=1}^{T}L(\wvec_t)} - L(\uvec) = \frac{\expect[R_T(\uvec)]}{T},
+$$
+
+where $R_T(\uvec) = \sum_t f_t(\wvec_t) - \sum_t f_t(\uvec)$ is the regret on the sample. If $\ell$ is convex in
+$\wvec$, so is $L$, and Jensen's inequality gives $L(\bar\wvec_T) \le \tfrac1T\sum_t L(\wvec_t)$. Therefore
+
+$$
+\expect\brack{L(\bar\wvec_T)} - L(\uvec) \le \frac{\expect[R_T(\uvec)]}{T}.
+$$
+
+Any regret bound that holds for every sequence holds in particular for the random sample, so a bound
+$R_T \le B_T$ gives excess risk at most $B_T/T$. For <NoteLink to="online-gradient-descent" /> with
+$B_T = DG\sqrt{T}$, the excess risk is at most $DG/\sqrt{T}$, the standard rate for
+<NoteLink to="stochastic-gradient-descent-theory">stochastic gradient descent</NoteLink> with averaging.
+
+Without convexity, pick an index $\tau$ uniformly from $\set{1, \dots, T}$ and output $\wvec_\tau$. Then
+$\expect L(\wvec_\tau) = \tfrac1T\sum_t\expect L(\wvec_t)$, and the same bound holds with no Jensen step.
+
+## A bound that holds with high probability
+
+Let the loss take values in $[0, 1]$. Define $V_t = L(\wvec_t) - f_t(\wvec_t)$. Given $\zvec_{1:t-1}$, $V_t$ has mean
+zero, and it lies in the interval $[L(\wvec_t) - 1, L(\wvec_t)]$ of length 1. So $V_1, V_2, \dots$ is a
+<NoteLink to="martingale">martingale difference sequence</NoteLink> with bounded increments. The Azuma–Hoeffding
+inequality (see <NoteLink to="mcdiarmids-inequality" />) gives
+
+$$
+\prob\paren{\sum_{t=1}^{T}V_t \ge \varepsilon} \le \exp\paren{-\frac{2\varepsilon^2}{T}}.
+$$
+
+Setting the right side to $\delta$ and solving for $\varepsilon$: with probability at least $1 - \delta$,
+
+$$
+\frac1T\sum_{t=1}^{T}L(\wvec_t) \le \frac1T\sum_{t=1}^{T}f_t(\wvec_t) + \sqrt{\frac{\ln(1/\delta)}{2T}}.
+$$
+
+With a convex loss, the left side bounds $L(\bar\wvec_T)$. The right side is computed from the online run itself, so
+the bound certifies the averaged model with no held-out data <Cite id="cesabianchi2004" />. To compare with the best
+hypothesis, bound the online loss by $\tfrac1T\sum_t f_t(\uvec) + R_T/T$ and apply
+<NoteLink to="hoeffdings-inequality" /> to the fixed $\uvec$: with probability at least $1 - 2\delta$,
+$L(\bar\wvec_T) \le L(\uvec) + R_T/T + 2\sqrt{\ln(1/\delta)/(2T)}$.
+
+## Worked example
+
+Run online gradient descent with $D = 2$ and $G = 1$ on $T = 10\,000$ i.i.d. examples of a convex loss with values in
+$[0, 1]$.
+
+- Expected excess risk of $\bar\wvec_T$: at most $DG/\sqrt{T} = 0.02$.
+- Suppose the average online loss is $0.130$. With probability at least $0.95$, the risk of $\bar\wvec_T$ is at most
+  $0.130 + \sqrt{\ln 20/20\,000} = 0.130 + 0.012 = 0.142$.
+
+The deviation term $0.012$ does not depend on $D$, $G$ or the dimension. No uniform convergence over the hypothesis
+class was needed.
+
+## Relation to uniform convergence
+
+Batch generalisation bounds, such as those in <NoteLink to="pac-learning" /> and <NoteLink
+to="rademacher-complexity" />, control the gap between empirical and true risk uniformly over a class, because the
+learned hypothesis depends on every example. The online-to-batch argument avoids uniform convergence. Each iterate is
+evaluated on an example it has not seen, so a concentration inequality for a single martingale suffices. The
+complexity of the class enters only through the regret. For a finite class of $N$ experts with regret
+$\sqrt{(T\ln N)/2}$, the excess risk is $\sqrt{\ln N/(2T)}$, the same order as the finite-class PAC bound.
+
+## Assumptions
+
+- The examples are independent and identically distributed. Under drift the fact
+  $\expect[f_t(\wvec_t) \mid \zvec_{1:t-1}] = L(\wvec_t)$ fails, because there is no single $L$.
+- The comparator $\uvec$ does not depend on the sample. The regret bound holds for any $\uvec$, but the step
+  $\expect\sum_t f_t(\uvec) = TL(\uvec)$ needs $\uvec$ fixed in advance.
+- The loss is convex in $\wvec$ for averaging, and bounded for the high-probability version.
+
+## Pitfalls
+
+- **Outputting the last iterate.** The bound is for the average, or for a random iterate. The argument says nothing
+  about the last iterate, whose risk needs a separate analysis.
+- **Several passes.** The argument holds for one pass. On a second pass $\wvec_t$ has seen $\zvec_t$ before, the
+  online loss is no longer a fresh estimate, and the high-probability bound does not apply.
+- **Strongly convex rates.** Plugging the $O((G^2/\lambda)\log T)$ regret into the conversion gives excess risk
+  $O(G^2\log T/(\lambda T))$. The extra $\log T$ can be removed with weighted averaging of later iterates, which the
+  plain conversion does not do.

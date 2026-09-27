@@ -1,0 +1,166 @@
+---
+title: Online learning
+kind: overview
+summary: 'Online learning predicts on a sequence one round at a time: the learner commits to $\wvec_t$, then sees the loss $f_t$. Its guarantees bound the regret $\sum_t f_t(\wvec_t) - \min_{\uvec}\sum_t f_t(\uvec)$ for every sequence, including sequences chosen by an adversary.'
+tags: [online-learning, regret, learning-theory]
+aliases: [online prediction, sequential prediction, prediction of individual sequences, regret minimisation, no-regret learning, Hannan consistency]
+related: [multi-armed-bandit, stochastic-gradient-descent-theory, pac-learning, bayesian-inference, kalman-filter, dataset-shift, online-transfer-learning]
+references: [cesabianchi2006, shalevshwartz2012, hazan2016, orabona2019, hoi2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Online learning** is a repeated game between a learner and an environment. In each round $t = 1, \dots, T$ the
+learner chooses a decision $\wvec_t$ from a set $\Wcal$, the environment reveals a loss function
+$f_t : \Wcal \to \reals$, and the learner pays $f_t(\wvec_t)$. The learner is judged by its **regret** against a
+comparator $\uvec \in \Wcal$,
+
+$$
+R_T(\uvec) = \sum_{t=1}^{T} f_t(\wvec_t) - \sum_{t=1}^{T} f_t(\uvec),
+$$
+
+and by $R_T = \sup_{\uvec \in \Wcal} R_T(\uvec)$. An algorithm is **no-regret** (or **Hannan consistent**) if
+$R_T / T \to 0$ for every loss sequence the environment is allowed to choose <Cite id="cesabianchi2006" />.
+</Definition>
+
+## The protocol
+
+Each round has the same three steps.
+
+1. The learner picks $\wvec_t \in \Wcal$, possibly at random, using only $f_1, \dots, f_{t-1}$.
+2. The environment picks $f_t$.
+3. The learner pays $f_t(\wvec_t)$ and observes feedback about $f_t$.
+
+The setting fixes four things: the decision set $\Wcal$, the class of losses $f_t$ may come from, how the environment
+chooses them, and what the learner observes. A supervised learner fits the protocol with $\wvec_t$ its parameters and
+$f_t(\wvec) = \ell(\wvec; \xvec_t, y_t)$ the loss on the example that arrives at round $t$. The example is revealed
+after the prediction is made, so every round is also a test on an unseen point.
+
+Online learning makes no statistical assumption about the sequence. A batch learner assumes the examples are drawn
+independently from one distribution and bounds the risk on that distribution. An online learner bounds its cumulative
+loss relative to a comparator, on the sequence that actually occurs. That guarantee survives drift, dependence and
+deliberate manipulation. The price is that it is relative: the regret is small, but the comparator itself may have
+large loss.
+
+## Adversarial and stochastic environments
+
+- **Stochastic.** The $f_t$ are drawn independently from a fixed distribution. Regret then relates directly to excess
+  risk, and <NoteLink to="online-to-batch-conversion">online-to-batch conversion</NoteLink> turns a regret bound into
+  a generalisation bound.
+- **Oblivious adversary.** The whole sequence $f_1, \dots, f_T$ is fixed before play begins, and may be any sequence
+  in the class. Randomised learners are analysed in expectation over their own random choices.
+- **Adaptive adversary.** $f_t$ may depend on the learner's past decisions $\wvec_1, \dots, \wvec_{t-1}$. Against a
+  deterministic learner an adaptive adversary gains nothing over an oblivious one, because it can simulate the learner.
+
+A deterministic learner that must pick one of finitely many actions cannot have sublinear regret. For two experts with 0/1 losses, the adversary gives loss 1 to whichever expert the learner is about to follow. The
+learner loses every round, while the better of the two experts loses at most $T/2$, so the regret is at least $T/2$. Two remedies exist. Convex losses
+over a convex set let the learner play a weighted average, which is deterministic and still no-regret. Otherwise the
+learner randomises, and the adversary, having fixed $f_t$ in advance, cannot know the draw. This observation goes back
+to Hannan <Cite id="hannan1957" />.
+
+## Full information and bandit feedback
+
+With **full information** the learner sees the whole function $f_t$, or at least its gradient at $\wvec_t$. Every note
+in this topic assumes full information unless it says otherwise. With **bandit feedback** the learner sees only the
+number $f_t(\wvec_t)$. Bandit problems need exploration and pay for it in the rate: with $N$ actions the minimax
+regret is of order $\sqrt{TN}$ under bandit feedback and $\sqrt{T\log N}$ under full information. The bandit setting
+has its own chapter, starting at the <NoteLink to="multi-armed-bandit" /> and the adversarial algorithm
+<NoteLink to="exp3">EXP3</NoteLink>. Partial monitoring and label-efficient prediction lie between the two, and
+<NoteLink to="selective-sampling" /> is one instance.
+
+## Notions of regret
+
+Regret against a fixed comparator is the default, but the comparator class decides what the guarantee is worth.
+
+- **Static (external) regret** compares with the best fixed decision in hindsight, $\min_{\uvec}\sum_t f_t(\uvec)$.
+  It is the notion in <NoteLink to="online-gradient-descent" />, <NoteLink to="hedge-and-exponential-weights" /> and
+  most of this topic.
+- **Dynamic regret** compares with a sequence $\uvec_1, \dots, \uvec_T$:
+  $\sum_t f_t(\wvec_t) - \sum_t f_t(\uvec_t)$. No algorithm has small dynamic regret against every sequence, so the
+  bound depends on how much the sequence moves, measured by the number of switches $m$ or the path length
+  $\sum_t \norm{\uvec_{t+1} - \uvec_t}$. <NoteLink to="tracking-the-best-expert" /> derives such a bound, of order
+  $\sqrt{T m \log(NT)}$ for $N$ experts and $m$ switches <Cite id="herbster1998" />.
+- **Adaptive regret** is the largest static regret over any contiguous interval,
+  $\max_{[r, s]}\paren{\sum_{t=r}^{s} f_t(\wvec_t) - \min_{\uvec}\sum_{t=r}^{s} f_t(\uvec)}$. A learner with small
+  adaptive regret does well on every stretch of the sequence, so it recovers quickly after a change
+  <Cite id="hazan2009" />.
+- **Mistake bounds** count errors of a classifier directly, without subtracting a comparator, when some expert or
+  linear separator makes no mistakes. The <NoteLink to="perceptron" /> and the halving algorithm in
+  <NoteLink to="weighted-majority" /> have mistake bounds <Cite id="littlestone1988" />.
+
+Regret against the best fixed decision is weak when the best decision changes; dynamic and adaptive regret address
+that. Regret against a very rich comparator class, such as all functions, cannot be sublinear; the comparator class
+plays the role of the hypothesis class in batch learning.
+
+## Components
+
+The topic has five chapters.
+
+- **<NoteLink to="online-convex-optimisation" />.** Convex losses over a convex set. <NoteLink
+  to="online-gradient-descent" /> has regret $O(DG\sqrt{T})$, and $O(\log T)$ on strongly convex losses.
+  <NoteLink to="follow-the-regularised-leader" /> is the unifying algorithm, <NoteLink
+  to="online-newton-step-and-exp-concavity">the online Newton step</NoteLink> exploits exp-concavity, and <NoteLink
+  to="adaptive-online-methods" /> tune their geometry to the data. <NoteLink to="online-to-batch-conversion" /> links
+  regret to statistical risk.
+- **Prediction with expert advice.** Combine $N$ forecasters. <NoteLink to="weighted-majority" /> has a mistake
+  bound, <NoteLink to="hedge-and-exponential-weights">Hedge</NoteLink> has regret $\sqrt{(T\ln N)/2}$, and <NoteLink
+  to="lower-bounds-for-online-learning" /> shows that rate cannot be improved. Mixable losses such as log loss give
+  constant regret $\ln N$ with the <NoteLink to="aggregating-algorithm-and-mixability">aggregating
+  algorithm</NoteLink>. <NoteLink to="tracking-the-best-expert" /> handles a best expert that changes.
+- **Streaming and incremental learning.** Practical learners that see each example once: <NoteLink
+  to="online-learning-for-linear-models" />, <NoteLink to="sequential-bayesian-updating" />, <NoteLink
+  to="concept-drift-adaptation" /> and <NoteLink to="streaming-algorithms-for-learning" /> such as reservoir sampling
+  and Hoeffding trees.
+- **Online active learning.** The label of each example costs something, and the learner decides whether to ask for
+  it: <NoteLink to="selective-sampling" /> and <NoteLink to="stream-based-active-learning" />.
+- **Continual learning.** A neural network trained on a sequence of tasks forgets earlier ones. <NoteLink
+  to="continual-learning" /> sets out the scenarios, and <NoteLink to="regularisation-based-continual-learning" />,
+  <NoteLink to="replay-and-architectural-methods" /> and <NoteLink to="evaluating-continual-learners" /> cover methods
+  and metrics.
+
+## Lineage
+
+| Authors | Year | Contribution |
+| --- | --- | --- |
+| Blackwell | 1956 | Approachability of sets in repeated games with vector payoffs, which implies no-regret play |
+| Hannan | 1957 | Randomised play whose average regret in a repeated game vanishes (Hannan consistency) |
+| Littlestone | 1988 | The mistake-bound model, the halving algorithm and Winnow |
+| Vovk | 1990 | The aggregating algorithm and mixable losses, with regret independent of $T$ |
+| Littlestone and Warmuth | 1994 | Weighted majority, with a mistake bound relative to the best expert |
+| Freund and Schapire | 1997 | Hedge, exponential weights with regret $O(\sqrt{T\ln N})$, and its use in boosting |
+| Herbster and Warmuth | 1998 | Fixed share, for tracking a best expert that changes |
+| Zinkevich | 2003 | Online convex optimisation and online gradient descent |
+| Cesa-Bianchi, Conconi and Gentile | 2004 | Online-to-batch conversion of regret bounds into risk bounds |
+| Cesa-Bianchi and Lugosi | 2006 | *Prediction, Learning, and Games*, the unified treatment |
+| Hazan, Agarwal and Kale | 2007 | Regret $O(\log T)$ for strongly convex and exp-concave losses |
+| Duchi, Hazan and Singer | 2011 | AdaGrad: per-coordinate learning rates with regret guarantees |
+| Shalev-Shwartz | 2012 | Follow-the-regularised-leader as the common frame for online algorithms |
+| Hazan; Orabona | 2016; 2019 | Textbooks on online convex optimisation and parameter-free online learning |
+
+The references are Blackwell <Cite id="blackwell1956" />, Hannan <Cite id="hannan1957" />, Littlestone <Cite
+id="littlestone1988" />, Vovk <Cite id="vovk1998" />, Littlestone and Warmuth <Cite id="littlestone1994" />, Freund and
+Schapire <Cite id="freund1997" />, Herbster and Warmuth <Cite id="herbster1998" />, Zinkevich <Cite
+id="zinkevich2003" />, Cesa-Bianchi, Conconi and Gentile <Cite id="cesabianchi2004" />, Cesa-Bianchi and Lugosi <Cite
+id="cesabianchi2006" />, Hazan, Agarwal and Kale <Cite id="hazan2007" />, Duchi, Hazan and Singer <Cite
+id="duchi2011" />, Shalev-Shwartz <Cite id="shalevshwartz2012" />, Hazan <Cite id="hazan2016" /> and Orabona <Cite
+id="orabona2019" />.
+
+## Relation to neighbouring topics
+
+- **Stochastic optimisation.** <NoteLink to="stochastic-gradient-descent-theory">Stochastic gradient descent</NoteLink>
+  on an expected loss is online gradient descent on the sequence of sampled losses. Regret bounds, averaged over the
+  sampling, give the SGD convergence rates.
+- **Bayesian inference.** Under log loss, the Bayesian predictive distribution is the aggregating algorithm, and its
+  regret against the best model in the prior's support is at most minus the log prior mass of that model. <NoteLink
+  to="sequential-bayesian-updating" /> treats the streaming form, and the <NoteLink to="kalman-filter" /> is its
+  linear-Gaussian case with a moving state.
+- **Game theory.** Two no-regret learners playing a zero-sum game against each other have average strategies that
+  converge to a minimax equilibrium. Boosting is one application: <NoteLink to="adaboost" /> was derived from Hedge
+  <Cite id="freund1997" />.
+- **Transfer learning.** When a source model exists and target data arrive as a stream, the learner can combine the
+  two with expert-advice methods: see <NoteLink to="online-transfer-learning" /> and <NoteLink
+  to="test-time-adaptation" />. <NoteLink to="lifelong-and-continual-transfer" /> treats a sequence of tasks from the
+  transfer side, where <NoteLink to="continual-learning" /> treats it from the side of forgetting.
+- **Deployment.** <NoteLink to="dataset-shift" /> and <NoteLink to="drift-detection" /> describe the same non-stationarity
+  from the monitoring side. <NoteLink to="concept-drift-adaptation" /> is the learning side.

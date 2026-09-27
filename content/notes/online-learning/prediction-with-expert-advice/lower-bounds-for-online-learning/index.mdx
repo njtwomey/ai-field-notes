@@ -1,0 +1,132 @@
+---
+title: Lower bounds for online learning
+kind: concept
+summary: 'No experts algorithm has regret below $(1 - o(1))\sqrt{(T\ln N)/2}$ on every sequence of losses in $[0, 1]$. The proof draws losses at random: every algorithm then loses $T/2$ in expectation, while the best of $N$ experts is ahead by half the maximum of $N$ random walks, about $\sqrt{T\ln N/2}$.'
+tags: [online-learning, regret, learning-theory, worked-example]
+aliases: [minimax regret, regret lower bound, probabilistic method lower bound]
+requires: [hedge-and-exponential-weights, central-limit-theorem]
+partOf: [online-learning]
+related: [online-convex-optimisation, exp3, weighted-majority, aggregating-algorithm-and-mixability]
+references: [cesabianchi2006, cesabianchi1997, orabona2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The **minimax regret** of the experts problem with $N$ experts, $T$ rounds and losses in $[0, 1]$ is
+
+$$
+V_{T,N} = \inf_{\text{algorithms}}\;\sup_{\lvec_1, \dots, \lvec_T}\paren{\sum_{t=1}^{T}\inner{\pvec_t}{\lvec_t} - \min_{i}\sum_{t=1}^{T}\ell_{t,i}},
+$$
+
+the regret of the best algorithm on its worst sequence. A **lower bound** shows that every algorithm has some sequence
+with regret at least a given amount. For the experts problem,
+$\lim_{N \to \infty}\lim_{T \to \infty}V_{T,N}/\sqrt{(T\ln N)/2} = 1$ <Cite id="cesabianchi2006" />.
+</Definition>
+
+## Notation
+
+$\lvec_t = (\ell_{t,1}, \dots, \ell_{t,N})$ is the loss vector in round $t$, $\pvec_t$ the learner's distribution over
+experts, and $L_{T,i} = \sum_t\ell_{t,i}$ expert $i$'s total loss. The upper bound to compare with is
+<NoteLink to="hedge-and-exponential-weights">Hedge</NoteLink>'s $\sqrt{(T\ln N)/2}$.
+
+## The random-loss argument
+
+The worst case is at least the average case. If the losses are drawn at random and every algorithm has expected
+regret at least $B$, then for every algorithm some fixed sequence has regret at least $B$. This is the probabilistic
+method: the random sequence is a tool for proving that a bad sequence exists.
+
+Draw every loss $\ell_{t,i}$ independently, equal to $0$ or $1$ with probability $\tfrac12$ each.
+
+**The learner cannot do better than $T/2$.** $\pvec_t$ is chosen before $\lvec_t$ is drawn and is independent of it.
+So $\expect\inner{\pvec_t}{\lvec_t} = \sum_i p_{t,i}\cdot\tfrac12 = \tfrac12$, whatever the algorithm, and the expected
+cumulative loss is $T/2$.
+
+**The best expert is lucky.** Write $\sigma_{t,i} = 1 - 2\ell_{t,i} \in \set{-1, +1}$ and
+$S_i = \sum_{t=1}^{T}\sigma_{t,i}$, a simple random walk. Then $L_{T,i} = T/2 - S_i/2$, and the best expert has
+$\min_i L_{T,i} = T/2 - \tfrac12\max_i S_i$. The expected regret of every algorithm is therefore
+
+$$
+\expect[R_T] = \frac{T}{2} - \expect\brack{\min_i L_{T,i}} = \frac12\expect\brack{\max_{i \le N}S_i}.
+$$
+
+**The maximum of $N$ random walks.** By the <NoteLink to="central-limit-theorem" />, $S_i/\sqrt{T}$ tends to a
+standard normal as $T \to \infty$, and the $N$ walks are independent. So
+
+$$
+\frac{\expect[R_T]}{\sqrt{T}} \to \frac12\expect\brack{\max_{i \le N}Z_i}, \qquad Z_1, \dots, Z_N \iid \Gauss(0, 1).
+$$
+
+The expected maximum of $N$ independent standard normals is $(1 + o(1))\sqrt{2\ln N}$ as $N \to \infty$. Therefore the
+regret is at least $(1 - o(1))\tfrac12\sqrt{T}\sqrt{2\ln N} = (1 - o(1))\sqrt{(T\ln N)/2}$, which is Hedge's upper
+bound, constant included.
+
+<Derivation title="Why the maximum of N normals is about the square root of 2 ln N">
+**Upper bound.** For any $s > 0$, by Jensen's inequality and a union bound over the terms,
+
+$$
+e^{s\expect\max_i Z_i} \le \expect e^{s\max_i Z_i} \le \sum_{i=1}^{N}\expect e^{sZ_i} = Ne^{s^2/2}.
+$$
+
+So $\expect\max_i Z_i \le \ln N/s + s/2$, which at $s = \sqrt{2\ln N}$ is $\sqrt{2\ln N}$.
+
+**Lower bound.** Fix $\epsilon \in (0, 1)$ and let $a = \sqrt{2(1 - \epsilon)\ln N}$. The normal tail satisfies
+$\prob(Z > a) \ge c\,e^{-a^2/2}/a = c\,N^{-(1 - \epsilon)}/a$ for a constant $c > 0$ and large $a$. The probability that
+no $Z_i$ exceeds $a$ is $(1 - \prob(Z > a))^N \le \exp(-cN^\epsilon/a)$, which tends to 0. So
+$\max_i Z_i > a$ with probability tending to 1, and $\expect\max_i Z_i \ge (1 - o(1))\sqrt{2(1 - \epsilon)\ln N}$ for
+every $\epsilon$.
+</Derivation>
+
+## Worked example
+
+For finite $N$ the exact limit $\tfrac12\expect\max_i Z_i$ is below $\sqrt{(\ln N)/2}$, and the ratio approaches 1
+slowly.
+
+| $N$ | $\expect\max_{i \le N} Z_i$ | lower bound $/\sqrt{T}$ | Hedge upper bound $/\sqrt{T}$ | ratio |
+| --- | --- | --- | --- | --- |
+| 2 | 0.564 | 0.282 | 0.589 | 0.48 |
+| 10 | 1.539 | 0.769 | 1.073 | 0.72 |
+| 100 | 2.508 | 1.254 | 1.517 | 0.83 |
+| 1000 | 3.241 | 1.621 | 1.858 | 0.87 |
+| $10^6$ | 4.863 | 2.432 | 2.628 | 0.93 |
+
+For two experts the limit has a closed form. $\max(S_1, S_2) = \tfrac12(S_1 + S_2) + \tfrac12\abs{S_1 - S_2}$, and
+$S_1 - S_2$ has variance $2T$, so $\expect\max(S_1, S_2) \approx \tfrac12\sqrt{2T}\sqrt{2/\pi} = \sqrt{T/\pi}$ and the
+regret lower bound is $\tfrac12\sqrt{T/\pi} = 0.282\sqrt{T}$. A simulation with $T = 1000$ and 2000 repetitions gives
+$0.290\sqrt{T}$.
+
+## Other settings
+
+The same method gives lower bounds across online learning.
+
+- **Online convex optimisation.** Linear losses $f_t(w) = z_tw$ on an interval of length $D$ with random signs
+  $z_t = \pm G$ give expected regret $DG\sqrt{T/(2\pi)}$ asymptotically, so the $O(DG\sqrt{T})$ rate of
+  online gradient descent is optimal up to a constant. <NoteLink to="online-convex-optimisation" /> derives it.
+- **Deterministic learners with finitely many actions.** An adversary that knows the learner's choice can force
+  linear regret; with 0/1 mistakes it forces $M \ge 2m$ mistakes against the best expert's $m$
+  (see <NoteLink to="weighted-majority" />).
+- **Bandit feedback.** When only the chosen expert's loss is observed, the minimax regret grows to order $\sqrt{NT}$;
+  <NoteLink to="exp3">EXP3</NoteLink> matches it up to $\sqrt{\ln N}$.
+
+## Where the bound does not apply
+
+The argument needs losses that are linear in $\pvec_t$ and noise that no combination of experts can average away.
+With log loss, squared loss or any other mixable loss, the learner can predict a combination that is better than
+every expert on the round, and the minimax regret is $O(\ln N)$, constant in $T$
+(see <NoteLink to="aggregating-algorithm-and-mixability" />). With strongly convex or exp-concave losses the rate is
+$O(\log T)$. The $\sqrt{T}$ rate belongs to linear losses, such as the expected 0/1 loss of a randomised choice or the
+absolute loss.
+
+## Assumptions
+
+- The limit statement takes $T \to \infty$ first. For fixed $T$ and very large $N$ ($\ln N$ comparable to $T$) the
+  central-limit step fails and the regret is at most $T$.
+- The losses are only required to be in $[0, 1]$. Restricted classes, such as sequences where some expert is perfect
+  or has small loss, have smaller minimax regret.
+
+## Pitfalls
+
+- **A lower bound on the worst case says nothing about typical data.** On stochastic losses with a gap between the
+  best expert and the rest, follow-the-leader has bounded regret. The lower bound is for the worst case.
+- **The limit is approached slowly in $N$.** For moderate $N$, the table shows the exact lower bound is 20–50% below
+  $\sqrt{(T\ln N)/2}$.

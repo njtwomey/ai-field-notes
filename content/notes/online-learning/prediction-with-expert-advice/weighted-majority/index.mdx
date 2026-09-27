@@ -1,0 +1,128 @@
+---
+title: Weighted majority
+kind: concept
+summary: 'Weighted majority predicts a binary label by a weighted vote of $N$ experts and multiplies the weight of each expert that errs by $\beta \in (0, 1)$. Its mistakes are at most $(\ln N + m\ln(1/\beta))/\ln(2/(1 + \beta))$, where $m$ is the best expert''s mistakes; $\beta = 1/2$ gives $2.41(m + \log_2 N)$.'
+tags: [online-learning, regret, classification, ensembles, worked-example]
+aliases: [weighted majority algorithm, WMA, halving algorithm, randomised weighted majority, mistake bound]
+requires: [exponential-and-logarithm]
+partOf: [online-learning]
+related: [hedge-and-exponential-weights, perceptron, tracking-the-best-expert, lower-bounds-for-online-learning]
+references: [littlestone1994, littlestone1988, cesabianchi2006]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+In **prediction with expert advice** for binary outcomes, each round $t$ every expert $i = 1, \dots, N$ predicts
+$x_{t,i} \in \set{0, 1}$, the learner predicts $\hat y_t$, and then the outcome $y_t \in \set{0, 1}$ is revealed. The
+**weighted majority algorithm** keeps weights $w_{t,i} > 0$, starting at $w_{1,i} = 1$. It predicts $1$ if the experts
+predicting $1$ hold at least half the total weight, and $0$ otherwise. After $y_t$ is revealed, each expert that
+predicted wrongly has its weight multiplied by a fixed $\beta \in [0, 1)$ <Cite id="littlestone1994" />.
+</Definition>
+
+## Notation
+
+$M$ is the number of mistakes the learner makes over $T$ rounds, and $m_i$ the number made by expert $i$.
+$m = \min_i m_i$ is the best expert's count. $W_t = \sum_i w_{t,i}$ is the total weight at the start of round $t$.
+No assumption is made about how the outcomes or the experts' predictions are generated.
+
+## The halving algorithm
+
+Suppose one expert never errs ($m = 0$). The **halving algorithm** is the case $\beta = 0$: an expert that errs is
+discarded, and the learner follows the majority of the experts still consistent with every outcome so far.
+
+Each time the learner errs, the majority it followed was wrong, so at least half of the surviving experts are
+discarded. The perfect expert is never discarded. After $M$ mistakes at most $N/2^M$ experts survive, and at least one
+does, so $N/2^M \ge 1$:
+
+$$
+M \le \log_2 N.
+$$
+
+Twenty mistakes suffice to find the perfect expert among a million. The same argument, applied to a finite hypothesis
+class, gives the mistake-bound model of learning <Cite id="littlestone1988" />.
+
+## The mistake bound
+
+When no expert is perfect, discarding is too harsh; weighted majority shrinks weights instead. The analysis tracks
+the total weight $W_t$.
+
+**Each mistake removes a fixed fraction of the weight.** When the learner errs, the experts that voted for the wrong
+answer held at least half of $W_t$. Each of their weights is multiplied by $\beta$. So at least $W_t/2$ of the weight
+shrinks by the factor $\beta$, and
+
+$$
+W_{t+1} \le \frac{W_t}{2} + \beta\frac{W_t}{2} = \frac{1 + \beta}{2}W_t.
+$$
+
+In rounds where the learner is right, $W_{t+1} \le W_t$. Starting from $W_1 = N$, after $M$ mistakes
+$W_{T+1} \le N\paren{\tfrac{1 + \beta}{2}}^M$.
+
+**The best expert keeps some weight.** Expert $i$ has been penalised $m_i$ times, so
+$W_{T+1} \ge w_{T+1,i} = \beta^{m_i}$ for every $i$.
+
+**Combine.** $\beta^{m_i} \le N\paren{\tfrac{1 + \beta}{2}}^M$. Taking logarithms and solving for $M$,
+
+$$
+M \le \frac{\ln N + m_i\ln(1/\beta)}{\ln\paren{2/(1 + \beta)}} \quad\text{for every expert } i.
+$$
+
+At $\beta = \tfrac12$, the denominator is $\ln(4/3) = 0.288$, and $\ln 2/\ln(4/3) = 2.41$, so
+$M \le 2.41(m + \log_2 N)$ <Cite id="littlestone1994" />.
+
+## The factor of two cannot be avoided deterministically
+
+As $\beta \to 1$, $\ln(1/\beta)/\ln(2/(1 + \beta)) \to 2$, so the coefficient of $m$ approaches 2 but the $\ln N$ term
+grows. No deterministic algorithm does better than $2m$. Take two experts that always disagree, one predicting 0 and
+one predicting 1. The adversary knows the learner's deterministic prediction and sets the outcome to the opposite, so
+$M = T$. Every round exactly one expert is wrong, so the two experts' mistakes sum to $T$, and the better one has
+$m \le T/2$. Therefore $M \ge 2m$.
+
+## Randomised weighted majority
+
+Predicting with an expert drawn at random with probability $w_{t,i}/W_t$ removes the factor of two in expectation. Let
+$F_t$ be the fraction of weight on experts that err in round $t$; it is the probability that the learner errs. The
+weight update gives
+
+$$
+W_{t+1} = W_t\paren{1 - (1 - \beta)F_t} \le W_t\exp\paren{-(1 - \beta)F_t},
+$$
+
+so $\ln W_{T+1} \le \ln N - (1 - \beta)\sum_t F_t$. Combined with $\ln W_{T+1} \ge m\ln\beta$, the expected number of
+mistakes is
+
+$$
+\expect[M] = \sum_{t=1}^{T}F_t \le \frac{m\ln(1/\beta) + \ln N}{1 - \beta}.
+$$
+
+With $\beta$ close to 1, $\ln(1/\beta)/(1 - \beta) \approx 1 + (1 - \beta)/2$, so the coefficient of $m$ approaches 1.
+Tuning $\beta$ with knowledge of $m$ gives $\expect[M] \le m + O(\sqrt{m\ln N} + \ln N)$
+<Cite id="littlestone1994" /> <Cite id="cesabianchi2006" />. The expected mistakes exceed the best expert's by a term
+sublinear in $m$, which is a regret bound. The general form of this algorithm for losses in $[0, 1]$ is
+<NoteLink to="hedge-and-exponential-weights">Hedge</NoteLink>.
+
+## Worked example
+
+Take $N = 1024$ experts, the best of which makes $m = 20$ mistakes, and $\beta = \tfrac12$.
+
+- Deterministic weighted majority: $M \le (\ln 1024 + 20\ln 2)/\ln(4/3) = (6.93 + 13.86)/0.288 = 72.3$.
+- Randomised weighted majority: $\expect[M] \le (20\ln 2 + \ln 1024)/(1 - \tfrac12) = 41.6$.
+- If some expert were perfect, halving would make at most $\log_2 1024 = 10$ mistakes.
+
+## Assumptions
+
+- The outcome is revealed after every prediction.
+- The comparison is with the best single expert over the whole sequence. If different experts are best on different
+  stretches, see <NoteLink to="tracking-the-best-expert" />.
+- The bound holds for every sequence of outcomes and expert predictions, including adversarial ones.
+
+## Pitfalls
+
+- **Tiny weights.** After many mistakes weights underflow in floating point. Store $\log w_{t,i}$, or renormalise every
+  round.
+- **Losing good experts for good.** A small $\beta$ drives a temporarily poor expert's weight so low that it cannot
+  recover when it becomes the best. Fixed share, in <NoteLink to="tracking-the-best-expert" />, bounds weights away
+  from zero.
+- **Mistake counts, not probabilities.** Weighted majority treats every error alike. When experts give probabilities
+  and the loss is log loss, the <NoteLink to="aggregating-algorithm-and-mixability">aggregating algorithm</NoteLink>
+  has a much smaller regret.

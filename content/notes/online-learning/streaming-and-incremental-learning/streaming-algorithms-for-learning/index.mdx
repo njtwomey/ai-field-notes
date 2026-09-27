@@ -1,0 +1,138 @@
+---
+title: Streaming algorithms for learning
+kind: concept
+summary: 'Streaming algorithms read each item once in memory that does not grow with the stream. Reservoir sampling keeps a uniform sample, the count-min sketch estimates counts within $\epsilon n$, and Hoeffding trees split a leaf once a concentration bound separates the best two attributes.'
+tags: [online-learning, streaming, sampling, trees, worked-example]
+aliases: [reservoir sampling, Algorithm R, count-min sketch, Hoeffding tree, very fast decision tree, VFDT, Welford's algorithm, running variance, data stream mining]
+requires: [hoeffdings-inequality, decision-tree]
+partOf: [online-learning]
+related: [concept-drift-adaptation, feature-hashing-for-text, locality-sensitive-hashing, markov-and-chebyshev-inequalities, replay-and-architectural-methods, streaming-and-incremental-matrix-profile]
+references: [vitter1985, cormode2005, domingos2000, hulten2001, gama2014]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **streaming algorithm** reads a sequence of items $x_1, x_2, \dots, x_n$ once, in order, and keeps a state whose size
+is much smaller than $n$, typically constant or logarithmic in $n$. After any prefix it can answer a query about the
+items seen so far, exactly or with a stated error and failure probability. **Streaming learners** use such states as
+their only memory of the data: running sufficient statistics, uniform samples, sketches of counts, or the leaf
+statistics of an incrementally grown tree.
+</Definition>
+
+## Exact running statistics
+
+Many estimates depend on the data only through sums, which update in constant time. The mean and variance are the
+common case. Adding sums of $x$ and $x^2$ loses precision when the mean is large compared with the spread, because
+$\sum x^2 - n\bar x^2$ subtracts two nearly equal numbers. **Welford's algorithm** updates the mean $\mu_n$ and the sum
+of squared deviations $M_n$ directly:
+
+$$
+\mu_n = \mu_{n-1} + \frac{x_n - \mu_{n-1}}{n}, \qquad M_n = M_{n-1} + (x_n - \mu_{n-1})(x_n - \mu_n).
+$$
+
+The second update follows from $M_n = \sum_{i \le n}(x_i - \mu_n)^2$: expanding around $\mu_{n-1}$, the old deviations
+shift by $\mu_{n-1} - \mu_n$, which adds $(n - 1)(\mu_n - \mu_{n-1})^2$, and the new item adds $(x_n - \mu_n)^2$. Since
+$\mu_n - \mu_{n-1} = (x_n - \mu_{n-1})/n$, the total increase is $(x_n - \mu_{n-1})(x_n - \mu_n)$. The sample variance is
+$M_n/(n - 1)$. Recursive least squares, in <NoteLink to="online-learning-for-linear-models" />, is the same idea for the
+normal equations.
+
+## Reservoir sampling
+
+Many learning procedures need a uniform sample of the stream: a validation set, a replay buffer for
+<NoteLink to="replay-and-architectural-methods">continual learning</NoteLink>, or a sample for estimating quantiles.
+The stream length $n$ is unknown in advance.
+
+**Algorithm R.** Keep the first $k$ items in a reservoir. For item $i > k$, draw $j$ uniformly from $\set{1, \dots, i}$;
+if $j \le k$, replace the reservoir's $j$-th item with item $i$ <Cite id="vitter1985" />.
+
+**Claim.** After $n \ge k$ items, each item is in the reservoir with probability $k/n$.
+
+*Proof by induction on $n$.* At $n = k$ every item is in the reservoir. Suppose the claim holds after $n$ items. Item
+$n + 1$ enters with probability $k/(n + 1)$. An item already in the reservoir is evicted only if item $n + 1$ enters and
+lands on its slot, which has probability $\frac{k}{n+1}\cdot\frac1k = \frac{1}{n+1}$. So it is still there with
+probability $\frac{k}{n}\cdot\frac{n}{n+1} = \frac{k}{n+1}$. $\square$
+
+The same argument, applied to sets, shows every subset of size $k$ is equally likely, so the reservoir is a uniform
+sample without replacement. A simulation with $k = 3$ and $n = 10$ over 100 000 runs gives inclusion frequencies
+between $0.298$ and $0.302$ for all ten items, against $k/n = 0.3$. Algorithm R draws one random number per item.
+Vitter's skip-based variants draw the number of items to skip before the next replacement, and need
+$O(k(1 + \log(n/k)))$ random numbers in expectation <Cite id="vitter1985" />.
+
+## The count-min sketch
+
+Counting how often each of $U$ possible items has occurred needs $U$ counters, which is too many for identifiers
+such as user–item pairs or hashed n-grams. Let $\fvec \in \reals^U$ be the vector of true counts, with
+$\norm{\fvec}_1 = n$. The **count-min sketch** keeps a $d \times w$ array of counters $\Cmat$ and $d$ hash functions
+$h_1, \dots, h_d$, each mapping items to $\set{1, \dots, w}$, drawn from a pairwise-independent family
+<Cite id="cormode2005" />.
+
+- **Update** for item $i$: $C_{r, h_r(i)} \leftarrow C_{r, h_r(i)} + 1$ for each row $r$.
+- **Query** for item $i$: $\hat f_i = \min_rC_{r, h_r(i)}$.
+
+**Guarantee.** With $w = \lceil e/\epsilon\rceil$ and $d = \lceil\ln(1/\delta)\rceil$, $\hat f_i \ge f_i$ always, and
+$\hat f_i \le f_i + \epsilon\norm{\fvec}_1$ with probability at least $1 - \delta$.
+
+*Proof.* Every counter includes the item's own count, so $\hat f_i \ge f_i$. In row $r$, the excess
+$X_r = C_{r, h_r(i)} - f_i$ is the total count of other items that collide with $i$. Pairwise independence gives
+collision probability $1/w$, so $\expect X_r \le \norm{\fvec}_1/w \le \epsilon\norm{\fvec}_1/e$. By Markov's inequality
+(<NoteLink to="markov-and-chebyshev-inequalities" />), $\prob(X_r \ge \epsilon\norm{\fvec}_1) \le 1/e$. The rows use
+independent hash functions, so the probability that every row exceeds the bound, which is what the minimum needs to
+fail, is at most $e^{-d} \le \delta$. $\square$
+
+**Worked example.** For error $\epsilon = 0.001$ of the stream length and failure probability $\delta = 0.01$, the
+sketch has $w = 2719$ columns and $d = 5$ rows: 13 595 counters, whatever the number of distinct items. After 10 million
+events, every count estimate is within 10 000 of the truth with probability 0.99. Heavy hitters, the items with
+$f_i \ge \phi n$, are therefore identified reliably when $\phi \gg \epsilon$. Count features for click-through models and
+frequency filters for vocabularies are typical uses; <NoteLink to="feature-hashing-for-text" /> uses a single hash for a
+different purpose, to index features rather than count them.
+
+## Hoeffding trees
+
+A <NoteLink to="decision-tree" /> chooses each split by comparing a heuristic such as information gain across
+attributes. On a stream, a leaf sees examples one at a time and must decide when it has seen enough to split. The
+**Hoeffding tree**, or very fast decision tree (VFDT), answers with a concentration bound <Cite id="domingos2000" />.
+
+**The Hoeffding bound.** For $n$ independent observations of a variable with range $R$, the sample mean is within
+
+$$
+\varepsilon = \sqrt{\frac{R^2\ln(1/\delta)}{2n}}
+$$
+
+of the true mean with probability at least $1 - \delta$ (see <NoteLink to="hoeffdings-inequality" />).
+
+**The split rule.** Each leaf keeps counts $n_{ajk}$ of examples with attribute $a$ equal to value $j$ and class $k$. From
+them it computes the gain $\bar G(a)$ of every attribute. Let $a_1$ and $a_2$ be the best and second-best attributes
+and $\Delta\bar G = \bar G(a_1) - \bar G(a_2) \ge 0$. If $\Delta\bar G > \varepsilon$, the true difference is positive with
+probability at least $1 - \delta$, so $a_1$ is the attribute a learner with infinite data would choose at this leaf. The
+leaf splits on $a_1$ and its children start collecting counts. If two attributes are nearly equal, the rule would
+wait forever, so the leaf also splits once $\varepsilon$ falls below a tie threshold $\tau$.
+
+Information gain with $c$ classes lies in $[0, \log_2c]$, so $R = \log_2c$. With a guarantee at every leaf, the
+expected disagreement between the Hoeffding tree and the tree grown by the same procedure with infinite data is at
+most $\delta/p$, where $p$ is the probability that an example falls into a leaf at a given level <Cite id="domingos2000" />.
+
+**Worked example.** For two classes, $R = 1$. With $\delta = 10^{-7}$, a leaf whose two best attributes differ in gain
+by $0.05$ needs $n = \ln(10^7)/(2 \cdot 0.05^2) = 3224$ examples. After $1000$ examples, $\varepsilon = 0.090$.
+
+The memory per leaf is $O(\text{attributes} \times \text{values} \times \text{classes})$, independent of $n$, and each example
+costs time proportional to the tree's depth. CVFDT extends the method to drifting streams by keeping the counts over a
+sliding window and growing alternative subtrees when a split's statistics change <Cite id="hulten2001" />.
+
+## Assumptions
+
+- Items arrive once and cannot be revisited. Algorithms that allow a few passes, or random access, are outside this
+  model.
+- The guarantees of reservoir sampling and the count-min sketch hold for any stream. The Hoeffding tree's guarantee
+  assumes independent, identically distributed examples.
+
+## Pitfalls
+
+- **Reservoir sampling under drift.** A uniform sample of the whole stream is dominated by old data once the stream
+  is long. For recent data use a sliding window, or a biased reservoir that replaces with a fixed probability.
+- **Count-min overestimates rare items.** The error bound is relative to the total $\norm{\fvec}_1$, so counts of rare items
+  can be mostly collision noise. Use it for frequent items, or widen the sketch until $\epsilon\norm{\fvec}_1$ is small
+  compared with the counts that matter.
+- **The Hoeffding bound is applied to a gain, not a mean.** Information gain is a non-linear function of the counts,
+  not an average of independent terms, so the bound as used is a heuristic. Hoeffding trees work well in practice, but
+  the per-split guarantee is weaker than stated for sample means.

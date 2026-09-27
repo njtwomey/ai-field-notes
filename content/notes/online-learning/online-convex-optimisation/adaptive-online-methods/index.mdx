@@ -1,0 +1,151 @@
+---
+title: Adaptive online methods
+kind: concept
+summary: 'Adaptive online methods choose the step-size geometry from the gradients seen so far. Diagonal AdaGrad divides coordinate $i$ by $\sqrt{\sum_{s \le t}g_{s,i}^2}$ and has regret at most $\sqrt2 D_\infty\sum_i\norm{\gvec_{1:T,i}}_2$, which is far below $D_2G\sqrt T$ when gradients are sparse.'
+tags: [online-learning, regret, optimisation, adaptive-learning-rate, worked-example]
+aliases: [AdaGrad regret bound, data-dependent regret bound, adaptive subgradient methods, FTRL-Proximal, scale-free online learning]
+requires: [online-gradient-descent, online-convex-optimisation]
+partOf: [online-learning]
+related: [adagrad-and-rmsprop, adam, follow-the-regularised-leader, online-newton-step-and-exp-concavity]
+references: [duchi2011, mcmahan2017b, orabona2019, hazan2016]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+An **adaptive online method** replaces the fixed step size of <NoteLink to="online-gradient-descent" /> with a
+positive definite matrix $\Hmat_t$ built from past gradients, and steps
+$\wvec_{t+1} = \Pi_\Wcal^{\Hmat_t}\paren{\wvec_t - \eta\Hmat_t^{-1}\gvec_t}$, projecting in the norm
+$\norm{\vvec}_{\Hmat_t} = \sqrt{\vvec^\top\Hmat_t\vvec}$. **Diagonal AdaGrad** uses
+$\Hmat_t = \diag(h_{t,1}, \dots, h_{t,d})$ with $h_{t,i} = \sqrt{\sum_{s=1}^{t}g_{s,i}^2}$, so each coordinate gets
+its own step size $\eta/h_{t,i}$ <Cite id="duchi2011" />.
+</Definition>
+
+## Notation
+
+$\gvec_t \in \reals^d$ is the subgradient at round $t$, $g_{t,i}$ its $i$-th coordinate, and
+$\gvec_{1:T,i} = (g_{1,i}, \dots, g_{T,i})$ the history of coordinate $i$. $D_\infty = \max_{\wvec, \wvec' \in \Wcal}\norm{\wvec - \wvec'}_\infty$
+and $D_2$ are the diameters of $\Wcal$ in the max and Euclidean norms. $R_T(\uvec)$ is the regret against
+$\uvec \in \Wcal$.
+
+## Why adapt
+
+The bound $D_2G\sqrt{T}$ of online gradient descent uses one step size for every coordinate and every round. Two
+common situations make it loose.
+
+- **Sparse features.** In text or click data most features are zero in most examples. A rare feature receives few
+  gradient updates, so it needs larger steps than a frequent one. A single step size tuned for the frequent features
+  leaves the rare ones barely trained.
+- **Unknown scale.** The optimal fixed step $D/(G\sqrt{T})$ needs $G$ and $T$. A method that measures the gradients
+  as they arrive needs neither.
+
+AdaGrad sets each coordinate's step from that coordinate's own history. The reasoning below shows this is the best
+diagonal choice in hindsight, up to a factor of 2.
+
+## The regret bound
+
+**One round in a changing norm.** The argument of <NoteLink to="online-gradient-descent" />, with the Euclidean norm
+replaced by $\norm{\cdot}_{\Hmat_t}$ (projection in that norm is non-expansive in the same norm), gives
+
+$$
+\inner{\gvec_t}{\wvec_t - \uvec} \le \frac{1}{2\eta}\paren{\norm{\wvec_t - \uvec}_{\Hmat_t}^2 - \norm{\wvec_{t+1} - \uvec}_{\Hmat_t}^2}
++ \frac{\eta}{2}\gvec_t^\top\Hmat_t^{-1}\gvec_t.
+$$
+
+**Distance terms.** Summing over $t$ and regrouping by $\wvec_t$,
+
+$$
+\sum_{t=1}^{T}\paren{\norm{\wvec_t - \uvec}_{\Hmat_t}^2 - \norm{\wvec_{t+1} - \uvec}_{\Hmat_t}^2}
+\le \norm{\wvec_1 - \uvec}_{\Hmat_1}^2 + \sum_{t=2}^{T}(\wvec_t - \uvec)^\top(\Hmat_t - \Hmat_{t-1})(\wvec_t - \uvec).
+$$
+
+$\Hmat_t - \Hmat_{t-1}$ is diagonal and non-negative, because each $h_{t,i}$ can only grow. Each squared coordinate
+difference $(w_{t,i} - u_i)^2$ is at most $D_\infty^2$. So the sum is at most $D_\infty^2\sum_i h_{T,i} = D_\infty^2\sum_i\norm{\gvec_{1:T,i}}_2$:
+the telescoping sum of the diagonal entries is their final value.
+
+**Gradient terms.** $\gvec_t^\top\Hmat_t^{-1}\gvec_t = \sum_i g_{t,i}^2/h_{t,i}$. For any non-negative $a_1, \dots, a_T$
+with partial sums $S_t = \sum_{s \le t}a_s$,
+
+$$
+\frac{a_t}{\sqrt{S_t}} \le \frac{2a_t}{\sqrt{S_t} + \sqrt{S_{t-1}}} = 2\paren{\sqrt{S_t} - \sqrt{S_{t-1}}},
+$$
+
+so $\sum_t a_t/\sqrt{S_t} \le 2\sqrt{S_T}$. With $a_t = g_{t,i}^2$, the gradient terms sum to at most
+$2\sum_i\norm{\gvec_{1:T,i}}_2$.
+
+**Combine.** Linearising the convex losses as in <NoteLink to="online-convex-optimisation" />,
+
+$$
+R_T(\uvec) \le \paren{\frac{D_\infty^2}{2\eta} + \eta}\sum_{i=1}^{d}\norm{\gvec_{1:T,i}}_2,
+$$
+
+which at $\eta = D_\infty/\sqrt2$ is
+
+$$
+R_T(\uvec) \le \sqrt2\,D_\infty\sum_{i=1}^{d}\norm{\gvec_{1:T,i}}_2
+$$
+
+<Cite id="duchi2011" />. The step size $\eta$ needs only $D_\infty$, a property of the decision set. The gradient scale
+and $T$ enter through the data.
+
+**Never much worse than OGD.** By Cauchy–Schwarz,
+$\sum_i\norm{\gvec_{1:T,i}}_2 \le \sqrt{d\sum_t\norm{\gvec_t}_2^2} \le \sqrt{d}\,G\sqrt{T}$. On a box, $D_2 = \sqrt{d}D_\infty$,
+so the AdaGrad bound is at most $\sqrt2 D_2G\sqrt{T}$, the OGD bound up to $\sqrt2$. When a few coordinates carry most
+of the gradient mass, the sum of per-coordinate norms is much smaller than $\sqrt{d}$ times the total.
+
+## Why the square root of the sum of squares
+
+Consider choosing, in hindsight, a fixed diagonal preconditioner $\diag(\svec)$ with $\svec > \zeros$ and a budget
+$\sum_i s_i \le c$, to minimise the gradient term $\sum_t\gvec_t^\top\diag(\svec)^{-1}\gvec_t = \sum_i A_i/s_i$, where
+$A_i = \sum_t g_{t,i}^2$. The Lagrangian $\sum_i A_i/s_i + \mu(\sum_i s_i - c)$ is stationary at
+$-A_i/s_i^2 + \mu = 0$, so $s_i \propto \sqrt{A_i} = \norm{\gvec_{1:T,i}}_2$, and the minimum is
+$(\sum_i\sqrt{A_i})^2/c$. AdaGrad's $h_{t,i}$ is this optimal choice computed from the gradients seen so far, and
+the lemma above shows that learning it online costs at most a factor of 2 <Cite id="duchi2011" />.
+
+## Worked example
+
+Take $d = 1000$ binary features on the box $\Wcal = [-1, 1]^d$, so $D_\infty = 2$ and $D_2 = 2\sqrt{1000}$. Feature $i$
+is active in a round with probability $1/i^2$, and each gradient coordinate is $\pm 1$ when active and $0$ otherwise.
+Over $T = 10\,000$ rounds, replace each sum of squares by its expectation.
+
+- Coordinate $i$ has $\norm{\gvec_{1:T,i}}_2 \approx \sqrt{T/i^2} = 100/i$, so
+  $\sum_i\norm{\gvec_{1:T,i}}_2 \approx 100\sum_{i=1}^{1000}1/i = 748.5$. AdaGrad's bound is
+  $\sqrt2 \cdot 2 \cdot 748.5 = 2117$.
+- The whole gradient has $\expect\norm{\gvec_t}^2 = \sum_i 1/i^2 = 1.644$. OGD with the best fixed step in hindsight
+  has bound $D_2\sqrt{\sum_t\norm{\gvec_t}^2} \approx 2\sqrt{1000} \cdot \sqrt{16\,440} = 8109$.
+
+AdaGrad's bound is about a quarter of the best fixed-step bound. The gain grows with the dimension: frequent features
+set the Euclidean gradient norm, while AdaGrad pays for each feature in proportion to its own activity.
+
+## Variants
+
+- **Full-matrix AdaGrad** uses $\Hmat_t = (\sum_{s \le t}\gvec_s\gvec_s^\top)^{1/2}$ and adapts to correlated
+  coordinates, at $O(d^2)$ memory and a matrix square root per step. The <NoteLink
+  to="online-newton-step-and-exp-concavity">online Newton step</NoteLink> uses the same matrix without the square
+  root, because exp-concave losses supply curvature.
+- **FTRL-Proximal** is the lazy, <NoteLink to="follow-the-regularised-leader" /> form of the same adaptive
+  regulariser, with an $\ell_1$ term for sparse weights. It was built for large-scale click-through-rate prediction,
+  and its analysis covers regularisers chosen from the data <Cite id="mcmahan2017b" />.
+- **RMSProp and Adam** replace the running sum of squares by an exponential moving average, so the step sizes stop
+  shrinking. That suits non-stationary deep-learning objectives. The regret analysis above no longer applies, because
+  $\Hmat_t - \Hmat_{t-1}$ can be negative. See <NoteLink to="adagrad-and-rmsprop" /> and <NoteLink to="adam" />.
+- **Parameter-free methods** remove the need for $D_\infty$ as well, with regret close to $\norm{\uvec}G\sqrt{T}$ up to
+  logarithmic factors for any comparator, from coin-betting arguments <Cite id="orabona2019" />.
+
+## Assumptions
+
+- The decision set is bounded in $\norm{\cdot}_\infty$. With an unbounded set, the bound is stated with the largest
+  distance the iterates actually reach.
+- The step $\eta = D_\infty/\sqrt2$ needs the box size; a wrong value scales the bound by a constant factor.
+- A small constant $\delta$ is usually added to $h_{t,i}$ so the first steps are defined; it adds a small term to the
+  bound.
+
+## Pitfalls
+
+- **Monotone step decay.** AdaGrad's steps only shrink. After a change in the data, a coordinate with a long history
+  moves slowly. On drifting streams this is the same weakness as a learning rate $1/\sqrt{t}$; see
+  <NoteLink to="concept-drift-adaptation" />.
+- **Dense, isotropic gradients gain nothing.** When all coordinates are equally active, the bound equals OGD's up to
+  $\sqrt2$.
+- **Coordinate dependence.** The diagonal version depends on the basis. A rotation of the features can turn sparse
+  gradients into dense ones.

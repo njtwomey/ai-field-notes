@@ -1,0 +1,135 @@
+---
+title: Sequential Bayesian updating
+kind: concept
+summary: 'Sequential Bayesian updating uses each posterior as the prior for the next observation, $p(\thetavec \mid x_{1:t}) \propto p(x_t \mid \thetavec)\,p(\thetavec \mid x_{1:t-1})$. Conjugate models update sufficient statistics exactly; assumed density filtering projects by moment matching.'
+tags: [online-learning, bayesian, streaming, probabilistic, worked-example]
+aliases: [recursive Bayesian estimation, online Bayesian learning, streaming Bayesian inference, Bayesian online learning, posterior as prior, power prior, Bayesian forgetting]
+requires: [bayes-theorem, conjugate-priors]
+partOf: [online-learning]
+related: [bayesian-inference, kalman-filter, expectation-propagation, bayesian-linear-regression, aggregating-algorithm-and-mixability, bayesian-online-changepoint-detection, particle-filter, kl-divergence]
+references: [opper1998, minka2001, cesabianchi2006, bishop2006]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let observations $x_1, x_2, \dots$ be conditionally independent given a parameter $\thetavec$ with prior $p(\thetavec)$.
+**Sequential Bayesian updating** computes the posterior one observation at a time:
+
+$$
+p(\thetavec \mid x_{1:t}) = \frac{p(x_t \mid \thetavec)\,p(\thetavec \mid x_{1:t-1})}{p(x_t \mid x_{1:t-1})}, \qquad
+p(x_t \mid x_{1:t-1}) = \int p(x_t \mid \thetavec)\,p(\thetavec \mid x_{1:t-1})\,d\thetavec.
+$$
+
+After each step the posterior replaces the data: the next update needs only the current posterior and the new
+observation. The denominator is the **one-step predictive** probability of $x_t$.
+</Definition>
+
+## Why the recursion is exact
+
+By <NoteLink to="bayes-theorem" /> on the whole batch, $p(\thetavec \mid x_{1:t}) \propto p(\thetavec)\prod_{s=1}^{t}p(x_s \mid \thetavec)$,
+using conditional independence. Splitting off the last factor, the remaining product is proportional to
+$p(\thetavec \mid x_{1:t-1})$, which gives the recursion. Three consequences follow.
+
+- **Order does not matter.** The batch posterior is a product over observations, so any order of updates gives the
+  same result.
+- **The predictive probabilities multiply to the evidence.** By the chain rule,
+  $\prod_{t=1}^{T}p(x_t \mid x_{1:t-1}) = p(x_{1:T})$, the marginal likelihood. The cumulative log loss of the sequential
+  predictions is $-\ln p(x_{1:T})$, a model score computed online.
+- **Regret under log loss.** For a finite set of models, the Bayesian predictive is the aggregating algorithm, and its
+  cumulative log loss exceeds the best model's by at most $\ln(1/\pi_i)$, where $\pi_i$ is that model's prior mass
+  (see <NoteLink to="aggregating-algorithm-and-mixability" />). For a smooth $d$-parameter family with a prior density
+  that is positive near the best parameter, the excess over the best parameter in hindsight grows as
+  $\tfrac{d}{2}\ln T + O(1)$ <Cite id="cesabianchi2006" />: each parameter costs $\tfrac12\ln T$ nats.
+
+## Conjugate models: streaming by sufficient statistics
+
+When the prior is conjugate to the likelihood, the posterior stays in the prior's family and each update adds the new
+observation's sufficient statistics to the hyperparameters (see <NoteLink to="conjugate-priors" />). The state is a
+fixed-size vector, whatever the length of the stream.
+
+- **Beta–Bernoulli.** With prior $\Beta(a, b)$ and $x_t \in \set{0, 1}$, the update is $a \leftarrow a + x_t$,
+  $b \leftarrow b + 1 - x_t$, and the predictive probability of $x_{t+1} = 1$ is $a/(a + b)$.
+- **Gaussian mean with known variance.** With prior $\Gauss(\mu, \tau^2)$ and $x_t \sim \Gauss(\theta, \sigma^2)$,
+  precisions add, $1/\tau^2 \leftarrow 1/\tau^2 + 1/\sigma^2$, and the mean becomes the precision-weighted average of
+  the old mean and $x_t$.
+- **Linear regression with Gaussian noise.** With prior $\thetavec \sim \Gauss(\zeros, \sigma_0^2\I)$ and
+  $y_t = \thetavec^\top\xvec_t + \varepsilon_t$, $\varepsilon_t \sim \Gauss(0, \sigma^2)$, the posterior mean is the ridge
+  solution with penalty $\sigma^2/\sigma_0^2$. Its online update is recursive least squares, derived in
+  <NoteLink to="online-learning-for-linear-models" />, and the posterior covariance is $\sigma^2\Pmat_t$.
+
+**Worked example.** Start from $\Beta(1, 1)$, uniform on $[0, 1]$. The stream $1, 0, 1, 1$ gives $\Beta(2, 1)$,
+$\Beta(2, 2)$, $\Beta(3, 2)$, $\Beta(4, 2)$. The predictive probabilities of the four observations were $1/2$, $1/3$,
+$1/2$ and $3/5$, whose product $1/20$ is the marginal likelihood
+$\int_0^1\theta^3(1 - \theta)\,d\theta = \mathrm{B}(4, 2) = 1/20$. The predictive probability that the fifth observation
+is 1 is $4/6 = 0.667$.
+
+## Assumed density filtering
+
+Without conjugacy, the product $p(x_t \mid \thetavec)\,q_{t-1}(\thetavec)$ leaves any tractable family, and exact
+posteriors grow in complexity with $t$. **Assumed density filtering** (ADF) keeps an approximation $q_t$ in a chosen
+exponential family $\Qcal$. Each step forms the **tilted distribution**
+$\hat p_t(\thetavec) \propto p(x_t \mid \thetavec)\,q_{t-1}(\thetavec)$ and projects it back:
+
+$$
+q_t = \argmin_{q \in \Qcal}\KL(\hat p_t \,\|\, q).
+$$
+
+**Projection is moment matching.** Let $q(\thetavec) = h(\thetavec)\exp(\etavec^\top\svec(\thetavec) - A(\etavec))$, with
+sufficient statistics $\svec$ and log-normaliser $A$. Up to terms that do not depend on $\etavec$,
+$\KL(\hat p_t \,\|\, q) = -\etavec^\top\expect_{\hat p_t}[\svec] + A(\etavec)$. Its gradient in $\etavec$ is
+$-\expect_{\hat p_t}[\svec] + \nabla A(\etavec)$, and $\nabla A(\etavec) = \expect_q[\svec]$ for an exponential family.
+The minimiser therefore sets $\expect_q[\svec] = \expect_{\hat p_t}[\svec]$. For a Gaussian $q$, ADF matches the mean and
+covariance of the tilted distribution <Cite id="opper1998" /> <Cite id="minka2001" />.
+
+**Probit regression.** Let $q_{t-1} = \Gauss(\mvec, \Smat)$ and $p(y \mid \thetavec) = \Phi(y\,\thetavec^\top\xvec)$ with
+$y \in \set{-1, +1}$ and $\Phi$ the standard normal distribution function. The tilted distribution depends on
+$\thetavec$ only through the scalar $\thetavec^\top\xvec$, whose prior is $\Gauss(\mvec^\top\xvec, s^2)$ with
+$s^2 = \xvec^\top\Smat\xvec$. Its moments have closed forms. With $z = y\,\mvec^\top\xvec/\sqrt{1 + s^2}$ and
+$r = \phi(z)/\Phi(z)$, where $\phi$ is the standard normal density,
+
+$$
+\mvec_{\text{new}} = \mvec + \frac{ry}{\sqrt{1 + s^2}}\Smat\xvec, \qquad
+\Smat_{\text{new}} = \Smat - \frac{r(z + r)}{1 + s^2}\Smat\xvec\xvec^\top\Smat.
+$$
+
+The update is rank one, like recursive least squares, and costs $O(d^2)$.
+
+**Worked example.** Start from $\Gauss(\zeros, \I)$ and observe $\xvec = (1, 2)$, $y = +1$. Then $s^2 = 5$, $z = 0$ and
+$r = \phi(0)/\Phi(0) = 0.798$. The update gives $\mvec_{\text{new}} = (0.326, 0.651)$ and
+$\Smat_{\text{new}} = \begin{pmatrix}0.894 & -0.212 \\ -0.212 & 0.576\end{pmatrix}$. The exact posterior moments, estimated
+by importance sampling with two million prior draws, agree to within $0.001$ in the mean and covariance.
+
+## Changing parameters
+
+The recursion above assumes $\thetavec$ never changes. With drift, old observations are evidence about a parameter
+that no longer holds. Two remedies keep the online form.
+
+- **Add dynamics.** Model $\thetavec_t = \thetavec_{t-1} + \wvec_t$ with noise $\wvec_t$. Each step first predicts,
+  which inflates the posterior covariance, then updates. For a linear-Gaussian model this is the
+  <NoteLink to="kalman-filter" />; for non-linear models, the <NoteLink to="particle-filter" />.
+- **Forget.** Raise the posterior to a power $\lambda \in (0, 1]$ before each update:
+  $p(\thetavec \mid x_{1:t}) \propto p(x_t \mid \thetavec)\,p(\thetavec \mid x_{1:t-1})^\lambda$. For a conjugate model this
+  multiplies the accumulated pseudo-counts by $\lambda$. A Beta posterior never holds more than about $1/(1 - \lambda)$
+  observations' worth of evidence. This is the Bayesian form of the forgetting factor in
+  <NoteLink to="concept-drift-adaptation" />.
+
+When the parameter changes abruptly, <NoteLink to="bayesian-online-changepoint-detection" /> keeps a posterior over the
+time since the last change and runs a sequential update for each hypothesis.
+
+## Assumptions
+
+- The observations are conditionally independent given $\thetavec$, and the model is fixed. The recursion is exact
+  only under both.
+- The likelihood can be evaluated for one observation at a time. Models whose likelihood does not factorise over
+  observations, such as those with global latent structure, need other online schemes.
+
+## Pitfalls
+
+- **ADF depends on order.** Each projection loses information that later observations cannot restore, so different
+  orders give different $q_T$. <NoteLink to="expectation-propagation" /> revisits each factor to remove this dependence,
+  at the cost of storing a site per observation.
+- **Overconfidence.** A posterior after millions of observations has tiny variance and barely moves. On a drifting
+  stream this is the same failure as a learning rate that decays to zero; add dynamics or forgetting.
+- **Numerical drift of the covariance.** The rank-one downdates can lose positive definiteness in floating point, as
+  in recursive least squares. Keep a factorised form or symmetrise periodically.

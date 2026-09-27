@@ -1,0 +1,160 @@
+---
+title: Online Newton step and exp-concavity
+kind: concept
+summary: 'A loss is $\alpha$-exp-concave if $e^{-\alpha f}$ is concave. Log loss and bounded squared loss are. The online Newton step preconditions each gradient step by $\Amat_t = \sum_{s \le t}\gvec_s\gvec_s^\top + \epsilon\I$ and has regret $O(d(1/\alpha + GD)\log T)$ on such losses.'
+tags: [online-learning, regret, optimisation, convexity, second-order, worked-example]
+aliases: [ONS, online Newton step, exp-concave loss, exp-concavity, logarithmic regret]
+requires: [online-convex-optimisation, online-gradient-descent]
+partOf: [online-learning]
+related: [newtons-method, quasi-newton-methods, aggregating-algorithm-and-mixability, adaptive-online-methods, matrix-inverse]
+references: [hazan2007, hazan2016, cover1991, orabona2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A convex function $f : \Wcal \to \reals$ is **$\alpha$-exp-concave** for $\alpha > 0$ if $\wvec \mapsto e^{-\alpha f(\wvec)}$
+is concave on $\Wcal$. The **online Newton step** (ONS) plays
+
+$$
+\Amat_t = \epsilon\I + \sum_{s=1}^{t}\gvec_s\gvec_s^\top, \qquad
+\wvec_{t+1} = \Pi_\Wcal^{\Amat_t}\paren{\wvec_t - \tfrac{1}{\gamma}\Amat_t^{-1}\gvec_t},
+$$
+
+where $\gvec_t = \nabla f_t(\wvec_t)$, $\gamma, \epsilon > 0$ are parameters, and
+$\Pi_\Wcal^{\Amat}(\vvec) = \argmin_{\wvec \in \Wcal}(\wvec - \vvec)^\top\Amat(\wvec - \vvec)$ is the projection in the
+norm induced by $\Amat$ <Cite id="hazan2007" />.
+</Definition>
+
+## Notation
+
+$\Wcal \subseteq \reals^d$ is closed and convex with diameter $D$, and $\norm{\nabla f_t(\wvec)} \le G$ on $\Wcal$.
+$R_T(\uvec) = \sum_{t=1}^{T}\paren{f_t(\wvec_t) - f_t(\uvec)}$ is the regret against $\uvec \in \Wcal$.
+
+## Exp-concave losses
+
+Exp-concavity is a curvature condition that is weaker than strong convexity. It asks for curvature only in the
+direction of the gradient.
+
+- **Log loss of a linear model.** $f(\wvec) = -\log\inner{\wvec}{\rvec}$ with $\inner{\wvec}{\rvec} > 0$ has
+  $e^{-f(\wvec)} = \inner{\wvec}{\rvec}$, which is linear and hence concave. So $f$ is $1$-exp-concave. It is not
+  strongly convex: its Hessian $\rvec\rvec^\top/\inner{\wvec}{\rvec}^2$ has rank one. This is the loss of
+  <NoteLink to="online-convex-optimisation">portfolio selection</NoteLink>, where $\rvec$ holds price ratios
+  <Cite id="cover1991" />.
+- **Squared loss on a bounded range.** For $h(p) = e^{-\alpha(p - y)^2}$, $h''(p) = e^{-\alpha s^2}(4\alpha^2 s^2 - 2\alpha)$
+  with $s = p - y$. This is non-positive when $s^2 \le 1/(2\alpha)$. So $(p - y)^2$ is $\alpha$-exp-concave in $p$ with
+  $\alpha = 1/(2B^2)$ whenever $\abs{p - y} \le B$, and so is $(\inner{\wvec}{\xvec} - y)^2$ in $\wvec$, since
+  composing with a linear map preserves concavity.
+- **Strongly convex losses.** A $\lambda$-strongly convex $f$ with gradients bounded by $G$ is $(\lambda/G^2)$-exp-concave.
+
+The regret rate on exp-concave losses is $O(d\log T)$, logarithmic like strongly convex losses but with a factor of
+the dimension. The factor $d$ is the price of curvature that exists only along the observed gradients: the algorithm
+must learn which directions are curved.
+
+## The key inequality
+
+Exp-concavity gives a quadratic lower bound built from the gradient alone.
+
+**Lemma.** Let $f$ be $\alpha$-exp-concave on $\Wcal$ and $\gamma \le \tfrac12\min(1/(4GD), \alpha)$. Then for all
+$\wvec, \uvec \in \Wcal$, with $\gvec = \nabla f(\wvec)$,
+
+$$
+f(\uvec) \ge f(\wvec) + \inner{\gvec}{\uvec - \wvec} + \frac{\gamma}{2}\inner{\gvec}{\uvec - \wvec}^2.
+$$
+
+*Proof.* Since $2\gamma \le \alpha$, $h = e^{-2\gamma f}$ is concave (a smaller exponent keeps concavity). A concave
+function lies below its tangent: $h(\uvec) \le h(\wvec) + \inner{\nabla h(\wvec)}{\uvec - \wvec}$, with
+$\nabla h(\wvec) = -2\gamma e^{-2\gamma f(\wvec)}\gvec$. Dividing by $e^{-2\gamma f(\wvec)}$ and taking logarithms,
+
+$$
+f(\uvec) \ge f(\wvec) - \frac{1}{2\gamma}\log\paren{1 - 2\gamma\inner{\gvec}{\uvec - \wvec}}.
+$$
+
+Let $z = 2\gamma\inner{\gvec}{\uvec - \wvec}$. Then $\abs{z} \le 2\gamma GD \le \tfrac14$, and on that range
+$-\log(1 - z) \ge z + z^2/4$. Substituting gives the lemma. $\square$
+
+## The regret bound
+
+**One step.** Write $\vvec_{t+1} = \wvec_t - \tfrac1\gamma\Amat_t^{-1}\gvec_t$ for the point before projection. Then
+
+$$
+(\vvec_{t+1} - \uvec)^\top\Amat_t(\vvec_{t+1} - \uvec) = (\wvec_t - \uvec)^\top\Amat_t(\wvec_t - \uvec)
+- \frac{2}{\gamma}\inner{\gvec_t}{\wvec_t - \uvec} + \frac{1}{\gamma^2}\gvec_t^\top\Amat_t^{-1}\gvec_t.
+$$
+
+Projection in the $\Amat_t$-norm does not increase the $\Amat_t$-distance to $\uvec \in \Wcal$, by the same argument as
+for Euclidean projection in <NoteLink to="online-gradient-descent" />. Replacing $\vvec_{t+1}$ by $\wvec_{t+1}$ on the
+left and rearranging,
+
+$$
+\inner{\gvec_t}{\wvec_t - \uvec} \le \frac{1}{2\gamma}\gvec_t^\top\Amat_t^{-1}\gvec_t
++ \frac{\gamma}{2}(\wvec_t - \uvec)^\top\Amat_t(\wvec_t - \uvec) - \frac{\gamma}{2}(\wvec_{t+1} - \uvec)^\top\Amat_t(\wvec_{t+1} - \uvec).
+$$
+
+**Sum.** The distance terms nearly telescope. Since $\Amat_t - \Amat_{t-1} = \gvec_t\gvec_t^\top$ and
+$\Amat_0 = \epsilon\I$, collecting them leaves
+$\tfrac{\gamma}{2}\sum_t\inner{\gvec_t}{\wvec_t - \uvec}^2 + \tfrac{\gamma}{2}\epsilon D^2$, after dropping the final
+negative term. So
+
+$$
+\sum_{t=1}^{T}\paren{\inner{\gvec_t}{\wvec_t - \uvec} - \frac{\gamma}{2}\inner{\gvec_t}{\wvec_t - \uvec}^2}
+\le \frac{1}{2\gamma}\sum_{t=1}^{T}\gvec_t^\top\Amat_t^{-1}\gvec_t + \frac{\gamma\epsilon D^2}{2}.
+$$
+
+By the lemma, the left side is at least $R_T(\uvec)$. The quadratic term that the exp-concavity lemma supplies is
+exactly the one that the preconditioner creates; this is why $\Amat_t$ accumulates $\gvec_t\gvec_t^\top$.
+
+**The elliptical potential.** For $\Amat = \Bmat + \gvec\gvec^\top$ with $\Bmat$ positive definite, the matrix
+determinant lemma gives $\det\Bmat = \det\Amat\,(1 - \gvec^\top\Amat^{-1}\gvec)$. Hence
+
+$$
+\gvec^\top\Amat^{-1}\gvec = 1 - \frac{\det\Bmat}{\det\Amat} \le \log\frac{\det\Amat}{\det\Bmat},
+$$
+
+using $1 - 1/x \le \log x$. Summing over rounds telescopes:
+$\sum_t\gvec_t^\top\Amat_t^{-1}\gvec_t \le \log(\det\Amat_T/\det\Amat_0)$. The eigenvalues of $\Amat_T$ sum to at most
+$d\epsilon + TG^2$, and the determinant of a positive definite matrix with a given trace is largest when the
+eigenvalues are equal, so $\log(\det\Amat_T/\epsilon^d) \le d\log(1 + TG^2/(d\epsilon)) \le d\log(1 + TG^2/\epsilon)$.
+
+**Choose the parameters.** With $\epsilon = 1/(\gamma^2D^2)$ and $\gamma = \tfrac12\min(1/(4GD), \alpha)$,
+
+$$
+R_T \le \frac{1}{2\gamma}\paren{d\log\paren{1 + TG^2\gamma^2D^2} + 1} \le 4\paren{GD + \frac{1}{\alpha}}\paren{d\log\paren{1 + \frac{T}{64}} + 1},
+$$
+
+using $1/(2\gamma) = \max(4GD, 1/\alpha) \le 4(GD + 1/\alpha)$ and $\gamma GD \le 1/8$. This is
+$O(d(1/\alpha + GD)\log T)$ <Cite id="hazan2007" /> <Cite id="hazan2016" />.
+
+## Worked example
+
+Take $d = 10$, $GD = 1$ and $\alpha = 1$. Then $\gamma = 1/8$, $1/(2\gamma) = 4$, and the first form of the bound is
+$4(10\log(1 + T/64) + 1)$, which is
+$206$ at $T = 10^4$, $298$ at $T = 10^5$ and $390$ at $T = 10^6$. The <NoteLink to="online-gradient-descent" /> bound
+$DG\sqrt{T}$ is $100$, $316$ and $1000$ at the same horizons. The logarithmic bound wins only after about $10^5$
+rounds here. The constants in these bounds are loose, but the comparison shows that $d\log T$ beats $\sqrt{T}$ only
+when $T$ is large compared with $d^2$.
+
+## Cost
+
+Each step needs $\Amat_t^{-1}$. The Sherman–Morrison formula updates it in $O(d^2)$ from $\Amat_{t-1}^{-1}$, because
+$\Amat_t$ differs by a rank-one term (see <NoteLink to="matrix-inverse" />). The projection in the $\Amat_t$-norm is a
+quadratic program and is the expensive part when $\Wcal$ is not the whole space. Memory is $O(d^2)$. These costs keep
+ONS to moderate dimensions; <NoteLink to="adaptive-online-methods">diagonal AdaGrad</NoteLink> keeps only the diagonal
+of $\Amat_t$ and costs $O(d)$.
+
+## Assumptions
+
+- $\Wcal$ is bounded. The rate depends on $GD$, and the exp-concavity constant of squared or log loss depends on the
+  range of predictions over $\Wcal$.
+- The parameters $\gamma$ and $\epsilon$ need $\alpha$, $G$ and $D$.
+- For experts with mixable losses, the <NoteLink to="aggregating-algorithm-and-mixability">aggregating algorithm</NoteLink>
+  does better than ONS on the simplex: its regret $(\ln N)/\eta$ does not grow with $T$.
+
+## Pitfalls
+
+- **Exp-concavity constants can be tiny.** Squared loss has $\alpha = 1/(2B^2)$, so a range $B = 10$ gives
+  $1/\alpha = 200$, and the bound grows accordingly.
+- **Skipping the projection.** Without the generalised projection the iterates can leave $\Wcal$, where the losses
+  may not be exp-concave and the lemma fails.
+- **Newton on non-curved directions.** $\Amat_t$ is nearly singular along directions no gradient has visited; the
+  $\epsilon\I$ term prevents enormous steps there. Setting $\epsilon$ too small makes early steps unstable.

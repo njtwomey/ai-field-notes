@@ -1,0 +1,125 @@
+---
+title: Online convex optimisation
+kind: concept
+summary: 'Online convex optimisation is online learning with a convex decision set $\Wcal$ and convex losses $f_t$. Convexity lets any regret bound for linear losses $\inner{\gvec_t}{\wvec}$ transfer to convex ones, and the minimax regret for $G$-Lipschitz losses on a set of diameter $D$ is of order $DG\sqrt{T}$.'
+tags: [online-learning, regret, convexity, optimisation]
+aliases: [OCO, online convex programming, linearisation of convex losses]
+requires: [convex-sets-and-functions, subgradients]
+partOf: [online-learning]
+related: [mirror-descent, stochastic-gradient-descent-theory, hedge-and-exponential-weights]
+references: [zinkevich2003, hazan2016, shalevshwartz2012, orabona2019, cover1991]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+In **online convex optimisation** (OCO) a learner and an environment play $T$ rounds. The learner holds a closed
+convex **decision set** $\Wcal \subseteq \reals^d$. In round $t$ it picks $\wvec_t \in \Wcal$. The environment then
+reveals a convex **loss** $f_t : \Wcal \to \reals$, and the learner pays $f_t(\wvec_t)$. The learner minimises the
+regret $R_T = \sum_{t=1}^{T} f_t(\wvec_t) - \min_{\uvec \in \Wcal}\sum_{t=1}^{T} f_t(\uvec)$ <Cite id="zinkevich2003" />.
+</Definition>
+
+## Constants of the problem
+
+Two constants set the scale of every bound.
+
+- The **diameter** $D = \max_{\wvec, \wvec' \in \Wcal}\norm{\wvec - \wvec'}_2$ bounds how far apart two decisions can
+  be.
+- The **gradient bound** $G$ satisfies $\norm{\gvec}_2 \le G$ for every subgradient $\gvec \in \partial f_t(\wvec)$, for
+  all $t$ and $\wvec \in \Wcal$. Equivalently, each $f_t$ is $G$-Lipschitz on $\Wcal$.
+
+The learner is assumed to observe at least a subgradient $\gvec_t \in \partial f_t(\wvec_t)$ after playing $\wvec_t$.
+Most algorithms use nothing else.
+
+## Problems that are OCO
+
+- **Prediction with expert advice.** $\Wcal$ is the probability simplex $\Delta_N$ over $N$ experts, and
+  $f_t(\wvec) = \inner{\wvec}{\lvec_t}$ with $\lvec_t = (\ell_{t,1}, \dots, \ell_{t,N}) \in [0, 1]^N$ the experts' losses. The learner's loss is the
+  expected loss of an expert drawn from $\wvec_t$. <NoteLink to="hedge-and-exponential-weights" /> is the standard
+  algorithm.
+- **Online regression and classification.** $\wvec$ is a parameter vector, and
+  $f_t(\wvec) = \ell(\inner{\wvec}{\xvec_t}, y_t)$ for a convex loss $\ell$ such as squared, logistic or hinge loss.
+  <NoteLink to="online-learning-for-linear-models" /> treats these losses in detail.
+- **Portfolio selection.** $\wvec \in \Delta_N$ splits wealth across $N$ assets, $\rvec_t$ holds the assets' price
+  ratios for day $t$, and $f_t(\wvec) = -\log\inner{\wvec}{\rvec_t}$. The total loss is minus the log of final wealth.
+  Low regret means the learner's wealth grows at nearly the rate of the best constant-rebalanced portfolio chosen in
+  hindsight <Cite id="cover1991" />.
+
+## Linearisation: linear losses are the hard case
+
+For a convex $f_t$ and a subgradient $\gvec_t \in \partial f_t(\wvec_t)$, the subgradient inequality states
+$f_t(\uvec) \ge f_t(\wvec_t) + \inner{\gvec_t}{\uvec - \wvec_t}$ for all $\uvec$. Rearranged,
+
+$$
+f_t(\wvec_t) - f_t(\uvec) \le \inner{\gvec_t}{\wvec_t} - \inner{\gvec_t}{\uvec}.
+$$
+
+The right side is the regret in round $t$ on the linear loss $\tilde f_t(\wvec) = \inner{\gvec_t}{\wvec}$. Summing over
+$t$,
+
+$$
+R_T(\uvec) = \sum_{t=1}^{T}\paren{f_t(\wvec_t) - f_t(\uvec)} \le \sum_{t=1}^{T}\paren{\tilde f_t(\wvec_t) - \tilde f_t(\uvec)}.
+$$
+
+An algorithm that feeds $\gvec_t$ to a learner for linear losses therefore inherits that learner's regret bound on the
+convex losses. The gradients have norm at most $G$ either way. Linear losses are the worst case among $G$-Lipschitz
+convex losses, and most analyses in this chapter prove bounds for linear losses only.
+
+The reduction discards curvature. Losses with curvature, such as strongly convex or exp-concave losses, admit
+$O(\log T)$ regret, and exploiting that needs more than the gradient (see below).
+
+## Why no algorithm beats $DG\sqrt{T}$
+
+Take $d = 1$, $\Wcal = [-D/2, D/2]$ and linear losses $f_t(w) = z_t w$, where $z_1, \dots, z_T$ are independent and
+equal to $+G$ or $-G$ with probability $\tfrac12$ each. Every $f_t$ is $G$-Lipschitz and $\Wcal$ has diameter $D$.
+
+- Whatever the learner plays, $w_t$ is chosen before $z_t$ is drawn, and $z_t$ has mean zero. So
+  $\expect\brack{\sum_t z_t w_t} = 0$.
+- The best fixed decision in hindsight puts $u$ at the end of the interval opposite the sign of $S_T = \sum_t z_t$,
+  so $\min_{u}\sum_t z_t u = -\tfrac{D}{2}\abs{S_T}$.
+
+The expected regret is therefore $\tfrac{D}{2}\expect\abs{S_T}$. $S_T/(G\sqrt{T})$ tends to a standard normal by the
+central limit theorem, and $\expect\abs{Z} = \sqrt{2/\pi}$ for $Z \sim \Gauss(0, 1)$, so
+
+$$
+\expect[R_T] = \frac{D}{2}\expect\abs{S_T} \approx \frac{DG}{2}\sqrt{\frac{2T}{\pi}} = DG\sqrt{\frac{T}{2\pi}}.
+$$
+
+A random sequence has expected regret of order $DG\sqrt{T}$ for every learner, so for every learner some fixed sequence
+does at least as badly. <NoteLink to="online-gradient-descent" /> achieves $DG\sqrt{T}$, which matches up to a
+constant factor. <NoteLink to="lower-bounds-for-online-learning" /> sharpens the same argument for experts.
+
+## Rates by loss class
+
+| Loss class | Algorithm | Regret |
+| --- | --- | --- |
+| Convex, $G$-Lipschitz, diameter $D$ | <NoteLink to="online-gradient-descent" /> | $O(DG\sqrt{T})$ |
+| Linear on the simplex $\Delta_N$, losses in $[0, 1]$ | <NoteLink to="hedge-and-exponential-weights">Hedge</NoteLink> | $\sqrt{(T\ln N)/2}$ |
+| $\lambda$-strongly convex | online gradient descent with $\eta_t = 1/(\lambda t)$ | $O((G^2/\lambda)\log T)$ |
+| $\alpha$-exp-concave | <NoteLink to="online-newton-step-and-exp-concavity">online Newton step</NoteLink> | $O(d(1/\alpha + GD)\log T)$ |
+| $\eta$-mixable, $N$ experts | <NoteLink to="aggregating-algorithm-and-mixability">aggregating algorithm</NoteLink> | $(\ln N)/\eta$ |
+| Convex, sparse or badly scaled gradients | <NoteLink to="adaptive-online-methods">AdaGrad</NoteLink> | $O(D_\infty\sum_i\norm{\gvec_{1:T,i}}_2)$ |
+
+<NoteLink to="follow-the-regularised-leader" /> and online <NoteLink to="mirror-descent" /> produce all of the
+first-order algorithms in the table by the choice of a regulariser <Cite id="shalevshwartz2012" /> <Cite
+id="hazan2016" />.
+
+## Assumptions
+
+- **Bounded domain and gradients.** The bounds scale with $D$ and $G$. On an unbounded domain the right quantity is the
+  norm of the comparator $\norm{\uvec}$, and parameter-free algorithms achieve
+  $O(\norm{\uvec}G\sqrt{T\log(1 + \norm{\uvec}T)})$ without knowing $\norm{\uvec}$ <Cite id="orabona2019" />.
+- **Convexity.** Without convexity of $\Wcal$ and $f_t$ the linearisation step fails. Non-convex online problems over a
+  finite set are handled by randomising, as in the experts setting.
+- **Full-information gradients.** The learner sees $\gvec_t$. With only the value $f_t(\wvec_t)$ the problem is a
+  bandit convex optimisation problem, with slower rates.
+
+## Pitfalls
+
+- **Regret is relative.** A regret bound of $DG\sqrt{T}$ says nothing about the absolute loss. If no fixed decision is
+  good, the learner is not good either.
+- **Tuning needs $T$, $D$ and $G$.** Step sizes that achieve the bounds depend on these constants. The doubling trick
+  or decreasing step sizes remove the dependence on $T$ at a constant-factor cost, and adaptive methods remove the
+  dependence on $G$.
+- **The comparator is fixed.** Static regret compares with one $\uvec$ for the whole sequence. On drifting data use
+  dynamic or adaptive regret; see <NoteLink to="tracking-the-best-expert" />.

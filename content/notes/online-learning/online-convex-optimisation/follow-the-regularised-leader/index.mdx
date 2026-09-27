@@ -1,0 +1,195 @@
+---
+title: Follow the regularised leader
+kind: concept
+summary: 'Follow the regularised leader plays $\wvec_{t+1} = \argmin_{\wvec}\sum_{s \le t}f_s(\wvec) + \psi(\wvec)/\eta$. Following the leader alone can have linear regret; a $1$-strongly convex $\psi$ makes play stable and gives regret at most $(\psi(\uvec) - \min\psi)/\eta + \eta\sum_t\norm{\gvec_t}_*^2$.'
+tags: [online-learning, regret, optimisation, convexity, regularisation, worked-example]
+aliases: [FTRL, follow the leader, FTL, be-the-leader lemma, dual averaging, lazy projection, regularised follow the leader]
+requires: [online-convex-optimisation, convex-sets-and-functions]
+partOf: [online-learning]
+related: [online-gradient-descent, mirror-descent, hedge-and-exponential-weights, conjugate-functions, adaptive-online-methods]
+references: [shalevshwartz2012, kalai2005, hazan2016, orabona2019, mcmahan2017b]
+status: draft
+updated: 2026-09-27
+---
+
+import { FtlFigure } from './FtlFigure'
+
+<Definition>
+**Follow the leader** (FTL) plays the decision with the least cumulative loss so far,
+$\wvec_{t+1} = \argmin_{\wvec \in \Wcal}\sum_{s=1}^{t}f_s(\wvec)$. **Follow the regularised leader** (FTRL) adds a
+fixed convex **regulariser** $\psi : \Wcal \to \reals$, scaled by a learning rate $\eta > 0$:
+
+$$
+\wvec_{t+1} = \argmin_{\wvec \in \Wcal}\paren{\sum_{s=1}^{t}f_s(\wvec) + \frac{1}{\eta}\psi(\wvec)}, \qquad
+\wvec_1 = \argmin_{\wvec \in \Wcal}\psi(\wvec).
+$$
+
+With linear losses $f_s(\wvec) = \inner{\gvec_s}{\wvec}$, FTRL is the common form of online gradient descent,
+exponential weights and AdaGrad, which differ only in $\psi$ <Cite id="shalevshwartz2012" />.
+</Definition>
+
+## Notation
+
+$\Wcal \subseteq \reals^d$ is a closed convex decision set, $f_t$ a convex loss, $\gvec_t \in \partial f_t(\wvec_t)$ a
+subgradient and $\uvec \in \Wcal$ a comparator. $R_T(\uvec) = \sum_{t=1}^{T}\paren{f_t(\wvec_t) - f_t(\uvec)}$ is the
+regret. $\psi$ is **$1$-strongly convex with respect to a norm** $\norm{\cdot}$ if
+$\psi(\vvec) \ge \psi(\wvec) + \inner{\nabla\psi(\wvec)}{\vvec - \wvec} + \tfrac12\norm{\vvec - \wvec}^2$. The dual norm
+is $\norm{\gvec}_* = \max_{\norm{\vvec} \le 1}\inner{\gvec}{\vvec}$; the Euclidean norm is its own dual, and
+$\norm{\cdot}_1$ and $\norm{\cdot}_\infty$ are dual to each other.
+
+## Follow the leader fails
+
+Take $\Wcal = [-1, 1]$ and linear losses $f_t(w) = z_t w$ with $z_1 = \tfrac12$ and then
+$z_t = -1, +1, -1, +1, \dots$ for $t \ge 2$. Let $S_t = \sum_{s \le t}z_s$ be the cumulative gradient. FTL plays
+$w_{t+1} = -\sgn(S_t)$, the end of the interval that minimises $S_t w$.
+
+- After round 1, $S_1 = \tfrac12$, so $w_2 = -1$. Then $z_2 = -1$ and the learner pays $1$.
+- After round 2, $S_2 = -\tfrac12$, so $w_3 = +1$. Then $z_3 = +1$ and the learner pays $1$.
+
+The cumulative gradient alternates between $\tfrac12$ and $-\tfrac12$, so the leader flips every round, always to the
+end that the next loss punishes. Over $T = 100$ rounds FTL pays $99$. The best fixed decision pays
+$\min(S_T, -S_T) = -\tfrac12$. The regret is $99.5$, linear in $T$.
+
+The problem is instability. A small change in the cumulative loss moves the leader across the whole decision set.
+FTL works when the losses themselves are curved enough to prevent this: on $\lambda$-strongly convex losses its regret
+is $O((G^2/\lambda)\log T)$ (see the derivation at the end).
+
+## The be-the-leader lemma
+
+The analysis of every FTRL variant starts from one inequality. A hypothetical learner that could play
+$\wvec_{t+1}$ in round $t$, one step ahead, is at least as good as any fixed decision.
+
+**Lemma** <Cite id="kalai2005" />. For FTL, $\sum_{t=1}^{T}f_t(\wvec_{t+1}) \le \sum_{t=1}^{T}f_t(\uvec)$ for every
+$\uvec \in \Wcal$.
+
+*Proof by induction on $T$.* For $T = 1$, $\wvec_2$ minimises $f_1$, so $f_1(\wvec_2) \le f_1(\uvec)$. Suppose the
+claim holds for $T - 1$. Apply it with $\uvec = \wvec_{T+1}$:
+
+$$
+\sum_{t=1}^{T-1}f_t(\wvec_{t+1}) \le \sum_{t=1}^{T-1}f_t(\wvec_{T+1}).
+$$
+
+Add $f_T(\wvec_{T+1})$ to both sides. The right side becomes $\sum_{t=1}^{T}f_t(\wvec_{T+1})$, which is at most
+$\sum_{t=1}^{T}f_t(\uvec)$ because $\wvec_{T+1}$ minimises $\sum_{t \le T}f_t$. $\square$
+
+Subtracting the lemma from the learner's loss gives
+
+$$
+R_T(\uvec) \le \sum_{t=1}^{T}\paren{f_t(\wvec_t) - f_t(\wvec_{t+1})}.
+$$
+
+FTL's regret is at most the total change in loss caused by moving from one leader to the next. In the counterexample
+each move costs $2$.
+
+## Regret of FTRL
+
+FTRL is FTL on the sequence $\psi/\eta, f_1, f_2, \dots$, with the regulariser as a round-zero loss played by
+$\wvec_1$. The lemma applied to that sequence gives
+$\psi(\wvec_1)/\eta + \sum_{t=1}^{T}f_t(\wvec_{t+1}) \le \psi(\uvec)/\eta + \sum_{t=1}^{T}f_t(\uvec)$, so
+
+$$
+R_T(\uvec) \le \frac{\psi(\uvec) - \psi(\wvec_1)}{\eta} + \sum_{t=1}^{T}\paren{f_t(\wvec_t) - f_t(\wvec_{t+1})}.
+$$
+
+The first term is the price of regularising. The second is the price of moving, and the regulariser keeps it small.
+
+**Stability.** Take linear losses $f_s(\wvec) = \inner{\gvec_s}{\wvec}$ and a $1$-strongly convex $\psi$. The FTRL
+objective $\Phi_t(\wvec) = \sum_{s < t}\inner{\gvec_s}{\wvec} + \psi(\wvec)/\eta$ is $(1/\eta)$-strongly convex and is
+minimised by $\wvec_t$. Strong convexity at a minimiser gives
+$\Phi_t(\vvec) \ge \Phi_t(\wvec_t) + \tfrac{1}{2\eta}\norm{\vvec - \wvec_t}^2$ for every $\vvec \in \Wcal$. Apply this to
+$\Phi_t$ at $\vvec = \wvec_{t+1}$ and to $\Phi_{t+1} = \Phi_t + \inner{\gvec_t}{\cdot}$ at $\vvec = \wvec_t$, and add:
+
+$$
+\inner{\gvec_t}{\wvec_t - \wvec_{t+1}} \ge \frac{1}{\eta}\norm{\wvec_t - \wvec_{t+1}}^2.
+$$
+
+The left side is at most $\norm{\gvec_t}_*\norm{\wvec_t - \wvec_{t+1}}$ by the definition of the dual norm. Dividing,
+$\norm{\wvec_t - \wvec_{t+1}} \le \eta\norm{\gvec_t}_*$, and therefore
+$f_t(\wvec_t) - f_t(\wvec_{t+1}) \le \eta\norm{\gvec_t}_*^2$. Substituting,
+
+$$
+R_T(\uvec) \le \frac{\psi(\uvec) - \min_{\Wcal}\psi}{\eta} + \eta\sum_{t=1}^{T}\norm{\gvec_t}_*^2.
+$$
+
+By the linearisation argument in <NoteLink to="online-convex-optimisation" />, the same bound holds for convex $f_t$
+when FTRL is run on the linearised losses $\inner{\gvec_s}{\wvec}$.
+
+**Two regularisers.**
+
+- **Euclidean.** $\psi(\wvec) = \tfrac12\norm{\wvec}_2^2$ on a ball of radius $B$, with $\norm{\gvec_t}_2 \le G$. The
+  bound is $B^2/(2\eta) + \eta TG^2$, minimised by $\eta = B/(G\sqrt{2T})$ at $R_T \le BG\sqrt{2T}$. When
+  $\Wcal = \reals^d$, FTRL plays $\wvec_{t+1} = -\eta\sum_{s \le t}\gvec_s$, which is
+  <NoteLink to="online-gradient-descent" /> started at zero.
+- **Negative entropy on the simplex.** $\psi(\wvec) = \sum_{i}w_i\ln w_i$ on $\Delta_N$ is $1$-strongly convex with
+  respect to $\norm{\cdot}_1$ (this is Pinsker's inequality), and $\psi(\uvec) - \min\psi \le \ln N$. With losses in
+  $[0, 1]$, $\norm{\gvec_t}_\infty \le 1$. The bound is $\ln N/\eta + \eta T$, which is $2\sqrt{T\ln N}$ at
+  $\eta = \sqrt{\ln N/T}$. The minimiser is $w_{t+1,i} \propto \exp(-\eta\sum_{s \le t}g_{s,i})$, which is
+  <NoteLink to="hedge-and-exponential-weights" />.
+
+The entropic bound depends on $N$ only through $\ln N$ because the loss vectors are measured in $\norm{\cdot}_\infty$,
+which does not grow with $N$. The Euclidean regulariser on the simplex measures them in $\norm{\cdot}_2$, up to
+$\sqrt{N}$.
+
+**Worked example.** Run FTRL with $\psi(w) = \tfrac12w^2$ on the counterexample above, with $T = 100$ and
+$\eta = 1/\sqrt{2T} = 0.0707$. The minimiser of $S_tw + w^2/(2\eta)$ on $[-1, 1]$ is $w_{t+1} = -\eta S_t$. The cumulative
+gradient alternates between $\pm\tfrac12$, so FTRL plays $\mp\eta/2$ and pays $\eta/2$ per round after the first. Its
+total loss is $99\eta/2 = 3.50$, and its regret against the best fixed decision, which pays $-\tfrac12$, is $4.00$.
+The bound $BG\sqrt{2T}$ with $B = G = 1$ is $14.1$. Follow the leader's regret on the same sequence is $99.5$.
+
+<FtlFigure />
+
+## Equivalence with mirror descent
+
+For linear losses and an unconstrained domain, set the gradient of the FTRL objective to zero:
+
+$$
+\nabla\psi(\wvec_{t+1}) = -\eta\sum_{s=1}^{t}\gvec_s = \nabla\psi(\wvec_t) - \eta\gvec_t.
+$$
+
+The right-hand form is the update of online <NoteLink to="mirror-descent" /> with mirror map $\psi$: step in the dual
+space $\nabla\psi(\wvec)$, then map back. The two algorithms produce identical iterates when
+$\nabla\psi(\wvec_1) = \zeros$. With a constrained $\Wcal$ they differ. FTRL projects the accumulated sum once, which is
+**lazy projection** or **dual averaging**. Mirror descent projects after every step, which is **greedy projection**.
+Both satisfy the same bound for a fixed $\eta$ <Cite id="hazan2016" /> <Cite id="mcmahan2017b" />.
+
+The lazy form matters in practice. With $\psi$ containing an $\ell_1$ term, FTRL sets coordinates exactly to zero
+whenever their accumulated gradient is small, so the iterates are sparse. The greedy form, which adds the $\ell_1$
+subgradient in each step, rarely produces exact zeros. FTRL-Proximal, used for large-scale click-through prediction,
+is built on this property <Cite id="mcmahan2017b" />.
+
+## Assumptions
+
+- $\psi$ is strongly convex with respect to some norm on $\Wcal$. The norm must be chosen so that the gradients are
+  small in its dual; this choice decides the dependence on dimension.
+- The regulariser is fixed in advance. Choosing $\psi_t$ from the data, as AdaGrad does, needs a modified analysis
+  (<NoteLink to="adaptive-online-methods" />).
+- Each step solves a convex minimisation. For linear losses and the two regularisers above it has a closed form.
+
+## Pitfalls
+
+- **FTL on linear losses.** Without a regulariser, FTL on any problem whose leader can jump across the decision set
+  has linear worst-case regret.
+- **FTL on stochastic data looks fine.** On independent random losses, the leader changes rarely and FTL often does
+  well. The failure is specific to sequences where the leader oscillates.
+- **The constant differs from the specialised analysis.** The FTRL bound for entropy is $2\sqrt{T\ln N}$; the direct
+  analysis of Hedge with Hoeffding's lemma gives $\sqrt{(T\ln N)/2}$, four times smaller.
+
+<Derivation title="Follow the leader on strongly convex losses">
+Let each $f_t$ be $\lambda$-strongly convex and $G$-Lipschitz on $\Wcal$. $\Phi_{t+1} = \sum_{s \le t}f_s$ is
+$\lambda t$-strongly convex with minimiser $\wvec_{t+1}$, so
+$\Phi_{t+1}(\wvec_t) - \Phi_{t+1}(\wvec_{t+1}) \ge \tfrac{\lambda t}{2}\norm{\wvec_t - \wvec_{t+1}}^2$. Also
+$\Phi_t(\wvec_{t+1}) - \Phi_t(\wvec_t) \ge 0$, because $\wvec_t$ minimises $\Phi_t$. Adding the two,
+
+$$
+f_t(\wvec_t) - f_t(\wvec_{t+1}) \ge \frac{\lambda t}{2}\norm{\wvec_t - \wvec_{t+1}}^2.
+$$
+
+The left side is at most $G\norm{\wvec_t - \wvec_{t+1}}$, so $\norm{\wvec_t - \wvec_{t+1}} \le 2G/(\lambda t)$ and
+$f_t(\wvec_t) - f_t(\wvec_{t+1}) \le 2G^2/(\lambda t)$. By the be-the-leader lemma,
+
+$$
+R_T(\uvec) \le \sum_{t=1}^{T}\frac{2G^2}{\lambda t} \le \frac{2G^2}{\lambda}(1 + \ln T).
+$$
+
+The curvature of the losses plays the role of the regulariser, and it grows with $t$.
+</Derivation>

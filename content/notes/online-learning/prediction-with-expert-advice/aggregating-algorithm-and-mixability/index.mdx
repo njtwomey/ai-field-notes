@@ -1,0 +1,132 @@
+---
+title: Aggregating algorithm and mixability
+kind: concept
+summary: 'A loss is $\eta$-mixable if, for any weights on experts, some single prediction loses no more than $-\frac1\eta\ln\sum_i w_ie^{-\eta\lambda_i}$ on every outcome. Vovk''s aggregating algorithm then has regret at most $(\ln N)/\eta$, constant in $T$. Log loss is $1$-mixable and the algorithm is the Bayesian mixture.'
+tags: [online-learning, regret, scoring-rules, bayesian, worked-example]
+aliases: [aggregating algorithm, AA, Vovk's aggregating algorithm, mixable loss, mixability, mixability constant, Bayesian mixture forecaster]
+requires: [hedge-and-exponential-weights, bayes-theorem]
+partOf: [online-learning]
+related: [proper-scoring-rule, log-loss-and-brier-score, online-newton-step-and-exp-concavity, bayesian-inference, lower-bounds-for-online-learning, sequential-bayesian-updating]
+references: [vovk1998, vovk2001, haussler1998, cesabianchi2006]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $\lambda(\gamma, y)$ be the loss of prediction $\gamma \in \Gamma$ on outcome $y \in \Ycal$. The loss is
+**$\eta$-mixable**, for $\eta > 0$, if for every finite set of predictions $\gamma_1, \dots, \gamma_N$ and weights
+$\wvec \in \Delta_N$ there is a prediction $\gamma \in \Gamma$ with
+
+$$
+\lambda(\gamma, y) \le -\frac1\eta\ln\sum_{i=1}^{N}w_i\,e^{-\eta\lambda(\gamma_i, y)} \quad\text{for every } y \in \Ycal.
+$$
+
+The **aggregating algorithm** (AA) keeps weights $w_{t,i} \propto \pi_ie^{-\eta L_{t-1,i}}$, where $\pi$ is a prior
+over experts and $L_{t-1,i}$ expert $i$'s cumulative loss, and predicts a $\gamma_t$ that satisfies this inequality for
+the experts' current predictions <Cite id="vovk1998" />.
+</Definition>
+
+## Notation
+
+Expert $i$ predicts $\gamma_{t,i}$ in round $t$ and has cumulative loss $L_{t,i} = \sum_{s \le t}\lambda(\gamma_{s,i}, y_s)$.
+The learner's cumulative loss is $\hat L_T = \sum_t\lambda(\gamma_t, y_t)$. The right side of the mixability
+inequality, as a function of $y$, is the **generalised prediction** $g_t(y) = -\frac1\eta\ln\sum_iw_{t,i}e^{-\eta\lambda(\gamma_{t,i}, y)}$.
+It is a soft minimum of the experts' losses on outcome $y$: it lies between $\min_i\lambda(\gamma_{t,i}, y)$ and the
+weighted average of the losses.
+
+## The regret bound
+
+Let $W_t = \sum_i\pi_ie^{-\eta L_{t,i}}$, with $W_0 = 1$. The weights are $w_{t,i} = \pi_ie^{-\eta L_{t-1,i}}/W_{t-1}$, so
+
+$$
+\sum_iw_{t,i}e^{-\eta\lambda(\gamma_{t,i}, y_t)} = \frac{W_t}{W_{t-1}}.
+$$
+
+Mixability says the learner's loss in round $t$ is at most $-\frac1\eta\ln(W_t/W_{t-1})$. Summing over rounds, the
+logarithms telescope:
+
+$$
+\hat L_T \le -\frac1\eta\ln W_T \le -\frac1\eta\ln\paren{\pi_ie^{-\eta L_{T,i}}} = L_{T,i} + \frac{\ln(1/\pi_i)}{\eta}
+$$
+
+for every expert $i$. With a uniform prior, $\hat L_T \le \min_iL_{T,i} + (\ln N)/\eta$ <Cite id="vovk1998" />.
+
+The bound does not grow with $T$. Compare <NoteLink to="hedge-and-exponential-weights">Hedge</NoteLink>, whose
+analysis has an extra $\eta T/8$ term: for linear losses no single prediction achieves the soft minimum, so each round
+costs a little. For a mixable loss the learner can always find a prediction at least as good as the soft minimum, and
+the per-round cost disappears. The <NoteLink to="lower-bounds-for-online-learning">$\sqrt{T}$ lower bound</NoteLink>
+does not apply to mixable losses.
+
+## Log loss: the Bayesian mixture
+
+Let the prediction be a distribution $q$ over $\Ycal$ and $\lambda(q, y) = -\ln q(y)$. With $\eta = 1$,
+$e^{-\lambda(q_i, y)} = q_i(y)$, and the mixability condition asks for a $q$ with $q(y) \ge \sum_iw_iq_i(y)$ for all
+$y$. The mixture $q = \sum_iw_iq_i$ satisfies it with equality. So log loss is $1$-mixable, and the AA predicts the
+mixture of the experts' distributions.
+
+The weights $w_{t,i} \propto \pi_i\prod_{s<t}q_{s,i}(y_s)$ are the posterior probabilities of the experts given the
+outcomes so far, by <NoteLink to="bayes-theorem" />. The AA under log loss is Bayesian model averaging, and the regret
+bound says the Bayesian predictive distribution loses at most $\ln(1/\pi_i)$ nats more than any model $i$ in the prior,
+on every sequence. No assumption that any model is true is needed. Because each round's prediction is the posterior
+predictive, the product of the predictions equals the marginal likelihood, and the telescoping above is the chain rule
+$p(y_{1:T}) = \prod_tp(y_t \mid y_{1:t-1})$. <NoteLink to="sequential-bayesian-updating" /> covers the same recursion for
+continuous parameters, where the regret against the best parameter grows as $\tfrac{d}{2}\ln T$ rather than staying
+constant.
+
+## Square loss
+
+Take binary outcomes $y \in \set{0, 1}$, predictions $\gamma \in [0, 1]$ and $\lambda(\gamma, y) = (\gamma - y)^2$. This
+loss is $2$-mixable, and a valid prediction is
+
+$$
+\gamma = \frac12 + \frac{g(0) - g(1)}{2},
+$$
+
+where $g$ is the generalised prediction with $\eta = 2$ <Cite id="vovk2001" />. The AA therefore has regret at most
+$(\ln N)/2$ under square loss.
+
+Predicting the weighted average $\sum_iw_i\gamma_i$ does not achieve this. Square loss on $[0, 1]$ is only
+$\tfrac12$-exp-concave: $e^{-\alpha(\gamma - y)^2}$ is concave in $\gamma$ when $(\gamma - y)^2 \le 1/(2\alpha)$, that is for
+$\alpha \le \tfrac12$. For an exp-concave loss, Jensen's inequality applied to the concave function
+$e^{-\alpha\lambda(\cdot, y)}$ shows that the weighted average satisfies the mixability inequality with $\eta = \alpha$.
+Averaging gives regret $2\ln N$; the AA's substitution gives $(\ln N)/2$, four times less.
+
+## Worked example
+
+**Log loss.** Three experts forecast the probability of $y = 1$ as $0.9$, $0.5$ and $0.2$ in every round. The outcomes
+are $1, 1, 0, 1, 1$. The experts' cumulative log losses are $2.724$, $3.466$ and $6.661$ nats. The Bayesian mixture,
+starting from a uniform prior, loses $3.420$ nats. Its regret against the best expert is $0.696$, below
+$\ln 3 = 1.099$. The final posterior weights are $(0.669, 0.318, 0.013)$.
+
+**Square loss.** Two experts with equal weight predict $0.2$ and $0.9$. With $\eta = 2$, the generalised prediction is
+$g(0) = -\tfrac12\ln\tfrac12(e^{-0.08} + e^{-1.62}) = 0.2895$ and $g(1) = -\tfrac12\ln\tfrac12(e^{-1.28} + e^{-0.02}) = 0.2317$.
+The AA predicts $\gamma = 0.5 + (0.2895 - 0.2317)/2 = 0.5289$. Its losses, $0.2797$ if $y = 0$ and $0.2219$ if $y = 1$,
+are below $g(0)$ and $g(1)$. The average $0.55$ would lose $0.3025 > g(0)$ if $y = 0$, so it violates the
+$2$-mixability inequality.
+
+## Absolute loss is not mixable
+
+Take $\lambda(\gamma, y) = \abs{\gamma - y}$ with $y \in \set{0, 1}$, two experts predicting $0$ and $1$, and equal
+weights. The generalised prediction is $c = -\frac1\eta\ln\tfrac12(1 + e^{-\eta})$ for both outcomes. Because
+$\ln$ is strictly concave, $\ln\tfrac12(1 + e^{-\eta}) > \tfrac12(0 - \eta)$, so $c < \tfrac12$. Mixability would need
+$\gamma \le c$ (for $y = 0$) and $1 - \gamma \le c$ (for $y = 1$), so $1 \le 2c < 1$, which is impossible. No
+$\eta > 0$ works, and for absolute loss the $\sqrt{T\ln N}$ regret of Hedge is the best possible
+<Cite id="haussler1998" />.
+
+## Assumptions
+
+- The loss must be mixable for some $\eta > 0$. The largest such $\eta$ is the loss's **mixability constant**, and the
+  regret bound is $(\ln N)/\eta$ with that constant.
+- The AA must compute a prediction that satisfies the inequality. For log loss and square loss there is a closed form;
+  for other losses it is a small optimisation problem each round.
+- The bound compares with the best expert. It holds for every sequence, with no probabilistic assumptions.
+
+## Pitfalls
+
+- **Averaging is not the aggregating algorithm.** For square loss the weighted average has a four times larger bound.
+  The two coincide only for log loss.
+- **Prior mass matters.** With a non-uniform prior the regret against expert $i$ is $\ln(1/\pi_i)/\eta$. With infinitely
+  many experts, as with a continuous parameter, the prior density near the best expert sets the regret.
+- **Constant regret needs a fixed comparator.** Against a sequence of experts that switches, the AA's weights
+  concentrate and it adapts slowly, like Hedge. Fixed share applies to the AA as well (see
+  <NoteLink to="tracking-the-best-expert" />).

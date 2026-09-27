@@ -1,0 +1,136 @@
+---
+title: Replay and architectural methods
+kind: concept
+summary: 'Replay methods keep a small memory of past examples, or a generator of them, and train on it alongside each new task; gradient episodic memory projects each gradient so no stored task''s loss rises. Architectural methods give each task its own parameters.'
+tags: [continual-learning, online-learning, deep-learning, optimisation, worked-example]
+aliases: [experience replay for continual learning, rehearsal, gradient episodic memory, averaged GEM, generative replay, deep generative replay, pseudo-rehearsal, parameter isolation, iCaRL]
+requires: [continual-learning, gradient-descent]
+partOf: [online-learning]
+related: [regularisation-based-continual-learning, streaming-algorithms-for-learning, lagrangian-duality, variational-autoencoder, generative-adversarial-network, transfer-learning-and-fine-tuning]
+references: [lopezpaz2017, chaudhry2019, rolnick2019, shin2017, rusu2016, rebuffi2017, vandeven2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **replay** method for continual learning stores a memory $\Mcal$ of examples from earlier tasks, or a generative
+model of them, and trains each new task on its own data together with the memory. An **architectural** method assigns
+separate parameters to each task, or adds parameters as tasks arrive, so that learning a new task cannot change the
+parameters an old one uses.
+</Definition>
+
+## Notation
+
+Tasks arrive in order $k = 1, \dots, K$. $\Mcal_j$ is the memory kept for task $j$, with loss
+$\ell(\thetavec, \Mcal_j)$, the average loss on its stored examples. $\gvec$ is the gradient of the current task's loss on
+a minibatch, and $\gvec_j = \nabla_{\thetavec}\ell(\thetavec, \Mcal_j)$ the gradient on memory $j$.
+
+## Experience replay
+
+The simplest method interleaves stored examples with new ones: each training batch mixes the current task's data with
+a batch drawn from $\Mcal$. The model then minimises an estimate of the joint risk over all tasks. With a memory of
+$m$ examples per task, that estimate is unbiased for each old task's risk, but noisy and prone to overfitting when $m$
+is small.
+
+When tasks are not delimited, or examples arrive as a stream, the memory is filled by reservoir sampling: each of the
+$n$ examples seen so far is in the buffer with probability $m/n$, whatever $n$ is (see
+<NoteLink to="streaming-algorithms-for-learning" />). Rolnick and co-authors show that a replay buffer, combined with
+behaviour cloning on the replayed data, largely removes forgetting in continual reinforcement learning
+<Cite id="rolnick2019" />. In supervised benchmarks, small replay buffers are among the strongest baselines, and
+replay is the one family that works well in the class-incremental scenario <Cite id="vandeven2019" />.
+
+**Choosing exemplars.** iCaRL keeps, for each class, the examples whose feature mean best approximates the class's full
+feature mean, chosen greedily, and classifies by the nearest class mean in feature space. The nearest-mean rule is less
+biased towards recent classes than the network's output layer <Cite id="rebuffi2017" />.
+
+## Gradient episodic memory
+
+Replaying stored examples treats them as extra training data. **Gradient episodic memory** (GEM) uses them as
+constraints instead: the update on the new task may not increase the loss on any stored task <Cite id="lopezpaz2017" />.
+
+**The constraint.** For a small step $\thetavec \leftarrow \thetavec - \eta\tilde\gvec$, a first-order Taylor expansion gives
+$\ell(\thetavec - \eta\tilde\gvec, \Mcal_j) \approx \ell(\thetavec, \Mcal_j) - \eta\inner{\gvec_j}{\tilde\gvec}$. The loss on memory $j$
+does not rise if $\inner{\tilde\gvec}{\gvec_j} \ge 0$. GEM uses the proposed gradient $\gvec$ if it satisfies this for every
+earlier task. Otherwise it projects $\gvec$ onto the constraint set:
+
+$$
+\tilde\gvec = \argmin_{\zvec}\frac12\norm{\zvec - \gvec}^2 \quad\text{subject to}\quad \Gmat\zvec \ge \zeros,
+$$
+
+where the rows of $\Gmat$ are $\gvec_1^\top, \dots, \gvec_{k-1}^\top$.
+
+**The dual is small.** The primal has as many variables as the network has weights. Its Lagrangian is
+$\frac12\norm{\zvec - \gvec}^2 - \vvec^\top\Gmat\zvec$ with multipliers $\vvec \ge \zeros$. Setting its gradient in $\zvec$ to zero
+gives $\zvec = \gvec + \Gmat^\top\vvec$. Substituting back, the dual problem (see <NoteLink to="lagrangian-duality" />) is
+
+$$
+\min_{\vvec \ge \zeros}\;\frac12\vvec^\top\Gmat\Gmat^\top\vvec + \gvec^\top\Gmat^\top\vvec,
+$$
+
+a quadratic program in $k - 1$ variables, one per earlier task. Solve it, then set $\tilde\gvec = \gvec + \Gmat^\top\vvec^\star$
+<Cite id="lopezpaz2017" />. The cost per step is $k - 1$ memory gradients and a small quadratic program.
+
+**A-GEM.** Averaged GEM replaces the $k - 1$ constraints with one, on the gradient $\gvec_{\text{ref}}$ of a batch drawn from
+the whole memory. Projection onto a single half-space has a closed form:
+
+$$
+\tilde\gvec = \gvec - \frac{\gvec^\top\gvec_{\text{ref}}}{\gvec_{\text{ref}}^\top\gvec_{\text{ref}}}\gvec_{\text{ref}} \quad\text{if } \gvec^\top\gvec_{\text{ref}} < 0,
+\qquad \tilde\gvec = \gvec \text{ otherwise}.
+$$
+
+It costs one extra gradient per step and matches GEM's accuracy on the reported benchmarks <Cite id="chaudhry2019" />.
+
+**Worked example.** Let the new task's gradient be $\gvec = (1, -1)$ and the memory gradient $\gvec_{\text{ref}} = (0, 1)$. Then
+$\gvec^\top\gvec_{\text{ref}} = -1 < 0$: a step along $-\gvec$ would raise the old loss. A-GEM removes the offending component,
+$\tilde\gvec = (1, -1) - (-1)(0, 1) = (1, 0)$, which is orthogonal to $\gvec_{\text{ref}}$ and still decreases the new loss, since
+$\inner{\tilde\gvec}{\gvec} = 1 > 0$. With two task memories $\gvec_1 = (0, 1)$ and $\gvec_2 = (0.5, 1)$, both constraints are
+violated by $\gvec$. The GEM dual gives $\vvec^\star = (1, 0)$ and the same $\tilde\gvec = (1, 0)$, which satisfies
+$\inner{\tilde\gvec}{\gvec_1} = 0$ and $\inner{\tilde\gvec}{\gvec_2} = 0.5$.
+
+## Generative replay
+
+Storing data may be impossible for privacy or memory reasons. **Deep generative replay** trains a generative model,
+such as a <NoteLink to="generative-adversarial-network" /> or <NoteLink to="variational-autoencoder" />, alongside the
+classifier. When a new task arrives, the old generator produces inputs, the old classifier labels them, and the new
+classifier and new generator are both trained on a mix of real new data and generated old data
+<Cite id="shin2017" />. The method is only as good as the generator. On complex images, generated samples drift from
+the real distribution with each task, and forgetting returns through the generator itself.
+
+## Architectural methods
+
+**Progressive networks** add a new column of layers for each task and freeze the earlier columns. Each layer of the new
+column receives, through trained lateral connections, the activations of the corresponding layers of all frozen
+columns <Cite id="rusu2016" />. Old tasks cannot be forgotten, because their weights never change, and new tasks reuse
+old features through the laterals. The price is growth: the parameters grow linearly with the number of tasks, and the
+lateral connections quadratically. The task identity must be known at test time to choose the column, which limits
+the method to the task-incremental scenario.
+
+A lighter form keeps one network and assigns each task a subset of its weights, frozen after the task, or a learned
+mask over units. These methods also need the task identity at test time.
+
+## Comparison
+
+| Method | Stores | Extra cost per step | Needs task identity at test time |
+| --- | --- | --- | --- |
+| Experience replay | examples | a memory batch | no |
+| GEM | examples | $k - 1$ memory gradients and a quadratic program | no |
+| A-GEM | examples | one memory gradient | no |
+| Generative replay | a generator | generating a batch; training the generator | no |
+| Progressive networks | all past columns | forward passes through old columns | yes |
+
+## Assumptions
+
+- Replay assumes old examples may be kept. Where regulations forbid storing data, generative replay or
+  regularisation methods (<NoteLink to="regularisation-based-continual-learning" />) are the options.
+- GEM's constraints are first-order. With a large learning rate, a step that satisfies them can still raise an old
+  task's loss.
+
+## Pitfalls
+
+- **Overfitting the memory.** A small buffer replayed many times is memorised: the loss on stored examples is low
+  while the loss on the old task's distribution rises. Augment replayed examples, or regularise towards the old model's
+  outputs on them.
+- **Imbalance between old and new.** A buffer of a few examples per old class is swamped by the new task's data. Balance
+  the sampling across tasks or classes.
+- **Growth without bound.** Architectural methods that add parameters per task are not continual learning in bounded
+  memory; report parameter counts with accuracy.

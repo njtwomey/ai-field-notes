@@ -1,0 +1,167 @@
+---
+title: Hedge and exponential weights
+kind: concept
+summary: 'Hedge plays a distribution over $N$ experts with $p_{t,i} \propto \exp(-\eta L_{t-1,i})$, where $L_{t-1,i}$ is expert $i$''s cumulative loss. For losses in $[0, 1]$ and $\eta = \sqrt{8\ln N/T}$ its regret against the best expert is at most $\sqrt{(T\ln N)/2}$, which is optimal.'
+tags: [online-learning, regret, ensembles, game-theory, worked-example]
+aliases: [Hedge algorithm, exponentially weighted average forecaster, exponential weights algorithm, doubling trick, anytime learning rate]
+requires: [expectation, softmax-and-log-sum-exp]
+partOf: [online-learning]
+related: [weighted-majority, exp3, mirror-descent, follow-the-regularised-leader, adaboost, lower-bounds-for-online-learning, hoeffdings-inequality]
+references: [freund1997, cesabianchi2006, cesabianchi1997, littlestone1994, orabona2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+In the **experts problem** a learner chooses, each round $t = 1, \dots, T$, a probability vector $\pvec_t$ over $N$
+experts. The environment then reveals losses $\lvec_t = (\ell_{t,1}, \dots, \ell_{t,N}) \in [0, 1]^N$, and the learner
+pays $\inner{\pvec_t}{\lvec_t}$, the expected loss of an expert drawn from $\pvec_t$. **Hedge** plays
+
+$$
+p_{t,i} = \frac{\exp(-\eta L_{t-1,i})}{\sum_{j=1}^{N}\exp(-\eta L_{t-1,j})}, \qquad L_{t,i} = \sum_{s=1}^{t}\ell_{s,i},
+$$
+
+with a learning rate $\eta > 0$ and $L_{0,i} = 0$ <Cite id="freund1997" />.
+</Definition>
+
+## Notation
+
+$\hat L_T = \sum_{t=1}^{T}\inner{\pvec_t}{\lvec_t}$ is the learner's cumulative loss and $L_T^\star = \min_i L_{T,i}$ the
+best expert's. The regret is $R_T = \hat L_T - L_T^\star$. The losses may be chosen by an adversary that sees
+$\pvec_t$ before choosing $\lvec_t$; because the learner's loss is the expectation over $\pvec_t$, no randomness
+enters the analysis.
+
+## Intuition
+
+Hedge is a softmax of the negated cumulative losses, $\pvec_t = \operatorname{softmax}(-\eta L_{t-1,1}, \dots, -\eta L_{t-1,N})$. The learning
+rate sets how sharply it concentrates. As $\eta \to \infty$ it puts all mass on the current leader, which is
+follow-the-leader and can be exploited (see <NoteLink to="follow-the-regularised-leader" />). As $\eta \to 0$ it stays
+uniform and never learns. The analysis finds the $\eta$ that balances the two failures. Hedge generalises the
+randomised <NoteLink to="weighted-majority" /> algorithm from mistakes to any loss in $[0, 1]$, with $\beta = e^{-\eta}$.
+
+## The regret bound
+
+Track the potential $W_t = \sum_{i}\exp(-\eta L_{t,i})$, with $W_0 = N$.
+
+**Upper bound.** The ratio of successive potentials is an expectation under $\pvec_t$:
+
+$$
+\frac{W_t}{W_{t-1}} = \sum_{i}\frac{\exp(-\eta L_{t-1,i})}{W_{t-1}}\exp(-\eta\ell_{t,i}) = \sum_i p_{t,i}\exp(-\eta\ell_{t,i}).
+$$
+
+Let $X$ be the loss of an expert drawn from $\pvec_t$, a random variable in $[0, 1]$ with mean $\inner{\pvec_t}{\lvec_t}$.
+**Hoeffding's lemma** states that $\ln\expect e^{sX} \le s\expect X + s^2/8$ for any real $s$ and any $X$ with values in
+an interval of length 1 (see <NoteLink to="hoeffdings-inequality" />). With $s = -\eta$,
+
+$$
+\ln\frac{W_t}{W_{t-1}} \le -\eta\inner{\pvec_t}{\lvec_t} + \frac{\eta^2}{8}.
+$$
+
+Summing over $t$: $\ln W_T - \ln N \le -\eta\hat L_T + T\eta^2/8$.
+
+**Lower bound.** Every term of $W_T$ is positive, so $W_T \ge \exp(-\eta L_{T,i})$ for each expert $i$, and
+$\ln W_T \ge -\eta L_T^\star$.
+
+**Combine.** $-\eta L_T^\star - \ln N \le -\eta\hat L_T + T\eta^2/8$. Dividing by $\eta$,
+
+$$
+R_T = \hat L_T - L_T^\star \le \frac{\ln N}{\eta} + \frac{\eta T}{8}.
+$$
+
+The first term is the cost of starting uniform over $N$ experts; the second is the cost of reacting to each round's
+losses. Their sum is smallest at $\eta = \sqrt{8\ln N/T}$, where
+
+$$
+R_T \le \sqrt{\frac{T\ln N}{2}}
+$$
+
+<Cite id="cesabianchi2006" />. The average regret per round falls as $\sqrt{\ln N/T}$. The number of experts enters
+only logarithmically, so a million experts cost less than twice as much as forty. The constant is exactly right:
+<NoteLink to="lower-bounds-for-online-learning" /> shows that random losses force regret
+$(1 - o(1))\sqrt{(T\ln N)/2}$ on every algorithm.
+
+## Not knowing the horizon
+
+The tuned $\eta$ needs $T$. Two fixes exist.
+
+**The doubling trick.** Split time into epochs $m = 0, 1, 2, \dots$ of length $2^m$, and run Hedge afresh in each epoch
+with $\eta$ tuned to its length. If the game ends during epoch $M$, then $2^M \le T$ and the regret is at most the sum
+of the epoch bounds:
+
+$$
+\sum_{m=0}^{M}\sqrt{\frac{2^m\ln N}{2}} = \sqrt{\frac{\ln N}{2}}\cdot\frac{2^{(M+1)/2} - 1}{\sqrt2 - 1}
+\le \frac{\sqrt2}{\sqrt2 - 1}\sqrt{\frac{T\ln N}{2}}.
+$$
+
+The regret against the best expert overall is at most the sum of the per-epoch regrets, because the best expert
+overall is no better within each epoch than that epoch's best. The price is a factor $\sqrt2/(\sqrt2 - 1) = 3.41$
+<Cite id="cesabianchi1997" />.
+
+**An anytime rate.** Use $\eta_t = \sqrt{8\ln N/t}$ in round $t$, without restarts. The regret is then at most
+$2\sqrt{(T\ln N)/2} + \sqrt{\ln N/8}$ for every $T$, a factor of 2 over the tuned bound <Cite id="cesabianchi2006" />.
+
+## Worked example
+
+Take $N = 100$ experts and $T = 10\,000$ rounds. The tuned rate is $\eta = \sqrt{8\ln 100/10\,000} = 0.061$. The regret
+bound is $\sqrt{10\,000 \cdot 4.605/2} = 151.7$, so the average loss per round exceeds the best expert's by at most
+$0.015$. The doubling trick raises the bound to $3.41 \times 151.7 = 518$ and the anytime rate to
+$2 \times 151.7 + 0.76 = 304$.
+
+## Solving zero-sum games
+
+Let $\Amat$ be an $N \times K$ matrix of losses in $[0, 1]$ for a two-player game: the row player picks a
+distribution $\pvec$, the column player picks $\qvec$, and the row player pays $\pvec^\top\Amat\qvec$. Let the row
+player run Hedge on the loss vectors $\Amat\qvec_t$, and the column player run Hedge on the gains
+$\Amat^\top\pvec_t$, each with regret at most $R_T$. Write $\bar\pvec$ and $\bar\qvec$ for the average strategies and
+$\bar v = \tfrac1T\sum_t\pvec_t^\top\Amat\qvec_t$ for the average payment. The two regret bounds are
+
+$$
+\bar v \le \min_{\pvec}\pvec^\top\Amat\bar\qvec + \frac{R_T}{T}, \qquad
+\bar v \ge \max_{\qvec}\bar\pvec^\top\Amat\qvec - \frac{R_T}{T}.
+$$
+
+Hence $\max_{\qvec}\bar\pvec^\top\Amat\qvec \le \min_{\pvec}\pvec^\top\Amat\bar\qvec + 2R_T/T$. Since
+$\min_{\pvec}\max_{\qvec} \ge \max_{\qvec}\min_{\pvec}$ always holds, and $R_T/T \to 0$, this proves von Neumann's
+minimax theorem, and $\bar\pvec$ is a $2R_T/T$-optimal strategy <Cite id="freund1997" />. <NoteLink
+to="adaboost" /> is this construction with examples as rows and weak hypotheses as columns.
+
+## Relation to other algorithms
+
+- **Follow the regularised leader** with the negative entropy on the simplex gives the same weights.
+  <NoteLink to="follow-the-regularised-leader" /> derives the bound $2\sqrt{T\ln N}$ from that view; the direct analysis
+  above is four times tighter.
+- **Mirror descent** with the entropy mirror map, the exponentiated gradient update, is Hedge with the loss vector
+  replaced by a gradient (see <NoteLink to="mirror-descent" />).
+- **Bandit feedback.** When only the chosen expert's loss is seen, <NoteLink to="exp3">EXP3</NoteLink> runs Hedge on
+  importance-weighted loss estimates and pays an extra $\sqrt{N}$ in the regret.
+
+## Assumptions
+
+- Losses lie in $[0, 1]$. For losses in $[a, b]$, rescale; the bound scales by $b - a$.
+- The loss is linear in $\pvec_t$: the learner either randomises over experts and is judged in expectation, or
+  combines the experts' predictions with a loss that is convex in the combination. In the convex case, predicting the
+  weighted average of the experts' predictions satisfies the same bound, by Jensen's inequality.
+- The comparator is the best single expert for the whole sequence.
+
+## Pitfalls
+
+- **Overflow.** $\exp(-\eta L_{t,i})$ underflows for large cumulative losses. Subtract $\min_j L_{t,j}$ before
+  exponentiating (<NoteLink to="softmax-and-log-sum-exp" />).
+- **Stuck weights.** An expert that was poor early keeps a weight near zero long after it becomes the best. Hedge's
+  regret against a sequence of experts can be linear; use fixed share (<NoteLink to="tracking-the-best-expert" />).
+- **Worst-case tuning on easy data.** When the best expert has small loss $L_T^\star$, a larger $\eta$ does better; the
+  bound in the derivation below adapts to $L_T^\star$.
+
+<Derivation title="A bound that improves when the best expert is good">
+For $X \in [0, 1]$, convexity of $x \mapsto e^{-\eta x}$ gives $e^{-\eta X} \le 1 - (1 - e^{-\eta})X$, so
+$\ln\expect e^{-\eta X} \le \ln\paren{1 - (1 - e^{-\eta})\expect X} \le -(1 - e^{-\eta})\expect X$. Using this in place
+of Hoeffding's lemma in the upper bound, and the same lower bound,
+
+$$
+-\eta L_T^\star - \ln N \le -(1 - e^{-\eta})\hat L_T, \qquad \hat L_T \le \frac{\eta L_T^\star + \ln N}{1 - e^{-\eta}}.
+$$
+
+With $\eta$ tuned to $L_T^\star$ this gives $\hat L_T \le L_T^\star + \sqrt{2L_T^\star\ln N} + \ln N$
+<Cite id="cesabianchi2006" />. When some expert is nearly perfect, $L_T^\star \approx 0$, the regret is $O(\ln N)$
+instead of $O(\sqrt{T\ln N})$, as for the halving algorithm.
+</Derivation>

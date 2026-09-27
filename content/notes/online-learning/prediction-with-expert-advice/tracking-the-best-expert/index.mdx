@@ -1,0 +1,134 @@
+---
+title: Tracking the best expert
+kind: concept
+summary: 'Tracking compares an online learner with the best sequence of experts that switches at most $m$ times. Fixed share mixes a fraction $\alpha$ of uniform weight into Hedge''s weights each round; with $\alpha \approx m/T$ its regret against every such sequence is $O(\sqrt{T((m+1)\ln N + m\ln(T/m))})$.'
+tags: [online-learning, regret, non-stationarity, ensembles, worked-example]
+aliases: [fixed share, fixed-share algorithm, tracking regret, shifting regret, switching experts, Herbster–Warmuth]
+requires: [hedge-and-exponential-weights]
+partOf: [online-learning]
+related: [non-stationary-bandits, concept-drift-adaptation, hidden-markov-model, bayesian-online-changepoint-detection, aggregating-algorithm-and-mixability]
+references: [herbster1998, cesabianchi2006, bousquet2001, hazan2009, kolter2007]
+status: draft
+updated: 2026-09-27
+---
+
+import { TrackingFigure } from './TrackingFigure'
+
+<Definition>
+In the experts problem with losses $\ell_{t,i} \in [0, 1]$, a **switching comparator** is a sequence of experts
+$i_1, \dots, i_T$, and it has $m$ **switches** if $i_{t+1} \ne i_t$ for exactly $m$ values of $t$. The **tracking
+regret** against it is $\sum_t\inner{\pvec_t}{\lvec_t} - \sum_t\ell_{t,i_t}$. **Fixed share** updates Hedge's weights
+in two steps each round:
+
+$$
+v_{t,i} = \frac{p_{t,i}e^{-\eta\ell_{t,i}}}{\sum_jp_{t,j}e^{-\eta\ell_{t,j}}}, \qquad
+p_{t+1,i} = \frac{\alpha}{N} + (1 - \alpha)v_{t,i},
+$$
+
+with learning rate $\eta > 0$, share rate $\alpha \in [0, 1)$ and $\pvec_1$ uniform <Cite id="herbster1998" />.
+</Definition>
+
+## Notation
+
+$N$ is the number of experts and $T$ the number of rounds. $\pvec_t$ is the learner's distribution over experts and
+$\lvec_t = (\ell_{t,1}, \dots, \ell_{t,N})$ the loss vector. The learner's loss is $\inner{\pvec_t}{\lvec_t}$, the expected
+loss of an expert drawn from $\pvec_t$. The comparator is any sequence with at most $m$ switches, which the learner
+does not know.
+
+## Why Hedge cannot track
+
+<NoteLink to="hedge-and-exponential-weights">Hedge</NoteLink> has weight $p_{t,i} \propto e^{-\eta L_{t-1,i}}$. If expert
+$i$ was worse than the leader by $\Delta$ in cumulative loss, its weight is $e^{-\eta\Delta}$ times the leader's.
+After expert $i$ becomes the best, it must first make up the whole deficit $\Delta$ before Hedge prefers it. The
+deficit grows with the length of the earlier segment, so Hedge's delay after a switch grows with $T$, and its tracking
+regret against a sequence with even one switch can be linear in $T$. Follow the leader has the same problem. The
+figure below shows both losing about 200 over 1000 rounds to a sequence with three switches.
+
+Fixed share caps the deficit. Every round it hands a fraction $\alpha$ of the mass back uniformly, so no weight falls
+below $\alpha/N$. When an expert becomes the best, it starts from at least $\alpha/N$ and needs only about
+$\ln(N/\alpha)/\eta$ loss difference to take over, whatever happened before.
+
+<TrackingFigure />
+
+## Fixed share is Bayes over switching sequences
+
+Consider exponential weights over the $N^T$ **sequences** of experts, with a prior $\pi$ on sequences. A sequence
+$\svec = (i_1, \dots, i_T)$ is treated as a single expert whose loss in round $t$ is $\ell_{t,i_t}$. Choose the Markov prior
+
+$$
+\pi(\svec) = \frac1N\prod_{t=2}^{T}\paren{(1 - \alpha)\indicator\set{i_t = i_{t-1}} + \frac{\alpha}{N}}:
+$$
+
+start uniformly, and in each round keep the current expert with probability $1 - \alpha$ or redraw it uniformly with
+probability $\alpha$. The learner's loss in round $t$ is linear in the sequences' weights, so it depends only on the
+marginal weight of each current expert $i_t$. That marginal is computed by the forward recursion of a
+<NoteLink to="hidden-markov-model" /> whose states are experts, whose transition matrix is the Markov prior, and whose
+emission weight is $e^{-\eta\ell_{t,i}}$. The recursion has two steps: multiply by the emission weight and normalise,
+which gives $v_{t,i}$; then apply the transition, $\sum_jv_{t,j}\paren{(1 - \alpha)\indicator\set{i = j} + \alpha/N} = (1 - \alpha)v_{t,i} + \alpha/N$.
+This is fixed share. The algorithm costs $O(N)$ per round, although it implicitly weights $N^T$ sequences.
+
+## The regret bound
+
+Hedge with a non-uniform prior satisfies the bound of <NoteLink to="hedge-and-exponential-weights" /> with $\ln N$
+replaced by $\ln(1/\pi(\svec))$: the lower bound on the potential becomes $W_T \ge \pi(\svec)e^{-\eta L_T(\svec)}$, where
+$L_T(\svec) = \sum_t\ell_{t,i_t}$. The upper bound is unchanged, because it depends only on the learner's
+distribution. Applied to the sequences,
+
+$$
+\sum_{t=1}^{T}\inner{\pvec_t}{\lvec_t} - L_T(\svec) \le \frac{\ln(1/\pi(\svec))}{\eta} + \frac{\eta T}{8}.
+$$
+
+A sequence with $m$ switches has prior at least $\frac1N\paren{\frac{\alpha}{N}}^m(1 - \alpha)^{T - 1 - m}$: each of the
+$m$ switches costs $\alpha/N$, and each of the $T - 1 - m$ stays costs at least $1 - \alpha$. So
+
+$$
+\ln\frac{1}{\pi(\svec)} \le (m + 1)\ln N + m\ln\frac1\alpha + (T - 1 - m)\ln\frac{1}{1 - \alpha} \eqdef P.
+$$
+
+**Tuning.** At $\alpha = m/(T - 1)$, the last term is $(T - 1 - m)\ln\paren{1 + \tfrac{m}{T - 1 - m}} \le m$, so
+$P \le (m + 1)\ln N + m\ln\tfrac{e(T - 1)}{m}$. With $\eta = \sqrt{8P/T}$,
+
+$$
+\sum_{t=1}^{T}\inner{\pvec_t}{\lvec_t} - L_T(\svec) \le \sqrt{\frac{TP}{2}}
+$$
+
+<Cite id="herbster1998" /> <Cite id="cesabianchi2006" />. Each switch costs about $\ln N + \ln(T/m)$ nats of prior: $\ln N$ to
+name the new expert and $\ln(T/m)$ to name when the switch happens. With $m = 0$ and $\alpha = 0$ the bound is Hedge's.
+
+## Worked example
+
+The figure's setting has $N = 4$, $T = 1000$ and $m = 3$. With $\alpha = 3/999$,
+$P = 4\ln 4 + 3\ln 333 + 996\ln(1/(1 - 3/999)) = 5.55 + 17.42 + 3.00 = 25.97$, the tuned rate is
+$\eta = \sqrt{8 \cdot 25.97/1000} = 0.46$ and the bound is $\sqrt{1000 \cdot 25.97/2} = 114$. On the figure's losses,
+fixed share with $\eta = 0.3$ has tracking regret about 60, and with $\eta = 1$ about 26. Hedge and follow the leader
+have about 210, close to the 207 by which the best single expert trails the switching sequence.
+
+## Variants
+
+- **Fixed share to past posteriors.** Instead of redistributing to the uniform distribution, share mass towards
+  weights the algorithm held in the past. When the best expert returns to an earlier one, as in the figure's last
+  segment, this recovers faster <Cite id="bousquet2001" />.
+- **Adaptive regret.** Fixed share also bounds the regret on every interval $[r, s]$ against the best fixed expert on
+  that interval, because a sequence can switch into that expert at $r$ and out at $s$. Hazan and Seshadhri give
+  algorithms with small regret on every interval for general online convex optimisation <Cite id="hazan2009" />.
+- **Ensembles for drifting concepts.** Dynamic weighted majority adds and removes experts as the data drift, trained
+  online, and weights them with a weighted-majority rule <Cite id="kolter2007" />; see
+  <NoteLink to="concept-drift-adaptation" />.
+- **Bandit feedback.** EXP3.S applies the same uniform mixing to the bandit algorithm EXP3; see
+  <NoteLink to="non-stationary-bandits" />.
+
+## Assumptions
+
+- The tuned $\alpha$ and $\eta$ need $m$ and $T$. With the wrong $m$, the bound degrades gracefully: $P$ grows
+  linearly in the true $m$ and logarithmically in the mismatch of $\alpha$.
+- Losses lie in $[0, 1]$. The comparator is any switching sequence chosen in hindsight.
+- The bound is on the regret, not on detection: fixed share does not report when a switch happened.
+  <NoteLink to="bayesian-online-changepoint-detection" /> does, under a probabilistic model.
+
+## Pitfalls
+
+- **Share rate too large.** Every round, fixed share gives away $\alpha$ of the mass. On a long stationary stretch this
+  costs about $\alpha T$ in extra loss, visible in the figure when $\alpha$ is pushed towards $0.3$.
+- **Share rate too small.** With $\alpha \to 0$, fixed share becomes Hedge and loses the ability to track.
+- **Comparing with the wrong baseline.** Low regret against the best fixed expert says nothing when the best expert
+  changes; report the tracking regret, or the regret on recent windows, on non-stationary data.

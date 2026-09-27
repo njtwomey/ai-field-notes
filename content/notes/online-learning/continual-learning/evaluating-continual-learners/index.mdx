@@ -1,0 +1,109 @@
+---
+title: Evaluating continual learners
+kind: concept
+summary: 'Continual learners are evaluated through the accuracy matrix $R_{i,j}$, the accuracy on task $j$ after training on task $i$. Average accuracy is the mean of its last row; backward transfer averages $R_{T,j} - R_{j,j}$; forward transfer measures help to unseen tasks.'
+tags: [continual-learning, online-learning, evaluation, metrics, worked-example]
+aliases: [accuracy matrix, average accuracy, backward transfer, BWT, forward transfer, FWT, forgetting measure, intransigence, average incremental accuracy, continual learning metrics]
+requires: [continual-learning]
+partOf: [online-learning]
+related: [replay-and-architectural-methods, regularisation-based-continual-learning, concept-drift-adaptation, transfer-learning-and-fine-tuning]
+references: [lopezpaz2017, chaudhry2018, chaudhry2019, rebuffi2017, vandeven2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let a model be trained on tasks $1, \dots, T$ in order, and let $R_{i,j}$ be its accuracy on the test set of task $j$
+after it has finished training on task $i$. The $T \times T$ **accuracy matrix** $R$ holds every measurement a
+continual learning evaluation needs. Below the diagonal are old tasks, on the diagonal the task just learnt, and above
+it tasks not yet seen. With $\bar b_j$ the accuracy on task $j$ of the model at random initialisation, Lopez-Paz and
+Ranzato define
+
+$$
+\text{ACC} = \frac1T\sum_{j=1}^{T}R_{T,j}, \qquad
+\text{BWT} = \frac{1}{T-1}\sum_{j=1}^{T-1}\paren{R_{T,j} - R_{j,j}}, \qquad
+\text{FWT} = \frac{1}{T-1}\sum_{j=2}^{T}\paren{R_{j-1,j} - \bar b_j}
+$$
+
+<Cite id="lopezpaz2017" />.
+</Definition>
+
+## What each number measures
+
+- **Average accuracy** (ACC) is the final performance over all tasks. It is what a user of the final model gets, but
+  it mixes how well each task was learnt with how well it was kept.
+- **Backward transfer** (BWT) compares each task's final accuracy with its accuracy just after it was learnt. Negative
+  BWT is forgetting. Positive BWT means later tasks improved earlier ones.
+- **Forward transfer** (FWT) compares the accuracy on task $j$ before training on it with that of an untrained model.
+  Positive FWT means earlier tasks built features that already help task $j$, which is zero-shot transfer within the
+  sequence.
+
+Two models with the same ACC can differ sharply. One can learn every task well and forget much (high diagonal, low
+BWT); the other can barely learn new tasks but never forget (low diagonal, BWT near zero). Chaudhry and co-authors
+name the second failure **intransigence**: the gap $I_k = a_k^\star - R_{k,k}$ between the accuracy $a_k^\star$ of a
+reference model trained on all data up to task $k$ and the accuracy the continual learner reaches on task $k$
+<Cite id="chaudhry2018" />. Forgetting and intransigence are the two sides of the stability–plasticity dilemma.
+
+## A forgetting measure
+
+BWT compares with the accuracy right after learning, $R_{j,j}$. If a later task first improved task $j$ and then
+something destroyed that gain, BWT misses the loss. The **forgetting measure** compares with the best accuracy ever
+reached:
+
+$$
+f_j = \max_{l \in \set{1, \dots, T-1}}R_{l,j} - R_{T,j}, \qquad F = \frac{1}{T-1}\sum_{j=1}^{T-1}f_j,
+$$
+
+with the maximum over the stages $l \ge j$ at which task $j$ had been learnt <Cite id="chaudhry2018" />. Because the maximum includes
+$l = j$, $f_j \ge R_{j,j} - R_{T,j}$ and so $F \ge -\text{BWT}$.
+
+## Worked example
+
+Three tasks, with untrained accuracies $\bar\bvec = (0.20, 0.25, 0.20)$ and accuracy matrix
+
+$$
+R = \begin{pmatrix} 0.95 & 0.30 & 0.25 \\ 0.97 & 0.93 & 0.35 \\ 0.60 & 0.80 & 0.94 \end{pmatrix}.
+$$
+
+- $\text{ACC} = (0.60 + 0.80 + 0.94)/3 = 0.78$.
+- $\text{BWT} = \tfrac12\paren{(0.60 - 0.95) + (0.80 - 0.93)} = \tfrac12(-0.35 - 0.13) = -0.24$.
+- $\text{FWT} = \tfrac12\paren{(0.30 - 0.25) + (0.35 - 0.20)} = \tfrac12(0.05 + 0.15) = 0.10$.
+- Forgetting: task 1 peaked at $0.97$ after task 2, so $f_1 = 0.97 - 0.60 = 0.37$; $f_2 = 0.93 - 0.80 = 0.13$; $F = 0.25$.
+  This exceeds $-\text{BWT} = 0.24$ because learning task 2 first raised task 1's accuracy.
+
+The **average incremental accuracy**, the mean over stages of the average accuracy on the tasks seen so far, is
+$\tfrac13\paren{0.95 + \tfrac12(0.97 + 0.93) + 0.78} = 0.893$. It rewards a learner that performs well throughout, not only
+at the end <Cite id="rebuffi2017" />.
+
+## Protocol
+
+The numbers are comparable only under a stated protocol.
+
+- **Scenario.** Task-, domain- or class-incremental, and whether the task identity is given at test time
+  <Cite id="vandeven2019" />. The same method can have very different ACC in different scenarios.
+- **Passes and budgets.** Lopez-Paz and Ranzato train with a single pass over each task's data, which makes the
+  problem closer to online learning and penalises methods that need many epochs <Cite id="lopezpaz2017" />. Report the
+  memory size, in examples or bytes, and the compute per step.
+- **Baselines.** Fine-tuning on each task in turn is the lower reference; joint training on all tasks at once is the
+  upper reference. A method's ACC should be read between the two.
+- **Hyperparameters.** Choosing hyperparameters by final accuracy on all tasks uses future tasks. A cleaner protocol
+  tunes on the first few tasks of a separate stream and then evaluates on the remaining tasks with those settings
+  fixed <Cite id="chaudhry2019" />.
+- **Orders and seeds.** Results depend on the task order. Average over several orders and random seeds, and report
+  the spread.
+
+## Assumptions
+
+- Each task has a held-out test set from its own distribution, and task accuracies are on comparable scales.
+  Averages over tasks with different numbers of classes weight them equally, which may not be what matters.
+- The matrix is measured at task boundaries. For task-free streams, evaluate at fixed intervals instead and report
+  accuracy on held-out data from every distribution seen so far.
+
+## Pitfalls
+
+- **Reporting ACC alone.** It cannot separate forgetting from failure to learn. Report BWT or $F$, and the diagonal.
+- **Forgetting relative to a weak peak.** A method that never learns a task well cannot forget much of it. Read $F$ with
+  the diagonal of $R$ or with intransigence.
+- **Online learning metrics are different.** Regret and prequential error reward adapting to the current distribution,
+  including forgetting what no longer holds (<NoteLink to="concept-drift-adaptation" />). Continual learning metrics
+  reward retaining old tasks. Choose the metric that matches whether old tasks still matter.
