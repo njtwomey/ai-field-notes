@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import {
   Activity,
   AudioWaveform,
+  Blend,
   BookOpen,
   Brain,
   ChartArea,
@@ -22,8 +23,10 @@ import {
   Radar,
   Ruler,
   Shapes,
+  ShieldCheck,
   SlidersHorizontal,
   Sigma,
+  Tags,
   Target,
   TrendingDown,
   Workflow,
@@ -59,6 +62,9 @@ const icons: Record<CategoryIcon, LucideIcon> = {
   sliders: SlidersHorizontal,
   library: LibraryBig,
   flask: FlaskConical,
+  shield: ShieldCheck,
+  blend: Blend,
+  tags: Tags,
 }
 
 /** A top-level topic's icon from taxonomy.yaml, or a folder when it has none. */

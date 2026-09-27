@@ -72,6 +72,9 @@ export const categoryIcons = [
   'sliders',
   'library',
   'flask',
+  'shield',
+  'blend',
+  'tags',
 ] as const
 export type CategoryIcon = (typeof categoryIcons)[number]
 

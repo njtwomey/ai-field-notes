@@ -1,0 +1,74 @@
+---
+title: Does SMOTE help? Modern evaluations
+kind: concept
+summary: 'Recent evaluations find that SMOTE and other rebalancing rarely improve strong classifiers once the decision threshold is tuned. In risk models they leave discrimination unchanged and overestimate the minority-class probability, sometimes beyond repair by recalibration.'
+tags: [class-imbalance, classification, resampling, calibration]
+aliases: [is SMOTE necessary, rebalancing harms calibration]
+requires: [smote-and-variants, threshold-moving]
+partOf: [class-imbalance]
+related: [calibration-under-imbalance, evaluating-imbalanced-classifiers, random-over-and-undersampling]
+references: [chawla2002, elor2022, vandengoorbergh2022, carriero2025, blagus2013]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The question is whether training on a rebalanced set, with SMOTE or with random over- or undersampling, gives a better
+classifier than training on the original data and then choosing the decision threshold. Evaluations since 2022 that
+include strong learners, proper scoring rules and threshold tuning mostly answer no
+<Cite id="elor2022" /> <Cite id="vandengoorbergh2022" /> <Cite id="carriero2025" />.
+</Definition>
+
+## Why the early evidence looked better
+
+<NoteLink to="smote-and-variants">SMOTE</NoteLink> was introduced with evaluations of decision trees and naive Bayes
+compared at a fixed threshold, using ROC and accuracy-type measures <Cite id="chawla2002" />. A model trained on data with
+prevalence $\pi = 0.01$ and cut at $0.5$ predicts the minority class rarely, so any method that raises the training
+prevalence raises recall at that fixed cut-off. The comparison mixes two changes: a different model and a different
+effective threshold. Once the threshold is chosen for each model separately, most of the gap disappears.
+
+## What rebalancing does to a probabilistic model
+
+Random oversampling of the minority class by a factor $w$ is equivalent to weighting its examples by $w$. For a
+well-specified probabilistic model this shifts the fitted log-odds by $\log w$ and changes nothing else (see
+<NoteLink to="random-over-and-undersampling">random over- and undersampling</NoteLink>). A constant shift of the log-odds
+preserves the ranking of every pair of examples, so the ROC curve and its area are unchanged. The same classifications
+are therefore available from the original model by <NoteLink to="threshold-moving">moving the threshold</NoteLink>. The
+shift itself is a calibration error: the rebalanced model overestimates $P(y = 1 \mid \xvec)$ at the deployment
+prevalence.
+
+SMOTE is not an exact reweighting, because its synthetic points lie on segments between minority neighbours rather than
+being drawn from $p(\xvec \mid y = 1)$. It keeps the minority mean and shrinks its covariance
+<Cite id="blagus2013" />, which also moves the decision boundary. The same two consequences follow approximately: little
+change in ranking, and a systematic upward bias in the predicted minority-class probability.
+
+## Findings
+
+- **Strong learners gain nothing.** Across many tabular data sets, balancing improved weak classifiers but did not
+  improve strong ones, such as gradient-boosted trees, once metrics, consistent algorithms and hyperparameter selection
+  were handled carefully <Cite id="elor2022" />.
+- **Discrimination unchanged, calibration broken.** For standard and ridge logistic regression, random undersampling,
+  random oversampling and SMOTE all produced strong overestimation of the minority-class probability without a better
+  area under the ROC curve. The gains in sensitivity and specificity were matched by shifting the threshold of the
+  uncorrected model <Cite id="vandengoorbergh2022" />.
+- **The same holds for machine-learning models.** In simulations across sample sizes, numbers of predictors and event
+  fractions, models trained without correction had equal or better calibration than corrected ones in every scenario.
+  The overestimation of risk was not always removed by recalibration <Cite id="carriero2025" />.
+- **High dimensions.** With many more features than examples, SMOTE had little effect for most classifiers and biased
+  $k$-nearest-neighbour classifiers towards the minority class <Cite id="blagus2013" />.
+
+## Where rebalancing still helps
+
+- **Weak or threshold-bound learners.** Models that output only a label, or whose threshold cannot be tuned, can
+  benefit from a changed training prevalence <Cite id="elor2022" />.
+- **Training dynamics.** Very rare classes in stochastic-gradient training can be undersampled in minibatches for
+  speed, provided the probabilities are corrected afterwards.
+- **Label-only goals.** When only the classification at one operating point matters, rebalancing and threshold moving
+  reach similar results; threshold moving does so without distorting probabilities.
+
+## Recommended default
+
+Train on the original data with a proper scoring rule, evaluate with prevalence-aware measures (see
+<NoteLink to="evaluating-imbalanced-classifiers">evaluating imbalanced classifiers</NoteLink>), and choose the threshold
+from the costs of the two errors. Use rebalancing only when it is shown to help on held-out data, and recalibrate at the
+deployment prevalence afterwards (see <NoteLink to="calibration-under-imbalance">calibration under imbalance</NoteLink>).
