@@ -1,0 +1,117 @@
+---
+title: Back-constrained GP-LVM
+kind: concept
+summary: A back-constrained GP-LVM writes each latent point as a smooth function of its observation, $\xvec_n = \gvec(\yvec_n; \Amat)$, and maximises the GP-LVM likelihood over $\Amat$. Points close in the data then stay close in the latent space, and new data embed without optimisation.
+tags: [gaussian-process, dimensionality-reduction, latent-variable-models, unsupervised, manifold-learning]
+aliases: [back constraints, BC-GP-LVM, back-constrained Gaussian process latent variable model, local distance preservation]
+requires: [gaussian-process-latent-variable-model]
+related: [autoencoder, isomap, locally-linear-embedding, kernel-ridge-regression]
+references: [lawrence2006, lawrence2005]
+status: draft
+updated: 2026-09-27
+---
+
+import { LatentFit } from '../_shared/LatentFit'
+import { TwoMappings } from './TwoMappings'
+
+<Definition>
+A back-constrained Gaussian process latent variable model replaces each free latent point of a
+<NoteLink to="gaussian-process-latent-variable-model">GP-LVM</NoteLink> by the output of a parametric map from data
+space to latent space <Cite id="lawrence2006" />:
+
+$$
+x_{nq} = g_q(\yvec_n; \Amat), \qquad n = 1, \dots, N, \quad q = 1, \dots, Q.
+$$
+
+The parameters $\Amat$ of the map $\gvec$ and the kernel hyperparameters are fitted by maximising the GP-LVM likelihood
+$p(\Ymat \mid \Xmat, \thetavec)$ at $\Xmat = \gvec(\Ymat; \Amat)$. A common choice is a kernel map
+$g_q(\yvec) = \sum_{m=1}^{N} a_{mq}\,k_{\text{bc}}(\yvec, \yvec_m)$ with
+$k_{\text{bc}}(\yvec, \yvec') = \exp\paren{-\frac\gamma2\norm{\yvec - \yvec'}^2}$.
+</Definition>
+
+## Why constrain the latent points
+
+The GP-LVM maps latent points to data. A smooth map sends nearby latent points to nearby outputs. The likelihood
+therefore keeps apart observations that are far apart in the data. It does nothing to keep together observations that
+are close in the data, because a Gaussian process can take equal values at two distant inputs. A fitted GP-LVM can tear
+a connected manifold into pieces and place neighbours far apart <Cite id="lawrence2006" />.
+
+Most nonlinear embedding methods, such as <NoteLink to="isomap">Isomap</NoteLink> and
+<NoteLink to="locally-linear-embedding">locally linear embedding</NoteLink>, preserve local distances instead. Back
+constraints add that property to the GP-LVM. A smooth map in the other direction, from data to latent space, sends
+nearby observations to nearby latent points. The model then has two maps, one each way, as in an
+<NoteLink to="autoencoder">autoencoder</NoteLink>. The back constraint plays the encoder. The Gaussian process plays a
+probabilistic decoder, with the decoder's functions integrated out rather than parametrised.
+
+<TwoMappings />
+
+## Local distances are preserved
+
+For the kernel map, the difference between two latent coordinates is
+
+$$
+x_{iq} - x_{jq} = \sum_{m=1}^{N} a_{mq}\paren{k_{\text{bc}}(\yvec_i, \yvec_m) - k_{\text{bc}}(\yvec_j, \yvec_m)}.
+$$
+
+As a function of the distance $r$, $e^{-\gamma r^2/2}$ has derivative $-\gamma r e^{-\gamma r^2/2}$, whose magnitude is
+largest at $r = 1/\sqrt\gamma$, where it equals $\sqrt{\gamma/e}$. So $e^{-\gamma r^2/2}$ is Lipschitz in $r$ with
+constant $\sqrt{\gamma/e}$. By the triangle inequality, $\abs{\norm{\yvec_i - \yvec_m} - \norm{\yvec_j - \yvec_m}} \le
+\norm{\yvec_i - \yvec_j}$. Together,
+
+$$
+\abs{x_{iq} - x_{jq}} \le \sqrt{\frac{\gamma}{e}}\,\paren{\sum_{m=1}^{N}\abs{a_{mq}}}\norm{\yvec_i - \yvec_j}.
+$$
+
+Observations close in the data have latent coordinates close together. The inverse width $\gamma$ sets how close:
+a small $\gamma$ makes the map smooth over large distances, and a large $\gamma$ lets it bend between nearby
+observations. The GP-LVM likelihood still pushes dissimilar observations apart, so the fitted embedding respects both
+directions.
+
+## Fitting
+
+The likelihood is the GP-LVM likelihood, so its gradient in the latent points is unchanged. With $\Kmat_{\text{bc}}$ the
+$N \times N$ matrix of $k_{\text{bc}}(\yvec_n, \yvec_m)$, the latent points are $\Xmat = \Kmat_{\text{bc}}\Amat$, and the
+chain rule gives
+
+$$
+\frac{\partial\Lcal}{\partial\Amat} = \Kmat_{\text{bc}}^\top\,\frac{\partial\Lcal}{\partial\Xmat}.
+$$
+
+Any differentiable map works. Lawrence and Quiñonero-Candela also use a multilayer perceptron, where the number of
+hidden units sets the smoothness <Cite id="lawrence2006" />. To start from PCA, $\Amat$ is set so that
+$\Kmat_{\text{bc}}\Amat$ is as close as possible to the PCA scores in squared distance.
+
+The figure starts from random latent points and compares free latent points with a kernel back constraint with
+$\gamma = 4$. For the back-constrained model the random start is a random $\Amat$, so the initial latent points are
+already a smooth function of the data.
+
+<LatentFit variant="back-constrained" />
+
+The constrained model has a lower likelihood than the free one at its best. That is expected: it searches a subset of
+the latent configurations. Lawrence and Quiñonero-Candela report the same on 102-dimensional motion-capture data, 34
+markers in three coordinates, of a subject breaking into a run <Cite id="lawrence2006" />. The free GP-LVM reached a
+log-likelihood of 1,543 but split the periodic run into several sub-sequences. The back-constrained model, with an RBF
+kernel map and $\gamma = 10^{-3}$, reached 1,000 and traced a squashed spiral that followed the stride cycle. On a
+vowel data set, nearest-neighbour classification in the latent space made 458 errors with Isomap, 226 with the GP-LVM
+and 155 with the back-constrained GP-LVM, against 24 in the original data space.
+
+## Embedding new data
+
+The back constraint is a function of the data. A new observation $\yvec_*$ gets the latent point
+$\gvec(\yvec_*; \Amat)$ by one evaluation. The unconstrained GP-LVM needs a numerical optimisation per new point,
+started from several places because the objective is multimodal.
+
+## Assumptions
+
+- **Smoothness in the data space is meaningful.** The back constraint uses Euclidean distance between raw
+  observations. If that distance is a poor measure of similarity, for example between images under small shifts, the
+  constraint pulls the wrong points together.
+- **The map's capacity is right.** The width $\gamma$ of a kernel map, or the size of a network, is chosen by hand.
+
+## Pitfalls
+
+- **Too smooth a map.** A small $\gamma$ forces far-apart observations together, which is the failure the GP-LVM avoids.
+  With $\gamma$ too large the map interpolates any latent configuration, and the constraint has no effect.
+- **A lower likelihood is not a worse model.** The back-constrained fit trades likelihood for neighbourhood
+  preservation. Compare embeddings with a criterion that matches the purpose, such as neighbour preservation or a
+  downstream task.
