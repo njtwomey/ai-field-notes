@@ -76,6 +76,14 @@ export type DiagramEdge = {
   route?: 'ortho' | 'straight' | 'curve'
   bend?: number
   label?: string
+  /** Where the label sits along the edge, as a fraction of its length (default: middle of the longest straight run). */
+  labelPos?: number
+  /** Which side of the edge the label sits on, relative to the direction of travel (default left: above a rightward edge). */
+  labelSide?: 'left' | 'right'
+  /** Gap between the edge and its label, in grid units. */
+  labelOffset?: number
+  /** Turn the label to run along the edge, kept upright (default true). */
+  labelRotate?: boolean
   dashed?: boolean
   arrow?: 'end' | 'start' | 'both' | 'none'
   tone?: Tone
@@ -90,4 +98,11 @@ export type DiagramSpec = {
   unit?: number
   /** How far the diagram may scale up beyond its natural size to fill its container. */
   maxScale?: number
+  /**
+   * Multiplies every position (nodes, waypoints, group rectangles) to space the layout out without resizing the shapes;
+   * a pair scales x and y separately.
+   */
+  spread?: number | [number, number]
+  /** Grow nodes whose label does not fit (default true). The label is measured after the first render. */
+  fitLabels?: boolean
 }

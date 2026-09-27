@@ -196,7 +196,9 @@ stale.
   (`site/src/components/diagram/`): a hand-specified SVG diagram, not auto-layout. Nodes are placed on a grid (centres,
   grid units), groups are drawn around nodes or at rectangles (plates are groups labelled bottom-right), and edges are
   routed at right angles through ports (`id:n|s|e|w`) and waypoints, or drawn `straight`/`curve` for graphical models.
-  Labels are KaTeX. Reusable pieces (`op`, `gate`, `projector` encoder/decoder trapezoids, `reparam`) live in
+  Labels are KaTeX, drawn as an HTML overlay; nodes grow to fit their labels (`fitLabels`), `spread` spaces a layout
+  out, and edge labels sit beside their edge (rotated along it when they fit; `labelPos`, `labelSide`, `labelOffset`).
+  Reusable pieces (`op`, `gate`, `projector` encoder/decoder trapezoids, `reparam`) live in
   `components.ts`; add a component there rather than repeating a pattern. `/lab/diagrams` is the test bench. The older
   `GraphDiagram` (ECharts) still backs existing graphical-model figures.
 - `XYChart equalAspect` gives equal pixel length per unit on both axes, for any ranges. Use it whenever a shape or

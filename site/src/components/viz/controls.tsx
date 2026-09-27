@@ -122,12 +122,14 @@ export function ParamChoice<T extends string>({ label, value, onChange, options 
   return (
     <div className="flex flex-col gap-2">
       <span className="text-xs text-muted-foreground">{label}</span>
+      {/* A joined segmented control for a few options; separate chips that wrap for many, so narrow screens fit. */}
       <ToggleGroup
         value={[value]}
         onValueChange={(v) => v[0] && onChange(v[0] as T)}
         variant="outline"
         size="sm"
-        spacing={0}
+        spacing={options.length > 4 ? 1 : 0}
+        className={options.length > 4 ? 'flex-wrap' : undefined}
       >
         {options.map((o) => (
           <ToggleGroupItem key={o.value} value={o.value} className="px-3 text-xs">

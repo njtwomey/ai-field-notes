@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTheme } from '@/components/theme-provider'
 import { MathText } from '@/components/content/MathText'
 import { chrome, seriesColor, type Mode } from '@/components/viz/palette'
@@ -193,7 +193,14 @@ function trapezoid(n: DiagramNode, u: number): string {
 /** A label drawn as HTML over the SVG, positioned in the diagram's pixel coordinates. */
 type Overlay = {
   key: string
-  box: Box
+  /** A box the label is centred or aligned in; or, for edge labels, a point the label is centred on. */
+  box?: Box
+  at?: Pt
+  rotate?: number
+  /** Which point of the label sits at `at`: its centre, or the middle of its left (start) or right (end) edge. */
+  anchor?: 'start' | 'center' | 'end'
+  /** Set on node labels so they can be measured and the node grown to fit. */
+  fitNode?: string
   /** Font size in diagram pixels; it scales with the rendered diagram. */
   size: number
   align: 'start' | 'center' | 'end'
@@ -230,6 +237,52 @@ function groupBox(g: DiagramGroup, byId: Map<string, DiagramNode>): Box {
   }
 }
 
+const INSIDE_LABEL = new Set(['box', 'pill', 'stack', 'circle', 'latent', 'noise', 'encoder', 'decoder', 'op'])
+
+/** Apply `spread` to every position and grow nodes to the measured label sizes. */
+function prepare(spec: DiagramSpec, fit: Record<string, [number, number]>): DiagramSpec {
+  const [sx, sy] = Array.isArray(spec.spread) ? spec.spread : [spec.spread ?? 1, spec.spread ?? 1]
+  return {
+    ...spec,
+    nodes: spec.nodes.map((n) => {
+      const [w, h] = size(n)
+      const f = fit[n.id]
+      const round = ROUND.has(n.shape ?? 'box')
+      // Circles grow evenly; trapezoids need extra width because their narrow end is only TAPER of the height.
+      const [fw, fh] = f ? (round ? [Math.max(f[0], f[1]), Math.max(f[0], f[1])] : f) : [0, 0]
+      return { ...n, x: n.x * sx, y: n.y * sy, w: Math.max(w, fw), h: Math.max(h, fh) }
+    }),
+    edges: spec.edges?.map((e) => ({ ...e, via: e.via?.map(([x, y]) => [x * sx, y * sy] as [number, number]) })),
+    groups: spec.groups?.map((g) =>
+      g.rect ? { ...g, rect: { x: g.rect.x * sx, y: g.rect.y * sy, w: g.rect.w * sx, h: g.rect.h * sy } } : g,
+    ),
+  }
+}
+
+/** Rough rendered length in diagram pixels of a label at a font size: maths counts by its visible characters. */
+function labelLength(text: string, px: number): number {
+  const plain = text
+    .replace(/\$([^$]*)\$/g, (_, m: string) => m.replace(/\\[a-zA-Z]+|[{}^_\\ ]/g, '').replace(/./g, 'x'))
+    .replace(/\n.*/s, '')
+  return plain.length * px * 0.55 + 8
+}
+
+/** The point and direction (radians) a fraction `t` of the way along a polyline. */
+function alongPolyline(pts: Pt[], t: number): { p: Pt; angle: number } {
+  const lens = pts.slice(1).map((q, i) => Math.hypot(q.x - pts[i].x, q.y - pts[i].y))
+  let target = lens.reduce((a, b) => a + b, 0) * t
+  for (let i = 0; i < lens.length; i++) {
+    if (target <= lens[i] || i === lens.length - 1) {
+      const f = lens[i] ? Math.min(target / lens[i], 1) : 0
+      const a = pts[i]
+      const b = pts[i + 1]
+      return { p: { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f }, angle: Math.atan2(b.y - a.y, b.x - a.x) }
+    }
+    target -= lens[i]
+  }
+  return { p: pts[0], angle: 0 }
+}
+
 /**
  * Renders a hand-specified diagram as SVG. Colours come from the data palette and the chrome tokens, so the diagram
  * follows the light and dark themes. Labels are HTML laid over the SVG, positioned in percentages of the diagram and
@@ -237,7 +290,7 @@ function groupBox(g: DiagramGroup, byId: Map<string, DiagramNode>): Box {
  * (SVG `foreignObject` is misplaced by WebKit when the SVG is scaled).
  */
 export function Diagram({
-  spec,
+  spec: source,
   ariaLabel,
   className,
   onNodeClick,
@@ -249,7 +302,10 @@ export function Diagram({
   onNodeClick?: (id: string) => void
 }) {
   const { resolved: mode } = useTheme()
-  const u = spec.unit ?? 40
+  const u = source.unit ?? 40
+  const [fit, setFit] = useState<Record<string, [number, number]>>({})
+  const spec = useMemo(() => prepare(source, fit), [source, fit])
+  const wrapper = useRef<HTMLDivElement>(null)
   const layout = useMemo(() => {
     const byId = new Map(spec.nodes.map((n) => [n.id, n]))
     const groups = (spec.groups ?? []).map((g) => ({ g, box: groupBox(g, byId) }))
@@ -368,35 +424,65 @@ export function Diagram({
         }
         if (arrow === 'end' || arrow === 'both') shorten(trimmed[trimmed.length - 1], before('end'))
         if (arrow === 'start' || arrow === 'both') shorten(trimmed[0], before('start'))
-        let labelAt: (Box & { start?: boolean }) | undefined
         if (e.label) {
-          let best = 0
-          for (let k = 1; k < px.length; k++) {
-            const len = Math.hypot(px[k].x - px[k - 1].x, px[k].y - px[k - 1].y)
-            if (len > best) {
-              best = len
-              const mx = (px[k].x + px[k - 1].x) / 2
-              const my = (px[k].y + px[k - 1].y) / 2
-              // Beside the segment, not on it: above a horizontal run, to the right of a vertical one.
-              labelAt =
-                Math.abs(px[k].y - px[k - 1].y) < 1
-                  ? { x0: mx - 3 * u, y0: my - 0.62 * u, x1: mx + 3 * u, y1: my - 0.04 * u }
-                  : { x0: mx + 0.12 * u, y0: my - 0.3 * u, x1: mx + 6 * u, y1: my + 0.3 * u, start: true }
+          // Position along the edge: the middle of the longest straight run, or `labelPos` of the way along.
+          let at: { p: Pt; angle: number }
+          let run: number
+          if (control) {
+            const t = e.labelPos ?? 0.5
+            const [a, b] = px
+            const p = {
+              x: (1 - t) ** 2 * a.x + 2 * (1 - t) * t * control.x + t * t * b.x,
+              y: (1 - t) ** 2 * a.y + 2 * (1 - t) * t * control.y + t * t * b.y,
             }
+            const d = {
+              x: 2 * (1 - t) * (control.x - a.x) + 2 * t * (b.x - control.x),
+              y: 2 * (1 - t) * (control.y - a.y) + 2 * t * (b.y - control.y),
+            }
+            at = { p, angle: Math.atan2(d.y, d.x) }
+            run = Math.hypot(b.x - a.x, b.y - a.y)
+          } else if (e.labelPos !== undefined) {
+            at = alongPolyline(px, e.labelPos)
+            run = Math.min(...px.slice(1).map((q, m) => Math.hypot(q.x - px[m].x, q.y - px[m].y)))
+          } else {
+            let k = 1
+            for (let m = 2; m < px.length; m++)
+              if (
+                Math.hypot(px[m].x - px[m - 1].x, px[m].y - px[m - 1].y) >
+                Math.hypot(px[k].x - px[k - 1].x, px[k].y - px[k - 1].y)
+              )
+                k = m
+            at = alongPolyline([px[k - 1], px[k]], 0.5)
+            run = Math.hypot(px[k].x - px[k - 1].x, px[k].y - px[k - 1].y)
           }
-        }
-        if (e.label && labelAt)
+          // Offset along the normal on the chosen side of the direction of travel, then keep the text upright.
+          const side = e.labelSide === 'right' ? -1 : 1
+          const gap = (e.labelOffset ?? 0.12) * u + 11 * 0.75
+          const nx = Math.sin(at.angle) * side
+          const ny = -Math.cos(at.angle) * side
+          // Rotate along the edge only when the label fits along its run; otherwise keep it level and set it beside the
+          // edge, anchored at its near end so it grows away from the line.
+          const fits = labelLength(e.label, 11) < run - 12
+          const rotate = e.labelRotate ?? fits
+          let deg = rotate ? (at.angle * 180) / Math.PI : 0
+          if (deg > 90) deg -= 180
+          if (deg <= -90) deg += 180
+          const steep = Math.abs(Math.sin(at.angle)) > 0.7
+          const anchor = !rotate && steep ? (nx < 0 ? 'end' : 'start') : 'center'
           overlays.push({
             key: `e-${i}`,
-            box: labelAt,
+            at: { x: at.p.x + nx * (anchor === 'center' ? gap : 6), y: at.p.y + ny * gap },
+            rotate: deg,
+            anchor,
             size: 11,
-            align: labelAt.start ? 'start' : 'center',
+            align: 'center',
             content: (
-              <span className="rounded px-1" style={{ background: c.surface, color: c.inkSecondary }}>
+              <span className="rounded px-1 whitespace-nowrap" style={{ background: c.surface, color: c.inkSecondary }}>
                 <MathText text={e.label} />
               </span>
             ),
           })
+        }
         return (
           <g key={i}>
             <path
@@ -452,6 +538,7 @@ export function Diagram({
           overlays.push({
             key: `n-${n.id}`,
             box: side ? outside(side) : b,
+            fitNode: side || !INSIDE_LABEL.has(shape) ? undefined : n.id,
             size: n.small ? 11 : 13,
             align: side === 'e' ? 'start' : side === 'w' ? 'end' : 'center',
             content: labelLines(n.label, labelColour),
@@ -518,8 +605,33 @@ export function Diagram({
     </svg>
   )
 
+  // Grow any node whose label is wider or taller than it (measured at the rendered scale, converted to grid units).
+  useLayoutEffect(() => {
+    const root = wrapper.current
+    if (!root || source.fitLabels === false) return
+    const scale = root.clientWidth / width
+    if (!scale) return
+    const grow: Record<string, [number, number]> = {}
+    root.querySelectorAll<HTMLElement>('[data-fit-node]').forEach((el) => {
+      const id = el.dataset.fitNode!
+      const node = layout.byId.get(id)
+      const inner = el.firstElementChild as HTMLElement | null
+      if (!node || !inner) return
+      const [w, h] = size(node)
+      // A trapezoid's height at its centre is (1 + TAPER)/2 of its full height, so it needs proportionally more.
+      const middle = node.shape === 'encoder' || node.shape === 'decoder' ? (1 + TAPER) / 2 : 1
+      const wide = (inner.scrollWidth / scale + 14) / u
+      const tall = (inner.scrollHeight / scale + 8) / u / middle
+      if (wide > w + 0.02 || tall > h + 0.02) grow[id] = [Math.max(w, wide), Math.max(h, tall)]
+    })
+    // Sizes come from the rendered DOM, so they can only be read after layout; growth is monotone, so this settles.
+    // oxlint-disable-next-line react/set-state-in-effect
+    if (Object.keys(grow).length) setFit((prev) => ({ ...prev, ...grow }))
+  }, [layout, width, u, source.fitLabels])
+
   return (
     <div
+      ref={wrapper}
       className={className}
       style={{
         position: 'relative',
@@ -530,28 +642,47 @@ export function Diagram({
       }}
     >
       {svg}
-      {overlays.map((o) => (
-        <div
-          key={o.key}
-          className="font-prose"
-          style={{
-            position: 'absolute',
-            left: pct((o.box.x0 - vx) / width),
-            top: pct((o.box.y0 - vy) / height),
-            width: pct((o.box.x1 - o.box.x0) / width),
-            height: pct((o.box.y1 - o.box.y0) / height),
-            // Container units: the font scales with the rendered width, exactly as the SVG does.
-            fontSize: `${(o.size / width) * 100}cqw`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: o.align === 'start' ? 'flex-start' : o.align === 'end' ? 'flex-end' : 'center',
-            textAlign: o.align === 'start' ? 'left' : o.align === 'end' ? 'right' : 'center',
-            pointerEvents: 'none',
-          }}
-        >
-          {o.content}
-        </div>
-      ))}
+      {overlays.map((o) =>
+        o.at ? (
+          <div
+            key={o.key}
+            className="font-prose"
+            style={{
+              position: 'absolute',
+              left: pct((o.at.x - vx) / width),
+              top: pct((o.at.y - vy) / height),
+              transform: `translate(${o.anchor === 'start' ? '0' : o.anchor === 'end' ? '-100%' : '-50%'}, -50%) rotate(${o.rotate ?? 0}deg)`,
+              fontSize: `${(o.size / width) * 100}cqw`,
+              lineHeight: 1.2,
+              pointerEvents: 'none',
+            }}
+          >
+            {o.content}
+          </div>
+        ) : o.box ? (
+          <div
+            key={o.key}
+            data-fit-node={o.fitNode}
+            className="font-prose"
+            style={{
+              position: 'absolute',
+              left: pct((o.box.x0 - vx) / width),
+              top: pct((o.box.y0 - vy) / height),
+              width: pct((o.box.x1 - o.box.x0) / width),
+              height: pct((o.box.y1 - o.box.y0) / height),
+              // Container units: the font scales with the rendered width, exactly as the SVG does.
+              fontSize: `${(o.size / width) * 100}cqw`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: o.align === 'start' ? 'flex-start' : o.align === 'end' ? 'flex-end' : 'center',
+              textAlign: o.align === 'start' ? 'left' : o.align === 'end' ? 'right' : 'center',
+              pointerEvents: 'none',
+            }}
+          >
+            {o.content}
+          </div>
+        ) : null,
+      )}
     </div>
   )
 }
