@@ -1,0 +1,107 @@
+---
+title: Recurrent neural network
+kind: concept
+summary: A recurrent neural network reads a sequence one element at a time and updates a hidden state $\hvec_t = \phi(\Wmat \hvec_{t-1} + \Umat \xvec_t + \bvec)$ with the same weights at every step. The state summarises the prefix read so far, so one network handles sequences of any length.
+tags: [deep-learning, sequence-models, worked-example]
+aliases: [RNN, vanilla RNN, Elman network, simple recurrent network, hidden state]
+requires: [backpropagation]
+related: [backpropagation-through-time, lstm, gru, hidden-markov-model, multilayer-perceptron]
+references: [elman1990, goodfellow2016]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A recurrent neural network (RNN) maps a sequence $\xvec_1, \dots, \xvec_T$ with $\xvec_t \in \reals^m$ to hidden states
+$\hvec_t \in \reals^n$ by the recurrence
+$$
+\hvec_t = \phi\paren{\Wmat \hvec_{t-1} + \Umat \xvec_t + \bvec}, \qquad \hvec_0 = \zeros,
+$$
+where $\Wmat \in \reals^{n \times n}$, $\Umat \in \reals^{n \times m}$, $\bvec \in \reals^n$ and $\phi$ is an
+elementwise nonlinearity, usually $\tanh$. An output $\hat\yvec_t = g(\Vmat \hvec_t + \cvec)$ can be read at any step.
+The same parameters are used at every step <Cite id="elman1990" />.
+</Definition>
+
+## Intuition
+
+A feed-forward network takes an input of fixed size. Text, speech and sensor readings arrive as sequences of varying
+length, and their meaning depends on order. An RNN handles them with a loop. At each step it combines the new input with
+a state vector that carries information from earlier steps. The state is the network's memory.
+
+Because the weights are shared across steps, the number of parameters does not depend on $T$. What the network learns
+about a pattern at one position applies at every position. This is the same idea as weight sharing in a
+<NoteLink to="convolutional-layer">convolutional layer</NoteLink>, applied along time instead of space.
+
+## Unrolling
+
+Writing out the recurrence for $T$ steps turns the RNN into a feed-forward network with $T$ layers. Layer $t$ takes
+$\hvec_{t-1}$ and $\xvec_t$, and every layer has the same weights. This unrolled graph is a directed acyclic graph, so
+ordinary <NoteLink to="backpropagation">backpropagation</NoteLink> applies to it. Applied to the unrolled graph it is
+called <NoteLink to="backpropagation-through-time">backpropagation through time</NoteLink>.
+
+The hidden state is a deterministic function of the whole prefix:
+
+$$
+\hvec_t = f_{\theta}(\hvec_{t-1}, \xvec_t) = f_{\theta}(f_{\theta}(\hvec_{t-2}, \xvec_{t-1}), \xvec_t) = \cdots,
+$$
+
+so $\hvec_t$ depends on $\xvec_1, \dots, \xvec_t$ and on nothing later.
+
+## Input–output patterns
+
+- **Many to one.** Read the whole sequence and predict from $\hvec_T$. Example: sentiment of a review.
+- **Many to many, aligned.** Predict $\hat\yvec_t$ at every step. Examples: tagging each word with its part of speech,
+  or predicting the next character.
+- **Many to many, unaligned.** An encoder reads the input and a decoder writes an output of a different length. See
+  <NoteLink to="sequence-to-sequence">sequence-to-sequence models</NoteLink>.
+- **Bidirectional.** A second RNN reads the sequence backwards. Concatenating the two states at step $t$ gives a
+  representation of the whole sequence centred on $t$. This needs the whole input in advance.
+
+As a **language model**, an RNN predicts $p(x_{t+1} \mid x_1, \dots, x_t) = \operatorname{softmax}(\Vmat \hvec_t + \cvec)$
+and is trained to maximise the log-likelihood of the next symbol at every step.
+
+## Parameters
+
+An RNN with $m$ inputs and $n$ hidden units has $n^2 + nm + n = n(n + m) + n$ recurrent parameters. With $m = n = 256$
+that is $256 \cdot 512 + 256 = 131{,}328$ parameters, for any sequence length.
+
+## Worked example
+
+Take a scalar RNN with $n = m = 1$, $h_t = \tanh(w h_{t-1} + u x_t)$, $w = 0.5$, $u = 1$, no bias and $h_0 = 0$. Feed
+the input $x = (1, 0, 0)$:
+
+$$
+\begin{aligned}
+h_1 &= \tanh(0.5 \cdot 0 + 1) = \tanh(1) = 0.762, \\
+h_2 &= \tanh(0.5 \cdot 0.762 + 0) = \tanh(0.381) = 0.363, \\
+h_3 &= \tanh(0.5 \cdot 0.363 + 0) = \tanh(0.182) = 0.180.
+\end{aligned}
+$$
+
+The input at step 1 is still visible at step 3, but its trace shrinks by roughly a factor $w = 0.5$ per step. Near zero,
+$\tanh z \approx z$, so the state decays like $w^t$. With $\abs{w} < 1$ the network forgets geometrically. The same
+factor governs how gradients shrink when they flow backwards, which is the subject of
+<NoteLink to="backpropagation-through-time">backpropagation through time</NoteLink>.
+
+## Relation to other sequence models
+
+A <NoteLink to="hidden-markov-model">hidden Markov model</NoteLink> also keeps a state that summarises the past. Its
+state is a discrete random variable and inference averages over it. An RNN's state is a deterministic real vector, so
+there is nothing to average over, and its update can be any differentiable function. Gated variants, the
+<NoteLink to="lstm">LSTM</NoteLink> and the <NoteLink to="gru">GRU</NoteLink>, replace the update to keep information
+for longer.
+
+## Assumptions
+
+- The past relevant to the future can be compressed into a fixed-size vector $\hvec_t$.
+- The same update rule applies at every step: the process is stationary in the sense that position does not change the
+  dynamics.
+
+## Pitfalls
+
+- **Short memory in practice.** A vanilla RNN can represent long dependencies, but gradient descent rarely finds them
+  because gradients vanish over many steps <Cite id="bengio1994" />. Use an LSTM or GRU, or attention.
+- **Sequential computation.** Step $t$ needs $\hvec_{t-1}$, so the steps of one sequence cannot run in parallel. This
+  makes RNNs slow to train on long sequences compared with convolutions or transformers.
+- **Exploding states.** With $\phi$ unbounded, such as ReLU, and a recurrent matrix with spectral radius above 1, the
+  state can grow without limit. $\tanh$ keeps every unit in $(-1, 1)$.

@@ -1,0 +1,123 @@
+---
+title: Backpropagation through time
+kind: technique
+summary: Backpropagation through time trains a recurrent network by unrolling it over the sequence and backpropagating through the unrolled graph. The gradient reaching step $k$ from step $t$ is a product of $t - k$ Jacobians, so it vanishes or explodes exponentially in the gap.
+tags: [deep-learning, sequence-models, gradients, worked-example]
+aliases: [BPTT, truncated BPTT, vanishing gradients, exploding gradients, gradient clipping]
+requires: [recurrent-neural-network, backpropagation, jacobian]
+related: [lstm, gru]
+references: [werbos1990, bengio1994, pascanu2013]
+status: draft
+updated: 2026-09-27
+---
+
+import { GradientDecay } from './GradientDecay'
+
+<Definition>
+Backpropagation through time (BPTT) computes the gradient of a sequence loss $\Lcal = \sum_{t=1}^{T} \Lcal_t$ with
+respect to the shared parameters of a recurrent network. It unrolls the recurrence into $T$ copies of one layer,
+runs <NoteLink to="backpropagation">backpropagation</NoteLink> through the unrolled graph, and sums the gradients of the
+$T$ copies of each parameter <Cite id="werbos1990" />.
+</Definition>
+
+## Problem
+
+A <NoteLink to="recurrent-neural-network">recurrent neural network</NoteLink> updates its state by
+$\hvec_t = \phi(\avec_t)$ with pre-activation $\avec_t = \Wmat \hvec_{t-1} + \Umat \xvec_t + \bvec$. The loss at step $t$
+depends on $\Wmat$ directly through $\avec_t$ and indirectly through every earlier state. The gradient must account for
+all of these paths.
+
+## Mechanism
+
+**Forward pass.** Run the recurrence for $t = 1, \dots, T$, storing every $\hvec_t$ and $\avec_t$, and compute the
+losses $\Lcal_t$.
+
+**Backward pass.** Define the adjoint $\bar\hvec_t = \partial \Lcal / \partial \hvec_t$, a row vector. The state
+$\hvec_t$ affects the loss through $\Lcal_t$ and through $\hvec_{t+1}$, so by the multivariable chain rule
+
+$$
+\bar\hvec_t = \frac{\partial \Lcal_t}{\partial \hvec_t} + \bar\hvec_{t+1}\, \frac{\partial \hvec_{t+1}}{\partial \hvec_t},
+\qquad \bar\hvec_{T+1} = \zeros.
+$$
+
+The Jacobian of one step follows from $\hvec_{t+1} = \phi(\Wmat \hvec_t + \Umat \xvec_{t+1} + \bvec)$:
+
+$$
+\Jmat_{t+1} \eqdef \frac{\partial \hvec_{t+1}}{\partial \hvec_t} = \diag\paren{\phi'(\avec_{t+1})}\, \Wmat.
+$$
+
+**Accumulate.** Each copy of $\Wmat$ receives the adjoint of its pre-activation,
+$\bar\avec_t = \bar\hvec_t \diag(\phi'(\avec_t))$, and the total gradient sums over copies:
+
+$$
+\frac{\partial \Lcal}{\partial \Wmat} = \sum_{t=1}^{T} \bar\avec_t^{\tr}\, \hvec_{t-1}^{\tr}, \qquad
+\frac{\partial \Lcal}{\partial \Umat} = \sum_{t=1}^{T} \bar\avec_t^{\tr}\, \xvec_t^{\tr}.
+$$
+
+Unrolling the recursion for $\bar\hvec_k$ shows what each term carries. The contribution of the loss at step $t$ to
+the adjoint at an earlier step $k$ is
+
+$$
+\frac{\partial \Lcal_t}{\partial \hvec_k} = \frac{\partial \Lcal_t}{\partial \hvec_t} \prod_{i = k+1}^{t} \Jmat_i
+= \frac{\partial \Lcal_t}{\partial \hvec_t}\, \Jmat_t \Jmat_{t-1} \cdots \Jmat_{k+1}.
+$$
+
+## Vanishing and exploding gradients
+
+The product of $t - k$ Jacobians decides whether the loss at step $t$ can teach the network anything about step $k$.
+Bound its norm with the submultiplicativity of the spectral norm, $\norm{\Amat\Bmat} \le \norm{\Amat}\norm{\Bmat}$.
+Suppose $\abs{\phi'(z)} \le \gamma$ for all $z$; for $\tanh$, $\gamma = 1$. Then
+$\norm{\diag(\phi'(\avec_i))} \le \gamma$, and with $\sigma_1$ the largest singular value of $\Wmat$,
+
+$$
+\norm{\prod_{i=k+1}^{t} \Jmat_i} \le \prod_{i=k+1}^{t} \norm{\diag(\phi'(\avec_i))}\,\norm{\Wmat} \le (\gamma \sigma_1)^{t-k}.
+$$
+
+- **Vanishing.** If $\gamma \sigma_1 < 1$, the bound falls geometrically in the gap $t - k$. Long-range terms are
+  exponentially smaller than short-range ones, so the summed gradient is dominated by nearby steps. The network cannot
+  learn that an input 50 steps back matters <Cite id="bengio1994" />.
+- **Exploding.** The bound is only an upper limit, so $\gamma \sigma_1 > 1$ is necessary for explosion, not
+  sufficient <Cite id="pascanu2013" />. In the linear case $\phi(z) = z$, the product is $\Wmat^{t-k}$. Along an
+  eigenvector with eigenvalue $\lambda$, $\Wmat^{t-k}\vvec = \lambda^{t-k}\vvec$, so any eigenvalue with
+  $\abs{\lambda} > 1$ makes some component grow exponentially.
+
+A single long-range term can then dominate the sum, and one gradient step can throw the parameters far away. Both
+failures come from one fact: backpropagation through $t - k$ steps multiplies by the same matrix $t - k$ times.
+
+<GradientDecay />
+
+## Worked example
+
+For the scalar RNN $h_t = \tanh(w h_{t-1} + u x_t)$, each Jacobian is the number
+$J_t = w\,(1 - h_t^2)$. With $w = 0.5$ and states near zero, $J_t \approx 0.5$. After 50 steps the factor is at most
+$0.5^{50} \approx 8.9 \times 10^{-16}$, below the resolution of a 32-bit float relative to 1. With $w = 1.5$ and
+states near zero, a linear network would multiply by $1.5^{50} \approx 6.4 \times 10^{8}$. A $\tanh$ unit in
+saturation, $h_t$ near $\pm 1$, has $1 - h_t^2$ near zero, which cuts the chain even when $\abs{w} > 1$.
+
+## Cost
+
+The forward pass stores $T$ states of size $n$, so memory grows linearly with the sequence length. Time is
+$O(T n^2)$ per sequence, the same order as the forward pass.
+
+**Truncated BPTT** splits a long sequence into chunks of $K$ steps. It carries the hidden state forward across chunks
+but stops the backward pass at each chunk boundary. Memory is $O(K n)$. Dependencies longer than $K$ steps receive no
+gradient.
+
+## Trade-offs
+
+- **Gradient clipping** handles explosion. If the gradient $\gvec$ has norm above a threshold $\tau$, rescale it to
+  $\tau\, \gvec / \norm{\gvec}$ <Cite id="pascanu2013" />. The direction is kept and the step length is bounded.
+  Clipping does not help vanishing.
+- **Gated architectures** handle vanishing. The <NoteLink to="lstm">LSTM</NoteLink> and <NoteLink to="gru">GRU</NoteLink>
+  add a path whose Jacobian is a diagonal of gates that can stay close to 1.
+- **Attention** gives each step a direct connection to every earlier step, so the gradient path length is 1 regardless of
+  the gap.
+- **Initialisation** of $\Wmat$ as an orthogonal or identity matrix puts every singular value at 1, which delays
+  both failures early in training.
+
+## Pitfalls
+
+- **Small gradients look like convergence.** A vanishing gradient gives a small loss change and a small gradient norm.
+  The model has not learned the long dependency; it has stopped receiving a signal about it.
+- **Truncation bias.** Truncated BPTT gives a biased gradient. The chunk length is an upper limit on what the model can
+  learn to remember.

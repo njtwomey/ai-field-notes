@@ -1,0 +1,119 @@
+---
+title: Pooling and strides
+kind: concept
+summary: Pooling replaces each window of a feature map by its maximum or mean, and a stride $s > 1$ evaluates a layer only at every $s$-th position. Both shrink the feature map and make the receptive field grow geometrically with depth instead of linearly.
+tags: [deep-learning, computer-vision, worked-example]
+aliases: [max pooling, average pooling, global average pooling, strided convolution, receptive field]
+requires: [convolutional-layer]
+related: [classic-cnn-architectures]
+references: [lecun1998b, dumoulin2016, luo2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { ReceptiveFieldGrowth } from './ReceptiveFieldGrowth'
+
+<Definition>
+A pooling layer slides a $k \times k$ window over each channel of a feature map with stride $s$ and outputs one summary
+per window: the maximum (max pooling) or the mean (average pooling). It has no parameters and treats channels
+independently. A strided layer, pooling or convolution, computes its output only at every $s$-th position, so the output
+is about $s$ times smaller along each axis.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="convolutional-layer">convolutional layer</NoteLink> with stride 1 keeps the spatial size of its input.
+A network made only of such layers keeps full resolution to the end. That is expensive, and each output still sees only
+a small window of the image. Downsampling fixes both problems. After a stride-2 layer, one step on the feature map
+covers two pixels of the input, so the next $3 \times 3$ kernel covers a region twice as wide.
+
+Max pooling also discards the exact position of a feature within each window. If an edge moves by one pixel inside a
+$2 \times 2$ window, the window's maximum does not change. This gives a small amount of translation invariance.
+
+## Pooling
+
+For channel $c$, max pooling with window $k$ and stride $s$ outputs
+
+$$
+y_{c, i, j} = \max_{0 \le u, v < k} x_{c,\, si + u,\, sj + v},
+$$
+
+and average pooling replaces the maximum by the mean of the $k^2$ values. The output size follows the same formula as a
+convolution: $\lfloor (n + 2p - k)/s \rfloor + 1$. The standard choice is $k = s = 2$, which halves each side and keeps
+one value in four.
+
+**Gradient of max pooling.** Within one window, $y = \max_m x_m$. When the maximum is unique at position $m^\star$,
+changing any other $x_m$ by a small amount leaves $y$ unchanged, and changing $x_{m^\star}$ changes $y$ one for one:
+
+$$
+\frac{\partial y}{\partial x_m} = \begin{cases} 1 & m = m^\star, \\ 0 & \text{otherwise.} \end{cases}
+$$
+
+Backpropagation therefore routes the whole gradient of each output to the single input that won. Average pooling
+spreads it evenly, $\partial y / \partial x_m = 1/k^2$.
+
+**Global average pooling** takes the mean of each channel over the whole feature map. A $C \times 7 \times 7$ map becomes
+a vector of $C$ numbers, whatever the input size. Modern networks use it before the classifier instead of flattening.
+
+## Strided convolution
+
+A convolution with stride $s$ downsamples and filters in one layer. It is equivalent to a stride-1 convolution followed
+by keeping every $s$-th output, but it skips the discarded work. Since ResNet, most architectures downsample with
+strided convolutions and use pooling only in the stem and at the end <Cite id="he2016" />.
+
+## Receptive field
+
+The receptive field of a unit is the side length $r$ of the input region that can affect it. Define the **jump**
+$j_l$ as the distance, in input pixels, between two adjacent units of layer $l$. The input has $r_0 = 1$ and $j_0 = 1$.
+
+Layer $l$ has kernel size $k_l$ and stride $s_l$. Adjacent units of layer $l$ are $s_l$ units of layer $l - 1$ apart,
+and those are $j_{l-1}$ pixels apart, so
+
+$$
+j_l = j_{l-1}\, s_l = \prod_{m=1}^{l} s_m.
+$$
+
+A unit of layer $l$ reads $k_l$ adjacent units of layer $l - 1$. Their centres span $(k_l - 1)\, j_{l-1}$ input pixels,
+and each of them sees $r_{l-1}$ pixels around its own centre. The union of their fields therefore has side
+
+$$
+r_l = r_{l-1} + (k_l - 1)\, j_{l-1}.
+$$
+
+With stride 1 everywhere, $j_l = 1$ and $r_L = 1 + L(k - 1)$: linear growth. Each stride-2 layer doubles the jump, so
+every later layer adds twice as many pixels. With a stride-2 layer in every stage, the field grows geometrically with
+the number of stages <Cite id="dumoulin2016" />.
+
+<ReceptiveFieldGrowth />
+
+## Worked example
+
+VGG-16 has five stages of $3 \times 3$ stride-1 convolutions (2, 2, 3, 3 and 3 layers), each followed by a
+$2 \times 2$ stride-2 max pool. Apply the recursion:
+
+- Stage 1: two convolutions give $r = 1 + 2 + 2 = 5$. The pool adds $(2 - 1) \cdot 1 = 1$, so $r = 6$ and $j = 2$.
+- Stage 2: two convolutions add $2 \cdot 2$ each, $r = 14$. The pool adds $2$: $r = 16$, $j = 4$.
+- Stage 3: three convolutions add $2 \cdot 4$ each, $r = 40$. The pool adds $4$: $r = 44$, $j = 8$.
+- Stage 4: three convolutions add $16$ each, $r = 92$. The pool adds $8$: $r = 100$, $j = 16$.
+- Stage 5: three convolutions add $32$ each, $r = 196$. The pool adds $16$: $r = 212$, $j = 32$.
+
+The last convolution sees a $196 \times 196$ region of a $224 \times 224$ input. Thirteen stride-1 convolutions
+without pooling would see only $1 + 13 \cdot 2 = 27$ pixels.
+
+## Assumptions
+
+- The exact position of a feature within a pooling window does not matter for the task. This holds for classification.
+  It fails for tasks that need precise localisation, such as segmentation, which recover resolution with upsampling or
+  skip connections.
+- The signal is not badly aliased by subsampling. Striding without a low-pass filter can alias high frequencies, and it
+  makes the output shift by different amounts depending on the phase of a shift of the input.
+
+## Pitfalls
+
+- **Invariance is approximate.** A $2 \times 2$ pool is invariant only to shifts that stay inside its window. Deep
+  strided networks can change their prediction when the input moves by one pixel.
+- **Theoretical versus effective field.** The recursion gives the region that can affect a unit. The influence of
+  input pixels on a unit falls off roughly like a Gaussian from the centre, so the effective field is much smaller than
+  the theoretical one <Cite id="luo2016" />.
+- **Gradient sparsity.** Max pooling passes gradient to one input in each window. Early in training this can leave many
+  units with zero gradient for many steps.

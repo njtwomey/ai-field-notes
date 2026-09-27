@@ -1,0 +1,105 @@
+---
+title: Residual network
+kind: concept
+summary: A residual network builds each block as $\yvec = \xvec + F(\xvec)$, so the block learns a correction to the identity. The identity path gives the gradient a route through every block unchanged, which lets networks with hundreds of layers train.
+tags: [deep-learning, computer-vision, worked-example]
+aliases: [ResNet, residual block, residual connection, skip connection, shortcut connection, bottleneck block]
+requires: [convolutional-layer, backpropagation]
+related: [classic-cnn-architectures, transformer]
+references: [he2016, he2016b]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A residual block computes $\yvec = \xvec + F(\xvec; \theta)$, where $F$ is a small stack of layers with parameters
+$\theta$ and the addition is elementwise. The path that carries $\xvec$ unchanged is the shortcut or skip connection. A
+residual network is a stack of such blocks <Cite id="he2016" />.
+</Definition>
+
+## Intuition
+
+Adding layers to a network should never make its training error worse: the extra layers could learn the identity and
+reproduce the shallower network. In practice, plain deep networks trained with gradient descent do get worse. On
+CIFAR-10, a plain 56-layer network has higher training error than a plain 20-layer one <Cite id="he2016" />. This is
+the degradation problem. It is an optimisation failure, not overfitting, because the training error itself rises.
+
+A residual block makes the identity the default. When $F = 0$ the block passes its input through, so setting the
+weights of $F$ near zero recovers a shallower network. The block only has to learn the difference between the identity
+and the desired map. If the desired map is close to the identity, that difference is small and easy to find.
+
+## Why gradients survive
+
+Differentiate one block. By the sum rule,
+
+$$
+\frac{\partial \yvec}{\partial \xvec} = \I + \frac{\partial F}{\partial \xvec}.
+$$
+
+The Jacobian of a plain layer is $\partial F / \partial \xvec$ alone. Stack $L$ plain layers and the gradient at the
+input is a product of $L$ such Jacobians, which shrinks or grows exponentially unless every factor is close to
+orthogonal. The identity term changes this.
+
+Consider blocks $l, l+1, \dots, L-1$ with pure identity shortcuts and no operation after the addition, as in the
+pre-activation design <Cite id="he2016b" />: $\xvec_{m+1} = \xvec_m + F_m(\xvec_m)$. Unrolling the recursion gives
+
+$$
+\xvec_L = \xvec_l + \sum_{m=l}^{L-1} F_m(\xvec_m).
+$$
+
+The output of any deeper block is the output of any shallower block plus a sum of residuals. For a loss $\ell$, the
+chain rule gives
+
+$$
+\frac{\partial \ell}{\partial \xvec_l} = \frac{\partial \ell}{\partial \xvec_L}
+\paren{\I + \frac{\partial}{\partial \xvec_l} \sum_{m=l}^{L-1} F_m(\xvec_m)}.
+$$
+
+The first term, $\partial \ell / \partial \xvec_L$, reaches block $l$ without passing through any weight layer. The
+gradient at a shallow block cannot vanish just because the network is deep. For the second term to cancel the first,
+the residual Jacobians would have to sum to exactly $-\I$ for every example, which is unlikely.
+
+The original ResNet applied a ReLU after the addition, so its shortcut is not quite the identity. Moving the batch
+normalisation and ReLU inside $F$ (pre-activation) makes the shortcut an exact identity. The pre-activation form trains
+a 1001-layer network on CIFAR-10 <Cite id="he2016b" />.
+
+## Block designs
+
+**Basic block.** $F$ is two $3 \times 3$ convolutions with batch normalisation and a ReLU between them. It is used in
+ResNet-18 and ResNet-34.
+
+**Bottleneck block.** $F$ is a $1 \times 1$ convolution that reduces the channels, a $3 \times 3$ convolution at the
+reduced width, and a $1 \times 1$ convolution that restores the width. It is used in ResNet-50, -101 and -152.
+
+**Projection shortcut.** When a block changes the number of channels or downsamples with stride 2, $\xvec$ and $F(\xvec)$
+have different shapes. The shortcut then applies a $1 \times 1$ convolution with the same stride,
+$\yvec = \Wmat_s \xvec + F(\xvec)$. All other shortcuts are identities, which add no parameters.
+
+## Worked example
+
+Compare the weights of a bottleneck block on 256 channels with a basic block of two $3 \times 3$ convolutions at 256
+channels, ignoring biases and normalisation.
+
+- Bottleneck: $1 \times 1$ from 256 to 64 channels has $256 \cdot 64 = 16{,}384$ weights. The $3 \times 3$ at 64
+  channels has $9 \cdot 64 \cdot 64 = 36{,}864$. The $1 \times 1$ back to 256 has $16{,}384$. The total is $69{,}632$.
+- Basic: two $3 \times 3$ convolutions at 256 channels have $2 \cdot 9 \cdot 256^2 = 1{,}179{,}648$ weights.
+
+The bottleneck block uses about 17 times fewer weights while keeping 256-channel inputs and outputs. That saving is what
+makes a 152-layer network affordable. ResNet-152 needs 11.3 billion multiply-adds per $224 \times 224$ image, fewer than
+the 15.3 billion of the 16-layer VGG-16 <Cite id="he2016" />.
+
+## Assumptions
+
+- $F(\xvec)$ and $\xvec$ have the same shape, or a projection makes them match.
+- The desired mapping is close to the identity, or can be built from many small corrections to it. Deep networks whose
+  layers each refine a representation fit this assumption.
+
+## Pitfalls
+
+- **Operations on the shortcut.** Anything placed on the identity path, such as a ReLU after the addition, dropout or a
+  scaling, reintroduces a product of factors along the shortcut. He et al. found that constant scaling and gating of the
+  shortcut both hurt optimisation <Cite id="he2016b" />.
+- **Variance growth.** Each addition adds the variance of $F(\xvec)$ to the variance of $\xvec$. Without normalisation
+  inside $F$ or a small initialisation of its last layer, activations grow with depth.
+- **Effective depth.** Many paths through a residual network are short. Much of the gradient flows through paths that
+  skip most blocks, so a 100-block network does not behave like a 100-layer plain network <Cite id="veit2016" />.

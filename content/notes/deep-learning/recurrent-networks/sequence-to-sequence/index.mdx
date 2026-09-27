@@ -1,0 +1,108 @@
+---
+title: Sequence-to-sequence model
+kind: concept
+summary: A sequence-to-sequence model maps an input sequence to an output sequence of a different length. An encoder RNN compresses the input into a vector $\cvec$, and a decoder RNN generates the output one token at a time, modelling $p(\yvec \mid \xvec) = \prod_t p(y_t \mid y_{<t}, \cvec)$.
+tags: [deep-learning, sequence-models, nlp, worked-example]
+aliases: [seq2seq, encoder-decoder, RNN encoder-decoder, teacher forcing, beam search]
+requires: [recurrent-neural-network, lstm]
+related: [bahdanau-attention, transformer, cross-entropy-and-perplexity]
+references: [sutskever2014, cho2014, bahdanau2015]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A sequence-to-sequence (encoder–decoder) model has two recurrent networks. The encoder reads the input
+$x_1, \dots, x_S$ and summarises it as a context vector $\cvec$, usually its final hidden state. The decoder is a
+conditional language model: starting from $\cvec$, it outputs a distribution over the next token given the tokens
+generated so far, until it emits an end-of-sequence token <Cite id="sutskever2014" /> <Cite id="cho2014" />.
+</Definition>
+
+## Intuition
+
+Translation, summarisation and speech recognition map a sequence to another sequence. The lengths differ and the
+alignment between them is unknown and not monotone. A single <NoteLink to="recurrent-neural-network">RNN</NoteLink>
+that emits one output per input cannot express this. The encoder–decoder separates reading from writing. The encoder
+reads the whole input first. The decoder then writes as many tokens as it needs.
+
+## Model
+
+Factor the probability of an output $\yvec = (y_1, \dots, y_T)$ by the chain rule of probability. No independence
+assumption is made:
+
+$$
+p(\yvec \mid \xvec) = \prod_{t=1}^{T} p(y_t \mid y_1, \dots, y_{t-1}, \xvec).
+$$
+
+The model makes each factor a function of a decoder state $\svec_t$:
+
+$$
+\begin{aligned}
+\cvec &= \hvec_S, \qquad \hvec_j = f_{\text{enc}}(\hvec_{j-1}, x_j), \\
+\svec_t &= f_{\text{dec}}(\svec_{t-1}, y_{t-1}, \cvec), \qquad \svec_0 = \cvec, \\
+p(y_t \mid y_{<t}, \xvec) &= \operatorname{softmax}(\Vmat \svec_t + \bvec)_{y_t}.
+\end{aligned}
+$$
+
+Here $f_{\text{enc}}$ and $f_{\text{dec}}$ are LSTM or GRU updates, $y_0$ is a start-of-sequence token and $\Vmat$
+maps the state to one score per vocabulary token. The decoder state $\svec_t$ depends on the input only through
+$\cvec$. Sutskever et al. start the decoder from $\cvec$. Cho et al. also feed $\cvec$ to every decoder step and to
+the output layer.
+
+## Training
+
+Given pairs $(\xvec, \yvec)$, maximise the log-likelihood. The log of the product is a sum, so the loss is the sum of
+per-step cross-entropies:
+
+$$
+\Lcal(\theta) = -\sum_{t=1}^{T} \log p_\theta(y_t \mid y_{<t}, \xvec).
+$$
+
+During training, the decoder input at step $t$ is the true previous token $y_{t-1}$, not the model's own prediction.
+This is **teacher forcing**. It makes every step's loss available in one forward pass. The gradient flows back through
+the decoder, through $\cvec$, and into the encoder, so both networks are trained jointly.
+
+## Decoding
+
+The most probable output $\argmax_{\yvec} p(\yvec \mid \xvec)$ is intractable: with vocabulary size $V$, there are
+$V^T$ candidates of length $T$.
+
+- **Greedy decoding** picks $\argmax_{y} p(y \mid y_{<t}, \xvec)$ at each step.
+- **Beam search** keeps the $B$ highest-scoring prefixes. At each step it extends each by every token, scores the
+  extensions by their total log-probability, and keeps the best $B$. Greedy decoding is beam search with $B = 1$.
+
+## Worked example
+
+Take a two-token vocabulary $\set{a, b}$ and outputs of length 2. Suppose $p(a) = 0.6$ and $p(b) = 0.4$ at step 1.
+After $a$, both tokens have probability $0.5$. After $b$, $p(a \mid b) = 0.9$.
+
+- Greedy picks $a$ at step 1, then either token: $p = 0.6 \cdot 0.5 = 0.30$.
+- Beam search with $B = 2$ keeps both prefixes. The four sequences score $0.30$, $0.30$, $0.4 \cdot 0.9 = 0.36$ and
+  $0.4 \cdot 0.1 = 0.04$. It returns $(b, a)$ with $p = 0.36$.
+
+The locally best first token did not start the best sequence. Beam search recovers the better sequence because it
+delays the decision.
+
+## Practical findings
+
+Sutskever et al. used four-layer LSTMs with 1000 units per layer. Reversing the order of the source sentence, but not
+the target, raised the BLEU score of a single model on WMT'14 English to French from 25.9 to 30.6
+<Cite id="sutskever2014" />. Reversal puts the first source words next to the first target words, which creates
+short-range dependencies at the start of the output. An ensemble of five reversed LSTMs reached 34.8 BLEU.
+
+## Assumptions
+
+- The whole input is available before decoding starts. Streaming tasks, such as simultaneous translation, need another
+  design.
+- A fixed-size vector $\cvec$ can hold all the information the decoder needs.
+
+## Pitfalls
+
+- **The bottleneck.** Every input, whatever its length, is squeezed into one vector of the same size. The BLEU score of
+  an encoder–decoder without attention falls steadily as the source sentence gets longer
+  <Cite id="bahdanau2015" />. <NoteLink to="bahdanau-attention">Attention</NoteLink> removes the bottleneck by letting
+  the decoder look at every encoder state.
+- **Exposure bias.** With teacher forcing the decoder never sees its own mistakes during training. At test time an
+  early error feeds into every later step.
+- **Length bias in beam search.** Every extra token multiplies the probability by a factor below 1, so beam search
+  favours short outputs. Scores are often divided by a power of the length.

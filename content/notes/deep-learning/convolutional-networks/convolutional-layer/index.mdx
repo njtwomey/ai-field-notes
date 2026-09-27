@@ -1,0 +1,147 @@
+---
+title: Convolutional layer
+kind: concept
+summary: A convolutional layer computes each output value from a small window of the input with one set of weights shared across all positions. For stride $s$, padding $p$ and kernel size $k$, an input of width $n$ gives an output of width $\lfloor (n + 2p - k)/s \rfloor + 1$.
+tags: [deep-learning, computer-vision, worked-example]
+aliases: [convolution layer, conv layer, 2D convolution, weight sharing, feature map]
+requires: [convolution]
+related: [pooling-and-strides, classic-cnn-architectures, multilayer-perceptron]
+references: [lecun1998b, dumoulin2016, goodfellow2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { ConvolutionExplorer } from './ConvolutionExplorer'
+
+<Definition>
+A convolutional layer maps an input with $C$ channels on an $H \times W$ grid to an output with $C'$ channels. Output
+channel $c'$ at position $(i, j)$ is a bias $b_{c'}$ plus the sum of the $k \times k \times C$ input values in a window
+at $(si - p, sj - p)$, each multiplied by a weight $w_{c', c, u, v}$. The same weights are used at every position. The
+output grid is called a feature map.
+</Definition>
+
+## Intuition
+
+A fully connected layer gives every output its own weight for every input. An image of $224 \times 224$ pixels has
+50,176 inputs per channel, so a dense layer is expensive and ignores the grid. A convolutional layer makes two
+assumptions about images and other grid-shaped signals <Cite id="lecun1998b" />:
+
+- **Locality.** A useful feature, such as an edge, depends on a small neighbourhood of pixels. Each output reads only a
+  $k \times k$ window.
+- **Stationarity.** A feature that is useful in one place is useful everywhere. Each output channel uses one kernel
+  at every position. This is weight sharing.
+
+The kernel acts as a feature detector. The output is large where the window looks like the kernel and small where it
+does not. The layer is a bank of $C'$ detectors, each swept over the whole input.
+
+## Definition in full
+
+Write the input as $x_{c, r, q}$ for channel $c \in \set{1, \dots, C}$, row $r$ and column $q$. Pad the input with $p$
+rows and columns of zeros on every side. With stride $s$, output channel $c'$ at row $i$ and column $j$ is
+
+$$
+y_{c', i, j} = b_{c'} + \sum_{c=1}^{C} \sum_{u=0}^{k-1} \sum_{v=0}^{k-1} w_{c', c, u, v} \; x_{c,\, si - p + u,\, sj - p + v}.
+$$
+
+Deep-learning libraries compute this sum without flipping the kernel, so it is a cross-correlation. The signal-processing
+<NoteLink to="convolution">convolution</NoteLink> flips the kernel first. The difference does not matter for a learned
+layer: learning the flipped kernel gives the same function. The output is usually passed through a nonlinearity such
+as $\max(0, z)$.
+
+<ConvolutionExplorer />
+
+## Output size
+
+Consider one spatial dimension with input width $n$. After padding, the input has width $n + 2p$, indexed
+$0, \dots, n + 2p - 1$. Output position $i$ reads the padded positions $si, \dots, si + k - 1$. The window fits when its
+last position is inside the padded input:
+
+$$
+si + k - 1 \le n + 2p - 1 \iff i \le \frac{n + 2p - k}{s}.
+$$
+
+The valid positions are the integers $i = 0, 1, \dots, \lfloor (n + 2p - k)/s \rfloor$, so the output width is
+
+$$
+m = \left\lfloor \frac{n + 2p - k}{s} \right\rfloor + 1.
+$$
+
+Three cases recur <Cite id="dumoulin2016" />:
+
+- **Valid.** $p = 0$, $s = 1$: $m = n - k + 1$. Each layer trims $k - 1$ positions.
+- **Same.** $p = (k - 1)/2$ for odd $k$, $s = 1$: $m = n$. A $3 \times 3$ kernel with $p = 1$ keeps the size.
+- **Downsampling.** $s = 2$ roughly halves the width. A $7 \times 7$ kernel with $s = 2$ and $p = 3$ on a
+  $224$-pixel input gives $\lfloor (224 + 6 - 7)/2 \rfloor + 1 = 112$.
+
+A **dilated** kernel with dilation $d$ reads every $d$-th input position. It covers $d(k - 1) + 1$ positions, so the
+formula holds with $k$ replaced by $d(k - 1) + 1$.
+
+## Parameters and cost
+
+The layer has $k^2 C C'$ weights and $C'$ biases. The count does not depend on the image size. A $3 \times 3$ layer
+from $C = 64$ to $C' = 128$ channels has $3 \cdot 3 \cdot 64 \cdot 128 + 128 = 73{,}856$ parameters. A dense layer
+between the same feature maps at $56 \times 56$ would have $(56^2 \cdot 64)(56^2 \cdot 128) \approx 8.1 \times 10^{10}$
+weights.
+
+Each output value costs $k^2 C$ multiply-adds, so the layer costs $k^2 C C' m_H m_W$ multiply-adds for an
+$m_H \times m_W$ output. Compute scales with the image; parameters do not.
+
+## Translation equivariance
+
+Let $T_a$ shift an image by $a$ positions: $(T_a x)_{c, r, q} = x_{c, r, q - a}$. With stride 1 and no boundary
+effects, shifting the input shifts the output by the same amount. Substitute $T_a x$ into the definition:
+
+$$
+y'_{c', i, j} = b_{c'} + \sum_{c, u, v} w_{c', c, u, v}\, x_{c,\, i - p + u,\, j - p + v - a} = y_{c', i, j - a}.
+$$
+
+The last step is the definition of $y$ at column $j - a$. So a convolutional layer is equivariant to translation:
+$\text{conv}(T_a x) = T_a\, \text{conv}(x)$. An edge detector finds an edge wherever the edge is, and reports it at
+the matching place in the output. Equivariance holds exactly only for stride 1 and away from the borders. A stride
+$s > 1$ gives equivariance only to shifts that are multiples of $s$. Pooling and a final global average turn
+equivariance into approximate invariance; see <NoteLink to="pooling-and-strides">pooling and strides</NoteLink>.
+
+## Receptive field
+
+The receptive field of an output value is the set of input pixels that can affect it. One $k \times k$ layer has a
+receptive field of $k \times k$. A stack of $L$ such layers with stride 1 has a receptive field of $L(k - 1) + 1$ per
+side: each layer adds $k - 1$ positions. Two $3 \times 3$ layers see $5 \times 5$ pixels, and three see $7 \times 7$.
+Strides and pooling multiply the growth. The general recursion is derived in
+<NoteLink to="pooling-and-strides">pooling and strides</NoteLink>.
+
+## Worked example
+
+Take a $4 \times 4$ single-channel input, a $3 \times 3$ vertical-edge kernel, no padding, stride 1 and zero bias:
+
+$$
+x = \begin{bmatrix} 1 & 2 & 0 & 1 \\ 0 & 1 & 3 & 1 \\ 2 & 1 & 0 & 0 \\ 1 & 0 & 1 & 2 \end{bmatrix}, \qquad
+w = \begin{bmatrix} 1 & 0 & -1 \\ 1 & 0 & -1 \\ 1 & 0 & -1 \end{bmatrix}.
+$$
+
+The output width is $\lfloor (4 - 3)/1 \rfloor + 1 = 2$. The kernel subtracts the right column of the window from the
+left column. For $y_{0,0}$ the window is the top-left $3 \times 3$ block. Its left column sums to $1 + 0 + 2 = 3$ and
+its right column to $0 + 3 + 0 = 3$, so $y_{0,0} = 0$. The other three windows give
+
+$$
+y = \begin{bmatrix} 0 & 2 \\ -1 & -1 \end{bmatrix}.
+$$
+
+For $y_{0,1}$ the window covers columns 1 to 3 of rows 0 to 2. The left column sums to $2 + 1 + 1 = 4$ and the right
+column to $1 + 1 + 0 = 2$, giving $2$. All four outputs use the same nine weights.
+
+## Assumptions
+
+- The input lives on a regular grid, and nearby grid points are related. Images, spectrograms, audio and video satisfy
+  this. Tabular data with arbitrarily ordered columns does not.
+- The statistics of the signal are roughly the same at every position. Where they are not, such as faces aligned in a
+  fixed frame, weight sharing wastes capacity.
+
+## Pitfalls
+
+- **Off-by-one sizes.** The floor in the output-size formula silently drops input columns that a strided window does
+  not reach. Check sizes layer by layer.
+- **Border effects.** Zero padding makes the border look like a dark frame. Outputs near the edge are not equivariant.
+- **Channels count.** A "$3 \times 3$ convolution" on 256 channels has $9 \cdot 256$ weights per output channel, not 9.
+  Most of the cost of a deep network is in the channel dimension.
+- **Receptive field is not effective field.** Pixels near the centre of the receptive field influence an output far
+  more than pixels near its edge <Cite id="luo2016" />.

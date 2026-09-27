@@ -1,0 +1,108 @@
+---
+title: Message passing neural network
+kind: concept
+summary: A message passing neural network updates each node's vector from its own vector and an order-independent aggregate, such as a sum, of messages from its neighbours. Stacking $K$ rounds lets information travel $K$ hops. The layers commute with any relabelling of the nodes.
+tags: [deep-learning, graph-neural-networks, worked-example]
+aliases: [MPNN, message passing, graph neural network, GNN, neighbourhood aggregation, readout]
+requires: [backpropagation]
+related: [graph-convolutional-network, graph-attention-network, transformer]
+references: [gilmer2017, xu2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A message passing neural network acts on a graph with node set $\Vcal$, edge set $\Ecal$, node vectors $\hvec_v^{(0)}$
+and optional edge vectors $\evec_{vw}$. In round $t$, every node $v$ collects messages from its neighbours $\Ncal(v)$
+and updates its vector:
+$$
+\mvec_v^{(t+1)} = \sum_{w \in \Ncal(v)} M_t\paren{\hvec_v^{(t)}, \hvec_w^{(t)}, \evec_{vw}}, \qquad
+\hvec_v^{(t+1)} = U_t\paren{\hvec_v^{(t)}, \mvec_v^{(t+1)}},
+$$
+where the message function $M_t$ and the update function $U_t$ are neural networks shared by all nodes. After $T$
+rounds, a readout $R$ maps the set of node vectors to a graph-level output <Cite id="gilmer2017" />.
+</Definition>
+
+## Intuition
+
+Molecules, social networks, road maps and citation networks are graphs. They have no grid, no fixed number of
+neighbours per node and no natural ordering of nodes. A <NoteLink to="convolutional-layer">convolutional layer</NoteLink>
+relies on all three.
+
+Message passing keeps the two ideas of convolution that do not need a grid. Each update is **local**: a node reads only
+its neighbours. The functions are **shared**: every node uses the same $M_t$ and $U_t$. A node's vector after one
+round describes its neighbourhood. After $K$ rounds it describes everything within $K$ hops.
+
+Gilmer et al. showed that many earlier graph networks, including graph convolutional networks, gated graph networks and
+interaction networks, are special cases of this scheme <Cite id="gilmer2017" />.
+
+## Permutation equivariance
+
+A graph has no preferred order of nodes. Number the nodes $1, \dots, N$, stack the node vectors as rows of
+$\Hmat \in \reals^{N \times d}$, and let $\Pmat$ be a permutation matrix that relabels them. The relabelled graph has
+node matrix $\Pmat \Hmat$ and adjacency matrix $\Pmat \Amat \Pmat^{\tr}$. A layer $F$ is equivariant if relabelling the
+input relabels the output in the same way:
+
+$$
+F(\Pmat \Hmat, \Pmat \Amat \Pmat^{\tr}) = \Pmat\, F(\Hmat, \Amat).
+$$
+
+Message passing satisfies this. Node $v$'s new vector depends on its own vector and on the multiset
+$\set{(\hvec_w, \evec_{vw}) : w \in \Ncal(v)}$. Relabelling moves node $v$ to a new index but does not change its own
+vector, its set of neighbours or their vectors. A sum over a set does not depend on the order in which its terms are
+listed. So node $v$ computes the same vector under its new index, which is the equation above.
+
+The readout must be **invariant**, $R(\Pmat \Hmat) = R(\Hmat)$, so that a graph-level prediction does not depend on
+the labelling. A sum, mean or maximum over nodes is invariant for the same reason.
+
+## Choice of aggregator
+
+The aggregate must be order-independent. Sum, mean and maximum are the common choices. They are not equally
+expressive <Cite id="xu2019" />:
+
+- **Sum** distinguishes multisets of different sizes. A node with neighbours $\set{1, 1}$ receives $2$; a node with
+  neighbours $\set{1}$ receives $1$.
+- **Mean** gives $1$ in both cases. It sees the distribution of neighbour values, not their number.
+- **Max** also gives $1$ in both cases, and it also cannot tell $\set{1, 2}$ from $\set{1, 2, 2}$.
+
+A message passing network can distinguish two graphs only if the Weisfeiler–Lehman colour refinement test can. With
+sum aggregation and injective update functions it distinguishes exactly the graphs that the test distinguishes
+<Cite id="xu2019" />. Some pairs of non-isomorphic graphs look identical to every such network. Two disjoint triangles
+and one hexagon, with the same feature on every node, are an example: every node in both graphs has two neighbours with
+identical views.
+
+## Worked example
+
+Take four nodes with edges $1{-}2$, $1{-}3$, $2{-}3$ and $3{-}4$, a triangle with a tail. Give each node a scalar
+feature, $h^{(0)} = (1, 2, 3, 4)$. Use the message $M(h_v, h_w) = h_w$, sum aggregation and the update
+$U(h_v, m_v) = h_v + m_v$.
+
+- Node 1 has neighbours 2 and 3: $m_1 = 2 + 3 = 5$, so $h_1^{(1)} = 6$.
+- Node 2 has neighbours 1 and 3: $m_2 = 1 + 3 = 4$, so $h_2^{(1)} = 6$.
+- Node 3 has neighbours 1, 2 and 4: $m_3 = 1 + 2 + 4 = 7$, so $h_3^{(1)} = 10$.
+- Node 4 has neighbour 3: $m_4 = 3$, so $h_4^{(1)} = 7$.
+
+After one round, node 4's value contains node 3's feature. After two rounds it will contain the features of nodes 1 and
+2, which are two hops away. A sum readout gives the graph a single number, $6 + 6 + 10 + 7 = 29$, whatever order the
+nodes are listed in.
+
+## Cost
+
+One round computes one message per directed edge and one update per node, so it costs $O(\abs{\Ecal} + \abs{\Vcal})$
+function evaluations. This is linear in the size of the graph, whereas a dense layer over all node pairs would cost
+$O(\abs{\Vcal}^2)$.
+
+## Assumptions
+
+- The relevant structure is local: a node's label depends mostly on its $K$-hop neighbourhood.
+- The graph given as input is the right one. Missing or spurious edges change every downstream vector.
+
+## Pitfalls
+
+- **Oversmoothing.** Many rounds of averaging make all node vectors in a connected graph similar. Deep message passing
+  networks often perform worse than shallow ones; see
+  <NoteLink to="graph-convolutional-network">graph convolutional network</NoteLink>.
+- **Oversquashing.** Information from an exponentially growing number of distant nodes must fit into a fixed-size
+  vector. Long-range dependencies are hard to learn <Cite id="alon2021" />.
+- **Limited expressiveness.** Plain message passing cannot count triangles or detect some cycles. Positional or
+  structural features added to the input help.

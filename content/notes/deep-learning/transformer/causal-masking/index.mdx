@@ -1,0 +1,124 @@
+---
+title: Causal masking
+kind: technique
+summary: A causal mask sets the attention score of every key after the query to $-\infty$ before the softmax, so position $t$ attends only to positions $1, \dots, t$. A decoder can then be trained on all next-token predictions of a sequence in one parallel pass and still generate one token at a time.
+tags: [deep-learning, transformer, attention, worked-example]
+aliases: [causal mask, look-ahead mask, autoregressive mask, masked self-attention, decoder mask]
+requires: [scaled-dot-product-attention]
+related: [transformer, kv-cache, sequence-to-sequence]
+references: [vaswani2017]
+status: draft
+updated: 2026-09-27
+---
+
+import { MaskedWeights } from './MaskedWeights'
+
+<Definition>
+Causal masking adds a matrix $\Mmat$ to the attention scores before the softmax, with $M_{ij} = 0$ for $j \le i$ and
+$M_{ij} = -\infty$ for $j > i$:
+$$
+\operatorname{softmax}\paren{\frac{\Qmat \Kmat^{\tr}}{\sqrt{d_k}} + \Mmat} \Vmat.
+$$
+Query position $i$ then puts zero weight on every later key position <Cite id="vaswani2017" />.
+</Definition>
+
+## Problem
+
+An autoregressive model factorises the probability of a sequence as
+
+$$
+p(x_1, \dots, x_T) = \prod_{t=1}^{T} p(x_t \mid x_1, \dots, x_{t-1}).
+$$
+
+The prediction for position $t$ must not see $x_t$ or anything after it. Otherwise training is trivial, since the
+answer is in the input, and the trained model is useless at generation time, when later tokens do not exist yet.
+
+Self-attention lets every position read every other position. A decoder built from it needs a way to block the future
+without giving up the parallel computation that makes attention fast. A recurrent network is causal by construction
+but must process positions one after another.
+
+## Mechanism
+
+Add $\Mmat$ to the score matrix $\Smat = \Qmat \Kmat^{\tr} / \sqrt{d_k}$. For $j > i$ the softmax numerator becomes
+$\exp(S_{ij} - \infty) = 0$, so
+
+$$
+\alpha_{ij} = \begin{cases}
+\dfrac{\exp(S_{ij})}{\sum_{l \le i} \exp(S_{il})} & j \le i, \\[8pt]
+0 & j > i.
+\end{cases}
+$$
+
+Each row is renormalised over the allowed keys, so it still sums to 1. The output at position $i$ is
+$\ovec_i = \sum_{j \le i} \alpha_{ij} \vvec_j$.
+
+**Causality holds through every layer.** Queries, keys and values at position $j$ are linear functions of the input at
+position $j$ alone. So $\ovec_i$ depends only on inputs at positions $j \le i$. The feed-forward sublayer, residual
+connections and layer normalisation act on each position separately, so they preserve this. By induction over layers,
+the final representation at position $i$ depends only on $x_1, \dots, x_i$.
+
+<MaskedWeights />
+
+## Training in parallel
+
+Feed the sequence $x_1, \dots, x_T$ and ask position $t$ to predict $x_{t+1}$. The loss is
+
+$$
+\Lcal = -\sum_{t=1}^{T-1} \log p_\theta(x_{t+1} \mid x_1, \dots, x_t).
+$$
+
+With the mask, the prediction at position $t$ uses only $x_{\le t}$, which is the conditional the factorisation needs.
+All $T - 1$ predictions come out of one forward pass, as matrix products over the whole sequence. A sequence of 1000
+tokens gives 999 training targets for the cost of one pass. This is teacher forcing, done for all positions at once.
+
+## Generation
+
+At inference, tokens are produced one at a time: predict $x_{t+1}$, append it, repeat. Position $t$'s keys and values
+depend only on $x_{\le t}$, so they do not change when later tokens are appended. They can be stored and reused, which
+is <NoteLink to="kv-cache">KV caching</NoteLink>. The new token then attends to the cache with one query row, and the
+mask is not needed because no future keys exist.
+
+## Worked example
+
+Take three positions with scores
+
+$$
+\Smat = \begin{bmatrix} 2 & 1 & 0 \\ 1 & 3 & 0 \\ 0 & 1 & 1 \end{bmatrix}.
+$$
+
+Without the mask, row 1 is $\operatorname{softmax}(2, 1, 0) = (0.665, 0.245, 0.090)$: position 1 reads positions 2 and 3.
+With the mask:
+
+- Row 1 keeps only $S_{11}$: weights $(1, 0, 0)$.
+- Row 2 keeps $S_{21} = 1$ and $S_{22} = 3$: $\operatorname{softmax}(1, 3) = (0.119, 0.881)$, so weights
+  $(0.119, 0.881, 0)$.
+- Row 3 keeps all three: $\operatorname{softmax}(0, 1, 1) = (0.155, 0.422, 0.422)$.
+
+The first position always attends only to itself.
+
+## Cost
+
+The mask removes no computation in a plain implementation: the full $T \times T$ score matrix is formed and half of it
+is discarded. Block-wise implementations skip blocks that lie entirely above the diagonal, which roughly halves the
+work.
+
+## Trade-offs
+
+- **Decoder-only models** such as GPT use causal self-attention in every layer. They generate text but each position
+  sees only the left context.
+- **Encoder-only models** such as BERT use no mask. Every position sees the whole input, which suits classification
+  and tagging, but they cannot generate left to right <Cite id="devlin2019" />.
+- **Encoder–decoder models** use unmasked self-attention in the encoder, causal self-attention in the decoder, and
+  unmasked cross-attention from decoder to encoder; see <NoteLink to="transformer">transformer</NoteLink>.
+- **Padding masks** use the same mechanism to give zero weight to padding tokens in a batch of sequences of different
+  lengths.
+
+## Pitfalls
+
+- **Fully masked rows.** A row whose entries are all $-\infty$ gives $0/0$. This cannot happen with a causal mask
+  alone, since the diagonal is always kept, but it can when combined with a padding mask. Implementations often use a
+  large finite negative number instead of $-\infty$ and handle such rows explicitly.
+- **Off-by-one in the targets.** The output at position $t$ predicts $x_{t+1}$. Shifting the targets the wrong way
+  trains the model to copy its input.
+- **Mask order.** The mask must be applied before the softmax. Zeroing weights after the softmax leaves rows that do
+  not sum to 1.

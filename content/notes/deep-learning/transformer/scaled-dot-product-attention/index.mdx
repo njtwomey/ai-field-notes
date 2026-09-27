@@ -1,0 +1,118 @@
+---
+title: Scaled dot-product attention
+kind: concept
+summary: Scaled dot-product attention computes $\operatorname{softmax}(\Qmat \Kmat^{\tr} / \sqrt{d_k})\, \Vmat$. Each query takes a weighted average of the values, with weights from the dot products of the query with the keys. Dividing by $\sqrt{d_k}$ keeps the score variance at 1, so the softmax does not saturate.
+tags: [deep-learning, transformer, attention, worked-example]
+aliases: [dot-product attention, self-attention, cross-attention, query key value, QKV attention, softmax attention]
+requires: [dot-product, softmax-and-log-sum-exp]
+related: [bahdanau-attention, multi-head-attention, transformer, positional-encoding]
+references: [vaswani2017, luong2015]
+status: draft
+updated: 2026-09-27
+---
+
+import { ScalingDemo } from './ScalingDemo'
+
+<Definition>
+Given $n$ queries $\Qmat \in \reals^{n \times d_k}$, $m$ keys $\Kmat \in \reals^{m \times d_k}$ and $m$ values
+$\Vmat \in \reals^{m \times d_v}$, scaled dot-product attention returns
+$$
+\operatorname{Attention}(\Qmat, \Kmat, \Vmat) = \operatorname{softmax}\paren{\frac{\Qmat \Kmat^{\tr}}{\sqrt{d_k}}} \Vmat
+\in \reals^{n \times d_v},
+$$
+where the softmax normalises each row of the $n \times m$ score matrix <Cite id="vaswani2017" />.
+</Definition>
+
+## Intuition
+
+Attention is a soft lookup table. Each value $\vvec_j$ is stored under a key $\kvec_j$. A query $\qvec$ is compared
+with every key, and the result is an average of all the values, weighted by how well each key matches. A hard lookup
+would return the value of the single best key. The softmax makes the lookup differentiable, so queries, keys and values
+can all be learned.
+
+The <NoteLink to="dot-product">dot product</NoteLink> measures the match. It is large when $\qvec$ and $\kvec_j$ point
+the same way and are long. Row $i$ of the output is
+
+$$
+\ovec_i = \sum_{j=1}^{m} \alpha_{ij} \vvec_j, \qquad
+\alpha_{ij} = \frac{\exp(\qvec_i^{\tr} \kvec_j / \sqrt{d_k})}{\sum_{l=1}^{m} \exp(\qvec_i^{\tr} \kvec_l / \sqrt{d_k})}.
+$$
+
+In **self-attention**, queries, keys and values are all linear projections of the same sequence $\Xmat$:
+$\Qmat = \Xmat \Wmat_Q$, $\Kmat = \Xmat \Wmat_K$, $\Vmat = \Xmat \Wmat_V$. Every position reads from every other
+position. In **cross-attention**, queries come from one sequence and keys and values from another, as in the decoder
+of an encoder–decoder <NoteLink to="transformer">transformer</NoteLink>.
+
+## Why divide by the square root of the dimension
+
+Suppose the components of $\qvec$ and $\kvec$ are independent random variables with mean 0 and variance 1, as at
+initialisation. Their dot product $\qvec^{\tr} \kvec = \sum_{i=1}^{d_k} q_i k_i$ has mean
+
+$$
+\expect\brack{\qvec^{\tr} \kvec} = \sum_{i=1}^{d_k} \expect[q_i]\, \expect[k_i] = 0.
+$$
+
+Each term has variance $\var(q_i k_i) = \expect[q_i^2 k_i^2] - \paren{\expect[q_i k_i]}^2 = \expect[q_i^2]\,\expect[k_i^2] - 0 = 1$.
+The terms are independent, so their variances add:
+
+$$
+\var\paren{\qvec^{\tr} \kvec} = d_k.
+$$
+
+The standard deviation of the scores grows as $\sqrt{d_k}$. Dividing by $\sqrt{d_k}$ gives scores with variance 1 for
+every $d_k$ <Cite id="vaswani2017" />.
+
+Large scores harm training because of the shape of the softmax. With weights $\alphavec = \operatorname{softmax}(\svec)$,
+differentiating $\alpha_i = e^{s_i} / \sum_l e^{s_l}$ with the quotient rule gives
+
+$$
+\frac{\partial \alpha_i}{\partial s_j} = \alpha_i (\delta_{ij} - \alpha_j), \qquad
+\frac{\partial \alphavec}{\partial \svec} = \diag(\alphavec) - \alphavec \alphavec^{\tr}.
+$$
+
+When the scores are spread widely, one weight approaches 1 and the rest approach 0. Every entry
+$\alpha_i(\delta_{ij} - \alpha_j)$ then approaches 0: either $\alpha_i \approx 0$, or $\alpha_i \approx 1$ and
+$\delta_{ij} - \alpha_j \approx 0$. The gradient with respect to the scores vanishes, and so does the gradient with
+respect to the queries and keys that produced them. Unscaled attention in high dimension starts training in this
+saturated regime.
+
+<ScalingDemo />
+
+## Worked example
+
+With $d_k = 64$, unscaled scores have standard deviation $\sqrt{64} = 8$. Two keys whose scores differ by one standard
+deviation get weights in the ratio $e^{8} \approx 2981$. After scaling, the same two keys differ by 1 in score and
+their weights are in the ratio $e^{1} \approx 2.72$. Both keys still contribute, and the gradient reaches both.
+
+## Cost
+
+Forming $\Qmat \Kmat^{\tr}$ costs $O(n m d_k)$ and multiplying the weights by $\Vmat$ costs $O(n m d_v)$. The score
+matrix has $nm$ entries. For self-attention over a sequence of length $n$, time and memory grow as $n^2$. All $n^2$
+scores are computed with matrix products and no sequential dependence, so attention parallelises across positions,
+unlike a recurrent network.
+
+## Comparison with additive attention
+
+<NoteLink to="bahdanau-attention">Additive attention</NoteLink> scores with a one-hidden-layer network,
+$\vvec^{\tr} \tanh(\Wmat_1 \qvec + \Wmat_2 \kvec)$. Dot-product scoring needs no extra parameters and is one matrix
+product, which is faster on hardware built for matrix multiplication. Vaswani et al. report that the two perform
+similarly for small $d_k$, and that additive attention does better than unscaled dot-product attention for large $d_k$.
+The scaling closes that gap <Cite id="vaswani2017" />. The unscaled dot form was used earlier by Luong et al.
+<Cite id="luong2015" />.
+
+## Assumptions
+
+- The variance argument assumes independent components with unit variance. After training, queries and keys are
+  correlated and not unit-variance; the scaling is a choice for initialisation and a stable default, not an exact
+  normalisation.
+- Attention treats its keys as a set. Permuting the key–value pairs together leaves the output unchanged. Order must be added
+  separately, for example with a <NoteLink to="positional-encoding">positional encoding</NoteLink>.
+
+## Pitfalls
+
+- **Numerical overflow.** Compute the softmax as $\exp(s_j - \max_l s_l)$ divided by the sum of the same terms. The
+  result is unchanged and never overflows; see <NoteLink to="softmax-and-log-sum-exp">softmax and log-sum-exp</NoteLink>.
+- **Quadratic memory.** Storing the $n \times n$ weights for long sequences exhausts memory. Fused implementations
+  compute the output in blocks without storing the full matrix.
+- **Masked positions.** Setting a score to $-\infty$ before the softmax gives that position weight exactly 0. This is
+  how padding and <NoteLink to="causal-masking">causal masking</NoteLink> are implemented.

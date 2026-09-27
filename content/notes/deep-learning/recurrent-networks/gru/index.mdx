@@ -1,0 +1,100 @@
+---
+title: Gated recurrent unit
+kind: concept
+summary: A gated recurrent unit (GRU) updates its state as a gated interpolation $\hvec_t = \zvec_t \odot \hvec_{t-1} + (1 - \zvec_t) \odot \tilde\hvec_t$ between the old state and a candidate. A reset gate controls how much of the old state the candidate sees. It has two gates, no separate cell and three quarters of an LSTM's parameters.
+tags: [deep-learning, sequence-models, worked-example]
+aliases: [GRU, update gate, reset gate]
+requires: [recurrent-neural-network, backpropagation-through-time]
+related: [lstm, sequence-to-sequence]
+references: [cho2014, chung2014]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A gated recurrent unit maps the input $\xvec_t \in \reals^m$ and the previous state $\hvec_{t-1} \in \reals^n$ to a new
+state by
+$$
+\begin{aligned}
+\zvec_t &= \sigma(\Wmat_z \xvec_t + \Umat_z \hvec_{t-1} + \bvec_z), &
+\rvec_t &= \sigma(\Wmat_r \xvec_t + \Umat_r \hvec_{t-1} + \bvec_r), \\
+\tilde\hvec_t &= \tanh\paren{\Wmat \xvec_t + \Umat(\rvec_t \odot \hvec_{t-1}) + \bvec}, &
+\hvec_t &= \zvec_t \odot \hvec_{t-1} + (1 - \zvec_t) \odot \tilde\hvec_t,
+\end{aligned}
+$$
+where $\sigma$ is the logistic sigmoid, $\zvec_t$ is the update gate, $\rvec_t$ is the reset gate and $\odot$ is the
+elementwise product <Cite id="cho2014" />.
+</Definition>
+
+## Intuition
+
+Each unit of the state decides, at each step, whether to keep its value or replace it. The update gate $z$ makes that
+choice. With $z = 1$ the unit copies its old value. With $z = 0$ it takes the candidate. Values in between blend the
+two.
+
+The reset gate decides what the candidate is computed from. With $r = 0$ the candidate ignores the previous state and
+depends only on the current input, so the unit can drop an irrelevant history and start afresh. With $r = 1$ the
+candidate is an ordinary <NoteLink to="recurrent-neural-network">RNN</NoteLink> update.
+
+Units that learn to keep $z$ near 1 act as long-term memory. Units whose $r$ is often near 0 track short-term
+structure <Cite id="cho2014" />.
+
+## Gradient flow
+
+Differentiate the state update along the direct path, holding the gates and the candidate fixed:
+
+$$
+\frac{\partial \hvec_t}{\partial \hvec_{t-1}} = \diag(\zvec_t) + \text{terms through } \zvec_t, \rvec_t \text{ and } \tilde\hvec_t.
+$$
+
+The first term has no weight matrix and no $\tanh$ derivative. Over $t - k$ steps the direct path contributes
+$\diag\paren{\prod_{i=k+1}^{t} \zvec_i}$, an elementwise product of gates. A unit with $z$ near 1 passes gradient back
+almost unchanged. This is the same mechanism as the forget gate of the <NoteLink to="lstm">LSTM</NoteLink>, and it
+addresses the vanishing gradients of <NoteLink to="backpropagation-through-time">backpropagation through
+time</NoteLink>.
+
+## Relation to the LSTM
+
+Start from the LSTM cell update $\cvec_t = \fvec_t \odot \cvec_{t-1} + \ivec_t \odot \gvec_t$ and make three changes:
+
+1. Couple the forget and input gates: $\fvec_t = \zvec_t$ and $\ivec_t = 1 - \zvec_t$. Keeping and writing then trade
+   off exactly, so the state is a convex combination of old and new.
+2. Drop the output gate and the separate cell: $\hvec_t = \cvec_t$. The whole state is exposed at every step.
+3. Apply a reset gate inside the candidate.
+
+The result is the GRU. It has three blocks of weights instead of four, so it has $3\paren{n(m + n) + n}$ parameters.
+With $m = n = 256$ that is $393{,}984$ against the LSTM's $525{,}312$. Because the state is a convex combination of
+values in $(-1, 1)$, every unit of $\hvec_t$ stays in $(-1, 1)$ when $\hvec_0 = \zeros$.
+
+On polyphonic music and speech modelling, GRUs and LSTMs performed comparably, and both clearly beat a $\tanh$ RNN
+<Cite id="chung2014" />. Neither dominates across tasks.
+
+## Worked example
+
+Take one unit with $h_{t-1} = 0.8$ and a candidate pre-activation of $-1$, so $\tilde h_t = \tanh(-1) = -0.762$.
+
+- **Keep.** An update-gate pre-activation of $2$ gives $z = \sigma(2) = 0.881$ and
+  $h_t = 0.881 \cdot 0.8 + 0.119 \cdot (-0.762) = 0.614$. The state stays close to its old value.
+- **Replace.** A pre-activation of $-2$ gives $z = 0.119$ and $h_t = 0.119 \cdot 0.8 + 0.881 \cdot (-0.762) = -0.575$.
+  The state moves most of the way to the candidate.
+
+The direct-path derivative $\partial h_t / \partial h_{t-1}$ is $0.881$ in the first case and $0.119$ in the second.
+
+## Conventions
+
+Some papers and libraries swap the roles of $z$ and $1 - z$, writing $\hvec_t = (1 - \zvec_t) \odot \hvec_{t-1} +
+\zvec_t \odot \tilde\hvec_t$ <Cite id="chung2014" />. Some apply the reset gate after the matrix product,
+$\rvec_t \odot (\Umat \hvec_{t-1})$, which lets the product be batched with the gate computations. The models are
+equivalent in capacity but their weights are not interchangeable.
+
+## Assumptions
+
+- The state can be read in full at every step; there is no hidden memory protected by an output gate.
+- Keeping and writing can be tied: to write more, a unit must keep less.
+
+## Pitfalls
+
+- **Weight conversion.** Loading GRU weights from another library needs care with the $z$ convention and the position
+  of the reset gate.
+- **Same sequential cost as other RNNs.** A GRU is cheaper per step than an LSTM but still cannot run the steps of one
+  sequence in parallel.

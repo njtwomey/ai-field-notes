@@ -1,0 +1,110 @@
+---
+title: Graph attention network
+kind: concept
+summary: A graph attention network replaces the fixed degree-based weights of a graph convolution with learned attention weights. Each node averages its neighbours' transformed features with weights $\alpha_{ij}$, a softmax over the neighbourhood of scores computed from both endpoints.
+tags: [deep-learning, graph-neural-networks, attention, worked-example]
+aliases: [GAT, GATv2, graph attention, static attention]
+requires: [message-passing-neural-network, softmax-and-log-sum-exp]
+related: [graph-convolutional-network, bahdanau-attention, multi-head-attention]
+references: [velickovic2018, brody2022]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A graph attention layer maps node features $\hvec_i \in \reals^F$ to
+$$
+\hvec_i' = \sigma\paren{\sum_{j \in \Ncal(i) \cup \set{i}} \alpha_{ij} \Wmat \hvec_j}, \qquad
+\alpha_{ij} = \frac{\exp(e_{ij})}{\sum_{k \in \Ncal(i) \cup \set{i}} \exp(e_{ik})},
+$$
+with scores $e_{ij} = \operatorname{LeakyReLU}\paren{\avec^{\tr} [\Wmat \hvec_i \,\Vert\, \Wmat \hvec_j]}$. Here
+$\Wmat \in \reals^{F' \times F}$ and $\avec \in \reals^{2F'}$ are learned and $\Vert$ is concatenation
+<Cite id="velickovic2018" />.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="graph-convolutional-network">graph convolutional network</NoteLink> weights neighbour $j$ of node $i$
+by $1/\sqrt{\tilde d_i \tilde d_j}$. The weight depends only on the graph's structure. Every neighbour of the same degree
+counts the same, whether its features are relevant or not.
+
+A graph attention network lets the features decide. Each node scores each neighbour, turns the scores into a probability
+distribution with a softmax, and takes the weighted average. The mechanism is the attention used in sequence models,
+restricted to the edges of the graph: a node attends only to its neighbours. It is a
+<NoteLink to="message-passing-neural-network">message passing</NoteLink> layer whose aggregation weights are computed
+from the messages.
+
+## Mechanism
+
+1. **Transform.** Apply a shared linear map to every node: $\zvec_j = \Wmat \hvec_j$.
+2. **Score.** For each edge $(i, j)$, including the self-loop, compute
+   $e_{ij} = \operatorname{LeakyReLU}(\avec^{\tr} [\zvec_i \Vert \zvec_j])$ with negative slope $0.2$.
+3. **Normalise.** Softmax the scores over the neighbourhood of $i$ to get $\alpha_{ij}$. The weights of each node's
+   neighbours sum to 1.
+4. **Aggregate.** $\hvec_i' = \sigma(\sum_j \alpha_{ij} \zvec_j)$.
+
+**Multi-head attention.** $K$ independent heads, each with its own $\Wmat^k$ and $\avec^k$, stabilise training. Hidden
+layers concatenate the heads' outputs into a vector of size $KF'$. The output layer averages them instead. The
+original model uses $K = 8$ heads of $F' = 8$ features in its hidden layer <Cite id="velickovic2018" />.
+
+**Cost.** Scoring is one dot product per edge, so a layer costs $O(\abs{\Vcal} F F' + \abs{\Ecal} F')$ per head, the same
+order as a GCN. No eigendecomposition or knowledge of the full graph is needed, so the layer applies to graphs not seen
+during training.
+
+## Static attention
+
+Split $\avec = [\avec_1; \avec_2]$ into the halves that multiply $\zvec_i$ and $\zvec_j$. Then
+
+$$
+e_{ij} = \operatorname{LeakyReLU}\paren{\avec_1^{\tr} \zvec_i + \avec_2^{\tr} \zvec_j}.
+$$
+
+LeakyReLU is strictly increasing. For a fixed query node $i$, the term $\avec_1^{\tr} \zvec_i$ is a constant, so the
+order of the scores $e_{ij}$ over $j$ is the order of $\avec_2^{\tr} \zvec_j$. That order does not depend on $i$. If
+node $j^\star$ maximises $\avec_2^{\tr} \zvec_j$ over all nodes, every node that has $j^\star$ as a neighbour attends to
+it most. The ranking of keys is the same for every query. Brody, Alon and Yahav call this static attention, and show
+that some simple graph problems cannot be solved by it <Cite id="brody2022" />.
+
+**GATv2** moves the nonlinearity between the two linear maps:
+$e_{ij} = \avec^{\tr} \operatorname{LeakyReLU}\paren{\Wmat [\hvec_i \Vert \hvec_j]}$. The score is no longer a monotone
+function of a sum of separate terms for $i$ and $j$, so the ranking of neighbours can differ between queries. This is
+dynamic attention. GATv2 matches or beats GAT on most benchmarks at the same cost <Cite id="brody2022" />.
+
+## Worked example
+
+Take a node $i$ with two neighbours, $j_1$ and $j_2$, and scalar transformed features $z_i = 1$, $z_{j_1} = 2$ and
+$z_{j_2} = -1$. Let $\avec = (a_1, a_2) = (0.5, 1)$. The scores are
+
+$$
+\begin{aligned}
+e_{ii} &= \operatorname{LeakyReLU}(0.5 \cdot 1 + 1 \cdot 1) = 1.5, \\
+e_{ij_1} &= \operatorname{LeakyReLU}(0.5 + 2) = 2.5, \\
+e_{ij_2} &= \operatorname{LeakyReLU}(0.5 - 1) = 0.2 \cdot (-0.5) = -0.1.
+\end{aligned}
+$$
+
+The softmax gives $\alpha = (0.255, 0.693, 0.052)$ for $(i, j_1, j_2)$. The aggregate before $\sigma$ is
+$0.255 \cdot 1 + 0.693 \cdot 2 + 0.052 \cdot (-1) = 1.590$. A GCN would have weighted all three by degree alone.
+
+Any other node that sees $j_1$ and $j_2$ also scores $j_1$ above $j_2$, because $a_2 z_{j_1} > a_2 z_{j_2}$. This is
+the static-attention property in action.
+
+## Results
+
+On the transductive citation benchmarks, GAT reached 83.0% accuracy on Cora, 72.5% on Citeseer and 79.0% on Pubmed. On
+the inductive protein–protein interaction task, where test graphs are unseen during training, it reached a micro-averaged
+F1 of 0.973 <Cite id="velickovic2018" />.
+
+## Assumptions
+
+- The relevance of a neighbour can be judged from the features of the two endpoints.
+- The graph is given. Attention reweights existing edges; it does not add new ones.
+
+## Pitfalls
+
+- **Weights are not importance.** Attention weights show how the layer averaged its neighbours, not which neighbours
+  determined the prediction.
+- **Static ranking.** The original GAT ranks neighbours the same way for every query node. Use GATv2 when the relevance
+  of a neighbour should depend on who is asking.
+- **Softmax discards degree.** Weights sum to 1 over each neighbourhood, so the layer cannot count neighbours. Like
+  mean aggregation, it cannot tell a node with two identical neighbours from one with a single such neighbour.
