@@ -20,10 +20,7 @@ export function SiteFooter() {
               Niall Twomey
             </a>
           </p>
-          <p>
-            The topics, structure and much of the material are mine. Claude drafted and edited much of the text, and
-            built the interactive figures, the runnable examples and this site.
-          </p>
+          <p>Digitised notes from my research, augmented by Claude for this public format.</p>
         </div>
         <nav aria-label="Footer" className="flex flex-wrap gap-x-5 gap-y-2">
           {links.map((l) => (

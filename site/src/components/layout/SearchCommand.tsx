@@ -1,4 +1,4 @@
-import { FolderOpen, Hash, Search } from 'lucide-react'
+import { FolderTree, Hash, Search } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
@@ -12,8 +12,8 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import { Kbd } from '@/components/ui/kbd'
-import { browseUrl, category, kindLabels, noteUrl, prefetchNote, taxonomy, type NoteMeta } from '@/lib/content'
-import { loadBodyIndex, parseQuery, search, suggestTags, tagCounts } from '@/lib/search'
+import { category, kindLabels, noteUrl, prefetchNote, type NoteMeta } from '@/lib/content'
+import { loadBodyIndex, parseQuery, search, suggestPaths, suggestTags } from '@/lib/search'
 import { kindIcons } from './kind-icon'
 import { MathText } from '@/components/content/MathText'
 
@@ -27,7 +27,7 @@ export function openSearch() {
 
 /**
  * ⌘K / Ctrl+K palette. Words search titles, aliases, summaries, tags and headings; `#tag` filters by a tag, with
- * autocomplete while it is typed. The empty palette offers popular tags and the topics rather than every note.
+ * autocomplete while it is typed. The palette lists nothing until the reader types.
  */
 export function SearchCommand() {
   const [open, setOpen] = useState(false)
@@ -66,7 +66,12 @@ export function SearchCommand() {
   }, [open, bodyReady])
   const parsed = parseQuery(query)
   const results = useMemo(() => search(debounced, { fullText: bodyReady }), [debounced, bodyReady])
-  const suggestions = parsed.partialTag !== undefined ? suggestTags(parsed.partialTag) : []
+  // A `#…` being typed at the end of the query switches the list to tag completion.
+  const tagging = parsed.partialTag !== undefined
+  const suggestions = tagging ? suggestTags(parsed.partialTag!) : []
+  // Likewise a trailing `/…` switches it to taxonomy-path completion.
+  const pathing = parsed.partialPath !== undefined
+  const paths = pathing ? suggestPaths(parsed.partialPath!) : []
   // The top result is the likeliest choice; start loading it while the reader decides.
   useEffect(() => {
     if (results[0]) prefetchNote(results[0].slug)
@@ -77,6 +82,10 @@ export function SearchCommand() {
     setQuery('')
     navigate(to)
   }
+
+  /** Complete the `/…` being typed: a branch with subtopics keeps completing into them; a leaf ends the token. */
+  const addPath = (p: string, hasChildren: boolean) =>
+    setQuery(`${query.replace(/\/\S*$/, '')}/${p}${hasChildren ? '/' : ' '}`)
 
   /** Put a tag into the query: replace the `#…` being typed, or append. */
   const addTag = (tag: string) => {
@@ -107,47 +116,72 @@ export function SearchCommand() {
         <Command shouldFilter={false}>
           <CommandInput
             autoFocus
-            placeholder="Search notes · #tag to filter by tag"
+            placeholder="Search notes · # for tags · / for topics"
             value={query}
             onValueChange={setQuery}
+            onKeyDown={(e) => {
+              // Tab completes the tag being typed with the top suggestion.
+              if (e.key === 'Tab' && tagging && suggestions[0]) {
+                e.preventDefault()
+                addTag(suggestions[0].tag)
+              } else if (e.key === 'Tab' && pathing && paths[0]) {
+                e.preventDefault()
+                addPath(paths[0].path, paths[0].hasChildren)
+              }
+            }}
           />
-          <CommandList>
-            <CommandEmpty>No matching notes.</CommandEmpty>
-            {suggestions.length > 0 && (
-              <CommandGroup heading="Tags">
-                {suggestions.map(({ tag, count }) => (
-                  <TagItem key={tag} tag={tag} count={count} onSelect={addTag} />
-                ))}
-              </CommandGroup>
-            )}
-            {query.trim() ? (
-              results.length > 0 && (
+          {/* Nothing is listed until the reader types; a trailing #… shows only tag completions. */}
+          {query.trim() !== '' && (
+            <CommandList>
+              {pathing ? (
+                paths.length > 0 ? (
+                  <CommandGroup heading="Topics · Enter or Tab to complete, space to finish">
+                    {paths.map((p) => (
+                      <CommandItem
+                        key={p.path}
+                        value={`path-${p.path}`}
+                        onSelect={() => addPath(p.path, p.hasChildren)}
+                      >
+                        <FolderTree className="size-4 text-muted-foreground" aria-hidden />
+                        <span className="min-w-0 flex-1 truncate">{p.trail}</span>
+                        <span className="font-mono text-[11px] text-muted-foreground">/{p.path}</span>
+                        <span className="ml-2 text-xs text-muted-foreground tabular-nums">{p.count}</span>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                ) : (
+                  <div className="py-6 text-center text-sm text-muted-foreground">No topic matches that path.</div>
+                )
+              ) : tagging ? (
+                suggestions.length > 0 ? (
+                  <CommandGroup heading="Tags · Enter or Tab to complete">
+                    {suggestions.map(({ tag, count }) => (
+                      <TagItem key={tag} tag={tag} count={count} onSelect={addTag} />
+                    ))}
+                  </CommandGroup>
+                ) : (
+                  <div className="py-6 text-center text-sm text-muted-foreground">No tag starts with that.</div>
+                )
+              ) : results.length > 0 ? (
                 <CommandGroup
-                  heading={parsed.tags.length ? `Notes tagged ${parsed.tags.map((t) => `#${t}`).join(' ')}` : 'Notes'}
+                  heading={[
+                    parsed.path && `in /${parsed.path}`,
+                    parsed.tags.length && `tagged ${parsed.tags.map((t) => `#${t}`).join(' ')}`,
+                  ]
+                    .filter(Boolean)
+                    .join(', ')
+                    .replace(/^/, 'Notes ')
+                    .trim()}
                 >
                   {results.map((n) => (
                     <ResultItem key={n.slug} note={n} onSelect={(slug) => go(noteUrl(slug))} />
                   ))}
                 </CommandGroup>
-              )
-            ) : (
-              <>
-                <CommandGroup heading="Popular tags">
-                  {tagCounts.slice(0, 12).map(({ tag, count }) => (
-                    <TagItem key={tag} tag={tag} count={count} onSelect={addTag} />
-                  ))}
-                </CommandGroup>
-                <CommandGroup heading="Topics">
-                  {taxonomy.map((t) => (
-                    <CommandItem key={t.path} value={`topic-${t.path}`} onSelect={() => go(browseUrl({ c: t.path }))}>
-                      <FolderOpen className="size-4 text-muted-foreground" aria-hidden />
-                      {t.title}
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-              </>
-            )}
-          </CommandList>
+              ) : (
+                <CommandEmpty>No matching notes.</CommandEmpty>
+              )}
+            </CommandList>
+          )}
         </Command>
       </CommandDialog>
     </>
