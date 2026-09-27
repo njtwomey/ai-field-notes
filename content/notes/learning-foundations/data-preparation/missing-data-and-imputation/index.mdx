@@ -1,0 +1,145 @@
+---
+title: Missing data and imputation
+kind: concept
+summary: 'Missing values are MCAR, MAR or MNAR depending on whether missingness depends on nothing, on observed values only, or on the missing values themselves. Mean imputation shrinks variances and correlations; multiple imputation with Rubin''s rules keeps the extra uncertainty.'
+tags: [data-preparation, statistics, missing-data, bayesian, worked-example]
+aliases: [missing data, imputation, MCAR, MAR, MNAR, missing completely at random, missing at random, missing not at random, ignorability, mean imputation, multiple imputation, Rubin's rules, MICE, multivariate imputation by chained equations, complete-case analysis, listwise deletion]
+requires: [law-of-total-expectation, variance-and-covariance]
+related: [censoring, expectation-maximisation, confidence-intervals]
+references: [rubin1976, rubin1987, little2019, vanbuuren2011]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $\Ymat$ be the complete data, split into observed values $\Ymat_{\text{obs}}$ and missing values $\Ymat_{\text{mis}}$,
+and let $\Rmat$ be the matrix of indicators recording which entries are missing. The **missingness mechanism** is the
+conditional distribution $p(\Rmat \mid \Ymat, \psivec)$. Data are **missing completely at random** (MCAR) if
+$p(\Rmat \mid \Ymat) = p(\Rmat)$, **missing at random** (MAR) if $p(\Rmat \mid \Ymat) = p(\Rmat \mid \Ymat_{\text{obs}})$,
+and **missing not at random** (MNAR) otherwise <Cite id="rubin1976" />. **Imputation** fills in the missing values
+so that complete-data methods can be applied.
+</Definition>
+
+## Intuition
+
+The three classes describe what the pattern of holes can reveal. Under MCAR the holes are a random sample, like
+coffee spilt on a questionnaire: the observed rows are a smaller but unbiased sample. Under MAR the holes depend on
+things that are recorded: older respondents skip the income question more often, and age is known. Within each age,
+the missing incomes look like the observed ones, so the observed data can correct for the pattern. Under MNAR the holes
+depend on the missing values themselves: people with high incomes skip the income question. Nothing in the observed
+data can reveal how different the missing values are.
+
+## Ignorability under MAR
+
+Let the complete-data model be $p(\Ymat \mid \thetavec)$ and the mechanism $p(\Rmat \mid \Ymat, \psivec)$, with
+parameters $\thetavec$ and $\psivec$ that are distinct. What is observed is $\Ymat_{\text{obs}}$ and $\Rmat$, so the
+likelihood integrates over the missing values:
+
+$$
+p(\Ymat_{\text{obs}}, \Rmat \mid \thetavec, \psivec) = \int p(\Ymat_{\text{obs}}, \Ymat_{\text{mis}} \mid \thetavec)\,p(\Rmat \mid \Ymat_{\text{obs}}, \Ymat_{\text{mis}}, \psivec)\,d\Ymat_{\text{mis}}.
+$$
+
+Under MAR the mechanism does not depend on $\Ymat_{\text{mis}}$, so it comes out of the integral:
+
+$$
+p(\Ymat_{\text{obs}}, \Rmat \mid \thetavec, \psivec) = p(\Rmat \mid \Ymat_{\text{obs}}, \psivec)\int p(\Ymat_{\text{obs}}, \Ymat_{\text{mis}} \mid \thetavec)\,d\Ymat_{\text{mis}} = p(\Rmat \mid \Ymat_{\text{obs}}, \psivec)\,p(\Ymat_{\text{obs}} \mid \thetavec).
+$$
+
+The first factor does not involve $\thetavec$. Maximum likelihood and Bayesian inference for $\thetavec$ can therefore use
+$p(\Ymat_{\text{obs}} \mid \thetavec)$ alone and ignore the mechanism. Under MNAR the factorisation fails, and a model of
+why values are missing is required <Cite id="rubin1976" /> <Cite id="little2019" />. Ignorability does not mean that
+deleting incomplete rows is safe: it means that a likelihood using all observed values is safe.
+
+## Simple methods and their biases
+
+**Complete-case analysis** (listwise deletion) drops every row with a missing value. Under MCAR it is unbiased but
+discards information. Under MAR it is biased whenever the variables that drive missingness also relate to the outcome,
+because the retained rows are no longer representative.
+
+**Mean imputation** replaces each missing value of a variable by the mean $\bar x_o$ of its $n_o$ observed values, out of
+$n$ rows. The mean is unchanged. The imputed values sit exactly at the mean and add nothing to the sum of squares, so the
+sample variance becomes
+
+$$
+s^2_{\text{imp}} = \frac{\sum_{\text{obs}}(x_i - \bar x_o)^2}{n - 1} = \frac{n_o - 1}{n - 1}\,s_o^2.
+$$
+
+Covariances with a complete variable $y$ shrink in the same way, since imputed rows contribute
+$(\bar x_o - \bar x_o)(y_i - \bar y) = 0$. Under MCAR both the covariance and the variance of $x$ shrink by about
+$n_o/n$, while the variance of $y$ is unchanged, so the correlation shrinks by about $\sqrt{n_o/n}$. Standard errors
+computed from the imputed data treat the made-up values as real observations and are too small.
+
+**Regression imputation** predicts each missing value from the other variables. It preserves relationships better than
+mean imputation but places every imputed value exactly on the regression surface, so variances are still understated.
+Adding a random residual to each prediction fixes the variance, but any single imputation still treats the imputed
+values as known.
+
+## Multiple imputation
+
+**Multiple imputation** creates $M$ completed datasets by drawing the missing values from their predictive
+distribution given the observed data, analyses each with the complete-data method, and combines the results
+<Cite id="rubin1987" />. Let analysis $m$ give an estimate $\hat Q_m$ with variance estimate $U_m$. **Rubin's rules**
+combine them as
+
+$$
+\bar Q = \frac1M\sum_m\hat Q_m, \qquad W = \frac1M\sum_m U_m, \qquad B = \frac{1}{M - 1}\sum_m(\hat Q_m - \bar Q)^2,
+$$
+
+$$
+T = W + \paren{1 + \frac1M}B.
+$$
+
+The total variance follows from the <NoteLink to="law-of-total-expectation">law of total variance</NoteLink>, conditioning
+on the missing values:
+
+$$
+\var(Q \mid \Ymat_{\text{obs}}) = \expect\brack{\var(Q \mid \Ymat_{\text{obs}}, \Ymat_{\text{mis}})} + \var\paren{\expect[Q \mid \Ymat_{\text{obs}}, \Ymat_{\text{mis}}]}.
+$$
+
+The first term is the average complete-data variance, estimated by $W$. The second is the spread of the estimate across
+plausible fillings of the missing values, estimated by $B$. The extra $B/M$ accounts for $\bar Q$ being an average of
+only $M$ draws. Intervals use a $t$ distribution with
+$\nu = (M - 1)(1 + 1/r)^2$ degrees of freedom, where $r = (1 + 1/M)B/W$ is the relative increase in variance due to
+missing data.
+
+Imputations are usually generated by **multivariate imputation by chained equations** (MICE): each incomplete variable
+is modelled given all others, and the models are cycled, drawing new imputations each time, until the draws stabilise
+<Cite id="vanbuuren2011" />.
+
+## Worked example
+
+**Mean imputation.** Let $x$ and $y$ be standard Gaussian with correlation 0.80, and delete 30% of the $x$ values
+completely at random. In a simulation with 100,000 rows, mean imputation gives a correlation of 0.665, close to
+$0.80\sqrt{0.7} = 0.669$. The variance of $x$ falls to 0.70 of its true value. The slope of the regression of $y$ on $x$
+stays at 0.80, but the slope of $x$ on $y$ falls from 0.80 to 0.55.
+
+**Rubin's rules.** Five imputations give regression coefficients $\hat Q = (2.10, 2.25, 1.98, 2.31, 2.16)$ with
+squared standard errors $U = (0.040, 0.042, 0.039, 0.041, 0.043)$. Then $\bar Q = 2.16$, $W = 0.041$ and
+$B = 0.01665$, so
+
+$$
+T = 0.041 + 1.2 \times 0.01665 = 0.0610, \qquad \sqrt{T} = 0.247.
+$$
+
+The relative increase in variance is $r = 0.487$, giving $\nu = 4(1 + 1/0.487)^2 = 37.3$ and a $t$ quantile of 2.026.
+The 95% interval is $2.16 \pm 2.026 \times 0.247 = (1.66, 2.66)$. Analysing one imputed dataset as if it were complete
+would give a standard error near $\sqrt{W} = 0.202$, 18% too small.
+
+## Assumptions
+
+- **MAR for standard imputation.** MICE and likelihood methods assume MAR given the variables in the imputation model.
+  Including variables that predict missingness, even ones not in the final analysis, makes MAR more plausible.
+- **A congenial imputation model.** The imputation model must include every relationship the analysis will study,
+  including the outcome and any interactions. Imputing $x$ without using $y$ biases the $x$–$y$ relationship towards zero.
+- **MAR cannot be tested.** The observed data are equally consistent with MAR and with many MNAR mechanisms. Under
+  suspected MNAR, report a sensitivity analysis over plausible departures.
+
+## Pitfalls
+
+- **Imputing before splitting.** Imputation models fitted on all rows use test-set information. Fit imputers inside
+  each training fold, like scalers and encoders. See <NoteLink to="data-leakage">data leakage</NoteLink>.
+- **Discarding the missingness pattern.** For prediction, the fact that a value is missing can itself be informative,
+  especially under MNAR. Adding a missing-value indicator column lets the model use it. Gradient-boosted trees can learn
+  a default split direction for missing values.
+- **Missing is not the same as censored.** A survival time known to exceed a value is partial information, handled
+  by <NoteLink to="censoring">censoring</NoteLink> methods, not by imputation.

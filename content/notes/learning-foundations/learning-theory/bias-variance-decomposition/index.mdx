@@ -1,0 +1,153 @@
+---
+title: Bias–variance decomposition
+kind: concept
+summary: 'Under squared loss, the expected test error of a learned predictor at $\xvec$, averaged over training sets, is noise $\sigma^2$ plus squared bias $(f(\xvec) - \expect\hat f(\xvec))^2$ plus variance $\var \hat f(\xvec)$. Flexible models lower the bias and raise the variance.'
+tags: [learning-theory, generalisation, model-complexity, overfitting, worked-example]
+aliases: [bias-variance trade-off, bias–variance dilemma, overfitting, underfitting]
+requires: [expectation, variance-and-covariance]
+related: [basis-expansions, local-regression]
+references: [geman1992, hastie2009, bishop2006]
+status: draft
+updated: 2026-09-27
+---
+
+import { BiasVariance } from './BiasVariance'
+
+<Definition>
+Let $y = f(\xvec) + \varepsilon$ with $\expect[\varepsilon] = 0$ and $\var(\varepsilon) = \sigma^2$, and let
+$\hat f_{\Dcal}$ be a predictor learned from a random training set $\Dcal$. At a fixed input $\xvec$, the expected
+squared error on a new target, averaged over training sets and noise, decomposes as
+
+$$
+\expect\brack{(y - \hat f_{\Dcal}(\xvec))^2} = \sigma^2 + \paren{f(\xvec) - \expect_{\Dcal}[\hat f_{\Dcal}(\xvec)]}^2 + \var_{\Dcal}\paren{\hat f_{\Dcal}(\xvec)}.
+$$
+
+The three terms are the **irreducible noise**, the **squared bias** and the **variance** <Cite id="geman1992" />.
+</Definition>
+
+## Intuition
+
+A learning procedure is a machine that turns a training set into a function. Train it on many independent training
+sets of the same size and it produces many different functions. The **bias** is how far their average is from the
+truth: a systematic error that more data of the same kind would not remove. The **variance** is how much they
+scatter around their own average: an error caused by the particular sample. The noise $\sigma^2$ is the part of $y$
+that no function of $\xvec$ can predict.
+
+A rigid procedure, such as fitting a straight line, gives nearly the same answer on every training set, so its variance
+is small. If the truth is curved, every one of those answers is wrong in the same way, so its bias is large. A
+flexible procedure, such as a high-degree polynomial, can follow the curve, so its bias is small. It also follows the
+noise, so its answers disagree from one training set to the next and its variance is large. The best test error sits
+between the two extremes. Underfitting is the high-bias side of this trade-off; overfitting is the high-variance side.
+
+## Derivation
+
+Fix $\xvec$ and write $\hat f = \hat f_{\Dcal}(\xvec)$ and $\bar f = \expect_{\Dcal}[\hat f]$. The new target
+$y = f(\xvec) + \varepsilon$ has noise $\varepsilon$ that is independent of $\Dcal$, because the test point is drawn
+separately from the training set. Split the error into three pieces:
+
+$$
+y - \hat f = \varepsilon + (f(\xvec) - \bar f) + (\bar f - \hat f).
+$$
+
+Square and take the expectation over $\varepsilon$ and $\Dcal$. The square of each piece gives
+
+$$
+\expect[\varepsilon^2] = \sigma^2, \qquad (f(\xvec) - \bar f)^2, \qquad \expect[(\bar f - \hat f)^2] = \var_{\Dcal}(\hat f).
+$$
+
+The middle term is a constant, so it passes through the expectation unchanged. Each cross term vanishes:
+
+- $2\expect[\varepsilon](f(\xvec) - \bar f) = 0$, because $\expect[\varepsilon] = 0$.
+- $2\expect[\varepsilon(\bar f - \hat f)] = 2\expect[\varepsilon]\,\expect[\bar f - \hat f] = 0$, because $\varepsilon$ is
+  independent of $\Dcal$.
+- $2(f(\xvec) - \bar f)\,\expect[\bar f - \hat f] = 0$, because $\expect[\hat f] = \bar f$ by definition.
+
+Adding the three squares gives the decomposition. Averaging it over the distribution of $\xvec$ gives the same split
+of the overall expected test error, with integrated squared bias and integrated variance
+<Cite id="hastie2009" />.
+
+The same algebra with $\sigma^2 = 0$ is the familiar statement that the mean squared error of an estimator is its
+squared bias plus its variance (see <NoteLink to="variance-and-covariance">variance and covariance</NoteLink>). Here the
+"estimator" is the whole fitted function, and the target it estimates is $f(\xvec)$.
+
+<Derivation title="Variance of a least-squares fit on a fixed design">
+Let the training inputs $\xvec_1, \dots, \xvec_n$ be fixed and fit $\hat f(\xvec) = \phivec(\xvec)^\top\hat\wvec$ by least
+squares on $p$ basis functions, with design matrix $\Phimat \in \reals^{n \times p}$. Then
+$\hat\wvec = (\Phimat^\top\Phimat)^{-1}\Phimat^\top\yvec$, and since $\cov(\yvec) = \sigma^2\eye$,
+
+$$
+\var \hat f(\xvec) = \sigma^2\,\phivec(\xvec)^\top(\Phimat^\top\Phimat)^{-1}\phivec(\xvec).
+$$
+
+At the training inputs, $\phivec(\xvec_i)^\top(\Phimat^\top\Phimat)^{-1}\phivec(\xvec_i)$ is the $i$-th diagonal entry
+of the hat matrix $\Hmat = \Phimat(\Phimat^\top\Phimat)^{-1}\Phimat^\top$. Its trace is
+$\trace\Hmat = \trace\paren{(\Phimat^\top\Phimat)^{-1}\Phimat^\top\Phimat} = p$. So the variance averaged over the
+training inputs is exactly
+
+$$
+\frac{1}{n}\sum_{i=1}^n \var \hat f(\xvec_i) = \frac{\sigma^2 p}{n}.
+$$
+
+Each extra coefficient adds $\sigma^2/n$ of variance, whatever the basis. The bias falls only while the extra basis
+function captures structure that the others missed. The trace of $\Hmat$ is the
+<NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink> of the fit.
+</Derivation>
+
+## Worked example: polynomial degree
+
+Let $f(x) = e^{-x}\sin 5x$ on $n = 25$ equally spaced inputs in $[-1, 1]$, with noise $\sigma = 0.4$, so
+$\sigma^2 = 0.16$. Fit polynomials of degree $d$ by least squares. Because the design is fixed and the fit is linear
+in $\yvec$, the bias and variance can be computed exactly. Averaged over $x \in [-1, 1]$:
+
+| Degree $d$ | Squared bias | Variance | Bias² + variance |
+| --- | --- | --- | --- |
+| 1 | 0.937 | 0.012 | 0.950 |
+| 3 | 0.189 | 0.023 | 0.212 |
+| 6 | 0.0030 | 0.040 | 0.043 |
+| 10 | $< 10^{-4}$ | 0.066 | 0.066 |
+| 14 | $< 10^{-4}$ | 0.129 | 0.129 |
+
+The squared bias falls by more than two orders of magnitude between degree 1 and degree 6, then stops mattering. The
+variance grows steadily with $d$, at first by about $\sigma^2/n = 0.0064$ per coefficient and faster near degree 14,
+where the fit swings at the ends of the interval. The sum is smallest at $d = 6$. The expected test error adds
+$\sigma^2 = 0.16$ to every row.
+
+<BiasVariance />
+
+## Controlling the trade-off
+
+Every capacity control acts on this trade-off:
+
+- **Model size.** Fewer basis functions, smaller trees and larger $k$ in
+  <NoteLink to="k-nearest-neighbours">k-nearest neighbours</NoteLink> lower variance and raise bias.
+- **Penalties.** <NoteLink to="ridge-regression">Ridge regression</NoteLink> and other forms of
+  <NoteLink to="regularisation">regularisation</NoteLink> shrink the fit towards a simple default, buying a large cut
+  in variance with a small increase in bias.
+- **Averaging.** <NoteLink to="bagging">Bagging</NoteLink> averages predictors trained on bootstrap resamples. The
+  average has roughly the same bias as each member and a lower variance.
+- **More data.** Variance typically falls like $1/n$, while bias does not depend on $n$ for a fixed model. A larger
+  training set therefore moves the optimum towards more flexible models.
+
+The decomposition explains the trade-off but cannot choose the model on its own, because the bias depends on the
+unknown $f$. In practice the complexity is chosen with <NoteLink to="cross-validation">cross-validation</NoteLink> or an
+<NoteLink to="information-criteria">information criterion</NoteLink>.
+
+## Assumptions
+
+- **Squared loss.** The additive split holds exactly for squared error. For the 0–1 loss, bias and variance interact:
+  variance can even reduce the error at points where the average prediction is on the wrong side of the boundary.
+  Several incompatible definitions exist for classification <Cite id="hastie2009" />.
+- **Independent test noise.** The cross terms vanish because the new target's noise is independent of the training
+  set. This fails if test points overlap the training set.
+- **A distribution over training sets.** Bias and variance are properties of the procedure over repeated sampling, not
+  of one fitted model. They cannot be read off a single fit.
+
+## Pitfalls
+
+- **The U-shape is not a law.** The classical picture of test error falling and then rising with model size fails for
+  heavily over-parameterised models. Past the point where the model interpolates the training data, test error can fall
+  again. See <NoteLink to="double-descent">double descent</NoteLink>.
+- **Training error measures neither term.** Training error keeps falling as complexity grows, even after the variance
+  dominates the test error.
+- **Parameter count is a poor proxy for complexity.** Penalised and averaged fits have far fewer effective degrees of
+  freedom than parameters. Compare models by their variance or effective degrees of freedom, not by raw size.

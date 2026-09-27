@@ -1,0 +1,118 @@
+---
+title: Hyperparameter search
+kind: technique
+summary: 'Hyperparameter search chooses settings such as a learning rate by validation score. Random search beats grid search when few hyperparameters matter; Bayesian optimisation picks trials by expected improvement; successive halving and Hyperband stop bad trials early.'
+tags: [model-selection, optimisation, hyperparameters, bayesian, worked-example]
+aliases: [hyperparameter optimisation, hyperparameter tuning, HPO, grid search, random search, Bayesian optimisation, Bayesian optimization, expected improvement, successive halving, Hyperband]
+requires: [cross-validation, gaussian-process]
+related: [early-stopping, learning-rate-schedules, gp-hyperparameter-learning]
+references: [bergstra2012, jones1998, snoek2012, jamieson2016, li2018hyperband, cawley2010]
+status: draft
+updated: 2026-09-27
+---
+
+import { GridVersusRandom } from './GridVersusRandom'
+
+<Definition>
+A **hyperparameter** is a setting of a learning procedure that is fixed before training, such as a learning rate, a
+penalty strength or a tree depth. **Hyperparameter search** chooses a configuration $\lambdavec$ from a search space
+$\Lambda$ to minimise a validation loss $f(\lambdavec)$, measured by training with $\lambdavec$ and evaluating on held-out
+data or by <NoteLink to="cross-validation">cross-validation</NoteLink>. Each evaluation of $f$ is expensive and noisy,
+and $f$ has no usable gradient.
+</Definition>
+
+## Problem
+
+Training a model once may take minutes or days, and there may be ten or more hyperparameters. Trying every
+combination is impossible. The search has to decide which configurations to try, in what order, and how much training
+to spend on each before judging it.
+
+## Mechanism
+
+### Grid search and random search
+
+**Grid search** tries every combination of a few values per hyperparameter. With $K$ values for each of $D$
+hyperparameters it costs $K^D$ trials. **Random search** draws each of $N$ trials independently from a distribution over
+$\Lambda$, typically uniform on a logarithmic scale for scale parameters such as learning rates.
+
+Random search is usually better at the same budget, because the validation loss typically depends strongly on only a
+few hyperparameters, and which ones varies from dataset to dataset <Cite id="bergstra2012" />. Suppose only one of $D$
+hyperparameters matters. A grid of $N = K^D$ trials tests only $K = N^{1/D}$ distinct values of it, since every other
+trial repeats one of those values with a different setting of the irrelevant ones. Random search tests $N$ distinct
+values. With $D = 2$ and $N = 9$, the grid tries 3 values of the important hyperparameter and random search tries 9.
+
+The same argument gives a budget rule that does not depend on $D$. If a region holds a fraction $q$ of the search
+space, $N$ random trials miss it with probability $(1 - q)^N$. For the best 5% of configurations, $q = 0.05$, and
+$1 - 0.95^{60} = 0.954$: sixty random trials land in the top 5% with probability above 95%, whatever the dimension.
+
+<GridVersusRandom />
+
+### Bayesian optimisation
+
+Grid and random search ignore the results of earlier trials. **Bayesian optimisation** fits a probabilistic
+**surrogate model** of $f$ to all trials so far, usually a <NoteLink to="gaussian-process">Gaussian process</NoteLink>,
+and chooses the next trial by maximising an **acquisition function** that trades off a low predicted loss against
+high uncertainty <Cite id="jones1998" /> <Cite id="snoek2012" />.
+
+At a candidate $\lambdavec$, the surrogate predicts $f(\lambdavec) \sim \Gauss(\mu, s^2)$. Let $f^*$ be the best loss
+found so far. The **improvement** is $I = \max(f^* - f(\lambdavec), 0)$, and the **expected improvement** is its mean.
+Substituting $f(\lambdavec) = \mu + s z$ with $z \sim \Gauss(0, 1)$, the improvement is positive when
+$z < z^* = (f^* - \mu)/s$, so
+
+$$
+\operatorname{EI}(\lambdavec) = \int_{-\infty}^{z^*}(f^* - \mu - s z)\,\phi(z)\,dz = (f^* - \mu)\,\Phi(z^*) + s\,\phi(z^*),
+$$
+
+where $\phi$ and $\Phi$ are the standard normal density and distribution function. The second step uses
+$\int_{-\infty}^{z^*}z\phi(z)\,dz = -\phi(z^*)$, since $\phi'(z) = -z\phi(z)$. The first term rewards a predicted mean
+below the incumbent (exploitation). The second rewards uncertainty (exploration). Both are needed: EI is positive
+wherever $s > 0$, so no region is ruled out forever.
+
+### Successive halving and Hyperband
+
+Most bad configurations are visibly bad early in training. **Successive halving** starts $n$ configurations with a
+small budget $r$ each (epochs, or a subsample of the data), keeps the best $1/\eta$ of them, multiplies the budget by
+$\eta$, and repeats until one remains <Cite id="jamieson2016" />. The difficulty is choosing $n$: many configurations
+with a small starting budget risk discarding a slow starter, while few configurations with a large budget waste less
+but explore less. **Hyperband** runs several brackets of successive halving that span this trade-off, from aggressive
+(many configurations, tiny budgets) to plain random search (few configurations, full budget)
+<Cite id="li2018hyperband" />.
+
+## Worked example
+
+**Expected improvement.** The best validation error so far is $f^* = 0.28$. Candidate A has surrogate prediction
+$\mu = 0.30$, $s = 0.05$; candidate B has $\mu = 0.27$, $s = 0.005$. For A, $z^* = -0.4$ and
+$\operatorname{EI} = (-0.02)(0.345) + 0.05(0.368) = 0.0115$. For B, $z^* = 2$ and
+$\operatorname{EI} = 0.01(0.977) + 0.005(0.054) = 0.0100$. EI prefers A, whose mean is worse, because A has a real
+chance of a large improvement while B can improve by at most a little.
+
+**Successive halving.** Take $n = 27$ configurations, $\eta = 3$ and a starting budget of 1 epoch. The rounds run 27
+configurations for 1 epoch, 9 for 3, 3 for 9 and 1 for 27. Each round costs 27 epochs, 108 in total, against
+$27 \times 27 = 729$ to train every configuration fully. Hyperband with a maximum budget of 27 and $\eta = 3$ runs four
+brackets, starting with 27 configurations at budget 1, 12 at 3, 6 at 9 and 4 at 27.
+
+## Cost
+
+Each trial costs one training run, or $K$ for $K$-fold cross-validation. Random and grid search parallelise
+perfectly. Bayesian optimisation is sequential by nature and adds the cost of refitting the surrogate, which for a
+Gaussian process grows as the cube of the number of trials. It pays off when training is expensive and the budget is
+tens to hundreds of trials. Successive halving and Hyperband cut the cost per configuration, often by an order of
+magnitude.
+
+## Trade-offs
+
+- **Search space.** Sampling scale parameters on a log scale matters more than the choice of search algorithm. A
+  learning rate drawn uniformly from $[10^{-5}, 1]$ spends 90% of its trials above $0.1$.
+- **Early stopping assumes rankings persist.** Successive halving discards configurations that start slowly, such as
+  those with small learning rates or strong regularisation, even if they would finish best.
+- **Selection bias.** The best of many validation scores is an optimistic estimate of that configuration's error. The
+  more configurations are tried, the larger the optimism. Report the error of the selected configuration on data not
+  used in the search, or use nested cross-validation <Cite id="cawley2010" />.
+
+## Pitfalls
+
+- **Tuning on the test set.** Any score used to choose a configuration is no longer an unbiased estimate of error.
+- **Grids with coarse spacing miss narrow optima.** A grid of 3 values per axis cannot find a peak narrower than its
+  spacing, however many other axes it has.
+- **Comparing methods with unequal tuning.** A new method tuned with 100 trials against a baseline tuned with 10
+  measures tuning effort, not the methods.

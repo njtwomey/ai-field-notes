@@ -1,0 +1,142 @@
+---
+title: Regularisation
+kind: concept
+summary: 'Regularisation restricts a model to reduce variance at the cost of some bias, most often by adding a penalty $\lambda\Omega(\wvec)$ to the training loss. An $L^2$ penalty is MAP estimation under a Gaussian prior and an $L^1$ penalty under a Laplace prior; each penalty is equivalent to a norm constraint.'
+tags: [regularisation, overfitting, bayesian, linear-models, worked-example]
+aliases: [regularization, penalised likelihood, penalized regression, penalty term, structural risk minimisation]
+requires: [empirical-risk-minimisation, bayes-theorem]
+related: [lasso, elastic-net, smoothing-splines, bayesian-linear-regression, laplace-distribution, tree-pruning]
+references: [hastie2009, bishop2006, hoerl1970, tibshirani1996, bishop1995, vapnik1998]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Regularisation** is any change to a learning procedure that restricts the fitted model in order to reduce its
+variance, accepting some bias in exchange. The most common form adds a **penalty** $\Omega(\wvec) \ge 0$ on the
+parameters to the empirical risk,
+
+$$
+\hat\wvec_\lambda = \argmin_{\wvec}\ \sum_{i=1}^n \ell(f_{\wvec}(\xvec_i), y_i) + \lambda\,\Omega(\wvec),
+$$
+
+with a **regularisation strength** $\lambda \ge 0$. The $L^2$ penalty $\Omega = \norm{\wvec}_2^2$ gives
+<NoteLink to="ridge-regression">ridge regression</NoteLink> and weight decay; the $L^1$ penalty
+$\Omega = \norm{\wvec}_1$ gives the <NoteLink to="lasso">lasso</NoteLink>.
+</Definition>
+
+## Why restrict a model
+
+<NoteLink to="empirical-risk-minimisation">Empirical risk minimisation</NoteLink> over a rich class fits the training
+data closely, including its noise. The <NoteLink to="bias-variance-decomposition">bias–variance decomposition</NoteLink>
+shows the cost: the fitted function changes a lot from one training set to the next. A penalty makes some solutions
+more expensive than others, usually those with large or many nonzero coefficients. The fit then moves towards a simple
+default, such as $\wvec = \zeros$, and moves less in response to the noise in any one sample. The strength $\lambda$
+sets the trade-off: $\lambda = 0$ is the unregularised fit, and $\lambda \to \infty$ returns the default whatever the
+data say.
+
+Vapnik's **structural risk minimisation** is the same idea stated for classes rather than penalties: order the
+hypothesis classes by complexity and minimise the empirical risk plus a bound on the estimation error of each class
+<Cite id="vapnik1998" />.
+
+## Penalties as priors
+
+Suppose $y_i = \wvec^\top\xvec_i + \varepsilon_i$ with independent $\varepsilon_i \sim \Gauss(0, \sigma^2)$, and give
+$\wvec$ a prior $p(\wvec)$. By <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink> the posterior is proportional to
+likelihood times prior, so the **maximum a posteriori** (MAP) estimate minimises the negative log posterior:
+
+$$
+\hat\wvec_{\text{MAP}} = \argmin_{\wvec}\ \frac{1}{2\sigma^2}\norm{\yvec - \Xmat\wvec}^2 - \log p(\wvec).
+$$
+
+The penalty is the negative log prior. Two priors give the two standard penalties.
+
+- **Gaussian prior.** With independent $w_j \sim \Gauss(0, \tau^2)$, $-\log p(\wvec) = \norm{\wvec}^2/(2\tau^2)$ plus a
+  constant. Multiplying the objective by $2\sigma^2$ gives
+  $\norm{\yvec - \Xmat\wvec}^2 + \lambda\norm{\wvec}_2^2$ with $\lambda = \sigma^2/\tau^2$. This is ridge regression.
+- **Laplace prior.** With independent $w_j$ of density $\frac{1}{2b}e^{-\abs{w_j}/b}$,
+  $-\log p(\wvec) = \norm{\wvec}_1/b$ plus a constant. Multiplying by $2\sigma^2$ gives
+  $\norm{\yvec - \Xmat\wvec}^2 + \lambda\norm{\wvec}_1$ with $\lambda = 2\sigma^2/b$. This is the lasso
+  <Cite id="tibshirani1996" />.
+
+A strong belief that coefficients are small (small $\tau$ or $b$) is a large $\lambda$. The
+<NoteLink to="laplace-distribution">Laplace distribution</NoteLink> puts more mass near zero and in the tails than a
+Gaussian of the same variance, which matches a belief that most coefficients are negligible and a few are large.
+The MAP estimate is a single point. A full Bayesian treatment averages over the posterior instead, as in
+<NoteLink to="bayesian-linear-regression">Bayesian linear regression</NoteLink>, and can also estimate $\lambda$ from
+the data.
+
+## Penalty and constraint forms
+
+The penalised problem is equivalent to a constrained one:
+
+$$
+\min_{\wvec}\ L(\wvec) \quad \text{subject to} \quad \Omega(\wvec) \le t.
+$$
+
+Let $L$ and $\Omega$ be convex and let $\hat\wvec$ solve the constrained problem. The Karush–Kuhn–Tucker conditions
+give a multiplier $\lambda \ge 0$ with $\nabla L(\hat\wvec) + \lambda\nabla\Omega(\hat\wvec) = \zeros$ (with
+subgradients where $\Omega$ is not differentiable) and $\lambda(\Omega(\hat\wvec) - t) = 0$. The first condition says
+that $\hat\wvec$ is a stationary point, and hence by convexity a minimiser, of $L + \lambda\Omega$. Conversely, if
+$\hat\wvec_\lambda$ minimises $L + \lambda\Omega$, it also solves the constrained problem with
+$t = \Omega(\hat\wvec_\lambda)$: any $\wvec$ with $\Omega(\wvec) \le t$ and $L(\wvec) < L(\hat\wvec_\lambda)$ would give
+a smaller penalised objective. Each $\lambda$ therefore corresponds to a budget $t$, with larger $\lambda$ meaning
+smaller $t$. The correspondence depends on the data, so neither form is more general.
+
+The constraint form explains the geometry. The solution is where the smallest level set of $L$ touches the region
+$\Omega(\wvec) \le t$. The $L^2$ ball is round, so the contact point is generically off the axes and no coefficient is
+zero. The $L^1$ ball is a cross-polytope with corners on the axes, and the level sets of $L$ often touch it first at a
+corner, where some coefficients are exactly zero.
+
+## Worked example: orthonormal features
+
+With orthonormal features, $\Xmat^\top\Xmat = \eye$, both penalties act on each coefficient separately. Write
+$z_j = \xvec_{(j)}^\top\yvec$ for the least-squares coefficient of feature $j$, where $\xvec_{(j)}$ is the $j$-th
+column of $\Xmat$. Then $\norm{\yvec - \Xmat\wvec}^2 = \norm{\yvec}^2 - \norm{\zvec}^2 + \sum_j (w_j - z_j)^2$, so each
+coordinate solves a one-dimensional problem.
+
+- **Ridge**: minimising $(w - z)^2 + \lambda w^2$ gives $w = z/(1 + \lambda)$. Every coefficient shrinks by the same
+  factor and none reaches zero.
+- **Lasso**: minimising $(w - z)^2 + \lambda\abs{w}$ gives $w = \sgn(z)\max(\abs{z} - \lambda/2, 0)$, the
+  **soft-thresholding** rule. For $w > 0$ the derivative $2(w - z) + \lambda$ vanishes at $w = z - \lambda/2$, which is
+  positive only when $z > \lambda/2$. Otherwise the minimum is at the kink $w = 0$.
+
+Take $\zvec = (3, 0.4)$ and $\lambda = 1$. Ridge gives $(1.5, 0.2)$: both coefficients halve. The lasso gives
+$(2.5, 0)$: the large coefficient moves by the fixed amount $0.5$ and the small one is removed.
+
+## Other regularisers
+
+Penalties on the parameters are one mechanism among several. Each of these reduces variance by restricting what the
+training procedure can reach:
+
+- **Combined penalties**: the <NoteLink to="elastic-net">elastic net</NoteLink> mixes $L^1$ and $L^2$; roughness
+  penalties on a curve give <NoteLink to="smoothing-splines">smoothing splines</NoteLink>.
+- **Early stopping**: halting gradient descent before convergence limits how far the weights move from their
+  initialisation, which for least squares behaves like a ridge penalty that weakens with the number of steps. See
+  <NoteLink to="early-stopping">early stopping</NoteLink>.
+- **Noise and augmentation**: training on perturbed inputs is equivalent, for small noise, to a Tikhonov penalty on the
+  model's derivatives <Cite id="bishop1995" />. See <NoteLink to="data-augmentation">data augmentation</NoteLink> and
+  <NoteLink to="dropout">dropout</NoteLink>.
+- **Weight decay in adaptive optimisers**: with Adam, an $L^2$ penalty in the loss and a direct decay of the weights
+  are not the same. See <NoteLink to="decoupled-weight-decay">decoupled weight decay</NoteLink>.
+- **Structural limits**: fewer features (see <NoteLink to="feature-selection">feature selection</NoteLink>),
+  smaller trees (see <NoteLink to="tree-pruning">tree pruning</NoteLink>) or fewer basis functions.
+
+## Choosing the strength
+
+$\lambda$ is a hyperparameter. It is usually chosen by <NoteLink to="cross-validation">cross-validation</NoteLink> over a
+logarithmic grid. For linear smoothers, the <NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink>
+put different penalties on a common scale and allow criteria such as Mallows' $C_p$ and
+<NoteLink to="information-criteria">AIC</NoteLink>. Bayesian models can estimate it by maximising the marginal
+likelihood.
+
+## Pitfalls
+
+- **Standardise first.** A penalty on $\norm{\wvec}$ treats all coefficients alike, so its effect depends on the units
+  of each feature. See <NoteLink to="feature-scaling">feature scaling</NoteLink>.
+- **Leave the intercept unpenalised.** Shrinking the intercept makes the fit depend on the origin of $y$. Centre the
+  data or exclude the intercept from $\Omega$.
+- **Regularised coefficients are biased.** They are shrunk towards zero, so they understate true effects. Confidence
+  intervals computed as if the fit were unpenalised are wrong.
+- **Conventions differ by a factor of $n$.** Some libraries scale the loss by $\frac{1}{n}$ or $\frac{1}{2n}$ and some
+  do not, so the same $\lambda$ means different amounts of regularisation in different software.

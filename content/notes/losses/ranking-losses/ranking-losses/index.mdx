@@ -1,0 +1,144 @@
+---
+title: Ranking losses
+kind: concept
+summary: 'Ranking losses train a scoring function whose order within a query matches relevance. Pointwise losses fit each label, pairwise losses such as RankNet penalise misordered pairs, and listwise losses such as ListNet compare whole lists. LambdaRank weights pairs by NDCG change.'
+tags: [loss-functions, ranking, information-retrieval, learning-to-rank, worked-example]
+aliases: [learning to rank, LTR, pointwise ranking loss, pairwise ranking loss, listwise ranking loss, RankNet, LambdaRank, LambdaMART, ListNet, ListMLE, lambda gradients]
+requires: [ndcg, logistic-regression, softmax-and-log-sum-exp]
+related: [mean-average-precision-and-mrr, gradient-boosting, contrastive-learning, cross-entropy-and-perplexity]
+references: [burges2005, burges2006, burges2010, cao2007, xia2008]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+In **learning to rank**, each query $q$ comes with documents $i = 1, \dots, n_q$, feature vectors $\xvec_i$ and graded
+relevance labels $r_i$. A scoring function assigns $s_i = f(\xvec_i)$, and documents are shown in decreasing order of
+score. A **ranking loss** measures how far the scores' order is from the labels' order within each query. **Pointwise**
+losses score each document separately, **pairwise** losses score pairs of documents, and **listwise** losses score the
+whole list for a query.
+</Definition>
+
+## The problem with optimising the metric directly
+
+Ranking quality is usually measured by <NoteLink to="ndcg">normalised discounted cumulative gain</NoteLink>. With gain
+$g_i = 2^{r_i} - 1$ and rank $\rho_i$ (1 for the top) of document $i$,
+
+$$
+\operatorname{DCG} = \sum_i \frac{g_i}{\log_2(1 + \rho_i)}, \qquad \operatorname{NDCG} = \frac{\operatorname{DCG}}{\operatorname{IDCG}},
+$$
+
+where IDCG is the DCG of the best possible order. NDCG depends on the scores only through their sort order. A small
+change in the scores that does not swap two documents leaves every rank, and so NDCG, unchanged. NDCG is therefore
+piecewise constant in the scores: its gradient is zero almost everywhere and undefined where two scores tie. Gradient
+methods cannot optimise it directly. Ranking losses are smooth surrogates for it.
+
+## Pointwise losses
+
+A pointwise loss treats each document as an independent regression or classification example, for example
+$\sum_i (s_i - r_i)^2$. Any regression model can then rank. The loss ignores that only the order within a query
+matters: it spends effort matching absolute label values, penalises a constant shift of all scores in a query, and
+weights every document equally, although errors at the top of the list matter most.
+
+## Pairwise losses: RankNet
+
+**RankNet** models the probability that document $i$ should rank above document $j$ as a logistic function of the
+score difference <Cite id="burges2005" />:
+
+$$
+P_{ij} = \sigma(s_i - s_j) = \frac{1}{1 + e^{-(s_i - s_j)}}.
+$$
+
+For every pair with $r_i > r_j$, the loss is the cross-entropy of that event,
+$L_{ij} = -\ln P_{ij} = \ln\paren{1 + e^{-(s_i - s_j)}}$. This is the logistic loss of
+<NoteLink to="logistic-regression">logistic regression</NoteLink> applied to the margin $s_i - s_j$. It depends only on
+score differences, so shifting all scores in a query changes nothing.
+
+Its derivatives with respect to the scores are equal and opposite:
+
+$$
+\frac{\partial L_{ij}}{\partial s_i} = -\frac{1}{1 + e^{s_i - s_j}} \eqdef \lambda_{ij}, \qquad \frac{\partial L_{ij}}{\partial s_j} = -\lambda_{ij}.
+$$
+
+Gradient descent raises $s_i$ and lowers $s_j$, most strongly when the pair is misordered. Summing over pairs gives each
+document a single force $\lambda_i = \sum_{j:\, r_i > r_j}\lambda_{ij} - \sum_{j:\, r_j > r_i}\lambda_{ji}$, which is
+back-propagated through $f$ <Cite id="burges2010" />.
+
+## LambdaRank: gradients weighted by NDCG
+
+RankNet counts every misordered pair equally. Swapping documents at ranks 1 and 2 changes NDCG much more than swapping
+documents at ranks 50 and 51, because of the logarithmic discount. **LambdaRank** skips writing a loss and specifies the
+gradients directly: each pair's RankNet gradient is multiplied by the change in NDCG that swapping the two documents
+would cause <Cite id="burges2006" />,
+
+$$
+\lambda_{ij}^{\text{Lambda}} = \lambda_{ij}\,\abs{\Delta\operatorname{NDCG}_{ij}},
+\qquad
+\abs{\Delta\operatorname{NDCG}_{ij}} = \frac{\abs{g_i - g_j}\,\abs{\dfrac{1}{\log_2(1 + \rho_i)} - \dfrac{1}{\log_2(1 + \rho_j)}}}{\operatorname{IDCG}}.
+$$
+
+The formula follows from the DCG: a swap exchanges the discounts of the two documents and leaves every other term
+unchanged, so the change is (gain difference) × (discount difference). Pairs near the top, and pairs with very different
+relevance, get large gradients. Burges et al. found empirically that training with these gradients improves NDCG
+<Cite id="burges2006" />. **LambdaMART** uses the same lambdas as the pseudo-residuals of
+<NoteLink to="gradient-boosting">gradient-boosted</NoteLink> regression trees. An ensemble of LambdaMART rankers won
+Track 1 of the 2010 Yahoo! Learning to Rank Challenge <Cite id="burges2010" />.
+
+## Listwise losses
+
+**ListNet** turns both the scores and the labels into probability distributions over which document is ranked first,
+using the softmax, and minimises the cross-entropy between them <Cite id="cao2007" />:
+
+$$
+P_s(i) = \frac{e^{s_i}}{\sum_k e^{s_k}}, \qquad P_r(i) = \frac{e^{r_i}}{\sum_k e^{r_k}}, \qquad L = -\sum_i P_r(i)\ln P_s(i).
+$$
+
+Since $\ln P_s(i) = s_i - \ln\sum_k e^{s_k}$ and $\sum_i P_r(i) = 1$, the loss is $-\sum_i P_r(i)s_i + \ln\sum_k e^{s_k}$.
+The derivative of the log-sum-exp is the softmax (see
+<NoteLink to="softmax-and-log-sum-exp">softmax and log-sum-exp</NoteLink>), so
+
+$$
+\frac{\partial L}{\partial s_i} = P_s(i) - P_r(i).
+$$
+
+Each document is pushed up if the model gives it less top-one probability than the labels do, and down otherwise.
+**ListMLE** instead maximises the likelihood of the correct permutation $\pi$ under the Plackett–Luce model, which picks
+the top document by softmax, removes it and repeats:
+$L = -\sum_{k}\paren{s_{\pi(k)} - \ln\sum_{l \ge k}e^{s_{\pi(l)}}}$ <Cite id="xia2008" />. The InfoNCE loss of
+<NoteLink to="contrastive-learning">contrastive learning</NoteLink> is a listwise softmax loss with one relevant item per
+list.
+
+## Worked example
+
+One query has documents A, B and C with relevance $(2, 1, 0)$, so gains $(3, 1, 0)$. The model scores them
+$(0.5, 1.0, -0.2)$ and ranks them B, A, C. Then $\operatorname{DCG} = 1/\log_2 2 + 3/\log_2 3 + 0 = 2.893$, the ideal
+order A, B, C has $\operatorname{IDCG} = 3 + 1/\log_2 3 = 3.631$, and $\operatorname{NDCG} = 0.797$.
+
+| Pair (higher, lower) | $P_{ij}$ | RankNet $L_{ij}$ | $\lambda_{ij}$ | $\abs{\Delta\operatorname{NDCG}_{ij}}$ | LambdaRank $\lambda$ |
+| --- | --- | --- | --- | --- | --- |
+| A, B | 0.378 | 0.974 | $-0.622$ | 0.203 | $-0.127$ |
+| A, C | 0.668 | 0.403 | $-0.332$ | 0.108 | $-0.036$ |
+| B, C | 0.769 | 0.263 | $-0.231$ | 0.138 | $-0.032$ |
+
+The misordered pair (A, B) has the largest gradient under both schemes. RankNet pushes it 1.9 times as hard as the
+correctly ordered pair (A, C); LambdaRank pushes it 3.5 times as hard, because fixing it raises NDCG from 0.797 to 1.
+
+For ListNet, the label distribution is $P_r = (0.665, 0.245, 0.090)$ and the score distribution is
+$P_s = (0.318, 0.524, 0.158)$. The loss is 1.087, against a minimum of 0.832 (the entropy of $P_r$). The gradient
+$P_s - P_r = (-0.347, 0.279, 0.068)$ raises A and lowers B and C.
+
+## Assumptions
+
+- **Relevance labels within a query are comparable.** Pairwise and listwise losses compare documents only within the
+  same query, so labels need to be consistent within a query but not across queries.
+- **Graded labels or clicks.** Click data are biased by position: users click what is shown at the top. Training on
+  clicks as if they were relevance labels teaches the model to reproduce the old ranking.
+
+## Pitfalls
+
+- **Pair counts grow quadratically.** A query with $n$ documents has up to $n(n - 1)/2$ pairs. Queries with many
+  documents dominate a pairwise loss unless pairs are sampled or weighted per query.
+- **Truncation.** NDCG@$k$ ignores positions below $k$, so its lambdas are zero for swaps entirely below the cut-off,
+  and those documents stop receiving gradient.
+- **ListNet's top-one approximation.** Matching top-one probabilities does not pin down the full order. Two score
+  vectors with the same softmax on the leading document can order the rest differently.

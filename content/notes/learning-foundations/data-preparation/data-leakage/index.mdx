@@ -1,0 +1,108 @@
+---
+title: Data leakage
+kind: concept
+summary: 'Data leakage is information in training or evaluation that would not be available when the model is used: features derived from the target, preprocessing fitted on test rows, related records across the split, or future data. It inflates validation scores.'
+tags: [data-preparation, model-evaluation, pitfalls, worked-example]
+aliases: [leakage, target leakage, train-test contamination, label leakage, temporal leakage, group leakage, look-ahead bias]
+requires: [cross-validation]
+related: [feature-selection, categorical-encoding]
+references: [kaufman2012, ambroise2002, varma2006, hastie2009]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Data leakage** is the use, in training or in evaluation, of information that would not be legitimately available
+at the moment the model makes a real prediction <Cite id="kaufman2012" />. Leakage in **features** gives the model
+inputs that encode the target. Leakage in **training examples** lets information from the evaluation data reach the
+fitted model. Both make validation scores overstate performance in use.
+</Definition>
+
+## Intuition
+
+A validation score is an estimate of how well the model will do on future cases. It is honest only if the evaluation
+imitates deployment: the model sees exactly what it would see at prediction time, and nothing about the cases it is
+scored on. Leakage breaks that imitation. A model that exploits a leak is not wrong about the data it was given; it
+has learned a shortcut that exists in the dataset and not in the world. The symptom is usually a score that is too
+good, often from one surprisingly powerful feature.
+
+## Forms of leakage
+
+### Target leakage in features
+
+A feature leaks the target when its value is determined by, or recorded after, the outcome being predicted.
+
+- **Downstream consequences.** Predicting pneumonia from a column recording whether antibiotics were prescribed;
+  predicting churn from the date an account was closed. The feature is available in the historical table, but at
+  prediction time the outcome has not happened, so neither has the feature.
+- **Encodings built from labels.** Target encoding computed on rows that include the row itself; see
+  <NoteLink to="categorical-encoding">categorical encoding</NoteLink>.
+- **Artefacts of data collection.** Identifiers, file paths or timestamps that correlate with the label because of how
+  the dataset was assembled. Kaufman et al. describe a competition in which patient identifiers predicted breast
+  cancer, because patients from different sources were numbered in different ranges <Cite id="kaufman2012" />.
+
+The test for each feature: would this value be known, with this meaning, at the moment the prediction is needed?
+
+### Train–test contamination
+
+Information flows from evaluation rows into the model when:
+
+- **Preprocessing is fitted on all the data.** Scalers, imputers, encoders, dimensionality reduction and feature
+  selectors estimated before splitting see the test rows. The damage ranges from negligible (a mean shifted by a
+  few test rows) to severe. Selecting features on all the data can make pure noise look 96% accurate; see
+  <NoteLink to="feature-selection">feature selection</NoteLink> <Cite id="ambroise2002" />.
+- **Records are duplicated or related.** Exact duplicates, near-duplicates such as augmented copies or consecutive video
+  frames, and several records from the same patient, user or device let the model score well by recognising what it has
+  already seen. Split by group so that each group falls entirely on one side.
+- **The evaluation data are used for choices.** Tuning hyperparameters, choosing features or picking the best of many
+  models by their test score makes the test score part of training <Cite id="varma2006" />.
+
+### Temporal leakage
+
+When the model will predict the future from the past, a random split lets it train on later data and predict
+earlier data. Features such as rolling averages computed over windows that extend past the prediction time do the
+same. Evaluation must respect time: train on the past, test on the future; see
+<NoteLink to="time-series-cross-validation">time-series cross-validation</NoteLink>.
+
+## Why fitting inside the fold is the rule
+
+Cross-validation estimates the error of a **procedure**: everything that turns raw data into a fitted model. Any step
+that looks at the targets or the distribution of the inputs is part of that procedure. Running it once on all the data
+and cross-validating only the final model estimates the error of a different procedure, one that had access to the test
+rows <Cite id="hastie2009" />. The fix is mechanical: bundle every data-dependent step into a single pipeline object and
+fit the whole pipeline inside each training fold.
+
+## Worked example: duplicates in the test set
+
+A 1-nearest-neighbour classifier has accuracy 70% on genuinely new cases. The dataset was assembled from overlapping
+sources, and after a random split 30% of test rows have an exact duplicate, with the same label, in the training set.
+1-NN predicts every duplicate correctly, because its nearest neighbour is its copy. The measured accuracy is
+
+$$
+0.30 \times 1.00 + 0.70 \times 0.70 = 0.79,
+$$
+
+nine points above the accuracy the model will achieve on new cases. More flexible models, which memorise more, gain
+more from the leak, so the leak also distorts comparisons between models: it favours whichever model memorises best.
+
+## Detecting leakage
+
+- **Scores that are too good**, especially compared with published results or with human performance on the task.
+- **One feature dominating importance**, particularly an identifier, a timestamp or a field recorded late in a
+  process.
+- **A gap between offline and online performance**, where a model that validated well fails after deployment.
+- **Checking the timeline of each feature**: when is the value recorded, and could it change after the outcome?
+
+## Assumptions
+
+- **A defined prediction moment.** Leakage is relative to when and how the model will be used. The same feature can
+  be legitimate for a model that runs after discharge and leaky for one that runs at admission.
+
+## Pitfalls
+
+- **Fixing the split but not the features.** Group and time-aware splits prevent contamination, but they do not remove a
+  feature that is itself a consequence of the target.
+- **Leaks that survive into production.** A leaking feature may be populated in the historical warehouse and empty or
+  delayed in the live system. The model then sees different inputs in use from those it was trained on.
+- **Removing a leak lowers the score.** An honest evaluation that scores worse than a leaky one is progress, not a
+  regression.

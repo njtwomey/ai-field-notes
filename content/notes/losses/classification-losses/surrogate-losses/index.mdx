@@ -1,0 +1,132 @@
+---
+title: Surrogate losses for classification
+kind: concept
+summary: 'A surrogate loss $\phi(yf(\xvec))$ replaces the non-convex 0–1 loss with a convex function of the margin: logistic, hinge, exponential or squared hinge. A convex $\phi$ is classification-calibrated, so minimising it yields the Bayes classifier, exactly when $\phi$ is differentiable at 0 with $\phi''(0) < 0$.'
+tags: [loss-functions, classification, learning-theory, convex-optimisation, worked-example]
+aliases: [surrogate loss, convex surrogate, margin-based loss, 0–1 loss, zero-one loss, classification calibration, classification-calibrated loss, Bayes consistency, logistic loss, squared hinge loss, psi-transform]
+requires: [empirical-risk-minimisation, bayes-decision-rule]
+related: [logistic-regression, adaboost, focal-loss, proper-scoring-rule, perceptron]
+references: [bartlett2006, zhang2004, shalevshwartz2014, hastie2009]
+status: draft
+updated: 2026-09-27
+---
+
+import { SurrogateLosses } from './SurrogateLosses'
+
+<Definition>
+For labels $y \in \set{-1, +1}$ and a real-valued score $f(\xvec)$ that classifies by its sign, the **margin** is
+$m = yf(\xvec)$. The **0–1 loss** is $\indicator[m \le 0]$. A **surrogate loss** is a function $\phi(m)$ used in its place
+during training, usually convex. Common surrogates are the **logistic** loss $\ln(1 + e^{-m})$, the **hinge** loss
+$\max(0, 1 - m)$, the **exponential** loss $e^{-m}$ and the **squared hinge** loss $\max(0, 1 - m)^2$. A surrogate is
+**classification-calibrated** if minimising its expected value always gives a score with the sign of the Bayes decision
+<Cite id="bartlett2006" />.
+</Definition>
+
+## Why not minimise the 0–1 loss
+
+The 0–1 risk is what a classifier should minimise, but its empirical version is a step function of the parameters. Its
+gradient is zero almost everywhere, and minimising the number of training mistakes over linear classifiers is NP-hard in
+general <Cite id="shalevshwartz2014" />. A convex surrogate that decreases in the margin gives a problem that gradient
+methods solve reliably. It also rewards confident correct predictions and penalises confident wrong ones in proportion,
+which the 0–1 loss does not.
+
+The question is whether the convenient problem has the right answer. Minimising $\expect[\phi(yf(\xvec))]$ over all
+functions $f$ should give a classifier whose 0–1 risk is the Bayes risk. Calibration answers this pointwise.
+
+## Conditional risk and its minimiser
+
+Fix $\xvec$ and let $\eta = \prob(y = +1 \mid \xvec)$. A score $\alpha = f(\xvec)$ has expected surrogate loss, the
+**conditional $\phi$-risk**,
+
+$$
+C_\eta(\alpha) = \eta\,\phi(\alpha) + (1 - \eta)\,\phi(-\alpha).
+$$
+
+The best score at $\xvec$ minimises $C_\eta$. The <NoteLink to="bayes-decision-rule">Bayes decision rule</NoteLink>
+predicts $+1$ when $\eta > \frac12$. Setting $C'_\eta(\alpha) = \eta\phi'(\alpha) - (1 - \eta)\phi'(-\alpha) = 0$ gives
+each minimiser.
+
+- **Logistic.** $\phi'(m) = -1/(1 + e^{m})$. The condition is $\eta/(1 + e^{\alpha}) = (1 - \eta)/(1 + e^{-\alpha})$.
+  Multiplying the right side by $e^{\alpha}/e^{\alpha}$ gives $(1 - \eta)e^{\alpha}/(1 + e^{\alpha})$, so
+  $\eta = (1 - \eta)e^{\alpha}$ and $\alpha^* = \ln\dfrac{\eta}{1 - \eta}$, the log-odds.
+- **Exponential.** $-\eta e^{-\alpha} + (1 - \eta)e^{\alpha} = 0$ gives $\alpha^* = \frac12\ln\dfrac{\eta}{1 - \eta}$,
+  half the log-odds. This is the loss minimised by <NoteLink to="adaboost">AdaBoost</NoteLink>.
+- **Squared hinge.** On $[-1, 1]$ both hinges are active and
+  $-2\eta(1 - \alpha) + 2(1 - \eta)(1 + \alpha) = 0$ gives $\alpha^* = 2\eta - 1$.
+- **Hinge.** On $[-1, 1]$ both hinges are active and $C_\eta(\alpha) = \eta(1 - \alpha) + (1 - \eta)(1 + \alpha) = 1 + (1 - 2\eta)\alpha$.
+  Above 1 only the second term remains, $(1 - \eta)(1 + \alpha)$, which increases; below $-1$ only the first,
+  $\eta(1 - \alpha)$, which increases as $\alpha$ falls. The minimum is therefore at an end of $[-1, 1]$: at
+  $\alpha^* = +1$ when the slope $1 - 2\eta$ is negative ($\eta > \frac12$), and at $-1$ when $\eta < \frac12$.
+
+In every case $\alpha^*$ has the sign of $2\eta - 1$, so all four surrogates are classification-calibrated. The minimisers
+differ in what else they carry. The logistic and exponential minimisers are invertible functions of $\eta$, so the
+probability can be recovered from the score: $\eta = 1/(1 + e^{-\alpha^*})$ for the logistic loss. The hinge minimiser
+is only $\pm 1$ and discards everything but the sign, which is why a
+<NoteLink to="support-vector-machine">support vector machine</NoteLink> does not produce probabilities without extra
+calibration. Losses whose minimiser recovers $\eta$ correspond to
+<NoteLink to="proper-scoring-rule">proper scoring rules</NoteLink>.
+
+### When a convex surrogate is calibrated
+
+**Theorem** <Cite id="bartlett2006" />. A convex $\phi$ is classification-calibrated if and only if it is
+differentiable at 0 and $\phi'(0) < 0$.
+
+Sufficiency follows from the derivative of the conditional risk at zero: $C'_\eta(0) = (2\eta - 1)\phi'(0)$. With
+$\phi'(0) < 0$ and $\eta > \frac12$, this is negative, so $C_\eta$ decreases through $\alpha = 0$. By convexity every
+$\alpha \le 0$ then has $C_\eta(\alpha) \ge C_\eta(0) > \min C_\eta$, and the minimum lies at positive $\alpha$. The case
+$\eta < \frac12$ is symmetric. The perceptron loss $\max(0, -m)$ fails the condition: it has a kink at 0 with
+right derivative 0, and for any $\eta$ the score $\alpha = 0$ is a minimiser, which gives no decision at all.
+
+### From surrogate risk to 0–1 risk
+
+Calibration is a pointwise statement. Bartlett, Jordan and McAuliffe also bound the excess 0–1 risk by the excess
+surrogate risk: for every $f$,
+
+$$
+\psi\paren{R_{0\text{–}1}(f) - R^*_{0\text{–}1}} \le R_\phi(f) - R^*_\phi,
+$$
+
+where $\psi(\theta) = C_{(1+\theta)/2}(0) - \min_\alpha C_{(1+\theta)/2}(\alpha)$ for convex calibrated $\phi$
+<Cite id="bartlett2006" /> <Cite id="zhang2004" />. Driving the surrogate risk to its minimum therefore drives the 0–1
+risk to the Bayes risk. The transforms are $\psi(\theta) = \abs{\theta}$ for the hinge loss,
+$1 - \sqrt{1 - \theta^2}$ for the exponential loss, $\theta^2$ for the squared loss $(1 - m)^2$, and
+$\frac{1 + \theta}{2}\ln(1 + \theta) + \frac{1 - \theta}{2}\ln(1 - \theta)$ for the logistic loss in nats. The hinge
+loss gives the tightest link, linear rather than quadratic near zero.
+
+<SurrogateLosses />
+
+## Worked example
+
+At a point with $\eta = 0.8$ the Bayes decision is $+1$. The surrogate minimisers are
+
+| Loss | $\alpha^*$ | $\min_\alpha C_{0.8}(\alpha)$ |
+| --- | --- | --- |
+| Logistic | $\ln 4 = 1.386$ | 0.500 nats (the entropy of 0.8) |
+| Exponential | $\frac12\ln 4 = 0.693$ | $2\sqrt{0.8 \times 0.2} = 0.800$ |
+| Hinge | $1$ | $2\min(0.8, 0.2) = 0.400$ |
+| Squared hinge | $2(0.8) - 1 = 0.6$ | $4(0.8)(0.2) = 0.640$ |
+
+All four scores are positive. Applying the logistic link to the logistic minimiser returns
+$1/(1 + e^{-1.386}) = 0.8$, and applying it to twice the exponential minimiser does the same. The hinge minimiser, 1,
+would be the same for $\eta = 0.55$ or $\eta = 0.99$.
+
+## Assumptions
+
+- **Minimisation over all measurable functions.** Calibration concerns the minimiser over every possible $f$. With a
+  restricted class, such as linear scores, different surrogates can give different classifiers, and the approximation
+  error matters as much as the choice of loss.
+- **Binary labels and symmetric costs.** With unequal misclassification costs the Bayes threshold moves away from
+  $\eta = \frac12$, and the surrogate must be weighted accordingly (see
+  <NoteLink to="cost-sensitive-learning">cost-sensitive learning</NoteLink>). Multiclass calibration needs its own
+  conditions.
+
+## Pitfalls
+
+- **Outliers and the exponential loss.** The exponential loss grows exponentially for negative margins, so a few
+  mislabelled points can dominate training. The logistic and hinge losses grow only linearly.
+- **Non-convex losses.** Bounded losses such as the ramp loss resist label noise but give up convexity, and with it the
+  guarantee of finding the global minimum.
+- **Scores are not probabilities by default.** Only losses with an invertible minimiser, fitted by a flexible enough
+  model, give scores that map to probabilities. Check calibration before treating scores as probabilities; see
+  <NoteLink to="classifier-calibration">classifier calibration</NoteLink>. Reweighting losses, as in the
+  <NoteLink to="focal-loss">focal loss</NoteLink>, also changes the minimiser.

@@ -1,0 +1,150 @@
+---
+title: Double descent
+kind: concept
+summary: 'Double descent is the shape of test error against model size beyond the classical U: error falls, peaks where the model first interpolates the training data ($p \approx n$), then falls again as the minimum-norm interpolant gets smoother with more parameters.'
+tags: [learning-theory, generalisation, overparameterisation, interpolation, worked-example]
+aliases: [interpolation threshold, benign overfitting, ridgeless regression, minimum-norm interpolation, overparameterised regime]
+requires: [bias-variance-decomposition, pseudoinverse]
+related: [universal-approximation-theorem, random-fourier-features]
+references: [belkin2019, belkin2020, hastie2022, nakkiran2020, zhang2017]
+status: draft
+updated: 2026-09-27
+---
+
+import { DoubleDescent } from './DoubleDescent'
+
+<Definition>
+**Double descent** is the behaviour of test error as a function of model capacity $p$ (for example the number of
+parameters) at a fixed training-set size $n$. In the under-parameterised regime $p < n$ the error follows the
+classical U-shaped curve. It peaks at the **interpolation threshold** $p \approx n$, where the model first fits the
+training data exactly. In the over-parameterised regime $p > n$, where the learner returns the interpolating solution of
+minimum norm, the error decreases again <Cite id="belkin2019" />.
+</Definition>
+
+## Intuition
+
+Below the threshold, adding parameters trades bias for variance as the
+<NoteLink to="bias-variance-decomposition">bias–variance decomposition</NoteLink> describes. At $p = n$ there is
+exactly one set of parameters that fits the training data, and it must pass through every noisy target. With no
+freedom left, the fit bends violently to do so, and its variance is unbounded.
+
+Above the threshold there are infinitely many interpolating solutions. The learner has to pick one. Gradient descent
+started at zero, and ridge regression in the limit of a vanishing penalty, both pick the one of **minimum norm**. The
+more parameters there are, the more ways there are to fit the data, and the smaller the norm of the smallest
+interpolant becomes. A small norm means a smooth, low-variance function. Extra parameters then act as an implicit
+regulariser rather than as extra capacity to overfit. This is why very large neural networks can fit random labels
+perfectly and still generalise on real labels <Cite id="zhang2017" />.
+
+## The minimum-norm interpolant
+
+Let $\Xmat \in \reals^{n \times p}$ with $p > n$ have full row rank $n$. The system $\Xmat\wvec = \yvec$ has infinitely
+many solutions. The one with smallest $\norm{\wvec}$ solves
+
+$$
+\min_{\wvec}\ \tfrac12\norm{\wvec}^2 \quad \text{subject to} \quad \Xmat\wvec = \yvec.
+$$
+
+The Lagrangian is $\tfrac12\norm{\wvec}^2 - \lambdavec^\top(\Xmat\wvec - \yvec)$. Setting its gradient in $\wvec$ to
+zero gives $\wvec = \Xmat^\top\lambdavec$. Substituting into the constraint gives
+$\Xmat\Xmat^\top\lambdavec = \yvec$, so
+
+$$
+\hat\wvec = \Xmat^\top(\Xmat\Xmat^\top)^{-1}\yvec = \Xmat^{+}\yvec,
+$$
+
+the <NoteLink to="pseudoinverse">Moore–Penrose pseudoinverse</NoteLink> solution. Two common procedures return it:
+
+- **Ridgeless limit.** The ridge solution $\Xmat^\top(\Xmat\Xmat^\top + \lambda\eye)^{-1}\yvec$ tends to $\hat\wvec$ as
+  $\lambda \to 0^+$.
+- **Gradient descent from zero.** Every gradient of $\norm{\yvec - \Xmat\wvec}^2$ has the form
+  $-2\Xmat^\top(\yvec - \Xmat\wvec)$, which lies in the row space of $\Xmat$. Starting from $\wvec_0 = \zeros$, every
+  iterate stays in the row space. The only interpolating solution in the row space is $\Xmat^\top\lambdavec$ for some
+  $\lambdavec$, which is $\hat\wvec$.
+
+## A model where the whole curve can be computed
+
+Let each input have $D$ independent standard Gaussian features, $\xvec \sim \Gauss(\zeros, \eye_D)$, and
+$y = \xvec^\top\betavec + \varepsilon$ with noise variance $\sigma^2$. The learner uses only the first $p$ features and
+fits them by least squares, or by the minimum-norm interpolant when $p > n$. Split $\betavec$ into the part
+$\betavec_p$ on the used features and the rest. The unused features are independent of the used ones, so they add
+noise of variance $\norm{\betavec_{\text{rest}}}^2$. Write $s^2 = \norm{\betavec_{\text{rest}}}^2 + \sigma^2$ for the
+total noise. The expected test error is then <Cite id="belkin2020" />
+
+$$
+\expect[\text{test error}] =
+\begin{cases}
+s^2\paren{1 + \dfrac{p}{n - p - 1}}, & p \le n - 2, \\[2ex]
+\norm{\betavec_p}^2\paren{1 - \dfrac{n}{p}} + s^2\paren{1 + \dfrac{n}{p - n - 1}}, & p \ge n + 2.
+\end{cases}
+$$
+
+Both branches blow up as $p \to n$. For $p \le n - 2$ the only error beyond $s^2$ is variance. For $p \ge n + 2$ the first
+term is bias, which grows with the part of $\betavec_p$ the interpolant cannot see, and the second is variance, which
+falls as $p$ grows.
+
+<Derivation title="Where the two branches come from">
+The test error of a coefficient vector $\wvec$ on the used features is
+$\expect[(y - \xvec_p^\top\wvec)^2] = \norm{\betavec_p - \wvec}^2 + s^2$, because the used features are independent
+with unit variance.
+
+**Below the threshold.** Write the targets as $\yvec = \Xmat_p\betavec_p + \etavec$, where $\etavec$ collects the
+unused features and the noise and has independent entries of variance $s^2$, independent of $\Xmat_p$. Least squares
+gives $\hat\wvec - \betavec_p = (\Xmat_p^\top\Xmat_p)^{-1}\Xmat_p^\top\etavec$, so
+
+$$
+\expect\norm{\hat\wvec - \betavec_p}^2 = s^2\,\expect\trace\paren{(\Xmat_p^\top\Xmat_p)^{-1}}.
+$$
+
+$\Xmat_p^\top\Xmat_p$ is Wishart with $n$ degrees of freedom and identity scale, so its inverse has mean
+$\eye/(n - p - 1)$ and the trace has mean $p/(n - p - 1)$.
+
+**Above the threshold.** The minimum-norm interpolant is
+$\hat\wvec = \Xmat_p^{+}\yvec = \Pmat\betavec_p + \Xmat_p^{+}\etavec$, where $\Pmat = \Xmat_p^{+}\Xmat_p$ projects onto
+the $n$-dimensional row space of $\Xmat_p$. Then $\betavec_p - \hat\wvec = (\eye - \Pmat)\betavec_p - \Xmat_p^{+}\etavec$.
+The first part is orthogonal to the row space and the second lies in it, so their squared norms add. The row space is
+a uniformly random $n$-dimensional subspace of $\reals^p$, so $\expect\norm{(\eye - \Pmat)\betavec_p}^2 = (1 - n/p)\norm{\betavec_p}^2$.
+The second part has $\expect\norm{\Xmat_p^{+}\etavec}^2 = s^2\,\expect\trace\paren{(\Xmat_p\Xmat_p^\top)^{-1}} = s^2\,n/(p - n - 1)$,
+by the same Wishart identity with the roles of $n$ and $p$ swapped.
+</Derivation>
+
+## Worked example
+
+Take $D = 200$ features, $n = 40$ training points, noise $\sigma = 0.3$ and $\norm{\betavec} = 1$, so predicting zero
+has error $1 + 0.09 = 1.09$.
+
+With the signal spread evenly over all 200 features, $\norm{\betavec_p}^2 = p/200$. The formula gives a test error of
+1.40 at $p = 10$, 4.07 at $p = 30$ and 4.62 at $p = 50$: every small model is worse than predicting zero, because each
+added feature adds more variance than signal. Past the peak the error falls to 1.14 at $p = 120$ and 0.91 at $p = 200$.
+The largest interpolating model is the best of all.
+
+With a decaying signal, $\beta_j \propto 1/j$, the first few features carry most of the signal. The classical regime now
+has a proper minimum, 0.195 at $p = 11$. The error at $p = 200$ is again 0.91, far worse than the classical optimum.
+Whether the second descent beats the first depends on how the signal is spread across features.
+
+<DoubleDescent />
+
+## Where double descent appears
+
+Belkin et al. observed the curve for random Fourier feature models, two-layer networks and ensembles of trees
+<Cite id="belkin2019" />. Nakkiran et al. found it in deep networks, both against model width and against the number
+of training epochs, and showed that adding training data can move the peak and make a model worse
+<Cite id="nakkiran2020" />. Hastie et al. derived the asymptotic risk of ridgeless least squares as $p/n$ tends to a
+constant, for isotropic and correlated features <Cite id="hastie2022" />.
+
+## Assumptions
+
+- **An implicit bias towards small norm.** The second descent needs a learner that picks a simple interpolant among
+  many. Minimum-norm least squares and gradient descent from a small initialisation do. An arbitrary interpolant does
+  not generalise.
+- **Noise near the threshold.** The peak comes from fitting noise with no spare capacity. With no noise and no
+  missing features, $s^2 = 0$ and the peak disappears.
+
+## Pitfalls
+
+- **The peak is avoidable.** Ridge regression with a tuned penalty removes the spike at $p = n$
+  <Cite id="hastie2022" />. The spike is a property of unregularised interpolation, not of model size.
+- **Parameter count is the wrong axis for many models.** For deep networks, the location of the peak depends on the
+  number of samples the model can fit, which depends on architecture and training time as well as width
+  <Cite id="nakkiran2020" />.
+- **Double descent does not overturn the bias–variance decomposition.** The decomposition still holds at every $p$.
+  What fails is the assumption that variance must rise with the number of parameters.

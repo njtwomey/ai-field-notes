@@ -1,0 +1,124 @@
+---
+title: Empirical risk minimisation
+kind: concept
+summary: 'Empirical risk minimisation picks the hypothesis $\hat h \in \Hcal$ with the smallest average loss on the training sample. Its excess risk over the Bayes risk splits into an estimation error (from finite data) and an approximation error (from the choice of $\Hcal$).'
+tags: [learning-theory, generalisation, risk, worked-example]
+aliases: [ERM, empirical risk, expected risk, true risk, excess risk, approximation error, estimation error, hypothesis class]
+requires: [expectation, law-of-total-expectation]
+related: [bayes-decision-rule, linear-regression]
+references: [vapnik1998, shalevshwartz2014, mohri2018, hastie2009]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let pairs $(\xvec, y)$ be drawn from an unknown distribution $P$, and let $\ell(h(\xvec), y) \ge 0$ be the loss of
+predicting $h(\xvec)$ when the target is $y$. The **risk** of a predictor $h$ is $R(h) = \expect_{(\xvec, y) \sim P}[\ell(h(\xvec), y)]$.
+Given a sample $S = \set{(\xvec_i, y_i)}_{i=1}^n$ drawn independently from $P$, the **empirical risk** is
+$\hat R_S(h) = \frac{1}{n}\sum_{i=1}^n \ell(h(\xvec_i), y_i)$. **Empirical risk minimisation** (ERM) returns
+$\hat h = \argmin_{h \in \Hcal} \hat R_S(h)$ over a fixed **hypothesis class** $\Hcal$ <Cite id="vapnik1998" />.
+</Definition>
+
+## Risk, empirical risk and the Bayes risk
+
+The risk $R(h)$ is the average loss that $h$ incurs on new data from $P$. It is the quantity a learner wants to make
+small. It cannot be computed, because $P$ is unknown.
+
+The empirical risk $\hat R_S(h)$ is the average loss of $h$ on the sample. For a fixed $h$ chosen before the sample is
+seen, each term $\ell(h(\xvec_i), y_i)$ is an independent draw with mean $R(h)$. So $\expect_S[\hat R_S(h)] = R(h)$,
+and by the law of large numbers $\hat R_S(h) \to R(h)$ as $n \to \infty$. ERM replaces the unknown objective with this
+estimate. Least squares, maximum likelihood and the training of most neural networks are ERM with a particular loss
+and class.
+
+The **Bayes risk** $R^* = \inf_h R(h)$ is the smallest risk of any measurable predictor, whatever its form. A predictor
+that attains it is a Bayes predictor. For the squared loss $\ell(\hat y, y) = (\hat y - y)^2$ the Bayes predictor is the
+regression function $f^*(\xvec) = \expect[y \mid \xvec]$. Conditioning on $\xvec$ and adding and subtracting $f^*(\xvec)$,
+
+$$
+\expect\brack{(h(\xvec) - y)^2 \mid \xvec} = (h(\xvec) - f^*(\xvec))^2 + \var(y \mid \xvec),
+$$
+
+because the cross term $2(h(\xvec) - f^*(\xvec))\,\expect[f^*(\xvec) - y \mid \xvec]$ is zero. The
+<NoteLink to="law-of-total-expectation">law of total expectation</NoteLink> then gives
+$R(h) = \expect[(h(\xvec) - f^*(\xvec))^2] + R^*$ with $R^* = \expect[\var(y \mid \xvec)]$. No predictor can remove the
+noise term. For the 0–1 loss the Bayes predictor is the <NoteLink to="bayes-decision-rule">Bayes decision rule</NoteLink>,
+which predicts the most probable class.
+
+## The excess-risk decomposition
+
+The **excess risk** of the ERM output is $R(\hat h) - R^*$. Let $h^*_{\Hcal} = \argmin_{h \in \Hcal} R(h)$ be the best
+predictor in the class. Adding and subtracting $R(h^*_{\Hcal})$ splits the excess risk into two non-negative parts:
+
+$$
+R(\hat h) - R^* = \underbrace{R(\hat h) - R(h^*_{\Hcal})}_{\text{estimation error}} + \underbrace{R(h^*_{\Hcal}) - R^*}_{\text{approximation error}}.
+$$
+
+- The **approximation error** depends only on $\Hcal$ and $P$. It measures how well the best member of the class can
+  do. A richer class makes it smaller.
+- The **estimation error** is random, because $\hat h$ depends on the sample. It measures the cost of choosing from
+  the class with $n$ samples instead of with $P$. A richer class makes it larger for fixed $n$, because there are more
+  hypotheses whose empirical risk is small by chance.
+
+The two errors move in opposite directions as the class grows. Choosing $\Hcal$ is choosing a point on this trade-off.
+The <NoteLink to="bias-variance-decomposition">bias–variance decomposition</NoteLink> is the analogous split of the
+squared error of a fixed learning procedure.
+
+### Why the estimation error is controlled by uniform deviations
+
+Since $\hat h$ minimises the empirical risk, $\hat R_S(\hat h) \le \hat R_S(h^*_{\Hcal})$. Then
+
+$$
+\begin{aligned}
+R(\hat h) - R(h^*_{\Hcal})
+&= \brack{R(\hat h) - \hat R_S(\hat h)} + \brack{\hat R_S(\hat h) - \hat R_S(h^*_{\Hcal})} + \brack{\hat R_S(h^*_{\Hcal}) - R(h^*_{\Hcal})} \\
+&\le 2\sup_{h \in \Hcal}\abs{R(h) - \hat R_S(h)}.
+\end{aligned}
+$$
+
+The middle bracket is at most zero, and each outer bracket is at most the supremum. The estimation error is therefore
+small whenever the empirical risk is close to the risk for every hypothesis in the class at once. The first bracket
+cannot be handled by the law of large numbers alone: $\hat h$ was chosen using $S$, so $\hat R_S(\hat h)$ is a biased,
+optimistic estimate of $R(\hat h)$. Bounding the uniform deviation is the subject of
+<NoteLink to="pac-learning">PAC learning</NoteLink>, the <NoteLink to="vc-dimension">VC dimension</NoteLink> and
+<NoteLink to="rademacher-complexity">Rademacher complexity</NoteLink> <Cite id="shalevshwartz2014" />.
+
+## Worked example: polynomials for a sine
+
+Let $x \sim \Unif(0, 1)$ and $y = \sin(2\pi x) + \varepsilon$ with $\varepsilon \sim \Gauss(0, 0.2^2)$, and use the
+squared loss. The Bayes predictor is $f^*(x) = \sin(2\pi x)$ and the Bayes risk is the noise variance, $R^* = 0.04$.
+Take $\Hcal_d$ to be the polynomials of degree $d$ and fit each by least squares, which is ERM for this loss, on
+$n = 20$ points.
+
+For polynomials, $R(h) - R^* = \expect[(h(x) - f^*(x))^2]$, so the approximation error is the squared $L^2$ distance
+from $\sin(2\pi x)$ to the class. The best line is $h^*(x) = \frac{3}{\pi} - \frac{6}{\pi}x$, and its approximation
+error is $\frac12 - \frac{3}{\pi^2} = 0.196$. Averaged over 4,000 simulated samples:
+
+| Class | Approximation error | Mean estimation error |
+| --- | --- | --- |
+| Lines, $d = 1$ | 0.196 | 0.030 |
+| Cubics, $d = 3$ | 0.0044 | 0.017 |
+| Degree 9 | $1 \times 10^{-11}$ | median 0.38, mean unbounded |
+
+Lines cannot represent the sine, so their excess risk is almost all approximation error. Cubics nearly can, and their
+excess risk of about 0.021 is the smallest of the three. Degree-9 polynomials represent the sine almost exactly, but
+ten coefficients fitted to twenty noisy points swing wildly between samples. Occasionally the random inputs leave a gap
+that the polynomial fills with a huge excursion, so the mean estimation error is dominated by rare samples.
+
+## Assumptions
+
+- **Independent, identically distributed data.** $\expect_S[\hat R_S(h)] = R(h)$ needs the training pairs to be
+  independent draws from the same $P$ that generates test data. Dependence (time series, grouped records) and shift
+  between training and deployment break the link between empirical and true risk.
+- **The loss measures what matters.** ERM minimises the loss it is given. When that loss is a convenient
+  <NoteLink to="surrogate-losses">surrogate</NoteLink> for the real objective, a separate argument is needed to show
+  that minimising it also minimises the real risk.
+
+## Pitfalls
+
+- **Training error is optimistic.** $\hat R_S(\hat h)$ underestimates $R(\hat h)$, and the gap grows with the richness
+  of the class. Estimate the risk on held-out data or by <NoteLink to="cross-validation">cross-validation</NoteLink>.
+- **Minimising over a huge class overfits.** With enough capacity, ERM drives the empirical risk to zero on any labels,
+  including random ones. <NoteLink to="regularisation">Regularisation</NoteLink> and structural risk minimisation add a
+  complexity penalty to the empirical risk to control the estimation error <Cite id="vapnik1998" />.
+- **ERM for the 0–1 loss is computationally hard.** Minimising the number of training mistakes over halfspaces is
+  NP-hard in general. Practical methods minimise a convex surrogate instead <Cite id="shalevshwartz2014" />.

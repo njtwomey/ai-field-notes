@@ -1,0 +1,132 @@
+---
+title: Categorical encoding
+kind: technique
+summary: 'Categorical encoding turns a feature with discrete levels into numbers. One-hot encoding gives one indicator per level; target encoding uses a smoothed mean of the target per level, which leaks the label unless computed out of fold; hashing maps levels into fixed columns.'
+tags: [data-preparation, preprocessing, feature-engineering, data-leakage, worked-example]
+aliases: [one-hot encoding, dummy variables, dummy coding, dummy variable trap, target encoding, mean encoding, likelihood encoding, feature hashing, hashing trick, ordinal encoding, high-cardinality categorical features]
+requires: [linear-regression, bayes-theorem]
+related: [beta-distribution, word-embeddings, xgboost-lightgbm-catboost]
+references: [micci2001, prokhorenkova2018, weinberger2009, hastie2009, kaufman2012]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **categorical feature** takes values in a finite set of levels $\set{1, \dots, K}$ with no numerical meaning, such as a
+country or a product identifier. **Categorical encoding** maps each level to a numeric vector. **One-hot encoding** maps
+level $c$ to the indicator vector $\evec_c \in \set{0, 1}^K$. **Target encoding** maps level $c$ to an estimate of
+$\expect[y \mid \text{level } c]$ computed from training labels. **Feature hashing** maps level $c$ to a signed
+indicator in $m \ll K$ columns chosen by a hash function.
+</Definition>
+
+## Problem
+
+Most models need numeric inputs. Coding the levels as integers $1, \dots, K$ imposes an order and equal spacing that the
+categories do not have: a linear model would treat "France = 7" as seven times "Albania = 1". The encoding must let
+the model give each level its own effect, without creating so many columns that the model cannot be fitted or so much
+freedom that it memorises rare levels.
+
+## Mechanism
+
+### One-hot encoding and the dummy-variable trap
+
+One-hot encoding creates $K$ indicator columns, exactly one of which is 1 in each row. A linear model then fits a
+separate coefficient per level. With an intercept, the $K$ columns sum to the all-ones intercept column:
+$\sum_{c=1}^K \indicator[x = c] = 1$ in every row. The design matrix is rank-deficient, $\Xmat^\top\Xmat$ is singular, and
+the coefficients are not identifiable: adding a constant to every level coefficient and subtracting it from the
+intercept gives the same predictions. The standard fixes are to drop one level, whose effect becomes the baseline
+absorbed by the intercept (**dummy** or reference coding), or to keep all $K$ columns with a penalty such as ridge,
+which picks a unique solution <Cite id="hastie2009" />.
+
+One-hot encoding works well for a few dozen levels. With thousands of levels it produces a very wide, very sparse design
+in which most columns have few nonzero entries and their coefficients are poorly estimated.
+
+### Target encoding
+
+Target encoding replaces the level by a single number: the mean target of the training rows at that level. For level
+$c$ with $n_c$ training rows and target sum $S_c$, the raw encoding is $\bar y_c = S_c/n_c$. Rare levels give noisy means,
+so the standard version shrinks towards the global mean $\bar y$ <Cite id="micci2001" />:
+
+$$
+\operatorname{enc}(c) = \frac{S_c + m\bar y}{n_c + m}.
+$$
+
+For a binary target this is the posterior mean of the level's positive rate under a
+$\operatorname{Beta}(m\bar y,\, m(1 - \bar y))$ prior: the prior contributes $m$ pseudo-observations at the global rate,
+and <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink> with a binomial likelihood adds $S_c$ successes in $n_c$ trials.
+The strength $m$ sets how many rows a level needs before its own mean dominates.
+
+### Why in-sample target encoding leaks
+
+If row $i$'s encoding is computed from a sample that includes row $i$, the encoding contains $y_i$ itself with weight
+$1/(n_c + m)$. For a level seen once, with no smoothing, the encoding equals the label exactly. A flexible model learns
+to read the label off the encoding, reaches near-perfect training accuracy, and fails on new rows whose encodings do not
+contain their labels. This is target leakage (see <NoteLink to="data-leakage">data leakage</NoteLink>)
+<Cite id="kaufman2012" />.
+
+Leaving row $i$ out does not fix it. The leave-one-out encoding $(S_c - y_i)/(n_c - 1)$ is a decreasing function of
+$y_i$ within each level, so within a level it sorts the rows by their labels, in reverse.
+
+The fixes compute each row's encoding from labels that the row cannot influence:
+
+- **Out-of-fold encoding.** Split the training data into $K$ folds and encode the rows of each fold using statistics
+  from the other folds only. Test rows use statistics from the full training set.
+- **Ordered target statistics.** Draw a random permutation of the rows and encode each row from the rows before it in
+  the permutation. CatBoost does this, with several permutations <Cite id="prokhorenkova2018" />.
+
+Either way, the encoder must be fitted inside each cross-validation training fold, like any other data-dependent step.
+
+### Feature hashing
+
+Feature hashing avoids storing a vocabulary. A hash function $h$ maps each level to one of $m$ columns and a second hash
+$\xi$ maps it to a sign $\pm 1$. A sparse input with values $x_c$ becomes $\phi_j(\xvec) = \sum_{c:\, h(c) = j}\xi(c)\,x_c$.
+Different levels that land in the same column collide <Cite id="weinberger2009" />.
+
+The signs make collisions harmless on average. For two inputs $\xvec$ and $\xvec'$,
+
+$$
+\inner{\phi(\xvec)}{\phi(\xvec')} = \sum_{c,\,c'}x_c x'_{c'}\,\xi(c)\xi(c')\,\indicator[h(c) = h(c')].
+$$
+
+For $c \ne c'$ the signs are independent with mean zero, so $\expect[\xi(c)\xi(c')] = 0$. For $c = c'$,
+$\xi(c)^2 = 1$ and the indicator is 1. Taking expectations over the hash functions,
+$\expect\inner{\phi(\xvec)}{\phi(\xvec')} = \inner{\xvec}{\xvec'}$: inner products, and hence linear models, are
+preserved in expectation. The variance falls as $m$ grows.
+
+## Worked example
+
+Let the global positive rate be $\bar y = 0.2$ and the smoothing strength $m = 10$.
+
+- **Level A**, 3 rows with labels $(1, 1, 0)$. The raw mean is $0.667$. The smoothed encoding is
+  $(2 + 10 \times 0.2)/(3 + 10) = 4/13 = 0.308$.
+- **Level B**, 1 row with label 1. The raw encoding is 1.0, which is the label. The smoothed encoding is
+  $(1 + 2)/11 = 0.273$, which still contains the label with weight $1/11$.
+- **Leave-one-out on level A.** The two positive rows get $(2 - 1)/2 = 0.5$ and the negative row gets
+  $(2 - 0)/2 = 1.0$. A threshold at 0.75 separates the labels perfectly, in the wrong direction.
+
+**Hashing collisions.** With $K = 100{,}000$ levels hashed into $m = 2^{20} \approx 1.05$ million columns, a given
+level shares its column with at least one other level with probability $1 - (1 - 1/m)^{K - 1} \approx 1 - e^{-K/m} = 9.1\%$.
+
+## Cost
+
+One-hot encoding adds $K$ sparse columns and needs the vocabulary at prediction time. Target encoding adds one dense
+column per target (per class for multiclass) and needs $K$ stored numbers; out-of-fold encoding multiplies the fitting
+cost by the number of folds. Hashing needs no vocabulary and a fixed $m$ columns, at the cost of collisions and of
+features that cannot be interpreted.
+
+## Trade-offs
+
+- **Levels unseen in training** get an all-zero one-hot vector, the global mean under target encoding, or a random
+  column under hashing. Grouping rare levels into an "other" level before encoding makes this behaviour explicit.
+- **Tree models** can split on target-encoded columns efficiently, but a single number per level loses interactions
+  between the level and other features that one-hot columns would keep.
+- **Neural networks** usually learn an embedding vector per level, in the same way as
+  <NoteLink to="word-embeddings">word embeddings</NoteLink>. Rare levels still need a shared fallback.
+
+## Pitfalls
+
+- **Encoding before splitting.** Fitting a target encoder on the full dataset leaks test labels into training features.
+  Cross-validation then overstates accuracy, sometimes dramatically for high-cardinality features.
+- **Treating identifiers as categories.** A level that is unique to one row, such as a customer ID, carries no
+  information that transfers to new rows. Target encoding it leaks the label; one-hot encoding it memorises the row.
+- **Integer codes in linear models.** Integer codes impose an order and equal spacing that the categories do not have.

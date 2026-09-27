@@ -1,0 +1,138 @@
+---
+title: Effective degrees of freedom
+kind: concept
+summary: 'The effective degrees of freedom of a fit are $\frac{1}{\sigma^2}\sum_i \cov(\hat y_i, y_i)$. For a linear smoother $\hat\yvec = \Smat\yvec$ they equal $\trace\Smat$: $p$ for least squares, $\sum_j d_j^2/(d_j^2 + \lambda)$ for ridge, $n/k$ for $k$-nearest neighbours.'
+tags: [regularisation, model-complexity, model-selection, linear-models, worked-example]
+aliases: [degrees of freedom of a fit, model degrees of freedom, trace of the hat matrix, effective number of parameters, optimism of the training error, Mallows Cp, Cp statistic]
+requires: [ridge-regression, variance-and-covariance]
+related: [smoothing-splines, local-regression, gam-smoothing-parameter-selection]
+references: [efron1986, hastie2009, zou2007, mallows1973]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $y_i = f(\xvec_i) + \varepsilon_i$ with independent noise of variance $\sigma^2$ and fixed inputs, and let
+$\hat y_i$ be the fitted value at $\xvec_i$. The **effective degrees of freedom** of the fitting procedure are
+
+$$
+\operatorname{df} = \frac{1}{\sigma^2}\sum_{i=1}^n \cov(\hat y_i, y_i).
+$$
+
+For a **linear smoother**, whose fitted values are $\hat\yvec = \Smat\yvec$ for a matrix $\Smat$ that does not depend
+on $\yvec$, this equals $\trace\Smat$ <Cite id="efron1986" /> <Cite id="hastie2009" />.
+</Definition>
+
+## Why count this way
+
+Ordinary least squares with $p$ coefficients uses $p$ degrees of freedom. Penalised, smoothed and averaged fits do not
+have a meaningful parameter count: a ridge fit has $p$ coefficients but all are shrunk, and a
+<NoteLink to="smoothing-splines">smoothing spline</NoteLink> has a coefficient per data point. The definition above
+measures complexity by behaviour instead. A flexible fit follows its own targets closely, so each $\hat y_i$ covaries
+strongly with $y_i$. A rigid fit barely responds to any single target, so the covariances are small. The sum of
+covariances, in units of the noise variance, counts how many targets the fit is effectively reproducing.
+
+## Linear smoothers: the trace
+
+If $\hat\yvec = \Smat\yvec$ then $\hat y_i = \sum_j S_{ij}y_j$. The targets are independent with variance $\sigma^2$,
+so only the $j = i$ term covaries with $y_i$:
+
+$$
+\cov(\hat y_i, y_i) = \sum_j S_{ij}\cov(y_j, y_i) = S_{ii}\sigma^2.
+$$
+
+Summing over $i$ and dividing by $\sigma^2$ gives $\operatorname{df} = \sum_i S_{ii} = \trace\Smat$. The diagonal
+entry $S_{ii}$ is the weight a point's own target receives in its fitted value.
+
+- **Least squares** with a full-rank $n \times p$ design $\Xmat$ has
+  $\Smat = \Hmat = \Xmat(\Xmat^\top\Xmat)^{-1}\Xmat^\top$. By the cyclic property of the trace,
+  $\trace\Hmat = \trace\paren{(\Xmat^\top\Xmat)^{-1}\Xmat^\top\Xmat} = \trace\eye_p = p$. The definition recovers the
+  parameter count.
+- **$k$-nearest-neighbour regression** at a training point averages the targets of its $k$ nearest training points,
+  which include the point itself. So $S_{ii} = 1/k$ and $\operatorname{df} = n/k$.
+- **Ridge regression** is derived below.
+
+## Ridge regression through the SVD
+
+The ridge fit is $\hat\yvec = \Xmat(\Xmat^\top\Xmat + \lambda\eye)^{-1}\Xmat^\top\yvec$. Write the
+<NoteLink to="singular-value-decomposition">singular value decomposition</NoteLink> $\Xmat = \Umat\Dmat\Vmat^\top$, with
+$\Umat \in \reals^{n \times p}$ and $\Vmat \in \reals^{p \times p}$ having orthonormal columns and
+$\Dmat = \diag(d_1, \dots, d_p)$. Since $\Vmat^\top\Vmat = \Vmat\Vmat^\top = \eye$,
+
+$$
+\Xmat^\top\Xmat + \lambda\eye = \Vmat(\Dmat^2 + \lambda\eye)\Vmat^\top,
+\qquad
+(\Xmat^\top\Xmat + \lambda\eye)^{-1} = \Vmat(\Dmat^2 + \lambda\eye)^{-1}\Vmat^\top.
+$$
+
+Substituting,
+
+$$
+\Smat_\lambda = \Umat\Dmat\Vmat^\top\Vmat(\Dmat^2 + \lambda\eye)^{-1}\Vmat^\top\Vmat\Dmat\Umat^\top
+= \Umat\,\diag\paren{\frac{d_j^2}{d_j^2 + \lambda}}\Umat^\top.
+$$
+
+The trace of $\Umat\Amat\Umat^\top$ with $\Umat^\top\Umat = \eye$ is $\trace\Amat$, so
+
+$$
+\operatorname{df}(\lambda) = \sum_{j=1}^p \frac{d_j^2}{d_j^2 + \lambda}.
+$$
+
+Each direction of the data contributes between 0 and 1. A direction with a large singular value, where the data
+determine the coefficient well, counts almost fully. A direction with a small singular value counts little. The total
+falls smoothly from $p$ at $\lambda = 0$ to 0 as $\lambda \to \infty$.
+
+## Degrees of freedom and the optimism of training error
+
+The training error of a fit is lower than its error on new targets at the same inputs. The gap is set by the degrees
+of freedom. Let $y_i^{\text{new}}$ be a fresh target at $\xvec_i$, independent of the training targets. Then
+
+$$
+\expect\brack{\frac1n\sum_i (y_i^{\text{new}} - \hat y_i)^2} - \expect\brack{\frac1n\sum_i (y_i - \hat y_i)^2}
+= \frac{2}{n}\sum_i\cov(\hat y_i, y_i) = \frac{2\sigma^2}{n}\operatorname{df}.
+$$
+
+To see this, expand both squares around $f_i = f(\xvec_i)$. For the new target,
+$\expect(y_i^{\text{new}} - \hat y_i)^2 = \sigma^2 + \expect(f_i - \hat y_i)^2$, because the new noise is independent of
+$\hat y_i$. For the training target,
+$\expect(y_i - \hat y_i)^2 = \sigma^2 + \expect(f_i - \hat y_i)^2 - 2\expect[\varepsilon_i(\hat y_i - f_i)]$, and
+$\expect[\varepsilon_i(\hat y_i - f_i)] = \cov(y_i, \hat y_i)$ because $f_i$ is fixed. The difference is
+$2\cov(\hat y_i, y_i)$ per point <Cite id="efron1986" />.
+
+This gives **Mallows' $C_p$**, an estimate of the in-sample prediction error <Cite id="mallows1973" />:
+
+$$
+C_p = \frac1n\sum_i (y_i - \hat y_i)^2 + \frac{2\hat\sigma^2}{n}\operatorname{df}.
+$$
+
+For Gaussian noise with known variance this is equivalent to <NoteLink to="information-criteria">AIC</NoteLink>.
+Generalised cross-validation uses $\trace\Smat$ in the same role
+(see <NoteLink to="gam-smoothing-parameter-selection">GAM smoothing parameter selection</NoteLink>).
+
+## Worked example
+
+**Ridge.** Let $\Xmat$ have singular values $(3, 1, 0.3)$ and take $\lambda = 1$. The three directions contribute
+$9/10 = 0.900$, $1/2 = 0.500$ and $0.09/1.09 = 0.083$, so $\operatorname{df} = 1.483$. The fit has three coefficients
+but behaves like one with about one and a half. The weakest direction is almost entirely suppressed.
+
+**$C_p$.** Suppose $n = 50$, the training mean squared error is $0.80$, $\operatorname{df} = 6$ and $\hat\sigma^2 = 1$.
+Then $C_p = 0.80 + 2 \times 6/50 = 1.04$. A rival fit with training error $0.70$ and $\operatorname{df} = 12$ has
+$C_p = 0.70 + 0.48 = 1.18$ and is predicted to do worse on new targets.
+
+**$k$-NN.** With $n = 100$ points and $k = 5$, $\operatorname{df} = 20$. Halving $k$ doubles the degrees of freedom.
+
+## Assumptions
+
+- **Fixed inputs, independent homoscedastic noise.** The covariance definition and the optimism identity treat
+  $\xvec_i$ as fixed and the $\varepsilon_i$ as independent with a common variance.
+- **Linearity for the trace formula.** $\operatorname{df} = \trace\Smat$ needs $\Smat$ not to depend on $\yvec$. For
+  adaptive procedures the covariance definition still applies, but the answer can differ from any count. For the lasso,
+  the number of nonzero coefficients is an unbiased estimate of the degrees of freedom <Cite id="zou2007" />.
+
+## Pitfalls
+
+- **Selection adds degrees of freedom.** Choosing the best 5 of 100 features and then fitting least squares uses more
+  than 5 degrees of freedom, because the choice was made using $\yvec$. Counting only the final coefficients makes
+  $C_p$ and AIC too optimistic.
+- **$\sigma^2$ must come from elsewhere.** Estimating $\sigma^2$ from the same flexible fit understates it. Use a
+  low-bias model or replicate measurements.

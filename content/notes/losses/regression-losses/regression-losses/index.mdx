@@ -1,0 +1,132 @@
+---
+title: Regression losses
+kind: concept
+summary: 'Each regression loss targets a statistic of $y$ given $\xvec$: squared loss the mean, absolute loss the median, the pinball loss $\rho_\tau$ the $\tau$-quantile. Huber and log-cosh losses are quadratic near zero and linear in the tails, bounding the pull of outliers.'
+tags: [loss-functions, regression, robust-statistics, worked-example]
+aliases: [regression loss functions, squared loss, absolute loss, Huber loss function, smooth L1 loss, check loss, influence function, M-estimation, M-estimator]
+requires: [expectation, empirical-risk-minimisation]
+related: [robust-and-distributional-regression-losses, probabilistic-forecasting, crps-and-interval-scores, laplace-distribution, gradient-boosting]
+references: [huber1964, koenker1978, hampel1974, hastie2009]
+status: draft
+updated: 2026-09-27
+---
+
+import { LossesAndInfluence } from './LossesAndInfluence'
+
+<Definition>
+A **regression loss** $\ell(y, \hat y) = \rho(y - \hat y)$ scores a real-valued prediction $\hat y$ of a target $y$
+through the residual $r = y - \hat y$. The common choices are the squared loss $\frac12 r^2$, the absolute loss
+$\abs{r}$, the **pinball** (quantile) loss $\rho_\tau(r) = r\,(\tau - \indicator[r < 0])$ for $\tau \in (0, 1)$, the
+**Huber** loss
+
+$$
+\rho_\delta(r) = \begin{cases} \frac12 r^2, & \abs{r} \le \delta, \\ \delta\paren{\abs{r} - \frac12\delta}, & \abs{r} > \delta, \end{cases}
+$$
+
+and the **log-cosh** loss $\log\cosh r$. The minimiser of the expected loss over constant predictions is a statistic
+of the distribution of $y$: the mean, the median, the $\tau$-quantile, or a robust compromise.
+</Definition>
+
+## What each loss estimates
+
+Minimising the expected loss $\expect[\rho(y - c)]$ over a constant $c$ picks a summary of the distribution of $y$.
+Applied conditionally on $\xvec$, the same calculation says what the best predictor $\hat f(\xvec)$ estimates. Let $y$
+have distribution function $F$ and set the derivative of the expected loss with respect to $c$ to zero.
+
+**Squared loss.** $\frac{d}{dc}\expect[\frac12(y - c)^2] = -\expect[y - c] = 0$ gives $c = \expect[y]$. The optimal
+predictor is the conditional mean $\expect[y \mid \xvec]$.
+
+**Absolute loss.** The derivative of $\abs{y - c}$ in $c$ is $-1$ when $y > c$ and $+1$ when $y < c$. So
+$\frac{d}{dc}\expect\abs{y - c} = -\prob(y > c) + \prob(y < c) = 2F(c) - 1$, which is zero at $F(c) = \frac12$: the
+**median**.
+
+**Pinball loss.** $\rho_\tau(y - c)$ has slope $-\tau$ in $c$ when $y > c$ and $1 - \tau$ when $y < c$. Then
+
+$$
+\frac{d}{dc}\expect[\rho_\tau(y - c)] = -\tau\,\prob(y > c) + (1 - \tau)\,\prob(y < c) = F(c) - \tau,
+$$
+
+which is zero at $c = F^{-1}(\tau)$, the **$\tau$-quantile**. Under-predictions cost $\tau$ per unit and
+over-predictions cost $1 - \tau$, so the optimum sits where a fraction $\tau$ of the mass lies below it. The absolute
+loss is the case $\tau = \frac12$, up to a factor of 2. Minimising the pinball loss over linear functions is
+**quantile regression** <Cite id="koenker1978" />.
+
+**Huber loss.** The derivative is the clipped residual $\psi_\delta(r) = \max(-\delta, \min(\delta, r))$, so the optimum
+solves $\expect[\psi_\delta(y - c)] = 0$. Residuals within $\delta$ count in full, as for the mean; larger residuals count
+as $\pm\delta$, as for the median. As $\delta \to \infty$ the optimum is the mean, and as $\delta \to 0$ it is the median.
+Huber derived this loss as the minimax choice for estimating a location when a fraction of the data comes from an
+arbitrary contaminating distribution <Cite id="huber1964" />.
+
+**Log-cosh loss.** Its derivative is $\tanh r$. For small $r$, $\log\cosh r \approx \frac12 r^2$; for large $\abs{r}$,
+$\log\cosh r \approx \abs{r} - \ln 2$. It behaves like a Huber loss with $\delta \approx 1$ but is smooth everywhere,
+which suits Newton-type optimisers.
+
+### Losses as likelihoods
+
+Minimising a loss is maximum likelihood under the noise density proportional to $e^{-\rho(r)}$. The squared loss
+$\frac{1}{2\sigma^2}r^2$ is the negative log density of a Gaussian, the absolute loss $\abs{r}/b$ that of a
+<NoteLink to="laplace-distribution">Laplace distribution</NoteLink>, and the pinball loss that of an asymmetric Laplace.
+Heavy-tailed noise calls for a loss that grows slowly in the tails.
+
+## Influence and robustness
+
+An **M-estimator** $\hat\theta$ of location solves $\sum_i\psi(y_i - \hat\theta) = 0$, where $\psi = \rho'$. Add a single
+observation at $y$ with weight $\epsilon$. Differentiating the estimating equation
+$\epsilon\,\psi(y - \theta_\epsilon) + (1 - \epsilon)\expect[\psi(Y - \theta_\epsilon)] = 0$ at $\epsilon = 0$ gives
+
+$$
+\left.\frac{d\theta_\epsilon}{d\epsilon}\right|_{\epsilon = 0} = \frac{\psi(y - \theta)}{\expect[\psi'(Y - \theta)]}.
+$$
+
+This is the **influence function**: the effect of a small amount of contamination at $y$ on the estimate
+<Cite id="hampel1974" />. It is proportional to $\psi$. For the squared loss $\psi(r) = r$ is unbounded, so one wild
+observation can move the mean arbitrarily far. For the absolute, pinball, Huber and log-cosh losses $\psi$ is bounded,
+and no single observation can move the estimate by more than a fixed amount.
+
+## Worked example
+
+Take the five values $1, 2, 3, 6, 18$, where 18 is an outlier, and find the constant that minimises each loss.
+
+- **Squared**: the mean, $30/5 = 6$. The outlier alone contributes $18/5 = 3.6$.
+- **Absolute**: the median, 3.
+- **Huber, $\delta = 2$**: 3.5. At $c = 3.5$ the residuals are $-2.5, -1.5, -0.5, 2.5, 14.5$, which clip to
+  $-2, -1.5, -0.5, 2, 2$ and sum to zero.
+- **Huber, $\delta = 5$**: 4.25. The residuals $-3.25, -2.25, -1.25, 1.75, 13.75$ clip to
+  $-3.25, -2.25, -1.25, 1.75, 5$, which sum to zero.
+- **Log-cosh**: 3.19, close to the median because $\tanh$ saturates within about 2 units.
+- **Pinball, $\tau = 0.7$**: 6. With $n\tau = 3.5$, the minimiser is the 4th smallest value.
+
+Replacing 18 by 1,800 moves the mean to 362.4 and leaves the median, both Huber estimates, the log-cosh estimate and the
+0.7-quantile unchanged, because the outlier's clipped pull is the same.
+
+<LossesAndInfluence />
+
+## Choosing a loss
+
+- **The prediction should estimate a mean** (for totals, expected costs, anything summed over many cases): squared
+  loss. The sum of conditional means is the mean of the sum; medians and quantiles do not add.
+- **Typical values matter and outliers are errors**: absolute or Huber loss. Choose $\delta$ on the scale of the
+  good residuals, for example a small multiple of a robust estimate of their standard deviation.
+- **A quantile or an interval is needed**: pinball losses at the required levels, as in
+  <NoteLink to="probabilistic-forecasting">probabilistic forecasting</NoteLink>.
+- **Targets that are positive and skewed**, such as counts or claim sizes: deviance losses matched to the variance
+  function; see <NoteLink to="robust-and-distributional-regression-losses">log-cosh, squared log error and Tweedie deviance</NoteLink>.
+
+The loss used for training need not be the metric used for evaluation, but the predictor it produces estimates the
+statistic of its own loss. Training with squared loss and evaluating by mean absolute error rewards the mean when the
+median is wanted. See <NoteLink to="mse-rmse-and-mae">MSE, RMSE and MAE</NoteLink> for the metrics.
+
+## Assumptions
+
+- **A scale for $\delta$.** The Huber and log-cosh losses are not scale invariant. Their thresholds are in the units of
+  $y$, so the residual scale must be known or estimated, or the targets standardised.
+
+## Pitfalls
+
+- **Non-smooth losses and gradient methods.** The absolute and pinball losses have a kink at zero and constant
+  gradients elsewhere, so plain gradient descent does not settle at the minimum without a decaying step size. Linear
+  programming, iteratively reweighted least squares or the smooth Huber and log-cosh approximations avoid this.
+- **Crossing quantiles.** Fitting separate models for several $\tau$ can produce a 0.9-quantile below the 0.5-quantile
+  at some inputs. Fit them jointly or sort the predictions.
+- **Robust losses do not fix leverage.** Bounded $\psi$ limits the influence of outlying targets, not of outlying
+  inputs. A point with an extreme $\xvec$ can still dominate a linear fit.

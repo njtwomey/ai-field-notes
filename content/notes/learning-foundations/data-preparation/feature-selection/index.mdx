@@ -1,0 +1,120 @@
+---
+title: Feature selection
+kind: technique
+summary: 'Feature selection keeps a subset of the input features. Filters score features one at a time, wrappers search subsets by model performance, and embedded methods such as the lasso select while fitting. Selection must happen inside cross-validation.'
+tags: [data-preparation, model-selection, regularisation, sparsity, worked-example]
+aliases: [variable selection, feature subset selection, filter methods, wrapper methods, embedded methods, recursive feature elimination, RFE, forward selection, backward elimination, stepwise selection, stability selection, selection bias]
+requires: [cross-validation]
+related: [mutual-information, pearson-correlation, random-forest, least-angle-regression, automatic-relevance-determination]
+references: [guyon2003, guyon2002, ambroise2002, meinshausen2010, tibshirani1996, hastie2009]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Feature selection** chooses a subset $\Scal \subseteq \set{1, \dots, p}$ of the input features and fits the model on
+those features only. **Filter** methods rank features by a statistic computed independently of the final model.
+**Wrapper** methods search over subsets, scoring each by the validated performance of the model trained on it.
+**Embedded** methods select features as part of fitting, for example through an $L^1$ penalty <Cite id="guyon2003" />.
+</Definition>
+
+## Problem
+
+Irrelevant features add variance: each one gives the model another way to fit noise. Redundant features waste
+computation and make coefficients unstable. A smaller feature set can also be cheaper to measure and easier to explain.
+Choosing the subset is itself a form of fitting, however, and it overfits in the same ways.
+
+## Mechanism
+
+### Filters
+
+A filter scores each feature by its relationship with the target: the absolute
+<NoteLink to="pearson-correlation">Pearson correlation</NoteLink>, a $t$ or $\chi^2$ statistic, or the
+<NoteLink to="mutual-information">mutual information</NoteLink>. The top $k$ features, or those above a threshold, are
+kept. Filters are fast, costing one pass per feature, and do not depend on the model.
+
+They judge each feature alone, which misses two cases <Cite id="guyon2003" />. A feature that is useless alone can be
+decisive together with another: if $y = x_1 \oplus x_2$ for independent fair bits, each feature has zero correlation
+and zero mutual information with $y$, yet together they determine it. Conversely, ten copies of the same strong feature
+all score highly, and a filter keeps all ten.
+
+### Wrappers
+
+A wrapper treats the model as a black box and searches for the subset with the best validated score. There are
+$2^p$ subsets, so the search is greedy:
+
+- **Forward selection** starts from no features and adds, at each step, the one that improves the score most.
+- **Backward elimination** starts from all features and removes the least useful one at each step.
+- **Recursive feature elimination** (RFE) fits the model, removes the features with the smallest weights or
+  importances, and refits, until the desired number remain <Cite id="guyon2002" />.
+
+Wrappers account for interactions and redundancy as the model sees them, but they cost many model fits and, because they
+optimise a validation score over many candidate subsets, they overfit that score.
+
+### Embedded methods
+
+Some models select features while they fit. The <NoteLink to="lasso">lasso</NoteLink> sets coefficients exactly to zero
+<Cite id="tibshirani1996" />, and its penalty strength controls how many features survive. Tree ensembles rank features
+by how much they reduce the loss (see <NoteLink to="random-forest">random forest</NoteLink>), and
+<NoteLink to="automatic-relevance-determination">automatic relevance determination</NoteLink> learns a length-scale per
+feature that can switch a feature off. Embedded methods cost about one fit, but inherit the model's biases: the lasso
+picks one feature arbitrarily from a group of correlated ones.
+
+### Selection bias and where selection belongs
+
+Selection must be part of the procedure being validated. If features are chosen by their relationship with $y$ on the
+whole dataset and the model is then cross-validated on those features, the test folds helped choose the features. With
+many candidate features and few samples, pure noise then looks predictive <Cite id="ambroise2002" />.
+
+The size of the effect follows from how large correlations with noise can be. For a noise feature independent of $y$,
+the sample correlation over $n$ points is approximately $\Gauss(0, 1/n)$. The largest of $p$ such values is about
+$\sqrt{2\ln p}$ standard deviations, so the best noise feature has correlation about $\sqrt{2\ln p/n}$ with $y$. With
+$p = 5{,}000$ and $n = 50$ that is 0.58. The top-ranked features are the ones whose noise happens to line up with the
+labels in this sample, including the test folds.
+
+### Stability
+
+The selected subset often changes a lot when the data are resampled, especially with correlated features. **Stability
+selection** runs a selection method, such as the lasso, on many random halves of the data and keeps the features
+selected in at least a fraction $\pi_{\text{thr}}$ of runs. If $q$ features are selected per run among $p$, the expected
+number of falsely selected noise features is at most $q^2/((2\pi_{\text{thr}} - 1)p)$, under an exchangeability
+assumption <Cite id="meinshausen2010" />.
+
+## Worked example: selecting on pure noise
+
+Take $n = 50$ samples, 25 in each of two classes, and $p = 5{,}000$ features of independent Gaussian noise. No feature
+carries any information, so the best possible accuracy is 50%.
+
+- **Wrong.** Select the 20 features most correlated with the labels using all 50 samples, then estimate the accuracy of
+  logistic regression on those 20 features by 5-fold cross-validation. Averaged over 50 simulated datasets, the
+  cross-validated accuracy is 95.8%.
+- **Right.** Repeat the selection inside each training fold, using only that fold's 40 samples, and test on the held-out
+  10. The cross-validated accuracy is 49.7%.
+
+The largest absolute correlation between a noise feature and the labels averaged 0.51 across the simulations, in line
+with the approximation $\sqrt{2\ln p/n} = 0.58$.
+
+## Cost
+
+A filter costs $O(np)$. Forward selection to $k$ features costs about $kp$ model fits, each cross-validated. RFE costs
+one fit per elimination round. The lasso costs about one fit per penalty value, with the whole path available cheaply
+through <NoteLink to="least-angle-regression">least-angle regression</NoteLink>. Stability selection multiplies the cost
+of its base method by the number of subsamples, typically 100.
+
+## Trade-offs
+
+- **Selection versus shrinkage.** For prediction, shrinking all coefficients (ridge) often matches or beats selecting a
+  subset, because hard selection is a discontinuous, high-variance decision <Cite id="hastie2009" />. Selection pays off
+  when measuring features is costly or when a short list is needed for interpretation.
+- **Relevance is not a unique answer.** With correlated features, several different subsets predict equally well.
+  The selected set says what suffices for this model, not which variables cause the outcome.
+
+## Pitfalls
+
+- **Selecting outside the cross-validation loop.** As the worked example shows, this can turn noise into a
+  near-perfect classifier. Put the selection step inside each training fold, and use nested cross-validation if the
+  number of selected features is itself tuned. See <NoteLink to="data-leakage">data leakage</NoteLink>.
+- **Reporting inference after selection.** $p$-values and confidence intervals computed for the selected features as if
+  they had been chosen in advance are too optimistic.
+- **Stepwise selection by $p$-values.** Adding and removing features by significance tests performs many tests on the
+  same data and is unstable. Prefer penalised methods or validated wrappers.

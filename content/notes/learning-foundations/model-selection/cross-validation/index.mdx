@@ -1,0 +1,139 @@
+---
+title: Cross-validation
+kind: technique
+summary: 'Cross-validation estimates prediction error by fitting on $k - 1$ of $k$ folds and testing on the one left out, in turn. For linear smoothers the leave-one-out residuals are $(y_i - \hat y_i)/(1 - S_{ii})$ without refitting. Nested cross-validation keeps selection out of the estimate.'
+tags: [model-selection, model-evaluation, resampling, generalisation, worked-example]
+aliases: [k-fold cross-validation, K-fold CV, CV, leave-one-out cross-validation, LOOCV, nested cross-validation, one-standard-error rule, 1-SE rule, PRESS statistic, stratified cross-validation, grouped cross-validation, holdout validation]
+requires: [empirical-risk-minimisation, linear-regression]
+related: [stacking, gam-smoothing-parameter-selection, bagging]
+references: [stone1974, allen1974, kohavi1995, varma2006, cawley2010, bengio2004, hastie2009, breiman1984]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Split the indices $1, \dots, n$ into $K$ disjoint **folds** of roughly equal size, and let $\kappa(i)$ be the fold that
+contains point $i$. Let $\hat f^{-k}$ be the model fitted to all data except fold $k$. The **$K$-fold cross-validation**
+estimate of prediction error is
+
+$$
+\operatorname{CV} = \frac{1}{n}\sum_{i=1}^n \ell\paren{y_i, \hat f^{-\kappa(i)}(\xvec_i)}.
+$$
+
+Each point is predicted exactly once, by a model that did not see it. **Leave-one-out** (LOO) cross-validation is the
+case $K = n$ <Cite id="stone1974" />.
+</Definition>
+
+## Problem
+
+The training error of a fitted model underestimates its error on new data, and the gap grows with the model's
+flexibility (see <NoteLink to="empirical-risk-minimisation">empirical risk minimisation</NoteLink>). A single held-out
+test set gives an honest estimate but wastes data: the model is trained on less, and the estimate rests on one small
+sample. Cross-validation uses every point for both roles, never at the same time.
+
+It serves two purposes that must be kept apart:
+
+- **Model selection**: choosing a hyperparameter, such as a penalty $\lambda$ or the number of neighbours $k$, by
+  minimising the CV error over a set of candidates.
+- **Model assessment**: estimating the error of the final chosen model.
+
+## Mechanism
+
+1. Shuffle the data and split it into $K$ folds. For classification, **stratify**: give each fold the same class
+   proportions. When records come in groups (several rows per patient, per user, per session), split by group so
+   that no group appears on both sides.
+2. For each $k = 1, \dots, K$, fit the whole pipeline on the other $K - 1$ folds and predict fold $k$. The pipeline
+   includes every data-dependent step: scaling, imputation, encoding and feature selection.
+3. Average the losses over all $n$ predictions.
+4. To select a hyperparameter, compute the CV error for each candidate value on the same folds and pick the best.
+   Refit the chosen model on all the data.
+
+$K = 5$ or $K = 10$ is standard. Kohavi's experiments favoured stratified 10-fold cross-validation over both LOO and
+the bootstrap for comparing classifiers <Cite id="kohavi1995" />. Time-ordered data need folds that respect time;
+see <NoteLink to="time-series-cross-validation">time-series cross-validation</NoteLink>.
+
+### Leave-one-out without refitting
+
+For a **linear smoother**, where fitted values are $\hat\yvec = \Smat\yvec$ and $\Smat$ does not depend on $\yvec$, all
+$n$ leave-one-out residuals come from one fit. This covers least squares, ridge regression and smoothing splines, which
+all minimise a penalised squared error $\sum_j (y_j - f(\xvec_j))^2 + \lambda J(f)$.
+
+Let $\hat f^{-i}$ minimise that objective without point $i$, and write $\hat y_i^{-i} = \hat f^{-i}(\xvec_i)$ for its
+prediction at $\xvec_i$. Now fit the full objective to modified data in which $y_i$ is replaced by $\hat y_i^{-i}$.
+At $f = \hat f^{-i}$ the added term $(\hat y_i^{-i} - f(\xvec_i))^2$ is zero, its smallest possible value, and the other
+terms are already minimised. So $\hat f^{-i}$ is also the fit to the modified data. Its fitted value at $\xvec_i$ is
+therefore both $\hat y_i^{-i}$ and, by linearity, $\sum_{j \ne i}S_{ij}y_j + S_{ii}\hat y_i^{-i}$. Hence
+
+$$
+\hat y_i^{-i} = \hat y_i - S_{ii}y_i + S_{ii}\hat y_i^{-i}
+\quad\Longrightarrow\quad
+y_i - \hat y_i^{-i} = \frac{y_i - \hat y_i}{1 - S_{ii}}.
+$$
+
+The LOO residual is the ordinary residual inflated by $1/(1 - S_{ii})$. A point with high leverage $S_{ii}$ pulls the
+fit towards itself, so its ordinary residual understates how badly it would be predicted from the others. The sum of
+squared LOO residuals is the **PRESS** statistic <Cite id="allen1974" />. **Generalised cross-validation** replaces
+each $S_{ii}$ by the average $\trace\Smat/n$, which gives $\operatorname{GCV} = \frac1n\sum_i(y_i - \hat y_i)^2 / (1 - \trace\Smat/n)^2$
+<Cite id="hastie2009" />. See <NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink> for
+$\trace\Smat$.
+
+## Worked example
+
+Fit a straight line to $x = (0, 1, 2, 3, 4)$ and $y = (1, 3, 2, 5, 4)$. Least squares gives $\hat y = 1.4 + 0.8x$, with
+residuals $(-0.4, 0.8, -1.0, 1.2, -0.6)$. For a line, the leverages are
+$S_{ii} = \frac1n + (x_i - \bar x)^2/\sum_j(x_j - \bar x)^2 = 0.2 + (x_i - 2)^2/10$, which is
+$(0.6, 0.3, 0.2, 0.3, 0.6)$.
+
+Dividing each residual by $1 - S_{ii}$ gives the LOO residuals
+
+$$
+(-1.00,\ 1.14,\ -1.25,\ 1.71,\ -1.50).
+$$
+
+Refitting five times, each time without one point, gives the same five numbers. The LOO mean squared error is 1.81,
+against a training mean squared error of 0.72. The end points, with leverage 0.6, have their residuals multiplied by
+2.5. GCV uses the average leverage $2/5$ and gives $0.72/0.6^2 = 2.0$.
+
+## Cost
+
+$K$-fold cross-validation costs $K$ fits per candidate model, and $K \times$ (number of candidates) fits for a
+search. LOO costs $n$ fits in general, but one fit for linear smoothers. Nested cross-validation with $K_{\text{out}}$
+outer and $K_{\text{in}}$ inner folds costs $K_{\text{out}} \times K_{\text{in}}$ fits per candidate.
+
+## Trade-offs
+
+**Bias.** Each fold's model is trained on $n(K - 1)/K$ points, not $n$. If the learning curve is still falling at
+$n$, the CV error overestimates the error of the model trained on all the data. The bias is largest for small $K$
+and nearly zero for LOO.
+
+**Variance.** LOO models are trained on almost identical data, so their errors are strongly correlated, and the LOO
+estimate can have high variance. Larger folds decorrelate the fold models. $K = 5$ or $10$ is a compromise. Repeating
+$K$-fold CV with different random splits and averaging reduces the part of the variance that comes from the split.
+
+**Standard errors are approximate.** The fold errors share training data, so they are not independent. There is no
+unbiased estimator of the variance of the $K$-fold estimate that is valid for all distributions
+<Cite id="bengio2004" />. The usual standard error, the standard deviation of the $K$ fold errors divided by
+$\sqrt K$, is a rough guide that tends to be too small.
+
+**The one-standard-error rule.** The CV curve over a hyperparameter is noisy near its minimum. The rule picks the
+simplest model whose CV error is within one standard error of the minimum <Cite id="breiman1984" />
+<Cite id="hastie2009" />. It trades a small, statistically invisible increase in estimated error for a more
+regularised model.
+
+**Nested cross-validation for honest assessment.** The minimum CV error over many candidates is optimistically
+biased, because the winner was chosen partly for its luck on these folds. Reporting it as the final model's error
+repeats the mistake that CV was meant to fix. **Nested** cross-validation puts the whole selection procedure, including
+its inner CV loop, inside each outer training fold, and scores the selected model on the outer test fold
+<Cite id="varma2006" />. With many hyperparameters or few samples, the optimism of the non-nested estimate can be
+larger than the differences between the methods being compared <Cite id="cawley2010" />.
+
+## Pitfalls
+
+- **Preprocessing outside the loop.** Fitting a scaler, an imputer, a target encoder or a feature selector on all the
+  data before splitting lets information from each test fold into its training. Feature selection on the full data
+  can turn pure noise into a classifier with 96% CV accuracy; see
+  <NoteLink to="feature-selection">feature selection</NoteLink> and <NoteLink to="data-leakage">data leakage</NoteLink>.
+- **Dependent records split across folds.** Rows from the same patient, user or time period in both training and
+  test folds make the estimate reflect memorisation. Split by group or by time.
+- **Comparing models on different splits.** Use the same folds for every candidate, so that differences reflect the
+  models, not the splits.

@@ -1,0 +1,139 @@
+---
+title: Rademacher complexity
+kind: concept
+summary: 'The Rademacher complexity of a function class is its expected best correlation with random signs $\sigma_i = \pm 1$ on a sample. For losses in $[0, 1]$ it bounds the generalisation gap by $2\mathfrak{R}_m + \sqrt{\ln(1/\delta)/2m}$; for linear functions with $\norm{\wvec} \le B$, $\norm{\xvec} \le X$ it is at most $BX/\sqrt{m}$.'
+tags: [learning-theory, generalisation, capacity, concentration, worked-example]
+aliases: [Rademacher average, empirical Rademacher complexity, symmetrisation, contraction lemma, Massart's lemma, margin bound]
+requires: [pac-learning]
+related: [vc-dimension, support-vector-machine, kernel-svm]
+references: [bartlett2002, shalevshwartz2014, mohri2018, zhang2017]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $\Fcal$ be a class of real-valued functions on $\Zcal$ and $S = (z_1, \dots, z_m)$ a sample. Let
+$\sigma_1, \dots, \sigma_m$ be independent **Rademacher** variables, each $+1$ or $-1$ with probability $\frac12$. The
+**empirical Rademacher complexity** of $\Fcal$ on $S$ is
+
+$$
+\hat{\mathfrak{R}}_S(\Fcal) = \expect_{\sigmavec}\brack{\sup_{f \in \Fcal}\frac{1}{m}\sum_{i=1}^m \sigma_i f(z_i)},
+$$
+
+and the **Rademacher complexity** is its average over samples of size $m$ from a distribution $P$,
+$\mathfrak{R}_m(\Fcal) = \expect_S[\hat{\mathfrak{R}}_S(\Fcal)]$ <Cite id="bartlett2002" />.
+</Definition>
+
+## Intuition
+
+Assign each training point a random label $\sigma_i$ by a fair coin. The sum $\frac1m\sum_i\sigma_i f(z_i)$ is large
+when $f$ agrees with those random labels. The supremum picks the member of the class that fits the noise best, and
+the expectation averages over the coin flips. A class that can match any pattern of signs has complexity near its
+maximum; a class that cannot fit noise has complexity near zero.
+
+This is the same question that makes the training error unreliable. If a class can fit random labels, then fitting
+the real labels is no evidence that it has found structure. Deep networks can fit random labels on standard image
+datasets, so their Rademacher complexity over the full parameter space is large <Cite id="zhang2017" />.
+
+Unlike the <NoteLink to="vc-dimension">VC dimension</NoteLink>, Rademacher complexity applies to real-valued
+functions, depends on the data distribution, and can be estimated from the sample itself.
+
+## The generalisation bound
+
+Let $\Fcal$ be a class of loss functions $f(z) = \ell(h(\xvec), y)$ taking values in $[0, 1]$, one for each hypothesis
+$h$. Write $\expect f$ for the risk and $\hat\expect_S f = \frac1m\sum_i f(z_i)$ for the empirical risk. Then, with
+probability at least $1 - \delta$, every $f \in \Fcal$ satisfies <Cite id="bartlett2002" />
+
+$$
+\expect f \le \hat\expect_S f + 2\mathfrak{R}_m(\Fcal) + \sqrt{\frac{\ln(1/\delta)}{2m}}.
+$$
+
+The proof has two steps.
+
+**Step 1: concentration of the worst gap.** Let $\Phi(S) = \sup_{f \in \Fcal}(\expect f - \hat\expect_S f)$ be the
+largest gap over the class. Replacing one point $z_i$ changes each $\hat\expect_S f$ by at most $1/m$, so it changes
+$\Phi$ by at most $1/m$. McDiarmid's bounded-differences inequality then gives, with probability at least $1 - \delta$,
+$\Phi(S) \le \expect_S[\Phi(S)] + \sqrt{\ln(1/\delta)/(2m)}$.
+
+**Step 2: symmetrisation.** Draw an independent ghost sample $S' = (z'_1, \dots, z'_m)$. Since
+$\expect f = \expect_{S'}[\hat\expect_{S'} f]$, and the supremum of an expectation is at most the expectation of the
+supremum,
+
+$$
+\expect_S[\Phi(S)] \le \expect_{S, S'}\brack{\sup_{f}\frac1m\sum_{i=1}^m\paren{f(z'_i) - f(z_i)}}.
+$$
+
+Swapping $z_i$ with $z'_i$ leaves the joint distribution unchanged and flips the sign of the $i$-th term. So
+multiplying each term by an independent random sign $\sigma_i$ does not change the expectation:
+
+$$
+\expect_S[\Phi(S)] \le \expect_{S, S', \sigmavec}\brack{\sup_{f}\frac1m\sum_{i=1}^m\sigma_i\paren{f(z'_i) - f(z_i)}}
+\le 2\mathfrak{R}_m(\Fcal).
+$$
+
+The last step splits the supremum of a difference into two suprema, each of which is a Rademacher complexity because
+$-\sigma_i$ has the same distribution as $\sigma_i$. Combining the two steps gives the bound. Applying McDiarmid once
+more to $\hat{\mathfrak{R}}_S$ gives a version that can be computed from the data: $2\hat{\mathfrak{R}}_S(\Fcal) + 3\sqrt{\ln(2/\delta)/(2m)}$
+in place of the last two terms <Cite id="mohri2018" />.
+
+## Linear functions of bounded norm
+
+Let $\Fcal = \set{\xvec \mapsto \wvec^\top\xvec : \norm{\wvec} \le B}$ and let every sample point satisfy
+$\norm{\xvec_i} \le X$. For fixed signs, the supremum over the ball is attained at $\wvec$ parallel to
+$\sum_i\sigma_i\xvec_i$ (Cauchy–Schwarz):
+
+$$
+\sup_{\norm{\wvec} \le B}\frac1m\wvec^\top\sum_i\sigma_i\xvec_i = \frac{B}{m}\norm{\sum_i\sigma_i\xvec_i}.
+$$
+
+By Jensen's inequality, $\expect\norm{\vvec} \le \sqrt{\expect\norm{\vvec}^2}$. Expanding the square, the cross terms
+have $\expect[\sigma_i\sigma_j] = 0$ for $i \ne j$, so
+
+$$
+\hat{\mathfrak{R}}_S(\Fcal) \le \frac{B}{m}\sqrt{\sum_{i=1}^m\norm{\xvec_i}^2} \le \frac{BX}{\sqrt m}.
+$$
+
+The bound does not depend on the dimension of $\xvec$. It holds in an infinite-dimensional feature space, which is why
+norm constraints, not parameter counts, control the capacity of kernel methods such as the
+<NoteLink to="kernel-svm">kernel SVM</NoteLink>.
+
+### Two tools for other classes
+
+- **Contraction.** If $\phi$ is $L$-Lipschitz, composing every function in the class with $\phi$ multiplies the
+  Rademacher complexity by at most $L$ (Talagrand's lemma). A Lipschitz loss therefore inherits the bound of the
+  predictors it scores <Cite id="mohri2018" />.
+- **Finite classes.** Massart's lemma gives $\hat{\mathfrak{R}}_S(\Fcal) \le r\sqrt{2\ln\abs{\Fcal}}/m$, where
+  $r = \max_f\sqrt{\sum_i f(z_i)^2}$. Combined with the Sauer–Shelah lemma it gives
+  $\mathfrak{R}_m \le \sqrt{2d\ln(em/d)/m}$ for a binary class of VC dimension $d$, recovering the VC bound up to
+  constants <Cite id="shalevshwartz2014" />.
+
+## Worked example
+
+**Checking the linear bound.** Draw $m = 100$ points uniformly on the unit sphere in $\reals^5$, so $X = 1$, and take
+$B = 1$. The bound gives $\hat{\mathfrak{R}}_S \le 1/\sqrt{100} = 0.1$. A Monte Carlo estimate over 20,000 draws of the
+signs gives $\expect\norm{\sum_i\sigma_i\xvec_i}/m = 0.0956$. The only slack is Jensen's inequality.
+
+**A margin bound.** Classify with $\sgn(\wvec^\top\xvec)$, $\norm{\wvec} \le 1$, $\norm{\xvec} \le 1$. Use the ramp
+loss with margin $\gamma$: 1 for margin $y\wvec^\top\xvec \le 0$, 0 for margin at least $\gamma$, linear in between. It
+is at least the 0–1 loss and $1/\gamma$-Lipschitz in the margin. Contraction and the linear bound give, for
+$\gamma = 0.1$, $m = 10{,}000$ and $\delta = 0.05$, a gap of
+
+$$
+\frac{2}{\gamma\sqrt m} + \sqrt{\frac{\ln 20}{2m}} = 0.200 + 0.012 = 0.212
+$$
+
+between the test error and the fraction of training points with margin below $\gamma$. The bound depends on the
+margin and the sample size, not on the dimension.
+
+## Assumptions
+
+- **Independent, identically distributed data**, as in all uniform-convergence bounds.
+- **Bounded losses.** McDiarmid's inequality needs each point to have bounded influence. Unbounded losses such as the
+  squared error on unbounded targets need truncation or other tools.
+
+## Pitfalls
+
+- **The class must be fixed in advance.** Bounding the complexity of the norm ball of the final weights, chosen after
+  training, is not valid without a union bound over a family of balls.
+- **The bound is on the whole class.** It holds uniformly, so it cannot exploit the particular solution an algorithm
+  finds. Algorithm-dependent analyses (stability, compression, PAC-Bayes) address that.
