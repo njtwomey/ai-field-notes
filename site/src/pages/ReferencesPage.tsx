@@ -98,7 +98,7 @@ export function ReferencesPage() {
   )
 
   return (
-    <PageContainer>
+    <PageContainer wide>
       <h1 className="mb-2 font-prose text-3xl font-bold">References</h1>
       <p className="mb-6 text-sm text-muted-foreground">
         {ENTRIES.length} sources cited across the notes. Search by title or author.
@@ -161,7 +161,7 @@ export function ReferencesPage() {
             {shown.map((e) => (
               <TableRow key={e.key} id={e.key} className={cn('align-top', hash === `#${e.key}` && 'bg-muted')}>
                 <TableCell className="text-muted-foreground tabular-nums">{e.ref.year ?? '—'}</TableCell>
-                <TableCell className="max-w-md whitespace-normal">
+                <TableCell className="max-w-xl whitespace-normal">
                   {e.ref.url ? (
                     <a href={e.ref.url} target="_blank" rel="noreferrer" className="font-medium hover:underline">
                       {e.ref.title}

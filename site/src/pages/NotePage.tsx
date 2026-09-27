@@ -83,7 +83,9 @@ export function NotePage({ tab }: { tab: Tab }) {
         <main className="px-4 pb-8 lg:px-8">
           <div className="grid grid-cols-1 gap-10 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[240px_minmax(0,1fr)_300px]">
             <aside className="hidden pt-8 lg:block">
-              <div className="sticky top-30 max-h-[calc(100svh-8.5rem)] overflow-y-auto overscroll-contain pr-2 pb-6">{left}</div>
+              <div className="sticky top-30 max-h-[calc(100svh-8.5rem)] overflow-y-auto overscroll-contain pr-2 pb-6">
+                {left}
+              </div>
             </aside>
             <div ref={contentRef} className="min-w-0 space-y-6">
               <NoteBar

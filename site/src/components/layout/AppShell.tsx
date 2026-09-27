@@ -1,3 +1,4 @@
+import { cn } from '@/lib/utils'
 import { useEffect } from 'react'
 import { Outlet, useLocation } from 'react-router'
 import { ContentErrors } from './ContentErrors'
@@ -22,6 +23,6 @@ export function AppShell() {
 }
 
 /** Standard page container for index pages (home, browse, tags, references). */
-export function PageContainer({ children }: { children: React.ReactNode }) {
-  return <main className="mx-auto max-w-5xl px-4 py-10 lg:px-6">{children}</main>
+export function PageContainer({ children, wide = false }: { children: React.ReactNode; wide?: boolean }) {
+  return <main className={cn('mx-auto px-4 py-10 lg:px-6', wide ? 'max-w-screen-2xl' : 'max-w-5xl')}>{children}</main>
 }
