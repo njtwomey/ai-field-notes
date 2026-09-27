@@ -1,0 +1,95 @@
+---
+title: Stop words
+kind: technique
+summary: 'Stop words are frequent function words, such as "the", "of" and "to", removed before counting because they occur in nearly every document. Lists are fixed or derived from document frequency. Removal shrinks indexes and vectors, and breaks negation and phrase queries.'
+tags: [nlp, preprocessing, text-representation, information-retrieval, worked-example]
+aliases: [stop word, stopword, stopwords, stop list, stop-word removal, stop-word list, function words]
+requires: [bag-of-words]
+partOf: [text-representation-pipeline]
+related: [tf-idf, tf-idf-weighting-variants, text-normalisation, word-n-grams, text-classification]
+references: [luhn1958, manning2008, bird2009, jurafsky2025]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **stop list** is a set $\Scal$ of words excluded from a text representation. Stop-word removal deletes every token
+$w \in \Scal$ before a <NoteLink to="bag-of-words">bag of words</NoteLink> or index is built. $\Scal$ is either a fixed
+list of function words (articles, prepositions, pronouns, auxiliaries, conjunctions) or the terms whose document
+frequency in a collection exceeds a threshold <Cite id="manning2008" />.
+</Definition>
+
+## Problem
+
+Word frequencies are highly skewed. A few words account for a large share of all tokens, and those words occur in
+almost every document. Luhn observed that the most frequent words of a text say little about its content, and proposed
+an upper frequency cut-off above which words are ignored when scoring sentences for an abstract
+<Cite id="luhn1958" />.
+
+In _Emma_ (161,975 lower-cased alphabetic tokens from the NLTK corpus sample <Cite id="bird2009" />), the 20 most
+frequent words are "to", "the", "and", "of", "i", "a", "it", "her", "was", "she", "in", "not", "you", "be", "that",
+"he", "had", "but", "as" and "for". All 20 are on NLTK's English stop list, and the 198 words of that list cover 54.8%
+of all tokens. A raw count vector for any chapter is dominated by these words, so two chapters look similar because
+both use "the".
+
+## Mechanism
+
+### A fixed list
+
+A fixed list is written once for a language. NLTK's English list, derived from the Snowball project, holds 198 entries
+in version 3.10, including contraction pieces such as "don", "t" and "isn't" <Cite id="bird2009" />. Of those 198,
+131 occur in _Emma_. Lists differ between toolkits in length and in borderline words. A fixed list
+is independent of the collection, so it keeps words that are frequent only in one domain.
+
+### A list derived from the collection
+
+Sort terms by document frequency $\mathrm{df}_t$, the number of documents that contain $t$, and put every term with
+$\mathrm{df}_t \ge \theta N$ on the list, where $N$ is the number of documents and $\theta$ a threshold
+<Cite id="manning2008" />. Splitting _Emma_ into its 55 chapters as documents:
+
+| Threshold $\theta$ | Terms on the list | Terms not on NLTK's list |
+| --- | --- | --- |
+| 1.0 (in every chapter) | 57 | could, emma, every, might, mr, much, must, never, one, would |
+| 0.9 | 112 | 39 terms, including father, good, miss, mrs, woodhouse |
+| 0.8 | 174 | 85 terms, including hartfield, knightley, happy, friend |
+
+The derived list finds domain-specific frequent words, such as "could" and "must", that a fixed list misses. It also
+catches "emma", the heroine's name, which is in every chapter. For a search in this collection "emma" is useless, as a
+stop word should be. For a classifier that separates _Emma_ from other novels, it is the best single feature. A
+term's usefulness depends on the task, not on its frequency alone.
+
+### Soft down-weighting instead of removal
+
+The inverse document frequency $\log(N / \mathrm{df}_t)$ of a term in every document is $\log 1 = 0$. A
+<NoteLink to="tf-idf">TF-IDF</NoteLink> weighting therefore already gives zero weight to the 57
+terms in every chapter of _Emma_, and a small weight to terms in most chapters, without a list. Modern web search
+engines mostly keep stop words in the index and let weighting and phrase matching decide their effect
+<Cite id="manning2008" />.
+
+## When removal hurts
+
+- **Negation.** "not" is on most stop lists. "The film is not good" and "The film is good" differ only in "not", so
+  after removal a sentiment classifier sees the same features for both. Keep negations, or attach them to the next
+  word ("not_good") before removal.
+- **Phrase queries.** Every word of "to be or not to be" is on NLTK's list, so removal leaves an empty query. Names
+  such as "The Who" and titles such as "Let It Be" lose most of their words.
+- **Word n-grams.** Removing stop words before forming <NoteLink to="word-n-grams">bigrams</NoteLink> creates bigrams
+  that never occurred: "king of France" yields the bigram "king france".
+- **Authorship and style.** Function-word frequencies are among the strongest signals of an author's style, because
+  they are frequent and independent of topic. A stop list deletes exactly those features.
+- **Neural models.** Transformer models read "not", "of" and "the" as syntax. Removing them changes the input
+  distribution the model was trained on and usually hurts.
+
+## Cost
+
+A stop list is a hash-set lookup per token. Its benefit is size: removing 55% of the tokens of _Emma_ removes the same
+share of postings from an inverted index, and removes the densest columns from a document–term matrix.
+
+## Trade-offs
+
+- **Smaller and faster against less expressive.** Removal shrinks indexes and vectors and removes noise from counts.
+  It cannot be undone at query time, and it breaks phrases and negation.
+- **Fixed against derived.** A fixed list is predictable and portable; a derived list adapts to the collection and
+  may remove content words that happen to be frequent.
+- **Removal against weighting.** IDF achieves most of the effect of a stop list on similarity while keeping every word
+  available for phrases.

@@ -1,0 +1,149 @@
+---
+title: Bag of words
+kind: concept
+summary: 'A bag of words represents a document by the count of each vocabulary term in it, ignoring order: $\xvec_d \in \naturals^V$. Stacked, the vectors form the sparse document–term matrix. The counts are sufficient for a unigram model, and cannot tell "dog bites man" from "man bites dog".'
+tags: [nlp, text-representation, feature-engineering, information-retrieval, worked-example]
+aliases: [bag-of-words, BoW, bag of words model, document-term matrix, document–term matrix, term frequency vector, count vector, binary bag of words, vector space model]
+requires: [one-hot-encoding-of-words]
+partOf: [text-representation-pipeline]
+related: [tf-idf, word-n-grams, naive-bayes, multinomial-distribution, pairwise-distances-and-cosine-similarity, latent-semantic-analysis, latent-dirichlet-allocation, text-classification]
+references: [salton1975, manning2008, jurafsky2025, bird2009]
+status: draft
+updated: 2026-09-27
+---
+
+import { PipelineExplorer } from '../_shared/PipelineExplorer'
+
+<Definition>
+Fix a vocabulary of $V$ terms. The **bag of words** of a document $d$ is the vector $\xvec_d \in \naturals^V$ whose
+coordinate $t$ is the term frequency $\mathrm{tf}_{t,d}$, the number of times term $t$ occurs in $d$. A collection of
+$N$ documents becomes the $N \times V$ **document–term matrix** $\Xmat$ with rows $\xvec_d^{\tr}$. The representation
+keeps which terms occur and how often, and discards their order <Cite id="manning2008" />.
+</Definition>
+
+## Intuition
+
+Cut a document into words, put the words in a bag and shake it. The bag still says what the document is about: a
+document with "goal", "match" and "referee" is about football whatever the order. It no longer says who did what to
+whom.
+
+The bag of words of a document is the sum of the <NoteLink to="one-hot-encoding-of-words">one-hot vectors</NoteLink>
+of its tokens. Summation is commutative, which is exactly why order is lost.
+
+## Variants
+
+The counts are the raw form. Four transformations are common, and each suits different models.
+
+| Variant | Coordinate $t$ | Use |
+| --- | --- | --- |
+| Count | $\mathrm{tf}_{t,d}$ | multinomial <NoteLink to="naive-bayes">naive Bayes</NoteLink>, topic models |
+| Binary | $\indicator[\mathrm{tf}_{t,d} > 0]$ | Bernoulli naive Bayes, set similarity, short texts |
+| Frequency | $\mathrm{tf}_{t,d} / L_d$, with $L_d$ the document length | comparing documents of different lengths |
+| Unit length | $\xvec_d / \norm{\xvec_d}$ | cosine similarity, linear classifiers |
+
+Reweighting each term by how rare it is across documents gives <NoteLink to="tf-idf">TF-IDF</NoteLink>,
+and its many variants are in <NoteLink to="tf-idf-weighting-variants">TF-IDF weighting variants</NoteLink>.
+
+## The document–term matrix is sparse
+
+A document uses a tiny fraction of the vocabulary, so almost every entry of $\Xmat$ is zero. Split _Emma_ from the NLTK
+corpus sample <Cite id="bird2009" /> into its 55 chapters, lower-case it and keep alphabetic tokens. The vocabulary has
+7,079 terms, and a chapter of 2,943 tokens on average uses 796 distinct terms, so 11.2% of the entries are non-zero.
+For a web collection with millions of terms, the fraction falls below 0.01%. Sparse matrix formats store only the
+non-zero entries, and the cost of a dot product between two documents is proportional to their numbers of distinct
+terms, not to $V$.
+
+## Worked example
+
+Take five documents:
+
+1. "the cat sat on the mat"
+2. "the dog sat on the log"
+3. "the cat chased the dog"
+4. "a dog and a cat played"
+5. "the bird sang"
+
+The vocabulary, in order of first occurrence, is the $V = 13$ terms "the", "cat", "sat", "on", "mat", "dog", "log",
+"chased", "a", "and", "played", "bird", "sang". The document–term matrix is
+
+$$
+\Xmat = \begin{pmatrix}
+2 & 1 & 1 & 1 & 1 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 \\
+2 & 0 & 1 & 1 & 0 & 1 & 1 & 0 & 0 & 0 & 0 & 0 & 0 \\
+2 & 1 & 0 & 0 & 0 & 1 & 0 & 1 & 0 & 0 & 0 & 0 & 0 \\
+0 & 1 & 0 & 0 & 0 & 1 & 0 & 0 & 2 & 1 & 1 & 0 & 0 \\
+1 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 1 & 1
+\end{pmatrix}.
+$$
+
+It has 22 non-zero entries out of 65, or 34%; even five six-word documents leave two-thirds of the matrix empty.
+
+**Similarity.** The cosine similarity of documents 1 and 2 is $\xvec_1^{\tr}\xvec_2 / (\norm{\xvec_1}\norm{\xvec_2})$.
+They share "the" (2 and 2), "sat" and "on", so $\xvec_1^{\tr}\xvec_2 = 4 + 1 + 1 = 6$, and both have
+$\norm{\xvec} = \sqrt{4 + 1 + 1 + 1 + 1} = \sqrt 8$. The cosine is $6 / 8 = 0.75$. With binary vectors, "the" counts
+once, and the cosine drops to $3 / 5 = 0.6$. Documents 1 and 4 are both about a cat and share only "cat"; their count
+cosine is $1 / (\sqrt 8 \cdot \sqrt 8) = 0.125$. The word "the" makes documents 1 and 2 look similar and contributes
+nothing to meaning; <NoteLink to="stop-words">stop-word removal</NoteLink> and IDF weighting address that.
+
+<PipelineExplorer />
+
+## What order information is lost
+
+### How many texts share a bag
+
+A document of length $L$ with term frequencies $\mathrm{tf}_1, \dots, \mathrm{tf}_V$ is one of
+
+$$
+\binom{L}{\mathrm{tf}_1, \dots, \mathrm{tf}_V} = \frac{L!}{\prod_{t} \mathrm{tf}_t!}
+$$
+
+word sequences with the same bag: choose which $\mathrm{tf}_1$ of the $L$ positions hold term 1, then which of the
+remaining positions hold term 2, and so on. Document 1 above has $L = 6$ and "the" twice, so $6!/2! = 360$ orderings
+share its vector. Picking one of them uniformly takes $\log_2 360 = 8.49$ bits, which is how much information the bag
+discards about this document. Most of the 360 are not English, but several are: "the mat sat on the cat" has the same
+vector.
+
+### Why the loss is harmless for a unigram model
+
+Suppose a document is generated by drawing each token independently from a distribution $\thetavec$ over the
+vocabulary, the unigram model. The probability of a particular sequence $w_1, \dots, w_L$ is
+
+$$
+p(w_1, \dots, w_L \mid \thetavec) = \prod_{i=1}^{L} \theta_{w_i} = \prod_{t=1}^{V} \theta_t^{\mathrm{tf}_t}.
+$$
+
+The right-hand side depends on the sequence only through the counts. By the factorisation theorem, the bag of words is
+a sufficient statistic for $\thetavec$: no estimate of $\thetavec$ can be improved by knowing the order. The count of
+the bag itself follows a <NoteLink to="multinomial-distribution">multinomial distribution</NoteLink>, whose coefficient
+is the number of orderings above. Multinomial <NoteLink to="naive-bayes">naive Bayes</NoteLink> and topic models such as
+<NoteLink to="latent-dirichlet-allocation">latent Dirichlet allocation</NoteLink> assume this model, so for them the bag
+loses nothing. Whenever the true process depends on order, it loses what order carried: negation scope, who did what to
+whom, and phrases. <NoteLink to="word-n-grams">Word n-grams</NoteLink> restore local order by adding sequences of words
+as extra terms.
+
+## The vector space model
+
+Salton's vector space model treats documents and queries as vectors in the same $V$-dimensional space and ranks
+documents by the cosine of the angle between each document and the query <Cite id="salton1975" />. The bag of words
+supplies the vectors. The cosine divides by both lengths, so a long document does not score higher only because it has
+more words (see <NoteLink to="pairwise-distances-and-cosine-similarity">cosine similarity</NoteLink>). The same vectors
+feed linear classifiers for <NoteLink to="text-classification">text classification</NoteLink> and, after a truncated
+SVD, <NoteLink to="latent-semantic-analysis">latent semantic analysis</NoteLink>.
+
+## Assumptions
+
+- **Order carries no meaning.** Only the unigram distribution matters.
+- **Terms are independent dimensions.** Synonyms such as "car" and "automobile" are orthogonal, and a query with one
+  never matches a document with the other. Latent semantic analysis and
+  <NoteLink to="distributional-semantics">distributional representations</NoteLink> relax this.
+- **Tokens are well defined.** The vector depends on the tokeniser, <NoteLink to="text-normalisation">normalisation</NoteLink>,
+  <NoteLink to="stemming">stemming</NoteLink> and the stop list, all fixed before counting.
+
+## Pitfalls
+
+- **Frequent function words dominate raw counts.** Cosine similarity on raw counts measures shared "the" and "of".
+  Weight or remove them.
+- **Vocabulary fitted on test data leaks.** Build the vocabulary and any document frequencies from training documents
+  only.
+- **Length effects.** Longer documents have larger counts and more distinct terms. Normalise before comparing.
+- **Dense storage.** Never materialise $\Xmat$ densely for a real collection.

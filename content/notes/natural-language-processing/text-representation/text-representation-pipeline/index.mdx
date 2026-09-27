@@ -1,0 +1,148 @@
+---
+title: Text representation pipeline
+kind: overview
+summary: 'Text becomes vectors in stages: normalise, tokenise, drop stop words, reduce words to stems or lemmas, extract features (words, n-grams, character n-grams, shingles), then weight or embed them. Each stage trades information for generality, from sparse counts to dense embeddings.'
+tags: [nlp, text-representation, feature-engineering, overview]
+aliases: [text preprocessing pipeline, text vectorisation, text vectorization, text featurisation, text representations, classical text representation, NLP preprocessing]
+related: [word-embeddings, masked-language-modelling, latent-semantic-analysis, latent-dirichlet-allocation, locality-sensitive-hashing, n-gram-language-model, text-classification]
+references: [manning2008, jurafsky2025, turney2010, salton1975, sparckjones1972, porter1980, broder1997, levy2015]
+status: draft
+updated: 2026-09-27
+---
+
+import { PipelineExplorer } from '../_shared/PipelineExplorer'
+
+<Definition>
+A text representation is a function from strings to vectors that a model can compare or learn from. Classical
+representations are built by a fixed pipeline: normalisation, tokenisation, filtering, morphological reduction,
+feature extraction and weighting, each step a hand-chosen rule. Distributed representations replace the last stages
+with vectors learned from co-occurrence or prediction <Cite id="manning2008" /> <Cite id="jurafsky2025" />.
+</Definition>
+
+## Components
+
+The component notes list themselves in the right-hand column. In pipeline order:
+
+1. **String to tokens.** <NoteLink to="text-normalisation">Text normalisation</NoteLink> (Unicode forms, case folding,
+   accents, numbers, contractions) and <NoteLink to="tokenisation">tokenisation</NoteLink> into words or, with
+   <NoteLink to="byte-pair-encoding">byte-pair encoding</NoteLink> or
+   <NoteLink to="wordpiece-and-unigram-tokenisation">WordPiece and unigram tokenisation</NoteLink>, subwords.
+2. **Filtering and reduction.** <NoteLink to="stop-words">Stop words</NoteLink> are removed or down-weighted.
+   <NoteLink to="stemming">Stemming</NoteLink> strips suffixes by rule; <NoteLink to="lemmatisation">lemmatisation</NoteLink>
+   maps inflected forms to dictionary words.
+3. **Features.** Each word is an index, a <NoteLink to="one-hot-encoding-of-words">one-hot vector</NoteLink>. A
+   document is a <NoteLink to="bag-of-words">bag of words</NoteLink>, optionally extended with
+   <NoteLink to="word-n-grams">word n-grams</NoteLink> for local order, or built from
+   <NoteLink to="character-n-grams-and-shingles">character n-grams and shingles</NoteLink> for robustness and
+   near-duplicate detection. <NoteLink to="feature-hashing-for-text">Feature hashing</NoteLink> fixes the dimension
+   without a vocabulary.
+4. **Weighting.** <NoteLink to="tf-idf">TF-IDF</NoteLink> and its
+   <NoteLink to="tf-idf-weighting-variants">variants</NoteLink> reweight counts by rarity and length.
+5. **Dense vectors.** <NoteLink to="co-occurrence-matrices-and-pmi">Co-occurrence matrices and PMI</NoteLink> describe
+   words by their neighbours, the basis of <NoteLink to="distributional-semantics">distributional semantics</NoteLink>.
+   Learned <NoteLink to="word-embeddings">word embeddings</NoteLink> compress the same information; averaged or trained
+   <NoteLink to="document-embeddings">document embeddings</NoteLink> and transformer
+   <NoteLink to="sentence-embeddings">sentence embeddings</NoteLink> give one vector per text.
+
+## Data flow
+
+Take "The cats aren't chasing mice." through one common configuration.
+
+| Stage | Output |
+| --- | --- |
+| Normalise (NFKC, case fold, expand contractions) | "the cats are not chasing mice." |
+| Tokenise | the, cats, are, not, chasing, mice |
+| Remove stop words, keep negations | cats, not, chasing, mice |
+| Porter stems | cat, not, chase, mice |
+| Unigrams and bigrams | cat, not, chase, mice, "cat not", "not chase", "chase mice" |
+| Weight | a sparse vector with 7 non-zero coordinates over the collection's vocabulary |
+
+Each stage merges or drops information. Case folding merges "Apple" and "apple". The stop list drops "are". The stemmer
+turns "chasing" into "chase", but it cannot join "mice" to "mouse"; a lemmatiser would. The bigrams restore that "not"
+applies to "chase". The explorer below runs these stages on six sentences.
+
+<PipelineExplorer />
+
+## Variants
+
+### Every representation at a glance
+
+$V$ is the vocabulary size, $L$ the document length and $d$ a chosen dense dimension.
+
+| Representation | Dimension | Sparsity | Captures | Loses |
+| --- | --- | --- | --- | --- |
+| One-hot word | $V$ | one non-zero | word identity | all similarity between words |
+| Bag of words (counts) | $V$ | at most $L$ non-zeros | which words, how often | order; synonymy |
+| Binary bag | $V$ | at most $L$ | which words | frequency; order |
+| TF-IDF | $V$ | at most $L$ | which words matter for this document | order; synonymy |
+| Word n-grams | up to $V^n$, pruned | very sparse | local order, phrases, negation | order beyond $n$ |
+| Character n-grams | up to $\abs{\Sigma}^n$ | sparse | spelling, morphology, typos | word boundaries (partly) |
+| $w$-shingle set | unbounded set | a set | exact wording | frequency; meaning of paraphrases |
+| MinHash signature | $K$ integers | dense | an estimate of shingle resemblance | the text itself |
+| Hashed features | $m$ | at most $L$ | same as the hashed features, with collisions | reversibility |
+| Word–context PPMI row | $V$ contexts | sparse | usage of a word type | word order; polysemy |
+| SVD of PPMI or LSA | $d$ | dense | latent dimensions of usage or topic | interpretability; rare detail |
+| Topic proportions (LDA) | number of topics | dense, on the simplex | thematic mixture | everything below topic level |
+| Static word embedding | $d$ | dense | similarity between word types | polysemy |
+| Averaged or SIF document vector | $d$ | dense | overall content | order; detail in long texts |
+| Paragraph vector (doc2vec) | $d$ | dense | content, some local order | needs optimisation per new text |
+| Contextual token and sentence embeddings | $d$ per token or per text | dense | meaning in context | interpretability; cost |
+
+The rows run roughly from symbolic to learned. Sparse representations are interpretable, cheap, exact about wording
+and blind to synonymy. Dense representations capture similarity of meaning, cost more to compute, and are hard to
+inspect. Retrieval and classification systems often combine one of each.
+
+### Lineage
+
+| Year | Work | Contribution |
+| --- | --- | --- |
+| 1954 | Harris | the distributional hypothesis <Cite id="harris1954" /> |
+| 1957 | Firth | "you shall know a word by the company it keeps" <Cite id="firth1957" /> |
+| 1958 | Luhn | frequency cut-offs for significant words <Cite id="luhn1958" /> |
+| 1968 | Lovins | the first published stemmer <Cite id="lovins1968" /> |
+| 1972 | Spärck Jones | inverse document frequency <Cite id="sparckjones1972" /> |
+| 1975 | Salton, Wong and Yang | the vector space model <Cite id="salton1975" /> |
+| 1980 | Porter | the Porter stemmer <Cite id="porter1980" /> |
+| 1988 | Salton and Buckley | systematic comparison of term weightings <Cite id="salton1988" /> |
+| 1990 | Church and Hanks | PMI as a word association measure <Cite id="church1990" /> |
+| 1990 | Deerwester et al. | latent semantic analysis <Cite id="deerwester1990" /> |
+| 1990 | Paice | the Lancaster stemmer <Cite id="paice1990" /> |
+| 1993 | Dunning | likelihood-ratio tests for rare events <Cite id="dunning1993" /> |
+| 1995 | Miller | WordNet <Cite id="miller1995" /> |
+| 1996 | Singhal, Buckley and Mitra | pivoted length normalisation <Cite id="singhal1996" /> |
+| 1997 | Broder | shingling and MinHash resemblance <Cite id="broder1997" /> |
+| 1999 | Hofmann | probabilistic latent semantic analysis <Cite id="hofmann1999" /> |
+| 2003 | Blei, Ng and Jordan | latent Dirichlet allocation <Cite id="blei2003" /> |
+| 2009 | Weinberger et al. | feature hashing with signed hashes <Cite id="weinberger2009" /> |
+| 2013 | Mikolov et al. | word2vec <Cite id="mikolov2013" /> |
+| 2014 | Pennington et al.; Le and Mikolov | GloVe <Cite id="pennington2014" />; paragraph vectors <Cite id="le2014" /> |
+| 2014 | Levy and Goldberg | skip-gram as implicit PMI factorisation <Cite id="levy2014" /> |
+| 2015 | Levy, Goldberg and Dagan | count and predict models compared with matched settings <Cite id="levy2015" /> |
+| 2016 | Sennrich et al. | byte-pair encoding for subwords <Cite id="sennrich2016" /> |
+| 2017 | Arora et al.; Bojanowski et al. | SIF sentence vectors <Cite id="arora2017" />; fastText subword vectors <Cite id="bojanowski2017" /> |
+| 2019 | Devlin et al.; Reimers and Gurevych | BERT <Cite id="devlin2019" />; Sentence-BERT <Cite id="reimers2019" /> |
+
+### Where the representations are used
+
+- **Classification.** Linear models on TF-IDF n-grams remain strong baselines for
+  <NoteLink to="text-classification">text classification</NoteLink>; <NoteLink to="naive-bayes">naive Bayes</NoteLink>
+  uses raw counts.
+- **Topic modelling.** <NoteLink to="latent-semantic-analysis">LSA</NoteLink>,
+  <NoteLink to="probabilistic-latent-semantic-analysis">pLSA</NoteLink> and
+  <NoteLink to="latent-dirichlet-allocation">LDA</NoteLink> factorise the document–term matrix.
+- **Near-duplicate detection.** Shingles and MinHash, indexed by
+  <NoteLink to="locality-sensitive-hashing">locality-sensitive hashing</NoteLink>.
+- **Language modelling.** <NoteLink to="n-gram-language-model">N-gram language models</NoteLink> use the same
+  n-gram counts as features; neural models start from subword tokens and learn everything after.
+- **Evaluation.** <NoteLink to="bleu">BLEU</NoteLink>, <NoteLink to="rouge">ROUGE</NoteLink> and
+  <NoteLink to="chrf">chrF</NoteLink> compare word and character n-grams; <NoteLink to="bertscore">BERTScore</NoteLink>
+  compares contextual embeddings.
+
+## Pitfalls
+
+- **The pipeline is part of the model.** Train and apply it identically, and fit every statistic (vocabulary, idf,
+  stop list from document frequency) on training data only.
+- **No step is neutral.** Each merges or drops distinctions; check what the task needs before applying it. Negation,
+  capitalised names and numbers are the usual casualties.
+- **Neural models expect raw text.** Transformer tokenisers include their own normalisation. Stemming, stop-word removal
+  and lower-casing before a pretrained model usually hurt it.

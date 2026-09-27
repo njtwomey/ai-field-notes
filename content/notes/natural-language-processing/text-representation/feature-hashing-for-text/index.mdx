@@ -1,0 +1,132 @@
+---
+title: Feature hashing for text
+kind: technique
+summary: 'Feature hashing maps each term to one of $m$ columns with a hash function $h$ and adds its count with a random sign $\xi(t) = \pm 1$. No vocabulary is stored, any n-gram or unseen word has a column, and the signs make inner products unbiased: $\expect\inner{\phi(\xvec)}{\phi(\xvec'')} = \inner{\xvec}{\xvec''}$.'
+tags: [nlp, text-representation, feature-engineering, hashing, randomised-algorithms, worked-example]
+aliases: [hashing vectorizer, hashing vectoriser, HashingVectorizer, signed hashing, hash kernel, hashed n-grams]
+requires: [bag-of-words]
+partOf: [text-representation-pipeline]
+related: [categorical-encoding, word-n-grams, character-n-grams-and-shingles, one-hot-encoding-of-words, locality-sensitive-hashing]
+references: [weinberger2009, pedregosa2011, manning2008]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Choose a dimension $m$, a hash function $h$ from terms to $\set{1, \dots, m}$ and a second hash function $\xi$ from terms
+to $\set{-1, +1}$. The **hashed** representation of a bag of words $\xvec$, with counts $x_t$ for every term $t$, is
+$\phi(\xvec) \in \reals^m$ with
+
+$$
+\phi_j(\xvec) = \sum_{t:\ h(t) = j} \xi(t)\, x_t.
+$$
+
+Terms that hash to the same column **collide** and share it <Cite id="weinberger2009" />.
+</Definition>
+
+## Problem
+
+A <NoteLink to="bag-of-words">bag of words</NoteLink> needs a vocabulary: a map from every term to a column, built in a
+pass over the training data and stored with the model. With <NoteLink to="word-n-grams">word n-grams</NoteLink> or
+<NoteLink to="character-n-grams-and-shingles">character n-grams</NoteLink> the vocabulary has millions of entries. It
+cannot grow while a model is in use, so new terms, including the typos and names that spam filters see constantly,
+fall out of the representation. A streaming or distributed system also has to share the vocabulary between machines.
+
+## Mechanism
+
+Hash each term instead of looking it up. The column of term $t$ is $h(t)$, computed from its characters, so there is
+nothing to store and every string has a column. This is the construction
+<NoteLink to="categorical-encoding">categorical encoding</NoteLink> calls the hashing trick, applied to text features
+where the number of distinct terms is unbounded.
+
+### Why the sign
+
+Without signs, a collision adds an unrelated term's count to a column, and every inner product is biased upwards. The
+inner product of two hashed vectors is
+
+$$
+\inner{\phi(\xvec)}{\phi(\xvec')} = \sum_{s,\,t} \xi(s)\,\xi(t)\,x_s\,x'_t\,\indicator[h(s) = h(t)].
+$$
+
+Split the sum into $s = t$ and $s \ne t$. For $s = t$, $\xi(t)^2 = 1$ and the indicator is 1, giving
+$\sum_t x_t x'_t = \inner{\xvec}{\xvec'}$. For $s \ne t$, treat $\xi$ as independent fair signs, independent of $h$.
+Then $\expect[\xi(s)\xi(t)] = \expect[\xi(s)]\,\expect[\xi(t)] = 0$, so each cross term has expectation zero, and
+
+$$
+\expect\,\inner{\phi(\xvec)}{\phi(\xvec')} = \inner{\xvec}{\xvec'}.
+$$
+
+Collisions add noise with mean zero instead of a positive bias <Cite id="weinberger2009" />.
+
+With unsigned hashing, $\xi \equiv 1$, and with $h$ uniform the cross term $s \ne t$ contributes $x_s x'_t$ with
+probability $1/m$. The expected inner product is then $\inner{\xvec}{\xvec'} + \frac1m \big(\sum_s x_s \sum_t x'_t -
+\inner{\xvec}{\xvec'}\big)$, too large by an amount that grows with document length.
+
+### How large is the noise
+
+Let $C = \sum_{s \ne t} \xi(s)\xi(t)\,x_s x'_t\,\indicator[h(s) = h(t)]$ be the collision term. Its mean is zero, so
+its variance is $\expect[C^2]$. Expanding the square gives a sum over pairs $(s, t)$ and $(u, v)$. The product of four
+signs has non-zero expectation only when they cancel in pairs, which for $s \ne t$ and $u \ne v$ means
+$(u, v) = (s, t)$ or $(u, v) = (t, s)$. For those terms the signs multiply to 1 and the indicator, squared, has
+expectation $\pr(h(s) = h(t)) = 1/m$. So
+
+$$
+\var\,\inner{\phi(\xvec)}{\phi(\xvec')} = \frac{1}{m} \sum_{s \ne t} \big(x_s^2\, x_t'^2 + x_s x'_s\, x_t x'_t\big).
+$$
+
+The variance falls as $1/m$. For $\xvec' = \xvec$ it becomes $\frac{2}{m} \big(\norm{\xvec}^4 - \sum_t x_t^4\big)$:
+the squared norm is preserved with relative error of order $\sqrt{2/m}$ for a vector whose mass is spread over many
+terms <Cite id="weinberger2009" />.
+
+### Collision rates
+
+With $K$ distinct terms hashed uniformly into $m$ columns, a given term shares its column with at least one other term
+with probability $1 - (1 - 1/m)^{K - 1} \approx 1 - e^{-K/m}$, and the expected number of colliding pairs is
+$\binom{K}{2}/m$.
+
+| Terms $K$ | Columns $m$ | Share of terms in a collision | Colliding pairs |
+| --- | --- | --- | --- |
+| 7,096 (words of _Emma_) | $2^{18} = 262{,}144$ | 2.7% | 96 |
+| 65,913 (bigrams of _Emma_) | $2^{18}$ | 22.2% | 8,286 |
+| 65,913 | $2^{20} = 1{,}048{,}576$ | 6.1% | 2,072 |
+
+Most colliding pairs involve rare terms, because most terms are rare, and a linear model with many features tolerates
+a few shared columns. In a classifier, a frequent informative term that collides with a rare one loses little.
+
+## Worked example
+
+Hash the five documents "the cat sat on the mat", "the dog sat on the log", "the cat chased the dog", "a dog and a cat
+played" and "the bird sang" into $m = 8$ columns with scikit-learn's `HashingVectorizer`, which uses the 32-bit
+MurmurHash3 of each term: the column is the absolute value of the hash modulo $m$, and the sign is the sign of the hash
+<Cite id="pedregosa2011" />. The 13 terms land as follows (columns numbered from 0):
+
+| Column | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Terms (sign) | | chased −, bird − | a + | mat −, sang − | sat +, played − | dog −, and − | the −, log + | cat +, on − |
+
+Thirteen terms in eight columns must collide. Column 0 is empty, column 2 holds only "a", and every other term
+shares its column. Document 1 hashes to
+$(0, 0, 0, -1, 1, 0, -2, 0)$: "the" gives $-2$ in column 6, and "cat" (+1) and "on" (−1) cancel in column 7. The true
+inner product of documents 1 and 3 is 5 ("the" twice in each, "cat" once in each). The hashed inner product is 4,
+because "cat" was cancelled in document 1. Over random hash functions, the expected hashed inner product is 5 and, by
+the formula above, its variance is $47/8 = 5.875$; a simulation over 200,000 random hashings gave mean 4.995 and
+variance 5.875. Unsigned hashing has expectation $5 + (6 \cdot 5 - 5)/8 = 8.125$ for the same pair.
+
+Eight columns is absurdly few; it makes the collisions visible. With $m = 2^{18}$, the 13 terms would almost surely
+occupy 13 separate columns.
+
+## Cost
+
+Hashing costs one hash per token and no memory for a vocabulary. It works in a single pass, on streams, and in
+parallel without coordination. The model has exactly $m$ weights per output, fixed in advance, however many distinct
+terms appear.
+
+## Trade-offs
+
+- **No inverse map.** A column cannot be turned back into a term, so feature weights cannot be read as words. Keep a
+  side table of frequent terms per column if interpretation matters.
+- **Collisions against memory.** Larger $m$ means fewer collisions and more weights. $2^{18}$ to $2^{24}$ columns are
+  common for text.
+- **Changing $m$ or the hash changes every feature.** A model is tied to its hash function and seed, as a one-hot model
+  is tied to its vocabulary.
+- **idf needs counts.** Document frequencies can be collected per column, but a column's df mixes all the terms in it.

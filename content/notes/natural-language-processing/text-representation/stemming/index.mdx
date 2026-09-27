@@ -1,0 +1,168 @@
+---
+title: Stemming
+kind: technique
+summary: 'A stemmer strips affixes by rule so that related forms share one key: "connected" and "connection" both become "connect". Porter''s algorithm removes suffixes in five steps, each guarded by the measure $m$ of the remaining stem. Stemming cuts vocabulary size by about a third.'
+tags: [nlp, preprocessing, text-representation, morphology, information-retrieval, worked-example]
+aliases: [stemmer, Porter stemmer, Porter's algorithm, Porter stemming algorithm, Porter2, Snowball stemmer, Lancaster stemmer, Paice/Husk stemmer, Lovins stemmer, suffix stripping, over-stemming, under-stemming, conflation]
+requires: [tokenisation]
+partOf: [text-representation-pipeline]
+related: [lemmatisation, text-normalisation, bag-of-words, stop-words, character-n-grams-and-shingles]
+references: [porter1980, lovins1968, paice1990, porter2001, manning2008, bird2009]
+status: draft
+updated: 2026-09-27
+---
+
+import { PorterTrace } from './PorterTrace'
+
+<Definition>
+A **stemmer** is a function from words to strings, called stems, built from rules that remove affixes. It
+**conflates** words that share a stem into one term, so "connect", "connected", "connecting" and "connection" all
+count as "connect". A stem need not be a word: Porter's algorithm maps "happy" and "happiness" to "happi"
+<Cite id="porter1980" />. Stemming uses no dictionary and no part of speech.
+</Definition>
+
+## Problem
+
+A <NoteLink to="bag-of-words">bag of words</NoteLink> treats each surface form as a separate feature. English inflection
+("cat", "cats"; "chase", "chased", "chasing") and derivation ("relate", "relation", "relational") split the evidence
+for one idea across many features. A query for "connection" misses a document that says "connected". A stemmer maps
+those forms to one term, which shrinks the vocabulary and raises recall.
+
+## Mechanism
+
+### Lovins: longest match
+
+The first published stemmer, by Lovins, holds a list of 294 endings with conditions. It removes the longest ending that
+matches and meets its condition, in one pass, then repairs the stem with transformation rules such as turning a final
+"rpt" into "rb" (so "absorption" and "absorb" meet) <Cite id="lovins1968" />. One pass is fast, but the list must
+contain every compound ending.
+
+### Porter: five steps and a measure
+
+Porter's algorithm removes compound suffixes one layer at a time in five steps, so that "generalizations" loses "s",
+then "ization", then "al" <Cite id="porter1980" />. Each rule has the form
+
+$$
+(\text{condition})\ S_1 \to S_2,
+$$
+
+which replaces the suffix $S_1$ by $S_2$ when the word ends in $S_1$ and the stem left after removing $S_1$ meets the
+condition.
+
+**The measure.** Call a letter a vowel if it is a, e, i, o or u, or a "y" that follows a consonant; every other letter
+is a consonant. Write a run of one or more consonants as $C$ and a run of one or more vowels as $V$. Every word then
+has the form
+
+$$
+[C](VC)^m[V],
+$$
+
+where brackets mark an optional part and $m \ge 0$ counts the vowel–consonant pairs. The number $m$ is the word's
+**measure**. It approximates the number of syllables that end in a consonant, and so the length of the stem.
+
+| $m$ | Examples |
+| --- | --- |
+| 0 | tr, ee, tree, y, by |
+| 1 | trouble, oats, trees, ivy |
+| 2 | troubles, private, oaten, orrery |
+
+"trouble" has letters in the pattern CCVVCCV, which collapses to $CVCV$, one $VC$ pair, so $m = 1$.
+
+**Why a measure.** A suffix rule must not fire on a word that only looks as if it has the suffix. Removing "-ate" from
+"activate" leaves "activ" ($m = 2$), a real stem. Removing it from "rate" would leave "r" ($m = 0$), which is no stem at
+all. Porter's step 4 removes "-ate" only when $m > 1$, which keeps "rate" whole. The conditions encode a single idea:
+the longer the remaining stem, the more likely the ending is a true suffix.
+
+Other conditions test the end of the stem: $^*S$ (it ends in "s"), $^*v^*$ (it contains a vowel), $^*d$ (it ends in a
+double consonant) and $^*o$ (it ends consonant–vowel–consonant, where the last consonant is not w, x or y, as in "hop"
+or "fil").
+
+**The steps.** Within a step only the rule with the longest matching suffix is considered. If its condition fails,
+the step does nothing.
+
+1. **Step 1a** removes plurals: SSES → SS, IES → I, SS → SS, S → ∅.
+2. **Step 1b** removes "-ed" and "-ing" when the stem contains a vowel, then repairs the stem: "hopp" loses a doubled
+   consonant ("hop"), and a short stem of form $^*o$ with $m = 1$ gains an "e" ("fil" → "file"). It also rewrites
+   $(m > 0)$ EED → EE.
+3. **Step 1c** turns a final "y" into "i" when the stem has a vowel, so "happy" and "happiness" can meet.
+4. **Step 2** $(m > 0)$ maps double suffixes to single ones: ATIONAL → ATE, IZATION → IZE, BILITI → BLE and 17 more.
+5. **Step 3** $(m > 0)$ maps or removes: ICATE → IC, ALIZE → AL, FUL → ∅, NESS → ∅, and three more.
+6. **Step 4** $(m > 1)$ removes single suffixes: AL, ANCE, ENCE, ER, IC, ABLE, IBLE, ANT, EMENT, MENT, ENT, ION (only
+   after "s" or "t"), OU, ISM, ATE, ITI, OUS, IVE, IZE.
+7. **Step 5** removes a final "e" when $m > 1$, or when $m = 1$ and the stem is not $^*o$, and reduces a final "ll" to
+   "l" when $m > 1$.
+
+### Worked example
+
+Stem four words. $m$ is always measured on the stem that would remain.
+
+- **generalizations.** Step 1a, S → ∅: "generalization". Step 2, IZATION → IZE, with stem "general" of $m = 3$:
+  "generalize". Step 3, ALIZE → AL, with stem "gener", $m = 2$: "general". Step 4, AL → ∅, with stem "gener",
+  $m = 2 > 1$: **gener**.
+- **oscillators.** Step 1a: "oscillator". Step 2, ATOR → ATE: "oscillate". Step 4, ATE → ∅, stem "oscill" with
+  $m = 2$: "oscill". Step 5b, a final "ll" with $m > 1$: **oscil**.
+- **filing.** Step 1b, ING → ∅, since "fil" has a vowel: "fil". "fil" has $m = 1$ and ends consonant–vowel–consonant,
+  so an "e" is restored: **file**.
+- **argument.** Step 4 finds MENT as the longest matching suffix. The stem "argu" has $m = 1$, which fails $m > 1$.
+  The step does nothing, and the shorter suffix ENT is never tried. The stem is **argument**.
+
+Porter's algorithm has about 60 rules and no dictionary, and it runs in time linear in the word length.
+
+<PorterTrace />
+
+### Snowball and Lancaster
+
+Porter later wrote Snowball, a small language for writing stemmers, and a revised English stemmer in it, often called
+Porter2 <Cite id="porter2001" />. It fixes known defects: "generalizations" becomes "general" rather than "gener",
+"dying" becomes "die", and a list of exceptional words ("news", "skies") is handled explicitly. Snowball stemmers
+exist for many European and other languages.
+
+The Lancaster (Paice/Husk) stemmer applies a table of about 115 rules iteratively until no rule applies, each rule
+saying whether stemming may continue <Cite id="paice1990" />. It is more aggressive: "organization" becomes "org" and
+"maximum" becomes "maxim".
+
+## Over- and under-stemming
+
+Two kinds of error follow from rules without a dictionary <Cite id="paice1990" />.
+
+- **Over-stemming** conflates words with different meanings. Porter maps "universe", "university" and "universal" all
+  to "univers"; "general", "generous" and "generate" all to "gener"; "news" to "new"; "organization" to "organ".
+- **Under-stemming** leaves related words apart. Porter maps "absorb" to "absorb" and "absorption" to "absorpt";
+  "alumnus" to "alumnu" and "alumni" to "alumni"; "Europe" to "europ" and "European" to "european". Irregular forms
+  are never joined: "ran" stays "ran", "mice" stays "mice", "was" becomes "wa".
+
+A more aggressive stemmer trades under-stemming for over-stemming. Lovins, Porter and Lancaster sit at different points
+on this trade-off; none has fewer errors of both kinds than another.
+
+## Effect on vocabulary size
+
+Take the 161,975 lower-cased alphabetic tokens of _Emma_ in the NLTK corpus sample <Cite id="bird2009" />, which have
+7,096 distinct word types.
+
+| Normaliser | Distinct terms | Reduction |
+| --- | --- | --- |
+| none | 7,096 | 0% |
+| WordNet lemmatiser with tagged part of speech | 5,460 | 23% |
+| Porter (1980) | 4,518 | 36% |
+| Snowball (Porter2) | 4,337 | 39% |
+| Lancaster | 3,765 | 47% |
+
+The order of the rows is the order of aggressiveness. The <NoteLink to="lemmatisation">lemmatiser</NoteLink> merges
+only inflections of one word; the stemmers also merge derivations.
+
+## Cost
+
+A stemmer is a few hundred lines of code, needs no training data, and processes millions of words per second. It must
+be applied to the query and the documents with the same stemmer, and it runs after
+<NoteLink to="text-normalisation">case folding</NoteLink>, since its rules expect lower-case letters.
+
+## Trade-offs
+
+- **Recall against precision.** In retrieval, stemming raises recall and can lower precision. For English the net
+  effect is modest and varies from query to query; it is larger for languages with richer morphology
+  <Cite id="manning2008" />.
+- **Language-specific.** Porter's rules are for English. Applying them to another language produces nonsense stems.
+- **Superseded in neural models.** Subword tokenisers such as <NoteLink to="byte-pair-encoding">byte-pair
+  encoding</NoteLink> learn frequent word pieces from data, and a neural model learns which pieces relate. Stemming
+  remains useful for sparse representations, keyword search and small data sets.
+- **Stems are not readable.** "gener" and "happi" are keys, not words. Display the original words to users.

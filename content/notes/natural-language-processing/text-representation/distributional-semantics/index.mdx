@@ -1,0 +1,112 @@
+---
+title: Distributional semantics
+kind: concept
+summary: 'Distributional semantics represents a word by the contexts it occurs in: words with similar distributions have similar meanings (Harris, Firth). Count models reweight co-occurrence matrices; predict models learn vectors by predicting contexts. Tuned, both do comparably.'
+tags: [nlp, text-representation, distributional-semantics, embeddings, representation-learning]
+aliases: [distributional hypothesis, distributional semantics, distributional similarity, distributional semantic model, DSM, vector space models of meaning, Firth's dictum, count-based models, prediction-based models, count versus predict, second-order co-occurrence]
+requires: [co-occurrence-matrices-and-pmi]
+partOf: [text-representation-pipeline]
+related: [word-embeddings, latent-semantic-analysis, masked-language-modelling, sentence-embeddings, document-embeddings, one-hot-encoding-of-words]
+references: [harris1954, firth1957, turney2010, baroni2014, levy2015, levy2014, deerwester1990, mikolov2013]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Distributional semantics** represents each word by a vector computed from the contexts in which the word occurs in a
+corpus, and measures similarity of meaning by similarity of those vectors, usually their cosine. It rests on the
+**distributional hypothesis**: words that occur in similar contexts tend to have similar meanings
+<Cite id="harris1954" /> <Cite id="turney2010" />.
+</Definition>
+
+## Intuition
+
+Nobody defines "wampimuk" for you, but after reading "the wampimuk climbed the tree" and "we fed the wampimuk nuts",
+you know roughly what kind of thing it is. Its contexts place it among small animals. Distributional semantics does
+this with counts. Every word gets a vector of its contexts, and words with overlapping contexts get nearby vectors.
+
+This is the step from a <NoteLink to="one-hot-encoding-of-words">one-hot representation</NoteLink>, in which every two
+words are equally unrelated, to a representation in which "cat" is closer to "dog" than to "cheese". The similarity is
+learned from unlabelled text alone.
+
+## The hypothesis
+
+Harris stated it as a claim about linguistic structure: "if we consider words or morphemes A and B to be more
+different in meaning than A and C, then we will often find that the distributions of A and B are more different than
+the distributions of A and C" <Cite id="harris1954" />. Difference of meaning correlates with difference of
+distribution. Firth put it as a slogan: "You shall know a word by the company it keeps" <Cite id="firth1957" />.
+
+The hypothesis says nothing about which contexts to use or how to compare them. Those choices define the different
+models, and they decide what kind of similarity the vectors capture.
+
+## Kinds of context
+
+Turney and Pantel classify vector space models of meaning by their matrix <Cite id="turney2010" />.
+
+| Matrix | Rows | Columns | Similar rows mean |
+| --- | --- | --- | --- |
+| term–document | words | documents | words about the same topic ("doctor", "nurse", "hospital") |
+| word–context | words | nearby words, in a window | words used the same way ("doctor", "surgeon") |
+| pair–pattern | word pairs | patterns joining them ("X cuts Y") | pairs in the same relation ("mason : stone", "carpenter : wood") |
+
+The term–document matrix, reduced by a truncated SVD, is <NoteLink to="latent-semantic-analysis">latent semantic
+analysis</NoteLink> <Cite id="deerwester1990" />. The word–context matrix, reweighted by positive pointwise mutual
+information, is described in <NoteLink to="co-occurrence-matrices-and-pmi">co-occurrence matrices and PMI</NoteLink>.
+Narrow windows favour similarity (words that can replace each other); wide windows and whole documents favour
+relatedness (words that appear together).
+
+**Second-order similarity.** Two words need not co-occur to be similar. "cat" and "kitten" may never appear in the same
+sentence, but both appear near "purr", "fed" and "vet". Their rows are similar because they share contexts, which is a
+second-order relation: similarity of first-order co-occurrence profiles.
+
+## Worked example
+
+In the thirteen-sentence corpus of <NoteLink to="co-occurrence-matrices-and-pmi">co-occurrence matrices and
+PMI</NoteLink> ("the cat is a pet", "we fed the dog", "the mouse ate the cheese" and ten more), with a window of two
+words and PPMI weighting, the cosine similarity of the rows of "cat" and "dog" is 0.939 and of "cat" and "cheese" is
+0.068. "cat" and "dog" never occur within two words of each other; in "the dog chased the cat" they are three
+apart. Their similarity comes entirely from sharing the contexts "fed", "saw", "chased", "slept" and "is a". Reducing the PPMI matrix to two dimensions with a truncated SVD,
+taking each word's vector as its row of $\Umat_2 \Sigmamat_2^{1/2}$, gives cosine 0.991 for "cat" and "dog", 0.734
+for "cat" and "mouse" and 1.000 for "cheese" and "grain", which occur in identical contexts.
+
+## Count and predict
+
+Two families of models implement the hypothesis.
+
+- **Count models** build a word–context matrix, reweight it (PPMI, TF-IDF), and optionally reduce its dimension with
+  an SVD. LSA and PPMI–SVD are count models.
+- **Predict models** learn a vector per word by training it to predict its contexts, or the reverse. Word2vec's
+  skip-gram and CBOW are predict models <Cite id="mikolov2013" />; see <NoteLink to="word-embeddings">word
+  embeddings</NoteLink>.
+
+Baroni, Dinu and Kruszewski compared the two across many lexical semantics tasks and parameter settings, and reported
+"a thorough and resounding victory" for the predict models <Cite id="baroni2014" />. The picture then changed. Levy and
+Goldberg showed that skip-gram with negative sampling implicitly factorises a shifted PMI matrix, so the two families
+optimise related objectives <Cite id="levy2014" />. Levy, Goldberg and Dagan then showed that much of the predict
+models' advantage came from design choices, such as subsampling frequent words, smoothing the context distribution and
+weighting nearer contexts more, rather than from prediction itself. With those choices transferred to PPMI and SVD,
+count models performed comparably, and no method won on every task <Cite id="levy2015" />.
+
+## From word types to word tokens
+
+A count or predict model gives one vector per word type. "bank" gets a single vector that mixes the riverside and the
+financial sense in proportion to their frequencies. Contextual models, such as the encoders trained by
+<NoteLink to="masked-language-modelling">masked language modelling</NoteLink>, give each occurrence of a word its own
+vector computed from the sentence around it. They apply the distributional hypothesis at the level of individual
+tokens: the representation of a word in a sentence is a function of its context in that sentence.
+
+## Assumptions
+
+- **Meaning is reflected in usage.** The hypothesis is a correlation, not an identity. Properties that are rarely
+  stated in text, such as the colour of common objects, are weakly represented.
+- **One corpus, one meaning.** The vectors describe usage in the training corpus, including its biases and its
+  domain.
+
+## Pitfalls
+
+- **Antonyms are distributionally similar.** "hot" and "cold" appear in the same contexts ("the water is ___"), so they
+  get similar vectors. Distributional similarity is not synonymy.
+- **Similarity against relatedness.** Evaluation sets differ in which one they measure. Choose the window and the
+  evaluation to match the task.
+- **Rare words get poor vectors.** A word seen a handful of times has too few contexts. Subword models such as fastText
+  share information through character n-grams.

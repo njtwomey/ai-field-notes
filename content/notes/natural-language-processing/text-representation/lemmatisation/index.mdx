@@ -1,0 +1,108 @@
+---
+title: Lemmatisation
+kind: technique
+summary: 'Lemmatisation maps each inflected word to its dictionary form, the lemma: "mice" to "mouse", "was" to "be", "better" to "good". It needs a lexicon and the part of speech, because "meeting" is a noun lemma and a form of the verb "meet". Lemmas are real words; stems need not be.'
+tags: [nlp, preprocessing, text-representation, morphology, worked-example]
+aliases: [lemmatization, lemmatiser, lemmatizer, lemma, WordNet lemmatiser, WordNet lemmatizer, morphy, morphological analysis, dictionary form, citation form]
+requires: [tokenisation]
+partOf: [text-representation-pipeline]
+related: [stemming, text-normalisation, bag-of-words, sequence-labelling]
+references: [miller1995, manning2008, jurafsky2025, bird2009]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **lemma** is the dictionary form of a word: the form listed as a headword. Lemmatisation maps a word token, together
+with its part of speech, to its lemma: $(\text{"ran"}, \text{verb}) \mapsto \text{"run"}$. It undoes **inflection**,
+the changes that mark number, tense, person or degree, and leaves **derivation**, which forms new words such as
+"happiness" from "happy", in place <Cite id="manning2008" /> <Cite id="jurafsky2025" />.
+</Definition>
+
+## Problem
+
+A <NoteLink to="stemming">stemmer</NoteLink> removes suffixes by rule and knows no words. It cannot join irregular forms,
+because "mice", "ran" and "was" share no suffix with "mouse", "run" and "be". It also produces keys that are not words,
+such as "happi", and it joins words that only look related, such as "news" and "new". A lemmatiser uses a lexicon, so
+its outputs are words and its joins are inflections of one word.
+
+## Mechanism
+
+Lemmatisation is **morphological analysis**: decomposing a word into a stem and affixes, such as
+"cats" = "cat" + plural "-s", and returning the stem's dictionary form. A full analyser uses a lexicon of stems and
+a finite-state model of each language's inflection rules. English inflection is simple enough that a lexicon and a
+handful of rules cover most words.
+
+**WordNet's morphy.** WordNet is a lexical database of English that groups nouns, verbs, adjectives and adverbs into
+sets of synonyms <Cite id="miller1995" />. Version 3.0 holds 147,306 distinct lemma names in 117,659 synonym sets.
+Its lemmatiser, morphy, works in three stages for a word $w$ with part of speech $p$.
+
+1. **Exception list.** Look up $w$ in a list of irregular forms for $p$: "mice" → "mouse" (noun), "ate" → "eat" (verb),
+   "better" → "good" (adjective).
+2. **Detachment rules.** Otherwise, try each suffix rule for $p$ and keep the results that are lemmas in WordNet.
+   Nouns: -s → ∅, -ses → -s, -xes → -x, -zes → -z, -ches → -ch, -shes → -sh, -men → -man, -ies → -y. Verbs: -s → ∅,
+   -ies → -y, -es → -e, -es → ∅, -ed → -e, -ed → ∅, -ing → -e, -ing → ∅. Adjectives: -er → ∅, -est → ∅, -er → -e,
+   -est → -e.
+3. **Otherwise** return $w$ unchanged, including when $w$ itself is a lemma.
+
+The check against the lexicon is what separates this from stemming. The rule -ing → ∅ turns "meeting" into "meet"
+only for a verb. The rule -ed → ∅ turns "chased" into "chas", which is not in WordNet, so the rule -ed → -e is used
+and gives "chase".
+
+**The part of speech is an input.** The same string has different lemmas under different parts of speech. A
+lemmatiser run over text first tags each token with a part-of-speech tagger, a <NoteLink to="sequence-labelling">sequence
+labelling</NoteLink> model, then lemmatises each token with its tag.
+
+## Worked example
+
+Outputs of NLTK's WordNet lemmatiser <Cite id="bird2009" />, with the part of speech given:
+
+| Word | As noun | As verb | As adjective |
+| --- | --- | --- | --- |
+| meeting | meeting | meet | meeting |
+| leaves | leaf | leave | leaves |
+| does | doe | do | does |
+| was | wa | be | was |
+| running | running | run | running |
+| better | better | better | good |
+| mice | mouse | mice | mice |
+
+Without a tag, NLTK treats every word as a noun. "does" then becomes "doe", a female deer, and "was" becomes "wa",
+WordNet's entry for the abbreviation of Washington State. The part of speech is not optional in practice.
+
+Some forms stay ambiguous even with a tag. The verb "saw" is a form of "see" and also the verb "to saw"; "axes" is the
+plural of both "ax" and "axis". Morphy returns every candidate that is in WordNet, and a lemmatiser must pick one.
+
+## Stemming against lemmatisation
+
+| | Stemming | Lemmatisation |
+| --- | --- | --- |
+| Output | a stem, often not a word ("happi") | a dictionary word ("happy") |
+| Resources | suffix rules only | lexicon, exception lists, part-of-speech tagger |
+| Irregular forms ("mice", "ran", "was") | not joined | joined |
+| Derivation ("relation", "relational") | joined ("relat") | kept apart |
+| Unknown words | stemmed by rule | returned unchanged |
+| Errors | over- and under-stemming | tagging errors, missing lexicon entries |
+| Vocabulary of _Emma_ (7,096 types) | 4,518 terms with Porter | 5,460 terms with WordNet and tags |
+| Speed | very fast | slower: tagging dominates |
+
+The last rows use the 161,975 lower-cased alphabetic tokens of _Emma_ from the NLTK sample. Lemmatisation reduces the
+vocabulary by 23%, Porter stemming by 36%. The difference is derivation: stemming joins "general", "generous" and
+"generate"; lemmatisation keeps them apart, correctly for the first two.
+
+## Cost
+
+Lemmatising running text costs one tagging pass, which is linear in the length of the text, plus one lexicon lookup per
+token. The lexicon is the main resource. For a language without one, lemmatisation is unavailable and stemming or
+subword tokenisation is the fallback.
+
+## Trade-offs
+
+- **Precision over recall.** Lemmatisation merges fewer forms than stemming, so it makes fewer false matches and finds
+  fewer true ones. In English retrieval the difference in effectiveness between the two is small
+  <Cite id="manning2008" />.
+- **Readable features.** Lemmas are words, so features built on them can be shown to people, for example as the top
+  weights of a linear classifier.
+- **Useful for rich morphology.** Languages such as Finnish, Czech or Arabic have dozens of inflected forms per lemma.
+  Lemmatisation there shrinks the vocabulary much more than in English.
+- **Tag errors propagate.** A mistagged token gets a wrong lemma, as "does" did above.

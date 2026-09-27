@@ -1,0 +1,128 @@
+---
+title: Text normalisation
+kind: concept
+summary: 'Text normalisation rewrites strings so that variants of one word become one token: Unicode normal forms (NFC, NFKC), case folding, accent stripping, and rules for punctuation, numbers and contractions. Each step merges vocabulary entries and can erase a distinction that mattered.'
+tags: [nlp, preprocessing, text-representation, unicode, worked-example]
+aliases: [Unicode normalisation, Unicode normalization, NFC, NFKC, NFD, NFKD, case folding, casefolding, lower-casing, accent stripping, diacritic removal, contraction expansion, number normalisation]
+requires: [tokenisation]
+partOf: [text-representation-pipeline]
+related: [stemming, lemmatisation, stop-words, bag-of-words]
+references: [whistler2026uax15, unicode2026casefolding, manning2008, jurafsky2025, bird2009]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Text normalisation is a function $\nu$ from strings to strings, applied before counting or tokenising, that maps
+strings a system should treat as equal to one canonical string. Two words $u$ and $v$ become one vocabulary entry when
+$\nu(u) = \nu(v)$. The set of words that map to the same string is an **equivalence class**
+<Cite id="manning2008" />. Common steps are Unicode normalisation, case folding, accent stripping, and rules for
+punctuation, numbers and contractions.
+</Definition>
+
+## Why normalise
+
+A <NoteLink to="bag-of-words">bag of words</NoteLink> counts strings, so "The" and "the" are different features unless
+they are made equal. Every feature split this way halves the evidence for each half. In Jane Austen's _Emma_ (about 161,000
+word tokens, taken from the NLTK corpus sample <Cite id="bird2009" />), "the" occurs 4,846 times in lower case and 358
+times as "The". The alphabetic word types number 7,663 with case kept and 7,204 after lower-casing, so 459 types were
+case variants of other types.
+
+Normalisation trades **recall** for **precision**. Merging more variants lets a query or a model match more texts
+(recall rises). Merging variants with different meanings creates false matches (precision falls). No normalisation is
+neutral: each rule decides which distinctions the representation keeps.
+
+## Unicode normalisation
+
+A Unicode string is a sequence of code points. Several code-point sequences can display as the same text.
+
+- **Canonical equivalence.** "é" can be the single code point U+00E9, or "e" followed by the combining acute accent
+  U+0301. The two strings have lengths 1 and 2 and compare unequal byte by byte. They are canonically equivalent: they
+  represent the same abstract character.
+- **Compatibility equivalence.** The ligature "ﬁ" (U+FB01), the superscript "²", the circled digit "①", the
+  full-width "Ａ" and the Roman numeral "Ⅻ" are formatting variants of "fi", "2", "1", "A" and "XII". They are
+  compatibility equivalent: the same text with a presentational difference.
+
+Unicode Standard Annex 15 defines four normal forms <Cite id="whistler2026uax15" />.
+
+| Form | Decompose | Recompose | "é" as U+0065 U+0301 | "ﬁ" | "x²" |
+| --- | --- | --- | --- | --- | --- |
+| NFD | canonical | no | U+0065 U+0301 | ﬁ | x² |
+| NFC | canonical | yes | U+00E9 | ﬁ | x² |
+| NFKD | compatibility | no | U+0065 U+0301 | fi | x2 |
+| NFKC | compatibility | yes | U+00E9 | fi | x2 |
+
+NFC changes no visible text, so it is always safe to apply. NFKC also folds compatibility characters, which loses
+information: "x²" becomes "x2" and "½" becomes "1⁄2" (the digits around a fraction slash U+2044). Search engines and
+tokenisers commonly apply NFKC; a system that must round-trip text exactly applies NFC or nothing.
+
+## Case folding
+
+Lower-casing maps upper-case letters to lower case. **Case folding** is the Unicode operation designed for
+case-insensitive comparison, and it differs from lower-casing for some characters <Cite id="unicode2026casefolding" />.
+
+- German "ß" has no single upper-case letter. Lower-casing leaves "Straße" as "straße". Case folding gives
+  "strasse", which equals the case folding of "STRASSE".
+- Greek has two lower-case sigmas. Lower-casing "ΣΑΣ" gives "σας", with the word-final "ς". Case folding gives "σασ",
+  so that a final and a medial sigma compare equal.
+- Turkish dotted capital "İ" lower-cases to "i" followed by a combining dot (two code points) in the default mapping.
+  Turkish text needs a language-specific mapping, because Turkish "I" lower-cases to dotless "ı".
+
+What case folding loses is the information that capitals carry. "US" (the country) and "us" (the pronoun) merge.
+"Apple" the company and "apple" the fruit merge. Sentence-initial capitals are noise; capitals inside a sentence often
+mark a name. Named-entity recognisers therefore keep case, while bag-of-words retrieval usually folds it
+<Cite id="manning2008" />. A compromise folds only sentence-initial words, a heuristic called truecasing when it is
+learned from data.
+
+## Accent stripping
+
+Accent stripping removes diacritics. The standard implementation is: decompose to NFD, delete every combining mark
+(Unicode category M), and recompose. "résumé" becomes "resume" and "naïve" becomes "naive".
+
+Two limits follow from the method. It removes only diacritics that decompose. "Ø" in "Ørsted" and "Ł" in "Łódź" are
+letters with no decomposition, so the same procedure gives "Ørsted" and "Łodz", with only the acute accent on "ó"
+removed. It also merges distinct words. English "résumé" (a CV) and "resume" (continue) become one term. In Spanish,
+"año" (year) becomes "ano" (anus), and in French "où" (where) becomes "ou" (or). Accent stripping helps when users type
+without accents; it harms when accents distinguish words.
+
+## Punctuation, numbers and contractions
+
+- **Punctuation.** Deleting punctuation joins "U.S.A." and "USA" and splits "e-mail" or joins it as "email", depending
+  on whether the hyphen becomes a space or nothing. Punctuation that carries meaning, such as the decimal point in
+  "3.14", the "+" in "C++" or the "@" in an email address, needs rules that run before deletion.
+- **Numbers.** Each distinct number is a separate, usually rare, word type. Replacing every digit sequence by one
+  placeholder, such as `<num>`, merges them. The representation keeps the fact that a number occurred and loses its
+  value, so "3 cats" and "300 cats" become identical.
+- **Contractions.** Expanding "don't" to "do not" and "isn't" to "is not" makes the negation a separate token, "not",
+  which a <NoteLink to="stop-words">stop-word</NoteLink> filter or a negation feature can then see. The expansion is
+  ambiguous for "'s", which can be "is" ("it's"), "has" ("she's gone") or the possessive ("the cat's"), and for "'d",
+  which can be "would" or "had".
+
+## Worked example
+
+Normalise "The Café's résumé-writing course starts on 3 May; it isn't full." with five steps in order: NFKC, case
+folding, accent stripping, contraction expansion and number replacement, then split into words.
+
+1. NFKC changes nothing here: there are no compatibility characters. If "é" was typed as "e" plus a combining accent,
+   NFKC recomposes it to U+00E9.
+2. Case folding gives "the café's résumé-writing course starts on 3 may; it isn't full."
+3. Accent stripping gives "the cafe's resume-writing course starts on 3 may; it isn't full."
+4. Contraction expansion gives "the cafe resume-writing course starts on 3 may; it is not full." The possessive "'s"
+   after the noun "cafe" is dropped.
+5. Number replacement gives "... starts on `<num>` may; ...".
+
+The final tokens are `the`, `cafe`, `resume-writing`, `course`, `starts`, `on`, `<num>`, `may`, `it`, `is`, `not`,
+`full`. The month "May" has become the modal verb "may", and "résumé" can now match "resume" (continue). Both are
+losses caused by rules that helped elsewhere.
+
+## Pitfalls
+
+- **Normalise training and query text identically.** A model trained on case-folded text sees unknown words when a
+  query is not folded. The normaliser is part of the model.
+- **Lossy steps break round-tripping.** A tokeniser that applies NFKC or lower-casing cannot reproduce the original
+  string from its tokens (see <NoteLink to="tokenisation">tokenisation</NoteLink>).
+- **Language matters.** Case and accent rules for English are wrong for Turkish, German or Vietnamese. Apply
+  language-specific rules when the language is known.
+- **Normalisation interacts with later steps.** A <NoteLink to="stop-words">stop-word list</NoteLink> written in lower
+  case misses "The" unless case is folded first, and a <NoteLink to="stemming">stemmer</NoteLink> expects lower-case
+  ASCII letters.

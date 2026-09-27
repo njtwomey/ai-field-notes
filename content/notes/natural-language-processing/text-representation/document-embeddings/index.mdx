@@ -1,0 +1,173 @@
+---
+title: Document embeddings
+kind: concept
+summary: 'A document embedding is one dense vector per text. Averaging word vectors equals projecting the bag of words. SIF weights each word by $a/(a + p(w))$ and removes the common principal component, both derived from a generative model; doc2vec learns a vector per document.'
+tags: [nlp, text-representation, embeddings, representation-learning, worked-example]
+aliases: [document embedding, paragraph vector, paragraph vectors, doc2vec, PV-DM, PV-DBOW, averaged word vectors, mean of word embeddings, SIF, smooth inverse frequency, common component removal]
+requires: [word-embeddings, bag-of-words]
+partOf: [text-representation-pipeline]
+related: [sentence-embeddings, distributional-semantics, latent-semantic-analysis, latent-dirichlet-allocation, principal-component-analysis, tf-idf]
+references: [arora2017, le2014, mikolov2013, reimers2019, jurafsky2025]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **document embedding** maps a text $s$ of any length to a vector $\vvec_s \in \reals^d$, with $d$ in the tens to
+hundreds, so that texts with similar content have nearby vectors. Classical constructions build $\vvec_s$ from
+pretrained <NoteLink to="word-embeddings">word vectors</NoteLink> $\vvec_w$: the plain average, a weighted average such
+as **SIF** (smooth inverse frequency) <Cite id="arora2017" />, or a vector trained per document, as in **doc2vec**
+<Cite id="le2014" />.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="bag-of-words">bag of words</NoteLink> is sparse and has one dimension per word, so "the car broke down"
+and "my automobile failed" share no non-zero coordinate. Word vectors place "car" near "automobile". Combining the
+word vectors of a text gives a dense vector in which texts with related words are close, even with no word in common.
+
+## Averaging word vectors
+
+Let $\Emat \in \reals^{V \times d}$ hold the word vectors as rows, and let $\xvec_s$ be the bag-of-words count vector
+of a text of length $L$. The average of the word vectors is
+
+$$
+\bar\vvec_s = \frac{1}{L} \sum_{i=1}^{L} \vvec_{w_i} = \frac{1}{L} \Emat^{\tr} \xvec_s,
+$$
+
+because $\Emat^{\tr}$ applied to the count vector adds each word's row once per occurrence. The average is a linear
+projection of the bag of words from $V$ dimensions to $d$. It inherits the bag's blindness to order and adds the
+similarity structure of $\Emat$.
+
+The plain average has a defect. Frequent words such as "the", "of" and "and" occur in every text, and their vectors are
+added to every average. All averages then share a large common part and have high cosine similarity with each other.
+Weighting each word vector by its <NoteLink to="tf-idf">TF-IDF</NoteLink> weight is a common fix. SIF
+derives a weighting from a model.
+
+## SIF: smooth inverse frequency
+
+### The model
+
+Arora, Liang and Ma model a sentence as generated around a **discourse vector** $\cvec_s$ <Cite id="arora2017" />. Each
+word is emitted independently, either from its unigram probability $p(w)$, with probability $\alpha$, or from a
+log-linear model around the discourse:
+
+$$
+p(w \mid s) = \alpha\, p(w) + (1 - \alpha) \frac{\exp\inner{\vvec_w}{\tilde\cvec_s}}{Z_{\tilde\cvec_s}}, \qquad
+\tilde\cvec_s = \beta\,\cvec_0 + (1 - \beta)\,\cvec_s,
+$$
+
+where $Z_{\tilde\cvec}$ normalises over the vocabulary. The first term lets frequent words appear whatever the topic.
+The fixed vector $\cvec_0$, orthogonal to $\cvec_s$, is a **common discourse** direction shared by all sentences, for
+example syntax.
+
+### Deriving the weights
+
+Estimate $\tilde\cvec_s$ by maximum likelihood, assuming $Z_{\tilde\cvec}$ is roughly the same, $Z$, for every
+$\tilde\cvec$, which holds when word vectors are spread roughly uniformly. The log-likelihood of word $w$ is
+
+$$
+f_w(\tilde\cvec) = \log\Big(\alpha\, p(w) + \frac{1 - \alpha}{Z} e^{\inner{\vvec_w}{\tilde\cvec}}\Big).
+$$
+
+Its gradient is
+
+$$
+\nabla f_w(\tilde\cvec) = \frac{\frac{1 - \alpha}{Z} e^{\inner{\vvec_w}{\tilde\cvec}}}{\alpha\, p(w) + \frac{1 -
+\alpha}{Z} e^{\inner{\vvec_w}{\tilde\cvec}}}\, \vvec_w.
+$$
+
+Expand to first order around $\tilde\cvec = \zeros$, where $e^0 = 1$:
+
+$$
+f_w(\tilde\cvec) \approx f_w(\zeros) + \frac{(1 - \alpha)/Z}{\alpha\, p(w) + (1 - \alpha)/Z} \inner{\vvec_w}{\tilde\cvec}
+= f_w(\zeros) + \frac{a}{p(w) + a} \inner{\vvec_w}{\tilde\cvec}, \qquad a = \frac{1 - \alpha}{\alpha Z},
+$$
+
+dividing numerator and denominator by $\alpha$. The log-likelihood of the sentence is the sum over its words, and it is
+linear in $\tilde\cvec$. On the unit sphere, a linear function $\inner{\uvec}{\tilde\cvec}$ is maximised by
+$\tilde\cvec \propto \uvec$, so
+
+$$
+\tilde\cvec_s \propto \sum_{w \in s} \frac{a}{p(w) + a}\, \vvec_w.
+$$
+
+Each word vector is weighted by $a/(p(w) + a)$. A rare word, $p(w) \ll a$, gets weight near 1. A frequent word,
+$p(w) \gg a$, gets weight near $a/p(w)$, inversely proportional to its frequency, smoothed by $a$. Arora et al. found
+$a$ between $10^{-4}$ and $10^{-3}$ to work well, and divide the sum by the sentence length.
+
+### Common component removal
+
+The weighted averages still contain the common direction $\cvec_0$. Estimate it as the first right singular vector
+$\uvec$ of the matrix whose rows are the weighted averages of all sentences in a collection (the first principal
+direction, without centring), and remove each sentence's projection on it:
+
+$$
+\vvec_s \leftarrow \vvec_s - \uvec \uvec^{\tr} \vvec_s.
+$$
+
+This is the component shared by all sentences, so removing it leaves what distinguishes them. With both steps, SIF
+beat plain averages and several trained sentence encoders on semantic textual similarity benchmarks
+<Cite id="arora2017" />. Removal needs many sentences; with a handful, the first singular vector describes the
+sample, not the language.
+
+## Worked example
+
+Give six words 3-dimensional vectors and unigram probabilities:
+
+| Word | $\vvec_w$ | $p(w)$ | SIF weight, $a = 10^{-3}$ |
+| --- | --- | --- | --- |
+| the | $(2, 2, 0)$ | 0.05 | 0.020 |
+| cat | $(1, 0, 1)$ | 0.0005 | 0.667 |
+| dog | $(1, 0.2, 0.8)$ | 0.0005 | 0.667 |
+| sat | $(0, 1, 1)$ | 0.0002 | 0.833 |
+| stock | $(0, 1, -1)$ | 0.0003 | 0.769 |
+| fell | $(-1, 1, -1)$ | 0.0002 | 0.833 |
+
+Embed "the cat sat", "the dog sat" and "the stock fell". The plain averages are $(1, 1, 0.667)$, $(1, 1.067, 0.6)$ and
+$(0.333, 1.333, -0.667)$. The first and third sentences share only "the", yet their cosine similarity is 0.512,
+because the vector of "the" is the longest of the three in each sum.
+
+With SIF weights, the averages become $(0.235, 0.291, 0.500)$, $(0.235, 0.335, 0.456)$ and $(-0.265, 0.547, -0.534)$.
+The cosine of the first and third falls to $-0.337$, while the first and second stay similar at 0.995 (0.998 before).
+The weight of "the" is 0.020, so it no longer sets the direction of every sentence.
+
+## doc2vec: paragraph vectors
+
+Le and Mikolov learn a vector per document directly, by the same kind of prediction task that trains word2vec
+<Cite id="le2014" /> <Cite id="mikolov2013" />.
+
+- **PV-DM** (distributed memory). Each document $s$ has a trainable vector $\dvec_s$. To predict a word from the words
+  before it, the model combines $\dvec_s$ with the context word vectors, by averaging or concatenation, and applies a
+  softmax over the vocabulary. $\dvec_s$ acts as a memory of what the rest of the document is about.
+- **PV-DBOW** (distributed bag of words). $\dvec_s$ alone predicts words sampled from the document, ignoring order, as
+  skip-gram predicts context words from a centre word.
+
+Word vectors and softmax weights are shared across documents. A new document has no vector, so one is found at test
+time by gradient descent on its words, with all shared parameters frozen. Inference is therefore an optimisation, not
+a forward pass, and its result depends on the number of steps and the learning rate. Le and Mikolov recommend
+combining the PV-DM and PV-DBOW vectors.
+
+## Relation to other representations
+
+- A truncated SVD of the document–term matrix, as in <NoteLink to="latent-semantic-analysis">latent semantic
+  analysis</NoteLink>, gives dense document vectors from counts alone.
+- The topic proportions of <NoteLink to="latent-dirichlet-allocation">latent Dirichlet allocation</NoteLink> are a
+  document embedding on the simplex, whose coordinates can be read as topics.
+- <NoteLink to="sentence-embeddings">Sentence embeddings</NoteLink> from fine-tuned transformer encoders read word order
+  and context, and they outperform averaged word vectors on semantic similarity <Cite id="reimers2019" />. Averages and
+  SIF remain strong, cheap baselines.
+
+## Assumptions
+
+- **Order carries little meaning.** Averages and PV-DBOW ignore order; PV-DM uses it only within a window.
+- **Word vectors transfer.** SIF assumes the pretrained word vectors and word frequencies suit the target domain.
+
+## Pitfalls
+
+- **Unweighted averages are dominated by frequent words.** Weight or remove them.
+- **Long documents average away their content.** A 5,000-word document's average is close to the corpus mean. Split
+  long documents into passages.
+- **Estimate $p(w)$ and $\uvec$ on a large corpus.** Estimates from the few texts being compared are noisy.
+- **doc2vec inference is stochastic.** The same document can receive different vectors on two runs. Fix seeds and
+  increase the number of inference steps.

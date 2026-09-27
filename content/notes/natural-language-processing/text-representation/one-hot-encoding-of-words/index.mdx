@@ -1,0 +1,110 @@
+---
+title: One-hot encoding of words
+kind: concept
+summary: 'One-hot encoding represents word $i$ of a vocabulary of size $V$ by the standard basis vector $\evec_i \in \{0,1\}^V$. Every two distinct words are orthogonal and at distance $\sqrt{2}$, so the encoding carries identity and nothing else. Words outside the vocabulary map to an unknown token.'
+tags: [nlp, text-representation, feature-engineering, linear-algebra, worked-example]
+aliases: [one-hot word vectors, one-hot word representation, local representation, vocabulary index, word index, unknown token, UNK token, minimum count threshold]
+requires: [tokenisation]
+partOf: [text-representation-pipeline]
+related: [categorical-encoding, bag-of-words, word-embeddings, feature-hashing-for-text, distributional-semantics]
+references: [jurafsky2025, bird2009]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Fix a vocabulary $\Vcal = \set{w_1, \dots, w_V}$ and an index $i(w)$ for each word. The **one-hot encoding** of word
+$w$ is the standard basis vector $\evec_{i(w)} \in \set{0, 1}^V$: a 1 in coordinate $i(w)$ and 0 elsewhere. A text of
+$T$ tokens becomes a $T \times V$ matrix with one 1 per row. A word not in $\Vcal$ is mapped to a reserved unknown
+token, written `<unk>`, which has its own index <Cite id="jurafsky2025" />.
+</Definition>
+
+## Intuition
+
+A one-hot vector is a word's identity card written as a vector. It is the input format that linear algebra requires
+for a symbol that has no numeric value. It is the same construction that
+<NoteLink to="categorical-encoding">categorical encoding</NoteLink> applies to any discrete feature, applied to a
+feature with tens of thousands of levels.
+
+The encoding says which word occurred and nothing about what the word means. That is its defining property and its
+defining limitation.
+
+## Details
+
+### All distinct words are equidistant
+
+For basis vectors, $\evec_i^{\tr} \evec_j = 1$ when $i = j$ and 0 otherwise. For two different words $i \ne j$:
+
+$$
+\norm{\evec_i - \evec_j}^2 = \evec_i^{\tr}\evec_i - 2\,\evec_i^{\tr}\evec_j + \evec_j^{\tr}\evec_j = 1 - 0 + 1 = 2,
+$$
+
+so $\norm{\evec_i - \evec_j} = \sqrt 2$ and the cosine similarity is $\evec_i^{\tr}\evec_j / (\norm{\evec_i}\norm{\evec_j})
+= 0$. The result holds for every pair. "cat" is exactly as far from "dog" as from "carburettor". Any method that
+compares one-hot vectors by distance, inner product or angle sees every pair of distinct words as equally unrelated.
+
+### Linear models learn one parameter per word
+
+A linear function of a one-hot vector reads off a single coordinate: $\wvec^{\tr} \evec_i = w_i$. A classifier on
+one-hot inputs therefore learns a separate weight for each word, and nothing it learns about "cat" transfers to "cats"
+or "kitten". Rare words get few training examples, so their weights are poorly estimated.
+
+### An embedding layer is a matrix times a one-hot vector
+
+Let $\Emat \in \reals^{V \times d}$ hold one $d$-dimensional row per word. Then $\Emat^{\tr} \evec_i$ is row $i$ of
+$\Emat$. An embedding layer computes exactly this product, implemented as a table lookup because the product with a
+one-hot vector touches one row. Training $\Emat$ so that similar words get similar rows gives
+<NoteLink to="word-embeddings">word embeddings</NoteLink>, which replace the fixed geometry of one-hot vectors, where
+every pair is at distance $\sqrt 2$, with a learned one.
+
+### A bag of words is a sum of one-hot vectors
+
+Summing the rows of a text's $T \times V$ one-hot matrix gives a vector whose coordinate $i$ counts the occurrences of
+word $i$. That sum is the text's <NoteLink to="bag-of-words">bag of words</NoteLink>. Summing discards the row order,
+which is why a bag of words cannot tell "dog bites man" from "man bites dog".
+
+### Sparsity and storage
+
+A one-hot vector has one non-zero out of $V$. Storing it densely costs $V$ numbers; storing it sparsely costs one
+integer, the index. Every practical system stores the index and never builds the vector.
+
+## Choosing the vocabulary
+
+The vocabulary is fixed from training text. Words that occur fewer than a minimum count $c_{\min}$ times are left out,
+because their parameters could not be learned. At test time, every word outside $\Vcal$ becomes `<unk>`.
+
+**Worked example.** Take the 161,975 lower-cased alphabetic tokens of _Emma_ from the NLTK corpus sample
+<Cite id="bird2009" />. Build the vocabulary from the first half of the book and encode the second half.
+
+| Minimum count $c_{\min}$ | Vocabulary size $V$ | Tokens of the second half mapped to `<unk>` |
+| --- | --- | --- |
+| 1 | 5,225 | 3.6% |
+| 2 | 3,015 | 5.8% |
+| 5 | 1,458 | 10.2% |
+
+Even with every word of the first half kept, 3.6% of the tokens of the second half are unknown, and 1,871 distinct
+words are lost. Raising $c_{\min}$ from 1 to 5 shrinks $V$ by a factor of 3.6 and nearly triples the unknown rate. The
+unknown words are the rare ones, such as names and specific nouns, which often carry the most information about a
+text.
+
+Three alternatives avoid a single `<unk>` token. Subword tokenisers such as
+<NoteLink to="byte-pair-encoding">byte-pair encoding</NoteLink> split an unknown word into known pieces.
+<NoteLink to="character-n-grams-and-shingles">Character n-grams</NoteLink> represent any word by its substrings.
+<NoteLink to="feature-hashing-for-text">Feature hashing</NoteLink> maps any word to a column without a vocabulary.
+
+## Assumptions
+
+- **Words are atomic symbols.** Morphology, spelling and meaning are invisible. Relations between words must come
+  from elsewhere: <NoteLink to="stemming">stemming</NoteLink> and <NoteLink to="lemmatisation">lemmatisation</NoteLink>
+  merge forms before encoding, and <NoteLink to="distributional-semantics">distributional representations</NoteLink>
+  learn similarity from context.
+- **The vocabulary is closed.** The encoding has no place for a new word except `<unk>`.
+
+## Pitfalls
+
+- **The index order is arbitrary.** Indices are often assigned by frequency rank, but a model must not treat the index
+  as a number. Feeding $i(w)$ as a single numeric feature imposes an order that means nothing.
+- **Vocabularies must match.** A model trained with one index map fails silently with another. Store the vocabulary
+  with the model.
+- **Dense one-hot matrices do not fit.** A $T \times V$ dense matrix for a book of $T = 160{,}000$ tokens with
+  $V = 50{,}000$ has $8 \times 10^9$ entries. Use indices or sparse matrices.

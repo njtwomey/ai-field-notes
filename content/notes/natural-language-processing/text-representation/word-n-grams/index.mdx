@@ -1,0 +1,156 @@
+---
+title: Word n-grams
+kind: concept
+summary: 'A word n-gram is a run of $n$ consecutive tokens. Adding bigrams to a bag of words restores local order ("not good", "New York") at the price of a vocabulary that grows much faster than the text. Collocations, pairs that co-occur beyond chance, are scored by PMI or Dunning''s $G^2$.'
+tags: [nlp, text-representation, feature-engineering, statistics, worked-example]
+aliases: [word n-gram, n-gram features, bag of n-grams, bigram features, trigram features, collocation, collocation detection, collocation extraction, log-likelihood ratio for collocations, Dunning's G-squared, G-squared statistic, skip-gram features, k-skip-n-gram]
+requires: [bag-of-words]
+partOf: [text-representation-pipeline]
+related: [n-gram-language-model, co-occurrence-matrices-and-pmi, mutual-information, feature-hashing-for-text, character-n-grams-and-shingles, stop-words, bleu, rouge]
+references: [dunning1993, church1990, guthrie2006, manning1999, jurafsky2025, bird2009]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **word n-gram** is a sequence of $n$ consecutive tokens $(w_i, \dots, w_{i+n-1})$. A document of $L$ tokens has
+$L - n + 1$ n-gram tokens. A **bag of n-grams** counts every n-gram, usually for all orders $n$ from 1 up to a maximum,
+as features of the document. A **collocation** is an n-gram whose words occur together more often than their separate
+frequencies predict, such as "strong tea" or "Frank Churchill" <Cite id="manning1999" />.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="bag-of-words">bag of words</NoteLink> cannot tell "dog bites man" from "man bites dog". Their bigrams
+differ: \{"dog bites", "bites man"\} against \{"man bites", "bites dog"\}. Bigram features capture negation ("not good"),
+compound names ("New York", "machine learning") and short phrases, all of which unigram counts break apart. N-grams
+keep order within a window of $n$ tokens and discard it beyond.
+
+The same objects appear in three roles. As features they extend the bag of words. In an
+<NoteLink to="n-gram-language-model">n-gram language model</NoteLink> they are the conditioning contexts of next-word
+probabilities. In evaluation, <NoteLink to="bleu">BLEU</NoteLink> and <NoteLink to="rouge">ROUGE</NoteLink> count
+n-grams shared with a reference.
+
+## Vocabulary growth
+
+Take the 161,975 lower-cased alphabetic tokens of _Emma_ in the NLTK corpus sample <Cite id="bird2009" />.
+
+| $n$ | Distinct n-grams | Share seen once |
+| --- | --- | --- |
+| 1 | 7,096 | 38.8% |
+| 2 | 65,913 | 72.5% |
+| 3 | 131,033 | 89.8% |
+| 4 | 155,485 | 97.2% |
+
+The number of possible n-grams is $V^n$. The number observed is bounded by the $L - n + 1$ n-gram tokens, and for
+$n \ge 3$ it approaches that bound: 4-grams are nearly all distinct, and 97% of them occur once. A feature that occurs
+once in training cannot be weighted reliably and rarely recurs at test time.
+
+Growth with text length is also faster for larger $n$. In the first 10,000 tokens of _Emma_ there are 1,764 distinct
+unigrams and 7,084 bigrams; in the first 160,000 there are 7,040 and 65,277. Sixteen times more text gave four times
+the unigram vocabulary and nine times the bigram vocabulary. Bigram and trigram feature sets therefore need pruning by
+minimum count, <NoteLink to="feature-hashing-for-text">feature hashing</NoteLink>, or both.
+
+## Collocations
+
+Most frequent bigrams are not collocations. The most frequent bigrams of _Emma_ are "to be" (608) and "of the" (566),
+which are frequent because their words are. A collocation measure compares the observed count of a pair with the count
+expected if the two words were independent.
+
+### Pointwise mutual information
+
+For words $a$ and $b$, with $p(a, b)$ the probability that a bigram is "$a$ $b$" and $p(a)$, $p(b)$ the probabilities
+of $a$ in first position and $b$ in second,
+
+$$
+\operatorname{PMI}(a, b) = \log_2 \frac{p(a, b)}{p(a)\, p(b)} = \log_2 \frac{c(a\,b)\, N}{c(a)\, c(b)},
+$$
+
+where $N$ is the number of bigram tokens and the $c$ are counts <Cite id="church1990" />. Under independence
+$p(a, b) = p(a) p(b)$ and PMI is 0. Each extra bit means the pair occurs twice as often as independence predicts.
+Church and Hanks called it the association ratio and used it to find word associations for lexicography.
+
+**PMI favours rare pairs.** If $a$ and $b$ each occur exactly once, and together, then
+$c(a\,b) = c(a) = c(b) = 1$ and $\operatorname{PMI} = \log_2 N$, the largest value possible. _Emma_ has
+$N = 161{,}974$ bigrams, so such a pair scores $\log_2 N = 17.31$ bits, and 79 bigrams tie at that maximum, among them
+"scalloped oysters" and "inconveniently shy". The score is an estimate from one observation. A minimum count fixes the
+ranking: among bigrams seen at least 20 times, the highest PMI goes to "maple grove" (12.35 bits), "colonel campbell"
+and "robert martin", which are names in the novel.
+
+### Dunning's likelihood ratio
+
+Dunning proposed a test that accounts for how much evidence a count carries <Cite id="dunning1993" />. Arrange the
+bigrams in a $2 \times 2$ table by whether the first word is $a$ and whether the second is $b$:
+
+| | second is $b$ | second is not $b$ |
+| --- | --- | --- |
+| first is $a$ | $k_{11}$ | $k_{12}$ |
+| first is not $a$ | $k_{21}$ | $k_{22}$ |
+
+Under the null hypothesis, the probability that the second word is $b$ is the same, $\pi$, whether or not the first is
+$a$. Under the alternative it is $\pi_1$ after $a$ and $\pi_2$ otherwise. Each row is a binomial sample, so the
+log-likelihood of the table is
+
+$$
+\ell(\pi_1, \pi_2) = k_{11} \log \pi_1 + k_{12} \log(1 - \pi_1) + k_{21} \log \pi_2 + k_{22} \log(1 - \pi_2).
+$$
+
+The maximum-likelihood estimates are $\hat\pi_1 = k_{11}/(k_{11} + k_{12})$, $\hat\pi_2 = k_{21}/(k_{21} + k_{22})$
+and, under the null, $\hat\pi = (k_{11} + k_{21})/N$. The likelihood-ratio statistic is
+
+$$
+G^2 = 2\big(\ell(\hat\pi_1, \hat\pi_2) - \ell(\hat\pi, \hat\pi)\big) = 2 \sum_{i,j} k_{ij} \log \frac{k_{ij}}{E_{ij}},
+$$
+
+where $E_{ij}$ is the count expected under independence, the row total times the column total divided by $N$. The
+second form follows by substituting the estimates: $\hat\pi_1 / \hat\pi = k_{11} / E_{11}$, and likewise for the other
+cells. Under the null, $G^2$ is approximately $\chi^2$ with one degree of freedom.
+
+$G^2$ is a sum of observed counts times log ratios, so a pair seen once contributes little however surprising it is.
+Pearson's $\chi^2 = \sum (k_{ij} - E_{ij})^2 / E_{ij}$ tests the same hypothesis but divides by $E_{ij}$, which is tiny
+for rare words, and Dunning showed that it overstates the significance of rare events.
+
+### Worked example
+
+In _Emma_, "frank" is the first word of 208 bigrams, "churchill" the second word of 224, and "frank churchill" occurs
+151 times, so the table is $k_{11} = 151$, $k_{12} = 57$, $k_{21} = 73$, $k_{22} = 161{,}693$. The expected count is
+$E_{11} = 208 \times 224 / 161{,}974 = 0.288$.
+
+| Bigram | $k_{11}$ | PMI (bits) | $G^2$ | Pearson $\chi^2$ |
+| --- | --- | --- | --- | --- |
+| frank churchill | 151 | 9.04 | 1,882.2 | 79,175 |
+| of the | 566 | 2.04 | 826.2 | 1,410 |
+| inconveniently shy | 1 | 17.31 | 26.0 | 161,974 |
+
+For the single-occurrence pair, $\chi^2$ equals $N$, the value of a perfect association in a large sample, and ranks
+it above "frank churchill". $G^2 \approx 2(\ln N + 1) = 26.0$ is significant but small, because one observation is
+little evidence. The top five bigrams of _Emma_ by $G^2$ are "i am" (2,936), "mr knightley" (2,621), "mrs weston"
+(2,297), "to be" (1,884) and "frank churchill" (1,882). $G^2$ finds associations that are both strong and well
+attested, which includes frequent grammatical pairs; PMI with a count threshold finds names and fixed phrases.
+
+## Skip-grams as features
+
+A **$k$-skip-bigram** is a pair of tokens with at most $k$ tokens between them <Cite id="guthrie2006" />. It tolerates
+an inserted word: "not very good" contains the 1-skip-bigram "not good". A sequence of $L$ tokens has
+$\sum_{g=1}^{k+1} (L - g) = (k + 1) L - (k + 1)(k + 2)/2$ $k$-skip-bigrams, counting the ordinary bigrams ($g = 1$).
+"the cat sat on the mat" ($L = 6$) has 5 bigrams, 9 1-skip-bigrams and 12 2-skip-bigrams. Guthrie et al. measured how many
+trigrams of test documents appear in the training data; skip-grams from a 50-million-word corpus covered about as many
+as ordinary trigrams from a corpus four times larger. The pairs of a word
+and every word in a window around it are also the training data of the skip-gram
+<NoteLink to="word-embeddings">word embedding</NoteLink> model and of
+<NoteLink to="co-occurrence-matrices-and-pmi">co-occurrence matrices</NoteLink>.
+
+## Assumptions
+
+- **Order matters only locally.** Dependencies longer than $n$ tokens are invisible.
+- **Contiguity.** Plain n-grams require adjacency. Skip-grams relax it.
+
+## Pitfalls
+
+- **Feature explosion.** Unpruned trigram features outnumber training documents by orders of magnitude. Use a
+  minimum count, a maximum feature count or hashing, and regularise the model.
+- **Stop-word removal before n-grams invents n-grams.** Removing "of" from "king of France" creates the bigram
+  "king france", which never occurred. Form n-grams first (see <NoteLink to="stop-words">stop words</NoteLink>).
+- **PMI without a count threshold ranks noise.** Require a minimum count, or rank by $G^2$.
+- **Significance is not importance.** $G^2$ ranks "i am" highly because it is strongly and frequently associated, not
+  because it is an interesting phrase. Filter by part-of-speech patterns such as adjective–noun when looking for terms.

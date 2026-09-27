@@ -1,0 +1,152 @@
+---
+title: Co-occurrence matrices and PMI
+kind: concept
+summary: 'A word–context matrix counts how often each word occurs within a window of each context word. Pointwise mutual information, $\log p(w,c)/(p(w)p(c))$, clipped at zero (PPMI), removes the dominance of frequent words; a truncated SVD of the PPMI matrix gives dense word vectors.'
+tags: [nlp, text-representation, distributional-semantics, information-theory, linear-algebra, worked-example]
+aliases: [co-occurrence matrix, cooccurrence matrix, word–context matrix, word-context matrix, term–term matrix, term-term matrix, pointwise mutual information, PMI, positive PMI, PPMI, shifted PPMI, context distribution smoothing, association ratio]
+requires: [bag-of-words, mutual-information]
+partOf: [text-representation-pipeline]
+related: [distributional-semantics, word-embeddings, singular-value-decomposition, latent-semantic-analysis, word-n-grams, pairwise-distances-and-cosine-similarity]
+references: [church1990, levy2015, levy2014, turney2010, jurafsky2025]
+status: draft
+updated: 2026-09-27
+---
+
+import { CooccurrenceExplorer } from '../_shared/CooccurrenceExplorer'
+
+<Definition>
+Slide a window of $L$ tokens on each side over a corpus. Each target word $w$ and each context word $c$ inside its
+window form a pair; let $\Dcal$ be the multiset of pairs, $\#(w, c)$ the count of a pair, $\#(w) = \sum_c \#(w, c)$
+and $\#(c) = \sum_w \#(w, c)$. The **word–context matrix** has entries $\#(w, c)$. The **pointwise mutual information**
+of a pair is
+
+$$
+\operatorname{PMI}(w, c) = \log \frac{p(w, c)}{p(w)\, p(c)} = \log \frac{\#(w, c)\, \abs{\Dcal}}{\#(w)\, \#(c)},
+$$
+
+and **positive PMI** is $\operatorname{PPMI}(w, c) = \max(\operatorname{PMI}(w, c), 0)$ <Cite id="church1990" />
+<Cite id="levy2015" />.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="bag-of-words">bag of words</NoteLink> describes documents by their words. A word–context matrix turns
+the idea around and describes words by their neighbours. Row $w$ lists how often each context word appears near $w$.
+Two words whose rows are similar are used in similar contexts, and by the
+<NoteLink to="distributional-semantics">distributional hypothesis</NoteLink> they tend to mean similar things.
+
+Raw counts fail at this for the same reason raw term counts fail for documents. "the" is near every noun, so every
+noun row is dominated by its "the" column, and all nouns look alike. PMI asks a better question: does $c$ appear near
+$w$ more often than it would if the two were independent?
+
+## Details
+
+### The matrix and the window
+
+The context can be a window of words, a sentence, a whole document, or a syntactic relation. With documents as
+contexts, the matrix is the transpose of the document–term matrix, and similar rows mean words about the same topic;
+this is the matrix of <NoteLink to="latent-semantic-analysis">latent semantic analysis</NoteLink>. With a small window,
+similar rows mean words that fill the same slot, such as "cat" and "dog", or "Tuesday" and "Friday"
+<Cite id="turney2010" />. A window of one or two words gives more syntactic, substitutable neighbours; a window of five
+or more gives more topical ones. Many implementations weight a context by $1/\text{distance}$ or by $(L - d + 1)/L$ at
+distance $d$.
+
+### Deriving PMI from counts
+
+Estimate the joint probability of a pair by its relative frequency, $\hat p(w, c) = \#(w, c) / \abs{\Dcal}$, and the
+marginals by $\hat p(w) = \#(w)/\abs{\Dcal}$ and $\hat p(c) = \#(c)/\abs{\Dcal}$. If $w$ and $c$ were independent,
+the pair would have probability $p(w)\,p(c)$. The ratio of observed to expected is
+
+$$
+\frac{\hat p(w, c)}{\hat p(w)\, \hat p(c)} = \frac{\#(w, c)/\abs{\Dcal}}{\#(w)\,\#(c)/\abs{\Dcal}^2} = \frac{\#(w, c)\,
+\abs{\Dcal}}{\#(w)\,\#(c)},
+$$
+
+and PMI is its logarithm. PMI is 0 under independence, positive when the pair is more frequent than chance and
+negative when less. Its average over all pairs, weighted by $p(w, c)$, is the
+<NoteLink to="mutual-information">mutual information</NoteLink> between the word and context variables, hence the
+name. Frequent context words have large $\#(c)$, which divides out, so "the" no longer dominates.
+
+### Why clip at zero
+
+Negative PMI says a pair occurs less often than chance. Estimating that needs a lot of data: a pair expected 0.1 times
+and observed 0 times gives no evidence either way, yet its PMI is $\log 0 = -\infty$. Most cells of the matrix are
+zero; in the worked example below, 186 of the 256 cells are. PPMI replaces every negative or undefined value by 0,
+which keeps the matrix sparse and non-negative. PPMI is the standard weighting for count-based word vectors
+<Cite id="jurafsky2025" /> <Cite id="levy2015" />.
+
+### Rare contexts and smoothing
+
+PMI is biased towards rare contexts. A context seen once, next to $w$, gets $\log(\abs{\Dcal}/\#(w))$, the largest
+value available to that row. Levy, Goldberg and Dagan transferred a fix from word2vec: raise the context counts to a
+power $\alpha$ before normalising,
+
+$$
+P_\alpha(c) = \frac{\#(c)^\alpha}{\sum_{c'} \#(c')^\alpha}, \qquad \operatorname{PMI}_\alpha(w, c) = \log
+\frac{\hat p(w, c)}{\hat p(w)\, P_\alpha(c)},
+$$
+
+with $\alpha = 0.75$ <Cite id="levy2015" />. Because $x \mapsto x^{0.75}$ compresses large counts more than small ones,
+$P_\alpha(c) > \hat p(c)$ for rare contexts and $P_\alpha(c) < \hat p(c)$ for frequent ones. The PMI of rare contexts
+falls and that of frequent contexts rises.
+
+### Shifted PPMI and SVD
+
+Skip-gram with $k$ negative samples, at its optimum, sets the dot product of a word and a context vector to
+$\operatorname{PMI}(w, c) - \log k$ <Cite id="levy2014" />; the derivation is in
+<NoteLink to="word-embeddings">word embeddings</NoteLink>. The explicit analogue is the **shifted PPMI** matrix,
+$\max(\operatorname{PMI}(w, c) - \log k, 0)$.
+
+A PPMI row has one entry per context, tens of thousands of dimensions, mostly zero. A truncated
+<NoteLink to="singular-value-decomposition">singular value decomposition</NoteLink> $\Mmat \approx \Umat_d \Sigmamat_d
+\Vmat_d^{\tr}$ keeps the $d$ directions of largest variance. The rows of $\Umat_d \Sigmamat_d^{\,p}$ are dense
+$d$-dimensional word vectors. Levy et al. found that $p = 0.5$ or $p = 0$ works better than the textbook $p = 1$ on
+similarity tasks, and that with such choices and context smoothing, PPMI and its SVD perform comparably to skip-gram
+embeddings on many word-similarity and analogy benchmarks <Cite id="levy2015" />.
+
+## Worked example
+
+Take the thirteen sentences "the cat is a pet", "the dog is a pet", "we fed the cat", "we fed the dog", "the vet saw
+the cat", "the vet saw the dog", "the cat chased the mouse", "the dog chased the cat", "the mouse ate the cheese", "the
+mouse ate the grain", "we ate the cheese", "the cat slept" and "the dog slept". They have 58 tokens and 16 word types.
+Use a window of $L = 2$ on each side within a sentence. There are $\abs{\Dcal} = 154$ pairs.
+
+"cat" has 14 pairs: "the" 7 times, "chased" 2 times, and "a", "fed", "is", "saw" and "slept" once each. "the" appears
+in 47 pairs as a context and "slept" in 4. So
+
+$$
+\operatorname{PMI}(\text{cat}, \text{the}) = \log_2 \frac{7 \times 154}{14 \times 47} = 0.712, \qquad
+\operatorname{PMI}(\text{cat}, \text{slept}) = \log_2 \frac{1 \times 154}{14 \times 4} = 1.459 \text{ bits}.
+$$
+
+"the" was cat's most frequent context by a factor of 3.5 and is now weighted half as much as "slept". With context
+smoothing, $P_{0.75}(\text{slept}) = 0.034$ instead of 0.026 and $P_{0.75}(\text{the}) = 0.218$ instead of 0.305, and
+the two PMIs become 1.054 and 1.195 bits.
+
+Cosine similarities between rows:
+
+| Pair | Counts | PPMI | PPMI, $\alpha = 0.75$ |
+| --- | --- | --- | --- |
+| cat, dog | 0.993 | 0.939 | 0.919 |
+| cat, mouse | 0.887 | 0.409 | 0.555 |
+| mouse, cheese | 0.904 | 0.823 | 0.862 |
+| cat, cheese | 0.650 | 0.068 | 0.208 |
+
+With counts, "cat" and "cheese" have similarity 0.650, only because both occur next to "the". PPMI drops it to 0.068
+and keeps "cat" and "dog", which share "fed", "saw", "chased", "slept" and "is a", at 0.939.
+
+<CooccurrenceExplorer />
+
+## Assumptions
+
+- **Context is a bag.** Within the window, position is ignored unless contexts are marked with their offset.
+- **Counts are reliable.** PMI of pairs seen a few times is noisy. Minimum counts, smoothing and large corpora address
+  this.
+
+## Pitfalls
+
+- **Unclipped PMI of unseen pairs is $-\infty$.** Use PPMI, or add pseudo-counts before taking logarithms.
+- **The matrix is $V \times V$.** With $V = 100{,}000$ it has $10^{10}$ cells. Store it sparsely and restrict contexts to
+  the most frequent words.
+- **Window and weighting are hyperparameters.** Levy et al. showed that differences often attributed to algorithms came
+  from such choices <Cite id="levy2015" />. Compare methods with matched settings.
