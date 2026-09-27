@@ -186,6 +186,8 @@ stale.
     drag, so a range that depends on the dragged value cannot rescale under the pointer; they refit on release.
   - With one handle, pressing anywhere on the plot moves it. With several, the nearest within `GRAB_RADIUS` wins.
     Prefer handles to `onPlotClick`/`onCellClick`, and say in the caption what can be dragged.
+- A slider that walks through a sequence (iterations, updates, sweeps, rounds, steps, frames) gets `withArrows`, so
+  the reader can step one at a time.
 - In-browser computation must stay light enough for slider drags. Seeded randomness uses `rng(seed)` from
   `site/src/lib/math`, never `Math.random`. Anything heavier becomes a Python `@figure` builder.
 - Tailwind generates only the classes it finds. `site/src/index.css` has `@source '../../content'` so that classes used
