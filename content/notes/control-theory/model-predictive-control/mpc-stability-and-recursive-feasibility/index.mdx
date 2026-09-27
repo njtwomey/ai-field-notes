@@ -1,0 +1,148 @@
+---
+title: MPC stability and recursive feasibility
+kind: concept
+summary: 'Model predictive control is stable and stays feasible when its terminal cost $V_f$ and terminal set $\Xcal_f$ admit a local controller that keeps the state in $\Xcal_f$ and makes $V_f$ fall by at least the stage cost. The optimal cost then decreases at every step and is a Lyapunov function.'
+tags: [control-theory, optimal-control, stability, worked-example]
+aliases: [recursive feasibility, terminal set, terminal cost, terminal constraint, MPC stability, maximal output admissible set, region of attraction of MPC, terminal ingredients]
+requires: [model-predictive-control, lyapunov-stability]
+related: [linear-quadratic-regulator, hamilton-jacobi-bellman-equation]
+references: [mayne2000, rawlings2017]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Consider MPC for $\xvec^+ = \fvec(\xvec, \uvec)$ with stage cost $\ell$, horizon $N$, terminal cost $V_f$, constraint
+sets $\Xcal$ and $\Ucal$, and terminal set $\Xcal_f \subseteq \Xcal$. Let $V_N(\xvec)$ be the optimal cost from $\xvec$
+and $\Xcal_N$ the set of states from which the problem is feasible. The **terminal ingredients** are adequate if
+there is a local control law $\kappa_f$ such that for every $\xvec \in \Xcal_f$:
+
+1. $\kappa_f(\xvec) \in \Ucal$ (the local law respects the input constraints);
+2. $\fvec(\xvec, \kappa_f(\xvec)) \in \Xcal_f$ (the terminal set is invariant under it);
+3. $V_f(\fvec(\xvec, \kappa_f(\xvec))) - V_f(\xvec) \le -\ell(\xvec, \kappa_f(\xvec))$ (the terminal cost is a local
+   Lyapunov function that decreases by at least the stage cost).
+
+Under these conditions, and with $\ell(\xvec, \uvec) \ge \alpha\norm{\xvec}^2$ for some $\alpha > 0$, MPC is
+**recursively feasible** on $\Xcal_N$ and the origin is asymptotically stable with region of attraction $\Xcal_N$
+<Cite id="mayne2000" />.
+</Definition>
+
+## Why re-optimising is not enough
+
+Each MPC step is optimal only for a truncated problem. The plan at time $k$ assumes the world ends at $k + N$, and the
+plan at time $k + 1$ assumes it ends one step later. Nothing forces these successive plans to agree, and a short
+horizon can make the controller take actions whose cost appears only beyond the horizon. The
+<NoteLink to="model-predictive-control">MPC</NoteLink> note shows a double integrator that never comes to rest under a
+one-step horizon without terminal cost. Two separate things can fail: the optimisation can become infeasible, and the
+closed loop can be unstable. The terminal ingredients fix both with one argument.
+
+## Recursive feasibility
+
+Suppose the problem is feasible at $\xvec$, with optimal inputs $\uvec_0^*, \dots, \uvec_{N-1}^*$ and predicted
+states $\xvec_0^* = \xvec, \xvec_1^*, \dots, \xvec_N^*$, where $\xvec_N^* \in \Xcal_f$. MPC applies $\uvec_0^*$, and
+without disturbances the next state is $\xvec^+ = \xvec_1^*$. Build a candidate plan from there by shifting the old
+plan and appending the local law:
+
+$$
+\tilde{\uvec} = \paren{\uvec_1^*, \dots, \uvec_{N-1}^*, \kappa_f(\xvec_N^*)}.
+$$
+
+Its first $N - 1$ inputs reproduce the old predicted states $\xvec_1^*, \dots, \xvec_N^*$, which satisfy the
+constraints. The last input is admissible by condition 1, and it takes $\xvec_N^*$ to
+$\fvec(\xvec_N^*, \kappa_f(\xvec_N^*)) \in \Xcal_f$ by condition 2. So the candidate is feasible at $\xvec^+$, and the
+problem at the next step is feasible too. By induction, a controller that starts in $\Xcal_N$ stays feasible forever.
+
+## Stability
+
+The candidate is feasible but not necessarily optimal, so the optimal cost at $\xvec^+$ is at most its cost. The
+candidate's cost is the old optimal cost with the first stage removed, the old terminal cost removed, and one new stage
+and terminal cost added:
+
+$$
+V_N(\xvec^+) \le V_N(\xvec) - \ell(\xvec, \uvec_0^*)
++ \underbrace{\ell(\xvec_N^*, \kappa_f(\xvec_N^*)) + V_f(\fvec(\xvec_N^*, \kappa_f(\xvec_N^*))) - V_f(\xvec_N^*)}_{\le\, 0 \text{ by condition 3}}.
+$$
+
+So
+
+$$
+V_N(\xvec^+) - V_N(\xvec) \le -\ell(\xvec, \uvec_0^*) \le -\alpha\norm{\xvec}^2.
+$$
+
+The optimal cost falls at every step by at least a positive definite amount. With upper and lower quadratic bounds on
+$V_N$, which hold for linear systems with quadratic costs, $V_N$ is a
+<NoteLink to="lyapunov-stability">Lyapunov function</NoteLink> for the closed loop. Summing the decrease over time also
+shows $\sum_k\ell(\xvec_k, \uvec_k) \le V_N(\xvec_0)$, so the stage costs, and with them the states, go to zero.
+
+The argument uses only feasibility of the shifted plan, never optimality of the solver's answer. A solver stopped
+early still gives stability, provided it returns a plan at least as good as the shifted one.
+
+## Terminal ingredients for linear systems
+
+For $\xvec^+ = \Amat\xvec + \Bmat\uvec$ with $\ell = \xvec^\top\Qmat\xvec + \uvec^\top\Rmat\uvec$, take the
+infinite-horizon <NoteLink to="linear-quadratic-regulator">LQR</NoteLink> as the local law: $\kappa_f(\xvec) =
+-\Kmat\xvec$ and $V_f(\xvec) = \xvec^\top\Pmat\xvec$, with $\Pmat$ from the discrete algebraic Riccati equation. With
+$\Amat_K = \Amat - \Bmat\Kmat$, the Riccati equation can be rewritten as
+
+$$
+\Amat_K^\top\Pmat\Amat_K - \Pmat = -\paren{\Qmat + \Kmat^\top\Rmat\Kmat},
+$$
+
+which is condition 3 with equality: along the LQR closed loop the cost-to-go falls by exactly the stage cost. The
+terminal set must make conditions 1 and 2 hold. Any set that is invariant under $\Amat_K$ and on which $-\Kmat\xvec$
+satisfies the constraints works. Common choices are a sublevel set $\set{\xvec : \xvec^\top\Pmat\xvec \le c}$, with $c$
+small enough that the constraints hold on it (ellipsoids are invariant because $\Pmat$ decreases along the loop), or
+the largest such polyhedral set, the **maximal output admissible set**. Inside $\Xcal_f$ the constraints are inactive
+and MPC coincides with the LQR.
+
+<Derivation title="Rewriting the Riccati equation">
+Write $\Mmat = \Rmat + \Bmat^\top\Pmat\Bmat$, so $\Kmat = \Mmat^{-1}\Bmat^\top\Pmat\Amat$ and
+$\Mmat\Kmat = \Bmat^\top\Pmat\Amat$. Expanding,
+
+$$
+\Amat_K^\top\Pmat\Amat_K + \Kmat^\top\Rmat\Kmat
+= \Amat^\top\Pmat\Amat - 2\Amat^\top\Pmat\Bmat\Kmat + \Kmat^\top\Mmat\Kmat
+= \Amat^\top\Pmat\Amat - \Amat^\top\Pmat\Bmat\Kmat,
+$$
+
+using $\Kmat^\top\Mmat\Kmat = \Amat^\top\Pmat\Bmat\Kmat$ (the cross term is symmetric). The Riccati equation says this
+equals $\Pmat - \Qmat$, which rearranges to the identity above.
+</Derivation>
+
+The simplest terminal ingredients are $V_f = 0$ and $\Xcal_f = \set{\zeros}$, a **terminal equality constraint**
+$\xvec_N = \zeros$ with $\kappa_f = \zeros$. The conditions hold trivially, but the feasible set is only the states that
+can be driven exactly to the origin in $N$ steps, which is small for short horizons.
+
+## Worked example
+
+Take the unstable scalar system $x^+ = 2x + u$ with $\abs{u} \le 1$ and $Q = R = 1$. The Riccati equation
+$p = 1 + 4p - 4p^2/(1 + p)$ reduces to $p^2 - 4p - 1 = 0$, so $p = 2 + \sqrt5 = 4.236$. The LQR gain is
+$K = 2p/(1 + p) = 1.618$ and the closed loop is $x^+ = 0.382\,x$. The check of condition 3:
+$(0.382^2 - 1)\,p = -3.618 = -(1 + K^2)$.
+
+**Terminal set.** The local law $u = -1.618x$ respects $\abs{u} \le 1$ when $\abs{x} \le 1/1.618 = 0.618$, and the
+closed loop shrinks $\abs{x}$, so $\Xcal_f = [-0.618, 0.618]$ is invariant.
+
+**Feasible sets.** A state is in $\Xcal_{j+1}$ if some admissible input takes it into $\Xcal_j$ in one step. With
+$\Xcal_j = [-b_j, b_j]$, the condition $\abs{2x + u} \le b_j$ for some $\abs{u} \le 1$ gives
+$b_{j+1} = (b_j + 1)/2$. Starting from $b_0 = 0.618$: $b_1 = 0.809$, $b_2 = 0.905$, $b_3 = 0.952$, approaching 1. The
+region of attraction grows with the horizon towards $(-1, 1)$, the set of states from which the bounded input can
+overcome the instability at all. From $\abs{x} \ge 1$ the state escapes whatever the controller does, since
+$\abs{2x + u} \ge 2\abs{x} - 1 \ge \abs{x}$. The horizon buys a larger region of attraction, not stability itself.
+
+## Assumptions
+
+- The model is exact and there are no disturbances, so the next state is the predicted one. With bounded disturbances
+  the shifted plan can become infeasible. Robust MPC schemes, such as tube MPC, tighten the constraints to keep a
+  margin.
+- The optimisation is solved to a plan at least as good as the shifted candidate at every step.
+
+## Pitfalls
+
+- **Dropping the terminal ingredients and hoping.** Long enough horizons are stabilising without them for many
+  problems, but how long is enough is problem-dependent and hard to certify.
+- **A terminal set that is too small.** A tiny $\Xcal_f$ satisfies the conditions easily but shrinks the region of
+  attraction for a given horizon. The largest invariant admissible set is the best choice, at the cost of more
+  constraints.
+- **Hard state constraints with disturbances.** Recursive feasibility is a nominal property. Softening state
+  constraints restores solvability but also removes the guarantee that they hold.

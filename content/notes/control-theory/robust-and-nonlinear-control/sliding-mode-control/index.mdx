@@ -1,0 +1,107 @@
+---
+title: Sliding-mode control
+kind: technique
+summary: 'Sliding-mode control picks a surface $s(\xvec) = 0$ on which the error decays, then uses a switching input $u = u_{\mathrm{eq}} - k\,\sgn(s)$ that drives the state onto the surface in finite time and holds it there despite bounded matched disturbances. Its price is chattering.'
+tags: [control-theory, nonlinear-systems, robust-control, feedback, worked-example]
+aliases: [sliding mode control, SMC, variable structure control, sliding surface, reaching condition, equivalent control, chattering, boundary layer]
+requires: [lyapunov-stability]
+related: [feedback-linearisation, adaptive-control, h-infinity-control, pontryagin-maximum-principle]
+references: [utkin1977, slotine1991, khalil2002]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For a system $x^{(n)} = f(\xvec) + b(\xvec)u + d(t)$ with tracking error $e = x - x_d$, a **sliding surface** is
+$s = \paren{\frac{d}{dt} + \lambda}^{n-1}e = 0$ with $\lambda > 0$. **Sliding-mode control** chooses the input so that
+the **reaching condition**
+
+$$
+\tfrac12\frac{d}{dt}s^2 \le -\eta\abs{s}, \qquad \eta > 0,
+$$
+
+holds for every admissible model error and disturbance <Cite id="utkin1977" />. The state then reaches $s = 0$ in
+finite time and slides along it, where the error obeys the stable linear equation
+$\paren{\frac{d}{dt} + \lambda}^{n-1}e = 0$.
+</Definition>
+
+## Problem
+
+Model-based cancellation, as in <NoteLink to="feedback-linearisation">feedback linearisation</NoteLink>, needs an
+exact model. Real models have bounded but unknown errors: an uncertain mass, unmodelled friction, a load disturbance.
+Sliding-mode control trades smoothness for a guarantee: as long as the uncertainty enters through the same channel as
+the input and has a known bound, the closed loop behaves exactly like a chosen first-order system after a finite
+reaching time.
+
+## Mechanism
+
+Take $n = 2$, the common case of a mechanical system $\ddot{x} = f(\xvec) + u + d$ with $b = 1$. The model knows an
+estimate $\hat{f}$ with $\abs{f - \hat{f} + d} \le F$. Choose
+
+$$
+s = \dot{e} + \lambda e.
+$$
+
+On $s = 0$, $\dot{e} = -\lambda e$, so the error decays as $e^{-\lambda t}$ and the dynamics on the surface do not
+depend on $f$ or $d$ at all. The problem of order 2 has become a problem of order 1: keep $s$ at zero.
+
+Differentiate $s$ along the dynamics: $\dot{s} = \ddot{x} - \ddot{x}_d + \lambda\dot{e} = f + u + d - \ddot{x}_d +
+\lambda\dot{e}$. The input that would hold $\dot{s} = 0$ with the nominal model is the **equivalent control**
+$u_{\mathrm{eq}} = -\hat{f} + \ddot{x}_d - \lambda\dot{e}$. Add a switching term:
+
+$$
+u = u_{\mathrm{eq}} - k\,\sgn(s) \quad\Longrightarrow\quad \dot{s} = (f - \hat{f} + d) - k\,\sgn(s).
+$$
+
+Then
+
+$$
+s\dot{s} = s\,(f - \hat{f} + d) - k\abs{s} \le (F - k)\abs{s}.
+$$
+
+With $k = F + \eta$ the reaching condition $s\dot{s} \le -\eta\abs{s}$ holds. $V = \tfrac12 s^2$ is a
+<NoteLink to="lyapunov-stability">Lyapunov function</NoteLink> for the scalar $s$, and more: since
+$\frac{d}{dt}\abs{s} \le -\eta$ away from zero, $\abs{s}$ falls at least at rate $\eta$ and reaches zero no later than
+$t_r = \abs{s(0)}/\eta$. Once on the surface, the switching term flips sign every time $s$ strays, and the state is
+held there.
+
+## Worked example
+
+A unit mass with an unknown force $\abs{d(t)} \le 1$, $\ddot{x} = u + d$, must be brought to $x = 0$. Take
+$\lambda = 2$, $\hat{f} = 0$, $F = 1$ and $\eta = 0.5$, so $k = 1.5$ and
+
+$$
+u = -2\dot{x} - 1.5\,\sgn(\dot{x} + 2x).
+$$
+
+From $x(0) = 1$, $\dot{x}(0) = 0$: $s(0) = 2$, so the state reaches the surface within $2/0.5 = 4$ s whatever $d$ does.
+From then on $\dot{x} = -2x$ and $x$ halves every $0.35$ s. Neither result needed $d$, only its bound. A linear
+controller with the same stiffness would leave a steady-state error for a constant $d$.
+
+## Chattering and the boundary layer
+
+The discontinuous $\sgn(s)$ needs an actuator that switches infinitely fast. Real actuators have delays and finite
+bandwidth, so the state overshoots the surface, the sign flips, and the input oscillates at high frequency with
+amplitude $2k$. This **chattering** wears actuators and excites unmodelled resonances. The standard fix replaces
+$\sgn(s)$ by the saturation $\operatorname{sat}(s/\phi)$, linear inside a **boundary layer** $\abs{s} \le \phi$. The
+input is then continuous. Outside the layer the reaching argument holds unchanged; inside it the state is confined to
+$\abs{s} \le \phi$, which bounds the tracking error by $\phi/\lambda$ in steady state rather than zero
+<Cite id="slotine1991" />. Higher-order sliding modes (such as the super-twisting algorithm) keep finite-time
+convergence with a continuous input.
+
+## Cost
+
+The law costs the same as a feedback-linearising one plus a sign evaluation. The analysis needs only a bound $F$ on the
+uncertainty.
+
+## Trade-offs
+
+- **Robustness against effort.** $k$ must exceed the uncertainty bound. A conservative bound means large switching
+  amplitude, more chattering and more actuator wear.
+- **Matched uncertainty only.** The guarantee covers disturbances that enter through the input channel. Unmatched
+  uncertainty, acting on states the input does not reach directly, changes the dynamics on the surface too.
+- **Precision against smoothness.** A thicker boundary layer means less chattering and a larger residual error.
+- **Relation to bang-bang control.** The switching law resembles the
+  <NoteLink to="pontryagin-maximum-principle">time-optimal</NoteLink> bang-bang solution: both switch on a curve in
+  the state space. Time-optimal control switches once; sliding-mode control switches infinitely often to stay on the
+  curve.

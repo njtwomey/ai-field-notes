@@ -1,0 +1,129 @@
+---
+title: LQG control
+kind: concept
+summary: 'Linear-quadratic-Gaussian control minimises an expected quadratic cost for a linear system with Gaussian noise and noisy measurements. The optimal controller applies the LQR gain to the Kalman-filter estimate, $\uvec_k = -\Kmat\hat{\xvec}_{k \mid k}$, but unlike LQR it has no guaranteed stability margins.'
+tags: [control-theory, optimal-control, estimation, stochastic-control, worked-example]
+aliases: [LQG, linear-quadratic-Gaussian, certainty equivalence, separation theorem, loop transfer recovery, LTR, Doyle counterexample, guaranteed margins for LQG regulators]
+requires: [linear-quadratic-regulator, kalman-filter]
+related: [state-observer, linear-gaussian-state-space-models, h-infinity-control]
+references: [doyle1978, anderson2007, bertsekas2017, astrom2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The **linear-quadratic-Gaussian** (LQG) problem is to control
+
+$$
+\xvec_{k+1} = \Amat\xvec_k + \Bmat\uvec_k + \wvec_k, \qquad \yvec_k = \Cmat\xvec_k + \vvec_k,
+$$
+
+with independent Gaussian noise $\wvec_k \sim \Gauss(\zeros, \Wmat)$, $\vvec_k \sim \Gauss(\zeros, \Vmat)$ and a
+Gaussian initial state, using only past and present measurements, so as to minimise
+
+$$
+J = \expect\brack{\sum_{k=0}^{N-1}\paren{\xvec_k^\top\Qmat\xvec_k + \uvec_k^\top\Rmat\uvec_k} + \xvec_N^\top\Qmat_f\xvec_N}.
+$$
+
+The optimal controller is $\uvec_k = -\Kmat_k\hat{\xvec}_{k \mid k}$: the gain of the deterministic
+<NoteLink to="linear-quadratic-regulator">LQR</NoteLink> problem applied to the estimate from the
+<NoteLink to="kalman-filter">Kalman filter</NoteLink>. The two designs are independent. This is the **separation
+theorem**.
+</Definition>
+
+## Two problems, solved separately
+
+The LQG controller is two blocks in series. The Kalman filter turns measurements into a Gaussian belief
+$\xvec_k \mid \yvec_{0:k} \sim \Gauss(\hat{\xvec}_{k \mid k}, \Sigmamat_{k \mid k})$ about the state. The regulator
+treats the mean of that belief as if it were the true state. Acting on an estimate as if it were exact is called
+**certainty equivalence**. For general nonlinear or non-Gaussian problems it is only a heuristic. For LQG it is exactly
+optimal.
+
+The filter gain depends only on $\Amat$, $\Cmat$, $\Wmat$ and $\Vmat$. The regulator gain depends only on $\Amat$,
+$\Bmat$, $\Qmat$ and $\Rmat$. Neither design needs to know anything about the other. The two Riccati equations are
+dual: the filter's is the regulator's with $\Amat \to \Amat^\top$, $\Bmat \to \Cmat^\top$ and time reversed.
+
+## Why certainty equivalence is optimal here
+
+Let $\Ical_k = (\yvec_{0:k}, \uvec_{0:k-1})$ be the information available at time $k$. Write
+$\hat{\xvec} = \hat{\xvec}_{k \mid k}$ and $\Sigmamat_k = \Sigmamat_{k \mid k}$. Two facts about the linear-Gaussian
+model do all the work.
+
+- The estimation error $\xvec_k - \hat{\xvec}$ has covariance $\Sigmamat_k$, which does not depend on the measured
+  values or on the inputs. Inputs are known, so their effect is subtracted exactly.
+- For any fixed matrix $\Mmat$, the conditional mean of the quadratic form $\xvec_k^\top\Mmat\xvec_k$ given
+  $\Ical_k$ is $\hat{\xvec}^\top\Mmat\hat{\xvec} + \trace(\Mmat\Sigmamat_k)$.
+
+**Claim:** the optimal cost-to-go is $V_k(\Ical_k) = \expect[\xvec_k^\top\Pmat_k\xvec_k \mid \Ical_k] + c_k$, with
+$\Pmat_k$ from the LQR Riccati recursion and $c_k$ a constant that does not depend on the data. It holds at $k = N$
+with $c_N = 0$. Assume it at $k + 1$ and write $\Pmat = \Pmat_{k+1}$. The Bellman equation, with the tower property of
+conditional expectation, asks for
+
+$$
+\min_{\uvec}\;\expect\brack{\xvec_k^\top\Qmat\xvec_k + \uvec^\top\Rmat\uvec
++ (\Amat\xvec_k + \Bmat\uvec + \wvec_k)^\top\Pmat(\Amat\xvec_k + \Bmat\uvec + \wvec_k) \Bigm| \Ical_k} + c_{k+1}.
+$$
+
+The input $\uvec$ is a function of $\Ical_k$, so it comes out of the expectation. By the second fact the expression
+equals
+
+$$
+\hat{\xvec}^\top\Qmat\hat{\xvec} + \uvec^\top\Rmat\uvec + (\Amat\hat{\xvec} + \Bmat\uvec)^\top\Pmat(\Amat\hat{\xvec} + \Bmat\uvec)
++ \trace\paren{(\Qmat + \Amat^\top\Pmat\Amat)\Sigmamat_k} + \trace(\Pmat\Wmat) + c_{k+1}.
+$$
+
+The terms that involve $\uvec$ are exactly the deterministic LQR problem with $\hat{\xvec}$ in place of $\xvec$. So
+the minimiser is $\uvec = -\Kmat_k\hat{\xvec}$ with the LQR gain, and the minimum is $\hat{\xvec}^\top\Pmat_k\hat{\xvec}$
+plus trace terms that do not depend on the data. Writing $\hat{\xvec}^\top\Pmat_k\hat{\xvec} =
+\expect[\xvec_k^\top\Pmat_k\xvec_k \mid \Ical_k] - \trace(\Pmat_k\Sigmamat_k)$ completes the induction.
+
+The trace terms show where the cost goes. Process noise costs $\trace(\Pmat\Wmat)$ per step even with perfect
+measurements. Estimation error costs extra through $\Sigmamat_k$. The controller cannot reduce either by acting
+differently, which is why its action is the deterministic one.
+
+## No guaranteed margins
+
+State-feedback LQR in continuous time tolerates any increase of loop gain, a reduction to one half, and $60°$ of
+phase lag at the plant input. It is tempting to expect an LQG controller, which is optimal in a broader sense, to
+inherit these margins. Doyle showed that it does not. His paper's abstract reads, in full, "There are none"
+<Cite id="doyle1978" />.
+
+The reason is that the margins of LQR come from a property of the loop $\Kmat(s\eye - \Amat)^{-1}\Bmat$, which is the
+loop seen at the plant input only when the true state is fed back. With a filter in the loop, the loop broken at the
+plant input is the plant followed by the whole controller, a different transfer function that the LQR inequality says
+nothing about. Doyle's example uses
+
+$$
+\Amat = \begin{bmatrix} 1 & 1 \\ 0 & 1 \end{bmatrix}, \quad \Bmat = \begin{bmatrix} 0 \\ 1 \end{bmatrix}, \quad
+\Cmat = \begin{bmatrix} 1 & 0 \end{bmatrix}, \quad \Qmat = q\begin{bmatrix} 1 & 1 \\ 1 & 1 \end{bmatrix}, \quad
+\Wmat = \sigma\begin{bmatrix} 1 & 1 \\ 1 & 1 \end{bmatrix},
+$$
+
+with $\Rmat = \Vmat = 1$, in continuous time. Multiply the plant input by a factor $\mu$, as an actuator with an
+uncertain gain would, and ask for which $\mu$ the closed loop stays stable. With $q = \sigma = 100$, the LQG loop is stable only for $0.938 < \mu < 1.007$: a gain error of less than
+1 % destabilises it. With $q = \sigma = 10^4$ the upper limit is $1.000$ to three decimal places. The margin shrinks to
+zero as the weights grow, while the state-feedback LQR for the same $\Qmat$ keeps its margin of $[1/2, \infty)$.
+
+## Recovering robustness
+
+**Loop transfer recovery** (LTR) exploits the structure of the problem. For a minimum-phase plant, adding fictitious
+process noise $\rho\Bmat\Bmat^\top$ at the plant input and letting $\rho \to \infty$ makes the LQG loop at the plant
+input converge to the LQR loop, recovering its margins at the cost of a fast, noise-sensitive filter. The deeper
+response to Doyle's result was to design for robustness directly, which led to
+<NoteLink to="h-infinity-control">$H_\infty$ control</NoteLink>.
+
+## Assumptions
+
+- The model is linear, the noises are Gaussian, white and independent, and all matrices are known. With non-Gaussian
+  noise the Kalman filter is still the best linear estimator and the controller is the best linear controller, but a
+  nonlinear one may do better.
+- The cost is quadratic. With other costs, or with constraints, separation fails: the controller may then act to
+  improve future estimates (the dual effect), and certainty equivalence is no longer optimal.
+
+## Pitfalls
+
+- **Assuming optimality implies robustness.** LQG is optimal for the model it was designed for. It says nothing about
+  a slightly different plant, and its margins must be checked.
+- **Tuning noise covariances as knobs.** $\Wmat$ and $\Vmat$ are often unknown and chosen to shape the filter. That is
+  legitimate, but the resulting controller is then optimal for a fictitious noise model, and robustness needs checking
+  in the frequency domain.

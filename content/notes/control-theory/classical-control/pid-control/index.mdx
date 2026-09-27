@@ -1,0 +1,144 @@
+---
+title: PID control
+kind: technique
+summary: 'A PID controller sets the input to $u = K_p e + K_i \int e\,dt + K_d\,\dot{e}$, where $e$ is the tracking error. The proportional term reacts to the present error, the integral term removes steady-state error, and the derivative term adds damping.'
+tags: [control-theory, feedback, classical-control, worked-example]
+aliases: [PID controller, proportional-integral-derivative, PI control, PD control, integral action, integrator windup, anti-windup, Ziegler–Nichols tuning, final value theorem, steady-state error, derivative kick, system type]
+requires: [transfer-function-and-block-diagrams]
+related: [bode-plots-and-stability-margins, lead-lag-compensation, root-locus, routh-hurwitz-criterion]
+references: [astrom2021, ziegler1942, franklin2019]
+status: draft
+updated: 2026-09-27
+---
+
+import { PidStepResponse } from './PidStepResponse'
+
+<Definition>
+A **PID controller** computes the plant input from the error $e(t) = r(t) - y(t)$ between a reference $r$ and the
+measured output $y$:
+
+$$
+u(t) = K_p\,e(t) + K_i\int_0^t e(\tau)\,d\tau + K_d\,\frac{de(t)}{dt}, \qquad
+C(s) = K_p + \frac{K_i}{s} + K_d\,s.
+$$
+
+$K_p$, $K_i$ and $K_d$ are the proportional, integral and derivative gains. An equivalent parametrisation writes
+$K_i = K_p/T_i$ and $K_d = K_p T_d$, with integral time $T_i$ and derivative time $T_d$ in seconds.
+</Definition>
+
+## Problem
+
+Most control loops in industry need no model beyond a rough idea of the plant's gain and speed. The PID controller
+has three parameters, each with a direct meaning, and it can be tuned by experiment. Åström and Murray estimate that
+the large majority of industrial loops are PI or PID loops <Cite id="astrom2021" />.
+
+## Mechanism
+
+- **Proportional action** pushes against the current error. A larger $K_p$ gives a faster response and a smaller
+  steady-state error, but also more overshoot and, beyond some gain, instability.
+- **Integral action** accumulates the error. As long as any error persists, the integral keeps growing and keeps
+  changing $u$. The only way the loop can come to rest is with $e = 0$. This is why integral action removes
+  steady-state error against constant references and disturbances.
+- **Derivative action** reacts to the rate of change of the error, which predicts the error a short time ahead:
+  $e(t + T_d) \approx e(t) + T_d\,\dot{e}(t)$. It damps oscillation, and it amplifies high-frequency noise.
+
+## Steady-state error and the final value theorem
+
+The error in steady state follows from the Laplace transform without solving for the whole response. Start from the
+derivative rule $\int_0^\infty \dot{e}(t)e^{-st}\,dt = sE(s) - e(0)$. Let $s \to 0$. If $e(t)$ converges, the left
+side tends to $\int_0^\infty \dot{e}(t)\,dt = e(\infty) - e(0)$, so
+
+$$
+\lim_{t \to \infty} e(t) = \lim_{s \to 0} sE(s).
+$$
+
+This is the **final value theorem**. It holds when $sE(s)$ has all its poles in the open left half-plane, so that
+$e(t)$ does converge. Applied to an unstable loop it returns a meaningless number.
+
+In a unity-feedback loop with loop transfer function $L = PC$, the error is $E = S R = R/(1 + L)$. For a unit step,
+$R = 1/s$, and
+
+$$
+e_\infty = \lim_{s \to 0} s\,\frac{1}{1 + L(s)}\,\frac{1}{s} = \frac{1}{1 + L(0)}.
+$$
+
+- **P control** on a plant with finite static gain $P(0)$ gives $e_\infty = 1/(1 + K_p P(0))$. The error shrinks as
+  $K_p$ grows but never vanishes.
+- **Integral action** puts a pole at the origin in $L$, so $L(0) = \infty$ and $e_\infty = 0$.
+
+The same argument applies to a constant load disturbance $d$ at the plant input. It reaches the output through
+$P/(1 + PC)$. With an integrator in $C$ this transfer function is zero at $s = 0$, so the disturbance has no lasting
+effect.
+
+For a ramp reference $R = 1/s^2$, $e_\infty = \lim_{s \to 0} 1/(sL(s)) = 1/K_v$, where $K_v = \lim_{s \to 0} sL(s)$
+is the **velocity constant**. A loop with one integrator tracks a ramp with a constant lag of $1/K_v$, and a loop with
+two integrators tracks it with no error. The number of integrators in $L$ is the **system type**.
+
+<PidStepResponse />
+
+## Worked example
+
+The plant $P(s) = 1/(s + 1)^3$ has $P(0) = 1$.
+
+- **P control.** With $K_p = 4$, $e_\infty = 1/(1 + 4) = 0.2$. The closed-loop poles are $-2.59$ and $-0.21 \pm 1.37i$,
+  a lightly damped pair. The output overshoots to $1.23$, which is $54$ % above its final value of $0.8$, and takes
+  about $19$ s to settle within 2 % of it.
+- **Stability limit.** The characteristic polynomial with P control is $s^3 + 3s^2 + 3s + 1 + K_p$. By the
+  <NoteLink to="routh-hurwitz-criterion">Routh–Hurwitz criterion</NoteLink> a cubic $s^3 + a_1s^2 + a_2s + a_3$ is
+  stable when $a_1a_2 > a_3$, here $9 > 1 + K_p$. The **ultimate gain** is $K_u = 8$. At that gain the loop
+  oscillates at the frequency where $\angle P = -180°$: $3\arctan\omega = 180°$, so $\omega_u = \sqrt3$ and the
+  **ultimate period** is $T_u = 2\pi/\sqrt3 = 3.63$ s.
+- **Ziegler–Nichols PID.** The ultimate-sensitivity rules are $K_p = 0.6K_u$, $T_i = T_u/2$ and $T_d = T_u/8$
+  <Cite id="ziegler1942" />. Here $K_p = 4.8$, $T_i = 1.81$ s and $T_d = 0.453$ s, so $K_i = 2.65$ and $K_d = 2.18$.
+  The simulated step response rises fast, has no steady-state error, overshoots by $52$ % and settles within 2 % in
+  about $10$ s.
+
+The large overshoot is typical. Ziegler and Nichols aimed for a decay ratio of one quarter between successive peaks,
+which is an aggressive target. Modern rules, such as those based on a maximum sensitivity $\max_\omega\abs{S(i\omega)}$
+of 1.4 to 2, trade some speed for robustness <Cite id="astrom2021" />.
+
+## Integrator windup
+
+Every actuator saturates: a valve opens only so far, a motor has a maximum torque. While the input is saturated the
+loop is effectively open, the error stays large, and the integral keeps growing. When the output finally reaches the
+reference, the accumulated integral holds the input at its limit until an error of the opposite sign has unwound it.
+The result is a large overshoot and a slow, oscillating recovery. This is **integrator windup**.
+
+Anti-windup schemes stop the integral from growing while the actuator is saturated.
+
+- **Conditional integration (clamping)** freezes the integrator whenever the controller output exceeds the limit and
+  the error would push it further. The figure uses this scheme.
+- **Back-calculation** feeds the difference between the saturated and unsaturated controller outputs back into the
+  integrator through a gain $1/T_t$, so that the integral tracks the value consistent with the saturated input.
+
+With the Ziegler–Nichols gains and the input limited to $\abs{u} \le 2$, the overshoot is $56$ % without
+anti-windup and $9$ % with clamping.
+
+## Practical forms
+
+- **Derivative filter.** The pure derivative $K_d s$ has unbounded gain at high frequency and amplifies measurement
+  noise without limit. Practical controllers use $K_d s / (1 + sT_d/N)$ with $N$ between about 5 and 20, which limits
+  the high-frequency gain to $K_pN$.
+- **Derivative on measurement.** A step in $r$ makes $\dot{e}$ an impulse, which kicks the input. Differentiating
+  $-y$ instead of $e$ avoids the kick and leaves the response to disturbances unchanged. The figure does this.
+- **Setpoint weighting.** Using $bK_p r - K_p y$ in the proportional term with $0 \le b \le 1$ reduces overshoot to
+  reference steps without changing the disturbance response.
+
+## Cost
+
+A PID controller costs a few operations per sample. Tuning costs an experiment: the ultimate-sensitivity test drives
+the loop to the edge of instability, and the step-response (reaction-curve) method of Ziegler and Nichols fits a
+first-order-plus-delay model to an open-loop step.
+
+## Trade-offs
+
+- **Speed against robustness.** Higher gains give faster responses and smaller phase margins. Ziegler–Nichols
+  tunings sit at the aggressive end.
+- **Integral action against overshoot.** Integral action removes steady-state error but adds phase lag at low
+  frequency, which reduces damping.
+- **Derivative action against noise.** Derivative action adds phase lead near crossover and amplifies sensor noise.
+  Many loops run as PI for this reason.
+- **Limits of the structure.** PID shapes a loop with at most two zeros and one integrator. Plants with long delays,
+  lightly damped resonances or several interacting loops need model-based designs such as
+  <NoteLink to="pole-placement">state feedback</NoteLink> or
+  <NoteLink to="model-predictive-control">model predictive control</NoteLink>.

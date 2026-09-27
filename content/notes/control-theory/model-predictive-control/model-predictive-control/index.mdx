@@ -1,0 +1,142 @@
+---
+title: Model predictive control
+kind: technique
+summary: 'Model predictive control solves a finite-horizon optimal control problem from the measured state at every sample, applies the first input of the plan and repeats. With linear dynamics, quadratic costs and linear constraints each problem is a convex quadratic program.'
+tags: [control-theory, optimal-control, constrained-optimisation, worked-example]
+aliases: [MPC, receding horizon control, moving horizon control, condensed QP, explicit MPC, constrained LQR, dynamic matrix control]
+requires: [linear-quadratic-regulator]
+related: [mpc-stability-and-recursive-feasibility, hamilton-jacobi-bellman-equation, pontryagin-maximum-principle, pid-control]
+references: [rawlings2017, mayne2000, boyd2004]
+status: draft
+updated: 2026-09-27
+---
+
+import { MpcHorizon } from './MpcHorizon'
+
+<Definition>
+**Model predictive control** (MPC) is a feedback law defined by repeated optimisation. At time $k$, with measured
+state $\xvec_k$, it solves
+
+$$
+\min_{\uvec_{0}, \dots, \uvec_{N-1}}\; \sum_{j=0}^{N-1}\ell(\xvec_j, \uvec_j) + V_f(\xvec_N)
+\quad\text{s.t.}\quad \xvec_0 = \xvec_k,\;\; \xvec_{j+1} = \fvec(\xvec_j, \uvec_j),\;\; \xvec_j \in \Xcal,\;\; \uvec_j \in \Ucal,
+\;\; \xvec_N \in \Xcal_f,
+$$
+
+applies the first optimal input $\uvec_0^*$, discards the rest of the plan, and solves again at time $k + 1$ from the
+new measurement. $N$ is the **prediction horizon**, $\ell$ the stage cost, $V_f$ the terminal cost, $\Xcal$ and
+$\Ucal$ the state and input constraint sets, and $\Xcal_f$ the terminal set <Cite id="rawlings2017" />.
+</Definition>
+
+## Problem
+
+Real actuators saturate, and real processes have limits: a tank must not overflow, a temperature must stay below a
+safety threshold, a motor current is bounded. The <NoteLink to="linear-quadratic-regulator">linear-quadratic
+regulator</NoteLink> is optimal only without constraints. Clipping its output at the limits gives a controller that
+does not know the limits exist, so it plans as if it could brake harder than it can. Solving the constrained optimal
+control problem once, offline, for every possible state is intractable beyond a few states (the
+<NoteLink to="hamilton-jacobi-bellman-equation">curse of dimensionality</NoteLink>). MPC solves it online, only for
+the state actually measured.
+
+## Mechanism
+
+### The receding horizon
+
+The optimisation produces an open-loop plan. Applying only its first move and re-planning from the next measurement
+closes the loop: disturbances and model errors show up in the new state and the next plan accounts for them. The
+horizon recedes with time. The resulting controller is a static but nonlinear function
+$\kappa_N(\xvec) = \uvec_0^*(\xvec)$ of the state.
+
+### The quadratic program for linear systems
+
+Take $\xvec_{j+1} = \Amat\xvec_j + \Bmat\uvec_j$, stage cost $\xvec^\top\Qmat\xvec + \uvec^\top\Rmat\uvec$, terminal
+cost $\xvec^\top\Pmat\xvec$ and polyhedral constraints. Unrolling the dynamics expresses every predicted state as an
+affine function of the initial state and the stacked input vector $\bar{\uvec} = (\uvec_0, \dots, \uvec_{N-1}) \in
+\reals^{Nm}$:
+
+$$
+\xvec_j = \Amat^j\xvec_k + \sum_{i=0}^{j-1}\Amat^{j-1-i}\Bmat\uvec_i, \qquad
+\bar{\xvec} = \Phimat\xvec_k + \Gammamat\bar{\uvec},
+$$
+
+where $\bar{\xvec} = (\xvec_1, \dots, \xvec_N)$, $\Phimat$ stacks the powers $\Amat^j$, and $\Gammamat$ is block lower
+triangular with blocks $\Amat^{j-1-i}\Bmat$. Let $\bar{\Qmat} = \diag(\Qmat, \dots, \Qmat, \Pmat)$ and
+$\bar{\Rmat} = \diag(\Rmat, \dots, \Rmat)$. Substituting into the cost,
+
+$$
+J(\bar{\uvec}) = (\Phimat\xvec_k + \Gammamat\bar{\uvec})^\top\bar{\Qmat}(\Phimat\xvec_k + \Gammamat\bar{\uvec}) + \bar{\uvec}^\top\bar{\Rmat}\bar{\uvec}
++ \xvec_k^\top\Qmat\xvec_k
+= \bar{\uvec}^\top\Hmat\bar{\uvec} + 2\xvec_k^\top\Fmat^\top\bar{\uvec} + \text{const},
+$$
+
+with $\Hmat = \Gammamat^\top\bar{\Qmat}\Gammamat + \bar{\Rmat}$ and $\Fmat = \Gammamat^\top\bar{\Qmat}\Phimat$. Input
+bounds are bounds on $\bar{\uvec}$. A state constraint $\Emat\xvec_j \le \evec$ becomes
+$\Emat(\Phimat\xvec_k + \Gammamat\bar{\uvec})_j \le \evec$, linear in $\bar{\uvec}$. Every constraint is linear, so the problem is
+
+$$
+\min_{\bar{\uvec}}\; \bar{\uvec}^\top\Hmat\bar{\uvec} + 2\xvec_k^\top\Fmat^\top\bar{\uvec} \quad\text{s.t.}\quad \Gmat\bar{\uvec} \le \wvec + \Smat\xvec_k.
+$$
+
+With $\Rmat \succ 0$, $\Hmat \succ 0$, so this is a strictly convex **quadratic program** with a unique solution
+<Cite id="boyd2004" />. Interior-point and active-set solvers handle it in milliseconds for hundreds of variables.
+Eliminating the states as above is the **condensed** form. Keeping the states as variables with the dynamics as
+equality constraints gives a larger but sparse, banded problem, which is faster for long horizons.
+
+### Without constraints it is the LQR
+
+With no constraints the minimiser is $\bar{\uvec}^* = -\Hmat^{-1}\Fmat\xvec_k$, a linear function of the state, and MPC is
+linear state feedback. If the terminal weight is the solution $\Pmat$ of the discrete algebraic Riccati equation, the
+backward Riccati recursion started at $\Pmat_N = \Pmat$ stays at $\Pmat$ for every step. The finite-horizon problem
+then has the same cost-to-go as the infinite-horizon one, and MPC reproduces the infinite-horizon LQR exactly, for any
+$N \ge 1$. The terminal cost stands in for everything beyond the horizon.
+
+### Stability
+
+Re-optimising at every step does not by itself guarantee stability: a short horizon without a terminal cost can
+drive the state away, as the figure shows. The standard remedy is a terminal cost that bounds the infinite-horizon
+cost and a terminal set in which a known controller satisfies the constraints. The optimal cost then decreases from
+step to step and serves as a <NoteLink to="lyapunov-stability">Lyapunov function</NoteLink> <Cite id="mayne2000" />.
+The argument, and the related guarantee that the problem stays feasible, are derived in
+<NoteLink to="mpc-stability-and-recursive-feasibility">MPC stability and recursive feasibility</NoteLink>.
+
+<MpcHorizon />
+
+## Worked example
+
+The figure regulates a unit mass on a track, $\ddot{p} = u$, sampled every $0.2$ s, from position $-5$ at rest to
+$0$. The stage cost is $p^2 + 0.01u^2$ and the input is limited to $\abs{u} \le 1$. The unconstrained LQR gain is
+$\Kmat = \begin{bmatrix} 6.42 & 3.58 \end{bmatrix}$, so from $p = -5$ it asks for a force of $32$, far beyond the limit.
+
+- **Saturated LQR.** Clipping $-\Kmat\xvec$ to $[-1, 1]$ accelerates at full force until the unconstrained law asks
+  to brake. By then the mass is too fast to stop at the limit, and it overshoots to $p = 2.84$. The cost over 12 s is
+  $337.6$.
+- **MPC with $N = 1$ and terminal cost $\Pmat$.** The one-step problem minimises
+  $\Rmat u^2 + (\Amat\xvec + \Bmat u)^\top\Pmat(\Amat\xvec + \Bmat u)$ over $\abs{u} \le 1$, a convex quadratic in one
+  variable. Its constrained minimiser is the unconstrained one, $-\Kmat\xvec$, clipped to the interval. MPC with
+  $N = 1$ is saturated LQR, with the same cost.
+- **Longer horizons.** With $N = 3$ the cost falls to $255.4$ and the overshoot to $1.76$. With $N = 20$ (4 s) the
+  controller sees the braking phase inside its horizon: it starts to brake earlier, overshoots by only $0.29$, and the
+  cost is $226.4$. Beyond $N = 20$ nothing changes.
+- **No terminal cost.** With $N = 1$ the controller sees one step ahead, where braking cannot yet show any benefit. It
+  never brings the mass to rest: the state is still at $p = -3.97$ after 12 s. With $N = 3$ it overshoots to $2.84$ and
+  has not settled after 12 s. With $N = 5$ it behaves like the $N = 3$ controller with terminal cost.
+
+## Cost
+
+One quadratic program per sample. For a condensed problem with $Nm$ variables, an interior-point solver costs
+$O((Nm)^3)$ per iteration, and structure-exploiting solvers on the sparse form cost $O(N(n + m)^3)$. For small
+problems **explicit MPC** moves the work offline: the solution $\bar{\uvec}^*(\xvec)$ of a parametric QP is piecewise affine
+in $\xvec$ over a partition of the state space into polyhedra, so the online controller is a table lookup. The number
+of regions grows combinatorially with the number of constraints.
+
+## Trade-offs
+
+- **Horizon length.** A longer horizon approaches the infinite-horizon constrained optimum and needs less from the
+  terminal ingredients, at a higher computational cost.
+- **Model quality.** MPC is only as good as its predictions. Offset-free tracking under model error needs a
+  disturbance model estimated by an observer, which plays the role of integral action.
+- **Hard state constraints and infeasibility.** A disturbance can push the state where no input satisfies all
+  constraints. Practical implementations soften state constraints with penalised slack variables so that the
+  optimiser always returns an answer.
+- **Nonlinear models.** With nonlinear dynamics the problem is a nonlinear program, solved approximately in real time,
+  often by sequential quadratic programming warm-started from the shifted previous solution.

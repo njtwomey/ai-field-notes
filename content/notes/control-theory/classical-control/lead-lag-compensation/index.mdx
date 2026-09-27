@@ -1,0 +1,127 @@
+---
+title: Lead-lag compensation
+kind: technique
+summary: 'A lead compensator $(1 + s/z)/(1 + s/p)$ with $z < p$ adds up to $\arcsin\frac{p - z}{p + z}$ of phase at $\omega = \sqrt{zp}$, raising the phase margin near crossover. A lag compensator, with $z > p$, raises the low-frequency gain by $z/p$ to reduce steady-state error.'
+tags: [control-theory, feedback, frequency-domain, classical-control, worked-example]
+aliases: [lead compensator, lag compensator, phase lead, phase lag, lead-lag compensator, maximum phase lead]
+requires: [bode-plots-and-stability-margins]
+related: [pid-control, root-locus, nyquist-stability-criterion]
+references: [franklin2019, ogata2010, astrom2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **lead-lag compensator** is a controller built from first-order factors
+
+$$
+C(s) = K\,\frac{1 + s/z}{1 + s/p}, \qquad z, p > 0.
+$$
+
+With $z < p$ it is a **lead** compensator: its phase is positive, and it raises the gain at high frequency. With
+$z > p$ it is a **lag** compensator: its phase is negative, and it raises the gain at low frequency. A lead-lag
+compensator is the product of one of each.
+</Definition>
+
+## Problem
+
+A proportional controller has one parameter. Raising it improves steady-state accuracy and speed, and reduces the
+phase margin. Often no single gain satisfies both requirements. The compensator adds a zero and a pole that reshape
+the loop's <NoteLink to="bode-plots-and-stability-margins">Bode plot</NoteLink> locally: a lead network adds phase
+near the crossover frequency, and a lag network adds gain at low frequency, where phase margin is not decided.
+
+## Mechanism
+
+### Lead: how much phase and where
+
+The phase of the lead factor is
+
+$$
+\varphi(\omega) = \arctan\frac{\omega}{z} - \arctan\frac{\omega}{p}.
+$$
+
+It is zero at $\omega = 0$ and as $\omega \to \infty$, and positive in between. Setting the derivative to zero,
+$\frac{1/z}{1 + \omega^2/z^2} = \frac{1/p}{1 + \omega^2/p^2}$, which simplifies to $\omega^2 = zp$. The maximum lies at
+the geometric mean of the zero and the pole, the midpoint on a logarithmic axis:
+
+$$
+\omega_{\max} = \sqrt{zp}.
+$$
+
+Write $\alpha = p/z > 1$. By the tangent subtraction formula, at $\omega_{\max}$
+
+$$
+\tan\varphi_{\max} = \frac{\omega/z - \omega/p}{1 + \omega^2/(zp)} = \frac{\sqrt{\alpha} - 1/\sqrt{\alpha}}{2}
+= \frac{\alpha - 1}{2\sqrt{\alpha}}.
+$$
+
+A right triangle with opposite side $\alpha - 1$ and adjacent side $2\sqrt\alpha$ has hypotenuse
+$\sqrt{(\alpha - 1)^2 + 4\alpha} = \alpha + 1$, so
+
+$$
+\sin\varphi_{\max} = \frac{\alpha - 1}{\alpha + 1}, \qquad \alpha = \frac{1 + \sin\varphi_{\max}}{1 - \sin\varphi_{\max}}.
+$$
+
+A ratio $\alpha = 3$ gives $30°$, $\alpha = 10$ gives $55°$. The price is gain: the lead factor's magnitude rises from
+1 at low frequency to $\alpha$ at high frequency, and is $\sqrt\alpha$ at $\omega_{\max}$. The high-frequency gain
+amplifies sensor noise, which limits $\alpha$ to about 10 to 20 in practice.
+
+A lead compensator is a filtered PD controller: as $p \to \infty$ it becomes $K(1 + s/z)$. In
+<NoteLink to="root-locus">root-locus</NoteLink> terms its zero pulls the branches to the left and its pole, further
+left, limits the effect at high frequency.
+
+### Lag: gain where it is needed
+
+A lag factor with $z > p$ has magnitude $z/p = \beta$ at low frequency and 1 at high frequency. Placed so that both
+$p$ and $z$ are well below the crossover frequency, typically $z \approx \omega_c/10$, it multiplies the static gain
+by $\beta$ and so divides the steady-state error by about $\beta$, while changing the magnitude and phase near
+$\omega_c$ only slightly. The phase it does add there is negative, about $-\arctan(\omega_c/p) + \arctan(\omega_c/z)$,
+roughly $-5°$ when $z = \omega_c/10$ and $\beta$ is large. A lag compensator is a PI controller with the integrator
+replaced by a pole close to the origin.
+
+## Worked example
+
+The plant $G(s) = 1/(s(s + 1))$ must track ramps with error at most $0.1$, so the velocity constant must be
+$K_v = \lim_{s \to 0} sKG(s) = K \ge 10$. With $K = 10$ alone, $\abs{10/(i\omega(1 + i\omega))} = 1$ at
+$\omega_c = 3.08$ rad/s, where the phase is $-90° - \arctan 3.08 = -162°$. The phase margin is $18°$, which gives a
+badly underdamped response. The target is $45°$.
+
+**Lead design.** The lead must supply about $45° - 18° = 27°$, plus a few degrees because adding it moves the
+crossover to a higher frequency where the plant has more lag. Take $\varphi_{\max} = 32°$, so
+$\alpha = (1 + \sin 32°)/(1 - \sin 32°) = 3.25$. The compensator adds $\sqrt\alpha$ of gain at $\omega_{\max}$, so
+choose $\omega_{\max}$ where the uncompensated magnitude is $1/\sqrt\alpha$, that is $-5.1$ dB. This happens at
+$4.19$ rad/s, which becomes the new crossover. Then $z = 4.19/\sqrt{3.25} = 2.32$ and
+$p = 4.19\sqrt{3.25} = 7.56$:
+
+$$
+C(s) = 10\,\frac{1 + s/2.32}{1 + s/7.56}.
+$$
+
+The compensated loop crosses over at $4.19$ rad/s with a phase margin of $45.4°$, and $K_v = 10$ is unchanged because
+the lead factor is 1 at $s = 0$.
+
+**Lag design.** Instead, keep the crossover where the plant already has enough phase. The plant phase is
+$-180° + 50° = -130°$ (target plus $5°$ for the lag's own phase) where $\arctan\omega = 40°$, at $\omega = 0.839$ rad/s.
+There $\abs{10\,G} = 9.13$. A lag with $\beta = 9.13$ brings the magnitude down to 1 at that frequency while keeping
+$K_v = 10$: put the zero a decade below, $z = 0.0839$, and the pole at $p = z/\beta = 0.0092$. The compensated loop
+crosses over at $0.842$ rad/s with a phase margin of $44.8°$.
+
+Both meet the specification. The lead design has five times the bandwidth, so it responds faster and passes more
+noise. The lag design is slow, and its pole near the origin leaves a slow closed-loop pole whose small residue shows
+up as a long tail in the step response.
+
+## Cost
+
+Each factor is a first-order filter: two coefficients and one state, a few operations per sample when implemented
+digitally.
+
+## Trade-offs
+
+- **Lead** raises bandwidth and phase margin, and raises the high-frequency gain by $\alpha$, amplifying noise and
+  demanding more actuator effort.
+- **Lag** improves steady-state accuracy without lowering the margins much, at the cost of a slower response and a
+  slow closed-loop pole near the lag's zero.
+- **Lead-lag** combines the two: lag for low-frequency gain, lead for phase at crossover. A PID controller with a
+  filtered derivative has the same structure, with the lag pole moved to the origin.
+- The design rules are approximate. They assume that each factor acts on its own frequency band. Checking the final
+  loop, as done above, is part of the method.

@@ -1,0 +1,190 @@
+---
+title: Linear-quadratic regulator
+kind: concept
+summary: 'The linear-quadratic regulator minimises $\sum_k \xvec_k^\top\Qmat\xvec_k + \uvec_k^\top\Rmat\uvec_k$ subject to $\xvec_{k+1} = \Amat\xvec_k + \Bmat\uvec_k$. Dynamic programming shows the cost-to-go is quadratic, $\xvec^\top\Pmat\xvec$, with $\Pmat$ from a Riccati equation, and the optimal input is linear feedback $\uvec = -\Kmat\xvec$.'
+tags: [control-theory, optimal-control, state-space, dynamic-programming, worked-example]
+aliases: [LQR, linear quadratic regulator, Riccati equation, discrete algebraic Riccati equation for control, continuous algebraic Riccati equation, CARE, DARE, Riccati recursion, optimal state feedback, return difference, Kalman inequality]
+requires: [state-space-representation, positive-definite-matrices]
+related: [kalman-filter, lqg-control, hamilton-jacobi-bellman-equation, bellman-equations, pole-placement, model-predictive-control, completing-the-square]
+references: [kalman1960b, kalman1964, anderson2007, bertsekas2017, safonov1977]
+status: draft
+updated: 2026-09-27
+---
+
+import { LqrDoubleIntegrator } from './LqrDoubleIntegrator'
+
+<Definition>
+For the linear system $\xvec_{k+1} = \Amat\xvec_k + \Bmat\uvec_k$ with $\xvec_k \in \reals^n$ and
+$\uvec_k \in \reals^m$, the **linear-quadratic regulator** (LQR) chooses the inputs that minimise
+
+$$
+J = \sum_{k=0}^{N-1}\paren{\xvec_k^\top\Qmat\xvec_k + \uvec_k^\top\Rmat\uvec_k} + \xvec_N^\top\Qmat_f\xvec_N,
+$$
+
+with $\Qmat, \Qmat_f \succeq 0$ weighting state deviations and $\Rmat \succ 0$ weighting control effort. The optimal
+input is linear state feedback $\uvec_k = -\Kmat_k\xvec_k$, with gains computed from a backward **Riccati recursion**.
+As $N \to \infty$ the gain becomes constant <Cite id="kalman1960b" />.
+</Definition>
+
+## Why a quadratic cost
+
+Pole placement asks the designer to choose closed-loop eigenvalues, and it gives no guidance about which are good. The
+LQR asks instead for weights that express what matters: large deviations of some states are costly, large inputs are
+costly. The quadratic form has three advantages. It penalises large errors more than proportionally. It makes the
+problem exactly solvable, with a linear controller. And the resulting loop has guaranteed robustness margins, which
+arbitrary pole placement does not.
+
+## Derivation by dynamic programming
+
+Define the **cost-to-go** $V_k(\xvec)$ as the smallest cost that can still be incurred from time $k$ onwards,
+starting at state $\xvec$. At the final time nothing remains to choose: $V_N(\xvec) = \xvec^\top\Qmat_f\xvec$. The
+**principle of optimality** <Cite id="bellman1957" /> says an optimal sequence of inputs, cut at time $k$, is still
+optimal from there on. So the cost-to-go at time $k$ is the best one-step cost plus the cost-to-go from wherever that
+step leads:
+
+$$
+V_k(\xvec) = \min_{\uvec}\brack{\xvec^\top\Qmat\xvec + \uvec^\top\Rmat\uvec + V_{k+1}(\Amat\xvec + \Bmat\uvec)}.
+$$
+
+**Claim: every $V_k$ is quadratic,** $V_k(\xvec) = \xvec^\top\Pmat_k\xvec$ with $\Pmat_k \succeq 0$. It holds at
+$k = N$ with $\Pmat_N = \Qmat_f$. Suppose it holds at $k + 1$ and write $\Pmat = \Pmat_{k+1}$. The expression to
+minimise is
+
+$$
+\xvec^\top\Qmat\xvec + \uvec^\top\Rmat\uvec + (\Amat\xvec + \Bmat\uvec)^\top\Pmat(\Amat\xvec + \Bmat\uvec),
+$$
+
+a quadratic in $\uvec$ with Hessian $2(\Rmat + \Bmat^\top\Pmat\Bmat) \succ 0$. It is strictly convex, so its unique
+minimiser is where the gradient vanishes, $2\Rmat\uvec + 2\Bmat^\top\Pmat(\Amat\xvec + \Bmat\uvec) = \zeros$:
+
+$$
+\uvec^* = -\Kmat_k\xvec, \qquad \Kmat_k = \paren{\Rmat + \Bmat^\top\Pmat\Bmat}^{-1}\Bmat^\top\Pmat\Amat.
+$$
+
+Substituting back, with $\uvec^* = -\Kmat\xvec$, the minimum is
+$\xvec^\top\brack{\Qmat + \Kmat^\top\Rmat\Kmat + (\Amat - \Bmat\Kmat)^\top\Pmat(\Amat - \Bmat\Kmat)}\xvec$. Expanding the
+last product and grouping $\Kmat^\top(\Rmat + \Bmat^\top\Pmat\Bmat)\Kmat = \Amat^\top\Pmat\Bmat\Kmat$ (from the
+definition of $\Kmat$) leaves
+
+$$
+\Pmat_k = \Qmat + \Amat^\top\Pmat_{k+1}\Amat
+- \Amat^\top\Pmat_{k+1}\Bmat\paren{\Rmat + \Bmat^\top\Pmat_{k+1}\Bmat}^{-1}\Bmat^\top\Pmat_{k+1}\Amat.
+$$
+
+This is the **discrete-time Riccati recursion**. It runs backwards from $\Pmat_N = \Qmat_f$. $\Pmat_k$ is positive
+semidefinite because it is a minimum of nonnegative costs. The claim follows by induction, and so does the form of the
+optimal controller: linear state feedback with a gain that depends on time but not on the state. The minimal cost
+from $\xvec_0$ is $\xvec_0^\top\Pmat_0\xvec_0$.
+
+The whole solution is computed offline. The recursion never looks at the state, only at $\Amat$, $\Bmat$, $\Qmat$ and
+$\Rmat$.
+
+## The infinite horizon
+
+As $N \to \infty$, the recursion, run backwards, converges to a fixed point $\Pmat$ that satisfies the **discrete
+algebraic Riccati equation** (DARE)
+
+$$
+\Pmat = \Qmat + \Amat^\top\Pmat\Amat - \Amat^\top\Pmat\Bmat\paren{\Rmat + \Bmat^\top\Pmat\Bmat}^{-1}\Bmat^\top\Pmat\Amat,
+$$
+
+provided $(\Amat, \Bmat)$ is stabilisable and $(\Amat, \Qmat^{1/2})$ is detectable. Then $\Kmat$ is constant and the
+closed loop $\Amat - \Bmat\Kmat$ is stable <Cite id="anderson2007" />. Stability follows from using the cost-to-go as a
+<NoteLink to="lyapunov-stability">Lyapunov function</NoteLink>. With $V(\xvec) = \xvec^\top\Pmat\xvec$ and the
+optimal input, the Bellman equation at the fixed point says
+
+$$
+V(\xvec_{k+1}) - V(\xvec_k) = -\paren{\xvec_k^\top\Qmat\xvec_k + \uvec_k^\top\Rmat\uvec_k} \le 0.
+$$
+
+The cost-to-go never increases, and detectability rules out a state that moves forever while the stage cost stays
+zero.
+
+In continuous time, for $\dot{\xvec} = \Amat\xvec + \Bmat\uvec$ and $J = \int_0^\infty(\xvec^\top\Qmat\xvec +
+\uvec^\top\Rmat\uvec)\,dt$, the same argument in the limit of small time steps (the
+<NoteLink to="hamilton-jacobi-bellman-equation">Hamilton–Jacobi–Bellman equation</NoteLink>) gives
+$\Kmat = \Rmat^{-1}\Bmat^\top\Pmat$ with $\Pmat$ solving the **continuous algebraic Riccati equation** (CARE)
+
+$$
+\Amat^\top\Pmat + \Pmat\Amat - \Pmat\Bmat\Rmat^{-1}\Bmat^\top\Pmat + \Qmat = \zeros.
+$$
+
+## Worked example
+
+Take the scalar system $x_{k+1} = x_k + u_k$ with $Q = R = 1$. The DARE is
+$p = 1 + p - p^2/(1 + p)$, so $p^2 = 1 + p$ and $p = (1 + \sqrt5)/2 = 1.618$, the golden ratio $\varphi$. The gain is
+$k = p/(1 + p) = 1/\varphi = 0.618$ and the closed loop is $x_{k+1} = (1 - 0.618)x_k = 0.382\,x_k$. The cost from
+$x_0 = 1$ is $1.618$: the first step costs $1 + 0.618^2 = 1.382$ and the remaining steps $0.382^2 \times 1.618 = 0.236$.
+
+The same numbers appear in the steady-state <NoteLink to="kalman-filter">Kalman filter</NoteLink> for a random walk
+with unit process and measurement noise. That is not a coincidence. The filter's Riccati recursion is this one with
+$\Amat$ replaced by $\Amat^\top$, $\Bmat$ by $\Cmat^\top$, $\Qmat$ and $\Rmat$ by the noise covariances, and time
+reversed. Estimation and control are **dual** problems <Cite id="kalman1960b" />.
+
+<LqrDoubleIntegrator />
+
+For the double integrator in the figure with $q_1 = 1$, $q_2 = 0.1$, $r = 1$ and sample time $0.1$ s, the gain is
+$\Kmat = \begin{bmatrix} 0.930 & 1.395 \end{bmatrix}$ and the closed-loop eigenvalues are $0.928 \pm 0.064i$,
+equivalent to continuous-time poles at $-0.72 \pm 0.69i$. The continuous-time LQR for the same weights has
+$\Kmat = \begin{bmatrix} \sqrt{q_1/r} & \sqrt{q_2/r + 2\sqrt{q_1/r}} \end{bmatrix} = \begin{bmatrix} 1 & 1.449 \end{bmatrix}$,
+close to the sampled one, as expected for a sample time much shorter than the closed-loop time constants.
+
+## Guaranteed margins
+
+Continuous-time LQR with a single input has guaranteed robustness margins. Write $L(s) = \Kmat(s\eye - \Amat)^{-1}\Bmat$ for
+the loop transfer function obtained by breaking the loop at the input. Then
+
+$$
+\abs{1 + L(i\omega)} \ge 1 \quad\text{for all } \omega,
+$$
+
+so the Nyquist curve of $L$ stays outside the unit disc centred at $-1$ <Cite id="kalman1964" />. Geometrically this
+forces a gain margin from $1/2$ to $\infty$ and a phase margin of at least $60°$. With several inputs and a diagonal
+$\Rmat$ the same margins hold in each input channel <Cite id="safonov1977" />.
+
+<Derivation title="The return-difference inequality">
+Write $\Phimat(s) = (s\eye - \Amat)^{-1}$ and use $\Rmat\Kmat = \Bmat^\top\Pmat$. Add and subtract $s\Pmat$ in the
+CARE to write $-\Amat^\top\Pmat - \Pmat\Amat = (-s\eye - \Amat^\top)\Pmat + \Pmat(s\eye - \Amat)$, so
+
+$$
+(-s\eye - \Amat^\top)\Pmat + \Pmat(s\eye - \Amat) + \Kmat^\top\Rmat\Kmat = \Qmat.
+$$
+
+Multiply on the left by $\Bmat^\top\Phimat(-s)^\top$ and on the right by $\Phimat(s)\Bmat$:
+
+$$
+\Rmat\Kmat\Phimat(s)\Bmat + \paren{\Kmat\Phimat(-s)\Bmat}^\top\Rmat
++ \paren{\Kmat\Phimat(-s)\Bmat}^\top\Rmat\,\Kmat\Phimat(s)\Bmat = \Bmat^\top\Phimat(-s)^\top\Qmat\Phimat(s)\Bmat.
+$$
+
+Adding $\Rmat$ to both sides factors the left side:
+
+$$
+\paren{\eye + \Kmat\Phimat(-s)\Bmat}^\top\Rmat\paren{\eye + \Kmat\Phimat(s)\Bmat}
+= \Rmat + \Bmat^\top\Phimat(-s)^\top\Qmat\Phimat(s)\Bmat.
+$$
+
+At $s = i\omega$ with one input, $\Phimat(-i\omega)$ is the complex conjugate of $\Phimat(i\omega)$, so this reads
+$r\abs{1 + L(i\omega)}^2 = r + \norm{\Qmat^{1/2}\Phimat(i\omega)\Bmat}^2 \ge r$.
+</Derivation>
+
+The margins belong to state feedback with the true state. With an observer or a Kalman filter in the loop they can
+vanish entirely, which is the subject of <NoteLink to="lqg-control">LQG control</NoteLink>.
+
+## Assumptions
+
+- The model is linear and known, the full state is measured, and there are no constraints on inputs or states.
+  Constraints are handled by <NoteLink to="model-predictive-control">model predictive control</NoteLink>, which
+  solves a constrained version of the same problem online.
+- $\Rmat \succ 0$. With $\Rmat$ singular, some inputs are free, the minimiser can be unbounded, and the problem
+  becomes singular.
+
+## Pitfalls
+
+- **Choosing weights.** The weights are a design language, not physical quantities. A common start is Bryson's rule:
+  diagonal entries $1/(\text{largest acceptable value})^2$ for each state and input. The result is then tuned by
+  simulation.
+- **Only the ratio matters.** Multiplying $\Qmat$ and $\Rmat$ by the same constant scales $\Pmat$ and leaves $\Kmat$
+  unchanged. The figure's sliders act through the ratios $q_1/r$ and $q_2/r$.
+- **Detectability.** If a state that $\Qmat$ does not penalise is unstable and influences nothing penalised, the
+  regulator ignores it, and the DARE has no stabilising solution.

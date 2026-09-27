@@ -1,0 +1,172 @@
+---
+title: Pontryagin's maximum principle
+kind: concept
+summary: 'Pontryagin''s principle gives necessary conditions for an optimal control. With Hamiltonian $H = \ell(\xvec, \uvec) + \lambdavec^\top\fvec(\xvec, \uvec)$, an optimal input minimises $H$ pointwise in time, while the costate obeys $\dot{\lambdavec} = -\partial H/\partial\xvec$ backwards from the terminal cost''s gradient.'
+tags: [control-theory, optimal-control, calculus-of-variations, worked-example]
+aliases: [Pontryagin minimum principle, minimum principle, maximum principle, costate, adjoint equation, optimal control Hamiltonian, bang-bang control, switching function, time-optimal control, needle variation]
+requires: [euler-lagrange-equation, state-space-representation]
+related: [hamilton-jacobi-bellman-equation, linear-quadratic-regulator, constrained-variational-problems, brachistochrone-problem, model-predictive-control, backpropagation]
+references: [pontryagin1962, kirk2004, bertsekas2017]
+status: draft
+updated: 2026-09-27
+---
+
+import { BangBang } from './BangBang'
+
+<Definition>
+Consider the problem of choosing $\uvec(t) \in \Ucal$ on $[0, T]$ to minimise
+
+$$
+J = \phi(\xvec(T)) + \int_0^T \ell(\xvec(t), \uvec(t))\,dt \quad\text{subject to}\quad
+\dot{\xvec} = \fvec(\xvec, \uvec), \quad \xvec(0) = \xvec_0,
+$$
+
+where $\Ucal$ is a set of admissible input values. Define the **Hamiltonian**
+$H(\xvec, \uvec, \lambdavec) = \ell(\xvec, \uvec) + \lambdavec^\top\fvec(\xvec, \uvec)$. If $\uvec^*$ is optimal with
+state trajectory $\xvec^*$, there is a **costate** $\lambdavec(t) \in \reals^n$ such that
+
+$$
+\dot{\lambdavec} = -\frac{\partial H}{\partial\xvec}(\xvec^*, \uvec^*, \lambdavec), \qquad
+\lambdavec(T) = \nabla\phi(\xvec^*(T)), \qquad
+\uvec^*(t) \in \argmin_{\uvec \in \Ucal} H(\xvec^*(t), \uvec, \lambdavec(t)).
+$$
+
+Pontryagin and colleagues stated it with the opposite sign convention, as a maximum principle
+<Cite id="pontryagin1962" />.
+</Definition>
+
+## Derivation from the calculus of variations
+
+Start with $\Ucal = \reals^m$, no constraint on the input. The dynamics are a constraint at every instant, so adjoin
+them with a time-varying multiplier $\lambdavec(t)$, as in <NoteLink to="constrained-variational-problems">constrained
+variational problems</NoteLink>:
+
+$$
+\bar{J} = \phi(\xvec(T)) + \int_0^T \paren{\ell(\xvec, \uvec) + \lambdavec^\top\paren{\fvec(\xvec, \uvec) - \dot{\xvec}}}dt
+= \phi(\xvec(T)) + \int_0^T \paren{H(\xvec, \uvec, \lambdavec) - \lambdavec^\top\dot{\xvec}}dt.
+$$
+
+On any trajectory that satisfies the dynamics, $\bar{J} = J$ whatever $\lambdavec$ is. Integrate the last term by
+parts, $-\int_0^T\lambdavec^\top\dot{\xvec}\,dt = -\lambdavec(T)^\top\xvec(T) + \lambdavec(0)^\top\xvec(0) +
+\int_0^T\dot{\lambdavec}^\top\xvec\,dt$. Now perturb the input by $\delta\uvec$. The state changes by $\delta\xvec$,
+with $\delta\xvec(0) = \zeros$ because the initial state is fixed. To first order,
+
+$$
+\delta\bar{J} = \paren{\nabla\phi - \lambdavec(T)}^\top\delta\xvec(T)
++ \int_0^T\brack{\paren{\frac{\partial H}{\partial\xvec} + \dot{\lambdavec}}^\top\delta\xvec
++ \paren{\frac{\partial H}{\partial\uvec}}^\top\delta\uvec}dt.
+$$
+
+$\delta\xvec$ depends on $\delta\uvec$ through the linearised dynamics in a complicated way. The multiplier is free,
+so choose it to make every $\delta\xvec$ term vanish: $\dot{\lambdavec} = -\partial H/\partial\xvec$ with
+$\lambdavec(T) = \nabla\phi(\xvec(T))$. This is the **costate** or **adjoint equation**, solved backwards from $T$.
+What remains is $\delta J = \int_0^T (\partial H/\partial\uvec)^\top\delta\uvec\,dt$. At an optimum this must vanish
+for every $\delta\uvec$, so
+
+$$
+\frac{\partial H}{\partial\uvec} = \zeros \quad\text{along the optimal trajectory}.
+$$
+
+The same computation, discretised, is reverse-mode differentiation: the costate is the gradient of the cost with
+respect to the state, propagated backwards, as in <NoteLink to="backpropagation">backpropagation</NoteLink>.
+
+**The Euler–Lagrange equation as a special case.** Take $\fvec(\xvec, \uvec) = \uvec$, so the input is the velocity
+$\dot{\xvec}$, and $\ell = L(\xvec, \dot{\xvec})$. Then $H = L(\xvec, \uvec) + \lambdavec^\top\uvec$. The condition
+$\partial H/\partial\uvec = \zeros$ gives $\lambdavec = -\partial L/\partial\dot{\xvec}$, and the costate equation gives
+$\dot{\lambdavec} = -\partial L/\partial\xvec$. Together,
+
+$$
+\frac{d}{dt}\frac{\partial L}{\partial\dot{\xvec}} = \frac{\partial L}{\partial\xvec},
+$$
+
+the <NoteLink to="euler-lagrange-equation">Euler–Lagrange equation</NoteLink>.
+
+## Constrained inputs: minimise the Hamiltonian
+
+When $\Ucal$ is bounded, the optimum often sits on its boundary, where $\partial H/\partial\uvec \ne \zeros$. Pontryagin's
+insight is to replace stationarity by minimisation, justified by a **needle variation**. Replace the optimal input by
+any admissible value $\vvec$ on a short interval $[\tau, \tau + \varepsilon]$ and leave it unchanged elsewhere. The
+change is large in size but short in duration, so it is small in effect even though $\Ucal$ may have no interior.
+
+- During the interval the running cost changes by $\varepsilon\paren{\ell(\xvec^*, \vvec) - \ell(\xvec^*, \uvec^*)}$
+  to first order.
+- At the end of the interval the state is displaced by $\delta\xvec(\tau + \varepsilon) =
+  \varepsilon\paren{\fvec(\xvec^*, \vvec) - \fvec(\xvec^*, \uvec^*)}$ to first order.
+- The costate is the sensitivity of the remaining cost to the state: the adjoint equation above makes
+  $\lambdavec(t)^\top\delta\xvec(t)$ constant along the linearised dynamics, equal at $T$ to the first-order change in
+  $\phi$. So the displacement changes the remaining cost by $\lambdavec(\tau)^\top\delta\xvec(\tau + \varepsilon)$.
+
+The total first-order change is
+
+$$
+\delta J = \varepsilon\brack{H(\xvec^*(\tau), \vvec, \lambdavec(\tau)) - H(\xvec^*(\tau), \uvec^*(\tau), \lambdavec(\tau))}.
+$$
+
+Optimality requires $\delta J \ge 0$ for every $\vvec \in \Ucal$ and almost every $\tau$. That is the minimum
+condition. When $\Ucal = \reals^m$ and $H$ is smooth, minimisation implies $\partial H/\partial\uvec = \zeros$, the
+condition derived above.
+
+Two further facts follow for time-invariant problems. $H$ is constant along an optimal trajectory. If the final time
+$T$ is free to choose, that constant is zero.
+
+## Worked example: time-optimal control is bang-bang
+
+Bring the double integrator $\dot{x}_1 = x_2$, $\dot{x}_2 = u$ from $(x_{1,0}, x_{2,0})$ to rest at the origin in
+minimum time, with $\abs{u} \le 1$. The cost is $T = \int_0^T 1\,dt$, so $\ell = 1$ and
+
+$$
+H = 1 + \lambda_1 x_2 + \lambda_2 u.
+$$
+
+- **Minimum condition.** $H$ is linear in $u$, so its minimum over $[-1, 1]$ is at an end: $u^* = -\sgn\lambda_2$.
+  The input is always at full thrust. This is **bang-bang** control, and $\lambda_2$ is the **switching function**.
+- **Costate.** $\dot{\lambda}_1 = -\partial H/\partial x_1 = 0$ and $\dot{\lambda}_2 = -\partial H/\partial x_2 =
+  -\lambda_1$. So $\lambda_1$ is constant and $\lambda_2$ is linear in time. A linear function changes sign at most
+  once, so the optimal input switches at most once.
+- **Arcs.** With $u = \pm1$, $x_2$ changes at unit rate and $x_1 \mp \tfrac12 x_2^2$ is constant: each arc is a
+  parabola in the phase plane. The last arc must end at the origin, which only two parabolas do:
+  $x_1 = \tfrac12 x_2^2$ with $x_2 \le 0$ under $u = +1$, and $x_1 = -\tfrac12 x_2^2$ with $x_2 \ge 0$ under $u = -1$.
+  Together they form the **switching curve** $x_1 = -\tfrac12 x_2\abs{x_2}$.
+
+Starting to the right of the curve, apply $u = -1$ until the state reaches the curve, then $u = +1$. Along the first
+arc $x_1 + \tfrac12 x_2^2 = c$, with $c = x_{1,0} + \tfrac12 x_{2,0}^2$. It meets the curve where $x_2 = -\sqrt{c}$,
+after time $x_{2,0} + \sqrt{c}$. The second arc takes $\sqrt{c}$, so the minimum time is
+
+$$
+T^* = x_{2,0} + 2\sqrt{x_{1,0} + \tfrac12 x_{2,0}^2}.
+$$
+
+From $(1, 0)$ this gives $T^* = 2$: full reverse thrust for one second, full forward thrust for one second. From
+$(2, 1)$ it gives $T^* = 1 + 2\sqrt{2.5} = 4.16$, with the switch at $t = 2.58$. The closed-loop form of the solution
+is $u = -\sgn\paren{x_1 + \tfrac12 x_2\abs{x_2}}$.
+
+<BangBang />
+
+## Relation to dynamic programming
+
+The costate is the gradient of the optimal cost-to-go, $\lambdavec(t) = \nabla_{\xvec}V(\xvec^*(t), t)$, where it is
+differentiable. The <NoteLink to="hamilton-jacobi-bellman-equation">Hamilton–Jacobi–Bellman equation</NoteLink> gives
+$V$ for all states at once and yields a feedback law. The maximum principle gives conditions along a single trajectory
+and yields an open-loop input. For the <NoteLink to="linear-quadratic-regulator">linear-quadratic regulator</NoteLink>
+the two meet: $\lambdavec = \Pmat\xvec$ with $\Pmat$ from the Riccati equation, and $\partial H/\partial\uvec = \zeros$
+gives $\uvec = -\Rmat^{-1}\Bmat^\top\Pmat\xvec$.
+
+## Assumptions
+
+- $\fvec$ and $\ell$ are continuously differentiable in $\xvec$. The input need only be measurable, so bang-bang inputs
+  with jumps are admissible.
+- The conditions are necessary, not sufficient. They pick out candidate trajectories (extremals). Sufficiency needs
+  convexity, or a check against the Hamilton–Jacobi–Bellman equation.
+- With state constraints or a constrained final state, the conditions gain extra multipliers and transversality
+  conditions. In abnormal problems the running cost's multiplier is zero, and the Hamiltonian is
+  $\lambda_0\ell + \lambdavec^\top\fvec$ with $\lambda_0 = 0$.
+
+## Pitfalls
+
+- **A two-point boundary value problem.** The state is known at $t = 0$ and the costate at $t = T$. Integrating both
+  forwards from a guessed $\lambdavec(0)$ (shooting) is numerically unstable when the dynamics are, because the
+  costate equation runs the linearised dynamics backwards. Collocation and multiple shooting are more robust.
+- **Singular arcs.** When the switching function stays at zero over an interval, the minimum condition does not
+  determine the input there. Higher-order conditions are needed.
+- **Sign conventions.** Pontryagin's original statement maximises $\lambda_0\ell + \lambdavec^\top\fvec$ with
+  $\lambda_0 = -1$. Texts that minimise a cost usually use $+\ell$ and minimise, as here.

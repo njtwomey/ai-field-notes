@@ -1,0 +1,127 @@
+---
+title: State observer
+kind: technique
+summary: 'A Luenberger observer estimates the state by simulating the model and correcting it with the output error: $\dot{\hat{\xvec}} = \Amat\hat{\xvec} + \Bmat\uvec + \Lmat(\yvec - \Cmat\hat{\xvec})$. The error obeys $\dot{\evec} = (\Amat - \Lmat\Cmat)\evec$, and feedback from the estimate keeps both sets of poles.'
+tags: [control-theory, state-space, estimation, feedback, worked-example]
+aliases: [Luenberger observer, state estimator, observer gain, output injection, separation principle, observer-based controller, dynamic output feedback]
+requires: [controllability-and-observability, pole-placement]
+related: [kalman-filter, lqg-control, linear-quadratic-regulator]
+references: [luenberger1964, luenberger1971, astrom2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For $\dot{\xvec} = \Amat\xvec + \Bmat\uvec$, $\yvec = \Cmat\xvec$, a **full-order state observer** (Luenberger
+observer) is the system
+
+$$
+\dot{\hat{\xvec}} = \Amat\hat{\xvec} + \Bmat\uvec + \Lmat\paren{\yvec - \Cmat\hat{\xvec}},
+$$
+
+driven by the known input $\uvec$ and the measured output $\yvec$. The $n \times p$ matrix $\Lmat$ is the **observer
+gain**. The estimation error $\evec = \xvec - \hat{\xvec}$ obeys $\dot{\evec} = (\Amat - \Lmat\Cmat)\evec$, and its
+eigenvalues can be placed anywhere exactly when $(\Amat, \Cmat)$ is observable <Cite id="luenberger1964" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="pole-placement">State feedback</NoteLink> $\uvec = -\Kmat\xvec$ needs the whole state, but sensors
+usually measure only some of it: a position but not a velocity, a temperature at one point of a rod. Differentiating
+the measurements to recover missing states amplifies noise. The observer reconstructs the state from the model and
+the measurement history instead.
+
+## Mechanism
+
+### Simulation with correction
+
+A copy of the model driven by the same input, $\dot{\hat{\xvec}} = \Amat\hat{\xvec} + \Bmat\uvec$, has error
+dynamics $\dot{\evec} = \Amat\evec$. The error then evolves with the plant's own eigenvalues: it never decays if the
+plant is unstable, and decays only as fast as the plant if it is stable. The observer adds a correction proportional
+to the **output error** $\yvec - \Cmat\hat{\xvec}$, the discrepancy between what the sensor reports and what the
+estimate predicts. Subtracting the observer equation from the plant equation, with $\yvec = \Cmat\xvec$,
+
+$$
+\dot{\evec} = \Amat\xvec + \Bmat\uvec - \Amat\hat{\xvec} - \Bmat\uvec - \Lmat\Cmat(\xvec - \hat{\xvec})
+= (\Amat - \Lmat\Cmat)\evec.
+$$
+
+The input cancels, so the error converges whatever the controller does, provided $\Amat - \Lmat\Cmat$ is stable.
+
+### Choosing the gain by duality
+
+The eigenvalues of $\Amat - \Lmat\Cmat$ equal those of its transpose $\Amat^\top - \Cmat^\top\Lmat^\top$. That is a
+state-feedback problem for the pair $(\Amat^\top, \Cmat^\top)$ with gain $\Lmat^\top$. Pole placement solves it for any
+desired eigenvalues exactly when $(\Amat^\top, \Cmat^\top)$ is controllable, which is the same as $(\Amat, \Cmat)$ being
+<NoteLink to="controllability-and-observability">observable</NoteLink>. For a single output, Ackermann's formula
+applies to the transposed pair. If some modes are unobservable, their eigenvalues stay in $\Amat - \Lmat\Cmat$, and a
+convergent observer exists exactly when those modes are stable (detectability).
+
+## The separation principle
+
+An **observer-based controller** feeds back the estimate: $\uvec = -\Kmat\hat{\xvec}$. The combined system has
+$2n$ states. Write the plant equation with $\hat{\xvec} = \xvec - \evec$:
+
+$$
+\dot{\xvec} = \Amat\xvec - \Bmat\Kmat(\xvec - \evec) = (\Amat - \Bmat\Kmat)\xvec + \Bmat\Kmat\evec.
+$$
+
+Together with the error equation, which the input does not affect,
+
+$$
+\begin{bmatrix} \dot{\xvec} \\ \dot{\evec} \end{bmatrix} =
+\begin{bmatrix} \Amat - \Bmat\Kmat & \Bmat\Kmat \\ \zeros & \Amat - \Lmat\Cmat \end{bmatrix}
+\begin{bmatrix} \xvec \\ \evec \end{bmatrix}.
+$$
+
+The matrix is block upper triangular, so its characteristic polynomial is the product of those of the diagonal
+blocks:
+
+$$
+\det\paren{s\eye - \Amat + \Bmat\Kmat}\,\det\paren{s\eye - \Amat + \Lmat\Cmat}.
+$$
+
+The closed-loop poles are the state-feedback poles together with the observer poles. This is the **separation
+principle**: $\Kmat$ and $\Lmat$ can be designed independently, and using the estimate in place of the state changes
+none of the poles chosen for either. A reference input $\rvec$ entering as $\uvec = -\Kmat\hat{\xvec} + \Nmat\rvec$
+reaches plant and observer identically, so it does not excite $\evec$. The transfer function from $\rvec$ to $\yvec$
+is the same as with exact state feedback; the observer poles show up only in the response to initial errors and
+disturbances.
+
+## Worked example: balancing with only the angle measured
+
+The inverted pendulum linearisation $\Amat = \begin{bmatrix} 0 & 1 \\ 9.81 & -0.5 \end{bmatrix}$,
+$\Bmat = (0, 1)$ is balanced by $\Kmat = \begin{bmatrix} 18.81 & 5.5 \end{bmatrix}$, which places both poles at $-3$.
+Only the angle is measured, $\Cmat = \begin{bmatrix} 1 & 0 \end{bmatrix}$. The pair is observable:
+$\Ocal = \begin{bmatrix} 1 & 0 \\ 0 & 1 \end{bmatrix}$.
+
+With $\Lmat = (l_1, l_2)$,
+
+$$
+\Amat - \Lmat\Cmat = \begin{bmatrix} -l_1 & 1 \\ 9.81 - l_2 & -0.5 \end{bmatrix}, \qquad
+\det(s\eye - \Amat + \Lmat\Cmat) = s^2 + (l_1 + 0.5)s + 0.5l_1 + l_2 - 9.81.
+$$
+
+Place both observer poles at $-10$, a little over three times faster than the controller: the target is
+$s^2 + 20s + 100$. Then $l_1 = 19.5$ and $l_2 = 100 + 9.81 - 9.75 = 100.06$. The four closed-loop poles of the
+observer-based controller are $-3, -3, -10, -10$, as the separation principle predicts. The angular velocity is
+never differentiated from the angle; it is inferred through the model.
+
+## Cost
+
+The observer is a dynamic system of the same order as the plant. Each step of a discrete-time implementation costs a
+few matrix-vector products. A **reduced-order observer** estimates only the $n - p$ unmeasured combinations of states
+and uses the measurements directly for the rest <Cite id="luenberger1971" />.
+
+## Trade-offs
+
+- **Speed against noise.** A large $\Lmat$ makes the error decay fast and also passes sensor noise straight into the
+  estimate. Observer poles two to five times faster than the controller poles are a common compromise. When the noise
+  statistics are known, the <NoteLink to="kalman-filter">Kalman filter</NoteLink> chooses $\Lmat$ optimally: its
+  steady-state gain is an observer gain that minimises the mean-squared estimation error.
+- **Model error.** The error equation assumes the observer's $\Amat$, $\Bmat$ and $\Cmat$ are exact. With model errors
+  the input no longer cancels, the separation principle holds only approximately, and the combined loop can lose the
+  robustness that state feedback alone had. The <NoteLink to="lqg-control">LQG</NoteLink> note shows how badly this can
+  go.
+- **Disturbances.** An unmeasured constant disturbance biases the estimate. Adding the disturbance to the state as a
+  constant, $\dot{d} = 0$, lets the observer estimate it too, which gives integral action.

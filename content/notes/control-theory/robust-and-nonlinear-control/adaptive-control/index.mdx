@@ -1,0 +1,117 @@
+---
+title: Adaptive control
+kind: technique
+summary: 'An adaptive controller adjusts its own parameters online so that an uncertain plant behaves like a reference model. The MIT rule adapts by gradient descent on the squared tracking error and can go unstable; a Lyapunov design chooses the update law so that stability is guaranteed.'
+tags: [control-theory, nonlinear-systems, robust-control, learning, worked-example]
+aliases: [model reference adaptive control, MRAC, MIT rule, Lyapunov redesign, self-tuning regulator, certainty equivalence adaptive control, parameter adaptation law, persistent excitation]
+requires: [lyapunov-stability, transfer-function-and-block-diagrams]
+related: [arx-and-prediction-error-methods, rls-filter, sliding-mode-control, feedback-linearisation, gradient-descent]
+references: [astrom2008adaptive, parks1966, slotine1991]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Model reference adaptive control** (MRAC) specifies the desired closed-loop behaviour as a **reference model**, a
+stable system with output $y_m$ driven by the command $r$. A controller with adjustable parameters $\thetavec$ drives
+the plant, and an **adaptation law** updates $\thetavec$ from the tracking error $e = y - y_m$ so that $e \to 0$
+although the plant's parameters are unknown <Cite id="astrom2008adaptive" />.
+</Definition>
+
+## Problem
+
+Plants change: an aircraft's dynamics vary with speed and altitude, a robot's with its payload, a process's with the
+feed. A fixed controller tuned for one condition may perform poorly or become unstable in another. Robust designs
+tolerate a known range of variation at the cost of performance everywhere. Adaptive control instead estimates what it
+needs while running.
+
+## Mechanism
+
+Take a first-order plant $\dot{y} = -ay + bu$ with unknown $a$ and $b$ (the sign of $b$ known), and a reference model
+$\dot{y}_m = -a_m y_m + b_m r$ with $a_m > 0$. The controller is
+
+$$
+u = \theta_1 r - \theta_2 y.
+$$
+
+Substituting gives $\dot{y} = -(a + b\theta_2)y + b\theta_1 r$, which matches the model exactly when
+$\theta_1^* = b_m/b$ and $\theta_2^* = (a_m - a)/b$. These ideal values are unknown because $a$ and $b$ are.
+
+### The MIT rule
+
+The first adaptive controllers, built for flight control in the 1950s, adjusted each parameter down the gradient of
+$J = \tfrac12 e^2$:
+
+$$
+\dot{\thetavec} = -\gamma\,e\,\frac{\partial e}{\partial\thetavec},
+$$
+
+with adaptation gain $\gamma > 0$. The sensitivity $\partial e/\partial\thetavec$ depends on the unknown plant, and in
+practice it is approximated by filtering $r$ and $y$ through the reference model. The rule is intuitive and works for
+small $\gamma$ and slowly varying commands. It is not derived from any stability argument, and for large $\gamma$ or
+large command amplitudes the loop can oscillate and diverge <Cite id="astrom2008adaptive" />.
+
+### Lyapunov design
+
+Parks proposed choosing the adaptation law so that a Lyapunov function is guaranteed to decrease
+<Cite id="parks1966" />. Write $\tilde{\theta}_i = \theta_i - \theta_i^*$ for the parameter errors. Subtracting the model
+from the plant and using $b\theta_1^* = b_m$ and $a + b\theta_2^* = a_m$,
+
+$$
+\dot{e} = -a_m e + b\paren{\tilde{\theta}_1 r - \tilde{\theta}_2 y}.
+$$
+
+Try $V = \tfrac12 e^2 + \frac{\abs{b}}{2\gamma}\paren{\tilde{\theta}_1^2 + \tilde{\theta}_2^2}$, which penalises both
+the tracking error and the parameter error. Since $\theta_i^*$ is constant, $\dot{\tilde{\theta}}_i = \dot{\theta}_i$,
+and
+
+$$
+\dot{V} = -a_m e^2 + b\,e\paren{\tilde{\theta}_1 r - \tilde{\theta}_2 y}
++ \frac{\abs{b}}{\gamma}\paren{\tilde{\theta}_1\dot{\theta}_1 + \tilde{\theta}_2\dot{\theta}_2}.
+$$
+
+The unknown $\tilde{\theta}_i$ appear only in the last two groups. Choosing
+
+$$
+\dot{\theta}_1 = -\gamma\,\sgn(b)\,e\,r, \qquad \dot{\theta}_2 = \gamma\,\sgn(b)\,e\,y
+$$
+
+makes them cancel exactly, leaving $\dot{V} = -a_m e^2 \le 0$. So $e$ and the parameters stay bounded for every
+$\gamma > 0$ and every command. Since $\dot{V}$ is only negative semidefinite (it ignores the parameter errors), LaSalle's
+principle does not apply to this time-varying system, but Barbalat's lemma does: $\dot{V}$ is uniformly continuous and
+$V$ is bounded below, so $\dot{V} \to 0$ and $e \to 0$ <Cite id="slotine1991" />.
+
+The Lyapunov law has the same form as the MIT rule, error times signal, without the sensitivity filter. The difference
+is the guarantee.
+
+## Worked example
+
+Let the true plant be $a = 1$, $b = 2$ and the reference model $a_m = b_m = 3$, so the ideal parameters are
+$\theta_1^* = 1.5$ and $\theta_2^* = 1$. Start from $\thetavec = \zeros$ with $\gamma = 2$ and a square-wave command
+switching between $\pm1$ every 10 s. In simulation the largest tracking error in each 20 s cycle
+falls from $0.63$ in the first cycle to $0.25$, $0.12$ and then $0.03$ by the sixth; the error spikes after each
+switch of the command and decays before the next. The parameters reach $(1.02, 0.52)$ at $t = 20$, $(1.44, 0.94)$ at $t = 100$ and
+$(1.49, 0.99)$ at $t = 200$.
+
+The error settles within each cycle long before the parameters are right. The Lyapunov argument guarantees $e \to 0$, not
+$\tilde{\thetavec} \to \zeros$. Parameter convergence needs **persistent excitation**: the regressor $(r, y)$ must keep
+varying enough to distinguish every parameter. A square wave excites the two parameters here. A constant command would
+not, and the parameters could settle anywhere on the line of values that give zero error for that constant.
+
+## Cost
+
+A few extra states (the parameters) integrated alongside the plant. Indirect schemes, such as self-tuning regulators,
+instead estimate the plant parameters by <NoteLink to="rls-filter">recursive least squares</NoteLink> and redesign the
+controller from them at every step, which costs a small design computation per sample.
+
+## Trade-offs
+
+- **Adaptation speed.** Large $\gamma$ adapts quickly and makes the parameter dynamics fast and oscillatory, sensitive
+  to noise.
+- **Robustness to unmodelled dynamics and disturbances.** The basic laws can let parameters drift without bound when
+  the plant has dynamics outside the model or when bounded disturbances act without enough excitation. Robust
+  modifications (σ-modification, dead zones, projection onto a known parameter set) keep them bounded at the cost of
+  exact convergence.
+- **Adaptive or robust.** When the uncertainty is a slowly varying parameter, adaptation recovers performance. When it
+  is fast or unstructured, <NoteLink to="h-infinity-control">robust</NoteLink> or
+  <NoteLink to="sliding-mode-control">sliding-mode</NoteLink> designs are better suited.

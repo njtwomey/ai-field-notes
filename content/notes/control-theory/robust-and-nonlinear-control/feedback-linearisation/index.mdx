@@ -1,0 +1,105 @@
+---
+title: Feedback linearisation
+kind: technique
+summary: 'Feedback linearisation cancels a system''s nonlinearity through the input. For $\dot{\xvec} = \fvec(\xvec) + \gvec(\xvec)u$ with output $y = h(\xvec)$ of relative degree $r$, the input $u = (v - L_f^r h)/(L_g L_f^{r-1}h)$ makes $y^{(r)} = v$, a chain of integrators that linear design then controls.'
+tags: [control-theory, nonlinear-systems, feedback, worked-example]
+aliases: [feedback linearization, input-output linearisation, exact linearisation, computed torque control, Lie derivative, relative degree, zero dynamics, nonlinear dynamic inversion]
+requires: [state-space-representation, jacobian-linearisation]
+related: [pole-placement, sliding-mode-control, adaptive-control, lyapunov-stability]
+references: [khalil2002, slotine1991]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Consider a single-input single-output system $\dot{\xvec} = \fvec(\xvec) + \gvec(\xvec)u$, $y = h(\xvec)$, with smooth
+$\fvec$, $\gvec$ and $h$. The **Lie derivative** $L_f h = \nabla h^\top\fvec$ is the rate of change of $h$ along
+$\fvec$, and $L_f^k h$ applies it $k$ times. The system has **relative degree** $r$ at $\xvec$ if
+$L_g L_f^{k}h = 0$ for $k < r - 1$ and $L_g L_f^{r-1}h(\xvec) \ne 0$. **Feedback linearisation** applies
+
+$$
+u = \frac{v - L_f^r h(\xvec)}{L_g L_f^{r-1}h(\xvec)},
+$$
+
+which turns the input-output behaviour into $y^{(r)} = v$ for a new input $v$ <Cite id="khalil2002" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="jacobian-linearisation">Jacobian linearisation</NoteLink> approximates a nonlinear system near one
+operating point, and a controller designed on it is valid only nearby. Many mechanical systems have nonlinearities
+that are known exactly and enter alongside the input: gravity and Coriolis torques in a robot arm, aerodynamic terms in
+an aircraft model. When the input can cancel them, the result is exactly linear over the whole operating range, not
+just near a point.
+
+## Mechanism
+
+Differentiate the output along the dynamics:
+
+$$
+\dot{y} = \nabla h^\top\paren{\fvec + \gvec u} = L_f h + L_g h\,u.
+$$
+
+If $L_g h \ne 0$, the input appears after one derivative ($r = 1$). If $L_g h = 0$, then $\dot{y} = L_f h$ and one
+differentiates again: $\ddot{y} = L_f^2 h + L_g L_f h\,u$. Continuing, the input first appears in the $r$-th derivative:
+
+$$
+y^{(r)} = L_f^r h(\xvec) + L_g L_f^{r-1}h(\xvec)\,u.
+$$
+
+Where the coefficient of $u$ is nonzero, solving for $u$ gives the linearising law in the definition, and then
+$y^{(r)} = v$. The new coordinates $\xi_k = L_f^{k-1}h$, $k = 1, \dots, r$, are $y$ and its first $r - 1$
+derivatives, and they obey a chain of integrators $\dot{\xi}_1 = \xi_2, \dots, \dot{\xi}_r = v$. Any linear design
+applies to the chain. For tracking a reference $y_d(t)$,
+
+$$
+v = y_d^{(r)} - k_{r-1}\paren{y^{(r-1)} - y_d^{(r-1)}} - \dots - k_0\paren{y - y_d}
+$$
+
+gives a tracking error $e = y - y_d$ that obeys $e^{(r)} + k_{r-1}e^{(r-1)} + \dots + k_0 e = 0$, which converges to
+zero when the polynomial $s^r + k_{r-1}s^{r-1} + \dots + k_0$ is Hurwitz. This is
+<NoteLink to="pole-placement">pole placement</NoteLink> on the linearised chain.
+
+### Zero dynamics
+
+When $r < n$, the chain accounts for only $r$ state dimensions. The remaining $n - r$ evolve on their own, driven by
+$y$ and its derivatives. With $y$ held at zero, what remains is the **zero dynamics**, the nonlinear counterpart of a
+linear system's zeros. The controller keeps $y$ on target but cannot influence the zero dynamics, so they must be
+stable. A system with stable zero dynamics is **minimum phase**. Feedback linearisation of a non-minimum-phase system
+cancels an unstable mode and the internal state diverges while the output looks perfect.
+
+## Worked example: the pendulum over its whole range
+
+The pendulum $\ddot{\theta} = -(g/\ell)\sin\theta - c\dot{\theta} + u$ has $\xvec = (\theta, \dot{\theta})$ and output
+$y = \theta$. Here $L_g h = 0$ (the torque does not change the angle directly) and $L_g L_f h = 1$, so $r = 2 = n$.
+There are no zero dynamics, and the law
+
+$$
+u = (g/\ell)\sin\theta + c\dot{\theta} + v
+$$
+
+gives $\ddot{\theta} = v$ exactly, for every angle. With $v = -k_0(\theta - \theta_d) - k_1\dot{\theta}$, the angle
+obeys $\ddot{\theta} + k_1\dot{\theta} + k_0(\theta - \theta_d) = 0$. With $k_0 = 9$ and $k_1 = 6$ (a double pole at
+$-3$), the pendulum settles at any target angle $\theta_d$, including the inverted position $\theta_d = \pi$, from any
+starting angle, with the same response. Holding the inverted position needs a steady torque of
+$(g/\ell)\sin\pi = 0$; holding $\theta_d = \pi/2$, horizontal, needs $g/\ell = 9.81$, which the controller supplies
+through the cancellation term. In robotics the same construction for an $n$-link arm, $u = \Mmat(\thetavec)\vvec +
+\cvec(\thetavec, \dot{\thetavec}) + \gvec(\thetavec)$ with mass matrix $\Mmat$, is **computed-torque control**
+<Cite id="slotine1991" />.
+
+## Cost
+
+One evaluation of $L_f^r h$ and $L_g L_f^{r-1}h$ per sample: cheap once the model is written down. Deriving the Lie
+derivatives by hand is error-prone for large models; symbolic or automatic differentiation helps.
+
+## Trade-offs
+
+- **Exact model needed.** The cancellation is exact only if the model is. An error in $g/\ell$ or $c$ leaves a
+  residual nonlinearity, which the outer linear loop must tolerate as a disturbance. Robust add-ons such as
+  <NoteLink to="sliding-mode-control">sliding-mode</NoteLink> terms or
+  <NoteLink to="adaptive-control">adaptation</NoteLink> of the model parameters address this.
+- **Cancelling helpful terms.** Damping and restoring forces already push towards the target. Cancelling them costs
+  input effort for nothing. Lyapunov-based designs such as backstepping keep helpful nonlinearities.
+- **Singularities.** The law divides by $L_g L_f^{r-1}h$, which can vanish somewhere in the state space. Near such
+  points the required input grows without bound.
+- **Input limits.** The linear closed loop exists only while the actuator can deliver the computed $u$.

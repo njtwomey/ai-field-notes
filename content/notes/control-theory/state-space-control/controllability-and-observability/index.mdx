@@ -1,0 +1,183 @@
+---
+title: Controllability and observability
+kind: concept
+summary: 'A linear system $(\Amat, \Bmat, \Cmat)$ is controllable if some input steers any state to any other, which holds exactly when $[\Bmat\; \Amat\Bmat\; \cdots\; \Amat^{n-1}\Bmat]$ has rank $n$. It is observable if the output determines the initial state, which holds exactly when the stacked matrix of $\Cmat\Amat^k$, $k < n$, has rank $n$.'
+tags: [control-theory, linear-systems, state-space, worked-example]
+aliases: [controllability, observability, controllability matrix, observability matrix, Kalman rank condition, controllability Gramian, observability Gramian, PBH test, stabilisability, detectability, Kalman decomposition, reachability]
+requires: [state-space-representation, rank-and-null-space]
+related: [pole-placement, state-observer, transfer-function-and-block-diagrams, linear-quadratic-regulator, kalman-filter, subspace-identification]
+references: [kalman1960c, kalman1963, astrom2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Consider $\dot{\xvec} = \Amat\xvec + \Bmat\uvec$, $\yvec = \Cmat\xvec$ with $\xvec \in \reals^n$.
+
+- The system is **controllable** if for every initial state $\xvec_0$, target state $\xvec_1$ and time $T > 0$ there is
+  an input on $[0, T]$ that takes $\xvec(0) = \xvec_0$ to $\xvec(T) = \xvec_1$.
+- The system is **observable** if for every $T > 0$ the initial state $\xvec(0)$ is uniquely determined by the input
+  and output on $[0, T]$.
+
+Kalman's rank conditions <Cite id="kalman1960c" />: the system is controllable exactly when the
+$n \times nm$ **controllability matrix** $\Ccal = \begin{bmatrix} \Bmat & \Amat\Bmat & \cdots & \Amat^{n-1}\Bmat \end{bmatrix}$
+has rank $n$, and observable exactly when the $np \times n$ **observability matrix**
+$\Ocal = \begin{bmatrix} \Cmat^\top & (\Cmat\Amat)^\top & \cdots & (\Cmat\Amat^{n-1})^\top \end{bmatrix}^\top$ has rank $n$.
+</Definition>
+
+## Why they matter
+
+Feedback can only act on what the input moves and what the output reveals. A mode that the input cannot excite keeps
+its own dynamics under any controller; if it is unstable, no controller stabilises the system. A mode that the output
+never shows cannot be estimated, so a controller that needs it cannot compute it. Controllability is what makes
+<NoteLink to="pole-placement">pole placement</NoteLink> possible, and observability is what makes a
+<NoteLink to="state-observer">state observer</NoteLink> possible.
+
+## The rank test in discrete time
+
+The discrete-time system $\xvec_{k+1} = \Amat\xvec_k + \Bmat\uvec_k$ shows the idea most directly. Unrolling the
+recursion from $\xvec_0$,
+
+$$
+\xvec_N = \Amat^N\xvec_0 + \sum_{k=0}^{N-1} \Amat^{N-1-k}\Bmat\uvec_k
+= \Amat^N\xvec_0 + \begin{bmatrix} \Bmat & \Amat\Bmat & \cdots & \Amat^{N-1}\Bmat \end{bmatrix}
+\begin{bmatrix} \uvec_{N-1} \\ \vdots \\ \uvec_0 \end{bmatrix}.
+$$
+
+The states reachable from $\xvec_0 = \zeros$ in $N$ steps form the column space of
+$\begin{bmatrix} \Bmat & \cdots & \Amat^{N-1}\Bmat \end{bmatrix}$. This space grows with $N$, but it stops growing at
+$N = n$. By the **Cayley–Hamilton theorem**, $\Amat$ satisfies its own characteristic polynomial
+$\chi(s) = s^n + a_1 s^{n-1} + \dots + a_n$:
+
+$$
+\Amat^n = -a_1\Amat^{n-1} - \dots - a_n\eye.
+$$
+
+So $\Amat^n\Bmat$ is a combination of $\Bmat, \dots, \Amat^{n-1}\Bmat$, and by induction so is every higher power.
+Every reachable state is reachable in $n$ steps, and every state is reachable exactly when $\rank\Ccal = n$.
+
+## The rank test in continuous time
+
+**Necessity.** By Cayley–Hamilton applied to each term of the exponential series, $e^{\Amat t}$ is a polynomial in
+$\Amat$ of degree less than $n$ with time-dependent coefficients, $e^{\Amat t} = \sum_{k=0}^{n-1}\alpha_k(t)\Amat^k$.
+The solution formula then gives
+
+$$
+\xvec(T) - e^{\Amat T}\xvec_0 = \int_0^T e^{\Amat(T - \tau)}\Bmat\uvec(\tau)\,d\tau
+= \sum_{k=0}^{n-1} \Amat^k\Bmat\int_0^T \alpha_k(T - \tau)\uvec(\tau)\,d\tau,
+$$
+
+which lies in the column space of $\Ccal$ whatever the input. If $\rank\Ccal < n$, some targets cannot be reached.
+
+**Sufficiency.** Define the **controllability Gramian**
+
+$$
+\Wmat_c(T) = \int_0^T e^{\Amat\tau}\Bmat\Bmat^\top e^{\Amat^\top\tau}\,d\tau.
+$$
+
+If $\Wmat_c(T)$ is invertible, the input
+
+$$
+\uvec(t) = \Bmat^\top e^{\Amat^\top(T - t)}\,\Wmat_c(T)^{-1}\paren{\xvec_1 - e^{\Amat T}\xvec_0}
+$$
+
+reaches the target: substituting it into the solution formula and changing variable to $\tau = T - t$ turns the
+integral into $\Wmat_c(T)\Wmat_c(T)^{-1}(\xvec_1 - e^{\Amat T}\xvec_0)$. It remains to show that $\Wmat_c(T)$ is
+invertible when $\rank\Ccal = n$. $\Wmat_c$ is positive semidefinite, and $\vvec^\top\Wmat_c\vvec =
+\int_0^T\norm{\Bmat^\top e^{\Amat^\top\tau}\vvec}^2 d\tau$ is zero only if $\vvec^\top e^{\Amat\tau}\Bmat = \zeros$ for
+all $\tau \in [0, T]$. Differentiating $k$ times at $\tau = 0$ gives $\vvec^\top\Amat^k\Bmat = \zeros$ for every $k$,
+so $\vvec^\top\Ccal = \zeros$. When $\Ccal$ has full rank this forces $\vvec = \zeros$, so $\Wmat_c(T) \succ 0$.
+
+<Derivation title="The Gramian measures control energy">
+Among all inputs that take $\zeros$ to $\xvec_1$ in time $T$, the one above minimises the energy
+$\int_0^T\norm{\uvec}^2dt$. Any other input that reaches $\xvec_1$ is $\uvec + \tilde{\uvec}$ with
+$\int_0^T e^{\Amat(T - t)}\Bmat\tilde{\uvec}(t)\,dt = \zeros$. The cross term in the energy is
+$2\int_0^T\uvec^\top\tilde{\uvec}\,dt = 2\,(\Wmat_c^{-1}\xvec_1)^\top\int_0^T e^{\Amat(T - t)}\Bmat\tilde{\uvec}\,dt = 0$,
+so the energy is $\int\norm{\uvec}^2 + \int\norm{\tilde{\uvec}}^2 \ge \int\norm{\uvec}^2$. The minimum is
+
+$$
+\int_0^T\norm{\uvec}^2dt = \xvec_1^\top\Wmat_c(T)^{-1}\xvec_1.
+$$
+
+Directions along eigenvectors of $\Wmat_c$ with small eigenvalues are expensive to reach. A system can be controllable
+in the rank sense and still need impractically large inputs in some directions.
+</Derivation>
+
+## Observability and duality
+
+With the input known, its contribution to the output can be subtracted, so take $\uvec = \zeros$. Then
+$\yvec(t) = \Cmat e^{\Amat t}\xvec_0$. Two initial states give the same output exactly when their difference
+$\dvec$ satisfies $\Cmat e^{\Amat t}\dvec = \zeros$ for all $t$. Differentiating at $t = 0$, this is
+$\Cmat\Amat^k\dvec = \zeros$ for all $k$, and by Cayley–Hamilton it suffices to check $k < n$: $\Ocal\dvec = \zeros$.
+So the initial state is determined uniquely exactly when the null space of $\Ocal$ is $\set{\zeros}$, which is
+$\rank\Ocal = n$.
+
+Transposing $\Ocal$ gives $\begin{bmatrix} \Cmat^\top & \Amat^\top\Cmat^\top & \cdots \end{bmatrix}$, the
+controllability matrix of the pair $(\Amat^\top, \Cmat^\top)$. Hence **duality**: $(\Amat, \Cmat)$ is observable exactly
+when $(\Amat^\top, \Cmat^\top)$ is controllable. Every result about control has a twin about estimation. The
+**observability Gramian** $\Wmat_o(T) = \int_0^T e^{\Amat^\top t}\Cmat^\top\Cmat e^{\Amat t}dt$ measures how much
+output energy an initial state produces, $\int_0^T\norm{\yvec}^2dt = \xvec_0^\top\Wmat_o\xvec_0$. It is invertible
+exactly when the system is observable.
+
+## Mode by mode: the PBH test
+
+The Popov–Belevitch–Hautus test states controllability one eigenvalue at a time: $(\Amat, \Bmat)$ is controllable
+exactly when $\rank\begin{bmatrix} \lambda\eye - \Amat & \Bmat \end{bmatrix} = n$ for every eigenvalue $\lambda$ of
+$\Amat$. Equivalently, no left eigenvector $\wvec^\top\Amat = \lambda\wvec^\top$ satisfies $\wvec^\top\Bmat = \zeros$.
+Such a $\wvec$ would pick out a combination of states, $\wvec^\top\xvec$, that evolves as
+$\frac{d}{dt}(\wvec^\top\xvec) = \lambda\,\wvec^\top\xvec$ regardless of the input. That combination is an
+uncontrollable mode. The dual test uses right eigenvectors with $\Cmat\vvec = \zeros$ for unobservable modes.
+
+The weaker properties used by optimal control are mode-wise too. The system is **stabilisable** if every
+uncontrollable mode is stable, and **detectable** if every unobservable mode is stable.
+
+## The Kalman decomposition
+
+A change of state coordinates splits any linear system into four parts: controllable and observable, controllable but
+unobservable, uncontrollable but observable, and neither <Cite id="kalman1963" />. The transfer function
+$\Cmat(s\eye - \Amat)^{-1}\Bmat$ depends only on the first part. The eigenvalues of the other parts are exactly the
+ones that cancel between numerator and denominator. A state-space model is **minimal**, of the smallest possible order
+for its transfer function, exactly when it is controllable and observable.
+
+## Worked example
+
+Take $\Amat = \begin{bmatrix} 0 & 1 \\ -2 & -3 \end{bmatrix}$ (eigenvalues $-1$ and $-2$) and
+$\Bmat = \begin{bmatrix} 0 \\ 1 \end{bmatrix}$. Then $\Amat\Bmat = (1, -3)$ and
+
+$$
+\Ccal = \begin{bmatrix} 0 & 1 \\ 1 & -3 \end{bmatrix}, \qquad \det\Ccal = -1 \ne 0.
+$$
+
+The system is controllable. Now measure $y = x_1 + x_2$, so $\Cmat = \begin{bmatrix} 1 & 1 \end{bmatrix}$ and
+$\Cmat\Amat = \begin{bmatrix} -2 & -2 \end{bmatrix}$:
+
+$$
+\Ocal = \begin{bmatrix} 1 & 1 \\ -2 & -2 \end{bmatrix}, \qquad \rank\Ocal = 1.
+$$
+
+The system is not observable. The null space of $\Ocal$ is spanned by $(1, -1)$, the eigenvector for $\lambda = -1$.
+Starting from $\xvec_0 = (1, -1)$, the state is $e^{-t}(1, -1)$ and the output $x_1 + x_2$ is zero for all time. The
+transfer function shows the cancellation:
+
+$$
+\Cmat(s\eye - \Amat)^{-1}\Bmat = \frac{s + 1}{(s + 1)(s + 2)} = \frac{1}{s + 2}.
+$$
+
+The hidden mode is stable, so the system is detectable and the loss is harmless for estimation. Had the hidden mode
+been unstable, the output would look perfectly well behaved while the state diverged.
+
+## Assumptions
+
+- The rank tests apply to linear time-invariant systems. Time-varying systems use the Gramians over an interval, and
+  nonlinear systems use Lie-bracket conditions that hold only locally.
+- The tests give a yes or no answer. The Gramians' eigenvalues give the quantitative picture.
+
+## Pitfalls
+
+- **Rank in floating point.** $\Ccal$ is badly conditioned for even moderate $n$, because the columns $\Amat^k\Bmat$
+  line up with the dominant eigenvector as $k$ grows. Numerical rank decisions should use the PBH test with a
+  staircase (Hessenberg) algorithm, or the singular values of the Gramians.
+- **Controllable is not easily controllable.** A tiny Gramian eigenvalue means a huge input is needed for that
+  direction, which saturating actuators cannot supply.
+- **Cancellations hide modes.** Checking stability of a transfer function misses unstable modes that are
+  uncontrollable or unobservable. Check $\Amat$ itself.

@@ -1,0 +1,204 @@
+---
+title: State-space representation
+kind: concept
+summary: 'A state-space model writes a linear dynamical system as $\dot{\xvec} = \Amat\xvec + \Bmat\uvec$, $\yvec = \Cmat\xvec + \Dmat\uvec$. Its solution is $\xvec(t) = e^{\Amat t}\xvec(0) + \int_0^t e^{\Amat(t-\tau)}\Bmat\uvec(\tau)\,d\tau$, and holding the input constant between samples gives an exact discrete-time model.'
+tags: [control-theory, dynamical-systems, linear-systems, worked-example]
+aliases: [state-space model, state equation, matrix exponential, zero-order hold, ZOH discretisation, companion form, similarity transformation, variation of constants]
+requires: [eigendecomposition, matrix-multiplication]
+related: [linear-gaussian-state-space-models, difference-equations, lti-systems, kalman-filter]
+references: [astrom2021, franklin2019, kalman1963]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **continuous-time linear state-space model** relates an input $\uvec(t) \in \reals^m$ to an output
+$\yvec(t) \in \reals^p$ through a state $\xvec(t) \in \reals^n$:
+
+$$
+\dot{\xvec}(t) = \Amat\xvec(t) + \Bmat\uvec(t), \qquad \yvec(t) = \Cmat\xvec(t) + \Dmat\uvec(t).
+$$
+
+$\Amat$ ($n \times n$) is the dynamics matrix, $\Bmat$ ($n \times m$) the input matrix, $\Cmat$ ($p \times n$) the
+output matrix and $\Dmat$ ($p \times m$) the direct feedthrough. The state is the smallest set of numbers whose value
+at time $t_0$, together with the input on $[t_0, t]$, determines the output at time $t$ <Cite id="kalman1963" />.
+</Definition>
+
+## From differential equations to state space
+
+A physical model usually arrives as a differential equation of order higher than one. Choosing the state as the
+variable and its derivatives turns it into a first-order system in $n$ variables.
+
+A mass $m$ on a spring of stiffness $k$ with a damper of coefficient $c$, pushed by a force $u$, obeys
+$m\ddot{q} + c\dot{q} + kq = u$, where $q$ is the position. Take $\xvec = (q, \dot{q})$. Then
+$\dot{x}_1 = x_2$ and $\dot{x}_2 = (u - kx_1 - cx_2)/m$, which is
+
+$$
+\dot{\xvec} = \begin{bmatrix} 0 & 1 \\ -k/m & -c/m \end{bmatrix}\xvec + \begin{bmatrix} 0 \\ 1/m \end{bmatrix} u,
+\qquad y = \begin{bmatrix} 1 & 0 \end{bmatrix}\xvec.
+$$
+
+The same construction works for any linear ordinary differential equation
+$y^{(n)} + a_1 y^{(n-1)} + \dots + a_n y = u$: set $x_i = y^{(i-1)}$ for $i = 1, \dots, n$. The matrix $\Amat$ then
+has ones on the superdiagonal and $-a_n, \dots, -a_1$ in its last row. This is the **companion form**. Its
+characteristic polynomial is $s^n + a_1 s^{n-1} + \dots + a_n$, the characteristic polynomial of the original equation.
+
+Several interacting parts (two masses, a motor driving a load, an electrical and a mechanical subsystem) stack their
+states into one vector. The model then has several inputs and outputs, which a single transfer function cannot
+describe but the matrices $\Amat$, $\Bmat$, $\Cmat$ and $\Dmat$ can.
+
+The state is not unique. For any invertible $n \times n$ matrix $\Tmat$, the new state $\zvec = \Tmat^{-1}\xvec$
+satisfies $\dot{\zvec} = \Tmat^{-1}\Amat\Tmat\zvec + \Tmat^{-1}\Bmat\uvec$ and $\yvec = \Cmat\Tmat\zvec + \Dmat\uvec$.
+This **similarity transformation** changes the matrices but not the input-output behaviour. $\Tmat^{-1}\Amat\Tmat$
+has the same eigenvalues as $\Amat$.
+
+## The matrix exponential
+
+For a scalar equation $\dot{x} = ax$ the solution is $x(t) = e^{at}x(0)$. The matrix analogue replaces $e^{at}$ with
+the **matrix exponential**, defined by the power series
+
+$$
+e^{\Amat t} = \eye + \Amat t + \frac{(\Amat t)^2}{2!} + \frac{(\Amat t)^3}{3!} + \dots = \sum_{k=0}^{\infty} \frac{\Amat^k t^k}{k!}.
+$$
+
+The series converges for every square $\Amat$ and every $t$, because $\norm{\Amat^k t^k / k!} \le
+(\norm{\Amat}\abs{t})^k / k!$ and the scalar exponential series converges. Differentiating term by term gives
+
+$$
+\frac{d}{dt} e^{\Amat t} = \sum_{k=1}^{\infty} \frac{\Amat^k t^{k-1}}{(k-1)!}
+= \Amat\sum_{k=0}^{\infty} \frac{\Amat^k t^k}{k!} = \Amat e^{\Amat t} = e^{\Amat t}\Amat.
+$$
+
+So $\xvec(t) = e^{\Amat t}\xvec(0)$ satisfies $\dot{\xvec} = \Amat\xvec$ with the right initial value. Two further
+properties follow from the series: $e^{\Amat(t+s)} = e^{\Amat t}e^{\Amat s}$, and $e^{\Amat t}$ is invertible with
+inverse $e^{-\Amat t}$. The matrix $e^{\Amat t}$ is called the **state-transition matrix**.
+
+## Solution with an input
+
+The forced equation $\dot{\xvec} = \Amat\xvec + \Bmat\uvec$ is solved by **variation of constants**. Multiply both
+sides by $e^{-\Amat t}$ and move the $\Amat\xvec$ term to the left:
+
+$$
+e^{-\Amat t}\dot{\xvec}(t) - e^{-\Amat t}\Amat\xvec(t) = e^{-\Amat t}\Bmat\uvec(t).
+$$
+
+By the product rule and $\frac{d}{dt}e^{-\Amat t} = -e^{-\Amat t}\Amat$, the left side is
+$\frac{d}{dt}\paren{e^{-\Amat t}\xvec(t)}$. Integrating from $0$ to $t$ and multiplying by $e^{\Amat t}$ gives
+
+$$
+\xvec(t) = e^{\Amat t}\xvec(0) + \int_0^t e^{\Amat(t-\tau)}\Bmat\uvec(\tau)\,d\tau.
+$$
+
+The first term is the **free response**, the motion from the initial state with no input. The second is the
+**forced response**, a convolution of the input with the impulse response $e^{\Amat t}\Bmat$. The output is
+$\yvec(t) = \Cmat\xvec(t) + \Dmat\uvec(t)$. The solution is linear in the pair $(\xvec(0), \uvec)$, which is what makes
+superposition hold.
+
+## Modes and stability
+
+If $\Amat$ has $n$ linearly independent eigenvectors, the <NoteLink to="eigendecomposition">eigendecomposition</NoteLink>
+$\Amat = \Vmat\Lambdamat\Vmat^{-1}$ gives $\Amat^k = \Vmat\Lambdamat^k\Vmat^{-1}$. Substituting in the series,
+
+$$
+e^{\Amat t} = \Vmat e^{\Lambdamat t}\Vmat^{-1}, \qquad e^{\Lambdamat t} = \diag(e^{\lambda_1 t}, \dots, e^{\lambda_n t}).
+$$
+
+The free response is a sum of **modes** $e^{\lambda_i t}\vvec_i$, one per eigenvalue $\lambda_i$ with eigenvector
+$\vvec_i$. A real eigenvalue gives an exponential. A complex pair $\sigma \pm i\omega$ gives an oscillation at
+$\omega$ rad/s inside an envelope $e^{\sigma t}$. Every mode decays exactly when every eigenvalue has a negative real
+part, so the system $\dot{\xvec} = \Amat\xvec$ is asymptotically stable exactly when all eigenvalues of $\Amat$ lie in
+the open left half of the complex plane. A defective $\Amat$ also produces terms $t^k e^{\lambda t}$, which change
+nothing in this conclusion when $\operatorname{Re}\lambda < 0$.
+
+## Discretisation with a zero-order hold
+
+A digital controller sets the input at sample times $t_k = kh$ and holds it constant until the next sample. This is a
+**zero-order hold**: $\uvec(t) = \uvec_k$ for $t \in [kh, (k+1)h)$. Apply the solution formula over one sample
+interval, starting at $kh$:
+
+$$
+\xvec_{k+1} = e^{\Amat h}\xvec_k + \int_{kh}^{(k+1)h} e^{\Amat((k+1)h - \tau)}\Bmat\,d\tau\;\uvec_k.
+$$
+
+Substituting $s = (k+1)h - \tau$ in the integral gives the exact discrete-time model
+
+$$
+\xvec_{k+1} = \Phimat\xvec_k + \Gammamat\uvec_k, \qquad \Phimat = e^{\Amat h}, \qquad
+\Gammamat = \int_0^h e^{\Amat s}\,ds\;\Bmat.
+$$
+
+No approximation is involved: at the sample times the discrete model and the continuous model agree exactly, provided
+the input really is piecewise constant. Each eigenvalue $\lambda$ of $\Amat$ becomes an eigenvalue $e^{\lambda h}$ of
+$\Phimat$, so the open left half-plane maps into the open unit disc. Continuous-time stability and discrete-time
+stability therefore agree.
+
+<Derivation title="Computing both matrices with one exponential">
+Form the $(n + m) \times (n + m)$ block matrix $\Mmat = \begin{bmatrix} \Amat & \Bmat \\ \zeros & \zeros \end{bmatrix}$.
+Its powers are $\Mmat^k = \begin{bmatrix} \Amat^k & \Amat^{k-1}\Bmat \\ \zeros & \zeros \end{bmatrix}$ for $k \ge 1$.
+Summing the exponential series block by block,
+
+$$
+e^{\Mmat h} = \begin{bmatrix} \sum_k \Amat^k h^k / k! & \sum_{k \ge 1} \Amat^{k-1}\Bmat h^k / k! \\ \zeros & \eye \end{bmatrix}
+= \begin{bmatrix} \Phimat & \Gammamat \\ \zeros & \eye \end{bmatrix},
+$$
+
+because $\int_0^h \Amat^{k-1} s^{k-1} / (k-1)!\,ds = \Amat^{k-1} h^k / k!$. One call to a matrix-exponential routine
+returns both $\Phimat$ and $\Gammamat$, and $\Amat$ need not be invertible.
+</Derivation>
+
+## Worked example
+
+Take $\ddot{q} + 3\dot{q} + 2q = u$, a mass-spring-damper with $m = 1$, $c = 3$ and $k = 2$. Then
+
+$$
+\Amat = \begin{bmatrix} 0 & 1 \\ -2 & -3 \end{bmatrix}, \qquad \Bmat = \begin{bmatrix} 0 \\ 1 \end{bmatrix}.
+$$
+
+The characteristic polynomial is $s^2 + 3s + 2 = (s + 1)(s + 2)$, so the eigenvalues are $-1$ and $-2$. Both modes
+decay and the system is stable. The eigenvectors are $(1, -1)$ and $(1, -2)$. With $\Vmat$ holding them as columns,
+$\Vmat e^{\Lambdamat t}\Vmat^{-1}$ gives
+
+$$
+e^{\Amat t} = \begin{bmatrix} 2e^{-t} - e^{-2t} & e^{-t} - e^{-2t} \\ -2e^{-t} + 2e^{-2t} & -e^{-t} + 2e^{-2t} \end{bmatrix}.
+$$
+
+At $t = 0$ this is $\eye$, as it must be. At $t = 1$ it is
+$\begin{bmatrix} 0.600 & 0.233 \\ -0.465 & -0.097 \end{bmatrix}$. A unit initial displacement with zero velocity
+decays to position $0.600$ after one second.
+
+With sample interval $h = 0.1$, the zero-order-hold model has
+
+$$
+\Phimat = \begin{bmatrix} 0.99094 & 0.08611 \\ -0.17221 & 0.73262 \end{bmatrix}, \qquad
+\Gammamat = \begin{bmatrix} 0.00453 \\ 0.08611 \end{bmatrix}.
+$$
+
+The eigenvalues of $\Phimat$ are $e^{-0.1} = 0.905$ and $e^{-0.2} = 0.819$. The second entry of $\Gammamat$ is
+$e^{-h} - e^{-2h}$, the velocity gained in one interval from a unit force.
+
+## Relations
+
+- The discrete-time model $\xvec_{k+1} = \Phimat\xvec_k + \Gammamat\uvec_k$ with Gaussian noise added is the
+  <NoteLink to="linear-gaussian-state-space-models">linear-Gaussian state-space model</NoteLink> of time-series
+  analysis, whose state the <NoteLink to="kalman-filter">Kalman filter</NoteLink> estimates.
+- Eliminating the state gives the input-output description: a transfer function in continuous time, or a
+  <NoteLink to="difference-equations">difference equation</NoteLink> in discrete time.
+
+## Assumptions
+
+- The model is linear and time-invariant. A nonlinear model $\dot{\xvec} = \fvec(\xvec, \uvec)$ is approximated by a
+  linear one near an operating point.
+- The zero-order-hold model is exact only when the input is held constant between samples. A controller that
+  computes $\uvec_k$ from $\xvec_k$ also introduces a computation delay, which the model must include if it is a
+  noticeable fraction of $h$.
+
+## Pitfalls
+
+- **Evaluating $e^{\Amat t}$ by truncating the series.** The terms can grow large before they shrink and cancel,
+  which loses precision when $\norm{\Amat t}$ is large. Library routines use scaling and squaring with Padé
+  approximants.
+- **Eigendecomposition of a nearly defective $\Amat$.** $\Vmat$ is then badly conditioned, and
+  $\Vmat e^{\Lambdamat t}\Vmat^{-1}$ is inaccurate even though $e^{\Amat t}$ itself is well behaved.
+- **Forward Euler instead of the hold equivalent.** $\xvec_{k+1} = (\eye + h\Amat)\xvec_k + h\Bmat\uvec_k$ is only
+  a first-order approximation. It maps a stable eigenvalue $\lambda$ to $1 + h\lambda$, which lies outside the unit
+  circle when $h$ is too large, so it can turn a stable system into an unstable model.
