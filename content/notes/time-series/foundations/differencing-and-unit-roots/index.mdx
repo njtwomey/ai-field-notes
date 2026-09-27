@@ -1,0 +1,180 @@
+---
+title: Differencing and unit roots
+kind: concept
+summary: 'Differencing, $\Delta x_t = x_t - x_{t-1}$, removes a stochastic trend. A series is integrated of order $d$ when $d$ differences make it stationary. A unit root is the case $d \ge 1$; Dickey–Fuller tests it as the null, and KPSS tests stationarity as the null.'
+tags: [time-series, stationarity, hypothesis-testing, worked-example]
+aliases:
+  [
+    differencing,
+    unit root,
+    integrated process,
+    order of integration,
+    backshift operator,
+    lag operator,
+    seasonal differencing,
+    Dickey–Fuller test,
+    augmented Dickey–Fuller test,
+    ADF test,
+    KPSS test,
+    over-differencing,
+  ]
+requires: [stationarity, white-noise-and-random-walk]
+related: [autoregressive-model, arima-model, seasonal-arima, acf-and-pacf]
+references: [dickey1979, said1984, kwiatkowski1992, hamilton1994, hyndman2021, hyndman2008b, box2015]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The **backshift operator** $B$ maps a series to its previous value, $Bx_t = x_{t-1}$. The **first difference** is
+$\Delta x_t = (1 - B)x_t = x_t - x_{t-1}$, and the $d$-th difference is $\Delta^d = (1 - B)^d$. A series is
+**integrated of order $d$**, written $I(d)$, if $\Delta^dx_t$ is stationary and invertible but $\Delta^{d-1}x_t$ is
+not. A series with $d \ge 1$ has a **unit root**: its autoregressive polynomial has a root at $z = 1$
+<Cite id="hamilton1994" />.
+</Definition>
+
+## Intuition
+
+Many series wander: prices, populations, cumulative counts. Their level at any time is the sum of all past changes,
+and the changes themselves may be stationary. Differencing recovers the changes. A random walk becomes white noise
+after one difference. A series whose growth rate wanders becomes stationary only after two.
+
+Differencing is also a filter. It removes the zero-frequency component entirely and amplifies high frequencies. It
+removes a straight-line trend, a stochastic trend, or a level shift, at the price of discarding all information about
+the level.
+
+## Differencing removes polynomial trends
+
+The first difference of a linear trend is a constant: $\Delta(a + bt) = a + bt - a - b(t - 1) = b$. By induction, a
+polynomial of degree $d$ becomes a constant after $d$ differences, because each difference lowers the degree by one:
+$\Delta t^k = t^k - (t - 1)^k$ is a polynomial of degree $k - 1$.
+
+Worked example: $x = (10, 12, 15, 19, 24)$ grows with an increasing slope. Its first differences are
+$(2, 3, 4, 5)$, which still trend. Its second differences are $(1, 1, 1)$, which are constant. The series is an exact
+quadratic, and $d = 2$ differences reduce it to a constant.
+
+**Seasonal differencing** subtracts the value one season earlier, $\Delta_mx_t = (1 - B^m)x_t = x_t - x_{t-m}$, with
+$m = 12$ for monthly data. It removes a fixed seasonal pattern, because any sequence with period $m$ satisfies
+$s_t = s_{t-m}$. Seasonal and ordinary differences multiply as operators: $(1 - B)(1 - B^{12})x_t$ is the change in
+the year-on-year change <Cite id="hyndman2021" />.
+
+## Unit roots in autoregressive models
+
+Write an AR($p$) model with the backshift operator: $\phi(B)x_t = \varepsilon_t$, where
+$\phi(z) = 1 - \phi_1z - \dots - \phi_pz^p$. The model is stationary if every root of $\phi(z)$ lies outside the unit
+circle (<NoteLink to="autoregressive-model">autoregressive model</NoteLink>). If $z = 1$ is a root, the polynomial
+factors as $\phi(z) = (1 - z)\phi^*(z)$, and the model reads $\phi^*(B)\Delta x_t = \varepsilon_t$. If the remaining
+roots lie outside the unit circle, the difference $\Delta x_t$ is a stationary AR($p - 1$) process and $x_t$ is
+$I(1)$. The random walk is the case $\phi(z) = 1 - z$.
+
+A unit root has two practical consequences:
+
+- **Shocks are permanent.** In a stationary AR(1), a shock's effect on $x_{t+h}$ decays as $\phi^h$. With a unit root,
+  a shock shifts every future value by the same amount.
+- **Forecast intervals grow without bound.** For a random walk the $h$-step forecast variance is $h\sigma^2$
+  (<NoteLink to="white-noise-and-random-walk">white noise and random walks</NoteLink>).
+
+## The Dickey–Fuller test
+
+The Dickey–Fuller test takes a unit root as the null hypothesis. In the AR(1) model $x_t = \phi x_{t-1} + \varepsilon_t$,
+subtract $x_{t-1}$ from both sides:
+
+$$
+\Delta x_t = \gamma x_{t-1} + \varepsilon_t, \qquad \gamma = \phi - 1.
+$$
+
+The null is $H_0: \gamma = 0$ (a unit root) against $H_1: \gamma < 0$ (stationary). The statistic is the ordinary
+least-squares $t$-ratio $\hat\gamma/\operatorname{se}(\hat\gamma)$ <Cite id="dickey1979" />.
+
+Under the null the statistic does not have a Student $t$ distribution, even asymptotically. The reason is visible in
+the estimator. With $x_0 = 0$ and $\varepsilon_t$ iid with variance $\sigma^2$,
+
+$$
+\hat\phi - 1 = \frac{\sum_{t=1}^{n}x_{t-1}\varepsilon_t}{\sum_{t=1}^{n}x_{t-1}^2}.
+$$
+
+Squaring $x_t = x_{t-1} + \varepsilon_t$ gives $x_t^2 = x_{t-1}^2 + 2x_{t-1}\varepsilon_t + \varepsilon_t^2$. Summing over
+$t$, the squares telescope:
+
+$$
+\sum_{t=1}^{n}x_{t-1}\varepsilon_t = \frac12\paren{x_n^2 - \sum_{t=1}^{n}\varepsilon_t^2}.
+$$
+
+Divide by $n\sigma^2$. The variable $x_n/(\sigma\sqrt n)$ is a sum of $n$ shocks scaled to unit variance, so it tends to
+$\Gauss(0, 1)$ and its square tends to $\chi^2_1$. The average $\frac{1}{n\sigma^2}\sum\varepsilon_t^2$ tends to 1. So
+the numerator divided by $n\sigma^2$ tends to $\frac12(\chi^2_1 - 1)$. This limit is skewed: it is negative whenever
+$\chi^2_1 < 1$, which has probability $0.683$. The denominator grows as $n^2$, because each $x_{t-1}^2$ has variance of
+order $t$. So $\hat\phi$ converges to 1 at rate $1/n$, faster than the usual $1/\sqrt n$, and the scaled error
+$n(\hat\phi - 1)$ has a non-Gaussian limit that is biased downward. The limit is a functional of Brownian motion,
+tabulated by simulation <Cite id="hamilton1994" />.
+
+The critical values depend on which deterministic terms the regression includes. The asymptotic 5% critical values of
+the $t$-ratio are:
+
+| Regression                                     | 5% critical value |
+| ---------------------------------------------- | ----------------- |
+| $\Delta x_t = \gamma x_{t-1} + \varepsilon_t$  | $-1.95$           |
+| with a constant                                | $-2.86$           |
+| with a constant and a linear trend             | $-3.41$           |
+
+The null is rejected when the statistic is below the critical value. The Student $t$ value of $-1.645$ would reject
+far too often.
+
+The **augmented Dickey–Fuller (ADF) test** adds lagged differences to absorb autocorrelation in $\Delta x_t$:
+
+$$
+\Delta x_t = \alpha + \beta t + \gamma x_{t-1} + \sum_{j=1}^{k}\delta_j\Delta x_{t-j} + \varepsilon_t.
+$$
+
+With $k$ growing slowly with $n$, the $t$-ratio for $\gamma$ has the same limit as in the simple test, and the test
+remains valid for ARMA processes of unknown order <Cite id="said1984" />.
+
+## The KPSS test
+
+The KPSS test reverses the hypotheses <Cite id="kwiatkowski1992" />. It writes the series as a deterministic trend, a
+random walk and stationary noise:
+
+$$
+x_t = \beta t + r_t + u_t, \qquad r_t = r_{t-1} + \eta_t, \qquad \var(\eta_t) = \sigma_\eta^2.
+$$
+
+The null is $H_0: \sigma_\eta^2 = 0$: the random walk is constant, so $x_t$ is stationary around a level (or around a
+trend if $\beta$ is included). Let $e_t$ be the residuals from regressing $x_t$ on a constant (and trend), and
+$S_t = \sum_{s=1}^{t}e_s$ their partial sums. The statistic is
+
+$$
+\operatorname{KPSS} = \frac{1}{n^2\hat\sigma^2_{\mathrm{LR}}}\sum_{t=1}^{n}S_t^2,
+$$
+
+where $\hat\sigma^2_{\mathrm{LR}}$ estimates the long-run variance $\sum_h\gamma(h)$ of $e_t$. Under the null, the
+partial sums behave like a Brownian bridge and the statistic stays bounded. Under a unit root, the partial sums
+accumulate a random walk and the statistic grows with $n$. The 5% critical values are $0.463$ for level stationarity
+and $0.146$ for trend stationarity. Large values reject stationarity.
+
+Running both tests gives four outcomes. ADF rejects and KPSS does not: stationary. KPSS rejects and ADF does not: unit
+root. Both reject or neither rejects: the data are not informative enough, often because the series is short or near
+the boundary. The Hyndman–Khandakar algorithm for automatic ARIMA applies KPSS repeatedly, differencing until it no longer
+rejects <Cite id="hyndman2008b" />.
+
+## Over-differencing
+
+Differencing a stationary series introduces a unit root in the moving-average part. If $x_t = \varepsilon_t$ is white
+noise, then $\Delta x_t = \varepsilon_t - \varepsilon_{t-1}$ is an MA(1) process with coefficient $-1$. Its lag-1
+autocorrelation is $-1/(1 + 1) = -0.5$, and it is not invertible, so its innovations cannot be recovered from the data.
+A lag-1 sample autocorrelation near $-0.5$ after differencing is the usual sign of over-differencing
+<Cite id="box2015" />. Differencing also doubles the noise variance in this example, from $\sigma^2$ to $2\sigma^2$.
+
+## Assumptions
+
+- Dickey–Fuller critical values assume the chosen deterministic terms match the data. Omitting a trend that is present
+  biases the test towards not rejecting.
+- Both tests assume no structural breaks. A level shift in a stationary series looks like a unit root to the ADF test.
+
+## Pitfalls
+
+- **Low power near the boundary.** An AR(1) with $\phi = 0.97$ is stationary, but in 100 observations the ADF test
+  rarely rejects the unit root. Failing to reject is not evidence for a unit root.
+- **Trend-stationary series need a different treatment.** Differencing a series that is a deterministic trend plus
+  stationary noise over-differences it. Regressing on time is the matching transformation.
+- **Log before differencing** when the spread grows with the level. The difference of the logarithm is approximately
+  the percentage change.

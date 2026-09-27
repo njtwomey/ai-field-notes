@@ -1,0 +1,128 @@
+---
+title: ARIMA model
+kind: concept
+summary: 'An ARIMA($p$, $d$, $q$) model is an ARMA($p$, $q$) model for the $d$-th difference of a series: $\phi(B)(1 - B)^dx_t = c + \theta(B)\varepsilon_t$. The $d$ unit roots give it a stochastic trend, so its forecast intervals widen without bound; random walks and simple exponential smoothing are special cases.'
+tags: [time-series, arima, forecasting, stationarity, worked-example]
+aliases: [ARIMA, 'ARIMA(p, d, q)', autoregressive integrated moving average, integrated ARMA, 'ARIMA(0, 1, 1)']
+requires: [arma-model, differencing-and-unit-roots]
+related: [seasonal-arima, regression-with-arma-errors, box-jenkins-method, simple-exponential-smoothing, ets-models]
+references: [box2015, hyndman2021, hamilton1994, muth1960]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A series $x_t$ follows an **ARIMA($p$, $d$, $q$) model** if its $d$-th difference $w_t = (1 - B)^dx_t$ follows a
+stationary, invertible ARMA($p$, $q$) model:
+
+$$
+\phi(B)(1 - B)^dx_t = c + \theta(B)\varepsilon_t,
+$$
+
+where $B$ is the backshift operator, $\phi(z) = 1 - \phi_1z - \dots - \phi_pz^p$ and
+$\theta(z) = 1 + \theta_1z + \dots + \theta_qz^q$ have all roots outside the unit circle, $c$ is a constant, and
+$\varepsilon_t \sim \operatorname{WN}(0, \sigma^2)$. The **I** stands for integrated: $x_t$ is recovered from $w_t$ by
+summing $d$ times <Cite id="box2015" />.
+</Definition>
+
+## Intuition
+
+ARMA models describe stationary series, which fluctuate around a fixed mean. Many real series drift. ARIMA handles
+drift by modelling the changes instead of the levels. The combined polynomial $\phi(z)(1 - z)^d$ has $d$ roots exactly
+on the unit circle at $z = 1$, and all its other roots outside. The unit roots give the series a stochastic trend, and
+the ARMA part describes the short-run dynamics of the changes.
+
+## Special cases
+
+| Model                          | Equation                                                    | Behaviour                                  |
+| ------------------------------ | ----------------------------------------------------------- | ------------------------------------------ |
+| ARIMA(0, 0, 0)                 | $x_t = c + \varepsilon_t$                                   | White noise around $c$                     |
+| ARIMA(0, 1, 0)                 | $x_t = x_{t-1} + \varepsilon_t$                             | Random walk                                |
+| ARIMA(0, 1, 0) with constant   | $x_t = c + x_{t-1} + \varepsilon_t$                         | Random walk with drift                     |
+| ARIMA(0, 1, 1)                 | $x_t = x_{t-1} + \varepsilon_t + \theta\varepsilon_{t-1}$   | Simple exponential smoothing               |
+| ARIMA(0, 2, 2)                 | $(1 - B)^2x_t = (1 + \theta_1B + \theta_2B^2)\varepsilon_t$ | Holt's linear trend method                 |
+| ARIMA($p$, 0, $q$)             | $\phi(B)x_t = c + \theta(B)\varepsilon_t$                   | Stationary ARMA                            |
+
+The exponential-smoothing equivalences are exact for the linear methods and give those methods a likelihood and
+prediction intervals (<NoteLink to="ets-models">ETS models</NoteLink>).
+
+## The constant and long-run forecasts
+
+The constant $c$ and the order $d$ together fix the shape of long-horizon forecasts. Taking expectations of the
+stationary differenced series gives $\expect[w_t] = c/\phi(1)$, so the $d$-th difference has a non-zero mean when
+$c \ne 0$. Summing $d$ times turns a constant into a polynomial of degree $d$ <Cite id="hyndman2021" />:
+
+| $d$ | $c = 0$                        | $c \ne 0$                    |
+| --- | ------------------------------ | ---------------------------- |
+| 0   | Forecasts go to 0              | Forecasts go to the mean     |
+| 1   | Forecasts go to a constant     | Forecasts follow a line      |
+| 2   | Forecasts follow a line        | Forecasts follow a quadratic |
+
+A quadratic trend is rarely credible, so software usually omits the constant when $d = 2$.
+
+## Forecasting
+
+Expand the operator. For ARIMA(1, 1, 0), $(1 - \phi B)(1 - B)x_t = \varepsilon_t$ becomes
+$x_t = (1 + \phi)x_{t-1} - \phi x_{t-2} + \varepsilon_t$. This is an AR(2) recursion whose polynomial
+$1 - (1 + \phi)z + \phi z^2 = (1 - z)(1 - \phi z)$ has a unit root. Forecasts run the recursion forward with future
+shocks set to 0, exactly as for an AR model. The difference from the stationary case appears in the error variance.
+
+The $h$-step forecast error is $\sum_{j=0}^{h-1}\psi_j\varepsilon_{T+h-j}$, with $\psi_j$ the coefficients of
+$\theta(z)/(\phi(z)(1 - z)^d)$. With a unit root the $\psi_j$ do not decay to 0. For $d = 1$ they approach a nonzero
+constant $\psi_\infty = \theta(1)/\phi(1)$, so the error variance $\sigma^2\sum_{j<h}\psi_j^2$ grows linearly in $h$ and
+prediction intervals widen as $\sqrt h$.
+
+## Worked example: ARIMA(1, 1, 0)
+
+Take $\phi = 0.5$, $\sigma^2 = 1$, no constant, and the last two observations $x_{T-1} = 9$ and $x_T = 10$. The last
+change is $w_T = 1$.
+
+- **Point forecasts.** The changes are forecast as an AR(1): $\hat w_{T+h} = 0.5^h$. Cumulating them gives
+  $\hat x_{T+1} = 10.5$, $\hat x_{T+2} = 10.75$, $\hat x_{T+3} = 10.875$, and the forecasts converge to
+  $10 + 0.5/(1 - 0.5) = 11$. The momentum in the last change carries on, decays, and leaves a permanent level shift.
+- **ψ weights.** The coefficients of $1/((1 - 0.5z)(1 - z))$ are the partial sums of $0.5^j$:
+  $\psi_j = (1 - 0.5^{j+1})/0.5$, giving $1$, $1.5$, $1.75$, $1.875$ and the limit $2 = 1/\phi(1)$.
+- **Error variances.** $\sigma^2\sum_{j<h}\psi_j^2$ gives $1$, $3.25$, $6.3125$ and $9.828$ for $h = 1, \dots, 4$. For
+  large $h$ each extra step adds about $\psi_\infty^2 = 4$.
+
+## ARIMA(0, 1, 1) is simple exponential smoothing
+
+The model $x_t = x_{t-1} + \varepsilon_t + \theta\varepsilon_{t-1}$ gives the one-step forecast
+$\hat x_{t+1 \mid t} = x_t + \theta\varepsilon_t$. Under invertibility, the innovation is the one-step forecast error,
+$\varepsilon_t = x_t - \hat x_{t \mid t-1}$. Substituting:
+
+$$
+\hat x_{t+1 \mid t} = x_t + \theta(x_t - \hat x_{t \mid t-1}) = (1 + \theta)x_t - \theta\hat x_{t \mid t-1}.
+$$
+
+With $\alpha = 1 + \theta$, this is $\hat x_{t+1 \mid t} = \alpha x_t + (1 - \alpha)\hat x_{t \mid t-1}$, the recursion
+of <NoteLink to="simple-exponential-smoothing">simple exponential smoothing</NoteLink>. Invertibility,
+$-1 < \theta < 1$, corresponds to $0 < \alpha < 2$. Muth showed that exponential smoothing is the optimal forecast for
+a random walk observed with noise, which has exactly this ARIMA(0, 1, 1) form <Cite id="muth1960" />.
+
+## Choosing $d$
+
+Differencing is chosen before the ARMA orders. Unit-root and stationarity tests (ADF, KPSS) give a formal choice
+(<NoteLink to="differencing-and-unit-roots">differencing and unit roots</NoteLink>). A sample ACF that decays slowly and
+almost linearly suggests another difference. A lag-1 autocorrelation near $-0.5$ after differencing suggests one
+difference too many. In practice $d$ is 0, 1 or 2. Seasonal differencing handles seasonal unit roots
+(<NoteLink to="seasonal-arima">seasonal ARIMA</NoteLink>).
+
+A log or Box–Cox transformation comes before differencing when the variance grows with the level. The differenced log
+series is then approximately the growth rate.
+
+## Assumptions
+
+- After $d$ differences the series is stationary and follows an invertible ARMA model.
+- Innovations are white noise with constant variance; Gaussian innovations for likelihood fitting and prediction
+  intervals.
+- The model's parameters are constant over the sample and the forecast horizon.
+
+## Pitfalls
+
+- **Long-horizon intervals depend on $d$.** Choosing $d = 1$ instead of $d = 0$ for a near-unit-root series turns
+  bounded intervals into intervals that grow without limit. The data rarely decide this confidently.
+- **A constant with $d = 1$ is a drift.** It is easy to include by default and obtain a trend in the forecasts that the
+  data barely support.
+- **Undoing a log transform.** The exponential of a forecast on the log scale is the median of the forecast
+  distribution, not its mean.

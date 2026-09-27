@@ -1,0 +1,146 @@
+---
+title: Box–Jenkins method
+kind: technique
+summary: 'The Box–Jenkins method builds an ARIMA model in three repeated stages: identify $d$, $p$ and $q$ from transformations, unit-root tests and the ACF and PACF; estimate the parameters by conditional or exact maximum likelihood; and check that the residuals are white noise.'
+tags: [time-series, arima, model-selection, forecasting, worked-example]
+aliases:
+  [
+    Box–Jenkins,
+    Box–Jenkins methodology,
+    ARIMA model building,
+    conditional sum of squares,
+    CSS estimation,
+    exact likelihood,
+    Hyndman–Khandakar algorithm,
+    auto.arima,
+    AICc,
+  ]
+requires: [arima-model, acf-and-pacf]
+related: [ljung-box-test, seasonal-arima, regression-with-arma-errors, differencing-and-unit-roots, kalman-filter]
+references: [box2015, hyndman2021, hyndman2008b, brockwell1991, hamilton1994]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The **Box–Jenkins method** is an iterative procedure for fitting ARIMA models <Cite id="box2015" />. **Identification**
+chooses a transformation, the differencing orders and candidate ARMA orders. **Estimation** fits each candidate by
+maximum likelihood or least squares. **Diagnostic checking** tests whether the residuals behave like white noise. A
+model that fails the checks sends the analyst back to identification. The accepted model is used for forecasting.
+</Definition>
+
+## Problem
+
+The ARIMA family is large. Orders $p$, $d$ and $q$ (and seasonal $P$, $D$, $Q$) each range over several values, and a
+wrong choice either misses structure or wastes parameters on noise. Box and Jenkins proposed a disciplined search built
+on the **principle of parsimony**: prefer the simplest model whose residuals show no remaining structure.
+
+## Mechanism
+
+### Identification
+
+1. **Plot the series.** Look for trend, seasonality, changing variance, outliers and structural breaks.
+2. **Stabilise the variance.** If the spread grows with the level, take logs or a Box–Cox transform.
+3. **Choose the differencing.** Difference until the series looks stationary, guided by unit-root and stationarity
+   tests (<NoteLink to="differencing-and-unit-roots">differencing and unit roots</NoteLink>). Seasonal data may need a
+   seasonal difference (<NoteLink to="seasonal-arima">seasonal ARIMA</NoteLink>).
+4. **Read the ACF and PACF** of the differenced series. A PACF that cuts off after lag $p$ suggests AR($p$). An ACF
+   that cuts off after lag $q$ suggests MA($q$). Both tailing off suggests a mixed model
+   (<NoteLink to="acf-and-pacf">ACF and PACF</NoteLink>).
+
+The correlograms usually suggest several candidates. Box and Jenkins compared them by judgement. Current practice
+compares them by an information criterion. For a model with $k$ estimated parameters, maximised log-likelihood
+$\log\hat L$ and $n$ observations,
+
+$$
+\AIC = -2\log\hat L + 2k, \qquad \operatorname{AICc} = \AIC + \frac{2k(k + 1)}{n - k - 1}, \qquad \BIC = -2\log\hat L + k\log n.
+$$
+
+The corrected AICc is preferred for the short series common in forecasting <Cite id="hyndman2021" />. The likelihood
+is that of the differenced data, so criteria can compare models with the same $d$ and $D$ only.
+
+### Estimation: conditional versus exact likelihood
+
+For Gaussian innovations, the likelihood factorises by the chain rule into one-step predictive densities:
+$p(x_1, \dots, x_n) = p(x_1, \dots, x_r)\prod_{t=r+1}^{n}p(x_t \mid x_1, \dots, x_{t-1})$. The two main estimators
+differ in how they treat the start of the series.
+
+**Conditional likelihood** treats the first $r$ values as fixed and drops their density. For an AR($p$) model with
+$r = p$, each remaining factor is $\Gauss(x_t;\, c + \sum_i\phi_ix_{t-i},\, \sigma^2)$. Maximising the product is
+ordinary least squares of $x_t$ on its lags. For models with an MA part, the unobserved pre-sample shocks are set to 0
+and the innovations are rebuilt recursively, $\hat\varepsilon_t = x_t - c - \sum_i\phi_ix_{t-i} - \sum_j\theta_j\hat\varepsilon_{t-j}$.
+Minimising $\sum_t\hat\varepsilon_t^2$ is **conditional sum of squares (CSS)** estimation. It is fast but ignores
+information in the first observations, and for MA roots near the unit circle the arbitrary start value
+$\hat\varepsilon_0 = 0$ biases the estimate.
+
+**Exact likelihood** keeps the density of the first observations under the stationary distribution. For the AR(1)
+model $x_t = \phi x_{t-1} + \varepsilon_t$, the first value has $x_1 \sim \Gauss(0, \sigma^2/(1 - \phi^2))$, so
+
+$$
+\log L(\phi, \sigma^2) = -\frac n2\log(2\pi\sigma^2) + \frac12\log(1 - \phi^2) - \frac{(1 - \phi^2)x_1^2 + \sum_{t=2}^{n}(x_t - \phi x_{t-1})^2}{2\sigma^2}.
+$$
+
+The extra terms involve $1 - \phi^2$, which pulls the estimate away from $\abs\phi = 1$ and guarantees a stationary
+estimate. For a general ARMA model the exact likelihood is computed with the Kalman filter on a state-space form, or
+with the innovations algorithm, in $O(n)$ time <Cite id="hamilton1994" />. Common software computes CSS estimates
+first and uses them to start the numerical maximisation of the exact likelihood.
+
+The two estimators have the same large-sample distribution. They differ in short series and near the boundaries of
+the stationarity and invertibility regions.
+
+### Diagnostic checking
+
+The standardised residuals of an adequate model are approximately white noise <Cite id="box2015" />.
+
+- **Residual ACF.** No residual autocorrelation should lie far outside $\pm 1.96/\sqrt n$, especially at low lags and
+  seasonal lags.
+- **Portmanteau test.** The <NoteLink to="ljung-box-test">Ljung–Box test</NoteLink> tests the first $h$ residual
+  autocorrelations jointly, with degrees of freedom reduced by the number of ARMA parameters.
+- **Distribution.** A histogram or normal quantile plot checks the Gaussian assumption behind the prediction
+  intervals. Heavy tails or clusters of large residuals point to outliers or changing volatility.
+- **Overfitting.** Add one AR or MA term. If the added coefficient is not significant and the others barely change,
+  the smaller model is adequate.
+
+## Worked example: conditional versus exact AR(1) estimates
+
+Six observations of a zero-mean series are $x = (0.5, 1.2, 0.3, -0.4, 0.8, 1.1)$. Fit an AR(1) with known mean 0.
+
+- **Conditional (least squares).** $\hat\phi = \sum_{t=2}^{6}x_tx_{t-1}/\sum_{t=2}^{6}x_{t-1}^2 = 1.4/2.58 = 0.543$.
+  The residual variance is $\hat\sigma^2 = \frac15\sum_{t=2}^{6}(x_t - \hat\phi x_{t-1})^2 = 0.556$.
+- **Exact maximum likelihood.** Maximising the exact log-likelihood numerically gives $\hat\phi = 0.471$ and
+  $\hat\sigma^2 = 0.498$.
+
+The exact estimate is smaller. The term $\frac12\log(1 - \phi^2)$ and the weight $(1 - \phi^2)$ on $x_1^2$ both enter
+because the first observation is treated as a draw from the stationary distribution. With six observations that one
+extra factor moves the estimate by 0.07. With several hundred it would move it by little.
+
+## Automatic ARIMA
+
+Automatic procedures encode the same steps. The Hyndman–Khandakar algorithm, used by the R function `auto.arima`,
+chooses $d$ by repeated KPSS tests and $D$ by a seasonal strength test, then runs a stepwise search over $p$, $q$, $P$
+and $Q$ that moves one order at a time and keeps the model with the lowest AICc <Cite id="hyndman2008b" />. It fits
+thousands of series without supervision, but it skips the plotting and residual checks that catch outliers, breaks and
+transformation problems.
+
+## Cost
+
+Each likelihood evaluation costs $O(n)$ for fixed orders, through the Kalman filter or the innovations algorithm.
+Maximisation needs tens to hundreds of evaluations. A search over $K$ candidate models multiplies this by $K$.
+
+## Trade-offs
+
+- **Judgement versus automation.** Manual identification catches data problems; automatic search scales and is
+  reproducible.
+- **Conditional versus exact likelihood.** CSS is simpler and fast; exact likelihood is more accurate in short series
+  and near the parameter boundaries, and guarantees a stationary AR estimate.
+- **Fit versus forecast accuracy.** The information criteria estimate out-of-sample fit under the model's assumptions.
+  Time-series cross-validation measures it directly at a higher cost.
+
+## Pitfalls
+
+- **Comparing AICc across different $d$.** Differencing changes the data whose likelihood is computed, so the values
+  are not comparable. Choose $d$ first.
+- **Passing the Ljung–Box test is not validation.** A model can have white-noise residuals and still forecast badly
+  because of a break or a wrong $d$.
+- **Identification from short series.** Sample autocorrelations of 50 observations have standard errors near 0.14.
+  Patterns in the correlogram at that size are weak evidence.

@@ -1,0 +1,155 @@
+---
+title: Holt's linear trend method
+kind: technique
+summary: "Holt's method extends exponential smoothing with a slope: the level $\\ell_t$ and trend $b_t$ are smoothed with constants $\\alpha$ and $\\beta^*$, and the forecast is $\\ell_T + hb_T$. The damped version multiplies the slope by $\\phi < 1$ each step, so long-horizon forecasts level off."
+tags: [time-series, exponential-smoothing, forecasting, trend, worked-example]
+aliases:
+  [
+    "Holt's method",
+    "Holt's linear method",
+    double exponential smoothing,
+    damped trend method,
+    damped trend,
+    additive damped trend,
+    'ARIMA(0, 2, 2)',
+  ]
+requires: [simple-exponential-smoothing]
+related: [holt-winters, ets-models, arima-model, linear-gaussian-state-space-models]
+references: [holt2004, gardner1985b, gardner1985, hyndman2021, hyndman2008]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Holt's linear trend method** forecasts a series with a local linear trend <Cite id="holt2004" />. It keeps a level
+$\ell_t$ and a slope $b_t$, updated after each observation $y_t$ by
+
+$$
+\begin{aligned}
+\ell_t &= \alpha y_t + (1 - \alpha)(\ell_{t-1} + b_{t-1}), \\
+b_t &= \beta^*(\ell_t - \ell_{t-1}) + (1 - \beta^*)b_{t-1},
+\end{aligned}
+$$
+
+with smoothing constants $0 < \alpha \le 1$ and $0 \le \beta^* \le 1$. The $h$-step forecast is
+$\hat y_{T+h \mid T} = \ell_T + hb_T$.
+</Definition>
+
+## Problem
+
+<NoteLink to="simple-exponential-smoothing">Simple exponential smoothing</NoteLink> forecasts a flat line. On a series
+that grows steadily it lags behind the data, and the lag does not shrink with more data: once the start-up has passed,
+the one-step error settles at the slope divided by $\alpha$. Holt's method adds a second smoothed quantity, the slope,
+so that forecasts extrapolate the current trend. Because the slope is itself smoothed, the method follows a trend that
+changes slowly, which a global regression on time cannot.
+
+## Mechanism
+
+### Two coupled smoothers
+
+The level equation is SES applied to a moving target: it averages the new observation $y_t$ with the previous level
+carried forward by one step of trend, $\ell_{t-1} + b_{t-1}$. The trend equation is SES applied to the observed change
+in level, $\ell_t - \ell_{t-1}$, averaged with the previous slope. $\alpha$ sets how fast the level adapts and
+$\beta^*$ how fast the slope adapts.
+
+### Error-correction form
+
+Let $e_t = y_t - (\ell_{t-1} + b_{t-1})$ be the one-step forecast error. The level update rearranges to
+$\ell_t = \ell_{t-1} + b_{t-1} + \alpha e_t$. Substituting $\ell_t - \ell_{t-1} = b_{t-1} + \alpha e_t$ into the trend
+update:
+
+$$
+b_t = \beta^*(b_{t-1} + \alpha e_t) + (1 - \beta^*)b_{t-1} = b_{t-1} + \alpha\beta^*e_t.
+$$
+
+Both states are corrected by multiples of the same forecast error. With $\beta = \alpha\beta^*$, this is the form used
+in the state-space version of the method, ETS(A, A, N) (<NoteLink to="ets-models">ETS models</NoteLink>).
+
+### Equivalence with ARIMA(0, 2, 2)
+
+The error-correction form implies that the second difference of $y_t$ is an MA(2) process in the errors:
+
+$$
+(1 - B)^2y_t = e_t + (\alpha + \beta - 2)e_{t-1} + (1 - \alpha)e_{t-2}.
+$$
+
+So Holt's method gives the same forecasts as an ARIMA(0, 2, 2) model with $\theta_1 = \alpha + \beta - 2$ and
+$\theta_2 = 1 - \alpha$, when $e_t$ are the model's innovations <Cite id="hyndman2008" />. Two unit roots mean that
+both the level and the slope wander (<NoteLink to="arima-model">ARIMA model</NoteLink>).
+
+<Derivation title="Second difference of Holt's method">
+From the error-correction form, $y_t = \ell_{t-1} + b_{t-1} + e_t$, $\ell_t - \ell_{t-1} = b_{t-1} + \alpha e_t$ and
+$b_t - b_{t-1} = \beta e_t$. The first difference is
+
+$$
+y_t - y_{t-1} = (\ell_{t-1} - \ell_{t-2}) + (b_{t-1} - b_{t-2}) + e_t - e_{t-1}
+= b_{t-2} + \alpha e_{t-1} + \beta e_{t-1} + e_t - e_{t-1}.
+$$
+
+So $\Delta y_t = b_{t-2} + e_t + (\alpha + \beta - 1)e_{t-1}$. Differencing again, using $b_{t-2} - b_{t-3} = \beta e_{t-2}$:
+
+$$
+\Delta^2y_t = \beta e_{t-2} + e_t + (\alpha + \beta - 1)e_{t-1} - e_{t-1} - (\alpha + \beta - 1)e_{t-2}
+= e_t + (\alpha + \beta - 2)e_{t-1} + (1 - \alpha)e_{t-2}.
+$$
+</Derivation>
+
+### Damped trend
+
+Holt's forecasts extrapolate the current slope forever. Over long horizons this overshoots, because real trends
+rarely persist. Gardner and McKenzie added a **damping parameter** $0 < \phi \le 1$ <Cite id="gardner1985b" />:
+
+$$
+\begin{aligned}
+\ell_t &= \alpha y_t + (1 - \alpha)(\ell_{t-1} + \phi b_{t-1}), \\
+b_t &= \beta^*(\ell_t - \ell_{t-1}) + (1 - \beta^*)\phi b_{t-1}, \\
+\hat y_{T+h \mid T} &= \ell_T + (\phi + \phi^2 + \dots + \phi^h)b_T.
+\end{aligned}
+$$
+
+Each future step adds a fraction $\phi$ of the previous step's increment. The sum is a geometric series, so as
+$h \to \infty$ the forecast approaches the finite limit $\ell_T + \phi b_T/(1 - \phi)$. $\phi = 1$ recovers Holt's
+method and $\phi = 0$ recovers SES. Values between 0.8 and 0.98 are typical, because below 0.8 the damping is so strong
+that the method is nearly SES, and above 0.98 it is nearly undamped <Cite id="hyndman2021" />. The damped trend method
+performed well against undamped methods across many series in its original evaluation <Cite id="gardner1985b" />.
+
+## Worked example
+
+Take $y = (10, 12, 15, 17)$, $\alpha = \beta^* = 0.5$, and initial states $\ell_0 = 10$, $b_0 = 2$.
+
+| $t$ | $y_t$ | forecast $\ell_{t-1} + b_{t-1}$ | $\ell_t$ | $b_t$  |
+| --- | ----- | ------------------------------- | -------- | ------ |
+| 1   | 10    | 12                              | 11       | 1.5    |
+| 2   | 12    | 12.5                            | 12.25    | 1.375  |
+| 3   | 15    | 13.625                          | 14.3125  | 1.7188 |
+| 4   | 17    | 16.031                          | 16.5156  | 1.9609 |
+
+At $t = 1$: $\ell_1 = 0.5 \cdot 10 + 0.5 \cdot 12 = 11$ and $b_1 = 0.5(11 - 10) + 0.5 \cdot 2 = 1.5$. The forecasts
+from $T = 4$ are $16.516 + 1.961h$: $18.48$, $20.44$ and $22.40$ for $h = 1, 2, 3$, rising without limit.
+
+The damped method with $\phi = 0.8$ and the same $\alpha$, $\beta^*$ and initial states ends at $\ell_4 = 15.981$ and
+$b_4 = 1.623$. Its forecasts are $15.981 + (0.8 + \dots + 0.8^h) \times 1.623$: $17.28$, $18.32$ and $19.15$ for
+$h = 1, 2, 3$, and $21.78$ at $h = 10$. They approach $15.981 + 4 \times 1.623 = 22.47$.
+
+## Cost
+
+Each update costs a handful of arithmetic operations, and the method stores two numbers per series. The smoothing
+constants, the damping parameter and the initial states are fitted by minimising one-step squared errors, a
+low-dimensional numerical optimisation.
+
+## Trade-offs
+
+- **$\beta^*$ small versus large.** A small $\beta^*$ gives a slope that changes slowly and extrapolates a long-run
+  trend. A large one makes the slope react to every wiggle, so forecasts swing with the latest changes.
+- **Damped versus undamped.** Damping costs one parameter and gives more conservative long-horizon forecasts; it
+  underestimates trends that genuinely persist.
+- **Local versus global trend.** A regression on time fits one slope to all the data. Holt's method weights recent
+  slopes more, which suits trends that drift but gives wider prediction intervals.
+
+## Pitfalls
+
+- **Extrapolating a local slope.** A burst of growth at the end of the series becomes a steep forecast. Damping, or a
+  smaller $\beta^*$, reduces the risk.
+- **Seasonal data.** A seasonal swing is read as a changing slope. Use <NoteLink to="holt-winters">Holt–Winters</NoteLink>.
+- **Multiplicative growth.** A series growing at a constant percentage rate is better modelled on the log scale, or
+  with a multiplicative trend, than with an additive slope.

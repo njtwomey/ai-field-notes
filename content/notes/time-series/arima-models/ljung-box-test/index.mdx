@@ -1,0 +1,121 @@
+---
+title: Ljung–Box test
+kind: test
+summary: 'The Ljung–Box test checks whether the first $h$ autocorrelations of a series, usually model residuals, are jointly zero. Its statistic $Q = n(n+2)\sum_{k=1}^{h} r_k^2/(n-k)$ is approximately $\chi^2_{h-p-q}$ under white noise after fitting an ARMA($p$, $q$) model.'
+tags: [hypothesis-testing, time-series, arima, model-diagnostics, worked-example]
+aliases: [Ljung–Box Q test, Box–Pierce test, portmanteau test, Ljung–Box statistic, residual autocorrelation test]
+requires: [acf-and-pacf, chi-squared-distribution, p-value]
+related: [box-jenkins-method, white-noise-and-random-walk, arma-model, regression-with-arma-errors]
+references: [ljung1978, box1970, box2015, hyndman2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The **Ljung–Box test** is a **portmanteau test**: it tests the first $h$ autocorrelations of a series together rather
+than one at a time <Cite id="ljung1978" />. Applied to the residuals of a fitted ARMA($p$, $q$) model, it checks
+whether the model has captured the series' linear dependence. The statistic sums squared sample autocorrelations with
+weights that correct their small-sample variance, and is compared with a chi-squared distribution with $h - p - q$
+degrees of freedom.
+</Definition>
+
+## Hypotheses
+
+- $H_0$: the series is white noise up to lag $h$, $\rho(1) = \rho(2) = \dots = \rho(h) = 0$. For residuals: the model
+  is adequate.
+- $H_1$: at least one of $\rho(1), \dots, \rho(h)$ is non-zero.
+
+The test is a lack-of-fit test. A rejection says that some linear structure remains. It does not say which.
+
+## Assumptions
+
+- Under $H_0$ the series is iid with finite variance, or the model's innovations are. The chi-squared approximation
+  needs $n$ large relative to $h$.
+- When the test is applied to residuals, the model must be an ARMA model fitted by an efficient method (least squares
+  or maximum likelihood), for the degrees-of-freedom correction to hold <Cite id="box1970" />.
+- The number of lags $h$ is chosen before looking at the result.
+
+## Test statistic
+
+Let $r_k$ be the sample autocorrelation at lag $k$ of $n$ values (<NoteLink to="acf-and-pacf">ACF and PACF</NoteLink>).
+Under iid noise each $r_k$ is approximately $\Gauss(0, 1/n)$ and different lags are approximately independent. So
+$\sqrt n\,r_k$ are approximately independent standard normals, and the sum of their squares is approximately
+chi-squared with $h$ degrees of freedom. This is the **Box–Pierce statistic** <Cite id="box1970" />:
+
+$$
+Q_{\mathrm{BP}} = n\sum_{k=1}^{h}r_k^2 \;\dot\sim\; \chi^2_h.
+$$
+
+The $1/n$ variance is only a large-sample value. For iid Gaussian data a more exact calculation gives
+
+$$
+\var(r_k) \approx \frac{n - k}{n(n + 2)},
+$$
+
+which is smaller than $1/n$, noticeably so at large lags. The factor $n - k$ counts the products in $\hat\gamma(k)$.
+The factor $n + 2$ comes from the moments of a ratio of two quadratic forms in normal variables, $\hat\gamma(k)$ over
+$\hat\gamma(0)$. Standardising each $r_k$ by this variance instead of $1/n$
+gives the **Ljung–Box statistic**:
+
+$$
+Q_{\mathrm{LB}} = n(n + 2)\sum_{k=1}^{h}\frac{r_k^2}{n - k}.
+$$
+
+Its null distribution is much closer to $\chi^2_h$ in samples of 50 to 100, where the Box–Pierce statistic is too
+small and the test rejects too rarely <Cite id="ljung1978" />.
+
+**Degrees of freedom for residuals.** Fitting an ARMA($p$, $q$) model makes the residuals fit the data by construction,
+which shrinks their low-lag autocorrelations. Box and Pierce showed that the residual autocorrelations behave like
+$h$ normal variables subject to $p + q$ linear constraints, so the statistic is approximately $\chi^2_{h-p-q}$
+<Cite id="box1970" />. The constant and regression coefficients do not reduce the degrees of freedom.
+
+## Decision rule
+
+Reject $H_0$ at level $\alpha$ when $Q_{\mathrm{LB}} > \chi^2_{h-p-q,\,1-\alpha}$, the $1 - \alpha$ quantile of the
+chi-squared distribution. Equivalently, reject when the <NoteLink to="p-value">p-value</NoteLink>
+$\Pr(\chi^2_{h-p-q} > Q_{\mathrm{LB}})$ is below $\alpha$.
+
+A common choice is $h = 10$ for non-seasonal data and $h = 2m$ for seasonal data with period $m$, with $h \le n/5$
+<Cite id="hyndman2021" />. Too small an $h$ misses dependence at longer lags. Too large an $h$ dilutes a few large
+autocorrelations among many small ones and loses power.
+
+## Worked example
+
+A model is fitted to $n = 100$ observations. The first five residual autocorrelations are
+$r = (0.15, -0.10, 0.08, 0.12, -0.05)$. The terms $n(n + 2)r_k^2/(n - k) = 10200r_k^2/(100 - k)$ are:
+
+| $k$ | $r_k$   | $10200r_k^2/(100 - k)$ |
+| --- | ------- | ---------------------- |
+| 1   | 0.15    | 2.318                  |
+| 2   | $-0.10$ | 1.041                  |
+| 3   | 0.08    | 0.673                  |
+| 4   | 0.12    | 1.530                  |
+| 5   | $-0.05$ | 0.268                  |
+
+The sum is $Q_{\mathrm{LB}} = 5.830$. The Box–Pierce value is $100 \times 0.0558 = 5.580$, slightly smaller.
+
+- **Raw series** (no model fitted, $h = 5$ degrees of freedom): the 5% critical value is $11.07$, and the p-value is
+  $0.32$. White noise is not rejected.
+- **Residuals of an AR(1) fit** ($5 - 1 = 4$ degrees of freedom): the critical value is $9.49$, and the p-value is
+  $0.21$. The model is not rejected.
+
+No single $r_k$ here exceeds the $\pm 1.96/\sqrt{100} = \pm 0.196$ band either. The portmanteau test combines evidence
+that is individually weak; with larger autocorrelations spread over several lags it can reject even when no single
+lag stands out.
+
+## Effect size
+
+The test has no standard effect size. The residual autocorrelations $r_k$ are the effect: they measure how much
+one-step predictability the model leaves unused. An $r_1$ of 0.1 means that regressing residuals on their previous
+value would explain about $0.1^2 = 1\%$ of their variance.
+
+## Pitfalls
+
+- **Correlation is not dependence.** The test detects linear dependence only. Residuals with volatility clustering can
+  pass. Applying the test to squared residuals (the McLeod–Li test) checks for that.
+- **Degrees of freedom.** Using $h$ instead of $h - p - q$ for residuals makes the test conservative; using $h - p - q$
+  on a raw series makes it anti-conservative. With $h \le p + q$ the test is undefined.
+- **Large samples reject trivially.** With $n$ in the tens of thousands, autocorrelations of 0.02 are significant but
+  irrelevant for forecasting. Look at the size of $r_k$.
+- **Not a model-selection tool.** Many models pass. Choose among them with information criteria or out-of-sample
+  accuracy (<NoteLink to="box-jenkins-method">Box–Jenkins method</NoteLink>).

@@ -1,0 +1,150 @@
+---
+title: Holt–Winters method
+kind: technique
+summary: 'Holt–Winters adds a seasonal component with period $m$ to Holt''s level and trend, each smoothed by its own constant ($\alpha$, $\beta^*$, $\gamma$). The additive form suits a seasonal swing of fixed size; the multiplicative form suits a swing proportional to the level.'
+tags: [time-series, exponential-smoothing, forecasting, seasonality, worked-example]
+aliases:
+  [
+    Holt–Winters,
+    Holt–Winters seasonal method,
+    triple exponential smoothing,
+    additive Holt–Winters,
+    multiplicative Holt–Winters,
+    Winters' method,
+  ]
+requires: [holt-linear-trend]
+related: [simple-exponential-smoothing, ets-models, seasonal-arima, time-series-decomposition]
+references: [winters1960, holt2004, hyndman2021, hyndman2008, gardner1985]
+status: draft
+updated: 2026-09-27
+---
+
+import { HoltWintersExplorer } from './HoltWintersExplorer'
+
+<Definition>
+The **Holt–Winters method** forecasts a series with trend and seasonality of period $m$ (for example $m = 12$ for
+monthly data) <Cite id="winters1960" />. It keeps a level $\ell_t$, a slope $b_t$ and $m$ seasonal states, one for
+each season. The **additive** method updates them by
+
+$$
+\begin{aligned}
+\ell_t &= \alpha(y_t - s_{t-m}) + (1 - \alpha)(\ell_{t-1} + b_{t-1}), \\
+b_t &= \beta^*(\ell_t - \ell_{t-1}) + (1 - \beta^*)b_{t-1}, \\
+s_t &= \gamma(y_t - \ell_{t-1} - b_{t-1}) + (1 - \gamma)s_{t-m},
+\end{aligned}
+$$
+
+with smoothing constants $\alpha, \beta^*, \gamma \in [0, 1]$, and forecasts
+$\hat y_{T+h \mid T} = \ell_T + hb_T + s_{T+h-m(k+1)}$ with $k = \lfloor(h - 1)/m\rfloor$, so that the seasonal state
+used is the most recent one for the forecast's season.
+</Definition>
+
+## Problem
+
+A seasonal series defeats both simpler smoothers. <NoteLink to="simple-exponential-smoothing">Simple exponential
+smoothing</NoteLink> chases each seasonal peak and trough as if it were a level shift.
+<NoteLink to="holt-linear-trend">Holt's method</NoteLink> reads the rising half of each season as a trend. Winters added a third smoothed component for the seasonal pattern. Each season keeps its own state, updated
+only when that season recurs.
+
+## Mechanism
+
+### The three updates
+
+Each equation averages a new estimate with the old state.
+
+- **Level.** The new estimate is the observation with its seasonal effect removed, $y_t - s_{t-m}$ (the seasonally
+  adjusted value). The old state is the level carried forward by one step of slope.
+- **Slope.** As in Holt's method, the new estimate is the change in level.
+- **Season.** The new estimate is the observation minus the predicted level, $y_t - \ell_{t-1} - b_{t-1}$. The old
+  state is the same season's index one period ago, $s_{t-m}$.
+
+The seasonal state for a season changes only once per period, so the effective smoothing of the seasonal pattern is
+much slower than that of the level for the same constant. For monthly data with $\gamma = 0.2$, a change in the
+December effect takes several years to be absorbed.
+
+### Error-correction form
+
+Let $e_t = y_t - (\ell_{t-1} + b_{t-1} + s_{t-m})$ be the one-step forecast error. Substituting into the three updates:
+
+$$
+\ell_t = \ell_{t-1} + b_{t-1} + \alpha e_t, \qquad b_t = b_{t-1} + \alpha\beta^*e_t, \qquad s_t = s_{t-m} + \gamma e_t.
+$$
+
+The seasonal line follows from $y_t - \ell_{t-1} - b_{t-1} = e_t + s_{t-m}$. All three states move in proportion to
+the same error. Winters' original seasonal update used the new level, $\gamma(y_t - \ell_t)$, which gives
+$s_t = s_{t-m} + \gamma(1 - \alpha)e_t$; the two forms differ only in how $\gamma$ is scaled
+<Cite id="hyndman2021" />. For the seasonal state not to absorb the level's share of the error, the constant is
+usually restricted to $0 \le \gamma \le 1 - \alpha$.
+
+### Multiplicative seasonality
+
+When the seasonal swing grows with the level, the seasonal states are ratios rather than offsets. The multiplicative
+method divides where the additive one subtracts:
+
+$$
+\begin{aligned}
+\ell_t &= \alpha\frac{y_t}{s_{t-m}} + (1 - \alpha)(\ell_{t-1} + b_{t-1}), \\
+b_t &= \beta^*(\ell_t - \ell_{t-1}) + (1 - \beta^*)b_{t-1}, \\
+s_t &= \gamma\frac{y_t}{\ell_{t-1} + b_{t-1}} + (1 - \gamma)s_{t-m}, \\
+\hat y_{T+h \mid T} &= (\ell_T + hb_T)\,s_{T+h-m(k+1)}.
+\end{aligned}
+$$
+
+A seasonal index of 1.2 means the season runs 20% above the level. The trend is still additive. Both methods can use
+a damped trend by replacing $b_{t-1}$ with $\phi b_{t-1}$ and $hb_T$ with $(\phi + \dots + \phi^h)b_T$, as in the
+damped Holt method.
+
+### Initialisation
+
+The level, slope and $m$ seasonal states need starting values. A common heuristic takes the level as the mean of the
+first season, the slope as the difference between the means of the first two seasons divided by $m$, and the seasonal
+states as the first season's deviations from (or ratios to) the level. Modern implementations estimate the initial
+states along with the smoothing constants by maximum likelihood <Cite id="hyndman2008" />.
+
+## Worked example
+
+Quarterly data ($m = 4$). Before observing $y_t$, the states are $\ell_{t-1} = 100$, $b_{t-1} = 2$, and the seasonal
+state for this quarter from a year ago is $s_{t-4} = 5$. The constants are $\alpha = 0.3$, $\beta^* = 0.1$ and
+$\gamma = 0.2$. The observation is $y_t = 110$.
+
+**Additive.** The forecast was $100 + 2 + 5 = 107$, so the error is $e_t = 3$. The updates are
+
+$$
+\ell_t = 102 + 0.3 \cdot 3 = 102.9, \qquad b_t = 2 + 0.03 \cdot 3 = 2.09, \qquad s_t = 5 + 0.2 \cdot 3 = 5.6.
+$$
+
+The same values follow from the component form: $\ell_t = 0.3(110 - 5) + 0.7(102) = 102.9$,
+$b_t = 0.1(102.9 - 100) + 0.9 \cdot 2 = 2.09$ and $s_t = 0.2(110 - 102) + 0.8 \cdot 5 = 5.6$. The surprise of 3 is split: 0.9
+raises the level, 0.6 raises this quarter's seasonal effect, and 0.09 raises the slope.
+
+**Multiplicative**, with seasonal state $s_{t-4} = 1.05$ instead. The forecast was $102 \times 1.05 = 107.1$. The
+updates are $\ell_t = 0.3(110/1.05) + 0.7 \cdot 102 = 102.829$, $b_t = 0.1(102.829 - 100) + 0.9 \cdot 2 = 2.083$ and
+$s_t = 0.2(110/102) + 0.8 \cdot 1.05 = 1.0557$.
+
+<HoltWintersExplorer />
+
+## Cost
+
+Each update costs a few arithmetic operations. The method stores $m + 2$ numbers per series. Fitting optimises three
+or four constants and $m + 2$ initial states, which becomes slow for long periods such as $m = 52$.
+
+## Trade-offs
+
+- **Additive versus multiplicative.** Additive seasonality suits a stable swing; multiplicative suits a swing that
+  scales with the level. Applying the additive method to the log of the series is an alternative to the
+  multiplicative method, and it makes the trend multiplicative too.
+- **Adaptivity.** A large $\gamma$ lets the seasonal pattern change quickly, which suits evolving patterns but passes
+  noise into the seasonal states. With few periods of data, a small $\gamma$ is safer.
+- **Versus seasonal ARIMA.** Additive Holt–Winters corresponds to a restricted seasonal ARIMA model. The multiplicative
+  method has no ARIMA equivalent. The state-space form gives both a likelihood and prediction intervals
+  (<NoteLink to="ets-models">ETS models</NoteLink>).
+
+## Pitfalls
+
+- **Long or multiple seasonal periods.** The method needs one state per season and one period $m$. Hourly data with
+  daily and weekly patterns, or weekly data with $m = 52.18$, need other methods.
+- **Seasonal states drift from normalisation.** In the additive method nothing forces the $m$ seasonal states to sum to
+  zero, so part of the level can migrate into them. Renormalising the states, and adjusting the level to compensate,
+  keeps the components interpretable without changing the forecasts.
+- **Multiplicative seasonality with values near zero.** Dividing by a seasonal index or a level near 0 makes the
+  updates unstable. The multiplicative method needs strictly positive data.

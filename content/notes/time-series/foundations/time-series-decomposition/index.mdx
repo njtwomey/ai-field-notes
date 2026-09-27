@@ -1,0 +1,152 @@
+---
+title: Time-series decomposition
+kind: technique
+summary: 'Decomposition splits a series into trend-cycle $T_t$, seasonal $S_t$ and remainder $R_t$, as $y_t = T_t + S_t + R_t$ or $y_t = T_t S_t R_t$. Classical decomposition uses a centred moving average and fixed seasonal indices; STL uses iterated loess and allows the season to change.'
+tags: [time-series, seasonality, smoothing, worked-example]
+aliases:
+  [
+    classical decomposition,
+    seasonal decomposition,
+    STL,
+    STL decomposition,
+    seasonal-trend decomposition using loess,
+    seasonal adjustment,
+    seasonally adjusted series,
+    trend-cycle,
+  ]
+requires: [stationarity]
+related: [moving-average-and-smoothing-filters, differencing-and-unit-roots, holt-winters, seasonal-arima]
+references: [cleveland1990, hyndman2021, box2015]
+status: draft
+updated: 2026-09-27
+---
+
+import { DecompositionExplorer } from './DecompositionExplorer'
+
+<Definition>
+A **decomposition** writes an observed series $y_t$ as a combination of a **trend-cycle** component $T_t$ (the
+slowly varying level), a **seasonal** component $S_t$ (a pattern that repeats with a known period $m$) and a
+**remainder** $R_t$. The **additive** form is $y_t = T_t + S_t + R_t$, and the **multiplicative** form is
+$y_t = T_t \times S_t \times R_t$ <Cite id="hyndman2021" />. The **seasonally adjusted** series is $y_t - S_t$ or
+$y_t / S_t$.
+</Definition>
+
+## Problem
+
+A monthly series of retail sales mixes three effects: long-run growth, a December peak every year, and irregular
+month-to-month noise. Each question about the series concerns one effect. Is growth slowing? Is this December unusual
+for a December? Decomposition estimates each component so that it can be examined, forecast or removed separately.
+
+The additive form fits when the seasonal swing has a constant size. The multiplicative form fits when the swing is
+proportional to the level, which is common for sales, traffic and other counts that grow. Taking logarithms turns a
+multiplicative decomposition into an additive one: $\log y_t = \log T_t + \log S_t + \log R_t$.
+
+## Mechanism: classical decomposition
+
+Classical decomposition has three steps, shown here for the additive form with period $m$.
+
+1. **Estimate the trend** with a centred moving average of length $m$. For even $m$, a window of $m$ values is not
+   centred on a time point, so the estimate averages two adjacent windows. This is the **$2 \times m$ moving average**,
+   with weight $1/(2m)$ on the two end values and $1/m$ on the $m - 1$ values between:
+   $$
+   \hat T_t = \frac1m\paren{\tfrac12y_{t-m/2} + y_{t-m/2+1} + \dots + y_{t+m/2-1} + \tfrac12y_{t+m/2}}.
+   $$
+2. **Estimate the seasonal indices.** Compute the detrended series $y_t - \hat T_t$. For each season $j$ (each month
+   of the year), average the detrended values that fall in season $j$. Subtract the mean of the $m$ averages so that
+   the indices sum to zero over one period. $\hat S_t$ repeats the index of $t$'s season.
+3. **The remainder** is $\hat R_t = y_t - \hat T_t - \hat S_t$.
+
+The multiplicative form divides instead of subtracting, and normalises the indices to average 1.
+
+**Why the moving average removes seasonality and keeps a linear trend.** The $2 \times m$ weights $w_k$ for
+$k = -m/2, \dots, m/2$ are symmetric and sum to 1. Apply them to a seasonal pattern $s_t$ with period $m$ and
+$\sum_{j=1}^{m}s_j = 0$. The two end weights fall on $s_{t-m/2}$ and $s_{t+m/2}$, which are equal because they are $m$
+apart. So the weighted sum is $\frac1m$ times the sum of $s$ over $m$ consecutive times, which covers each season
+once and equals 0. Apply the same weights to a straight line $a + bt$: the result is
+$a + bt + b\sum_kw_kk = a + bt$, because the symmetric weights give $\sum_kw_kk = 0$. The moving average therefore
+passes the trend, deletes the season exactly, and averages the noise over roughly $m$ values. It is a linear filter,
+analysed in <NoteLink to="moving-average-and-smoothing-filters">moving-average and smoothing filters</NoteLink>.
+
+## Worked example
+
+Quarterly data ($m = 4$) over three years:
+
+| Year | Q1  | Q2  | Q3  | Q4  |
+| ---- | --- | --- | --- | --- |
+| 1    | 10  | 14  | 8   | 12  |
+| 2    | 12  | 16  | 10  | 14  |
+| 3    | 14  | 19  | 11  | 16  |
+
+The $2 \times 4$ moving average at year 1, Q3 ($t = 3$) is $(\frac12 \cdot 10 + 14 + 8 + 12 + \frac12 \cdot 12)/4 =
+45/4 = 11.25$. The average exists for $t = 3, \dots, 10$ and gives
+$\hat T = (11.25, 11.75, 12.25, 12.75, 13.25, 13.875, 14.375, 14.75)$. Two values are lost at each end.
+
+The detrended values $y_t - \hat T_t$, grouped by quarter, are:
+
+- Q1: $12 - 12.25 = -0.25$ and $14 - 14.375 = -0.375$, average $-0.3125$.
+- Q2: $16 - 12.75 = 3.25$ and $19 - 14.75 = 4.25$, average $3.75$.
+- Q3: $8 - 11.25 = -3.25$ and $10 - 13.25 = -3.25$, average $-3.25$.
+- Q4: $12 - 11.75 = 0.25$ and $14 - 13.875 = 0.125$, average $0.1875$.
+
+The four averages sum to $0.375$, so each is reduced by $0.375/4 = 0.094$. The seasonal indices are
+$\hat S = (-0.406, 3.656, -3.344, 0.094)$ for Q1 to Q4. The second quarter is about 3.7 units above trend and the third
+about 3.3 below. The remainders are all below 0.6 in absolute value, for example
+$\hat R_3 = 8 - 11.25 - (-3.344) = 0.094$.
+
+<DecompositionExplorer />
+
+## Mechanism: STL
+
+Classical decomposition has three weaknesses. It loses $m/2$ values of trend at each end. It forces the seasonal
+pattern to be identical every year. A single outlier distorts both the trend and the seasonal index of its season.
+
+**STL** (seasonal-trend decomposition using loess) addresses all three <Cite id="cleveland1990" />. Loess is local
+weighted regression: the smoothed value at $t$ is a low-degree polynomial fitted by weighted least squares to the
+nearby points, with weights that fall to zero at the edge of a window. STL alternates two smoothers in an inner loop.
+Starting from $T^{(0)} = 0$, iteration $k$:
+
+1. **Detrend:** $y_t - T_t^{(k)}$.
+2. **Smooth each cycle-subseries.** The cycle-subseries are the values at one season (all Januaries, all Februaries).
+   Each is smoothed by loess with window $n_s$ and extended by one period at both ends. A larger $n_s$ makes the
+   seasonal pattern change more slowly; in the limit it is fixed, as in classical decomposition.
+3. **Remove low frequencies** from the smoothed subseries with moving averages and a loess pass. The result is the
+   seasonal component $S_t^{(k+1)}$, with any trend that leaked into it removed.
+4. **Deseasonalise** and smooth by loess with window $n_t$ to get the trend $T_t^{(k+1)}$.
+
+An outer loop adds robustness. It computes the remainder $R_t = y_t - T_t - S_t$ and gives each point the weight
+$B(\abs{R_t}/h)$, where $h = 6\operatorname{median}\abs{R_t}$ and $B(u) = (1 - u^2)^2$ for $u < 1$ and 0 otherwise.
+The next inner loop uses these weights in every loess fit, so points with large remainders stop influencing the trend
+and the season.
+
+STL handles any period $m$, estimates the trend to the ends of the series, and lets the seasonal pattern evolve. It is
+additive only; a multiplicative decomposition is obtained by applying STL to $\log y_t$.
+
+## Cost
+
+Classical decomposition costs $O(n)$. STL costs $O(n)$ per loess pass for fixed window widths, times the number of
+inner and outer iterations. Both counts are small: one or two inner passes, and no outer passes unless robustness is
+needed, in which case a few suffice <Cite id="cleveland1990" />.
+
+## Trade-offs
+
+- **Window widths set what counts as trend and what counts as season.** A short trend window lets the trend absorb
+  cycles; a long one leaves them in the remainder. There is no data-free correct choice.
+- **The strength of each component** can be summarised by comparing variances. With $F_T = \max(0, 1 -
+  \var(R_t)/\var(T_t + R_t))$ and $F_S = \max(0, 1 - \var(R_t)/\var(S_t + R_t))$, a value near 1 means that the
+  component dominates the remainder <Cite id="hyndman2021" />.
+- **Decomposition describes; it does not forecast.** To forecast, a model is fitted to the seasonally adjusted series
+  and the last seasonal pattern is added back, or a seasonal model such as
+  <NoteLink to="holt-winters">Holt–Winters</NoteLink> or <NoteLink to="seasonal-arima">seasonal ARIMA</NoteLink>
+  handles both at once.
+- **Official statistics** use more elaborate methods, X-13ARIMA-SEATS among them, that also correct for trading days
+  and holidays <Cite id="hyndman2021" />.
+
+## Pitfalls
+
+- **Wrong form.** An additive decomposition of multiplicative data fits one average seasonal swing to every year. The
+  remainder then contains a seasonal pattern, largest where the level is furthest from its average. The figure shows
+  this.
+- **Remainders are not white noise by construction.** The moving average and the loess smoothers correlate neighbouring
+  remainders, so a correlogram of $\hat R_t$ does not test the decomposition in the way residual tests test a model.
+- **Seasonal adjustment can create artefacts.** Adjusting a series with no real seasonality introduces a spurious
+  periodic component from the noise.

@@ -1,0 +1,199 @@
+---
+title: Autoregressive model
+kind: concept
+summary: 'An AR($p$) model regresses a series on its own past, $x_t = c + \phi_1x_{t-1} + \dots + \phi_px_{t-p} + \varepsilon_t$. It is stationary when every root of $1 - \phi_1z - \dots - \phi_pz^p$ lies outside the unit circle, and the Yule–Walker equations link $\phi$ to the ACF.'
+tags: [time-series, arima, forecasting, linear-models, worked-example]
+aliases: [AR model, 'AR(p)', 'AR(1)', 'AR(2)', autoregressive process, characteristic polynomial, stationarity triangle]
+requires: [stationarity, white-noise-and-random-walk, acf-and-pacf]
+related: [moving-average-model, arma-model, linear-prediction, parametric-spectral-estimation, poles-and-zeros, vector-autoregression]
+references: [box2015, brockwell1991, hamilton1994, yule1927, walker1931, hyndman2021]
+status: draft
+updated: 2026-09-27
+---
+
+import { Ar2Triangle } from './Ar2Triangle'
+
+<Definition>
+An **autoregressive model of order $p$**, AR($p$), is
+
+$$
+x_t = c + \phi_1x_{t-1} + \phi_2x_{t-2} + \dots + \phi_px_{t-p} + \varepsilon_t,
+$$
+
+where $c$ is a constant, $\phi_1, \dots, \phi_p$ are real coefficients with $\phi_p \ne 0$, and
+$\varepsilon_t \sim \operatorname{WN}(0, \sigma^2)$ is white noise. With the backshift operator $B$ ($Bx_t = x_{t-1}$)
+and the **autoregressive polynomial** $\phi(z) = 1 - \phi_1z - \dots - \phi_pz^p$, the model is
+$\phi(B)x_t = c + \varepsilon_t$ <Cite id="box2015" />.
+</Definition>
+
+## Intuition
+
+An AR model is a linear regression of the current value on the $p$ previous values. The noise term $\varepsilon_t$ is
+the part of $x_t$ that the past cannot predict, the **innovation**. Each innovation enters the series once and then
+echoes through the recursion. The coefficients decide whether the echo dies away (a stationary series), persists (a
+unit root) or grows (an explosive series).
+
+Yule introduced the model in 1927 to describe the sunspot cycle as a damped oscillation driven by random shocks, and
+Walker extended it to general order <Cite id="yule1927" /> <Cite id="walker1931" />.
+
+## AR(1): stationarity by substitution
+
+Take $p = 1$ and $c = 0$: $x_t = \phi x_{t-1} + \varepsilon_t$. Substituting the equation into itself $k$ times gives
+$x_t = \phi^kx_{t-k} + \sum_{j=0}^{k-1}\phi^j\varepsilon_{t-j}$. If $\abs\phi < 1$, the first term vanishes as
+$k \to \infty$ and the sum converges in mean square, so
+
+$$
+x_t = \sum_{j=0}^{\infty}\phi^j\varepsilon_{t-j}, \qquad \var(x_t) = \frac{\sigma^2}{1 - \phi^2}, \qquad \rho(h) = \phi^{\abs h}.
+$$
+
+This representation expresses $x_t$ through present and past shocks only, which is called **causal**. It has constant
+mean and an autocovariance that depends only on the lag, so the process is stationary. For $\abs\phi = 1$ the series
+is a random walk and has no stationary solution. For $\abs\phi > 1$ the recursion explodes from any fixed start.
+
+## AR(p): stationarity from the characteristic roots
+
+The same argument works for any order after factoring the polynomial. By the fundamental theorem of algebra, with
+roots $z_1, \dots, z_p$ of $\phi(z)$ (the **characteristic roots**) and $\lambda_i = 1/z_i$,
+
+$$
+\phi(z) = (1 - \lambda_1z)(1 - \lambda_2z)\cdots(1 - \lambda_pz).
+$$
+
+The model is $\phi(B)x_t = \varepsilon_t$. Each factor $(1 - \lambda_iB)$ is an AR(1) operator. Its inverse is the
+geometric series $(1 - \lambda_iB)^{-1} = \sum_{j \ge 0}\lambda_i^jB^j$, which converges when $\abs{\lambda_i} < 1$,
+exactly as in the AR(1) case. If every factor can be inverted,
+
+$$
+x_t = \phi(B)^{-1}\varepsilon_t = \prod_{i=1}^{p}(1 - \lambda_iB)^{-1}\varepsilon_t = \sum_{j=0}^{\infty}\psi_j\varepsilon_{t-j},
+$$
+
+a product of convergent power series in $B$ with absolutely summable coefficients $\psi_j$. The result is a causal,
+stationary process. So:
+
+**An AR($p$) process has a causal stationary solution if and only if every root of $\phi(z)$ satisfies $\abs z > 1$**,
+that is, every $\abs{\lambda_i} < 1$ <Cite id="brockwell1991" />.
+
+The $\lambda_i$ are the eigenvalues of the companion matrix that writes the AR($p$) recursion as a first-order
+system in the state $(x_t, \dots, x_{t-p+1})$. They are also the poles of the transfer function $1/\phi(z^{-1})$ in
+signal-processing terms, where the same condition reads "all poles inside the unit circle"
+(<NoteLink to="poles-and-zeros">poles and zeros</NoteLink>). A root at $z = 1$ is a **unit root**, and the series is
+then non-stationary but becomes stationary after differencing
+(<NoteLink to="differencing-and-unit-roots">differencing and unit roots</NoteLink>).
+
+With a constant $c$, the stationary mean follows from taking expectations of both sides:
+$\mu = c + \sum_i\phi_i\mu$, so $\mu = c/(1 - \phi_1 - \dots - \phi_p) = c/\phi(1)$.
+
+## The autocorrelation function
+
+Centre the series so that $c = 0$. Multiply both sides of the model by $x_{t-h}$ for $h \ge 1$ and take expectations.
+The innovation $\varepsilon_t$ is uncorrelated with $x_{t-h}$, because a causal $x_{t-h}$ depends only on shocks up to
+time $t - h$. So
+
+$$
+\gamma(h) = \phi_1\gamma(h - 1) + \dots + \phi_p\gamma(h - p), \qquad h \ge 1.
+$$
+
+At $h = 0$ the innovation contributes $\expect[\varepsilon_tx_t] = \sigma^2$, which gives
+$\gamma(0) = \phi_1\gamma(1) + \dots + \phi_p\gamma(p) + \sigma^2$.
+
+The autocovariances satisfy the same linear recursion as the series without noise. Its general solution for distinct
+roots is $\gamma(h) = \sum_iA_i\lambda_i^h$. Each real $\lambda_i$ contributes an exponential decay (alternating in
+sign if $\lambda_i < 0$). A complex pair $\lambda = re^{\pm i\omega}$ contributes a damped cosine
+$r^h\cos(\omega h + \theta)$ with period $2\pi/\omega$. The ACF of a stationary AR process therefore **tails off**
+geometrically and never cuts off. Its PACF cuts off after lag $p$ (<NoteLink to="acf-and-pacf">ACF and PACF</NoteLink>).
+
+## Yule–Walker estimation
+
+Divide the recursion for $h = 1, \dots, p$ by $\gamma(0)$. The result is $p$ linear equations in $p$ unknowns:
+
+$$
+\begin{bmatrix} 1 & \rho(1) & \cdots & \rho(p-1) \\ \rho(1) & 1 & \cdots & \rho(p-2) \\ \vdots & & \ddots & \vdots \\
+\rho(p-1) & \rho(p-2) & \cdots & 1 \end{bmatrix}
+\begin{bmatrix} \phi_1 \\ \phi_2 \\ \vdots \\ \phi_p \end{bmatrix} =
+\begin{bmatrix} \rho(1) \\ \rho(2) \\ \vdots \\ \rho(p) \end{bmatrix}.
+$$
+
+These are the **Yule–Walker equations**. Read forwards, they give the ACF from the coefficients. Read backwards with
+the sample autocorrelations $r_h$ in place of $\rho(h)$, they give the **Yule–Walker estimator** $\hat\phi$, and the
+$h = 0$ equation gives $\hat\sigma^2 = \hat\gamma(0)(1 - \hat\phi_1r_1 - \dots - \hat\phi_pr_p)$. The matrix is
+Toeplitz, so the Durbin–Levinson recursion solves the system in $O(p^2)$ operations, the same algorithm used in
+<NoteLink to="linear-prediction">linear prediction</NoteLink>.
+
+Built from the divisor-$n$ sample autocovariances, the Yule–Walker estimate always defines a stationary model. For
+pure AR models it has the same asymptotic distribution as the maximum-likelihood estimator, but in small samples, and
+when a root is near the unit circle, it is more biased than least squares or maximum likelihood
+<Cite id="brockwell1991" />.
+
+## Worked example: an AR(2) model
+
+Take $x_t = 0.5x_{t-1} + 0.3x_{t-2} + \varepsilon_t$ with $\sigma^2 = 1$.
+
+- **Stationarity.** The polynomial $1 - 0.5z - 0.3z^2$ has roots $z = 1.174$ and $z = -2.840$. Both lie outside the
+  unit circle, so the process is stationary. The root near 1 means that shocks decay slowly.
+- **ACF.** The Yule–Walker equation at $h = 1$ is $\rho(1) = 0.5 + 0.3\rho(1)$, using $\rho(0) = 1$ and
+  $\rho(-1) = \rho(1)$. So $\rho(1) = 0.5/0.7 = 0.714$. The recursion then gives
+  $\rho(2) = 0.5 \cdot 0.714 + 0.3 = 0.657$ and $\rho(3) = 0.5 \cdot 0.657 + 0.3 \cdot 0.714 = 0.543$.
+- **Variance.** $\gamma(0)(1 - 0.5\rho(1) - 0.3\rho(2)) = \sigma^2$ gives $\gamma(0) = 1/(1 - 0.357 - 0.197) = 2.244$.
+
+Now suppose a sample gives $r_1 = 0.6$ and $r_2 = 0.4$. The Yule–Walker estimate of an AR(2) solves
+$\hat\phi_1 + 0.6\hat\phi_2 = 0.6$ and $0.6\hat\phi_1 + \hat\phi_2 = 0.4$, so $\hat\phi_1 = 0.5625$ and
+$\hat\phi_2 = 0.0625$. The small $\hat\phi_2$, which is also the lag-2 partial autocorrelation, suggests that an AR(1)
+would suffice.
+
+A second example has complex roots: $x_t = x_{t-1} - 0.5x_{t-2} + \varepsilon_t$. The roots of $1 - z + 0.5z^2$ are
+$z = 1 \pm i$, with modulus $\sqrt2 > 1$, so the process is stationary. Their argument is $\omega = \pi/4$, so the ACF
+is a damped cosine with period $2\pi/\omega = 8$ steps. The series shows irregular cycles of about 8 steps.
+
+## The AR(2) stationarity region
+
+For $p = 2$ the root condition becomes three linear inequalities:
+
+$$
+\phi_1 + \phi_2 < 1, \qquad \phi_2 - \phi_1 < 1, \qquad \abs{\phi_2} < 1.
+$$
+
+They define a triangle with vertices $(-2, -1)$, $(0, 1)$ and $(2, -1)$ in the $(\phi_1, \phi_2)$ plane. The parabola
+$\phi_1^2 + 4\phi_2 = 0$ splits it. Above the parabola the roots are real and the ACF decays as a mix of two
+exponentials. Below it the roots are complex and the ACF oscillates.
+
+<Derivation title="Deriving the triangle">
+The reciprocal roots $\lambda = 1/z$ solve $\lambda^2 - \phi_1\lambda - \phi_2 = 0$. Write this as
+$p(\lambda) = \lambda^2 + a\lambda + b$ with $a = -\phi_1$ and $b = -\phi_2$. Stationarity requires both roots inside
+the unit disc.
+
+**Complex roots** ($a^2 < 4b$, so $b > 0$). The roots are conjugates with $\abs\lambda^2 = \lambda\bar\lambda = b$. They
+lie inside the disc if and only if $b < 1$. In that case $\abs a < 2\sqrt b < 1 + b$ holds automatically, because
+$(1 - \sqrt b)^2 > 0$.
+
+**Real roots** ($a^2 \ge 4b$). The parabola $p$ opens upward, so both roots lie in $(-1, 1)$ if and only if
+$p(1) > 0$, $p(-1) > 0$ and the vertex $-a/2$ lies in $(-1, 1)$. The first two conditions are $1 + a + b > 0$ and
+$1 - a + b > 0$, that is $\abs a < 1 + b$. Given $\abs a < 1 + b$ and $b < 1$, $\abs a < 2$, so the vertex condition
+holds.
+
+In both cases the conditions are $\abs a < 1 + b$ and $b < 1$. The first implies $b > -1$. In terms of $\phi$:
+$\abs{\phi_1} < 1 - \phi_2$ and $\abs{\phi_2} < 1$, which are the three inequalities.
+</Derivation>
+
+<Ar2Triangle />
+
+## Forecasting
+
+The minimum mean-squared-error forecast replaces future innovations by 0 and future values by their forecasts:
+$\hat x_{T+h \mid T} = c + \sum_{i=1}^{p}\phi_i\hat x_{T+h-i \mid T}$, where $\hat x_{s \mid T} = x_s$ for $s \le T$. For
+a stationary model the forecasts decay geometrically to the mean $\mu$, and the forecast error variance rises to
+$\gamma(0)$. With the causal weights $\psi_j$, the $h$-step error variance is $\sigma^2\sum_{j=0}^{h-1}\psi_j^2$.
+
+## Assumptions
+
+- The innovations are white noise, uncorrelated with past values of the series.
+- The orders and coefficients are constant over the sample.
+- Inference with the usual standard errors assumes the roots are not close to the unit circle.
+
+## Pitfalls
+
+- **Stationarity is not visible in the coefficients alone.** $\phi_1 = 0.6$ and $\phi_2 = 0.5$ are both below 1, but
+  $\phi_1 + \phi_2 = 1.1 > 1$ and the process explodes. Check the roots.
+- **Cycles do not imply seasonality.** Complex roots produce cycles of variable length. A fixed calendar period needs a
+  seasonal model (<NoteLink to="seasonal-arima">seasonal ARIMA</NoteLink>).
+- **Order selection by the PACF alone is noisy.** Sample partial autocorrelations beyond lag $p$ fall outside the
+  $\pm 1.96/\sqrt n$ band about 5% of the time. Information criteria (AIC, BIC) are more reliable for choosing $p$.

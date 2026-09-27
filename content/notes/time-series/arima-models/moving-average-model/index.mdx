@@ -1,0 +1,147 @@
+---
+title: Moving-average model
+kind: concept
+summary: 'An MA($q$) model writes a series as a weighted sum of current and past shocks, $x_t = \mu + \varepsilon_t + \theta_1\varepsilon_{t-1} + \dots + \theta_q\varepsilon_{t-q}$. It is always stationary, its ACF is zero beyond lag $q$, and it is invertible when the roots of $1 + \theta_1z + \dots + \theta_qz^q$ lie outside the unit circle.'
+tags: [time-series, arima, forecasting, linear-models, worked-example]
+aliases: [MA model, 'MA(q)', 'MA(1)', moving-average process, invertibility, invertible MA]
+requires: [stationarity, white-noise-and-random-walk, acf-and-pacf]
+related: [autoregressive-model, arma-model, fir-filters, moving-average-and-smoothing-filters, box-jenkins-method]
+references: [box2015, brockwell1991, slutsky1937, hyndman2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **moving-average model of order $q$**, MA($q$), is
+
+$$
+x_t = \mu + \varepsilon_t + \theta_1\varepsilon_{t-1} + \dots + \theta_q\varepsilon_{t-q},
+$$
+
+where $\mu$ is the mean, $\theta_1, \dots, \theta_q$ are real coefficients with $\theta_q \ne 0$, and
+$\varepsilon_t \sim \operatorname{WN}(0, \sigma^2)$. With the backshift operator $B$ and the **moving-average
+polynomial** $\theta(z) = 1 + \theta_1z + \dots + \theta_qz^q$, the model is $x_t = \mu + \theta(B)\varepsilon_t$
+<Cite id="box2015" />.
+</Definition>
+
+## Intuition
+
+Each shock $\varepsilon_t$ affects the series for exactly $q + 1$ steps, with weights $1, \theta_1, \dots, \theta_q$,
+and is then forgotten. An MA model suits effects that last a fixed time: a promotion that lifts sales for two weeks, a
+measurement error that contaminates two adjacent readings, or the change in a series that was differenced once too
+often.
+
+The name has nothing to do with the moving averages used for smoothing. The weights need not be positive or sum to 1.
+The model is a finite impulse response filter applied to white noise (<NoteLink to="fir-filters">FIR filters</NoteLink>).
+
+## Moments
+
+Set $\theta_0 = 1$, so $x_t - \mu = \sum_{j=0}^{q}\theta_j\varepsilon_{t-j}$. The mean is $\mu$. For $h \ge 0$ the
+autocovariance is
+
+$$
+\gamma(h) = \cov\paren{\sum_{j=0}^{q}\theta_j\varepsilon_{t-j},\, \sum_{k=0}^{q}\theta_k\varepsilon_{t+h-k}}
+= \sigma^2\sum_{j=0}^{q-h}\theta_j\theta_{j+h}, \qquad 0 \le h \le q,
+$$
+
+and $\gamma(h) = 0$ for $h > q$. Only pairs of terms that contain the same shock contribute. A shock $\varepsilon_{t-j}$
+in the first sum matches $\varepsilon_{t+h-k}$ in the second when $k = j + h$, and $k \le q$ requires $j \le q - h$.
+When $h > q$ no shock appears in both sums.
+
+The mean and autocovariances do not depend on $t$, so **every MA($q$) process is stationary**, whatever its
+coefficients. Its ACF **cuts off** after lag $q$. That cut-off is the MA signature in a correlogram
+(<NoteLink to="acf-and-pacf">ACF and PACF</NoteLink>).
+
+For the MA(1) model $x_t = \mu + \varepsilon_t + \theta\varepsilon_{t-1}$:
+
+$$
+\gamma(0) = \sigma^2(1 + \theta^2), \qquad \gamma(1) = \sigma^2\theta, \qquad \rho(1) = \frac{\theta}{1 + \theta^2}.
+$$
+
+The function $\theta/(1 + \theta^2)$ has maximum $1/2$ at $\theta = 1$ and minimum $-1/2$ at $\theta = -1$. An MA(1)
+process cannot have a lag-1 autocorrelation larger than $0.5$ in absolute value.
+
+## Invertibility
+
+The ACF does not determine the MA coefficients. In the MA(1) formula, $\theta$ and $1/\theta$ give the same value:
+$\frac{1/\theta}{1 + 1/\theta^2} = \frac{\theta}{\theta^2 + 1}$. Rescaling the noise variance matches $\gamma(0)$ too. So
+$(\theta, \sigma^2)$ and $(1/\theta, \theta^2\sigma^2)$ define processes with identical autocovariances, and for
+Gaussian noise identical distributions. The data cannot tell them apart.
+
+The convention is to pick the **invertible** representation. Write $\theta(B) = \prod_j(1 - \kappa_jB)$, with $1/\kappa_j$
+the roots of $\theta(z)$. If every $\abs{\kappa_j} < 1$, each factor has the convergent inverse
+$\sum_{i \ge 0}\kappa_j^iB^i$, as in the AR case, and
+
+$$
+\varepsilon_t = \theta(B)^{-1}(x_t - \mu) = \sum_{j=0}^{\infty}\pi_j(x_{t-j} - \mu).
+$$
+
+The shock is then a convergent function of the present and past observations. **An MA($q$) process is invertible if
+and only if every root of $\theta(z)$ lies outside the unit circle** <Cite id="brockwell1991" />. For MA(1) the
+condition is $\abs\theta < 1$, and $\pi_j = (-\theta)^j$:
+
+$$
+x_t - \mu = \varepsilon_t - \sum_{j=1}^{\infty}(-\theta)^j(x_{t-j} - \mu).
+$$
+
+An invertible MA(1) is an AR($\infty$) with geometrically decaying coefficients. Invertibility matters for three
+reasons:
+
+- It makes the model identifiable: among the models that share one ACF, which differ by replacing roots with their reciprocals, exactly one is
+  invertible
+  (ignoring roots on the unit circle).
+- Under invertibility, $\varepsilon_t$ is the one-step prediction error from the infinite past, so the model's
+  innovations are the forecast errors. The non-invertible version has shocks that are not recoverable from the data.
+- Estimation reconstructs the shocks recursively from the data. The recursion is stable only when the model is
+  invertible.
+
+## Worked example
+
+Take $\theta = 0.5$ and $\sigma^2 = 4$. The autocovariances are $\gamma(0) = 4(1 + 0.25) = 5$ and $\gamma(1) = 4 \cdot 0.5
+= 2$, so $\rho(1) = 0.4$. Now take $\theta = 2$ and $\sigma^2 = 1$: $\gamma(0) = 1 + 4 = 5$ and $\gamma(1) = 2$. The two
+models have identical ACFs. The root of $1 + 0.5z$ is $z = -2$, outside the unit circle, so $\theta = 0.5$ is the
+invertible choice. The root of $1 + 2z$ is $z = -0.5$, inside.
+
+The invertible model's PACF does not cut off. For an MA(1) it is
+
+$$
+\phi_{hh} = -\frac{(-\theta)^h(1 - \theta^2)}{1 - \theta^{2(h+1)}},
+$$
+
+which for $\theta = 0.5$ gives $0.4$, $-0.190$ and $0.094$ at lags 1, 2 and 3: an alternating geometric decay. That is
+the mirror image of the AR(1) pattern, where the ACF decays and the PACF cuts off.
+
+## Forecasting
+
+Given the infinite past, the invertible representation recovers $\varepsilon_T, \varepsilon_{T-1}, \dots$. Future shocks
+have mean 0, so
+
+$$
+\hat x_{T+h \mid T} = \mu + \sum_{j=h}^{q}\theta_j\varepsilon_{T+h-j}, \qquad h \le q,
+$$
+
+and $\hat x_{T+h \mid T} = \mu$ for $h > q$. An MA($q$) model has a memory of exactly $q$ steps: beyond that horizon
+the forecast is the mean, and the error variance is $\gamma(0)$. With a finite sample, the shocks are estimated by
+running the inverse recursion from $\varepsilon_0 = 0$, or exactly with the innovations algorithm or a Kalman filter.
+
+## Estimation
+
+The shocks are not observed. For MA(1), they are rebuilt as $\hat\varepsilon_t = x_t - \mu - \theta\hat\varepsilon_{t-1}$,
+so each residual is a polynomial in $\theta$ and the sum of squares is a high-degree polynomial in $\theta$. The model
+is linear in its parameters only through the unobserved shocks, so least squares requires numerical optimisation.
+Moment estimators, which solve $\rho(1) = r_1$ for $\theta$, are inefficient and have no solution when
+$\abs{r_1} > 0.5$ (<NoteLink to="box-jenkins-method">Box–Jenkins method</NoteLink>).
+
+## Assumptions
+
+- The innovations are white noise with constant variance.
+- The model is invertible. Software usually constrains estimates to the invertible region.
+
+## Pitfalls
+
+- **A unit root in $\theta(z)$** signals over-differencing. Differencing white noise gives an MA(1) with $\theta = -1$
+  and $\rho(1) = -0.5$ (<NoteLink to="differencing-and-unit-roots">differencing and unit roots</NoteLink>).
+- **Short memory, long appearance.** Moving sums of white noise produce smooth, cycle-like paths. Slutsky used this
+  effect to argue that business cycles could arise from summed random shocks <Cite id="slutsky1937" />.
+- **An estimate near $\abs\theta = 1$** makes the reconstructed shocks depend strongly on the starting value
+  $\varepsilon_0$, and the conditional and exact likelihoods differ sharply.

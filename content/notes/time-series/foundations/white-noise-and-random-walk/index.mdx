@@ -1,0 +1,142 @@
+---
+title: White noise and random walks
+kind: concept
+summary: 'White noise is a series of uncorrelated shocks $\varepsilon_t$ with mean 0 and constant variance $\sigma^2$. A random walk sums them, $x_t = x_{t-1} + \varepsilon_t$, so $\var(x_t) = t\sigma^2$ grows without bound: the walk is not stationary, but its first difference is white noise.'
+tags: [time-series, stationarity, stochastic-processes, forecasting, worked-example]
+aliases:
+  [
+    white noise,
+    Gaussian white noise,
+    iid noise,
+    random walk,
+    random walk with drift,
+  ]
+requires: [stationarity]
+related: [acf-and-pacf, differencing-and-unit-roots, autoregressive-model, arima-model, simple-exponential-smoothing]
+references: [brockwell1991, hyndman2021, granger1974, slutsky1937]
+status: draft
+updated: 2026-09-27
+---
+
+import { RandomWalkFan } from './RandomWalkFan'
+
+<Definition>
+A series $\set{\varepsilon_t}$ is **white noise** with variance $\sigma^2$, written $\varepsilon_t \sim \operatorname{WN}(0,
+\sigma^2)$, if $\expect[\varepsilon_t] = 0$, $\var(\varepsilon_t) = \sigma^2$ and $\cov(\varepsilon_s, \varepsilon_t) = 0$
+for $s \ne t$. A **random walk** is the running sum of white noise: $x_t = x_{t-1} + \varepsilon_t$ for $t \ge 1$,
+from a fixed start $x_0$. A **random walk with drift** adds a constant $\delta$ at each step,
+$x_t = \delta + x_{t-1} + \varepsilon_t$ <Cite id="brockwell1991" />.
+</Definition>
+
+## Intuition
+
+White noise is the series with no memory that a linear model can use. Each value is uncorrelated with every other,
+so the past gives no linear information about the future. It is the building block of every ARMA model, and it is the
+target of residual diagnostics: a model has captured the linear structure of a series when its residuals look like
+white noise.
+
+A random walk has perfect memory. Each shock $\varepsilon_t$ moves the level permanently, and nothing pulls the series
+back. Stock prices, exchange rates and many economic series behave approximately like random walks over short
+horizons.
+
+## White noise
+
+The definition constrains only the first two moments. Stronger versions add distributional assumptions:
+
+- **Independent and identically distributed (iid) noise** requires the $\varepsilon_t$ to be independent with a common
+  distribution. Iid noise with finite variance is white noise. The converse fails: uncorrelated values can still be
+  dependent, for example when large values cluster in time, as in ARCH processes.
+- **Gaussian white noise** requires each $\varepsilon_t \sim \Gauss(0, \sigma^2)$ with the vector of any finite set of
+  values jointly Gaussian. Uncorrelated jointly Gaussian variables are independent, so Gaussian white noise is iid.
+
+White noise is weakly stationary. Its autocovariance is $\gamma(0) = \sigma^2$ and $\gamma(h) = 0$ for $h \ne 0$, so
+its autocorrelation function is 1 at lag 0 and 0 elsewhere. Its power spectral density is the constant $\sigma^2$ at
+every frequency, which is the origin of the name: all frequencies contribute equal power, as all colours do in white
+light.
+
+## The random walk
+
+With $x_0 = 0$, unrolling the recursion gives $x_t = \sum_{s=1}^{t}\varepsilon_s$. The moments follow from the
+properties of white noise:
+
+$$
+\expect[x_t] = 0, \qquad \var(x_t) = \sum_{s=1}^{t}\var(\varepsilon_s) = t\sigma^2.
+$$
+
+The variance sums because the shocks are uncorrelated. For $s \le t$, the covariance counts the shocks the two values
+share:
+
+$$
+\cov(x_s, x_t) = \cov\paren{\sum_{i=1}^{s}\varepsilon_i,\, \sum_{j=1}^{t}\varepsilon_j} = \sum_{i=1}^{s}\var(\varepsilon_i) = s\sigma^2,
+$$
+
+because only the pairs with $i = j$ contribute. So $\cov(x_s, x_t) = \min(s, t)\,\sigma^2$, and the correlation is
+
+$$
+\corr(x_t, x_{t+h}) = \frac{t\sigma^2}{\sqrt{t\sigma^2 \cdot (t + h)\sigma^2}} = \sqrt{\frac{t}{t + h}}.
+$$
+
+The variance depends on $t$ and the covariance depends on $t$ as well as the lag, so the random walk is not
+stationary. The walk is the AR(1) recursion $x_t = \phi x_{t-1} + \varepsilon_t$ at the boundary $\phi = 1$. For
+$\abs\phi < 1$ the variance from $x_0 = 0$ is $\sigma^2(1 - \phi^{2t})/(1 - \phi^2)$, which converges to the stationary
+value $\sigma^2/(1 - \phi^2)$. At $\phi = 1$ the same sum is $t\sigma^2$. A process with $\phi = 1$ is said to have a
+**unit root** (<NoteLink to="differencing-and-unit-roots">differencing and unit roots</NoteLink>).
+
+With drift, $x_t = x_0 + \delta t + \sum_{s=1}^{t}\varepsilon_s$. The mean $x_0 + \delta t$ is a straight line, and the
+variance is $t\sigma^2$ as before. The line is a deterministic trend and the sum of shocks is a **stochastic trend**.
+
+The first difference of a random walk is $\Delta x_t = x_t - x_{t-1} = \delta + \varepsilon_t$: white noise plus a
+constant. Differencing is the transformation that makes a random walk stationary.
+
+<RandomWalkFan />
+
+## Worked example: correlation and forecasts
+
+Take a random walk without drift, $\sigma^2 = 1$ and $x_0 = 0$.
+
+- At $t = 100$ the variance is $100$ and the standard deviation is $10$. At $t = 400$ the standard deviation is $20$:
+  quadrupling the time doubles the spread.
+- The correlation between $x_{100}$ and $x_{110}$ is $\sqrt{100/110} = 0.953$. Values ten steps apart are nearly
+  perfectly correlated, because they share 100 of their shocks.
+
+Forecasting is direct. Given $x_1, \dots, x_T$, the future value is
+$x_{T+h} = x_T + \delta h + \sum_{s=1}^{h}\varepsilon_{T+s}$, and the future shocks have mean 0 and are uncorrelated
+with the past. So the minimum mean-squared-error linear forecast and its error variance are
+
+$$
+\hat x_{T+h \mid T} = x_T + \delta h, \qquad \var(x_{T+h} - \hat x_{T+h \mid T}) = h\sigma^2.
+$$
+
+Without drift the forecast is the last observed value at every horizon. This is the **naive forecast**, the usual
+baseline in forecasting practice <Cite id="hyndman2021" />. The 95% prediction interval
+$\hat x_{T+h \mid T} \pm 1.96\sigma\sqrt h$ widens as $\sqrt h$. With $\sigma = 1$, the interval at $h = 25$ is
+$x_T \pm 9.8$.
+
+## Cycles and trends from noise
+
+Sums of random shocks look structured. A random walk wanders in long excursions that resemble trends, and its turning
+points resemble business cycles. Slutsky showed in 1927 (published in English in 1937) that moving sums of
+independent random numbers produce series with apparent regular cycles <Cite id="slutsky1937" />. The apparent
+structure has no predictive value beyond the last observed value.
+
+The same effect breaks regression. Regress one random walk on another, independent random walk. The fitted slope does
+not converge to 0, the $t$-statistic diverges as the sample grows, and $R^2$ is typically large. Granger and Newbold
+called this **spurious regression** <Cite id="granger1974" />. The remedy is to difference both series, or to test for
+cointegration.
+
+## Assumptions
+
+- White noise needs finite variance. A sequence of iid Cauchy variables has no variance and is not white noise.
+- The random-walk moment formulas assume a fixed start $x_0$. A random walk has no stationary distribution to start
+  from.
+
+## Pitfalls
+
+- **Uncorrelated is not independent.** A white-noise test on residuals (such as the
+  <NoteLink to="ljung-box-test">Ljung–Box test</NoteLink>) checks correlation only. Squared residuals can still be
+  correlated, which is the signature of <NoteLink to="volatility-clustering">volatility clustering</NoteLink>.
+- **Trend-stationary versus difference-stationary.** A deterministic trend plus stationary noise,
+  $x_t = a + bt + u_t$, also drifts upward. Its deviations from the line are bounded in distribution, and removing the
+  line makes it stationary. Differencing it instead gives $b + u_t - u_{t-1}$, a non-invertible moving average. The two
+  models give different long-horizon forecast intervals: constant width for the trend model, width growing as
+  $\sqrt h$ for the random walk.

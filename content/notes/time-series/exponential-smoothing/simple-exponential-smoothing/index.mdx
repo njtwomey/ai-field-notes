@@ -1,0 +1,151 @@
+---
+title: Simple exponential smoothing
+kind: technique
+summary: 'Simple exponential smoothing forecasts a series without trend or season by the level $\ell_t = \alpha y_t + (1 - \alpha)\ell_{t-1}$, a weighted average with weights $\alpha(1 - \alpha)^j$ that decay geometrically into the past. It is the steady-state Kalman filter for a random walk observed with noise.'
+tags: [time-series, exponential-smoothing, forecasting, state-space-models, worked-example]
+aliases: [SES, exponentially weighted moving average, EWMA, single exponential smoothing, local level model]
+requires: [white-noise-and-random-walk]
+related: [holt-linear-trend, holt-winters, ets-models, kalman-filter, arima-model, iir-filters]
+references: [hyndman2021, hyndman2008, gardner1985, muth1960, holt2004]
+status: draft
+updated: 2026-09-27
+---
+
+import { SesExplorer } from './SesExplorer'
+
+<Definition>
+**Simple exponential smoothing (SES)** forecasts a series $y_1, \dots, y_T$ that has no trend or seasonality. It
+maintains a **level** $\ell_t$, updated after each observation by
+
+$$
+\ell_t = \alpha y_t + (1 - \alpha)\ell_{t-1}, \qquad 0 < \alpha \le 1,
+$$
+
+from an initial level $\ell_0$. The forecast for every horizon $h \ge 1$ is the last level:
+$\hat y_{T+h \mid T} = \ell_T$ <Cite id="hyndman2021" />.
+</Definition>
+
+## Problem
+
+Two naive forecasts bracket the problem. The mean of all past values ignores that the level may have moved. The last
+value ignores that it contains noise. SES interpolates between them with one parameter, the **smoothing constant**
+$\alpha$. At $\alpha = 1$ it is the last value (the random-walk forecast). As $\alpha \to 0$ it approaches a long-run
+average.
+
+The method was developed in operations research in the 1950s, by Brown for inventory control and by Holt, because it
+needs one stored number per series and one multiplication per update <Cite id="gardner1985" />.
+
+## Mechanism
+
+### A weighted average with geometric weights
+
+Substitute the recursion into itself:
+
+$$
+\ell_T = \alpha y_T + (1 - \alpha)\paren{\alpha y_{T-1} + (1 - \alpha)\ell_{T-2}} = \dots
+= \sum_{j=0}^{T-1}\alpha(1 - \alpha)^jy_{T-j} + (1 - \alpha)^T\ell_0.
+$$
+
+The weight on the observation $j$ steps in the past is $\alpha(1 - \alpha)^j$. The weights decay geometrically, which
+gives the method its name. They sum to 1 with the weight on $\ell_0$:
+$\sum_{j=0}^{T-1}\alpha(1 - \alpha)^j = 1 - (1 - \alpha)^T$. So the level is a weighted average of the data and the
+initial level, and the initial level's influence decays like $(1 - \alpha)^T$.
+
+The **mean age** of the data in the average is $\sum_{j \ge 0}j\,\alpha(1 - \alpha)^j = (1 - \alpha)/\alpha$. At
+$\alpha = 0.2$ the level reflects data about 4 steps old on average; at $\alpha = 0.5$, about 1 step. A small $\alpha$
+averages away more noise and reacts more slowly to real changes.
+
+In signal-processing terms SES is a first-order recursive low-pass filter with transfer function
+$\alpha/(1 - (1 - \alpha)z^{-1})$ (<NoteLink to="iir-filters">IIR filters</NoteLink>).
+
+### Error-correction form
+
+Write the one-step forecast error as $e_t = y_t - \ell_{t-1}$. The update rearranges to
+
+$$
+\ell_t = \ell_{t-1} + \alpha e_t.
+$$
+
+The level moves a fraction $\alpha$ of the way towards each new observation. This form is the basis of the
+state-space models that give SES a likelihood (<NoteLink to="ets-models">ETS models</NoteLink>).
+
+### SES is a steady-state Kalman filter
+
+Consider the **local-level model**: a hidden level $\mu_t$ follows a random walk and is observed with noise,
+
+$$
+y_t = \mu_t + \varepsilon_t, \qquad \mu_t = \mu_{t-1} + \eta_t, \qquad \varepsilon_t \sim \Gauss(0, \sigma_\varepsilon^2),
+\quad \eta_t \sim \Gauss(0, \sigma_\eta^2).
+$$
+
+This is a scalar linear-Gaussian state-space model with $A = C = 1$, $Q = \sigma_\eta^2$ and $R = \sigma_\varepsilon^2$.
+The <NoteLink to="kalman-filter">Kalman filter</NoteLink> estimates the level by
+$\hat\mu_t = \hat\mu_{t-1} + k_t(y_t - \hat\mu_{t-1})$, the error-correction form of SES with a time-varying gain
+$k_t$. The gain converges to a constant $k_\infty$, and from then on the filter is SES with $\alpha = k_\infty$.
+
+The relation between $\alpha$ and the **signal-to-noise ratio** $q = \sigma_\eta^2/\sigma_\varepsilon^2$ follows from the
+steady state. The predicted variance $P$ satisfies the scalar Riccati fixed point $P^2 = Q(P + R)$, and the gain is
+$\alpha = P/(P + R)$. Solving the second equation for $P = \alpha R/(1 - \alpha)$ and substituting into the first:
+
+$$
+\frac{\alpha^2R^2}{(1 - \alpha)^2} = Q\,\frac{\alpha R + (1 - \alpha)R}{1 - \alpha} = \frac{QR}{1 - \alpha}
+\quad\Longrightarrow\quad q = \frac{\alpha^2}{1 - \alpha}.
+$$
+
+A level that moves a lot relative to the noise (large $q$) calls for a large $\alpha$. So SES is the optimal forecast,
+among all forecasts, for a random walk observed with Gaussian noise once the filter has settled, a result first shown
+by Muth <Cite id="muth1960" />. The same model is an <NoteLink to="arima-model">ARIMA(0, 1, 1)</NoteLink> process with
+$\theta = \alpha - 1$.
+
+## Worked example
+
+Take $y = (10, 12, 11, 13, 12)$, $\alpha = 0.5$ and $\ell_0 = 10$.
+
+| $t$ | $y_t$ | forecast $\ell_{t-1}$ | error $e_t$ | $\ell_t = \ell_{t-1} + 0.5e_t$ |
+| --- | ----- | --------------------- | ----------- | ------------------------------ |
+| 1   | 10    | 10                    | 0           | 10                             |
+| 2   | 12    | 10                    | 2           | 11                             |
+| 3   | 11    | 11                    | 0           | 11                             |
+| 4   | 13    | 11                    | 2           | 12                             |
+| 5   | 12    | 12                    | 0           | 12                             |
+
+The forecast for every future period is $\ell_5 = 12$. The weights on $y_5, y_4, y_3, \dots$ are
+$0.5, 0.25, 0.125, 0.0625, 0.03125$, and $\ell_0$ keeps the remaining $0.5^5 = 0.03125$.
+
+For the local-level model, $\alpha = 0.5$ is the steady-state Kalman gain when $q = 0.5^2/0.5 = 0.5$: the level's
+step variance is half the observation noise variance. The Kalman note's example with $q = 1$ gives
+$\alpha = 1/\varphi = 0.618$, where $\varphi$ is the golden ratio; checking, $0.618^2/0.382 = 1$.
+
+<SesExplorer />
+
+## Choosing $\alpha$ and $\ell_0$
+
+The parameters are usually chosen to minimise the sum of squared one-step errors, $\sum_{t=1}^{T}e_t^2$, by numerical
+search over $0 < \alpha < 1$ and $\ell_0$. Under the Gaussian state-space form this is maximum likelihood, which also
+gives prediction intervals <Cite id="hyndman2008" />. For the innovations model the $h$-step forecast variance is
+$\sigma^2\paren{1 + (h - 1)\alpha^2}$, where $\sigma^2$ is the one-step error variance: the interval grows because
+the level itself keeps moving.
+
+## Cost
+
+Each update costs one multiplication and two additions, and the method stores one number. Fitting $\alpha$ costs a
+one-dimensional optimisation over $O(T)$ passes.
+
+## Trade-offs
+
+- **Responsiveness versus noise.** A large $\alpha$ tracks level shifts quickly and passes noise into the forecast; a
+  small $\alpha$ smooths the noise and lags behind shifts.
+- **Flat forecasts.** SES forecasts are flat at every horizon. Series with a trend need
+  <NoteLink to="holt-linear-trend">Holt's method</NoteLink>, and seasonal series need
+  <NoteLink to="holt-winters">Holt–Winters</NoteLink>.
+- **Simplicity as a strength.** SES is a strong baseline for short, noisy series without trend, and more complex
+  methods often fail to beat it <Cite id="gardner1985" />.
+
+## Pitfalls
+
+- **Trends make SES lag.** On a trending series the one-step errors all have the same sign, and once the
+  transient has passed the one-step error settles at $b/\alpha$ for a trend of slope $b$ per step.
+- **An optimised $\alpha$ near 1** indicates that the series behaves like a random walk; SES then adds nothing over the
+  naive forecast.
+- **Initialisation matters for short series.** With $T = 20$ and $\alpha = 0.1$, the initial level still carries weight
+  $0.9^{20} = 0.12$.
