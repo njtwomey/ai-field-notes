@@ -5,11 +5,13 @@ summary: 'Procrustes analysis finds the rotation, and optionally translation and
 tags: [metrics, shape-analysis, alignment, linear-algebra, worked-example]
 aliases: [orthogonal Procrustes problem, Kabsch algorithm, Procrustes disparity, generalised Procrustes analysis, shape alignment]
 requires: [singular-value-decomposition]
-related: [pairwise-distances-and-cosine-similarity, spectral-theorem]
-references: [schonemann1966, kabsch1976, gower1975, detlefsen2022]
+related: [pairwise-distances-and-cosine-similarity, spectral-theorem, two-tower-model, approximate-nearest-neighbour-search]
+references: [schonemann1966, kabsch1976, gower1975, detlefsen2022, zielnicki2025, shen2020]
 status: draft
 updated: 2026-09-27
 ---
+
+import { EmbeddingCompatibility } from './EmbeddingCompatibility'
 
 <Definition>
 Given matrices $\Amat, \Bmat \in \reals^{d \times n}$ whose columns are $n$ matched points in $d$ dimensions, the
@@ -93,6 +95,46 @@ Take the four points $(0, 0)$, $(1, 0)$, $(1, 1)$ and $(0, 2)$, and rotate them 
 - **Unknown correspondence.** Procrustes needs paired points. When the pairing is unknown, <NoteLink
   to="optimal-transport">optimal transport</NoteLink> finds the cheapest pairing for a fixed alignment, and the two
   steps can be alternated.
+
+## Keeping embeddings compatible across model versions
+
+A factorisation model that scores users and items by a dot product, such as a <NoteLink
+to="two-tower-model">two-tower model</NoteLink>, has no fixed meaning for its embedding axes. Any orthogonal change of
+basis, applied to every user and item vector together, leaves every dot product and every ranking unchanged.
+Retraining the model, even on unchanged data, lands in a different arbitrary basis. Downstream consumers built
+against the old basis then break: an <NoteLink to="approximate-nearest-neighbour-search">approximate
+nearest-neighbour index</NoteLink> built on the old item vectors returns the wrong neighbours for a query encoded in
+the new space, a cached user embedding stored as another model's input feature no longer means what that model was
+trained on, and a score computed from one old vector and one new vector is meaningless. Some of this mismatch is only
+a change of basis. Some of it is real drift, from new interactions or a changed model, and cannot be undone.
+
+Orthogonal Procrustes removes the basis mismatch. Take the new run's embeddings and the old run's embeddings for a
+set of items or users present in both runs, the anchors, and fit $\Rmat$ by the closed-form solution derived above.
+Apply $\Rmat$ to every embedding in the new run, not only the anchors. Because $\Rmat$ is orthogonal, this step is
+lossless: it preserves every dot product between transformed vectors, so it costs one small matrix multiply and does
+not change what the model predicts.
+
+Alignment can only recover a rotation, and possibly a reflection (see the Kabsch correction, above). It cannot
+recover a change that is not a rotation. An anchor whose true representation moved, because the item or the user
+genuinely changed, stays out of place after alignment. A single such anchor also pulls the fitted $\Rmat$ slightly
+off target, the outlier sensitivity noted in Pitfalls, below. Residual drift after alignment is measured the way the
+disparity, defined above, measures shape difference: the cosine similarity or distance between each anchor's old and
+aligned-new embedding, and whether an item's or a user's nearest neighbours still agree across the retraining.
+
+<EmbeddingCompatibility />
+
+Netflix aligns the user and item embeddings of a production recommender this way every time the base model retrains
+<Cite id="zielnicki2025" />. A raw factorisation is degenerate in more ways than a rotation: any invertible change of
+basis leaves the dot product it feeds unchanged, orthogonal or not. Each run's embeddings are therefore first reduced
+to a canonical low-rank factorisation by SVD, computed cheaply from the embedding matrices rather than the full
+user-item score matrix, and only then aligned onto a fixed reference run by orthogonal Procrustes, using item
+embeddings as the anchors because items are more stable day to day than users. On production data, the same user's
+embedding taken two weeks apart had a cosine similarity close to zero before alignment, since the retrained space is
+an arbitrary rotation away from the old one, and 0.82 after; four weeks apart it was 0.75, the remaining gap now
+measuring real drift rather than basis mismatch <Cite id="zielnicki2025" />. Training a new model to already sit
+close to the old one is an alternative, called backward-compatible representation learning <Cite id="shen2020" />: it
+avoids realignment, but ties every future training run to imitating its predecessor, where Procrustes alignment is a
+post-hoc step that leaves training untouched.
 
 ## Pitfalls
 

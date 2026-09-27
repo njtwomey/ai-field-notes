@@ -1,0 +1,220 @@
+---
+title: Deep support vector data description
+kind: concept
+summary: 'Deep SVDD trains a network $\phi$ to map normal data close to a fixed centre $\cvec$ and scores a point by $\norm{\phi(\xvec) - \cvec}^2$. A learned centre, bias terms or bounded activations make the constant map $\phi \equiv \cvec$ optimal, a failure called hypersphere collapse.'
+tags: [anomaly-detection, deep-learning, novelty-detection, representation-learning, worked-example]
+aliases: [Deep SVDD, one-class Deep SVDD, soft-boundary Deep SVDD, hypersphere collapse, deep one-class classification]
+requires: [support-vector-data-description, multilayer-perceptron, gradient-descent]
+partOf: [deep-anomaly-detection]
+related: [one-class-support-vector-machine, autoencoder-anomaly-detection, non-contrastive-learning, kernel-trick]
+references: [ruff2018, ruff2020, ruff2021, tax2004, cho2009]
+status: draft
+updated: 2026-09-27
+---
+
+import { DeepSvddFigure } from './DeepSvddFigure'
+
+<Definition>
+Deep support vector data description (Deep SVDD), introduced by Ruff and colleagues <Cite id="ruff2018" />, trains a
+neural network $\phi(\cdot\,; \Wcal) : \reals^D \to \reals^d$ with weights $\Wcal = \set{\Wmat^1, \dots, \Wmat^L}$ so
+that the embeddings of normal training data lie inside a small hypersphere around a fixed centre $\cvec \in \reals^d$.
+The anomaly score of an input $\xvec$ is its squared distance from the centre, $s(\xvec) = \norm{\phi(\xvec; \Wcal^*) - \cvec}^2$,
+where $\Wcal^*$ are the trained weights. The centre is fixed before training, and the network has no bias terms.
+</Definition>
+
+## Intuition
+
+<NoteLink to="support-vector-data-description">Kernel SVDD</NoteLink> fixes a feature map, given by a kernel, and
+learns the smallest sphere that encloses the mapped data. Deep SVDD reverses the roles. It fixes the sphere's centre
+and learns the feature map.
+
+To pull every normal input close to one point, the network must keep the features that all normal inputs share and
+discard the features in which they differ. An input that lacks the shared features lands far from $\cvec$. The network
+is a learned compression of normality.
+
+The danger is that the network finds a cheaper way to pull everything to $\cvec$: ignore the input altogether. A
+constant map puts every input, normal or not, exactly on $\cvec$ at zero loss. Most of the design of Deep SVDD exists
+to make that constant map unreachable.
+
+## Objectives
+
+Write $\phi(\xvec_i)$ for $\phi(\xvec_i; \Wcal)$ and $d_i = \norm{\phi(\xvec_i) - \cvec}^2$ for the squared distance of
+training point $i$ from the centre. Ruff and colleagues give two objectives <Cite id="ruff2018" />.
+
+The **soft-boundary** objective copies the kernel SVDD primal with slack $\xi_i = \max(0, d_i - R^2)$:
+
+$$
+\min_{R,\, \Wcal}\ R^2 + \frac{1}{\nu n}\sum_{i=1}^{n} \max\paren{0,\ d_i - R^2} + \frac{\lambda}{2}\sum_{\ell=1}^{L} \norm{\Wmat^\ell}_F^2 .
+$$
+
+$R$ is the radius, $\nu \in (0, 1]$ sets how many training points may fall outside, and $\lambda > 0$ weights the weight
+decay. The **one-class** objective drops the radius and penalises every distance:
+
+$$
+\min_{\Wcal}\ \frac{1}{n}\sum_{i=1}^{n} \norm{\phi(\xvec_i) - \cvec}^2 + \frac{\lambda}{2}\sum_{\ell=1}^{L} \norm{\Wmat^\ell}_F^2 .
+$$
+
+The one-class objective suits training data that are all, or nearly all, normal. The soft-boundary objective lets a
+fraction $\nu$ of contaminated training points stay outside without pulling the sphere towards them.
+
+Both objectives are trained by stochastic gradient descent on $\Wcal$. The soft-boundary radius is not trained by
+gradient steps: every few epochs it is set to its optimal value given the current embeddings <Cite id="ruff2018" />.
+
+### The optimal radius and the ν-property
+
+For fixed weights, the soft-boundary objective is a function of $\rho = R^2 \ge 0$ alone:
+
+$$
+J(\rho) = \rho + \frac{1}{\nu n}\sum_{i=1}^{n} \max(0, d_i - \rho).
+$$
+
+$J$ is convex and piecewise linear. Moving $\rho$ up by a small amount raises the first term at rate $1$ and lowers the
+sum at rate $1/(\nu n)$ for every point with $d_i > \rho$. The right derivative is therefore
+$1 - n_{>}(\rho)/(\nu n)$, with $n_{>}(\rho) = \abs{\set{i : d_i > \rho}}$. Moving $\rho$ down raises the sum for every
+point with $d_i \ge \rho$, so the left derivative is $1 - n_{\ge}(\rho)/(\nu n)$. At a minimum the left derivative is at
+most zero and the right derivative is at least zero:
+
+$$
+\frac{n_{>}(\rho^*)}{n} \le \nu \le \frac{n_{\ge}(\rho^*)}{n}.
+$$
+
+$\nu$ bounds the fraction of training points strictly outside the sphere from above, and the fraction outside or on it
+from below. The optimal $R^*$ is the $(1 - \nu)$ quantile of the distances $\sqrt{d_i}$. This is the ν-property of the
+<NoteLink to="one-class-support-vector-machine">one-class support vector machine</NoteLink>, recovered without a dual <Cite id="ruff2018" />.
+
+## The anomaly score
+
+The score is $s(\xvec) = \norm{\phi(\xvec; \Wcal^*) - \cvec}^2$. For the soft-boundary model, $s(\xvec) - R^{*2}$ is
+positive outside the sphere and negative inside, so zero is a natural threshold. The model needs no stored training
+data at test time: the weights and $\cvec$ are the whole description <Cite id="ruff2018" />.
+
+## Hypersphere collapse
+
+Both objectives are non-negative apart from weight decay. A network that outputs $\cvec$ for every input makes every
+$d_i = 0$ and so attains the minimum of the data term. Such a network scores every input $0$ and detects nothing. Ruff
+and colleagues call this **hypersphere collapse**, because the optimal radius collapses to zero <Cite id="ruff2018" />.
+Three routes lead to it.
+
+**A learned centre.** Set every weight matrix to zero. Each layer then outputs a constant, so the network outputs the
+same vector $\cvec_0 = \phi(\xvec; \zeros)$ for every $\xvec$. For a network without bias terms and with $\sigma(0) = 0$,
+such as ReLU, $\cvec_0 = \zeros$. If $\cvec$ is a free variable, the choice $\Wcal = \zeros$, $\cvec = \cvec_0$, $R = 0$
+makes the data term zero and the weight decay zero. The whole objective is zero, its lower bound, so this trivial
+solution is a global minimum. Gradient descent on $\cvec$ and $\Wcal$ together is pulled towards it. A fixed centre must
+therefore differ from $\cvec_0$.
+
+**Bias terms.** Suppose layer $\ell$ computes $\zvec^\ell = \sigma(\Wmat^\ell \zvec^{\ell - 1} + \bvec^\ell)$. With
+$\Wmat^\ell = \zeros$, the layer outputs $\sigma(\bvec^\ell)$ whatever its input. The later layers receive a constant
+and output a constant, and the bias and later weights can be chosen to make that constant $\cvec$, provided $\cvec$ is
+reachable. The data term is then zero for any fixed $\cvec$. A single bias term anywhere in the network is enough.
+
+**Bounded activations.** Let a unit have a monotone activation with $B = \sup_z \sigma(z) \ne 0$, and suppose one of its
+inputs, feature $k$, is positive on every training point: $z^{(k)}_i > 0$ for all $i$. Inputs that come out of a ReLU
+layer, or pixel intensities, are often of this kind. Give feature $k$ the weight $t$ and every other input weight zero.
+As $t \to \infty$, $\sigma(t z^{(k)}_i) \to B$ uniformly over the finite training set, because
+$\min_i z^{(k)}_i > 0$. The unit then outputs almost the constant $B$ on every training point and acts as a bias term
+for the next layer, which reopens the previous route <Cite id="ruff2018" />. With weight decay the large weight $t$ has
+a cost, so this route gives a near-collapse traded against $\lambda t^2$ rather than an exact one.
+
+### Rules that prevent collapse
+
+The three routes give three rules <Cite id="ruff2018" />:
+
+1. **Fix $\cvec$, and fix it away from $\cvec_0$.** Ruff and colleagues set $\cvec$ to the mean of the initial network's
+   embeddings of the training data. Any fixed $\cvec \ne \cvec_0$ blocks the first route. Placing $\cvec$ where the
+   network already maps the data makes training faster and more stable. The reference implementation also pushes coordinates of
+   $\cvec$ that are nearly zero out to a small $\pm\epsilon$, because a zero coordinate is matched by a unit whose
+   incoming weights are all zero.
+2. **Use no bias terms**, including the learnable shift of batch normalisation.
+3. **Use unbounded activations**, such as ReLU, or activations bounded only by zero.
+
+These rules exclude an exactly constant map, and the reason is homogeneity. A network without bias terms and with ReLU
+activations is positively homogeneous: $\phi(\alpha\xvec) = \alpha\phi(\xvec)$ for every $\alpha \ge 0$, because
+$\max(0, \alpha z) = \alpha\max(0, z)$ and every layer is linear otherwise. In particular $\phi(\zeros) = \zeros$, so
+the input $\zeros$ always scores $\norm{\cvec}^2 > 0$, and scores along any ray from the origin follow the quadratic
+$s(\alpha\xvec) = \norm{\alpha\phi(\xvec) - \cvec}^2$. The network cannot be constant. It can still learn a poor
+description, for instance one that ignores most input directions, as the worked example shows.
+
+Later work adds further safeguards, which a review by Ruff and colleagues lists: a reconstruction term from autoencoder
+pretraining, freezing pretrained features, penalising low variance of the embeddings, and training with true, auxiliary
+or synthetic anomalies as negatives <Cite id="ruff2021" />. Each of these makes the constant map suboptimal rather than
+merely unreachable. <NoteLink to="deep-semi-supervised-anomaly-detection" />,
+<NoteLink to="fully-convolutional-data-description" /> and
+<NoteLink to="deep-robust-one-class-classification" /> are built on the last idea.
+
+<DeepSvddFigure />
+
+## Worked example: a linear network ignores all but one direction
+
+Take a network with one bias-free linear layer, $\phi(\xvec) = \Wmat\xvec$, the one-class objective and weight decay
+$\lambda$. Write $\bar\xvec = \frac{1}{n}\sum_i \xvec_i$ for the data mean and $\Mmat = \frac{1}{n}\sum_i \xvec_i\xvec_i^\top$
+for the second-moment matrix. Setting the gradient to zero,
+
+$$
+\frac{2}{n}\sum_i (\Wmat\xvec_i - \cvec)\xvec_i^\top + \lambda\Wmat = \zeros
+\quad\Longrightarrow\quad
+\Wmat^* = \cvec\,\avec^\top, \qquad \avec = \paren{\Mmat + \tfrac{\lambda}{2}\eye}^{-1}\bar\xvec .
+$$
+
+$\Wmat^*$ has rank one, and the score is $s(\xvec) = \norm{\cvec}^2\paren{1 - \avec^\top\xvec}^2$. The model measures
+the input along the single direction $\avec$. It gives score zero to the whole hyperplane $\avec^\top\xvec = 1$, however
+far along it a point lies.
+
+Take the four points $(1, 0)$, $(3, 0)$, $(2, 1)$ and $(2, -1)$, the centre $\cvec = (1, 1)$ and $\lambda = 0$. Then
+$\bar\xvec = (2, 0)$ and $\Mmat = \diag(4.5, 0.5)$, so $\avec = (4/9, 0)$ and
+$s(\xvec) = 2\paren{1 - \tfrac{4}{9}x_1}^2$. The training scores are $0.617$ for $(1, 0)$, $0.222$ for $(3, 0)$ and
+$0.025$ for each of $(2, \pm 1)$. The point $(2.25, 100)$, far from all the data, scores $0$. The origin scores
+$\norm{\cvec}^2 = 2$.
+
+If the data are centred, $\bar\xvec = \zeros$, then $\avec = \zeros$ and $\Wmat^* = \zeros$: every input scores
+$\norm{\cvec}^2$. The linear network collapses even without bias terms, because it has no way to map the data to a
+point other than through their mean. Deep SVDD depends on depth and nonlinearity to give the network enough ways to be
+selective.
+
+## Relation to kernel SVDD
+
+Freeze the network and free the centre. The soft-boundary objective becomes
+
+$$
+\min_{R,\, \cvec}\ R^2 + \frac{1}{\nu n}\sum_{i=1}^{n} \max\paren{0,\ \norm{\phi(\xvec_i) - \cvec}^2 - R^2},
+$$
+
+which is the kernel SVDD primal with slack $\xi_i = \max(0, \norm{\phi(\xvec_i) - \cvec}^2 - R^2)$, cost
+$C = 1/(\nu n)$ and the kernel $k(\xvec, \xvec') = \inner{\phi(\xvec)}{\phi(\xvec')}$ <Cite id="tax2004" />. Kernel SVDD
+is soft-boundary Deep SVDD with the features frozen and the centre learned. Deep SVDD is kernel SVDD with the features
+learned and the centre frozen. Learning both at once is what collapses.
+
+The kernel of a frozen network becomes a classical kernel as the network widens. Let the features be one hidden layer of
+$m$ ReLU units with random Gaussian weights, $\phi(\xvec) = m^{-1/2}\max(0, \Umat\xvec)$ with the entries of $\Umat$
+drawn from $\Gauss(0, 1)$. By the law of large numbers, as $m \to \infty$,
+
+$$
+\inner{\phi(\xvec)}{\phi(\xvec')} \to \frac{\norm{\xvec}\norm{\xvec'}}{2\pi}\paren{\sin\theta + (\pi - \theta)\cos\theta},
+$$
+
+where $\theta$ is the angle between $\xvec$ and $\xvec'$. This is the arc-cosine kernel of degree one
+<Cite id="cho2009" />. So kernel SVDD with the arc-cosine kernel is the limit of soft-boundary Deep SVDD with an
+infinitely wide, untrained hidden layer and a free centre. The arc-cosine kernel has $k(\xvec, \xvec) = \norm{\xvec}^2/2$,
+which is not constant, so in this limit SVDD and the one-class SVM differ.
+
+Deep SVDD also has a probabilistic reading. Minimising the mean squared distance to $\cvec$ minimises an upper bound on
+the entropy of the embeddings, since among distributions with a given covariance the Gaussian has the largest entropy.
+The note <NoteLink to="deep-semi-supervised-anomaly-detection" /> derives the bound <Cite id="ruff2020" />.
+
+## Assumptions
+
+- **Normal data share features that anomalies lack.** The network can only pull normal data together through features
+  they have in common. Anomalies that share those features and differ elsewhere land near $\cvec$ and are missed.
+- **Clean or lightly contaminated training data.** The one-class objective pulls every training point in, anomalies
+  included. The soft-boundary objective tolerates a fraction $\nu$.
+- **A useful initial network.** $\cvec$ is fixed from the initial embeddings, and training only moves the embeddings.
+  Ruff and colleagues initialise the network with the encoder of a pretrained autoencoder <Cite id="ruff2018" />.
+
+## Pitfalls
+
+- **Collapse by the back door.** Batch normalisation with a learnable shift, a bias in any layer, or saturating
+  activations reopen the trivial solution. A loss that falls towards zero while the scores of held-out anomalies fall
+  with it is the symptom.
+- **Homogeneity bias.** A bias-free ReLU network treats inputs along the same ray alike, up to scale. Centring or
+  otherwise shifting the inputs changes which anomalies are easy to find.
+- **No labels, no tuning.** The architecture, $\lambda$ and the number of epochs change the score substantially, and in
+  the unsupervised setting nothing tells which choice is right (see <NoteLink to="evaluating-anomaly-detectors">evaluating anomaly detectors</NoteLink>).

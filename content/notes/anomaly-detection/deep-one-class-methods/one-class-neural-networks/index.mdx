@@ -1,0 +1,127 @@
+---
+title: One-class neural networks
+kind: concept
+summary: 'A one-class neural network (OC-NN) trains the one-class SVM objective with a learned feature map $g(\Vmat\xvec)$ in place of a kernel. Weights and offset $r$ are updated in turn; the optimal $r$ is the $\nu$-quantile of the outputs $\inner{\wvec}{g(\Vmat\xvec_n)}$.'
+tags: [anomaly-detection, deep-learning, novelty-detection, worked-example]
+aliases: [OC-NN, one-class neural network, deep one-class SVM]
+requires: [one-class-support-vector-machine, multilayer-perceptron]
+partOf: [deep-anomaly-detection]
+related: [deep-support-vector-data-description, autoencoder-anomaly-detection]
+references: [chalapathy2018, scholkopf2001b, ruff2021, ruff2018]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A one-class neural network, introduced by Chalapathy, Menon and Chawla <Cite id="chalapathy2018" />, replaces the
+kernel feature map of the <NoteLink to="one-class-support-vector-machine">one-class support vector machine</NoteLink> with a hidden layer
+$g(\Vmat\xvec)$, where $\Vmat$ is a weight matrix and $g$ a linear or sigmoid activation applied elementwise. It learns
+$\Vmat$, an output weight vector $\wvec$ and an offset $r$ by minimising the one-class SVM objective directly. An input is
+normal when $\hat y(\xvec) = \inner{\wvec}{g(\Vmat\xvec)} \ge r$ and anomalous otherwise.
+</Definition>
+
+## Intuition
+
+The one-class SVM separates the data from the origin of a fixed feature space with the widest possible margin. Its
+kernel decides which features exist. For images or text no fixed kernel describes the right features. OC-NN keeps the
+objective and lets the features be learned, so the representation is shaped by the one-class task rather than by
+reconstruction or by an unrelated pretraining task <Cite id="chalapathy2018" />.
+
+The price is convexity. The kernel one-class SVM solves a quadratic programme with a unique solution. OC-NN is a neural
+network trained by gradient descent and finds a local optimum.
+
+## Objective
+
+For training inputs $\xvec_1, \dots, \xvec_N$ and $\nu \in (0, 1]$, OC-NN solves <Cite id="chalapathy2018" />
+
+$$
+\min_{\wvec,\, \Vmat,\, r}\ \frac{1}{2}\norm{\wvec}^2 + \frac{1}{2}\norm{\Vmat}_F^2
++ \frac{1}{\nu N}\sum_{n=1}^{N} \max\paren{0,\ r - \hat y_n} - r,
+\qquad \hat y_n = \inner{\wvec}{g(\Vmat\xvec_n)} .
+$$
+
+Compare the primal one-class SVM, with feature map $\phi$, offset $\rho$ and slacks $\xi_n$:
+$\frac{1}{2}\norm{\wvec}^2 + \frac{1}{\nu N}\sum_n \xi_n - \rho$ subject to $\inner{\wvec}{\phi(\xvec_n)} \ge \rho - \xi_n$
+and $\xi_n \ge 0$. At the optimum each slack equals $\max(0, \rho - \inner{\wvec}{\phi(\xvec_n)})$, so the two
+objectives match term for term with $\phi(\xvec) = g(\Vmat\xvec)$, $\rho = r$, and one new term,
+$\frac{1}{2}\norm{\Vmat}_F^2$, which is weight decay on the feature map. The kernel SVM works in the dual because $\phi$
+is implicit. OC-NN has an explicit $\phi$ and works in the primal.
+
+In the experiments of Chalapathy and colleagues, the input to OC-NN is the code of a pretrained autoencoder, and a
+single hidden layer with a linear activation worked best <Cite id="chalapathy2018" />.
+
+## Alternating minimisation and the ν-quantile
+
+OC-NN alternates two steps <Cite id="chalapathy2018" />:
+
+1. With $r$ fixed, update $\wvec$ and $\Vmat$ by backpropagation on the objective.
+2. With $\wvec$ and $\Vmat$ fixed, set $r$ to its optimal value.
+
+The second step has a closed form. As a function of $r$ alone the objective is
+
+$$
+F(r) = \frac{1}{\nu N}\sum_{n=1}^{N} \max(0, r - \hat y_n) - r.
+$$
+
+$F$ is convex and piecewise linear. Raising $r$ by a small amount raises the sum at rate $1/(\nu N)$ for every $n$ with
+$\hat y_n < r$ and lowers $-r$ at rate $1$, so the right derivative is $n_{\le}(r)/(\nu N) - 1$ with
+$n_{\le}(r) = \abs{\set{n : \hat y_n \le r}}$, and the left derivative is $n_{<}(r)/(\nu N) - 1$ with
+$n_{<}(r) = \abs{\set{n : \hat y_n < r}}$. At the minimum the left derivative is at most zero and the right derivative at
+least zero:
+
+$$
+\frac{n_{<}(r^*)}{N} \le \nu \le \frac{n_{\le}(r^*)}{N}.
+$$
+
+$r^*$ is the $\nu$-quantile of the outputs $\hat y_1, \dots, \hat y_N$. The same inequalities are the ν-property: at most
+a fraction $\nu$ of training points is classed anomalous, $\hat y_n < r^*$, and at least a fraction $\nu$ lies on or
+below the boundary.
+
+## Worked example
+
+Take nine outputs $\hat y = 1, 2, \dots, 9$ and $\nu = 0.33$, so $\nu N = 2.97$. Then
+$F(r) = \frac{1}{2.97}\sum_n \max(0, r - \hat y_n) - r$:
+
+| $r$    | 2        | 3        | 4        | 5        |
+| ------ | -------- | -------- | -------- | -------- |
+| $F(r)$ | $-1.663$ | $-1.990$ | $-1.980$ | $-1.633$ |
+
+The minimum is at $r^* = 3$. Two outputs lie below it, $2 \le 2.97$, and three lie at or below it, $3 \ge 2.97$, as the
+quantile condition requires. The points with outputs 1 and 2 are the training anomalies, and the decision score
+$\hat y - r^*$ is negative for exactly those two. This example is the one Chalapathy and colleagues give
+<Cite id="chalapathy2018" />.
+
+## Collapse in the margin objective
+
+Deep SVDD can collapse to a constant map. OC-NN has the analogous weakness, because the objective rewards features
+that are large on every input, not features that tell inputs apart.
+
+Fix the features $\gvec_n = g(\Vmat\xvec_n)$ and consider the case with no slack, where every $\hat y_n \ge r$. Write
+$\wvec = t\uvec$ with $\norm{\uvec} = 1$ and $t \ge 0$. The largest feasible offset is $r = t\,m(\uvec)$, with
+$m(\uvec) = \min_n \inner{\uvec}{\gvec_n}$, the distance of the separating hyperplane from the origin. The objective in
+$t$ is $\frac{1}{2}t^2 - t\,m(\uvec)$, minimised at $t = m(\uvec)$ with value $-\frac{1}{2}m(\uvec)^2$. The best feature
+map is the one that maximises the margin $m(\uvec)$: every feature vector should lie far from the origin in a common
+direction.
+
+With a sigmoid activation, every feature vector lies in $(0, 1)^K$ for $K$ hidden units, so
+$m(\uvec) \le \norm{\gvec_n} < \sqrt{K}$. The bound is approached by saturating every hidden unit on every input,
+$\gvec_n \approx \ones$, which is a constant map. Only the weight decay $\frac{1}{2}\norm{\Vmat}_F^2$ stops the network
+from reaching it, since saturation needs large weights. This is the bounded-activation route to collapse that Ruff and
+colleagues describe for Deep SVDD <Cite id="ruff2018" />. A review by Ruff and colleagues notes that minimum-volume and
+maximum-margin deep objectives alike admit such constant solutions without regularisation <Cite id="ruff2021" />.
+Feeding OC-NN a frozen, pretrained code and training only a shallow head limits how far the features can drift.
+
+## Assumptions
+
+- **A fixed input representation that already carries the right information.** OC-NN refines features; it does not
+  learn them from raw data on its own.
+- **Mostly normal training data**, with $\nu$ at least the contamination, as for the one-class SVM.
+
+## Pitfalls
+
+- **ν is a training quantile.** As in the kernel case, it bounds the fraction of training points outside, not the
+  false-alarm rate on new data.
+- **Non-convex training.** Different initialisations give different boundaries. The alternation between gradient steps
+  and the quantile update can oscillate if the gradient steps are large.
+- **Collapse pressure.** Monitor the spread of $\hat y$ on held-out normal data. Outputs that all approach $r$ indicate
+  features that no longer depend on the input.

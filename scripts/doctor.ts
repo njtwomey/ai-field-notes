@@ -4,6 +4,11 @@
  * The build (plugins/content-index.ts) already enforces frontmatter, unique slugs, the leaf rule, known categories,
  * relations and citations. This adds the checks that span content/, python/ and the generated assets, and structural
  * warnings that help keep the taxonomy tidy as notes move.
+ *
+ * Scope: `node scripts/doctor.ts [taxonomy-path | slug ...]` (or `make doctor SCOPE="..."`) checks only the notes under
+ * those taxonomy paths or with those slugs: their MDX compile, maths, links, imports and figure ids. Compiling every
+ * note is what makes a full run slow, so work confined to one branch checks just that branch. Whole-tree checks that
+ * are cheap (unique slugs, taxonomy, name collisions) always run. `make check`, CI and the deploy run it unscoped.
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -17,15 +22,31 @@ const contentDir = path.join(root, 'content')
 const errors: string[] = []
 const warnings: string[] = []
 
+const scopeArgs = process.argv.slice(2).map((a) => a.replace(/^\/+|\/+$/g, ''))
+const inScope = (n: { slug: string; category: string }) =>
+  scopeArgs.length === 0 || scopeArgs.some((a) => n.slug === a || n.category === a || n.category.startsWith(`${a}/`))
+
 let index: ReturnType<typeof buildIndex>
 try {
-  index = buildIndex(contentDir)
+  index = buildIndex(contentDir, { inScope })
 } catch (err) {
   console.error(err instanceof Error ? err.message : err)
   process.exit(1)
 }
-const { notes, taxonomy, folders } = index
-const slugs = new Set(notes.map((n) => n.slug))
+const { notes: allNotes, taxonomy, folders } = index
+const slugs = new Set(allNotes.map((n) => n.slug))
+// Per-note checks run on the scoped notes; whole-tree checks below use allNotes.
+const notes = allNotes.filter(inScope)
+for (const a of scopeArgs) {
+  if (!allNotes.some((n) => n.slug === a || n.category === a || n.category.startsWith(`${a}/`)))
+    errors.push(`scope "${a}" matches no note slug or taxonomy path`)
+}
+const scopeDirs = [...new Set(notes.map((n) => path.dirname(n.file)))]
+const inScopeFile = (rel: string) =>
+  scopeArgs.length === 0 ||
+  scopeDirs.some((d) => rel === d || rel.startsWith(`${d}/`) || rel.startsWith(`${path.dirname(d)}/_`))
+if (scopeArgs.length)
+  console.log(`doctor: ${notes.length} of ${allNotes.length} notes in scope (${scopeArgs.join(', ')})`)
 
 // Every note must compile exactly as the site compiles it; the index check reads frontmatter and maths only.
 await Promise.all(
@@ -84,6 +105,7 @@ for (const n of notes) {
 
 const sourceFiles = fs
   .globSync('notes/**/*.{ts,tsx,mdx}', { cwd: contentDir })
+  .filter((rel) => inScopeFile(path.dirname(rel)))
   .concat(fs.globSync('src/**/*.{ts,tsx}', { cwd: path.join(root, 'site') }).map((f) => `../site/${f}`))
 for (const rel of sourceFiles) {
   const file = path.join(contentDir, rel)
@@ -140,7 +162,7 @@ for (const rel of sourceFiles) {
 }
 
 // Layout: legacy flat notes, redundant frontmatter, stray folders.
-for (const n of notes) {
+for (const n of allNotes) {
   const nested = n.file.split('/').length > 3
   if (!nested) warnings.push(`content/${n.file}: flat layout; move into its category folder (${n.category})`)
 }
@@ -152,7 +174,7 @@ for (const folder of folders) {
 }
 
 // Structure: empty categories and branches that hold a single note.
-const deepCount = (p: string) => notes.filter((n) => n.category === p || n.category.startsWith(`${p}/`)).length
+const deepCount = (p: string) => allNotes.filter((n) => n.category === p || n.category.startsWith(`${p}/`)).length
 // Empty categories are the planned parts of the encyclopedia, so they are counted, not warned about one by one.
 const empty: string[] = []
 const visit = (nodes: CategoryNode[]) => {
@@ -177,7 +199,7 @@ const normalise = (s: string) =>
     .replace(/s\b/g, '')
     .replace(/\s+/g, '')
 const owners = new Map<string, Set<string>>()
-for (const n of notes) {
+for (const n of allNotes) {
   for (const name of [n.slug, n.title, ...n.aliases]) {
     const key = normalise(name)
     // Symbols such as Γ or α normalise to nothing; they are not names worth comparing.
@@ -193,5 +215,7 @@ for (const [key, set] of owners) {
 for (const w of warnings) console.log(`warning  ${w}`)
 if (empty.length) console.log(`info     ${empty.length} taxonomy categories have no notes yet (planned)`)
 for (const e of errors) console.error(`error    ${e}`)
-console.log(`\n${notes.length} notes · ${errors.length} errors · ${warnings.length} warnings`)
+console.log(
+  `\n${scopeArgs.length ? `${notes.length} of ` : ''}${allNotes.length} notes · ${errors.length} errors · ${warnings.length} warnings`,
+)
 process.exit(errors.length ? 1 : 0)

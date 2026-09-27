@@ -147,7 +147,17 @@ function formatIssues(file: string, error: z.ZodError): string {
  * Build and validate the index. Strict (build, CI, `make check`) throws on any error. Lenient (the dev server) keeps
  * going: it drops whatever is broken, so the rest of the site renders, and returns the errors for the in-app banner.
  */
-export function buildIndex(contentDir: string, { strict = true }: { strict?: boolean } = {}) {
+export function buildIndex(
+  contentDir: string,
+  {
+    strict = true,
+    inScope = () => true,
+  }: {
+    strict?: boolean
+    /** Notes outside the scope are indexed but their maths is not rendered (the expensive part); the default is all. */
+    inScope?: (note: { slug: string; category: string }) => boolean
+  } = {},
+) {
   const errors: string[] = []
 
   const taxonomyFile = path.join(contentDir, 'taxonomy.yaml')
@@ -226,9 +236,11 @@ export function buildIndex(contentDir: string, { strict = true }: { strict?: boo
       errors.push(`content/${file}: no category; move the note into a category folder`)
       continue
     }
-    errors.push(...mathErrors(body).map((e) => `content/${file}: ${e}`))
-    // Summaries render $…$ maths too (abstract, cards, hover cards); check it, and limit the length as read.
-    errors.push(...mathErrors(parsed.data.summary).map((e) => `content/${file}: summary ${e}`))
+    if (inScope({ slug: noteSlug, category: resolvedCategory })) {
+      errors.push(...mathErrors(body).map((e) => `content/${file}: ${e}`))
+      // Summaries render $…$ maths too (abstract, cards, hover cards); check it, and limit the length as read.
+      errors.push(...mathErrors(parsed.data.summary).map((e) => `content/${file}: summary ${e}`))
+    }
     const readLength = plainMath(parsed.data.summary).trim().length
     if (readLength > 280) errors.push(`content/${file}: summary is ${readLength} characters as read; the limit is 280`)
     const text = plainText(body)

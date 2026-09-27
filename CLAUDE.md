@@ -43,6 +43,7 @@ uv run mlc figures --only logistic-regression   # rebuild one note's figure data
 uv run mlc list                                 # registered examples, runs and figures
 uv run python -m mlc.examples.kmeans fit --help # every CLI documents itself
 npm run check:content                           # validate content/ without starting Vite
+make doctor SCOPE="maths/optimal-transport kalman-filter"  # doctor for one branch or a few notes
 ```
 
 ## Architecture
@@ -66,6 +67,10 @@ npm run check:content                           # validate content/ without star
   `code:` ids against `runs.toml`, `useFigure` ids against notes and generated data, and imports across notes. It also
   warns about empty or single-note categories and names (slugs, titles, aliases) that collide across notes. Move a
   note with a plain `mv` into another category folder, then run `make doctor`.
+- Scope the doctor to the work in hand. Compiling every note's MDX and rendering its maths is what makes a full run
+  slow (about a minute), so `make doctor SCOPE="<taxonomy path | slug> ..."` checks only the notes under those paths
+  or with those slugs (seconds); whole-tree checks that are cheap still run. Changes confined to one branch of the
+  taxonomy need only that branch. Before a push, `make check` runs everything unscoped, as CI and the deploy do.
 - `plugins/content-index.ts` (Vite plugin) reads every note's frontmatter and validates it with zod schemas from
   `site/src/lib/content-schema.ts`. It checks categories, relation slugs, `<NoteLink to>` targets and `<Cite id>` keys.
   Any error fails dev and build with the offending file named. It exposes two virtual modules:
@@ -296,9 +301,11 @@ Frontmatter (validated; see `site/src/lib/content-schema.ts`): `title`, `kind`, 
 
 ## Git
 
-- Never stage, commit or push unless the user expressly asks for it in the current message. Permission is atomic: one
-  request covers one action (one commit, or one push) and does not carry over to later work. "Commit" does not imply
-  "push", and making a repository does not imply pushing to it.
+- Standing approval: when a batch of work is finished (no agents still running) and `make check` passes, then the
+  commit builds cleanly from a fresh checkout, add, commit and push. If any check fails, fix or report it and do not
+  push.
+- Otherwise never stage, commit or push unless the user asks in the current message; that permission covers one
+  action and does not carry over. "Commit" does not imply "push".
 - `docs/field-notes-survey.md` is a volatile local planning file, excluded via `.git/info/exclude`. Never add it.
 
 ## Deployment

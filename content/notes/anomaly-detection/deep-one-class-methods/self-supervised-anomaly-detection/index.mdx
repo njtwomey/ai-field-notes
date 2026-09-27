@@ -1,0 +1,160 @@
+---
+title: Self-supervised anomaly detection
+kind: concept
+summary: 'Self-supervised detectors train a network on normal data to solve a pretext task, such as naming which of $M$ transformations was applied, and score a point by how badly the network solves it. A constant network fails the task, so it cannot collapse.'
+tags: [anomaly-detection, deep-learning, self-supervised-learning, novelty-detection, worked-example]
+aliases:
+  [
+    geometric transformation anomaly detection,
+    GEOM,
+    GOAD,
+    classification-based anomaly detection,
+    CSI,
+    contrastive shifted instances,
+    transformation prediction anomaly score,
+  ]
+requires: [self-supervised-learning, deep-support-vector-data-description]
+partOf: [deep-anomaly-detection]
+related: [contrastive-learning, non-contrastive-learning, data-augmentation, pretrained-features-for-anomaly-detection]
+references: [golan2018, bergman2020, tack2020, hendrycks2019c, gidaris2018, chen2020, ruff2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A self-supervised anomaly detector trains a network on normal data to solve a pretext task whose labels come from the
+data themselves, and uses the network's performance on that task as a normality score. In the main family, the task is
+to recognise which of $M$ fixed transformations $T_1, \dots, T_M$, such as rotations of an image, was applied to an
+input. A normal input, transformed by $T_m$, is recognised as $T_m$. An anomalous input is not recognised reliably, and
+its anomaly score is the negative log-likelihood of the correct transformations, summed over $m$ <Cite id="golan2018" />.
+</Definition>
+
+## Intuition
+
+A network that has learned to tell whether a photograph of a car is upright, upside down or on its side has learned
+where the wheels and the roof are. That knowledge is specific to cars. Shown a rotated photograph of a cat, the same
+network cannot tell which way is up and spreads its prediction over the rotations. The uncertainty reveals that the
+input is unlike the training data.
+
+The pretext task turns one-class learning into ordinary multi-class classification, with all the tools that work for
+it. It also removes the collapse that troubles <NoteLink to="deep-support-vector-data-description">Deep SVDD</NoteLink>.
+
+## Transformation prediction
+
+Golan and El-Yaniv apply $M = 72$ transformations to every normal image: the compositions of a horizontal flip or not,
+nine translations and four rotations by multiples of $90°$ <Cite id="golan2018" />. A classifier $\yvec(\cdot)$ with a
+softmax output over $M$ classes is trained to predict $m$ from $T_m(\xvec)$. At test time the input is transformed by
+every $T_m$, and the normality score combines the predicted probabilities of the correct classes,
+$y_m(T_m(\xvec))$. Their full score fits a Dirichlet distribution to the softmax outputs of each transformation on
+training data; a simpler version, which ranks inputs almost as well, is the summed log-probability
+<Cite id="golan2018" />:
+
+$$
+n(\xvec) = \sum_{m=1}^{M} \log y_m\paren{T_m(\xvec)} .
+$$
+
+The anomaly score is $-n(\xvec)$. Hendrycks and colleagues use the same idea with rotation prediction alone, the
+pretext task of RotNet <Cite id="hendrycks2019c" /> <Cite id="gidaris2018" />.
+
+### Beyond images: GOAD
+
+Rotations and flips suit images. Bergman and Hoshen generalise the method to any data with random affine
+transformations $T_m(\xvec) = \Wmat_m\xvec + \bvec_m$, and replace the softmax classifier with one based on distances
+<Cite id="bergman2020" />. A network $f$ maps every transformed input to a feature space, and transformation $m$ has a
+centre $\cvec_m = \frac{1}{N}\sum_i f(T_m(\xvec_i))$, the mean feature of the transformed training data. The
+probability of transformation $m'$ given the transformed input $T_m(\xvec)$ is a softmax over negative squared
+distances to the centres:
+
+$$
+P\paren{m' \mid T_m(\xvec)} = \frac{\exp\paren{-\norm{f(T_m(\xvec)) - \cvec_{m'}}^2}}
+{\sum_{\tilde m} \exp\paren{-\norm{f(T_m(\xvec)) - \cvec_{\tilde m}}^2}} .
+$$
+
+Each transformation's data form a hypersphere in feature space, as in Deep SVDD, and the classifier tells the
+hyperspheres apart. Treating the $M$ transformed copies as independent, the probability that $\xvec$ is normal is the
+product of the probabilities of the correct transformations, and the anomaly score is
+
+$$
+s(\xvec) = -\sum_{m=1}^{M} \log \tilde P\paren{m \mid T_m(\xvec)} .
+$$
+
+Far from the training data, all distances are large and a small difference between them makes the softmax confidently
+pick one transformation. $\tilde P$ therefore adds a small $\epsilon$ to each numerator term and $M\epsilon$ to the
+denominator, which pushes the probabilities of distant points towards uniform <Cite id="bergman2020" />.
+
+## Worked example: why GOAD needs ε
+
+Take one-dimensional normal data concentrated near $x = 2$, two transformations $T_1(x) = x$ and $T_2(x) = -x$, and the
+identity as the feature map. The centres are $c_1 = 2$ and $c_2 = -2$. For transformation 1,
+
+$$
+P(1 \mid x) = \frac{e^{-(x - 2)^2}}{e^{-(x - 2)^2} + e^{-(x + 2)^2}} = \frac{1}{1 + e^{-8x}},
+$$
+
+and $P(2 \mid -x)$ has the same value, so without $\epsilon$ the score is $s(x) = 2\log(1 + e^{-8x})$.
+
+| $x$                             | 2      | 1       | 0       | −2     | 10      |
+| ------------------------------- | ------ | ------- | ------- | ------ | ------- |
+| $s(x)$, $\epsilon = 0$          | 0.0000 | 0.0007 | 1.386 | 32.0  | 0.0000 |
+| $s(x)$, $\epsilon = 10^{-6}$    | 0.0000 | 0.0007 | 1.386 | 27.4  | 1.386  |
+
+Without $\epsilon$, the point $x = 10$, far from all the data, scores the same as the normal point $x = 2$: both
+transformed copies land closer to the correct centre than to the wrong one. With $\epsilon$, both probabilities are
+close to $\frac{1}{2}$ and the score is $2\log 2 = 1.386$, the score of maximal uncertainty. The point $x = -2$, whose
+copies land on the wrong centres, scores highest in both cases. A transformation classifier flags points whose
+transformations it confuses. It cannot flag points whose transformations it finds easy to tell apart, however far they
+lie from the data.
+
+## Contrastive learning with shifted instances
+
+Contrastive learning trains an encoder $\zvec(\cdot)$ so that two augmented views of the same input are similar and
+views of different inputs are dissimilar (see <NoteLink to="contrastive-learning">contrastive learning</NoteLink>), as in SimCLR <Cite id="chen2020" />. Tack and colleagues observed that
+some transformations should not be treated as augmentations <Cite id="tack2020" />. Rotating a natural image by $90°$
+produces an image unlike any in the data set. CSI, contrastive learning on distributionally shifted instances, treats
+such shifted copies as different instances, negatives in the contrastive loss, and also trains a head to predict which
+shift was applied.
+
+The detection score of CSI uses two properties of a contrastive representation: the cosine similarity of $\zvec(\xvec)$
+to its nearest training example, and the norm $\norm{\zvec(\xvec)}$, which contrastive training tends to make larger for
+in-distribution inputs <Cite id="tack2020" />:
+
+$$
+s_{\text{con}}(\xvec) = \max_i \operatorname{sim}\paren{\zvec(\xvec_i), \zvec(\xvec)} \cdot \norm{\zvec(\xvec)} .
+$$
+
+This is a normality score. CSI averages it over the shifted copies of the input and adds the log-probability of the
+correct shift from the prediction head. The distinction CSI draws between augmentations and shifts is the one that
+makes transformation prediction work: a transformation is informative only if normal data carry a recognisable
+signature of it.
+
+## Why self-supervision helps
+
+**No collapse.** A constant network outputs the same prediction for every transformed input. Every transformation
+appears equally often in training, so the best constant prediction is the uniform one, and its cross-entropy is
+$\log M$: the loss of guessing, the worst a classifier needs to do, not the best. The objective can only be lowered
+by features that depend on the input. The pretext task supplies the negatives that the one-class objectives lack.
+
+**Features tied to the normal class.** The transformation can be predicted only from features that change under it
+and are consistent across normal data: the orientation of objects, the position of typical parts. Such features are
+specific to the normal class and are learned from normal data alone.
+
+**A well-posed training signal.** Minimising a distance to a centre, as Deep SVDD does, does not say which features to
+keep. Classification does. A review by Ruff and colleagues places these methods among classification-based detectors
+for this reason and notes that whether self-supervision learns semantic features or low-level statistics remains open
+<Cite id="ruff2021" />.
+
+## Assumptions
+
+- **Normal data are not invariant to the transformations.** Rotation prediction fails on textures, aerial images or
+  cell images, which look the same at every orientation. The transformations must suit the data.
+- **Anomalies change the signature.** An anomaly that shares the normal class's orientation cues, such as a defect on
+  an otherwise normal part, may be classified confidently and missed.
+
+## Pitfalls
+
+- **Far anomalies can score as normal**, as the worked example shows. Regularising the probabilities, or combining the
+  score with a distance, guards against it.
+- **Cost at test time.** Every input is transformed $M$ times and passed through the network $M$ times.
+- **Pretrained features often do better.** On image benchmarks, nearest-neighbour scores on features pretrained on
+  large labelled data sets have matched or beaten self-supervised detectors trained on the normal class alone (see
+  <NoteLink to="pretrained-features-for-anomaly-detection" />).

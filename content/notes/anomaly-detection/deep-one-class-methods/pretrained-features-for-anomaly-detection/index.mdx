@@ -1,0 +1,165 @@
+---
+title: Pretrained features for anomaly detection
+kind: concept
+summary: 'The distance from a pretrained network''s features of an input to the $k$ nearest features of normal data is a strong image anomaly score. PANDA and mean-shifted contrastive training adapt the features without collapse; PatchCore scores patches against a coreset.'
+tags: [anomaly-detection, deep-learning, transfer-learning, computer-vision, worked-example]
+aliases:
+  [
+    PatchCore,
+    PANDA,
+    mean-shifted contrastive loss,
+    MSC loss,
+    deep nearest neighbour anomaly detection,
+    DN2,
+    SPADE,
+    PaDiM,
+    patch memory bank,
+    coreset subsampling,
+  ]
+requires: [k-nearest-neighbour-anomaly-score, transfer-learning-and-fine-tuning]
+partOf: [deep-anomaly-detection]
+related:
+  [
+    self-supervised-anomaly-detection,
+    contrastive-learning,
+    fully-convolutional-data-description,
+    approximate-nearest-neighbour-search,
+    regularisation-based-continual-learning,
+  ]
+references:
+  [bergman2020b, reiss2021, reiss2023, roth2022, cohen2020, defard2021, bergmann2019, kirkpatrick2017, gonzalez1985, deng2009, ruff2021]
+status: draft
+updated: 2026-09-27
+---
+
+import { PatchMemoryFigure } from './PatchMemoryFigure'
+
+<Definition>
+Anomaly detection with pretrained features maps every input through a network $\psi$ pretrained on a large, unrelated
+labelled data set, usually ImageNet classification <Cite id="deng2009" />, and scores a test input by its distance to
+the nearest features of normal training data. With $\Ncal_k(\xvec)$ the $k$ training features nearest to
+$\psi(\xvec)$, the score is
+
+$$
+s(\xvec) = \frac{1}{k}\sum_{\zvec \in \Ncal_k(\xvec)} \norm{\psi(\xvec) - \zvec}^2 .
+$$
+
+Variants adapt $\psi$ to the normal data before scoring, or score local patches of an image to locate defects.
+</Definition>
+
+## Intuition
+
+A one-class objective trained from scratch, such as
+<NoteLink to="deep-support-vector-data-description">Deep SVDD</NoteLink>, has to discover which variations of the input
+matter from normal data alone. Nothing in "map these images close together" says that the shape of an object matters
+and the lighting does not. A network trained to separate a thousand object classes on over a million labelled images
+has already learned that distinction. In its feature space, images of one class occupy a compact region, and images of
+another class land elsewhere.
+
+Anomaly detection then reduces to the oldest method there is: a point far from all normal points is anomalous (see
+<NoteLink to="k-nearest-neighbour-anomaly-score">k-nearest-neighbour anomaly score</NoteLink>). Bergman, Cohen and Hoshen showed that this baseline, applied to
+ImageNet-pretrained ResNet features, outperformed the self-supervised detectors of its time on standard image
+benchmarks, and was more robust to few training images and to contaminated training data <Cite id="bergman2020b" />.
+
+## Why pretrained features often win
+
+- **The training signal is stronger.** A one-class objective sees one class and no labels. Pretraining sees many
+  classes and many labels. The features it learns separate semantic categories because that was its task.
+- **Collapse is impossible without training.** A frozen network cannot collapse. Every one-class objective trained from
+  scratch must be protected against the constant map; a nearest-neighbour score on frozen features needs no protection.
+- **Normal data are often scarce.** A few hundred normal images are too few to learn good features but enough to
+  populate a nearest-neighbour memory.
+
+The advantage depends on transfer. Pretrained features describe natural photographs. For medical scans, spectra or
+tabular records they may miss the variations that matter, and adapting or replacing them is necessary.
+
+## Adapting the features without collapse
+
+Fine-tuning the pretrained network on normal data should make normal features more compact. The obvious loss, the
+compactness loss $\sum_i \norm{\psi(\xvec_i) - \cvec}^2$ with $\cvec$ the mean initial feature, is the Deep SVDD loss,
+and a pretrained network has bias terms and batch normalisation. Trained to convergence, it collapses. Reiss and
+colleagues found a broader problem: well before full collapse, the features lose discriminative properties they had
+<Cite id="reiss2021" />.
+
+**PANDA** (pretrained anomaly detection adaptation) fine-tunes with the compactness loss and limits the drift in two ways
+<Cite id="reiss2021" />. The simplest is early stopping after a fixed number of epochs. The second borrows elastic
+weight consolidation from continual learning <Cite id="kirkpatrick2017" />: it adds the penalty
+
+$$
+\frac{\lambda}{2}\sum_j F_j\paren{\theta_j - \theta_j^0}^2,
+$$
+
+where $\theta^0$ are the pretrained weights and $F_j$ the diagonal of the Fisher information of the pretraining task.
+Weights that mattered for ImageNet classification are held near their pretrained values; the others are free to adapt.
+
+**Mean-shifted contrastive learning.** Contrastive learning is a stronger adaptation signal, but it fails here for a
+reason Reiss and Hoshen identify <Cite id="reiss2023" />. The contrastive loss has two effects on normalised features:
+views of the same image are pulled together, and all features are spread uniformly over the unit sphere. In a pretrained
+space, normal images occupy a small cap of the sphere around their mean direction. Spreading them over the whole sphere
+destroys exactly the compactness that separated them from anomalies.
+
+The fix measures angles around the normal mean instead of the origin. Let $\cvec$ be the mean of the normalised
+pretrained features of the training set. Each normalised feature is shifted to $\psi(\xvec)/\norm{\psi(\xvec)} - \cvec$,
+and the contrastive loss is applied to the cosine similarities of these shifted vectors. Uniformity now spreads the
+normal data around $\cvec$, not over the sphere, so it no longer pushes normal features away from the region they share
+<Cite id="reiss2023" />. The anomaly score is the cosine distance to the nearest training features.
+
+## Patch-level scores: PatchCore
+
+Industrial inspection needs to find a scratch on an otherwise perfect part, and to say where it is. Whole-image features
+average the scratch away. Patch-level methods keep a feature for every location.
+
+SPADE scores each pixel by the distance of its feature to its nearest neighbours among the pixel features of normal
+images <Cite id="cohen2020" />. PaDiM fits a Gaussian to the features at each image position and scores by Mahalanobis
+distance <Cite id="defard2021" />. PatchCore, by Roth and colleagues, combines three choices <Cite id="roth2022" />:
+
+1. **Locally aware, mid-level features.** Features come from intermediate layers of the pretrained network, which
+   describe local structure rather than object class, averaged over a small neighbourhood of positions to widen their
+   receptive field.
+2. **A memory bank.** The patch features of all normal training images form a bank $\Mcal$. The score of a test patch
+   is its distance to the nearest bank entry, and the image score is the largest patch score. The patch scores,
+   upsampled and smoothed, form the segmentation map.
+3. **A coreset.** The bank is subsampled to a fraction of its size, for speed, by greedy $k$-centre selection: start
+   from one patch, and repeatedly add the patch farthest from every patch chosen so far.
+
+The greedy rule minimises, within a factor of two, the largest distance from any bank patch to its nearest chosen patch
+<Cite id="gonzalez1985" />. That is the right criterion for a nearest-neighbour score. A normal test patch is scored by
+its distance to the nearest kept patch, and the greedy coreset keeps that distance small for every kind of normal patch,
+including rare ones. Random subsampling keeps patches in proportion to how common they are, so rare normal patterns lose
+their representatives and start to look anomalous. On the MVTec AD benchmark <Cite id="bergmann2019" />, PatchCore
+reports image-level AUROC up to 99.6 % <Cite id="roth2022" />.
+
+<PatchMemoryFigure />
+
+## Worked example: a coreset keeps the rare rivet
+
+The figure builds a bank of 4,608 patches of $5 \times 5$ raw pixels from eight normal images of diagonal stripes. Each
+image has one bright rivet in a random place, so rivet patches are a few percent of the bank. The test image has a
+rivet at column 20, row 8, and a dark dent at column 10, row 18.
+
+- With the full bank, the rivet patch scores $0.57$ and the dent patch $1.09$. The image score, the largest patch
+  score, is $1.17$, next to the dent.
+- A random 10 % of the bank, 461 patches, keeps few rivet patches. The rivet patch now scores $1.01$, and the largest
+  patch score in the image, $1.28$, sits beside the rivet rather than the dent. The detector would point an inspector
+  at the normal part.
+- A greedy coreset of the same size keeps the rivet at $0.57$. The largest score, $1.21$, is beside the dent.
+
+The raw-pixel features stand in for a pretrained network's features. The bank, the nearest-neighbour score, the maximum
+over patches and the coreset are those of PatchCore.
+
+## Assumptions
+
+- **The pretraining domain resembles the target.** ImageNet features transfer to photographs of objects and textures.
+  They transfer less well to data with different statistics.
+- **Anomalies differ in the pretrained feature space.** A defect that the pretrained network's features ignore, such as
+  a subtle change of colour in a channel the features discount, is invisible to the score.
+- **The training set covers normal variation.** A nearest-neighbour score flags every normal pattern that is missing
+  from the bank.
+
+## Pitfalls
+
+- **Memory and search cost.** The bank grows with the number of training images and patch positions. Coresets and
+  <NoteLink to="approximate-nearest-neighbour-search">approximate nearest-neighbour search</NoteLink> keep test time manageable.
+- **Adaptation can hurt.** Fine-tuning on normal data without safeguards degrades the features it set out to improve.
+- **Benchmarks favour the pretraining domain.** Results on natural-image benchmarks overstate what pretrained features
+  do for data unlike ImageNet (see <NoteLink to="evaluating-anomaly-detectors">evaluating anomaly detectors</NoteLink>).

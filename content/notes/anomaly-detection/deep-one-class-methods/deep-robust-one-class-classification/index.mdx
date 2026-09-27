@@ -1,0 +1,128 @@
+---
+title: Deep robust one-class classification
+kind: concept
+summary: 'DROCC trains a classifier to label normal points positive and to label negative every point at distance between $r$ and $\gamma r$ from a training point. It finds the hardest such negatives by projected gradient ascent, so collapse to a constant is never optimal.'
+tags: [anomaly-detection, deep-learning, adversarial-robustness, novelty-detection]
+aliases: [DROCC, DROCC-LF, DROCC-OE]
+requires: [deep-support-vector-data-description, adversarial-examples]
+partOf: [deep-anomaly-detection]
+related: [deep-semi-supervised-anomaly-detection, fully-convolutional-data-description, k-nearest-neighbour-anomaly-score]
+references: [goyal2020, ruff2018, ruff2021, hendrycks2019b]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Deep robust one-class classification (DROCC), introduced by Goyal and colleagues <Cite id="goyal2020" />, assumes that
+normal data lie on a low-dimensional manifold that the training set samples densely, so that points a small distance
+$r$ away from every training point are anomalous. It trains a network $f_\theta : \reals^D \to \reals$ as a binary
+classifier: training points are positives, and synthetic points generated near them, at distance between $r$ and
+$\gamma r$ with $\gamma \ge 1$, are negatives. The negatives are chosen adversarially, as the points in that shell that
+the current classifier finds most normal. The classifier's output is the anomaly score.
+</Definition>
+
+## Intuition
+
+<NoteLink to="deep-support-vector-data-description">Deep SVDD</NoteLink> has only positive examples, and a constant
+map satisfies it perfectly. Any objective that sees only normal data has this weakness. The cure used by
+<NoteLink to="deep-semi-supervised-anomaly-detection">Deep SAD</NoteLink> and
+<NoteLink to="fully-convolutional-data-description">FCDD</NoteLink> is to add negative examples. DROCC generates the
+negatives itself, from a geometric assumption about where normal data live.
+
+If normal data lie on a thin manifold, a point that has stepped off the manifold by a small distance $r$ is no longer
+normal. Such points are close to the data in input space but on the wrong side of the boundary a good detector must
+draw. A classifier that separates the training points from all their off-manifold neighbours has drawn a tight boundary
+around the manifold. The hardest neighbours, the ones the classifier currently accepts, are found by gradient ascent,
+as in adversarial training of a supervised classifier.
+
+## Objective
+
+For training points $\xvec_1, \dots, \xvec_n$, a classification loss $\ell$ (cross-entropy), labels $+1$ for normal and
+$-1$ for anomalous, and weights $\lambda, \mu > 0$, DROCC solves <Cite id="goyal2020" />
+
+$$
+\min_\theta\ \lambda\norm{\theta}^2 + \sum_{i=1}^{n}\bigg[\ell\paren{f_\theta(\xvec_i), +1}
++ \mu\max_{\tilde\xvec_i \in N_i(r)} \ell\paren{f_\theta(\tilde\xvec_i), -1}\bigg].
+$$
+
+The ideal set of negatives for point $i$ is
+
+$$
+N_i(r) = \set{\tilde\xvec : \norm{\tilde\xvec - \xvec_i} \le \gamma r,\ \ \norm{\tilde\xvec - \xvec_j} \ge r \text{ for all } j}:
+$$
+
+points within $\gamma r$ of $\xvec_i$ and at least $r$ from every training point. The upper bound $\gamma r$ keeps the
+search local. The inner maximum finds, for each training point, the nearby off-manifold point the classifier is most
+wrong about. The problem is a saddle point, like adversarial training, with the usual ball of perturbations replaced by
+$N_i(r)$.
+
+The constraint involving all $j$ couples every training point and is expensive. DROCC relaxes it to the annulus
+
+$$
+N_i(r) \approx \set{\tilde\xvec : r \le \norm{\tilde\xvec - \xvec_i} \le \gamma r},
+$$
+
+and relies on the manifold being low-dimensional: most directions out of the manifold leave it, so a point in the
+annulus around $\xvec_i$ is rarely close to another training point. A smaller weight $\mu$ on the negatives guards
+against the few that are <Cite id="goyal2020" />.
+
+## Training: projected gradient ascent
+
+Each training step finds the negatives, then updates $\theta$ <Cite id="goyal2020" />.
+
+1. For each $\xvec_i$ in the batch, start from $\tilde\xvec_i = \xvec_i + \hvec$ with $\hvec \sim \Gauss(\zeros, \eye)$.
+2. Repeat a few times: take a normalised ascent step on the negative loss,
+   $\hvec \leftarrow \hvec + \eta\,\nabla_{\hvec}\ell / \norm{\nabla_{\hvec}\ell}$, then project $\xvec_i + \hvec$ back
+   onto the annulus.
+3. Take a gradient step on $\theta$ for
+   $\lambda\norm{\theta}^2 + \sum_i \ell(f_\theta(\xvec_i), +1) + \mu\,\ell(f_\theta(\xvec_i + \hvec_i), -1)$.
+
+A few initial epochs train on the positives alone. Goyal and colleagues set $\gamma = 2$ and choose $r$, $\lambda$,
+$\mu$ and $\eta$ by validation.
+
+### The projection onto the annulus
+
+The projection of a point $\zvec$ onto the annulus $\set{\uvec : r \le \norm{\uvec - \xvec_i} \le \gamma r}$ keeps its
+direction from $\xvec_i$ and clips its distance. Let $\beta = \norm{\zvec - \xvec_i}$ and let $\beta'$ be $\beta$
+clipped to $[r, \gamma r]$. For any $\uvec$ in the annulus, the reverse triangle inequality gives
+
+$$
+\norm{\uvec - \zvec} \ge \abs{\norm{\uvec - \xvec_i} - \norm{\zvec - \xvec_i}} \ge \abs{\beta' - \beta},
+$$
+
+since $\norm{\uvec - \xvec_i}$ lies in $[r, \gamma r]$ and $\beta'$ is the point of that interval nearest $\beta$. The
+point $\xvec_i + (\beta'/\beta)(\zvec - \xvec_i)$ lies in the annulus at distance exactly $\abs{\beta' - \beta}$ from
+$\zvec$, so it attains the bound and is the projection. This is the closed form DROCC uses <Cite id="goyal2020" />.
+
+## Why DROCC does not collapse
+
+A constant classifier, $f_\theta(\xvec) = a$ for every $\xvec$, labels positives and negatives alike. With the
+cross-entropy loss, its loss per training point is $\ell(a, +1) + \mu\,\ell(a, -1)$, which is bounded below by a
+positive constant for every $a$. A classifier that separates the manifold from its $r$-shell drives both terms towards
+zero. The objective asks for discrimination, so the trivial solution is never optimal <Cite id="goyal2020" />. This
+is the same mechanism as outlier exposure <Cite id="hendrycks2019b" />, with the negatives generated from the training
+data instead of taken from a separate corpus.
+
+## Negatives that are available
+
+DROCC extends to the case where a limited set of real negatives exists but cannot cover all anomalies, such as
+detecting one spoken wake word against all other speech. Adding a cross-entropy term on the real negatives gives a
+variant analogous to outlier exposure, DROCC–OE. A second variant, DROCC–LF, uses the real negatives to learn which
+input features are noise, and measures the distance $r$ in a metric that down-weights them <Cite id="goyal2020" />.
+
+## Assumptions
+
+- **Normal data lie on a well-sampled, low-dimensional manifold** that is locally Euclidean at scale $r$. Where the
+  data fill a full-dimensional region, the annulus around a training point contains other normal points, and DROCC
+  learns to reject normal data.
+- **Euclidean distance in input space is meaningful at scale $r$.** For images, a pixel-space perturbation of norm $r$
+  may be imperceptible or may destroy the image, depending on $r$.
+
+## Pitfalls
+
+- **Choosing $r$.** The radius sets how tight the boundary is, and there are no labels to set it. Too small, and
+  negatives are indistinguishable from normal points. Too large, and the boundary is loose.
+- **Cost.** Each training step runs several ascent steps, each a forward and backward pass, on every batch element.
+  Training costs several times as much as for Deep SVDD.
+- **Noisy features.** Irrelevant input dimensions inflate distances in every direction, so the annulus mixes
+  meaningful and meaningless perturbations. DROCC–LF addresses this when some negatives are available.

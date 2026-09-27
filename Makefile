@@ -22,8 +22,8 @@ assets: contracts ## Build example outputs and figure data (cached), then the ma
 content: ## Validate content/ (frontmatter, links, citations, taxonomy)
 	node scripts/check-content.ts
 
-doctor: ## Check the content tree: slugs, folders, figure and example ids, imports, structure warnings
-	node scripts/doctor.ts
+doctor: ## Check the content tree (SCOPE="taxonomy/path slug ..." limits per-note checks to those notes)
+	node scripts/doctor.ts $(SCOPE)
 
 lint: ## Lint TypeScript and Python
 	npx oxlint
