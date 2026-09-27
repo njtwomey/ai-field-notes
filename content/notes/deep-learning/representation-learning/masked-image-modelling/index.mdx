@@ -1,0 +1,112 @@
+---
+title: Masked image modelling
+kind: concept
+summary: Masked image modelling splits an image into patches, hides a random subset, and trains a vision transformer to predict the hidden content. The masked autoencoder (MAE) hides 75% of patches and encodes only the visible ones, which cuts encoder compute by 4 to 16 times.
+tags: [deep-learning, representation-learning, self-supervised-learning, computer-vision, transformer, worked-example]
+aliases: [MIM, masked autoencoder, masked autoencoders, BEiT, SimMIM, masked patch prediction]
+requires: [transformer, autoencoder]
+partOf: [self-supervised-learning]
+related: [data-augmentation]
+references: [he2022, bao2022, xie2022, dosovitskiy2021, devlin2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Masked image modelling divides an image into $N$ non-overlapping patches, selects a random subset $\Mcal$ of them with
+mask ratio $r = \abs{\Mcal} / N$, and trains a network to predict the content of the masked patches from the visible
+ones. The prediction target can be the raw pixels (MAE, SimMIM), discrete tokens from a pretrained image tokeniser
+(BEiT), or features. The trained encoder is kept as a representation for other tasks
+<Cite id="he2022" /> <Cite id="bao2022" />.
+</Definition>
+
+## Intuition
+
+<NoteLink to="masked-language-modelling">Masked language modelling</NoteLink> works because predicting a missing word
+requires understanding its sentence. The same recipe applied to images must account for a difference in density.
+Words carry a lot of meaning each, so hiding 15% of them already makes the task hard. Pixels are highly redundant. A
+hidden patch surrounded by visible neighbours can be filled in by interpolation, which needs no understanding of the
+scene.
+
+Masking most of the image removes that shortcut. With 75% of patches hidden, there are large regions with no nearby
+visible pixels. Filling them in requires knowing what objects are and how they continue: that a visible half-wheel
+implies a car, or that a leg implies a body above it <Cite id="he2022" />.
+
+## The masked autoencoder
+
+The MAE has four parts <Cite id="he2022" />.
+
+1. **Patchify and mask.** A $224 \times 224$ image is cut into $16 \times 16$ patches, as in the vision transformer
+   <Cite id="dosovitskiy2021" />. A random 75% of patches are removed, sampled uniformly without replacement.
+2. **Encoder on visible patches only.** A vision transformer embeds each visible patch, adds its positional embedding,
+   and processes only these patches. No mask tokens enter the encoder.
+3. **Lightweight decoder.** The encoded visible patches are put back in their positions, and every masked position gets
+   a shared learned mask token. All tokens get positional embeddings, and a small transformer decoder processes the full
+   set.
+4. **Pixel loss on masked patches.** A linear layer predicts the pixel values of each patch. The loss is the mean
+   squared error, computed on masked patches only. The target pixels of each patch are normalised by that patch's mean
+   and standard deviation, which improved the representation.
+
+After pretraining, the decoder is discarded. The encoder is applied to whole, unmasked images for downstream tasks.
+
+The loss is restricted to masked patches because predicting a visible patch is an identity task. Including visible
+patches in the loss lowered downstream accuracy <Cite id="he2022" />.
+
+## Why the asymmetric design saves compute
+
+Let the encoder have $L$ transformer blocks of width $d$. A block on $n$ tokens costs about $a n d^2$ for the linear
+layers and $b n^2 d$ for the attention scores and weighted sums, for constants $a$ and $b$. With mask ratio $r$ the
+encoder sees $n = (1 - r) N$ tokens instead of $N$. The ratio of costs is
+
+$$
+\frac{a (1 - r) N d^2 + b (1 - r)^2 N^2 d}{a N d^2 + b N^2 d}.
+$$
+
+This lies between $(1 - r)^2$ and $1 - r$. It equals $1 - r$ when the linear layers dominate ($N \ll d$) and
+approaches $(1 - r)^2$ when attention dominates ($N \gg d$). With $r = 0.75$ the encoder is between 4 and 16 times
+cheaper per image. The decoder processes all $N$ tokens but is narrow and shallow: the default has 8 blocks of width
+512, under a tenth of the encoder's computation per token <Cite id="he2022" />. He et al. report training 3 times or
+more faster than an encoder that processes mask tokens.
+
+### Worked example
+
+A $224 \times 224$ image with $16 \times 16$ patches has $N = (224 / 16)^2 = 14^2 = 196$ patches. At $r = 0.75$ the
+encoder sees $49$. Each attention score matrix shrinks from $196^2 = 38{,}416$ to $49^2 = 2{,}401$ entries, a factor of
+16. The linear layers process 49 rows instead of 196, a factor of 4. For ViT-Large, with width $d = 1024$ much larger
+than $N = 196$, the linear layers dominate and the saving is close to 4.
+
+## Variants
+
+- **BEiT** first trains a discrete image tokeniser, then masks about 40% of patches, replaces them with a mask
+  embedding inside the encoder, and predicts the tokeniser's code for each masked patch with a softmax, exactly as
+  BERT predicts words <Cite id="bao2022" />.
+- **SimMIM** feeds mask tokens through the encoder, predicts raw pixels with a single linear layer, and uses an $\ell_1$
+  loss on masked patches <Cite id="xie2022" />. It works with hierarchical vision transformers, whose windowed
+  attention cannot drop patches as easily as a plain ViT.
+
+## Evaluation
+
+MAE representations are strong after fine-tuning and weaker under a frozen linear probe. A ViT-Huge encoder pretrained
+with MAE and fine-tuned on ImageNet-1K reached 87.8% top-1 accuracy, the best among methods using only ImageNet-1K data
+at the time <Cite id="he2022" />. Under linear probing, MAE features trail those of
+<NoteLink to="contrastive-learning">contrastive</NoteLink> methods. He et al. found that fine-tuning only the last one or
+two blocks closes most of the gap, which suggests MAE features are rich but not linearly separable. See
+<NoteLink to="embedding-evaluation">embedding evaluation</NoteLink> for the two protocols.
+
+## Assumptions
+
+- Images contain structure at the scale of several patches, so that masked regions are predictable from visible ones
+  given an understanding of the scene.
+- The encoder must handle a variable set of tokens. This is natural for a plain transformer and awkward for a
+  convolutional network, whose sliding kernels assume a full grid.
+
+## Pitfalls
+
+- **Train–test mismatch in token count.** The encoder sees 25% of patches during pretraining and 100% afterwards. The
+  change in sequence length changes attention statistics; fine-tuning adapts to it.
+- **Mask ratio is task-specific.** The 75% optimum is for natural images with $16 \times 16$ patches. Denser signals or
+  smaller patches favour different ratios.
+- **Reconstructions look blurry.** The mean squared error rewards the average of plausible completions. Blurry outputs
+  are expected and do not mean the representation is poor.
+- **Linear-probe comparisons mislead.** Ranking MAE against contrastive methods by linear probing alone understates
+  MAE, and ranking by fine-tuning alone overstates it for frozen-feature use.

@@ -1,0 +1,97 @@
+---
+title: Self-supervised learning
+kind: overview
+summary: Self-supervised learning trains a representation on unlabelled data by solving a pretext task whose targets come from the data itself. Its families are masked prediction, contrastive learning and non-contrastive learning. Each must stop the encoder from collapsing to a constant.
+tags: [deep-learning, representation-learning, self-supervised-learning]
+aliases: [SSL, self-supervision, pretext task, representation learning, pretraining, unsupervised pretraining]
+related: [autoencoder, data-augmentation, clip]
+references: [gidaris2018, mikolov2013, devlin2019, he2022, oord2018, chen2020, grill2020, zbontar2021, wang2020]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Self-supervised learning trains an encoder $f$ on unlabelled data by constructing a supervised **pretext task** from
+the data itself: predicting a hidden part of an input from the rest, or recognising which inputs are views of the same
+source. The pretext task is discarded after training. The encoder's representation $f(x)$ is kept and reused for
+downstream tasks, by probing or by fine-tuning on a small labelled set.
+</Definition>
+
+## Why it works
+
+Labels are expensive and unlabelled data is plentiful. A pretext task needs no annotation, so it can use all of the
+data. The pretext task has no value of its own. It is chosen so that solving it requires the same knowledge that
+downstream tasks need. Predicting a masked word requires syntax and meaning. Matching two crops of a photograph requires
+recognising the object in both.
+
+The representation learned is only as good as this match. A pretext task with a shortcut, such as filling in a pixel
+from its neighbours, is solved without learning anything transferable.
+
+## The collapse problem unifies the families
+
+Many pretext tasks compare two views $x_A$ and $x_B$ of one input and ask their embeddings to agree. Agreement alone
+cannot be the objective. The loss $\expect\brack{\norm{f(x_A) - f(x_B)}^2}$ is non-negative, and a constant encoder
+$f(x) = \cvec$ makes every term zero. The minimum is attained by an encoder that carries no information.
+
+Every self-supervised method avoids this in one of four ways, and the families below are defined by which one they use.
+
+1. **Reconstruct the input.** The target is part of the input itself, such as a masked word or a masked image patch. A
+   constant encoder cannot predict varying targets, so it has high loss.
+2. **Contrast with negatives.** The encoder must also tell the positive view apart from other inputs. A constant encoder
+   cannot, and its loss is $\log N$ for $N$ candidates.
+3. **Regularise the batch.** A term computed across the batch requires each embedding dimension to vary and to be
+   decorrelated from the others. A constant encoder violates it.
+4. **Break the symmetry.** One branch predicts a slowly moving or gradient-stopped copy of the other. The constant
+   solution still exists but is not reached by the training dynamics.
+
+## Components
+
+Component notes declare `partOf: [self-supervised-learning]` and appear in the right-hand column.
+
+- <NoteLink to="word-embeddings">Word embeddings</NoteLink>: word2vec predicts the words around each word, an early
+  large-scale pretext task on text <Cite id="mikolov2013" />.
+- <NoteLink to="masked-language-modelling">Masked language modelling</NoteLink>: BERT predicts randomly hidden tokens
+  from both sides of their context <Cite id="devlin2019" />.
+- <NoteLink to="masked-image-modelling">Masked image modelling</NoteLink>: the masked autoencoder reconstructs the
+  pixels of 75% of an image's patches from the rest <Cite id="he2022" />.
+- <NoteLink to="contrastive-learning">Contrastive learning</NoteLink>: InfoNCE picks the positive view from a set of
+  candidates, and bounds the mutual information between views <Cite id="oord2018" /> <Cite id="chen2020" />.
+- <NoteLink to="non-contrastive-learning">Non-contrastive learning</NoteLink>: BYOL, SimSiam, Barlow Twins and VICReg
+  use positive pairs only <Cite id="grill2020" /> <Cite id="zbontar2021" />.
+
+## Data flow
+
+1. **Make the pretext task.** Mask part of each input, or make two views with random augmentations
+   (<NoteLink to="data-augmentation">data augmentation</NoteLink>), or pair data from two modalities such as images and
+   captions (<NoteLink to="clip">CLIP</NoteLink>).
+2. **Encode.** A backbone network, usually a transformer or a convolutional network, maps each input or view to a
+   representation $\hvec$. Many methods add a small head, such as a projector or a decoder, that maps $\hvec$ to the
+   space where the loss is computed.
+3. **Compute the pretext loss** and train the backbone and head together.
+4. **Discard the head.** The head specialises to the pretext task. The backbone's output is the representation.
+5. **Evaluate and transfer.** Measure the frozen representation with linear or nearest-neighbour probes
+   (<NoteLink to="embedding-evaluation">embedding evaluation</NoteLink>), or fine-tune it on a labelled task
+   (<NoteLink to="transfer-learning-and-fine-tuning">transfer learning and fine-tuning</NoteLink>).
+
+## Variants
+
+| Family           | Pretext task                           | Against collapse                 | Examples                       |
+| ---------------- | -------------------------------------- | -------------------------------- | ------------------------------ |
+| Hand-crafted     | predict a transformation of the input  | varying targets                  | rotation prediction            |
+| Masked           | predict hidden parts of the input      | varying targets                  | word2vec, BERT, MAE            |
+| Autoregressive   | predict the next token                 | varying targets                  | GPT-style language models      |
+| Contrastive      | identify the positive among negatives  | negatives                        | CPC, SimCLR, MoCo, CLIP        |
+| Non-contrastive  | make two views agree                   | batch regularisers or asymmetry  | BYOL, SimSiam, Barlow Twins    |
+
+Hand-crafted pretext tasks came first. Rotating an image by 0, 90, 180 or 270 degrees and training a network to predict
+the rotation forces it to recognise the orientation of objects, and so the objects <Cite id="gidaris2018" />. Such tasks
+were overtaken by contrastive and masked methods, which do not depend on one designed shortcut-free task.
+
+Masked and autoregressive prediction dominate in language, where tokens are discrete and a softmax over the vocabulary
+gives an exact likelihood. Joint-embedding methods, contrastive and non-contrastive, were developed mainly for images,
+where predicting pixels exactly wastes capacity on detail. Masked autoencoders showed that pixel prediction also works
+for images when most of the image is hidden <Cite id="he2022" />.
+
+A common geometric view explains joint-embedding methods. Their losses favour **alignment**, related inputs mapping
+close together, and **uniformity**, all embeddings spreading over the space <Cite id="wang2020" />. Negatives, batch
+regularisers and asymmetric updates are different ways of obtaining the second property.

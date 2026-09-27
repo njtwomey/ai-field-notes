@@ -1,39 +1,260 @@
 ---
 title: Positional encoding
 kind: concept
-summary: A positional encoding adds information about token order to the input of a transformer. Attention alone is invariant to the order of its inputs.
-tags: [transformer, embeddings]
-references: [kazemnejad2019]
+summary: Self-attention is permutation-equivariant, so a transformer needs position information from elsewhere. Absolute encodings add a vector $\pvec_t$ to each token embedding. Relative schemes (Shaw, RoPE, ALiBi) make each attention score depend on the offset between query and key.
+tags: [deep-learning, transformer, attention, embeddings]
+aliases:
+  [
+    position embedding,
+    sinusoidal positional encoding,
+    learned position embedding,
+    relative position representation,
+    rotary position embedding,
+    RoPE,
+    ALiBi,
+    attention with linear biases,
+    permutation equivariance of attention,
+  ]
+requires: [scaled-dot-product-attention]
+related: [multi-head-attention, causal-masking]
+references: [vaswani2017, shaw2018, raffel2020, su2021, press2022, haviv2022, chen2023, kazemnejad2019, touvron2023]
 status: draft
-updated: 2026-09-26
+updated: 2026-09-27
 ---
 
 import { EncodingHeatmap } from './EncodingHeatmap'
+import { RopeOffset } from './RopeOffset'
 
 <Definition>
-A positional encoding is a vector $\pvec_t \in \reals^{d}$ added to the embedding of the token at position
-$t$. Without it, self-attention produces the same output for any permutation of the input tokens.
+A positional encoding gives a transformer information about the order of its $n$ input tokens. An **absolute**
+encoding adds a vector $\pvec_t \in \reals^{d}$ to the embedding $\xvec_t \in \reals^d$ of the token at position $t$. A
+**relative** encoding changes the attention score between query position $i$ and key position $j$ so that the
+position enters only through the offset $j - i$. Without either, self-attention returns the same set of outputs for
+every ordering of the input tokens.
 </Definition>
 
-## Sinusoidal encoding
+## Intuition
 
-The original transformer uses fixed sinusoids <Cite id="vaswani2017" />:
+<NoteLink to="scaled-dot-product-attention">Attention</NoteLink> compares every query with every key by a dot product.
+The dot product sees the contents of the two vectors and nothing about where they came from. The sentences "dog bites
+man" and "man bites dog" contain the same three token embeddings. Self-attention without position information gives
+each word the same output vector in both sentences.
+
+A recurrent network gets order for free, because it reads tokens one after another. A convolution gets it from the
+fixed layout of its kernel. A transformer has neither. Order must be written into the vectors, or into the scores.
+
+## Why attention ignores order
+
+Let $\Xmat \in \reals^{n \times d}$ hold one token embedding per row. Self-attention computes
 
 $$
-p_{t,2i} = \sin\!\left(\frac{t}{10000^{2i/d}}\right), \qquad p_{t,2i+1} = \cos\!\left(\frac{t}{10000^{2i/d}}\right)
+f(\Xmat) = \operatorname{softmax}\paren{\frac{\Xmat \Wmat_Q (\Xmat \Wmat_K)^{\tr}}{\sqrt{d_k}}} \Xmat \Wmat_V,
 $$
 
-Each pair of dimensions is a rotation at its own frequency. The wavelengths form a geometric progression from
-$2\pi$ to $10000 \cdot 2\pi$.
+with the softmax applied to each row. Reordering the tokens multiplies $\Xmat$ on the left by a permutation matrix
+$\Pmat$. A permutation matrix has one 1 in each row and column, and $\Pmat^{\tr} \Pmat = \eye$.
+
+The score matrix of the permuted input is
+
+$$
+\Pmat \Xmat \Wmat_Q (\Pmat \Xmat \Wmat_K)^{\tr} = \Pmat \paren{\Xmat \Wmat_Q \Wmat_K^{\tr} \Xmat^{\tr}} \Pmat^{\tr}
+= \Pmat \Smat \Pmat^{\tr}.
+$$
+
+Multiplying by $\Pmat$ on the left reorders the rows of $\Smat$. Multiplying by $\Pmat^{\tr}$ on the right reorders the
+entries inside every row in the same way. The softmax of a row does not depend on the order of its entries: each entry
+is divided by the sum of the exponentials of all of them. So the row-wise softmax commutes with both reorderings,
+$\operatorname{softmax}(\Pmat \Smat \Pmat^{\tr}) = \Pmat \operatorname{softmax}(\Smat) \Pmat^{\tr}$. Writing
+$\Amat = \operatorname{softmax}(\Smat)$,
+
+$$
+f(\Pmat \Xmat) = \Pmat \Amat \Pmat^{\tr} \Pmat \Xmat \Wmat_V = \Pmat \Amat \Xmat \Wmat_V = \Pmat f(\Xmat).
+$$
+
+Self-attention is **permutation-equivariant**: permuting the inputs permutes the outputs in the same way and changes
+nothing else. The feed-forward sublayer, residual connections and layer normalisation act on each row separately, so
+they are equivariant too. A whole encoder stack is therefore equivariant, and pooling its outputs gives a function of
+the multiset of tokens only. The <NoteLink to="transformer">transformer</NoteLink> must receive position from an
+encoding.
+
+A <NoteLink to="causal-masking">causal mask</NoteLink> breaks the symmetry. Position $t$ attends to exactly $t$ keys, so
+a decoder can infer position from the attention pattern. Decoder-only language models trained with no positional
+encoding at all reach perplexities close to those of models with one <Cite id="haviv2022" />.
+
+## Absolute encodings
+
+An absolute encoding forms the input to the first layer as $\xvec_t + \pvec_t$. The two standard choices differ in how
+$\pvec_t$ is made.
+
+**Learned embeddings.** A matrix $\Pmat_{\text{pos}} \in \reals^{T_{\max} \times d}$ is trained with the rest of the
+model, and row $t$ is $\pvec_t$. BERT and GPT-2 use this <Cite id="devlin2019" /> <Cite id="radford2019" />. Positions beyond $T_{\max}$ have no row, so the model cannot
+run on longer inputs. Vaswani et al. found learned embeddings and sinusoids gave nearly identical results
+<Cite id="vaswani2017" />.
+
+**Sinusoids.** The original transformer uses fixed functions of $t$ <Cite id="vaswani2017" />. For
+$i = 0, 1, \dots, d/2 - 1$, set the frequency $\omega_i = 10000^{-2i/d}$ and
+
+$$
+p_{t,2i} = \sin(\omega_i t), \qquad p_{t,2i+1} = \cos(\omega_i t).
+$$
+
+Each pair of dimensions is a point on the unit circle that turns at its own rate as $t$ increases. The frequencies fall
+geometrically, so the wavelengths $2\pi / \omega_i$ run from $2\pi \approx 6.3$ tokens for $i = 0$ to nearly
+$10000 \cdot 2\pi$ tokens for the last pair. Fast pairs separate neighbouring positions. Slow pairs separate distant
+ones. Together they act like the digits of a number written in a mixed base.
 
 <EncodingHeatmap />
 
-## Relative position
+### Offsets are linear maps
 
-For a fixed offset $k$, $\pvec_{t+k}$ is a linear function of $\pvec_t$. The linear map is a rotation that
-depends on $k$ but not on $t$. This lets attention express relative offsets <Cite id="kazemnejad2019" />.
+Vaswani et al. chose sinusoids because, for any fixed offset $k$, $\pvec_{t+k}$ is a linear function of $\pvec_t$
+<Cite id="vaswani2017" />. The angle-addition formulas give, for pair $i$,
 
-## Alternatives
+$$
+\begin{aligned}
+\sin(\omega_i (t + k)) &= \sin(\omega_i t) \cos(\omega_i k) + \cos(\omega_i t) \sin(\omega_i k), \\
+\cos(\omega_i (t + k)) &= \cos(\omega_i t) \cos(\omega_i k) - \sin(\omega_i t) \sin(\omega_i k).
+\end{aligned}
+$$
 
-Lorem ipsum dolor sit amet. Learned absolute embeddings, relative position biases and rotary embeddings (RoPE) are
-common alternatives.
+In matrix form,
+
+$$
+\begin{bmatrix} p_{t+k,2i} \\ p_{t+k,2i+1} \end{bmatrix} =
+\underbrace{\begin{bmatrix} \cos \omega_i k & \sin \omega_i k \\ -\sin \omega_i k & \cos \omega_i k \end{bmatrix}}_{\Rmat_i(k)}
+\begin{bmatrix} p_{t,2i} \\ p_{t,2i+1} \end{bmatrix}.
+$$
+
+$\Rmat_i(k)$ is a rotation by angle $\omega_i k$ (clockwise, since the pair is stored as sine then cosine). Stacking the
+$d/2$ blocks on the diagonal gives one orthogonal matrix $\Rmat(k)$ with $\pvec_{t+k} = \Rmat(k) \pvec_t$ for every
+$t$. The map depends on the offset $k$ and not on $t$. A linear layer can therefore learn "look $k$ positions back" once
+and apply it at every position <Cite id="kazemnejad2019" />.
+
+The same identity makes the dot product of two encodings a function of the offset alone:
+
+$$
+\pvec_t^{\tr} \pvec_{t+k} = \sum_{i=0}^{d/2-1} \brack{\sin(\omega_i t) \sin(\omega_i (t+k)) + \cos(\omega_i t) \cos(\omega_i (t+k))}
+= \sum_{i=0}^{d/2-1} \cos(\omega_i k).
+$$
+
+Each bracket is $\cos(\omega_i (t + k) - \omega_i t)$ by the cosine difference formula. The sum is largest at $k = 0$
+and does not depend on the sign of $k$.
+
+This relative structure is diluted in the model. The first layer sees $\xvec_t + \pvec_t$, and its score between
+positions $m$ and $n$ expands into four terms:
+
+$$
+(\xvec_m + \pvec_m)^{\tr} \Wmat_Q \Wmat_K^{\tr} (\xvec_n + \pvec_n) =
+\xvec_m^{\tr} \Mmat \xvec_n + \xvec_m^{\tr} \Mmat \pvec_n + \pvec_m^{\tr} \Mmat \xvec_n + \pvec_m^{\tr} \Mmat \pvec_n,
+$$
+
+with $\Mmat = \Wmat_Q \Wmat_K^{\tr}$. The two middle terms mix content with absolute position. Only a model that learns
+to suppress them gets scores that depend on offset alone. Relative encodings build that property in.
+
+## Relative position representations
+
+Shaw et al. add learned vectors for the offset directly inside attention <Cite id="shaw2018" />. For each clipped
+offset $r = \max(-K, \min(K, j - i))$ there are two learned vectors $\avec^K_r, \avec^V_r \in \reals^{d_k}$, shared
+across positions. The score and output of query position $i$ become
+
+$$
+e_{ij} = \frac{\qvec_i^{\tr} (\kvec_j + \avec^K_{r})}{\sqrt{d_k}}, \qquad
+\ovec_i = \sum_j \alpha_{ij} (\vvec_j + \avec^V_{r}),
+$$
+
+with $\alpha_{ij}$ the softmax of $e_{ij}$ over $j$. Offsets beyond $\pm K$ share one vector, so the model has
+$2K + 1$ pairs per layer and applies to any sequence length. On WMT 2014 translation, relative representations beat
+sinusoidal absolute encodings by 1.3 BLEU (English–German) and 0.3 BLEU (English–French), and adding absolute encodings
+back gave no further gain <Cite id="shaw2018" />.
+
+T5 simplifies this to one learned scalar bias $b_{h}(j - i)$ per head, added to the score, with offsets grouped into
+logarithmically sized buckets <Cite id="raffel2020" />.
+
+## Rotary position embedding
+
+Rotary position embedding (RoPE) rotates the query and key vectors by an angle proportional to their positions, so that
+their dot product depends only on the offset <Cite id="su2021" />. Llama 2 and many other decoder-only language models
+use it <Cite id="touvron2023" />.
+
+Start in two dimensions and write a vector $(a, b)$ as the complex number $a + \mathrm{i} b$. Rotation by angle
+$\phi$ is multiplication by $e^{\mathrm{i}\phi}$. The real part of $u \bar{v}$ equals the dot product of $u$ and $v$
+viewed as vectors in $\reals^2$: $(a + \mathrm{i} b)(c - \mathrm{i} d)$ has real part $ac + bd$.
+
+Rotate the query at position $m$ by $m\theta$ and the key at position $n$ by $n\theta$:
+$\tilde q_m = q\, e^{\mathrm{i} m\theta}$ and $\tilde k_n = k\, e^{\mathrm{i} n\theta}$. Their dot product is
+
+$$
+\operatorname{Re}\brack{\tilde q_m \overline{\tilde k_n}}
+= \operatorname{Re}\brack{q\, e^{\mathrm{i} m\theta}\, \bar k\, e^{-\mathrm{i} n\theta}}
+= \operatorname{Re}\brack{q \bar k\, e^{\mathrm{i} (m - n)\theta}}.
+$$
+
+The positions $m$ and $n$ appear only through $m - n$. In matrix form the same fact reads
+$(\Rmat_{m\theta} \qvec)^{\tr} (\Rmat_{n\theta} \kvec) = \qvec^{\tr} \Rmat_{m\theta}^{\tr} \Rmat_{n\theta} \kvec =
+\qvec^{\tr} \Rmat_{(n-m)\theta} \kvec$, because rotations are orthogonal, $\Rmat_{\phi}^{\tr} = \Rmat_{-\phi}$, and
+rotations about the same centre add their angles.
+
+In $d_k$ dimensions RoPE splits $\qvec$ and $\kvec$ into $d_k/2$ pairs and rotates pair $i$ by $m \theta_i$, with the
+sinusoidal frequencies $\theta_i = 10000^{-2i/d_k}$. The rotation is block-diagonal, so the argument holds pair by pair
+and the full score is
+
+$$
+(\Rmat_m \qvec)^{\tr} (\Rmat_n \kvec) = \qvec^{\tr} \Rmat_{n-m} \kvec.
+$$
+
+RoPE differs from added sinusoids in three ways. It acts on queries and keys inside every attention layer, not once on
+the input. It multiplies rather than adds, so there are no content–position cross terms. It leaves the values
+unrotated, so position shapes the weights and not the vectors being averaged. The vector norms are unchanged, since
+rotations preserve length.
+
+<RopeOffset />
+
+## Attention with linear biases
+
+ALiBi adds no vectors at all <Cite id="press2022" />. Head $h$ subtracts a penalty proportional to the distance from
+each causal score:
+
+$$
+e_{ij} = \frac{\qvec_i^{\tr} \kvec_j}{\sqrt{d_k}} - s_h \,(i - j), \qquad j \le i.
+$$
+
+The slopes $s_h$ are fixed, not learned. For $H$ heads they form the geometric sequence $s_h = 2^{-8h/H}$, so with 8
+heads they are $\tfrac12, \tfrac14, \dots, \tfrac{1}{256}$. Steep heads attend locally and shallow heads see far back.
+The bias depends only on $i - j$, so ALiBi is a relative encoding.
+
+The penalty grows without bound, so keys far outside the training length receive negligible weight rather than scores
+the model has never seen. Press et al. trained a 1.3-billion-parameter model on sequences of 1024 tokens that reached,
+on 2048-token inputs, the perplexity of a sinusoidal model trained on 2048 tokens <Cite id="press2022" />.
+
+## Comparison
+
+| Method               | Where it acts                  | Learned parameters      | Score depends on           |
+| -------------------- | ------------------------------ | ----------------------- | -------------------------- |
+| Learned absolute     | added to the input, once       | $T_{\max} \times d$     | absolute positions         |
+| Sinusoidal absolute  | added to the input, once       | none                    | absolute positions         |
+| Shaw et al. relative | keys and values, every layer   | $2(2K+1) d_k$ per layer | clipped offset             |
+| T5 bias              | score, every layer             | one scalar per bucket   | bucketed offset            |
+| RoPE                 | queries and keys, every layer  | none                    | offset                     |
+| ALiBi                | score, every layer             | none                    | offset, with linear decay  |
+
+## Assumptions
+
+- The model sees tokens in a single linear order. Trees, grids and graphs need their own encodings, such as
+  two-dimensional patch positions in vision transformers.
+- Relative schemes assume that the meaning of a relation between two tokens depends on their distance and not on where
+  the pair sits in the sequence.
+
+## Pitfalls
+
+- **Length extrapolation.** Learned absolute embeddings have no vector beyond $T_{\max}$. Sinusoids and RoPE are defined
+  at every position, but a model trained on short sequences has never seen the rotation angles of long offsets and
+  degrades beyond its training length <Cite id="press2022" />. Position interpolation rescales positions $t \to t L / L'$
+  so that a RoPE model trained on length $L$ sees only familiar angles at length $L'$, and needs little fine-tuning
+  <Cite id="chen2023" />.
+- **Changing the base.** The frequencies $\theta_i$ are part of the trained model. Changing the base of a trained RoPE
+  model changes every score and needs fine-tuning.
+- **Pairing convention.** Implementations pair dimensions either as $(2i, 2i+1)$ or as $(i, i + d_k/2)$. Both are valid
+  RoPE, but weights trained with one convention give wrong outputs under the other.
+- **RoPE and the KV cache.** A key is rotated by its own position before it is stored in the
+  <NoteLink to="kv-cache">KV cache</NoteLink>. Cached keys stay valid as new tokens arrive, because each key's angle
+  depends only on its own position.

@@ -1,0 +1,213 @@
+---
+title: Contrastive learning
+kind: concept
+summary: Contrastive learning trains an encoder to pick the matching view of an input out of $N$ candidates. Its InfoNCE loss $\mathcal{L}$ gives the bound $I \ge \log N - \mathcal{L}$ on the mutual information between views. SimCLR draws negatives from the batch; MoCo keeps a queue.
+tags: [deep-learning, representation-learning, self-supervised-learning, information-theory, worked-example]
+aliases:
+  [
+    InfoNCE,
+    InfoNCE loss,
+    NT-Xent,
+    contrastive loss,
+    contrastive predictive coding,
+    CPC,
+    SimCLR,
+    MoCo,
+    momentum contrast,
+    instance discrimination,
+    negative pairs,
+    hard negatives,
+  ]
+requires: [mutual-information, softmax-and-log-sum-exp]
+partOf: [self-supervised-learning]
+related: [word-embeddings, data-augmentation]
+references: [oord2018, poole2019, gutmann2010, chen2020, he2020, wu2018, wang2020, wang2021]
+status: draft
+updated: 2026-09-27
+---
+
+import { TemperatureDemo } from './TemperatureDemo'
+
+<Definition>
+Contrastive learning trains an encoder $f$ from pairs of related inputs $(x, y^+)$, such as two augmented crops of one
+image. For each anchor $x$ the model sees the positive $y^+$ and $N - 1$ negatives $y^-_2, \dots, y^-_N$, and scores
+each candidate with a critic $s(x, y)$, usually the cosine similarity of the encodings. The InfoNCE loss is the
+cross-entropy of picking the positive out of the $N$ candidates:
+
+$$
+\mathcal{L}_{\text{NCE}} = -\expect\brack{\log \frac{\exp(s(x, y^+) / \tau)}{\exp(s(x, y^+) / \tau) + \sum_{j=2}^{N} \exp(s(x, y^-_j) / \tau)}},
+$$
+
+with temperature $\tau > 0$ <Cite id="oord2018" />.
+</Definition>
+
+## Intuition
+
+Without labels there is no class to predict. The data still says which inputs belong together: two crops of one
+photograph, a sentence and the next one, an image and its caption. Contrastive learning turns this into a
+classification problem. The "classes" are the candidates in the batch, and the correct class is the one that came from
+the same source as the anchor.
+
+To win, the encoder must keep whatever distinguishes one input from the others and discard whatever changes between
+two views of one input. The choice of views therefore decides what the representation learns. If views differ in
+colour, colour is discarded. If they differ in crop, position is discarded.
+
+The negatives stop the trivial solution. An encoder that maps every input to the same vector makes the positive score
+equal every negative score. The loss is then $\log N$, its value for a uniform guess.
+
+## The loss is a bound on mutual information
+
+Let $(X, Y)$ have joint density $p(x, y)$ with marginals $p(x)$ and $p(y)$. Draw $x$ and the positive $y_1$ from
+$p(x, y)$, and draw $y_2, \dots, y_N$ independently from $p(y)$. Write $y_{1:N}$ for all $N$ candidates and let
+$f(x, y) = s(x, y)/\tau$ be any critic. Then
+
+$$
+I(X; Y) \ge \log N - \mathcal{L}_{\text{NCE}}.
+$$
+
+The proof follows Poole et al. <Cite id="poole2019" />.
+
+**Step 1: the extra candidates carry no information.** The negatives are independent of $(X, Y_1)$, so
+$I(X; Y_{1:N}) = I(X; Y_1) = I(X; Y)$.
+
+**Step 2: any normalised guess gives a lower bound.** For any conditional density $q(y_{1:N} \mid x)$,
+
+$$
+I(X; Y_{1:N}) - \expect\brack{\log \frac{q(y_{1:N} \mid x)}{p(y_{1:N})}}
+= \expect\brack{\log \frac{p(y_{1:N} \mid x)}{q(y_{1:N} \mid x)}}
+= \expect_x\brack{\KL\paren{p(y_{1:N} \mid x) \,\|\, q(y_{1:N} \mid x)}} \ge 0,
+$$
+
+because <NoteLink to="kl-divergence">KL divergence</NoteLink> is non-negative. So
+$I(X; Y) \ge \expect[\log q(y_{1:N} \mid x) / p(y_{1:N})]$ for every valid $q$.
+
+**Step 3: build $q$ from the critic.** Let $m(x, y_{1:N}) = \frac{1}{N} \sum_{j=1}^{N} e^{f(x, y_j)}$ and set
+
+$$
+q(y_{1:N} \mid x) = p(y_{1:N}) \, \frac{e^{f(x, y_1)}}{m(x, y_{1:N})}, \qquad p(y_{1:N}) = \prod_{j=1}^{N} p(y_j).
+$$
+
+This $q$ integrates to 1. Under $p(y_{1:N})$ the candidates are exchangeable, so each ratio
+$e^{f(x, y_i)} / m$ has the same expectation. The $N$ ratios sum to $N$ by the definition of $m$. Each therefore has
+expectation 1, and $\int q \, dy_{1:N} = \expect_{p(y_{1:N})}[e^{f(x, y_1)} / m] = 1$.
+
+**Step 4: substitute.** The ratio $q / p(y_{1:N})$ is $e^{f(x, y_1)} / m$, so
+
+$$
+I(X; Y) \ge \expect\brack{\log \frac{e^{f(x, y_1)}}{\frac{1}{N} \sum_{j} e^{f(x, y_j)}}}
+= \log N + \expect\brack{\log \frac{e^{f(x, y_1)}}{\sum_{j} e^{f(x, y_j)}}} = \log N - \mathcal{L}_{\text{NCE}}.
+$$
+
+Minimising the InfoNCE loss maximises a lower bound on the <NoteLink to="mutual-information">mutual
+information</NoteLink> between the two views. The loss is non-negative, so the bound can never exceed $\log N$. With
+$N = 4096$ candidates, no critic can certify more than $\log 4096 \approx 8.32$ nats. This is one reason contrastive
+methods use large batches or large banks of negatives.
+
+**The optimal critic.** The loss is the cross-entropy of an $N$-way classifier that must name the positive's index $i$.
+Given $x$, the probability of the candidates when index $i$ is the positive is
+$p(y_i \mid x) \prod_{l \ne i} p(y_l) = \frac{p(y_i \mid x)}{p(y_i)} \prod_{l} p(y_l)$. With a uniform prior over $i$,
+Bayes' rule gives the posterior
+
+$$
+\pr(i \mid x, y_{1:N}) = \frac{p(y_i \mid x) / p(y_i)}{\sum_{j} p(y_j \mid x) / p(y_j)}.
+$$
+
+The best classifier matches this posterior, so the optimal critic is $f^*(x, y) = \log \frac{p(y \mid x)}{p(y)} + c(x)$
+for any $c(x)$ <Cite id="oord2018" />. The critic learns the log density ratio, the pointwise mutual information, and
+never has to model $p(y)$ itself. This is the same idea as noise-contrastive estimation, which fits an unnormalised
+density by classifying data against noise <Cite id="gutmann2010" />.
+
+## Temperature and hard negatives
+
+Write $p_j$ for the softmax weight of candidate $j$ at temperature $\tau$, with $j = 1$ the positive. Differentiating
+the loss for one anchor, $\mathcal{L} = -s_1/\tau + \log \sum_j e^{s_j/\tau}$, gives
+
+$$
+\frac{\partial \mathcal{L}}{\partial s_1} = -\frac{1 - p_1}{\tau}, \qquad
+\frac{\partial \mathcal{L}}{\partial s_j} = \frac{p_j}{\tau} \quad (j \ge 2).
+$$
+
+Each negative is pushed away in proportion to $p_j \propto e^{s_j / \tau}$. Two negatives with similarities $s_j$ and
+$s_k$ receive gradients in the ratio $e^{(s_j - s_k)/\tau}$. A small temperature makes this ratio large, so the
+gradient concentrates on the hardest negatives, the ones most similar to the anchor <Cite id="wang2021" />. A large
+temperature spreads it over all negatives.
+
+<TemperatureDemo />
+
+### Worked example
+
+Take one anchor with a positive at cosine similarity 0.8 and three negatives at 0.1, 0.3 and 0.5.
+
+- At $\tau = 1$ the logits are $(0.8, 0.1, 0.3, 0.5)$. The softmax gives the positive $p_1 = 0.352$, and the loss is
+  $-\log 0.352 = 1.05$ nats. The three negatives get weights 0.175, 0.213 and 0.260, nearly equal.
+- At $\tau = 0.1$ the logits are $(8, 1, 3, 5)$. Now $p_1 = 0.946$ and the loss is 0.056 nats. The negatives get
+  0.0009, 0.0064 and 0.0471. The hardest negative, at 0.5, receives 55 times the gradient of the easiest.
+
+Lower temperature separates the positive more sharply and aims the gradient at the confusable negatives. Too low a
+temperature also pushes apart negatives that are genuinely similar, such as two images of the same class.
+
+## Alignment and uniformity
+
+Normalise the encodings to the unit sphere, so $s(x, y) = f(x)^{\tr} f(y)$. Subtract the constant $\log N$ from the
+loss for one anchor:
+
+$$
+\mathcal{L} - \log N = -\frac{s(x, y^+)}{\tau} + \log\paren{\frac{e^{s(x, y^+)/\tau}}{N} + \frac{1}{N} \sum_{j=2}^{N} e^{s(x, y^-_j)/\tau}}.
+$$
+
+As $N \to \infty$, the first term inside the logarithm vanishes and the average over negatives tends to its expectation.
+Wang and Isola show that the loss then approaches <Cite id="wang2020" />
+
+$$
+\underbrace{-\frac{1}{\tau} \expect\brack{f(x)^{\tr} f(y^+)}}_{\text{alignment}}
++ \underbrace{\expect_x \brack{\log \expect_{y^-} \brack{e^{f(x)^{\tr} f(y^-) / \tau}}}}_{\text{uniformity}}.
+$$
+
+The first term rewards positive pairs that map close together. The second penalises encodings that bunch up, and is
+smallest when the encodings are spread uniformly over the sphere. See
+<NoteLink to="embedding-evaluation">embedding evaluation</NoteLink> for these two quantities used as metrics.
+
+## Methods
+
+**Contrastive predictive coding** (CPC) introduced InfoNCE. An autoregressive model summarises a sequence up to time
+$t$, and the critic must pick the true encoding of step $t + k$ from negatives taken from other times and sequences
+<Cite id="oord2018" />.
+
+**Instance discrimination** treats every image in the dataset as its own class and stores one feature vector per image
+in a memory bank to supply negatives <Cite id="wu2018" />.
+
+**SimCLR** takes a batch of $N$ images and makes two augmented views of each, giving $2N$ views <Cite id="chen2020" />.
+An encoder produces $\hvec = f(x)$, and a small MLP projection head produces $\zvec = g(\hvec)$. The critic is the cosine
+similarity of $\zvec$ vectors divided by $\tau$. Each view's positive is its partner, and its negatives are the other
+$2(N - 1)$ views in the batch. Chen et al. found three things. The composition of augmentations matters most, and random
+cropping with colour distortion works best. The projection head improves the representation $\hvec$ taken before it,
+which is what is used downstream. Larger batches help: they used batches of up to 8192 images. A linear classifier on
+the ResNet-50 representation reached 76.5% top-1 accuracy on ImageNet <Cite id="chen2020" />.
+
+**MoCo** decouples the number of negatives from the batch size <Cite id="he2020" />. It keeps a queue of encoded keys
+from recent batches, 65,536 in the paper, and uses them all as negatives. Keys in the queue were encoded at different
+training steps. To keep them consistent, the key encoder is not trained by gradient descent but follows the query
+encoder as an exponential moving average, $\thetavec_k \leftarrow m \thetavec_k + (1 - m) \thetavec_q$ with
+$m = 0.999$. A key encoder copied directly from the query encoder at each step changed too fast, and training failed
+<Cite id="he2020" />.
+
+## Assumptions
+
+- Two views of one input share the information that matters for downstream tasks, and what differs between views is
+  nuisance.
+- Negatives drawn from the data are mostly unrelated to the anchor. The bound in the derivation assumes they are
+  independent draws from $p(y)$.
+
+## Pitfalls
+
+- **False negatives.** Two different images of dogs are negatives for each other. The loss pushes them apart, which
+  works against class structure. The effect grows as the batch grows relative to the number of classes.
+- **The bound saturates.** The estimate $\log N - \mathcal{L}$ cannot exceed $\log N$. When the true mutual information
+  is larger, InfoNCE underestimates it badly, so it is a poor estimator of mutual information even when it trains good
+  representations <Cite id="poole2019" />.
+- **Augmentations define the invariances.** Colour jitter makes the representation ignore colour. That helps object
+  classification and hurts a task, such as flower species, that depends on colour.
+- **Batch size and temperature interact.** Changing either changes which negatives dominate the gradient. They must be
+  tuned together.
+- **Evaluate the right layer.** In SimCLR the representation before the projection head transfers better than the
+  output of the head <Cite id="chen2020" />.

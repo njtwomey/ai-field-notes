@@ -1,33 +1,177 @@
 ---
 title: KV caching
 kind: technique
-summary: A KV cache stores the attention keys and values of earlier tokens during autoregressive decoding. Each new token then costs one step of attention instead of a full recomputation.
-tags: [transformer, inference, memory]
-references: [pope2022]
-status: stub
-updated: 2026-09-26
+summary: A KV cache stores the attention keys and values of every earlier token during autoregressive decoding, so each new token computes only its own. Attention per generated token drops from $O(t^2 d)$ to $O(t d)$ at length $t$, at a memory cost of $2 L h_{kv} d_h$ values per token.
+tags: [deep-learning, transformer, inference, memory, worked-example]
+aliases: [KV cache, key-value cache, incremental decoding, PagedAttention, paged attention, prefix caching, KV cache quantisation]
+requires: [causal-masking]
+related: [positional-encoding]
+references: [pope2022, shazeer2019, ainslie2023, kwon2023, zheng2024, liu2024, touvron2023, deepseek2024]
+status: draft
+updated: 2026-09-27
 ---
 
+import { CacheMemory } from './CacheMemory'
+
 <Definition>
-During decoding, the keys and values of past tokens do not change. A KV cache keeps them in memory and appends one
-entry per new token.
+During autoregressive decoding with a causally masked transformer, the keys and values that every layer computes for
+earlier tokens never change. A KV cache stores them. At each step the model computes the query, key and value of the
+one new token in each layer, appends the key and value to the cache, and attends over the cache. The output is
+identical to recomputing the whole sequence.
 </Definition>
 
 ## Problem
 
-Lorem ipsum dolor sit amet. Without a cache, generating token $t$ recomputes keys and values for all $t$ previous
-tokens.
+A decoder-only <NoteLink to="transformer">transformer</NoteLink> generates text one token at a time. After producing
+$t$ tokens it runs the model on $x_1, \dots, x_t$, reads the prediction at position $t$, samples $x_{t+1}$, and repeats.
+
+Run naively, each step processes the entire prefix again. Take $L$ layers of width $d$. One layer on $t$ tokens costs
+$O(t d^2)$ for the linear projections and the feed-forward network, plus $O(t^2 d)$ for the attention scores and the
+weighted sums. Generating $T$ tokens this way costs
+
+$$
+\sum_{t=1}^{T} L \paren{c_1 t d^2 + c_2 t^2 d} = O\paren{L T^2 d^2 + L T^3 d},
+$$
+
+for constants $c_1$ and $c_2$ that count the projections. Almost all of this work repeats the previous step.
 
 ## Mechanism
 
-Lorem ipsum dolor sit amet.
+**Why earlier keys and values do not change.** A <NoteLink to="causal-masking">causal mask</NoteLink> makes the
+representation at position $j$ in every layer a function of $x_1, \dots, x_j$ only. The query, key and value at
+position $j$ of layer $\ell$ are linear maps of that representation, so they are also functions of $x_1, \dots, x_j$
+only. Appending $x_{t+1}$ therefore leaves every key $\kvec^{(\ell)}_j$ and value $\vvec^{(\ell)}_j$ with $j \le t$
+unchanged, in every layer.
+
+**One decoding step.** Store the keys and values of layer $\ell$ as
+$\Kmat^{(\ell)}_{1:t}, \Vmat^{(\ell)}_{1:t} \in \reals^{t \times d_h}$ for each head. When token $x_{t+1}$ arrives, each
+layer
+
+1. computes the new row's $\qvec_{t+1}$, $\kvec_{t+1}$ and $\vvec_{t+1}$ from its input at position $t + 1$;
+2. appends $\kvec_{t+1}$ and $\vvec_{t+1}$ to the cache, giving $\Kmat_{1:t+1}$ and $\Vmat_{1:t+1}$;
+3. returns
+   $\operatorname{softmax}\paren{\qvec_{t+1}^{\tr} \Kmat_{1:t+1}^{\tr} / \sqrt{d_h}} \Vmat_{1:t+1}$, one row of
+   attention, with no mask needed because the cache holds only the past.
+
+The feed-forward network, residual connections and normalisation act on the new position alone.
+
+**Cost of a step.** Per layer, the projections and feed-forward network cost $O(d^2)$ for the single new row. The
+attention costs $O(t d)$: one query against $t$ keys, then a weighted sum of $t$ values. Generating $T$ tokens costs
+
+$$
+\sum_{t=1}^{T} L \paren{c_1 d^2 + c_2 t d} = O\paren{L T d^2 + L T^2 d}.
+$$
+
+Attention per generated token falls from $O(t^2 d)$ to $O(t d)$, and the projection cost per token from $O(t d^2)$ to
+$O(d^2)$. The saving is exact: the cached computation returns the same numbers as the full recomputation, up to
+floating-point rounding.
+
+**Prefill and decode.** Serving has two phases. In **prefill**, the whole prompt of $n$ tokens is processed in one
+parallel pass, as in training, and the cache is filled with $n$ entries per layer. In **decode**, tokens are produced
+one at a time from the cache. Prefill performs large matrix products and is limited by arithmetic throughput. Decode
+performs one row per sequence and is limited by memory bandwidth, because each step must read every weight and every
+cached key and value once to produce a single token <Cite id="pope2022" />.
 
 ## Cost
 
-Cache size is $2 \times \text{layers} \times \text{heads} \times d_\text{head} \times \text{tokens}$ values per
-sequence <Cite id="pope2022" />.
+The cache holds a key and a value for every token, layer and key–value head. Its size in bytes is
+
+$$
+\text{bytes} = 2 \cdot L \cdot h_{kv} \cdot d_h \cdot n \cdot B \cdot b,
+$$
+
+where the factor 2 counts keys and values, $L$ is the number of layers, $h_{kv}$ the number of key–value heads, $d_h$
+the width of one head, $n$ the number of cached tokens per sequence, $B$ the batch size and $b$ the bytes per stored
+number <Cite id="pope2022" />. In standard multi-head attention $h_{kv} = h$, and $h d_h = d$, so the cache holds
+$2 L d$ numbers per token.
+
+The size grows linearly in both sequence length and batch size, and does not depend on the parameter count except
+through $L$, $h_{kv}$ and $d_h$. At long contexts or large batches the cache, not the weights, fills the accelerator's
+memory.
+
+### Worked example
+
+Llama 2 7B has $L = 32$ layers and $h = 32$ heads of width $d_h = 128$, with standard multi-head attention and a
+4096-token context <Cite id="touvron2023" />. In 16-bit precision ($b = 2$), one token costs
+
+$$
+2 \cdot 32 \cdot 32 \cdot 128 \cdot 2 = 524{,}288 \text{ bytes} = 512 \text{ KiB}.
+$$
+
+A full 4096-token sequence needs $512 \text{ KiB} \times 4096 = 2 \text{ GiB}$. A batch of 8 such sequences needs
+16 GiB, more than the 13.5 GB (12.6 GiB) of the model's 6.7 billion 16-bit weights.
+
+Llama 2 70B has $L = 80$ layers and 64 query heads of width 128, but uses grouped-query attention with $h_{kv} = 8$
+key–value heads <Cite id="touvron2023" />. One token costs $2 \cdot 80 \cdot 8 \cdot 128 \cdot 2 = 327{,}680$ bytes,
+or 320 KiB, and a 4096-token sequence 1.25 GiB. With 64 key–value heads the same model would need 2.5 MiB per token and
+10 GiB per sequence. With one key–value head it would need 40 KiB per token.
+
+<CacheMemory />
 
 ## Trade-offs
 
-Lorem ipsum dolor sit amet. Multi-query and grouped-query attention reduce cache size by sharing keys and values
-across heads.
+### Sharing keys and values across heads
+
+The cache formula is linear in $h_{kv}$. <NoteLink to="multi-head-attention">Multi-head attention</NoteLink> variants
+reduce $h_{kv}$ while keeping $h$ query heads.
+
+- **Multi-query attention** uses one key head and one value head for all $h$ query heads, so $h_{kv} = 1$ and the cache
+  shrinks by a factor of $h$ <Cite id="shazeer2019" />. Every cached key is read once and used by $h$ queries, which
+  raises the arithmetic done per byte loaded during decode. Shazeer reports much faster decoding with a small loss in
+  quality.
+- **Grouped-query attention** splits the $h$ query heads into $h_{kv}$ groups that each share one key and value head,
+  shrinking the cache by $h / h_{kv}$. Quality is close to multi-head attention at a speed close to multi-query
+  attention <Cite id="ainslie2023" />. An existing multi-head checkpoint can be converted by mean-pooling the key and
+  value heads of each group and training further with about 5% of the original pre-training compute.
+- **Multi-head latent attention** in DeepSeek-V3 caches one low-dimensional latent vector per token and layer, from
+  which keys and values for all heads are reconstructed by learned up-projections <Cite id="deepseek2024" />. The cache
+  is smaller than grouped-query attention's while every head keeps its own keys and values.
+
+### Paged memory
+
+A sequence's final length is unknown when it starts. A server that reserves a contiguous region for the maximum length
+of each request wastes most of it on short outputs, and cannot fit as many requests in a batch. PagedAttention stores
+each sequence's cache in fixed-size blocks of a few tokens, placed anywhere in memory, with a per-sequence block table
+that maps logical positions to physical blocks, as virtual memory maps pages <Cite id="kwon2023" />. Only the last block
+of each sequence can be partly empty. Several sequences can point to the same physical blocks, with copy-on-write, so
+parallel samples and beam-search candidates share the cache of their common prompt. The vLLM system built on it raised
+serving throughput 2–4× over earlier systems at the same latency <Cite id="kwon2023" />. The attention kernel must
+gather keys and values through the block table, which costs some speed per step.
+
+### Prefix caching
+
+Many requests begin with the same tokens: a system prompt, few-shot examples, a shared document, or the earlier turns
+of a conversation. Because the cache entry at position $j$ depends only on $x_1, \dots, x_j$, two requests with the same
+first $p$ tokens have identical cache entries for positions $1$ to $p$. A server can keep the cache after a request
+ends and reuse it for any later request with a matching prefix, skipping that part of prefill. SGLang's RadixAttention
+indexes cached prefixes in a radix tree over token sequences and evicts the least recently used entries
+<Cite id="zheng2024" />. Reuse requires an exact token match from the first position: the same text tokenised
+differently, or a change early in the prompt, invalidates everything after it.
+
+### Quantised caches
+
+Storing keys and values in fewer bits shrinks $b$ in the cache formula. Moving from 16 to 8 bits halves the cache, and
+2 bits divides it by eight, before the overhead of scales. Keys and values have different outlier structure: some key
+channels are consistently large across tokens, while values have no such channels. KIVI therefore quantises keys per
+channel and values per token, stores both in 2 bits, and keeps the most recent tokens in full precision
+<Cite id="liu2024" />. It reports almost unchanged quality with 2.6× less peak memory, including the weights, and up
+to 4× larger batches.
+
+### Summary of the trade-off
+
+The cache trades memory for computation. It removes the $O(t^2 d)$ recomputation per token but makes decoding a
+memory-bound workload whose batch size and context length are limited by cache size. Every method above shrinks one
+factor of $2 L h_{kv} d_h n B b$: fewer key–value heads, less wasted $n$, shared prefixes across $B$, or fewer bytes $b$.
+
+## Pitfalls
+
+- **Positions must be tracked.** The new token's position is the cache length, not 0. With
+  <NoteLink to="positional-encoding">rotary embeddings</NoteLink>, keys are rotated by their own position before they
+  are cached; rotating the new query by the wrong position gives wrong scores without any error.
+- **Padding in batches.** Sequences in a batch have different lengths. Padded cache slots must be masked in every step,
+  or they receive attention weight.
+- **The cache is not free at short lengths.** For a short prompt and output, the weights dominate memory and the cache
+  saves little; the benefit grows with $T$.
+- **Numerical drift.** Cached and recomputed outputs can differ in the last bits, because kernels for one row and for
+  many rows sum in different orders. Greedy decoding can then diverge from a reference implementation after many
+  tokens.

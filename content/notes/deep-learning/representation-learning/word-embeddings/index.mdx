@@ -1,0 +1,179 @@
+---
+title: Word embeddings
+kind: concept
+summary: A word embedding maps each vocabulary word to a dense vector so that words used in similar contexts get similar vectors. Skip-gram with $k$ negative samples implicitly factorises the pointwise mutual information matrix shifted by $\log k$; GloVe fits log co-occurrence counts.
+tags: [deep-learning, representation-learning, nlp, embeddings, worked-example]
+aliases:
+  [
+    word2vec,
+    skip-gram,
+    skip-gram with negative sampling,
+    SGNS,
+    negative sampling,
+    continuous bag of words,
+    CBOW,
+    GloVe,
+    word vectors,
+    distributional hypothesis,
+    word analogies,
+    fastText,
+  ]
+requires: [logistic-regression, mutual-information]
+partOf: [self-supervised-learning]
+related: [singular-value-decomposition, pairwise-distances-and-cosine-similarity]
+references: [harris1954, mikolov2013, mikolov2013b, levy2014, pennington2014, bojanowski2017, bolukbasi2016]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A word embedding assigns each word $w$ in a vocabulary $\Vcal$ a vector $\vvec_w \in \reals^d$, with $d$ in the tens to
+hundreds and far smaller than $\abs{\Vcal}$. The vectors are trained on unlabelled text so that words appearing in
+similar contexts have similar vectors, measured by dot product or cosine similarity. Word2vec's skip-gram model and GloVe
+are the standard methods <Cite id="mikolov2013" /> <Cite id="pennington2014" />.
+</Definition>
+
+## Intuition
+
+A one-hot vector for each word treats "cat" and "dog" as exactly as different as "cat" and "carburettor". Every pair
+of one-hot vectors is orthogonal. A model built on them must learn about each word separately.
+
+The **distributional hypothesis** says that words with similar meanings occur in similar contexts
+<Cite id="harris1954" />. "Cat" and "dog" both appear near "pet", "fed" and "vet". A representation built from contexts
+therefore places them close together, and anything a downstream model learns about one partly transfers to the other.
+
+Embeddings are learned as a by-product of a prediction task on raw text, with no labels. This makes word2vec an early
+instance of <NoteLink to="self-supervised-learning">self-supervised learning</NoteLink>.
+
+## Skip-gram with negative sampling
+
+Slide a window over a corpus. Each word $w$ at the centre and each word $c$ within $L$ positions of it form a
+(word, context) pair. Let $\Dcal$ be the multiset of all such pairs, and write $\#(w, c)$, $\#(w)$ and $\#(c)$ for the
+number of pairs, pairs with word $w$, and pairs with context $c$.
+
+The **skip-gram** model keeps two vectors per word: $\vvec_w$ when the word is at the centre and $\uvec_c$ when it is a
+context <Cite id="mikolov2013" />. It predicts contexts with a softmax over the vocabulary,
+$p(c \mid w) = e^{\uvec_c^{\tr} \vvec_w} / \sum_{c'} e^{\uvec_{c'}^{\tr} \vvec_w}$. The normaliser sums over the whole
+vocabulary, which costs $O(\abs{\Vcal} d)$ per pair.
+
+**Negative sampling** replaces the softmax with binary classification <Cite id="mikolov2013b" />. Observed pairs are
+labelled 1. For each observed pair, $k$ contexts $c_N$ are drawn from a noise distribution $P_n$ and labelled 0. With
+$\sigma$ the logistic function, the objective for one pair is
+
+$$
+\ell(w, c) = \log \sigma(\uvec_c^{\tr} \vvec_w) + k\, \expect_{c_N \sim P_n}\brack{\log \sigma(-\uvec_{c_N}^{\tr} \vvec_w)}.
+$$
+
+This is <NoteLink to="logistic-regression">logistic regression</NoteLink> on the score $\uvec_c^{\tr} \vvec_w$, and it
+costs $O(k d)$ per pair instead of $O(\abs{\Vcal} d)$. Mikolov et al. used $k$ between 2 and 20 and the noise
+distribution $P_n(c) \propto \#(c)^{3/4}$, which samples rare words more often than their frequency. They also discard
+each occurrence of a frequent word with probability $1 - \sqrt{t / f(w)}$, where $f(w)$ is its relative frequency and
+$t \approx 10^{-5}$ <Cite id="mikolov2013b" />.
+
+## Negative sampling factorises a PMI matrix
+
+Levy and Goldberg showed what skip-gram with negative sampling computes <Cite id="levy2014" />. Take the noise
+distribution to be the empirical context distribution $P_{\Dcal}(c) = \#(c) / \abs{\Dcal}$, and sum the objective over
+all pairs:
+
+$$
+\ell = \sum_{w} \sum_{c} \#(w, c) \log \sigma(\uvec_c^{\tr} \vvec_w)
++ \sum_{w} \#(w)\, k \sum_{c} \frac{\#(c)}{\abs{\Dcal}} \log \sigma(-\uvec_c^{\tr} \vvec_w).
+$$
+
+Collect the terms involving one pair $(w, c)$ and write $x = \uvec_c^{\tr} \vvec_w$:
+
+$$
+\ell(w, c) = \#(w, c) \log \sigma(x) + k \frac{\#(w)\, \#(c)}{\abs{\Dcal}} \log \sigma(-x).
+$$
+
+Suppose $d$ is large enough that each dot product $x$ can be set independently. The derivatives of the two logarithms
+are $\frac{d}{dx} \log \sigma(x) = \sigma(-x)$ and $\frac{d}{dx} \log \sigma(-x) = -\sigma(x)$. Setting the derivative
+of $\ell(w, c)$ to zero gives
+
+$$
+\#(w, c)\, \sigma(-x) = k \frac{\#(w)\, \#(c)}{\abs{\Dcal}} \sigma(x).
+$$
+
+The ratio $\sigma(-x) / \sigma(x)$ equals $e^{-x}$, because $\sigma(x) = e^{x} \sigma(-x)$. Solving,
+
+$$
+\uvec_c^{\tr} \vvec_w = x^* = \log \frac{\#(w, c)\, \abs{\Dcal}}{\#(w)\, \#(c)} - \log k = \operatorname{PMI}(w, c) - \log k.
+$$
+
+The quantity $\operatorname{PMI}(w, c) = \log \frac{p(w, c)}{p(w)\, p(c)}$ is the **pointwise mutual information**
+between word and context, estimated from counts. At its optimum, skip-gram with negative sampling makes the matrix of
+dot products $\Vmat \Umat^{\tr}$ equal the $\abs{\Vcal} \times \abs{\Vcal}$ matrix of PMI values shifted by $\log k$. With
+$d \ll \abs{\Vcal}$ it cannot match every entry. It finds a low-rank approximation of the shifted PMI matrix, weighted
+by how often each pair is observed or sampled.
+
+This connects neural embeddings to older count-based methods. Levy and Goldberg obtained comparable word-similarity
+results by building the shifted positive PMI matrix $\max(\operatorname{PMI} - \log k, 0)$ directly and taking its
+truncated <NoteLink to="singular-value-decomposition">singular value decomposition</NoteLink> <Cite id="levy2014" />.
+
+### Worked example
+
+In a corpus of $\abs{\Dcal} = 10{,}000$ pairs, suppose "coffee" appears in $\#(w) = 100$ pairs, "cup" in $\#(c) = 200$,
+and the two together in $\#(w, c) = 20$. Then
+
+$$
+\operatorname{PMI} = \log \frac{20 \times 10{,}000}{100 \times 200} = \log 10 \approx 2.303.
+$$
+
+The pair occurs 10 times more often than if the words were independent. With $k = 5$ negatives the optimal dot product
+is $\log 10 - \log 5 = \log 2 \approx 0.693$, and $\sigma(0.693) = 2/3$. A pair that occurs exactly as often as
+independence predicts has PMI 0 and optimal dot product $-\log 5 \approx -1.609$.
+
+## GloVe
+
+GloVe fits the logarithm of the co-occurrence counts directly <Cite id="pennington2014" />. Let $X_{ij}$ be the number
+of times word $j$ appears in the context of word $i$, and $X_i = \sum_j X_{ij}$.
+
+Pennington et al. start from ratios. For probe words $k$, the ratio $P(k \mid i) / P(k \mid j)$ distinguishes $i$
+from $j$: for $i = $ "ice", $j = $ "steam", it is large for $k = $ "solid" and small for $k = $ "gas". They ask for
+vectors in which differences encode these ratios, $F\paren{(\wvec_i - \wvec_j)^{\tr} \tilde \wvec_k} = P(k \mid i) / P(k \mid j)$.
+Requiring $F$ to turn a difference into a ratio gives $F = \exp$, and then $\wvec_i^{\tr} \tilde \wvec_k = \log P(k \mid i)
+= \log X_{ik} - \log X_i$. The term $\log X_i$ does not depend on $k$, so it is absorbed into a bias $b_i$, and a bias
+$\tilde b_k$ is added for symmetry. The model is $\wvec_i^{\tr} \tilde \wvec_k + b_i + \tilde b_k \approx \log X_{ik}$,
+fitted by weighted least squares:
+
+$$
+J = \sum_{i, j:\, X_{ij} > 0} g(X_{ij}) \paren{\wvec_i^{\tr} \tilde \wvec_j + b_i + \tilde b_j - \log X_{ij}}^2,
+\qquad g(x) = \min\paren{1, (x / x_{\max})^{3/4}},
+$$
+
+with $x_{\max} = 100$. The weight $g$ stops frequent pairs from dominating and gives zero weight to pairs never seen,
+whose logarithm is undefined. If the biases absorb $\log X_i$ and $\log X_j$, the dot product fits
+$\log X_{ij} - \log X_i - \log X_j$, which is the PMI up to an additive constant. GloVe and skip-gram fit the same kind
+of matrix with different weightings.
+
+## Analogies
+
+Word vectors show linear regularities. The vector $\vvec_{\text{king}} - \vvec_{\text{man}} + \vvec_{\text{woman}}$ is
+closer to $\vvec_{\text{queen}}$ than to any other word except the three inputs <Cite id="mikolov2013" />. The PMI view
+explains when this can happen. If, for every context $c$,
+$\operatorname{PMI}(\text{king}, c) - \operatorname{PMI}(\text{man}, c) \approx \operatorname{PMI}(\text{queen}, c) - \operatorname{PMI}(\text{woman}, c)$,
+then the rows of the PMI matrix satisfy the analogy, and so does their linear factorisation. The condition says that
+"king" differs from "man" in its contexts the way "queen" differs from "woman". Analogy benchmarks exclude the input
+words from the search; without that exclusion the nearest vector is often one of the inputs.
+
+## Assumptions
+
+- Meaning is reflected in co-occurrence within a small window. Syntax beyond the window and word order within it are
+  ignored.
+- Each word type has one meaning. "Bank" gets one vector, an average of its financial and river senses weighted by
+  frequency.
+
+## Pitfalls
+
+- **Rare and unseen words.** A word seen a few times gets a noisy vector, and a word never seen gets none. FastText
+  represents each word as the sum of vectors for its character $n$-grams, so unseen words still get a vector
+  <Cite id="bojanowski2017" />.
+- **Frequency leaks into the geometry.** Vector norms and nearest neighbours correlate with word frequency. Normalising
+  to unit length before comparing reduces the effect.
+- **Social bias.** Embeddings reproduce associations in their training text, including gender stereotypes such as
+  $\vvec_{\text{man}} - \vvec_{\text{woman}} \approx \vvec_{\text{programmer}} - \vvec_{\text{homemaker}}$
+  <Cite id="bolukbasi2016" />. Downstream systems inherit them.
+- **Static embeddings are context-free.** The same vector serves every sentence. Contextual encoders trained by
+  <NoteLink to="masked-language-modelling">masked language modelling</NoteLink> produce a different vector for each
+  occurrence.

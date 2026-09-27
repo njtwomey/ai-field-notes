@@ -1,0 +1,135 @@
+---
+title: Masked language modelling
+kind: concept
+summary: Masked language modelling corrupts a random 15% of the tokens in a text and trains a bidirectional transformer encoder to predict the originals from the rest. At its optimum the model outputs $p(x_i \mid \text{unmasked tokens})$. BERT introduced it as a pretraining task.
+tags: [deep-learning, representation-learning, self-supervised-learning, nlp, transformer, worked-example]
+aliases: [MLM, BERT, masked LM, cloze task, RoBERTa, span corruption, next sentence prediction]
+requires: [transformer, cross-entropy-and-perplexity]
+partOf: [self-supervised-learning]
+related: [masked-image-modelling, word-embeddings, causal-masking]
+references: [devlin2019, liu2019, raffel2020, reimers2019]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Masked language modelling (MLM) trains a model on unlabelled text. For each sequence $\xvec = (x_1, \dots, x_n)$ a
+random set $\Mcal$ of positions is selected, and the tokens there are corrupted to give $\tilde \xvec$. A bidirectional
+<NoteLink to="transformer">transformer</NoteLink> encoder reads $\tilde \xvec$ and is trained to predict each original
+token:
+
+$$
+\mathcal{L}_{\text{MLM}} = -\expect_{\xvec, \Mcal}\brack{\sum_{i \in \Mcal} \log p_{\thetavec}(x_i \mid \tilde \xvec)}.
+$$
+
+BERT selects 15% of positions and replaces the selected tokens with a `[MASK]` token 80% of the time, a random token 10%
+of the time, and leaves them unchanged 10% of the time <Cite id="devlin2019" />.
+</Definition>
+
+## Intuition
+
+A left-to-right language model predicts each word from the words before it. Its representation of a word can use only
+the left context. Many tasks, such as deciding what "it" refers to or answering a question about a passage, need both
+sides.
+
+A bidirectional encoder cannot be trained as a next-word predictor. Every position attends to every other position,
+including the one it must predict, so after one layer the answer is already in the representation and the task is
+trivial. Masking removes the answer from the input. The model must infer each hidden word from its context on both
+sides, like a reader filling in a cloze test.
+
+## What the model learns
+
+For one masked position $i$, write $\xvec_{\setminus \Mcal}$ for the unmasked tokens. The expected loss at that position
+is the cross-entropy between the true conditional $p(x_i \mid \xvec_{\setminus \Mcal})$ and the model's
+$q(x_i) = p_{\thetavec}(x_i \mid \tilde \xvec)$. Cross-entropy splits as
+
+$$
+\expect_{x_i \sim p}\brack{-\log q(x_i)} = \entropy\paren{p} + \KL\paren{p \,\|\, q}.
+$$
+
+The entropy does not depend on the model, and the <NoteLink to="kl-divergence">KL divergence</NoteLink> is zero only
+when $q = p$. So the best possible model outputs the true conditional distribution of each masked token given the
+unmasked ones.
+
+This differs from a causal language model in two ways. A causal model learns
+$p(x_t \mid x_1, \dots, x_{t-1})$ for every $t$, and the product of these conditionals is the joint probability of the
+sequence. The MLM conditionals for different masked positions are predicted independently given the same unmasked
+tokens, and their product is not the joint distribution of the masked tokens. In "`[MASK]` `[MASK]` is a large city",
+both "New York" and "Los Angeles" fit. Predicted independently, the first position may favour "New" and the second
+"Angeles", and the product of the two conditionals scores "New Angeles" highly. MLM is a representation-learning
+objective, not a generative model.
+
+## Why 80/10/10
+
+Fine-tuning and inference never show the model a `[MASK]` token. If every selected token became `[MASK]`, the model
+would learn that unmasked tokens are always correct and could simply copy them. The representations of ordinary
+tokens would then receive no training signal about their own identity from context, and pretraining would see a
+different input distribution from fine-tuning <Cite id="devlin2019" />.
+
+The random and unchanged cases fix this. The model now cannot tell, from a visible ordinary token, whether it is the
+original.
+
+### Worked example
+
+With a vocabulary of $V = 30{,}522$ WordPiece tokens, as in the released BERT models, consider how often a visible
+token is wrong.
+
+- A position shows an ordinary token (not `[MASK]`) with probability $0.85 + 0.15 \times 0.2 = 0.88$: it was not
+  selected, or it was selected and given the random or unchanged treatment.
+- A position shows a random replacement with probability $0.15 \times 0.1 = 0.015$.
+- Given that a position shows an ordinary token, the chance that it is a random replacement is
+  $0.015 / 0.88 = 1.7\%$. The chance that it was selected for prediction at all is $0.03 / 0.88 = 3.4\%$.
+
+The model must therefore check every visible token against its context, because about one in 60 is wrong. The random
+replacement rate is low enough that the model still mostly sees real text.
+
+For a selected position, the input equals the original token with probability $0.1 + 0.1 / V \approx 0.100$: the
+unchanged case, plus the rare random draw of the original token.
+
+## BERT
+
+BERT pretrained a transformer encoder on MLM and a second task, next sentence prediction: given two segments, predict
+whether the second followed the first in the corpus <Cite id="devlin2019" />. A special `[CLS]` token at the start of
+each input has a final representation used for classification, and `[SEP]` separates the segments. BERT-Base has 12
+layers, width 768 and 12 heads (110 million parameters). BERT-Large has 24 layers, width 1024 and 16 heads (340 million
+parameters). Inputs are at most 512 tokens.
+
+To use BERT on a task, a small output layer is added and the whole network is fine-tuned on labelled data (see
+<NoteLink to="transfer-learning-and-fine-tuning">transfer learning and fine-tuning</NoteLink>). BERT set new results on
+eleven language-understanding benchmarks, including GLUE and SQuAD, this way <Cite id="devlin2019" />.
+
+RoBERTa kept the MLM objective and changed the recipe <Cite id="liu2019" />. It dropped next sentence prediction, which
+did not help. It re-sampled the masked positions each time a sequence was seen (dynamic masking) instead of fixing them
+once during preprocessing. It trained longer, on about ten times as much text, with larger batches. The same
+architecture then matched or exceeded every model published after BERT on the benchmarks reported.
+
+## Variants
+
+- **Span corruption.** T5 replaces contiguous spans of tokens, 15% of tokens in total with a mean span length of 3, by
+  single sentinel tokens, and trains an encoder–decoder to output the missing spans <Cite id="raffel2020" />. The
+  targets are shorter than the input, which saves computation.
+- **Masking rate.** A higher rate gives more predictions per sequence but less context for each. BERT's 15% is a
+  convention, not an optimum derived from theory.
+
+## Cost
+
+Only the selected 15% of positions contribute to the loss. A 512-token sequence yields about $0.15 \times 512 \approx 77$
+predictions, while a causal language model trained on the same sequence makes 512. The encoder still processes all 512
+tokens. MLM therefore extracts less training signal per unit of computation than next-token prediction.
+
+## Assumptions
+
+- The context around a token, on both sides, determines it well enough to make prediction a useful task.
+- Masked positions are chosen uniformly at random. Whole-word and span masking change which predictions are easy.
+
+## Pitfalls
+
+- **Not a text generator.** MLM gives conditionals for masked positions, not a joint distribution over sequences.
+  Sampling text from an MLM model needs special procedures and works poorly compared with a causal model.
+- **Subword leakage.** When a word is split into several WordPiece tokens and only one is masked, the others give it
+  away. Whole-word masking masks all pieces of a word together.
+- **Pretrain–fine-tune mismatch remains.** The `[MASK]` token still appears only in pretraining. The 80/10/10 scheme
+  reduces the mismatch but does not remove it.
+- **Sentence embeddings from `[CLS]`.** Without fine-tuning, the `[CLS]` vector of a pretrained MLM encoder is a weak
+  sentence embedding, worse than averaged GloVe vectors on semantic similarity. Fine-tuning the encoder with a
+  sentence-pair objective fixes this <Cite id="reimers2019" />.

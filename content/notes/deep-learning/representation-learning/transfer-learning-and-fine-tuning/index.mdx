@@ -1,0 +1,162 @@
+---
+title: Transfer learning and fine-tuning
+kind: concept
+summary: Transfer learning reuses a network pretrained on a large source task for a target task. Feature extraction freezes it and trains a new head; fine-tuning updates all weights. LoRA trains a low-rank update $\Wmat_0 + \Bmat \Amat$ with $r(d + k)$ parameters instead of $dk$.
+tags: [deep-learning, representation-learning, fine-tuning, worked-example]
+aliases:
+  [
+    transfer learning,
+    fine-tuning,
+    feature extraction,
+    linear probing then fine-tuning,
+    LP-FT,
+    parameter-efficient fine-tuning,
+    PEFT,
+    LoRA,
+    low-rank adaptation,
+    adapters,
+    catastrophic forgetting,
+  ]
+requires: [backpropagation, gradient-descent]
+related: [self-supervised-learning, embedding-evaluation, masked-language-modelling, data-augmentation]
+references: [yosinski2014, kumar2022, houlsby2019, hu2022, aghajanyan2021, devlin2019, touvron2023]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Transfer learning trains a model for a target task starting from parameters learned on a different source task, usually
+one with far more data. **Feature extraction** freezes the pretrained network and trains only a new output layer (the
+head) on its features. **Fine-tuning** initialises from the pretrained weights and updates all of them, or a chosen
+subset, on the target data. **Parameter-efficient fine-tuning** freezes the pretrained weights and trains a small
+number of added parameters, such as the low-rank update of LoRA <Cite id="hu2022" />.
+</Definition>
+
+## Intuition
+
+Training a deep network from scratch needs a lot of labelled data. Many target tasks have little. A network trained on
+a large dataset has already learned features that are useful beyond its own task: edges and textures in images, syntax
+and word meaning in text. Starting from those features, a small target dataset only has to teach the task-specific
+part.
+
+The more the target resembles the source, the more of the network transfers. Yosinski et al. measured this layer by
+layer. Features in the first layers of an image network were general and transferred between unrelated halves of
+ImageNet with no loss. Features in the last layers were specific to the source classes. Initialising from transferred
+weights and fine-tuning all of them gave better accuracy than training from scratch, even on the same amount of target
+data <Cite id="yosinski2014" />.
+
+## Choosing a strategy
+
+| Strategy            | Trained parameters             | Suits                                           |
+| ------------------- | ------------------------------ | ----------------------------------------------- |
+| Feature extraction  | head only                      | little target data, target close to source      |
+| Partial fine-tuning | last few blocks and head       | moderate data                                   |
+| Full fine-tuning    | all                            | enough data, or target far from source          |
+| LoRA or adapters    | small added modules and head   | large models, many tasks sharing one base model |
+
+Feature extraction is cheap: the features can be computed once and stored, and the head is often a
+<NoteLink to="logistic-regression">logistic regression</NoteLink>, a convex problem. It cannot adapt features that the
+source task did not need. Full fine-tuning can, but it needs a full copy of the model per task and can overfit or
+forget what pretraining learned. Fine-tuning uses a learning rate well below the one used in pretraining, so that the
+weights move only a little from their starting point. BERT fine-tuned all weights for 2 to 4 epochs at learning rates
+between $2 \times 10^{-5}$ and $5 \times 10^{-5}$ <Cite id="devlin2019" />.
+
+## Fine-tuning can distort features
+
+Fine-tuning a pretrained network with a freshly initialised head can do worse than feature extraction on data unlike
+the training set. Kumar et al. explain this with a two-layer linear model <Cite id="kumar2022" />.
+
+Let the network be $\hat y = \vvec^{\tr} \Bmat \xvec$, with feature extractor $\Bmat \in \reals^{k \times d}$ and head
+$\vvec \in \reals^k$, trained on inputs $\xvec_1, \dots, \xvec_n$ with squared error
+$\mathcal{L} = \frac{1}{2} \sum_i (\vvec^{\tr} \Bmat \xvec_i - y_i)^2$. The gradient with respect to the features is
+
+$$
+\frac{\partial \mathcal{L}}{\partial \Bmat} = \sum_{i=1}^{n} (\vvec^{\tr} \Bmat \xvec_i - y_i)\, \vvec \xvec_i^{\tr}.
+$$
+
+Every term is a multiple of $\vvec \xvec_i^{\tr}$, whose rows lie in the span of the training inputs. For any direction
+$\uvec$ orthogonal to all $\xvec_i$, each term gives $\vvec \xvec_i^{\tr} \uvec = \zeros$, so gradient descent never
+changes $\Bmat \uvec$. Fine-tuning changes the features only on the subspace spanned by the training data. Meanwhile the
+head $\vvec$ changes to fit the training data. Inputs with components outside that subspace, such as
+out-of-distribution test data, are then mapped by old, unchanged features into a head that no longer matches them.
+
+The distortion is worst when the head starts far from a good solution, because then the residuals
+$\vvec^{\tr} \Bmat \xvec_i - y_i$, and so the feature gradients, are large. The remedy is **linear probing, then
+fine-tuning** (LP-FT). First train the head with the features frozen. Then fine-tune everything, starting from a head
+that already fits. The residuals are small, the features move less, and Kumar et al. report better out-of-distribution
+accuracy than either method alone <Cite id="kumar2022" />.
+
+## Low-rank adaptation
+
+Large language models have billions of weights. Fine-tuning all of them needs optimiser state for each weight and a
+full copy of the model per task. LoRA freezes each pretrained weight matrix $\Wmat_0 \in \reals^{d \times k}$ and
+learns a low-rank update <Cite id="hu2022" />:
+
+$$
+\hvec = \Wmat_0 \xvec + \frac{\alpha}{r} \Bmat \Amat \xvec, \qquad \Bmat \in \reals^{d \times r},\;
+\Amat \in \reals^{r \times k},\; r \ll \min(d, k).
+$$
+
+The product $\Bmat \Amat$ has rank at most $r$ and $r(d + k)$ parameters, against $dk$ for a full update.
+
+**Why a low-rank update can be enough.** For one input, a linear layer $\hvec = \Wmat \xvec$ with upstream gradient
+$\gvec = \partial \mathcal{L} / \partial \hvec$ has weight gradient $\partial \mathcal{L} / \partial \Wmat = \gvec \xvec^{\tr}$,
+an outer product of rank 1. Each step of fine-tuning on a batch of $B$ examples adds a matrix of rank at most $B$. A
+sum of many steps can have full rank, so this does not prove that the total update is low-rank. It shows that the
+update is built from a limited set of directions in the input and gradient spaces. Empirically, fine-tuning updates
+have low intrinsic dimension: Aghajanyan et al. reached 90% of full fine-tuning performance on a sentence task by
+optimising only a few hundred parameters projected into the full space <Cite id="aghajanyan2021" />. Hu et al. found
+that rank $r$ as low as 1 to 8 matched full fine-tuning on GPT-3 for the tasks they tested <Cite id="hu2022" />.
+
+**Initialisation.** $\Amat$ is initialised randomly and $\Bmat$ to zero, so $\Bmat \Amat = \zeros$ and the model starts
+exactly at its pretrained function. Writing $s = \alpha / r$, the gradients are
+
+$$
+\frac{\partial \mathcal{L}}{\partial \Bmat} = s\, \gvec (\Amat \xvec)^{\tr}, \qquad
+\frac{\partial \mathcal{L}}{\partial \Amat} = s\, \Bmat^{\tr} \gvec \xvec^{\tr}.
+$$
+
+At initialisation $\Bmat = \zeros$, so $\Amat$ receives no gradient and $\Bmat$ does. Training first moves $\Bmat$ in the
+random subspace set by $\Amat$, and $\Amat$ starts to move once $\Bmat$ is nonzero.
+
+**Scaling.** The factor $\alpha / r$ keeps the size of the update roughly the same when $r$ changes, so the learning
+rate need not be retuned for each rank. Hu et al. set $\alpha$ to the first $r$ they tried and did not tune it
+<Cite id="hu2022" />.
+
+**No inference cost.** After training, $\Wmat = \Wmat_0 + (\alpha / r) \Bmat \Amat$ is computed once. The merged model
+has the same shape and speed as the original. Adapter layers, which insert small bottleneck networks between existing
+layers, add depth and so add latency at inference <Cite id="houlsby2019" />. A LoRA model can also be unmerged, and one
+base model can serve many tasks by swapping their small $\Bmat \Amat$ pairs.
+
+### Worked example
+
+Llama 2 7B has 32 layers with attention projections of size $4096 \times 4096$ <Cite id="touvron2023" />. LoRA with
+$r = 8$ on one such matrix trains
+
+$$
+r(d + k) = 8 \times (4096 + 4096) = 65{,}536 \text{ parameters},
+$$
+
+against $4096^2 = 16{,}777{,}216$ for a full update, 256 times fewer. Applied to the query and value projections of all
+32 layers, as in Hu et al.'s default, LoRA trains $2 \times 32 \times 65{,}536 = 4{,}194{,}304$ parameters, 0.06% of the
+model's 6.7 billion. Adam keeps two extra numbers per trained parameter, so its state shrinks by the same factor. The
+frozen weights still have to be stored and run forward and backward.
+
+## Assumptions
+
+- The source and target tasks share useful structure. When they do not, pretrained initialisation can be no better than
+  random.
+- For LoRA, the change needed to adapt the model has low rank in each adapted matrix.
+
+## Pitfalls
+
+- **Learning rate too high.** A pretraining-sized learning rate destroys pretrained features in the first steps. The
+  loss can recover while transfer benefits are lost.
+- **Catastrophic forgetting.** Fine-tuning on a narrow task degrades performance on the source task and on other tasks
+  the model handled before.
+- **Mismatched preprocessing.** Pretrained weights assume the source's input normalisation, image resolution or
+  tokeniser. A mismatch silently reduces accuracy.
+- **Batch normalisation statistics.** With small target batches, the running means and variances of pretrained
+  batch-normalisation layers are best kept frozen.
+- **Evaluation leakage.** Pretraining corpora can contain the target benchmark's test set, which inflates transfer
+  results.

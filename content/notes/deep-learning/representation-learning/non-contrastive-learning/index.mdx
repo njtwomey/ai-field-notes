@@ -1,0 +1,187 @@
+---
+title: Non-contrastive learning
+kind: concept
+summary: Non-contrastive self-supervised methods learn from two views of each input with no negative pairs. Collapse to a constant is avoided by asymmetry and a stop-gradient (BYOL, SimSiam), or by penalising the batch's feature correlations and variances (Barlow Twins, VICReg).
+tags: [deep-learning, representation-learning, self-supervised-learning]
+aliases:
+  [
+    BYOL,
+    bootstrap your own latent,
+    SimSiam,
+    Barlow Twins,
+    VICReg,
+    representational collapse,
+    dimensional collapse,
+    stop-gradient,
+    joint-embedding architecture,
+    redundancy reduction,
+  ]
+requires: [contrastive-learning]
+partOf: [self-supervised-learning]
+references: [grill2020, chen2021, tian2021, zbontar2021, bardes2022, caron2021, he2020]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A non-contrastive (joint-embedding) method trains an encoder so that two augmented views $x_A$ and $x_B$ of the same
+input have similar embeddings $\zvec_A$ and $\zvec_B$, using positive pairs only. Pulling views together is minimised by
+a constant encoder, so every method adds one mechanism against this **collapse**. BYOL and SimSiam use an asymmetric
+architecture with a predictor and a stop-gradient. Barlow Twins and VICReg add terms computed over the batch that
+require each embedding dimension to vary and to be decorrelated from the others.
+</Definition>
+
+## Intuition
+
+<NoteLink to="contrastive-learning">Contrastive learning</NoteLink> needs many negatives, which means large batches or
+a queue. The negatives do one job: they stop every input from mapping to the same point. Non-contrastive methods ask
+whether that job can be done another way.
+
+Two answers work. The first changes the dynamics. One branch predicts the other branch's output, and the other branch
+is held fixed during each update. The target moves only slowly, so a collapsed solution is never pursued directly. The
+second changes the loss. Collapse means the embedding does not vary across inputs, so a term that measures variation
+across the batch can forbid it.
+
+## The collapse problem
+
+Take the loss that only asks views to agree, $\mathcal{L}_{\text{align}} = \expect\brack{\norm{f(x_A) - f(x_B)}^2}$.
+Every term is non-negative, so $\mathcal{L}_{\text{align}} \ge 0$. The constant encoder $f(x) = \cvec$ gives
+$f(x_A) - f(x_B) = \zeros$ for every pair, so it attains the minimum. It is useless: it carries no information about
+the input. Gradient descent on $\mathcal{L}_{\text{align}}$ alone finds it.
+
+A subtler failure is **dimensional collapse**. The embeddings vary, but only within a low-dimensional subspace of
+$\reals^D$. Every coordinate is then a linear function of a few underlying ones, and most of the capacity is wasted.
+
+## Asymmetric methods: BYOL and SimSiam
+
+**BYOL** has an online network with parameters $\thetavec$ (encoder, projector and predictor $q_{\thetavec}$) and a
+target network with parameters $\xivec$ (encoder and projector only) <Cite id="grill2020" />. The online network sees
+view $A$ and predicts the target network's projection of view $B$. With both vectors normalised to unit length, the
+loss is
+
+$$
+\mathcal{L}_{\thetavec} = \norm{\bar q_{\thetavec}(\zvec_A) - \bar \zvec'_B}^2 = 2 - 2 \cos\paren{q_{\thetavec}(\zvec_A), \zvec'_B},
+$$
+
+symmetrised by swapping the views. The gradient updates only $\thetavec$. The target follows as an exponential moving
+average, $\xivec \leftarrow \beta \xivec + (1 - \beta) \thetavec$, with $\beta$ raised from 0.996 towards 1 during
+training. A ResNet-50 trained this way reached 74.3% top-1 ImageNet accuracy under linear evaluation, with no negative
+pairs <Cite id="grill2020" />.
+
+**SimSiam** removes the moving average <Cite id="chen2021" />. Both branches share one encoder $f$ and projector. A
+predictor $h$ is applied on one branch, and the other branch is passed through a stop-gradient, written
+$\operatorname{sg}$, which treats its argument as a constant when differentiating:
+
+$$
+\mathcal{L} = \tfrac12 D\paren{h(\zvec_A), \operatorname{sg}(\zvec_B)} + \tfrac12 D\paren{h(\zvec_B), \operatorname{sg}(\zvec_A)},
+$$
+
+with $D$ the negative cosine similarity. Without the stop-gradient, SimSiam collapsed at once: the standard deviation of
+the normalised outputs across the batch fell to zero and linear-probe accuracy to 0.1%, chance level for 1000 classes
+<Cite id="chen2021" />. Without the predictor it also collapsed.
+
+### What the stop-gradient optimises
+
+Chen and He interpret SimSiam as alternating minimisation of a two-argument loss <Cite id="chen2021" />. Let $\mathcal{T}$
+be a random augmentation, $F_{\thetavec}$ the network, and $\etavec_x$ a free vector for each training image $x$:
+
+$$
+\mathcal{L}(\thetavec, \etavec) = \expect_{x, \mathcal{T}}\brack{\norm{F_{\thetavec}(\mathcal{T}(x)) - \etavec_x}^2}.
+$$
+
+Minimise over $\etavec$ with $\thetavec$ fixed. The loss is a sum of separate quadratics in each $\etavec_x$. Setting the
+derivative $-2\,\expect_{\mathcal{T}}[F_{\thetavec}(\mathcal{T}(x)) - \etavec_x]$ to zero gives
+
+$$
+\etavec_x = \expect_{\mathcal{T}}\brack{F_{\thetavec}(\mathcal{T}(x))},
+$$
+
+the average embedding of $x$ over augmentations. Then minimise over $\thetavec$ with $\etavec$ fixed. Because $\etavec$
+is held constant, no gradient flows into it: this is the stop-gradient. Approximating the expectation by a single
+augmentation, $\etavec_x \approx F_{\thetavec}(\mathcal{T}'(x))$, and taking one gradient step on $\thetavec$ recovers
+SimSiam without the predictor. The predictor $h$ is hypothesised to learn the missing expectation over augmentations,
+since the best predictor of one view's embedding from another's is the conditional mean.
+
+This view explains why the stop-gradient is needed: without it the method is plain gradient descent on
+$\mathcal{L}_{\text{align}}$, which collapses. It does not prove that the alternating scheme avoids collapse, since the
+constant encoder is still a fixed point of it. No general proof exists. For linear networks, Tian et al. show that the
+predictor, the stop-gradient and weight decay together create dynamics in which non-collapsed solutions are stable and
+the predictor aligns with the eigenvectors of the embedding correlation matrix <Cite id="tian2021" />.
+
+## Regularised methods: Barlow Twins and VICReg
+
+These methods use a symmetric architecture and ordinary gradients, and add a term that a collapsed solution cannot
+satisfy.
+
+**Barlow Twins** standardises each embedding dimension over a batch of $B$ inputs to mean 0 and variance 1, then forms
+the $D \times D$ cross-correlation matrix between the two views <Cite id="zbontar2021" />:
+
+$$
+C_{ij} = \frac{1}{B} \sum_{b=1}^{B} z^A_{b,i}\, z^B_{b,j}, \qquad
+\mathcal{L}_{\text{BT}} = \sum_{i=1}^{D} (1 - C_{ii})^2 + \lambda \sum_{i=1}^{D} \sum_{j \ne i} C_{ij}^2.
+$$
+
+Each $C_{ij}$ is the Pearson correlation between dimension $i$ of view $A$ and dimension $j$ of view $B$, so
+$-1 \le C_{ij} \le 1$. The loss is zero exactly when $\Cmat = \eye$.
+
+- **Invariance.** $C_{ii} = 1$ means dimension $i$ of the two views is perfectly correlated across the batch: the two
+  views get the same value up to the standardisation.
+- **No complete collapse.** A correlation of 1 requires dimension $i$ to vary across the batch. A constant embedding
+  has zero variance, so standardisation cannot make it correlate: $C_{ii} = 0$ (implementations add a small $\epsilon$
+  to the variance) and the invariance term equals $D$, its worst non-degenerate value.
+- **No dimensional collapse.** If dimensions $i$ and $j$ carry the same information, they are correlated, and $C_{ij}^2$
+  is large. If the embedding lies on a single line in $\reals^D$, every pair of standardised dimensions has correlation
+  $\pm 1$, and the off-diagonal term equals $\lambda D(D - 1)$.
+
+The off-diagonal term is a redundancy-reduction penalty: each dimension must carry information that the others do not.
+Zbontar et al. used $\lambda = 0.005$ and found that the method benefits from very wide embeddings, with $D$ in the
+thousands <Cite id="zbontar2021" />.
+
+**VICReg** separates the three roles into three terms over embedding batches $\Zmat, \Zmat' \in \reals^{B \times D}$
+<Cite id="bardes2022" />:
+
+$$
+\mathcal{L} = \lambda\, s(\Zmat, \Zmat') + \mu \brack{v(\Zmat) + v(\Zmat')} + \nu \brack{c(\Zmat) + c(\Zmat')}.
+$$
+
+- **Invariance** $s$ is the mean squared distance between paired embeddings.
+- **Variance** $v(\Zmat) = \frac{1}{D} \sum_{j=1}^{D} \max\paren{0, \gamma - \sqrt{\var(\zvec_{:,j}) + \epsilon}}$ is a
+  hinge on the standard deviation of each dimension over the batch, with $\gamma = 1$. A constant encoder has every
+  standard deviation near 0 and pays $\mu \gamma$ per branch. Any encoder whose dimensions each have standard deviation
+  at least $\gamma$ pays nothing. The hinge rules out complete collapse without pushing variances higher than needed.
+- **Covariance** $c(\Zmat) = \frac{1}{D} \sum_{i \ne j} \operatorname{Cov}(\Zmat)_{ij}^2$ penalises off-diagonal
+  covariance and rules out dimensional collapse, as in Barlow Twins.
+
+Bardes et al. used $\lambda = \mu = 25$ and $\nu = 1$. Adding the variance term to other methods, including SimSiam
+without a predictor, prevented their collapse <Cite id="bardes2022" />.
+
+## Comparison
+
+| Method       | Against collapse                           | Needs                                   |
+| ------------ | ------------------------------------------ | --------------------------------------- |
+| BYOL         | predictor, stop-gradient, moving-average target | moving-average schedule            |
+| SimSiam      | predictor, stop-gradient                   | predictor tuning                        |
+| Barlow Twins | cross-correlation driven to the identity   | wide projector, batch statistics        |
+| VICReg       | variance hinge and covariance penalty      | three loss weights, batch statistics    |
+
+Self-distillation methods such as DINO sit between these families. A student network matches the output distribution
+of a moving-average teacher, and the teacher's outputs are centred and sharpened to prevent collapse
+<Cite id="caron2021" />. The moving-average target is the same device MoCo uses to keep its keys consistent
+<Cite id="he2020" />.
+
+## Assumptions
+
+- As in contrastive learning, the augmentations define what the representation ignores. The two views must share the
+  information that later tasks need.
+- Barlow Twins and VICReg estimate correlations and variances from a batch. The batch must be large enough, relative to
+  $D$, for these estimates to be meaningful.
+
+## Pitfalls
+
+- **Silent collapse.** Training loss can look healthy while the embedding has collapsed. Monitor the per-dimension
+  standard deviation of normalised outputs across the batch, which is about $1/\sqrt{D}$ for well-spread embeddings and
+  0 for collapsed ones <Cite id="chen2021" />, and the rank of the embedding covariance.
+- **Fragile hyperparameters.** BYOL and SimSiam depend on the predictor's learning rate, weight decay and the target's
+  moving-average rate. Settings that work for one architecture can collapse on another.
+- **No guarantee from the loss alone.** For BYOL and SimSiam the collapsed solution remains a fixed point. Their
+  success is a property of the training dynamics, not of the minimum of an objective.

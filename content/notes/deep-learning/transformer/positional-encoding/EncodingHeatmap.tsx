@@ -17,11 +17,13 @@ export function EncodingHeatmap() {
   const [logBase, setLogBase] = useState(4)
   const base = 10 ** logBase
   const z = useMemo(() => encoding(positions, d, base), [positions, d, base])
+  const dims = useMemo(() => Array.from({ length: d }, (_, j) => j), [d])
+  const rows = useMemo(() => Array.from({ length: positions }, (_, p) => p), [positions])
 
   return (
     <Interactive
       title="Sinusoidal positional encoding"
-      caption="Each row is one position; each column is one dimension. Low dimensions oscillate fast and high dimensions slowly. A smaller base makes every dimension oscillate faster."
+      caption="Each row is one position t and each column one dimension of the encoding. Columns come in (sin, cos) pairs at a shared frequency. Low dimensions oscillate fast and high dimensions slowly, so each row is a distinct pattern. A smaller base raises every frequency."
       controls={
         <>
           <ParamSlider label="positions" value={positions} onChange={setPositions} min={8} max={64} step={1} />
@@ -39,8 +41,8 @@ export function EncodingHeatmap() {
       }
     >
       <Heatmap
-        x={Array.from({ length: d }, (_, j) => j)}
-        y={Array.from({ length: positions }, (_, p) => p)}
+        x={dims}
+        y={rows}
         z={z}
         scale="diverging"
         range={[-1, 1]}
