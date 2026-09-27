@@ -5,13 +5,14 @@
  *   node scripts/render-check.ts --port 5173 matrix-profile
  *   node scripts/render-check.ts '/browse?c=maths'           # any page path, with a leading slash
  *   node scripts/render-check.ts --save /tmp/dom k-means   # also write each page's DOM to <dir>/<slug>.html
+ *   node scripts/render-check.ts --shot /tmp/png --height 3000 k-means   # also save a PNG screenshot per page
  *
  * This is the only sanctioned way to render pages headlessly. Pages run one at a time, and each Chrome is killed after
  * a hard timeout: `--virtual-time-budget` alone can wait forever on the dev server's open HMR socket, and ad-hoc loops
  * without a kill left browsers stalled for an hour. A timeout is reported as such, never retried.
  */
 import { spawn } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -21,10 +22,14 @@ const TIMEOUT_MS = 30_000
 const args = process.argv.slice(2)
 let port = 5180
 let save: string | undefined
+let shot: string | undefined
+let height = 2400
 const slugs: string[] = []
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--port') port = Number(args[++i])
   else if (args[i] === '--save') save = args[++i]
+  else if (args[i] === '--shot') shot = args[++i]
+  else if (args[i] === '--height') height = Number(args[++i])
   else slugs.push(args[i])
 }
 if (slugs.length === 0) {
@@ -69,6 +74,36 @@ function dump(url: string): Promise<Result> {
   })
 }
 
+/** A PNG of the first `height` pixels of the page, under the same hard timeout. */
+function screenshot(url: string, file: string): Promise<boolean> {
+  const profile = mkdtempSync(join(tmpdir(), 'render-check-'))
+  return new Promise((resolve) => {
+    const chrome = spawn(
+      CHROME,
+      [
+        '--headless=new',
+        '--disable-gpu',
+        '--hide-scrollbars',
+        `--user-data-dir=${profile}`,
+        `--window-size=1400,${height}`,
+        '--virtual-time-budget=10000',
+        `--screenshot=${file}`,
+        url,
+      ],
+      { stdio: 'ignore' },
+    )
+    // Chrome may linger after writing the file; poll for it and kill on sight.
+    const poll = setInterval(() => existsSync(file) && chrome.kill('SIGKILL'), 250)
+    const timer = setTimeout(() => chrome.kill('SIGKILL'), TIMEOUT_MS)
+    chrome.on('close', () => {
+      clearInterval(poll)
+      clearTimeout(timer)
+      rmSync(profile, { recursive: true, force: true })
+      resolve(existsSync(file))
+    })
+  })
+}
+
 const count = (html: string, pattern: RegExp) => html.match(pattern)?.length ?? 0
 
 let failures = 0
@@ -79,6 +114,13 @@ for (const slug of slugs) {
   if (save) {
     mkdirSync(save, { recursive: true })
     writeFileSync(join(save, `${slug.replace(/[^\w-]/g, '_')}.html`), html)
+  }
+  if (shot) {
+    mkdirSync(shot, { recursive: true })
+    const file = join(shot, `${slug.replace(/[^\w-]/g, '_')}.png`)
+    rmSync(file, { force: true })
+    if (!(await screenshot(`http://localhost:${port}/ai-field-notes/${page}`, file)))
+      console.log(`      no screenshot for ${slug}`)
   }
   const problems: string[] = []
   if (timedOut) problems.push(`timed out after ${TIMEOUT_MS / 1000} s`)

@@ -4,6 +4,7 @@ import { ThemeProvider } from '@/components/theme-provider'
 import { AppShell } from '@/components/layout/AppShell'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { BrowsePage, CategoryRedirect } from '@/pages/BrowsePage'
+import { DiagramLabPage } from '@/pages/DiagramLabPage'
 import { HomePage } from '@/pages/HomePage'
 import { NotePage } from '@/pages/NotePage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
@@ -24,6 +25,7 @@ const router = createBrowserRouter(
         { path: 'tags', element: <TagsPage /> },
         { path: 'tags/:tag', element: <TagPage /> },
         { path: 'references', element: <ReferencesPage /> },
+        { path: 'lab/diagrams', element: <DiagramLabPage /> },
         {
           path: 'notation',
           element: (
