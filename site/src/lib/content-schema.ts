@@ -71,6 +71,7 @@ export const categoryIcons = [
   'eye',
   'sliders',
   'library',
+  'flask',
 ] as const
 export type CategoryIcon = (typeof categoryIcons)[number]
 

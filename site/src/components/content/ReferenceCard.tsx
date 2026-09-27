@@ -2,7 +2,7 @@ import { BookOpen, Code2, ExternalLink, FileText, GraduationCap, Newspaper, Vide
 import type { LucideIcon } from 'lucide-react'
 import { formatAuthors, type Reference } from '@/lib/content'
 
-export const referenceIcons: Record<Reference['type'], LucideIcon> = {
+const referenceIcons: Record<Reference['type'], LucideIcon> = {
   paper: FileText,
   blog: Newspaper,
   book: BookOpen,

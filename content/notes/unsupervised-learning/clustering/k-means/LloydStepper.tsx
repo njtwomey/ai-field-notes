@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Interactive,
   ParamChoice,
@@ -11,6 +11,7 @@ import {
 } from '@/components/viz'
 import type { PointCloud2d } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
+import { useDerivedState } from '@/lib/use-derived-state'
 import { CENTRE_INIT_OPTIONS, initialCentres, type CentreInit, type Point } from '@/lib/math/cluster'
 import { assign, step, type State } from './lloyd'
 
@@ -21,15 +22,13 @@ export function LloydStepper() {
   const [k, setK] = useState(3)
   const [init, setInit] = useState<CentreInit>('random')
   const [seed, setSeed] = useState(3)
-  const [state, setState] = useState<State>()
-
-  const reset = () => {
-    if (!points.length) return
+  // Re-initialised whenever the data or a setting changes.
+  const initial = useMemo((): State | undefined => {
+    if (!points.length) return undefined
     const centroids = initialCentres(points, k, init, seed)
-    setState({ centroids, ...assign(points, centroids), iteration: 0, done: false })
-  }
-  // Re-initialise whenever the data or a setting changes.
-  useEffect(reset, [points, k, init, seed]) // eslint-disable-line react-hooks/exhaustive-deps
+    return { centroids, ...assign(points, centroids), iteration: 0, done: false }
+  }, [points, k, init, seed])
+  const [state, setState, reset] = useDerivedState(initial)
 
   if (!data || !state) return null
   // Dragging a centroid starts a new run from the edited centroids: points are reassigned and the count restarts,

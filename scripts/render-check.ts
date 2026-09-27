@@ -3,13 +3,14 @@
  *
  *   node scripts/render-check.ts <slug> [<slug> ...]      # against the dev server on --port (default 5180)
  *   node scripts/render-check.ts --port 5173 matrix-profile
+ *   node scripts/render-check.ts --save /tmp/dom k-means   # also write each page's DOM to <dir>/<slug>.html
  *
  * This is the only sanctioned way to render pages headlessly. Pages run one at a time, and each Chrome is killed after
  * a hard timeout: `--virtual-time-budget` alone can wait forever on the dev server's open HMR socket, and ad-hoc loops
  * without a kill left browsers stalled for an hour. A timeout is reported as such, never retried.
  */
 import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -18,9 +19,11 @@ const TIMEOUT_MS = 30_000
 
 const args = process.argv.slice(2)
 let port = 5180
+let save: string | undefined
 const slugs: string[] = []
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--port') port = Number(args[++i])
+  else if (args[i] === '--save') save = args[++i]
   else slugs.push(args[i])
 }
 if (slugs.length === 0) {
@@ -70,6 +73,10 @@ const count = (html: string, pattern: RegExp) => html.match(pattern)?.length ?? 
 let failures = 0
 for (const slug of slugs) {
   const { html, timedOut } = await dump(`http://localhost:${port}/ai-field-notes/n/${slug}`)
+  if (save) {
+    mkdirSync(save, { recursive: true })
+    writeFileSync(join(save, `${slug}.html`), html)
+  }
   const problems: string[] = []
   if (timedOut) problems.push(`timed out after ${TIMEOUT_MS / 1000} s`)
   else {

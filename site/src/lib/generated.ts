@@ -23,20 +23,22 @@ function fetchJson<T>(relative: string): Promise<T> {
 export type Loadable<T> = { data?: T; error?: Error; loading: boolean }
 
 export function useGeneratedJson<T>(relative: string | undefined): Loadable<T> {
-  const [state, setState] = useState<Loadable<T>>({ loading: !!relative })
+  // Results are keyed by path, so a new path reads as loading without resetting state inside the effect.
+  const [state, setState] = useState<{ relative: string; data?: T; error?: Error }>()
   useEffect(() => {
     if (!relative) return
     let live = true
-    setState({ loading: true })
     fetchJson<T>(relative).then(
-      (data) => live && setState({ data, loading: false }),
-      (error: Error) => live && setState({ error, loading: false }),
+      (data) => live && setState({ relative, data }),
+      (error: Error) => live && setState({ relative, error }),
     )
     return () => {
       live = false
     }
   }, [relative])
-  return state
+  if (!relative) return { loading: false }
+  if (state?.relative !== relative) return { loading: true }
+  return { data: state.data, error: state.error, loading: false }
 }
 
 export const useManifest = () => useGeneratedJson<Manifest>('manifest.json')

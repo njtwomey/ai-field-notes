@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Interactive,
   ParamChoice,
@@ -12,6 +12,7 @@ import {
 } from '@/components/viz'
 import type { PointCloud2d } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
+import { useDerivedState } from '@/lib/use-derived-state'
 import { CENTRE_INIT_OPTIONS, type CentreInit, type Point } from '@/lib/math/cluster'
 import { ellipse, finished, initialise, moveMean, seek, step, type EmState } from './em'
 
@@ -24,13 +25,12 @@ export function EmStepper() {
   const [k, setK] = useState(3)
   const [init, setInit] = useState<CentreInit>('random')
   const [seed, setSeed] = useState(5)
-  const [state, setState] = useState<EmState>()
-
-  const reset = () => {
-    if (points.length) setState(initialise(points, k, init, seed))
-  }
-  // Re-initialise whenever the data or a setting changes.
-  useEffect(reset, [points, k, init, seed]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Re-initialised whenever the data or a setting changes.
+  const initial = useMemo(
+    (): EmState | undefined => (points.length ? initialise(points, k, init, seed) : undefined),
+    [points, k, init, seed],
+  )
+  const [state, setState, reset] = useDerivedState(initial)
 
   const series = useMemo((): XYSeries[] => {
     if (!data || !state) return []

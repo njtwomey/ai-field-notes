@@ -54,11 +54,12 @@ export function SearchCommand() {
   useEffect(() => {
     let live = true
     if (query.trim()) search(query).then((r) => live && setResults(r))
-    else setResults([])
     return () => {
       live = false
     }
   }, [query])
+
+  const shown = query.trim() ? results : []
 
   const go = (slug: string) => {
     setOpen(false)
@@ -101,7 +102,7 @@ export function SearchCommand() {
             <CommandEmpty>No matching notes.</CommandEmpty>
             {query.trim() ? (
               <CommandGroup heading="Results">
-                {results.map((n) => (
+                {shown.map((n) => (
                   <ResultItem key={n.slug} note={n} onSelect={go} />
                 ))}
               </CommandGroup>

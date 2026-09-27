@@ -14,7 +14,7 @@ function loadSource(path: string): Promise<string> {
 }
 
 /** Short file label: path inside the example package. */
-export function fileLabel(example: ExampleIndex, path: string): string {
+function fileLabel(example: ExampleIndex, path: string): string {
   const dir = `python/${example.module.replaceAll('.', '/')}/`
   return path.startsWith(dir) ? path.slice(dir.length) : path
 }

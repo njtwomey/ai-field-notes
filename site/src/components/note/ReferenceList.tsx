@@ -1,5 +1,5 @@
 import { ReferenceCard } from '@/components/content/ReferenceCard'
-import { useSidenotes } from '@/components/content/sidenotes'
+import { useSidenotes } from '@/components/content/sidenotes-context'
 import { noteReferences, type NoteMeta } from '@/lib/content'
 import { cn } from '@/lib/utils'
 

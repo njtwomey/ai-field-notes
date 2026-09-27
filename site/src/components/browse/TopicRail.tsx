@@ -1,6 +1,6 @@
 import { Layers } from 'lucide-react'
 import { Link } from 'react-router'
-import { categoryIcon } from '@/components/layout/category-icon'
+import { TopicIcon } from '@/components/layout/category-icon'
 import { browseUrl, notes, taxonomy, type BrowseParams, type CategoryNode } from '@/lib/content'
 import { cn } from '@/lib/utils'
 import { inCategory } from './filters'
@@ -24,7 +24,6 @@ export function TopicRail({ params, onNavigate }: { params: BrowseParams; onNavi
         <span className="text-xs tabular-nums">{notes.length}</span>
       </Link>
       {taxonomy.map((topic) => {
-        const Icon = categoryIcon(topic.icon)
         const open = params.c === topic.path || params.c?.startsWith(`${topic.path}/`)
         const n = count(topic.path)
         return (
@@ -34,7 +33,7 @@ export function TopicRail({ params, onNavigate }: { params: BrowseParams; onNavi
               onClick={onNavigate}
               className={cn(item(params.c === topic.path), n === 0 && 'opacity-50')}
             >
-              <Icon className="size-4" aria-hidden />
+              <TopicIcon icon={topic.icon} className="size-4" aria-hidden />
               <span className="flex-1">{topic.title}</span>
               <span className="text-xs tabular-nums">{n}</span>
             </Link>

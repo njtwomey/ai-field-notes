@@ -5,7 +5,7 @@ import { references } from '@/lib/content'
 import { cn } from '@/lib/utils'
 import { useCurrentNote } from './note-context'
 import { ReferenceCard } from './ReferenceCard'
-import { useSidenotes } from './sidenotes'
+import { useSidenotes } from './sidenotes-context'
 
 /**
  * Inline citation: `<Cite id="vaswani2017" />` or several keys `<Cite id="a,b" />`. Markers are numbered in first-use

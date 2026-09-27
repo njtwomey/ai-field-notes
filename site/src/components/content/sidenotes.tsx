@@ -4,9 +4,7 @@
  * its note, and hovering a note highlights its markers.
  */
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -19,20 +17,7 @@ import { formatAuthors, references } from '@/lib/content'
 import { cn } from '@/lib/utils'
 import { useCurrentNote } from './note-context'
 import { ReferenceCard } from './ReferenceCard'
-
-type Anchor = { key: string; el: HTMLElement }
-
-type SidenoteContext = {
-  register: (id: string, anchor: Anchor | null) => void
-  anchors: Map<string, Anchor>
-  version: number
-  active: string | null
-  setActive: (key: string | null) => void
-  /** Element whose size changes should trigger a re-layout: the article column. */
-  contentRef: RefObject<HTMLElement | null>
-}
-
-const Context = createContext<SidenoteContext | null>(null)
+import { SidenoteContext, useSidenotes, type Anchor } from './sidenotes-context'
 
 export function SidenoteProvider({
   children,
@@ -41,28 +26,28 @@ export function SidenoteProvider({
   children: ReactNode
   contentRef: RefObject<HTMLElement | null>
 }) {
-  const anchors = useRef(new Map<string, Anchor>())
+  // One map for the provider's lifetime; held in state rather than a ref because the context value exposes it.
+  const [anchors] = useState(() => new Map<string, Anchor>())
   const [version, setVersion] = useState(0)
   const [active, setActive] = useState<string | null>(null)
   const frame = useRef(0)
 
-  const register = useCallback((id: string, anchor: Anchor | null) => {
-    if (anchor) anchors.current.set(id, anchor)
-    else anchors.current.delete(id)
-    // Batch registrations from one render into one layout pass.
-    cancelAnimationFrame(frame.current)
-    frame.current = requestAnimationFrame(() => setVersion((v) => v + 1))
-  }, [])
+  const register = useCallback(
+    (id: string, anchor: Anchor | null) => {
+      if (anchor) anchors.set(id, anchor)
+      else anchors.delete(id)
+      // Batch registrations from one render into one layout pass.
+      cancelAnimationFrame(frame.current)
+      frame.current = requestAnimationFrame(() => setVersion((v) => v + 1))
+    },
+    [anchors],
+  )
 
   const value = useMemo(
-    () => ({ register, anchors: anchors.current, version, active, setActive, contentRef }),
-    [register, version, active, contentRef],
+    () => ({ register, anchors, version, active, setActive, contentRef }),
+    [register, anchors, version, active, contentRef],
   )
-  return <Context.Provider value={value}>{children}</Context.Provider>
-}
-
-export function useSidenotes(): SidenoteContext | null {
-  return useContext(Context)
+  return <SidenoteContext.Provider value={value}>{children}</SidenoteContext.Provider>
 }
 
 type Placed = { id: string; key: string; top: number; first: boolean }
@@ -73,7 +58,7 @@ export function MarginNotes() {
   const note = useCurrentNote()
   const root = useRef<HTMLDivElement>(null)
   const heights = useRef(new Map<string, number>())
-  const [placed, setPlaced] = useState<Placed[]>([])
+  const [layout, setLayout] = useState<{ placed: Placed[]; height: number }>({ placed: [], height: 0 })
   const [tick, setTick] = useState(0)
 
   // Re-layout when the article or the window changes size, and once web fonts have loaded.
@@ -106,22 +91,26 @@ export function MarginNotes() {
       seen.add(key)
       return { id, key, top: Math.round(top), first }
     })
-    setPlaced((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
+    const last = next.at(-1)
+    const height = last ? last.top + (heights.current.get(last.id) ?? 48) : 0
+    setLayout((prev) =>
+      prev.height === height && JSON.stringify(prev.placed) === JSON.stringify(next) ? prev : { placed: next, height },
+    )
   }, [ctx, ctx?.version, tick])
 
   // Heights are known only after the notes render; a change schedules one more layout pass.
-  const measure = (id: string) => (el: HTMLDivElement | null) => {
+  const measure = useCallback((el: HTMLDivElement | null) => {
     if (!el) return
+    const id = el.dataset.id!
     const h = el.offsetHeight
     if (heights.current.get(id) !== h) {
       heights.current.set(id, h)
       requestAnimationFrame(() => setTick((t) => t + 1))
     }
-  }
+  }, [])
 
   if (!ctx) return null
-  const last = placed.at(-1)
-  const height = last ? last.top + (heights.current.get(last.id) ?? 48) : 0
+  const { placed, height } = layout
 
   return (
     <div ref={root} className="relative" style={{ height }} aria-label="Margin references">
@@ -132,7 +121,8 @@ export function MarginNotes() {
         return (
           <div
             key={id}
-            ref={measure(id)}
+            ref={measure}
+            data-id={id}
             onMouseEnter={() => ctx.setActive(key)}
             onMouseLeave={() => ctx.setActive(null)}
             className={cn(

@@ -1,7 +1,7 @@
 import { ArrowRight, ChevronDown, Search, Waypoints } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
-import { categoryIcon } from '@/components/layout/category-icon'
+import { TopicIcon } from '@/components/layout/category-icon'
 import { openSearch } from '@/components/layout/SearchCommand'
 import { Kbd } from '@/components/ui/kbd'
 import { browseUrl, notes, notesInCategory, references, taxonomy, type CategoryNode } from '@/lib/content'
@@ -55,7 +55,6 @@ const TILE_ROWS = 6
 
 function TopicTile({ topic }: { topic: CategoryNode }) {
   const [open, setOpen] = useState(false)
-  const Icon = categoryIcon(topic.icon)
   const extra = topic.children.length - TILE_ROWS
   const shown = open ? topic.children : topic.children.slice(0, TILE_ROWS)
   // Invisible rows pad short tiles to the same height as full ones.
@@ -64,7 +63,7 @@ function TopicTile({ topic }: { topic: CategoryNode }) {
     <div className="flex flex-col rounded-xl border p-5">
       <Link to={browseUrl({ c: topic.path })} className="group mb-3 flex items-center gap-2.5">
         <span className="flex size-8 items-center justify-center rounded-lg bg-muted">
-          <Icon className="size-4" aria-hidden />
+          <TopicIcon icon={topic.icon} className="size-4" aria-hidden />
         </span>
         <span className="flex-1 font-medium group-hover:underline">{topic.title}</span>
         <span className="text-xs text-muted-foreground tabular-nums">{notesInCategory(topic.path).length}</span>

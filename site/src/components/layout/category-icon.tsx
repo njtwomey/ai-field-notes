@@ -1,3 +1,4 @@
+import { createElement } from 'react'
 import {
   Activity,
   AudioWaveform,
@@ -8,6 +9,7 @@ import {
   Cpu,
   Dices,
   Eye,
+  FlaskConical,
   Folder,
   Gamepad2,
   GitFork,
@@ -26,6 +28,7 @@ import {
   TrendingDown,
   Workflow,
   type LucideIcon,
+  type LucideProps,
 } from 'lucide-react'
 import type { CategoryIcon } from '@/lib/content-schema'
 
@@ -55,8 +58,10 @@ const icons: Record<CategoryIcon, LucideIcon> = {
   eye: Eye,
   sliders: SlidersHorizontal,
   library: LibraryBig,
+  flask: FlaskConical,
 }
 
-export function categoryIcon(icon: CategoryIcon | undefined): LucideIcon {
-  return icon ? icons[icon] : Folder
+/** A top-level topic's icon from taxonomy.yaml, or a folder when it has none. */
+export function TopicIcon({ icon, ...props }: { icon: CategoryIcon | undefined } & LucideProps) {
+  return createElement(icon ? icons[icon] : Folder, props)
 }
