@@ -1,6 +1,7 @@
 import { List, Search, Waypoints } from 'lucide-react'
 import { useMemo } from 'react'
 import { Navigate, useParams, useSearchParams } from 'react-router'
+import { CategoryTrail } from '@/components/note/TaxonomyTrail'
 import { ConceptMap } from '@/components/browse/ConceptMap'
 import { filterNotes } from '@/components/browse/filters'
 import { NoteCard } from '@/components/browse/NoteCard'
@@ -70,6 +71,7 @@ export function BrowsePage() {
         <div className="min-w-0 space-y-6">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
+              {params.c && <CategoryTrail path={params.c} className="mb-2 -ml-1" />}
               <h1 className="font-prose text-3xl font-bold">{scopeTitle}</h1>
               <p className="mt-1 text-sm text-muted-foreground">
                 {matches.length} of {notes.length} notes

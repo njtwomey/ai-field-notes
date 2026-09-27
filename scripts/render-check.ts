@@ -3,6 +3,7 @@
  *
  *   node scripts/render-check.ts <slug> [<slug> ...]      # against the dev server on --port (default 5180)
  *   node scripts/render-check.ts --port 5173 matrix-profile
+ *   node scripts/render-check.ts '/browse?c=maths'           # any page path, with a leading slash
  *   node scripts/render-check.ts --save /tmp/dom k-means   # also write each page's DOM to <dir>/<slug>.html
  *
  * This is the only sanctioned way to render pages headlessly. Pages run one at a time, and each Chrome is killed after
@@ -72,10 +73,12 @@ const count = (html: string, pattern: RegExp) => html.match(pattern)?.length ?? 
 
 let failures = 0
 for (const slug of slugs) {
-  const { html, timedOut } = await dump(`http://localhost:${port}/ai-field-notes/n/${slug}`)
+  // A leading slash names a page path (e.g. /browse?c=maths) rather than a note slug.
+  const page = slug.startsWith('/') ? slug.slice(1) : `n/${slug}`
+  const { html, timedOut } = await dump(`http://localhost:${port}/ai-field-notes/${page}`)
   if (save) {
     mkdirSync(save, { recursive: true })
-    writeFileSync(join(save, `${slug}.html`), html)
+    writeFileSync(join(save, `${slug.replace(/[^\w-]/g, '_')}.html`), html)
   }
   const problems: string[] = []
   if (timedOut) problems.push(`timed out after ${TIMEOUT_MS / 1000} s`)

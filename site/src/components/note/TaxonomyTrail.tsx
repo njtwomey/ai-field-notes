@@ -1,6 +1,6 @@
-import { Check, ChevronDown, ChevronRight, LayoutGrid } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, CornerDownRight, LayoutGrid } from 'lucide-react'
 import { Fragment } from 'react'
-import { useNavigate } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -45,15 +45,61 @@ export function TaxonomyTrail({ note, className }: { note: NoteMeta; className?:
   )
 }
 
+/**
+ * A category's place in the taxonomy as the same trail of dropdowns, for the browse page: "All topics", each ancestor,
+ * then the category itself in bold. The last crumb also opens the category's subtopics, so the tree can be walked both
+ * up and down.
+ */
+export function CategoryTrail({ path, className }: { path: string; className?: string }) {
+  const trail = categoryTrail(path)
+  return (
+    <nav aria-label="Breadcrumb" className={cn('flex min-w-0 flex-wrap items-center gap-x-1 text-sm', className)}>
+      <Link to={browseUrl()} className={cn(triggerClass, 'text-muted-foreground')}>
+        All topics
+      </Link>
+      {trail.map((c, i) => (
+        <Fragment key={c.path}>
+          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <CategoryCrumb
+            node={c}
+            siblings={i === 0 ? taxonomy : trail[i - 1].children}
+            current={i === trail.length - 1}
+            className="inline-flex"
+          />
+        </Fragment>
+      ))}
+    </nav>
+  )
+}
+
 const triggerClass =
   'inline-flex min-w-0 items-center gap-0.5 rounded-md px-1 py-0.5 hover:bg-muted hover:text-foreground ' +
   'data-popup-open:bg-muted data-popup-open:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring'
 
-function CategoryCrumb({ node, siblings }: { node: CategoryNode; siblings: CategoryNode[] }) {
+function CategoryCrumb({
+  node,
+  siblings,
+  current = false,
+  className,
+}: {
+  node: CategoryNode
+  siblings: CategoryNode[]
+  /** The category being viewed: set in bold, and its menu also lists its subtopics. */
+  current?: boolean
+  className?: string
+}) {
   const navigate = useNavigate()
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className={cn(triggerClass, 'hidden text-muted-foreground md:inline-flex')}>
+      <DropdownMenuTrigger
+        aria-current={current ? 'page' : undefined}
+        className={cn(
+          triggerClass,
+          'hidden md:inline-flex',
+          current ? 'font-semibold text-foreground' : 'text-muted-foreground',
+          className,
+        )}
+      >
         <span className="truncate">{node.title}</span>
         <ChevronDown className="size-3 shrink-0 opacity-60" aria-hidden />
       </DropdownMenuTrigger>
@@ -64,6 +110,28 @@ function CategoryCrumb({ node, siblings }: { node: CategoryNode; siblings: Categ
             {notesInCategory(node.path).length}
           </span>
         </DropdownMenuItem>
+        {current && node.children.length > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Inside</DropdownMenuLabel>
+              {node.children.map((s) => {
+                const count = notesInCategory(s.path).length
+                return (
+                  <DropdownMenuItem
+                    key={s.path}
+                    onClick={() => navigate(browseUrl({ c: s.path }))}
+                    className={cn(count === 0 && 'text-muted-foreground')}
+                  >
+                    <CornerDownRight />
+                    {s.title}
+                    <span className="ml-auto pl-4 text-xs text-muted-foreground tabular-nums">{count}</span>
+                  </DropdownMenuItem>
+                )
+              })}
+            </DropdownMenuGroup>
+          </>
+        )}
         {siblings.length > 1 && (
           <>
             <DropdownMenuSeparator />
