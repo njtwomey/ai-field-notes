@@ -1,0 +1,172 @@
+---
+title: Root finding
+kind: concept
+summary: 'Root finding solves $f(x) = 0$ iteratively. Bisection halves a sign-changing bracket each step and always converges, linearly. Newton''s method $x_{k+1} = x_k - f(x_k)/f''(x_k)$ converges quadratically near a simple root but can diverge. The secant method has order $1.618$.'
+tags: [numerical-methods, root-finding, iterative-methods, worked-example]
+aliases: [bisection method, Newton–Raphson method, secant method, order of convergence, quadratic convergence, Brent's method]
+requires: [derivative, taylor-series, mean-value-theorem]
+related: [gradient-descent, jacobian, hessian, floating-point-arithmetic, inverse-transform-sampling, logistic-regression, kl-ucb]
+references: [suli2003, press2007, nocedal2006]
+status: draft
+updated: 2026-09-27
+---
+
+import { RootFindingRace } from './RootFindingRace'
+
+<Definition>
+Given a continuous function $f : \reals \to \reals$, **root finding** computes an $x^*$ with $f(x^*) = 0$ by
+generating iterates $x_0, x_1, \dots$ that converge to $x^*$. A method has **order of convergence** $p \ge 1$ if the
+errors $e_k = x_k - x^*$ satisfy
+
+$$
+\lim_{k \to \infty}\frac{\abs{e_{k+1}}}{\abs{e_k}^p} = C
+$$
+
+for a constant $0 < C < \infty$ (with $C < 1$ required when $p = 1$). Order 1 is **linear** convergence and order 2
+**quadratic** convergence <Cite id="suli2003" />.
+</Definition>
+
+## Intuition
+
+Most equations have no closed-form solution. Iterative methods trade exactness for a sequence that approaches the
+root. Two ideas dominate. Bracketing traps the root in an interval and shrinks the interval; it is slow but cannot
+fail. Local models replace $f$ near the current guess by something solvable, such as its tangent line, and jump to
+that model's root; they are fast but need a good start.
+
+The order of convergence measures speed in digits. Linear convergence adds a fixed number of correct digits per
+step. Quadratic convergence doubles the number of correct digits per step.
+
+## Bisection
+
+If $f$ is continuous and $f(a)$ and $f(b)$ have opposite signs, the intermediate value theorem guarantees a root in
+$[a, b]$. Bisection evaluates $f$ at the midpoint $m = (a + b)/2$ and keeps the half on which the sign still changes.
+
+After $k$ steps the bracket has width $(b - a)/2^k$, and its midpoint is within $(b - a)/2^{k+1}$ of a root. The error
+bound halves each step: linear convergence with rate $1/2$, about $0.3$ decimal digits per step. Reaching a tolerance
+$\tau$ takes
+
+$$
+k = \left\lceil\log_2\frac{b - a}{\tau}\right\rceil
+$$
+
+steps, whatever $f$ is. From $[1, 2]$ with $\tau = 10^{-10}$, finding $\sqrt 2$ as the root of $x^2 - 2$ takes 34
+steps. Bisection uses only the sign of $f$, so it cannot find a root where $f$ touches zero without crossing, such as
+the double root of $(x - 1)^2$.
+
+## Newton's method
+
+Newton's method replaces $f$ by its tangent line at $x_k$, $f(x_k) + f'(x_k)(x - x_k)$, and takes the tangent's root
+as the next iterate:
+
+$$
+x_{k+1} = x_k - \frac{f(x_k)}{f'(x_k)}.
+$$
+
+**Quadratic convergence.** Suppose $f$ is twice continuously differentiable near a simple root $x^*$, meaning
+$f'(x^*) \ne 0$. Taylor's theorem with the Lagrange remainder expands $f(x^*)$ around $x_k$:
+
+$$
+0 = f(x^*) = f(x_k) + f'(x_k)(x^* - x_k) + \tfrac12 f''(\xi_k)(x^* - x_k)^2
+$$
+
+for some $\xi_k$ between $x_k$ and $x^*$. Divide by $f'(x_k)$ and rearrange, using the Newton update
+$x_k - f(x_k)/f'(x_k) = x_{k+1}$:
+
+$$
+x_{k+1} - x^* = \frac{f''(\xi_k)}{2f'(x_k)}(x_k - x^*)^2.
+$$
+
+So $e_{k+1} \approx C e_k^2$ with $C = f''(x^*)/(2f'(x^*))$. Once $\abs{Ce_k} < 1$, the error squares at every step.
+The result is local. It holds once $x_k$ is close enough that $f'$ stays away from 0 and $\abs{Ce_k}$ is small.
+
+**Worked example: $\sqrt 2$.** For $f(x) = x^2 - 2$ the update is $x_{k+1} = (x_k + 2/x_k)/2$, the Babylonian method.
+From $x_0 = 1$:
+
+| $k$ | $x_k$              | $\abs{x_k - \sqrt 2}$   |
+| --- | ------------------ | ----------------------- |
+| 1   | 1.5                | $8.6 \times 10^{-2}$    |
+| 2   | 1.416666666666667  | $2.5 \times 10^{-3}$    |
+| 3   | 1.414215686274510  | $2.1 \times 10^{-6}$    |
+| 4   | 1.414213562374690  | $1.6 \times 10^{-12}$   |
+| 5   | 1.414213562373095  | $0$ (to double precision) |
+
+Here $C = 2/(2 \cdot 2\sqrt 2) = 0.354$. The error ratios $e_{k+1}/e_k^2$ are $0.33$, $0.35$ and $0.35$, as predicted.
+
+**Multiple roots.** At a root of multiplicity $m > 1$, $f'(x^*) = 0$ and the argument above fails. For
+$f(x) = (x - x^*)^m g(x)$ with $g(x^*) \ne 0$, the Newton step gives $e_{k+1} \approx (1 - 1/m)e_k$: linear
+convergence. For $(x - 1)^2$ from $x_0 = 2$ the iterates are $1.5, 1.25, 1.125, \dots$, halving the error each step.
+
+**Failure modes.** Far from a root the tangent can point anywhere.
+
+- For $f(x) = x^3 - 2x + 2$ from $x_0 = 0$ the iterates cycle $0, 1, 0, 1, \dots$ forever.
+- For $f(x) = \arctan x$ from $x_0 = 1.5$ the iterates are $-1.69, 2.32, -5.11, 32.3, \dots$ and diverge. From
+  $x_0 = 1.3$ they converge to 0.
+- If $f'(x_k) = 0$ the step is undefined.
+
+**Several variables.** For $\fvec : \reals^n \to \reals^n$, the tangent line becomes the
+<NoteLink to="jacobian">Jacobian</NoteLink> $\Jmat(\xvec_k)$, and each step solves the linear system
+$\Jmat(\xvec_k)\Delta\xvec = -\fvec(\xvec_k)$ and sets $\xvec_{k+1} = \xvec_k + \Delta\xvec$. Minimising a smooth
+function by Newton's method is root finding on its gradient, with the <NoteLink to="hessian">Hessian</NoteLink> as the
+Jacobian <Cite id="nocedal2006" />. Convergence is again quadratic near a root with a non-singular Jacobian.
+
+## The secant method
+
+The secant method replaces $f'(x_k)$ by the slope through the last two iterates:
+
+$$
+x_{k+1} = x_k - f(x_k)\frac{x_k - x_{k-1}}{f(x_k) - f(x_{k-1})}.
+$$
+
+It needs no derivative and one new evaluation of $f$ per step.
+
+**Order $\varphi = (1 + \sqrt 5)/2$.** A Taylor expansion of the same kind as for Newton gives, near a simple root,
+
+$$
+e_{k+1} \approx C e_ke_{k-1}, \qquad C = \frac{f''(x^*)}{2f'(x^*)}.
+$$
+
+Suppose $\abs{e_{k+1}} \approx A\abs{e_k}^p$ for some order $p$. Then $\abs{e_{k-1}} \approx (\abs{e_k}/A)^{1/p}$.
+Substituting into the recurrence, $A\abs{e_k}^p \approx \abs C\abs{e_k}\,(\abs{e_k}/A)^{1/p}$. Matching the powers of
+$\abs{e_k}$ requires $p = 1 + 1/p$, that is $p^2 = p + 1$. The positive root is $p = (1 + \sqrt 5)/2 \approx 1.618$,
+the golden ratio.
+
+From $x_0 = 1$ and $x_1 = 2$ for $x^2 - 2$, the errors are $8.1 \times 10^{-2}$, $1.4 \times 10^{-2}$,
+$4.2 \times 10^{-4}$, $2.1 \times 10^{-6}$, $3.2 \times 10^{-10}$ and then $2 \times 10^{-16}$. Each exponent is roughly the
+sum of the previous two, as $e_{k+1} \approx Ce_ke_{k-1}$ predicts.
+
+**Cost per evaluation.** Newton needs $f$ and $f'$ each step; the secant method needs only $f$. If a derivative costs
+as much as a function value, two secant steps cost the same as one Newton step and improve the order to
+$\varphi^2 = 2.618 > 2$. Per function evaluation, the secant method is faster.
+
+<RootFindingRace />
+
+## Safeguarded methods
+
+Practical solvers combine the reliability of bracketing with the speed of local models. **Brent's method** keeps a
+sign-changing bracket and tries a secant or inverse quadratic interpolation step. It falls back to bisection whenever
+the fast step leaves the bracket or does not shrink it enough <Cite id="press2007" />. It converges whenever bisection
+does, and superlinearly near a simple root. It is the default scalar root finder in most libraries, for example
+SciPy's `brentq`.
+
+## In machine learning
+
+- **Newton's method for logistic regression.** Fitting <NoteLink to="logistic-regression">logistic regression</NoteLink>
+  by Newton's method on the gradient of the log-likelihood (iteratively reweighted least squares) converges in a
+  handful of iterations.
+- **Quantiles.** <NoteLink to="inverse-transform-sampling">Inverse transform sampling</NoteLink> needs $F^{-1}(u)$.
+  When the distribution function $F$ has no closed-form inverse, $F(x) - u = 0$ is solved by bisection or Newton's
+  method.
+- **Confidence bounds.** The <NoteLink to="kl-ucb">KL-UCB</NoteLink> index is the root of a monotone equation in the
+  arm's mean, found by bisection or Newton's method.
+- **Implicit layers.** Deep equilibrium models define a layer's output as a root of $\zvec - g(\zvec, \xvec) = 0$ and
+  solve it with Newton-type methods.
+
+## Pitfalls
+
+- **Stopping on $\abs{f(x_k)}$ alone.** A flat function has small values far from its root. Stop when both the step
+  $\abs{x_{k+1} - x_k}$ and $\abs{f(x_k)}$ are small.
+- **Attainable accuracy.** Near a root, $f(x)$ is computed with an absolute error of about $u$ times the size of its
+  terms. No method can locate the root more accurately than about that error divided by $\abs{f'(x^*)}$. At a double
+  root the attainable accuracy is only about $\sqrt u$.
+- **Unsafeguarded Newton.** Newton's method from an arbitrary start can cycle or diverge. Use a bracket, a line
+  search or a trust region when the start is not known to be close.

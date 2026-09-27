@@ -1,0 +1,148 @@
+---
+title: Numerical stability and conditioning
+kind: concept
+summary: 'Conditioning belongs to a problem: the condition number $\kappa$ bounds how much relative input changes move the output. Stability belongs to an algorithm: a backward-stable one returns the exact answer to a slightly perturbed input. Forward error $\lesssim \kappa \times$ backward error.'
+tags: [numerical-methods, numerical-stability, floating-point, linear-algebra, worked-example]
+aliases: [backward error, forward error, backward stability, backward-stable algorithm, relative condition number, numerical stability]
+requires: [floating-point-arithmetic, derivative]
+related: [condition-number, lu-decomposition, qr-decomposition, cholesky-decomposition, matrix-norms, iterative-linear-solvers]
+references: [higham2002, trefethen1997, golub2013]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $f$ be a problem that maps data $x$ to a solution $f(x)$, and let $\hat f$ be an algorithm that computes it in
+floating-point arithmetic.
+
+- The **relative condition number** of $f$ at $x$ is
+  $\kappa(x) = \lim_{\delta \to 0}\sup_{\norm{\Delta x} \le \delta\norm x}\dfrac{\norm{f(x + \Delta x) - f(x)}/\norm{f(x)}}{\norm{\Delta x}/\norm x}$.
+- The **forward error** of $\hat f$ is $\norm{\hat f(x) - f(x)}/\norm{f(x)}$.
+- The **backward error** of $\hat f$ is the smallest $\norm{\Delta x}/\norm x$ such that $\hat f(x) = f(x + \Delta x)$.
+
+An algorithm is **backward stable** if its backward error is $O(u)$ for every input, where $u$ is the unit roundoff
+<Cite id="trefethen1997" />.
+</Definition>
+
+## Intuition
+
+Two separate things can go wrong in a numerical computation. The problem may be sensitive: tiny changes in the data
+change the answer a lot. No algorithm can fix that, because the data are already uncertain, at least by the rounding
+error of storing them. Or the algorithm may be poor: it introduces errors much larger than the data's own uncertainty.
+
+Conditioning measures the first, stability the second. The backward-error view makes them combine cleanly. A
+backward-stable algorithm returns the exact answer to a question that differs from the one asked by a relative
+amount of order $u$. If the data are only known to that accuracy anyway, the algorithm has done as well as possible.
+
+## Condition numbers
+
+For a differentiable scalar function, a first-order Taylor expansion gives $f(x + \Delta x) - f(x) \approx
+f'(x)\Delta x$. Dividing by $f(x)$ and by $\Delta x/x$,
+
+$$
+\kappa(x) = \abs{\frac{xf'(x)}{f(x)}}.
+$$
+
+- **Multiplication** $f(x) = cx$: $\kappa = 1$. Always well-conditioned.
+- **Square root**: $\kappa = 1/2$.
+- **Subtraction** $f(a, b) = a - b$: $\kappa = (\abs a + \abs b)/\abs{a - b}$, unbounded when $a \approx b$. This is
+  the source of catastrophic cancellation in
+  <NoteLink to="floating-point-arithmetic">floating-point arithmetic</NoteLink>.
+- **Logarithm**: $\kappa = 1/\abs{\log x}$, which is $10^8$ at $x = 1 + 10^{-8}$. Near $x = 1$ the input
+  $1 + \epsilon$ should be passed to `log1p` as $\epsilon$.
+- **Solving $\Amat\xvec = \bvec$**: $\kappa(\Amat) = \norm{\Amat}\norm{\Amat^{-1}}$, the
+  <NoteLink to="condition-number">condition number of the matrix</NoteLink>. In the 2-norm it is the ratio of the
+  largest to the smallest singular value.
+
+A condition number of $10^k$ means that about $k$ significant digits can be lost in the answer.
+
+## Forward error from backward error
+
+Suppose an algorithm is backward stable: $\hat f(x) = f(x + \Delta x)$ with $\norm{\Delta x}/\norm x \le cu$ for a
+modest constant $c$. By the definition of the condition number, to first order,
+
+$$
+\frac{\norm{\hat f(x) - f(x)}}{\norm{f(x)}} = \frac{\norm{f(x + \Delta x) - f(x)}}{\norm{f(x)}} \lesssim
+\kappa(x)\,\frac{\norm{\Delta x}}{\norm x} \le c\,\kappa(x)\,u.
+$$
+
+This is the central rule of thumb of numerical analysis:
+
+$$
+\text{forward error} \lesssim \text{condition number} \times \text{backward error}.
+$$
+
+It splits the analysis in two. Perturbation theory of the problem gives $\kappa$. Rounding-error analysis of the
+algorithm gives the backward error. Neither needs the other <Cite id="higham2002" />.
+
+## Stable and unstable algorithms
+
+Backward-stable algorithms for common problems:
+
+- **Summation and dot products.** Recursive summation computes the exact sum of $x_i(1 + \delta_i)$ with
+  $\abs{\delta_i} \le (n - 1)u$.
+- **Gaussian elimination with partial pivoting** (the <NoteLink to="lu-decomposition">LU decomposition</NoteLink>) is
+  backward stable in practice. Growth of the entries during elimination can in principle be $2^{n-1}$, but it is
+  almost never large <Cite id="trefethen1997" />.
+- **Householder <NoteLink to="qr-decomposition">QR</NoteLink>** and
+  **<NoteLink to="cholesky-decomposition">Cholesky</NoteLink>** factorisations are backward stable.
+
+An unstable algorithm can ruin a well-conditioned problem. Computing $e^{-20}$ from its Taylor series
+$\sum_k(-20)^k/k!$ is an example. The problem is well-conditioned, with $\kappa = 20$. But the series has terms as large
+as $4.3 \times 10^7$ that alternate in sign and cancel to leave $2 \times 10^{-9}$. Each term carries a rounding error of
+about $u \times 4.3 \times 10^7 \approx 5 \times 10^{-9}$, larger than the answer. In double precision the series
+gives $5.0 \times 10^{-9}$ instead of $2.06 \times 10^{-9}$. Computing $1/e^{20}$, a sum of positive terms followed by a
+division, is accurate to full precision.
+
+## Worked example: the Hilbert matrix
+
+The $n \times n$ Hilbert matrix has entries $H_{ij} = 1/(i + j - 1)$. It is symmetric positive definite and badly
+conditioned. Set $\xvec = \ones$, compute $\bvec = \Hmat\xvec$, and solve $\Hmat\hat\xvec = \bvec$ with LU and partial
+pivoting in double precision:
+
+| $n$ | $\kappa_2(\Hmat)$     | $\max_i\abs{\hat x_i - 1}$ | relative residual        |
+| --- | --------------------- | -------------------------- | ------------------------ |
+| 5   | $4.8 \times 10^{5}$   | $1.7 \times 10^{-11}$      | $0$                      |
+| 10  | $1.6 \times 10^{13}$  | $8.5 \times 10^{-4}$       | $9.2 \times 10^{-17}$    |
+| 12  | $1.7 \times 10^{16}$  | $0.14$                     | $5.8 \times 10^{-17}$    |
+
+The relative residual $\norm{\Hmat\hat\xvec - \bvec}/(\norm{\Hmat}\norm{\hat\xvec})$ measures the backward error. It
+stays at the level of $u = 1.1 \times 10^{-16}$ for every $n$: the solver is backward stable. The forward error grows
+with $\kappa$. At $n = 10$, $\kappa u \approx 2 \times 10^{-3}$, and the observed error is $8.5 \times 10^{-4}$. At
+$n = 12$, $\kappa u \approx 2$, and no digit of the solution can be trusted. The algorithm is not at fault; the problem
+has used up the precision.
+
+## Worked example: least squares
+
+Fit a degree-11 polynomial to 50 points on $[0, 1]$ in the monomial basis. The design matrix $\Amat$ ($50 \times 12$)
+has $\kappa(\Amat) = 1.2 \times 10^8$. Two algorithms solve the same problem:
+
+- **Normal equations**, $\Amat^\top\Amat\wvec = \Amat^\top\yvec$. Forming $\Amat^\top\Amat$ squares the condition
+  number, to $1.3 \times 10^{16}$. With exact coefficients equal to 1, the computed coefficients are off by up to
+  $0.22$.
+- **QR**, $\Amat = \Qmat\Rmat$ and $\Rmat\wvec = \Qmat^\top\yvec$. It works with $\Amat$ directly, and the coefficients
+  are off by $1.7 \times 10^{-9}$, consistent with $\kappa(\Amat)u$.
+
+The normal equations are not unstable in the backward sense for the matrix $\Amat^\top\Amat$. They are an unstable
+algorithm for the least-squares problem, because they replace it with a problem whose condition number is the square
+of the original.
+
+## In machine learning
+
+- **Feature scaling.** Features on very different scales make $\Xmat^\top\Xmat$ ill-conditioned. Standardising them
+  improves the conditioning of linear regression and the convergence of gradient methods.
+- **Regularisation.** Ridge regression solves $(\Xmat^\top\Xmat + \lambda\eye)\wvec = \Xmat^\top\yvec$. Adding
+  $\lambda$ raises the smallest eigenvalue, so the condition number falls from $\lambda_{\max}/\lambda_{\min}$ to
+  $(\lambda_{\max} + \lambda)/(\lambda_{\min} + \lambda)$.
+- **Jitter.** Gaussian-process code adds a small multiple of the identity to a kernel matrix before its Cholesky
+  factorisation. The kernel matrix is positive definite in exact arithmetic but can have eigenvalues near $u$ times
+  its norm, which rounding can push negative.
+
+## Pitfalls
+
+- **Small residual is not small error.** A backward-stable solver always gives a small residual. The error in
+  $\xvec$ can still be large when $\kappa$ is large.
+- **Inverting to solve.** Computing $\Amat^{-1}$ and then $\Amat^{-1}\bvec$ costs more and is less accurate than
+  solving with a factorisation.
+- **Squaring the condition number.** Forming $\Amat^\top\Amat$, as the normal equations do, loses twice as many
+  digits as working with $\Amat$.

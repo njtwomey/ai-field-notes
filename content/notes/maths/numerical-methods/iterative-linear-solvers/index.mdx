@@ -1,0 +1,233 @@
+---
+title: Iterative linear solvers
+kind: concept
+summary: 'Iterative solvers approach the solution of $\Amat\xvec = \bvec$ using only matrix-vector products. Jacobi and Gauss–Seidel converge when the spectral radius of their iteration matrix is below 1. Conjugate gradient, for symmetric positive definite $\Amat$, cuts the energy-norm error by $2((\sqrt\kappa - 1)/(\sqrt\kappa + 1))^k$.'
+tags: [numerical-methods, linear-algebra, iterative-methods, optimisation, worked-example]
+aliases: [conjugate gradient method, CG, Jacobi method, Gauss–Seidel method, successive over-relaxation, SOR, Krylov subspace method, preconditioning, preconditioner, stationary iterative method]
+requires: [matrix-vector-product, positive-definite-matrices, eigendecomposition, condition-number]
+related: [gradient-descent, lu-decomposition, cholesky-decomposition, numerical-stability-and-conditioning, spectral-theorem, gaussian-process]
+references: [hestenes1952, shewchuk1994, saad2003, trefethen1997, golub2013]
+status: draft
+updated: 2026-09-27
+---
+
+import { SolverRace } from './SolverRace'
+
+<Definition>
+An **iterative linear solver** computes a sequence $\xvec_0, \xvec_1, \dots$ that converges to the solution $\xvec^*$
+of $\Amat\xvec = \bvec$, where $\Amat$ is $n \times n$ and non-singular. It accesses $\Amat$ only through products
+$\Amat\vvec$ (and, for stationary methods, its diagonal and triangular parts). A **stationary method** splits
+$\Amat = \Mmat - \Nmat$ with $\Mmat$ easy to invert and iterates $\Mmat\xvec_{k+1} = \Nmat\xvec_k + \bvec$. A
+**Krylov method** chooses $\xvec_k$ from $\xvec_0 + \Kcal_k$, where
+$\Kcal_k = \Span\set{\rvec_0, \Amat\rvec_0, \dots, \Amat^{k-1}\rvec_0}$ and $\rvec_0 = \bvec - \Amat\xvec_0$
+<Cite id="saad2003" />.
+</Definition>
+
+## Intuition
+
+Direct methods such as the <NoteLink to="lu-decomposition">LU</NoteLink> or
+<NoteLink to="cholesky-decomposition">Cholesky</NoteLink> decomposition cost $O(n^3)$ operations for a dense matrix.
+For a sparse matrix, elimination fills in zeros, so the factors can be far denser than $\Amat$. A discretised partial
+differential equation or a graph Laplacian can have millions of unknowns and a handful of non-zeros per row. An
+iterative method costs one sparse matrix-vector product per step, $O(\text{nnz}(\Amat))$, and stores only a few
+vectors. It is worthwhile when it converges in far fewer than $n$ steps.
+
+The speed of every method depends on the spectrum of $\Amat$. The number of steps grows with the condition number
+$\kappa$: linearly for the simple stationary methods and as $\sqrt\kappa$ for conjugate gradient.
+
+## Stationary methods: Jacobi and Gauss–Seidel
+
+Write $\Amat = \Dmat + \Lmat + \Umat$, with $\Dmat$ the diagonal and $\Lmat$ and $\Umat$ the strictly lower and upper
+triangular parts.
+
+- **Jacobi** takes $\Mmat = \Dmat$. Each unknown is updated from the previous iterate:
+  $x_i^{(k+1)} = \paren{b_i - \sum_{j \ne i}A_{ij}x_j^{(k)}}/A_{ii}$.
+- **Gauss–Seidel** takes $\Mmat = \Dmat + \Lmat$. It uses each new value as soon as it is computed:
+  $x_i^{(k+1)} = \paren{b_i - \sum_{j < i}A_{ij}x_j^{(k+1)} - \sum_{j > i}A_{ij}x_j^{(k)}}/A_{ii}$.
+
+**Convergence.** The solution satisfies $\Mmat\xvec^* = \Nmat\xvec^* + \bvec$. Subtracting it from the iteration gives
+the error recursion
+
+$$
+\evec_{k+1} = \Gmat\evec_k, \qquad \Gmat = \Mmat^{-1}\Nmat, \qquad \evec_k = \Gmat^k\evec_0.
+$$
+
+$\Gmat^k \to \zeros$ if and only if the spectral radius $\rho(\Gmat)$, the largest eigenvalue modulus, is below 1. The
+error then shrinks by about $\rho(\Gmat)$ per step, so reducing it by a factor $\epsilon$ takes about
+$\log\epsilon/\log\rho(\Gmat)$ steps.
+
+- If $\Amat$ is strictly diagonally dominant, $\abs{A_{ii}} > \sum_{j \ne i}\abs{A_{ij}}$ for every row, then Jacobi
+  converges. The Jacobi matrix $-\Dmat^{-1}(\Lmat + \Umat)$ has row sums of absolute values below 1, so its
+  $\infty$-norm, and hence its spectral radius, is below 1.
+- If $\Amat$ is symmetric positive definite, Gauss–Seidel converges <Cite id="golub2013" />.
+
+**Successive over-relaxation** (SOR) extrapolates each Gauss–Seidel update by a factor $\omega \in (1, 2)$. With the
+best $\omega$, it can reduce the number of steps from $O(\kappa)$ to $O(\sqrt\kappa)$ on model problems.
+
+## Conjugate gradient
+
+Let $\Amat$ be symmetric positive definite. Solving $\Amat\xvec = \bvec$ is then equivalent to minimising the convex
+quadratic
+
+$$
+\phi(\xvec) = \tfrac12\xvec^\top\Amat\xvec - \bvec^\top\xvec,
+$$
+
+whose gradient is $\Amat\xvec - \bvec = -\rvec$, the negative residual. The error is measured in the **energy norm**
+$\norm{\evec}_\Amat = \sqrt{\evec^\top\Amat\evec}$, and $\phi(\xvec) - \phi(\xvec^*) = \frac12\norm{\xvec -
+\xvec^*}_\Amat^2$.
+
+<NoteLink to="gradient-descent">Gradient descent</NoteLink> with exact line search on $\phi$ (steepest descent) zigzags
+across narrow valleys. Its error contracts by $(\kappa - 1)/(\kappa + 1)$ per step in the energy norm. Conjugate
+gradient removes the zigzag by never undoing progress made along earlier directions.
+
+**Conjugate directions.** Vectors $\pvec_0, \dots, \pvec_{n-1}$ are **$\Amat$-conjugate** if $\pvec_i^\top\Amat\pvec_j
+= 0$ for $i \ne j$. They are linearly independent, so the initial error expands as $\xvec^* - \xvec_0 =
+\sum_i\alpha_i\pvec_i$. Multiplying by $\pvec_j^\top\Amat$ isolates one coefficient:
+$\alpha_j = \pvec_j^\top\Amat(\xvec^* - \xvec_0)/\pvec_j^\top\Amat\pvec_j = \pvec_j^\top\rvec_0/\pvec_j^\top\Amat
+\pvec_j$. Adding the terms one at a time, $\xvec_{k+1} = \xvec_k + \alpha_k\pvec_k$, reaches $\xvec^*$ after $n$
+steps. Each step is also an exact line search on $\phi$ along $\pvec_k$, because $\pvec_k^\top\rvec_k =
+\pvec_k^\top\rvec_0$ (the earlier steps change $\rvec$ only along the $\Amat\pvec_j$, which are orthogonal to
+$\pvec_k$).
+
+**The algorithm.** Conjugate gradient builds the directions on the fly from the residuals <Cite id="hestenes1952" />.
+From $\xvec_0$, set $\rvec_0 = \bvec - \Amat\xvec_0$ and $\pvec_0 = \rvec_0$, then repeat:
+
+$$
+\alpha_k = \frac{\rvec_k^\top\rvec_k}{\pvec_k^\top\Amat\pvec_k}, \quad
+\xvec_{k+1} = \xvec_k + \alpha_k\pvec_k, \quad
+\rvec_{k+1} = \rvec_k - \alpha_k\Amat\pvec_k, \quad
+\beta_k = \frac{\rvec_{k+1}^\top\rvec_{k+1}}{\rvec_k^\top\rvec_k}, \quad
+\pvec_{k+1} = \rvec_{k+1} + \beta_k\pvec_k.
+$$
+
+Each step costs one product $\Amat\pvec_k$, two inner products and three vector updates. The new direction is the new
+residual made $\Amat$-conjugate to the previous direction only. That is enough: it is automatically conjugate to all
+earlier ones.
+
+<Derivation title="Why one correction makes the new direction conjugate to all earlier ones">
+By induction, $\Span\set{\pvec_0, \dots, \pvec_k} = \Span\set{\rvec_0, \dots, \rvec_k} = \Kcal_{k+1}$. Because each
+step is an exact line search along conjugate directions, $\xvec_{k+1}$ minimises $\phi$ over $\xvec_0 + \Kcal_{k+1}$.
+At that minimiser the gradient is orthogonal to the subspace: $\rvec_{k+1} \perp \Kcal_{k+1}$. In particular the
+residuals are mutually orthogonal.
+
+For $j < k$, $\Amat\pvec_j$ lies in $\Kcal_{j+2} \subseteq \Kcal_{k+1}$, so $\rvec_{k+1}^\top\Amat\pvec_j = 0$. The
+residual $\rvec_{k+1}$ is therefore already conjugate to $\pvec_0, \dots, \pvec_{k-1}$, and only its component along
+$\pvec_k$ must be removed. The coefficient that removes it is $\beta_k = -\rvec_{k+1}^\top\Amat\pvec_k/\pvec_k^\top
+\Amat\pvec_k$. Substituting $\Amat\pvec_k = (\rvec_k - \rvec_{k+1})/\alpha_k$ and using the orthogonality of the
+residuals gives $\beta_k = \rvec_{k+1}^\top\rvec_{k+1}/(\alpha_k\pvec_k^\top\Amat\pvec_k) = \rvec_{k+1}^\top
+\rvec_{k+1}/\rvec_k^\top\rvec_k$. The same orthogonality gives $\pvec_k^\top\rvec_k = \rvec_k^\top\rvec_k$, the form of
+$\alpha_k$ above.
+</Derivation>
+
+## The convergence bound
+
+Every $\xvec \in \xvec_0 + \Kcal_k$ has error $\xvec - \xvec^* = q(\Amat)(\xvec_0 - \xvec^*)$ for a polynomial $q$ of
+degree at most $k$ with $q(0) = 1$. Conjugate gradient picks the best such $\xvec$ in the energy norm. Expand the
+initial error in the orthonormal eigenvectors of $\Amat$, with eigenvalues $\lambda_i$. Then $\norm{q(\Amat)\evec_0}_\Amat^2 =
+\sum_i q(\lambda_i)^2\lambda_ic_i^2$, where $c_i$ are the coefficients, and
+
+$$
+\frac{\norm{\evec_k}_\Amat}{\norm{\evec_0}_\Amat} \le \min_{q(0) = 1,\ \deg q \le k}\ \max_i\abs{q(\lambda_i)}.
+$$
+
+Two consequences follow. If $\Amat$ has only $d$ distinct eigenvalues, the polynomial $\prod_{j=1}^d(1 -
+\lambda/\lambda_j)$ vanishes on all of them, so conjugate gradient terminates in $d$ steps. And if the eigenvalues lie
+in $[\lambda_{\min}, \lambda_{\max}]$ with $\kappa = \lambda_{\max}/\lambda_{\min}$, a shifted Chebyshev polynomial
+gives
+
+$$
+\frac{\norm{\evec_k}_\Amat}{\norm{\evec_0}_\Amat} \le 2\paren{\frac{\sqrt\kappa - 1}{\sqrt\kappa + 1}}^k.
+$$
+
+<Derivation title="The Chebyshev bound">
+The Chebyshev polynomial $T_k$ satisfies $\abs{T_k(z)} \le 1$ on $[-1, 1]$ and $T_k(z) = \frac12\brack{(z +
+\sqrt{z^2 - 1})^k + (z - \sqrt{z^2 - 1})^k} \ge \frac12(z + \sqrt{z^2 - 1})^k$ for $z > 1$. Map
+$[\lambda_{\min}, \lambda_{\max}]$ onto $[-1, 1]$ by $z(\lambda) = (\lambda_{\max} + \lambda_{\min} -
+2\lambda)/(\lambda_{\max} - \lambda_{\min})$, and take $q(\lambda) = T_k(z(\lambda))/T_k(z(0))$, so that $q(0) = 1$.
+On the eigenvalues $\abs{q} \le 1/T_k(z_0)$ with $z_0 = z(0) = (\kappa + 1)/(\kappa - 1)$. Then
+
+$$
+z_0 + \sqrt{z_0^2 - 1} = \frac{\kappa + 1 + 2\sqrt\kappa}{\kappa - 1} = \frac{(\sqrt\kappa + 1)^2}{(\sqrt\kappa -
+1)(\sqrt\kappa + 1)} = \frac{\sqrt\kappa + 1}{\sqrt\kappa - 1},
+$$
+
+so $1/T_k(z_0) \le 2\paren{(\sqrt\kappa - 1)/(\sqrt\kappa + 1)}^k$ <Cite id="trefethen1997" />.
+</Derivation>
+
+For large $\kappa$ the factor per step is about $1 - 2/\sqrt\kappa$, so reducing the error by $\epsilon$ takes about
+$\frac12\sqrt\kappa\log(2/\epsilon)$ steps. Steepest descent, Jacobi and Gauss–Seidel need $O(\kappa)$ steps on the
+same problems. When $\kappa = 10^4$, that is the difference between hundreds and tens of thousands of steps.
+
+<SolverRace />
+
+## Worked example: a $2 \times 2$ system
+
+Solve
+
+$$
+\begin{bmatrix} 4 & 1 \\ 1 & 3 \end{bmatrix}\xvec = \begin{bmatrix} 1 \\ 2 \end{bmatrix}, \qquad
+\xvec^* = \paren{\tfrac{1}{11}, \tfrac{7}{11}} = (0.0909, 0.6364),
+$$
+
+from $\xvec_0 = \zeros$.
+
+- **Jacobi:** $x_1 \leftarrow (1 - x_2)/4$ and $x_2 \leftarrow (2 - x_1)/3$, both from the old values. The iterates are
+  $(0.250, 0.667)$, $(0.083, 0.583)$, $(0.104, 0.639)$, $(0.090, 0.632)$. The iteration matrix has eigenvalues
+  $\pm 1/\sqrt{12} = \pm 0.289$, so each step shrinks the error by about $0.29$.
+- **Gauss–Seidel:** the second update uses the new $x_1$. The iterates are $(0.250, 0.583)$, $(0.104, 0.632)$,
+  $(0.092, 0.636)$. Its spectral radius is $1/12 = 0.083$, the square of Jacobi's.
+- **Conjugate gradient:** $\rvec_0 = \pvec_0 = (1, 2)$ and $\Amat\pvec_0 = (6, 7)$, so $\alpha_0 = 5/20 = 0.25$,
+  $\xvec_1 = (0.25, 0.5)$ and $\rvec_1 = (-0.5, 0.25)$. Then $\beta_0 = 0.3125/5 = 0.0625$ and $\pvec_1 = (-0.4375,
+  0.375)$. The second step, with $\alpha_1 = 0.364$, lands exactly on $\xvec^* = (0.0909, 0.6364)$: two steps for two
+  unknowns.
+
+## Worked example: the Poisson equation
+
+Discretise $-\nabla^2u = f$ on the unit square with a $30 \times 30$ grid of unknowns and the five-point stencil. The
+matrix has $n = 900$ rows, at most five non-zeros per row, and $\kappa = 389$. To reduce the energy-norm error by
+$10^6$ from a random right-hand side:
+
+| Method              | Predicted steps                               | Observed |
+| ------------------- | --------------------------------------------- | -------- |
+| Jacobi              | $\log 10^{-6}/\log\cos(\pi/31) = 2\,686$      | $2\,469$ |
+| Gauss–Seidel        | half of Jacobi, $1\,343$                      |          |
+| Conjugate gradient  | bound $2(\dots)^k \le 10^{-6}$ at $k = 143$   | $80$     |
+
+The bound for conjugate gradient is pessimistic, because it assumes the worst spread of eigenvalues. The number of
+steps for Jacobi grows like $m^2$ for an $m \times m$ grid, and for conjugate gradient like $m$.
+
+## Preconditioning
+
+The number of steps depends on $\kappa$, so the practical question is how to reduce it. A **preconditioner** is a
+symmetric positive definite $\Mmat \approx \Amat$ whose systems $\Mmat\zvec = \rvec$ are cheap to solve. Preconditioned
+conjugate gradient runs the same iteration on the transformed system and converges at the rate set by
+$\kappa(\Mmat^{-1}\Amat)$. Common choices are the diagonal of $\Amat$ (Jacobi preconditioning), incomplete Cholesky
+factorisations that drop fill-in, and multigrid cycles. A good preconditioner can make the number of steps nearly
+independent of the problem size <Cite id="saad2003" />.
+
+## Beyond symmetric positive definite systems
+
+- **GMRES** minimises the residual over the Krylov subspace for any non-singular $\Amat$. It must store every
+  direction, so it is restarted after a fixed number of steps.
+- **MINRES** handles symmetric indefinite systems with short recurrences.
+- **BiCGSTAB** handles non-symmetric systems with short recurrences, at the price of irregular convergence.
+
+## In machine learning
+
+- **Gaussian processes.** Exact <NoteLink to="gaussian-process">Gaussian-process</NoteLink> inference needs
+  $(\Kmat + \sigma^2\eye)^{-1}\yvec$. Conjugate gradient needs only kernel matrix-vector products, which run in batches
+  on GPUs and scale to far larger $n$ than a Cholesky factorisation.
+- **Newton-CG.** Second-order optimisers solve the Newton system $\Hmat\Delta\wvec = -\gvec$ approximately with a few
+  conjugate gradient steps, using Hessian-vector products from automatic differentiation instead of forming $\Hmat$.
+- **Least squares.** Conjugate gradient on the normal equations, in the numerically safer forms CGLS and LSQR, solves
+  large sparse regression problems.
+
+## Pitfalls
+
+- **Conjugate gradient needs symmetric positive definite $\Amat$.** On an indefinite or non-symmetric matrix it can
+  break down or diverge.
+- **Loss of orthogonality.** In floating-point arithmetic the residuals gradually lose orthogonality. Convergence is
+  delayed rather than destroyed, but finite termination in $n$ steps does not hold in practice.
+- **Stopping on the residual.** A small residual $\norm{\rvec_k}$ bounds the error only up to a factor
+  $\kappa$: $\norm{\evec_k}/\norm{\xvec^*} \le \kappa\norm{\rvec_k}/\norm{\bvec}$.

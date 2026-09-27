@@ -1,0 +1,165 @@
+---
+title: Hoeffding's inequality
+kind: concept
+summary: 'Hoeffding''s inequality bounds the deviation of a sum of independent bounded variables $X_i \in [a_i, b_i]$ from its mean: $\prob(S_n - \expect S_n \ge s) \le \exp(-2s^2/\sum_i(b_i - a_i)^2)$. For a mean of $n$ draws in $[0, 1]$ the deviation exceeds $\epsilon$ with probability at most $e^{-2n\epsilon^2}$.'
+tags: [probability, limit-theorems, concentration, tail-bounds, learning-theory, worked-example]
+aliases: [Hoeffding bound, Hoeffding's lemma, Hoeffding inequality for bounded variables]
+requires: [chernoff-bounds, markov-and-chebyshev-inequalities, independence]
+related: [mcdiarmids-inequality, law-of-large-numbers, pac-learning, ucb1, central-limit-theorem]
+references: [hoeffding1963, boucheron2013, shalevshwartz2014]
+status: draft
+updated: 2026-09-27
+---
+
+import { BoundsVsN } from './BoundsVsN'
+
+<Definition>
+Let $X_1, \dots, X_n$ be independent with $a_i \le X_i \le b_i$ almost surely, and let $S_n = \sum_{i=1}^n X_i$. For
+every $s > 0$,
+
+$$
+\prob(S_n - \expect S_n \ge s) \le \exp\paren{-\frac{2s^2}{\sum_{i=1}^n (b_i - a_i)^2}}.
+$$
+
+The same bound holds for $\prob(S_n - \expect S_n \le -s)$. If every $X_i \in [a, b]$ and $\bar X_n = S_n/n$, then
+$\prob(\abs{\bar X_n - \expect\bar X_n} \ge \epsilon) \le 2\exp(-2n\epsilon^2/(b - a)^2)$ <Cite id="hoeffding1963" />.
+</Definition>
+
+## Intuition
+
+A variable confined to an interval of width $b - a$ has variance at most $(b - a)^2/4$. Hoeffding's inequality says
+that such a variable also has tails no heavier than a Gaussian with that variance. The mean of $n$ bounded draws then
+behaves, in its tails, like a Gaussian with standard deviation $(b - a)/(2\sqrt n)$. The bound is non-asymptotic: it
+holds at every $n$, with no approximation.
+
+The only inputs are the ranges. The bound needs no knowledge of the distributions beyond their support, which makes it
+the default tool when a quantity is an average of bounded losses, rewards or indicators.
+
+## Hoeffding's lemma
+
+The inequality follows from a bound on the moment-generating function of one bounded variable.
+
+**Lemma.** If $\expect[X] = 0$ and $a \le X \le b$, then $\expect[e^{tX}] \le e^{t^2(b - a)^2/8}$ for every $t \in
+\reals$.
+
+**Proof.** The function $x \mapsto e^{tx}$ is convex, so on $[a, b]$ it lies below the chord joining its endpoint
+values:
+
+$$
+e^{tx} \le \frac{b - x}{b - a}e^{ta} + \frac{x - a}{b - a}e^{tb}, \qquad a \le x \le b.
+$$
+
+Taking expectations and using $\expect[X] = 0$ gives $\expect[e^{tX}] \le \frac{b}{b - a}e^{ta} - \frac{a}{b - a}
+e^{tb}$. Write $\theta = -a/(b - a)$, which lies in $[0, 1]$ because $a \le 0 \le b$, and $h = t(b - a)$. Then the
+right side equals $e^{L(h)}$ with
+
+$$
+L(h) = -\theta h + \log\paren{1 - \theta + \theta e^h}.
+$$
+
+Direct differentiation gives $L(0) = 0$, $L'(0) = 0$, and
+
+$$
+L''(h) = \frac{\theta e^h}{1 - \theta + \theta e^h}\paren{1 - \frac{\theta e^h}{1 - \theta + \theta e^h}} = u(1 - u)
+\le \frac14,
+$$
+
+where $u$ is a number in $[0, 1]$. Taylor's theorem with the Lagrange remainder gives $L(h) = L(0) + hL'(0) +
+\frac{h^2}{2}L''(\xi) \le h^2/8$ for some $\xi$ between 0 and $h$. Hence $\expect[e^{tX}] \le e^{h^2/8} =
+e^{t^2(b - a)^2/8}$.
+
+## Proof of the inequality
+
+Apply the <NoteLink to="chernoff-bounds">Chernoff bound</NoteLink> to $S_n - \expect S_n$. For $t > 0$, Markov's
+inequality on $e^{t(S_n - \expect S_n)}$ and independence give
+
+$$
+\prob(S_n - \expect S_n \ge s) \le e^{-ts}\prod_{i=1}^n\expect\brack{e^{t(X_i - \expect X_i)}}.
+$$
+
+Each centred variable $X_i - \expect X_i$ has mean 0 and lies in an interval of width $b_i - a_i$, so the lemma bounds
+each factor:
+
+$$
+\prob(S_n - \expect S_n \ge s) \le \exp\paren{-ts + \frac{t^2}{8}\sum_{i=1}^n(b_i - a_i)^2}.
+$$
+
+The exponent is a quadratic in $t$, minimised at $t = 4s/\sum_i(b_i - a_i)^2$. Substituting this $t$ gives the
+exponent $-2s^2/\sum_i(b_i - a_i)^2$. The lower tail follows by applying the result to $-X_i$, and the two-sided bound
+adds the two.
+
+## Comparison with Chebyshev
+
+For the mean of $n$ draws in $[0, 1]$, Chebyshev's inequality with the worst-case variance $1/4$ gives
+$\prob(\abs{\bar X_n - \mu} \ge \epsilon) \le 1/(4n\epsilon^2)$, and Hoeffding gives $2e^{-2n\epsilon^2}$. Setting each
+bound equal to $\delta$ and solving for $n$:
+
+$$
+n_{\text{Chebyshev}} = \frac{1}{4\delta\epsilon^2}, \qquad n_{\text{Hoeffding}} = \frac{\log(2/\delta)}{2\epsilon^2}.
+$$
+
+The dependence on the accuracy $\epsilon$ is the same, $1/\epsilon^2$. The dependence on the confidence is $1/\delta$
+for Chebyshev and $\log(1/\delta)$ for Hoeffding. High confidence is cheap under Hoeffding and expensive under
+Chebyshev. The ratio of the two sample sizes is $n_{\text{Chebyshev}}/n_{\text{Hoeffding}} =
+1/(2\delta\log(2/\delta))$. It is $2.7$ at $\delta = 0.05$ and about $34\,000$ at $\delta = 10^{-6}$.
+
+<BoundsVsN />
+
+## Worked example: estimating a coin's bias
+
+How many flips guarantee $\abs{\bar X_n - p} < 0.01$ with probability at least $0.95$? Hoeffding with $b - a = 1$
+requires $2e^{-2n(0.01)^2} \le 0.05$:
+
+$$
+n \ge \frac{\log(2/0.05)}{2 \times 10^{-4}} = \frac{3.689}{2 \times 10^{-4}} = 18\,445.
+$$
+
+Chebyshev requires $n \ge 50\,000$ for the same guarantee. The normal approximation suggests $9\,604$ but is not a
+guarantee. The gap between $18\,445$ and $9\,604$ is the price of a bound that holds for every $n$ and every $p$.
+
+Read in the other direction, $n$ observations in $[0, 1]$ give the confidence interval
+
+$$
+\bar X_n \pm \sqrt{\frac{\log(2/\delta)}{2n}},
+$$
+
+which covers $\expect[\bar X_n]$ with probability at least $1 - \delta$. With $n = 10\,000$ test examples and
+$\delta = 0.05$, a measured accuracy is within $\pm 0.0136$ of the true accuracy.
+
+## In machine learning
+
+- **Test-set error.** A model's test error is a mean of $n$ indicator losses, so it is within
+  $\sqrt{\log(2/\delta)/(2n)}$ of the true error with probability $1 - \delta$, provided the model was chosen without
+  looking at the test set.
+- **Finite hypothesis classes.** Hoeffding's inequality for each hypothesis, combined with a union bound over
+  $\abs{\Hcal}$ hypotheses, gives the <NoteLink to="pac-learning">PAC</NoteLink> bound: with probability
+  $1 - \delta$, every $h \in \Hcal$ has $\abs{\hat R(h) - R(h)} \le \sqrt{(\log\abs{\Hcal} + \log(2/\delta))/(2n)}$
+  <Cite id="shalevshwartz2014" />.
+- **Bandits.** <NoteLink to="ucb1">UCB1</NoteLink> adds $\sqrt{2\log t/n_a}$ to each arm's mean reward, a Hoeffding
+  radius at a confidence level that tightens with time.
+
+## Refinements
+
+- **Variance-aware bounds.** Hoeffding's inequality ignores the variance. When $\var(X_i) = \sigma^2$ is much smaller
+  than $(b - a)^2/4$, Bernstein's inequality, $\prob(\bar X_n - \mu \ge \epsilon) \le
+  \exp\paren{-n\epsilon^2/(2\sigma^2 + 2(b - a)\epsilon/3)}$, is much tighter <Cite id="boucheron2013" />.
+- **Martingales.** The Azuma–Hoeffding inequality replaces independence with martingale differences bounded in
+  intervals of the same widths, with the same exponent.
+- **Functions of many variables.** <NoteLink to="mcdiarmids-inequality">McDiarmid's inequality</NoteLink> extends the
+  bound from sums to any function that changes by a bounded amount when one input changes.
+- **Sampling without replacement.** Hoeffding showed that the same bound holds for the mean of a sample drawn without
+  replacement from a finite population <Cite id="hoeffding1963" />.
+
+## Assumptions
+
+- **Bounded support**, known in advance. Unbounded variables need a moment-generating-function condition instead,
+  such as sub-Gaussian tails.
+- **Independence**, or a martingale structure. For dependent sequences such as Markov chain samples, the effective
+  sample size is smaller.
+
+## Pitfalls
+
+- **Loose when the variance is small.** For rare events ($p$ near 0) the Bernoulli variance $p(1 - p)$ is far below
+  $1/4$, and Bernstein's or the Chernoff KL bound can be orders of magnitude tighter.
+- **Data-dependent choices break it.** The bound holds for a fixed function of the data. Selecting the best of many
+  models on the same data requires a union bound or a uniform bound.

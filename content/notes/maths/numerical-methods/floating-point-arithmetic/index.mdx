@@ -1,0 +1,160 @@
+---
+title: Floating-point arithmetic
+kind: concept
+summary: 'Floating-point numbers store a sign, a $p$-bit significand and an exponent. Each stored value and each operation is exact up to a factor $1 + \delta$ with $\abs{\delta} \le u = 2^{-p}$, about $10^{-16}$ in double precision. Subtracting nearly equal numbers magnifies earlier errors.'
+tags: [numerical-methods, floating-point, numerical-stability, worked-example]
+aliases: [IEEE 754, machine epsilon, unit roundoff, rounding error, catastrophic cancellation, double precision, single precision, subnormal numbers, Kahan summation]
+requires: [exponential-and-logarithm]
+related: [numerical-stability-and-conditioning, softmax-and-log-sum-exp, mixed-precision-training, condition-number, variance-and-covariance]
+references: [goldberg1991, higham2002, ieee2019, kahan1965, chan1983]
+status: draft
+updated: 2026-09-27
+---
+
+import { CancellationErrors } from './CancellationErrors'
+
+<Definition>
+A binary **floating-point number** with precision $p$ is
+
+$$
+x = (-1)^s \times (1.b_1b_2\dots b_{p-1})_2 \times 2^e,
+$$
+
+with sign bit $s$, significand bits $b_i$ and an integer exponent $e$ in a fixed range $[e_{\min}, e_{\max}]$. The
+**IEEE 754** standard fixes the formats and requires every basic operation ($+$, $-$, $\times$, $\div$, $\sqrt{\ }$)
+to return the exact result rounded to a representable number, by default to the nearest <Cite id="ieee2019" />. The
+**machine epsilon** $\epsilon_{\text{mach}} = 2^{1-p}$ is the gap between 1 and the next larger number, and the **unit
+roundoff** is $u = \epsilon_{\text{mach}}/2 = 2^{-p}$.
+</Definition>
+
+## Intuition
+
+A floating-point number is scientific notation in base 2 with a fixed number of significant digits. Double precision
+keeps 53 significant bits, about 16 decimal digits, whether the number is $10^{-300}$ or $10^{300}$. The absolute
+spacing between neighbouring numbers therefore grows with their size, while the relative spacing stays near
+$10^{-16}$.
+
+Every operation rounds its result to the nearest representable number. One rounding is harmless. Trouble comes from
+steps that turn small absolute errors into large relative ones. Subtracting two nearly equal numbers is the main
+culprit.
+
+## The formats
+
+| Format                | Precision $p$ | $\epsilon_{\text{mach}}$           | Largest                | Smallest normal         |
+| --------------------- | ------------- | ---------------------------------- | ---------------------- | ----------------------- |
+| binary64 (double)     | 53            | $2^{-52} \approx 2.2 \times 10^{-16}$ | $1.8 \times 10^{308}$ | $2.2 \times 10^{-308}$ |
+| binary32 (single)     | 24            | $2^{-23} \approx 1.2 \times 10^{-7}$  | $3.4 \times 10^{38}$  | $1.2 \times 10^{-38}$  |
+| binary16 (half)       | 11            | $2^{-10} \approx 9.8 \times 10^{-4}$  | $65\,504$             | $6.1 \times 10^{-5}$   |
+| bfloat16              | 8             | $2^{-7} \approx 7.8 \times 10^{-3}$   | $3.4 \times 10^{38}$  | $1.2 \times 10^{-38}$  |
+
+The leading bit of a normal significand is always 1, so it is not stored: double precision stores 52 fraction bits, an
+11-bit exponent and a sign. bfloat16 keeps the 8-bit exponent of single precision and cuts the significand to 8 bits,
+trading precision for range. Below the smallest normal number, **subnormal** numbers drop the leading 1 and fill the
+gap down to 0 with evenly spaced values, at reduced precision. Overflow gives $\pm\infty$, and invalid operations such
+as $0/0$ or $\infty - \infty$ give NaN ("not a number").
+
+## Rounding error
+
+**Representation.** Take a real $x$ with $2^e \le \abs x < 2^{e+1}$, inside the normal range. The representable numbers
+in that interval are spaced $2^{e-p+1}$ apart. Rounding to the nearest moves $x$ by at most half a spacing,
+$2^{e-p}$. Relative to $\abs x \ge 2^e$, the error is at most $2^{-p} = u$. So the rounded value is
+
+$$
+\operatorname{fl}(x) = x(1 + \delta), \qquad \abs\delta \le u.
+$$
+
+**Operations.** Because IEEE 754 rounds the exact result of each operation, the same bound holds for every basic
+operation. This is the **standard model** of floating-point arithmetic <Cite id="higham2002" />:
+
+$$
+\operatorname{fl}(x \mathbin{\text{op}} y) = (x \mathbin{\text{op}} y)(1 + \delta), \qquad \abs\delta \le u,
+\qquad \text{op} \in \set{+, -, \times, \div}.
+$$
+
+Error analysis of an algorithm chains these factors. A product of $n$ numbers carries at most $n - 1$ factors
+$(1 + \delta_i)$, so its relative error is at most about $(n - 1)u$. Rounding errors of a long computation usually
+partly cancel, so the typical error grows more like $\sqrt n\,u$.
+
+**Decimal fractions are not exact.** The number $0.1$ has the infinite binary expansion $0.000110011001\dots_2$. The
+nearest double is $0.1000000000000000055511\dots$, and $0.1 + 0.2$ evaluates to $0.30000000000000004$, which is not the
+double nearest to $0.3$. Floating-point results should be compared with a tolerance, never with $=$.
+
+**Arithmetic is not associative.** In double precision $(0.1 + 0.2) + 0.3 = 0.6000000000000001$ while
+$0.1 + (0.2 + 0.3) = 0.6$. The order of a sum changes its value. Parallel reductions on GPUs add in an order that can
+vary from run to run, which makes results non-deterministic in the last bits.
+
+## Catastrophic cancellation
+
+Subtraction of exact numbers is exact up to one rounding. The danger is subtracting numbers that already carry errors.
+Suppose $\hat a = a(1 + \delta_a)$ and $\hat b = b(1 + \delta_b)$ with $\abs{\delta_a}, \abs{\delta_b} \le \delta$.
+Then
+
+$$
+\frac{\abs{(\hat a - \hat b) - (a - b)}}{\abs{a - b}} = \frac{\abs{a\delta_a - b\delta_b}}{\abs{a - b}} \le
+\delta\,\frac{\abs a + \abs b}{\abs{a - b}}.
+$$
+
+The factor $(\abs a + \abs b)/\abs{a - b}$ is the relative condition number of subtraction. When $a \approx b$ it is
+huge: the leading digits cancel, and what remains is dominated by the earlier errors. The subtraction itself did
+nothing wrong. It exposed errors that were already there.
+
+The remedy is to rearrange the formula so that the nearly equal quantities are never subtracted.
+
+<CancellationErrors />
+
+## Worked examples
+
+**A small root of a quadratic.** The roots of $x^2 - 10^8x + 1 = 0$ are about $10^8$ and $10^{-8}$. The textbook
+formula for the small root, $(10^8 - \sqrt{10^{16} - 4})/2$, subtracts two numbers that agree to 16 digits. In double
+precision it returns $7.45 \times 10^{-9}$, with a relative error of 25%. The product of the roots equals the constant
+term, $x_1x_2 = 1$. Computing the large root with the formula, which adds rather than subtracts, and then setting
+$x_2 = 1/x_1$ gives $10^{-8}$ to full precision.
+
+**$(1 - \cos x)/x^2$ near 0.** The true value tends to $1/2$. At $x = 10^{-8}$, $\cos x = 1 - 5 \times 10^{-17}$ rounds
+to exactly 1, and the naive formula returns 0. The identity $1 - \cos x = 2\sin^2(x/2)$ removes the subtraction and
+gives $0.5$.
+
+**Sample variance in one pass.** The formula $s^2 = \frac{1}{n-1}\paren{\sum_i x_i^2 - \frac1n\paren{\sum_i x_i}^2}$
+subtracts two large, nearly equal sums. For the four values $10^8 + \set{4, 7, 13, 16}$, whose variance is exactly 30,
+it returns $29.33$ in double precision. The two-pass formula $\frac{1}{n-1}\sum_i(x_i - \bar x)^2$ subtracts the mean
+first and returns $30.0$. Welford's one-pass update achieves the same accuracy without storing the data
+<Cite id="chan1983" />.
+
+**Summing many numbers.** Adding $0.1$ to a single-precision accumulator ten million times gives $1\,087\,937$
+instead of $10^6$. Once the running total is large, each addition of $0.1$ is rounded to a multiple of the total's
+spacing, and the errors accumulate in one direction. Summing pairwise (as NumPy does) gives $1\,000\,000.1$. Kahan's
+compensated summation carries the rounding error of each addition in a second variable and adds it back, which makes
+the error independent of $n$ to first order <Cite id="kahan1965" />.
+
+## Overflow and underflow
+
+$e^x$ overflows in double precision for $x > 709.78$. A softmax over logits $(1000, 1001, 1002)$ computed directly
+evaluates $e^{1000} = \infty$ and returns NaN. Subtracting the largest logit first leaves the result unchanged
+mathematically and keeps every exponent at most 0. The same shift makes $\log\sum_i e^{z_i}$ safe; see
+<NoteLink to="softmax-and-log-sum-exp">softmax and log-sum-exp</NoteLink>. For these logits it gives $1002.408$.
+
+Probabilities of long sequences underflow: a product of 1000 probabilities around $0.1$ is $10^{-1000}$, below the
+smallest double. Working with log-probabilities turns the product into a sum and avoids underflow. Library functions
+`log1p(x)` and `expm1(x)` compute $\log(1 + x)$ and $e^x - 1$ accurately for small $x$, where the direct formulas
+cancel.
+
+## In machine learning
+
+- **Mixed precision.** <NoteLink to="mixed-precision-training">Mixed-precision training</NoteLink> in 16-bit formats
+  halves memory and speeds up matrix multiplication. Weights are kept in single precision, because an update smaller
+  than $\epsilon_{\text{mach}}/2$ times a weight rounds away entirely in half precision.
+- **Loss scaling.** Small gradients underflow to zero in binary16. Multiplying the loss by a large factor before
+  back-propagation, and dividing the gradients afterwards, keeps them in range. bfloat16 has the range of single
+  precision and needs no loss scaling.
+- **Stable primitives.** Log-softmax, log-sum-exp, cross-entropy from logits and `logaddexp` are provided as fused,
+  stable operations because their naive forms overflow or cancel.
+
+## Pitfalls
+
+- **Testing equality.** Replace `a == b` with $\abs{a - b} \le \tau\max(\abs a, \abs b)$ for a tolerance $\tau$ chosen
+  from the expected error.
+- **Blaming the last operation.** Cancellation reveals earlier errors; the fix is usually to reformulate an earlier
+  step.
+- **Assuming more digits fix everything.** An ill-conditioned problem loses the same number of digits at any precision.
+  Higher precision only postpones the loss; see
+  <NoteLink to="numerical-stability-and-conditioning">numerical stability and conditioning</NoteLink>.

@@ -1,0 +1,128 @@
+---
+title: McDiarmid's inequality
+kind: concept
+summary: 'McDiarmid''s inequality bounds the deviation of any function $f(X_1, \dots, X_n)$ of independent variables from its mean when changing the $i$-th input moves $f$ by at most $c_i$: $\prob(f - \expect f \ge t) \le \exp(-2t^2/\sum_i c_i^2)$. It extends Hoeffding''s inequality from sums to such functions.'
+tags: [probability, limit-theorems, concentration, tail-bounds, martingales, learning-theory, worked-example]
+aliases: [bounded differences inequality, method of bounded differences, Azuma–Hoeffding inequality, Azuma's inequality, Doob martingale]
+requires: [hoeffdings-inequality, independence, law-of-total-expectation]
+related: [martingale, rademacher-complexity, chernoff-bounds, pac-learning]
+references: [mcdiarmid1989, azuma1967, boucheron2013, mohri2018]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A function $f : \Xcal_1 \times \dots \times \Xcal_n \to \reals$ has **bounded differences** $c_1, \dots, c_n$ if
+changing its $i$-th argument alone changes its value by at most $c_i$:
+
+$$
+\sup_{x_1, \dots, x_n, x_i'}\abs{f(x_1, \dots, x_i, \dots, x_n) - f(x_1, \dots, x_i', \dots, x_n)} \le c_i.
+$$
+
+**McDiarmid's inequality** states that for independent $X_1, \dots, X_n$ and every $t > 0$
+
+$$
+\prob\paren{f(X_1, \dots, X_n) - \expect f(X_1, \dots, X_n) \ge t} \le \exp\paren{-\frac{2t^2}{\sum_{i=1}^n c_i^2}},
+$$
+
+and the same bound holds for the lower tail <Cite id="mcdiarmid1989" />.
+</Definition>
+
+## Intuition
+
+A function of many independent inputs, none of which has much influence on its own, is nearly constant. Each input
+can move the value by at most $c_i$. The inputs push in random directions, so their effects add like independent
+steps of a random walk. The total fluctuation is of order $\sqrt{\sum_i c_i^2}$, not $\sum_i c_i$.
+
+For a sum $f = \sum_i X_i$ with $X_i \in [a_i, b_i]$, the bounded differences are $c_i = b_i - a_i$ and McDiarmid's
+inequality is exactly <NoteLink to="hoeffdings-inequality">Hoeffding's inequality</NoteLink>. The gain is that $f$ can
+be any function: a supremum over a class of models, the number of empty bins, the length of a longest common
+subsequence, or the error of a kernel density estimate.
+
+## Proof with a martingale
+
+The proof reveals the inputs one at a time and tracks the conditional expectation of $f$.
+
+**The Doob martingale.** Let $Z = f(X_1, \dots, X_n)$ and define
+
+$$
+Z_k = \expect[Z \mid X_1, \dots, X_k], \qquad k = 0, 1, \dots, n.
+$$
+
+Then $Z_0 = \expect[Z]$ is a constant and $Z_n = Z$. The differences $D_k = Z_k - Z_{k-1}$ telescope:
+$Z - \expect Z = \sum_{k=1}^n D_k$. By the tower property of conditional expectation,
+$\expect[D_k \mid X_1, \dots, X_{k-1}] = 0$. The sequence $Z_0, \dots, Z_n$ is a
+<NoteLink to="martingale">martingale</NoteLink>, and each $D_k$ has mean 0 given the past.
+
+**Each difference lies in a short interval.** Fix $x_1, \dots, x_{k-1}$. Because the inputs are independent, the
+conditional expectation given $X_{1:k-1} = x_{1:k-1}$ and $X_k = x$ is an average over the remaining inputs only:
+
+$$
+g(x) = \expect\brack{f(x_1, \dots, x_{k-1}, x, X_{k+1}, \dots, X_n)}.
+$$
+
+For any two values $x$ and $x'$, the integrands differ only in the $k$-th argument, so $\abs{g(x) - g(x')} \le c_k$.
+Hence $Z_k = g(X_k)$ ranges over an interval $[L_k, L_k + c_k]$, where $L_k = \inf_x g(x)$ depends only on
+$x_1, \dots, x_{k-1}$. Subtracting the constant $Z_{k-1}$, the difference $D_k$ lies in an interval of width $c_k$
+given the past.
+
+**Hoeffding's lemma, conditionally.** A variable with mean 0 lying in an interval of width $c$ satisfies
+$\expect[e^{sD}] \le e^{s^2c^2/8}$ (Hoeffding's lemma). Applied conditionally,
+$\expect[e^{sD_k} \mid X_{1:k-1}] \le e^{s^2c_k^2/8}$. Peeling off one difference at a time with the tower property,
+
+$$
+\expect\brack{e^{s(Z - \expect Z)}} = \expect\brack{e^{s\sum_{k < n}D_k}\,\expect\brack{e^{sD_n} \mid X_{1:n-1}}} \le
+e^{s^2c_n^2/8}\,\expect\brack{e^{s\sum_{k < n}D_k}} \le \dots \le \exp\paren{\frac{s^2}{8}\sum_{k=1}^n c_k^2}.
+$$
+
+**Chernoff step.** Markov's inequality on $e^{s(Z - \expect Z)}$ gives $\prob(Z - \expect Z \ge t) \le
+\exp(-st + s^2\sum_k c_k^2/8)$. The minimising $s = 4t/\sum_k c_k^2$ gives the stated bound.
+
+The same argument applies to any martingale whose differences lie in intervals of width $c_k$ given the past. That
+result is the **Azuma–Hoeffding inequality** <Cite id="azuma1967" />. McDiarmid's inequality is Azuma–Hoeffding applied
+to the Doob martingale of $f$.
+
+## Worked example: empty bins
+
+Throw $n$ balls independently and uniformly into $n$ bins. Let $Z$ be the number of empty bins. Each bin is empty with
+probability $(1 - 1/n)^n$, so $\expect[Z] = n(1 - 1/n)^n$. For $n = 1000$ this is $367.7$, close to $n/e$.
+
+$Z$ is a function of the $n$ independent bin choices $X_1, \dots, X_n$. Moving one ball to another bin can empty at
+most one bin and fill at most one other, so it changes $Z$ by at most 1: $c_i = 1$. McDiarmid's inequality gives
+
+$$
+\prob\paren{\abs{Z - \expect Z} \ge t} \le 2e^{-2t^2/n}.
+$$
+
+With $n = 1000$ and $t = 60$ the bound is $2e^{-7.2} = 0.0015$. The number of empty bins lies in $[308, 428]$ with
+probability above $0.998$, without computing the distribution of $Z$. The bound is not tight: the exact standard
+deviation of $Z$ is $9.86$, and in $20\,000$ simulations no deviation reached 60. The bound captures the correct
+$\sqrt n$ scale of the fluctuations with a loose constant. The indicators "bin $j$ is empty" are dependent, so
+Hoeffding's inequality for a sum of independent terms does not apply to them directly.
+
+## In machine learning
+
+- **Uniform deviation bounds.** Let $\Phi = \sup_{h \in \Hcal}(R(h) - \hat R(h))$, the largest gap between true and
+  training risk over a class, with losses in $[0, 1]$. Replacing one of the $n$ training examples changes each
+  $\hat R(h)$ by at most $1/n$, so it changes $\Phi$ by at most $1/n$. McDiarmid gives
+  $\Phi \le \expect\Phi + \sqrt{\log(1/\delta)/(2n)}$ with probability $1 - \delta$. The expectation is then bounded by
+  twice the <NoteLink to="rademacher-complexity">Rademacher complexity</NoteLink> <Cite id="mohri2018" />.
+- **Algorithmic stability.** Suppose replacing one training example changes the learned model's loss on any point by
+  at most $\beta$, with losses in $[0, 1]$. Then the true risk moves by at most $\beta$ and the training risk by at most
+  $\beta + 1/n$, so the gap $R - \hat R$ has bounded differences $c_i = 2\beta + 1/n$. McDiarmid gives a deviation of
+  at most $(2n\beta + 1)\sqrt{\log(1/\delta)/(2n)}$ with probability $1 - \delta$. The bound is useful when
+  $\beta = O(1/n)$, as for strongly regularised methods such as ridge regression.
+
+## Assumptions
+
+- **Independent inputs.** The Doob martingale's differences are bounded only because the future inputs are averaged
+  with the same distribution whatever the value of the current one.
+- **Worst-case bounded differences.** The constant $c_i$ must bound the change for every configuration of the other
+  inputs, including very unlikely ones.
+
+## Pitfalls
+
+- **It bounds deviation from the mean, not the mean.** In learning theory the expectation $\expect\Phi$ needs a
+  separate argument such as symmetrisation.
+- **Typical changes do not count.** If one input usually changes $f$ by $1/n$ but can, rarely, change it by 1, then
+  $c_i = 1$ and the bound is weak. Variance-sensitive versions exist for such cases <Cite id="boucheron2013" />.

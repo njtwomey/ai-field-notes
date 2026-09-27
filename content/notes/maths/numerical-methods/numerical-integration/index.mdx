@@ -1,0 +1,193 @@
+---
+title: Numerical integration
+kind: concept
+summary: 'Numerical integration (quadrature) approximates $\int_a^b f(x)\,dx$ by a weighted sum $\sum_i w_if(x_i)$. The composite trapezoid and Simpson rules have errors $O(h^2)$ and $O(h^4)$ in the spacing $h$. Gaussian quadrature with $n$ nodes is exact for polynomials of degree $2n - 1$.'
+tags: [numerical-methods, integration, quadrature, worked-example]
+aliases: [numerical quadrature, quadrature rule, trapezoid rule, trapezoidal rule, Simpson's rule, Gaussian quadrature, Gauss–Legendre quadrature, Gauss–Hermite quadrature, Newton–Cotes formulas, Romberg integration, Euler–Maclaurin formula]
+requires: [fundamental-theorem-of-calculus, taylor-series, mean-value-theorem]
+related: [monte-carlo-integration, multiple-integrals, laplace-approximation, gaussian-integral, root-finding]
+references: [suli2003, press2007, golub1969, trefethen2008]
+status: draft
+updated: 2026-09-27
+---
+
+import { QuadratureErrors } from './QuadratureErrors'
+
+<Definition>
+A **quadrature rule** with nodes $x_1, \dots, x_n \in [a, b]$ and weights $w_1, \dots, w_n$ approximates an integral by
+
+$$
+\int_a^b f(x)\,dx \approx Q_n(f) = \sum_{i=1}^n w_if(x_i).
+$$
+
+Its **degree of exactness** is the largest $d$ such that $Q_n(p) = \int_a^b p$ for every polynomial $p$ of degree at
+most $d$. A **composite rule** splits $[a, b]$ into $m$ panels of width $h = (b - a)/m$ and applies a simple rule on
+each <Cite id="suli2003" />.
+</Definition>
+
+## Intuition
+
+Most integrals have no closed form. A quadrature rule samples $f$ at a few points and integrates a simple function
+that matches those samples: a piecewise-constant, piecewise-linear or piecewise-quadratic interpolant, or a polynomial
+through well-chosen points. The error is the integral of the interpolation error. Smooth functions are well
+approximated by polynomials, so their integrals converge fast. Kinks, singularities and oscillation slow every rule
+down.
+
+Two levers control accuracy: more points, and better-placed points. Newton–Cotes rules fix equally spaced points and
+raise the number of panels. Gaussian rules choose the points themselves, and gain twice the degree of exactness for the
+same number of evaluations.
+
+## The trapezoid rule
+
+On one panel $[x_0, x_0 + h]$, replace $f$ by the straight line through its endpoint values. The integral of the line
+is the area of a trapezoid:
+
+$$
+\int_{x_0}^{x_0 + h}f(x)\,dx \approx \frac h2\paren{f(x_0) + f(x_0 + h)}.
+$$
+
+**Error of one panel.** Shift so that $x_0 = 0$. The linear interpolant $p$ satisfies, for $f$ twice continuously
+differentiable, $f(x) - p(x) = \frac12 f''(\xi_x)\,x(x - h)$ for some $\xi_x \in (0, h)$. This is the standard
+interpolation error formula. The factor $x(x - h)$ does not change sign on $[0, h]$, so the mean value theorem for
+integrals gives a single $\xi$ with
+
+$$
+\int_0^h (f - p)\,dx = \frac{f''(\xi)}{2}\int_0^h x(x - h)\,dx = \frac{f''(\xi)}{2}\paren{-\frac{h^3}{6}} =
+-\frac{h^3}{12}f''(\xi).
+$$
+
+**Composite rule.** With $m$ panels, nodes $x_j = a + jh$ and $f_j = f(x_j)$,
+
+$$
+T_h = h\paren{\tfrac12 f_0 + f_1 + \dots + f_{m-1} + \tfrac12 f_m}.
+$$
+
+Summing the $m$ panel errors, and replacing the average of the $f''(\xi_j)$ by one value $f''(\xi)$ (possible because
+$f''$ is continuous),
+
+$$
+\int_a^b f\,dx - T_h = -\frac{(b - a)h^2}{12}f''(\xi), \qquad \xi \in (a, b).
+$$
+
+The error is $O(h^2)$: doubling the number of panels divides it by 4. The rule is exact for straight lines, so its
+degree of exactness is 1.
+
+## Simpson's rule
+
+Simpson's rule fits a parabola through three equally spaced points. On $[-h, h]$,
+
+$$
+\int_{-h}^h f(x)\,dx \approx \frac h3\paren{f(-h) + 4f(0) + f(h)}.
+$$
+
+**Error.** Expand $f$ in its Taylor series about 0. Odd powers integrate to zero over $[-h, h]$ and cancel in the
+symmetric rule, so only even terms matter. The exact integral is
+
+$$
+\int_{-h}^h f = 2hf(0) + \frac{h^3}{3}f''(0) + \frac{h^5}{60}f^{(4)}(0) + O(h^7),
+$$
+
+and the rule gives
+
+$$
+\frac h3\paren{6f(0) + h^2f''(0) + \frac{h^4}{12}f^{(4)}(0) + O(h^6)} = 2hf(0) + \frac{h^3}{3}f''(0) +
+\frac{h^5}{36}f^{(4)}(0) + O(h^7).
+$$
+
+The difference is $h^5(1/60 - 1/36)f^{(4)}(0) = -\frac{h^5}{90}f^{(4)}(0)$. The quadratic interpolant happens to
+integrate cubics exactly, by symmetry, so the degree of exactness is 3 rather than 2. The composite rule on an even
+number $m$ of panels has error
+
+$$
+\int_a^b f\,dx - S_h = -\frac{(b - a)h^4}{180}f^{(4)}(\xi).
+$$
+
+Doubling the number of panels divides the error by 16.
+
+**Richardson extrapolation.** The trapezoid error has the form $c_2h^2 + c_4h^4 + \dots$. Combining two step sizes to
+cancel the $h^2$ term gives $(4T_{h/2} - T_h)/3$, which is exactly Simpson's rule. Repeating the cancellation for
+$h^4$, $h^6$ and so on is **Romberg integration**.
+
+<Derivation title="Euler–Maclaurin: why the trapezoid rule excels for periodic functions">
+The Euler–Maclaurin formula expands the trapezoid error of a smooth $f$ as
+
+$$
+T_h - \int_a^b f\,dx = \sum_{j=1}^{r}\frac{B_{2j}h^{2j}}{(2j)!}\paren{f^{(2j-1)}(b) - f^{(2j-1)}(a)} + O(h^{2r+2}),
+$$
+
+where $B_{2j}$ are Bernoulli numbers ($B_2 = 1/6$, which recovers the leading term $\frac{h^2}{12}(f'(b) - f'(a))$).
+Every term involves only the difference of odd derivatives at the two ends. If $f$ is smooth and periodic with period
+$b - a$, all those differences vanish, and the error is smaller than any power of $h$. For analytic periodic functions
+it decays geometrically in the number of points <Cite id="trefethen2008" />. The periodic integrand in the figure shows
+this: 17 points give the integral to machine precision.
+</Derivation>
+
+## Gaussian quadrature
+
+An $n$-point rule has $2n$ free parameters, $n$ nodes and $n$ weights. Matching the integrals of $1, x, \dots,
+x^{2n-1}$ gives $2n$ equations, so one can hope for degree of exactness $2n - 1$. Gauss–Legendre quadrature achieves
+it on $[-1, 1]$.
+
+**Construction.** Let $P_n$ be the Legendre polynomial of degree $n$: the polynomials $P_0, P_1, \dots$ are orthogonal
+on $[-1, 1]$, $\int_{-1}^1 P_jP_k\,dx = 0$ for $j \ne k$. Take the nodes $x_i$ to be the $n$ roots of $P_n$, which are
+real, distinct and inside $(-1, 1)$. Take the weights so that the rule integrates every polynomial of degree at most
+$n - 1$ exactly (the rule is interpolatory).
+
+**Exactness to degree $2n - 1$.** Let $p$ have degree at most $2n - 1$. Divide by $P_n$: $p = qP_n + r$, with $q$ and
+$r$ of degree at most $n - 1$. Then
+
+$$
+\int_{-1}^1 p\,dx = \int_{-1}^1 qP_n\,dx + \int_{-1}^1 r\,dx = 0 + \sum_i w_ir(x_i) = \sum_i w_ip(x_i).
+$$
+
+The first integral vanishes because $P_n$ is orthogonal to every polynomial of lower degree. The rule is exact for
+$r$ by construction. At the nodes $P_n(x_i) = 0$, so $p(x_i) = r(x_i)$. No $n$-point rule can do better: the
+polynomial $\prod_i(x - x_i)^2$ has degree $2n$ and positive integral, but vanishes at every node.
+
+The weights of Gauss rules are all positive, which makes them numerically stable. Nodes and weights can be computed
+as the eigenvalues and first eigenvector components of a symmetric tridiagonal matrix <Cite id="golub1969" />.
+Changing the weight function gives other families. Gauss–Hermite quadrature approximates $\int e^{-x^2}f(x)\,dx$ and
+therefore expectations under a Gaussian. Gauss–Laguerre handles $\int_0^\infty e^{-x}f(x)\,dx$.
+
+<QuadratureErrors />
+
+## Worked example: $\int_0^1 e^x\,dx$
+
+The exact value is $e - 1 = 1.718281828$. With $m = 4$ panels ($h = 1/4$, five evaluations):
+
+- **Trapezoid:** $T = 1.727222$, error $8.94 \times 10^{-3}$. The leading-order prediction is
+  $\frac{h^2}{12}(f'(1) - f'(0)) = \frac{1}{192}(e - 1) = 8.95 \times 10^{-3}$.
+- **Simpson:** $S = 1.718319$, error $3.70 \times 10^{-5}$. The prediction is
+  $\frac{h^4}{180}(f'''(1) - f'''(0)) = 3.73 \times 10^{-5}$.
+- **Gauss–Legendre** with 3 points: error $8.2 \times 10^{-7}$, from only three evaluations. With 5 points the error is
+  $6.5 \times 10^{-13}$.
+
+Doubling to $m = 8$ divides the trapezoid error by $4.0$ and the Simpson error by $15.9$, as the $h^2$ and $h^4$ laws
+predict.
+
+## Many dimensions
+
+A product rule with $n$ points per axis needs $n^d$ evaluations in $d$ dimensions. With $N$ total points, a rule of
+order $h^r$ has error $O(N^{-r/d})$, which deteriorates quickly as $d$ grows.
+<NoteLink to="monte-carlo-integration">Monte Carlo integration</NoteLink> has error $O(N^{-1/2})$ in any dimension. It
+beats product rules when $d > 2r$, roughly beyond a handful of dimensions. Sparse grids and quasi-Monte Carlo sit in
+between.
+
+## In machine learning
+
+- **Expectations under Gaussians.** Variational inference and Gaussian-process classification need
+  $\expect_{\Gauss(\mu, \sigma^2)}[g(x)]$ for one-dimensional non-linear $g$, such as a log-sigmoid likelihood.
+  Gauss–Hermite quadrature with 10 to 20 points computes these to high accuracy.
+- **Normalising constants.** One- and two-dimensional posteriors can be normalised by quadrature on a grid. It is
+  exact enough to check a <NoteLink to="laplace-approximation">Laplace approximation</NoteLink> or an MCMC run.
+- **Adaptive integrators.** Library routines such as SciPy's `quad` (QUADPACK) subdivide panels where an error
+  estimate is large. They handle kinks and integrable singularities automatically.
+
+## Pitfalls
+
+- **Smoothness assumptions.** The $O(h^2)$ and $O(h^4)$ laws need bounded second and fourth derivatives. For $\sqrt x$
+  on $[0, 1]$ both rules converge only as $h^{1.5}$.
+- **Equally spaced high-order rules.** Newton–Cotes rules of high degree have negative weights and can diverge as the
+  degree grows, as for Runge's function $1/(1 + 25x^2)$. Raise the number of panels, not the degree.
+- **Infinite intervals.** Truncating $\int_0^\infty$ at an arbitrary point, or applying a rule for finite intervals
+  after a careless substitution, loses the tail. Use a change of variables or a Gauss rule with the matching weight.
