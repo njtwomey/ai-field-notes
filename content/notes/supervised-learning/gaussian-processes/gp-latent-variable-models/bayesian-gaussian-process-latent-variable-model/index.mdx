@@ -1,0 +1,232 @@
+---
+title: Bayesian GP-LVM
+kind: concept
+summary: The Bayesian GP-LVM integrates out the latent points of a GP-LVM under a Gaussian variational posterior $q(\Xmat)$ and maximises a closed-form lower bound on $\log p(\Ymat)$ built from inducing variables. With an ARD kernel it switches off unneeded latent dimensions, which selects $Q$.
+tags: [gaussian-process, dimensionality-reduction, latent-variable-models, variational-inference, bayesian, unsupervised, model-selection]
+aliases: [Bayesian GPLVM, variational GP-LVM, BGPLVM, psi statistics]
+requires: [gaussian-process-latent-variable-model, sparse-gaussian-processes, variational-inference, automatic-relevance-determination]
+related: [evidence-lower-bound, kullback-leibler-divergence, mean-field-variational-inference, variational-autoencoder]
+references: [titsias2010, damianou2016, titsias2009, lawrence2005, campbell2014]
+status: draft
+updated: 2026-09-27
+---
+
+import { AugmentedModel } from './AugmentedModel'
+import { Psi1Curve } from './Psi1Curve'
+
+<Definition>
+The Bayesian Gaussian process latent variable model places the prior $p(\Xmat) = \prod_{n=1}^{N}\Gauss(\xvec_n \mid
+\zeros, \eye_Q)$ on the latent points of a <NoteLink to="gaussian-process-latent-variable-model">GP-LVM</NoteLink> and
+integrates them out instead of optimising them <Cite id="titsias2010" />. The marginal likelihood
+$p(\Ymat) = \int p(\Ymat \mid \Xmat)\,p(\Xmat)\,d\Xmat$ is intractable, so it is replaced by a lower bound
+
+$$
+\log p(\Ymat) \ge \sum_{d=1}^{D}\tilde\Fcal_d(q) - \KL\paren{q(\Xmat) \,\|\, p(\Xmat)}, \qquad
+q(\Xmat) = \prod_{n=1}^{N}\Gauss(\xvec_n \mid \muvec_n, \Smat_n),
+$$
+
+with diagonal $\Smat_n$. Each $\tilde\Fcal_d$ is a closed-form bound that uses $M$ inducing inputs $\Zmat$. The bound
+is maximised over the variational parameters $\set{\muvec_n, \Smat_n}$, the inducing inputs $\Zmat$, the kernel
+hyperparameters and the noise precision $\beta$.
+</Definition>
+
+## Why integrate out the latent points
+
+The standard GP-LVM fits one free latent point per observation by maximum likelihood. Two problems follow. The model
+can overfit: with more latent dimensions it always fits at least as well, so the likelihood cannot choose the latent
+dimension $Q$. And the fit returns a point, with no measure of how well each latent position is determined.
+
+A Bayesian treatment fixes both. Integrating out $\Xmat$ gives the marginal likelihood $p(\Ymat)$, which penalises
+unused flexibility. The approximate posterior $q(\Xmat)$ gives each latent point a mean and a variance. Combined with
+the automatic relevance determination (ARD) kernel
+
+$$
+k(\xvec, \xvec') = \sigma_f^2\exp\paren{-\frac12\sum_{q=1}^{Q}\alpha_q(x_q - x_q')^2},
+$$
+
+with one inverse squared length-scale $\alpha_q \ge 0$ per latent dimension, the bound can switch dimensions off by
+driving $\alpha_q$ to zero. Setting $Q$ generously and reading off the surviving $\alpha_q$ estimates the latent
+dimensionality <Cite id="titsias2010" />.
+
+## Why the integral is hard
+
+The GP-LVM likelihood of column $d$ is $p(\yvec_{:,d} \mid \Xmat) = \Gauss(\yvec_{:,d} \mid \zeros, \Kmat_{NN} +
+\beta^{-1}\eye_N)$, where $\Kmat_{NN} = k(\Xmat, \Xmat)$ and $\beta = 1/\sigma^2$ is the noise precision. Jensen's
+inequality with any $q(\Xmat)$ gives the standard <NoteLink to="evidence-lower-bound">evidence lower bound</NoteLink>
+
+$$
+\log p(\Ymat) \ge \int q(\Xmat)\log p(\Ymat \mid \Xmat)\,d\Xmat - \KL\paren{q(\Xmat) \,\|\, p(\Xmat)}.
+$$
+
+The KL term between two Gaussians is available in closed form. The first term is not. The latent points sit inside
+$(\Kmat_{NN} + \beta^{-1}\eye)^{-1}$ and $\log\abs{\Kmat_{NN} + \beta^{-1}\eye}$, and no Gaussian average of these
+has a closed form.
+
+## The variational bound
+
+Titsias and Lawrence remove the inverse with the inducing-variable construction of
+<NoteLink to="sparse-gaussian-processes">variational sparse Gaussian processes</NoteLink> <Cite id="titsias2009" />.
+
+**Augment the model.** For each output dimension, introduce the latent function values $\fvec_d = f_d(\Xmat) \in
+\reals^N$ and $M$ inducing values $\uvec_d = f_d(\Zmat) \in \reals^M$ at inducing inputs $\Zmat \in \reals^{M \times
+Q}$. The Gaussian process prior factorises as $p(\fvec_d, \uvec_d) = p(\fvec_d \mid \uvec_d, \Xmat)\,p(\uvec_d)$ with
+
+$$
+p(\uvec_d) = \Gauss(\zeros, \Kmat_{MM}), \qquad
+p(\fvec_d \mid \uvec_d, \Xmat) = \Gauss\paren{\Kmat_{NM}\Kmat_{MM}^{-1}\uvec_d,\ \Kmat_{NN} -
+\Kmat_{NM}\Kmat_{MM}^{-1}\Kmat_{MN}},
+$$
+
+where $\Kmat_{MM} = k(\Zmat, \Zmat)$ and $\Kmat_{NM} = k(\Xmat, \Zmat)$. Integrating out $\fvec_d$ and $\uvec_d$
+returns the original likelihood for any $\Zmat$, so $\Zmat$ is a variational parameter, not part of the model.
+
+<AugmentedModel />
+
+**Bound the conditional likelihood.** Choose the variational distribution $q(\fvec_d, \uvec_d) = p(\fvec_d \mid
+\uvec_d, \Xmat)\,\phi(\uvec_d)$. The conditional prior cancels inside the logarithm, and Jensen's inequality gives
+
+$$
+\log p(\yvec_{:,d} \mid \Xmat) \ge \int \phi(\uvec_d)\log\frac{\Gauss(\yvec_{:,d} \mid \Kmat_{NM}\Kmat_{MM}^{-1}\uvec_d,
+\beta^{-1}\eye)\,p(\uvec_d)}{\phi(\uvec_d)}\,d\uvec_d - \frac\beta2\trace\paren{\Kmat_{NN} - \Kmat_{NM}\Kmat_{MM}^{-1}
+\Kmat_{MN}}.
+$$
+
+The trace term is the expected squared deviation of $\fvec_d$ from its conditional mean, scaled by $\beta/2$. The
+latent points now appear only in $\Kmat_{NN}$ and $\Kmat_{NM}$, outside any inverse.
+
+**Average over $q(\Xmat)$.** Take $\phi(\uvec_d)$ independent of $\Xmat$. Then the integrals over $\uvec_d$ and $\Xmat$
+can be swapped. Expanding the Gaussian log density,
+
+$$
+\expect_{q(\Xmat)}\LB\log\Gauss(\yvec_{:,d} \mid \Kmat_{NM}\Kmat_{MM}^{-1}\uvec_d, \beta^{-1}\eye)\RB
+= \frac N2\log\frac{\beta}{2\pi} - \frac\beta2\LB\yvec_{:,d}^\top\yvec_{:,d} - 2\yvec_{:,d}^\top\Psimat_1\Kmat_{MM}^{-1}
+\uvec_d + \uvec_d^\top\Kmat_{MM}^{-1}\Psimat_2\Kmat_{MM}^{-1}\uvec_d\RB,
+$$
+
+and the trace term averages to $\frac\beta2\LB\psi_0 - \trace(\Kmat_{MM}^{-1}\Psimat_2)\RB$. Three expectations under
+$q(\Xmat)$ carry all the dependence on the latent points:
+
+$$
+\psi_0 = \trace\,\expect_q\LB\Kmat_{NN}\RB, \qquad \Psimat_1 = \expect_q\LB\Kmat_{NM}\RB, \qquad
+\Psimat_2 = \expect_q\LB\Kmat_{MN}\Kmat_{NM}\RB.
+$$
+
+$\Psimat_1$ is $N \times M$ and $\Psimat_2$ is $M \times M$. They are called the $\Psi$ statistics.
+
+**Optimise $\phi(\uvec_d)$.** The averaged log density is quadratic in $\uvec_d$. The best $\phi$ is proportional to
+$\exp(\expect_q[\log\Gauss(\cdot)])\,p(\uvec_d)$, a Gaussian, and the bound at that $\phi$ is the logarithm of a
+Gaussian integral. Evaluating it gives <Cite id="titsias2010" />
+
+$$
+\tilde\Fcal_d = \log\LB\frac{\beta^{N/2}\,\abs{\Kmat_{MM}}^{1/2}}{(2\pi)^{N/2}\,\abs{\beta\Psimat_2 +
+\Kmat_{MM}}^{1/2}}\exp\paren{-\frac12\yvec_{:,d}^\top\Wmat\yvec_{:,d}}\RB - \frac{\beta\psi_0}{2} +
+\frac\beta2\trace\paren{\Kmat_{MM}^{-1}\Psimat_2},
+$$
+
+with $\Wmat = \beta\eye_N - \beta^2\Psimat_1(\beta\Psimat_2 + \Kmat_{MM})^{-1}\Psimat_1^\top$. This is the sparse
+Gaussian process bound of Titsias with $\trace\Kmat_{NN}$, $\Kmat_{NM}$ and $\Kmat_{MN}\Kmat_{NM}$ replaced by their
+averages under $q(\Xmat)$. The full objective is $\sum_d\tilde\Fcal_d - \KL(q \,\|\, p)$, with
+
+$$
+\KL\paren{q(\Xmat) \,\|\, p(\Xmat)} = \frac12\sum_{n=1}^{N}\sum_{q=1}^{Q}\paren{\mu_{nq}^2 + S_{nq} - \log S_{nq} - 1}.
+$$
+
+The data enter through $\yvec_{:,d}^\top\Wmat\yvec_{:,d}$ summed over $d$, which is $\trace(\Wmat\Ymat\Ymat^\top)$. The
+cost is $O(NM^2Q)$ per evaluation and linear in $D$ through a single precomputation, as for the ordinary GP-LVM. The
+full derivation, with dynamical priors on $\Xmat$ and uncertain inputs, is in Damianou, Titsias and Lawrence
+<Cite id="damianou2016" />.
+
+## The Ψ statistics
+
+The $\Psi$ statistics are averages of the kernel over Gaussian inputs. Each decomposes over data points:
+$\Psimat_2 = \sum_n\Psimat_2^{(n)}$ with $(\Psimat_2^{(n)})_{mm'} = \expect_{q(\xvec_n)}[k(\xvec_n,
+\zvec_m)k(\zvec_{m'}, \xvec_n)]$. For the ARD squared exponential kernel they are closed-form
+<Cite id="titsias2010" />. With $\mu_{nq}$ and $S_{nq}$ the mean and variance of $q(x_{nq})$,
+
+$$
+\psi_0 = N\sigma_f^2, \qquad
+(\Psimat_1)_{nm} = \sigma_f^2\prod_{q=1}^{Q}\frac{\exp\paren{-\frac{\alpha_q(\mu_{nq} - z_{mq})^2}{2(\alpha_q S_{nq} +
+1)}}}{\sqrt{\alpha_q S_{nq} + 1}},
+$$
+
+$$
+(\Psimat_2^{(n)})_{mm'} = \sigma_f^4\prod_{q=1}^{Q}\frac{\exp\paren{-\frac{\alpha_q(z_{mq} - z_{m'q})^2}{4} -
+\frac{\alpha_q(\mu_{nq} - \bar z_q)^2}{2\alpha_q S_{nq} + 1}}}{\sqrt{2\alpha_q S_{nq} + 1}}, \qquad
+\bar z_q = \frac{z_{mq} + z_{m'q}}{2}.
+$$
+
+<Derivation title="Deriving Ψ₁">
+Consider one latent dimension and drop the indices $n$, $m$ and $q$. With $x \sim \Gauss(\mu, S)$ and $\delta = \mu -
+z$,
+
+$$
+\expect\LB e^{-\alpha(x - z)^2/2}\RB = \int\frac{1}{\sqrt{2\pi S}}e^{-(x - \mu)^2/2S}\,e^{-\alpha(x - z)^2/2}\,dx.
+$$
+
+The exponent is quadratic in $x$. Completing the square, the product of the two Gaussian shapes in $x$ is proportional
+to a Gaussian with precision $1/S + \alpha$, times $\exp\paren{-\frac{\delta^2}{2(S + 1/\alpha)}}$. The integral of the
+normalised part is 1, and the prefactors combine to $\sqrt{(1/S)/(1/S + \alpha)} = 1/\sqrt{\alpha S + 1}$. Since
+$\delta^2/(2(S + 1/\alpha)) = \alpha\delta^2/(2(\alpha S + 1))$,
+
+$$
+\expect\LB e^{-\alpha(x - z)^2/2}\RB = \frac{1}{\sqrt{\alpha S + 1}}\exp\paren{-\frac{\alpha(\mu - z)^2}{2(\alpha S +
+1)}}.
+$$
+
+The ARD kernel is a product over dimensions and $q(\xvec_n)$ factorises over dimensions, so the expectation is the
+product of these one-dimensional factors times $\sigma_f^2$. $\Psimat_2$ follows the same way, since
+$k(\xvec, \zvec_m)k(\xvec, \zvec_{m'})$ is again a Gaussian shape in $\xvec$, centred at $\bar\zvec$ with twice the
+precision. The identity $(x - z_m)^2 + (x - z_{m'})^2 = 2(x - \bar z)^2 + (z_m - z_{m'})^2/2$ gives the extra factor
+$\exp(-\alpha(z_m - z_{m'})^2/4)$.
+</Derivation>
+
+$\Psimat_1$ is the kernel with the input blurred by the posterior uncertainty. The figure compares it with the kernel in
+one dimension.
+
+<Psi1Curve />
+
+## Choosing the latent dimension
+
+With $\alpha_q = 0$, latent dimension $q$ drops out of the kernel, and every factor for $q$ in the $\Psi$ statistics
+equals 1. The expected log-likelihood then does not depend on $\mu_{nq}$ or $S_{nq}$. The only term left that does is
+the KL divergence, which is minimised at $\mu_{nq} = 0$ and $S_{nq} = 1$, where dimension $q$'s contribution to the
+KL is zero. A dimension is kept only when the gain in expected log-likelihood from using it exceeds the KL cost of
+moving $q(x_{nq})$ away from the prior. In the maximum-likelihood GP-LVM there is no such cost, so extra dimensions
+are used to fit noise.
+
+Titsias and Lawrence fitted the Bayesian GP-LVM with $Q = 10$ and 50 inducing variables to 1000 twelve-dimensional
+points of the multi-phase oil-flow data, with three classes of flow <Cite id="titsias2010" />. The bound switched off
+7 of the 10 latent dimensions by setting their inverse length-scales to zero. In the two dominant dimensions, a nearest
+neighbour classifier made 3 errors on the 1000 points. A standard sparse GP-LVM with $Q = 2$ made 26.
+
+Campbell and Kautz used the same test on font outlines. The Bayesian GP-LVM gave four dimensions for the joint manifold
+of all characters and three for the character "g" alone <Cite id="campbell2014" />. The
+<NoteLink to="manifold-of-fonts">manifold of fonts</NoteLink> note describes that application.
+
+## Prediction and missing data
+
+A new observation $\yvec_*$ gets its own variational distribution $q(\xvec_*)$, found by maximising the bound on
+$p(\Ymat, \yvec_*)$ with the training quantities held fixed. Because the $\Psi$ statistics decompose over points, only
+the terms for $\xvec_*$ are new. When $\yvec_*$ is partly observed, the bound uses the observed coordinates to fit
+$q(\xvec_*)$ and the model predicts the rest. On the Frey faces data, with half of each test image's pixels missing,
+the mean absolute reconstruction error was 7.40 for the Bayesian GP-LVM trained once with 30 latent dimensions. The
+best standard sparse GP-LVM, with 5 latent dimensions, had 9.73 <Cite id="titsias2010" />.
+
+## Assumptions
+
+- **A factorised Gaussian posterior.** $q(\Xmat)$ is independent across points, and each $\Smat_n$ is diagonal. The
+  true posterior over latent points is multimodal (the likelihood is invariant to rotations and reflections of the
+  latent space), and the bound picks one mode.
+- **Kernels with tractable $\Psi$ statistics.** The ARD squared exponential and the linear kernels have closed forms.
+  Other kernels need numerical integration.
+- **A standard normal prior on each latent point.** Structured priors, such as a Gaussian process over time for
+  sequences, fit the same framework <Cite id="damianou2016" />.
+
+## Pitfalls
+
+- **Reading relevance off $\alpha_q$.** The inverse length-scales are not always driven exactly to zero. On Frey faces
+  many became small without vanishing <Cite id="titsias2010" />. A threshold on $\alpha_q$ is a judgement.
+- **Initialisation still matters.** Means are usually initialised by PCA and variances near 0.5, as in the original
+  experiments. The bound is non-convex.
+- **The bound is a bound.** Comparing models by their bounds assumes the gap to $\log p(\Ymat)$ is similar across
+  them.

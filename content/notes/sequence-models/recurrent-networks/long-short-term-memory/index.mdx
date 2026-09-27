@@ -1,0 +1,123 @@
+---
+title: Long short-term memory
+kind: concept
+summary: A long short-term memory (LSTM) network is a recurrent network with a cell state updated additively, $\cvec_t = \fvec_t \odot \cvec_{t-1} + \ivec_t \odot \gvec_t$. Gates in $(0, 1)$ decide what to forget, write and read. Gradients flow along the cell state scaled only by the forget gates, so they survive hundreds of steps.
+tags: [deep-learning, sequence-models, gradients, worked-example]
+aliases: [LSTM, LSTM cell, constant error carousel, forget gate, input gate, output gate, cell state]
+requires: [recurrent-neural-network, backpropagation-through-time]
+related: [gated-recurrent-unit, sequence-to-sequence]
+references: [hochreiter1997, gers2000, greff2017]
+status: draft
+updated: 2026-09-27
+---
+
+import { LstmCellDiagram } from './LstmCellDiagram'
+
+<Definition>
+An LSTM keeps two vectors per step, a cell state $\cvec_t \in \reals^n$ and a hidden state $\hvec_t \in \reals^n$. From
+the input $\xvec_t$ and $\hvec_{t-1}$ it computes a forget gate $\fvec_t$, an input gate $\ivec_t$, an output gate
+$\ovec_t$ and a candidate $\gvec_t$, then updates
+$$
+\cvec_t = \fvec_t \odot \cvec_{t-1} + \ivec_t \odot \gvec_t, \qquad \hvec_t = \ovec_t \odot \tanh(\cvec_t),
+$$
+where $\odot$ is the elementwise product <Cite id="hochreiter1997" /> <Cite id="gers2000" />.
+</Definition>
+
+## Intuition
+
+A vanilla <NoteLink to="recurrent-neural-network">recurrent network</NoteLink> rewrites its whole state at every step
+through a matrix and a squashing function. Information and gradients both pass through that map once per step, and
+they decay geometrically. The LSTM adds a second state, the cell, that is changed only by elementwise scaling and
+addition. Nothing multiplies the cell by a weight matrix. Gates, computed from the current input and the previous
+output, decide how much of the cell to keep, how much new content to add, and how much of the cell to expose.
+
+The gates are soft switches. A forget gate near 1 keeps a memory. A forget gate near 0 erases it. An input gate near 0
+protects the cell from irrelevant inputs. An output gate near 0 hides the memory from the rest of the network until it
+is needed.
+
+## The equations
+
+With the logistic sigmoid $\sigma(z) = 1/(1 + e^{-z})$, each gate has its own weights $\Wmat_\ast \in \reals^{n \times m}$,
+$\Umat_\ast \in \reals^{n \times n}$ and bias $\bvec_\ast \in \reals^n$:
+
+$$
+\begin{aligned}
+\fvec_t &= \sigma(\Wmat_f \xvec_t + \Umat_f \hvec_{t-1} + \bvec_f) && \text{forget gate} \\
+\ivec_t &= \sigma(\Wmat_i \xvec_t + \Umat_i \hvec_{t-1} + \bvec_i) && \text{input gate} \\
+\ovec_t &= \sigma(\Wmat_o \xvec_t + \Umat_o \hvec_{t-1} + \bvec_o) && \text{output gate} \\
+\gvec_t &= \tanh(\Wmat_g \xvec_t + \Umat_g \hvec_{t-1} + \bvec_g) && \text{candidate} \\
+\cvec_t &= \fvec_t \odot \cvec_{t-1} + \ivec_t \odot \gvec_t \\
+\hvec_t &= \ovec_t \odot \tanh(\cvec_t).
+\end{aligned}
+$$
+
+The gates lie in $(0, 1)$, so each is a per-unit fraction. The candidate lies in $(-1, 1)$ and is the content that
+could be written. The four pre-activations are usually computed as one matrix product of size $4n \times (m + n)$.
+
+<LstmCellDiagram />
+
+## The constant error carousel
+
+Hochreiter and Schmidhuber derived the cell from a requirement on the gradient <Cite id="hochreiter1997" />. Take a
+single unit $j$ connected only to itself with weight $w_{jj}$ and activation $f_j$:
+$c_j(t) = f_j(w_{jj}\, c_j(t-1))$. Backpropagation through one step multiplies the error by
+
+$$
+\frac{\partial c_j(t)}{\partial c_j(t-1)} = f_j'\paren{w_{jj}\, c_j(t-1)}\, w_{jj}.
+$$
+
+Over $q$ steps the error is multiplied by $q$ such factors. It neither vanishes nor explodes only if every factor
+equals 1:
+
+$$
+f_j'\paren{w_{jj}\, c_j(t-1)}\, w_{jj} = 1 \quad \text{for every } t.
+$$
+
+The argument of $f_j'$ changes from step to step, so $f_j'$ must be constant. Then $f_j$ is linear, and the condition
+fixes its slope at $1/w_{jj}$. The simplest choice is the identity with $w_{jj} = 1$: $c_j(t) = c_j(t-1)$. This unit
+carries error backwards unchanged for any number of steps. It is the constant error carousel.
+
+A unit that only copies itself stores nothing new. The original LSTM added an input gate to control writes,
+$c_j(t) = c_j(t-1) + i_j(t)\, g_j(t)$, and an output gate to control reads. The cell's self-Jacobian stays exactly 1.
+
+**Forget gate.** A cell with self-weight 1 can only accumulate, and on long continuous streams its state grows without
+bound. Gers, Schmidhuber and Cummins added the forget gate, which replaces the fixed weight 1 by a learned, input-dependent
+$f_j(t) \in (0, 1)$ <Cite id="gers2000" />. Along the direct path through the cell,
+
+$$
+\frac{\partial \cvec_t}{\partial \cvec_{t-1}} = \diag(\fvec_t), \qquad
+\frac{\partial \cvec_t}{\partial \cvec_k} = \diag\paren{\prod_{i=k+1}^{t} \fvec_i},
+$$
+
+where the product is elementwise. There is no weight matrix and no squashing derivative in this product. The network
+controls the decay: when the forget gate is near 1, the gradient survives. Other paths, through $\hvec_{t-1}$ and the
+gates, add further terms, but the direct path alone is enough to carry long-range signal.
+
+## Worked example
+
+Compare how much of a gradient survives 50 steps.
+
+- **Vanilla RNN** with a per-step factor of about $0.5$: $0.5^{50} \approx 8.9 \times 10^{-16}$.
+- **LSTM** with forget gates held at $0.95$: $0.95^{50} \approx 0.077$. With forget gates at $0.99$, a signal
+  survives 100 steps as $0.99^{100} \approx 0.37$.
+
+Setting the forget-gate bias to 1 or 2 at initialisation makes $\sigma(b_f) \approx 0.73$ to $0.88$, so the network
+starts by remembering. This initialisation improves LSTM performance on many tasks <Cite id="jozefowicz2015" />.
+
+**Parameters.** Four blocks of $n(m + n) + n$ parameters give $4\paren{n(m + n) + n}$. With $m = n = 256$ that is
+$4 \cdot 131{,}328 = 525{,}312$, four times a vanilla RNN of the same width.
+
+## Assumptions
+
+- The information needed later can be written into a fixed number of cells and protected by gates until it is used.
+- The gates can be predicted from the current input and the previous hidden state.
+
+## Pitfalls
+
+- **Not unlimited memory.** Forget gates below 1 still decay the cell geometrically, and the cell has only $n$ units. An
+  LSTM encoding a long sentence into one vector loses detail; see
+  <NoteLink to="sequence-to-sequence">sequence-to-sequence models</NoteLink>.
+- **Variants disagree on details.** Peephole connections, coupled input and forget gates and other changes appear in the
+  literature. A large study found that none reliably beats the standard forget-gate LSTM, and that the forget gate and
+  the output activation are its most important parts <Cite id="greff2017" />.
+- **Sequential cost.** Each step still depends on the previous one, so an LSTM cannot parallelise over time.

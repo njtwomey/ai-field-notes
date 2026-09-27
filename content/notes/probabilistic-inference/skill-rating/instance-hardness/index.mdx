@@ -1,0 +1,183 @@
+---
+title: Instance hardness
+kind: concept
+summary: 'The instance hardness of a labelled example $(\xvec, y)$ is the probability that a population of learners $\Lcal$ misclassifies it: $1 - \frac{1}{\abs{\Lcal}}\sum_j p(y \mid \xvec, h_j)$. Hardness measures such as $k$-disagreeing neighbours explain why an instance is hard.'
+tags: [classification, data-quality, label-noise, meta-learning, evaluation, worked-example]
+aliases:
+  [
+    instance hardness measures,
+    hardness measures,
+    k-disagreeing neighbours,
+    kDN,
+    disjunct size,
+    disjunct class percentage,
+    class likelihood difference,
+    minority value,
+    instance space analysis,
+    PyHard,
+    data complexity measures,
+  ]
+requires: [k-nearest-neighbours, decision-tree]
+partOf: [skill-rating]
+related:
+  [
+    item-response-theory-for-machine-learning,
+    detecting-and-cleaning-label-errors,
+    label-noise-models,
+    no-free-lunch-theorem,
+    meta-learning,
+    naive-bayes,
+  ]
+references:
+  [smith2014instance, martinezplumed2019, lorena2019complexity, munoz2018instance, paiva2022pyhard, swayamdipta2020, toneva2019, bengio2009curriculum]
+status: draft
+updated: 2026-09-27
+---
+
+import { HardnessMap } from './HardnessMap'
+
+<Definition>
+Let $\Dcal$ be a labelled dataset, $t$ a training set, and $\Lcal = \set{g_1, \dots, g_{\abs{\Lcal}}}$ a set of learning
+algorithms, each of which returns a classifier $h_j = g_j(t)$ with class probabilities $p(y \mid \xvec, h_j)$. The
+**instance hardness** of an example $(\xvec, y)$ with respect to $\Lcal$ is
+
+$$
+\operatorname{IH}_{\Lcal}(\xvec, y) = 1 - \frac{1}{\abs{\Lcal}} \sum_{j=1}^{\abs{\Lcal}} p(y \mid \xvec, h_j),
+$$
+
+a number in $[0, 1]$: the expected probability that a classifier drawn at random from the population gives the example
+a wrong label <Cite id="smith2014instance" />. **Hardness measures** are cheaper, model-free quantities computed from
+$\Dcal$ alone, each tied to one cause of hardness such as class overlap or class imbalance.
+</Definition>
+
+## Intuition
+
+Accuracy summarises a classifier over a whole test set and says nothing about which examples it gets wrong. Across
+many learners, the same examples tend to be misclassified again and again. Some lie where the classes overlap. Some
+belong to a small class. Some carry a wrong label. Instance hardness turns this observation into a number per example.
+It depends on the example and on the population of learners, and not on any one model.
+
+A hardness measure answers the next question: why is the example hard? An example whose five nearest neighbours all
+have another label is hard because it sits inside the other class. An example in a rare class is hard because learners
+trade its errors for fewer errors on the common class. Each measure isolates one such cause.
+
+## From one classifier to a population
+
+For one classifier $h$, the natural hardness of $(\xvec, y)$ is $1 - p(y \mid \xvec, h)$. It measures how hard the example
+is for that classifier and mixes a property of the example with the biases of $h$. To remove the dependence on one
+hypothesis, average over hypotheses with the weight each deserves given the training data:
+
+$$
+\operatorname{IH}(\xvec, y) = \sum_{h} \paren{1 - p(y \mid \xvec, h)}\,p(h \mid t) = 1 - \sum_{h} p(y \mid \xvec, h)\,p(h \mid t),
+$$
+
+using $\sum_h p(h \mid t) = 1$ <Cite id="smith2014instance" />. The weights $p(h \mid t)$ cannot be uniform over every
+possible classifier. Suppose $h$ ranges over all $\abs{\mathcal{Y}}^{\abs{\mathcal{X}}}$ deterministic maps from a finite
+input space $\mathcal{X}$ to labels $\mathcal{Y}$, each with equal weight. Exactly a fraction $1/\abs{\mathcal{Y}}$ of
+these maps assign label $y$ to $\xvec$, whatever $\xvec$ and $y$ are. The average of $p(y \mid \xvec, h)$ is then
+$1/\abs{\mathcal{Y}}$, and every example has hardness $1 - 1/\abs{\mathcal{Y}}$. This is the <NoteLink
+to="no-free-lunch-theorem">no free lunch</NoteLink> argument applied to a single example: hardness exists only relative
+to a bias.
+
+Smith, Martinez and Giraud-Carrier therefore put equal weight on a small set $\Lcal$ of learners that are both used in
+practice and diverse, and zero weight elsewhere, which gives the definition above. They chose nine learners by
+clustering twenty Weka algorithms on how often their predictions differ, and took one from each cluster. With their
+estimate, $p(y \mid \xvec, h_j)$ is either the classifier's predicted probability or an indicator of a correct
+prediction, both computed out of sample by cross-validation <Cite id="smith2014instance" />.
+
+## Hardness measures
+
+Each measure below is computed from the dataset $\Dcal$ with the given labels. Write $t(\xvec)$ for the label of
+$\xvec$ and $\Dcal_c$ for the examples with label $c$. The sign says whether a larger value means harder ($+$) or easier
+($-$) <Cite id="smith2014instance" />.
+
+- **Neighbourhood.** $k$-disagreeing neighbours ($+$) is the share of the $k$ nearest neighbours of $\xvec$ with another
+  label, $\operatorname{kDN}(\xvec) = \abs{\set{\zvec \in \operatorname{kNN}(\xvec) : t(\zvec) \ne t(\xvec)}}/k$. It
+  measures local class overlap in the full feature space.
+- **Tree.** Grow a decision tree; the leaf that contains $\xvec$ is its **disjunct**. Disjunct size ($-$) is the number
+  of examples in that leaf of an unpruned tree, normalised by the largest leaf, so that an example isolated in a leaf of
+  its own is hard. Disjunct class percentage ($-$) is the share of examples in the leaf of a pruned tree that share the
+  label of $\xvec$. Tree depth ($+$) is the depth of the leaf, an estimate of how long a description the example
+  needs.
+- **Likelihood.** Class likelihood ($-$) is $\operatorname{CL}(\xvec) = \prod_i p(x_i \mid t(\xvec))$, the <NoteLink
+  to="naive-bayes">naive Bayes</NoteLink> likelihood of the example under its own class, without the prior so that small
+  classes are not penalised. Class likelihood difference ($-$) is $\operatorname{CL}(\xvec, t(\xvec)) - \max_{c \ne
+  t(\xvec)} \operatorname{CL}(\xvec, c)$, the margin by which its own class explains it best.
+- **Class balance.** Minority value ($+$) is $\operatorname{MV}(\xvec) = 1 - \abs{\Dcal_{t(\xvec)}} / \max_c
+  \abs{\Dcal_c}$. Class balance ($-$) is $\operatorname{CB}(\xvec) = \abs{\Dcal_{t(\xvec)}}/\abs{\Dcal} -
+  1/\abs{\mathcal{Y}}$. Both are zero for every example when the classes have equal size.
+
+Later work added measures from dataset-level complexity: the share of an example's neighbours in a minimum spanning tree
+with another label, the ratio of its distances to the nearest example of its own and of another class, and the size of
+its **local set**, the examples closer to it than its nearest enemy <Cite id="lorena2019complexity" />
+<Cite id="paiva2022pyhard" />.
+
+Over 190,000 examples from 64 datasets and nine learners, class overlap was the main source of hardness: kDN and the two
+class-likelihood measures correlated most strongly with instance hardness <Cite id="smith2014instance" />.
+
+<HardnessMap />
+
+## Worked example
+
+Three classifiers give an example $(\xvec, y)$ the probabilities $0.9$, $0.6$ and $0.3$ for its label $y$. Its instance
+hardness is
+
+$$
+\operatorname{IH} = 1 - \tfrac{1}{3}(0.9 + 0.6 + 0.3) = 1 - 0.6 = 0.4 .
+$$
+
+Two of its five nearest neighbours have another label, so $\operatorname{kDN} = 2/5 = 0.4$. The dataset has 30 examples
+of the example's class and 70 of the other. Its minority value is $1 - 30/70 = 0.571$ and its class balance is
+$30/100 - 1/2 = -0.2$. An example of the larger class has minority value $0$ and class balance $+0.2$. The three
+numbers point to two causes at once: moderate overlap with the other class and membership of the smaller class.
+
+## Uses
+
+- **Filtering.** Removing training examples whose hardness exceeds a threshold before training raised accuracy for most
+  of nine learners; a threshold of 0.7 gave the largest gain of the filters compared <Cite id="smith2014instance" />.
+  Filtering removes wrong labels and also correct but atypical examples, so it helps most when the hard examples are
+  mostly noise.
+- **Weighting the loss.** In an informative-error scheme, the target of a network's output for the true class is
+  $1 - \operatorname{IH}$ instead of 1, so the network is not pushed to fit examples that a population of learners gets
+  wrong <Cite id="smith2014instance" />.
+- **Curricula.** Curriculum learning presents easy examples before hard ones
+  <Cite id="bengio2009curriculum" />, and hardness gives the order. Training dynamics give a hardness signal from a
+  single model: how often an example is forgotten after being learnt <Cite id="toneva2019" />, or the mean and
+  variability of its label probability across epochs, which dataset cartography plots to separate easy, ambiguous and
+  hard-to-learn regions <Cite id="swayamdipta2020" />.
+- **Data quality.** The hardest examples are the first place to look for <NoteLink
+  to="detecting-and-cleaning-label-errors">label errors</NoteLink>. Hardness alone cannot tell a wrong label from a
+  correct label in the overlap region; the <NoteLink to="item-response-theory-for-machine-learning">item response
+  view</NoteLink> separates them with a second parameter.
+
+## Instances as points in a space
+
+**Instance space analysis** maps problem instances into two dimensions so that each algorithm's performance can be read
+off a plane. Muñoz, Villanova, Baatar and Smith-Miles took whole classification datasets as the instances, described
+each by meta-features, and chose a linear projection to two dimensions in which the meta-features and the algorithms'
+performances vary as linearly as possible. The region of the plane where an algorithm performs well is its
+**footprint**, and the footprints support algorithm selection <Cite id="munoz2018instance" />. Paiva and colleagues
+applied the same method inside one dataset: the instances are its examples, the meta-features are hardness measures, and
+the footprints show where each classifier fails. Their PyHard package implements it <Cite id="paiva2022pyhard" />.
+
+Hardness measures computed per example and averaged per dataset are also meta-features for choosing an algorithm for a
+new dataset, the older sense of meta-learning <Cite id="lorena2019complexity" />.
+
+## Assumptions
+
+- **A representative population.** Instance hardness is defined relative to $\Lcal$. A population of linear models calls
+  the inside of a curved class boundary hard; a population that includes nearest neighbours does not.
+- **Out-of-sample predictions.** Each $p(y \mid \xvec, h_j)$ must come from a classifier that did not train on $\xvec$,
+  for example by cross-validation. A classifier that memorised the example makes every example look easy.
+- **Labels are the ground truth.** Hardness is measured against the given label. A wrong label makes an easy example
+  look hard.
+
+## Pitfalls
+
+- **One number, several causes.** An example near the boundary and an example with a wrong label can have the same
+  hardness. Instance hardness says that an example is hard, not why, and the measures that say why disagree with each
+  other on many examples.
+- **Scale of the measures.** The measures have different ranges and signs. Compare them by rank correlation, not by raw
+  value.
+- **Class imbalance.** Minority-class examples are hard for learners that ignore imbalance. Rebalancing the evaluation,
+  as well as the training, changes which examples look hard <Cite id="martinezplumed2019" />.

@@ -1,0 +1,131 @@
+---
+title: Shared and multi-view GP-LVMs
+kind: concept
+summary: A shared GP-LVM explains paired data sets $\Ymat$ and $\Zmat$ with one set of latent points and a Gaussian process map to each view. Manifold relevance determination integrates out the latent points and gives each view its own ARD weights, learning which dimensions are shared and which private.
+tags: [gaussian-process, latent-variable-models, multi-view-learning, dimensionality-reduction, bayesian, unsupervised]
+aliases: [shared GP-LVM, SGPLVM, shared Gaussian process latent variable model, manifold relevance determination, MRD, factorised latent space, shared and private latent spaces]
+requires: [gaussian-process-latent-variable-model]
+related: [bayesian-gaussian-process-latent-variable-model, canonical-correlation-analysis, automatic-relevance-determination, conditional-variational-autoencoder]
+references: [shon2005, ek2008, damianou2012, titsias2010]
+status: draft
+updated: 2026-09-27
+---
+
+import { SharedModels } from './SharedModels'
+
+<Definition>
+A shared Gaussian process latent variable model relates two views of the same $N$ items, $\Ymat \in \reals^{N \times
+D_Y}$ and $\Zmat \in \reals^{N \times D_Z}$ with row $n$ of each describing item $n$, through one latent matrix
+$\Xmat \in \reals^{N \times Q}$ <Cite id="shon2005" />. Each view has its own Gaussian process map from the latent
+space, with its own kernel, and the views are independent given $\Xmat$:
+
+$$
+p(\Ymat, \Zmat \mid \Xmat) = \prod_{d=1}^{D_Y}\Gauss(\yvec_{:,d} \mid \zeros, \Kmat_Y)\prod_{d=1}^{D_Z}\Gauss(\zvec_{:,d}
+\mid \zeros, \Kmat_Z),
+$$
+
+with $\Kmat_Y = k_Y(\Xmat, \Xmat) + \sigma_Y^2\eye$ and $\Kmat_Z = k_Z(\Xmat, \Xmat) + \sigma_Z^2\eye$. Manifold
+relevance determination (MRD) integrates out $\Xmat$ variationally and gives $k_Y$ and $k_Z$ separate ARD weights over
+the same latent dimensions <Cite id="damianou2012" />.
+</Definition>
+
+## Intuition
+
+Paired data are common: an image and its depth map, a video and its audio, a human pose and the silhouette it casts, a
+human pose and the joint angles of a robot imitating it. Each view has its own high-dimensional representation, and
+the pairing says that the two describe one underlying state. A single latent point per pair is a natural description
+of that state. The two <NoteLink to="gaussian-process-latent-variable-model">GP-LVM</NoteLink> maps turn it into each
+view.
+
+Once fitted, the latent space translates between views. A new observation of one view is embedded by maximising its
+likelihood over the latent point, and the other view's Gaussian process predicts the matching observation. Shon,
+Grochow, Hertzmann and Rao used this to synthesise novel views of objects and to map human motion-capture poses to the
+degrees of freedom of a humanoid robot <Cite id="shon2005" />.
+
+<SharedModels />
+
+## Shared and private variation
+
+One latent space for both views assumes that all variation is shared. It rarely is. A silhouette does not show whether
+the person faces towards or away from the camera, although the 3D pose does. A face image under different lighting
+varies with the light, which a second face under the same lighting shares, and with identity, which it does not.
+Forcing private variation into the shared space mixes the two.
+
+Ek and colleagues split the latent space into three parts, $\Xmat = [\Xmat^s, \Xmat^Y, \Xmat^Z]$ <Cite id="ek2008" />.
+The shared part $\Xmat^s$ feeds both kernels. The private part $\Xmat^Y$ feeds only $k_Y$, and $\Xmat^Z$ only $k_Z$.
+Private dimensions capture ambiguity. When a silhouette is consistent with several poses, the pose view's private
+dimensions index the alternatives, and inference from the silhouette alone returns several candidate poses. This
+factorisation is fixed before training and fitted by maximum a posteriori estimation of the latent points. The number
+of shared and private dimensions is a discrete structural choice that the likelihood cannot make.
+
+## Manifold relevance determination
+
+MRD replaces the hard split by a soft one and lets the data choose it <Cite id="damianou2012" />. There is one latent
+space $\Xmat$ with $Q$ dimensions. Each view has an ARD squared exponential kernel with its own weights:
+
+$$
+k_Y(\xvec, \xvec') = (\sigma_{\text{ard}}^Y)^2\exp\paren{-\frac12\sum_{q=1}^{Q}w_q^Y(x_q - x_q')^2},
+$$
+
+and likewise $k_Z$ with weights $w_q^Z$. A dimension with $w_q^Y > \delta$ and $w_q^Z > \delta$, for a small threshold
+$\delta$, is shared. A dimension with only $w_q^Y > \delta$ is private to $\Ymat$, and one with only $w_q^Z > \delta$
+is private to $\Zmat$. A dimension relevant to both views with different weights is softly shared.
+
+The weights can only be learned if unused dimensions are penalised, which the maximum-likelihood GP-LVM does not do.
+MRD therefore uses the <NoteLink to="bayesian-gaussian-process-latent-variable-model">Bayesian GP-LVM</NoteLink> bound. With a factorised Gaussian
+$q(\Xmat)$ and inducing variables for each view, Jensen's inequality gives
+
+$$
+\log p(\Ymat, \Zmat) \ge \Lcal_Y + \Lcal_Z - \KL\paren{q(\Xmat) \,\|\, p(\Xmat)},
+$$
+
+where $\Lcal_Y$ and $\Lcal_Z$ are the per-view bounds of the Bayesian GP-LVM, each computed from $\Psi$ statistics with
+that view's kernel. The two views interact only through the shared $q(\Xmat)$. A latent dimension whose weight is zero
+in both views costs nothing in either likelihood term, so the KL term returns it to the prior. The same bound extends to
+more than two views by adding one term per view.
+
+**Inference across views.** Given a new $\yvec_*$, MRD fits $q(\xvec_*)$ with the bound for $\Ymat$ alone. It then finds
+the training latent points nearest to $\xvec_*$ in the shared dimensions only, and generates $\zvec_*$ from $p(\Zmat \mid
+\Xmat)$ at a latent point that takes its shared coordinates from $\xvec_*$ and its $\Zmat$-private coordinates from a
+neighbour. Each neighbour gives one candidate, which exposes the ambiguity of the mapping.
+
+## Experiments
+
+**Faces under varying light.** Two views each contained 192 images, the 64 illumination conditions of three subjects
+from the Yale faces database, at $192 \times 168 = 32{,}256$ pixels per image <Cite id="damianou2012" />. Images were
+paired only by illumination condition, not by identity. The learned weights switched on the first three latent
+dimensions with about equal weight for both views: a shared space shaped like a hollow hemisphere, the geometry of the
+light-source positions. Most other dimensions were private to one view. Two private dimensions of the first view
+separated its three faces into three clusters. Sampling along a shared dimension moved the light source in generated
+images of both views. Sampling in a private space morphed between faces of one view.
+
+**Pose from silhouette.** The views were 63-dimensional 3D joint locations and 100-dimensional histogram-of-gradient
+features of silhouettes, from 5 walking sequences totalling 649 frames, with a separate test sequence of 158 frames
+<Cite id="damianou2012" />. A silhouette often matches several poses. The non-dynamical model cannot choose between
+them because it treats test frames independently. A version with a Gaussian process prior over time on the latent
+points forces the test sequence onto a smooth path, which resolves the ambiguity. The mean Euclidean error of the
+predicted joint locations was 2.94 for MRD with dynamics and 4.67 without. The comparisons were 5.86 for linear
+regression, 4.27 for GP regression, 4.88 for nearest neighbours in silhouette space, 4.04 for nearest neighbours chosen
+to be coherent over the sequence, and 5.13 for the MAP shared GP-LVM of Ek and colleagues.
+
+## Relation to linear methods
+
+<NoteLink to="canonical-correlation-analysis">Canonical correlation analysis</NoteLink> finds linear projections of two
+views that are maximally correlated. It captures shared variation only, through linear maps, and gives no generative
+model. The shared GP-LVM and MRD are nonlinear and generative: each view is a Gaussian process function of a common
+latent space, and MRD also learns which latent dimensions are private to one view.
+
+## Assumptions
+
+- **Paired observations.** Row $n$ of every view describes the same item.
+- **Conditional independence of views** given the latent point.
+- **Smooth maps from the latent space to each view,** with Gaussian noise.
+
+## Pitfalls
+
+- **Thresholding the weights.** Deciding which dimensions are shared uses a threshold $\delta$ on learned weights,
+  which are rarely exactly zero.
+- **Many-to-one maps.** When one view does not determine the other, a single prediction averages incompatible
+  outputs. Return several candidates from different neighbours, or add dynamics or other context to choose.
+- **Cost grows with every view.** Each view has its own kernel and inducing variables, and the per-view terms are
+  computed separately.

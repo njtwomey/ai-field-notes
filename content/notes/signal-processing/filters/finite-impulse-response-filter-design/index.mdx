@@ -1,0 +1,101 @@
+---
+title: FIR filter design
+kind: technique
+summary: 'FIR design turns a frequency specification into coefficients. The window method truncates the ideal sinc response and tapers it; Kaiser''s formulas give the window and length for a required attenuation; Parks–McClellan finds the shortest equiripple filter.'
+tags: [signal-processing, filters, worked-example]
+aliases: [window method, windowed sinc, firwin, Kaiser window design, Parks-McClellan, Remez exchange, equiripple filter, minimax filter design]
+requires: [finite-impulse-response-filters, spectral-leakage-and-windows]
+related: [infinite-impulse-response-filter-design, linear-phase-and-group-delay, frequency-response]
+references: [parks1972, harris1978, smith2007filters]
+status: draft
+updated: 2026-09-26
+---
+
+import { FirDesignExplorer } from './FirDesignExplorer'
+
+<Definition>
+FIR filter design chooses coefficients $h[0], \dots, h[M]$ whose frequency response meets a specification: passband
+and stopband edges, the allowed passband ripple, and the required stopband attenuation. The window method multiplies
+the ideal impulse response by a window of length $M + 1$; optimal methods such as Parks–McClellan minimise the
+largest weighted error over the bands directly <Cite id="parks1972" />.
+</Definition>
+
+## The ideal low-pass filter
+
+An ideal low-pass filter with cutoff $\omega_c$ has $H(e^{i\omega}) = 1$ for $\abs{\omega} < \omega_c$ and 0 otherwise.
+Its impulse response is the inverse DTFT,
+
+$$
+h_d[n] = \frac{1}{2\pi}\int_{-\omega_c}^{\omega_c} e^{i\omega n}\, d\omega = \frac{\sin(\omega_c n)}{\pi n},
+$$
+
+with $h_d[0] = \omega_c/\pi$. It is infinitely long and non-causal, so it cannot be implemented. Shifting it by $M/2$
+and keeping $M + 1$ samples gives a causal, linear-phase approximation:
+$h[n] = h_d[n - M/2]\, w[n]$ for $0 \le n \le M$, where $w[n]$ is the truncating window.
+
+## Why truncation ripples: the Gibbs phenomenon
+
+Multiplying by a window in time convolves the ideal response with the window's transform $W(e^{i\omega})$ in
+frequency. With a rectangular window, $W$ is the Dirichlet kernel, whose sidelobes make the response overshoot at the
+band edge by about 9% of the jump, and the overshoot does not shrink as $M$ grows: the sidelobes narrow but keep their
+height. The peak stopband level stays near $-21$ dB for any length.
+
+A tapered window has lower sidelobes but a wider main lobe. The two properties map directly onto the design: the
+main-lobe width sets the transition width, and the sidelobe level sets the stopband attenuation and passband ripple.
+For 101-tap low-pass designs with cutoff $0.3\pi$, the measured peak stopband levels are:
+
+| Window | Peak stopband level | Main-lobe width (transition) |
+| --- | --- | --- |
+| Rectangular | $-21$ dB | $4\pi/(M+1)$ |
+| Hann | $-44$ dB | $8\pi/M$ |
+| Hamming | $-53$ dB | $8\pi/M$ |
+| Blackman | $-75$ dB | $12\pi/M$ |
+
+In every case the gain at $\omega_c$ is close to $-6$ dB, half amplitude, because the window is symmetric and the
+ideal response jumps from 1 to 0 there <Cite id="harris1978" />.
+
+<FirDesignExplorer />
+
+## Kaiser's formulas
+
+The Kaiser window has a parameter $\beta$ that trades main-lobe width against sidelobe level continuously. Kaiser
+fitted empirical formulas that turn a specification into $\beta$ and a length. For a stopband attenuation of $A$ dB,
+taking the same ripple $\delta = 10^{-A/20}$ in both bands, and a transition width $\Delta\omega$:
+
+$$
+\beta = \begin{cases} 0.1102\,(A - 8.7), & A > 50, \\ 0.5842\,(A - 21)^{0.4} + 0.07886\,(A - 21), & 21 \le A \le 50, \\
+0, & A < 21, \end{cases}
+\qquad M \approx \frac{A - 7.95}{2.285\,\Delta\omega} .
+$$
+
+The length formula is an estimate, accurate to a tap or two; check the result and adjust.
+
+## Parks–McClellan: optimal equiripple design
+
+The window method does not control the error directly: its ripple is largest near the band edges and decays away from
+them, wasting accuracy. Parks and McClellan pose design as a minimax problem: over linear-phase filters of a given
+length, minimise the largest weighted error $\max_\omega W(\omega)\abs{H(e^{i\omega}) - D(\omega)}$ over the specified
+bands <Cite id="parks1972" />. The solution is characterised by the alternation theorem: the optimal filter's error
+reaches its maximum magnitude, with alternating signs, at least $L + 2$ times, where $L$ is the number of free
+cosine coefficients. The Remez exchange algorithm finds it by iterating on the set of extremal frequencies. The result
+is equiripple, and for a given specification it is the shortest linear-phase FIR filter.
+
+## Worked example
+
+Specify a low-pass filter with passband edge $0.25\pi$, stopband edge $0.35\pi$, and 60 dB attenuation, so the
+transition width is $\Delta\omega = 0.1\pi$ and $\delta = 0.001$ in both bands.
+
+- **Kaiser.** $\beta = 0.1102\,(60 - 8.7) = 5.653$ and $M \approx (60 - 7.95)/(2.285 \times 0.1\pi) = 72.5$, which
+  SciPy's `kaiserord` rounds to 74 taps. With the cutoff at the band centre, $0.3\pi$, 74 taps reach $-59.3$ dB at
+  $0.35\pi$; 76 taps reach $-60.4$ dB with passband deviation 0.00101, meeting the specification.
+- **Parks–McClellan.** With equal weights in both bands, 69 taps meet the same specification, reaching $-60.8$ dB. The
+  equiripple design saves about 10% of the length, and so of the computation.
+
+## Pitfalls
+
+- **Specify in the right units.** SciPy's `firwin` and `remez` take frequencies relative to the Nyquist frequency
+  by default, or in Hz with `fs`; a factor of 2 or $\pi$ is the most common design error.
+- **High-pass needs odd length.** A symmetric even-length filter always has a zero at $\omega = \pi$ (type II), so it
+  cannot be a high-pass filter.
+- **Narrow transitions are expensive.** Length grows as $1/\Delta\omega$; halving the transition width doubles the
+  taps, and the delay. An IIR design may be the better choice when linear phase is not needed.

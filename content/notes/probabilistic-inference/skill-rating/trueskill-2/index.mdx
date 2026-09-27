@@ -1,0 +1,131 @@
+---
+title: TrueSkill 2
+kind: technique
+summary: 'TrueSkill 2 extends TrueSkill for online shooters. It adds squad and experience offsets, predicts kills, deaths and quitting from each player''s performance, links skill across game modes, and learns its parameters from past matches, keeping one Gaussian skill per player.'
+tags: [skill-rating, bayesian, message-passing, games, model-based-machine-learning]
+aliases: [TrueSkill2, squad offset, experience offset, quit penalty, metric-driven modelling]
+requires: [trueskill]
+partOf: [skill-rating]
+related: [trueskill-through-time, expectation-propagation, probabilistic-programming]
+references: [minka2018, herbrich2006, dangauthier2007, winn2023]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**TrueSkill 2** is a skill rating system for team-based online games that keeps TrueSkill's single Gaussian skill per
+player and its game model, and changes the assumptions about how skills and match data are generated
+<Cite id="minka2018" />. It adds offsets for squads and for experience, predicts each player's kill and death counts
+and decision to quit from their performance, and links a player's skills across game modes. Its parameters are learned
+from historical matches rather than set by hand.
+</Definition>
+
+## Problem
+
+<NoteLink to="trueskill">TrueSkill</NoteLink> uses only which team won. A match record in a shooter contains much more:
+who played together as a squad, how many matches each player has played, each player's kills and deaths, who quit, and
+the player's record in other game modes. Game studios also asked for properties that constrain any fix
+<Cite id="minka2018" />:
+
+- a single skill number per player, so existing matchmakers keep working;
+- cheap online updates;
+- no hand tuning after launch;
+- **aligned incentives**: a player should raise their rating only by playing the game well. A quantity that a player
+  controls directly, such as how often they heal themselves, is a poor signal of skill.
+
+## Metric-driven modelling
+
+The model was built by a loop the authors call metric-driven modelling <Cite id="minka2018" />. Partition players by
+a feature, such as squad size or the kill rate in their previous match. Compare their actual win rate with the win rate
+the model predicted. A gap shows an assumption that the data contradict. Change that assumption, the smallest change
+that closes the gap, and repeat. This is the model-based approach of Winn and Bishop applied to a production system
+<Cite id="winn2023" />: each fix is a change to the generative model, and the inference code is regenerated from the
+model description, here with Infer.NET.
+
+## Mechanism: the changed assumptions
+
+Write $s_i$ for player $i$'s skill and $p_i$ for their performance in a match. The scale is fixed by setting the
+performance noise to $\beta = 1$.
+
+**Squads.** Friends who queue together win more often than the sum of their skills predicts, and the gap grows with
+squad size. TrueSkill 2 adds an offset that depends on the size of the player's squad:
+
+$$
+p_i \sim \Gauss\paren{s_i + \operatorname{squadOffset}(\text{squad size}),\ \beta^2},
+$$
+
+with one learned offset per squad size and $\operatorname{squadOffset}(1) = 0$.
+
+**Experience.** New players win less often than their ratings predict, and the gap closes over their first matches.
+Classic TrueSkill's random walk is unbiased. TrueSkill 2 biases it by an amount that depends on how many matches the
+player has played in the mode, capped at 200:
+
+$$
+s_i^{\text{next}} \sim \Gauss\paren{s_i + \operatorname{experienceOffset}(\min(n_i, 200)),\ \gamma^2}.
+$$
+
+Each match now nudges the rating up slightly whatever the result. The nudge is small next to a win or a loss.
+
+**Kills and deaths.** A player's kill count $k_i$ is modelled from their own performance and the performance of the
+opposing team, scaled by time played $T_i$:
+
+$$
+k_i \sim \max\paren{0,\ \Gauss\paren{(w_p\, p_i + w_o\, p_i^{o})\,T_i,\ v\,T_i}},
+$$
+
+with learned weights, $w_p > 0$ and $w_o < 0$ for kills, and the signs reversed for deaths. Here $p_i^{o}$ is the
+opposing team's performance, averaged so that it works for teams of any size. The mean and variance both scale with
+time played, as the Halo 5 data showed, but the variance is not equal to the mean, so a truncated Gaussian replaces a
+Poisson model. The counts depend on performance, not on a separate kill skill. The team outcome still determines
+performance first, and the counts only redistribute credit within a team: the player with more kills gets more of the
+win.
+
+**Quitting.** Players who quit tend to be underperforming. TrueSkill 2 models an underperformance event
+$\text{under}_i$, true when $p_i - p_i^{o}$ plus Gaussian noise falls below a threshold, and
+
+$$
+\text{quit}_i = \text{unrelated}_i \ \text{or}\ \paren{\text{related}_i \ \text{and}\ \text{under}_i},
+$$
+
+with learned probabilities for the two Boolean causes. Observing a quit lowers the inferred performance of the quitter.
+In the online updater a quit is an extra observation added only when a player quits, so matches without quits cost the
+same as in TrueSkill.
+
+**Game modes.** Skills in different modes are correlated. Each player has a base skill and one offset per mode, and the
+skill in mode $d$ is $s_{id} = w_d\, \text{base}_i + \text{offset}_{id}$ with $w_d \ge 0$. A player who starts a new
+mode borrows their rating from the others. Once they have played that mode enough, games elsewhere barely change it.
+
+## Learning the parameters
+
+The model has many parameters per game mode: prior mean and variance, drift per match and per unit of idle time, draw
+margin, squad offsets, 200 experience offsets, and the kill, death and quit weights. Each parameter touches millions of
+factors, so its posterior is sharp. TrueSkill 2 therefore treats each parameter as a point estimate. It runs batch
+expectation propagation over the whole history, as in <NoteLink to="trueskill-through-time">TrueSkill Through
+Time</NoteLink>, computes each parameter's gradient from the EP messages into it, and updates the parameters with the Rprop optimiser. About 100 forward and backward sweeps are enough
+<Cite id="minka2018" />.
+
+## Results
+
+On Halo 5 data, trained on 23 million matches and tested on the next 3 million, TrueSkill 2 predicted the winning team
+in 68% of test matches against 52% for classic TrueSkill with tuned parameters <Cite id="minka2018" />. Each change
+also closed the gap in the metric that motivated it, such as the win rate of large squads. TrueSkill 2 has rated
+players in Gears of War 4 since its launch in 2016, with online updates during a season and a batch refit before each
+new one.
+
+## Cost
+
+An online update is still one EP pass on a per-match factor graph, now with a few extra factors per player. The state
+per player is a base skill, an offset per mode played, and an experience count. Parameter learning is an offline batch
+job over the history.
+
+## Trade-offs
+
+- **Incentives constrain the model.** Statistics that a player can inflate without helping the team are left out, even
+  when they would improve prediction. Kills enter only through performance, with a monotone link, so more kills never
+  lower a rating.
+- **Completion is rewarded.** To penalise quitting, the model must slightly favour completing, so a player who completes
+  a match with almost no play time gains a little. The paper points out this side effect.
+- **Game-specific.** Squad, kill and quit models suit online shooters. Other games need their own metrics and their own
+  changes.
+- **More to learn.** The model needs enough historical matches per mode. Modes with fewer than about 1000 matches borrow
+  parameters from a similar popular mode.

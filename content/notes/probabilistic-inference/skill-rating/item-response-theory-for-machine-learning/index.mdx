@@ -1,0 +1,202 @@
+---
+title: Item response theory for machine learning
+kind: concept
+summary: 'Item response theory for evaluation treats test instances as items and models as respondents. Fitted to many models'' right and wrong answers, it gives each instance a difficulty and a discrimination, and each model an ability. Negative discrimination flags likely label errors.'
+tags: [evaluation, psychometrics, label-noise, meta-learning, model-selection, worked-example]
+aliases:
+  [
+    IRT for machine learning,
+    IRT in AI,
+    item response theory for classifiers,
+    instance-level evaluation,
+    negative discrimination,
+    classifier characteristic curve,
+    IRT for benchmarks,
+    tinyBenchmarks,
+  ]
+requires: [item-response-theory, instance-hardness]
+partOf: [skill-rating]
+related:
+  [
+    beta-cubed-item-response-model,
+    ability-estimation-and-item-calibration,
+    detecting-and-cleaning-label-errors,
+    language-model-evaluation,
+    cross-validation,
+    meta-learning,
+  ]
+references:
+  [martinezplumed2016, martinezplumed2019, chen2019beta3, smith2014instance, lalor2016, rodriguez2021, polo2024tinybenchmarks]
+status: draft
+updated: 2026-09-27
+---
+
+import { InstanceIrtExplorer } from '../_shared/InstanceIrtExplorer'
+
+<Definition>
+Let $M$ models $i = 1, \dots, M$ each predict the labels of $N$ test instances $j = 1, \dots, N$, and let
+$x_{ij} \in \set{0, 1}$ record whether model $i$ labels instance $j$ correctly. **Item response theory for machine
+learning** fits an <NoteLink to="item-response-theory">item response model</NoteLink> to the $M \times N$ matrix with the
+instances as items and the models as respondents <Cite id="martinezplumed2016" /> <Cite id="martinezplumed2019" />.
+Under the two-parameter logistic (2PL) model,
+
+$$
+\pr(x_{ij} = 1) = \sigma\paren{a_j(\theta_i - b_j)}, \qquad \sigma(z) = \frac{1}{1 + e^{-z}},
+$$
+
+where $\theta_i$ is the **ability** of model $i$, $b_j$ the **difficulty** of instance $j$ and $a_j$ its
+**discrimination**, which may be negative.
+</Definition>
+
+## Intuition
+
+A benchmark is a test, and every model sat it. In a classroom, a question that strong students get right and weak
+students get wrong is a good question. A question that everyone gets right says nothing about who is stronger. A question
+that weak students get right and strong students get wrong is suspect: the answer key is probably wrong.
+
+The same three cases appear among test instances. An instance far from the class boundary is right for every model and
+carries no information about which model is better. An instance near the boundary separates good models from poor ones.
+An instance with a wrong label is "answered correctly" only by models that fail to learn the pattern around it, so the
+chance of a correct answer falls as ability rises. Item response theory gives each case a parameter.
+
+The <NoteLink to="instance-hardness">instance hardness</NoteLink> of an instance, one minus the share of models that get
+it right, merges these cases. Under the 2PL, the expected share of correct answers over a population of abilities
+$\theta \sim p(\theta)$ is $\int \sigma\paren{a_j(\theta - b_j)}\,p(\theta)\,d\theta$, which depends on $a_j$ and $b_j$
+together. A correctly labelled instance at the boundary and a wrongly labelled instance in the middle of a class can have
+the same hardness and opposite discriminations <Cite id="martinezplumed2019" />.
+
+## The parameters, read for classifiers
+
+- **Difficulty $b_j$** is the ability at which a model has an even chance of labelling instance $j$ correctly. Instances
+  near the class boundary and in small classes have high difficulty <Cite id="martinezplumed2019" />.
+- **Discrimination $a_j$** is the steepness of the item characteristic curve at $b_j$: how sharply the instance
+  separates models just below $b_j$ from those just above. An instance that every model gets right has a flat curve and
+  is useless for ranking.
+- **Negative discrimination** means that stronger models are more often wrong. In psychometrics such items are flawed
+  and are removed. In machine learning they are informative: on a toy dataset with 10% of labels flipped on purpose,
+  every flipped instance received a negative discrimination, along with a few instances on the boundaries between
+  classes <Cite id="martinezplumed2019" />.
+- **Guessing $c_j$**, the lower asymptote of the 3PL, does not match chance accuracy. With classifiers as respondents it
+  bore no relation to the number or proportion of classes and acted as an extra degree of freedom in the fit
+  <Cite id="martinezplumed2019" />.
+- **Ability $\theta_i$** is a model's skill on the test's scale. It is not a monotone function of accuracy, because
+  answers are weighted by the discrimination of the instances they are given on.
+
+## Why a wrong label gives a negative slope
+
+Take two instances with the same features $\xvec$ and opposite labels in a two-class problem. A model that predicts one
+label for $\xvec$ is right on exactly one of them, so $\pr(x_{i1} = 1 \mid \theta) = 1 - \pr(x_{i2} = 1 \mid \theta)$
+for every ability. If one item characteristic curve rises with ability, the other falls
+<Cite id="martinezplumed2019" />. The same holds on average for an instance with a flipped label: a model that learns
+the pattern around $\xvec$ well predicts the true label with high probability and the given, wrong label with low
+probability. The better the model, the lower its chance of matching the given label, and the fitted $a_j$ is negative.
+
+The argument also shows the method's limit. It detects a label that disagrees with the features, not the event of a
+flip. A correctly labelled instance that lies deep inside the other class gets a negative discrimination too, and a
+flipped label that happens to agree with the features cannot be detected by any model.
+
+## Ability is weighted by discrimination
+
+With the instance parameters fixed, the 2PL log-likelihood of model $i$ is
+$\ell(\theta_i) = \sum_j \brack{x_{ij}\log P_{ij} + (1 - x_{ij})\log(1 - P_{ij})}$ with
+$P_{ij} = \sigma\paren{a_j(\theta_i - b_j)}$. Since $\partial P_{ij}/\partial\theta_i = a_j P_{ij}(1 - P_{ij})$, its
+derivative is
+
+$$
+\ell'(\theta_i) = \sum_j a_j\paren{x_{ij} - P_{ij}} ,
+$$
+
+and the maximum-likelihood ability solves $\sum_j a_j x_{ij} = \sum_j a_j P_{ij}(\hat\theta_i)$
+<Cite id="martinezplumed2019" />. The left side is a weighted score in which a correct answer on instance $j$ counts
+$a_j$. A correct answer on a highly discriminating instance counts most. A correct answer on an instance with negative
+discrimination lowers the score. Two models with equal accuracy therefore get different abilities when they are right on
+different instances, and a model that "fits the noise" is penalised. Removing instances with negative discrimination
+before estimating abilities made ability and accuracy much more closely related, and in most cases put an oracle
+classifier that is always right back at the top <Cite id="martinezplumed2019" />.
+
+A **classifier characteristic curve** plots one model's accuracy against instance difficulty, in bins. It shows where on
+the difficulty scale a model's errors lie: two models with equal accuracy may differ on easy instances or only on hard
+ones <Cite id="martinezplumed2019" />.
+
+<InstanceIrtExplorer />
+
+## Uses of the fitted parameters
+
+- **Informative test sets.** The 2PL information of instance $j$ at ability $\theta$ is $a_j^2 P_j(\theta)\paren{1 -
+  P_j(\theta)}$, largest at $\theta = b_j$. A small set of high-information instances at the abilities of interest
+  ranks models almost as well as the full test set. For large language models, a fitted IRT model picks about 100
+  representative MMLU questions out of 14,000 and estimates a new model's accuracy from its answers to them, with about
+  2% average error across benchmarks <Cite id="polo2024tinybenchmarks" />. Adaptive testing goes further and picks each
+  next instance by the model's current estimated ability.
+- **Benchmark curation.** Instances with negative or near-zero discrimination add noise to a leaderboard. On NLP
+  leaderboards, an IRT model of subject skill and item difficulty and discriminability identified annotation errors,
+  found the examples most worth annotating, and measured how reliable the rankings are <Cite id="rodriguez2021" />.
+  Lalor, Wu and Yu fitted an IRT model to many human answers on a textual-entailment test set, then placed NLP systems
+  on the human ability scale; a high accuracy did not always mean a high ability <Cite id="lalor2016" />.
+- **Label-noise detection.** Negative discrimination is a population-based detector of label errors, usable alongside
+  single-model methods such as <NoteLink to="detecting-and-cleaning-label-errors">confident learning</NoteLink>.
+- **Comparing models at the instance level.** Abilities are on one scale for a given test, whatever mix of easy and hard
+  instances it contains. Accuracy is not comparable across datasets of different difficulty, and averaging ranks across
+  datasets discards the size of the differences <Cite id="martinezplumed2019" />.
+- **Continuous responses.** Binary responses discard the models' probabilities. The <NoteLink
+  to="beta-cubed-item-response-model">β³ model</NoteLink> fits the probability of the correct class directly, so that a
+  confident error counts more than a hesitant one <Cite id="chen2019beta3" />.
+
+## Worked example
+
+Four models A, B, C and D answer five instances ($1$ = correct):
+
+| model | 1 | 2 | 3 | 4 | 5 | correct |
+| ----- | - | - | - | - | - | ------- |
+| A     | 1 | 1 | 1 | 1 | 0 | 4       |
+| B     | 1 | 1 | 1 | 0 | 0 | 3       |
+| C     | 1 | 1 | 0 | 0 | 1 | 3       |
+| D     | 1 | 0 | 0 | 0 | 1 | 2       |
+
+The instance hardness, the share of wrong answers, is $0$, $0.25$, $0.5$, $0.75$ and $0.5$. Instances 3 and 5 have the
+same hardness. The pattern differs. Instance 3 is right for A and B and wrong for C and D. Instance 5 is right only for
+C and D, whose scores on the other four instances are 2 and 1, the two lowest.
+
+A 2PL fitted by joint maximum a posteriori estimation, with priors $\theta_i \sim \Gauss(0, 1)$,
+$a_j \sim \Gauss(0.5, 1)$ and $a_j b_j \sim \Gauss(0, 3^2)$, gives (checked with scipy):
+
+| instance | 1 | 2 | 3 | 4 | 5 |
+| -------- | - | - | - | - | - |
+| $a_j$    | 0.43 | 1.05 | 1.28 | 1.04 | $-0.64$ |
+| $b_j$    | $-6.05$ | $-1.04$ | 0.03 | 1.09 | 0.03 |
+
+and abilities $\theta_A = 1.11$, $\theta_B = 0.53$, $\theta_C = -0.47$ and $\theta_D = -1.05$.
+
+- Instance 1 is right for everyone. Its difficulty is far below every ability, and its discrimination stays near the
+  prior mean of 0.5 because the data carry no information about it.
+- Instances 2, 3 and 4 have positive discrimination and difficulties that rise with their hardness.
+- Instance 5 has negative discrimination. The fitted chance of a correct answer falls from 0.67 for D to 0.33 for A. It
+  is the instance to inspect for a wrong label.
+- B and C both have 3 correct answers, yet $\theta_B - \theta_C = 1.0$. C's extra correct answer is on instance 5, and
+  by the score equation above a correct answer there counts $a_5 = -0.64$, against B's on instance 3, which counts
+  $1.28$.
+
+## Assumptions
+
+- **One ability.** A single $\theta_i$ explains all instances. A linear model and a nearest-neighbour model fail in
+  different regions of the feature space, so their errors may need several dimensions.
+- **Local independence.** Given the abilities, responses are independent. Models from the same family, or trained on
+  the same data, share errors beyond what ability explains.
+- **A varied population.** The fit needs models over a range of abilities. Martínez-Plumed and colleagues added random,
+  majority-class and oracle classifiers to their 121 real ones, because with real classifiers alone many easy instances
+  were right for every model and their curves were flat or singular <Cite id="martinezplumed2019" />.
+- **Clean training data.** Label noise in the training set lowers every model's ability and hides the test-set noise.
+  Negative discrimination detects noisy test labels best when the models were trained on clean data
+  <Cite id="chen2019beta3" />.
+
+## Pitfalls
+
+- **Class imbalance mimics noise.** When good classifiers neglect a minority class, a 2PL fit can give the whole
+  minority class negative discrimination. A 3PL, and estimating the IRT parameters on a class-balanced resample of the
+  test responses, removed most of these spurious negatives <Cite id="martinezplumed2019" />.
+- **Software that forbids negative discrimination.** Psychometric packages often bound $a_j$ below by a positive
+  number, since negative items are errors in a test for people. For label-noise detection the bound must be removed.
+- **Arbitrary scale and sign.** Abilities and difficulties are identified only up to shift and scale, and in the 2PL
+  flipping the signs of every $\theta_i$, $a_j$ and $b_j$ gives the same fit. Initialise abilities from accuracy, or put
+  a prior with positive mean on $a_j$, so that strong models get high ability.
+- **Cross-validated responses.** Responses must come from models that did not train on the instance.

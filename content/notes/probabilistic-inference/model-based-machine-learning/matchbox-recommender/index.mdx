@@ -1,0 +1,167 @@
+---
+title: Matchbox recommender
+kind: technique
+summary: 'Matchbox maps user features and item features through learned matrices to trait vectors $\svec = \Umat\xvec$ and $\tvec = \Vmat\yvec$ and predicts a latent rating $\svec\transpose\tvec$ plus bias and noise. Gaussian beliefs, per-user rating thresholds and one-pass message passing give online recommendations that work at cold start.'
+tags: [model-based-machine-learning, recommender-systems, collaborative-filtering, bayesian, message-passing, online-learning, variational-inference]
+aliases: [Matchbox, Bayesian bilinear rating model, trait space recommender, making recommendations, MBML chapter 5, Infer.NET Matchbox recommender]
+requires: [matrix-factorisation-for-recommendation, factor-graph, expectation-propagation]
+partOf: [model-based-machine-learning]
+related: [hybrid-recommenders, cold-start-problem, two-tower-model, content-based-filtering, email-reply-classifier, adpredictor, mean-field-variational-inference, assumed-density-filtering]
+references: [stern2009matchbox, winn2023recommender, winn2005vmp, minka2005, minka2001]
+status: draft
+updated: 2026-09-27
+---
+
+import { MatchboxGraph } from './MatchboxGraph'
+import { ProductFactor } from './ProductFactor'
+
+<Callout variant="credit" title="Provenance: Stern, Herbrich and Graepel (2009), and Model-Based Machine Learning, by John Winn et al.">
+This note follows "Matchbox: Large Scale Online Bayesian Recommendations" by David Stern, Ralf Herbrich and Thore
+Graepel (Microsoft Research), WWW 2009 <Cite id="stern2009matchbox" />, and the "Making Recommendations" chapter of
+*Model-Based Machine Learning* by John Winn with Christopher M. Bishop, Thomas Diethe, John Guiver and Yordan Zaykov
+(Microsoft Research), which rebuilds the Matchbox model assumption by assumption <Cite id="winn2023recommender" />. The
+model, its feedback models, the mixed EP and variational inference and the online training scheme are theirs; this note
+restates them in this site's notation. I include it because it is a very good account, and I want it in my own
+records. The book is free to read at [mbmlbook.com](https://mbmlbook.com). The derivation of the variational message
+and the interactive figure were added by this site.
+</Callout>
+
+<Definition>
+User $u$ is described by a feature vector $\xvec \in \reals^n$ and item $j$ by $\yvec \in \reals^m$, including one-hot
+identity features. **Matchbox** maps them to $K$-dimensional trait vectors $\svec = \Umat\xvec$ and $\tvec = \Vmat\yvec$,
+with a factorised Gaussian prior on every entry of $\Umat$ and $\Vmat$. The latent rating is
+$r \sim \Gauss(\svec\transpose\tvec + b, \beta^2)$, with a bias $b$ that is itself a weighted sum of features. The
+observation is $r$ itself, its sign, or a star rating through thresholds specific to the user <Cite id="stern2009matchbox" />.
+</Definition>
+
+## Problem
+
+A web recommender has to predict, for each user, which items they will value, from sparse ratings. It must say
+something sensible about a new user or a new item, which have no ratings, from metadata such as age or genre. It must
+accept different kinds of feedback, learn from a stream of ratings without retraining, and follow tastes that drift.
+Plain <NoteLink to="matrix-factorisation-for-recommendation">matrix factorisation</NoteLink> handles none of the
+first three.
+
+## Mechanism
+
+### The bilinear model
+
+Row $k$ of $\Umat$ holds the contribution of each user feature to trait $k$, so a user's trait $s_k = \sum_i u_{ki}
+x_i$ adds up contributions from all their features. The same holds for items. The predicted affinity is the inner
+product in trait space <Cite id="stern2009matchbox" />:
+
+$$
+\expect[r \mid \svec, \tvec, b] = \svec\transpose\tvec + b = \sum_{k=1}^{K} s_k t_k + b.
+$$
+
+- **Collaborative filtering as a special case.** If the only features are one-hot identities, $\xvec = \evec_u$ and
+  $\yvec = \evec_j$, then $\svec$ and $\tvec$ are columns of $\Umat$ and $\Vmat$, and the model is Bayesian matrix
+  factorisation.
+- **Cold start.** With metadata features, a new user's traits come from their age, location and so on, whose weights
+  were learned from other users. As the user rates items, their identity feature's weights move away from the prior and
+  the recommendations become personal. This is a <NoteLink to="hybrid-recommenders">hybrid recommender</NoteLink> in
+  one model, and the same structure, features to vectors to an inner product, is the
+  <NoteLink to="two-tower-model">two-tower model</NoteLink> with linear towers.
+
+<MatchboxGraph />
+
+### Feedback models
+
+The rating layer is interchangeable <Cite id="stern2009matchbox" />:
+
+- **Absolute rating.** Observe $r$ directly.
+- **Binary.** Observe $c = \indicator[r > 0]$, a like or a click. This is a probit layer, as in the
+  <NoteLink to="email-reply-classifier">email reply classifier</NoteLink>.
+- **Ordinal.** Observe a star rating $\ell \in \{1, \dots, L\}$. User $u$ has thresholds $b_{u1} < \dots < b_{u,L-1}$,
+  each with a Gaussian prior, and gives $\ell$ stars when the latent rating falls between thresholds $\ell - 1$ and
+  $\ell$. Each user can use the scale differently: a generous user's thresholds sit low.
+
+The book makes the thresholds shared by all users, on the assumption that two people with the same affinity for a film
+give it the same number of stars, and fixes the middle threshold at zero so that thresholds and biases cannot trade off
+<Cite id="winn2023recommender" />.
+
+### Dynamics
+
+Tastes, popularity and personal rating scales drift. Each latent variable follows a Gaussian random walk between time
+steps, $w^{(t+1)} \sim \Gauss(w^{(t)}, \gamma^2)$. In online training this adds $\gamma^2$ to the variance of each
+belief once per step.
+
+## Inference
+
+### Messages
+
+Every factor except two is linear-Gaussian: the sums that form traits, the sum that forms $\tilde r$ and the noise.
+Their messages are exact Gaussian sum-product messages <Cite id="stern2009matchbox" />. The threshold factors of the
+feedback layer are handled by expectation propagation, as for a probit likelihood. The remaining factor is the product
+$z_k = s_k t_k$.
+
+### The product factor
+
+Given a message about $z_k$, the exact message to $s_k$ is not Gaussian. If $z_k$ is likely positive, then $s_k$ and
+$t_k$ are either both positive or both negative, and the message on $s_k$ has two modes, one for each sign of $t_k$.
+The moment-matching projection of EP covers both modes. The resulting Gaussian message is wider than it should be, and
+with repeated updates the variances keep growing <Cite id="stern2009matchbox" />.
+
+Matchbox instead uses the variational message for this factor, the one that minimises the reversed divergence
+$\KL(q \,\|\, p)$ locally, as in <NoteLink to="mean-field-variational-inference">mean-field variational
+inference</NoteLink> <Cite id="winn2005vmp" /> <Cite id="minka2005" />. Let the message arriving at the product from
+$z_k$ be $\Gauss(z_k; m_z, v_z)$, and let $q(t_k)$ have mean $\langle t\rangle$ and second moment $\langle t^2\rangle$.
+The variational message to $s_k$ is the exponentiated expected log factor:
+
+$$
+\log \mu_{\times \to s}(s) = \expect_{q(t)}\LB -\frac{(m_z - s\,t)^2}{2 v_z} \RB + \text{const}
+= -\frac{\langle t^2\rangle}{2 v_z}\, s^2 + \frac{m_z \langle t\rangle}{v_z}\, s + \text{const},
+$$
+
+a Gaussian in $s$ with
+
+$$
+\mu_{\times \to s}(s) = \Gauss\paren{s;\; \frac{m_z\,\langle t\rangle}{\langle t^2\rangle},\; \frac{v_z}{\langle t^2\rangle}}.
+$$
+
+The message to $t_k$ swaps the roles of $s$ and $t$. The message to $z_k$ is Gaussian with mean $\langle s\rangle
+\langle t\rangle$ and variance $\langle s^2\rangle\langle t^2\rangle - \langle s\rangle^2 \langle t\rangle^2$. The
+precision of the message to $s$ grows with $\langle t^2\rangle = \var[t] + \langle t\rangle^2$: an *uncertain* $t$
+produces a *confident* message about $s$. Stern et al. point out that this is an undesirable property of the
+approximation <Cite id="stern2009matchbox" />. It is also what makes the solution commit to one mode. Minimising
+$\KL(q \,\|\, p)$ is mode-seeking, so the variational solution picks one of the equivalent sign configurations, which is
+what breaks the symmetry of trait space.
+
+<ProductFactor />
+
+### Schedule and online training
+
+For one rating, the schedule runs the feature sums up to the traits, iterates the messages through the product, sum,
+noise and feedback factors until the predicted rating stops changing, and sends the result back down to $\Umat$,
+$\Vmat$ and the bias weights. The updated marginals become the prior for the next rating and the messages are
+discarded. This single pass is <NoteLink to="assumed-density-filtering">assumed density filtering</NoteLink>: memory
+grows with the number of users, items and features, not with the number of ratings. Several full EP passes over stored
+messages improve accuracy when the cost is affordable <Cite id="stern2009matchbox" />.
+
+## Symmetries
+
+The likelihood depends on $\svec\transpose\tvec$ only. Rotating trait space, $\svec \to \Rmat\svec$ and
+$\tvec \to \Rmat\tvec$ with $\Rmat$ orthogonal, leaves every prediction unchanged, and so does flipping the sign of a
+trait for all users and items together. The exact posterior therefore has many equivalent modes, and its marginals are
+centred at zero. A useful approximation must pick one mode. The book fixes the traits of the first two films to
+$(1, 0)$ and $(0, 1)$, which pins the rotation <Cite id="winn2023recommender" />; the variational product message
+breaks the remaining symmetry during inference.
+
+## Cost
+
+One update touches the active features of one user and one item, and costs $O(K(n_{\text{active}} + m_{\text{active}}))$
+per iteration of the local schedule. Memory holds a mean and a variance per weight. Predictions for a user are inner
+products of their trait vector with every item's, the same retrieval problem as for any
+<NoteLink to="two-tower-model">two-tower model</NoteLink>.
+
+## Trade-offs
+
+- **Uncertainty.** Each prediction comes with a variance. New items can be ranked by an optimistic score, or sampled,
+  to explore.
+- **Approximation.** The factorised posterior ignores correlations between the traits of a user and those of the items
+  they rated. The book finds the posteriors of most films broad after training, because most films have few ratings
+  <Cite id="winn2023recommender" />.
+- **Linear towers.** Features enter linearly. Interactions between features, or text and images, need either crafted
+  features or a neural tower, which gives up closed-form messages.
+- **Implicit feedback.** Unrated items are not negative examples. The binary model needs sampled negatives or a model of
+  exposure, as discussed in <NoteLink to="biases-in-recommender-feedback">biases in recommender feedback</NoteLink>.

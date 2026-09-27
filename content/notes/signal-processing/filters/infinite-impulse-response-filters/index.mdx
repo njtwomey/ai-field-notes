@@ -1,0 +1,81 @@
+---
+title: IIR filters
+kind: concept
+summary: 'An infinite impulse response filter feeds past outputs back, $y[n] = \sum_k b_k x[n-k] - \sum_{k \ge 1} a_k y[n-k]$. Poles give sharp responses at low order, but stability requires every pole inside the unit circle, and the phase cannot be exactly linear.'
+tags: [signal-processing, filters, worked-example]
+aliases: [infinite impulse response filter, IIR, recursive filter, biquad, second-order section, exponential moving average filter, one-pole filter]
+requires: [difference-equations, poles-and-zeros, frequency-response]
+related: [infinite-impulse-response-filter-design, finite-impulse-response-filters, zero-phase-filtering, minimum-phase-filters]
+references: [smith2007filters]
+status: draft
+updated: 2026-09-26
+---
+
+<Definition>
+An infinite impulse response (IIR) filter computes each output from current and past inputs and past outputs:
+
+$$
+y[n] = \sum_{k=0}^{M} b_k\, x[n - k] - \sum_{k=1}^{N} a_k\, y[n - k],
+\qquad H(z) = \frac{\sum_{k=0}^{M} b_k z^{-k}}{1 + \sum_{k=1}^{N} a_k z^{-k}} .
+$$
+
+The feedback makes the impulse response infinitely long in general. The roots of the denominator are the filter's
+poles <Cite id="smith2007filters" />.
+</Definition>
+
+## Stability
+
+Write $H(z)$ in partial fractions with distinct poles $p_k$: $H(z) = \sum_k \frac{c_k}{1 - p_k z^{-1}}$, plus a
+polynomial if $M \ge N$. Each term is the transform of $c_k p_k^n$ for $n \ge 0$, so the causal impulse response is
+
+$$
+h[n] = \sum_k c_k\, p_k^{\,n}, \qquad n \ge 0 .
+$$
+
+This is absolutely summable exactly when every $\abs{p_k} < 1$. A causal IIR filter is therefore stable if and only if
+all its poles lie strictly inside the unit circle; a pole on or outside the circle makes the response ring forever or
+grow. Repeated poles add factors $n^j p_k^n$, which decay under the same condition. The distance of the poles from the
+circle sets how long the response rings: a pole at radius $r$ decays by a factor $r$ per sample, with time constant
+$-1/\ln r$ samples.
+
+## Why use feedback
+
+Poles near the unit circle create sharp peaks and steep transitions that FIR filters can only approximate with many
+coefficients. For a typical low-pass specification, an elliptic IIR filter of order 4 does the work of an FIR filter
+with dozens of taps; see <NoteLink to="infinite-impulse-response-filter-design">IIR filter design</NoteLink>. The cost is in three places:
+
+- **Phase.** A causal stable IIR filter cannot have exactly linear phase: linear phase needs a symmetric impulse
+  response, which an infinite causal response cannot have. Its group delay varies with frequency, peaking near the
+  band edge. <NoteLink to="zero-phase-filtering">Zero-phase filtering</NoteLink> removes the phase offline.
+- **Numerical sensitivity.** Poles of a high-order polynomial move far when its coefficients are rounded, and a filter
+  designed as stable can become unstable in fixed point. The standard remedy is to factor the filter into cascaded
+  second-order sections (biquads), each with two poles and two zeros, which are far less sensitive.
+- **Limit cycles.** Rounding inside a feedback loop can sustain small oscillations with zero input.
+
+## Worked example
+
+The one-pole low-pass filter, also called the exponential moving average,
+
+$$
+y[n] = a\, y[n - 1] + (1 - a)\, x[n], \qquad 0 < a < 1,
+$$
+
+has $H(z) = (1 - a)/(1 - a z^{-1})$, one pole at $z = a$, and impulse response $h[n] = (1 - a)a^n$: each past input is
+weighted by a geometrically decaying factor. Its gain is 1 at $\omega = 0$, and
+
+$$
+\abs{H(e^{i\omega})}^2 = \frac{(1 - a)^2}{1 - 2a\cos\omega + a^2} .
+$$
+
+Setting this to $\tfrac12$ gives the half-power cutoff $\cos\omega_c = (-1 + 4a - a^2)/(2a)$. For $a = 0.9$,
+$\omega_c = 0.1055$ rad/sample, about $0.034\pi$, and the time constant is $-1/\ln 0.9 = 9.5$ samples. Its mean delay,
+$\sum_n n\, h[n] = a/(1 - a) = 9$ samples, matches a 19-tap moving average; the recursive filter needs one memory
+element and two multiplications per sample instead of 19 stored inputs.
+
+## Pitfalls
+
+- **Design in sections.** Compute and apply high-order IIR filters as second-order sections (`sos` output in SciPy),
+  not as one long numerator and denominator.
+- **Transients.** The response to a sudden input lasts several time constants; the first outputs are unreliable.
+- **Poles close to the circle.** Very narrow filters have poles within $10^{-3}$ of the unit circle, which demands high
+  numerical precision and long settling.

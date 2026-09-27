@@ -1,0 +1,144 @@
+---
+title: Email reply classifier
+kind: concept
+summary: 'A personal classifier predicts whether a user will reply to an email. Feature weights $w_i \sim \Gauss(0, 1)$ give a score $s = \sum_i w_i x_i$; Gaussian noise and a learned threshold $\theta$ give $\pr(\text{reply}) = \Phi((s - \theta)/\sigma)$. Online updates and a community prior across users handle new users.'
+tags: [model-based-machine-learning, bayesian, classification, online-learning, message-passing, factor-graph]
+aliases: [uncluttering your inbox, reply prediction, clutter classifier, MBML chapter 4, noisy threshold classifier, community prior]
+requires: [factor-graph, gaussian-distribution, bayes-theorem]
+partOf: [model-based-machine-learning]
+related: [adpredictor, bayes-point-machine, logistic-regression, assumed-density-filtering, sequential-bayesian-updating, cold-start-problem]
+references: [winn2023email, graepel2010adpredictor, minka2001]
+status: draft
+updated: 2026-09-27
+---
+
+import { EmailGraph } from './EmailGraph'
+import { NoisyThreshold } from './NoisyThreshold'
+
+<Callout variant="credit" title="Provenance: Model-Based Machine Learning, by John Winn et al.">
+This note follows the "Uncluttering Your Inbox" chapter of *Model-Based Machine Learning* by John Winn with Christopher
+M. Bishop, Thomas Diethe, John Guiver and Yordan Zaykov (Microsoft Research) <Cite id="winn2023email" />. The model, its
+assumptions and the way they are built up step by step are theirs; this note restates them in this site's notation. I
+include it because it is a very good account, and I want it in my own records. The book is free to read at
+[mbmlbook.com](https://mbmlbook.com). This site added the derivation of the predictive probability and the interactive
+figure.
+</Callout>
+
+<Definition>
+For one user, each incoming email $n$ has feature values $x_{ni}$. Each feature $i$ has a weight $w_i$ with prior
+$\Gauss(0, 1)$. The email's score is $s_n = \sum_i w_i x_{ni}$. The user replies, $r_n = 1$, when a noisy score
+$\tilde s_n \sim \Gauss(s_n, \sigma^2)$ exceeds a threshold $\theta$ with prior $\Gauss(0, 10)$. Training infers
+Gaussian posteriors over the weights and the threshold from past emails; prediction returns
+$\pr(r_n = 1 \mid \xvec_n)$ <Cite id="winn2023email" />.
+</Definition>
+
+## The problem
+
+Office workers spend a large part of each day on email. A useful assistant separates the emails a user will act on
+from clutter. Clutter is personal: a newsletter that one user always reads is noise to another. The system therefore
+needs one classifier per user, trained on that user's own history of replies. It must work from the first day, keep
+learning as mail arrives, and give calibrated probabilities, because the interface acts differently on a 0.9 and a 0.55
+<Cite id="winn2023email" />.
+
+## The model, one assumption at a time
+
+The chapter states five assumptions about how features relate to replies <Cite id="winn2023email" />:
+
+1. Every feature value can be computed for every email.
+2. Each email has a continuous score, higher when a reply is more likely.
+3. If a feature value changes by $\Delta$, the score changes by $w \Delta$ for a fixed weight $w$.
+4. A weight is equally likely to be positive or negative.
+5. A single feature usually has a small effect, sometimes a moderate one and occasionally a large one.
+
+Assumptions 2 and 3 make the score linear in the features. Assumptions 4 and 5 give each weight a zero-mean Gaussian
+prior $\Gauss(0, 1)$, symmetric and with light tails.
+
+A score alone does not produce a reply. The first attempt says reply exactly when $s_n > 0$. Under that model one email
+whose reply contradicts the others has probability zero, and inference fails. Adding Gaussian noise before the threshold
+gives every outcome a non-zero probability. Replacing the fixed 0 by a learned threshold $\theta$ lets the model match
+the user's overall reply rate. The chapter uses noise variance $\sigma^2 = 10$: with weights and feature values mostly in
+$[-1, 1]$, scores vary over a few units, and a variance of 10 keeps predictions from being over-confident.
+
+<EmailGraph />
+
+### Features
+
+Features are built as **buckets**: each feature, such as the sender or the position of the user's address (To line or
+Cc line), is split into mutually exclusive values, and each value gets its own weight. An email activates one bucket
+per feature, so $x_{ni} \in \{0, 1\}$ and the score is a sum of a few weights. Only the active buckets appear in each
+email's part of the graph, which keeps the graph small when a feature such as the sender has hundreds of values.
+Continuous quantities such as the length of the body are discretised into ranges that grow exponentially, which
+assumes the reply probability depends only on the range <Cite id="winn2023email" />.
+
+## Prediction
+
+Given Gaussian posteriors $w_i \sim \Gauss(\mu_i, v_i)$ and $\theta \sim \Gauss(\mu_\theta, v_\theta)$, the quantity
+$\tilde s_n - \theta$ is a sum of independent Gaussians:
+
+$$
+\tilde s_n - \theta = \sum_i w_i x_{ni} + \epsilon_n - \theta \sim \Gauss\paren{\sum_i \mu_i x_{ni} - \mu_\theta,\; \sum_i v_i x_{ni}^2 + \sigma^2 + v_\theta},
+$$
+
+with $\epsilon_n \sim \Gauss(0, \sigma^2)$. The reply probability is the probability that this Gaussian is positive:
+
+$$
+\pr(r_n = 1 \mid \xvec_n) = \Phi\paren{\frac{\sum_i \mu_i x_{ni} - \mu_\theta}{\sqrt{\sum_i v_i x_{ni}^2 + \sigma^2 + v_\theta}}},
+$$
+
+where $\Phi$ is the standard normal cdf. This is probit regression. Uncertainty about the weights enters the
+denominator, next to the noise, so an email whose buckets have rarely been seen gets a prediction nearer 0.5.
+
+<NoisyThreshold />
+
+## Training
+
+The factor graph has one path from each weight to each observed reply, through a product, a sum, the noise factor and
+the threshold factor $\indicator[\tilde s_n > \theta]$. Every factor except the threshold passes Gaussian messages
+exactly. The message out of the threshold factor, towards $\tilde s_n$ and $\theta$, is a truncated Gaussian. Expectation
+propagation replaces it by the Gaussian with the same mean and variance, and the result is Gaussian posteriors over the
+weights and the threshold <Cite id="minka2001" />.
+
+Processed one email at a time, with each posterior becoming the prior for the next email, this is
+<NoteLink to="assumed-density-filtering">assumed density filtering</NoteLink>. The update equations are the ones derived
+in the <NoteLink to="adpredictor">AdPredictor</NoteLink> note, where the threshold is absorbed into a bias weight. In the
+chapter, online training approaches the accuracy of retraining on all mail, and larger batches get closer; with either,
+a new user needs several hundred emails before the predictions settle <Cite id="winn2023email" />.
+
+## A community prior for new users
+
+A new user has no history, and a per-user model with prior $\Gauss(0, 1)$ on every weight predicts poorly for its first
+few hundred emails. The chapter extends the model across users. The weight of bucket $i$ for user $u$ is drawn around a
+shared mean with a shared precision:
+
+$$
+w_{ui} \sim \Gauss\paren{m_i, \tau_i^{-1}}, \qquad m_i \sim \Gauss(0, 1), \qquad \tau_i \sim \GammaD(a, b).
+$$
+
+Training on many users learns $m_i$ and $\tau_i$. A bucket that means the same for everyone, such as being on the To
+line, gets a high precision, and a new user inherits its weight at once. A bucket whose effect varies between users gets
+a low precision and is learned from the user's own mail. This is the hierarchical-prior answer to the
+<NoteLink to="cold-start-problem">cold-start problem</NoteLink> <Cite id="winn2023email" />.
+
+## Drift
+
+Users' habits change. The chapter lets each weight drift between time periods: $w_i^{(t+1)} \sim \Gauss(w_i^{(t)}, \gamma^2)$ with a small
+$\gamma^2$, which adds $\gamma^2$ to each weight's variance at the start of a period. These are the random-walk dynamics
+that <NoteLink to="trueskill">TrueSkill</NoteLink> uses for skills. The posterior variance then
+never collapses to zero, and the weights keep tracking the user.
+
+## Assumptions
+
+- **Linear, additive score.** Two features combine only by adding their weights. An interaction, such as "replies to this
+  sender only when on the To line", needs its own bucket.
+- **Gaussian noise.** The probit link is symmetric. A heavy-tailed noise would make the model less sensitive to single
+  surprising emails.
+- **Replies measure importance.** The label is a proxy: an important announcement that needs no reply is labelled as
+  clutter.
+
+## Pitfalls
+
+- **Many buckets, little data.** Each new bucket adds a weight that starts at the prior. Rarely seen buckets keep wide
+  posteriors, and the community prior keeps their predictions sensible until data arrive.
+- **Evaluating on the wrong metric.** Replied emails are a small minority, so accuracy is dominated by the clutter
+  class. The chapter uses precision–recall curves, average precision and calibration plots instead
+  <Cite id="winn2023email" />.

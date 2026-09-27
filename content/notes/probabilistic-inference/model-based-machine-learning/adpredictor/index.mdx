@@ -1,0 +1,190 @@
+---
+title: AdPredictor
+kind: technique
+summary: 'AdPredictor predicts ad click-through rates with Bayesian probit regression: a Gaussian belief $\Gauss(\mu_i, \sigma_i^2)$ per sparse binary feature, and one closed-form online update per impression that moves each active weight in proportion to its own variance.'
+tags: [model-based-machine-learning, bayesian, online-learning, advertising, click-through-rate, message-passing]
+aliases: [adPredictor, Bing click-through rate prediction, online Bayesian probit regression, Bayesian CTR prediction]
+requires: [gaussian-distribution, factor-graph, assumed-density-filtering]
+partOf: [model-based-machine-learning]
+related: [email-reply-classifier, trueskill, thompson-sampling, logistic-regression, expectation-propagation-truncated-gaussian, online-learning-for-linear-models, sequential-bayesian-updating]
+references: [graepel2010adpredictor, herbrich2006, minka2001, thompson1933, richardson2007clicks]
+status: draft
+updated: 2026-09-27
+---
+
+import { AdPredictorGraph } from './AdPredictorGraph'
+import { AdPredictorStream } from './AdPredictorStream'
+
+<Callout variant="credit" title="Provenance: Graepel, Quiñonero Candela, Borchert and Herbrich (2010)">
+This note follows "Web-Scale Bayesian Click-Through Rate Prediction for Sponsored Search Advertising in Microsoft's Bing
+Search Engine" by Thore Graepel, Joaquin Quiñonero Candela, Thomas Borchert and Ralf Herbrich (Microsoft Research),
+ICML 2010 <Cite id="graepel2010adpredictor" />. The model, the update equations, the dynamics, the pruning rule, the
+parallel training scheme and the use of posterior sampling for exploration are theirs; this note restates them in this
+site's notation. I include it because it is a very good account, and I want it in my own records. The paper states the
+updates without derivation, pointing to TrueSkill; the derivation below and the interactive figure were added by this
+site.
+</Callout>
+
+<Definition>
+An ad impression is described by a sparse binary feature vector $\xvec \in \{0, 1\}^D$ with one active entry per
+feature (the ad, the query, the position, the user and so on). **AdPredictor** models the click $y \in \{+1, -1\}$ as
+$\pr(y \mid \xvec, \wvec) = \Phi\paren{y\, \wvec\transpose\xvec / \beta}$ and keeps a factorised Gaussian belief
+$w_i \sim \Gauss(\mu_i, \sigma_i^2)$ over the weights. After each impression it replaces the belief of every active
+weight by the Gaussian that matches the mean and variance of its exact posterior <Cite id="graepel2010adpredictor" />.
+</Definition>
+
+## Problem
+
+In sponsored search the engine ranks ads by bid times predicted click-through rate (CTR), and charges each advertiser
+according to the CTRs of the ads below it. The CTR estimate therefore sets both what users see and what advertisers
+pay. It must be calibrated, not merely ranked correctly. It must learn from billions of impressions a day, handle
+features with a few values (position) and features with billions (user identifier), and track a web that changes.
+AdPredictor replaced Bing's previous CTR predictor in 2009 <Cite id="graepel2010adpredictor" />.
+
+## Mechanism
+
+### The factor graph
+
+The model has four layers, one factor each <Cite id="graepel2010adpredictor" />:
+
+1. **Prior.** $w_i \sim \Gauss(\mu_i, \sigma_i^2)$, independently for every weight.
+2. **Score.** $s = \wvec\transpose\xvec$, the sum of the active weights.
+3. **Noise.** $t \sim \Gauss(s, \beta^2)$.
+4. **Threshold.** $y = +1$ if $t > 0$ and $y = -1$ otherwise.
+
+Integrating out $t$ gives $\pr(y = +1 \mid s) = \pr(s + \epsilon > 0) = \Phi(s / \beta)$, the probit link. The
+graph is the one of <NoteLink to="trueskill">TrueSkill</NoteLink> for a team of active weights playing a team of fixed
+skill zero, and the updates are TrueSkill's updates <Cite id="graepel2010adpredictor" /> <Cite id="herbrich2006" />.
+
+<AdPredictorGraph />
+
+### Deriving the update
+
+Before seeing $y$, the weights and $t$ are jointly Gaussian. With $\mu_s = \sum_{i \in \Acal} \mu_i$ over the active
+set $\Acal$, the noisy score has
+
+$$
+t \sim \Gauss(\mu_s, \Sigma^2), \qquad \Sigma^2 = \beta^2 + \sum_{i \in \Acal} \sigma_i^2,
+$$
+
+and each active weight has $\cov(w_i, t) = \sigma_i^2$, because $t$ contains $w_i$ once and the other terms are
+independent of it.
+
+**Step 1: condition $t$ on the click.** Observing $y$ truncates $t$ to the half-line $y t > 0$. Define the surprise
+$z = y \mu_s / \Sigma$, small when the observed outcome was unexpected. A Gaussian truncated to one side has closed-form
+moments:
+
+$$
+\expect[t \mid y] = \mu_s + y\, \Sigma\, v(z), \qquad \var[t \mid y] = \Sigma^2\, \LB 1 - w(z) \RB,
+$$
+
+with $v(z) = \phi(z) / \Phi(z)$ and $w(z) = v(z)\,(v(z) + z)$, where $\phi$ is the standard normal density.
+
+**Step 2: carry the change back to each weight.** Given $t$, the click carries no further information about the
+weights, and $w_i$ given $t$ is the regression of a Gaussian on a Gaussian:
+$\expect[w_i \mid t] = \mu_i + (\sigma_i^2 / \Sigma^2)(t - \mu_s)$ and $\var[w_i \mid t] = \sigma_i^2 -
+\sigma_i^4 / \Sigma^2$. Averaging over $t \mid y$ with the laws of total expectation and total variance gives
+
+$$
+\tilde\mu_i = \mu_i + y\, \frac{\sigma_i^2}{\Sigma}\, v(z), \qquad
+\tilde\sigma_i^2 = \sigma_i^2 \LB 1 - \frac{\sigma_i^2}{\Sigma^2}\, w(z) \RB.
+$$
+
+These are the exact posterior mean and variance of each weight. The exact joint posterior is not Gaussian and not
+factorised; AdPredictor keeps only these two moments per weight. Keeping the moments and dropping the correlations is
+<NoteLink to="assumed-density-filtering">assumed density filtering</NoteLink>, one pass of expectation propagation
+<Cite id="minka2001" />. Inactive weights are unchanged.
+
+The update reads as follows:
+
+- **Surprise sets the size.** $v(z)$ is near 0 when the click was expected and grows almost linearly in $-z$ when it was
+  not.
+- **Variance sets the share.** Each active weight moves in proportion to $\sigma_i^2 / \Sigma$. A well-known feature,
+  with small variance, anchors the prediction and barely moves; a new feature absorbs most of the change. This is a
+  per-feature learning rate derived from the model rather than tuned.
+- **Every observation reduces variance.** $0 < w(z) < 1$, so each variance shrinks, by more when the outcome was
+  surprising and the weight was uncertain.
+
+<Derivation title="Moments of a Gaussian truncated to one side">
+Let $t \sim \Gauss(m, S^2)$ and condition on $t > 0$ (the case $y = +1$; $y = -1$ follows by $t \to -t$). Write
+$t = m + S u$ with $u \sim \Gauss(0, 1)$, so the condition is $u > -m/S = -z$. The mass of the region is $\Phi(z)$. The
+standard normal density satisfies $\phi'(u) = -u\,\phi(u)$, so
+
+$$
+\expect[u \mid u > -z] = \frac{1}{\Phi(z)}\int_{-z}^{\infty} u\,\phi(u)\,du = \frac{\phi(-z)}{\Phi(z)} = v(z).
+$$
+
+Integrating by parts, $\int_{-z}^\infty u^2 \phi(u)\,du = \brack{-u\,\phi(u)}_{-z}^{\infty} + \int_{-z}^\infty \phi(u)\,du =
+-z\,\phi(z) + \Phi(z)$, so $\expect[u^2 \mid u > -z] = 1 - z\,v(z)$ and
+
+$$
+\var[u \mid u > -z] = 1 - z\,v(z) - v(z)^2 = 1 - w(z).
+$$
+
+Scaling back, $\expect[t \mid t > 0] = m + S\,v(z)$ and $\var[t \mid t > 0] = S^2\LB 1 - w(z) \RB$. The
+<NoteLink to="expectation-propagation-truncated-gaussian">truncated Gaussian</NoteLink> note works the same update as
+an EP site.
+</Derivation>
+
+### Prediction
+
+The predictive probability integrates the probit over the Gaussian beliefs. The noisy score is Gaussian with mean
+$\mu_s$ and variance $\Sigma^2$, so
+
+$$
+\pr(y = +1 \mid \xvec) = \Phi\paren{\frac{\mu_s}{\Sigma}} = \Phi\paren{\frac{\sum_{i \in \Acal}\mu_i}{\sqrt{\beta^2 + \sum_{i \in \Acal}\sigma_i^2}}}.
+$$
+
+Weight uncertainty enlarges the denominator and pulls the prediction towards 0.5. With zero variances the probit of the
+data model returns.
+
+<AdPredictorStream />
+
+### Dynamics
+
+With a fixed model every variance shrinks towards zero and learning stops. The paper's first remedy, adding a small
+variance to every weight per unit time as in a Kalman filter, lets a rarely seen weight grow wider than its prior; a
+single surprising impression then moves it too far. The adopted remedy instead forgets old data gradually, so that a
+weight with no new data returns to its prior <Cite id="graepel2010adpredictor" />. One way to write this is to
+discount the evidence: raise the accumulated likelihood to the power $1 - \varepsilon$ per unit time. In natural
+parameters the posterior is then pulled towards the prior $\Gauss(\mu_{0}, \sigma_{0}^2)$:
+
+$$
+\frac{1}{\sigma_{\text{new}}^2} = \frac{1 - \varepsilon}{\sigma^2} + \frac{\varepsilon}{\sigma_0^2}, \qquad
+\frac{\mu_{\text{new}}}{\sigma_{\text{new}}^2} = (1 - \varepsilon)\frac{\mu}{\sigma^2} + \varepsilon\frac{\mu_0}{\sigma_0^2}.
+$$
+
+The correction can be deferred and applied in one step the next time the weight is active.
+
+### Web-scale engineering
+
+- **Sparse storage.** Only weights whose belief differs from the prior are stored. A user identifier with billions of
+  values costs memory only for users actually seen.
+- **Pruning.** A weight is reset to its prior when predicting with the prior instead of its posterior would change the
+  CTR of an impression activating it very little, measured by a KL divergence between the two Bernoulli predictions
+  <Cite id="graepel2010adpredictor" />.
+- **Parallel training.** Each machine runs the online update on its shard, starting from the shared belief, and sends
+  back the message its data sent to each weight. The master multiplies the messages in. This is a message-passing
+  schedule on a factor graph with replicated weight variables.
+- **Exploration.** The CTR estimate decides which ads are shown, so it decides its own future training data. Sampling
+  weights from the posterior, instead of using the mean, raises uncertain ads in the ranking now and then. This is
+  <NoteLink to="thompson-sampling">Thompson sampling</NoteLink> <Cite id="thompson1933" />.
+
+## Cost
+
+One update touches only the active weights: $O(|\Acal|)$ arithmetic, a handful of features per impression. Memory is
+two numbers per stored weight. There is no learning rate to tune; the prior variance, $\beta$ and $\varepsilon$ play its
+role.
+
+## Trade-offs
+
+- **Calibration by construction.** Before any recalibration, a naive Bayes baseline was off by orders of magnitude at
+  small CTRs, while AdPredictor's predictions lay close to the diagonal of a calibration plot
+  <Cite id="graepel2010adpredictor" />.
+- **Factorised posterior.** Correlations between weights are dropped after every update. Two features that always appear
+  together share the credit arbitrarily, and the order of the data matters. Several EP passes remove the order
+  dependence but need the messages to be stored.
+- **Linear in the features.** Interactions must be built as crossed features, such as ad × position. Later click models
+  learn such interactions; see <NoteLink to="click-models">click models</NoteLink> for position effects.
+- **Weights are not identifiable.** Adding a constant to every ad weight and subtracting it from a bias weight leaves all
+  predictions unchanged. Only sums of weights along active sets are learned; the individual weights are set by the prior.

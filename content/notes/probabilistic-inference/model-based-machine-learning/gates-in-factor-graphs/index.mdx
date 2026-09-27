@@ -1,0 +1,123 @@
+---
+title: Gates in factor graphs
+kind: concept
+summary: 'A gate is a box in a factor graph that switches the factors inside it on or off by the value of a selector variable. It draws mixtures, model selection and context-specific independence; its messages are evidence to the selector and mixtures out of it.'
+tags: [model-based-machine-learning, factor-graph, message-passing, mixture-models, model-selection, bayesian, worked-example]
+aliases: [gate, gates, gated factor graph, selector variable, Bayesian model selection with gates, clinical trial model, Minka and Winn gates]
+requires: [factor-graph, belief-propagation, beta-distribution]
+partOf: [model-based-machine-learning]
+related: [bayes-factors-and-model-comparison, gaussian-mixture-model, expectation-propagation, community-bayesian-classifier-combination, difficulty-versus-ability, allergy-sensitisation-model]
+references: [minka2008gates, infernetclinical, winn2012causality, winn2023asthma]
+status: draft
+updated: 2026-09-27
+---
+
+import { TrialEvidence } from './TrialEvidence'
+import { TrialGraph } from './TrialGraph'
+
+<Callout variant="credit" title="Provenance: Minka and Winn (2008), and the Infer.NET clinical trial tutorial">
+This note follows "Gates" by Tom Minka and John Winn (Microsoft Research), NIPS 2008 <Cite id="minka2008gates" />, and
+the "Clinical trial" tutorial of Infer.NET, whose data and model are used as the worked example
+<Cite id="infernetclinical" />. The notation, the message rules and the example are theirs; this note restates them in
+this site's notation. I include it because it is a very good account, and I want it in my own records. The derivation
+of the gate messages as written here and the interactive figures were added by this site.
+</Callout>
+
+<Definition>
+A **gate** encloses part of a factor graph and is labelled with a **key** value. It is attached to a discrete
+**selector** variable $c$. When $c$ equals the key, the factors inside the gate are on; otherwise they are replaced by
+the constant 1. A set of gates with the same selector and different keys, one per value of $c$, represents
+$\prod_k f_k(\xvec)^{\indicator[c = k]}$: exactly one of the enclosed sub-models explains the variables it touches
+<Cite id="minka2008gates" />.
+</Definition>
+
+## Why a new notation
+
+A mixture $\pr(x \mid c) = \prod_k f_k(x)^{\indicator[c = k]}$ can be drawn as one big factor joining $c$, $x$ and all
+the parameters of all components. That hides structure. Given $c = k$, $x$ depends on component $k$'s parameters only,
+and not on the others: a *context-specific* independence that no ordinary factor graph shows. Message passing also has
+a nested structure, the component messages computed inside and mixed outside, which the single factor hides. The gate
+draws both. It is drawn as a dashed box with its key in a corner and an edge from the selector
+<Cite id="minka2008gates" />.
+
+## Messages through a gate
+
+Let the gate with key $k$ contain the factor $f_k(x)$, and let $x$ send the message $\mu_{x}(x)$ into the gated factors.
+
+**To the selector.** The gate multiplies the factor graph by $f_k(x)$ when $c = k$ and by 1 otherwise. Summing out
+$x$ against its incoming message gives the message to $c$:
+
+$$
+\mu_{\text{gate} \to c}(c = k) = \int f_k(x)\, \mu_x(x)\, dx = Z_k.
+$$
+
+$Z_k$ is the evidence for the contents of gate $k$, given everything outside it. The selector's posterior is its prior
+times these evidences, so posterior model probabilities come out of ordinary message passing.
+
+**To a variable outside.** The factor seen by $x$, after summing out $c$ against its incoming message
+$\mu_c(k) = \pr(c = k)$, is the mixture
+
+$$
+\sum_k \mu_c(k)\, f_k(x).
+$$
+
+In belief propagation this mixture is the message. In expectation propagation the belief it produces is projected back
+to the family of $x$, which amounts to weighting each component's contribution by the posterior probability of its key.
+In variational message passing the message is $\exp\paren{\sum_k \mu_c(k) \log f_k(x)}$, a geometric mixture
+<Cite id="minka2008gates" />.
+
+## Worked example: a clinical trial
+
+Five patients take a placebo and five take a new treatment. One control and four treated patients recover
+<Cite id="infernetclinical" />. Does the treatment have an effect?
+
+- The selector $e$ says whether it does, with $\pr(e = \text{true}) = 0.5$.
+- In the gate $e = \text{true}$, the control and treated groups have separate recovery rates $\rho_c$ and $\rho_t$, each
+  with a uniform $\Beta(1, 1)$ prior.
+- In the gate $e = \text{false}$, one rate $\rho \sim \Beta(1, 1)$ serves everyone.
+
+<TrialGraph />
+
+The message from each gate to $e$ is the evidence of its sub-model. For $n$ Bernoulli outcomes with $k$ successes under
+a $\Beta(1, 1)$ rate,
+
+$$
+\int_0^1 \rho^k (1 - \rho)^{n - k}\, d\rho = B(1 + k,\; 1 + n - k),
+$$
+
+where $B$ is the Beta function. The two gates send
+
+$$
+Z_{\text{true}} = B(2, 5)\, B(5, 2) = \frac{1}{30} \cdot \frac{1}{30} = \frac{1}{900}, \qquad
+Z_{\text{false}} = B(6, 6) = \frac{5!\,5!}{11!} = \frac{1}{2772}.
+$$
+
+With equal prior probabilities, $\pr(e = \text{true} \mid \text{data}) = Z_{\text{true}} / (Z_{\text{true}} +
+Z_{\text{false}}) = 2772 / 3672 = 0.755$. Infer.NET prints the same number, 0.7549, from the same gated model
+<Cite id="infernetclinical" />. The ratio $Z_{\text{true}} / Z_{\text{false}} = 3.08$ is the Bayes factor, and the
+model comparison is exactly that of <NoteLink to="bayes-factors-and-model-comparison">Bayes factors</NoteLink>, done by
+message passing inside one model.
+
+<TrialEvidence />
+
+## Where gates appear
+
+- **Mixture models.** The component indicator of each data point is the selector; each component's likelihood sits in
+  a gate. A <NoteLink to="gaussian-mixture-model">Gaussian mixture</NoteLink> is the simplest case.
+- **Crowd labels.** In <NoteLink to="community-bayesian-classifier-combination">Bayesian classifier
+  combination</NoteLink> the true class selects which row of a worker's confusion matrix generates their label.
+- **Knowing or guessing.** In <NoteLink to="difficulty-versus-ability">difficulty versus ability</NoteLink> a binary
+  "knows the answer" variable selects between "response equals the true answer" and "response is uniform".
+- **Latent classes.** In the <NoteLink to="allergy-sensitisation-model">allergy sensitisation model</NoteLink> each
+  child's class selects the parameters of their sensitisation chain <Cite id="winn2023asthma" />.
+- **Interventions.** Winn uses gates to express the difference between observing a variable and setting it, so that
+  causal questions become inference in one gated model <Cite id="winn2012causality" />.
+
+## Pitfalls
+
+- **Evidence is prior-sensitive.** The message $Z_k$ integrates over each sub-model's prior. A vague prior on a
+  parameter inside one gate lowers that gate's evidence and biases selection towards the simpler sub-model.
+- **Approximate evidence.** With EP inside a gate, $Z_k$ is EP's evidence approximation, and model probabilities
+  inherit its error.
+- **Symmetric keys.** When the gated sub-models are exchangeable, as in a mixture with identical priors, the selector's
+  posterior is symmetric at the start and message passing needs a random initialisation to break the tie.

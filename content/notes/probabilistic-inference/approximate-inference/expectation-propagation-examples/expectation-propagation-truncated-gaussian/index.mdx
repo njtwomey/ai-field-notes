@@ -1,0 +1,176 @@
+---
+title: A Gaussian times a step function
+kind: example
+summary: 'The EP update for a factor $\indicator(x > \epsilon)$ on a Gaussian cavity $\Gauss(\mu, \sigma^2)$ has a closed form: with $t = (\mu - \epsilon)/\sigma$, the tilted mean is $\mu + \sigma v(t)$ and its variance $\sigma^2(1 - w(t))$. These v and w functions drive probit models and TrueSkill.'
+tags: [worked-example, approximate-inference, exponential-family, message-passing]
+aliases: [truncated Gaussian EP update, v and w functions, EP step factor, probit tilted moments]
+requires: [expectation-propagation, gaussian-distribution]
+related: [assumed-density-filtering, expectation-propagation-probit-regression, expectation-propagation-gaussian-process-classification, expectation-propagation-on-a-factor-graph]
+references: [minka2001thesis, herbrich2006, rasmussen2006]
+status: draft
+updated: 2026-09-27
+---
+
+import { TruncatedMoments } from './TruncatedMoments'
+
+<Definition>
+A Gaussian cavity $\Gauss(x \mid \mu, \sigma^2)$ is multiplied by the step factor $t(x) = \indicator(x > \epsilon)$.
+Find the Gaussian $q$ that minimises $\KL(\hat p \,\|\, q)$ for the tilted density
+$\hat p(x) \propto \Gauss(x \mid \mu, \sigma^2)\,\indicator(x > \epsilon)$, and the Gaussian site $\tilde t = q / \Gauss(\cdot \mid \mu, \sigma^2)$
+that expectation propagation (EP) stores in place of the step. Work it for $\mu = -1$, $\sigma^2 = 1$, $\epsilon = 0$, and
+for $\mu = 1$, $\sigma^2 = 4$, $\epsilon = 0$.
+</Definition>
+
+## Setup
+
+In <NoteLink to="expectation-propagation">expectation propagation</NoteLink>, every site update needs the mean and
+variance of a tilted density: a Gaussian cavity times one exact factor. Minimising $\KL(\hat p \,\|\, q)$ over Gaussians
+$q$ sets the mean and variance of $q$ to those of $\hat p$. For a step factor, $\hat p$ is a **truncated Gaussian**: the
+cavity with all mass below $\epsilon$ removed and the rest renormalised.
+
+The step factor appears whenever a hidden continuous quantity is observed only through its sign. In TrueSkill, a win
+of player A over player B says that the performance difference $d = p_A - p_B$ is positive <Cite id="herbrich2006" />.
+In probit classification, the label $y = +1$ says that a latent value plus Gaussian noise is positive. Both reduce to
+this computation.
+
+Symbols:
+
+- $\phi$ and $\Phi$ are the standard normal density and cdf.
+- $t = (\mu - \epsilon)/\sigma$ is the distance from the threshold to the cavity mean, in cavity standard deviations.
+- $v(t) = \phi(t)/\Phi(t)$ and $w(t) = v(t)\paren{v(t) + t}$ are the two functions that carry the answer.
+
+## Solution
+
+### Moments from the normaliser
+
+The moments of any tilted density with a Gaussian cavity follow from its normaliser alone. Let
+$Z(\mu) = \int t(x)\,\Gauss(x \mid \mu, \sigma^2)\,dx$ for any factor $t$. The derivative of the Gaussian with
+respect to its mean is $\partial_\mu \Gauss(x \mid \mu, \sigma^2) = \frac{x - \mu}{\sigma^2}\Gauss(x \mid \mu, \sigma^2)$.
+Differentiating under the integral and dividing by $Z$ gives
+
+$$
+\frac{\partial \log Z}{\partial \mu} = \frac{1}{Z}\int t(x)\,\frac{x - \mu}{\sigma^2}\,\Gauss(x \mid \mu, \sigma^2)\,dx
+= \frac{\expect_{\hat p}[x] - \mu}{\sigma^2}.
+$$
+
+The second derivative of the Gaussian is
+$\partial^2_\mu \Gauss = \paren{\frac{(x - \mu)^2}{\sigma^4} - \frac{1}{\sigma^2}}\Gauss$, so
+$Z''/Z = \paren{\expect_{\hat p}[(x - \mu)^2] - \sigma^2}/\sigma^4$. Then
+$\partial^2_\mu \log Z = Z''/Z - (Z'/Z)^2$, and the two squared terms combine into a variance:
+
+$$
+\expect_{\hat p}[x] = \mu + \sigma^2\,\frac{\partial \log Z}{\partial \mu}, \qquad
+\var_{\hat p}[x] = \sigma^2 + \sigma^4\,\frac{\partial^2 \log Z}{\partial \mu^2}.
+$$
+
+These two identities hold for every factor $t$. They reduce each EP update to one scalar function, $\log Z(\mu)$, and
+its first two derivatives <Cite id="minka2001thesis" />.
+
+### The step factor
+
+For $t(x) = \indicator(x > \epsilon)$, the normaliser is the cavity's mass above $\epsilon$:
+
+$$
+Z = P(x > \epsilon) = \Phi\paren{\frac{\mu - \epsilon}{\sigma}} = \Phi(t).
+$$
+
+The chain rule with $\partial t / \partial \mu = 1/\sigma$ gives $\partial_\mu \log Z = \phi(t)/(\sigma\Phi(t)) = v(t)/\sigma$.
+The derivative of $v$ uses $\phi'(t) = -t\,\phi(t)$:
+
+$$
+v'(t) = \frac{\phi'(t)\Phi(t) - \phi(t)^2}{\Phi(t)^2} = -t\,v(t) - v(t)^2 = -w(t).
+$$
+
+So $\partial^2_\mu \log Z = -w(t)/\sigma^2$. Substituting both derivatives into the identities gives the moments of the
+truncated Gaussian:
+
+$$
+\expect_{\hat p}[x] = \mu + \sigma\,v(t), \qquad \var_{\hat p}[x] = \sigma^2\paren{1 - w(t)}.
+$$
+
+$v(t) > 0$, so the mean always moves up, away from the removed mass. $0 < w(t) < 1$, so the variance always shrinks and
+stays positive. When the cavity already lies far above the threshold ($t \gg 0$), $v$ and $w$ vanish and the factor
+changes nothing. When it lies far below ($t \ll 0$), $v(t) \approx -t$ and $w(t) \approx 1$: the mean moves to
+$\epsilon$ and the variance collapses, because all remaining mass is squeezed against the threshold.
+
+### Numbers: a surprising observation
+
+Take $\mu = -1$, $\sigma^2 = 1$, $\epsilon = 0$. The cavity puts most of its mass below the threshold, so the observation
+$x > 0$ is surprising.
+
+1. $t = (-1 - 0)/1 = -1$.
+2. $\phi(-1) = 0.2420$ and $\Phi(-1) = 0.1587$, so $Z = 0.1587$ and $v = 0.2420/0.1587 = 1.5251$.
+3. $w = 1.5251 \times (1.5251 - 1) = 0.8009$.
+4. Mean $= -1 + 1 \times 1.5251 = 0.5251$. Variance $= 1 \times (1 - 0.8009) = 0.1991$.
+
+The projection is $q = \Gauss(0.5251, 0.1991)$. The site is the ratio $q/\text{cavity}$, a subtraction in natural
+parameters (precision $\tau = 1/\sigma^2$ and precision-weighted mean $\nu = \mu/\sigma^2$):
+
+- Site precision: $1/0.1991 - 1/1 = 4.0227$, so the site variance is $0.2486$.
+- Site $\nu$: $0.5251/0.1991 - (-1)/1 = 3.6376$, so the site mean is $3.6376/4.0227 = 0.9043$.
+
+The step has no location and no width, yet EP replaces it by the Gaussian $\tilde t(x) \propto \Gauss(x \mid 0.904, 0.249)$,
+narrow and just above the threshold. The site describes the step only where the cavity has mass.
+
+### Numbers: an expected observation
+
+Take $\mu = 1$, $\sigma^2 = 4$, $\epsilon = 0$. Now $t = 1/2 = 0.5$, $\Phi(0.5) = 0.6915$, $\phi(0.5) = 0.3521$, so
+$v = 0.5092$ and $w = 0.5092 \times 1.0092 = 0.5138$.
+
+- Mean $= 1 + 2 \times 0.5092 = 2.0183$. Variance $= 4 \times (1 - 0.5138) = 1.9447$.
+- Site precision $1/1.9447 - 1/4 = 0.2642$ (variance $3.785$). Site $\nu = 2.0183/1.9447 - 1/4 = 0.7879$ (mean $2.982$).
+
+The observation was likely, so the site is broad: precision 0.26 against 4.02 in the surprising case. Scipy's
+`truncnorm` gives the same moments in both cases.
+
+### Adding noise: the probit factor
+
+A probit factor $\Phi\paren{(x - \epsilon)/s}$ is a step on a noisy copy of $x$: it equals
+$P(x + n > \epsilon)$ with $n \sim \Gauss(0, s^2)$ independent of $x$. The sum $x + n$ has variance $\sigma^2 + s^2$ under
+the cavity, so $Z = \Phi(t)$ with $t = (\mu - \epsilon)/\sqrt{\sigma^2 + s^2}$. Then
+$\partial_\mu \log Z = v(t)/\sqrt{\sigma^2 + s^2}$ and $\partial^2_\mu \log Z = -w(t)/(\sigma^2 + s^2)$, and the same
+two identities give
+
+$$
+\expect_{\hat p}[x] = \mu + \frac{\sigma^2\,v(t)}{\sqrt{\sigma^2 + s^2}}, \qquad
+\var_{\hat p}[x] = \sigma^2 - \frac{\sigma^4\,w(t)}{\sigma^2 + s^2}.
+$$
+
+With $s = 0$ these are the step's moments. With $\mu = -1$, $\sigma^2 = 1$, $s = 1$: $t = -0.7071$, $v = 1.2959$,
+$w = 0.7631$, mean $-1 + 1.2959/\sqrt 2 = -0.0836$, variance $1 - 0.7631/2 = 0.6185$. The site now has precision
+$0.6169$ and mean $1.402$: noise makes the same surprising observation less informative, and the site broader. These are
+the formulas used by <NoteLink to="gaussian-process-classification">Gaussian process classification</NoteLink> with a probit
+likelihood <Cite id="rasmussen2006" />.
+
+## Simulation
+
+<TruncatedMoments />
+
+Numerical care matters in the lower tail. For $t = -40$, $\Phi(t) \approx 3.6 \times 10^{-350}$ is below the smallest double-precision number, and computing $\phi(t)/\Phi(t)$ as
+a ratio of two underflowing numbers fails. The figure computes $v(t) = \exp\paren{\log\phi(t) - \log\Phi(t)}$ with a
+tail-accurate $\log\Phi$, which returns $v(-40) = 40.02$.
+
+## What it illustrates
+
+- **Moment matching is a projection.** The step factor is not Gaussian and not normalisable, yet a single Gaussian
+  update summarises its effect on the cavity. See <NoteLink to="expectation-propagation">expectation propagation</NoteLink>.
+- **The site depends on the cavity.** The same factor produced a site of variance 0.25 in one case and 3.8 in the
+  other. When the other sites change the cavity, EP recomputes this site; a single pass cannot. See
+  <NoteLink to="assumed-density-filtering">assumed density filtering</NoteLink>.
+- **Building block.** Probit regression (<NoteLink to="expectation-propagation-probit-regression">EP for probit regression</NoteLink>),
+  Gaussian process classification (<NoteLink to="expectation-propagation-gaussian-process-classification">EP for GP classification</NoteLink>)
+  and paired comparisons (<NoteLink to="expectation-propagation-on-a-factor-graph">EP on a factor graph</NoteLink>) all call this update,
+  each on a one-dimensional projection of a larger Gaussian.
+
+## Variations
+
+- **Two-sided truncation.** A draw in TrueSkill says $\abs{d} \le \epsilon$ <Cite id="herbrich2006" />. With
+  $\alpha = (-\epsilon - \mu)/\sigma$ and $\beta = (\epsilon - \mu)/\sigma$, $Z = \Phi(\beta) - \Phi(\alpha)$, and the
+  same identities give mean $\mu + \sigma\,\frac{\phi(\alpha) - \phi(\beta)}{Z}$ and variance
+  $\sigma^2\brack{1 + \frac{\alpha\phi(\alpha) - \beta\phi(\beta)}{Z} - \paren{\frac{\phi(\alpha) - \phi(\beta)}{Z}}^2}$.
+  For $\mu = 1$, $\sigma = 1$, $\epsilon = 0.5$: $Z = 0.2417$, mean $0.0794$, variance $0.0769$.
+- **A win margin.** A win with margin $\epsilon > 0$ shifts the threshold; the figure's $\epsilon$ slider shows the
+  result. Moving $\epsilon$ up makes the same win more surprising and the site narrower.
+- **Negative sites cannot occur here.** The step is log-concave, so the tilted variance is below the cavity variance and
+  the site precision is positive. Factors that are not log-concave, such as the clutter likelihood in
+  <NoteLink to="expectation-propagation-clutter-problem">the clutter problem</NoteLink>, can produce sites of negative precision.

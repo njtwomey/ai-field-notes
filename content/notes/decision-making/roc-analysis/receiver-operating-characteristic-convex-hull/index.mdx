@@ -1,0 +1,140 @@
+---
+title: ROC convex hull
+kind: concept
+summary: 'Expected cost is linear in ROC space, constant along lines of slope $(1 - \pi)\,c_{\text{FP}}/(\pi\,c_{\text{FN}})$. Randomising between two classifiers reaches every point between them, so only classifiers on the convex hull of the ROC points can be optimal, each for an interval of slopes.'
+tags: [roc-analysis, decision-theory, classification, thresholds, worked-example]
+aliases: [ROCCH, ROC convex hull method, iso-performance line, iso-cost line, isocost line, potentially optimal classifiers]
+requires: [receiver-operating-characteristic-curve-and-area, bayes-decision-rule]
+related: [cost-curves, receiver-operating-characteristic-isometrics, isotonic-calibration, operating-points-and-equal-error-rate, cost-sensitive-learning, threshold-choice-methods]
+references: [provost2001, fawcett2006, fawcett2007, flach2003]
+status: draft
+updated: 2026-09-27
+---
+
+import { HullIsoCost } from './HullIsoCost'
+
+<Definition>
+Each binary classifier, or each threshold on a scoring classifier, gives a point $(\text{FPR}, \text{TPR})$ in ROC
+space. The **ROC convex hull** (ROCCH) of a set of such points is the upper boundary of the smallest convex set
+containing them together with $(0, 0)$ and $(1, 1)$. For every prevalence $\pi$ and every pair of error costs
+$c_{\text{FP}}, c_{\text{FN}}$, a classifier with the least expected cost lies on the hull. Classifiers strictly below
+the hull are never optimal <Cite id="provost2001" />.
+</Definition>
+
+## Expected cost is linear in ROC space
+
+Let $\pi$ be the fraction of positives, $c_{\text{FN}}$ the cost of a false negative and $c_{\text{FP}}$ the cost of a
+false positive, with correct decisions costing nothing. A classifier at $(\text{FPR}, \text{TPR})$ misses a fraction
+$1 - \text{TPR}$ of the positives and flags a fraction $\text{FPR}$ of the negatives. Its expected cost per case is
+
+$$
+C(\text{FPR}, \text{TPR}) = \pi\, c_{\text{FN}}\,(1 - \text{TPR}) + (1 - \pi)\, c_{\text{FP}}\, \text{FPR}.
+$$
+
+$C$ is a linear function of the two coordinates. Its level sets are parallel straight lines, called **iso-cost** or
+**iso-performance lines**. Setting $dC = 0$ gives $\pi\, c_{\text{FN}}\, d\text{TPR} = (1 - \pi)\, c_{\text{FP}}\,
+d\text{FPR}$, so every iso-cost line has slope
+
+$$
+m = \frac{(1 - \pi)\, c_{\text{FP}}}{\pi\, c_{\text{FN}}}.
+$$
+
+Cost decreases towards the upper left. The operating conditions, prevalence and costs, enter only through $m$. A
+prevalence of 0.1 with equal costs gives $m = 9$; a prevalence of 0.5 with false negatives nine times as costly gives
+$m = 1/9$ <Cite id="provost2001" />.
+
+## Interpolation: every point between two classifiers is achievable
+
+Take classifiers $A$ at $(f_A, t_A)$ and $B$ at $(f_B, t_B)$. Build a new classifier that, for each case, uses $A$ with
+probability $\lambda$ and $B$ otherwise, choosing independently of the case. A positive is detected with probability
+$\lambda t_A + (1 - \lambda) t_B$ and a negative is flagged with probability $\lambda f_A + (1 - \lambda) f_B$. The
+randomised classifier sits at
+
+$$
+\lambda (f_A, t_A) + (1 - \lambda)(f_B, t_B),
+$$
+
+on the straight segment between $A$ and $B$. Every point of the convex hull of a set of classifiers is therefore
+achievable by randomising between at most two of them <Cite id="provost2001" />. Because $C$ is linear, the
+randomised classifier's expected cost is the same mixture $\lambda C_A + (1 - \lambda) C_B$.
+
+## Why only hull points can be optimal
+
+**Points below the hull are dominated.** Let $P = (f, t)$ lie strictly below the hull. The hull point $Q = (f, t')$
+directly above it has the same false-positive rate and a higher true-positive rate $t' > t$. Then
+$C(Q) - C(P) = -\pi\, c_{\text{FN}}\,(t' - t) < 0$ for every $\pi > 0$ and $c_{\text{FN}} > 0$. $Q$ is achievable by
+interpolation, so $P$ is beaten under every operating condition.
+
+**The optimum is at a hull vertex.** A linear function over a convex polygon attains its minimum at a vertex. So for any
+slope $m$ the least-cost achievable point is a vertex of the hull, or a whole edge when $m$ equals that edge's slope.
+Geometrically, slide an iso-cost line of slope $m$ from the upper left towards the lower right. The first achievable
+point it touches is where the line is tangent to the hull.
+
+**Each vertex owns an interval of slopes.** Order the hull vertices $v_0 = (0, 0), v_1, \dots, v_k = (1, 1)$ from left
+to right, and let $s_i$ be the slope of the edge from $v_{i-1}$ to $v_i$. Convexity makes the slopes decrease,
+$s_1 > s_2 > \dots > s_k$. Vertex $v_i$ is optimal exactly when $s_{i+1} \le m \le s_i$: then the iso-cost line through
+$v_i$ has every other vertex on or below it. A steep iso-cost line (rare positives, cheap misses) picks a vertex near the
+origin, and a shallow one picks a vertex near $(1, 1)$.
+
+<HullIsoCost />
+
+## The ROCCH method
+
+Provost and Fawcett turned this into a procedure for imprecise environments, where costs and priors are unknown when
+the classifiers are built <Cite id="provost2001" />:
+
+1. Plot every candidate classifier, or every threshold of each scoring classifier, in ROC space.
+2. Compute the convex hull and discard every classifier that does not contribute a vertex.
+3. When the operating conditions become known, compute $m$ and select the vertex where an iso-cost line of slope $m$
+   touches the hull. If $m$ matches an edge, either endpoint (or any mixture) is optimal.
+
+The hull is computed once. A change of prevalence or costs later needs only a new slope, not new training. A classifier
+that never appears on the hull can be dropped without loss for any operating condition.
+
+## Hull slopes are likelihood ratios
+
+For a scoring classifier, an edge of the hull covers an interval of scores. The edge's slope is
+$\Delta\text{TPR}/\Delta\text{FPR} = (n^+_I / n^+) / (n^-_I / n^-)$, where $n^+_I$ and $n^-_I$ count the positives and
+negatives with scores in that interval, and $n^+$, $n^-$ are the class totals. That ratio is an empirical likelihood
+ratio $P(I \mid +)/P(I \mid -)$. By <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink> a case in the interval has
+posterior probability
+
+$$
+P(+ \mid I) = \frac{\pi\, s}{\pi\, s + (1 - \pi)},
+$$
+
+where $s$ is the slope of the edge. Replacing each score by this value turns the hull into a calibration map, and it is
+exactly the map produced by <NoteLink to="isotonic-calibration">isotonic calibration</NoteLink> with the pool adjacent
+violators algorithm <Cite id="fawcett2007" />. The Bayes threshold $p \ge c_{\text{FP}}/(c_{\text{FP}} + c_{\text{FN}})$
+on these calibrated probabilities selects the same vertex as the tangent iso-cost line.
+
+## Worked example
+
+Five classifiers have ROC points $A = (0.1, 0.5)$, $B = (0.2, 0.7)$, $C = (0.35, 0.75)$, $D = (0.5, 0.9)$ and
+$E = (0.7, 0.92)$. The hull runs $(0, 0) \to A \to B \to D \to (1, 1)$, with edge slopes $5$, $2$, $2/3$ and $0.2$.
+$C$ lies below the edge $BD$: the midpoint of $B$ and $D$ is $(0.35, 0.8)$, with the same FPR and a higher TPR. $E$
+lies below the edge from $D$ to $(1, 1)$, which reaches TPR $0.94$ at FPR $0.7$.
+
+- **Prevalence $0.2$, $c_{\text{FN}} = 4$, $c_{\text{FP}} = 1$.** The slope is $m = 0.8/0.8 = 1$, between $2$ and
+  $2/3$, so $B$ is optimal. Its cost is $0.2 \times 4 \times 0.3 + 0.8 \times 0.2 = 0.40$. $A$, $C$ and $D$ all cost
+  $0.48$, and the half-and-half mixture of $B$ and $D$ at $C$'s FPR costs $0.44$, less than $C$.
+- **Prevalence $0.1$, equal costs.** $m = 9$ exceeds the steepest edge slope $5$, so the optimal vertex is $(0, 0)$:
+  always predict negative, at cost $0.1$. The best non-trivial classifier $A$ costs $0.14$.
+- **Prevalence $0.2$, $c_{\text{FN}} = 10$, $c_{\text{FP}} = 1$.** $m = 0.4$ lies between $2/3$ and $0.2$, so $D$ is
+  optimal, at cost $0.6$, against $0.76$ for $B$.
+
+## Assumptions
+
+- **Rates transfer.** The hull is built from true- and false-positive rates measured on one sample. They are assumed to
+  hold under the deployment prevalence, which is true when the class-conditional feature distributions do not change
+  (prior shift only).
+- **Costs are per case and do not depend on the case.** Example-dependent costs break the linearity in ROC space.
+
+## Pitfalls
+
+- **The empirical hull is optimistic.** Built on the test set, the hull picks the vertices that happened to do well.
+  Choose vertices on validation data and report their cost on separate test data.
+- **Interpolated classifiers randomise.** Two identical cases can receive different predictions. Where that is
+  unacceptable, use the nearest vertex instead of the mixture.
+- **Area under the hull is not area under the curve.** The hull's AUC is at least the curve's AUC. Say which one is
+  reported.

@@ -1,0 +1,122 @@
+---
+title: Difficulty versus ability
+kind: concept
+summary: 'The difficulty–ability–response model: a person knows the answer with probability $\Phi(\sqrt{\tau_q}(a_p - d_q))$, else guesses uniformly. With the answer key latent too, it grades a test without one: each response votes for its answer, weighted by inferred ability.'
+tags: [model-based-machine-learning, crowdsourcing, psychometrics, bayesian, message-passing, latent-variable-models]
+aliases: [DARE model, difficulty ability response estimation, grading a test without knowing the answers, Infer.NET difficulty versus ability, ability-weighted voting]
+requires: [item-response-theory, factor-graph, gates-in-factor-graphs]
+partOf: [model-based-machine-learning]
+related: [assessing-skills, community-bayesian-classifier-combination, dawid-skene-model, learning-from-crowds, bayesian-active-learning]
+references: [bachrach2012dare, infernetdifficulty, minka2008gates, minka2001]
+status: draft
+updated: 2026-09-27
+---
+
+import { DareGraph } from './DareGraph'
+
+<Callout variant="credit" title="Provenance: Bachrach, Minka, Guiver and Graepel (2012), and Infer.NET">
+This note follows "How To Grade a Test Without Knowing the Answers: A Bayesian Graphical Model for Adaptive
+Crowdsourcing and Aptitude Testing" by Yoram Bachrach, Tom Minka, John Guiver and Thore Graepel (Microsoft Research),
+ICML 2012 <Cite id="bachrach2012dare" />, and the Infer.NET "Difficulty versus ability" example that implements it
+<Cite id="infernetdifficulty" />. The model, its inference and the adaptive-testing scheme are theirs; this note
+restates them in this site's notation. I include it because it is a very good account, and I want it in my own
+records. The derivation of the ability-weighted vote was added by this site.
+</Callout>
+
+<Definition>
+Participants $p$ answer multiple-choice questions $q$ with $R$ options. Participant $p$ has ability $a_p$, question $q$
+has difficulty $d_q$ and discrimination (a precision) $\tau_q$, and an unknown correct answer $y_q$. The participant
+knows the answer, $c_{pq} = 1$, with probability $\Phi\paren{\sqrt{\tau_q}\,(a_p - d_q)}$. A participant who knows
+responds $r_{pq} = y_q$; one who does not responds uniformly at random. Given the responses, inference returns
+posteriors over abilities, difficulties, discriminations and the correct answers <Cite id="bachrach2012dare" />.
+</Definition>
+
+## What it adds to item response theory
+
+<NoteLink to="item-response-theory">Item response theory</NoteLink> models the probability of a correct response from
+ability and difficulty, and needs to know which responses are correct. The DARE model (difficulty, ability, response
+estimation) treats the answer key as one more latent variable. The same model then serves two settings
+<Cite id="bachrach2012dare" />:
+
+- **Testing.** The answers are known. Inference estimates abilities and question parameters, as in IRT.
+- **Crowdsourcing.** The answers are unknown, as when a crowd labels data. Inference estimates the answers from the
+  responses, trusting able participants more. A few questions with known answers, a gold set, sharpen the abilities
+  and so the answers.
+
+<DareGraph />
+
+## The model
+
+**Knowing.** The probit comes from a noisy comparison. Let the participant's advantage be $t_{pq} = a_p - d_q$, and let
+them know the answer when $t_{pq} + \epsilon > 0$ with $\epsilon \sim \Gauss(0, 1/\tau_q)$:
+
+$$
+\pr(c_{pq} = 1 \mid a_p, d_q, \tau_q) = \pr\paren{\epsilon > -t_{pq}} = \Phi\paren{\sqrt{\tau_q}\, t_{pq}}.
+$$
+
+A large $\tau_q$ makes the question sharply discriminating: people above its difficulty know it and people below do not.
+A small $\tau_q$ makes knowing nearly a coin flip whatever the ability, the mark of a badly worded question.
+
+**Responding.** The response is a mixture selected by $c_{pq}$, drawn as two <NoteLink to="gates-in-factor-graphs">gates</NoteLink>
+<Cite id="minka2008gates" />. Marginalising $c_{pq}$ with $\pi_{pq} = \pr(c_{pq} = 1)$,
+
+$$
+\pr(r_{pq} = r \mid y_q) = \pi_{pq}\,\indicator[r = y_q] + \frac{1 - \pi_{pq}}{R}.
+$$
+
+Priors are Gaussian on abilities and difficulties, Gamma on discriminations and uniform on the correct answers.
+
+## Grading without an answer key
+
+The message from one response to the correct answer $y_q$ follows from the mixture above. As a function of $y_q$ it
+takes one value when $y_q$ equals the response and another otherwise, so it acts on $y_q$ through the ratio
+
+$$
+\frac{\pr(r_{pq} \mid y_q = r_{pq})}{\pr(r_{pq} \mid y_q \ne r_{pq})} = \frac{\pi_{pq} + (1 - \pi_{pq})/R}{(1 - \pi_{pq})/R} = 1 + \frac{R\,\pi_{pq}}{1 - \pi_{pq}}.
+$$
+
+Multiplying the messages from all participants, the log-posterior of each candidate answer $y$ is
+
+$$
+\log \pr(y_q = y \mid \text{responses}) = \sum_{p:\, r_{pq} = y} \log\paren{1 + \frac{R\,\pi_{pq}}{1 - \pi_{pq}}} + \text{const}.
+$$
+
+Each response is a vote for the option it chose, weighted by how likely the responder was to know. If every participant
+has the same $\pi_{pq}$, every vote has the same weight and the posterior mode is the majority answer. Unequal
+abilities turn majority vote into ability-weighted voting, and the abilities themselves are estimated from agreement
+with the inferred answers. The loop between the two is what message passing iterates. On synthetic data from the model,
+the Infer.NET example recovers 99% of the correct answers against 97% for majority vote <Cite id="infernetdifficulty" />.
+
+## Inference
+
+The graph is loopy, and the messages through the probit and the gates are approximate, so the implementation runs
+expectation propagation to convergence <Cite id="minka2001" />. Abilities, difficulties and discriminations are
+strongly correlated in the posterior, and a factorised approximation converges slowly or fails. The Infer.NET example
+updates participants and questions sequentially, refreshing all variables after each one, which makes EP converge in a
+few iterations <Cite id="infernetdifficulty" />.
+
+## Adaptive testing
+
+The posterior over a participant's ability says which question would be most informative to ask next. The paper picks
+the question with the largest expected reduction in the entropy of the ability posterior. For a Gaussian posterior the
+entropy is $\frac12 \log(2\pi e\sigma^2)$, so this is the question whose answer is expected to shrink the posterior
+variance most, averaged over the model's prediction of the response <Cite id="bachrach2012dare" />. On a standard
+intelligence test, adaptive questioning reached a given accuracy of the ability estimate with fewer questions than a
+fixed test <Cite id="bachrach2012dare" />.
+
+## Assumptions
+
+- **One ability.** A single number per person. Tests of several skills need the multi-skill structure of
+  <NoteLink to="assessing-skills">assessing skills</NoteLink> or a vector of abilities.
+- **Uniform guessing.** A participant who does not know picks uniformly. Attractive wrong options, which draw more
+  guesses, break this; a per-question confusion distribution would fix it at the cost of parameters, as in
+  <NoteLink to="community-bayesian-classifier-combination">Bayesian classifier combination</NoteLink>.
+- **Independent responses** given the latent variables. Copying between participants is not modelled.
+
+## Pitfalls
+
+- **A crowd that is mostly wrong.** If most participants share a misconception, the model infers the misconception as
+  the answer and rates those who got it right as weak. A gold set of known answers anchors the scale.
+- **Difficult questions.** For questions few people know, the inferred answer is unreliable. In the paper, the model
+  inferred the correct answer for 46 of the 60 questions of the test; the authors attribute the misses to very difficult
+  items that few participants answered correctly <Cite id="bachrach2012dare" />.

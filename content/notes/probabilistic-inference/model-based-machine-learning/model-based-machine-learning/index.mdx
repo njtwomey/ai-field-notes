@@ -1,0 +1,100 @@
+---
+title: Model-based machine learning
+kind: overview
+summary: 'Model-based machine learning designs a bespoke probabilistic model for each problem: state the assumptions, draw them as a factor graph, and let a general message-passing engine do inference. The model, not the algorithm, is the design artefact.'
+tags: [model-based-machine-learning, bayesian, factor-graph, message-passing, probabilistic-programming]
+aliases: [MBML, model-based ML, Winn and Bishop, bespoke probabilistic models, Microsoft Research probabilistic models]
+related: [factor-graph, probabilistic-programming, expectation-propagation, belief-propagation, trueskill, bayesian-inference]
+references: [winn2023intro, bishop2013mbml, winn2023lifecycle, infernet2018, minka2008gates, herbrich2006]
+status: draft
+updated: 2026-09-27
+---
+
+import { MotifGallery } from './MotifGallery'
+
+<Callout variant="credit" title="Provenance: Model-Based Machine Learning, by John Winn et al., and Microsoft Research">
+This section follows *Model-Based Machine Learning* by John Winn with Christopher M. Bishop, Thomas Diethe, John Guiver
+and Yordan Zaykov (Microsoft Research) <Cite id="winn2023intro" />, Bishop's paper of the same name
+<Cite id="bishop2013mbml" />, and the Microsoft Research papers and Infer.NET examples that its case studies come from
+<Cite id="infernet2018" />. The philosophy, the workflow and every model in the section are theirs; the notes restate
+them in this site's notation. I include them because they are a very good account, and I want them in my own records.
+The book is free to read at [mbmlbook.com](https://mbmlbook.com). This site added the synthesis below, the factor-graph
+drawings and the interactive figures.
+</Callout>
+
+<Definition>
+**Model-based machine learning** (MBML) builds a probabilistic model tailored to one application instead of choosing a
+standard algorithm and adapting the data to it. The modeller writes down assumptions about how the data were
+generated, expresses them as a factor graph of random variables and factors, and hands the graph to a general
+inference engine that computes posteriors by message passing <Cite id="bishop2013mbml" />. The same engine serves every
+model; only the model changes.
+</Definition>
+
+## The philosophy
+
+Traditional machine learning offers a toolbox: logistic regression, support vector machines, random forests, neural
+networks. Each tool fixes a set of assumptions, often implicit, and the practitioner picks the tool whose assumptions
+fit best. Model-based machine learning reverses this <Cite id="winn2023intro" />:
+
+- **The model is the design artefact.** Each assumption is stated in words, then as a factor. A disagreement about the
+  output is a disagreement about a listed assumption, which can be tested and changed.
+- **Inference is generic.** Given the factor graph, message passing, whether belief propagation, expectation
+  propagation or variational message passing, computes the posteriors. No algorithm is derived by hand for the problem.
+- **Uncertainty is kept.** Every unknown has a distribution. Predictions carry calibrated uncertainty, and online
+  learning is the posterior of one batch becoming the prior of the next.
+- **Many standard methods are special cases.** Chapter 8 of the book reads LDA, PCA, k-means and decision trees as
+  models with particular assumptions; <NoteLink to="matchbox-recommender">Matchbox</NoteLink> contains matrix
+  factorisation as a special case.
+
+## The workflow
+
+The book's interlude on the machine learning life cycle lists eight stages <Cite id="winn2023lifecycle" />:
+
+1. **Gather data** for training and for evaluation.
+2. **Collect domain knowledge** that supports the modelling assumptions.
+3. **Visualise the data** to understand it and find problems.
+4. **Build the model**: write the assumptions, one quantity at a time, and turn each into a factor or the absence of an
+   edge.
+5. **Perform inference** to predict the variables of interest.
+6. **Evaluate** the results against a metric and a success criterion.
+7. **Diagnose** what limits accuracy, using visualisation and synthetic data sampled from the model.
+8. **Refine** the data, the model, the inference or the evaluation, and return to step 5.
+
+The last two stages repeat until the system is good enough. Each case study goes through the loop several times, and
+its failures, traced back to a named assumption, are as instructive as its final model.
+
+<MotifGallery />
+
+## The case studies
+
+| Model | Problem | Latent variables | Motifs | Inference | What goes wrong |
+| --- | --- | --- | --- | --- | --- |
+| <NoteLink to="murder-mystery">Murder mystery</NoteLink> | who did it, from two clues | the murderer | tree of discrete factors | exact belief propagation | clues assumed independent given the murderer |
+| <NoteLink to="assessing-skills">Assessing skills</NoteLink> | which skills a candidate has | binary skills, guess rates | AND gate, noise, loops | loopy BP, EP for Beta guess rates | loops overcount evidence; fixed guess rates miscalibrate |
+| <NoteLink to="difficulty-versus-ability">Difficulty versus ability</NoteLink> | grade a test without the answers | ability, difficulty, discrimination, answer key | noisy threshold, gate | EP, sequential schedule | slow convergence from correlated posteriors |
+| <NoteLink to="email-reply-classifier">Email reply classifier</NoteLink> | will the user reply | feature weights, threshold | noisy threshold, shared prior across users | EP, online | cold start without the community prior |
+| <NoteLink to="adpredictor">AdPredictor</NoteLink> | ad click-through rate | feature weights | noisy threshold | assumed density filtering | variances shrink to zero without dynamics |
+| <NoteLink to="bayes-point-machine">Bayes point machine</NoteLink> | linear classification | weight vector | noisy threshold per point | EP | not sparse; factorised variants lose correlations |
+| <NoteLink to="matchbox-recommender">Matchbox</NoteLink> | recommendations from ratings and metadata | user and item traits, thresholds | product of latents, noisy threshold | EP with variational product messages | trait-space symmetries; broad posteriors for rare items |
+| <NoteLink to="allergy-sensitisation-model">Allergy sensitisation</NoteLink> | patterns of allergy in children | sensitisation states, classes | chain over time, gate, mixture | EP | class symmetry needs random initialisation |
+| <NoteLink to="community-bayesian-classifier-combination">Community BCC</NoteLink> | true labels from crowd labels | true classes, confusion matrices, communities | gate, mixture, shared prior | EP or variational | too many parameters per sparse worker without communities |
+| <NoteLink to="reviewer-calibration">Reviewer calibration</NoteLink> | paper quality from biased reviews | quality, bias, thresholds | shared prior, noisy ordinal threshold | exact Gaussian or EP | confounded assignment; isolated reviewer clusters |
+| <NoteLink to="clicks-and-relevance-judgements">Clicks and judgements</NoteLink> | reconcile labels and clicks | relevance score, thresholds | noisy threshold, soft evidence | EP | clicks measure attractiveness, not relevance |
+
+Skill rating, the book's third case study, has a section of its own: <NoteLink to="trueskill">TrueSkill</NoteLink> is
+the noisy-threshold motif applied to games <Cite id="herbrich2006" />.
+
+## Components
+
+- <NoteLink to="infer-net">Infer.NET</NoteLink>: the inference engine behind every model here.
+- <NoteLink to="gates-in-factor-graphs">Gates in factor graphs</NoteLink>: the notation for mixtures and model
+  selection <Cite id="minka2008gates" />.
+- The case-study notes in the table above.
+
+## When it fits
+
+Model-based design suits problems where domain knowledge is strong, data are scarce or arrive over time, uncertainty
+matters, and the result must be explained. It suits less well problems where the input is raw and high-dimensional,
+such as images or audio, and the useful structure is unknown; there, learned representations do better, and a model can
+sit on top of them. Writing a good model also takes skill: the assumptions must be both true enough and tractable for
+message passing.

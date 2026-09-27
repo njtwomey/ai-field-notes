@@ -8,7 +8,7 @@ export type NoteTab = 'concept' | 'code' | 'outputs'
 
 /**
  * Sticky bar under the site header and the page's only breadcrumb: the taxonomy trail ending in the note's title,
- * its status, then the section being read, a reading-progress line, and (when
+ * then the section being read, a reading-progress line, and (when
  * the note has code) its tabs. The page's h1 is in NoteHeader.
  */
 export function NoteBar({
@@ -37,9 +37,6 @@ export function NoteBar({
       )}
       <div className="flex min-w-0 items-center gap-1 text-sm">
         <TaxonomyTrail note={note} className="shrink-0" />
-        {note.status !== 'stable' && (
-          <span className="shrink-0 pl-1 text-xs text-muted-foreground italic">{note.status}</span>
-        )}
         {section.length > 0 && (
           <a
             href={`#${section[section.length - 1].id}`}

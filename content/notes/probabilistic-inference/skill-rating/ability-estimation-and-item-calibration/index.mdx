@@ -1,0 +1,154 @@
+---
+title: Ability estimation and item calibration
+kind: concept
+summary: 'In item response theory, ability is estimated from a person''s answers by maximum likelihood, or by the posterior mode (MAP) or mean (EAP) under a prior, with standard error $1/\sqrt{I(\theta)}$. Item parameters are calibrated by marginal maximum likelihood, integrating abilities out with EM.'
+tags: [skill-rating, psychometrics, maximum-likelihood, bayesian, worked-example]
+aliases:
+  [
+    ability estimation,
+    item calibration,
+    expected a posteriori,
+    EAP estimate,
+    maximum a posteriori ability,
+    joint maximum likelihood,
+    marginal maximum likelihood,
+    Bock–Aitkin EM,
+    conditional maximum likelihood,
+    computerised adaptive testing,
+  ]
+requires: [item-response-theory, expectation-maximisation]
+partOf: [skill-rating]
+related: [paired-comparison-models, laplace-approximation, elo-rating]
+references: [lord1968, bock1981, bock1982, rasch1960]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Given item characteristic curves $P_i(\theta)$ and a person's responses $x_1, \dots, x_n \in \set{0, 1}$, **ability
+estimation** finds the person's ability $\theta$ from the likelihood
+
+$$
+L(\theta) = \prod_{i=1}^{n} P_i(\theta)^{x_i}\paren{1 - P_i(\theta)}^{1 - x_i},
+$$
+
+by maximising it (MLE), by maximising $L(\theta)\,p(\theta)$ for a prior $p$ (MAP), or by taking the posterior mean
+(EAP). **Item calibration** estimates the item parameters from the responses of many persons, whose abilities are
+unknown.
+</Definition>
+
+## Intuition
+
+A test is a small set of contests against items of known strength. Ability estimation is then the problem of rating
+one player from a few results against fixed opponents, as in a <NoteLink to="paired-comparison-models">Bradley–Terry
+fit</NoteLink> with every opponent's strength known. Calibration is the harder problem in which the opponents' strengths
+are unknown too, and every person plays only a few of them.
+
+## Ability by maximum likelihood
+
+For the 2PL model, $P_i(\theta) = \sigma\paren{a_i(\theta - b_i)}$ and $P_i' = a_i P_i(1 - P_i)$. The log-likelihood
+$\ell(\theta) = \sum_i \brack{x_i\log P_i + (1 - x_i)\log(1 - P_i)}$ has derivative and negative second derivative
+
+$$
+\ell'(\theta) = \sum_i a_i\paren{x_i - P_i(\theta)}, \qquad -\ell''(\theta) = \sum_i a_i^2 P_i(\theta)\paren{1 - P_i(\theta)} = I(\theta).
+$$
+
+The second derivative does not depend on the responses, so it equals the test information $I(\theta)$ and is positive:
+$\ell$ is concave. **Newton's method** is therefore also Fisher scoring:
+
+$$
+\theta \leftarrow \theta + \frac{\sum_i a_i\paren{x_i - P_i(\theta)}}{\sum_i a_i^2 P_i(\theta)\paren{1 - P_i(\theta)}} .
+$$
+
+The estimate satisfies $\sum_i a_i x_i = \sum_i a_i P_i(\hat\theta)$: the discrimination-weighted score equals its
+expected value. In the Rasch model all $a_i = 1$, so the raw score alone determines $\hat\theta$. The standard error is
+$1/\sqrt{I(\hat\theta)}$, from the asymptotic normality of maximum-likelihood estimates.
+
+The maximum is finite only when the answers are mixed. All correct pushes $\hat\theta$ to $+\infty$ and all wrong to
+$-\infty$. Short tests and adaptive tests often start with such patterns.
+
+## Ability with a prior
+
+With a prior $\theta \sim \Gauss(0, 1)$ on the population's scale, the log-posterior adds $-\theta^2/2$:
+
+- **MAP.** Newton's method on $\ell(\theta) - \theta^2/2$ uses the score $\ell'(\theta) - \theta$ and the curvature
+  $I(\theta) + 1$. The estimate is always finite and is pulled towards the prior mean. The approximate posterior
+  standard deviation is $1/\sqrt{I(\hat\theta) + 1}$.
+- **EAP.** The posterior mean $\expect[\theta \mid x] = \int \theta\, L(\theta)\phi(\theta)\,d\theta \big/ \int
+  L(\theta)\phi(\theta)\,d\theta$ is a one-dimensional integral, computed by quadrature on a grid of $\theta$ values.
+  It needs no iteration, exists for every response pattern, and gives the posterior standard deviation from the same
+  grid <Cite id="bock1982" />.
+
+Both shrink towards the prior mean, most for short tests. The MLE is unbiased only asymptotically and has large variance
+for few items.
+
+## Worked example: a 2PL ability estimate
+
+Three items have $(a_i, b_i) = (1.0, -1.0)$, $(1.5, 0.0)$ and $(2.0, 1.0)$. A person answers the first two correctly
+and the third incorrectly: $x = (1, 1, 0)$.
+
+1. **Start at $\theta = 0$.** $P = \paren{\sigma(1), \sigma(0), \sigma(-2)} = (0.7311, 0.5, 0.1192)$. The score is
+   $1.0 \times 0.2689 + 1.5 \times 0.5 + 2.0 \times (-0.1192) = 0.7805$. The information is
+   $1.0 \times 0.1966 + 2.25 \times 0.25 + 4.0 \times 0.1050 = 1.1791$. Newton step: $\theta = 0.7805/1.1791 = 0.662$.
+2. **At $\theta = 0.662$.** $P = (0.8405, 0.7297, 0.3371)$, score $-0.1093$, information $1.4718$. Step:
+   $\theta = 0.662 - 0.0743 = 0.5877$.
+3. **At $\theta = 0.5877$.** Score $-0.0006$, information $1.4544$. The next step changes $\theta$ by $-0.0004$.
+
+The MLE is $\hat\theta = 0.587$ with standard error $1/\sqrt{1.4543} = 0.829$. With a standard normal prior, the MAP
+estimate is 0.344 (posterior sd about 0.651) and the EAP estimate is 0.312 (posterior sd 0.674). The prior pulls the
+estimate towards 0, and it narrows the uncertainty, because three items carry little information. These numbers
+agree with scipy and with the `girth` Python package, whose `ability_mle`, `ability_map` and `ability_eap` give
+0.5873, 0.3437 and 0.3122.
+
+## Item calibration
+
+**Joint maximum likelihood** (JML) maximises the likelihood over all $\theta_p$ and all item parameters together,
+alternating between the two sets. It is simple but inconsistent for the item parameters when the number of items per
+person stays fixed: every new person adds a new $\theta_p$, so the number of parameters grows with the data. Persons
+with all-correct or all-wrong patterns must also be dropped.
+
+**Conditional maximum likelihood** (Rasch model only). The raw score $r_p = \sum_i x_{pi}$ is sufficient for $\theta_p$,
+because the Rasch likelihood of person $p$ is
+
+$$
+\frac{\exp\paren{\theta_p r_p - \sum_i x_{pi} b_i}}{\prod_i \paren{1 + e^{\theta_p - b_i}}} .
+$$
+
+Conditioning on $r_p$ removes $\theta_p$, leaving a likelihood in the difficulties alone <Cite id="rasch1960" />.
+
+**Marginal maximum likelihood** (MML) treats abilities as draws from a population, $\theta_p \sim \Gauss(0, 1)$, and
+maximises the marginal likelihood of the item parameters,
+
+$$
+\prod_p \int \prod_i P_i(\theta)^{x_{pi}}\paren{1 - P_i(\theta)}^{1 - x_{pi}}\, \phi(\theta)\, d\theta .
+$$
+
+Bock and Aitkin maximise it with <NoteLink to="expectation-maximisation">expectation maximisation</NoteLink>, replacing
+the integral by a sum over quadrature points $\theta_q$ with weights $w_q$ <Cite id="bock1981" />.
+
+- **E-step.** For each person, compute the posterior weight of each quadrature point,
+  $\pi_{pq} \propto w_q \prod_i P_i(\theta_q)^{x_{pi}}\paren{1 - P_i(\theta_q)}^{1 - x_{pi}}$. Sum them into the
+  expected number of persons at each point, $\bar n_q = \sum_p \pi_{pq}$, and the expected number of correct answers to
+  item $i$ there, $\bar r_{iq} = \sum_p \pi_{pq} x_{pi}$.
+- **M-step.** Each item separately: fit $P_i(\theta_q)$ to $\bar r_{iq}$ successes out of $\bar n_q$ trials, a small
+  weighted logistic regression on the quadrature points.
+
+The standard normal population fixes the scale that is otherwise identified only up to shift (and, in the 2PL, a
+stretch). Abilities are then estimated person by person with the item parameters held fixed, by MLE, MAP or EAP.
+
+## Adaptive testing
+
+A computerised adaptive test alternates two steps: estimate $\theta$ from the answers so far, usually by EAP so that the
+estimate exists from the first answer, then give the unused item with the largest information $I_i(\hat\theta)$. The
+test stops when the posterior standard deviation falls below a target or a maximum length is reached
+<Cite id="bock1982" />. For a 2PL item bank, maximum information means choosing items with $b_i$ near the current
+estimate and large $a_i$.
+
+## Pitfalls
+
+- **Treating calibrated parameters as exact.** Ability standard errors from $1/\sqrt{I}$ ignore the uncertainty in the
+  item parameters. With a small calibration sample the reported precision is optimistic.
+- **Item exposure.** Maximum-information selection reuses the same highly discriminating items for everyone near a
+  given ability. Operational tests randomise among near-best items to keep items secret.
+- **Prior mismatch.** MAP and EAP shrink towards the prior mean. For a person far from the calibration population, a
+  short test reports an ability that is too close to the average.

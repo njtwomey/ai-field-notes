@@ -1,0 +1,85 @@
+---
+title: LLM as a judge
+kind: concept
+summary: 'An LLM judge rates or compares system outputs in place of human raters, pointwise, pairwise or by rubric. For recommenders it can judge fit to a user profile. Judges must be validated against humans and have known biases: position, verbosity, self-preference and manipulable cues.'
+tags: [evaluation, large-language-models, recommender-systems, metrics]
+aliases: [LLM-as-a-judge, LLM judge, LLM evaluator, automated evaluation with language models, profile-aware judge, judge bias, position bias of LLM judges]
+requires: [recommendation-metrics]
+partOf: [recommender-systems]
+related: [language-models-as-recommenders, cohens-kappa, receiver-operating-characteristic-curve-and-area, overall-evaluation-criterion]
+references: [zheng2023judge, fabbri2025podcast, hashemi2024llmrubric, wang2023notfair, chen2024judgebias, zhao2025masterkeys, guerdan2025indeterminacy, chan2023chateval]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**LLM as a judge** is the use of a large language model to evaluate the outputs of another system, as a scalable
+substitute for human raters. The judge receives the input, the output or outputs, and instructions, and returns a score
+(**pointwise**), a preference between two outputs (**pairwise**), or scores on several criteria (**rubric-based**)
+<Cite id="zheng2023judge" />.
+</Definition>
+
+## Why recommenders need it
+
+Recommenders increasingly generate text: explanations, conversational replies, summaries of reviews. List metrics such
+as NDCG do not apply to text, overlap metrics such as BLEU agree poorly with human judgement, and human studies are slow
+and expensive. For item lists too, offline metrics inherit exposure bias and online tests are costly. An LLM judge fills
+the gap by rating how well recommendations fit a user.
+
+## Designs
+
+- **Pointwise scoring** rates one output against a rubric.
+- **Pairwise comparison** asks which of two outputs is better, which is often more reliable than absolute scores
+  <Cite id="zheng2023judge" />.
+- **Rubrics** decompose the judgement into dimensions such as fluency, faithfulness and relevance and combine them;
+  LLM-Rubric calibrates the combination to individual human judges <Cite id="hashemi2024llmrubric" />.
+- **Multiple agents** debate or deliberate in roles, such as critic and defender, before a verdict
+  <Cite id="chan2023chateval" />.
+- **Personalised judges** condition on a description of the user. Fabbri et al. distilled 90 days of podcast listening
+  into a natural-language profile and asked the judge whether recommended episodes fit it. In a study with 47
+  participants the profile-aware judge matched human judgements with high fidelity and matched or beat a judge given the
+  raw listening history. Longer profiles helped: accuracy rose from 0.51 with profiles built from 5 episodes to 0.59
+  with 20 <Cite id="fabbri2025podcast" />.
+
+## Validating the judge
+
+A judge is itself a model that must be evaluated before its scores are trusted.
+
+- **Agreement with humans.** Raw agreement, precision and recall, and chance-corrected agreement such as
+  <NoteLink to="cohens-kappa">Cohen's kappa</NoteLink>.
+- **Decision-level agreement.** Fabbri et al. report the judge's ROC-AUC on user–episode relevance and **model selection
+  agreement**, the fraction of cases where the judge prefers the same recommender as the human annotators
+  <Cite id="fabbri2025podcast" />.
+- **Indeterminacy.** For many items, several ratings are reasonable. Forcing humans and the judge to choose one rating
+  per item biases validation; Guerdan et al. show that forced-choice validation can select judges up to 31% worse than
+  validation with multi-label responses <Cite id="guerdan2025indeterminacy" />.
+
+## Biases and attacks
+
+LLM judges are not neutral.
+
+- **Position bias.** In pairwise comparisons the verdict can depend on which answer is shown first; swapping the order
+  changes results <Cite id="wang2023notfair" /> <Cite id="zheng2023judge" />.
+- **Verbosity and self-preference.** Judges tend to favour longer answers and answers from their own model family
+  <Cite id="zheng2023judge" />.
+- **Superficial cues.** Authority cues such as fabricated references and presentation changes shift verdicts
+  independently of content <Cite id="chen2024judgebias" />.
+- **Master keys.** Content-free inputs such as a colon or "Let's solve this problem step by step" can elicit positive
+  verdicts from reward-model judges, including leading proprietary models <Cite id="zhao2025masterkeys" />.
+
+When a recommender is optimised against a judge, these weaknesses become targets: the system learns to please the judge
+rather than the user, as Goodhart's law predicts.
+
+## Mitigations
+
+- Use explicit rubrics, reasoning before a verdict, and a few worked examples in the prompt.
+- Randomise or swap the order in pairwise comparisons and average <Cite id="wang2023notfair" />.
+- Use committees of different models, and allow the judge to abstain when unsure.
+- Keep humans in the loop: a golden set of human-labelled items to validate against, adversarial red-teaming, and expert
+  review of disagreements.
+
+## Pitfalls
+
+- **Stale context.** A judge built on historical behaviour cannot judge a recommendation for a trend that started after
+  the history it was given.
+- **Judging the judge on the same data.** Validate on items the prompt was not tuned on.

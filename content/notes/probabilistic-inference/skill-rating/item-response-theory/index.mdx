@@ -1,0 +1,157 @@
+---
+title: Item response theory
+kind: concept
+summary: 'Item response theory models the chance that person $p$ answers item $i$ correctly as a curve in ability $\theta_p$: $c_i + (d_i - c_i)\,\sigma(a_i(\theta_p - b_i))$, with difficulty $b_i$, discrimination $a_i$, guessing floor $c_i$ and ceiling $d_i$. The Rasch model keeps only $b_i$ and is a Bradley–Terry contest.'
+tags: [skill-rating, psychometrics, latent-variable-models, paired-comparisons, worked-example]
+aliases:
+  [
+    IRT,
+    Rasch model,
+    one-parameter logistic model,
+    1PL,
+    two-parameter logistic model,
+    2PL,
+    three-parameter logistic model,
+    3PL,
+    four-parameter logistic model,
+    4PL,
+    item characteristic curve,
+    item information function,
+    test information function,
+    normal ogive model,
+  ]
+requires: [logistic-regression, paired-comparison-models]
+partOf: [skill-rating]
+related: [ability-estimation-and-item-calibration, polytomous-and-multidimensional-item-response-models, elo-rating, trueskill]
+references: [rasch1960, lord1968, barton1981, camilli1994, pelanek2016, bock1981]
+status: draft
+updated: 2026-09-27
+---
+
+import { ItemResponseExplorer } from './ItemResponseExplorer'
+
+<Definition>
+**Item response theory** (IRT) models the responses $x_{pi} \in \set{0, 1}$ of persons $p$ to test items $i$. Each
+person has a latent ability $\theta_p \in \reals$. Each item has a curve $P_i(\theta)$, its **item characteristic
+curve**, giving the probability of a correct answer at ability $\theta$. Responses are independent given the
+abilities. The **four-parameter logistic** (4PL) curve is
+
+$$
+P_i(\theta) = c_i + (d_i - c_i)\,\sigma\paren{a_i(\theta - b_i)}, \qquad \sigma(z) = \frac{1}{1 + e^{-z}},
+$$
+
+with difficulty $b_i$, discrimination $a_i > 0$, lower asymptote $0 \le c_i < d_i$ and upper asymptote $d_i \le 1$. The
+3PL fixes $d_i = 1$, the 2PL also fixes $c_i = 0$, and the **Rasch** or 1PL model also fixes $a_i = 1$
+<Cite id="rasch1960" /> <Cite id="lord1968" />.
+</Definition>
+
+## Intuition
+
+A test question is an opponent with a fixed strength. A person "beats" the item by answering it correctly. Under the
+Rasch model,
+
+$$
+\pr(x_{pi} = 1) = \sigma(\theta_p - b_i) = \frac{e^{\theta_p}}{e^{\theta_p} + e^{b_i}},
+$$
+
+which is the <NoteLink to="paired-comparison-models">Bradley–Terry model</NoteLink> for a game between person $p$ and
+item $i$. Every result for Bradley–Terry carries over: only differences $\theta_p - b_i$ are identified, the fit is a
+logistic regression, and the maximum likelihood needs a connected pattern of successes and failures. The
+difference from sports is that the items never play each other and the persons never play each other; every game is
+between the two groups.
+
+Each parameter of the 4PL curve has one job.
+
+- **Difficulty $b_i$** shifts the curve along the ability axis. In the 1PL and 2PL, $b_i$ is the ability at which the
+  chance of success is $\tfrac12$.
+- **Discrimination $a_i$** sets the slope at $b_i$, which is $a_i(d_i - c_i)/4$. A steep item separates people just
+  below $b_i$ from those just above it; a flat item says little about anyone.
+- **Guessing floor $c_i$** is the success rate of a person with very low ability, for example about $1/4$ on a
+  four-option multiple-choice item.
+- **Ceiling $d_i$** is below 1 when able people sometimes slip, through carelessness or a badly worded item
+  <Cite id="barton1981" />.
+
+## Logistic and normal ogive
+
+The first IRT models used the **normal ogive** $\Phi\paren{a_i(\theta - b_i)}$, where $\Phi$ is the standard normal
+cdf <Cite id="lord1968" />. This is the Thurstone form of a paired comparison; the logistic curve is the Bradley–Terry
+form. The two are close after rescaling: $\abs{\Phi(z) - \sigma(1.702\,z)} < 0.0095$ for all $z$ (checked numerically).
+A normal-ogive discrimination $a$ therefore corresponds to a logistic discrimination of about $1.702\,a$. Many programs
+write the logistic model as $\sigma\paren{D a_i(\theta - b_i)}$ with $D = 1.7$ or $1.702$ so that its parameters can be
+read on the normal-ogive scale <Cite id="camilli1994" />. The choice matters for the scale of $a_i$ and not for fit.
+
+## Information
+
+How precisely a test measures ability depends on where the ability lies. For one Bernoulli response with success
+probability $P(\theta)$, the log-likelihood is $\ell(\theta) = x\log P + (1 - x)\log(1 - P)$, and its derivative is
+
+$$
+\ell'(\theta) = \frac{x - P(\theta)}{P(\theta)\paren{1 - P(\theta)}}\, P'(\theta).
+$$
+
+The response has mean $P$ and variance $P(1 - P)$, so the Fisher information, the variance of $\ell'$, is
+
+$$
+I_i(\theta) = \frac{P_i'(\theta)^2}{P_i(\theta)\paren{1 - P_i(\theta)}} .
+$$
+
+For the 4PL curve, $P_i'(\theta) = a_i(d_i - c_i)\,s(1 - s)$ with $s = \sigma\paren{a_i(\theta - b_i)}$.
+
+- **2PL.** With $c_i = 0$ and $d_i = 1$, $P_i' = a_i P_i(1 - P_i)$, and the information simplifies to
+  $I_i(\theta) = a_i^2 P_i(\theta)\paren{1 - P_i(\theta)}$. It peaks at $\theta = b_i$ with value $a_i^2/4$.
+- **3PL.** Guessing lowers the information everywhere, because a correct answer might be a guess. The peak also moves
+  above the difficulty, to $\theta = b_i + \frac{1}{a_i}\log\frac{1 + \sqrt{1 + 8c_i}}{2}$ <Cite id="lord1968" />. For
+  $a_i = 1.5$ and $c_i = 0.2$ the peak is at $b_i + 0.178$ with height 0.383, against 0.5625 at $b_i$ without guessing.
+
+Responses are independent given $\theta$, so information adds. The **test information** is
+$I(\theta) = \sum_i I_i(\theta)$, and the standard error of the maximum-likelihood ability estimate is approximately
+$1/\sqrt{I(\theta)}$. A test built from items of one difficulty measures well near that difficulty and poorly
+elsewhere. A test for a broad population needs items spread along the ability axis.
+
+<ItemResponseExplorer />
+
+## Estimating abilities and item parameters
+
+With the item parameters known, a person's ability is estimated from their responses by maximum likelihood, or by the
+posterior mode or mean under a prior. With the abilities unknown too, the item parameters are calibrated by marginal
+maximum likelihood, integrating the abilities out, usually with the EM algorithm of Bock and Aitkin
+<Cite id="bock1981" />. Both are derived, with a worked 2PL example, in
+<NoteLink to="ability-estimation-and-item-calibration">ability estimation and item calibration</NoteLink>.
+
+Items scored in more than two categories, and tests that measure more than one ability, need the extensions in
+<NoteLink to="polytomous-and-multidimensional-item-response-models">polytomous and multidimensional item response
+models</NoteLink>. With test instances as items and trained models as respondents, the same models describe datasets and
+benchmarks; see <NoteLink to="item-response-theory-for-machine-learning" /> and, for probabilities as responses, the
+<NoteLink to="beta-cubed-item-response-model">β³ model</NoteLink>.
+
+## Online updates and adaptive testing
+
+An **adaptive test** gives each person the item with the most information at their current ability estimate, then
+re-estimates. Each item is then close to a fair contest, as a matchmaker in a game picks an opponent of similar skill.
+
+The skill-rating view gives a cheap alternative to refitting. After each answer, update both the person and the item
+with the <NoteLink to="elo-rating">Elo</NoteLink> rule, $\theta_p \leftarrow \theta_p + K(x - P)$ and
+$b_i \leftarrow b_i - K(x - P)$. This is one stochastic-gradient step on the Rasch log-likelihood. Adaptive learning
+systems use it to track students and calibrate questions at the same time <Cite id="pelanek2016" />. A Bayesian version
+keeps a Gaussian belief over each $\theta_p$ and $b_i$ and updates it as <NoteLink to="trueskill">TrueSkill</NoteLink>
+does, with the uncertainty acting as a per-person and per-item learning rate.
+
+## Assumptions
+
+- **One dimension.** A single ability explains all items. Tests that mix skills need multidimensional models.
+- **Local independence.** Given $\theta_p$, responses to different items are independent. Items that share a reading
+  passage or build on each other violate this.
+- **Monotonicity.** The chance of a correct answer rises with ability.
+- **Invariance.** An item's parameters are the same for every person. An item that is harder for one group than
+  another at equal ability shows **differential item functioning** and breaks this assumption.
+
+## Pitfalls
+
+- **Arbitrary scale.** Adding a constant to all $\theta_p$ and all $b_i$ changes nothing, and in the 2PL scaling
+  $\theta$ by $k$ while dividing every $a_i$ by $k$ changes nothing either. Abilities mean something only relative to
+  the reference population that fixed the scale.
+- **Guessing and slipping are hard to estimate.** The floor $c_i$ is informed only by low-ability people and the
+  ceiling $d_i$ only by high-ability people. With few of them, the 3PL and 4PL estimates are unstable, and priors on
+  $c_i$ and $d_i$ are common.
+- **All-correct and all-wrong patterns.** A person who answers every item correctly has no finite maximum-likelihood
+  ability, just as an undefeated player has no finite Bradley–Terry strength. A prior fixes this.

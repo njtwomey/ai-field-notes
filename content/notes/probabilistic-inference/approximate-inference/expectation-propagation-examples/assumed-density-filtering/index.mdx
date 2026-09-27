@@ -1,0 +1,134 @@
+---
+title: Assumed density filtering
+kind: technique
+summary: 'Assumed density filtering absorbs a posterior''s factors one at a time: multiply the current Gaussian by the next exact factor, then replace the product by the Gaussian with the same mean and variance. It never revisits a factor, so its result depends on their order.'
+tags: [worked-example, approximate-inference, bayesian, exponential-family]
+aliases: [ADF, assumed density filtering, moment-matching filter, projection filter]
+requires: [expectation-propagation, kullback-leibler-divergence]
+related: [expectation-propagation-truncated-gaussian, kalman-filter, expectation-propagation-clutter-problem, laplace-approximation]
+references: [minka2001thesis, opper1998, minka2001]
+status: draft
+updated: 2026-09-27
+---
+
+import { AdfOrder } from './AdfOrder'
+
+<Definition>
+Assumed density filtering (ADF) approximates a posterior $p(\thetavec) \propto p_0(\thetavec)\prod_{i=1}^n t_i(\thetavec)$
+by a member of an exponential family $\Fcal$, such as the Gaussians. Start from $q_0 = p_0$. For $i = 1, \dots, n$, form
+$\hat p_i \propto q_{i-1}\,t_i$ and set $q_i$ to the member of $\Fcal$ with the same expected sufficient statistics as
+$\hat p_i$, which minimises $\KL(\hat p_i \,\|\, q_i)$. The answer is $q_n$ <Cite id="minka2001thesis" /> <Cite id="opper1998" />.
+</Definition>
+
+## Problem
+
+An exact posterior with non-Gaussian factors is not Gaussian, and its normaliser and moments are integrals without a
+closed form. One factor at a time is easy: a Gaussian times one probit, step or mixture factor has closed-form moments.
+ADF strings these easy steps together, keeping a Gaussian at every stage, so that the cost is one small integral per
+factor. It suits streaming data, where each observation is seen once, and it is the first pass of
+<NoteLink to="expectation-propagation">expectation propagation</NoteLink> (EP).
+
+## Mechanism
+
+Each ADF step has three parts:
+
+1. **Multiply.** $\hat p_i(\thetavec) = q_{i-1}(\thetavec)\,t_i(\thetavec)/Z_i$ with
+   $Z_i = \int q_{i-1}(\thetavec)\,t_i(\thetavec)\,d\thetavec$. $\hat p_i$ is the exact posterior if $q_{i-1}$ were the
+   exact posterior of the first $i - 1$ factors.
+2. **Project.** Set $q_i = \argmin_{q \in \Fcal}\KL(\hat p_i \,\|\, q)$. For an exponential family with sufficient
+   statistics $\tvec(\thetavec)$ the minimiser satisfies $\expect_{q_i}[\tvec] = \expect_{\hat p_i}[\tvec]$. For a
+   Gaussian, $q_i$ has the mean and covariance of $\hat p_i$.
+3. **Accumulate the evidence.** $\prod_i Z_i$ approximates the marginal likelihood $\int p_0\prod_i t_i\,d\thetavec$,
+   because each $Z_i$ is the predictive probability of factor $i$ under the current approximation.
+
+For a Gaussian $q_{i-1} = \Gauss(\mu, \sigma^2)$ in one dimension, step 2 needs only $\log Z_i$ as a function of $\mu$:
+$\expect_{\hat p_i}[\theta] = \mu + \sigma^2\,\partial_\mu\log Z_i$ and
+$\var_{\hat p_i}[\theta] = \sigma^2 + \sigma^4\,\partial^2_\mu\log Z_i$. The derivation of these identities, and of the
+closed forms for step and probit factors, is in <NoteLink to="expectation-propagation-truncated-gaussian">a Gaussian times a step function</NoteLink>.
+
+### ADF as a product of sites
+
+Every ADF step can be read as replacing factor $t_i$ by a Gaussian **site**
+$\tilde t_i(\thetavec) = Z_i\,q_i(\thetavec)/q_{i-1}(\thetavec)$. A ratio of Gaussians is an exponentiated quadratic, so
+the site is Gaussian in shape, possibly with negative precision. Multiplying the prior by all the sites reproduces
+$q_n$ exactly: the product telescopes, $p_0\prod_i \tilde t_i = q_n\prod_i Z_i$ <Cite id="minka2001thesis" />.
+
+This reading shows what goes wrong. Site $i$ is fitted against $q_{i-1}$, the approximation built from the factors
+before it, and is never updated when later factors arrive. A factor absorbed early is summarised where the early
+approximation had its mass, which may not be where the final posterior lies. The result depends on the order.
+
+EP keeps the sites and revisits them. To refine site $i$, it removes that site from the current $q$ to get a **cavity**
+$q^{\setminus i} \propto q/\tilde t_i$, which contains all the other factors' information, and repeats the ADF step
+against that cavity. At a fixed point, every site is consistent with every other, and the order of visits no longer
+matters.
+
+## Worked example: two censored readings
+
+A quantity $\theta$ has prior $\Gauss(0, 4)$. A sensor reports $\theta + n$ with noise $n \sim \Gauss(0, 1)$, but only
+relative to a threshold. Reading A says $\theta + n_A > 2$; reading B says $\theta + n_B < 0$. The factors are
+
+$$
+t_A(\theta) = \Phi(\theta - 2), \qquad t_B(\theta) = \Phi(-\theta),
+$$
+
+where $\Phi$ is the standard normal cdf. The readings disagree: one says $\theta$ is large, the other that it is small.
+
+For a cavity $\Gauss(\mu, \sigma^2)$ and a factor $\Phi\paren{y(\theta - c)}$ with sign $y = \pm 1$ and threshold $c$,
+let $z = y(\mu - c)/\sqrt{1 + \sigma^2}$, $v = \phi(z)/\Phi(z)$ and $w = v(v + z)$. The tilted moments are
+
+$$
+\text{mean} = \mu + \frac{y\,\sigma^2 v}{\sqrt{1 + \sigma^2}}, \qquad
+\text{variance} = \sigma^2 - \frac{\sigma^4 w}{1 + \sigma^2}.
+$$
+
+**Order A then B.**
+
+1. Absorb $t_A$ into $\Gauss(0, 4)$. $z = (0 - 2)/\sqrt 5 = -0.8944$, $v = 1.4412$, $w = 0.7881$. Mean
+   $= 4 \times 1.4412/\sqrt 5 = 2.5782$; variance $= 4 - 16 \times 0.7881/5 = 1.4781$.
+2. Absorb $t_B$ into $\Gauss(2.5782, 1.4781)$. $z = -2.5782/\sqrt{2.4781} = -1.6378$, $v = 2.0566$, $w = 0.8614$. Mean
+   $= 2.5782 - 1.4781 \times 2.0566/\sqrt{2.4781} = 0.6471$; variance $= 1.4781 - 1.4781^2 \times 0.8614/2.4781 = 0.7187$.
+
+**Order B then A.**
+
+1. Absorb $t_B$ into $\Gauss(0, 4)$. $z = 0$, $v = 0.7979$, $w = 0.6366$. Mean $= -4 \times 0.7979/\sqrt 5 = -1.4273$;
+   variance $= 4 - 16 \times 0.6366/5 = 1.9628$.
+2. Absorb $t_A$ into $\Gauss(-1.4273, 1.9628)$. $z = -3.4273/\sqrt{2.9628} = -1.9911$, $v = 2.3654$, $w = 0.8852$.
+   Mean $= -1.4273 + 1.9628 \times 2.3654/\sqrt{2.9628} = 1.2700$; variance $= 0.8118$.
+
+**Exact.** Numerical integration of $\Gauss(\theta \mid 0, 4)\,\Phi(\theta - 2)\,\Phi(-\theta)$ on a fine grid gives mean
+$0.8617$ and variance $0.5537$.
+
+The two orders give means of $0.647$ and $1.270$, on either side of the exact $0.862$, and both overstate the variance.
+The first factor absorbed is fitted against the prior, which is broad and centred at 0. With A first, its site is
+$\tilde t_A \propto \Gauss(\theta \mid 4.09, 2.34)$ (precision $0.427$); A's evidence is summarised as if $\theta$ were
+near the prior, and B's later pull is not balanced against it.
+
+**EP.** Keep both sites and revisit them. In sweep 2, the cavity for A is the prior times the site of B, which after
+the first pass is $\Gauss(-0.8745, 1.0364)$. Absorbing $t_A$ into this cavity gives $q = \Gauss(0.8583, 0.5688)$ and a
+new site for A with precision $0.793$ and mean $2.97$. Refitting B against its new cavity gives
+$\Gauss(0.8621, 0.5554)$. A third sweep changes the fourth decimal place only: EP converges to $\Gauss(0.8617, 0.5553)$
+from either order. The mean agrees with the exact mean to four decimals, and the variance is within 0.3 per cent. A
+<NoteLink to="laplace-approximation">Laplace approximation</NoteLink> at the mode gives $\Gauss(0.8650, 0.5404)$.
+
+<AdfOrder />
+
+## Cost
+
+One ADF step costs one tilted-moment computation plus an update of the Gaussian. For scalar factors of the form
+$t_i(\thetavec) = f(\xvec_i\transpose\thetavec)$ on a $d$-dimensional Gaussian, the tilted moments are one-dimensional
+and the covariance changes by a rank-one update, $O(d^2)$ per factor and $O(nd^2)$ for the pass. EP repeats the pass a
+few times, typically 4 or 5 <Cite id="minka2001thesis" />, and stores one site per factor.
+
+## Trade-offs
+
+- **Order dependence.** The result depends on the order of the factors. Processing similar observations together is
+  especially bad: the approximation commits to one region before it sees data elsewhere <Cite id="minka2001thesis" />.
+  EP removes the dependence at the cost of storing the sites and repeating the passes.
+- **Streaming.** ADF needs each factor once and stores nothing per factor, so it works on unbounded streams where EP
+  cannot. Opper's online Bayesian learning for neural networks and perceptrons is ADF with a Gaussian
+  <Cite id="opper1998" />.
+- **Always proper.** The cavity at every ADF step is the previous posterior approximation, which is a proper Gaussian,
+  so ADF never meets the negative-variance cavities that can stall EP.
+- **Kalman filtering.** For a linear-Gaussian state-space model every tilted distribution is already Gaussian and ADF is
+  exact: it is the <NoteLink to="kalman-filter">Kalman filter</NoteLink>. With non-linear observations ADF gives a
+  moment-matching filter, an alternative to linearisation in the extended Kalman filter.

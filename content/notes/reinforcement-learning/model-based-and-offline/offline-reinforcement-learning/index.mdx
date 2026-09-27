@@ -1,0 +1,125 @@
+---
+title: Offline reinforcement learning
+kind: concept
+summary: 'Offline RL learns a policy from a fixed dataset, without further interaction. Bootstrapped targets query actions absent from the data, and the maximum amplifies their errors. Conservative Q-learning penalises those values; behaviour regularisation stays near the data.'
+tags: [reinforcement-learning, offline-rl, off-policy, distribution-shift, worked-example]
+aliases: [offline RL, batch reinforcement learning, batch RL, conservative Q-learning, CQL, behaviour regularisation, behavior regularization, BCQ, batch-constrained Q-learning, TD3+BC, implicit Q-learning, IQL, extrapolation error]
+requires: [q-learning]
+partOf: [reinforcement-learning]
+related: [off-policy-evaluation-in-reinforcement-learning, off-policy-learning, logging-policies-and-propensities, deterministic-policy-gradients]
+references: [levine2020, kumar2020, fujimoto2019, fujimoto2021, kostrikov2022]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Offline reinforcement learning** learns a policy from a fixed dataset $\Dcal = \set{(s_i, a_i, r_i, s'_i)}$ of
+transitions collected by one or more **behaviour policies** $\pi_\beta$, with no further interaction with the
+environment. The goal is the policy with the highest return in the true environment, not a copy of $\pi_\beta$
+<Cite id="levine2020" />.
+</Definition>
+
+## Intuition
+
+Many domains have large logs of past decisions and no safe way to experiment: medicine, driving, recommendation,
+industrial control. Supervised learning scaled with large fixed datasets; offline RL aims to do the same for decision
+making. It is the sequential version of <NoteLink to="off-policy-learning">off-policy learning</NoteLink> for
+contextual bandits.
+
+The obstacle is **distribution shift**. Any policy better than $\pi_\beta$ must take some actions $\pi_\beta$ took
+rarely. The data say little about those actions, and no new data will arrive to correct a mistaken estimate of their
+value.
+
+## Why off-policy methods fail offline
+
+<NoteLink to="q-learning">Q-learning</NoteLink> is off-policy, so it looks applicable to fixed data. Its target
+$r + \gamma\max_{a'}Q(s', a')$ evaluates $Q$ at every action in $s'$, including actions absent from $\Dcal$. A neural
+network's values there are extrapolations with arbitrary errors. The maximum selects whichever action's error is most
+positive. That inflated value becomes a regression target, and bootstrapping spreads it to every state that leads to
+$s'$. Online, the agent would try the overvalued action, observe a low return and correct the estimate. Offline, the
+correction never comes, and the learned policy heads for exactly the actions the data know least about. Fujimoto et
+al. call this **extrapolation error**, and showed that off-policy deep RL trained on data from a good policy can learn
+far worse than that policy <Cite id="fujimoto2019" />.
+
+Two families of fixes exist: change the values so that unseen actions do not look good, or constrain the policy to
+actions the data support.
+
+## Conservative Q-learning
+
+**Conservative Q-learning** (CQL) adds a regulariser to the Bellman error that pushes down Q-values of actions a
+chosen distribution $\mu$ proposes and pushes up Q-values of actions in the data <Cite id="kumar2020" />:
+
+$$
+\min_Q\ \alpha\paren{\expect_{s \sim \Dcal,\, a \sim \mu(\cdot \mid s)}\brack{Q(s, a)} - \expect_{(s, a) \sim \Dcal}\brack{Q(s, a)}} + \frac12\expect_{(s, a, s') \sim \Dcal}\brack{\paren{Q(s, a) - \hat y(s, a, s')}^2}.
+$$
+
+**Why it is conservative.** Take one state in the tabular case, with dataset action frequencies $\pi_\beta(a)$ and a
+fixed target $y(a)$ for each action. The objective is
+$\alpha\sum_a(\mu(a) - \pi_\beta(a))Q(a) + \frac12\sum_a\pi_\beta(a)(Q(a) - y(a))^2$. Setting its derivative in $Q(a)$
+to zero gives
+
+$$
+Q(a) = y(a) - \alpha\,\frac{\mu(a) - \pi_\beta(a)}{\pi_\beta(a)}.
+$$
+
+Actions that $\mu$ favours more than the data do are penalised, in inverse proportion to how often the data contain
+them. The value of the policy $\mu$ under these Q-values is
+
+$$
+\sum_a\mu(a)Q(a) = \sum_a\mu(a)y(a) - \alpha\paren{\sum_a\frac{\mu(a)^2}{\pi_\beta(a)} - 1} = \expect_\mu[y] - \alpha\,\chi^2(\mu \,\|\, \pi_\beta),
+$$
+
+an underestimate by $\alpha$ times the chi-squared divergence between $\mu$ and the data distribution. Policies close
+to the data are barely penalised; policies that rely on rare actions are penalised heavily.
+
+In practice $\mu$ is the distribution that maximises the penalised Q-value with an entropy bonus, which replaces the
+first expectation by $\log\sum_a\exp Q(s, a)$. Its gradient with respect to $Q(s, a)$ is the softmax probability of
+$a$, so the push-down falls hardest on the actions the maximum would pick.
+
+## Behaviour regularisation
+
+The second family leaves the values alone and keeps the policy near $\pi_\beta$, so that the critic is queried only
+where the data can answer.
+
+- **BCQ** trains a generative model of $\pi_\beta(a \mid s)$ and lets the policy choose only among actions sampled from
+  it, perturbed slightly <Cite id="fujimoto2019" />.
+- **TD3+BC** adds a behaviour-cloning term to the <NoteLink to="deterministic-policy-gradients">TD3</NoteLink> actor
+  objective: maximise $\lambda Q(s, \mu(s)) - (\mu(s) - a)^2$ over dataset pairs $(s, a)$, with $\lambda$ normalised
+  by the scale of $Q$. It is two lines of code added to TD3, and competitive with far more complex methods
+  <Cite id="fujimoto2021" />.
+- **Implicit Q-learning** never evaluates an action outside the data. It fits a state value $V(s)$ to an upper
+  expectile of $Q(s, a)$ over dataset actions, which approximates a maximum over supported actions only, uses
+  $r + \gamma V(s')$ as the target for $Q$, and extracts the policy by regression on dataset actions weighted by
+  $\exp(\beta(Q(s, a) - V(s)))$ <Cite id="kostrikov2022" />.
+
+## Worked example
+
+In one state the data contain action 1 in 90% of transitions and action 2 in 10%, so $\pi_\beta = (0.9, 0.1)$. Both
+actions have target value $y = 1$. A candidate policy $\mu = (0.2, 0.8)$ prefers the rare action. With $\alpha = 0.1$,
+CQL's tabular fixed point is
+
+- $Q(1) = 1 - 0.1\,(0.2 - 0.9)/0.9 = 1.078$, raised because the data favour it;
+- $Q(2) = 1 - 0.1\,(0.8 - 0.1)/0.1 = 0.300$, lowered sharply because it is rare in the data.
+
+The value of $\mu$ is $0.2 \cdot 1.078 + 0.8 \cdot 0.3 = 0.456$. The chi-squared divergence is
+$0.2^2/0.9 + 0.8^2/0.1 - 1 = 5.44$, and $1 - 0.1 \cdot 5.44 = 0.456$ agrees. Both actions are truly worth 1, but CQL
+would steer a learner towards action 1, whose value the data support.
+
+## Evaluation
+
+A policy learned offline must be evaluated before deployment, and the same distribution shift makes that hard.
+<NoteLink to="off-policy-evaluation-in-reinforcement-learning">Off-policy evaluation</NoteLink> estimates its value from the same kind of
+log, with variance that grows with how far the policy departs from the data.
+
+## Assumptions
+
+- **Coverage.** The data must contain the actions a good policy takes, in the states it visits, often enough. No method
+  can learn the value of an action that never appears.
+- **Markov states and no hidden confounding.** The behaviour policy's decisions depend only on the recorded state.
+
+## Pitfalls
+
+- **Tuning on the environment.** Choosing hyperparameters by online evaluation is not offline RL. Many reported results
+  do this.
+- **Too much conservatism.** A large penalty reproduces the behaviour policy. The penalty weight sets how far from the
+  data the policy may go.

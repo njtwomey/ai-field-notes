@@ -1,0 +1,112 @@
+---
+title: Exploration in reinforcement learning
+kind: concept
+summary: 'An RL agent must try actions whose value it does not know, and in an MDP useful information may lie many steps away. Dithering such as $\varepsilon$-greedy can need time exponential in that depth; optimism, count bonuses $\beta/\sqrt{N(s,a)}$ and intrinsic rewards direct exploration.'
+tags: [reinforcement-learning, exploration, bandits, worked-example]
+aliases: [exploration–exploitation in RL, deep exploration, count-based exploration, exploration bonus, intrinsic motivation, curiosity-driven exploration, random network distillation, RND, R-max, optimism under uncertainty, noisy-TV problem]
+requires: [markov-decision-process, q-learning]
+partOf: [reinforcement-learning]
+related: [multi-armed-bandit, epsilon-greedy, upper-confidence-bound-algorithm, thompson-sampling]
+references: [sutton2018, brafman2002, strehl2008, bellemare2016, pathak2017, burda2019, osband2016]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Exploration** is the choice of actions for the information they yield about the environment, rather than for their
+estimated reward. An agent that only **exploits**, choosing $\argmax_a Q(s, a)$, never corrects an underestimated
+action. In a <NoteLink to="markov-decision-process">Markov decision process</NoteLink>, exploration must reach states
+as well as try actions, and the value of information depends on what the agent can do with it later.
+</Definition>
+
+## Intuition
+
+The <NoteLink to="multi-armed-bandit">multi-armed bandit</NoteLink> is exploration in a single state. There,
+<NoteLink to="epsilon-greedy">$\varepsilon$-greedy</NoteLink>, <NoteLink to="upper-confidence-bound-algorithm">upper confidence bounds</NoteLink>
+and <NoteLink to="thompson-sampling">Thompson sampling</NoteLink> balance trying arms against playing the best one.
+MDPs add a new difficulty: to learn about a distant state, the agent must first get there. A sequence of individually
+unpromising actions may be needed to reach the one region where reward is found. Exploration that decides afresh at
+each step whether to act randomly cannot plan such a sequence.
+
+## Dithering and its cost
+
+**$\varepsilon$-greedy** takes a uniformly random action with probability $\varepsilon$ and the greedy action
+otherwise. **Boltzmann** (softmax) exploration takes action $a$ with probability proportional to $\exp(Q(s, a)/\tau)$.
+Both perturb the greedy policy independently at every step; they are called dithering strategies.
+
+Consider a chain of $N$ states. From each state, action "right" moves one state right and action "left" returns to
+the start. Only the right end pays a reward. A uniformly random agent must choose "right" $N$ times in a row, which
+happens with probability $2^{-N}$ per attempt, so it needs about $2^N$ attempts to see the reward once. With $N = 20$
+that is a million attempts. Every value is zero until then, so $\varepsilon$-greedy on zero-initialised values behaves
+like the random agent. The number of steps needed grows exponentially with the depth of the reward.
+
+## Optimism
+
+An optimistic agent treats what it does not know as good. It then goes where it is uncertain because it expects reward
+there, and either finds reward or learns that the region is poor.
+
+- **Optimistic initial values.** Initialise $Q(s, a) = R_{\max}/(1 - \gamma)$, the largest possible value. Every
+  untried action looks best until tried. Unlike dithering, this makes the agent travel to unvisited states on purpose
+  <Cite id="sutton2018" />.
+- **R-max.** Learn a model of the MDP. Treat any state-action pair tried fewer than $m$ times as leading to a fictitious
+  state that pays $R_{\max}$ for ever, and act optimally in that optimistic model. Either the optimistic policy
+  collects near-optimal reward, or it visits an unknown pair and learns about it. R-max finds a near-optimal policy
+  with high probability within a number of steps polynomial in the numbers of states and actions, $1/(1 - \gamma)$
+  and the accuracy <Cite id="brafman2002" />.
+- **Count-based bonuses.** Add $\beta/\sqrt{N(s, a)}$ to the reward, where $N(s, a)$ counts visits. The bonus is the
+  width of a confidence interval on the mean reward, as in UCB. MBIE-EB plans in the learned model with this bonus
+  and has the same kind of polynomial guarantee <Cite id="strehl2008" />.
+
+## Pseudo-counts and intrinsic rewards
+
+In large state spaces each exact state is seen once, and counts are useless. Three approaches generalise them.
+
+**Pseudo-counts.** Let $\rho_n(s)$ be the probability a density model trained on $n$ states assigns to $s$, and
+$\rho'_n(s)$ the probability after one more update on $s$. If the model behaved like an empirical frequency with a
+pseudo-count $\hat N$ out of a pseudo-total $\hat n$, then $\rho = \hat N/\hat n$ and $\rho' = (\hat N + 1)/(\hat n + 1)$.
+Solving the two equations gives
+
+$$
+\hat N(s) = \frac{\rho_n(s)\,(1 - \rho'_n(s))}{\rho'_n(s) - \rho_n(s)}.
+$$
+
+A state the model has learned well barely changes its probability after one more update, so $\hat N$ is large. A
+novel state changes it a lot, so $\hat N$ is small. The bonus $\beta/\sqrt{\hat N + 0.01}$ then generalises
+count-based exploration to images. It made progress on Montezuma's Revenge, an Atari game whose first reward requires
+a long sequence of precise moves <Cite id="bellemare2016" />.
+
+**Prediction-error curiosity.** Train a model to predict something about the next state, and pay the agent its
+prediction error. The intrinsic curiosity module predicts learned features of $s'$ from $s$ and $a$
+<Cite id="pathak2017" />. **Random network distillation** trains a network to match the outputs of a fixed, randomly
+initialised network on visited states; the error is small on familiar states and large on novel ones
+<Cite id="burda2019" />.
+
+A random-network target is deterministic, which avoids the **noisy-TV problem**: a predictor of genuinely random
+observations, such as a television showing static, never stops being surprised, and a curious agent watches it for
+ever.
+
+## Posterior sampling
+
+Thompson sampling extends to MDPs. Sample a plausible MDP, or a plausible $Q$-function, from a posterior; act
+greedily with respect to the sample for a whole episode. Committing to one sample for many steps gives deep
+exploration, because a sample that is optimistic about a distant region makes the agent go there directly.
+Bootstrapped DQN approximates the posterior with an ensemble of Q-network heads trained on bootstrap resamples of the
+data, and follows one randomly chosen head per episode <Cite id="osband2016" />.
+
+## Worked example
+
+**Count bonus.** With $\beta = 0.1$, a pair tried 4 times earns a bonus $0.1/\sqrt 4 = 0.05$, and one tried 100 times
+earns $0.01$. The bonus fades as $1/\sqrt{N}$, as fast as the standard error of a mean reward.
+
+**Pseudo-count.** A density model assigns a frame probability $\rho = 0.01$; after one update on it, $\rho' = 0.0102$.
+Then $\hat N = 0.01 \cdot 0.9898/0.0002 = 49.5$: the model treats the frame as seen about 50 times out of about 4,950
+frames.
+
+## Pitfalls
+
+- **Bonuses change the objective.** An agent maximising reward plus bonus is not maximising reward. The bonus must
+  decay, or be removed at evaluation.
+- **Detachment.** An agent can leave a promising frontier, forget how to return to it, and have exhausted the bonus on
+  the way.
+- **Stochastic distractions.** Prediction-error rewards are attracted to unpredictable noise; see the noisy-TV problem
+  above.

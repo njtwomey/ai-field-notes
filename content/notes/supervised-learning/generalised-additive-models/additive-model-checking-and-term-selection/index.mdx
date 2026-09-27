@@ -1,0 +1,172 @@
+---
+title: GAM model checking and term selection
+kind: concept
+summary: 'A fitted GAM is checked for bases that limit the fit (edf near its cap, a k-index below 1), for residual patterns and for concurvity. The usual penalty leaves lines free and cannot remove a smooth; an extra null-space penalty lets REML shrink it to zero.'
+tags: [generalised-additive-models, diagnostics, model-selection, regularisation, worked-example]
+aliases: [basis dimension check, k-index, gam.check, double penalty, shrinkage smoother, GAM variable selection, select = TRUE, conditional AIC]
+requires: [generalised-additive-model, smoothing-penalties-and-curvature, additive-model-inference-and-effective-degrees-of-freedom]
+partOf: [generalised-additive-model]
+related: [interpreting-generalised-additive-models, additive-model-smoothing-parameter-selection, deviance-and-generalised-linear-model-diagnostics, residual-diagnostics, information-criteria]
+references: [wood2017, marra2011, wood2016, dunn1996, serven2018, mgcvdocs]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Model checking** for a generalised additive model asks whether each smooth's basis is large enough, whether the
+residuals are consistent with the assumed family and link, and whether terms are confounded with each other.
+**Term selection** decides which terms the model needs. With a **double penalty**, a second penalty on the null space
+of each smooth's roughness penalty, smoothing parameter estimation can shrink an unneeded term all the way to zero
+<Cite id="marra2011" />.
+</Definition>
+
+## Basis dimension
+
+The penalty can only remove flexibility. A term with $k'$ free coefficients has at most $k'$ effective degrees of
+freedom (derived in <NoteLink to="additive-model-inference-and-effective-degrees-of-freedom">GAM inference</NoteLink>). If the true
+function needs more, the fit is biased whatever $\lambda$ is. Two checks detect this <Cite id="wood2017" />.
+
+**Compare the edf with its cap.** An edf close to $k'$ means the penalty is barely acting and the basis sets the fit.
+Refit with double the basis dimension. If the edf rises substantially, the original basis was too small.
+
+**The k-index.** Sort the observations by the term's covariate $x_j$ and let $r_{(1)}, \dots, r_{(n)}$ be the
+residuals in that order. The k-index is
+
+$$
+\hat k = \frac{\frac{1}{2(n-1)}\sum_{i=2}^n\paren{r_{(i)} - r_{(i-1)}}^2}{\frac1n\sum_{i=1}^n r_i^2}.
+$$
+
+Suppose the residuals are $r_i = h(x_{ij}) + e_i$, with independent noise $e_i$ of variance $\sigma^2$ and a smooth
+pattern $h$ that the fit has missed. Neighbours in $x_j$ share almost the same value of $h$, so $h$ cancels in the
+differences, and $\expect(r_{(i)} - r_{(i-1)})^2 \approx 2\sigma^2$. The numerator estimates $\sigma^2$. The
+denominator estimates $\sigma^2$ plus the mean of $h^2$. So $\hat k \approx 1$ when nothing is missed and $\hat k < 1$
+when a pattern remains. A p-value comes from permutation: shuffling the residuals destroys any relation to $x_j$, and
+the fraction of shuffled indices at or below $\hat k$ is the p-value. mgcv reports $\hat k$, the p-value, $k'$ and the
+edf for each smooth in `gam.check` and `k.check` <Cite id="mgcvdocs" />. For smooths of several variables, neighbours
+are found in the space of all the term's covariates.
+
+**Worked example.** Four hundred points with $x$ uniform on $[0, 1]$ and $y = \sin(6\pi x) + \varepsilon$,
+$\varepsilon \sim \Gauss(0, 0.3^2)$: three full periods. A single penalised cubic spline with $p$ B-splines and the
+penalty $\int f''^2$ is fitted with $\lambda$ chosen by REML, and the p-value uses 1000 permutations. With one smooth
+and no separate intercept the edf cap is $p$.
+
+| $p$ | edf   | $\hat k$ | p-value | residual SD |
+| --- | ----- | -------- | ------- | ----------- |
+| 6   | 5.65  | 0.19     | < 0.001 | 0.666       |
+| 9   | 8.95  | 0.40     | < 0.001 | 0.458       |
+| 15  | 13.82 | 0.95     | 0.16    | 0.295       |
+| 27  | 19.70 | 0.97     | 0.22    | 0.292       |
+
+With 6 and 9 functions the edf sits at the cap and the k-index is far below 1: the fit cannot follow three periods.
+With 15 functions the k-index passes, but the edf of 13.8 is still close to 15. Doubling to 27 raises the edf to 19.7,
+so 15 functions were constraining the fit a little, although the residual SD barely moves. The two checks answer
+different questions and are used together.
+
+## Residuals
+
+- **Deviance residuals** $r_i = \sgn(y_i - \hat\mu_i)\sqrt{d_i}$, where $d_i$ is observation $i$'s contribution to the
+  deviance, are plotted against the linear predictor, each covariate and any covariate not in the model. A trend
+  points to a missing or too-smooth term. A funnel points to the wrong variance function. See
+  <NoteLink to="deviance-and-generalised-linear-model-diagnostics">deviance and GLM diagnostics</NoteLink>.
+- **Quantile plots** compare sorted residuals with their distribution under the fitted model. For discrete responses,
+  **randomised quantile residuals** are exactly standard normal when the model is correct, which removes the banding
+  of deviance residuals for counts and binary data <Cite id="dunn1996" />.
+- **Overdispersion.** For Poisson and binomial families, the Pearson statistic $\sum_i(y_i - \hat\mu_i)^2/V(\hat\mu_i)$
+  divided by $n - \tau$ should be near 1. A value well above 1 calls for an estimated scale, a negative binomial
+  family or a missing term.
+- **Dependence.** Residuals ordered in time or space should not be autocorrelated. Correlated errors make GCV and REML
+  choose too little smoothing, because correlated noise looks like signal.
+
+## Concurvity
+
+Concurvity is the nonlinear version of collinearity: one smooth is closely approximated by the others. The sum of the
+terms stays well determined while the individual smooths trade signal and their bands widen. It is measured by how
+much of $\hat f_j$ lies in the span of the other terms' bases. See <NoteLink to="interpreting-generalised-additive-models">interpreting
+GAMs</NoteLink>. Concurvity also affects selection: when two terms carry the same information, a shrinkage method may
+keep either one.
+
+## Why the usual penalty cannot remove a term
+
+In the Demmler–Reinsch basis of a smooth (see
+<NoteLink to="smoothing-penalties-and-curvature">smoothing penalties</NoteLink>), the penalised fit multiplies each
+component of the data by $1/(1 + \lambda d_k)$. The components with $d_k = 0$ span the penalty's null space and are
+multiplied by 1 for every $\lambda$. For a centred cubic spline smooth the null space is the centred line in $x_j$. Its
+coefficient is the unpenalised least-squares slope, which is nonzero with probability one under continuous noise. So:
+
+- the edf of the term never falls below about 1, the dimension of the null space;
+- as $\lambda_j \to \infty$ the term becomes a straight line, not zero;
+- a smoothing parameter criterion such as REML can make a term linear but cannot remove it.
+
+## The double penalty
+
+Write the term's penalty in its eigenbasis, $\Smat_j = \Umat\Lambdamat\Umat^\top$, and split $\Umat = [\Umat_+,
+\Umat_0]$ into the eigenvectors with positive eigenvalues and those with zero eigenvalues. Marra and Wood add a second
+penalty on the null space <Cite id="marra2011" />:
+
+$$
+\lambda_j\betavec_j^\top\Smat_j\betavec_j + \lambda_j^*\betavec_j^\top\Smat_j^*\betavec_j, \qquad \Smat_j^* =
+\Umat_0\Umat_0^\top.
+$$
+
+$\Smat_j + \Smat_j^* = \Umat(\Lambdamat + \diag(\zeros, \ones))\Umat^\top$ is positive definite, so the two penalties
+together have no null space. The argument that sends a singly penalised fit to its null space now sends it to zero:
+as $\lambda_j$ and $\lambda_j^*$ both grow, the criterion at the fitted coefficients is bounded by the residual sum of
+squares without the term, so $\hat\betavec_j^\top(\Smat_j + \Smat_j^*)\hat\betavec_j \to 0$ and $\hat\betavec_j \to
+\zeros$. The two smoothing parameters are estimated with the others, by REML. Each term can end up wiggly ($\lambda_j$
+small), linear ($\lambda_j$ large, $\lambda_j^*$ small) or absent (both large). In mgcv, `gam(..., select = TRUE)` adds
+the extra penalty to every smooth <Cite id="mgcvdocs" />.
+
+**Shrinkage smoothers** do the same with one smoothing parameter. They replace the zero eigenvalues of $\Smat_j$ by a
+small multiple $\epsilon$ of its smallest positive eigenvalue, as in mgcv's `bs = "ts"` and `bs = "cs"`. The null-space
+components are then shrunk by $1/(1 + \lambda_j\epsilon d_{\min})$, which tends to zero as $\lambda_j \to \infty$ but
+only after the wiggly components have gone.
+
+pyGAM has no null-space penalty. A term can be given two penalties, `s(1, penalties=['derivative', 'l2'], lam=[l1,
+l2])`, where the ridge penalty `'l2'` acts on all coefficients rather than only the null space. The total penalty is
+then full rank and the term can shrink to zero. With a derivative penalty of $10^6$, raising the ridge penalty from
+$10^{-2}$ to $10^4$ took the edf of an irrelevant term from 0.98 to 0.002 in a check with 300 points.
+
+**Worked example.** One hundred simulated data sets, each with 200 points, $y = \sin(2\pi x_1) + \varepsilon$ with
+$\varepsilon \sim \Gauss(0, 0.4^2)$ and an irrelevant second feature $x_2$. The model is $\beta_0 + f_1(x_1) +
+f_2(x_2)$, each smooth a centred cubic spline with 13 B-splines and the $\int f''^2$ penalty, and all smoothing
+parameters are chosen by REML.
+
+| Penalty on $f_2$ | median edf of $f_2$ | edf $< 0.1$ | edf $< 0.5$ | edf $> 1.5$ |
+| ---------------- | ------------------- | ----------- | ----------- | ----------- |
+| $\int f_2''^2$ only | 1.02             | 0 of 100    | 0 of 100    | 28 of 100   |
+| double penalty   | 0.25                | 45 of 100   | 60 of 100   | 10 of 100   |
+
+With the usual penalty, the edf of $f_2$ was never below 1.01: the irrelevant term always kept its line. With the
+double penalty, it was removed (edf below 0.1) in 45 data sets and kept small in most others.
+
+## Comparing models by AIC
+
+For a penalised model the parameter count in AIC is replaced by the effective degrees of freedom:
+
+$$
+\operatorname{AIC} = -2\ell(\hat\betavec) + 2\tau.
+$$
+
+This conditional AIC treats the smoothing parameters as known. Estimating them adds uncertainty that $\tau$ ignores,
+and the criterion then leans towards the more complex model. Wood, Pya and Säfken replace $\tau$ by a corrected edf
+that includes the uncertainty of $\log\hat\lambda$; mgcv's `AIC` uses it <Cite id="wood2016" />. pyGAM reports the
+uncorrected version, plus 2 when the scale is estimated, and the small-sample AICc <Cite id="serven2018" />. AIC can
+compare models with different terms fitted to the same response. REML scores cannot compare models with different
+unpenalised terms, because the restricted likelihood depends on those terms.
+
+## Assumptions
+
+- The k-index assumes that residual variation is the same across $x_j$ and that neighbouring observations are
+  independent. Residuals of a penalised fit are slightly correlated, so it is a screening tool, not an exact test.
+- The double penalty assumes that shrinking a term to zero is a sensible default for every smooth.
+
+## Pitfalls
+
+- **Raising $k$ does not overfit.** With the penalty chosen by REML, a larger basis costs computation, not accuracy.
+  An unnecessarily small basis costs accuracy.
+- **A passing k-index is not proof.** In the example, 15 basis functions passed the k-index and were still slightly
+  limiting.
+- **Stepwise deletion by p-values.** p-values of smooth terms are approximate and conditional on $\lambda$. Repeated
+  testing and deletion inflates the apparent significance of what remains. The double penalty selects terms in one
+  fit.
+- **Selection under concurvity.** When terms overlap, which one survives is unstable across samples.

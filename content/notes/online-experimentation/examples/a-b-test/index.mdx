@@ -1,0 +1,125 @@
+---
+title: A/B test on a conversion rate
+kind: example
+summary: A shop tests a new checkout page against the old one. The example runs the whole experiment, choosing the smallest lift worth detecting, sizing the sample for 80% power, running the two-proportion z-test and reading the confidence interval.
+tags: [worked-example, ab-testing, hypothesis-testing]
+aliases: [A/B testing, split test, online controlled experiment, conversion rate test]
+requires: [z-test, sample-size-planning]
+related: [a-a-test, confidence-intervals, effect-size, type-i-and-type-ii-errors, p-value]
+references: [kohavi2020, fleiss2003]
+status: draft
+updated: 2026-09-26
+---
+
+import { AbSimulator } from './AbSimulator'
+
+<Definition>
+The current checkout page converts 10% of visitors. A new page is worth launching if it raises conversion by at least
+1 percentage point, to 11%. The team wants a two-sided test at $\alpha = 0.05$ with 80% power to detect that lift.
+How many users does each arm need, and what does the team conclude if arm A converts 1,475 users and arm B 1,652?
+</Definition>
+
+## Setup
+
+Arm A (the old page) and arm B (the new page) each get $n$ users, assigned at random. Their conversion rates are $p_A$
+and $p_B$, and the observed rates are $\hat p_A = X_A / n$ and $\hat p_B = X_B / n$ with $X_A \sim \Binom(n, p_A)$ and
+$X_B \sim \Binom(n, p_B)$. The hypotheses are
+
+$$
+H_0: p_B = p_A \qquad \text{against} \qquad H_1: p_B \ne p_A.
+$$
+
+The smallest lift worth detecting, the minimum detectable effect, is $\delta = p_B - p_A = 0.01$ on a baseline of
+$p_A = 0.10$. It is a business decision, made before the data arrive: a smaller lift would not pay for the change.
+
+## Solution
+
+**Step 1: the sample size.** The observed difference $D = \hat p_B - \hat p_A$ is approximately normal. Under $H_0$
+both arms share one rate, estimated by the pooled rate $\bar p$, so
+
+$$
+\sigma_0^2 = \var(D \mid H_0) = \frac{2\bar p(1 - \bar p)}{n}, \qquad
+\sigma_1^2 = \var(D \mid H_1) = \frac{p_A(1 - p_A) + p_B(1 - p_B)}{n}.
+$$
+
+The test rejects when $\abs{D} > z_{1 - \alpha/2}\,\sigma_0$, where $z_q$ is the $q$ quantile of $\Gauss(0, 1)$. If the
+true difference is $\delta > 0$, the chance of landing in the lower rejection region is negligible, so
+
+$$
+\text{power} \approx P(D > z_{1 - \alpha/2}\,\sigma_0) = \Phi\paren{\frac{\delta - z_{1 - \alpha/2}\,\sigma_0}{\sigma_1}}.
+$$
+
+Setting the power to $1 - \beta$ requires $(\delta - z_{1 - \alpha/2}\sigma_0)/\sigma_1 = z_{1 - \beta}$, that is
+$\delta = z_{1 - \alpha/2}\,\sigma_0 + z_{1 - \beta}\,\sigma_1$. Both standard deviations scale as $1/\sqrt n$, so
+multiplying by $\sqrt n$ and squaring gives <Cite id="fleiss2003" />
+
+$$
+n = \frac{\paren{z_{1 - \alpha/2}\sqrt{2\bar p(1 - \bar p)} + z_{1 - \beta}\sqrt{p_A(1 - p_A) + p_B(1 - p_B)}}^2}{\delta^2}.
+$$
+
+With $p_A = 0.10$, $p_B = 0.11$, $\bar p = 0.105$, $z_{0.975} = 1.960$ and $z_{0.8} = 0.842$:
+
+$$
+n = \frac{\paren{1.960 \times 0.4335 + 0.842 \times 0.4335}^2}{0.01^2} = \frac{1.2145^2}{0.0001} \approx 14{,}751
+$$
+
+users per arm, about 29,500 in total. The general version of this calculation is in
+<NoteLink to="sample-size-planning">sample-size planning</NoteLink>.
+
+**Step 2: the test.** The experiment runs until each arm has $n = 14{,}751$ users. Arm A converts 1,475 users, a rate
+of 10.00%, and arm B converts 1,652, a rate of 11.20%. The observed difference is $D = 0.0120$. The pooled rate is
+$\hat p = (1{,}475 + 1{,}652)/29{,}502 = 0.1060$, so
+
+$$
+\hat\sigma_0 = \sqrt{\frac{2 \times 0.1060 \times 0.8940}{14{,}751}} = 0.00358, \qquad
+Z = \frac{0.0120}{0.00358} = 3.35, \qquad p = 2\paren{1 - \Phi(3.35)} = 0.0008.
+$$
+
+The <NoteLink to="z-test">z-test</NoteLink> rejects $H_0$ at $\alpha = 0.05$.
+
+**Step 3: the confidence interval.** The interval for $p_B - p_A$ uses each arm's own variance, since it does not
+assume the arms are equal:
+
+$$
+D \pm z_{0.975} \sqrt{\frac{\hat p_A(1 - \hat p_A)}{n} + \frac{\hat p_B(1 - \hat p_B)}{n}}
+= 0.0120 \pm 1.96 \times 0.00358 = [0.0050,\ 0.0190].
+$$
+
+The new page raises conversion by between 0.5 and 1.9 percentage points, with 95% confidence.
+
+**Step 4: the decision.** The result is statistically significant, and the point estimate, 1.2 points, exceeds the
+1-point threshold. But the interval includes lifts as small as 0.5 points, below the threshold that makes the change
+worthwhile. Statistical significance says the lift is probably not zero. Whether it is large enough is answered by
+the <NoteLink to="confidence-intervals">confidence interval</NoteLink> against the business threshold, not by the
+p-value. A cautious team launches, or extends the experiment to narrow the interval.
+
+## Simulation
+
+<AbSimulator />
+
+## What it illustrates
+
+- **Power is chosen, not observed.** The sample size follows from four inputs fixed in advance: $\alpha$, the power,
+  the baseline and the minimum detectable effect. With the true lift set to the minimum detectable effect and
+  $n = 14{,}751$, the simulated power is close to 80%. See
+  <NoteLink to="type-i-and-type-ii-errors">Type I and Type II errors</NoteLink>.
+- **Small lifts need large samples.** $n$ scales as $1/\delta^2$. Halving the minimum detectable effect to 0.5 points
+  multiplies the sample size by about four, to roughly 58,000 users per arm.
+- **Statistical against practical significance.** With enough users any nonzero lift becomes significant. The
+  <NoteLink to="effect-size">effect size</NoteLink> and its interval, not the p-value, say whether the lift matters.
+- **Relative lifts.** A lift of 1.2 points on a 10% baseline is a relative lift of 12%. Reports often quote the
+  relative figure, which sounds larger; both describe the same data. Its confidence interval must account for the
+  noise in the baseline; see <NoteLink to="relative-lift">relative lift</NoteLink>.
+
+## Variations
+
+- **Stopping early.** Checking the result daily and stopping at the first significant value inflates the Type I error
+  rate well above $\alpha$. The planned $n$ is only valid if the analysis happens once, at the end, unless the looks
+  are planned as in <NoteLink to="group-sequential-designs">group-sequential designs</NoteLink>.
+- **An unequal split.** If the arms end up with noticeably different numbers of users when the plan was 50/50, the
+  assignment or logging is broken, and the comparison may be biased. This is a sample ratio mismatch.
+- **Underpowered experiments.** If the true lift is 0.3 points and $n$ is sized for 1 point, most experiments are not
+  significant, and the few that are overstate the lift. Set the true lift low in the simulation and rerun until the
+  result is significant to see it.
+- **One-sided tests.** A one-sided test for $p_B > p_A$ replaces $z_{0.975}$ with $z_{0.95} = 1.645$ and needs about
+  21% fewer users, but it cannot detect a new page that is worse.

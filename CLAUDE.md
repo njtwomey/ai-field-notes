@@ -54,6 +54,9 @@ npm run check:content                           # validate content/ without star
   `category` frontmatter) and the folder name is its slug. Depth varies by branch. URLs use the slug only
   (`/n/<slug>`), so moving a note between categories never changes its URL: the taxonomy is plastic, links are not.
   Slugs are one flat namespace and must be unique across the whole tree.
+- Slugs spell ideas out rather than using acronyms: `kullback-leibler-divergence`, not `kl-divergence`. Acronyms are
+  ambiguous across fields (LDA, EP, EM, GP, PU, MIL) and a slug is a permanent URL. Put the acronym in `aliases`, where
+  search finds it. The exception is a proper name whose acronym is the name (BERT, FAISS, BLEU, N-BEATS).
 - A folder holding `index.mdx` is a note and contains no other notes. Any other folder is a category and must exist in
   `content/taxonomy.yaml`. Folders starting with `_` hold shared code and are skipped.
 - Note-specific widgets sit next to the note (`<note folder>/Widget.tsx`) and are imported by the MDX file. A note
@@ -122,7 +125,7 @@ stale.
   `site/src/components/note/`: the note page. `site/src/components/layout/`: shell, search, navigation.
 - The note page opens with `NoteBar`, which sticks under the site header and is the page's only breadcrumb:
   `TaxonomyTrail` (every category crumb a dropdown of its siblings, with a link to browse it; the note's title, bold at
-  the same size, a dropdown of the other notes in its category), the status, then "›" and the section being read, a
+  the same size, a dropdown of the other notes in its category), then "›" and the section being read, a
   reading-progress line, and the Concept / Code / Outputs tabs. Below `md` only the title crumb shows. `NoteHeader`
   follows: the centred title (the page's h1) and the summary set as an abstract, with tags beneath.
   `useReadingPosition` computes the current heading and progress once, for both the bar and the left index. Sticky

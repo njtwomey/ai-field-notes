@@ -1,0 +1,123 @@
+---
+title: UMAP
+kind: concept
+summary: 'UMAP builds a k-nearest-neighbour graph with fuzzy edge weights normalised per point, then lays out a low-dimensional graph with weights $(1 + a d^{2b})^{-1}$ that minimises the cross-entropy between the two. Unlike t-SNE it needs no global normalisation, so it scales further.'
+tags: [manifold-learning, dimensionality-reduction, unsupervised, visualisation, graphs, worked-example]
+aliases: [uniform manifold approximation and projection, fuzzy simplicial set]
+requires: [t-distributed-stochastic-neighbour-embedding, k-nearest-neighbours]
+partOf: [dimensionality-reduction]
+related: [spectral-clustering, isomap, locally-linear-embedding, cross-entropy-and-perplexity, laplacian-eigenmaps, pacmap-trimap-and-largevis, parametric-and-neural-embeddings]
+references: [mcinnes2018, kobak2021, belkin2003]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Uniform manifold approximation and projection** (UMAP) embeds points $\xvec_1, \dots, \xvec_n$ as
+$\yvec_1, \dots, \yvec_n \in \reals^m$ <Cite id="mcinnes2018" />. It builds a symmetric weighted graph on the data,
+with weights $w_{ij} \in [0, 1]$ from each point's $k$ nearest neighbours, and a weighted graph on the embedding, with
+weights $v_{ij} = \paren{1 + a\norm{\yvec_i - \yvec_j}^{2b}}^{-1}$. It chooses the $\yvec_i$ to minimise the cross-entropy
+between the two sets of weights:
+
+$$
+C = \sum_{i \ne j}\LB w_{ij}\log\frac{w_{ij}}{v_{ij}} + (1 - w_{ij})\log\frac{1 - w_{ij}}{1 - v_{ij}}\RB.
+$$
+</Definition>
+
+## The data graph
+
+UMAP starts from the $k$ nearest neighbours of each point, with $k$ the `n_neighbors` parameter, typically 15. For point
+$i$ with neighbour distances $d_{i1} \le \dots \le d_{ik}$:
+
+1. $\rho_i = d_{i1}$ is the distance to the nearest neighbour.
+2. $\sigma_i$ is chosen by binary search so that
+   $\sum_{j=1}^k\exp\paren{-(d_{ij} - \rho_i)/\sigma_i} = \log_2 k$.
+3. The directed weight from $i$ to its neighbour $j$ is $w_{j \mid i} = \exp\paren{-(d_{ij} - \rho_i)/\sigma_i}$.
+
+Subtracting $\rho_i$ gives every point a weight of exactly 1 to its nearest neighbour, so no point is isolated,
+however sparse its region. Scaling by $\sigma_i$ normalises the local distance scale, as t-SNE's perplexity does. The
+directed weights are combined by a fuzzy union, the probability that at least one of two independent events occurs:
+
+$$
+w_{ij} = w_{j \mid i} + w_{i \mid j} - w_{j \mid i}\,w_{i \mid j}.
+$$
+
+## The fuzzy simplicial set view
+
+McInnes, Healy and Melville justify these choices geometrically <Cite id="mcinnes2018" />. Assume the data lie
+uniformly on a manifold. If they do, then around each point there is a local metric in which the $k$ nearest
+neighbours lie within a unit ball. Each point therefore defines its own rescaled distances, which is what $\rho_i$ and
+$\sigma_i$ do. The local views disagree, so each is represented as a fuzzy set of edges, a fuzzy simplicial set
+restricted to its 1-skeleton, with membership strengths $w_{j \mid i}$. The fuzzy union merges these local views into a
+single weighted graph. The embedding is a second fuzzy set of edges, and the cross-entropy between fuzzy sets is the
+loss. In practice the theory reduces to the weighted $k$-nearest-neighbour graph and the loss above.
+
+## The embedding graph and the loss
+
+The embedding weights $v_{ij} = (1 + a d^{2b})^{-1}$ generalise the Student-t kernel of <NoteLink to="t-distributed-stochastic-neighbour-embedding">t-SNE</NoteLink>,
+which is the case $a = b = 1$. The parameters are fitted so that $v$ approximates 1 for $d < \text{min\_dist}$ and
+$e^{-(d - \text{min\_dist})}$ beyond. The default `min_dist` of 0.1 gives $a = 1.577$ and $b = 0.895$. Smaller
+`min_dist` packs points of a cluster more tightly.
+
+The loss has two parts for each pair:
+
+- **Attraction.** $w_{ij}\log(w_{ij}/v_{ij})$ is large when strongly connected points are far apart in the embedding.
+- **Repulsion.** $(1 - w_{ij})\log\paren{(1 - w_{ij})/(1 - v_{ij})}$ is large when unconnected points are close.
+
+For $b = 1$, write $d = \norm{\yvec_i - \yvec_j}$. The attractive gradient is
+$w_{ij}\cdot 2a(\yvec_i - \yvec_j)/(1 + ad^2)$, from $\partial\log(1 + ad^2)$. The repulsive gradient is
+$-(1 - w_{ij})\cdot 2(\yvec_i - \yvec_j)/\paren{d^2(1 + ad^2)}$, from $\partial\LB\log(1 + ad^2) - \log(ad^2)\RB$. It
+diverges as $d \to 0$, so implementations add a small constant to $d^2$.
+
+Almost all pairs have $w_{ij} = 0$ and contribute only repulsion. UMAP never sums over them. It runs stochastic
+gradient descent over the edges of the graph, sampling each edge in proportion to $w_{ij}$, and for each sampled edge it
+pushes $\yvec_i$ away from a few randomly chosen points. This **negative sampling** makes each epoch linear in the
+number of edges, $O(nk)$.
+
+## Comparison with t-SNE
+
+| | t-SNE | UMAP |
+| --- | --- | --- |
+| Data affinities | Gaussian, perplexity-calibrated, all pairs | Exponential on $k$-NN graph, offset by $\rho_i$ |
+| Symmetrisation | Average $(p_{j \mid i} + p_{i \mid j})/2n$ | Fuzzy union $a + b - ab$ |
+| Embedding kernel | $(1 + d^2)^{-1}$, normalised over all pairs | $(1 + ad^{2b})^{-1}$, not normalised |
+| Loss | $\KL(P \,\|\, Q)$ | Binary cross-entropy per edge |
+| Repulsion | Through the normaliser $Z$ | Explicit, by negative sampling |
+| Default initialisation | Random | Spectral (Laplacian eigenmaps) |
+| Cost per iteration | $O(n\log n)$ with Barnes–Hut | $O(nk)$ |
+
+The missing normaliser is the main computational difference. t-SNE's $q_{ij}$ depend on every pair through $Z$; UMAP's
+$v_{ij}$ depend only on the pair itself, so its gradient can be sampled. UMAP's embeddings often show more of the
+global arrangement of clusters than t-SNE's. Kobak and Linderman found that most of this difference comes from the
+initialisation: t-SNE initialised with PCA or Laplacian eigenmaps preserves global structure about as well as UMAP,
+and UMAP initialised randomly loses it <Cite id="kobak2021" />. Spectral initialisation places points by the bottom
+eigenvectors of the graph Laplacian, as in <NoteLink to="laplacian-eigenmaps">Laplacian eigenmaps</NoteLink>
+<Cite id="belkin2003" />.
+
+## Worked example
+
+A point has $k = 4$ nearest neighbours at distances 1, 1.5, 2 and 3.
+
+- $\rho = 1$. The target sum is $\log_2 4 = 2$.
+- The binary search gives $\sigma = 0.889$. The weights are $e^{0} = 1$, $e^{-0.5/0.889} = 0.570$,
+  $e^{-1/0.889} = 0.325$ and $e^{-2/0.889} = 0.105$, which sum to 2.
+- If the second neighbour in turn gives this point a weight of 0.3, the symmetric weight is
+  $0.570 + 0.3 - 0.570 \times 0.3 = 0.699$.
+
+## Hyperparameters
+
+- **n_neighbors.** Small values emphasise local structure and can fragment the data; large values connect more of the
+  manifold and show broader structure.
+- **min_dist.** The minimum spacing of points in the embedding. It changes how tightly clusters are drawn, not which
+  points are neighbours.
+- **metric.** Any distance can define the $k$-nearest-neighbour graph, for example cosine distance for text
+  embeddings.
+
+## Pitfalls
+
+- **Same reading rules as t-SNE.** Cluster sizes and distances between clusters are not reliable.
+- **Uniformity assumption.** The local rescaling treats every region as equally dense, so density differences are
+  largely erased.
+- **Stochastic output.** Negative sampling and random initialisation make runs differ unless the seed is fixed.
+- **Features for downstream models.** UMAP can transform new points, but the embedding axes have no meaning, and
+  clusters found in the embedding should be checked in the original space.

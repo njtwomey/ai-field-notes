@@ -1,0 +1,107 @@
+---
+title: Fast Fourier transform
+kind: technique
+summary: 'The FFT computes the $N$-point DFT in $O(N \log N)$ operations instead of $O(N^2)$. The radix-2 Cooley–Tukey algorithm splits the sum into even and odd samples, $X[k] = E[k] + W^k O[k]$, and recurses.'
+tags: [signal-processing, fourier, algorithms, worked-example]
+aliases: [FFT, fast Fourier transform, Cooley–Tukey, radix-2, butterfly, decimation in time, bit reversal]
+requires: [discrete-fourier-transform]
+related: [convolution-theorem, overlap-add-and-overlap-save, short-time-fourier-transform]
+references: [cooley1965, heideman1984, oppenheim2010]
+status: draft
+updated: 2026-09-26
+---
+
+import { OperationCount } from './OperationCount'
+
+<Definition>
+A fast Fourier transform is any algorithm that computes the <NoteLink to="discrete-fourier-transform">DFT</NoteLink> of length $N$ in
+$O(N\log N)$ operations. The best known, the radix-2 Cooley–Tukey algorithm for $N$ a power of two, splits the
+transform into two transforms of half the length and recurses <Cite id="cooley1965" />.
+</Definition>
+
+## The even–odd split
+
+Write $W_N = e^{-i 2\pi/N}$, so $X[k] = \sum_{n=0}^{N-1} x[n] W_N^{kn}$. Separate the even-indexed and odd-indexed
+samples, $n = 2m$ and $n = 2m + 1$:
+
+$$
+X[k] = \sum_{m=0}^{N/2-1} x[2m]\, W_N^{2mk} + W_N^{k}\sum_{m=0}^{N/2-1} x[2m+1]\, W_N^{2mk}.
+$$
+
+Since $W_N^2 = W_{N/2}$, each sum is itself a DFT of length $N/2$: $E[k]$ of the even samples and $O[k]$ of the odd
+ones. So
+
+$$
+X[k] = E[k] + W_N^{k}\, O[k].
+$$
+
+$E$ and $O$ have period $N/2$, and $W_N^{k + N/2} = -W_N^k$. Therefore the second half of the output reuses the same
+two numbers with a sign change:
+
+$$
+X[k] = E[k] + W_N^k O[k], \qquad X[k + N/2] = E[k] - W_N^k O[k], \qquad k = 0, \dots, N/2 - 1.
+$$
+
+This pair of equations is the **butterfly**: one complex multiplication by the twiddle factor $W_N^k$, one addition
+and one subtraction produce two outputs.
+
+## Cost
+
+Let $C(N)$ count complex multiplications. Two half-size transforms plus $N/2$ twiddle multiplications give
+$C(N) = 2C(N/2) + N/2$, with $C(1) = 0$. Unrolling over $\log_2 N$ levels, each contributing $N/2$,
+
+$$
+C(N) = \frac{N}{2}\log_2 N,
+$$
+
+against $N^2$ for the direct sum. For $N = 1024$ that is 5,120 against 1,048,576, a factor of about 200. Many of the
+twiddle factors are $\pm 1$ or $\pm i$ and cost nothing, so real counts are lower still.
+
+<OperationCount />
+
+## Worked example: $N = 8$
+
+Take $x = (1, 2, 3, 4, 0, 0, 0, 0)$. The even samples $(1, 3, 0, 0)$ and odd samples $(2, 4, 0, 0)$ have 4-point DFTs
+
+$$
+E = (4,\ 1 - 3i,\ -2,\ 1 + 3i), \qquad O = (6,\ 2 - 4i,\ -2,\ 2 + 4i).
+$$
+
+With $W_8 = e^{-i\pi/4} = (1 - i)/\sqrt 2$, the butterflies give, for example,
+
+$$
+X[0] = E[0] + O[0] = 10, \qquad X[4] = E[0] - O[0] = -2,
+$$
+
+$$
+X[1] = E[1] + W_8\, O[1] = (1 - 3i) + \tfrac{1 - i}{\sqrt 2}(2 - 4i) = (1 - 3i) + \tfrac{-2 - 6i}{\sqrt 2} \approx -0.414 - 7.243i.
+$$
+
+These match the direct DFT: $X = (10,\ -0.414 - 7.243i,\ -2 + 2i,\ 2.414 - 1.243i,\ -2,\ 2.414 + 1.243i,\ -2 - 2i,\
+-0.414 + 7.243i)$.
+
+## Implementation
+
+- **Bit reversal.** Applying the split recursively reorders the input so that sample $n$ ends up at the position
+  whose binary index is $n$ with its bits reversed. Iterative in-place FFTs first permute the input into this order,
+  then run $\log_2 N$ stages of butterflies.
+- **Other factorisations.** The split works for any factor of $N$: radix-4 and split-radix algorithms need fewer
+  multiplications, and mixed-radix algorithms handle any composite length. Prime lengths are handled by Bluestein's
+  or Rader's algorithms, which re-express the DFT as a convolution.
+- **Real input.** A real sequence of length $N$ can be transformed with a complex FFT of length $N/2$, since only half
+  its spectrum is independent.
+
+## History
+
+Cooley and Tukey published the algorithm in 1965, and it made digital spectral analysis practical
+<Cite id="cooley1965" />.
+The same idea had appeared before, most notably in unpublished work by Gauss around 1805 on interpolating asteroid
+orbits <Cite id="heideman1984" />.
+
+## Pitfalls
+
+- **Length matters for speed, not for correctness.** An FFT of a prime length is slower than one of a nearby
+  power of two. Padding to a convenient length changes the frequency grid; see
+  <NoteLink to="zero-padding-and-resolution">zero-padding and resolution</NoteLink>.
+- **The FFT is the DFT.** It inherits the DFT's periodicity, circular convolution and leakage; it only computes the
+  same numbers faster.

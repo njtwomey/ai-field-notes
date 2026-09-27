@@ -1,0 +1,106 @@
+---
+title: Plackett–Luce model
+kind: concept
+summary: 'The Plackett–Luce model gives the probability of a ranking of $n$ items as a sequence of choices: the first item is chosen from all $n$ with probability proportional to its strength $\pi_i$, the second from the rest, and so on. Each choice is a softmax over the remaining items.'
+tags: [skill-rating, ranking, paired-comparisons, choice-models, maximum-likelihood]
+aliases: [Plackett-Luce model, Luce choice axiom, independence of irrelevant alternatives, exploded logit, rank-ordered logit]
+requires: [paired-comparison-models, softmax-and-log-sum-exp]
+partOf: [skill-rating]
+related: [gumbel-max-trick, ranking-losses, trueskill, multinomial-logistic-regression]
+references: [luce1959, plackett1975, hunter2004, cao2007, xia2008]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+Let $n$ items have strengths $\pi_1, \dots, \pi_n > 0$, or log-strengths $\theta_i = \log\pi_i$. The **Plackett–Luce
+model** gives a ranking $\rho = (\rho_1, \dots, \rho_n)$, where $\rho_1$ is the item ranked first, the probability
+
+$$
+\pr(\rho) = \prod_{k=1}^{n} \frac{\pi_{\rho_k}}{\sum_{m=k}^{n} \pi_{\rho_m}}
+= \prod_{k=1}^{n} \frac{e^{\theta_{\rho_k}}}{\sum_{m=k}^{n} e^{\theta_{\rho_m}}}
+$$
+
+<Cite id="plackett1975" />. Each factor is the probability of choosing the next item from those not yet ranked, in
+proportion to strength <Cite id="luce1959" />.
+</Definition>
+
+## Intuition
+
+A ranking is built from the top. The winner is chosen from all $n$ items by a softmax of the log-strengths. That item
+is removed, and second place is chosen from the remaining $n - 1$ by the same rule. The last factor is always 1.
+
+For two items the model is <NoteLink to="paired-comparison-models">Bradley–Terry</NoteLink>:
+$\pr(i \text{ above } j) = \pi_i/(\pi_i + \pi_j)$. The first factor alone is the multinomial logit, the choice model of
+<NoteLink to="multinomial-logistic-regression">multinomial logistic regression</NoteLink> with one score per item.
+
+## Luce's choice axiom
+
+Luce derived the choice rule from one assumption about choices from sets <Cite id="luce1959" />. The **choice axiom**
+says that the relative probability of choosing $i$ over $j$ does not depend on which other options are available:
+
+$$
+\frac{\pr(i \mid S)}{\pr(j \mid S)} = \frac{\pr(i \mid \set{i, j})}{\pr(j \mid \set{i, j})} \quad \text{for every set } S \ni i, j .
+$$
+
+This property is also called independence of irrelevant alternatives. Define $\pi_i = \pr(i \mid S)/\pr(r \mid S)$ for
+a fixed reference item $r$; the axiom makes this ratio the same for every $S$ containing $i$ and $r$. Then
+$\pr(i \mid S) \propto \pi_i$ within any $S$, and normalising gives $\pr(i \mid S) = \pi_i/\sum_{j \in S}\pi_j$. Applying
+this rule repeatedly to the shrinking set of unranked items gives the Plackett–Luce product.
+
+## Random utility
+
+The same model arises from noisy scores. Let $u_i = \theta_i + g_i$ with independent standard Gumbel noise $g_i$, and
+rank the items by $u_i$. By the <NoteLink to="gumbel-max-trick">Gumbel-max trick</NoteLink>, the top item is $i$ with
+probability $\operatorname{softmax}(\thetavec)_i$. Conditional on which item is largest, the remaining noise terms are
+still independent Gumbels shifted by their $\theta$, so the second place follows the softmax over the rest, and so on.
+The ranking by $u$ therefore has the Plackett–Luce distribution. Sampling a ranking costs one sort of $n$ perturbed
+scores.
+
+Replacing the Gumbel noise by Gaussian noise gives a Thurstonian ranking model. Its probabilities have no product form,
+and computing them requires an $(n-1)$-dimensional Gaussian integral. The multi-team ranking in
+<NoteLink to="trueskill">TrueSkill</NoteLink> is of this Gaussian kind, which is why TrueSkill needs approximate
+inference.
+
+## Fitting
+
+For rankings $\rho^{(1)}, \dots, \rho^{(N)}$ the log-likelihood is
+
+$$
+\ell(\thetavec) = \sum_{r=1}^{N}\sum_{k=1}^{n_r - 1}\brack{\theta_{\rho^{(r)}_k} - \log\sum_{m=k}^{n_r} e^{\theta_{\rho^{(r)}_m}}},
+$$
+
+a sum of log-softmax terms, concave in $\thetavec$ and invariant to adding a constant. Its gradient is observed minus
+expected choice counts. The minorisation used for Bradley–Terry, $-\log x \ge 1 - \log y - x/y$ applied to each
+denominator, gives an MM update of the same form as Zermelo's iteration <Cite id="hunter2004" />:
+
+$$
+\pi_i^{\text{new}} = \frac{w_i}{\sum_{r}\sum_{k} \delta_{irk} \big/ \sum_{m=k}^{n_r} \pi_{\rho^{(r)}_m}},
+$$
+
+where $w_i$ counts the choice stages at which $i$ was chosen (every rank except last) and $\delta_{irk} = 1$ when item $i$
+was still unranked at stage $k$ of ranking $r$ and that stage was a real choice ($k < n_r$). As with Bradley–Terry, a
+finite maximum needs every item to have been beaten and to have beaten some other item, in the sense of a strongly
+connected comparison graph.
+
+**Partial rankings.** A top-$k$ list, such as the first three finishers of a race, uses the first $k$ factors only.
+Rankings of different subsets of items combine in one likelihood, because each ranking involves only its own items.
+
+## Learning to rank
+
+In learning to rank, $\theta_i = f(\xvec_i)$ is a model's score for document $i$ given a query. **ListNet** trains the
+scores by the cross-entropy between the top-one probabilities of the true and the predicted ranking, which are the
+first Plackett–Luce factor, a softmax <Cite id="cao2007" />. **ListMLE** maximises the full Plackett–Luce likelihood of
+the correct ranking <Cite id="xia2008" />. Both are covered with other losses in
+<NoteLink to="ranking-losses">ranking losses</NoteLink>. Sampling rankings by sorting Gumbel-perturbed scores is also
+how stochastic rankers and policy-gradient methods for ranking draw from a Plackett–Luce policy.
+
+## Pitfalls
+
+- **Independence of irrelevant alternatives.** Adding a near-copy of item $i$ takes probability from every item in
+  proportion, not mainly from $i$. Real choices among similar options violate this.
+- **Top-heavy information.** Early factors choose from many items and carry most of the information. The order among
+  the last few items is decided by a few near-binary choices.
+- **Not the same as pairwise fitting.** Splitting each ranking into its $\binom{n}{2}$ pairs and fitting Bradley–Terry
+  counts the same evidence many times and gives overconfident standard errors, although the point estimates are often
+  close.

@@ -1,0 +1,167 @@
+---
+title: TF-IDF weighting variants
+kind: concept
+summary: 'A TF-IDF weight is a product of three choices: a term-frequency function (raw, $1 + \log \mathrm{tf}$, augmented, binary), a document-frequency function (none, $\log N/\mathrm{df}$, smoothed, probabilistic) and a normalisation (none, cosine, pivoted). SMART notation names each combination, as in lnc.ltc.'
+tags: [nlp, information-retrieval, feature-engineering, text-representation, worked-example]
+aliases: [SMART notation, SMART weighting, lnc.ltc, ltc, sublinear tf, logarithmic term frequency, augmented term frequency, maximum tf normalisation, smooth idf, probabilistic idf, cosine normalisation, pivoted length normalisation, pivoted document length normalization, pivoted unique normalisation]
+requires: [term-frequency-inverse-document-frequency]
+partOf: [text-representation-pipeline]
+related: [bag-of-words, stop-words, pairwise-distances-and-cosine-similarity, latent-semantic-analysis]
+references: [salton1988, singhal1996, manning2008, sparckjones1972, robertson2009, pedregosa2011]
+status: draft
+updated: 2026-09-27
+---
+
+import { PivotedNormalisation } from './PivotedNormalisation'
+
+<Definition>
+A TF-IDF weight of term $t$ in document $d$ is a product
+
+$$
+w_{t,d} = \underbrace{f(\mathrm{tf}_{t,d})}_{\text{term frequency}} \cdot \underbrace{g(\mathrm{df}_t)}_{\text{document
+frequency}} \cdot \underbrace{\frac{1}{Z_d}}_{\text{normalisation}},
+$$
+
+where $\mathrm{tf}_{t,d}$ counts $t$ in $d$, $\mathrm{df}_t$ counts the documents containing $t$ among $N$, and $Z_d$
+depends on the whole document. **SMART notation** names a scheme by one letter for each factor, and a pair of schemes
+by `ddd.qqq`, the document weighting then the query weighting <Cite id="salton1988" /> <Cite id="manning2008" />.
+</Definition>
+
+## Intuition
+
+The <NoteLink to="term-frequency-inverse-document-frequency">TF-IDF</NoteLink> idea has three separate parts. How much does the tenth
+occurrence of a term add over the first? How much rarer terms should count? How to stop long documents from winning
+because they are long? Each question has several answers, and Salton and Buckley compared the combinations
+systematically across collections <Cite id="salton1988" />.
+
+## The SMART table
+
+| Letter | Term frequency $f(\mathrm{tf})$ | Letter | Document frequency $g(\mathrm{df})$ | Letter | Normalisation $1/Z_d$ |
+| --- | --- | --- | --- | --- | --- |
+| n | $\mathrm{tf}$ | n | $1$ | n | $1$ |
+| l | $1 + \log \mathrm{tf}$ | t | $\log (N/\mathrm{df})$ | c | $1 / \sqrt{\sum_t w_t^2}$ |
+| a | $0.5 + 0.5\,\mathrm{tf}/\max_{s} \mathrm{tf}_{s}$ | p | $\max\{0, \log((N - \mathrm{df})/\mathrm{df})\}$ | u | $1/((1 - s)\,p + s\,u_d)$ |
+| b | $\indicator[\mathrm{tf} > 0]$ | | | b | $1/\mathrm{CharLength}^{\alpha}$, $\alpha < 1$ |
+| L | $(1 + \log \mathrm{tf}) / (1 + \log \operatorname{ave}_{s} \mathrm{tf}_s)$ | | | | |
+
+The $f$ entries apply only for $\mathrm{tf} > 0$; a term absent from the document has weight 0. In the "u" row, $u_d$
+is the number of distinct terms of $d$, $p$ the pivot and $s$ the slope, explained below. The table follows Manning,
+Raghavan and Schütze <Cite id="manning2008" />. "lnc.ltc" means documents use logarithmic tf, no idf and cosine
+normalisation, and queries use logarithmic tf, idf and cosine normalisation.
+
+## Term-frequency functions
+
+**Raw (n).** Twenty occurrences count twenty times as much as one. That overstates the evidence: a document that
+mentions a term twenty times is more about it than one that mentions it once, but not twenty times more.
+
+**Logarithmic (l).** $1 + \log \mathrm{tf}$ grows by the same amount each time the count multiplies by the base of the
+logarithm. With base 10, counts 1, 10 and 100 get weights 1, 2 and 3. The weight is concave, so the marginal value of
+one more occurrence, $\partial f / \partial \mathrm{tf} = 1/(\mathrm{tf} \ln 10)$, falls as the count grows. This is
+called sublinear tf scaling.
+
+**Augmented (a).** Dividing by the largest count in the document, $\max_s \mathrm{tf}_s$, removes the effect of length
+on counts: a long document's counts are all larger, and so is its maximum. The ratio lies in $(0, 1]$, and mixing it
+with a constant gives weights in $(0.5, 1]$. The constant 0.5 keeps a term that occurs once from being negligible
+next to the most frequent term. The ratio is fragile: one anomalous term with a very high count scales all the others
+down <Cite id="manning2008" />.
+
+**Binary (b)** keeps only presence. **Log average (L)** divides the logarithmic weight by that of the document's
+average count, another length correction.
+
+## Document-frequency functions
+
+**Standard idf (t).** $\log(N/\mathrm{df}_t)$ is the information, in nats for the natural logarithm, of learning that a
+randomly chosen document contains $t$, since that happens with probability $\mathrm{df}_t / N$
+<Cite id="sparckjones1972" />. A term in every document gets 0.
+
+**Probabilistic idf (p).** $\log((N - \mathrm{df}_t)/\mathrm{df}_t)$ is the log-odds against a random document
+containing $t$. It follows from the binary independence retrieval model when the probability that a relevant document
+contains $t$ is set to $\tfrac12$ <Cite id="robertson2009" />. The derivation is in
+<NoteLink to="term-frequency-inverse-document-frequency">TF-IDF</NoteLink>. It is negative for terms in more than half the documents,
+hence the clipping at zero.
+
+**Smoothed idf.** scikit-learn's default is $\ln\big((1 + N)/(1 + \mathrm{df}_t)\big) + 1$
+<Cite id="pedregosa2011" />. The $+1$ inside the logarithm counts one extra document that contains every term, which
+keeps the ratio finite for a term with $\mathrm{df}_t = 0$ (possible when the vocabulary is fixed in advance). The
+$+1$ outside keeps terms that are in every document from being zeroed. The effect is a weight that never reaches zero,
+so no term is removed entirely.
+
+## Normalisation
+
+**Cosine (c).** Dividing by the Euclidean length makes every document vector unit length, and the dot product of two
+such vectors is their cosine similarity. Without it, a long document has large weights for many terms and scores high
+against every query.
+
+**Pivoted length normalisation (u).** Singhal, Buckley and Mitra plotted, against document length, the probability
+that a retrieved document is relevant and the probability that it is retrieved <Cite id="singhal1996" />. Under
+cosine normalisation, short documents were retrieved more often than their share of relevant documents, and long
+documents less often. Cosine normalisation overcorrects for length.
+
+The fix rotates the normaliser around a pivot. Let $Z_d$ be the old normalisation factor, for example the cosine
+length or the number of distinct terms $u_d$, and let $p$ be a pivot, usually the average of $Z_d$ over the collection.
+The pivoted factor is
+
+$$
+Z'_d = (1 - s)\,p + s\,Z_d, \qquad 0 < s < 1.
+$$
+
+It is a straight line through the point $(p, p)$ with slope $s$. At $Z_d = p$ it equals the old factor. For a
+document longer than the pivot, $Z_d > p$, so $Z'_d - Z_d = (1 - s)(p - Z_d) < 0$: the new divisor is smaller and the
+document's weights, and so its scores, rise. For a shorter document they fall. The slope $s$ sets how much: $s = 1$ is
+the old normalisation and $s \to 0$ removes length normalisation. $s$ and $p$ are tuned on queries with relevance
+judgements <Cite id="singhal1996" />. Dividing $Z'_d$ by the constant $(1 - s)\,p$ does not change any ranking, so the
+factor is often written $1 + \frac{s}{(1-s)p} Z_d$.
+
+The length normalisation in BM25, dividing the term frequency by $1 - b + b\,L_d/\bar{L}$, is the same idea applied
+inside the saturating tf function, with $b$ in the role of $s$ and the average length $\bar{L}$ as pivot.
+
+<PivotedNormalisation />
+
+## Worked example
+
+Take the five documents "the cat sat on the mat", "the dog sat on the log", "the cat chased the dog", "a dog and a cat
+played" and "the bird sang", so $N = 5$, and score the query "cat mat" with lnc.ltc and base-10 logarithms.
+
+**Query (ltc).** Both terms have $\mathrm{tf} = 1$, so $l = 1$. "cat" is in 3 documents and "mat" in 1, so the idf
+weights are $\log_{10}(5/3) = 0.222$ and $\log_{10} 5 = 0.699$. Cosine normalisation divides by
+$\sqrt{0.222^2 + 0.699^2} = 0.733$, giving 0.303 for "cat" and 0.953 for "mat".
+
+**Documents (lnc).** Document 1 has "the" twice and four other terms once. The weights are $1 + \log_{10} 2 = 1.301$
+for "the" and 1 for the rest, with length $\sqrt{1.301^2 + 4} = 2.386$. The normalised weights are 0.545 for "the" and
+0.419 for "cat", "sat", "on" and "mat".
+
+**Scores.** The score is the dot product over the shared terms.
+
+| Document | Shared terms | Score |
+| --- | --- | --- |
+| 1 | cat, mat | $0.419 \times 0.303 + 0.419 \times 0.953 = 0.526$ |
+| 3 | cat | $(1/2.166) \times 0.303 = 0.140$ |
+| 4 | cat | $(1/2.386) \times 0.303 = 0.127$ |
+| 2, 5 | none | 0 |
+
+Documents 3 and 4 each contain "cat" once. Document 3 scores higher because it has fewer distinct terms, so its
+cosine length is smaller (2.166 against 2.386). This is the preference for short documents that pivoting reduces. With
+the number of distinct terms as $Z_d$ ($u = 5, 5, 4, 5, 3$), the pivot $p = 4.4$ and slope $s = 0.2$, the factors
+$1/Z'_d$ become 0.221, 0.221, 0.232, 0.221 and 0.243, against 0.200, 0.200, 0.250, 0.200 and 0.333 for $1/u_d$. The
+three-term document 5 now gets 1.10 times the weight of a five-term document instead of 1.67 times.
+
+The same idf for "mat" under the smoothed scikit-learn formula is $\ln(6/2) + 1 = 2.099$, and for "the" it is
+$\ln(6/5) + 1 = 1.182$; the ratio between them is 1.8 instead of $0.699 / 0.097 = 7.2$ under standard idf. Smoothing
+compresses the range of the weights.
+
+## Assumptions
+
+- **The three factors are independent choices.** SMART treats tf, df and normalisation as separable. BM25 couples tf
+  and length, which the product form cannot express.
+- **Collection statistics are stable.** idf and the pivot are estimated from the collection and change when documents
+  are added.
+
+## Pitfalls
+
+- **The logarithm base does not matter within one scheme** for ranking with cosine normalisation, because changing base
+  multiplies every idf by the same constant. It does matter in $1 + \log \mathrm{tf}$, where the constant 1 is not
+  rescaled.
+- **Different libraries, different defaults.** scikit-learn smooths idf and adds 1; many textbook formulas do not.
+  Report the SMART code or the exact formula.
+- **Query and document weighting differ on purpose.** lnc.ltc applies idf once, on the query side. Applying it on both
+  sides squares its effect.

@@ -1,0 +1,134 @@
+---
+title: PAC learning
+kind: concept
+summary: 'A class $\Hcal$ is PAC learnable if, for every accuracy $\epsilon$ and confidence $\delta$, some number of samples $m(\epsilon, \delta)$ guarantees risk within $\epsilon$ of the best with probability at least $1 - \delta$. A finite class needs $m = O((\ln\abs{\Hcal} + \ln(1/\delta))/\epsilon^2)$.'
+tags: [learning-theory, generalisation, sample-complexity, worked-example]
+aliases: [probably approximately correct, PAC, agnostic PAC learning, sample complexity, realisable case, Occam bound, finite hypothesis class bound]
+requires: [empirical-risk-minimisation]
+related: [markov-and-chebyshev-inequalities]
+references: [valiant1984, shalevshwartz2014, hoeffding1963, blumer1989, mohri2018]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A hypothesis class $\Hcal$ of classifiers is **(agnostic) PAC learnable** if there are a function
+$m_{\Hcal}: (0, 1)^2 \to \naturals$ and a learning algorithm with the following property. For every
+$\epsilon, \delta \in (0, 1)$ and every distribution $P$ over labelled examples, when the algorithm receives
+$m \ge m_{\Hcal}(\epsilon, \delta)$ independent examples from $P$, it returns $\hat h$ with
+
+$$
+R(\hat h) \le \min_{h \in \Hcal} R(h) + \epsilon
+$$
+
+with probability at least $1 - \delta$ over the sample. The smallest such $m_{\Hcal}$ is the **sample complexity** of
+$\Hcal$ <Cite id="valiant1984" /> <Cite id="shalevshwartz2014" />.
+</Definition>
+
+## Intuition
+
+"Probably approximately correct" names the two ways a learner can fall short. **Approximately**: even with a good
+sample, the learned rule may be slightly worse than the best rule in the class, by at most $\epsilon$. **Probably**:
+the sample may be unrepresentative, and then no learner can be trusted; this is allowed to happen with probability
+at most $\delta$. The sample complexity says how many examples make both failures as rare as required, for every
+data distribution at once.
+
+Valiant's original definition assumed the **realisable** case: some $h \in \Hcal$ has zero risk
+<Cite id="valiant1984" />. The **agnostic** version drops that assumption and compares with the best $h$ in the
+class, which is what practice needs.
+
+## Finite classes: the union bound
+
+The central result is that every finite class is PAC learnable by
+<NoteLink to="empirical-risk-minimisation">empirical risk minimisation</NoteLink>, with a sample complexity that grows
+only with $\ln\abs{\Hcal}$.
+
+**Step 1: one hypothesis.** Fix $h \in \Hcal$ and use the 0–1 loss. The losses $\indicator[h(\xvec_i) \ne y_i]$ are
+independent, lie in $[0, 1]$ and have mean $R(h)$. Hoeffding's inequality bounds the chance that their average is far
+from its mean <Cite id="hoeffding1963" />:
+
+$$
+\prob\paren{\abs{\hat R_S(h) - R(h)} > t} \le 2e^{-2mt^2}.
+$$
+
+**Step 2: all hypotheses at once.** ERM chooses its output after seeing the data, so a bound for one fixed $h$ is not
+enough. The union bound turns it into a bound for the whole class: the probability that at least one hypothesis
+deviates is at most the sum of the individual probabilities,
+
+$$
+\prob\paren{\exists h \in \Hcal: \abs{\hat R_S(h) - R(h)} > t} \le 2\abs{\Hcal}\,e^{-2mt^2}.
+$$
+
+Setting the right side to $\delta$ and solving for $t$ shows that, with probability at least $1 - \delta$,
+
+$$
+\abs{\hat R_S(h) - R(h)} \le \sqrt{\frac{\ln\abs{\Hcal} + \ln(2/\delta)}{2m}} \quad \text{for every } h \in \Hcal.
+$$
+
+**Step 3: ERM.** When every empirical risk is within $t$ of its true risk, the ERM output satisfies
+$R(\hat h) \le \hat R_S(\hat h) + t \le \hat R_S(h^*) + t \le R(h^*) + 2t$, where $h^*$ is the best hypothesis in the
+class. Requiring $2t \le \epsilon$ gives the agnostic sample complexity
+
+$$
+m_{\Hcal}(\epsilon, \delta) \le \left\lceil \frac{2\paren{\ln\abs{\Hcal} + \ln(2/\delta)}}{\epsilon^2} \right\rceil.
+$$
+
+The bound needs $\ln\abs{\Hcal}$, the number of bits needed to name a hypothesis, not $\abs{\Hcal}$ itself. Doubling
+the size of the class costs only $2\ln 2/\epsilon^2$ extra examples.
+
+<Derivation title="The realisable case needs only 1/ε, not 1/ε²">
+Suppose some hypothesis in $\Hcal$ has zero risk, and let ERM return any $\hat h$ with zero training error. Call $h$
+**bad** if $R(h) > \epsilon$. A bad $h$ classifies one random example correctly with probability less than
+$1 - \epsilon$, so it is consistent with all $m$ independent examples with probability less than
+$(1 - \epsilon)^m \le e^{-\epsilon m}$. By the union bound over at most $\abs{\Hcal}$ bad hypotheses,
+
+$$
+\prob\paren{\text{some bad } h \text{ has zero training error}} \le \abs{\Hcal}\,e^{-\epsilon m}.
+$$
+
+This is at most $\delta$ once $m \ge (\ln\abs{\Hcal} + \ln(1/\delta))/\epsilon$. The rate is faster because a
+hypothesis with risk $\epsilon$ is rejected as soon as one of its mistakes appears in the sample, which takes about
+$1/\epsilon$ examples. Estimating a risk to within $\epsilon$ in the agnostic case takes about $1/\epsilon^2$
+<Cite id="shalevshwartz2014" />.
+</Derivation>
+
+## Worked example: Boolean conjunctions
+
+Let the inputs be 10 Boolean variables and let $\Hcal$ be the conjunctions of literals, such as
+$x_1 \wedge \neg x_4 \wedge x_7$. Each variable appears positively, negatively or not at all, and one more hypothesis
+is always false, so $\abs{\Hcal} = 3^{10} + 1 = 59{,}050$ and $\ln\abs{\Hcal} = 10.99$. Take $\epsilon = 0.05$ and
+$\delta = 0.01$.
+
+- **Realisable.** $m \ge (10.99 + \ln 100)/0.05 = (10.99 + 4.61)/0.05 = 311.8$, so 312 examples suffice.
+- **Agnostic, from the uniform deviation.** Requiring every empirical risk to be within $\epsilon$ of its risk,
+  $m \ge (\ln\abs{\Hcal} + \ln(2/\delta))/(2\epsilon^2) = (10.99 + 5.30)/0.005 = 3{,}257$.
+
+- **Agnostic, for ERM.** Guaranteeing $R(\hat h) \le R(h^*) + \epsilon$ needs deviations within $\epsilon/2$, which
+  multiplies the previous figure by 4: $m \ge 13{,}028$.
+
+The agnostic requirement is 10 to 40 times the realisable one. All three grow with $\ln\abs{\Hcal} = 10.99$, not with
+$\abs{\Hcal} = 59{,}050$.
+
+## Beyond finite classes
+
+Most useful classes, such as all linear classifiers, are infinite, and $\ln\abs{\Hcal}$ is then infinite. The
+<NoteLink to="vapnik-chervonenkis-dimension">VC dimension</NoteLink> replaces it with the number of distinct labellings the class can
+produce on $m$ points. The fundamental theorem of statistical learning states that a binary class is PAC learnable if
+and only if its VC dimension $d$ is finite, with sample complexity of order $(d + \ln(1/\delta))/\epsilon^2$ in the
+agnostic case <Cite id="blumer1989" /> <Cite id="shalevshwartz2014" />.
+<NoteLink to="rademacher-complexity">Rademacher complexity</NoteLink> gives data-dependent versions of the same bounds.
+
+## Assumptions
+
+- **Independent, identically distributed examples** from the same distribution used for testing.
+- **Worst case over distributions.** The guarantee holds for every $P$. That makes it robust, and also loose for the
+  benign distributions met in practice.
+- **Computation is ignored** in the statistical definition. Valiant also required a polynomial-time learner. Some
+  classes are learnable with few samples but only with an intractable search.
+
+## Pitfalls
+
+- **The bound is on the class, not the model.** A PAC bound certifies ERM over $\Hcal$ chosen before seeing the data.
+  Choosing $\Hcal$ after looking at the data, for example by trying many model families, enlarges the effective class.
+- **Bounds are often vacuous numerically.** For modern networks, $\ln\abs{\Hcal}$ or its analogues exceed the number of
+  examples, and the bound exceeds 1. The theory explains rates and trends better than it predicts error bars.

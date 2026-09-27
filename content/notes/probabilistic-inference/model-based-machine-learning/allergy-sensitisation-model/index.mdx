@@ -1,0 +1,104 @@
+---
+title: Allergy sensitisation model
+kind: concept
+summary: 'Childhood allergy as a model: each child''s sensitisation to each allergen is a hidden Markov chain over ages, seen through noisy skin and blood tests, and a latent class per child selects the chain''s probabilities. One class marked children at high risk of asthma.'
+tags: [model-based-machine-learning, bayesian, latent-variable-models, hidden-markov-model, medicine, worked-example]
+aliases: [understanding asthma, sensitisation classes, atopy phenotypes, MBML chapter 6, latent sensitisation classes, Manchester Asthma and Allergy Study model]
+requires: [hidden-markov-model, factor-graph, beta-distribution]
+partOf: [model-based-machine-learning]
+related: [gates-in-factor-graphs, gaussian-mixture-model, assessing-skills, expectation-propagation]
+references: [winn2023asthma, simpson2010asthma, lazic2013, minka2008gates]
+status: draft
+updated: 2026-09-27
+---
+
+import { AsthmaGraph } from './AsthmaGraph'
+import { SensitisationChain } from './SensitisationChain'
+
+<Callout variant="credit" title="Provenance: Model-Based Machine Learning, by John Winn et al.">
+This note follows the "Understanding Asthma" chapter of *Model-Based Machine Learning* by John Winn with Christopher M.
+Bishop, Thomas Diethe, John Guiver and Yordan Zaykov (Microsoft Research) <Cite id="winn2023asthma" />. The chapter
+describes a collaboration with the Manchester Asthma and Allergy Study, published by Simpson et al. and Lazic et al.
+<Cite id="simpson2010asthma" /> <Cite id="lazic2013" />. The model, its assumptions and the way they are built up step
+by step are theirs; this note restates them in this site's notation. I include it because it is a very good account,
+and I want it in my own records. The book is free to read at [mbmlbook.com](https://mbmlbook.com). This site added the
+interactive figures; the class parameters in the second figure are illustrative, not the study's estimates.
+</Callout>
+
+<Definition>
+Child $n$ has, for each allergen $a$ and age $t \in \{1, 3, 5, 8\}$, a binary sensitisation state $s_{nat}$. The states
+form a Markov chain over ages with probabilities of initial sensitisation, gain and retention. Skin-prick and IgE tests
+observe each state with test-specific error rates. A latent class $z_n$ per child selects which chain probabilities
+apply. Inference returns the posterior over each child's class and states, and the class-specific probabilities
+<Cite id="winn2023asthma" />.
+</Definition>
+
+## The problem
+
+Many children are sensitised to allergens such as house-dust mite, cat, dog, pollen, milk or egg, and some go on to
+develop asthma. Being sensitised, or atopic, is a crude predictor: most atopic children never develop asthma. The
+Manchester Asthma and Allergy Study followed about a thousand children from birth, testing them for sensitisation at
+ages 1, 3, 5 and 8. The question was whether there are distinct *patterns* of sensitisation, and whether some patterns
+predict asthma better than atopy does <Cite id="simpson2010asthma" />. This is explanatory modelling: the aim is to find
+structure a clinician can interpret, not only to predict.
+
+## The model, one assumption at a time
+
+The chapter's assumptions <Cite id="winn2023asthma" />:
+
+1. If a child is sensitised to an allergen, a test for it is positive with high probability.
+2. If a child is not sensitised, a test is positive with low probability.
+3. For each type of test, the false-positive and false-negative rates are the same for every test in the study.
+4. Whether a child is sensitised at one age depends only on whether they were sensitised at the previous age.
+5. The probabilities of initially having, gaining and retaining sensitisation to an allergen are the same for all
+   children.
+
+Assumptions 1 to 3 make the tests noisy observations of a hidden state, with four shared parameters per test type:
+$\pr(\text{positive} \mid s = 1)$ and $\pr(\text{positive} \mid s = 0)$ for skin and for IgE, each with a Beta prior.
+Assumption 4 makes the states over age a two-state <NoteLink to="hidden-markov-model">hidden Markov model</NoteLink>.
+Assumption 5 shares the chain probabilities across children, one set per allergen.
+
+Assumption 5 is the one the chapter then relaxes. Children differ in how they become sensitised, so it is replaced: each
+child belongs to one of $K$ latent classes, and each class has its own initial, gain and retain probabilities for every
+allergen. The class selects the parameters through a <NoteLink to="gates-in-factor-graphs">gate</NoteLink>
+<Cite id="minka2008gates" />. The model becomes a mixture of hidden Markov models.
+
+<AsthmaGraph />
+
+## Inference
+
+For one child and one allergen, given the class and the parameters, the posterior over the four states is the
+forward–backward algorithm on a chain of length four. The class multiplies in the evidence of each class's chain for
+all of the child's allergens, and the gate's message to $z_n$ is that evidence. The parameters are learned by
+expectation propagation over all children at once, with Beta messages to every probability. Two practical points from
+the chapter:
+
+- **Symmetry.** The classes are exchangeable a priori, so message passing started from a symmetric state stays there.
+  Random initial messages on the class variables break the symmetry.
+- **Number of classes.** The model is given more classes than it needs, and unused classes stay empty. With five classes
+  available, four were used <Cite id="winn2023asthma" />.
+
+<SensitisationChain />
+
+## What the classes showed
+
+The classes had distinct, interpretable patterns: a large class of children with almost no sensitisation, and smaller
+classes differing in which allergens they became sensitised to and when. One class, children sensitised early and to
+many allergens, carried a much higher risk of asthma than the others, much more than atopy defined by any single test
+<Cite id="simpson2010asthma" />. The same analysis on a second birth cohort found similar classes and associations
+<Cite id="lazic2013" />.
+
+## Assumptions
+
+- **Binary sensitisation.** Test results are thresholded; the size of a skin wheal or an IgE level is not used.
+- **First-order dynamics.** The state at age 8 depends on age 5 only, not on the whole history. Four time points give
+  little room to test richer dynamics.
+- **Independent allergens given the class.** Within a class, a child's sensitisations to different allergens are
+  independent. Correlation between allergens is carried entirely by the class.
+
+## Pitfalls
+
+- **Classes are not diseases.** A latent class is a pattern the model finds useful for explaining the data. Reading it
+  as a biological mechanism needs outside evidence, which is why the replication on a second cohort matters.
+- **Missing tests.** Not every child was tested at every age. The model handles a missing test by leaving its variable
+  unobserved; a test missing for reasons related to the child's health would bias the result.

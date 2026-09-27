@@ -126,6 +126,19 @@ for (const rel of sourceFiles) {
   }
 }
 
+// Every hard-coded note URL must name a real note. The build checks relations and <NoteLink to>, but not a markdown
+// link such as [x](/n/slug), an href, a noteUrl('slug') call or a string holding /n/slug in TSX.
+const noteUrlPattern = /(?:\/n\/|noteUrl\(\s*['"`]|prefetchNote\(\s*['"`])([a-z0-9]+(?:-[a-z0-9]+)*)/g
+for (const rel of sourceFiles) {
+  const text = fs.readFileSync(path.join(contentDir, rel), 'utf8')
+  text.split('\n').forEach((line, i) => {
+    for (const [, target] of line.matchAll(noteUrlPattern)) {
+      if (!slugs.has(target))
+        errors.push(`${path.relative(root, path.join(contentDir, rel))}:${i + 1}: link to unknown note "${target}"`)
+    }
+  })
+}
+
 // Layout: legacy flat notes, redundant frontmatter, stray folders.
 for (const n of notes) {
   const nested = n.file.split('/').length > 3

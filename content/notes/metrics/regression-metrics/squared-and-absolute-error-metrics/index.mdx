@@ -1,0 +1,101 @@
+---
+title: Mean squared error, RMSE and mean absolute error
+kind: concept
+summary: 'Mean squared error $\frac1n\sum_i (y_i - \hat y_i)^2$ averages squared misses and is minimised by the conditional mean; mean absolute error averages absolute misses and is minimised by the median. RMSE puts MSE back in the units of $y$ and always exceeds or equals MAE.'
+tags: [metrics, regression, loss-functions, worked-example]
+aliases: [MSE, RMSE, MAE, mean squared error, root mean squared error, mean absolute error, L2 loss, L1 loss, median absolute error, max error]
+related: [r-squared-and-explained-variance, robust-and-distributional-regression-losses, pearson-correlation, linear-regression, percentage-errors, scaled-errors-and-mean-absolute-scaled-error, regression-losses]
+references: [hastie2009, pedregosa2011, detlefsen2022]
+status: draft
+updated: 2026-09-27
+---
+
+import { OutlierScores } from './OutlierScores'
+
+<Definition>
+For true values $y_1, \dots, y_n$ and predictions $\hat y_1, \dots, \hat y_n$, with errors $e_i = y_i - \hat y_i$,
+
+$$
+\operatorname{MSE} = \frac1n\sum_{i=1}^n e_i^2, \qquad
+\operatorname{RMSE} = \sqrt{\operatorname{MSE}}, \qquad
+\operatorname{MAE} = \frac1n\sum_{i=1}^n \abs{e_i}.
+$$
+
+All three are 0 for perfect predictions and grow without bound. MSE is in squared units of $y$; RMSE and MAE are in
+the units of $y$ <Cite id="hastie2009" />.
+</Definition>
+
+## What each one rewards
+
+The two scores reward different point predictions. For a random target $Y$ and a constant prediction $c$:
+
+**MSE is minimised by the mean.** $\expect[(Y - c)^2] = \var(Y) + (\expect[Y] - c)^2$, obtained by adding and
+subtracting $\expect[Y]$ inside the square; the cross term has zero expectation. The second term is the only one that
+depends on $c$, and it vanishes at $c = \expect[Y]$. Conditioning on the inputs, the prediction that minimises
+expected squared error is the conditional mean $\expect[Y \mid \xvec]$.
+
+**MAE is minimised by the median.** $\frac{d}{dc}\expect\abs{Y - c} = P(Y < c) - P(Y > c)$ wherever it exists, since
+moving $c$ up by a small amount increases the error of every observation below $c$ and decreases it for every
+observation above. The derivative is zero, or changes sign, where half the probability lies on each side: at a
+median. Conditioning on the inputs, MAE rewards the conditional median.
+
+The two differ exactly when the conditional distribution is skewed. For a right-skewed target such as income or
+waiting time, a model trained to minimise MSE predicts higher values than one trained to minimise MAE, and each looks
+worse under the other's score.
+
+The same split holds for the losses used in training: MSE is the Gaussian negative log-likelihood up to constants,
+and MAE is the Laplace negative log-likelihood. The <NoteLink to="linear-regression">least-squares</NoteLink> fit is
+the MSE-optimal linear predictor.
+
+## Sensitivity to large errors
+
+Squaring makes MSE dominated by the largest errors. An error of 10 adds 100 to the sum; ten errors of 1 add 10.
+MAE counts every unit of error equally. So MSE and RMSE respond strongly to a single outlying prediction, and MAE
+responds only in proportion to its size.
+
+The two are ordered. By Jensen's inequality, or the power-mean inequality,
+$\operatorname{MAE} = \frac1n\sum \abs{e_i} \le \paren{\frac1n\sum e_i^2}^{1/2} = \operatorname{RMSE}$, with equality
+only when every $\abs{e_i}$ is the same. At the other extreme, when a single error carries all the loss,
+$\operatorname{RMSE} = \sqrt n\,\operatorname{MAE}$. The ratio RMSE / MAE, between 1 and $\sqrt n$, measures how
+concentrated the errors are.
+
+MSE also splits into bias and variance. Writing $\bar e$ for the mean error,
+$\operatorname{MSE} = \bar e^2 + \frac1n\sum (e_i - \bar e)^2$: a systematic offset and the spread around it.
+
+<OutlierScores />
+
+## Worked example
+
+With $y = (3, -0.5, 2, 7)$ and $\hat y = (2.5, 0, 2, 8)$, the errors are $e = (0.5, -0.5, 0, -1)$.
+
+- $\operatorname{MSE} = (0.25 + 0.25 + 0 + 1)/4 = 0.375$ and $\operatorname{RMSE} = \sqrt{0.375} = 0.612$.
+- $\operatorname{MAE} = (0.5 + 0.5 + 0 + 1)/4 = 0.5$.
+- RMSE / MAE = 1.22: one error of 1 is larger than the rest.
+- The median absolute error is 0.5 and the maximum error is 1.
+
+These match scikit-learn's `mean_squared_error`, `mean_absolute_error`, `median_absolute_error` and `max_error`
+<Cite id="pedregosa2011" />.
+
+## Related scores
+
+- **Median absolute error** takes the median of $\abs{e_i}$ instead of the mean, so up to half the predictions can be
+  arbitrarily wrong without changing it.
+- **Maximum error** is the worst single miss, for settings with a hard tolerance.
+- **Normalised RMSE** divides RMSE by the range, mean or standard deviation of $y$ so that datasets on different
+  scales can be compared. Dividing by the standard deviation gives $\sqrt{1 - R^2}$; see
+  <NoteLink to="r-squared-and-explained-variance">R²</NoteLink>.
+- **Relative and scaled errors** for forecasting are in <NoteLink to="percentage-errors">percentage errors</NoteLink>
+  and <NoteLink to="scaled-errors-and-mean-absolute-scaled-error">scaled errors</NoteLink>.
+
+TorchMetrics implements all of these, including a log-scaled MSE, with streaming accumulation over batches
+<Cite id="detlefsen2022" />.
+
+## Pitfalls
+
+- **Scale dependence.** MSE and MAE are in the units of $y$. They cannot compare models across targets with different
+  scales without normalisation.
+- **Choosing the wrong one.** Report the score that matches the decision. If a large miss is much worse than several
+  small ones, use RMSE; if every unit of error costs the same, use MAE. Training with one and evaluating with the
+  other rewards a different point prediction.
+- **Averaging RMSE over groups.** The mean of per-group RMSEs is not the RMSE of the pooled data. Pool squared errors,
+  then take the root.

@@ -1,0 +1,256 @@
+---
+title: GAM inference and effective degrees of freedom
+kind: concept
+summary: 'A fitted GAM has $\tau = \trace\Fmat$ effective degrees of freedom, $\Fmat = (\Xmat^\top\Wmat\Xmat + \Smat_\lambda)^{-1}\Xmat^\top\Wmat\Xmat$, split into terms by the diagonal of $\Fmat$. Reading the penalty as a Gaussian prior gives the posterior $\Gauss(\hat\betavec, (\Xmat^\top\Wmat\Xmat + \Smat_\lambda)^{-1}\phi)$ for credible bands and draws.'
+tags: [generalised-additive-models, smoothing, bayesian-inference, uncertainty-quantification, model-complexity]
+aliases: [GAM credible intervals, Bayesian confidence intervals for splines, across-the-function coverage, per-term effective degrees of freedom, posterior simulation for GAMs, smooth term p-values, pyGAM summary]
+requires: [generalised-additive-model, effective-degrees-of-freedom, bayesian-linear-regression]
+partOf: [generalised-additive-model]
+related: [credible-intervals-and-highest-posterior-density, smoothing-penalties-and-curvature, interpreting-generalised-additive-models, additive-model-checking-and-term-selection]
+references: [wood2017, wahba1983, nychka1988, marra2012, wood2013, wood2016, serven2018, hastie1990]
+status: draft
+updated: 2026-09-27
+---
+
+import { PosteriorBands } from './PosteriorBands'
+
+<Definition>
+Let a GAM with model matrix $\Xmat$ and total penalty $\Smat_\lambda$ be fitted by penalised IRLS, with working
+weights $\Wmat$ at convergence. Its **influence matrix** is $\Amat = \Xmat(\Xmat^\top\Wmat\Xmat +
+\Smat_\lambda)^{-1}\Xmat^\top\Wmat$ and its **effective degrees of freedom** are $\tau = \trace\Amat = \trace\Fmat$,
+with $\Fmat = (\Xmat^\top\Wmat\Xmat + \Smat_\lambda)^{-1}\Xmat^\top\Wmat\Xmat$. The edf of term $j$ is the sum of the
+diagonal entries of $\Fmat$ that belong to its coefficients. Reading the penalty as a Gaussian prior gives the
+**Bayesian posterior** $\betavec \mid \yvec \approx \Gauss(\hat\betavec, \Vmat_\beta)$ with $\Vmat_\beta =
+(\Xmat^\top\Wmat\Xmat + \Smat_\lambda)^{-1}\phi$, where $\phi$ is the scale parameter <Cite id="wood2017" />.
+</Definition>
+
+## Effective degrees of freedom
+
+**The influence matrix.** At convergence, $\hat\betavec = (\Xmat^\top\Wmat\Xmat + \Smat_\lambda)^{-1}\Xmat^\top\Wmat
+\zvec$ for the working response $\zvec$ (see <NoteLink to="penalised-iteratively-reweighted-least-squares">penalised IRLS</NoteLink>), so
+the fitted linear predictor is $\hat\etavec = \Xmat\hat\betavec = \Amat\zvec$. For Gaussian data with the identity
+link, $\Wmat = \eye$, $\zvec = \yvec$ and $\hat\yvec = \Amat\yvec$. The trace of a linear smoother is its
+<NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink>, and by the cyclic property of the
+trace
+
+$$
+\trace\Amat = \trace\paren{\Xmat(\Xmat^\top\Wmat\Xmat + \Smat_\lambda)^{-1}\Xmat^\top\Wmat} =
+\trace\paren{(\Xmat^\top\Wmat\Xmat + \Smat_\lambda)^{-1}\Xmat^\top\Wmat\Xmat} = \trace\Fmat.
+$$
+
+$\Amat$ is $n \times n$ and $\Fmat$ is only $p \times p$.
+
+**What $\Fmat$ does.** Write $\Hmat = \Xmat^\top\Wmat\Xmat$. When $\Hmat$ is invertible, the unpenalised estimate is
+$\tilde\betavec = \Hmat^{-1}\Xmat^\top\Wmat\zvec$, and
+
+$$
+\hat\betavec = (\Hmat + \Smat_\lambda)^{-1}\Hmat\,\Hmat^{-1}\Xmat^\top\Wmat\zvec = \Fmat\tilde\betavec.
+$$
+
+$\Fmat$ maps the unpenalised coefficients to the penalised ones. Without a penalty $\Fmat = \eye$ and $\tau = p$. The
+diagonal entry $F_{kk}$ measures how much of the $k$-th unpenalised coefficient survives in its own penalised value.
+
+**Per-term edf.** Let $J$ be the set of coefficient indices of term $j$. Its edf is $\tau_j = \sum_{k \in J}F_{kk}$.
+The terms partition the coefficients, so the $\tau_j$ add up to $\tau$. An unpenalised coefficient, such as the
+intercept or a parametric effect, has $F_{kk} = 1$ exactly. To see this, write
+
+$$
+\Fmat = (\Hmat + \Smat_\lambda)^{-1}(\Hmat + \Smat_\lambda - \Smat_\lambda) = \eye - (\Hmat + \Smat_\lambda)^{-1}
+\Smat_\lambda.
+$$
+
+Column $k$ of $\Smat_\lambda$ is zero for an unpenalised coefficient, so column $k$ of $(\Hmat + \Smat_\lambda)^{-1}
+\Smat_\lambda$ is zero and $F_{kk} = 1$.
+
+**The upper bound.** $\Smat_\lambda$ is block diagonal, so the $J$ block of $(\Hmat + \Smat_\lambda)^{-1}\Smat_\lambda$
+is $\Cmat_J\lambda_j\Smat_j$, where $\Cmat_J$ is the $J$ block of $(\Hmat + \Smat_\lambda)^{-1}$. Then
+
+$$
+\tau_j = \abs{J} - \lambda_j\trace\paren{\Cmat_J\Smat_j} = \abs{J} - \lambda_j\trace\paren{\Smat_j^{1/2}\Cmat_J
+\Smat_j^{1/2}} \le \abs{J}.
+$$
+
+$\Cmat_J$ is a principal block of a positive definite matrix, so it is positive definite, and the trace in the middle
+is non-negative. The edf of a term is at most its number of free coefficients: $k - 1$ for mgcv's `s(x, k = 10)`
+after the sum-to-zero constraint, which leaves 9. As $\lambda_j \to \infty$, the penalised directions are removed and
+$\tau_j$ falls towards the dimension of the penalty's null space: 1 for a centred cubic spline, whose only unpenalised
+function is the centred line. An edf close to $\abs{J}$ means the basis, not the penalty, is limiting the term; see
+<NoteLink to="additive-model-checking-and-term-selection">model checking</NoteLink>.
+
+mgcv also computes the alternative $\trace(2\Fmat - \Fmat^2)$, which enters its tests as reference degrees of freedom
+<Cite id="wood2017" />. For a linear smoother $\Amat$, the expected residual sum of squares is
+$\sigma^2\paren{n - \trace(2\Amat - \Amat^\top\Amat)}$ plus a bias term, which motivates this version
+<Cite id="hastie1990" />.
+
+## The penalty as a prior
+
+Suppose the working data follow $\zvec \mid \betavec \sim \Gauss(\Xmat\betavec, \phi\Wmat^{-1})$. This is exact for a
+Gaussian response with the identity link, and for other families it is the quadratic approximation of the
+log-likelihood at the fit. Give $\betavec$ the prior density $\propto \exp\paren{-\betavec^\top\Smat_\lambda
+\betavec/(2\phi)}$: a Gaussian with precision $\Smat_\lambda/\phi$, flat on the null space of $\Smat_\lambda$. The log
+posterior is, up to a constant,
+
+$$
+-\frac{1}{2\phi}\brack{\norm{\Wmat^{1/2}(\zvec - \Xmat\betavec)}^2 + \betavec^\top\Smat_\lambda\betavec}.
+$$
+
+Let $\Mmat = \Xmat^\top\Wmat\Xmat + \Smat_\lambda$ and $\hat\betavec = \Mmat^{-1}\Xmat^\top\Wmat\zvec$. Expanding the
+bracket gives $\betavec^\top\Mmat\betavec - 2\betavec^\top\Xmat^\top\Wmat\zvec + \zvec^\top\Wmat\zvec$. Since
+$\Xmat^\top\Wmat\zvec = \Mmat\hat\betavec$, completing the square gives
+
+$$
+(\betavec - \hat\betavec)^\top\Mmat(\betavec - \hat\betavec) + \zvec^\top\Wmat\zvec - \hat\betavec^\top\Mmat
+\hat\betavec.
+$$
+
+Only the first term depends on $\betavec$, so the posterior is Gaussian:
+
+$$
+\betavec \mid \yvec \sim \Gauss\paren{\hat\betavec, \Vmat_\beta}, \qquad \Vmat_\beta = \paren{\Xmat^\top\Wmat\Xmat +
+\Smat_\lambda}^{-1}\phi.
+$$
+
+The posterior mean is the penalised estimate. The scale $\phi$ is 1 for binomial and Poisson responses. Otherwise it
+is estimated by the Pearson statistic $\hat\phi = \sum_i w_i(z_i - \hat\eta_i)^2/(n - \tau)$, which for Gaussian data
+is $\norm{\yvec - \hat\yvec}^2/(n - \tau)$. This is the model of
+<NoteLink to="bayesian-linear-regression">Bayesian linear regression</NoteLink> with a structured, partly improper
+prior <Cite id="wahba1983" />.
+
+**Why not the sampling covariance.** Treating $\zvec$ as random with covariance $\phi\Wmat^{-1}$, the frequentist
+covariance of $\hat\betavec$ is $\Vmat_e = \Mmat^{-1}\Xmat^\top\Wmat\Xmat\Mmat^{-1}\phi$. It is smaller than
+$\Vmat_\beta$:
+
+$$
+\Vmat_\beta - \Vmat_e = \Mmat^{-1}\paren{\Mmat - \Xmat^\top\Wmat\Xmat}\Mmat^{-1}\phi = \Mmat^{-1}\Smat_\lambda
+\Mmat^{-1}\phi.
+$$
+
+The difference is the expected squared smoothing bias. The bias of $\hat\betavec$ for a true $\betavec$ is
+$\expect\hat\betavec - \betavec = \Mmat^{-1}\Xmat^\top\Wmat\Xmat\betavec - \betavec = -\Mmat^{-1}\Smat_\lambda
+\betavec$. Averaged over the prior, whose covariance on the penalised directions is $\phi\Smat_\lambda^-$ (a
+generalised inverse, with $\Smat_\lambda\Smat_\lambda^-\Smat_\lambda = \Smat_\lambda$), its outer product is
+
+$$
+\expect\brack{\Mmat^{-1}\Smat_\lambda\betavec\betavec^\top\Smat_\lambda\Mmat^{-1}} = \Mmat^{-1}\Smat_\lambda(\phi
+\Smat_\lambda^-)\Smat_\lambda\Mmat^{-1} = \Mmat^{-1}\Smat_\lambda\Mmat^{-1}\phi.
+$$
+
+So $\Vmat_\beta = \Vmat_e + {}$average squared bias. Intervals from $\Vmat_e$ ignore the bias that the penalty
+introduces and are centred on a biased estimate. Intervals from $\Vmat_\beta$ widen to allow for it.
+
+## Credible bands
+
+Term $j$ at a point $x$ is $f_j(x) = \bvec_j(x)^\top\betavec_j$, where $\bvec_j(x)$ is the vector of its (constrained)
+basis functions at $x$. Under the posterior, $f_j(x)$ is Gaussian with mean $\hat f_j(x)$ and variance
+$\bvec_j(x)^\top\Vmat_j\bvec_j(x)$, where $\Vmat_j$ is the block of $\Vmat_\beta$ for term $j$. The pointwise 95%
+band is
+
+$$
+\hat f_j(x) \pm 1.96\sqrt{\bvec_j(x)^\top\Vmat_j\bvec_j(x)}.
+$$
+
+A band for the mean response $\mu = g^{-1}(\eta)$ transforms the endpoints of the band for $\eta$, since $g^{-1}$ is
+monotone.
+
+**Across-the-function coverage.** The band is Bayesian, but its frequentist behaviour is known. Wahba proposed these
+intervals for smoothing splines <Cite id="wahba1983" />, and Nychka explained their coverage
+<Cite id="nychka1988" />. Pointwise, coverage is below nominal where the bias is large, such as at peaks, and above
+nominal elsewhere. Averaged over the observed $x_i$, the coverage is close to nominal. The reason is the identity just
+derived: the posterior variance approximates variance plus squared bias, and the average of that over the data is the
+average squared error of the fit. Marra and Wood extended the argument to GAM components <Cite id="marra2012" />. The
+coverage stays close to nominal unless a term is heavily oversmoothed, so that bias dominates the sampling
+variability, which happens when the true term is close to its null space, a straight line. They also found that
+including the uncertainty of the intercept in each term's band (mgcv's `seWithMean = TRUE`) improves coverage.
+
+In 400 simulated data sets like the figure's (100 points, noise standard deviation 0.3, $\lambda$ chosen by REML), the
+95% band from $\Vmat_\beta$ contained the true curve at 96% of the points on average, and the band from $\Vmat_e$ at
+93%. The fraction varied between data sets: it was below 88% in one data set in ten.
+
+The bands are pointwise. A simultaneous band, which covers the whole curve at once, is wider. It is obtained by
+simulation: draw $\betavec^*$ from the posterior, compute $\max_x\abs{f_j^*(x) - \hat f_j(x)}/\operatorname{se}(x)$
+for each draw, and replace 1.96 by the 95% quantile of that maximum.
+
+## Posterior simulation
+
+Draws $\betavec^* = \hat\betavec + \Lmat\uvec$, with $\Lmat\Lmat^\top = \Vmat_\beta$ and $\uvec \sim
+\Gauss(\zeros, \eye)$, give the posterior of any function of the model: a difference $f_j(a) - f_j(b)$, the location
+of a maximum, a prediction on the response scale, or a whole curve. The same draws give simultaneous bands.
+
+<PosteriorBands />
+
+**Smoothing parameter uncertainty.** $\Vmat_\beta$ treats $\lambda$ as known. When it is estimated, the true
+uncertainty is larger. Wood, Pya and Säfken add a first-order correction built from the derivatives of
+$\hat\betavec$ with respect to $\log\lambda$ and the approximate covariance of $\log\hat\lambda$ from the REML
+criterion; mgcv returns it from `vcov(b, unconditional = TRUE)` <Cite id="wood2016" />. pyGAM's `sample` method
+instead refits $\lambda$ on response vectors simulated from the fitted model (`n_bootstraps=5` by default) and mixes
+Gaussian draws around those fits <Cite id="serven2018" />.
+
+## p-values for smooth terms
+
+The hypothesis $f_j = 0$ is tested with a Wald statistic. Let $\hat\fvec_j = \Xmat_j\hat\betavec_j$ be the term's
+values at the data and $\Vmat_{f_j} = \Xmat_j\Vmat_j\Xmat_j^\top$ their posterior covariance. The statistic is
+$T = \hat\fvec_j^\top\Vmat_{f_j}^-\hat\fvec_j$ for a generalised inverse $\Vmat_{f_j}^-$. If $\Vmat_{f_j}$ has full
+rank $\abs{J}$, $T$ is approximately $\chi^2$ with $\abs{J}$ degrees of freedom under the null. The penalty makes
+most of those directions nearly irrelevant, so this reference distribution wastes power.
+
+Wood's test uses a pseudo-inverse of rank $r$ close to the term's edf, keeping only the $r$ largest eigenvalues of
+$\Vmat_{f_j}$, with a special treatment of non-integer $r$ <Cite id="wood2013" />. The statistic $T_r$ is referred to
+a $\chi^2_r$ distribution, or to an $F$ distribution when $\phi$ is estimated. mgcv's `summary` reports these
+p-values. They condition on the estimated $\lambda$ and are approximate, but their null distribution is close to
+uniform in simulations <Cite id="wood2013" />.
+
+pyGAM computes the older statistic with the full-rank pseudo-inverse of the coefficient covariance and warns that its
+p-values are too small when smoothing parameters are estimated <Cite id="serven2018" />. Use them to rule terms out,
+not to declare terms significant.
+
+## What pyGAM reports
+
+`gam.summary()` prints the model-level statistics <Cite id="serven2018" />:
+
+| Entry            | Definition                                                                                   |
+| ---------------- | -------------------------------------------------------------------------------------------- |
+| Effective DoF    | $\tau = \trace\Fmat$                                                                          |
+| Log Likelihood   | $\ell(\hat\betavec)$                                                                          |
+| AIC              | $-2\ell(\hat\betavec) + 2\tau$, plus 2 when the scale is estimated                            |
+| AICc             | $\operatorname{AIC} + 2(\tau + 1)(\tau + 2)/(n - \tau - 2)$                                    |
+| GCV or UBRE      | $nD/(n - \gamma\tau)^2$ when $\phi$ is unknown; $D/n + 2\gamma\tau\phi/n$ plus a constant when it is known, with $\gamma = 1.4$ |
+| Scale            | $\hat\phi^{1/2}$ from the Pearson statistic; 1 for binomial and Poisson                       |
+| Pseudo R-Squared | explained deviance $1 - D/D_0$, with $D_0$ the deviance of the constant model                |
+
+The factor $\gamma = 1.4$ inflates the edf in GCV and UBRE, a correction Wood suggested against undersmoothing
+<Cite id="wood2017" />. The UBRE value also carries an additive constant, so only differences between fits are
+meaningful. Per term, the summary lists $\lambda_j$, the number of coefficients (Rank), $\tau_j$ (EDoF) and the
+p-value.
+
+The interval methods use the covariance stored in `gam.statistics_['cov']`. In pyGAM 0.12 this is the frequentist
+covariance $\Vmat_e = \Mmat^{-1}\Xmat^\top\Wmat\Xmat\Mmat^{-1}\phi$, not the Bayesian $\Vmat_\beta$. For the
+logistic GAM of <NoteLink to="penalised-iteratively-reweighted-least-squares">penalised IRLS</NoteLink>, the variances of $\hat\eta$ that
+pyGAM uses at $x = 0.1, 0.5, 0.9$ match $\Vmat_e$ to seven digits and are 14% to 19% smaller than those from
+$\Vmat_\beta$. pyGAM's bands therefore omit the allowance for smoothing bias and are narrower than mgcv's
+<Cite id="serven2018" />:
+
+- `confidence_intervals(X, width=0.95)`: an interval for the mean $\mu$ at each row of `X`, from the band for $\eta$
+  mapped through $g^{-1}$. The quantile is Gaussian when $\phi$ is known and Student $t$ with $n - \tau$ degrees of
+  freedom when it is estimated.
+- `prediction_intervals(X, width=0.95)`: the same with the response variance added, for a new observation.
+- `partial_dependence(term, X, width=0.95)`: $\hat f_j$ and its pointwise band on the link scale. pyGAM does not
+  centre its smooths, so the curve has an arbitrary offset.
+- `sample(X, y, quantity='coef' | 'mu' | 'y', n_draws=100)`: Gaussian draws of the coefficients, the means or new
+  responses, centred on the fits and using the same covariance.
+
+## Assumptions
+
+- The quadratic approximation of the log-likelihood at the fit is adequate. For small samples with binary data it may
+  not be.
+- The smoothing parameters are treated as fixed unless a correction or bootstrap is used.
+- The model is correct in its terms, family and link. The bands describe uncertainty within the model.
+
+## Pitfalls
+
+- **Pointwise, not simultaneous.** A pointwise band covers each $x$ separately. Claims about the whole curve, such as
+  "the effect is monotone", need simultaneous bands or posterior draws.
+- **Coverage is an average.** Near a sharp peak, where the bias is largest, the pointwise band covers less often than
+  95%.
+- **Uncentred bands.** Without the sum-to-zero constraint, as in pyGAM, a term's band includes an arbitrary share of
+  the intercept's uncertainty. Compare differences between points, not levels.
+- **p-values after selection.** Terms chosen because they looked significant have p-values that are too small.

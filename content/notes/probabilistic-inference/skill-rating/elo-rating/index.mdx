@@ -1,0 +1,152 @@
+---
+title: Elo rating
+kind: technique
+summary: 'Elo updates a player''s rating after each game by $R \leftarrow R + K(S - E)$, where $S$ is the score and $E = 1/(1 + 10^{-(R - R_{\text{opp}})/400})$ the expected score. It is one stochastic-gradient step on the Bradley–Terry log-loss, with $K$ as the learning rate.'
+tags: [skill-rating, paired-comparisons, online-learning, games, worked-example]
+aliases: [Elo system, Elo rating system, K-factor, expected score, rating inflation, rating deflation, chess rating]
+requires: [paired-comparison-models, logistic-regression]
+partOf: [skill-rating]
+related: [online-gradient-descent, glicko-and-glicko-2, trueskill, item-response-theory, kalman-filter]
+references: [elo1978, bradley1952, herbrich2006, glickman1999, pelanek2016]
+status: draft
+updated: 2026-09-27
+---
+
+import { EloLearningRate } from './EloLearningRate'
+
+<Definition>
+The **Elo rating system** gives each player a single rating $R$ <Cite id="elo1978" />. When player A, rated $R_A$,
+plays player B, rated $R_B$, A's **expected score** is
+
+$$
+E_A = \frac{1}{1 + 10^{-(R_A - R_B)/400}} ,
+$$
+
+and after the game A's rating becomes $R_A + K(S_A - E_A)$, where $S_A$ is 1 for a win, $\tfrac12$ for a draw and 0
+for a loss, and $K > 0$ is the **K-factor**. B's rating changes by the same amount with the opposite sign.
+</Definition>
+
+## Problem
+
+Chess federations need a number for each player that predicts results and can be updated after every tournament
+without refitting the whole history. Arpad Elo's system, adopted by the World Chess Federation (FIDE) in 1970, meets
+both needs with one rule <Cite id="herbrich2006" />. The rule looks like a heuristic, "move towards the result by a fixed
+fraction of the surprise", but it is an online fit of the <NoteLink to="paired-comparison-models">Bradley–Terry
+model</NoteLink>.
+
+## Mechanism: a gradient step on Bradley–Terry
+
+Write the expected score with the logistic function $\sigma(z) = 1/(1 + e^{-z})$. Since $10^{-x} = e^{-x\ln 10}$,
+
+$$
+E_A = \sigma\paren{\frac{R_A - R_B}{s}}, \qquad s = \frac{400}{\ln 10} = 173.7 .
+$$
+
+This is the Bradley–Terry probability that A beats B, with strengths $\theta = R/s$. Score the prediction with the
+log-loss of <NoteLink to="logistic-regression">logistic regression</NoteLink>, treating $S_A$ as the target:
+
+$$
+L = -S_A \log E_A - (1 - S_A)\log(1 - E_A).
+$$
+
+Using $\sigma'(z) = \sigma(z)(1 - \sigma(z))$, the derivatives with respect to the two ratings are
+
+$$
+\frac{\partial L}{\partial R_A} = -\frac{S_A - E_A}{s}, \qquad \frac{\partial L}{\partial R_B} = +\frac{S_A - E_A}{s}.
+$$
+
+One step of stochastic gradient descent with step size $\eta$ gives
+
+$$
+R_A \leftarrow R_A + \frac{\eta}{s}(S_A - E_A), \qquad R_B \leftarrow R_B - \frac{\eta}{s}(S_A - E_A).
+$$
+
+This is the Elo update with $K = \eta/s$. Elo is <NoteLink to="online-gradient-descent">online gradient descent</NoteLink>
+on the Bradley–Terry log-likelihood, one game at a time, with a constant learning rate. Three consequences follow.
+
+- **The update is zero-sum.** The two gradients are equal and opposite, so the sum of all ratings in a closed pool
+  never changes.
+- **Draws fit without a tie model.** A draw is a target of $\tfrac12$ in the log-loss. The update moves the higher-rated
+  player down and the lower-rated one up.
+- **The fixed point is the maximum-likelihood fit.** In expectation the step is zero only when each player's expected
+  score matches the average actual score, which is the Bradley–Terry likelihood equation.
+
+### The 400-point scale
+
+The constant 400 sets the units. A 400-point gap gives expected score $1/(1 + 10^{-1}) = 10/11 = 0.909$, so odds of
+10 to 1. A 200-point gap gives 0.760. Elo's own formulation assumed that each player's performance in a game is
+normally distributed with standard deviation 200 points, which makes the win probability a Gaussian cdf, the
+<NoteLink to="paired-comparison-models">Thurstone model</NoteLink> <Cite id="elo1978" />. Most federations now use the
+logistic curve, whose heavier tails give weaker players slightly more chance of an upset. The two curves differ by
+less than 0.01 at matched scale.
+
+### The K-factor as a learning rate
+
+$K$ trades tracking speed against noise. Let a player's true rating be $R^*$ against opponents rated exactly at
+their true strength, and write $e_t = R_t - R^*$ for the error after $t$ games. With $p = E(R^*)$ the true expected
+score, linearising $E$ around $R^*$ gives $E(R_t) \approx p + g\, e_t$ with $g = p(1 - p)/s$. The update becomes
+
+$$
+e_{t+1} = (1 - Kg)\, e_t + K \xi_t, \qquad \xi_t = S_t - p ,
+$$
+
+where $\xi_t$ has mean 0 and variance $p(1 - p)$. This is a first-order autoregression.
+
+- **Adaptation time.** A change in $R^*$ decays as $(1 - Kg)^t$, with a time constant of $1/(Kg) = s/\paren{K p(1 - p)}$
+  games. For evenly matched play, $p = \tfrac12$, it is $4s/K$: 22 games for $K = 32$.
+- **Stationary noise.** The stationary variance is $K^2 p(1 - p)/\paren{1 - (1 - Kg)^2} \approx K^2 p(1-p)/(2Kg) =
+  Ks/2$ for small $Kg$. The rating's standard deviation around the truth is $\sqrt{Ks/2}$, independent of $p$: 53 points
+  for $K = 32$ and 29 points for $K = 10$. A simulation of 200,000 games reproduces both values to within 2%.
+
+Halving the noise costs four times the adaptation time. Federations give new and young players a larger $K$ and
+established players a smaller one for this reason. A fixed $K$ cannot be right for everyone, which is the problem that
+<NoteLink to="glicko-and-glicko-2">Glicko</NoteLink> and <NoteLink to="trueskill">TrueSkill</NoteLink> solve by giving each
+player an uncertainty that acts as a personal learning rate.
+
+<EloLearningRate />
+
+## Worked example
+
+A is rated 1600 and B 1400, with $K = 32$.
+
+1. **Expected score.** $E_A = 1/(1 + 10^{-200/400}) = 1/(1 + 0.3162) = 0.7597$, and $E_B = 0.2403$.
+2. **B wins.** $R_A = 1600 + 32(0 - 0.7597) = 1575.69$ and $R_B = 1400 + 32(1 - 0.2403) = 1424.31$. The total, 3000,
+   is unchanged.
+3. **A draw instead.** $R_A = 1600 + 32(0.5 - 0.7597) = 1591.69$ and $R_B = 1408.31$.
+4. **A wins instead.** $R_A = 1600 + 32 \times 0.2403 = 1607.69$. The expected win earns 7.69 points; the upset
+   cost 24.31.
+
+These numbers were checked with numpy.
+
+## Rating inflation and deflation
+
+Because updates are zero-sum, the average rating of a pool changes only when players join or leave. The average true
+strength can change for other reasons, and the two drift apart.
+
+- **Improving players deflate the pool.** A player who improves wins points from opponents whose strength has not
+  changed. Their ratings fall below their true strength. A pool with many fast-improving juniors deflates.
+- **Departures move points.** A player who retires takes their rating out of the pool. Leaving after gaining points
+  removes points; leaving after losing them leaves the points behind.
+- **Entry ratings.** A newcomer starts at a fixed rating. A newcomer weaker than that rating loses points to the pool
+  and inflates everyone else; a stronger one deflates it.
+- **Floors create points.** A rule that ratings cannot fall below a floor adds points whenever it binds, which inflates
+  the pool.
+
+Federations counter these effects with bonus points, rating floors, and different $K$ for new players. None of them is
+exact, because the Elo rating has no absolute anchor: it measures strength relative to the current pool.
+
+## Cost
+
+One update costs one exponential and a few additions. The state is one number per player. No history is stored.
+
+## Trade-offs
+
+- **No uncertainty.** A new player's rating means as much to the system as a veteran's. Provisional periods with a
+  larger $K$ patch this. <NoteLink to="glicko-and-glicko-2">Glicko</NoteLink> models it.
+- **Order dependence.** Online updates depend on the order of games. A batch
+  <NoteLink to="paired-comparison-models">Bradley–Terry fit</NoteLink> does not.
+- **Two players only.** Team games and free-for-all games need extensions, such as averaging pairwise updates;
+  <NoteLink to="trueskill">TrueSkill</NoteLink> handles them in its model.
+- **Other uses.** The same update estimates student ability and question difficulty in adaptive learning systems, where
+  it is an online fit of the Rasch model of <NoteLink to="item-response-theory">item response theory</NoteLink>
+  <Cite id="pelanek2016" />.

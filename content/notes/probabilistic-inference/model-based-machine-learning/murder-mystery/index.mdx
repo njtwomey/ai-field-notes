@@ -1,0 +1,127 @@
+---
+title: The murder mystery
+kind: concept
+summary: 'The smallest model-based inference: a murderer $m$ with a prior, and clues whose probabilities depend on $m$. Each observed clue sends its likelihood column to $m$ as a message; the posterior is the normalised product. A revolver and a grey hair take Grey from 0.3 to 0.95.'
+tags: [model-based-machine-learning, bayesian, factor-graph, message-passing, worked-example]
+aliases: [murder mystery, Dr Black murder, Major Grey and Miss Auburn, MBML chapter 1]
+requires: [bayes-theorem, conditional-probability]
+partOf: [model-based-machine-learning]
+related: [factor-graph, belief-propagation, bayesian-network, independence]
+references: [winn2023murder, kschischang2001]
+status: draft
+updated: 2026-09-27
+---
+
+import { MurderGraph } from './MurderGraph'
+import { MurderMystery } from './MurderMystery'
+
+<Callout variant="credit" title="Provenance: Model-Based Machine Learning, by John Winn et al.">
+This note follows the "A Murder Mystery" chapter of *Model-Based Machine Learning* by John Winn with Christopher M.
+Bishop, Thomas Diethe, John Guiver and Yordan Zaykov (Microsoft Research) <Cite id="winn2023murder" />. The model, its
+assumptions and the way they are built up step by step are theirs; this note restates them in this site's notation. I
+include it because it is a very good account, and I want it in my own records. The book is free to read at
+[mbmlbook.com](https://mbmlbook.com). The suspects, the clues and every probability below are the book's. This site
+added the message-passing derivation and the interactive figure.
+</Callout>
+
+<Definition>
+Dr Black has been murdered. Exactly one of two suspects did it: Major Grey or Miss Auburn. The unknown murderer is a
+random variable $m \in \{\text{Grey}, \text{Auburn}\}$ with a prior $\pr(m)$. Each clue $c$ found at the scene is a
+random variable with a conditional distribution $\pr(c \mid m)$. The task is to compute the posterior
+$\pr(m \mid \text{clues})$ <Cite id="winn2023murder" />.
+</Definition>
+
+## The model, one assumption at a time
+
+The book builds the model by writing down one assumption per quantity, then turning each into a probability.
+
+1. **Prior.** Before any evidence, Grey is the murderer with probability 0.3 and Auburn with probability 0.7:
+   $\pr(m = \text{Grey}) = 0.3$.
+2. **Weapon.** The weapon $w$ is either a revolver or a dagger. Grey, an old soldier, would choose the revolver with
+   probability 0.9. Auburn would choose it with probability 0.2.
+3. **Hair.** The clue $h$ is whether one of Grey's grey hairs is found at the scene. If Grey is the murderer he leaves
+   one with probability 0.5. If Auburn is the murderer she plants one with probability 0.05.
+4. **Conditional independence.** Given the murderer, the choice of weapon tells nothing about the hair:
+   $\pr(w, h \mid m) = \pr(w \mid m)\,\pr(h \mid m)$.
+
+The joint distribution is the product of one factor per assumption:
+
+$$
+\pr(m, w, h) = \pr(m)\,\pr(w \mid m)\,\pr(h \mid m).
+$$
+
+Its factor graph has one variable node for each of $m$, $w$ and $h$ and one factor node for each term. There is no edge
+between $w$ and $h$, and no factor joins them. The missing edge is assumption 4.
+
+<MurderGraph />
+
+## Inference as message passing
+
+Observing a clue fixes its variable. The factor $\pr(w \mid m)$ then depends on $m$ alone, and it sends $m$ a message,
+the column of its table at the observed value. For a revolver the message is
+
+$$
+\mu_{w \to m}(m) = \pr(w = \text{revolver} \mid m) = \begin{cases} 0.9 & m = \text{Grey}, \\ 0.2 & m = \text{Auburn}. \end{cases}
+$$
+
+The posterior of $m$ is the normalised product of every message arriving at $m$:
+
+$$
+\pr(m \mid w, h) = \frac{\pr(m)\,\mu_{w \to m}(m)\,\mu_{h \to m}(m)}{\sum_{m'} \pr(m')\,\mu_{w \to m}(m')\,\mu_{h \to m}(m')}.
+$$
+
+This is <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink> written on the graph. It follows from the factorisation.
+Condition the joint on the observed values and sum over nothing, since every other variable is observed:
+$\pr(m \mid w, h) \propto \pr(m, w, h) = \pr(m)\,\pr(w \mid m)\,\pr(h \mid m)$, and each observed factor is its message.
+An unobserved clue sends the message $\sum_{w} \pr(w \mid m) = 1$, which changes nothing. On a tree such as this one,
+the rule "multiply the incoming messages" is the sum-product algorithm of
+<NoteLink to="belief-propagation">belief propagation</NoteLink> <Cite id="kschischang2001" />.
+
+### The numbers
+
+With the revolver alone, the unnormalised posterior is $0.3 \times 0.9 = 0.27$ for Grey and $0.7 \times 0.2 = 0.14$ for
+Auburn. Normalising gives
+
+$$
+\pr(m = \text{Grey} \mid w = \text{revolver}) = \frac{0.27}{0.27 + 0.14} = 0.659.
+$$
+
+Adding the hair multiplies by $0.5$ and $0.05$: $0.27 \times 0.5 = 0.135$ and $0.14 \times 0.05 = 0.007$, so
+
+$$
+\pr(m = \text{Grey} \mid w = \text{revolver}, h = \text{found}) = \frac{0.135}{0.142} = 0.951.
+$$
+
+A dagger instead of the revolver gives $0.3 \times 0.1 = 0.03$ against $0.7 \times 0.8 = 0.56$, and Grey's probability
+falls to $0.051$. Messages multiply, so the order in which the clues arrive does not change the final answer. Each
+intermediate posterior is the prior for the next clue.
+
+<MurderMystery />
+
+## What the example shows
+
+- **A model is a set of assumptions.** Every number in the answer traces back to one sentence in the list above. A
+  disagreement about the verdict is a disagreement about an assumption, and it can be located.
+- **The factor graph is the model.** It shows which quantities depend on which. The absent edge between weapon and hair
+  is as much a modelling decision as any probability.
+- **Inference is mechanical.** Once the model is written down, the posterior follows by multiplying messages. No
+  algorithm was designed for this problem. This separation of model from inference is the idea behind
+  <NoteLink to="model-based-machine-learning">model-based machine learning</NoteLink>.
+- **Weak clues compound.** Neither clue alone is conclusive. The revolver moves Grey from 0.3 to 0.66. The hair has a
+  likelihood ratio of $0.5 / 0.05 = 10$ and takes him to 0.95.
+
+## Assumptions
+
+- **Exactly one of two suspects.** The prior puts zero probability on anyone else. A third suspect would need a third
+  state of $m$ and a row in every table.
+- **Clues independent given the murderer.** If Grey carried the revolver because he knew it would incriminate someone
+  else, the weapon and his behaviour at the scene would be linked, and a factor joining $w$ and $h$ would be needed.
+- **Known probabilities.** The tables are fixed numbers. Chapter 2 of the same book, on
+  <NoteLink to="assessing-skills">assessing skills</NoteLink>, starts to learn such numbers from data.
+
+## Pitfalls
+
+- **Reading a likelihood as a posterior.** $\pr(w = \text{revolver} \mid m = \text{Grey}) = 0.9$ is not the probability
+  that Grey did it given a revolver. The two differ by the prior and the normaliser.
+- **Double counting.** Two reports of the same hair are one clue. Entering them as two independent factors squares the
+  likelihood ratio and overstates the evidence.

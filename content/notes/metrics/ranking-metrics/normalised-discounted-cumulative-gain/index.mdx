@@ -1,0 +1,91 @@
+---
+title: Normalised discounted cumulative gain
+kind: concept
+summary: 'NDCG scores a ranking with graded relevance. Each item contributes its gain divided by $\log_2(\text{rank} + 1)$, and the total is divided by the score of the ideal ordering, giving a value in $[0, 1]$.'
+tags: [metrics, ranking, information-retrieval, worked-example]
+aliases: [NDCG, nDCG, DCG, discounted cumulative gain, NDCG@k]
+related: [precision-and-recall-at-k, mean-average-precision-and-mean-reciprocal-rank, hit-rate-and-r-precision]
+references: [jarvelin2002, manning2008, chapelle2009err, arguello2021evaluation]
+status: draft
+updated: 2026-09-27
+---
+
+import { RankingDuel } from '../_shared/RankingDuel'
+import { RankingExplorer } from '../_shared/RankingExplorer'
+
+<Definition>
+Let $g_i \ge 0$ be the relevance grade of the item at rank $i$. The discounted cumulative gain at cut-off $k$ and its
+normalised form are <Cite id="jarvelin2002" />
+
+$$
+\text{DCG}@k = \sum_{i=1}^{k} \frac{g_i}{\log_2(i + 1)}, \qquad \text{NDCG}@k = \frac{\text{DCG}@k}{\text{IDCG}@k},
+$$
+
+where $\text{IDCG}@k$ is the DCG@k of the same items sorted by decreasing grade. A common variant replaces the gain
+$g_i$ by $2^{g_i} - 1$, which weights highly relevant items more.
+</Definition>
+
+## The two ingredients
+
+**Cumulative gain.** Graded relevance lets a ranking earn more for a highly relevant item than for a marginally
+relevant one. Summing the grades of the top $k$ items gives the cumulative gain, which, like
+<NoteLink to="precision-and-recall-at-k">precision at k</NoteLink>, ignores order within the prefix.
+
+**Discount.** Dividing by $\log_2(i + 1)$ makes each position worth less than the one above it: rank 1 has weight 1,
+rank 2 has $1/\log_2 3 = 0.63$, rank 4 has $0.43$, rank 10 has $0.29$. The logarithm falls slowly, so lower ranks still
+count, unlike the reciprocal rank's $1/i$. It models a reader who is less and less likely to look further down.
+
+## Normalisation
+
+DCG grows with the number and grades of the relevant items, so raw DCG values are not comparable across queries. The
+ideal ordering maximises DCG for a given multiset of grades: the discounts decrease with rank, and a sum of products is
+largest when the largest gains are paired with the largest weights (the rearrangement inequality). Dividing by that
+maximum gives $\text{NDCG}@k \in [0, 1]$, with 1 exactly when the top $k$ are in ideal order. NDCG therefore measures
+how close a ranking is to the best possible ordering of the same items, and averages sensibly over queries.
+
+The ideal ordering can be defined from the retrieved items only, or from all judged items including unretrieved ones.
+The second is stricter, because a missing highly relevant document lowers the score. Libraries differ: scikit-learn's
+`ndcg_score` uses the items it is given.
+
+**Worked example.** Six items are ranked with grades $(3, 2, 3, 0, 1, 2)$. With linear gains,
+
+$$
+\text{DCG}@6 = \frac{3}{1} + \frac{2}{1.585} + \frac{3}{2} + \frac{0}{2.322} + \frac{1}{2.585} + \frac{2}{2.807} = 6.861 .
+$$
+
+The ideal order is $(3, 3, 2, 2, 1, 0)$ with $\text{IDCG}@6 = 7.141$, so $\text{NDCG}@6 = 0.961$, which is what
+`sklearn.metrics.ndcg_score` returns. The exponential gain $2^{g} - 1$ gives $0.949$: it penalises the misplaced grade-3
+item more. At $k = 3$ the ranking scores $0.978$, because its top three items are close to ideal.
+
+<RankingExplorer />
+
+## NDCG against a cascade user
+
+The logarithmic discount credits every relevant item in the top $k$, however good the items above it were. A metric
+built on a user who stops at the first satisfying result disagrees. Expected reciprocal rank (ERR) turns grade $g$ into
+a probability $(2^{g} - 1)/2^{g_{\max}}$ that the item satisfies the reader, and averages $1/r$ over the rank $r$ at
+which the reader stops <Cite id="chapelle2009err" />.
+
+Take list A with a single grade-3 item at rank 1, and list B with grades $(1, 1, 2, 1, 1)$ in its top five, from a
+collection with six relevant items. With linear gains and the unretrieved relevant items counted as grade 1 in the
+ideal ranking, NDCG@10 is $0.566$ for A and $0.801$ for B, so NDCG prefers B's several fair results. With
+$g_{\max} = 3$, ERR@10 is $0.875$ for A and $0.301$ for B, because A's first item satisfies the reader with probability
+$7/8$ and the reader rarely looks further. The two metrics describe different users, and the choice between them is a
+claim about which user the system serves.
+
+<Callout variant="note" title="Source">
+The A-versus-B ranking comparison in the figure below, and the overview of evaluation it comes from, are adapted from
+Jaime Arguello's lecture "Evaluation Overview" for INLS 509: Information Retrieval at the University of North Carolina
+at Chapel Hill <Cite id="arguello2021evaluation" />. The interactive figure is this site's.
+</Callout>
+
+<RankingDuel preset="graded" metric="ndcg" />
+
+## Pitfalls
+
+- **State the gain and the cut-off.** Linear and exponential gains give different numbers for the same ranking, and
+  NDCG@10 differs from NDCG over the full list. Papers that omit either are not comparable.
+- **All-zero queries.** If a query has no relevant items, IDCG is 0 and NDCG is undefined. Libraries set it to 0 or
+  drop the query; the choice changes the average.
+- **Near-perfect scores.** Because the logarithmic discount is gentle, NDCG values bunch near 1 when most items are
+  relevant, and small differences can be noise. Compare systems with paired tests over queries.

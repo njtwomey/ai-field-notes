@@ -1,0 +1,135 @@
+---
+title: GAM smoothing parameter selection
+kind: concept
+summary: 'The smoothing parameters $\lambda_j$ of a penalised spline or GAM are chosen from the data, by generalised cross-validation (GCV), which approximates leave-one-out error in closed form, or by REML, which maximises the marginal likelihood when the penalty is read as a Gaussian prior.'
+tags: [generalised-additive-models, smoothing, model-selection, cross-validation, regularisation]
+aliases: [generalised cross-validation, GCV, REML smoothing parameter selection, restricted maximum likelihood, UBRE, smoothing parameter]
+requires: [smoothing-splines, smoothing-penalties-and-curvature]
+partOf: [generalised-additive-model]
+related: [penalised-iteratively-reweighted-least-squares, additive-model-inference-and-effective-degrees-of-freedom, gaussian-process-hyperparameter-learning, ridge-regression]
+references: [craven1979, wood2011, reiss2009, wood2017, wahba1990, serven2018]
+status: draft
+updated: 2026-09-27
+---
+
+import { SmoothingSelection } from './SmoothingSelection'
+
+<Definition>
+A penalised spline fit minimises $\norm{\yvec - \Xmat\betavec}^2 + \sum_j\lambda_j\betavec^\top\Smat_j\betavec$,
+where $\Smat_j$ is the roughness penalty matrix of term $j$. **Smoothing parameter selection** chooses the $\lambda_j \ge 0$
+from the data. **Generalised cross-validation** (GCV) minimises an estimate of prediction error. **REML** maximises the
+likelihood of the data with the penalised coefficients integrated out <Cite id="wood2017" />.
+</Definition>
+
+## The problem
+
+Each $\lambda_j$ trades fidelity against smoothness for one term of a
+<NoteLink to="generalised-additive-model">generalised additive model</NoteLink>. Small values interpolate the noise;
+large values flatten the term to its unpenalised part, a straight line for a cubic spline penalty (see
+<NoteLink to="smoothing-penalties-and-curvature">smoothing penalties</NoteLink>). The residual sum of
+squares always prefers $\lambda = 0$, so it cannot choose. A GAM can have dozens of smoothing parameters, so the
+criterion must be cheap to evaluate and smooth enough to optimise numerically.
+
+For fixed $\lambda$, the fit is linear in $\yvec$: $\hat\yvec = \Amat_\lambda\yvec$, with **influence matrix**
+$\Amat_\lambda = \Xmat(\Xmat^\top\Xmat + \Smat_\lambda)^{-1}\Xmat^\top$ and $\Smat_\lambda =
+\sum_j\lambda_j\Smat_j$. Its trace $\tau = \trace\Amat_\lambda$ is the effective degrees of freedom of the model.
+
+## Leave-one-out cross-validation without refitting
+
+Let $\hat f^{(-i)}$ be the fit with observation $i$ left out. Replace $y_i$ by $\hat f^{(-i)}(x_i)$ and refit with all
+$n$ observations. The fit $\hat f^{(-i)}$ minimises the criterion over the other $n - 1$ points and has zero error at
+point $i$, so it also minimises the full criterion. The refit is therefore $\hat f^{(-i)}$ itself. Its value at $x_i$ is
+linear in the modified data:
+
+$$
+\hat f^{(-i)}(x_i) = \sum_{k \ne i} A_{ik}y_k + A_{ii}\hat f^{(-i)}(x_i) = \hat y_i - A_{ii}y_i + A_{ii}\hat
+f^{(-i)}(x_i).
+$$
+
+Rearranging gives the leave-one-out residual from a single fit:
+
+$$
+y_i - \hat f^{(-i)}(x_i) = \frac{y_i - \hat y_i}{1 - A_{ii}}, \qquad \operatorname{CV}(\lambda) = \frac1n\sum_{i=1}^n
+\paren{\frac{y_i - \hat y_i}{1 - A_{ii}}}^2.
+$$
+
+**GCV** replaces each $A_{ii}$ by the average $\tau/n$ <Cite id="craven1979" />:
+
+$$
+\operatorname{GCV}(\lambda) = \frac{n\norm{\yvec - \Amat_\lambda\yvec}^2}{(n - \tau)^2}.
+$$
+
+GCV needs only the trace of $\Amat_\lambda$, and it is invariant to rotations of the data, which ordinary
+cross-validation is not. For a GLM family, the residual sum of squares is replaced by the deviance of the
+<NoteLink to="penalised-iteratively-reweighted-least-squares">penalised IRLS</NoteLink> fit. When the scale parameter $\phi$ is known, as for
+Poisson and binomial responses, the **UBRE** criterion $D/n - \phi + 2\phi\tau/n$, an unbiased estimate of scaled
+prediction error akin to Mallows' $C_p$, is used instead.
+
+Both criteria can be made to smooth more by counting each effective degree of freedom $\gamma > 1$ times, replacing
+$\tau$ by $\gamma\tau$. Wood suggests $\gamma = 1.4$ as a guard against the occasional undersmoothed GCV choice
+<Cite id="wood2017" />, and pyGAM uses it by default in both criteria <Cite id="serven2018" />.
+
+## REML: the penalty as a prior
+
+Read the penalty as a Gaussian prior on the coefficients: $\betavec$ has density proportional to
+$\exp\paren{-\betavec^\top\Smat_\lambda\betavec / (2\sigma^2)}$. The penalty is rank-deficient, with a null space of
+dimension $M$ holding the unpenalised functions such as straight lines, so the prior is flat on that null space.
+Maximising the posterior gives the penalised least-squares estimate. The smoothing parameters are now variance
+parameters, and they can be estimated by maximising the **marginal likelihood**, the density of $\yvec$ with $\betavec$
+integrated out. Because the null-space coefficients are integrated against a flat prior, this is restricted maximum
+likelihood (REML) <Cite id="wahba1990" /> <Cite id="wood2011" />. The same prior gives the posterior covariance used
+for credible bands; see <NoteLink to="additive-model-inference-and-effective-degrees-of-freedom">GAM inference</NoteLink>.
+
+For a single smoothing parameter with $\Smat_\lambda = \lambda\Smat$ and $r = \rank\Smat$, the integral is
+Gaussian and can be done by completing the square. Let $\Mmat = \Xmat^\top\Xmat + \lambda\Smat$, $\hat\betavec =
+\Mmat^{-1}\Xmat^\top\yvec$, and $Q = \norm{\yvec - \Xmat\hat\betavec}^2 + \lambda\hat\betavec^\top\Smat\hat
+\betavec$, the minimised penalised criterion. Up to constants,
+
+$$
+-2\log L_R(\lambda, \sigma^2) = (n - M)\log\sigma^2 + \frac{Q}{\sigma^2} + \log\abs{\Mmat} - r\log\lambda.
+$$
+
+Setting $\sigma^2 = Q/(n - M)$ profiles out the variance:
+
+$$
+-2\log L_R(\lambda) = (n - M)\log Q + \log\abs{\Mmat} - r\log\lambda + \text{const}.
+$$
+
+The first term rewards fit. The last two form an Occam factor: $\log\abs{\Mmat} - r\log\lambda$ grows as $\lambda$ falls
+and the fit becomes more flexible.
+
+<Derivation title="Integrating out the coefficients">
+The model is $\yvec \mid \betavec \sim \Gauss(\Xmat\betavec, \sigma^2\eye)$, with prior density
+$(2\pi\sigma^2/\lambda)^{-r/2}\abs{\Smat}_+^{1/2}\exp\paren{-\lambda\betavec^\top\Smat\betavec/(2\sigma^2)}$, where
+$\abs{\Smat}_+$ is the product of the nonzero eigenvalues. The exponent of the joint density is
+$-\brack{\norm{\yvec - \Xmat\betavec}^2 + \lambda\betavec^\top\Smat\betavec}/(2\sigma^2)$. Completing the square in
+$\betavec$ writes it as $-\brack{Q + (\betavec - \hat\betavec)^\top\Mmat(\betavec - \hat\betavec)}/(2\sigma^2)$. The
+Gaussian integral over $\betavec \in \reals^p$ gives $(2\pi\sigma^2)^{p/2}\abs{\Mmat}^{-1/2}$. Collecting powers of
+$\sigma^2$: $-n/2$ from the likelihood, $-r/2$ from the prior and $+p/2$ from the integral, a total of $-(n - M)/2$
+since $p - r = M$. Taking $-2\log$ gives the expression above.
+</Derivation>
+
+<SmoothingSelection />
+
+## GCV or REML
+
+Both criteria choose similar amounts of smoothing on average. They differ in variability. GCV curves are often flat
+near their minimum and sometimes have a second minimum at small $\lambda$, so the GCV choice varies more between data
+sets and occasionally undersmooths badly <Cite id="reiss2009" />. REML penalises overfitting more strongly and has a
+clearer optimum. In 40 simulated data sets of the kind in the figure (100 points, noise standard deviation 0.3), the
+standard deviation of the chosen $\log_{10}\lambda$ was 0.60 for GCV and 0.11 for REML. Wood recommends REML over GCV
+for this reason <Cite id="wood2011" />.
+
+With several smoothing parameters, both criteria are optimised by Newton's method over $\log\lambda_j$. Stable
+computation of the determinant terms, whose penalty matrices overlap in rank, is the main technical difficulty that
+Wood's method solves <Cite id="wood2011" />.
+
+## Pitfalls
+
+- **Correlated errors.** Both criteria assume independent errors. Autocorrelated noise looks like signal, and the
+  chosen $\lambda$ is too small. Model the correlation or choose $\lambda$ with blocked cross-validation.
+- **Terms that should vanish.** A penalty never removes the null space, so a useless term is still fitted as a straight
+  line. An extra penalty on the null space lets REML shrink a whole term to zero; see
+  <NoteLink to="additive-model-checking-and-term-selection">term selection</NoteLink>.
+- **Reporting $\lambda$.** Its scale depends on the units of the feature. Report the effective degrees of freedom of each
+  term.

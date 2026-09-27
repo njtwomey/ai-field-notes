@@ -1,0 +1,156 @@
+---
+title: Expectation propagation for a mixture weight
+kind: example
+summary: 'The weight $w$ of a two-component mixture with known components lives in $[0, 1]$, so EP approximates its posterior by a Beta, not a Gaussian. Projecting onto the Beta family matches $\expect[\log w]$ and $\expect[\log(1 - w)]$, not the mean and variance.'
+tags: [worked-example, approximate-inference, bayesian, exponential-family, mixture-model]
+aliases: [EP mixture weight, Beta EP, EP with a Beta approximation, EP with a Dirichlet approximation]
+requires: [expectation-propagation, beta-distribution, exponential-family]
+related: [expectation-propagation-clutter-problem, assumed-density-filtering, laplace-approximation, gaussian-mixture-model]
+references: [minka2001thesis, minka2001]
+status: draft
+updated: 2026-09-27
+---
+
+import { MixtureWeightEp } from './MixtureWeightEp'
+
+<Callout variant="credit" title="Provenance: Minka, the mixture-weight example">
+The mixture-weight problem, its Dirichlet (here Beta) approximation, the update that matches $\expect[\log w]$, and the
+comparison with a cheaper mean-and-variance update follow section 3.3 of Thomas Minka's PhD thesis
+<Cite id="minka2001thesis" />. It is included here because it is a very good account, kept as part of these notes. The
+two-component data, the worked numbers and the figure are new.
+</Callout>
+
+<Definition>
+Data come from a mixture of two known densities, $p(x \mid w) = w\,p_1(x) + (1 - w)\,p_2(x)$, with
+$p_1 = \Gauss(0, 1)$, $p_2 = \Gauss(2, 1)$ and an unknown weight $w \in [0, 1]$ with a uniform prior. Given
+$x = (-0.5, 0.3, 1.0, 2.4, 0.1)$, approximate $p(w \mid x) \propto \prod_i \paren{w\,p_1(x_i) + (1 - w)\,p_2(x_i)}$ by a
+Beta distribution with expectation propagation (EP) <Cite id="minka2001thesis" />.
+</Definition>
+
+## Setup
+
+A Gaussian approximation to the posterior of $w$ would put mass outside $[0, 1]$. EP works with any exponential
+family, so it can use one whose support is the parameter's range: the Beta family for a weight, the Dirichlet for $K$
+weights, the Gamma for a precision.
+
+- **Family.** $\Beta(w \mid a, b) = w^{a - 1}(1 - w)^{b - 1}/B(a, b)$, with sufficient statistics
+  $\tvec(w) = (\log w, \log(1 - w))$ and natural parameters $(a - 1, b - 1)$.
+- **Sites.** Each data factor $t_i(w) = w\,p_1(x_i) + (1 - w)\,p_2(x_i)$ is replaced by
+  $\tilde t_i(w) \propto w^{\alpha_i}(1 - w)^{\beta_i}$. Multiplying sites adds exponents, so
+  $q(w) = \Beta(w \mid 1 + \sum_i\alpha_i, 1 + \sum_i\beta_i)$. The exponents may be negative, the Beta analogue of a
+  negative-precision Gaussian site.
+- **The data.** Write $p_{1i} = p_1(x_i)$ and $p_{2i} = p_2(x_i)$. Only their ratio matters for the posterior.
+
+| $x_i$                  | −0.5   | 0.3    | 1.0   | 2.4    | 0.1    |
+| ---------------------- | ------ | ------ | ----- | ------ | ------ |
+| $p_{1i}$               | 0.3521 | 0.3814 | 0.2420 | 0.0224 | 0.3970 |
+| $p_{2i}$               | 0.0175 | 0.0940 | 0.2420 | 0.3683 | 0.0656 |
+| $p_{1i}/p_{2i}$        | 20.09  | 4.06   | 1      | 0.061  | 6.05   |
+
+## Solution
+
+### Projection onto the Beta family
+
+For an exponential family, minimising $\KL(\hat p \,\|\, q)$ sets the expected sufficient statistics of $q$ equal to
+those of $\hat p$ (derived in <NoteLink to="expectation-propagation">expectation propagation</NoteLink>). For the Beta,
+$\expect[\log w] = \psi(a) - \psi(a + b)$ and $\expect[\log(1 - w)] = \psi(b) - \psi(a + b)$, where $\psi$ is the
+digamma function; these are the gradients of the log-normaliser $\log B(a, b)$. The projection is the $(a, b)$ that
+solves
+
+$$
+\psi(a) - \psi(a + b) = \expect_{\hat p}[\log w], \qquad \psi(b) - \psi(a + b) = \expect_{\hat p}[\log(1 - w)].
+$$
+
+These equations have no closed-form solution, but Newton's method on $(a, b)$ converges in a few steps; its Jacobian
+uses the trigamma function $\psi'$. The mean and variance of $q$ are not matched: the projection preserves the
+expectations that define the family.
+
+### The tilted distribution is a Beta mixture
+
+Multiplying a Beta cavity by one data factor gives two Beta terms. Because $B(a + 1, b)/B(a, b) = a/(a + b)$,
+
+$$
+w\,\Beta(w \mid a, b) = \frac{a}{a + b}\,\Beta(w \mid a + 1, b), \qquad
+(1 - w)\,\Beta(w \mid a, b) = \frac{b}{a + b}\,\Beta(w \mid a, b + 1).
+$$
+
+So the tilted distribution for factor $i$ is $\pi_i\,\Beta(a + 1, b) + (1 - \pi_i)\,\Beta(a, b + 1)$ with
+$\pi_i = p_{1i}a/(p_{1i}a + p_{2i}b)$, the probability under the cavity that $x_i$ came from $p_1$. Its expected
+sufficient statistics are the $\pi_i$-weighted averages of the two components' digamma expressions.
+
+### The first update, by hand
+
+The first cavity is the prior, $\Beta(1, 1)$. For $x_1 = -0.5$, $\pi_1 = 0.3521/(0.3521 + 0.0175) = 0.9526$. For
+$\Beta(2, 1)$, $\expect[\log w] = \psi(2) - \psi(3) = -\tfrac12$ and $\expect[\log(1 - w)] = \psi(1) - \psi(3) = -\tfrac32$; for
+$\Beta(1, 2)$ the two values swap. So
+
+$$
+\expect_{\hat p}[\log w] = 0.9526 \times (-0.5) + 0.0474 \times (-1.5) = -0.5474, \qquad
+\expect_{\hat p}[\log(1 - w)] = -1.4526.
+$$
+
+Newton's method gives $q = \Beta(1.7756, 0.9638)$, so the first site has $\alpha_1 = 0.7756$ and
+$\beta_1 = -0.0362$. A negative exponent is allowed: the site $w^{0.776}(1 - w)^{-0.036}$ is a function of $w$ to be
+multiplied into $q$, not a density.
+
+### Sweeps
+
+Computed with scipy, the first sweep of site updates gives:
+
+| site | $x_i$ | cavity $(a, b)$   | $\pi_i$ | new $q$            | $\alpha_i$ | $\beta_i$ |
+| ---- | ----- | ----------------- | ------- | ------------------ | ---------- | --------- |
+| 1    | −0.5  | (1, 1)            | 0.953   | Beta(1.776, 0.964) | 0.776      | −0.036    |
+| 2    | 0.3   | (1.776, 0.964)    | 0.882   | Beta(2.270, 0.932) | 0.495      | −0.032    |
+| 3    | 1.0   | (2.270, 0.932)    | 0.709   | Beta(2.270, 0.932) | 0          | 0         |
+| 4    | 2.4   | (2.270, 0.932)    | 0.129   | Beta(2.045, 1.515) | −0.225     | 0.583     |
+| 5    | 0.1   | (2.045, 1.515)    | 0.891   | Beta(2.636, 1.464) | 0.590      | −0.050    |
+
+The point at $x = 1$ is equally likely under both components, so its factor is the constant $0.242$, the tilted
+distribution equals the cavity, and its site is exactly 1. After sweeps 1 to 4 the approximation is $\Beta(2.636, 1.464)$,
+$\Beta(2.524, 1.380)$, $\Beta(2.509, 1.377)$ and $\Beta(2.508, 1.377)$: EP converges to $\Beta(2.508, 1.377)$, with mean
+$0.6457$ and variance $0.0468$.
+
+### Comparison
+
+- **Exact.** On a fine grid, the posterior has mean $0.6450$ and variance $0.0449$.
+- **Mean-and-variance matching.** Replacing the digamma equations by $\expect_q[w] = \expect_{\hat p}[w]$ and
+  $\expect_q[w^2] = \expect_{\hat p}[w^2]$ gives a closed-form update and converges to $\Beta(2.633, 1.440)$, with mean
+  $0.6464$ and variance $0.0451$. Its global divergence $\KL(p \,\|\, q)$ from the exact posterior is $0.00421$, against
+  $0.00402$ for the KL projection: matching the family's own statistics fits better overall, even though it misses the
+  variance by more.
+- **Laplace on the logit scale.** Writing $u = \log(w/(1 - w))$ removes the boundaries. The posterior density of $u$,
+  including the Jacobian $w(1 - w)$, has its mode at $u = 0.597$ with curvature giving variance $0.929$. Mapped back,
+  this logistic-normal approximation has mean $0.623$ and variance $0.037$: the mode on the logit scale sits below the
+  mean of $w$, and the approximation is too narrow.
+- **Order.** A single pass (<NoteLink to="assumed-density-filtering">assumed density filtering</NoteLink>) gives mean
+  $0.643$ in the order above and $0.639$ in reverse. Here the order matters little, because every factor is bounded and
+  none is an outlier.
+
+## Simulation
+
+<MixtureWeightEp />
+
+## What it illustrates
+
+- **EP is not tied to Gaussians.** Any exponential family works: sites multiply by adding natural parameters, cavities
+  divide by subtracting them, and the projection matches expected sufficient statistics. See
+  <NoteLink to="exponential-family">the exponential family</NoteLink>.
+- **Which moments?** For the Beta family the KL projection matches $\expect[\log w]$ and $\expect[\log(1 - w)]$. Matching
+  the mean and variance is a different, non-KL projection. Both are usable EP updates; they have different fixed points.
+- **Uninformative points have trivial sites.** A factor that is constant over the support contributes nothing, and EP
+  gives it a site of exactly 1.
+- **Boundaries.** A Gaussian approximation on $w$ would need truncation; one on the logit scale works but is anchored at
+  the mode. The Beta is a natural family for a proportion; see <NoteLink to="beta-distribution">the Beta
+  distribution</NoteLink>.
+
+## Variations
+
+- **$K$ components.** With $K$ known densities and weights on the simplex, the family is the Dirichlet, the tilted
+  distribution a mixture of $K$ Dirichlets, and the projection matches $\expect[\log w_k]$ for every $k$
+  <Cite id="minka2001thesis" />.
+- **Close components.** When $p_1$ and $p_2$ overlap heavily, each point carries little information about $w$, the
+  posterior stays broad, and the Beta approximation remains accurate. Minka reports EP beating Laplace and variational
+  Bayes on the evidence for two components $\Gauss(0, 3)$ and $\Gauss(1, 3)$ and 50 points <Cite id="minka2001thesis" />.
+- **Learning the components too.** If $p_1$ and $p_2$ have unknown parameters, the posterior couples them with $w$ and
+  a factorised approximation over all of them is needed; EP then passes messages between the parts, as on a factor
+  graph.

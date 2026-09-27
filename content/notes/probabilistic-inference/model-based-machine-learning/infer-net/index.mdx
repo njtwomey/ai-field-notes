@@ -1,0 +1,105 @@
+---
+title: Infer.NET
+kind: concept
+summary: 'Infer.NET is Microsoft Research''s framework for Bayesian inference in graphical models. A model is a program of random variables and factors; a model compiler turns it and a set of queries into message-passing code for EP, variational message passing or Gibbs sampling.'
+tags: [model-based-machine-learning, probabilistic-programming, message-passing, software, bayesian, worked-example]
+aliases: [Infer.NET, InferNet, Infer.NET model compiler, Microsoft.ML.Probabilistic]
+requires: [factor-graph, probabilistic-programming]
+partOf: [model-based-machine-learning]
+related: [expectation-propagation, mean-field-variational-inference, gibbs-sampling, belief-propagation, gates-in-factor-graphs]
+references: [infernet2018, infernetworks, infernettwocoins, minka2001, winn2005vmp, minka2008gates, winn2023intro]
+status: draft
+updated: 2026-09-27
+---
+
+import { InferPipeline, TwoCoins } from './TwoCoins'
+
+<Callout variant="credit" title="Provenance: Infer.NET, by Tom Minka, John Winn and colleagues at Microsoft Research">
+This note describes Infer.NET, built at Microsoft Research by Tom Minka, John Winn, John Guiver, Yordan Zaykov, Dany
+Fabian, John Bronskill and colleagues <Cite id="infernet2018" />, as documented in its user guide
+<Cite id="infernetworks" /> <Cite id="infernettwocoins" />. The design and the examples are theirs; this note restates
+them. I include it because it is a very good account, and I want it in my own records. Every case study in this section
+was built with it. This site added the factor-graph drawings.
+</Callout>
+
+<Definition>
+**Infer.NET** is a .NET framework for Bayesian inference in factor graphs. A model is written with a modelling API as
+random variables, factors, arrays over ranges, conditional blocks and observed values. Given the model and a set of
+queries, a model compiler generates source code that computes the requested posterior marginals by expectation
+propagation, belief propagation, variational message passing or Gibbs sampling <Cite id="infernet2018" />
+<Cite id="infernetworks" />.
+</Definition>
+
+## Why a compiler
+
+Most <NoteLink to="probabilistic-programming">probabilistic programming</NoteLink> systems interpret the model at run
+time and use a generic algorithm such as Hamiltonian Monte Carlo. Infer.NET instead compiles. The model compiler reads
+the model, builds its factor graph, picks a schedule, the order in which messages are computed, and writes out plain
+source code for that schedule. The code runs without the overhead of the modelling layer, can be read and profiled
+like any code, and is reused for new observed values without recompiling <Cite id="infernetworks" />.
+
+<InferPipeline />
+
+Message passing is local, so the compiler assembles the algorithm from per-factor pieces. Each factor type comes with
+**message operators**: for every algorithm, a function giving the message from the factor to each of its arguments in
+terms of the incoming messages. A sum factor has exact Gaussian operators; a threshold factor has EP operators that
+match moments of a truncated Gaussian <Cite id="minka2001" />; a product has variational operators
+<Cite id="winn2005vmp" />. New factors and distributions can be added by writing their operators.
+
+## A first model
+
+The first tutorial tosses two fair coins and asks about both being heads <Cite id="infernettwocoins" />:
+
+```csharp
+var firstCoin = Variable.Bernoulli(0.5);
+var secondCoin = Variable.Bernoulli(0.5);
+var bothHeads = firstCoin & secondCoin;
+var engine = new InferenceEngine();
+engine.Infer(bothHeads);          // Bernoulli(0.25)
+bothHeads.ObservedValue = false;
+engine.Infer(firstCoin);          // Bernoulli(0.3333)
+```
+
+Each line adds a node to a factor graph: two Bernoulli prior factors, two variables and an AND factor. Observing
+`bothHeads` fixes a variable, and the backward query is answered by the message from the AND factor to the first coin.
+
+<TwoCoins />
+
+The derivation is the AND-factor message of <NoteLink to="assessing-skills">assessing skills</NoteLink>: with $b$
+false, the factor passes $c_1$ the probability of $b = \text{false}$ for each value of $c_1$, which is
+$\pr(c_2 = \text{tails}) = 0.5$ if $c_1$ is heads and 1 if it is tails. Multiplying by the prior gives
+$\pr(c_1 = \text{heads} \mid b = \text{false}) = 0.25 / 0.75 = 1/3$.
+
+## Modelling constructs
+
+- **Ranges and arrays.** `Range` and `Variable.Array` express plates: a factor inside `ForEach(range)` is replicated per
+  index, and the compiler generates loops instead of unrolled graphs.
+- **If and Switch blocks.** `Variable.If(c)` and `Variable.Switch(c)` build <NoteLink to="gates-in-factor-graphs">gates</NoteLink>
+  <Cite id="minka2008gates" />. The compiler generates the gate messages, including the evidence for each branch, so
+  model selection and mixtures need no special code.
+- **Constraints and soft evidence.** `ConstrainTrue`, `ConstrainBetween` and `ConstrainEqualRandom` add factors that
+  restrict a variable or attach a fixed distribution to it, as in the
+  <NoteLink to="clicks-and-relevance-judgements">click model</NoteLink>.
+- **Shared variables and online learning.** Posteriors can be fed back as priors, and a model can be split across
+  batches of data that share variables, the pattern behind <NoteLink to="adpredictor">AdPredictor</NoteLink> and
+  <NoteLink to="matchbox-recommender">Matchbox</NoteLink>.
+
+## Learners and applications
+
+Infer.NET ships two ready-made learners built with the compiler: a <NoteLink to="bayes-point-machine">Bayes point
+machine</NoteLink> classifier and the Matchbox recommender. Its examples include the models of the
+<NoteLink to="model-based-machine-learning">model-based machine learning</NoteLink> case studies: the
+<NoteLink to="reviewer-calibration">reviewer model</NoteLink>, <NoteLink to="difficulty-versus-ability">difficulty
+versus ability</NoteLink>, crowdsourcing with <NoteLink to="community-bayesian-classifier-combination">community
+BCC</NoteLink>, the click model and the clinical trial. The book *Model-Based Machine Learning* uses Infer.NET for
+every chapter <Cite id="winn2023intro" />. Microsoft released Infer.NET as open source under the MIT licence in 2018
+<Cite id="infernet2018" />.
+
+## Trade-offs
+
+- **Deterministic and fast.** Message passing gives answers in a fixed number of sweeps, with no sampling noise and
+  no convergence diagnostics of the MCMC kind. Large models run in time linear in the data.
+- **Approximate.** EP and VMP are approximations with no general accuracy guarantee. EP can fail to converge, and the
+  schedule and initialisation matter for loopy graphs with symmetries.
+- **Model restrictions.** Every factor needs message operators for the chosen algorithm. A model outside the supported
+  factors, or one needing a very different posterior family, is harder to write than in a sampling-based language.

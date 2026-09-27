@@ -1,0 +1,156 @@
+---
+title: Bandits versus A/B tests
+kind: concept
+summary: 'An A/B test fixes the allocation to estimate an effect precisely; a bandit adapts it to lose less reward. For two arms with gap $\Delta$ and reward variance $\sigma^2$, regret times the variance of the estimated effect is at least $\Delta\sigma^2$, so no design is best at both.'
+tags: [bandits, experimentation, ab-testing, worked-example]
+aliases: [bandit testing, adaptive experiments, regret versus estimation, earning versus learning, adaptive allocation]
+requires: [multi-armed-bandit, a-b-test]
+related: [thompson-sampling, best-arm-identification, winners-curse, peeking-and-optional-stopping, simpsons-paradox, a-b-test-power, overall-evaluation-criterion, novelty-and-primacy-effects]
+references: [kohavi2020, scott2010, nie2018, lattimore2020, russo2016, mui2019bandit]
+status: draft
+updated: 2026-09-27
+---
+
+import { RegretVsEstimation } from './RegretVsEstimation'
+
+<Definition>
+An **A/B test** assigns units to arms with fixed probabilities, usually equal, for a planned sample size, then
+estimates the difference between the arms and tests whether it is zero. A **bandit** assigns each unit using the
+outcomes seen so far, shifting traffic towards the arms that look better, to maximise the total reward during the
+experiment. The first design targets **estimation**: a precise, unbiased effect estimate with controlled error rates.
+The second targets **regret**: the reward lost to serving worse arms <Cite id="kohavi2020" />
+<Cite id="lattimore2020" />.
+</Definition>
+
+## Two objectives
+
+An <NoteLink to="a-b-test">A/B test</NoteLink> answers the question "how large is the difference, and is it real?". Its
+output is an estimate with a confidence interval and a decision with known false-positive and false-negative rates.
+To get them it gives the worse arm half the traffic for the whole test, which costs reward: with $T$ users and a gap
+$\Delta$ between the arms' means, the test's regret is $T\Delta/2$.
+
+A <NoteLink to="multi-armed-bandit">bandit</NoteLink> answers the question "which arm should the next user get?". Good
+bandit algorithms have regret of order $\log T$, far below $T\Delta/2$. They achieve this by giving the worse arm few
+users, and those few users are all the information there is about that arm.
+
+## The trade-off
+
+Take two arms with reward variance $\sigma^2$ each and a gap $\Delta > 0$, and suppose arm 2 is the worse one. A design
+that gives $N_1$ units to arm 1 and $N_2$ to arm 2, with $N_1 + N_2 = T$, has regret
+
+$$
+R = \Delta N_2.
+$$
+
+The difference of sample means $\hat\tau = \hat\mu_1 - \hat\mu_2$ has variance
+
+$$
+\var(\hat\tau) = \sigma^2\paren{\frac{1}{N_1} + \frac{1}{N_2}} \ge \frac{\sigma^2}{N_2}.
+$$
+
+Multiplying the two,
+
+$$
+R \cdot \var(\hat\tau) \ge \Delta N_2 \cdot \frac{\sigma^2}{N_2} = \Delta\sigma^2.
+$$
+
+The product does not depend on the allocation. Halving the regret at least doubles the variance of the effect
+estimate. An A/B test sits at one end, with $N_2 = T/2$: variance $4\sigma^2/T$ and regret $T\Delta/2$. A bandit with
+regret of order $\log T$ has an estimate whose variance is at least of order $\sigma^2/\log T$. Its standard error
+shrinks like $1/\sqrt{\log T}$ instead of $1/\sqrt{T}$, so it may never become small enough to detect the difference it
+is exploiting. With adaptive allocation $N_2$ is random and the inequality holds for each realised allocation.
+
+### Worked example
+
+A shop tests a new page (arm 1, conversion rate 11%) against the old one (arm 2, 10%) on $T = 100{,}000$ users. The gap
+is $\Delta = 0.01$.
+
+- **A/B test, 50/50.** Each arm gets 50,000 users. The regret is $50{,}000 \times 0.01 = 500$ lost conversions. The
+  standard error of the difference is
+  $\sqrt{0.11 \cdot 0.89/50{,}000 + 0.10 \cdot 0.90/50{,}000} = 0.00194$, so the true lift is $5.2$ standard errors from
+  zero. A two-sided 5% test detects it with probability above 99.9%.
+- **Bandit that gives arm 2 only 2,000 users.** The regret is $2{,}000 \times 0.01 = 20$ lost conversions, 25 times
+  less. The standard error is $\sqrt{0.11 \cdot 0.89/98{,}000 + 0.10 \cdot 0.90/2{,}000} = 0.00678$, 3.5 times larger.
+  The same test detects the lift with probability 31%.
+
+The bandit earned 480 more conversions and cannot say with confidence that the new page is better.
+
+<RegretVsEstimation />
+
+## When to use which
+
+A bandit fits when the value is in the allocation itself and no one needs the effect size.
+
+- **Short-lived choices.** A headline, a promotion or a daily recommendation slot lives for hours or days. There is no
+  long deployment after the test in which to recover the cost of a balanced experiment.
+- **Many arms.** With 20 creatives, a balanced test gives 95% of traffic to arms that are not the best. Adaptive
+  allocation drops clear losers quickly, as in <NoteLink to="best-arm-identification">best-arm identification</NoteLink>.
+- **Continuous optimisation.** When arms come and go and the system should keep serving the current best, the
+  question "was B better than A last month?" is never asked.
+- **Costly exposure.** In medical or financial settings, each unit given a worse arm is a real harm.
+
+An A/B test fits when the decision or the knowledge outlives the experiment.
+
+- **Launch decisions.** A change shipped to all users for years is worth measuring precisely. The regret of a two-week
+  test is small next to the cost of shipping a harmful change or dropping a good one. Explore-then-commit, a test
+  followed by shipping the winner, is the bandit view of this design.
+- **Several metrics.** A bandit optimises one reward. A launch decision weighs an
+  <NoteLink to="overall-evaluation-criterion">overall evaluation criterion</NoteLink> against guardrail metrics such as
+  latency, revenue and complaints. With a bandit's allocation the guardrails of the starved arm are barely measured.
+- **Delayed or long-term outcomes.** A bandit needs the reward soon after the choice. Retention after 30 days, or
+  effects that change as users get used to a feature (<NoteLink to="novelty-and-primacy-effects">novelty and primacy
+  effects</NoteLink>), cannot steer allocation in time.
+- **Learning.** The size of an effect informs the next product decision and the next test's
+  <NoteLink to="a-b-test-power">power calculation</NoteLink>.
+
+## Inference after a bandit
+
+Adaptive allocation breaks the assumptions behind the standard analysis of an A/B test.
+
+- **Sample means are biased.** An arm that has an unlucky start gets fewer users and keeps its low estimate. The final
+  sample means of adaptively sampled arms are biased downwards <Cite id="nie2018" />, and the reported difference
+  between winner and loser is exaggerated, as in the <NoteLink to="winners-curse">winner's curse</NoteLink>.
+- **Continuous looking.** A bandit acts on the data after every unit. Reading its final data with a fixed-sample
+  $t$-test is as invalid as <NoteLink to="peeking-and-optional-stopping">peeking</NoteLink> at an A/B test.
+- **Allocation that changes over time confounds.** If the conversion rate drifts during the experiment and the
+  allocation shifts at the same time, the pooled comparison mixes the two. Suppose both arms convert at 20% on day 1
+  and at 10% on day 2, so they are identical. On day 1 each gets 1,000 users; on day 2 the bandit sends 1,800 to arm B
+  and 200 to arm A. The pooled rates are $220/1{,}200 = 18.3\%$ for A and $380/2{,}800 = 13.6\%$ for B. Arm B looks much
+  worse only because it received more of the low-converting day. This is <NoteLink to="simpsons-paradox">Simpson's
+  paradox</NoteLink>. The fix is to compare arms within periods, or to weight each observation by the inverse of its
+  assignment probability.
+
+## Hybrids
+
+- **Explore then exploit.** Run a balanced test to the planned size, then shift all traffic to the winner. This is
+  <NoteLink to="explore-then-commit">explore-then-commit</NoteLink> with the exploration length set by a power
+  calculation.
+- **Floors on assignment probabilities.** A bandit whose assignment probabilities never fall below a floor, such as
+  10% per arm, keeps a minimum of data on every arm, as the figure shows. The known probabilities also allow unbiased
+  inverse-probability-weighted estimates.
+- **Thompson sampling with a stopping rule.** Scott's approach runs Thompson sampling and stops when the posterior
+  probability that one arm is best exceeds a threshold, or when the expected loss of choosing the leader is small
+  <Cite id="scott2010" />. It reports posterior probabilities instead of $p$-values.
+- **Top-two Thompson sampling.** For identifying the best of many arms, keeping a fixed share of traffic on the
+  runner-up gives faster, more reliable conclusions than plain Thompson sampling <Cite id="russo2016" />.
+- **Bandit screening before an A/B test.** A short bandit over several candidates, between offline evaluation and a
+  full A/B test, drops weak candidates while losing little reward. Mui et al. used a Thompson-sampling stage to screen
+  recommender algorithms at Expedia Group: up to six candidates could be screened and the winner validated in about
+  five weeks, against about six months for serial four-week A/B tests <Cite id="mui2019bandit" />. For comparing
+  rankers, <NoteLink to="interleaving">interleaving</NoteLink> plays the same screening role; see
+  <NoteLink to="choosing-an-experimentation-method">choosing an experimentation method</NoteLink>.
+
+## Assumptions
+
+- The inequality $R \cdot \var(\hat\tau) \ge \Delta\sigma^2$ assumes equal variances and the difference of sample
+  means as the estimator. With unequal variances the constant changes but the product form does not.
+- Regret counts only reward during the experiment. The value of what is learned for later decisions is outside it.
+
+## Pitfalls
+
+- **"Bandits make A/B tests obsolete."** They solve a different problem. A bandit that runs for a week and then
+  ships its favourite has made a launch decision with far less evidence than a test of the same length.
+- **Unlogged assignment probabilities.** If the bandit's probabilities are not recorded, the data cannot be
+  reweighted later, and the adaptive bias cannot be corrected.
+- **Bandits on the wrong reward.** Optimising clicks with a bandit is fast, but clicks may not track the outcome that
+  matters. A balanced test can measure both.

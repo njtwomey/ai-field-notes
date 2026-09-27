@@ -1,0 +1,97 @@
+---
+title: Skill rating
+kind: overview
+summary: 'Skill rating infers a latent strength for each player, team or item from the outcomes of contests between them. Paired-comparison models such as Bradley–Terry give outcome probabilities; Elo, Glicko and TrueSkill update them online, and the Bayesian ones track uncertainty.'
+tags: [skill-rating, paired-comparisons, ranking, games, bayesian]
+aliases: [rating systems, skill rating systems, player rating, ranking from pairwise comparisons, latent skill models]
+related: [logistic-regression, online-gradient-descent, kalman-filter, ranking-losses, reinforcement-learning-from-human-feedback]
+references: [bradley1952, thurstone1927, elo1978, glickman1999, herbrich2006, winn2023]
+status: draft
+updated: 2026-09-27
+---
+
+import { SkillRace } from './SkillRace'
+
+<Definition>
+A **skill rating** system assigns each competitor $i$ a latent strength $s_i$ from the observed outcomes of contests,
+such as wins, losses, draws or finishing orders. A probability model links strengths to outcomes, usually through the
+difference $s_i - s_j$. An estimation method turns a history of outcomes into strengths, either in one batch fit or by
+updating after every game.
+</Definition>
+
+## The problem
+
+Skill is not observed. Only outcomes are, and outcomes are noisy: a stronger player sometimes loses. Four facts shape
+every method in this family.
+
+- **Only differences matter.** Outcome probabilities depend on $s_i - s_j$, so adding a constant to every strength
+  changes nothing. A rating scale needs an anchor, such as a starting value or a mean of zero.
+- **Data arrive as a stream.** Games are played continuously, and ratings are wanted after each one, so most systems
+  update online.
+- **Evidence is uneven.** A player with three games is known far less well than one with three thousand. Systems that
+  track uncertainty move the first rating quickly and the second slowly.
+- **Skill changes.** Players improve, decline and return after breaks. A model that treats skill as fixed stops
+  learning.
+
+## Family map
+
+| Model | Outcome model | Fitted by | Uncertainty | Teams | Draws | Skill over time |
+| --- | --- | --- | --- | --- | --- | --- |
+| <NoteLink to="paired-comparison-models">Bradley–Terry, Thurstone</NoteLink> | logit, probit | ML, MM | no | no | extensions | fixed |
+| <NoteLink to="plackett-luce-model">Plackett–Luce</NoteLink> | sequential softmax | ML, MM | no | no | extensions | fixed |
+| <NoteLink to="elo-rating">Elo</NoteLink> | logit | SGD step | no | no | half point | fixed step $K$ |
+| <NoteLink to="glicko-and-glicko-2">Glicko</NoteLink> | logit | approx. Bayes | yes | no | half point | variance grows |
+| <NoteLink to="glicko-and-glicko-2">Glicko-2</NoteLink> | logit | approx. Bayes | yes | no | half point | learned volatility |
+| <NoteLink to="trueskill">TrueSkill</NoteLink> | probit | EP, one pass | yes | yes | margin | random walk |
+| <NoteLink to="trueskill-through-time">TrueSkill Through Time</NoteLink> | probit | EP, all games | yes | yes | per player | smoothed walk |
+| <NoteLink to="trueskill-2">TrueSkill 2</NoteLink> | probit, more data | EP, learned | yes | yes | margin | biased walk |
+| <NoteLink to="item-response-theory">Item response theory</NoteLink> | logit | marginal ML | optional | n/a | n/a | fixed |
+
+ML is maximum likelihood, MM the minorise–maximise iteration, SGD stochastic gradient descent and EP expectation
+propagation. Plackett–Luce and the TrueSkill family also model rankings of more than two competitors; the others
+compare two at a time.
+
+## Three choices that separate the models
+
+**Logit or probit.** The logistic curve of Bradley–Terry and the Gaussian cdf of Thurstone differ by less than 0.01
+once their scales are matched, so the choice rarely changes a ranking. The logistic form gives simple gradients and
+closed-form odds. The Gaussian form composes: sums of Gaussian performances stay Gaussian, which is what lets TrueSkill
+handle teams exactly up to the outcome factor.
+
+**Point estimate or belief.** Elo keeps one number per player and moves it by a fixed step $K$. Glicko and TrueSkill
+keep a mean and a variance. The variance acts as a per-player learning rate that starts large and shrinks with
+evidence, which is why a Bayesian system ranks a new player correctly after far fewer games. The same structure
+appears in the <NoteLink to="kalman-filter">Kalman filter</NoteLink>, whose gain plays the role of $K$.
+
+**Online or batch.** An online update uses each game once, in order, like
+<NoteLink to="online-gradient-descent">online gradient descent</NoteLink>. A batch fit, such as maximum likelihood for
+Bradley–Terry or smoothing in TrueSkill Through Time, lets later games revise the estimates for earlier ones. Batch
+estimates are more accurate for history; online ones are what a live system can afford.
+
+<SkillRace />
+
+## Components
+
+- <NoteLink to="paired-comparison-models">Paired-comparison models</NoteLink>: Thurstone and Bradley–Terry, their
+  maximum-likelihood fit and ties.
+- <NoteLink to="plackett-luce-model">Plackett–Luce model</NoteLink>: rankings of several items.
+- <NoteLink to="elo-rating">Elo rating</NoteLink>: the online gradient step on Bradley–Terry.
+- <NoteLink to="glicko-and-glicko-2">Glicko and Glicko-2</NoteLink>: Elo with a rating deviation and a volatility.
+- <NoteLink to="trueskill">TrueSkill</NoteLink>: a factor graph for teams and rankings, solved by expectation
+  propagation.
+- <NoteLink to="trueskill-through-time">TrueSkill Through Time</NoteLink>: smoothing skill trajectories over a whole
+  history.
+- <NoteLink to="trueskill-2">TrueSkill 2</NoteLink>: more observations per game and learned parameters.
+- <NoteLink to="item-response-theory">Item response theory</NoteLink>: the same model for people answering test
+  questions, from the Rasch model to the 4PL.
+- <NoteLink to="ability-estimation-and-item-calibration">Ability estimation and item calibration</NoteLink>: fitting
+  abilities and item parameters, and adaptive testing.
+- <NoteLink to="polytomous-and-multidimensional-item-response-models">Polytomous and multidimensional item response
+  models</NoteLink>: graded and partial-credit scores, and several abilities at once.
+
+## Beyond games
+
+The same models rank anything compared in pairs. Preference data for language models are fitted with the Bradley–Terry
+model to train a reward model, as in <NoteLink to="reinforcement-learning-from-human-feedback">reinforcement learning from human feedback</NoteLink>.
+Sports leagues, chess federations, online matchmaking, crowd-sourced comparisons of images or model outputs, and
+adaptive testing all use one of the models above.

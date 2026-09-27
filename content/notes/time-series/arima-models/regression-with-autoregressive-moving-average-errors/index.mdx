@@ -1,0 +1,143 @@
+---
+title: Regression with ARMA errors
+kind: concept
+summary: 'Regression with ARMA errors models $y_t = \betavec^\top\uvec_t + \eta_t$ with external regressors $\uvec_t$ and an ARMA (or ARIMA) error $\eta_t$. Ignoring the error correlation leaves OLS unbiased but makes its standard errors wrong, usually too small; GLS or joint maximum likelihood fixes both.'
+tags: [time-series, arima, regression, forecasting, worked-example]
+aliases:
+  [
+    ARIMAX,
+    dynamic regression,
+    regression with autocorrelated errors,
+    regression with ARIMA errors,
+    Cochrane–Orcutt procedure,
+    dynamic harmonic regression,
+    Fourier terms,
+  ]
+requires: [autoregressive-moving-average-model, linear-regression]
+related: [autoregressive-integrated-moving-average-model, seasonal-autoregressive-integrated-moving-average, box-jenkins-method, ljung-box-test, vector-autoregression]
+references: [hyndman2021, cochrane1949, hamilton1994, box2015, granger1974]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **regression with ARMA errors** is
+
+$$
+y_t = \beta_0 + \beta_1u_{1,t} + \dots + \beta_ku_{k,t} + \eta_t, \qquad \phi(B)\eta_t = \theta(B)\varepsilon_t,
+$$
+
+where $u_{1,t}, \dots, u_{k,t}$ are observed external regressors (covariates), $\beta_0, \dots, \beta_k$ are regression
+coefficients, and the error $\eta_t$ follows an ARMA($p$, $q$) model driven by white noise
+$\varepsilon_t \sim \operatorname{WN}(0, \sigma^2)$. When $\eta_t$ is ARIMA($p$, $d$, $q$), the model is a
+**regression with ARIMA errors** <Cite id="hyndman2021" />.
+</Definition>
+
+## Intuition
+
+A time-series regression has two sources of structure. The regressors explain part of $y_t$: temperature explains
+electricity demand, advertising explains sales, a holiday indicator explains a traffic dip. What they leave unexplained
+is rarely white noise. It carries the series' own inertia, which an ARMA model describes. The model keeps both. The
+$\beta$ coefficients have the ordinary regression meaning, the effect of a unit change in $u_{j,t}$ on $y_t$ with the
+other regressors fixed, and the ARMA error supplies the dynamics and the forecast of what the regressors miss.
+
+The name ARIMAX is used for this model and for a different one, in which lagged values of $y_t$ appear as regressors
+alongside $u_t$. In that form, $y_t = \beta u_t + \phi y_{t-1} + \varepsilon_t$, the coefficient $\beta$ is only the
+immediate effect; the total effect of a permanent unit change in $u$ is $\beta/(1 - \phi)$. The regression-with-errors
+form keeps $\beta$ interpretable <Cite id="hyndman2021" />.
+
+## Why the error model matters
+
+Suppose the true error is AR(1), $\eta_t = \phi\eta_{t-1} + \varepsilon_t$, and the model is fitted by ordinary least
+squares (OLS) as if the errors were independent. The OLS estimator is still unbiased when the regressors are
+independent of the errors. Its variance is wrong.
+
+Take one centred regressor $u_t$ and no intercept, so $\hat\beta = \sum_tu_ty_t/\sum_tu_t^2$ and
+$\hat\beta - \beta = \sum_tu_t\eta_t/\sum_tu_t^2$. Conditional on the regressor,
+
+$$
+\var(\hat\beta) = \frac{\sum_s\sum_tu_su_t\gamma_\eta(s - t)}{\paren{\sum_tu_t^2}^2},
+$$
+
+where $\gamma_\eta(h) = \sigma_\eta^2\phi^{\abs h}$ is the error autocovariance. OLS software reports only the $s = t$
+terms, $\sigma_\eta^2/\sum_tu_t^2$. Suppose the regressor is itself autocorrelated, with sample autocorrelation
+$\rho_u(h) \approx \rho^{\abs h}$. Grouping the double sum by lag $h = s - t$ gives, for large $n$,
+$\sum_s\sum_tu_su_t\phi^{\abs{s-t}} \approx \sum_tu_t^2\sum_h\rho^{\abs h}\phi^{\abs h}$. So
+
+$$
+\frac{\var(\hat\beta)}{\sigma_\eta^2/\sum_tu_t^2} \approx \sum_{h=-\infty}^{\infty}(\phi\rho)^{\abs h}
+= 1 + \frac{2\phi\rho}{1 - \phi\rho} = \frac{1 + \phi\rho}{1 - \phi\rho}.
+$$
+
+When both the regressor and the error are positively autocorrelated, the true variance exceeds the reported one.
+Trending regressors and persistent errors are the usual situation in time series, so naive $t$-tests reject far too
+often. In the limit $\phi \to 1$ the error is a random walk and the regression becomes spurious
+<Cite id="granger1974" />.
+
+## Worked example
+
+Take $\phi = \rho = 0.8$. The variance ratio is $(1 + 0.64)/(1 - 0.64) = 1.64/0.36 = 4.56$. The true standard error
+is $\sqrt{4.56} = 2.13$ times the reported one. A coefficient reported with $t = 2.5$ has a correct $t$ of about
+$2.5/2.13 = 1.17$, which is not significant.
+
+Forecasting uses both parts. Suppose a fitted model is $y_t = 5 + 2u_t + \eta_t$ with $\eta_t = 0.8\eta_{t-1} + \varepsilon_t$,
+and the last observation is $y_T = 14$ with $u_T = 4$. The last error is $\eta_T = 14 - 5 - 8 = 1$. With planned values
+$u_{T+1} = u_{T+2} = 3$, the forecasts are
+
+$$
+\hat y_{T+1} = 5 + 2 \cdot 3 + 0.8 \cdot 1 = 11.8, \qquad \hat y_{T+2} = 5 + 6 + 0.8^2 \cdot 1 = 11.64.
+$$
+
+The regression part carries the effect of the planned regressor, and the error part adds a correction that decays at
+rate $\phi$ as the last surprise is forgotten.
+
+## Estimation
+
+**Generalised least squares.** For AR(1) errors, subtract $\phi$ times the lagged equation:
+
+$$
+y_t - \phi y_{t-1} = \beta_0(1 - \phi) + \beta_1(u_t - \phi u_{t-1}) + \varepsilon_t.
+$$
+
+The transformed errors are white noise, so OLS on the **quasi-differenced** data is efficient. The Cochrane–Orcutt
+procedure alternates: estimate $\beta$ by OLS, estimate $\phi$ from the residuals, quasi-difference, and repeat until
+convergence <Cite id="cochrane1949" />.
+
+**Maximum likelihood.** Modern software estimates $\beta$, $\phi$, $\theta$ and $\sigma^2$ jointly by maximising the
+Gaussian likelihood, usually through a state-space form and the Kalman filter <Cite id="hamilton1994" />. This handles
+any ARMA order, includes the first observations exactly, and gives standard errors for all parameters together.
+
+**Non-stationary errors.** If $\eta_t$ has a unit root, the regression is fitted in differences:
+$\Delta y_t = \beta_1\Delta u_{1,t} + \dots + \beta_k\Delta u_{k,t} + \Delta\eta_t$, with $\Delta\eta_t$ an ARMA process.
+The coefficients keep their meaning, because differencing both sides of a linear equation preserves $\beta$.
+
+## Model building
+
+A standard sequence is <Cite id="hyndman2021" />:
+
+1. Fit the regression with a generous error model, or difference if the series or the regressors are non-stationary.
+2. Choose the ARMA orders for the error from the ACF and PACF of the regression residuals, or by information criteria.
+3. Refit jointly and check that the ARMA innovations (not the regression residuals $\hat\eta_t$) are white noise with a
+   <NoteLink to="ljung-box-test">Ljung–Box test</NoteLink>.
+
+**Dynamic harmonic regression** uses sine and cosine pairs as regressors to model seasonality:
+$u_{2k-1,t} = \sin(2\pi kt/m)$ and $u_{2k,t} = \cos(2\pi kt/m)$ for $k = 1, \dots, K$. A few pairs describe a smooth
+seasonal shape with any period, including long ones such as $m = 52$ or $m = 365.25$, where a
+<NoteLink to="seasonal-autoregressive-integrated-moving-average">seasonal ARIMA</NoteLink> would need hundreds of lags.
+
+## Assumptions
+
+- The regressors are exogenous: the error $\eta_t$ is uncorrelated with present, past and future regressors. Feedback
+  from $y$ to $u$ violates this and calls for a multivariate model such as a
+  <NoteLink to="vector-autoregression">vector autoregression</NoteLink>.
+- Future values of the regressors are known when forecasting. Calendar effects and planned prices are known;
+  temperature and competitor behaviour must themselves be forecast, which adds uncertainty the model's intervals omit.
+
+## Pitfalls
+
+- **Residuals versus innovations.** The regression residuals $\hat\eta_t$ are autocorrelated by design. Diagnostic
+  tests belong on the innovations $\hat\varepsilon_t$.
+- **Regressing levels on levels.** Two trending series regressed on each other give a large $R^2$ and a significant
+  slope even when unrelated. Use ARIMA errors with $d = 1$, or difference both sides.
+- **Lagged effects.** The effect of a regressor may be spread over time (advertising this week affects sales next
+  week). Include lagged regressors $u_{t-1}, u_{t-2}, \dots$ explicitly.

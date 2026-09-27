@@ -1,0 +1,144 @@
+---
+title: Assessing skills from test answers
+kind: concept
+summary: 'Binary skills $s_k$ explain a candidate''s answers: a question is right with probability $1 - \epsilon$ if every skill it needs is present, else with guess probability $g$. Belief propagation through AND and noise factors gives each skill''s posterior; two-skill questions create loops.'
+tags: [model-based-machine-learning, bayesian, factor-graph, message-passing, psychometrics, latent-variable-models, worked-example]
+aliases: [DINA model, deterministic inputs noisy and gate, NIDA model, guess and slip, student skills model, cognitive diagnosis model, MBML chapter 2]
+requires: [factor-graph, belief-propagation, bernoulli-distribution]
+partOf: [model-based-machine-learning]
+related: [item-response-theory, difficulty-versus-ability, loopy-belief-propagation, murder-mystery, beta-distribution]
+references: [winn2023skills, junker2001, infernetskills, kschischang2001]
+status: draft
+updated: 2026-09-27
+---
+
+import { SkillsGraph } from './SkillsGraph'
+import { SkillsPosterior } from './SkillsPosterior'
+
+<Callout variant="credit" title="Provenance: Model-Based Machine Learning, by John Winn et al.">
+This note follows the "Assessing People's Skills" chapter of *Model-Based Machine Learning* by John Winn with
+Christopher M. Bishop, Thomas Diethe, John Guiver and Yordan Zaykov (Microsoft Research) <Cite id="winn2023skills" />.
+The model, its assumptions and the way they are built up step by step are theirs; this note restates them in this site's
+notation. I include it because it is a very good account, and I want it in my own records. The book is free to read at
+[mbmlbook.com](https://mbmlbook.com). The same structure is the DINA model of cognitive diagnosis, named by Junker and
+Sijtsma <Cite id="junker2001" />, which Infer.NET ships as its "Student skills" example <Cite id="infernetskills" />.
+The numerical examples are the book's; this site added the derivation of the AND-factor message and the interactive
+figure.
+</Callout>
+
+<Definition>
+A candidate either has or lacks each of $K$ skills, $s_k \in \{0, 1\}$. Question $q$ needs a set $S_q$ of skills. Let
+$h_q = \prod_{k \in S_q} s_k$ be 1 when the candidate has all of them. The answer $a_q \in \{0, 1\}$ (1 for correct)
+has
+
+$$
+\pr(a_q = 1 \mid h_q) = \begin{cases} 1 - \epsilon & h_q = 1, \\ g & h_q = 0, \end{cases}
+$$
+
+with slip probability $\epsilon$ and guess probability $g$. Given the answers, inference returns
+$\pr(s_k = 1 \mid a_1, \dots, a_Q)$ for every skill <Cite id="winn2023skills" />.
+</Definition>
+
+## The model, one assumption at a time
+
+The book's candidates sit a multiple-choice test for a software job. Each question is tagged with the skills it
+tests, such as C# or SQL. The model is five assumptions <Cite id="winn2023skills" />:
+
+1. A candidate has either mastered each skill or not.
+2. Before seeing any answers, having and lacking a skill are equally likely: $\pr(s_k = 1) = 0.5$.
+3. A candidate with every skill a question needs gets it right, except one time in ten: $\epsilon = 0.1$.
+4. A candidate lacking a needed skill picks one of the five answers at random: $g = 0.2$.
+5. Whether a question is answered correctly depends only on the skills the candidate has.
+
+Each assumption becomes a factor. Assumption 2 is a prior factor on each $s_k$. For a question needing several skills,
+a deterministic AND factor $\indicator[h_q = \prod_{k \in S_q} s_k]$ builds $h_q$. Assumptions 3 and 4 are one noise
+factor $\pr(a_q \mid h_q)$, a $2 \times 2$ table. Assumption 5 is the absence of any other edge into $a_q$.
+This deterministic-AND-then-noise structure is the DINA model ("deterministic inputs, noisy AND gate")
+<Cite id="junker2001" />.
+
+<SkillsGraph />
+
+## Messages
+
+Answers are observed, so each noise factor sends its column of the table upwards. A correct answer sends
+$\mu(h_q) = (1 - \epsilon, g)$ for $h_q = 1$ and $h_q = 0$, here $(0.9, 0.2)$. A wrong answer sends
+$(\epsilon, 1 - g) = (0.1, 0.8)$.
+
+**A question testing one skill.** Then $h_q = s_k$, and the message reaches $s_k$ unchanged. One correct C# answer
+gives $\pr(s_{\text{C\#}} = 1) = 0.5 \times 0.9 / (0.5 \times 0.9 + 0.5 \times 0.2) = 9/11 = 0.818$.
+
+**The AND factor.** Let the factor receive $\lambda(h)$ from below and a message $\pr(s_j = 1) = r_j$ from the other
+skill $s_j$ it joins. Its message to $s_k$ sums the factor against both:
+
+$$
+\mu_{\text{AND} \to s_k}(s_k) = \sum_{s_j, h} \indicator[h = s_k s_j]\, \lambda(h)\, \pr(s_j)
+= \begin{cases} r_j\,\lambda(1) + (1 - r_j)\,\lambda(0) & s_k = 1, \\ \lambda(0) & s_k = 0. \end{cases}
+$$
+
+When $s_k = 0$ the product is 0 whatever $s_j$ is, so the message is $\lambda(0)$. When $s_k = 1$ the product equals
+$s_j$, so the message averages $\lambda$ over the belief in $s_j$. A wrong answer to a two-skill question is therefore
+weak evidence against each skill, and its strength depends on how sure the model is about the other skill. With more
+than two skills, $r_j$ becomes the product of the other skills' probabilities.
+
+### A worked example
+
+Take three questions: Q1 tests C#, Q2 tests SQL, Q3 tests both. A candidate gets Q1 right and Q2 and Q3 wrong. The graph
+is a tree, so one pass of messages is exact. The posteriors are
+
+$$
+\pr(s_{\text{C\#}} = 1 \mid \text{answers}) = 0.802, \qquad \pr(s_{\text{SQL}} = 1 \mid \text{answers}) = 0.034.
+$$
+
+A candidate who gets all three wrong has $\pr(s_{\text{SQL}} = 1) = 0.101$. Getting Q1 right *lowers* the SQL
+probability from 0.101 to 0.034. The explanation runs through Q3. Once the candidate probably knows C#, the wrong answer
+to Q3 is best explained by a missing SQL skill. This is explaining away, and it arises from the message averaging over
+$r_{\text{C\#}}$ above <Cite id="winn2023skills" />.
+
+## Loops
+
+A fourth question that also tests both skills creates a cycle: C#, the AND factor of Q3, SQL, the AND factor of Q4, and
+back to C#. Belief propagation is then no longer exact. <NoteLink to="loopy-belief-propagation">Loopy belief
+propagation</NoteLink> initialises every message to uniform and repeats the updates until they stop changing. For
+answers (right, wrong, wrong, wrong) it converges to $\pr(s_{\text{C\#}} = 1) = 0.809$ and
+$\pr(s_{\text{SQL}} = 1) = 0.010$. The exact posteriors are 0.800 and 0.024 <Cite id="winn2023skills" />. The two
+wrong answers on two-skill questions are both counted as independent evidence against SQL, although they share the C#
+belief that explains them, so loopy BP is overconfident. The order in which messages are updated, the schedule, affects
+how fast the iteration converges and, in harder graphs, whether it converges at all.
+
+<SkillsPosterior />
+
+## Learning the guess probabilities
+
+On real test data the fixed $g = 0.2$ fails: some questions are easy to guess, because a wrong option is implausible,
+and some are hard. The book makes $g_q$ a random variable per question with a Beta prior of mean 0.25, so that
+most questions are guessed about one time in four and a few much more often <Cite id="winn2023skills" />. The message
+from the noise factor to $g_q$ is a mixture of a Beta for the case $h_q = 0$ and a constant for $h_q = 1$, and
+expectation propagation projects it back to a Beta. Only candidates believed to lack the skills inform $g_q$, so the
+posteriors of the guess probabilities stay wide. Learning them mainly improves the calibration of the predicted answer
+probabilities, and it changes the ranking of candidates little.
+
+## Variants
+
+- **NIDA.** Noisy inputs, deterministic AND: a candidate lacking one skill can still exhibit it with a per-skill guess
+  probability, and the question is right only if every skill is exhibited. A candidate missing one of three skills then
+  does better than one missing all three <Cite id="junker2001" />. DINA treats both the same.
+- **Continuous ability.** <NoteLink to="item-response-theory">Item response theory</NoteLink> replaces binary skills by
+  a real ability and each question by a difficulty. The
+  <NoteLink to="difficulty-versus-ability">difficulty versus ability</NoteLink> model does this inside a factor graph
+  and also infers unknown correct answers.
+
+## Assumptions
+
+- **Mastery is binary.** Partial knowledge is not represented; it appears as extra slips or guesses.
+- **The skill tags are right.** The model trusts which skills each question needs. A mis-tagged question produces
+  confident, wrong skill posteriors.
+- **Answers are independent given the skills.** Fatigue, time pressure or a shared misconception across questions are
+  not modelled.
+
+## Pitfalls
+
+- **Loopy overconfidence.** With many multi-skill questions, loopy belief propagation can push skill probabilities
+  towards 0 or 1 further than the data justify. Checking a few candidates against exact enumeration, feasible for up to
+  about 20 skills, shows the size of the error.
+- **Symmetric skills.** Two skills that always appear together in the same questions cannot be told apart. The
+  posterior can say only that the candidate lacks at least one of them.

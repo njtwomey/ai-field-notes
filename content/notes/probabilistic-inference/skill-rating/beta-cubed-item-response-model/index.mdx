@@ -1,0 +1,203 @@
+---
+title: β³ item response model
+kind: concept
+summary: 'The β³ item response model treats a response $p_{ij} \in (0, 1)$, such as a classifier''s probability of the correct class, as $\Beta(\alpha, \beta)$ with $\alpha = (\theta_i/\delta_j)^{a_j}$ and $\beta = ((1-\theta_i)/(1-\delta_j))^{a_j}$. Its mean curve can be sigmoid, anti-sigmoid or decreasing.'
+tags: [psychometrics, evaluation, label-noise, bayesian, latent-variable-models, worked-example]
+aliases: [beta3-IRT, beta-3 IRT, beta cubed IRT, beta item response model, continuous item response model]
+requires: [item-response-theory-for-machine-learning, beta-distribution]
+partOf: [skill-rating]
+related:
+  [
+    item-response-theory,
+    ability-estimation-and-item-calibration,
+    instance-hardness,
+    variational-inference,
+    reparameterisation-trick,
+    classifier-calibration,
+  ]
+references: [chen2019beta3, chen2019beta3code, noel2007, martinezplumed2019]
+status: draft
+updated: 2026-09-27
+---
+
+import { BetaIccExplorer } from './BetaIccExplorer'
+import { InstanceIrtExplorer } from '../_shared/InstanceIrtExplorer'
+
+<Callout variant="credit" title="Provenance: Chen, Silva Filho, Prudêncio, Diethe and Flach (2019)">
+The β³ model is the work of Yu Chen, Telmo Silva Filho, Ricardo B. C. Prudêncio, Tom Diethe and Peter Flach, published
+at AISTATS 2019 as "β³-IRT: A New Item Response Model and its Applications" <Cite id="chen2019beta3" />. The model, its
+inference scheme and its use for classifier ability and noise detection are theirs. The derivation of the curve shapes
+from the logit form, the worked example and the interactive figures are this site's. The user includes this note because
+it is very nice work by former colleagues and wants it in their own records.
+</Callout>
+
+<Definition>
+The **β³ item response model** describes a response $p_{ij} \in (0, 1)$ of respondent $i$ to item $j$ by a
+<NoteLink to="beta-distribution">beta distribution</NoteLink>,
+
+$$
+p_{ij} \sim \Beta(\alpha_{ij}, \beta_{ij}), \qquad \alpha_{ij} = \paren{\frac{\theta_i}{\delta_j}}^{a_j}, \qquad
+\beta_{ij} = \paren{\frac{1 - \theta_i}{1 - \delta_j}}^{a_j},
+$$
+
+with ability $\theta_i \in (0, 1)$, difficulty $\delta_j \in (0, 1)$ and discrimination $a_j \in \reals$. The priors are
+$\theta_i \sim \Beta(1, 1)$, $\delta_j \sim \Beta(1, 1)$ and $a_j \sim \Gauss(1, \sigma_0^2)$ <Cite id="chen2019beta3" />.
+</Definition>
+
+## Intuition
+
+Binary item response models score each answer right or wrong. A classifier's output is richer: a probability for the
+correct class. A classifier that gives the correct class 0.49 and one that gives it 0.01 are both wrong, and a binary
+model treats them alike. The β³ model keeps the probability as the response.
+
+Ability and difficulty live on $(0, 1)$, and the model compares them by ratio. When $\theta_i > \delta_j$, the ratio
+$\theta_i/\delta_j$ exceeds 1 and $(1 - \theta_i)/(1 - \delta_j)$ falls below 1, so with $a_j > 0$ the first shape
+parameter $\alpha_{ij}$ is the larger and the response leans towards 1. When $\theta_i < \delta_j$ it leans towards 0. The
+discrimination $a_j$ is a power that sharpens or flattens this comparison, and a negative power reverses it.
+
+## The item characteristic curve
+
+The mean of $\Beta(\alpha, \beta)$ is $\alpha/(\alpha + \beta)$. Dividing through by $\alpha_{ij}$,
+
+$$
+\expect[p_{ij}] = \frac{1}{1 + \beta_{ij}/\alpha_{ij}}, \qquad \frac{\beta_{ij}}{\alpha_{ij}} =
+\paren{\frac{1 - \theta_i}{\theta_i}\cdot\frac{\delta_j}{1 - \delta_j}}^{a_j} =
+\exp\paren{-a_j\paren{\operatorname{logit}\theta_i - \operatorname{logit}\delta_j}},
+$$
+
+with $\operatorname{logit} u = \log\paren{u/(1 - u)}$. The item characteristic curve is therefore
+
+$$
+\expect[p_{ij} \mid \theta_i, \delta_j, a_j] = \sigma\paren{a_j\paren{\operatorname{logit}\theta_i -
+\operatorname{logit}\delta_j}}, \qquad \sigma(z) = \frac{1}{1 + e^{-z}} .
+$$
+
+It is the <NoteLink to="item-response-theory">2PL</NoteLink> curve with ability and difficulty replaced by their logits.
+The mean response is $\tfrac12$ at $\theta_i = \delta_j$, so $\delta_j$ is a location parameter as in the 2PL. Since
+$d\operatorname{logit}\theta/d\theta = 1/\paren{\theta(1 - \theta)}$ and $\sigma'(0) = \tfrac14$, the slope there is
+$a_j/\paren{4\delta_j(1 - \delta_j)}$ <Cite id="chen2019beta3" />.
+
+On the logit scale every curve is a logistic. On the ability scale $(0, 1)$ the shape depends on $a_j$, because the
+logit stretches both ends. Near $\theta = 0$, $\operatorname{logit}\theta \approx \log\theta$, so for $a_j > 0$
+
+$$
+\expect[p_{ij}] \approx \exp\paren{a_j(\log\theta - \operatorname{logit}\delta_j)} = \paren{\frac{1 - \delta_j}{\delta_j}}^{a_j}\theta^{a_j},
+$$
+
+a power of $\theta$, and by symmetry $1 - \expect[p_{ij}]$ is proportional to $(1 - \theta)^{a_j}$ near $\theta = 1$.
+
+- **$a_j > 1$.** The slope $\propto a_j\theta^{a_j - 1}$ is zero at both ends. The curve is flat at the ends and steep in
+  the middle: a **sigmoid**, like the 2PL.
+- **$a_j = 1$.** The slope is finite and non-zero at the ends. The curve is $\theta(1 - \delta_j)/\paren{\theta(1 -
+  \delta_j) + \delta_j(1 - \theta)}$, a ratio of linear functions with no inflection point in $(0, 1)$.
+- **$0 < a_j < 1$.** The slope is infinite at both ends. The curve is steep at the ends and flat in the middle: an
+  **anti-sigmoid**. Such an item separates the weakest and the strongest respondents from the rest, and says little
+  about respondents near $\delta_j$.
+- **$a_j < 0$.** The curve decreases: a decreasing sigmoid for $a_j < -1$ and a decreasing anti-sigmoid for
+  $-1 < a_j < 0$. Stronger respondents give lower responses.
+
+A logistic curve on $\reals$ cannot produce the anti-sigmoid. In the student-answer data of the paper about 46% of
+questions were fitted with $\abs{a_j} < 1$, a non-logistic shape <Cite id="chen2019beta3" />.
+
+## The response distribution
+
+The mean is one summary; the beta distribution also sets the spread. At $\theta_i = \delta_j$ both ratios equal 1, so
+$\alpha_{ij} = \beta_{ij} = 1$ for every $a_j$, and the response is uniform on $(0, 1)$. A respondent whose ability
+matches an item's difficulty is maximally uncertain about it. Away from $\delta_j$ one shape parameter grows and the
+other shrinks, and the mass moves to one end.
+
+<BetaIccExplorer />
+
+## Worked example
+
+An item has difficulty $\delta = 0.6$ and discrimination $a = 2$. For a classifier of ability $\theta = 0.8$,
+
+$$
+\alpha = \paren{\tfrac{0.8}{0.6}}^2 = 1.778, \qquad \beta = \paren{\tfrac{0.2}{0.4}}^2 = 0.25, \qquad
+\expect[p] = \frac{1.778}{1.778 + 0.25} = 0.877 .
+$$
+
+The logit form agrees: $2\paren{\operatorname{logit}0.8 - \operatorname{logit}0.6} = 2(1.386 - 0.405) = 1.962$ and
+$\sigma(1.962) = 0.877$. Because $\beta < 1$, the density rises without bound towards $p = 1$: the median response is
+0.970, and the chance of a response below $\tfrac12$ is 0.067. For a weaker classifier with $\theta = 0.3$, $\alpha = 0.25$,
+$\beta = 3.06$ and the mean response is 0.075.
+
+Now take an item with $\delta = 0.2$ and $a = -1.5$. For the classifier with $\theta = 0.8$, $\alpha = 4^{-1.5} = 0.125$
+and $\beta = 0.25^{-1.5} = 8$, so the expected probability of the given label is 0.015. A strong classifier is expected
+to reject the label almost completely: the signature of a wrong label.
+
+(All numbers checked with scipy.)
+
+## Inference
+
+The paper fits the model in two ways <Cite id="chen2019beta3" />.
+
+- **Maximum likelihood**, by stochastic gradient descent on the log loss of the predicted mean response, for predicting
+  students' answers.
+- **Variational inference** for classifiers, to obtain posteriors over all latent variables. The variational posteriors
+  of $\theta_i$ and $\delta_j$ are logit-normal, an approximation to the beta that admits the <NoteLink
+  to="reparameterisation-trick">reparameterisation trick</NoteLink>. Optimisation is coordinate ascent: abilities and
+  difficulties are updated to convergence with the discriminations fixed, then the discriminations are updated, and the
+  cycle repeats. The implementation used the probabilistic programming library Edward <Cite id="chen2019beta3code" />.
+
+The alternation addresses a symmetry. A response near 1 means $\alpha_{ij} > 1 > \beta_{ij}$, which holds when
+$\theta_i > \delta_j$ with $a_j > 0$ and also when $\theta_i < \delta_j$ with $a_j < 0$. The likelihood alone cannot
+choose, and the prior $a_j \sim \Gauss(1, 1)$ expresses the assumption that positive discrimination is the more common
+case <Cite id="chen2019beta3" />.
+
+The figure below fits the posterior mode instead, by gradient ascent on unconstrained $\operatorname{logit}\theta_i$,
+$\operatorname{logit}\delta_j$ and $a_j$. The $\Beta(1, 1)$ prior on $\theta_i$ becomes the logistic density on
+$u_i = \operatorname{logit}\theta_i$, whose log-derivative is $1 - 2\sigma(u_i)$. The gradient of the log-density of one
+response with respect to $\alpha$ is $\log p - \psi(\alpha) + \psi(\alpha + \beta)$, with $\psi$ the digamma function,
+and the chain rule through $\alpha = \exp\paren{a(\log\theta - \log\delta)}$ gives the rest. Started with every
+$a_j = 1$, a mislabelled instance settles at a local optimum where it is very hard with near-zero discrimination. The
+figure starts each $a_j$ at $\pm 1$ by the sign of the instance's correlation with the classifiers' mean responses, which
+reaches a higher posterior.
+
+## β³ for classifiers
+
+Each respondent is a classifier and each item a test instance. The response is the probability that classifier $i$
+gives the labelled class of instance $j$, $p_{ij} = \sum_k \indicator(y_j = k)\,p_{ijk}$ <Cite id="chen2019beta3" />.
+
+- **Instance parameters.** Instances near the class boundary get high difficulty and low discrimination, and instances
+  far from it get low difficulty and high discrimination. Most instances with negative discrimination had flipped
+  labels, and without noise in the test labels no negative discriminations were inferred <Cite id="chen2019beta3" />.
+- **Ability as a metric.** Solving the mean curve for ability gives the ability that one mean response implies,
+  $\operatorname{logit}\theta_i = \operatorname{logit}\delta_j + \operatorname{logit}(\bar p_{ij})/a_j$. Each instance
+  pulls the ability towards its own implied value, with strength set by its parameters. A low response on a hard,
+  weakly discriminating instance costs little ability, whereas log loss and the Brier score charge it in full. Ability
+  therefore ranks classifiers differently from accuracy, log loss and the Brier score <Cite id="chen2019beta3" />.
+- **Robustness to noisy test labels.** The inferred abilities of the classifiers stayed nearly constant as the fraction of
+  flipped test labels rose towards one half <Cite id="chen2019beta3" />. The flipped instances are explained by negative
+  discriminations, not by lower abilities.
+
+<InstanceIrtExplorer initialModel="beta3" />
+
+## Relation to other continuous IRT models
+
+Noel and Dauvier's beta item response model also draws responses from a beta distribution, with shape parameters
+$e^{(\theta_i - \delta_j)/2}$ and $e^{-(\theta_i - \delta_j)/2}$ on the real line <Cite id="noel2007" />. Its mean is
+the logistic $\sigma(\theta_i - \delta_j)$, a one-parameter curve with fixed slope. The β³ model adds a discrimination,
+moves ability and difficulty to $(0, 1)$, and through that bounded scale gains the non-logistic shapes
+<Cite id="chen2019beta3" />.
+
+## Assumptions
+
+- **Binary classification.** The response is one probability. The paper proposes a Dirichlet in place of the beta for
+  several classes <Cite id="chen2019beta3" />.
+- **Clean training data.** Noise-detection by negative discrimination works when the classifiers were trained on few
+  noisy labels. Noise in the training set lowers every classifier's ability and hides the noisy test instances
+  <Cite id="chen2019beta3" />.
+- **Responses inside $(0, 1)$.** A response of exactly 0 or 1 has zero density under most beta distributions. Hard
+  classifiers such as a 1-nearest-neighbour rule must be smoothed or clipped, as in the figure.
+
+## Pitfalls
+
+- **Non-identifiability.** The same response pattern can be explained by $\theta_i > \delta_j$ with $a_j > 0$ or by
+  $\theta_i < \delta_j$ with $a_j < 0$. The prior mean of $a_j$ and the initialisation decide which, and a poor start
+  leaves mislabelled instances looking merely hard.
+- **Scale is relative.** Only $\operatorname{logit}\theta_i - \operatorname{logit}\delta_j$ enters the mean, so
+  abilities and difficulties are comparable with each other within one fit, not across fits.
+- **Calibration matters.** The response is a probability, so a poorly <NoteLink to="classifier-calibration">calibrated
+  </NoteLink> but accurate classifier can get a lower ability than a calibrated one of equal accuracy. That is the point
+  of the metric, and a reason not to read ability as accuracy.

@@ -3,13 +3,15 @@ title: Expectation propagation
 kind: technique
 summary: 'Expectation propagation approximates a posterior that is a product of factors by replacing each factor with an exponential-family site. Each update removes one site, multiplies in the true factor, and matches the moments of the result, minimising a local forward KL divergence.'
 tags: [approximate-inference, bayesian, message-passing, exponential-family, worked-example]
-aliases: [EP, assumed density filtering, ADF, moment matching, cavity distribution, tilted distribution, site approximation]
-requires: [exponential-family, kl-divergence, bayes-theorem]
-related: [gp-classification, variational-inference, loopy-belief-propagation, laplace-approximation, belief-propagation, multivariate-normal-distribution]
-references: [minka2001, minka2005, rasmussen2006, bishop2006, vehtari2020]
+aliases: [EP, moment matching, cavity distribution, tilted distribution, site approximation]
+requires: [exponential-family, kullback-leibler-divergence, bayes-theorem]
+related: [gaussian-process-classification, variational-inference, loopy-belief-propagation, laplace-approximation, belief-propagation, multivariate-normal-distribution]
+references: [minka2001, minka2001thesis, opper2000, minka2005, minka2004, rasmussen2006, bishop2006, vehtari2020]
 status: draft
 updated: 2026-09-27
 ---
+
+import { EpLoop } from './EpLoop'
 
 <Definition>
 Let a posterior factorise as $p(\thetavec) \propto p_0(\thetavec)\prod_{i=1}^{n} t_i(\thetavec)$, with a prior $p_0$ in
@@ -28,7 +30,7 @@ $q$, multiply in the true factor $t_i$, and project the result back onto $\Fcal$
 ## Problem
 
 A posterior with a Gaussian prior and non-Gaussian likelihoods, such as a
-<NoteLink to="gp-classification">Gaussian process classifier</NoteLink> or a probit regression, is not Gaussian, and
+<NoteLink to="gaussian-process-classification">Gaussian process classifier</NoteLink> or a probit regression, is not Gaussian, and
 its moments are integrals with no closed form. Each single factor is easy to handle, however: the product of a
 Gaussian and one probit factor has closed-form moments. EP builds a global Gaussian approximation from these local,
 tractable computations.
@@ -60,7 +62,29 @@ and $\thetavec\thetavec^\top$, and the projection matches the mean and covarianc
 so the projection is mass-covering; see <NoteLink to="variational-inference">variational inference</NoteLink> for the
 contrast with the reverse direction.
 
+## Why the cavity
+
+The ideal site would make $q$ close to the true posterior $p$, for example by minimising $\KL(p \,\|\, q)$. That needs
+the moments of $p$, which are the intractable integrals the approximation was meant to avoid. EP makes the problem
+local. To refine site $i$, it keeps factor $t_i$ exact and replaces every other factor by its current site. The product
+of the prior and the other sites is the **cavity** $q^{\setminus i}$, and the stand-in for the posterior is the
+**tilted** distribution $\hat p_i \propto q^{\setminus i}\,t_i$. EP chooses the new site to minimise
+
+$$
+\KL\paren{q^{\setminus i}\,t_i \,\big\|\, q^{\setminus i}\,\tilde t_i}
+$$
+
+over sites $\tilde t_i$ in $\Fcal$. The cavity is a member of $\Fcal$, possibly unnormalised, and multiplying it by every
+member of $\Fcal$ gives every member of $\Fcal$. So minimising over the site is the same as minimising
+$\KL(\hat p_i \,\|\, q)$ over all $q \in \Fcal$, which is the moment match above. The site is then whatever turns the
+cavity into the projection, $\tilde t_i = q^{\mathrm{new}}/q^{\setminus i}$.
+
+Only the tilted moments are needed, and $\hat p_i$ differs from a member of $\Fcal$ by one factor. When $t_i$ depends on
+$\thetavec$ through a scalar, such as $\xvec_i\transpose\thetavec$, those moments are one-dimensional integrals.
+
 ## Mechanism
+
+<EpLoop />
 
 Initialise every site to 1 (so $q = p_0$), or to a rough guess. Then repeat until the sites stop changing, visiting
 each $i$ in turn:
@@ -73,18 +97,53 @@ each $i$ in turn:
 4. **Update the site.** $\tilde t_i \propto q^{\mathrm{new}}/q^{\setminus i}$, again a subtraction of natural
    parameters, so that $q = q^{\mathrm{new}}$.
 
-Each update minimises $\KL(\hat p_i \,\|\, q)$, a divergence in which only one factor is exact. EP never minimises a
-global divergence. Its fixed points are stationary points of an approximation to the log evidence, closely related to
-the Bethe free energy of <NoteLink to="loopy-belief-propagation">loopy belief propagation</NoteLink>
-<Cite id="minka2005" />. EP with a fully factorised discrete $q$ on a graphical model is loopy belief propagation
-<Cite id="minka2001" />.
+For a Gaussian $\Fcal$ in natural parameters, with precision $\tau$ and precision-weighted mean $\nu = \tau\mu$, the
+whole update is three subtractions and one moment computation:
 
-**Assumed density filtering** (ADF) is a single pass of steps 1 to 3 in which each factor is included once and never
-revisited. Its result depends on the order of the factors. EP's iteration refines early sites in the light of later
-ones and removes the order dependence.
+$$
+\tau_{\setminus i} = \tau - \tilde\tau_i, \quad \nu_{\setminus i} = \nu - \tilde\nu_i; \qquad
+(\hat\mu, \hat\sigma^2) = \text{moments of } \hat p_i; \qquad
+\tilde\tau_i = \frac{1}{\hat\sigma^2} - \tau_{\setminus i}, \quad \tilde\nu_i = \frac{\hat\mu}{\hat\sigma^2} - \nu_{\setminus i}.
+$$
 
-The normalising constants of the tilted distributions also give an approximation to the evidence $p(\text{data})$, used
-for hyperparameter learning, for example in Gaussian process classification <Cite id="rasmussen2006" />.
+A site's precision $\tilde\tau_i$ can be negative. That is allowed: sites are only multiplied together, and only $q$ and
+the cavities must be proper distributions.
+
+### Fixed points
+
+A fixed point is a set of sites that no update changes. At a fixed point, $q^{\mathrm{new}} = q$ for every $i$, so
+
+$$
+\expect_q\brack{\tvec(\thetavec)} = \expect_{\hat p_i}\brack{\tvec(\thetavec)} \quad \text{for every } i = 1, \dots, n.
+$$
+
+The approximation agrees on the expected sufficient statistics with each of the $n$ tilted distributions, each of which
+treats one factor exactly. It is not required to agree with the true posterior, which treats all factors exactly at
+once; with a single factor the two coincide, and EP matches the posterior's moments exactly. The order of the updates
+does not appear in the condition, so the fixed points do not depend on it.
+
+EP never minimises a global divergence. Its fixed points are stationary points of a constrained free energy that
+approximates the log evidence and generalises the Bethe free energy of
+<NoteLink to="loopy-belief-propagation">loopy belief propagation</NoteLink> <Cite id="minka2005" />. EP with a fully
+factorised discrete $q$ on a graphical model is loopy belief propagation <Cite id="minka2001" />. Plain iteration is
+not guaranteed to reach a fixed point; damping, power EP and double-loop algorithms are the remedies, described in
+<NoteLink to="expectation-propagation-failure-modes">EP failure modes and fixes</NoteLink>.
+
+### Evidence
+
+Give each site a scale chosen so that $\int q^{\setminus i}\,\tilde t_i\,d\thetavec$ equals the tilted normaliser
+$Z_i = \int q^{\setminus i}\,t_i\,d\thetavec$: the site then reproduces the factor's effect on the normaliser as well as
+on the moments. The integral of the prior times all scaled sites is a Gaussian integral and approximates the evidence
+$p(\text{data})$. It is used for hyperparameter learning, for example in Gaussian process classification
+<Cite id="rasmussen2006" />.
+
+### Assumed density filtering
+
+<NoteLink to="assumed-density-filtering">Assumed density filtering</NoteLink> (ADF) is a single pass of the update with
+every site starting at 1, so each factor is included once and never revisited <Cite id="minka2001thesis" />. Its result
+depends on the order of the factors. EP's iteration refines early sites in the light of later ones and removes the
+order dependence. The <NoteLink to="trueskill">TrueSkill</NoteLink> rating system runs ADF over a stream of games, and
+<NoteLink to="trueskill-through-time">TrueSkill Through Time</NoteLink> runs full EP over the same history.
 
 ## Worked example: one probit factor
 
@@ -114,6 +173,29 @@ $\tilde t(\theta) \propto \Gauss(\theta \mid 1.77, 2.14)$. With a single factor 
 posterior, and EP matches its mean and variance exactly. With several factors, each site is refined in turn against a
 cavity that contains the other sites.
 
+## Worked examples
+
+A ladder of examples, from a single update to realistic models. Each shows every step, with numbers checked against
+numerical integration.
+
+1. <NoteLink to="expectation-propagation-truncated-gaussian">A Gaussian times a step function</NoteLink>: the tilted
+   moments of a truncated Gaussian, the $v$ and $w$ functions, and the probit factor. The building block of the rest.
+2. <NoteLink to="assumed-density-filtering">Assumed density filtering</NoteLink>: two censored readings absorbed in each
+   order give different answers; EP revisits the sites and reaches the same answer from both.
+3. <NoteLink to="expectation-propagation-clutter-problem">The clutter problem</NoteLink>: Minka's example, with full
+   sweeps, negative-precision sites for outliers, and comparisons with the exact posterior, Laplace and variational
+   Bayes.
+4. <NoteLink to="expectation-propagation-probit-regression">EP for probit regression</NoteLink>: rank-one sites on
+   projections of a weight vector, in one and two dimensions.
+5. <NoteLink to="expectation-propagation-gaussian-process-classification">EP for Gaussian process
+   classification</NoteLink>: the same model with a kernel, compared with Laplace and MCMC.
+6. <NoteLink to="expectation-propagation-mixture-weight">EP for a mixture weight</NoteLink>: a Beta approximation, where
+   the projection matches $\expect[\log w]$ rather than the mean and variance.
+7. <NoteLink to="expectation-propagation-on-a-factor-graph">EP on a factor graph</NoteLink>: paired comparisons, with EP
+   written as Gaussian message passing, as in <NoteLink to="trueskill">TrueSkill</NoteLink>.
+8. <NoteLink to="expectation-propagation-failure-modes">EP failure modes and fixes</NoteLink>: oscillation, damping,
+   power EP and the $\alpha$-divergence, and when variational Bayes is the better choice.
+
 ## Cost
 
 For a Gaussian $q$ over $d$ dimensions, each site update costs a rank-one update of the covariance for scalar factors,
@@ -125,8 +207,10 @@ this gives $O(n^3)$ per pass, like the Laplace approximation, with a few passes 
 - **Accuracy.** For Gaussian process classification EP gives more accurate marginal posteriors and evidence estimates
   than the <NoteLink to="laplace-approximation">Laplace approximation</NoteLink>, which fits the curvature at the mode
   <Cite id="rasmussen2006" />. Matching moments captures the skew of the posterior in the mean, where Laplace ignores it.
-- **No convergence guarantee.** EP is not the optimisation of a single objective, and it can oscillate or diverge.
-  Damping, replacing each site by a weighted geometric average of its old and new values, usually fixes this.
+- **No convergence guarantee.** EP is not the optimisation of a single objective, and it can oscillate or diverge,
+  typically when the posterior is multimodal. Damping, replacing each site by a weighted geometric average of its old
+  and new values, usually fixes this; see <NoteLink to="expectation-propagation-failure-modes">EP failure modes and
+  fixes</NoteLink>.
 - **Invalid sites.** A site can have negative precision. The approximation stays valid as long as $q$ and every cavity
   have positive precision; if a cavity does not, the update must be skipped or damped.
 - **Tilted moments must be computable.** Each factor must allow the moments of $q^{\setminus i}\, t_i$, in closed form or

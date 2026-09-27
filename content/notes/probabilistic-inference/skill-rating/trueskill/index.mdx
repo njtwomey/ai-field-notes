@@ -1,0 +1,314 @@
+---
+title: TrueSkill
+kind: technique
+summary: 'TrueSkill rates players with a Gaussian belief $\Gauss(\mu, \sigma^2)$ over each skill. Performances are skills plus noise, teams add performances, and the ranking constrains their differences. Expectation propagation on this factor graph updates $\mu$ and $\sigma$ after each game.'
+tags: [skill-rating, bayesian, message-passing, approximate-inference, games, worked-example]
+aliases:
+  [
+    TrueSkill rating system,
+    Xbox Live ranking,
+    conservative skill estimate,
+    draw margin,
+    match quality,
+    truncated Gaussian update,
+  ]
+requires: [expectation-propagation, factor-graph, gaussian-distribution]
+partOf: [skill-rating]
+related: [elo-rating, glicko-and-glicko-2, paired-comparison-models, belief-propagation, kalman-filter]
+references: [herbrich2006, winn2023, minka2001, dangauthier2007, minka2018, kschischang2001]
+status: draft
+updated: 2026-09-27
+---
+
+import { TrueSkillFactorGraph } from './TrueSkillFactorGraph'
+import { TrueSkillUpdate } from './TrueSkillUpdate'
+
+<Callout variant="credit" title="Provenance: Winn and Bishop, Model-Based Machine Learning">
+This note follows the "Meeting your match" chapter of *Model-Based Machine Learning* by John Winn with Christopher M.
+Bishop, Thomas Diethe, John Guiver and Yordan Zaykov (Microsoft Research) <Cite id="winn2023" />, which builds TrueSkill
+(Herbrich, Minka and Graepel) up step by step <Cite id="herbrich2006" />. The model, its assumptions and their order are
+theirs; this note restates them in this site's notation. I include it because it is a very good account, and I want it
+in my own records. The book is free to read at [mbmlbook.com](https://mbmlbook.com).
+</Callout>
+
+<Definition>
+**TrueSkill** is a Bayesian skill rating system for games with any number of players and teams
+<Cite id="herbrich2006" />. Player $i$ has an unknown skill $s_i$ with a Gaussian belief $\Gauss(\mu_i, \sigma_i^2)$.
+In a game each player gives a performance $p_i \sim \Gauss(s_i, \beta^2)$, a team's performance is the sum of its
+players' performances, and teams finish in the order of their performances, with a draw when two teams differ by at
+most a margin $\varepsilon$. After each game, expectation propagation on the model's factor graph returns a new
+Gaussian belief for every player.
+</Definition>
+
+## Problem
+
+An online game must pair players of similar skill within seconds, often before they have played more than a handful
+of games. The rating system sees only who won. <NoteLink to="elo-rating">Elo</NoteLink> keeps one number per player
+and moves it by a fixed step, so a new player's rating takes dozens of games to settle, and Elo has no rule for teams,
+for more than two teams, or for draws. TrueSkill was built for Xbox Live to solve these problems
+<Cite id="herbrich2006" />. Following Winn and Bishop <Cite id="winn2023" />, the note first states the assumptions,
+then draws the factor graph they imply, then finds an inference method that the graph allows.
+
+## The model, one assumption at a time
+
+**Skill and performance.** Each player has a skill $s_i$, a real number that stays fixed during a game. In one game
+the player performs at $p_i = s_i + \epsilon_i$ with $\epsilon_i \sim \Gauss(0, \beta^2)$, independent across players
+and games. The player with the higher performance wins. The standard deviation $\beta$ sets the scale: a skill gap of
+$\beta$ is a fixed amount of advantage, whatever the game.
+
+With known skills, player 1 beats player 2 when $p_1 - p_2 > 0$. The difference $p_1 - p_2$ is Gaussian with mean
+$s_1 - s_2$ and variance $2\beta^2$, so
+
+$$
+\pr(\text{1 beats 2} \mid s_1, s_2) = \Phi\paren{\frac{s_1 - s_2}{\sqrt 2\, \beta}},
+$$
+
+where $\Phi$ is the standard normal cdf. This is Thurstone's probit model of
+<NoteLink to="paired-comparison-models">paired comparisons</NoteLink>. Winn and Bishop's example has Jill with skill 15,
+Fred with skill 12.5 and $\beta = 5$. Jill wins with probability $\Phi(2.5/\sqrt{50}) = 0.638$ <Cite id="winn2023" />.
+
+**Uncertain skill.** Skills are not known, so each carries a Gaussian belief $s_i \sim \Gauss(\mu_i, \sigma_i^2)$. A new
+player starts at $\Gauss(\mu_0, \sigma_0^2)$. Xbox Live used $\mu_0 = 25$, $\sigma_0 = 25/3$, $\beta = \sigma_0/2$ and
+$\tau = \sigma_0/100$, where $\tau$ is defined below <Cite id="herbrich2006" />. Integrating the skills out, the
+difference $d = p_1 - p_2$ is Gaussian with mean $t = \mu_1 - \mu_2$ and variance
+
+$$
+c^2 = 2\beta^2 + \sigma_1^2 + \sigma_2^2 ,
+$$
+
+so the predicted win probability is $\Phi(t/c)$. Uncertainty about either skill pulls the prediction towards 1/2.
+
+**Draws.** A game is drawn when $\abs{d} \le \varepsilon$, for a **draw margin** $\varepsilon \ge 0$. Player 1 wins when
+$d > \varepsilon$. Between two equally skilled players with $\sigma_1 = \sigma_2 = 0$, the draw probability is
+$2\Phi\paren{\varepsilon/(\sqrt 2\beta)} - 1$. Setting this to the observed draw rate $p_{\text{draw}}$ gives
+$\varepsilon = \sqrt 2\, \beta\, \Phi^{-1}\paren{(1 + p_{\text{draw}})/2}$. For teams of $n_1$ and $n_2$ players,
+$\sqrt 2$ becomes $\sqrt{n_1 + n_2}$ <Cite id="herbrich2006" />.
+
+**Teams.** A team's performance is the sum of its members' performances, $t_j = \sum_{i \in A_j} p_i$, where $A_j$ is
+the set of players in team $j$. Only the team outcome is observed. Assigning credit for it to the individual players is
+an inference problem, which Winn and Bishop call **credit assignment** <Cite id="winn2023" />.
+
+**Several teams.** With $k$ teams, the outcome is a ranking. Sort the teams by finishing position and take the
+differences $d_j = t_{(j)} - t_{(j+1)}$ between neighbours. The ranking is observed exactly when every $d_j > \varepsilon$,
+or $\abs{d_j} \le \varepsilon$ for a tied pair. The $k - 1$ neighbour comparisons imply the rest, so the other
+pairs need no factors.
+
+**Skills change.** Before each game a player's skill takes a Gaussian random-walk step,
+$s_i^{\text{new}} \sim \Gauss(s_i, \tau^2)$. The belief widens from $\sigma_i^2$ to $\sigma_i^2 + \tau^2$. Without this
+**dynamics factor** $\sigma_i$ would fall towards zero with every game and the rating would freeze.
+
+<TrueSkillFactorGraph />
+
+The joint density of skills, performances and differences is the product of the factors in the graph
+<Cite id="kschischang2001" />. For one game the graph is a tree: skills feed performances, performances feed team
+sums, team sums feed differences, and each difference ends in an outcome factor.
+
+## Why exact inference fails
+
+Take two players and the outcome "1 wins". The posterior of $s_1$ is its Gaussian prior times the probability of the
+observed outcome given $s_1$, which is a Gaussian cdf in $s_1$:
+
+$$
+p(s_1 \mid \text{1 wins}) \propto \Gauss(s_1; \mu_1, \sigma_1^2)\; \Phi\paren{\frac{s_1 - \mu_2 - \varepsilon}{\sqrt{2\beta^2 + \sigma_2^2}}}.
+$$
+
+A Gaussian times a Gaussian cdf is a skew-normal density, not a Gaussian. After $n$ games the exact posterior is a
+Gaussian times $n$ such cdfs, with parameters that grow with every game <Cite id="winn2023" />. TrueSkill keeps a
+single Gaussian per player instead. After each game it replaces the exact posterior with the Gaussian of the same mean
+and variance. This projection is the step of <NoteLink to="expectation-propagation">expectation propagation</NoteLink>
+(EP) <Cite id="minka2001" />, and one pass of it over a stream of games is called Gaussian density filtering or
+assumed density filtering.
+
+## The two-player update
+
+The update needs the posterior mean and variance of each skill after one game. Take the case "1 wins" with prior
+variances already widened by $\tau^2$.
+
+**Step 1: skills and difference are jointly Gaussian.** Before the outcome is seen, $s_1$ and
+$d = p_1 - p_2$ are jointly Gaussian with $\cov(s_1, d) = \sigma_1^2$, $\var(d) = c^2$ and $\expect[d] = t$. The
+conditional of $s_1$ given $d$ is therefore Gaussian with a mean linear in $d$:
+
+$$
+\expect[s_1 \mid d] = \mu_1 + \frac{\sigma_1^2}{c^2}(d - t), \qquad \var(s_1 \mid d) = \sigma_1^2 - \frac{\sigma_1^4}{c^2}.
+$$
+
+The outcome depends on the skills only through $d$. By the laws of total expectation and total variance, the posterior
+moments of $s_1$ follow from those of $d$ given the outcome:
+
+$$
+\expect[s_1 \mid \text{win}] = \mu_1 + \frac{\sigma_1^2}{c^2}\paren{\expect[d \mid \text{win}] - t},
+$$
+
+$$
+\var(s_1 \mid \text{win}) = \sigma_1^2 - \frac{\sigma_1^4}{c^2} + \frac{\sigma_1^4}{c^4}\var(d \mid \text{win}).
+$$
+
+**Step 2: moments of a truncated Gaussian.** Given "1 wins", $d$ is $\Gauss(t, c^2)$ truncated to $d > \varepsilon$.
+Standardise with $z = (d - t)/c$, which is standard normal truncated to $z > -u$ for
+$u = (t - \varepsilon)/c$. The standard normal density satisfies $z\phi(z) = -\phi'(z)$, so
+
+$$
+\expect[z \mid z > -u] = \frac{\int_{-u}^{\infty} z\phi(z)\,dz}{\Phi(u)} = \frac{\phi(-u)}{\Phi(u)} = \frac{\phi(u)}{\Phi(u)}.
+$$
+
+Write $x = t/c$ and $a = \varepsilon/c$, so that $u = x - a$, and define
+
+$$
+v(x, a) = \frac{\phi(x - a)}{\Phi(x - a)}, \qquad w(x, a) = v(x, a)\paren{v(x, a) + x - a}.
+$$
+
+Then $\expect[d \mid \text{win}] = t + c\,v$ and $\var(d \mid \text{win}) = c^2 (1 - w)$. The variance is derived in
+the collapsed block below. The same moments, as a single EP step, are worked through in
+<NoteLink to="expectation-propagation-truncated-gaussian">a Gaussian times a step function</NoteLink>.
+
+**Step 3: substitute.** Putting the moments of $d$ into step 1 gives the TrueSkill update for the winner:
+
+$$
+\mu_1 \leftarrow \mu_1 + \frac{\sigma_1^2}{c}\, v\paren{\frac{t}{c}, \frac{\varepsilon}{c}}, \qquad
+\sigma_1^2 \leftarrow \sigma_1^2 \brack{1 - \frac{\sigma_1^2}{c^2}\, w\paren{\frac{t}{c}, \frac{\varepsilon}{c}}}.
+$$
+
+The loser's update has $\mu_2$ decreased by $\frac{\sigma_2^2}{c} v$ and the same variance rule with $\sigma_2$
+<Cite id="herbrich2006" />. A draw replaces $v$ and $w$ by the moments of $d$ truncated to $\abs{d} \le \varepsilon$:
+
+$$
+v_{\text{draw}}(x, a) = \frac{\phi(-a - x) - \phi(a - x)}{\Phi(a - x) - \Phi(-a - x)},
+$$
+
+$$
+w_{\text{draw}}(x, a) = v_{\text{draw}}^2 + \frac{(a - x)\phi(a - x) + (a + x)\phi(a + x)}{\Phi(a - x) - \Phi(-a - x)}.
+$$
+
+<Derivation title="Variance of a truncated Gaussian">
+Let $z$ be standard normal truncated to $z > \alpha$, with $\lambda = \phi(\alpha)/(1 - \Phi(\alpha))$ its mean. Using
+$z^2\phi(z) = \phi(z) - (z\phi(z))'$, which follows from $\phi'(z) = -z\phi(z)$,
+
+$$
+\int_\alpha^\infty z^2 \phi(z)\,dz = \paren{1 - \Phi(\alpha)} + \alpha\phi(\alpha),
+$$
+
+so $\expect[z^2 \mid z > \alpha] = 1 + \alpha\lambda$ and $\var(z \mid z > \alpha) = 1 + \alpha\lambda - \lambda^2$.
+With $\alpha = -u$ the mean is $\lambda = \phi(u)/\Phi(u) = v$ and the variance is $1 - uv - v^2 = 1 - v(v + u) = 1 - w$.
+Scaling back by $c$ gives $\var(d \mid \text{win}) = c^2(1 - w)$.
+
+In step 1, $\var(s_1 \mid \text{win}) = \sigma_1^2 - \sigma_1^4/c^2 + \sigma_1^4(1 - w)/c^2 = \sigma_1^2(1 - w\sigma_1^2/c^2)$.
+
+For a draw, $z$ is truncated to $-a - x < z \le a - x$, and the same two integrals over a finite interval give
+$v_{\text{draw}}$ and $w_{\text{draw}}$.
+</Derivation>
+
+Three properties of the update follow from its form.
+
+- **Surprise sets the step.** $v$ is large when $x - a$ is negative, that is, when the winner was expected to lose, and
+  falls to zero for an expected win. An upset moves both means a lot; a predictable result moves them little.
+- **Uncertainty sets the share.** Each player's mean moves by $\sigma_i^2 v/c$. The player with the larger $\sigma_i$
+  absorbs more of the change. A new player's rating moves fast; an established player's barely moves.
+- **Every game shrinks $\sigma$.** $0 < w < 1$, so the variance factor lies between $1 - \sigma_i^2/c^2$ and 1. The
+  $\tau^2$ added before each game stops $\sigma$ reaching zero.
+
+<TrueSkillUpdate />
+
+## Message passing on the whole graph
+
+For team games and multi-team rankings, the update is computed by passing messages on the factor graph
+<Cite id="herbrich2006" />. Represent each Gaussian by its natural parameters, the precision $1/\sigma^2$ and the
+precision-weighted mean $\mu/\sigma^2$. Then multiplying Gaussians adds natural parameters, and dividing subtracts them.
+
+1. **Down the tree.** The prior factor sends $\Gauss(\mu_i, \sigma_i^2 + \tau^2)$ to $s_i$. The performance factor
+   sends $\Gauss(\mu_i, \sigma_i^2 + \tau^2 + \beta^2)$ to $p_i$. The sum factor sends a Gaussian to $t_j$ whose mean is
+   the sum of the members' means and whose variance is the sum of their variances. The difference factor does the same
+   for $d_j$ with a sign. All these messages are exact, because every factor above the outcome is Gaussian or linear,
+   as in <NoteLink to="belief-propagation">belief propagation</NoteLink> on a Gaussian tree.
+2. **At the outcome.** The outcome factor $\indicator[d_j > \varepsilon]$ is not Gaussian. EP forms the marginal of
+   $d_j$ as the incoming Gaussian times the indicator, projects it to the Gaussian with the same mean and variance
+   (the $v$ and $w$ functions above), and divides by the incoming message. The quotient is the Gaussian message the
+   outcome factor sends up.
+3. **Between neighbouring differences.** With three or more teams, team $j$'s performance feeds both $d_{j-1}$ and
+   $d_j$. Updating one difference changes the message into the next. The inner loop visits the difference nodes in
+   turn, each time dividing out its own previous message before recomputing it, until the messages stop changing.
+4. **Up the tree.** The final messages from the difference nodes travel back through the sum and performance factors to
+   each $s_i$. Each skill's new belief is its prior times the message from below.
+
+For two players, steps 1 to 4 reproduce the closed-form update derived above. For a team game, the same derivation with
+$c^2 = \sum_{i}(\beta^2 + \sigma_i^2)$ over all players in both teams gives each winning player
+$\mu_i \leftarrow \mu_i + (\sigma_i^2/c)\, v$ and each losing player the mirror image. Team-mates split the credit in
+proportion to their variances.
+
+Across games TrueSkill makes a single forward pass: each game's message is computed once and never revised. This is
+assumed density filtering, and its result depends on the order of the games. Re-running EP over past games, and
+smoothing along each player's history, is <NoteLink to="trueskill-through-time">TrueSkill Through Time</NoteLink>
+<Cite id="dangauthier2007" />.
+
+## Leaderboards and matchmaking
+
+**Conservative skill.** Xbox Live ranked players by $\mu_i - 3\sigma_i$, a lower bound that the skill exceeds with
+probability $\Phi(3) = 0.9987$ under the player's belief <Cite id="herbrich2006" />. A new player starts at $25 - 3 \times 25/3 = 0$. The score rises
+as games reduce $\sigma$, even without an increase in $\mu$, so the top of the board holds players who are both good
+and well measured.
+
+**Match quality.** A fair game is one whose outcome is least predictable. TrueSkill scores a candidate game by its draw
+probability as $\varepsilon \to 0$, relative to the largest possible value. For two players this is the density of $d$
+at 0, $\Gauss(0; t, c^2)$, divided by its value $1/\sqrt{2\pi\, 2\beta^2}$ when $t = 0$ and $\sigma_1 = \sigma_2 = 0$:
+
+$$
+q = \sqrt{\frac{2\beta^2}{c^2}}\; \exp\paren{-\frac{t^2}{2c^2}} .
+$$
+
+The first factor penalises uncertainty and the second a gap in means. Two new players at the default prior have
+$q = \sqrt{2\beta^2/(2\beta^2 + 2\sigma_0^2)} = \sqrt{0.2} = 0.447$. The matchmaker picks games with high $q$.
+
+## Worked example: an upset
+
+Player A has $\mu_A = 30$, $\sigma_A = 4$. Player B has $\mu_B = 22$, $\sigma_B = 6$. Use the Xbox defaults
+$\beta = 25/6$ and $\tau = 25/300$, and a draw probability of 0.1. B wins.
+
+1. **Dynamics.** $\sigma_A^2 = 16 + \tau^2 = 16.0069$ and $\sigma_B^2 = 36.0069$.
+2. **Draw margin.** $\varepsilon = \sqrt 2 \times 4.1667 \times \Phi^{-1}(0.55) = 5.8926 \times 0.12566 = 0.7405$.
+3. **Scale.** $c^2 = 2 \times 17.3611 + 16.0069 + 36.0069 = 86.7361$, so $c = 9.3132$.
+4. **From the winner's side.** $t = \mu_B - \mu_A = -8$, so $x = t/c = -0.8590$, $a = \varepsilon/c = 0.0795$ and
+   $x - a = -0.9385$. Before the game B's win had probability $\Phi(-0.9385) = 0.1740$.
+5. **Corrections.** $\phi(-0.9385) = 0.25683$, so $v = 0.25683/0.17399 = 1.4761$ and
+   $w = 1.4761 \times (1.4761 - 0.9385) = 0.7936$.
+6. **Winner B.** $\mu_B = 22 + (36.0069/9.3132) \times 1.4761 = 22 + 3.8662 \times 1.4761 = 27.707$, and
+   $\sigma_B^2 = 36.0069 \times (1 - 0.41513 \times 0.7936) = 24.145$, so $\sigma_B = 4.914$.
+7. **Loser A.** $\mu_A = 30 - (16.0069/9.3132) \times 1.4761 = 27.463$, and
+   $\sigma_A^2 = 16.0069 \times (1 - 0.18455 \times 0.7936) = 13.663$, so $\sigma_A = 3.696$.
+
+B's mean rises by 5.71 and A's falls by 2.54: B's larger $\sigma$ takes most of the correction. The conservative
+scores move from 18 to 16.37 for A and from 4 to 12.97 for B. These numbers agree with scipy and with the `trueskill`
+Python package (0.4.5), which reports A at $(27.463, 3.696)$ and B at $(27.707, 4.914)$.
+
+Winn and Bishop's first example makes the same point with more extreme beliefs. Jill, a newcomer, has belief
+$\Gauss(120, 40^2)$; Fred has $\Gauss(100, 5^2)$; $\beta = 5$ and there are no draws or dynamics. Jill wins. Then
+$c = \sqrt{1600 + 25 + 50} = 40.93$ and $x = 20/40.93 = 0.4887$, $v = 0.5150$ and $w = 0.5169$. Jill moves to
+$\Gauss(140.1, 28.5^2)$ and Fred only to $\Gauss(99.7, 4.98^2)$ <Cite id="winn2023" />.
+
+## What the model-based view adds
+
+Winn and Bishop use TrueSkill to teach a way of building models <Cite id="winn2023" />. Each assumption is stated in
+words, then becomes one factor. When the data disagree with the model, the fix is a changed assumption, not a tuned
+formula. Their chapter adds draws, then several players, then teams, then changing skills, each as a small change to the
+graph. The inference code does not change in kind: the same local message computations run on a larger graph.
+<NoteLink to="trueskill-2">TrueSkill 2</NoteLink> continues the same process with more observed quantities
+<Cite id="minka2018" />.
+
+## Cost
+
+A two-player update is a few arithmetic operations and two evaluations of $\phi$ and $\Phi$. A game with $n$ players in
+$k$ teams costs $O(n)$ for the messages down and up and $O(k)$ per sweep of the inner loop over differences, which
+converges in a few sweeps. In the original experiments, TrueSkill took at most twice the time of an Elo update
+<Cite id="herbrich2006" />. Each player's state is two numbers.
+
+## Trade-offs
+
+- **Gaussian and additive assumptions.** Team performance is a plain sum of player performances. Squads that queue
+  together perform better than their sum, which <NoteLink to="trueskill-2">TrueSkill 2</NoteLink> models with an offset
+  <Cite id="minka2018" />.
+- **Only the ranking is used.** A narrow win and a rout give the same update. Scores, kills and other statistics carry
+  information that the model discards.
+- **Order dependence.** A single forward pass gives different ratings for the same games in a different order. EP
+  sweeps over the history remove this.
+- **Not zero-sum.** Means move by $\sigma_i^2 v/c$, so the winner's gain and the loser's loss differ when their
+  variances differ. The total of the $\mu_i$ is not conserved, unlike Elo's total rating.
+- **Choice of $\beta$ and $\tau$.** $\beta$ measures how much luck the game has, and $\tau$ how fast skill drifts. Both
+  are set per game mode, by hand or by maximising the likelihood of past outcomes.

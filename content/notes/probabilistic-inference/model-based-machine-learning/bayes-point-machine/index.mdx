@@ -1,0 +1,133 @@
+---
+title: Bayes point machine
+kind: technique
+summary: 'A Bayes point machine classifies with the one weight vector that best imitates the vote of the whole posterior over linear classifiers, roughly the centre of mass of the version space. With a Gaussian prior and probit likelihoods, EP finds it as the posterior mean.'
+tags: [model-based-machine-learning, bayesian, classification, kernel-methods, expectation-propagation]
+aliases: [BPM, Bayes point, version space, centre of mass of version space, kernel billiard, Infer.NET BPM classifier]
+requires: [expectation-propagation, support-vector-machine, gaussian-distribution]
+partOf: [model-based-machine-learning]
+related: [expectation-propagation-probit-regression, gaussian-process-classification, email-reply-classifier, adpredictor, active-transfer-learning, kernel-support-vector-machine]
+references: [herbrich2001, minka2001, minka2001thesis, infernetbpm, infernetbpmmodel, diethe2016active]
+status: draft
+updated: 2026-09-27
+---
+
+import { BpmGraph } from './BpmGraph'
+import { VersionSpace } from './VersionSpace'
+
+<Callout variant="credit" title="Provenance: Herbrich, Graepel and Campbell (2001), and Minka (2001)">
+This note follows "Bayes Point Machines" by Ralf Herbrich, Thore Graepel and Colin Campbell, JMLR 2001
+<Cite id="herbrich2001" />, and the expectation-propagation treatment of the same model by Tom Minka
+<Cite id="minka2001" /> <Cite id="minka2001thesis" />, both from Microsoft Research. Infer.NET ships the model as a
+tutorial and as its general-purpose classifier <Cite id="infernetbpm" /> <Cite id="infernetbpmmodel" />. The ideas, the
+geometry of the version space and the inference methods are theirs; this note restates them in this site's notation. I
+include it because it is a very good account, and I want it in my own records. The derivation of why the posterior mean
+reproduces the posterior vote and the interactive figure were added by this site.
+</Callout>
+
+<Definition>
+Consider linear classifiers $f_\wvec(\xvec) = \sgn(\wvec\transpose\xvec)$ with a posterior $\pr(\wvec \mid \Dcal)$ after
+seeing labelled data $\Dcal$. The Bayes-optimal classifier predicts by the posterior vote
+$\sgn\paren{\expect_{\wvec \mid \Dcal}[f_\wvec(\xvec)]}$, which is in general not linear. The **Bayes point** is the
+single weight vector $\wvec_{\text{bp}}$ whose classifier agrees best with that vote on future inputs. Herbrich,
+Graepel and Campbell approximate it by the centre of mass of the version space <Cite id="herbrich2001" />.
+</Definition>
+
+## Problem
+
+A support vector machine picks one classifier among all those that separate the data: the one with the largest margin.
+A Bayesian treatment keeps all of them, weighted by the posterior, and predicts by their vote. The vote generalises
+better but costs an integral over classifiers for every prediction. The Bayes point machine keeps the Bayesian
+prediction and the cost of a single linear classifier.
+
+## Mechanism
+
+### Version space
+
+For separable data and no label noise, the likelihood is 1 for every $\wvec$ that classifies all points correctly and 0
+otherwise. Only the direction of $\wvec$ matters, so the classifiers live on the unit sphere. The consistent ones form
+the **version space**, the intersection of the half-spaces $\{\wvec : y_n\,\wvec\transpose\xvec_n > 0\}$ with the
+sphere. Under a uniform prior on directions, the posterior is uniform on the version space.
+
+- The **maximum-margin** classifier maximises $\min_n y_n\,\wvec\transpose\xvec_n$ over unit vectors. When every input
+  has the same length, as with a Gaussian kernel, it is the centre of the largest ball that fits inside the version space
+  <Cite id="herbrich2001" />. It depends only on the constraints that touch that ball, the support vectors.
+- The **Bayes point** is approximated by the centre of mass of the version space. It depends on the whole shape of the
+  region, so it moves when the region is elongated or lopsided.
+
+### Why the posterior mean
+
+Suppose the posterior is Gaussian, $\wvec \mid \Dcal \sim \Gauss(\mvec, \Smat)$. For a new input $\xvec$ the
+activation $a = \wvec\transpose\xvec$ is Gaussian with mean $\mvec\transpose\xvec$ and variance
+$\xvec\transpose\Smat\xvec$. The posterior vote is
+
+$$
+\expect_{\wvec \mid \Dcal}\brack{\sgn(\wvec\transpose\xvec)} = 2\,\pr(a > 0) - 1
+= 2\,\Phi\paren{\frac{\mvec\transpose\xvec}{\sqrt{\xvec\transpose\Smat\xvec}}} - 1,
+$$
+
+whose sign is the sign of $\mvec\transpose\xvec$, because $\Phi(u) > \frac12$ exactly when $u > 0$. For every input,
+the vote of the whole posterior equals the prediction of the single classifier $\mvec$. A Gaussian posterior therefore
+has its mean as its Bayes point, exactly. For a true posterior that is not Gaussian, such as the uniform density on a
+polyhedral version space, the identity holds approximately, and the centre of mass is the natural estimate
+<Cite id="herbrich2001" />.
+
+### Finding it
+
+Herbrich, Graepel and Campbell estimate the centre of mass by **kernel billiards**: a ball bounces around inside the
+version space, reflecting off the constraint walls, and its time-averaged position approximates the centre of mass.
+Everything is written in terms of inner products, so it works with kernels. A second sampler averages many perceptron
+solutions, each trained on a different random ordering of the data <Cite id="herbrich2001" />.
+
+Minka recasts the problem as Bayesian inference in a probit model <Cite id="minka2001" />:
+
+$$
+\wvec \sim \Gauss(\zeros, \Imat), \qquad y_n = \sgn(\wvec\transpose\xvec_n + \epsilon_n), \quad \epsilon_n \sim \Gauss(0, \beta^2).
+$$
+
+<BpmGraph />
+
+As $\beta \to 0$ the likelihood becomes the version-space indicator. Expectation propagation approximates the posterior
+by a Gaussian, one site per data point, each site a Gaussian in the projection $\wvec\transpose\xvec_n$. Its mean is
+the Bayes point estimate. In Minka's experiments EP trained Bayes point machines faster than billiards and was at least as
+accurate <Cite id="minka2001thesis" />. The site updates are worked through in the
+<NoteLink to="expectation-propagation-probit-regression">EP for probit regression</NoteLink> note. The label noise
+$\beta$ also makes the model usable on data that no linear boundary separates.
+
+<VersionSpace />
+
+## The Infer.NET classifier
+
+Infer.NET's general-purpose classifier is a Bayes point machine, and its documentation builds it from explicit
+assumptions in the model-based style <Cite id="infernetbpmmodel" />:
+
+1. Feature values are always observed.
+2. The order of the instances does not matter.
+3. The prediction is a linear discriminant of the features.
+4. Gaussian noise is added to the score, which makes it a probit model.
+5. The weights have factorised heavy-tailed priors: Gaussians whose precision has a Gamma prior with a Gamma-distributed
+   rate. This makes the classifier invariant to rescaling a feature and robust to features with large values.
+6. For several classes, class labels have no order. Each class $c$ has its own weight vector and score, and the class with
+   the largest noisy score wins.
+
+The same structure, with the weights of each user drawn around shared population weights, is the community Bayes
+point machine used for personalised activity recognition in
+<NoteLink to="active-transfer-learning">active transfer learning</NoteLink> <Cite id="diethe2016active" />.
+
+## Cost
+
+EP costs $O(N d^2)$ per pass over $N$ points in $d$ dimensions with a full covariance, or $O(N^3)$ per pass in the kernel
+form, as for <NoteLink to="gaussian-process-classification">Gaussian process classification</NoteLink>. Prediction costs one inner
+product, like an SVM, and returns a probability $\Phi\paren{\mvec\transpose\xvec / \sqrt{\beta^2 + \xvec\transpose\Smat\xvec}}$.
+
+## Trade-offs
+
+- **Against the SVM.** The Bayes point uses every point, not only the support vectors, so the solution is not sparse.
+  With zero training error allowed, Bayes point machines consistently beat support vector machines in Herbrich, Graepel
+  and Campbell's experiments; with soft margins the gain was smaller <Cite id="herbrich2001" />.
+- **Probabilities for free.** The Gaussian posterior gives calibrated uncertainty for each prediction, which an SVM
+  lacks.
+- **Approximation.** EP's Gaussian is a projection. In weight space it matches the mean and covariance of the true
+  posterior only approximately, and its mean is an estimate of the centre of mass.
+- **Online use.** One pass of EP with no revisiting is <NoteLink to="adpredictor">AdPredictor</NoteLink>'s update, which
+  processes a stream once and forgets it.

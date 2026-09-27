@@ -1,0 +1,121 @@
+---
+title: Seasonal ARIMA
+kind: concept
+summary: 'A seasonal ARIMA($p$, $d$, $q$)($P$, $D$, $Q$)$_m$ model multiplies ordinary ARIMA polynomials in $B$ by seasonal ones in $B^m$: $\Phi(B^m)\phi(B)(1 - B)^d(1 - B^m)^Dx_t = \Theta(B^m)\theta(B)\varepsilon_t$. The airline model $(0,1,1)(0,1,1)_{12}$ is the classic example.'
+tags: [time-series, arima, seasonality, forecasting, worked-example]
+aliases: [SARIMA, seasonal ARIMA model, airline model, multiplicative seasonal ARIMA, seasonal ARMA]
+requires: [autoregressive-integrated-moving-average-model]
+related: [time-series-decomposition, holt-winters, regression-with-autoregressive-moving-average-errors, box-jenkins-method, differencing-and-unit-roots]
+references: [box2015, hyndman2021, brockwell1991]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **seasonal ARIMA** model with period $m$, written ARIMA($p$, $d$, $q$)($P$, $D$, $Q$)$_m$, is
+
+$$
+\Phi(B^m)\,\phi(B)\,(1 - B)^d(1 - B^m)^D\,x_t = c + \Theta(B^m)\,\theta(B)\,\varepsilon_t,
+$$
+
+where $\phi$ and $\theta$ are the ordinary AR and MA polynomials of degrees $p$ and $q$, and
+$\Phi(z) = 1 - \Phi_1z - \dots - \Phi_Pz^P$ and $\Theta(z) = 1 + \Theta_1z + \dots + \Theta_Qz^Q$ are the seasonal
+polynomials, evaluated at $B^m$. $D$ is the number of seasonal differences $1 - B^m$. All roots of $\phi$, $\theta$,
+$\Phi$ and $\Theta$ lie outside the unit circle, and $\varepsilon_t \sim \operatorname{WN}(0, \sigma^2)$
+<Cite id="box2015" />.
+</Definition>
+
+## Intuition
+
+Monthly data have two kinds of memory. This month relates to last month, and this January relates to last January.
+A seasonal ARIMA model gives each kind its own ARIMA structure. The seasonal polynomials act on lags that are multiples
+of $m$, so a seasonal AR(1) term $\Phi_1$ links $x_t$ to $x_{t-12}$ directly, with a single parameter.
+
+The model is **multiplicative**: the ordinary and seasonal polynomials multiply. Multiplying produces interaction
+terms. The product $(1 + \theta B)(1 + \Theta B^{12}) = 1 + \theta B + \Theta B^{12} + \theta\Theta B^{13}$ has a
+coefficient at lag 13 without any new parameter. The interaction says that the effect of last month's shock on this
+month is the same in every month, and that last year's shock enters with the same one-month echo.
+
+## Seasonal differencing
+
+The seasonal difference $(1 - B^m)x_t = x_t - x_{t-m}$ removes a fixed seasonal pattern and a seasonal unit root
+(<NoteLink to="differencing-and-unit-roots">differencing and unit roots</NoteLink>). The polynomial $1 - z^m$ has $m$
+roots on the unit circle, at the $m$-th roots of unity $e^{2\pi ik/m}$. Each root corresponds to one seasonal frequency
+$k/m$ cycles per step, including frequency 0. So $(1 - B^m)$ contains the ordinary difference $(1 - B)$ as a factor:
+$1 - z^m = (1 - z)(1 + z + \dots + z^{m-1})$. A seasonal difference therefore also removes a stochastic trend.
+
+In practice $D$ is 0 or 1, and $d + D$ rarely exceeds 2. A strong, stable seasonal pattern usually calls for $D = 1$.
+
+## The airline model
+
+Box and Jenkins fitted the monthly totals of international airline passengers, 1949–1960, on the log scale, with
+the model ARIMA(0, 1, 1)(0, 1, 1)$_{12}$ <Cite id="box2015" />. It became a standard benchmark and is called the
+**airline model**:
+
+$$
+w_t = (1 - B)(1 - B^{12})x_t = (1 + \theta B)(1 + \Theta B^{12})\varepsilon_t
+= \varepsilon_t + \theta\varepsilon_{t-1} + \Theta\varepsilon_{t-12} + \theta\Theta\varepsilon_{t-13}.
+$$
+
+The doubly differenced series $w_t$ is an MA(13) with only two free parameters. Its autocovariances follow from the
+MA formula $\gamma(h) = \sigma^2\sum_ja_ja_{j+h}$ with coefficients $a_0 = 1$, $a_1 = \theta$, $a_{12} = \Theta$ and
+$a_{13} = \theta\Theta$ (<NoteLink to="moving-average-model">moving-average model</NoteLink>):
+
+$$
+\begin{aligned}
+\gamma(0) &= \sigma^2(1 + \theta^2)(1 + \Theta^2), \\
+\gamma(1) &= \sigma^2(a_0a_1 + a_{12}a_{13}) = \sigma^2\theta(1 + \Theta^2), \\
+\gamma(11) &= \sigma^2a_1a_{12} = \sigma^2\theta\Theta, \\
+\gamma(12) &= \sigma^2(a_0a_{12} + a_1a_{13}) = \sigma^2\Theta(1 + \theta^2), \\
+\gamma(13) &= \sigma^2a_0a_{13} = \sigma^2\theta\Theta,
+\end{aligned}
+$$
+
+and every other lag is 0. Dividing by $\gamma(0)$:
+
+$$
+\rho(1) = \frac{\theta}{1 + \theta^2}, \qquad \rho(12) = \frac{\Theta}{1 + \Theta^2}, \qquad \rho(11) = \rho(13) = \rho(1)\rho(12).
+$$
+
+The ACF has spikes at lags 1 and 12, and smaller spikes at 11 and 13 whose size is the product of the two. Those side
+lobes are the fingerprint of a multiplicative seasonal MA.
+
+## Worked example
+
+Take $\theta = -0.4$ and $\Theta = -0.6$. The lag-1 autocorrelation is $-0.4/1.16 = -0.345$ and the lag-12
+autocorrelation is $-0.6/1.36 = -0.441$. The side lobes are $\rho(11) = \rho(13) = (-0.345)(-0.441) = 0.152$, positive
+because both factors are negative. All other autocorrelations are 0.
+
+With $\alpha = 1 + \theta = 0.6$ the non-seasonal part behaves like simple exponential smoothing of the level. With
+$1 + \Theta = 0.4$ the seasonal part smooths the seasonal pattern across years. A negative $\Theta$ close to $-1$ means
+the seasonal pattern is nearly fixed; the seasonal difference then nearly cancels against the seasonal MA factor.
+
+## Identification
+
+The ACF and PACF are read at two scales <Cite id="hyndman2021" />.
+
+- **Seasonal lags** $m, 2m, 3m, \dots$ identify $P$ and $Q$. A seasonal MA($Q$) gives ACF spikes at lags
+  $m, \dots, Qm$ and none after. A seasonal AR($P$) gives PACF spikes at $m, \dots, Pm$ and an ACF that decays across
+  seasonal lags.
+- **Short lags** $1, 2, \dots$ identify $p$ and $q$ as for an ordinary ARMA model.
+- **Side lobes** around seasonal lags are expected from the multiplication and do not call for extra terms.
+
+Information criteria then compare the candidate models, fitted to the same differenced data
+(<NoteLink to="box-jenkins-method">Box–Jenkins method</NoteLink>).
+
+## Assumptions
+
+- The seasonal period $m$ is known and fixed.
+- After ordinary and seasonal differencing, the series is a stationary, invertible multiplicative ARMA process.
+- The multiplicative structure holds; an additive model with free coefficients at lags 1, 12 and 13 is an alternative
+  when it does not.
+
+## Pitfalls
+
+- **Long periods.** With weekly data ($m = 52$) or daily data with an annual cycle ($m = 365$), seasonal differencing
+  discards a whole year of data and seasonal polynomials need very long lags. Fourier terms in a
+  <NoteLink to="regression-with-autoregressive-moving-average-errors">regression with ARMA errors</NoteLink> handle long periods with a few
+  parameters.
+- **Multiple seasonalities** (hourly data with daily and weekly cycles) do not fit one period $m$.
+- **Over-differencing** with both $d = 1$ and $D = 1$ when one suffices introduces a non-invertible MA factor. Check for
+  $\hat\theta$ or $\hat\Theta$ near $-1$.

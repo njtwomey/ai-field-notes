@@ -1,0 +1,137 @@
+---
+title: Power and duration of A/B tests
+kind: technique
+summary: An A/B test with $n$ users per arm detects an absolute difference $\delta$ with power $1 - \beta$ when $n = 2(z_{1-\alpha/2} + z_{1-\beta})^2\sigma^2/\delta^2$. Written for a relative lift, allocation and daily traffic, the same formula sets how long the test must run.
+tags: [ab-testing, power, experimental-design, worked-example]
+aliases: [A/B test sample size, A/B test power, relative minimum detectable effect, experiment duration, unequal allocation, rule of 16]
+requires: [sample-size-planning, standard-error, z-test]
+related: [a-b-test, randomisation-and-analysis-units]
+references: [kohavi2020, kohavi2009]
+status: draft
+updated: 2026-09-27
+---
+
+import { MdeByDays } from './MdeByDays'
+
+<Definition>
+The **power** of an A/B test is the probability that it rejects the null hypothesis of no difference when the true
+difference between arms is $\delta$. For a two-sided test at level $\alpha$ comparing two means, each estimated from
+$n$ independent randomisation units with per-unit standard deviation $\sigma$, the power is $1 - \beta$ when
+
+$$
+n = \frac{2\paren{z_{1-\alpha/2} + z_{1-\beta}}^2 \sigma^2}{\delta^2}
+$$
+
+units per arm, where $z_q$ is the standard normal $q$-quantile. The smallest $\delta$ detectable for a given $n$ is
+the minimum detectable effect (MDE). The required duration is the time the experiment takes to enrol the required
+number of distinct units.
+</Definition>
+
+## Problem
+
+A team must decide, before an experiment starts, how many users to enrol and for how long. Too few users give an
+experiment that cannot detect the lifts the team cares about, and whose significant results overstate the effect, as
+in the <NoteLink to="winners-curse">winner's curse</NoteLink>. Too many users waste traffic that other experiments
+could use and delay the decision.
+
+## Mechanism
+
+**The sample size.** The estimated difference $\hat\Delta = \bar Y_T - \bar Y_C$ of two arm means with $n$ units each
+has standard error $\text{se} = \sigma\sqrt{2/n}$, assuming a common per-unit variance $\sigma^2$. The two-sided test
+rejects when $\abs{\hat\Delta}/\text{se} \ge z_{1-\alpha/2}$. If the true difference is $\delta > 0$, then
+$\hat\Delta/\text{se} \sim \Gauss(\delta/\text{se}, 1)$ approximately. Ignoring the negligible chance of rejecting in
+the wrong direction, the power is
+
+$$
+1 - \beta = P\paren{\frac{\hat\Delta}{\text{se}} \ge z_{1-\alpha/2}} = 1 - \Phi\paren{z_{1-\alpha/2} - \frac{\delta}{\text{se}}},
+$$
+
+where $\Phi$ is the standard normal distribution function. Solving gives $\delta = (z_{1-\alpha/2} + z_{1-\beta})\,
+\text{se}$: the true difference must lie $z_{1-\alpha/2}$ standard errors beyond zero to reach the critical value, and
+a further $z_{1-\beta}$ standard errors beyond that so that a fraction $1 - \beta$ of the estimates fall past it.
+Substituting $\text{se} = \sigma\sqrt{2/n}$ and solving for $n$ gives the formula in the definition. The general form of
+this argument is in <NoteLink to="sample-size-planning">sample-size planning</NoteLink>.
+
+For $\alpha = 0.05$ and power 0.8, $z_{0.975} + z_{0.8} = 1.960 + 0.842 = 2.802$ and $2 \times 2.802^2 = 15.7$. Rounding
+up gives the **rule of 16**, $n \approx 16\sigma^2/\delta^2$ per arm <Cite id="kohavi2009" />.
+
+**Relative lifts.** Experiments are usually planned for a relative lift $r$, so $\delta = r\mu$ for a control mean
+$\mu$. Then
+
+$$
+n = \frac{2\paren{z_{1-\alpha/2} + z_{1-\beta}}^2}{r^2}\paren{\frac{\sigma}{\mu}}^2.
+$$
+
+Only the coefficient of variation $\sigma/\mu$ of the per-unit metric matters. For a conversion rate $p$, each unit
+converts or not, $\sigma^2 = p(1 - p)$ and $(\sigma/\mu)^2 = (1 - p)/p$. Rare events have a large coefficient of
+variation and need large samples. Revenue per user has a larger one still; see
+<NoteLink to="revenue-and-heavy-tailed-metrics">revenue and heavy-tailed metrics</NoteLink>.
+
+**Unequal allocation.** Let a fraction $q$ of $N$ units go to treatment and $1 - q$ to control. Then
+
+$$
+\text{se}^2 = \sigma^2\paren{\frac{1}{qN} + \frac{1}{(1 - q)N}} = \frac{\sigma^2}{N q (1 - q)},
+\qquad
+N = \frac{\paren{z_{1-\alpha/2} + z_{1-\beta}}^2 \sigma^2}{\delta^2\, q(1 - q)}.
+$$
+
+$q(1 - q)$ is largest at $q = 1/2$, so an equal split needs the fewest units in total. Any other split multiplies $N$
+by $1/\paren{4q(1 - q)}$: 1.33 for $q = 0.25$ and 2.78 for $q = 0.1$.
+
+**Duration.** If $U(d)$ distinct eligible units arrive in the first $d$ days, the experiment needs the smallest $d$
+with $U(d) \ge N$. When most visitors on a given day are returning users, $U(d)$ grows more slowly than the traffic, and
+the MDE falls more slowly than $1/\sqrt d$. Suppose each of $P$ users visits on any day with probability $\pi$,
+independently. The chance that a user has not visited in $d$ days is $(1 - \pi)^d$, so
+
+$$
+U(d) = P\paren{1 - (1 - \pi)^d}.
+$$
+
+The daily traffic is $P\pi$, but $U(d)$ approaches $P$ and stops growing.
+
+## Worked example
+
+A shop converts $p = 5\%$ of users and wants to detect a relative lift of $r = 2\%$, from 5.0% to 5.1%, at
+$\alpha = 0.05$ with power 0.8. The absolute difference is $\delta = 0.001$ and $\sigma^2 = 0.05 \times 0.95 =
+0.0475$.
+
+1. **Per arm.** $n = 15.698 \times 0.0475 / 0.001^2 = 745{,}644$ users per arm, 1.49 million in total. The rule of 16
+   gives 760,000 per arm.
+2. **A 10% treatment.** With $q = 0.1$ the total is $1.49\text{ million} \times 2.78 = 4.14$ million users. A 10/10
+   split that leaves the other 80% of traffic out of the experiment needs 1.49 million users in the experiment, and
+   therefore 7.46 million users of traffic. When traffic, not risk, is the constraint, giving control the other 90%
+   uses it better than a small equal split.
+3. **Duration.** If 100,000 new eligible users arrive each day and the split is 50/50, the experiment needs
+   $1.49\text{ million}/100{,}000 = 14.9$ days. Rounding up to whole weeks, so that each day of the week is equally
+   represented, gives three weeks.
+
+<MdeByDays />
+
+## Cost
+
+The sample size scales as $1/\delta^2$. Halving the detectable lift quadruples the users needed. It scales linearly in
+$\sigma^2$, so any reduction in the per-unit variance acts as extra traffic:
+<NoteLink to="controlled-experiments-using-pre-experiment-data">CUPED</NoteLink> with a pre-experiment covariate of correlation $\rho$ multiplies $\sigma^2$ by
+$1 - \rho^2$, and <NoteLink to="triggering-and-dilution">triggering</NoteLink> removes units the change cannot affect.
+
+## Trade-offs
+
+- **Allocation against risk.** A small treatment share limits the harm of a bad change but needs more units. Many
+  teams ramp up: a few percent of traffic first to catch crashes, then an equal split for the measurement.
+- **Duration against novelty.** A longer run detects smaller lifts and averages over weekly cycles and short-lived
+  <NoteLink to="novelty-and-primacy-effects">novelty effects</NoteLink>. It also delays the decision and exposes more
+  users to a possibly worse variant.
+- **Power against false discoveries.** Lowering $\alpha$ from 0.05 to 0.01 raises $z_{1-\alpha/2}$ from 1.96 to 2.58
+  and the sample size by the factor $\paren{(2.576 + 0.842)/(1.960 + 0.842)}^2 = 1.49$.
+
+## Pitfalls
+
+- **Variance at the wrong unit.** $\sigma^2$ must be the variance of the metric per randomisation unit. Using
+  page-level variance for a user-randomised test understates the required sample; see
+  <NoteLink to="randomisation-and-analysis-units">randomisation and analysis units</NoteLink>.
+- **Planning for an optimistic lift.** The MDE should be the smallest lift worth acting on, not the lift the team
+  hopes for. Planning for a large lift gives an underpowered test for realistic ones.
+- **Stopping when significant.** The calculation assumes one analysis at the planned sample size. Checking repeatedly
+  and stopping at the first significant result inflates the false-positive rate, as shown in
+  <NoteLink to="peeking-and-optional-stopping">peeking and optional stopping</NoteLink>.
+- **Post-hoc power.** Power computed from the observed effect after the experiment adds nothing to its p-value.

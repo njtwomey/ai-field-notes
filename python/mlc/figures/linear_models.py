@@ -174,7 +174,10 @@ def lars_paths() -> LarsPaths:
     return LarsPaths(features=diabetes().features, lar=_knot_path("lar"), lasso=_knot_path("lasso"))
 
 
-@figure("sgd-for-linear-models/trajectories", title="SGDRegressor weights per epoch against the exact solutions")
+@figure(
+    "stochastic-gradient-descent-for-linear-models/trajectories",
+    title="SGDRegressor weights per epoch against the exact solutions",
+)
 def sgd_trajectories() -> SgdTrajectories:
     data = diabetes()
     alpha, l1_ratio, epochs = 1.0, 0.5, 60

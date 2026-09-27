@@ -1,0 +1,214 @@
+---
+title: MQ-RNN
+kind: concept
+summary: 'MQ-RNN outputs $Q$ quantiles for each of $K$ horizons at once. An LSTM encodes the history, a global MLP maps its state and future covariates to per-horizon contexts, and a shared local MLP maps each context to quantiles. It minimises the quantile loss at every forecast origin.'
+tags:
+  [
+    time-series,
+    forecasting,
+    neural-forecasting,
+    probabilistic-forecasting,
+    quantile-regression,
+    recurrent-networks,
+    worked-example,
+  ]
+aliases: [multi-horizon quantile recurrent forecaster, MQ-CNN, MQ-R(C)NN, forking sequences, forking-sequences training]
+requires: [long-short-term-memory]
+partOf: [neural-forecasting-models]
+related:
+  [deepar, probabilistic-forecasting, continuous-ranked-probability-score-and-interval-scores, sequence-to-sequence, temporal-convolutional-networks]
+references: [wen2017, koenker1978, hochreiter1997, oord2016c, salinas2020]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+The **multi-horizon quantile recurrent forecaster** (MQ-RNN) is a sequence-to-sequence network that outputs, at a
+forecast creation time $t$, a $K \times Q$ matrix of quantile forecasts $\hat y^{(q)}_{t+k}$ for horizons
+$k = 1, \dots, K$ and quantile levels $q \in \{q_1, \dots, q_Q\}$ <Cite id="wen2017" />:
+
+$$
+\hvec_t = \operatorname{LSTM}(\hvec_{t-1}, y_t, \xvec_t), \qquad
+(\cvec_{t+1}, \dots, \cvec_{t+K}, \cvec_a) = m_G(\hvec_t, \xvec^{(f)}_{t+1:t+K}), \qquad
+\hat y^{(q_1:q_Q)}_{t+k} = m_L(\cvec_{t+k}, \cvec_a, \xvec^{(f)}_{t+k}).
+$$
+
+$\hvec_t$ is the encoder state, $\xvec_t$ are the covariates at time $t$, $\xvec^{(f)}$ are covariates known in advance
+for the future, $m_G$ is the **global** multilayer perceptron, and $m_L$ is the **local** multilayer perceptron shared
+by all horizons. The network is trained by minimising the quantile loss summed over horizons, quantiles and forecast
+creation times.
+
+</Definition>
+
+## The problem it solves
+
+A retailer needs forecasts for every product at every week, for each of the next 52 weeks, and needs more than a
+point forecast. Stock decisions depend on quantiles: an order that covers demand with probability 0.9 is the 0.9
+quantile of demand. The inputs have three kinds:
+
+- **history-only covariates** $\xvec^{(h)}_{1:t}$, known only up to the forecast creation time, such as past demand;
+- **known future covariates** $\xvec^{(f)}_{t+1:t+K}$, such as calendar features, holidays and planned promotions;
+- **static covariates** $\xvec^{(s)}$, attributes of the series such as its product category.
+
+One network is fitted to all series, so a new product with little history borrows patterns from the others.
+
+MQ-RNN combines three ideas: sequence-to-sequence networks for the temporal structure, quantile regression for the
+output distribution, and the direct multi-horizon strategy for producing several steps at once.
+
+## Quantile loss
+
+For a quantile level $q \in (0, 1)$, a forecast $\hat y$ and an outcome $y$, the **quantile loss** is
+
+$$
+L_q(y, \hat y) = q\,(y - \hat y)_+ + (1 - q)\,(\hat y - y)_+, \qquad (a)_+ = \max(0, a).
+$$
+
+An outcome above the forecast costs $q$ per unit and an outcome below it costs $1 - q$ per unit. At $q = 0.5$ the loss
+is half the absolute error.
+
+**The expected quantile loss is minimised at the $q$-quantile.** Let $Y$ have cumulative distribution function $F$ and
+density $f$. The expected loss of a forecast $\hat y$ is
+
+$$
+R(\hat y) = \expect[L_q(Y, \hat y)] = q\int_{\hat y}^{\infty} (y - \hat y) f(y)\,dy + (1 - q)\int_{-\infty}^{\hat y}
+(\hat y - y) f(y)\,dy.
+$$
+
+Differentiate with respect to $\hat y$. Each integrand is zero at $y = \hat y$, so the terms from the moving limits
+vanish:
+
+$$
+R'(\hat y) = -q\,(1 - F(\hat y)) + (1 - q)\,F(\hat y) = F(\hat y) - q.
+$$
+
+$R'$ is negative where $F(\hat y) < q$ and positive where $F(\hat y) > q$, so $R$ falls and then rises. Its minimum is
+at $F(\hat y) = q$, which defines the $q$-quantile. A network trained to minimise the average quantile loss over
+training pairs therefore estimates the conditional $q$-quantile of $y$ given its inputs. This is quantile regression
+
+<Cite id="koenker1978" />. No distributional family is assumed. The
+<NoteLink to="probabilistic-forecasting">probabilistic forecasting</NoteLink> note works through the same result with an
+interactive figure.
+
+With $K$ horizons and $Q$ levels, the network's output at creation time $t$ is the $K \times Q$ matrix
+$\hat{\Ymat}_t = [\hat y^{(q)}_{t+k}]_{k,q}$. The training loss is
+
+$$
+\mathcal{L} = \sum_{t} \sum_{k=1}^{K} \sum_{q} L_q\paren{y_{t+k}, \hat y^{(q)}_{t+k}},
+$$
+
+where $t$ runs over forecast creation times. Terms can be weighted to stress some horizons or quantiles.
+
+## Direct multi-horizon forecasting
+
+A **recursive** forecaster predicts $\hat y_{t+1}$, feeds it back as the next input, and repeats. At training time it
+consumes true values; at forecast time it consumes its own predictions, so errors accumulate along the horizon. MQ-RNN
+uses the **direct multi-horizon** strategy instead: the whole vector $(y_{t+1}, \dots, y_{t+K})$ is a target, and all
+horizons are predicted from the same encoder state. Nothing is fed back.
+
+Feeding quantiles back would also be ill-defined. The 0.9 quantile of $y_{t+2}$ is not a function of the 0.9 quantile
+of $y_{t+1}$ alone, because quantiles do not add. A recursive quantile model would have to learn how to combine them.
+
+## Architecture
+
+**Encoder.** An LSTM <Cite id="hochreiter1997" /> reads the history. At each step it takes the target $y_t$, the
+history-only and known covariates at $t$, and an embedding of the static covariates repeated over time.
+
+**Global MLP.** At a creation time $t$, $m_G$ takes the encoder state $\hvec_t$ and all known future covariates
+$\xvec^{(f)}_{t+1:t+K}$. It outputs $K + 1$ context vectors:
+
+- a **horizon-specific context** $\cvec_{t+k}$ for each $k$, which tells the decoder how far ahead step $t+k$ lies and
+  carries what the history implies for that step;
+- a **horizon-agnostic context** $\cvec_a$, which carries information common to every horizon.
+
+Because $m_G$ sees the whole future covariate block, an event late in the horizon, such as a holiday in week 6, can
+change the forecast for week 5. The paper calls this anticipation.
+
+**Local MLP.** $m_L$ is applied to each horizon separately, with the same weights for every $k$. It takes
+$\cvec_{t+k}$, $\cvec_a$ and that step's own future covariates $\xvec^{(f)}_{t+k}$, and outputs the $Q$ quantiles for
+step $t+k$. Tying $\xvec^{(f)}_{t+k}$ directly to its own output lets a promotion in week $k$ produce a sharp spike in
+week $k$ and not in its neighbours. When future covariates carry no information, the local MLP can be dropped and $m_G$
+outputs the $K \times Q$ matrix directly.
+
+The decoder is not recurrent. The authors argue that the horizon-specific contexts already carry the temporal
+information, so a recurrent decoder would add cost without adding information <Cite id="wen2017" />.
+
+## Forking sequences
+
+Most sequence-to-sequence forecasters are trained by **cutting**: each training example is one series cut at one
+randomly chosen creation time, with the history before it as input and the next $K$ values as target. A series of
+length $T$ yields many overlapping examples, and each is encoded from scratch.
+
+An LSTM already computes $\hvec_t$ at every $t$ as it reads the series. MQ-RNN attaches a copy of the decoder, with
+shared weights, to the encoder state at **every** time step and computes the multi-horizon loss at every $t$:
+
+$$
+\hvec_t = \operatorname{encoder}(y_{1:t}, \xvec_{1:t}), \qquad
+\hat{\Ymat}_t = \operatorname{decoder}(\hvec_t, \xvec^{(f)}_{t+1:t+K}) \quad \text{for all } t.
+$$
+
+One forward and one backward pass through the series then collects the gradients of all creation times. This is
+**forking sequences**. A whole series is one training example, so no windows need to be cut. The losses at adjacent
+creation times are highly correlated, and updating them together stabilised training in the paper's experiments.
+
+Near the end of the training data, creation times $t > T - K$ have only part of their $K$-step target. MQ-RNN masks the
+missing terms of the loss rather than discarding those creation times, so the model still learns from the most recent
+short-horizon targets.
+
+## Encoder variants
+
+Any encoder that produces a state at every step with shared weights over time is compatible with forking sequences.
+The paper tried three alternatives to the plain LSTM:
+
+- **Skip connections to past states.** A linear layer summarises $(\hvec_t, \dots, \hvec_{t-D})$ before the decoder,
+  as in a nonlinear autoregressive network with exogenous inputs (NARX).
+- **Lagged targets as inputs.** Feeding $(y_{t-1}, \dots, y_{t-D})$ into the LSTM at step $t$. With $D = 52$ weeks
+  this gave the best recurrent variant.
+- **Dilated causal convolutions.** A WaveNet-style stack <Cite id="oord2016c" /> replaces the LSTM, giving
+  **MQ-CNN**. It had the highest accuracy on the Amazon data. See
+  <NoteLink to="temporal-convolutional-networks">temporal convolutional networks</NoteLink>.
+
+## Worked example
+
+Take one creation time, horizon $k = 1$ and the three quantile levels $0.1$, $0.5$ and $0.9$. The network outputs
+$\hat y^{(0.1)} = 8$, $\hat y^{(0.5)} = 10$ and $\hat y^{(0.9)} = 13$, and the outcome is $y = 12$.
+
+- $q = 0.1$: $y$ is above the forecast by 4, so the loss is $0.1 \times 4 = 0.4$.
+- $q = 0.5$: $y$ is above the forecast by 2, so the loss is $0.5 \times 2 = 1.0$.
+- $q = 0.9$: $y$ is below the forecast by 1, so the loss is $(1 - 0.9) \times 1 = 0.1$.
+
+The contribution to $\mathcal{L}$ is $1.5$. The median forecast carries most of the loss because it missed by the most.
+The 0.9 forecast was above the outcome, which that level expects to happen nine times in ten, so it pays little.
+
+The minimiser property holds for samples as well as for distributions. For the five outcomes $3, 5, 6, 8, 13$ and
+$q = 0.7$, the average quantile loss as a function of a constant forecast $c$ has slope equal to (fraction of outcomes
+below $c$) $- 0.7$. The slope changes sign at $c = 8$, where the fraction below jumps from $0.6$ to $0.8$. The average
+loss at $c = 8$ is $\big(0.7 \times 5 + 0.3 \times (5 + 3 + 2)\big)/5 = 1.3$, and $8$ is the sample 0.7-quantile.
+
+## Results reported
+
+- **Amazon demand.** Weekly demand for about 60,000 products, trained on data before 2016 and forecast at each of the 52
+  weeks of 2016 for horizons of 1 to 52 weeks. Variants each changed one design choice: a log-Gaussian likelihood in
+  place of the quantile loss, cutting in place of forking, and a recursive sequence-to-sequence model with a
+  log-Gaussian likelihood. Among these, the full MQ-RNN was the most accurate at every horizon. The likelihood variant's
+  80% interval was on average almost twice as wide <Cite id="wen2017" />.
+- **GEFCom2014.** On the electricity price task, 24 hours ahead with 99 quantiles, MQ-RNN's average quantile loss of
+  2.63 was lower than the winning entry's 2.72. On the load task, a month of hourly quantiles, its loss of 7.43 would
+  also have placed first.
+
+## Assumptions
+
+- The quantile levels are fixed before training. A level not in the set must be interpolated. The GEFCom2014 entry
+  trained 5 levels and interpolated linearly to 99.
+- Known future covariates must be available for the whole horizon at forecast time.
+- Each output is a marginal quantile of one step. The model says nothing about the joint behaviour of several steps.
+
+## Pitfalls
+
+- Quantiles are separate outputs, so nothing prevents the 0.9 forecast from falling below the 0.5 forecast. Sorting the
+  outputs, or predicting positive increments between levels, restores the order.
+- Marginal quantiles cannot answer questions about sums over the horizon, such as the 0.9 quantile of total demand over
+  four weeks. A model that produces sample paths, such as <NoteLink to="deepar">DeepAR</NoteLink>
+  <Cite id="salinas2020" />, can.
+- Quantile forecasts should be scored with the quantile loss or the
+  <NoteLink to="continuous-ranked-probability-score-and-interval-scores">CRPS</NoteLink>, and checked for calibration: the 0.9 forecast should exceed
+  about 90% of outcomes.

@@ -1,0 +1,175 @@
+---
+title: ETS models
+kind: concept
+summary: 'ETS models are the state-space form of exponential smoothing, labelled by error (additive or multiplicative), trend (none, additive, damped) and season (none, additive, multiplicative). One noise term drives observation and states, giving a likelihood and prediction intervals.'
+tags: [time-series, exponential-smoothing, forecasting, state-space-models, model-selection, worked-example]
+aliases:
+  [
+    ETS,
+    error trend seasonal,
+    exponential smoothing state-space model,
+    innovations state-space model,
+    single source of error model,
+    'ETS(A, N, N)',
+    'ETS(M, N, N)',
+    'ETS(A, A, N)',
+  ]
+requires: [simple-exponential-smoothing, holt-winters]
+related: [kalman-filter, linear-gaussian-state-space-models, autoregressive-integrated-moving-average-model, seasonal-autoregressive-integrated-moving-average, box-jenkins-method]
+references: [hyndman2008, hyndman2002, hyndman2021, gardner1985]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+An **ETS model** is a state-space model whose point forecasts equal those of an exponential-smoothing method
+<Cite id="hyndman2002" />. The label ETS($E$, $T$, $S$) names its **error** ($E$: A additive or M multiplicative),
+**trend** ($T$: N none, A additive or A$_d$ additive damped) and **seasonal** ($S$: N none, A additive or M
+multiplicative) components. With a state vector $\xvec_t$ (level, slope, seasonal states) and white noise
+$\varepsilon_t \iid \Gauss(0, \sigma^2)$, every ETS model has the **innovations** form
+
+$$
+y_t = w(\xvec_{t-1}) + r(\xvec_{t-1})\varepsilon_t, \qquad \xvec_t = f(\xvec_{t-1}) + \gvec(\xvec_{t-1})\varepsilon_t,
+$$
+
+where $w$ gives the one-step forecast, $f$ propagates the states, and $r$ and $\gvec$ set how the single error
+$\varepsilon_t$ enters the observation and each state <Cite id="hyndman2008" />.
+</Definition>
+
+## Intuition
+
+The exponential-smoothing methods (SES, Holt, Holt–Winters) are recursions that produce point forecasts. They say
+nothing about uncertainty and give no principled way to choose between them. ETS supplies the missing statistical
+model. Each method is rewritten so that its one-step forecast error is a random innovation with a distribution. Then
+the parameters have a likelihood, models can be compared by an information criterion, and prediction intervals follow
+from the model.
+
+The same point forecasts arise from two models that differ only in how the error enters. With additive errors the
+noise has constant size. With multiplicative errors the noise is a percentage of the level. The forecasts agree but
+the prediction intervals do not.
+
+## The taxonomy
+
+Combining the trend and seasonal options gives nine exponential-smoothing methods <Cite id="hyndman2021" />:
+
+| Trend \ Season         | N (none)        | A (additive)             | M (multiplicative)            |
+| ---------------------- | --------------- | ------------------------ | ----------------------------- |
+| N (none)               | SES             | additive seasonal        | multiplicative seasonal       |
+| A (additive)           | Holt            | additive Holt–Winters    | multiplicative Holt–Winters   |
+| A$_d$ (damped)         | damped Holt     | damped additive HW       | damped multiplicative HW      |
+
+Each method has an additive-error and a multiplicative-error model, so there are 18 ETS models. Earlier versions of
+the framework also included multiplicative trends <Cite id="hyndman2008" />; they tend to give explosive forecasts and
+are usually omitted.
+
+## Two examples
+
+**ETS(A, N, N)**, simple exponential smoothing with additive errors. The state is the level $\ell_t$:
+
+$$
+y_t = \ell_{t-1} + \varepsilon_t, \qquad \ell_t = \ell_{t-1} + \alpha\varepsilon_t.
+$$
+
+The first equation says that the one-step forecast error $y_t - \ell_{t-1}$ is the innovation. Substituting it into
+the second gives $\ell_t = \ell_{t-1} + \alpha(y_t - \ell_{t-1})$, the SES update. Here $w(\ell) = \ell$, $r = 1$,
+$f(\ell) = \ell$ and $g = \alpha$.
+
+**ETS(M, N, N)**, the same method with multiplicative errors. The innovation is a relative error:
+
+$$
+y_t = \ell_{t-1}(1 + \varepsilon_t), \qquad \ell_t = \ell_{t-1}(1 + \alpha\varepsilon_t).
+$$
+
+Now $\varepsilon_t = (y_t - \ell_{t-1})/\ell_{t-1}$, and substituting gives
+$\ell_t = \ell_{t-1} + \alpha(y_t - \ell_{t-1})$ again. The point forecasts are identical to ETS(A, N, N). The
+one-step standard deviation is $\sigma\ell_{t-1}$, proportional to the level.
+
+The general additive-error Holt–Winters model, ETS(A, A, A), writes the error-correction form of
+<NoteLink to="holt-winters">Holt–Winters</NoteLink> with $e_t$ replaced by $\varepsilon_t$:
+
+$$
+y_t = \ell_{t-1} + b_{t-1} + s_{t-m} + \varepsilon_t, \quad \ell_t = \ell_{t-1} + b_{t-1} + \alpha\varepsilon_t, \quad
+b_t = b_{t-1} + \beta\varepsilon_t, \quad s_t = s_{t-m} + \gamma\varepsilon_t,
+$$
+
+with $\beta = \alpha\beta^*$.
+
+## Likelihood and model selection
+
+Because the innovations are the one-step forecast errors, the likelihood follows from the chain rule. Given the
+parameters $\thetavec$ (smoothing constants and initial states), each $\varepsilon_t$ is computed recursively from the
+data. Conditional on the past, $y_t \sim \Gauss(w(\xvec_{t-1}), r(\xvec_{t-1})^2\sigma^2)$, so
+
+$$
+\log L(\thetavec, \sigma^2) = -\frac n2\log(2\pi\sigma^2) - \sum_{t=1}^{n}\log\abs{r(\xvec_{t-1})} - \frac{1}{2\sigma^2}\sum_{t=1}^{n}\varepsilon_t^2.
+$$
+
+Maximising over $\sigma^2$ gives $\hat\sigma^2 = \frac1n\sum_t\varepsilon_t^2$. Substituting it back, maximising the
+likelihood is equivalent to minimising
+
+$$
+L^*(\thetavec) = n\log\paren{\sum_{t=1}^{n}\varepsilon_t^2} + 2\sum_{t=1}^{n}\log\abs{r(\xvec_{t-1})}.
+$$
+
+For additive-error models $r = 1$, and this is least squares on the one-step errors. For multiplicative-error models
+$r$ is the one-step forecast $w(\xvec_{t-1})$, and the second term penalises fits with a large level. The likelihood is
+for the undifferenced data $y_t$ in every model, so the AICc can compare all 18 models on the same series, including
+models with and without a trend or season <Cite id="hyndman2002" />. This differs from ARIMA, where models with
+different differencing orders are not comparable by AICc.
+
+## Prediction intervals
+
+For ETS(A, N, N), iterate the state equation forward from $T$. The level at $T + h - 1$ is
+$\ell_T + \alpha\sum_{j=1}^{h-1}\varepsilon_{T+j}$, so
+
+$$
+y_{T+h} = \ell_T + \alpha\sum_{j=1}^{h-1}\varepsilon_{T+j} + \varepsilon_{T+h}, \qquad
+\var(y_{T+h} \mid y_{1:T}) = \sigma^2\paren{1 + (h - 1)\alpha^2}.
+$$
+
+The innovations are independent, so the variances add. The variance grows linearly in $h$ because the level is a
+random walk. For linear (additive-error, additive or no trend and season) models, all forecast variances have closed
+forms of this kind. For multiplicative models the forecast distribution is not Gaussian, and intervals are usually
+obtained by simulating future paths from the model <Cite id="hyndman2008" />.
+
+## Worked example
+
+Take ETS(A, N, N) with $\alpha = 0.5$ and $\sigma^2 = 1$. The forecast variances for $h = 1, \dots, 5$ are
+$1 + 0.25(h - 1)$: $1$, $1.25$, $1.5$, $1.75$ and $2$. The 95% interval at $h = 5$ is $\ell_T \pm 1.96\sqrt2 =
+\ell_T \pm 2.77$.
+
+Take ETS(M, N, N) with the same $\alpha$, $\sigma = 0.05$ and last level $\ell_T = 200$. The one-step forecast is 200,
+with standard deviation $0.05 \times 200 = 10$. A series at level 20 would have a one-step standard deviation of 1.
+The additive model gives the same interval width at every level.
+
+## Relation to ARIMA and to Kalman filtering
+
+- **Linear ETS models are ARIMA models.** ETS(A, N, N) is ARIMA(0, 1, 1) with $\theta = \alpha - 1$. ETS(A, A, N) is
+  ARIMA(0, 2, 2) with $\theta_1 = \alpha + \beta - 2$ and $\theta_2 = 1 - \alpha$
+  (<NoteLink to="holt-linear-trend">Holt's method</NoteLink>). ETS(A, A$_d$, N) is ARIMA(1, 1, 2). The additive seasonal
+  models are seasonal ARIMA models with restricted coefficients. The multiplicative models have no ARIMA equivalent,
+  and many ARIMA models have no ETS equivalent.
+- **Single versus multiple sources of error.** The local-level model has two independent noises,
+  $y_t = \mu_t + \varepsilon_t$ and $\mu_t = \mu_{t-1} + \eta_t$
+  (<NoteLink to="linear-gaussian-state-space-models">linear-Gaussian state-space models</NoteLink>). Its
+  <NoteLink to="kalman-filter">Kalman filter</NoteLink> converges to SES with a gain fixed by $\sigma_\eta^2/\sigma_\varepsilon^2$.
+  The innovations model ETS(A, N, N) has one noise, perfectly shared between observation and state. The two models
+  imply the same ARIMA(0, 1, 1) process for $y_t$ when $0 < \alpha < 1$, so they give the same forecasts once the
+  Kalman gain has converged. The innovations form needs no filter: its states are computed directly from the data.
+
+## Assumptions
+
+- Innovations are independent Gaussian with constant variance (for additive errors) or constant relative variance (for
+  multiplicative errors).
+- The parameters lie in the region where the model is stable, so that the effect of the initial states dies out. For
+  ETS(A, N, N) this is $0 < \alpha < 2$, wider than the usual $0 < \alpha < 1$.
+- Multiplicative errors, trends or seasonality require strictly positive data.
+
+## Pitfalls
+
+- **Multiplicative errors do not change the point forecasts.** They change only the intervals and the likelihood, and
+  hence which model the AICc selects.
+- **Automatic selection is not a diagnosis.** Choosing among 18 models by AICc picks the best of the family. If the
+  series has multiple seasonal periods, structural breaks or outliers, every member can be poor.
+- **Intervals ignore parameter uncertainty.** The formulas treat $\alpha$, $\beta$, $\gamma$ and the initial states as
+  known, so intervals are too narrow for short series.

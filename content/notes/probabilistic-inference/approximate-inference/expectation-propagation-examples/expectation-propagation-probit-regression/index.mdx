@@ -1,0 +1,160 @@
+---
+title: Expectation propagation for probit regression
+kind: example
+summary: 'Bayesian probit regression has prior $\wvec \sim \Gauss(\zeros, s_0\eye)$ and likelihood $\Phi(y_i\xvec_i\transpose\wvec)$. EP gives each point a Gaussian site on its projection $\xvec_i\transpose\wvec$, so every update is one-dimensional. Worked in 1-D and 2-D against the exact posterior and Laplace.'
+tags: [worked-example, approximate-inference, bayesian, classification]
+aliases: [EP probit regression, Bayesian probit classification with EP]
+requires: [expectation-propagation, expectation-propagation-truncated-gaussian, multivariate-normal-distribution]
+related: [logistic-regression, laplace-approximation, expectation-propagation-gaussian-process-classification, assumed-density-filtering]
+references: [minka2001, minka2001thesis, bishop2006, rasmussen2006]
+status: draft
+updated: 2026-09-27
+---
+
+import { ProbitEp } from './ProbitEp'
+
+<Definition>
+Binary labels $y_i \in \set{-1, +1}$ with inputs $\xvec_i \in \reals^d$ follow the probit model
+$p(y_i \mid \xvec_i, \wvec) = \Phi(y_i\,\xvec_i\transpose\wvec)$, where $\Phi$ is the standard normal cdf. The weights
+have prior $\wvec \sim \Gauss(\zeros, s_0\eye)$. Approximate the posterior
+$p(\wvec \mid \Dcal) \propto \Gauss(\wvec \mid \zeros, s_0\eye)\prod_{i=1}^n \Phi(y_i\,\xvec_i\transpose\wvec)$ by a
+Gaussian with expectation propagation (EP): first for $d = 1$, $s_0 = 1$ and three points, then for $d = 2$, $s_0 = 4$
+and seven points.
+</Definition>
+
+## Setup
+
+The probit likelihood says that $y_i = +1$ when $\xvec_i\transpose\wvec + n_i > 0$, with latent noise
+$n_i \sim \Gauss(0, 1)$. There is no bias term; the decision boundary $\xvec\transpose\wvec = 0$ passes through the
+origin, which keeps the weight space two-dimensional in the second example.
+
+- **Factors.** Each likelihood term $t_i(\wvec) = \Phi(y_i\,\xvec_i\transpose\wvec)$ depends on $\wvec$ only through the
+  scalar projection $a_i = \xvec_i\transpose\wvec$.
+- **Sites.** EP replaces $t_i$ by a Gaussian function of the same projection,
+  $\tilde t_i(\wvec) = \exp\paren{-\tfrac12\tau_i a_i^2 + \nu_i a_i}$, with site precision $\tau_i$ and
+  precision-weighted mean $\nu_i$.
+- **Approximation.** The product of the prior and the sites is Gaussian, $q(\wvec) = \Gauss(\mvec, \Smat)$ with
+
+$$
+\Smat = \paren{s_0^{-1}\eye + \sum_{i=1}^n \tau_i\,\xvec_i\xvec_i\transpose}^{-1}, \qquad
+\mvec = \Smat\sum_{i=1}^n \nu_i\,\xvec_i.
+$$
+
+## Solution
+
+### Why each update is one-dimensional
+
+Under $q$, the projection $a_i$ is Gaussian with mean $m_i = \xvec_i\transpose\mvec$ and variance
+$s_i^2 = \xvec_i\transpose\Smat\xvec_i$. The site multiplies the density of $a_i$ by
+$\exp(-\tfrac12\tau_i a_i^2 + \nu_i a_i)$ and leaves the conditional distribution of $\wvec$ given $a_i$ unchanged. So
+the cavity $q^{\setminus i} \propto q/\tilde t_i$ has, for $a_i$, precision and precision-weighted mean
+
+$$
+\tau_{\setminus i} = \frac{1}{s_i^2} - \tau_i, \qquad \nu_{\setminus i} = \frac{m_i}{s_i^2} - \nu_i.
+$$
+
+The tilted distribution $q^{\setminus i}(\wvec)\,\Phi(y_i a_i)$ also changes only the marginal of $a_i$. Under the
+cavity, $\wvec$ given $a_i$ is Gaussian with a mean linear in $a_i$ and a covariance that does not depend on $a_i$. The
+mean and covariance of $\wvec$ under the tilted distribution are therefore determined by the mean and variance of
+$a_i$ under it, and the Gaussian that matches them is the cavity times a Gaussian function of $a_i$. The full
+$d$-dimensional moment match reduces to a one-dimensional one:
+
+1. Cavity on $a_i$: $\Gauss(\mu, \sigma^2)$ with $\mu = \nu_{\setminus i}/\tau_{\setminus i}$ and
+   $\sigma^2 = 1/\tau_{\setminus i}$.
+2. Tilted moments of $\Gauss(a \mid \mu, \sigma^2)\,\Phi(y_i a)$, with $z = y_i\mu/\sqrt{1 + \sigma^2}$,
+   $v = \phi(z)/\Phi(z)$ and $w = v(v + z)$:
+   $\hat\mu = \mu + y_i\sigma^2 v/\sqrt{1 + \sigma^2}$ and $\hat\sigma^2 = \sigma^2 - \sigma^4 w/(1 + \sigma^2)$. These are
+   derived in <NoteLink to="expectation-propagation-truncated-gaussian">a Gaussian times a step function</NoteLink>.
+3. New site: $\tau_i = 1/\hat\sigma^2 - \tau_{\setminus i}$ and $\nu_i = \hat\mu/\hat\sigma^2 - \nu_{\setminus i}$.
+4. Recompute $\Smat$ and $\mvec$. A change $\delta\tau$ in one site is a rank-one update,
+   $\Smat \leftarrow \Smat - \frac{\delta\tau\,\Smat\xvec_i\xvec_i\transpose\Smat}{1 + \delta\tau\,s_i^2}$, costing $O(d^2)$.
+
+### One dimension, by hand
+
+Take $d = 1$, prior $w \sim \Gauss(0, 1)$, inputs $x = (1, 2, -0.5)$ and all labels $+1$. The third point disagrees
+with the first two: it favours negative $w$. In one dimension the site can be written on $w$ itself; a factor
+$\Phi(y\,x\,w)$ with cavity $\Gauss(w \mid \mu, \sigma^2)$ has $z = y x\mu/\sqrt{1 + x^2\sigma^2}$, tilted mean
+$\mu + y x\sigma^2 v/\sqrt{1 + x^2\sigma^2}$ and tilted variance $\sigma^2 - x^2\sigma^4 w/(1 + x^2\sigma^2)$.
+
+| sweep | point | cavity mean | cavity var | $z$     | tilted mean | tilted var | site precision | site mean |
+| ----- | ----- | ----------- | ---------- | ------- | ----------- | ---------- | -------------- | --------- |
+| 1     | 1     | 0           | 1          | 0       | 0.5642      | 0.6817     | 0.4669         | 1.773     |
+| 1     | 2     | 0.5642      | 0.6817     | 0.5845  | 0.8938      | 0.4370     | 0.8215         | 1.482     |
+| 1     | 3     | 0.8938      | 0.4370     | −0.4243 | 0.6685      | 0.4060     | 0.1744         | −2.289    |
+| 2     | 1     | 0.4102      | 0.5010     | 0.3348  | 0.6546      | 0.4078     | 0.4561         | 1.724     |
+| 2     | 2     | 0.2375      | 0.6133     | 0.2557  | 0.6617      | 0.3618     | 1.1332         | 1.272     |
+| 2     | 3     | 0.8604      | 0.3862     | −0.4108 | 0.6619      | 0.3618     | 0.1744         | −2.286    |
+
+The first row is the single-factor update of <NoteLink to="expectation-propagation">expectation propagation</NoteLink>:
+$\Gauss(1/\sqrt\pi, 1 - 1/\pi)$. The first sweep is <NoteLink to="assumed-density-filtering">assumed density
+filtering</NoteLink>. In sweep 2 the cavity for point 2 is the prior times the sites of points 1 and 3,
+$\Gauss(0.2375, 0.6133)$, much lower than the $\Gauss(0.5642, 0.6817)$ it met in sweep 1, because point 3 has pulled
+$w$ down; point 2's site is refitted with precision $1.13$ instead of $0.82$. The site of point 3 has a mean of $-2.29$
+and a small precision: a weak pull towards negative $w$.
+
+EP converges to $\Gauss(0.6597, 0.3614)$ after a few sweeps. The exact posterior, integrated on a grid, has mean
+$0.6608$ and variance $0.3674$.
+
+The <NoteLink to="laplace-approximation">Laplace approximation</NoteLink> centres on the mode, where
+$w = \sum_i y_i x_i\,v(y_i x_i w)$, and takes the variance from the curvature
+$1 + \sum_i x_i^2\,w(y_i x_i w)$ there, using $\frac{d^2}{da^2}\log\Phi(a) = -w(a)$. It gives $\Gauss(0.5328, 0.3246)$.
+The posterior is skewed towards large $w$: the likelihood $\Phi(x w)$ is flat for large positive $x w$ and falls off
+steeply for negative values. The mode sits on the steep side, 0.13 below the mean, and Laplace inherits that error. EP
+matches the mean to within 0.001.
+
+### Two dimensions
+
+Seven points with $s_0 = 4$: $(1, 0.5)$, $(2, 1.5)$ and $(0.5, 2)$ labelled $+1$; $(-1, -0.5)$, $(-1.5, 0.5)$,
+$(-0.5, -2)$ and $(0.8, -0.3)$ labelled $-1$. The last point lies on the positive side of the boundary that the other six suggest. Computed
+with numpy (the exact posterior on a $1201 \times 1201$ grid):
+
+| method  | mean             | $\var(w_1)$ | $\cov(w_1, w_2)$ | $\var(w_2)$ | $p(y = +1 \mid (1, 1))$ |
+| ------- | ---------------- | ----------- | ---------------- | ----------- | ----------------------- |
+| exact   | $(1.140, 1.811)$ | 0.551       | 0.198            | 1.396       | 0.964                   |
+| EP      | $(1.141, 1.819)$ | 0.510       | 0.084            | 1.147       | 0.961                   |
+| Laplace | $(0.812, 1.154)$ | 0.442       | 0.110            | 1.293       | 0.874                   |
+
+EP's mean is within 0.01 of the exact mean after three sweeps. Its covariance is too small along $w_2$: the posterior
+has a long tail towards large $\wvec$, because the data are nearly separable and nothing stops the weights growing in
+that direction except the prior. EP matches the moments of each tilted distribution, not of the posterior itself; for a
+strongly skewed posterior the two differ, and here EP's variance along $w_2$ is 18 per cent too small.
+
+The predictive probability averages the likelihood over the posterior. Under a Gaussian $\Gauss(\mvec, \Smat)$,
+$\xvec\transpose\wvec + n$ is Gaussian with mean $\mvec\transpose\xvec$ and variance $1 + \xvec\transpose\Smat\xvec$, so
+
+$$
+p(y = +1 \mid \xvec, \Dcal) \approx \Phi\paren{\frac{\mvec\transpose\xvec}{\sqrt{1 + \xvec\transpose\Smat\xvec}}}.
+$$
+
+At $\xvec = (1, 1)$ EP gives $0.961$ against the exact $0.964$. Laplace gives $0.874$: its mean is too close to the
+origin, so $\mvec\transpose\xvec = 1.97$ against EP's $2.96$. Plugging the Laplace mode into
+the likelihood, $\Phi(\hat\wvec\transpose\xvec) = 0.975$, ignores the uncertainty altogether.
+
+## Simulation
+
+<ProbitEp />
+
+## What it illustrates
+
+- **Sites on projections.** Whenever a factor depends on $\wvec$ only through $\xvec_i\transpose\wvec$, EP's update is a
+  one-dimensional moment match plus a rank-one covariance update. The same structure gives
+  <NoteLink to="expectation-propagation-gaussian-process-classification">EP for Gaussian process classification</NoteLink>, where $\xvec_i$
+  becomes a row of a kernel matrix.
+- **Mean against mode.** For skewed posteriors, EP's mean is close to the posterior mean; the Laplace approximation is
+  anchored at the mode. See <NoteLink to="laplace-approximation">the Laplace approximation</NoteLink>.
+- **Predictive uncertainty.** The predictive probability shrinks towards $0.5$ away from the data, where
+  $\xvec\transpose\Smat\xvec$ is large. Compare the plug-in prediction of
+  <NoteLink to="logistic-regression">logistic regression</NoteLink> at the maximum-likelihood weights.
+
+## Variations
+
+- **Noise-free labels.** Replacing $\Phi(y_i\xvec_i\transpose\wvec)$ by the step $\indicator(y_i\xvec_i\transpose\wvec > 0)$
+  makes the posterior uniform on the version space of separating weight vectors (times the prior). Its mean is the
+  Bayes point, and EP with step sites is Minka's Bayes point machine <Cite id="minka2001thesis" />.
+- **Logistic likelihood.** For $\sigma(y_i\xvec_i\transpose\wvec)$ the tilted moments have no closed form; each update
+  needs a one-dimensional quadrature. Approximating $\sigma(a) \approx \Phi(\sqrt{\pi/8}\,a)$ gives closed-form
+  moments at a small cost in accuracy <Cite id="bishop2006" />.
+- **Separable data.** When the data are separable and the prior is broad, the posterior stretches far along the
+  separating directions and the tilted variances of well-classified points become small. Updates can then overshoot,
+  and damping the site parameters is the usual remedy; see
+  <NoteLink to="expectation-propagation-failure-modes">EP failure modes and fixes</NoteLink>.

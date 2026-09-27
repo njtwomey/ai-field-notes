@@ -1,0 +1,105 @@
+---
+title: IIR filter design
+kind: technique
+summary: 'IIR filters are usually designed from analog prototypes: Butterworth (maximally flat), Chebyshev I and II (equiripple in one band) and elliptic (equiripple in both). The bilinear transform $s = 2\frac{z-1}{z+1}$ maps them to discrete time, with the band edges pre-warped by $\Omega = 2\tan(\omega/2)$.'
+tags: [signal-processing, filters, worked-example]
+aliases: [Butterworth filter, Chebyshev filter, elliptic filter, Cauer filter, bilinear transform, frequency pre-warping, impulse invariance, analog prototype]
+requires: [infinite-impulse-response-filters, z-transform, poles-and-zeros]
+related: [finite-impulse-response-filter-design, frequency-response, linear-phase-and-group-delay]
+references: [smith2007filters]
+status: draft
+updated: 2026-09-26
+---
+
+import { IirDesignExplorer } from './IirDesignExplorer'
+
+<Definition>
+The classical IIR design procedure takes a normalised analog low-pass prototype $H_a(s)$ with cutoff 1 rad/s, scales
+it to the required analog cutoff, and converts it to a digital filter by the bilinear transform
+
+$$
+s = \frac{2}{T}\,\frac{z - 1}{z + 1},
+$$
+
+where $T$ is the sample period. The four standard prototypes differ in where they place their error: Butterworth
+nowhere in particular, Chebyshev type I in the passband, type II in the stopband, and elliptic in both
+<Cite id="smith2007filters" />.
+</Definition>
+
+## Analog prototypes
+
+Each prototype is defined by its squared magnitude response on the $j\Omega$ axis:
+
+- **Butterworth.** $\abs{H_a(j\Omega)}^2 = 1/\paren{1 + \Omega^{2N}}$. The first $2N - 1$ derivatives are zero at
+  $\Omega = 0$, so it is maximally flat; the response falls monotonically and is $-3$ dB at $\Omega = 1$. Its poles lie
+  equally spaced on the left half of the unit circle.
+- **Chebyshev type I.** $\abs{H_a}^2 = 1/\paren{1 + \varepsilon^2 T_N^2(\Omega)}$, with $T_N$ the Chebyshev polynomial.
+  $T_N$ oscillates between $\pm 1$ on $\abs{\Omega} \le 1$ and grows fastest outside it of all polynomials of degree
+  $N$, so the passband ripples by $1/(1 + \varepsilon^2)$ and the transition is steeper than Butterworth's. Its poles
+  lie on an ellipse.
+- **Chebyshev type II.** The inverse design: flat passband, equiripple stopband, and zeros on the $j\Omega$ axis, which
+  become zeros on the unit circle.
+- **Elliptic (Cauer).** Equiripple in both bands, using Jacobian elliptic functions. For a given order it has the
+  narrowest transition band of any filter meeting given ripple limits, so it needs the lowest order.
+
+## The bilinear transform
+
+The bilinear transform replaces $s$ by $\frac{2}{T}\frac{z - 1}{z + 1}$, a rational map from the $z$-plane to the
+$s$-plane, and so turns a rational $H_a(s)$ into a rational $H(z)$ of the same order. Put $z = e^{i\omega}$:
+
+$$
+s = \frac{2}{T}\,\frac{e^{i\omega} - 1}{e^{i\omega} + 1} = \frac{2}{T}\,\frac{e^{i\omega/2} - e^{-i\omega/2}}{e^{i\omega/2} + e^{-i\omega/2}}
+= i\,\frac{2}{T}\tan\frac{\omega}{2} .
+$$
+
+So the unit circle maps onto the whole imaginary axis, with $\Omega = \frac{2}{T}\tan(\omega/2)$. The digital response
+at $\omega$ equals the analog response at that $\Omega$: the frequency axis is compressed, but nothing aliases. Solving
+for $z = (2/T + s)/(2/T - s)$ shows that $\abs{z} < 1$ exactly when $\operatorname{Re}s < 0$, so stable analog filters
+map to stable digital filters.
+
+The compression is nonlinear, which is why band edges must be *pre-warped*: to put a digital edge at $\omega_c$,
+design the analog prototype with its edge at $\Omega_c = \frac{2}{T}\tan(\omega_c/2)$. Impulse invariance, the older
+alternative, samples the analog impulse response instead; it keeps the frequency axis linear but aliases the analog
+response, so it suits only band-limited low-pass designs.
+
+<IirDesignExplorer />
+
+## Choosing the order
+
+For a Butterworth filter meeting a passband ripple of $R_p$ dB at $\Omega_p$ and an attenuation of $R_s$ dB at
+$\Omega_s$ (both pre-warped), the order must satisfy
+
+$$
+N \ge \frac{\log_{10}\brack{\paren{10^{R_s/10} - 1}/\paren{10^{R_p/10} - 1}}}{2\log_{10}(\Omega_s/\Omega_p)},
+$$
+
+obtained by requiring the squared-magnitude formula to meet both limits. The Chebyshev and elliptic orders come from
+similar formulas; SciPy's `buttord`, `cheb1ord`, `cheb2ord` and `ellipord` compute them.
+
+## Worked example
+
+Specify a low-pass filter with at most 1 dB ripple up to $0.2\pi$ and at least 40 dB attenuation from $0.3\pi$.
+Pre-warping gives $\Omega_p = 2\tan(0.1\pi) = 0.650$ and $\Omega_s = 2\tan(0.15\pi) = 1.019$, with $T = 1$. The
+Butterworth formula gives $N \ge 11.74$, so order 12. The required orders are:
+
+| Design | Order |
+| --- | --- |
+| Butterworth | 12 |
+| Chebyshev I | 6 |
+| Chebyshev II | 6 |
+| Elliptic | 4 |
+| FIR, Kaiser window (40 dB, $\Delta\omega = 0.1\pi$) | 45 (46 taps) |
+
+The elliptic filter needs about 9 multiplications per sample in direct form, against about 46 for the FIR design. A
+fourth-order Butterworth filter with cutoff $0.3\pi$ is exactly $-3.01$ dB at $0.3\pi$ thanks to pre-warping; its group
+delay is 2.56 samples at DC and rises to 4.66 samples at $0.282\pi$, just below the cutoff. Without pre-warping, an
+analog cutoff of $0.3\pi$ rad/s would land at $0.280\pi$.
+
+## Pitfalls
+
+- **Implement as second-order sections.** High-order designs as a single polynomial ratio lose precision badly; use
+  `output='sos'`.
+- **Ripple is steep but not free.** Chebyshev and elliptic filters have larger group-delay peaks and more ringing than
+  Butterworth; transient-sensitive applications often prefer Butterworth or Bessel.
+- **Band-pass and high-pass.** These are made from the low-pass prototype by frequency transformations before the
+  bilinear transform; a band-pass filter of prototype order $N$ has order $2N$.

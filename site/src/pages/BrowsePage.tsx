@@ -69,9 +69,14 @@ export function BrowsePage() {
         </aside>
 
         <div className="min-w-0 space-y-6">
+          {/* The trail stays under the site header while the list scrolls, so the reader always sees where they are. */}
+          {params.c && (
+            <div className="sticky top-14 z-10 -mx-2 border-b bg-background/95 px-2 py-2 backdrop-blur">
+              <CategoryTrail path={params.c} className="-ml-1" />
+            </div>
+          )}
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              {params.c && <CategoryTrail path={params.c} className="mb-2 -ml-1" />}
               <h1 className="font-prose text-3xl font-bold">{scopeTitle}</h1>
               <p className="mt-1 text-sm text-muted-foreground">
                 {matches.length} of {notes.length} notes

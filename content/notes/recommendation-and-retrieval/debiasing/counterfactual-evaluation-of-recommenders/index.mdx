@@ -1,0 +1,328 @@
+---
+title: Counterfactual evaluation of recommenders
+kind: concept
+summary: 'Counterfactual evaluation estimates the reward a new recommender would earn from logs of the production one, weighting each logged reward by $\pi(a \mid x)/\pi_0(a \mid x)$. It needs logged propensities and support; clipping, self-normalisation and a reward model tame its variance.'
+tags: [recommender-systems, evaluation, bias, off-policy-evaluation, importance-sampling, worked-example]
+aliases: [counterfactual recommender evaluation, offline A/B test simulation]
+requires: [propensity-in-recommendation, expectation]
+partOf: [recommender-systems]
+related: [off-policy-evaluation, unbiased-offline-evaluation, logging-policies-and-propensities, slate-off-policy-evaluation, a-b-test, importance-sampling]
+references: [yan2022counterfactual, horvitz1952, rosenbaum1983, swaminathan2015, swaminathan2015b, bottou2013, dudik2011, li2011, sachdeva2020deficient, saito2021obp, saito2021tutorial, joachims2016tutorial, rohde2018recogym]
+status: draft
+updated: 2026-09-27
+---
+
+import { EstimatorLab } from './EstimatorLab'
+
+<Callout variant="credit" title="Provenance: Eugene Yan (10 April 2022)">
+The progression of this note is seeded by Eugene Yan's article [Counterfactual Evaluation for Recommendation
+Systems](https://eugeneyan.com/writing/counterfactual-evaluation/) <Cite id="yan2022counterfactual" />. The article
+frames recommendation as an interventional problem, then walks from inverse propensity scoring through its failures
+(missing support and high variance) to clipped and self-normalised IPS, and discusses where the probabilities come from
+in a production recommender. The iPhone and Pixel example and the storage argument for SNIPS are his. The derivations,
+the doubly robust section, the worked example and the estimator lab are additions for this site.
+</Callout>
+
+<Definition>
+A production recommender, the **logging policy** $\pi_0$, shows item $a$ in context $x$ (a user, or the page being
+viewed) with probability $\pi_0(a \mid x)$, and the log records each impression as $(x_i, a_i, r_i, p_i)$ with reward
+$r_i$ (a click or a purchase) and **propensity** $p_i = \pi_0(a_i \mid x_i)$. **Counterfactual evaluation** estimates
+the expected reward per impression that a new recommender $\pi$ would earn,
+
+$$
+V(\pi) = \expect_{x}\brack{\sum_a \pi(a \mid x)\,\mu(x, a)}, \qquad \mu(x, a) = \expect[r \mid x, a],
+$$
+
+from that log, without deploying $\pi$ <Cite id="yan2022counterfactual" />.
+</Definition>
+
+## Observational and interventional evaluation
+
+The standard offline evaluation of a recommender splits logged interactions into training and validation sets and
+scores the validation set with recall, precision or NDCG (see <NoteLink to="recommendation-metrics">recommendation
+metrics</NoteLink>). That protocol treats recommendation as an **observational** problem, like predicting a product's
+category from its title. A model evaluated this way learns, for example,
+$P(\text{next view} = \text{iPhone} \mid \text{viewed Pixel, Galaxy})$: how well it predicts what users did while the
+production recommender was choosing what they saw.
+
+Recommendation is an **interventional** problem. Showing an item changes what users do, and users can only click items
+that were shown. The quantity of interest is
+$P(\text{click} \mid \text{recommend iPhone}, \text{viewed Pixel, Galaxy})$: what happens under a new intervention
+<Cite id="yan2022counterfactual" />. A holdout metric measures how well a new model fits the production policy's log. A
+model that differs from production is penalised for every logged click it would not have caused, and receives no credit
+for clicks it would have caused on items production never showed. The causal structure behind this, confounding by
+the presentation policy, is set out in <NoteLink to="biases-in-recommender-feedback">biases in recommender
+feedback</NoteLink>. Reweighting holdout metrics pair by pair is covered in <NoteLink
+to="unbiased-offline-evaluation">unbiased offline evaluation</NoteLink>; this note evaluates whole policies.
+
+The direct way to answer an interventional question is an <NoteLink to="a-b-test">A/B test</NoteLink>. An A/B test
+shows the new recommendations to real users and measures the change in click-through or conversion. It needs
+engineering work to deploy, enough traffic and time to reach a verdict, and tolerance for exposing users to a bad
+variant; research teams often have no access to one. Counterfactual evaluation asks the existing log what would have
+happened had users been shown the new recommendations instead. It estimates the outcome of an A/B test without running
+it, and is used to decide which candidates deserve one.
+
+## Inverse propensity scoring
+
+The **inverse propensity scoring** (IPS) estimator reweights each logged reward by how much more, or less, often the new
+recommender would make the logged recommendation:
+
+$$
+\hat V_{\text{IPS}}(\pi) = \frac1n\sum_{i=1}^{n} w_i r_i, \qquad w_i = \frac{\pi(a_i \mid x_i)}{\pi_0(a_i \mid x_i)}.
+$$
+
+The ratio $w_i$ is the **importance weight**. Suppose the production recommender shows an iPhone on the Pixel's detail
+page with probability 0.4 and the new recommender would show it with probability 0.6. The new recommender makes that
+recommendation $0.6/0.4 = 1.5$ times as often, so each logged click on the iPhone from the Pixel page counts 1.5 times
+<Cite id="yan2022counterfactual" />. The estimator is the Horvitz–Thompson estimator of survey sampling
+<Cite id="horvitz1952" />, and the same inverse-probability weighting underlies propensity-score methods for
+observational studies <Cite id="rosenbaum1983" />. It is <NoteLink to="importance-sampling">importance
+sampling</NoteLink> with the logging policy as proposal.
+
+**Unbiasedness.** Given the context $x$, the logged item is drawn from $\pi_0(\cdot \mid x)$, so
+
+$$
+\expect[w r \mid x] = \sum_a \pi_0(a \mid x)\,\frac{\pi(a \mid x)}{\pi_0(a \mid x)}\,\mu(x, a) = \sum_a \pi(a \mid x)\,\mu(x, a),
+$$
+
+provided $\pi_0(a \mid x) > 0$ for every item the new recommender might show. The production probabilities cancel, and
+averaging over $x$ gives $\expect[\hat V_{\text{IPS}}] = V(\pi)$. The derivation in full, with the law of total
+expectation, is in <NoteLink to="off-policy-evaluation">off-policy evaluation</NoteLink>.
+
+## Where the propensities come from
+
+IPS needs $\pi_0(a \mid x)$ for every logged impression. A production recommender offers three sources
+<Cite id="yan2022counterfactual" />.
+
+- **Normalised scores.** If the recommender samples items from its scores $s_a$, the probability of item $a$ in the
+  first slot is the Plackett–Luce probability $\exp(s_a)/\sum_b \exp(s_b)$, and later slots follow by sampling without
+  replacement (see <NoteLink to="paired-comparison-models">paired comparison models</NoteLink>). A recommender that
+  sorts by score and shows the top items deterministically has propensities 0 and 1, whatever the softmax of its scores
+  says. Normalised scores are propensities only if the system actually samples from them.
+- **Frequencies in a recommendation store.** Recommendations precomputed in batch can be counted: the share of store
+  versions, or of candidate lists, in which item $a$ was recommended for context $x$.
+- **Impression counts.** The share of impressions in context $x$ that showed item $a$. Impressions record what users
+  were actually shown, after business rules, deduplication and layout, so they are the most direct measure of the
+  probability of a recommendation. Yan prefers them for that reason.
+
+Counted frequencies are estimates, and they are noisy for rarely shown items, which are exactly the items with the
+largest weights. The general theory of exposure and position propensities is in <NoteLink
+to="propensity-in-recommendation">propensity in recommendation</NoteLink>, and estimating exposure from clicks alone is
+worked through in <NoteLink to="estimating-item-propensities">estimating item propensities</NoteLink>. Most public
+recommendation datasets record no propensities, which is one reason counterfactual evaluation is rare in academic
+papers. The Open Bandit Dataset, from a fashion e-commerce site, is an exception: every row carries the probability
+with which its item was chosen <Cite id="saito2021obp" />.
+
+## Failure one: missing support
+
+IPS is unbiased only if the production recommender could have shown every item the new recommender shows. Let $U(x)$ be
+the set of items with $\pi_0(a \mid x) = 0$. Those items never appear in the log, so the sum in the unbiasedness
+argument runs over the other items only:
+
+$$
+\expect[\hat V_{\text{IPS}}] = V(\pi) - \expect_x\brack{\sum_{a \in U(x)} \pi(a \mid x)\,\mu(x, a)}.
+$$
+
+The estimator silently drops the value of every recommendation the log never made. For nonnegative rewards the bias is
+downward: a new recommender that surfaces items production never showed looks worse than it is
+<Cite id="sachdeva2020deficient" />. No reweighting repairs this, because there is nothing to reweight.
+
+Support is a property of the logging policy, so it is fixed by changing that policy.
+
+- **Exploration traffic.** Show random, otherwise unrecommended items on a small share of traffic, so that every item
+  has been logged in every context. Product owners tend to resist it, because it shows users worse recommendations.
+- **Stochastic recommendations.** Give every eligible item a positive probability and sample the recommendation from
+  it, for example by Plackett–Luce sampling from the scores, or by mixing the ranking with a small uniform share. Every
+  item has a chance to be shown, and the propensity is known exactly.
+
+<NoteLink to="logging-policies-and-propensities">Logging policies and propensities</NoteLink> compares these designs
+and quantifies what each costs.
+
+## Failure two: variance
+
+The terms of IPS are independent, so $\var(\hat V_{\text{IPS}}) = \var(w r)/n$. The contribution of one item $a$ in
+context $x$ to the second moment is its logging probability times the squared weighted reward:
+
+$$
+\pi_0(a \mid x)\paren{\frac{\pi(a \mid x)}{\pi_0(a \mid x)}}^2\expect[r^2 \mid x, a] = \frac{\pi(a \mid x)^2}{\pi_0(a \mid x)}\,\expect[r^2 \mid x, a].
+$$
+
+The variance grows as $1/\pi_0$ on the items the new recommender favours. Suppose production shows an item with
+probability 0.001 and one click on it was logged. If the new recommender shows the item with probability 0.1, that
+single click is multiplied by 100 <Cite id="yan2022counterfactual" />. Whether the log happened to contain that click
+moves the estimate by more than the difference between candidate recommenders. The simplest defence is to evaluate
+only candidates close to production: if $\pi(a \mid x) \le M\,\pi_0(a \mid x)$ everywhere, every weight is at most
+$M$. Penalties on divergence from $\pi_0$ used when learning policies are the same idea; see
+<NoteLink to="off-policy-learning">off-policy learning</NoteLink>.
+
+## Clipped IPS
+
+**Clipped IPS** (CIPS) caps each weight at a threshold $M$ <Cite id="bottou2013" /> <Cite id="swaminathan2015" />:
+
+$$
+\hat V_{\text{CIPS}}(\pi) = \frac1n\sum_{i=1}^{n}\min(w_i, M)\,r_i.
+$$
+
+With $M = 10$, a weight of 100 counts as 10. The threshold trades bias for variance, and both sides can be derived.
+
+**Bias.** Given $x$, $\expect[\min(w, M)\,r \mid x] = \sum_a \pi_0(a \mid x)\min\paren{\pi(a \mid x)/\pi_0(a \mid x), M}\mu(x, a) = \sum_a \min\paren{\pi(a \mid x), M\pi_0(a \mid x)}\mu(x, a)$.
+Subtracting $\sum_a \pi(a \mid x)\mu(x, a)$ gives
+
+$$
+\expect[\hat V_{\text{CIPS}}] - V(\pi) = -\expect_x\brack{\sum_a \paren{\pi(a \mid x) - M\pi_0(a \mid x)}_+\,\mu(x, a)},
+$$
+
+where $(z)_+ = \max(z, 0)$. For nonnegative rewards the bias is downward, and it is the value the new recommender earns
+from the part of its probability that exceeds $M$ times production's. It vanishes when $M$ exceeds the largest weight.
+
+**Variance.** For $w \ge 0$, $\min(w, M)^2 \le M w$, since $\min(w, M) \le M$ and $\min(w, M) \le w$. With rewards in
+$[0, r_{\max}]$ and $\expect[w] = \expect_x\brack{\sum_a \pi(a \mid x)} = 1$,
+
+$$
+\var(\hat V_{\text{CIPS}}) \le \frac{\expect[\min(w, M)^2 r^2]}{n} \le \frac{M\,r_{\max}^2\,\expect[w]}{n} = \frac{M\,r_{\max}^2}{n}.
+$$
+
+The variance is bounded by the threshold, whatever the smallest propensity. A small $M$ gives low variance and a large
+downward bias; a large $M$ recovers IPS. The best threshold depends on the log and the candidate, and tuning it is the
+estimator's practical weakness <Cite id="yan2022counterfactual" />.
+
+## Self-normalised IPS
+
+The weights have expectation 1, as shown above, but their sample average $\bar w = \frac1n\sum_i w_i$ fluctuates, and
+IPS inherits the fluctuation. **Self-normalised IPS** (SNIPS) divides by the sum of the weights instead of by $n$
+<Cite id="swaminathan2015b" />:
+
+$$
+\hat V_{\text{SNIPS}}(\pi) = \frac{\sum_{i=1}^{n} w_i r_i}{\sum_{i=1}^{n} w_i}.
+$$
+
+- **No parameter.** Unlike CIPS, SNIPS has no threshold to tune.
+- **Bounded.** SNIPS is a weighted average of the logged rewards, so it lies between the smallest and largest of them.
+  IPS can report a click rate above 1.
+- **Consistent, slightly biased.** The numerator divided by $n$ converges to $V(\pi)$ and the denominator divided by $n$
+  converges to $\expect[w] = 1$, so the ratio converges to $V(\pi)$. A ratio of two random sums is biased in finite
+  samples, by an amount of order $1/n$.
+- **Invariant to reward translation.** Replacing every reward $r_i$ by $r_i + c$ changes SNIPS by exactly $c$, because
+  $\sum_i w_i(r_i + c)/\sum_i w_i = \hat V_{\text{SNIPS}} + c$. IPS changes by $c\,\bar w$, which is not $c$. The IPS
+  comparison of two recommenders can therefore depend on whether a non-click is coded 0 or $-1$; the SNIPS comparison
+  cannot.
+
+SNIPS has a storage cost that IPS does not. The IPS numerator needs weights only for impressions with nonzero reward,
+and its denominator $n$ is a count. The SNIPS denominator needs the weight of every impression. With click-through or
+conversion rates below 10%, that is ten or more times as many propensities to store and weights to compute
+<Cite id="yan2022counterfactual" />. Swaminathan and Joachims report that SNIPS converges faster, which repays the extra
+computation in learning <Cite id="swaminathan2015b" />.
+
+## The direct method and doubly robust
+
+The **direct method** (DM) fits a reward model $\hat\mu(x, a)$, a click model or a simulator of users, and averages its
+predictions under the new recommender, $\hat V_{\text{DM}} = \frac1n\sum_i\sum_a \pi(a \mid x_i)\,\hat\mu(x_i, a)$.
+It is the recommender analogue of training reinforcement-learning agents in a simulated environment such as RecoGym
+<Cite id="rohde2018recogym" />. It needs no propensities and has low variance. The model is fitted on production's
+impressions, so it extrapolates on exactly the items the new recommender adds, and its error there is a bias that more
+data does not remove.
+
+The **doubly robust** (DR) estimator adds the weighted residuals of the model to DM <Cite id="dudik2011" />:
+
+$$
+\hat V_{\text{DR}}(\pi) = \frac1n\sum_{i=1}^{n}\brack{\sum_a \pi(a \mid x_i)\,\hat\mu(x_i, a) + w_i\paren{r_i - \hat\mu(x_i, a_i)}}.
+$$
+
+The correction is IPS applied to the residual $r - \hat\mu(x, a)$. With correct propensities its expectation is
+$\expect_x[\sum_a \pi(a \mid x)(\mu(x, a) - \hat\mu(x, a))]$, which cancels the model's bias exactly. With a correct
+model the residuals have mean zero under any weights. DR is unbiased if either part is right; both cases are derived in
+<NoteLink to="off-policy-evaluation">off-policy evaluation</NoteLink>. Its variance is that of IPS on the residuals.
+With rare binary clicks most of the residual is the randomness of the click itself, which no model predicts, so DR
+removes less variance in recommendation than in problems with rewards far from zero.
+
+## Choosing an estimator
+
+<EstimatorLab />
+
+The lab shows the trade-offs. IPS is centred on the truth, and its spread grows as production's propensities for the
+new recommender's items shrink. Clipping shrinks the spread and pulls the estimate down; at a small threshold the error
+is almost all bias. SNIPS is nearly centred with a smaller spread and no parameter. The direct method with a page-blind
+model is precise and wrong. Doubly robust stays centred whatever the model. The production click rate, which is what the
+log reports without reweighting, is far from the new recommender's value: that gap is the observational bias.
+
+In a comparison on synthetic data with ten actions, Saito found that IPS overtook the direct method as the log grew,
+that clipping gained little over IPS, and that SNIPS had the smallest error without any tuning
+<Cite id="saito2021tutorial" />. Yan's practical advice follows from this <Cite id="yan2022counterfactual" />. Keep
+conventional offline evaluation, because it is standardised, comparable across papers and available before any
+recommender is deployed. Add counterfactual evaluation with SNIPS when offline metrics disagree with A/B test outcomes.
+The SIGIR 2016 and RecSys 2021 tutorials develop the estimators and their learning counterparts further
+<Cite id="joachims2016tutorial" /> <Cite id="saito2021tutorial" />.
+
+A recommender usually shows a list, not one item. Treating each slot as a separate impression with its own propensity
+assumes that items on a page do not affect each other's rewards; <NoteLink to="slate-off-policy-evaluation">off-policy
+evaluation for slates</NoteLink> covers what happens when they do. Li et al.'s replay method, which keeps only the
+impressions where a uniformly random logger showed what the new policy would show, is the special case of SNIPS with
+equal propensities, and was used to evaluate news recommenders offline <Cite id="li2011" />.
+
+## Worked example
+
+A shop recommends one accessory on phone detail pages: an iPhone or a phone case. The context $x$ is the page, Pixel or
+Galaxy. The production and new recommenders show the items with these probabilities:
+
+| page   | item   | production $\pi_0$ | new $\pi$ | weight $w = \pi/\pi_0$ |
+| ------ | ------ | ------------------ | --------- | ---------------------- |
+| Pixel  | iPhone | 0.4                | 0.6       | 1.5                    |
+| Pixel  | case   | 0.6                | 0.4       | 2/3                    |
+| Galaxy | iPhone | 0.1                | 0.5       | 5                      |
+| Galaxy | case   | 0.9                | 0.5       | 5/9                    |
+
+Six impressions were logged, with reward 1 for a click:
+
+| impression | page   | item   | propensity $p$ | click $r$ | weight $w$ |
+| ---------- | ------ | ------ | -------------- | --------- | ---------- |
+| 1          | Pixel  | iPhone | 0.4            | 1         | 1.5        |
+| 2          | Pixel  | case   | 0.6            | 0         | 0.667      |
+| 3          | Pixel  | case   | 0.6            | 1         | 0.667      |
+| 4          | Galaxy | case   | 0.9            | 0         | 0.556      |
+| 5          | Galaxy | iPhone | 0.1            | 1         | 5          |
+| 6          | Galaxy | case   | 0.9            | 0         | 0.556      |
+
+- **Log average.** Three clicks in six impressions give $3/6 = 0.5$. This estimates production's click rate, not the
+  new recommender's.
+- **IPS.** The clicked impressions carry weights 1.5, 0.667 and 5, so
+  $\hat V_{\text{IPS}} = (1.5 + 0.667 + 5)/6 = 7.167/6 = 1.194$. The estimated click rate exceeds 1, because
+  impression 5, a rare recommendation that happened to be clicked, counts five times.
+- **Clipped IPS, $M = 3$.** Impression 5's weight becomes 3, so $\hat V_{\text{CIPS}} = (1.5 + 0.667 + 3)/6 = 0.861$.
+- **SNIPS.** The six weights sum to $8.944$, so $\hat V_{\text{SNIPS}} = 7.167/8.944 = 0.801$. The average weight
+  $\bar w = 8.944/6 = 1.49$ is far from its expectation of 1, a warning that six impressions are too few. SNIPS needed
+  the weights of impressions 2, 4 and 6, which IPS did not.
+- **Direct method.** Suppose a click model predicts $\hat\mu = 0.5$ for the iPhone and $0.3$ for the case on the Pixel
+  page, and $0.4$ and $0.2$ on the Galaxy page. The new recommender's predicted click rate is
+  $0.6 \cdot 0.5 + 0.4 \cdot 0.3 = 0.42$ on a Pixel page and $0.5 \cdot 0.4 + 0.5 \cdot 0.2 = 0.30$ on a Galaxy page.
+  Three impressions of each give $\hat V_{\text{DM}} = (3 \cdot 0.42 + 3 \cdot 0.30)/6 = 0.36$.
+- **Doubly robust.** The corrections $w_i(r_i - \hat\mu(x_i, a_i))$ are $1.5(1 - 0.5) = 0.75$,
+  $0.667(0 - 0.3) = -0.2$, $0.667(1 - 0.3) = 0.467$, $0.556(0 - 0.2) = -0.111$, $5(1 - 0.4) = 3$ and $-0.111$. They sum
+  to $3.794$, with average $0.632$, so $\hat V_{\text{DR}} = 0.36 + 0.632 = 0.992$.
+- **Translation.** Adding 1 to every reward raises SNIPS by exactly 1 and IPS by $\bar w = 1.49$.
+
+The estimates range from 0.36 to 1.19. Six impressions show the arithmetic, not a reliable answer. The spread shows how
+each estimator treats impression 5. IPS takes it at face value, CIPS caps it, SNIPS dilutes it by the total weight, DM
+ignores it, and DR adds its surprise relative to the click model, weighted by 5. The effective sample size
+$(\sum_i w_i)^2/\sum_i w_i^2 = 2.8$ says the six impressions carry the information of fewer than three.
+
+## Assumptions
+
+- **Recorded propensities.** The probability of every logged impression under production is known, or estimated well.
+- **Support.** Production gave positive probability to every item the new recommender shows, in every context.
+- **No unrecorded confounders.** Production chose items using only the recorded context and independent randomness.
+- **No interference.** One impression's reward does not depend on the other items on the page, or on earlier
+  recommendations to the same user.
+- **Stationarity.** Users respond to the new recommender as they responded to the same items under production. Novelty
+  effects and feedback loops break this; see <NoteLink to="feedback-loops-in-recommendation">feedback loops in
+  recommendation</NoteLink>.
+
+## Pitfalls
+
+- **Scores as propensities.** A softmax of the scores of a deterministic ranker is not a propensity. Only probabilities
+  the system actually sampled from, or observed frequencies, are.
+- **Clipping hides missing value.** CIPS never exceeds IPS for nonnegative rewards, so a clipped estimate can rank a
+  bold candidate below a timid one. Report how much weight was clipped.
+- **Reporting an estimate without diagnostics.** Report the average weight $\bar w$, the effective sample size and the
+  largest weights with each estimate. An average weight far from 1 means too little support or wrong propensities.
+- **Treating the estimate as the A/B result.** Counterfactual evaluation ranks candidates for an online test. It does
+  not replace one, because its assumptions cannot be checked from the log alone.

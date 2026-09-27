@@ -1,0 +1,186 @@
+---
+title: Expectation propagation failure modes and fixes
+kind: concept
+summary: 'EP has no objective that every update decreases. It can meet cavities of negative precision, oscillate on multimodal posteriors, or average modes into a valley. Damping, power EP with $\alpha$-divergences and double-loop algorithms restore convergence.'
+tags: [worked-example, approximate-inference, bayesian, message-passing]
+aliases: [EP convergence, damped EP, power EP, alpha-divergence, double-loop EP, EP non-convergence, negative site precision]
+requires: [expectation-propagation, kullback-leibler-divergence]
+related: [expectation-propagation-clutter-problem, variational-inference, loopy-belief-propagation, assumed-density-filtering]
+references: [minka2004, minka2005, heskes2002, minka2001thesis, kuss2005, vehtari2020]
+status: draft
+updated: 2026-09-27
+---
+
+import { AlphaProjection } from './AlphaProjection'
+import { DampingPower } from './DampingPower'
+
+<Definition>
+Expectation propagation (EP) refines each site against a cavity and projects the tilted distribution by minimising a
+local divergence $\KL(\hat p_i \,\|\, q)$. No global quantity is guaranteed to improve at every update, so EP can fail in
+three ways: an update meets a cavity that is not a proper distribution; the sweeps never converge; or they converge to
+an approximation that is poor because the posterior is multimodal. The standard fixes are damping, power EP (which
+replaces the KL divergence by an $\alpha$-divergence), double-loop algorithms with guaranteed convergence, and, when
+the posterior has several modes, a mode-seeking method such as variational Bayes <Cite id="minka2005" />.
+</Definition>
+
+## Intuition
+
+Each EP update is <NoteLink to="assumed-density-filtering">assumed density filtering</NoteLink> against a cavity built
+from the other sites. When the posterior is close to Gaussian, every cavity is a good local picture, the updates agree,
+and the sweeps settle in a few passes. When the posterior has two modes, a cavity built from the sites of one group of
+factors points at one mode, the next factor pulls towards the other, and the Gaussian swings between them. When a
+factor is not log-concave, its site can have negative precision, and a cavity formed by removing a site with large
+positive precision from a $q$ that relies on it can have negative precision too.
+
+## Details
+
+The examples use the <NoteLink to="expectation-propagation-clutter-problem">clutter problem</NoteLink>: prior
+$\theta \sim \Gauss(0, 100)$ and factors $t_i(\theta) = (1 - w)\,\Gauss(x_i \mid \theta, 1) + w\,\Gauss(x_i \mid 0, 10)$.
+
+### Negative site precision
+
+A site $\tilde t_i \propto \exp(-\frac12\tau_i\theta^2 + \nu_i\theta)$ with $\tau_i < 0$ is an upward-curving function,
+not a density. It is harmless as long as $q$ and every cavity have positive precision: sites are only ever multiplied
+together. For the clutter factor, the tilted variance exceeds the cavity variance, and the site precision is negative,
+exactly when a point's role is uncertain and it lies far from the cavity mean: $(1 - r_i)(x_i - \mu)^2 > \sigma^2 + 1$,
+with $r_i$ the probability that $x_i$ is signal. Outliers get negative sites; this is correct behaviour, because the
+possibility that an outlier is signal widens the posterior.
+
+The problem comes when the cavity $q/\tilde t_i$ has non-positive precision, which happens when $\tilde t_i$ has a large
+positive precision and the other sites are negative. The tilted distribution then cannot be normalised and the update
+is undefined. Three responses are used:
+
+- **Skip** the update and move to the next site, hoping that other updates restore a proper cavity.
+- **Constrain** every site precision to be non-negative, for example by setting any negative $\tau_i$ to a small positive
+  value. This always converges but discards information: Minka reports that the constrained answer is worse than the
+  unconstrained one whenever the latter converges <Cite id="minka2001thesis" />.
+- **Damp** the updates, below, so that no single update can remove much precision.
+
+For log-concave factors, such as probit or step likelihoods, the tilted variance never exceeds the cavity variance, all
+sites have non-negative precision, and cavities stay proper.
+
+### Oscillation
+
+Take $w = 0.5$ and $x = (-1.5, -1, 4, 4.5)$: two groups of two. The exact posterior, computed on a grid, has modes at
+$\theta = -1.24$ and $\theta = 4.23$, mean $2.63$ and variance $19.2$. Plain EP never converges. Its posterior mean at
+the end of sweeps 1 to 8 is $3.09$, $3.00$, $-5.88$, $2.01$, $3.05$, $-0.78$, $1.35$ and $3.00$, and it is still
+swinging after 200 sweeps. The sites of each group pull $q$ towards their own mode, and each update overcorrects for
+the last.
+
+### Damping
+
+A damped update replaces the site by a convex combination of its old and new natural parameters,
+
+$$
+\tau_i \leftarrow \delta\,\tau_i^{\text{new}} + (1 - \delta)\,\tau_i, \qquad
+\nu_i \leftarrow \delta\,\nu_i^{\text{new}} + (1 - \delta)\,\nu_i,
+$$
+
+with step size $0 < \delta \le 1$. In terms of functions this is a weighted geometric mean,
+$\tilde t_i \leftarrow (\tilde t_i^{\text{new}})^\delta(\tilde t_i)^{1 - \delta}$. Three properties follow.
+
+- **Same fixed points.** A damped update leaves the site unchanged exactly when $\tau_i^{\text{new}} = \tau_i$ and
+  $\nu_i^{\text{new}} = \nu_i$, so damped and undamped EP have the same fixed points. Damping changes only the path.
+- **Proper posteriors.** The cavity is the same for the old and the new site. The damped $q$ has natural parameters
+  $\delta\,\eta^{\text{new}} + (1 - \delta)\,\eta^{\text{old}}$, a convex combination of two proper Gaussians' natural
+  parameters, so its precision is positive.
+- **Smaller steps.** Each update moves $q$ a fraction $\delta$ of the way, which suppresses the overcorrection that drives
+  oscillation.
+
+On the two-group data, $\delta = 0.7$, $0.5$ and $0.3$ all converge, in 60, 72 and 117 sweeps, to the same Gaussian,
+$\Gauss(2.061, 18.34)$. Stable fixed points of damped EP correspond to local minima of the EP free energy described
+below <Cite id="heskes2002" />.
+
+<DampingPower />
+
+The converged Gaussian spans both modes, with its mean between them where the exact density is low. Laplace and
+variational Bayes each sit on the larger mode, $\theta \approx 4.23$, with variances near $0.6$ and no mass on the other.
+
+### What EP's fixed points optimise
+
+EP's fixed points are the stationary points of a constrained free energy, a function of the sites that generalises the
+Bethe free energy of <NoteLink to="loopy-belief-propagation">loopy belief propagation</NoteLink>. At a fixed point, the
+approximation $q$ and each tilted distribution $\hat p_i$ agree on the expected sufficient statistics. Plain EP is a
+fixed-point iteration on this function with no guarantee of descent <Cite id="minka2001thesis" /> <Cite id="heskes2002" />.
+
+**Double-loop algorithms** minimise the free energy directly. The outer loop replaces its concave part by a linear upper
+bound at the current point; the inner loop minimises the resulting convex problem to convergence. Each outer step
+cannot increase the free energy, so the algorithm converges to a local minimum. Heskes and Zoeter derived such an
+algorithm for EP <Cite id="heskes2002" />. Each outer step needs an inner optimisation, so it is slower than damped EP,
+which reaches a minimum of the same function whenever it converges to a stable fixed point. Double-loop algorithms are a
+fallback when damping fails.
+
+### Power EP and the $\alpha$-divergence
+
+The $\alpha$-divergence between densities $p$ and $q$ is <Cite id="minka2005" />
+
+$$
+D_\alpha(p \,\|\, q) = \frac{1}{\alpha(1 - \alpha)}\int \paren{\alpha\,p(\theta) + (1 - \alpha)\,q(\theta) - p(\theta)^\alpha q(\theta)^{1 - \alpha}}\,d\theta.
+$$
+
+It is zero exactly when $p = q$. As $\alpha \to 1$ it tends to $\KL(p \,\|\, q)$, EP's local objective; as
+$\alpha \to 0$ it tends to $\KL(q \,\|\, p)$, the objective of variational Bayes; $\alpha = \tfrac12$ gives
+$2\int\paren{\sqrt{p} - \sqrt{q}}^2 d\theta$, a multiple of the squared Hellinger distance.
+
+**The projection.** Let $q(\theta) = \exp\paren{\etavec\transpose\tvec(\theta)}$ be an unnormalised member of an
+exponential family whose statistics $\tvec$ include the constant 1, so that the scale is free. Then
+$\partial q/\partial\etavec = \tvec\,q$ and $\partial q^{1 - \alpha}/\partial\etavec = (1 - \alpha)\,\tvec\,q^{1 - \alpha}$, so
+
+$$
+\frac{\partial D_\alpha}{\partial\etavec} = \frac{1}{\alpha}\paren{\int \tvec(\theta)\,q(\theta)\,d\theta - \int \tvec(\theta)\,p(\theta)^\alpha q(\theta)^{1 - \alpha}\,d\theta}.
+$$
+
+At the minimum, $q$ has the same expected sufficient statistics as $p^\alpha q^{1 - \alpha}$, including its normaliser.
+At $\alpha = 1$ this is moment matching to $p$. At $\alpha < 1$, $q$ appears on both sides, and the fixed point
+depends on where the search starts.
+
+**Power EP** applies this locally. It removes only a fraction $\alpha$ of site $i$, forming the cavity
+$q/\tilde t_i^\alpha$; multiplies in $t_i^\alpha$; projects; and sets the new site so that $\tilde t_i^\alpha$ accounts for
+the change, which in natural parameters divides the change by $\alpha$ <Cite id="minka2004" />. Its fixed points minimise
+local $\alpha$-divergences. It has two uses. Some factors have tractable tilted moments only when raised to a power other
+than 1 <Cite id="minka2004" />. And $\alpha < 1$ makes each update smaller and more
+mode-seeking, which often stabilises EP. On the two-group data, power EP converges without damping: to
+$\Gauss(2.170, 14.58)$ at $\alpha = 0.5$ and $\Gauss(2.282, 12.95)$ at $\alpha = 0.25$, narrower than the $\alpha = 1$
+answer.
+
+<AlphaProjection />
+
+For the two-mode target $p = 0.35\,\Gauss(-3, 0.6^2) + 0.65\,\Gauss(2, 0.8^2)$, the global minimiser of $D_\alpha$ over
+Gaussians, found numerically, is $\Gauss(0.25, 6.23)$ at $\alpha = 1$, the moment match, and $\Gauss(0.45, 5.55)$ at
+$\alpha = \tfrac12$. Near $\alpha = 0.47$ the global minimiser jumps to the right mode; at $\alpha = \tfrac14$ it is
+$\Gauss(2.00, 0.65)$. The left mode, $\Gauss(-3.00, 0.37)$, is a second local minimum, and a broad Gaussian remains a
+third one down to about $\alpha = 0.3$, so a local search started wide stays wide until then.
+
+### EP against variational Bayes
+
+The two methods fail in opposite directions <Cite id="minka2005" />.
+
+- **EP covers mass.** $\KL(p \,\|\, q)$ is infinite if $q$ is zero where $p$ is not, so EP's Gaussian spreads over every
+  mode. On a unimodal but skewed posterior this is what is wanted: EP tracks the mean and variance, where Laplace tracks
+  the mode and variational Bayes underestimates the variance. For Gaussian process classification, EP's predictive
+  probabilities and marginal likelihoods are close to MCMC and better than both alternatives <Cite id="kuss2005" />.
+- **VB seeks a mode.** $\KL(q \,\|\, p)$ is infinite if $q$ puts mass where $p$ has none, so variational Bayes fits one mode
+  and ignores the rest. On a multimodal posterior this gives a sensible local summary, where EP's average can put its
+  mean in a valley of low density, as in the two-group example.
+- **Guarantees.** Variational Bayes by coordinate ascent always converges and gives a lower bound on the evidence, useful
+  for learning hyperparameters. EP's evidence estimate is usually more accurate but is not a bound, and EP may need
+  damping to converge.
+- **Symmetric modes.** In a mixture model with exchangeable components, the posterior has one mode per labelling. EP
+  averages them into a useless symmetric answer; a mode-seeking method picks one labelling.
+
+## Assumptions
+
+- The examples are one-dimensional so that the exact posterior is available; the same phenomena occur in higher
+  dimensions, where they are harder to see.
+- The damping and power values quoted converge on these data. No setting is universal; a common start is
+  $\delta = 0.5$, reduced when the sweeps still oscillate.
+
+## Pitfalls
+
+- **Stopping on a sweep count.** A fixed number of sweeps can stop mid-oscillation. Monitor the largest change in any
+  site's natural parameters and require it to fall below a tolerance.
+- **Damping hides multimodality.** A damped EP that converges on a bimodal posterior returns a single broad Gaussian.
+  Check the result against a few samples or a Laplace fit started from different points.
+- **Skipped updates.** Many skipped updates mean the answer ignores some factors. Report the count.
+- **Large datasets.** Storing one site per factor costs memory in proportion to the data; for very large $n$, stochastic
+  or distributed variants share or partition the sites <Cite id="vehtari2020" />.

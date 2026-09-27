@@ -1,0 +1,196 @@
+---
+title: Paired-comparison models
+kind: concept
+summary: 'A paired-comparison model gives the probability that item $i$ beats item $j$ as a function of a strength difference, $\sigma(\theta_i - \theta_j)$ in Bradley–Terry or $\Phi((s_i - s_j)/\sqrt{2}\sigma)$ in Thurstone. Strengths are fitted by maximum likelihood, for example by Zermelo''s MM iteration.'
+tags: [skill-rating, paired-comparisons, ranking, maximum-likelihood, worked-example]
+aliases:
+  [
+    Bradley–Terry model,
+    Bradley-Terry model,
+    Thurstone model,
+    Thurstone case V,
+    law of comparative judgment,
+    Zermelo iteration,
+    MM algorithm for Bradley–Terry,
+    Rao–Kupper model,
+    Davidson model,
+    Ford condition,
+  ]
+requires: [logistic-regression, gaussian-distribution]
+partOf: [skill-rating]
+related: [plackett-luce-model, elo-rating, gumbel-max-trick, expectation-maximisation, reinforcement-learning-from-human-feedback, item-response-theory]
+references: [thurstone1927, bradley1952, zermelo1929, hunter2004, rao1967, davidson1970]
+status: draft
+updated: 2026-09-27
+---
+
+import { BradleyTerryFit } from './BradleyTerryFit'
+
+<Definition>
+A **paired-comparison model** assigns each of $m$ items a strength and gives the probability that item $i$ is preferred
+to, or beats, item $j$ as a function of the difference in strengths. The **Bradley–Terry** model uses the logistic
+function $\sigma(z) = 1/(1 + e^{-z})$:
+
+$$
+\pr(i \succ j) = \sigma(\theta_i - \theta_j) = \frac{\pi_i}{\pi_i + \pi_j}, \qquad \pi_i = e^{\theta_i} > 0
+$$
+
+<Cite id="bradley1952" />. The **Thurstone** model uses the standard normal cdf $\Phi$ and a noise scale $\sigma > 0$:
+$\pr(i \succ j) = \Phi\paren{(s_i - s_j)/(\sqrt 2\,\sigma)}$ <Cite id="thurstone1927" />.
+</Definition>
+
+## Random utility
+
+Both models come from one story. On each comparison, item $i$ produces a random utility $u_i = s_i + \epsilon_i$, with
+noise terms independent across items and comparisons. The item with the larger utility wins, so
+$\pr(i \succ j) = \pr(\epsilon_j - \epsilon_i < s_i - s_j)$. The model is fixed by the distribution of the noise
+difference.
+
+- **Gaussian noise.** With $\epsilon_i \sim \Gauss(0, \sigma^2)$, the difference $\epsilon_j - \epsilon_i$ is
+  $\Gauss(0, 2\sigma^2)$ and the win probability is $\Phi\paren{(s_i - s_j)/(\sqrt 2\sigma)}$. This is Thurstone's
+  "case V", in which all items share one noise variance and the noises are uncorrelated <Cite id="thurstone1927" />.
+- **Gumbel noise.** With standard Gumbel noise, the difference of two independent terms has the standard logistic
+  distribution, and the win probability is $\sigma(s_i - s_j)$. This is Bradley–Terry. The same noise gives the
+  softmax over many items, by the <NoteLink to="gumbel-max-trick">Gumbel-max trick</NoteLink>, which leads to the
+  <NoteLink to="plackett-luce-model">Plackett–Luce model</NoteLink>.
+
+<Derivation title="The difference of two Gumbels is logistic">
+A standard Gumbel variable has cdf $F(x) = \exp(-e^{-x})$ and density $f(x) = e^{-x}\exp(-e^{-x})$. For independent
+$\epsilon_i, \epsilon_j$,
+
+$$
+\pr(\epsilon_j - \epsilon_i < z) = \int f(x)\, F(x + z)\, dx = \int e^{-x} \exp\paren{-e^{-x}(1 + e^{-z})}\, dx .
+$$
+
+Substitute $y = e^{-x}$, so $dy = -e^{-x}dx$: the integral is $\int_0^\infty \exp\paren{-y(1 + e^{-z})}\,dy =
+1/(1 + e^{-z}) = \sigma(z)$.
+</Derivation>
+
+The two curves have the same shape. With the scale matched, $\abs{\Phi(z) - \sigma(1.702 z)} < 0.0095$ for every $z$
+(checked numerically), so a Thurstone strength in units of $\sqrt 2\sigma$ times 1.702 is close to a Bradley–Terry
+strength. Rankings from the two models almost always agree. The logistic tails are heavier, so Bradley–Terry is less
+surprised by upsets between very unequal players.
+
+Only differences enter either model. Adding a constant to every $\theta_i$ leaves every probability unchanged, so the
+strengths are **identified only up to a shift**. Fix it by setting $\sum_i \theta_i = 0$ or $\theta_1 = 0$.
+
+## Maximum likelihood
+
+Let $w_{ij}$ be the number of times $i$ beat $j$, $n_{ij} = w_{ij} + w_{ji}$ the number of games between them, and
+$W_i = \sum_j w_{ij}$ the total wins of $i$. The Bradley–Terry log-likelihood is
+
+$$
+\ell(\thetavec) = \sum_{i \ne j} w_{ij}\paren{\theta_i - \log\paren{e^{\theta_i} + e^{\theta_j}}}.
+$$
+
+Each game is one observation of a <NoteLink to="logistic-regression">logistic regression</NoteLink> with no intercept,
+feature vector $\evec_i - \evec_j$ and weights $\thetavec$. The log-likelihood is concave. Its gradient is
+
+$$
+\frac{\partial \ell}{\partial \theta_i} = W_i - \sum_{j \ne i} n_{ij}\, \sigma(\theta_i - \theta_j),
+$$
+
+so at the maximum every item's observed wins equal its expected wins.
+
+### Zermelo's iteration as an MM algorithm
+
+Setting the gradient to zero and solving for $\pi_i$ with the other strengths held at their current values gives a
+fixed-point update. Zermelo proposed it in 1929 <Cite id="zermelo1929" />. Hunter showed that it is a
+**minorise–maximise** (MM) algorithm, which guarantees that the likelihood never decreases <Cite id="hunter2004" />.
+
+The difficult term is $-\log(\pi_i + \pi_j)$. For any $x, y > 0$, concavity of the logarithm gives
+$\log x \le \log y + (x - y)/y$, that is,
+
+$$
+-\log x \ \ge\ 1 - \log y - \frac{x}{y},
+$$
+
+with equality at $x = y$. Apply it with $x = \pi_i + \pi_j$ and $y = \pi_i^{(k)} + \pi_j^{(k)}$, the values at
+iteration $k$. The result is a surrogate that lies below $\ell$ everywhere and touches it at the current point:
+
+$$
+Q(\pivec \mid \pivec^{(k)}) = \sum_{i \ne j} w_{ij}\brack{\log \pi_i - \frac{\pi_i + \pi_j}{\pi_i^{(k)} + \pi_j^{(k)}}} + \text{const}.
+$$
+
+$Q$ separates across items. Collect the terms in $\pi_i$: $W_i \log \pi_i$ from the wins, and
+$-\pi_i \sum_{j \ne i} n_{ij}/(\pi_i^{(k)} + \pi_j^{(k)})$ from every game $i$ played, won or lost. Setting the
+derivative to zero gives
+
+$$
+\pi_i^{(k+1)} = \frac{W_i}{\sum_{j \ne i} \dfrac{n_{ij}}{\pi_i^{(k)} + \pi_j^{(k)}}}.
+$$
+
+Maximising $Q$ cannot decrease $Q$, and $\ell \ge Q$ with equality at $\pivec^{(k)}$, so
+$\ell(\pivec^{(k+1)}) \ge Q(\pivec^{(k+1)} \mid \pivec^{(k)}) \ge Q(\pivec^{(k)} \mid \pivec^{(k)}) = \ell(\pivec^{(k)})$.
+The same argument underlies <NoteLink to="expectation-maximisation">expectation maximisation</NoteLink>. After each
+iteration, rescale $\pivec$ to fix the shift; the rescaling does not change $\ell$.
+
+### When the maximum exists
+
+If some item has won every game it played, its likelihood keeps increasing as $\theta_i \to \infty$, and no finite
+maximum exists. The general condition is due to Zermelo and to Ford: a finite maximum exists, and is unique after
+fixing the shift, if and only if for every split of the items into two non-empty groups, some item in each group has
+beaten some item in the other <Cite id="hunter2004" />. Equivalently, the directed graph with an edge $i \to j$ whenever
+$i$ beat $j$ is strongly connected. Sparse data often break the condition. A Gaussian prior on $\thetavec$, which adds
+a ridge penalty, restores a unique finite estimate.
+
+## Worked example
+
+Four players A to D play an uneven round robin. The win matrix, with rows beating columns, is
+
+| | A | B | C | D | wins | games |
+| --- | --- | --- | --- | --- | --- | --- |
+| A | – | 2 | 3 | 1 | 6 | 8 |
+| B | 1 | – | 2 | 2 | 5 | 9 |
+| C | 0 | 1 | – | 2 | 3 | 9 |
+| D | 1 | 1 | 1 | – | 3 | 8 |
+
+Start from $\pi_i = 1$, so every denominator term is $n_{ij}/2$ and the first update is wins divided by half the games
+played: $\pi_A = 6/4 = 1.5$, $\pi_B = 5/4.5 = 1.111$, $\pi_C = 3/4.5 = 0.667$, $\pi_D = 3/4 = 0.75$. Centred on the log
+scale, $\thetavec^{(1)} = (0.451, 0.151, -0.360, -0.242)$. The iteration converges to
+
+$$
+\hat\thetavec = (0.863,\ 0.173,\ -0.558,\ -0.479),
+$$
+
+which a direct numerical maximisation with scipy reproduces to four decimals. C and D both won three games, but D
+played one game fewer, so D ranks higher. The model predicts that A beats B with probability
+$\sigma(0.863 - 0.173) = 0.666$. The graph of wins is strongly connected (for example A beat B, B beat C, C beat D and
+D beat A), so the maximum exists.
+
+<BradleyTerryFit />
+
+## Ties
+
+A comparison can end level. Two extensions of Bradley–Terry add one parameter for ties.
+
+- **Rao–Kupper.** A tie occurs when the utilities differ by less than a threshold $\eta > 0$. With $\nu = e^\eta \ge 1$,
+  $\pr(i \succ j) = \pi_i/(\pi_i + \nu\pi_j)$ and
+  $\pr(i = j) = (\nu^2 - 1)\pi_i\pi_j/\paren{(\pi_i + \nu\pi_j)(\nu\pi_i + \pi_j)}$ <Cite id="rao1967" />. This is
+  the logistic version of the draw margin in <NoteLink to="trueskill">TrueSkill</NoteLink>.
+- **Davidson.** $\pr(i \succ j) = \pi_i/D$ and $\pr(i = j) = \nu\sqrt{\pi_i\pi_j}/D$, with
+  $D = \pi_i + \pi_j + \nu\sqrt{\pi_i\pi_j}$ and $\nu \ge 0$ <Cite id="davidson1970" />. The ratio of win to loss
+  probability stays $\pi_i/\pi_j$, as in the model without ties, and ties are most likely between equal items.
+
+Counting a tie as half a win for each side, as <NoteLink to="elo-rating">Elo</NoteLink> does, keeps the plain
+Bradley–Terry likelihood with fractional outcomes and needs no extra parameter.
+
+## Assumptions
+
+- **One dimension.** Strength is a single number, so preferences are transitive in probability: if
+  $\pr(i \succ j) > 1/2$ and $\pr(j \succ k) > 1/2$ then $\pr(i \succ k) > 1/2$. Rock–paper–scissors cycles cannot be
+  represented.
+- **Independent comparisons.** Each game is an independent draw given the strengths. Order effects, fatigue and
+  home advantage need extra terms, such as an additive home bonus inside $\sigma(\cdot)$.
+- **Fixed strengths.** The fit pools all games. Strengths that change over time need a dynamic model, such as
+  <NoteLink to="glicko-and-glicko-2">Glicko</NoteLink> or <NoteLink to="trueskill">TrueSkill</NoteLink>.
+
+## Pitfalls
+
+- **Scale is arbitrary.** Bradley–Terry strengths are in log-odds, Thurstone strengths in units of the noise. Compare
+  strengths only within one fit, or convert with the factor 1.702.
+- **Unconnected data.** Two groups that never meet have no common scale. Their relative strengths are not identified,
+  whatever the fit reports.
+- **Selection by matchmaking.** When opponents are chosen by current rating, the set of comparisons depends on past
+  outcomes. The likelihood is still valid, because the choice of pairs depends only on observed data, but the
+  standard errors of rarely compared pairs are large.

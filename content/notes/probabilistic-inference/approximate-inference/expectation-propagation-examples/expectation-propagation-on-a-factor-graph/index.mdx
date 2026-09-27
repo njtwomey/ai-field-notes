@@ -1,0 +1,153 @@
+---
+title: Expectation propagation on a factor graph
+kind: example
+summary: 'Three players with Gaussian skills play two games: A beats B, B beats C. EP with one Gaussian per skill becomes message passing: each game factor sends each player a Gaussian message, computed from a truncated Gaussian, and B''s two messages are revised until they agree.'
+tags: [worked-example, approximate-inference, message-passing, bayesian]
+aliases: [EP as message passing, EP on a factor graph, Gaussian message passing with moment matching, paired comparison EP]
+requires: [expectation-propagation, factor-graph, expectation-propagation-truncated-gaussian]
+related: [belief-propagation, loopy-belief-propagation, trueskill, paired-comparison-models]
+references: [minka2001, herbrich2006, minka2005]
+status: draft
+updated: 2026-09-27
+---
+
+import { ComparisonEp } from './ComparisonEp'
+import { ComparisonGraph } from './ComparisonGraph'
+
+<Definition>
+Three players have skills $s_A, s_B, s_C$ with independent priors $\Gauss(0, 1)$. In a game, the player with the higher
+performance wins, where performance is skill plus noise, so a win of $a$ over $b$ has likelihood
+$\Phi\paren{(s_a - s_b)/\sigma_n}$ with $\sigma_n^2 = 1$ the variance of the performance difference. A beat B and B
+beat C. Approximate the posterior by a product of one Gaussian per skill, using expectation propagation (EP) as
+message passing on the factor graph, and compare with the exact marginals.
+</Definition>
+
+## Setup
+
+The posterior is
+
+$$
+p(s_A, s_B, s_C \mid \text{results}) \propto \Gauss(s_A \mid 0, 1)\,\Gauss(s_B \mid 0, 1)\,\Gauss(s_C \mid 0, 1)\,
+\underbrace{\Phi(s_A - s_B)}_{f_1}\,\underbrace{\Phi(s_B - s_C)}_{f_2}.
+$$
+
+As a <NoteLink to="factor-graph">factor graph</NoteLink> it has three variable nodes, three prior factors and two game
+factors. The graph is a chain, so it has no cycles, but the game factors are not Gaussian, so
+<NoteLink to="belief-propagation">belief propagation</NoteLink> cannot pass exact messages in closed form.
+
+<ComparisonGraph />
+
+**The approximation.** EP uses a fully factorised Gaussian, $q = q_A(s_A)\,q_B(s_B)\,q_C(s_C)$. Each game factor
+$f_k$ is replaced by a product of Gaussian functions, one for each of its players:
+$\tilde f_1 = m_{1 \to A}(s_A)\,m_{1 \to B}(s_B)$ and $\tilde f_2 = m_{2 \to B}(s_B)\,m_{2 \to C}(s_C)$. These are the
+**messages**. Each marginal is its prior times its incoming messages, for example
+$q_B \propto \Gauss(0, 1)\,m_{1 \to B}\,m_{2 \to B}$.
+
+## Solution
+
+### An EP update is a pair of messages
+
+Updating game factor $f_1$ follows the four EP steps.
+
+1. **Cavity.** Remove $\tilde f_1$ from $q$. Only $q_A$ and $q_B$ change: the cavities are
+   $q_A^{\setminus 1} = q_A/m_{1 \to A}$ and $q_B^{\setminus 1} = q_B/m_{1 \to B}$, the prior times every *other* message
+   into that player. These are the variable-to-factor messages of belief propagation.
+2. **Tilted.** $\hat p(s_A, s_B) \propto q_A^{\setminus 1}(s_A)\,q_B^{\setminus 1}(s_B)\,\Phi(s_A - s_B)$.
+3. **Project.** Minimise $\KL(\hat p \,\|\, q_A q_B)$ over products of Gaussians. The divergence separates into one
+   term per factor of $q$ plus a constant, $-\expect_{\hat p}[\log q_A(s_A)] - \expect_{\hat p}[\log q_B(s_B)]$, and each
+   term depends only on the marginal of $\hat p$ for that variable. So $q_A^{\text{new}}$ matches the mean and variance of
+   the marginal of $\hat p$ in $s_A$, and likewise for $s_B$.
+4. **Messages.** $m_{1 \to A} = q_A^{\text{new}}/q_A^{\setminus 1}$ and $m_{1 \to B} = q_B^{\text{new}}/q_B^{\setminus 1}$,
+   divisions of Gaussians in natural parameters.
+
+This is belief propagation with one change: the factor-to-variable message is the **projected** marginal divided by the
+cavity, not the exact sum-product message. With discrete variables and exact projections, EP with a fully factorised
+$q$ is loopy belief propagation <Cite id="minka2001" />.
+
+### The moments of one game
+
+Let the cavities be $\Gauss(\mu_A, \sigma_A^2)$ and $\Gauss(\mu_B, \sigma_B^2)$. The factor depends on the difference
+$d = s_A - s_B$, which under the cavities is $\Gauss(\mu_A - \mu_B, \sigma_A^2 + \sigma_B^2)$, so the normaliser is
+$Z = \Phi\paren{(\mu_A - \mu_B)/c}$ with $c = \sqrt{\sigma_A^2 + \sigma_B^2 + \sigma_n^2}$. The derivatives of
+$\log Z$ with respect to each cavity mean give that player's tilted moments, exactly as for a single variable (see
+<NoteLink to="expectation-propagation-truncated-gaussian">a Gaussian times a step function</NoteLink>). With
+$t = (\mu_A - \mu_B)/c$, $v = \phi(t)/\Phi(t)$ and $w = v(v + t)$:
+
+$$
+\mu_A^{\text{new}} = \mu_A + \frac{\sigma_A^2}{c}\,v, \quad \sigma_A^{2,\text{new}} = \sigma_A^2\paren{1 - \frac{\sigma_A^2}{c^2}w},
+\qquad
+\mu_B^{\text{new}} = \mu_B - \frac{\sigma_B^2}{c}\,v, \quad \sigma_B^{2,\text{new}} = \sigma_B^2\paren{1 - \frac{\sigma_B^2}{c^2}w}.
+$$
+
+The winner moves up and the loser down, each in proportion to its own share $\sigma^2/c$ of the uncertainty. These are
+the TrueSkill update equations for two players <Cite id="herbrich2006" />.
+
+### Update 1: A beats B
+
+Nothing has been sent yet, so both cavities are the priors $\Gauss(0, 1)$. $c = \sqrt 3 = 1.732$, $t = 0$,
+$v = 0.7979$, $w = 0.6366$.
+
+- $q_A = \Gauss(0.7979/1.732, 1 - 0.6366/3) = \Gauss(0.4607, 0.7878)$, and $q_B = \Gauss(-0.4607, 0.7878)$.
+- $m_{1 \to A} = q_A/\Gauss(0, 1)$ has precision $1/0.7878 - 1 = 0.269$ and mean $2.171$, variance $3.712$. By symmetry
+  $m_{1 \to B}$ has mean $-2.171$.
+
+### Update 2: B beats C
+
+B's cavity is its prior times $m_{1 \to B}$, which is $\Gauss(-0.4607, 0.7878)$: B has already lost once. C's is
+$\Gauss(0, 1)$. $c = \sqrt{0.7878 + 1 + 1} = 1.670$ and $t = -0.4607/1.670 = -0.276$, so the win is mildly surprising:
+$v = 0.981$ and $w = 0.692$.
+
+- $q_B$ has mean $-0.4607 + 0.7878 \times 0.981/1.670 = 0.0024$ and variance
+  $0.7878 \times (1 - 0.7878 \times 0.692/2.788) = 0.6336$.
+- $q_C = \Gauss(-0.981/1.670, 1 - 0.692/2.788) = \Gauss(-0.5878, 0.7516)$.
+
+### Update 3: A beats B, again
+
+The first message to B was computed when B's cavity was the prior. Now B's cavity is its prior times $m_{2 \to B}$,
+$\Gauss(0.4497, 0.7641)$: B has also won a game. A's cavity is still $\Gauss(0, 1)$, since A plays no other game. Now
+$t = (0 - 0.4497)/\sqrt{1 + 0.7641 + 1} = -0.2705$, and the update gives $q_A = \Gauss(0.5881, 0.7499)$ and
+$q_B = \Gauss(0.0004, 0.6180)$. Beating a player who has won a game raises A more than beating an unknown player did.
+
+After two sweeps (four updates) every marginal is within 0.0002 of its limit. EP converges to
+
+$$
+q_A = \Gauss(0.5879, 0.7499), \qquad q_B = \Gauss(0, 0.6179), \qquad q_C = \Gauss(-0.5879, 0.7499).
+$$
+
+### Comparison with the exact posterior
+
+Summing the exact joint over a $241^3$ grid gives marginal means and variances $(0.5878, 0.7502)$ for A,
+$(0, 0.6170)$ for B and $(-0.5878, 0.7502)$ for C. EP's marginal means and variances agree to three decimal places.
+
+What the factorised approximation loses is correlation. The exact posterior has $\cov(s_A, s_B) = 0.191$: if B is
+strong, A, who beat B, is probably strong too. The prediction that A would beat C in a new game,
+$\expect\brack{\Phi(s_A - s_C)}$, is $0.7761$ exactly and $\Phi\paren{1.1758/\sqrt{0.7499 + 0.7499 + 1}} = 0.7715$ under
+the factorised $q$, which ignores $\cov(s_A, s_C) = 0.058$. EP with a full $3 \times 3$ Gaussian covariance, which
+treats each game as a site on the projection $s_a - s_b$ as in <NoteLink to="expectation-propagation-probit-regression">EP
+for probit regression</NoteLink>, recovers $\cov(s_A, s_B) = 0.191$ and predicts $0.7770$.
+
+## Simulation
+
+<ComparisonEp />
+
+## What it illustrates
+
+- **EP is message passing.** With a factorised $q$, the cavity is the product of the other incoming messages, and each
+  factor update produces one outgoing message per variable. See
+  <NoteLink to="expectation-propagation">expectation propagation</NoteLink> and
+  <NoteLink to="belief-propagation">belief propagation</NoteLink>.
+- **Iteration on a tree.** Exact belief propagation on a tree needs one pass in each direction. EP needs repeated
+  passes even on a tree, because each projected message depends on the cavity it was computed against.
+- **TrueSkill.** The same factor-graph updates, with performances, teams and draws, rate players in online games; see
+  <NoteLink to="trueskill">TrueSkill</NoteLink>.
+
+## Variations
+
+- **A cycle.** Adding a game in which C beats A closes a loop. The same updates apply, as in
+  <NoteLink to="loopy-belief-propagation">loopy belief propagation</NoteLink>; the schedule then matters for
+  convergence, and damping may be needed.
+- **Draws and margins.** A draw is the two-sided factor $\indicator(\abs{d} \le \epsilon)$ and a win by a margin shifts
+  the threshold; both change only the $v$ and $w$ functions.
+- **Many games.** With many games per player, the cavities become narrow and each message is small; a single forward
+  pass, which is <NoteLink to="assumed-density-filtering">assumed density filtering</NoteLink>, is what online rating
+  systems use, and a few EP sweeps over the history refine it.

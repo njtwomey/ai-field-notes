@@ -1,0 +1,180 @@
+---
+title: The clutter problem
+kind: example
+summary: 'Estimate the mean $\theta$ of $\Gauss(\theta, 1)$ data when each point may instead be clutter from $\Gauss(0, 10)$. The posterior is a product of two-component mixtures. EP fits it site by site, with negative-precision sites for outliers, and beats Laplace and variational Bayes.'
+tags: [worked-example, approximate-inference, bayesian, mixture-model]
+aliases: [Minka's clutter problem, clutter example, EP clutter problem]
+requires: [expectation-propagation, gaussian-distribution]
+related: [assumed-density-filtering, expectation-propagation-truncated-gaussian, expectation-propagation-failure-modes, laplace-approximation, variational-inference, gaussian-mixture-model]
+references: [minka2001, minka2001thesis, bishop2006]
+status: draft
+updated: 2026-09-27
+---
+
+import { ClutterEp } from './ClutterEp'
+
+<Callout variant="credit" title="Provenance: Minka, the clutter problem">
+The clutter problem is Thomas Minka's. He introduced expectation propagation with it, in his UAI 2001 paper and in
+chapter 3 of his PhD thesis <Cite id="minka2001" /> <Cite id="minka2001thesis" />. The model, the prior and clutter
+variances, and the EP, Laplace and variational updates follow his treatment. It is included here because it is a very
+good account, kept as part of these notes. The one-dimensional data, the worked tables and the figure are new.
+</Callout>
+
+<Definition>
+An unknown mean $\theta$ has prior $\Gauss(0, 100)$. Each observation $x_i$ is drawn from $\Gauss(\theta, 1)$ with
+probability $1 - w$ and from a clutter distribution $\Gauss(0, 10)$ with probability $w$:
+
+$$
+p(\theta \mid x_{1:n}) \propto \Gauss(\theta \mid 0, 100)\prod_{i=1}^n \brack{(1 - w)\,\Gauss(x_i \mid \theta, 1) + w\,\Gauss(x_i \mid 0, 10)}.
+$$
+
+With $w = 0.2$ and data $x = (-2.5, 0.5, 1.5, 2, 3)$, approximate this posterior by a Gaussian using expectation
+propagation (EP), step by step, and compare it with the exact posterior, the Laplace approximation and variational
+Bayes <Cite id="minka2001" />.
+</Definition>
+
+## Setup
+
+The model is Minka's clutter problem, the example on which expectation propagation was introduced
+<Cite id="minka2001" /> <Cite id="minka2001thesis" />. Here it is one-dimensional, so the exact posterior can be
+computed on a grid and every approximation checked against it.
+
+- **Factors.** The prior $t_0(\theta) = \Gauss(\theta \mid 0, 100)$ is already Gaussian and is kept exactly. Each data
+  factor $t_i(\theta) = (1 - w)\,\Gauss(x_i \mid \theta, 1) + w\,\Gauss(x_i \mid 0, 10)$ is a Gaussian bump in $\theta$
+  on a constant floor. The floor is the clutter term, which does not depend on $\theta$.
+- **Why it is hard.** The exact posterior is a mixture of $2^n$ Gaussians, one for each assignment of the points to
+  signal or clutter. For $n = 5$ that is 32 components; for $n = 50$ it is $10^{15}$.
+- **Sites.** EP replaces each $t_i$ by $\tilde t_i(\theta) \propto \exp(-\frac12\tau_i\theta^2 + \nu_i\theta)$, a
+  Gaussian shape with precision $\tau_i$ and precision-weighted mean $\nu_i$. The approximation is
+  $q(\theta) \propto t_0(\theta)\prod_i \tilde t_i(\theta)$, a Gaussian with precision $0.01 + \sum_i\tau_i$ and
+  $\nu = \sum_i \nu_i$.
+
+## Solution
+
+### The tilted moments of one clutter factor
+
+A site update multiplies a Gaussian cavity $\Gauss(\theta \mid \mu, \sigma^2)$ by $t_i$ and matches the mean and variance
+of the product. The normaliser is a two-term sum, because integrating $\Gauss(x_i \mid \theta, 1)$ against the cavity
+gives $\Gauss(x_i \mid \mu, \sigma^2 + 1)$:
+
+$$
+Z_i(\mu) = (1 - w)\,\Gauss(x_i \mid \mu, \sigma^2 + 1) + w\,\Gauss(x_i \mid 0, 10).
+$$
+
+Let $r_i = (1 - w)\,\Gauss(x_i \mid \mu, \sigma^2 + 1)/Z_i$, the probability under the cavity that $x_i$ is signal.
+Only the first term depends on $\mu$, and its derivative is itself times $(x_i - \mu)/(\sigma^2 + 1)$, so
+
+$$
+\frac{\partial \log Z_i}{\partial \mu} = r_i\,\frac{x_i - \mu}{\sigma^2 + 1}.
+$$
+
+Differentiating again, with $\partial r_i/\partial\mu = r_i(1 - r_i)(x_i - \mu)/(\sigma^2 + 1)$, gives
+$\partial^2_\mu \log Z_i = -\frac{r_i}{\sigma^2 + 1} + r_i(1 - r_i)\frac{(x_i - \mu)^2}{(\sigma^2 + 1)^2}$. For any
+factor, the tilted mean is $\mu + \sigma^2\,\partial_\mu\log Z$ and the tilted variance is
+$\sigma^2 + \sigma^4\,\partial_\mu^2\log Z$ (derived in <NoteLink to="expectation-propagation-truncated-gaussian">a Gaussian times a step
+function</NoteLink>). So
+
+$$
+\text{mean} = \mu + \sigma^2 r_i\,\frac{x_i - \mu}{\sigma^2 + 1}, \qquad
+\text{variance} = \sigma^2 - \frac{\sigma^4 r_i}{\sigma^2 + 1} + \frac{\sigma^4\,r_i(1 - r_i)(x_i - \mu)^2}{(\sigma^2 + 1)^2}.
+$$
+
+The mean moves towards $x_i$ in proportion to how likely the point is to be signal. The variance has a shrinking term
+and a growing term. The growing term is large when the point's role is uncertain ($r_i(1 - r_i)$ near $\tfrac14$) and far
+from the cavity mean. When it wins, $(1 - r_i)(x_i - \mu)^2 > \sigma^2 + 1$, the tilted variance exceeds the cavity
+variance, and the new site has **negative precision**. A negative-precision site is not a density: it curves upward,
+and it widens $q$ to express doubt about where $\theta$ is.
+
+### The first sweep
+
+All sites start at $\tau_i = \nu_i = 0$, so the first cavity is the prior and the first sweep is
+<NoteLink to="assumed-density-filtering">assumed density filtering</NoteLink>. For the first point,
+$\Gauss(-2.5 \mid 0, 101) = 0.0385$ and $\Gauss(-2.5 \mid 0, 10) = 0.0923$, so
+$r_1 = 0.8 \times 0.0385/(0.8 \times 0.0385 + 0.2 \times 0.0923) = 0.625$. The tilted mean is
+$100 \times 0.625 \times (-2.5)/101 = -1.548$. The site precision is the tilted precision minus the cavity precision.
+Computed with numpy, each update of the first sweep is:
+
+| site | $x_i$ | cavity mean | cavity var | $r_i$ | tilted mean | tilted var | site precision | site mean |
+| ---- | ----- | ----------- | ---------- | ----- | ----------- | ---------- | -------------- | --------- |
+| 1    | −2.5  | 0.000       | 100.0      | 0.625 | −1.548      | 39.54      | 0.015          | −2.56     |
+| 2    | 0.5   | −1.548      | 39.54      | 0.656 | −0.237      | 15.12      | 0.041          | 0.58      |
+| 3    | 1.5   | −0.237      | 15.12      | 0.763 | 1.005       | 4.788      | 0.143          | 1.58      |
+| 4    | 2.0   | 1.005       | 4.788      | 0.855 | 1.709       | 1.486      | 0.464          | 2.03      |
+| 5    | 3.0   | 1.709       | 1.486      | 0.900 | 2.403       | 0.740      | 0.678          | 3.09      |
+
+After one pass, $q = \Gauss(2.403, 0.740)$. The first point, $-2.5$, was absorbed when the approximation was the broad
+prior and nothing marked it as an outlier; it was given a 62 per cent chance of being signal and dragged the early
+estimate to $-1.5$. Processing the same points in reverse order ends at $\Gauss(0.066, 1.764)$.
+
+### The second sweep
+
+Now each cavity holds the other four sites. For the first point, the cavity is $\Gauss(2.460, 0.749)$: the other points
+put $\theta$ near 2.5, where $-2.5$ is five units away and almost certainly clutter.
+
+| site | $x_i$ | cavity mean | cavity var | $r_i$ | tilted mean | tilted var | site precision | site mean |
+| ---- | ----- | ----------- | ---------- | ----- | ----------- | ---------- | -------------- | --------- |
+| 1    | −2.5  | 2.460       | 0.749      | 0.011 | 2.436       | 0.796      | −0.079         | 2.84      |
+| 2    | 0.5   | 2.499       | 0.822      | 0.760 | 1.813       | 0.688      | 0.237          | −1.71     |
+| 3    | 1.5   | 1.838       | 0.764      | 0.912 | 1.705       | 0.464      | 0.846          | 1.50      |
+| 4    | 2.0   | 1.617       | 0.591      | 0.921 | 1.748       | 0.390      | 0.871          | 2.00      |
+| 5    | 3.0   | 1.264       | 0.531      | 0.857 | 1.780       | 0.418      | 0.511          | 3.68      |
+
+The outlier's site now has precision $-0.079$. Its tilted variance, $0.796$, exceeds the cavity variance, $0.749$: the
+point is almost surely clutter ($r_1 = 0.011$), but the small chance that it is signal, five units away, widens the
+posterior. The second point, at $0.5$, gets a site whose mean is $-1.71$: the site is not an estimate of $\theta$ but a
+quadratic in $\theta$ that, combined with the cavity, reproduces the tilted moments.
+
+### Convergence and comparison
+
+The posterior means after sweeps 1 to 4 are $2.403$, $1.780$, $1.750$ and $1.752$; after sweep 4 the sites change by
+less than $10^{-4}$. EP converges to $q = \Gauss(1.752, 0.405)$, with one negative site (the outlier).
+
+- **Exact.** The posterior on a grid of $\theta$ has mean $1.735$ and variance $0.555$. As $\abs\theta$ grows, every
+  point becomes clutter and the likelihood tends to the constant $\prod_i w\,\Gauss(x_i \mid 0, 10)$, so the posterior's
+  tails follow the broad $\Gauss(0, 100)$ prior. Only 0.4 per cent of the mass lies outside $[-1, 5]$, but it raises the
+  variance from $0.401$ (inside that interval) to $0.555$. Inside $[-1, 5]$ the exact mean is $1.748$: EP matches the
+  central bump to within $0.004$ in both mean and variance.
+- **Laplace.** Newton's method finds the mode at $1.760$. The curvature there,
+  $\frac{1}{100} + \sum_i r_i - \sum_i r_i(1 - r_i)(x_i - \hat\theta)^2$ with $r_i$ evaluated at the mode, gives
+  variance $0.307$. See <NoteLink to="laplace-approximation">the Laplace approximation</NoteLink>.
+- **Variational Bayes.** A mean-field approximation $q(\theta)\prod_i q(c_i)$, with $c_i$ the indicator that $x_i$ is
+  signal, alternates between $q(c_i = 1) \propto (1 - w)\exp\paren{\expect_q \log\Gauss(x_i \mid \theta, 1)}$ and a
+  Gaussian $q(\theta)$ with precision $0.01 + \sum_i q(c_i = 1)$. It converges to $\Gauss(1.763, 0.279)$.
+
+Laplace and VB both land near the mode and are too narrow: their variances are 23 and 30 per cent below the variance of
+the central bump.
+Variational Bayes minimises $\KL(q \,\|\, p)$, which penalises $q$ for putting mass where $p$ has little and so prefers
+narrow approximations. EP's local steps minimise $\KL(\hat p \,\|\, q)$, which penalises $q$ for missing mass. See
+<NoteLink to="variational-inference">variational inference</NoteLink> for the two directions.
+
+## Simulation
+
+<ClutterEp />
+
+Stepping through the first five updates reproduces the first table. Update 6 shows the outlier's site turn into an
+upward-curving parabola. Dragging the point at 3 to 6 gives the exact posterior a second mode near 6. EP then meets
+cavities with negative precision, skips those updates and wanders between the modes without converging; a single
+Gaussian cannot represent both modes.
+
+## What it illustrates
+
+- **Cavities carry context.** A site is recomputed against the other sites' current view. The outlier looked like
+  signal in the first sweep and like clutter in the second. See <NoteLink to="expectation-propagation">expectation
+  propagation</NoteLink>.
+- **Sites are not densities.** Site precisions can be negative and site means can lie far from the data. Only $q$ and
+  the cavities must be proper Gaussians.
+- **Order dependence of ADF.** The first sweep alone ends at $2.403$ in one order and $0.066$ in the other. See
+  <NoteLink to="assumed-density-filtering">assumed density filtering</NoteLink>.
+- **Failure on multimodal posteriors.** With two separated groups of points, EP can oscillate or reach a cavity with
+  negative precision. See <NoteLink to="expectation-propagation-failure-modes">EP failure modes and fixes</NoteLink>.
+
+## Variations
+
+- **More data.** With $n = 20$ or more points, the central bump dominates the tails, the exact posterior is close to
+  Gaussian, and EP's mean and evidence are more accurate than those of Laplace, VB, importance sampling or Gibbs sampling
+  at equal cost <Cite id="minka2001" />.
+- **Higher dimension.** In $d$ dimensions with an isotropic Gaussian $q$, the same updates hold with
+  $(x_i - \mu)^2$ replaced by $\norm{\xvec_i - \muvec}^2/d$ in the variance term <Cite id="minka2001thesis" />.
+- **Heavier clutter.** Raising $w$ widens the tails of the exact posterior and makes negative sites more common. At
+  $w = 0.5$ with five points, the exact variance is dominated by the tails and no single Gaussian describes the posterior
+  well.

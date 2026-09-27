@@ -1,0 +1,119 @@
+---
+title: Polytomous and multidimensional item response models
+kind: concept
+summary: 'Item response models extend beyond right-or-wrong answers and single abilities. The graded response and partial credit models give probabilities for ordered scores $0, \dots, m$; multidimensional models replace $a(\theta - b)$ by $\avec^\top\thetavec + d$ for an ability vector $\thetavec$.'
+tags: [skill-rating, psychometrics, latent-variable-models, worked-example]
+aliases:
+  [
+    graded response model,
+    partial credit model,
+    generalised partial credit model,
+    polytomous IRT,
+    multidimensional IRT,
+    MIRT,
+    compensatory multidimensional model,
+  ]
+requires: [item-response-theory]
+partOf: [skill-rating]
+related: [ability-estimation-and-item-calibration, multinomial-logistic-regression, factor-analysis]
+references: [samejima1969, masters1982, muraki1992, reckase2009]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **polytomous** item response model gives, for an item scored in ordered categories $k = 0, 1, \dots, m$, the
+probability $\pr(X = k \mid \theta)$ of each score as a function of ability $\theta$. A **multidimensional** model gives
+each person an ability vector $\thetavec \in \reals^D$ and each item a vector of discriminations $\avec_i$, with the
+probability of success depending on $\avec_i^\top\thetavec$.
+</Definition>
+
+## Intuition
+
+Many items are not simply right or wrong. An essay is marked 0 to 4, a survey answer runs from "strongly disagree" to
+"strongly agree", and a maths problem earns partial credit for correct steps. Two ideas turn the binary
+<NoteLink to="item-response-theory">item response model</NoteLink> into a model for ordered scores. The **cumulative**
+idea models "score at least $k$" as a binary item for each $k$. The **adjacent-category** idea models each step from
+$k - 1$ to $k$ as a binary contest.
+
+Likewise, a test may measure more than one ability, such as algebra and reading. A word problem needs both. A
+multidimensional model gives each item a direction in ability space.
+
+## Graded response model
+
+Samejima's **graded response model** treats each threshold as a 2PL item with a shared discrimination
+<Cite id="samejima1969" />:
+
+$$
+\pr(X \ge k \mid \theta) = \sigma\paren{a(\theta - b_k)}, \quad k = 1, \dots, m, \qquad b_1 < b_2 < \dots < b_m,
+$$
+
+with $\pr(X \ge 0) = 1$ and $\pr(X \ge m + 1) = 0$. Category probabilities are differences of neighbouring curves:
+$\pr(X = k) = \pr(X \ge k) - \pr(X \ge k + 1)$. The ordering of the $b_k$ keeps every difference positive.
+
+**Example.** Take $a = 1.5$, thresholds $b = (-1, 0.5, 1.5)$, and $\theta = 0$. The cumulative probabilities are
+$\sigma(1.5) = 0.8176$, $\sigma(-0.75) = 0.3208$ and $\sigma(-2.25) = 0.0953$. The category probabilities are
+$(0.1824, 0.4968, 0.2255, 0.0953)$ for scores 0 to 3.
+
+## Partial credit models
+
+Masters' **partial credit model** treats each step from $k - 1$ to $k$ as a Rasch item with its own step difficulty
+$\delta_k$ <Cite id="masters1982" />. Conditional on the score being $k - 1$ or $k$, the chance of $k$ is
+$\sigma(\theta - \delta_k)$. Chaining these conditionals gives
+
+$$
+\pr(X = k \mid \theta) = \frac{\exp\paren{\sum_{j=1}^{k}(\theta - \delta_j)}}{\sum_{h=0}^{m}\exp\paren{\sum_{j=1}^{h}(\theta - \delta_j)}},
+$$
+
+a softmax over categories whose logits are cumulative sums (the empty sum for $k = 0$ is 0). Unlike the graded model,
+the step difficulties need not be ordered: a step can be harder than the next one.
+
+The **generalised partial credit model** multiplies each $(\theta - \delta_j)$ by an item discrimination $a$
+<Cite id="muraki1992" />. It is to the partial credit model what the 2PL is to the Rasch model.
+
+**Example.** With $\delta = (-1, 0.5, 1.5)$ and $\theta = 0$, the cumulative sums are $0, 1, 0.5, -1$. Their
+exponentials $1, 2.718, 1.649, 0.368$ sum to 5.735, giving probabilities $(0.174, 0.474, 0.288, 0.064)$ for scores 0
+to 3. With the same numbers as thresholds, the graded response model with $a = 1.5$ gave a similar but not identical
+distribution: the two families are different models, not reparameterisations.
+
+Both examples were checked numerically.
+
+## Multidimensional models
+
+The **compensatory** multidimensional 2PL model is
+
+$$
+\pr(x_{pi} = 1 \mid \thetavec_p) = \sigma\paren{\avec_i^\top\thetavec_p + d_i},
+$$
+
+with an intercept $d_i$ in place of $-a_i b_i$ <Cite id="reckase2009" />. Strength in one dimension compensates for
+weakness in another, because only the weighted sum matters. The model is a logistic
+<NoteLink to="factor-analysis">factor analysis</NoteLink> of binary data: $\avec_i$ are the item loadings and
+$\thetavec_p$ the person's factor scores.
+
+Two properties follow from the linear form.
+
+- **Rotation.** Replacing $\thetavec$ by $\Rmat\thetavec$ and every $\avec_i$ by $\Rmat^{-\top}\avec_i$ leaves every
+  probability unchanged. As in factor analysis, the dimensions need constraints or a rotation to be interpreted.
+- **Direction of measurement.** An item measures best along its own direction $\avec_i/\norm{\avec_i}$, with
+  multidimensional discrimination $\norm{\avec_i}$. A test measures an ability combination well only if some items
+  point that way.
+
+Estimation extends the one-dimensional methods: marginal maximum likelihood with EM over a multidimensional quadrature
+grid for few dimensions, and Monte Carlo or variational methods for more.
+
+## Assumptions
+
+- **Ordered categories.** Both polytomous families assume the categories are ordered along the ability. Unordered
+  options, such as which distractor a person chose, need a nominal model.
+- **Local independence** holds given the whole ability vector, not given a single summary score.
+
+## Pitfalls
+
+- **Sparse categories.** A category that almost nobody uses gives a threshold or step difficulty with a large
+  standard error. Merging it with a neighbour is common.
+- **Reversed step difficulties** in the partial credit model are not an error in themselves, but they mean the middle
+  category is never the most likely score at any ability.
+- **Too many dimensions.** Every extra dimension adds a loading to every item and a coordinate to every person, and
+  the loadings are identified only up to rotation. Confirmatory structures, in which each item loads on a named subset
+  of dimensions, are easier to estimate and to interpret.

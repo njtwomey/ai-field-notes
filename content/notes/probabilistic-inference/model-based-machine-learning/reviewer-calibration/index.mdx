@@ -1,0 +1,157 @@
+---
+title: Reviewer calibration
+kind: concept
+summary: 'Reviewer calibration models each score as paper quality plus reviewer bias plus noise, $y_{rp} = \mu + q_p + b_r + \epsilon_{rp}$, and ranks papers by the posterior mean of $q_p$. Gaussian priors make it ridge regression; an ordinal version adds per-reviewer thresholds.'
+tags: [model-based-machine-learning, bayesian, peer-review, ranking, linear-gaussian-models, worked-example]
+aliases: [conference review calibration, calibrating review scores, reviewer bias, Platt–Burges model, SIGKDD'09 review calibration, reviewer model]
+requires: [bayesian-linear-regression, ridge-regression, gaussian-distribution]
+partOf: [model-based-machine-learning]
+related: [factor-graph, email-reply-classifier, dawid-skene-model, community-bayesian-classifier-combination, gaussian-process]
+references: [flach2010kdd, infernetreviewers, lawrence2014calibration, cortes2021nips]
+status: draft
+updated: 2026-09-27
+---
+
+import { CalibrationLab } from './CalibrationLab'
+import { LinearReviewGraph, OrdinalReviewGraph } from './ReviewGraphs'
+
+<Callout variant="credit" title="Provenance: Flach et al. (2010), Infer.NET, and Platt and Burges">
+This note follows two lines of work. The first is the review-calibration model built for SIGKDD 2009 and described in
+"Novel Tools to Streamline the Conference Review Process: Experiences from SIGKDD'09" by Peter Flach, Sebastian
+Spiegler, Bruno Golénia, Simon Price, John Guiver, Ralf Herbrich, Thore Graepel and Mohammed Zaki
+<Cite id="flach2010kdd" />; its Infer.NET implementation, by the Microsoft Research authors, ships as the "Conference
+reviewer model" example <Cite id="infernetreviewers" />. The second is the regularised least-squares calibration that
+John Platt and Chris Burges of Microsoft Research used at NIPS from 2002, as described by Neil Lawrence and Corinna
+Cortes <Cite id="lawrence2014calibration" /> <Cite id="cortes2021nips" />. The models are theirs; this note restates
+them in this site's notation. I include it because it is a very good account, and I want it in my own records. The
+derivation of why raw means fail, the identifiability argument and the interactive figure were added by this site.
+</Callout>
+
+<Definition>
+Each paper $p$ has an unknown quality $q_p$ and each reviewer $r$ an unknown bias $b_r$. The score reviewer $r$ gives
+paper $p$ is
+
+$$
+y_{rp} = \mu + q_p + b_r + \epsilon_{rp}, \qquad q_p \sim \Gauss(0, \alpha_q), \quad b_r \sim \Gauss(0, \alpha_b), \quad
+\epsilon_{rp} \sim \Gauss(0, \sigma^2),
+$$
+
+observed only for the pairs $(r, p)$ that were assigned. **Reviewer calibration** computes the posterior over qualities
+and ranks papers by $\expect[q_p \mid \yvec]$ instead of by their mean raw score.
+</Definition>
+
+<LinearReviewGraph />
+
+## Why raw means fail
+
+The mean of the $n_p$ scores of paper $p$, with reviewer set $R_p$, is
+
+$$
+\bar y_p = \mu + q_p + \frac{1}{n_p}\sum_{r \in R_p} b_r + \bar\epsilon_p.
+$$
+
+The middle term is the average bias of whoever happened to review the paper. With three reviews per paper it does not
+average out. It is also not independent of quality. Papers are assigned by topic, so a sub-area with harsh reviewers
+depresses all its papers together. Two papers of equal quality can then differ in raw mean by more than the gap between
+a strong paper and a weak one.
+
+The fix follows from the model. Every reviewer scores several papers, and every paper is scored by several reviewers,
+so each bias is seen repeatedly. The data can separate $q_p$ from $b_r$ as long as the bipartite graph of reviewers and
+papers is connected.
+
+## The posterior
+
+Stack the unknowns into $\thetavec = (q_1, \dots, q_P, b_1, \dots, b_R)$. Each review is one row of a design matrix
+$\Amat$ with a 1 in the column of its paper and a 1 in the column of its reviewer, so $\yvec - \mu = \Amat\thetavec +
+\epsilonvec$. The prior and likelihood are Gaussian, so the posterior is Gaussian, and its log density is, up to a
+constant,
+
+$$
+-\frac{1}{2\sigma^2}\norm{\yvec - \mu - \Amat\thetavec}^2 - \frac{1}{2\alpha_q}\sum_p q_p^2 - \frac{1}{2\alpha_b}\sum_r b_r^2.
+$$
+
+Setting its gradient to zero gives the posterior mean:
+
+$$
+\paren{\frac{\Amat\transpose\Amat}{\sigma^2} + \Lambdamat}\thetavec = \frac{\Amat\transpose(\yvec - \mu)}{\sigma^2},
+\qquad \Lambdamat = \diag\paren{\alpha_q^{-1}, \dots, \alpha_q^{-1}, \alpha_b^{-1}, \dots, \alpha_b^{-1}}.
+$$
+
+This is ridge regression, with a separate ridge for qualities and biases. It is the model John Platt introduced at NIPS
+in 2002, fitted as regularised least squares, and related to a two-way analysis of variance with random effects
+<Cite id="lawrence2014calibration" />. Lawrence and Cortes rewrote it as a Gaussian process whose covariance between two
+reviews is $\alpha_q$ if they share a paper, plus $\alpha_b$ if they share a reviewer, plus $\sigma^2$ if they are the
+same review, and fitted the variances to the data <Cite id="lawrence2014calibration" />.
+
+### Why the prior is needed
+
+Without the prior, the likelihood cannot tell $q_p + c$ and $b_r - c$ from $q_p$ and $b_r$ for any constant $c$: every
+score is unchanged. $\Amat\transpose\Amat$ is singular, with the null direction $(\ones_P, -\ones_R)$. The prior
+removes it by preferring the split in which qualities and biases are both small. The same holds within each connected
+component of the review graph separately, which is why an isolated cluster of papers and reviewers cannot be compared
+with the rest by any model.
+
+### How much a paper moves
+
+For intuition, suppose the biases were known. Then each paper's posterior mean is the average of its bias-corrected
+scores, shrunk towards the mean:
+
+$$
+\expect[q_p \mid \yvec, \bvec] = \frac{n_p / \sigma^2}{n_p / \sigma^2 + 1 / \alpha_q}\; \frac{1}{n_p}\sum_{r \in R_p}(y_{rp} - \mu - b_r).
+$$
+
+Calibration subtracts each reviewer's bias from their scores, and the prior pulls papers with few reviews towards the
+middle. The joint solution does both at once, with each bias estimated from all of that reviewer's papers.
+
+<CalibrationLab />
+
+## The ordinal model of SIGKDD'09
+
+Real reviews are not continuous scores but recommendations on a scale such as strong reject to strong accept, and
+reviewers also report their expertise. The model used for SIGKDD 2009 builds both in <Cite id="flach2010kdd" />
+<Cite id="infernetreviewers" />:
+
+1. **Quality.** Each submission has a latent quality $q_p$ with a Gaussian prior centred mid-scale.
+2. **Expertise sets the noise.** The latent score of a review is $\Gauss(q_p, 1/\lambda_e)$, where the precision
+   $\lambda_e$ depends on the reviewer's self-declared expertise level $e$ and has a Gamma prior. Experts' scores are
+   trusted more, by an amount learned from the data.
+3. **Personal thresholds.** Reviewer $r$ turns the latent score into a recommendation through their own thresholds
+   $\theta_{r,1} < \dots < \theta_{r,L-1}$. Each is drawn around a fixed nominal threshold, $\theta_{r,\ell} \sim
+   \Gauss(\theta_\ell, 1/a_r)$, where the reviewer's accuracy $a_r$ has a Gamma prior.
+4. **Observation.** The recommendation is level $\ell$ exactly when the latent score falls between thresholds $\ell - 1$
+   and $\ell$.
+
+<OrdinalReviewGraph />
+
+A harsh reviewer is one whose thresholds sit high; an erratic reviewer is one whose thresholds scatter far from the
+nominal ones. The threshold factors are the ordinal version of the probit factor of the
+<NoteLink to="email-reply-classifier">email reply classifier</NoteLink>, and expectation propagation handles them the
+same way. In the Infer.NET example the learned precision rises with declared expertise, from informed outsider to
+knowledgeable to expert, as the model allows but does not force <Cite id="infernetreviewers" />.
+
+## Assignment comes first
+
+Calibration can only use the review graph it is given. The SIGKDD'09 organisers also automated the earlier stages,
+bidding and assignment of papers to reviewers <Cite id="flach2010kdd" />. Assignment decides which biases are
+confounded with which papers. An assignment that mixes reviewers across sub-areas makes calibration more reliable, and
+an assignment that walls off a sub-area with its own reviewers makes it impossible.
+
+## Assumptions
+
+- **Bias is a constant shift.** A reviewer is equally harsh on every paper. Reviewers who are harsh only on some topics,
+  or who compress the scale, need a scale parameter or per-reviewer thresholds as in the ordinal model.
+- **Noise is shared.** One $\sigma^2$ for all reviews in the linear model. The ordinal model relaxes this through
+  expertise.
+- **Quality is one number.** Disagreement about what makes a paper good lands in $\epsilon_{rp}$. In the NIPS 2014
+  experiment about half of the variation in quality scores was subjective in this sense <Cite id="cortes2021nips" />;
+  calibration cannot remove it.
+
+## Pitfalls
+
+- **Calibrating unbiased reviewers.** With no real biases, estimating six extra parameters from 36 reviews adds a little
+  noise. In the figure, setting all biases to zero makes the calibrated ranking slightly worse than the raw one.
+- **Few reviews per reviewer.** A reviewer with one review has a bias estimate equal to the prior; the calibration then
+  does nothing for their paper. Shrinkage handles this gracefully, but the benefit comes only from reviewers with several
+  papers.
+- **Using calibrated scores as the decision.** Calibrated scores are one input to a programme committee, not a verdict.
+  The model has no access to the content of the reviews.

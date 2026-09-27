@@ -1,0 +1,121 @@
+---
+title: Clicks and relevance judgements
+kind: concept
+summary: 'Reconciles two noisy views of a document''s relevance: a latent score $s_i$ seen by judges through ordered thresholds, and by users through a click rate entered as Gaussian soft evidence. It learns thresholds and noise, and predicts labels from clicks alone.'
+tags: [model-based-machine-learning, information-retrieval, bayesian, ordinal-regression, implicit-feedback, worked-example]
+aliases: [Infer.NET click model, click model example, reconciling clicks and judgements, soft evidence, virtual evidence, ConstrainEqualRandom]
+requires: [factor-graph, gaussian-distribution, beta-distribution]
+partOf: [model-based-machine-learning]
+related: [click-models, reviewer-calibration, email-reply-classifier, expectation-propagation, explicit-and-implicit-feedback]
+references: [infernetclick, infernet2018, minka2001]
+status: draft
+updated: 2026-09-27
+---
+
+import { ClickGraph } from './ClickGraph'
+import { ClickScore } from './ClickScore'
+
+<Callout variant="credit" title="Provenance: the Infer.NET click model example">
+This note follows the "Click model" example of Infer.NET, written by the Infer.NET team at Microsoft Research
+<Cite id="infernetclick" /> <Cite id="infernet2018" />. The model, the treatment of clicks as soft evidence and the data
+are theirs; this note restates them in this site's notation. I include it because it is a very good account, and I want
+it in my own records. The parameter values in the figure are the ones Infer.NET learns when this site ran the example
+on its data; the derivations and the interactive figure were added by this site.
+</Callout>
+
+<Definition>
+Each query–document pair $i$ has a latent relevance score $s_i \sim \Gauss(m, 1/\tau)$. A human judge reports a label
+$\ell_i \in \{0, 1, 2\}$ by comparing a noisy copy $s^J_i \sim \Gauss(s_i, 1/\tau_J)$ with ordered thresholds. Users
+click with a rate that is another noisy copy $s^C_i \sim \Gauss(s_i, 1/\tau_C)$, observed only through $c_i$ clicks in
+$e_i$ examinations. Inference learns $m$, the thresholds and the noise precisions from pairs with both kinds of data,
+and predicts scores and labels for pairs with clicks only <Cite id="infernetclick" />.
+</Definition>
+
+## The problem
+
+A search engine needs relevance labels to train and evaluate rankers. Human judgements are accurate but expensive.
+Click logs are free and plentiful but noisy: a click reflects a title and snippet, not the document, and many documents
+are rarely examined. The two sources sometimes disagree, and a document judged highly relevant may never be clicked. A
+model that links both to one latent score can find bad judgements, and can turn click data into cleaned training
+targets with stated uncertainty <Cite id="infernetclick" />.
+
+The data of the example are 4,604 query–document pairs, each with a label from 0 (not relevant) to 2 (relevant), a
+click count and an examination count, where an examination means the document or one below it was clicked. Most pairs
+have no examinations; the model is trained on the 522 that do.
+
+<ClickGraph />
+
+## Clicks as soft evidence
+
+Clicks are a binomial experiment: $c_i$ successes in $e_i$ trials with an unknown rate. Rather than put a binomial factor
+in the model, the example computes the rate's posterior outside it. With a uniform prior the posterior is
+$\Beta(1 + c_i, 1 + e_i - c_i)$, with mean and variance
+
+$$
+\hat c_i = \frac{1 + c_i}{2 + e_i}, \qquad v_i = \frac{(1 + c_i)(1 + e_i - c_i)}{(2 + e_i)^2 (3 + e_i)}.
+$$
+
+The Beta is projected to $\Gauss(\hat c_i, v_i)$, and this Gaussian is attached to $s^C_i$ as a fixed factor, the
+constraint that $s^C_i$ is a random draw from it. A factor that encodes an observation's likelihood rather than a
+value is called soft or virtual evidence. Its width does the right thing automatically: 1 click in 2 examinations gives
+$v_i \approx 0.05$, and 1,000 in 2,000 gives $v_i \approx 1.2 \times 10^{-4}$.
+
+**The score from clicks alone.** The noise factor turns the soft evidence into a message to $s_i$ of
+$\Gauss(\hat c_i, v_i + 1/\tau_C)$, and the prior is $\Gauss(m, 1/\tau)$. The product of two Gaussians has precision
+equal to the sum of their precisions:
+
+$$
+\var[s_i \mid c_i] = \paren{\tau + \frac{1}{v_i + 1/\tau_C}}^{-1}, \qquad
+\expect[s_i \mid c_i] = \var[s_i \mid c_i]\paren{\tau\, m + \frac{\hat c_i}{v_i + 1/\tau_C}}.
+$$
+
+Even with infinitely many examinations, $v_i \to 0$ and the click noise $1/\tau_C$ keeps the score uncertain: clicks
+measure attractiveness, which is not quite relevance.
+
+## Judgements through thresholds
+
+The judge's label constrains $s^J_i$ to lie between two thresholds, $\theta_{\ell} < s^J_i < \theta_{\ell + 1}$. The
+message from this factor to $s_i$ is a difference of normal cdfs,
+
+$$
+\pr(\ell_i = \ell \mid s_i) = \Phi\paren{\sqrt{\tau_J}\,(\theta_{\ell + 1} - s_i)} - \Phi\paren{\sqrt{\tau_J}\,(\theta_\ell - s_i)},
+$$
+
+an ordinal probit. Expectation propagation projects its product with the other messages to a Gaussian, as for any
+threshold factor; the thresholds, with Gaussian priors, receive messages from every judged pair and are learned
+<Cite id="minka2001" />. For prediction, integrating this likelihood against a Gaussian score posterior
+$\Gauss(\mu, \sigma^2)$ gives
+
+$$
+\pr(\ell_i = \ell \mid c_i) = \Phi\paren{\frac{\theta_{\ell + 1} - \mu}{\sqrt{\sigma^2 + 1/\tau_J}}} - \Phi\paren{\frac{\theta_\ell - \mu}{\sqrt{\sigma^2 + 1/\tau_J}}},
+$$
+
+because $s^J_i$ given the clicks is Gaussian with variance $\sigma^2 + 1/\tau_J$.
+
+## Worked example
+
+Running the example learns $m = 0.461$, judge and click noise precisions of about 20 (standard deviations of 0.22),
+and inner thresholds $\theta_1 = 0.20$ and $\theta_2 = 0.80$. A document with 10 clicks in 100 examinations has
+$\hat c = 11/102 = 0.108$ and $v = 9.3 \times 10^{-4}$. The message variance is $0.00093 + 0.050 = 0.051$, so the score
+posterior has variance $(2 + 19.6)^{-1} = 0.046$ and mean $0.046 \times (2 \times 0.461 + 19.6 \times 0.108) = 0.14$.
+The predicted label probabilities are 0.58, 0.41 and 0.02 for labels 0, 1 and 2. Infer.NET, which also carries the
+uncertainty in the learned parameters, gives a score of 0.141 and probabilities 0.577, 0.406 and 0.017.
+
+<ClickScore />
+
+## Assumptions
+
+- **One score explains both.** Judges and clickers respond to the same underlying relevance, each with their own noise.
+  A document with an attractive snippet but poor content breaks this, and shows up as a disagreement.
+- **Click rate independent of position.** The example takes clicks per examination as the rate, a crude correction
+  for position bias. Proper <NoteLink to="click-models">click models</NoteLink> such as the cascade model separate
+  examination from attractiveness.
+- **Beta then Gaussian.** Summarising the clicks by a Gaussian is accurate when there are many examinations and rough
+  when there are few; a binomial factor inside the model would avoid the approximation at some cost.
+
+## Pitfalls
+
+- **Training on pairs with clicks only.** Pairs with no examinations carry information about the distribution of
+  labels, which the example discards to focus on the relation between the two sources.
+- **Unidentified scale.** Scores, thresholds and noise levels trade off. Fixing the outer thresholds at 0 and 1 during
+  training, as the example does, pins the scale to that of click rates.

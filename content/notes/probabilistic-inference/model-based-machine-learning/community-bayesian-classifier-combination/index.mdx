@@ -1,0 +1,133 @@
+---
+title: Community Bayesian classifier combination
+kind: concept
+summary: 'Bayesian classifier combination infers true labels from crowd labels with a Dirichlet-distributed confusion matrix per worker. Community BCC assumes a few worker types, each worker''s matrix drawn near its community''s, so sparse workers borrow strength.'
+tags: [model-based-machine-learning, crowdsourcing, weak-supervision, bayesian, latent-variable-models, message-passing, worked-example]
+aliases: [BCC, IBCC, independent Bayesian classifier combination, Community-BCC, CBCC, CommunityBCC, harnessing the crowd, BCCWords, worker communities, MBML chapter 7]
+requires: [dawid-skene-model, dirichlet-distribution, categorical-distribution, factor-graph]
+partOf: [model-based-machine-learning]
+related: [learning-from-crowds, gates-in-factor-graphs, mean-field-variational-inference, difficulty-versus-ability, reviewer-calibration]
+references: [winn2023crowd, kim2012bcc, venanzi2014, simpson2015bccwords, dawid1979, minka2008gates]
+status: draft
+updated: 2026-09-27
+---
+
+import { CrowdCommunities } from './CrowdCommunities'
+import { CrowdGraph } from './CrowdGraph'
+
+<Callout variant="credit" title="Provenance: Model-Based Machine Learning, by John Winn et al., and Venanzi et al. (2014)">
+This note follows the "Harnessing the Crowd" chapter of *Model-Based Machine Learning* by John Winn with Christopher M.
+Bishop, Thomas Diethe, John Guiver and Yordan Zaykov (Microsoft Research) <Cite id="winn2023crowd" />, and the papers it
+builds on: "Bayesian Classifier Combination" by Hyun-Chul Kim and Zoubin Ghahramani <Cite id="kim2012bcc" />, and
+"Community-Based Bayesian Aggregation Models for Crowdsourcing" by Matteo Venanzi, John Guiver, Gabriella Kazai,
+Pushmeet Kohli and Milad Shokouhi (Microsoft Research and Southampton) <Cite id="venanzi2014" />. The models, their
+assumptions and the way they are built up step by step are theirs; this note restates them in this site's notation. I
+include it because it is a very good account, and I want it in my own records. The book is free to read at
+[mbmlbook.com](https://mbmlbook.com). This site added the variational updates written out below, the simulation and the
+interactive figure.
+</Callout>
+
+<Definition>
+$N$ items each have an unknown true class $t_i \in \{1, \dots, C\}$ with $t_i \sim \Cat(\pvec)$. Worker $k$ labels
+some items; label $\ell_{ik}$ is drawn from row $t_i$ of the worker's confusion matrix, $\ell_{ik} \sim
+\Cat(\pivec^{(k)}_{t_i})$. **Bayesian classifier combination** (BCC) puts Dirichlet priors on $\pvec$ and on every row
+$\pivec^{(k)}_c$ and infers the posterior over true classes and confusion matrices <Cite id="kim2012bcc" />.
+**Community BCC** adds a latent community $m_k \in \{1, \dots, M\}$ per worker and draws each worker's confusion matrix
+near that community's matrix $\pivec^{(m)}$ <Cite id="venanzi2014" />.
+</Definition>
+
+## From Dawid–Skene to BCC
+
+The likelihood of BCC is that of the <NoteLink to="dawid-skene-model">Dawid–Skene model</NoteLink> <Cite id="dawid1979" />.
+Dawid and Skene fit it by maximum likelihood with EM. BCC makes it Bayesian <Cite id="kim2012bcc" />. Two things change.
+
+- **Priors on confusion matrices.** A row prior $\Dir(\alphavec_c)$ with more mass on the diagonal says "most workers
+  mostly give the right label". A worker with three labels then gets a confusion matrix close to the prior, not a
+  maximum-likelihood estimate built from three counts.
+- **Uncertainty propagates.** The posterior over each true class averages over the uncertainty in the confusion
+  matrices, instead of plugging in point estimates.
+
+In the factor graph, the true class $t_i$ selects which row of $\pivec^{(k)}$ generates the label. This is drawn as a
+<NoteLink to="gates-in-factor-graphs">gate</NoteLink>: one categorical factor per value of $t_i$, switched on when $t_i$
+takes that value <Cite id="minka2008gates" />.
+
+<CrowdGraph />
+
+## The book's progression
+
+The book builds the model on a real data set: about 99,000 tweets about the weather, labelled positive, negative,
+neutral or unrelated by about 2,000 crowd workers, with a small set of expert gold labels for evaluation
+<Cite id="winn2023crowd" />. It tries three models in turn.
+
+1. **Honest workers.** Each worker has one ability $a_k$: with probability $a_k$ they give the true label, otherwise a
+   label uniformly at random. One parameter per worker.
+2. **Biased workers.** Each worker has a full confusion matrix, as in BCC: $C(C - 1) = 12$ free parameters per worker
+   for four classes. On the real data this model was *less* accurate than the honest-worker model, and barely beat
+   majority vote. Most workers labelled too few tweets to pin down twelve numbers.
+3. **Communities.** Workers are grouped into a few communities, and every worker in a community shares its confusion
+   matrix. The number of parameters no longer grows with the number of workers. This model was the most accurate, and
+   its advantage grew when the training labels were thinned out <Cite id="winn2023crowd" />.
+
+The communities it found had distinct error patterns: one community overused "neutral", another overused "unrelated".
+A final step, BCCWords, lets the true class also generate the words of the tweet, so a tweet with few labels borrows
+evidence from its text <Cite id="simpson2015bccwords" />.
+
+## Community BCC
+
+The book shares one matrix per community exactly. Venanzi et al. let each worker deviate from their community
+<Cite id="venanzi2014" />:
+
+$$
+m_k \sim \Cat(\hvec), \qquad \svec^{(k)}_c \sim \Gauss\paren{\svec^{(m_k)}_c, \nu^{-1}\Imat}, \qquad
+\pivec^{(k)}_c = \operatorname{softmax}\paren{\svec^{(k)}_c}.
+$$
+
+Each row of a confusion matrix is the softmax of a real-valued score vector. A community has score vectors
+$\svec^{(m)}_c$; a worker's scores are a Gaussian perturbation of their community's, with precision $\nu$. A worker
+with many labels can move away from the community; a worker with few stays close to it. As $\nu \to \infty$ the model
+becomes the book's hard-sharing community model, and with one community per worker it becomes BCC with a softmax-Gaussian prior on each row.
+
+## Inference as soft counting
+
+The model has discrete true classes, Dirichlet confusion rows and categorical community memberships. The authors run
+approximate message passing on it in Infer.NET <Cite id="venanzi2014" />. The fully factorised variational version,
+written out here for the book's hard-sharing model, shows what the messages do. With $q(t_i = c) = \rho_{ic}$, $q(m_k = m) = r_{km}$
+and Dirichlet posteriors $\alphavec^{(m)}_c$ over community rows:
+
+1. **Confusion rows are soft counts.** Each label adds its item's class probabilities, weighted by the worker's
+   community membership, to the matching column:
+   $\alpha^{(m)}_{c\ell} = \alpha^{0}_{c\ell} + \sum_{(i, k):\, \ell_{ik} = \ell} r_{km}\,\rho_{ic}$.
+2. **Items are scored by every label on them.** With
+   $\expect[\log \pi^{(m)}_{c\ell}] = \psi(\alpha^{(m)}_{c\ell}) - \psi(\sum_{\ell'}\alpha^{(m)}_{c\ell'})$ and $\psi$
+   the digamma function,
+   $\log \rho_{ic} = \expect[\log p_c] + \sum_{k} \sum_m r_{km}\, \expect[\log \pi^{(m)}_{c\,\ell_{ik}}] + \text{const}$.
+3. **Workers are scored against every community.**
+   $\log r_{km} = \expect[\log h_m] + \sum_{i} \sum_c \rho_{ic}\, \expect[\log \pi^{(m)}_{c\,\ell_{ik}}] + \text{const}$.
+
+Each update is the exact coordinate-wise optimum of the evidence lower bound given the others, because every factor is
+conjugate once the rest are fixed. BCC is the special case with one community per worker and $r_{km}$ fixed. Majority
+vote is the special case with every worker's matrix fixed to the same symmetric matrix. Community labels are
+exchangeable, so the updates must start from random memberships to break the symmetry, and several restarts guard
+against poor local optima.
+
+<CrowdCommunities />
+
+## Assumptions
+
+- **Labels are independent given the true class and the worker.** Workers who copy each other, or items that confuse
+  everyone, violate this; the difficulty of an item is modelled in
+  <NoteLink to="difficulty-versus-ability">difficulty versus ability</NoteLink> and in GLAD, described in
+  <NoteLink to="learning-from-crowds">learning from crowds</NoteLink>.
+- **A few worker types.** The community model helps when workers really cluster. With one community it cannot represent
+  a crowd of mixed reliability; with too many it reverts towards BCC.
+- **Stationary workers.** A worker's confusion matrix does not change as they learn the task or tire.
+
+## Pitfalls
+
+- **Label switching.** Communities, and in unsupervised settings the classes themselves, are identified only up to
+  relabelling. A diagonal-heavy prior on confusion rows ties classes to their meaning; communities need matching to be
+  compared with anything.
+- **Too many parameters per worker.** BCC with a flat prior on a crowd of occasional workers can do worse than majority
+  vote, as the book's biased-worker model did. The figure shows the same effect as the crowd grows sparser.
+- **Evaluating without gold labels.** Accuracy needs some expert-labelled items. They also help inference: observing
+  $t_i$ for a few items anchors each community's matrix.
