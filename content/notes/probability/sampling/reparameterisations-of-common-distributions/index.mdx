@@ -1,0 +1,145 @@
+---
+title: Reparameterisations of common distributions
+kind: technique
+summary: 'A catalogue of pathwise samplers $z = g_{\phivec}(\epsilon)$ and their derivatives: location–scale families, quantile transforms, Cholesky factors, implicit gradients for gamma, beta and Dirichlet, the Kumaraswamy substitute, Gumbel-softmax relaxations, and what cannot be reparameterised.'
+tags: [probability, sampling, gradients, variational-inference, worked-example]
+aliases: [pathwise samplers, reparameterisable distributions, implicit reparameterisation, rsample]
+requires: [reparameterisation-trick, inverse-transform-sampling]
+related: [gumbel-max-trick, score-function-estimator, variational-autoencoder, black-box-variational-inference, normalising-flow]
+references: [kingma2014, rezende2014, figurnov2018, jang2017, maddison2017, naesseth2017, nalisnick2017, marsaglia2000, mohamed2020]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A distribution $q_{\phivec}$ is reparameterisable when a sample can be written as $z = g_{\phivec}(\epsilon)$, with
+$\epsilon$ drawn from a fixed distribution $p(\epsilon)$ that does not depend on $\phivec$ and $g$ differentiable in
+$\phivec$. Then $\nabla_{\phivec} \expect_{q_{\phivec}}[f(z)] = \expect_{p(\epsilon)}[f'(g_{\phivec}(\epsilon))\,
+\nabla_{\phivec} g_{\phivec}(\epsilon)]$, estimated by averaging over samples of $\epsilon$ (see the
+<NoteLink to="reparameterisation-trick">reparameterisation trick</NoteLink>). This note lists $g$ and
+$\partial z / \partial \phivec$ for the distributions met in practice.
+</Definition>
+
+## Four routes to a pathwise sample
+
+Every entry below uses one of four constructions.
+
+1. **Location–scale.** If $z = \mu + \sigma \epsilon$ with $\epsilon$ from the standard member of the family, then
+   $\partial z / \partial \mu = 1$ and $\partial z / \partial \sigma = \epsilon$.
+2. **Quantile transform.** If the cdf $F_{\phivec}$ has a closed-form inverse, $z = F_{\phivec}^{-1}(u)$ with
+   $u \sim \Unif(0, 1)$ (see <NoteLink to="inverse-transform-sampling">inverse-transform sampling</NoteLink>).
+3. **Composition.** A differentiable transformation of a reparameterisable variable is reparameterisable. The chain rule
+   gives the derivative.
+4. **Implicit differentiation.** If only the cdf can be differentiated, hold the uniform $u = F_{\phivec}(z)$ fixed and
+   differentiate the identity $F_{\phivec}(z) = u$ with respect to $\phivec$:
+
+$$
+\frac{\partial F_{\phivec}}{\partial z}\,\frac{\partial z}{\partial \phivec} + \frac{\partial F_{\phivec}}{\partial \phivec} = 0
+\quad\Longrightarrow\quad
+\frac{\partial z}{\partial \phivec} = -\,\frac{\partial F_{\phivec}(z) / \partial \phivec}{q_{\phivec}(z)} .
+$$
+
+The sample $z$ can come from any sampler, including a rejection sampler; only the derivative uses the implicit formula
+<Cite id="figurnov2018" />. This is route 2 without inverting the cdf.
+
+## Continuous univariate distributions
+
+| Distribution | Sampler $z = g_{\phivec}(\epsilon)$ | Derivatives | Route |
+| --- | --- | --- | --- |
+| Gaussian $\Gauss(\mu, \sigma^2)$ | $\mu + \sigma\epsilon$, $\epsilon \sim \Gauss(0, 1)$ | $\partial_\mu z = 1$, $\partial_\sigma z = \epsilon$ | 1 |
+| Log-normal | $\exp(\mu + \sigma\epsilon)$ | $\partial_\mu z = z$, $\partial_\sigma z = z\epsilon$ | 3 |
+| Uniform $\Unif(a, b)$ | $a + (b - a)u$ | $\partial_a z = 1 - u$, $\partial_b z = u$ | 1 |
+| Exponential $\Exp(\lambda)$ | $-\log(u)/\lambda$ | $\partial_\lambda z = -z/\lambda$ | 2 |
+| Laplace$(\mu, b)$ | $\mu - b\,\operatorname{sign}(u - \tfrac12)\log(1 - 2\abs{u - \tfrac12})$ | $\partial_\mu z = 1$, $\partial_b z = (z - \mu)/b$ | 1, 2 |
+| Logistic$(\mu, s)$ | $\mu + s\log\big(u/(1-u)\big)$ | $\partial_\mu z = 1$, $\partial_s z = (z - \mu)/s$ | 1, 2 |
+| Gumbel$(\mu, \beta)$ | $\mu - \beta\log(-\log u)$ | $\partial_\mu z = 1$, $\partial_\beta z = (z - \mu)/\beta$ | 1, 2 |
+| Cauchy$(x_0, \gamma)$ | $x_0 + \gamma\tan\big(\pi(u - \tfrac12)\big)$ | $\partial_{x_0} z = 1$, $\partial_\gamma z = (z - x_0)/\gamma$ | 1, 2 |
+| Weibull$(\lambda, k)$ | $\lambda(-\log u)^{1/k}$ | $\partial_\lambda z = z/\lambda$, $\partial_k z = -z\log(z/\lambda)/k$ | 2 |
+| Kumaraswamy$(a, b)$ | $\big(1 - (1 - u)^{1/b}\big)^{1/a}$ | closed form by the chain rule | 2 |
+| Truncated Gaussian on $[l, r]$ | $\mu + \sigma\Phi^{-1}\big(\Phi(\alpha) + u(\Phi(\beta) - \Phi(\alpha))\big)$ | chain rule through $\Phi$, $\Phi^{-1}$ | 2 |
+| Gamma$(\alpha, \beta)$ | any sampler for $\operatorname{Gamma}(\alpha, 1)$, then $z/\beta$ | $\partial_\alpha z$ implicit, $\partial_\beta z = -z/\beta$ | 4, 1 |
+| Student $t_\nu(\mu, \sigma)$ | $\mu + \sigma\,\epsilon/\sqrt{v/\nu}$, $v \sim \chi^2_\nu = \operatorname{Gamma}(\nu/2, \tfrac12)$ | $\partial_\nu$ through the gamma, implicit | 1, 4 |
+| von Mises$(\mu, \kappa)$ | $\mu + $ a sample of $\operatorname{vM}(0, \kappa)$ | $\partial_\kappa z$ implicit | 1, 4 |
+
+In the truncated Gaussian, $\alpha = (l - \mu)/\sigma$ and $\beta = (r - \mu)/\sigma$. The location–scale derivative
+$\partial_\sigma z = (z - \mu)/\sigma$ recovers $\epsilon$, so the scale gradient is the standardised sample in every
+location–scale family.
+
+**Gamma.** The gamma quantile function has no closed form, and the standard sampler of Marsaglia and Tsang is a
+rejection sampler <Cite id="marsaglia2000" />. Two routes give pathwise gradients. The implicit route above needs
+$\partial F / \partial \alpha$ of the regularised incomplete gamma function, which libraries compute by series or
+numerical differentiation <Cite id="figurnov2018" />. Rejection-sampling reparameterisation differentiates through the
+accepted proposal of the Marsaglia–Tsang sampler and corrects for the acceptance step <Cite id="naesseth2017" />. Once
+$\operatorname{Gamma}(\alpha, 1)$ is reparameterised, the rate is a scale: $z/\beta$.
+
+## Multivariate distributions
+
+- **Multivariate Gaussian** $\Gauss(\muvec, \Sigmamat)$: $\zvec = \muvec + \Lmat\epsilonvec$ with $\Lmat\Lmat^\top =
+  \Sigmamat$ the Cholesky factor and $\epsilonvec \sim \Gauss(\zeros, \Imat)$. Parameterise $\Lmat$ directly as a lower
+  triangular matrix with a positive diagonal (for example through $\exp$ or softplus of the diagonal), so every $\Lmat$ is
+  valid. Then $\partial \zvec / \partial \muvec = \Imat$ and $\partial z_i / \partial L_{ij} = \epsilon_j$ for $j \le i$.
+  A diagonal Gaussian is the special case $\Lmat = \diag(\sigmavec)$; a low-rank-plus-diagonal covariance uses
+  $\zvec = \muvec + \Bmat\epsilonvec_1 + \diag(\dvec)\epsilonvec_2$.
+- **Dirichlet** $\operatorname{Dir}(\alphavec)$: draw $g_k \sim \operatorname{Gamma}(\alpha_k, 1)$ independently and
+  set $z_k = g_k / \sum_j g_j$. The derivative composes the implicit gamma derivatives with the normalisation. The
+  **beta** distribution is the two-component case, $z = g_1/(g_1 + g_2)$.
+- **Kumaraswamy as a beta substitute.** The Kumaraswamy distribution on $(0, 1)$ has a closed-form quantile function
+  and a shape close to the beta. It is used in place of the beta when a simple pathwise sampler matters more than
+  conjugacy, as in stick-breaking variational autoencoders <Cite id="nalisnick2017" />.
+- **Normalising flows**: any invertible differentiable map applied to a reparameterised base sample is reparameterised
+  (route 3); see <NoteLink to="normalising-flow">normalising flows</NoteLink>.
+
+## Discrete distributions and relaxations
+
+A categorical sample changes by jumps, so $\partial z / \partial \phivec$ is zero almost everywhere and the pathwise
+estimator is useless. Three workarounds are standard.
+
+- **Gumbel-softmax (Concrete).** By the <NoteLink to="gumbel-max-trick">Gumbel-max trick</NoteLink>,
+  $\argmax_k(\log \pi_k + g_k)$ with $g_k$ independent standard Gumbel variables is an exact categorical sample.
+  Replacing the argmax by a softmax with temperature $\tau > 0$,
+
+$$
+y_k = \frac{\exp\big((\log\pi_k + g_k)/\tau\big)}{\sum_j \exp\big((\log\pi_j + g_j)/\tau\big)},
+$$
+
+  gives a point on the simplex that is differentiable in $\pivec$ and tends to the one-hot sample as $\tau \to 0$
+  <Cite id="jang2017" /> <Cite id="maddison2017" />. Small $\tau$ reduces the bias of the relaxation and raises the
+  variance of the gradient.
+- **Straight-through estimator.** Use the hard one-hot sample in the forward pass and the gradient of the relaxed
+  sample in the backward pass. The estimator is biased but often works in practice.
+- **Score function.** The <NoteLink to="score-function-estimator">score-function estimator</NoteLink> is unbiased for any
+  distribution, discrete or not, at the cost of higher variance; control variates reduce it
+  <Cite id="mohamed2020" />.
+
+Mixtures are discrete in their component label. A mixture sample can be made pathwise in the component parameters by
+summing over components analytically, or in all parameters by implicit differentiation of the mixture cdf, which is
+available in one dimension.
+
+## Worked examples
+
+**Gaussian: pathwise against score function.** For $z \sim \Gauss(\mu, \sigma^2)$ with $\mu = 0.5$ and
+$\sigma = 1.5$, the target is $\partial_\sigma \expect[z^2] = \partial_\sigma(\mu^2 + \sigma^2) = 2\sigma = 3$. The
+pathwise estimator averages $2z\epsilon$; over 200,000 samples it gives 3.006. The score-function estimator averages
+$z^2\big((z - \mu)^2/\sigma^3 - 1/\sigma\big)$ and gives 3.036 from the same samples, with a per-sample variance about
+10 times larger.
+
+**Gamma: the implicit derivative.** For $\operatorname{Gamma}(\alpha = 2, 1)$ and the sample $z = 1.5$, the cdf is
+$u = F(1.5) = 0.442$. The implicit formula gives $\partial z / \partial \alpha = -(\partial F/\partial \alpha)/q(z) =
+0.937$. Differentiating the quantile function directly, $\partial F^{-1}(u)/\partial \alpha$ at fixed $u$, gives the same
+0.937. Averaged over samples, the implicit derivatives estimate $\partial \expect[z]/\partial \alpha = 1$; 200,000
+samples give 1.001.
+
+**Gumbel-softmax.** With $\pivec = (0.2, 0.3, 0.5)$ and Gumbel noise from $u = (0.1, 0.6, 0.35)$, the hard sample is
+category 2. The relaxed sample is $(0.076, 0.511, 0.414)$ at $\tau = 1$, $(0.013, 0.595, 0.392)$ at $\tau = 0.5$ and
+$(0.000, 0.890, 0.110)$ at $\tau = 0.1$, approaching the one-hot vector $(0, 1, 0)$.
+
+## Pitfalls
+
+- **Constrained parameters.** Scales, rates and Cholesky diagonals must stay positive. Optimise an unconstrained value
+  and map it through $\exp$ or softplus; the chain rule adds one factor to each derivative.
+- **Heavy tails.** For the Cauchy and Student $t$ with small $\nu$, $f(z)$ may have no finite mean, and neither
+  estimator is then meaningful.
+- **Relaxation bias.** Gumbel-softmax gradients are gradients of a different, relaxed objective. Anneal $\tau$ or check
+  the result against an unbiased estimator.
+- **Numerical cdf derivatives.** Implicit gradients for the gamma family near $\alpha \to 0$ are ill-conditioned;
+  libraries switch to asymptotic expansions there <Cite id="figurnov2018" />.
