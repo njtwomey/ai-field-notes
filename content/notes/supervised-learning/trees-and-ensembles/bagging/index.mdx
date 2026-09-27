@@ -1,0 +1,133 @@
+---
+title: Bagging
+kind: technique
+summary: 'Bagging (bootstrap aggregating) fits one model to each of $B$ bootstrap resamples of the training set and averages their predictions. The average of $B$ predictors with variance $\sigma^2$ and pairwise correlation $\rho$ has variance $\rho\sigma^2 + (1 - \rho)\sigma^2/B$.'
+tags: [ensembles, trees, variance-reduction, resampling, worked-example]
+aliases: [bootstrap aggregating, bootstrap aggregation, out-of-bag error, OOB error, bagged trees]
+requires: [decision-tree, variance-and-covariance]
+related: [random-forest, extremely-randomised-trees, stacking, ensemble-methods-for-imbalance, dropout]
+references: [breiman1996, efron1979, hastie2009, buhlmann2002]
+status: draft
+updated: 2026-09-27
+---
+
+import { BaggingVariance } from './BaggingVariance'
+
+<Definition>
+**Bagging** draws $B$ bootstrap samples $\Dcal^{*1}, \dots, \Dcal^{*B}$, each of $n$ pairs drawn with replacement from
+the training set $\Dcal$ of size $n$. It fits a model $\hat f^{*b}$ to each and predicts with their average
+
+$$
+\hat f_{\text{bag}}(\xvec) = \frac{1}{B}\sum_{b=1}^{B} \hat f^{*b}(\xvec)
+$$
+
+for regression, or with a majority vote or averaged class probabilities for classification <Cite id="breiman1996" />.
+</Definition>
+
+## Problem
+
+A deep <NoteLink to="decision-tree">decision tree</NoteLink> has low bias and high variance: a different training
+sample from the same distribution gives a different tree and a different prediction at the same $\xvec$. With many
+independent training sets, averaging their models would cancel much of this variance. Only one training set exists.
+The bootstrap <Cite id="efron1979" /> simulates new ones by resampling it.
+
+## Mechanism
+
+### Why averaging helps under squared loss
+
+Fix an input $\xvec$ and a target $y$. Let $\varphi(\xvec, \Dcal)$ be the prediction of a model trained on a random
+training set $\Dcal$, and $\varphi_A(\xvec) = \expect_\Dcal[\varphi(\xvec, \Dcal)]$ its average over training sets.
+Expanding the square around $\varphi_A$, the cross term has expectation zero, so
+
+$$
+\expect_\Dcal\brack{(y - \varphi(\xvec, \Dcal))^2} = (y - \varphi_A(\xvec))^2 + \var_\Dcal\brack{\varphi(\xvec, \Dcal)}.
+$$
+
+The aggregated predictor $\varphi_A$ has error $(y - \varphi_A)^2$, lower than the average error of a single model by
+exactly the model's variance <Cite id="breiman1996" />. The gain is large for unstable procedures, whose predictions
+vary a lot between training sets, such as deep trees and subset selection. It is near zero for stable ones, such as
+ridge regression or $k$-nearest neighbours with large $k$.
+
+Bagging approximates $\varphi_A$ by averaging over bootstrap samples of the one training set. The approximation
+matches $\varphi_A$ in variance reduction only to the extent that bootstrap samples behave like fresh draws. They do
+not fully: bootstrap samples of the same $\Dcal$ overlap, so their models are correlated.
+
+### Variance of an average of correlated predictors
+
+Let $Z_1, \dots, Z_B$ be the predictions at $\xvec$ of $B$ bagged models. Over the randomness of both the training
+set and the bootstrap draws, they are identically distributed, each with variance $\sigma^2$. Every pair has the same
+correlation $\rho$, because every pair shares the training set $\Dcal$ and differs only in its bootstrap draws. The variance of their mean is
+
+$$
+\var\paren{\frac{1}{B}\sum_{b=1}^B Z_b} = \frac{1}{B^2}\paren{\sum_{b=1}^B \var(Z_b) + \sum_{b \ne b'} \cov(Z_b, Z_{b'})}
+= \frac{1}{B^2}\paren{B\sigma^2 + B(B - 1)\rho\sigma^2}.
+$$
+
+Simplifying,
+
+$$
+\var\paren{\bar Z} = \rho\sigma^2 + \frac{1 - \rho}{B}\,\sigma^2.
+$$
+
+The second term vanishes as $B$ grows; the first does not. The variance of an infinite bag is $\rho\sigma^2$, set by
+how alike the models are. Adding trees never increases the variance and never causes overfitting in this sense; it
+only stops helping. Reducing $\rho$ without increasing $\sigma^2$ much is the idea behind
+<NoteLink to="random-forest">random forests</NoteLink> <Cite id="hastie2009" />.
+
+### Worked example
+
+With $\sigma^2 = 1$ and $\rho = 0.5$, a bag of $B = 10$ models has variance $0.5 + 0.5/10 = 0.55$ and an infinite bag
+$0.5$. Bagging at most halves the variance. With $\rho = 0.1$, ten models give $0.1 + 0.9/10 = 0.19$ and the floor is
+$0.1$. Decorrelating the models matters more than adding models once $B$ is a few times $1/\rho$.
+
+<BaggingVariance />
+
+In the figure, unpruned regression trees on 50 points have a correlation near $0.46$ between bootstrap trees built
+from the same training set. Shrinking each resample lowers the correlation and raises each tree's variance. The
+resulting ensemble has lower variance but also higher bias, because each tree sees fewer points.
+
+### Bias
+
+Bagging leaves the bias almost unchanged: the expected bagged prediction is the expected prediction of one model fitted
+to a bootstrap sample. That model sees on average only $1 - (1 - 1/n)^n \approx 1 - e^{-1} \approx 63.2\%$ of the
+distinct training points, so its bias can be slightly higher than that of a model fitted to all of $\Dcal$. Bagging a
+high-bias model such as a stump gives a smoother high-bias model. Bühlmann and Yu show that for hard threshold
+decisions, bagging acts as a smoother: it replaces the step of a split by a smooth ramp, which is where most of its
+variance reduction comes from <Cite id="buhlmann2002" />.
+
+### Classification
+
+Two combination rules are common.
+
+- **Majority vote** over the $B$ predicted classes.
+- **Probability averaging**: average each model's estimated class probabilities and take the most probable class.
+
+Probability averaging gives smoother, better-ranked scores and is what most libraries do. For 0–1 loss the
+squared-loss argument above does not carry over. If $B$ votes at $\xvec$ were independent and each correct with
+probability $q$, the majority would be correct with probability tending to 1 as $B$ grows when $q > 0.5$, and tending
+to 0 when $q < 0.5$. Bagged votes are correlated, so the effect is weaker, but its direction is the same: bagging
+makes a good classifier better and a poor one worse <Cite id="hastie2009" />.
+
+### Out-of-bag error
+
+Each bootstrap sample omits a given training point with probability $(1 - 1/n)^n$, which tends to $e^{-1} \approx
+0.368$ as $n$ grows ($0.366$ at $n = 100$). About a third of the models therefore never saw point $i$. Averaging only
+those models' predictions at $\xvec_i$ gives an **out-of-bag** prediction for point $i$, and the average loss of these
+predictions is the **out-of-bag error**. It estimates the test error without a held-out set or cross-validation. Each
+out-of-bag prediction uses about $0.37B$ models rather than $B$, so the estimate is slightly pessimistic for small $B$.
+
+## Cost
+
+Bagging costs $B$ times the training cost of the base model, and $B$ times its prediction cost. The $B$ fits are
+independent and parallelise perfectly. The out-of-bag error is a by-product and needs no extra fits.
+
+## Trade-offs
+
+- **Loss of interpretability.** An average of 500 trees is not a readable set of rules.
+- **Correlation limits the gain.** Bootstrap samples of the same data share most points, so bagged trees on data with
+  one dominant feature all split on it first and stay strongly correlated. Feature subsampling in random forests
+  addresses this.
+- **Stable models gain nothing.** Bagging a linear least-squares fit returns roughly the same fit at $B$ times the
+  cost.
+- **Choice of $B$.** More trees never hurt accuracy. $B$ is set by when the out-of-bag error stops falling, usually a
+  few hundred.

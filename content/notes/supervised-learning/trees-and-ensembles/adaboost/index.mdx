@@ -1,0 +1,156 @@
+---
+title: AdaBoost
+kind: concept
+summary: 'AdaBoost builds a classifier $\sgn\big(\sum_m \alpha_m G_m(\xvec)\big)$ from weak classifiers $G_m$, each trained on reweighted data that upweights the previous mistakes. It is forward stagewise additive modelling under the exponential loss $e^{-yf(\xvec)}$.'
+tags: [ensembles, boosting, classification, worked-example]
+aliases: [adaptive boosting, discrete AdaBoost, AdaBoost.M1, exponential loss, forward stagewise additive modelling, boosting]
+requires: [decision-tree]
+related: [gradient-boosting, logistic-regression, bagging, random-forest]
+references: [freund1997, friedman2000, hastie2009, schapire1990]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**AdaBoost** (discrete AdaBoost, or AdaBoost.M1) takes labels $y_i \in \set{-1, +1}$ and a weak learner that returns
+a classifier $G(\xvec) \in \set{-1, +1}$ given weighted data. Starting from weights $w_i = 1/n$, it repeats for
+$m = 1, \dots, M$:
+
+1. Fit $G_m$ to the training data with weights $w_i$.
+2. Compute the weighted error $\text{err}_m = \sum_i w_i \indicator[y_i \ne G_m(\xvec_i)] / \sum_i w_i$.
+3. Set $\alpha_m = \log\frac{1 - \text{err}_m}{\text{err}_m}$.
+4. Multiply the weight of each misclassified point by $e^{\alpha_m}$.
+
+The final classifier is $\sgn\big(\sum_{m=1}^{M}\alpha_m G_m(\xvec)\big)$ <Cite id="freund1997" />.
+</Definition>
+
+## Intuition
+
+A **weak learner** is one whose weighted error is below $1/2$ on any weighting of the data: better than a coin, but
+perhaps only slightly. Schapire showed that a weak learner can always be boosted into an arbitrarily accurate one
+<Cite id="schapire1990" />. AdaBoost is the practical form of that result. Each round concentrates the weights on
+the points the ensemble currently gets wrong, so the next weak learner is forced to attend to them. Each learner's
+vote $\alpha_m$ grows as its error falls: $\alpha_m = 0$ at $\text{err}_m = 1/2$ and $\alpha_m \to \infty$ as
+$\text{err}_m \to 0$. The weak learner is typically a **stump**, a <NoteLink to="decision-tree">decision tree</NoteLink>
+with one split, or a tree with a few leaves.
+
+## AdaBoost as forward stagewise additive modelling
+
+For years AdaBoost's success was explained through learning theory. Friedman, Hastie and Tibshirani showed that it is
+an ordinary statistical procedure: it fits an additive model $f(\xvec) = \sum_m \beta_m G_m(\xvec)$ by greedy
+forward stagewise minimisation of the **exponential loss** $L(y, f) = e^{-yf}$ <Cite id="friedman2000" />.
+
+**Forward stagewise fitting** adds one term at a time and never revisits earlier terms. At step $m$, with the current
+model $f_{m-1}$, it solves
+
+$$
+(\beta_m, G_m) = \argmin_{\beta, G} \sum_{i=1}^n \exp\big(-y_i\,[f_{m-1}(\xvec_i) + \beta G(\xvec_i)]\big).
+$$
+
+The factor $\exp(-y_i f_{m-1}(\xvec_i))$ does not depend on $\beta$ or $G$. Call it $w_i^{(m)}$. The objective becomes
+$\sum_i w_i^{(m)} e^{-\beta y_i G(\xvec_i)}$. Since $y_i G(\xvec_i) = +1$ for a correct point and $-1$ for a wrong one,
+
+$$
+\sum_i w_i^{(m)} e^{-\beta y_i G(\xvec_i)} = e^{-\beta}\sum_{y_i = G(\xvec_i)} w_i^{(m)} + e^{\beta}\sum_{y_i \ne G(\xvec_i)} w_i^{(m)}
+= (e^{\beta} - e^{-\beta})\sum_i w_i^{(m)}\indicator[y_i \ne G(\xvec_i)] + e^{-\beta}\sum_i w_i^{(m)}.
+$$
+
+**The classifier.** For any $\beta > 0$ the factor $e^\beta - e^{-\beta}$ is positive, so the best $G$ minimises the
+weighted misclassification count $\sum_i w_i^{(m)}\indicator[y_i \ne G(\xvec_i)]$. This is step 1 of AdaBoost.
+
+**The coefficient.** Divide the objective by $\sum_i w_i^{(m)}$ and write $\text{err}_m$ for the weighted error of
+$G_m$. The objective is $e^{-\beta}(1 - \text{err}_m) + e^{\beta}\,\text{err}_m$. Its derivative in $\beta$ is
+$-e^{-\beta}(1 - \text{err}_m) + e^{\beta}\text{err}_m$, which is zero when $e^{2\beta} = (1 - \text{err}_m)/\text{err}_m$:
+
+$$
+\beta_m = \frac{1}{2}\log\frac{1 - \text{err}_m}{\text{err}_m}.
+$$
+
+**The weights.** The next step's weights are $w_i^{(m+1)} = w_i^{(m)} e^{-\beta_m y_i G_m(\xvec_i)}$. Using
+$-y_i G_m(\xvec_i) = 2\,\indicator[y_i \ne G_m(\xvec_i)] - 1$,
+
+$$
+w_i^{(m+1)} = w_i^{(m)}\, e^{2\beta_m \indicator[y_i \ne G_m(\xvec_i)]}\, e^{-\beta_m}.
+$$
+
+The factor $e^{-\beta_m}$ is the same for every point and cancels when the weights are normalised. With
+$\alpha_m = 2\beta_m$, this is step 4 of AdaBoost, and $\sgn(\sum_m \beta_m G_m) = \sgn(\sum_m \alpha_m G_m)$. Every
+step of AdaBoost is therefore a step of forward stagewise minimisation of the exponential loss <Cite id="friedman2000" />.
+
+## What the exponential loss estimates
+
+The minimiser of the expected exponential loss, at each $\xvec$, solves
+
+$$
+\min_f\ \expect\brack{e^{-yf} \mid \xvec} = \Pr(y = 1 \mid \xvec)\,e^{-f} + \Pr(y = -1 \mid \xvec)\,e^{f}.
+$$
+
+Setting the derivative to zero gives
+
+$$
+f^*(\xvec) = \frac{1}{2}\log\frac{\Pr(y = 1 \mid \xvec)}{\Pr(y = -1 \mid \xvec)},
+$$
+
+half the log-odds. AdaBoost's score estimates half the log-odds, and $\Pr(y = 1 \mid \xvec) = 1/(1 + e^{-2f(\xvec)})$
+turns it into a probability. The binomial deviance of <NoteLink to="logistic-regression">logistic regression</NoteLink>,
+$\log(1 + e^{-2yf})$, has the same population minimiser <Cite id="friedman2000" />. The two losses agree near a margin
+$yf = 0$ and differ for large negative margins: the exponential loss grows as $e^{-yf}$, the deviance only linearly.
+
+## Worked example: one round of reweighting
+
+Ten points have equal weights $0.1$. The first stump misclassifies three of them, so $\text{err}_1 = 0.3$ and
+$\alpha_1 = \log(0.7/0.3) = 0.847$. The three misclassified weights become $0.1 \cdot 7/3 = 0.233$ each, a total of
+$0.7$; the seven correct weights stay $0.1$, also a total of $0.7$. After normalisation each misclassified point
+weighs $1/6 \approx 0.167$ and each correct point $1/14 \approx 0.071$.
+
+The misclassified points now hold exactly half the weight. This is general: after reweighting, the misclassified
+points' share is $\text{err}_m e^{\alpha_m} / (\text{err}_m e^{\alpha_m} + 1 - \text{err}_m) = 1/2$. The stump just
+fitted has weighted error $1/2$ on the new weights, no better than a coin, so the next round must find a different
+one.
+
+## Training error falls exponentially
+
+The indicator of a mistake is bounded by the exponential loss: $\indicator[y \ne \sgn f] \le e^{-yf}$. So the training
+error of $f_M$ is at most the average exponential loss, which the derivation above lets us compute exactly.
+
+<Derivation title="The training-error bound">
+Normalise weights to sum to 1 at each step and write $Z_m$ for the normaliser of step $m$, the sum of the unnormalised
+weights $w_i^{(m)} e^{-\beta_m y_i G_m(\xvec_i)}$. At the optimal $\beta_m$,
+
+$$
+Z_m = e^{-\beta_m}(1 - \text{err}_m) + e^{\beta_m}\text{err}_m = 2\sqrt{\text{err}_m(1 - \text{err}_m)}.
+$$
+
+Unrolling the updates from $w_i^{(1)} = 1/n$ gives $\frac{1}{n}e^{-y_i f_M(\xvec_i)} = w_i^{(M+1)}\prod_{m=1}^M Z_m$.
+Summing over $i$, and using that the final weights sum to 1,
+
+$$
+\frac{1}{n}\sum_{i=1}^n \indicator[y_i \ne \sgn f_M(\xvec_i)] \le \frac{1}{n}\sum_{i=1}^n e^{-y_i f_M(\xvec_i)} =
+\prod_{m=1}^M 2\sqrt{\text{err}_m(1 - \text{err}_m)}.
+$$
+
+Write $\text{err}_m = 1/2 - \gamma_m$. Then $2\sqrt{\text{err}_m(1 - \text{err}_m)} = \sqrt{1 - 4\gamma_m^2}
+\le e^{-2\gamma_m^2}$, using $1 + x \le e^x$. The training error is at most $\exp(-2\sum_m \gamma_m^2)$
+<Cite id="freund1997" />.
+</Derivation>
+
+If every weak learner beats a coin by at least $\gamma$, the training error is at most $e^{-2M\gamma^2}$ and reaches
+zero after $O(\log n / \gamma^2)$ rounds. In the worked example, $\gamma_1 = 0.2$ and the first factor is
+$2\sqrt{0.21} = 0.917$.
+
+## Assumptions
+
+- The weak learner must accept weights, or the data must be resampled in proportion to them.
+- Each weak learner must beat chance on the weighted data. If $\text{err}_m \ge 1/2$, $\alpha_m \le 0$ and the
+  algorithm stops.
+- The procedure is for two classes. SAMME and AdaBoost.MH extend it to $K$ classes.
+
+## Pitfalls
+
+- **Label noise and outliers.** The exponential loss penalises a point with margin $yf = -5$ by $e^5 \approx 148$. A
+  mislabelled point gains weight every round it stays wrong and eventually dominates the fit. Gradient boosting with
+  the binomial deviance, whose penalty grows linearly, is more robust <Cite id="friedman2000" />.
+- **Test error and $M$.** Test error often keeps falling after training error reaches zero, but AdaBoost can overfit
+  noisy data. Choose $M$ on held-out data.
+- **Calibration.** The score estimates half the log-odds only in the limit of infinite data. In practice, probabilities
+  from boosted trees are pushed away from 0 and 1 and need <NoteLink to="classifier-calibration">calibration</NoteLink> before use <Cite id="niculescumizil2005" />.

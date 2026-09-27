@@ -1,0 +1,154 @@
+---
+title: Tree pruning
+kind: technique
+summary: 'Pruning grows a large decision tree and then removes branches whose improvement in training loss does not pay for their extra leaves. Cost-complexity pruning minimises $R(T) + \alpha\abs{T}$; weakest-link pruning finds the optimal subtree for every $\alpha$ in one pass.'
+tags: [trees, regularisation, model-selection, worked-example]
+aliases: [cost-complexity pruning, weakest-link pruning, minimal cost-complexity pruning, reduced-error pruning, pre-pruning, post-pruning]
+requires: [decision-tree]
+related: [random-forest, early-stopping]
+references: [breiman1984, hastie2009, quinlan1986]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+**Pruning** replaces a subtree of a fitted <NoteLink to="decision-tree">decision tree</NoteLink> by a single leaf.
+**Cost-complexity pruning** chooses, for a penalty $\alpha \ge 0$, the subtree $T$ of a large tree $T_0$ that minimises
+
+$$
+R_\alpha(T) = R(T) + \alpha\abs{T},
+$$
+
+where $R(T)$ is the training loss of $T$ and $\abs{T}$ is its number of leaves. **Weakest-link pruning** computes the
+minimisers for all $\alpha$ at once, as a nested sequence of subtrees. Cross-validation then picks $\alpha$
+<Cite id="breiman1984" />.
+</Definition>
+
+## Problem
+
+A tree grown until its leaves are pure fits the training labels exactly, including their noise. Its test error is
+high because each small leaf rests on a few points. The tree's size must be controlled.
+
+Stopping early, by refusing any split whose impurity decrease is below a threshold, is the obvious control and a poor
+one. A split can be worthless alone and valuable for the splits it enables below it. On an XOR pattern, where the
+class is $\indicator[x_1 > 0] \oplus \indicator[x_2 > 0]$, no single split on $x_1$ or $x_2$ decreases the impurity at
+all, yet two levels of splits separate the classes perfectly. A stopping rule halts at the root. Breiman and
+colleagues therefore grow the tree fully and prune it back <Cite id="breiman1984" />.
+
+## Mechanism
+
+### Cost-complexity
+
+Measure $R(T)$ as the training loss summed over leaves and divided by the training size $n$: the misclassification
+rate for classification, the mean squared error for regression. The penalty $\alpha\abs{T}$ charges $\alpha$ per leaf.
+At $\alpha = 0$ the full tree $T_0$ minimises $R_\alpha$. As $\alpha$ grows, smaller subtrees win. At a large enough
+$\alpha$ the root alone, a single leaf, wins.
+
+### The critical penalty of one node
+
+Take an internal node $t$ of the current tree. Write $T_t$ for the branch rooted at $t$, $R(T_t)$ for the training loss
+of its leaves and $R(t)$ for the loss that $t$ would have as a single leaf. The rest of the tree is unaffected by
+what happens at $t$, so the choice between keeping the branch and collapsing it compares
+
+$$
+R(T_t) + \alpha\abs{T_t} \quad \text{with} \quad R(t) + \alpha.
+$$
+
+Collapsing is at least as good exactly when $\alpha\,(\abs{T_t} - 1) \ge R(t) - R(T_t)$, that is when
+
+$$
+\alpha \ge g(t) = \frac{R(t) - R(T_t)}{\abs{T_t} - 1}.
+$$
+
+The ratio $g(t)$ is the reduction in training loss that the branch buys per extra leaf. Splitting never increases
+training loss, so $R(t) \ge R(T_t)$ and $g(t) \ge 0$.
+
+### Weakest-link pruning
+
+Weakest-link pruning repeatedly collapses the node with the smallest $g(t)$:
+
+1. Set $k = 0$ and start from $T_0$.
+2. Compute $g(t)$ for every internal node of $T_k$.
+3. Let $\alpha_{k+1} = \min_t g(t)$. Collapse every node attaining the minimum, giving $T_{k+1}$.
+4. Stop at the root; otherwise increase $k$ and return to step 2.
+
+The result is a nested sequence $T_0 \supset T_1 \supset \dots \supset \set{\text{root}}$ with increasing penalties
+$0 < \alpha_1 < \alpha_2 < \dots$. For every $\alpha \in [\alpha_k, \alpha_{k+1})$, the subtree $T_k$ is the smallest
+minimiser of $R_\alpha$ among all subtrees of $T_0$ <Cite id="breiman1984" />. The optimal subtree for any penalty is
+therefore one of at most $\abs{T_0}$ trees, not one of the exponentially many subtrees of $T_0$.
+
+<Derivation title="Why each tree in the sequence beats its own pruned subtrees">
+Write $C_\alpha(T) = R(T) + \alpha\abs{T}$. Both terms add over disjoint branches, so the cost of a tree is the sum of
+the costs of its root's two child branches.
+
+**Claim.** If $\alpha < g(s)$ for every internal node $s$ of a branch $T_t$, then every proper pruned subtree $T'$ of
+$T_t$ has $C_\alpha(T') > C_\alpha(T_t)$.
+
+**Proof, by induction on the size of $T_t$.** If $T'$ is the single leaf $t$, then $C_\alpha(T') = R(t) + \alpha$ and
+$C_\alpha(T_t) = R(T_t) + \alpha\abs{T_t}$. Their difference is $R(t) - R(T_t) - \alpha(\abs{T_t} - 1)$, which is
+positive because $\alpha < g(t)$. Otherwise $T'$ keeps the split at $t$ and prunes the child branches $T_L$ and $T_R$
+to $T'_L$ and $T'_R$, at least one of them properly. By additivity,
+$C_\alpha(T') = C_\alpha(T'_L) + C_\alpha(T'_R)$. By the induction hypothesis applied to each child branch, each
+term is at least the corresponding $C_\alpha(T_L)$ or $C_\alpha(T_R)$, and strictly greater for a properly pruned
+child. So $C_\alpha(T') > C_\alpha(T_L) + C_\alpha(T_R) = C_\alpha(T_t)$.
+
+Applied to the whole tree $T_k$, whose internal nodes all have $g(t) \ge \alpha_{k+1}$, the claim shows that no
+pruned subtree of $T_k$ beats it for $\alpha < \alpha_{k+1}$. The remaining step, that subtrees of $T_0$ which keep a
+branch removed at an earlier step cannot beat $T_k$ either, uses the same additivity and is proved by Breiman et al.
+<Cite id="breiman1984" />.
+</Derivation>
+
+### Worked example
+
+A tree $T_0$ has root $t_1$ with two internal children $t_2$ and $t_3$. Node $t_2$ has leaves $t_4$ and $t_5$; node
+$t_3$ has leaves $t_6$ and $t_7$. The training losses, as fractions of the whole training set, are:
+
+| node        | $t_1$ | $t_2$ | $t_3$ | $t_4$ | $t_5$ | $t_6$ | $t_7$ |
+| ----------- | ----- | ----- | ----- | ----- | ----- | ----- | ----- |
+| $R$ as leaf | 0.40  | 0.20  | 0.10  | 0.05  | 0.10  | 0.07  | 0.02  |
+
+The full tree has $\abs{T_0} = 4$ leaves and $R(T_0) = 0.05 + 0.10 + 0.07 + 0.02 = 0.24$.
+
+- **Step 1.** $g(t_2) = (0.20 - 0.15)/1 = 0.05$, $g(t_3) = (0.10 - 0.09)/1 = 0.01$ and
+  $g(t_1) = (0.40 - 0.24)/3 = 0.053$. The weakest link is $t_3$, so $\alpha_1 = 0.01$. Collapsing it gives $T_1$ with
+  leaves $t_4, t_5, t_3$ and $R(T_1) = 0.25$.
+- **Step 2.** $g(t_2) = 0.05$ and $g(t_1) = (0.40 - 0.25)/2 = 0.075$. Collapse $t_2$ at $\alpha_2 = 0.05$, giving
+  $T_2$ with leaves $t_2, t_3$ and $R(T_2) = 0.30$.
+- **Step 3.** $g(t_1) = (0.40 - 0.30)/1 = 0.10$. Collapse the root at $\alpha_3 = 0.10$.
+
+So $T_0$ is optimal for $\alpha < 0.01$, $T_1$ for $0.01 \le \alpha < 0.05$, $T_2$ for $0.05 \le \alpha < 0.10$ and the
+root for $\alpha \ge 0.10$. At $\alpha = 0.03$ the penalised losses are $0.36$ for $T_0$, $0.34$ for $T_1$, $0.36$ for
+$T_2$ and $0.43$ for the root, confirming $T_1$. The subtree that collapses only $t_2$, with $R = 0.29$ and 3 leaves,
+scores $0.38$ and is never optimal, which is why the sequence can skip it.
+
+### Choosing the penalty
+
+The training loss always prefers $T_0$, so $\alpha$ is chosen on held-out data. With $V$-fold cross-validation, grow
+and prune a tree on each training fold, evaluate each fold's pruned sequence on its held-out fold at a grid of $\alpha$
+values, and average the errors. The final tree is the member of the full-data sequence at the chosen $\alpha$. The
+**one-standard-error rule** picks the largest $\alpha$ whose cross-validated error is within one standard error of the
+minimum, which gives a smaller tree with statistically indistinguishable error <Cite id="breiman1984" />.
+
+### Other pruning rules
+
+- **Reduced-error pruning** (Quinlan) collapses a node whenever doing so does not increase the error on a separate
+  pruning set. It needs held-out data but no penalty.
+- **Pessimistic pruning** in C4.5 replaces each leaf's training error by an upper confidence bound on its error rate
+  and collapses a branch when the bound for the collapsed node is no worse. It needs no held-out data but its bound
+  has no strict statistical justification.
+
+## Cost
+
+Weakest-link pruning visits each internal node a bounded number of times per step. A naive implementation recomputes
+all $g(t)$ after every collapse, costing $O(\abs{T_0}^2)$. Updating only the ancestors of the collapsed node reduces
+this to $O(\abs{T_0}\, D)$ for depth $D$. Cross-validation multiplies the cost of growing and pruning by the number of
+folds.
+
+## Trade-offs
+
+- Pruning reduces variance at the price of coarser boxes. The pruned tree is still one tree, and its structure still
+  changes with small changes in the data.
+- <NoteLink to="random-forest">Random forests</NoteLink> and <NoteLink to="bagging">bagging</NoteLink> usually leave
+  their trees unpruned: averaging removes the variance that pruning would, without the bias.
+- In <NoteLink to="gradient-boosting">gradient boosting</NoteLink>, each tree is small by design, and the penalty on
+  leaves reappears as the $\gamma$ term in the split gain of <NoteLink to="xgboost-lightgbm-catboost">XGBoost</NoteLink>.

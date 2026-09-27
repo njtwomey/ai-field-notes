@@ -1,0 +1,113 @@
+---
+title: Curse of dimensionality for neighbours
+kind: concept
+summary: 'In high dimensions, a neighbourhood that holds a fixed fraction $r$ of uniform data must have edge $r^{1/d}$, close to the whole range, and distances from a query to all points concentrate: $(D_{\max} - D_{\min})/D_{\min} \to 0$. Nearest neighbours stop being near.'
+tags: [nearest-neighbours, high-dimensional, nonparametric, worked-example]
+aliases: [curse of dimensionality, distance concentration, concentration of distances, relative contrast]
+requires: [k-nearest-neighbours, variance-and-covariance]
+related: [nearest-neighbour-search, markov-and-chebyshev-inequalities, pairwise-distances-and-cosine-similarity]
+references: [beyer1999, aggarwal2001, hastie2009]
+status: draft
+updated: 2026-09-27
+---
+
+import { DistanceConcentration } from './DistanceConcentration'
+
+<Definition>
+The **curse of dimensionality** for neighbour methods is the failure of locality as the input dimension $d$ grows. For
+data spread through $d$ dimensions, a neighbourhood containing a fixed fraction of the data spans most of each
+feature's range, and the distances from a query to all data points become nearly equal. Local averaging, on which
+<NoteLink to="k-nearest-neighbours">$k$-nearest neighbours</NoteLink> relies, then averages over points that are not
+local.
+</Definition>
+
+## Neighbourhoods are not local
+
+Take inputs uniform in the unit hypercube $[0, 1]^d$ and a neighbourhood that is a sub-cube capturing a fraction $r$
+of the data. Its volume must be $r$, so its edge length is
+
+$$
+e_d(r) = r^{1/d}.
+$$
+
+In $d = 10$ dimensions, capturing 1% of the data needs edge $0.01^{1/10} = 0.63$, and capturing 10% needs
+$0.1^{1/10} = 0.79$. The "local" neighbourhood covers 63% and 79% of the range of every feature <Cite id="hastie2009" />.
+In one dimension the same fractions need edges $0.01$ and $0.1$.
+
+The nearest point is far, too. For $N$ points uniform in the unit ball of $\reals^d$, a point lies within radius $\rho$
+of the centre with probability $\rho^d$, so all $N$ lie outside it with probability $(1 - \rho^d)^N$. Setting this to
+$1/2$ gives the median distance from the centre to the nearest point,
+
+$$
+\rho_{\text{med}}(d, N) = \big(1 - 2^{-1/N}\big)^{1/d}.
+$$
+
+For $N = 500$ and $d = 10$ this is $0.52$: the nearest of 500 points is typically more than halfway to the boundary
+<Cite id="hastie2009" />.
+
+Keeping neighbourhoods small instead requires data that grow exponentially with $d$. To hold $k$ neighbours in a
+sub-cube of edge $e$, the sample needs about $n = k/e^d$ points. With $e = 0.1$ and $k = 10$, that is 100 points in one
+dimension, 1,000 in two and $10^{11}$ in ten.
+
+## Distances concentrate
+
+A second effect makes the notion of "nearest" itself unstable. Take a query $\qvec$ and a data point $\xvec$ whose
+coordinate differences are independent and identically distributed, and write $Z_j = (x_j - q_j)^2$ with mean $\mu$
+and variance $\nu$. The squared distance $S = \norm{\xvec - \qvec}^2 = \sum_{j=1}^{d} Z_j$ has mean $d\mu$ and variance
+$d\nu$, because the $Z_j$ are independent. Its relative spread is
+
+$$
+\frac{\sqrt{\var(S)}}{\expect[S]} = \frac{\sqrt{d\nu}}{d\mu} = \frac{1}{\sqrt{d}}\,\frac{\sqrt{\nu}}{\mu},
+$$
+
+which shrinks like $1/\sqrt{d}$. By Chebyshev's inequality,
+$\Pr\big(\abs{S/(d\mu) - 1} > \epsilon\big) \le \nu/(d\mu^2\epsilon^2)$. For $n$ data points, a union bound shows that all
+$n$ squared distances lie within a factor $1 \pm \epsilon$ of $d\mu$ with probability at least
+$1 - n\nu/(d\mu^2\epsilon^2)$, which tends to 1 as $d$ grows with $n$ fixed. Then
+
+$$
+\frac{D_{\max}}{D_{\min}} \le \sqrt{\frac{1 + \epsilon}{1 - \epsilon}} \quad\text{with high probability}, \qquad\text{so}\qquad
+\frac{D_{\max} - D_{\min}}{D_{\min}} \to 0.
+$$
+
+The farthest data point is barely farther than the nearest.
+
+Beyer, Goldstein, Ramakrishnan and Shaft proved this under a much weaker condition <Cite id="beyer1999" />. Let
+$D_d$ be the distance, in $d$ dimensions, from the query to a random data point. If
+$\var(D_d^p)/\expect[D_d^p]^2 \to 0$ for some $p > 0$, then for every $\epsilon > 0$ and any fixed number of points,
+$\Pr(D_{\max} \le (1 + \epsilon) D_{\min}) \to 1$. Independence of coordinates is not needed, only that no small set of
+coordinates dominates the distance.
+
+### Worked example
+
+For coordinates uniform on $[0, 1]$, the difference of two independent coordinates has $\expect[(x - q)^2] = 1/6$ and
+$\expect[(x - q)^4] = 1/15$, so $\nu = 1/15 - 1/36 = 7/180$. The relative spread of the squared distance is
+$6\sqrt{7/180}/\sqrt{d} = 1.18/\sqrt{d}$: $0.37$ at $d = 10$, $0.12$ at $d = 100$ and $0.037$ at $d = 1000$. In a
+simulation with 500 uniform points and one random query, the relative contrast $(D_{\max} - D_{\min})/D_{\min}$ was 41
+in two dimensions, 4.7 in ten, 0.36 in a hundred and 0.11 in a thousand.
+
+<DistanceConcentration />
+
+## When it bites and when it does not
+
+- **Intrinsic dimension matters, not the number of columns.** Images, text embeddings and sensor data with thousands
+  of features often lie near a manifold of much lower dimension. Distances along the data then behave as in the
+  intrinsic dimension, and nearest neighbours work well.
+- **Irrelevant features cause it.** Each noise feature adds variance to every distance and none to the signal. Many of
+  them drown the few informative coordinates, which is the case the theorem describes. Feature selection and learnt
+  metrics restore contrast.
+- **The norm matters.** Aggarwal, Hinneburg and Keim show that the relative contrast degrades faster for higher $L_p$
+  norms, so the Manhattan distance $L_1$ keeps more contrast than the Euclidean $L_2$, and fractional norms with
+  $p < 1$ more still <Cite id="aggarwal2001" />.
+- **Indexing suffers too.** Exact search structures such as $k$-d trees prune a region when it is provably farther
+  than the current best candidate. When all distances are nearly equal, nothing can be pruned and the search visits
+  almost every point. See <NoteLink to="nearest-neighbour-search">nearest-neighbour search</NoteLink>.
+
+## Pitfalls
+
+- **Reading high-dimensional neighbours as similar.** A nearest neighbour in 1,000 raw dimensions may be no more
+  similar to the query than a random point. Check the contrast before trusting neighbour-based results.
+- **Standardising noise features.** Scaling every feature to unit variance gives irrelevant features as much weight as
+  relevant ones.
+- **Extrapolating from two-dimensional pictures.** Intuition from plots, where neighbourhoods are small and distances
+  vary widely, fails in high dimensions.

@@ -1,0 +1,145 @@
+---
+title: Learning with noisy labels
+kind: concept
+summary: 'When training labels are corrupted by a class-conditional noise transition matrix $\Tmat$, with $T_{ij} = \Pr(\tilde y = j \mid y = i)$, the loss can be corrected: backward correction trains on $\Tmat^{-1}\boldsymbol{\ell}$, forward correction on the loss of $\Tmat^\top\hat\pvec$. Both are consistent for the clean labels.'
+tags: [classification, label-noise, robustness, deep-learning, worked-example]
+aliases: [label noise, noise transition matrix, forward correction, backward correction, loss correction, random classification noise, class-conditional noise, confident learning, noisy labels]
+requires: [logistic-regression, conditional-probability]
+related: [self-training, label-propagation, bayes-decision-rule, prior-shift-correction]
+references: [natarajan2013, patrini2017, angluin1988, frenay2014, northcutt2021]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+In **class-conditional label noise**, each training label $y \in \set{1, \dots, K}$ is replaced by an observed label
+$\tilde y$ drawn from a row of a **noise transition matrix** $\Tmat$, with $T_{ij} = \Pr(\tilde y = j \mid y = i)$,
+independently of the input $\xvec$. **Learning with noisy labels** means training on pairs $(\xvec, \tilde y)$ a
+classifier that performs well on the clean labels $y$. **Loss correction** modifies the loss, using $\Tmat$, so that its
+minimiser on noisy data is the minimiser of the original loss on clean data <Cite id="natarajan2013" />
+<Cite id="patrini2017" />.
+</Definition>
+
+## Intuition
+
+Annotators disagree, crowd workers make mistakes, and labels scraped from the web are wrong a few to tens of percent
+of the time <Cite id="frenay2014" />. A flexible model fitted to such labels learns the noise: deep networks can fit
+even completely random labels on standard image data sets <Cite id="zhang2017" />. If the pattern of mistakes is
+known, it can be undone, because the noisy labels are a known mixture of the clean ones.
+
+## How noise changes the posterior
+
+By the law of total probability, the noisy class posterior mixes the clean one through $\Tmat$:
+
+$$
+\Pr(\tilde y = j \mid \xvec) = \sum_{i} \Pr(\tilde y = j \mid y = i)\Pr(y = i \mid \xvec) = \sum_i T_{ij}\,\Pr(y = i \mid \xvec),
+$$
+
+or, with $\pvec(\xvec)$ the vector of clean posteriors and $\tilde\pvec(\xvec)$ the noisy ones,
+$\tilde\pvec(\xvec) = \Tmat^\top\pvec(\xvec)$. A classifier trained on noisy labels estimates $\tilde\pvec$, not $\pvec$.
+
+**Binary case.** With labels $\pm 1$, write $\rho_+ = \Pr(\tilde y = -1 \mid y = +1)$ and
+$\rho_- = \Pr(\tilde y = +1 \mid y = -1)$, with $\rho_+ + \rho_- < 1$. The clean posterior $\eta(\xvec) = \Pr(y = +1 \mid \xvec)$
+and the noisy one $\tilde\eta(\xvec)$ satisfy
+
+$$
+\tilde\eta = (1 - \rho_+)\eta + \rho_-(1 - \eta) = (1 - \rho_+ - \rho_-)\,\eta + \rho_-.
+$$
+
+This is an increasing affine map, so ranking by $\tilde\eta$ is ranking by $\eta$. The clean Bayes rule predicts $+1$
+when $\eta > 1/2$, which is when
+
+$$
+\tilde\eta > \frac{1 - \rho_+ - \rho_-}{2} + \rho_- = \frac{1 - \rho_+ + \rho_-}{2}.
+$$
+
+So the optimal clean classifier is the noisy posterior thresholded at $(1 - \rho_+ + \rho_-)/2$ instead of $1/2$
+<Cite id="natarajan2013" />. With symmetric noise, $\rho_+ = \rho_-$, the threshold stays at $1/2$: the Bayes classifier
+is unchanged, and noise only makes it harder to estimate. This is Angluin and Laird's **random classification noise**
+<Cite id="angluin1988" />.
+
+## Backward correction
+
+The idea is to build a loss $\tilde\ell$ on noisy labels whose expectation over the noise equals the clean loss. For a
+prediction $t$, collect the losses for each possible label into a vector
+$\boldsymbol{\ell}(t) = (\ell(t, 1), \dots, \ell(t, K))$. The expected corrected loss given clean label $i$ is
+$\sum_j T_{ij}\tilde\ell(t, j) = (\Tmat\tilde{\boldsymbol{\ell}}(t))_i$. Requiring this to equal $\ell(t, i)$ for every $i$
+gives
+
+$$
+\tilde{\boldsymbol{\ell}}(t) = \Tmat^{-1}\boldsymbol{\ell}(t),
+$$
+
+which exists when $\Tmat$ is invertible <Cite id="patrini2017" />. For every $\xvec$ and $t$, the noisy-data risk of
+$\tilde\ell$ then equals the clean-data risk of $\ell$, so minimising one minimises the other. In the binary case this
+is the unbiased estimator of Natarajan et al. <Cite id="natarajan2013" />:
+
+$$
+\tilde\ell(t, y) = \frac{(1 - \rho_{-y})\,\ell(t, y) - \rho_{y}\,\ell(t, -y)}{1 - \rho_+ - \rho_-}.
+$$
+
+The corrected loss can be negative, and its variance grows as $\Tmat$ approaches singularity, since $\Tmat^{-1}$ then
+has large entries. In practice it is less stable than forward correction.
+
+## Forward correction
+
+Forward correction keeps the model predicting clean posteriors $\hat\pvec(\xvec)$ and passes them through the noise
+before the loss:
+
+$$
+\ell^{\to}(\hat\pvec, \tilde y) = \ell\big(\Tmat^\top\hat\pvec, \tilde y\big).
+$$
+
+For log loss this is $-\log(\Tmat^\top\hat\pvec)_{\tilde y}$: the model is scored on how well it predicts the noisy
+label once the known corruption is applied. Log loss is minimised in expectation by the true distribution of the
+label it scores, so the expected forward loss on noisy data is minimised when $\Tmat^\top\hat\pvec = \tilde\pvec =
+\Tmat^\top\pvec$. When $\Tmat$ is invertible this forces $\hat\pvec = \pvec$: the model learns the clean posterior
+<Cite id="patrini2017" />. In a neural network, forward correction is one extra linear layer, fixed to $\Tmat^\top$,
+after the softmax during training, removed at test time.
+
+## Worked example
+
+Take $\rho_+ = 0.2$ and $\rho_- = 0.1$, so, ordering the classes as $(+1, -1)$,
+$\Tmat = \begin{pmatrix}0.8 & 0.2\\ 0.1 & 0.9\end{pmatrix}$.
+
+- **Threshold.** The clean Bayes rule is the noisy posterior thresholded at $(1 - 0.2 + 0.1)/2 = 0.45$.
+- **Forward.** A model predicting clean probabilities $\hat\pvec = (0.8, 0.2)$ implies noisy probabilities
+  $\Tmat^\top\hat\pvec = (0.8 \cdot 0.8 + 0.1 \cdot 0.2,\ 0.2 \cdot 0.8 + 0.9 \cdot 0.2) = (0.66, 0.34)$. Log loss is
+  computed on these.
+- **Backward.** The log losses of $\hat\pvec$ are $\boldsymbol{\ell} = (-\log 0.8, -\log 0.2) = (0.223, 1.609)$. With
+  $\Tmat^{-1} = \frac{1}{0.7}\begin{pmatrix}0.9 & -0.2 \\ -0.1 & 0.8\end{pmatrix}$, the corrected losses are
+  $\tilde{\boldsymbol{\ell}} = (-0.173, 1.807)$. A noisy label $+1$ now earns a negative loss. Their expectation under clean
+  label $+1$ is $0.8 \cdot (-0.173) + 0.2 \cdot 1.807 = 0.223$, the clean loss, as designed.
+
+## Estimating the transition matrix
+
+Both corrections need $\Tmat$. Without clean labels it can be estimated from **anchor points**: inputs that belong to
+class $i$ with certainty, $\Pr(y = i \mid \xvec) = 1$. At such an $\xvec$, $\tilde\pvec(\xvec) = \Tmat^\top\evec_i$ is row $i$
+of $\Tmat$. Patrini et al. fit a model to the noisy labels, take as the anchor for class $i$ the training input with
+the highest predicted $\Pr(\tilde y = i \mid \xvec)$, or a high percentile of it for robustness, and read row $i$ from its
+predicted noisy posterior <Cite id="patrini2017" />. **Confident learning** instead counts, per class, the examples whose
+predicted probability of each other class exceeds that class's average self-confidence, estimating the joint
+distribution of noisy and clean labels, and removes examples judged mislabelled <Cite id="northcutt2021" />.
+
+## Other defences
+
+- **Early stopping.** Deep networks fit the clean, consistent patterns before they memorise noisy labels
+  <Cite id="arpit2017" />, so validation accuracy on clean data peaks before training accuracy does.
+- **Small-loss selection.** Examples with large training loss early in training are disproportionately mislabelled.
+  Training on the small-loss examples, or down-weighting the others, reduces the noise rate.
+- **Robust losses.** Bounded losses, such as the mean absolute error on probabilities, are less affected by a
+  mislabelled example than the unbounded log loss, at the cost of slower training.
+
+## Assumptions
+
+- The noise depends on the class only, not on $\xvec$. Real annotators err more on hard examples, which violates this.
+- $\Tmat$ is invertible, and for binary problems $\rho_+ + \rho_- < 1$: labels still carry information.
+- Anchor points exist, or $\Tmat$ is known from a small clean subset.
+
+## Pitfalls
+
+- **Clean validation data.** Model selection on noisy validation labels selects for fitting the noise. Keep a small
+  clean set.
+- **Misestimated $\Tmat$.** Corrections with a wrong $\Tmat$ can be worse than none, especially backward correction.
+- **Noise versus ambiguity.** Some "noise" is genuine ambiguity: the input supports several labels. Correcting it as
+  noise discards real uncertainty.

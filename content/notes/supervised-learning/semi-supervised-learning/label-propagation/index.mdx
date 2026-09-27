@@ -1,0 +1,136 @@
+---
+title: Label propagation
+kind: concept
+summary: 'Label propagation spreads a few labels through a similarity graph over labelled and unlabelled points. The harmonic solution minimises $\sum_{ij} W_{ij}(f_i - f_j)^2$ with labelled scores fixed, so each unlabelled score is the weighted average of its neighbours: $\fvec_U = (\Dmat_{UU} - \Wmat_{UU})^{-1}\Wmat_{UL}\fvec_L$.'
+tags: [semi-supervised, graphs, nonparametric, classification, worked-example]
+aliases: [harmonic function solution, Gaussian random fields for semi-supervised learning, graph-based semi-supervised learning, harmonic energy minimisation, graph Laplacian regularisation]
+requires: [k-nearest-neighbours]
+related: [self-training, graph-convolutional-network, learning-with-noisy-labels]
+references: [zhu2003, chapelle2006]
+status: draft
+updated: 2026-09-27
+---
+
+import { HarmonicPropagation } from './HarmonicPropagation'
+
+<Definition>
+Given $l$ labelled points and $u$ unlabelled points, and non-negative edge weights $W_{ij}$ measuring the similarity
+of points $i$ and $j$, **label propagation** assigns each point a score $f_i$. Labelled points keep their labels,
+$f_i = y_i \in \set{0, 1}$. Unlabelled scores minimise the **energy**
+
+$$
+E(\fvec) = \frac{1}{2}\sum_{i, j} W_{ij}(f_i - f_j)^2.
+$$
+
+The minimiser is the **harmonic solution**. An unlabelled point is assigned class 1 when $f_i > 1/2$
+<Cite id="zhu2003" />.
+</Definition>
+
+## Intuition
+
+Labels are scarce and unlabelled inputs are cheap. If points of the same class form dense regions separated by
+sparse gaps, the unlabelled points reveal where the regions are. A graph that links nearby points follows the dense
+regions. The energy penalises any disagreement between linked points, weighted by the strength of the link. Scores
+therefore stay nearly constant within a dense region and change across sparse gaps, where links are weak and
+disagreement is cheap.
+
+## The harmonic solution
+
+**The harmonic property.** The energy is a sum of squares, convex in the unlabelled scores. Its derivative with
+respect to an unlabelled $f_i$ collects the terms containing $f_i$, which appear twice, once as $(f_i - f_j)^2$ and
+once as $(f_j - f_i)^2$:
+
+$$
+\frac{\partial E}{\partial f_i} = 2\sum_j W_{ij}(f_i - f_j) = 0 \quad\Longrightarrow\quad f_i = \frac{\sum_j W_{ij} f_j}{\sum_j W_{ij}}.
+$$
+
+Every unlabelled score is the weighted average of its neighbours' scores. A function with this property at every
+unlabelled node is called **harmonic**. It follows that every $f_i$ lies between 0 and 1 (the maximum principle: an
+average cannot exceed its largest term, so the extremes are attained at labelled points).
+
+**Closed form.** Write $d_i = \sum_j W_{ij}$ for the degree of node $i$, $\Dmat = \diag(d_1, \dots, d_n)$, and
+$\Delta = \Dmat - \Wmat$ for the **graph Laplacian**. Expanding the square,
+$E(\fvec) = \sum_i d_i f_i^2 - \sum_{i, j}W_{ij}f_if_j = \fvec^\top\Delta\fvec$. Order the points with the labelled ones first
+and split the matrices into blocks:
+
+$$
+\Wmat = \begin{pmatrix}\Wmat_{LL} & \Wmat_{LU} \\ \Wmat_{UL} & \Wmat_{UU}\end{pmatrix}, \qquad
+\fvec = \begin{pmatrix}\fvec_L \\ \fvec_U\end{pmatrix}.
+$$
+
+The harmonic conditions for all unlabelled points together read $\Dmat_{UU}\fvec_U = \Wmat_{UL}\fvec_L + \Wmat_{UU}\fvec_U$,
+so
+
+$$
+\fvec_U = (\Dmat_{UU} - \Wmat_{UU})^{-1}\Wmat_{UL}\fvec_L = \Delta_{UU}^{-1}\Wmat_{UL}\fvec_L.
+$$
+
+$\Delta_{UU}$ is invertible when every connected component of the graph contains a labelled point
+<Cite id="zhu2003" />. An unlabelled component with no labelled point has no information, and its scores are
+undetermined.
+
+## Three readings of the same solution
+
+- **Random walks.** Start a walk at unlabelled node $i$ and step from node $a$ to node $b$ with probability
+  $W_{ab}/d_a$, stopping at the first labelled node reached. Let $h_i$ be the probability that the walk stops at a
+  class-1 node. Conditioning on the first step gives $h_i = \sum_j (W_{ij}/d_i)\,h_j$, with $h = 1$ at class-1 nodes and
+  $h = 0$ at class-0 nodes: the same equations, so $f_i = h_i$.
+- **Electrical networks.** Treat $W_{ij}$ as the conductance of a resistor between $i$ and $j$, hold class-1 nodes at
+  1 volt and class-0 nodes at 0 volts. Kirchhoff's current law at an unlabelled node, $\sum_j W_{ij}(f_i - f_j) = 0$,
+  is the harmonic condition, so $f_i$ is the node's voltage.
+- **Gaussian random fields.** Place the prior $p(\fvec) \propto \exp(-\beta E(\fvec))$ on real-valued scores. Conditioned
+  on $\fvec_L$, the distribution of $\fvec_U$ is Gaussian with mean the harmonic solution <Cite id="zhu2003" />.
+
+## Iterative propagation
+
+The harmonic solution is also the fixed point of a simple iteration: set every unlabelled score to the weighted
+average of its neighbours, $f_i \leftarrow \sum_j W_{ij}f_j / d_i$, then reset the labelled scores to their labels, and
+repeat. Each sweep is a Jacobi step for the linear system above and moves label information one edge further. With a
+sparse $k$-nearest-neighbour graph each sweep costs $O(nk)$, which scales to graphs far too large for a direct solve.
+
+## Worked example: a path
+
+Four nodes form a path $1 - 2 - 3 - 4$. Node 1 has label 1 and node 4 has label 0.
+
+With all three edge weights equal to 1, the harmonic conditions are $f_2 = (1 + f_3)/2$ and $f_3 = (f_2 + 0)/2$.
+Substituting, $f_2 = 2/3$ and $f_3 = 1/3$: the scores interpolate linearly. Node 2 is class 1 and node 3 class 0.
+
+Now weaken the middle edge to $W_{23} = 0.1$, as if nodes 2 and 3 lay on opposite sides of a sparse gap. The
+conditions become $1.1 f_2 = 1 + 0.1 f_3$ and $1.1 f_3 = 0.1 f_2$. The second gives $f_3 = f_2/11$; substituting,
+$f_2(1.1 - 0.1/11) = 1$, so $f_2 = 110/120 = 0.917$ and $f_3 = 0.083$. Each node now takes almost entirely the label on
+its own side of the weak link. The gap has become the class boundary.
+
+<HarmonicPropagation />
+
+## Multiple classes and class proportions
+
+For $K$ classes, $\fvec$ becomes an $n \times K$ matrix with one-hot rows for labelled points. The harmonic solution
+is computed column by column, and each row of $\fvec_U$ sums to 1. Each point is assigned the class with the largest
+score.
+
+Thresholding at $1/2$ ignores the class proportions, and when the labelled points are unbalanced the scores are
+biased towards the better-labelled class. Zhu et al. propose **class mass normalisation**: rescale each class's
+column so that the total mass $\sum_i f_{ic}$ matches the prior proportion of class $c$, estimated from the labelled
+data, before taking the arg max <Cite id="zhu2003" />.
+
+## Assumptions
+
+- **The cluster assumption.** Points joined by a path through high-density regions share a label; boundaries run
+  through low-density regions <Cite id="chapelle2006" />. When a class boundary cuts through a dense region,
+  propagation spreads the wrong label across it.
+- **The graph captures similarity.** The kernel width $\sigma$, or the number of neighbours $k$, must be chosen so
+  that links within a class are strong and links across the gap weak. There is no labelled data to spare for tuning,
+  so this choice is often the hardest part.
+
+## Pitfalls
+
+- **Scale.** The direct solve costs $O(u^3)$. Use a sparse graph and iterative solvers for more than a few thousand
+  points.
+- **Transductive only.** The solution gives scores for the graph's nodes. A new point needs to be added to the graph,
+  or scored by the weighted average of its neighbours' scores.
+- **Label noise spreads.** A mislabelled seed pulls its whole region to the wrong class. Label spreading variants
+  let labelled scores move away from their given values to limit this; see
+  <NoteLink to="learning-with-noisy-labels">learning with noisy labels</NoteLink>.
+- **Relation to graph neural networks.** A <NoteLink to="graph-convolutional-network">graph convolutional
+  network</NoteLink> also averages over neighbours, but learns feature transformations as well. Label propagation uses
+  only the graph and the labels.

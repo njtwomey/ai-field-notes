@@ -1,0 +1,171 @@
+---
+title: Linear discriminant analysis
+kind: concept
+summary: 'Linear discriminant analysis models each class as a Gaussian $\Gauss(\muvec_k, \Sigmamat)$ with a covariance shared by all classes. The quadratic terms cancel, so the Bayes boundary is linear, with normal $\Sigmamat^{-1}(\muvec_1 - \muvec_0)$: the direction Fisher''s criterion finds without assuming Gaussians.'
+tags: [classification, generative-models, linear-models, gaussian, dimensionality-reduction, worked-example]
+aliases: [Fisher's linear discriminant, Fisher discriminant analysis, Gaussian discriminant analysis, pooled covariance, reduced-rank LDA, Fisher's criterion]
+requires: [multivariate-normal-distribution, bayes-theorem]
+related: [quadratic-discriminant-analysis, naive-bayes, logistic-regression, generative-vs-discriminative, bayes-decision-rule]
+references: [fisher1936, hastie2009, bishop2006, friedman1989]
+status: draft
+updated: 2026-09-27
+---
+
+import { DiscriminantExplorer } from '../_shared/DiscriminantExplorer'
+
+<Definition>
+**Linear discriminant analysis** (LDA) assumes that the features $\xvec \in \reals^d$ of class $k \in \set{1, \dots, K}$
+follow a multivariate Gaussian $\Gauss(\muvec_k, \Sigmamat)$ with a class-specific mean and a covariance matrix
+$\Sigmamat$ common to all classes, and that the classes have priors $\pi_k$. It classifies by the largest posterior
+$p(y = k \mid \xvec)$. Under this model, the boundary between any two classes is a hyperplane.
+</Definition>
+
+## Deriving the linear boundary
+
+By <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink>, $p(y = k \mid \xvec) \propto \pi_k\,
+\Gauss(\xvec \mid \muvec_k, \Sigmamat)$. Take logarithms and write out the Gaussian density:
+
+$$
+\log p(y = k \mid \xvec) = \log\pi_k - \frac{1}{2}(\xvec - \muvec_k)^\top\Sigmamat^{-1}(\xvec - \muvec_k)
+- \frac{1}{2}\log\det(2\pi\Sigmamat) - \log p(\xvec).
+$$
+
+The last two terms are the same for every class, because $\Sigmamat$ is shared. Expand the quadratic form:
+
+$$
+(\xvec - \muvec_k)^\top\Sigmamat^{-1}(\xvec - \muvec_k) = \xvec^\top\Sigmamat^{-1}\xvec - 2\xvec^\top\Sigmamat^{-1}\muvec_k + \muvec_k^\top\Sigmamat^{-1}\muvec_k.
+$$
+
+The term $\xvec^\top\Sigmamat^{-1}\xvec$ does not depend on $k$ either. Dropping every class-independent term leaves
+the **linear discriminant function**
+
+$$
+\delta_k(\xvec) = \xvec^\top\Sigmamat^{-1}\muvec_k - \frac{1}{2}\muvec_k^\top\Sigmamat^{-1}\muvec_k + \log\pi_k,
+$$
+
+and LDA predicts $\argmax_k \delta_k(\xvec)$. Each $\delta_k$ is affine in $\xvec$. The boundary between classes $k$
+and $l$ is the set where $\delta_k(\xvec) = \delta_l(\xvec)$:
+
+$$
+\wvec^\top\xvec + b = 0, \qquad \wvec = \Sigmamat^{-1}(\muvec_k - \muvec_l), \qquad
+b = -\frac{1}{2}(\muvec_k + \muvec_l)^\top\Sigmamat^{-1}(\muvec_k - \muvec_l) + \log\frac{\pi_k}{\pi_l},
+$$
+
+a hyperplane. The shared covariance is what makes it linear. With class-specific covariances the quadratic terms no
+longer cancel; see <NoteLink to="quadratic-discriminant-analysis">quadratic discriminant analysis</NoteLink>.
+
+For two classes the log-odds is $\delta_1(\xvec) - \delta_0(\xvec) = \wvec^\top\xvec + b$, so
+
+$$
+p(y = 1 \mid \xvec) = \sigma(\wvec^\top\xvec + b),
+$$
+
+the same functional form as <NoteLink to="logistic-regression">logistic regression</NoteLink>. The two methods differ
+in how they estimate $\wvec$ and $b$: LDA from the class means and covariance, logistic regression from the
+conditional likelihood of the labels. See <NoteLink to="generative-vs-discriminative">generative versus
+discriminative classifiers</NoteLink>.
+
+## Estimation
+
+The maximum-likelihood estimates are the class frequencies $\hat\pi_k = n_k/n$, the class means
+$\hat\muvec_k = \frac{1}{n_k}\sum_{y_i = k}\xvec_i$, and the **pooled** within-class covariance
+
+$$
+\hat\Sigmamat = \frac{1}{n - K}\sum_{k=1}^{K}\sum_{y_i = k}(\xvec_i - \hat\muvec_k)(\xvec_i - \hat\muvec_k)^\top,
+$$
+
+where the divisor $n - K$ rather than $n$ makes the estimate unbiased. The model has $K d$ mean parameters and
+$d(d + 1)/2$ covariance parameters in total, independent of $K$ for the covariance.
+
+## Worked example
+
+Two classes with equal priors have means $\muvec_0 = (0, 0)$ and $\muvec_1 = (2, 1)$ and shared covariance
+$\Sigmamat = \begin{pmatrix} 1 & 0.5 \\ 0.5 & 1\end{pmatrix}$. Its inverse is
+$\Sigmamat^{-1} = \frac{1}{0.75}\begin{pmatrix} 1 & -0.5 \\ -0.5 & 1\end{pmatrix}$. The boundary normal is
+
+$$
+\wvec = \Sigmamat^{-1}(\muvec_1 - \muvec_0) = \tfrac{1}{0.75}(2 - 0.5,\ -1 + 1) = (2, 0),
+$$
+
+and $b = -\frac{1}{2}(\muvec_0 + \muvec_1)^\top\wvec = -\frac{1}{2}(2 \cdot 2 + 1 \cdot 0) = -2$. The boundary is the
+vertical line $x_1 = 1$. It is not perpendicular to the difference of means $(2, 1)$: the correlation in $\Sigmamat$
+tilts it. Classifying by the nearest mean in Euclidean distance would use the perpendicular bisector instead and make
+more errors.
+
+The error rate of this rule is $\Phi(-\Delta/2)$, where $\Phi$ is the standard normal distribution function and
+$\Delta^2 = (\muvec_1 - \muvec_0)^\top\Sigmamat^{-1}(\muvec_1 - \muvec_0)$ is the squared **Mahalanobis distance**
+between the means. Here $\Delta^2 = (2, 1)\cdot(2, 0) = 4$, so the error is $\Phi(-1) = 0.159$.
+
+<Derivation title="The error rate of two-class LDA">
+Under class $k$, the score $s = \wvec^\top\xvec + b$ is a linear function of a Gaussian vector, so it is Gaussian with
+mean $\wvec^\top\muvec_k + b$ and variance $\wvec^\top\Sigmamat\wvec$. With $\wvec = \Sigmamat^{-1}(\muvec_1 - \muvec_0)$,
+the variance is $(\muvec_1 - \muvec_0)^\top\Sigmamat^{-1}(\muvec_1 - \muvec_0) = \Delta^2$. With equal priors,
+$b = -\frac{1}{2}(\muvec_0 + \muvec_1)^\top\wvec$, so the mean of $s$ is $\wvec^\top(\muvec_1 - \muvec_0)/2 = \Delta^2/2$
+under class 1 and $-\Delta^2/2$ under class 0. A class-1 point is misclassified when $s < 0$, which has probability
+$\Phi\big((0 - \Delta^2/2)/\Delta\big) = \Phi(-\Delta/2)$. By symmetry the same holds for class 0.
+</Derivation>
+
+## Fisher's criterion
+
+Fisher derived the same direction without any Gaussian assumption <Cite id="fisher1936" />. He sought the projection
+$z = \wvec^\top\xvec$ that best separates two classes: one that places the projected class means far apart relative
+to the spread within each class. With sample means $\mvec_0$ and $\mvec_1$ and within-class scatter matrix
+$\Smat_W = \sum_{k}\sum_{y_i = k}(\xvec_i - \mvec_k)(\xvec_i - \mvec_k)^\top$, the projected means differ by
+$\wvec^\top(\mvec_1 - \mvec_0)$ and the projected within-class scatter is $\wvec^\top\Smat_W\wvec$. Fisher's criterion is
+their ratio,
+
+$$
+J(\wvec) = \frac{\big(\wvec^\top(\mvec_1 - \mvec_0)\big)^2}{\wvec^\top\Smat_W\wvec}.
+$$
+
+$J$ does not change when $\wvec$ is scaled, so only its direction matters. Write $\dvec = \mvec_1 - \mvec_0$. Setting
+the gradient to zero,
+
+$$
+\nabla J = \frac{2(\wvec^\top\dvec)\,\dvec\,(\wvec^\top\Smat_W\wvec) - 2(\wvec^\top\dvec)^2\,\Smat_W\wvec}{(\wvec^\top\Smat_W\wvec)^2} = \zeros
+\quad\Longrightarrow\quad \Smat_W\wvec = \frac{\wvec^\top\Smat_W\wvec}{\wvec^\top\dvec}\,\dvec.
+$$
+
+The fraction is a scalar, so $\Smat_W\wvec$ is parallel to $\dvec$ and
+
+$$
+\wvec \propto \Smat_W^{-1}(\mvec_1 - \mvec_0).
+$$
+
+Since $\hat\Sigmamat = \Smat_W/(n - 2)$, this is the direction of LDA's boundary normal. Fisher's argument gives the
+direction only; the threshold on $z$ is a separate choice. The Gaussian model supplies the threshold that minimises the
+error under its assumptions, including the prior term $\log(\pi_1/\pi_0)$ <Cite id="bishop2006" />.
+
+## Reduced-rank LDA
+
+With $K$ classes, the $K$ means span an affine subspace of dimension at most $K - 1$. After whitening by
+$\Sigmamat^{-1/2}$, classification by $\delta_k$ is nearest-mean classification (with prior offsets), and distances
+orthogonal to the subspace of the means are the same for every class. LDA therefore needs only the $K - 1$
+coordinates within that subspace. Fisher's criterion generalises to the between-class scatter $\Smat_B$: the
+directions maximising $\wvec^\top\Smat_B\wvec / \wvec^\top\Smat_W\wvec$ are the leading eigenvectors of
+$\Smat_W^{-1}\Smat_B$, found in order of separation. Projecting onto the first two gives the best two-dimensional view
+of class separation, a supervised alternative to principal components <Cite id="hastie2009" />.
+
+## LDA and QDA compared
+
+The figure fits LDA and <NoteLink to="quadratic-discriminant-analysis">QDA</NoteLink> to the same sample. Setting the
+true covariances equal makes LDA's model correct, and its straight boundary is then close to the Bayes boundary.
+
+<DiscriminantExplorer />
+
+## Assumptions
+
+- Each class is Gaussian. The boundary remains a sensible linear rule when this fails mildly, and Fisher's derivation
+  shows the direction has a meaning without it.
+- All classes share one covariance. If they do not, the optimal boundary is quadratic.
+- $\hat\Sigmamat$ is invertible, which requires $n - K \ge d$ and no collinear features.
+
+## Pitfalls
+
+- **High dimensions.** With $d$ close to $n$, $\hat\Sigmamat$ is nearly singular and its inverse amplifies noise.
+  Shrink it towards a diagonal or scaled identity matrix, as in regularised discriminant analysis
+  <Cite id="friedman1989" />.
+- **Outliers.** Means and covariances are not robust, and one extreme point can tilt the boundary.
+- **Unequal covariances.** A class with much larger spread than another is poorly served by a pooled covariance, as
+  the figure shows.
+- **Name clash.** In topic modelling, LDA means latent Dirichlet allocation, an unrelated model.

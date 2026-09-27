@@ -1,0 +1,130 @@
+---
+title: k-nearest neighbours
+kind: concept
+summary: 'k-nearest neighbours predicts at $\xvec$ from the $k$ training points closest to it: the majority class for classification, the mean target for regression. As $n \to \infty$, the 1-nearest-neighbour error is at most twice the Bayes error; $k$ trades bias against variance.'
+tags: [classification, regression, nonparametric, nearest-neighbours, worked-example]
+aliases: [kNN, k-NN, nearest neighbour classifier, nearest neighbor, 1-NN, instance-based learning, lazy learning, Cover–Hart bound]
+requires: [bayes-decision-rule]
+related: [curse-of-dimensionality-for-neighbours, nearest-neighbour-search, pairwise-distances-and-cosine-similarity, label-propagation, decision-tree]
+references: [fix1989, cover1967, stone1977, devroye1996, hastie2009, bishop2006]
+status: draft
+updated: 2026-09-27
+---
+
+import { KnnRegions } from './KnnRegions'
+
+<Definition>
+Given training pairs $(\xvec_1, y_1), \dots, (\xvec_n, y_n)$ and a distance on the inputs, the **$k$-nearest
+neighbours** rule predicts at a query $\xvec$ from the set $N_k(\xvec)$ of the $k$ training points nearest to $\xvec$.
+For classification it predicts the most frequent class in $N_k(\xvec)$; for regression it predicts the mean
+$\hat f(\xvec) = \frac{1}{k}\sum_{i \in N_k(\xvec)} y_i$. There is no training step beyond storing the data
+<Cite id="fix1989" />.
+</Definition>
+
+## A local estimate of the posterior
+
+The fraction of neighbours in class $c$, $\hat p(c \mid \xvec) = \frac{1}{k}\sum_{i \in N_k(\xvec)}\indicator[y_i = c]$,
+estimates the posterior probability $p(y = c \mid \xvec)$. Majority voting then implements the
+<NoteLink to="bayes-decision-rule">Bayes decision rule</NoteLink> with this estimate in place of the true posterior.
+
+The estimate also follows from density estimation <Cite id="bishop2006" />. Let the smallest ball around $\xvec$ that
+holds the $k$ neighbours have volume $V$, and let $k_c$ of them be in class $c$, which has $n_c$ training points. The
+density of class $c$ near $\xvec$ is estimated by the fraction of its points in the ball per unit volume,
+$\hat p(\xvec \mid c) = k_c/(n_c V)$, and the prior by $\hat p(c) = n_c/n$. The unconditional density is
+$\hat p(\xvec) = k/(nV)$. <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink> gives
+
+$$
+\hat p(c \mid \xvec) = \frac{\hat p(\xvec \mid c)\,\hat p(c)}{\hat p(\xvec)} = \frac{k_c}{n_c V}\cdot\frac{n_c}{n}\cdot\frac{nV}{k} = \frac{k_c}{k}.
+$$
+
+## Twice the Bayes error
+
+Cover and Hart bounded the error of the 1-nearest-neighbour rule as the training set grows <Cite id="cover1967" />.
+Consider two classes and write $\eta(\xvec) = p(y = 1 \mid \xvec)$. The Bayes classifier errs at $\xvec$ with
+probability $r^*(\xvec) = \min(\eta(\xvec), 1 - \eta(\xvec))$, and the **Bayes error** is $R^* = \expect[r^*(\xvec)]$.
+
+As $n \to \infty$, the nearest neighbour $\xvec'$ of a query $\xvec$ converges to $\xvec$ (for $\xvec$ in the support
+of the input distribution). If $\eta$ is continuous, $\eta(\xvec') \to \eta(\xvec)$. The neighbour's label $y'$ and
+the query's label $y$ are then two independent draws, each equal to 1 with probability $\eta(\xvec)$. The rule errs
+when they differ:
+
+$$
+\Pr(y \ne y' \mid \xvec) \to \eta(1 - \eta) + (1 - \eta)\eta = 2\eta(\xvec)\big(1 - \eta(\xvec)\big) = 2r^*(\xvec)\big(1 - r^*(\xvec)\big),
+$$
+
+where the last step uses that $\eta(1 - \eta)$ is symmetric under $\eta \mapsto 1 - \eta$. The asymptotic 1-NN error is
+the average over $\xvec$:
+
+$$
+R_{1\text{NN}} = \expect\brack{2r^*(1 - r^*)} = 2R^* - 2\expect[(r^*)^2] \le 2R^* - 2(R^*)^2 = 2R^*(1 - R^*),
+$$
+
+using $\expect[(r^*)^2] \ge (\expect[r^*])^2$, which is Jensen's inequality or the non-negativity of the variance. So
+
+$$
+R^* \le R_{1\text{NN}} \le 2R^*(1 - R^*) \le 2R^*.
+$$
+
+For $K$ classes the bound is $R^*\big(2 - \frac{K}{K - 1}R^*\big)$ <Cite id="cover1967" />. The lower bound holds
+because no rule beats the Bayes classifier.
+
+### Worked example
+
+If the Bayes error is $R^* = 0.1$, the asymptotic 1-NN error lies between $0.1$ and $2 \cdot 0.1 \cdot 0.9 = 0.18$. If
+$R^* = 0.01$, it lies between $0.01$ and $0.0198$. In the Cover–Hart phrase, half of the classification information
+in an infinite sample is contained in the nearest neighbour. When the classes barely overlap, 1-NN is nearly optimal;
+when they overlap a lot, it pays for copying one noisy label.
+
+## Consistency with growing $k$
+
+Averaging more labels removes the factor of 2. If $k \to \infty$ and $k/n \to 0$ as $n \to \infty$, the $k$-NN error
+converges to $R^*$ for every distribution of the data: the rule is **universally consistent**
+<Cite id="stone1977" /> <Cite id="devroye1996" />. The first condition makes the vote average over many labels, so
+it estimates $\eta(\xvec)$ rather than sampling it once. The second keeps the neighbourhood shrinking, so the
+neighbours come from ever closer to $\xvec$.
+
+## Bias and variance
+
+For regression with $y = f(\xvec) + \varepsilon$, noise of variance $\sigma^2$, and fixed training inputs, the expected
+squared error of $k$-NN at a query $\xvec_0$ splits as
+
+$$
+\expect\brack{(y_0 - \hat f(\xvec_0))^2} = \sigma^2 + \Big[f(\xvec_0) - \frac{1}{k}\sum_{\ell = 1}^{k} f(\xvec_{(\ell)})\Big]^2 + \frac{\sigma^2}{k},
+$$
+
+where $\xvec_{(\ell)}$ is the $\ell$-th nearest neighbour <Cite id="hastie2009" />. The prediction is the average of
+$k$ targets whose noises are independent, so its variance is $\sigma^2/k$, and its mean is the average of $f$ over the
+neighbours. The middle term is the squared **bias**: small for small $k$, when the neighbours are close to $\xvec_0$,
+and growing with $k$ as further neighbours enter. The last term is the **variance**, falling as $1/k$. Small $k$ gives
+jagged, high-variance fits; large $k$ smooths away structure. The same trade-off governs classification.
+
+<KnnRegions />
+
+In practice $k$ is chosen by cross-validation. The effective number of parameters of $k$-NN is roughly $n/k$: the
+number of neighbourhoods of size $k$ that fit in the data.
+
+## Distances and scaling
+
+The rule is only as good as its distance. Euclidean distance on raw features lets the feature with the largest range
+dominate, so features are standardised first. Irrelevant features add noise to every distance and should be removed
+or down-weighted. Other choices, such as the cosine distance for text or a learnt Mahalanobis metric, change which
+points count as near; see <NoteLink to="pairwise-distances-and-cosine-similarity">pairwise distances</NoteLink>.
+
+Common variants weight each neighbour's vote by a decreasing function of its distance, such as $1/d$, which reduces the
+sensitivity to $k$.
+
+## Assumptions
+
+- Nearby inputs have similar targets: $\eta$ or $f$ is smooth with respect to the chosen distance.
+- The training data cover the region where queries arise. $k$-NN cannot extrapolate.
+- The dimension is low enough for neighbourhoods to be local. In high dimensions distances concentrate; see
+  <NoteLink to="curse-of-dimensionality-for-neighbours">the curse of dimensionality for neighbours</NoteLink>.
+
+## Pitfalls
+
+- **Query cost.** A brute-force query costs $O(nd)$. Large data sets need an index; see
+  <NoteLink to="nearest-neighbour-search">nearest-neighbour search</NoteLink>.
+- **Memory.** The model is the whole training set.
+- **Class imbalance.** A large class dominates most neighbourhoods. Weight votes by inverse class frequency or compare
+  $k_c/n_c$ across classes.
+- **Ties.** With two classes, an odd $k$ avoids tied votes.

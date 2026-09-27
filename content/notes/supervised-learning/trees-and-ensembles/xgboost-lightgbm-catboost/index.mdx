@@ -1,0 +1,183 @@
+---
+title: XGBoost, LightGBM and CatBoost
+kind: case-study
+summary: 'XGBoost, LightGBM and CatBoost are gradient-boosted tree libraries. XGBoost adds a regularised second-order split gain; LightGBM speeds up split search with histograms, GOSS and feature bundling; CatBoost removes target leakage with ordered target statistics and boosting.'
+tags: [boosting, trees, ensembles, software, worked-example]
+aliases: [XGBoost, LightGBM, CatBoost, GOSS, gradient-based one-side sampling, exclusive feature bundling, EFB, ordered boosting, ordered target statistics, oblivious trees, histogram-based gradient boosting]
+related: [gradient-boosting, decision-tree, tree-pruning, random-forest]
+references: [chen2016b, ke2017, prokhorenkova2018, friedman2001, grinsztajn2022]
+status: draft
+updated: 2026-09-27
+---
+
+## At a glance
+
+<SpecTable
+  columns={['XGBoost', 'LightGBM', 'CatBoost']}
+  rows={{
+    'First paper': ['Chen & Guestrin, KDD 2016', 'Ke et al., NeurIPS 2017', 'Prokhorenkova et al., NeurIPS 2018'],
+    'Leaf values': ['Newton step with L2 penalty', 'Newton step with L2 penalty', 'Newton or gradient step'],
+    'Split criterion': ['Second-order gain minus γ per leaf', 'Second-order gain on histograms', 'Second-order gain on symmetric levels'],
+    'Tree growth': ['Level-wise (depth-limited) by default', 'Leaf-wise (best-first), limited by leaf count', 'Oblivious: one split per level'],
+    'Split search': ['Exact on sorted columns, or quantile histograms', 'Histograms of up to 255 bins', 'Histograms of quantised features'],
+    'Row sampling': ['Uniform subsampling', 'GOSS: keep large gradients, sample small ones', 'Bayesian bootstrap weights'],
+    'Sparse features': ['Default direction per split', 'Exclusive feature bundling', 'Handled via quantisation'],
+    'Categorical features': ['One-hot or partition search (later versions)', 'Partition search on gradient-sorted categories', 'Ordered target statistics'],
+    'Distinctive idea': ['Regularised second-order objective', 'Speed on large, wide data', 'Unbiased gradients (ordered boosting)'],
+  }}
+/>
+
+The first three rows describe the published algorithms <Cite id="chen2016b" /> <Cite id="ke2017" />
+<Cite id="prokhorenkova2018" />. All three libraries have since borrowed from each other: XGBoost has a histogram
+method and a leaf-wise option, and LightGBM and XGBoost both support categorical splits.
+
+## Shared base: second-order gradient boosting
+
+All three fit an additive model of regression trees by <NoteLink to="gradient-boosting">gradient boosting</NoteLink>.
+They differ from Friedman's original algorithm <Cite id="friedman2001" /> in using the second derivative of the loss to
+choose splits, not only to set leaf values. The XGBoost paper derives this objective.
+
+### The XGBoost objective
+
+At stage $t$ the model adds a tree $f_t$ to the current predictions $\hat y_i^{(t-1)}$. The objective is the loss plus
+a penalty on the tree's complexity,
+
+$$
+\Lcal^{(t)} = \sum_{i=1}^n l\big(y_i, \hat y_i^{(t-1)} + f_t(\xvec_i)\big) + \gamma T + \frac{\lambda}{2}\sum_{j=1}^T w_j^2,
+$$
+
+where $T$ is the number of leaves and $w_j$ is the value of leaf $j$ <Cite id="chen2016b" />. Expand each loss term to
+second order in $f_t(\xvec_i)$ with the <NoteLink to="taylor-series">Taylor series</NoteLink> around
+$\hat y_i^{(t-1)}$. Write $g_i$ and $h_i$ for the first and second derivatives of $l(y_i, \cdot)$ at
+$\hat y_i^{(t-1)}$. Dropping the constant $l(y_i, \hat y_i^{(t-1)})$,
+
+$$
+\Lcal^{(t)} \approx \sum_{i=1}^n \Big[g_i f_t(\xvec_i) + \frac{1}{2}h_i f_t(\xvec_i)^2\Big] + \gamma T + \frac{\lambda}{2}\sum_{j=1}^T w_j^2.
+$$
+
+A tree predicts $w_j$ for every point in leaf $j$. Let $I_j$ be the set of those points, and write
+$G_j = \sum_{i \in I_j} g_i$ and $H_j = \sum_{i \in I_j} h_i$. Grouping the sum by leaf,
+
+$$
+\Lcal^{(t)} \approx \sum_{j=1}^T \Big[G_j w_j + \frac{1}{2}(H_j + \lambda) w_j^2\Big] + \gamma T.
+$$
+
+Each bracket is a quadratic in its own $w_j$. When the loss is convex, $H_j \ge 0$ and the quadratic has its minimum
+where the derivative $G_j + (H_j + \lambda) w_j$ is zero:
+
+$$
+w_j^* = -\frac{G_j}{H_j + \lambda}, \qquad
+\Lcal^{(t)}(\text{tree}) = -\frac{1}{2}\sum_{j=1}^T \frac{G_j^2}{H_j + \lambda} + \gamma T.
+$$
+
+The second expression scores any tree structure without fitting it. Splitting a leaf with sums $(G, H)$ into children
+with sums $(G_L, H_L)$ and $(G_R, H_R)$ changes the score by the **gain**
+
+$$
+\text{Gain} = \frac{1}{2}\brack{\frac{G_L^2}{H_L + \lambda} + \frac{G_R^2}{H_R + \lambda} - \frac{(G_L + G_R)^2}{H_L + H_R + \lambda}} - \gamma.
+$$
+
+A split is worth making only if the gain is positive. The penalty $\gamma$ is a minimum gain per extra leaf, the same
+role $\alpha$ plays in <NoteLink to="tree-pruning">cost-complexity pruning</NoteLink>. The penalty $\lambda$ shrinks
+leaf values towards zero, most strongly in leaves with small $H_j$. For squared loss $l = \frac{1}{2}(y - \hat y)^2$,
+$g_i = \hat y_i - y_i$ and $h_i = 1$, so $H_j$ is the leaf's count and $w_j^*$ is the mean residual shrunk by
+$n_j/(n_j + \lambda)$. For log loss, $h_i = p_i(1 - p_i)$ and $w_j^*$ is the penalised Newton step.
+
+### Worked example: split gain
+
+A node holds four points with current predictions 0 and targets $2, 1, -1, -2$, under squared loss. The gradients are
+$g = (-2, -1, 1, 2)$ and every $h_i = 1$. Take $\lambda = 1$ and $\gamma = 0$.
+
+- Parent: $G = 0$, $H = 4$, score term $0^2/5 = 0$.
+- Split into the first two and last two points: $G_L = -3$, $H_L = 2$, $G_R = 3$, $H_R = 2$. Each child contributes
+  $9/3 = 3$, so the gain is $\frac{1}{2}(3 + 3 - 0) = 3$.
+- Leaf values: $w_L^* = 3/3 = 1$ and $w_R^* = -1$. The unpenalised values, the mean residuals, are $\pm 1.5$;
+  $\lambda = 1$ shrinks them by $2/3$.
+
+With $\gamma = 4$ the gain is $3 - 4 = -1$, and the node stays a leaf.
+
+## XGBoost
+
+Beyond the regularised objective, the XGBoost paper contributes systems techniques for scale <Cite id="chen2016b" />.
+
+- **Sparsity-aware split finding.** At each split, points with a missing value for the split feature go in a
+  **default direction**, learnt by trying both sides and keeping the one with the larger gain. The search visits only
+  non-missing entries, so its cost is linear in the number of non-missing values.
+- **Weighted quantile sketch.** On large data, candidate thresholds are quantiles of each feature. The quantiles are
+  weighted by $h_i$, because the approximate objective is a squared error weighted by $h_i$: in
+  $\sum_i \frac{1}{2}h_i(f_t(\xvec_i) + g_i/h_i)^2$, each point counts in proportion to its $h_i$.
+- **Column blocks and cache-aware access** store features pre-sorted in compressed blocks, reused across all stages.
+- Shrinkage and column (feature) subsampling, as in random forests.
+
+## LightGBM
+
+LightGBM targets the cost of split search on large, high-dimensional data <Cite id="ke2017" />.
+
+- **Histograms.** Each feature is quantised once into at most a few hundred bins. Split search accumulates $g_i$ and
+  $h_i$ per bin in $O(n)$, then scans the bins in $O(\#\text{bins})$ instead of sorting. A child's histogram equals
+  its parent's minus its sibling's, so only the smaller child needs a pass over data.
+- **Leaf-wise growth.** Instead of splitting every node at a depth, LightGBM splits the leaf with the largest gain
+  anywhere in the tree. For the same number of leaves this reduces the loss more, and it produces deeper, unbalanced
+  trees that can overfit small data; the number of leaves is the main control.
+- **Gradient-based one-side sampling (GOSS).** Points with small $\abs{g_i}$ are already fitted well and contribute
+  little to the gain. GOSS keeps the top fraction $a$ of points by $\abs{g_i}$, samples a fraction $b$ of the rest,
+  and multiplies the sampled small-gradient points' gradients and Hessians by $(1 - a)/b$. The factor makes the
+  sampled points' sums estimate the sums over all small-gradient points, so the estimated gain stays close to the
+  full-data gain while training uses a fraction $a + b$ of the points.
+- **Exclusive feature bundling (EFB).** In sparse data many features are rarely non-zero at the same time, such as
+  one-hot columns. EFB merges such mutually exclusive features into one feature, offsetting their bin ranges so their
+  values stay distinguishable. Finding the best bundling is NP-hard (it is graph colouring), so a greedy algorithm
+  bundles features whose conflicts, rows where both are non-zero, are rare.
+
+## CatBoost
+
+CatBoost addresses a statistical problem, not a speed problem: **target leakage** in gradient boosting
+<Cite id="prokhorenkova2018" />.
+
+### Ordered target statistics
+
+A common way to use a categorical feature is to replace each category by the mean target of the training points in
+that category. Computed on the same points it encodes, this leaks the target. A category seen once has its own label
+as its encoding, so the tree splits on it perfectly in training and learns nothing that transfers.
+
+CatBoost draws a random permutation $\sigma$ of the training points. Point $i$'s encoding uses only the points before
+it in the permutation:
+
+$$
+\hat x_i = \frac{\sum_{j:\, \sigma(j) < \sigma(i)} \indicator[x_j = x_i]\, y_j + a\,p}{\sum_{j:\, \sigma(j) < \sigma(i)} \indicator[x_j = x_i] + a},
+$$
+
+with a prior $p$, usually the global mean of $y$, and a prior weight $a > 0$. The encoding of point $i$ never uses
+$y_i$. For example, three points of category A appear in permutation order with labels 1, 0, 1. With $p = 0.5$ and
+$a = 1$ their encodings are $0.5/1 = 0.5$, then $(1 + 0.5)/2 = 0.75$, then $(1 + 0 + 0.5)/3 = 0.5$. The leave-in
+mean would give all three $(2 + 0.5)/4 = 0.625$, which uses each point's own label.
+
+CatBoost also builds combinations of categorical features greedily during tree construction and encodes them the same
+way.
+
+### Ordered boosting
+
+The same leakage affects the gradients themselves. The pseudo-residual of point $i$ at stage $t$ uses the model
+$F_{t-1}$, which was fitted on point $i$. The residual is therefore smaller in magnitude than a residual on a fresh
+point, and the distribution of $F_{t-1}(\xvec_i)$ on training points differs from that on test points. Prokhorenkova
+et al. call this **prediction shift** <Cite id="prokhorenkova2018" />. Ordered boosting computes point $i$'s
+residual from a model trained only on the points before $i$ in a random permutation. A naive implementation needs $n$
+models; CatBoost maintains models for a logarithmic set of prefix lengths and shares tree structures across them.
+
+### Oblivious trees
+
+CatBoost's trees are **oblivious**: every node at the same depth uses the same split. A depth-$D$ tree is then a
+lookup table of $2^D$ leaves indexed by $D$ binary tests, which evaluates very fast and acts as a regulariser.
+
+## Comparison
+
+- **Accuracy.** On typical tabular benchmarks the three libraries are close after tuning, and the gap between them is
+  usually smaller than the effect of tuning. Tree ensembles of this kind remain strong baselines on medium-sized
+  tabular data, often ahead of deep networks <Cite id="grinsztajn2022" />.
+- **Speed.** LightGBM's histogram methods and GOSS make it the fastest to train on large data in its paper's
+  experiments <Cite id="ke2017" />. XGBoost's own histogram method narrows the gap. CatBoost's oblivious trees make
+  prediction fast.
+- **Categorical data.** CatBoost handles high-cardinality categorical features without manual encoding and without
+  leakage. With the others, target encoding must be done out-of-fold by hand.
+- **Small data.** Leaf-wise growth overfits more easily. CatBoost's ordered boosting targets exactly the small-data
+  regime where prediction shift is largest.

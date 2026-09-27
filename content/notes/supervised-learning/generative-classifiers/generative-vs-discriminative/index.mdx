@@ -1,0 +1,127 @@
+---
+title: Generative versus discriminative classifiers
+kind: concept
+summary: 'A generative classifier models $p(\xvec, y)$ and classifies with Bayes'' theorem; a discriminative one models $p(y \mid \xvec)$ directly. For naive Bayes against logistic regression, the discriminative model has lower asymptotic error; the generative one reaches its limit with far fewer examples.'
+tags: [classification, generative-models, probabilistic, learning-theory, worked-example]
+aliases: [generative-discriminative pair, generative classifier, discriminative classifier, generative vs discriminative]
+requires: [naive-bayes, logistic-regression]
+related: [linear-discriminant-analysis, quadratic-discriminant-analysis, conditional-random-field, hidden-markov-model]
+references: [ng2002, hastie2009, bishop2006]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **generative classifier** fits a model of the joint distribution $p(\xvec, y) = p(y)\,p(\xvec \mid y)$, usually by
+maximising the joint likelihood $\sum_i \log p(\xvec_i, y_i)$, and classifies with the posterior
+$p(y \mid \xvec) \propto p(y)\,p(\xvec \mid y)$. A **discriminative classifier** fits $p(y \mid \xvec)$, or a decision
+function, directly, usually by maximising the conditional likelihood $\sum_i \log p(y_i \mid \xvec_i)$. Two models
+form a **generative–discriminative pair** when the posteriors the generative model can express are exactly the
+discriminative model's hypothesis class <Cite id="ng2002" />.
+</Definition>
+
+## Intuition
+
+A generative model explains how the features arise in each class, which is more than classification needs. It spends
+parameters on the distribution of $\xvec$, and if that distribution is modelled wrongly the resulting boundary is
+wrong too. A discriminative model spends its parameters on the boundary alone. The generative model's extra
+assumptions are also extra information: when they are right, or nearly right, they let the model learn from less data.
+
+## The naive Bayes–logistic regression pair
+
+Take $d$ binary features and <NoteLink to="naive-bayes">naive Bayes</NoteLink> with
+$p(x_j = 1 \mid y = k) = \theta_{kj}$. Each feature's log-likelihood ratio is
+
+$$
+\log\frac{p(x_j \mid y = 1)}{p(x_j \mid y = 0)} = x_j\log\frac{\theta_{1j}}{\theta_{0j}} + (1 - x_j)\log\frac{1 - \theta_{1j}}{1 - \theta_{0j}},
+$$
+
+which is affine in $x_j$. The log-odds is a sum of these plus $\log(\pi_1/\pi_0)$, so it has the form
+$\wvec^\top\xvec + b$, and naive Bayes's posterior is $\sigma(\wvec^\top\xvec + b)$ for particular $\wvec$ and $b$. That
+is the model of <NoteLink to="logistic-regression">logistic regression</NoteLink>. Conversely, any $\wvec$ and $b$ can be
+produced by some choice of the $\theta_{kj}$ and $\pi_k$. The two share a hypothesis class, the linear classifiers,
+and differ only in how they choose a member of it:
+
+- naive Bayes sets each $\theta_{kj}$ to a class frequency, independently of the other features;
+- logistic regression chooses $\wvec$ and $b$ jointly to maximise the conditional likelihood of the labels.
+
+The same holds for Gaussian features: <NoteLink to="linear-discriminant-analysis">LDA</NoteLink> is the generative
+partner of logistic regression on continuous inputs. In sequence labelling, the
+<NoteLink to="hidden-markov-model">hidden Markov model</NoteLink> and the linear-chain
+<NoteLink to="conditional-random-field">conditional random field</NoteLink> form a pair.
+
+## Two results of Ng and Jordan
+
+Ng and Jordan compared the two members of such a pair by their error $\varepsilon(h)$ as the training size $n$
+grows <Cite id="ng2002" />.
+
+**Asymptotic error.** As $n \to \infty$, naive Bayes's parameters converge to the true class frequencies and its
+classifier converges to a fixed linear rule $h_{\text{Gen}, \infty}$. Logistic regression converges to the linear rule
+$h_{\text{Dis}, \infty}$ that maximises the expected conditional log-likelihood, which, for this class, is the best
+linear classifier under the log loss. When the naive Bayes assumption holds, both limits are the Bayes-optimal
+classifier. When it fails, naive Bayes's limit is some other linear rule, generally a worse one:
+
+$$
+\varepsilon(h_{\text{Dis}, \infty}) \le \varepsilon(h_{\text{Gen}, \infty}).
+$$
+
+Strictly, logistic regression minimises log loss, not error rate, so this ordering is the typical case rather than
+a theorem for every distribution. Ng and Jordan state it for the classifier that minimises training error within the
+linear class <Cite id="ng2002" />.
+
+**Rate of convergence.** The generative model approaches its asymptote much faster. Naive Bayes estimates each of its
+$2d$ parameters from its own feature's counts. By Hoeffding's inequality, one frequency is within $\epsilon$ of its
+limit with probability at least $1 - 2e^{-2n\epsilon^2}$ from $n$ samples. For all $2d$ to be accurate at once, a union
+bound needs $2 \cdot 2d\, e^{-2n\epsilon^2} \le \delta$, that is
+
+$$
+n \ge \frac{1}{2\epsilon^2}\log\frac{4d}{\delta},
+$$
+
+a sample size that grows like $O(\log d)$. Once every parameter is close to its limit, naive Bayes's error is close
+to $\varepsilon(h_{\text{Gen}, \infty})$ (under a mild condition that few examples sit near the limiting boundary). A
+discriminative learner over linear classifiers in $d$ dimensions needs a number of examples that grows like $O(d)$ to
+come close to $\varepsilon(h_{\text{Dis}, \infty})$, because the class has VC dimension $d + 1$ and the parameters are
+estimated jointly <Cite id="ng2002" />.
+
+Together: the generative model starts better and plateaus higher; the discriminative model starts worse and
+eventually wins. The learning curves cross, and on many of Ng and Jordan's data sets naive Bayes was ahead at small
+$n$ and logistic regression at large $n$.
+
+## Worked example: crossing learning curves
+
+Take 40 binary features, conditionally independent given a balanced class, with $p(x_j = 1 \mid y = 1)$ evenly spaced
+from $0.35$ to $0.65$ and $p(x_j = 1 \mid y = 0) = 1 - p(x_j = 1 \mid y = 1)$. Append five exact copies of the first
+feature, so the naive Bayes assumption fails for 6 of the 45 features. Fit Bernoulli naive Bayes (smoothing
+$\alpha = 1$) and $L_2$-penalised logistic regression (scikit-learn defaults) on $n$ examples. The table averages the
+test error over 100 training sets, each tested on 50,000 fresh examples.
+
+| $n$                 | 10    | 20    | 50    | 200   | 1000  | 5000  |
+| ------------------- | ----- | ----- | ----- | ----- | ----- | ----- |
+| naive Bayes         | 0.315 | 0.277 | 0.250 | 0.246 | 0.255 | 0.256 |
+| logistic regression | 0.352 | 0.284 | 0.214 | 0.163 | 0.136 | 0.129 |
+
+Naive Bayes reaches its plateau near $0.25$ by $n = 50$. It never improves further, because it counts the duplicated
+feature six times however much data it sees. Logistic regression starts worse and keeps improving, since it can learn
+to split the weight of the duplicated feature among its copies. The curves cross between $n = 20$ and $n = 50$.
+
+## Other differences
+
+- **Missing features and unlabelled data.** A generative model can marginalise a missing feature out of $p(\xvec, y)$
+  and can use unlabelled $\xvec$ through $p(\xvec) = \sum_k p(\xvec, y = k)$, for example with expectation
+  maximisation. A discriminative model has no model of $\xvec$ to do either <Cite id="bishop2006" />.
+- **Feature engineering.** A discriminative model can use arbitrary, overlapping features of $\xvec$ without
+  modelling their dependence. This freedom is the main reason for conditional random fields over hidden Markov models.
+- **Outliers and density.** A generative model assigns a density to every $\xvec$, so it can flag inputs unlike any
+  training data; a discriminative model is confident far from the data whenever the boundary says so.
+- **Class priors.** A generative model separates $p(y)$ from $p(\xvec \mid y)$, so a shift in class frequencies is
+  corrected by changing $\pi_k$ alone.
+
+## Pitfalls
+
+- **"Discriminative is always better" is false** for small data or when the generative model is nearly correct.
+- **The comparison concerns a pair.** A flexible generative model, such as a
+  <NoteLink to="gaussian-mixture-model">Gaussian mixture</NoteLink> per class, is not compared with logistic regression
+  by these results; its hypothesis class differs.
+- **Regularisation shifts the crossing.** A strongly penalised logistic regression behaves more like a generative
+  model with a strong prior, and moves the crossing point.

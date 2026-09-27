@@ -1,0 +1,177 @@
+---
+title: Decision tree
+kind: concept
+summary: 'A decision tree predicts by routing an input through a sequence of threshold tests $x_j \le t$ to a leaf and returning that leaf''s constant. CART grows the tree greedily, choosing each split to maximise the decrease in squared error, Gini impurity or entropy.'
+tags: [trees, classification, regression, nonparametric, interpretability, worked-example]
+aliases: [CART, classification and regression trees, regression tree, classification tree, Gini impurity, recursive partitioning, ID3]
+requires: [entropy]
+related: [tree-pruning, bagging, random-forest, gradient-boosting, log-loss-and-brier-score, mutual-information]
+references: [breiman1984, quinlan1986, hastie2009, hyafil1976]
+status: draft
+updated: 2026-09-27
+---
+
+import { TreePartition } from './TreePartition'
+
+<Definition>
+A **decision tree** is a binary tree whose internal nodes each hold a test $x_j \le t$ on one feature $j$ against a
+threshold $t$, and whose leaves each hold a constant. An input $\xvec \in \reals^d$ starts at the root, goes left when
+the test is true and right otherwise, and receives the constant of the leaf it reaches. The leaves partition the input
+space into axis-aligned boxes $R_1, \dots, R_M$, and the tree is the piecewise-constant function
+$f(\xvec) = \sum_{m=1}^{M} c_m \indicator[\xvec \in R_m]$ <Cite id="breiman1984" />.
+</Definition>
+
+## The model
+
+A tree with $M$ leaves divides the input space into $M$ disjoint boxes. Each box is the intersection of the half-spaces
+tested on the path from the root to its leaf. Inside a box the prediction is constant: a real number $c_m$ for
+regression, or a class distribution $\hat p_{m1}, \dots, \hat p_{mK}$ over $K$ classes for classification.
+
+Fitting a tree means choosing the boxes and the constants. Given the boxes, the constants have closed forms. Choosing
+the boxes is hard: finding the smallest tree consistent with a training set is NP-complete <Cite id="hyafil1976" />.
+CART (classification and regression trees) therefore grows the tree greedily, one split at a time, and controls its
+size afterwards by <NoteLink to="tree-pruning">pruning</NoteLink> <Cite id="breiman1984" />.
+
+## Leaf values
+
+Let leaf $m$ contain the $n_m$ training pairs $(\xvec_i, y_i)$ with $\xvec_i \in R_m$.
+
+For regression with squared error, the leaf value minimises $\sum_{i \in R_m} (y_i - c)^2$. The derivative with
+respect to $c$ is $-2\sum_{i \in R_m}(y_i - c)$. Setting it to zero gives $c_m = \frac{1}{n_m}\sum_{i \in R_m} y_i$,
+the mean of the leaf's targets. The leaf's loss at this value is $n_m$ times the within-leaf variance
+$\hat\sigma_m^2 = \frac{1}{n_m}\sum_{i \in R_m}(y_i - c_m)^2$.
+
+For classification, the leaf stores the class proportions $\hat p_{mk} = \frac{1}{n_m}\sum_{i \in R_m}
+\indicator[y_i = k]$ and predicts the majority class $\argmax_k \hat p_{mk}$. The proportions are the maximum-likelihood
+estimate of a categorical distribution from the leaf's labels.
+
+## Growing the tree
+
+A split of node $R$ is a pair $(j, t)$. It sends the points with $x_{ij} \le t$ to a left child $R_L$ and the rest to
+a right child $R_R$. CART scores a node by an **impurity** $Q(R)$ and chooses the split with the largest decrease
+
+$$
+\Delta(j, t) = n_R\, Q(R) - n_{R_L}\, Q(R_L) - n_{R_R}\, Q(R_R),
+$$
+
+where $n_R$, $n_{R_L}$ and $n_{R_R}$ count the training points in each node. The weights make $\Delta$ a decrease in
+total training loss rather than in average loss. The search is exhaustive over features and thresholds. Only
+thresholds between consecutive distinct values of $x_j$ in the node change the partition, so each feature has at most
+$n_R - 1$ candidates, usually placed at midpoints.
+
+Growing repeats this on each child until a stopping rule holds: a maximum depth, a minimum leaf size, or no split that
+decreases the impurity.
+
+### Squared error for regression
+
+For regression, $Q(R) = \hat\sigma_R^2$, the variance of the targets in the node. Then $n_R Q(R)$ is the node's
+squared-error loss at its optimal constant, and $\Delta$ is the reduction in training sum of squares that the split
+achieves.
+
+### Impurities for classification
+
+Write $p_k$ for the proportion of class $k$ in node $R$. Three impurities are in use.
+
+- **Misclassification rate:** $Q(R) = 1 - \max_k p_k$.
+- **Gini impurity:** $Q(R) = \sum_{k} p_k(1 - p_k) = 1 - \sum_k p_k^2$.
+- **Entropy:** $Q(R) = -\sum_k p_k \log_2 p_k$.
+
+Each is the minimum average training loss of a leaf that predicts a fixed distribution $\qvec$ for all of its points,
+under a different loss.
+
+**Entropy is the minimum log loss.** A leaf that predicts $\qvec$ has average log loss
+$-\frac{1}{n_R}\sum_{i \in R} \log_2 q_{y_i} = -\sum_k p_k \log_2 q_k$. This is the cross-entropy of $\qvec$ relative
+to $\pvec$. It equals $\entropy(\pvec) + \KL(\pvec \,\|\, \qvec)$, and the KL divergence is non-negative and zero only at
+$\qvec = \pvec$. The minimum is therefore $\entropy(\pvec)$, attained by predicting the node's own proportions. The
+entropy decrease of a split, divided by $n_R$, is the **information gain** of ID3 and C4.5 <Cite id="quinlan1986" />:
+the <NoteLink to="mutual-information">mutual information</NoteLink> between the class label and the side of the split,
+measured on the node's points.
+
+**Gini is the minimum Brier score.** Encode label $y$ as a one-hot vector $\evec_y$. A leaf that predicts $\qvec$ has
+average squared error $\frac{1}{n_R}\sum_{i \in R}\norm{\evec_{y_i} - \qvec}^2$. For each class $k$ this is the mean
+squared error of the constant $q_k$ against the 0/1 indicators of class $k$, minimised by their mean $p_k$ with value
+$p_k(1 - p_k)$. Summing over classes gives $\sum_k p_k(1 - p_k)$, the Gini impurity. A second reading gives the same
+number: if the leaf labels each point by drawing a class at random from $\pvec$, the probability of an error is
+$\sum_k p_k(1 - p_k)$.
+
+**Misclassification rate is the minimum 0–1 loss**, attained by predicting the majority class. It is a poor splitting
+criterion. It is piecewise linear in $\pvec$, so a split whose children keep the same majority class as the parent
+never decreases it, however much purer the children are. Gini and entropy are strictly concave. For a strictly
+concave $Q$, the weighted average of the children's impurities is below the parent's whenever the children's class
+proportions differ, so every split that separates the classes at all scores a positive decrease.
+
+<Derivation title="Why a strictly concave impurity rewards every informative split">
+The parent's proportions are the size-weighted average of the children's:
+$\pvec = w\,\pvec_L + (1 - w)\,\pvec_R$ with $w = n_{R_L}/n_R$. For a concave $Q$, Jensen's inequality gives
+$Q(\pvec) \ge w\,Q(\pvec_L) + (1 - w)\,Q(\pvec_R)$, so $\Delta \ge 0$. Strict concavity makes the inequality strict
+whenever $\pvec_L \ne \pvec_R$. The misclassification rate $1 - \max_k p_k$ is concave but linear on each region where
+the same class is the majority, so the inequality holds with equality whenever $\pvec_L$ and $\pvec_R$ share the
+parent's majority class.
+</Derivation>
+
+### Worked example
+
+A node holds 400 points of each of two classes. Split A produces children with class counts $(300, 100)$ and
+$(100, 300)$. Split B produces $(200, 400)$ and $(200, 0)$. This example follows Hastie, Tibshirani and Friedman
+<Cite id="hastie2009" />.
+
+- **Misclassification rate.** The parent's rate is $0.5$. Split A leaves $100/400 = 0.25$ in each child; split B
+  leaves $200/600 = 1/3$ on 600 points and $0$ on 200, a weighted $0.75 \cdot \tfrac{1}{3} = 0.25$. Both splits
+  decrease the rate by $0.25$.
+- **Gini.** The parent's impurity is $2 \cdot 0.5 \cdot 0.5 = 0.5$. Split A's children each have
+  $2 \cdot 0.75 \cdot 0.25 = 0.375$, a decrease of $0.125$. Split B's larger child has
+  $2 \cdot \tfrac{1}{3}\cdot\tfrac{2}{3} = 0.444$ and its smaller child $0$, a weighted $0.333$ and a decrease of
+  $0.167$.
+- **Entropy.** The parent's entropy is 1 bit. Split A decreases it by $0.189$ bits and split B by $0.311$ bits.
+
+Gini and entropy both prefer split B, which creates a pure node. A pure node needs no further splits, so the
+preference produces smaller trees.
+
+## Depth and overfitting
+
+Every split reduces the training loss or leaves it unchanged. A tree grown until every leaf is pure has zero training
+error, which is possible whenever no two training points with different labels share an input. Such a tree memorises
+the label noise.
+Depth trades the bias of coarse boxes against the variance of boxes fitted to a few points.
+
+<TreePartition />
+
+## Computational cost
+
+For one node with $n_R$ points, sorting each feature costs $O(n_R \log n_R)$. A single sweep through the sorted values
+then evaluates every threshold, because the counts or sums on each side update in constant time as one point crosses
+from right to left. The split search at a node costs $O(d\, n_R \log n_R)$. Every point sits in exactly one node per
+level, so a tree of depth $D$ costs $O(D\, d\, n \log n)$ to grow. Sorting once at the root and passing sorted index
+lists down to the children removes the repeated sorts. Prediction costs $O(D)$ comparisons.
+
+## Other feature types
+
+- **Categorical features.** A feature with $L$ unordered levels admits $2^{L-1} - 1$ binary partitions of its levels.
+  For a binary outcome, or for regression with squared error, sorting the levels by their mean target and treating the
+  result as ordered finds the optimal partition among $L - 1$ candidates <Cite id="breiman1984" />.
+- **Missing values.** CART stores **surrogate splits** at each node: splits on other features that best mimic the
+  primary split's routing of the training points. A point missing the primary feature follows the first surrogate
+  whose feature it has <Cite id="breiman1984" />.
+
+## Properties
+
+- **Interpretable when small.** A tree of depth three is a readable set of rules.
+- **Invariant to monotone feature transforms.** Only the order of each feature's values matters, so scaling, taking
+  logarithms or ranking a feature leaves the fitted tree unchanged.
+- **Handles interactions.** A split on $x_2$ below a split on $x_1$ lets the effect of $x_2$ depend on $x_1$.
+- **Constant outside the data.** A regression tree predicts a leaf mean everywhere beyond the training range. It cannot
+  extrapolate a trend.
+
+## Pitfalls
+
+- **High variance.** A small change in the data can change the root split, and every split below it changes with the
+  root. Deep trees fit label noise, as the figure shows. <NoteLink to="tree-pruning">Pruning</NoteLink> reduces the
+  variance of one tree; <NoteLink to="bagging">bagging</NoteLink> and
+  <NoteLink to="random-forest">random forests</NoteLink> average many trees instead.
+- **Axis-aligned boundaries.** A diagonal boundary $x_1 = x_2$ needs a staircase of many splits. A linear model
+  represents it with one weight vector.
+- **Bias towards features with many thresholds.** A feature with many distinct values offers many candidate splits,
+  and the best of many candidates on pure noise still reduces impurity. Impurity-based feature importances inherit this
+  bias <Cite id="strobl2007" />.
+- **Greedy is not optimal.** Each split is best given the splits above it. A split that is useless alone but enables
+  a good split below it, as in an XOR pattern, is found only by chance.

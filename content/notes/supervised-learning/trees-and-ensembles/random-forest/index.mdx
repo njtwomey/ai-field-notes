@@ -1,0 +1,137 @@
+---
+title: Random forest
+kind: concept
+summary: 'A random forest averages $B$ unpruned decision trees, each grown on a bootstrap sample and choosing each split among only $m$ randomly drawn features. Feature subsampling lowers the correlation $\rho$ between trees, which lowers the variance floor $\rho\sigma^2$ of the average.'
+tags: [ensembles, trees, classification, regression, interpretability, worked-example]
+aliases: [random forests, feature bagging, mtry, max_features, out-of-bag estimate, permutation importance, mean decrease in impurity, MDI, Gini importance, variable importance]
+requires: [bagging, decision-tree]
+related: [extremely-randomised-trees, gradient-boosting, shap-values-for-trees, ensemble-methods-for-imbalance]
+references: [breiman2001, hastie2009, strobl2007, ho1998, amit1997]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+A **random forest** is an average of $B$ decision trees. Tree $b$ is grown on a bootstrap sample of the training set.
+At every node, the split is chosen among $m$ features drawn at random without replacement from the $d$ features,
+rather than among all $d$. Trees are grown deep and not pruned. Regression forests average the trees' predictions;
+classification forests take a majority vote or average the class probabilities <Cite id="breiman2001" />.
+</Definition>
+
+## Intuition
+
+<NoteLink to="bagging">Bagging</NoteLink> averages trees fitted to bootstrap samples. The variance of an average of
+$B$ identically distributed predictors, each with variance $\sigma^2$ and pairwise correlation $\rho$, is
+
+$$
+\rho\sigma^2 + \frac{1 - \rho}{B}\,\sigma^2.
+$$
+
+As $B$ grows the second term vanishes and the variance approaches $\rho\sigma^2$. Bagged trees are strongly
+correlated: bootstrap samples share about 63% of their distinct points, and if one feature is a strong predictor,
+nearly every tree splits on it at the root and grows a similar structure beneath. A random forest breaks this
+similarity by hiding most features at each split. A tree whose root sees only $m$ of the $d$ features often cannot
+use the dominant feature there, so it grows a different structure. Correlation falls, and so does the variance floor
+<Cite id="hastie2009" />.
+
+Randomising the features raises each tree's own variance $\sigma^2$ and bias a little, because each split is the best
+of fewer candidates. The number $m$ trades the two effects. The default values $m = \lfloor\sqrt{d}\rfloor$ for
+classification and $m = \lfloor d/3 \rfloor$ for regression work well across many data sets <Cite id="hastie2009" />.
+With $m = d$ the forest is bagging.
+
+## Algorithm
+
+For $b = 1, \dots, B$:
+
+1. Draw a bootstrap sample $\Dcal^{*b}$ of size $n$ from the training set.
+2. Grow a tree on $\Dcal^{*b}$. At each node, draw $m$ features uniformly at random, find the best split among them
+   by the usual impurity decrease, and split. Stop when a node reaches the minimum size (typically 1 for
+   classification, 5 for regression).
+
+Predict with the average of $\hat f^{*1}(\xvec), \dots, \hat f^{*B}(\xvec)$, or the majority vote.
+
+The idea of random feature selection predates the forest: Ho grew each tree on a random subspace of features
+<Cite id="ho1998" />, and Amit and Geman chose each split from a random subset of candidate features
+<Cite id="amit1997" />. Breiman combined per-split feature sampling with bagging <Cite id="breiman2001" />.
+
+## Why more trees do not overfit
+
+The ensemble's prediction converges as $B \to \infty$ to the expectation of one random tree over the bootstrap and
+feature draws, given the training set. Adding trees moves the forest towards this limit and never away from it, so
+test error does not rise with $B$; it falls and flattens. The forest can still overfit through its trees, if they are
+deep on noisy data, but not through their number. Breiman bounds the limiting error of a classification forest by
+$\bar\rho(1 - s^2)/s^2$, where $s$ is the **strength**, the expected margin by which the trees' vote for the correct
+class exceeds the vote for any other class, and $\bar\rho$ is the mean correlation between trees' margin functions
+<Cite id="breiman2001" />. Strong, weakly correlated trees make a good forest.
+
+## Out-of-bag error
+
+Each training point is absent from a given bootstrap sample with probability $(1 - 1/n)^n \approx e^{-1} \approx 0.37$.
+The **out-of-bag** prediction for point $i$ averages only the roughly $0.37B$ trees that did not see it. The average
+loss of out-of-bag predictions estimates the test error. It is nearly identical to $n$-fold cross-validation, at no
+extra cost, and is usually used to choose $m$ and to decide when $B$ is large enough <Cite id="breiman2001" />.
+
+## Variable importance
+
+Forests are hard to read directly, so two summary measures of each feature's importance are standard.
+
+**Mean decrease in impurity** (MDI, or Gini importance). Every split on feature $j$ reduces the weighted impurity by
+$\Delta = n_R Q(R) - n_{R_L} Q(R_L) - n_{R_R} Q(R_R)$. The MDI of feature $j$ sums these decreases over all nodes
+that split on $j$, divided by $n$, and averages over trees. It comes free with training.
+
+**Permutation importance.** For each tree, compute the loss on its out-of-bag points. Randomly permute the values of
+feature $j$ among those points, which breaks any association between feature $j$ and the target while keeping its
+marginal distribution, and recompute the loss. The importance of $j$ is the average increase in loss
+<Cite id="breiman2001" />. The same procedure works on any held-out set and with any model.
+
+### The bias of impurity importance
+
+MDI is measured on the training points that built the trees, and each split is the best of many candidates. A
+feature with more distinct values offers more candidate thresholds. On pure noise, the best of many thresholds still
+decreases the impurity, and the expected best decrease grows with the number of thresholds. MDI therefore rewards
+features for having many values, even when they carry no information. Strobl and colleagues show this for features of
+differing cardinality, and trace a second source of bias to bootstrap sampling with replacement
+<Cite id="strobl2007" />. Permutation importance on held-out data does not have this bias, because a noise feature
+cannot help predict points the tree did not fit.
+
+### Worked example
+
+Draw $n = 1000$ points with a binary label $y$ that is a fair coin, independent of five features: uniform integers
+with 2, 4, 10 and 20 levels, and a standard normal. No feature carries any information. A forest of 300 trees
+(scikit-learn defaults) gets an out-of-bag accuracy of $0.50$, as it should. Its MDI values are
+
+| feature      | 2 levels | 4 levels | 10 levels | 20 levels | continuous |
+| ------------ | -------- | -------- | --------- | --------- | ---------- |
+| MDI          | 0.04     | 0.09     | 0.17      | 0.24      | 0.46       |
+| permutation  | −0.02    | 0.01     | 0.00      | −0.01     | −0.02      |
+
+MDI ranks the features exactly by their number of distinct values and assigns the continuous noise feature almost
+half the total. Permutation importance on 1000 fresh points is within $\pm 0.02$ of zero for every feature, the
+noise level of the estimate.
+
+### Correlated features
+
+Both measures mislead when features are correlated. MDI splits credit between correlated features arbitrarily,
+depending on which one wins each split. Permutation breaks the correlation as well as the association with the
+target, so the model is evaluated on combinations of feature values that never occur in the data. A feature that the
+forest uses only through a correlated partner can then look important. Grouping correlated features, or permuting a
+feature conditionally on the others, reduces this problem. For per-prediction attributions, see
+<NoteLink to="shap-values-for-trees">SHAP values for trees</NoteLink>.
+
+## Assumptions
+
+- Random forests need little tuning: $m$, the minimum leaf size and $B$ are the main settings, and the defaults are
+  usually close to optimal.
+- Like all trees, forests are invariant to monotone transformations of each feature and need no scaling.
+- A regression forest predicts an average of leaf means, which lies within the range of the training targets. It
+  cannot extrapolate beyond them.
+
+## Pitfalls
+
+- **Few relevant features among many.** If only a handful of $d$ features matter and $m$ is small, most splits see
+  no relevant feature and pick noise. Raise $m$.
+- **Probability estimates.** Averaged votes of deep trees are pushed away from 0 and 1, because a few trees always
+  disagree <Cite id="niculescumizil2005" />. <NoteLink to="classifier-calibration">Recalibrate</NoteLink> if probabilities matter.
+- **Memory.** Deep unpruned trees have about $n$ leaves each. A forest of $B$ trees stores $O(Bn)$ nodes.
+- **MDI on training data.** Use permutation importance on held-out data, or SHAP values, before drawing conclusions
+  about which features matter.

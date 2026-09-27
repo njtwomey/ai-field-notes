@@ -1,0 +1,122 @@
+---
+title: SHAP values for trees
+kind: concept
+summary: 'SHAP values attribute a prediction $f(\xvec)$ minus the average prediction to the features, as the Shapley values of a game whose payoff for a feature set $S$ is the expected prediction given $\xvec_S$. TreeSHAP computes them exactly for tree ensembles in polynomial time.'
+tags: [interpretability, trees, ensembles, worked-example]
+aliases: [SHAP, TreeSHAP, Shapley values, Shapley additive explanations, feature attribution, SHAP interaction values]
+requires: [decision-tree]
+related: [random-forest, gradient-boosting, xgboost-lightgbm-catboost, expectation]
+references: [lundberg2017, lundberg2020, strobl2007]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+For a model $f$, an input $\xvec$ with $M$ features and a **value function** $v(S)$ giving the model's expected output
+when only the features in $S \subseteq \set{1, \dots, M}$ are known, the **SHAP value** of feature $j$ is its Shapley
+value
+
+$$
+\phi_j = \sum_{S \subseteq \set{1, \dots, M} \setminus \set{j}} \frac{\abs{S}!\,(M - \abs{S} - 1)!}{M!}\big[v(S \cup \set{j}) - v(S)\big].
+$$
+
+The values satisfy $\sum_j \phi_j = f(\xvec) - v(\emptyset)$, where $v(\emptyset)$ is the average prediction
+<Cite id="lundberg2017" />. **TreeSHAP** computes all $\phi_j$ exactly for tree models in time polynomial in the size of
+the trees <Cite id="lundberg2020" />.
+</Definition>
+
+## Intuition
+
+A prediction of 50 against an average of 21 needs an explanation: how much of the difference of 29 does each feature
+account for? When features interact, the answer depends on the order in which features are revealed. Revealing
+$x_1$ first might move the expected prediction by 11, while revealing it after $x_2$ moves it by 20. The Shapley value,
+from cooperative game theory, resolves this by averaging a feature's contribution over every order of revelation.
+
+## Where the weights come from
+
+Reveal the $M$ features one at a time in a uniformly random order. When feature $j$ is revealed, the set $S$ of
+features already known has some value, and revealing $j$ changes the expected prediction by
+$v(S \cup \set{j}) - v(S)$. The Shapley value is the average of this change over all $M!$ orders.
+
+Count the orders in which the features before $j$ are exactly the set $S$. The $\abs{S}$ features of $S$ come first in
+any of $\abs{S}!$ orders, then $j$, then the remaining $M - \abs{S} - 1$ features in any of $(M - \abs{S} - 1)!$
+orders. Dividing by the $M!$ orders gives the weight in the definition. Summing the changes along any single order
+telescopes to $v(\set{1, \dots, M}) - v(\emptyset) = f(\xvec) - v(\emptyset)$. Every order sums to this, so the average
+does too. This is the **efficiency** property.
+
+The Shapley value is the only attribution with efficiency and three further properties: features with identical
+contributions get equal values (symmetry), a feature that never changes $v$ gets zero (dummy), and the values for a sum
+of two models are the sums of their values (additivity). Additivity is what lets an ensemble's SHAP values be computed
+tree by tree and added.
+
+## The value function for trees
+
+The value function $v(S) = \expect[f(\xvec) \mid \xvec_S]$ must be defined for a model that needs every feature.
+Two choices are in use.
+
+- **Path-dependent (observational approximation).** Follow the tree from the root. At a split on a feature in $S$, go
+  the way $\xvec$ goes. At a split on a feature not in $S$, take both branches and weight each by the fraction of
+  training points that went that way (the node's **cover**). The result is the leaves' values averaged by these
+  weights. This approximates the conditional expectation using only the tree's own statistics.
+- **Interventional.** Replace the features outside $S$ by their values in a background data set and average the
+  predictions. This breaks correlations between features, answering "what if I changed $\xvec_S$ alone".
+
+The two differ when features are correlated, in the same way that conditional and marginal permutation importances
+differ.
+
+### Worked example
+
+A tree splits first on a binary feature $x_1$. The 50 training points with $x_1 = 0$ reach a leaf of value 10. The 50
+with $x_1 = 1$ are split on a binary feature $x_2$: the 30 with $x_2 = 0$ reach a leaf of value 20 and the 20 with
+$x_2 = 1$ a leaf of value 50. Explain the input $\xvec = (1, 1)$, with prediction $f(\xvec) = 50$, using the
+path-dependent value function.
+
+- $v(\emptyset)$: both branches everywhere, $0.5 \cdot 10 + 0.3 \cdot 20 + 0.2 \cdot 50 = 21$.
+- $v(\set{1})$: go right at the root, then average by cover, $(30 \cdot 20 + 20 \cdot 50)/50 = 32$.
+- $v(\set{2})$: both ways at the root with weight $0.5$ each; on the right, go to $x_2 = 1$.
+  $0.5 \cdot 10 + 0.5 \cdot 50 = 30$.
+- $v(\set{1, 2}) = f(\xvec) = 50$.
+
+With $M = 2$ each of the two orders has weight $1/2$:
+
+$$
+\phi_1 = \tfrac{1}{2}\big[(32 - 21) + (50 - 30)\big] = 15.5, \qquad
+\phi_2 = \tfrac{1}{2}\big[(30 - 21) + (50 - 32)\big] = 13.5.
+$$
+
+They sum to $29 = 50 - 21$. Feature $x_1$ gets more credit although $x_2$ decides the final leaf, because $x_1$ is
+needed to reach the split on $x_2$ at all.
+
+## TreeSHAP
+
+The definition sums over $2^{M-1}$ subsets per feature, and each $v(S)$ costs a pass over the tree. For a tree with
+$L$ leaves this is $O(L\, 2^M)$ per feature, infeasible beyond a few dozen features. TreeSHAP computes the
+path-dependent values for all features at once in $O(L D^2)$ per tree, where $D$ is the tree's depth, and
+$O(TLD^2)$ for an ensemble of $T$ trees <Cite id="lundberg2020" />.
+
+The algorithm walks every root-to-leaf path once. Along a path, a feature matters only through the splits on it, so
+the subsets $S$ that give the same path weights can be grouped by their size. The algorithm keeps, for each subset
+size, the total weight of the subsets of that size that would reach the current node, and updates these $D + 1$
+numbers in $O(D)$ time as it descends each split and unwinds them when a feature's contribution is read off at a
+leaf. The recursion is exact; there is no sampling <Cite id="lundberg2020" />.
+
+## Uses
+
+- **Local explanation.** The $\phi_j$ of one prediction show which features pushed it above or below the average.
+- **Global importance.** The mean of $\abs{\phi_j}$ over a data set ranks features. Unlike split-count or impurity
+  importances, it is **consistent**: if a model changes so that a feature's contribution increases for every input,
+  its SHAP importance does not decrease <Cite id="lundberg2020" />.
+- **Interaction values.** A generalisation of the Shapley value to pairs splits each $\phi_j$ into a main effect and
+  pairwise interaction effects, also computable in polynomial time for trees <Cite id="lundberg2020" />.
+- **Dependence plots.** Plotting $\phi_j$ against $x_j$ over a data set shows the shape of the feature's effect and,
+  through the vertical spread, its interactions.
+
+## Pitfalls
+
+- **Attribution is not causation.** SHAP values explain the model, not the world. A feature correlated with the true
+  cause can take its credit.
+- **The value function is a choice.** Path-dependent and interventional values can rank features differently on
+  correlated data. State which one was used.
+- **Background data.** Interventional values depend on the background data set, and so does $v(\emptyset)$.
+- **Output scale.** For classifiers the values are usually computed on the log-odds scale, where contributions add.
+  On the probability scale they do not add in the same way.

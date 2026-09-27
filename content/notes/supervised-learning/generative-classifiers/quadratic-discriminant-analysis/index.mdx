@@ -1,0 +1,110 @@
+---
+title: Quadratic discriminant analysis
+kind: concept
+summary: 'Quadratic discriminant analysis models each class as a Gaussian $\Gauss(\muvec_k, \Sigmamat_k)$ with its own covariance. The class log-posteriors are quadratic in $\xvec$, so boundaries are quadrics. It needs $K d(d+1)/2$ covariance parameters, against $d(d+1)/2$ for LDA.'
+tags: [classification, generative-models, gaussian, worked-example]
+aliases: [QDA, regularised discriminant analysis, regularized discriminant analysis, RDA, Gaussian classifier]
+requires: [linear-discriminant-analysis]
+related: [naive-bayes, generative-vs-discriminative, bayes-decision-rule, gaussian-mixture-model]
+references: [hastie2009, friedman1989, bishop2006]
+status: draft
+updated: 2026-09-27
+---
+
+import { DiscriminantExplorer } from '../_shared/DiscriminantExplorer'
+
+<Definition>
+**Quadratic discriminant analysis** (QDA) assumes that the features $\xvec \in \reals^d$ of class $k$ follow a
+Gaussian $\Gauss(\muvec_k, \Sigmamat_k)$ with a class-specific mean and a class-specific covariance matrix, and that
+the classes have priors $\pi_k$. It classifies by the largest posterior $p(y = k \mid \xvec)$. The boundary between two
+classes is a quadric surface: in the plane, an ellipse, parabola, hyperbola or pair of lines.
+</Definition>
+
+## The quadratic discriminant
+
+By Bayes' theorem, $\log p(y = k \mid \xvec) = \log\pi_k + \log\Gauss(\xvec \mid \muvec_k, \Sigmamat_k) - \log p(\xvec)$.
+Writing out the Gaussian and dropping the terms that are the same for every class, $-\frac{d}{2}\log 2\pi$ and
+$\log p(\xvec)$, leaves the **quadratic discriminant function**
+
+$$
+\delta_k(\xvec) = -\frac{1}{2}\log\det\Sigmamat_k - \frac{1}{2}(\xvec - \muvec_k)^\top\Sigmamat_k^{-1}(\xvec - \muvec_k) + \log\pi_k.
+$$
+
+QDA predicts $\argmax_k\delta_k(\xvec)$. In <NoteLink to="linear-discriminant-analysis">LDA</NoteLink>, where every
+$\Sigmamat_k$ equals one $\Sigmamat$, the term $\xvec^\top\Sigmamat^{-1}\xvec$ and the log-determinant are common to all
+classes and cancel. Here they do not. The boundary between classes $k$ and $l$ is
+
+$$
+\delta_k(\xvec) - \delta_l(\xvec) = -\frac{1}{2}\xvec^\top\big(\Sigmamat_k^{-1} - \Sigmamat_l^{-1}\big)\xvec
++ \xvec^\top\big(\Sigmamat_k^{-1}\muvec_k - \Sigmamat_l^{-1}\muvec_l\big) + c_{kl} = 0,
+$$
+
+with a constant $c_{kl}$ collecting the means, log-determinants and priors. The quadratic term vanishes only when
+$\Sigmamat_k = \Sigmamat_l$. The first two terms are the difference of two squared **Mahalanobis distances**, each
+measured in its own class's covariance: a point is assigned to the class in whose own metric it is nearest, after
+adjusting for the class's volume $\log\det\Sigmamat_k$ and prior.
+
+## Estimation
+
+The maximum-likelihood estimates are the class frequencies $\hat\pi_k = n_k/n$, the class means $\hat\muvec_k$ and
+one sample covariance per class, $\hat\Sigmamat_k = \frac{1}{n_k - 1}\sum_{y_i = k}(\xvec_i - \hat\muvec_k)
+(\xvec_i - \hat\muvec_k)^\top$. Each $\hat\Sigmamat_k$ must be invertible, which needs $n_k > d$ points in class $k$.
+
+## Worked example: equal means
+
+Two classes with equal priors have one feature, with $x \mid y = 0 \sim \Gauss(0, 1)$ and $x \mid y = 1 \sim \Gauss(0, 4)$.
+The means are equal, so LDA's boundary normal $\Sigmamat^{-1}(\mu_1 - \mu_0)$ is zero: LDA cannot separate the classes
+at all and assigns everything to one class, for an error of $0.5$.
+
+QDA's discriminants are $\delta_0(x) = -\frac{1}{2}x^2$ and $\delta_1(x) = -\log 2 - \frac{1}{8}x^2$, using
+$\frac{1}{2}\log 4 = \log 2$. Class 0 wins where $\delta_0 > \delta_1$:
+
+$$
+\frac{1}{2}x^2 - \frac{1}{8}x^2 < \log 2 \quad\Longleftrightarrow\quad x^2 < \frac{8\log 2}{3} = 1.848
+\quad\Longleftrightarrow\quad \abs{x} < 1.360.
+$$
+
+The classifier predicts class 0 in the interval $(-1.36, 1.36)$ and class 1 outside it. A class-0 point falls outside
+with probability $2(1 - \Phi(1.360)) = 0.174$. A class-1 point, with standard deviation 2, falls inside with probability
+$2\Phi(0.680) - 1 = 0.503$. The average error is $0.339$, the Bayes error for this problem. The two classes differ only
+in spread, which a quadratic boundary can use and a linear one cannot.
+
+## LDA or QDA
+
+<DiscriminantExplorer />
+
+QDA's model contains LDA's, so with unlimited data it is never worse. With finite data, it estimates
+$K d(d + 1)/2$ covariance parameters where LDA estimates $d(d + 1)/2$. In $d = 50$ dimensions with $K = 3$ classes,
+that is $3825$ against $1275$. Each extra parameter adds estimation variance. The bias of LDA's shared-covariance
+assumption is often smaller than the variance QDA pays to avoid it, and LDA frequently wins on real data even when
+the class covariances plainly differ <Cite id="hastie2009" />.
+
+**Regularised discriminant analysis** interpolates between the two <Cite id="friedman1989" />. It shrinks each class
+covariance towards the pooled one,
+
+$$
+\hat\Sigmamat_k(\alpha) = \alpha\,\hat\Sigmamat_k + (1 - \alpha)\,\hat\Sigmamat, \qquad 0 \le \alpha \le 1,
+$$
+
+so $\alpha = 0$ is LDA and $\alpha = 1$ is QDA. A second parameter $\gamma$ shrinks the pooled covariance towards a
+multiple of the identity, $\gamma\hat\Sigmamat + (1 - \gamma)\hat\sigma^2\eye$, which keeps it invertible when $d$ is
+large. Both are chosen by cross-validation.
+
+Restricting every $\Sigmamat_k$ to be diagonal gives Gaussian <NoteLink to="naive-bayes">naive Bayes</NoteLink>, with
+$Kd$ variance parameters and axis-aligned quadratic boundaries.
+
+## Assumptions
+
+- Each class is Gaussian with its own covariance.
+- Each class has more than $d$ training points, or the covariance estimate is regularised.
+
+## Pitfalls
+
+- **Small classes.** A class with few points gets a poorly estimated, possibly singular covariance, and its boundary
+  can bend wildly around the training points.
+- **Sensitivity to the Gaussian assumption.** Heavy tails or multimodal classes distort the covariance, and the
+  quadratic boundary then reflects the distortion. A <NoteLink to="gaussian-mixture-model">Gaussian mixture</NoteLink>
+  per class relaxes the single-Gaussian assumption.
+- **Calibration away from the data.** Far from all training points, the posterior is set by the ratio of Gaussian
+  tails, which goes to 0 or 1 according to which class has the larger variance in that direction. The resulting
+  confidence is an artefact of the model.

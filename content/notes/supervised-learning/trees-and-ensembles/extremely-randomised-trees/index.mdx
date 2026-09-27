@@ -1,0 +1,92 @@
+---
+title: Extremely randomised trees
+kind: concept
+summary: 'Extremely randomised trees (extra-trees) average trees whose splits are the best of $K$ random splits, each on a random feature at a uniformly random threshold. Grown on the full training set, they trade a little bias for lower variance and faster training.'
+tags: [ensembles, trees, variance-reduction, worked-example]
+aliases: [extra-trees, extremely randomized trees, totally randomised trees, ExtraTrees]
+requires: [random-forest]
+related: [bagging, decision-tree]
+references: [geurts2006, breiman2001]
+status: draft
+updated: 2026-09-27
+---
+
+<Definition>
+An **extremely randomised trees** ensemble, or **extra-trees**, averages $M$ unpruned
+<NoteLink to="decision-tree">decision trees</NoteLink>, each grown on the full training set. At each node, the tree
+draws $K$ features at random. For each drawn feature $j$ it draws one threshold uniformly between the smallest and
+largest values of $x_j$ in the node. Of these $K$ random splits it keeps the one with the largest impurity decrease.
+A node with fewer than $n_{\min}$ points becomes a leaf <Cite id="geurts2006" />.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="random-forest">random forest</NoteLink> randomises which features a split may use, and optimises the
+threshold. Extra-trees randomise the threshold too. The effect on an average of trees follows from the variance of an
+average of $M$ predictors, each with variance $\sigma^2$ and pairwise correlation $\rho$:
+$\rho\sigma^2 + (1 - \rho)\sigma^2/M$. Random thresholds make two trees grown on the same data less alike, lowering
+$\rho$ and the variance floor $\rho\sigma^2$. They also make each tree a worse fit, raising its bias and its variance
+$\sigma^2$. Geurts, Ernst and Wehenkel found the net effect favourable on most of their benchmark problems
+<Cite id="geurts2006" />.
+
+Extra-trees drop the bootstrap. Random thresholds already decorrelate the trees, and training on all $n$ points
+rather than the roughly $0.63n$ distinct points of a bootstrap sample lowers each tree's bias.
+
+## The two parameters
+
+- **$K$, the number of random splits tried per node**, sets the strength of the selection. $K = 1$ gives **totally
+  randomised trees**, whose structure ignores the labels entirely; the labels only set the leaf values. Large $K$
+  makes each split closer to the best split on the drawn features. Geurts et al. recommend $K = \sqrt{d}$ for
+  classification and $K = d$ for regression <Cite id="geurts2006" />.
+- **$n_{\min}$, the minimum node size for splitting**, sets the strength of averaging within a leaf. Defaults are 2
+  for classification and 5 for regression. Larger values smooth the output and help on noisy targets.
+
+## Smoothness of the ensemble
+
+A single tree is piecewise constant. An average of trees with random thresholds is much smoother. Consider one
+feature and two neighbouring training points $x_1 < x_2$ with targets $y_1$ and $y_2$ that end up alone in a node.
+The node's threshold $t$ is uniform on $[x_1, x_2]$. A query $x$ between them receives $y_1$ when $t > x$ and $y_2$
+when $t \le x$. Averaged over the threshold, its prediction is
+
+$$
+y_1 \Pr(t > x) + y_2 \Pr(t \le x) = y_1\,\frac{x_2 - x}{x_2 - x_1} + y_2\,\frac{x - x_1}{x_2 - x_1},
+$$
+
+the straight line through the two points. In one dimension, an infinite ensemble of totally randomised trees grown to
+single-point leaves is a continuous piecewise-linear interpolation of the training data <Cite id="geurts2006" />.
+Optimised thresholds, as in a random forest, sit at midpoints between pairs of training values, so an average of such
+trees remains piecewise constant, with steps only at those midpoints.
+
+## Worked example
+
+On Friedman's first benchmark function, with 10 features of which 5 matter and Gaussian noise of variance 1, one run
+with 500 training points, 2000 test points and 500 trees per ensemble (scikit-learn) gives these test mean squared
+errors:
+
+| ensemble                            | test MSE |
+| ----------------------------------- | -------- |
+| bagged trees ($m = d$)              | 4.64     |
+| random forest ($m = d/3$)           | 4.74     |
+| extra-trees ($K = d$)               | 3.81     |
+| extra-trees ($K = d/3$)             | 4.88     |
+
+The target is a smooth function, and the smooth averages of extra-trees with $K = d$ fit it best. With $K = d/3$ the
+splits are too random: five of ten features are noise, and a node that draws three random thresholds on mostly noise
+features picks a poor split. The irreducible error is 1, so all four ensembles are far from the optimum at this
+sample size.
+
+## Computational cost
+
+A random threshold needs no sorting. Evaluating one candidate split at a node with $n_R$ points costs $O(n_R)$, so a
+node costs $O(K n_R)$, against $O(m\, n_R \log n_R)$ for a random-forest node that sorts $m$ features. Extra-trees
+train several times faster than random forests of the same size, although deeper trees (random splits are less
+efficient) offset part of the gain.
+
+## Pitfalls
+
+- **Many irrelevant features.** With small $K$, most nodes see only noise features and their random thresholds. Raise
+  $K$.
+- **Interpretation.** Impurity-based importances are measured on the training points, as for random forests. Use
+  permutation importance on held-out data.
+- **No out-of-bag estimate.** Without bootstrap samples every tree sees every point. Error estimates need a held-out
+  set or cross-validation.
