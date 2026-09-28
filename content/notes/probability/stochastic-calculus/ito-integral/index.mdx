@@ -5,13 +5,14 @@ summary: 'The Itô integral $\int_0^T H_t\,dW_t$ is the mean-square limit of sum
 tags: [probability, stochastic-processes, stochastic-differential-equations, martingales, worked-example]
 aliases: [stochastic integral, Itô stochastic integral, Itô isometry, Stratonovich integral, non-anticipating integrand]
 requires: [brownian-motion, martingale]
-related: [itos-lemma, stochastic-differential-equations, fundamental-theorem-of-calculus]
+related: [riemann-stieltjes-integral, itos-lemma, stochastic-differential-equations, fundamental-theorem-of-calculus]
 references: [ito1944, oksendal2003, karatzas1998, stratonovich1966, sarkka2019]
 status: draft
 updated: 2026-09-27
 ---
 
 import { EvaluationPoint } from './EvaluationPoint'
+import { KnobIntegral } from './KnobIntegral'
 
 <Definition>
 Let $W_t$ be a standard <NoteLink to="brownian-motion">Brownian motion</NoteLink> and $H_t$ a process that is
@@ -34,26 +35,183 @@ is $H_{t_j}\Delta W_j$. The Itô integral is the total gain. The holding must be
 what "left end" and "non-anticipating" mean. A trader who could set $H$ with knowledge of the next move would win
 systematically.
 
-The ordinary Riemann–Stieltjes integral does not care where in each step the integrand is evaluated, because for a
+The ordinary <NoteLink to="riemann-stieltjes-integral">Riemann–Stieltjes integral</NoteLink> does not care where in each step the integrand is evaluated, because for a
 smooth integrator the choices differ by a vanishing amount. For Brownian motion they do not, because each increment
 $\Delta W_j$ is of size $\sqrt{\Delta t}$ and the products of increments add up to a finite amount. The left end is
 the choice that keeps the integral a fair game, with mean zero.
 
+A second picture avoids money altogether. Think of $dW_t$ as white noise, a hiss of tiny independent random kicks, and
+of $H_t$ as a volume knob. The Itô integral is the total noise that comes out of the speaker when the hiss is played
+through the knob. Turning the knob up makes the accumulated noise larger; turning it to zero silences it; turning it
+negative flips the sign of the kicks. In the examples below, $h(t)$ is a knob setting chosen in advance, and the question
+is always the same: how large is the accumulated noise?
+
+## The integrand $H$: what it is and what it is not
+
+The integrand $H$ is a **stochastic process**: at every time $t$, $H_t$ is a random variable. Fix one realisation of the
+noise, one whole Brownian path, and $H$ becomes an ordinary function of time: the knob setting over time along that
+path. Draw a different path and the knob may be turned differently. The integral $\int_0^T H_t\,dW_t$ is therefore a
+random variable too, one number per path.
+
+**The one rule: no peeking.** $H_t$ may be computed from anything known at time $t$: the path $W_s$ for every
+$s \le t$, fixed parameters, and other randomness independent of the future kicks. It may not use the path after time
+$t$. Formally, $H_t$ is measurable with respect to the history $\Fcal_t$ of the path up to $t$; such a process is
+called **adapted** or **non-anticipating**. The rule is what makes the left-point sum fair: the knob for the step from
+$t_j$ to $t_{j+1}$ is set at $t_j$, before the kick $\Delta W_j$ arrives.
+
+**Allowed integrands**, from simplest to most general:
+
+- **A deterministic function** $h(t)$, the same on every path: a knob set in advance, such as $h(t) = t$ or
+  $h(t) = e^{-\theta(T - t)}$. These give Gaussian integrals, as the next sections show.
+- **A function of the current position**, $H_t = f(W_t)$: for example $W_t$, $W_t^2$ or $\sin W_t$. The knob follows
+  where the path is now.
+- **A function of the past path**: the running maximum $\max_{s \le t} W_s$, the running average
+  $\tfrac1t \int_0^t W_s\,ds$, or the lagged value $W_{t - 0.5}$ (taken as 0 for $t < 0.5$). All of these are known at
+  time $t$.
+- **A decision based on the past**: $H_t = 1$ once the path has touched the level 1 and $0$ before. This is a stopping
+  rule, and it is allowed because at each time the path so far says whether the level has been touched.
+- **The state of a noisy system**: $H_t = g(X_t)$, where $X_t$ solves a stochastic differential equation driven by the
+  same $W$. This is the case that SDEs need.
+
+**What $H$ does not need to be.** It need not be continuous (the step functions below jump), differentiable, bounded,
+Gaussian or deterministic. The Itô integral asks for far less of its integrand than of its integrator.
+
+**Forbidden integrands** all look at the future:
+
+- The end point $W_T$, used as the knob at every time.
+- The next value $W_{t + 0.1}$, or the sign of the coming increment.
+- "1 if the path will finish above 0".
+
+**Why peeking breaks the integral.** Take $H_t = W_T$ for every $t$, a constant knob chosen by looking at the end of the
+path. The left-point sum is $\sum_j W_T\,\Delta W_j = W_T \sum_j \Delta W_j = W_T \cdot W_T = W_T^2$, whose mean is
+$T$, not 0. A knob that knows where the path is going always turns up when the noise is about to go its way, and the
+accumulated noise stops being a fair game. The zero mean, the isometry and the martingale property below all fail.
+
+**The size condition.** The knob must not be too loud on average: $\expect\int_0^T H_t^2\,dt < \infty$. The knob
+$h(t) = t^{-1/4}$ on $[0, 1]$ blows up at $t = 0$ but is allowed, because $\int_0^1 t^{-1/2}\,dt = 2$ is finite. The
+knob $h(t) = t^{-1/2}$ is not, because $\int_0^1 t^{-1}\,dt$ diverges: the noise near time 0 would be infinitely loud.
+Integrands that fail this condition but are finite on every path can still be integrated as local martingales
+<Cite id="karatzas1998" />.
+
 ## The simplest case: a step integrand
 
-Let $H$ be constant on each step, $H_t = h_j$ for $t_j \le t < t_{j+1}$, with $h_j$ fixed numbers. Then
+Let the knob be constant on each step: $H_t = h_j$ for $t_j \le t < t_{j+1}$, with $h_j$ fixed numbers. The integral is
+the finite sum
 
 $$
-\int_0^T H_t\, dW_t = \sum_j h_j\, \Delta W_j \sim \Gauss\paren{0,\ \sum_j h_j^2\, (t_{j+1} - t_j)},
+\int_0^T H_t\, dW_t = \sum_{j=0}^{n-1} h_j\, \Delta W_j, \qquad \Delta W_j = W_{t_{j+1}} - W_{t_j}.
 $$
 
-a sum of independent zero-mean Gaussians. The variance is $\int_0^T H_t^2\,dt$. For example, holding one unit on
-$[0, 1)$ and three units on $[1, 2]$ gives $W_1 + 3(W_2 - W_1) \sim \Gauss(0, 1 + 9) = \Gauss(0, 10)$. A general
-integrand is approximated by step integrands, and the integral is defined as the limit of their integrals. The
-approximation converges in mean square, not path by path; this is the measure theory the definition sweeps aside
+Its distribution follows from four facts, each used once.
+
+1. **Each increment is Gaussian with variance equal to its duration.** By the definition of Brownian motion,
+   $\Delta W_j \sim \Gauss(0,\ t_{j+1} - t_j)$. Over a step of length $0.5$ the kick has variance $0.5$.
+2. **Scaling a Gaussian scales its variance by the square.** If $Z \sim \Gauss(0, \sigma^2)$ and $c$ is a number, then
+   $cZ$ is Gaussian with mean $c \cdot 0 = 0$ and variance $\var(cZ) = \expect[c^2 Z^2] = c^2\sigma^2$. So
+   $h_j\,\Delta W_j \sim \Gauss\paren{0,\ h_j^2\,(t_{j+1} - t_j)}$. The sign of $h_j$ disappears in the square.
+3. **Increments over non-overlapping steps are independent.** This is also part of the definition of Brownian motion.
+   So the terms $h_j\,\Delta W_j$ are independent.
+4. **A sum of independent Gaussians is Gaussian, and the variances add.** For independent $X \sim \Gauss(0, a)$ and
+   $Y \sim \Gauss(0, b)$, the moment generating functions multiply:
+   $\expect[e^{s(X+Y)}] = \expect[e^{sX}]\,\expect[e^{sY}] = e^{as^2/2} e^{bs^2/2} = e^{(a+b)s^2/2}$, which is the moment
+   generating function of $\Gauss(0, a + b)$.
+
+Putting the four facts together,
+
+$$
+\int_0^T H_t\, dW_t = \sum_j h_j\, \Delta W_j \sim \Gauss\paren{0,\ \sum_j h_j^2\,(t_{j+1} - t_j)} =
+\Gauss\paren{0,\ \int_0^T H_t^2\,dt}.
+$$
+
+The last equality holds because $H_t^2$ is the constant $h_j^2$ on each step, so its ordinary integral is the sum of
+height times width. The variance of the accumulated noise is the area under the squared knob setting.
+
+A general integrand is approximated by step integrands, and the integral is defined as the limit of their integrals.
+The approximation converges in mean square, not path by path; this is the measure theory the definition sweeps aside
 <Cite id="oksendal2003" />.
 
-## Worked example: $\int_0^T W\, dW$
+## Worked examples with a knob set in advance
+
+In each example the integrand $h(t)$ is a fixed function of time, not of the path, so the four facts apply and the
+integral is Gaussian with mean 0 and variance $\int_0^T h(t)^2\,dt$.
+
+**1. A constant knob.** Take $h(t) = c$ on $[0, T]$. For any partition, the sum telescopes:
+$\sum_j c\,\Delta W_j = c\,(W_{t_1} - W_{t_0} + W_{t_2} - W_{t_1} + \dots + W_{t_n} - W_{t_{n-1}}) = c\,(W_T - W_0)
+= c\,W_T$. So $\int_0^T c\,dW_t = c\,W_T \sim \Gauss(0, c^2 T)$, and the variance formula agrees:
+$\int_0^T c^2\,dt = c^2 T$. With $c = 3$ and $T = 2$, the accumulated noise is $\Gauss(0, 18)$, with standard
+deviation $\sqrt{18} \approx 4.24$.
+
+**2. One unit, then three.** Take $h = 1$ on $[0, 1)$ and $h = 3$ on $[1, 2]$. The integral is
+$1 \cdot (W_1 - W_0) + 3 \cdot (W_2 - W_1)$. Step by step:
+
+- $W_1 - W_0 = W_1 \sim \Gauss(0, 1)$, a kick over a step of length 1 (fact 1).
+- $W_2 - W_1 \sim \Gauss(0, 1)$, another step of length 1 (fact 1), independent of the first (fact 3).
+- $3(W_2 - W_1) \sim \Gauss(0, 3^2 \times 1) = \Gauss(0, 9)$ (fact 2).
+- The sum is $\Gauss(0, 1 + 9) = \Gauss(0, 10)$ (fact 4).
+
+Check with the formula: $\int_0^2 h(t)^2\,dt = 1^2 \times 1 + 3^2 \times 1 = 10$.
+
+**3. Three settings, one of them negative.** Take $h = 2$ on $[0, 0.5)$, $h = -1$ on $[0.5, 1.5)$ and $h = 0.5$ on
+$[1.5, 2]$.
+
+- Variances of the three pieces: $2^2 \times 0.5 = 2$, then $(-1)^2 \times 1 = 1$, then $0.5^2 \times 0.5 = 0.125$.
+- Total: $\int_0^2 h^2\,dt = 3.125$, so the integral is $\Gauss(0, 3.125)$, with standard deviation $1.768$.
+- On one path, suppose the three increments are $0.4$, $-0.7$ and $0.2$. The integral on that path is
+  $2 \times 0.4 + (-1) \times (-0.7) + 0.5 \times 0.2 = 0.8 + 0.7 + 0.1 = 1.6$. The negative knob turned a downward kick
+  into a positive contribution.
+- The chance that the integral exceeds 3 in size is $2\,\Pr(Z > 3/1.768) = 0.090$.
+
+**4. A knob that turns up steadily: $h(t) = t$ on $[0, 1]$.** This integrand is not a step function, so approximate it
+by one. With $n$ equal steps of width $1/n$, the left-point value on step $j$ is $t_j = j/n$, and the step integral is
+$\sum_j t_j\,\Delta W_j \sim \Gauss\paren{0,\ \sum_j t_j^2 \cdot \tfrac1n}$ by the four facts. The variance is a Riemann
+sum for $\int_0^1 t^2\,dt$:
+
+| steps $n$ | variance $\sum_j t_j^2 / n$ |
+| --- | --- |
+| 4 | $(0 + 0.0625 + 0.25 + 0.5625)/4 = 0.21875$ |
+| 10 | $0.285$ |
+| 100 | $0.32835$ |
+| 1000 | $0.33283$ |
+
+The limit is $\int_0^1 t^2\,dt = 1/3$, so $\int_0^1 t\,dW_t \sim \Gauss(0, 1/3)$. Early kicks are played quietly and late
+kicks loudly, so the total has less variance than $W_1$, whose variance is 1.
+
+**5. The same integral by summation by parts.** For a smooth deterministic knob, the ordinary product rule survives.
+On a partition, $\sum_j t_j\,\Delta W_j = t_n W_{t_n} - t_0 W_{t_0} - \sum_j W_{t_{j+1}}\,(t_{j+1} - t_j)$, which is
+exact algebra: expand both sides and the terms match. Take the four-step path used below,
+$W = (0, 0.3, -0.2, 0.4, 0.6)$ at $t = (0, 0.25, 0.5, 0.75, 1)$.
+
+- Left-point sum: $0 \times 0.3 + 0.25 \times (-0.5) + 0.5 \times 0.6 + 0.75 \times 0.2 = -0.125 + 0.3 + 0.15 = 0.325$.
+- By parts: $1 \times 0.6 - 0 - (0.3 - 0.2 + 0.4 + 0.6) \times 0.25 = 0.6 - 0.275 = 0.325$.
+
+In the limit, $\int_0^T t\,dW_t = T\,W_T - \int_0^T W_t\,dt$, with no correction term. The correction that appears in
+the next section comes from products $\Delta W \cdot \Delta W$; here the products are $\Delta t \cdot \Delta W$, which add
+up to nothing.
+
+**6. A knob that fades: $h(t) = e^{-\theta(T - t)}$.** Kicks from long ago are turned down, recent ones kept almost at
+full volume. The variance is
+
+$$
+\int_0^T e^{-2\theta(T - t)}\,dt = \brack{\frac{e^{-2\theta(T - t)}}{2\theta}}_0^T = \frac{1 - e^{-2\theta T}}{2\theta}.
+$$
+
+With $\theta = 1$ and $T = 1$ this is $(1 - e^{-2})/2 = 0.432$; 20,000 simulated paths give $0.429$. As $T \to \infty$
+the variance settles at $1/(2\theta)$: old noise is forgotten as fast as new noise arrives. This integral is the noise
+term of the <NoteLink to="ornstein-uhlenbeck-process">Ornstein–Uhlenbeck process</NoteLink>, and it is why that
+process has a stationary Gaussian distribution.
+
+<KnobIntegral />
+
+The figure runs every knob above on 4,000 simulated paths. The histograms of the deterministic knobs all match
+$\Gauss\paren{0, \int h^2\,dt}$, whatever the knob's shape. The last knob, the path itself, is the case the next
+section works through.
+
+## Worked example: a knob that follows the path, $\int_0^T W\, dW$
+
+Now let the knob depend on the noise itself: $H_t = W_t$, so the volume at time $t$ is wherever the path has got to.
+Fact 2 no longer applies, because $h_j = W_{t_j}$ is random, and the sum of products of Gaussians is not Gaussian. What
+survives is the left-point rule: $W_{t_j}$ is known before the kick $\Delta W_j$ arrives, so each term still has mean
+zero.
 
 Ordinary calculus suggests $\int_0^T W\,dW = \tfrac12 W_T^2$. The Itô integral gives something else.
 
@@ -78,6 +236,13 @@ $$
 
 The extra $-\tfrac12 T$ has a clear source. At every step the left-point sum misses $\tfrac12(\Delta W_j)^2$, and
 these misses add up to $\tfrac12 T$.
+
+**The result is not Gaussian.** At $T = 1$, $W_1 \sim \Gauss(0, 1)$, so $\int_0^1 W\,dW = \tfrac12(W_1^2 - 1)$ is half of
+a chi-squared variable with one degree of freedom, shifted down by $\tfrac12$. It has mean
+$\tfrac12(\expect[W_1^2] - 1) = \tfrac12(1 - 1) = 0$, as every Itô integral must, but it can never be below $-\tfrac12$,
+and it has a long right tail. The chance that it is below $-0.4$ is
+$\Pr(W_1^2 < 0.2) = 0.345$, while a Gaussian with the same variance $\tfrac12$ puts only $0.286$ there. Mean zero and the
+variance from the isometry hold for every integrand; the Gaussian shape holds only when the knob is set in advance.
 
 **On a path with four steps.** Take $T = 1$, steps of $0.25$, and the path $W = (0, 0.3, -0.2, 0.4, 0.6)$. The
 increments are $(0.3, -0.5, 0.6, 0.2)$.
@@ -171,7 +336,8 @@ The two conventions describe the same process when the drift is adjusted.
 - The integrand is non-anticipating and square-integrable. Without the first, the isometry and zero mean fail. Without
   the second, the integral may exist only as a local martingale <Cite id="karatzas1998" />.
 - Convergence is in mean square over paths. For a single fixed path the sums need not converge, which is why the Itô
-  integral is not a pathwise Riemann–Stieltjes integral.
+  integral is not a pathwise
+  <NoteLink to="riemann-stieltjes-integral">Riemann–Stieltjes integral</NoteLink>.
 
 ## Pitfalls
 
