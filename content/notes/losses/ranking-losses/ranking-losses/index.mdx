@@ -19,7 +19,7 @@ losses score each document separately, **pairwise** losses score pairs of docume
 whole list for a query.
 </Definition>
 
-## The problem with optimising the metric directly
+## NDCG is piecewise constant in the scores
 
 Ranking quality is usually measured by <NoteLink to="normalised-discounted-cumulative-gain">normalised discounted cumulative gain</NoteLink>. With gain
 $g_i = 2^{r_i} - 1$ and rank $\rho_i$ (1 for the top) of document $i$,
@@ -38,7 +38,7 @@ methods cannot optimise it directly. Ranking losses are smooth surrogates for it
 A pointwise loss treats each document as an independent regression or classification example, for example
 $\sum_i (s_i - r_i)^2$. Any regression model can then rank. The loss ignores that only the order within a query
 matters: it spends effort matching absolute label values, penalises a constant shift of all scores in a query, and
-weights every document equally, although errors at the top of the list matter most.
+weights every document equally, although, because of the logarithmic discount, errors at the top of the list change NDCG most.
 
 ## Pairwise losses: RankNet
 
@@ -80,7 +80,9 @@ $$
 The formula follows from the DCG: a swap exchanges the discounts of the two documents and leaves every other term
 unchanged, so the change is (gain difference) × (discount difference). Pairs near the top, and pairs with very different
 relevance, get large gradients. Burges et al. found empirically that training with these gradients improves NDCG
-<Cite id="burges2006" />. **LambdaMART** uses the same lambdas as the pseudo-residuals of
+<Cite id="burges2006" />.
+
+**LambdaMART** uses the same lambdas as the pseudo-residuals of
 <NoteLink to="gradient-boosting">gradient-boosted</NoteLink> regression trees. An ensemble of LambdaMART rankers won
 Track 1 of the 2010 Yahoo! Learning to Rank Challenge <Cite id="burges2010" />.
 
@@ -102,11 +104,12 @@ $$
 $$
 
 Each document is pushed up if the model gives it less top-one probability than the labels do, and down otherwise.
-**ListMLE** instead maximises the likelihood of the correct permutation $\pi$ under the <NoteLink to="plackett-luce-model">Plackett–Luce model</NoteLink>, which picks
-the top document by softmax, removes it and repeats:
-$L = -\sum_{k}\paren{s_{\pi(k)} - \ln\sum_{l \ge k}e^{s_{\pi(l)}}}$ <Cite id="xia2008" />. The InfoNCE loss of
-<NoteLink to="contrastive-learning">contrastive learning</NoteLink> is a listwise softmax loss with one relevant item per
-list.
+
+**ListMLE** maximises the likelihood of the correct permutation $\pi$ under the
+<NoteLink to="plackett-luce-model">Plackett–Luce model</NoteLink>, which picks the top document by softmax, removes it
+and repeats: $L = -\sum_{k}\paren{s_{\pi(k)} - \ln\sum_{l \ge k}e^{s_{\pi(l)}}}$ <Cite id="xia2008" />.
+The InfoNCE loss of <NoteLink to="contrastive-learning">contrastive learning</NoteLink> is a listwise softmax loss with
+one relevant item per list.
 
 ## Worked example
 
