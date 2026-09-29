@@ -3,7 +3,7 @@
  *
  * - `virtual:search` exposes plain-text note bodies for full-text search. It is loaded in the background the first
  *   time the search palette opens; the palette answers from note metadata until it is ready.
- * - `virtual:content` exposes note metadata, references and the taxonomy. It is small and loaded eagerly.
+ * - `virtual:content` exposes note metadata, references, the glossary and the taxonomy. It is loaded eagerly.
  *
  * Frontmatter, taxonomy and references are validated here with zod. Any broken slug, citation key or category fails
  * the build with a message that names the file.
@@ -22,11 +22,13 @@ import {
   slug,
   type CategoryInput,
   type CategoryNode,
+  type GlossaryEntry,
   type NoteMeta,
   type TopicGroup,
 } from '../site/src/lib/content-schema.ts'
 import { macroExample, macroGroups, macros } from '../content/macros.ts'
 import { plainMath } from '../site/src/lib/math-text.ts'
+import { loadGlossary, type Glossary } from './glossary.ts'
 
 const CONTENT_ID = 'virtual:content'
 const SEARCH_ID = 'virtual:search'
@@ -84,11 +86,15 @@ function attributeValues(body: string, component: string, attribute: string): st
   return [...body.matchAll(pattern)].flatMap((m) => m[1].split(',').map((s) => s.trim()))
 }
 
-/** Rough MDX → plain text for search. Keeps prose, drops code, JSX and import/export lines. */
-function plainText(body: string): string {
+/**
+ * Rough MDX → plain text for search. Keeps prose, drops code, JSX and import/export lines. A self-closing <Gloss> is
+ * replaced by its entry's short and long forms, so the words it renders are searchable.
+ */
+function plainText(body: string, gloss: (name: string) => string | undefined): string {
   return body
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/^(import|export)\s.*$/gm, ' ')
+    .replace(/<Gloss\b[^>]*?\bname=["']([^"']+)["'][^>]*?\/>/g, (_, name: string) => ` ${gloss(name) ?? ''} `)
     .replace(/<[^>]+>/g, ' ')
     .replace(/\$\$[\s\S]*?\$\$/g, ' ')
     .replace(/[#*_`>[\]()|{}]/g, ' ')
@@ -148,6 +154,48 @@ function formatIssues(file: string, error: z.ZodError): string {
  * Build and validate the index. Strict (build, CI, `make check`) throws on any error. Lenient (the dev server) keeps
  * going: it drops whatever is broken, so the rest of the site renders, and returns the errors for the in-app banner.
  */
+/** Site totals, computed once at build time for the search palette's empty state. */
+function contentStats(
+  notes: NoteMeta[],
+  references: Record<string, unknown>,
+  glossary: Record<string, unknown>,
+  taxonomy: CategoryNode[],
+) {
+  const countCategories = (nodes: CategoryNode[]): number =>
+    nodes.reduce((sum, n) => sum + 1 + countCategories(n.children), 0)
+  return {
+    notes: notes.length,
+    topics: taxonomy.length,
+    categories: countCategories(taxonomy),
+    glossary: Object.keys(glossary).length,
+    references: Object.keys(references).length,
+    tags: new Set(notes.flatMap((n) => n.tags)).size,
+    runnable: notes.filter((n) => n.code).length,
+    workedExamples: notes.filter((n) => n.tags.includes('worked-example')).length,
+  }
+}
+
+/** A name as a slug: lowercase, apostrophes dropped, runs of other characters as one hyphen. */
+function nameSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/['’]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
+/**
+ * Notes whose slug or title is one of the entry's names (key, long form, aliases, and its short form when no other entry
+ * shares it), ignoring a trailing plural "s". Only exact names count: a note that merely lists the term in its aliases
+ * is not about it.
+ */
+function glossNoteMatches(e: GlossaryEntry, notesByName: Map<string, string[]>, glossary: Glossary): string[] {
+  const sharedShort = e.short && Object.values(glossary.entries).some((o) => o.key !== e.key && o.short === e.short)
+  const names = [e.key, e.long, ...e.aliases, ...(e.short && !sharedShort ? [e.short] : [])].map(nameSlug)
+  const forms = new Set(names.flatMap((n) => [n, n.replace(/s$/, ''), `${n}s`]))
+  return [...new Set([...forms].flatMap((n) => notesByName.get(n) ?? []))]
+}
+
 export function buildIndex(
   contentDir: string,
   {
@@ -195,6 +243,14 @@ export function buildIndex(
     .safeParse(YAML.parse(fs.readFileSync(referencesFile, 'utf8')))
   if (!referencesParsed.success) throw new Error(formatIssues('content/references.yaml', referencesParsed.error))
   const references = referencesParsed.data
+
+  // Parsed once and cached; the MDX first-use pass (plugins/rehype-gloss.ts) reads the same cache.
+  const glossary = loadGlossary(path.join(contentDir, 'glossary.yaml'))
+  errors.push(...glossary.errors)
+  const glossWords = (name: string) => {
+    const e = glossary.entries[glossary.names.get(name) ?? '']
+    return e && [e.short, e.long].filter(Boolean).join(' ')
+  }
 
   const notesDir = path.join(contentDir, 'notes')
   const notes: NoteMeta[] = []
@@ -244,7 +300,10 @@ export function buildIndex(
     }
     const readLength = plainMath(parsed.data.summary).trim().length
     if (readLength > 280) errors.push(`content/${file}: summary is ${readLength} characters as read; the limit is 280`)
-    const text = plainText(body)
+    const text = plainText(body, glossWords)
+    const glossNames = attributeValues(body, 'Gloss', 'name')
+    for (const name of glossNames.filter((n) => !glossary.names.has(n)))
+      errors.push(`content/${file}: unknown glossary name "${name}" in <Gloss> (see glossary.yaml)`)
     notes.push({
       ...parsed.data,
       category: resolvedCategory,
@@ -253,6 +312,7 @@ export function buildIndex(
       headings: extractHeadings(body),
       cited: [...new Set(attributeValues(body, 'Cite', 'id'))],
       linked: [...new Set(attributeValues(body, 'NoteLink', 'to'))],
+      glossed: [...new Set(glossNames.flatMap((n) => glossary.names.get(n) ?? []))],
       wordCount: text.split(' ').length,
     })
     bodies[noteSlug] = text
@@ -300,6 +360,28 @@ export function buildIndex(
     })
   checkIndex(taxonomy)
 
+  // Glossary entries point at real notes and categories, and every string that can hold maths renders.
+  const notesByName = new Map<string, string[]>()
+  for (const n of notes)
+    for (const name of new Set([n.slug, nameSlug(n.title)]))
+      notesByName.set(name, [...(notesByName.get(name) ?? []), n.slug])
+  for (const e of Object.values(glossary.entries)) {
+    const where = `content/glossary.yaml: ${e.key}`
+    if (e.note && !slugs.has(e.note)) errors.push(`${where}: note → unknown note "${e.note}"`)
+    for (const s of e.see.filter((s) => !slugs.has(s))) errors.push(`${where}: see → unknown note "${s}"`)
+    if (e.note && e.see.includes(e.note)) errors.push(`${where}: "${e.note}" is both note and see`)
+    // A note whose slug or title names the entry is the entry's note: the mapping is declared, never left implicit.
+    const direct = glossNoteMatches(e, notesByName, glossary)
+    for (const s of direct.filter((s) => s !== e.note))
+      errors.push(`${where}: note "${s}" is titled by this entry; set note: ${s}${e.note ? ` (now ${e.note})` : ''}`)
+    for (const c of e.category) if (!categoryPaths.has(c)) errors.push(`${where}: unknown category "${c}"`)
+    for (const text of [e.definition, e.short, e.long, e.longPlural]) {
+      if (text) errors.push(...mathErrors(text).map((m) => `${where}: ${m}`))
+    }
+    const readLength = plainMath(e.definition).trim().length
+    if (readLength > 400) errors.push(`${where}: definition is ${readLength} characters as read; the limit is 400`)
+  }
+
   if (errors.length && strict) throw new Error(`Content validation failed:\n${errors.join('\n')}`)
 
   // Lenient: remove dangling references so components never look up something that does not exist.
@@ -314,7 +396,26 @@ export function buildIndex(
     cited: n.cited.filter((k) => k in references),
     references: n.references.filter((k) => k in references),
   }))
-  return { notes: safe, references, taxonomy, groups, bodies, folders: found.folders, errors }
+  const glossaryEntries = Object.fromEntries(
+    Object.entries(glossary.entries).map(([key, e]) => [
+      key,
+      {
+        ...e,
+        note: e.note && validSlugs.has(e.note) ? e.note : undefined,
+        see: e.see.filter((s) => validSlugs.has(s)),
+      },
+    ]),
+  )
+  return {
+    notes: safe,
+    references,
+    glossary: glossaryEntries,
+    taxonomy,
+    groups,
+    bodies,
+    folders: found.folders,
+    errors,
+  }
 }
 
 export function contentIndex({ contentDir }: { contentDir: string }): Plugin {
@@ -344,14 +445,18 @@ export function contentIndex({ contentDir }: { contentDir: string }): Plugin {
     load(id) {
       if (id !== resolved(CONTENT_ID) && id !== resolved(SEARCH_ID)) return
       // The dev server stays up on content errors and lists them in the page; builds stay strict.
-      const { notes, references, taxonomy, groups, bodies, errors } = buildIndex(contentDir, { strict: !server })
+      const { notes, references, glossary, taxonomy, groups, bodies, errors } = buildIndex(contentDir, {
+        strict: !server,
+      })
       if (id === resolved(SEARCH_ID)) return `export default ${JSON.stringify(bodies)}`
       return [
         `export const notes = ${JSON.stringify(notes)}`,
         `export const references = ${JSON.stringify(references)}`,
+        `export const glossary = ${JSON.stringify(glossary)}`,
         `export const taxonomy = ${JSON.stringify(taxonomy)}`,
         `export const groups = ${JSON.stringify(groups)}`,
         `export const contentErrors = ${JSON.stringify(errors)}`,
+        `export const stats = ${JSON.stringify(contentStats(notes, references, glossary, taxonomy))}`,
       ].join('\n')
     },
   }

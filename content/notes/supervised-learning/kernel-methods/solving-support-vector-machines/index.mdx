@@ -1,0 +1,454 @@
+---
+title: Solving a support vector machine by hand
+kind: example
+summary: A six-point soft-margin SVM with $C = 1/2$, solved exactly twice. As a quadratic programme, a guess of which $\alpha_i$ are $0$, free or $C$ turns the KKT conditions into linear equations. SMO reaches the same $\alpha$ in four pair updates. Each slack is then $\xi_i = \max(0, 1 - y_i f(\xvec_i))$.
+tags: [classification, max-margin, convex-optimisation, constrained-optimisation, worked-example]
+aliases: [SMO worked example, sequential minimal optimisation, sequential minimal optimization, SMO, SVM slack variables, solving the SVM dual, maximal violating pair]
+requires: [support-vector-machine]
+related: [quadratic-programming, karush-kuhn-tucker-conditions, lagrange-multipliers, lagrangian-duality, coordinate-descent]
+code: svm-solvers
+references: [flach2012, cortes1995, platt1998, keerthi2001, fan2005, chang2011, nocedal2006]
+status: draft
+updated: 2026-09-29
+---
+
+import { ActiveSetGuess } from './ActiveSetGuess'
+import { DataScatter } from './DataScatter'
+import { SlackExplorer } from './SlackExplorer'
+import { SmoStepper } from './SmoStepper'
+
+_I found the hand-worked examples in Peter Flach's_ Machine Learning _instructive <Cite id="flach2012" />, and wrote
+this one in the same spirit._
+
+<Definition>
+Six points in $\reals^2$ carry labels $y_i \in \set{-1, +1}$:
+
+<div className="grid items-center gap-6 md:grid-cols-2">
+<div>
+
+| point | $\xvec_i$ | $y_i$ |
+| --- | --- | --- |
+| $\xvec_1$ | $(1, 1)$ | $-1$ |
+| $\xvec_2$ | $(2, 1)$ | $-1$ |
+| $\xvec_3$ | $(1, 2)$ | $-1$ |
+| $\xvec_4$ | $(2, 2)$ | $+1$ |
+| $\xvec_5$ | $(4, 3)$ | $+1$ |
+| $\xvec_6$ | $(4, 1)$ | $+1$ |
+
+</div>
+<DataScatter />
+</div>
+
+Fit the linear soft-margin support vector machine with $C = 1/2$:
+
+$$
+\min_{\wvec, b, \xivec}\ \frac12\norm{\wvec}^2 + C\sum_{i=1}^{6}\xi_i \quad \text{subject to} \quad
+y_i(\wvec^\top\xvec_i + b) \ge 1 - \xi_i,\ \ \xi_i \ge 0 .
+$$
+
+Find the multipliers $\alpha_i$, the weight vector $\wvec$, the bias $b$ and every slack $\xi_i$, first by solving the
+dual as a quadratic programme and then by sequential minimal optimisation (SMO) <Cite id="platt1998" />.
+</Definition>
+
+## Setup
+
+### Symbols
+
+The decision function is $f(\xvec) = \wvec^\top\xvec + b$. The classifier predicts $\sgn f(\xvec)$. The quantity
+$y_i f(\xvec_i)$ is the functional margin of point $i$. It is positive when point $i$ is classified correctly and at
+least 1 when point $i$ lies on or beyond its margin line. The two margin lines are $f(\xvec) = +1$ and $f(\xvec) = -1$.
+They lie at distance $1/\norm{\wvec}$ on either side of the boundary $f(\xvec) = 0$.
+
+The slack $\xi_i \ge 0$ is how far point $i$ falls short of functional margin 1. The price of one unit of slack is
+$C > 0$. The dual variable $\alpha_i \in [0, C]$ is the Lagrange multiplier of the margin constraint of point $i$. The
+error $E_i = f(\xvec_i) - y_i$ is the gap between the decision value and the label; SMO works with it.
+
+### What $\xi_i$, $\alpha_i$ and $C$ mean
+
+**Slack.** The functional margin $y_i f(\xvec_i)$ puts every point in one of four positions:
+
+| $y_i f(\xvec_i)$ | $\xi_i$ | position |
+| --- | --- | --- |
+| $> 1$ | $0$ | beyond its margin line, on the correct side |
+| $= 1$ | $0$ | exactly on its margin line |
+| between $0$ and $1$ | between $0$ and $1$ | inside the margin band, still on the correct side |
+| $< 0$ | $> 1$ | on the wrong side of the boundary: misclassified |
+
+A point exactly on the boundary has $\xi_i = 1$. Moving point $i$ a distance $\xi_i/\norm{\wvec}$ along the normal
+$y_i\wvec$ puts it on its own margin line, so $\xi_i$ is the distance to that line measured in units of the half-width
+$1/\norm{\wvec}$.
+
+**Multipliers.** The optimal weight vector is $\wvec = \sum_i\alpha_i y_i\xvec_i$ (derived in the
+<NoteLink to="support-vector-machine">support vector machine</NoteLink> note). Each point pulls $\wvec$ towards
+$y_i\xvec_i$ with weight $\alpha_i$. A point with $\alpha_i = 0$ has no influence. The constraint
+$\sum_i\alpha_i y_i = 0$ balances the total weight of the two classes.
+
+**The price $C$.** The upper bound $\alpha_i \le C$ caps the influence of any one point. A point that would need more
+than $C$ to stay on its margin line is allowed into the band instead, and its slack is paid for at rate $C$. A small
+$C$ makes slack cheap: the margin widens and more points sit at $\alpha_i = C$. A large $C$ makes slack expensive: the
+margin narrows until, on separable data, every $\xi_i = 0$.
+
+### Three kinds of point
+
+Complementary slackness ties $\alpha_i$ to the position of point $i$. The multiplier of $\xi_i \ge 0$ is
+$\mu_i = C - \alpha_i$, and at the optimum $\mu_i\xi_i = 0$ and $\alpha_i\brack{y_i f(\xvec_i) - 1 + \xi_i} = 0$
+<Cite id="cortes1995" />. Three cases follow.
+
+| $\alpha_i$ | forced by complementary slackness | position |
+| --- | --- | --- |
+| $0$ | $\mu_i = C > 0$, so $\xi_i = 0$ and $y_i f(\xvec_i) \ge 1$ | on or beyond the margin line |
+| $0 < \alpha_i < C$ | $\mu_i > 0$ so $\xi_i = 0$; $\alpha_i > 0$ so $y_i f(\xvec_i) = 1 - \xi_i = 1$ | exactly on the margin line |
+| $C$ | $\alpha_i > 0$, so $\xi_i = 1 - y_i f(\xvec_i) \ge 0$ | inside the band or misclassified |
+
+A multiplier strictly between $0$ and $C$ is called **free**. A free point pins the boundary: its equation
+$y_i f(\xvec_i) = 1$ fixes $b$.
+
+### The slack is not a free variable
+
+For fixed $\wvec$ and $b$, the slack $\xi_i$ appears in the objective as $C\xi_i$ and in two constraints,
+$\xi_i \ge 1 - y_i f(\xvec_i)$ and $\xi_i \ge 0$. The objective increases with $\xi_i$, so the optimal slack is the
+smallest value that satisfies both constraints:
+
+$$
+\xi_i = \max\paren{0,\ 1 - y_i f(\xvec_i)}.
+$$
+
+Both solvers below therefore compute $\wvec$ and $b$ first and read the slacks off afterwards. The dual has no slack
+variables at all. In terms of the error, $1 - y_i f(\xvec_i) = -y_i(f(\xvec_i) - y_i) = -y_i E_i$, so
+$\xi_i = \max(0, -y_i E_i)$.
+
+### The problem in numbers
+
+The linear kernel is the Gram matrix $K_{ij} = \xvec_i^\top\xvec_j$. The dual uses $Q_{ij} = y_i y_j K_{ij}$:
+
+$$
+\Kmat = \begin{pmatrix}
+2 & 3 & 3 & 4 & 7 & 5 \\
+3 & 5 & 4 & 6 & 11 & 9 \\
+3 & 4 & 5 & 6 & 10 & 6 \\
+4 & 6 & 6 & 8 & 14 & 10 \\
+7 & 11 & 10 & 14 & 25 & 19 \\
+5 & 9 & 6 & 10 & 19 & 17
+\end{pmatrix}, \qquad
+\Qmat = \begin{pmatrix}
+2 & 3 & 3 & -4 & -7 & -5 \\
+3 & 5 & 4 & -6 & -11 & -9 \\
+3 & 4 & 5 & -6 & -10 & -6 \\
+-4 & -6 & -6 & 8 & 14 & 10 \\
+-7 & -11 & -10 & 14 & 25 & 19 \\
+-5 & -9 & -6 & 10 & 19 & 17
+\end{pmatrix}.
+$$
+
+The dual problem is a quadratic programme in six variables:
+
+$$
+\max_{\alphavec}\ D(\alphavec) = \sum_{i=1}^{6}\alpha_i - \frac12\alphavec^\top\Qmat\alphavec
+\quad \text{subject to} \quad 0 \le \alpha_i \le \tfrac12,
+\ \ -\alpha_1 - \alpha_2 - \alpha_3 + \alpha_4 + \alpha_5 + \alpha_6 = 0 .
+$$
+
+The term $\alphavec^\top\Qmat\alphavec$ equals $\norm{\wvec}^2$ for $\wvec = \sum_i\alpha_i y_i\xvec_i$, so
+$D(\alphavec) = \sum_i\alpha_i - \frac12\norm{\wvec}^2$.
+
+## Solution 1: quadratic programming by active sets
+
+The dual is a convex <NoteLink to="quadratic-programming">quadratic programme</NoteLink>. Its difficulty is the box
+$0 \le \alpha_i \le C$: nobody knows in advance which bounds are active. An active-set method guesses them
+<Cite id="nocedal2006" />. For the SVM a guess assigns every point one of three statuses: $\alpha_i = 0$, free, or
+$\alpha_i = C$. With the guess fixed, the <NoteLink to="karush-kuhn-tucker-conditions">KKT conditions</NoteLink> that
+remain are linear equations.
+
+### Step 1: guess the active set
+
+Sketch the points. Class $-1$ sits in the lower-left corner at $(1, 1)$, $(2, 1)$ and $(1, 2)$. Class $+1$ has two
+points far to the right, $(4, 3)$ and $(4, 1)$, and one point, $\xvec_4 = (2, 2)$, pressed against the class $-1$
+corner. The guess:
+
+- $\xvec_4$ is too close to class $-1$ to be separated cheaply, so it is inside the band or misclassified:
+  $\alpha_4 = C$.
+- $\xvec_2 = (2, 1)$ is the class $-1$ point nearest $\xvec_4$, so it is inside the band too: $\alpha_2 = C$.
+- $\xvec_3 = (1, 2)$ and $\xvec_6 = (4, 1)$ hold the margin lines: they are free.
+- $\xvec_1 = (1, 1)$ and $\xvec_5 = (4, 3)$ are far from the boundary: $\alpha_1 = \alpha_5 = 0$.
+
+### Step 2: solve the linear KKT equations
+
+The guess fixes $\alpha_1 = \alpha_5 = 0$ and $\alpha_2 = \alpha_4 = \frac12$. The unknowns are $\alpha_3$, $\alpha_6$
+and $b$. There are three equations: the equality constraint and $y_i f(\xvec_i) = 1$ for each free point.
+
+The equality constraint is $-\frac12 - \alpha_3 + \frac12 + \alpha_6 = 0$, so $\alpha_3 = \alpha_6$. Call the common
+value $a$. The weight vector is then
+
+$$
+\wvec = \sum_i\alpha_i y_i\xvec_i = -\tfrac12(2, 1) - a(1, 2) + \tfrac12(2, 2) + a(4, 1) = (0, \tfrac12) + a(3, -1).
+$$
+
+The free points satisfy $f(\xvec_3) = -1$ and $f(\xvec_6) = +1$:
+
+$$
+\wvec^\top\xvec_3 + b = (1 + a) + b = -1, \qquad \wvec^\top\xvec_6 + b = (\tfrac12 + 11a) + b = 1 .
+$$
+
+Subtracting the first equation from the second removes $b$: $10a - \frac12 = 2$, so $a = \frac14$. Then
+$b = -2 - a = -\frac94$ and $\wvec = (0, \frac12) + \frac14(3, -1) = (\frac34, \frac14)$.
+
+### Step 3: check the conditions the guess did not impose
+
+The equations imposed $y_i f(\xvec_i) = 1$ at the free points and $\sum_i\alpha_i y_i = 0$. The remaining KKT conditions
+are inequalities. With $f(\xvec) = \frac14(3x_1 + x_2 - 9)$:
+
+| point | status | $\alpha_i$ | $f(\xvec_i)$ | $y_i f(\xvec_i)$ | condition | holds |
+| --- | --- | --- | --- | --- | --- | --- |
+| $\xvec_1$ | $0$ | $0$ | $-5/4$ | $5/4$ | $y_i f \ge 1$ | yes |
+| $\xvec_2$ | $C$ | $1/2$ | $-1/2$ | $1/2$ | $y_i f \le 1$ | yes |
+| $\xvec_3$ | free | $1/4$ | $-1$ | $1$ | $0 < \alpha_i < C$ | yes |
+| $\xvec_4$ | $C$ | $1/2$ | $-1/4$ | $-1/4$ | $y_i f \le 1$ | yes |
+| $\xvec_5$ | $0$ | $0$ | $3/2$ | $3/2$ | $y_i f \ge 1$ | yes |
+| $\xvec_6$ | free | $1/4$ | $1$ | $1$ | $0 < \alpha_i < C$ | yes |
+
+Every KKT condition holds. The dual is convex, so the KKT conditions are sufficient and
+$\alphavec = (0, \frac12, \frac14, \frac12, 0, \frac14)$ is the optimum.
+
+### Step 4: read off the slacks
+
+$\xi_i = \max(0, 1 - y_i f(\xvec_i))$ from the column $y_i f(\xvec_i)$ above:
+
+| point | $y_i f(\xvec_i)$ | $\xi_i$ | position |
+| --- | --- | --- | --- |
+| $\xvec_1$ | $5/4$ | $0$ | beyond the margin line |
+| $\xvec_2$ | $1/2$ | $1/2$ | inside the band, correct side, halfway from its margin line to the boundary |
+| $\xvec_3$ | $1$ | $0$ | on the margin line $f = -1$ |
+| $\xvec_4$ | $-1/4$ | $5/4$ | misclassified, at $f = -1/4$ just past the boundary |
+| $\xvec_5$ | $3/2$ | $0$ | beyond the margin line |
+| $\xvec_6$ | $1$ | $0$ | on the margin line $f = +1$ |
+
+The total slack is $\sum_i\xi_i = \frac74$. The margin half-width is $1/\norm{\wvec} = 1/\sqrt{5/8} \approx 1.265$, so
+the geometric distances to the margin lines are $\xi_2/\norm{\wvec} \approx 0.632$ and
+$\xi_4/\norm{\wvec} \approx 1.581$.
+
+The primal objective is
+$\frac12\norm{\wvec}^2 + C\sum_i\xi_i = \frac12 \cdot \frac58 + \frac12 \cdot \frac74 = \frac{19}{16}$. The dual
+objective is $\sum_i\alpha_i - \frac12\norm{\wvec}^2 = \frac32 - \frac{5}{16} = \frac{19}{16}$. The two agree, which
+certifies optimality independently of the KKT check.
+
+### Where a QP solver returns the slacks
+
+A general QP solver given the dual never sees $\xivec$. It returns the slacks anyway, as the multipliers of the upper
+bounds $\alpha_i \le C$. Write the dual as the minimisation of
+$\frac12\alphavec^\top\Qmat\alphavec - \ones^\top\alphavec$ with multipliers $\nu_i \ge 0$ for $-\alpha_i \le 0$,
+$\lambda_i \ge 0$ for $\alpha_i - C \le 0$ and $\beta$ for $\yvec^\top\alphavec = 0$. Stationarity in $\alpha_i$ reads
+
+$$
+(\Qmat\alphavec)_i - 1 - \nu_i + \lambda_i + \beta y_i = 0 .
+$$
+
+Here $(\Qmat\alphavec)_i = y_i\sum_j\alpha_j y_j K_{ij} = y_i(f(\xvec_i) - b)$. At a free point both bound multipliers
+vanish, and stationarity reads $y_i f(\xvec_i) - 1 + y_i(\beta - b) = 0$. A free point has $y_i f(\xvec_i) = 1$, so
+$\beta = b$. With $\beta = b$ and $y_i^2 = 1$, stationarity at every point becomes
+$\lambda_i - \nu_i = 1 - y_i f(\xvec_i)$. At $\alpha_i = C$ the lower bound is inactive, so $\nu_i = 0$ and
+$\lambda_i = 1 - y_i f(\xvec_i) = \xi_i$. At $\alpha_i < C$ the upper bound is inactive and $\lambda_i = 0 = \xi_i$. The
+multiplier of the equality constraint is the bias $b$, and the multiplier of each upper bound is the slack $\xi_i$. Here
+$\lambda_2 = \frac12$ and $\lambda_4 = \frac54$. This is
+<NoteLink to="lagrangian-duality">Lagrangian duality</NoteLink> at work: the dual of the dual is the primal, whose
+variables $b$ and $\xivec$ return as multipliers.
+
+### A wrong guess
+
+Suppose $\xvec_2$ is guessed to be free, on the margin line, rather than at $C$. The unknowns are now $\alpha_2$,
+$\alpha_3$, $\alpha_6$ and $b$. The equations $f(\xvec_2) = f(\xvec_3) = -1$ force $\wvec^\top(\xvec_2 - \xvec_3) = 0$,
+so $\wvec$ is perpendicular to $(1, -1)$ and $w_1 = w_2$. Together with $f(\xvec_6) = 1$ and the equality constraint,
+the solution is
+
+$$
+\alpha_2 = \tfrac74, \quad \alpha_3 = -\tfrac12, \quad \alpha_6 = \tfrac34, \quad \wvec = (1, 1), \quad b = -4 .
+$$
+
+Three conditions fail. $\alpha_2 = \frac74 > C$: keeping $\xvec_2$ on the margin line would take more than the
+permitted weight $C$. $\alpha_6 = \frac34 > C$ fails for the same reason. $\alpha_3 = -\frac12 < 0$: a negative
+multiplier means $\xvec_3$ would have to push the boundary away rather than hold it. Each violated inequality points to
+its repair. Moving the largest violator, $\xvec_2$, to $\alpha_2 = C$ gives the right guess above, and every condition
+then holds. A full active-set method makes such changes one at a time and re-solves after each
+<Cite id="nocedal2006" />. With six points there are $3^6 = 729$ possible guesses. The Python code for this note tries
+them in order and stops at the first that satisfies every KKT condition.
+
+<ActiveSetGuess />
+
+## Solution 2: sequential minimal optimisation
+
+SMO solves the dual without a QP solver. It changes two multipliers at a time and solves each two-variable problem in
+closed form <Cite id="platt1998" />.
+
+### Why two at a time
+
+The equality constraint $\sum_i\alpha_i y_i = 0$ forbids changing one multiplier alone. Changing a pair $(i, j)$ keeps
+the constraint when $y_i\,\Delta\alpha_i + y_j\,\Delta\alpha_j = 0$. Write the move as
+
+$$
+\alpha_i \leftarrow \alpha_i + y_i s, \qquad \alpha_j \leftarrow \alpha_j - y_j s
+$$
+
+for a step length $s$. The pair moves along a line in the $(\alpha_i, \alpha_j)$ plane. The box $[0, C]^2$ cuts that
+line to a segment.
+
+### The objective along the line
+
+The move changes the weight vector by $\Delta\wvec = y_i(y_i s)\xvec_i - y_j(y_j s)\xvec_j = s(\xvec_i - \xvec_j)$ and
+the sum of multipliers by $s(y_i - y_j)$. With $D = \sum_t\alpha_t - \frac12\norm{\wvec}^2$,
+
+$$
+D(s) = D(0) + s\brack{(y_i - y_j) - \wvec^\top(\xvec_i - \xvec_j)} - \frac{s^2}{2}\norm{\xvec_i - \xvec_j}^2 .
+$$
+
+The bracket equals $(\wvec^\top\xvec_j + b - y_j) - (\wvec^\top\xvec_i + b - y_i) = E_j - E_i$, since $b$ cancels. With
+$\eta = \norm{\xvec_i - \xvec_j}^2 = K_{ii} + K_{jj} - 2K_{ij}$,
+
+$$
+D(s) = D(0) + s(E_j - E_i) - \frac{\eta}{2}s^2 .
+$$
+
+The objective along the line is a downward parabola. Its maximum is at $s^\star = (E_j - E_i)/\eta$, which gives
+Platt's update for the second multiplier:
+
+$$
+\alpha_j^{\text{new, unclipped}} = \alpha_j - y_j s^\star = \alpha_j + \frac{y_j(E_i - E_j)}{\eta} .
+$$
+
+### Clipping to the box
+
+Both multipliers must stay in $[0, C]$. When $y_i \ne y_j$, the move keeps $\alpha_i - \alpha_j$ fixed. When
+$y_i = y_j$, it keeps $\alpha_i + \alpha_j$ fixed. Requiring $0 \le \alpha_i \le C$ and $0 \le \alpha_j \le C$ on the
+line gives the range $[L, H]$ for $\alpha_j$:
+
+$$
+y_i \ne y_j:\ L = \max(0, \alpha_j - \alpha_i),\ H = \min(C, C + \alpha_j - \alpha_i); \qquad
+y_i = y_j:\ L = \max(0, \alpha_i + \alpha_j - C),\ H = \min(C, \alpha_i + \alpha_j).
+$$
+
+The parabola is concave, so its maximum over $[L, H]$ is the unclipped value clipped to the interval:
+$\alpha_j^{\text{new}} = \min(\max(\alpha_j^{\text{new, unclipped}}, L), H)$. The first multiplier follows from the
+line, $\alpha_i^{\text{new}} = \alpha_i + y_i y_j(\alpha_j - \alpha_j^{\text{new}})$.
+
+### Which pair
+
+A step with $s > 0$ raises $D$ at rate $E_j - E_i$. It is possible only if $\alpha_i$ can move in the direction $y_i$
+and $\alpha_j$ in the direction $-y_j$. Define the two index sets
+
+$$
+I_{\text{up}} = \set{t : y_t = +1, \alpha_t < C} \cup \set{t : y_t = -1, \alpha_t > 0}, \qquad
+I_{\text{low}} = \set{t : y_t = +1, \alpha_t > 0} \cup \set{t : y_t = -1, \alpha_t < C}.
+$$
+
+The pair must have $i \in I_{\text{up}}$ and $j \in I_{\text{low}}$. This note uses the **maximal violating pair**: $i$
+minimises $E_t$ over $I_{\text{up}}$ and $j$ maximises $E_t$ over $I_{\text{low}}$, with ties broken by the lower index
+<Cite id="keerthi2001" />. SMO stops when $\max_{I_{\text{low}}}E_t \le \min_{I_{\text{up}}}E_t$. Then no pair can
+raise $D$, and this condition is equivalent to the KKT conditions of the dual. Platt's original heuristic chooses the
+first multiplier among KKT violators and the second to maximise $\abs{E_i - E_j}$ <Cite id="platt1998" />. LIBSVM
+chooses $j$ using the curvature $\eta$ as well <Cite id="fan2005" /> <Cite id="chang2011" />.
+
+### The bias
+
+The differences $E_j - E_i$ do not depend on $b$, so the sequence of multipliers does not either. SMO still updates $b$
+after each step, so that the errors $E_t$ and the slacks $\max(0, -y_t E_t)$ are meaningful along the way. Platt's rule
+chooses $b$ so that $f$ is exact on a free member of the pair. After the step, $f(\xvec_i)$ has changed by
+$y_i\Delta\alpha_i K_{ii} + y_j\Delta\alpha_j K_{ij}$ plus the change in $b$. Setting the new $f(\xvec_i)$ equal to
+$y_i$ gives
+
+$$
+b_1 = b - E_i - y_i\Delta\alpha_i K_{ii} - y_j\Delta\alpha_j K_{ij}, \qquad
+b_2 = b - E_j - y_i\Delta\alpha_i K_{ij} - y_j\Delta\alpha_j K_{jj},
+$$
+
+with $b_2$ from the same argument at $\xvec_j$. The new bias is $b_1$ if $\alpha_i$ is free, else $b_2$ if $\alpha_j$ is
+free, else $(b_1 + b_2)/2$.
+
+### The run
+
+Start from $\alphavec = \zeros$ and $b = 0$, so every $f(\xvec_t) = 0$ and $E_t = -y_t$. The four steps are below. The
+column $E$ lists $E_1, \dots, E_6$ before the step, and $D$ is the dual objective after it.
+
+| step | pair $(i, j)$ | $E$ before | $E_j - E_i$ | $\eta$ | unclipped $\alpha_j$ | $[L, H]$ | $\alpha_j, \alpha_i$ after | $b$ | $D$ |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | $(4, 1)$ | $1, 1, 1, -1, -1, -1$ | $2$ | $2$ | $1$ | $[0, \frac12]$ | $\frac12, \frac12$ | $-\frac32$ | $\frac34$ |
+| 2 | $(6, 2)$ | $\frac12, 1, 1, -\frac12, 1, 0$ | $1$ | $4$ | $\frac14$ | $[0, \frac12]$ | $\frac14, \frac14$ | $-\frac72$ | $\frac78$ |
+| 3 | $(1, 2)$ | $-1, 0, -\frac12, -\frac32, 1, 0$ | $1$ | $1$ | $\frac54$ | $[\frac14, \frac12]$ | $\frac12, \frac14$ | $-\frac94$ | $\frac{35}{32}$ |
+| 4 | $(1, 3)$ | $0, \frac34, \frac12, -\frac34, \frac54, \frac14$ | $\frac12$ | $1$ | $\frac12$ | $[0, \frac14]$ | $\frac14, 0$ | $-\frac94$ | $\frac{19}{16}$ |
+
+**Step 1.** All class $+1$ points tie at $E = -1$ and all class $-1$ points at $E = +1$. The lowest indices give
+$i = 4$ and $j = 1$. Then $\eta = \norm{(2, 2) - (1, 1)}^2 = 2$ and the unclipped
+$\alpha_1 = 0 + (-1)(-1 - 1)/2 = 1$. The labels differ, so $[L, H] = [0, \frac12]$ and $\alpha_1$ clips to
+$\frac12$. The line gives $\alpha_4 = \frac12$. Both multipliers sit at $C$, so $b$ is the average of
+$b_1 = -1$ and $b_2 = -2$. Now $\wvec = (\frac12, \frac12)$.
+
+**Step 2.** $I_{\text{up}} = \set{1, 5, 6}$ has smallest error $E_6 = 0$. $I_{\text{low}} = \set{2, 3, 4}$ has largest
+error $E_2 = E_3 = 1$, and the tie goes to $j = 2$. Then $\eta = \norm{(4, 1) - (2, 1)}^2 = 4$ and the unclipped
+$\alpha_2 = 0 + (-1)(0 - 1)/4 = \frac14$ lies inside $[0, \frac12]$, so no clipping happens. Both new multipliers are
+free. Now $\wvec = (1, \frac12)$.
+
+**Step 3.** $I_{\text{up}} = \set{1, 2, 5, 6}$ has smallest error $E_1 = -1$. $I_{\text{low}} = \set{2, 3, 4, 6}$ has
+largest error $E_2 = E_6 = 0$, and the tie goes to $j = 2$. Both points have $y = -1$, so the move keeps
+$\alpha_1 + \alpha_2 = \frac34$ and $[L, H] = [\frac14, \frac12]$. The unclipped
+$\alpha_2 = \frac14 + (-1)(-1 - 0)/1 = \frac54$ clips to $H = \frac12$, and $\alpha_1$ falls to $\frac14$. Now
+$\wvec = (\frac34, \frac12)$.
+
+**Step 4.** $I_{\text{up}} = \set{1, 2, 5, 6}$ has smallest error $E_1 = 0$. $I_{\text{low}} = \set{1, 3, 4, 6}$ has
+largest error $E_3 = \frac12$. The move keeps $\alpha_1 + \alpha_3 = \frac14$, so $[L, H] = [0, \frac14]$. The unclipped
+$\alpha_3 = 0 + (-1)(0 - \frac12)/1 = \frac12$ clips to $\frac14$, and $\alpha_1$ falls to $0$. Now
+$\wvec = (\frac34, \frac14)$ and $b = -\frac94$.
+
+**Stop.** The errors are now $E = (-\frac14, \frac12, 0, -\frac54, \frac12, 0)$. The smallest error over
+$I_{\text{up}} = \set{2, 3, 5, 6}$ is $0$ and the largest over $I_{\text{low}} = \set{1, 3, 4, 6}$ is $0$. The gap is
+exactly zero, so the KKT conditions hold.
+
+The dual objective rises at every step, $\frac34 < \frac78 < \frac{35}{32} < \frac{19}{16}$. Point $\xvec_1$ enters the
+solution at step 1 with $\alpha_1 = C$ and leaves it at step 4. SMO's early steps are greedy, and later steps undo them.
+
+<SmoStepper />
+
+### Same answer
+
+SMO ends at $\alphavec = (0, \frac12, \frac14, \frac12, 0, \frac14)$, $\wvec = (\frac34, \frac14)$ and $b = -\frac94$,
+the quadratic-programming solution exactly. The slacks follow from the final errors as $\xi_t = \max(0, -y_t E_t)$:
+$\xi_2 = \max(0, \frac12) = \frac12$, $\xi_4 = \max(0, \frac54) = \frac54$, and the other four are $0$. On larger
+problems SMO stops at a tolerance on the gap, and the two methods agree to that tolerance.
+
+## Simulation
+
+The figure solves the same problem in the browser, by SMO to a gap of $10^{-10}$, for any $C$ and any position of the
+points. At $C = \frac12$ and the original points it reproduces every number above.
+
+<SlackExplorer />
+
+## What it illustrates
+
+- **KKT conditions as a solution method.** For a convex quadratic programme, the
+  <NoteLink to="karush-kuhn-tucker-conditions">KKT conditions</NoteLink> are necessary and sufficient. Guessing which
+  inequalities are active turns them into a linear system, and the unused inequalities certify the guess.
+- **Active-set methods.** The guess-solve-check loop is the core of an active-set method for
+  <NoteLink to="quadratic-programming">quadratic programming</NoteLink>. A violated inequality names the constraint to
+  add or drop.
+- **Duality.** The primal and dual objectives meet at $\frac{19}{16}$. The multipliers of the dual's constraints are the
+  primal's $b$ and $\xivec$ (<NoteLink to="lagrangian-duality">Lagrangian duality</NoteLink>).
+- **Coordinate methods under an equality constraint.** SMO is
+  <NoteLink to="coordinate-descent">coordinate ascent</NoteLink> on the dual with blocks of two, the smallest block
+  that can respect $\sum_i\alpha_i y_i = 0$.
+- **Slack as hinge loss.** $\xi_i = \max(0, 1 - y_i f(\xvec_i))$ is the hinge loss of point $i$, and $\sum_i\xi_i$ is
+  the total hinge loss of the <NoteLink to="support-vector-machine">support vector machine</NoteLink>.
+
+## Variations
+
+- **Larger $C$.** At $C = 1$ the same active set holds with $\alphavec = (0, 1, \frac{3}{10}, 1, 0, \frac{3}{10})$,
+  $\wvec = (\frac{9}{10}, \frac{7}{10})$ and $\xi_4 = \frac{11}{10}$. The band narrows and $\xvec_2$ moves closer to its
+  margin line ($\xi_2 = \frac15$). For $C \ge 4$ the solution is the hard-margin SVM: $\wvec = (2, 2)$, $b = -7$,
+  $\alphavec = (0, 2, 2, 4, 0, 0)$ and every $\xi_i = 0$. The data are separable by the line $x_1 + x_2 = \frac72$. The
+  hard-margin multipliers satisfy $\alpha_i \le C$ only when $C \ge 4$.
+- **Smaller $C$.** At $C = \frac18$ every point is a support vector: $\alpha_1 = \alpha_5 = \frac{7}{104}$ and the other
+  four sit at $C$. Only $\xvec_1$ and $\xvec_5$ remain on their margin lines.
+- **Other kernels.** Replacing $K_{ij} = \xvec_i^\top\xvec_j$ by a kernel $k(\xvec_i, \xvec_j)$ changes $\Kmat$ and
+  $\Qmat$ and nothing else. Both methods run unchanged, with
+  $\eta = k(\xvec_i, \xvec_i) + k(\xvec_j, \xvec_j) - 2k(\xvec_i, \xvec_j)$. The weight vector no longer has explicit
+  coordinates, and $f(\xvec) = \sum_i\alpha_i y_i k(\xvec_i, \xvec) + b$ (see the <NoteLink
+  to="kernel-support-vector-machine">kernel SVM</NoteLink>).
+- **Another pair-selection rule.** A different rule visits different pairs and takes a different number of steps. The
+  optimum does not change. The primal objective is strictly convex in $\wvec$, so every rule reaches the same $\wvec$.
+  Here the points with $0 < \alpha_i < C$, $\xvec_3$ and $\xvec_6$, are linearly independent, so $\alphavec$ is unique
+  too.

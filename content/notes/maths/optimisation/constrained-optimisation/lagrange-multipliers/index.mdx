@@ -6,12 +6,23 @@ tags: [optimisation, constrained-optimisation, calculus, worked-example]
 aliases: [Lagrange multiplier, method of Lagrange multipliers, Lagrangian function, shadow price, bordered Hessian]
 requires: [gradient, partial-derivatives]
 related: [karush-kuhn-tucker-conditions, lagrangian-duality, constrained-variational-problems, maximum-entropy-distributions, penalty-and-barrier-methods]
-references: [nocedal2006, boyd2004]
+references: [nocedal2006, boyd2004, horn2012, markowitz1952, jaynes1957, cover2006]
 status: draft
-updated: 2026-09-27
+updated: 2026-09-29
 ---
 
+import { CanOfFixedVolume } from './CanOfFixedVolume'
+import { CircleInSpace } from './CircleInSpace'
+import { ClosestPointOnLine } from './ClosestPointOnLine'
+import { CuspRegularity } from './CuspRegularity'
 import { LagrangeExplorer } from './LagrangeExplorer'
+import { LargestRectangle } from './LargestRectangle'
+import { MaximumEntropyDie } from './MaximumEntropyDie'
+import { MinimumVariancePortfolio } from './MinimumVariancePortfolio'
+import { RayleighQuotient } from './RayleighQuotient'
+import { SecondOrderTest } from './SecondOrderTest'
+import { SeveralStationaryPoints } from './SeveralStationaryPoints'
+import { SimplexLikelihood } from './SimplexLikelihood'
 
 <Definition>
 Let $f, g_1, \dots, g_p : \reals^n \to \reals$ be continuously differentiable. If $\xvec^*$ is a local minimum or
@@ -75,37 +86,375 @@ $$
 
 The multiplier is the marginal change in the optimal value per unit relaxation of the constraint. In economics it is
 the **shadow price** of the constrained resource. A multiplier near zero means the constraint barely matters at the
-optimum.
+optimum. With several constraints $g_j(\xvec) = c_j$, the same argument gives $\partial f^*/\partial c_j = \lambda_j$.
 
-## Worked example
+## Worked examples
 
-Minimise $f(x, y) = x^2 + y^2$ subject to $x + 2y = 5$: the point on a line closest to the origin. With
-$g(x, y) = x + 2y - 5$, the condition $\nabla f = \lambda\nabla g$ reads $(2x, 2y) = \lambda(1, 2)$, so $x = \lambda/2$
-and $y = \lambda$. Substituting into the constraint, $\lambda/2 + 2\lambda = 5$, so $\lambda = 2$. The solution is
-$(x, y) = (1, 2)$ with $f^* = 5$.
+Each example sets up the Lagrangian $\Lcal = f - \lambda g$, solves the stationarity equations, and interprets the
+multiplier. In the figures with a point to drag, the point stays on the constraint. At a point that is not stationary, the readout
+$\lambda = \nabla f^\top\nabla g / \norm{\nabla g}^2$ is the least-squares fit of $\nabla f$ by a multiple of
+$\nabla g$, and the residual $\norm{\nabla f - \lambda\nabla g}$ is the part of $\nabla f$ along the constraint. The
+residual is zero exactly at the stationary points.
 
-Check the sensitivity. For the constraint $x + 2y = c$ the same steps give $\lambda = 2c/5$ and $f^*(c) = c^2/5$. The
-derivative $df^*/dc = 2c/5$ equals $\lambda = 2$ at $c = 5$.
+### Closest point on a line
 
-In the figure's problem, $f(x, y) = (x - 2)^2 + 2(y - 1)^2$ on the unit circle $g(x, y) = x^2 + y^2 - 1 = 0$, the
-minimum is at $(0.815, 0.579)$ with $f^* = 1.758$ and $\lambda = -1.45$. The negative multiplier says that enlarging the
-circle (raising $c$ in $x^2 + y^2 - 1 = c$) lowers the minimum, because the circle moves towards the unconstrained
-minimum at $(2, 1)$.
+Minimise $f(x, y) = x^2 + y^2$ subject to $x + 2y = c$. This asks for the point on a line closest to the origin. The
+Lagrangian is $\Lcal = x^2 + y^2 - \lambda(x + 2y - c)$. Its partial derivatives in $x$ and $y$ give $2x = \lambda$
+and $2y = 2\lambda$, so $x = \lambda/2$ and $y = \lambda$. Substituting into the constraint gives
+$\lambda/2 + 2\lambda = c$, so $\lambda = 2c/5$. The solution is $(x^*, y^*) = (c/5, 2c/5)$ with $f^*(c) = c^2/5$. At
+$c = 5$ the solution is $(1, 2)$, with $f^* = 5$ and $\lambda = 2$. The solution is a multiple of the normal $(1, 2)$
+of the line: the closest point lies on the perpendicular from the origin.
+
+The sensitivity result holds here: $df^*/dc = 2c/5 = \lambda$. The multiplier is positive, because moving the line
+away from the origin ($c$ larger) makes its closest point farther away. The problem is a minimum because $f$ is
+convex and the constraint is linear, so $f$ restricted to the line is a convex function of one variable.
+
+<ClosestPointOnLine />
+
+The same steps solve the general **least-norm problem**: minimise $\norm{\xvec}^2$ subject to $\Amat\xvec = \bvec$,
+where $\Amat$ is $p \times n$ with linearly independent rows. Stationarity of
+$\norm{\xvec}^2 - \lambdavec^\top(\Amat\xvec - \bvec)$ gives $2\xvec = \Amat^\top\lambdavec$. The constraint then gives
+$\Amat\Amat^\top\lambdavec / 2 = \bvec$, so $\lambdavec = 2(\Amat\Amat^\top)^{-1}\bvec$ and
+
+$$
+\xvec^* = \Amat^\top(\Amat\Amat^\top)^{-1}\bvec.
+$$
+
+This is the minimum-norm solution of an underdetermined linear system, the one that the
+<NoteLink to="pseudoinverse">pseudoinverse</NoteLink> returns. With $\Amat = (1 \;\; 2)$ and $\bvec = c$,
+$\Amat\Amat^\top = 5$ and $\xvec^* = c(1, 2)/5$, as above.
+
+### Quadratic objective on a circle
+
+Minimise and maximise $f(x, y) = (x - 2)^2 + 2(y - 1)^2$ subject to $g(x, y) = x^2 + y^2 - 1 = 0$. The explorer in
+the Intuition section draws this problem. The stationarity equations are $2(x - 2) = 2\lambda x$ and
+$4(y - 1) = 2\lambda y$. The first has no solution when $\lambda = 1$ and the second none when $\lambda = 2$. Otherwise
+they give $x = 2/(1 - \lambda)$ and $y = 2/(2 - \lambda)$. Substituting into the constraint gives
+
+$$
+\frac{4}{(1 - \lambda)^2} + \frac{4}{(2 - \lambda)^2} = 1,
+$$
+
+a quartic in $\lambda$ after clearing denominators. It has two real roots:
+
+| $\lambda$ | $(x, y)$           | $f$    | type    |
+| --------- | ------------------ | ------ | ------- |
+| $-1.453$  | $(0.815, 0.579)$   | $1.758$  | minimum |
+| $4.453$   | $(-0.579, -0.815)$ | $13.242$ | maximum |
+
+The circle is closed and bounded, so $f$ attains a minimum and a maximum on it, and both must be among the solutions.
+Comparing the values of $f$ identifies them. The negative multiplier at the minimum says that enlarging the circle
+(raising $c$ in $x^2 + y^2 - 1 = c$) lowers the minimum, because the circle moves towards the unconstrained minimum at
+$(2, 1)$. The positive multiplier at the maximum says that enlarging the circle raises the maximum.
+
+### Maximise a product under a sum constraint
+
+Maximise $f(x, y) = xy$ subject to $x + y = c$. For a rectangle with sides $x$ and $y$ and perimeter $2c$, $f$ is the
+area. The Lagrangian is $\Lcal = xy - \lambda(x + y - c)$. Stationarity gives $y = \lambda$ and $x = \lambda$, so
+$x = y$. The constraint then gives $x^* = y^* = c/2$ and $\lambda = c/2$, with $f^*(c) = c^2/4$. The largest rectangle
+of a given perimeter is a square. The point is a maximum: along the line, with $x = c/2 + s$ and $y = c/2 - s$,
+$f = c^2/4 - s^2$.
+
+The multiplier is the **shadow price** of the perimeter: $df^*/dc = c/2 = \lambda$. One more unit of half-perimeter
+buys $c/2$ more units of area.
+
+The same problem appears in economics as a consumer maximising the utility $u(x, y) = xy$ of two goods with prices
+$p_x$ and $p_y$ and a budget $m$, so that $p_x x + p_y y = m$. Stationarity gives $y = \lambda p_x$ and
+$x = \lambda p_y$. The budget then gives $\lambda = m/(2p_xp_y)$, $x^* = m/(2p_x)$ and $y^* = m/(2p_y)$. The optimal
+utility is $u^*(m) = m^2/(4p_xp_y)$, and $du^*/dm = m/(2p_xp_y) = \lambda$. The multiplier is the marginal utility of
+money.
+
+<LargestRectangle />
+
+### Can with least surface area
+
+A closed cylindrical can with radius $r$ and height $h$ has surface area $A(r, h) = 2\pi r^2 + 2\pi rh$ and volume
+$\pi r^2h$. Minimise $A$ subject to $\pi r^2h = V$. The Lagrangian is
+$\Lcal = 2\pi r^2 + 2\pi rh - \lambda(\pi r^2h - V)$. Stationarity gives
+
+$$
+\frac{\partial\Lcal}{\partial r} = 4\pi r + 2\pi h - 2\lambda\pi rh = 0, \qquad
+\frac{\partial\Lcal}{\partial h} = 2\pi r - \lambda\pi r^2 = 0.
+$$
+
+The second equation gives $\lambda = 2/r$. Substituting into the first gives $4\pi r + 2\pi h = 4\pi h$, so $h = 2r$:
+the height equals the diameter. The volume constraint $2\pi r^3 = V$ then gives $r^* = (V/2\pi)^{1/3}$ and
+$A^* = 6\pi r^{*2}$. Along the constraint, $h = V/(\pi r^2)$ and $A(r) = 2\pi r^2 + 2V/r$, whose second derivative
+$4\pi + 4V/r^3$ is positive, so the point is a minimum.
+
+The multiplier $\lambda = 2/r^*$ is positive: a larger volume needs more material. As a check,
+$A^*(V) = 6\pi r^{*2}$ with $V = 2\pi r^{*3}$ has derivative $12\pi r^* \cdot dr^*/dV = 12\pi r^*/(6\pi r^{*2}) = 2/r^*$. For
+$V = 2\pi$ the optimal can has $r^* = 1$, $h^* = 2$, $A^* = 6\pi \approx 18.85$ and $\lambda = 2$.
+
+<CanOfFixedVolume />
+
+### Rayleigh quotient and eigenvectors
+
+Let $\Amat$ be a symmetric $n \times n$ matrix. Maximise $f(\xvec) = \xvec^\top\Amat\xvec$ subject to
+$\xvec^\top\xvec = 1$. The constraint gradient $2\xvec$ is nonzero on the unit sphere, so every point is regular. The
+Lagrangian is $\Lcal = \xvec^\top\Amat\xvec - \lambda(\xvec^\top\xvec - 1)$, and its gradient in $\xvec$ is
+$2\Amat\xvec - 2\lambda\xvec$. Stationarity is therefore
+
+$$
+\Amat\xvec = \lambda\xvec.
+$$
+
+The stationary points are the unit eigenvectors of $\Amat$, and the multiplier at each one is its eigenvalue. The value
+there is $f = \xvec^\top\Amat\xvec = \lambda\xvec^\top\xvec = \lambda$. The sphere is closed and bounded, so the maximum
+and minimum exist and are attained at stationary points. The maximum of $\xvec^\top\Amat\xvec$ on the unit sphere is
+therefore the largest eigenvalue, and the minimum is the smallest <Cite id="horn2012" />. The argument also proves that
+every real symmetric matrix has a real eigenvalue with a real eigenvector. The ratio
+$\xvec^\top\Amat\xvec / \xvec^\top\xvec$ is the **Rayleigh quotient**; it equals $f$ on the sphere.
+
+In $n$ dimensions with distinct eigenvalues $\lambda_1 > \dots > \lambda_n$ there are $2n$ stationary points
+$\pm\vvec_i$. Only $\pm\vvec_1$ are maxima and only $\pm\vvec_n$ are minima. At $\vvec_i$ with $1 < i < n$, moving
+along the sphere towards $\vvec_1$ increases $f$ and moving towards $\vvec_n$ decreases it, so the point is a saddle of
+$f$ on the sphere. The second-order test below confirms this: the Hessian of the Lagrangian is
+$2(\Amat - \lambda_i\eye)$, and on the tangent space (vectors orthogonal to $\vvec_i$) its eigenvalues are
+$2(\lambda_j - \lambda_i)$ for $j \ne i$, which take both signs. In two dimensions only the maximum and the minimum
+exist.
+
+The same problem defines <NoteLink to="principal-component-analysis">principal component analysis</NoteLink>. The
+variance of data projected onto a unit vector $\wvec$ is $\wvec^\top\Smat\wvec$, where $\Smat$ is the sample
+covariance matrix. The maximising direction is the top eigenvector of $\Smat$, and the multiplier is the variance
+captured.
+
+<RayleighQuotient />
+
+### Minimum-variance portfolio
+
+An investor splits one unit of wealth across $n$ assets with weights $\wvec$, so $\ones^\top\wvec = 1$. The asset
+returns have covariance matrix $\Sigmamat$, assumed positive definite. The portfolio's variance is
+$\wvec^\top\Sigmamat\wvec$ <Cite id="markowitz1952" />. Minimise it subject to the budget. The Lagrangian is
+$\Lcal = \wvec^\top\Sigmamat\wvec - \lambda(\ones^\top\wvec - 1)$, and stationarity gives
+$2\Sigmamat\wvec = \lambda\ones$, so $\wvec = (\lambda/2)\Sigmamat^{-1}\ones$. The budget gives
+$(\lambda/2)\,\ones^\top\Sigmamat^{-1}\ones = 1$, so
+
+$$
+\wvec^* = \frac{\Sigmamat^{-1}\ones}{\ones^\top\Sigmamat^{-1}\ones}, \qquad
+\sigma^{*2} = \wvec^{*\top}\Sigmamat\wvec^* = \frac{1}{\ones^\top\Sigmamat^{-1}\ones}, \qquad
+\lambda = 2\sigma^{*2}.
+$$
+
+The objective is strictly convex and the constraint is linear, so this stationary point is the global minimum. For
+a budget $c$ instead of 1, the solution scales to $c\wvec^*$ with variance $c^2\sigma^{*2}$, whose derivative at
+$c = 1$ is $2\sigma^{*2} = \lambda$.
+
+For two assets with volatilities $\sigma_1, \sigma_2$ and correlation $\rho$, the first weight is
+
+$$
+w_1^* = \frac{\sigma_2^2 - \rho\sigma_1\sigma_2}{\sigma_1^2 + \sigma_2^2 - 2\rho\sigma_1\sigma_2}.
+$$
+
+When $\sigma_1 < \sigma_2$ and $\rho > \sigma_1/\sigma_2$, $w_2^* < 0$: the minimum-variance portfolio sells the
+riskier asset short. With $\sigma_1 = 0.2$, $\sigma_2 = 0.3$ and $\rho = 0.2$, $\wvec^* = (0.736, 0.264)$ and
+$\sigma^* = 0.181$, below either asset's volatility. A ban on short positions adds the inequalities $\wvec \ge \zeros$,
+which need the <NoteLink to="karush-kuhn-tucker-conditions">KKT conditions</NoteLink>.
+
+<MinimumVariancePortfolio />
+
+### Maximum likelihood of a categorical distribution
+
+Observe counts $n_1, \dots, n_K$ of $K$ categories, with $N = \sum_i n_i$. The log-likelihood of a
+<NoteLink to="categorical-distribution">categorical distribution</NoteLink> with probabilities $\pvec$ is
+$\ell(\pvec) = \sum_i n_i\log p_i$. Maximise it subject to $\sum_i p_i = 1$. The Lagrangian is
+$\Lcal = \sum_i n_i\log p_i - \lambda(\sum_i p_i - 1)$. Its partial derivative in $p_i$ is $n_i/p_i - \lambda$, so
+$p_i = n_i/\lambda$. Summing over $i$ gives $N/\lambda = 1$, so
+
+$$
+\lambda = N, \qquad \hat p_i = \frac{n_i}{N}.
+$$
+
+The maximum-likelihood estimate is the vector of observed frequencies. $\ell$ is concave and the constraint is linear,
+so the stationary point is the global maximum. The multiplier $N$ is a sensitivity: under $\sum_i p_i = c$ the
+solution is $p_i = cn_i/N$ with $\ell^*(c) = \sum_i n_i\log(n_i/N) + N\log c$, whose derivative at $c = 1$ is $N$.
+
+The derivation ignores the constraints $p_i \ge 0$. They are inactive when every $n_i > 0$, because $\ell \to -\infty$
+as any $p_i \to 0$. A category with $n_i = 0$ has $\hat p_i = 0$, a point on the boundary of the simplex where the
+inequality is active.
+
+<SimplexLikelihood />
+
+### Maximum entropy with a known mean
+
+A die has faces $k = 1, \dots, 6$. Of all distributions $\pvec$ on the faces with mean $\mu$, find the one with the
+largest entropy $H(\pvec) = -\sum_k p_k\log p_k$ <Cite id="jaynes1957" />. There are two constraints,
+$\sum_k p_k = 1$ and $\sum_k kp_k = \mu$, and so two multipliers. The Lagrangian is
+
+$$
+\Lcal = -\sum_k p_k\log p_k - \lambda_0\Big(\sum_k p_k - 1\Big) - \lambda_1\Big(\sum_k kp_k - \mu\Big).
+$$
+
+Its partial derivative in $p_k$ is $-\log p_k - 1 - \lambda_0 - \lambda_1k$. Setting it to zero gives
+$p_k = \exp(-1 - \lambda_0 - \lambda_1k)$. Normalisation fixes $\lambda_0$: with
+$Z(\lambda_1) = \sum_k e^{-\lambda_1k}$, $e^{1 + \lambda_0} = Z$ and
+
+$$
+p_k = \frac{e^{-\lambda_1k}}{Z(\lambda_1)}.
+$$
+
+This is the Gibbs form, a member of the <NoteLink to="exponential-family">exponential family</NoteLink> with
+sufficient statistic $k$ <Cite id="cover2006" />. The mean constraint fixes $\lambda_1$ through
+$-d\log Z/d\lambda_1 = \sum_k kp_k = \mu$. The mean falls as $\lambda_1$ rises, because its derivative in $\lambda_1$ is
+minus the variance of $k$. The equation therefore has one root, found by a one-dimensional search; there is no closed
+form for six faces. Every $p_k$ is positive, so the constraints $p_k \ge 0$ are inactive. $H$ is strictly concave and
+the constraints are linear, so the stationary point is the unique maximum.
+
+The maximum entropy is $H^* = \sum_k p_k(\lambda_1k + \log Z) = \lambda_1\mu + \log Z$. Its derivative in $\mu$ is
+$(\mu + d\log Z/d\lambda_1)\,d\lambda_1/d\mu + \lambda_1 = \lambda_1$, the multiplier of the mean constraint. At
+$\mu = 3.5$, $\lambda_1 = 0$, the distribution is uniform and $H^* = \log 6 = 1.792$ nats. For $\mu = 4.5$,
+$\lambda_1 = -0.371$, $\pvec = (0.054, 0.079, 0.114, 0.165, 0.240, 0.347)$ and $H^* = 1.614$ nats. The same
+construction gives the other <NoteLink to="maximum-entropy-distributions">maximum entropy distributions</NoteLink>, and
+with densities in place of vectors it becomes a
+<NoteLink to="constrained-variational-problems">constrained variational problem</NoteLink>.
+
+<MaximumEntropyDie />
+
+### Two constraints: closest point on a circle in space
+
+The plane $\ones^\top\xvec = 1$ meets the unit sphere $\xvec^\top\xvec = 1$ in $\reals^3$ in a circle. Find the point of
+that circle closest to a given point $\avec$: minimise $f(\xvec) = \norm{\xvec - \avec}^2$ subject to
+$g_1(\xvec) = \ones^\top\xvec - 1 = 0$ and $g_2(\xvec) = \xvec^\top\xvec - 1 = 0$. The constraint gradients $\ones$
+and $2\xvec$ are linearly independent unless $\xvec$ is a multiple of $\ones$. The only multiple of $\ones$ in the
+plane is $\tfrac13\ones$, whose norm is $1/\sqrt3 \ne 1$, so every point of the circle is regular.
+
+The multiplier condition is $2(\xvec - \avec) = \lambda_1\ones + 2\lambda_2\xvec$: $\nabla f$ lies in the plane
+spanned by the two constraint normals. Rearranging gives
+
+$$
+(1 - \lambda_2)\,\xvec = \avec + \frac{\lambda_1}{2}\ones,
+$$
+
+so the solution lies in the span of $\avec$ and $\ones$. Geometrically, the circle has centre $\cvec = \tfrac13\ones$ and
+radius $\rho = \sqrt{2/3}$, because $\norm{\xvec}^2 = \norm{\cvec}^2 + \norm{\xvec - \cvec}^2$ for $\xvec$ in the
+plane and $\norm{\cvec}^2 = 1/3$. Let $\avec_\parallel = \avec - \frac{\ones^\top\avec - 1}{3}\ones$ be the projection
+of $\avec$ onto the plane. The stationary points are
+
+$$
+\xvec_\pm = \cvec \pm \rho\,\frac{\avec_\parallel - \cvec}{\norm{\avec_\parallel - \cvec}},
+$$
+
+the closest ($+$) and the farthest ($-$). They are defined when $\avec_\parallel \ne \cvec$; otherwise every point of
+the circle is equally far from $\avec$.
+
+For $\avec = (2, 1, 0)$: $\ones^\top\avec = 3$, $\avec_\parallel = (4/3, 1/3, -2/3)$ and
+$\avec_\parallel - \cvec = (1, 0, -1)$. The closest point is
+$\xvec_+ = (1/3 + 1/\sqrt3,\ 1/3,\ 1/3 - 1/\sqrt3) \approx (0.911, 0.333, -0.244)$ with $f^* = 1.691$. Its second
+coordinate gives $-4/3 = \lambda_1 + 2\lambda_2/3$, and its first gives
+$2(1/\sqrt3 - 5/3) = \lambda_1 + 2\lambda_2(1/3 + 1/\sqrt3)$. Subtracting, $\lambda_2 = 1 - \sqrt3 \approx -0.732$
+and $\lambda_1 = -2 + 2/\sqrt3 \approx -0.845$. Both are negative. Raising the plane's level towards $\avec$
+($\ones^\top\avec = 3 > 1$) or enlarging the sphere towards $\avec$ ($\norm{\avec}^2 = 5 > 1$) reduces the distance.
+
+The figure shows the plane face on, in coordinates $(s_1, s_2)$ along two orthonormal vectors of the plane. Within the
+plane, the sphere constraint is the circle $s_1^2 + s_2^2 = 2/3$. The part of $\nabla f$ along the plane's normal
+$\ones$ is always absorbed by $\lambda_1$, so the in-plane picture is again a single constraint, and its multiplier is
+$\lambda_2$.
+
+<CircleInSpace />
+
+### Several solutions of the Lagrange equations
+
+Find the extremes of $f(x, y) = x^2y$ on the circle $x^2 + y^2 = 3$. Stationarity of
+$\Lcal = x^2y - \lambda(x^2 + y^2 - 3)$ gives
+
+$$
+2xy = 2\lambda x, \qquad x^2 = 2\lambda y.
+$$
+
+The first equation holds when $x = 0$ or when $y = \lambda$. Dividing it by $x$ would lose the first case.
+
+- **$x = 0$.** The constraint gives $y = \pm\sqrt3$, and the second equation gives $\lambda = 0$. Here $f = 0$.
+- **$y = \lambda$.** The second equation gives $x^2 = 2y^2$, and the constraint gives $3y^2 = 3$, so $y = \pm1$ and
+  $x = \pm\sqrt2$. Here $f = 2y$: $f = 2$ at $(\pm\sqrt2, 1)$ with $\lambda = 1$, and $f = -2$ at $(\pm\sqrt2, -1)$
+  with $\lambda = -1$.
+
+The equations have six solutions. The circle is closed and bounded, so the global maximum and minimum are among them,
+and comparing values gives the maximum $2$ and the minimum $-2$. The points $(0, \pm\sqrt3)$ are local extrema of $f$
+along the circle but not global ones. Near $(0, \sqrt3)$, $y > 0$, so $f = x^2y \ge 0$ and the point is a local
+minimum with value $0$. At both of these points $\lambda = 0$ because $\nabla f = \zeros$ there: they are
+unconstrained stationary points of $f$ that happen to lie on the circle.
+
+<SeveralStationaryPoints />
+
+### Second-order test: when a convex objective has a constrained maximum
+
+Find the extremes of $f(x, y) = x^2 + ay^2$ on the unit circle, for a constant $a \ne 1$. Stationarity of
+$\Lcal = x^2 + ay^2 - \lambda(x^2 + y^2 - 1)$ gives $2x = 2\lambda x$ and $2ay = 2\lambda y$. The solutions are
+$(\pm1, 0)$ with $\lambda = 1$ and $f = 1$, and $(0, \pm1)$ with $\lambda = a$ and $f = a$. The Hessian of the
+Lagrangian is $\nabla^2\Lcal = \mathrm{diag}(2 - 2\lambda,\ 2a - 2\lambda)$. At $(\pm1, 0)$ the tangent direction is
+$\vvec = (0, 1)$, and $\vvec^\top\nabla^2\Lcal\,\vvec = 2(a - 1)$. At $(0, \pm1)$ the tangent direction is
+$\vvec = (1, 0)$, and $\vvec^\top\nabla^2\Lcal\,\vvec = 2(1 - a)$.
+
+For $0 < a < 1$, $f$ is convex (its Hessian $\mathrm{diag}(2, 2a)$ is positive definite), yet $(\pm1, 0)$ is a
+constrained maximum, because $2(a - 1) < 0$. The Hessian of $f$ alone would call it a minimum. The term
+$-\lambda\nabla^2 g = -2\lambda\eye$ subtracts the curvature of the circle. At $(\pm1, 0)$ the circle has curvature
+$1$ and the level set $x^2 + ay^2 = 1$ has curvature $a < 1$, so the circle stays inside that level set, where $f < 1$.
+For $a > 1$ the roles swap. At $a = 1$, $f = 1$ everywhere on the circle, every point is
+stationary, and the second-order quantity is zero.
+
+A stationary point can be neither a minimum nor a maximum. Minimise $f(x, y) = y$ subject to $y = x^3$. At the origin
+$\nabla f = (0, 1) = \nabla g$ for $g = y - x^3$, so $\lambda = 1$. The Hessian of the Lagrangian is
+$\nabla^2\Lcal = -\lambda\nabla^2 g = \mathrm{diag}(6x, 0)$, which vanishes at the origin, so the test is
+inconclusive. Along the curve $f = x^3$, which has an inflection at $0$: the point is not an extremum.
+
+<SecondOrderTest />
+
+### Regularity fails at a cusp
+
+Minimise $f(x, y) = x$ subject to $g(x, y) = x^3 - y^2 = 0$. The constraint forces $x = y^{2/3} \ge 0$, so the minimum
+is $x = 0$, at the origin. The Lagrange equations are $1 = 3\lambda x^2$ and $0 = -2\lambda y$. The first needs
+$\lambda \ne 0$, so the second gives $y = 0$, the constraint gives $x = 0$, and the first becomes $1 = 0$. The
+equations have no solution, and the method misses the minimum.
+
+The theorem does not apply because $\nabla g = (3x^2, -2y)$ is zero at the origin: the curve has a cusp there and no
+normal line. Along the curve $(t^2, t^3)$ near the cusp, $\nabla g = (3t^4, -2t^3)$ and the best-fitting multiplier
+$\nabla f^\top\nabla g / \norm{\nabla g}^2 = 3/(t^2(9t^2 + 4))$ grows without bound as $t \to 0$. A complete search
+therefore adds every feasible point where the constraint gradients are linearly dependent to the solutions of the
+Lagrange equations.
+
+<CuspRegularity />
 
 ## Second-order conditions
 
 The multiplier condition is necessary, not sufficient. It holds at constrained minima, maxima and saddle points alike.
-The second-order test restricts the <NoteLink to="hessian">Hessian</NoteLink> of the Lagrangian to the tangent space:
-if $\vvec^\top\nabla^2_{\xvec\xvec}\Lcal(\xvec^*, \lambdavec)\vvec > 0$ for every nonzero $\vvec \in \Tcal$, then
-$\xvec^*$ is a strict local minimum <Cite id="nocedal2006" />. The Hessian of $f$ alone is not the right matrix: the
-curvature of the constraint enters through $-\sum_j\lambda_j\nabla^2 g_j$. In small problems this test is often stated
-through the determinants of the **bordered Hessian**, the Hessian of $\Lcal$ in $(\xvec, \lambdavec)$ jointly.
+The second derivative of $f$ along the constraint decides between them. Let $\xvec(t)$ be a curve in $\Mcal$ with
+$\xvec(0) = \xvec^*$ and $\xvec'(0) = \vvec$, for one constraint $g$. Then
+
+$$
+\frac{d^2}{dt^2}f(\xvec(t))\Big|_{t=0} = \vvec^\top\nabla^2 f\,\vvec + \nabla f^\top\xvec''(0).
+$$
+
+Differentiating $g(\xvec(t)) = 0$ twice gives $\vvec^\top\nabla^2 g\,\vvec + \nabla g^\top\xvec''(0) = 0$. With
+$\nabla f = \lambda\nabla g$, the last term is $\lambda\nabla g^\top\xvec''(0) = -\lambda\vvec^\top\nabla^2 g\,\vvec$,
+so
+
+$$
+\frac{d^2}{dt^2}f(\xvec(t))\Big|_{t=0} = \vvec^\top\big(\nabla^2 f - \lambda\nabla^2 g\big)\vvec
+= \vvec^\top\nabla^2_{\xvec\xvec}\Lcal\,\vvec.
+$$
+
+The <NoteLink to="hessian">Hessian</NoteLink> of the Lagrangian, restricted to the tangent space, is the curvature of
+$f$ along the constraint. If $\vvec^\top\nabla^2_{\xvec\xvec}\Lcal(\xvec^*, \lambdavec)\vvec > 0$ for every nonzero
+$\vvec \in \Tcal$, then $\xvec^*$ is a strict local minimum; with several constraints the curvature term is
+$-\sum_j\lambda_j\nabla^2 g_j$ <Cite id="nocedal2006" />. The Hessian of $f$ alone is not the right matrix.
+
+In small problems the test is often stated through the **bordered Hessian**, the Hessian of $\Lcal$ in
+$(\lambda, \xvec)$ jointly. Its border holds $-\nabla g$; flipping the border's sign multiplies one row and one column
+by $-1$ and leaves the determinant unchanged. For two variables and one constraint,
+
+$$
+\bar\Hmat = \begin{pmatrix} 0 & g_x & g_y \\ g_x & \Lcal_{xx} & \Lcal_{xy} \\ g_y & \Lcal_{xy} & \Lcal_{yy} \end{pmatrix},
+\qquad \det\bar\Hmat = -\vvec^\top\nabla^2_{\xvec\xvec}\Lcal\,\vvec \text{ with } \vvec = (-g_y, g_x).
+$$
+
+The identity follows by expanding the determinant along its first row. The vector $\vvec$ is tangent to the
+constraint, so $\det\bar\Hmat < 0$ means a strict local minimum and $\det\bar\Hmat > 0$ a strict local maximum.
 
 ## Assumptions
 
-- **Regularity.** The constraint gradients must be linearly independent at $\xvec^*$. Without it the theorem can fail:
-  minimise $x$ subject to $x^3 - y^2 = 0$ (a cusp). The minimum is at the origin, where $\nabla g = \zeros$ and no
-  multiplier satisfies $(1, 0) = \lambda\cdot\zeros$.
+- **Regularity.** The constraint gradients must be linearly independent at $\xvec^*$. Without it the theorem can fail,
+  as at the cusp of $x^3 = y^2$ in the worked examples, where $\nabla g = \zeros$ at the minimum and no multiplier
+  exists.
 - **Equality constraints only.** Inequality constraints need signs on the multipliers and complementary slackness; see
   <NoteLink to="karush-kuhn-tucker-conditions">KKT conditions</NoteLink>.
 
@@ -114,7 +463,10 @@ through the determinants of the **bordered Hessian**, the Hessian of $\Lcal$ in 
 - **Sign conventions.** Writing $\Lcal = f + \lambda g$ instead of $f - \lambda g$ flips the sign of $\lambda$. The
   sensitivity interpretation changes sign with it.
 - **Solving the equations finds all stationary points.** Compare the value of $f$ at every solution, and check the
-  boundary if the constraint set is not closed and bounded.
+  boundary if the constraint set is not closed and bounded. Do not divide an equation by a variable that can be zero:
+  in $2xy = 2\lambda x$, dividing by $x$ loses the solutions with $x = 0$.
+- **Points where regularity fails.** Add the feasible points where the constraint gradients are linearly dependent to
+  the candidates; the Lagrange equations never find them.
 - **Functions as unknowns.** The same argument works when the unknown is a function, with a constraint such as
   normalisation of a density. See <NoteLink to="constrained-variational-problems">constrained variational problems</NoteLink>
   and <NoteLink to="maximum-entropy-distributions">maximum entropy distributions</NoteLink>.

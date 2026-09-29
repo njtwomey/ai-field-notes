@@ -192,8 +192,17 @@ export function search(
           .map((r) => r.id as string)
           .filter((id) => !seen.has(id))
       : []
-  return [...found, ...extra]
-    .map((id) => bySlug.get(id))
-    .filter((n): n is NoteMeta => !!n && hasTags(n))
-    .slice(0, limit)
+  // A note whose title or an alias is exactly the query leads, whatever its score: "svm" opens with the SVM note.
+  const key = exactKey(text)
+  const exact = (n: NoteMeta) => exactKey(n.title) === key || n.aliases.some((a) => exactKey(a) === key)
+  const ranked = [...found, ...extra].map((id) => bySlug.get(id)).filter((n): n is NoteMeta => !!n && hasTags(n))
+  return [...ranked.filter(exact), ...ranked.filter((n) => !exact(n))].slice(0, limit)
+}
+
+/** Lowercase, with punctuation and spacing folded, for exact title and alias comparison. */
+function exactKey(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
 }

@@ -27,12 +27,12 @@ doctor: ## Check the content tree (SCOPE="taxonomy/path slug ..." limits per-not
 
 lint: ## Lint TypeScript and Python
 	npx oxlint
-	npx prettier --check .
+	git ls-files -z | xargs -0 npx prettier --check --ignore-unknown
 	uv run ruff check python
 	uv run ruff format --check python
 
 format: ## Format TypeScript and Python
-	npx prettier --write .
+	git ls-files -z | xargs -0 npx prettier --write --ignore-unknown --log-level warn
 	uv run ruff check --fix python
 	uv run ruff format python
 

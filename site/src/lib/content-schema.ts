@@ -44,6 +44,48 @@ export const referenceSchema = z
   })
   .strict()
 
+export const glossaryKinds = ['acronym', 'concept', 'proper-name'] as const
+
+/**
+ * One entry of content/glossary.yaml, which is keyed by slug. Notes use an entry with `<Gloss name="key" />` (or any
+ * of its aliases); the first use in a note shows "long (short)", later uses the short form.
+ */
+export const glossaryEntrySchema = z
+  .object({
+    /** The abbreviation shown after the first use. Required for acronyms and proper names. */
+    short: z.string().min(1).optional(),
+    /** The full name in Title Case, with every nested acronym spelled out. */
+    long: z.string().min(1),
+    /** Only when appending "s" to the long form is wrong. */
+    longPlural: z.string().min(1).optional(),
+    kind: z.enum(glossaryKinds),
+    /** Tells apart entries that share one short form, e.g. the two LDAs. */
+    sense: z.string().min(1).optional(),
+    /** Other slugs that resolve to this entry, e.g. the acronym itself. */
+    aliases: z.array(slug).default([]),
+    /** Taxonomy path(s), as in taxonomy.yaml. */
+    category: z.union([categoryPath, z.array(categoryPath).min(1)]).transform((c) => (typeof c === 'string' ? [c] : c)),
+    /** The note whose subject the entry is (the glossary links straight to it); empty or absent when there is none. */
+    note: z
+      .union([slug, z.literal('')])
+      .optional()
+      .transform((n) => n || undefined),
+    /** Notes that discuss the entry without being about it, e.g. true positive → the confusion matrix. */
+    see: z.array(slug).default([]),
+    /** Set while a definition awaits checking. */
+    review: z.boolean().optional(),
+    /** One or two plain sentences; `$…$` maths with the site macros. */
+    definition: z.string().min(1).max(600),
+  })
+  .strict()
+  .refine((e) => e.kind === 'concept' || e.short !== undefined, {
+    message: 'acronyms and proper names need a short form',
+    path: ['short'],
+  })
+
+export type GlossaryEntry = z.output<typeof glossaryEntrySchema> & { key: string }
+export type GlossaryKind = (typeof glossaryKinds)[number]
+
 /** Icons a top-level category may use. Mapped to lucide components in site/src/components/layout/category-icon.tsx. */
 export const categoryIcons = [
   'sigma',
@@ -122,6 +164,8 @@ export type NoteMeta = Omit<Frontmatter, 'category'> & {
   cited: string[]
   /** Slugs linked inline with <NoteLink>. */
   linked: string[]
+  /** Glossary keys used with <Gloss>, resolved from aliases, in first-use order. */
+  glossed: string[]
   wordCount: number
 }
 

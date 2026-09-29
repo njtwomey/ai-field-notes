@@ -12,6 +12,7 @@ const links = [
   { to: '/browse', label: 'Browse' },
   { to: '/tags', label: 'Tags' },
   { to: '/references', label: 'References' },
+  { to: '/glossary', label: 'Glossary' },
   { to: '/notation', label: 'Notation' },
 ]
 

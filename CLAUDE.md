@@ -72,13 +72,49 @@ make doctor SCOPE="maths/optimal-transport kalman-filter"  # doctor for one bran
   or with those slugs (seconds); whole-tree checks that are cheap still run. Changes confined to one branch of the
   taxonomy need only that branch. Before a push, `make check` runs everything unscoped, as CI and the deploy do.
 - `plugins/content-index.ts` (Vite plugin) reads every note's frontmatter and validates it with zod schemas from
-  `site/src/lib/content-schema.ts`. It checks categories, relation slugs, `<NoteLink to>` targets and `<Cite id>` keys.
-  Any error fails dev and build with the offending file named. It exposes two virtual modules:
-  - `virtual:content`: metadata, references and taxonomy. Loaded eagerly.
+  `site/src/lib/content-schema.ts`. It checks categories, relation slugs, `<NoteLink to>` targets, `<Cite id>` keys and
+  `<Gloss name>` names. Any error fails dev and build with the offending file named. It exposes two virtual modules:
+  - `virtual:content`: metadata, references, glossary and taxonomy. Loaded eagerly.
   - `virtual:search`: plain-text bodies. Loaded only when search first opens.
 - MDX is compiled by `@mdx-js/rollup` with remark-gfm, remark-math + rehype-katex, and rehype-slug. Components in
   `site/src/components/content/mdx-components.tsx` are available in every note without an import.
 - Note bodies load lazily via `import.meta.glob` in `site/src/lib/content.ts`.
+
+### Glossary
+
+`content/glossary.yaml` defines every acronym, recurring concept and proper name once, like LaTeX's `\acrodef`.
+Notes use an entry with `<Gloss name="svd" />`, like `\ac`. The glossary stands on its own: an entry may have no note
+and may be used by no note yet. The `/glossary` page lists every entry, searchable and filtered by kind and category,
+with `#key` anchors; ⌘K search lists matching entries below the notes.
+
+- **Keys** are short, unique, unambiguous lowercase kebab-case slugs, not long forms. A unique acronym is its own key
+  (`svd`, `ols`, `auroc`, `l-bfgs`, `kl`). An ambiguous acronym gets the shortest key a reader would recognise for each
+  sense (`autodiff`; `em-algorithm`); a concept uses the natural slug of its name (`reparameterisation-trick`). Every
+  other spelling, the long form and the acronym included, goes in `aliases`; `<Gloss name>` resolves keys and aliases.
+- **Fields:** `short` (the abbreviation; required for acronyms and proper names), `long`, `longPlural` (only when
+  appending "s" is wrong), `kind` (`acronym | concept | proper-name`), `sense` (required on every entry that shares a
+  short form with another, e.g. the two LDAs), `aliases`, `category` (a taxonomy path, or a list; default to the owning
+  note's category but write it out), `note`, `see`, `review` (true while a definition awaits checking), `definition`.
+- **`note` and `see`** map entries to notes. `note` is the note whose subject the entry is (Fourier transform →
+  `fourier-transform`, positive definite → `positive-definite-matrices`); the entry's headword on `/glossary` opens it.
+  `see` lists notes that discuss the entry without being about it (true positive → `confusion-matrix`). The content
+  check fails when a note's slug or title names an entry (its key, long form, aliases or unshared short form, plural
+  ignored) and the entry's `note` is not that note, so the mapping is always declared. A note that only lists the term
+  among its aliases does not count.
+- **`long`** is fully expanded and in Title Case: "Limited-Memory Broyden–Fletcher–Goldfarb–Shanno", "Area Under the
+  Receiver Operating Characteristic Curve". Minor words (of, and, the, for, in, on, a, to, with) stay lowercase unless
+  first; a leading one-letter variable stays lowercase ("k-Nearest Neighbours"). It contains no acronym except a proper
+  name that is its own acronym. The content check fails on a run of capitals outside an allowlist
+  (`plugins/glossary.ts`) and on a lowercase first word.
+- **`definition`** is one or two plain sentences in the note style, at most 400 characters as read, with `$…$` maths
+  in the site macros. The content check renders every definition, short and long form.
+- **Rendering:** the first `<Gloss>` of an entry in a note reads "Long Form (SHORT)", later ones "SHORT". The first use
+  is marked at compile time (`plugins/rehype-gloss.ts`), in document order, aliases resolved. `form="full|short|long"`
+  forces a reading and does not count as the first use; `plural` pluralises; children replace the words shown (e.g. to
+  inflect a concept). Hovering shows the long form, the definition and links to the note and the glossary entry.
+  Do not put `<Gloss>` in headings: the table of contents shows heading source text.
+- One sense per entry. When one acronym names two quantities, make two entries (AUROC and AUPRC, never a bare AUC),
+  and keep the generic spelling as an alias of the usual one.
 
 ### Code and output pipeline
 
@@ -269,6 +305,8 @@ Notes are encyclopedia entries, not blog posts. Every sentence must carry inform
   `macros.ts` rather than using `\newcommand` in a note. A macro that cannot render on its own (such as `\LP`) needs an entry in its
   group's `examples`; the content check renders every macro's example. The `/notation` page lists them all. Every formula is
   rendered with the macros by `npm run check:content`, so an unknown command fails the build with the file name.
+- **Use `<Gloss name="…" />` for acronyms;** define new ones in `content/glossary.yaml` (see Glossary above). It
+  expands the first use in the note and abbreviates the rest, so do not also spell the acronym out by hand.
 - **Cite claims that are not common knowledge** with `<Cite id="key" />`. Every source goes in
   `content/references.yaml` with a real URL. Papers, blog posts, books, docs and videos are all valid. Cite the
   primary source for definitions and results.

@@ -9,6 +9,7 @@ import { Pre, Table } from './MdxElements'
 import { Callout, Definition } from './Callout'
 import { Cite } from './Cite'
 import { Derivation } from './Derivation'
+import { Gloss } from './Gloss'
 import { NoteLink } from './NoteLink'
 import { SpecTable } from './SpecTable'
 
@@ -21,6 +22,7 @@ export const mdxComponents = {
   Definition,
   Derivation,
   DistributionExplorer,
+  Gloss,
   Interactive,
   NoteLink,
   Readout,
