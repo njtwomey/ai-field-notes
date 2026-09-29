@@ -15,8 +15,8 @@ updated: 2026-09-27
 <Definition>
 **OmniSage** is a representation-learning framework that produces one embedding per entity (pins, boards and other
 entity types) at Pinterest. It builds a heterogeneous graph of entities and interactions, samples each node's
-neighbourhood by random walks with restart per node type, and encodes the node's content features together with its
-neighbours' features with a transformer, one per entity type. It is trained on three families of contrastive tasks:
+neighbourhood by <NoteLink to="random-walk">random walks</NoteLink> with restart per node type, and encodes the node's content features together with its
+neighbours' features with a <NoteLink to="transformer">transformer</NoteLink>, one per entity type. It is trained on three families of contrastive tasks:
 entity–entity pairs from graph edges and engagement logs, entity–feature pairs, and next and future entities in user
 activity sequences <Cite id="badrinath2025omnisage" />.
 </Definition>
@@ -24,7 +24,7 @@ activity sequences <Cite id="badrinath2025omnisage" />.
 ## Problem
 
 Before OmniSage, Pinterest learned representations with separate models for separate signals: PinSage for the pin–board graph,
-PinnerFormer for user sequences, content models for images and text, and task-specific models such as ItemSage and
+<NoteLink to="pinnerformer">PinnerFormer</NoteLink> for user sequences, content models for images and text, and task-specific models such as <NoteLink to="itemsage">ItemSage</NoteLink> and
 OmniSearchSage <Cite id="ying2018pinsage" /> <Cite id="pancha2022pinnerformer" /> <Cite id="agarwal2024omnisearchsage" />.
 MultiBiSage had already shown that pin embeddings improve when trained on several bipartite graphs (with users, idea
 pins, creators and interactions such as add-to-cart and follow) instead of the pin–board graph alone
@@ -57,9 +57,9 @@ the forward-push algorithm <Cite id="badrinath2025omnisage" />.
 
 ## Encoder
 
-Each entity type $t$ has its own embedder $f_t$. Images are encoded by an in-house pretrained vision transformer and text
+Each entity type $t$ has its own embedder $f_t$. Images are encoded by an in-house pretrained <Gloss name="vit">vision transformer</Gloss> and text
 by a shared hash embedding of n-grams. The neighbours of $u$ are sorted by proximity score, their features pass through
-an MLP, and the resulting sequence goes through a transformer encoder with a learned `[CLS]` token. The `[CLS]` output
+an <Gloss name="mlp" />, and the resulting sequence goes through a transformer encoder with a learned `[CLS]` token. The `[CLS]` output
 passes through an MLP and is normalised to unit length <Cite id="badrinath2025omnisage" />.
 
 Compared with <NoteLink to="pinsage">PinSage</NoteLink>, the aggregator changes from a weighted mean with
@@ -68,7 +68,7 @@ depend on the content of the node and each neighbour.
 
 ## Objectives
 
-All tasks use the same sampled softmax with in-batch and random negatives, for a query $\qvec$, positive $\pvec$ and
+All tasks use the same <NoteLink to="two-tower-model">sampled softmax</NoteLink> with in-batch and random negatives, for a query $\qvec$, positive $\pvec$ and
 negatives $\Ncal$: $L(\qvec, \pvec, \Ncal) = -\log \frac{e^{s(\qvec, \pvec)}}{e^{s(\qvec, \pvec)} +
 \sum_{\nvec \in \Ncal} e^{s(\qvec, \nvec)}}$ <Cite id="badrinath2025omnisage" />.
 
@@ -77,7 +77,7 @@ negatives $\Ncal$: $L(\qvec, \pvec, \Ncal) = -\log \frac{e^{s(\qvec, \pvec)}}{e^
 - **Entity–feature.** For each feature type $x$ of node $u$, an MLP encoder $g_x$ maps the feature to a query, and the
   positive is $u$'s own embedding. This keeps content information in the embedding, which matters for cold-start nodes.
 - **User–entity.** A causal transformer decoder reads a user's sequence of entity embeddings $\pvec_1, \dots, \pvec_t$
-  and outputs user embeddings $\uvec_t$. The next-action loss contrasts $\uvec_t$ with $\pvec_{t+1}$. The future-action
+  and outputs user embeddings $\uvec_t$. The <NoteLink to="transact">next-action loss</NoteLink> contrasts $\uvec_t$ with $\pvec_{t+1}$. The future-action
   loss contrasts it with an entity sampled from a future window, following PinnerFormer
   <Cite id="pancha2022pinnerformer" />.
 
@@ -94,7 +94,7 @@ samples neighbours on the fly in C++, and fetches features from a RocksDB key-va
 
 **Chunked sampled softmax.** With $b$ queries and $k$ negatives pooled across devices, the logits matrix
 $\Qmat\Nmat\transpose$ has $b \times k$ entries per task and is held until the backward pass. OmniSage detaches the
-query, positive and negative embeddings, computes the loss and its gradients with respect to those embeddings chunk by
+query, positive and negative embeddings, computes the loss and its <NoteLink to="gradient">gradients</NoteLink> with respect to those embeddings chunk by
 chunk, frees each chunk's logits, averages the accumulated gradients, and then backpropagates once from the embeddings
 into the model. Peak memory for logits falls from $b \times k$ to (chunk size) $\times k$ without extra backward passes
 through the model, which permits larger batches <Cite id="badrinath2025omnisage" />.

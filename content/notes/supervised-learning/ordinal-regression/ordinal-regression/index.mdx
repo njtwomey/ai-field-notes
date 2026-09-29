@@ -1,0 +1,202 @@
+---
+title: Ordinal regression
+kind: overview
+summary: 'Ordinal regression predicts a label from ordered categories $1 < 2 < \dots < K$ whose spacing is unknown, such as ratings or disease grades. Classification ignores the order and regression assumes equal spacing; most ordinal methods learn a score and $K - 1$ cut points.'
+tags: [ordinal-regression, classification, supervised-learning]
+aliases: [ordinal classification, ordinal regression, ordered classification, ranking with ordered labels, ordinal outcome]
+requires: [logistic-regression]
+related: [multinomial-logistic-regression, cost-sensitive-learning, ordinal-classification-metrics, cohens-kappa]
+references: [mccullagh1980, agresti2010, gutierrez2016, frank2001, rennie2005, chu2005gp, twomey2019ordinal]
+status: draft
+updated: 2026-09-29
+---
+
+import { OrdinalModelLab } from '../_shared/OrdinalModelLab'
+
+<Definition>
+Ordinal regression learns a predictor $f: \Xcal \to \set{1, 2, \dots, K}$ from examples $(\xvec_i, y_i)$ whose labels
+are ordered categories. The order $1 < 2 < \dots < K$ is known, but the distance between neighbouring categories is not.
+A mistake that predicts $k$ for true class $y$ costs more the larger $\abs{k - y}$ is. Most ordinal models learn a real
+score and $K - 1$ ordered cut points that divide the score into the $K$ categories
+<Cite id="mccullagh1980" /> <Cite id="gutierrez2016" />.
+</Definition>
+
+## What makes a label ordinal
+
+A label is ordinal when its values can be ranked but not measured. Star ratings from 1 to 5, a pain scale, the stage
+of a disease, a credit grade and a survey answer from "strongly disagree" to "strongly agree" are ordinal. The label
+$y = 4$ is higher than $y = 2$. The label does not say that the step from 2 to 3 equals the step from 3 to 4, and it
+does not say that 4 is twice 2.
+
+Three kinds of target differ in the structure they carry:
+
+| Target      | Example                | Order | Distances | Natural loss                  |
+| ----------- | ---------------------- | ----- | --------- | ----------------------------- |
+| Nominal     | species, colour        | no    | no        | 0–1 loss                      |
+| Ordinal     | rating, disease grade  | yes   | no        | a cost that grows with $\abs{k - y}$ |
+| Interval    | temperature, price     | yes   | yes       | squared or absolute error     |
+
+Ordinal labels often come from a continuous quantity that was recorded coarsely. A clinician grades cognitive
+decline as healthy, mild, moderate or severe; the decline itself is continuous
+<Cite id="twomey2019ordinal" />. This view, a hidden continuous score cut into intervals, underlies most of the
+methods in this category.
+
+## Why classification and regression both fall short
+
+**Multiclass classification ignores the order.** A multiclass model such as
+<NoteLink to="multinomial-logistic-regression">multinomial logistic regression</NoteLink> gives class $k$ its own
+weight vector $\wvec_k$ and sets $P(y = k \mid \xvec) \propto \exp(\wvec_k^\top \xvec)$. Relabel the classes by any
+permutation $\pi$ and relabel the weight vectors the same way: every probability is unchanged, so the likelihood is
+unchanged. The model therefore cannot use the fact that class 3 lies between classes 2 and 4. It spends $K$ weight
+vectors where the ordinal structure needs about one, and its 0–1 training loss charges predicting 5 for a true 1 the
+same as predicting 2.
+
+**Regression assumes equal spacing.** Coding the classes as the numbers $1, \dots, K$, fitting least squares and
+rounding the prediction $\hat y = \wvec^\top\xvec$ to the nearest integer makes two hidden choices. It fixes the cut
+points at $1.5, 2.5, \dots, K - 0.5$, and it treats every step between classes as the same size. If the residuals are
+Gaussian with <NoteLink to="variance-and-covariance">standard deviation</NoteLink> $\sigma$, the implied class probabilities are
+
+$$
+P(y = k \mid \xvec) = \Phi\LP\frac{k + \tfrac12 - \wvec^\top\xvec}{\sigma}\RP - \Phi\LP\frac{k - \tfrac12 - \wvec^\top\xvec}{\sigma}\RP,
+$$
+
+where $\Phi$ is the standard normal <Gloss name="cdf">cumulative distribution function</Gloss>. This is a cumulative probit model whose cut points
+are fixed rather than learnt. When the true categories have unequal widths, for example a narrow "moderate" band
+between wide "mild" and "severe" bands, the fixed cut points put the boundaries in the wrong places.
+
+**Ordinal models keep the order and learn the spacing.** An ordinal model learns one score $\eta(\xvec)$ and $K - 1$
+cut points $\theta_1 < \dots < \theta_{K-1}$ from the data. The order of the classes is built in through the order of
+the cut points. The spacing is a parameter, so a narrow category gets a narrow interval.
+
+## A map of the methods
+
+Gutiérrez et al. sort ordinal methods into three families <Cite id="gutierrez2016" />, and two later families fit
+alongside them.
+
+- **Naive approaches** treat the problem as nominal classification, as regression, or as cost-sensitive classification
+  with a cost matrix that grows with $\abs{k - y}$ (<NoteLink to="cost-sensitive-learning" />).
+- **Threshold models** assume a latent score cut at learnt thresholds.
+  - <NoteLink to="cumulative-link-model">Cumulative link models</NoteLink> (proportional odds, ordered probit) are the
+    likelihood-based classic <Cite id="mccullagh1980" />.
+  - <NoteLink to="continuation-ratio-and-adjacent-category-models">Continuation-ratio and adjacent-category
+    models</NoteLink> use other binary comparisons with the same linear score.
+  - <NoteLink to="threshold-losses-for-ordinal-regression">Threshold losses</NoteLink> give margin-based versions:
+    <Gloss name="svor">support vector ordinal regression</Gloss> and the <Gloss name="all-threshold-loss">all-threshold loss</Gloss> <Cite id="rennie2005" />.
+  - <NoteLink to="ordering-constraints-on-ordinal-thresholds">Ordering constraints</NoteLink> keep the thresholds of
+    any of these models in order, and their <Gloss name="kkt" /> multipliers show which neighbouring classes the data
+    merge.
+  - <NoteLink to="gaussian-process-ordinal-regression">Gaussian-process ordinal regression</NoteLink> replaces the
+    linear score with a <Gloss name="gp">Gaussian process</Gloss> <Cite id="chu2005gp" />.
+- **Decomposition models** split the task into binary questions "is $y > k$?".
+  <NoteLink to="binary-decomposition-for-ordinal-regression">Binary decomposition</NoteLink> trains $K - 1$ classifiers
+  and combines them <Cite id="frank2001" />.
+- **Deep ordinal models** put an ordinal output layer on a neural network: shared-weight binary heads (<Gloss name="consistent-rank-logits" />),
+  conditional heads (<Gloss name="corn" />) and soft ordinal targets (<Gloss name="sord" />). See
+  <NoteLink to="deep-ordinal-regression" />.
+- **Structured models** encode the label as a sequence of $K - 1$ bits and model the bits jointly.
+  <NoteLink to="structured-ordinal-regression-modelling" /> fits a chain <Gloss name="crf">conditional random field</Gloss> to that encoding
+  <Cite id="twomey2019ordinal" />.
+
+Whether a cumulative model's single score is adequate is testable; see
+<NoteLink to="proportional-odds-assumption" />.
+
+## Datasets for the figures
+
+Every figure in this category that shows two-dimensional data draws it from one generator, modelled on the synthetic
+manifolds of Twomey et al. <Cite id="twomey2019ordinal" />. The paper projects ordinal data onto four curves in the
+plane, named Linear, Sine, Circle and Spiral, with $K = 5$ or $K = 10$ classes, 100 training points and 1000 test
+points. The paper does not give the curves' equations or the noise level; the ones below are this site's choices.
+
+**The latent coordinate.** Each point has a hidden ordinal coordinate $t \in [0, 1]$, and class $k$ owns the
+interval $[(k - 1)/K,\ k/K)$. Every class gets the same number of points: for each class, $t$ is drawn uniformly
+within its interval. The training set has $m$ points per class and the test set 200 per class, so $mK$ training points
+and $200K$ test points in all.
+
+**The curve.** A curve $\gammavec: [0, 1] \to \reals^2$ carries $t$ into the plane, and the point is the curve plus
+isotropic Gaussian noise,
+
+$$
+\xvec = \gammavec(t) + \sigma\, s(t)\, \epsilonvec, \qquad \epsilonvec \sim \Gauss(\zeros, \eye),
+$$
+
+where $\sigma$ is the noise level and $s(t)$ scales it along the curve. The four curves are
+
+| Dataset | Curve $\gammavec(t)$                                                        | Noise scale $s(t)$  |
+| ------- | --------------------------------------------------------------------------- | ------------------- |
+| linear  | $(5t - 2.5)\,(\cos 30^\circ, \sin 30^\circ)$                                 | 1                   |
+| sine    | $\big(5t - 2.5,\ 1.5 \sin 4\pi t\big)$                                       | 1                   |
+| arc     | $2.2\,(\cos a, \sin a) - (0, 0.3)$ with $a = -\pi/4 + 3\pi t/2$              | 1                   |
+| spiral  | $r(\theta)\,(\cos\theta, \sin\theta)$ with $\theta = K\pi t/2$, $r = 0.4 + 0.3\,\theta$ | $r(t)/r(\tfrac12)$ |
+
+The spiral gives every class a quarter turn, so $K$ classes wind $K/4$ turns: more classes make a longer spiral, not
+a finer cut of the same one. Its radius grows linearly with the angle (an Archimedean spiral), so neighbouring turns
+are $2\pi \times 0.3 \approx 1.9$ apart. Its noise is proportional to the radius, divided by the radius half-way
+along the curve so that $\sigma$ has the same average size as on the other curves; the inner turns stay tight and the
+outer turns spread, as in the paper's spiral. The plotted range follows the spiral's outer radius. The arc keeps a
+fixed three quarters of a circle whatever $K$, because a quarter turn per class would pass a full turn and put the
+last class next to the first.
+
+**Controls.** Every figure offers the same controls: the curve, the number of classes $K$ from 3 to 10, the noise
+$\sigma$, the random seed, and the training points per class $m$ from 10 to 100. The test set does not depend on $m$,
+so metrics stay comparable across training sizes. Figures with a filled map also set its resolution and its fill: the
+model's decision (the class it predicts), or its expected class
+$\expect[y \mid \xvec] = \sum_k k\, P(y = k \mid \xvec)$. Classes are coloured along one diverging scale, dark blue for
+class 1 to dark red for class $K$, in every figure.
+
+## Comparing the models on shared data
+
+The figure fits a chosen model to the training points and draws its expected class over the plane, with contours of
+$\expect[y \mid \xvec]$ at the half-way values $1.5, 2.5, \dots$ between classes.
+
+<OrdinalModelLab />
+
+With the default settings ($K = 5$, $\sigma = 0.2$, 20 points per class, seed 1), the held-out metrics show four
+patterns.
+
+- **Linear.** Every model reaches a mean absolute error of 0.15, because one direction orders the classes. With
+  $K = 10$ and 10 points per class the order starts to pay: the cumulative logit fits $2 + 9 = 11$ parameters and
+  reaches 0.30, while multiclass logistic regression fits 27 free parameters and reaches 0.34.
+- **Sine.** The classes still advance along $x_1$, so the single-score models stay close (0.13). The models with a
+  boundary per split follow the waves slightly better (0.12).
+- **Arc.** No single direction orders the classes. The single-score models reach about 0.30, and the models with a
+  separate boundary per split (Frank & Hall, StORM, multiclass) reach 0.07.
+- **Spiral.** The classes wind around each other. The single-score models, SVOR and regression-then-round fail (0.9
+  and above), and Frank & Hall reaches 0.64. StORM and multiclass logistic regression both reach 0.07 with linear
+  potentials. The nonlinear models follow the curve too: the GP reaches 0.07, Li & Lin's reduction with a small network
+  0.07, and the neural heads 0.06 to 0.08.
+
+The chooser offers every method in the table below except partial proportional odds, whose separate-slope fit is the
+Frank & Hall fit. Only the selected model is fitted.
+
+## Strengths and weaknesses of the methods
+
+The table summarises each method covered in this category: what kind of model it is, how it uses the order, what its
+class probabilities are like, what shape its class boundaries take in input space, where it fails, which method
+addresses that failure, and what it costs. Each entry is argued in the method's note. The figure above fits each of
+them on the shared datasets; the arc and the spiral show the single-score failures.
+
+| Method | Family | Order enters through | Class probabilities | Boundaries | Fails when | Addressed by | Cost |
+| ------ | ------ | -------------------- | ------------------- | ---------- | ---------- | ------------ | ---- |
+| <NoteLink to="multinomial-logistic-regression">Multiclass logistic</NoteLink> (baseline) | nominal | not used | calibrated softmax | free per class | few points per class; charges all errors alike | <NoteLink to="cumulative-link-model">cumulative link</NoteLink> | $(K - 1)(D + 1)$ parameters, convex |
+| Regress then round (baseline) | regression | class index as a number | implied probit with fixed cut points | parallel, equal spacing | classes of unequal width | <NoteLink to="cumulative-link-model">cumulative link</NoteLink> | closed form |
+| <NoteLink to="cumulative-link-model">Cumulative logit, probit</NoteLink> | latent threshold | shared slope, ordered thresholds | valid everywhere | parallel | proportional odds violated (arc, spiral) | <NoteLink to="proportional-odds-assumption">partial proportional odds</NoteLink>; <NoteLink to="gaussian-process-ordinal-regression">GP</NoteLink>; <NoteLink to="structured-ordinal-regression-modelling">StORM</NoteLink> | $D + K - 1$ parameters, concave likelihood |
+| <NoteLink to="continuation-ratio-and-adjacent-category-models">Continuation ratio</NoteLink> | sequential binary | stopping at each level | valid everywhere | parallel | one slope for every stage; depends on direction | level-specific slopes; <NoteLink to="deep-ordinal-regression">CORN</NoteLink> | $K - 1$ nested <NoteLink to="logistic-regression">logistic regressions</NoteLink> |
+| <NoteLink to="continuation-ratio-and-adjacent-category-models">Adjacent category</NoteLink> | restricted multinomial | scores linear in the class index | valid everywhere | parallel | class weight vectors not equally spaced | stereotype model | $D + K - 1$ parameters |
+| <NoteLink to="proportional-odds-assumption">Partial proportional odds</NoteLink> | latent threshold | split-specific slopes for some inputs | can go negative where splits cross | tilted per split | cumulative curves cross | constrained fitting; <NoteLink to="continuation-ratio-and-adjacent-category-models">continuation ratio</NoteLink> | extra $D(K - 2)$ parameters at most |
+| <NoteLink to="threshold-losses-for-ordinal-regression">Immediate threshold</NoteLink> | loss surrogate | the two thresholds around the class | scores, not probabilities | parallel (linear) | error size ignored; thresholds can cross | <NoteLink to="threshold-losses-for-ordinal-regression">all threshold</NoteLink> | convex; <Gloss name="qp" /> for the hinge |
+| <NoteLink to="threshold-losses-for-ordinal-regression">All threshold, SVOR</NoteLink> | loss surrogate | every threshold, bounds absolute error | scores, not probabilities | parallel, or kernel | one score cannot order the classes | kernels; <NoteLink to="gaussian-process-ordinal-regression">GP</NoteLink> | convex; QP for the hinge |
+| <NoteLink to="binary-decomposition-for-ordinal-regression">Frank & Hall</NoteLink> | decomposition | nested targets $y > k$ | can go negative | per split | independent fits cross | <NoteLink to="deep-ordinal-regression">CORAL, CORN</NoteLink>; <NoteLink to="structured-ordinal-regression-modelling">StORM</NoteLink> | $K - 1$ binary fits |
+| <NoteLink to="binary-decomposition-for-ordinal-regression">Li & Lin reduction</NoteLink> | decomposition | extended examples $(\xvec, k)$ | from the binary learner | any binary learner | data set $K - 1$ times larger | — | one binary fit on $(K - 1)N$ examples |
+| <NoteLink to="gaussian-process-ordinal-regression">GP ordinal</NoteLink> | Bayesian latent threshold | thresholds on a latent function | calibrated, widen away from data | smooth, nonlinear | large $N$ | <NoteLink to="sparse-gaussian-processes">sparse GP</NoteLink> approximations | $O(N^3)$ per Newton step |
+| <NoteLink to="deep-ordinal-regression">OR-CNN</NoteLink> | deep decomposition | nested targets | can be inconsistent | free | heads disagree | <NoteLink to="deep-ordinal-regression">CORAL, CORN</NoteLink> | $K - 1$ output units |
+| <NoteLink to="deep-ordinal-regression">CORAL</NoteLink> | deep, shared head | shared weights, ordered biases | consistent at the optimum | one direction in the last layer | splits need different directions | <NoteLink to="deep-ordinal-regression">CORN</NoteLink> | $K - 1$ output units |
+| <NoteLink to="deep-ordinal-regression">CORN</NoteLink> | deep, sequential | conditional targets $y > k \mid y > k - 1$ | monotone by construction | free | outer levels see few examples | per-level weights in the loss | $K - 1$ output units |
+| <NoteLink to="deep-ordinal-regression">SORD</NoteLink> | deep, soft targets | target decays with $\abs{k - y}$ | softmax, not forced unimodal | free | multimodal predictions | unimodal outputs | $K$ output units |
+| <NoteLink to="structured-ordinal-regression-modelling">StORM</NoteLink> | structured (chain CRF) | up-to-$k$ bits and their chain | mass on invalid codes far from data | per boundary, follows curves | many parameters; invalid codes | forbid invalid transitions; condition on valid codes | $O(K)$ per example by forward–backward |
+
+## Evaluation
+
+Ordinal predictions are scored with metrics that grow with the size of the error: <Gloss name="mean-absolute-error">mean absolute error</Gloss> on the class
+index, its macro-average over classes, <Gloss name="qwk">quadratic weighted kappa</Gloss> and rank correlations such as Kendall's $\tau_b$. See
+<NoteLink to="ordinal-classification-metrics" />. Accuracy alone treats an off-by-one error and an off-by-four error
+the same, so it is a poor sole criterion for an ordinal task.

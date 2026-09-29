@@ -5,6 +5,7 @@
 import { Interactive, Readout } from '@/components/viz'
 import { DistributionExplorer } from '@/components/widgets/DistributionExplorer'
 import { Asset } from './Asset'
+import { H2, H3, H4 } from './Anchored'
 import { Pre, Table } from './MdxElements'
 import { Callout, Definition } from './Callout'
 import { Cite } from './Cite'
@@ -14,6 +15,9 @@ import { NoteLink } from './NoteLink'
 import { SpecTable } from './SpecTable'
 
 export const mdxComponents = {
+  h2: H2,
+  h3: H3,
+  h4: H4,
   pre: Pre,
   table: Table,
   Asset,

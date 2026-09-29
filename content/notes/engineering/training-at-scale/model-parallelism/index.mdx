@@ -29,15 +29,15 @@ import { PipelineSchedule } from './PipelineSchedule'
 <Definition>
 Model parallelism places different parts of one model on different devices. **Tensor parallelism** splits the weight
 matrices inside each layer across $t$ devices, which compute each layer together. **Pipeline parallelism** assigns a
-contiguous run of layers, a **stage**, to each of $p$ devices, and passes activations forward and gradients backward
+contiguous run of layers, a **stage**, to each of $p$ devices, and passes activations forward and <NoteLink to="gradient">gradients</NoteLink> backward
 between neighbouring stages. The two are combined with <NoteLink to="data-parallelism">data parallelism</NoteLink>.
 </Definition>
 
 ## Problem
 
 <NoteLink to="data-parallelism">Data parallelism</NoteLink> keeps a full copy of the model on every device. A model
-with $6.7 \times 10^9$ parameters already needs about 107 GB for its weights, gradients and Adam state in mixed
-precision, more than one 80 GB accelerator holds. Even when the state is sharded, one layer's activations and weights can
+with $6.7 \times 10^9$ parameters already needs about 107 GB for its weights, gradients and Adam state in <NoteLink to="mixed-precision-training">mixed
+precision</NoteLink>, more than one 80 GB accelerator holds. Even when the state is sharded, one layer's activations and weights can
 exceed a device. The model itself must be divided, and the division must keep every device busy and the communication
 small.
 
@@ -69,8 +69,8 @@ partial product $\Xmat_i \Amat_i$ with $\Xmat \Amat = \sum_i \Xmat_i \Amat_i$, b
 $\operatorname{GeLU}\paren{\sum_i \Xmat_i \Amat_i} \ne \sum_i \operatorname{GeLU}(\Xmat_i \Amat_i)$, so the partial
 products would have to be summed across devices before the non-linearity.
 
-**Split $\Bmat$ by rows.** Write $\Bmat$ as the stack of blocks $\Bmat_i \in \reals^{4h/t \times h}$. Block matrix
-multiplication gives
+**Split $\Bmat$ by rows.** Write $\Bmat$ as the stack of blocks $\Bmat_i \in \reals^{4h/t \times h}$. Block <NoteLink to="matrix-multiplication">matrix
+multiplication</NoteLink> gives
 
 $$
 \Zmat = [\Ymat_1, \dots, \Ymat_t] \begin{bmatrix} \Bmat_1 \\ \vdots \\ \Bmat_t \end{bmatrix} = \sum_{i=1}^{t} \Ymat_i \Bmat_i.
@@ -87,7 +87,7 @@ A transformer layer thus needs two all-reduces of an $n \times h$ activation in 
 pass <Cite id="shoeybi2019" />.
 
 These all-reduces sit on the critical path of every layer, so tensor parallelism is used within a server, where devices
-share fast links, typically with $t \le 8$. Megatron-LM trained an 8.3-billion-parameter model on 512 GPUs at
+share fast links, typically with $t \le 8$. Megatron-LM trained an 8.3-billion-parameter model on 512 <Gloss name="gpu" plural /> at
 15.1 PetaFLOP/s, 76% scaling efficiency relative to one GPU, combining 8-way tensor parallelism with data parallelism
 <Cite id="shoeybi2019" />.
 
@@ -117,7 +117,7 @@ $$
 of the step. Relative to the ideal time, the overhead is $(p - 1)/m$ <Cite id="narayanan2021" />. The bubble shrinks
 only by using many more micro-batches than stages.
 
-**Activation memory and 1F1B.** GPipe runs all $m$ forward passes before any backward pass, so each stage stores the
+**<NoteLink to="memory-footprint-of-training">Activation memory</NoteLink> and 1F1B.** GPipe runs all $m$ forward passes before any backward pass, so each stage stores the
 activations of all $m$ micro-batches. The **1F1B** schedule starts the backward pass of a micro-batch as soon as it has
 left the last stage. After a warm-up of at most $p - 1$ forward passes, each stage alternates one forward and one
 backward pass, so it holds the activations of at most $p$ micro-batches. The step time and bubble are unchanged
@@ -140,7 +140,7 @@ across servers, and data parallelism of degree $d$ over replicas of the whole pi
 Narayanan et al. trained a model with one trillion parameters on 3072 GPUs at 502 PetaFLOP/s, 52% of the GPUs' peak
 throughput, with this combination and the interleaved schedule <Cite id="narayanan2021" />.
 
-Tensor parallelism leaves some activations replicated: layer normalisation and dropout operate on the full $n \times h$
+Tensor parallelism leaves some activations replicated: <NoteLink to="layer-normalisation">layer normalisation</NoteLink> and dropout operate on the full $n \times h$
 tensor on every device. **Sequence parallelism** splits those operations along the token dimension, which replaces each
 all-reduce with a reduce-scatter and an all-gather of the same total volume and divides their activation memory by $t$
 <Cite id="korthikanti2022" />.
@@ -153,7 +153,7 @@ all-reduce with a reduce-scatter and an all-gather of the same total volume and 
 requires $(p - 1)/(m + p - 1) \le 0.05$, that is $m \ge 19 (p - 1) = 133$ micro-batches. With micro-batches of one
 sequence, that fixes a global batch of at least 133 sequences per pipeline replica.
 
-**Tensor-parallel MLP.** GPT-3 has width $h = 12288$ <Cite id="korthikanti2022" />. One MLP holds
+**Tensor-parallel <Gloss name="mlp" />.** <Gloss name="gpt-3" /> has width $h = 12288$ <Cite id="korthikanti2022" />. One MLP holds
 $2 \times 12288 \times 49152 = 1.21 \times 10^9$ weights, 2.4 GB in 16-bit precision. With $t = 8$, each device holds
 302 MB of it. For a micro-batch of one sequence of 2048 tokens, each all-reduce carries a $2048 \times 12288$
 activation, 50 MB in 16-bit precision, and a layer needs two in the forward pass and two in the backward pass.
@@ -169,7 +169,7 @@ activation, 50 MB in 16-bit precision, and a layer needs two in the forward pass
 - **Tensor-parallel degree.** Larger $t$ fits bigger layers but shrinks each device's matrices, lowering arithmetic
   efficiency, and multiplies communication. Beyond one server, the links are too slow.
 - **Pipeline depth.** More stages cut memory per device but enlarge the bubble unless the number of micro-batches grows
-  with them, which raises the global batch size.
+  with them, which raises the global <NoteLink to="minibatching-and-batch-size">batch size</NoteLink>.
 - **Stage balance.** The slowest stage sets the pace. The embedding and output layers are often much larger or smaller
   than a transformer block and must be balanced by hand.
 

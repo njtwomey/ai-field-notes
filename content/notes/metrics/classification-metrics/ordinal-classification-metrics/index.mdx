@@ -1,0 +1,154 @@
+---
+title: Ordinal classification metrics
+kind: concept
+summary: 'Metrics for predictions of ordered classes charge an error by its size: mean absolute error on the class index, its macro-average over true classes, quadratic weighted kappa and rank correlations such as Kendall''s $\tau_b$. Accuracy treats all errors alike.'
+tags: [metrics, classification, ordinal-regression, worked-example]
+aliases:
+  [
+    ordinal evaluation,
+    mean absolute error for ordinal labels,
+    macro-averaged mean absolute error,
+    macro-MAE,
+    MAE^M,
+    off-by-one accuracy,
+    accuracy within one,
+    ordinal classification index,
+  ]
+requires: [confusion-matrix]
+related:
+  [
+    cohens-kappa,
+    rank-correlation,
+    squared-and-absolute-error-metrics,
+    accuracy-and-balanced-accuracy,
+    averaging-multiclass-metrics,
+  ]
+references: [baccianella2009, cardoso2011, cohen1968, kendall1945, gutierrez2016]
+status: draft
+updated: 2026-09-29
+---
+
+import { MetricResponse } from './MetricResponse'
+
+<Definition>
+Let $n$ items have true classes $y_i$ and predicted classes $\hat y_i$ in $\set{1, \dots, K}$, and let $C_{jk}$ count
+the items with true class $j$ predicted as $k$. The mean absolute error is
+$\mathrm{MAE} = \frac1n\sum_i \abs{\hat y_i - y_i}$. The macro-averaged MAE averages the per-class MAE over the true
+classes. Quadratic weighted kappa is $\kappa_w = 1 - \sum_{jk} (j - k)^2 C_{jk} \big/ \sum_{jk} (j - k)^2 E_{jk}$, where
+$E_{jk}$ is the count expected if predictions were independent of the truth with the same marginals. Kendall's
+$\tau_b$ and Spearman's $\rho$ measure how well the predicted order matches the true order <Cite id="gutierrez2016" />.
+</Definition>
+
+## Why accuracy is not enough
+
+For an ordinal label, a prediction of "moderate" for a "mild" case is a smaller error than "severe". Accuracy counts
+both as one mistake. Two classifiers with equal accuracy can therefore differ greatly in how far their errors land.
+The metrics below read the <NoteLink to="confusion-matrix">confusion matrix</NoteLink> $\Cmat$ with the order in mind. They weight a cell by its distance from the
+diagonal, or they compare rankings.
+
+<MetricResponse />
+
+## Mean absolute error on the class index
+
+$\mathrm{MAE}$ treats the classes as the integers $1, \dots, K$ and averages the distance between prediction and truth.
+In terms of the confusion matrix,
+
+$$
+\mathrm{MAE} = \frac1n \sum_{j,k} \abs{j - k}\, C_{jk}.
+$$
+
+It lies in $[0, K - 1]$, and it is 0 only for a perfect predictor. Its unit is "classes". The integer coding assumes
+that every step between neighbouring classes costs the same, which is the one interval assumption an ordinal metric
+usually accepts. See <NoteLink to="squared-and-absolute-error-metrics" />.
+
+**Macro-averaged MAE.** Under <NoteLink to="class-imbalance">class imbalance</NoteLink>, MAE is dominated by the frequent classes. A predictor that always outputs
+a middle class can score a low MAE on data concentrated in the middle. Baccianella et al. average the MAE of each true
+class instead <Cite id="baccianella2009" />:
+
+$$
+\mathrm{MAE}^M = \frac{1}{\abs{\Kcal}} \sum_{j \in \Kcal} \frac{\sum_k \abs{j - k}\, C_{jk}}{\sum_k C_{jk}},
+$$
+
+where $\Kcal$ is the set of classes present in the test data. The constant middle-class predictor now pays the full
+distance for every outer class, however rare. This is the ordinal counterpart of <NoteLink to="accuracy-and-balanced-accuracy">balanced accuracy</NoteLink>; see
+<NoteLink to="averaging-multiclass-metrics" />.
+
+## Quadratic weighted kappa
+
+Weighted kappa corrects a weighted disagreement for the disagreement expected by chance <Cite id="cohen1968" />. With
+row totals $r_j = \sum_k C_{jk}$, column totals $c_k = \sum_j C_{jk}$ and the chance-expected counts
+$E_{jk} = r_j c_k / n$,
+
+$$
+\kappa_w = 1 - \frac{\sum_{j,k} w_{jk} C_{jk}}{\sum_{j,k} w_{jk} E_{jk}},
+$$
+
+with weights $w_{jk} = (j - k)^2$ for the quadratic version and $\abs{j - k}$ for the linear one. The numerator divided
+by $n$ is the mean squared error of the predictions on the class index. The denominator divided by $n$ is the mean
+squared error of a predictor that draws its predictions independently of the truth from the same marginal
+distribution. So quadratic weighted kappa is one minus the ratio of the model's squared error to a shuffled model's
+squared error. It is 1 for perfect agreement, 0 at chance level and negative below it. A constant predictor has
+$E_{jk} = C_{jk}$ for every cell, since its predictions are trivially independent of the truth, so its kappa is 0
+whatever its accuracy.
+
+The squared weights penalise large errors more than MAE does. Quadratic weighted kappa is scale-free, which makes it
+comparable across tasks with different $K$, and it is common in competitions on essay scoring and disease grading. See
+<NoteLink to="cohens-kappa" /> for the unweighted statistic.
+
+## Rank correlations
+
+A rank correlation asks whether items with higher true classes get higher predictions, and ignores the class values
+themselves. Kendall's $\tau_b$ compares every pair of items. A pair is concordant when its true and predicted orders
+agree and discordant when they disagree. With $P$ concordant pairs, $Q$ discordant pairs, $n_0 = n(n - 1)/2$ pairs in
+all, and $T_y$, $T_{\hat y}$ the pairs tied on the truth or on the prediction,
+
+$$
+\tau_b = \frac{P - Q}{\sqrt{(n_0 - T_y)(n_0 - T_{\hat y})}}.
+$$
+
+Ordinal data have many ties, since $K$ is small and $n$ is large, and the tie correction in the denominator is what
+makes $\tau_b$ reach 1 for a perfect predictor <Cite id="kendall1945" />. Spearman's $\rho$ is the <NoteLink to="pearson-correlation">Pearson correlation</NoteLink>
+of mid-ranks. Both are undefined for a constant predictor, whose predictions have no order. A predictor that is
+off by exactly one class in the same direction everywhere keeps a perfect rank correlation while its MAE is 1, so rank
+correlations suit tasks where only the order of the items matters. See <NoteLink to="rank-correlation" />.
+
+## Other measures
+
+- **Accuracy within one class** counts a prediction as correct when $\abs{\hat y - y} \le 1$. It is common in age
+  estimation and credit rating, and it ignores everything about errors larger than one.
+- **Mean squared error** on the class index penalises large errors quadratically, as quadratic weighted kappa does
+  without the chance correction.
+- **Ordinal classification index.** Cardoso and Sousa define a measure from the cheapest path through the confusion
+  matrix that is consistent with the order, which combines the size of errors with their dispersion
+  <Cite id="cardoso2011" />.
+
+### Worked example
+
+Ten items in three classes, with two predictors of equal accuracy $0.7$. The rows are the true classes, the columns the
+predictions:
+
+$$
+\Cmat_A = \begin{bmatrix} 3 & 1 & 0 \\ 1 & 2 & 1 \\ 0 & 0 & 2 \end{bmatrix}, \qquad
+\Cmat_B = \begin{bmatrix} 3 & 0 & 1 \\ 1 & 2 & 1 \\ 0 & 0 & 2 \end{bmatrix}.
+$$
+
+Predictor B differs only in sending one class-1 item to class 3 instead of class 2.
+
+- **MAE.** A makes three errors of size 1, so $\mathrm{MAE}_A = 0.3$. B makes two of size 1 and one of size 2, so
+  $\mathrm{MAE}_B = 0.4$.
+- **Macro-MAE.** A's per-class errors are $(1/4, 2/4, 0)$ with mean $0.25$; B's are $(2/4, 2/4, 0)$ with mean $0.33$.
+- **Quadratic weighted kappa.** The row totals are $(4, 4, 2)$ for both. A's column totals are $(4, 3, 3)$, so
+  $\sum_{jk} (j - k)^2 E_{jk} = 12.6$ and $\kappa_w = 1 - 3/12.6 = 0.76$. B's column totals are $(4, 2, 4)$, which gives
+  $\sum (j-k)^2 E_{jk} = 14.0$, a weighted disagreement of $1 + 4 + 1 = 6$, and $\kappa_w = 1 - 6/14 = 0.57$.
+- **Kendall's $\tau_b$** falls from $0.71$ to $0.56$.
+
+Accuracy does not tell the two apart. Every ordinal metric prefers A.
+
+## Pitfalls
+
+- **Integer coding is an assumption.** MAE and weighted kappa treat the steps between classes as equal. If the classes
+  are unevenly spaced in meaning, a cost matrix that states the real costs is more honest.
+- **Kappa depends on the marginals.** The same confusion pattern gives different kappas under different class
+  distributions, because the chance term changes.
+- **Report more than one metric.** MAE says how far errors land, macro-MAE whether rare classes are served, kappa how
+  much better than chance, and accuracy how often the answer is exact.

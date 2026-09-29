@@ -113,6 +113,11 @@ with `#key` anchors; ⌘K search lists matching entries below the notes.
   forces a reading and does not count as the first use; `plural` pluralises; children replace the words shown (e.g. to
   inflect a concept). Hovering shows the long form, the definition and links to the note and the glossary entry.
   Do not put `<Gloss>` in headings: the table of contents shows heading source text.
+- **Marking up notes:** `make links SCOPE="<path | slug>"` lists the first unmarked mention of each glossary entry
+  and note in the scoped notes, with its sentence and a decision (add, or skip with the reason: the note's own term,
+  already linked or glossed, defined in bold, generic, an acronym sense that does not fit). `ARGS="--apply"` writes
+  every add; the author's words stay as written inside `<Gloss>` and `<NoteLink>`. Run it on a new note and read the
+  report before applying.
 - One sense per entry. When one acronym names two quantities, make two entries (AUROC and AUPRC, never a bare AUC),
   and keep the generic spelling as an alias of the usual one.
 

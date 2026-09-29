@@ -32,7 +32,7 @@ $$
 
 with a diagonal $\Amat \in \reals^{N \times N}$ that is a fixed learned parameter, and a step $\Delta_t > 0$ and vectors
 $\Bmat_t, \Cmat_t \in \reals^N$ that are computed from the input at position $t$. **Mamba** is a deep network of blocks
-built around this layer, with no attention and no separate MLP blocks <Cite id="gu2023mamba" />.
+built around this layer, with no attention and no separate <Gloss name="mlp" /> blocks <Cite id="gu2023mamba" />.
 </Definition>
 
 ## Why time invariance fails
@@ -106,12 +106,12 @@ gate $g = 0.5$ gives $h = (1, 5, 7, 1.5)$: the ignored tokens dominate the state
 ## Computing a selective layer
 
 Input-dependent parameters make the layer time-varying. The output is no longer a convolution with one kernel, so the
-FFT route of S4 is gone. The recurrence is still linear in $\hvec$, and $\bar{\Amat}_t$ is diagonal, so each state
+<Gloss name="fft" /> route of S4 is gone. The recurrence is still linear in $\hvec$, and $\bar{\Amat}_t$ is diagonal, so each state
 dimension is a scalar recurrence $h_t = \bar a_t h_{t-1} + \bar b_t x_t$. A
 <NoteLink to="parallel-scan">parallel scan</NoteLink> computes all $L$ states in $O(\log L)$ depth and $O(L)$ work.
 
 The obstacle is memory. The states form a tensor of shape (batch, $L$, $D$, $N$), $N$ times larger than the input. Writing
-it to the GPU's main memory (HBM) would make the layer memory-bound. Mamba's kernel avoids this in the same way as
+it to the <Gloss name="gpu" />'s main memory (HBM) would make the layer memory-bound. Mamba's kernel avoids this in the same way as
 <NoteLink to="flash-attention">FlashAttention</NoteLink> <Cite id="gu2023mamba" />:
 
 - **Kernel fusion.** It reads $\Delta$, $\Amat$, $\Bmat$, $\Cmat$ and $x$ from HBM into on-chip SRAM, discretises and runs
@@ -127,8 +127,8 @@ position. There is no <NoteLink to="key-value-cache">KV cache</NoteLink>.
 ## The Mamba block
 
 A Mamba block expands the model width $D$ by a factor $E = 2$ with a linear projection into two branches. One branch
-applies a short causal convolution, a SiLU nonlinearity and the selective SSM. The other applies SiLU and acts as a
-multiplicative gate on the first. A linear projection returns to width $D$. Blocks are stacked with residual connections
+applies a short causal convolution, a <Gloss name="silu" /> nonlinearity and the selective SSM. The other applies SiLU and acts as a
+multiplicative gate on the first. A linear projection returns to width $D$. Blocks are stacked with <NoteLink to="residual-connections">residual connections</NoteLink>
 and normalisation, and no attention or MLP layers are added <Cite id="gu2023mamba" />.
 
 <MambaBlockDiagram />
@@ -159,12 +159,12 @@ $$
 where the rows of $\Cmat$ and $\Bmat$ are the $\Cmat_t^\tr$ and $\Bmat_t^\tr$, and $\circ$ is the elementwise product. This
 is causal <NoteLink to="linear-attention">linear attention</NoteLink> with queries $\Cmat$, keys $\Bmat$, values $x$ and a
 decay mask $\Lmat$ in place of the causal mask. The same layer has two algorithms: the recurrence, linear in $L$, and
-the masked matrix product, quadratic in $L$ but made of matrix multiplications. Dao and Gu call this **structured state
-space duality** (SSD) <Cite id="dao2024" />.
+the masked <NoteLink to="matrix-multiplication">matrix product</NoteLink>, quadratic in $L$ but made of matrix multiplications. Dao and Gu call this **structured state
+space duality** (<Gloss name="single-shot-detector" />) <Cite id="dao2024" />.
 
-Mamba-2 computes SSD in chunks: the quadratic form inside each chunk, which uses the GPU's matrix-multiply units, and the
+Mamba-2 computes SSD in chunks: the <NoteLink to="positive-definite-matrices">quadratic form</NoteLink> inside each chunk, which uses the GPU's matrix-multiply units, and the
 recurrence between chunks. The SSD layer is 2 to 8 times faster than Mamba's selective scan, and the faster layer lets
-Mamba-2 use a larger state <Cite id="dao2024" />. It also adds heads, analogous to multi-head attention.
+Mamba-2 use a larger state <Cite id="dao2024" />. It also adds heads, analogous to <Gloss name="mha">multi-head attention</Gloss>.
 
 ## Assumptions
 

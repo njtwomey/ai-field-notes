@@ -19,7 +19,7 @@ import { NBeatsBlockDiagram } from './NBeatsBlockDiagram'
 **N-BEATS** (neural basis expansion analysis for time series) maps a look-back window $\xvec \in \reals^{L}$ of one
 series to a forecast $\hat\yvec \in \reals^{H}$ of its next $H$ values <Cite id="oreshkin2020" />. It is a sequence of
 blocks. Block $\ell$ reads its input $\xvec_\ell$, computes expansion coefficients $\thetavec^b_\ell$ and
-$\thetavec^f_\ell$ with a fully connected network, and turns them into a **backcast** $\hat\xvec_\ell$ and a **partial
+$\thetavec^f_\ell$ with a <Gloss name="mlp">fully connected network</Gloss>, and turns them into a **backcast** $\hat\xvec_\ell$ and a **partial
 forecast** $\hat\yvec_\ell$ through basis layers. Blocks are joined by **doubly residual stacking**:
 
 $$
@@ -30,7 +30,7 @@ $$
 
 ## Motivation
 
-In the 2018 M4 competition, the most accurate entry was a hybrid of an LSTM network and Holt-Winters exponential
+In the 2018 M4 competition, the most accurate entry was a hybrid of an <Gloss name="lstm" /> network and Holt-Winters exponential
 smoothing. The competition's organisers concluded that hybrids and combinations were the way forward. N-BEATS was built
 to test whether a network with no time-series-specific components could do better, and whether constraining its
 outputs could make its forecasts interpretable <Cite id="oreshkin2020" />. It forecasts one univariate series at a
@@ -40,7 +40,7 @@ time, from its own past values only, with weights shared across all series of a 
 
 Block $\ell$ has two parts.
 
-**Coefficient network.** Four fully connected layers with ReLU activations, followed by two linear heads:
+**Coefficient network.** Four fully connected layers with <Gloss name="relu" /> activations, followed by two linear heads:
 
 $$
 \hvec_{\ell} = \operatorname{FC}_{\ell,4}\big(\operatorname{FC}_{\ell,3}(\operatorname{FC}_{\ell,2}(
@@ -59,7 +59,7 @@ $\vvec^b_i \in \reals^L$ are waveforms over the look-back window. The basis is e
 
 ## Doubly residual stacking
 
-A standard residual network adds each layer's input to its output. N-BEATS has two residual branches.
+A standard <Gloss name="resnet">residual network</Gloss> adds each layer's input to its output. N-BEATS has two residual branches.
 
 - **Backcast branch.** Each block subtracts its backcast from its input and passes the remainder on. Unrolling the
   recursion gives $\xvec_{\ell+1} = \xvec - \sum_{j \le \ell} \hat\xvec_j$. Block $\ell + 1$ sees only the part of the
@@ -70,16 +70,16 @@ A standard residual network adds each layer's input to its output. N-BEATS has t
 
 <NBeatsBlockDiagram />
 
-Both branches are sums, so gradients reach every block directly, which lets the network be very deep. The generic
+Both branches are sums, so <NoteLink to="gradient">gradients</NoteLink> reach every block directly, which lets the network be very deep. The generic
 configuration has 30 stacks of one block each.
 
 ## Generic and interpretable bases
 
-**Generic.** The basis layers are learnt linear maps, $\hat\yvec_\ell = \Vmat^f_\ell\thetavec^f_\ell + \bvec^f_\ell$
+**Generic.** The basis layers are learnt <NoteLink to="matrix-vector-product">linear maps</NoteLink>, $\hat\yvec_\ell = \Vmat^f_\ell\thetavec^f_\ell + \bvec^f_\ell$
 with $\Vmat^f_\ell \in \reals^{H \times \dim\thetavec^f_\ell}$. Its columns are waveforms over the horizon, but nothing
 constrains their shape, and the learnt ones show no structure. This is **N-BEATS-G**.
 
-**Interpretable.** Fixed bases force stacks to produce the components of a classical decomposition. This is
+**Interpretable.** Fixed bases force stacks to produce the components of a <NoteLink to="time-series-decomposition">classical decomposition</NoteLink>. This is
 **N-BEATS-I**. Time over the horizon is $\tvec = (0, 1, \dots, H-1)/H$, which runs from $0$ to $(H-1)/H$.
 
 - **Trend stack.** The basis is a polynomial of small degree $p$:
@@ -90,7 +90,7 @@ constrains their shape, and the learnt ones show no structure. This is **N-BEATS
 
   where powers are elementwise. With $p$ equal to 2 or 3 the output varies slowly across the horizon, as a trend should.
 
-- **Seasonality stack.** The basis is a truncated Fourier series:
+- **Seasonality stack.** The basis is a truncated <NoteLink to="fourier-series">Fourier series</NoteLink>:
 
   $$
   \hat y^{\,\mathrm{seas}}_{\ell}(t) = \sum_{i=0}^{\lfloor H/2 \rfloor - 1} \theta^f_{\ell,i} \cos(2\pi i t) +
@@ -103,7 +103,7 @@ The interpretable model has a trend stack followed by a seasonality stack, three
 share their weights as well as their basis.
 
 **Why the stack outputs are a trend and a seasonal component.** Every block in the trend stack outputs a vector in the
-column space of $\Tmat$. A sum of polynomials of degree at most $p$ is a polynomial of degree at most $p$, so the trend
+<NoteLink to="rank-and-null-space">column space</NoteLink> of $\Tmat$. A sum of polynomials of degree at most $p$ is a polynomial of degree at most $p$, so the trend
 stack's total output $\sum_{\ell \in \mathrm{trend}} \Tmat\thetavec^f_\ell = \Tmat \sum_\ell \thetavec^f_\ell$ is
 again a single polynomial of degree at most $p$ in $t$. Likewise, every seasonal block's output is a combination of
 $\cos(2\pi i t)$ and $\sin(2\pi i t)$, and so is their sum. Each such function has period $1/i$ in $t$, which divides
@@ -123,11 +123,11 @@ stack models a detrended window.
 ## Training and ensembling
 
 Each model is trained on windows sampled from the most recent part of each series' training data. The loss is a
-scale-free forecast error: symmetric MAPE, MASE or MAPE. The reported forecasts are the median of an ensemble of 180
+scale-free forecast error: symmetric MAPE, <Gloss name="mase" /> or <Gloss name="mape" />. The reported forecasts are the median of an ensemble of 180
 models, which differ in three ways: the loss (three choices), the look-back length ($L = 2H, 3H, \dots, 7H$, six
 choices) and the random initialisation
 
-<Cite id="oreshkin2020" />. The authors found the ensemble a stronger regulariser than dropout or weight decay, which
+<Cite id="oreshkin2020" />. The authors found the ensemble a stronger regulariser than dropout or <Gloss name="weight-decay">weight decay</Gloss>, which
 improved single models but hurt the ensemble.
 
 ## Worked example

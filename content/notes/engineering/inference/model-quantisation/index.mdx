@@ -36,8 +36,8 @@ $$
 q = \operatorname{clamp}\paren{\operatorname{round}(x / s) + z,\; 0,\; 2^b - 1}, \qquad \hat x = s\,(q - z).
 $$
 
-The quantised model stores $q$, $s$ and $z$ instead of $x$, and computes matrix products in integer arithmetic. The
-approximation $\hat x$ differs from $x$ by a rounding error inside the representable range and by a clipping error
+The quantised model stores $q$, $s$ and $z$ instead of $x$, and computes <NoteLink to="matrix-multiplication">matrix products</NoteLink> in integer arithmetic. The
+approximation $\hat x$ differs from $x$ by a <NoteLink to="floating-point-arithmetic">rounding error</NoteLink> inside the representable range and by a clipping error
 outside it.
 </Definition>
 
@@ -75,7 +75,7 @@ near $2^b - 1$. Rounding picks the nearest grid point, and clamping maps values 
 Dequantisation inverts the affine map: $\hat x = s(q - z)$.
 
 The zero-point is an integer, not the real number $-\alpha/s$, so that $x = 0$ is represented exactly: $q = z$ gives
-$\hat x = 0$. Zero is the value of padding, of ReLU outputs below threshold, and of pruned weights, so an error there
+$\hat x = 0$. Zero is the value of padding, of <Gloss name="relu" /> outputs below threshold, and of pruned weights, so an error there
 would bias every sum that contains it <Cite id="jacob2018" />.
 
 **Symmetric quantisation** fixes $z = 0$ and uses signed integers $-(2^{b-1} - 1), \dots, 2^{b-1} - 1$ with
@@ -101,7 +101,7 @@ that is $10 \log_{10} 4 \approx 6.02$ dB per bit, the same rule as for
 ### Clipping trades range for resolution
 
 Values outside $[\alpha, \beta]$ are clamped to the end points and incur an error equal to their distance from the
-range. The total mean squared error for a symmetric range $[-c, c]$ is
+range. The total <Gloss name="mse">mean squared error</Gloss> for a symmetric range $[-c, c]$ is
 
 $$
 \operatorname{MSE}(c) = \underbrace{\frac{s(c)^2}{12} \pr\paren{\abs{x} \le c}}_{\text{rounding}} + \underbrace{\expect\brack{(\abs{x} - c)^2 \, \indicator\set{\abs{x} > c}}}_{\text{clipping}}, \qquad s(c) = \frac{c}{2^{b-1} - 1}.
@@ -109,7 +109,7 @@ $$
 
 The rounding term grows as $c^2$ and the clipping term falls as $c$ grows, so there is an interior minimum. Setting $c$
 to the largest absolute value, the simplest choice, makes the clipping term zero but lets a single outlier widen every
-step. For two million standard Gaussian weights at 4 bits, the largest value is $5.35$ standard deviations and gives an
+step. For two million standard Gaussian weights at 4 bits, the largest value is $5.35$ <NoteLink to="variance-and-covariance">standard deviations</NoteLink> and gives an
 MSE of $0.049$. The minimising range is $c = 2.45$ standard deviations and gives $0.013$, about a quarter. Range-setting
 methods therefore search over $c$, by grid search or golden-section search, for the minimum of the MSE on the tensor
 itself or on a calibration batch <Cite id="nagel2021" />.
@@ -141,7 +141,7 @@ the standard choice at 8 bits <Cite id="nagel2021" />. At 4 bits, weights are sp
 consecutive inputs, each with its own scale. A 16-bit scale per group of 128 adds $16/128 = 0.125$ bits per weight.
 
 Activations cannot have per-input-channel scales, because a per-$k$ scale sits inside the sum over $k$ and cannot be
-factored out. This matters for large language models: beyond about 6.7 billion parameters, a few hidden dimensions carry
+factored out. This matters for <Gloss name="llm">large language models</Gloss>: beyond about 6.7 billion parameters, a few hidden dimensions carry
 activations up to about 20 times larger than the rest in almost every layer, and per-tensor activation quantisation
 then fails <Cite id="dettmers2022" />. LLM.int8() keeps those outlier dimensions in 16-bit arithmetic and quantises the
 other 99.9% of values to 8 bits.
@@ -155,8 +155,8 @@ layer's output, not of each weight, do much better <Cite id="nagel2021" />.
 
 - **GPTQ** quantises a linear layer's weights one input column at a time to minimise
   $\norm{\Wmat \Xmat - \hat\Wmat \Xmat}_F^2$ on calibration inputs $\Xmat$. After a column is rounded, the remaining
-  unquantised columns are adjusted to cancel its error, using the inverse of the Hessian $\Hmat = 2 \Xmat \Xmat^\tr$ of
-  that squared error. GPTQ quantises a 175-billion-parameter model to 3 or 4 bits in about four GPU hours with a small
+  unquantised columns are adjusted to cancel its error, using the inverse of the <NoteLink to="hessian">Hessian</NoteLink> $\Hmat = 2 \Xmat \Xmat^\tr$ of
+  that squared error. GPTQ quantises a 175-billion-parameter model to 3 or 4 bits in about four <Gloss name="gpu" /> hours with a small
   loss in perplexity <Cite id="frantar2023" />.
 - **AWQ** observes that about 1% of weight channels, those that multiply large activations, cause most of the output
   error. It multiplies each such input channel of $\Wmat$ by a factor $\sigma > 1$ and divides the matching activation by
@@ -165,9 +165,9 @@ layer's output, not of each weight, do much better <Cite id="nagel2021" />.
 
 ### Quantisation-aware training
 
-Quantisation-aware training (QAT) inserts the quantise–dequantise operation $x \mapsto \hat x$ into the forward pass
+Quantisation-aware training (QAT) inserts the quantise–dequantise operation $x \mapsto \hat x$ into the <NoteLink to="multilayer-perceptron">forward pass</NoteLink>
 during training or fine-tuning, so that the network learns weights that survive rounding <Cite id="jacob2018" />. The
-rounding function has zero derivative almost everywhere. Training therefore uses the straight-through estimator: the
+rounding function has zero <NoteLink to="derivative">derivative</NoteLink> almost everywhere. Training therefore uses the straight-through estimator: the
 backward pass treats $\partial \hat x / \partial x$ as 1 inside the clipping range and 0 outside it. The scales can be
 learned as parameters too. QAT recovers more accuracy than PTQ at 4 bits and below, at the cost of a training run and
 access to training data <Cite id="nagel2021" />.
@@ -217,7 +217,7 @@ are quantised too, so that the product runs on integer or 8-bit floating-point u
 - **Calibration data must match deployment.** Activation ranges set on unrepresentative inputs clip real inputs.
 - **Accumulators must be wide.** Each product of two signed 8-bit integers needs up to 15 bits, and a sum of 4096 of them
   needs up to 27 bits; accumulating in 16 bits overflows.
-- **Batch normalisation must be folded first.** Folding the normalisation's scale into the weights after quantisation
+- **<NoteLink to="batch-normalisation">Batch normalisation</NoteLink> must be folded first.** Folding the normalisation's scale into the weights after quantisation
   changes the weight ranges and invalidates the scales <Cite id="jacob2018" />.
-- **Perplexity hides failures.** A quantised language model can keep its average perplexity while failing on long
+- **Perplexity hides failures.** A quantised <Gloss name="language-model">language model</Gloss> can keep its average perplexity while failing on long
   reasoning chains or rare languages; evaluate the downstream task.

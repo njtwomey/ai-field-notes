@@ -1,0 +1,148 @@
+---
+title: Deep ordinal regression
+kind: concept
+summary: 'Deep ordinal regression puts an ordinal output layer on a neural network. CORAL uses $K - 1$ sigmoid units that share one weight vector, so $P(y > k)$ is monotone in $k$; CORN chains conditional probabilities; SORD trains a softmax on soft targets that decay with the distance $\abs{k - y}$.'
+tags: [ordinal-regression, deep-learning, loss-functions]
+aliases:
+  [
+    consistent rank logits,
+    CORN,
+    conditional ordinal regression for neural networks,
+    SORD,
+    soft ordinal labels,
+    OR-CNN,
+    unimodal ordinal outputs,
+    ordinal neural network,
+  ]
+requires: [binary-decomposition-for-ordinal-regression]
+partOf: [ordinal-regression]
+related:
+  [
+    continuation-ratio-and-adjacent-category-models,
+    cross-entropy-and-perplexity,
+    cumulative-link-model,
+  ]
+references: [niu2016, cao2020coral, shi2023corn, diaz2019sord, beckham2017]
+status: draft
+updated: 2026-09-29
+---
+
+import { OrdinalModelLab } from '../_shared/OrdinalModelLab'
+import { SoftLabels } from './SoftLabels'
+
+<Definition>
+Deep <NoteLink to="ordinal-regression">ordinal regression</NoteLink> trains a neural network $\hvec = g(\xvec)$ with an output layer and loss that respect the order
+of the labels $1 < \dots < K$. Three designs dominate. CORAL outputs $q_k = \sigma(\wvec^\top\hvec + \beta_k)$ for
+$k = 1, \dots, K - 1$ with one shared $\wvec$ and trains each unit on the target $\indicator[y > k]$
+<Cite id="cao2020coral" />. CORN outputs conditional probabilities $P(y > k \mid y > k - 1)$ and multiplies them
+<Cite id="shi2023corn" />. SORD keeps a softmax output and trains it against a soft target
+$t_k \propto \exp(-\alpha\,\phi(k, y))$ that decays with a distance $\phi$ <Cite id="diaz2019sord" />.
+</Definition>
+
+## Problem
+
+A network with a $K$-way softmax and <NoteLink to="cross-entropy-and-perplexity">cross-entropy loss</NoteLink> treats the classes as nominal. Cross-entropy against a one-hot
+target is $-\log p_y$, which depends only on the probability of the true class. Predicting age 70 for a 20-year-old
+costs the same as predicting 21 if both leave the same mass on 20. A single regression output with rounding keeps the
+order, but assumes equal spacing between classes and gives no distribution. The designs below keep a distribution and
+put the order into the output layer or the target.
+
+## Binary heads: OR-CNN and CORAL
+
+**Independent heads.** Niu et al. replace the softmax with $K - 1$ sigmoid units, unit $k$ trained with binary
+cross-entropy on $\indicator[y > k]$, and predict $\hat y = 1 + \sum_k \indicator[q_k > \tfrac12]$
+<Cite id="niu2016" />. This is the <NoteLink to="binary-decomposition-for-ordinal-regression">Frank and Hall
+decomposition</NoteLink> with a shared backbone. Each unit has its own weight vector, so nothing stops $q_2 > q_1$ at
+some input. The estimates of $P(y > k)$ are then not monotone in $k$, and the counting rule and the probabilities
+disagree.
+
+**Shared weights.** CORAL gives the $K - 1$ units one weight vector and separate biases:
+$q_k(\xvec) = \sigma(\wvec^\top\hvec + \beta_k)$ <Cite id="cao2020coral" />. If $\beta_1 \ge \beta_2 \ge \dots \ge
+\beta_{K-1}$, then for every input
+
+$$
+q_k - q_{k+1} = \sigma(\wvec^\top\hvec + \beta_k) - \sigma(\wvec^\top\hvec + \beta_{k+1}) \ge 0,
+$$
+
+because $\sigma$ is increasing. The differences $q_{k-1} - q_k$ are then valid class probabilities. Cao et al. prove
+that the minimiser of the summed binary cross-entropy has ordered biases, so no constraint is needed during training
+<Cite id="cao2020coral" />. The loss is exactly the logistic <Gloss name="all-threshold-loss">all-threshold loss</Gloss> of
+<NoteLink to="threshold-losses-for-ordinal-regression" />, with $-\beta_k$ as the threshold and $\wvec^\top\hvec$ as the
+score.
+
+The cost of consistency is flexibility in the last layer: every split uses the same direction in feature space. A
+deep backbone can learn a representation in which one direction suffices, which the linear models in the figure below
+cannot.
+
+## Conditional heads: CORN
+
+CORN keeps $K - 1$ independent units but changes what each one estimates <Cite id="shi2023corn" />. Unit $k$ estimates
+the <NoteLink to="conditional-probability">conditional probability</NoteLink> $c_k(\xvec) = P(y > k \mid y > k - 1, \xvec)$ and is trained only on the examples with
+$y > k - 1$. The unconditional probabilities follow from the chain rule of probability:
+
+$$
+P(y > k \mid \xvec) = \prod_{j=1}^{k} c_j(\xvec).
+$$
+
+Each factor lies in $[0, 1]$, so multiplying by one more factor cannot increase the product: $P(y > k + 1) =
+P(y > k)\, c_{k+1} \le P(y > k)$. The estimates are monotone by construction, whatever the weights. CORN is the
+continuation-ratio decomposition of <NoteLink to="continuation-ratio-and-adjacent-category-models" /> with a separate
+weight vector per level, which gives it the flexibility that CORAL gives up.
+
+## Soft targets: SORD
+
+SORD keeps the ordinary softmax and changes the target <Cite id="diaz2019sord" />. For true class $y$ and a distance
+$\phi(k, y)$, such as $\abs{k - y}$ or $(k - y)^2$, the target is
+
+$$
+t_k = \frac{\exp(-\alpha\,\phi(k, y))}{\sum_{m=1}^{K} \exp(-\alpha\,\phi(m, y))},
+$$
+
+and the loss is the cross-entropy $-\sum_k t_k \log p_k$. Its <NoteLink to="gradient">gradient</NoteLink> with respect to the logits is $\pvec - \tvec$,
+the same form as for one-hot targets. The loss now charges a prediction by where its mass sits: mass on a class near
+$y$ is partly rewarded, mass far from $y$ is not. As $\alpha \to \infty$ the target becomes one-hot; as $\alpha \to 0$
+it becomes uniform.
+
+<SoftLabels />
+
+Uniform label smoothing also softens the target, but spreads the removed mass evenly over all classes. It regularises
+confidence without encoding order.
+
+## Unimodal outputs
+
+A different approach constrains the predicted distribution to have one peak. Beckham and Pal let the network output a
+single number $p = \sigma(\cdot) \in (0, 1)$ and set
+$P(y = k) = \binom{K-1}{k-1} p^{k-1}(1 - p)^{K-k}$, a <NoteLink to="binomial-distribution">binomial distribution</NoteLink> over the classes, or use a Poisson form
+with a learnt temperature <Cite id="beckham2017" />. The distribution is unimodal for every input, so the network
+cannot put mass on classes 1 and 5 while skipping 3.
+
+## Comparing heads on shared data
+
+The figure fits each head on a network with one hidden layer of 24 tanh units, trained by backpropagation on the shared
+datasets. On the spiral with the defaults, all four heads follow the curve (held-out <Gloss name="mean-absolute-error">mean absolute error</Gloss> 0.06 to 0.08),
+where every linear single-score model fails. With $K = 10$ and 100 points per class, the CORAL head, whose splits share
+one direction in the last layer, reaches 0.20, while the independent, conditional and soft-label heads reach 0.03 to
+0.04.
+
+<OrdinalModelLab
+  model="coral"
+  data={{ shape: 'spiral' }}
+  models={['orcnn', 'coral', 'corn', 'sord', 'multiclass']}
+  title="Ordinal output heads on shared data"
+/>
+
+## Trade-offs
+
+| Head               | Output units | Consistent $P(y > k)$ | Split directions | Loss                         |
+| ------------------ | ------------ | --------------------- | ---------------- | ---------------------------- |
+| softmax, one-hot   | $K$          | not defined           | free             | cross-entropy                |
+| independent (OR-CNN) | $K - 1$    | no                    | free             | $K - 1$ binary cross-entropies |
+| CORAL              | $K - 1$      | yes, at the optimum   | shared           | $K - 1$ binary cross-entropies |
+| CORN               | $K - 1$      | yes, always           | free             | conditional binary cross-entropies |
+| SORD               | $K$          | not defined           | free             | cross-entropy to a soft target |
+| binomial unimodal  | 1            | yes                   | one score        | negative log-likelihood       |
+
+- **Prediction rule.** For binary heads, counting $q_k > \tfrac12$ and taking the median of the implied distribution
+  agree when the heads are consistent. For softmax heads, the median minimises expected absolute error and the argmax
+  minimises the 0–1 error.
+- **Imbalance.** The outer binary tasks are imbalanced. Niu et al. and Cao et al. allow per-task weights in the loss.

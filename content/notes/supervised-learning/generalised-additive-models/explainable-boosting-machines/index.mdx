@@ -15,7 +15,7 @@ updated: 2026-09-27
 import { EbmShapes } from './EbmShapes'
 
 <Definition>
-A **GA²M** is a generalised additive model with a small set $\Pcal$ of pairwise interactions,
+A **GA²M** is a <Gloss name="gam">generalised additive model</Gloss> with a small set $\Pcal$ of pairwise interactions,
 
 $$
 g\paren{\expect[y \mid \xvec]} = \beta_0 + \sum_{j=1}^d f_j(x_j) + \sum_{(j,k) \in \Pcal}f_{jk}(x_j, x_k)
@@ -23,15 +23,15 @@ $$
 
 <Cite id="lou2013" />. An **explainable boosting machine** (EBM) fits a GA²M by gradient boosting: it cycles through
 the terms, and for each one fits a shallow tree on that term's features alone to the current pseudo-residuals, adding it
-with a small learning rate. Each fitted term is a piecewise-constant function of one or two features
+with a small <Gloss name="learning-rate">learning rate</Gloss>. Each fitted term is a piecewise-constant function of one or two features
 <Cite id="nori2019" />.
 </Definition>
 
 ## From spline GAMs to boosted shape functions
 
-A spline GAM represents each $f_j$ in a smooth basis and controls its wiggliness with a quadratic penalty. Lou, Caruana
+A spline GAM represents each $f_j$ in a smooth basis and controls its wiggliness with a <NoteLink to="penalty-and-barrier-methods">quadratic penalty</NoteLink>. Lou, Caruana
 and Gehrke compared other ways to build the shape functions of an additive model <Cite id="lou2012" />. They paired
-several shape families (regression splines, single trees, bagged trees, boosted trees) with several fitting procedures
+several shape families (<NoteLink to="regression-splines">regression splines</NoteLink>, single trees, <NoteLink to="bagging">bagged trees</NoteLink>, boosted trees) with several fitting procedures
 (penalised least squares, backfitting, gradient boosting). The most accurate combination on their benchmarks built each
 shape function from many shallow trees, fitted by gradient boosting that cycles through the features, with bagging on
 top. A tree on one feature is a step function of that feature, and a sum of step functions is again a step function, so
@@ -83,7 +83,7 @@ residual sum of squares falls by $0.1 \times 1.9 \times 8 = 1.52$.
 ## Pairwise interactions: FAST
 
 A GA²M with all $\binom d2$ pairs would lose the model's readability and cost too much. Lou, Caruana, Gehrke and Hooker
-rank the pairs first and keep the best few <Cite id="lou2013" />. After the main effects are fitted, each candidate pair
+rank the pairs first and keep the best few <Cite id="lou2013" />. After the <NoteLink to="factorial-designs">main effects</NoteLink> are fitted, each candidate pair
 $(j, k)$ is scored by the best reduction in residual sum of squares that a simple interaction model achieves on the
 residuals. The model cuts $x_j$ once and $x_k$ once and predicts the mean residual in each of the four quadrants.
 
@@ -102,14 +102,14 @@ InterpretML implements EBMs as `ExplainableBoostingRegressor` and `ExplainableBo
 - bins each feature, using up to 1024 bins for main effects and 64 per feature for interactions in version 0.7;
 - holds out a validation set (15% by default) and stops when the validation loss has not improved for a set number of
   rounds;
-- repeats the whole fit on several bootstrap samples ("outer bags", 14 by default) and averages the shape functions,
+- repeats the whole fit on several <NoteLink to="bootstrap">bootstrap</NoteLink> samples ("outer bags", 14 by default) and averages the shape functions,
   which smooths them and gives an error band from the spread between bags;
 - detects interactions with FAST, with the number of pairs set as a multiple of the number of features;
 - centres every term to weighted mean zero over the training data and moves the means into the intercept. Full
   **purification**, which also moves a pair's marginal means into the main effects so that $f_{jk}$ averages to zero
-  over each of its features, is the functional ANOVA convention <Cite id="lengerich2020" />; version 0.7 implements it
+  over each of its features, is the functional <Gloss name="anova" /> convention <Cite id="lengerich2020" />; version 0.7 implements it
   but does not apply it by default;
-- offers monotone constraints, and a post-hoc `monotonize` that replaces a term by its isotonic regression.
+- offers monotone constraints, and a post-hoc `monotonize` that replaces a term by its <NoteLink to="isotonic-regression">isotonic regression</NoteLink>.
 
 The defaults change between versions. Version 0.7 uses learning rates of 0.04 for regression and 0.015 for
 classification and trees with two leaves. It starts with heavily regularised rounds that set the basic shapes, then
@@ -128,17 +128,17 @@ refitting the rest.
 
 ## Spline GAMs and EBMs compared
 
-| | Penalised spline GAM | EBM |
+| | <NoteLink to="smoothing-and-penalised-splines">Penalised spline</NoteLink> GAM | EBM |
 | --- | --- | --- |
 | Shape of each term | smooth piecewise polynomial | step function on bins |
-| Complexity control | quadratic roughness penalty, one $\lambda$ per term | learning rate, early stopping, bagging |
-| Choosing the amount of smoothing | REML or GCV, from the training data | a held-out validation set |
-| Uncertainty | Bayesian posterior bands, approximate p-values, effective degrees of freedom | spread across bootstrap bags |
+| Complexity control | quadratic <NoteLink to="smoothing-penalties-and-curvature">roughness penalty</NoteLink>, one $\lambda$ per term | learning rate, <NoteLink to="early-stopping">early stopping</NoteLink>, bagging |
+| Choosing the amount of smoothing | <Gloss name="reml" /> or <Gloss name="gcv" />, from the training data | a held-out validation set |
+| Uncertainty | Bayesian posterior bands, approximate <NoteLink to="p-value">p-values</NoteLink>, <NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink> | spread across bootstrap bags |
 | Interactions | chosen by the analyst: `te`, `ti` | detected automatically by FAST |
-| Categorical and missing values | factor terms; missing values handled outside | bins, with a separate bin for missing |
+| Categorical and missing values | <NoteLink to="cyclic-factor-and-by-terms">factor terms</NoteLink>; missing values handled outside | bins, with a separate bin for missing |
 | Beyond the data range | continues the penalty's null space, usually linearly | constant beyond the last bin |
 | Shape constraints | penalty or reparameterisation | constrained boosting or post-hoc isotonic regression |
-| Scaling in $n$ | $O(np^2)$ per iteration for $p$ basis functions | $O(n)$ per boosting step, many steps |
+| Scaling in $n$ | $O(np^2)$ per iteration for $p$ <NoteLink to="basis-expansions">basis functions</NoteLink> | $O(n)$ per boosting step, many steps |
 
 The two meet in the middle. A spline GAM gives smooth terms and principled inference. An EBM captures jumps and
 thresholds without choosing knots, handles many features and pairs automatically, and needs a validation set in place

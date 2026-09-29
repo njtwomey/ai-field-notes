@@ -1,4 +1,6 @@
+import { slug } from 'github-slugger'
 import { Component, type ReactNode } from 'react'
+import { AnchorTitle } from '@/components/content/Anchored'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
@@ -16,10 +18,14 @@ export type InteractiveProps = {
 
 /** The standard frame for every interactive figure: title, controls, figure, readout, caption. */
 export function Interactive({ title, caption, controls, readout, children, className }: InteractiveProps) {
+  // The title's slug is the figure's anchor, so a link can point at one figure: /n/<note>#<figure-title>.
+  const id = slug(title)
   return (
-    <Card className={cn('not-prose my-8 gap-4', className)}>
+    <Card id={id} className={cn('not-prose my-8 gap-4', className)}>
       <CardHeader>
-        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        <CardTitle className="text-sm font-medium">
+          <AnchorTitle id={id}>{title}</AnchorTitle>
+        </CardTitle>
         {caption && <CardDescription className="text-xs">{caption}</CardDescription>}
       </CardHeader>
       <CardContent className="flex flex-col gap-4">

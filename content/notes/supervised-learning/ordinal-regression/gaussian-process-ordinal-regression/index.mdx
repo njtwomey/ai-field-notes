@@ -1,0 +1,158 @@
+---
+title: Gaussian-process ordinal regression
+kind: concept
+summary: 'Gaussian-process ordinal regression puts a Gaussian-process prior on a latent function $f(\xvec)$ and observes it through thresholds: $P(y = k \mid f) = \Phi((b_k - f)/\sigma) - \Phi((b_{k-1} - f)/\sigma)$. The posterior is approximated by Laplace or expectation propagation, and thresholds are set by the evidence.'
+tags: [ordinal-regression, gaussian-processes, bayesian-inference, kernel-methods]
+aliases: [GP ordinal regression, Gaussian process ordinal regression, GPOR, ordinal Gaussian process, ordinal likelihood]
+requires: [gaussian-process, cumulative-link-model]
+partOf: [ordinal-regression]
+related: [gaussian-process-classification, laplace-approximation, expectation-propagation, matchbox-recommender, reviewer-calibration]
+references: [chu2005gp, rasmussen2006]
+status: draft
+updated: 2026-09-29
+---
+
+import { GpOrdinal } from './GpOrdinal'
+import { GpOrdinalMap } from './GpOrdinalMap'
+
+<Definition>
+Gaussian-process <NoteLink to="ordinal-regression">ordinal regression</NoteLink> places a zero-mean Gaussian-process prior with kernel $k(\xvec, \xvec')$ on a
+latent function $f$, and relates it to an ordinal label $y \in \set{1, \dots, K}$ through thresholds
+$b_1 < \dots < b_{K-1}$ and Gaussian noise of <NoteLink to="variance-and-covariance">standard deviation</NoteLink> $\sigma$:
+
+$$
+P(y = k \mid f(\xvec)) = \Phi\LP\frac{b_k - f(\xvec)}{\sigma}\RP - \Phi\LP\frac{b_{k-1} - f(\xvec)}{\sigma}\RP,
+$$
+
+with $b_0 = -\infty$ and $b_K = +\infty$. The posterior over $f$ is not Gaussian; Chu and Ghahramani approximate it
+with the Laplace approximation or expectation propagation, and choose the thresholds, the noise and the kernel's
+parameters by maximising the approximate <NoteLink to="law-of-total-probability">marginal likelihood</NoteLink> <Cite id="chu2005gp" />.
+</Definition>
+
+## Intuition
+
+The <NoteLink to="cumulative-link-model">ordered probit</NoteLink> cuts a linear score $\wvec^\top\xvec$ at
+thresholds. Gaussian-process ordinal regression keeps the thresholds and replaces the linear score with a function
+drawn from a <NoteLink to="gaussian-process" />. The class boundaries in input space then follow the level sets of a
+smooth nonlinear function, and the model reports how uncertain the function is away from the data.
+
+<GpOrdinal />
+
+## The ordinal likelihood
+
+The likelihood follows from the latent-variable view. Suppose the observed grade is the interval of the thresholds
+into which $f(\xvec) + \delta$ falls, with $\delta \sim \Gauss(0, \sigma^2)$. Then
+
+$$
+P(y = k \mid f) = P(b_{k-1} < f + \delta \le b_k) = P\LP\frac{b_{k-1} - f}{\sigma} < \frac{\delta}{\sigma} \le \frac{b_k - f}{\sigma}\RP
+= \Phi(z_1) - \Phi(z_2),
+$$
+
+where $z_1 = (b_k - f)/\sigma$ and $z_2 = (b_{k-1} - f)/\sigma$. With $K = 2$ this is the probit likelihood of
+<NoteLink to="gaussian-process-classification" />. With a linear kernel $k(\xvec, \xvec') = \xvec^\top\xvec'$, it is a
+Bayesian ordered probit.
+
+**<NoteLink to="derivative">Derivatives</NoteLink> in $f$.** Write $p = \Phi(z_1) - \Phi(z_2)$ and $\phi$ for the standard normal density. Since
+$\partial z_j/\partial f = -1/\sigma$ and $\phi'(z) = -z\phi(z)$,
+
+$$
+\frac{\partial \log p}{\partial f} = -\frac{\phi(z_1) - \phi(z_2)}{\sigma p}, \qquad
+-\frac{\partial^2 \log p}{\partial f^2} = \frac{1}{\sigma^2}\LB\LP\frac{\phi(z_1) - \phi(z_2)}{p}\RP^2 + \frac{z_1\phi(z_1) - z_2\phi(z_2)}{p}\RB.
+$$
+
+The second quantity is positive for every $f$: the Gaussian cdf difference is log-concave in $f$, so the <NoteLink to="cross-entropy-and-perplexity">negative
+log-likelihood</NoteLink> is convex and the posterior has a single mode. An implementation computes $\log p$ in the tail that
+both ends share, because $\Phi(z_1) - \Phi(z_2)$ underflows for $f$ far outside its interval when $\sigma$ is small.
+
+## Laplace approximation
+
+Let $\fvec = (f(\xvec_1), \dots, f(\xvec_N))$, $\Kmat$ the kernel matrix and $\yvec$ the labels. The log posterior is,
+up to a constant,
+
+$$
+\Psi(\fvec) = \sum_{i=1}^N \log p(y_i \mid f_i) - \tfrac12 \fvec^\top\Kmat^{-1}\fvec.
+$$
+
+**Mode.** Its <NoteLink to="gradient">gradient</NoteLink> is $\nabla\log p(\yvec \mid \fvec) - \Kmat^{-1}\fvec$ and its <NoteLink to="hessian">Hessian</NoteLink> is $-\Wmat - \Kmat^{-1}$,
+where $\Wmat$ is the diagonal matrix of the second derivatives above. <NoteLink to="newtons-method">Newton's method</NoteLink> gives the update
+
+$$
+\fvec \leftarrow (\Kmat^{-1} + \Wmat)^{-1}\big(\Wmat\fvec + \nabla\log p(\yvec \mid \fvec)\big),
+$$
+
+computed stably through the <NoteLink to="cholesky-decomposition">Cholesky factor</NoteLink> of $\Bmat = \eye + \Wmat^{1/2}\Kmat\Wmat^{1/2}$ <Cite id="rasmussen2006" />.
+The figure halves the Newton step whenever $\Psi$ would decrease, which matters when $\sigma$ is small and the
+likelihood is nearly a step. The Laplace approximation replaces the posterior by
+$\Gauss(\hat\fvec, (\Kmat^{-1} + \Wmat)^{-1})$ around the mode $\hat\fvec$. See
+<NoteLink to="laplace-approximation" />.
+
+**Prediction.** At a new input $\xvec_*$ with kernel vector $\kvec_*$, the approximate latent posterior is Gaussian with
+
+$$
+\mu_* = \kvec_*^\top\nabla\log p(\yvec \mid \hat\fvec), \qquad
+v_* = k(\xvec_*, \xvec_*) - \kvec_*^\top(\Kmat + \Wmat^{-1})^{-1}\kvec_*.
+$$
+
+The class probabilities integrate the likelihood against this Gaussian. The integral has a closed form:
+
+$$
+P(y_* = k \mid \Dcal) = \Phi\LP\frac{b_k - \mu_*}{\sqrt{\sigma^2 + v_*}}\RP - \Phi\LP\frac{b_{k-1} - \mu_*}{\sqrt{\sigma^2 + v_*}}\RP.
+$$
+
+Uncertainty about $f$ adds to the observation noise, so the predicted classes spread out where data are sparse.
+
+<Derivation title="The predictive class probability">
+Write $\Phi((b - f)/\sigma) = P(f + \delta \le b)$ with $\delta \sim \Gauss(0, \sigma^2)$ independent of $f$. If
+$f \sim \Gauss(\mu_*, v_*)$, the sum $f + \delta$ is Gaussian with mean $\mu_*$ and variance $v_* + \sigma^2$. So
+
+$$
+\int \Phi\LP\frac{b - f}{\sigma}\RP \Gauss(f; \mu_*, v_*)\, df = P(f + \delta \le b) = \Phi\LP\frac{b - \mu_*}{\sqrt{\sigma^2 + v_*}}\RP.
+$$
+
+Applying this to both thresholds and subtracting gives the class probability.
+</Derivation>
+
+## On two-dimensional data
+
+The figure below fits the same model to the shared datasets of <NoteLink to="ordinal-regression" />, with a
+squared-exponential kernel on the plane. The Laplace fit costs $O(n^3)$ per Newton step, so it uses at most 150
+training points, the same number from each class. The thresholds are fixed one unit apart around zero and the kernel
+amplitude is $K/2$, so that the latent function can reach every interval; only the lengthscale and the noise are free.
+Unlike the linear models of the other notes, the GP follows the arc and the spiral, because its latent function is not
+restricted to one direction.
+
+<GpOrdinalMap />
+
+## Setting the thresholds
+
+The thresholds, the noise $\sigma$ and the kernel parameters are hyperparameters. The Laplace approximation to the
+log marginal likelihood is
+
+$$
+\log p(\yvec \mid \Xmat) \approx -\tfrac12 \hat\fvec^\top\Kmat^{-1}\hat\fvec + \sum_i \log p(y_i \mid \hat f_i) - \tfrac12\log\abs{\Bmat},
+$$
+
+and Chu and Ghahramani maximise it by gradient ascent, parametrising $b_1$ and the positive gaps
+$b_k - b_{k-1}$ <Cite id="chu2005gp" />. The readout in the figure shows this quantity. Dragging a threshold into the
+middle of a class's training points lowers it; the thresholds that best separate the posterior modes raise it.
+
+**Expectation propagation** replaces the local Gaussian at the mode with a moment-matched Gaussian site for each
+likelihood term. For the ordinal likelihood the moments of a Gaussian truncated to an interval are available in
+closed form. Chu and Ghahramani derive both approximations and compare them on benchmark data <Cite id="chu2005gp" />.
+Expectation propagation costs more per iteration, because every site is refined in turn. See <NoteLink to="expectation-propagation" />.
+
+## Assumptions
+
+- **A single latent function.** One $f$ is cut at all thresholds, so the model keeps the single-score structure of the
+  cumulative model. The function is nonlinear, so the class regions in input space are not parallel bands.
+- **Gaussian latent noise** of the same scale everywhere. The probit form comes from it.
+- **Smoothness from the kernel.** The kernel's lengthscale sets how fast the grade can change with the input.
+
+## Pitfalls
+
+- **Cubic cost.** Exact inference costs $O(N^3)$ time and $O(N^2)$ memory, as for any Gaussian process. Sparse
+  approximations apply.
+- **Scale non-identifiability.** Multiplying $f$, the thresholds and $\sigma$ by a constant leaves the likelihood
+  unchanged; the kernel amplitude fixes the scale of $f$. Fixing $\sigma$ or the amplitude avoids a flat direction in
+  <NoteLink to="hyperparameter-search">hyperparameter search</NoteLink>.
+- **Empty classes.** A class with no training labels leaves its thresholds unconstrained by the likelihood.

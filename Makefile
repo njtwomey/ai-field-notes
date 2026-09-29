@@ -1,6 +1,6 @@
 # Common tasks. `make help` lists them.
 .DEFAULT_GOAL := help
-.PHONY: help install dev contracts assets content doctor lint format typecheck test check build preview clean
+.PHONY: help install dev contracts assets content doctor links lint format typecheck test check build preview clean
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -21,6 +21,9 @@ assets: contracts ## Build example outputs and figure data (cached), then the ma
 
 content: ## Validate content/ (frontmatter, links, citations, taxonomy)
 	node scripts/check-content.ts
+
+links: ## Suggest <Gloss> and <NoteLink> markup (SCOPE="taxonomy/path slug ...", ARGS="--apply" to write it)
+	node scripts/suggest-links.ts $(ARGS) $(SCOPE)
 
 doctor: ## Check the content tree (SCOPE="taxonomy/path slug ..." limits per-note checks to those notes)
 	node scripts/doctor.ts $(SCOPE)

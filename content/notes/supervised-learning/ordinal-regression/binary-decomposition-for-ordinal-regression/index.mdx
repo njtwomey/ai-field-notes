@@ -1,0 +1,147 @@
+---
+title: Binary decomposition for ordinal regression
+kind: concept
+summary: 'Binary decomposition turns a $K$-class ordinal problem into $K - 1$ questions "is $y > k$?". Frank and Hall train one classifier per question and difference their outputs; Li and Lin train one classifier on extended examples and bound the absolute error by its mistakes.'
+tags: [ordinal-regression, reductions, classification, worked-example]
+aliases:
+  [
+    Frank and Hall method,
+    ordinal binary decomposition,
+    extended binary classification,
+    nested binary classifiers,
+    cumulative binary decomposition,
+    rank consistency,
+    rank inconsistency,
+  ]
+requires: [logistic-regression]
+partOf: [ordinal-regression]
+related:
+  [threshold-losses-for-ordinal-regression, cost-sensitive-learning, proportional-odds-assumption]
+references: [frank2001, li2006ordinal, lin2012, gutierrez2016, cao2020coral, twomey2019ordinal]
+status: draft
+updated: 2026-09-29
+---
+
+import { OrdinalModelLab } from '../_shared/OrdinalModelLab'
+import { RankConsistency } from './RankConsistency'
+
+<Definition>
+For an ordinal label $y \in \set{1, \dots, K}$, binary decomposition defines the $K - 1$ binary targets
+$t_k = \indicator[y > k]$ for $k = 1, \dots, K - 1$, learns classifiers for them, and combines the answers into a
+class. Frank and Hall learn an independent probabilistic classifier $q_k(\xvec) \approx P(y > k \mid \xvec)$ for each
+$k$ and set $P(y = k \mid \xvec) = q_{k-1}(\xvec) - q_k(\xvec)$ with $q_0 = 1$ and $q_K = 0$ <Cite id="frank2001" />.
+Li and Lin learn a single classifier $g(\xvec, k)$ on extended examples and predict
+$\hat y = 1 + \sum_k \indicator[g(\xvec, k) > 0]$ <Cite id="li2006ordinal" />.
+</Definition>
+
+## Intuition
+
+The questions "is the grade above mild?", "above moderate?" and "above severe?" are ordinary binary problems. Any
+binary learner can answer them: <NoteLink to="logistic-regression">logistic regression</NoteLink>, a <NoteLink to="decision-tree">decision tree</NoteLink>, a boosted ensemble. The order of the classes
+lives in how the questions are nested. A patient above "moderate" is also above "mild", so the targets satisfy
+$t_1 \ge t_2 \ge \dots \ge t_{K-1}$ for every example, and the true probabilities satisfy
+$P(y > 1) \ge P(y > 2) \ge \dots \ge P(y > K - 1)$.
+
+## Frank and Hall: independent classifiers
+
+**Combining the answers.** The event $y = k$ is the event $y > k - 1$ minus the event $y > k$, and the second is a
+subset of the first. So
+
+$$
+P(y = k \mid \xvec) = P(y > k - 1 \mid \xvec) - P(y > k \mid \xvec),
+$$
+
+with $P(y > 0) = 1$ and $P(y > K) = 0$. Frank and Hall substitute each classifier's estimate $q_k(\xvec)$ and predict
+the class with the largest difference <Cite id="frank2001" />. The method needs no ordinal learner. It gives the base
+learner a problem with a natural two-way split at every level, and in their experiments with decision trees it
+improved accuracy over treating the classes as nominal.
+
+**Rank inconsistency.** Each classifier is trained on its own. Nothing ties $q_k$ to $q_{k+1}$, so at some inputs
+$q_k(\xvec) < q_{k+1}(\xvec)$ and the difference for class $k + 1$ is negative. For example, three classifiers that
+output $q = (0.9, 0.3, 0.4)$ at some $\xvec$ give class probabilities $(0.1, 0.6, -0.1, 0.4)$. The usual remedies clip
+negative values to zero and renormalise, or sort the $q_k$ before differencing. Neither makes the model coherent: the
+fitted "probabilities" were never a distribution. Inconsistency grows with the number of classes, with small samples
+for the outer splits, and with flexible base learners.
+
+<RankConsistency />
+
+**Sharing parameters restores consistency.** If every classifier is a logistic regression with the same weight
+vector and its own bias, $q_k(\xvec) = \sigma(\wvec^\top\xvec - \theta_k)$, then $q_k \ge q_{k+1}$ at every input exactly
+when $\theta_k \le \theta_{k+1}$, because $\sigma$ is increasing. The curves are shifts of one another and cannot
+cross. This is the <Gloss name="consistent-rank-logits" /> construction for neural networks <Cite id="cao2020coral" />, and it is the logistic
+all-threshold model of <NoteLink to="threshold-losses-for-ordinal-regression" />. The price is the same single-score
+restriction as proportional odds: all splits share one direction.
+
+## Li and Lin: one classifier on extended examples
+
+Li and Lin reduce the $K - 1$ questions to one binary problem <Cite id="li2006ordinal" />. Each example $(\xvec, y)$
+becomes $K - 1$ extended examples
+
+$$
+\big((\xvec, \evec_k),\ t_k = \indicator[y > k]\big), \qquad k = 1, \dots, K - 1,
+$$
+
+where $\evec_k$ is the $k$-th unit vector of length $K - 1$. One binary classifier $g(\xvec, k)$ is trained on the
+pooled set, and the rank is $\hat y = 1 + \sum_k \indicator[g(\xvec, k) > 0]$.
+
+**The absolute error is bounded by the binary errors.** Let $a_k = \indicator[g(\xvec, k) > 0]$ be the classifier's
+answers. The true class satisfies $y - 1 = \sum_k t_k$, since $t_k = 1$ exactly for $k = 1, \dots, y - 1$. The
+prediction satisfies $\hat y - 1 = \sum_k a_k$ by definition. Subtracting,
+
+$$
+\abs{\hat y - y} = \Big\lvert \sum_{k=1}^{K-1} (a_k - t_k) \Big\rvert \le \sum_{k=1}^{K-1} \abs{a_k - t_k}.
+$$
+
+The right-hand side is the number of extended examples that $g$ gets wrong. The bound holds for any $g$, including one
+whose answers are not monotone in $k$. A binary classifier with low error on the extended set therefore gives an
+ordinal predictor with low absolute error. With a cost matrix $C_{y,k}$ that is V-shaped in $k$, weighting extended
+example $k$ by $\abs{C_{y,k} - C_{y,k+1}}$ gives the same kind of bound for that cost <Cite id="lin2012" />.
+
+**Familiar models are special cases.** Take $g(\xvec, k) = \wvec^\top\xvec - \thetavec^\top\evec_k = \wvec^\top\xvec -
+\theta_k$, a linear classifier on the extended input. A support vector machine on the extended examples is support
+vector ordinal regression with the all-threshold hinge loss; a perceptron on them is PRank; logistic regression on them
+is the logistic all-threshold model <Cite id="li2006ordinal" />. A classifier that lets $\evec_k$ interact with $\xvec$
+recovers separate directions per split.
+
+## Other decompositions
+
+Gutiérrez et al. list further schemes that exploit the order <Cite id="gutierrez2016" />:
+
+- **One-versus-next:** $K - 1$ classifiers compare class $k$ with class $k + 1$ only, using the examples of those two
+  classes. This mirrors the adjacent-category model.
+- **One-versus-followers:** classifier $k$ compares class $k$ with all classes above it, using the examples with
+  $y \ge k$. This mirrors the continuation-ratio model.
+- **Ordinal output codes:** each class is assigned a code word, such as the cumulative code
+  $(\indicator[y > 1], \dots, \indicator[y > K - 1])$, and a multi-output model predicts the code. The class is the code
+  word nearest the prediction.
+
+The cumulative code is the label encoding that <NoteLink to="structured-ordinal-regression-modelling">StORM</NoteLink>
+models jointly with a chain <Gloss name="crf">conditional random field</Gloss>, so that one model learns all the bits and their dependencies
+together rather than $K - 1$ models learning them apart <Cite id="twomey2019ordinal" />.
+
+<OrdinalModelLab
+  model="binary-decomposition"
+  data={{ shape: 'arc' }}
+  models={['binary-decomposition', 'li-lin', 'all-threshold', 'cumulative-logit', 'multiclass']}
+  title="Binary decompositions on shared data"
+/>
+
+On the arc, the classes are ordered along a curve, and each split "is $y > k$?" needs its own direction. Frank and Hall's
+independent logistic regressions find those directions and cut the absolute error of the shared-slope models by more
+than half.
+The readout reports the share of the input plane where their differenced probabilities go negative.
+
+## Assumptions
+
+- **Nested targets.** The decomposition relies on $y > k + 1$ implying $y > k$. It holds for any ordinal label.
+- **Base-learner calibration.** Differencing needs calibrated probabilities. A classifier whose scores are not
+  probabilities, such as a margin classifier, must be calibrated first or used through the counting rule of Li and Lin.
+
+## Pitfalls
+
+- **Negative probabilities.** Independent classifiers can produce them; report how often it happens before trusting
+  the probabilities.
+- **Imbalanced outer splits.** The questions $y > 1$ and $y > K - 1$ have one rare side each. Their classifiers see few
+  examples of it, which is where inconsistency usually appears.
+- **Cost of training.** $K - 1$ independent classifiers cost $K - 1$ fits. The extended-example reduction costs one fit
+  on a dataset $K - 1$ times larger.

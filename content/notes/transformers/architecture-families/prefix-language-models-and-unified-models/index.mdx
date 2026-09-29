@@ -24,7 +24,7 @@ updated: 2026-09-27
 import { MaskPatterns } from './MaskPatterns'
 
 <Definition>
-A prefix language model splits a sequence of $n$ tokens into a prefix $x_1, \dots, x_P$ and a continuation
+A prefix <Gloss name="language-model">language model</Gloss> splits a sequence of $n$ tokens into a prefix $x_1, \dots, x_P$ and a continuation
 $x_{P+1}, \dots, x_n$. Its self-attention mask lets query $i$ attend to key $j$ when $j \le P$ or $j \le i$:
 
 $$
@@ -32,14 +32,14 @@ M_{ij} = \begin{cases} 0 & j \le P \text{ or } j \le i, \\ -\infty & \text{other
 $$
 
 indexing positions from 1. The prefix is encoded bidirectionally and the continuation causally, and the loss covers only
-the continuation. $P = 0$ gives a causal decoder and $P = n$ an encoder. A **unified model** trains one set of weights
+the continuation. $P = 0$ gives a <NoteLink to="decoder-only-transformers">causal decoder</NoteLink> and $P = n$ an encoder. A **unified model** trains one set of weights
 with several such masks <Cite id="dong2019unilm" />.
 
 </Definition>
 
 ## Intuition
 
-Encoder, decoder and encoder–decoder transformers use the same block. What separates them is which positions may read
+Encoder, decoder and <NoteLink to="encoder-decoder-transformers">encoder–decoder transformers</NoteLink> use the same block. What separates them is which positions may read
 which. Written as a mask over one sequence, the three are three patterns of a single matrix, and a prefix mask spans the
 range between them.
 
@@ -74,38 +74,38 @@ every prefix state changes and must be recomputed.
 
 ## UniLM
 
-UniLM trains one transformer with four masks, chosen per batch: bidirectional as in BERT, sequence-to-sequence
+UniLM trains one <NoteLink to="transformer">transformer</NoteLink> with four masks, chosen per batch: bidirectional as in <Gloss name="bert" />, sequence-to-sequence
 (bidirectional over the first segment, causal over the second, which is a prefix mask), left-to-right and right-to-left <Cite id="dong2019unilm" />. Within a batch, the bidirectional and sequence-to-sequence objectives are each used a third
 of the time and the two one-directional objectives a sixth each. Every objective predicts masked tokens, and segment
 embeddings tell the model which mask is in use. With BERT-large's size, 24 layers of width 1024 and about 340M
-parameters, UniLM set new results on CNN/DailyMail abstractive summarisation (ROUGE-L 40.51) and on Gigaword, while
+parameters, UniLM set new results on <Gloss name="cnn" />/DailyMail abstractive summarisation (ROUGE-L 40.51) and on Gigaword, while
 remaining usable as a BERT-style encoder <Cite id="dong2019unilm" />.
 
 ## UL2
 
 UL2 treats pre-training objectives as denoisers described by a mean span length $\mu$, a corruption rate $r$ and a
-number of corrupted spans $n$ <Cite id="tay2023ul2" />. For a sequence of length $L$, a causal language model is one
+number of corrupted spans $n$ <Cite id="tay2023ul2" />. For a sequence of length $L$, a <NoteLink to="autoregressive-transformer-language-model">causal language model</NoteLink> is one
 span covering the sequence, $(\mu = L, r = 1, n = 1)$, and a prefix language model with prefix $P$ is
 $(\mu = L - P, r = 1 - P/L, n = 1)$. UL2 mixes three kinds.
 
 | Denoiser       | Settings                                                                                  | Resembles                      |
 | -------------- | ----------------------------------------------------------------------------------------- | ------------------------------ |
-| R (regular)    | $(\mu = 3, r = 0.15)$ and $(\mu = 8, r = 0.15)$                                           | T5 span corruption             |
+| R (regular)    | $(\mu = 3, r = 0.15)$ and $(\mu = 8, r = 0.15)$                                           | <Gloss name="t5" /> span corruption             |
 | S (sequential) | $(\mu = L/4, r = 0.25, n = 1)$, the span at the end                                       | prefix language modelling      |
 | X (extreme)    | $(\mu = 3, r = 0.5)$, $(\mu = 8, r = 0.5)$, $(\mu = 64, r = 0.15)$, $(\mu = 64, r = 0.5)$ | long spans or heavy corruption |
 
 The seven denoisers are mixed in roughly equal shares. A **mode token** [R], [S] or [X] is prepended to each example to
 say which kind it is, and at fine-tuning or prompting time the matching token selects the behaviour. A 20B UL2
-encoder–decoder trained on 1 trillion tokens outperformed the 175B GPT-3 on zero-shot SuperGLUE and tripled the
+encoder–decoder trained on 1 trillion tokens outperformed the 175B <Gloss name="gpt-3" /> on zero-shot SuperGLUE and tripled the
 one-shot summarisation score of T5-XXL <Cite id="tay2023ul2" />. The authors report that the choice of denoisers matters
 more than the choice between a decoder-only and an encoder–decoder backbone.
 
 ## Evidence on prefix masks
 
-- T5, at equal compute per example with a denoising objective, scored 81.82 on GLUE with a prefix language model,
+- T5, at equal compute per example with a denoising objective, scored 81.82 on <Gloss name="glue" /> with a prefix language model,
   74.70 with a causal language model and 83.28 with an encoder–decoder <Cite id="raffel2020" />.
 - Wang et al. found that causal decoders trained on next-token prediction were best zero-shot after pre-training alone,
-  but that non-causal (prefix) decoders trained with masked language modelling were best after multitask fine-tuning.
+  but that non-causal (prefix) decoders trained with <Gloss name="mlm">masked language modelling</Gloss> were best after multitask fine-tuning.
   They also converted a trained causal decoder into a non-causal one by changing the mask and continuing training
   <Cite id="wang2022architecture" />.
 
@@ -118,7 +118,7 @@ Take $n = 8$ tokens with a prefix of $P = 3$.
 - Prefix model: $3^2 + 36 - 3 \cdot 4/2 = 9 + 36 - 6 = 39$ pairs. Rows 1 to 3 attend to 3 keys each and rows 4 to 8
   attend to 4, 5, 6, 7 and 8 keys, and $9 + 30 = 39$. The loss covers the 5 tokens after the prefix.
 
-The prefix model adds 3 pairs to the causal mask, the entries above the diagonal inside the prefix, and gives up 2
+The prefix model adds 3 pairs to the <NoteLink to="causal-masking">causal mask</NoteLink>, the entries above the diagonal inside the prefix, and gives up 2
 training targets.
 
 ## Assumptions

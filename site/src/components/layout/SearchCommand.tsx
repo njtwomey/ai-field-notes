@@ -42,18 +42,28 @@ export function SearchCommand() {
   const [query, setQuery] = useState('')
   const [picked, setPicked] = useState<Tab>()
   const navigate = useNavigate()
+  // The palette opens empty every time: a query left from an earlier page is cleared on each open and close.
+  const reset = () => {
+    setQuery('')
+    setPicked(undefined)
+  }
+  const show = (o: boolean) => {
+    reset()
+    setOpen(o)
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
+        reset()
         setOpen((o) => !o)
       } else if (e.key === '/' && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
         e.preventDefault()
-        setOpen(true)
+        show(true)
       }
     }
-    const onOpen = () => setOpen(true)
+    const onOpen = () => show(true)
     document.addEventListener('keydown', onKey)
     window.addEventListener(OPEN_EVENT, onOpen)
     return () => {
@@ -127,7 +137,7 @@ export function SearchCommand() {
       <Button
         variant="outline"
         size="sm"
-        onClick={() => setOpen(true)}
+        onClick={() => show(true)}
         className="w-full justify-start gap-2 text-muted-foreground sm:w-64"
       >
         <Search className="size-4" aria-hidden />
@@ -136,10 +146,7 @@ export function SearchCommand() {
       </Button>
       <CommandDialog
         open={open}
-        onOpenChange={(o) => {
-          setOpen(o)
-          if (!o) setPicked(undefined)
-        }}
+        onOpenChange={show}
         title="Search"
         description="Search all notes"
         className="sm:max-w-3xl"

@@ -9,7 +9,7 @@ partOf: [multi-head-attention]
 related: [bahdanau-attention, encoder-decoder-cross-attention, transformer-layer-by-layer, query-key-normalisation-and-logit-soft-capping, positional-encoding]
 references: [vaswani2017, luong2015]
 status: draft
-updated: 2026-09-27
+updated: 2026-09-29
 ---
 
 import { ScalingDemo } from './ScalingDemo'
@@ -46,22 +46,35 @@ and keys and values from another, as in the decoder of the encoder–decoder <No
 
 ## Why divide by the square root of the dimension
 
-Suppose the components of $\qvec$ and $\kvec$ are independent random variables with mean 0 and variance 1, as at
-initialisation. Their dot product $\qvec^{\tr} \kvec = \sum_{i=1}^{d_k} q_i k_i$ has mean
+Vaswani et al. justify the scaling with a variance argument, given in a footnote of the transformer paper
+<Cite id="vaswani2017" />. Suppose the components $q_1, \dots, q_{d_k}$ and $k_1, \dots, k_{d_k}$ of $\qvec$ and
+$\kvec$ are mutually <NoteLink to="independence">independent random variables</NoteLink> with mean 0 and variance 1, as at initialisation. Their dot product
+$\qvec^{\tr} \kvec = \sum_{i=1}^{d_k} q_i k_i$ has mean
 
 $$
 \expect\brack{\qvec^{\tr} \kvec} = \sum_{i=1}^{d_k} \expect[q_i]\, \expect[k_i] = 0.
 $$
 
-Each term has variance $\var(q_i k_i) = \expect[q_i^2 k_i^2] - \paren{\expect[q_i k_i]}^2 = \expect[q_i^2]\,\expect[k_i^2] - 0 = 1$.
-The terms are independent, so their variances add:
+Because the mean is 0, the variance is the expected square. Expanding the square of the sum gives
+
+$$
+\var\paren{\qvec^{\tr} \kvec} = \expect\brack{\paren{\sum_{i=1}^{d_k} q_i k_i}^2}
+= \sum_{i=1}^{d_k} \expect\brack{q_i^2}\, \expect\brack{k_i^2}
++ \sum_{i \neq j} \expect[q_i]\, \expect[q_j]\, \expect[k_i]\, \expect[k_j].
+$$
+
+Independence lets each expectation factor into a product. Every cross term with $i \neq j$ contains the factor
+$\expect[q_i] = 0$, so the cross terms vanish. Each diagonal term is $\expect[q_i^2]\,\expect[k_i^2] = 1 \cdot 1 = 1$,
+so
 
 $$
 \var\paren{\qvec^{\tr} \kvec} = d_k.
 $$
 
-The standard deviation of the scores grows as $\sqrt{d_k}$. Dividing by $\sqrt{d_k}$ gives scores with variance 1 for
-every $d_k$ <Cite id="vaswani2017" />.
+The standard deviation of the scores grows as $\sqrt{d_k}$. The scaled score $\qvec^{\tr}\kvec / \sqrt{d_k}$ has
+variance $d_k / d_k = 1$ for every $d_k$. The argument uses only independence, zero mean and unit variance. Gaussian
+components, $q_i, k_i \sim \Gauss(0, 1)$, satisfy these conditions and are the convenient case, but any distribution
+with those two moments gives the same result.
 
 If the components have variances $\sigma_q^2$ and $\sigma_k^2$ instead of 1, the same argument gives
 $\var(\qvec^{\tr}\kvec) = d_k \sigma_q^2 \sigma_k^2$. The $\sqrt{d_k}$ factor removes the dependence on width but not
@@ -72,8 +85,13 @@ Dividing the scores by a constant $\tau$ is a softmax **temperature**. The scale
 $\operatorname{softmax}(\svec / \tau)$ with $\tau = \sqrt{d_k}$. As $\tau \to \infty$ the weights tend to uniform,
 $1/m$ each. As $\tau \to 0$ they concentrate on the largest score.
 
+Without the scaling, the spread of the scores depends on the <NoteLink to="multi-head-attention">head dimension</NoteLink>. A wider head gives more widely spread
+scores, which push the softmax towards a one-hot vector, so the effective temperature of the softmax would change
+with $d_k$. With the scaling, the scale of the scores is independent of $d_k$, and the head dimension can be changed
+without retuning the temperature.
+
 Large scores harm training because of the shape of the softmax. With weights $\alphavec = \operatorname{softmax}(\svec)$,
-differentiating $\alpha_i = e^{s_i} / \sum_l e^{s_l}$ with the quotient rule gives
+differentiating $\alpha_i = e^{s_i} / \sum_l e^{s_l}$ with the <NoteLink to="derivative">quotient rule</NoteLink> gives
 
 $$
 \frac{\partial \alpha_i}{\partial s_j} = \alpha_i (\delta_{ij} - \alpha_j), \qquad
@@ -82,7 +100,7 @@ $$
 
 When the scores are spread widely, one weight approaches 1 and the rest approach 0. Every entry
 $\alpha_i(\delta_{ij} - \alpha_j)$ then approaches 0: either $\alpha_i \approx 0$, or $\alpha_i \approx 1$ and
-$\delta_{ij} - \alpha_j \approx 0$. The gradient with respect to the scores vanishes, and so does the gradient with
+$\delta_{ij} - \alpha_j \approx 0$. The <NoteLink to="gradient">gradient</NoteLink> with respect to the scores vanishes, and so does the gradient with
 respect to the queries and keys that produced them. Unscaled attention in high dimension starts training in this
 saturated regime.
 
@@ -98,7 +116,7 @@ their weights are in the ratio $e^{1} \approx 2.72$. Both keys still contribute,
 
 Forming $\Qmat \Kmat^{\tr}$ costs $O(n m d_k)$ and multiplying the weights by $\Vmat$ costs $O(n m d_v)$. The score
 matrix has $nm$ entries. For self-attention over a sequence of length $n$, time and memory grow as $n^2$. All $n^2$
-scores are computed with matrix products and no sequential dependence, so attention parallelises across positions,
+scores are computed with <NoteLink to="matrix-multiplication">matrix products</NoteLink> and no sequential dependence, so attention parallelises across positions,
 unlike a recurrent network.
 
 ## Comparison with additive attention

@@ -1,0 +1,205 @@
+---
+title: Cumulative link model
+kind: concept
+summary: 'A cumulative link model sets $P(y \le k \mid \xvec) = F(\theta_k - \wvec^\top\xvec)$ for ordered thresholds $\theta_1 < \dots < \theta_{K-1}$ and a cdf $F$. It is a latent score $\wvec^\top\xvec + \epsilon$ cut into intervals. The logistic $F$ gives the proportional odds model, the Gaussian the ordered probit.'
+tags: [ordinal-regression, generalised-linear-models, latent-variable-models, worked-example]
+aliases:
+  [
+    proportional odds model,
+    ordered logit,
+    ordered logistic regression,
+    ordered probit,
+    cumulative logit model,
+    cumulative probit model,
+    POM,
+    CLM,
+    polr,
+  ]
+requires: [logistic-regression]
+partOf: [ordinal-regression]
+related:
+  [
+    generalised-linear-model,
+    multinomial-logistic-regression,
+    matchbox-recommender,
+  ]
+references: [mccullagh1980, mccullagh1989, agresti2010, pratt1981]
+status: draft
+updated: 2026-09-29
+---
+
+import { OrdinalModelLab } from '../_shared/OrdinalModelLab'
+import { CumulativeCurves } from './CumulativeCurves'
+import { LatentThresholds } from './LatentThresholds'
+
+<Definition>
+For an ordinal label $y \in \set{1, \dots, K}$ and input $\xvec \in \reals^D$, a cumulative link model sets
+
+$$
+P(y \le k \mid \xvec) = F(\theta_k - \wvec^\top\xvec), \qquad k = 1, \dots, K - 1,
+$$
+
+where $F$ is a continuous <Gloss name="cdf">cumulative distribution function</Gloss>, $\wvec \in \reals^D$ is a weight vector and
+$\theta_1 < \theta_2 < \dots < \theta_{K-1}$ are thresholds (cut points). The class probabilities are the differences
+$P(y = k \mid \xvec) = F(\theta_k - \wvec^\top\xvec) - F(\theta_{k-1} - \wvec^\top\xvec)$, with $\theta_0 = -\infty$
+and $\theta_K = +\infty$. With the logistic $F$ it is the proportional odds model; with the standard normal $F$ it is
+the ordered probit <Cite id="mccullagh1980" />.
+</Definition>
+
+## Intuition
+
+The model assumes a hidden continuous score $y^*$ behind the observed grade. A patient's cognitive decline is a
+continuous quantity. A clinician reports it as one of four grades by comparing it with fixed boundaries. The model
+learns how the inputs move the hidden score, and where the boundaries lie.
+
+<LatentThresholds />
+
+The inputs act only through one number, the linear predictor $\eta = \wvec^\top\xvec$. Increasing $\eta$ slides the
+noise density to the right. Mass then moves from the low classes to the high ones, and the cumulative probability
+$P(y \le k)$ falls for every $k$ at once.
+
+## Derivation from a latent variable
+
+Let the latent score be
+
+$$
+y^* = \wvec^\top\xvec + \epsilon, \qquad \epsilon \sim F,
+$$
+
+where $F$ is the cdf of a noise distribution with density $f$. The observed label is the interval into which $y^*$
+falls: $y = k$ exactly when $\theta_{k-1} < y^* \le \theta_k$. The event $y \le k$ is then the event
+$y^* \le \theta_k$. Its probability is
+
+$$
+P(y \le k \mid \xvec) = P(\wvec^\top\xvec + \epsilon \le \theta_k) = P(\epsilon \le \theta_k - \wvec^\top\xvec) = F(\theta_k - \wvec^\top\xvec).
+$$
+
+The class probability is the probability that $y^*$ lies in the $k$-th interval, which is the difference of two
+cumulative probabilities:
+
+$$
+P(y = k \mid \xvec) = P(y \le k \mid \xvec) - P(y \le k - 1 \mid \xvec) = F(\theta_k - \wvec^\top\xvec) - F(\theta_{k-1} - \wvec^\top\xvec).
+$$
+
+Each difference is positive because $F$ is increasing and $\theta_{k-1} < \theta_k$. The differences sum to
+$F(+\infty) - F(-\infty) = 1$. The order of the classes is carried entirely by the order of the thresholds.
+
+**Identifiability.** Two parameters cannot be learnt from $y$ alone. An intercept $b$ in $\wvec^\top\xvec + b$ can be
+absorbed into the thresholds, $\theta_k \to \theta_k - b$, without changing any probability; the model therefore has no
+separate intercept. Multiplying $y^*$, $\wvec$ and every $\theta_k$ by $c > 0$ also changes nothing, so the noise scale
+is fixed, to 1 for the logit and probit links. A model with $D$ inputs and $K$ classes has $D + K - 1$ free parameters.
+
+**Sign convention.** Some texts write $F(\theta_k + \wvec^\top\xvec)$. The two forms differ only in the sign of $\wvec$.
+The minus sign used here makes a positive weight push the label upwards.
+
+### Worked example
+
+Take $K = 3$, one input, $w = 2$, thresholds $\theta = (-1, 1)$, the logistic link $F = \sigma$, and the input
+$x = 0.5$. The linear predictor is $\eta = 1$. Then
+
+- $P(y \le 1) = \sigma(-1 - 1) = \sigma(-2) = 0.119$;
+- $P(y \le 2) = \sigma(1 - 1) = \sigma(0) = 0.5$;
+- $P(y = 1, 2, 3) = (0.119,\ 0.5 - 0.119,\ 1 - 0.5) = (0.119,\ 0.381,\ 0.5)$.
+
+At $x = 0$ the predictor is $\eta = 0$ and the probabilities are $(0.269, 0.462, 0.269)$: the middle class wins, and
+the two outer classes are equally likely because the thresholds are symmetric about 0.
+
+## Link functions
+
+The noise distribution $F$ is the inverse of a link function, as in a
+<NoteLink to="generalised-linear-model" />: $F^{-1}(P(y \le k \mid \xvec)) = \theta_k - \wvec^\top\xvec$
+<Cite id="mccullagh1989" />.
+
+| Link                    | $F$                            | Name                      | Property                                   |
+| ----------------------- | ------------------------------ | ------------------------- | ------------------------------------------ |
+| logit                   | $\sigma(z) = 1/(1 + e^{-z})$   | proportional odds model   | constant cumulative odds ratios            |
+| probit                  | $\Phi(z)$                      | ordered probit            | Gaussian latent noise                      |
+| complementary log–log   | $1 - \exp(-e^{z})$             | proportional hazards      | constant hazard ratios on a grouped scale |
+| cauchit                 | $\tfrac12 + \tfrac1\pi\arctan z$ | ordered Cauchit         | heavy-tailed noise, robust to outliers     |
+
+The logit and probit links usually give nearly identical fits once $\wvec$ is rescaled: the standard logistic
+distribution has standard deviation $\pi/\sqrt3 \approx 1.81$, so logit weights are roughly 1.6 to 1.8 times probit
+weights. The complementary log–log link arises when a continuous survival time is grouped into intervals
+<Cite id="mccullagh1980" />.
+
+## Proportional odds
+
+Under the logit link, compare the cumulative log-odds at two inputs $\xvec$ and $\xvec'$. Since
+$\operatorname{logit}\sigma(z) = z$,
+
+$$
+\operatorname{logit} P(y \le k \mid \xvec) - \operatorname{logit} P(y \le k \mid \xvec') = (\theta_k - \wvec^\top\xvec) - (\theta_k - \wvec^\top\xvec') = -\wvec^\top(\xvec - \xvec').
+$$
+
+The threshold cancels, so the difference is the same for every $k$. The odds of $y \le k$ change by the factor
+$\exp(-w_j)$ per unit increase of input $x_j$, whichever cut point $k$ is used. This is the proportional odds property
+that names the model <Cite id="mccullagh1980" />. It is a restriction: a separate logistic regression for each split
+$y \le k$ would have its own weight vector. Whether the data support one shared vector is tested in
+<NoteLink to="proportional-odds-assumption" />.
+
+<CumulativeCurves />
+
+The cumulative curves are horizontal shifts of one another for any link, not only the logit. They therefore never
+cross, and every class probability is positive at every input. This guarantee is what separate binary classifiers
+lack.
+
+## Decision boundaries are parallel
+
+The boundary between predicting "at most $k$" and "above $k$" is the set where $P(y \le k \mid \xvec) = \tfrac12$,
+which is $\wvec^\top\xvec = \theta_k - F^{-1}(\tfrac12)$. Each such set is a hyperplane with normal $\wvec$. All
+$K - 1$ boundaries share that normal, so they are parallel and differ only by their offsets. In two dimensions the
+input plane is divided into parallel bands, one per class, whose widths are set by the gaps between thresholds.
+
+Class-probability boundaries for the rule $\hat y = \argmax_k P(y = k \mid \xvec)$ are also level sets of
+$\wvec^\top\xvec$, because every probability depends on $\xvec$ only through $\eta$. They are parallel for the same
+reason. A narrow middle class can have no region at all under the argmax rule, if its probability never exceeds its
+neighbours' at any $\eta$.
+
+<OrdinalModelLab
+  model="cumulative-logit"
+  data={{ shape: 'linear' }}
+  models={['cumulative-logit', 'cumulative-probit', 'multiclass', 'regression']}
+  title="Cumulative link models on shared data"
+/>
+
+## Fitting
+
+The parameters are fitted by maximum likelihood. For $N$ examples, with $\eta_i = \wvec^\top\xvec_i$ and
+$p_i = F(\theta_{y_i} - \eta_i) - F(\theta_{y_i - 1} - \eta_i)$, the log-likelihood is
+$\ell = \sum_{i} \log p_i$. Differentiating one term, with $u_i = \theta_{y_i} - \eta_i$ and
+$l_i = \theta_{y_i - 1} - \eta_i$,
+
+$$
+\frac{\partial \log p_i}{\partial \wvec} = -\frac{f(u_i) - f(l_i)}{p_i}\,\xvec_i, \qquad
+\frac{\partial \log p_i}{\partial \theta_{y_i}} = \frac{f(u_i)}{p_i}, \qquad
+\frac{\partial \log p_i}{\partial \theta_{y_i - 1}} = -\frac{f(l_i)}{p_i},
+$$
+
+where $f(\pm\infty) = 0$. Each example touches only the two thresholds that bound its class. When the density $f$ is
+log-concave, as the logistic and Gaussian densities are, the log-likelihood is concave in $(\wvec, \theta)$, so a
+Newton or quasi-Newton method finds the global maximum <Cite id="pratt1981" />.
+
+The ordering $\theta_1 < \dots < \theta_{K-1}$ must hold during optimisation. A common parametrisation is
+$\theta_1 = a_1$ and $\theta_k = \theta_{k-1} + e^{a_k}$ for $k \ge 2$, which is unconstrained in $a$. At the maximum
+likelihood estimate the order holds automatically when every class is observed, because a reversed pair would give
+some observed class a negative probability.
+
+## Assumptions
+
+- **One score.** Every input shifts all the cumulative probabilities through the same $\eta$. The effect of an input
+  on "above mild" equals its effect on "above moderate".
+- **A fixed noise distribution.** The shape and scale of $F$ are the same for every input. A covariate that changes
+  the spread of $y^*$ rather than its location violates the model; location–scale extensions give each input a scale
+  term $\exp(\gammavec^\top\xvec)$ <Cite id="mccullagh1980" />.
+- **Linearity in $\xvec$.** The score is linear. Basis expansions, kernels or a
+  <NoteLink to="gaussian-process-ordinal-regression">Gaussian process</NoteLink> relax this.
+
+## Pitfalls
+
+- **Proportional odds can fail.** When different splits need different directions, a single score cannot separate
+  them; the arc dataset in the figure is an example. Test the assumption before relying on it.
+- **Empty classes.** A class with no training examples leaves its two thresholds unidentified; they collapse together.
+- **Separation.** When some threshold separates the data perfectly, the likelihood increases without bound as
+  $\norm{\wvec} \to \infty$. A small $\ell_2$ penalty keeps the estimate finite.
+- **Argmax is not the only prediction.** The median class, the smallest $k$ with $P(y \le k) \ge \tfrac12$, minimises
+  expected absolute error. The argmax minimises the 0–1 error. The two can differ.

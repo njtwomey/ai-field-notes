@@ -85,20 +85,20 @@ updated: 2026-09-27
 />
 
 A **forecasting foundation model** is trained once on many series from many domains and frequencies, then forecasts a
-new series from its context alone, with no gradient updates. This is **zero-shot** forecasting. The four models here
-were published within months of each other and share the transformer backbone. They differ in how a series becomes
+new series from its context alone, with no <NoteLink to="gradient">gradient</NoteLink> updates. This is **zero-shot** forecasting. The four models here
+were published within months of each other and share the <NoteLink to="transformer">transformer</NoteLink> backbone. They differ in how a series becomes
 tokens, what the output head predicts, and how they cope with differences in scale, frequency and dimension across
 their corpora.
 
 ## Architecture
 
-**Chronos** reuses a language model unchanged apart from its vocabulary <Cite id="ansari2024" />. A series is scaled
+**Chronos** reuses a <Gloss name="language-model">language model</Gloss> unchanged apart from its vocabulary <Cite id="ansari2024" />. A series is scaled
 and quantised into a vocabulary of $4096$ tokens: $4094$ value bins plus padding and end-of-sequence tokens. The main
-models are T5 encoder–decoders; a GPT-2 decoder-only variant also works. Calendar and frequency information are
+models are <Gloss name="t5" /> encoder–decoders; a <Gloss name="gpt-2" /> decoder-only variant also works. Calendar and frequency information are
 deliberately ignored: the model sees only the sequence of tokens.
 
 **TimesFM** is a decoder-only transformer over patches <Cite id="das2024" />. The context is cut into non-overlapping
-input patches of 32 values. A residual MLP maps each patch to a token, positional encodings are added, and 20 causally
+input patches of 32 values. A residual <Gloss name="mlp" /> maps each patch to a token, <NoteLink to="positional-encoding">positional encodings</NoteLink> are added, and 20 causally
 masked transformer layers (model width 1280, 16 heads) process the tokens. Each output token is mapped by another
 residual MLP to an **output patch** of 128 values: the forecast for the 128 steps after that input patch.
 
@@ -108,7 +108,7 @@ output projection per patch size. Horizon patches are replaced by a learnt mask 
 the distribution parameters for every masked patch in one pass. Every variable of a multivariate series, including
 covariates, is flattened into one token sequence.
 
-**Lag-Llama** follows the LLaMA decoder: RMSNorm pre-normalisation and rotary position encodings
+**Lag-Llama** follows the <Gloss name="llama" /> decoder: <Gloss name="rmsnorm" /> pre-normalisation and <NoteLink to="rotary-position-embedding">rotary position encodings</NoteLink>
 
 <Cite id="rasul2023" />. Its token at time $t$ is a vector of past values at a fixed set of lags, chosen to cover
 quarterly, monthly, weekly, daily, hourly and second-level cycles, together with date-time features and summary
@@ -123,7 +123,7 @@ window.
 - **Chronos** divides by the mean absolute value of the context, $s = \frac1C\sum_{i=1}^{C}\abs{x_i}$, and keeps zeros
   as zeros. It then quantises each scaled value to the nearest of $B = 4094$ bin centres spaced uniformly on
   $[-15, 15]$. The bin width is $30 / 4093 \approx 0.0073$ in scaled units.
-- **TimesFM** subtracts the mean and divides by the standard deviation of the first input patch of the context.
+- **TimesFM** subtracts the mean and divides by the <NoteLink to="variance-and-covariance">standard deviation</NoteLink> of the first input patch of the context.
 - **Moirai** and **Lag-Llama** standardise each window. Lag-Llama found a robust version, subtracting the median and
   dividing by the interquartile range, to work well, and passes the window's statistics to the model as features.
 
@@ -140,12 +140,12 @@ limit for series with strong trends.
 ## Training
 
 - **Chronos** trains on 28 public datasets. Two augmentations add diversity. **TSMixup** takes convex combinations of up
-  to three series from different datasets, with weights from a symmetric Dirichlet distribution, to make 10 million new
-  series. **KernelSynth** samples 1 million series from Gaussian processes whose kernels are random combinations of
+  to three series from different datasets, with weights from a symmetric <NoteLink to="dirichlet-distribution">Dirichlet distribution</NoteLink>, to make 10 million new
+  series. **KernelSynth** samples 1 million series from <Gloss name="gp">Gaussian processes</Gloss> whose kernels are random combinations of
   linear kernels for trend, radial-basis kernels for smooth variation and periodic kernels for seasonality. The context
   is 512 values and the prediction length 64.
 - **TimesFM** trains on about 100 billion time points: Google Trends queries, Wikipedia page views, synthetic series
-  (autoregressive processes, sinusoids, trends and steps) and public benchmarks. Batches are 80% real and 20% synthetic,
+  (<Gloss name="ar">autoregressive processes</Gloss>, sinusoids, trends and steps) and public benchmarks. Batches are 80% real and 20% synthetic,
   with equal weight on hourly, daily, weekly and monthly data. The model predicts the next output patch after every
   input patch in parallel, as a language model predicts every next token. Random masking of the start of the context
   teaches it every context length from 1 to 512.
@@ -157,7 +157,7 @@ limit for series with strong trends.
 ## What is distinctive
 
 **Chronos: a language model for numbers.** It changes nothing in the transformer and shows that tokenisation plus
-cross-entropy is enough for probabilistic forecasting. Forecasts are sample paths drawn one token at a time, then
+cross-entropy is enough for <NoteLink to="probabilistic-forecasting">probabilistic forecasting</NoteLink>. Forecasts are sample paths drawn one token at a time, then
 dequantised and rescaled; quantiles come from the samples. On datasets in its training corpus it outperformed local
 and task-specific models. On 27 datasets it had not seen, its zero-shot accuracy was comparable to, and sometimes
 better than, models trained on those datasets <Cite id="ansari2024" />.
@@ -166,8 +166,8 @@ better than, models trained on those datasets <Cite id="ansari2024" />.
 accurate for long horizons, but a foundation model does not know the horizon in advance. An output patch four times as
 long as the input patch is the compromise. Forecasting 256 steps from a 256-step context takes two passes, one for steps
 257 to 384 and one for 385 to 512, where an output patch of 32 would take eight. Zero-shot, TimesFM had the lowest
-scaled error on 18 Monash datasets, within significance of N-BEATS. On the Darts collection it was within significance
-of the best models. On four ETT datasets it was the most accurate, with a supervised PatchTST within significance of it
+scaled error on 18 Monash datasets, within significance of <Gloss name="n-beats" />. On the Darts collection it was within significance
+of the best models. On four ETT datasets it was the most accurate, with a supervised <Gloss name="patchtst" /> within significance of it
 
 <Cite id="das2024" /> <Cite id="nie2023" />.
 

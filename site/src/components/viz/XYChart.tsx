@@ -26,6 +26,13 @@ export type XYSeries = Omit<Series, 'group' | 'type'> & {
   muted?: boolean
   /** Names for group indices, shown in the legend. */
   groupNames?: string[]
+  /**
+   * A data colour from a palette helper (e.g. `sequentialColor`) in place of the categorical slot, for series that
+   * stand for a point on an ordered scale, such as class k of K.
+   */
+  color?: string
+  /** Bars and ungrouped scatter only: one palette colour per point, e.g. each bar coloured by its class. */
+  pointColors?: string[]
 }
 
 export type Segment = { from: [number, number]; to: [number, number] }
@@ -49,6 +56,8 @@ export type XYChartProps = {
    * and ignores `height`.
    */
   equalAspect?: boolean
+  /** Ticks and labels on the x-axis at integers only, e.g. classes 1…K drawn as bars on [0.5, K + 0.5]. */
+  integerX?: boolean
   /** Hide axes, ticks and grid lines, e.g. for a grid of people where coordinates mean nothing. */
   bare?: boolean
   /** Draggable handles bound to parameters. See handles.ts. */
@@ -75,6 +84,7 @@ export function XYChart({
   equalAspect,
   onPlotClick,
   handles,
+  integerX,
   bare,
   height = 320,
   ariaLabel,
@@ -97,7 +107,12 @@ export function XYChart({
         }
         return
       }
-      const data = s.x.map((x, i) => [x, s.y[i]])
+      const points = s.x.map((x, i) => [x, s.y[i]])
+      // Per-point colours ride on each data item, so the series style keeps its defaults.
+      const data = s.pointColors
+        ? points.map((value, i) => ({ value, itemStyle: { color: s.pointColors![i] } }))
+        : points
+      const own = s.color ?? seriesColor(mode, slot)
       if (s.type === 'bar') {
         out.push({
           name: s.name,
@@ -105,16 +120,23 @@ export function XYChart({
           data,
           barWidth: '92%',
           barGap: '-100%',
-          itemStyle: { color: s.muted ? chrome(mode).grid : seriesColor(mode, slot), borderRadius: [2, 2, 0, 0] },
+          itemStyle: { color: s.muted ? chrome(mode).grid : own, borderRadius: [2, 2, 0, 0] },
           z: 1,
         })
       } else if (s.type === 'scatter') {
         // Emphasised marks (e.g. centroids) are ink-coloured so they never read as another category.
-        const color = s.emphasis ? chrome(mode).ink : s.muted ? chrome(mode).grid : seriesColor(mode, slot)
-        out.push(scatter(s.name, data, color, s.emphasis ? 3 : 0, s.emphasis, mode))
+        const color = s.emphasis ? chrome(mode).ink : s.muted ? chrome(mode).grid : own
+        const series = scatter(s.name, points, color, s.emphasis ? 3 : 0, s.emphasis, mode)
+        // Marks coloured along a scale may match their surroundings, so they get an ink outline instead of a ring.
+        out.push(
+          s.pointColors
+            ? // The series colour only reaches the legend, which shows the mark in ink since colour varies per point.
+              { ...series, data, itemStyle: { ...series.itemStyle, color: c.ink, borderColor: c.ink, borderWidth: 1 } }
+            : series,
+        )
       } else {
         // Muted lines sit behind the data in the chrome colour; emphasised lines are ink. Neither uses a palette slot.
-        const color = s.emphasis ? c.ink : s.muted ? c.muted : seriesColor(mode, slot)
+        const color = s.emphasis ? c.ink : s.muted ? c.muted : own
         out.push({
           name: s.name,
           type: 'line',
@@ -175,7 +197,23 @@ export function XYChart({
         formatter: (p: { seriesName: string; value: number[] }) =>
           `${p.seriesName}<br/>(${formatNumber(p.value[0])}, ${formatNumber(p.value[1])})`,
       },
-      xAxis: { type: 'value', name: xLabel, min: x0, max: x1, scale: true, show: !bare },
+      xAxis: {
+        type: 'value',
+        name: xLabel,
+        min: x0,
+        max: x1,
+        scale: true,
+        show: !bare,
+        // The range ends sit half a step outside the integers; hide their labels and tick only whole numbers.
+        // Ticks every half unit (ECharts starts them at the axis minimum, a half-integer), labelled at integers only.
+        ...(integerX
+          ? {
+              interval: 0.5,
+              axisLabel: { formatter: (v: number) => (Number.isInteger(v) ? String(v) : '') },
+              splitLine: { show: false },
+            }
+          : {}),
+      },
       yAxis: yLog
         ? {
             type: 'log',
@@ -188,7 +226,7 @@ export function XYChart({
         : { type: 'value', name: yLabel, min: y0, max: y1, scale: true, nameGap: 36, show: !bare },
       series: out,
     }
-  }, [series, segments, vectors, xLabel, yLabel, x0, x1, y0, y1, yLog, equalAspect, bare, mode])
+  }, [series, segments, vectors, xLabel, yLabel, x0, x1, y0, y1, yLog, equalAspect, bare, integerX, mode])
 
   // For equal aspect, derive the height from the measured width: plot height / plot width = y span / x span.
   const wrapper = useRef<HTMLDivElement>(null)

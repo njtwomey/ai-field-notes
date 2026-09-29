@@ -1,0 +1,164 @@
+---
+title: Threshold losses for ordinal regression
+kind: concept
+summary: 'Threshold losses train a score $s(\xvec)$ and cut points $\theta_1 < \dots < \theta_{K-1}$ with a convex surrogate per threshold. The all-threshold loss penalises every threshold on the wrong side of $s$ and bounds the absolute error; the immediate-threshold loss penalises only the two beside the true class.'
+tags: [ordinal-regression, loss-functions, support-vector-machines, worked-example]
+aliases:
+  [
+    all-threshold loss,
+    immediate-threshold loss,
+    support vector ordinal regression,
+    SVOR,
+    SVOR-EXC,
+    SVOR-IMC,
+    PRank,
+    perceptron ranking,
+    ordinal hinge loss,
+  ]
+requires: [support-vector-machine]
+partOf: [ordinal-regression]
+related: [surrogate-losses, cumulative-link-model, deep-ordinal-regression, kernel-support-vector-machine]
+references: [rennie2005, chu2005svor, chu2007svor, crammer2001, gutierrez2016]
+status: draft
+updated: 2026-09-29
+---
+
+import { OrdinalModelLab } from '../_shared/OrdinalModelLab'
+import { ThresholdLosses } from './ThresholdLosses'
+
+<Definition>
+A threshold model predicts class $\hat y(\xvec) = 1 + \abs{\set{k : \theta_k < s(\xvec)}}$ from a score $s(\xvec)$ and
+<NoteLink to="ordering-constraints-on-ordinal-thresholds">ordered thresholds</NoteLink> $\theta_1 < \dots < \theta_{K-1}$. Given a <NoteLink to="surrogate-losses">convex surrogate</NoteLink> $h$ of the step $\indicator[z \le 0]$,
+such as the hinge $h(z) = \max(0, 1 - z)$, the **all-threshold** loss for true class $y$ is
+
+$$
+L_{\text{AT}} = \sum_{k < y} h(s - \theta_k) + \sum_{k \ge y} h(\theta_k - s),
+$$
+
+and the **immediate-threshold** loss keeps only the terms $k = y - 1$ and $k = y$. Support vector ordinal regression
+minimises one of them plus $\tfrac12\norm{\wvec}^2$ <Cite id="rennie2005" /> <Cite id="chu2005svor" />.
+</Definition>
+
+## Intuition
+
+The <NoteLink to="cumulative-link-model" /> learns a score and thresholds by maximum likelihood. Threshold losses keep
+the same prediction rule, a score cut at thresholds, and replace the likelihood with a margin loss. The score of an
+example of class $y$ should sit above every threshold below its class and below every threshold above it. Each
+threshold is a binary decision: is $s$ on the correct side of $\theta_k$, with a margin?
+
+The two losses differ in which binary decisions they count. Immediate-threshold asks only about the two thresholds that
+bound the true class. All-threshold asks about all $K - 1$ of them.
+
+<ThresholdLosses />
+
+## The absolute error counts violated thresholds
+
+The loss that <NoteLink to="ordinal-regression">ordinal regression</NoteLink> usually cares about is the absolute error $\abs{\hat y - y}$. That error has an exact
+threshold form. Call threshold $k$ **violated** when it is on the wrong side of the score: $s \le \theta_k$ for
+$k < y$, or $s > \theta_k$ for $k \ge y$.
+
+Suppose the prediction is too high, $\hat y > y$. Then the thresholds $\theta_y, \dots, \theta_{\hat y - 1}$ lie below
+$s$, because $s$ fell in interval $\hat y$. They should lie above it, since their indices are at least $y$. That is
+$\hat y - y$ violated thresholds. Every threshold $\theta_k$ with $k < y$ lies below $\theta_y < s$, so none of them is
+violated. Every threshold with $k \ge \hat y$ lies above $s$, as it should. The case $\hat y < y$ is symmetric. So
+
+$$
+\abs{\hat y - y} = \sum_{k < y} \indicator[s \le \theta_k] + \sum_{k \ge y} \indicator[s > \theta_k].
+$$
+
+Replacing each indicator by a surrogate $h$ with $h(z) \ge \indicator[z \le 0]$ gives the all-threshold loss, and the
+replacement can only increase each term:
+
+$$
+L_{\text{AT}} \ge \abs{\hat y - y}.
+$$
+
+The immediate-threshold loss replaces only the two terms that decide whether $\hat y = y$, so it bounds the 0–1 error
+$\indicator[\hat y \ne y]$ instead. Beyond the neighbouring thresholds it keeps one slope however far the score strays.
+The all-threshold loss steepens by one slope unit at each threshold crossed. Rennie and Srebro found the all-threshold
+loss gave lower absolute error than the immediate-threshold loss and than multiclass reductions on movie-rating
+prediction <Cite id="rennie2005" />.
+
+The hinge satisfies $h(z) \ge \indicator[z \le 0]$ exactly. The logistic surrogate $h(z) = \log(1 + e^{-z})$ equals
+$\log 2 \approx 0.69$ at $z = 0$, so the logistic all-threshold loss bounds $\log 2 \cdot \abs{\hat y - y}$.
+
+### Worked example
+
+Take $K = 5$, thresholds $\theta = (-3, -1, 1, 3)$, true class $y = 2$ and score $s = 2.5$ with the hinge. The score
+exceeds $\theta_1, \theta_2, \theta_3$, so $\hat y = 4$ and the absolute error is 2.
+
+- Threshold 1 ($k < y$): $h(2.5 + 3) = h(5.5) = 0$.
+- Threshold 2 ($k \ge y$): $h(-1 - 2.5) = h(-3.5) = 4.5$.
+- Threshold 3: $h(1 - 2.5) = h(-1.5) = 2.5$.
+- Threshold 4: $h(3 - 2.5) = h(0.5) = 0.5$.
+
+The all-threshold loss is $7.5 \ge 2$. The immediate-threshold loss counts thresholds 1 and 2 only: $0 + 4.5 = 4.5$.
+Threshold 3, which the score also crossed, costs nothing in the immediate-threshold loss.
+
+## Support vector ordinal regression
+
+With a linear score $s = \wvec^\top\xvec$ and the hinge, Chu and Keerthi give two support vector formulations
+<Cite id="chu2005svor" /> <Cite id="chu2007svor" />.
+
+**Explicit constraints (SVOR-EXC)** minimise $\tfrac12\norm{\wvec}^2 + C\sum_i L_{\text{IT}}(\xvec_i, y_i)$ subject to
+$\theta_1 \le \theta_2 \le \dots \le \theta_{K-1}$. Each threshold is fitted only to the two classes beside it, so the
+ordering can fail without the explicit constraint.
+
+**Implicit constraints (SVOR-IMC)** minimise $\tfrac12\norm{\wvec}^2 + C\sum_i L_{\text{AT}}(\xvec_i, y_i)$ with no
+ordering constraint. Every example contributes to every threshold. Chu and Keerthi prove that the optimal thresholds
+satisfy $\theta_1 \le \dots \le \theta_{K-1}$ without the constraint being imposed.
+
+Both are quadratic programmes in the usual <Gloss name="svm" /> form, with one slack variable per example per threshold used. Their
+duals depend on the data only through <NoteLink to="dot-product">inner products</NoteLink>, so a kernel replaces $\xvec_i^\top\xvec_j$ and the score becomes
+nonlinear, as in the <NoteLink to="kernel-support-vector-machine" />. The thresholds remain scalars.
+
+## Online learning: PRank
+
+PRank is a perceptron for the all-threshold model <Cite id="crammer2001" />. For each example it predicts
+$\hat y$, and if $\hat y \ne y$ it finds the violated thresholds. Let $\tau_k = +1$ if threshold $k$ is violated with
+$k < y$ (the score should be higher), $\tau_k = -1$ if violated with $k \ge y$, and $\tau_k = 0$ otherwise. The update is
+
+$$
+\wvec \leftarrow \wvec + \Big(\sum_k \tau_k\Big)\xvec, \qquad \theta_k \leftarrow \theta_k - \tau_k.
+$$
+
+The score moves by the number of violated thresholds, and each violated threshold moves one unit towards the correct
+side. Crammer and Singer show that the update preserves the order of the thresholds and give a mistake bound in terms
+of the absolute error.
+
+## Logistic threshold losses and neural heads
+
+With the logistic surrogate, the all-threshold loss is a sum of $K - 1$ binary cross-entropies, one per threshold, all
+sharing the score $s$:
+
+$$
+L_{\text{AT}} = \sum_{k=1}^{K-1} -\Big(t_k \log\sigma(s - \theta_k) + (1 - t_k)\log\big(1 - \sigma(s - \theta_k)\big)\Big), \qquad t_k = \indicator[y > k].
+$$
+
+This is the loss of <Gloss name="consistent-rank-logits" />, a neural ordinal output layer with one shared weight vector and $K - 1$ biases; see
+<NoteLink to="deep-ordinal-regression" />. It differs from the cumulative logit likelihood, which is the log of one
+difference of sigmoids per example, not a sum over thresholds.
+
+<OrdinalModelLab
+  model="all-threshold"
+  data={{ shape: 'linear' }}
+  models={['all-threshold', 'immediate-threshold', 'svor', 'cumulative-logit', 'regression']}
+  title="Threshold losses on shared data"
+/>
+
+## Assumptions
+
+- **One score.** As in cumulative link models, the thresholds cut a single score, so the class regions in input
+  space are parallel bands for a linear score.
+- **Unit cost per threshold.** The all-threshold loss charges each crossed threshold the same. Weighting the
+  thresholds gives other costs, which the extended binary reduction of
+  <NoteLink to="binary-decomposition-for-ordinal-regression" /> makes explicit.
+
+## Pitfalls
+
+- **Scores are not probabilities.** A hinge-trained score has no probabilistic meaning. The sigmoid differences shown in
+  the figure's bars are a convenient reading, not calibrated class probabilities.
+- **Immediate-threshold thresholds can cross.** Without the explicit ordering constraint, fits that use only
+  neighbouring classes can produce out-of-order thresholds when a class is rare.
+- **<NoteLink to="class-imbalance">Class imbalance</NoteLink>.** Every example contributes $K - 1$ terms to the all-threshold loss, so frequent classes dominate
+  the placement of thresholds far from them.

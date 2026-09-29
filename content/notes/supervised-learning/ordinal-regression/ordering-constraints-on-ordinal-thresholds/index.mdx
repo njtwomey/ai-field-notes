@@ -1,0 +1,413 @@
+---
+title: Ordering constraints on ordinal thresholds
+kind: technique
+summary: 'A threshold model needs ordered cut points $\theta_1 \le \dots \le \theta_{K-1}$. Written as constraints $\theta_k - \theta_{k+1} \le 0$, the order has KKT multipliers $\mu_k \ge 0$: an inactive constraint has $\mu_k = 0$, and an active one merges two thresholds, with $\mu_k$ the push to cross.'
+tags: [ordinal-regression, constrained-optimisation, optimisation, worked-example]
+aliases:
+  [
+    threshold ordering constraints,
+    ordered thresholds,
+    ordered cut points,
+    monotone thresholds,
+    crossing thresholds,
+    threshold crossing,
+  ]
+requires: [cumulative-link-model, karush-kuhn-tucker-conditions]
+partOf: [ordinal-regression]
+related:
+  [
+    threshold-losses-for-ordinal-regression,
+    binary-decomposition-for-ordinal-regression,
+    lagrange-multipliers,
+    isotonic-calibration,
+    penalty-and-barrier-methods,
+    quadratic-programming,
+  ]
+references:
+  [mccullagh1980, frank2001, rennie2005, chu2005svor, chu2007svor, cao2020coral, kuhn1951, boyd2004, ayer1955, best1990, chernozhukov2010]
+code: ordinal-thresholds
+status: draft
+updated: 2026-09-29
+---
+
+import { OrderedThresholds } from './OrderedThresholds'
+
+<Definition>
+A threshold model for an ordinal label $y \in \set{1, \dots, K}$ cuts a score $s = \wvec^\top\xvec$ at thresholds
+$\theta_1, \dots, \theta_{K-1}$ and predicts class $k$ when $\theta_{k-1} < s \le \theta_k$. Fitting the thresholds
+with the order imposed is the problem
+
+$$
+\min_{\thetavec} L(\thetavec) \quad \text{subject to} \quad g_k(\thetavec) = \theta_k - \theta_{k+1} \le 0, \qquad k = 1, \dots, K - 2,
+$$
+
+where $L$ is a <NoteLink to="cross-entropy-and-perplexity">negative log-likelihood</NoteLink> or a threshold loss.
+Its <Gloss name="kkt" /> multipliers $\mu_k \ge 0$ satisfy $\mu_k(\theta_k - \theta_{k+1}) = 0$. A constraint is active, $\theta_k = \theta_{k+1}$, only when the data
+push the two thresholds to cross, and $\mu_k$ is the size of that push <Cite id="kuhn1951" />.
+</Definition>
+
+## Problem
+
+### The setup
+
+Every example $i$ has a score $s_i = \wvec^\top\xvec_i$ on one direction $\wvec$. Hold $\wvec$ fixed. This is the
+threshold step of a fit that alternates between $\wvec$ and $\thetavec$, and it is also the threshold part of a joint
+fit: the ordering constraints do not involve $\wvec$, so the joint <Gloss name="kkt" /> conditions add
+$\nabla_{\wvec} L = \zeros$ and leave the threshold conditions below unchanged.
+
+The cumulative logit model, with $\sigma(z) = 1/(1 + e^{-z})$, sets
+
+$$
+P(y \le k \mid \xvec) = \sigma(\theta_k - s), \qquad P(y = k \mid \xvec) = \sigma(\theta_k - s) - \sigma(\theta_{k-1} - s),
+$$
+
+with $\theta_0 = -\infty$ and $\theta_K = +\infty$ <Cite id="mccullagh1980" />. The class probabilities are
+non-negative for every score exactly when $\theta_1 \le \dots \le \theta_{K-1}$. The order of the classes is carried by
+the order of the thresholds. See <NoteLink to="cumulative-link-model" /> for the model itself.
+
+Some fits require strict gaps, $\theta_{k+1} - \theta_k \ge \epsilon$ for a margin $\epsilon > 0$. The constraint is
+then $g_k(\thetavec) = \theta_k - \theta_{k+1} + \epsilon \le 0$. Every result below holds with $\epsilon$ added.
+
+### When the order holds without a constraint
+
+**The cumulative logit likelihood with every class observed.** Suppose $\theta_{k-1} \ge \theta_k$ and some example
+$i$ has $y_i = k$. Its probability is $\sigma(\theta_k - s_i) - \sigma(\theta_{k-1} - s_i) \le 0$, because $\sigma$
+is increasing. Its log-probability is undefined, so the negative log-likelihood is $+\infty$ there. As the gap
+$\theta_k - \theta_{k-1}$ shrinks to zero from above, the same probability tends to zero and the negative
+log-likelihood tends to $+\infty$. The loss is therefore a barrier on the ordered region. Any minimiser lies strictly
+inside it, every ordering constraint is inactive, and every multiplier is zero.
+
+**Per-threshold fits that share the score and see all the data.** Fit each $\theta_k$ alone by logistic regression of
+the binary target $\indicator[y_i \le k]$ on the offset $\theta_k - s_i$. The loss for threshold $k$ is
+
+$$
+L_k(\theta_k) = -\sum_i \Big(\indicator[y_i \le k]\log\sigma(\theta_k - s_i) + \indicator[y_i > k]\log\sigma(s_i - \theta_k)\Big).
+$$
+
+Its derivative is $\sum_i \sigma(\theta_k - s_i) - N_{\le k}$, where $N_{\le k}$ is the number of examples with
+$y_i \le k$. At the minimum,
+
+$$
+\sum_i \sigma(\theta_k - s_i) = N_{\le k}.
+$$
+
+The left side is strictly increasing in $\theta_k$ and the same function for every $k$. The right side does not
+decrease with $k$. So $\theta_k \le \theta_{k+1}$, with equality exactly when class $k + 1$ is empty. The sum of these
+losses over $k$ is the logistic all-threshold loss of the <Gloss name="consistent-rank-logits" /> output layer, and
+Cao et al. prove the same ordering for it <Cite id="cao2020coral" />. Chu and Keerthi prove the corresponding result
+for the hinge all-threshold loss, support vector ordinal regression with implicit constraints (SVOR-IMC)
+<Cite id="chu2005svor" />.
+
+### When the order can fail
+
+- **An empty class.** Let class $k$ have no examples in the cumulative logit model. Then $\theta_{k-1}$ appears only in
+  the upper term $\sigma(\theta_{k-1} - s_i)$ of class $k - 1$, which it increases, and $\theta_k$ only in the lower term
+  $\sigma(\theta_k - s_i)$ of class $k + 1$, which it decreases. Neither term sees the sign of $\theta_k - \theta_{k-1}$.
+  The likelihood formula improves as $\theta_{k-1} \to +\infty$ and $\theta_k \to -\infty$, so unconstrained descent
+  drives the pair past each other and apart without bound. The class that would pay for the crossing has no example to
+  pay it.
+- **Fits that use only neighbouring classes.** The immediate-threshold loss fits $\theta_k$ to classes $k$ and $k + 1$
+  only <Cite id="rennie2005" />. A rare class $k + 1$ is outweighed on both sides: class $k$ pulls $\theta_k$ up past it,
+  and class $k + 2$ pulls $\theta_{k+1}$ down past it. The worked example below has this failure. Chu and Keerthi's
+  support vector ordinal regression with explicit constraints (SVOR-EXC) uses this loss and imposes
+  $\theta_k \le \theta_{k+1}$ as constraints for this reason <Cite id="chu2005svor" /> <Cite id="chu2007svor" />.
+- **Separate binary classifiers with their own weights.** Frank and Hall train one classifier for each target
+  $y > k$ <Cite id="frank2001" />. With a weight vector per split, the estimates of $P(y > k \mid \xvec)$ need not
+  decrease in $k$ at every input, and the differenced class probabilities can be negative. The failure comes from the
+  separate weights. With a shared score, the argument above orders the thresholds.
+- **Gradient steps that overshoot.** Even when the minimiser is ordered, a gradient step of fixed size can carry one
+  threshold past its neighbour. For the cumulative logit the iterate then leaves the domain of the likelihood.
+
+The ordering constraint is therefore needed in four situations: a class is empty, a loss fits each threshold to its
+neighbours only, splits have their own weights, or the optimiser can step past the boundary.
+
+## Mechanism
+
+### The Lagrangian and the KKT conditions
+
+The constraints are linear, so the feasible set $\set{\thetavec : \theta_1 \le \dots \le \theta_{K-1}}$ is a convex
+cone. Attach a multiplier $\mu_k \ge 0$ to each constraint. The Lagrangian is
+
+$$
+\Lcal(\thetavec, \muvec) = L(\thetavec) + \sum_{k=1}^{K-2} \mu_k(\theta_k - \theta_{k+1}).
+$$
+
+The constraint gradients are $\nabla g_k = \evec_k - \evec_{k+1}$, where $\evec_k$ is the $k$-th standard basis vector.
+They are linearly independent, so a constraint qualification holds at every point. For a convex $L$, such as the
+negative log-likelihood of the cumulative logit or any convex threshold loss, the <Gloss name="kkt" /> conditions are
+necessary and sufficient for a minimum <Cite id="boyd2004" />:
+
+1. **Stationarity.** $\nabla L(\thetavec) + \sum_k \mu_k(\evec_k - \evec_{k+1}) = \zeros$.
+2. **Primal feasibility.** $\theta_k \le \theta_{k+1}$ for every $k$.
+3. **Dual feasibility.** $\mu_k \ge 0$ for every $k$.
+4. **Complementary slackness.** $\mu_k(\theta_k - \theta_{k+1}) = 0$ for every $k$.
+
+Write $\partial_j L = \partial L / \partial\theta_j$. Threshold $\theta_j$ appears in constraint $j$ with coefficient
+$+1$ and in constraint $j - 1$ with coefficient $-1$. Component $j$ of stationarity is therefore
+
+$$
+\partial_j L + \mu_j - \mu_{j-1} = 0, \qquad \mu_0 = \mu_{K-1} = 0.
+$$
+
+Summing components $1$ to $k$ telescopes the multipliers and gives each one in closed form:
+
+$$
+\mu_k = -\sum_{j=1}^{k} \partial_j L, \qquad k = 1, \dots, K - 2.
+$$
+
+Summing all $K - 1$ components gives $\sum_{j=1}^{K-1} \partial_j L = 0$. Shifting every threshold by the same amount
+never violates a constraint, so the loss must be stationary in that direction.
+
+### Reading the conditions
+
+The quantity $-\sum_{j \le k} \partial_j L$ is the rate at which the loss falls when the block
+$\theta_1, \dots, \theta_k$ moves up together while $\theta_{k+1}, \dots, \theta_{K-1}$ stay fixed. It is the net
+push of the data on the lower block towards the upper one.
+
+- **Inactive constraint.** If $\theta_k < \theta_{k+1}$, complementary slackness gives $\mu_k = 0$. The net push on
+  the lower block is zero, and the thresholds sit where the unconstrained loss puts them.
+- **Active constraint.** If $\mu_k > 0$, complementary slackness gives $\theta_k = \theta_{k+1}$. The two thresholds
+  merge into one cut point. The interval $(\theta_k, \theta_{k+1}]$ of class $k + 1$ has zero width, so the model
+  never predicts class $k + 1$. The data push the lower block upward with force $\mu_k$, and the constraint holds it.
+- **Dual feasibility is the direction test.** A merge is optimal only when the data push the thresholds towards each
+  other. A negative $\mu_k$ would mean the data want the pair apart. The constraint would then be inactive.
+
+The multiplier is also a sensitivity. Impose a margin, $\theta_{k+1} - \theta_k = \epsilon$ on an active constraint,
+and let $L^*(\epsilon)$ be the optimal loss. Differentiating $\theta_{k+1}^*(\epsilon) - \theta_k^*(\epsilon) = \epsilon$
+gives $\theta_{k+1}^{*\prime} - \theta_k^{*\prime} = 1$. With one active constraint, stationarity gives
+$\partial_k L = -\mu_k$ and $\partial_{k+1} L = \mu_k$, and $\partial_j L = 0$ at every other threshold. By the chain rule,
+
+$$
+\frac{dL^*}{d\epsilon} = \partial_k L\,\theta_k^{*\prime} + \partial_{k+1} L\,\theta_{k+1}^{*\prime} = \mu_k(\theta_{k+1}^{*\prime} - \theta_k^{*\prime}) = \mu_k.
+$$
+
+Requiring a gap of $\epsilon$ between two merged thresholds raises the optimal loss at rate $\mu_k$. The same argument
+is the sensitivity result of <NoteLink to="lagrange-multipliers" />, applied to one ordering constraint.
+
+### Worked example
+
+Take $K = 4$ and ten scores: three examples of class 1 at $s = 0$, one example of class 2 at $s = 1$, three examples of
+class 3 at $s = 2$ and three examples of class 4 at $s = 3$. Fit the thresholds with the logistic immediate-threshold
+loss, in which threshold $\theta_k$ separates class $k$ from class $k + 1$ and sees no other class:
+
+$$
+\begin{aligned}
+L(\thetavec) ={}& \underbrace{3\log(1 + e^{-\theta_1}) + \log(1 + e^{\theta_1 - 1})}_{\theta_1 \text{: classes 1 and 2}} \\
+&+ \underbrace{\log(1 + e^{1 - \theta_2}) + 3\log(1 + e^{\theta_2 - 2})}_{\theta_2 \text{: classes 2 and 3}} \\
+&+ \underbrace{3\log(1 + e^{2 - \theta_3}) + 3\log(1 + e^{\theta_3 - 3})}_{\theta_3 \text{: classes 3 and 4}}.
+\end{aligned}
+$$
+
+Each threshold appears in its own two terms. The partial derivatives are
+
+$$
+\begin{aligned}
+\partial_1 L &= -3\sigma(-\theta_1) + \sigma(\theta_1 - 1), \\
+\partial_2 L &= -\sigma(1 - \theta_2) + 3\sigma(\theta_2 - 2), \\
+\partial_3 L &= -3\sigma(2 - \theta_3) + 3\sigma(\theta_3 - 3).
+\end{aligned}
+$$
+
+**Separate fits.** Setting $\partial_1 L = 0$ gives $3\sigma(-\theta_1) = \sigma(\theta_1 - 1)$. With $u = e^{\theta_1}$,
+$\sigma(-\theta_1) = 1/(1 + u)$ and $\sigma(\theta_1 - 1) = u/(u + e)$, so $3(u + e) = u(1 + u)$, which is
+$u^2 - 2u - 3e = 0$. The positive root is $u = 1 + \sqrt{1 + 3e} = 4.026$, so $\theta_1 = \log 4.026 = 1.393$. The
+reflection $s \mapsto 2 - s$ swaps classes 1 and 3 and maps the problem for $\theta_2$ onto the problem for $\theta_1$,
+so $\theta_2 = 2 - 1.393 = 0.607$. Classes 3 and 4 have equal counts, so $\theta_3 = 2.5$, their midpoint. The first
+two thresholds cross by $0.785$. Class 1 outnumbers the single class-2 example three to one, so it pulls $\theta_1$
+past $s = 1$; class 3 pulls $\theta_2$ below $s = 1$ in the same way. The loss is $5.993$.
+
+**What the crossing breaks.** Read as a cumulative logit model, the crossed thresholds give class 2 the probability
+
+$$
+P(y = 2 \mid s) = \sigma(\theta_2 - s) - \sigma(\theta_1 - s) = \sigma(0.607 - s) - \sigma(1.393 - s),
+$$
+
+which is negative at every score, because $\theta_2 < \theta_1$ and $\sigma$ is increasing. At $s = 1$ it is
+$\sigma(-0.393) - \sigma(0.393) = 0.403 - 0.597 = -0.194$, its minimum. The binary decisions contradict each other too.
+For $0.607 < s < 1.393$, threshold 1 answers "$y \le 1$" and threshold 2 answers "$y \ge 3$". Counting the thresholds
+below the score still assigns the class-2 example to class 2, but that count hides two incompatible answers.
+
+**KKT.** The constraints are $g_1 = \theta_1 - \theta_2 \le 0$ and $g_2 = \theta_2 - \theta_3 \le 0$. The separate fit
+violates $g_1$, so constraint 1 must be active. Try the active set $\set{1}$: $\theta_1 = \theta_2 = t$ and $\mu_2 = 0$.
+Stationarity is $\partial_1 L(t) + \mu_1 = 0$, $\partial_2 L(t) - \mu_1 = 0$ and $\partial_3 L(\theta_3) = 0$.
+
+- Adding the first two eliminates $\mu_1$: $-3\sigma(-t) + \sigma(t - 1) - \sigma(1 - t) + 3\sigma(t - 2) = 0$. The
+  left side is increasing in $t$, and $t = 1$ makes it zero, since $\sigma(0) - \sigma(0) = 0$ and
+  $3\sigma(-1) = 3\sigma(1 - 2)$. So $t = 1$.
+- The multiplier is $\mu_1 = -\partial_1 L(1) = 3\sigma(-1) - \sigma(0) = 3(0.2689) - 0.5 = 0.307 \ge 0$.
+- The third equation gives $\theta_3 = 2.5$ as before. Constraint 2 holds with slack, $1 < 2.5$, and the closed form
+  $\mu_2 = -(\partial_1 L + \partial_2 L) = 0$ agrees with $\mu_2 = 0$.
+
+Every condition holds and the loss is convex, so this is the constrained optimum: $\thetavec = (1, 1, 2.5)$ with
+$\muvec = (0.307, 0)$. The merged cut point sits on the class-2 example, and the model never predicts class 2. The
+loss is $2\big(3\log(1 + e^{-1}) + \log 2\big) + 6\log(1 + e^{-0.5}) = 3.266 + 2.845 = 6.110$, which is $0.117$ above
+the crossed fit. By the sensitivity result, requiring a gap $\theta_2 - \theta_1 = \epsilon$ raises the optimal loss at
+rate $0.307$ per unit of $\epsilon$ near $\epsilon = 0$. Complementary slackness holds in both forms: constraint 1 is
+active with $\mu_1 > 0$, and constraint 2 is inactive with $\mu_2 = 0$.
+
+**Two examples in class 2.** Stationarity for $\theta_1$ becomes $3\sigma(-\theta_1) = 2\sigma(\theta_1 - 1)$, which
+is $2u^2 - u - 3e = 0$ with root $u = (1 + \sqrt{1 + 24e})/4 = 2.284$. So $\theta_1 = 0.826$ and, by the reflection,
+$\theta_2 = 1.174$. The separate fits are ordered, both constraints are inactive, and $\muvec = (0, 0)$.
+
+**An empty class 2.** Remove the class-2 example. Then $\theta_1$ sees only class 1, through $3\log(1 + e^{-\theta_1})$,
+which decreases in $\theta_1$. And $\theta_2$ sees only class 3, through $3\log(1 + e^{\theta_2 - 2})$, which increases
+in $\theta_2$. Without the constraint there is no minimiser: $\theta_1 \to +\infty$ and $\theta_2 \to -\infty$. With the
+constraint, the same case analysis gives $t = 1$ and $\mu_1 = 3\sigma(-1) = 0.807$. The multiplier grows as the class
+between the merged thresholds shrinks: $0$ with two examples, $0.307$ with one, $0.807$ with none. The cumulative logit
+fitted to classes 1 and 3 alone has the same two terms, so it has the same solution.
+
+**The all-threshold loss on the same data.** Adding the terms that compare every class with every threshold gives the
+all-threshold loss. Its unconstrained minimum is $(0.488, 1.081, 2.737)$, ordered without a constraint, as the
+implicit-constraint result predicts.
+
+<OrderedThresholds />
+
+### Implementation in PyTorch
+
+The runnable example in the [Code tab](ordering-constraints-on-ordinal-thresholds/code) fits the worked example with
+each method: 4000 gradient steps of size 0.2 from $\thetavec = (0.75, 1.5, 2.25)$, with $\wvec$ fixed. Four functions
+carry the ideas. The model's class probabilities are differences of cumulative probabilities:
+
+```python
+def class_probabilities(s: Tensor, theta: Tensor) -> Tensor:
+    """P(y = k | s) = σ(θ_k − s) − σ(θ_{k−1} − s), shape (N, K). A class between crossed thresholds goes negative."""
+    cdf = torch.sigmoid(theta[None, :] - s[:, None])  # P(y ≤ k | s), shape (N, K − 1)
+    zeros, ones = torch.zeros_like(cdf[:, :1]), torch.ones_like(cdf[:, :1])
+    return torch.diff(torch.cat([zeros, cdf, ones], dim=1), dim=1)
+```
+
+`torch.diff` subtracts neighbouring cumulative probabilities. Nothing in it checks the order, so crossed thresholds
+produce negative probabilities silently.
+
+The reparameterised method optimises $\theta_1$ and increments $\delta_j$ instead of the thresholds:
+
+```python
+def ordered(theta1: Tensor, delta: Tensor) -> Tensor:
+    """θ_1 followed by softplus increments: every value of (θ_1, δ) gives strictly ordered thresholds."""
+    return torch.cat([theta1.reshape(1), theta1 + torch.cumsum(F.softplus(delta), dim=0)])
+```
+
+The projected method takes a plain gradient step on $\thetavec$ and then projects it onto the ordered cone:
+
+```python
+            for p, g in zip(params, grads, strict=True):
+                p -= lr * g
+            if method is Method.projected:
+                theta.copy_(pool_adjacent_violators(theta))
+```
+
+```python
+def pool_adjacent_violators(v: Tensor) -> Tensor:
+    """Euclidean projection onto θ_1 ≤ … ≤ θ_{K−1}: replace each out-of-order run by its mean."""
+    blocks: list[tuple[float, int]] = []  # (sum, count) of each pooled run
+    for value in v.tolist():
+        blocks.append((value, 1))
+        while len(blocks) > 1 and blocks[-2][0] / blocks[-2][1] > blocks[-1][0] / blocks[-1][1]:
+            total, count = blocks.pop()
+            blocks[-1] = (blocks[-1][0] + total, blocks[-1][1] + count)
+    return torch.tensor([total / count for total, count in blocks for _ in range(count)], dtype=v.dtype)
+```
+
+Each new value joins the list as a block of one. While the last two blocks are out of order, they are pooled into one
+block whose value is their mean.
+
+The Lagrangian method minimises the loss plus an augmented Lagrangian term, and updates the multipliers every 100
+steps:
+
+```python
+def augmented_penalty(theta: Tensor, mu: Tensor, rho: float) -> Tensor:
+    """The augmented Lagrangian term for g ≤ 0 with multipliers μ ≥ 0 and penalty weight ρ."""
+    return (torch.clamp(mu + rho * constraints(theta), min=0) ** 2 - mu**2).sum() / (2 * rho)
+
+
+def update_multipliers(theta: Tensor, mu: Tensor, rho: float) -> Tensor:
+    """First-order multiplier update: μ grows while a constraint is violated and falls to 0 when it is slack."""
+    return torch.clamp(mu + rho * constraints(theta), min=0)
+```
+
+The term is $\frac{1}{2\rho}\sum_k \big(\max(0, \mu_k + \rho g_k)^2 - \mu_k^2\big)$ with $\rho = 1$. Its gradient
+is $\sum_k \max(0, \mu_k + \rho g_k)\nabla g_k$. At a minimiser of the loss plus the term, the gradient of the loss
+therefore cancels $\sum_k \mu_k^{+}\nabla g_k$ with $\mu_k^{+} = \max(0, \mu_k + \rho g_k)$, which is the
+stationarity condition with the updated multipliers. The update keeps $\mu_k^{+} \ge 0$. A slack constraint,
+$g_k < 0$, drives its multiplier to zero; a violated one, $g_k > 0$, raises it. At a fixed point the multipliers stop
+changing, which forces $g_k = 0$ wherever $\mu_k > 0$ (complementary slackness) and $g_k \le 0$ wherever
+$\mu_k = 0$ (primal feasibility).
+
+The run on the worked example gives the following, on the ten training scores and a grid of scores around them:
+
+| Method            | $\theta_1$ | $\theta_2$ | $\theta_3$ | Ordered | Minimum $P(y = k \mid s)$ | Loss  | $\mu_1$ | $\mu_2$ |
+| ----------------- | ---------- | ---------- | ---------- | ------- | ------------------------- | ----- | ------- | ------- |
+| unconstrained     | 1.393      | 0.607      | 2.500      | no      | $-0.194$                  | 5.993 |         |         |
+| reparameterised   | 0.998      | 1.002      | 2.500      | yes     | 0.0002                    | 6.112 |         |         |
+| projected         | 1.000      | 1.000      | 2.500      | yes     | 0                         | 6.110 | 0.307   | 0       |
+| Lagrangian        | 1.000      | 1.000      | 2.500      | yes     | 0                         | 6.110 | 0.307   | 0       |
+
+The unconstrained fit reaches the separate fits and their negative class-2 probability. The projected and Lagrangian
+fits reach the constrained optimum and the multipliers derived above; the projected method's multipliers are
+computed from stationarity, $\mu_k = -\sum_{j \le k}\partial_j L$. The reparameterised thresholds are still $0.004$
+apart after 4000 steps and approach the tie without reaching it. With class 2 empty, the unconstrained thresholds reach
+$(7.78, -5.78)$ and are still moving apart, while both constrained methods give $\theta_1 = \theta_2 = 1$ and
+$\mu_1 = 0.807$. On synthetic two-dimensional data with one class-2 example among 91 and $\wvec$ learnt, the unconstrained
+fit crosses $\theta_1$ and $\theta_2$. It gives class 2 a negative probability at every input, and its binary
+decisions contradict each other on 42% of 800 held-out inputs. The constrained fits have neither defect. They merge
+class 2 away, so their held-out mean absolute error, 0.43, is slightly above the crossed fit's 0.39. The
+[Outputs tab](ordering-constraints-on-ordinal-thresholds/outputs/worked-example) shows every run, with the threshold
+paths and the multipliers by round.
+
+## Cost
+
+The <Gloss name="kkt" /> view does not require a special solver. The constraints form a chain, and the cheapest exact
+method is projected gradient descent:
+
+$$
+\thetavec \leftarrow \Pi\big(\thetavec - \eta\nabla L(\thetavec)\big),
+$$
+
+where $\Pi$ is the Euclidean projection onto the ordered cone and $\eta > 0$ is a step size. That projection is
+isotonic regression of the vector $\thetavec - \eta\nabla L$ with unit weights. The pool adjacent violators algorithm
+computes it in $O(K)$ time by replacing each run of out-of-order values with its mean <Cite id="ayer1955" />. Pool
+adjacent violators is itself an active-set method for the <Gloss name="kkt" /> conditions of that projection: a pooled
+run is a set of active constraints <Cite id="best1990" />. The same algorithm is used for
+<NoteLink to="isotonic-calibration" />.
+
+A point is a fixed point of projected gradient descent exactly when it satisfies the <Gloss name="kkt" /> conditions.
+The projection $\Pi(\zvec)$ of $\zvec$ is the point $\thetavec$ with $\zvec - \thetavec = \sum_k \nu_k \nabla g_k$ for
+some $\nu_k \ge 0$ that vanish on inactive constraints. At a fixed point $\thetavec = \Pi(\thetavec - \eta\nabla L)$,
+so $-\eta\nabla L = \sum_k \nu_k \nabla g_k$, which is stationarity with $\mu_k = \nu_k / \eta$. Each projection step
+therefore also yields multiplier estimates.
+
+The cost of the thresholds is small next to the cost of $\wvec$. A step on $\thetavec$ costs $O(N + K)$ for $N$
+examples. The hinge-loss versions are <NoteLink to="quadratic-programming">quadratic programmes</NoteLink>, in which
+the ordering constraints are $K - 2$ further linear inequalities.
+
+## Trade-offs
+
+Several other methods keep the thresholds in order. They differ in whether they solve the constrained problem exactly,
+whether they can represent a tie, and whether they report a multiplier.
+
+- **Reparameterisation.** Set $\theta_k = \theta_1 + \sum_{j<k} e^{\delta_j}$, or use softplus increments
+  $\log(1 + e^{\delta_j})$. The problem becomes unconstrained in $(\theta_1, \deltavec)$ and every iterate is strictly
+  ordered, so a gradient step can never cross. A tie needs $\delta_j \to -\infty$, and the gradient
+  $\partial L/\partial\delta_j = e^{\delta_j}\sum_{k > j}\partial_k L$ vanishes along the way, so descent towards a tie
+  slows. Reparameterisation cannot represent a merged pair and gives no multiplier. It suits the cumulative logit with
+  every class observed, where the optimum is strictly ordered anyway, and neural output layers trained by stochastic
+  <NoteLink to="gradient">gradients</NoteLink>.
+- **Projection after each step.** <NoteLink to="proximal-gradient-methods">Projected gradient descent</NoteLink>, above,
+  converges to the exact constrained optimum and can reach a tie. Projecting only the unconstrained optimum once is
+  not the same. With six class-3 examples at $s = 2$ in the worked example, the separate fits give
+  $(\theta_1, \theta_2) = (1.393, 0.019)$, their projection is the mean $0.706$, and the constrained optimum is
+  $\theta_1 = \theta_2 = 0.635$. The mean weights both thresholds equally; the optimum weights
+  them by the curvature of the loss.
+- **Penalty or barrier.** A quadratic penalty $\tfrac{\rho}{2}\max(0, \theta_k - \theta_{k+1})^2$ leaves a violation
+  of about $\mu_k/\rho$: in the worked example, $\rho = 100$ gives $\theta_1 - \theta_2 = 0.0031$, and
+  $\rho(\theta_1 - \theta_2) = 0.306$ estimates $\mu_1 = 0.307$. A log barrier $-\tfrac1t\log(\theta_{k+1} - \theta_k)$
+  keeps a gap of about $1/(t\mu_k)$: $t = 100$ gives a gap of $0.031$. Both approach the constrained optimum only as
+  $\rho$ or $t$ grows. See <NoteLink to="penalty-and-barrier-methods" />.
+- **Sorting.** Sorting the fitted thresholds, or rearranging crossing cumulative probability curves, guarantees an
+  order <Cite id="chernozhukov2010" />. For losses tied to specific thresholds it changes which threshold is which. In
+  the worked example, sorting $(1.393, 0.607, 2.5)$ into $(0.607, 1.393, 2.5)$ gives loss $6.486$, above both the
+  crossed fit, $5.993$, and the constrained optimum, $6.110$.
+
+The <Gloss name="kkt" /> formulation is the one that describes the constrained optimum exactly. It says which classes
+the data merge, it prices each merge through $\mu_k$, and its multipliers come from projected descent at no extra
+cost. Reparameterisation is simpler to implement when no tie is expected.

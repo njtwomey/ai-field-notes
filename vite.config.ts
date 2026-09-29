@@ -38,6 +38,14 @@ export default defineConfig({
     react({ include: /\.(mdx|tsx|ts)$/ }),
     tailwindcss(),
     contentIndex({ contentDir }),
+    {
+      // The Code tab globs python/mlc/examples, which lies outside Vite's root and so is not watched by default: without
+      // this, a new example needs a dev-server restart before its files appear.
+      name: 'watch-python-examples',
+      configureServer(server) {
+        server.watcher.add(path.resolve(import.meta.dirname, 'python/mlc/examples'))
+      },
+    },
   ],
   resolve: {
     alias: {

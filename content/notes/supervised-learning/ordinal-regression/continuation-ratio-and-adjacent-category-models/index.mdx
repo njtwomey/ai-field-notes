@@ -1,0 +1,162 @@
+---
+title: Continuation-ratio and adjacent-category models
+kind: concept
+summary: 'Two ordinal models that share a linear score $\eta = \wvec^\top\xvec$ with cumulative models but compare different events: the continuation ratio models $P(y = k \mid y \ge k)$, a sequence of stopping decisions; the adjacent-category model sets $\log P(y = k + 1)/P(y = k) = \eta - \theta_k$.'
+tags: [ordinal-regression, generalised-linear-models, worked-example]
+aliases:
+  [
+    continuation ratio model,
+    sequential model,
+    stopping ratio model,
+    adjacent category logit,
+    adjacent categories model,
+    stereotype model,
+    rating scale model,
+  ]
+requires: [cumulative-link-model]
+partOf: [ordinal-regression]
+related: [multinomial-logistic-regression, cox-proportional-hazards, item-response-theory, proportional-odds-assumption]
+references: [agresti2010, anderson1984, mccullagh1980]
+status: draft
+updated: 2026-09-29
+---
+
+import { OrdinalModelLab } from '../_shared/OrdinalModelLab'
+import { LinkFamilies } from './LinkFamilies'
+
+<Definition>
+Let $y \in \set{1, \dots, K}$ be ordinal, $\eta = \wvec^\top\xvec$ a linear score and $\theta_1, \dots, \theta_{K-1}$
+real intercepts. The **continuation-ratio** model sets
+$P(y = k \mid y \ge k, \xvec) = \sigma(\theta_k - \eta)$ for $k < K$: at each level, the outcome either stops there
+or continues upwards. The **adjacent-category** model sets
+$\log \frac{P(y = k + 1 \mid \xvec)}{P(y = k \mid \xvec)} = \eta - \theta_k$: each pair of neighbouring classes is
+compared by a logit. Both use one weight vector for all $K - 1$ comparisons, as the
+<NoteLink to="cumulative-link-model" /> does <Cite id="agresti2010" />.
+</Definition>
+
+## Three sets of binary comparisons
+
+An ordinal outcome with $K$ classes can be broken into $K - 1$ binary questions in three natural ways. Each ordinal
+family applies a logistic regression with a shared slope to one of them.
+
+| Family             | Question at level $k$                          | Model                                                           |
+| ------------------ | ---------------------------------------------- | --------------------------------------------------------------- |
+| cumulative         | is $y \le k$ rather than $y > k$?              | $\operatorname{logit} P(y \le k) = \theta_k - \eta$             |
+| continuation ratio | given $y \ge k$, is $y = k$ rather than $y > k$? | $\operatorname{logit} P(y = k \mid y \ge k) = \theta_k - \eta$ |
+| adjacent category  | given $y \in \set{k, k + 1}$, is $y = k + 1$?   | $\log P(y = k + 1)/P(y = k) = \eta - \theta_k$                  |
+
+The cumulative question uses all $K$ classes at every level. The continuation-ratio question uses only the classes
+from $k$ upwards. The adjacent-category question uses only two classes.
+
+<LinkFamilies />
+
+## The continuation-ratio model
+
+**Class probabilities.** Write $h_k = \sigma(\theta_k - \eta)$ for the probability of stopping at level $k$, given
+that level $k$ was reached. To end at class $k$, the outcome must pass levels $1, \dots, k - 1$ and then stop at $k$.
+Passing level $j$ has probability $1 - h_j$. So
+
+$$
+P(y = k \mid \xvec) = h_k \prod_{j < k} (1 - h_j), \quad k < K, \qquad P(y = K \mid \xvec) = \prod_{j < K} (1 - h_j).
+$$
+
+These are positive for any intercepts, so the continuation-ratio model needs no ordering constraint on $\theta$.
+
+**The likelihood splits into binary regressions.** Take the logarithm of one example's probability. For $y_i = k$,
+
+$$
+\log P(y_i = k \mid \xvec_i) = \log h_k(\xvec_i) + \sum_{j < k} \log\big(1 - h_j(\xvec_i)\big).
+$$
+
+Group the terms of all examples by level $j$. Level $j$ collects a term from every example with $y_i \ge j$: the term
+$\log h_j$ if $y_i = j$ and $\log(1 - h_j)$ if $y_i > j$. That is exactly the log-likelihood of a binary logistic
+regression of "$y = j$" against "$y > j$" on the examples with $y \ge j$. The full log-likelihood is the sum of these
+$K - 1$ binary log-likelihoods. With a separate weight vector per level, the model is fitted as $K - 1$ independent
+logistic regressions on nested subsets. With a shared weight vector, the same $K - 1$ datasets are stacked with a
+level indicator and fitted as one logistic regression <Cite id="agresti2010" />.
+
+**Sequential processes.** The continuation ratio suits outcomes reached in stages: a patient who has reached stage 3 of
+a disease has passed stages 1 and 2. It is the discrete-time analogue of a hazard model. With the complementary
+log–log link in place of the logit, the continuation-ratio model and the cumulative model give the same class
+probabilities, both being grouped versions of a continuous proportional hazards model <Cite id="agresti2010" />. See
+<NoteLink to="cox-proportional-hazards" />.
+
+**Direction matters.** Reversing the order of the classes turns "stop at $k$ given at least $k$" into "stop at $k$ given
+at most $k$", which is a different model with a different fit. The cumulative and adjacent-category models only flip
+the sign of $\wvec$ when the order is reversed.
+
+## The adjacent-category model
+
+**Class probabilities.** Sum the adjacent log-ratios from class 1 up to class $k$:
+
+$$
+\log \frac{P(y = k \mid \xvec)}{P(y = 1 \mid \xvec)} = \sum_{j=1}^{k-1} (\eta - \theta_j) = (k - 1)\,\eta - \sum_{j < k} \theta_j.
+$$
+
+Exponentiating and normalising over $k$ gives a softmax with class scores $a_k = (k - 1)\eta - \sum_{j<k}\theta_j$:
+
+$$
+P(y = k \mid \xvec) = \frac{\exp(a_k)}{\sum_{m=1}^{K} \exp(a_m)}.
+$$
+
+**A restricted multinomial logit.** In
+<NoteLink to="multinomial-logistic-regression">multinomial logistic regression</NoteLink> class $k$ has score
+$\wvec_k^\top\xvec + b_k$ with a free weight vector $\wvec_k$. The <Gloss name="adjacent-category-model">adjacent-category model</Gloss> constrains
+$\wvec_k = (k - 1)\wvec$: the weight vectors lie on a line and are equally spaced along it. The class scores are
+linear in the class index, which is how the order enters. The model has $D + K - 1$ parameters in place of
+$(K - 1)(D + 1)$.
+
+**The stereotype model** relaxes the equal spacing. Anderson's stereotype model sets
+$\log P(y = k)/P(y = 1) = \alpha_k - \phi_k \wvec^\top\xvec$ with learnt scores $0 = \phi_1 \le \phi_2 \le \dots \le
+\phi_K = 1$ <Cite id="anderson1984" />. The weight vectors still lie on one line, but their spacing is learnt. Equal
+spacing $\phi_k = (k - 1)/(K - 1)$ gives back the adjacent-category model. Stereotype models with several score
+directions instead of one reach the full multinomial logit when the number of directions is $K - 1$
+<Cite id="anderson1984" />.
+
+The adjacent-category form also appears in psychometrics: the rating-scale and partial-credit models of item response
+theory are adjacent-category logits in a latent ability. See <NoteLink to="item-response-theory" />.
+
+### Worked example
+
+Take $K = 3$, $\eta = 0$ and intercepts $\theta = (-1, 1)$.
+
+- **Cumulative logit.** $P(y \le 1) = \sigma(-1) = 0.269$ and $P(y \le 2) = \sigma(1) = 0.731$, so
+  $P = (0.269, 0.462, 0.269)$.
+- **Continuation ratio.** $h_1 = \sigma(-1) = 0.269$ and $h_2 = \sigma(1) = 0.731$. Then $P(y = 1) = 0.269$,
+  $P(y = 2) = 0.731 \times 0.731 = 0.534$ and $P(y = 3) = 0.731 \times 0.269 = 0.197$.
+- **Adjacent category.** The scores are $a = (0,\ 0 - (-1),\ 0 - (-1) - 1) = (0, 1, 0)$, and the softmax gives
+  $P = (0.212, 0.576, 0.212)$.
+
+The same intercepts mean different things in each family. The cumulative and adjacent-category answers are symmetric
+about the middle class; the continuation-ratio answer is not, because its comparisons run in one direction.
+
+## Comparing the families on shared data
+
+<OrdinalModelLab
+  model="continuation-ratio"
+  data={{ shape: 'linear' }}
+  models={['continuation-ratio', 'adjacent-category', 'cumulative-logit', 'multiclass']}
+  title="Continuation-ratio and adjacent-category models on shared data"
+/>
+
+All three single-score families produce parallel boundaries in the input plane, because their class probabilities
+depend on $\xvec$ only through $\eta$. On the linear and sine datasets their held-out errors are within
+a few hundredths of each other. The choice between them rests more on which comparison has a meaning for the problem
+than on fit.
+
+## Assumptions
+
+- **One score.** As in the cumulative model, one weight vector serves every comparison. Each family can be relaxed
+  to level-specific weights, giving $K - 1$ free binary regressions, at the cost of more parameters. The tests of
+  <NoteLink to="proportional-odds-assumption" /> apply to each family's comparisons.
+- **Continuation ratio:** the stages are passed in order, and the effect of an input on stopping is the same at every
+  stage.
+- **Adjacent category:** the log-odds of each class against its neighbour move by the same amount $\wvec^\top\Delta\xvec$
+  at every level.
+
+## Pitfalls
+
+- **Intercepts are not thresholds.** Only the cumulative family has thresholds on a latent scale. Continuation-ratio
+  and adjacent-category intercepts need not be ordered, and comparing them with cumulative cut points is meaningless.
+- **Direction of the continuation ratio.** State whether the model stops upwards or downwards; the two give different
+  fits and different interpretations of $\wvec$.

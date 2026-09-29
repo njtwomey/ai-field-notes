@@ -1,0 +1,220 @@
+---
+title: Structured ordinal regression modelling
+kind: concept
+summary: 'StORM encodes an ordinal label $y \in \set{1, \dots, K}$ as $K - 1$ up-to-$k$ bits, bit $n$ on when $n < y$, and fits a chain conditional random field over the bits with its own weights at every node and edge. One jointly trained model gives class probabilities and interval queries such as $P(a \le y \le b)$.'
+tags: [ordinal-regression, structured-prediction, graphical-models, worked-example]
+aliases: [StORM, StoRM, storm, ordinal regression as structured classification, up-to-k encoding, ordinal CRF]
+requires: [conditional-random-field, binary-decomposition-for-ordinal-regression]
+partOf: [ordinal-regression]
+related: [structured-prediction, when-is-structure-needed, multinomial-logistic-regression, cumulative-link-model]
+references: [twomey2019ordinal, twomey2016, lafferty2001, gutierrez2016, frank2001]
+status: draft
+updated: 2026-09-29
+---
+
+import { OrdinalModelLab } from '../_shared/OrdinalModelLab'
+import { StormQueries } from './StormQueries'
+
+<Definition>
+Structured ordinal regression modelling (StORM) maps an ordinal label $\hat y \in \set{1, \dots, K}$ to a binary
+sequence $\yvec = (y_1, \dots, y_{K-1})$ with $y_n = \indicator[n < \hat y]$, and models $P(\yvec \mid \xvec)$ with a
+linear-chain conditional random field over the $K - 1$ positions. Node $n$ has potential $\psivec_n = \exp\set{\Wmat_n
+\xvec}$ with $\Wmat_n \in \reals^{2 \times D}$, and the edge between positions $n$ and $n + 1$ has potential
+$\Psimat_n = \exp\set{\Umat_n \xvec} \in \reals^{2 \times 2}$. Unlike a standard chain CRF, no weights are shared
+between positions. All parameters are learnt jointly by maximum likelihood <Cite id="twomey2019ordinal" />.
+</Definition>
+
+## The up-to-$k$ encoding
+
+The encoding writes a class as a run of ones followed by a run of zeros. With $K = 7$ classes,
+
+$$
+\hat y = 3 \mapsto (1, 1, 0, 0, 0, 0), \qquad \hat y = 4 \mapsto (1, 1, 1, 0, 0, 0), \qquad \hat y = 5 \mapsto (1, 1, 1, 1, 0, 0).
+$$
+
+Bit $n$ answers the question "is $\hat y > n$?", so the code is the vector of cumulative binary targets used by
+<NoteLink to="binary-decomposition-for-ordinal-regression">binary decomposition</NoteLink>. Two labels share every
+bit outside the range between them. Classes 3 and 5 agree on the first two bits (both on) and the last two (both off),
+and differ only in bits 3 and 4. The number of differing bits is exactly $\abs{\hat y - \hat y'}$. A model that
+predicts the bits well therefore predicts close classes for close labels <Cite id="twomey2019ordinal" />.
+
+Only $K$ of the $2^{K-1}$ bit patterns are valid codes. A valid code never has a 0 followed by a 1. A chain model over
+the bits can represent that constraint through its edges, which independent binary classifiers cannot.
+
+## The model
+
+StORM treats the $K - 1$ bits as a sequence and models them with a conditional random field, in the notation of
+<NoteLink to="conditional-random-field" /> <Cite id="twomey2016" />. The input $\xvec \in \reals^D$ includes a
+constant feature for the bias.
+
+- **Node potentials.** $\psivec_n = \exp\set{\Wmat_n \xvec} \in \reals^2$ scores bit $n$ being 0 or 1.
+- **Edge potentials.** $\Psimat_n = \exp\set{\Umat_n \xvec} \in \reals^{2 \times 2}$ scores each pair of values of bits
+  $n$ and $n + 1$, with $\Umat_n \in \reals^{2 \times 2 \times D}$.
+
+The probability of a bit sequence is the product of its potentials, normalised over all $2^{K-1}$ sequences:
+
+$$
+P(\yvec \mid \xvec) = \frac{1}{Z(\xvec)} \prod_{n=1}^{K-1} \psivec_n(y_n) \prod_{n=1}^{K-2} \Psimat_n(y_n, y_{n+1}).
+$$
+
+**No weight sharing.** A standard chain CRF uses the same weights at every position, because the dynamics of a
+sentence or a sensor stream do not depend on the position. Here position $n$ is a specific threshold between classes
+$n$ and $n + 1$, and an input may matter more for one threshold than another. StORM therefore gives every node and
+edge its own weights. The parameters are $\Theta = \set{\Wmat_1, \dots, \Wmat_{K-1}, \Umat_1, \dots, \Umat_{K-2}}$.
+
+**Inference.** The chain has $K - 1$ positions with 2 states each, so forward–backward computes $Z(\xvec)$ and every
+marginal in $O(K)$ operations. With $\gammavec_n = \alphavec_n \odot \psivec_n$ and
+$\deltavec_{n+1} = \betavec_{n+1} \odot \psivec_{n+1}$,
+
+$$
+\alphavec_{n+1} = \Psimat_n^\top \gammavec_n, \qquad \betavec_n = \Psimat_n \deltavec_{n+1}, \qquad \alphavec_1 = \betavec_{K-1} = \ones,
+$$
+
+$$
+P(y_n \mid \xvec) = \frac{\alphavec_n \odot \psivec_n \odot \betavec_n}{Z}, \qquad
+P(y_n = u, y_{n+1} = v \mid \xvec) = \frac{\gammavec_n(u)\, \Psimat_n(u, v)\, \deltavec_{n+1}(v)}{Z}.
+$$
+
+Every sequence has the same length, $K - 1$, so the messages can be passed for all training examples at once as
+matrix operations <Cite id="twomey2019ordinal" />.
+
+**Learning.** The <NoteLink to="cross-entropy-and-perplexity">negative log-likelihood</NoteLink> of the encoded labels,
+$-\sum_{i} \log P(\yvec_i \mid \xvec_i, \Theta)$, is convex in $\Theta$, as for any log-linear model. Its <NoteLink to="gradient">gradient</NoteLink> with
+respect to row $u$ of $\Wmat_n$ is the familiar "expected minus observed" form:
+
+$$
+\frac{\partial\, \mathrm{NLL}}{\partial \Wmat_n(u)} = \sum_{i} \big(P(y_{i,n} = u \mid \xvec_i) - \indicator[y_{i,n} = u]\big)\, \xvec_i,
+$$
+
+and the edge weights have the same form with pairwise marginals. Twomey et al. optimise it with <Gloss name="l-bfgs" /> and an
+$\ell_2$ penalty chosen by cross-validation <Cite id="twomey2019ordinal" />.
+
+### Worked example
+
+Take $K = 3$, so two bits and the valid codes $00$, $10$, $11$ for classes 1, 2, 3. Let the potentials at some input be
+$\psivec_1 = (1, 2)$, $\psivec_2 = (2, 1)$ (entries for bit value 0 and 1), and an edge potential that forbids a 0
+followed by a 1:
+
+$$
+\Psimat_1 = \begin{bmatrix} 1 & 0 \\ 1 & 1 \end{bmatrix}.
+$$
+
+- **Sequence weights.** $00$: $1 \cdot 2 \cdot 1 = 2$. $10$: $2 \cdot 2 \cdot 1 = 4$. $11$: $2 \cdot 1 \cdot 1 = 2$.
+  $01$: $1 \cdot 1 \cdot 0 = 0$. So $Z = 8$ and $P(\hat y = 1, 2, 3) = (0.25, 0.5, 0.25)$.
+- **Forward.** $\alphavec_1 = (1, 1)$, $\gammavec_1 = (1, 2)$ and $\alphavec_2 = \Psimat_1^\top\gammavec_1 = (3, 2)$.
+- **Marginal of bit 2.** $\alphavec_2 \odot \psivec_2 \odot \betavec_2 = (6, 2)$, which sums to $Z = 8$. So
+  $P(y_2 = 1) = 0.25$, which is $P(\hat y = 3)$ because only class 3 has its second bit on.
+- **Pairwise marginal.** With $\deltavec_2 = \betavec_2 \odot \psivec_2 = (2, 1)$,
+  $P(y_1 = 1, y_2 = 0) = \gammavec_1(1)\,\Psimat_1(1, 0)\,\deltavec_2(0)/Z = 2 \cdot 1 \cdot 2/8 = 0.5$, which is
+  $P(\hat y = 2)$.
+
+## Predictions and queries
+
+**Class predictions.** A CRF offers several predictions: the Viterbi path, per-position marginals, or the most
+probable valid code. Twomey et al. use the Viterbi path <Cite id="twomey2019ordinal" />. The figures in this note
+predict the most probable valid code.
+
+**Invalid codes.** A 0 followed by a 1 encodes no class. Setting $\Psimat_n(0, 1) = 0$ forbids it, as in the worked
+example. Twomey et al. leave the transition free and report early evidence that inputs whose predictions are invalid
+tend to be outliers <Cite id="twomey2019ordinal" />. The figures report the mass on invalid codes.
+
+**Interval queries.** For a valid code, $\hat y \ge a$ exactly when bit $a - 1$ is on, and $\hat y \le b$ exactly when
+bit $b$ is off. So
+
+$$
+P(a \le \hat y \le b \mid \xvec) = P(y_{a-1} = 1, y_b = 0 \mid \xvec),
+$$
+
+a marginal of the chain. For neighbouring bits it is an edge marginal: $P(y_3 = 0, y_4 = 0)$, $P(y_3 = 1, y_4 = 0)$ and
+$P(y_3 = 1, y_4 = 1)$ are $P(\hat y < 4)$, $P(\hat y = 4)$ and $P(\hat y > 4)$. Clinical scales are often recorded
+finely and then grouped into bands such as "moderate"; a StORM model answers the banded question directly without
+retraining <Cite id="twomey2019ordinal" />.
+
+The identity holds on valid codes only. The chain marginal $P(y_{a-1} = 1, y_b = 0 \mid \xvec)$ also counts every
+invalid code with those two bits. With linear potentials, the scores of some invalid codes grow fastest as $\xvec$ moves
+away from the data, so far from the training points almost all the mass is on invalid codes and the chain marginal can
+be close to 1 for any interval. Conditioning on a valid code avoids this:
+
+$$
+P(a \le \hat y \le b \mid \xvec, \text{valid}) = \frac{\sum_{k=a}^{b} P(\hat y = k \mid \xvec)}{\sum_{k=1}^{K} P(\hat y = k \mid \xvec)}.
+$$
+
+On the spiral with $K = 9$ and 70 points per class, the chain marginal for $2 \le \hat y \le 4$ exceeds 0.5 on 70% of
+the plane beyond the data, and the conditional exceeds 0.5 nowhere there. The figure shows both, and the invalid-code
+mass that separates them. The invalid mass is a signal in its own right: Twomey et al. note that invalid predictions
+tend to fall on outlying data <Cite id="twomey2019ordinal" />.
+
+**Feature expansions.** With potentials linear in $\xvec$, the log-probability of every code is a linear function
+of $\xvec$ minus the shared $\log Z(\xvec)$. The boundary between two codes is therefore a straight line, and the
+region where one code is most probable is an intersection of half-planes, a convex polygon. A curved band of classes,
+such as a turn of the spiral, is covered by a chain of such polygons, which is why the maps of a linear StORM are made
+of straight-edged wedges and bands. Replacing $\xvec$ by features $\phivec(\xvec)$ in both the node and the edge
+potentials leaves the model and its inference unchanged, and the boundaries become level sets of linear functions of
+$\phivec$, which are curves in the plane. Twomey et al. use a Nyström approximation of a radial basis function kernel
+for this <Cite id="twomey2019ordinal" />. The paper does not state its settings, so the figure uses 64 landmarks
+sampled from the training points and the median distance between landmarks as the lengthscale. It also offers
+polynomial expansions of degree 2 and 3. Every feature is standardised on the training set; the $\ell_2$ strength is
+$10^{-3}$, or $10^{-2}$ for the 64 Nyström features, which overfit 100 training points at the smaller value. Far
+from every landmark the Nyström features are constant, so there the model falls back on the class probabilities its
+constant terms give, which can favour any class.
+
+<StormQueries />
+
+## Relation to other ordinal models
+
+StORM sits in the decomposition family of the ordinal taxonomy: it models the answers to "is $\hat y > n$?"
+<Cite id="gutierrez2016" />. Two special cases make its position precise.
+
+**Without edges it is Frank and Hall.** Set every $\Umat_n = 0$. The edge potentials become matrices of ones, the
+normaliser factorises, and $P(\yvec \mid \xvec) = \prod_n P(y_n \mid \xvec)$ with
+$P(y_n = 1 \mid \xvec) = \sigma\big((\Wmat_n(1) - \Wmat_n(0))\xvec\big)$. The log-likelihood splits into $K - 1$
+independent <NoteLink to="logistic-regression">logistic regressions</NoteLink> of $\indicator[\hat y > n]$ on $\xvec$, which is the decomposition of Frank and Hall
+<Cite id="frank2001" />. The edges are what couple the bits: they let one model learn that bit $n + 1$ should switch off
+once bit $n$ has. The analysis of <NoteLink to="when-is-structure-needed" /> makes the same point for sequence labels.
+
+**Restricted to valid codes it is a reparametrised multinomial logit.** Suppose invalid codes are forbidden. The only
+sequences left are the $K$ codes, and the score of class $k$ is a sum of the potentials its code switches on. Compare
+the codes of classes $k + 1$ and $k$: they differ at bit $k$, at the edge into bit $k$ and at the edge out of it. The
+log-ratio is therefore
+
+$$
+\log\frac{P(\hat y = k + 1 \mid \xvec)}{P(\hat y = k \mid \xvec)} = \vvec_k^\top\xvec,
+$$
+
+where $\vvec_k$ collects the difference of the node weights at bit $k$ and of the edge weights on either side. Each
+$\vvec_k$ has its own free parameters, so the adjacent log-ratios are arbitrary linear functions of $\xvec$. That is the
+same family of distributions as <NoteLink to="multinomial-logistic-regression" />. The order enters through the
+parametrisation: each weight matrix governs one boundary between neighbouring classes, so an $\ell_2$ penalty on the
+weights shrinks neighbouring classes towards each other rather than every class towards the mean. The unrestricted
+model adds the invalid codes to the normaliser.
+
+<OrdinalModelLab
+  model="storm"
+  data={{ shape: 'spiral', k: 6 }}
+  models={['storm', 'binary-decomposition', 'multiclass', 'cumulative-logit']}
+  title="StORM on shared data"
+/>
+
+## Evidence
+
+Twomey et al. compare StORM with the <Gloss name="pom">ordered logit</Gloss>, nested binary classifiers and multinomial logistic regression, all
+linear in their parameters, on synthetic manifolds (linear, sine, circle, spiral), ordinal versions of UCI regression
+datasets, larger benchmark datasets and two Alzheimer's disease datasets <Cite id="twomey2019ordinal" />. StORM has the
+best average rank on <Gloss name="macro-mae">macro-averaged mean absolute error</Gloss> and 0–1 loss in most comparisons. Its advantage is
+statistically significant on the synthetic data, the larger datasets and the five-class UCI tasks. On the ten-class UCI
+tasks and the healthcare data the ordered logit is not significantly worse. On the synthetic manifolds, the ordered logit cannot follow curved class boundaries, because its
+single score gives parallel bands. Nyström features for a radial basis kernel let the linear StORM follow a spiral.
+
+## Assumptions
+
+- **Linear potentials.** Node and edge potentials are log-linear in $\xvec$. Nonlinear boundaries need a feature map,
+  such as a <NoteLink to="random-fourier-features">kernel approximation</NoteLink> or a neural network.
+- **Enough data per class boundary.** Without weight sharing the model has $2D(K - 1) + 4D(K - 2)$ weights, more than
+  multinomial logistic regression. Twomey et al. attribute StORM's larger gains on bigger datasets to this.
+
+## Pitfalls
+
+- **Invalid codes.** Unless forbidden, some probability goes to sequences that encode no class. Decide whether to
+  renormalise over valid codes, to forbid invalid transitions, or to flag invalid predictions.
+- **Prediction rule.** The Viterbi path, the most probable valid code and the per-bit marginals can disagree. Choose the
+  rule that matches the evaluation metric.
