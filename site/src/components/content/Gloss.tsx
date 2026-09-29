@@ -36,10 +36,19 @@ export function Gloss({
     <HoverCard>
       <HoverCardTrigger
         render={
-          <Link
-            to={glossaryUrl(entry.key)}
-            className="underline decoration-muted-foreground/60 decoration-dotted underline-offset-2"
-          />
+          // A term with a note of its own opens that note; any other term only shows its definition on hover.
+          note ? (
+            <Link
+              to={noteUrl(note.slug)}
+              onMouseEnter={() => prefetchNote(note.slug)}
+              className="underline decoration-muted-foreground/60 decoration-dotted underline-offset-2"
+            />
+          ) : (
+            <span
+              tabIndex={0}
+              className="cursor-help underline decoration-muted-foreground/60 decoration-dotted underline-offset-2"
+            />
+          )
         }
       >
         {children ?? <MathText text={glossText(entry, form ?? (first ? 'full' : 'short'), plural)} />}

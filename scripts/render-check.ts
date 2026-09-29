@@ -113,6 +113,16 @@ function screenshot(url: string, file: string): Promise<boolean> {
 
 const count = (html: string, pattern: RegExp) => html.match(pattern)?.length ?? 0
 
+// Chrome shows its own error page (which has an <h1>) when nothing is listening, so check the server first.
+const reachable = await fetch(`http://localhost:${port}/ai-field-notes/`).then(
+  (r) => r.ok,
+  () => false,
+)
+if (!reachable) {
+  console.error(`no dev server on port ${port}: start one (make dev, or npx vite --port ${port}) and try again`)
+  process.exit(2)
+}
+
 let failures = 0
 for (const slug of slugs) {
   // A leading slash names a page path (e.g. /browse?c=maths) rather than a note slug.
@@ -132,7 +142,8 @@ for (const slug of slugs) {
   const problems: string[] = []
   if (timedOut) problems.push(`timed out after ${TIMEOUT_MS / 1000} s`)
   else {
-    if (/<h1[^>]*>Not found<\/h1>/.test(html)) problems.push('no such note')
+    if (!html.includes('id="root"')) problems.push('not the site (the server stopped, or Chrome showed an error page)')
+    else if (/<h1[^>]*>Not found<\/h1>/.test(html)) problems.push('no such note')
     else if (!/<h1[^>]*>/.test(html)) problems.push('no title (page crashed or did not load)')
     const failed = count(html, /This figure failed to render/g)
     if (failed) problems.push(`${failed} failed figure(s)`)

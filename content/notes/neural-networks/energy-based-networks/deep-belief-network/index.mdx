@@ -1,0 +1,98 @@
+---
+title: Deep belief network
+kind: concept
+summary: 'A deep belief network stacks restricted Boltzmann machines, each trained on the hidden activities of the one below, into a generative model with an undirected top layer over directed layers. This greedy layer-wise pretraining helped start the revival of deep learning in 2006.'
+tags: [neural-networks, generative-models, unsupervised, deep-learning, energy-based-models, history]
+aliases: [DBN, deep belief net, greedy layer-wise pretraining, layer-wise pretraining]
+requires: [restricted-boltzmann-machine]
+partOf: [energy-based-networks]
+related: [boltzmann-machine, autoencoder, weight-initialisation, vanishing-and-exploding-gradients, evidence-lower-bound]
+references: [hinton2006dbn, hinton2006, bengio2007, hinton2012speech, salakhutdinov2009dbm]
+status: draft
+updated: 2026-09-29
+---
+
+import { DeepBeliefNetDiagram } from '../_shared/Diagrams'
+
+<Definition>
+A **deep belief network** (DBN) is a generative model of data $\vvec$ with <NoteLink to="multilayer-perceptron">hidden layers</NoteLink> $\hvec^{(1)}, \dots,
+\hvec^{(L)}$ of binary units. The top two layers form a <NoteLink to="restricted-boltzmann-machine">restricted
+Boltzmann machine</NoteLink>, an undirected model $p(\hvec^{(L-1)}, \hvec^{(L)})$. Every lower layer is generated from
+the layer above by directed sigmoid connections, $p(h^{(l)}_i = 1 \mid \hvec^{(l+1)}) = \sigma(b^{(l)}_i + \sum_j
+W^{(l+1)}_{ij} h^{(l+1)}_j)$, with $\hvec^{(0)} = \vvec$. It is trained greedily, one RBM per layer, from the bottom
+up <Cite id="hinton2006dbn" />.
+</Definition>
+
+## Greedy layer-wise training
+
+Deep networks were hard to train in the early 2000s: <NoteLink to="gradient">gradients</NoteLink> through many sigmoid layers from small random weights
+were weak, and <NoteLink to="deep-generative-models">deep generative models</NoteLink> with many hidden layers had intractable posteriors. Hinton, Osindero and Teh
+avoided both problems by never training more than one layer at a time <Cite id="hinton2006dbn" />:
+
+1. Train an RBM on the data $\vvec$ with <Gloss name="contrastive-divergence">contrastive divergence</Gloss>. Keep its weights $\Wmat^{(1)}$.
+2. Pass each training vector up through the RBM to get the hidden probabilities $p(\hvec^{(1)} \mid \vvec)$, or
+   samples from them. Treat these as data for the next layer.
+3. Train a second RBM on them, and repeat for as many layers as wanted.
+4. Keep the last RBM as an undirected top-level model; turn the weights of every lower RBM into directed generative
+   connections pointing down, and use the same weights upwards as an approximate recognition model.
+
+<DeepBeliefNetDiagram />
+
+To generate a sample, run block Gibbs sampling in the top RBM for many steps, then pass the result down through the
+directed layers with one sample per layer. To recognise, pass the data up with the recognition weights.
+
+## Why adding a layer helps
+
+Adding a layer can be justified with a variational bound. For any distribution $q(\hvec \mid \vvec)$ over the first
+hidden layer, <NoteLink to="expectation">Jensen's inequality</NoteLink> applied to the concave logarithm gives
+
+$$
+\begin{aligned}
+\log p(\vvec) &= \log \sum_{\hvec} q(\hvec \mid \vvec)\, \frac{p(\hvec)\, p(\vvec \mid \hvec)}{q(\hvec \mid \vvec)} \\
+&\ge \sum_{\hvec} q(\hvec \mid \vvec) \brack{\log p(\hvec) + \log p(\vvec \mid \hvec) - \log q(\hvec \mid \vvec)},
+\end{aligned}
+$$
+
+the <NoteLink to="evidence-lower-bound">evidence lower bound</NoteLink>. After the first RBM is trained, take
+$p(\vvec \mid \hvec)$ and $q(\hvec \mid \vvec)$ to be its two conditionals, and $p(\hvec)$ its marginal on the hidden
+layer. For this model $q$ is the exact posterior, so the bound equals $\log p(\vvec)$.
+
+Now hold $p(\vvec \mid \hvec)$ and $q$ fixed and replace the prior $p(\hvec)$ with a better model of the hidden
+activities. Only the term $\sum_{\hvec} q(\hvec \mid \vvec)\log p(\hvec)$ changes. Averaged over the training data it is
+the log-likelihood of the new prior on the hidden vectors that $q$ produces from the data, which is exactly what the
+second RBM is trained to maximise. If the second RBM starts with the transposed weights of the first,
+$\Wmat^{(2)} = {\Wmat^{(1)}}^\top$, its marginal is the first RBM's $p(\hvec)$, so the bound starts at the old
+log-likelihood. Any improvement in the second RBM's likelihood then raises the bound on $\log p(\vvec)$. In practice
+layers differ in size and CD is approximate, so the guarantee holds only in this idealised form, but it explains why
+stacking does not undo the work of the layers below <Cite id="hinton2006dbn" />.
+
+## Fine-tuning and the revival of deep learning
+
+The greedy stack is a starting point. Hinton, Osindero and Teh fine-tuned it as a generative model with an up-down
+variant of the wake-sleep algorithm, and reached 1.25% error on <Gloss name="mnist" /> digit classification by modelling digits and
+labels jointly <Cite id="hinton2006dbn" />. More often the pretrained weights initialise a feed-forward network that is
+then fine-tuned with backpropagation on a supervised task. The same year, Hinton and Salakhutdinov pretrained a deep
+<NoteLink to="autoencoder">autoencoder</NoteLink> layer by layer with RBMs and obtained codes far better than <Gloss name="pca">principal component analysis</Gloss>
+<Cite id="hinton2006" />, and Bengio and colleagues showed that greedy layer-wise pretraining, with RBMs or with
+autoencoders, helped deep networks generalise <Cite id="bengio2007" />.
+
+These results made depth trainable, and within a few years pretrained deep networks replaced <Gloss name="gmm">Gaussian mixture models</Gloss> as
+the acoustic models of large speech recognisers <Cite id="hinton2012speech" />. Unsupervised pretraining then faded
+from supervised practice. <Gloss name="relu">Rectified linear units</Gloss>, careful <NoteLink to="weight-initialisation">weight
+initialisation</NoteLink>, <NoteLink to="dropout">dropout</NoteLink> and much larger labelled datasets let networks train from random weights directly.
+The <NoteLink to="boltzmann-machine">deep Boltzmann machine</NoteLink>, which keeps every layer undirected, is the fully undirected relative of the DBN
+<Cite id="salakhutdinov2009dbm" />.
+
+## Assumptions
+
+- **Each layer is a good RBM.** The bound argument needs each RBM to model the hidden activities of the layer below;
+  poorly trained layers pass their errors up.
+- **The recognition weights are approximate.** Using the generative weights upwards ignores the influence of the
+  layers above on each posterior, the "explaining away" that a directed model implies.
+
+## Pitfalls
+
+- **Likelihood is hard to evaluate.** Neither the DBN's likelihood nor its posterior is tractable; comparisons use
+  annealed <NoteLink to="importance-sampling">importance sampling</NoteLink> estimates or downstream task performance.
+- **Pretraining is not required for depth today.** Modern initialisation and normalisation make it unnecessary for
+  most supervised tasks; the DBN matters mainly for its history and for the idea of learning features without labels.

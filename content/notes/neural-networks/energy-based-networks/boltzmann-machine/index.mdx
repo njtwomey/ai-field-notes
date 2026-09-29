@@ -1,0 +1,164 @@
+---
+title: Boltzmann machine
+kind: concept
+summary: 'A Boltzmann machine is a network of stochastic binary units with symmetric weights that defines $p(\svec) \propto e^{-E(\svec)}$ over visible and hidden units. The log-likelihood gradient of a weight is $\langle s_is_j\rangle_{\text{data}} - \langle s_is_j\rangle_{\text{model}}$, estimated by Gibbs sampling.'
+tags: [neural-networks, energy-based-models, generative-models, unsupervised, sampling, markov-chains, monte-carlo, worked-example]
+aliases: [stochastic Hopfield network, Boltzmann learning rule, clamped phase, free-running phase, visible and hidden units, general Boltzmann machine, deep Boltzmann machine]
+requires: [gibbs-sampling]
+partOf: [energy-based-networks]
+related: [hopfield-network, restricted-boltzmann-machine, energy-based-models, simulated-annealing, ising-model, markov-random-field, exponential-family]
+references: [ackley1985, geman1984, kirkpatrick1983, salakhutdinov2009dbm, hertz1991, mackay2003]
+status: draft
+updated: 2026-09-29
+---
+
+import { BoltzmannArchitectures } from '../_shared/Diagrams'
+import { BoltzmannLearning } from './BoltzmannLearning'
+
+<Definition>
+A **Boltzmann machine** is a network of $n$ binary units $s_i \in \set{0, 1}$ joined by symmetric weights
+$w_{ij} = w_{ji}$, with $w_{ii} = 0$ and a bias $b_i$ per unit <Cite id="ackley1985" />. Its energy is
+
+$$
+E(\svec) = -\sum_{i<j} w_{ij}\, s_i s_j - \sum_i b_i\, s_i,
+$$
+
+and at temperature $T$ it defines the <Gloss name="boltzmann-distribution">Boltzmann distribution</Gloss> $p(\svec) = e^{-E(\svec)/T}/Z$. The units split into
+**visible** units $\vvec$, which the data set, and **hidden** units $\hvec$, which the model infers. The model of the
+data is the marginal $p(\vvec) = \sum_{\hvec} p(\vvec, \hvec)$, and learning adjusts the weights so that it matches the
+data distribution.
+</Definition>
+
+## From memory to distribution
+
+A <NoteLink to="hopfield-network">Hopfield network</NoteLink> stores chosen patterns as minima of an energy and
+recalls them by descent. Ackley, Hinton and Sejnowski asked the network for more: to learn, from examples alone, a
+probability distribution over its visible units <Cite id="ackley1985" />. Two changes make this possible. The units
+become stochastic, so the network samples states in proportion to $e^{-E/T}$ instead of settling into one minimum. And
+hidden units, which the data never set, give the network extra degrees of freedom with which to build the
+distribution.
+
+<BoltzmannArchitectures />
+
+## Stochastic units
+
+Collect the terms of $E$ that contain unit $k$: $E(\svec) = -s_k \Delta_k + (\text{terms without } s_k)$, where
+$\Delta_k = b_k + \sum_j w_{kj} s_j$ is the **energy gap** of unit $k$, the energy saved by turning it on. The two
+values of $s_k$ given all the other units therefore have probabilities in the ratio $e^{\Delta_k/T} : 1$, so
+
+$$
+\pr(s_k = 1 \mid \text{all other units}) = \frac{e^{\Delta_k/T}}{e^{\Delta_k/T} + 1} = \sigma\paren{\frac{\Delta_k}{T}},
+$$
+
+with $\sigma(x) = 1/(1 + e^{-x})$ the logistic function. Updating units one at a time with this rule is
+<NoteLink to="gibbs-sampling">Gibbs sampling</NoteLink>, and it converges to $p(\svec)$
+<Cite id="geman1984" />. As $T \to 0$ the probability tends to $1$ when $\Delta_k > 0$ and $0$ when $\Delta_k < 0$: the
+unit takes the state of lower energy, which is the deterministic Hopfield update. Temperature is a free scale here,
+since dividing every weight by $T$ gives the same distribution at $T = 1$; the original paper used it to anneal, running
+the chain at a high temperature first and cooling it, as in
+<NoteLink to="simulated-annealing">simulated annealing</NoteLink>, to reach equilibrium faster
+<Cite id="kirkpatrick1983" />.
+
+## The learning rule
+
+Learning maximises the average log-likelihood of the training vectors, which is the same as minimising the
+<NoteLink to="kullback-leibler-divergence">Kullback–Leibler divergence</NoteLink> from the data distribution to the
+model's $p(\vvec)$. For one visible vector,
+
+$$
+\log p(\vvec) = \log\sum_{\hvec} e^{-E(\vvec, \hvec)/T} - \log Z, \qquad Z = \sum_{\vvec', \hvec'}
+e^{-E(\vvec', \hvec')/T}.
+$$
+
+The energy is linear in each weight, with $\partial E/\partial w_{ij} = -s_i s_j$. Differentiating the first term,
+
+$$
+\frac{\partial}{\partial w_{ij}} \log\sum_{\hvec} e^{-E(\vvec, \hvec)/T} = \frac{\sum_{\hvec} e^{-E(\vvec,\hvec)/T}\,
+s_i s_j/T}{\sum_{\hvec} e^{-E(\vvec,\hvec)/T}} = \frac1T \sum_{\hvec} p(\hvec \mid \vvec)\, s_i s_j,
+$$
+
+an average over the hidden units with the visible units **clamped** to $\vvec$. The same calculation for $\log Z$ sums
+over every state, giving $\frac1T\sum_{\svec} p(\svec)\, s_i s_j$, an average with the network **free-running**.
+Averaging over the training data,
+
+$$
+\frac{\partial\, \expect_{\text{data}}[\log p(\vvec)]}{\partial w_{ij}} = \frac1T\paren{\langle s_i s_j
+\rangle_{\text{data}} - \langle s_i s_j \rangle_{\text{model}}},
+$$
+
+where $\langle \cdot \rangle_{\text{data}}$ averages over training vectors and, for each, over $p(\hvec \mid \vvec)$.
+The bias <NoteLink to="gradient">gradient</NoteLink> is the same with $s_i s_j$ replaced by $s_i$. Gradient ascent raises a weight when its two units are
+on together more often in the clamped phase than in the free phase, and lowers it otherwise. The rule is **local**:
+each weight needs only the statistics of the two units it joins.
+
+The gradient is zero when every pairwise statistic of the model equals that of the data. Without hidden units, $\log
+p(\vvec)$ is concave in the weights and biases, because the model is an
+<NoteLink to="exponential-family">exponential family</NoteLink> with <NoteLink to="sufficient-statistic">sufficient statistics</NoteLink> $v_i$ and $v_iv_j$, and
+the maximum-likelihood model is the one that matches the data's means and pairwise correlations. It captures nothing
+beyond second order.
+
+### Why hidden units are needed
+
+Take four visible units and the **even-parity** distribution: uniform over the eight vectors with an even number of
+ones. Each unit is on with probability $\frac12$. For any two units, fixing both leaves two free bits, of which exactly
+two of the four settings give even parity, so each of the four pairs of values has probability $\frac{2}{8} =
+\frac14$. These are the means and pairwise statistics of the uniform distribution over all 16 vectors, the model with
+every weight and bias at zero. By concavity that model is the best a Boltzmann machine without hidden units can do, and
+it is off by $\KL = \log\frac{1/8}{1/16} = \log 2 = 0.693$ nats. Hidden units make $p(\vvec)$ a mixture over hidden
+states, no longer an exponential family, and a machine with two hidden units can learn parity.
+
+## Why learning is slow
+
+Each gradient step needs two expectations under distributions over exponentially many states. Ackley, Hinton and
+Sejnowski estimated both by running Gibbs chains, with the visible units clamped and then free, annealed to
+equilibrium and then sampled.
+
+- **Equilibrium is expensive.** A chain must forget its start before its samples are valid. With large weights the
+  energy landscape has deep, separated minima, and single-unit updates cross between them rarely, so equilibration
+  time grows quickly as learning proceeds.
+- **The gradient is a difference of noisy estimates.** The two averages are close when the model is good, and their
+  difference is small compared with the sampling noise in each. Small <Gloss name="learning-rate">learning rates</Gloss> and many samples are needed.
+- **Every step needs a clamped chain per training vector.** With hidden units connected to each other, even
+  $p(\hvec \mid \vvec)$ must be sampled rather than computed.
+
+The <NoteLink to="restricted-boltzmann-machine">restricted Boltzmann machine</NoteLink> removes the last cost by
+forbidding connections within a layer, which makes $p(\hvec \mid \vvec)$ exact, and <Gloss name="contrastive-divergence">contrastive divergence</Gloss> replaces
+the equilibrium free phase with a few sampling steps from the data. Stacked restricted machines trained this way
+revived the model two decades later, and deep Boltzmann machines with several <NoteLink to="multilayer-perceptron">hidden layers</NoteLink> are trained with a
+variational approximation for the clamped phase and persistent chains for the free phase
+<Cite id="salakhutdinov2009dbm" />.
+
+<BoltzmannLearning />
+
+## Worked example: two visible units
+
+Take two visible units with no hidden units and the data distribution $p(00) = p(11) = 0.4$,
+$p(01) = p(10) = 0.1$: the units usually agree. By symmetry use one bias $b$ for both units, and $T = 1$. The model is
+$p(\vvec) \propto \exp(w v_1 v_2 + b(v_1 + v_2))$.
+
+- **First step from zero.** At $w = b = 0$ the model is uniform. The data give $\langle v_1 v_2\rangle_{\text{data}} =
+  p(11) = 0.4$ and the model gives $0.25$, so $\partial/\partial w = 0.15 > 0$: the weight grows. Both give
+  $\langle v_1 \rangle = 0.5$, so the bias gradient is zero at this point.
+- **Optimum.** The model has two parameters and the symmetric data have two free probabilities, so the fit is exact.
+  The odds of one unit on against both off fix the bias: $p(10)/p(00) = e^{b} = 0.25$, so $b = -\ln 4 = -1.386$. The
+  odds of both on against both off fix the weight: $p(11)/p(00) = e^{w + 2b} = 1$, so $w = 2\ln 4 = 2.773$.
+- **Check.** The unnormalised probabilities are $1, 0.25, 0.25, 1$ for $00, 10, 01, 11$, which normalise to $0.4, 0.1,
+  0.1, 0.4$. Every statistic now matches and the gradient is zero.
+
+The positive weight makes the units agree, and the negative biases stop them from being on too often, which the
+weight alone would cause.
+
+## Assumptions
+
+- **Symmetric weights.** The energy, and so the Boltzmann distribution, exists only for $w_{ij} = w_{ji}$.
+- **Binary units.** Real-valued data need other units, such as Gaussian visible units in an RBM.
+- **Equilibrium samples.** The learning rule is the exact gradient only if both phases are sampled at equilibrium.
+
+## Pitfalls
+
+- **No likelihood to monitor.** $Z$ is intractable beyond a few dozen units, so the training likelihood is unknown.
+  Estimates need annealed <NoteLink to="importance-sampling">importance sampling</NoteLink> or exact enumeration on toy models.
+- **Plateaus.** Starting from small symmetric weights, hidden units receive nearly the same gradient and can take a
+  long time to specialise, as the parity example shows.
+- **Noisy phases diverge.** A large learning rate with short, noisy free-phase chains can drive the weights to large
+  values, after which the chains stop mixing and the estimates become worse.

@@ -1,8 +1,8 @@
-import { useId, useMemo } from 'react'
+import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTheme } from '@/components/theme-provider'
 import type { Series } from '@/generated/contracts'
 import { contourSegments } from '@/lib/math/contours'
-import { EChart, type EChartClick } from './EChart'
+import { EChart, type EChartClick, type PlotPointer } from './EChart'
 import type { Handle } from './handles'
 import {
   chrome,
@@ -79,8 +79,20 @@ export type HeatmapProps = {
   vectors?: { from: [number, number]; to: [number, number] }[]
   /** Called with the centre of a clicked cell, or a clicked overlay point. Cells show a pointer cursor when set. */
   onCellClick?: (x: number, y: number) => void
+  /**
+   * Pointer position over the grid in data coordinates (see EChart): hover, click and leave, e.g. to link this chart to
+   * another. Updating overlays or the marker in response redraws only them.
+   */
+  onPointer?: (event: PlotPointer) => void
   valueLabel?: string
   height?: number
+  /**
+   * Equal pixel length per unit on both axes, e.g. for an image whose lines and angles must look true. The chart sets
+   * its own height from its width and ignores `height`. Not combined with `scaleTicks`.
+   */
+  equalAspect?: boolean
+  /** False hides the colour bar, e.g. for a binary image, and gives its width to the plot. */
+  colorBar?: boolean
   ariaLabel?: string
 }
 
@@ -228,8 +240,11 @@ export function Heatmap({
   vectors,
   handles,
   onCellClick,
+  onPointer,
   valueLabel = 'value',
   height = 360,
+  equalAspect,
+  colorBar = true,
   ariaLabel,
 }: HeatmapProps) {
   const { resolved: mode } = useTheme()
@@ -255,7 +270,7 @@ export function Heatmap({
     const dy = y.length > 1 ? y[1] - y[0] : 1
     const cells = y.flatMap((yv, i) => x.map((xv, j) => [xv, yv, z[i][j]]))
     return {
-      grid: { right: scaleTicks ? 16 : 72 },
+      grid: gridMargins(!!scaleTicks || !colorBar),
       legend: {
         show: structure.length > 1,
         // Each entry shows its series' marker, so shapes that encode groups read correctly in the legend.
@@ -274,7 +289,7 @@ export function Heatmap({
       visualMap: {
         min: lo,
         max: hi,
-        show: !scaleTicks,
+        show: !scaleTicks && colorBar,
         dimension: 2,
         seriesIndex: 0,
         calculable: false,
@@ -372,6 +387,7 @@ export function Heatmap({
     mode,
     height,
     clickable,
+    colorBar,
   ])
 
   const [mx, my] = marker ?? [undefined, undefined]
@@ -397,18 +413,41 @@ export function Heatmap({
       }
     : undefined
 
+  // For equal aspect, derive the height from the measured width: plot height / plot width = y span / x span.
+  const wrapper = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(0)
+  useLayoutEffect(() => {
+    if (!equalAspect || !wrapper.current) return
+    const observer = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width)))
+    observer.observe(wrapper.current)
+    return () => observer.disconnect()
+  }, [equalAspect])
+  const margins = gridMargins(!!scaleTicks || !colorBar)
+  const xSpan = x.length > 1 ? (x[x.length - 1] - x[0]) * (x.length / (x.length - 1)) : 1
+  const ySpan = y.length > 1 ? (y[y.length - 1] - y[0]) * (y.length / (y.length - 1)) : 1
+  const chartHeight = equalAspect
+    ? Math.round((Math.max(width - margins.left - margins.right, 0) * ySpan) / xSpan) + margins.top + margins.bottom
+    : height
+
   const chart = (
     <EChart
       option={option}
       patch={patch}
       onClick={handleClick}
+      onPointer={onPointer}
       handles={handles}
-      height={height}
+      height={chartHeight}
       ariaLabel={ariaLabel}
       // One rectangle per cell: thousands of marks, which canvas draws far faster than SVG.
       renderer="canvas"
     />
   )
+  if (equalAspect)
+    return (
+      <div ref={wrapper} className="w-full">
+        {width > 0 && chart}
+      </div>
+    )
   if (!scaleTicks) return chart
   return (
     <div className="flex items-center">
@@ -422,6 +461,11 @@ export function Heatmap({
       />
     </div>
   )
+}
+
+/** Plot margins, with room for the colour bar on the right unless it is hidden. */
+function gridMargins(noBar: boolean) {
+  return { left: 52, right: noBar ? 16 : 72, top: 36, bottom: 44 }
 }
 
 /** A vertical colour bar with labelled ticks, drawn as SVG beside the chart; low values at the bottom. */

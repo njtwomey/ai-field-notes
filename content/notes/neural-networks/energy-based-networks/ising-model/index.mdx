@@ -1,0 +1,221 @@
+---
+title: Ising model
+kind: concept
+summary: 'The Ising model gives spins $s_i \in \set{-1, +1}$ on a graph the energy $E(\svec) = -\sum_{i<j} J_{ij}s_is_j - \sum_i h_is_i$ and the Boltzmann distribution $p(\svec) \propto e^{-E(\svec)/T}$. On the square lattice it magnetises spontaneously below $T_c = 2/\ln(1+\sqrt2) \approx 2.269$.'
+tags: [statistical-physics, energy-based-models, graphical-models, markov-chains, monte-carlo, worked-example]
+aliases: [Lenz–Ising model, Lenz-Ising model, ferromagnet, spontaneous magnetisation, critical temperature, Onsager solution, Curie temperature, mean-field theory of the Ising model, Metropolis dynamics]
+requires: [random-variable, expectation]
+partOf: [energy-based-networks]
+related: [markov-random-field, gibbs-sampling, metropolis-hastings, simulated-annealing, spin-glass, hopfield-network, boltzmann-machine, loopy-belief-propagation]
+references: [ising1925, brush1967, onsager1944, yang1952, metropolis1953, glauber1963]
+status: draft
+updated: 2026-09-29
+---
+
+import { IsingLattice } from './IsingLattice'
+
+<Definition>
+The **Ising model** places a **spin** $s_i \in \set{-1, +1}$ on each of the $N$ nodes of a graph. A configuration
+$\svec = (s_1, \dots, s_N)$ has the **energy**
+
+$$
+E(\svec) = -\sum_{i<j} J_{ij}\, s_i s_j - \sum_i h_i\, s_i,
+$$
+
+where the **coupling** $J_{ij}$ is non-zero only for pairs joined by an edge and $h_i$ is an external **field** at
+node $i$. At **temperature** $T > 0$ the probability of a configuration is the **Boltzmann distribution**
+$p(\svec) = e^{-E(\svec)/T}/Z$, with the normalising constant $Z = \sum_{\svec} e^{-E(\svec)/T}$ summed over all
+$2^N$ configurations <Cite id="ising1925" />.
+</Definition>
+
+## Spins, couplings and energy
+
+Wilhelm Lenz proposed the model in 1920 as a caricature of a magnet, and his student Ernst Ising solved the
+one-dimensional chain in 1925 <Cite id="brush1967" />. Each spin is a tiny magnet that points up ($+1$) or down
+($-1$). A positive coupling $J_{ij} > 0$ is **ferromagnetic**: the bond contributes $-J_{ij}$ to the energy when
+$s_i = s_j$ and $+J_{ij}$ when they differ, so aligned neighbours have lower energy. A negative coupling is
+**antiferromagnetic** and favours opposite neighbours. A positive field $h_i$ lowers the energy of $s_i = +1$ by
+$2h_i$ relative to $s_i = -1$.
+
+The standard case is the **square lattice**: $N = L \times L$ spins on a grid with periodic edges, $J_{ij} = J$ for
+the four nearest neighbours of each spin and zero otherwise, and a uniform field $h$. Each spin has four bonds and
+each bond joins two spins, so the lattice has $2N$ bonds. With $J = 1$ and $h = 0$ the two **ground states**, all
+spins $+1$ or all $-1$, have energy $-2N$, or $-2$ per spin. A single flipped spin in a ground state breaks its four
+bonds and raises the energy by $8$.
+
+## The Boltzmann distribution
+
+The temperature sets how strongly the distribution prefers low energy. The ratio of the probabilities of two
+configurations is
+
+$$
+\frac{p(\svec)}{p(\svec')} = e^{-(E(\svec) - E(\svec'))/T},
+$$
+
+which does not involve $Z$. As $T \to 0$ the ratio for any configuration above the ground energy tends to zero, and
+the distribution concentrates on the ground states. As $T \to \infty$ every ratio tends to $1$, and the distribution
+tends to uniform over all $2^N$ configurations. Temperature is measured in units of energy here (Boltzmann's constant
+is set to $1$).
+
+<Derivation title="Why the Boltzmann form: maximum entropy at fixed mean energy">
+Among all distributions $p$ over configurations with a given mean energy $\sum_{\svec} p(\svec) E(\svec) = \bar E$,
+the one with the largest <NoteLink to="entropy">entropy</NoteLink> $-\sum_{\svec} p(\svec)\log p(\svec)$ is the
+Boltzmann distribution. Introduce multipliers $\lambda$ for the energy constraint and $\mu$ for normalisation. The
+Lagrangian is
+
+$$
+\Lcal = -\sum_{\svec} p(\svec)\log p(\svec) - \lambda\paren{\sum_{\svec} p(\svec)E(\svec) - \bar E} -
+\mu\paren{\sum_{\svec} p(\svec) - 1}.
+$$
+
+Setting $\partial\Lcal/\partial p(\svec) = -\log p(\svec) - 1 - \lambda E(\svec) - \mu = 0$ gives
+$p(\svec) = e^{-1-\mu}\, e^{-\lambda E(\svec)}$. Normalisation fixes $e^{1+\mu} = Z$, and the multiplier $\lambda$
+is the inverse temperature $1/T$, chosen so that the mean energy equals $\bar E$. The entropy is concave in $p$ and
+the constraints are linear, so this stationary point is the maximum.
+</Derivation>
+
+## Magnetisation and the phase transition
+
+The **magnetisation** per spin is $m = \frac1N\sum_i s_i \in [-1, 1]$. With $h = 0$ the energy is unchanged when
+every spin is flipped, so $\svec$ and $-\svec$ are equally likely and the expected magnetisation of any finite system
+is exactly zero. The informative quantity is the typical size $\abs{m}$, or the magnetisation that survives when an
+infinitesimal field $h \to 0^+$ breaks the tie after the system size $N \to \infty$. This limit, the **spontaneous
+magnetisation**, is non-zero at low temperature on the square lattice and zero at high temperature. The change
+happens at a sharp **critical temperature** $T_c$, the model's **phase transition**.
+
+### Mean-field theory: why a transition appears
+
+A single spin in a fixed field $H$ has two states with energies $\mp H$, so
+
+$$
+\expect[s] = \frac{e^{H/T} - e^{-H/T}}{e^{H/T} + e^{-H/T}} = \tanh\paren{\frac{H}{T}}.
+$$
+
+In the lattice the field felt by spin $i$ is $J\sum_{j \in \text{nb}(i)} s_j + h$, which fluctuates. **Mean-field
+theory** replaces each neighbour by its average $m$, so the field is $4Jm + h$ on the square lattice. Requiring the
+spin's own average to equal $m$ gives the self-consistency equation
+
+$$
+m = \tanh\paren{\frac{4Jm + h}{T}}.
+$$
+
+At $h = 0$, $m = 0$ is always a solution. The right-hand side has slope $4J/T$ at $m = 0$ and flattens towards
+$\pm 1$, so it crosses the line $y = m$ at two further points $\pm m^* \neq 0$ exactly when the slope exceeds $1$,
+that is when $T < 4J$. Below this temperature the aligned solutions have lower free energy and the system magnetises.
+Mean-field theory therefore predicts a transition at $T = 4J$. It overestimates $T_c$ because it ignores the
+fluctuations of the neighbours, which disorder the system more easily than a fixed average field would.
+
+### Onsager's exact result
+
+Lars Onsager solved the two-dimensional model with $h = 0$ exactly in 1944 <Cite id="onsager1944" />. On the square
+lattice with coupling $J = 1$ the critical temperature is
+
+$$
+T_c = \frac{2}{\ln(1 + \sqrt2)} \approx 2.269,
+$$
+
+and C. N. Yang derived the spontaneous magnetisation below it <Cite id="yang1952" />:
+
+$$
+m(T) = \paren{1 - \sinh^{-4}(2/T)}^{1/8}, \qquad T < T_c.
+$$
+
+The exponent $1/8$ makes $m$ fall steeply to zero as $T \to T_c$. At $T_c$ itself, clusters of aligned spins of every
+size appear, and the correlation between distant spins decays as a power of their distance rather than
+exponentially. The one-dimensional chain has no transition at any $T > 0$: a single broken bond splits the chain into
+two domains at a fixed energy cost of $2J$, while it can sit in any of $N$ places, so for large $N$ the entropy of the
+broken bonds always wins.
+
+## Simulating the model: Metropolis and Glauber dynamics
+
+$Z$ is a sum over $2^N$ terms, so expectations on a lattice of thousands of spins cannot be computed by
+enumeration. They are estimated by a <NoteLink to="markov-chain">Markov chain</NoteLink> whose stationary distribution is $p(\svec)$, a form of
+<NoteLink to="markov-chain-monte-carlo">Markov chain Monte Carlo</NoteLink>. Both standard chains change one spin at
+a time. Flipping spin $i$ changes only the terms that contain $s_i$, so the energy change is
+
+$$
+\Delta E_i = 2 s_i \paren{\sum_{j \in \text{nb}(i)} J_{ij} s_j + h_i},
+$$
+
+computed from the four neighbours alone.
+
+- **Metropolis dynamics** <Cite id="metropolis1953" /> picks a site and flips it with probability
+  $\min(1, e^{-\Delta E_i/T})$. Flips that lower the energy are always made.
+- **Glauber dynamics** <Cite id="glauber1963" /> picks a site and flips it with probability
+  $1/(1 + e^{\Delta E_i/T})$. This is the same as drawing $s_i$ afresh from its <NoteLink to="conditional-probability">conditional distribution</NoteLink> given its
+  neighbours, which is <NoteLink to="gibbs-sampling">Gibbs sampling</NoteLink>; physicists call it the heat-bath
+  algorithm.
+
+Both rules satisfy **detailed balance** with respect to $p$: for two configurations $\svec$ and $\svec'$ that differ
+only at site $i$, with $\Delta E = E(\svec') - E(\svec)$, the probability flow from $\svec$ to $\svec'$ equals the
+flow back. For Glauber dynamics,
+
+$$
+p(\svec)\, \frac{1}{1 + e^{\Delta E/T}} = \frac{e^{-E(\svec)/T}}{Z}\, \frac{e^{-\Delta E/T}}{e^{-\Delta E/T} + 1} =
+\frac{e^{-E(\svec')/T}}{Z}\, \frac{1}{1 + e^{-\Delta E/T}} = p(\svec')\, \frac{1}{1 + e^{-\Delta E/T}},
+$$
+
+where the first step multiplies the numerator and denominator by $e^{-\Delta E/T}$ and the second uses
+$E(\svec) + \Delta E = E(\svec')$. The right-hand side is the flow from $\svec'$ back to $\svec$, whose flip costs
+$-\Delta E$. For Metropolis with $\Delta E > 0$, the forward flow is $p(\svec)e^{-\Delta E/T} = p(\svec')$ and the
+backward flip is always accepted, so the backward flow is $p(\svec') \cdot 1$. Detailed balance makes $p$ stationary,
+and because any configuration can reach any other by single flips, the chain converges to $p$. One **sweep** is $N$
+single-spin updates, so each spin is visited once on average.
+
+<IsingLattice />
+
+Near $T_c$ the dynamics slow down sharply: large domains need many sweeps to change, a phenomenon called critical
+slowing down. Below $T_c$ a random start coarsens into domains of up and down spins whose walls shrink slowly, and a
+finite lattice can stay in a striped state for thousands of sweeps. A field opposed to an ordered state leaves it
+**metastable**: the state persists until a large enough droplet of the favoured phase forms by chance and then grows.
+
+## Worked example: two spins and one Metropolis step
+
+Take two spins joined by a coupling $J = 1$ with no field. The four configurations have energies
+$E(+,+) = E(-,-) = -1$ and $E(+,-) = E(-,+) = +1$. The normalising constant is
+$Z = 2e^{1/T} + 2e^{-1/T} = 4\cosh(1/T)$, and the correlation of the two spins is
+
+$$
+\expect[s_1 s_2] = \frac{2e^{1/T} - 2e^{-1/T}}{4\cosh(1/T)} = \tanh(1/T).
+$$
+
+At $T = 1$ the correlation is $\tanh 1 = 0.762$. At $T = 10$ it is $\tanh 0.1 = 0.0997$: the spins are almost
+independent.
+
+Now take one spin of the square lattice at $T = 2.269$ with $J = 1$ and $h = 0$. The spin is $+1$ and all four
+neighbours are $+1$. Flipping it costs $\Delta E = 2 \times 1 \times 4 = 8$, so Metropolis accepts the flip with
+probability $e^{-8/2.269} = 0.0294$ and Glauber with probability $1/(1 + e^{8/2.269}) = 0.0286$. If instead two
+neighbours are $+1$ and two are $-1$, then $\Delta E = 0$: Metropolis always flips the spin and Glauber flips it with
+probability $1/2$.
+
+## From magnets to neural networks
+
+Read each spin as a neuron that fires ($+1$) or is silent ($-1$), each coupling as a synaptic weight and each field
+as a bias. The zero-temperature dynamics, which set each spin to the sign of its local field, are then the update
+rule of a <NoteLink to="hopfield-network">Hopfield network</NoteLink>, and the couplings can be chosen to make chosen
+patterns the ground states. With random couplings of both signs the model becomes a
+<NoteLink to="spin-glass">spin glass</NoteLink>, with many local minima. Learning the couplings and fields so that the
+Boltzmann distribution matches data is the inverse Ising problem, which the
+<NoteLink to="boltzmann-machine">Boltzmann machine</NoteLink> solves with hidden units added. As a probabilistic
+model, the Ising model is a pairwise <NoteLink to="markov-random-field">Markov random field</NoteLink> over binary
+variables.
+
+## Assumptions
+
+- **Spins are binary and interactions pairwise.** Models with more spin values (the Potts model) or continuous spins
+  (the XY and Heisenberg models) behave differently; the XY model in two dimensions has no spontaneous magnetisation
+  at any $T > 0$.
+- **Couplings are fixed.** The Ising model describes a given $J$; the couplings are not learned.
+- **Equilibrium.** The Boltzmann distribution describes a system that has had time to equilibrate. Measurements taken
+  before the chain mixes describe the dynamics, not the distribution.
+
+## Pitfalls
+
+- **Finite lattices have no sharp transition.** $\abs{m}$ falls smoothly through $T_c$ on a finite lattice, and the
+  apparent transition shifts with $L$. The exact $T_c$ is a property of the infinite lattice.
+- **$\expect[m] = 0$ at $h = 0$.** Averaging $m$ over a long enough run gives zero at every temperature, because the
+  chain eventually flips between the two ordered states. Average $\abs{m}$ or $m^2$ instead.
+- **Units of temperature.** Some texts write $e^{-\beta E}$ with $\beta = 1/(k_B T)$, or fold $J$ into $T$; the value
+  $T_c \approx 2.269$ holds for $J = 1$ and $k_B = 1$ and scales with $J$.
+- **Correlated samples.** Successive configurations of a single-spin chain are strongly correlated, especially near
+  $T_c$. Estimates need many sweeps between the samples used, or a cluster algorithm that flips whole domains.

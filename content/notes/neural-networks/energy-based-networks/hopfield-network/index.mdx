@@ -1,0 +1,195 @@
+---
+title: Hopfield network
+kind: concept
+summary: 'A Hopfield network stores binary patterns $\xivec^\mu$ in symmetric weights $\Wmat = \frac1N\sum_\mu \xivec^\mu{\xivec^\mu}^\top$ and recalls one from a corrupted cue by setting units, one at a time, to the sign of their input. No update raises the energy $E = -\frac12\svec^\top\Wmat\svec$, so recall ends in a minimum.'
+tags: [neural-networks, associative-memory, energy-based-models, statistical-physics, memory, worked-example]
+aliases: [Hopfield net, associative memory, content-addressable memory, Hebbian learning, Hebb rule, attractor network, spurious state, mixture state, storage capacity, Hopfield energy, recurrent associative memory]
+requires: [dot-product]
+partOf: [energy-based-networks]
+related: [ising-model, spin-glass, boltzmann-machine, modern-hopfield-network, perceptron, self-organising-maps]
+references: [hopfield1982, hopfield1984, hebb1949, amari1972, amit1985, mceliece1987, hertz1991, mackay2003]
+status: draft
+updated: 2026-09-29
+---
+
+import { EnergyLandscape } from '../_shared/EnergyLandscape'
+import { HopfieldMemory } from './HopfieldMemory'
+
+<Definition>
+A **Hopfield network** is a recurrent network of $N$ binary units $s_i \in \set{-1, +1}$ with symmetric weights
+$w_{ij} = w_{ji}$ and no self-connections, $w_{ii} = 0$ <Cite id="hopfield1982" />. It stores $P$ patterns
+$\xivec^1, \dots, \xivec^P \in \set{-1, +1}^N$ with the Hebbian rule $w_{ij} = \frac1N \sum_{\mu} \xi^\mu_i \xi^\mu_j$
+for $i \neq j$. It recalls a pattern from a partial or noisy cue by **asynchronous updates**: pick a unit $i$ and set
+$s_i \leftarrow \sgn(h_i)$, where $h_i = \sum_j w_{ij} s_j$ is its **local field**. Each update keeps or lowers the
+energy $E(\svec) = -\frac12 \sum_{i,j} w_{ij} s_i s_j$, and recall stops at a state that no single update changes.
+</Definition>
+
+## Memory addressed by content
+
+A computer memory is addressed by location: give it an address and it returns what is stored there. An **associative**
+or **content-addressable** memory is addressed by the content itself: give it part of a stored item, or a corrupted
+copy, and it returns the whole item. John Hopfield showed in 1982 that a network of simple threshold units can do this
+with no central control, because its dynamics descend an energy function whose minima are the stored items
+<Cite id="hopfield1982" />. Similar networks had been studied before, notably by Amari <Cite id="amari1972" />, but
+the energy function made the collective behaviour analysable with the physics of the
+<NoteLink to="ising-model">Ising model</NoteLink>: the units are spins, the weights are couplings, and recall is
+relaxation to a low-energy state.
+
+## Storing patterns with Hebb's rule
+
+Donald Hebb proposed in 1949 that a synapse strengthens when the neurons on both sides are active together
+<Cite id="hebb1949" />. The storage rule
+
+$$
+\Wmat = \frac1N \sum_{\mu=1}^P \xivec^\mu {\xivec^\mu}^\top, \qquad \text{with the diagonal set to zero},
+$$
+
+is that idea for $\pm1$ units: the weight $w_{ij}$ grows by $1/N$ for every pattern in which units $i$ and $j$ agree
+and falls by $1/N$ for every pattern in which they disagree. Storing a pattern needs one pass and no iteration, and
+adding a pattern adds one <NoteLink to="matrix-multiplication">outer product</NoteLink>. The factor $1/N$ keeps the local fields of order one.
+
+## Recall and the energy
+
+With a bias $b_i$ per unit the energy is $E(\svec) = -\frac12\svec^\top\Wmat\svec - \bvec^\top\svec$ and the local
+field is $h_i = \sum_j w_{ij}s_j + b_i$; the Hebbian network has $\bvec = \zeros$. Recall starts from the cue and
+repeats the update $s_i \leftarrow \sgn(h_i)$ at units chosen in turn, in a fixed or random order. A unit whose field
+is exactly zero is left unchanged.
+
+### The energy never increases
+
+Pick one unit $k$ and collect the terms of $E$ that contain $s_k$. In $-\frac12\sum_{i,j} w_{ij}s_is_j$ they are the
+terms with $i = k$ and those with $j = k$ (the term $i = j = k$ is zero because $w_{kk} = 0$). By symmetry the two
+groups are equal, so
+
+$$
+E(\svec) = -s_k \sum_{j} w_{kj} s_j - b_k s_k + (\text{terms without } s_k) = -s_k h_k + (\text{terms without } s_k).
+$$
+
+The field $h_k$ does not contain $s_k$ because $w_{kk} = 0$, so changing $s_k$ to $s_k'$ changes the energy by
+
+$$
+\Delta E = -(s_k' - s_k)\, h_k.
+$$
+
+The update sets $s_k' = \sgn(h_k)$. If this changes the unit, then $s_k' - s_k = 2\sgn(h_k)$ and
+$\Delta E = -2\abs{h_k} < 0$. If it does not, $\Delta E = 0$. The energy never increases.
+
+The network has $2^N$ states, a finite number, and every change of state strictly lowers the energy, so no state can
+be visited twice. Recall therefore stops after finitely many changes, at a **fixed point**: a state in which every
+unit agrees with the sign of its field, $s_i h_i \ge 0$ for all $i$. A fixed point is a local minimum of $E$ with
+respect to single flips, since a flip of unit $i$ would change the energy by $2 s_i h_i \ge 0$.
+
+The proof uses both conditions on the weights. Asymmetric weights break the step that equates the two groups of
+terms, and such networks can cycle forever. **Synchronous** updates, which update every unit at once from the old
+state, can also fail to converge: they can end in a cycle of two states that alternate.
+
+## Why the stored patterns are fixed points
+
+Set the network to a stored pattern, $\svec = \xivec^\nu$, and compute the field of unit $i$:
+
+$$
+h_i = \frac1N \sum_{\mu}\xi^\mu_i \sum_{j \neq i}\xi^\mu_j \xi^\nu_j = \frac{N - 1}{N}\,\xi^\nu_i +
+\frac1N\sum_{\mu \neq \nu}\xi^\mu_i\sum_{j \neq i}\xi^\mu_j\xi^\nu_j.
+$$
+
+The first term, from $\mu = \nu$, is the **signal**: it points in the direction of the stored bit. The second term is
+the **crosstalk** from the other patterns. Unit $i$ is stable when $\xi^\nu_i h_i > 0$, that is when the crosstalk
+multiplied by $\xi^\nu_i$,
+
+$$
+C_i = \frac1N \sum_{\mu \neq \nu}\sum_{j \neq i} \xi^\nu_i\xi^\mu_i\xi^\mu_j\xi^\nu_j,
+$$
+
+exceeds $-(N-1)/N \approx -1$. For random patterns, with every bit an independent fair coin, $C_i$ is a sum of
+$(P-1)(N-1)$ independent terms, each $\pm 1/N$ with equal probability. It has mean zero and variance
+$(P-1)(N-1)/N^2 \approx P/N$, and by the <NoteLink to="central-limit-theorem">central limit theorem</NoteLink> it is
+close to Gaussian. The probability that a given bit of a stored pattern is unstable is therefore about
+
+$$
+\pr\paren{C_i < -1} \approx \Phi\paren{-\sqrt{N/P}},
+$$
+
+with $\Phi$ the standard normal distribution function. With $P = 0.05N$ this is $\Phi(-4.47) = 4 \times 10^{-6}$;
+with $P = 0.138N$ it is $\Phi(-2.69) = 0.0036$; with $P = 0.5N$ it is $\Phi(-1.41) = 0.079$.
+
+The estimate describes only the first update. Each flipped bit changes the fields of all the others, and errors can
+cascade. Amit, Gutfreund and Sompolinsky analysed the full dynamics with the replica method of spin-glass theory and
+found that retrieval states exist up to $P \approx 0.138N$ <Cite id="amit1985" />. At that load a retrieved pattern
+still has about $1.6\%$ of its bits wrong; beyond it the retrieval states vanish abruptly and the network becomes a
+<NoteLink to="spin-glass">spin glass</NoteLink> whose minima are unrelated to the patterns. If every bit of every
+pattern must be a fixed point with high probability, the number of patterns can grow only in proportion to
+$N/\ln N$ <Cite id="mceliece1987" />.
+
+## Memories as attractors
+
+Each stored pattern sits at the bottom of a **basin of attraction**: the set of states from which the dynamics end
+there. A cue anywhere inside the basin is completed to the pattern. The figure below enumerates every state of a
+network of ten units. Units 1 to 5 choose the column and units 6 to 10 the row, both in Gray-code order so that
+adjacent cells differ in one unit. Low-energy wells sit at the stored patterns, and every path runs downhill into a
+fixed point.
+
+<EnergyLandscape initial="hopfield-3" />
+
+## Spurious states
+
+The minima of $E$ include states that were never stored.
+
+- **Reversed patterns.** $E(-\svec) = E(\svec)$ because $E$ is quadratic in $\svec$, and $h_i(-\svec) = -h_i(\svec)$,
+  so $-\xivec^\mu$ is a fixed point whenever $\xivec^\mu$ is. A cue closer to the reversed pattern recalls the
+  reversed pattern.
+- **Mixture states.** The bitwise majority of three patterns, $s_i = \sgn(\xi^1_i + \xi^2_i + \xi^3_i)$, is also a
+  fixed point. For random patterns, $\xi^1_i$ agrees with the majority unless both other patterns disagree with it,
+  which happens with probability $1/4$. The overlap $m^\mu = \frac1N \xivec^\mu \cdot \svec$ with each of the three
+  patterns is therefore about $\tfrac34 - \tfrac14 = \tfrac12$, and the field is
+  $h_i \approx \sum_\mu \xi^\mu_i m^\mu \approx \frac12(\xi^1_i + \xi^2_i + \xi^3_i)$, whose sign is $s_i$. Every unit
+  agrees with its field, so the mixture is stable. Its energy, about $-\frac N2 \cdot 3 \cdot \frac14 = -\frac{3N}{8}$,
+  is above the $-\frac N2$ of a stored pattern, so its basin is shallower.
+- **Spin-glass states.** Near and beyond capacity, the crosstalk creates many minima unrelated to any pattern.
+
+<HopfieldMemory />
+
+## Worked example: one pattern, one correction
+
+Take $N = 4$ units and one stored pattern $\xivec = (+1, +1, -1, -1)$. The weights are $w_{ij} = \xi_i\xi_j/4$ for
+$i \neq j$. Start from the cue $\svec = (+1, -1, -1, -1)$, which differs from $\xivec$ in unit 2.
+
+- **Field on unit 2.** $h_2 = \frac14\paren{\xi_2\xi_1 s_1 + \xi_2\xi_3 s_3 + \xi_2\xi_4 s_4} = \frac14\paren{1 + 1 +
+  1} = 0.75$, so the update sets $s_2 = +1$ and the cue becomes $\xivec$.
+- **Energy before and after.** Write $a_i = \xi_i s_i$. Then $E = -\frac14\sum_{i<j} a_i a_j =
+  -\frac18\paren{(\textstyle\sum_i a_i)^2 - 4}$. Before the update $\avec = (1, -1, 1, 1)$, so $\sum_i a_i = 2$ and
+  $E = 0$. After it $\avec = (1, 1, 1, 1)$, so $\sum_i a_i = 4$ and $E = -1.5$.
+- **Check.** $\Delta E = -1.5 = -2\abs{h_2}$, as the descent argument predicts.
+- **Other units.** At $\xivec$ every field is $h_i = \frac34 \xi_i$, which agrees with $s_i$, so $\xivec$ is a fixed
+  point. So is $-\xivec$, with the same energy $-1.5$.
+
+## Variants
+
+- **Continuous units.** Hopfield's 1984 network uses graded outputs $V_i = g(u_i)$ with a sigmoid $g$ and continuous
+  time dynamics, and has an energy with the same descent property <Cite id="hopfield1984" />. It was used for
+  optimisation problems such as the travelling salesman.
+- **$\set{0, 1}$ units.** The 1982 paper uses units that are on or off with thresholds. The substitution
+  $s_i = 2V_i - 1$ maps it onto the $\pm1$ form with biases.
+- **Stochastic units.** Replacing $\sgn(h_i)$ by a random choice with $\pr(s_i = +1) = 1/(1 + e^{-2h_i/T})$ gives
+  <NoteLink to="gibbs-sampling">Gibbs sampling</NoteLink> of the <Gloss name="boltzmann-distribution">Boltzmann distribution</Gloss> $e^{-E/T}$; with hidden units
+  and learned weights this is a <NoteLink to="boltzmann-machine">Boltzmann machine</NoteLink>.
+- **Modern Hopfield networks.** Energies that grow faster than quadratically in the overlaps store far more patterns,
+  and their continuous version is attention; see <NoteLink to="modern-hopfield-network">modern Hopfield
+  networks</NoteLink>.
+
+## Assumptions
+
+- **Random, unbiased patterns.** The capacity $0.138N$ assumes independent bits with equal probability of $\pm1$.
+- **Symmetric weights with zero diagonal and asynchronous updates.** These guarantee convergence to a fixed point.
+- **The cue is near its pattern.** A cue outside the pattern's basin is completed to something else.
+
+## Pitfalls
+
+- **Correlated patterns interfere.** Patterns that share many bits, such as letters drawn on a grid, have large
+  overlaps, so their crosstalk is far larger than for random patterns. A network of 100 units may fail with only four
+  letters stored, far below $0.138 \times 100 = 14$.
+- **Fixed points are not memories.** Convergence says only that the state is a local minimum. Check the overlap with
+  every stored pattern to tell a memory from a spurious state.
+- **Capacity is set by $N$.** The number of storable patterns grows only linearly with the number of units, and each
+  pattern costs $N^2$ weights.
+- **Updates must be asynchronous.** Updating every unit at once from the same old state can oscillate between two
+  states.

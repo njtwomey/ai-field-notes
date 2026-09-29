@@ -11,9 +11,16 @@ export type TocItem = { id: string; text: string; depth: number }
 export function Toc({ items, active, title = 'On this page' }: { items: TocItem[]; active?: string; title?: string }) {
   const activeRef = useRef<HTMLAnchorElement>(null)
 
-  // Keep the current entry visible when the index itself scrolls.
+  // Keep the current entry visible when the index itself scrolls. Only the index's own scroll box moves:
+  // scrollIntoView would also pan a pinch-zoomed page across to the index, away from the text being read.
   useEffect(() => {
-    activeRef.current?.scrollIntoView({ block: 'nearest' })
+    const el = activeRef.current
+    const box = el && scrollParent(el)
+    if (!el || !box) return
+    const top = el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop
+    if (top < box.scrollTop) box.scrollTop = top
+    else if (top + el.offsetHeight > box.scrollTop + box.clientHeight)
+      box.scrollTop = top + el.offsetHeight - box.clientHeight
   }, [active])
 
   if (!items.length) return null
@@ -53,4 +60,13 @@ export function Toc({ items, active, title = 'On this page' }: { items: TocItem[
       </ul>
     </nav>
   )
+}
+
+/** The nearest ancestor that scrolls vertically on its own, if any (not the page). */
+function scrollParent(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+    const overflow = getComputedStyle(p).overflowY
+    if ((overflow === 'auto' || overflow === 'scroll') && p.scrollHeight > p.clientHeight) return p
+  }
+  return null
 }

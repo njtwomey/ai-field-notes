@@ -1,0 +1,303 @@
+---
+title: Hough transform
+kind: technique
+summary: 'The Hough transform finds straight lines by voting. Each edge point $(x, y)$ votes for every line $x\cos\theta + y\sin\theta = \rho$ through it, which traces a sinusoid in $(\theta, \rho)$ space. Sinusoids of collinear points cross at one cell, so accumulator peaks are lines.'
+tags: [computer-vision, image-processing, line-detection, voting, worked-example]
+aliases:
+  [
+    Hough lines,
+    Hough space,
+    Hough accumulator,
+    line detection,
+    probabilistic Hough transform,
+    progressive probabilistic Hough transform,
+    generalised Hough transform,
+    circle Hough transform,
+    R-table,
+  ]
+requires: [edge-detection, dot-product]
+related: [pinhole-camera-model, homography, object-detection, feature-detection-and-descriptors]
+references:
+  [hough1962, duda1972, ogorman1976, kimme1975, ballard1981, kiryati1991, matas2000, deans1981, radon1917, barnard1983, szeliski2022]
+status: draft
+updated: 2026-09-29
+---
+
+import { HoughExplorer } from './HoughExplorer'
+
+<Definition>
+The Hough transform detects straight lines in an image by voting in a space of line parameters. Every line in the
+plane is written $x\cos\theta + y\sin\theta = \rho$, with $\theta \in [0, \pi)$ the direction of its unit normal and
+$\rho$ its signed distance from the origin. Each edge point $(x_i, y_i)$ adds one vote to every discretised
+$(\theta, \rho)$ cell whose line passes through it. Cells with many votes, the peaks of the accumulator, are the lines
+supported by many edge points.
+</Definition>
+
+## Problem
+
+An <NoteLink to="edge-detection">edge detector</NoteLink> returns a set of edge pixels, not lines. The edge pixels of
+a straight boundary are scattered along it with gaps where contrast is low, displaced by noise, and mixed with edge
+pixels from texture and other objects. Fitting one line by least squares fails when most points belong to other
+structures, and the number of lines is not known in advance. Testing every pair of edge points as a candidate line and
+counting its support costs $O(N^2)$ candidates for $N$ edge points, each checked against all $N$ points.
+
+The Hough transform turns detection into counting. Each edge point contributes evidence for all lines that pass
+through it. A line is detected where the evidence from many points agrees, however the points are spread along it and
+whatever else is in the image. Hough introduced the method in a 1962 patent for finding particle tracks in
+bubble-chamber photographs <Cite id="hough1962" />. Duda and Hart replaced his slope–intercept parameters with the
+normal parameters $(\theta, \rho)$ used today <Cite id="duda1972" />.
+
+## Mechanism
+
+### Why not slope and intercept
+
+A non-vertical line is $y = mx + c$. Fix an edge point $(x_i, y_i)$. The lines through it satisfy
+$c = -x_i m + y_i$, which is itself a straight line in the $(m, c)$ plane. Two image points give two lines in the
+$(m, c)$ plane, and those meet at the $(m, c)$ of the line through both points. Points and lines swap roles: this is a
+point–line duality. Two points with the same $x$ give parallel lines in the $(m, c)$ plane, which never meet, because
+the line through them is vertical.
+
+The slope is unbounded. A line at angle $\alpha$ to the $x$-axis has $m = \tan\alpha$, which tends to infinity as
+$\alpha \to 90°$, and a vertical line $x = x_0$ has no slope–intercept form at all. The intercept is unbounded too,
+because $c = y_i - m x_i$ grows with $m$. No finite array over $(m, c)$ covers every line that crosses an image, and
+equal steps in $m$ are unequal steps in angle.
+
+### The normal parametrisation
+
+Describe a line by its unit normal $\nvec = (\cos\theta, \sin\theta)$ and the foot of the perpendicular from the
+origin, $\rho\,\nvec$. A point $\pvec = (x, y)$ lies on the line exactly when $\pvec - \rho\,\nvec$ is perpendicular to
+$\nvec$:
+
+$$
+(\pvec - \rho\,\nvec) \cdot \nvec = 0 \iff \pvec \cdot \nvec = \rho\, \nvec \cdot \nvec = \rho
+\iff x\cos\theta + y\sin\theta = \rho,
+$$
+
+using $\nvec \cdot \nvec = \cos^2\theta + \sin^2\theta = 1$. Every line, vertical ones included, has this form.
+
+The pair $(\theta, \rho)$ and the pair $(\theta + \pi, -\rho)$ describe the same line, because replacing $\nvec$ by
+$-\nvec$ and $\rho$ by $-\rho$ leaves the equation unchanged. Restricting $\theta$ to $[0, \pi)$ and letting $\rho$
+take either sign removes the duplicate, so each line has exactly one pair. The equivalent convention
+$\theta \in [0, 2\pi)$, $\rho \ge 0$ is also common; it is unique except for lines through the origin.
+
+Both ranges are bounded for lines that meet the image. Place the origin at the image centre. For an image $W$ pixels
+wide and $H$ pixels high, every image point satisfies $\norm{\pvec} \le R = \tfrac12\sqrt{W^2 + H^2}$, the distance to
+a corner. If a line meets the image at a point $\pvec$, the <NoteLink to="dot-product">Cauchy–Schwarz inequality</NoteLink> gives
+$\abs{\rho} = \abs{\pvec \cdot \nvec} \le \norm{\pvec}\norm{\nvec} \le R$. The parameter space is the rectangle
+$[0, \pi) \times [-R, R]$. For a $128 \times 128$ image, $R = 64\sqrt2 \approx 90.5$ pixels.
+
+### Each point traces a sinusoid
+
+Fix an edge point $\pvec_i = (x_i, y_i)$ and let $\theta$ vary. The lines through $\pvec_i$ have
+
+$$
+\rho_i(\theta) = x_i\cos\theta + y_i\sin\theta.
+$$
+
+Write the point in polar form, $x_i = r_i\cos\phi_i$ and $y_i = r_i\sin\phi_i$, with $r_i = \norm{\pvec_i}$. The
+angle-difference identity $\cos(\theta - \phi_i) = \cos\theta\cos\phi_i + \sin\theta\sin\phi_i$ gives
+
+$$
+\rho_i(\theta) = r_i\cos\phi_i\cos\theta + r_i\sin\phi_i\sin\theta = r_i\cos(\theta - \phi_i).
+$$
+
+The curve is a sinusoid in $\theta$ with amplitude $r_i$, the point's distance from the origin, and phase $\phi_i$, the
+point's direction. It peaks at $\theta = \phi_i$ with $\rho = r_i$: the line through $\pvec_i$ perpendicular to the ray
+from the origin to $\pvec_i$ is the farthest line from the origin through that point. A point at the origin gives
+$\rho_i(\theta) = 0$ for every $\theta$, since every line through the origin has $\rho = 0$.
+
+### Collinear points meet at one cell
+
+Suppose points $\pvec_1, \dots, \pvec_n$ lie on the line $(\theta^\ast, \rho^\ast)$. Each satisfies
+$\pvec_i \cdot \nvec(\theta^\ast) = \rho^\ast$, so each sinusoid has $\rho_i(\theta^\ast) = \rho^\ast$. All $n$
+sinusoids pass through the single point $(\theta^\ast, \rho^\ast)$.
+
+The converse holds too. Two distinct points have equal $\rho$ at angle $\theta$ when
+
+$$
+\rho_1(\theta) = \rho_2(\theta) \iff (\pvec_1 - \pvec_2) \cdot \nvec(\theta) = 0,
+$$
+
+that is, when $\nvec(\theta)$ is perpendicular to $\pvec_1 - \pvec_2$. That fixes $\nvec$ up to sign, which is one
+value of $\theta$ in $[0, \pi)$. Two sinusoids therefore cross exactly once in $[0, \pi)$, at the unique line through
+the two points. If $n$ sinusoids share a point $(\theta^\ast, \rho^\ast)$, all $n$ points satisfy
+$\pvec_i \cdot \nvec(\theta^\ast) = \rho^\ast$ and lie on that line. A point of the $(\theta, \rho)$ plane crossed by
+many sinusoids is a line through many edge points.
+
+<HoughExplorer />
+
+### The algorithm
+
+1. **Detect edges.** Run an edge detector, for example Canny, and collect the $N$ edge points $\pvec_i$, measured from
+   the image centre.
+2. **Discretise.** Choose a bin width $\Delta\theta$ and a bin width $\Delta\rho$. The columns are
+   $\theta_j = j\,\Delta\theta$ for $j = 0, \dots, N_\theta - 1$ with $N_\theta = \pi / \Delta\theta$. The rows split
+   $[-R, R]$ into $N_\rho = \lceil 2R / \Delta\rho \rceil$ bins. Set the accumulator $A$, an
+   $N_\rho \times N_\theta$ array of counts, to zero.
+3. **Vote.** For every edge point and every column $j$, compute $\rho = x_i\cos\theta_j + y_i\sin\theta_j$, find its
+   row $k = \lfloor (\rho + R)/\Delta\rho \rfloor$, and add one to $A[k, j]$. Precomputed tables of
+   $\cos\theta_j$ and $\sin\theta_j$ make each vote two multiplications and an addition.
+4. **Find peaks.** A long line gives a peak spread over neighbouring cells, and noise gives many small local maxima.
+   Keep cells whose count exceeds a threshold and that are the maximum within a window of neighbours:
+   <Gloss name="nms">non-maximum suppression</Gloss>. A greedy version takes the highest cell, discards every cell
+   within the window around it, and repeats. The window wraps at $\theta = \pi$, where $(\theta, \rho)$ meets
+   $(\theta - \pi, -\rho)$.
+5. **Convert back.** Each peak $(\theta_j, \rho_k)$ is the line $x\cos\theta_j + y\sin\theta_j = \rho_k$, with $\rho_k$
+   the centre of row $k$. The line is infinite. Segments are recovered by walking along it in the edge map and
+   splitting where the gap between edge points exceeds a set length.
+
+## Worked example
+
+Take four edge points: $\pvec_1 = (0, 2)$, $\pvec_2 = (1, 1)$, $\pvec_3 = (2, 0)$ and $\pvec_4 = (2, 2)$. The first
+three lie on the line $x + y = 2$; $\pvec_4$ does not. Their sinusoids are
+
+$$
+\rho_1 = 2\sin\theta, \quad \rho_2 = \cos\theta + \sin\theta, \quad \rho_3 = 2\cos\theta, \quad
+\rho_4 = 2\cos\theta + 2\sin\theta.
+$$
+
+The values at four angles, with $\sqrt2 \approx 1.414$:
+
+| $\theta$     | $\rho_1$ | $\rho_2$ | $\rho_3$ | $\rho_4$ | shared value                    |
+| ------------ | -------- | -------- | -------- | -------- | ------------------------------- |
+| $0°$         | 0        | 1        | 2        | 2        | $\rho = 2$: $\pvec_3, \pvec_4$  |
+| $45°$        | 1.414    | 1.414    | 1.414    | 2.828    | $\rho = \sqrt2$: $\pvec_1, \pvec_2, \pvec_3$ |
+| $90°$        | 2        | 1        | 0        | 2        | $\rho = 2$: $\pvec_1, \pvec_4$  |
+| $135°$       | 1.414    | 0        | $-1.414$ | 0        | $\rho = 0$: $\pvec_2, \pvec_4$  |
+
+The crossing of the first three sinusoids follows from the perpendicularity condition. $\pvec_1 - \pvec_3 = (-2, 2)$,
+and the unit normal perpendicular to it with $\theta \in [0, \pi)$ is $\nvec = (1, 1)/\sqrt2$, so $\theta = 45°$.
+Then $\rho = \pvec_1 \cdot \nvec = 2/\sqrt2 = \sqrt2$. The second point gives
+$\rho_2(45°) = (1 + 1)/\sqrt2 = \sqrt2$ as well. With bins of $\Delta\theta = 45°$ and $\Delta\rho = 1$, the cell
+holding $(45°, \sqrt2)$ receives three votes. Every other column has at most two equal values, and each of those
+pairs is the line through $\pvec_4$ and one other point: $x = 2$ at $\theta = 0°$, $y = 2$ at $\theta = 90°$ and
+$y = x$ at $\theta = 135°$. The peak converts back to $x\cos 45° + y\sin 45° = \sqrt2$, which is $x + y = 2$.
+
+## Cost
+
+Voting costs $O(N_{\text{edge}} \cdot N_\theta)$ time for $N_{\text{edge}}$ edge points: each point casts one vote per
+column. The accumulator takes $O(N_\theta N_\rho)$ memory, and a scan for peaks with a window of $w \times w$ cells
+costs $O(N_\theta N_\rho w^2)$. For $2{,}000$ edge points and $1°$ columns, voting is $360{,}000$ updates. The
+time is linear in the number of edge points. The pairwise search generates $O(N_{\text{edge}}^2)$ candidate lines
+before it counts the support of any.
+
+## Trade-offs
+
+### Bin sizes
+
+Bin widths set a trade between precision and robustness to noise, and the two widths depend on each other.
+
+A point displaced by $e$ pixels along the normal of its line changes its $\rho$ by exactly $e$, because
+$(\pvec + e\,\nvec) \cdot \nvec = \pvec \cdot \nvec + e$. With edge noise of <NoteLink to="variance-and-covariance">standard deviation</NoteLink> $\sigma$ pixels, a
+line's votes spread over about $\pm 2\sigma$ in $\rho$. Bins much narrower than $\sigma$ split the peak over several
+rows and lower it below the clutter. Bins much wider than $\sigma$ merge parallel lines closer than $\Delta\rho$ and
+locate each line only to within $\Delta\rho$.
+
+The $\theta$ width must match the length of the line. Differentiating $\rho_i(\theta)$ gives
+
+$$
+\frac{d\rho_i}{d\theta} = -x_i\sin\theta + y_i\cos\theta = \pvec_i \cdot \nvec_\perp(\theta),
+$$
+
+where $\nvec_\perp = (-\sin\theta, \cos\theta)$ is the direction along the line. The <NoteLink to="derivative">derivative</NoteLink> is $t_i$, the
+position of $\pvec_i$ along the line. At a column $\delta$ away from the true angle, the votes of a segment of length
+$L$ spread over a $\rho$ interval of width about $L\abs{\delta}$. The nearest column is at most $\Delta\theta/2$ away,
+so the whole segment stays in one row when $L\,\Delta\theta / 2 \le \Delta\rho$, that is
+$\Delta\theta \le 2\Delta\rho / L$ in radians. For a line crossing a $128$-pixel image and $\Delta\rho = 1$ pixel,
+this asks for $\Delta\theta \le 2/128$ rad, about $0.9°$.
+
+### Voting along the gradient direction
+
+The image gradient at an edge point is perpendicular to the edge, so it estimates the normal of the line through the
+point. With the <NoteLink to="gradient">gradient</NoteLink> angle $\phi_i = \operatorname{atan2}(g_y, g_x)$ reduced to $[0, \pi)$, the point needs to
+vote only in the column $\theta = \phi_i$, or in a few columns around it to absorb error in the gradient direction
+<Cite id="ogorman1976" />. Voting then costs $O(N_{\text{edge}})$ rather than $O(N_{\text{edge}} N_\theta)$, and the
+accumulator holds far fewer stray votes, so peaks stand out more. The method depends on reliable gradient directions,
+which noise and corners degrade.
+
+### Probabilistic Hough transforms
+
+A peak is found long before every edge point has voted. The probabilistic Hough transform votes with a random subset of
+the edge points and scales the threshold to match <Cite id="kiryati1991" />. The progressive probabilistic Hough
+transform takes points in random order and votes with each <Cite id="matas2000" />. When a cell's count becomes
+unlikely to have arisen from noise, it follows the corresponding line through the edge map, extracts the segment,
+removes that segment's points from the pool, and withdraws their votes. Its cost adapts to the image, and it returns
+segments with end points rather than infinite lines. OpenCV's `HoughLinesP` implements it.
+
+### Spurious peaks
+
+Votes from unrelated points pile up. Uniform clutter of density $\lambda$ points per pixel adds on average
+$\lambda\,\ell(\theta, \rho)\,\Delta\rho$ votes to a cell, where $\ell(\theta, \rho)$ is the length of that line's chord
+inside the image. Chords are longest near $\rho = 0$, so clutter raises a ridge through the middle of the accumulator
+and biases detection towards lines near the centre. Dividing counts by the chord length, or setting the threshold from
+the expected clutter count, removes the bias. Textured regions such as foliage or brickwork give dense edge points
+whose accidental alignments form peaks with no line behind them. The count of a true line is proportional to its
+length in edge points, so a short real line can score below a long accidental one. A peak is evidence of many
+collinear edge points, not of an object boundary.
+
+## Generalisations
+
+### Circles
+
+A circle is $(x - a)^2 + (y - b)^2 = r^2$, with centre $(a, b)$ and radius $r$. An edge point $(x_i, y_i)$ votes for
+every circle through it. For each radius $r$, those centres form the circle of radius $r$ around $(x_i, y_i)$, so the
+votes fill a cone in the three-dimensional $(a, b, r)$ accumulator. Duda and Hart described this extension
+<Cite id="duda1972" />. The gradient direction $\phi_i$ points towards or away from the centre, which gives
+$(a, b) = (x_i, y_i) \mp r(\cos\phi_i, \sin\phi_i)$: two votes per radius instead of a whole circle
+<Cite id="kimme1975" />.
+
+### Arbitrary shapes
+
+The generalised Hough transform detects a shape with no analytic form <Cite id="ballard1981" />. Pick a reference point
+inside a template of the shape. For each boundary point of the template, record the vector $\rvec$ from the
+boundary point to the reference point, indexed by the boundary's gradient direction $\phi$. The table of vectors per
+$\phi$ is the R-table. At detection, each edge point with gradient $\phi$ looks up the vectors stored under $\phi$ and
+votes for the reference point at $\pvec_i + \rvec$ for each. A peak in the two-dimensional accumulator is the
+location of the shape. Unknown rotation and scale add a dimension each, with the stored vectors rotated and scaled
+before voting.
+
+## Relation to the Radon transform
+
+The Radon transform of an image $f(x, y)$ integrates $f$ along every line:
+
+$$
+\mathcal{R}f(\theta, \rho) = \int_{-\infty}^{\infty} f\paren{\rho\,\nvec(\theta) + t\,\nvec_\perp(\theta)}\,dt,
+$$
+
+where $\nvec_\perp(\theta) = (-\sin\theta, \cos\theta)$ runs along the line and $t$ is arc length on it
+<Cite id="radon1917" />.
+
+Take $f$ to be the edge image as a sum of point masses, $f = \sum_i \delta_{\pvec_i}$. The line $(\theta, \rho)$ picks
+up one unit for each point with $\pvec_i \cdot \nvec(\theta) = \rho$, so $\mathcal{R}f(\theta, \rho) =
+\sum_i \delta(\rho - \pvec_i \cdot \nvec(\theta))$. Integrating over a $\rho$ bin at $\theta_j$ counts the points whose
+$\rho_i(\theta_j)$ falls in the bin, which is the accumulator entry $A[k, j]$. The Hough accumulator is the Radon
+transform of the edge image, binned in $\rho$ <Cite id="deans1981" />. Computed tomography measures the Radon transform
+of the X-ray attenuation in a slice of the body and inverts it, usually by filtered back projection, to reconstruct the
+slice. A plot of $\mathcal{R}f$ over $(\theta, \rho)$ is called a sinogram because a single point traces the sinusoid
+$\rho_i(\theta)$ derived above.
+
+## Vanishing points
+
+Lines that are parallel in the scene converge in a perspective image at a vanishing point $\vvec$ (see
+<NoteLink to="pinhole-camera-model" />). Every image line through $\vvec$ satisfies $\rho = \vvec \cdot \nvec(\theta)$,
+so the Hough peaks $(\theta_m, \rho_m)$ of lines that share a vanishing point lie on the sinusoid of $\vvec$. Finding
+$\vvec$ is a second Hough transform: each detected line votes for every candidate $\vvec$ on it, and the peak of that
+vote is the point most lines pass through. Equivalently, $\vvec$ minimises $\sum_m (\vvec \cdot \nvec(\theta_m) -
+\rho_m)^2$, a linear least-squares problem in the two coordinates of $\vvec$. Vanishing points often lie outside the
+image, or at infinity for lines parallel to the image plane. Barnard therefore voted on the Gaussian sphere, the unit
+sphere of viewing directions around the camera centre: each image line and the camera centre span a plane, which cuts
+the sphere in a great circle, and the great circles of parallel scene lines meet at the direction of those lines
+<Cite id="barnard1983" />. The sphere is bounded, so vanishing points at infinity fall on its equator rather than
+outside the accumulator.
+
+## Pitfalls
+
+- **Origin and axis conventions.** $\rho$ depends on where the origin is. With the origin at the top-left corner and
+  $y$ pointing down, as in many libraries, $\rho$ ranges over $[-\sqrt{W^2 + H^2}, \sqrt{W^2 + H^2}]$ and the sign of
+  $\theta$ flips relative to a $y$-up frame.
+- **Peaks are infinite lines.** A peak says nothing about where a segment starts and ends, and collinear segments on
+  either side of a gap merge into one peak.
+- **Thick edges.** Edges several pixels wide vote as several parallel lines and smear each peak across rows. Thinning
+  by non-maximum suppression in the edge detector keeps peaks sharp.
+- **Threshold choice.** Peak counts scale with line length and image size, so an absolute threshold that works on one
+  image fails on another <Cite id="szeliski2022" />.

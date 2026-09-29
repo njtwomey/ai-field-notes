@@ -1,0 +1,199 @@
+---
+title: Modern Hopfield network
+kind: concept
+summary: 'Modern Hopfield networks replace the quadratic energy of the classical network with $E = -\sum_\mu F({\xivec^\mu}^\top\svec)$ for a fast-growing $F$ such as $x^n$ or $e^x$, raising capacity from about $0.14N$ patterns to polynomially or exponentially many. The continuous update $\xivec \leftarrow \Xmat\operatorname{softmax}(\beta\Xmat^\top\xivec)$ is attention.'
+tags: [neural-networks, associative-memory, energy-based-models, attention, memory, worked-example]
+aliases: [dense associative memory, Krotov–Hopfield network, exponential associative memory, continuous modern Hopfield network, Hopfield layer, Hopfield networks is all you need, log-sum-exp energy]
+requires: [hopfield-network, softmax-and-log-sum-exp]
+partOf: [energy-based-networks]
+related: [scaled-dot-product-attention, multi-head-attention, transformer, spin-glass, boltzmann-machine]
+references: [krotov2016, demircigil2017, ramsauer2021, amit1985, vaswani2017]
+status: draft
+updated: 2026-09-29
+---
+
+import { CapacityCurves } from './CapacityCurves'
+import { ModernHopfield } from './ModernHopfield'
+
+<Definition>
+A **modern Hopfield network** stores patterns $\xivec^1, \dots, \xivec^P \in \set{-1, +1}^N$ in the energy
+
+$$
+E(\svec) = -\sum_{\mu=1}^P F\paren{{\xivec^\mu}^\top \svec},
+$$
+
+where the **separation function** $F$ grows faster than the quadratic of the classical
+<NoteLink to="hopfield-network">Hopfield network</NoteLink>: $F(x) = x^n$ with $n > 2$ in the **dense associative
+memory** <Cite id="krotov2016" />, or $F(x) = e^x$ in the exponential memory <Cite id="demircigil2017" />. Recall sets
+units one at a time to the value of lower energy. The **continuous** modern Hopfield network holds a real vector
+$\xivec \in \reals^N$ and updates it as $\xivec \leftarrow \Xmat\operatorname{softmax}(\beta\Xmat^\top\xivec)$, where
+$\Xmat = (\xivec^1, \dots, \xivec^P)$ has the patterns as columns and $\beta > 0$ is an inverse temperature
+<Cite id="ramsauer2021" />. That update is the attention operation of <NoteLink to="transformer">transformers</NoteLink>.
+</Definition>
+
+## The classical energy in terms of overlaps
+
+Write the classical energy with Hebbian weights $w_{ij} = \frac1N\sum_\mu \xi^\mu_i \xi^\mu_j$ ($i \neq j$) in terms
+of the overlaps ${\xivec^\mu}^\top\svec$:
+
+$$
+E(\svec) = -\frac12 \sum_{i \neq j} w_{ij} s_i s_j = -\frac1{2N}\sum_\mu \paren{\sum_{i,j} \xi^\mu_i s_i\, \xi^\mu_j
+s_j - \sum_i (\xi^\mu_i s_i)^2} = -\frac1{2N}\sum_\mu \paren{{\xivec^\mu}^\top\svec}^2 + \frac P2.
+$$
+
+The last step uses $(\xi^\mu_i s_i)^2 = 1$. Up to a constant and a positive factor, the classical network is the case
+$F(x) = x^2$. Each pattern contributes a bowl centred on itself, and the energy is the sum of $P$ bowls. A quadratic
+bowl is broad: a state halfway to a pattern still receives a quarter of the pattern's full contribution. The bowls of
+other patterns therefore reach deep into each pattern's neighbourhood, and their sum, the crosstalk, overwhelms the
+signal once $P$ is a fixed fraction of $N$. The capacity is about $0.138N$ <Cite id="amit1985" />.
+
+## Dense associative memory
+
+A separation function that grows faster than $x^2$ makes each bowl narrower relative to its depth. Krotov and Hopfield
+used $F(x) = x^n$ <Cite id="krotov2016" />. The update of unit $i$ compares the energy with $s_i = +1$ and with
+$s_i = -1$, all other units fixed:
+
+$$
+s_i \leftarrow \sgn\brack{\sum_{\mu} \paren{F\paren{\xi^\mu_i + x^\mu_i} - F\paren{-\xi^\mu_i + x^\mu_i}}}, \qquad
+x^\mu_i = \sum_{j \neq i} \xi^\mu_j s_j.
+$$
+
+The update chooses the value of $s_i$ with the lower energy, so the energy never increases, and recall ends in a fixed
+point as in the classical network. With $F(x) = x^2$ the bracket equals $4\sum_\mu \xi^\mu_i x^\mu_i$, a positive
+multiple of the classical local field.
+
+### Why capacity grows as $N^{n-1}$
+
+Set the state to a stored pattern, $\svec = \xivec^\nu$, and multiply the bracket for unit $i$ by $\xi^\nu_i$, so that
+a positive result means the bit is stable.
+
+- **Signal.** For $\mu = \nu$ the overlap without unit $i$ is $x^\nu_i = N - 1$, and the term is
+  $F(N) - F(N - 2) \approx 2F'(N) = 2nN^{n-1}$.
+- **Crosstalk.** For a random pattern $\mu \neq \nu$, $x^\mu_i$ is a sum of $N - 1$ independent $\pm1$ terms, of order
+  $\sqrt N$. Its term is about $2\xi^\nu_i\xi^\mu_i F'(x^\mu_i)$, of random sign and typical size $2n N^{(n-1)/2}$ up
+  to a constant $c_n$ that depends on $n$. The sum of $P - 1$ such terms has <NoteLink to="variance-and-covariance">standard deviation</NoteLink> about
+  $2nc_n\sqrt{P}\,N^{(n-1)/2}$.
+
+The ratio of signal to crosstalk is $N^{(n-1)/2}/(c_n\sqrt P)$, so the stored bits stay stable while $P$ is small
+compared with $N^{n-1}$. For $n = 2$ this recovers the classical condition $P \ll N$; for $n = 3$ the capacity grows
+as $N^2$, and for larger $n$ faster still <Cite id="krotov2016" />.
+
+### Exponential memory
+
+With $F(x) = e^x$ the signal term is $e^N - e^{N-2}$, while the crosstalk is dominated by the largest overlap among
+the other patterns, which for $P$ random patterns is about $\sqrt{2N\ln P}$. The signal wins while $\sqrt{2N \ln P}$
+stays well below $N$, that is while $\ln P$ is below a constant times $N$. Demircigil and colleagues proved that this
+memory stores a number of patterns exponential in $N$ and still corrects a fixed fraction of errors
+<Cite id="demircigil2017" />.
+
+<CapacityCurves />
+
+## The continuous modern Hopfield network
+
+Ramsauer and colleagues made the state continuous, $\xivec \in \reals^N$, and used the energy
+
+$$
+E(\xivec) = -\frac1\beta \log\sum_{\mu=1}^P \exp\paren{\beta\, {\xivec^\mu}^\top\xivec} + \frac12\xivec^\top\xivec +
+\text{const},
+$$
+
+a log-sum-exp of the overlaps that rewards closeness to some pattern, plus a quadratic term that keeps $\xivec$ bounded
+<Cite id="ramsauer2021" />. The <NoteLink to="gradient">gradient</NoteLink> of the log-sum-exp is the softmax-weighted average of the patterns (see
+<NoteLink to="softmax-and-log-sum-exp">softmax and log-sum-exp</NoteLink>), so
+
+$$
+\nabla E(\xivec) = -\Xmat\, \pvec + \xivec, \qquad \pvec = \operatorname{softmax}\paren{\beta\Xmat^\top\xivec}.
+$$
+
+### The update and why it lowers the energy
+
+Split the energy into a convex part $E_1(\xivec) = \frac12\xivec^\top\xivec$ and a concave part $E_2(\xivec) =
+-\frac1\beta\log\sum_\mu e^{\beta{\xivec^\mu}^\top\xivec}$ (the log-sum-exp is convex, so its negative is concave).
+The **concave–convex procedure** chooses the next state $\xivec_{t+1}$ so that $\nabla E_1(\xivec_{t+1}) = -\nabla
+E_2(\xivec_t)$, which here is
+
+$$
+\xivec_{t+1} = \Xmat\operatorname{softmax}\paren{\beta\Xmat^\top\xivec_t}.
+$$
+
+A concave function lies below its tangent, and a <NoteLink to="convex-sets-and-functions">convex function</NoteLink> lies above its tangent, so
+
+$$
+E_2(\xivec_{t+1}) \le E_2(\xivec_t) + \nabla E_2(\xivec_t)^\top(\xivec_{t+1} - \xivec_t), \qquad E_1(\xivec_t) \ge
+E_1(\xivec_{t+1}) + \nabla E_1(\xivec_{t+1})^\top(\xivec_t - \xivec_{t+1}).
+$$
+
+Adding the first inequality to the second, rearranged as $E_1(\xivec_{t+1}) \le E_1(\xivec_t) + \nabla
+E_1(\xivec_{t+1})^\top(\xivec_{t+1} - \xivec_t)$, gives
+
+$$
+E(\xivec_{t+1}) \le E(\xivec_t) + \paren{\nabla E_1(\xivec_{t+1}) + \nabla E_2(\xivec_t)}^\top(\xivec_{t+1} -
+\xivec_t) = E(\xivec_t),
+$$
+
+because the update makes the bracket zero. Every update lowers or keeps the energy. When the patterns are well
+separated and $\beta$ is large, the softmax puts almost all its weight on the nearest pattern, and one update lands
+almost exactly on it <Cite id="ramsauer2021" />.
+
+### Fixed points and the role of $\beta$
+
+The inverse temperature $\beta$ sets how many patterns share the weight. At large $\beta$ each stored pattern has its
+own minimum and one step retrieves it. At small $\beta$ the weights spread over many patterns and the fixed point is a
+**metastable state** near their average; at $\beta = 0$ every weight is $1/P$ and the update returns the mean of all
+patterns. Between the two, similar patterns merge into shared minima while distinct ones stay separate.
+
+## Attention is a Hopfield update
+
+Write the update for a query as a row vector. With the stored patterns as the rows of a key matrix
+$\Kmat = \Xmat^\top \in \reals^{P \times N}$ and the state as a query row $\qvec^\top = \xivec^\top$,
+
+$$
+\xivec_{\text{new}}^\top = \operatorname{softmax}\paren{\beta\, \qvec^\top \Kmat^\top}\Kmat.
+$$
+
+Stack several queries as the rows of $\Qmat$, compute queries and keys by learned projections of two sets of inputs,
+and return a separate projection $\Vmat$ of the stored inputs in place of $\Kmat$. With $\beta = 1/\sqrt{d_k}$ this is
+
+$$
+\operatorname{softmax}\paren{\frac{\Qmat\Kmat^\top}{\sqrt{d_k}}}\Vmat,
+$$
+
+the <NoteLink to="scaled-dot-product-attention">scaled dot-product attention</NoteLink> of the transformer
+<Cite id="vaswani2017" />. Each <NoteLink to="multi-head-attention">attention head</NoteLink> therefore performs one step of retrieval from an <Gloss name="associative-memory">associative memory</Gloss>
+whose stored patterns are the keys, and $1/\sqrt{d_k}$ is its inverse temperature. Ramsauer and colleagues found that
+many heads in trained <Gloss name="bert" /> models act in the metastable regime, averaging over many tokens, while others retrieve
+single tokens <Cite id="ramsauer2021" />. They also packaged the update as a **Hopfield layer** for pooling,
+memory lookup and <Gloss name="mil">multiple-instance learning</Gloss>.
+
+<ModernHopfield />
+
+## Worked example: one softmax update with two patterns
+
+Take $N = 100$ and two stored patterns $\xivec^1, \xivec^2 \in \set{-1, +1}^{100}$. A query $\xivec$ has overlaps
+${\xivec^1}^\top\xivec = 60$ and ${\xivec^2}^\top\xivec = 20$.
+
+- **At $\beta = 0.1$.** The scores are $6$ and $2$, so the weights are $p_1 = 1/(1 + e^{-4}) = 0.982$ and
+  $p_2 = 0.018$. The new state is $0.982\,\xivec^1 + 0.018\,\xivec^2$. Where the two patterns agree its entries are
+  $\pm 1$; where they differ they are $\pm 0.964$ with the sign of $\xivec^1$. One step has retrieved $\xivec^1$ to
+  within a small admixture.
+- **At $\beta = 0.01$.** The scores are $0.6$ and $0.2$, so $p_1 = 1/(1 + e^{-0.4}) = 0.599$ and $p_2 = 0.401$. Where
+  the patterns differ the entries are $\pm 0.198$: the state is close to the average of the two patterns, a
+  metastable mixture, even though its signs still follow $\xivec^1$.
+
+## Assumptions
+
+- **Stored patterns are given.** The capacity results are for fixed, random patterns; in a transformer the keys are
+  computed from the input and change with every sequence.
+- **Scaling of $\beta$.** Retrieval of a single pattern needs $\beta$ times the gap between the largest and the next
+  overlap to be large. With unnormalised $\pm1$ patterns the overlaps grow with $N$, so a useful $\beta$ shrinks as
+  $N$ grows.
+
+## Pitfalls
+
+- **The energy is not a sum over pairs.** Dense memories with $n > 2$ correspond to interactions among $n$ units at a
+  time; written as weights they need a tensor of order $n$, not a matrix. Implementations store the patterns
+  themselves instead.
+- **Capacity is not free.** A memory with $P$ patterns costs $O(NP)$ per update, like attention over $P$ keys; the
+  exponential capacity is a statement about how many patterns can be kept apart, not about cost.
+- **Metastable states are not failures.** At small $\beta$ the update returns averages by design; attention heads use
+  this regime to pool information.

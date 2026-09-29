@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 import { echarts, type EChartsOption } from './echarts'
 import { GRAB_RADIUS, type Handle } from './handles'
 import { chrome, type Mode } from './palette'
-import { baseOption } from './theme'
+import { baseOption, formatNumber } from './theme'
 
 export type EChartProps = {
   /** Chart-specific option, merged over the site theme from `baseOption`. */
@@ -39,7 +39,16 @@ export type EChartProps = {
    * grids, which SVG draws as one element per cell. Fixed when the chart mounts.
    */
   renderer?: 'svg' | 'canvas'
+  /**
+   * Pointer position over any grid, in that grid's data coordinates: `move` while hovering (one per frame, not while
+   * a handle is dragged), `click` on a click that did not grab a handle, `leave` when the pointer leaves the chart.
+   * For charts with several grids (`grid: [...]`), `grid` is the index of the one under the pointer.
+   */
+  onPointer?: (event: PlotPointer) => void
 }
+
+export type PlotPointer =
+  { type: 'move' | 'click'; grid: number; point: [number, number] } | { type: 'leave'; grid?: never; point?: never }
 
 export type EChartClick = {
   seriesId?: string
@@ -61,6 +70,35 @@ function merge(base: unknown, over: unknown): unknown {
   const out: Plain = { ...base }
   for (const [k, v] of Object.entries(over)) out[k] = merge(base[k], v)
   return out
+}
+
+/** The tick step ECharts picks for a value axis of this span (steps of 1, 2, 3, 5 times a power of ten). */
+function niceStep(span: number): number {
+  const raw = span / 5
+  const unit = 10 ** Math.floor(Math.log10(raw))
+  const f = raw / unit
+  return unit * (f <= 1 ? 1 : f <= 2 ? 2 : f <= 3 ? 3 : f <= 5 ? 5 : 10)
+}
+
+const onTick = (v: number, step: number) => Math.abs(v / step - Math.round(v / step)) < 1e-6
+
+/**
+ * Tidy every numeric axis the same way, whatever the chart set: labels are rounded (4.62, not 4.620000000000001), and
+ * a fixed min or max that does not fall on a tick keeps its gridline but loses its label, which would otherwise crowd
+ * the regular ticks next to it. A chart that sets its own formatter or min/max label rule keeps it.
+ */
+function tidyAxes(axes: unknown): unknown {
+  if (Array.isArray(axes)) return axes.map(tidyAxes)
+  if (!isPlain(axes) || (axes.type !== undefined && axes.type !== 'value')) return axes
+  const label: Plain = isPlain(axes.axisLabel) ? { ...axes.axisLabel } : {}
+  if (label.formatter === undefined) label.formatter = (v: number) => formatNumber(v)
+  const { min, max } = axes
+  if (typeof min === 'number' && typeof max === 'number' && max > min) {
+    const step = niceStep(max - min)
+    if (label.showMinLabel === undefined && !onTick(min, step)) label.showMinLabel = false
+    if (label.showMaxLabel === undefined && !onTick(max, step)) label.showMaxLabel = false
+  }
+  return { ...axes, axisLabel: label }
 }
 
 const HANDLES_ID = '__handles'
@@ -90,11 +128,13 @@ export function EChart({
   cartesian = true,
   handles,
   renderer = 'svg',
+  onPointer,
 }: EChartProps) {
   const ref = useRef<HTMLDivElement>(null)
   const chart = useRef<echarts.ECharts | null>(null)
   const onClickRef = useRef(onClick)
   const onPlotClickRef = useRef(onPlotClick)
+  const onPointerRef = useRef(onPointer)
   const { resolved } = useTheme()
   const inputs = useRef<Inputs>({ option, patch, handles, mode: resolved, cartesian })
   const frozen = useRef<Extents | null>(null)
@@ -103,6 +143,7 @@ export function EChart({
   useEffect(() => {
     onClickRef.current = onClick
     onPlotClickRef.current = onPlotClick
+    onPointerRef.current = onPointer
     inputs.current = { option, patch, handles, mode: resolved, cartesian }
   })
 
@@ -124,8 +165,12 @@ export function EChart({
       const merged = merge(base, option) as Plain
       if (frozen.current && cartesian) {
         const { x, y } = frozen.current
-        merged.xAxis = merge(merged.xAxis, { min: x[0], max: x[1] })
-        merged.yAxis = merge(merged.yAxis, { min: y[0], max: y[1] })
+        merged.xAxis = freeze(merged.xAxis, x)
+        merged.yAxis = freeze(merged.yAxis, y)
+      }
+      if (cartesian) {
+        merged.xAxis = tidyAxes(merged.xAxis)
+        merged.yAxis = tidyAxes(merged.yAxis)
       }
       if (handles && cartesian) merged.series = [...asArray(merged.series), handlesSeries(mode)]
       instance.setOption(merged as EChartsOption, { notMerge: true })
@@ -146,11 +191,15 @@ export function EChart({
       const [x, y] = instance.convertFromPixel({ gridIndex: 0 }, pixel) as number[]
       onPlotClickRef.current([x, y])
     })
+    // Registered before the handle listeners, so a press starts ungrabbed and `start` below marks it grabbed.
+    const pointer = attachPointer(instance, () => inputs.current.option, onPointerRef)
     const detach = attachHandles(instance, () => inputs.current.handles, {
       start: () => {
+        pointer.grab()
         frozen.current = axisExtents(instance)
       },
       end: () => {
+        pointer.release()
         if (!frozen.current) return
         frozen.current = null
         render.current(true)
@@ -167,6 +216,7 @@ export function EChart({
     observer.observe(el)
     return () => {
       observer.disconnect()
+      pointer.detach()
       detach()
       instance.dispose()
       chart.current = null
@@ -189,6 +239,90 @@ export function EChart({
 }
 
 const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : v ? [v] : [])
+
+/** Fix an axis to `[min, max]`. With a list of axes (several grids) only the first, which handles use, is frozen. */
+function freeze(axis: unknown, [min, max]: [number, number]): unknown {
+  if (Array.isArray(axis)) return axis.map((a, i) => (i === 0 ? merge(a, { min, max }) : a))
+  return merge(axis, { min, max })
+}
+
+/**
+ * Hover and click positions over every grid, for `onPointer`. Moves are batched to one per frame and suppressed while
+ * a handle is dragged; a click that grabbed a handle is not reported.
+ */
+function attachPointer(
+  instance: echarts.ECharts,
+  option: () => EChartsOption,
+  handler: { current: ((event: PlotPointer) => void) | undefined },
+) {
+  const el = instance.getDom()
+  let grabbed = false
+  let dragging = false
+  let frame = 0
+  let pending: number[] | null = null
+
+  const locate = (pixel: number[]): { type: 'move'; grid: number; point: [number, number] } | null => {
+    const grids = Math.max(asArray((option() as Plain).grid).length, 1)
+    for (let grid = 0; grid < grids; grid++) {
+      if (!instance.containPixel({ gridIndex: grid }, pixel)) continue
+      const [x, y] = instance.convertFromPixel({ gridIndex: grid }, pixel) as number[]
+      return { type: 'move', grid, point: [x, y] }
+    }
+    return null
+  }
+  const local = (e: PointerEvent | MouseEvent) => {
+    const rect = el.getBoundingClientRect()
+    return [e.clientX - rect.left, e.clientY - rect.top]
+  }
+
+  const down = () => {
+    grabbed = false
+  }
+  const move = (e: PointerEvent) => {
+    if (!handler.current || dragging) return
+    pending = local(e)
+    if (!frame)
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        const hit = pending && locate(pending)
+        pending = null
+        handler.current?.(hit ?? { type: 'leave' })
+      })
+  }
+  const leave = (e: PointerEvent) => {
+    // A touch lifts off after every tap; keep what the tap showed rather than clearing it at once.
+    if (!handler.current || dragging || e.pointerType === 'touch') return
+    cancelAnimationFrame(frame)
+    frame = 0
+    pending = null
+    handler.current({ type: 'leave' })
+  }
+  const click = (e: MouseEvent) => {
+    if (!handler.current || grabbed) return
+    const hit = locate(local(e))
+    if (hit) handler.current({ ...hit, type: 'click' })
+  }
+  el.addEventListener('pointerdown', down)
+  el.addEventListener('pointermove', move)
+  el.addEventListener('pointerleave', leave)
+  el.addEventListener('click', click)
+  return {
+    grab: () => {
+      grabbed = true
+      dragging = true
+    },
+    release: () => {
+      dragging = false
+    },
+    detach: () => {
+      cancelAnimationFrame(frame)
+      el.removeEventListener('pointerdown', down)
+      el.removeEventListener('pointermove', move)
+      el.removeEventListener('pointerleave', leave)
+      el.removeEventListener('click', click)
+    },
+  }
+}
 
 /** The series that draws every handle: points as ink markers, x and y handles as dashed guide lines. */
 function handlesSeries(mode: Mode) {
@@ -338,7 +472,9 @@ function attachHandles(
     frame = 0
     pending = null
     apply(local(e))
+    const released = current()?.[active]
     active = null
+    released?.onRelease?.()
     if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId)
     hooks.end()
   }

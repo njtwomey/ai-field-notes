@@ -1,0 +1,272 @@
+---
+title: Seam carving
+kind: technique
+summary: 'Seam carving resizes an image by removing or inserting seams: connected paths of one pixel per row or column that cross low-energy pixels. Dynamic programming finds the cheapest seam in $O(HW)$ time, so objects keep their shape while background is removed.'
+tags: [computer-vision, image-processing, dynamic-programming, worked-example]
+aliases:
+  [
+    content-aware resizing,
+    content-aware image resizing,
+    liquid rescaling,
+    image retargeting,
+    seam insertion,
+    forward energy,
+  ]
+requires: [edge-detection]
+related: [dynamic-time-warping, hidden-markov-model, bellman-equations, image-filtering]
+references: [avidan2007, rubinstein2008, rubinstein2009]
+status: draft
+updated: 2026-09-29
+---
+
+import { SeamCarvingExplorer } from './SeamCarvingExplorer'
+
+<Definition>
+Seam carving changes the width or height of an image one pixel at a time. A vertical seam is a path of one pixel per
+row, from the top row to the bottom row, whose column changes by at most one between neighbouring rows. Each pixel has
+an energy that measures its importance, usually the image gradient magnitude. Removing the vertical seam of least
+total energy narrows the image by one column; dynamic programming finds that seam exactly in time proportional to the
+number of pixels <Cite id="avidan2007" />.
+</Definition>
+
+## Problem
+
+An image of $H$ rows and $W$ columns must be shown at a different aspect ratio, for example a landscape photograph on a
+portrait phone screen. Two standard operations do this. Uniform scaling resamples every row to the new width, so every
+object becomes narrower by the same factor and circles become ellipses. Cropping keeps a window of the target size, so
+everything outside the window is lost. Both operations ignore what the image contains.
+
+Most photographs contain regions that carry little information, such as sky, water, grass or a plain wall. Deleting
+pixels from those regions changes the image less than deleting pixels from a face or a building. Seam carving removes
+pixels where the image is smooth and leaves pixels where it has structure <Cite id="avidan2007" />. The operation is
+called content-aware resizing, retargeting, or liquid rescaling.
+
+## Mechanism
+
+### Energy
+
+The energy $e(i, j) \ge 0$ assigns an importance to the pixel in row $i$ and column $j$, with $1 \le i \le H$ and
+$1 \le j \le W$. The standard choice is the $L_1$ norm of the intensity <NoteLink to="gradient">gradient</NoteLink>:
+
+$$
+e(i, j) = \abs{\frac{\partial I}{\partial x}(i, j)} + \abs{\frac{\partial I}{\partial y}(i, j)},
+$$
+
+where $I(i, j)$ is the image intensity, $x$ runs along columns and $y$ along rows. The <NoteLink to="derivative">derivatives</NoteLink> are estimated with
+finite differences or derivative kernels such as Sobel, as in <NoteLink to="edge-detection" />. For a colour image the
+energy is summed over the red, green and blue channels. The energy is near zero in flat regions and large on edges and
+texture. Avidan and Shamir also tested the $L_2$ gradient norm, local <NoteLink to="entropy">entropy</NoteLink>, and the gradient divided by the largest bin of a local histogram of
+oriented gradients. They found that no single energy suits every image, and that the $L_1$ gradient and the
+histogram-weighted gradient worked well on most images <Cite id="avidan2007" />.
+
+### Seams
+
+A vertical seam is a sequence of column indices $s = (s_1, s_2, \dots, s_H)$, one per row, with
+
+$$
+\abs{s_i - s_{i-1}} \le 1 \quad \text{for } i = 2, \dots, H.
+$$
+
+The seam is 8-connected: each of its pixels touches the next one along an edge or a corner. The cost of the seam is
+the total energy of its pixels,
+
+$$
+E(s) = \sum_{i=1}^{H} e(i, s_i).
+$$
+
+Removing a vertical seam deletes exactly one pixel from every row, and each row shifts left by one pixel from the seam
+onwards. The result is a rectangular image of width $W - 1$. The connectivity constraint keeps the shift local: two
+pixels that were vertical neighbours before the removal are at most one column apart afterwards. Deleting the
+lowest-energy pixel in each row independently would also narrow the image, but the deleted pixels could sit in unrelated
+columns, and the rows would then shear against each other. A horizontal seam is defined in the same way with rows and
+columns exchanged, and is found by running the vertical algorithm on the transposed image.
+
+### Finding the cheapest seam by dynamic programming
+
+A seam starts at any of $W$ columns and has up to three choices in each of the next $H - 1$ rows, so there are up to
+$W \cdot 3^{H - 1}$ seams. Enumeration is impossible for any real image. The cheapest seam has optimal substructure,
+which reduces the search to one pass over the pixels.
+
+Define $M(i, j)$ as the least cost of a partial seam that runs from row 1 to row $i$ and ends at pixel $(i, j)$. In the
+first row the partial seam is the pixel itself, so $M(1, j) = e(1, j)$. Take any partial seam that ends at $(i, j)$ with
+$i \ge 2$. The seam's pixel in row $i - 1$ is at a column $j' \in \set{j - 1, j, j + 1}$, because of the connectivity
+constraint. The cost of the seam is $e(i, j)$ plus the cost of its first $i - 1$ pixels. Those $i - 1$ pixels form a
+partial seam ending at $(i - 1, j')$, so their cost is at least $M(i - 1, j')$. Every partial seam ending at $(i, j)$
+therefore costs at least
+
+$$
+e(i, j) + \min_{j' \in \set{j - 1, j, j + 1}} M(i - 1, j').
+$$
+
+The bound is attained: take a cheapest partial seam ending at the minimising $(i - 1, j')$ and append $(i, j)$. The
+result is a valid partial seam, because $\abs{j - j'} \le 1$, and its cost equals the bound. So the least cost is the
+bound itself:
+
+$$
+M(i, j) = e(i, j) + \min\set{M(i-1, j-1),\ M(i-1, j),\ M(i-1, j+1)}.
+$$
+
+Terms with a column outside $1, \dots, W$ are left out of the minimum. The argument is the <NoteLink to="bellman-equations">principle of optimality</NoteLink>
+behind every dynamic program: the part of an optimal path before its last step is itself an optimal path to where that
+step starts. The same recursion over a chain of rows is the <Gloss name="viterbi">Viterbi algorithm</Gloss> for the most probable state
+sequence of a <NoteLink to="hidden-markov-model" />, with columns as states and energy as negative log-probability.
+
+Every seam ends in row $H$. The cost of the cheapest complete seam is therefore $\min_j M(H, j)$. The seam itself is
+recovered by backtracking. Set $s_H = \argmin_j M(H, j)$. For $i = H, H - 1, \dots, 2$, set $s_{i-1}$ to the column
+among $s_i - 1, s_i, s_i + 1$ that attained the minimum in $M(i, s_i)$. Storing that choice for each pixel while $M$ is
+filled makes backtracking a walk of $H$ steps. Ties can be broken by any fixed rule; the figure below prefers the
+pixel straight above, then the one to the left.
+
+### Removing seams
+
+Shrinking the width by $k$ columns repeats three steps $k$ times: compute the energy of the current image, find the
+cheapest seam, and remove it. The energy must be recomputed after each removal. Pixels on either side of the removed
+seam become neighbours, so the gradient changes along the seam. The cumulative cost $M$ must be recomputed as well,
+because $M(i, j)$ depends on every pixel above row $i$ within the cone of columns that can reach $j$. The sequence is
+greedy: each seam is optimal for the current image, but the set of $k$ seams is not guaranteed to have the least total
+energy among all sets of $k$ disjoint seams.
+
+### Inserting seams
+
+Enlarging the width by $k$ columns inserts seams. A new pixel is placed next to each pixel of a seam, with the mean
+colour of its left and right neighbours. The obvious method, to find the cheapest seam, duplicate it, and repeat,
+fails. The duplicated seam and its copy are smooth by construction, because each new pixel is an average of its
+neighbours. The next search therefore finds the same seam or its copy again, and $k$ repetitions stretch one column
+into a band of $k$ copies.
+
+Avidan and Shamir instead run the removal sequence for $k$ steps on a copy of the image and record which original
+pixels the $k$ seams removed <Cite id="avidan2007" />. The $k$ seams are distinct and together cover the $k$ cheapest
+columns' worth of pixels. All $k$ are then duplicated in the original image at once. Each row gains exactly $k$ pixels,
+because each seam holds one pixel per row. Enlarging by more than about half the width duplicates nearly every
+low-energy pixel, so large enlargements are done in several steps of this kind.
+
+### Resizing in both dimensions
+
+Changing an $H \times W$ image to $H' \times W'$ with $H' < H$ and $W' < W$ removes $r = H - H'$ horizontal seams and
+$c = W - W'$ vertical seams. The order matters, because each removal changes the energy seen by later seams. Avidan and
+Shamir find the best order with a second dynamic program over the table $T(r, c)$, the least total energy of reaching
+an image with $r$ rows and $c$ columns removed. Each entry takes the cheaper of removing a horizontal seam from the
+image at $T(r - 1, c)$ or a vertical seam from the image at $T(r, c - 1)$ <Cite id="avidan2007" />. The table has
+$(r + 1)(c + 1)$ entries and each needs a seam search, so the cost is high. Alternating vertical and horizontal seams is
+a cheap approximation that often gives similar results.
+
+### Forward energy
+
+The energy $e$ above measures the pixels that a seam removes. Rubinstein, Shamir and Avidan call it backward energy,
+because it ignores what the removal creates <Cite id="rubinstein2008" />. A seam through a flat region next to a sharp
+edge can join pixels of very different colour and create a new edge. Forward energy charges a seam for the new
+differences between pixels that become neighbours.
+
+When pixel $(i, j)$ is removed, pixels $(i, j - 1)$ and $(i, j + 1)$ become horizontal neighbours in every case. The
+vertical neighbours of row $i$ depend on where the seam was in row $i - 1$. If the seam steps straight down from
+$(i - 1, j)$, both rows shift by the same amount and every vertical pair is preserved. If it comes from $(i - 1, j - 1)$,
+pixel $(i - 1, j)$ moves left into column $j - 1$, above pixel $(i, j - 1)$. If it comes from $(i - 1, j + 1)$, pixel
+$(i, j + 1)$ moves left into column $j$, below pixel $(i - 1, j)$. The three cases give three costs:
+
+$$
+\begin{aligned}
+C_U(i, j) &= \abs{I(i, j+1) - I(i, j-1)}, \\
+C_L(i, j) &= C_U(i, j) + \abs{I(i-1, j) - I(i, j-1)}, \\
+C_R(i, j) &= C_U(i, j) + \abs{I(i-1, j) - I(i, j+1)}.
+\end{aligned}
+$$
+
+The cost now depends on the step into $(i, j)$ as well as on the pixel, so it enters the recursion inside the minimum:
+
+$$
+\begin{aligned}
+M(i, j) = P(i, j) + \min\{\, & M(i-1, j-1) + C_L(i, j), \\
+& M(i-1, j) + C_U(i, j), \\
+& M(i-1, j+1) + C_R(i, j) \,\}.
+\end{aligned}
+$$
+
+Here $P(i, j)$ is an optional per-pixel term, such as a mask. The optimal-substructure argument goes through
+unchanged, because the added costs depend only on the last step. Forward energy removes fewer seams across object
+boundaries and leaves fewer jagged edges. It also treats the flat interior of an object like background, because
+removing pixels there creates no new edge, so a uniform object can become narrower. The same paper replaces the dynamic
+program with a graph cut for video, where a seam becomes a surface through space and time <Cite id="rubinstein2008" />.
+
+### Object removal and protection
+
+A mask changes the energy of chosen pixels. Adding a large positive value to every pixel of a region protects it: any
+seam through the region costs more than a seam around it, so the region survives until no other seam remains. Adding a
+large negative value marks a region for removal. The cheapest seams then pass through the region, and each one deletes
+one pixel from each of its rows. Removing seams until no marked pixel remains deletes the object. Inserting the same
+number of seams afterwards restores the original width, with the background filled in around the gap
+<Cite id="avidan2007" />.
+
+<SeamCarvingExplorer />
+
+## Worked example
+
+Take an image with $H = 4$ rows and $W = 5$ columns and the energy table below.
+
+| $e(i, j)$ | $j = 1$ | $j = 2$ | $j = 3$ | $j = 4$ | $j = 5$ |
+| --------- | ------- | ------- | ------- | ------- | ------- |
+| $i = 1$   | 4       | 3       | 5       | 1       | 6       |
+| $i = 2$   | 2       | 6       | 5       | 7       | 4       |
+| $i = 3$   | 1       | 5       | 3       | 8       | 5       |
+| $i = 4$   | 3       | 2       | 6       | 4       | 7       |
+
+Row 1 of $M$ copies row 1 of $e$. Each later entry adds $e(i, j)$ to the smallest of the up to three entries above it.
+For example, $M(2, 1) = 2 + \min\set{4, 3} = 5$, $M(2, 2) = 6 + \min\set{4, 3, 5} = 9$ and
+$M(3, 2) = 5 + \min\set{5, 9, 6} = 10$. The full table is
+
+| $M(i, j)$ | $j = 1$ | $j = 2$ | $j = 3$ | $j = 4$ | $j = 5$ |
+| --------- | ------- | ------- | ------- | ------- | ------- |
+| $i = 1$   | 4       | **3**   | 5       | 1       | 6       |
+| $i = 2$   | **5**   | 9       | 6       | 8       | 5       |
+| $i = 3$   | **6**   | 10      | 9       | 13      | 10      |
+| $i = 4$   | 9       | **8**   | 15      | 13      | 17      |
+
+The smallest entry in the last row is $M(4, 2) = 8$, so the cheapest seam costs 8 and ends at $s_4 = 2$. Backtracking:
+
+- $M(4, 2) = 2 + \min\set{M(3, 1), M(3, 2), M(3, 3)} = 2 + \min\set{6, 10, 9}$, attained at column 1, so $s_3 = 1$.
+- $M(3, 1) = 1 + \min\set{M(2, 1), M(2, 2)} = 1 + \min\set{5, 9}$, attained at column 1, so $s_2 = 1$.
+- $M(2, 1) = 2 + \min\set{M(1, 1), M(1, 2)} = 2 + \min\set{4, 3}$, attained at column 2, so $s_1 = 2$.
+
+The seam is $s = (2, 1, 1, 2)$, shown in bold, with cost $e(1, 2) + e(2, 1) + e(3, 1) + e(4, 2) = 3 + 2 + 1 + 2 = 8$.
+Every column changes by at most one between rows, so the seam is valid. Removing it leaves a $4 \times 4$ image whose
+rows are $(4, 5, 1, 6)$, $(6, 5, 7, 4)$, $(5, 3, 8, 5)$ and $(3, 6, 4, 7)$ in energy terms, before the energy is
+recomputed.
+
+A greedy search that starts at the cheapest pixel of the first row and always steps to the cheapest of the three pixels
+below does worse. It starts at $e(1, 4) = 1$, then takes $e(2, 5) = 4$, $e(3, 5) = 5$ and $e(4, 4) = 4$, for a total
+of 14. The cheap first pixel leads into expensive rows, which only the full table of $M$ reveals.
+
+## Cost
+
+- **One seam.** Filling $M$ takes three comparisons and one addition per pixel, and the energy takes a constant number
+  of operations per pixel. Finding one seam costs $O(HW)$ time. Storing $M$ and the backtracking choices costs $O(HW)$
+  memory.
+- **Shrinking by $k$ columns.** Each of the $k$ seams needs a new energy and a new $M$, so the cost is $O(kHW)$. The
+  energy changes only near the removed seam and can be updated locally, but $M$ must be recomputed below the first
+  changed row.
+- **Enlarging by $k$ columns.** The $k$ seams come from one removal sequence of $k$ steps, $O(kHW)$, plus one pass to
+  insert them.
+- **Both dimensions.** The optimal order needs a seam search for every entry of an $(r + 1) \times (c + 1)$ table.
+  Alternation costs the same as $r + c$ separate removals.
+- **Interactive resizing.** Avidan and Shamir precompute the removal order of every pixel once and store it as an index
+  map. Any target width is then a lookup: keep the pixels whose removal index exceeds the number of seams to remove
+  <Cite id="avidan2007" />. The figure above works this way.
+
+## Trade-offs
+
+- **Images without low-energy regions.** Seam carving needs somewhere cheap to remove pixels. A texture, a page of
+  text or a crowd has high energy everywhere, so every seam cuts through structure. Uniform scaling then distorts
+  less.
+- **Structure that energy does not see.** Energy is local. A face has smooth cheeks and forehead, so seams pass through
+  them and change its proportions, which viewers notice at once. Avidan and Shamir protect faces with a mask from a face
+  detector <Cite id="avidan2007" />. Symmetric objects, regular patterns and the spacing between objects are also lost.
+- **Straight lines bend.** Each row loses one pixel per seam, at a column that varies from row to row. A straight line
+  that is not vertical crosses the seams at different rows, so different parts of it shift by different amounts, and
+  the line becomes a broken or curved one.
+- **Backward energy creates edges.** Joining the two sides of a removed seam can place very different pixels next to
+  each other. Forward energy reduces these artefacts at the cost of treating flat object interiors as removable
+  <Cite id="rubinstein2008" />.
+- **Greedy sequence.** Each seam is optimal for the current image. The whole sequence of $k$ seams is not optimal, and
+  a seam that looked cheap early can force costly seams later.
+- **Mixing with scaling and cropping.** Seam carving is one of several retargeting operators. Rubinstein, Shamir and
+  Avidan combine it with uniform scaling and cropping, and search for the sequence of operators that best preserves
+  the image under an image-similarity measure <Cite id="rubinstein2009" />.

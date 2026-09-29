@@ -1,0 +1,169 @@
+---
+title: Restricted Boltzmann machine
+kind: concept
+summary: 'A restricted Boltzmann machine has binary visible and hidden layers and no connections within a layer. Given one layer the other factorises, $p(h_j = 1 \mid \vvec) = \sigma(c_j + \wvec_j^\top\vvec)$, so block Gibbs sampling is cheap. Contrastive divergence trains it with short chains started at the data.'
+tags: [neural-networks, energy-based-models, generative-models, unsupervised, sampling, markov-chains, worked-example]
+aliases: [RBM, harmonium, CD-k, CD-1, block Gibbs sampling, RBM free energy, bars and stripes, Bernoulli RBM]
+requires: [boltzmann-machine]
+partOf: [energy-based-networks]
+related: [deep-belief-network, energy-based-models, gibbs-sampling, autoencoder, hopfield-network]
+references: [smolensky1986, hinton2002poe, carreira2005, tieleman2008, fischer2010, hinton2012practical]
+status: draft
+updated: 2026-09-29
+---
+
+import { BoltzmannArchitectures } from '../_shared/Diagrams'
+import { RbmTrainer } from './RbmTrainer'
+
+<Definition>
+A **restricted Boltzmann machine** (RBM) has $V$ visible units $\vvec \in \set{0,1}^V$ and $H$ hidden units
+$\hvec \in \set{0,1}^H$, a weight matrix $\Wmat \in \reals^{V \times H}$ that joins every visible unit to every hidden
+unit, and biases $\bvec$ and $\cvec$. There are no connections within a layer. The energy and the joint distribution
+are
+
+$$
+E(\vvec, \hvec) = -\bvec^\top\vvec - \cvec^\top\hvec - \vvec^\top\Wmat\hvec, \qquad p(\vvec, \hvec) =
+\frac{e^{-E(\vvec, \hvec)}}{Z}.
+$$
+
+It is a <NoteLink to="boltzmann-machine">Boltzmann machine</NoteLink> whose connection graph is bipartite. Smolensky
+introduced it in 1986 as the **harmonium** <Cite id="smolensky1986" />; Hinton's contrastive divergence made it
+practical to train <Cite id="hinton2002poe" />.
+</Definition>
+
+<BoltzmannArchitectures />
+
+## The layers are conditionally independent
+
+Fix the visible units. The terms of the energy that involve $\hvec$ are $\cvec^\top\hvec + \vvec^\top\Wmat\hvec =
+\sum_j h_j\, a_j(\vvec)$, where $a_j(\vvec) = c_j + \wvec_j^\top\vvec$ is the input to hidden unit $j$ and $\wvec_j$ is
+column $j$ of $\Wmat$. So
+
+$$
+p(\hvec \mid \vvec) \propto \exp\paren{\sum_j h_j a_j(\vvec)} = \prod_j e^{h_j a_j(\vvec)}.
+$$
+
+The distribution is a product of one factor per hidden unit, so the hidden units are independent given $\vvec$. Each
+factor normalises over $h_j \in \set{0, 1}$ on its own:
+
+$$
+p(h_j = 1 \mid \vvec) = \frac{e^{a_j(\vvec)}}{1 + e^{a_j(\vvec)}} = \sigma\paren{c_j + \wvec_j^\top\vvec},
+$$
+
+with $\sigma$ the logistic function. The same argument with the roles swapped gives $p(v_i = 1 \mid \hvec) =
+\sigma(b_i + \sum_j W_{ij} h_j)$. In a general Boltzmann machine the hidden units interact, and $p(\hvec \mid \vvec)$
+has to be sampled; in an RBM it is one <NoteLink to="matrix-multiplication">matrix product</NoteLink> and a sigmoid.
+
+## The free energy
+
+Summing the hidden units out uses the same factorisation:
+
+$$
+p(\vvec) = \frac1Z \sum_{\hvec} e^{\bvec^\top\vvec + \sum_j h_j a_j(\vvec)} = \frac1Z\, e^{\bvec^\top\vvec}
+\prod_{j=1}^H \sum_{h_j \in \set{0,1}} e^{h_j a_j(\vvec)} = \frac1Z\, e^{\bvec^\top\vvec} \prod_{j=1}^H \paren{1 +
+e^{a_j(\vvec)}}.
+$$
+
+Writing $p(\vvec) = e^{-F(\vvec)}/Z$ defines the **free energy**
+
+$$
+F(\vvec) = -\bvec^\top\vvec - \sum_{j=1}^H \log\paren{1 + e^{c_j + \wvec_j^\top\vvec}},
+$$
+
+which costs $O(VH)$ to compute. The marginal is a product of one factor per hidden unit, a **product of experts**: each
+hidden unit raises the probability of the visible vectors that match its weight vector, and a vector is likely only if
+many experts approve of it. $Z$ still sums over $2^V$ visible vectors or $2^H$ hidden vectors and is intractable when
+both layers are large.
+
+## The likelihood gradient
+
+Differentiating $\log p(\vvec) = -F(\vvec) - \log Z$ as for any Boltzmann machine gives
+
+$$
+\frac{\partial \log p(\vvec)}{\partial W_{ij}} = v_i\, \sigma(a_j(\vvec)) - \expect_{\vvec' \sim p}\brack{v'_i\,
+\sigma(a_j(\vvec'))},
+$$
+
+and similarly $\partial/\partial b_i = v_i - \expect[v'_i]$ and $\partial/\partial c_j = \sigma(a_j(\vvec)) -
+\expect[\sigma(a_j(\vvec'))]$. The first term, the <NoteLink to="energy-based-models">positive phase</NoteLink>, is exact and cheap. The second, the negative phase,
+needs samples from the model.
+
+## Block Gibbs sampling
+
+<NoteLink to="independence">Conditional independence</NoteLink> makes each Gibbs step update a whole layer at once: draw $\hvec \sim p(\hvec \mid \vvec)$,
+then $\vvec \sim p(\vvec \mid \hvec)$, each as independent <NoteLink to="bernoulli-distribution">coin flips</NoteLink>. One step costs two matrix products. The chain
+still needs many steps to reach equilibrium from an arbitrary start, and many more to move between well-separated
+modes.
+
+## Contrastive divergence
+
+**Contrastive divergence** with $k$ steps (CD-$k$) replaces the equilibrium sample of the negative phase by a short
+chain started at the training vector <Cite id="hinton2002poe" />:
+
+1. Set $\vvec^{(0)}$ to a training vector and compute $p(\hvec \mid \vvec^{(0)})$.
+2. Run $k$ block Gibbs steps to reach $\vvec^{(k)}$.
+3. Update $\Delta W_{ij} = \eta\paren{v^{(0)}_i\, \sigma(a_j(\vvec^{(0)})) - v^{(k)}_i\, \sigma(a_j(\vvec^{(k)}))}$, and
+   the biases likewise, averaged over a mini-batch.
+
+The idea is that a model which fits the data leaves the data distribution unchanged under <NoteLink to="gibbs-sampling">Gibbs sampling</NoteLink>, so a few
+steps from the data are enough to see which way the model is pulling it. Starting at the data also removes most of the
+variance of the estimate, since the chain begins where the probability mass should be. The price is bias. Hinton
+showed that CD-$k$ approximately follows the <NoteLink to="gradient">gradient</NoteLink> of $\KL(p_0 \| p_\infty) - \KL(p_k \| p_\infty)$, with $p_0$ the
+data distribution, $p_k$ the distribution after $k$ steps and $p_\infty$ the model, not the gradient of the likelihood
+<Cite id="hinton2002poe" />. Its fixed points are close to, but not at, the maximum-likelihood solution
+<Cite id="carreira2005" />, and on small problems the likelihood of a CD-1 model can rise and then fall as training
+continues <Cite id="fischer2010" />. Larger $k$ reduces the bias.
+
+**Persistent contrastive divergence** (PCD) keeps its negative chains between updates instead of restarting them at
+the data <Cite id="tieleman2008" />. The model changes little per update, so the chains stay near equilibrium and
+explore regions far from the data, which CD never visits. It needs a small <Gloss name="learning-rate">learning rate</Gloss>: if the model changes faster
+than the chains can follow, the negative phase is stale and training oscillates.
+
+<RbmTrainer />
+
+The figure trains on the 30 bars-and-stripes patterns, a standard test on which the exact likelihood can be computed
+by summing over the $2^H$ hidden states. With 8 hidden units and learning rate 0.2, CD-1 and CD-10 rise together for
+about 150 epochs; then CD-1 levels off near $-5.8$ while CD-10 reaches about $-4.5$, against the optimum
+$-\log 30 = -3.4$. PCD at the same rate peaks early and then falls away, because its five persistent chains cannot
+keep up with the changing model. At rate 0.05 the three methods stay close together and all improve slowly. The
+filters of a trained model pick out parts of rows and columns, and the Gibbs chains turn random pixels into bars and
+stripes.
+
+## Worked example: one CD-1 update
+
+Take $V = 2$ visible units and $H = 1$ hidden unit, with weights $\Wmat = (1, 1)^\top$, biases $\bvec = (0, 0)$ and
+$c = -1$, and the training vector $\vvec = (1, 1)$. Use a learning rate $\eta = 0.1$.
+
+- **Positive phase.** $a(\vvec) = -1 + 1 + 1 = 1$, so $p(h = 1 \mid \vvec) = \sigma(1) = 0.731$.
+- **One Gibbs step.** Suppose the hidden sample is $h = 1$. Then $p(v_i = 1 \mid h = 1) = \sigma(0 + 1) = 0.731$ for
+  both units, and suppose the visible sample is $\vvec^{(1)} = (1, 0)$. Its input is $a(\vvec^{(1)}) = -1 + 1 = 0$, so
+  $p(h = 1 \mid \vvec^{(1)}) = 0.5$.
+- **Update.** $\Delta W_1 = 0.1(1 \times 0.731 - 1 \times 0.5) = 0.023$, $\Delta W_2 = 0.1(1 \times 0.731 - 0 \times
+  0.5) = 0.073$, $\Delta \bvec = 0.1\paren{(1, 1) - (1, 0)} = (0, 0.1)$ and $\Delta c = 0.1(0.731 - 0.5) = 0.023$.
+- **Effect on the free energy.** Before the update $F(1, 1) = -\log(1 + e^{1}) = -1.313$ and
+  $F(1, 0) = -\log(1 + e^{0}) = -0.693$, a gap of $0.620$. After it $F(1, 1) = -1.502$ and $F(1, 0) = -0.717$, a gap
+  of $0.785$. The update lowered the free energy of the training vector more than that of the chain's sample, so the
+  training vector gained probability relative to it.
+
+## Uses
+
+RBMs were the building block of <NoteLink to="deep-belief-network">deep belief networks</NoteLink>, whose layer-wise
+pretraining started the revival of deep learning in 2006. They also served as feature extractors, as <Gloss name="collaborative-filtering">collaborative
+filtering</Gloss> models over ratings, and as models of motion and documents, with Gaussian, softmax or count-valued visible
+units in place of binary ones <Cite id="hinton2012practical" />.
+
+## Assumptions
+
+- **Binary units.** The derivation above assumes $\set{0, 1}$ units on both layers. Other unit types change the
+  conditionals but keep the bipartite factorisation.
+- **Equilibrium is not reached.** CD-$k$ and PCD are approximations whose quality depends on $k$, the learning rate
+  and how well the chains mix.
+
+## Pitfalls
+
+- **Reconstruction error is not likelihood.** The error of one-step reconstructions is easy to compute and often
+  reported, but it can keep falling while the likelihood falls too <Cite id="hinton2012practical" />.
+- **CD makes spurious modes invisible.** Regions of high model probability far from the data are never reached by
+  chains started at the data, so CD does not remove them. Samples from long chains reveal them.
+- **Hidden-unit symmetry.** Starting all weights at zero gives every hidden unit the same gradient forever. Initial
+  weights need small random values.
