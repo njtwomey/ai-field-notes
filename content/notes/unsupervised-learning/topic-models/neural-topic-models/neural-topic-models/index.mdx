@@ -33,7 +33,7 @@ document its own variational parameters $\gammavec_d$, found by an inner loop of
 loop for every new document. A change to the model, such as a new likelihood or a new prior, needs new update
 equations.
 
-Neural inference replaces both costs.
+Neural inference replaces both the per-document inner loop and the hand-derived update equations.
 
 - **Amortisation.** One encoder network $f_{\phivec}$ outputs the variational parameters of any document in a single
   forward pass. The per-document optimisation becomes a regression from $\wvec_d$ to the parameters, learnt once over
@@ -42,8 +42,8 @@ Neural inference replaces both costs.
   differentiation through a <NoteLink to="reparameterisation-trick">reparameterised</NoteLink> sample. Changing the
   decoder changes only the code of the decoder.
 
-The price is the amortisation gap, a looser bound than per-document optimisation would give, and a set of
-training pathologies that classical inference does not have, of which component collapse is the most important.
+Amortisation leaves an amortisation gap, a looser bound than per-document optimisation would give, and neural
+training has pathologies that classical inference does not have, of which component collapse is the most important.
 
 ## The amortised variational view
 
@@ -74,7 +74,7 @@ Two obstacles separate this bound from a working model, and each member of the f
 1. **The Dirichlet cannot be reparameterised by a location–scale transform.** The Gaussian can:
    $\hvec = \muvec + \sigmavec \odot \epsilonvec$. So most models replace the Dirichlet with a **logistic normal**:
    draw $\hvec_d$ from a Gaussian and set $\thetavec_d = \operatorname{softmax}(\hvec_d)$. The prior is then chosen to
-   imitate a Dirichlet (ProdLDA's <NoteLink to="laplace-approximation">Laplace approximation</NoteLink>), or it is dropped for a standard Gaussian (NVDM, ETM). Other
+   imitate a Dirichlet (ProdLDA's <NoteLink to="laplace-approximation">Laplace approximation</NoteLink>), or it is dropped for a standard Gaussian (the neural variational document model and the embedded topic model). Other
    models keep a true Dirichlet or gamma posterior and use a different gradient estimator.
 2. **The decoder need not be a mixture.** Once inference is a black box, the decoder can be any differentiable map from
    $\thetavec_d$ to word probabilities: a product of experts, a log-linear model on <NoteLink to="word-embeddings">word embeddings</NoteLink>, or a network
@@ -87,7 +87,7 @@ Two obstacles separate this bound from a working model, and each member of the f
 Each model has its own note, with its derivation.
 
 - <NoteLink to="neural-variational-document-model">Neural variational document model</NoteLink> (NVDM): a Gaussian
-  latent and a softmax decoder, the first VAE for bags of words <Cite id="miao2016nvdm" />.
+  latent and a softmax decoder, the first variational autoencoder for bags of words <Cite id="miao2016nvdm" />.
 - <NoteLink to="prodlda">ProdLDA and AVITM</NoteLink>: amortised inference for LDA with a Laplace approximation of the
   Dirichlet prior in the softmax basis, and the product-of-experts decoder <Cite id="srivastava2017prodlda" />.
 - <NoteLink to="dirichlet-variational-topic-models">Dirichlet variational topic models</NoteLink>: keeping a Dirichlet
@@ -136,7 +136,7 @@ A model of the variational family processes a minibatch of documents as follows.
 3. **Sample.** Draw $\epsilonvec \sim \Gauss(\zeros, \Imat)$ and set $\hvec_d = \muvec_d + \sigmavec_d \odot
    \epsilonvec$, then $\thetavec_d = \operatorname{softmax}(\hvec_d)$.
 4. **Decode.** Map $\thetavec_d$ to a distribution $\hat\wvec_d$ over the vocabulary.
-5. **Loss.** The negative ELBO is $-\sum_v w_{dv}\log\hat w_{dv}$ plus the KL divergence between two Gaussians, which
+5. **Loss.** The negative evidence lower bound is $-\sum_v w_{dv}\log\hat w_{dv}$ plus the KL divergence between two Gaussians, which
    has a closed form.
 6. **Read out.** After training, topic $k$ is described by the $10$ or so words with the largest entries in row $k$ of
    $\Bmat$. A new document's topic proportions are one encoder pass: $\operatorname{softmax}(\muvec_d)$ or the mean of
@@ -150,7 +150,7 @@ A model of the variational family processes a minibatch of documents as follows.
 - **Metadata.** SCHOLAR adds document labels and covariates to the encoder and decoder, which gives supervised and
   covariate-dependent topics in the same framework <Cite id="card2018scholar" />.
 - **Coherence regularisers.** NTM-R adds a differentiable surrogate of topic coherence, the similarity of each topic's
-  word-embedding centroid to its words, to the ELBO <Cite id="ding2018ntmr" />.
+  word-embedding centroid to its words, to the evidence lower bound <Cite id="ding2018ntmr" />.
 
 Surveys cover the wider family, including graph-based and pretrained-language-model variants
 <Cite id="zhao2021ntmsurvey" /> <Cite id="wu2024ntmsurvey" />.
