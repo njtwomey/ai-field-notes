@@ -1,4 +1,4 @@
-import { ArrowRight, ChevronLeft, ChevronRight, FileText, Search } from 'lucide-react'
+import { ArrowRight, ChevronLeft, ChevronRight, FileText, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router'
 import { MathText } from '@/components/content/MathText'
@@ -194,9 +194,24 @@ export function GlossaryPage() {
                   }}
                   onKeyDown={(e) => e.key === 'Enter' && commitQuery.flush()}
                   placeholder="Search terms, expansions and definitions"
-                  className="pl-8"
+                  className="pr-8 pl-8"
                   aria-label="Search the glossary"
                 />
+                {text && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setText('')
+                      commitQuery.cancel()
+                      set({ q: undefined, page: undefined })
+                    }}
+                    className="absolute top-1/2 right-2 -translate-y-1/2 rounded-sm p-0.5 text-muted-foreground hover:text-foreground"
+                    aria-label="Clear the search"
+                    title="Clear"
+                  >
+                    <X className="size-4" />
+                  </button>
+                )}
               </div>
               <ToggleGroup
                 value={[kind ?? 'all']}

@@ -1,5 +1,5 @@
 import { BookA, FileText, FolderTree, Hash, Search } from 'lucide-react'
-import { useEffect, useMemo, useState, type MouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
 import {
@@ -108,6 +108,11 @@ export function SearchCommand() {
       : glossHits.slice(0, SHOWN).map((e) => `gloss-${e.key}`)
   const inTabs = !tagging && !pathing
   const active = inTabs && !shownValues.includes(selected) ? (shownValues[0] ?? '') : selected
+  // New results scroll the list back to the top, so continuing to type after scrolling shows the best matches.
+  const listRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: 0 })
+  }, [debounced, tab])
   // The top result is the likeliest choice; start loading it while the reader decides.
   useEffect(() => {
     if (results[0]) prefetchNote(results[0].slug)
@@ -156,7 +161,11 @@ export function SearchCommand() {
             autoFocus
             placeholder="Search notes · # for tags · / for topics"
             value={query}
-            onValueChange={setQuery}
+            onValueChange={(v) => {
+              setQuery(v)
+              // A changed query starts again from the top result.
+              setSelected('')
+            }}
             onKeyDown={(e) => {
               // Tab completes the tag being typed with the top suggestion.
               if (e.key === 'Tab' && tagging && suggestions[0]) {
@@ -174,7 +183,7 @@ export function SearchCommand() {
           {query.trim() === '' ? (
             <SiteStats />
           ) : pathing || tagging ? (
-            <CommandList className="max-h-[min(60vh,32rem)]">
+            <CommandList ref={listRef} className="max-h-[min(60vh,32rem)]">
               {pathing ? (
                 paths.length > 0 ? (
                   <CommandGroup heading="Topics · Enter or Tab to complete, space to finish">
@@ -223,7 +232,7 @@ export function SearchCommand() {
                   </span>
                 </div>
               </Tabs>
-              <CommandList key={tab} className="max-h-[min(60vh,32rem)]">
+              <CommandList ref={listRef} key={tab} className="max-h-[min(60vh,32rem)]">
                 {tab === 'notes' ? (
                   results.length > 0 ? (
                     <CommandGroup

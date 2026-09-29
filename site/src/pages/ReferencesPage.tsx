@@ -1,4 +1,4 @@
-import { ArrowDownWideNarrow, ArrowUpNarrowWide, ChevronLeft, ChevronRight, ExternalLink, Search } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ExternalLink, Search, X } from 'lucide-react'
 import { useEffect, useMemo } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router'
 import { PageContainer } from '@/components/layout/AppShell'
@@ -113,38 +113,46 @@ export function ReferencesPage() {
               value={q}
               onChange={(e) => set({ q: e.target.value, page: undefined })}
               placeholder="Search titles and authors"
-              className="pl-8"
+              className="pr-8 pl-8"
               aria-label="Search references"
             />
+            {q && (
+              <button
+                type="button"
+                onClick={() => set({ q: undefined, page: undefined })}
+                className="absolute top-1/2 right-2 -translate-y-1/2 rounded-sm p-0.5 text-muted-foreground hover:text-foreground"
+                aria-label="Clear the search"
+                title="Clear"
+              >
+                <X className="size-4" />
+              </button>
+            )}
           </div>
-          <div className="flex items-center gap-1.5">
-            <ToggleGroup
-              value={[by]}
-              onValueChange={(v) =>
-                v[0] && set({ sort: v[0] === 'title' ? 'title' : undefined, dir: undefined, page: undefined })
-              }
-              variant="outline"
-              size="sm"
-              spacing={0}
-              aria-label="Sort by"
-            >
-              <ToggleGroupItem value="year" className="px-3">
-                Year
+          {/* One button per sort key: choosing a key sorts in its default direction; choosing it again reverses. */}
+          <ToggleGroup
+            value={[by]}
+            onValueChange={(v) => {
+              if (v[0]) set({ sort: v[0] === 'title' ? 'title' : undefined, dir: undefined, page: undefined })
+              // Pressing the active key deselects it in the group; read that as "reverse the direction".
+              else set({ dir: descending ? 'asc' : 'desc', page: undefined })
+            }}
+            variant="outline"
+            size="sm"
+            spacing={0}
+            aria-label="Sort by"
+          >
+            {(['year', 'title'] as const).map((key) => (
+              <ToggleGroupItem
+                key={key}
+                value={key}
+                className="gap-1 px-3"
+                title={by === key ? `Sorted ${descending ? 'descending' : 'ascending'}; click to reverse` : undefined}
+              >
+                {key === 'year' ? 'Year' : 'Title'}
+                {by === key && (descending ? <ArrowDown className="size-3.5" /> : <ArrowUp className="size-3.5" />)}
               </ToggleGroupItem>
-              <ToggleGroupItem value="title" className="px-3">
-                Title
-              </ToggleGroupItem>
-            </ToggleGroup>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              onClick={() => set({ dir: descending ? 'asc' : 'desc', page: undefined })}
-              aria-label={descending ? 'Descending; switch to ascending' : 'Ascending; switch to descending'}
-              title={descending ? 'Descending' : 'Ascending'}
-            >
-              {descending ? <ArrowDownWideNarrow /> : <ArrowUpNarrowWide />}
-            </Button>
-          </div>
+            ))}
+          </ToggleGroup>
         </div>
 
         {pager}
