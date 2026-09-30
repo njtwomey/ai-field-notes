@@ -25,17 +25,22 @@ content: ## Validate content/ (frontmatter, links, citations, taxonomy)
 links: ## Suggest <Gloss> and <NoteLink> markup (SCOPE="taxonomy/path slug ...", ARGS="--apply" to write it)
 	node scripts/suggest-links.ts $(ARGS) $(SCOPE)
 
+wrap: ## Rewrap note prose to 120 characters, verified by parse and render (SCOPE="taxonomy/path slug ...", ARGS="--check" to report only)
+	node scripts/wrap-mdx.ts $(ARGS) $(SCOPE)
+
 doctor: ## Check the content tree (SCOPE="taxonomy/path slug ..." limits per-note checks to those notes)
 	node scripts/doctor.ts $(SCOPE)
 
-lint: ## Lint TypeScript and Python
+lint: ## Lint TypeScript, Python and note prose
 	npx oxlint
 	git ls-files -z | xargs -0 npx prettier --check --ignore-unknown
+	node scripts/wrap-mdx.ts --check
 	uv run ruff check python
 	uv run ruff format --check python
 
-format: ## Format TypeScript and Python
+format: ## Format TypeScript, Python and note prose
 	git ls-files -z | xargs -0 npx prettier --write --ignore-unknown --log-level warn
+	node scripts/wrap-mdx.ts
 	uv run ruff check --fix python
 	uv run ruff format python
 

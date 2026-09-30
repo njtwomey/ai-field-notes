@@ -31,7 +31,8 @@ make contracts   # pydantic → JSON Schema → site/src/generated/contracts.ts
 make check       # doctor, lint, typecheck, tests, registry check, contract drift
 make doctor      # content tree: slugs, folders vs taxonomy, figure/example ids, cross-note imports
 make build       # assets + production build into dist/
-make format      # prettier + ruff
+make format      # prettier + ruff + note prose rewrap
+make wrap        # rewrap note prose to 120 characters (SCOPE="..."; ARGS="--check" to report only)
 ```
 
 Targeted commands:
@@ -115,9 +116,10 @@ with `#key` anchors; ⌘K search lists matching entries below the notes.
   Do not put `<Gloss>` in headings: the table of contents shows heading source text.
 - **Marking up notes:** `make links SCOPE="<path | slug>"` lists the first unmarked mention of each glossary entry
   and note in the scoped notes, with its sentence and a decision (add, or skip with the reason: the note's own term,
-  already linked or glossed, defined in bold, generic, an acronym sense that does not fit). `ARGS="--apply"` writes
+  already linked or glossed, generic, an acronym sense that does not fit). `ARGS="--apply"` writes
   every add; the author's words stay as written inside `<Gloss>` and `<NoteLink>`. Run it on a new note and read the
-  report before applying.
+  report before applying. After adding a glossary entry (or a note), `ARGS="--term <key|slug>"` scans the whole tree
+  for that one target only; read the report, then add `--apply`.
 - One sense per entry. When one acronym names two quantities, make two entries (AUROC and AUPRC, never a bare AUC),
   and keep the generic spelling as an alias of the usual one.
 
@@ -274,7 +276,14 @@ stale.
 
 ## Code style
 
-- Line length is 120 characters in TypeScript (Prettier) and Python (Ruff).
+- Line length is 120 characters in TypeScript (Prettier) and Python (Ruff), and in note prose (`make wrap`,
+  `plugins/wrap-prose.ts`). Prettier cannot format MDX 3 safely, so `*.mdx` is in `.prettierignore`. `make wrap`
+  parses each note as the site does and reflows only paragraphs with a line over 120 characters, breaking only at
+  whitespace inside text: never inside maths, code, JSX tags or link destinations, and never where the new line would
+  open a block (a list marker, heading, quote, fence, `$$`, or a line of only JSX tags). A note is written only if it
+  parses to the same tree and renders to the same HTML as before, up to whitespace. `make check` fails on any
+  paragraph that `make wrap` would change; tables, headings, display maths and frontmatter are exempt.
+  `make links ARGS="--apply"` rewraps the paragraphs its markup lengthens.
 - Match surrounding code. Comment the non-obvious _why_, not the _what_.
 
 ## Writing style for notes

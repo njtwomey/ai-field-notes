@@ -6,11 +6,16 @@
  *
  * Each candidate is the first unmarked mention of a term in a note, with its sentence, and a decision:
  *   add       the markup is proposed;
- *   skip      with the reason (the note is the term's own note, the term is already linked or glossed, it is defined
- *             in bold here, it is too generic, an ambiguous acronym whose sense cannot be told, ...).
+ *   skip      with the reason (the note is the term's own note, the term is already linked or glossed, it is too
+ *             generic, an ambiguous acronym whose sense cannot be told, ...). A term defined in bold is marked inside
+ *             the bold: the hover adds the glossary definition and link to the note's own definition.
  * The report is for reading the decisions, not the notes. `--apply` writes every `add` into the notes.
  *
- *   node scripts/suggest-links.ts [--mode gloss|notes|both] [--apply] [--json file] [--md file] <taxonomy path | slug ...>
+ *   node scripts/suggest-links.ts [--mode gloss|notes|both] [--term key,...] [--apply] [--json file] [--md file]
+ *                                 <taxonomy path | slug ...>
+ *
+ * --term limits the scan to the named glossary entries (key or alias) and notes (slug), e.g. after adding one glossary
+ * entry: `make links ARGS="--term examination-hypothesis"`, then again with --apply.
  *
  * Glossary matching: an acronym's short form case-sensitively (with a plural "s"); long forms and aliases
  * case-insensitively, with hyphens, spaces and dashes interchangeable and an optional plural. Note matching uses the
@@ -21,6 +26,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { buildIndex } from '../plugins/content-index.ts'
 import { loadGlossary } from '../plugins/glossary.ts'
+import { wrapProse } from '../plugins/wrap-prose.ts'
 import type { GlossaryEntry, NoteMeta } from '../site/src/lib/content-schema.ts'
 
 const root = path.resolve(import.meta.dirname, '..')
@@ -38,6 +44,7 @@ const flag = (name: string) => {
   return v
 }
 const mode = (flag('--mode') ?? 'both') as 'gloss' | 'notes' | 'both'
+const termArg = flag('--term')
 const jsonOut = flag('--json')
 const mdOut = flag('--md')
 const apply = argv.includes('--apply')
@@ -48,6 +55,17 @@ const inScope = (n: { slug: string; category: string }) =>
 const { notes: allNotes } = buildIndex(contentDir, { inScope: () => false })
 const glossary = loadGlossary(path.join(contentDir, 'glossary.yaml'))
 const notes = allNotes.filter(inScope)
+/** Targets named by --term: glossary keys (aliases resolved) and note slugs. Undefined scans every target. */
+const terms = termArg
+  ? new Set(
+      termArg.split(',').map((t) => {
+        const key = glossary.names.get(t) ?? t
+        if (!glossary.entries[key] && !allNotes.some((n) => n.slug === key))
+          throw new Error(`--term "${t}" is neither a glossary entry nor a note slug`)
+        return key
+      }),
+    )
+  : undefined
 for (const a of scopeArgs)
   if (!allNotes.some((n) => n.slug === a || n.category === a || n.category.startsWith(`${a}/`)))
     throw new Error(`scope "${a}" matches no note slug or taxonomy path`)
@@ -261,8 +279,6 @@ const linkedIn = (body: string) =>
   new Set([...body.matchAll(/<NoteLink\b[^>]*\bto=["']([^"']+)["']/g)].map((m) => m[1]))
 const glossedIn = (body: string) =>
   new Set([...body.matchAll(/<Gloss\b[^>]*\bname=["']([^"']+)["']/g)].map((m) => glossary.names.get(m[1]) ?? m[1]))
-const boldIn = (body: string) =>
-  [...body.matchAll(/\*\*([^*\n]+)\*\*/g)].map((m) => m[1].toLowerCase().replace(/[\s\-–—]+/g, ' '))
 
 /** The sense of an ambiguous acronym that fits the note: same category branch, or its note related to this one. */
 function senseFits(e: GlossaryEntry, n: NoteMeta): boolean {
@@ -298,7 +314,6 @@ for (const n of notes) {
   const mask = proseMask(text)
   const linked = linkedIn(text)
   const glossed = glossedIn(text)
-  const bold = boldIn(text)
   const boldSpans = [...text.matchAll(/\*\*([^*\n]+)\*\*/g)].map((m) => ({
     start: m.index + 2,
     end: m.index + 2 + m[1].length,
@@ -332,7 +347,9 @@ for (const n of notes) {
   // A concept with a note of its own is marked by a NoteLink; as a glossary target it would only claim the words first.
   const glossPool =
     mode === 'both' ? glossTargets.filter((t) => !(t.entry!.kind === 'concept' && t.entry!.note)) : glossTargets
-  const targets = [...(mode !== 'notes' ? glossPool : []), ...(mode !== 'gloss' ? noteTargets : [])]
+  const targets = [...(mode !== 'notes' ? glossPool : []), ...(mode !== 'gloss' ? noteTargets : [])].filter(
+    (t) => !terms || terms.has(t.id),
+  )
   for (const t of targets) {
     if (t.kind === 'note' && t.id === n.slug) continue
     for (const m of t.matchers) {
@@ -411,10 +428,6 @@ for (const n of notes) {
         skip(`the note already links ${e.note}`)
         continue
       }
-      if (bold.some((b) => b === norm || b === e.long.toLowerCase())) {
-        skip('defined in bold in this note')
-        continue
-      }
       if (h.m.form === 'short' && (shortCount.get(e.short!) ?? 0) > 1 && !senseFits(e, n)) {
         skip(`ambiguous ${e.short}: this sense does not fit the note`)
         continue
@@ -449,10 +462,6 @@ for (const n of notes) {
       const glossHere = Object.values(glossary.entries).find((e) => e.note === t.slug && e.kind !== 'concept')
       if (glossHere && (glossed.has(glossHere.key) || glossAdded.has(glossHere.key))) {
         skip(`the <Gloss name="${glossHere.key}"> hover links this note`)
-        continue
-      }
-      if (bold.some((b) => b === norm)) {
-        skip('defined in bold in this note')
         continue
       }
       if (ownTerm(norm)) {
@@ -531,7 +540,8 @@ if (apply) {
     let text = fs.readFileSync(file, 'utf8')
     for (const c of cs.sort((a, b) => b.start - a.start))
       text = text.slice(0, c.start) + c.replacement + text.slice(c.end)
-    fs.writeFileSync(file, text)
+    // Added markup lengthens lines; rewrap the paragraphs it pushed past 120 characters (plugins/wrap-prose.ts).
+    fs.writeFileSync(file, wrapProse(text).text)
   }
   console.error(`applied ${adds.length} additions to ${byFile.size} notes`)
 }
