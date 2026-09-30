@@ -1,17 +1,20 @@
 ---
 title: Logistic regression
 kind: concept
-summary: Logistic regression models the probability of a binary label as the logistic function of a linear score. It is fitted by minimising cross-entropy.
-tags: [classification, linear-models, probabilistic]
+summary: Logistic regression models the probability of a binary label as the logistic function of a linear score. It is fitted by minimising the mean cross-entropy, a convex loss with gradient $\Xmat^\top(\pvec - \yvec)/n$ and Hessian $\Xmat^\top\Smat\Xmat/n$, by gradient descent, SGD or Newton's method (IRLS).
+tags: [classification, linear-models, probabilistic, optimisation, maximum-likelihood, worked-example]
 aliases: [logit model]
 requires: [linear-regression, gradient-descent]
+related: [newtons-method, quasi-newton-methods, stochastic-gradient-descent-theory]
 code: logistic-regression
 status: draft
-updated: 2026-09-26
+updated: 2026-09-29
 ---
 
 import { LossSurfaceExplorer } from './LossSurfaceExplorer'
+import { PerExampleLoss } from './PerExampleLoss'
 import { SigmoidExplorer } from './SigmoidExplorer'
+import { SolverRace } from './SolverRace'
 
 <Definition>
 Logistic regression predicts $P(y = 1 \mid \xvec) = \sigma(\wvec^\top\xvec + b)$ for a binary label
@@ -31,32 +34,316 @@ $z = \log \frac{p}{1 - p}$. Each weight is the change in log-odds per unit chang
 The model predicts class 1 when $p \geq 0.5$, which is when $z \geq 0$. The boundary $\wvec^\top\xvec + b = 0$
 is a hyperplane. Logistic regression is therefore a linear classifier.
 
-## Objective
+## Training objective
 
-Fitting maximises the likelihood of the labels. This is the same as minimising the mean cross-entropy:
+The training set holds $n$ pairs $(\xvec_i, y_i)$. From here on the bias is absorbed into the weights: each
+$\xvec_i$ gains a leading constant feature 1, and $\wvec \in \reals^d$ gains $b$ as its first entry, so
+$z_i = \wvec^\top\xvec_i$. The $n \times d$ design matrix $\Xmat$ has the rows $\xvec_i^\top$. The vectors
+$\pvec, \yvec \in \reals^n$ hold $p_i = \sigma(z_i)$ and $y_i$.
+
+The model treats each label as a <NoteLink to="bernoulli-distribution">Bernoulli</NoteLink> draw with success probability $p_i$:
+$P(y_i \mid \xvec_i) = p_i^{y_i}(1 - p_i)^{1 - y_i}$. The labels are independent given the features, so the
+likelihood is the product of these terms. The <Gloss name="mle" /> maximises it. Dividing the <NoteLink to="cross-entropy-and-perplexity">negative
+log-likelihood</NoteLink> by $n$ gives the mean cross-entropy
 
 $$
-L(\wvec, b) = -\frac{1}{n}\sum_{i=1}^{n} \big[y_i \log p_i + (1 - y_i)\log(1 - p_i)\big]
+L(\wvec) = -\frac{1}{n}\sum_{i=1}^{n} \big[y_i \log p_i + (1 - y_i)\log(1 - p_i)\big].
 $$
 
-The loss is convex in $(\wvec, b)$. Any local minimum is the global minimum <Cite id="bishop2006" />. There is
-no closed-form solution. <NoteLink to="gradient-descent">Gradient descent</NoteLink> or <NoteLink to="newtons-method">Newton's method</NoteLink> finds it.
+Each term simplifies in the score. The logistic function gives $\log p_i = z_i - \log(1 + e^{z_i})$ and
+$\log(1 - p_i) = -\log(1 + e^{z_i})$. Substituting both,
+
+$$
+L(\wvec) = \frac{1}{n}\sum_{i=1}^{n} \ell_i, \qquad \ell_i = \log\paren{1 + e^{z_i}} - y_i z_i.
+$$
+
+Software evaluates $\log(1 + e^{z})$ directly, as $\max(z, 0) + \log(1 + e^{-\abs{z}})$. Computing $p_i$ first loses
+the term: in <NoteLink to="floating-point-arithmetic">double precision</NoteLink> $\sigma(z)$ rounds to exactly 1 once $z$ exceeds about 37, and $\log(1 - p_i)$
+becomes $\log 0$. With labels
+$t_i = 2y_i - 1 \in \{-1, 1\}$, the same term is $\ell_i = \log(1 + e^{-t_i z_i})$, the logistic loss of the margin
+$t_i z_i$.
+
+An L2 penalty adds $\tfrac{\lambda}{2}\norm{\tilde\wvec}^2$, where $\tilde\wvec$ is $\wvec$ with the bias entry set to
+0; the bias is not penalised. The penalised loss is the negative log-posterior divided by $n$ under the prior
+$\tilde\wvec \sim \Gauss(\zeros, (n\lambda)^{-1}\eye)$, so its minimiser is a
+<Gloss name="map-estimate" /> <Cite id="murphy2012" />. The matrix $\Dmat = \diag(0, 1, \dots, 1)$ writes the
+penalty as $\tfrac{\lambda}{2}\wvec^\top\Dmat\wvec$.
 
 <LossSurfaceExplorer />
 
-<Derivation title="Gradient of the cross-entropy">
-With $p_i = \sigma(z_i)$ and $\sigma'(z) = \sigma(z)(1 - \sigma(z))$, the <NoteLink to="derivative">derivative</NoteLink> of one term with respect to
-$z_i$ simplifies to $p_i - y_i$. By the chain rule, $\nabla_\wvec L = \frac{1}{n} X^\top(\pvec - \yvec)$.
+## Gradient
 
-This has the same form as the <NoteLink to="linear-regression">linear-regression</NoteLink> <NoteLink to="gradient">gradient</NoteLink>, with predictions passed through $\sigma$.
-</Derivation>
+The loss reaches the weights through a chain of three maps. The weights set each score, $z_i = \wvec^\top\xvec_i$.
+The score sets the probability, $p_i = \sigma(z_i)$. The probability sets the example's loss,
+$\ell_i = -\big[y_i \log p_i + (1 - y_i)\log(1 - p_i)\big]$, and $L(\wvec) = \frac{1}{n}\sum_i \ell_i$. The <NoteLink to="derivative">chain rule</NoteLink>
+gives the <NoteLink to="gradient">gradient</NoteLink> of one term as the product of the derivatives along the chain:
+
+$$
+\nabla_\wvec \ell_i = \frac{d\ell_i}{dp_i}\,\frac{dp_i}{dz_i}\,\nabla_\wvec z_i.
+$$
+
+Each factor follows from its own map.
+
+1. **The loss in the probability.** Differentiating the cross-entropy term,
+   $$
+   \frac{d\ell_i}{dp_i} = -\frac{y_i}{p_i} + \frac{1 - y_i}{1 - p_i} = \frac{p_i - y_i}{p_i(1 - p_i)}.
+   $$
+2. **The probability in the score.** Differentiating $\sigma(z) = (1 + e^{-z})^{-1}$,
+   $$
+   \sigma'(z) = \frac{e^{-z}}{(1 + e^{-z})^2} = \sigma(z)\,\frac{e^{-z}}{1 + e^{-z}} = \sigma(z)\big(1 - \sigma(z)\big),
+   $$
+   so $dp_i/dz_i = p_i(1 - p_i)$.
+3. **The score in the weights.** $z_i = \wvec^\top\xvec_i$ is linear in $\wvec$, so $\nabla_\wvec z_i = \xvec_i$.
+
+The factor $p_i(1 - p_i)$ from step 2 cancels the denominator from step 1. In the score alone,
+$d\ell_i/dz_i = p_i - y_i$, and in the weights $\nabla_\wvec \ell_i = (p_i - y_i)\,\xvec_i$. The cancellation happens
+because the log-odds, the inverse of $\sigma$, is the canonical link of the Bernoulli distribution
+<Cite id="mccullagh1989" />. Averaging over the $n$ examples,
+
+$$
+\gvec(\wvec) = \nabla L(\wvec) = \frac{1}{n}\sum_{i=1}^{n}(p_i - y_i)\,\xvec_i = \frac{1}{n}\Xmat^\top(\pvec - \yvec).
+$$
+
+The penalty adds $\lambda\Dmat\wvec$. Each example pulls the weights along its own feature vector, in proportion to
+its residual $p_i - y_i \in (-1, 1)$. An example classified correctly with $p_i$ near $y_i$ contributes almost
+nothing. The least-squares gradient $\frac{1}{n}\Xmat^\top(\Xmat\wvec - \yvec)$ of
+<NoteLink to="linear-regression">linear regression</NoteLink> has the same form, with $\Xmat\wvec$ in place of
+$\sigma(\Xmat\wvec)$. In the figure above, the arrows at $\wvec$ are $-\gvec$ and $-\lambda\Dmat\wvec$ and their sum.
+
+At an unpenalised minimum the gradient vanishes, so $\Xmat^\top\pvec = \Xmat^\top\yvec$. The first column of
+$\Xmat$ is all ones, so its row of this equation reads $\sum_i p_i = \sum_i y_i$: the fitted probabilities sum to the
+number of positive labels. Every other feature satisfies the same balance, weighted by that feature. The equation is
+nonlinear in $\wvec$ because $\pvec$ is, so it has no closed-form solution. <NoteLink to="gradient-descent">Gradient descent</NoteLink> solves it iteratively
+with $\wvec \leftarrow \wvec - \eta\,\gvec(\wvec)$ for a step size $\eta > 0$, at $O(nd)$ cost per step.
+
+<Callout variant="warning">
+The balance $\sum_i p_i = \sum_i y_i$ makes the probabilities right on average over the training set, and over every
+group that a feature indicates. It does not make them right within groups the features cannot express. A misspecified
+model, such as one missing a feature, can be miscalibrated there. The L2 penalty keeps the overall balance, because the bias
+is not penalised, but breaks it for every other feature. It pulls the probabilities towards the overall rate
+$\bar y = \frac{1}{n}\sum_i y_i$, which they all equal in the limit $\lambda \to \infty$, even when accuracy is
+unchanged.
+</Callout>
+
+## Hessian
+
+The <NoteLink to="hessian">Hessian</NoteLink> $\Hmat$ is the $d \times d$ matrix of second derivatives, the
+derivative of the gradient. It follows from the same chain. In $\nabla\ell_i = (p_i - y_i)\,\xvec_i$ only $p_i$
+depends on $\wvec$, and steps 2 and 3 give $\nabla_\wvec p_i = p_i(1 - p_i)\,\xvec_i$. Differentiating each term,
+
+$$
+\Hmat(\wvec) = \frac{1}{n}\sum_{i=1}^{n} p_i(1 - p_i)\,\xvec_i\xvec_i^\top = \frac{1}{n}\Xmat^\top\Smat\Xmat,
+\qquad \Smat = \diag(s_1, \dots, s_n), \quad s_i = p_i(1 - p_i).
+$$
+
+The penalty adds $\lambda\Dmat$. The labels $y_i$ do not appear in $\Hmat$. The weight $s_i$ is also the curvature of
+example $i$'s loss in its score: $d^2\ell_i / dz_i^2 = s_i$.
+
+**Reading the Hessian.** Each term is a product of two factors.
+
+- $s_i = p_i(1 - p_i)$ is the variance of the label under the model. $y_i$ is a Bernoulli variable with mean $p_i$,
+  so $\var(y_i \mid \xvec_i) = p_i(1 - p_i)$.
+- $\xvec_i\xvec_i^\top$ is the example's scatter, a $d \times d$ <NoteLink to="matrix-multiplication">outer product</NoteLink>. The average
+  $\frac{1}{n}\Xmat^\top\Xmat$ of these outer products is the scatter matrix of the features: the second moments
+  $\frac{1}{n}\sum_i x_{ij}x_{ik}$ of every pair of features $j, k$.
+
+$\Hmat$ is therefore the scatter matrix of the features with each example weighted by the variance of its label. An
+example with $p_i$ near 0 or 1 has a label distribution close to a point mass. The model is certain of its label, the
+variance is near 0, and the example adds almost no curvature, whether it is classified correctly or not. An example
+on the boundary, $p_i = 1/2$, has the largest variance, $1/4$. The model is least certain of its label there, and the
+loss is most sensitive to a change in its score. The weight is a variance because the probability's sensitivity to
+the score, $dp_i/dz_i$, equals the Bernoulli variance $p_i(1 - p_i)$. Least squares, the loss of linear regression,
+has the Hessian $\frac{1}{n}\Xmat^\top\Xmat$: the same scatter, with every weight equal to 1.
+
+The same matrix is the <Gloss name="fisher-information" />. Under the model, the gradient $(p_i - y_i)\,\xvec_i$ of one
+example's loss has mean $\zeros$ and covariance $\expect\brack{(p_i - y_i)^2}\,\xvec_i\xvec_i^\top =
+p_i(1 - p_i)\,\xvec_i\xvec_i^\top$. Summed over the examples, the covariance of the log-likelihood's gradient is
+$\Xmat^\top\Smat\Xmat = n\Hmat$. Its inverse $(\Xmat^\top\Smat\Xmat)^{-1}$, evaluated at the fitted weights,
+approximates the covariance of the estimate $\hat\wvec$. Statistical software reports the square roots of its
+diagonal as the weights' <NoteLink to="standard-error">standard errors</NoteLink> <Cite id="hastie2009" />. A direction along which the uncertain examples
+spread widely carries much information, and the weights along it are estimated precisely.
+
+**Convexity.** For any direction $\vvec \in \reals^d$,
+
+$$
+\vvec^\top\Hmat\vvec = \frac{1}{n}\sum_{i=1}^{n} s_i\,(\xvec_i^\top\vvec)^2 \geq 0,
+$$
+
+because every $s_i > 0$. The Hessian is <NoteLink to="positive-definite-matrices">positive semidefinite</NoteLink> at every $\wvec$, so $L$ is convex, and any local
+minimum is a global minimum <Cite id="bishop2006" />. The sum is 0 only when $\Xmat\vvec = \zeros$. If $\Xmat$ has
+full column rank, $\Hmat$ is positive definite, $L$ is strictly convex, and there is at most one minimiser.
+
+**A bound on the curvature.** A Bernoulli variance $p(1 - p)$ is at most $1/4$, at $p = 1/2$. Therefore
+$\Hmat \preceq \frac{1}{4n}\Xmat^\top\Xmat$ everywhere, and the largest eigenvalue of $\Hmat$ never exceeds
+$L_{\max} = \lambda_{\max}(\Xmat^\top\Xmat)/(4n)$, plus $\lambda$ with the penalty. Gradient descent with
+$\eta = 1/L_{\max}$ lowers the loss at every step, since that is the step for which the quadratic upper bound
+$L(\wvec) + \gvec^\top\vvec + \tfrac{L_{\max}}{2}\norm{\vvec}^2$ is minimised.
+
+A confidently wrong example has a large gradient but almost no curvature. The quadratic model of its loss is nearly
+flat.
+
+<PerExampleLoss />
+
+## Newton's method and IRLS
+
+<NoteLink to="newtons-method">Newton's method</NoteLink> replaces $L$ near the current $\wvec$ by its second-order
+Taylor model $m(\vvec) = L(\wvec) + \gvec^\top\vvec + \tfrac{1}{2}\vvec^\top\Hmat\vvec$ and moves to the model's
+minimiser. Setting $\nabla m = \gvec + \Hmat\vvec = \zeros$ gives the step $\vvec = -\Hmat^{-1}\gvec$. For logistic
+regression without a penalty the factors $1/n$ cancel:
+
+$$
+\wvec_{\text{new}} = \wvec - \Hmat^{-1}\gvec = \wvec + \paren{\Xmat^\top\Smat\Xmat}^{-1}\Xmat^\top(\yvec - \pvec).
+$$
+
+**The weighted least-squares form.** Write $\wvec = (\Xmat^\top\Smat\Xmat)^{-1}\Xmat^\top\Smat\Xmat\wvec$ and
+collect terms:
+
+$$
+\wvec_{\text{new}} = \paren{\Xmat^\top\Smat\Xmat}^{-1}\Xmat^\top\Smat\big[\Xmat\wvec + \Smat^{-1}(\yvec - \pvec)\big]
+= \paren{\Xmat^\top\Smat\Xmat}^{-1}\Xmat^\top\Smat\zetavec,
+$$
+
+with the **working response**
+
+$$
+\zeta_i = z_i + \frac{y_i - p_i}{p_i(1 - p_i)}.
+$$
+
+$\paren{\Xmat^\top\Smat\Xmat}^{-1}\Xmat^\top\Smat\zetavec$ is the solution of the weighted least-squares problem
+$\min_{\wvec}\sum_i s_i(\zeta_i - \xvec_i^\top\wvec)^2$. A Newton step is therefore a weighted linear regression of
+the working responses on the features. Each iteration recomputes the weights $s_i$ and the responses $\zeta_i$ at the
+new $\wvec$, which gives the method its name, <Gloss name="irls" /> <Cite id="green1984" />.
+
+The working response has a direct reading. It is the score at which the quadratic model of $\ell_i$ alone is
+minimised: in the figure above, the diamond. It is also the first-order <NoteLink to="taylor-series">Taylor expansion</NoteLink> of the log-odds of $y_i$
+about $p_i$, since $\frac{d}{dp}\log\frac{p}{1 - p} = \frac{1}{p(1 - p)}$. The weight $s_i$ says how firmly
+example $i$ holds its score to $\zeta_i$. With the penalty, the same algebra gives
+
+$$
+\wvec_{\text{new}} = \paren{\Xmat^\top\Smat\Xmat + n\lambda\Dmat}^{-1}\Xmat^\top\Smat\zetavec.
+$$
+
+The Hessian of $L$ does not involve $\yvec$, so the observed information $n\Hmat$ equals its expectation over the
+labels. Newton's method and Fisher scoring are therefore the same algorithm here. For every
+<NoteLink to="generalised-linear-model">generalised linear model</NoteLink> with its canonical link, IRLS is Newton's
+method for the same reason <Cite id="mccullagh1989" />.
+
+**The algorithm.**
+
+1. Start at $\wvec = \zeros$, where every $p_i = 1/2$ and every $s_i = 1/4$.
+2. Compute $p_i$, $s_i$ and $\zeta_i$ at the current $\wvec$.
+3. Solve $(\Xmat^\top\Smat\Xmat + n\lambda\Dmat)\,\wvec_{\text{new}} = \Xmat^\top\Smat\zetavec$ by a <NoteLink to="cholesky-decomposition">Cholesky
+   factorisation</NoteLink>, or by a <Gloss name="qr" /> of $\Smat^{1/2}\Xmat$ for better <NoteLink to="numerical-stability-and-conditioning">numerical stability</NoteLink>.
+4. If the loss did not decrease, halve the step $\wvec_{\text{new}} - \wvec$ until it does.
+5. Stop when the decrease in loss falls below a tolerance. Typical fits take 5 to 10 iterations.
+
+**Convergence.** Near the minimiser, Newton's method converges quadratically: the number of correct digits roughly
+doubles per iteration. Far from the minimiser, a full step can overshoot. Where most $s_i$ are small, $\Hmat$ is
+small, the quadratic model is flat, and $-\Hmat^{-1}\gvec$ is long. The solver figure in the section on stochastic gradient
+descent shows this: on its overlapping dataset, pure Newton converges from $\wvec = \zeros$ but diverges from
+$(w_1, w_2) = (-3, 1)$. When $\Xmat$ has full column rank, $\Hmat$ is positive definite and $-\Hmat^{-1}\gvec$ points
+downhill wherever $\gvec \neq \zeros$. When a minimiser also exists, because the classes overlap or $\lambda > 0$,
+step 4, a backtracking <NoteLink to="line-search">line search</NoteLink>, makes the method converge to it from any
+start <Cite id="nocedal2006" />.
+
+**Cost.** Forming $\Xmat^\top\Smat\Xmat$ costs $O(nd^2)$ time and solving the $d \times d$ system $O(d^3)$, with
+$O(d^2)$ memory. For $n \geq d$ one Newton step costs about as much as $d$ gradient steps, which cost $O(nd)$ each.
+Gradient descent needs on the order of $\kappa\log(1/\epsilon)$ steps to come within $\epsilon$ of the minimum, where
+$\kappa$ is the condition number of $\Hmat$ (see <NoteLink to="convergence-of-gradient-descent">convergence of
+gradient descent</NoteLink>). Ten Newton steps therefore cost less whenever $\kappa\log(1/\epsilon)$ exceeds about
+$10d$: on ill-conditioned problems with few features.
+
+## Worked example: an intercept-only model
+
+Take a model with only the bias $b$, fitted to labels whose mean is $\bar y = 0.8$. Every $\xvec_i$ is the constant
+1, so $L(b) = \log(1 + e^{b}) - \bar y\,b$, $L'(b) = \sigma(b) - \bar y$ and $L''(b) = \sigma(b)(1 - \sigma(b))$. The
+gradient vanishes at $\sigma(b^\star) = 0.8$, so $b^\star = \log(0.8/0.2) = \log 4 = 1.386294$.
+
+Newton's method takes $b \leftarrow b + (\bar y - p)/(p(1 - p))$ with $p = \sigma(b)$. Gradient descent with the safe
+step $\eta = 1/L_{\max} = 4$ takes $b \leftarrow b + 4(\bar y - p)$. At $b = 0$, $p(1 - p) = 1/4$ exactly, so both
+take the same first step to $b = 0.3/0.25 = 1.2$. After that they part:
+
+| $t$ | Newton $b^{(t)}$ | error | gradient descent $b^{(t)}$ | error |
+| --- | --- | --- | --- | --- |
+| 0 | 0 | $-1.386$ | 0 | $-1.386$ |
+| 1 | 1.2 | $-0.186$ | 1.2 | $-0.186$ |
+| 2 | 1.376932 | $-9.4 \times 10^{-3}$ | 1.325901 | $-6.0 \times 10^{-2}$ |
+| 3 | 1.386268 | $-2.6 \times 10^{-5}$ | 1.365254 | $-2.1 \times 10^{-2}$ |
+| 4 | 1.386294 | $-2.1 \times 10^{-10}$ | 1.378805 | $-7.5 \times 10^{-3}$ |
+
+Newton's error is roughly squared at each step. Gradient descent's error shrinks by a constant factor of about 0.36.
+That factor is $1 - L''(b^\star)/L_{\max} = 1 - 0.16/0.25$: the step uses the worst-case curvature $1/4$, while the
+true curvature at the minimum is $0.8 \times 0.2 = 0.16$.
+
+## Stochastic gradient descent
+
+The gradient is an average of $n$ per-example gradients. A mini-batch $\mathcal{B}$ of $B$ examples drawn at random
+gives an unbiased estimate of it:
+
+$$
+\gvec_{\mathcal{B}}(\wvec) = \frac{1}{B}\sum_{i \in \mathcal{B}} (p_i - y_i)\,\xvec_i + \lambda\Dmat\wvec, \qquad
+\expect\brack{\gvec_{\mathcal{B}}(\wvec)} = \gvec(\wvec).
+$$
+
+<Gloss name="sgd" /> takes $\wvec \leftarrow \wvec - \eta_t\,\gvec_{\mathcal{B}}(\wvec)$ at step $t$. Each step
+costs $O(Bd)$, independent of $n$, and the data can arrive as a stream <Cite id="bottou2010" />. With $B = 1$ and no
+penalty the update is $\wvec \leftarrow \wvec + \eta_t(y_i - p_i)\,\xvec_i$. The
+<NoteLink to="perceptron">perceptron</NoteLink> update is the same with the hard prediction
+$\hat y_i \in \{0, 1\}$ in place of $p_i$.
+
+**Step sizes.** With a constant $\eta$ the iterates do not converge. They settle into a region around the minimiser
+whose size grows with $\eta$ and with the variance of $\gvec_{\mathcal{B}}$. A step size that satisfies
+$\sum_t \eta_t = \infty$ and $\sum_t \eta_t^2 < \infty$, such as $\eta_t = \eta_0 / (1 + t/\tau)$, makes the
+iterates converge to the minimiser, when one exists and the gradient estimates have bounded variance
+<Cite id="robbins1951" />. For a strongly convex loss, steps $\eta_t \propto 1/t$ of a suitable size make the
+expected gap
+$\expect[L(\wvec_t)] - L(\wvec^\star)$ fall as $O(1/t)$ <Cite id="bottou2018" />. The penalty makes the loss strongly convex in the penalised
+weights; the unpenalised bias is strongly convex only through the data, near a minimiser that exists. Gradient
+descent's gap falls geometrically, and Newton's faster still, but each of their steps costs a full pass over the
+data.
+
+The comparison favours SGD when $n$ is large. The fitted weights only need to be accurate to within their
+statistical error, which shrinks as $n$ grows. When $n$ is large, a few passes of SGD reach that accuracy at a
+fraction of the cost of optimising to machine precision <Cite id="bottou2010" />.
+
+Averaging the SGD iterates reduces the final noise without a smaller step <Cite id="polyak1992" />. <NoteLink to="variance-reduction">Variance-reduced
+methods</NoteLink> such as the stochastic average gradient (SAG) and its variant SAGA store one gradient per example and recover
+geometric convergence on a finite training set <Cite id="schmidt2017" /> <Cite id="defazio2014" />.
+
+<SolverRace />
+
+## Approximate Newton methods
+
+Several methods approximate the Newton step without forming or inverting $\Hmat$.
+
+- **Newton–CG** solves $\Hmat\vvec = -\gvec$ approximately by conjugate gradients, which needs only products $\Hmat\vvec = \frac{1}{n}\Xmat^\top\big(\Smat(\Xmat\vvec)\big)$.
+  Each product costs $O(nd)$ and never builds the $d \times d$ matrix. A <NoteLink to="trust-region-methods">trust region</NoteLink> replaces the line search in
+  the widely used version for large sparse problems <Cite id="lin2008" />.
+- **L-BFGS** builds an approximation to $\Hmat^{-1}$ from the last $m$ pairs of weight and gradient differences, at
+  $O(md)$ extra cost per step <Cite id="nocedal2006" />. It is the default solver of scikit-learn's
+  `LogisticRegression`; `newton-cholesky`, which is IRLS, is recommended there when $n \gg d$
+  <Cite id="sklearn-linear-models" />. See <NoteLink to="quasi-newton-methods">quasi-Newton methods</NoteLink>.
+- **The fixed curvature bound** $\frac{1}{4n}\Xmat^\top\Xmat$ of the Hessian section replaces $\Hmat$ in the Newton
+  step. The matrix is factorised once, and every step decreases the loss <Cite id="bohning1988" />.
+
+In a comparison of optimisers for logistic regression on large data sets, conjugate gradient and quasi-Newton
+methods were the fastest <Cite id="minka2003" />.
+
+## Comparison of solvers
+
+| Method | Cost per iteration | Memory | Convergence |
+| --- | --- | --- | --- |
+| Gradient descent | $O(nd)$ | $O(d)$ | linear; the rate depends on the <NoteLink to="condition-number">condition number</NoteLink> of $\Hmat$ |
+| Newton / IRLS | $O(nd^2 + d^3)$ | $O(d^2)$ | quadratic near the minimum; 5 to 10 iterations |
+| Newton–CG | $O(nd)$ per <NoteLink to="jacobian-vector-products-and-higher-order-derivatives">Hessian-vector product</NoteLink> | $O(d)$ | superlinear near the minimum |
+| L-BFGS | $O(nd + md)$ | $O(md)$ | fast in practice; no quadratic guarantee |
+| SGD | $O(Bd)$ per step | $O(d)$ | $O(1/t)$ with decaying steps; a noise floor with a constant step |
 
 ## Separable data
 
-If a hyperplane separates the classes perfectly, the likelihood has no maximum. The weights grow without bound as
-the fit sharpens. An L2 penalty $\tfrac{\lambda}{2}\norm{\wvec}^2$ keeps the weights finite.
-
-<Callout variant="warning">
-Predicted probabilities are only calibrated when the model is well specified. A strong penalty or a missing
-feature shifts them, even when accuracy is unchanged.
-</Callout>
+If a hyperplane separates the classes perfectly, the likelihood has no maximum. Scaling up any separating $\wvec$
+lowers every $\ell_i$, so the weights grow without bound as the fit sharpens. A maximum-likelihood estimate exists
+only when the classes overlap <Cite id="albert1984" />. As $\norm{\wvec}$ grows, every $p_i$ approaches 0 or 1, every
+$s_i$ approaches 0 and $\Hmat$ approaches the zero matrix. Newton steps then grow longer, and IRLS software reports
+fitted probabilities of exactly 0 or 1. The L2 penalty $\tfrac{\lambda}{2}\norm{\tilde\wvec}^2$ keeps the weights
+finite: it adds $\lambda\Dmat$ to $\Hmat$, which keeps the curvature in the weight directions at least $\lambda$.

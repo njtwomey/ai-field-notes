@@ -4,6 +4,7 @@ import type { Series } from '@/generated/contracts'
 import { contourSegments } from '@/lib/math/contours'
 import { EChart, type EChartClick, type PlotPointer } from './EChart'
 import type { Handle } from './handles'
+import { vectorLines, type Vector } from './vectors'
 import {
   chrome,
   diverging,
@@ -75,8 +76,11 @@ export type HeatmapProps = {
   marker?: [number, number]
   /** Draggable handles bound to parameters. See handles.ts. */
   handles?: Handle[]
-  /** Ink arrows over the grid, e.g. a gradient at the marker. Updated without redrawing the grid. */
-  vectors?: { from: [number, number]; to: [number, number] }[]
+  /**
+   * Arrows over the grid, e.g. a gradient at the marker. Ink unless a vector sets `slot`; on a sequential grid use
+   * slot 1 or above, since slot 0 is the ramp's hue. Updated without redrawing the grid.
+   */
+  vectors?: Vector[]
   /** Called with the centre of a clicked cell, or a clicked overlay point. Cells show a pointer cursor when set. */
   onCellClick?: (x: number, y: number) => void
   /**
@@ -274,10 +278,13 @@ export function Heatmap({
       legend: {
         show: structure.length > 1,
         // Each entry shows its series' marker, so shapes that encode groups read correctly in the legend.
-        data: structure.map(([, style]) => ({
-          name: style.name as string,
-          ...(style.type === 'scatter' && typeof style.symbol === 'string' ? { icon: style.symbol } : {}),
-        })),
+        // Series sharing a name (e.g. several runs of one method) get one entry, which toggles them together.
+        data: structure
+          .filter(([, style], i) => structure.findIndex(([, other]) => other.name === style.name) === i)
+          .map(([, style]) => ({
+            name: style.name as string,
+            ...(style.type === 'scatter' && typeof style.symbol === 'string' ? { icon: style.symbol } : {}),
+          })),
       },
       tooltip: {
         trigger: 'item',
@@ -398,11 +405,11 @@ export function Heatmap({
         {
           id: 'marker',
           data: mx === undefined ? [] : [[mx, my]],
-          markLine: { data: (vectors ?? []).map((v) => [{ coord: v.from }, { coord: v.to }]) },
+          markLine: { data: vectorLines(vectors ?? [], mode) },
         },
       ],
     }),
-    [overlays, mx, my, vectors],
+    [overlays, mx, my, vectors, mode],
   )
 
   // Clicks on overlay points (e.g. an optimum drawn on top of the grid) select that point too.

@@ -4,6 +4,7 @@ import type { Series } from '@/generated/contracts'
 import { EChart } from './EChart'
 import type { Handle } from './handles'
 import { chrome, MARKER_SHAPES, seriesColor } from './palette'
+import { vectorLines, type Vector } from './vectors'
 import { formatNumber, LINE_WIDTH, MARKER_SIZE } from './theme'
 
 /** A contract `Series` (group optional) plus display options that only the site needs. */
@@ -48,8 +49,8 @@ export type XYChartProps = {
   yLog?: boolean
   /** Thin muted segments drawn under the data, e.g. residuals. */
   segments?: Segment[]
-  /** Ink arrows, e.g. a weight vector normal to a decision boundary. */
-  vectors?: Segment[]
+  /** Arrows, e.g. a weight vector normal to a decision boundary. Ink unless a vector sets `slot`. */
+  vectors?: Vector[]
   /**
    * Equal pixel length per unit on both axes, so shapes and angles are true (an ellipse keeps its proportions, a
    * normal vector looks perpendicular). Requires `xRange` and `yRange`. The chart sets its own height from its width
@@ -182,12 +183,13 @@ export function XYChart({
           label: { show: false },
           lineStyle: { color: c.ink, width: LINE_WIDTH, type: 'solid' },
           animation: false,
-          data: vectors.map((v) => [{ coord: v.from }, { coord: v.to }]),
+          data: vectorLines(vectors, mode),
         },
         z: 6,
       })
     }
-    const legend = out.filter((s) => !String(s.name).startsWith('__')).map((s) => s.name as string)
+    // Series sharing a name (e.g. several runs of one method) get one legend entry, which toggles them together.
+    const legend = [...new Set(out.filter((s) => !String(s.name).startsWith('__')).map((s) => s.name as string))]
     return {
       // With equalAspect the chart height is derived from this grid's margins (see below).
       ...(equalAspect || bare ? { grid: bare ? BARE_GRID : ASPECT_GRID } : {}),

@@ -57,6 +57,7 @@ export interface Contracts {
   RegressionSurface?: RegressionSurface
   RidgePath?: RidgePath
   SgdTrajectories?: SgdTrajectories
+  SolverDatasets?: SolverDatasets
   TypeIErrorMaps?: TypeIErrorMaps
 }
 /**
@@ -709,6 +710,29 @@ export interface SgdRun {
    */
   zeros: number[]
   exact_zeros: number
+}
+/**
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "SolverDatasets".
+ */
+export interface SolverDatasets {
+  datasets: SolverDataset[]
+}
+/**
+ * A two-feature dataset for the solver comparison, with its unpenalised loss surface (bias fixed at 0).
+ *
+ * This interface was referenced by `Contracts`'s JSON-Schema
+ * via the `definition` "SolverDataset".
+ */
+export interface SolverDataset {
+  name: string
+  description: string
+  /**
+   * True when a line through the origin separates the classes, so the unpenalised loss has no minimum.
+   */
+  separable: boolean
+  surface: Grid2d
+  data: PointCloud2d
 }
 /**
  * Type I error rates of the pooled and Welch tests over the variance ratio and the second group's size.

@@ -8,11 +8,14 @@ import {
   formatNumber,
   useParam,
   type Handle,
+  type Vector,
   type XYSeries,
 } from '@/components/viz'
 import type { LossSurface } from '@/generated/contracts'
 import { useFigure } from '@/lib/generated'
 import { mean, sigmoid } from '@/lib/math'
+
+type Vec = [number, number]
 
 const penalty = (lambda: number, a: number, b: number) => 0.5 * lambda * (a * a + b * b)
 
@@ -56,7 +59,12 @@ export function LossSurfaceExplorer() {
       p.map((pi, i) => -(labels[i] * Math.log(pi + 1e-12) + (1 - labels[i]) * Math.log(1 - pi + 1e-12))),
     )
     const accuracy = mean(p.map((pi, i) => ((pi >= 0.5 ? 1 : 0) === labels[i] ? 1 : 0)))
-    return { crossEntropy, reg: penalty(lambda, w1, w2), accuracy }
+    // ∇ cross-entropy = Xᵀ(p − y)/n and ∇ penalty = λw.
+    const grad: [number, number] = [
+      mean(p.map((pi, i) => (pi - labels[i]) * x[i])),
+      mean(p.map((pi, i) => (pi - labels[i]) * y[i])),
+    ]
+    return { crossEntropy, reg: penalty(lambda, w1, w2), accuracy, grad }
   }, [data, w1, w2, lambda])
 
   const overlay = useMemo(
@@ -90,8 +98,23 @@ export function LossSurfaceExplorer() {
   // direction only; ‖w‖ is in the readout. It starts at the origin because the bias is fixed at 0.
   const normal = useMemo(() => {
     const norm = Math.hypot(w1, w2)
-    return norm < 1e-9 ? [] : [{ from: [0, 0] as [number, number], to: [w1 / norm, w2 / norm] as [number, number] }]
+    // Coloured as class y = 1 (scatter slot 1), the class it points toward.
+    return norm < 1e-9 ? [] : [{ from: [0, 0] as Vec, to: [w1 / norm, w2 / norm] as Vec, slot: 1 }]
   }, [w1, w2])
+
+  // Negative gradients at w: the step that gradient descent with η = 1 would take, split into the part from the
+  // cross-entropy and the part from the penalty. Slots start at 1 because slot 0 is the heatmap's own hue.
+  const descent = useMemo((): Vector[] => {
+    if (!stats) return []
+    const [g1, g2] = stats.grad
+    const from: Vec = [w1, w2]
+    const out: Vector[] = [{ from, to: [w1 - g1, w2 - g2], slot: 1, label: '−∇ cross-entropy' }]
+    if (lambda > 0) {
+      out.push({ from, to: [w1 - lambda * w1, w2 - lambda * w2], slot: 2, label: '−∇ penalty' })
+      out.push({ from, to: [w1 - g1 - lambda * w1, w2 - g2 - lambda * w2], label: '−∇ total' })
+    }
+    return out
+  }, [stats, w1, w2, lambda])
 
   // On the loss surface, the weights themselves are the handle.
   const weightHandle: Handle[] = [
@@ -127,7 +150,7 @@ export function LossSurfaceExplorer() {
   return (
     <Interactive
       title="Loss surface and decision boundary"
-      caption="Left: mean cross-entropy plus the L2 penalty (λ/2)‖w‖² for every (w₁, w₂), bias fixed at 0. The diamond marks the minimum. Right: the data, the boundary for your weights and the boundary at the minimum. The arrow is the unit normal w/‖w‖. It points toward y = 1. The length ‖w‖, in the readout, sets how sharply P(y = 1) changes across the boundary. Drag the dot on the loss surface to move w, or drag the arrow tip to turn the boundary at fixed ‖w‖. Raise λ and the minimum moves toward the origin: a smaller ‖w‖, a softer boundary."
+      caption="Left: mean cross-entropy plus the L2 penalty (λ/2)‖w‖² for every (w₁, w₂), bias fixed at 0. The diamond marks the minimum. The arrows at w are the negative gradients, the step gradient descent with η = 1 would take: from the cross-entropy, from the penalty (pointing at the origin), and their sum. At the minimum the first two are equal and opposite, so the sum vanishes. Right: the data, the boundary for your weights and the boundary at the minimum. The arrow is the unit normal w/‖w‖, coloured as class y = 1, toward which it points. The length ‖w‖, in the readout, sets how sharply P(y = 1) changes across the boundary. Drag the dot on the loss surface to move w, or drag the arrow tip to turn the boundary at fixed ‖w‖. Raise λ and the minimum moves toward the origin: a smaller ‖w‖, a softer boundary."
       controls={
         <>
           <ParamSlider label="w₁" param={w1Param} />
@@ -140,6 +163,10 @@ export function LossSurfaceExplorer() {
           <Readout label="cross-entropy" value={formatNumber(stats.crossEntropy)} />
           <Readout label="penalty" value={formatNumber(stats.reg)} />
           <Readout label="total" value={formatNumber(stats.crossEntropy + stats.reg)} />
+          <Readout
+            label="‖∇ total‖"
+            value={formatNumber(Math.hypot(stats.grad[0] + lambda * w1, stats.grad[1] + lambda * w2))}
+          />
           <Readout label="‖w‖" value={formatNumber(Math.hypot(w1, w2))} />
           <Readout label="accuracy" value={`${(stats.accuracy * 100).toFixed(1)}%`} />
           <Readout label="minimum at" value={`(${surface.minimum.map(formatNumber).join(', ')})`} />
@@ -156,6 +183,7 @@ export function LossSurfaceExplorer() {
           valueLabel="loss"
           overlay={overlay}
           handles={weightHandle}
+          vectors={descent}
           range={[0, 3]}
           height={340}
         />
