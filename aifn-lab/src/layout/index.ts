@@ -1,0 +1,11 @@
+/** The lab's layout: the figure frame, the app shell and small typographic pieces. Import from '@lab/layout'. */
+export { Figure, type FigureProps } from './Figure'
+export { ControlRow, Controls } from './Controls'
+export { Dashboard, DashboardCell, DashboardRow } from './Dashboard'
+export { FigureScope, FIGURE_SIZES, type FigureSize } from './figure-size'
+export { Shell, type LabPage } from './Shell'
+export { Providers } from './Providers'
+export { ThemeToggle } from './ThemeToggle'
+export { Tex } from './Tex'
+export { FigurePage } from './FigurePage'
+export { slugify, specimenPath } from './paths'

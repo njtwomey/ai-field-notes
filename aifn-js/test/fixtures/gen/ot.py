@@ -1,0 +1,53 @@
+"""Golden values for aifn/ot: scipy's wasserstein_distance, exact transport by scipy's linprog and
+linear_sum_assignment, and log-domain Sinkhorn written directly in numpy (POT is not a dependency)."""
+
+import numpy as np
+from scipy import optimize, special, stats
+
+
+def sinkhorn_log(a: np.ndarray, b: np.ndarray, c: np.ndarray, eps: float, iters: int) -> dict[str, object]:
+    """f then g soft c-transforms, the plan relative to a bᵀ (the same update order as aifn)."""
+    f = np.zeros(len(a))
+    g = np.zeros(len(b))
+    la, lb = np.log(a), np.log(b)
+    for _ in range(iters):
+        f = -eps * special.logsumexp((g[None, :] - c) / eps + lb[None, :], axis=1)
+        g = -eps * special.logsumexp((f[:, None] - c) / eps + la[:, None], axis=0)
+    plan = a[:, None] * b[None, :] * np.exp((f[:, None] + g[None, :] - c) / eps)
+    return {"f": f, "g": g, "plan": plan, "transport": float((plan * c).sum())}
+
+
+def cases() -> dict[str, object]:
+    rng = np.random.default_rng(20260930)
+    out: dict[str, object] = {}
+    u = rng.normal(size=12)
+    v = rng.normal(1.0, 2.0, size=9)
+    uw = rng.uniform(0.1, 1, size=12)
+    vw = rng.uniform(0.1, 1, size=9)
+    out["w1"] = {
+        "u": u,
+        "v": v,
+        "uw": uw,
+        "vw": vw,
+        "plain": stats.wasserstein_distance(u, v),
+        "weighted": stats.wasserstein_distance(u, v, uw, vw),
+    }
+    x = rng.normal(size=(6, 2))
+    y = rng.normal(size=(6, 2)) + 1
+    c = ((x[:, None, :] - y[None, :, :]) ** 2).sum(-1)
+    rows, cols = optimize.linear_sum_assignment(c)
+    out["assignment"] = {"x": x, "y": y, "cost": c, "cols": cols, "value": float(c[rows, cols].sum() / 6)}
+    a = rng.uniform(0.2, 1, size=5)
+    a /= a.sum()
+    b = rng.uniform(0.2, 1, size=4)
+    b /= b.sum()
+    c2 = rng.uniform(0, 3, size=(5, 4))
+    aeq = np.zeros((9, 20))
+    for i in range(5):
+        aeq[i, i * 4 : (i + 1) * 4] = 1
+    for j in range(4):
+        aeq[5 + j, j::4] = 1
+    res = optimize.linprog(c2.ravel(), A_eq=aeq, b_eq=np.concatenate([a, b]), method="highs")
+    out["exact"] = {"a": a, "b": b, "cost": c2, "value": res.fun}
+    out["sinkhorn"] = {"a": a, "b": b, "cost": c2, "eps": 0.1, "iters": 50, **sinkhorn_log(a, b, c2, 0.1, 50)}
+    return out
