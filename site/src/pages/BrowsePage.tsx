@@ -1,13 +1,15 @@
-import { List, Search, Waypoints } from 'lucide-react'
-import { useMemo } from 'react'
+import { ChevronDown, FolderTree, List, Search, Waypoints } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { Navigate, useParams, useSearchParams } from 'react-router'
 import { CategoryTrail } from '@/components/note/TaxonomyTrail'
 import { ConceptMap } from '@/components/browse/ConceptMap'
-import { filterNotes } from '@/components/browse/filters'
+import { filterNotes, inCategory } from '@/components/browse/filters'
 import { NoteCard } from '@/components/browse/NoteCard'
 import { TopicRail } from '@/components/browse/TopicRail'
 import { kindIcons } from '@/components/layout/kind-icon'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   browseUrl,
@@ -26,7 +28,8 @@ import { cn } from '@/lib/utils'
 
 /**
  * The explorer: topics on the left, notes as cards (or as a map) on the right, filtered by topic, kind and text. All
- * state lives in the URL, so every view can be linked.
+ * state lives in the URL, so every view can be linked. Below `lg` the topic rail moves into a sheet opened from one
+ * button, so the notes start right under the filters instead of below every topic.
  */
 export function BrowsePage() {
   const [search, setSearch] = useSearchParams()
@@ -109,6 +112,9 @@ export function BrowsePage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <div className="w-full lg:hidden">
+              <TopicPicker params={params} />
+            </div>
             <div className="relative w-full sm:w-72">
               <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -118,7 +124,8 @@ export function BrowsePage() {
                 className="pl-8"
               />
             </div>
-            <div className="flex flex-wrap gap-1.5">
+            {/* One scrolling row on phones; wrapped from sm up. */}
+            <div className="-mx-4 flex w-[calc(100%+2rem)] gap-1.5 overflow-x-auto px-4 pb-1 sm:mx-0 sm:w-auto sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
               <KindChip active={!params.kind} onClick={() => set({ kind: undefined })} label="All" />
               {noteKinds.map((k) => (
                 <KindChip
@@ -131,11 +138,6 @@ export function BrowsePage() {
                 />
               ))}
             </div>
-          </div>
-
-          {/* Topics as chips on small screens, where the rail is hidden. */}
-          <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 lg:hidden">
-            <TopicRail params={params} />
           </div>
 
           {params.view === 'map' ? (
@@ -189,7 +191,7 @@ function KindChip({
       disabled={count === 0 && !active}
       aria-pressed={active}
       className={cn(
-        'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs transition-colors disabled:opacity-40',
+        'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs transition-colors disabled:opacity-40',
         active ? 'border-foreground bg-foreground text-background' : 'hover:bg-muted',
       )}
     >
@@ -197,6 +199,33 @@ function KindChip({
       {label}
       {count !== undefined && <span className="tabular-nums opacity-70">{count}</span>}
     </button>
+  )
+}
+
+/** Below `lg`: the selected topic as one button, opening the topic rail in a sheet that closes on a choice. */
+function TopicPicker({ params }: { params: BrowseParams }) {
+  const [open, setOpen] = useState(false)
+  const title = params.c ? (category(params.c)?.title ?? params.c) : 'All topics'
+  const count = params.c ? notes.filter((n) => inCategory(n, params.c!)).length : notes.length
+  return (
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger render={<Button variant="outline" className="w-full justify-between" />}>
+        <span className="flex min-w-0 items-center gap-2">
+          <FolderTree className="size-4 text-muted-foreground" aria-hidden />
+          <span className="truncate">{title}</span>
+          <span className="text-xs text-muted-foreground tabular-nums">{count}</span>
+        </span>
+        <ChevronDown className="size-4 opacity-60" aria-hidden />
+      </SheetTrigger>
+      <SheetContent side="left" className="w-80 overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle>Topics</SheetTitle>
+        </SheetHeader>
+        <div className="px-4 pb-6">
+          <TopicRail params={params} onNavigate={() => setOpen(false)} />
+        </div>
+      </SheetContent>
+    </Sheet>
   )
 }
 
