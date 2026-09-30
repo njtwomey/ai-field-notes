@@ -16,19 +16,21 @@ import { NeighbourhoodSampling } from './NeighbourhoodSampling'
 import { ConvolveDiagram } from './ConvolveDiagram'
 
 <Definition>
-**PinSage** is a graph convolutional network that computes an embedding $\zvec_u \in \reals^{d}$ for every node $u$ of
-a bipartite graph of pins (image items) and boards (user-curated collections of pins). Each layer aggregates a node's
-**importance-based neighbourhood**: the $T$ nodes most often visited by short <NoteLink to="random-walk">random walks</NoteLink> from $u$. The aggregation is
-a mean weighted by those visit counts, called **importance pooling**. Training minimises a max-margin ranking loss on
-pairs of pins engaged with in sequence, with hard negatives added by a curriculum. Pinterest trained and ran it on a
-graph with 3 billion nodes and 18 billion edges <Cite id="ying2018pinsage" />.
+**PinSage** is a graph convolutional network that computes an embedding $\zvec_u \in \reals^{d}$ for every node $u$ of a
+bipartite graph of pins (image items) and boards (user-curated collections of pins). Each layer aggregates a node's
+**importance-based neighbourhood**: the $T$ nodes most often visited by short <NoteLink to="random-walk">random
+walks</NoteLink> from $u$. The aggregation is a mean weighted by those visit counts, called **importance pooling**.
+Training minimises a max-margin ranking loss on pairs of pins engaged with in sequence, with hard negatives added by a
+curriculum. Pinterest trained and ran it on a graph with 3 billion nodes and 18 billion edges
+<Cite id="ying2018pinsage" />.
 </Definition>
 
 ## Problem
 
-Pinterest wants an embedding for each of about 2 billion pins, for related-pin retrieval by <NoteLink to="nearest-neighbour-search">nearest-neighbour search</NoteLink> and
-as a feature in ranking models. Each pin has an image and text annotations. Pins are also connected through boards:
-the graph has 2 billion pins, 1 billion boards and over 18 billion pin–board edges <Cite id="ying2018pinsage" />.
+Pinterest wants an embedding for each of about 2 billion pins, for related-pin retrieval by
+<NoteLink to="nearest-neighbour-search">nearest-neighbour search</NoteLink> and as a feature in ranking models. Each pin
+has an image and text annotations. Pins are also connected through boards: the graph has 2 billion pins, 1 billion
+boards and over 18 billion pin–board edges <Cite id="ying2018pinsage" />.
 
 A spectral <NoteLink to="graph-convolutional-network">graph convolutional network</NoteLink> multiplies features by
 powers of the full normalised adjacency matrix. That requires the whole graph during training, which is infeasible at
@@ -50,13 +52,13 @@ $$
 $$
 
 Here $[\cdot \Vert \cdot]$ is concatenation, $\Qmat, \qvec, \Wmat, \wvec$ are the layer's weights and $\gamma$ is a
-symmetric pooling function. The weights are shared by every node and differ between layers. Write $\hvec_u^{(k)}$ for node
-$u$'s vector after $k$ layers, with $\hvec_u^{(0)} = \xvec_u$, the input feature vector. Layer $k$ applies `convolve`
-with the vectors $\hvec^{(k-1)}$ as its inputs $\zvec$, and its output $\zvec_u^{\mathrm{new}}$ is $\hvec_u^{(k)}$. After
-$K$ layers a two-layer network gives the final embedding,
-$\zvec_u = \Gmat_2 \operatorname{ReLU}(\Gmat_1 \hvec_u^{(K)} + \gvec)$. The paper reports that concatenating
-$\zvec_u$ with $\nvec_u$ works better than averaging them, and that the final normalisation stabilises training and
-makes <Gloss name="ann-search">approximate nearest-neighbour search</Gloss> more efficient <Cite id="ying2018pinsage" />.
+symmetric pooling function. The weights are shared by every node and differ between layers. Write $\hvec_u^{(k)}$ for
+node $u$'s vector after $k$ layers, with $\hvec_u^{(0)} = \xvec_u$, the input feature vector. Layer $k$ applies
+`convolve` with the vectors $\hvec^{(k-1)}$ as its inputs $\zvec$, and its output $\zvec_u^{\mathrm{new}}$ is
+$\hvec_u^{(k)}$. After $K$ layers a two-layer network gives the final embedding,
+$\zvec_u = \Gmat_2 \operatorname{ReLU}(\Gmat_1 \hvec_u^{(K)} + \gvec)$. The paper reports that concatenating $\zvec_u$
+with $\nvec_u$ works better than averaging them, and that the final normalisation stabilises training and makes
+<Gloss name="ann-search">approximate nearest-neighbour search</Gloss> more efficient <Cite id="ying2018pinsage" />.
 
 <ConvolveDiagram />
 
@@ -74,10 +76,11 @@ normalised counts <Cite id="ying2018pinsage" />. The walks come from Pinterest's
 The neighbourhood has a fixed size $T$, so the memory of each minibatch is bounded, and each neighbour carries
 a score of how strongly the graph connects it to $u$, which the pooling step uses.
 
-**Why visit counts measure importance.** Let $\Pmat$ be the <NoteLink to="markov-chain">transition matrix</NoteLink> of the walk on the graph, so
-$(\Pmat^k)_{uv}$ is the probability that a walk from $u$ is at $v$ after $k$ steps. Suppose each walk continues after
-every step with probability $1 - c$ and stops otherwise, so walk lengths are geometric. The expected number of visits
-to $v \ne u$ during one walk is the sum over steps of the probability that the walk is still running and is at $v$:
+**Why visit counts measure importance.** Let $\Pmat$ be the <NoteLink to="markov-chain">transition matrix</NoteLink> of
+the walk on the graph, so $(\Pmat^k)_{uv}$ is the probability that a walk from $u$ is at $v$ after $k$ steps. Suppose
+each walk continues after every step with probability $1 - c$ and stops otherwise, so walk lengths are geometric. The
+expected number of visits to $v \ne u$ during one walk is the sum over steps of the probability that the walk is still
+running and is at $v$:
 
 $$
 \expect[\text{visits to } v] = \sum_{k \ge 1} (1-c)^{k-1} (\Pmat^k)_{uv}
@@ -85,14 +88,14 @@ $$
 = \frac{\pi_u(v)}{c(1-c)}.
 $$
 
-The $k = 0$ term is zero because $v \ne u$. The vector
-$\pivec_u = c \sum_{k \ge 0} (1-c)^k \evec_u\transpose \Pmat^k$ is the **personalised PageRank** of $u$, where $\evec_u$ is the indicator vector of node $u$ and $\pi_u(v)$ is entry $v$. It is the stationary
-distribution of a walk that restarts at $u$ with probability $c$ at each step. It satisfies
-$\pivec_u = c\,\evec_u\transpose + (1-c)\,\pivec_u \Pmat$, which is the fixed-point form of the same series. By the <Gloss name="lln">law of
-large numbers</Gloss>, the total count at $v$ over many walks, divided by the number of walks, converges to the expectation. The
-counts are therefore proportional to $\pi_u(v)$, and so are the normalised counts. This is the paper's statement that
-in the limit of infinitely many simulations the normalised counts approximate personalised PageRank scores with respect
-to $u$ <Cite id="ying2018pinsage" />.
+The $k = 0$ term is zero because $v \ne u$. The vector $\pivec_u = c \sum_{k \ge 0} (1-c)^k \evec_u\transpose \Pmat^k$
+is the **personalised PageRank** of $u$, where $\evec_u$ is the indicator vector of node $u$ and $\pi_u(v)$ is entry
+$v$. It is the stationary distribution of a walk that restarts at $u$ with probability $c$ at each step. It satisfies
+$\pivec_u = c\,\evec_u\transpose + (1-c)\,\pivec_u \Pmat$, which is the fixed-point form of the same series. By the
+<Gloss name="lln">law of large numbers</Gloss>, the total count at $v$ over many walks, divided by the number of walks,
+converges to the expectation. The counts are therefore proportional to $\pi_u(v)$, and so are the normalised counts.
+This is the paper's statement that in the limit of infinitely many simulations the normalised counts approximate
+personalised PageRank scores with respect to $u$ <Cite id="ying2018pinsage" />.
 
 <NeighbourhoodSampling />
 
@@ -125,10 +128,11 @@ $$
 J(\zvec_q, \zvec_i) = \expect_{n_k \sim P_n(q)} \max\set{0,\; \zvec_q\transpose\zvec_{n_k} - \zvec_q\transpose\zvec_i + \Delta}.
 $$
 
-Each term is zero once the positive's score beats the negative's by at least $\Delta$. Its <NoteLink to="gradient">gradient</NoteLink> with respect to
-$\zvec_q$ is $\zvec_{n_k} - \zvec_i$ while the margin is violated and $\zeros$ afterwards. A negative contributes to
-learning only while it scores within $\Delta$ of the positive. The loss is a
-<NoteLink to="triplet-and-margin-losses">triplet margin loss</NoteLink> on <NoteLink to="dot-product">inner products</NoteLink>.
+Each term is zero once the positive's score beats the negative's by at least $\Delta$. Its
+<NoteLink to="gradient">gradient</NoteLink> with respect to $\zvec_q$ is $\zvec_{n_k} - \zvec_i$ while the margin is
+violated and $\zeros$ afterwards. A negative contributes to learning only while it scores within $\Delta$ of the
+positive. The loss is a <NoteLink to="triplet-and-margin-losses">triplet margin loss</NoteLink> on
+<NoteLink to="dot-product">inner products</NoteLink>.
 
 **Shared negatives.** Each minibatch samples 500 negatives shared by all its examples, instead of separate negatives per
 example. The paper observed no difference in quality and fewer embeddings to compute <Cite id="ying2018pinsage" />.
@@ -151,11 +155,11 @@ fine distinctions that only hard negatives expose <Cite id="ying2018pinsage" />.
 
 ## Systems
 
-**Producer–consumer minibatches.** The adjacency lists and features of billions of nodes stay in <Gloss name="cpu" /> memory (500 GB in
-total). For each minibatch a CPU producer samples neighbourhoods, re-indexes the nodes involved into a small subgraph,
-extracts the matching rows of the feature matrix and samples negatives. The <Gloss name="gpu" /> consumer receives this subgraph and runs
-the convolutions without further CPU–GPU communication. CPU work for the next minibatch overlaps GPU work on the current
-one, which almost halved training time <Cite id="ying2018pinsage" />.
+**Producer–consumer minibatches.** The adjacency lists and features of billions of nodes stay in <Gloss name="cpu" />
+memory (500 GB in total). For each minibatch a CPU producer samples neighbourhoods, re-indexes the nodes involved into a
+small subgraph, extracts the matching rows of the feature matrix and samples negatives. The <Gloss name="gpu" />
+consumer receives this subgraph and runs the convolutions without further CPU–GPU communication. CPU work for the next
+minibatch overlaps GPU work on the current one, which almost halved training time <Cite id="ying2018pinsage" />.
 
 **MapReduce inference.** Computing each node's embedding separately recomputes shared neighbours many times. PinSage
 instead computes layer by layer. One MapReduce job projects every pin with the first layer's dense transform. A second
@@ -176,13 +180,13 @@ Weak AND operator <Cite id="ying2018pinsage" />.
 The largest single gain came from the neighbourhood. With hard negatives in both models, importance pooling over
 random-walk neighbourhoods raised the offline hit rate from 46% to 67% over mean pooling on uniformly sampled neighbours
 <Cite id="ying2018pinsage" />. Larger $T$ helped further, at a roughly proportional cost in training time. In production
-<Gloss name="ab-test" plural /> on the home feed, PinSage embeddings raised the repin rate by 10% to 30% over content-only embeddings
-<Cite id="ying2018pinsage" />.
+<Gloss name="ab-test" plural /> on the home feed, PinSage embeddings raised the repin rate by 10% to 30% over
+content-only embeddings <Cite id="ying2018pinsage" />.
 
-The embeddings also spread out more. Cosine similarities between random pairs of PinSage embeddings are less peaked
-than those of the <NoteLink to="content-based-filtering">content embeddings</NoteLink> <Cite id="ying2018pinsage" />. A wider spread separates items of different
-relevance, and it lowers the collision rate of <NoteLink to="locality-sensitive-hashing">locality-sensitive
-hashing</NoteLink>, which makes retrieval cheaper.
+The embeddings also spread out more. Cosine similarities between random pairs of PinSage embeddings are less peaked than
+those of the <NoteLink to="content-based-filtering">content embeddings</NoteLink> <Cite id="ying2018pinsage" />. A wider
+spread separates items of different relevance, and it lowers the collision rate of
+<NoteLink to="locality-sensitive-hashing">locality-sensitive hashing</NoteLink>, which makes retrieval cheaper.
 
 ## Compared with LightGCN
 
@@ -195,8 +199,9 @@ hashing</NoteLink>, which makes retrieval cheaper.
 | intended scale | benchmark graphs           | billions of nodes                              |
 
 <NoteLink to="lightgcn">LightGCN</NoteLink> shows that when nodes are IDs without features, transformation layers and
-non-linearities hurt <Gloss name="collaborative-filtering">collaborative filtering</Gloss>. PinSage shows that with rich content features at web scale they help. The
-two results agree: whether to transform depends on whether nodes have features worth transforming.
+non-linearities hurt <Gloss name="collaborative-filtering">collaborative filtering</Gloss>. PinSage shows that with rich
+content features at web scale they help. The two results agree: whether to transform depends on whether nodes have
+features worth transforming.
 
 ## Pitfalls
 

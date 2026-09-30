@@ -1,0 +1,294 @@
+---
+title: Pointwise recommendation losses
+kind: concept
+summary: 'A pointwise loss scores each user-item example alone: squared error on ratings, binary cross-entropy on clicks, confidence-weighted error on implicit feedback. Its minimiser is the label''s conditional mean, so it gives calibrated probabilities but ignores list order.'
+tags: [recommender-systems, loss-functions, implicit-feedback, calibration, click-through-rate, worked-example]
+aliases: [pointwise loss, pointwise ranking loss, click-through rate prediction loss, CTR loss, log loss for recommendation, negative downsampling correction, negative subsampling recalibration]
+requires: [logistic-regression, explicit-and-implicit-feedback]
+partOf: [recommendation-loss-families]
+related: [weighted-matrix-factorisation, calibration-under-imbalance, focal-loss, multi-behaviour-recommendation, proper-scoring-rule, ranking-losses]
+references: [koren2009mf, hu2008implicit, pan2008occf, he2014facebook, mcmahan2013adclick, king2001, mikolov2013b, levy2014, lin2017, charoenphakdee2021, ma2018esmm, robertson1977prp, liu2009ltr]
+status: draft
+updated: 2026-09-30
+---
+
+import { RankingLossLab } from '../_shared/RankingLossLab'
+import { NegativeSubsamplingCalibration } from './NegativeSubsamplingCalibration'
+
+<Definition>
+A **pointwise recommendation loss** is a sum of per-example losses $\sum_{(u, i)} \ell(s_{ui}, y_{ui})$, where
+$s_{ui} = f(u, i)$ is the model's score for user $u$ and item $i$ and $y_{ui}$ is the observed label: a rating, a click,
+a purchase. Each term depends on one score and one label, and on nothing else in the list the item is shown in. The
+common choices are squared error on ratings, <Gloss name="bce">binary cross-entropy</Gloss> on binary events, and
+confidence-weighted squared error on implicit feedback <Cite id="liu2009ltr" />.
+</Definition>
+
+## Intuition
+
+A pointwise loss turns recommendation into ordinary regression or classification. Every logged impression, rating or
+interaction is one training row. The model is asked for the right number on each row, not for the right order among
+rows. A model that gets every number right also gets every order right. A model with finite capacity must trade errors
+between rows, and a pointwise loss makes that trade without regard to which rows end up at the top of a list.
+
+The number a pointwise loss asks for has a meaning of its own. Binary cross-entropy is minimised when the predicted
+probability equals the true click probability. That property, calibration, is what auctions, bid pricing and the
+blending of several predicted events need. It is the main reason <Gloss name="click-through-rate">click-through rate
+(CTR)</Gloss> models in production are trained pointwise even when the product shows ranked lists.
+
+## Squared error on ratings
+
+For explicit ratings $r_{ui}$, such as 1 to 5 stars, the loss is $\ell = \tfrac12 (s_{ui} - r_{ui})^2$. Its
+<NoteLink to="gradient">gradient</NoteLink> with respect to the score is the residual:
+
+$$
+\frac{\partial \ell}{\partial s_{ui}} = s_{ui} - r_{ui}.
+$$
+
+For <NoteLink to="matrix-factorisation-for-recommendation">matrix factorisation</NoteLink> with
+$s_{ui} = \wvec_u\transpose\vvec_i$, the <NoteLink to="derivative">chain rule</NoteLink> gives
+$\partial\ell/\partial\wvec_u = (s_{ui} - r_{ui})\,\vvec_i$ and
+$\partial\ell/\partial\vvec_i = (s_{ui} - r_{ui})\,\wvec_u$. This is the objective of the
+<NoteLink to="netflix-prize">Netflix Prize</NoteLink> era, summed over the observed ratings only
+<Cite id="koren2009mf" />.
+
+The expected loss $\expect[\tfrac12(s - r)^2 \mid u, i]$ is minimised at $s = \expect[r \mid u, i]$,
+so the model estimates the mean rating.
+
+The loss only sees observed cells. Users rate what they chose to consume, so the observed ratings are a biased sample,
+and a model fit to them says nothing about items the user never considered (see
+<NoteLink to="explicit-and-implicit-feedback">explicit and implicit feedback</NoteLink>).
+
+## Binary cross-entropy on clicks and purchases
+
+For a binary label $y \in \set{0, 1}$ (click or no click, purchase or no purchase) and predicted probability
+$q = \sigma(s)$, with $\sigma(z) = 1/(1 + e^{-z})$, the loss is the <NoteLink to="cross-entropy-and-perplexity">negative
+log-likelihood</NoteLink> of a Bernoulli label:
+
+$$
+\ell(s, y) = -y\ln\sigma(s) - (1 - y)\ln\paren{1 - \sigma(s)} = \ln\paren{1 + e^{s}} - y\,s.
+$$
+
+The second form uses $\ln\sigma(s) = s - \ln(1 + e^s)$ and $\ln(1 - \sigma(s)) = -\ln(1 + e^s)$. Since
+$\tfrac{d}{ds}\ln(1 + e^s) = \sigma(s)$, the gradient is
+
+$$
+\frac{\partial \ell}{\partial s} = \sigma(s) - y.
+$$
+
+The gradient is bounded in $(-1, 1)$, pushes a clicked item up by $1 - q$ and an unclicked item down by $q$, and never
+refers to another item's score.
+
+**The minimiser is the click probability.** Let $p = P(y = 1 \mid u, i)$ be the true probability for one context. The
+expected loss is $\expect[\ell] = \ln(1 + e^s) - p\,s$, whose derivative $\sigma(s) - p$ vanishes only at
+$\sigma(s) = p$. The expected loss is convex in $s$, so this is the global minimum. Binary cross-entropy is a strictly
+<NoteLink to="proper-scoring-rule">proper scoring rule</NoteLink>: a model that minimises it over a rich enough class
+outputs calibrated probabilities. Squared error on $\sigma(s)$ is also proper, with the same minimiser, but its gradient
+$(\sigma(s) - y)\,\sigma(s)(1 - \sigma(s))$ vanishes when a confident prediction is wrong, so
+<NoteLink to="click-models">click models</NoteLink> use cross-entropy.
+
+## Implicit feedback: confidence weights
+
+Implicit data record events, not dislikes. An absent interaction may mean the user never saw the item. Two pointwise
+responses exist. Treating every missing cell as a zero with full weight teaches the model that unseen means disliked.
+Dropping the missing cells leaves only positives, and a model fit to them predicts 1 everywhere
+<Cite id="pan2008occf" />.
+
+**Weighted matrix factorisation** sits between the two <Cite id="hu2008implicit" />. Each cell has a binary preference
+$p_{ui} = \indicator[r_{ui} > 0]$, where $r_{ui}$ counts interactions, and a confidence $c_{ui} = 1 + \alpha r_{ui}$.
+The loss over all $U \times M$ cells is
+
+$$
+L = \sum_{u, i} c_{ui}\paren{p_{ui} - \wvec_u\transpose\vvec_i}^2 + \lambda\paren{\sum_u\norm{\wvec_u}^2 + \sum_i\norm{\vvec_i}^2},
+$$
+
+with gradient $\partial L/\partial s_{ui} = 2c_{ui}(s_{ui} - p_{ui})$ per cell. Hu, Koren and Volinsky fit it by
+weighted <Gloss name="als" />, which handles the $UM$ terms in time linear in the number of observed interactions (see
+<NoteLink to="weighted-matrix-factorisation">weighted matrix factorisation</NoteLink>). Pan et al. proposed the same
+weighting and, as an alternative, sampling a subset of missing cells as negatives <Cite id="pan2008occf" />.
+
+**What the weighted score estimates.** Suppose a user–item context is positive with probability $p$, positives carry
+confidence $c$ and negatives confidence 1. The expected loss $p\,c\,(1 - s)^2 + (1 - p)\,s^2$ has derivative
+$-2pc(1 - s) + 2(1 - p)s$, which vanishes at
+
+$$
+s^\star = \frac{c\,p}{c\,p + 1 - p}, \qquad \frac{s^\star}{1 - s^\star} = c\,\frac{p}{1 - p}.
+$$
+
+The optimal score is a probability whose odds are inflated by the confidence $c$. Weighting positives by $c$ is
+equivalent, at the optimum, to keeping only a fraction $1/c$ of the negatives. The scores rank correctly within a
+<NoteLink to="confidence-intervals">confidence level</NoteLink> but are not click probabilities.
+
+## Negative sampling for pointwise training
+
+A catalogue of $M$ items and $U$ users has $UM$ cells, almost all negative. Pointwise training on implicit data
+therefore samples negatives. For each positive $(u, i)$, draw $m$ items $j$ from a proposal distribution $Q$ (uniform,
+or proportional to popularity) and train binary cross-entropy with label 1 on $(u, i)$ and 0 on each $(u, j)$. This is
+the negative-sampling objective of word2vec applied to users and items <Cite id="mikolov2013b" />.
+
+**What the sampled model learns.** Let $P(i \mid u)$ be the probability that $u$'s next interaction is $i$. The pair
+$(u, i)$ appears as a positive at rate $P(i \mid u)$ and as a sampled negative at rate $m\,Q(i)$. The binary
+cross-entropy optimum derived above sets $\sigma(s_{ui})$ to the fraction of appearances that are positive:
+
+$$
+\sigma(s^\star_{ui}) = \frac{P(i \mid u)}{P(i \mid u) + m\,Q(i)}
+\quad\Longleftrightarrow\quad
+s^\star_{ui} = \ln P(i \mid u) - \ln Q(i) - \ln m.
+$$
+
+The score is a log ratio of the data to the proposal, not a click probability. For word2vec with $Q$ the unigram
+distribution it is the shifted <Gloss name="pmi" /> of Levy and Goldberg <Cite id="levy2014" />. With a popularity
+proposal, the term $-\ln Q(i)$ lowers the scores of popular items relative to $\ln P(i \mid u)$; ranking by
+$s^\star_{ui} + \ln Q(i)$ recovers the order of $P(i \mid u)$. The same correction appears for the
+<NoteLink to="two-tower-model">sampled softmax</NoteLink> as the <Gloss name="logq-correction">logQ correction</Gloss>
+(see <NoteLink to="sampled-softmax-and-negative-sampling">sampled softmax and negative sampling</NoteLink>).
+
+## Negative subsampling and recalibration
+
+Click logs have the opposite problem: every impression is labelled, but clicks are rare. Advertising systems keep all
+clicks and a random fraction $w$ of non-clicks to cut training cost <Cite id="he2014facebook" />. Training on the
+subsample changes the class prior, and the model learns the wrong probability.
+
+**The distortion.** Let $p = P(y = 1 \mid \xvec)$ on the full data. After subsampling, a click is always kept and a
+non-click is kept with probability $w$. By <NoteLink to="bayes-theorem">Bayes' rule</NoteLink>, the probability of a
+click among the kept examples with features $\xvec$ is
+
+$$
+q = P(y = 1 \mid \xvec, \text{kept}) = \frac{p}{p + w(1 - p)}, \qquad \frac{q}{1 - q} = \frac{1}{w}\cdot\frac{p}{1 - p}.
+$$
+
+A model trained with binary cross-entropy on the subsample converges to $q$. Its odds are too high by the factor
+$1/w$, and its logit by $-\ln w$.
+
+**The correction.** Solving the odds equation for $p$ gives
+
+$$
+p = \frac{q}{q + (1 - q)/w}, \qquad \operatorname{logit} p = \operatorname{logit} q + \ln w.
+$$
+
+This is the recalibration used for Facebook's ad click model <Cite id="he2014facebook" />, and the prior correction of
+King and Zeng for rare-event <NoteLink to="logistic-regression">logistic regression</NoteLink> <Cite id="king2001" />.
+For a model whose last layer is a logit it is a constant added to the bias. The correction needs no held-out data, but
+it assumes the subsampled model is otherwise calibrated (see <NoteLink to="calibration-under-imbalance">calibration
+under imbalance</NoteLink>).
+
+**Importance weighting instead.** Giving each kept non-click weight $1/w$ makes the expected weighted loss equal the
+full-data loss, so the minimiser is $p$ directly. Google's ad click system subsampled queries without clicks and
+reweighted them this way <Cite id="mcmahan2013adclick" />. The weights raise the variance of the gradient; the analytic
+correction keeps unit weights and shifts the bias afterwards.
+
+<NegativeSubsamplingCalibration />
+
+## Class imbalance and focal loss
+
+With click rates near 1%, most gradient comes from easy negatives with $q \approx 0$, each contributing $q$. **Focal
+loss** multiplies cross-entropy by $(1 - q_t)^\gamma$, where $q_t$ is the predicted probability of the observed label
+and $\gamma \ge 0$ <Cite id="lin2017" />:
+
+$$
+\ell_{\text{focal}} = -(1 - q_t)^\gamma \ln q_t.
+$$
+
+At $q_t = 0.9$ and $\gamma = 2$ the loss is scaled by $0.01$, so confident examples fall out of the gradient. The cost
+is calibration: the minimiser of the expected focal loss is not $q = p$, and focal-loss models must be recalibrated
+before their outputs are read as probabilities <Cite id="charoenphakdee2021" />. For CTR prediction, where calibrated
+output is the point of the pointwise model, negative subsampling followed by the analytic correction is the usual
+remedy for imbalance instead (see <NoteLink to="focal-loss">focal loss</NoteLink>).
+
+<Derivation title="Gradient of the focal loss">
+Take $y = 1$ with $q = \sigma(s)$, so $q_t = q$ and $\ell = -(1 - q)^\gamma\ln q$. With $dq/ds = q(1 - q)$,
+
+$$
+\frac{\partial \ell}{\partial s} = q(1 - q)\brack{\gamma(1 - q)^{\gamma - 1}\ln q - \frac{(1 - q)^\gamma}{q}} = (1 - q)^\gamma\brack{\gamma\,q\ln q - (1 - q)}.
+$$
+
+At $\gamma = 0$ this is $q - 1$, the <NoteLink to="softmax-and-log-sum-exp">cross-entropy gradient</NoteLink>. For
+$\gamma > 0$ the factor $(1 - q)^\gamma$ shrinks the gradient on well-classified examples ($q$ near 1) faster than
+cross-entropy does.
+</Derivation>
+
+## Multi-task pointwise heads
+
+Commercial feeds predict several events per impression: click, add to cart, purchase, dwell. Each has its own pointwise
+head, and the final ranking score combines them, for example expected revenue $b \cdot P(\text{click}) \cdot
+P(\text{purchase} \mid \text{click})$ for a bid or price $b$. A product of predicted probabilities is only meaningful
+if each factor is calibrated, which is why each head keeps a proper loss (see
+<NoteLink to="multi-behaviour-recommendation">multi-behaviour recommendation</NoteLink>).
+
+Post-click <Gloss name="cvr">conversion rate (CVR)</Gloss> is observed only on clicked impressions. A CVR model trained
+on clicks alone is fit to a biased sample and applied to every impression at serving time. The
+**<Gloss name="esmm">entire space multi-task model</Gloss>** (ESMM) <Cite id="ma2018esmm" /> avoids this. It models
+$P(\text{click}) = \sigma(s_{\text{ctr}})$ and $P(\text{conv} \mid \text{click}) = \sigma(s_{\text{cvr}})$, and trains
+two cross-entropy losses over all impressions: one on the click label with $P(\text{click})$, and one on the label
+"clicked and converted" with the product $P(\text{click})\,P(\text{conv} \mid \text{click})$. The CVR head never sees a
+loss of its own. It is learnt through the product, on the same impressions as the CTR head.
+
+## Relation to ranking metrics
+
+A pointwise loss can be consistent for ranking. The probability ranking principle states that ordering items by their
+probability of relevance is optimal for retrieval effectiveness <Cite id="robertson1977prp" />. For expected
+<Gloss name="dcg" /> with binary relevance, the expected DCG of an order is
+$\sum_i p_i\,d_{\rho_i}$, where $p_i$ is item $i$'s relevance probability and $d_\rho = 1/\log_2(1 + \rho)$ the discount
+at rank $\rho$. The discounts decrease with rank, so the rearrangement inequality puts the largest $p_i$ at the largest
+discount: sorting by $p_i$ is optimal. A model that outputs the true click probabilities, sorted by score, produces that
+order.
+
+Two things break this in practice. First, the gradient $\sigma(s_{ui}) - y_{ui}$ is the same at rank 1 and rank 500, so
+a model with limited capacity spends as much effort on the bottom of a list as on the top, where <Gloss name="ndcg" />
+is decided. Second, the loss rewards fitting offsets that ranking ignores. A user who clicks 10% of impressions and a
+user who clicks 1% need different intercepts; a ranking within each user's list is unaffected by either intercept, but
+the pointwise loss penalises an error in either intercept. Pairwise and listwise losses remove the offset by depending
+only on score differences within a list (see <NoteLink to="pairwise-ranking-losses">pairwise ranking losses</NoteLink>
+and <NoteLink to="listwise-ranking-losses">listwise ranking losses</NoteLink>). The two are often combined: a ranker
+trained with a listwise loss plus a pointwise cross-entropy term keeps calibration and gains order.
+
+<RankingLossLab initial="pointwise-bce" losses={['pointwise-bce', 'pointwise-mse', 'ranknet', 'softmax']} />
+
+Switching the figure to the pairwise or softmax loss shows the push concentrating on the items that are out of order.
+
+## Worked example
+
+**Ratings.** A user rated items A, B and C with $4$, $2$ and $5$ stars. The model predicts $3.5$, $3.0$ and $4.0$. The
+predicted order C, A, B is the true order, so every ranking metric is perfect. The squared-error loss is
+$\tfrac12(0.25 + 1 + 1) = 1.125$, and the gradients $s - r = (-0.5, 1.0, -1.0)$ still move all three scores. The loss
+spends updates on a list that is already ranked correctly.
+
+**Clicks.** Three items with scores $s = (1.0, -0.5, 0.2)$ are shown; only the second is clicked. Then
+$\sigma(s) = (0.731, 0.378, 0.550)$, the loss is $1.313 + 0.974 + 0.798 = 3.085$, and the gradients are
+$\sigma(s) - y = (0.731, -0.622, 0.550)$. A pairwise logistic loss over the pairs (2, 1) and (2, 3) instead gives
+gradients $(0.818, -1.486, 0.668)$: the clicked item is pushed up by the sum of its two pair terms, and each unclicked
+item is pushed down by how far it outscores the clicked one.
+
+**Recalibration.** The true CTR is 1% and non-clicks are kept with $w = 0.1$. Among 1,000 impressions, 10 clicks and
+$99$ of the $990$ non-clicks are kept, so the training click rate is $10/109 = 9.17\%$. A calibrated model on the
+subsample predicts $q = 0.0917$. The correction gives $p = 0.0917 / (0.0917 + 0.9083/0.1) = 0.0100$. In logits,
+$\operatorname{logit} q = -2.293$ and $\ln w = -2.303$, so $\operatorname{logit} p = -4.595 = \operatorname{logit}
+0.01$.
+
+**Confidence weights.** A user–item context is positive with probability $p = 0.02$, and a
+single play gives confidence $c = 1 + 40 \times 1 = 41$. The optimal weighted matrix factorisation (WMF) score is
+$41 \times 0.02 / (41 \times 0.02 + 0.98) = 0.456$, about 23 times the probability.
+
+## Assumptions
+
+- **Labels are conditionally independent given the features.** Each row's loss ignores what else was shown. Position
+  and presentation effects, which make a click depend on the rest of the list, must enter as features or be removed
+  with <NoteLink to="unbiased-learning-to-rank">unbiased learning to rank</NoteLink>.
+- **The recalibration assumes random subsampling.** The keep decision must be independent of the features given the
+  label. Subsampling non-clicks more heavily for some users or items needs a per-stratum correction.
+- **Calibration holds on the training distribution.** A model calibrated on logged impressions is calibrated on the
+  items the old system chose to show, not on the whole catalogue.
+
+## Pitfalls
+
+- **Reading sampled scores as probabilities.** A model trained with $m$ sampled negatives per positive outputs
+  $\sigma(s) = P/(P + mQ)$. Changing $m$ or $Q$ shifts every prediction. The scores rank but must not be fed to an
+  auction or blended with calibrated heads.
+- **Forgetting the correction after subsampling.** An uncorrected model overestimates CTR by up to $1/w$. The ranking is
+  unchanged, so offline <NoteLink to="recommendation-metrics">ranking metrics</NoteLink> do not reveal the error;
+  calibration metrics such as <NoteLink to="log-loss-and-brier-score">log loss</NoteLink> or the ratio of predicted to
+  observed clicks do.
+- **Weighted squared error on binary labels.** The optimal WMF score $cp/(cp + 1 - p)$ has its odds inflated by the
+  confidence $c$, and the low-rank dot product that approximates it is unbounded, so fitted scores can fall outside
+  $[0, 1]$. They are ranking scores, not probabilities.
+- **Squared error on ratings for top-$k$ recommendation.** Low rating error does not imply good top-$k$ lists. The
+  Netflix Prize's <Gloss name="rmse" /> rewarded accuracy on rated items, while users see only the items ranked first.

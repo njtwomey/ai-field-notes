@@ -3,7 +3,6 @@ import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, typ
 import { linspace, rng } from '@/lib/math'
 import { joinPaths } from '../_shared/sde'
 
-const PATHS = 20
 const STEPS = 200
 const T = 4
 const TIMES = linspace(0, T, STEPS + 1)
@@ -16,12 +15,18 @@ export function OrnsteinUhlenbeckPaths() {
   const x0 = useParam(3, { min: -4, max: 4, step: 0.1 })
   const theta = useParam(1, { min: 0.1, max: 4, step: 0.05 })
   const sigma = useParam(1, { min: 0, max: 2, step: 0.05 })
+  const count = useParam(20, { min: 1, max: 50, step: 1 })
 
-  // Fixed standard normals: changing a parameter moves every path smoothly instead of redrawing the noise.
-  const z = useMemo(() => {
-    const { normal } = rng(9)
-    return Array.from({ length: PATHS }, () => Float64Array.from({ length: STEPS }, () => normal()))
-  }, [])
+  // Fixed standard normals, one stream per path: changing a parameter moves every path smoothly instead of redrawing
+  // the noise, and raising the count adds paths without changing the existing ones.
+  const z = useMemo(
+    () =>
+      Array.from({ length: count.value }, (_, k) => {
+        const { normal } = rng(9 * 1000 + k)
+        return Float64Array.from({ length: STEPS }, () => normal())
+      }),
+    [count.value],
+  )
 
   const series = useMemo<XYSeries[]>(() => {
     const th = theta.value
@@ -40,7 +45,7 @@ export function OrnsteinUhlenbeckPaths() {
     const sd = TIMES.map((t) => Math.sqrt(((sg * sg) / (2 * th)) * (1 - Math.exp(-2 * th * t))))
     const stat = sg / Math.sqrt(2 * th)
     return [
-      { name: 'paths', type: 'line', ...paths, muted: true },
+      { name: 'sample paths', type: 'line', ...paths, slot: 2, thin: z.length > 1 },
       { name: 'mean x₀e^{−θt}', type: 'line', x: TIMES, y: mean, slot: 0 },
       {
         name: 'mean ± 2 sd',
@@ -63,12 +68,13 @@ export function OrnsteinUhlenbeckPaths() {
   return (
     <Interactive
       title="Ornstein–Uhlenbeck paths and their Gaussian band"
-      caption="Twenty paths of dX = −θX dt + σ dW started at x₀. The mean decays to 0 at rate θ and the band of ±2 standard deviations widens from zero to the stationary ±2σ/√(2θ) (dashed). Large θ forgets the start quickly and holds the paths in a narrow band; large σ widens the band. With θ = ½ and σ = 1 the stationary law is N(0, 1): this is the forward process of a variance-preserving diffusion model. Drag the start point at t = 0."
+      caption="Sample paths of dX = −θX dt + σ dW started at x₀, drawn as light lines; the paths slider sets how many. The mean decays to 0 at rate θ and the band of ±2 standard deviations widens from zero to the stationary ±2σ/√(2θ) (dashed). Large θ forgets the start quickly and holds the paths in a narrow band; large σ widens the band. With θ = ½ and σ = 1 the stationary law is N(0, 1): this is the forward process of a variance-preserving diffusion model. Drag the start point at t = 0."
       controls={
         <>
           <ParamSlider label="pull θ" param={theta} />
           <ParamSlider label="noise σ" param={sigma} />
           <ParamSlider label="start x₀" param={x0} />
+          <ParamSlider label="paths" param={count} withArrows format={(v) => String(v)} />
         </>
       }
       readout={

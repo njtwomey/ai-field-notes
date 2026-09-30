@@ -147,7 +147,11 @@ export function posterior(
  * smoothly as the parameters change.
  */
 export function samples(mean: number[], cov: Matrix, normals: number[][], jitter = 1e-6): number[][] {
-  const l = cholesky(addDiagonal(cov, jitter))
+  return samplesFromFactor(mean, cholesky(addDiagonal(cov, jitter)), normals)
+}
+
+/** Draws m + L z for each row z of standard normals, given the Cholesky factor L of the covariance. */
+export function samplesFromFactor(mean: number[], l: Matrix, normals: number[][]): number[][] {
   return normals.map((z) => mean.map((m, i) => m + l[i].reduce((s, lij, j) => (j <= i ? s + lij * z[j] : s), 0)))
 }
 

@@ -26,17 +26,19 @@ import { AlignUniform } from './AlignUniform'
 
 <Definition>
 Embedding evaluation measures the quality of a representation $f: \Xcal \to \reals^D$ that is kept frozen. **Linear
-probing** trains a linear classifier on $f(x)$ for a labelled task and reports its test accuracy. **$k$-nearest-neighbour
-probing** classifies each test point by a similarity-weighted vote among its $k$ closest training embeddings.
-**Alignment and uniformity** measure, without labels, how close the embeddings of related inputs are and how evenly
-all embeddings spread over the unit sphere <Cite id="alain2016" /> <Cite id="wu2018" /> <Cite id="wang2020" />.
+probing** trains a linear classifier on $f(x)$ for a labelled task and reports its test accuracy.
+**$k$-nearest-neighbour probing** classifies each test point by a similarity-weighted vote among its $k$ closest
+training embeddings. **Alignment and uniformity** measure, without labels, how close the embeddings of related inputs
+are and how evenly all embeddings spread over the unit sphere <Cite id="alain2016" /> <Cite id="wu2018" />
+<Cite id="wang2020" />.
 </Definition>
 
 ## Intuition
 
-A self-supervised model is trained on a <NoteLink to="self-supervised-learning">pretext task</NoteLink> that is not itself a downstream task, such as matching two crops of an image. Its value lies
-in how useful its features are for other tasks. Measuring that directly would mean building every downstream system.
-Probes are a cheap stand-in: attach the simplest possible model to the frozen features and see how well it does.
+A self-supervised model is trained on a <NoteLink to="self-supervised-learning">pretext task</NoteLink> that is not
+itself a downstream task, such as matching two crops of an image. Its value lies in how useful its features are for
+other tasks. Measuring that directly would mean building every downstream system. Probes are a cheap stand-in: attach
+the simplest possible model to the frozen features and see how well it does.
 
 A simple probe has little capacity of its own. If it succeeds, the information was already in the features in an easily
 usable form. A deep probe could learn the task from poor features, and would measure the probe rather than the
@@ -45,24 +47,25 @@ representation.
 ## Linear probing
 
 Compute the features $\hvec_i = f(x_i)$ of every labelled training example once. Fit multinomial
-<NoteLink to="logistic-regression">logistic regression</NoteLink>, $p(y = c \mid \hvec) \propto \exp(\wvec_c^{\tr} \hvec + b_c)$,
-by minimising cross-entropy, usually with an $\ell_2$ penalty chosen on a validation split. Report accuracy on a held-out
-test set.
+<NoteLink to="logistic-regression">logistic regression</NoteLink>,
+$p(y = c \mid \hvec) \propto \exp(\wvec_c^{\tr} \hvec + b_c)$, by minimising cross-entropy, usually with an $\ell_2$
+penalty chosen on a validation split. Report accuracy on a held-out test set.
 
 The fit is a convex problem in $(\wvec_c, b_c)$, because the cross-entropy of a softmax is convex in the logits and the
 logits are linear in the parameters. Any reasonable optimiser reaches the same minimum. The result therefore depends on
 the features and the regularisation, not on training luck, which makes it a reproducible benchmark.
 
 Linear probing measures **linear separability**: whether the classes lie on different sides of hyperplanes in feature
-space. On <Gloss name="imagenet" /> it is the standard protocol for self-supervised image models. SimCLR's ResNet-50 features reached
-76.5% top-1 accuracy under it <Cite id="chen2020" />. Alain and Bengio trained linear probes on every layer of a network
-to see where class information becomes linearly available; it grows monotonically with depth <Cite id="alain2016" />.
+space. On <Gloss name="imagenet" /> it is the standard protocol for self-supervised image models. SimCLR's ResNet-50
+features reached 76.5% top-1 accuracy under it <Cite id="chen2020" />. Alain and Bengio trained linear probes on every
+layer of a network to see where class information becomes linearly available; it grows monotonically with depth
+<Cite id="alain2016" />.
 
 ## Nearest-neighbour probing
 
 Normalise every embedding to unit length. For a test embedding $\hvec$, find the $k$ training embeddings
-$\hvec_1, \dots, \hvec_k$ with the highest <NoteLink to="dot-product">cosine similarity</NoteLink> $s_i = \hvec^{\tr} \hvec_i$. Each neighbour votes for its
-label with weight $e^{s_i / \tau}$, and the predicted class is
+$\hvec_1, \dots, \hvec_k$ with the highest <NoteLink to="dot-product">cosine similarity</NoteLink>
+$s_i = \hvec^{\tr} \hvec_i$. Each neighbour votes for its label with weight $e^{s_i / \tau}$, and the predicted class is
 
 $$
 \hat y = \argmax_c \sum_{i=1}^{k} \indicator[y_i = c]\, e^{s_i / \tau}.
@@ -72,10 +75,10 @@ Wu et al. introduced this weighted vote with $\tau = 0.07$ <Cite id="wu2018" />.
 for their models <Cite id="caron2021" />. The temperature decides how much a closer neighbour counts: two neighbours
 whose similarities differ by $\Delta$ have weights in the ratio $e^{\Delta / \tau}$.
 
-A $k$-NN probe needs no training and no <NoteLink to="hyperparameter-search">hyperparameter search</NoteLink> beyond $k$ and $\tau$. It measures **local** structure:
-whether each point's nearest neighbours share its label. A representation can have good local structure and poor
-linear separability, for example when one class occupies several separate clusters. The two probes can therefore rank
-models differently.
+A $k$-NN probe needs no training and no <NoteLink to="hyperparameter-search">hyperparameter search</NoteLink> beyond $k$
+and $\tau$. It measures **local** structure: whether each point's nearest neighbours share its label. A representation
+can have good local structure and poor linear separability, for example when one class occupies several separate
+clusters. The two probes can therefore rank models differently.
 
 ### Worked example
 
@@ -100,9 +103,9 @@ $$
 $$
 
 Both are better when lower. Alignment is small when related inputs map close together. Uniformity is small when
-embeddings are spread out: the <NoteLink to="first-order-linear-odes">exponential decays</NoteLink> with distance, so its average is large only if many pairs are close.
-For unit vectors $\norm{\uvec - \vvec}^2 = 2 - 2 \uvec^{\tr} \vvec$, so both quantities are functions of cosine
-similarity.
+embeddings are spread out: the <NoteLink to="first-order-linear-odes">exponential decays</NoteLink> with distance, so
+its average is large only if many pairs are close. For unit vectors $\norm{\uvec - \vvec}^2 = 2 - 2 \uvec^{\tr} \vvec$,
+so both quantities are functions of cosine similarity.
 
 The two quantities pull against each other. A constant encoder has perfect alignment, $\mathcal{L}_{\text{align}} = 0$,
 and the worst uniformity, $\log e^0 = 0$. An encoder that ignores which inputs are related can spread embeddings evenly
@@ -123,8 +126,8 @@ it towards 0.
 
 - **Fine-tuning.** Train the whole network on the labelled task, starting from the pretrained weights (see
   <NoteLink to="transfer-learning-and-fine-tuning">transfer learning and fine-tuning</NoteLink>). This measures the
-  representation as an initialisation. <Gloss name="masked-autoencoder">Masked autoencoders</Gloss> score much better under fine-tuning than under linear
-  probing <Cite id="he2022" />.
+  representation as an initialisation. <Gloss name="masked-autoencoder">Masked autoencoders</Gloss> score much better
+  under fine-tuning than under linear probing <Cite id="he2022" />.
 - **Low-shot probing.** Train the probe on 1% or 10% of the labels. This measures how quickly the representation
   supports learning from few examples.
 - **Word embeddings.** Static word vectors are evaluated by the rank correlation between their cosine similarities and
@@ -142,13 +145,14 @@ it towards 0.
 
 ## Pitfalls
 
-- **Protocol details change rankings.** Probe regularisation, feature normalisation, <NoteLink to="data-augmentation">data augmentation</NoteLink> during probing,
-  the layer probed and the number of training epochs all change the reported accuracy. Compare only numbers obtained
-  with the same protocol.
-- **Probe before the projection head.** In contrastive models the representation before the projection head transfers better than its
-  output <Cite id="chen2020" />. Probing the wrong layer understates the model.
+- **Protocol details change rankings.** Probe regularisation, feature normalisation,
+  <NoteLink to="data-augmentation">data augmentation</NoteLink> during probing, the layer probed and the number of
+  training epochs all change the reported accuracy. Compare only numbers obtained with the same protocol.
+- **Probe before the projection head.** In contrastive models the representation before the projection head transfers
+  better than its output <Cite id="chen2020" />. Probing the wrong layer understates the model.
 - **One protocol is not enough.** Linear probing, $k$-NN and fine-tuning can order the same models differently. A method
   that wins under one can lose under another <Cite id="he2022" />. Fine-tuning can also improve in-distribution accuracy
-  while hurting <NoteLink to="robustness-to-distribution-shift">robustness to distribution shift</NoteLink> <Cite id="kumar2022" />.
+  while hurting <NoteLink to="robustness-to-distribution-shift">robustness to distribution shift</NoteLink>
+  <Cite id="kumar2022" />.
 - **Uniformity depends on $t$ and dimension.** Its absolute value is only comparable between embeddings of the same
   dimension, measured with the same $t$.

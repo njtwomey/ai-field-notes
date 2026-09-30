@@ -21,19 +21,21 @@ $$
 F(\wvec, b) = \frac{1}{n}\sum_{i=1}^{n} \tfrac{1}{2}\bigl(y_i - \wvec^\top\xvec_i - b\bigr)^2 + \alpha R(\wvec)
 $$
 
-by visiting the samples one at a time and stepping against the <NoteLink to="gradient">gradient</NoteLink> of each sample's term. The penalty $R$ is
-$\frac{1}{2}\norm{\wvec}^2$ for ridge, $\norm{\wvec}_1$ for the lasso, or the <NoteLink to="elastic-net">elastic-net</NoteLink> mixture
-$\rho\norm{\wvec}_1 + \frac{1 - \rho}{2}\norm{\wvec}^2$ <Cite id="pedregosa2011" />.
+by visiting the samples one at a time and stepping against the <NoteLink to="gradient">gradient</NoteLink> of each
+sample's term. The penalty $R$ is $\frac{1}{2}\norm{\wvec}^2$ for ridge, $\norm{\wvec}_1$ for the lasso, or the
+<NoteLink to="elastic-net">elastic-net</NoteLink> mixture $\rho\norm{\wvec}_1 + \frac{1 - \rho}{2}\norm{\wvec}^2$
+<Cite id="pedregosa2011" />.
 </Definition>
 
 ## Problem
 
 The exact solvers for these models need the data at hand and cost more than one pass over it. The closed form for
 <NoteLink to="ridge-regression">ridge</NoteLink> forms and factorises $\Xmat^\top\Xmat + \lambda\eye$, at
-$O(nd^2 + d^3)$ time and $O(d^2)$ memory. <NoteLink to="coordinate-descent">Coordinate descent</NoteLink> for the <NoteLink to="lasso">lasso</NoteLink> makes
-repeated $O(nd)$ passes over data held in memory. When $n$ runs to hundreds of millions of rows, when $d$ is large
-and the features sparse, or when data arrive as a stream, neither is practical. SGD needs $O(d)$ memory and $O(d)$
-time per update, and it can learn from each batch as it arrives <Cite id="bottou2010" />.
+$O(nd^2 + d^3)$ time and $O(d^2)$ memory. <NoteLink to="coordinate-descent">Coordinate descent</NoteLink> for the
+<NoteLink to="lasso">lasso</NoteLink> makes repeated $O(nd)$ passes over data held in memory. When $n$ runs to hundreds
+of millions of rows, when $d$ is large and the features sparse, or when data arrive as a stream, neither is practical.
+SGD needs $O(d)$ memory and $O(d)$ time per update, and it can learn from each batch as it arrives
+<Cite id="bottou2010" />.
 
 The objective $F$ is the same as the exact solvers' up to scaling. The lasso and elastic net match scikit-learn's
 `Lasso` and `ElasticNet` with the same $\alpha$ and $\rho$. The ridge term $\frac{\alpha}{2}\norm{\wvec}^2$ matches
@@ -51,10 +53,10 @@ $$
 \wvec \leftarrow \wvec - \eta_t(-r_i\xvec_i + \alpha\wvec) = (1 - \eta_t\alpha)\,\wvec + \eta_t r_i\xvec_i, \qquad b \leftarrow b + \eta_t r_i.
 $$
 
-The penalty appears as **weight decay**: every step first multiplies the weights by $1 - \eta_t\alpha$, then moves
-them towards fitting sample $i$. Because the <NoteLink to="expectation">expected value</NoteLink> of the sample gradient, over a uniformly chosen $i$, is the
-full gradient of $F$, each step is an unbiased estimate of a
-<NoteLink to="gradient-descent">gradient-descent</NoteLink> step.
+The penalty appears as **<Gloss name="weight-decay">weight decay</Gloss>**: every step first multiplies the weights by
+$1 - \eta_t\alpha$, then moves them towards fitting sample $i$. Because the <NoteLink to="expectation">expected
+value</NoteLink> of the sample gradient, over a uniformly chosen $i$, is the full gradient of $F$, each step is an
+unbiased estimate of a <NoteLink to="gradient-descent">gradient-descent</NoteLink> step.
 
 ### The L1 part and exact zeros
 
@@ -67,9 +69,10 @@ subgradient step gives $w_j = 0.004 - 0.01 = -0.006$. The next step pushes it to
 settles at zero.
 
 The fix is to **clip at zero**: apply the penalty step, but if it would cross zero, stop at zero. That is exactly the
-<NoteLink to="proximal-gradient-methods">soft-thresholding operator</NoteLink> $S(v, \eta_t\alpha) = \sgn(v)\max(\abs{v} - \eta_t\alpha, 0)$ applied after the data step.
-It is the proximal operator of the <NoteLink to="vector-norms">L1 norm</NoteLink>, the same operation that gives the lasso its zeros in coordinate descent.
-In the example, the clipped step gives $w_j = 0$.
+<NoteLink to="proximal-gradient-methods">soft-thresholding operator</NoteLink>
+$S(v, \eta_t\alpha) = \sgn(v)\max(\abs{v} - \eta_t\alpha, 0)$ applied after the data step. It is the proximal operator
+of the <NoteLink to="vector-norms">L1 norm</NoteLink>, the same operation that gives the lasso its zeros in coordinate
+descent. In the example, the clipped step gives $w_j = 0$.
 
 Clipping each step on its own still misses many zeros, because a single noisy sample can push a weight away from zero
 again before the penalty has had a chance to act. The **cumulative penalty** method keeps track of the total L1
@@ -82,9 +85,10 @@ L1 step with strength $\alpha\rho$.
 
 ### Step sizes
 
-For SGD to converge to the minimiser, the step sizes must satisfy the <NoteLink to="stochastic-gradient-descent-theory">Robbins–Monro conditions</NoteLink>
-$\sum_t \eta_t = \infty$ and $\sum_t \eta_t^2 < \infty$ <Cite id="robbins1951" />. The first lets the iterates travel
-any distance; the second makes the noise from single samples die out. scikit-learn offers several schedules.
+For SGD to converge to the minimiser, the step sizes must satisfy the
+<NoteLink to="stochastic-gradient-descent-theory">Robbins–Monro conditions</NoteLink> $\sum_t \eta_t = \infty$ and
+$\sum_t \eta_t^2 < \infty$ <Cite id="robbins1951" />. The first lets the iterates travel any distance; the second makes
+the noise from single samples die out. scikit-learn offers several schedules.
 
 - **invscaling** (the default for `SGDRegressor`): $\eta_t = \eta_0/t^{p}$ with $\eta_0 = 0.01$ and $p = 0.25$. Since
   $\sum_t t^{-0.5}$ diverges, $\sum_t \eta_t^2 = \infty$, so the noise never fully dies out and the iterates keep
@@ -141,8 +145,8 @@ point per epoch, for 60 epochs. The exact minimisers of the same objectives are 
   SGD is often the only practical option, and its approximation error is small next to the statistical error.
 - **Tuning cost.** SGD adds a schedule, an initial step size, a number of epochs and a tolerance to the model's own
   $\alpha$ and $\rho$. The exact solvers need only the model's parameters.
-- **Selection.** If exact zeros matter, as in <NoteLink to="feature-selection">feature selection</NoteLink>, prefer an exact L1 solver, or run SGD long enough and
-  check that the zero set has stopped changing.
+- **Selection.** If exact zeros matter, as in <NoteLink to="feature-selection">feature selection</NoteLink>, prefer an
+  exact L1 solver, or run SGD long enough and check that the zero set has stopped changing.
 
 ## Pitfalls
 

@@ -29,22 +29,24 @@ $$
 
 ## Intuition
 
-Humans find it hard to score behaviour on an absolute scale but easy to say which of two attempts is better.
-Comparisons are therefore cheaper and more consistent than ratings. Christiano et al. used them to teach simulated
-robots and Atari agents tasks, such as a backflip, from under an hour of human time, by querying people on short clips
-where the reward model was most uncertain <Cite id="christiano2017" />. Applied to <Gloss name="language-model">language models</Gloss>, with $x$ a prompt
-and $y$ a response, the same recipe produced InstructGPT <Cite id="ouyang2022" />. The language-model side of the
-pipeline, including supervised fine-tuning, is in <NoteLink to="instruction-tuning-and-alignment">instruction tuning
-and alignment</NoteLink>. This note covers the <Gloss name="rl">reinforcement-learning</Gloss> side.
+Humans find it hard to score behaviour on an absolute scale but easy to say which of two attempts is better. Comparisons
+are therefore cheaper and more consistent than ratings. Christiano et al. used them to teach simulated robots and Atari
+agents tasks, such as a backflip, from under an hour of human time, by querying people on short clips where the reward
+model was most uncertain <Cite id="christiano2017" />. Applied to <Gloss name="language-model">language models</Gloss>,
+with $x$ a prompt and $y$ a response, the same recipe produced InstructGPT <Cite id="ouyang2022" />. The language-model
+side of the pipeline, including supervised fine-tuning, is in
+<NoteLink to="instruction-tuning-and-alignment">instruction tuning and alignment</NoteLink>. This note covers the
+<Gloss name="rl">reinforcement-learning</Gloss> side.
 
 <RlhfDiagram />
 
 ## Reward models from preferences
 
-**The Bradley–Terry model.** Suppose a rater's judgement of response $y$ is a latent utility $u(y) = r(x, y) + \epsilon_y$,
-where $r$ is the true reward and the noise terms $\epsilon_y$ are independent standard Gumbel variables. The rater
-prefers the response with the larger utility. By the <NoteLink to="gumbel-max-trick">Gumbel-max trick</NoteLink>, the
-index of the largest of $r_i + \epsilon_i$ is distributed as $\operatorname{softmax}(r)$. For two responses this gives
+**The Bradley–Terry model.** Suppose a rater's judgement of response $y$ is a latent utility
+$u(y) = r(x, y) + \epsilon_y$, where $r$ is the true reward and the noise terms $\epsilon_y$ are independent standard
+Gumbel variables. The rater prefers the response with the larger utility. By the
+<NoteLink to="gumbel-max-trick">Gumbel-max trick</NoteLink>, the index of the largest of $r_i + \epsilon_i$ is
+distributed as $\operatorname{softmax}(r)$. For two responses this gives
 
 $$
 P(y_w \succ y_l \mid x) = \frac{e^{r(x, y_w)}}{e^{r(x, y_w)} + e^{r(x, y_l)}} = \sigma\paren{r(x, y_w) - r(x, y_l)},
@@ -67,11 +69,11 @@ For language models, $r_\phi$ is usually the pretrained model with its output la
 
 ## Policy optimisation with a KL penalty
 
-**Reward overoptimisation.** The reward model is accurate only near the responses it was trained on. A policy that maximises
-$r_\phi$ without restraint finds responses on which the model is wrong: text that scores highly but that people dislike.
-This is **reward overoptimisation**, an instance of Goodhart's law: past a point, true preference falls while the
-proxy reward keeps rising. The <Gloss name="kl" /> term keeps the policy near $\pi_{\text{ref}}$, the supervised model on whose outputs
-the preferences were collected <Cite id="stiennon2020" />.
+**Reward overoptimisation.** The reward model is accurate only near the responses it was trained on. A policy that
+maximises $r_\phi$ without restraint finds responses on which the model is wrong: text that scores highly but that
+people dislike. This is **reward overoptimisation**, an instance of Goodhart's law: past a point, true preference falls
+while the proxy reward keeps rising. The <Gloss name="kl" /> term keeps the policy near $\pi_{\text{ref}}$, the
+supervised model on whose outputs the preferences were collected <Cite id="stiennon2020" />.
 
 **As an RL problem.** A response is a sequence of tokens $y = (y_1, \dots, y_T)$, each an action in a state made of the
 prompt and the tokens so far. The KL divergence of sequence distributions is the expected sum of per-token
@@ -81,10 +83,10 @@ $$
 R_t = -\beta\log\frac{\pi_{\thetavec}(y_t \mid x, y_{<t})}{\pi_{\text{ref}}(y_t \mid x, y_{<t})} + \indicator[t = T]\,r_\phi(x, y),
 $$
 
-a KL penalty at every token and the reward model's score at the last <Cite id="ziegler2019" />. PPO optimises it,
-with a value head on the policy network estimating the return for <NoteLink to="actor-critic">GAE</NoteLink>
-advantages, and clipped updates as in <NoteLink to="trust-region-and-proximal-policy-optimisation">PPO</NoteLink>. The episode is one response,
-the horizon is its length, and $\gamma = 1$.
+a KL penalty at every token and the reward model's score at the last <Cite id="ziegler2019" />. PPO optimises it, with a
+value head on the policy network estimating the return for <NoteLink to="actor-critic">GAE</NoteLink> advantages, and
+clipped updates as in <NoteLink to="trust-region-and-proximal-policy-optimisation">PPO</NoteLink>. The episode is one
+response, the horizon is its length, and $\gamma = 1$.
 
 ## The optimal policy in closed form
 
@@ -104,9 +106,9 @@ the highest-reward responses, large $\beta$ stays near $\pi_{\text{ref}}$.
 
 ## Direct preference optimisation
 
-The closed form can be inverted: any policy $\pi$ is optimal for the reward $r(x, y) = \beta\log(\pi(y \mid x)/\pi_{\text{ref}}(y \mid x)) + \beta\log Z(x)$.
-Substituting this into the Bradley–Terry likelihood, the intractable $\beta\log Z(x)$ appears in both rewards and
-cancels in their difference:
+The closed form can be inverted: any policy $\pi$ is optimal for the reward
+$r(x, y) = \beta\log(\pi(y \mid x)/\pi_{\text{ref}}(y \mid x)) + \beta\log Z(x)$. Substituting this into the
+Bradley–Terry likelihood, the intractable $\beta\log Z(x)$ appears in both rewards and cancels in their difference:
 
 $$
 P(y_w \succ y_l \mid x) = \sigma\paren{\beta\log\frac{\pi(y_w \mid x)}{\pi_{\text{ref}}(y_w \mid x)} - \beta\log\frac{\pi(y_l \mid x)}{\pi_{\text{ref}}(y_l \mid x)}}.
@@ -119,13 +121,14 @@ L_{\text{DPO}}(\thetavec) = -\expect\brack{\log\sigma\paren{\beta\log\frac{\pi_{
 $$
 
 <Cite id="rafailov2023" />. The policy is its own reward model. DPO needs no separate reward network, no sampling from
-the policy during training and no <Gloss name="value-function">value function</Gloss>; it is a classification loss on the preference data. Its <NoteLink to="gradient">gradient</NoteLink>
-raises the log-probability of $y_w$ and lowers that of $y_l$, weighted by $\sigma$ of the implied reward margin in the
-wrong direction, so pairs the policy already ranks correctly contribute little.
+the policy during training and no <Gloss name="value-function">value function</Gloss>; it is a classification loss on
+the preference data. Its <NoteLink to="gradient">gradient</NoteLink> raises the log-probability of $y_w$ and lowers that
+of $y_l$, weighted by $\sigma$ of the implied reward margin in the wrong direction, so pairs the policy already ranks
+correctly contribute little.
 
-**Trade-off.** DPO optimises on a fixed dataset, so it is an offline method. PPO-based RLHF samples fresh responses
-from the current policy and scores them with the reward model, which lets it explore responses not in the data and
-lets the reward model generalise to them. Which is better depends on the task and the data.
+**Trade-off.** <Gloss name="dpo" /> optimises on a fixed dataset, so it is an offline method. PPO-based RLHF samples
+fresh responses from the current policy and scores them with the reward model, which lets it explore responses not in
+the data and lets the reward model generalise to them. Which is better depends on the task and the data.
 
 ## Worked example
 

@@ -12,8 +12,8 @@ updated: 2026-09-27
 ---
 
 <Definition>
-**QK normalisation** applies a normalisation $N$, usually <NoteLink to="layer-normalisation">layer normalisation</NoteLink> or <Gloss name="rmsnorm" /> per head, to the queries and keys
-before the scores are formed:
+**QK normalisation** applies a normalisation $N$, usually <NoteLink to="layer-normalisation">layer
+normalisation</NoteLink> or <Gloss name="rmsnorm" /> per head, to the queries and keys before the scores are formed:
 $$
 \operatorname{softmax}\paren{\frac{N(\Xmat \Wmat_Q)\, N(\Xmat \Wmat_K)^{\tr}}{\sqrt{d_k}}}
 $$
@@ -24,21 +24,23 @@ so every logit lies in $(-c, c)$ <Cite id="gemmateam2024" />.
 ## Problem
 
 **Logits grow with the weights.** The score between positions $a$ and $b$ is
-$\xvec_a^{\tr} \Wmat_Q \Wmat_K^{\tr} \xvec_b / \sqrt{d_k}$. Scaling both $\Wmat_Q$ and $\Wmat_K$ by $c$ scales every score
-by $c^2$. By the <NoteLink to="dot-product">Cauchy–Schwarz inequality</NoteLink>, $\abs{\qvec^{\tr} \kvec} \le \norm{\qvec} \norm{\kvec}$, and nothing in
-the architecture bounds the norms of queries and keys. The inputs are normalised in a pre-norm block, but the
-projection weights are not. As their norms grow during training, the largest logits can grow quadratically.
+$\xvec_a^{\tr} \Wmat_Q \Wmat_K^{\tr} \xvec_b / \sqrt{d_k}$. Scaling both $\Wmat_Q$ and $\Wmat_K$ by $c$ scales every
+score by $c^2$. By the <NoteLink to="dot-product">Cauchy–Schwarz inequality</NoteLink>,
+$\abs{\qvec^{\tr} \kvec} \le \norm{\qvec} \norm{\kvec}$, and nothing in the architecture bounds the norms of queries and
+keys. The inputs are normalised in a pre-norm block, but the projection weights are not. As their norms grow during
+training, the largest logits can grow quadratically.
 
-**Large logits stall learning.** Large logit gaps make the softmax nearly one-hot. The <NoteLink to="jacobian">Jacobian</NoteLink> of the softmax,
-$\diag(\alphavec) - \alphavec \alphavec^{\tr}$, then has every entry near 0, so the <NoteLink to="gradient">gradient</NoteLink> reaching the queries and keys
-vanishes (see <NoteLink to="scaled-dot-product-attention">scaled dot-product attention</NoteLink>). Zhai et al. call
-this **attention entropy collapse** and link it to oscillating or diverging loss <Cite id="zhai2023entropy" />.
+**Large logits stall learning.** Large logit gaps make the softmax nearly one-hot. The
+<NoteLink to="jacobian">Jacobian</NoteLink> of the softmax, $\diag(\alphavec) - \alphavec \alphavec^{\tr}$, then has
+every entry near 0, so the <NoteLink to="gradient">gradient</NoteLink> reaching the queries and keys vanishes (see
+<NoteLink to="scaled-dot-product-attention">scaled dot-product attention</NoteLink>). Zhai et al. call this **attention
+entropy collapse** and link it to oscillating or diverging loss <Cite id="zhai2023entropy" />.
 
 **Observed at scale.** Training ViT-22B, Dehghani et al. saw the loss diverge after a few thousand steps in models of
 about 8 billion parameters. Without normalisation, attention logits grew above 50,000 in magnitude and the attention
-weights became one-hot <Cite id="dehghani2023" />. Wortsman et al. reproduced this **attention logit growth** instability
-in small models trained at high <Gloss name="learning-rate">learning rates</Gloss>, and found QK layer normalisation equally effective there
-<Cite id="wortsman2023" />.
+weights became one-hot <Cite id="dehghani2023" />. Wortsman et al. reproduced this **attention logit growth**
+instability in small models trained at high <Gloss name="learning-rate">learning rates</Gloss>, and found QK layer
+normalisation equally effective there <Cite id="wortsman2023" />.
 
 ## Mechanism
 
@@ -63,10 +65,10 @@ $$
 c \tanh\paren{\frac{s}{c}} \approx s - \frac{s^3}{3c^2},
 $$
 
-which is almost the identity. For $\abs{s} \gg c$ the output approaches $\pm c$. The <NoteLink to="derivative">derivative</NoteLink> is
-$\operatorname{sech}^2(s/c)$: 1 at $s = 0$, $0.42$ at $s = c$ and near 0 beyond. Large logits therefore stop changing the
-output and receive almost no gradient. Soft-capping on output logits goes back to Bello et al.'s pointer networks
-<Cite id="bello2016" />.
+which is almost the identity. For $\abs{s} \gg c$ the output approaches $\pm c$. The
+<NoteLink to="derivative">derivative</NoteLink> is $\operatorname{sech}^2(s/c)$: 1 at $s = 0$, $0.42$ at $s = c$ and
+near 0 beyond. Large logits therefore stop changing the output and receive almost no gradient. Soft-capping on output
+logits goes back to Bello et al.'s pointer networks <Cite id="bello2016" />.
 
 **Where they are used.** Gemma 2 soft-caps attention logits at $c = 50$ and the final vocabulary logits at $c = 30$
 <Cite id="gemmateam2024" />. Gemma 3 replaced the attention soft-capping with QK normalisation
@@ -96,9 +98,9 @@ normalisation happens before the kernel.
 
 - **Bounded logits limit sharpness.** QK normalisation without gains caps how peaked a head can be. The learned gains or
   scale restore the range, and the bound on them is what keeps training stable.
-- **Interaction with <Gloss name="rope" />.** In rotary models the normalisation can be applied before or after the rotation. Rotations
-  preserve norms, so the bound holds either way.
+- **Interaction with <Gloss name="rope" />.** In rotary models the normalisation can be applied before or after the
+  rotation. Rotations preserve norms, so the bound holds either way.
 - **Other remedies.** Zhai et al. reparametrise every linear layer with spectral normalisation and a learned scale,
-  which lower-bounds attention <NoteLink to="entropy">entropy</NoteLink> <Cite id="zhai2023entropy" />. Lower learning rates also delay logit growth, at
-  the cost of slower training. See <NoteLink to="training-stability-at-scale">training stability at scale</NoteLink>
-  for the other instabilities, such as output-logit divergence, and their fixes.
+  which lower-bounds attention <NoteLink to="entropy">entropy</NoteLink> <Cite id="zhai2023entropy" />. Lower learning
+  rates also delay logit growth, at the cost of slower training. See <NoteLink to="training-stability-at-scale">training
+  stability at scale</NoteLink> for the other instabilities, such as output-logit divergence, and their fixes.

@@ -1,0 +1,353 @@
+---
+title: Sequential recommendation losses
+kind: concept
+summary: 'Next-item models train with full-catalogue cross-entropy, sampled softmax, a Cloze loss or binary cross-entropy with $k$ sampled negatives. With $|I|$ items, BCE learns $q = p/(p + \alpha(1-p))$ for $\alpha = k/(|I|-1)$, near 1 for any likely item; gBCE corrects this.'
+tags: [recommender-systems, sequence-modelling, loss-functions, ranking, implicit-feedback, evaluation, worked-example]
+aliases: [next-item loss, next-item cross-entropy, gSASRec, gBCE, generalised binary cross-entropy, overconfidence from negative sampling, TOP1 loss, BPR-max, TOP1-max, GRU4Rec loss, Cloze loss for recommendation]
+requires: [sequential-recommendation-models, cross-entropy-and-perplexity, softmax-and-log-sum-exp]
+partOf: [recommendation-loss-families]
+related: [sasrec, bert4rec, pinnerformer, bayesian-personalised-ranking, ranking-losses, two-tower-model, classifier-calibration, hit-rate-and-r-precision, importance-sampling]
+references: [kang2018sasrec, petrov2023gsasrec, klenitskiy2023, sun2019bert4rec, devlin2019, hidasi2016gru4rec, hidasi2018topk, jean2015sampledsoftmax, yi2019sampling, mezentsev2024sce, pancha2022pinnerformer, covington2016youtube, krichene2020sampled]
+status: draft
+updated: 2026-09-30
+---
+
+import { OverconfidenceLab } from './OverconfidenceLab'
+
+<Definition>
+A **sequential recommendation loss** trains a model that maps a user's item history $(i_1, \ldots, i_t)$ to a score
+$s_{t,j}$ for every catalogue item $j \in \Ical$, so that the item the user takes next, $i_{t+1}$, scores highly. The
+main families are **next-item cross-entropy** (a softmax over the whole catalogue),
+**<NoteLink to="two-tower-model">sampled softmax</NoteLink>** (the same over the positive and a sample of negatives),
+**binary cross-entropy with sampled negatives** (one logistic loss per item), the **Cloze** loss of masked-item models,
+and **pairwise session losses** such as TOP1 and BPR-max. The choice of loss changes what the scores estimate, and it
+affects accuracy as much as the architecture does <Cite id="klenitskiy2023" /> <Cite id="petrov2023gsasrec" />.
+</Definition>
+
+## Setup
+
+A sequence model such as <Gloss name="sasrec" /> produces an output vector $\fvec_t \in \reals^d$ at every position $t$
+of a user's sequence. The score of candidate item $j$ for position $t + 1$ is the dot product
+$s_{t,j} = \fvec_t\transpose\evec_j$ with the item's embedding $\evec_j \in \reals^d$ <Cite id="kang2018sasrec" />. The
+catalogue has $\abs{\Ical}$ items. For one position, write $s_j$ for $s_{t,j}$ and $y = i_{t+1}$ for the label.
+
+A causal model is trained at every position at once. One sequence of length $n$ gives $n$ labelled examples, each
+position predicting its successor, and the causal mask stops position $t$ from seeing its own label. The losses below
+are written for one position; the training loss sums them over positions and users.
+
+For a fixed history, let $p_j$ be the true probability that the next item is $j$, with $\sum_j p_j = 1$. Each loss has a
+population optimum: the scores that minimise its expectation over $y \sim p$. That optimum says what the trained scores
+estimate.
+
+## Next-item cross-entropy
+
+The full-catalogue loss is the <NoteLink to="cross-entropy-and-perplexity">cross-entropy</NoteLink> of a
+<NoteLink to="softmax-and-log-sum-exp">softmax</NoteLink> over all items:
+
+$$
+\mathcal{L}_{\mathrm{CE}} = -\log \pi_y, \qquad \pi_j = \frac{e^{s_j}}{\sum_{l \in \Ical} e^{s_l}}.
+$$
+
+Its gradient with respect to a score is
+
+$$
+\frac{\partial \mathcal{L}_{\mathrm{CE}}}{\partial s_j} = \pi_j - \indicator[j = y].
+$$
+
+The label's score rises by $1 - \pi_y$ and every other score falls in proportion to its current probability. Averaged
+over labels $y \sim p$, the expected gradient is $\pi_j - p_j$. It vanishes only when $\pi_j = p_j$ for every $j$, so
+the population optimum of full cross-entropy is the true next-item distribution. The scores are calibrated in the sense
+that the softmax probabilities sum to 1 and match $p$.
+
+The cost is the normaliser. Each position needs all $\abs{\Ical}$ scores, which is $O(\abs{\Ical} d)$ per position and
+$O(n\abs{\Ical})$ memory for the logits of one sequence. <Gloss name="bert4rec" /> trained with this loss; Klenitskiy
+and Vasilev trained SASRec with it and found that SASRec then matched or beat BERT4Rec and trained faster
+<Cite id="klenitskiy2023" />.
+
+## Binary cross-entropy with sampled negatives
+
+The original SASRec avoided the normaliser. At each position it drew one negative item $j^-$ uniformly from the items
+the user had not interacted with and applied a <NoteLink to="pointwise-recommendation-losses">pointwise</NoteLink>
+logistic loss to each item separately <Cite id="kang2018sasrec" />. With $k$ negatives $j^-_1, \ldots, j^-_k$ the binary
+cross-entropy (BCE) loss is
+
+$$
+\mathcal{L}_{\mathrm{BCE}} = -\log\sigma(s_y) - \sum_{m=1}^{k}\log\paren{1 - \sigma(s_{j^-_m})},
+$$
+
+where $\sigma(z) = 1 / (1 + e^{-z})$. Each item's score is read as an independent probability $q_j = \sigma(s_j)$ that
+$j$ is the next item. Nothing forces $\sum_j q_j = 1$.
+
+### What binary cross-entropy learns
+
+The population optimum of this loss is not $p$. Fix one item $i$ and collect every term of the loss in which $s_i$
+appears. The item is the positive with probability $p_i$. It is a negative only when it is not the positive, probability
+$1 - p_i$. Let $\Ical^-$ be the $\abs{\Ical} - 1$ items other than the positive. Each of the $k$ negatives is drawn
+uniformly from $\Ical^-$, so item $i$ is the $m$-th negative with probability $1/\abs{\Ical^-}$. Define the **sampling
+rate**
+
+$$
+\alpha = \frac{k}{\abs{\Ical^-}} = \frac{k}{\abs{\Ical} - 1}.
+$$
+
+The expected contribution of item $i$ to the loss, as a function of $q_i = \sigma(s_i)$, is
+
+$$
+\expect\brack{\mathcal{L}_i} = -p_i\log q_i - \alpha\paren{1 - p_i}\log\paren{1 - q_i}.
+$$
+
+The items do not interact in this sum, so each $q_i$ is optimised separately. Setting the derivative to zero,
+
+$$
+-\frac{p_i}{q_i} + \frac{\alpha(1 - p_i)}{1 - q_i} = 0
+\quad\Longrightarrow\quad
+q_i = \frac{p_i}{p_i + \alpha(1 - p_i)}.
+$$
+
+The second derivative $p_i/q_i^2 + \alpha(1 - p_i)/(1 - q_i)^2$ is positive, so this is the minimum. Petrov and
+Macdonald proved this result for SASRec's loss <Cite id="petrov2023gsasrec" />.
+
+### Overconfidence
+
+The optimum is far from calibrated when $\alpha$ is small. The negative term is weighted by $\alpha$, while the positive
+term is not. Any item with $p_i \gg \alpha$ has $q_i \approx 1$. SASRec uses $k = 1$, so $\alpha = 1/(\abs{\Ical} - 1)$
+and every item many times more likely than a uniform guess ($p_i \gg \alpha$) is predicted with probability close to 1.
+Petrov and Macdonald call a model **overconfident** when $q_i \gg p_i$ for its highly scored items
+<Cite id="petrov2023gsasrec" />.
+
+In logits the effect is a constant shift. Taking $\log\frac{q_i}{1 - q_i}$ of the optimum gives
+
+$$
+\operatorname{logit} q_i = \operatorname{logit} p_i - \log\alpha.
+$$
+
+Every score is raised by the same $-\log\alpha$, so the population optimum still ranks items in the order of $p$.
+
+The damage is to training, not to the optimum. The sigmoid saturates near $q = 1$, so the probabilities of the top items
+are nearly equal and the positive's gradient $-(1 - q_y)$ is close to zero. The loss then spends its effort separating
+the top items from the bottom ones, not ordering the top items among themselves. A top item that is sampled as a
+negative contributes $-\log(1 - q_i)$, which grows without bound as $q_i \to 1$, and Petrov and Macdonald report
+numerical overflow and unstable training from these rare large terms <Cite id="petrov2023gsasrec" />.
+
+### Generalised binary cross-entropy
+
+**gBCE** (generalised BCE) raises the positive's sigmoid to a power $\beta \in (0, 1]$:
+
+$$
+\mathcal{L}_{\mathrm{gBCE}}^{\beta} = -\log\sigma^{\beta}(s_y) - \sum_{m=1}^{k}\log\paren{1 - \sigma(s_{j^-_m})}.
+$$
+
+Since $\log\sigma^\beta = \beta\log\sigma$, the positive term is multiplied by $\beta$. The expected contribution of
+item $i$ becomes $-\beta p_i\log q_i - \alpha(1 - p_i)\log(1 - q_i)$, and the same calculation gives
+
+$$
+q_i = \frac{\beta p_i}{\beta p_i + \alpha(1 - p_i)}, \qquad \operatorname{logit} q_i = \operatorname{logit} p_i + \log\frac{\beta}{\alpha}.
+$$
+
+Setting $\beta = \alpha$ gives $q_i = p_i$: the model is calibrated although it sees only $k$ negatives. Setting
+$\beta = 1$ recovers plain BCE <Cite id="petrov2023gsasrec" />.
+
+Because $\beta$ must lie between $\alpha$ and 1, and $\alpha$ depends on the catalogue and on $k$, the paper
+reparameterises it with a **calibration parameter** $t \in [0, 1]$:
+
+$$
+\beta = \alpha\paren{t\paren{1 - \frac{1}{\alpha}} + \frac{1}{\alpha}} = 1 - t(1 - \alpha).
+$$
+
+$t = 0$ is BCE and $t = 1$ is full calibration. **gSASRec** is SASRec trained with gBCE and more negatives. In practice
+the loss is computed as ordinary BCE on a transformed positive score
+$\gamma(s_y) = \log\paren{1/(\sigma^{-\beta}(s_y) - 1)}$, which satisfies $\sigma(\gamma(s)) = \sigma^\beta(s)$ and
+reuses numerically stable BCE implementations. The authors recommend $t$ between 0.75 and 0.9 with 128 to 256 negatives,
+and report that $t$ very close to 1 slows training <Cite id="petrov2023gsasrec" />.
+
+<OverconfidenceLab />
+
+## Sampled softmax
+
+<NoteLink to="sampled-softmax-and-negative-sampling">Sampled softmax</NoteLink> keeps the softmax form and replaces the
+normaliser with an estimate from $k$ sampled items. It is the standard remedy for catalogues too large for the full loss
+<Cite id="jean2015sampledsoftmax" />. Negatives are drawn from a proposal distribution $Q$ over items, and each sampled
+logit is corrected by subtracting $\log(kQ(j))$:
+
+$$
+\mathcal{L}_{\mathrm{SSM}} = -\log\frac{e^{s_y}}{e^{s_y} + \sum_{m=1}^{k} e^{s_{j^-_m} - \log(kQ(j^-_m))}}.
+$$
+
+The correction makes the sampled sum an unbiased estimate of $\sum_{j \ne y} e^{s_j}$, the sum over the items other
+than the positive, so the whole denominator estimates the partition function $Z$.
+With uniform sampling the correction is the same constant $\log(k/\abs{\Ical^-})$ for every negative. With
+**in-batch negatives**, the positives of other sequences in the batch serve as negatives; they are drawn in proportion
+to item popularity, and without the correction the loss penalises popular items too much. Estimating $Q(j)$ from
+streaming item frequencies and subtracting $\log Q(j)$ is the **logQ correction** <Cite id="yi2019sampling" />.
+
+Other variants choose negatives by score. **Scalable cross-entropy** finds, for each position, the items the model
+currently scores highest, by an approximate <Gloss name="mips">maximum inner product search</Gloss>, and computes the
+softmax over those, since the high-scoring wrong items dominate the full <NoteLink to="gradient">gradient</NoteLink>
+<Cite id="mezentsev2024sce" />.
+
+<Derivation title="Why the logQ correction estimates the normaliser">
+The full normaliser is $Z = e^{s_y} + \sum_{j \ne y} e^{s_j}$. Draw $j^-_1, \ldots, j^-_k$ independently from $Q$ over
+the items other than $y$. For any function $g$,
+$\expect_{j \sim Q}\brack{g(j)/Q(j)} = \sum_{j \ne y} g(j)$, the identity behind
+<NoteLink to="importance-sampling">importance sampling</NoteLink>. With $g(j) = e^{s_j}$,
+
+$$
+\expect\brack{\sum_{m=1}^{k}\frac{e^{s_{j^-_m}}}{kQ(j^-_m)}} = \sum_{j \ne y} e^{s_j},
+\qquad
+\frac{e^{s_j}}{kQ(j)} = e^{s_j - \log(kQ(j))}.
+$$
+
+So the denominator of $\mathcal{L}_{\mathrm{SSM}}$ is an unbiased estimate of $Z$. The loss takes the logarithm of this
+estimate, and $\expect[\log\hat{Z}] \le \log Z$ by <NoteLink to="expectation">Jensen's inequality</NoteLink>, so the
+sampled loss is biased low for finite $k$. The bias shrinks as $k$ grows. Without the correction, an item that $Q$
+samples often has its $e^{s_j}$ counted $kQ(j)$ times on average instead of once, and its score is pushed down too far.
+</Derivation>
+
+## The Cloze objective
+
+A bidirectional encoder cannot be trained on next-item prediction, because position $t$ would attend to $i_{t+1}$ and
+copy it. BERT4Rec instead replaces a random proportion $\rho$ of the items with a mask token and predicts each masked
+item from both sides with a full softmax <Cite id="sun2019bert4rec" />, the masked-language-model objective of
+<Gloss name="bert" /> <Cite id="devlin2019" />. With $M$ the set of masked positions,
+
+$$
+\mathcal{L}_{\mathrm{Cloze}} = -\sum_{t \in M}\log\pi_{t, i_t}.
+$$
+
+Training and inference differ. In training a mask sits among real items on both sides. At inference the mask is appended
+after the last item and nothing lies to its right, so the model predicts from one side only, the case it saw least. Sun
+et al. narrowed this gap by adding training sequences in which only the last item is masked
+<Cite id="sun2019bert4rec" />.
+
+The Cloze loss supervises fewer positions: a sequence of length $n$ gives about $\rho n$ labels per pass, against $n$
+for a causal model. With $\rho = 0.2$ and $n = 200$ that is 40 labels against 200.
+
+## Which future item is the label
+
+Cross-entropy is minimised when the model's distribution equals the distribution of the label. The expected loss
+$-\sum_j p^{\mathrm{label}}_j\log\pi_j$ is minimised over distributions $\pi$ at $\pi = p^{\mathrm{label}}$, since it
+equals the <NoteLink to="entropy">entropy</NoteLink> of $p^{\mathrm{label}}$ plus
+$\KL(p^{\mathrm{label}} \,\|\, \pi) \ge 0$. The choice of label therefore chooses what the model estimates.
+
+- **Next action.** The label is $i_{t+1}$. The model estimates the next-item distribution, which changes after every
+  action.
+- **Next item, not a held-out item.** Covington et al. found that predicting a user's next watch worked better than
+  predicting a randomly held-out watch, because a held-out label lets the model use future context it will not have at
+  serving time <Cite id="covington2016youtube" />.
+- **Dense all action.** <NoteLink to="pinnerformer">PinnerFormer</NoteLink> samples positions and pairs each with one
+  positive engagement drawn uniformly from the $K$ days that follow it. If $W_t$ is the set of future engagements in the
+  window, the label distribution is the average $\frac{1}{\abs{W_t}}\sum_{\tau \in W_t} \delta_{i_\tau}$ over the
+  window, so the embedding estimates the user's interests over $K$ days. An embedding computed once a day then goes
+  stale more slowly than one trained on the next action <Cite id="pancha2022pinnerformer" />.
+
+## Pairwise session losses
+
+<Gloss name="gru4rec" /> trains a recurrent network on sessions and uses the targets of the other sessions in a
+mini-batch as negatives <Cite id="hidasi2016gru4rec" />. Its losses compare the target score $r_i$ with the scores $r_j$
+of $N_S$ sampled negatives. Sampled <Gloss name="bpr" /> averages pairwise logistic losses, and TOP1 averages a sigmoid
+of the score difference plus a penalty that pulls negative scores towards zero:
+
+$$
+\mathcal{L}_{\mathrm{BPR}} = -\frac{1}{N_S}\sum_{j=1}^{N_S}\log\sigma(r_i - r_j),
+\qquad
+\mathcal{L}_{\mathrm{TOP1}} = \frac{1}{N_S}\sum_{j=1}^{N_S}\sigma(r_j - r_i) + \sigma(r_j^2).
+$$
+
+Averaging makes the gradient vanish as $N_S$ grows <Cite id="hidasi2018topk" />. The gradient of the BPR loss with
+respect to the target score is
+
+$$
+\frac{\partial\mathcal{L}_{\mathrm{BPR}}}{\partial r_i} = -\frac{1}{N_S}\sum_{j=1}^{N_S}\paren{1 - \sigma(r_i - r_j)}.
+$$
+
+A negative with $r_j \ll r_i$ contributes almost 0 to the sum but still counts in $N_S$. Most sampled items are such
+easy negatives, so if $N_R$ of the $N_S$ negatives score near the target, the gradient is roughly $N_R/N_S$ of a single
+pair's, and it shrinks as more negatives are added.
+
+Hidasi and Karatzoglou compare the target with the maximum negative score instead, smoothed by a softmax over the
+negatives, $\omega_j = e^{r_j}/\sum_{l} e^{r_l}$ <Cite id="hidasi2018topk" />:
+
+$$
+\mathcal{L}_{\mathrm{BPR\text{-}max}} = -\log\sum_{j=1}^{N_S} \omega_j\,\sigma(r_i - r_j) + \lambda\sum_{j=1}^{N_S} \omega_j r_j^2,
+\qquad
+\mathcal{L}_{\mathrm{TOP1\text{-}max}} = \sum_{j=1}^{N_S} \omega_j\paren{\sigma(r_j - r_i) + \sigma(r_j^2)}.
+$$
+
+The first term of BPR-max is $-\log P(r_i > r_{\max})$, with $P(r_i > r_j)$ approximated by $\sigma(r_i - r_j)$ and
+$P(r_j = r_{\max})$ by $\omega_j$. Its gradient with respect to $r_i$ is a weighted average of pairwise gradients with
+weights $\omega_j\sigma(r_i - r_j)$. Easy negatives get weights near zero and do not dilute it, so adding negatives no
+longer shrinks the update. The last term is a softmax-weighted $\ell_2$ penalty on the negative scores with strength
+$\lambda$ <Cite id="hidasi2018topk" />. These losses are the <NoteLink to="pairwise-ranking-losses">pairwise ranking
+losses</NoteLink> adapted to sampled negatives.
+
+## Worked example
+
+Take a catalogue of $\abs{\Ical} = 10{,}001$ items, so $\abs{\Ical^-} = 10{,}000$. For one user and position, two items
+have true next-item probabilities $p_A = 0.05$ and $p_B = 0.01$.
+
+**SASRec's BCE, $k = 1$.** The sampling rate is $\alpha = 10^{-4}$. The optimum is
+
+$$
+q_A = \frac{0.05}{0.05 + 10^{-4} \cdot 0.95} = 0.9981, \qquad q_B = \frac{0.01}{0.01 + 10^{-4} \cdot 0.99} = 0.9902.
+$$
+
+Both items are predicted with probability above 0.99, although only one item can be next. In logits,
+$\operatorname{logit} q_A = 6.266$ and $\operatorname{logit} q_B = 4.615$. The gap of 1.651 equals
+$\operatorname{logit} 0.05 - \operatorname{logit} 0.01 = -2.944 + 4.595$: the order is kept and every logit is shifted
+by $-\log 10^{-4} = 9.210$.
+
+**gBCE, $k = 256$, $t = 0.75$.** Now $\alpha = 0.0256$ and $\beta = 1 - 0.75 \cdot 0.9744 = 0.2692$. Then
+
+$$
+q_A = \frac{0.2692 \cdot 0.05}{0.2692 \cdot 0.05 + 0.0256 \cdot 0.95} = 0.356, \qquad
+q_B = \frac{0.2692 \cdot 0.01}{0.2692 \cdot 0.01 + 0.0256 \cdot 0.99} = 0.096.
+$$
+
+The logit shift is $\log(\beta/\alpha) = 2.353$ instead of 9.210, and the probabilities are off the flat top of the
+sigmoid. With $t = 1$, $\beta = \alpha = 0.0256$ and the optimum is $q_A = 0.05$, $q_B = 0.01$.
+
+**Full cross-entropy.** The softmax optimum is $\pi_A = 0.05$ and $\pi_B = 0.01$ directly, at the cost of 10,001 logits
+per position.
+
+## Evaluation pitfalls
+
+Losses are compared through offline metrics, and the metric protocol can reverse the comparison.
+
+- **<NoteLink to="progress-and-baselines-in-recommendation">Sampled metrics</NoteLink>.** Many papers rank the held-out
+  item against 100 randomly sampled items instead of the whole catalogue. Krichene and Rendle showed that sampled
+  versions of metrics such as <Gloss name="ndcg" /> and <NoteLink to="hit-rate-and-r-precision">hit rate</NoteLink> are
+  inconsistent with the full metrics and can reverse the order of two models <Cite id="krichene2020sampled" />. In the
+  catalogue above, suppose the held-out item has <NoteLink to="rank-and-null-space">full rank</NoteLink> 101: 100 items
+  score higher. Its full hit rate at 10 is 0. Ranked against 100 negatives sampled without replacement from the 10,000
+  other items, the number of higher-scoring negatives is hypergeometric with mean $100 \cdot 100/10{,}000 = 1$. The
+  sampled rank is at most 10 with probability 0.99999995 and is 1 with probability 0.364, so the sampled hit rate at 10
+  is essentially 1.
+- **Loss and metric alignment.** A loss that samples negatives uniformly spends most of its gradient on easy items,
+  while top-heavy metrics reward the order of the first few (see <NoteLink to="ranking-surrogates-and-metrics">ranking
+  surrogates and metrics</NoteLink>). This is the same mismatch as between BCE's saturated top items and
+  <Gloss name="ndcg" /> at 10.
+- **Unequal comparisons.** An architecture comparison is confounded when the two models use different losses, as with
+  the original SASRec (BCE, one negative) against BERT4Rec (full softmax) <Cite id="klenitskiy2023" />.
+
+## Assumptions
+
+- The optimum results assume enough data and capacity for the model to reach the population minimum for every history.
+  A finite model shares parameters across histories and does not.
+- The BCE analysis assumes negatives drawn uniformly, with replacement, from the items other than the positive.
+  Popularity or in-batch sampling gives each item its own rate $\alpha_i$, and the same argument gives
+  $q_i = p_i/(p_i + \alpha_i(1 - p_i))$.
+- <NoteLink to="explicit-and-implicit-feedback">Implicit feedback</NoteLink> treats every item not taken next as a
+  negative. An item the user would have liked but did not reach is counted against, whichever loss is used.
+
+## Pitfalls
+
+- **Reading BCE scores as probabilities.** A model trained with BCE and sampled negatives is overconfident by
+  construction. Its outputs can be recalibrated by $\operatorname{logit} p = \operatorname{logit} q + \log\alpha$ when
+  the sampling was uniform.
+- **Comparing sampled softmax runs without the correction.** In-batch sampled softmax without
+  <Gloss name="logq-correction">logQ correction</Gloss> learns scores shifted by $-\log Q(j)$, which demotes popular
+  items <Cite id="yi2019sampling" />.
+- **Adding negatives to an averaged pairwise loss.** With BPR or TOP1 averaged over negatives, more negatives dilute the
+  gradient; use a max-type or softmax loss instead <Cite id="hidasi2018topk" />.
+- **Reporting sampled metrics.** Rank against the full catalogue, or correct the sampled metric, before comparing models
+  <Cite id="krichene2020sampled" />.

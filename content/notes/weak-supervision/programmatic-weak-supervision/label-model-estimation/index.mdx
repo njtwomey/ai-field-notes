@@ -14,26 +14,30 @@ updated: 2026-09-27
 import { LabelModelDemo } from './LabelModelDemo'
 
 <Definition>
-A **label model** is a latent-variable model $p(\lambdavec, Y)$ of the outputs $\lambdavec = (\lambda_1, \dots, \lambda_m)$ of
-$m$ <Gloss name="labelling-function">labelling functions (LFs)</Gloss> and the unobserved true label $Y$. **Label model estimation** recovers its parameters,
-chiefly each LF's accuracy and the dependencies between LFs, from the unlabelled label matrix alone. The main methods are
-maximum likelihood by sampling, pseudolikelihood for dependency structure <Cite id="bach2017" />, matrix completion on the
-inverse covariance <Cite id="ratner2019" />, and closed-form triplet solutions <Cite id="fu2020" />.
+A **label model** is a latent-variable model $p(\lambdavec, Y)$ of the outputs
+$\lambdavec = (\lambda_1, \dots, \lambda_m)$ of $m$ <Gloss name="labelling-function">labelling functions (LFs)</Gloss>
+and the unobserved true label $Y$. **Label model estimation** recovers its parameters, chiefly each LF's accuracy and
+the dependencies between LFs, from the unlabelled label matrix alone. The main methods are maximum likelihood by
+sampling, pseudolikelihood for dependency structure <Cite id="bach2017" />, matrix completion on the inverse covariance
+<Cite id="ratner2019" />, and closed-form triplet solutions <Cite id="fu2020" />.
 </Definition>
 
 ## Problem
 
-The original <Gloss name="data-programming">data-programming</Gloss> label model is fitted by <Gloss name="sgd">stochastic gradient descent</Gloss> on the <NoteLink to="law-of-total-probability">marginal likelihood</NoteLink>, with
-<NoteLink to="gibbs-sampling">Gibbs sampling</NoteLink> for the <NoteLink to="gradient">gradients</NoteLink> of models with dependencies <Cite id="ratner2016" />. This is slow and must be rerun
-every time a user edits an LF. It also needs the dependency structure between LFs, which users rarely know. Three lines
-of work address these problems: learning the structure, replacing sampling by linear algebra, and replacing iteration by
-closed forms.
+The original <Gloss name="data-programming">data-programming</Gloss> label model is fitted by
+<Gloss name="sgd">stochastic gradient descent</Gloss> on the <NoteLink to="law-of-total-probability">marginal
+likelihood</NoteLink>, with <NoteLink to="gibbs-sampling">Gibbs sampling</NoteLink> for the
+<NoteLink to="gradient">gradients</NoteLink> of models with dependencies <Cite id="ratner2016" />. This is slow and must
+be rerun every time a user edits an LF. It also needs the dependency structure between LFs, which users rarely know.
+Three lines of work address these problems: learning the structure, replacing sampling by linear algebra, and replacing
+iteration by closed forms.
 
 ## Mechanism 1: learning the dependency structure
 
 Bach, He, Ratner and Ré select dependencies by maximising an $\ell_1$-regularised **marginal pseudolikelihood**
-<Cite id="bach2017" />. For each LF $j$ in turn, they model the <NoteLink to="conditional-probability">conditional distribution</NoteLink> of $\lambda_j$ given all other
-LF outputs, with $Y$ summed out, as a <NoteLink to="factor-graph">factor graph</NoteLink> containing candidate dependencies between $j$ and every other LF.
+<Cite id="bach2017" />. For each LF $j$ in turn, they model the <NoteLink to="conditional-probability">conditional
+distribution</NoteLink> of $\lambda_j$ given all other LF outputs, with $Y$ summed out, as a
+<NoteLink to="factor-graph">factor graph</NoteLink> containing candidate dependencies between $j$ and every other LF.
 Each conditional involves only one observed variable and the latent $Y$, so its gradient is exact and needs no sampling.
 The $\ell_1$ penalty zeroes most candidate dependency weights; those that survive a threshold are kept. The amount of
 unlabelled data needed to recover the true structure scales sublinearly in the number of possible dependencies for a
@@ -41,23 +45,23 @@ broad class of models. In simulations the method was 100 times faster than a max
 one quarter as many extraneous dependencies. On real information-extraction applications it gave an average 1.5 F1
 points of improvement <Cite id="bach2017" />.
 
-Varma et al. later recover the structure from the observable covariance of the LF outputs, whose inverse is the sum
-of a sparse matrix (the dependencies) and a low-rank matrix (the effect of the hidden $Y$), separated by robust <Gloss name="pca" />
-<Cite id="varma2019" />.
+Varma et al. later recover the structure from the observable covariance of the LF outputs, whose inverse is the sum of a
+sparse matrix (the dependencies) and a low-rank matrix (the effect of the hidden $Y$), separated by robust
+<Gloss name="pca" /> <Cite id="varma2019" />.
 
 ## Mechanism 2: matrix completion (Snorkel MeTaL)
 
-Ratner et al.'s multi-task label model recovers accuracies from second moments <Cite id="ratner2019" />. Let $\psi(O)$ be
-<NoteLink to="bernoulli-distribution">indicator variables</NoteLink> for the outputs of the LFs (the observable cliques) and $\psi(S)$ the indicator of $Y$ (the separator).
-Write their joint covariance and its inverse in blocks:
+Ratner et al.'s multi-task label model recovers accuracies from second moments <Cite id="ratner2019" />. Let $\psi(O)$
+be <NoteLink to="bernoulli-distribution">indicator variables</NoteLink> for the outputs of the LFs (the observable
+cliques) and $\psi(S)$ the indicator of $Y$ (the separator). Write their joint covariance and its inverse in blocks:
 
 $$
 \Sigmamat = \cov\LB\psi(O \cup S)\RB = \begin{pmatrix}\Sigmamat_O & \Sigmamat_{OS} \\ \Sigmamat_{OS}^\top & \Sigmamat_S\end{pmatrix}, \qquad
 \Kmat = \Sigmamat^{-1} = \begin{pmatrix}\Kmat_O & \Kmat_{OS} \\ \Kmat_{OS}^\top & \Kmat_S\end{pmatrix}.
 $$
 
-$\Sigmamat_O$ is observable from the label matrix. $\Sigmamat_S$ is the variance of the class indicator, a function of the
-class balance. $\Sigmamat_{OS}$, the covariance between each LF and the true label, is unobservable and holds the
+$\Sigmamat_O$ is observable from the label matrix. $\Sigmamat_S$ is the variance of the class indicator, a function of
+the class balance. $\Sigmamat_{OS}$, the covariance between each LF and the true label, is unobservable and holds the
 accuracies.
 
 **Step 1: a rank-one correction.** The block-inversion formula gives
@@ -84,33 +88,33 @@ $$
 $\Sigmamat_O^{-1}$ is known, so this is a rank-one matrix completion problem for $\zvec$, solved by minimising
 $\norm{\Sigmamat_O^{-1} + \zvec\zvec^\top}_\Omega$ over the known-zero entries.
 
-**Step 3: back out the accuracies.** From the definition of $\zvec$, $\Sigmamat_{OS} = \Sigmamat_O\zvec/\sqrt{c}$. Substituting
-into the definition of $c$ gives $1/c = \Sigmamat_S - \zvec^\top\Sigmamat_O\zvec/c$, so $c = (1 + \zvec^\top\Sigmamat_O\zvec)/\Sigmamat_S$.
-The accuracies follow from $\Sigmamat_{OS}$ and the observed means.
+**Step 3: back out the accuracies.** From the definition of $\zvec$, $\Sigmamat_{OS} = \Sigmamat_O\zvec/\sqrt{c}$.
+Substituting into the definition of $c$ gives $1/c = \Sigmamat_S - \zvec^\top\Sigmamat_O\zvec/c$, so
+$c = (1 + \zvec^\top\Sigmamat_O\zvec)/\Sigmamat_S$. The accuracies follow from $\Sigmamat_{OS}$ and the observed means.
 
-**Identifiability.** Taking logs of the squared equations gives a linear system $\log z_i^2 + \log z_j^2 = \log(\Sigmamat_O^{-1})_{ij}^2$
-over $(i, j) \in \Omega$. It determines every $z_i^2$ when the graph of independent pairs contains an odd cycle, the
-smallest being a triangle: three mutually conditionally independent LFs. The signs are determined within each connected
-component of that graph up to one global flip, fixed by assuming the LFs are better than random on average
-<Cite id="ratner2019" />.
+**Identifiability.** Taking logs of the squared equations gives a linear system
+$\log z_i^2 + \log z_j^2 = \log(\Sigmamat_O^{-1})_{ij}^2$ over $(i, j) \in \Omega$. It determines every $z_i^2$ when the
+graph of independent pairs contains an odd cycle, the smallest being a triangle: three mutually conditionally
+independent LFs. The signs are determined within each connected component of that graph up to one global flip, fixed by
+assuming the LFs are better than random on average <Cite id="ratner2019" />.
 
 **Worked example.** Three independent LFs with outputs in $\set{-1, +1}$, no abstentions and balanced classes have
 $\cov(\lambda_i, Y) = a_i = (0.6, 0.5, 0.3)$. Then $\Sigmamat_O$ has unit diagonal and off-diagonal entries $a_ia_j$:
 $0.30$, $0.18$ and $0.15$. Its inverse has off-diagonal entries $-0.3133$, $-0.1549$ and $-0.1102$. Solving
-$z_iz_j = 0.3133, 0.1549, 0.1102$ gives $\zvec = (0.664, 0.472, 0.233)$. Then $c = 1 + \zvec^\top\Sigmamat_O\zvec = 1.995$ and
-$\Sigmamat_{OS} = \Sigmamat_O\zvec/\sqrt{c} = (0.6, 0.5, 0.3)$: the covariances with the unseen label are recovered exactly.
-As a check, $\Sigmamat_O^{-1} + \zvec\zvec^\top$ is diagonal.
+$z_iz_j = 0.3133, 0.1549, 0.1102$ gives $\zvec = (0.664, 0.472, 0.233)$. Then
+$c = 1 + \zvec^\top\Sigmamat_O\zvec = 1.995$ and $\Sigmamat_{OS} = \Sigmamat_O\zvec/\sqrt{c} = (0.6, 0.5, 0.3)$: the
+covariances with the unseen label are recovered exactly. As a check, $\Sigmamat_O^{-1} + \zvec\zvec^\top$ is diagonal.
 
 The multi-task version handles LFs that label different, related sub-tasks at different granularities. On three
-fine-grained classification problems it gained 20.2 accuracy points on average over a traditional supervised
-approach, 6.8 over majority vote and 4.1 over a <NoteLink to="weak-supervision">weak-supervision</NoteLink> method that models tasks separately
-<Cite id="ratner2019" />.
+fine-grained classification problems it gained 20.2 accuracy points on average over a traditional supervised approach,
+6.8 over majority vote and 4.1 over a <NoteLink to="weak-supervision">weak-supervision</NoteLink> method that models
+tasks separately <Cite id="ratner2019" />.
 
 ## Mechanism 3: triplets in closed form (FlyingSquid)
 
 Fu et al. observe that for binary tasks the needed moments have closed forms <Cite id="fu2020" />. Encode each LF as
-observed variables $v_i \in \set{-1, +1}$ (abstentions are split into a pair of variables), and let $a_i = \expect[v_iY]$,
-the accuracy on the $[-1, 1]$ scale.
+observed variables $v_i \in \set{-1, +1}$ (abstentions are split into a pair of variables), and let
+$a_i = \expect[v_iY]$, the accuracy on the $[-1, 1]$ scale.
 
 **The triplet identity.** If $v_i \perp v_j \mid Y$, then $v_iY \perp v_jY$. Because $Y^2 = 1$,
 
@@ -118,8 +122,8 @@ $$
 a_ia_j = \expect[v_iY]\,\expect[v_jY] = \expect[v_iv_jY^2] = \expect[v_iv_j].
 $$
 
-The product of two accuracies is the observable agreement rate. For three mutually conditionally independent
-variables, the three equations $a_ia_j = M_{ij}$, $a_ia_k = M_{ik}$, $a_ja_k = M_{jk}$ with $M_{ij} = \expect[v_iv_j]$ give
+The product of two accuracies is the observable agreement rate. For three mutually conditionally independent variables,
+the three equations $a_ia_j = M_{ij}$, $a_ia_k = M_{ik}$, $a_ja_k = M_{jk}$ with $M_{ij} = \expect[v_iv_j]$ give
 
 $$
 \abs{a_i} = \sqrt{\abs{\frac{M_{ij}\,M_{ik}}{M_{jk}}}}, \qquad
@@ -147,14 +151,14 @@ by up to 15.7 F1 points <Cite id="fu2020" />.
 | Matrix completion (MeTaL) | structure given | one inversion of $\Sigmamat_O$ and a small non-convex fit |
 | Triplets (FlyingSquid) | structure given | one pass for $\Mmat$, then closed form |
 
-All second-moment methods need one pass over the label matrix to form $\Mmat$ or $\Sigmamat_O$, $O(nm^2)$, after which the
-cost is independent of $n$.
+All second-moment methods need one pass over the label matrix to form $\Mmat$ or $\Sigmamat_O$, $O(nm^2)$, after which
+the cost is independent of $n$.
 
 ## Trade-offs
 
 - **The structure must be right.** Every method needs to know which LFs are conditionally independent. Assuming
-  <NoteLink to="independence">independence</NoteLink> for correlated LFs inflates their estimated accuracies, as the figure shows. Structure learning reduces
-  but does not remove this risk.
+  <NoteLink to="independence">independence</NoteLink> for correlated LFs inflates their estimated accuracies, as the
+  figure shows. Structure learning reduces but does not remove this risk.
 - **Enough independent LFs.** Identifiability needs triangles of conditionally independent LFs with overlapping
   coverage. Sparse LFs that rarely vote together give noisy moment estimates, and a near-zero $M_{jk}$ in a denominator
   makes the triplet estimate unstable.

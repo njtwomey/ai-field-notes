@@ -29,25 +29,25 @@ updated: 2026-09-27
 import { AttentionPatterns } from '../_shared/AttentionPatterns'
 
 <Definition>
-**Sparse attention** restricts each query $i$ to a set of key positions $\Scal(i) \subset \set{1, \dots, n}$ and computes
-the softmax only over that set:
+**Sparse attention** restricts each query $i$ to a set of key positions $\Scal(i) \subset \set{1, \dots, n}$ and
+computes the softmax only over that set:
 
 $$
 \ovec_i = \sum_{j \in \Scal(i)} \frac{\exp(\qvec_i^\tr\kvec_j/\sqrt d)}{\sum_{l \in \Scal(i)} \exp(\qvec_i^\tr\kvec_l/\sqrt d)}\,\vvec_j.
 $$
 
-In **sliding-window attention**, $\Scal(i) = \set{j : \abs{i - j} \le w}$, or $\set{j : i - w \le j \le i}$ with a <NoteLink to="causal-masking">causal
-mask</NoteLink>. Other patterns add dilated or strided positions, **global tokens** that attend to and are attended by every
-position, or random keys. The cost is proportional to $\sum_i \abs{\Scal(i)}$ instead of $n^2$
-<Cite id="beltagy2020" /> <Cite id="zaheer2020" />.
+In **sliding-window attention**, $\Scal(i) = \set{j : \abs{i - j} \le w}$, or $\set{j : i - w \le j \le i}$ with a
+<NoteLink to="causal-masking">causal mask</NoteLink>. Other patterns add dilated or strided positions, **global tokens**
+that attend to and are attended by every position, or random keys. The cost is proportional to $\sum_i \abs{\Scal(i)}$
+instead of $n^2$ <Cite id="beltagy2020" /> <Cite id="zaheer2020" />.
 </Definition>
 
 ## Problem
 
 Full <NoteLink to="scaled-dot-product-attention">attention</NoteLink> scores all $n^2$ query–key pairs. In text, most of
-a token's attention weight goes to nearby tokens, and long-range links are few. Computing all $n^2$ scores spends most of
-the work on weights that end up near zero. Sparse attention decides in advance which pairs to score, so the cost follows
-the pattern, not the square of the length.
+a token's attention weight goes to nearby tokens, and long-range links are few. Computing all $n^2$ scores spends most
+of the work on weights that end up near zero. Sparse attention decides in advance which pairs to score, so the cost
+follows the pattern, not the square of the length.
 
 ## Mechanism
 
@@ -65,23 +65,24 @@ $i$ depends on inputs at positions $i - w$ to $i + w$. Suppose the output of lay
 depends on inputs within $(\ell - 1)w$ of $j$. Layer $\ell$ at position $i$ reads layer $\ell - 1$ at positions
 $j \in [i - w, i + w]$, and each of those depends on inputs within $(\ell - 1)w$ of $j$. So layer $\ell$ at $i$ depends
 on inputs within $\ell w$ of $i$. By induction, $L$ layers give a receptive field of $2Lw + 1$ positions, or $Lw + 1$
-with a causal window. Longformer uses small windows in lower layers and larger ones in upper layers, so that lower layers
-model local detail cheaply <Cite id="beltagy2020" />.
+with a causal window. Longformer uses small windows in lower layers and larger ones in upper layers, so that lower
+layers model local detail cheaply <Cite id="beltagy2020" />.
 
 The receptive field is an upper bound. Information that must cross $Lw$ positions passes through $L$ successive
 weighted averages and is diluted at each step.
 
 ### Dilated and strided patterns
 
-A **dilated** window with dilation $\delta$ attends to keys $i \pm \delta, i \pm 2\delta, \dots, i \pm w\delta$. It has the
-same cost as a window of width $w$ and $\delta$ times the reach, but it skips the $\delta - 1$ positions between consecutive keys. Longformer uses dilation on some
-heads of upper layers, and none in lower layers <Cite id="beltagy2020" />.
+A **dilated** window with dilation $\delta$ attends to keys $i \pm \delta, i \pm 2\delta, \dots, i \pm w\delta$. It has
+the same cost as a window of width $w$ and $\delta$ times the reach, but it skips the $\delta - 1$ positions between
+consecutive keys. Longformer uses dilation on some heads of upper layers, and none in lower layers
+<Cite id="beltagy2020" />.
 
-The **Sparse Transformer** factorises attention into two patterns on different heads or layers
-<Cite id="child2019" />. With stride $l$, one head attends to the previous $l$ positions and another to every $l$-th
-position. Any earlier position $j$ is reachable from $i$ in two hops: the strided head moves from $i$ to a position $k$
-with $i - k$ a multiple of $l$ and $0 \le k - j < l$, and the local head moves from $k$ to $j$. Choosing $l \approx \sqrt n$ gives $O(\sqrt n)$ keys per query and $O(n\sqrt n)$
-cost.
+The **Sparse Transformer** factorises attention into two patterns on different heads or layers <Cite id="child2019" />.
+With stride $l$, one head attends to the previous $l$ positions and another to every $l$-th position. Any earlier
+position $j$ is reachable from $i$ in two hops: the strided head moves from $i$ to a position $k$ with $i - k$ a
+multiple of $l$ and $0 \le k - j < l$, and the local head moves from $k$ to $j$. Choosing $l \approx \sqrt n$ gives
+$O(\sqrt n)$ keys per query and $O(n\sqrt n)$ cost.
 
 ### Global tokens
 
@@ -98,8 +99,9 @@ sparse attention, with its $O(1)$ global tokens, keeps two properties of full at
 of sequence-to-sequence functions and it is Turing complete. BigBird handled sequences up to 8 times longer than
 previously possible on the same hardware.
 
-<Gloss name="gpu" plural /> are inefficient at gathering scattered single keys. BigBird therefore applies every pattern to blocks of
-consecutive tokens, so each query block attends to whole key blocks and the work stays in dense <NoteLink to="matrix-multiplication">matrix products</NoteLink>.
+<Gloss name="gpu" plural /> are inefficient at gathering scattered single keys. BigBird therefore applies every pattern
+to blocks of consecutive tokens, so each query block attends to whole key blocks and the work stays in dense
+<NoteLink to="matrix-multiplication">matrix products</NoteLink>.
 
 ### Generation with a window
 
@@ -138,5 +140,5 @@ block-sparse kernels do this. A dense kernel with a mask computes every score an
 - **Task-specific global tokens.** Longformer's global tokens are chosen by hand for each task, which a general
   pretrained decoder cannot do.
 - **Exactness.** Within the pattern the softmax is exact. Combined with
-  <NoteLink to="flash-attention">FlashAttention</NoteLink>-style tiling, a banded pattern costs time and memory linear in
-  $n$.
+  <NoteLink to="flash-attention">FlashAttention</NoteLink>-style tiling, a banded pattern costs time and memory linear
+  in $n$.

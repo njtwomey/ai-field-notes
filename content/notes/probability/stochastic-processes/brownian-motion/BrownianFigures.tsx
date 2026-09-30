@@ -1,10 +1,20 @@
 import { useMemo, useState } from 'react'
-import { Interactive, ParamChoice, ParamSlider, Readout, XYChart, formatNumber, type XYSeries } from '@/components/viz'
+import {
+  Interactive,
+  ParamChoice,
+  ParamSlider,
+  Readout,
+  XYChart,
+  formatNumber,
+  useParam,
+  type XYSeries,
+} from '@/components/viz'
 import { linspace, rng } from '@/lib/math'
 
 const STEP_CHOICES = ['4', '16', '64', '256', '4096'] as const
 type Steps = (typeof STEP_CHOICES)[number]
-const PATHS = 3
+/** Longest walk drawn as an exact step function; longer walks are sampled at this many points for drawing only. */
+const DRAWN_STEPS = 256
 const T = linspace(0, 1, 101)
 
 /** Scaled simple random walks W(t) = S⌊nt⌋/√n on [0, 1]: jagged for small n, Brownian-looking for large n. */
@@ -12,37 +22,51 @@ export function ScaledWalks() {
   const [steps, setSteps] = useState<Steps>('16')
   const n = Number(steps)
 
+  const paths = useParam(3, { min: 1, max: 30, step: 1 })
+  const count = paths.value
+
   const series = useMemo((): XYSeries[] => {
+    const many = count > 1
     const out: XYSeries[] = []
-    for (let p = 0; p < PATHS; p++) {
+    const stride = Math.max(1, n / DRAWN_STEPS)
+    for (let p = 0; p < count; p++) {
+      // Each walk has its own stream, so adding walks leaves the existing ones unchanged.
       const { uniform } = rng(40 + p)
       const x = [0]
       const y = [0]
       let s = 0
       for (let k = 1; k <= n; k++) {
         s += uniform() < 0.5 ? 1 : -1
-        // The walk is constant between steps, so draw it as a step function.
-        x.push(k / n, k / n)
-        y.push(y[y.length - 1], s / Math.sqrt(n))
+        if (stride === 1) {
+          // The walk is constant between steps, so draw it as a step function.
+          x.push(k / n, k / n)
+          y.push(y[y.length - 1], s / Math.sqrt(n))
+        } else if (k % stride === 0) {
+          x.push(k / n)
+          y.push(s / Math.sqrt(n))
+        }
       }
-      out.push({ name: `walk ${p + 1}`, type: 'line', x, y, slot: p })
+      out.push({ name: many ? 'scaled walks' : 'scaled walk', type: 'line', x, y, slot: 0, thin: many })
     }
     out.push({ name: '+2√t', type: 'line', x: T, y: T.map((t) => 2 * Math.sqrt(t)), muted: true, dashed: true })
     out.push({ name: '−2√t', type: 'line', x: T, y: T.map((t) => -2 * Math.sqrt(t)), muted: true, dashed: true })
     return out
-  }, [n])
+  }, [n, count])
 
   return (
     <Interactive
       title="Scaled random walks converge to Brownian motion"
-      caption="Three simple random walks with n steps of ±1, squeezed into time [0, 1] and scaled by 1/√n. At every n the value at time t has mean 0 and variance ⌊nt⌋/n ≈ t; the dashed curves are ±2√t. As n grows the steps vanish and the paths take the rough, self-similar look of Brownian motion."
+      caption="Simple random walks with n steps of ±1, squeezed into time [0, 1] and scaled by 1/√n, drawn as light lines; the paths slider sets how many. At every n the value at time t has mean 0 and variance ⌊nt⌋/n ≈ t; the dashed curves are ±2√t, and about 95% of the walks lie between them at any t. As n grows the steps vanish and the paths take the rough, self-similar look of Brownian motion. Walks with more than 256 steps are drawn at 256 evenly spaced times."
       controls={
-        <ParamChoice
-          label="steps n"
-          value={steps}
-          onChange={setSteps}
-          options={STEP_CHOICES.map((s) => ({ value: s, label: s }))}
-        />
+        <>
+          <ParamChoice
+            label="steps n"
+            value={steps}
+            onChange={setSteps}
+            options={STEP_CHOICES.map((s) => ({ value: s, label: s }))}
+          />
+          <ParamSlider label="paths" param={paths} withArrows format={(v) => String(v)} />
+        </>
       }
       readout={<Readout label="step size in space 1/√n" value={formatNumber(1 / Math.sqrt(n))} />}
     >

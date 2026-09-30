@@ -103,16 +103,26 @@ export function BaggingVariance() {
 
   const bs = Array.from({ length: B_MAX }, (_, k) => k + 1)
   const theory = bs.map((k) => sim.rho * sim.sigma2 + ((1 - sim.rho) * sim.sigma2) / k)
-  const bagged = GRID.map(
-    (v) => sim.firstTrees.slice(0, b.value).reduce((a, t) => a + predictTree(t, [v]), 0) / b.value,
-  )
-
-  const fitSeries: XYSeries[] = [
-    { name: 'true function', type: 'line', x: GRID, y: GRID.map(truth), muted: true, dashed: true },
-    { name: 'one tree', type: 'line', x: GRID, y: GRID.map((v) => predictTree(sim.firstTrees[0], [v])), slot: 1 },
-    { name: `bag of ${b.value}`, type: 'line', x: GRID, y: bagged, slot: 0 },
-    { name: 'training data', type: 'scatter', x: sim.firstData.x, y: sim.firstData.y, muted: true },
-  ]
+  // Predictions of every tree fitted to the first training set; the bag averages the first B of them.
+  const treeCurves = useMemo(() => sim.firstTrees.map((t) => GRID.map((v) => predictTree(t, [v]))), [sim])
+  const fitSeries = useMemo((): XYSeries[] => {
+    const shown = treeCurves.slice(0, b.value)
+    const bagged = GRID.map((_, i) => shown.reduce((a, c) => a + c[i], 0) / b.value)
+    const many = b.value > 1
+    return [
+      { name: 'true function', type: 'line', x: GRID, y: GRID.map(truth), muted: true, dashed: true },
+      ...shown.map((y): XYSeries => ({
+        name: many ? 'individual trees' : 'one tree',
+        type: 'line',
+        x: GRID,
+        y,
+        slot: 1,
+        thin: many,
+      })),
+      { name: `bag of ${b.value}`, type: 'line', x: GRID, y: bagged, slot: 0 },
+      { name: 'training data', type: 'scatter', x: sim.firstData.x, y: sim.firstData.y, muted: true },
+    ]
+  }, [treeCurves, b.value, sim])
   const varSeries: XYSeries[] = [
     { name: 'measured variance', type: 'scatter', x: bs, y: sim.empirical, slot: 0 },
     { name: 'ρσ² + (1 − ρ)σ²/B', type: 'line', x: bs, y: theory, slot: 1 },
@@ -131,10 +141,10 @@ export function BaggingVariance() {
   return (
     <Interactive
       title="Variance of a bagged tree against the number of trees"
-      caption="Forty training sets of 50 points each are drawn from y = sin(2πx) plus Gaussian noise of sd 0.5. On each, B unpruned regression trees are fitted to bootstrap samples and averaged. Left: the first training set, one tree and the bag. Right: the variance of the bagged prediction across the forty training sets, averaged over x, with the formula computed from the measured single-tree variance σ² and between-tree correlation ρ. The variance falls like 1/B and levels off at ρσ². Smaller resamples make the trees less alike (lower ρ) but individually noisier (higher σ²). Drag the line labelled B, or use the slider."
+      caption="Forty training sets of 50 points each are drawn from y = sin(2πx) plus Gaussian noise of sd 0.5. On each, B unpruned regression trees are fitted to bootstrap samples and averaged. Left: the first training set, each of its B bootstrap trees as a light line, and the bag, their average. Right: the variance of the bagged prediction across the forty training sets, averaged over x, with the formula computed from the measured single-tree variance σ² and between-tree correlation ρ. The variance falls like 1/B and levels off at ρσ². Smaller resamples make the trees less alike (lower ρ) but individually noisier (higher σ²). Drag the line labelled B, or use the slider."
       controls={
         <>
-          <ParamSlider label="trees B" param={b} format={(v) => String(v)} />
+          <ParamSlider label="trees B" param={b} format={(v) => String(v)} withArrows />
           <ParamSlider label="minimum leaf size" param={minLeaf} format={(v) => String(v)} />
           <ParamSlider label="resample size / n" param={fraction} />
         </>

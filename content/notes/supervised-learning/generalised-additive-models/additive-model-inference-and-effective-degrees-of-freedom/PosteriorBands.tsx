@@ -7,6 +7,7 @@ import {
   Readout,
   XYChart,
   formatNumber,
+  useParam,
   type XYSeries,
 } from '@/components/viz'
 import { linspace, rng } from '@/lib/math'
@@ -23,7 +24,7 @@ import {
 
 const N = 100
 const K = 17
-const DRAWS = 20
+const MAX_DRAWS = 50
 const GRID = linspace(0, 1, 121)
 const LOG_LAMBDAS = linspace(-9, 1, 51)
 const truth = (x: number) => Math.sin(2 * Math.PI * x) * Math.exp(-x) + 0.5 * x
@@ -33,6 +34,7 @@ export function PosteriorBands() {
   const [noise, setNoise] = useState(0.3)
   const [seed, setSeed] = useState(1)
   const [showDraws, setShowDraws] = useState(true)
+  const count = useParam(20, { min: 1, max: MAX_DRAWS, step: 1 })
 
   const data = useMemo(() => {
     const r = rng(seed)
@@ -69,19 +71,28 @@ export function PosteriorBands() {
   const lower = curve.map((c, i) => c - 1.96 * se[i])
   const covered = GRID.filter((x, i) => Math.abs(truth(x) - curve[i]) <= 1.96 * se[i]).length / GRID.length
 
+  const factor = useMemo(() => cholesky(fit.inv.map((row) => row.map((v) => v * sigma2))), [fit, sigma2])
+  // Draw k uses its own stream, so raising the count adds curves without redrawing the earlier ones.
   const draws = useMemo(() => {
-    const L = cholesky(fit.inv.map((row) => row.map((v) => v * sigma2)))
-    const r = rng(1000 + seed)
-    return Array.from({ length: DRAWS }, () => {
+    const L = factor
+    return Array.from({ length: count.value }, (_, k) => {
+      const r = rng((1000 + seed) * 1000 + k)
       const z = Array.from({ length: p }, () => r.normal())
       const beta = fit.coef.map((c, i) => c + L[i].reduce((acc, v, j) => acc + v * z[j], 0))
       return times(gridB, beta)
     })
-  }, [fit, sigma2, gridB, p, seed])
+  }, [factor, fit, gridB, p, seed, count.value])
 
   const series: XYSeries[] = [
     ...(showDraws
-      ? draws.map((y): XYSeries => ({ name: 'posterior draws', type: 'line', x: GRID, y, muted: true }))
+      ? draws.map((y): XYSeries => ({
+          name: 'posterior draws',
+          type: 'line',
+          x: GRID,
+          y,
+          slot: 3,
+          thin: draws.length > 1,
+        }))
       : []),
     { name: 'data', type: 'scatter', x: data.x, y: data.y, muted: true },
     { name: 'true f', type: 'line', x: GRID, y: GRID.map(truth), slot: 2, dashed: true },
@@ -96,10 +107,10 @@ export function PosteriorBands() {
       caption={
         <>
           A cubic spline with 20 B-splines and the penalty λ∫f″², fitted to 100 points. The band is f̂(x) ± 1.96 standard
-          errors from the posterior covariance (BᵀB + λS)⁻¹σ̂², and the thin curves are draws from that posterior. At
-          small λ the band is wide and the draws wiggle; at large λ the band narrows around a straight line and misses
-          the truth. The readout reports the fraction of the x grid where the band contains the true curve: its average
-          over many data sets is close to 95% near the REML choice of λ.
+          errors from the posterior covariance (BᵀB + λS)⁻¹σ̂², and the light curves are draws of f from that posterior;
+          the draws slider sets how many. At small λ the band is wide and the draws wiggle; at large λ the band narrows
+          around a straight line and misses the truth. The readout reports the fraction of the x grid where the band
+          contains the true curve: its average over many data sets is close to 95% near the REML choice of λ.
         </>
       }
       controls={
@@ -115,6 +126,7 @@ export function PosteriorBands() {
           />
           <ParamSlider label="noise σ" value={noise} onChange={setNoise} min={0.05} max={1} step={0.05} />
           <ParamSwitch label="posterior draws" checked={showDraws} onChange={setShowDraws} />
+          <ParamSlider label="draws" param={count} withArrows format={(v) => String(v)} />
           <ParamButton onClick={() => setLogLambda(remlBest)}>Set λ by REML</ParamButton>
           <ParamButton onClick={() => setSeed((v) => v + 1)}>New sample</ParamButton>
         </>

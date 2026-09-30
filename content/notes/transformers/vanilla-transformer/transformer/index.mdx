@@ -35,11 +35,12 @@ updated: 2026-09-27
 import { TransformerDiagram } from './TransformerDiagram'
 
 <Definition>
-The transformer is a <Gloss name="seq2seq">sequence-to-sequence model</Gloss> built only from attention and position-wise feed-forward layers, with
-no recurrence and no convolution <Cite id="vaswani2017" />. An encoder of $N = 6$ identical blocks maps the $n$ source
-tokens to $n$ vectors in $\reals^{d}$, with $d = 512$ in the base model. A decoder of $N = 6$ blocks generates the target
-one token at a time. Each decoder block reads the target prefix through causally masked self-attention and the source
-through cross-attention. Every sublayer is wrapped as $\operatorname{LN}(\xvec + \operatorname{Sublayer}(\xvec))$.
+The transformer is a <Gloss name="seq2seq">sequence-to-sequence model</Gloss> built only from attention and
+position-wise feed-forward layers, with no recurrence and no convolution <Cite id="vaswani2017" />. An encoder of
+$N = 6$ identical blocks maps the $n$ source tokens to $n$ vectors in $\reals^{d}$, with $d = 512$ in the base model. A
+decoder of $N = 6$ blocks generates the target one token at a time. Each decoder block reads the target prefix through
+causally masked self-attention and the source through cross-attention. Every sublayer is wrapped as
+$\operatorname{LN}(\xvec + \operatorname{Sublayer}(\xvec))$.
 </Definition>
 
 This note describes the model exactly as published in 2017. Most later transformers change several of its parts.
@@ -73,9 +74,10 @@ $$
 $$
 
 Here $w_t$ is the token's index and $\evec_{w_t}$ is row $w_t$ of $\Emat$. The paper states the $\sqrt{d}$ factor
-without a reason. If the entries of $\Emat$ have <NoteLink to="variance-and-covariance">standard deviation</NoteLink> $d^{-1/2}$, each row has
-norm about 1, and after the factor each entry has standard deviation 1. The entries of $\pvec_t$ lie in $[-1, 1]$, so
-the token and the position then contribute on the same scale. Dropout with rate $0.1$ is applied to the sum.
+without a reason. If the entries of $\Emat$ have <NoteLink to="variance-and-covariance">standard deviation</NoteLink>
+$d^{-1/2}$, each row has norm about 1, and after the factor each entry has standard deviation 1. The entries of
+$\pvec_t$ lie in $[-1, 1]$, so the token and the position then contribute on the same scale. Dropout with rate $0.1$ is
+applied to the sum.
 
 **Encoder block.** Two sublayers, each followed by a residual addition and layer normalisation:
 
@@ -111,10 +113,11 @@ $$
 \end{aligned}
 $$
 
-**Output.** The target sequence is shifted right by one position, so the decoder output at position $t$ predicts
-token $t + 1$. A <NoteLink to="matrix-vector-product">linear map</NoteLink> to $V$ logits and a softmax give $p(y_{t+1} \mid y_{\le t}, \xvec)$. The output matrix is
-$\Emat^{\tr}$: the source embedding, the target embedding and the pre-softmax projection share one matrix. Sharing is
-possible because the English–German and English–French experiments used one vocabulary for both languages.
+**Output.** The target sequence is shifted right by one position, so the decoder output at position $t$ predicts token
+$t + 1$. A <NoteLink to="matrix-vector-product">linear map</NoteLink> to $V$ logits and a softmax give
+$p(y_{t+1} \mid y_{\le t}, \xvec)$. The output matrix is $\Emat^{\tr}$: the source embedding, the target embedding and
+the pre-softmax projection share one matrix. Sharing is possible because the English–German and English–French
+experiments used one vocabulary for both languages.
 
 **Dropout.** The output of every sublayer passes through dropout with $P_{\text{drop}} = 0.1$ before it is added to the
 residual <Cite id="srivastava2014" />.
@@ -140,8 +143,9 @@ Vaswani et al. compare layer types on a sequence of length $n$ and width $d$ <Ci
 
 A recurrent layer must process positions one after another, so it cannot use a parallel processor on one sequence.
 Self-attention computes every row of $\Qmat \Kmat^{\tr}$ at once. A signal from position 1 reaches position $n$ in one
-attention step. Through a recurrent network it passes $n - 1$ steps, and the <NoteLink to="gradient">gradient</NoteLink> along that path decays as
-described in <NoteLink to="backpropagation-through-time">backpropagation through time</NoteLink>.
+attention step. Through a recurrent network it passes $n - 1$ steps, and the <NoteLink to="gradient">gradient</NoteLink>
+along that path decays as described in <NoteLink to="backpropagation-through-time">backpropagation through
+time</NoteLink>.
 
 **When the attention term dominates.** Count multiply-adds in one encoder block. The four projections of multi-head
 attention cost $4nd^2$. The scores $\Qmat \Kmat^{\tr}$ and the weighted sum of values cost $n^2 d$ each. The
@@ -156,9 +160,9 @@ compute in the projections and the feed-forward network.
 
 ## Training
 
-**Data.** WMT 2014 English–German has about 4.5 million sentence pairs, encoded with <Gloss name="bpe">byte-pair encoding</Gloss> into a shared
-vocabulary of about 37,000 tokens <Cite id="sennrich2016" />. English–French has 36 million sentences and a 32,000
-word-piece vocabulary. Each batch held about 25,000 source and 25,000 target tokens.
+**Data.** WMT 2014 English–German has about 4.5 million sentence pairs, encoded with <Gloss name="bpe">byte-pair
+encoding</Gloss> into a shared vocabulary of about 37,000 tokens <Cite id="sennrich2016" />. English–French has 36
+million sentences and a 32,000 word-piece vocabulary. Each batch held about 25,000 source and 25,000 target tokens.
 
 **Optimiser.** Adam with $\beta_1 = 0.9$, $\beta_2 = 0.98$ and $\epsilon = 10^{-9}$ <Cite id="kingma2015" />. The
 <Gloss name="learning-rate">learning rate</Gloss> at step $s$ is
@@ -167,26 +171,26 @@ $$
 \eta(s) = d^{-1/2} \min\paren{s^{-1/2},\ s \cdot s_w^{-3/2}}, \qquad s_w = 4000.
 $$
 
-For $s < s_w$ the second term is the smaller: $s \cdot s_w^{-3/2} < s^{-1/2}$ is equivalent to $s^{3/2} < s_w^{3/2}$.
-So the rate rises linearly for $s_w$ steps, then decays as $s^{-1/2}$. The two terms meet at $s = s_w$, where the peak is
+For $s < s_w$ the second term is the smaller: $s \cdot s_w^{-3/2} < s^{-1/2}$ is equivalent to $s^{3/2} < s_w^{3/2}$. So
+the rate rises linearly for $s_w$ steps, then decays as $s^{-1/2}$. The two terms meet at $s = s_w$, where the peak is
 $\eta = (d\, s_w)^{-1/2}$. For the base model this is $(512 \times 4000)^{-1/2} = 6.99 \times 10^{-4}$. The factor
-$d^{-1/2}$ gives wider models a smaller peak: $4.94 \times 10^{-4}$ for $d = 1024$. A
-post-norm transformer has large gradients near its output at initialisation and can diverge without warm-up
-<Cite id="xiong2020" />.
+$d^{-1/2}$ gives wider models a smaller peak: $4.94 \times 10^{-4}$ for $d = 1024$. A post-norm transformer has large
+gradients near its output at initialisation and can diverge without warm-up <Cite id="xiong2020" />.
 
-**<NoteLink to="cross-entropy-and-perplexity">Label smoothing</NoteLink>.** The target distribution for each token is $q' = (1 - \epsilon)\,\delta_y + \epsilon / V$ instead of
-the one-hot $\delta_y$, with $\epsilon = 0.1$ <Cite id="szegedy2016" />. The cross-entropy $-\sum_k q'_k \log p_k$ over
-the probability simplex is minimised at $p = q'$ (<NoteLink to="kullback-leibler-divergence">Gibbs' inequality</NoteLink>), so training pushes the probability of the correct
-token towards $0.9 + 0.1/V \approx 0.9$ instead of 1. A model that reaches this target has per-token perplexity at least
-$1/0.9 \approx 1.11$ on the true tokens. The paper reports the consequence: smoothing hurts perplexity but improves
-accuracy and <Gloss name="bleu" />.
+**<NoteLink to="cross-entropy-and-perplexity">Label smoothing</NoteLink>.** The target distribution for each token is
+$q' = (1 - \epsilon)\,\delta_y + \epsilon / V$ instead of the one-hot $\delta_y$, with $\epsilon = 0.1$
+<Cite id="szegedy2016" />. The cross-entropy $-\sum_k q'_k \log p_k$ over the probability simplex is minimised at
+$p = q'$ (<NoteLink to="kullback-leibler-divergence">Gibbs' inequality</NoteLink>), so training pushes the probability
+of the correct token towards $0.9 + 0.1/V \approx 0.9$ instead of 1. A model that reaches this target has per-token
+perplexity at least $1/0.9 \approx 1.11$ on the true tokens. The paper reports the consequence: smoothing hurts
+perplexity but improves accuracy and <Gloss name="bleu" />.
 
-**Hardware.** One machine with 8 NVIDIA P100 <Gloss name="gpu" plural />. The base model trained for 100,000 steps in 12 hours, at about 0.4 s
-per step. The big model trained for 300,000 steps in 3.5 days.
+**Hardware.** One machine with 8 NVIDIA P100 <Gloss name="gpu" plural />. The base model trained for 100,000 steps in 12
+hours, at about 0.4 s per step. The big model trained for 300,000 steps in 3.5 days.
 
-**Decoding.** The base model averages the last 5 checkpoints, written at 10-minute intervals, and the big model the
-last 20. <Gloss name="beam-search">Beam search</Gloss> uses beam size 4 and length penalty $\alpha = 0.6$, with a maximum output length of the input
-length plus 50.
+**Decoding.** The base model averages the last 5 checkpoints, written at 10-minute intervals, and the big model the last 20.
+<Gloss name="beam-search">Beam search</Gloss> uses beam size 4 and length penalty $\alpha = 0.6$, with a maximum output
+length of the input length plus 50.
 
 ## Results
 
@@ -206,12 +210,13 @@ The ablations on newstest2013 (base model, 25.8 BLEU) change one part of the bas
 
 - **Heads.** One head of width 512 scored 24.9. Sixteen heads of width 32 scored 25.8 and 32 heads of width 16 scored
   25.4.
-- **Key width.** Reducing $d_k$ to 16 with 8 heads scored 25.1. The authors read this as evidence that the dot product is
-  a limited compatibility function.
+- **Key width.** Reducing $d_k$ to 16 with 8 heads scored 25.1. The authors read this as evidence that the dot product
+  is a limited compatibility function.
 - **Size.** $d = 1024$ scored 26.0 and $d_{ff} = 4096$ scored 26.2.
 - **Dropout.** No dropout scored 24.6.
 - **Label smoothing.** No smoothing scored 25.3 BLEU with a better perplexity, 4.67 against 4.92.
-- **Positions.** <NoteLink to="learned-absolute-position-embeddings">Learned position embeddings</NoteLink> instead of sinusoids scored 25.7.
+- **Positions.** <NoteLink to="learned-absolute-position-embeddings">Learned position embeddings</NoteLink> instead of
+  sinusoids scored 25.7.
 
 A four-layer transformer with $d = 1024$ also reached 91.3 F1 on English constituency parsing trained on the Wall
 Street Journal alone.
@@ -268,7 +273,7 @@ and compares it with the 2017 block line by line.
 - **Warm-up with post-norm.** Post-norm blocks can diverge early in training at the paper's learning rate
   unless the rate is warmed up <Cite id="xiong2020" />.
 - **Quadratic cost in length.** Doubling the context quadruples attention time and memory.
-- **Label smoothing and perplexity.** A smoothed model's perplexity is not comparable with an unsmoothed one's. Smoothing
-  makes perplexity worse by construction while improving BLEU.
+- **Label smoothing and perplexity.** A smoothed model's perplexity is not comparable with an unsmoothed one's.
+  Smoothing makes perplexity worse by construction while improving BLEU.
 - **Reported parameter counts.** The 65 M and 213 M figures match a count that includes the shared embedding once.
   Counting the source embedding, target embedding and output projection separately would add two more copies.

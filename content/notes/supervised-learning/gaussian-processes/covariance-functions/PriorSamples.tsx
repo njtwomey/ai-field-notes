@@ -10,7 +10,7 @@ import {
   type XYSeries,
 } from '@/components/viz'
 import { linspace, rng } from '@/lib/math'
-import { gram, makeKernel, samples, type Kernel } from '../_shared/gp'
+import { addDiagonal, cholesky, gram, makeKernel, samplesFromFactor, type Kernel } from '../_shared/gp'
 
 type Choice =
   'se' | 'matern12' | 'matern32' | 'matern52' | 'rq' | 'periodic' | 'linear' | 'se-x-periodic' | 'se-plus-linear'
@@ -32,10 +32,13 @@ const X_RANGE: [number, number] = [-5, 5]
 const Y_RANGE: [number | undefined, number | undefined] = [-4, 4]
 const K_RANGE: [number | undefined, number | undefined] = [undefined, undefined]
 const REF = 1
-const NORMALS = (() => {
-  const g = rng(5)
-  return Array.from({ length: 3 }, () => GRID.map(() => g.normal()))
-})()
+const MAX_SAMPLES = 30
+const ZERO = GRID.map(() => 0)
+/** Draw k has its own stream of standard normals, shared by every kernel, so raising the count only adds draws. */
+const NORMALS = Array.from({ length: MAX_SAMPLES }, (_, k) => {
+  const g = rng(5 * 1000 + k)
+  return GRID.map(() => g.normal())
+})
 
 function kernelFor(choice: Choice, ell: number): Kernel {
   switch (choice) {
@@ -61,40 +64,45 @@ function kernelFor(choice: Choice, ell: number): Kernel {
   }
 }
 
-/** Three draws from a zero-mean GP prior for each covariance function, beside the kernel as a function of x. */
+/** Draws from a zero-mean GP prior for each covariance function, beside the kernel as a function of x. */
 export function PriorSamples() {
   const [choice, setChoice] = useState<Choice>('se')
   const logEll = useParam(0, { min: -1, max: 0.7, step: 0.02 })
+  const count = useParam(3, { min: 1, max: MAX_SAMPLES, step: 1 })
   const ell = 10 ** logEll.value
 
+  // The Cholesky factor depends only on the kernel; changing the number of draws reuses it.
   const r = useMemo(() => {
     const k = kernelFor(choice, ell)
-    const draws = samples(
-      GRID.map(() => 0),
-      gram(k, GRID, GRID),
-      NORMALS,
-    )
-    return { draws, shape: GRID.map((x) => k(REF, x)) }
+    return { factor: cholesky(addDiagonal(gram(k, GRID, GRID), 1e-6)), shape: GRID.map((x) => k(REF, x)) }
   }, [choice, ell])
 
-  const sampleSeries: XYSeries[] = r.draws.map((d, i) => ({
-    name: `sample ${i + 1}`,
-    type: 'line',
-    x: GRID,
-    y: d,
-    slot: i,
-  }))
-  const kernelSeries: XYSeries[] = [{ name: `k(${REF}, x)`, type: 'line', x: GRID, y: r.shape, slot: 0 }]
+  const sampleSeries = useMemo((): XYSeries[] => {
+    const many = count.value > 1
+    return samplesFromFactor(ZERO, r.factor, NORMALS.slice(0, count.value)).map((d) => ({
+      name: many ? 'prior samples' : 'prior sample',
+      type: 'line',
+      x: GRID,
+      y: d,
+      slot: 1,
+      thin: many,
+    }))
+  }, [r, count.value])
+  const kernelSeries = useMemo(
+    (): XYSeries[] => [{ name: `k(${REF}, x)`, type: 'line', x: GRID, y: r.shape, slot: 0 }],
+    [r],
+  )
   const usesEll = choice !== 'linear'
 
   return (
     <Interactive
       title="Samples from Gaussian process priors"
-      caption="Left: three functions drawn from a zero-mean GP prior with the chosen covariance, using the same random numbers for every kernel. Right: the covariance between f(1) and f(x). The squared exponential gives infinitely smooth samples. Matérn 1/2 samples are continuous but jagged, and Matérn 3/2 and 5/2 are once and twice differentiable. The rational quadratic mixes length-scales, so its samples vary on several scales at once. The periodic kernel repeats exactly every 2 units; multiplying it by a squared exponential lets the repeating shape drift. The linear kernel gives straight lines, and adding it to a squared exponential gives wiggles about a trend."
+      caption="Left: functions drawn from a zero-mean GP prior with the chosen covariance, as light lines, using the same random numbers for every kernel. The draws slider sets how many; a single draw is drawn at full weight. Right: the covariance between f(1) and f(x). The squared exponential gives infinitely smooth samples. Matérn 1/2 samples are continuous but jagged, and Matérn 3/2 and 5/2 are once and twice differentiable. The rational quadratic mixes length-scales, so its samples vary on several scales at once. The periodic kernel repeats exactly every 2 units; multiplying it by a squared exponential lets the repeating shape drift. The linear kernel gives straight lines, and adding it to a squared exponential gives wiggles about a trend."
       controls={
         <>
           <ParamChoice label="covariance function" value={choice} onChange={setChoice} options={OPTIONS} />
           <ParamSlider label="length-scale ℓ" param={logEll} format={(v) => formatNumber(10 ** v)} />
+          <ParamSlider label="draws" param={count} withArrows format={(v) => String(v)} />
         </>
       }
       readout={<Readout label="length-scale ℓ" value={usesEll ? formatNumber(ell) : 'not used'} />}

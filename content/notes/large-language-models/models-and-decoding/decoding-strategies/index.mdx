@@ -14,11 +14,11 @@ updated: 2026-09-27
 import { NextTokenSampler } from './NextTokenSampler'
 
 <Definition>
-An autoregressive <Gloss name="language-model">language model</Gloss> outputs, at each step $t$, logits $\zvec \in \reals^V$ over a vocabulary of $V$
-tokens, and the next-token distribution $p(x_t = i \mid x_{<t}) = \operatorname{softmax}(\zvec)_i$. A decoding strategy
-is a rule that chooses $x_t$ from these logits, appends it to the prefix and repeats until an end token or a length
-limit. Deterministic strategies search for a high-probability sequence; stochastic strategies sample from a modified
-distribution <Cite id="holtzman2020" />.
+An autoregressive <Gloss name="language-model">language model</Gloss> outputs, at each step $t$, logits
+$\zvec \in \reals^V$ over a vocabulary of $V$ tokens, and the next-token distribution
+$p(x_t = i \mid x_{<t}) = \operatorname{softmax}(\zvec)_i$. A decoding strategy is a rule that chooses $x_t$ from these
+logits, appends it to the prefix and repeats until an end token or a length limit. Deterministic strategies search for a
+high-probability sequence; stochastic strategies sample from a modified distribution <Cite id="holtzman2020" />.
 </Definition>
 
 ## Search
@@ -26,8 +26,8 @@ distribution <Cite id="holtzman2020" />.
 **Greedy decoding** takes $x_t = \argmax_i z_i$ at every step. It is fast and deterministic. It does not find the most
 probable sequence, because a locally best token can lead to poor continuations.
 
-**Beam search** keeps the $B$ highest-scoring prefixes, extends each by every token, and keeps the $B$ best extensions by
-total log-probability. Greedy decoding is beam search with $B = 1$. The note on
+**<Gloss name="beam-search">Beam search</Gloss>** keeps the $B$ highest-scoring prefixes, extends each by every token,
+and keeps the $B$ best extensions by total log-probability. Greedy decoding is beam search with $B = 1$. The note on
 <NoteLink to="sequence-to-sequence">sequence-to-sequence models</NoteLink> gives a worked example and the length
 normalisation that beam search needs.
 
@@ -53,9 +53,9 @@ $$
 
 The ratio of two probabilities is $p_T(i) / p_T(j) = e^{(z_i - z_j)/T}$. With $T < 1$ each logit gap counts for more, so
 the distribution sharpens toward the largest logit; as $T \to 0$ it concentrates on the argmax, and sampling becomes
-greedy decoding. With $T > 1$ the gaps shrink; as $T \to \infty$ the distribution becomes uniform. $T = 1$ is the model's
-own distribution. Equivalently, $p_T \propto p^{1/T}$: temperature raises every probability to the same power and
-renormalises. The order of the tokens never changes.
+greedy decoding. With $T > 1$ the gaps shrink; as $T \to \infty$ the distribution becomes uniform. $T = 1$ is the
+model's own distribution. Equivalently, $p_T \propto p^{1/T}$: temperature raises every probability to the same power
+and renormalises. The order of the tokens never changes.
 
 **Entropy rises with temperature.** Write $\beta = 1/T$ and $Z(\beta) = \sum_j e^{\beta z_j}$. Then $\log p_\beta(i) =
 \beta z_i - \log Z(\beta)$, and the <NoteLink to="entropy">entropy</NoteLink> is
@@ -64,16 +64,17 @@ $$
 \entropy(\beta) = -\sum_i p_\beta(i) \log p_\beta(i) = \log Z(\beta) - \beta\, \expect_\beta[z].
 $$
 
-The <NoteLink to="derivative">derivative</NoteLink> of $\log Z$ is $\frac{d}{d\beta}\log Z(\beta) = \sum_i z_i e^{\beta z_i} / Z(\beta) = \expect_\beta[z]$,
-and the derivative of the mean is $\frac{d}{d\beta}\expect_\beta[z] = \var_\beta[z]$. So
+The <NoteLink to="derivative">derivative</NoteLink> of $\log Z$ is
+$\frac{d}{d\beta}\log Z(\beta) = \sum_i z_i e^{\beta z_i} / Z(\beta) = \expect_\beta[z]$, and the derivative of the mean
+is $\frac{d}{d\beta}\expect_\beta[z] = \var_\beta[z]$. So
 
 $$
 \frac{d\entropy}{d\beta} = \expect_\beta[z] - \expect_\beta[z] - \beta \var_\beta[z] = -\beta \var_\beta[z] \le 0.
 $$
 
 Entropy falls as $\beta$ grows, so it rises with $T$. It is constant only when all logits are equal. The same rescaling,
-fitted on held-out data rather than set by hand, is <NoteLink to="temperature-scaling">temperature scaling</NoteLink> for
-calibration.
+fitted on held-out data rather than set by hand, is <NoteLink to="temperature-scaling">temperature scaling</NoteLink>
+for calibration.
 
 ### Top-k sampling
 
@@ -83,7 +84,8 @@ confident, $k$ tokens include implausible ones; when many continuations are reas
 
 ### Nucleus (top-p) sampling
 
-Sort the tokens by probability and keep the smallest set $\Vcal^{(p)}$ whose <NoteLink to="law-of-total-probability">total probability</NoteLink> is at least $p$:
+Sort the tokens by probability and keep the smallest set $\Vcal^{(p)}$ whose
+<NoteLink to="law-of-total-probability">total probability</NoteLink> is at least $p$:
 
 $$
 \Vcal^{(p)} = \text{smallest prefix of the sorted tokens with} \sum_{i \in \Vcal^{(p)}} p(i) \ge p.
@@ -106,8 +108,8 @@ Take four tokens with logits $\zvec = (2, 1, 0, -1)$.
 - **$T = 0.5$.** The logits double to $(4, 2, 0, -2)$ and $p = (0.865, 0.117, 0.016, 0.002)$, with entropy 0.66 bits.
 - **$T = 2$.** The logits halve and $p = (0.455, 0.276, 0.167, 0.102)$, with entropy 1.80 bits.
 - **Top-$k$ with $k = 2$, at $T = 1$.** Keep 0.644 and 0.237, which sum to 0.881, and renormalise to $(0.731, 0.269)$.
-- **Top-$p$ with $p = 0.9$, at $T = 1$.** The cumulative sums are 0.644, 0.881 and 0.968. Two tokens reach only 0.881, so
-  three are kept, and renormalising gives $(0.665, 0.245, 0.090)$.
+- **Top-$p$ with $p = 0.9$, at $T = 1$.** The cumulative sums are 0.644, 0.881 and 0.968. Two tokens reach only 0.881,
+  so three are kept, and renormalising gives $(0.665, 0.245, 0.090)$.
 
 Top-$k$ with $k = 3$ would give the same result here. On a flatter distribution top-$p$ keeps more tokens; on a sharper
 one, fewer.
@@ -121,5 +123,5 @@ one, fewer.
   temperature top-$k$ may be the only setting that removes the tail tokens.
 - **Truncation changes the distribution.** Samples no longer come from the model, so sample-based estimates, such as the
   average log-probability of generated text, are biased.
-- **Search and sampling suit different tasks.** Constrained outputs (translation, code, extraction) favour greedy or beam
-  search; open-ended outputs favour truncated sampling.
+- **Search and sampling suit different tasks.** Constrained outputs (translation, code, extraction) favour greedy or
+  beam search; open-ended outputs favour truncated sampling.

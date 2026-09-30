@@ -17,27 +17,29 @@ import { DistanceProfileExplorer } from './DistanceProfileExplorer'
 <Definition>
 Let $x_1, \dots, x_n$ be a time series and $Q = (q_0, \dots, q_{m-1})$ a query of length $m \le n$. Write
 $T_i = (x_i, \dots, x_{i+m-1})$ for the subsequence starting at $i$. The distance profile of $Q$ is the vector
-$D_i = d(Q, T_i)$ for $i = 1, \dots, n - m + 1$, where $d$ is the Euclidean distance after z-normalising both
-arguments to mean 0 and <NoteLink to="variance-and-covariance">standard deviation</NoteLink> 1. MASS (Mueen's Algorithm for Similarity Search) computes the whole
-vector in $O(n \log n)$ time with the fast Fourier transform <Cite id="mueen-mass" />.
+$D_i = d(Q, T_i)$ for $i = 1, \dots, n - m + 1$, where $d$ is the Euclidean distance after z-normalising both arguments
+to mean 0 and <NoteLink to="variance-and-covariance">standard deviation</NoteLink> 1. MASS (Mueen's Algorithm for
+Similarity Search) computes the whole vector in $O(n \log n)$ time with the fast Fourier transform
+<Cite id="mueen-mass" />.
 </Definition>
 
 ## Problem
 
 A distance profile answers "where in this series does the query occur, up to offset and scale?". Its minima are the
 query's matches. When $Q$ is itself a subsequence $T_j$ of the series, the distance profile is row $j$ of the full
-distance matrix, and its minimum outside an exclusion zone around $j$ is the <NoteLink to="matrix-profile">matrix profile</NoteLink> entry $P_j$
-<Cite id="yeh2016" />. Computing each of the $n - m + 1$ distances directly costs $O(m)$, so the direct profile costs
-$O(nm)$. For long queries this is slow, and computing the matrix profile row by row multiplies the cost by $n$.
+distance matrix, and its minimum outside an exclusion zone around $j$ is the <NoteLink to="matrix-profile">matrix
+profile</NoteLink> entry $P_j$ <Cite id="yeh2016" />. Computing each of the $n - m + 1$ distances directly costs $O(m)$,
+so the direct profile costs $O(nm)$. For long queries this is slow, and computing the matrix profile row by row
+multiplies the cost by $n$.
 
 ## Mechanism
 
 ### Distance from a dot product
 
-For a query with mean $\mu_Q$ and standard deviation $\sigma_Q$, and a subsequence $T_i$ with mean $\mu_i$ and
-standard deviation $\sigma_i$, write the dot product as $QT_i = \sum_{k=0}^{m-1} q_k x_{i+k}$. The z-normalised vectors
-$\hat Q$ and $\hat T_i$ each have squared norm $m$. Their dot product is $m$ times the <NoteLink to="pearson-correlation">Pearson correlation</NoteLink>
-$\rho_i$:
+For a query with mean $\mu_Q$ and standard deviation $\sigma_Q$, and a subsequence $T_i$ with mean $\mu_i$ and standard
+deviation $\sigma_i$, write the dot product as $QT_i = \sum_{k=0}^{m-1} q_k x_{i+k}$. The z-normalised vectors $\hat Q$
+and $\hat T_i$ each have squared norm $m$. Their dot product is $m$ times the <NoteLink to="pearson-correlation">Pearson
+correlation</NoteLink> $\rho_i$:
 
 $$
 \hat Q^\top \hat T_i = \sum_{k=0}^{m-1} \frac{q_k - \mu_Q}{\sigma_Q} \cdot \frac{x_{i+k} - \mu_i}{\sigma_i}
@@ -58,19 +60,20 @@ sliding dot products $QT_i$.
 
 ### Sliding dot products by convolution
 
-Reverse the query: $r_k = q_{m-1-k}$ for $k = 0, \dots, m-1$. The full <NoteLink to="convolution">linear convolution</NoteLink> of $x$ with $r$ is
-$(x * r)_t = \sum_k r_k x_{t-k}$. At $t = i + m - 1$, substituting $k = m - 1 - s$ gives
+Reverse the query: $r_k = q_{m-1-k}$ for $k = 0, \dots, m-1$. The full <NoteLink to="convolution">linear
+convolution</NoteLink> of $x$ with $r$ is $(x * r)_t = \sum_k r_k x_{t-k}$. At $t = i + m - 1$, substituting
+$k = m - 1 - s$ gives
 
 $$
 (x * r)_{i+m-1} = \sum_{s=0}^{m-1} q_s \, x_{i+s} = QT_i .
 $$
 
 So the sliding dot products are entries $m$ through $n$ of the convolution, counting from 1. By the
-<NoteLink to="convolution-theorem">convolution theorem</NoteLink>, a linear convolution equals the inverse <Gloss name="dft">discrete
-Fourier transform</Gloss> of the product of the two transforms, provided both sequences are zero-padded to a length
-$L \ge n + m - 1$ so that the circular wrap-around does not overlap the result. With the
-<NoteLink to="fast-fourier-transform">fast Fourier transform</NoteLink>, each of the two forward transforms and the inverse costs
-$O(L \log L) = O(n \log n)$.
+<NoteLink to="convolution-theorem">convolution theorem</NoteLink>, a linear convolution equals the inverse
+<Gloss name="dft">discrete Fourier transform</Gloss> of the product of the two transforms, provided both sequences are
+zero-padded to a length $L \ge n + m - 1$ so that the circular wrap-around does not overlap the result. With the
+<NoteLink to="fast-fourier-transform">fast Fourier transform</NoteLink>, each of the two forward transforms and the
+inverse costs $O(L \log L) = O(n \log n)$.
 
 ### The algorithm
 
@@ -79,9 +82,10 @@ $O(L \log L) = O(n \log n)$.
 3. Multiply their FFTs elementwise and invert. Read $QT_i$ from positions $m$ to $n$.
 4. Return $D_i = \sqrt{2m \paren{1 - (QT_i - m \mu_Q \mu_i)/(m \sigma_Q \sigma_i)}}$.
 
-The cost is $O(n \log n)$ and does not depend on $m$. Later versions of MASS split long series into pieces sized
-for the hardware, and one replaces the FFT with a discrete cosine transform to avoid <NoteLink to="floating-point-arithmetic">rounding error</NoteLink> from
-frequency-domain aliasing <Cite id="mueen-mass" />.
+The cost is $O(n \log n)$ and does not depend on $m$. Later versions of MASS split long series into pieces sized for the
+hardware, and one replaces the FFT with a discrete cosine transform to avoid
+<NoteLink to="floating-point-arithmetic">rounding error</NoteLink> from frequency-domain aliasing
+<Cite id="mueen-mass" />.
 
 <DistanceProfileExplorer />
 

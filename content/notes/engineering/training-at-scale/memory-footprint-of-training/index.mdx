@@ -14,10 +14,11 @@ updated: 2026-09-27
 import { TrainingMemory } from './TrainingMemory'
 
 <Definition>
-The memory needed to train a neural network on one device is the sum of the **model state** (weights, <NoteLink to="gradient">gradients</NoteLink> and
-optimiser state), the **activations** saved during the forward pass for use in the backward pass, and **temporary
-buffers** for intermediate results and communication. Model state scales with the number of parameters; activations
-scale with the <NoteLink to="minibatching-and-batch-size">batch size</NoteLink>, the sequence length and the model's width and depth.
+The memory needed to train a neural network on one device is the sum of the **model state** (weights,
+<NoteLink to="gradient">gradients</NoteLink> and optimiser state), the **activations** saved during the forward pass for
+use in the backward pass, and **temporary buffers** for intermediate results and communication. Model state scales with
+the number of parameters; activations scale with the <NoteLink to="minibatching-and-batch-size">batch size</NoteLink>,
+the sequence length and the model's width and depth.
 </Definition>
 
 ## Model state
@@ -35,9 +36,10 @@ parameters, <NoteLink to="mixed-precision-training">mixed-precision training</No
 | **total**                     |           | **16**              |
 
 so model state takes $16\Psi$ bytes <Cite id="rajbhandari2020" />. Training in fp32 with Adam also needs 16 bytes per
-parameter: 4 each for weights, gradients and the two moments. <NoteLink to="momentum-and-nesterov">SGD with momentum</NoteLink> needs one moment instead of two. A model
-with $7 \times 10^9$ parameters needs 112 GB of model state, before any activations. Inference needs only the 2 bytes of
-16-bit weights, which is why a model can often be served on hardware where it cannot be trained.
+parameter: 4 each for weights, gradients and the two moments. <NoteLink to="momentum-and-nesterov">SGD with
+momentum</NoteLink> needs one moment instead of two. A model with $7 \times 10^9$ parameters needs 112 GB of model
+state, before any activations. Inference needs only the 2 bytes of 16-bit weights, which is why a model can often be
+served on hardware where it cannot be trained.
 
 <NoteLink to="zero-and-sharded-optimisers">ZeRO</NoteLink> shards this state across data-parallel devices, and
 <NoteLink to="model-parallelism">tensor and pipeline parallelism</NoteLink> split it across the devices that share a
@@ -71,8 +73,8 @@ bytes.
 
 The total is $11sbh + 5as^2b$ bytes.
 
-**<Gloss name="mlp" /> block.** The two linear layers store their inputs, of widths $h$ and $4h$: $2sbh + 8sbh$. The GeLU needs its
-input: $8sbh$. The dropout mask: $sbh$. The total is $19sbh$ bytes.
+**<Gloss name="mlp" /> block.** The two linear layers store their inputs, of widths $h$ and $4h$: $2sbh + 8sbh$. The
+GeLU needs its input: $8sbh$. The dropout mask: $sbh$. The total is $19sbh$ bytes.
 
 **<NoteLink to="layer-normalisation">Layer normalisation</NoteLink>.** Each of the two stores its input: $4sbh$.
 
@@ -82,18 +84,18 @@ $$
 \text{activation bytes per layer} = 34 sbh + 5 a s^2 b = sbh\paren{34 + \frac{5as}{h}}.
 $$
 
-The first term is linear in sequence length; the second, from the attention matrices, is quadratic. The ratio
-$5as/h$ decides which dominates. For <Gloss name="gpt-3" />, with $a = 96$, $s = 2048$ and $h = 12288$, it is 80, more than twice the
-linear term <Cite id="korthikanti2022" />.
+The first term is linear in sequence length; the second, from the attention matrices, is quadratic. The ratio $5as/h$
+decides which dominates. For <Gloss name="gpt-3" />, with $a = 96$, $s = 2048$ and $h = 12288$, it is 80, more than
+twice the linear term <Cite id="korthikanti2022" />.
 
 ### Reducing activation memory
 
 - **Full recomputation.** Store only each layer's input, $2sbh$ bytes, and recompute the layer's internals during the
   backward pass. This is <NoteLink to="gradient-checkpointing">gradient checkpointing</NoteLink> at layer granularity
   <Cite id="chen2016" />. It costs about one extra forward pass, roughly a third more computation.
-- **Selective recomputation.** The quadratic $5as^2b$ term comes from operations that take little arithmetic to recompute:
-  the softmax, its dropout and the attention-weighted sum. Recomputing only these leaves $34sbh$ bytes per layer at a
-  small extra cost <Cite id="korthikanti2022" />. Kernels that never store the attention matrix, such as
+- **Selective recomputation.** The quadratic $5as^2b$ term comes from operations that take little arithmetic to
+  recompute: the softmax, its dropout and the attention-weighted sum. Recomputing only these leaves $34sbh$ bytes per
+  layer at a small extra cost <Cite id="korthikanti2022" />. Kernels that never store the attention matrix, such as
   <NoteLink to="flash-attention">FlashAttention</NoteLink>, remove this term as well.
 - **Tensor and sequence parallelism.** With tensor parallelism of degree $t$, the attention and MLP internals are split
   across devices, but layer normalisation and dropout remain replicated. Sequence parallelism splits those along the

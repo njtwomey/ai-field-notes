@@ -12,13 +12,13 @@ updated: 2026-09-27
 ---
 
 <Definition>
-In a smart home, activity recognition learns a map from a stream of sensor events, such as a motion sensor turning on
-or a door opening, to the activity being performed. Two homes rarely have the same sensors, so their input spaces
-differ and transfer between them is **heterogeneous** <Cite id="pan2010survey" />. Twomey and colleagues propose two
-techniques for building representations that can be shared. **Context modulation** rewrites an existing
-dataset into new, user-defined contexts by deleting, merging and renaming sensors and labels <Cite id="twomey2014context" />.
-**Sensor topology learning** estimates from unlabelled data which sensors are adjacent in the home, and uses the
-adjacency to build features <Cite id="twomey2017topologies" />.
+In a smart home, activity recognition learns a map from a stream of sensor events, such as a motion sensor turning on or
+a door opening, to the activity being performed. Two homes rarely have the same sensors, so their input spaces differ
+and transfer between them is **heterogeneous** <Cite id="pan2010survey" />. Twomey and colleagues propose two techniques
+for building representations that can be shared. **Context modulation** rewrites an existing dataset into new,
+user-defined contexts by deleting, merging and renaming sensors and labels <Cite id="twomey2014context" />. **Sensor
+topology learning** estimates from unlabelled data which sensors are adjacent in the home, and uses the adjacency to
+build features <Cite id="twomey2017topologies" />.
 </Definition>
 
 ## Problem
@@ -35,7 +35,8 @@ grouping be learnt from the data instead of from floor plans?
 
 Twomey and Flach define **context modulation** as modifying a dataset so that it represents a new context chosen by the
 analyst <Cite id="twomey2014context" />. A sensor event file lists a timestamp, a sensor identifier, its state and the
-start or end of labelled activities. Their software applies four kinds of rewrite, each specified by regular expressions:
+start or end of labelled activities. Their software applies four kinds of rewrite, each specified by regular
+expressions:
 
 - **Sensor deletion** removes every event from matching sensors, simulating a failed sensor or a blind spot. The
   activity boundaries on deleted rows are remembered, so labels are not lost.
@@ -45,13 +46,14 @@ start or end of labelled activities. Their software applies four kinds of rewrit
 - **Feature engineering** rewrites derived attributes, for example mapping hours to periods such as breakfast time,
   or days to weekday and weekend.
 - **Label engineering** rewrites activity labels. Removing the resident identifier from labels such as `R1_Work`
-  anonymises the task, so that the model classifies activities regardless of who performs them. Harmonising names such as
-  "cooking" and "meal preparation" makes labels consistent across datasets, which transfer between homes requires.
-  Keeping the resident and the activity as separate labels recasts the problem as <Gloss name="multi-task-learning">multi-task learning</Gloss>.
+  anonymises the task, so that the model classifies activities regardless of who performs them. Harmonising names such
+  as "cooking" and "meal preparation" makes labels consistent across datasets, which transfer between homes requires.
+  Keeping the resident and the activity as separate labels recasts the problem as
+  <Gloss name="multi-task-learning">multi-task learning</Gloss>.
 
-When several residents are active, an event can belong to any of the currently open activities. The software records
-the set of open activities with each event, which makes the labels ambiguous in the sense of <NoteLink to="partial-label-learning" />, and
-evaluation counts a prediction as correct if it is in that set.
+When several residents are active, an event can belong to any of the currently open activities. The software records the
+set of open activities with each event, which makes the labels ambiguous in the sense of
+<NoteLink to="partial-label-learning" />, and evaluation counts a prediction as correct if it is in that set.
 
 ### What coarsening costs
 
@@ -70,24 +72,25 @@ accuracy lost by making homes comparable.
 ## Learning sensor topologies
 
 Sensor events are usually treated as independent features, but complex activities show up as combinations of sensors.
-Taking every combination, the power set of the active sensors, is equivalent to a <NoteLink to="kernel-trick">polynomial kernel</NoteLink> and learns weights
-for spurious combinations: motion in a bedroom together with motion in the kitchen, when two residents happen to be in
-those rooms at once. Twomey, Diethe, Craddock and Flach learn an **adjacency matrix** $\Amat$ of the sensor network from
-unlabelled event streams, and allow only combinations of adjacent sensors <Cite id="twomey2017topologies" />.
+Taking every combination, the power set of the active sensors, is equivalent to a <NoteLink to="kernel-trick">polynomial
+kernel</NoteLink> and learns weights for spurious combinations: motion in a bedroom together with motion in the kitchen,
+when two residents happen to be in those rooms at once. Twomey, Diethe, Craddock and Flach learn an **adjacency matrix**
+$\Amat$ of the sensor network from unlabelled event streams, and allow only combinations of adjacent sensors
+<Cite id="twomey2017topologies" />.
 
 ### Weighted cross-correlation
 
-Represent the stream as a sparse matrix $\Xmat \in \reals^{m \times n}$, one row per one-second time slice and one column
-per sensor, with entries in $\set{0, 1}$ for sensor-on events or $\set{-1, 0, 1}$ for on and off events. Let $\Ymat$ be
-$\Xmat$ lagged by $l$ slices. The correlation between columns needs centred data, and centring destroys sparsity.
-For columns $\xvec$ and $\yvec$ with means $\bar x$ and $\bar y$,
+Represent the stream as a sparse matrix $\Xmat \in \reals^{m \times n}$, one row per one-second time slice and one
+column per sensor, with entries in $\set{0, 1}$ for sensor-on events or $\set{-1, 0, 1}$ for on and off events. Let
+$\Ymat$ be $\Xmat$ lagged by $l$ slices. The correlation between columns needs centred data, and centring destroys
+sparsity. For columns $\xvec$ and $\yvec$ with means $\bar x$ and $\bar y$,
 $$
 \sum_{i=1}^{m} (x_i - \bar x)(y_i - \bar y) = \xvec\transpose \yvec - m \bar x \bar y ,
 $$
-so the matrix of centred cross-products is $\Xmat\transpose \Ymat - m\, \bar\xvec \bar\yvec\transpose$, where $\bar\xvec$
-and $\bar\yvec$ are the column means. For entries in $\set{-1, 0, 1}$, $x_i^2 = \abs{x_i}$, so the variance of a column is
-$\frac1m \sum_i \abs{x_i} - \bar x^2$, computable from the column sums of $\abs{\Xmat}$. Every quantity uses sparse
-products, and the cost is governed by the number of non-zero entries rather than by $m \times n$
+so the matrix of centred cross-products is $\Xmat\transpose \Ymat - m\, \bar\xvec \bar\yvec\transpose$, where
+$\bar\xvec$ and $\bar\yvec$ are the column means. For entries in $\set{-1, 0, 1}$, $x_i^2 = \abs{x_i}$, so the variance
+of a column is $\frac1m \sum_i \abs{x_i} - \bar x^2$, computable from the column sums of $\abs{\Xmat}$. Every quantity
+uses sparse products, and the cost is governed by the number of non-zero entries rather than by $m \times n$
 <Cite id="twomey2017topologies" />.
 
 As a check, take $m = 6$ slices and three on-event columns: sensor $a$ fires in slices 1 and 2, sensor $b$ in slices 2
@@ -106,17 +109,17 @@ itself and a few neighbours.
 ### Mutual information
 
 The second method sets $A_{ij}$ to the <NoteLink to="mutual-information" /> between the on–off states of sensors $i$ and
-$j$, on the reasoning that neighbouring sensors switch on and off together. Mutual information is not bounded, so a single
-threshold does not fit every pair. The threshold for a pair is the mean of the two sensors' average mutual information with
-all sensors, $T_{ij} = \frac12\paren{\expect[A_{i,:}] + \expect[A_{:,j}]}$, and the pair is adjacent if $A_{ij} > T_{ij}$
-<Cite id="twomey2017topologies" />.
+$j$, on the reasoning that neighbouring sensors switch on and off together. Mutual information is not bounded, so a
+single threshold does not fit every pair. The threshold for a pair is the mean of the two sensors' average mutual
+information with all sensors, $T_{ij} = \frac12\paren{\expect[A_{i,:}] + \expect[A_{:,j}]}$, and the pair is adjacent if
+$A_{ij} > T_{ij}$ <Cite id="twomey2017topologies" />.
 
 ### Using the adjacency
 
-Given $\Amat$, the active sensors in each time slice are split into groups of mutually reachable sensors, which separates
-parallel streams of activity by different residents without hand segmentation. Features are the conjunctions of sensors
-within a group, up to a maximum cardinality $c$, rather than all conjunctions. The authors describe this as a graph-based
-regularisation of the conditional random field's feature space <Cite id="twomey2017topologies" />.
+Given $\Amat$, the active sensors in each time slice are split into groups of mutually reachable sensors, which
+separates parallel streams of activity by different residents without hand segmentation. Features are the conjunctions
+of sensors within a group, up to a maximum cardinality $c$, rather than all conjunctions. The authors describe this as a
+graph-based regularisation of the conditional random field's feature space <Cite id="twomey2017topologies" />.
 
 ### What the adjacency buys
 

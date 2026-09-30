@@ -1,0 +1,363 @@
+---
+title: Ranking surrogates and metrics
+kind: concept
+summary: 'Ranking metrics such as NDCG, MRR and AUC are piecewise constant in the scores, so rankers train on smooth surrogate losses. A surrogate can bound a metric, as softmax cross-entropy bounds $-\log$ NDCG, approximate it, or be consistent for it. Ranking well does not imply calibration.'
+tags: [loss-functions, ranking, learning-to-rank, learning-theory, recommender-systems, worked-example]
+aliases:
+  [
+    ranking surrogate loss,
+    surrogate loss for ranking,
+    NDCG consistency,
+    consistency of ranking losses,
+    calibrated surrogate for ranking,
+    softmax cross-entropy bound on NDCG,
+    ranking versus calibration,
+    scale calibration of ranking models,
+  ]
+requires: [normalised-discounted-cumulative-gain, surrogate-losses, softmax-and-log-sum-exp]
+partOf: [recommendation-loss-families]
+related:
+  [
+    ranking-losses,
+    pairwise-ranking-losses,
+    pointwise-recommendation-losses,
+    lambda-gradients,
+    mean-average-precision-and-mean-reciprocal-rank,
+    receiver-operating-characteristic-curve-and-area,
+    classifier-calibration,
+    proper-scoring-rule,
+  ]
+references:
+  [
+    bruch2019softmax,
+    bruch2021xendcg,
+    cossock2008,
+    duchi2010consistency,
+    ravikumar2011ndcg,
+    buffoni2011,
+    calauzenes2012,
+    xia2009topk,
+    gao2015auc,
+    agarwal2014bipartite,
+    qin2010approx,
+    wang2018lambdaloss,
+    yan2022scale,
+    bai2023rcr,
+  ]
+status: draft
+updated: 2026-09-30
+---
+
+import { MetricSteps } from './MetricSteps'
+
+<Definition>
+A **ranking metric** such as <Gloss name="ndcg" />, <Gloss name="mrr" />, recall at $k$ or <Gloss name="auroc" />
+depends on a model's scores $\svec = (s_1, \dots, s_n)$ for one list only through the order they induce. A
+**<NoteLink to="surrogate-losses">surrogate loss</NoteLink>** is a continuous, usually differentiable, function of the
+scores that is minimised in place of the metric. A surrogate is related to a metric in one of three ways: it bounds the
+metric's loss, it approximates the metric, or it is **consistent** for the metric, meaning that minimising its
+<NoteLink to="expectation">expected value</NoteLink> over the label distribution produces scores whose order maximises
+the expected metric.
+</Definition>
+
+## Intuition
+
+A ranker is judged on the order of its list, and the order does not change when a score moves a little. The metric
+therefore gives no gradient. A surrogate turns "put the relevant items first" into a smooth objective that
+<NoteLink to="gradient-descent">gradient descent</NoteLink> can reduce. The surrogate and the metric can still disagree.
+The surrogate may keep falling while the metric stays flat, and a surrogate that is minimised perfectly on the
+population may rank by the wrong quantity. The theory of ranking surrogates asks when reducing the surrogate must also
+improve the metric.
+
+## Ranking metrics are piecewise constant
+
+Let $\rho_i$ be the rank of item $i$ (1 for the top), $y_i$ its relevance label and $g_i = 2^{y_i} - 1$ its gain.
+Ignoring ties,
+
+$$
+\rho_i = 1 + \sum_{j \ne i}\indicator[s_j > s_i].
+$$
+
+Every common metric is a function of the ranks and the labels alone.
+
+| Metric | Value on one list |
+| --- | --- |
+| <Gloss name="dcg" /> | $\sum_i g_i / \log_2(1 + \rho_i)$; NDCG divides by the DCG of the ideal order |
+| <NoteLink to="mean-average-precision-and-mean-reciprocal-rank">Reciprocal rank</NoteLink> | $\max_{i:\, y_i > 0} 1/\rho_i$ |
+| Recall at $k$ | fraction of relevant items with $\rho_i \le k$ |
+| AUC (binary labels) | fraction of (relevant, irrelevant) pairs with $s_i > s_j$ |
+
+Each indicator $\indicator[s_j > s_i]$ is constant on either side of the hyperplane $s_i = s_j$. The $n(n - 1)/2$
+hyperplanes cut $\reals^n$ into $n!$ open cones, one per strict order of the scores. Inside a cone every rank, and so
+every metric, is constant. The <NoteLink to="gradient">gradient</NoteLink> of the metric is zero inside every cone and
+undefined on the boundaries. Gradient descent on the metric itself never moves.
+
+<MetricSteps />
+
+## Three ways a surrogate relates to a metric
+
+- **Bound.** The surrogate is at least the metric's loss at every score vector, for example
+  $L(\svec) \ge -\ln\operatorname{NDCG}(\svec)$. Driving the surrogate down raises a floor under the metric; the metric
+  itself can stay flat or fall. The bound holds list by list, with no assumption about the data distribution.
+- **Approximation.** The surrogate is a smoothed copy of the metric with a temperature, such as
+  <Gloss name="approxndcg" /> <Cite id="qin2010approx" />, SoftRank or <Gloss name="neuralndcg" /> (see
+  <NoteLink to="listwise-ranking-losses">listwise ranking losses</NoteLink>). As the temperature goes to zero the copy
+  tends to the metric, and its gradient tends to zero.
+- **Consistency.** Fix the features of a list and treat the labels as random. A surrogate is consistent for a metric
+  when any sequence of scores whose expected surrogate loss approaches its minimum has expected metric approaching its
+  maximum <Cite id="ravikumar2011ndcg" />. Consistency is a population statement. It says what an unconstrained model
+  learns from infinite data, not what a given model learns from a given sample.
+
+The first and third are properties a loss can be proved to have. The lambda gradients of LambdaRank fit the first
+kind: the LambdaLoss framework shows that they are the gradients of a coarse upper bound on an NDCG-based loss
+<Cite id="wang2018lambdaloss" /> (see <NoteLink to="lambda-gradients">lambda gradients</NoteLink>).
+
+## Softmax cross-entropy bounds reciprocal rank and NDCG
+
+Take binary labels with a set $\Pcal$ of $R \ge 1$ relevant items. The softmax of the scores is
+$p_i = e^{s_i} / \sum_k e^{s_k}$. The softmax <NoteLink to="cross-entropy-and-perplexity">cross-entropy loss</NoteLink>
+with the target spread evenly over the relevant items is
+
+$$
+L(\svec) = -\frac{1}{R}\sum_{i \in \Pcal}\ln p_i.
+$$
+
+Bruch et al. prove that this loss bounds $-\ln$ of both reciprocal rank and NDCG
+<Cite id="bruch2019softmax" />.
+
+**Step 1: the rank of an item is at most the inverse of its softmax probability.** For every real $z$,
+$\indicator[z \ge 0] \le e^{z}$: when $z \ge 0$ the right side is at least 1, and otherwise the left side is 0. Apply
+this with $z = s_j - s_i$:
+
+$$
+\rho_i \le 1 + \sum_{j \ne i}\indicator[s_j \ge s_i] \le 1 + \sum_{j \ne i} e^{s_j - s_i}
+= \frac{\sum_k e^{s_k}}{e^{s_i}} = \frac{1}{p_i}.
+$$
+
+The middle expression counts ties against item $i$, so the bound holds for any way of breaking ties.
+
+**Step 2: reciprocal rank.** Reciprocal rank is the largest $1/\rho_i$ over the relevant items. By step 1,
+$1/\rho_i \ge p_i$. The largest of $R$ numbers is at least their geometric mean, so
+
+$$
+\operatorname{RR} \ge \max_{i \in \Pcal} p_i \ge \paren{\prod_{i \in \Pcal} p_i}^{1/R} = e^{-L(\svec)},
+\qquad\text{so}\qquad -\ln\operatorname{RR} \le L(\svec).
+$$
+
+**Step 3: NDCG.** With binary labels every relevant item has gain 1. For $\rho \ge 1$, $\log_2(1 + \rho) \le \rho$, with
+equality at $\rho = 1$. So the DCG satisfies
+
+$$
+\operatorname{DCG} = \sum_{i \in \Pcal}\frac{1}{\log_2(1 + \rho_i)} \ge \sum_{i \in \Pcal}\frac{1}{\rho_i}
+\ge \sum_{i \in \Pcal} p_i.
+$$
+
+The ideal DCG is $\sum_{k=1}^{R} 1/\log_2(1 + k) \le R$, since each term is at most 1. Dividing,
+
+$$
+\operatorname{NDCG} \ge \frac{1}{R}\sum_{i \in \Pcal} p_i \ge \paren{\prod_{i \in \Pcal} p_i}^{1/R} = e^{-L(\svec)},
+$$
+
+where the second inequality is the arithmetic–geometric mean inequality, the form that
+<Gloss name="jensens-inequality" /> takes for the concave logarithm. Taking logs,
+$-\ln\operatorname{NDCG} \le L(\svec)$.
+
+**Across lists.** For a set of lists $q = 1, \dots, Q$, the logarithm is concave, so
+$\ln\paren{\frac{1}{Q}\sum_q \operatorname{NDCG}_q} \ge \frac{1}{Q}\sum_q \ln\operatorname{NDCG}_q \ge -\frac{1}{Q}\sum_q L_q$.
+The mean NDCG over lists is therefore at least $e^{-\bar L}$, where $\bar L$ is the mean training loss. The same holds
+for <Gloss name="mrr" />.
+
+The bound is loose. Uniform scores over $n$ items give $L = \ln n$ and $e^{-L} = 1/n$, while the NDCG of a random order
+is far above $1/n$. With one relevant item the bound is tight only when that item takes almost all the softmax mass.
+With $R \ge 2$ relevant items the floor is at most $1/R$, so it stays loose even at a perfect ranking. Lowering the loss
+raises the floor $e^{-L}$.
+
+With graded labels the gains differ, and Bruch replaces the target by $(2^{y_i} - \gamma_i)/\sum_k (2^{y_k} - \gamma_k)$
+with random $\gamma_k \in [0, 1]$, which makes the loss a convex bound on NDCG with graded
+labels <Cite id="bruch2021xendcg" />.
+
+## AUC and pairwise losses
+
+With binary labels, the AUC of one list is the fraction of (relevant $i$, irrelevant $j$) pairs that the scores order
+correctly. The <NoteLink to="pairwise-ranking-losses">pairwise</NoteLink> logistic loss
+$\ln\paren{1 + e^{-(s_i - s_j)}}$ is at least $\ln 2$ whenever $s_i \le s_j$, because the function is decreasing in
+$s_i - s_j$ and equals $\ln 2$ at zero. Averaging over the $\abs{\Pcal}\abs{\Ncal}$ pairs, with $\Ncal$ the irrelevant
+items,
+
+$$
+1 - \operatorname{AUC} \le \frac{1}{\ln 2}\cdot\frac{1}{\abs{\Pcal}\abs{\Ncal}}
+\sum_{i \in \Pcal}\sum_{j \in \Ncal}\ln\paren{1 + e^{-(s_i - s_j)}}.
+$$
+
+This is why <NoteLink to="bayesian-personalised-ranking">Bayesian personalised ranking</NoteLink>, which maximises the
+mean of $\ln\sigma(s_i - s_j)$, is a smoothed AUC.
+
+Consistency for AUC depends on the pair loss. Gao and Zhou prove that the pairwise exponential and logistic losses are
+consistent for AUC and that the pairwise hinge loss is not <Cite id="gao2015auc" />.
+<NoteLink to="pointwise-recommendation-losses">Pointwise losses</NoteLink> can also be consistent for AUC. Agarwal
+bounds the AUC regret by the regret of any strongly proper pointwise loss, a class that includes the logistic and
+squared losses <Cite id="agarwal2014bipartite" />.
+
+AUC weighs every misordered pair equally, wherever it sits in the list. Swapping ranks 1 and 2 costs the same as
+swapping ranks 50 and 51. A loss that bounds AUC well can therefore leave NDCG and MRR, which weight the top, poorly
+optimised.
+
+## Consistency for DCG and NDCG
+
+Fix the features of a list, and let the label vector $\yvec$ be random with the
+<NoteLink to="conditional-probability">conditional distribution</NoteLink> given those features. Let
+$D(\rho) = 1/\log_2(1 + \rho)$ be the discount.
+
+**DCG.** The expected DCG of an order with ranks $\rho_i$ is $\sum_i \expect[g_i]\, D(\rho_i)$, because the ranks
+are fixed and expectation is linear. The discount decreases with rank. By the rearrangement inequality, the sum is
+largest when the item with the largest $\expect[g_i]$ gets rank 1, the next largest rank 2, and so on. Any loss whose
+population minimiser orders items by $\expect[g_i]$ is consistent for DCG. Squared error regression on the gains is
+one <Cite id="cossock2008" />.
+
+**NDCG.** NDCG divides by the ideal DCG, $\operatorname{IDCG}(\yvec)$, which is random. The same argument gives
+
+$$
+\expect[\operatorname{NDCG}] = \sum_i \eta_i\, D(\rho_i), \qquad \eta_i = \expect\brack{\frac{g_i}{\operatorname{IDCG}(\yvec)}},
+$$
+
+so the Bayes-optimal order sorts by $\eta_i$. Ravikumar et al. show that a surrogate is NDCG-consistent exactly when
+its population minimiser is an order-preserving function of $\etavec$ <Cite id="ravikumar2011ndcg" />.
+
+**Softmax cross-entropy.** With target $t_i(\yvec) = g_i / \sum_k g_k$, the loss $-\sum_i t_i(\yvec)\ln p_i$ is linear
+in the target. Its expectation is $-\sum_i \tau_i \ln p_i$ with $\tau_i = \expect[t_i(\yvec)]$. That is a cross-entropy
+from $\tauvec$ to $\pvec$, minimised by <NoteLink to="kullback-leibler-divergence">Gibbs' inequality</NoteLink> at
+$\pvec = \tauvec$. The minimiser sorts by
+
+$$
+\tau_i = \expect\brack{\frac{g_i}{\sum_k g_k}},
+$$
+
+which normalises by the total gain, not by the ideal DCG. The two orders agree whenever
+$\sum_k g_k / \operatorname{IDCG}$ is the same for every label vector that can occur. That holds when each list has
+exactly one relevant item (both normalisers equal its gain) and when the labels are a deterministic function of the
+features. It fails in general. Ravikumar et al. show that the cosine, squared-error and <Gloss name="listnet" />
+surrogates are not NDCG-consistent, and that replacing the target by $g_i / \operatorname{IDCG}(\yvec)$ restores
+consistency <Cite id="ravikumar2011ndcg" />. They also show that the strongly NDCG-consistent surrogates of this form
+are exactly the Bregman divergences between the normalised gains and an order-preserving transform of the scores. Bruch
+argues that softmax cross-entropy is NDCG-consistent in the two common special cases above: a single click per query,
+and graded labels where each query appears once <Cite id="bruch2021xendcg" />.
+
+<Derivation title="A list where softmax cross-entropy ranks by the wrong quantity">
+Three items have binary labels. With probability 0.35 only item 1 is relevant, $\yvec = (1, 0, 0)$. With probability
+0.65 items 2 and 3 are relevant, $\yvec = (0, 1, 1)$.
+
+The softmax target is $(1, 0, 0)$ in the first case and $(0, 0.5, 0.5)$ in the second, so
+$\tauvec = (0.35, 0.325, 0.325)$. Softmax cross-entropy learns to put item 1 first.
+
+The ideal DCG is 1 in the first case and $1 + 1/\log_2 3 = 1.631$ in the second, so
+$\etavec = (0.35,\ 0.65/1.631,\ 0.65/1.631) = (0.35, 0.399, 0.399)$. NDCG prefers items 2 and 3 first.
+
+The expected NDCG of the order 1, 2, 3 is $0.35 \cdot 1 + 0.65 \cdot (1/\log_2 3 + 1/2)/1.631 = 0.801$. The order
+2, 3, 1 has expected NDCG $0.35 \cdot 0.5 + 0.65 \cdot 1 = 0.825$. Softmax cross-entropy converges to the worse order.
+Regression on the gains orders by $\expect[g_i] = (0.35, 0.65, 0.65)$ and happens to be right here. Ravikumar et al.
+give a two-item example with graded labels where regression on the gains is wrong and the IDCG-normalised order is
+right <Cite id="ravikumar2011ndcg" />.
+</Derivation>
+
+**Metrics with no convex consistent surrogate.** For some metrics consistency is out of reach for any convex loss. Duchi
+et al. show that many common pairwise surrogates are inconsistent for the pairwise disagreement loss, even under low
+noise <Cite id="duchi2010consistency" />. Calauzènes et al. prove that no surrogate that is convex in the scores is
+consistent for <Gloss name="ap" />, for <Gloss name="err-metric" /> or for pairwise disagreement
+<Cite id="calauzenes2012" />. 
+
+**Metrics with convex consistent surrogates.** For metrics built from sums of gains times discounts, such as DCG, convex
+consistent
+surrogates exist whenever the supervision can be put in a <NoteLink to="linear-programming">standard form</NoteLink>
+<Cite id="buffoni2011" />. Truncated metrics such as NDCG at $k$ raise the same question for the top $k$ positions. Xia
+et al. give conditions for consistency with the top-$k$ ranking and modify listwise losses to meet them
+<Cite id="xia2009topk" />.
+
+## Calibration versus ranking
+
+A model is <NoteLink to="classifier-calibration">calibrated</NoteLink> when, among items it gives probability $q$, a
+fraction $q$ are relevant. Ranking and calibration are independent properties.
+
+- **Good ranking, poor calibration.** Every pairwise and listwise loss named here is unchanged when the same constant
+  is added to all scores of a list. The loss fixes the order and the differences between scores, and leaves the level
+  of each list free. The sigmoid of such a score is not a click probability, and scores of different lists are not on
+  one scale.
+- **Good calibration, poor ranking.** A model that predicts the overall click rate for every item is calibrated and
+  has AUC 0.5.
+- **Order-preserving maps.** Any strictly increasing transform of the scores keeps every ranking metric and changes the
+  calibration. <NoteLink to="platt-scaling">Platt scaling</NoteLink> and
+  <NoteLink to="isotonic-calibration">isotonic regression</NoteLink> fix calibration after training without
+  changing the order.
+
+Pointwise <Gloss name="bce">binary cross-entropy</Gloss> is a <NoteLink to="proper-scoring-rule">proper scoring
+rule</NoteLink>. Its population minimiser is the true click probability, so it gives calibration and, through Agarwal's
+bound, AUC consistency. It ignores the position weighting of NDCG and MRR. Systems that need both a good order and
+calibrated scores, such as ad auctions that multiply a click probability by a bid, combine the two. Yan et al. study
+<NoteLink to="ranking-losses">ranking losses</NoteLink> that keep the score scale <Cite id="yan2022scale" />. Bai et al.
+pair sigmoid cross-entropy with a listwise cross-entropy computed on $\sigma(s_i) / \sum_k \sigma(s_k)$, so that both
+terms are minimised by the same scores, $\sigma(s_i)$ equal to the click probability <Cite id="bai2023rcr" />.
+
+## Choosing a loss
+
+- **One positive per list** (a click on a slate, the next item in a session): softmax cross-entropy bounds $-\ln$ MRR
+  and $-\ln$ NDCG, and is NDCG-consistent.
+- **Graded labels, each query seen once:** softmax cross-entropy with gain targets, XE-NDCG or lambda gradients. All
+  weight the top of the list.
+- **Several positives drawn from a noisy distribution:** gain targets normalised by the ideal DCG give NDCG-consistent
+  losses; targets normalised by the total gain are not NDCG-consistent in general.
+- **The metric is AUC or the task is retrieval of all relevant items:** pairwise logistic loss or pointwise binary
+  cross-entropy. Avoid the pairwise hinge, which is not AUC-consistent.
+- **Scores feed a later calculation** (an auction, a blend of objectives, a threshold): add a pointwise calibrated term
+  or calibrate after training.
+- **In every case:** choose the model and its hyperparameters on the metric itself, measured on held-out lists. A
+  surrogate that keeps falling says nothing once the metric has stopped rising.
+
+## Worked example
+
+One list has four items with binary labels $\yvec = (1, 0, 1, 0)$ and scores $\svec = (0.5, 1.0, 0.0, -0.5)$. The
+order is 2, 1, 3, 4, so the relevant items have ranks $\rho_1 = 2$ and $\rho_3 = 3$.
+
+**Metrics.** Reciprocal rank is $1/2$. The DCG is $1/\log_2 3 + 1/\log_2 4 = 0.631 + 0.5 = 1.131$. The ideal DCG is
+$1 + 0.631 = 1.631$, so NDCG is $0.693$. Of the four (relevant, irrelevant) pairs, (1, 4) and (3, 4)
+are ordered correctly and (1, 2) and (3, 2) are not, so AUC is $0.5$.
+
+**Step 1 of the bound.** The softmax is $\pvec = (0.276, 0.455, 0.167, 0.102)$. Then $1/p_1 = 3.62 \ge \rho_1 = 2$
+and $1/p_3 = 5.97 \ge \rho_3 = 3$.
+
+**The bound.** The loss is $L = -\tfrac{1}{2}(\ln 0.276 + \ln 0.167) = 1.537$, and $e^{-L} = 0.215$. The bound holds:
+$0.215 \le 0.5$ for reciprocal rank and $0.215 \le 0.693$ for NDCG. It is loose because the relevant items hold only
+44% of the softmax mass.
+
+**Surrogate moves, metric stays.** Raising $s_1$ from 0.5 to 0.9 lowers $L$ to 1.465. Item 1 is still below item 2,
+so reciprocal rank and NDCG do not change. Raising $s_1$ to 1.1 lowers $L$ to 1.442 and moves item 1 to the top.
+Reciprocal rank jumps to 1 and NDCG to $(1 + 0.5)/1.631 = 0.920$.
+
+**Pairwise bound.** The mean pairwise logistic loss over the four pairs is 0.769, so the bound gives
+$1 - \operatorname{AUC} \le 0.769/\ln 2 = 1.109$. The true value is 0.5. The bound exceeds 1 and says nothing here.
+Correctly ordered pairs with small margins still add to the loss: the pair (3, 4), with margin 0.5, contributes 0.474.
+
+**Calibration.** Suppose instead two items have true click probabilities 0.10 and 0.05. Scores $(3, 2)$ and
+$(-2, -3)$ give the same order and the same value of any shift-invariant ranking loss. Their sigmoids are
+$(0.953, 0.881)$ and $(0.119, 0.047)$. Only the second is close to calibrated.
+
+## Assumptions
+
+- **Binary labels for the softmax bound.** The derivation above uses unit gains. Graded gains need a different target,
+  such as the one of XE-NDCG.
+- **An unconstrained model for consistency.** Consistency results assume the model can reach the population minimiser
+  for every feature vector. With a restricted model class, such as a linear scorer, the population minimiser may be out
+  of reach, and consistency then gives no guarantee.
+- **A fixed candidate list.** The metrics and bounds are per list. When lists are sampled, as in
+  <NoteLink to="two-tower-model">sampled softmax</NoteLink>, the bound applies to the sampled list, not to the full
+  catalogue.
+
+## Pitfalls
+
+- **Reading the surrogate as the metric.** A falling training loss can leave the metric unchanged, as in the worked
+  example, or lower it, for example when the loss improves the tail of the list at the expense of the top.
+- **Using ranking scores as probabilities.** Scores from shift-invariant losses need a calibration step before they
+  are compared across lists or multiplied by a bid.
+- **Trusting a loose bound.** The softmax bound guarantees a floor, $\operatorname{NDCG} \ge e^{-L}$, not that
+  NDCG moves with the loss. Two models with the same
+  loss can differ widely in NDCG.
+- **Assuming "convex and consistent" is always available.** For average precision and expected reciprocal rank no
+  convex surrogate is consistent. A non-convex smoothed metric or a lambda-weighted loss is then the practical choice.

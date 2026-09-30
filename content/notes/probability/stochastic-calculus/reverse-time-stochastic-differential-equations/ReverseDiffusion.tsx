@@ -24,7 +24,8 @@ import {
 
 const STEPS = 250
 const PARTICLES = 2000
-const SHOWN = 14
+/** Forward paths are simulated for the largest count once, so the slider only chooses how many to draw. */
+const MAX_PATHS = 50
 const H = T_END / STEPS
 const XS = linspace(-4.5, 4.5, 181)
 
@@ -36,20 +37,23 @@ const XS = linspace(-4.5, 4.5, 181)
 export function ReverseDiffusion() {
   const [kind, setKind] = useState<Exclude<ReverseKind, 'ode'>>('sde')
   const t = useParam(1, { min: 0, max: T_END, step: H * 5 })
+  const count = useParam(14, { min: 1, max: MAX_PATHS, step: 1 })
 
-  const forward = useMemo(() => forwardParticles(sampleMixture(SHOWN, 31), STEPS, 32), [])
+  const forward = useMemo(() => forwardParticles(sampleMixture(MAX_PATHS, 31), STEPS, 32), [])
   const reverse = useMemo(() => reverseParticles(kind, normals(PARTICLES, 33), STEPS, 34), [kind])
 
   const pathSeries = useMemo<XYSeries[]>(() => {
     const fTimes = forward.map((_, k) => k * H)
     const rTimes = reverse.map((_, k) => T_END - k * H)
-    const fw = joinPaths(Array.from({ length: SHOWN }, (_, i) => ({ x: fTimes, y: forward.map((s) => s[i]) })))
-    const rv = joinPaths(Array.from({ length: SHOWN }, (_, i) => ({ x: rTimes, y: reverse.map((s) => s[i]) })))
+    // Draw the first `count` of the simulated particles, so raising the count adds paths and keeps the others.
+    const n = count.value
+    const fw = joinPaths(Array.from({ length: n }, (_, i) => ({ x: fTimes, y: forward.map((s) => s[i]) })))
+    const rv = joinPaths(Array.from({ length: n }, (_, i) => ({ x: rTimes, y: reverse.map((s) => s[i]) })))
     return [
-      { name: 'forward: data → noise', type: 'line', ...fw, muted: true },
-      { name: 'reverse: noise → data', type: 'line', ...rv, slot: 0 },
+      { name: 'forward: data → noise', type: 'line', ...fw, muted: true, thin: n > 1 },
+      { name: 'reverse: noise → data', type: 'line', ...rv, slot: 0, thin: n > 1 },
     ]
-  }, [forward, reverse])
+  }, [forward, reverse, count.value])
 
   const k = Math.round((T_END - t.value) / H)
   const densitySeries = useMemo<XYSeries[]>(() => {
@@ -70,7 +74,7 @@ export function ReverseDiffusion() {
   return (
     <Interactive
       title="Running a diffusion backwards with the score"
-      caption="Grey: the forward process dX = −½X dt + dW carries data from a two-mode density (35% near −2, 65% near 1.5) to N(0, 1) by t = 5. Colour: particles drawn from N(0, 1) at t = 5 and moved backwards by the reverse-time SDE, whose drift adds g²∇log p_t, with the exact score of the noised mixture. The lower panel shows the reverse particles at the time on the slider against the exact p_t. Without the score term the reverse particles never find the data: their spread grows instead. Drag the vertical line to move in time."
+      caption="Grey: the forward process dX = −½X dt + dW carries data from a two-mode density (35% near −2, 65% near 1.5) to N(0, 1) by t = 5. Colour: particles drawn from N(0, 1) at t = 5 and moved backwards by the reverse-time SDE, whose drift adds g²∇log p_t, with the exact score of the noised mixture. The paths slider sets how many paths of each kind are drawn, as light lines when there are several. The lower panel shows the reverse particles at the time on the slider against the exact p_t. Without the score term the reverse particles never find the data: their spread grows instead. Drag the vertical line to move in time."
       controls={
         <>
           <ParamChoice
@@ -83,6 +87,7 @@ export function ReverseDiffusion() {
             ]}
           />
           <ParamSlider label="time t" param={t} withArrows />
+          <ParamSlider label="paths" param={count} withArrows format={(v) => String(v)} />
         </>
       }
       readout={

@@ -26,6 +26,9 @@ type Scheme = 'multinomial' | 'systematic'
 type When = 'always' | 'adaptive' | 'never'
 
 const BIN_CENTRES = Array.from({ length: 61 }, (_, i) => i - 30)
+const T = Array.from({ length: STEPS }, (_, i) => i + 1)
+/** Lines that leave the plotted range (the EKF, stray lineages) are clipped to the frame. */
+const clip = (v: number) => Math.max(-30, Math.min(30, v))
 
 function simulate(seed: number) {
   const g = rng(seed)
@@ -63,11 +66,19 @@ function particleFilter(obs: number[], n: number, scheme: Scheme, when: When, se
   let particles = Array.from({ length: n }, () => Math.sqrt(P0) * g.normal())
   // Log-weights, so that without resampling they can fall far below the smallest double without underflowing.
   let logW = new Array<number>(n).fill(0)
+  // Ancestry, for drawing lineages: history[t][i] is particle i at step t + 1 after propagation, and parent[t][i] is
+  // the index at step t of the particle it descends from (identity when the previous step did not resample).
+  const history: number[][] = []
+  const parent: number[][] = []
+  let lastIdx: number[] = Array.from({ length: n }, (_, i) => i)
   const mean: number[] = []
   const ess: number[] = []
   const density: number[][] = BIN_CENTRES.map(() => new Array<number>(STEPS).fill(0))
   for (let t = 1; t <= STEPS; t++) {
     particles = particles.map((z) => f(z, t) + Math.sqrt(Q) * g.normal())
+    history.push(particles)
+    parent.push(lastIdx)
+    lastIdx = Array.from({ length: n }, (_, i) => i)
     logW = logW.map((lw, i) => lw - (obs[t - 1] - h(particles[i])) ** 2 / (2 * R))
     const top = Math.max(...logW)
     const w = logW.map((lw) => Math.exp(lw - top))
@@ -88,6 +99,7 @@ function particleFilter(obs: number[], n: number, scheme: Scheme, when: When, se
     const cumulative: number[] = []
     w.reduce((a, v, i) => (cumulative[i] = a + v), 0)
     const idx = resample(cumulative, scheme, g.uniform)
+    lastIdx = idx
     particles = idx.map((i) => particles[i])
     logW = new Array<number>(n).fill(0)
   }
@@ -96,7 +108,26 @@ function particleFilter(obs: number[], n: number, scheme: Scheme, when: When, se
     const peak = Math.max(...density.map((row) => row[t])) || 1
     density.forEach((row) => (row[t] /= peak))
   }
-  return { mean, ess, density }
+  return { mean, ess, density, history, parent }
+}
+
+/**
+ * Ancestral lineages of `count` particles spread evenly through the final population, traced back to step 1 through
+ * the resampling indices. Repeated resampling makes them coalesce into a few ancestors (path degeneracy).
+ */
+function lineages(history: number[][], parent: number[][], count: number): number[][] {
+  const n = history[0].length
+  const k = Math.min(count, n)
+  return Array.from({ length: k }, (_, j) => {
+    let i = Math.floor((j * n) / k)
+    const path = new Array<number>(history.length)
+    for (let t = history.length - 1; t >= 0; t--) {
+      path[t] = history[t][i]
+      // parent[t] maps particles at step t + 1 to their parents at step t (the initial draws when t = 0).
+      i = parent[t][i]
+    }
+    return path
+  })
 }
 
 /** Extended Kalman filter on the same model, linearised at the current mean. */
@@ -124,6 +155,7 @@ export function ParticleTracking() {
   const [scheme, setScheme] = useState<Scheme>('systematic')
   const [when, setWhen] = useState<When>('always')
   const seed = useParam(7, { min: 1, max: 20, step: 1 })
+  const shown = useParam(10, { min: 1, max: 50, step: 1 })
 
   const world = useMemo(() => simulate(seed.value), [seed.value])
   const ekf = useMemo(() => extendedKalman(world.obs), [world])
@@ -132,20 +164,30 @@ export function ParticleTracking() {
     [world, n, scheme, when, seed.value],
   )
 
-  const t = world.truth.map((_, i) => i + 1)
-  // The EKF can leave the plotted range; clip it to the frame.
-  const clip = (v: number) => Math.max(-30, Math.min(30, v))
-  const overlay: HeatmapOverlay[] = [
-    { name: 'true state', type: 'line', x: t, y: world.truth, slot: 1 },
-    { name: 'particle filter mean', type: 'line', x: t, y: pf.mean, slot: 2 },
-    { name: 'EKF mean', type: 'line', x: t, y: ekf.map(clip), slot: 3 },
-  ]
-  const essSeries: XYSeries[] = [{ name: 'effective sample size / N', type: 'line', x: t, y: pf.ess, slot: 0 }]
+  const lines = useMemo(() => lineages(pf.history, pf.parent, shown.value), [pf, shown.value])
+
+  const overlay: HeatmapOverlay[] = useMemo(
+    () => [
+      ...lines.map((y): HeatmapOverlay => ({
+        name: 'particle lineages',
+        type: 'line',
+        x: T,
+        y: y.map(clip),
+        slot: 4,
+        thin: lines.length > 1,
+      })),
+      { name: 'true state', type: 'line', x: T, y: world.truth, slot: 1 },
+      { name: 'particle filter mean', type: 'line', x: T, y: pf.mean, slot: 2 },
+      { name: 'EKF mean', type: 'line', x: T, y: ekf.map(clip), slot: 3 },
+    ],
+    [lines, world, pf, ekf],
+  )
+  const essSeries: XYSeries[] = [{ name: 'effective sample size / N', type: 'line', x: T, y: pf.ess, slot: 0 }]
 
   return (
     <Interactive
       title="Particles tracking a nonlinear state"
-      caption="The state follows strongly nonlinear dynamics and is observed through z²/20 plus noise, so each observation fits both z and −z. The shading is the particle filter's estimate of the filtering distribution at each step (each column scaled to a maximum of 1). It is often bimodal, with modes at ±z, and the filter keeps both until the dynamics break the tie. The extended Kalman filter keeps one Gaussian and frequently locks onto the wrong sign. Without resampling, the weights collapse onto a few particles within a few steps."
+      caption="The state follows strongly nonlinear dynamics and is observed through z²/20 plus noise, so each observation fits both z and −z. The shading is the particle filter's estimate of the filtering distribution at each step (each column scaled to a maximum of 1). It is often bimodal, with modes at ±z, and the filter keeps both until the dynamics break the tie. The extended Kalman filter keeps one Gaussian and frequently locks onto the wrong sign. Without resampling, the weights collapse onto a few particles within a few steps. The light lines are the ancestral lineages of particles spread evenly through the final population, traced back through the resampling steps; the lineages slider sets how many are drawn (at most N). With resampling at every step they coalesce into one or a few ancestors a few steps back: this is path degeneracy."
       controls={
         <>
           <ParamChoice
@@ -178,6 +220,7 @@ export function ParticleTracking() {
               { value: 'multinomial', label: 'multinomial' },
             ]}
           />
+          <ParamSlider label="lineages" param={shown} format={(v) => String(v)} withArrows />
           <ParamSlider label="seed" param={seed} format={(v) => String(v)} withArrows />
         </>
       }
@@ -191,7 +234,7 @@ export function ParticleTracking() {
     >
       <div className="space-y-4">
         <Heatmap
-          x={t}
+          x={T}
           y={BIN_CENTRES}
           z={pf.density}
           range={[0, 1]}

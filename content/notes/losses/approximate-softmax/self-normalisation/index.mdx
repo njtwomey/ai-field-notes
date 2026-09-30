@@ -1,0 +1,132 @@
+---
+title: Self-normalisation
+kind: technique
+summary:
+  'A self-normalising model is trained so that its softmax normaliser is one, and its unnormalised score is used as a
+  log probability. Penalising $(\log Z)^2$ does this directly; noise-contrastive estimation does it at its optimum.
+  Scoring a known class costs one dot product instead of $V$.'
+tags: [deep-learning, loss-functions, classification, language-models, nlp, worked-example]
+aliases:
+  [
+    self-normalised softmax,
+    self-normalising training,
+    log-Z penalty,
+    unnormalised scores,
+    normalisation-free scoring,
+    variance regularisation of the normaliser,
+  ]
+requires: [softmax-and-log-sum-exp, cross-entropy-and-perplexity, logistic-regression]
+partOf: [approximate-softmax]
+related: [sampled-softmax-and-negative-sampling, hierarchical-softmax, energy-based-models]
+references: [devlin2014, gutmann2010, mnih2012nce, dyer2014nce, chen2016largevocab]
+status: draft
+updated: 2026-09-30
+---
+
+<Definition>
+A softmax model $\pr(w \mid \hvec) = e^{s_w} / Z(\hvec)$ is **self-normalising** when training drives $Z(\hvec)$ to one
+on the inputs it will see, so that $s_w$ can be read as $\log \pr(w \mid \hvec)$ without summing over the classes. Two
+objectives do it: adding a penalty $\alpha(\log Z(\hvec))^2$ to the log loss, which asks for it explicitly
+<Cite id="devlin2014" />, and <Gloss name="nce" />, whose optimum is normalised without being told to
+<Cite id="gutmann2010" />. Neither changes the model; both give up the guarantee that the scores are a distribution.
+</Definition>
+
+## Problem
+
+Some uses of a model need the value of one probability, over and over, for classes that are already known. A
+translation decoder scores candidate words inside its search. A re-ranker scores an n-best list. A feature in a larger
+system reports $\log \pr(w \mid \hvec)$.
+
+Each of those needs one numerator, which is a single dot product, and the normaliser, which is $V$ of them. The
+normaliser is the same number for every class at that input, and it is the entire cost.
+
+Two other observations bound what is worth doing. Picking the most likely class never needs $Z$, because it does not
+change the order of the scores. And an exact perplexity does need it, because a perplexity computed from unnormalised
+scores is not a perplexity of anything.
+
+## Mechanism
+
+### Penalising the normaliser
+
+Train with the log loss and a penalty on how far the normaliser is from one:
+
+$$
+\Lcal(\theta) = \sum_{i} \left[-\log \pr(w_i \mid \hvec_i) + \alpha \left(\log Z(\hvec_i)\right)^2\right].
+$$
+
+The first term is unchanged, so the distribution is still fitted; the second is zero exactly when $Z(\hvec_i) = 1$. At
+test time the model is scored as $\log \pr(w \mid \hvec) \approx s_w$, ignoring $Z$ altogether
+<Cite id="devlin2014" />. The parameter $\alpha$ sets the exchange rate between fit and normalisation: at $\alpha = 0$
+the scores can have any scale, and as $\alpha$ grows the model spends capacity making one number constant across
+inputs instead of fitting the data.
+
+The penalty needs $\log Z(\hvec_i)$, so training still pays the full $O(Vd)$ sum. Self-normalisation buys nothing at
+training time; it buys the test-time sum.
+
+### Noise-contrastive estimation arrives there on its own
+
+<Gloss name="nce" /> removes the normaliser from the model instead of penalising it. Fix $Z = 1$, so the model is the
+unnormalised $\tilde p_\theta(w \mid \hvec) = e^{s_w}$, and train a classifier to tell an observed class from $k$
+classes drawn from a noise distribution $q$. If a sample is data with prior probability $1/(1+k)$, the posterior that a
+class $u$ came from the data is
+
+$$
+\pr(\text{data} \mid u, \hvec) = \frac{\tilde p_\theta(u \mid \hvec)}{\tilde p_\theta(u \mid \hvec) + k\, q(u)}
+= \sigma\!\left(s_u - \log\left(k\, q(u)\right)\right),
+$$
+
+which is a logistic regression in the *corrected score* $s_u - \log(k q(u))$. The objective is its log likelihood: the
+observed class labelled data, the $k$ noise classes labelled noise.
+
+The log loss of a binary classifier is a proper loss, so over unconstrained scores it is minimised only where the
+predicted posterior equals the true one. Writing $p_d(u \mid \hvec)$ for the data distribution, the true posterior is
+$p_d / (p_d + kq)$, and setting the two equal gives
+
+$$
+\frac{e^{s_u}}{e^{s_u} + k q(u)} = \frac{p_d(u \mid \hvec)}{p_d(u \mid \hvec) + k q(u)}
+\quad\Longrightarrow\quad
+e^{s_u} = p_d(u \mid \hvec)
+$$
+
+for every class $u$. Since $p_d$ sums to one over $\Vcal$, the optimum satisfies $\sum_{u} e^{s_u} = 1$: the model is
+normalised because the objective's solution is a distribution, not because a constraint was imposed
+<Cite id="mnih2012nce" />. The same argument explains the sampling side of the story — the noise samples are why one
+step costs $O(kd)$ rather than $O(Vd)$, which is why
+<NoteLink to="sampled-softmax-and-negative-sampling">sampled softmax and negative sampling</NoteLink> covers it as a
+sampling method <Cite id="dyer2014nce" />.
+
+### How well it holds
+
+Both routes are approximate for the same reason: a model of finite capacity cannot make $Z(\hvec)$ exactly one for
+every input, and nothing forces it to be near one for an input unlike those in training. Reported normalisers cluster
+around one with a spread that widens as $\alpha$ falls, and the error in a score is $\log Z(\hvec)$, which is shared by
+every class at that input. That makes the error harmless for comparing classes at one input and harmful for comparing
+quantities across inputs, which is what a perplexity does <Cite id="chen2016largevocab" />.
+
+## Cost
+
+| Quantity | Normalised softmax | Self-normalising |
+| --- | --- | --- |
+| Training, per example | $O(Vd)$ | $O(Vd)$ with the penalty, $O(kd)$ with <Gloss name="nce" /> |
+| Scoring one known class | $O(Vd)$ | $O(d)$ |
+| The full distribution | $O(Vd)$ | $O(Vd)$ |
+| Memory for a batch of $B$ inputs | $B \times V$ logits | $B$ scores |
+
+With $V = 32{,}000$ and $d = 512$, scoring one class falls from $16.8$M multiply-accumulates to $512$: the sum, not the
+dot product, was the cost. The gain is exactly the ratio $V$, and it is available only when the class is known in
+advance.
+
+## Trade-offs
+
+- **The scores are not a distribution.** They are a distribution at the optimum and near one in practice, with an
+  input-dependent error $\log Z(\hvec)$. Anything that compares probabilities across inputs, or sums them, needs the
+  real normaliser.
+- **No saving at training time from the penalty alone.** The penalty is a function of $Z$, so it must be computed.
+  Pair it with sampling, or use <Gloss name="nce" />, which removes the sum from training and self-normalises at once.
+- **$\alpha$ is a real hyperparameter.** It trades likelihood against normalisation error, and the right value depends
+  on how far off-distribution the model will be scored.
+- **It keeps the model.** Unlike <NoteLink to="hierarchical-softmax">a tree</NoteLink>, self-normalisation leaves a
+  flat softmax in place, so the same weights can be normalised exactly whenever the full sum is affordable. That makes
+  it the safe choice when only some uses are latency-bound.
+- **Nothing is gained for decoding the argmax**, for beam search within a step, or for any ranking of classes: those
+  never needed $Z$.

@@ -30,6 +30,8 @@ export type HeatmapOverlay = Omit<Series, 'group'> & {
   slot?: number
   /** Lines only: mark every vertex, e.g. each step of an optimiser. */
   showPoints?: boolean
+  /** Lines only: a light line in the overlay's colour, for many stochastic draws such as several chains. */
+  thin?: boolean
   /** Ink-coloured diamond, e.g. an optimum. Not a category, so no palette slot. */
   emphasis?: boolean
   /**
@@ -214,7 +216,7 @@ function overlaySeries(
           symbolSize: s.emphasis ? 16 : line ? 5 : MARKER_SIZE,
           showSymbol: !line || !!s.showPoints,
           itemStyle: { color, borderColor: surface, borderWidth: s.emphasis ? 2 : 1 },
-          lineStyle: { color, width: LINE_WIDTH },
+          lineStyle: { color, width: s.thin ? 1 : LINE_WIDTH, opacity: s.thin ? 0.5 : 1 },
           // Clip paths that leave the grid, e.g. a diverging optimiser.
           clip: true,
           z: s.emphasis ? 4 : 3,

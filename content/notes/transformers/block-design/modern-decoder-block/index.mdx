@@ -34,9 +34,10 @@ $$
 $$
 
 where attention is causal, uses fewer key-value heads than query heads and rotates queries and keys by their positions,
-and no <NoteLink to="matrix-vector-product">linear map</NoteLink> has a bias. <Gloss name="llama" /> introduced this combination: pre-normalisation with RMSNorm, the <Gloss name="swiglu" /> activation
-and rotary embeddings in place of absolute positions <Cite id="touvron2023b" />. Grouped-query attention was added in
-the larger Llama 2 models and in all Llama 3 models <Cite id="touvron2023" /> <Cite id="grattafiori2024" />.
+and no <NoteLink to="matrix-vector-product">linear map</NoteLink> has a bias. <Gloss name="llama" /> introduced this
+combination: pre-normalisation with RMSNorm, the <Gloss name="swiglu" /> activation and rotary embeddings in place of
+absolute positions <Cite id="touvron2023b" />. Grouped-query attention was added in the larger Llama 2 models and in all
+Llama 3 models <Cite id="touvron2023" /> <Cite id="grattafiori2024" />.
 
 </Definition>
 
@@ -58,10 +59,10 @@ replaces almost every part.
 | Dropout         | 0.1 on sublayer outputs and embeddings           | none in pre-training                                                            | <NoteLink to="bias-terms-and-dropout-in-modern-transformers">bias terms and dropout</NoteLink> |
 | Embeddings      | tied, input scaled by $\sqrt d$                  | often untied                                                                    | <NoteLink to="embeddings-and-output-heads">embeddings and output heads</NoteLink>              |
 
-Two further changes appear in some
-models but not in the Llama line: <NoteLink to="parallel-attention-and-feed-forward">parallel attention and
-feed-forward</NoteLink> (GPT-J, PaLM) and <NoteLink to="query-key-normalisation-and-logit-soft-capping">QK normalisation and
-logit soft-capping</NoteLink> (Gemma 2 caps attention logits).
+Two further changes appear in some models but not in the Llama line:
+<NoteLink to="parallel-attention-and-feed-forward">parallel attention and feed-forward</NoteLink> (GPT-J,
+<Gloss name="palm" />) and <NoteLink to="query-key-normalisation-and-logit-soft-capping">QK normalisation and logit
+soft-capping</NoteLink> (Gemma 2 caps attention logits).
 
 ## Data flow
 
@@ -71,8 +72,9 @@ For one token with residual vector $\xvec \in \reals^d$, $h$ query heads of size
 2. Queries $\tilde\xvec\Wmat_Q \in \reals^{h d_h}$, keys $\tilde\xvec\Wmat_K \in \reals^{g d_h}$ and values
    $\tilde\xvec\Wmat_V \in \reals^{g d_h}$. Each query and key head is rotated by angles proportional to the token's
    position.
-3. Query head $i$ attends, with a <NoteLink to="causal-masking">causal mask</NoteLink>, to the keys and values of head $\lfloor i g/h \rfloor$. The $h$ outputs
-   are concatenated and projected by $\Wmat_O \in \reals^{d \times d}$, then added: $\hvec = \xvec + \ovec$.
+3. Query head $i$ attends, with a <NoteLink to="causal-masking">causal mask</NoteLink>, to the keys and values of head
+   $\lfloor i g/h \rfloor$. The $h$ outputs are concatenated and projected by $\Wmat_O \in \reals^{d \times d}$, then
+   added: $\hvec = \xvec + \ovec$.
 4. $\tilde\hvec = \operatorname{RMSNorm}_2(\hvec)$, then
    $\yvec = \hvec + \paren{\operatorname{SiLU}(\tilde\hvec\Wmat) \odot \tilde\hvec\Vmat}\Wmat_2$.
 
@@ -84,10 +86,11 @@ After the last block a final RMSNorm and the output head give the logits.
 $\Wmat_K$ and $\Wmat_V$ each, $2d^2 + 2 d g d_h$ in total. The gated feed-forward layer has $3 d d'_{ff}$. Two RMSNorms
 add $2d$. With $g = h$ the attention part is $4d^2$, as in 2017.
 
-**<Gloss name="flop" plural />.** Generating one token costs two FLOPs per weight in every <NoteLink to="matrix-multiplication">matrix product</NoteLink>, since each weight is used in one
-multiply and one add. Attending to $n$ cached tokens costs $2nd$ for the scores $\qvec\Kmat^\tr$ over all heads and $2nd$
-for the weighted sum of values, so $4nd$ per block. Grouped keys and values do not reduce this term: every query head
-still scores $n$ keys of size $d_h$.
+**<Gloss name="flop" plural />.** Generating one token costs two FLOPs per weight in every
+<NoteLink to="matrix-multiplication">matrix product</NoteLink>, since each weight is used in one multiply and one add.
+Attending to $n$ cached tokens costs $2nd$ for the scores $\qvec\Kmat^\tr$ over all heads and $2nd$ for the weighted sum
+of values, so $4nd$ per block. Grouped keys and values do not reduce this term: every query head still scores $n$ keys
+of size $d_h$.
 
 **Cache.** Each block stores a key and a value of size $d_h$ for each of the $g$ key-value heads, $2 g d_h$ numbers per
 token per block. At 2 bytes each and $L$ blocks, that is $4 L g d_h$ bytes per token. Reducing $g$ from $h$ to $h/4$

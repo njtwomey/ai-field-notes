@@ -12,9 +12,9 @@ updated: 2026-09-27
 ---
 
 <Definition>
-An attention sink is a key position that receives a large fraction of the attention weight in many heads and layers,
-for most queries, regardless of its content. In autoregressive <Gloss name="language-model">language models</Gloss> the sinks are the first few tokens of
-the sequence <Cite id="xiao2024" />.
+An attention sink is a key position that receives a large fraction of the attention weight in many heads and layers, for
+most queries, regardless of its content. In autoregressive <Gloss name="language-model">language models</Gloss> the
+sinks are the first few tokens of the sequence <Cite id="xiao2024" />.
 </Definition>
 
 ## Intuition
@@ -30,13 +30,15 @@ visible only to queries at $t$ and after. A single consistent sink is therefore 
 
 ## Details
 
-**Sinks act like <NoteLink to="bias-terms-and-dropout-in-modern-transformers">key biases</NoteLink>.** Gu et al. found that sink tokens behave like a learned bias on the keys: they collect
-extra attention while their values contribute little to the output. The phenomenon emerged after sufficient training,
-was encouraged by <Gloss name="weight-decay">weight decay</Gloss>, and disappeared in models up to 1 billion parameters when <NoteLink to="scaled-dot-product-attention">softmax attention</NoteLink> was
-replaced by sigmoid attention without normalisation <Cite id="gu2025sink" />. Sun et al. traced sinks to a few
-**massive activations**, a few hidden-state entries about 10,000 times the median magnitude in Llama 2 7B, located at the starting
-token and a few delimiter tokens and nearly independent of the input. They act as fixed bias terms and concentrate
-attention on their tokens <Cite id="sun2024massive" />.
+**Sinks act like <NoteLink to="bias-terms-and-dropout-in-modern-transformers">key biases</NoteLink>.** Gu et al. found
+that sink tokens behave like a learned bias on the keys: they collect extra attention while their values contribute
+little to the output. The phenomenon emerged after sufficient training, was encouraged by
+<Gloss name="weight-decay">weight decay</Gloss>, and disappeared in models up to 1 billion parameters when
+<NoteLink to="scaled-dot-product-attention">softmax attention</NoteLink> was replaced by sigmoid attention without
+normalisation <Cite id="gu2025sink" />. Sun et al. traced sinks to a few **massive activations**, a few hidden-state
+entries about 10,000 times the median magnitude in Llama 2 7B, located at the starting token and a few delimiter tokens
+and nearly independent of the input. They act as fixed bias terms and concentrate attention on their tokens
+<Cite id="sun2024massive" />.
 
 **Position, not meaning.** Replacing the first four tokens of Llama-2-13B's input with line breaks left the model still
 attending heavily to them. Keeping those line breaks in a 1024-token window gave perplexity 5.60, close to the 5.40 with
@@ -52,23 +54,25 @@ lets the weights sum to less than 1 <Cite id="miller2023" />. This is exactly or
 score 0 and value $\zeros$: that key's term $e^0 = 1$ enters the denominator, and its contribution to the output is
 $\frac{1}{1 + \sum_l e^{s_l}} \cdot \zeros = \zeros$. The weight not given to real tokens goes to nothing.
 
-**<Gloss name="vit">Vision transformers</Gloss>.** Darcet et al. found high-norm tokens in low-information background patches of supervised and
-self-supervised vision transformers, repurposed for internal computation. Adding a few extra learnable **register**
-tokens to the input moved those computations onto the registers and removed the artefacts from the attention maps
-<Cite id="darcet2024" />.
+**<Gloss name="vit">Vision transformers</Gloss>.** Darcet et al. found high-norm tokens in low-information background
+patches of supervised and self-supervised vision transformers, repurposed for internal computation. Adding a few extra
+learnable **register** tokens to the input moved those computations onto the registers and removed the artefacts from
+the attention maps <Cite id="darcet2024" />.
 
 ## Streaming with sinks
 
 **Window attention fails.** Keeping only the most recent $w$ tokens' keys and values in the
-<NoteLink to="key-value-cache">KV cache</NoteLink> bounds memory for long streams. When the first tokens are evicted, the heads
-that parked weight on them must redistribute it over the remaining tokens, and the model's outputs change sharply. For
-Llama-2-13B with a 1024-token window, perplexity on the first book of PG19 rose to 5158 <Cite id="xiao2024" />.
+<NoteLink to="key-value-cache">KV cache</NoteLink> bounds memory for long streams. When the first tokens are evicted,
+the heads that parked weight on them must redistribute it over the remaining tokens, and the model's outputs change
+sharply. For Llama-2-13B with a 1024-token window, perplexity on the first book of PG19 rose to 5158
+<Cite id="xiao2024" />.
 
 **StreamingLLM keeps the sinks.** Xiao et al. keep the keys and values of the first four tokens permanently, plus a
-rolling window of recent tokens. With four sink tokens and 1020 recent ones, the same Llama-2-13B setting had
-perplexity 5.40. Positions are assigned by place in the cache, not in the original text, so rotary or <Gloss name="alibi" /> offsets stay
-within the trained range. Models including Llama-2, MPT, Falcon and Pythia then modelled streams of 4 million tokens
-with stable perplexity, up to 22.2 times faster per token than recomputing a sliding window <Cite id="xiao2024" />.
+rolling window of recent tokens. With four sink tokens and 1020 recent ones, the same Llama-2-13B setting had perplexity
+5.40. Positions are assigned by place in the cache, not in the original text, so rotary or <Gloss name="alibi" />
+offsets stay within the trained range. Models including Llama-2, MPT, Falcon and Pythia then modelled streams of 4
+million tokens with stable perplexity, up to 22.2 times faster per token than recomputing a sliding window
+<Cite id="xiao2024" />.
 
 **One sink is enough if trained for.** Llama-2 prefixes documents before chunking, so a random token often sits at
 position 0 during training, and the models learned to use several initial tokens as sinks. Xiao et al. pretrained

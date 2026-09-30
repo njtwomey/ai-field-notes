@@ -12,11 +12,11 @@ updated: 2026-09-27
 ---
 
 <Definition>
-Scalable Gaussian processes replace the $O(N^3)$ <NoteLink to="cholesky-decomposition">Cholesky factorisation</NoteLink> of exact
-<NoteLink to="gaussian-process">Gaussian process</NoteLink> inference by computations that exploit structure: fast
-<NoteLink to="matrix-vector-product">matrix-vector products</NoteLink>, low-rank or grid structure in the kernel, or a Markov representation in time. Deep Gaussian
-processes and deep kernel learning keep the Gaussian process framework but let a hierarchy of functions or a neural
-network shape the covariance.
+Scalable Gaussian processes replace the $O(N^3)$ <NoteLink to="cholesky-decomposition">Cholesky factorisation</NoteLink>
+of exact <NoteLink to="gaussian-process">Gaussian process</NoteLink> inference by computations that exploit structure:
+fast <NoteLink to="matrix-vector-product">matrix-vector products</NoteLink>, low-rank or grid structure in the kernel,
+or a Markov representation in time. Deep Gaussian processes and deep kernel learning keep the Gaussian process framework
+but let a hierarchy of functions or a neural network shape the covariance.
 </Definition>
 
 ## Intuition
@@ -27,33 +27,35 @@ $O(N^2)$ memory. There are two ways around it. One is to approximate the kernel 
 other is to compute the same quantities with algorithms that only multiply by $\Kmat_y$, which is cheap when $\Kmat_y$
 has structure or when a <Gloss name="gpu" /> does the multiplying.
 
-A second limit of the standard GP is the kernel itself. A <NoteLink to="covariance-functions">stationary kernel</NoteLink> with a few hyperparameters encodes a
-single notion of similarity over the whole input space. Images, text and other high-dimensional inputs need
-similarities that a squared exponential on raw inputs cannot express.
+A second limit of the standard GP is the kernel itself. A <NoteLink to="covariance-functions">stationary
+kernel</NoteLink> with a few hyperparameters encodes a single notion of similarity over the whole input space. Images,
+text and other high-dimensional inputs need similarities that a squared exponential on raw inputs cannot express.
 
 ## Scaling exact inference
 
-**Iterative solvers on GPUs.** <Gloss name="cg">Conjugate gradients</Gloss> solve $\Kmat_y\alphavec = \yvec$ using only matrix-vector
-products, each $O(N^2)$ and highly parallel. Stochastic trace estimation with the Lanczos process gives
-$\ln\abs{\Kmat_y}$ and its <NoteLink to="gradient">gradient</NoteLink> from the same products. Batching these solves, as in GPyTorch's blackbox
-matrix-matrix inference, makes exact GPs practical on GPUs <Cite id="gardner2018" />. With kernel products computed
-in partitions, exact GP regression has been run on over a million points <Cite id="wang2019b" />.
+**Iterative solvers on GPUs.** <Gloss name="cg">Conjugate gradients</Gloss> solve $\Kmat_y\alphavec = \yvec$ using only
+matrix-vector products, each $O(N^2)$ and highly parallel. Stochastic trace estimation with the Lanczos process gives
+$\ln\abs{\Kmat_y}$ and its <NoteLink to="gradient">gradient</NoteLink> from the same products. Batching these solves, as
+in GPyTorch's blackbox matrix-matrix inference, makes exact GPs practical on GPUs <Cite id="gardner2018" />. With kernel
+products computed in partitions, exact GP regression has been run on over a million points <Cite id="wang2019b" />.
 
 **Structured kernel interpolation.** KISS-GP places $m$ inducing points on a regular grid and interpolates the kernel
-from them: $\Kmat \approx \Wmat\Kmat_{UU}\Wmat^\top$, where each row of the sparse $N \times m$ matrix $\Wmat$ holds
-the local cubic interpolation weights of one input <Cite id="wilson2015" />. On a grid, a stationary kernel matrix
+from them: $\Kmat \approx \Wmat\Kmat_{UU}\Wmat^\top$, where each row of the sparse $N \times m$ matrix $\Wmat$ holds the
+local cubic interpolation weights of one input <Cite id="wilson2015" />. On a grid, a stationary kernel matrix
 $\Kmat_{UU}$ is Toeplitz in one dimension and a Kronecker product of Toeplitz matrices in several, so multiplying by it
-costs $O(m\log m)$ by <Gloss name="fft">fast Fourier transform</Gloss>. Each matrix-vector product with $\Kmat$ then costs $O(N + m\log m)$, and
-$m$ can exceed $N$. The grid restricts the method to a few input dimensions.
+costs $O(m\log m)$ by <Gloss name="fft">fast Fourier transform</Gloss>. Each matrix-vector product with $\Kmat$ then
+costs $O(N + m\log m)$, and $m$ can exceed $N$. The grid restricts the method to a few input dimensions.
 
-**Random features.** Bochner's theorem writes a stationary kernel as an <NoteLink to="expectation">expectation</NoteLink> over frequencies. Sampling $D$
-frequencies turns the GP into <NoteLink to="gaussian-processes-and-bayesian-linear-regression">Bayesian linear regression</NoteLink> on
-$2D$ trigonometric features, solved in $O(ND^2)$. The sparse spectrum GP optimises the frequencies as hyperparameters
+**Random features.** Bochner's theorem writes a stationary kernel as an
+<NoteLink to="expectation">expectation</NoteLink> over frequencies. Sampling $D$ frequencies turns the GP into
+<NoteLink to="gaussian-processes-and-bayesian-linear-regression">Bayesian linear regression</NoteLink> on $2D$
+trigonometric features, solved in $O(ND^2)$. The sparse spectrum GP optimises the frequencies as hyperparameters
 <Cite id="lazarogredilla2010" />. See <NoteLink to="random-fourier-features">random Fourier features</NoteLink>.
 
 **State-space form.** In one dimension, a GP with a Matérn kernel of half-integer order, or an approximation to the
-squared exponential, is the output of a linear <Gloss name="sde">stochastic differential equation</Gloss> driven by white noise. Sorting the
-inputs in time turns GP regression into a <NoteLink to="linear-gaussian-state-space-models">linear-Gaussian state-space model</NoteLink>, and the
+squared exponential, is the output of a linear <Gloss name="sde">stochastic differential equation</Gloss> driven by
+white noise. Sorting the inputs in time turns GP regression into a
+<NoteLink to="linear-gaussian-state-space-models">linear-Gaussian state-space model</NoteLink>, and the
 <NoteLink to="kalman-filter">Kalman filter</NoteLink> and smoother compute the exact posterior in $O(N)$ time
 <Cite id="hartikainen2010" />. The state dimension is $\nu + 1/2$ for a Matérn kernel of order $\nu$.
 
@@ -63,20 +65,21 @@ form.
 
 ## Hierarchical models
 
-**Deep kernel learning.** Deep kernel learning passes the inputs through a neural network $\gvec_{\wvec}$ and applies
-a base kernel to its outputs, $k(\xvec, \xvec') = k_{\text{base}}(\gvec_{\wvec}(\xvec), \gvec_{\wvec}(\xvec'))$
+**Deep kernel learning.** Deep kernel learning passes the inputs through a neural network $\gvec_{\wvec}$ and applies a
+base kernel to its outputs, $k(\xvec, \xvec') = k_{\text{base}}(\gvec_{\wvec}(\xvec), \gvec_{\wvec}(\xvec'))$
 <Cite id="wilson2016" />. The network weights are hyperparameters, trained jointly with the base kernel's by maximising
-the <NoteLink to="law-of-total-probability">marginal likelihood</NoteLink>, and a KISS-GP approximation keeps the cost linear in $N$. The model is still a Gaussian
-process given the weights. With millions of weights the marginal likelihood no longer protects against overfitting,
-and deep kernel learning can overfit more severely than the network alone, with worse-calibrated predictions. Treating the weights
-in a Bayesian way, or training with a stochastic minibatch objective, reduces the problem <Cite id="ober2021" />.
+the <NoteLink to="law-of-total-probability">marginal likelihood</NoteLink>, and a KISS-GP approximation keeps the cost
+linear in $N$. The model is still a Gaussian process given the weights. With millions of weights the marginal likelihood
+no longer protects against overfitting, and deep kernel learning can overfit more severely than the network alone, with
+worse-calibrated predictions. Treating the weights in a Bayesian way, or training with a stochastic minibatch objective,
+reduces the problem <Cite id="ober2021" />.
 
-**Deep Gaussian processes.** A deep GP composes Gaussian processes,
-$f = f_L \circ \dots \circ f_1$ with each $f_\ell \sim \GP(0, k_\ell)$ mapping one layer's outputs to the
-next <Cite id="damianou2013" />. The prior over $f$ is not Gaussian, so it can represent non-stationary and
-heavy-tailed functions, such as a step whose sharpness varies across the input space. Exact inference is intractable.
-Each layer is given its own inducing variables and a variational posterior. <NoteLink to="black-box-variational-inference">Doubly stochastic variational inference</NoteLink>
-samples through the layers and over minibatches, and scales to large datasets <Cite id="salimbeni2017" />.
+**Deep Gaussian processes.** A deep GP composes Gaussian processes, $f = f_L \circ \dots \circ f_1$ with each
+$f_\ell \sim \GP(0, k_\ell)$ mapping one layer's outputs to the next <Cite id="damianou2013" />. The prior over $f$ is
+not Gaussian, so it can represent non-stationary and heavy-tailed functions, such as a step whose sharpness varies
+across the input space. Exact inference is intractable. Each layer is given its own inducing variables and a variational
+posterior. <NoteLink to="black-box-variational-inference">Doubly stochastic variational inference</NoteLink> samples
+through the layers and over minibatches, and scales to large datasets <Cite id="salimbeni2017" />.
 
 ## Assumptions
 

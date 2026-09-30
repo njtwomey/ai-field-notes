@@ -15,23 +15,23 @@ updated: 2026-09-27
 import { NtmDiagram } from '../_shared/NtmDiagram'
 
 <Definition>
-The **neural variational document model** (NVDM) is a generative model of a document's <NoteLink to="bag-of-words">bag of words</NoteLink> with one
-continuous latent vector per document <Cite id="miao2016nvdm" />. For a vocabulary of $V$ words and a latent dimension
-$K$:
+The **neural variational document model** (NVDM) is a generative model of a document's <NoteLink to="bag-of-words">bag
+of words</NoteLink> with one continuous latent vector per document <Cite id="miao2016nvdm" />. For a vocabulary of $V$
+words and a latent dimension $K$:
 
 1. Draw $\hvec_d \sim \Gauss(\zeros, \Imat_K)$.
 2. For each word position $n = 1, \dots, N_d$, draw $w_{dn} \sim \Cat\paren{\operatorname{softmax}(\Rmat^\top\hvec_d +
    \bvec)}$, with $\Rmat \in \reals^{K \times V}$ and $\bvec \in \reals^V$.
 
 An encoder network maps the word counts $\wvec_d$ to a diagonal Gaussian $q_{\phivec}(\hvec_d \mid \wvec_d)$. The
-decoder parameters $\Rmat, \bvec$ and the encoder weights $\phivec$ are trained together by maximising the <Gloss name="elbo">evidence
-lower bound</Gloss>.
+decoder parameters $\Rmat, \bvec$ and the encoder weights $\phivec$ are trained together by maximising the
+<Gloss name="elbo">evidence lower bound</Gloss>.
 </Definition>
 
 ## Intuition
 
-NVDM is the <NoteLink to="variational-autoencoder">variational autoencoder</NoteLink> applied to text with the word order
-thrown away. A document is summarised by a point $\hvec_d$ in $\reals^K$. The decoder is a
+NVDM is the <NoteLink to="variational-autoencoder">variational autoencoder</NoteLink> applied to text with the word
+order thrown away. A document is summarised by a point $\hvec_d$ in $\reals^K$. The decoder is a
 <NoteLink to="multinomial-logistic-regression">multinomial logistic regression</NoteLink> from that point to the
 vocabulary: word $v$ gets the logit $\rvec_v^\top\hvec_d + b_v$, where $\rvec_v$ is column $v$ of $\Rmat$. Documents
 that use similar words are pushed to nearby points, and words used in similar documents get similar columns $\rvec_v$.
@@ -47,43 +47,46 @@ held-out perplexity, but its "topics", read off the rows of $\Rmat$, are hard to
 
 ## The objective
 
-Given $\hvec_d$, the words are independent draws from one <NoteLink to="categorical-distribution">categorical distribution</NoteLink>, so the likelihood depends on the
-document only through its counts $w_{dv}$, the number of times word $v$ occurs:
+Given $\hvec_d$, the words are independent draws from one <NoteLink to="categorical-distribution">categorical
+distribution</NoteLink>, so the likelihood depends on the document only through its counts $w_{dv}$, the number of times
+word $v$ occurs:
 
 $$
 \log p(\wvec_d \mid \hvec_d) = \sum_{n=1}^{N_d}\log p(w_{dn} \mid \hvec_d) = \sum_{v=1}^V w_{dv}\paren{\rvec_v^\top\hvec_d
 + b_v} - N_d\log\sum_{u=1}^V\exp\paren{\rvec_u^\top\hvec_d + b_u} .
 $$
 
-The encoder is a <Gloss name="mlp">multilayer perceptron</Gloss> $\pivec_d = \text{MLP}_{\phivec}(\wvec_d)$ followed by two linear heads,
-$\muvec_d = \Wmat_1\pivec_d + \cvec_1$ and $\log\sigmavec_d^2 = \Wmat_2\pivec_d + \cvec_2$. The evidence lower bound for one
-document is
+The encoder is a <Gloss name="mlp">multilayer perceptron</Gloss> $\pivec_d = \text{MLP}_{\phivec}(\wvec_d)$ followed by
+two linear heads, $\muvec_d = \Wmat_1\pivec_d + \cvec_1$ and $\log\sigmavec_d^2 = \Wmat_2\pivec_d + \cvec_2$. The
+evidence lower bound for one document is
 
 $$
 \Lcal_d = \expect_{q_{\phivec}(\hvec_d \mid \wvec_d)}\brack{\log p(\wvec_d \mid \hvec_d)} - \KL\paren{\Gauss(\muvec_d,
 \diag\sigmavec_d^2) \,\|\, \Gauss(\zeros, \Imat)} .
 $$
 
-It is derived exactly as for any VAE: $\log p(\wvec_d) = \Lcal_d + \KL(q \,\|\, p(\hvec_d \mid \wvec_d))$ and the
-second term is non-negative. The <Gloss name="kl" /> term between two Gaussians has the closed form $\frac12\sum_{k=1}^K\paren{\mu_{dk}^2 +
-\sigma_{dk}^2 - 1 - \log\sigma_{dk}^2}$. The <NoteLink to="expectation">expectation</NoteLink> is estimated with one reparameterised sample $\hvec_d =
+It is derived exactly as for any VAE: $\log p(\wvec_d) = \Lcal_d + \KL(q \,\|\, p(\hvec_d \mid \wvec_d))$ and the second
+term is non-negative. The <Gloss name="kl" /> term between two Gaussians has the closed form $\frac12\sum_{k=1}^K\paren{\mu_{dk}^2 +
+\sigma_{dk}^2 - 1 - \log\sigma_{dk}^2}$. The <NoteLink to="expectation">expectation</NoteLink> is estimated with one
+reparameterised sample $\hvec_d =
 \muvec_d + \sigmavec_d \odot \epsilonvec$, $\epsilonvec \sim \Gauss(\zeros, \Imat)$, which makes the estimate
 differentiable in $\phivec$ (see the <NoteLink to="reparameterisation-trick">reparameterisation trick</NoteLink>).
 
-The cost of one <NoteLink to="gradient">gradient</NoteLink> step is dominated by the softmax normaliser, a sum over all $V$ words. It is computed once per
-document, not once per word, because every word in the document shares the same $\hvec_d$.
+The cost of one <NoteLink to="gradient">gradient</NoteLink> step is dominated by the softmax normaliser, a sum over all
+$V$ words. It is computed once per document, not once per word, because every word in the document shares the same
+$\hvec_d$.
 
 ## From NVDM to a topic model
 
 Miao, Grefenstette and Blunsom turned NVDM into a topic model by inserting the simplex between the Gaussian and the
 decoder <Cite id="miao2017gsm" />. The **Gaussian softmax** construction draws $\xvec_d \sim \Gauss(\muvec_d,
 \diag\sigmavec_d^2)$ and sets $\thetavec_d = \operatorname{softmax}(\Wmat\xvec_d)$, a vector of $K$ topic proportions.
-Each word is then drawn from the mixture $\thetavec_d^\top\Bmat$, with the topic–word matrix $\Bmat \in \reals^{K \times V}$
-built from topic and word vectors, $\Bmat = \operatorname{softmax}(\Tmat\Umat^\top)$ row by row. The same paper derives
-a **stick-breaking** construction, in which a Gaussian draw passed through a sigmoid gives break proportions, and a
-**recurrent stick-breaking** construction whose recurrent network can generate an unbounded number of break
-proportions, so that the number of topics need not be fixed in advance. These constructions keep the Gaussian
-reparameterisation of NVDM and gain interpretable topic proportions.
+Each word is then drawn from the mixture $\thetavec_d^\top\Bmat$, with the topic–word matrix
+$\Bmat \in \reals^{K \times V}$ built from topic and word vectors, $\Bmat = \operatorname{softmax}(\Tmat\Umat^\top)$ row
+by row. The same paper derives a **stick-breaking** construction, in which a Gaussian draw passed through a sigmoid
+gives break proportions, and a **recurrent stick-breaking** construction whose recurrent network can generate an
+unbounded number of break proportions, so that the number of topics need not be fixed in advance. These constructions
+keep the Gaussian reparameterisation of NVDM and gain interpretable topic proportions.
 
 <NoteLink to="prodlda">ProdLDA</NoteLink> takes the same step but chooses the Gaussian's prior so that
 $\operatorname{softmax}(\hvec_d)$ approximates a Dirichlet.
@@ -115,8 +118,9 @@ vectors $\hvec_d$ that raise the reconstruction term, and shrinks the KL term.
 ## Assumptions
 
 - **Bag of words.** Word order is discarded. All words of a document share one latent vector.
-- **A Gaussian latent.** The prior $\Gauss(\zeros, \Imat)$ has no sparsity: a document tends to use all $K$ directions
-  a little, unlike <Gloss name="latent-dirichlet-allocation" />'s Dirichlet with $\alpha < 1$, which concentrates each document on a few topics.
+- **A Gaussian latent.** The prior $\Gauss(\zeros, \Imat)$ has no sparsity: a document tends to use all $K$ directions a
+  little, unlike <Gloss name="latent-dirichlet-allocation" />'s Dirichlet with $\alpha < 1$, which concentrates each
+  document on a few topics.
 - **A log-linear decoder.** One linear layer and a softmax. Deeper decoders fit better but make the latent space harder
   to read.
 

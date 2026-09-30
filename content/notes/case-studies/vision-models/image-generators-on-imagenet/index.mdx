@@ -21,8 +21,9 @@ updated: 2026-09-27
 
 ## At a glance
 
-All four models generate $256 \times 256$ <Gloss name="imagenet" /> images conditioned on the class label. Lower <Gloss name="fid" /> is better; precision
-measures how many samples look like real images, recall how much of the real distribution the samples cover.
+All four models generate $256 \times 256$ <Gloss name="imagenet" /> images conditioned on the class label. Lower
+<Gloss name="fid" /> is better; precision measures how many samples look like real images, recall how much of the real
+distribution the samples cover.
 
 <SpecTable
   columns={['VQ-VAE-2', 'BigGAN-deep', 'ADM-G', 'LDM-4-G']}
@@ -46,29 +47,32 @@ measures how many samples look like real images, recall how much of the real dis
 />
 
 VQ-VAE-2, BigGAN-deep and ADM-G scores are from Table 5 of <Cite id="dhariwal2021" />; the VQ-VAE-2 figure there is
-taken from earlier work and uses a two-resolution stack. LDM-4-G scores, all parameter counts, compute and throughput are
-from Table 18 of <Cite id="rombach2022" />, which takes the BigGAN-deep and ADM compute from <Cite id="dhariwal2021" />
-and converts A100-days to V100-days by a factor of 2.2. FID is the Fréchet distance between Inception features of real
-and generated images <Cite id="heusel2017" />; precision and recall are the $k$-nearest-neighbour estimates of
-<Cite id="kynkaanniemi2019" />.
+taken from earlier work and uses a two-resolution stack. LDM-4-G scores, all parameter counts, compute and throughput
+are from Table 18 of <Cite id="rombach2022" />, which takes the BigGAN-deep and ADM compute from
+<Cite id="dhariwal2021" /> and converts A100-days to V100-days by a factor of 2.2. FID is the Fréchet distance between
+Inception features of real and generated images <Cite id="heusel2017" />; precision and recall are the
+$k$-nearest-neighbour estimates of <Cite id="kynkaanniemi2019" />.
 
 ## Architecture
 
 **VQ-VAE-2** compresses an image into two grids of discrete codes, a coarse top level and a finer bottom level, using a
-<NoteLink to="vector-quantised-variational-autoencoder">vector-quantised autoencoder</NoteLink>. Autoregressive PixelCNN-style priors, with self-attention,
-model the codes; sampling draws codes one at a time and decodes them <Cite id="razavi2019" />.
+<NoteLink to="vector-quantised-variational-autoencoder">vector-quantised autoencoder</NoteLink>. Autoregressive
+PixelCNN-style priors, with self-attention, model the codes; sampling draws codes one at a time and decodes them
+<Cite id="razavi2019" />.
 
 **BigGAN-deep** is a <NoteLink to="generative-adversarial-network">GAN</NoteLink>: a generator maps noise and a class
-embedding to an image in one forward pass, trained against a discriminator. It uses class-conditional <NoteLink to="batch-normalisation">batch
-normalisation</NoteLink>, self-attention and orthogonal regularisation. The **truncation trick** samples the noise from a truncated
-normal to trade diversity for fidelity <Cite id="brock2019" />; the scores above use truncation 1.0.
+embedding to an image in one forward pass, trained against a discriminator. It uses class-conditional
+<NoteLink to="batch-normalisation">batch normalisation</NoteLink>, self-attention and orthogonal regularisation. The
+**truncation trick** samples the noise from a truncated normal to trade diversity for fidelity <Cite id="brock2019" />;
+the scores above use truncation 1.0.
 
-**ADM** ("ablated <Gloss name="diffusion-model">diffusion model</Gloss>") is a <NoteLink to="denoising-diffusion-probabilistic-models">diffusion
-model</NoteLink> whose <Gloss name="u-net" /> predicts the noise in a noisy image. Dhariwal and Nichol improved the U-Net by ablation:
-more attention heads, attention at several resolutions, BigGAN-style residual blocks for up- and down-sampling, and
-adaptive group normalisation to inject the time step and class <Cite id="dhariwal2021" />. **ADM-G** adds **classifier
-guidance**: the <NoteLink to="gradient">gradient</NoteLink> of a classifier trained on noisy images, scaled by a factor, is added to the denoising step to
-push samples toward the class (see <NoteLink to="diffusion-guidance">diffusion guidance</NoteLink>).
+**ADM** ("ablated <Gloss name="diffusion-model">diffusion model</Gloss>") is a
+<NoteLink to="denoising-diffusion-probabilistic-models">diffusion model</NoteLink> whose <Gloss name="u-net" /> predicts
+the noise in a noisy image. Dhariwal and Nichol improved the U-Net by ablation: more attention heads, attention at
+several resolutions, BigGAN-style residual blocks for up- and down-sampling, and adaptive group normalisation to inject
+the time step and class <Cite id="dhariwal2021" />. **ADM-G** adds **classifier guidance**: the
+<NoteLink to="gradient">gradient</NoteLink> of a classifier trained on noisy images, scaled by a factor, is added to the
+denoising step to push samples toward the class (see <NoteLink to="diffusion-guidance">diffusion guidance</NoteLink>).
 
 **LDM-4** is a <NoteLink to="latent-diffusion">latent diffusion model</NoteLink>. An autoencoder first compresses the
 image by a factor of 4 in each spatial dimension, and the diffusion model runs on the $64 \times 64$ latent instead of
@@ -78,41 +82,43 @@ the $256 \times 256$ image <Cite id="rombach2022" />. **LDM-4-G** uses classifie
 ## Training
 
 The four models were trained on the same data, ImageNet at $256 \times 256$ with class labels, and are compared on the
-same metrics. Their training costs differ by an order of magnitude. ADM-G's 962 V100-days are 916 for the diffusion model
-and 46 for the classifier. LDM-4-G's 271 V100-days were spent on a single A100 for 178K steps with <NoteLink to="minibatching-and-batch-size">batch size</NoteLink> 1,200
-<Cite id="rombach2022" />.
+same metrics. Their training costs differ by an order of magnitude. ADM-G's 962 V100-days are 916 for the diffusion
+model and 46 for the classifier. LDM-4-G's 271 V100-days were spent on a single A100 for 178K steps with
+<NoteLink to="minibatching-and-batch-size">batch size</NoteLink> 1,200 <Cite id="rombach2022" />.
 
 ## What is distinctive
 
 **BigGAN-deep** samples in one network evaluation, hundreds of times fewer than the diffusion models, and shares the
-highest precision, 0.87, with LDM-4-G. Its recall of 0.28 is the lowest of the four: it covers little of the real distribution. This is the
-signature of mode dropping, the GAN failure in which the generator ignores parts of the data.
+highest precision, 0.87, with LDM-4-G. Its recall of 0.28 is the lowest of the four: it covers little of the real
+distribution. This is the signature of mode dropping, the GAN failure in which the generator ignores parts of the data.
 
-With classifier guidance, **ADM** beat BigGAN-deep's FID on ImageNet, the benchmark on which GANs had led <Cite id="dhariwal2021" />. Without guidance its FID is 10.94, with recall 0.63. Classifier guidance lowers FID to 4.59
-and raises precision from 0.69 to 0.82, at the cost of recall falling to 0.52. With only 25 <Gloss name="ddim" /> steps, ADM-G still
-scores FID 5.44, better than BigGAN-deep.
+With classifier guidance, **ADM** beat BigGAN-deep's FID on ImageNet, the benchmark on which GANs had led
+<Cite id="dhariwal2021" />. Without guidance its FID is 10.94, with recall 0.63. Classifier guidance lowers FID to 4.59
+and raises precision from 0.69 to 0.82, at the cost of recall falling to 0.52. With only 25 <Gloss name="ddim" /> steps,
+ADM-G still scores FID 5.44, better than BigGAN-deep.
 
 **LDM** moved diffusion into a compressed latent space. At $64 \times 64 \times$ channels instead of
 $256 \times 256 \times 3$, each denoising step is cheaper, which cut training compute to 28% of ADM-G's and raised
-throughput from 0.07 to 0.4 images per second. The latent-diffusion design, conditioned on text, became Stable Diffusion.
+throughput from 0.07 to 0.4 images per second. The latent-diffusion design, conditioned on text, became Stable
+Diffusion.
 
 ## Comparison
 
 **Fidelity against diversity.** Precision and recall separate what FID combines. The GAN sits at high precision and low
-recall. Unguided diffusion (ADM: 0.69, 0.63) sits at the opposite corner. Guidance moves diffusion toward the GAN's corner.
-The guidance scale sets the trade-off: for LDM-4-G, a classifier-free guidance scale of 1.25 gives FID 3.95, precision 0.81 and recall
-0.55; a scale of 1.5 gives FID 3.60, precision 0.87 and recall 0.48 <Cite id="rombach2022" />. The best FID lies at an
-intermediate trade-off.
+recall. Unguided diffusion (ADM: 0.69, 0.63) sits at the opposite corner. Guidance moves diffusion toward the GAN's
+corner. The guidance scale sets the trade-off: for LDM-4-G, a classifier-free guidance scale of 1.25 gives FID 3.95,
+precision 0.81 and recall 0.55; a scale of 1.5 gives FID 3.60, precision 0.87 and recall 0.48 <Cite id="rombach2022" />.
+The best FID lies at an intermediate trade-off.
 
 **Likelihood-based models.** VQ-VAE-2 and diffusion models are trained by maximising a likelihood or a bound on it,
 which penalises assigning zero probability to any real image. Both reach higher recall than BigGAN-deep. VQ-VAE-2's
 precision of 0.36 shows that, in 2019, its samples were much less realistic than the GAN's.
 
 **Cost.** At sampling time the GAN is by far the cheapest: one forward pass. Diffusion needs one network evaluation per
-denoising step, 250 here. At training time the GAN is also the cheapest: BigGAN-deep's 128–256 V100-days are less than LDM-4-G's
-271 and far less than ADM-G's 962, but GAN training is adversarial and can collapse <Cite id="brock2019" />, while the diffusion loss is a
-regression target that trains stably.
+denoising step, 250 here. At training time the GAN is also the cheapest: BigGAN-deep's 128–256 V100-days are less than
+LDM-4-G's 271 and far less than ADM-G's 962, but GAN training is adversarial and can collapse <Cite id="brock2019" />,
+while the diffusion loss is a regression target that trains stably.
 
-**Metric caveats.** FID and <NoteLink to="inception-score">Inception score</NoteLink> use an Inception network trained on ImageNet, so they reward images that
-the classifier finds recognisable. Guidance pushes samples toward images the classifier recognises, so part of its gain on these metrics reflects the
-metric rather than realism.
+**Metric caveats.** FID and <NoteLink to="inception-score">Inception score</NoteLink> use an Inception network trained
+on ImageNet, so they reward images that the classifier finds recognisable. Guidance pushes samples toward images the
+classifier recognises, so part of its gain on these metrics reflects the metric rather than realism.

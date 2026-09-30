@@ -3,15 +3,16 @@ import { Interactive, ParamSlider, Readout, XYChart, formatNumber, useParam, typ
 import { rng } from '@/lib/math'
 import { effectiveSampleSize, splitRhat } from '../../_shared/mcmc'
 
-const CHAINS = 4
-const STARTS = [-1, -0.33, 0.33, 1]
+/** Trace points drawn per chain; longer chains are thinned for drawing only. */
+const TRACE_POINTS = 400
 
 /**
- * Four chains, each an AR(1) process x_t = μ + φ (x_{t−1} − μ) + √(1 − φ²) ε_t with stationary distribution N(μ, 1).
- * The chains start at dispersed points, and the last one can be centred on a different mode μ = δ, standing in for a
- * chain trapped in a second mode.
+ * Several chains, each an AR(1) process x_t = μ + φ (x_{t−1} − μ) + √(1 − φ²) ε_t with stationary distribution
+ * N(μ, 1). The chains start at points spread evenly across [−s, s], and the last one can be centred on a different
+ * mode μ = δ, standing in for a chain trapped in a second mode.
  */
 export function ChainDiagnostics() {
+  const chains = useParam(4, { min: 1, max: 20, step: 1 })
   const phi = useParam(0.9, { min: 0, max: 0.995, step: 0.005 })
   const draws = useParam(1000, { min: 100, max: 4000, step: 100 })
   const spread = useParam(8, { min: 0, max: 20, step: 0.5 })
@@ -19,11 +20,13 @@ export function ChainDiagnostics() {
   const seed = useParam(1, { min: 1, max: 30, step: 1 })
 
   const run = useMemo(() => {
-    const g = rng(seed.value)
+    const m = chains.value
     const noise = Math.sqrt(1 - phi.value ** 2)
-    const chains = Array.from({ length: CHAINS }, (_, c) => {
-      const mu = c === CHAINS - 1 ? offset.value : 0
-      let x = STARTS[c] * spread.value
+    // Each chain has its own random stream, so adding a chain leaves the others unchanged.
+    const all = Array.from({ length: m }, (_, c) => {
+      const g = rng(seed.value * 1000 + c)
+      const mu = c === m - 1 ? offset.value : 0
+      let x = (m === 1 ? 1 : -1 + (2 * c) / (m - 1)) * spread.value
       const out: number[] = []
       for (let t = 0; t < draws.value; t++) {
         x = mu + phi.value * (x - mu) + noise * g.normal()
@@ -31,40 +34,47 @@ export function ChainDiagnostics() {
       }
       return out
     })
-    const kept = chains.map((c) => c.slice(Math.floor(c.length / 2)))
+    const kept = all.map((c) => c.slice(Math.floor(c.length / 2)))
     return {
-      chains,
-      rhatAll: splitRhat(chains),
+      chains: all,
+      rhatAll: splitRhat(all),
       rhatKept: splitRhat(kept),
       ess: kept.reduce((a, c) => a + effectiveSampleSize(c), 0),
       keptCount: kept.reduce((a, c) => a + c.length, 0),
     }
-  }, [phi.value, draws.value, spread.value, offset.value, seed.value])
+  }, [chains.value, phi.value, draws.value, spread.value, offset.value, seed.value])
 
-  const series: XYSeries[] = useMemo(
-    () =>
-      run.chains.map((c, i) => ({
-        name: `chain ${i + 1}`,
+  const series: XYSeries[] = useMemo(() => {
+    const many = run.chains.length > 1
+    const stride = Math.max(1, Math.ceil(draws.value / TRACE_POINTS))
+    return run.chains.map((c, i): XYSeries => {
+      const idx: number[] = []
+      for (let t = 0; t < c.length; t += stride) idx.push(t)
+      const last = i === run.chains.length - 1
+      return {
+        name: last ? (many ? 'last chain (centred at δ)' : 'chain (centred at δ)') : 'other chains',
         type: 'line',
-        x: c.map((_, t) => t + 1),
-        y: c,
-        slot: i,
-      })),
-    [run],
-  )
+        x: idx.map((t) => t + 1),
+        y: idx.map((t) => c[t]),
+        slot: last ? 1 : 0,
+        thin: many,
+      }
+    })
+  }, [run, draws.value])
 
   const tau = (1 + phi.value) / (1 - phi.value)
 
   return (
     <Interactive
       title="Trace plots, split R-hat and effective sample size"
-      caption="Four chains whose stationary distribution is N(0, 1), each moving with autocorrelation φ from a dispersed start. The first half of each chain is treated as warm-up. With large starting spread, R-hat over all draws is far above 1 until the chains forget their starts. Raise φ: the chains mix slowly, the effective sample size falls towards (draws/2) × 4/τ, and R-hat on the kept half rises. Move chain 4 to another mode: every chain on its own looks stationary, but the chains disagree and R-hat flags it."
+      caption="Several chains whose stationary distribution is N(0, 1), each with its own random stream, moving with autocorrelation φ from starts spread evenly across ± the starting spread. Each chain is a light line; the chains slider sets how many run. The first half of each chain is treated as warm-up, and R-hat and the effective sample size (summed over chains) use every chain shown. With large starting spread, R-hat over all draws is far above 1 until the chains forget their starts. Raise φ: the chains mix slowly, the effective sample size falls towards (draws/2) × chains/τ, and R-hat on the kept half rises. Move the last chain to another mode: every chain on its own looks stationary, but the chains disagree and R-hat flags it."
       controls={
         <>
+          <ParamSlider label="chains" param={chains} format={(v) => String(v)} withArrows />
           <ParamSlider label="autocorrelation φ" param={phi} />
           <ParamSlider label="draws per chain" param={draws} format={(v) => String(v)} />
           <ParamSlider label="starting spread" param={spread} />
-          <ParamSlider label="chain 4 centred at δ" param={offset} />
+          <ParamSlider label="last chain centred at δ" param={offset} />
           <ParamSlider label="random seed" param={seed} withArrows />
         </>
       }

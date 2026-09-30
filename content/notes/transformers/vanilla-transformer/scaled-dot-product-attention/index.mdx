@@ -26,12 +26,12 @@ where the softmax normalises each row of the $n \times m$ score matrix <Cite id=
 
 ## Intuition
 
-Attention is a soft lookup table. Each value $\vvec_j$ is stored under a key $\kvec_j$. A query $\qvec$ is compared
-with every key, and the result is an average of all the values, weighted by how well each key matches. A hard lookup
-would return the value of the single best key. The softmax makes the lookup differentiable, so queries, keys and values
-can all be learned. With the keys as stored patterns, the same computation is one update of a
-<NoteLink to="modern-hopfield-network">modern Hopfield network</NoteLink>, an <Gloss name="associative-memory">associative memory</Gloss> with inverse
-temperature $1/\sqrt{d_k}$.
+Attention is a soft lookup table. Each value $\vvec_j$ is stored under a key $\kvec_j$. A query $\qvec$ is compared with
+every key, and the result is an average of all the values, weighted by how well each key matches. A hard lookup would
+return the value of the single best key. The softmax makes the lookup differentiable, so queries, keys and values can
+all be learned. With the keys as stored patterns, the same computation is one update of a
+<NoteLink to="modern-hopfield-network">modern Hopfield network</NoteLink>, an
+<Gloss name="associative-memory">associative memory</Gloss> with inverse temperature $1/\sqrt{d_k}$.
 
 The <NoteLink to="dot-product">dot product</NoteLink> measures the match. It is large when $\qvec$ and $\kvec_j$ point
 the same way and are long. Row $i$ of the output is
@@ -44,14 +44,15 @@ $$
 In **self-attention**, queries, keys and values are all linear projections of the same sequence $\Xmat$:
 $\Qmat = \Xmat \Wmat_Q$, $\Kmat = \Xmat \Wmat_K$, $\Vmat = \Xmat \Wmat_V$. Every position reads from every other
 position. In <NoteLink to="encoder-decoder-cross-attention">cross-attention</NoteLink>, queries come from one sequence
-and keys and values from another, as in the decoder of the encoder–decoder <NoteLink to="transformer">transformer</NoteLink>.
+and keys and values from another, as in the decoder of the encoder–decoder
+<NoteLink to="transformer">transformer</NoteLink>.
 
 ## Scaling by the square root of the key dimension
 
 Vaswani et al. justify the scaling with a variance argument, given in a footnote of the transformer paper
-<Cite id="vaswani2017" />. Suppose the components $q_1, \dots, q_{d_k}$ and $k_1, \dots, k_{d_k}$ of $\qvec$ and
-$\kvec$ are mutually <NoteLink to="independence">independent random variables</NoteLink> with mean 0 and variance 1, as at initialisation. Their dot product
-$\qvec^{\tr} \kvec = \sum_{i=1}^{d_k} q_i k_i$ has mean
+<Cite id="vaswani2017" />. Suppose the components $q_1, \dots, q_{d_k}$ and $k_1, \dots, k_{d_k}$ of $\qvec$ and $\kvec$
+are mutually <NoteLink to="independence">independent random variables</NoteLink> with mean 0 and variance 1, as at
+initialisation. Their dot product $\qvec^{\tr} \kvec = \sum_{i=1}^{d_k} q_i k_i$ has mean
 
 $$
 \expect\brack{\qvec^{\tr} \kvec} = \sum_{i=1}^{d_k} \expect[q_i]\, \expect[k_i] = 0.
@@ -87,13 +88,14 @@ Dividing the scores by a constant $\tau$ is a softmax **temperature**. The scale
 $\operatorname{softmax}(\svec / \tau)$ with $\tau = \sqrt{d_k}$. As $\tau \to \infty$ the weights tend to uniform,
 $1/m$ each. As $\tau \to 0$ they concentrate on the largest score.
 
-Without the scaling, the spread of the scores depends on the <NoteLink to="multi-head-attention">head dimension</NoteLink>. A wider head gives more widely spread
-scores, which push the softmax towards a one-hot vector, so the effective temperature of the softmax would change
-with $d_k$. With the scaling, the scale of the scores is independent of $d_k$, and the head dimension can be changed
-without retuning the temperature.
+Without the scaling, the spread of the scores depends on the <NoteLink to="multi-head-attention">head
+dimension</NoteLink>. A wider head gives more widely spread scores, which push the softmax towards a one-hot vector, so
+the effective temperature of the softmax would change with $d_k$. With the scaling, the scale of the scores is
+independent of $d_k$, and the head dimension can be changed without retuning the temperature.
 
-Large scores harm training because of the shape of the softmax. With weights $\alphavec = \operatorname{softmax}(\svec)$,
-differentiating $\alpha_i = e^{s_i} / \sum_l e^{s_l}$ with the <NoteLink to="derivative">quotient rule</NoteLink> gives
+Large scores harm training because of the shape of the softmax. With weights
+$\alphavec = \operatorname{softmax}(\svec)$, differentiating $\alpha_i = e^{s_i} / \sum_l e^{s_l}$ with the
+<NoteLink to="derivative">quotient rule</NoteLink> gives
 
 $$
 \frac{\partial \alpha_i}{\partial s_j} = \alpha_i (\delta_{ij} - \alpha_j), \qquad
@@ -102,9 +104,9 @@ $$
 
 When the scores are spread widely, one weight approaches 1 and the rest approach 0. Every entry
 $\alpha_i(\delta_{ij} - \alpha_j)$ then approaches 0: either $\alpha_i \approx 0$, or $\alpha_i \approx 1$ and
-$\delta_{ij} - \alpha_j \approx 0$. The <NoteLink to="gradient">gradient</NoteLink> with respect to the scores vanishes, and so does the gradient with
-respect to the queries and keys that produced them. Unscaled attention in high dimension starts training in this
-saturated regime.
+$\delta_{ij} - \alpha_j \approx 0$. The <NoteLink to="gradient">gradient</NoteLink> with respect to the scores vanishes,
+and so does the gradient with respect to the queries and keys that produced them. Unscaled attention in high dimension
+starts training in this saturated regime.
 
 <ScalingDemo />
 
@@ -118,8 +120,8 @@ their weights are in the ratio $e^{1} \approx 2.72$. Both keys still contribute,
 
 Forming $\Qmat \Kmat^{\tr}$ costs $O(n m d_k)$ and multiplying the weights by $\Vmat$ costs $O(n m d_v)$. The score
 matrix has $nm$ entries. For self-attention over a sequence of length $n$, time and memory grow as $n^2$. All $n^2$
-scores are computed with <NoteLink to="matrix-multiplication">matrix products</NoteLink> and no sequential dependence, so attention parallelises across positions,
-unlike a recurrent network.
+scores are computed with <NoteLink to="matrix-multiplication">matrix products</NoteLink> and no sequential dependence,
+so attention parallelises across positions, unlike a recurrent network.
 
 ## Comparison with additive attention
 
@@ -135,13 +137,14 @@ The scaling closes that gap <Cite id="vaswani2017" />. The unscaled dot form was
 - The variance argument assumes independent components with unit variance. After training, queries and keys are
   correlated and not unit-variance; the scaling is a choice for initialisation and a stable default, not an exact
   normalisation.
-- Attention treats its keys as a set. Permuting the key–value pairs together leaves the output unchanged. Order must be added
-  separately, for example with a <NoteLink to="positional-encoding">positional encoding</NoteLink>.
+- Attention treats its keys as a set. Permuting the key–value pairs together leaves the output unchanged. Order must be
+  added separately, for example with a <NoteLink to="positional-encoding">positional encoding</NoteLink>.
 
 ## Pitfalls
 
 - **Numerical overflow.** Compute the softmax as $\exp(s_j - \max_l s_l)$ divided by the sum of the same terms. The
-  result is unchanged and never overflows; see <NoteLink to="softmax-and-log-sum-exp">softmax and log-sum-exp</NoteLink>.
+  result is unchanged and never overflows; see <NoteLink to="softmax-and-log-sum-exp">softmax and
+  log-sum-exp</NoteLink>.
 - **Quadratic memory.** Storing the $n \times n$ weights for long sequences exhausts memory. Fused implementations
   compute the output in blocks without storing the full matrix.
 - **Masked positions.** Setting a score to $-\infty$ before the softmax gives that position weight exactly 0. This is

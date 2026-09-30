@@ -1,0 +1,343 @@
+---
+title: Pairwise ranking losses
+kind: concept
+summary: 'A pairwise ranking loss sums $\phi(s_i - s_j)$ over pairs where item $i$ should rank above item $j$, with $\phi$ a decreasing surrogate for a misorder: hinge (RankSVM), logistic (RankNet, BPR) or rank-weighted hinge (WARP). Unweighted, it bounds $1 - \text{AUC}$.'
+tags: [loss-functions, ranking, learning-to-rank, recommender-systems, implicit-feedback, worked-example]
+aliases: [pairwise losses, pairwise approach, RankSVM, ranking SVM, margin ranking loss, pairwise hinge loss, pairwise logistic loss, RankBoost, WARP, WSABIE, weighted approximate-rank pairwise loss]
+requires: [logistic-regression, receiver-operating-characteristic-curve-and-area, normalised-discounted-cumulative-gain]
+partOf: [recommendation-loss-families]
+related: [bayesian-personalised-ranking, ranking-losses, support-vector-machine, explicit-and-implicit-feedback, surrogate-losses, listwise-ranking-losses, sampled-softmax-and-negative-sampling]
+references: [bradley1952, herbrich2000rank, joachims2002clickthrough, freund2003rankboost, burges2005, burges2010, rendle2009bpr, hanley1982, weston2011wsabie, usunier2009owpc, zhang2013dns, rendle2014sampling, chen2009essential, burges2006]
+status: draft
+updated: 2026-09-30
+---
+
+import { RankingLossLab } from '../_shared/RankingLossLab'
+
+<Definition>
+A **pairwise ranking loss** trains a scoring function $s_i = f(\xvec_i)$ from pairs $(i, j)$ in which item $i$ should
+be ranked above item $j$ for the same query or user. With the set of such pairs $\Pcal$ and the score difference
+$d_{ij} = s_i - s_j$, the loss is
+
+$$
+L = \sum_{(i, j) \in \Pcal} \phi(d_{ij}),
+$$
+
+where $\phi$ is a decreasing surrogate for the misorder indicator $\indicator[d_{ij} \le 0]$. The hinge
+$\phi(d) = \max(0, 1 - d)$ gives RankSVM, the logistic $\phi(d) = \ln(1 + e^{-d})$ gives <Gloss name="ranknet" /> and
+<Gloss name="bpr" />, and the exponential $\phi(d) = e^{-d}$ gives RankBoost.
+</Definition>
+
+## Intuition
+
+A ranked list is a set of order decisions. A list of $n$ items is correctly ordered exactly when every pair of items
+with different labels is correctly ordered. A pairwise loss turns ranking into binary classification of pairs: the
+input is a pair, the label is which item should come first, and the classifier's margin is the score difference
+$d_{ij}$. Any classification surrogate then becomes a ranking loss.
+
+The loss depends only on differences of scores. Adding a constant to every score of a query leaves every $d_{ij}$, and
+so the loss, unchanged. Absolute score levels, which a <NoteLink to="pointwise-recommendation-losses">pointwise
+loss</NoteLink> must fit, carry no weight. This matches the deployed task: a ranker shows items in order of score, so
+only the order within a query matters.
+
+## The pairwise surrogates
+
+All the common choices of $\phi$ upper-bound the misorder indicator. The <NoteLink to="surrogate-losses">logistic
+loss</NoteLink> in base 2, $\log_2(1 + e^{-d})$, equals 1 at $d = 0$ and exceeds 1 for $d < 0$. The hinge and the
+exponential are at least 1 for $d \le 0$. Each is non-negative for $d > 0$, so each bounds $\indicator[d \le 0]$
+everywhere. They differ in how they treat pairs that are already correctly ordered.
+
+- **Hinge (RankSVM).** Herbrich et al. posed <NoteLink to="ordinal-regression">ordinal regression</NoteLink> as
+  large-margin classification of pairs <Cite id="herbrich2000rank" />, and Joachims trained it on preferences mined from
+  clicks <Cite id="joachims2002clickthrough" />. With a linear score $s_i = \wvec\transpose\xvec_i$, RankSVM solves
+
+  $$
+  \min_{\wvec, \xi}\; \tfrac{1}{2}\norm{\wvec}^2 + C\sum_{(i, j) \in \Pcal}\xi_{ij}
+  \quad\text{subject to}\quad \wvec\transpose(\xvec_i - \xvec_j) \ge 1 - \xi_{ij},\; \xi_{ij} \ge 0.
+  $$
+
+  This is a <NoteLink to="support-vector-machine">support vector machine</NoteLink> on the difference vectors
+  $\xvec_i - \xvec_j$, all labelled positive. At the optimum $\xi_{ij} = \max(0, 1 - d_{ij})$. A pair ordered by a
+  margin of at least 1 contributes neither loss nor <NoteLink to="gradient">gradient</NoteLink>.
+- **Logistic (RankNet).** Burges et al. modelled the probability that $i$ ranks above $j$ as $P_{ij} = \sigma(d_{ij})$,
+  with $\sigma$ the logistic function, and trained a neural network by cross-entropy on these pair probabilities
+  <Cite id="burges2005" />. The model is the Bradley–Terry model of paired comparisons with $e^{s_i}$ as item strengths
+  <Cite id="bradley1952" />. Every pair contributes a gradient, which decays exponentially once the pair is ordered.
+- **Exponential (RankBoost).** RankBoost runs boosting on pairs, which minimises $\sum e^{-d_{ij}}$
+  <Cite id="freund2003rankboost" />. The exponential grows fast for misordered pairs, so a few badly misordered or
+  mislabelled pairs dominate it.
+- **Squared hinge and margin variants.** $\max(0, m - d)^2$ is differentiable at the hinge. A margin $m$ other than 1
+  only rescales the scores of a linear model, but it sets the operating scale when embeddings are normalised, as in the
+  margin ranking loss of embedding models.
+
+## The RankNet gradient
+
+RankNet allows ties by using a target probability $\bar{P}_{ij} \in \set{0, \tfrac{1}{2}, 1}$ for "$j$ above $i$",
+"tied" and "$i$ above $j$". The loss of one pair is the cross-entropy
+
+$$
+C_{ij} = -\bar{P}_{ij}\ln P_{ij} - (1 - \bar{P}_{ij})\ln(1 - P_{ij}), \qquad P_{ij} = \sigma(d_{ij}).
+$$
+
+Write $d = d_{ij}$. From $\sigma(d) = 1/(1 + e^{-d})$,
+
+$$
+\ln P_{ij} = -\ln(1 + e^{-d}), \qquad \ln(1 - P_{ij}) = \ln\frac{e^{-d}}{1 + e^{-d}} = -d - \ln(1 + e^{-d}).
+$$
+
+Substituting,
+
+$$
+C_{ij} = (1 - \bar{P}_{ij})\,d + \ln(1 + e^{-d}).
+$$
+
+The <NoteLink to="derivative">derivative</NoteLink> of $\ln(1 + e^{-d})$ is $-e^{-d}/(1 + e^{-d}) = -\sigma(-d)$, and
+$1 - \sigma(-d) = \sigma(d)$. Hence
+
+$$
+\frac{\partial C_{ij}}{\partial d} = \sigma(d) - \bar{P}_{ij},
+\qquad
+\frac{\partial C_{ij}}{\partial s_i} = \sigma(d_{ij}) - \bar{P}_{ij} = -\frac{\partial C_{ij}}{\partial s_j}.
+$$
+
+The gradient is the predicted pair probability minus the target, the same form as the gradient of
+<NoteLink to="logistic-regression">logistic regression</NoteLink>. For a strict preference, $\bar{P}_{ij} = 1$, it is
+$-\sigma(-d_{ij})$. A gradient step raises $s_i$ and lowers $s_j$ by equal amounts. The push is close to 1 for a pair
+misordered by a wide margin, $\tfrac{1}{2}$ when the two scores are equal and close to 0 for a pair ordered by a wide
+margin.
+
+**Per-item gradients.** For model parameters $\wvec$ the chain rule gives
+$\partial C_{ij}/\partial\wvec = \lambda_{ij}\paren{\partial s_i/\partial\wvec - \partial s_j/\partial\wvec}$ with
+$\lambda_{ij} = \sigma(d_{ij}) - \bar{P}_{ij}$. Summing over the pairs of one query and collecting the terms of each
+item,
+
+$$
+\frac{\partial L}{\partial\wvec} = \sum_i \lambda_i\,\frac{\partial s_i}{\partial\wvec},
+\qquad
+\lambda_i = \sum_{j:\,(i, j) \in \Pcal}\lambda_{ij} - \sum_{j:\,(j, i) \in \Pcal}\lambda_{ji}.
+$$
+
+The pair sum costs $O(n^2)$ scalar operations, but the model needs only one backward pass per item, not one per pair
+<Cite id="burges2010" />. The per-item force $\lambda_i$ is the object that
+<NoteLink to="lambda-gradients">lambda gradients</NoteLink> reweight.
+
+## BPR and the area under the ROC curve
+
+**Bayesian derivation.** BPR applies the logistic pairwise loss to
+<NoteLink to="explicit-and-implicit-feedback">implicit feedback</NoteLink> <Cite id="rendle2009bpr" />. For user $u$,
+let $\Ical_u^+$ be the items the user interacted with and $\Ical_u^-$ the rest, and let
+$\hat{x}_{uij} = \hat{x}_{ui} - \hat{x}_{uj}$. BPR assumes that $u$ prefers every $i \in \Ical_u^+$ to every
+$j \in \Ical_u^-$, that these preferences are independent given the parameters $\Theta$, and that
+$p(i >_u j \mid \Theta) = \sigma(\hat{x}_{uij})$. With a Gaussian prior on $\Theta$, the log posterior is
+
+$$
+\ln p(\Theta \mid \text{data}) = \sum_{u}\sum_{i \in \Ical_u^+}\sum_{j \in \Ical_u^-}\ln\sigma(\hat{x}_{uij}) - \lambda_\Theta\norm{\Theta}^2 + \text{const}.
+$$
+
+Maximising it is minimising the logistic pairwise loss plus an $\ell_2$ penalty. See
+<NoteLink to="bayesian-personalised-ranking">Bayesian personalised ranking</NoteLink> for the model-specific updates.
+
+**The AUC.** The per-user <Gloss name="auroc" /> is the fraction of (positive, negative) pairs that the scores order
+correctly,
+
+$$
+\operatorname{AUC}(u) = \frac{1}{\abs{\Ical_u^+}\abs{\Ical_u^-}}\sum_{i \in \Ical_u^+}\sum_{j \in \Ical_u^-}\indicator[\hat{x}_{uij} > 0].
+$$
+
+This is the Wilcoxon–Mann–Whitney statistic, which equals the area under the ROC curve <Cite id="hanley1982" />.
+
+**Why BPR maximises a smoothed AUC.** Write $N_u = \abs{\Ical_u^+}\abs{\Ical_u^-}$ for the number of pairs. Then
+
+$$
+1 - \operatorname{AUC}(u) = \frac{1}{N_u}\sum_{i, j}\indicator[\hat{x}_{uij} \le 0].
+$$
+
+For every real $d$, $\indicator[d \le 0] \le \log_2(1 + e^{-d}) = -\ln\sigma(d)/\ln 2$. For $d \le 0$ the right side is
+at least $\log_2 2 = 1$; for $d > 0$ the left side is 0 and the right side is positive. Summing the inequality over
+pairs,
+
+$$
+1 - \operatorname{AUC}(u) \le \frac{1}{N_u\ln 2}\sum_{i, j}\paren{-\ln\sigma(\hat{x}_{uij})}.
+$$
+
+The right side is the BPR loss of user $u$, scaled by a constant. Minimising the BPR loss therefore minimises an upper
+bound on $1 - \operatorname{AUC}(u)$. Equivalently, BPR replaces the step function $\indicator[d > 0]$ inside the AUC
+by the smooth, increasing function $\ln\sigma(d)$ <Cite id="rendle2009bpr" />.
+
+The choice of $\ln\sigma$ over $\sigma$ matters for training. The smoothed AUC $\frac{1}{N_u}\sum\sigma(\hat{x}_{uij})$
+is also a smooth surrogate, but its derivative $\sigma(d)\,\sigma(-d)$ tends to 0 as $d \to -\infty$: a badly
+misordered pair receives almost no gradient. The derivative of $\ln\sigma(d)$ is $\sigma(-d)$, which tends to 1 for a
+badly misordered pair. The log form concentrates the gradient on the pairs that are wrong.
+
+The same argument, with $\indicator[d \le 0] \le \max(0, 1 - d)$ and $\indicator[d \le 0] \le e^{-d}$, shows that the
+hinge and exponential losses also bound $1 - \operatorname{AUC}$. Chen et al. showed more generally that the pairwise
+losses of RankSVM, RankBoost and RankNet upper-bound a measure-based ranking error that in turn bounds one
+minus <Gloss name="ndcg" /> and one minus mean average precision <Cite id="chen2009essential" />. These bounds are
+loose because each surrogate exceeds the 0–1 error it replaces on every pair, including pairs that are correctly
+ordered by only a small margin.
+
+## Position blindness
+
+A plain pairwise loss depends on $d_{ij}$ and not on where the pair sits in the ranking. A misordered pair at ranks 1
+and 2 costs the same as one at ranks 50 and 51 with the same score difference.
+<NoteLink to="recommendation-metrics">Ranking metrics</NoteLink> do not treat these equally. Under <Gloss name="ndcg" />
+the discount of rank $\rho$ is $1/\log_2(1 + \rho)$. For binary relevance, the swap at ranks 1 and 2 changes the
+discounted gain by $1 - 1/\log_2 3 = 0.369$, and the swap at ranks 50 and 51 by $1/\log_2 51 - 1/\log_2 52 = 0.00087$,
+426 times less.
+
+Counting pairwise errors can even prefer the worse ranking. Take ten items, two relevant. Ranking A places them at
+ranks 1 and 10: the item at rank 10 sits below eight irrelevant items, so A has 8 misordered pairs and NDCG 0.790.
+Ranking B places them at ranks 3 and 4: 4 misordered pairs and NDCG 0.571. The pairwise count prefers B; NDCG prefers
+A, because it rewards the item at the top. Burges illustrates the same effect: RankNet's gradients push the lower
+relevant item up hardest, while a top-heavy metric would rather push the upper one <Cite id="burges2010" />.
+
+Two remedies weight pairs by position. The Weighted Approximate-Rank Pairwise loss (WARP), below, weights each positive
+by a function of its own rank. <NoteLink to="lambda-gradients">LambdaRank</NoteLink> weights each pair's gradient by the
+change in NDCG from swapping the pair <Cite id="burges2006" />.
+
+## WARP: rank-weighted pairs by sampling
+
+WARP targets the top of the list in settings with a large catalogue and
+one or a few positives per example, such as image annotation and item recommendation <Cite id="weston2011wsabie" />.
+
+**The loss.** For a positive item $i$ with score $s_i$ and the negatives $j \in \Ical^-$, let the margin-violating rank
+be
+
+$$
+r_i = \sum_{j \in \Ical^-}\indicator[1 + s_j > s_i],
+$$
+
+the number of negatives that score within a margin of 1 of the positive, or above it. The loss of the positive is
+$L(r_i)$ with
+
+$$
+L(r) = \sum_{k = 1}^{r}\alpha_k, \qquad \alpha_1 \ge \alpha_2 \ge \dots \ge 0.
+$$
+
+Constant $\alpha_k$ makes $L(r)$ proportional to the rank, which is the AUC-type pair count. The choice
+$\alpha_k = 1/k$ makes $L(r)$ the harmonic number $H_r \approx \ln r + 0.577$, which penalises the first violations most
+and targets precision at the top of the list <Cite id="usunier2009owpc" />. To make the loss continuous, WARP replaces
+each indicator by a hinge and spreads the weight $L(r_i)$ evenly over the $r_i$ violators:
+
+$$
+\operatorname{err}(i) = \sum_{j \in \Ical^-}\frac{L(r_i)}{r_i}\max(0, 1 - s_i + s_j).
+$$
+
+**Rank estimation by sampling.** Computing $r_i$ costs a pass over the whole catalogue. WARP instead draws negatives
+uniformly at random until it finds a violator $j$, one with $1 + s_j > s_i$. Let $M^- = \abs{\Ical^-}$. Each draw
+violates with probability $r_i/M^-$, so the number of draws $N$ is geometric with mean $M^-/r_i$. WARP estimates the
+rank as $\hat{r}_i = \lfloor M^-/N \rfloor$ and takes a gradient step on
+
+$$
+L(\hat{r}_i)\,\max(0, 1 - s_i + s_j).
+$$
+
+The weight $L(\hat{r}_i)$ in place of $L(r_i)/r_i$ follows from how $j$ is chosen. The first violator found by
+uniform draws is a uniformly random violator. The sum $\operatorname{err}(i)$ has $r_i$ non-zero terms, each with
+weight $L(r_i)/r_i$. A single uniformly chosen term, multiplied by the $r_i$ terms it stands for, has expectation
+$\operatorname{err}(i)$, and $r_i \cdot L(r_i)/r_i = L(r_i)$ <Cite id="weston2011wsabie" />.
+
+**Behaviour.** With 1,000 negatives and $\alpha_k = 1/k$: a violator found on the first draw gives
+$\hat{r} = 1000$ and weight $H_{1000} = 7.49$; on the tenth draw, $\hat{r} = 100$ and weight $5.19$; on the 100th,
+$\hat{r} = 10$ and weight $2.93$. A positive already near the top gets small updates, and a positive buried deep gets
+large ones. Sampling is cheap early in training, when violators are common, and expensive late, when they are rare;
+implementations cap the number of draws and skip the positive when the cap is reached.
+
+## Constructing pairs
+
+Pairs come from labels or from behaviour.
+
+- **Graded labels.** Every pair of items in a query with different grades is a pair. Tied items form no pair.
+- **Clicks on a result page.** Joachims took a clicked result to be preferred to every unclicked result ranked above it,
+  which the user presumably read and skipped <Cite id="joachims2002clickthrough" />. Such pairs are relative judgements
+  within one impression and are less affected by <Gloss name="position-bias">position bias</Gloss> than raw clicks.
+- **Implicit feedback without impressions.** For a user $u$, pair each interacted item with a sampled item from
+  $\Ical_u^-$. The sampler decides which negatives the model learns from.
+
+**Negative samplers.**
+
+- **Uniform.** Each non-interacted item is equally likely. Most sampled items are obviously irrelevant, so late in
+  training $\sigma(-\hat{x}_{uij}) \approx 0$ for most pairs and most updates carry almost no gradient.
+- **Popularity-weighted.** Sample $j$ with probability proportional to $f_j^\beta$, with $f_j$ the item's interaction
+  count and $0 < \beta \le 1$. Popular items are harder negatives, and weighting corrects the tendency of a uniformly
+  trained model to rank popular items high. It also treats a popular item the user never saw as a stronger negative,
+  which it may not be.
+- **Hard negatives.** Dynamic negative sampling draws several candidates uniformly and keeps the one the current model
+  scores highest <Cite id="zhang2013dns" />. Adaptive oversampling picks negatives in proportion to their current rank
+  for the user <Cite id="rendle2014sampling" />. Both pick pairs with large gradients and converge faster. The hardest
+  negatives include items the user would like but has not found, which the loss then pushes down.
+
+The same samplers, with corrections for their bias, serve losses that use many negatives at once (see
+<NoteLink to="sampled-softmax-and-negative-sampling">sampled softmax and negative sampling</NoteLink>).
+
+**The quadratic number of pairs.** A query with $n$ items and all grades distinct has $n(n-1)/2$ pairs. In implicit
+feedback, user $u$ has $\abs{\Ical_u^+}\,(M - \abs{\Ical_u^+})$ pairs in a catalogue of $M$ items. Full enumeration is
+infeasible at catalogue scale, so training samples pairs. Summing over all pairs also weights a query by its number of
+pairs: a query with 100 items has 4,950 pairs, 110 times the 45 of a query with 10. Per-query normalisation, or sampling
+a fixed number of pairs per query or per user, restores equal weight.
+
+## Worked example
+
+User $u$ interacted with items $P_1$ and $P_2$ and not with $N_1$, $N_2$, $N_3$. The model scores are
+$s(P_1) = 1.2$, $s(N_1) = 0.8$, $s(N_2) = 0.1$, $s(P_2) = -0.4$, $s(N_3) = -1.0$, which is also the ranked order. There
+are $2 \times 3 = 6$ pairs.
+
+| Pair | $d_{ij}$ | $\sigma(d_{ij})$ | Logistic loss $-\ln\sigma(d_{ij})$ | Push $\sigma(-d_{ij})$ | Hinge $\max(0, 1 - d_{ij})$ |
+| --- | --- | --- | --- | --- | --- |
+| $P_1, N_1$ | $0.4$ | 0.599 | 0.513 | 0.401 | 0.6 |
+| $P_1, N_2$ | $1.1$ | 0.750 | 0.287 | 0.250 | 0 |
+| $P_1, N_3$ | $2.2$ | 0.900 | 0.105 | 0.100 | 0 |
+| $P_2, N_1$ | $-1.2$ | 0.232 | 1.463 | 0.769 | 2.2 |
+| $P_2, N_2$ | $-0.5$ | 0.377 | 0.974 | 0.623 | 1.5 |
+| $P_2, N_3$ | $0.6$ | 0.646 | 0.438 | 0.354 | 0.4 |
+
+**AUC.** Four of the six pairs are ordered correctly, so $\operatorname{AUC}(u) = 4/6 = 0.667$. The smoothed AUC, the
+mean of $\sigma(d_{ij})$, is $0.584$.
+
+**Bound.** The logistic loss sums to $3.780$. The bound gives
+$1 - \operatorname{AUC} \le 3.780/(6\ln 2) = 0.909$, which holds ($0.333 \le 0.909$) but is loose.
+
+**Per-item pushes.** The negative gradient $-\partial L/\partial s$ of the logistic loss adds each pair's push to the
+positive and subtracts it from the negative:
+
+- $P_1$: $0.401 + 0.250 + 0.100 = +0.751$; $P_2$: $0.769 + 0.623 + 0.354 = +1.745$.
+- $N_1$: $-(0.401 + 0.769) = -1.170$; $N_2$: $-0.872$; $N_3$: $-0.454$.
+
+The pushes sum to zero, because each pair pushes its two items by equal and opposite amounts. The hinge gives
+$P_1$: $+1$, $P_2$: $+3$, $N_1$: $-2$, $N_2$: $-1$, $N_3$: $-1$, from the four pairs inside the margin; the two pairs
+ordered by more than 1 contribute nothing.
+
+$P_2$ at rank 4 receives the largest push under both losses. $P_1$ at rank 1 still receives $+0.751$ from the logistic
+loss, because the pair $(P_1, N_1)$ is ordered by only $0.4$. Neither loss reads the ranks. The pushes would be the same
+if the five scores were shifted so that the items sat at ranks 50 to 54 of a longer list, where they matter far less
+to NDCG.
+
+<RankingLossLab initial="ranknet" losses={['ranknet', 'hinge', 'lambdarank', 'pointwise-bce']} />
+
+The figure shows one list of six items with graded labels. Drag an item's score up or down; the arrows show
+$-\partial L/\partial s$ for the chosen loss, and the lower panel shows the same push by rank. Compare the logistic and
+<Gloss name="hinge-loss">hinge losses</Gloss>: the hinge stops pushing a pair once it clears the margin. LambdaRank
+concentrates the push on the top ranks; the pointwise loss pushes each item towards its own label regardless of the
+others.
+
+## Assumptions
+
+- **Preferences are comparable within a query or user.** Pairs never cross queries, so labels need only be consistent
+  within a query.
+- **Pairs are independent.** BPR's likelihood multiplies pair probabilities. The pairs of one list share items, so
+  they are not independent, and the likelihood overcounts evidence from lists with many items.
+- **Non-interaction means lower preference.** In implicit feedback, the negative of a pair is an item the user did not
+  interact with, which mixes dislikes with items never seen.
+
+## Pitfalls
+
+- **Position blindness.** Minimising misordered pairs does not maximise top-heavy metrics such as NDCG or
+  <Gloss name="mrr" />; the ten-item example above shows the two can disagree.
+- **Queries with many items dominate.** Without per-query normalisation, the loss is weighted by the number of pairs
+  per query.
+- **Easy negatives stall training.** With uniform sampling, the logistic push $\sigma(-d)$ vanishes for most pairs
+  once the model is decent.
+- **<Gloss name="fn">False negatives</Gloss>.** Hard-negative samplers select exactly the unobserved items that look
+  most relevant, some of which the user would have liked.
+- **Scores are not calibrated.** A pairwise loss is invariant to adding a constant to all scores of a query, so the
+  scores are not probabilities. A system that needs click probabilities needs a pointwise loss or a calibration step.

@@ -14,10 +14,10 @@ updated: 2026-09-27
 
 <Definition>
 **Uniform manifold approximation and projection** (UMAP) embeds points $\xvec_1, \dots, \xvec_n$ as
-$\yvec_1, \dots, \yvec_n \in \reals^m$ <Cite id="mcinnes2018" />. It builds a symmetric weighted graph on the data,
-with weights $w_{ij} \in [0, 1]$ from each point's $k$ nearest neighbours, and a weighted graph on the embedding, with
-weights $v_{ij} = \paren{1 + a\norm{\yvec_i - \yvec_j}^{2b}}^{-1}$. It chooses the $\yvec_i$ to minimise the cross-entropy
-between the two sets of weights:
+$\yvec_1, \dots, \yvec_n \in \reals^m$ <Cite id="mcinnes2018" />. It builds a symmetric weighted graph on the data, with
+weights $w_{ij} \in [0, 1]$ from each point's $k$ nearest neighbours, and a weighted graph on the embedding, with
+weights $v_{ij} = \paren{1 + a\norm{\yvec_i - \yvec_j}^{2b}}^{-1}$. It chooses the $\yvec_i$ to minimise the
+cross-entropy between the two sets of weights:
 
 $$
 C = \sum_{i \ne j}\LB w_{ij}\log\frac{w_{ij}}{v_{ij}} + (1 - w_{ij})\log\frac{1 - w_{ij}}{1 - v_{ij}}\RB.
@@ -34,9 +34,10 @@ $i$ with neighbour distances $d_{i1} \le \dots \le d_{ik}$:
    $\sum_{j=1}^k\exp\paren{-(d_{ij} - \rho_i)/\sigma_i} = \log_2 k$.
 3. The directed weight from $i$ to its neighbour $j$ is $w_{j \mid i} = \exp\paren{-(d_{ij} - \rho_i)/\sigma_i}$.
 
-Subtracting $\rho_i$ gives every point a weight of exactly 1 to its nearest neighbour, so no point is isolated,
-however sparse its region. Scaling by $\sigma_i$ normalises the local distance scale, as t-SNE's perplexity does. The
-directed weights are combined by a fuzzy union, the probability that at least one of two <NoteLink to="independence">independent events</NoteLink> occurs:
+Subtracting $\rho_i$ gives every point a weight of exactly 1 to its nearest neighbour, so no point is isolated, however
+sparse its region. Scaling by $\sigma_i$ normalises the local distance scale, as t-SNE's perplexity does. The directed
+weights are combined by a fuzzy union, the probability that at least one of two <NoteLink to="independence">independent
+events</NoteLink> occurs:
 
 $$
 w_{ij} = w_{j \mid i} + w_{i \mid j} - w_{j \mid i}\,w_{i \mid j}.
@@ -44,20 +45,21 @@ $$
 
 ## The fuzzy simplicial set view
 
-McInnes, Healy and Melville justify these choices geometrically <Cite id="mcinnes2018" />. Assume the data lie
-uniformly on a manifold. If they do, then around each point there is a local metric in which the $k$ nearest
-neighbours lie within a <NoteLink to="vector-norms">unit ball</NoteLink>. Each point therefore defines its own rescaled distances, which is what $\rho_i$ and
-$\sigma_i$ do. The local views disagree, so each is represented as a fuzzy set of edges, a fuzzy simplicial set
-restricted to its 1-skeleton, with membership strengths $w_{j \mid i}$. The fuzzy union merges these local views into a
-single weighted graph. The embedding is a second fuzzy set of edges, and the cross-entropy between fuzzy sets is the
-loss. In practice the theory reduces to the weighted $k$-nearest-neighbour graph and the loss above.
+McInnes, Healy and Melville justify these choices geometrically <Cite id="mcinnes2018" />. Assume the data lie uniformly
+on a manifold. If they do, then around each point there is a local metric in which the $k$ nearest neighbours lie within
+a <NoteLink to="vector-norms">unit ball</NoteLink>. Each point therefore defines its own rescaled distances, which is
+what $\rho_i$ and $\sigma_i$ do. The local views disagree, so each is represented as a fuzzy set of edges, a fuzzy
+simplicial set restricted to its 1-skeleton, with membership strengths $w_{j \mid i}$. The fuzzy union merges these
+local views into a single weighted graph. The embedding is a second fuzzy set of edges, and the cross-entropy between
+fuzzy sets is the loss. In practice the theory reduces to the weighted $k$-nearest-neighbour graph and the loss above.
 
 ## The embedding graph and the loss
 
-The embedding weights $v_{ij} = (1 + a d^{2b})^{-1}$ generalise the Student-t kernel of <NoteLink to="t-distributed-stochastic-neighbour-embedding">t-SNE</NoteLink>,
-which is the case $a = b = 1$. The parameters are fitted so that $v$ approximates 1 for $d < \text{min\_dist}$ and
-$e^{-(d - \text{min\_dist})}$ beyond. The default `min_dist` of 0.1 gives $a = 1.577$ and $b = 0.895$. Smaller
-`min_dist` packs points of a cluster more tightly.
+The embedding weights $v_{ij} = (1 + a d^{2b})^{-1}$ generalise the Student-t kernel of
+<NoteLink to="t-distributed-stochastic-neighbour-embedding">t-SNE</NoteLink>, which is the case $a = b = 1$. The
+parameters are fitted so that $v$ approximates 1 for $d < \text{min\_dist}$ and $e^{-(d - \text{min\_dist})}$ beyond.
+The default `min_dist` of 0.1 gives $a = 1.577$ and $b = 0.895$. Smaller `min_dist` packs points of a cluster more
+tightly.
 
 The loss has two parts for each pair:
 
@@ -69,10 +71,10 @@ $w_{ij}\cdot 2a(\yvec_i - \yvec_j)/(1 + ad^2)$, from $\partial\log(1 + ad^2)$. T
 $-(1 - w_{ij})\cdot 2(\yvec_i - \yvec_j)/\paren{d^2(1 + ad^2)}$, from $\partial\LB\log(1 + ad^2) - \log(ad^2)\RB$. It
 diverges as $d \to 0$, so implementations add a small constant to $d^2$.
 
-Almost all pairs have $w_{ij} = 0$ and contribute only repulsion. UMAP never sums over them. It runs <Gloss name="sgd">stochastic
-gradient descent</Gloss> over the edges of the graph, sampling each edge in proportion to $w_{ij}$, and for each sampled edge it
-pushes $\yvec_i$ away from a few randomly chosen points. This **negative sampling** makes each epoch linear in the
-number of edges, $O(nk)$.
+Almost all pairs have $w_{ij} = 0$ and contribute only repulsion. UMAP never sums over them. It runs
+<Gloss name="sgd">stochastic gradient descent</Gloss> over the edges of the graph, sampling each edge in proportion to
+$w_{ij}$, and for each sampled edge it pushes $\yvec_i$ away from a few randomly chosen points. This **negative
+sampling** makes each epoch linear in the number of edges, $O(nk)$.
 
 ## Comparison with t-SNE
 
@@ -81,7 +83,7 @@ number of edges, $O(nk)$.
 | Data affinities | Gaussian, perplexity-calibrated, all pairs | Exponential on $k$-NN graph, offset by $\rho_i$ |
 | Symmetrisation | Average $(p_{j \mid i} + p_{i \mid j})/2n$ | Fuzzy union $a + b - ab$ |
 | Embedding kernel | $(1 + d^2)^{-1}$, normalised over all pairs | $(1 + ad^{2b})^{-1}$, not normalised |
-| Loss | $\KL(P \,\|\, Q)$ | Binary cross-entropy per edge |
+| Loss | $\KL(P \,\|\, Q)$ | <Gloss name="bce">Binary cross-entropy</Gloss> per edge |
 | Repulsion | Through the normaliser $Z$ | Explicit, by negative sampling |
 | Default initialisation | Random | Spectral (Laplacian eigenmaps) |
 | Cost per iteration | $O(n\log n)$ with Barnes–Hut | $O(nk)$ |
@@ -112,8 +114,8 @@ A point has $k = 4$ nearest neighbours at distances 1, 1.5, 2 and 3.
   manifold and show broader structure.
 - **min_dist.** The minimum spacing of points in the embedding. It changes how tightly clusters are drawn, not which
   points are neighbours.
-- **metric.** Any distance can define the $k$-nearest-neighbour graph, for example <NoteLink to="dot-product">cosine distance</NoteLink> for text
-  embeddings.
+- **metric.** Any distance can define the $k$-nearest-neighbour graph, for example <NoteLink to="dot-product">cosine
+  distance</NoteLink> for text embeddings.
 
 ## Pitfalls
 

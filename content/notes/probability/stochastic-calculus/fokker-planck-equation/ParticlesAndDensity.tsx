@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import {
+  Heatmap,
   Interactive,
   ParamChoice,
   ParamSlider,
@@ -7,6 +8,7 @@ import {
   XYChart,
   formatNumber,
   useParam,
+  type HeatmapOverlay,
   type XYSeries,
 } from '@/components/viz'
 import { rng } from '@/lib/math'
@@ -28,6 +30,11 @@ const FRAME = 0.05
 const FRAMES = Math.round(T_MAX / FRAME)
 const PARTICLES = 3000
 const START_SD = 0.15
+const DENSITY_RANGE: [number, number] = [0, 1.2]
+const TIMES = Array.from({ length: FRAMES + 1 }, (_, k) => k * FRAME)
+/** Every second grid point, for the density map under the trajectories. */
+const MAP_ROWS = GRID.map((_, i) => i).filter((i) => i % 2 === 0)
+const MAP_Y = MAP_ROWS.map((i) => GRID[i])
 
 /**
  * Solve ∂p/∂t = −∂(f p)/∂x + ½σ² ∂²p/∂x² on [−4, 4] with no-flux walls: a conservative finite-volume scheme with
@@ -105,6 +112,7 @@ export function ParticlesAndDensity() {
   const sigma = useParam(1, { min: 0.4, max: 1.5, step: 0.05 })
   const x0 = useParam(2.5, { min: -3, max: 3, step: 0.05 })
   const t = useParam(0.5, { min: 0, max: T_MAX, step: FRAME })
+  const count = useParam(20, { min: 1, max: 50, step: 1 })
 
   const { f, potential } = DRIFTS[model]
   const pde = useMemo(() => solveFokkerPlanck(f, sigma.value, x0.value), [f, sigma.value, x0.value])
@@ -126,12 +134,28 @@ export function ParticlesAndDensity() {
     return out
   }, [particles, pde, frame, potential, sigma.value])
 
+  // The Fokker–Planck density over (t, x), with the first particles' trajectories drawn over it. The particles share one
+  // random stream, so raising the count adds trajectories without changing the ones already drawn.
+  const densityMap = useMemo(() => MAP_ROWS.map((i) => pde.map((p) => p[i])), [pde])
+  const trajectories = useMemo<HeatmapOverlay[]>(
+    () =>
+      Array.from({ length: count.value }, (_, i) => ({
+        name: 'particle trajectories',
+        type: 'line',
+        x: TIMES,
+        y: particles.map((frameStates) => frameStates[i]),
+        slot: 2,
+        thin: count.value > 1,
+      })),
+    [particles, count.value],
+  )
+
   const pm = moments(particles[frame])
   const dm = moments(GRID, pde[frame])
   return (
     <Interactive
       title="Particles and the density they follow"
-      caption="Bars: a histogram of 3,000 particles simulated from the SDE dX = f(X) dt + σ dW, all released near x₀. Line: the density obtained by solving the Fokker–Planck equation numerically from the same start, with no simulation at all. The two agree at every time. With no drift the density spreads as the heat equation dictates; the spring pulls it to a fixed Gaussian; the double well splits it between two wells, and the dashed stationary density exp(−2U/σ²) is reached slowly when σ is small. Drag the vertical line at x₀ to release the particles elsewhere."
+      caption="Bars: a histogram of 3,000 particles simulated from the SDE dX = f(X) dt + σ dW, all released near x₀. Line: the density obtained by solving the Fokker–Planck equation numerically from the same start, with no simulation at all. The two agree at every time. With no drift the density spreads as the heat equation dictates; the spring pulls it to a fixed Gaussian; the double well splits it between two wells, and the dashed stationary density exp(−2U/σ²) is reached slowly when σ is small. Below, the numerical density over time and x, with the trajectories of some of the particles drawn over it as light lines; the paths slider sets how many. Each trajectory is rough, but together they fill the density. Drag the vertical line at x₀ to release the particles elsewhere, or the vertical line in the lower panel to move in time."
       controls={
         <>
           <ParamChoice
@@ -143,6 +167,7 @@ export function ParticlesAndDensity() {
           <ParamSlider label="time t" param={t} withArrows />
           <ParamSlider label="noise σ" param={sigma} />
           <ParamSlider label="start x₀" param={x0} />
+          <ParamSlider label="paths" param={count} withArrows format={(v) => String(v)} />
         </>
       }
       readout={
@@ -162,6 +187,18 @@ export function ParticlesAndDensity() {
         xRange={[-L, L]}
         yRange={[0, 1.2]}
         handles={[{ kind: 'x', at: x0.value, label: 'x₀', onDrag: (x) => x0.set(x) }]}
+      />
+      <Heatmap
+        x={TIMES}
+        y={MAP_Y}
+        z={densityMap}
+        xLabel="t"
+        yLabel="x"
+        range={DENSITY_RANGE}
+        overlay={trajectories}
+        handles={[{ kind: 'x', at: t.value, label: 't', onDrag: (v) => t.set(v) }]}
+        valueLabel="density p_t(x)"
+        height={260}
       />
     </Interactive>
   )

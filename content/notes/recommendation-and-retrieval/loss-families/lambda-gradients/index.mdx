@@ -1,0 +1,314 @@
+---
+title: Lambda gradients
+kind: technique
+summary: 'Lambda gradients train a ranker on a non-differentiable metric by scaling the RankNet gradient of each pair by $\abs{\Delta \text{NDCG}}$, the metric change from swapping the pair. LambdaRank applies them to neural networks, LambdaMART to boosted trees; LambdaLoss gives the implied loss.'
+tags: [loss-functions, ranking, learning-to-rank, information-retrieval, recommender-systems, worked-example]
+aliases: [LambdaRank, LambdaMART, LambdaLoss, lambdas, ΔNDCG weighting, metric-weighted pairwise gradients, NDCG-Loss2]
+requires: [pairwise-ranking-losses, normalised-discounted-cumulative-gain]
+partOf: [recommendation-loss-families]
+related: [ranking-losses, listwise-ranking-losses, gradient-boosting, mean-average-precision-and-mean-reciprocal-rank, recommendation-metrics, newtons-method]
+references: [burges2005, burges2006, burges2010, donmez2009lambdarank, wu2010lambdamart, wang2018lambdaloss, chapelle2009err, jarvelin2002]
+status: draft
+updated: 2026-09-30
+---
+
+import { RankingLossLab } from '../_shared/RankingLossLab'
+
+<Definition>
+**Lambda gradients** are per-item training signals for a ranker that stand in for the gradient of a ranking metric. For
+a pair of items $(i, j)$ in one query with item $i$ more relevant and score difference $d_{ij} = s_i - s_j$, the lambda
+is the <Gloss name="ranknet" /> pair gradient multiplied by the absolute change $\abs{\Delta Z_{ij}}$ in the metric $Z$
+caused by swapping the ranks of $i$ and $j$:
+
+$$
+\lambda_{ij} = -\sigma(-d_{ij})\,\abs{\Delta Z_{ij}}, \qquad \lambda_i = \sum_{j:\, i \succ j}\lambda_{ij} - \sum_{j:\, j \succ i}\lambda_{ji},
+$$
+
+with $\sigma$ the logistic function and $i \succ j$ meaning $i$ is labelled more relevant than $j$. **LambdaRank**
+trains a neural network by using $\lambda_i$ as $\partial C/\partial s_i$ <Cite id="burges2006" />; **LambdaMART**
+fits gradient-boosted regression trees to them <Cite id="wu2010lambdamart" />.
+</Definition>
+
+## Problem
+
+Ranking systems are judged by metrics such as <Gloss name="ndcg" />, <Gloss name="mean-average-precision" />,
+<Gloss name="mrr" /> and <Gloss name="err-metric" />. Each depends on the scores only through their sort order. For a
+query with items $i = 1, \dots, n$, graded labels $r_i$, gains $g_i = 2^{r_i} - 1$ and ranks $\rho_i$ (1 for the top),
+
+$$
+\operatorname{NDCG} = \frac{1}{\operatorname{IDCG}}\sum_{i = 1}^n g_i\,D(\rho_i), \qquad D(\rho) = \frac{1}{\log_2(1 + \rho)},
+$$
+
+where IDCG is the <Gloss name="dcg" /> of the ideal order <Cite id="jarvelin2002" />. A change in the scores small
+enough not to swap two items leaves every $\rho_i$, and so NDCG, unchanged. NDCG is piecewise constant in the scores.
+Its gradient is zero almost everywhere and undefined where two scores tie, so <NoteLink to="gradient-descent">gradient
+descent</NoteLink> on NDCG does not move.
+
+A smooth pairwise surrogate such as RankNet's logistic loss has useful gradients but is blind to position: a misordered
+pair at ranks 1 and 2 costs the same as one at ranks 50 and 51 with the same score difference (see
+<NoteLink to="pairwise-ranking-losses">pairwise ranking losses</NoteLink>). Swapping the first pair changes the metric
+far more. Lambda gradients keep RankNet's smooth dependence on the scores and borrow the metric's dependence on the
+ranks.
+
+## Mechanism
+
+### The change in NDCG from a swap
+
+DCG is a sum of one term per item, $g_k D(\rho_k)$. Swapping the ranks of items $i$ and $j$ gives item $i$ the
+discount $D(\rho_j)$ and item $j$ the discount $D(\rho_i)$, and changes no other term. The change is
+
+$$
+\Delta\operatorname{DCG}_{ij} = g_i D(\rho_j) + g_j D(\rho_i) - g_i D(\rho_i) - g_j D(\rho_j) = (g_i - g_j)\paren{D(\rho_j) - D(\rho_i)}.
+$$
+
+Dividing by IDCG, which does not depend on the order,
+
+$$
+\abs{\Delta\operatorname{NDCG}_{ij}} = \frac{\abs{g_i - g_j}\,\abs{D(\rho_i) - D(\rho_j)}}{\operatorname{IDCG}}.
+$$
+
+The weight is a product of a label factor and a position factor. Pairs with equal labels get weight zero. Pairs whose
+labels differ a lot, and pairs that straddle the top of the list where $D$ falls steeply, get large weight. For binary
+labels, a swap of ranks 1 and 2 has position factor $1 - 1/\log_2 3 = 0.369$; a swap of ranks 50 and 51 has
+$0.00087$.
+
+### The lambda for a pair
+
+RankNet's loss for a pair with $i \succ j$ is $C_{ij} = \ln(1 + e^{-d_{ij}})$, the cross-entropy of the event "$i$ above
+$j$" under $P_{ij} = \sigma(d_{ij})$ <Cite id="burges2005" />. Its <NoteLink to="derivative">derivative</NoteLink> is
+
+$$
+\frac{\partial C_{ij}}{\partial s_i} = \frac{-e^{-d_{ij}}}{1 + e^{-d_{ij}}} = -\sigma(-d_{ij}), \qquad \frac{\partial C_{ij}}{\partial s_j} = \sigma(-d_{ij}).
+$$
+
+The pair's gradient is a force of size $\sigma(-d_{ij}) \in (0, 1)$ that pushes $s_i$ up and $s_j$ down: close to 1 when
+the pair is badly misordered, close to 0 when it is ordered by a wide margin.
+
+LambdaRank multiplies that force by the swap's effect on the metric <Cite id="burges2006" />:
+
+$$
+\lambda_{ij} = \frac{\partial C_{ij}}{\partial s_i}\,\abs{\Delta\operatorname{NDCG}_{ij}} = -\sigma(-d_{ij})\,\abs{\Delta\operatorname{NDCG}_{ij}}.
+$$
+
+The per-item lambda $\lambda_i$ sums the pairs in which item $i$ takes part, with sign $+$ when $i$ is the more
+relevant item and $-$ when it is the less relevant one. The model then takes the step it would take if $\lambda_i$ were
+$\partial C/\partial s_i$ for a cost $C$: for a network with weights $\wvec$,
+
+$$
+\wvec \leftarrow \wvec - \eta\sum_i \lambda_i\frac{\partial s_i}{\partial\wvec},
+$$
+
+with step size $\eta$. The ranks $\rho_i$ in $\abs{\Delta\operatorname{NDCG}_{ij}}$ are recomputed by sorting the
+current scores at every step. A scale parameter on $d_{ij}$, often written $\sigma$ in the LambdaRank papers, is
+absorbed into the scores here.
+
+### Empirical test of local optimality
+
+LambdaRank was defined by its gradients, not by a loss. Burges et al. tested it empirically. After training, they moved
+the weights a small distance in <NoteLink to="sampling-a-disk-or-sphere">random directions</NoteLink> and measured mean
+NDCG on the training set. If NDCG decreases in every one of $n$ random directions, then with confidence $1 - \delta$ the
+fraction of ascent directions is below $p_0$ once $n \ge \log\delta/\log(1 - p_0)$; with $\delta = p_0 = 0.01$ this
+needs 459 directions <Cite id="burges2010" />. Donmez et al. ran this test for NDCG, MAP and MRR and found no ascent
+direction for any of them, so with 99% confidence fewer than 1% of directions increase each metric at the trained
+weights <Cite id="donmez2009lambdarank" />. The test bounds the share of ascent directions; it does not prove a local
+optimum.
+
+### The implied loss
+
+At fixed ranks, the lambdas are the gradient of
+
+$$
+C = \sum_{i \succ j}\abs{\Delta\operatorname{NDCG}_{ij}}\ln(1 + e^{-d_{ij}}),
+$$
+
+a RankNet loss with pair weights. The weights depend on the ranks, which depend on the scores, so this $C$ changes
+whenever two scores cross. Whether a single function has the lambdas as its gradient everywhere was an open question
+<Cite id="burges2010" />.
+
+The **LambdaLoss** framework answers it <Cite id="wang2018lambdaloss" />. It treats the ranked list $\pi$ as a hidden
+variable and defines the loss of a query with labels $\yvec$ as the negative log-likelihood of a mixture,
+
+$$
+\ell(\yvec, \svec) = -\log_2\sum_\pi P(\yvec \mid \svec, \pi)\,P(\pi \mid \svec).
+$$
+
+Take $P(\pi \mid \svec)$ to put all its mass on the list sorted by score, and let each pair's likelihood depend on
+the ranks in $\pi$ through an exponent,
+
+$$
+P(i \succ j \mid s_i, s_j, \pi) = \sigma(d_{ij})^{\abs{\Delta\operatorname{NDCG}_{ij}}}.
+$$
+
+Minimising this loss by the <Gloss name="em-algorithm" /> algorithm alternates two steps. The E-step sorts the items by
+the current scores. The M-step minimises
+$-\sum_{i \succ j}\log_2\sigma(d_{ij})^{\abs{\Delta\operatorname{NDCG}_{ij}}} = \sum_{i \succ j}\abs{\Delta\operatorname{NDCG}_{ij}}\log_2(1 + e^{-d_{ij}})$
+with the ranks held fixed, which is LambdaRank's weighted RankNet loss. LambdaRank is therefore EM on a well-defined
+loss, and LambdaMART's practice of adding one tree per round to the previous model is a warm-started M-step
+<Cite id="wang2018lambdaloss" />.
+
+The framework also shows how tightly the loss tracks NDCG. Wang et al. proved that the LambdaRank loss upper-bounds a
+metric that is itself at least the NDCG cost $1 - \text{NDCG}$, so LambdaRank minimises a coarse upper bound of
+$1 - \text{NDCG}$. They derived a tighter bound, NDCG-Loss2, which replaces the position factor
+$\abs{D(\rho_i) - D(\rho_j)}$ by
+$\delta_{ij} = \abs{D(\abs{\rho_i - \rho_j}) - D(\abs{\rho_i - \rho_j} + 1)}$, a factor that depends on how far apart
+the two items sit rather than on where they sit <Cite id="wang2018lambdaloss" />.
+
+<Derivation title="Why NDCG-Loss2 bounds the NDCG cost">
+Write $G_k = g_k/\operatorname{IDCG}$ for the normalised gain and label the items by their current ranks, so item $k$
+has rank $k$ and $D_k = D(k)$. Define the NDCG cost here as the shortfall from the constant $\sum_k G_k$. It differs
+from $1 - \text{NDCG}$ by the constant $\sum_k G_k - 1$, so it has the same gradient and the same minimisers:
+
+$$
+\text{NDCG}_\text{cost} = \sum_k G_k - \text{NDCG} = \sum_k G_k\paren{1 - D_k}.
+$$
+
+The factor $1 - D_k$ telescopes over the gaps to the items above $k$. With
+$\delta_{kl} = \abs{D(\abs{k - l}) - D(\abs{k - l} + 1)}$ and $D(1) = 1$,
+
+$$
+\sum_{l = 1}^{k - 1}\delta_{kl} = \sum_{m = 1}^{k - 1}\paren{D(m) - D(m + 1)} = D(1) - D(k) = 1 - D_k.
+$$
+
+Item $l$ sits above item $k$ exactly when $s_l > s_k$, so
+
+$$
+\text{NDCG}_\text{cost} = \sum_k G_k\sum_l \delta_{kl}\,\indicator[s_k < s_l].
+$$
+
+Group the terms by unordered pair. For a pair with $y_k > y_l$ and no tie in scores, exactly one of the two indicators
+is 1, so the pair contributes
+$\delta_{kl}\paren{G_k\indicator[s_k < s_l] + G_l\indicator[s_l < s_k]} = \delta_{kl}G_l + \delta_{kl}(G_k - G_l)\indicator[s_k < s_l]$.
+Pairs with equal labels contribute a term that does not depend on which of the two is on top. At fixed ranks the
+$\delta_{kl}$ are constants, so
+
+$$
+\text{NDCG}_\text{cost} = \sum_{y_k > y_l}\delta_{kl}\abs{G_k - G_l}\,\indicator[s_k < s_l] + \text{const}
+\le \sum_{y_k > y_l}\delta_{kl}\abs{G_k - G_l}\log_2(1 + e^{-(s_k - s_l)}) + \text{const},
+$$
+
+using $\indicator[d < 0] \le \log_2(1 + e^{-d})$. The right side is NDCG-Loss2. Replacing $\delta_{kl}$ by
+$\rho_{kl} = \abs{D_k - D_l}$ gives LambdaRank. Since
+$\sum_{l < k}\rho_{kl} \ge \rho_{k1} = 1 - D_k = \sum_{l < k}\delta_{kl}$, the LambdaRank weights sum to more than the
+NDCG cost needs, which is why its bound is the coarser one <Cite id="wang2018lambdaloss" />.
+</Derivation>
+
+### LambdaMART
+
+<NoteLink to="gradient-boosting">Gradient boosting</NoteLink> with regression trees (MART) builds a model
+$F(\xvec) = \sum_m f_m(\xvec)$ one tree at a time, fitting each tree to the negative gradient of the loss at the
+current scores. MART never needs the loss itself, only its first and second derivatives with respect to each score.
+Lambda gradients supply exactly that, so LambdaMART is MART with $-\lambda_i$ as the regression targets
+<Cite id="wu2010lambdamart" />.
+
+Each tree's leaf values come from a <NoteLink to="newtons-method">Newton step</NoteLink>. With
+$\pi_{ij} = \sigma(-d_{ij})$, the second derivative of the implied cost at fixed ranks is
+
+$$
+w_i = \frac{\partial^2 C}{\partial s_i^2} = \sum_{j \ne i,\, r_j \ne r_i}\abs{\Delta\operatorname{NDCG}_{ij}}\,\pi_{ij}(1 - \pi_{ij}),
+$$
+
+using $\tfrac{d}{dd}\sigma(-d) = -\sigma(-d)\paren{1 - \sigma(-d)}$. The value of leaf $R$ is
+$\gamma_R = -\sum_{i \in R}\lambda_i \big/ \sum_{i \in R}w_i$, shrunk by a learning rate <Cite id="burges2010" />.
+Per pair, the gradient is proportional to $\pi_{ij}$ and the curvature to $\pi_{ij}(1 - \pi_{ij})$, so their ratio is
+$1/(1 - \pi_{ij})$. It is near 1 for a confidently ordered pair ($\pi_{ij}$ near 0) and large for a confidently
+misordered pair ($\pi_{ij}$ near 1), whose gradient stays large while its curvature vanishes. Leaves dominated by
+misordered pairs therefore take the largest steps.
+
+An ensemble of LambdaMART rankers won Track 1 of the 2010 Yahoo! <Gloss name="ltr">Learning to Rank</Gloss> Challenge
+<Cite id="burges2010" />.
+
+### Other metrics
+
+The construction needs only the metric change from a swap, so it transfers to other metrics by replacing
+$\abs{\Delta\operatorname{NDCG}_{ij}}$ <Cite id="donmez2009lambdarank" />.
+
+- **NDCG@$k$.** Positions below $k$ have discount 0. A pair with both items below $k$ has weight 0 and gives no
+  gradient; a pair straddling position $k$ gets the full discount of the upper item.
+- **Reciprocal rank (MRR).** With binary labels, reciprocal rank is $1/\rho^\ast$, where $\rho^\ast$ is the rank of the
+  first relevant item. A swap changes it only if it changes $\rho^\ast$, so every pair entirely below the first relevant
+  item has weight 0.
+- **<Gloss name="ap">Average precision</Gloss> (MAP).** A swap between ranks $\rho_i < \rho_j$ changes the precision at
+  every relevant item between them, so $\Delta\text{AP}_{ij}$ depends on the items in between.
+- **ERR.** Expected reciprocal rank models a user who reads down the list and is satisfied by item $k$, once reached,
+  with probability $R_k = (2^{r_k} - 1)/2^{r_{\max}}$ <Cite id="chapelle2009err" />. The change from a swap also depends
+  on every item between the two. Burges showed that all the $\Delta\text{ERR}_{ij}$ of a query can still be computed in
+  $O(n^2)$ with cumulative products and partial sums, and that $\Delta\text{ERR}_{ij} \ge 0$ whenever the more relevant
+  item moves up <Cite id="burges2010" />.
+
+## Worked example
+
+One query has four items, sorted by score:
+
+| Item | Score $s$ | Label $r$ | Gain $g$ | Rank $\rho$ | Discount $D(\rho)$ |
+| --- | --- | --- | --- | --- | --- |
+| A | 1.5 | 0 | 0 | 1 | 1.000 |
+| B | 1.0 | 2 | 3 | 2 | 0.631 |
+| C | 0.2 | 1 | 1 | 3 | 0.500 |
+| D | $-0.5$ | 0 | 0 | 4 | 0.431 |
+
+$\operatorname{DCG} = 3(0.631) + 1(0.5) = 2.393$. The ideal order B, C, A, D gives
+$\operatorname{IDCG} = 3 + 1/\log_2 3 = 3.631$, so $\operatorname{NDCG} = 0.659$. The pairs with different labels are:
+
+| Pair ($i \succ j$) | $d_{ij}$ | RankNet push $\sigma(-d_{ij})$ | $\abs{\Delta\operatorname{NDCG}_{ij}}$ | Lambda push $\sigma(-d_{ij})\abs{\Delta\operatorname{NDCG}_{ij}}$ |
+| --- | --- | --- | --- | --- |
+| B, A | $-0.5$ | 0.622 | 0.305 | 0.190 |
+| B, C | $0.8$ | 0.310 | 0.072 | 0.022 |
+| B, D | $1.5$ | 0.182 | 0.166 | 0.030 |
+| C, A | $-1.3$ | 0.786 | 0.138 | 0.108 |
+| C, D | $0.7$ | 0.332 | 0.019 | 0.006 |
+
+Check one weight: swapping B and A puts B at rank 1 and A at rank 2, so DCG becomes $3 + 0.5 = 3.5$ and NDCG
+$0.964$, a change of $0.305$. By the formula,
+$\abs{3 - 0}\cdot\abs{1 - 0.631}/3.631 = 0.305$.
+
+Summing each item's pushes gives $-\lambda_i$, the direction a gradient step moves its score:
+
+| Item | RankNet $-\partial C/\partial s$ | LambdaRank $-\lambda$ |
+| --- | --- | --- |
+| A | $-1.408$ | $-0.298$ |
+| B | $+1.115$ | $+0.242$ |
+| C | $+0.808$ | $+0.092$ |
+| D | $-0.514$ | $-0.037$ |
+
+RankNet pushes C up with 72% of the force it applies to B. LambdaRank pushes C with 38% of B's force. The pair
+(C, A) is RankNet's most misordered pair ($d = -1.3$), but lifting C above A gains less NDCG than lifting B above A,
+because B has three times C's gain. LambdaRank also nearly ignores the pair (C, D) at ranks 3 and 4, whose swap changes
+NDCG by only 0.019.
+
+**Newton weights.** The LambdaMART curvatures are $w = (0.095, 0.112, 0.043, 0.029)$ for A to D. A tree leaf holding
+only item B would take the value $0.242/0.112 = 2.17$ before shrinkage.
+
+**Reciprocal rank.** With binary labels and relevant items at ranks 3 and 5 of five, reciprocal rank is $1/3$. Swapping
+the item at rank 3 with the one at rank 1 raises it to 1 ($\Delta = 0.667$); with the one at rank 2, to $1/2$
+($\Delta = 0.167$). Swapping the relevant item at rank 5 with the irrelevant one at rank 4 leaves the first relevant
+item at rank 3, so $\Delta = 0$ and that pair gets no lambda under ΔMRR, although RankNet still pushes it.
+
+<RankingLossLab initial="lambdarank" losses={['lambdarank', 'ranknet']} />
+
+The figure shows one list of six items with graded labels. Drag an item's score; the arrows show $-\lambda_i$ for
+LambdaRank or $-\partial C/\partial s_i$ for RankNet, and the lower panel shows the same push by rank. Drag a relevant
+item from the bottom to the top and watch the LambdaRank pushes concentrate on the top ranks while the RankNet pushes
+stay spread over every misordered pair.
+
+## Cost
+
+A query with $n$ items needs one sort, $O(n \log n)$, and one $\abs{\Delta\operatorname{NDCG}_{ij}}$ per pair with
+different labels, $O(n^2)$ in the worst case. Each $\abs{\Delta\operatorname{NDCG}_{ij}}$ is $O(1)$ once the ranks and
+IDCG are known. $\Delta\text{AP}$ and $\Delta\text{ERR}$ need prefix sums to stay $O(n^2)$. The model still takes one
+backward pass per item, because the pair terms are summed into $\lambda_i$ before back-propagation
+<Cite id="burges2010" />. LambdaMART adds no cost to MART beyond computing the lambdas and curvatures at each round.
+
+## Trade-offs
+
+- **Metric alignment against smoothness.** The weights change discontinuously when two scores cross, so the effective
+  objective shifts during training. LambdaLoss casts the procedure as EM on a fixed loss, and a full M-step never
+  increases that loss. LambdaRank and LambdaMART take one gradient step or add one tree per round instead of a full
+  M-step, and the loss is not convex, so neither is guaranteed to converge to an optimum.
+- **Dependence on the current ranking.** Early in training the ranking is poor, so the $\abs{\Delta Z}$ weights target
+  the wrong positions until the ranking improves.
+- **Truncated metrics starve the tail.** Under NDCG@$k$ the items that sit well below $k$ receive no gradient from
+  pairs among themselves, so a relevant item that starts deep in the list may never rise.
+- **Graded labels help most.** With one relevant item per list, $\abs{g_i - g_j}$ is the same for every pair and the
+  weight reduces to the position factor, so lambdas only reweight by rank.
+- **The metric is chosen at training time.** Lambdas for NDCG optimise NDCG; a system evaluated by MRR or ERR needs
+  the matching $\Delta Z$.

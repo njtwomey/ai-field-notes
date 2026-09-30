@@ -19,7 +19,7 @@ const BETA = 25
 const MAX_POINTS = 20
 const GRID = linspace(-1, 1, 41)
 const LINE_X = [-1, 1]
-const SAMPLES = 6
+const MAX_SAMPLES = 50
 
 /**
  * Sequential Bayesian learning of a straight line y = w₀ + w₁x. The posterior over (w₀, w₁) after n points is the
@@ -27,6 +27,7 @@ const SAMPLES = 6
  */
 export function SequentialLearning() {
   const n = useParam(0, { min: 0, max: MAX_POINTS, step: 1 })
+  const count = useParam(6, { min: 1, max: MAX_SAMPLES, step: 1 })
   // Seed 2 starts with typical points; seed 1 opens with a 3.4σ outlier, a misleading first step.
   const [seed, setSeed] = useState(2)
   const [truth, setTruth] = useState<[number, number]>([-0.3, 0.5])
@@ -77,23 +78,29 @@ export function SequentialLearning() {
       [c / det, -b / det],
       [-b / det, a / det],
     ]
-    const l = cholesky(cov)
-    const g = rng(1000 + seed)
-    const lines = Array.from({ length: SAMPLES }, () => {
+    return { post, z: density(post), prior: density(prior), likelihood, cov, last }
+  }, [data])
+
+  // Sample k uses its own stream, so raising the count adds lines without moving the earlier ones.
+  const lines = useMemo(() => {
+    const l = cholesky(r.cov)
+    return Array.from({ length: count.value }, (_, k) => {
+      const g = rng((1000 + seed) * 1000 + k)
       const [z0, z1] = [g.normal(), g.normal()]
-      return [post.mean[0] + l[0][0] * z0, post.mean[1] + l[1][0] * z0 + l[1][1] * z1]
+      return [r.post.mean[0] + l[0][0] * z0, r.post.mean[1] + l[1][0] * z0 + l[1][1] * z1]
     })
-    return { post, z: density(post), prior: density(prior), likelihood, cov, lines, last }
-  }, [data, seed])
+  }, [r, seed, count.value])
+  const many = lines.length > 1
 
   const series: XYSeries[] = [
     // One shared name, so the legend shows a single entry that toggles every sample.
-    ...r.lines.map((w): XYSeries => ({
+    ...lines.map((w): XYSeries => ({
       name: 'samples from the posterior',
       type: 'line',
       x: LINE_X,
       y: LINE_X.map((x) => w[0] + w[1] * x),
-      muted: true,
+      slot: 0,
+      thin: many,
     })),
     {
       name: 'true line',
@@ -141,10 +148,11 @@ export function SequentialLearning() {
   return (
     <Interactive
       title="Learning a line one point at a time"
-      caption="Bayes' theorem one point at a time, over the intercept w₀ and slope w₁ (dark = probable), with prior N(0, 0.5 I) and noise precision β = 25. Top left: the prior, which is the posterior from the earlier points. Top right: the likelihood of the newest point, a band of lines passing near it. Bottom left: their product, the new posterior. Bottom right: lines drawn from the posterior, with the newest point marked. Step through the points with the arrows; each posterior becomes the next prior. Drag the true weights on the posterior to move the line that generates the data."
+      caption="Bayes' theorem one point at a time, over the intercept w₀ and slope w₁ (dark = probable), with prior N(0, 0.5 I) and noise precision β = 25. Top left: the prior, which is the posterior from the earlier points. Top right: the likelihood of the newest point, a band of lines passing near it. Bottom left: their product, the new posterior. Bottom right: lines drawn from the posterior (light; the draws slider sets how many), with the newest point marked. Step through the points with the arrows; each posterior becomes the next prior. Drag the true weights on the posterior to move the line that generates the data."
       controls={
         <>
           <ParamSlider label="points observed" param={n} format={(v) => String(v)} withArrows />
+          <ParamSlider label="draws" param={count} withArrows format={(v) => String(v)} />
           <ParamSlider label="seed" value={seed} onChange={setSeed} min={1} max={20} step={1} />
         </>
       }

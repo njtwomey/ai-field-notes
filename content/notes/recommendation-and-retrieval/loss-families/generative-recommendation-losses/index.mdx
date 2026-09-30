@@ -1,0 +1,295 @@
+---
+title: Generative recommendation losses
+kind: concept
+summary: 'Generative recommenders minimise the cross-entropy of the next item''s identifier tokens, $-\sum_m \log p(z_m \mid z_{<m}, h)$, an item softmax factorised like a hierarchical softmax. An RQ-VAE learns the identifiers; LLM recommenders add next-token and preference losses.'
+tags: [recommender-systems, generative-models, loss-functions, retrieval, large-language-models, worked-example]
+aliases: [semantic ID loss, RQ-VAE loss, residual-quantised variational autoencoder, TIGER loss, HSTU, generative recommenders, sequential transduction, S-DPO, softmax direct preference optimisation, constrained decoding for recommendation, invalid item IDs]
+requires: [generative-retrieval-for-recommendation, cross-entropy-and-perplexity, additive-and-residual-quantisation]
+partOf: [recommendation-loss-families]
+related: [sequential-recommendation-losses, language-models-as-recommenders, vector-quantised-variational-autoencoder, two-tower-model, reinforcement-learning-from-human-feedback, plackett-luce-model, bayesian-personalised-ranking, decoding-strategies]
+references: [rajput2023tiger, lee2022rqvae, oord2017, bengio2013b, morin2005, tay2022dsi, yi2019sampling, zhai2024hstu, geng2022p5, bao2023tallrec, rafailov2023, chen2024sdpo, deng2025onerec]
+status: draft
+updated: 2026-09-30
+---
+
+<Definition>
+A **generative recommender** represents each item $i$ by a sequence of $m$ discrete tokens, its identifier
+$(z_1, \ldots, z_m)$, and trains a sequence model to generate the identifier of the next item from the user's history
+$h$. The training loss is the cross-entropy of the identifier's tokens,
+$-\sum_{l=1}^{m}\log p_\theta(z_l \mid z_{<l}, h)$, which equals $-\log p_\theta(i \mid h)$. The identifiers themselves
+are usually learned first, by a residual-quantised autoencoder whose loss combines reconstruction, codebook and
+commitment terms <Cite id="rajput2023tiger" />. Recommenders built on large language models add next-token losses on
+item text and preference losses such as <Gloss name="dpo" />.
+</Definition>
+
+## From an item softmax to a token softmax
+
+A discriminative next-item model scores all $\abs{\Ical}$ items and normalises with a softmax, which costs
+$O(\abs{\Ical})$ per prediction or a sampled approximation. A generative model writes the item instead. Suppose each
+item has a distinct identifier of $m$ tokens, each token drawn from a vocabulary of $K$ codes. The map from items to
+identifiers is one-to-one, so the probability of an item is the probability of its identifier. By the chain rule of
+probability,
+
+$$
+p_\theta(i \mid h) = p_\theta(z_1, \ldots, z_m \mid h) = \prod_{l=1}^{m} p_\theta(z_l \mid z_1, \ldots, z_{l-1}, h).
+$$
+
+The logarithm turns the product into a sum, so the item's negative log-likelihood is the sum of token cross-entropies:
+
+$$
+\mathcal{L}(i, h) = -\log p_\theta(i \mid h) = -\sum_{l=1}^{m}\log p_\theta(z_l \mid z_{<l}, h).
+$$
+
+Each factor is a softmax over $K$ codes with logits $o_{l,c}$, so its gradient is the familiar
+$\partial\mathcal{L}/\partial o_{l,c} = p_\theta(c \mid z_{<l}, h) - \indicator[c = z_l]$. Training is
+<Gloss name="teacher-forcing">teacher forcing</Gloss>: the true prefix $z_{<l}$ is fed in at every step, and all $m$
+levels are trained in one pass.
+
+Three consequences follow.
+
+- **The loss is exact, not sampled.** Each level normalises over all $K$ codes, so no negatives are drawn and no
+  <Gloss name="logq-correction">logQ correction</Gloss> is needed, unlike
+  <NoteLink to="sampled-softmax-and-negative-sampling">sampled softmax</NoteLink>. The cost per item is $O(mK)$. With
+  $K = 256$ and $m = 4$ that is 1,024 logits, and the code space holds $256^4 \approx 4.3 \times 10^9$ identifiers.
+- **It is a hierarchical softmax.** The identifiers are paths in a tree of depth $m$ and branching $K$, and the item
+  probability is the product of the branch probabilities along its path. This is the hierarchical softmax of Morin and
+  Bengio, which replaced a flat softmax over a vocabulary by a product of choices down a tree
+  <Cite id="morin2005" />. Items that share a prefix share the probability mass
+  and the <NoteLink to="gradient">gradient</NoteLink> of that prefix, so the tree decides which items the model can
+  tell apart cheaply.
+- **Probability leaks to invalid identifiers.** The product defines a distribution over all $K^m$ code tuples, and most
+  of them name no item. The mass the model puts on them is lost, and decoding can return them
+  <Cite id="rajput2023tiger" />.
+
+## Semantic IDs and the RQ-VAE loss
+
+**<NoteLink to="generative-retrieval-for-recommendation">Semantic IDs</NoteLink>** make the tree meaningful: similar
+items get identifiers with a common prefix. <Gloss name="tiger" /> computes a content embedding $\xvec \in \reals^{768}$
+for each item from its text with a pre-trained sentence encoder and quantises it with a **residual-quantised variational
+autoencoder** (RQ-VAE) <Cite id="rajput2023tiger" />, introduced for image generation by Lee et al.
+<Cite id="lee2022rqvae" />. The method is <NoteLink to="additive-and-residual-quantisation">residual
+quantisation</NoteLink> inside an autoencoder.
+
+**Encoding.** An encoder maps $\xvec$ to a latent $\zvec = E(\xvec)$. Set the first residual $\rvec_0 = \zvec$. Level
+$d = 0, \ldots, m - 1$ has its own codebook $\set{\evec^{(d)}_1, \ldots, \evec^{(d)}_K}$. Each level picks the nearest
+codeword to the current residual and passes on what is left:
+
+$$
+c_d = \argmin_k \norm{\rvec_d - \evec^{(d)}_k}, \qquad \rvec_{d+1} = \rvec_d - \evec^{(d)}_{c_d}.
+$$
+
+The <Gloss name="semantic-identifier">semantic ID</Gloss> is $(c_0, \ldots, c_{m-1})$. The quantised latent is the sum
+of the chosen codewords, $\hat{\zvec} = \sum_{d} \evec^{(d)}_{c_d}$, and a decoder maps it back to
+$\hat{\xvec} = D(\hat{\zvec})$. Unrolling the recursion, $\rvec_{d+1} = \zvec - \sum_{l=0}^{d}\evec^{(l)}_{c_l}$: each
+residual is the error of the partial reconstruction from the first $d + 1$ codewords. The residuals shrink level by
+level, which is why each level gets its own codebook and why the first code is the coarsest
+<Cite id="rajput2023tiger" />.
+
+**Loss.** The RQ-VAE is trained on
+
+$$
+\mathcal{L}_{\mathrm{RQ\text{-}VAE}}(\xvec) = \underbrace{\norm{\xvec - \hat{\xvec}}^2}_{\text{reconstruction}}
++ \sum_{d=0}^{m-1}\Big(\underbrace{\norm{\operatorname{sg}[\rvec_d] - \evec^{(d)}_{c_d}}^2}_{\text{codebook}}
++ \beta\underbrace{\norm{\rvec_d - \operatorname{sg}[\evec^{(d)}_{c_d}]}^2}_{\text{commitment}}\Big),
+$$
+
+where $\operatorname{sg}$ is the stop-gradient operator: it is the identity in the forward pass and has zero
+<NoteLink to="derivative">derivative</NoteLink>. TIGER uses $\beta = 0.25$ <Cite id="rajput2023tiger" />. The
+stop-gradients determine which parameters each term trains:
+
+- The **codebook** term has gradient only with respect to the codeword. Its gradient
+  $-2(\rvec_d - \evec^{(d)}_{c_d})$ moves the chosen codeword towards the residual it quantised, as a
+  <NoteLink to="k-means">k-means</NoteLink> centroid moves towards its points.
+- The **commitment** term has gradient only with respect to the residual, and so with respect to the encoder. It pulls
+  the encoder's output towards the codewords, so the latent does not drift away from what the codebooks can represent.
+  $\beta < 1$ makes the encoder move more slowly than the codebook.
+- The **reconstruction** term trains the decoder, and the encoder through it. The $\argmin$ has no gradient, so the
+  encoder receives the decoder's gradient by the **straight-through estimator**: the forward pass uses $\hat{\zvec}$
+  and the backward pass treats $\hat{\zvec}$ as if it were $\zvec$, computed as
+  $\hat{\zvec}_{\mathrm{st}} = \zvec + \operatorname{sg}[\hat{\zvec} - \zvec]$ <Cite id="bengio2013b" />
+  <Cite id="oord2017" />.
+
+The same three terms with $m = 1$ are the loss of the <Gloss name="vq-vae" /> <Cite id="oord2017" />.
+
+**Practical fixes.** Most inputs can collapse onto a few codewords. TIGER initialises each codebook by k-means on the
+first training batch to prevent this. Its RQ-VAE uses $m = 3$ levels of $K = 256$ codewords of dimension 32.
+Two items can also receive the same codes; TIGER appends a fourth token that numbers the colliding items, so
+$(7, 1, 4)$ becomes $(7, 1, 4, 0)$ and $(7, 1, 4, 1)$ <Cite id="rajput2023tiger" />.
+
+## Training the generator
+
+TIGER trains an encoder-decoder <NoteLink to="transformer">transformer</NoteLink>. The input is a hashed user token
+followed by the semantic-ID tokens of the items in the user's history; the target is the next item's semantic ID. The
+loss is the token cross-entropy above. The vocabulary holds $256 \times 4$ code tokens, one set per position, and the
+model has about 13 million parameters. At inference, <Gloss name="beam-search" /> returns the most probable identifiers,
+which are looked up to find the items <Cite id="rajput2023tiger" />.
+
+The idea comes from document retrieval. The Differentiable Search Index trained a sequence-to-sequence model to map a
+query directly to a document identifier, and compared atomic, string and hierarchically clustered identifiers
+<Cite id="tay2022dsi" />.
+
+## Generative versus dense retrieval losses
+
+A <NoteLink to="two-tower-model">two-tower</NoteLink> retriever learns an embedding for each user and item and trains
+them with a <NoteLink to="contrastive-losses-for-retrieval">contrastive loss</NoteLink>, a sampled softmax over item
+scores corrected by $\log Q$ for in-batch sampling <Cite id="yi2019sampling" />.
+A generative retriever trains a softmax over codes. The two differ in four ways.
+
+| | Dense retrieval | Generative retrieval |
+| --- | --- | --- |
+| Normaliser | sampled over items, biased | exact over $K$ codes per level |
+| Item representation | a free embedding per item, trained by the loss | fixed codes from a separate RQ-VAE |
+| Serving | <NoteLink to="nearest-neighbour-search">nearest-neighbour search</NoteLink> over item embeddings | beam search through the code tree |
+| New items | need an embedding, often from content | get codes from content at once |
+
+In a two-tower model the retrieval loss shapes every item vector. In TIGER the
+RQ-VAE is trained on reconstruction of <NoteLink to="content-based-filtering">content embeddings</NoteLink> and then
+frozen, so the retrieval loss never changes which items share a prefix. Collaborative signal enters only through the
+generator.
+
+## Generative recommenders (HSTU)
+
+Zhai et al. reformulate ranking and retrieval as **sequential transduction**: one causal model reads a user's whole
+chronological sequence of items $\Phi_i$ and actions $a_i$, and emits a label at each position
+<Cite id="zhai2024hstu" />. The encoder is the Hierarchical Sequential Transduction Unit (HSTU), and the models are
+called generative recommenders.
+
+- **Retrieval.** The input at position $i$ is the pair $(\Phi_i, a_i)$ and the label is the next item $\Phi_{i+1}$ if
+  the user engaged with it positively, otherwise no label. The model learns $p(\Phi_{i+1} \mid u_i)$ over the content
+  vocabulary, trained with sampled softmax. Skipping negative items as targets makes the model predict what users
+  engage with, not what they were shown <Cite id="zhai2024hstu" />.
+- **Ranking.** Items and actions are interleaved as tokens, $\Phi_0, a_0, \Phi_1, a_1, \ldots$. The label at the item
+  token $\Phi_{i+1}$ is the action $a_{i+1}$ the user took on it, predicted by a small network on the output at that
+  position. The model thus scores a candidate after attending to it and to the whole history, which is the target-aware
+  ranking that industrial models need. With several binary actions this is a multi-task <Gloss name="bce">binary
+  cross-entropy</Gloss> <Cite id="zhai2024hstu" />.
+- **Generative training.** A conventional ranker is trained once per impression and re-encodes the history each time.
+  With self-attention, a user with $n$ tokens costs $O(n^2 d)$ per impression and $O(n^3 d)$ over their $n$
+  impressions. A sequential transducer supervises every position in one pass. Sampling each user at a rate proportional
+  to $1/n$ reduces the total cost by a factor of $O(n)$ <Cite id="zhai2024hstu" />.
+
+The loss is not new: sampled softmax for retrieval and binary cross-entropy for ranking. What changes is that one
+causal pass over the full sequence provides every label. Zhai et al. report models of up to 1.5 trillion parameters
+whose quality kept improving with training compute, and a 12.4% improvement in online metrics in production
+<Cite id="zhai2024hstu" />.
+
+## Language models as recommenders
+
+A pre-trained <Gloss name="llm" /> is adapted by fine-tuning with the ordinary next-token cross-entropy on text that
+describes the recommendation task. See <NoteLink to="language-models-as-recommenders">large language models as
+recommenders</NoteLink> for the wider picture.
+
+- **P5** casts rating, <NoteLink to="sequential-recommendation-models">sequential recommendation</NoteLink>, explanation
+  and review tasks as text-to-text prompts for a <Gloss name="t5" /> model, and minimises the negative log-likelihood of
+  the target tokens. Item IDs are written as text such as "item_7391" and split by the tokeniser into sub-word pieces; a
+  whole-word embedding marks which pieces belong to one ID <Cite id="geng2022p5" />.
+- **TALLRec** fine-tunes LLaMA-7B with <Gloss name="lora" /> to answer "Yes" or "No" to whether a user with a given
+  history will like a target item. The loss is next-token cross-entropy on the answer, a pointwise binary
+  classification written as text <Cite id="bao2023tallrec" />.
+
+Item text is neither unique nor constrained to the catalogue. Cross-entropy over the tokens of a title also scores a
+long title as less likely than a short one, because its probability is a product of more factors.
+
+### Preference optimisation
+
+Next-token loss teaches the model to produce the positive item, but never shows it which items to avoid. **DPO** trains
+on pairs of a preferred response $y_w$ and a dispreferred one $y_l$ for a prompt $x$ with
+
+$$
+\mathcal{L}_{\mathrm{DPO}} = -\log\sigma\paren{r_\theta(x, y_w) - r_\theta(x, y_l)},
+\qquad r_\theta(x, y) = \beta\log\frac{\pi_\theta(y \mid x)}{\pi_{\mathrm{ref}}(y \mid x)},
+$$
+
+where $\pi_{\mathrm{ref}}$ is the model before this stage and $\beta > 0$ sets how far $\pi_\theta$ may move from it
+<Cite id="rafailov2023" />. Read $r_\theta$ as a score, and this is the <NoteLink to="bayesian-personalised-ranking">BPR
+</NoteLink> loss on one positive and one negative item.
+
+**S-DPO** uses one preferred item $e_p$ and a set $E_d$ of dispreferred items <Cite id="chen2024sdpo" />. It models the
+preference with the <NoteLink to="plackett-luce-model">Plackett–Luce model</NoteLink>. The probability that $e_p$ ranks
+first among $\set{e_p} \cup E_d$ is $e^{r_p} / (e^{r_p} + \sum_{d} e^{r_d})$, writing $r_p = r_\theta(x, e_p)$ and
+$r_d = r_\theta(x, e_d)$. Its negative logarithm is the S-DPO loss:
+
+$$
+\mathcal{L}_{\mathrm{S\text{-}DPO}} = -\log\sigma\paren{-\log\sum_{e_d \in E_d} e^{r_d - r_p}}
+= \log\paren{1 + \sum_{e_d \in E_d} e^{r_d - r_p}}
+= -\log\frac{e^{r_p}}{e^{r_p} + \sum_{e_d \in E_d} e^{r_d}}.
+$$
+
+The first equality uses $-\log\sigma(-u) = \log(1 + e^{u})$. The result is a sampled softmax cross-entropy with the
+implicit rewards as logits, the one-positive case of the <NoteLink to="listwise-ranking-losses">listwise
+losses</NoteLink>. With one negative it reduces to DPO. Chen et al. make this analogy explicit: DPO relates to
+BPR as S-DPO relates to the softmax loss, and the softmax form puts larger gradients on dispreferred items with high
+reward, the hard negatives <Cite id="chen2024sdpo" />.
+
+OneRec combines a generative recommender over semantic IDs with iterative preference alignment, in which a reward
+model scores sampled sessions to build the preference pairs for DPO <Cite id="deng2025onerec" />.
+
+## Constrained decoding and invalid identifiers
+
+An unconstrained decoder can emit identifiers that name no item. TIGER reports that 0.1% to 1.6% of its top-10
+identifiers from beam search were invalid, and handles them by widening the beam and filtering
+<Cite id="rajput2023tiger" />. The alternative is **constrained decoding**: store the valid identifiers in a prefix tree
+(a trie) and, at each step, set the logits of codes that lead to no valid identifier to $-\infty$.
+
+Masking changes the distribution. With the mask, each step renormalises over the valid next codes, so the probability of
+item $i$ becomes
+
+$$
+\tilde{p}(i \mid h) = \prod_{l=1}^{m}\frac{p_\theta(z_l \mid z_{<l}, h)}{\sum_{c \in V(z_{<l})} p_\theta(c \mid z_{<l}, h)},
+$$
+
+where $V(z_{<l})$ is the set of codes that extend $z_{<l}$ to a valid prefix. This is not the model's distribution
+restricted to real items, $p_\theta(i \mid h)/\sum_{i' \in \Ical} p_\theta(i' \mid h)$. Local renormalisation gives
+all the invalid mass under a prefix to the valid items under that same prefix. An item whose siblings are mostly invalid
+gains, and the ranking of items can change. Training with the same mask, so that the loss normalises over valid codes
+only, removes the mismatch between training and decoding.
+
+## Worked example
+
+**Token loss.** A catalogue has three items with two-token identifiers from $K = 2$ codes: $A = (1, 1)$,
+$B = (1, 2)$ and $C = (2, 1)$. The identifier $(2, 2)$ is invalid. For one history the model gives
+$p(z_1 = 1) = 0.6$ and $p(z_1 = 2) = 0.4$, then $p(z_2 \mid z_1 = 1) = (0.7, 0.3)$ and
+$p(z_2 \mid z_1 = 2) = (0.25, 0.75)$. The item probabilities are
+
+$$
+p(A) = 0.42, \quad p(B) = 0.18, \quad p(C) = 0.10, \quad p((2, 2)) = 0.30.
+$$
+
+If the next item is $C$, the loss is $-\log 0.4 - \log 0.25 = 0.916 + 1.386 = 2.303 = -\log 0.10$. The gradient on the
+level-1 logits is $(0.6, 0.4) - (0, 1) = (0.6, -0.6)$, and on the level-2 logits under prefix 2 it is
+$(0.25, 0.75) - (1, 0) = (-0.75, 0.75)$. The model has put 0.30 on an identifier that names nothing.
+
+**Constrained decoding.** Under prefix 2 the only valid code is 1, so masking gives $\tilde{p}(C) = 0.4 \cdot 1 = 0.40$,
+while $\tilde{p}(A) = 0.42$ and $\tilde{p}(B) = 0.18$ are unchanged. Renormalising over real items instead gives
+$0.42/0.70 = 0.600$, $0.18/0.70 = 0.257$ and $0.10/0.70 = 0.143$. Masking ranks $A, C, B$; the restricted model ranks
+$A, B, C$. $C$ inherits all of the 0.30 that leaked to $(2, 2)$.
+
+**RQ-VAE.** A latent $\zvec = (1.0, 0.6)$ is quantised with two levels. Level 0 has codewords $(1, 0)$ and $(0, 1)$, at
+distances 0.600 and 1.077, so $c_0 = 1$ and $\rvec_1 = (0, 0.6)$. Level 1 has codewords $(0, 0.5)$ and $(0.5, 0)$, at
+distances 0.100 and 0.781, so $c_1 = 1$ and $\rvec_2 = (0, 0.1)$. The semantic ID is $(1, 1)$ and
+$\hat{\zvec} = (1, 0.5)$. The codebook terms are $\norm{\rvec_0 - (1, 0)}^2 = 0.36$ and
+$\norm{\rvec_1 - (0, 0.5)}^2 = 0.01$. The commitment terms have the same values times $\beta = 0.25$, so the
+quantisation part of the loss is $1.25 \times 0.37 = 0.4625$. The codebook gradients pull level 0's codeword $(1, 0)$
+towards $\rvec_0 = (1, 0.6)$ and level 1's codeword $(0, 0.5)$ towards $\rvec_1 = (0, 0.6)$. The commitment gradients
+pull the encoder output towards $(1, 0)$ through the first level and towards $\hat{\zvec} = (1, 0.5)$ through the
+second. Each term is the squared error of a partial reconstruction: $0.36 = \norm{\rvec_1}^2 = \norm{\zvec - (1, 0)}^2$
+and $0.01 = \norm{\rvec_2}^2 = \norm{\zvec - \hat{\zvec}}^2$.
+
+## Assumptions
+
+- The factorisation assumes each item has exactly one identifier and each identifier at most one item. Collisions
+  break this and are removed by an extra token.
+- Semantic IDs assume that content similarity is a good tree for the item softmax. Items with similar text but
+  different audiences share a prefix and its gradient.
+- Next-token and preference losses on text assume that generated text can be mapped back to a catalogue item.
+
+## Pitfalls
+
+- **Treating the RQ-VAE loss as the recommendation objective.** A low reconstruction error says the codes preserve the
+  content embedding, not that they suit next-item prediction.
+- **Ignoring leaked probability.** Scores read from an unconstrained model are not normalised over real items. Compare
+  items only after the same constraint used at decoding.
+- **Beam search is not exact top-$k$.** A beam can drop a prefix whose items would have scored highly, because it keeps
+  only the best partial identifiers at each level.
+- **Length effects with text identifiers.** Summing token log-probabilities favours short titles; normalise by length or
+  use fixed-length identifiers.

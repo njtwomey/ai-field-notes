@@ -13,26 +13,29 @@ updated: 2026-09-27
 ---
 
 <Definition>
-A sentence embedding is a map $f_{\thetavec}$ from a text $s$ to a vector $\uvec = f_{\thetavec}(s) \in \reals^d$, trained so
-that the <NoteLink to="dot-product">cosine similarity</NoteLink> $\cos(\uvec, \vvec)$ of two embeddings is high when the texts mean similar things. Most
-sentence embeddings are built from a <NoteLink to="transformer">transformer</NoteLink> encoder: the encoder outputs one vector per token, and a pooling step
+A sentence embedding is a map $f_{\thetavec}$ from a text $s$ to a vector $\uvec = f_{\thetavec}(s) \in \reals^d$,
+trained so that the <NoteLink to="dot-product">cosine similarity</NoteLink> $\cos(\uvec, \vvec)$ of two embeddings is
+high when the texts mean similar things. Most sentence embeddings are built from a
+<NoteLink to="transformer">transformer</NoteLink> encoder: the encoder outputs one vector per token, and a pooling step
 reduces them to one vector <Cite id="reimers2019" />.
 </Definition>
 
 ## Cross-encoders and bi-encoders
 
-Many tasks compare texts: semantic search, clustering, <NoteLink to="character-n-grams-and-shingles">duplicate detection</NoteLink>, retrieval for <Gloss name="qa">question answering</Gloss>. A
-**cross-encoder** reads both texts together, such as <Gloss name="bert" /> with the input "`[CLS]` text A `[SEP]` text B", and outputs a
-similarity score. Cross-encoders are accurate, because every token of one text attends to every token of the other.
-They cost one full forward pass per pair. Finding the most similar pair among $n$ sentences needs $n(n - 1)/2$ passes:
-49,995,000 for $n = 10{,}000$, which Reimers and Gurevych estimated at about 65 hours on a <Gloss name="gpu" /> <Cite id="reimers2019" />.
+Many tasks compare texts: semantic search, clustering, <NoteLink to="character-n-grams-and-shingles">duplicate
+detection</NoteLink>, retrieval for <Gloss name="qa">question answering</Gloss>. A **cross-encoder** reads both texts
+together, such as <Gloss name="bert" /> with the input "`[CLS]` text A `[SEP]` text B", and outputs a similarity score.
+Cross-encoders are accurate, because every token of one text attends to every token of the other. They cost one full
+forward pass per pair. Finding the most similar pair among $n$ sentences needs $n(n - 1)/2$ passes: 49,995,000 for
+$n = 10{,}000$, which Reimers and Gurevych estimated at about 65 hours on a <Gloss name="gpu" />
+<Cite id="reimers2019" />.
 
-A **bi-encoder** embeds each text once, independently. The $n$ embeddings cost $n$ passes. Comparing them is a <NoteLink to="matrix-multiplication">matrix
-product</NoteLink>, and a <NoteLink to="nearest-neighbour-search">nearest-neighbour index</NoteLink> finds the closest vectors
-without comparing all pairs. The same search took about 5 seconds with Sentence-BERT <Cite id="reimers2019" />. The
-price is that the two texts never interact inside the model, so a bi-encoder is usually less accurate than a
-cross-encoder on the same pair. A common design retrieves candidates with a bi-encoder and re-ranks the top few with a
-cross-encoder.
+A **bi-encoder** embeds each text once, independently. The $n$ embeddings cost $n$ passes. Comparing them is a
+<NoteLink to="matrix-multiplication">matrix product</NoteLink>, and a
+<NoteLink to="nearest-neighbour-search">nearest-neighbour index</NoteLink> finds the closest vectors without comparing
+all pairs. The same search took about 5 seconds with Sentence-BERT <Cite id="reimers2019" />. The price is that the two
+texts never interact inside the model, so a bi-encoder is usually less accurate than a cross-encoder on the same pair. A
+common design retrieves candidates with a bi-encoder and re-ranks the top few with a cross-encoder.
 
 ## Pooling
 
@@ -51,8 +54,9 @@ common.
 - **Max pooling** takes the maximum of each coordinate over the real tokens.
 
 Without fine-tuning, none of these works well. On semantic textual similarity benchmarks, the `[CLS]` vector and the
-mean of BERT's output vectors both scored below the average of <NoteLink to="word-embeddings">GloVe</NoteLink> word vectors <Cite id="reimers2019" />. The
-encoder was trained to predict masked tokens, not to place similar sentences near each other.
+mean of BERT's output vectors both scored below the average of <NoteLink to="word-embeddings">GloVe</NoteLink> word
+vectors <Cite id="reimers2019" />. The encoder was trained to predict masked tokens, not to place similar sentences near
+each other.
 
 ## Sentence-BERT
 
@@ -60,10 +64,11 @@ Sentence-BERT (SBERT) fine-tunes a pretrained encoder so that pooled embeddings 
 <Cite id="reimers2019" />. It uses a **siamese** network: the same encoder, with shared weights, embeds both texts of a
 training pair, $\uvec = f_{\thetavec}(a)$ and $\vvec = f_{\thetavec}(b)$. The loss depends on the training data.
 
-- **Classification on <Gloss name="nli">natural language inference (NLI)</Gloss>.** Each pair is labelled entailment, contradiction or neutral.
-  A linear layer reads the concatenation $(\uvec, \vvec, \abs{\uvec - \vvec})$ and a softmax predicts the label:
-  $\operatorname{softmax}(\Wmat [\uvec; \vvec; \abs{\uvec - \vvec}])$ with $\Wmat \in \reals^{3 \times 3d}$. The layer is
-  discarded after training. Its only purpose is to shape the geometry of $\uvec$ and $\vvec$.
+- **Classification on <Gloss name="nli">natural language inference (NLI)</Gloss>.** Each pair is labelled entailment,
+  contradiction or neutral. A linear layer reads the concatenation $(\uvec, \vvec, \abs{\uvec - \vvec})$ and a softmax
+  predicts the label: $\operatorname{softmax}(\Wmat [\uvec; \vvec; \abs{\uvec - \vvec}])$ with
+  $\Wmat \in \reals^{3 \times 3d}$. The layer is discarded after training. Its only purpose is to shape the geometry of
+  $\uvec$ and $\vvec$.
 - **Regression on similarity scores.** The loss is the squared error between $\cos(\uvec, \vvec)$ and a gold score.
 - **Triplets.** Given an anchor $a$, a positive $p$ and a negative $n$, the loss is $\max(\norm{\uvec_a - \uvec_p} -
   \norm{\uvec_a - \uvec_n} + \epsilon, 0)$ with margin $\epsilon$, which pushes the positive closer than the negative.
@@ -88,8 +93,8 @@ $(1, 1, 0)$, $(0, 1, 2)$ and $(1, 0, 1)$.
 
 - **Masked mean pooling.** $\uvec_A = (0.5, 1, 1)$ and $\uvec_B = (\tfrac23, \tfrac23, 1)$. Their cosine similarity is
   $\uvec_A^\top \uvec_B / (\norm{\uvec_A}\norm{\uvec_B}) = 0.970$.
-- **Unmasked mean.** Averaging all three positions of A gives $(\tfrac43, \tfrac13, \tfrac23)$, and the cosine similarity
-  drops to 0.847.
+- **Unmasked mean.** Averaging all three positions of A gives $(\tfrac43, \tfrac13, \tfrac23)$, and the cosine
+  similarity drops to 0.847.
 
 The padding position changed the similarity by 0.12. Sentence A's embedding would also change with the batch it
 happened to be padded in.

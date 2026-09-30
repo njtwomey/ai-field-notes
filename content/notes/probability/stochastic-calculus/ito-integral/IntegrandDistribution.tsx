@@ -16,6 +16,8 @@ type Integrand = 'constant' | 'steps' | 'ramp' | 'fade' | 'path'
 
 const PATHS = 4000
 const STEPS = 200
+/** Paths whose traces are kept for drawing; the histogram always uses all PATHS. */
+const MAX_DRAWN = 30
 
 /** Each integrand: its horizon T, the function h(t) (unused for `path`, whose integrand is the path) and the exact variance. */
 const INTEGRANDS: Record<Integrand, { label: string; T: number; h: (t: number) => number; variance: number }> = {
@@ -41,6 +43,7 @@ function itoWdWDensity(y: number, T: number): number {
 export function IntegrandDistribution() {
   const [integrand, setIntegrand] = useState<Integrand>('steps')
   const seed = useParam(1, { min: 1, max: 20, step: 1 })
+  const count = useParam(10, { min: 1, max: MAX_DRAWN, step: 1 })
   const spec = INTEGRANDS[integrand]
 
   const sim = useMemo(() => {
@@ -48,41 +51,80 @@ export function IntegrandDistribution() {
     const dt = spec.T / STEPS
     const sd = Math.sqrt(dt)
     const values = new Float64Array(PATHS)
-    let firstPath: number[] = []
+    // The first MAX_DRAWN paths keep their traces of W and of the running integral, for drawing.
+    const wTraces: number[][] = []
+    const sumTraces: number[][] = []
     for (let p = 0; p < PATHS; p++) {
       let w = 0
       let sum = 0
-      const trace = p === 0 ? [0] : []
+      const keep = p < MAX_DRAWN
+      const wTrace = [0]
+      const sumTrace = [0]
       for (let j = 0; j < STEPS; j++) {
         const t = j * dt
         const dW = sd * normal()
         const h = integrand === 'path' ? w : spec.h(t)
         sum += h * dW
         w += dW
-        if (p === 0) trace.push(w)
+        if (keep) {
+          wTrace.push(w)
+          sumTrace.push(sum)
+        }
       }
       values[p] = sum
-      if (p === 0) firstPath = trace
+      if (keep) {
+        wTraces.push(wTrace)
+        sumTraces.push(sumTrace)
+      }
     }
     let mean = 0
     for (const v of values) mean += v / PATHS
     let variance = 0
     for (const v of values) variance += (v - mean) ** 2 / (PATHS - 1)
-    return { values, mean, variance, firstPath }
+    return { values, mean, variance, wTraces, sumTraces }
   }, [integrand, seed.value, spec])
 
-  const { integrandSeries, histSeries, below } = useMemo(() => {
-    const ts = Array.from({ length: STEPS + 1 }, (_, j) => (j * spec.T) / STEPS)
-    const hs = integrand === 'path' ? sim.firstPath : ts.map((t) => spec.h(t))
-    const integrandSeries: XYSeries[] = [
-      {
-        name: integrand === 'path' ? 'h(t) = W(t), one sample path' : 'h(t)',
+  const ts = useMemo(() => Array.from({ length: STEPS + 1 }, (_, j) => (j * spec.T) / STEPS), [spec])
+
+  const { integrandSeries, runningSeries } = useMemo(() => {
+    const many = count.value > 1
+    const shown = sim.sumTraces.slice(0, count.value)
+    const integrandSeries: XYSeries[] =
+      integrand === 'path'
+        ? sim.wTraces.slice(0, count.value).map((w) => ({
+            name: many ? 'h(t) = W(t), sample paths' : 'h(t) = W(t), one sample path',
+            type: 'line',
+            x: ts,
+            y: w,
+            slot: 0,
+            thin: many,
+          }))
+        : [{ name: 'h(t)', type: 'line', x: ts, y: ts.map((t) => spec.h(t)), slot: 0 }]
+    // Variance of the running integral: t²/2 for h = W, else the left-point sum of h² dt (the isometry).
+    const dt = spec.T / STEPS
+    const v: number[] = [0]
+    for (let j = 0; j < STEPS; j++) v.push(integrand === 'path' ? ts[j + 1] ** 2 / 2 : v[j] + spec.h(ts[j]) ** 2 * dt)
+    const runningSeries: XYSeries[] = shown.map((y) => ({
+      name: many ? 'running integrals, sample paths' : 'running integral, one sample path',
+      type: 'line',
+      x: ts,
+      y,
+      slot: 3,
+      thin: many,
+    }))
+    for (const sgn of [1, -1])
+      runningSeries.push({
+        name: '± 2 sd, sd² = ∫₀ᵗ h² ds',
         type: 'line',
         x: ts,
-        y: hs,
-        slot: 0,
-      },
-    ]
+        y: v.map((vv) => sgn * 2 * Math.sqrt(vv)),
+        slot: 1,
+        dashed: true,
+      })
+    return { integrandSeries, runningSeries }
+  }, [integrand, sim, spec, ts, count.value])
+
+  const { histSeries, below } = useMemo(() => {
     const sd = Math.sqrt(spec.variance)
     const lo = integrand === 'path' ? -0.75 : -4 * sd
     const hi = integrand === 'path' ? 3 : 4 * sd
@@ -110,13 +152,13 @@ export function IntegrandDistribution() {
       })
     let below = 0
     for (const v of sim.values) if (v < -0.4) below++
-    return { integrandSeries, histSeries, below: below / PATHS }
+    return { histSeries, below: below / PATHS }
   }, [integrand, sim, spec])
 
   return (
     <Interactive
       title="The distribution of ∫ h dW for different integrands"
-      caption="Left-point sums of ∫ h dW over 200 steps, on 4,000 simulated Brownian paths. Top: the integrand h(t). Bottom: the histogram of the 4,000 values against the theory. For a deterministic integrand the integral is Gaussian with variance ∫ h(t)² dt, whatever the integrand's shape. For the integrand h = W, which depends on the path, the integral is ½(W₁² − 1): mean 0 and variance ½ as the isometry says, but skewed, never below −½, and not Gaussian (dashed)."
+      caption="Left-point sums of ∫ h dW over 200 steps, on 4,000 simulated Brownian paths. Top: the integrand h(t); for h = W, the first few sampled paths of W. Middle: the running integral ∫₀ᵗ h dW on the first few paths, as light lines, inside a band of ± 2 standard deviations, sd² = ∫₀ᵗ h(s)² ds (for h = W, t²/2); the paths slider sets how many are drawn. Bottom: the histogram of all 4,000 values at the end of the interval against the theory. For a deterministic integrand the integral is Gaussian with variance ∫ h(t)² dt, whatever the integrand's shape. For the integrand h = W, which depends on the path, the integral is ½(W₁² − 1): mean 0 and variance ½ as the isometry says, but skewed, never below −½, and not Gaussian (dashed)."
       controls={
         <>
           <ParamChoice
@@ -125,6 +167,7 @@ export function IntegrandDistribution() {
             onChange={setIntegrand}
             options={(Object.keys(INTEGRANDS) as Integrand[]).map((k) => ({ value: k, label: INTEGRANDS[k].label }))}
           />
+          <ParamSlider label="paths" param={count} withArrows format={(v) => String(v)} />
           <ParamSlider label="seed" param={seed} withArrows />
         </>
       }
@@ -139,6 +182,7 @@ export function IntegrandDistribution() {
     >
       <div className="space-y-4">
         <XYChart height={180} xLabel="t" yLabel="h(t)" series={integrandSeries} />
+        <XYChart height={220} xLabel="t" yLabel="∫₀ᵗ h dW" series={runningSeries} />
         <XYChart height={260} xLabel="∫ h dW" yLabel="density" series={histSeries} />
       </div>
     </Interactive>

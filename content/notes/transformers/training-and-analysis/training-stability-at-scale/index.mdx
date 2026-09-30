@@ -30,9 +30,10 @@ updated: 2026-09-27
 
 <Definition>
   A training run is **unstable** when the loss diverges, or rises sharply for a few hundred steps and then recovers (a
-  **loss spike**), at hyperparameters that give smooth training for a smaller model. Instabilities in large <NoteLink to="transformer">transformers</NoteLink>
-  have several distinct causes, each with a targeted fix. Wortsman et al. showed that the main ones also appear in small
-  models trained at high <Gloss name="learning-rate">learning rates</Gloss>, which makes them cheap to study <Cite id="wortsman2023" />.
+  **loss spike**), at hyperparameters that give smooth training for a smaller model. Instabilities in large
+  <NoteLink to="transformer">transformers</NoteLink> have several distinct causes, each with a targeted fix. Wortsman et
+  al. showed that the main ones also appear in small models trained at high <Gloss name="learning-rate">learning
+  rates</Gloss>, which makes them cheap to study <Cite id="wortsman2023" />.
 </Definition>
 
 ## Intuition
@@ -44,21 +45,23 @@ route by which a quantity grows until the arithmetic or the optimiser breaks.
 
 ## Observations
 
-<Gloss name="palm" />'s 540-billion-parameter model spiked roughly 20 times during training, despite gradient clipping, at irregular
-intervals and sometimes late in training. The smaller PaLM models did not spike. The team restarted from a checkpoint
-about 100 steps before each spike and skipped 200 to 500 batches, after which the spike did not recur. Replaying the same
-batches from an earlier checkpoint did not cause a spike either, so the spikes came from the combination of a model
-state and particular data, not from bad data alone <Cite id="chowdhery2022" />.
+<Gloss name="palm" />'s 540-billion-parameter model spiked roughly 20 times during training, despite gradient clipping,
+at irregular intervals and sometimes late in training. The smaller PaLM models did not spike. The team restarted from a
+checkpoint about 100 steps before each spike and skipped 200 to 500 batches, after which the spike did not recur.
+Replaying the same batches from an earlier checkpoint did not cause a spike either, so the spikes came from the
+combination of a model state and particular data, not from bad data alone <Cite id="chowdhery2022" />.
 
 ## Attention logit growth
 
 The attention logits $\qvec_i \cdot \kvec_j/\sqrt{d_h}$ are bilinear in the query and key weights. If both weight
 matrices grow by a factor $a$, the logits grow by $a^2$. Large logits make the softmax nearly one-hot: the attention
-entropy collapses, and the <NoteLink to="gradient">gradient</NoteLink> through the softmax vanishes for all but one key <Cite id="zhai2023entropy" />.
-Dehghani et al. observed this divergence when scaling <Gloss name="vit">vision transformers</Gloss> to 22 billion parameters and fixed it by
-normalising queries and keys before the dot product <Cite id="dehghani2023" />. Wortsman et al. reproduced the same
-failure in small models at high learning rates, found that it came from growth in the queries and keys rather than in
-their alignment, and showed that QK normalisation lets a 1.2B model train at learning rate 0.3 <Cite id="wortsman2023" />. The fix and its variants are covered in <NoteLink to="query-key-normalisation-and-logit-soft-capping">QK normalisation and logit soft-capping</NoteLink>.
+entropy collapses, and the <NoteLink to="gradient">gradient</NoteLink> through the softmax vanishes for all but one key
+<Cite id="zhai2023entropy" />. Dehghani et al. observed this divergence when scaling <Gloss name="vit">vision
+transformers</Gloss> to 22 billion parameters and fixed it by normalising queries and keys before the dot product
+<Cite id="dehghani2023" />. Wortsman et al. reproduced the same failure in small models at high learning rates, found
+that it came from growth in the queries and keys rather than in their alignment, and showed that QK normalisation lets a
+1.2B model train at learning rate 0.3 <Cite id="wortsman2023" />. The fix and its variants are covered in
+<NoteLink to="query-key-normalisation-and-logit-soft-capping">QK normalisation and logit soft-capping</NoteLink>.
 
 ## Output logit divergence and z-loss
 
@@ -67,7 +70,8 @@ The softmax is unchanged when a constant is added to every logit: $\operatorname
 normaliser $\log Z = \log\sum_w e^{z_w}$ can drift far from 0. Large logits lose precision in low-precision
 arithmetic.
 
-PaLM adds an auxiliary **z-loss** $10^{-4}\,(\log Z)^2$ "to encourage the softmax normalizer $\log(Z)$ to be close to 0" <Cite id="chowdhery2022" />. Its gradient with respect to logit $z_w$ is
+PaLM adds an auxiliary **z-loss** $10^{-4}\,(\log Z)^2$ "to encourage the softmax normalizer $\log(Z)$ to be close to 0"
+<Cite id="chowdhery2022" />. Its gradient with respect to logit $z_w$ is
 
 $$
 \frac{\partial}{\partial z_w}\,10^{-4}(\log Z)^2 = 2 \times 10^{-4}\,\log Z\;\frac{e^{z_w}}{Z} = 2 \times 10^{-4}\,\log Z\;p_w .
@@ -76,9 +80,10 @@ $$
 When $\log Z > 0$ every logit is pushed down in proportion to its probability; when $\log Z < 0$ every logit is pushed
 up. Write $c = 2 \times 10^{-4}\log Z$. A gradient step of size $s$ moves the logits by $-sc\,\pvec$, and since
 $\partial\log Z/\partial z_w = p_w$, it changes $\log Z$ by about $-sc\norm{\pvec}^2$, which has the opposite sign to
-$\log Z$. <NoteLink to="gradient-descent">Gradient descent</NoteLink> on the z-loss therefore drives $\log Z$ towards 0. With $\log Z = 0$ the
-logits are the log-probabilities themselves. Wortsman et al. found that output logit divergence occurs in models
-trained without <Gloss name="weight-decay">weight decay</Gloss> at any scale, and that z-loss with coefficient $10^{-4}$ removes it <Cite id="wortsman2023" />.
+$\log Z$. <NoteLink to="gradient-descent">Gradient descent</NoteLink> on the z-loss therefore drives $\log Z$ towards 0.
+With $\log Z = 0$ the logits are the log-probabilities themselves. Wortsman et al. found that output logit divergence
+occurs in models trained without <Gloss name="weight-decay">weight decay</Gloss> at any scale, and that z-loss with
+coefficient $10^{-4}$ removes it <Cite id="wortsman2023" />.
 
 ## Adam's epsilon
 
@@ -104,16 +109,16 @@ improved the loss of a 4.8B model <Cite id="wortsman2023" />.
 - **Weight decay.** Decay that is not multiplied by the learning rate, as in decoupled weight decay
   <Cite id="loshchilov2019" />, reduced sensitivity to the learning rate <Cite id="wortsman2023" />. Without any decay,
   output logits drifted; see <NoteLink to="decoupled-weight-decay">decoupled weight decay</NoteLink>.
-- **Parameterisation.** Under the standard parameterisation the best learning rate falls as width grows, so a
-  learning rate tuned on a small model is too high for a large one. <NoteLink to="maximal-update-parameterisation">Maximal update
+- **Parameterisation.** Under the standard parameterisation the best learning rate falls as width grows, so a learning
+  rate tuned on a small model is too high for a large one. <NoteLink to="maximal-update-parameterisation">Maximal update
   parameterisation</NoteLink> keeps it fixed. In Wortsman et al.'s setting it stabilised the optimal learning rate
   across widths without improving the loss <Cite id="wortsman2023" />.
 
 ## Other design choices made for stability
 
 PaLM removed all biases, citing stability, and used $\beta_2 = 1 - k^{-0.8}$ at step $k$ rather than a fixed 0.99,
-because rare embedding tokens had poorly estimated second moments over short windows <Cite id="chowdhery2022" />. Pre-norm
-placement, bf16 rather than fp16 arithmetic (see <NoteLink to="mixed-precision-training">mixed-precision
+because rare embedding tokens had poorly estimated second moments over short windows <Cite id="chowdhery2022" />.
+Pre-norm placement, bf16 rather than fp16 arithmetic (see <NoteLink to="mixed-precision-training">mixed-precision
 training</NoteLink>) and removing biases (see <NoteLink to="bias-terms-and-dropout-in-modern-transformers">bias terms
 and dropout</NoteLink>) are other design choices made at least in part for stability.
 
@@ -132,9 +137,9 @@ Take three logits $\zvec = (2, 1, 0)$. Then $\log Z = \log(e^2 + e + 1) = 2.408$
 $(0.665, 0.245, 0.090)$, and the cross-entropy for class 1 is $2.408 - 2 = 0.408$.
 
 Shift all logits by 300. The probabilities and the cross-entropy do not change, because the softmax ignores the shift.
-Now $\log Z = 302.408$. In bf16, numbers between 256 and 512 are spaced 2 apart, so the logits $(302.41, 301.41, 300.41)$
-round to $(302, 302, 300)$. The softmax of the rounded logits is $(0.468, 0.468, 0.063)$ and the cross-entropy becomes
-$0.759$: the rounding has destroyed the difference between the first two classes.
+Now $\log Z = 302.408$. In bf16, numbers between 256 and 512 are spaced 2 apart, so the logits
+$(302.41, 301.41, 300.41)$ round to $(302, 302, 300)$. The softmax of the rounded logits is $(0.468, 0.468, 0.063)$ and
+the cross-entropy becomes $0.759$: the rounding has destroyed the difference between the first two classes.
 
 The z-loss detects the drift. At $\log Z = 302.408$ it is $10^{-4} \times 302.408^2 = 9.15$, against $0.00058$ at
 $\log Z = 2.408$. Its gradient is $2 \times 10^{-4} \times 302.408 \times \pvec = (0.040, 0.015, 0.005)$, which lowers

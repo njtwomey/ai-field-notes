@@ -80,7 +80,7 @@ export function HmcTrajectories() {
   const rho = useParam(0.9, { min: 0, max: 0.99, step: 0.01 })
   const eps = useParam(0.15, { min: 0.01, max: 1, step: 0.01 })
   const steps = useParam(20, { min: 1, max: 100, step: 1 })
-  const iterations = useParam(5, { min: 1, max: 30, step: 1 })
+  const iterations = useParam(5, { min: 1, max: 50, step: 1 })
   const seed = useParam(1, { min: 1, max: 30, step: 1 })
   const sx = useParam(-2, { min: -R, max: R, step: 0.05 })
   const sy = useParam(-1.2, { min: -R, max: R, step: 0.05 })
@@ -97,7 +97,8 @@ export function HmcTrajectories() {
       { name: '1 standard deviation', type: 'line', x: e1.x, y: e1.y, muted: true },
       { name: '2 standard deviations', type: 'line', x: e2.x, y: e2.y, muted: true },
     ]
-    // One series per trajectory, coloured by outcome; series with the same name share a legend entry.
+    // One light series per trajectory, coloured by outcome; series with the same name share a legend entry.
+    const many = run.paths.length > 1
     run.paths.forEach((p) =>
       out.push({
         name: p.accepted ? 'accepted trajectory' : 'rejected trajectory',
@@ -105,6 +106,7 @@ export function HmcTrajectories() {
         x: p.x,
         y: p.y,
         slot: p.accepted ? 0 : 1,
+        thin: many,
       }),
     )
     const states = run.paths.filter((p) => p.accepted).map((p) => [p.x[p.x.length - 1], p.y[p.y.length - 1]])
@@ -135,7 +137,7 @@ export function HmcTrajectories() {
   return (
     <Interactive
       title="Hamiltonian trajectories on a correlated Gaussian"
-      caption="Each iteration draws a random momentum and follows L leapfrog steps of size ε along the Hamiltonian flow, then accepts the end point with probability min(1, e^(−ΔH)). Drag the start point. The trajectories sweep along the long axis of the ellipse, far beyond what a random walk reaches in one step. The energy error ΔH stays small for small ε; as ε approaches the stability limit 2σ_min, where σ_min = √(1 − ρ) is the narrowest standard deviation, ΔH grows and trajectories are rejected; above it they spiral out. Very long trajectories curve back on themselves, which is what NUTS detects."
+      caption="Each iteration draws a random momentum and follows L leapfrog steps of size ε along the Hamiltonian flow, then accepts the end point with probability min(1, e^(−ΔH)). The iterations slider sets how many trajectories the chain runs, each from a fresh momentum draw; with more than one they are drawn as light lines, and the accepted states are marked. Drag the start point. The trajectories sweep along the long axis of the ellipse, far beyond what a random walk reaches in one step. The energy error ΔH stays small for small ε; as ε approaches the stability limit 2σ_min, where σ_min = √(1 − ρ) is the narrowest standard deviation, ΔH grows and trajectories are rejected; above it they spiral out. Very long trajectories curve back on themselves, which is what NUTS detects."
       controls={
         <>
           <ParamSlider label="step size ε" param={eps} />

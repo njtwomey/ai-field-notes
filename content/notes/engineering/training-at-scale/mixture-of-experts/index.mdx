@@ -41,12 +41,12 @@ with $k$ <Cite id="shazeer2017" />.
 
 ## Problem
 
-The accuracy of a <NoteLink to="transformer">transformer</NoteLink> <Gloss name="language-model">language model</Gloss> improves with its number of
-parameters, but in a dense model every parameter is used for every token, so compute per token grows in proportion.
-Conditional computation decouples the two: different tokens use different parts of the network. Mixtures of experts
-were introduced as ensembles of networks with a learned gating network that weights all of them
-<Cite id="jacobs1991" />. The sparse version evaluates only the few experts the gate selects, which is what makes it
-cheaper.
+The accuracy of a <NoteLink to="transformer">transformer</NoteLink> <Gloss name="language-model">language model</Gloss>
+improves with its number of parameters, but in a dense model every parameter is used for every token, so compute per
+token grows in proportion. Conditional computation decouples the two: different tokens use different parts of the
+network. Mixtures of experts were introduced as ensembles of networks with a learned gating network that weights all of
+them <Cite id="jacobs1991" />. The sparse version evaluates only the few experts the gate selects, which is what makes
+it cheaper.
 
 The difficulty is that the router is trained along with the experts. Experts that are chosen more often are trained
 more, become better, and are chosen even more often. Without a counterweight, a few experts receive most tokens, the
@@ -57,7 +57,8 @@ rest are wasted, and the devices holding the popular experts become a bottleneck
 ### Routing
 
 In a transformer, the MoE layer replaces the feed-forward block of some or all layers; attention is unchanged. The
-router is a <NoteLink to="matrix-vector-product">linear map</NoteLink> $\Wmat_r \in \reals^{N \times h}$ from the token's hidden state to one logit per expert.
+router is a <NoteLink to="matrix-vector-product">linear map</NoteLink> $\Wmat_r \in \reals^{N \times h}$ from the
+token's hidden state to one logit per expert.
 
 **Top-$k$ gating.** Shazeer et al. keep the $k$ largest logits, set the others to $-\infty$ and apply a softmax, so the
 $k$ selected weights sum to 1 <Cite id="shazeer2017" />:
@@ -74,10 +75,10 @@ The Switch Transformer uses $k = 1$, which halves the router's computation and c
 simplifies the implementation <Cite id="fedus2022" />.
 
 **Fine-grained and shared experts.** DeepSeekMoE splits each expert into several smaller ones and routes to
-proportionally more of them, which allows more combinations of experts per token, and adds **shared experts** that
-every token uses to hold common knowledge <Cite id="dai2024" />. DeepSeek-V3 has one shared expert and 256 routed experts
-per MoE layer and routes each token to 8 of them. It has 671 billion parameters, of which 37 billion, 5.5%, are active
-for each token <Cite id="deepseek2024" />.
+proportionally more of them, which allows more combinations of experts per token, and adds **shared experts** that every
+token uses to hold common knowledge <Cite id="dai2024" />. DeepSeek-V3 has one shared expert and 256 routed experts per
+MoE layer and routes each token to 8 of them. It has 671 billion parameters, of which 37 billion, 5.5%, are active for
+each token <Cite id="deepseek2024" />.
 
 ### The load-balancing loss
 
@@ -97,9 +98,10 @@ $$
 
 with $\alpha = 10^{-2}$ in the Switch Transformer <Cite id="fedus2022" />.
 
-**Why the product.** $f_i$ counts discrete choices and has no gradient. $P_i$ is differentiable. The <NoteLink to="derivative">derivative</NoteLink> of the
-loss with respect to $P_i$ is $\alpha N f_i$, so <NoteLink to="gradient-descent">gradient descent</NoteLink> lowers the router probability of each expert in
-proportion to the load it already carries: overloaded experts are pushed down hardest.
+**Why the product.** $f_i$ counts discrete choices and has no gradient. $P_i$ is differentiable. The
+<NoteLink to="derivative">derivative</NoteLink> of the loss with respect to $P_i$ is $\alpha N f_i$, so
+<NoteLink to="gradient-descent">gradient descent</NoteLink> lowers the router probability of each expert in proportion
+to the load it already carries: overloaded experts are pushed down hardest.
 
 **Why its minimum is uniform routing.** If routing follows the probabilities, $f_i \approx P_i$, and the loss is
 $\alpha N \sum_i P_i^2$. By the <NoteLink to="dot-product">Cauchy–Schwarz inequality</NoteLink>,
@@ -131,8 +133,8 @@ $$
 
 tokens per batch <Cite id="fedus2022" />. A capacity factor above 1 leaves slack for imbalance. Tokens routed to a full
 expert are dropped from that layer: their representation passes on unchanged through the residual connection. A larger
-capacity factor drops fewer tokens but pads more slots with nothing, wasting computation and memory. DeepSeek-V3 balances
-its load well enough that it drops no tokens during training <Cite id="deepseek2024" />.
+capacity factor drops fewer tokens but pads more slots with nothing, wasting computation and memory. DeepSeek-V3
+balances its load well enough that it drops no tokens during training <Cite id="deepseek2024" />.
 
 ### Expert parallelism
 
@@ -173,8 +175,9 @@ as T5-Base up to 7 times faster in pre-training with the same computation per to
 
 ## Trade-offs
 
-- **Parameters against memory.** An MoE model has the compute of a small dense model and the memory of a large one.
-  It is cheapest where memory is plentiful and arithmetic is the bottleneck, as in <NoteLink to="minibatching-and-batch-size">large-batch training</NoteLink> and serving.
+- **Parameters against memory.** An MoE model has the compute of a small dense model and the memory of a large one. It
+  is cheapest where memory is plentiful and arithmetic is the bottleneck, as in
+  <NoteLink to="minibatching-and-batch-size">large-batch training</NoteLink> and serving.
 - **Balance against quality.** Strong balancing forces tokens away from the experts that suit them best. Weak balancing
   wastes experts and devices.
 - **Communication.** Expert parallelism adds two all-to-all exchanges per MoE layer, which dominate when devices are

@@ -31,11 +31,12 @@ updated: 2026-09-27
 ---
 
 <Definition>
-A **graph index** for <NoteLink to="nearest-neighbour-search">nearest-neighbour search</NoteLink> is a directed graph whose nodes are the stored vectors. A query is
-answered by **greedy beam search**: start from a fixed entry node, keep a list of the $L$ closest nodes seen, repeatedly
-expand the closest unexpanded one by computing distances to its out-neighbours, and stop when every node in the list has
-been expanded <Cite id="subramanya2019" />. Graph families differ in how they choose each node's out-neighbours:
-enough, and in enough directions, for routing to succeed, but few enough to keep memory and per-hop cost low.
+A **graph index** for <NoteLink to="nearest-neighbour-search">nearest-neighbour search</NoteLink> is a directed graph
+whose nodes are the stored vectors. A query is answered by **greedy beam search**: start from a fixed entry node, keep a
+list of the $L$ closest nodes seen, repeatedly expand the closest unexpanded one by computing distances to its
+out-neighbours, and stop when every node in the list has been expanded <Cite id="subramanya2019" />. Graph families
+differ in how they choose each node's out-neighbours: enough, and in enough directions, for routing to succeed, but few
+enough to keep memory and per-hop cost low.
 </Definition>
 
 ## Intuition
@@ -62,9 +63,9 @@ An edge is removed when a shorter two-hop route via $\rvec$ exists. Graph indexe
 when choosing the out-neighbours of $\pvec$ from a candidate list. Sort the candidates by distance from $\pvec$. Keep
 the closest, $\pvec^*$. Discard every remaining candidate $\pvec'$ that is closer to $\pvec^*$ than to $\pvec$, since
 $\pvec'$ lies behind $\pvec^*$ as seen from $\pvec$ and is reachable through it. Repeat with the closest survivor. The
-result is the **sparse neighbourhood graph** described by DiskANN's authors <Cite id="subramanya2019" />. <Gloss name="hnsw" />'s
-neighbour selection heuristic <Cite id="malkov2018" /> and NSG's edge selection <Cite id="fu2019" /> are forms of
-this rule.
+result is the **sparse neighbourhood graph** described by DiskANN's authors <Cite id="subramanya2019" />.
+<Gloss name="hnsw" />'s neighbour selection heuristic <Cite id="malkov2018" /> and NSG's edge selection
+<Cite id="fu2019" /> are forms of this rule.
 
 If every node's out-neighbours are chosen this way from all other points, greedy search for any stored point
 $\xvec_q$ reaches it. At a node $\pvec$ that does not link to $\xvec_q$, the point $\xvec_q$ was discarded because some
@@ -105,15 +106,18 @@ Graph search in RAM is fast, but a billion 128-dimensional float vectors with th
 DiskANN keeps the graph and the full-precision vectors on a solid-state drive (SSD), and only
 <NoteLink to="product-quantisation">product-quantisation</NoteLink> codes in RAM <Cite id="subramanya2019" />.
 
-- The product-quantisation (PQ) codes guide the search: they estimate which nodes to expand next without reading the disk.
+- The product-quantisation (PQ) codes guide the search: they estimate which nodes to expand next without reading the
+  disk.
 - **Beam search** reads the neighbourhoods of the $W$ best frontier nodes in one round of parallel SSD reads. Small
   widths such as $W = 4$ balance latency and throughput.
 - A node's full vector is stored in the same 4 KB sector as its adjacency list, so reading a neighbourhood also fetches
   the exact vector. The final results are re-ranked with exact distances at no extra I/O.
-- Vamana's long edges reduce the number of hops, which matters more on disk than in RAM because each hop costs a round trip to the SSD.
+- Vamana's long edges reduce the number of hops, which matters more on disk than in RAM because each hop costs a round
+  trip to the SSD.
 
-On the billion-point <NoteLink to="meta-vector-search-research">SIFT1B</NoteLink> dataset, DiskANN reports more than 5000 <NoteLink to="approximate-nearest-neighbour-benchmarking">queries per second</NoteLink> with mean latency under 3 ms and
-1-recall@1 above 95%, on a 16-core workstation with 64 GB of RAM and an SSD <Cite id="subramanya2019" />.
+On the billion-point <NoteLink to="meta-vector-search-research">SIFT1B</NoteLink> dataset, DiskANN reports more than
+5000 <NoteLink to="approximate-nearest-neighbour-benchmarking">queries per second</NoteLink> with mean latency under 3
+ms and 1-recall@1 above 95%, on a 16-core workstation with 64 GB of RAM and an SSD <Cite id="subramanya2019" />.
 
 **FreshDiskANN** supports insertions and deletions. A deleted point goes on a delete list and is still used for
 navigation but filtered from results. After 1 to 10% of the index has been deleted, a batch step gives every node that
@@ -142,8 +146,8 @@ a relative neighbourhood graph that the search then walks <Cite id="sptag" />.
 
 ## Assumptions
 
-- **A metric that behaves.** The pruning arguments use the triangle inequality. Graph indexes are also used for <NoteLink to="dot-product">inner
-  products</NoteLink>, which are not metrics, and then work only empirically (see
+- **A metric that behaves.** The pruning arguments use the triangle inequality. Graph indexes are also used for
+  <NoteLink to="dot-product">inner products</NoteLink>, which are not metrics, and then work only empirically (see
   <NoteLink to="maximum-inner-product-search">maximum inner product search</NoteLink>).
 - **Queries like the data.** The graph is shaped by the stored points. Queries from a different distribution, such as
   text queries against image embeddings, need more expansions for the same recall.
@@ -151,8 +155,8 @@ a relative neighbourhood graph that the search then walks <Cite id="sptag" />.
 ## Pitfalls
 
 - **Memory for edges.** Degree $R = 64$ with 4-byte ids costs 256 bytes per vector, as much as 64 floats.
-- **Construction cost.** Each insertion is a search plus pruning. A billion-point graph takes days to build. DiskANN built
-  one in about 2 days on a machine with 1.1 TB of RAM, or in about 5 days on a 64 GB workstation by building 40
+- **Construction cost.** Each insertion is a search plus pruning. A billion-point graph takes days to build. DiskANN
+  built one in about 2 days on a machine with 1.1 TB of RAM, or in about 5 days on a 64 GB workstation by building 40
   overlapping shards and merging their edges <Cite id="subramanya2019" />.
 - **Deletion.** Removing a node can disconnect the graph. Most libraries mark nodes as deleted and skip them, which
   slowly degrades recall until the graph is repaired or rebuilt.

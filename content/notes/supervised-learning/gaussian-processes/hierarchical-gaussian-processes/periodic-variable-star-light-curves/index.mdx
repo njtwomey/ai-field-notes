@@ -15,13 +15,14 @@ import { StarAnomaly } from './StarAnomaly'
 
 <Definition>
 The data are light curves of periodic variable stars from the Optical Gravitational Lensing Experiment (OGLE), as
-distributed by the UCR time-series archive <Cite id="dau2019" />: 1329 Cepheids (CEPH), 2580 eclipsing binaries (EB) and 5326 RR Lyrae
-(RRL), each a single phase-folded period resampled to 1024 points <Cite id="twomey2019" />. Some curves may carry the
-wrong class label. The task is to rank the curves of a class so that curves that do not conform to the class come
-first. The method is to fit a <NoteLink to="hierarchical-gaussian-process">hierarchical Gaussian process</NoteLink> to
-training curves of the class and score each curve by its negative log <NoteLink to="law-of-total-probability">marginal likelihood</NoteLink> under that model
-<Cite id="twomey2019" />. With labels available, EB curves are planted as known anomalies among CEPH and RRL curves,
-and the ranking is scored by precision.
+distributed by the UCR time-series archive <Cite id="dau2019" />: 1329 Cepheids (CEPH), 2580 eclipsing binaries (EB) and
+5326 RR Lyrae (RRL), each a single phase-folded period resampled to 1024 points <Cite id="twomey2019" />. Some curves
+may carry the wrong class label. The task is to rank the curves of a class so that curves that do not conform to the
+class come first. The method is to fit a <NoteLink to="hierarchical-gaussian-process">hierarchical Gaussian
+process</NoteLink> to training curves of the class and score each curve by its negative log
+<NoteLink to="law-of-total-probability">marginal likelihood</NoteLink> under that model <Cite id="twomey2019" />. With
+labels available, EB curves are planted as known anomalies among CEPH and RRL curves, and the ranking is scored by
+precision.
 </Definition>
 
 ## Setup
@@ -54,9 +55,9 @@ $$
 $$
 
 Plotting brightness against $\phi_k$ folds all cycles onto one. Choosing $t_0$ at a fixed feature, such as maximum
-brightness, aligns the phases of different stars. The folded curve is then resampled onto a fixed grid.
-In the <Gloss name="ucr-archive" /> version of the OGLE data every curve has 1024 points and all curves share the same start and end
-<Cite id="twomey2019" />.
+brightness, aligns the phases of different stars. The folded curve is then resampled onto a fixed grid. In the
+<Gloss name="ucr-archive" /> version of the OGLE data every curve has 1024 points and all curves share the same start
+and end <Cite id="twomey2019" />.
 
 ### The class model
 
@@ -81,25 +82,26 @@ $$
 S(\yvec_*) = -\ln p(\yvec_* \mid \xvec_*, \thetavec),
 $$
 
-the negative log marginal likelihood under the class model with hyperparameters $\thetavec$ inferred from the
-training curves <Cite id="twomey2019" />. Under the model a new star is a new replicate, so its curve is Gaussian with
-mean equal to the posterior mean of $g$ and covariance equal to the posterior covariance of $g$ plus
-$\Kmat_f + \tau^{-1}\eye$. The derivation and the reading of $S$ as a Mahalanobis distance are in
-<NoteLink to="hierarchical-gaussian-process-anomaly-detection">HGP anomaly detection</NoteLink>. The method is called HGPAD.
+the negative log marginal likelihood under the class model with hyperparameters $\thetavec$ inferred from the training
+curves <Cite id="twomey2019" />. Under the model a new star is a new replicate, so its curve is Gaussian with mean equal
+to the posterior mean of $g$ and covariance equal to the posterior covariance of $g$ plus $\Kmat_f + \tau^{-1}\eye$. The
+derivation and the reading of $S$ as a Mahalanobis distance are in
+<NoteLink to="hierarchical-gaussian-process-anomaly-detection">HGP anomaly detection</NoteLink>. The method is called
+HGPAD.
 
 ## Solution
 
 ### Periodic or non-periodic kernel
 
-The curves are periodic, so a periodic covariance function on the shared level $k_g$ is the obvious candidate. It
-buys little here. Each folded curve holds exactly one period, so there is no repetition within a curve for a periodic
-kernel to exploit. Twomey et al. tried a periodic Matérn 3/2 kernel for $k_g$ <Cite id="twomey2019" />. The optimiser
-usually settled on a short period that fits local wiggles rather than the one long cycle, with a lower log marginal
-likelihood than the plain Matérn kernel. A solution with the correct period and a slightly higher marginal likelihood
-existed, but only appeared after tens of random restarts and had implausibly tight error bars. The non-periodic Matérn
-kernel was chosen because it is the one the optimiser reliably finds. The episode shows two properties of
-<NoteLink to="gaussian-process-hyperparameter-learning">marginal-likelihood model selection</NoteLink>: a kernel that matches the
-physics need not match the data layout, and the marginal likelihood has several local optima.
+The curves are periodic, so a periodic covariance function on the shared level $k_g$ is the obvious candidate. It buys
+little here. Each folded curve holds exactly one period, so there is no repetition within a curve for a periodic kernel
+to exploit. Twomey et al. tried a periodic Matérn 3/2 kernel for $k_g$ <Cite id="twomey2019" />. The optimiser usually
+settled on a short period that fits local wiggles rather than the one long cycle, with a lower log marginal likelihood
+than the plain Matérn kernel. A solution with the correct period and a slightly higher marginal likelihood existed, but
+only appeared after tens of random restarts and had implausibly tight error bars. The non-periodic Matérn kernel was
+chosen because it is the one the optimiser reliably finds. The episode shows two properties of
+<NoteLink to="gaussian-process-hyperparameter-learning">marginal-likelihood model selection</NoteLink>: a kernel that
+matches the physics need not match the data layout, and the marginal likelihood has several local optima.
 
 ### Evaluation with planted anomalies
 
@@ -108,12 +110,12 @@ the inliers and a few EB curves, whose flat-with-dips shape differs clearly, are
 With $n_a$ planted anomalies, precision is the fraction of anomalies among the $n_a$ highest-scoring curves (see
 <NoteLink to="evaluating-anomaly-detectors">evaluating anomaly detectors</NoteLink>).
 
-HGPAD reached a precision of 0.99 on the OGLE curves when trained on about seven curves, 1% of the available
-training curves <Cite id="twomey2019" />. A <NoteLink to="k-means">$k$-means</NoteLink> detector with a cross-correlation
-distance, designed for periodic light curves <Cite id="rebbapragada2009" />, found far fewer of the planted curves.
-Two properties of the HGP explain the gap. The posterior over $g$ carries its own uncertainty, so a handful of training
-curves does not overfit. The score uses the full covariance between phase points, so it weighs a departure by how
-often class members show it, where a centroid distance weighs every departure equally.
+HGPAD reached a precision of 0.99 on the OGLE curves when trained on about seven curves, 1% of the available training
+curves <Cite id="twomey2019" />. A <NoteLink to="k-means">$k$-means</NoteLink> detector with a cross-correlation
+distance, designed for periodic light curves <Cite id="rebbapragada2009" />, found far fewer of the planted curves. Two
+properties of the HGP explain the gap. The posterior over $g$ carries its own uncertainty, so a handful of training
+curves does not overfit. The score uses the full covariance between phase points, so it weighs a departure by how often
+class members show it, where a centroid distance weighs every departure equally.
 
 The same protocol measures robustness to contaminated training data. A first model fitted to a small sample ranks a
 validation set, and the fraction $Q$ with the lowest scores trains a second model. Precision stays high for small $Q$
@@ -148,7 +150,8 @@ comparison is point by point in phase, so misalignment looks the same as a chang
   <NoteLink to="hierarchical-gaussian-process">hierarchical Gaussian process</NoteLink>. The model separates the class
   shape, the star-to-star variation and the measurement noise.
 - **Likelihood as an anomaly score.** The score is a log predictive density, and on a common grid it ranks curves by a
-  Mahalanobis distance from the class prediction (see <NoteLink to="hierarchical-gaussian-process-anomaly-detection">HGP anomaly detection</NoteLink>).
+  Mahalanobis distance from the class prediction (see <NoteLink to="hierarchical-gaussian-process-anomaly-detection">HGP
+  anomaly detection</NoteLink>).
 - **Phase folding before comparison.** The comparison is point by point in phase, so period estimation with the
   <NoteLink to="lomb-scargle-periodogram">Lomb–Scargle periodogram</NoteLink> and a common epoch are prerequisites.
 - **Kernel choice by marginal likelihood.** The periodic kernel matches the physics but not the data layout of one
@@ -156,7 +159,8 @@ comparison is point by point in phase, so misalignment looks the same as a chang
   <NoteLink to="covariance-functions">covariance functions</NoteLink> and
   <NoteLink to="gaussian-process-hyperparameter-learning">hyperparameter learning</NoteLink>).
 - **Evaluation with planted anomalies.** Precision in the top $n_a$ is measured by planting a known class as anomalies,
-  and training contamination lowers it (see <NoteLink to="evaluating-anomaly-detectors">evaluating anomaly detectors</NoteLink>).
+  and training contamination lowers it (see <NoteLink to="evaluating-anomaly-detectors">evaluating anomaly
+  detectors</NoteLink>).
 
 ## Variations
 

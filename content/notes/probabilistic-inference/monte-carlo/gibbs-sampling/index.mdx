@@ -11,6 +11,7 @@ status: draft
 updated: 2026-09-27
 ---
 
+import { GibbsFactorGraph } from './GibbsFactorGraph'
 import { GibbsGaussian } from './GibbsGaussian'
 
 <Definition>
@@ -28,12 +29,12 @@ the current values of the others. The chain has $\pi$ as its stationary distribu
 
 ## Problem
 
-Sampling a high-dimensional joint distribution directly is hard, but its one-dimensional conditionals are often easy.
-In a <NoteLink to="bayesian-network">Bayesian network</NoteLink> or a
-<NoteLink to="markov-random-field">Markov random field</NoteLink>, the full conditional of a variable depends only on
-its Markov blanket, and in conjugate Bayesian models it is a standard distribution. Gibbs sampling builds a
-<NoteLink to="markov-chain-monte-carlo">Markov chain Monte Carlo</NoteLink> sampler from these conditionals alone,
-with no proposal to tune and no rejections.
+Sampling a high-dimensional joint distribution directly is hard, but its one-dimensional conditionals are often easy. In
+a <NoteLink to="bayesian-network">Bayesian network</NoteLink> or a <NoteLink to="markov-random-field">Markov random
+field</NoteLink>, the full conditional of a variable depends only on its <Gloss name="markov-blanket">Markov
+blanket</Gloss>, and in conjugate Bayesian models it is a standard distribution. Gibbs sampling builds a
+<NoteLink to="markov-chain-monte-carlo">Markov chain Monte Carlo</NoteLink> sampler from these conditionals alone, with
+no proposal to tune and no rejections.
 
 ## Invariance of the target distribution
 
@@ -61,7 +62,8 @@ no single-coordinate update can move either variable.
 The full conditional is proportional to the joint as a function of $x_j$, so every factor that does not contain $x_j$
 cancels. In a Markov random field only the potentials that touch $x_j$ remain.
 
-**<NoteLink to="ising-model">Ising model</NoteLink>.** With spins $x_i \in \set{-1, +1}$, couplings $J$ between neighbours and field $h$,
+**<NoteLink to="ising-model">Ising model</NoteLink>.** With spins $x_i \in \set{-1, +1}$, couplings $J$ between
+neighbours and field $h$,
 
 $$
 \pi(x_i = +1 \mid \xvec_{-i}) = \frac{e^{a_i}}{e^{a_i} + e^{-a_i}} = \frac{1}{1 + e^{-2 a_i}}, \qquad
@@ -73,21 +75,86 @@ algorithm of statistical physics, which Geman and Geman applied to image restora
 
 ## Worked example: a correlated Gaussian
 
-Let $(x_1, x_2)$ be Gaussian with zero means, unit variances and correlation $\rho$. The full conditionals are
+**From covariance to correlation.** Let $(y_1, y_2)$ be jointly Gaussian with means $\mu_1, \mu_2$, variances
+$\sigma_1^2, \sigma_2^2$ and covariance $\sigma_{12}$. Their correlation is $\rho = \sigma_{12}/(\sigma_1\sigma_2)$,
+which lies in $[-1, 1]$ by the <NoteLink to="dot-product">Cauchy–Schwarz inequality</NoteLink>. Standardise each
+coordinate, $x_i = (y_i - \mu_i)/\sigma_i$. Each $x_i$ has mean 0 and variance 1, and
+$\cov(x_1, x_2) = \sigma_{12}/(\sigma_1\sigma_2) = \rho$. The covariance matrix of $\xvec = (x_1, x_2)$ is therefore the
+correlation matrix
+
+$$
+\Sigmamat = \begin{pmatrix} 1 & \rho \\ \rho & 1 \end{pmatrix}, \qquad \det\Sigmamat = 1 - \rho^2, \qquad
+\Sigmamat^{-1} = \frac{1}{1 - \rho^2}\begin{pmatrix} 1 & -\rho \\ -\rho & 1 \end{pmatrix}.
+$$
+
+For $\abs{\rho} < 1$ the joint density is the <NoteLink to="multivariate-normal-distribution">multivariate
+normal</NoteLink> density with the <NoteLink to="positive-definite-matrices">quadratic form</NoteLink>
+$\xvec\transpose\Sigmamat^{-1}\xvec$ written out:
+
+$$
+p(x_1, x_2) = \frac{1}{2\pi\sqrt{1 - \rho^2}}\exp\paren{-\frac{x_1^2 - 2\rho\, x_1 x_2 + x_2^2}{2(1 - \rho^2)}}.
+$$
+
+**The full conditionals.** The conditional density is $p(x_1 \mid x_2) = p(x_1, x_2)/p(x_2)$, and $p(x_2)$ does not
+depend on $x_1$. As a function of $x_1$ the conditional is therefore proportional to the joint density.
+<NoteLink to="completing-the-square">Complete the square</NoteLink> in $x_1$:
+
+$$
+x_1^2 - 2\rho\, x_1 x_2 + x_2^2 = (x_1 - \rho\, x_2)^2 + (1 - \rho^2)\, x_2^2.
+$$
+
+The second term does not involve $x_1$, so it joins the normalising constant:
+
+$$
+p(x_1 \mid x_2) \propto \exp\paren{-\frac{(x_1 - \rho\, x_2)^2}{2(1 - \rho^2)}}.
+$$
+
+This is a Gaussian density in $x_1$ with mean $\rho\, x_2$ and variance $1 - \rho^2$. The joint density is symmetric in
+$x_1$ and $x_2$, so the same argument with the roles swapped gives the other conditional. The full conditionals are
 
 $$
 x_1 \mid x_2 \sim \Gauss(\rho\, x_2,\ 1 - \rho^2), \qquad x_2 \mid x_1 \sim \Gauss(\rho\, x_1,\ 1 - \rho^2).
 $$
 
-A sweep draws $x_1' = \rho\, x_2 + \sqrt{1 - \rho^2}\,\epsilon_1$, then $x_2' = \rho\, x_1' + \sqrt{1 - \rho^2}\,\epsilon_2$
-with $\epsilon_1, \epsilon_2 \sim \Gauss(0, 1)$. Substituting the previous sweep's $x_2 = \rho\, x_1 + \dots$ shows that
-the sequence of $x_1$ values is an autoregressive process,
+Knowing $x_2$ shifts the mean of $x_1$ by $\rho$ standard deviations per standard deviation of $x_2$, and shrinks its
+variance from 1 to $1 - \rho^2$. Undoing the standardisation gives the general form,
+$y_1 \mid y_2 \sim \Gauss\paren{\mu_1 + \rho\,\frac{\sigma_1}{\sigma_2}(y_2 - \mu_2),\ \sigma_1^2(1 - \rho^2)}$.
+
+**The same result from the <NoteLink to="factor-graph">factor graph</NoteLink>.** Multiplying out the quadratic form
+splits the joint density into three factors, one for each entry of the <Gloss name="precision-matrix">precision
+matrix</Gloss> $\Lambdamat = \Sigmamat^{-1}$:
+
+$$
+p(x_1, x_2) \propto \underbrace{e^{-x_1^2/(2(1 - \rho^2))}}_{\phi_1(x_1)}\;
+\underbrace{e^{-x_2^2/(2(1 - \rho^2))}}_{\phi_2(x_2)}\;
+\underbrace{e^{\rho\, x_1 x_2/(1 - \rho^2)}}_{\psi_{12}(x_1, x_2)}.
+$$
+
+The full conditional of $x_1$ is proportional to the product of the factors that involve $x_1$, here
+$\phi_1\psi_{12}$. The factor $\phi_2$ is constant in $x_1$ and drops out: it is the $(1 - \rho^2)x_2^2$ term that the
+completed square discarded. The other variables that those factors touch form the Markov blanket of $x_1$, here
+$\set{x_2}$. The same argument holds for a zero-mean Gaussian in any dimension:
+
+$$
+x_j \mid \xvec_{-j} \sim \Gauss\paren{-\frac{1}{\Lambda_{jj}}\sum_{k \ne j}\Lambda_{jk}\, x_k,\ \frac{1}{\Lambda_{jj}}}.
+$$
+
+The Markov blanket of $x_j$ is the set of $x_k$ with $\Lambda_{jk} \ne 0$, so a Gibbs update reads only the neighbours
+of $x_j$ in the graph. In the bivariate case $\Lambda_{11} = 1/(1 - \rho^2)$ and $\Lambda_{12} = -\rho/(1 - \rho^2)$,
+which give the mean $\rho\, x_2$ and the variance $1 - \rho^2$ found above.
+
+<GibbsFactorGraph />
+
+A sweep draws $x_1' = \rho\, x_2 + \sqrt{1 - \rho^2}\,\epsilon_1$, then
+$x_2' = \rho\, x_1' + \sqrt{1 - \rho^2}\,\epsilon_2$ with $\epsilon_1, \epsilon_2 \sim \Gauss(0, 1)$. Substituting the
+previous sweep's $x_2 = \rho\, x_1 + \dots$ shows that the sequence of $x_1$ values is an autoregressive process,
 
 $$
 x_1^{(t+1)} = \rho^2\, x_1^{(t)} + \text{independent Gaussian noise},
 $$
 
-with lag-$k$ autocorrelation $\rho^{2k}$. Its <NoteLink to="markov-chain-monte-carlo-diagnostics">integrated autocorrelation time</NoteLink> is
+with lag-$k$ autocorrelation $\rho^{2k}$. Its <NoteLink to="markov-chain-monte-carlo-diagnostics">integrated
+autocorrelation time</NoteLink> is
 
 $$
 \tau = 1 + 2\sum_{k=1}^{\infty} \rho^{2k} = \frac{1 + \rho^2}{1 - \rho^2}.
@@ -103,16 +170,18 @@ explore a distance of 1.41 only by a slow <NoteLink to="random-walk">random walk
 ## Variants
 
 - **Blocked Gibbs.** Sample strongly dependent variables jointly from their conditional given the rest. In the example,
-  drawing $(x_1, x_2)$ jointly gives independent samples. In a <Gloss name="hmm">hidden Markov model</Gloss>, the whole state sequence can be
-  drawn at once by forward filtering and backward sampling.
+  drawing $(x_1, x_2)$ jointly gives independent samples. In a <Gloss name="hmm">hidden Markov model</Gloss>, the whole
+  state sequence can be drawn at once by forward filtering and backward sampling.
 - **Collapsed Gibbs.** Integrate some variables out analytically and sample the rest from the resulting marginal. The
   sampler then works in a lower dimension, with less dependence, and never samples the integrated variables
-  <Cite id="liu1994collapsed" />. The standard sampler for <Gloss name="latent-dirichlet-allocation">latent Dirichlet allocation</Gloss> integrates out the topic
-  proportions and word distributions and resamples only the topic of each word <Cite id="griffiths2004" />.
+  <Cite id="liu1994collapsed" />. The standard sampler for <Gloss name="latent-dirichlet-allocation">latent Dirichlet
+  allocation</Gloss> integrates out the topic proportions and word distributions and resamples only the topic of each
+  word <Cite id="griffiths2004" />.
 - **Metropolis-within-Gibbs.** When a full conditional cannot be sampled directly, replace its exact draw by one
   Metropolis–Hastings step that leaves that conditional invariant. The composition still leaves $\pi$ invariant.
-- **<NoteLink to="data-augmentation">Data augmentation</NoteLink>.** Add latent variables that make every full conditional a distribution
-  that can be sampled directly, such as the component labels of a mixture model, and sample them alongside the parameters.
+- **<NoteLink to="data-augmentation">Data augmentation</NoteLink>.** Add latent variables that make every full
+  conditional a distribution that can be sampled directly, such as the component labels of a mixture model, and sample
+  them alongside the parameters.
 
 ## Trade-offs
 
@@ -124,6 +193,6 @@ explore a distance of 1.41 only by a slow <NoteLink to="random-walk">random walk
   Carlo</NoteLink> moves along correlated directions directly.
 - **Multimodality.** In an Ising model with strong coupling, flipping from mostly $+1$ to mostly $-1$ requires passing
   through configurations of low probability, one spin at a time. The sampler can stay in one phase for a very long time.
-- **Relation to mean field.** <NoteLink to="mean-field-variational-inference">Mean-field variational inference</NoteLink>
-  has the same structure, visiting one variable at a time and using its Markov blanket, but it updates a distribution
-  over each variable deterministically instead of drawing a value.
+- **Relation to mean field.** <NoteLink to="mean-field-variational-inference">Mean-field variational
+  inference</NoteLink> has the same structure, visiting one variable at a time and using its Markov blanket, but it
+  updates a distribution over each variable deterministically instead of drawing a value.

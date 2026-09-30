@@ -13,7 +13,7 @@ import { linspace, rng } from '@/lib/math'
 
 const MAX_DEGREE = 14
 const MAX_N = 60
-const FITS = 20
+const MAX_FITS = 50
 const GRID = linspace(-1, 1, 161)
 const truth = (x: number) => Math.exp(-x) * Math.sin(5 * x)
 
@@ -91,12 +91,18 @@ export function BiasVariance() {
   const degree = useParam(3, { min: 0, max: MAX_DEGREE, step: 1 })
   const n = useParam(25, { min: 16, max: MAX_N, step: 1 })
   const sigma = useParam(0.4, { min: 0.05, max: 1, step: 0.05 })
+  const count = useParam(20, { min: 1, max: MAX_FITS, step: 1 })
 
-  // One fixed table of standard normals, so moving σ rescales the same noise rather than drawing new noise.
-  const noise = useMemo(() => {
-    const g = rng(11)
-    return Array.from({ length: FITS }, () => Array.from({ length: MAX_N }, () => g.normal()))
-  }, [])
+  // One fixed table of standard normals, so moving σ rescales the same noise rather than drawing new noise. Each
+  // training set has its own stream, so raising the count adds fits without changing the earlier ones.
+  const noise = useMemo(
+    () =>
+      Array.from({ length: MAX_FITS }, (_, k) => {
+        const g = rng(11 * 1000 + k)
+        return Array.from({ length: MAX_N }, () => g.normal())
+      }),
+    [],
+  )
   const fits = useMemo(() => analyse(n.value), [n.value])
   const s2 = sigma.value ** 2
   const curves = useMemo((): XYSeries[] => {
@@ -117,24 +123,33 @@ export function BiasVariance() {
   const chosen = fits[degree.value]
   const panel = useMemo((): XYSeries[] => {
     const xs = linspace(-1, 1, n.value)
+    const phi = GRID.map((x) => legendre(x, chosen.d))
     const fx: number[] = []
     const fy: number[] = []
-    for (let r = 0; r < FITS; r++) {
+    // All fits go in one series, separated by gaps, so the legend has one entry and the chart one line series.
+    for (let r = 0; r < count.value; r++) {
       const y = xs.map((x, i) => truth(x) + sigma.value * noise[r][i])
       const coef = chosen.project(y)
-      GRID.forEach((x) => {
+      GRID.forEach((x, g) => {
         fx.push(x)
-        fy.push(dot(legendre(x, chosen.d), coef))
+        fy.push(dot(phi[g], coef))
       })
       fx.push(NaN)
       fy.push(NaN)
     }
     return [
-      { name: `${FITS} fits to resampled data`, type: 'line', x: fx, y: fy, muted: true },
+      {
+        name: count.value > 1 ? `${count.value} fits to resampled data` : 'one fit to resampled data',
+        type: 'line',
+        x: fx,
+        y: fy,
+        slot: 1,
+        thin: count.value > 1,
+      },
       { name: 'average fit', type: 'line', x: GRID, y: chosen.meanFit, slot: 0 },
       { name: 'true function', type: 'line', x: GRID, y: GRID.map(truth), emphasis: true, dashed: true },
     ]
-  }, [chosen, n.value, sigma.value, noise])
+  }, [chosen, n.value, sigma.value, noise, count.value])
 
   const handles: Handle[] = [{ kind: 'x', at: degree.value, label: 'degree', onDrag: (x) => degree.set(x) }]
   const bias2 = chosen.bias2
@@ -143,12 +158,13 @@ export function BiasVariance() {
   return (
     <Interactive
       title="Bias and variance of polynomial fits"
-      caption="The true function is e^(−x) sin 5x on n equally spaced inputs, with Gaussian noise of standard deviation σ. Left: least-squares fits of the chosen degree to 20 independent noisy datasets (grey), their average (coloured) and the truth (dashed). Right: bias² and variance averaged over x, computed exactly, against degree (log scale). Low degrees miss the shape in the same way every time; high degrees follow the noise and differ from dataset to dataset. Drag the degree line on the right or use the slider."
+      caption="The true function is e^(−x) sin 5x on n equally spaced inputs, with Gaussian noise of standard deviation σ. Left: least-squares fits of the chosen degree to independent noisy datasets (light lines; the training sets slider sets how many), the exact average fit over all datasets (solid) and the truth (dashed). Right: bias² and variance averaged over x, computed exactly, against degree (log scale). Low degrees miss the shape in the same way every time; high degrees follow the noise and differ from dataset to dataset. Drag the degree line on the right or use the slider."
       controls={
         <>
           <ParamSlider label="polynomial degree" param={degree} format={(v) => String(v)} withArrows />
           <ParamSlider label="training points n" param={n} format={(v) => String(v)} />
           <ParamSlider label="noise σ" param={sigma} />
+          <ParamSlider label="training sets" param={count} withArrows format={(v) => String(v)} />
         </>
       }
       readout={

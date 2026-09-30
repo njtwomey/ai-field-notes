@@ -15,11 +15,11 @@ updated: 2026-09-27
 import { ShapeConstrained } from './ShapeConstrained'
 
 <Definition>
-A **shape-constrained** smooth term $f_j$ of a <Gloss name="gam" /> is required to be monotone increasing ($f_j' \ge 0$), monotone
-decreasing ($f_j' \le 0$), convex ($f_j'' \ge 0$) or concave ($f_j'' \le 0$) on the range of its covariate, or to satisfy
-several of these together. With a <NoteLink to="b-splines">B-spline basis</NoteLink> $f_j(x) = \sum_k\beta_kB_k(x)$, each shape follows from a sign
-condition on the differences of the coefficients $\beta_k$, which the fit enforces by penalty or by reparameterisation
-<Cite id="pya2015" />.
+A **shape-constrained** smooth term $f_j$ of a <Gloss name="gam" /> is required to be monotone increasing
+($f_j' \ge 0$), monotone decreasing ($f_j' \le 0$), convex ($f_j'' \ge 0$) or concave ($f_j'' \le 0$) on the range of
+its covariate, or to satisfy several of these together. With a <NoteLink to="b-splines">B-spline basis</NoteLink>
+$f_j(x) = \sum_k\beta_kB_k(x)$, each shape follows from a sign condition on the differences of the coefficients
+$\beta_k$, which the fit enforces by penalty or by reparameterisation <Cite id="pya2015" />.
 </Definition>
 
 ## Why constrain the shape
@@ -36,15 +36,16 @@ decreases somewhere replaces that part with a flat segment.
 
 ## The derivative of a B-spline expansion
 
-Consider cubic B-splines on evenly spaced knots with spacing $h$, as in <NoteLink to="p-splines">P-splines</NoteLink>. Every
-basis function is a shifted copy of one **cardinal** B-spline, $B_k(x) = M_3((x - x_0)/h - k)$. The cardinal B-splines of
-increasing degree come from repeated averaging over a unit window. $M_0$ is the indicator of $[0, 1)$, and
+Consider cubic B-splines on evenly spaced knots with spacing $h$, as in <NoteLink to="p-splines">P-splines</NoteLink>.
+Every basis function is a shifted copy of one **cardinal** B-spline, $B_k(x) = M_3((x - x_0)/h - k)$. The cardinal
+B-splines of increasing degree come from repeated averaging over a unit window. $M_0$ is the indicator of $[0, 1)$, and
 
 $$
 M_p(u) = \int_{u-1}^{u}M_{p-1}(s)\,ds.
 $$
 
-The <NoteLink to="fundamental-theorem-of-calculus">fundamental theorem of calculus</NoteLink> gives the <NoteLink to="derivative">derivative</NoteLink> directly:
+The <NoteLink to="fundamental-theorem-of-calculus">fundamental theorem of calculus</NoteLink> gives the
+<NoteLink to="derivative">derivative</NoteLink> directly:
 
 $$
 M_p'(u) = M_{p-1}(u) - M_{p-1}(u - 1).
@@ -68,8 +69,8 @@ f''(x) = \frac{1}{h^2}\sum_k\Delta^2\beta_k\,M_1(u - k), \qquad \Delta^2\beta_k 
 $$
 
 **Monotonicity.** B-splines are non-negative. If every $\Delta\beta_k \ge 0$, then $f'(x)$ is a sum of non-negative
-terms, and $f$ is non-decreasing. The condition is sufficient but not necessary. Take six cubic B-splines on $[0, 3]$ with
-$h = 1$ and $\betavec = (0, 1, 2, 1.9, 2.9, 3.9)$, so $\Delta\betavec = (1, 1, -0.1, 1, 1)$. The quadratic B-spline
+terms, and $f$ is non-decreasing. The condition is sufficient but not necessary. Take six cubic B-splines on $[0, 3]$
+with $h = 1$ and $\betavec = (0, 1, 2, 1.9, 2.9, 3.9)$, so $\Delta\betavec = (1, 1, -0.1, 1, 1)$. The quadratic B-spline
 $M_2$ takes the values $\tfrac12, \tfrac12$ at the knots of its support and $\tfrac18, \tfrac68, \tfrac18$ at the
 midpoints of its three intervals. So $f'(1) = (1 - 0.1)/2 = 0.45$, and at the midpoint $x = 1.5$,
 $f'(1.5) = (1 \times 1 - 0.1 \times 6 + 1 \times 1)/8 = 0.175$. The derivative stays positive although one difference is
@@ -77,39 +78,43 @@ negative.
 
 **Convexity.** $M_1$ is the hat function: 1 at one knot, 0 at the neighbouring knots, linear in between. At each knot
 exactly one hat equals 1, so $f''$ at that knot equals $\Delta^2\beta_k/h^2$ for one $k$, and $f''$ is linear between
-knots. Hence $f'' \ge 0$ on the whole range if and only if $\Delta^2\beta_k \ge 0$ at every knot in the range. A basis of $K$ cubic
-B-splines covering $[a, b]$ with $K - 3$ intervals has $K - 2$ knots in $[a, b]$ and $K - 2$ second differences, one per
-knot.
+knots. Hence $f'' \ge 0$ on the whole range if and only if $\Delta^2\beta_k \ge 0$ at every knot in the range. A basis
+of $K$ cubic B-splines covering $[a, b]$ with $K - 3$ intervals has $K - 2$ knots in $[a, b]$ and $K - 2$ second
+differences, one per knot.
 
 Decreasing and concave shapes flip the signs. Shapes combine by imposing both sets of conditions: an increasing,
 concave curve needs $\Delta\beta_k \ge 0$ and $\Delta^2\beta_k \le 0$.
 
 ## Enforcing a constraint with a penalty
 
-<NoteLink to="generalised-additive-models-in-practice">pyGAM</NoteLink> accepts `constraints='monotonic_inc'`, `'monotonic_dec'`, `'convex'` or `'concave'` on a spline term, or a list
-of several. It enforces them with an **asymmetric penalty** that switches on only for violated differences
-<Cite id="serven2018" />, the scheme of Bollaerts, Eilers and van Mechelen <Cite id="bollaerts2006" />. For
-`monotonic_inc`, with current coefficients $\hat\betavec$, let $V = \set{k : \Delta\hat\beta_k < 0}$ be the violated
-differences, and let $\dvec_k$ be the row of the first-difference matrix with $\dvec_k^\top\betavec = \Delta\beta_k$. The
-constraint adds
+<NoteLink to="generalised-additive-models-in-practice">pyGAM</NoteLink> accepts `constraints='monotonic_inc'`,
+`'monotonic_dec'`, `'convex'` or `'concave'` on a spline term, or a list of several. It enforces them with an
+**asymmetric penalty** that switches on only for violated differences <Cite id="serven2018" />, the scheme of Bollaerts,
+Eilers and van Mechelen <Cite id="bollaerts2006" />. For `monotonic_inc`, with current coefficients $\hat\betavec$, let
+$V = \set{k : \Delta\hat\beta_k < 0}$ be the violated differences, and let $\dvec_k$ be the row of the first-difference
+matrix with $\dvec_k^\top\betavec = \Delta\beta_k$. The constraint adds
 
 $$
 \betavec^\top\Cmat\betavec = \lambda_c\sum_{k \in V}\paren{\Delta\beta_k}^2 + \epsilon\norm{\betavec}^2, \qquad \Cmat =
 \lambda_c\sum_{k \in V}\dvec_k\dvec_k^\top + \epsilon\eye,
 $$
 
-to the smoothing penalty, with $\lambda_c = 10^9$ and a diagonal loading $\epsilon = 10^{-3}$ for numerical conditioning,
-added only when $V$ is not empty. The other constraints use second differences and the opposite signs. pyGAM rebuilds $V$
-and $\Cmat$ from the current coefficients at every <NoteLink to="penalised-iteratively-reweighted-least-squares">penalised iteratively reweighted least squares (IRLS)</NoteLink>
-iteration, refactorises, and stops when the coefficients stop changing. For a tensor-product term it applies the
-marginal constraint to every slice of the coefficient array along that margin.
+to the smoothing penalty, with $\lambda_c = 10^9$ and a diagonal loading $\epsilon = 10^{-3}$ for numerical
+conditioning, added only when $V$ is not empty. The other constraints use second differences and the opposite signs.
+pyGAM rebuilds $V$ and $\Cmat$ from the current coefficients at every
+<NoteLink to="penalised-iteratively-reweighted-least-squares">penalised iteratively reweighted least squares
+(IRLS)</NoteLink> iteration, refactorises, and stops when the coefficients stop changing. For a tensor-product term it
+applies the marginal constraint to every slice of the coefficient array along that margin.
 
-The fit is an <NoteLink to="quadratic-programming">active-set method</NoteLink> with a quadratic penalty. Differences that were violated are pushed to nearly zero, so
-the curve has flat segments where the data would have it decrease. They stay slightly negative, of order $1/\lambda_c$
-relative to the data scale: the penalty approximates the constraint and does not impose it exactly. Differences that
-satisfy the constraint are left to the ordinary smoothing penalty. The method adds nothing to the fitting machinery
-beyond a changing <NoteLink to="penalty-and-barrier-methods">quadratic penalty</NoteLink>. <NoteLink to="standard-error">Standard errors</NoteLink> and <NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink> computed from the final penalised
-system treat the <NoteLink to="karush-kuhn-tucker-conditions">active set</NoteLink> as fixed, although it was chosen from the data.
+The fit is an <NoteLink to="quadratic-programming">active-set method</NoteLink> with a quadratic penalty. Differences
+that were violated are pushed to nearly zero, so the curve has flat segments where the data would have it decrease. They
+stay slightly negative, of order $1/\lambda_c$ relative to the data scale: the penalty approximates the constraint and
+does not impose it exactly. Differences that satisfy the constraint are left to the ordinary smoothing penalty. The
+method adds nothing to the fitting machinery beyond a changing <NoteLink to="penalty-and-barrier-methods">quadratic
+penalty</NoteLink>. <NoteLink to="standard-error">Standard errors</NoteLink> and
+<NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink> computed from the final penalised
+system treat the <NoteLink to="karush-kuhn-tucker-conditions">active set</NoteLink> as fixed, although it was chosen
+from the data.
 
 <ShapeConstrained />
 
@@ -129,8 +134,9 @@ idea one level down: the second differences are the exponentials. The penalty ac
 parameters, so heavy smoothing drives all the increments $e^{\gamma_k}$ to a common value and the fit to a straight
 line.
 
-The model is no longer linear in its parameters. SCAM maximises the penalised likelihood by <NoteLink to="newtons-method">Newton's method</NoteLink> in
-$\gammavec$ and selects the smoothing parameters by <Gloss name="gcv" />, <Gloss name="ubre" /> or <Gloss name="aic" /> in an outer loop, as mgcv does for unconstrained
+The model is no longer linear in its parameters. SCAM maximises the penalised likelihood by
+<NoteLink to="newtons-method">Newton's method</NoteLink> in $\gammavec$ and selects the smoothing parameters by
+<Gloss name="gcv" />, <Gloss name="ubre" /> or <Gloss name="aic" /> in an outer loop, as mgcv does for unconstrained
 terms. The constraint holds exactly at every iteration. A flat segment corresponds to $\gamma_k \to -\infty$, which the
 optimiser can only approach.
 

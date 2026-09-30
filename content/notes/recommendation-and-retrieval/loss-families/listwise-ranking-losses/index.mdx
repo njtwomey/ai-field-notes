@@ -1,0 +1,321 @@
+---
+title: Listwise ranking losses
+kind: concept
+summary: 'A listwise ranking loss scores the whole candidate list at once. ListNet and softmax cross-entropy match the softmax of the scores to a target distribution, ListMLE maximises the Plackett–Luce likelihood of the ideal order, and ApproxNDCG and NeuralNDCG smooth the metric itself.'
+tags: [loss-functions, ranking, learning-to-rank, recommender-systems, information-retrieval, worked-example]
+aliases:
+  [
+    softmax cross-entropy ranking loss,
+    softmax loss for ranking,
+    top-one probability,
+    permutation probability,
+    Plackett–Luce loss,
+    position-aware ListMLE,
+    p-ListMLE,
+    top-k ListMLE,
+    ApproxNDCG,
+    NeuralNDCG,
+    SoftRank,
+    XE-NDCG,
+  ]
+requires: [softmax-and-log-sum-exp, plackett-luce-model, normalised-discounted-cumulative-gain]
+partOf: [recommendation-loss-families]
+related:
+  [
+    ranking-losses,
+    ranking-surrogates-and-metrics,
+    pairwise-ranking-losses,
+    sampled-softmax-and-negative-sampling,
+    contrastive-learning,
+    gumbel-max-trick,
+    sasrec,
+  ]
+references:
+  [
+    cao2007,
+    xia2008,
+    xia2009topk,
+    lan2014positionaware,
+    bruch2019softmax,
+    bruch2021xendcg,
+    qin2010approx,
+    taylor2008softrank,
+    grover2019neuralsort,
+    pobrotyn2021neuralndcg,
+    covington2016youtube,
+    yi2019sampling,
+    klenitskiy2023,
+  ]
+status: draft
+updated: 2026-09-30
+---
+
+import { RankingLossLab } from '../_shared/RankingLossLab'
+
+<Definition>
+A **listwise ranking loss** takes the scores $\svec = (s_1, \dots, s_n)$ that a model gives to all $n$ candidates of one
+query or user, together with their relevance labels $\yvec = (y_1, \dots, y_n)$, and returns a single number for the
+whole list. It is not a sum of independent per-item or per-pair terms. The main families are cross-entropies between the
+softmax of the scores and a target distribution (<Gloss name="listnet" />, softmax cross-entropy), likelihoods of the
+ideal order under the Plackett–Luce model (<Gloss name="listmle" />), and smoothed versions of a ranking metric
+(ApproxNDCG, SoftRank, NeuralNDCG).
+</Definition>
+
+## Intuition
+
+A ranking metric such as <Gloss name="ndcg" /> is a property of the whole list. Item $i$'s contribution depends on its
+rank, and its rank depends on every other score. A <NoteLink to="pointwise-recommendation-losses">pointwise
+loss</NoteLink> fits each label on its own. A pairwise loss scores each pair on its own. Neither sees that a mistake at
+rank 1 costs more than a mistake at rank 50.
+
+A listwise loss couples all the scores through a normaliser. The softmax $p_i = e^{s_i} / \sum_k e^{s_k}$ is the
+standard coupling: raising one score lowers every other item's probability. The
+<NoteLink to="gradient">gradient</NoteLink> of a softmax loss then concentrates on the items with the highest scores.
+Those are the items at the top of the list, where the metrics are decided.
+
+## Softmax cross-entropy and ListNet
+
+**ListNet** defines a probability distribution over permutations from the scores <Cite id="cao2007" />. The full
+distribution has $n!$ outcomes. ListNet uses its marginal over the first position instead, the **top-one
+probability**. For the exponential transformation of scores that marginal is the softmax:
+
+$$
+P_{\svec}(i) = \frac{e^{s_i}}{\sum_{k=1}^n e^{s_k}} \eqdef p_i.
+$$
+
+A target distribution $\tvec$ over the same $n$ items comes from the labels. The loss is the
+<NoteLink to="cross-entropy-and-perplexity">cross-entropy</NoteLink> from $\tvec$ to $\pvec$:
+
+$$
+L(\svec, \tvec) = -\sum_{i=1}^n t_i \ln p_i.
+$$
+
+The choice of target names the variant.
+
+| Variant | Target $t_i$ | Source |
+| --- | --- | --- |
+| ListNet (original) | $e^{y_i} / \sum_k e^{y_k}$ | <Cite id="cao2007" /> |
+| Softmax cross-entropy, label-normalised | $y_i / \sum_k y_k$ | <Cite id="bruch2019softmax" />, binary $y_i$ |
+| Single positive $+$ | $\indicator[i = +]$ | multiclass logistic loss |
+| XE-NDCG | $(2^{y_i} - \gamma_i) / \sum_k (2^{y_k} - \gamma_k)$, $\gamma_k \sim \Unif(0, 1)$ | <Cite id="bruch2021xendcg" /> |
+
+The label-normalised target puts zero mass on irrelevant items. ListNet's softmax of the labels gives an irrelevant
+item mass $e^0 / \sum_k e^{y_k}$, which is positive. XE-NDCG uses the NDCG gains $2^{y_i}$ and a random offset
+$\gamma_i$ drawn afresh at each step. Bruch shows that this target makes the loss a convex bound on NDCG
+<Cite id="bruch2021xendcg" />.
+
+**Gradient.** Write $\ln p_i = s_i - \ln\sum_k e^{s_k}$. Because $\sum_i t_i = 1$,
+
+$$
+L = -\sum_i t_i s_i + \ln\sum_{k} e^{s_k}.
+$$
+
+The first term is linear in the scores, with <NoteLink to="derivative">derivative</NoteLink> $-t_i$ with respect to
+$s_i$. The derivative of $\ln\sum_k e^{s_k}$ with respect to $s_i$ is $e^{s_i}/\sum_k e^{s_k} = p_i$. So
+
+$$
+\frac{\partial L}{\partial s_i} = p_i - t_i.
+$$
+
+<NoteLink to="gradient-descent">Gradient descent</NoteLink> raises item $i$ when the model gives it less top-one
+probability than the target does and lowers it otherwise. The gradients sum to $\sum_i p_i - \sum_i t_i = 0$. The loss
+is therefore unchanged by adding a constant to every score, and the scores carry order but no absolute scale. The loss
+is convex in $\svec$, because log-sum-exp is convex and the other term is linear.
+
+An irrelevant item $j$ (with $t_j = 0$) is pushed down with force $p_j$. That force is largest for the irrelevant items
+the model scores highest. Those are the items that sit at the top of the list and hurt the metrics most. A
+<NoteLink to="pairwise-ranking-losses">pairwise</NoteLink> logistic loss pushes the same item $j$ below a relevant item
+$i$ with force $\sigma(s_j - s_i)$, which depends only on the pair; the softmax force $p_j$ also depends on how $s_j$
+compares with all other scores.
+
+## One positive: the softmax over a candidate set
+
+Recommendation data often has one positive per list: the item clicked from a slate, the next item in a session, or
+the true pair in a batch of user–item pairs. The target is then one-hot on the positive $+$, and the loss reduces to
+
+$$
+L = -\ln\frac{e^{s_+}}{\sum_{k \in \Ccal} e^{s_k}} = -s_+ + \ln\sum_{k \in \Ccal} e^{s_k},
+$$
+
+with gradient $p_+ - 1$ on the positive and $p_j$ on every other candidate. This is the loss of
+<NoteLink to="multinomial-logistic-regression">multinomial logistic regression</NoteLink> with the candidate set $\Ccal$
+as the classes. With <NoteLink to="two-tower-model">in-batch negatives</NoteLink> and a temperature it is the
+<Gloss name="infonce" /> loss of <NoteLink to="contrastive-learning">contrastive learning</NoteLink>.
+
+The candidate set $\Ccal$ decides what the model learns to beat.
+
+- **The slate.** $\Ccal$ is the items shown on the page. The loss learns to reorder what an earlier stage retrieved.
+- **The whole catalogue.** $\Ccal$ is every item, as in <NoteLink to="sequential-recommendation-models">next-item
+  prediction</NoteLink>. A full softmax uses every item as a negative, and <NoteLink to="sasrec">SASRec</NoteLink>
+  trained with it outperforms the same model trained with one sampled negative and <Gloss name="bce">binary
+  cross-entropy</Gloss> <Cite id="klenitskiy2023" />.
+- **A sample.** When the catalogue is too large to normalise over, $\Ccal$ is the positive plus sampled negatives.
+  This is <NoteLink to="sampled-softmax-and-negative-sampling">sampled softmax</NoteLink>
+  <Cite id="covington2016youtube" />. If each of $m$ negatives is drawn from a proposal $q$, the sampled sum
+  $\sum_j e^{s_j}$ over-represents frequently sampled items. Dividing each sampled term by its expected count
+  $m q_j$ makes the sum an unbiased estimate of the full normaliser. In the logits that weight is the shift
+  $s_j - \ln(m q_j)$, the **<Gloss name="logq-correction">logQ correction</Gloss>** <Cite id="yi2019sampling" />.
+
+With several positives $\Pcal$ and target $t_i = 1/\abs{\Pcal}$ on each, the loss is the average of
+$-\ln p_i$ over the positives. Every positive then competes against the other positives in the shared normaliser. A
+common variant removes that competition: each positive $i$ gets its own term
+$-\ln\paren{e^{s_i} / \paren{e^{s_i} + \sum_{j \notin \Pcal} e^{s_j}}}$, contrasting it only with the negatives.
+
+## ListMLE: likelihood of the ideal order
+
+**ListMLE** treats the scores as the log-strengths of a <NoteLink to="plackett-luce-model">Plackett–Luce
+model</NoteLink>. The model builds a ranking top-down: it picks the first item with probability proportional to
+$e^{s_i}$, removes it, picks the second from the rest in the same way, and so on. Let $\pi$ be a permutation that sorts
+the items by decreasing label, with $\pi(k)$ the item at position $k$. ListMLE minimises the negative log-likelihood of
+$\pi$ <Cite id="xia2008" />:
+
+$$
+L(\svec, \pi) = -\sum_{k=1}^{n} \ln\frac{e^{s_{\pi(k)}}}{\sum_{l=k}^{n} e^{s_{\pi(l)}}}
+= \sum_{k=1}^{n}\paren{-s_{\pi(k)} + \ln\sum_{l=k}^{n} e^{s_{\pi(l)}}}.
+$$
+
+Each term is a single-positive softmax loss: the item that belongs at position $k$ against every item that belongs
+below it. A ranking drawn from this model has the same distribution as the order of the scores after adding independent
+standard Gumbel noise to each, by the <NoteLink to="gumbel-max-trick">Gumbel-max trick</NoteLink> applied at every
+step.
+
+**Gradient.** Write $p^{(k)}_i = e^{s_i}/\sum_{l \ge k} e^{s_{\pi(l)}}$ for the softmax over the items remaining at
+step $k$, and $\kappa(i)$ for the position of item $i$ in $\pi$. Item $i$ appears in the normaliser of every step
+$k \le \kappa(i)$ and is the chosen item at step $\kappa(i)$. Each step is a single-positive softmax loss, whose
+gradient is $p^{(k)}_i$ minus one for the chosen item. Summing over steps,
+
+$$
+\frac{\partial L}{\partial s_i} = \sum_{k=1}^{\kappa(i)} p^{(k)}_i \; - \; 1.
+$$
+
+The top item gets $p^{(1)}_{\pi(1)} - 1 < 0$ and is always pushed up. The last item gets
+$\sum_{k<n} p^{(k)}_{\pi(n)} > 0$ and is always pushed down. The gradients again sum to zero, since each step
+contributes $\sum_i p^{(k)}_i - 1 = 0$.
+
+Xia et al. show that ListMLE is consistent for the permutation-level 0–1 loss and that its loss is convex and
+differentiable <Cite id="xia2008" />.
+
+ListMLE needs a full order. With graded or binary labels many permutations sort the labels, and the loss forces one
+arbitrary order among tied items. Common fixes follow.
+
+- **Random tie-breaking.** Draw a fresh permutation consistent with the labels at each step, so no tie order is
+  learned systematically.
+- **Top-$k$ ListMLE.** Keep only the first $k$ steps of the likelihood. Xia, Liu and Li show that this truncated loss
+  is consistent for the top-$k$ ranking <Cite id="xia2009topk" />. With one positive and $k = 1$, top-$k$ ListMLE is
+  the single-positive softmax loss.
+- **Position-aware ListMLE (p-ListMLE).** Weight step $k$ by a decreasing $\alpha(k)$, so that mistakes at the top
+  cost more than mistakes in the tail <Cite id="lan2014positionaware" />. Plain ListMLE gives every step weight one,
+  and a list of $n$ items has $n - 1$ informative steps, most of them about the order of the tail.
+
+## Smoothing the metric
+
+A second group of listwise losses starts from the metric. NDCG with gains $g_i = 2^{y_i} - 1$ and ranks $\rho_i$ (1 for
+the top) is $\frac{1}{\operatorname{IDCG}}\sum_i g_i / \log_2(1 + \rho_i)$, where IDCG is the <Gloss name="dcg" /> of
+the ideal order. The rank $\rho_i = 1 + \sum_{j \ne i}\indicator[s_j > s_i]$ is a step function of the scores. Replacing
+the steps with smooth functions gives a differentiable metric, and its negative is the loss.
+
+- **ApproxNDCG** replaces each indicator with a sigmoid of temperature $T$
+  <Cite id="qin2010approx" />:
+  $$
+  \hat\rho_i = 1 + \sum_{j \ne i}\sigma\paren{\frac{s_j - s_i}{T}}, \qquad
+  \operatorname{ApproxNDCG} = \frac{1}{\operatorname{IDCG}}\sum_i \frac{g_i}{\log_2(1 + \hat\rho_i)}.
+  $$
+  As $T \to 0$, $\hat\rho_i \to \rho_i$ away from ties and ApproxNDCG tends to NDCG.
+- **SoftRank** treats each score as a Gaussian <NoteLink to="random-variable">random variable</NoteLink> with mean $s_i$
+  and a shared variance, computes the distribution of every item's rank from the pairwise probabilities
+  $\prob(S_j > S_i)$, and optimises the expected NDCG under that distribution <Cite id="taylor2008softrank" />. The rank
+  distributions cost $O(n^3)$ per list.
+- **NeuralNDCG** relaxes the sorting operator itself <Cite id="pobrotyn2021neuralndcg" />. **NeuralSort** replaces
+  the permutation matrix that sorts $\svec$ with a row-stochastic matrix $\hat{\Pmat}$ whose row $k$ is
+  $\operatorname{softmax}\paren{\paren{(n + 1 - 2k)\svec - \Amat_{\svec}\ones}/\tau}$, where
+  $(\Amat_{\svec})_{ij} = \abs{s_i - s_j}$ <Cite id="grover2019neuralsort" />. Row $k$ is a distribution over which item
+  sits at position $k$. NeuralNDCG scales $\hat{\Pmat}$ towards a doubly stochastic matrix with
+  <NoteLink to="entropic-regularisation-and-sinkhorn">Sinkhorn</NoteLink> iterations, forms the relaxed gains
+  $\hat{\Pmat}\gvec$ by position, and discounts them. As $\tau \to 0$, $\hat{\Pmat}$ tends to the true sorting matrix.
+
+Each smoothing has a temperature that trades bias against gradient quality. A large temperature gives a smooth
+function that differs from the metric. A small one gives a close approximation whose gradient is near zero almost
+everywhere, which is the original problem. None of these losses is convex.
+
+<Derivation title="Why row k of NeuralSort picks the k-th largest score">
+Fix $k$ and consider $f_k(x) = (n + 1 - 2k)x - \sum_{j=1}^n \abs{x - s_j}$ as a function of a real number $x$. When
+$x$ lies strictly between two neighbouring scores with $m$ scores above it and $n - m$ below, the sum
+$\sum_j \abs{x - s_j}$ has slope $(n - m) - m$. The slope of $f_k$ there is
+$(n + 1 - 2k) - (n - 2m) = 2(m - k) + 1$. It is positive when $m \ge k$ and negative when $m \le k - 1$. So $f_k$
+rises as $x$ climbs towards the $k$-th largest score and falls beyond it, and among the scores themselves $f_k$ is
+largest at the $k$-th largest. At $x = s_i$ the term $\abs{s_i - s_i}$ is zero, so $f_k(s_i)$ is the $i$-th entry of
+$(n + 1 - 2k)\svec - \Amat_{\svec}\ones$ <Cite id="grover2019neuralsort" />.
+
+Row $k$ of the true sorting matrix is the one-hot vector on $\argmax_i f_k(s_i)$. Replacing the $\argmax$ with a
+softmax of temperature $\tau$ gives row $k$ of $\hat{\Pmat}$. Each row is a probability vector, so $\hat{\Pmat}$ is
+row-stochastic. Its columns need not sum to one, which is why NeuralNDCG adds Sinkhorn scaling.
+</Derivation>
+
+## Worked example
+
+One query has four items with graded labels $\yvec = (2, 0, 1, 0)$. The model scores them
+$\svec = (0.5, 1.0, 0.0, -0.5)$ and ranks them 2, 1, 3, 4. The NDCG of that order is 0.659. The softmax of the scores
+is $\pvec = (0.276, 0.455, 0.167, 0.102)$, with $\ln\sum_k e^{s_k} = 1.787$.
+
+**Softmax cross-entropy, target $y_i/\sum_k y_k$.** The target is $\tvec = (0.667, 0, 0.333, 0)$. The loss is
+$-(0.667 \ln 0.276 + 0.333 \ln 0.167) = 1.454$. Its minimum over $\svec$ is the
+<NoteLink to="entropy">entropy</NoteLink> of $\tvec$, 0.637, reached only in the limit where irrelevant scores go to
+$-\infty$. The gradient is
+
+$$
+\pvec - \tvec = (-0.391,\ 0.455,\ -0.166,\ 0.102).
+$$
+
+The largest push is downward on item 2, the irrelevant item ranked first.
+
+**ListNet, target $\operatorname{softmax}(\yvec)$.** The target is $(0.610, 0.083, 0.225, 0.083)$. The loss is 1.441
+against a minimum of 1.049, and the gradient is $(-0.334, 0.373, -0.057, 0.019)$. The softmax of the labels leaves
+mass 0.083 on each irrelevant item, so item 4, which already has probability 0.102, is barely pushed down.
+
+**ListMLE.** The labels sort as 1, 3, then the tied items 2 and 4. Breaking the tie by index gives
+$\pi = (1, 3, 2, 4)$. The step probabilities of the chosen items are
+
+| Step $k$ | Remaining items | Chosen item | $p^{(k)}$ of chosen item | $-\ln p^{(k)}$ |
+| --- | --- | --- | --- | --- |
+| 1 | 1, 3, 2, 4 | 1 | 0.276 | 1.287 |
+| 2 | 3, 2, 4 | 3 | 0.231 | 1.464 |
+| 3 | 2, 4 | 2 | 0.818 | 0.201 |
+| 4 | 4 | 4 | 1 | 0 |
+
+The loss is 2.953. The gradient formula gives, for item 3, $0.167 + (0.231 - 1) = -0.601$, and for item 4,
+$0.102 + 0.140 + 0.182 = 0.424$. The full gradient is $(-0.724, 0.901, -0.601, 0.424)$. Step 3 contributes 0.201 to
+the loss and 0.182 to item 4's push. That part only enforces the arbitrary tie-break between two irrelevant items.
+
+The three losses agree on the direction for every item: raise items 1 and 3, lower items 2 and 4. They differ in how
+hard they push the bottom of the list.
+
+<RankingLossLab initial="softmax" losses={['softmax', 'listnet', 'listmle', 'ranknet']} />
+
+The figure shows a list of six items. Switch the loss to compare softmax cross-entropy, ListNet and ListMLE with the
+pairwise <Gloss name="ranknet" /> loss, and drag scores to see how each redistributes the push. With the "one click"
+labels, softmax cross-entropy and ListNet push the clicked item up and spread the downward push over the other items in
+proportion to their softmax probabilities.
+
+## Assumptions
+
+- **A list is a unit.** The loss needs all candidates of a query or user in one batch. Lists of unequal length give
+  softmax losses of unequal scale, since $\ln n$ is the loss of uniform scores over $n$ items.
+- **Labels within a list are comparable.** Every listwise loss compares items only within the same list, so labels
+  must be consistent within a list but need not be across lists.
+- **The candidate set matches serving.** A model trained against the items on a slate learns to reorder slates. A
+  model trained against sampled catalogue items learns to retrieve. The candidate set of the loss should match the
+  stage at which the model is used.
+
+## Pitfalls
+
+- **Scores are not probabilities.** Softmax, ListNet and ListMLE are all unchanged by adding a constant to every score
+  in a list. The scores of different lists are on no common scale, and $\sigma(s_i)$ is not a click probability.
+- **ListNet's target is ambiguous.** Libraries often call the label-normalised target "ListNet" or "softmax loss",
+  while Cao et al. used the softmax of the labels. The two targets put different mass on irrelevant items and give
+  different gradients.
+- **Lists with no positive.** With target $y_i/\sum_k y_k$ the target is undefined when every label is zero. Such lists
+  carry no ranking information for these losses and are usually dropped.
+- **Temperature schedules.** ApproxNDCG and NeuralNDCG need a temperature small enough to track the metric and large
+  enough to give gradients. A value tuned for lists of 10 items may be wrong for lists of 1,000.
+- **Sampled negatives without correction.** A sampled softmax without the logQ correction learns scores biased against
+  popular items, which are sampled as negatives most often.

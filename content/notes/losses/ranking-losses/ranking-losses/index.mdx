@@ -3,7 +3,7 @@ title: Ranking losses
 kind: concept
 summary: 'Ranking losses train a scoring function whose order within a query matches relevance. Pointwise losses fit each label, pairwise losses such as RankNet penalise misordered pairs, and listwise losses such as ListNet compare whole lists. LambdaRank weights pairs by NDCG change.'
 tags: [loss-functions, ranking, information-retrieval, learning-to-rank, worked-example]
-aliases: [learning to rank, pointwise ranking loss, pairwise ranking loss, listwise ranking loss, RankNet, LambdaRank, LambdaMART, ListNet, ListMLE, lambda gradients]
+aliases: [learning to rank, RankNet, ListNet, ListMLE]
 requires: [normalised-discounted-cumulative-gain, logistic-regression, softmax-and-log-sum-exp]
 related: [mean-average-precision-and-mean-reciprocal-rank, gradient-boosting, contrastive-learning, cross-entropy-and-perplexity]
 references: [burges2005, burges2006, burges2010, cao2007, xia2008]
@@ -21,8 +21,8 @@ whole list for a query.
 
 ## NDCG is piecewise constant in the scores
 
-Ranking quality is usually measured by <NoteLink to="normalised-discounted-cumulative-gain">normalised discounted cumulative gain</NoteLink>. With gain
-$g_i = 2^{r_i} - 1$ and rank $\rho_i$ (1 for the top) of document $i$,
+Ranking quality is usually measured by <NoteLink to="normalised-discounted-cumulative-gain">normalised discounted
+cumulative gain</NoteLink>. With gain $g_i = 2^{r_i} - 1$ and rank $\rho_i$ (1 for the top) of document $i$,
 
 $$
 \operatorname{DCG} = \sum_i \frac{g_i}{\log_2(1 + \rho_i)}, \qquad \operatorname{NDCG} = \frac{\operatorname{DCG}}{\operatorname{IDCG}},
@@ -30,15 +30,16 @@ $$
 
 where IDCG is the DCG of the best possible order. NDCG depends on the scores only through their sort order. A small
 change in the scores that does not swap two documents leaves every rank, and so NDCG, unchanged. NDCG is therefore
-piecewise constant in the scores: its <NoteLink to="gradient">gradient</NoteLink> is zero almost everywhere and undefined where two scores tie. Gradient
-methods cannot optimise it directly. Ranking losses are smooth surrogates for it.
+piecewise constant in the scores: its <NoteLink to="gradient">gradient</NoteLink> is zero almost everywhere and
+undefined where two scores tie. Gradient methods cannot optimise it directly. Ranking losses are smooth surrogates for
+it.
 
 ## Pointwise losses
 
 A pointwise loss treats each document as an independent regression or classification example, for example
-$\sum_i (s_i - r_i)^2$. Any regression model can then rank. The loss ignores that only the order within a query
-matters: it spends effort matching absolute label values, penalises a constant shift of all scores in a query, and
-weights every document equally, although, because of the logarithmic discount, errors at the top of the list change NDCG most.
+$\sum_i (s_i - r_i)^2$. Any regression model can then rank. The loss ignores that only the order within a query matters:
+it spends effort matching absolute label values, penalises a constant shift of all scores in a query, and weights every
+document equally, although, because of the logarithmic discount, errors at the top of the list change NDCG most.
 
 ## Pairwise losses: RankNet
 
@@ -50,9 +51,9 @@ P_{ij} = \sigma(s_i - s_j) = \frac{1}{1 + e^{-(s_i - s_j)}}.
 $$
 
 For every pair with $r_i > r_j$, the loss is the cross-entropy of that event,
-$L_{ij} = -\ln P_{ij} = \ln\paren{1 + e^{-(s_i - s_j)}}$. This is the <NoteLink to="surrogate-losses">logistic loss</NoteLink> of
-<NoteLink to="logistic-regression">logistic regression</NoteLink> applied to the margin $s_i - s_j$. It depends only on
-score differences, so shifting all scores in a query changes nothing.
+$L_{ij} = -\ln P_{ij} = \ln\paren{1 + e^{-(s_i - s_j)}}$. This is the <NoteLink to="surrogate-losses">logistic
+loss</NoteLink> of <NoteLink to="logistic-regression">logistic regression</NoteLink> applied to the margin $s_i - s_j$.
+It depends only on score differences, so shifting all scores in a query changes nothing.
 
 Its <NoteLink to="derivative">derivatives</NoteLink> with respect to the scores are equal and opposite:
 
@@ -60,16 +61,17 @@ $$
 \frac{\partial L_{ij}}{\partial s_i} = -\frac{1}{1 + e^{s_i - s_j}} \eqdef \lambda_{ij}, \qquad \frac{\partial L_{ij}}{\partial s_j} = -\lambda_{ij}.
 $$
 
-<NoteLink to="gradient-descent">Gradient descent</NoteLink> raises $s_i$ and lowers $s_j$, most strongly when the pair is misordered. Summing over pairs gives each
-document a single force $\lambda_i = \sum_{j:\, r_i > r_j}\lambda_{ij} - \sum_{j:\, r_j > r_i}\lambda_{ji}$, which is
-back-propagated through $f$ <Cite id="burges2010" />.
+<NoteLink to="gradient-descent">Gradient descent</NoteLink> raises $s_i$ and lowers $s_j$, most strongly when the pair
+is misordered. Summing over pairs gives each document a single force
+$\lambda_i = \sum_{j:\, r_i > r_j}\lambda_{ij} - \sum_{j:\, r_j > r_i}\lambda_{ji}$, which is back-propagated through
+$f$ <Cite id="burges2010" />.
 
 ## LambdaRank: gradients weighted by NDCG
 
 RankNet counts every misordered pair equally. Swapping documents at ranks 1 and 2 changes NDCG much more than swapping
-documents at ranks 50 and 51, because of the logarithmic discount. **LambdaRank** skips writing a loss and specifies the
-gradients directly: each pair's RankNet gradient is multiplied by the change in NDCG that swapping the two documents
-would cause <Cite id="burges2006" />,
+documents at ranks 50 and 51, because of the logarithmic discount. **<Gloss name="lambdarank" />** skips writing a loss
+and specifies the gradients directly: each pair's RankNet gradient is multiplied by the change in NDCG that swapping the
+two documents would cause <Cite id="burges2006" />,
 
 $$
 \lambda_{ij}^{\text{Lambda}} = \lambda_{ij}\,\abs{\Delta\operatorname{NDCG}_{ij}},
@@ -82,7 +84,7 @@ unchanged, so the change is (gain difference) × (discount difference). Pairs ne
 relevance, get large gradients. Burges et al. found empirically that training with these gradients improves NDCG
 <Cite id="burges2006" />.
 
-**LambdaMART** uses the same lambdas as the pseudo-residuals of
+**<Gloss name="lambdamart" />** uses the same lambdas as the pseudo-residuals of
 <NoteLink to="gradient-boosting">gradient-boosted</NoteLink> regression trees. An ensemble of LambdaMART rankers won
 Track 1 of the 2010 Yahoo! Learning to Rank Challenge <Cite id="burges2010" />.
 
@@ -95,8 +97,8 @@ $$
 P_s(i) = \frac{e^{s_i}}{\sum_k e^{s_k}}, \qquad P_r(i) = \frac{e^{r_i}}{\sum_k e^{r_k}}, \qquad L = -\sum_i P_r(i)\ln P_s(i).
 $$
 
-Since $\ln P_s(i) = s_i - \ln\sum_k e^{s_k}$ and $\sum_i P_r(i) = 1$, the loss is $-\sum_i P_r(i)s_i + \ln\sum_k e^{s_k}$.
-The derivative of the log-sum-exp is the softmax (see
+Since $\ln P_s(i) = s_i - \ln\sum_k e^{s_k}$ and $\sum_i P_r(i) = 1$, the loss is
+$-\sum_i P_r(i)s_i + \ln\sum_k e^{s_k}$. The derivative of the log-sum-exp is the softmax (see
 <NoteLink to="softmax-and-log-sum-exp">softmax and log-sum-exp</NoteLink>), so
 
 $$
@@ -127,8 +129,9 @@ The misordered pair (A, B) has the largest gradient under both schemes. RankNet 
 correctly ordered pair (A, C); LambdaRank pushes it 3.5 times as hard, because fixing it raises NDCG from 0.797 to 1.
 
 For ListNet, the label distribution is $P_r = (0.665, 0.245, 0.090)$ and the score distribution is
-$P_s = (0.318, 0.524, 0.158)$. The loss is 1.087, against a minimum of 0.832 (the <NoteLink to="entropy">entropy</NoteLink> of $P_r$). The gradient
-$P_s - P_r = (-0.347, 0.279, 0.068)$ raises A and lowers B and C.
+$P_s = (0.318, 0.524, 0.158)$. The loss is 1.087, against a minimum of 0.832 (the
+<NoteLink to="entropy">entropy</NoteLink> of $P_r$). The gradient $P_s - P_r = (-0.347, 0.279, 0.068)$ raises A and
+lowers B and C.
 
 ## Assumptions
 

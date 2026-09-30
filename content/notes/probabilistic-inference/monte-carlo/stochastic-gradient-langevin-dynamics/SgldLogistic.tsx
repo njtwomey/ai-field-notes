@@ -12,11 +12,15 @@ import {
   type HeatmapOverlay,
 } from '@/components/viz'
 import { linspace, rng } from '@/lib/math'
+import { splitRhat } from '../../_shared/mcmc'
 
 /** Bayesian logistic regression without intercept: y ~ Bern(σ(wᵀx)), w ~ N(0, τ²I), N = 50 points. */
 const N = 50
 const TAU = 2
 const TRUE_W: [number, number] = [1.5, -1]
+/** Points drawn per burn-in path, and kept samples drawn in all; the readouts use every sample. */
+const BURN_POINTS = 400
+const SHOWN = 3000
 
 const DATA = (() => {
   const g = rng(3)
@@ -128,6 +132,7 @@ function noiseRatio(eps: number, n: number, w: [number, number]) {
 export function SgldLogistic() {
   const [batch, setBatch] = useState<Batch>('5')
   const [noise, setNoise] = useState(true)
+  const chains = useParam(4, { min: 1, max: 10, step: 1 })
   const a = useParam(0.05, { min: 0.005, max: 0.3, step: 0.005 })
   const gamma = useParam(0.33, { min: 0, max: 1, step: 0.01 })
   const steps = useParam(2000, { min: 10, max: 5000, step: 10 })
@@ -136,25 +141,58 @@ export function SgldLogistic() {
   const s1 = useParam(0, { min: -3.5, max: 1.5, step: 0.05 })
   const n = Number(batch)
 
-  const run = useMemo(
-    () => sgld(a.value, gamma.value, n, steps.value, noise, [s0.value, s1.value], seed.value),
-    [a.value, gamma.value, n, steps.value, noise, s0.value, s1.value, seed.value],
+  // Each chain has its own random stream and starts at the common start point.
+  const runs = useMemo(
+    () =>
+      Array.from({ length: chains.value }, (_, k) =>
+        sgld(a.value, gamma.value, n, steps.value, noise, [s0.value, s1.value], seed.value * 1000 + k),
+      ),
+    [chains.value, a.value, gamma.value, n, steps.value, noise, s0.value, s1.value, seed.value],
   )
+  const run = runs[0]
 
-  const { overlay, mean, sd0 } = useMemo(() => {
-    // Discard the first quarter as burn-in; average the rest.
-    const from = Math.floor(run.path.x.length / 4)
-    const xs = run.path.x.slice(from)
-    const ys = run.path.y.slice(from)
+  const { overlay, mean, sd0, rhat } = useMemo(() => {
+    const many = runs.length > 1
+    // Discard the first quarter of each chain as burn-in; pool and average the rest.
+    const kept = runs.map((r) => {
+      const from = Math.floor(r.path.x.length / 4)
+      return { from, x: r.path.x.slice(from), y: r.path.y.slice(from) }
+    })
+    const xs = kept.flatMap((c) => c.x)
+    const ys = kept.flatMap((c) => c.y)
     const k = xs.length || 1
     const mean = [xs.reduce((s, v) => s + v, 0) / k, ys.reduce((s, v) => s + v, 0) / k]
     const sd0 = Math.sqrt(xs.reduce((s, v) => s + (v - mean[0]) ** 2, 0) / k)
+    // Split R̂ needs chains of equal length; a diverged chain stops early and has no R̂.
+    const equal = kept.every((c) => c.x.length === kept[0].x.length) && kept[0].x.length >= 4
+    const rhat = equal ? Math.max(splitRhat(kept.map((c) => c.x)), splitRhat(kept.map((c) => c.y))) : null
+    // Drawing only: each burn-in path is thinned to about BURN_POINTS points, the kept samples to about SHOWN in all.
+    const burn = runs.map((r, j): HeatmapOverlay => {
+      const stride = Math.max(1, Math.ceil(kept[j].from / BURN_POINTS))
+      const idx: number[] = []
+      for (let i = 0; i <= kept[j].from; i += stride) idx.push(i)
+      return {
+        name: 'burn-in',
+        type: 'line',
+        x: idx.map((i) => r.path.x[i]),
+        y: idx.map((i) => r.path.y[i]),
+        slot: 2,
+        thin: many,
+      }
+    })
+    const stride = Math.max(1, Math.ceil(xs.length / SHOWN))
     const overlay: HeatmapOverlay[] = [
-      { name: 'burn-in', type: 'line', x: run.path.x.slice(0, from + 1), y: run.path.y.slice(0, from + 1), slot: 2 },
-      { name: 'kept samples', type: 'scatter', x: xs, y: ys, slot: 1 },
+      ...burn,
+      {
+        name: 'kept samples',
+        type: 'scatter',
+        x: xs.filter((_, i) => i % stride === 0),
+        y: ys.filter((_, i) => i % stride === 0),
+        slot: 1,
+      },
     ]
-    return { overlay, mean, sd0 }
-  }, [run])
+    return { overlay, mean, sd0, rhat }
+  }, [runs])
 
   const ratio = noiseRatio(run.eps, n, run.end)
   const handles: Handle[] = [
@@ -172,10 +210,11 @@ export function SgldLogistic() {
   return (
     <Interactive
       title="SGLD on a Bayesian logistic regression"
-      caption="The shaded grid is the exact posterior of the two weights of a logistic regression on 50 points with prior N(0, 4I). SGLD takes minibatch gradient steps of size ε_t = a(1 + t/100)^(−γ) and adds N(0, ε_t I) noise. Drag the start point. The kept samples (after a quarter of the run as burn-in) cover the posterior, and their mean and spread match the exact values. Switching the noise off turns SGLD into minibatch SGD: the chain settles near the posterior mode and its spread shrinks to the small jitter left by minibatch noise, far below the posterior spread. With γ = 0 and a large a the step stays large, the minibatch noise stays comparable to the injected noise, and the samples spread too wide. The last readout compares the two noise sources at the final step."
+      caption="The shaded grid is the exact posterior of the two weights of a logistic regression on 50 points with prior N(0, 4I). SGLD takes minibatch gradient steps of size ε_t = a(1 + t/100)^(−γ) and adds N(0, ε_t I) noise. Several chains run from the same start, each with its own random stream; their burn-in paths (the first quarter of each run) are the light lines, and the chains slider sets how many run. Drag the start point. The kept samples, pooled over the chains, cover the posterior, and their mean and spread match the exact values. Split R̂ compares the kept samples of the chains: near 1 they agree. Switching the noise off turns SGLD into minibatch SGD: the chain settles near the posterior mode and its spread shrinks to the small jitter left by minibatch noise, far below the posterior spread. With γ = 0 and a large a the step stays large, the minibatch noise stays comparable to the injected noise, and the samples spread too wide. The last readout compares the two noise sources at the final step of the first chain."
       controls={
         <>
           <ParamChoice label="minibatch size n" value={batch} onChange={setBatch} options={BATCH_OPTIONS} />
+          <ParamSlider label="chains" param={chains} format={(v) => String(v)} withArrows />
           <ParamSwitch label="inject Langevin noise" checked={noise} onChange={setNoise} />
           <ParamSlider label="initial step a" param={a} format={(v) => v.toFixed(3)} />
           <ParamSlider label="decay exponent γ" param={gamma} />
@@ -190,6 +229,7 @@ export function SgldLogistic() {
             value={`(${formatNumber(EXACT.mean[0])}, ${formatNumber(EXACT.mean[1])}) → (${formatNumber(mean[0])}, ${formatNumber(mean[1])})`}
           />
           <Readout label="sd of w₁ (exact → SGLD)" value={`${formatNumber(EXACT.sd0)} → ${formatNumber(sd0)}`} />
+          <Readout label="split R̂ (worse weight)" value={rhat === null ? 'a chain diverged' : formatNumber(rhat)} />
           <Readout label="final step ε_t" value={run.eps.toExponential(2)} />
           <Readout
             label="minibatch / injected noise variance"

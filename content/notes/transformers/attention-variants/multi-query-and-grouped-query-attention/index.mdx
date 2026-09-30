@@ -18,20 +18,21 @@ $$
 \qquad \gamma(i) = \left\lfloor \frac{i}{h/g} \right\rfloor,
 $$
 so each group of $h/g$ consecutive query heads shares one key projection and one value projection. Multi-query attention
-(MQA) is the case $g = 1$ <Cite id="shazeer2019" />; <Gloss name="mha">multi-head attention</Gloss> is $g = h$. GQA was introduced by Ainslie et
-al. <Cite id="ainslie2023" />.
+(MQA) is the case $g = 1$ <Cite id="shazeer2019" />; <Gloss name="mha">multi-head attention</Gloss> is $g = h$. GQA was
+introduced by Ainslie et al. <Cite id="ainslie2023" />.
 </Definition>
 
 ## Problem
 
 Autoregressive decoding generates one token per step. Each step reads every layer's cached keys and values for all
-earlier tokens (see <NoteLink to="key-value-cache">KV caching</NoteLink>) but does little arithmetic with them. The step is
-limited by memory bandwidth, not by compute.
+earlier tokens (see <NoteLink to="key-value-cache">KV caching</NoteLink>) but does little arithmetic with them. The step
+is limited by memory bandwidth, not by compute.
 
-Shazeer makes this precise for one attention layer of width $d$ with $h$ heads of width $d_k = d/h$, <NoteLink to="minibatching-and-batch-size">batch size</NoteLink> $b$ and
-$n$ decoding steps <Cite id="shazeer2019" />. Over the $n$ steps the arithmetic is $\Theta(b n d^2)$, dominated by the
-projections. The memory traffic is $\Theta(b n^2 d + n d^2)$: each step reads the whole cache, $b \cdot n \cdot d$
-numbers, and the projection weights, $d^2$. The ratio of memory access to arithmetic is
+Shazeer makes this precise for one attention layer of width $d$ with $h$ heads of width $d_k = d/h$,
+<NoteLink to="minibatching-and-batch-size">batch size</NoteLink> $b$ and $n$ decoding steps <Cite id="shazeer2019" />.
+Over the $n$ steps the arithmetic is $\Theta(b n d^2)$, dominated by the projections. The memory traffic is
+$\Theta(b n^2 d + n d^2)$: each step reads the whole cache, $b \cdot n \cdot d$ numbers, and the projection weights,
+$d^2$. The ratio of memory access to arithmetic is
 
 $$
 \Theta\paren{\frac{b n^2 d + n d^2}{b n d^2}} = \Theta\paren{\frac{n}{d} + \frac{1}{b}}.
@@ -54,21 +55,21 @@ $h/g$. MQA caches $2 d_k$, a reduction by $h$.
 widened the feed-forward layers from 4096 to 5440 hidden units to keep the parameter count equal to the baseline's
 <Cite id="shazeer2019" />.
 
-**Uptraining.** A trained multi-head checkpoint can be converted rather than retrained. Ainslie et al. build each group's
-key and value projections by mean-pooling the projections of the original heads in that group, then continue
+**Uptraining.** A trained multi-head checkpoint can be converted rather than retrained. Ainslie et al. build each
+group's key and value projections by mean-pooling the projections of the original heads in that group, then continue
 pretraining for a fraction $\alpha$ of the original steps <Cite id="ainslie2023" />. Mean-pooling worked better than
 keeping the first head of each group or initialising randomly. GQA already performed reasonably right after conversion;
 MQA needed the extra training. Both gained from $\alpha = 5\%$, with diminishing returns at 10%.
 
 ## Evidence
 
-**Multi-query, translation.** On WMT 2014 English–German, a multi-query model scored 26.5 <Gloss name="bleu" /> on the development set
-against 26.7 for multi-head attention. Incremental decoding took $3.8\ \mu$s per token instead of $46\ \mu$s. Reducing
-the number of heads or their width in a multi-head model to save the same memory cost more quality
+**Multi-query, translation.** On WMT 2014 English–German, a multi-query model scored 26.5 <Gloss name="bleu" /> on the
+development set against 26.7 for multi-head attention. Incremental decoding took $3.8\ \mu$s per token instead of
+$46\ \mu$s. Reducing the number of heads or their width in a multi-head model to save the same memory cost more quality
 <Cite id="shazeer2019" />.
 
-**Grouped-query, uptrained T5-XXL.** Averaged over summarisation, translation and <Gloss name="qa">question answering</Gloss>
-<Cite id="ainslie2023" />:
+**Grouped-query, uptrained T5-XXL.** Averaged over summarisation, translation and <Gloss name="qa">question
+answering</Gloss> <Cite id="ainslie2023" />:
 
 | Model               | Inference time per sample (s) | Average score |
 | ------------------- | ----------------------------- | ------------- |

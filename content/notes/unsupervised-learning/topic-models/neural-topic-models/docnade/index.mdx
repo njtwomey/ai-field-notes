@@ -14,8 +14,8 @@ updated: 2026-09-27
 
 <Definition>
 The **document neural autoregressive distribution estimator** (DocNADE) is a model of a document $\vvec = (v_1,
-\dots, v_D)$, a sequence of word indices in $\set{1, \dots, V}$, that factorises the probability by the <NoteLink to="derivative">chain rule</NoteLink>
-<Cite id="larochelle2012docnade" />:
+\dots, v_D)$, a sequence of word indices in $\set{1, \dots, V}$, that factorises the probability by the
+<NoteLink to="derivative">chain rule</NoteLink> <Cite id="larochelle2012docnade" />:
 
 $$
 p(\vvec) = \prod_{i=1}^D p(v_i \mid \vvec_{1:i-1}), \qquad p(v_i = w \mid \vvec_{1:i-1}) = \frac{\exp\paren{b_w +
@@ -30,12 +30,13 @@ sigmoid. The hidden layer is shared by all positions, so every conditional reads
 
 ## Intuition
 
-<NoteLink to="latent-dirichlet-allocation">Latent Dirichlet allocation (LDA)</NoteLink> and the VAE-based topic models explain a document through a
-latent variable, $\thetavec_d$, that must be inferred. DocNADE has no latent variable to infer. It predicts each word
-from the words before it, like an <NoteLink to="autoregressive-generative-models">autoregressive model</NoteLink> of
-text, but it summarises the previous words as a bag: $\hvec_i$ depends on $\sum_{k=1}^{i-1}\Wmat_{:,v_k}$, the sum of the
-previous words' columns, not on their order. The sum plays the role that $\thetavec_d$ plays in LDA: an estimate of
-what the document is about, sharpened with every word read.
+<NoteLink to="latent-dirichlet-allocation">Latent Dirichlet allocation (LDA)</NoteLink> and the VAE-based topic models
+explain a document through a latent variable, $\thetavec_d$, that must be inferred. DocNADE has no latent variable to
+infer. It predicts each word from the words before it, like an
+<NoteLink to="autoregressive-generative-models">autoregressive model</NoteLink> of text, but it summarises the previous
+words as a bag: $\hvec_i$ depends on $\sum_{k=1}^{i-1}\Wmat_{:,v_k}$, the sum of the previous words' columns, not on
+their order. The sum plays the role that $\thetavec_d$ plays in LDA: an estimate of what the document is about,
+sharpened with every word read.
 
 Because the model is a product of normalised conditionals, $\log p(\vvec)$ is computed exactly in one pass. There is no
 lower bound, no sampling during training, and no amortisation gap.
@@ -51,11 +52,12 @@ p(h_j = 1 \mid \vvec) = \sigma\paren{Dc_j + \sum_{i=1}^D W_{j,v_i}}, \qquad p(v_
 \operatorname{softmax}_w\paren{\bvec + \Wmat^\top\hvec} .
 $$
 
-The marginal $p(\vvec)$ needs the partition function, which is intractable, and training relies on <Gloss name="contrastive-divergence">contrastive
-divergence</Gloss>. The autoregressive conditional $p(v_i \mid \vvec_{1:i-1})$ of the Replicated Softmax can be approximated by
-mean-field inference, which alternates between updating the hidden units from the words and the unseen words from the
-hidden units. Larochelle and Lauly run **one** such update: start with the unseen words set to zero, compute the hidden
-means from the observed words $\vvec_{1:i-1}$ alone, then compute the distribution of $v_i$ from those hidden means
+The marginal $p(\vvec)$ needs the partition function, which is intractable, and training relies on
+<Gloss name="contrastive-divergence">contrastive divergence</Gloss>. The autoregressive conditional
+$p(v_i \mid \vvec_{1:i-1})$ of the Replicated Softmax can be approximated by mean-field inference, which alternates
+between updating the hidden units from the words and the unseen words from the hidden units. Larochelle and Lauly run
+**one** such update: start with the unseen words set to zero, compute the hidden means from the observed words
+$\vvec_{1:i-1}$ alone, then compute the distribution of $v_i$ from those hidden means
 <Cite id="larochelle2012docnade" />. That single pass is the formula in the definition, after two further changes: the
 input weights $\Wmat$ and output weights $\Umat$ are untied, and the factor $D$ on the hidden bias is dropped. The
 truncated inference is then trained directly, by maximum likelihood, to be a good model on its own.
@@ -64,16 +66,17 @@ truncated inference is then trained directly, by maximum likelihood, to be a goo
 
 The hidden pre-activations share their sums: $\avec_{i+1} = \avec_i + \Wmat_{:,v_i}$ with $\avec_1 = \cvec$. All $D$
 hidden layers cost $O(DH)$ together. The softmax over the vocabulary costs $O(VH)$ per position, so a document costs
-$O(DVH)$. Larochelle and Lauly replaced the flat softmax by a binary tree of <NoteLink to="logistic-regression">logistic regressions</NoteLink> over the vocabulary,
-which costs $O(H\log V)$ per position <Cite id="larochelle2012docnade" />.
+$O(DVH)$. Larochelle and Lauly replaced the flat softmax by a binary tree of <NoteLink to="logistic-regression">logistic
+regressions</NoteLink> over the vocabulary, which costs $O(H\log V)$ per position <Cite id="larochelle2012docnade" />.
 
 ## Order
 
-A <NoteLink to="bag-of-words">bag of words</NoteLink> has no order, but the chain rule needs one. Any fixed order gives a valid distribution over sequences,
-and different orders give different probabilities for the same bag. DocNADE is therefore trained on documents whose
-words are shuffled at random, which averages over orders and makes the model approximately invariant to them
-<Cite id="lauly2017docnade" />. The document representation used downstream is the hidden layer after reading every
-word, $\hvec(\vvec) = g(\cvec + \sum_{k=1}^D\Wmat_{:,v_k})$, which does not depend on the order.
+A <NoteLink to="bag-of-words">bag of words</NoteLink> has no order, but the chain rule needs one. Any fixed order gives
+a valid distribution over sequences, and different orders give different probabilities for the same bag. DocNADE is
+therefore trained on documents whose words are shuffled at random, which averages over orders and makes the model
+approximately invariant to them <Cite id="lauly2017docnade" />. The document representation used downstream is the
+hidden layer after reading every word, $\hvec(\vvec) = g(\cvec + \sum_{k=1}^D\Wmat_{:,v_k})$, which does not depend on
+the order.
 
 ## What plays the role of topics
 

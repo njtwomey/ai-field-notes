@@ -15,9 +15,9 @@ import { RingAllReduce } from './RingAllReduce'
 
 <Definition>
 Data parallelism replicates a model on $N$ devices, called workers. Each training step splits a mini-batch of $B$
-examples into $N$ shards of $B/N$, and each worker computes the <NoteLink to="gradient">gradient</NoteLink> on its own shard. An **all-reduce** operation
-then leaves every worker with the average of the $N$ gradients, and every worker applies the same optimiser update, so
-the replicas stay identical.
+examples into $N$ shards of $B/N$, and each worker computes the <NoteLink to="gradient">gradient</NoteLink> on its own
+shard. An **all-reduce** operation then leaves every worker with the average of the $N$ gradients, and every worker
+applies the same optimiser update, so the replicas stay identical.
 </Definition>
 
 ## Problem
@@ -90,16 +90,18 @@ hierarchical variants for small messages.
 
 Backpropagation produces the gradients of the last layers first. The gradient of a layer is final as soon as its
 backward step finishes, so its all-reduce can start while earlier layers are still being differentiated. PyTorch's
-distributed data parallel groups gradients into buckets of about 25 MB, launches an all-reduce for each bucket as soon as
-all its gradients are ready, and so hides most of the communication behind computation <Cite id="li2020" />.
+distributed data parallel groups gradients into buckets of about 25 MB, launches an all-reduce for each bucket as soon
+as all its gradients are ready, and so hides most of the communication behind computation <Cite id="li2020" />.
 
 ### Larger batches need retuned optimisers
 
 With $N$ workers each processing a fixed per-device batch, the global batch $B$ grows with $N$ and the number of steps
-per epoch falls. Goyal et al. trained ResNet-50 on <Gloss name="imagenet" /> with $B = 8192$ on 256 <Gloss name="gpu" plural /> in one hour without loss of
-accuracy, by multiplying the <Gloss name="learning-rate">learning rate</Gloss> by $k$ when multiplying the <NoteLink to="minibatching-and-batch-size">batch size</NoteLink> by $k$, and by increasing the learning
-rate gradually over the first five epochs <Cite id="goyal2017" />. Beyond some batch size, which depends on the problem,
-larger batches no longer reduce the number of steps needed, so adding workers no longer reduces training time.
+per epoch falls. Goyal et al. trained ResNet-50 on <Gloss name="imagenet" /> with $B = 8192$ on 256
+<Gloss name="gpu" plural /> in one hour without loss of accuracy, by multiplying the
+<Gloss name="learning-rate">learning rate</Gloss> by $k$ when multiplying the
+<NoteLink to="minibatching-and-batch-size">batch size</NoteLink> by $k$, and by increasing the learning rate gradually
+over the first five epochs <Cite id="goyal2017" />. Beyond some batch size, which depends on the problem, larger batches
+no longer reduce the number of steps needed, so adding workers no longer reduces training time.
 
 ## Cost
 
@@ -117,11 +119,12 @@ If the backward pass takes longer than $0.23$ s, bucketing can hide the ring all
 
 ### Memory
 
-Every worker holds the full weights, gradients and optimiser state. For <NoteLink to="mixed-precision-training">mixed-precision training</NoteLink> with <NoteLink to="adam">Adam</NoteLink> that is
-about 16 bytes per parameter, 107 GB for this model, more than one 80 GB GPU holds. Data parallelism alone therefore
-cannot train it (see <NoteLink to="memory-footprint-of-training">memory footprint of training</NoteLink>). The state
-must be sharded across workers, as in <NoteLink to="zero-and-sharded-optimisers">ZeRO</NoteLink>, or the model split
-across devices by <NoteLink to="model-parallelism">model parallelism</NoteLink>.
+Every worker holds the full weights, gradients and optimiser state. For
+<NoteLink to="mixed-precision-training">mixed-precision training</NoteLink> with <NoteLink to="adam">Adam</NoteLink>
+that is about 16 bytes per parameter, 107 GB for this model, more than one 80 GB GPU holds. Data parallelism alone
+therefore cannot train it (see <NoteLink to="memory-footprint-of-training">memory footprint of training</NoteLink>). The
+state must be sharded across workers, as in <NoteLink to="zero-and-sharded-optimisers">ZeRO</NoteLink>, or the model
+split across devices by <NoteLink to="model-parallelism">model parallelism</NoteLink>.
 
 ## Trade-offs
 

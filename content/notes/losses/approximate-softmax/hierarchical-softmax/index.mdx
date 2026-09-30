@@ -1,0 +1,136 @@
+---
+title: Hierarchical softmax
+kind: technique
+summary:
+  'A hierarchical softmax replaces one $V$-way choice by a product of binary choices down a tree whose leaves are the
+  classes. It is normalised for any node vectors, so training and scoring a known class cost $O(d \log V)$ exactly,
+  with no estimate.'
+tags: [deep-learning, loss-functions, classification, language-models, nlp, worked-example]
+aliases:
+  [
+    class-based softmax,
+    two-level softmax,
+    adaptive softmax,
+    differentiated softmax,
+    Huffman tree softmax,
+    structured output layer,
+    tree-factorised softmax,
+  ]
+requires: [softmax-and-log-sum-exp, cross-entropy-and-perplexity]
+partOf: [approximate-softmax]
+related: [sampled-softmax-and-negative-sampling, self-normalisation, word-embeddings, source-coding-theorem]
+references: [morin2005, goodman2001, mikolov2013, grave2017, chen2016largevocab, bengio2003]
+status: draft
+updated: 2026-09-30
+---
+
+<Definition>
+A **hierarchical softmax** puts the $V$ classes at the leaves of a binary tree and gives every internal node $n$ a
+vector $\vvec_n \in \reals^d$. The probability of a class is the product of the branch probabilities along its path from
+the root, each branch a logistic function of $\vvec_n^\tr\hvec$. The leaves' probabilities sum to one whatever the node
+vectors are, so this is a reparameterisation of the distribution rather than an approximation of the flat softmax.
+Training on an observed class, and scoring one, cost one dot product per node on its path.
+</Definition>
+
+## Problem
+
+A flat softmax over $V$ classes needs its normaliser $Z(\hvec) = \sum_{v \in \Vcal} e^{\uvec_v^\tr\hvec}$, and the
+normaliser needs every class. The gradient of $-\log \pr(w \mid \hvec)$ touches every output vector $\uvec_v$, even
+though one class was observed. For a neural language model over a word vocabulary, $V$ is $10^4$ to $10^6$ and the
+model under the head is shallow, so that sum is the training cost <Cite id="bengio2003" />.
+
+The observation behind the technique is that a normalised distribution over $V$ outcomes can be built from $V - 1$
+normalised distributions over two outcomes. Each of those is one logistic function, and a leaf needs only the ones on
+its own path.
+
+## Mechanism
+
+Build a binary tree with the $V$ classes as leaves and $V - 1$ internal nodes. Let $n_1(w), \dots, n_{L(w)}(w)$ be the
+internal nodes on the path from the root to class $w$, and let $b_\ell(w) = +1$ when the path takes the left child at
+$n_\ell(w)$ and $-1$ when it takes the right. With $\sigma(z) = 1 / (1 + e^{-z})$ the model is
+
+$$
+\pr(w \mid \hvec) = \prod_{\ell=1}^{L(w)} \sigma\!\left(b_\ell(w)\, \vvec_{n_\ell(w)}^\tr \hvec\right).
+$$
+
+Each factor is the probability of one turn, so the product is the probability of walking from the root to $w$.
+
+### It is normalised by construction
+
+Write $T(n)$ for the leaves under node $n$, and $m(n)$ for the product of the branch probabilities from the root to $n$,
+with $m(\text{root}) = 1$. The claim is that $\sum_{w \in T(n)} \pr(w \mid \hvec) = m(n)$ for every node.
+
+For a leaf the sum has one term, $m(n)$ itself. For an internal node $n$ with children $\ell$ and $r$ and $z =
+\vvec_n^\tr\hvec$, the children carry $m(\ell) = m(n)\sigma(z)$ and $m(r) = m(n)\sigma(-z)$. Assuming the claim for both
+children,
+
+$$
+\sum_{w \in T(n)} \pr(w \mid \hvec) = m(\ell) + m(r) = m(n)\left[\sigma(z) + \sigma(-z)\right] = m(n),
+$$
+
+because $\sigma(z) + \sigma(-z) = 1$. Induction up to the root gives $\sum_{w \in \Vcal} \pr(w \mid \hvec) = 1$.
+
+Nothing in that argument constrains $\vvec_n$, so the tree defines a proper distribution for any parameters. This is
+what separates structure from the other two families: there is no estimator, no bias and no variance. What changes is
+the set of distributions the model can represent. A flat softmax can represent any distribution over $\Vcal$; a tree
+with fixed structure can too, given enough capacity per node, but the parameters it reaches by gradient descent are
+tied to the tree's shape.
+
+### The gradient touches one path
+
+$-\log \pr(w \mid \hvec) = -\sum_\ell \log \sigma(b_\ell \vvec_{n_\ell}^\tr\hvec)$, so only the $L(w)$ node vectors on
+the path receive a gradient, and the gradient with respect to $\hvec$ is a sum of $L(w)$ terms. Classes that share a
+prefix with $w$ are updated through the shared nodes; the rest of the tree is untouched by that example.
+
+### Choosing the tree
+
+- **Balanced.** Every path has length $\lceil \log_2 V \rceil$. Simple, and the worst case is the best possible.
+- **Huffman, by class frequency.** The expected path length of a Huffman tree is within one bit of the entropy $H$ of
+  the class distribution, and for text $H$ is well below $\log_2 V$, so frequent classes get short paths and the
+  expected cost falls <Cite id="mikolov2013" />.
+- **Two levels: the class-based softmax.** Partition the classes into $C$ groups and factorise
+  $\pr(w \mid \hvec) = \pr(c(w) \mid \hvec)\,\pr(w \mid c(w), \hvec)$ <Cite id="goodman2001" />. The first factor is a
+  softmax over $C$ groups, the second a softmax over one group. With groups of equal size the cost is
+  $O\!\left(d\left(C + V/C\right)\right)$, and $\frac{\partial}{\partial C}\left(C + V/C\right) = 1 - V/C^2$ is zero at
+  $C = \sqrt{V}$, giving $O(d\sqrt{V})$.
+- **Adaptive softmax.** A two-level tree whose shape minimises expected time on a <Gloss name="gpu" /> rather than
+  expected depth, because a matrix product's cost is not proportional to its size: below a few hundred columns it is
+  dominated by fixed overhead. Frequent classes sit in the head, where they cost one large product, and tail clusters
+  are projected to a smaller dimension before their own softmax <Cite id="grave2017" />.
+- **Differentiated softmax.** Structure without a hierarchy: keep one flat softmax, but give frequent classes more
+  parameters than rare ones by making the output matrix block-diagonal <Cite id="chen2016largevocab" />.
+
+## Cost
+
+Let $V = 32{,}768$ and $d = 512$.
+
+| Head | Dot products per observed class | Multiply-accumulates |
+| --- | --- | --- |
+| Flat softmax | $32{,}768$ | $16.8$M |
+| Balanced tree, depth $15$ | $15$ | $7{,}680$ |
+| Huffman tree, English unigrams, $H \approx 10$ bits | $\approx 11$ | $\approx 5{,}600$ |
+| Two-level, $C = \sqrt{V} = 181$ | $362$ | $185$K |
+
+The tree is three orders of magnitude cheaper than the flat head for one training example, and the two-level version
+still two. Parameters are unchanged: $V - 1$ node vectors of length $d$ against $V$ output vectors.
+
+The saving applies to a *known* class. Computing the whole distribution means evaluating every internal node, which is
+$V - 1$ dot products, and a traversal of small operations rather than one matrix product — slower in practice than the
+flat softmax it replaced. Any use that needs all $V$ probabilities, such as sampling from the model or an exact
+perplexity over the vocabulary, gives the technique's advantage back.
+
+## Trade-offs
+
+- **The model changes, so quality changes.** A tree is not an approximation with an error that shrinks; it is a
+  different parameterisation, and its perplexity depends on the tree. Comparisons on the same corpus put hierarchical
+  softmax behind a full softmax and behind sampling-based training at equal capacity <Cite id="chen2016largevocab" />.
+- **The shape must be chosen in advance.** The tree is discrete, so it is built from frequencies, from a clustering of
+  pretrained vectors, or from a hand-made hierarchy such as WordNet <Cite id="morin2005" />, and not learned with the
+  weights. Frequency trees minimise cost; semantically coherent trees fit better. word2vec used Huffman because it
+  wanted the embeddings, not the distribution <Cite id="mikolov2013" />.
+- **Hardware dislikes it.** A path is a sequence of small matrix-vector products with data-dependent shapes, which uses
+  a GPU poorly, while a flat head is one large matrix product. That is why the shallow, few-block variants survived and
+  deep trees did not <Cite id="grave2017" />.
+- **It commits the model.** <NoteLink to="sampled-softmax-and-negative-sampling">Sampling the denominator</NoteLink>
+  and <NoteLink to="self-normalisation">self-normalisation</NoteLink> leave a flat softmax in place, so the trained
+  weights can be scored exactly afterwards. A tree cannot be unwound into a flat softmax.

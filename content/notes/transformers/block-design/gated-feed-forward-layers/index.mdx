@@ -21,8 +21,9 @@ $$
 $$
 
 where $\phi$ is applied elementwise and $\odot$ is the elementwise product <Cite id="shazeer2020" />. The variants are
-named by $\phi$: sigmoid gives GLU, <Gloss name="relu" /> gives ReGLU, <Gloss name="gelu" /> gives GEGLU, $\operatorname{Swish}_1(a) = a\,\sigma(a)$
-(<Gloss name="silu" />) gives SwiGLU, and the identity gives the bilinear layer.
+named by $\phi$: sigmoid gives GLU, <Gloss name="relu" /> gives ReGLU, <Gloss name="gelu" /> gives GEGLU,
+$\operatorname{Swish}_1(a) = a\,\sigma(a)$ (<Gloss name="silu" />) gives SwiGLU, and the identity gives the bilinear
+layer.
 
 </Definition>
 
@@ -30,16 +31,18 @@ named by $\phi$: sigmoid gives GLU, <Gloss name="relu" /> gives ReGLU, <Gloss na
 
 The feed-forward sublayer of the original <NoteLink to="transformer">transformer</NoteLink> is
 $\max(0, \xvec\Wmat_1)\Wmat_2$ with $d_{ff} = 4d$ <Cite id="vaswani2017" />. It holds two thirds of a block's
-parameters: $8d^2$ against $4d^2$ for attention. Replacing ReLU by GELU or Swish changes quality little <Cite id="shazeer2020" />. The question is whether a different form of layer, at the same number of parameters and the
+parameters: $8d^2$ against $4d^2$ for attention. Replacing ReLU by GELU or Swish changes quality little
+<Cite id="shazeer2020" />. The question is whether a different form of layer, at the same number of parameters and the
 same compute, is better.
 
 ## Mechanism
 
 ### The gate
 
-Dauphin et al. introduced the gated linear unit for convolutional <Gloss name="language-model">language models</Gloss>: the product of two <NoteLink to="matrix-vector-product">linear maps</NoteLink>, one
-passed through a sigmoid <Cite id="dauphin2017" />. Shazeer placed it inside the transformer's feed-forward layer, in
-place of the first linear map and its activation, and dropped the biases <Cite id="shazeer2020" />.
+Dauphin et al. introduced the gated linear unit for convolutional <Gloss name="language-model">language models</Gloss>:
+the product of two <NoteLink to="matrix-vector-product">linear maps</NoteLink>, one passed through a sigmoid
+<Cite id="dauphin2017" />. Shazeer placed it inside the transformer's feed-forward layer, in place of the first linear
+map and its activation, and dropped the biases <Cite id="shazeer2020" />.
 
 Each hidden unit $i$ computes $\phi(a_i)\,b_i$ with $a_i = \xvec\wvec_i$ and $b_i = \xvec\vvec_i$, where $\wvec_i$ and
 $\vvec_i$ are the $i$-th columns of $\Wmat$ and $\Vmat$. For SwiGLU:
@@ -53,10 +56,10 @@ $$
 a_i b_i = (\xvec\wvec_i)(\xvec\vvec_i) = \xvec \paren{\wvec_i \vvec_i^\tr} \xvec^\tr ,
 $$
 
-a <NoteLink to="positive-definite-matrices">quadratic form</NoteLink> in $\xvec$ with the rank-one matrix $\wvec_i\vvec_i^\tr$. The bilinear variant is exactly this at
-every input. A ReLU unit $\max(0, a_i)$ is piecewise linear in $\xvec$, so a product of two input features must be
-approximated by many units. A gated unit represents such a product with one unit, and the gate decides where it
-applies.
+a <NoteLink to="positive-definite-matrices">quadratic form</NoteLink> in $\xvec$ with the rank-one matrix
+$\wvec_i\vvec_i^\tr$. The bilinear variant is exactly this at every input. A ReLU unit $\max(0, a_i)$ is piecewise
+linear in $\xvec$, so a product of two input features must be approximated by many units. A gated unit represents such a
+product with one unit, and the gate decides where it applies.
 
 ### Keeping parameters and compute equal
 
@@ -67,13 +70,14 @@ $$
 2\,d\,d_{ff} = 3\,d\,d'_{ff} \quad\Longleftrightarrow\quad d'_{ff} = \tfrac23 d_{ff}.
 $$
 
-With $d_{ff} = 4d$ this gives $d'_{ff} = 8d/3$. The forward cost per token is two <Gloss name="flop" plural /> per weight in each <NoteLink to="matrix-multiplication">matrix
-product</NoteLink>, $2 \cdot 2 d d_{ff}$ for the standard layer and $2 \cdot 3 d d'_{ff}$ for the gated one, so the same condition
-also equalises FLOPs. The activation $\phi$ and the elementwise product cost $O(d'_{ff})$ per token, which is small next
-to $O(d\,d'_{ff})$.
+With $d_{ff} = 4d$ this gives $d'_{ff} = 8d/3$. The forward cost per token is two <Gloss name="flop" plural /> per
+weight in each <NoteLink to="matrix-multiplication">matrix product</NoteLink>, $2 \cdot 2 d d_{ff}$ for the standard
+layer and $2 \cdot 3 d d'_{ff}$ for the gated one, so the same condition also equalises FLOPs. The activation $\phi$ and
+the elementwise product cost $O(d'_{ff})$ per token, which is small next to $O(d\,d'_{ff})$.
 
-Shazeer used $d = 768$ and reduced $d_{ff}$ from 3072 to 2048 for the three-matrix variants <Cite id="shazeer2020" />. <Gloss name="llama" /> uses a hidden width of $\frac23 \cdot 4d$ <Cite id="touvron2023b" />. For $d = 4096$
-that is $10922.7$, which the released code rounds up to a multiple of 256, giving $d'_{ff} = 11008$.
+Shazeer used $d = 768$ and reduced $d_{ff}$ from 3072 to 2048 for the three-matrix variants <Cite id="shazeer2020" />.
+<Gloss name="llama" /> uses a hidden width of $\frac23 \cdot 4d$ <Cite id="touvron2023b" />. For $d = 4096$ that is
+$10922.7$, which the released code rounds up to a multiple of 256, giving $d'_{ff} = 11008$.
 
 ### Evidence
 
@@ -91,22 +95,23 @@ compute, and reported held-out log-perplexity <Cite id="shazeer2020" />:
 | SwiGLU             | 1.944        | 1.636         |
 | ReGLU              | 1.953        | 1.645         |
 
-The <NoteLink to="variance-and-covariance">standard deviation</NoteLink> across four short runs was about 0.005. Every gated variant beat every ungated one at the
-end of training, and GEGLU and SwiGLU were best. The paper gives no reason: "we attribute their success, as all else,
-to divine benevolence" <Cite id="shazeer2020" />. <Gloss name="palm" /> adopted SwiGLU, noting that it needs three matrix products but
-improved quality in compute-matched comparisons <Cite id="chowdhery2022" />.
+The <NoteLink to="variance-and-covariance">standard deviation</NoteLink> across four short runs was about 0.005. Every
+gated variant beat every ungated one at the end of training, and GEGLU and SwiGLU were best. The paper gives no reason:
+"we attribute their success, as all else, to divine benevolence" <Cite id="shazeer2020" />. <Gloss name="palm" />
+adopted SwiGLU, noting that it needs three matrix products but improved quality in compute-matched comparisons
+<Cite id="chowdhery2022" />.
 
 ## Worked example
 
-**Parameter counts at $d = 4096$.** The ReLU layer with $d_{ff} = 16384$ has $2 \cdot 4096 \cdot 16384 = 134{,}217{,}728$
-weights. The SwiGLU layer with $d'_{ff} = 11008$ has $3 \cdot 4096 \cdot 11008 = 135{,}266{,}304$ weights, 0.8% more
-because of the rounding.
+**Parameter counts at $d = 4096$.** The ReLU layer with $d_{ff} = 16384$ has
+$2 \cdot 4096 \cdot 16384 = 134{,}217{,}728$ weights. The SwiGLU layer with $d'_{ff} = 11008$ has
+$3 \cdot 4096 \cdot 11008 = 135{,}266{,}304$ weights, 0.8% more because of the rounding.
 
 **One hidden pair.** Suppose two hidden units receive gate pre-activations $\avec = (2, -2)$ and linear values
 $\bvec = (1.5, 3)$. Then $\operatorname{Swish}_1(2) = 2\sigma(2) = 1.762$ and
 $\operatorname{Swish}_1(-2) = -2\sigma(-2) = -0.238$. The hidden outputs are $1.762 \times 1.5 = 2.642$ and
-$-0.238 \times 3 = -0.715$. The second unit has the larger linear value but a mostly closed gate, so it contributes less.
-Swish is not zero for negative inputs, so the closed gate still passes a small signal of opposite sign.
+$-0.238 \times 3 = -0.715$. The second unit has the larger linear value but a mostly closed gate, so it contributes
+less. Swish is not zero for negative inputs, so the closed gate still passes a small signal of opposite sign.
 
 ## Cost
 
@@ -118,7 +123,8 @@ per token against $4d$ for the ReLU layer, a third more activation memory in the
 
 - **Hidden width.** $8d/3$ is not an integer multiple of the sizes that matrix hardware prefers. Models round it, and
   some choose other widths entirely; the parameter match is a convention, not a requirement.
-- **Sparsity.** A ReLU layer outputs exact zeros for every unit with a negative pre-activation, about half of them at initialisation. SwiGLU and GEGLU outputs are rarely zero,
-  which removes the activation sparsity that some inference methods exploit.
+- **Sparsity.** A ReLU layer outputs exact zeros for every unit with a negative pre-activation, about half of them at
+  initialisation. SwiGLU and GEGLU outputs are rarely zero, which removes the activation sparsity that some inference
+  methods exploit.
 - **Mixture of experts.** Each expert in a <NoteLink to="mixture-of-experts">mixture-of-experts</NoteLink> layer is
   usually a gated feed-forward layer, so the $8d/3$ convention carries over to expert widths.

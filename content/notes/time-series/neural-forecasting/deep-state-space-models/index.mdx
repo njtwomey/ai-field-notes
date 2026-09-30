@@ -13,8 +13,9 @@ updated: 2026-09-27
 ---
 
 <Definition>
-A **deep state space model** forecasts each series $z^{(i)}_{1:T_i}$ with a <NoteLink to="linear-gaussian-state-space-models">linear-Gaussian state space model</NoteLink> whose
-parameters $\Theta^{(i)}_t$ change over time and are produced by a recurrent network from the series' covariates
+A **deep state space model** forecasts each series $z^{(i)}_{1:T_i}$ with a
+<NoteLink to="linear-gaussian-state-space-models">linear-Gaussian state space model</NoteLink> whose parameters
+$\Theta^{(i)}_t$ change over time and are produced by a recurrent network from the series' covariates
 <Cite id="rangapuram2018" />:
 
 $$
@@ -22,18 +23,18 @@ $$
 p(z^{(i)}_{1:T_i} \mid \xvec^{(i)}_{1:T_i}; \Phi) = p_{\mathrm{SS}}(z^{(i)}_{1:T_i} \mid \Theta^{(i)}_{1:T_i}).
 $$
 
-$\Psi$ is a multi-layer <Gloss name="lstm" /> followed by affine maps and range-constraining transforms, $\Phi$ are its parameters
-shared by all series, and $p_{\mathrm{SS}}$ is the <NoteLink to="law-of-total-probability">marginal likelihood</NoteLink> of the state space model with the latent state
-integrated out.
+$\Psi$ is a multi-layer <Gloss name="lstm" /> followed by affine maps and range-constraining transforms, $\Phi$ are its
+parameters shared by all series, and $p_{\mathrm{SS}}$ is the <NoteLink to="law-of-total-probability">marginal
+likelihood</NoteLink> of the state space model with the latent state integrated out.
 </Definition>
 
 ## Motivation
 
-Classical state space models, such as exponential smoothing in innovations form or structural models with level,
-trend and seasonal states, encode known structure. That structure makes them data-efficient and interpretable, but
-each series is fitted separately, and covariates must be chosen by hand. <NoteLink to="neural-forecasting-models">Neural forecasters</NoteLink> such as
-<NoteLink to="deepar">DeepAR</NoteLink> learn patterns across series from raw covariates, but need more data and give
-no handle on smoothness or components.
+Classical state space models, such as exponential smoothing in innovations form or structural models with level, trend
+and seasonal states, encode known structure. That structure makes them data-efficient and interpretable, but each series
+is fitted separately, and covariates must be chosen by hand. <NoteLink to="neural-forecasting-models">Neural
+forecasters</NoteLink> such as <NoteLink to="deepar">DeepAR</NoteLink> learn patterns across series from raw covariates,
+but need more data and give no handle on smoothness or components.
 
 DeepState keeps the linear-Gaussian state space model as the per-series likelihood and moves only the choice of its
 parameters into a network. The network is shared, so patterns are learnt across series. The model for any single
@@ -50,11 +51,13 @@ $$
 z_t = \avec_t^\top\lvec_{t-1} + b_t + \sigma_t\epsilon_t, \qquad \varepsilon_t, \epsilon_t \sim \Gauss(0, 1),
 $$
 
-with $\lvec_0 \sim \Gauss(\muvec_0, \diag(\sigmavec_0^2))$. $\Fmat_t$ ($L \times L$) is the <NoteLink to="markov-chain">transition matrix</NoteLink>,
-$\gvec_t \in \reals^L$ the innovation strength, $\avec_t \in \reals^L$ and $b_t$ the observation weights and offset,
-and $\sigma_t > 0$ the observation noise. The structure of $\Fmat_t$ and $\avec_t$ fixes which components the state
-holds. In the simplest case, a <NoteLink to="simple-exponential-smoothing">local level model</NoteLink>, $L = 1$, $F_t = 1$ and $a_t = 1$: the level drifts as a <NoteLink to="random-walk">random walk</NoteLink>
-with step size $g_t$ and is observed with noise $\sigma_t$.
+with $\lvec_0 \sim \Gauss(\muvec_0, \diag(\sigmavec_0^2))$. $\Fmat_t$ ($L \times L$) is the
+<NoteLink to="markov-chain">transition matrix</NoteLink>, $\gvec_t \in \reals^L$ the innovation strength,
+$\avec_t \in \reals^L$ and $b_t$ the observation weights and offset, and $\sigma_t > 0$ the observation noise. The
+structure of $\Fmat_t$ and $\avec_t$ fixes which components the state holds. In the simplest case, a
+<NoteLink to="simple-exponential-smoothing">local level model</NoteLink>, $L = 1$, $F_t = 1$ and $a_t = 1$: the level
+drifts as a <NoteLink to="random-walk">random walk</NoteLink> with step size $g_t$ and is observed with noise
+$\sigma_t$.
 
 The structure of the state (which components it holds, and hence the pattern of $\Fmat_t$ and $\avec_t$) is chosen
 per dataset, for example a day-of-week or hour-of-day seasonal model <Cite id="rangapuram2018" />.
@@ -68,8 +71,8 @@ difference from DeepAR, whose network consumes $z_{t-1}$ directly.
 
 ## Deriving the likelihood
 
-The marginal likelihood of one series factorises by the <NoteLink to="derivative">chain rule</NoteLink> into one-step predictive densities, the
-**prediction error decomposition**:
+The marginal likelihood of one series factorises by the <NoteLink to="derivative">chain rule</NoteLink> into one-step
+predictive densities, the **prediction error decomposition**:
 
 $$
 \log p_{\mathrm{SS}}(z_{1:T} \mid \Theta_{1:T}) = \sum_{t=1}^{T} \log p(z_t \mid z_{1:t-1}, \Theta_{1:t}).
@@ -96,22 +99,22 @@ The transition then moves the state forward: $\mvec_t = \Fmat_t\mvec'_{t-1}$ and
 $\Pmat_t = \Fmat_t\Pmat'_{t-1}\Fmat_t^\top + \gvec_t\gvec_t^\top$. Summing the Gaussian log-densities over $t$ gives the
 exact log-likelihood of the series.
 
-Every step is a sequence of <NoteLink to="matrix-multiplication">matrix products</NoteLink> and one scalar division, so the whole computation is differentiable in
-$\Theta_{1:T}$ and hence in $\Phi$. The training objective is
+Every step is a sequence of <NoteLink to="matrix-multiplication">matrix products</NoteLink> and one scalar division, so
+the whole computation is differentiable in $\Theta_{1:T}$ and hence in $\Phi$. The training objective is
 
 $$
 \mathcal{L}(\Phi) = \sum_{i=1}^{N} \log p_{\mathrm{SS}}\paren{z^{(i)}_{1:T_i} \mid \Theta^{(i)}_{1:T_i}(\Phi)},
 $$
 
-maximised by stochastic <NoteLink to="gradient">gradient</NoteLink> ascent with gradients from automatic differentiation through the filter
-<Cite id="rangapuram2018" />.
+maximised by stochastic <NoteLink to="gradient">gradient</NoteLink> ascent with gradients from automatic differentiation
+through the filter <Cite id="rangapuram2018" />.
 
 ## Forecasting
 
 For series $i$ with history $z_{1:T}$ and covariates $\xvec_{1:T+\tau}$:
 
-1. Unroll the <Gloss name="rnn" /> over the training range to get $\Theta_{1:T}$ and run the Kalman filter to get the posterior of the
-   last state, $p(\lvec_T \mid z_{1:T})$.
+1. Unroll the <Gloss name="rnn" /> over the training range to get $\Theta_{1:T}$ and run the Kalman filter to get the
+   posterior of the last state, $p(\lvec_T \mid z_{1:T})$.
 2. Unroll the RNN over the prediction range to get $\Theta_{T+1:T+\tau}$ from the future covariates.
 3. Sample $\lvec_T$ from its posterior and apply the transition and observation equations recursively to get sample
    paths $\hat z_{T+1:T+\tau}$.

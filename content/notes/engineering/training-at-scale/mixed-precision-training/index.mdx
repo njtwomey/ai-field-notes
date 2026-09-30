@@ -14,11 +14,12 @@ updated: 2026-09-27
 import { LossScaling } from './LossScaling'
 
 <Definition>
-Mixed-precision training stores activations, weights for the forward and backward passes, and <NoteLink to="gradient">gradients</NoteLink> in a 16-bit
-floating-point format, and runs <NoteLink to="matrix-multiplication">matrix products</NoteLink> in that format with 32-bit accumulation. It keeps a 32-bit **master
-copy** of the weights to which updates are applied, and computes numerically sensitive reductions in 32 bits. With the
-fp16 format it also multiplies the loss by a **loss scale** before backpropagation and divides the gradients by it
-before the update <Cite id="micikevicius2018" />.
+Mixed-precision training stores activations, weights for the forward and backward passes, and
+<NoteLink to="gradient">gradients</NoteLink> in a 16-bit floating-point format, and runs
+<NoteLink to="matrix-multiplication">matrix products</NoteLink> in that format with 32-bit accumulation. It keeps a
+32-bit **master copy** of the weights to which updates are applied, and computes numerically sensitive reductions in 32
+bits. With the fp16 format it also multiplies the loss by a **loss scale** before backpropagation and divides the
+gradients by it before the update <Cite id="micikevicius2018" />.
 </Definition>
 
 ## Problem
@@ -48,18 +49,18 @@ precision <Cite id="kalamkar2019" />.
 
 ### Why updates need a 32-bit master copy
 
-<NoteLink to="gradient-descent">Gradient descent</NoteLink> updates $w \leftarrow w - \eta g$. Suppose $\abs{w}$ lies in $[2^E, 2^{E+1})$. In a format with $p$
-fraction bits, neighbouring representable numbers near $w$ are $2^{E-p}$ apart. Round-to-nearest maps $w + u$ back to $w$
-whenever $\abs{u}$ is less than half of that spacing:
+<NoteLink to="gradient-descent">Gradient descent</NoteLink> updates $w \leftarrow w - \eta g$. Suppose $\abs{w}$ lies in
+$[2^E, 2^{E+1})$. In a format with $p$ fraction bits, neighbouring representable numbers near $w$ are $2^{E-p}$ apart.
+Round-to-nearest maps $w + u$ back to $w$ whenever $\abs{u}$ is less than half of that spacing:
 
 $$
 \abs{u} < 2^{E - p - 1} \le \abs{w} \, 2^{-p - 1}.
 $$
 
 In fp16, $p = 10$, so an update smaller than about $\abs{w} / 2048$ can be lost entirely <Cite id="micikevicius2018" />.
-Late in training, <Gloss name="learning-rate">learning rates</Gloss> are small and $\abs{\eta g}$ is often thousands of times smaller than $\abs{w}$. Every
-such step is silently discarded, and the discarded amounts do not accumulate. In bf16, $p = 7$ and the threshold is
-$\abs{w}/256$, so the problem is worse.
+Late in training, <Gloss name="learning-rate">learning rates</Gloss> are small and $\abs{\eta g}$ is often thousands of
+times smaller than $\abs{w}$. Every such step is silently discarded, and the discarded amounts do not accumulate. In
+bf16, $p = 7$ and the threshold is $\abs{w}/256$, so the problem is worse.
 
 The fix is to keep the weights that receive updates in fp32, where the threshold is $\abs{w}/2^{24}$, and to cast them
 to 16 bits for each forward and backward pass. The optimiser state, such as Adam's moments, is kept in fp32 as well.
@@ -68,9 +69,10 @@ and would become zero in fp16 before even being multiplied by the learning rate 
 
 ### Why fp16 gradients need loss scaling
 
-Backpropagated gradients of activations are often tiny. In fp16, magnitudes below $2^{-25}$ round to zero and those
-just above $2^{-24}$ keep only one significant bit. In a Multibox <Gloss name="single-shot-detector" /> detector trained in fp32, 67% of the activation
-gradient values were zero, and many of the non-zero values lay below the fp16 range <Cite id="micikevicius2018" />.
+Backpropagated gradients of activations are often tiny. In fp16, magnitudes below $2^{-25}$ round to zero and those just
+above $2^{-24}$ keep only one significant bit. In a Multibox <Gloss name="single-shot-detector" /> detector trained in
+fp32, 67% of the activation gradient values were zero, and many of the non-zero values lay below the fp16 range
+<Cite id="micikevicius2018" />.
 
 Backpropagation is linear in the gradient of the loss. Multiplying the loss by a constant $S$ multiplies every
 intermediate gradient by $S$, by the <NoteLink to="derivative">chain rule</NoteLink>:
@@ -124,8 +126,8 @@ normal fp16 number with full 11-bit precision. Dividing by $2^{16}$ in fp32 afte
 ### Memory
 
 Per parameter, mixed-precision Adam stores 2 bytes of 16-bit weights, 2 bytes of gradients, and 12 bytes of fp32 master
-weights and moments: 16 bytes, against 16 bytes for fp32 Adam with fp32 weights, gradients and moments. The saving is not
-in model state but in activations, which are stored in 16 bits, and in memory bandwidth and arithmetic speed. See
+weights and moments: 16 bytes, against 16 bytes for fp32 Adam with fp32 weights, gradients and moments. The saving is
+not in model state but in activations, which are stored in 16 bits, and in memory bandwidth and arithmetic speed. See
 <NoteLink to="zero-and-sharded-optimisers">ZeRO</NoteLink> for sharding these 16 bytes.
 
 ## Trade-offs

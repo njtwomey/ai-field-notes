@@ -26,8 +26,9 @@ Earlier sequence models at Pinterest were either pretrained user embeddings, suc
 <NoteLink to="pinnerformer">PinnerFormer</NoteLink>, or sequence encoders trained inside one ranking model, such as
 <NoteLink to="transact">TransAct</NoteLink> <Cite id="pancha2022pinnerformer" /> <Cite id="xia2023transact" />. A
 pretrained embedding cannot see the candidate item. An encoder trained inside one ranker is limited by that ranker's
-training budget and data. PinFM follows the pretrain-then-fine-tune approach of <Gloss name="language-model">language models</Gloss>: pretrain one large
-sequence model on all users' activity, then fine-tune it within each application <Cite id="chen2025pinfm" />.
+training budget and data. PinFM follows the pretrain-then-fine-tune approach of <Gloss name="language-model">language
+models</Gloss>: pretrain one large sequence model on all users' activity, then fine-tune it within each application
+<Cite id="chen2025pinfm" />.
 
 Three difficulties are specific to recommendation. The model must score millions of items per second within cost and
 latency limits. It must capture interactions between the user's history and the candidate. It must handle new items
@@ -36,16 +37,19 @@ that did not exist during pretraining.
 ## Pretraining
 
 **Data.** Each user's actions over two years are sorted by time and capped at 16,000. An event is
-$S_i = [t_i, a_i, v_i, id_i]$: timestamp, action type, surface and item ID. Training cuts sequences into
-non-overlapping segments of a few hundred events. PinFM uses learned ID embeddings, not pretrained <NoteLink to="content-based-filtering">content embeddings</NoteLink>,
-because content embeddings would multiply storage and serving volume by hundreds <Cite id="chen2025pinfm" />.
+$S_i = [t_i, a_i, v_i, id_i]$: timestamp, action type, surface and item ID. Training cuts sequences into non-overlapping
+segments of a few hundred events. PinFM uses learned ID embeddings, not pretrained
+<NoteLink to="content-based-filtering">content embeddings</NoteLink>, because content embeddings would multiply storage
+and serving volume by hundreds <Cite id="chen2025pinfm" />.
 
-**Model.** Item, surface and action embeddings are summed, passed through an <Gloss name="mlp" /> with normalisation, the transformer
-$M$, and another MLP with normalisation: $\Hmat = \phi_{\mathrm{out}}(M(\phi_{\mathrm{in}}(\Emat + \Vmat + \Amat)))$.
-The paper used <Gloss name="gpt-2" /> with pre-layer-norm and found HSTU similar <Cite id="chen2025pinfm" />.
+**Model.** Item, surface and action embeddings are summed, passed through an <Gloss name="mlp" /> with normalisation,
+the transformer $M$, and another MLP with normalisation:
+$\Hmat = \phi_{\mathrm{out}}(M(\phi_{\mathrm{in}}(\Emat + \Vmat + \Amat)))$. The paper used <Gloss name="gpt-2" /> with
+pre-layer-norm and found HSTU similar <Cite id="chen2025pinfm" />.
 
-**Losses.** With billions of items, a full softmax over the vocabulary is too expensive. Each loss is an <Gloss name="infonce" /> term
-with <NoteLink to="two-tower-model">in-batch negatives</NoteLink> that excludes the user's own positives:
+**Losses.** With billions of items, a full softmax over the vocabulary is too expensive. Each loss is an
+<Gloss name="infonce" /> term with <NoteLink to="two-tower-model">in-batch negatives</NoteLink> that excludes the user's
+own positives:
 
 $$
 \ell(\hvec_i, \zvec) = -\log\frac{\exp(\hvec_i\transpose\zvec/\tau)}{\exp(\hvec_i\transpose\zvec/\tau) +
@@ -55,8 +59,9 @@ $$
 where $\zvec$ is an MLP of the target item's ID embedding and $\tau$ is a learned temperature
 <Cite id="chen2025pinfm" />. Three losses use it:
 
-- **Next-token loss.** $\mathcal{L}_{ntl} = \sum_i \ell(\hvec_i, \zvec_{i+1})\,\indicator[a_{i+1} \in A_{\mathrm{pos}}]$:
-  each position predicts the next item if the next action is positive.
+- **Next-token loss.**
+  $\mathcal{L}_{ntl} = \sum_i \ell(\hvec_i, \zvec_{i+1})\,\indicator[a_{i+1} \in A_{\mathrm{pos}}]$: each position
+  predicts the next item if the next action is positive.
 - **Multi-token loss.** $\mathcal{L}_{mtl} = \sum_i \sum_{j=i+1}^{i+L'} \ell(\hvec_i, \zvec_j)\,\indicator[a_j \in
   A_{\mathrm{pos}}]$: each position predicts every positive in a window of $L'$ future events, because interests
   persist over short periods.
@@ -69,10 +74,11 @@ instead of only the next one.
 
 ## Fine-tuning
 
-PinFM becomes the user-sequence module of a ranking model with feature crossing such as <NoteLink to="deepfm">DCN</NoteLink> or DLRM. The candidate is
-added by **early fusion**: it is appended to the user's sequence, so the module outputs an embedding that crosses the
-history with the candidate, as in TransAct. The pretrained module's <Gloss name="learning-rate">learning rate</Gloss> is about one tenth of the ranker's,
-and the pretraining losses can be kept during fine-tuning <Cite id="chen2025pinfm" />.
+PinFM becomes the user-sequence module of a ranking model with feature crossing such as
+<NoteLink to="deepfm">DCN</NoteLink> or DLRM. The candidate is added by **early fusion**: it is appended to the user's
+sequence, so the module outputs an embedding that crosses the history with the candidate, as in TransAct. The pretrained
+module's <Gloss name="learning-rate">learning rate</Gloss> is about one tenth of the ranker's, and the pretraining
+losses can be kept during fine-tuning <Cite id="chen2025pinfm" />.
 
 **New items.** ID embeddings are poor for items with little history. Two techniques help. During fine-tuning, the
 candidate's ID is replaced by a random ID 10% of the time, which simulates an unseen item. Dropout is applied to the
@@ -84,12 +90,12 @@ A ranking request scores many candidates for one user. The paper reports about 1
 sequence in serving and about 10 in training <Cite id="chen2025pinfm" />. With early fusion, a naive implementation
 runs self-attention over the history plus the candidate once per candidate.
 
-Let the history have length $L$ and a request have $C$ candidates. A naive per-candidate self-attention costs
-$O(L^2)$ query–key products per layer for each candidate, $O(C L^2)$ in total. The history does not depend on the
-candidate, and the causal mask means history positions never attend to the appended candidate. The history's keys and
-values in each layer can therefore be computed once, as a <Gloss name="kv-cache" />, and each candidate then attends to them with
-$O(L)$ products per layer. The total becomes $O(L^2 + C L)$. For $C$ in the hundreds or thousands and $L$ in the hundreds,
-this removes most of the work.
+Let the history have length $L$ and a request have $C$ candidates. A naive per-candidate self-attention costs $O(L^2)$
+query–key products per layer for each candidate, $O(C L^2)$ in total. The history does not depend on the candidate, and
+the causal mask means history positions never attend to the appended candidate. The history's keys and values in each
+layer can therefore be computed once, as a <Gloss name="kv-cache" />, and each candidate then attends to them with
+$O(L)$ products per layer. The total becomes $O(L^2 + C L)$. For $C$ in the hundreds or thousands and $L$ in the
+hundreds, this removes most of the work.
 
 The **Deduplicated Cross-Attention Transformer** (DCAT) does this with custom Triton kernels. It deduplicates the batch
 of user sequences, runs the context transformer once per unique sequence to build the KV cache, and runs cross-attention
@@ -98,8 +104,8 @@ for every candidate. It raised serving throughput by 600% and training throughpu
 
 **Embedding compression.** Item-ID embeddings are 32-dimensional. Post-training quantisation to int4 with a float16
 scale and bias per vector shrinks each from 512 to 160 bits, 31.25% of the original size. The tables are served from a
-<Gloss name="cpu" /> cluster separate from the <Gloss name="gpu" /> model. A two-week online test of int4 against full precision was statistically
-neutral <Cite id="chen2025pinfm" />.
+<Gloss name="cpu" /> cluster separate from the <Gloss name="gpu" /> model. A two-week online test of int4 against full
+precision was statistically neutral <Cite id="chen2025pinfm" />.
 
 ## Reported results
 
@@ -112,12 +118,14 @@ Online <Gloss name="ab-test" plural />, all statistically significant at 95% con
 | fresh saves    | +5.70%           | −0.82%                |
 
 The paper reports that changing the input sequence so that PinFM learns interactions between the history and the
-candidate raised engagement with new items by 20%, and that PinFM serves more than half a billion users. Bidirectional attention during fine-tuning lowered evaluation metrics by 1.4% relative to
-keeping the causal mask used in pretraining <Cite id="chen2025pinfm" />.
+candidate raised engagement with new items by 20%, and that PinFM serves more than half a billion users. Bidirectional
+attention during fine-tuning lowered evaluation metrics by 1.4% relative to keeping the causal mask used in pretraining
+<Cite id="chen2025pinfm" />.
 
 ## Pitfalls
 
-- **ID embeddings and <NoteLink to="cold-start-problem">cold start</NoteLink>.** An ID-based model knows nothing about a new item until it has interactions.
+- **ID embeddings and <NoteLink to="cold-start-problem">cold start</NoteLink>.** An ID-based model knows nothing about a
+  new item until it has interactions.
 - **Distribution shift between stages.** Changing the attention pattern or input length between pretraining and
   fine-tuning costs accuracy, which motivates the future-token loss and the causal mask at fine-tuning.
 - **Serving cost.** The model is viable only with deduplication, KV caching and quantised embedding tables.

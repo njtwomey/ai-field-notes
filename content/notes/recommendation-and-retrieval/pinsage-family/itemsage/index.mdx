@@ -15,9 +15,10 @@ updated: 2026-09-27
 <Definition>
 **ItemSage** is Pinterest's embedding for shopping products. A product's up to 20 images, each represented by its
 PinSage embedding, and 12 text features are turned into a sequence of 32 vectors, prefixed by a global `[CLS]` token and
-passed through a one-layer <NoteLink to="transformer">transformer</NoteLink> encoder. The `[CLS]` output goes through a two-layer <Gloss name="mlp" /> to a unit-length
-256-dimensional embedding. Training contrasts query–product pairs from several engagement types in the same batch, so
-that one embedding serves image queries, text queries and user-activity queries <Cite id="baltescu2022itemsage" />.
+passed through a one-layer <NoteLink to="transformer">transformer</NoteLink> encoder. The `[CLS]` output goes through a
+two-layer <Gloss name="mlp" /> to a unit-length 256-dimensional embedding. Training contrasts query–product pairs from
+several engagement types in the same batch, so that one embedding serves image queries, text queries and user-activity
+queries <Cite id="baltescu2022itemsage" />.
 </Definition>
 
 ## Problem
@@ -34,10 +35,11 @@ models, indexes and upgrade cycles. ItemSage is one embedding for all three.
 ## Compatibility
 
 ItemSage embeddings must be **compatible** with two existing embeddings: PinSage for images and SearchSage, a search
-query model fine-tuned from DistilBERT. Compatible means that the <NoteLink to="dot-product">cosine similarity</NoteLink> between a query embedding and a
-product embedding is directly a relevance score. That lets product candidates be retrieved by <Gloss name="ann-search">approximate
-nearest-neighbour search</Gloss> (<NoteLink to="hnsw">HNSW</NoteLink>) without a transformation at query time. PinSage and
-SearchSage are frozen during ItemSage training <Cite id="baltescu2022itemsage" />.
+query model fine-tuned from DistilBERT. Compatible means that the <NoteLink to="dot-product">cosine
+similarity</NoteLink> between a query embedding and a product embedding is directly a relevance score. That lets product
+candidates be retrieved by <Gloss name="ann-search">approximate nearest-neighbour search</Gloss>
+(<NoteLink to="hnsw">HNSW</NoteLink>) without a transformation at query time. PinSage and SearchSage are frozen during
+ItemSage training <Cite id="baltescu2022itemsage" />.
 
 ## Architecture
 
@@ -45,18 +47,18 @@ SearchSage are frozen during ItemSage training <Cite id="baltescu2022itemsage" /
 <NoteLink to="pinsage">PinSage</NoteLink> embedding. Missing slots are zero vectors. 99.7% of products
 have at most 20 images <Cite id="baltescu2022itemsage" />.
 
-**Text inputs.** Each of 12 text fields becomes a bag of word unigrams, word bigrams and character trigrams, drawn from a
-vocabulary of the most frequent 200,000 unigrams, 1,000,000 bigrams and 64,000 trigrams. A **hash embedding** keeps the
-table small: an embedding table $\Emat$ of size $100{,}000 \times 256$, an importance table $\Wmat$ of size
+**Text inputs.** Each of 12 text fields becomes a bag of word unigrams, word bigrams and character trigrams, drawn from
+a vocabulary of the most frequent 200,000 unigrams, 1,000,000 bigrams and 64,000 trigrams. A **hash embedding** keeps
+the table small: an embedding table $\Emat$ of size $100{,}000 \times 256$, an importance table $\Wmat$ of size
 $\abs{\Vcal} \times 2$, and two hash functions $h_1, h_2$. Token $i$ has embedding
 $W_{i1}\Emat_{h_1(i)} + W_{i2}\Emat_{h_2(i)}$. A field's embedding is the sum of its tokens' embeddings
 <Cite id="baltescu2022itemsage" />.
 
-**Encoder.** Each group of features gets its own <NoteLink to="matrix-vector-product">linear map</NoteLink> to 512 dimensions, which removes the need for equal input
-sizes. The 32 projected vectors and the `[CLS]` token go through one transformer layer with 8 attention heads and a
-feed-forward module with one hidden layer. The `[CLS]` output passes through a two-layer MLP to 256 dimensions and is
-normalised to unit length. Encoders with 2 or 3 layers were worse offline, and 4 layers gave mixed results
-<Cite id="baltescu2022itemsage" />.
+**Encoder.** Each group of features gets its own <NoteLink to="matrix-vector-product">linear map</NoteLink> to 512
+dimensions, which removes the need for equal input sizes. The 32 projected vectors and the `[CLS]` token go through one
+transformer layer with 8 attention heads and a feed-forward module with one hidden layer. The `[CLS]` output passes
+through a two-layer MLP to 256 dimensions and is normalised to unit length. Encoders with 2 or 3 layers were worse
+offline, and 4 layers gave mixed results <Cite id="baltescu2022itemsage" />.
 
 ## Loss
 
@@ -74,12 +76,13 @@ L_{S_{\mathrm{neg}}} = -\frac{1}{\abs{\Ncal}}\sum_{i=1}^{\abs{\Ncal}}\log
 $$
 
 and minimises $L_{S_{\mathrm{pos}}} + L_{S_{\mathrm{neg}}}$. The first uses the other positives in the batch as
-negatives, with the <NoteLink to="two-tower-model">logQ correction</NoteLink> for how often each product is a positive, estimated with a count-min sketch
-<Cite id="yi2019sampling" /> <Cite id="cormode2005" />. In-batch negatives alone never include products that nobody
-engaged with and over-penalise popular products. The second term uses $\abs{\Ncal} = \abs{\Bcal}$ products sampled
-from the catalogue, with $Q_n$ their sampling probability. Mixed negative sampling puts both sets in one denominator
-<Cite id="yang2020mns" />. ItemSage keeps two separate terms and reports at least 3.5% better recall on every task
-with the separation <Cite id="baltescu2022itemsage" />.
+negatives, with the <NoteLink to="two-tower-model">logQ correction</NoteLink> for how often each product is a positive,
+estimated with a count-min sketch <Cite id="yi2019sampling" /> <Cite id="cormode2005" />. In-batch negatives alone never
+include products that nobody engaged with and over-penalise popular products. The second term uses
+$\abs{\Ncal} = \abs{\Bcal}$ products sampled from the catalogue, with $Q_n$ their sampling probability.
+<NoteLink to="sampled-softmax-and-negative-sampling">Mixed negative sampling</NoteLink> puts both sets in one
+denominator <Cite id="yang2020mns" />. ItemSage keeps two separate terms and reports at least 3.5% better recall on
+every task with the separation <Cite id="baltescu2022itemsage" />.
 
 The logQ term divides each sampled exponential by its inclusion probability, which makes the sampled denominator an
 unbiased estimate of the catalogue-wide sum. The derivation is in <NoteLink to="pinnerformer">PinnerFormer</NoteLink>.
@@ -87,15 +90,17 @@ unbiased estimate of the catalogue-wide sum. The derivation is in <NoteLink to="
 ## Multi-task batches
 
 ItemSage learns four engagement types: clicks, saves, add-to-cart actions and checkouts, with queries from Closeup
-(images) and Search (text). <Gloss name="multi-task-learning">Multi-task learning</Gloss> here means that one batch of size $\abs{\Bcal}$ holds $T_k$ positives
-from each task $k$, with $\sum_k T_k = \abs{\Bcal}$. There are no task-specific heads, because the output must be one
-embedding. The allocation $T_k$ sets the trade-off between tasks. The paper reports that, with $K$ tasks, $T_k = \abs{\Bcal}/K$ is a good
-starting point when adding a task, and attributes the lack of harm to existing tasks to correlation between them: a
-purchase is usually preceded by a click <Cite id="baltescu2022itemsage" />.
+(images) and Search (text). <Gloss name="multi-task-learning">Multi-task learning</Gloss> here means that one batch of
+size $\abs{\Bcal}$ holds $T_k$ positives from each task $k$, with $\sum_k T_k = \abs{\Bcal}$. There are no task-specific
+heads, because the output must be one embedding. The allocation $T_k$ sets the trade-off between tasks. The paper
+reports that, with $K$ tasks, $T_k = \abs{\Bcal}/K$ is a good starting point when adding a task, and attributes the lack
+of harm to existing tasks to correlation between them: a purchase is usually preceded by a click
+<Cite id="baltescu2022itemsage" />.
 
-For Home, which queries with user activity, the product retrieval uses the <NoteLink to="pinnersage">PinnerSage</NoteLink> approach: cluster the user's
-activity and sample pins from several clusters, which reduces the problem to Closeup-style image queries
-<Cite id="baltescu2022itemsage" /> <Cite id="pal2020pinnersage" />.
+For Home, which queries with user activity, the product retrieval uses the
+<NoteLink to="pinnersage">PinnerSage</NoteLink> approach: cluster the user's activity and sample pins from several
+clusters, which reduces the problem to Closeup-style image queries <Cite id="baltescu2022itemsage" />
+<Cite id="pal2020pinnersage" />.
 
 ## Serving
 
@@ -107,8 +112,8 @@ classifier by 3.6% <Cite id="baltescu2022itemsage" />.
 
 ## Reported results
 
-In <Gloss name="ab-test" plural /> where ItemSage generated candidates, against the previous embeddings (sum-pooling baselines), the relative
-changes were <Cite id="baltescu2022itemsage" />:
+In <Gloss name="ab-test" plural /> where ItemSage generated candidates, against the previous embeddings (sum-pooling
+baselines), the relative changes were <Cite id="baltescu2022itemsage" />:
 
 | surface | clicks  | purchases | gross merchandise value per user |
 | ------- | ------- | --------- | -------------------------------- |
@@ -125,6 +130,7 @@ tasks together with clicks and saves improved the sparse shopping tasks with sma
 
 - **Frozen query spaces.** Compatibility ties ItemSage to specific versions of PinSage and SearchSage. Upgrading either
   requires retraining.
-- **Bag-of-words text.** Text uses n-gram bags, not a pretrained <Gloss name="language-model">language model</Gloss>; the authors list this as future work.
+- **Bag-of-words text.** Text uses n-gram bags, not a pretrained <Gloss name="language-model">language model</Gloss>;
+  the authors list this as future work.
 - **No graph.** Despite the name, ItemSage uses no neighbourhood aggregation of its own. Graph information enters only
   through the PinSage embeddings of its images.

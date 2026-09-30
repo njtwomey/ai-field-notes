@@ -25,20 +25,21 @@ updated: 2026-09-27
 
 <Definition>
 A **linear-recurrent transformer** keeps the transformer's block structure but replaces softmax self-attention with a
-token mixer that is a linear recurrence with <NoteLink to="first-order-linear-odes">exponential decay</NoteLink>. The **retentive network** (RetNet) uses
-$\Smat_n = \gamma\Smat_{n-1} + \kvec_n^\tr\vvec_n$ and outputs $\qvec_n\Smat_n$, with a decay $0 < \gamma < 1$ per head
-<Cite id="sun2023retnet" />. **RWKV** uses a normalised, per-channel decaying average of values weighted by $e^{k}$
-<Cite id="peng2023rwkv" />. Both train in parallel like a transformer and generate like a recurrent network.
+token mixer that is a linear recurrence with <NoteLink to="first-order-linear-odes">exponential decay</NoteLink>. The
+**retentive network** (RetNet) uses $\Smat_n = \gamma\Smat_{n-1} + \kvec_n^\tr\vvec_n$ and outputs $\qvec_n\Smat_n$,
+with a decay $0 < \gamma < 1$ per head <Cite id="sun2023retnet" />. **RWKV** uses a normalised, per-channel decaying
+average of values weighted by $e^{k}$ <Cite id="peng2023rwkv" />. Both train in parallel like a transformer and generate
+like a recurrent network.
 </Definition>
 
 ## Intuition
 
 Causal <NoteLink to="linear-attention">linear attention</NoteLink> is already a recurrent network: its state adds one
-<NoteLink to="matrix-multiplication">outer product</NoteLink> $\kvec_n^\tr\vvec_n$ per token and never forgets. Every past token keeps full weight, so the state fills
-with old associations. Multiplying the state by a factor $\gamma < 1$ before each addition makes old tokens fade: a token
-$n - m$ steps back has weight $\gamma^{n-m}$. The model then has a soft recency bias, much like the decaying kernel of a
-<NoteLink to="structured-state-space-models">state-space layer</NoteLink>, while keeping linear attention's query–key
-matching.
+<NoteLink to="matrix-multiplication">outer product</NoteLink> $\kvec_n^\tr\vvec_n$ per token and never forgets. Every
+past token keeps full weight, so the state fills with old associations. Multiplying the state by a factor $\gamma < 1$
+before each addition makes old tokens fade: a token $n - m$ steps back has weight $\gamma^{n-m}$. The model then has a
+soft recency bias, much like the decaying kernel of a <NoteLink to="structured-state-space-models">state-space
+layer</NoteLink>, while keeping linear attention's query–key matching.
 
 ## Retention
 
@@ -71,25 +72,26 @@ $d \times d_v$ entries per head, and each token costs $O(dd_v)$.
 
 RetNet also multiplies $\qvec_n$ and $\kvec_m$ by rotations $e^{in\theta}$ and $e^{-im\theta}$, so the score depends on
 the offset $n - m$, the idea behind <NoteLink to="rotary-position-embedding">rotary position embedding</NoteLink>. The
-rotations fold into $\qvec$ and $\kvec$ and leave the recurrent and parallel forms, and the chunkwise form below, unchanged.
+rotations fold into $\qvec$ and $\kvec$ and leave the recurrent and parallel forms, and the chunkwise form below,
+unchanged.
 
 ### Chunkwise form
 
-For long sequences the parallel form's $n \times n$ matrix is too large, and the recurrent form is slow on a <Gloss name="gpu" />. The
-chunkwise form splits the sequence into chunks of $B$ tokens. Let position $n = (i-1)B + j$ be the $j$-th token of chunk
-$i$, and let $\Rmat_{i-1}$ be the state after the last token of chunk $i - 1$. Split the sum for $\ovec_n$ into tokens
-inside chunk $i$ and tokens before it. Every token before the chunk reaches position $n$ through $\Rmat_{i-1}$, decayed
-by $j$ further steps, so
+For long sequences the parallel form's $n \times n$ matrix is too large, and the recurrent form is slow on a
+<Gloss name="gpu" />. The chunkwise form splits the sequence into chunks of $B$ tokens. Let position $n = (i-1)B + j$ be
+the $j$-th token of chunk $i$, and let $\Rmat_{i-1}$ be the state after the last token of chunk $i - 1$. Split the sum
+for $\ovec_n$ into tokens inside chunk $i$ and tokens before it. Every token before the chunk reaches position $n$
+through $\Rmat_{i-1}$, decayed by $j$ further steps, so
 
 $$
 \ovec_n = \underbrace{\sum_{m\ \text{in chunk}\ i,\ m \le n} \gamma^{n-m}(\qvec_n\kvec_m^\tr)\vvec_m}_{\text{parallel form within the chunk}}
 + \underbrace{\gamma^{j}\,\qvec_n\Rmat_{i-1}}_{\text{recurrent across chunks}}.
 $$
 
-The state carried forward is $\Rmat_i = \gamma^B\Rmat_{i-1} + \sum_{j=1}^{B} \gamma^{B-j}\kvec_{(i-1)B+j}^\tr\vvec_{(i-1)B+j}$,
-the recurrence applied $B$ times at once <Cite id="sun2023retnet" />. The within-chunk part costs $O(B^2 d)$ per chunk and
-the cross-chunk part $O(Bdd_v)$. For $n/B$ chunks the total is $O(nBd + ndd_v)$: linear in $n$, and made of matrix
-products.
+The state carried forward is
+$\Rmat_i = \gamma^B\Rmat_{i-1} + \sum_{j=1}^{B} \gamma^{B-j}\kvec_{(i-1)B+j}^\tr\vvec_{(i-1)B+j}$, the recurrence
+applied $B$ times at once <Cite id="sun2023retnet" />. The within-chunk part costs $O(B^2 d)$ per chunk and the
+cross-chunk part $O(Bdd_v)$. For $n/B$ chunks the total is $O(nBd + ndd_v)$: linear in $n$, and made of matrix products.
 
 ### Multi-scale retention
 
@@ -98,8 +100,9 @@ $\gamma$ gives a memory of about $1/(1 - \gamma)$ tokens, so eight heads span 32
 no softmax, head outputs differ in scale; RetNet normalises each head with GroupNorm and multiplies the result by a
 swish gate $\operatorname{swish}(\Xmat\Wmat_G)$ before the output projection.
 
-A RetNet of 6.7B parameters decodes 8.4 times faster than a transformer with a <Gloss name="kv-cache" /> at sequence length 8K and uses
-70% less memory. Its throughput and latency do not depend on sequence length <Cite id="sun2023retnet" />.
+A RetNet of 6.7B parameters decodes 8.4 times faster than a transformer with a <Gloss name="kv-cache" /> at sequence
+length 8K and uses 70% less memory. Its throughput and latency do not depend on sequence length
+<Cite id="sun2023retnet" />.
 
 ### Worked example
 
@@ -112,13 +115,13 @@ $0.5^1 \times 2.5 = 1.25$ and $0.5^2 \times 2.5 = 0.625$. The outputs $o_3 = 4.2
 
 ## RWKV
 
-RWKV names its four vectors receptance $\rvec$, weight $\wvec$, key $\kvec$ and value $\vvec$ <Cite id="peng2023rwkv" />.
-Each block has a time-mixing sublayer, which plays the role of attention, and a channel-mixing sublayer, which plays the
-role of the feed-forward layer.
+RWKV names its four vectors receptance $\rvec$, weight $\wvec$, key $\kvec$ and value $\vvec$
+<Cite id="peng2023rwkv" />. Each block has a time-mixing sublayer, which plays the role of attention, and a
+channel-mixing sublayer, which plays the role of the feed-forward layer.
 
 **Token shift.** Every projection reads a per-channel interpolation of the current and previous inputs,
-$\kvec_t = \Wmat_k(\muvec_k \circ \xvec_t + (1 - \muvec_k) \circ \xvec_{t-1})$, and likewise for $\rvec_t$ and $\vvec_t$.
-This gives each layer a direct view of the previous token.
+$\kvec_t = \Wmat_k(\muvec_k \circ \xvec_t + (1 - \muvec_k) \circ \xvec_{t-1})$, and likewise for $\rvec_t$ and
+$\vvec_t$. This gives each layer a direct view of the previous token.
 
 **The WKV operator.** For each channel separately, with a learned decay $w \ge 0$ and a bonus $u$ for the current
 token,
@@ -139,16 +142,18 @@ a_t = e^{-w}a_{t-1} + e^{k_t}v_t, \qquad b_t = e^{-w}b_{t-1} + e^{k_t}, \qquad
 \operatorname{wkv}_t = \frac{a_{t-1} + e^{u + k_t}v_t}{b_{t-1} + e^{u + k_t}}.
 $$
 
-The recurrence for $a_t$ follows from $\sum_{i \le t} e^{-(t-i)w + k_i}v_i = e^{-w}\sum_{i \le t-1} e^{-(t-1-i)w + k_i}v_i + e^{k_t}v_t$.
-Generation therefore needs two numbers per channel per layer and $O(d)$ time per token <Cite id="peng2023rwkv" />.
-Implementations subtract a running maximum of the exponents, as in the online softmax, to avoid overflow.
+The recurrence for $a_t$ follows from
+$\sum_{i \le t} e^{-(t-i)w + k_i}v_i = e^{-w}\sum_{i \le t-1} e^{-(t-1-i)w + k_i}v_i + e^{k_t}v_t$. Generation therefore
+needs two numbers per channel per layer and $O(d)$ time per token <Cite id="peng2023rwkv" />. Implementations subtract a
+running maximum of the exponents, as in the online softmax, to avoid overflow.
 
-With one channel, $w = \ln 2$ (decay $0.5$ per step), $u = 0$, all $k_t = 0$ and $v = (1, 2, 3, 4)$, the recurrence gives
-$\operatorname{wkv} = (1,\ 1.5,\ 2.2,\ 3.0)$. For example, at $t = 3$ the numerator is $0.5 \times 1 + 1 \times 2 + 3 = 5.5$
-and the denominator $0.5 + 1 + 1 = 2.5$. RetNet's unnormalised sum on the same values was $(1, 2.5, 4.25, 6.125)$; RWKV's
-normalisation keeps the output on the scale of the values.
+With one channel, $w = \ln 2$ (decay $0.5$ per step), $u = 0$, all $k_t = 0$ and $v = (1, 2, 3, 4)$, the recurrence
+gives $\operatorname{wkv} = (1,\ 1.5,\ 2.2,\ 3.0)$. For example, at $t = 3$ the numerator is
+$0.5 \times 1 + 1 \times 2 + 3 = 5.5$ and the denominator $0.5 + 1 + 1 = 2.5$. RetNet's unnormalised sum on the same
+values was $(1, 2.5, 4.25, 6.125)$; RWKV's normalisation keeps the output on the scale of the values.
 
-**Channel mixing.** A gated feed-forward layer with token shift, a squared <Gloss name="relu" /> and a sigmoid receptance gate.
+**Channel mixing.** A gated feed-forward layer with token shift, a squared <Gloss name="relu" /> and a sigmoid
+receptance gate.
 
 RWKV models from 169M to 14B parameters were trained on the Pile, with language-modelling performance close to
 transformers of the same size <Cite id="peng2023rwkv" />.

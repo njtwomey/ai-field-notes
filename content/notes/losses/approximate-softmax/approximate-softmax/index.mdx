@@ -1,0 +1,100 @@
+---
+title: Approximate softmax
+kind: overview
+summary:
+  'A softmax over $V$ classes costs $O(Vd)$ per prediction, all of it in the normaliser $Z$. Three families avoid
+  paying for it: sample the denominator, factorise it into a tree, or train the model so that $Z$ is already one.'
+tags: [deep-learning, loss-functions, classification, language-models, nlp]
+aliases:
+  [
+    large-vocabulary softmax,
+    softmax approximation,
+    approximating the partition function,
+    large output space,
+    output layer cost,
+  ]
+requires: [softmax-and-log-sum-exp, cross-entropy-and-perplexity]
+related: [word-embeddings, embeddings-and-output-heads, importance-sampling, multinomial-logistic-regression]
+references: [bengio2003, chen2016largevocab, morin2005, goodman2001, grave2017, gutmann2010, devlin2014, wijmans2025]
+status: draft
+updated: 2026-09-30
+---
+
+<Definition>
+A model that predicts one of $V$ classes from a state $\hvec \in \reals^d$ scores each class with $s_w =
+\uvec_w\tr\hvec$ and normalises: $\pr(w \mid \hvec) = e^{s_w} / Z(\hvec)$ with $Z(\hvec) = \sum_{v \in \Vcal} e^{s_v}$.
+The scores are independent of each other; only $Z$ couples them, and only $Z$ costs $O(Vd)$. An **approximate softmax**
+is any of three ways to avoid that sum: estimate it from samples, replace it by a product of small sums, or train the
+model so that it equals one.
+</Definition>
+
+## What the normaliser costs
+
+Every logit is one dot product, so all $V$ of them are one matrix product: $Vd$ multiply-accumulates per prediction,
+then $V$ exponentials and $V$ additions. Two regimes follow, and they explain why the same technique can be essential
+or irrelevant.
+
+In a <Gloss name="language-model">language model</Gloss> of the word2vec kind there is no depth to compare against
+<Cite id="bengio2003" />. The model is an embedding lookup and one output head, so the normaliser is almost the whole
+computation: with $V = 10^5$ the softmax is four orders of magnitude more work than the lookup it normalises.
+
+In a transformer the head is one term among many. A layer of width $d$ costs about $12d^2$ multiply-accumulates per
+token: $4d^2$ for the attention projections and $8d^2$ for a four-times-expanded <Gloss name="mlp" />. With $d = 4096$
+and $V = 32{,}000$ the head is $131$M against $201$M for a single layer, so in a 32-layer stack it is about 2% of the
+forward pass. The cost that still bites is memory rather than arithmetic: the logits for a batch of $B$ tokens are a
+$B \times V$ tensor, and the backward pass needs it. At $B = 8192$ and $V = 128{,}000$ that is $10^9$ numbers, 4.2 GB in
+single precision, for one tensor.
+
+Nothing here is needed to pick a winner. Greedy decoding, beam search within a step and any ranking of the classes
+depend on the logits only through their order, and $Z(\hvec)$ is one number for all of them. The normaliser is needed
+when a probability's *value* is used: a training loss, a perplexity, a rescoring feature, a sampling temperature.
+
+## The three families
+
+Each family gives up something different, and the difference matters more than the speed.
+
+- <NoteLink to="sampled-softmax-and-negative-sampling">Sampling the denominator</NoteLink> keeps the model exactly as
+  it is and estimates $Z$ from $m \ll V$ classes drawn from a proposal $q$. With each sampled logit corrected to
+  $s_j - \log(m q_j)$ the sampled sum is an unbiased estimate of $Z$; without the correction the objective is a
+  different one, which is what negative sampling trains.
+- <NoteLink to="hierarchical-softmax">Adding structure</NoteLink> approximates nothing. It replaces the flat
+  distribution by a product of choices down a tree over the classes, which is normalised by construction, so training
+  and scoring a known class cost $O(d \log V)$ and no estimate is involved <Cite id="morin2005" />. The model class
+  changes, and with it the achievable fit.
+- <NoteLink to="self-normalisation">Self-normalisation</NoteLink> keeps the model and the objective and gives up the
+  guarantee that $Z = 1$, training it towards one instead. Scoring a known class then costs one dot product
+  <Cite id="devlin2014" />.
+
+| Family | What is approximated | Model class | Cost of scoring one known class |
+| --- | --- | --- | --- |
+| Sampling the denominator | the normaliser, from $m$ samples | unchanged | $O(Vd)$, or $O(md)$ while training |
+| Adding structure | nothing | tree-factorised | $O(d\log V)$ |
+| Self-normalisation | the constraint $Z = 1$ | unchanged | $O(d)$ |
+
+The families compose. Adaptive softmax is a tree whose shape is chosen from the class frequencies and the hardware's
+cost model <Cite id="grave2017" />; <Gloss name="nce" /> is a sampling method whose optimum is self-normalised
+<Cite id="gutmann2010" />.
+
+## Choosing
+
+- **Training a model over a huge output space, and the full distribution is never needed.** Sample the denominator. It
+  leaves the model alone, so the same weights can be scored exactly later.
+- **Scoring one known class, many times, at test time.** Self-normalise, or use a tree. Both turn the $V$-way sum into
+  work that does not grow with $V$.
+- **The whole distribution is needed at every step**, for sampling or for an exact perplexity. Compute it. Every
+  approximation here is either an estimate of $Z$ or a way of avoiding it, and neither gives all $V$ probabilities more
+  cheaply than the matrix product does.
+- **Rare classes must be modelled well.** Prefer sampling with a corrected proposal. A frequency-shaped tree spends its
+  capacity on frequent classes, and a sampling proposal that ignores rare classes never scores them
+  <Cite id="chen2016largevocab" />.
+
+## When none is needed
+
+Two changes have narrowed the problem since these methods were designed. Vocabularies stopped growing: subword
+tokenisation holds $V$ between $32{,}000$ and $256{,}000$ whatever the language, so the head is a fixed share of a model
+that has grown much deeper. And the memory cost, which was the real obstacle, is now removed by computing the loss in
+chunks or in one fused kernel that never writes the $B \times V$ logits to memory <Cite id="wijmans2025" />.
+
+What survives is the shape of the problem rather than the arithmetic. Retrieval over a catalogue of millions has no
+subword trick available, so sampled softmax is standard there; and any model scored inside a search — a translation
+decoder, a re-ranker — still wants a probability without a sum over the vocabulary.

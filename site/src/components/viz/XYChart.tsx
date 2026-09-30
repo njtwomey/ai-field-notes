@@ -25,6 +25,12 @@ export type XYSeries = Omit<Series, 'group' | 'type'> & {
   emphasis?: boolean
   /** Background marks in the muted chrome colour, e.g. the unremarkable majority. Not a category. */
   muted?: boolean
+  /**
+   * Lines only: a light line (width 1, partly transparent) in the series' own colour, for many stochastic draws of one
+   * thing, such as several MCMC chains or simulated paths, so they read as a band without hiding what lies beneath.
+   * Give the draws one name and one slot: the legend then shows a single entry that toggles them together.
+   */
+  thin?: boolean
   /** Names for group indices, shown in the legend. */
   groupNames?: string[]
   /**
@@ -145,14 +151,14 @@ export function XYChart({
           showSymbol: false,
           smooth: false,
           lineStyle: {
-            width: s.muted ? 1 : LINE_WIDTH,
+            width: s.muted || s.thin ? 1 : LINE_WIDTH,
             color,
-            opacity: s.muted ? 0.7 : 1,
+            opacity: s.thin ? 0.45 : s.muted ? 0.7 : 1,
             type: s.dashed ? 'dashed' : 'solid',
           },
           itemStyle: { color },
           ...(s.area ? { areaStyle: { color, opacity: 0.3 } } : {}),
-          z: s.muted ? 2 : 3,
+          z: s.muted || s.thin ? 2 : 3,
         })
       }
     })

@@ -12,11 +12,11 @@ updated: 2026-09-27
 ---
 
 <Definition>
-FlashAttention is an algorithm for exact <NoteLink to="scaled-dot-product-attention">scaled dot-product attention</NoteLink>
-$\Omat = \operatorname{softmax}\paren{\Qmat \Kmat^\tr / \sqrt{d}} \Vmat$ that splits $\Qmat$, $\Kmat$ and $\Vmat$ into
-blocks, loads each block into fast on-chip memory, and combines the partial results with an online softmax. It never
-writes the $N \times N$ matrix of scores or probabilities to the <Gloss name="gpu" />'s main memory, and it recomputes them in the
-backward pass instead of storing them <Cite id="dao2022" />.
+FlashAttention is an algorithm for exact <NoteLink to="scaled-dot-product-attention">scaled dot-product
+attention</NoteLink> $\Omat = \operatorname{softmax}\paren{\Qmat \Kmat^\tr / \sqrt{d}} \Vmat$ that splits $\Qmat$,
+$\Kmat$ and $\Vmat$ into blocks, loads each block into fast on-chip memory, and combines the partial results with an
+online softmax. It never writes the $N \times N$ matrix of scores or probabilities to the <Gloss name="gpu" />'s main
+memory, and it recomputes them in the backward pass instead of storing them <Cite id="dao2022" />.
 </Definition>
 
 ## Problem
@@ -73,8 +73,8 @@ $$
 \avec_{A \cup B} = e^{m_A - m} \avec_A + e^{m_B - m} \avec_B.
 $$
 
-Both are exactly the quantities that the union would have produced in one pass. By induction over blocks, processing
-the keys block by block and merging after each one gives $\ell$ and $\avec$ for the whole row, and $\ovec = \avec / \ell$.
+Both are exactly the quantities that the union would have produced in one pass. By induction over blocks, processing the
+keys block by block and merging after each one gives $\ell$ and $\avec$ for the whole row, and $\ovec = \avec / \ell$.
 The rescaling factors are at most 1, because $m$ is the larger maximum. Milakov and Gimelshein introduced the running
 normaliser for the softmax alone <Cite id="milakov2018" />; FlashAttention carries the output sum $\avec$ along with it
 <Cite id="dao2022" />.
@@ -145,15 +145,15 @@ about twice as fast as the first version and reaches 50–73% of the A100's peak
 - **Hardware-specific kernels.** Block sizes depend on SRAM size, and a fast kernel is written for each GPU generation
   and head width. Masks, dropout and positional biases must be fused into the kernel, because the scores never leave
   the chip.
-- **Decoding.** During autoregressive decoding with a <NoteLink to="key-value-cache">key-value cache</NoteLink>, each step has one
-  query row, so there is no $N \times N$ matrix to avoid. The time per step is set by reading the cache; splitting the
-  cache across blocks processed in parallel and merging them with the same rule helps there.
+- **Decoding.** During autoregressive decoding with a <NoteLink to="key-value-cache">key-value cache</NoteLink>, each
+  step has one query row, so there is no $N \times N$ matrix to avoid. The time per step is set by reading the cache;
+  splitting the cache across blocks processed in parallel and merging them with the same rule helps there.
 
 ## Pitfalls
 
 - **Merging normalised outputs.** Partial outputs from different blocks must be merged through their maxima and
   normalisers; averaging normalised outputs is wrong, as the worked example shows.
-- **Access to attention probabilities.** Code that needs the attention probabilities, for example to visualise them, cannot get
-  them from FlashAttention without recomputing them.
+- **Access to attention probabilities.** Code that needs the attention probabilities, for example to visualise them,
+  cannot get them from FlashAttention without recomputing them.
 - **Mask semantics.** A row whose keys are all masked has $\ell = 0$; kernels must define its output, usually zero, to
   avoid dividing by zero.

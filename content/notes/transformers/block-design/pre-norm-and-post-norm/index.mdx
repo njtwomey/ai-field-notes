@@ -53,43 +53,45 @@ $\xvec_{\ell+1} = \xvec_\ell + \operatorname{LN}(F(\operatorname{LN}(\xvec_\ell)
 ## Problem
 
 The original <NoteLink to="transformer">transformer</NoteLink> is post-norm <Cite id="vaswani2017" />. Post-norm
-transformers train only with a <NoteLink to="learning-rate-schedules">learning-rate warmup</NoteLink>: the <Gloss name="learning-rate">learning rate</Gloss> starts near zero and rises over the first few
-thousand steps. Without warmup, training diverges or settles at a poor solution. Xiong et al. trained a post-norm
-transformer on IWSLT14 German–English with Adam. Without warmup it reached a BLEU score of 8.45; with warmup it reached
-about 34 <Cite id="xiong2020" />. The result was also sensitive to the warmup length: 500 warmup steps gave <Gloss name="bleu" /> 31.16
-at peak learning rate $5 \times 10^{-4}$ and 2.77 at $10^{-3}$. The question is why the placement of one normalisation
-decides whether warmup is needed.
+transformers train only with a <NoteLink to="learning-rate-schedules">learning-rate warmup</NoteLink>: the
+<Gloss name="learning-rate">learning rate</Gloss> starts near zero and rises over the first few thousand steps. Without
+warmup, training diverges or settles at a poor solution. Xiong et al. trained a post-norm transformer on IWSLT14
+German–English with Adam. Without warmup it reached a BLEU score of 8.45; with warmup it reached about 34
+<Cite id="xiong2020" />. The result was also sensitive to the warmup length: 500 warmup steps gave <Gloss name="bleu" />
+31.16 at peak learning rate $5 \times 10^{-4}$ and 2.77 at $10^{-3}$. The question is why the placement of one
+normalisation decides whether warmup is needed.
 
 ## Mechanism
 
-Two facts decide the answer: how large the residual stream becomes, and how a normalisation scales the <NoteLink to="gradient">gradient</NoteLink> that
-passes back through it.
+Two facts decide the answer: how large the residual stream becomes, and how a normalisation scales the
+<NoteLink to="gradient">gradient</NoteLink> that passes back through it.
 
 ### The Jacobian of a normalisation
 
-Take <NoteLink to="layer-normalisation">layer normalisation</NoteLink> with unit gain, zero shift and $\epsilon = 0$. Write $\Pmat = \I - \frac1d \ones\ones^\tr$
-for the $d \times d$ matrix that subtracts the mean. The <NoteLink to="variance-and-covariance">standard deviation</NoteLink> of $\xvec$ is
-$\norm{\Pmat\xvec}/\sqrt d$, so
+Take <NoteLink to="layer-normalisation">layer normalisation</NoteLink> with unit gain, zero shift and $\epsilon = 0$.
+Write $\Pmat = \I - \frac1d \ones\ones^\tr$ for the $d \times d$ matrix that subtracts the mean. The
+<NoteLink to="variance-and-covariance">standard deviation</NoteLink> of $\xvec$ is $\norm{\Pmat\xvec}/\sqrt d$, so
 
 $$
 \operatorname{LN}(\xvec) = \sqrt d \, \frac{\Pmat\xvec}{\norm{\Pmat\xvec}}.
 $$
 
-For $\uvec = \Pmat\xvec$, the <NoteLink to="derivative">derivative</NoteLink> of $\uvec/\norm{\uvec}$ is $(\I - \hat\uvec\hat\uvec^\tr)/\norm{\uvec}$ with
-$\hat\uvec = \uvec/\norm{\uvec}$. By the chain rule
+For $\uvec = \Pmat\xvec$, the <NoteLink to="derivative">derivative</NoteLink> of $\uvec/\norm{\uvec}$ is
+$(\I - \hat\uvec\hat\uvec^\tr)/\norm{\uvec}$ with $\hat\uvec = \uvec/\norm{\uvec}$. By the chain rule
 
 $$
 \frac{\partial \operatorname{LN}(\xvec)}{\partial \xvec} = \frac{\sqrt d}{\norm{\Pmat\xvec}}\paren{\I -
 \hat\uvec\hat\uvec^\tr}\Pmat .
 $$
 
-The two matrices on the right are projections, with <NoteLink to="matrix-norms">spectral norm</NoteLink> 1. The <NoteLink to="jacobian">Jacobian</NoteLink> therefore has spectral norm
-$\sqrt d/\norm{\Pmat\xvec}$. **A normalisation divides the gradient passing through it by the size of its input**, in
-units where a standard vector has norm $\sqrt d$.
+The two matrices on the right are projections, with <NoteLink to="matrix-norms">spectral norm</NoteLink> 1. The
+<NoteLink to="jacobian">Jacobian</NoteLink> therefore has spectral norm $\sqrt d/\norm{\Pmat\xvec}$. **A normalisation
+divides the gradient passing through it by the size of its input**, in units where a standard vector has norm $\sqrt d$.
 
 ### How large the residual stream becomes
 
-In a post-norm stack every block ends with a normalisation, so every $\xvec_\ell$ has norm $\sqrt d$, whatever the depth.
+In a post-norm stack every block ends with a normalisation, so every $\xvec_\ell$ has norm $\sqrt d$, whatever the
+depth.
 
 In a pre-norm stack nothing normalises the stream itself. Unrolling the recursion gives
 
@@ -99,8 +101,9 @@ $$
 
 Each branch reads a normalised input, so its output has the same scale at every depth. At initialisation the branch
 outputs are nearly uncorrelated with each other and with $\xvec_0$. If each adds variance $c$ per coordinate, then
-$\expect\norm{\xvec_\ell}^2 \approx (1 + c\ell)\, d$. Xiong et al. prove, for a transformer with <Gloss name="relu" /> feed-forward
-layers at initialisation, that $(1 + \ell/2)\,d \le \expect\norm{\xvec_\ell}^2 \le (1 + 3\ell/2)\,d$ <Cite id="xiong2020" />. The pre-norm residual stream grows as $\sqrt\ell$.
+$\expect\norm{\xvec_\ell}^2 \approx (1 + c\ell)\, d$. Xiong et al. prove, for a transformer with <Gloss name="relu" />
+feed-forward layers at initialisation, that $(1 + \ell/2)\,d \le \expect\norm{\xvec_\ell}^2 \le (1 + 3\ell/2)\,d$
+<Cite id="xiong2020" />. The pre-norm residual stream grows as $\sqrt\ell$.
 
 ### Gradients of the last layer
 
@@ -120,24 +123,24 @@ $$
 \norm{\frac{\partial \Lcal}{\partial \Wmat^{2,L}}}_F \le O\paren{d\sqrt{\frac{\ln d}{L}}} \ \text{(pre-norm)}
 $$
 
-This is their Theorem 1 <Cite id="xiong2020" />. Near the output, post-norm gradients are larger than pre-norm ones by a factor that grows as
-$\sqrt L$. With the learning rate that suits the rest of the network, the first updates to the top layers of a post-norm
-model are too large. Warmup keeps those first updates small until the model leaves the region around initialisation. A
-pre-norm model does not have the large top-layer gradients, and Xiong et al. trained pre-norm transformers without
-warmup on translation and on <Gloss name="bert" /> pre-training. They report that pre-norm BERT reached a given validation loss faster
-than post-norm BERT, a speed-up they put at 40% <Cite id="xiong2020" />.
+This is their Theorem 1 <Cite id="xiong2020" />. Near the output, post-norm gradients are larger than pre-norm ones by a
+factor that grows as $\sqrt L$. With the learning rate that suits the rest of the network, the first updates to the top
+layers of a post-norm model are too large. Warmup keeps those first updates small until the model leaves the region
+around initialisation. A pre-norm model does not have the large top-layer gradients, and Xiong et al. trained pre-norm
+transformers without warmup on translation and on <Gloss name="bert" /> pre-training. They report that pre-norm BERT
+reached a given validation loss faster than post-norm BERT, a speed-up they put at 40% <Cite id="xiong2020" />.
 
 <NormGradients />
 
 ### The identity path
 
-The <NoteLink to="residual-connections">residual connection</NoteLink> exists to give the gradient an identity path.
-In a pre-norm block the Jacobian is $\I + \partial F_\ell(\operatorname{LN}(\xvec_\ell))/\partial\xvec_\ell$, and the
+The <NoteLink to="residual-connections">residual connection</NoteLink> exists to give the gradient an identity path. In
+a pre-norm block the Jacobian is $\I + \partial F_\ell(\operatorname{LN}(\xvec_\ell))/\partial\xvec_\ell$, and the
 identity term reaches every layer unchanged. In a post-norm block the identity term is multiplied by the normalisation's
 Jacobian. If the branch adds variance $c$, the input to the normalisation has norm about $\sqrt{(1 + c)d}$, and the
 identity path is scaled by about $1/\sqrt{1 + c}$ per block. Over $L$ blocks the pure identity path is scaled by
-$(1 + c)^{-L/2}$. The gradient still reaches the lower layers through the branches, but the exact identity path that makes deep
-<Gloss name="resnet">residual networks</Gloss> trainable is lost.
+$(1 + c)^{-L/2}$. The gradient still reaches the lower layers through the branches, but the exact identity path that
+makes deep <Gloss name="resnet">residual networks</Gloss> trainable is lost.
 
 ## Worked example
 
@@ -151,16 +154,18 @@ Take $L = 24$ blocks whose branches each add variance $c = 1$ per coordinate at 
 
 ## Remedies and variants
 
-**Pre-norm with a final normalisation.** <Gloss name="gpt-2" /> moved layer normalisation to the input of each sub-block and added one
-after the final block <Cite id="radford2019" />. Most later <Gloss name="language-model">language models</Gloss> use pre-norm, usually with <NoteLink to="rmsnorm-in-transformers">RMSNorm</NoteLink>.
+**Pre-norm with a final normalisation.** <Gloss name="gpt-2" /> moved layer normalisation to the input of each sub-block
+and added one after the final block <Cite id="radford2019" />. Most later <Gloss name="language-model">language
+models</Gloss> use pre-norm, usually with <NoteLink to="rmsnorm-in-transformers">RMSNorm</NoteLink>.
 
 **DeepNorm.** Wang et al. keep post-norm and change the residual weighting to
 $\xvec_{\ell+1} = \operatorname{LN}(\alpha\xvec_\ell + F(\xvec_\ell))$ with $\alpha > 1$. They also scale the
 initialisation of the feed-forward, value and output projections by $\beta < 1$ <Cite id="wang2022deepnet" />. Both
 changes make the identity term dominate the sum, so the normalisation's Jacobian is closer to a projection that passes
-$\xvec_\ell$ through. For a <NoteLink to="decoder-only-transformers">decoder-only model</NoteLink> with $M$ layers they use $\alpha = (2M)^{1/4}$ and
-$\beta = (8M)^{-1/4}$; for an <NoteLink to="encoder-only-transformers">encoder-only model</NoteLink> with $N$ layers, $\alpha = (2N)^{1/4}$ and $\beta = (8N)^{-1/4}$.
-With these settings they trained a transformer with 1,000 layers (2,500 attention and feed-forward sublayers) <Cite id="wang2022deepnet" />.
+$\xvec_\ell$ through. For a <NoteLink to="decoder-only-transformers">decoder-only model</NoteLink> with $M$ layers they
+use $\alpha = (2M)^{1/4}$ and $\beta = (8M)^{-1/4}$; for an <NoteLink to="encoder-only-transformers">encoder-only
+model</NoteLink> with $N$ layers, $\alpha = (2N)^{1/4}$ and $\beta = (8N)^{-1/4}$. With these settings they trained a
+transformer with 1,000 layers (2,500 attention and feed-forward sublayers) <Cite id="wang2022deepnet" />.
 
 **Sandwich and peri-norm.** CogView added a normalisation to the output of each sublayer, which it called
 Sandwich-LN, to stop values in the residual stream overflowing in 16-bit training <Cite id="ding2021cogview" />.

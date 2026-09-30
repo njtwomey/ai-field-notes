@@ -5,7 +5,6 @@ import { T_END, histogram, joinPaths, normals, reverseParticles, vpMixture } fro
 
 const STEPS = 250
 const PARTICLES = 2000
-const SHOWN = 12
 const H = T_END / STEPS
 const XS = linspace(-4.5, 4.5, 181)
 
@@ -15,19 +14,23 @@ const XS = linspace(-4.5, 4.5, 181)
  */
 export function FlowVersusDiffusion() {
   const t = useParam(0, { min: 0, max: T_END, step: H * 5 })
+  const count = useParam(12, { min: 1, max: 50, step: 1 })
   const start = useMemo(() => normals(PARTICLES, 41), [])
   const sde = useMemo(() => reverseParticles('sde', start, STEPS, 42), [start])
   const ode = useMemo(() => reverseParticles('ode', start, STEPS, 42), [start])
 
   const pathSeries = useMemo<XYSeries[]>(() => {
     const times = sde.map((_, k) => T_END - k * H)
+    // The drawn paths are the first particles of the 2,000, so raising the count adds paths and keeps the others.
     const paths = (states: Float64Array[]) =>
-      joinPaths(Array.from({ length: SHOWN }, (_, i) => ({ x: times, y: states.map((s) => s[i]) })))
+      joinPaths(Array.from({ length: count.value }, (_, i) => ({ x: times, y: states.map((s) => s[i]) })))
+    // The ODE paths are not random, but many of them still form a solid fan, so they are drawn light as well.
+    const thin = count.value > 1
     return [
-      { name: 'reverse SDE', type: 'line', ...paths(sde), slot: 0 },
-      { name: 'probability-flow ODE', type: 'line', ...paths(ode), slot: 1 },
+      { name: 'reverse SDE', type: 'line', ...paths(sde), slot: 0, thin },
+      { name: 'probability-flow ODE', type: 'line', ...paths(ode), slot: 1, thin },
     ]
-  }, [sde, ode])
+  }, [sde, ode, count.value])
 
   const k = Math.round((T_END - t.value) / H)
   const densitySeries = useMemo<XYSeries[]>(() => {
@@ -51,8 +54,13 @@ export function FlowVersusDiffusion() {
   return (
     <Interactive
       title="Same marginals, different paths"
-      caption="Twelve particles start from the same N(0, 1) draws at t = 5 and move back to t = 0 with the exact score of the noised two-mode density. The reverse-time SDE (drift f − g²∇log p_t plus noise) gives rough paths that cross one another; the probability-flow ODE (drift f − ½g²∇log p_t, no noise) gives smooth paths that never cross, so each starting point is mapped to one data point. The lower panel shows that 2,000 particles of each kind have the same density p_t at every time. Drag the vertical line to move in time."
-      controls={<ParamSlider label="time t" param={t} withArrows />}
+      caption="Particles start from the same N(0, 1) draws at t = 5 and move back to t = 0 with the exact score of the noised two-mode density. The reverse-time SDE (drift f − g²∇log p_t plus noise) gives rough paths that cross one another; the probability-flow ODE (drift f − ½g²∇log p_t, no noise) gives smooth paths that never cross, so each starting point is mapped to one data point. The paths slider sets how many particles of each kind are drawn, as light lines when there are several. The lower panel shows that 2,000 particles of each kind have the same density p_t at every time. Drag the vertical line to move in time."
+      controls={
+        <>
+          <ParamSlider label="time t" param={t} withArrows />
+          <ParamSlider label="paths" param={count} withArrows format={(v) => String(v)} />
+        </>
+      }
       readout={
         <>
           <Readout label="SDE share right of −0.25" value={formatNumber(share(sde[k]))} />

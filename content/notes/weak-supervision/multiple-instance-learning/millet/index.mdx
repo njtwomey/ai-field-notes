@@ -17,24 +17,26 @@ import { MilletPooling } from './MilletPooling'
 **MILLET** (Multiple Instance Learning for Locally Explainable Time series classification) is a framework for making
 deep time-series classifiers inherently interpretable <Cite id="early2024" />. A time series
 $X_i = \set{\xvec_i^1, \dots, \xvec_i^t}$ is a multiple-instance **bag** whose **instances** are its $t$ time points,
-and the series label $Y_i$ is the bag label. The global average pooling of the classifier is replaced by a <NoteLink to="attention-based-multiple-instance-learning">MIL pooling</NoteLink>
-that produces a class score for each time point as part of the forward pass. Those scores are the explanation.
+and the series label $Y_i$ is the bag label. The <NoteLink to="pooling-and-strides">global average pooling</NoteLink> of
+the classifier is replaced by a <NoteLink to="attention-based-multiple-instance-learning">MIL pooling</NoteLink> that
+produces a class score for each time point as part of the forward pass. Those scores are the explanation.
 </Definition>
 
 ## Problem
 
-Deep time-series classifiers such as FCN, <Gloss name="resnet" /> and InceptionTime share one structure <Cite id="ismailfawaz2020" />. A
-feature extractor $\psi_{FE}$ (the **backbone**) maps a univariate series $X_i$ to one $d$-dimensional embedding per time
-point, $\Zmat_i = [\zvec_i^1, \dots, \zvec_i^t] \in \reals^{t \times d}$. **Global average pooling** (GAP) averages the
-embeddings and a classifier $\psi_{CLF}$ maps the average to class logits:
+Deep time-series classifiers such as FCN, <Gloss name="resnet" /> and InceptionTime share one structure
+<Cite id="ismailfawaz2020" />. A feature extractor $\psi_{FE}$ (the **backbone**) maps a univariate series $X_i$ to one
+$d$-dimensional embedding per time point, $\Zmat_i = [\zvec_i^1, \dots, \zvec_i^t] \in \reals^{t \times d}$. **Global
+average pooling** (GAP) averages the embeddings and a classifier $\psi_{CLF}$ maps the average to class logits:
 
 $$
 \Zmat_i = \psi_{FE}(X_i), \qquad \hat{Y}_i = \psi_{CLF}\LP\frac{1}{t}\sum_{j=1}^{t}\zvec_i^j\RP.
 $$
 
 The average gives every time point equal weight, so the model's output says nothing about which stretches of the series
-(the **discriminatory motifs**) drove the prediction. Post-hoc explainers such as <Gloss name="shap" /> recover this by perturbing the
-input, at a cost of hundreds of forward passes per explanation, and their answer is an approximation of the model.
+(the **discriminatory motifs**) drove the prediction. Post-hoc explainers such as <Gloss name="shap" /> recover this by
+perturbing the input, at a cost of hundreds of forward passes per explanation, and their answer is an approximation of
+the model.
 
 Time-series classification has the label structure of <NoteLink to="multiple-instance-learning">multiple-instance
 learning</NoteLink>: labels exist for whole series and not for time points. In MIL terms, GAP followed by a classifier
@@ -104,8 +106,8 @@ time-point terms $\hat{y}_{i,k}^j$ or $a_i^j \hat{y}_{i,k}^j$, so the interpreta
 into per-time-point shares. Nothing is approximated, so the explanation is faithful by construction, as the terms of an
 <NoteLink to="intrinsically-interpretable-models">additive model</NoteLink> are.
 
-**Instance pooling and the class activation map (CAM).** With a linear classifier $\psi_{CLF}(\zvec) = \Wmat\zvec + \bvec$, averaging is linear,
-so
+**Instance pooling and the class activation map (CAM).** With a linear classifier
+$\psi_{CLF}(\zvec) = \Wmat\zvec + \bvec$, averaging is linear, so
 
 $$
 \frac{1}{t}\sum_{j=1}^{t}(\Wmat\zvec_i^j + \bvec) = \Wmat\LP\frac{1}{t}\sum_{j=1}^{t}\zvec_i^j\RP + \bvec.
@@ -131,10 +133,10 @@ attention head.
 A per-time-point interpretation is a ranking of time points, and it can be scored in two ways (see
 <NoteLink to="evaluating-explanations">evaluating explanations</NoteLink>). **AOPCR** removes time points in order of
 importance and measures how fast the class output falls, relative to random orderings; it needs no ground truth.
-**NDCG@n** compares the ranking with the $n$ time points known to be discriminatory; see <NoteLink to="normalised-discounted-cumulative-gain" />. Real
-benchmarks such as the UCR archive <Cite id="dau2019" /> have no time-point labels, so NDCG@n needs synthetic data in
-which the motifs are injected at known positions. Early et al. built such a data set, WebTraffic, with one class per
-kind of injected signature <Cite id="early2024" />.
+**NDCG@n** compares the ranking with the $n$ time points known to be discriminatory; see
+<NoteLink to="normalised-discounted-cumulative-gain" />. Real benchmarks such as the UCR archive <Cite id="dau2019" />
+have no time-point labels, so NDCG@n needs synthetic data in which the motifs are injected at known positions. Early et
+al. built such a data set, WebTraffic, with one class per kind of injected signature <Cite id="early2024" />.
 
 ## Cost
 
@@ -145,14 +147,15 @@ and they were more faithful by AOPCR <Cite id="early2024" />.
 
 ## Trade-offs
 
-- **Accuracy is kept.** Replacing GAP by a MIL pooling does not cost accuracy. On 85 <Gloss name="ucr-archive" /> data sets, Conjunctive pooling
-  raised mean accuracy over GAP for each of the three backbones <Cite id="early2024" />.
+- **Accuracy is kept.** Replacing GAP by a MIL pooling does not cost accuracy. On 85 <Gloss name="ucr-archive" /> data
+  sets, Conjunctive pooling raised mean accuracy over GAP for each of the three backbones <Cite id="early2024" />.
 - **Attention alone is not enough.** Attention weights are not class-specific. Of the four poolings, Attention gave the
   least useful interpretations; the class-specific poolings (Instance, Additive, Conjunctive) are the ones to use.
 - **Sparse explanations.** MILLET tends to highlight a few time points of each motif, such as the two ends of a window.
   Sparsity helps AOPCR, since removing those few points changes the output, but lowers NDCG@n when the ground truth is a
   whole region.
 - **Stronger backbones explain less.** Across backbones, the more complex ones predicted better and gave less faithful
-  interpretations by AOPCR, so the choice of backbone trades accuracy against explanation quality <Cite id="early2024" />.
+  interpretations by AOPCR, so the choice of backbone trades accuracy against explanation quality
+  <Cite id="early2024" />.
 - **Scope.** The method was developed for univariate series. Variable lengths need no change. Multivariate series need
   interpretations per channel as well as per time point.

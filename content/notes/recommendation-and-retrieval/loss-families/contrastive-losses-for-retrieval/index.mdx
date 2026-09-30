@@ -1,0 +1,284 @@
+---
+title: Contrastive losses for retrieval
+kind: concept
+summary: 'Contrastive retrieval losses train a two-tower model to pick each query''s item out of a set of candidates with InfoNCE, a softmax over similarities divided by a temperature $\tau$. The temperature sets how much of the gradient falls on the hardest negatives.'
+tags: [recommender-systems, retrieval, loss-functions, contrastive-learning, embeddings, worked-example]
+aliases:
+  [
+    contrastive retrieval loss,
+    in-batch contrastive loss,
+    two-tower InfoNCE,
+    symmetric contrastive loss,
+    bidirectional contrastive loss,
+    CLIP loss,
+    contrastive temperature,
+    debiased contrastive loss,
+    DirectAU,
+    alignment and uniformity loss,
+  ]
+requires: [two-tower-model, softmax-and-log-sum-exp]
+partOf: [recommendation-loss-families]
+related:
+  [
+    sampled-softmax-and-negative-sampling,
+    contrastive-learning,
+    clip,
+    triplet-and-margin-losses,
+    bayesian-personalised-ranking,
+    pairwise-distances-and-cosine-similarity,
+  ]
+references:
+  [
+    oord2018,
+    poole2019,
+    yi2019sampling,
+    radford2021,
+    wang2020,
+    wang2021,
+    wang2022directau,
+    chuang2020debiased,
+    robinson2021hardnegatives,
+    huang2020ebr,
+    zhou2021clrec,
+    wu2024sampledsoftmaxrec,
+  ]
+status: draft
+updated: 2026-09-30
+---
+
+import { RankingLossLab } from '../_shared/RankingLossLab'
+
+<Definition>
+A **contrastive retrieval loss** trains a query encoder and an item encoder so that each query's logged item scores
+higher than a set of negative items. For a query with positive item $y$ and candidates $\mathcal{C} \ni y$, scores
+$s_j$ and temperature $\tau > 0$, the <Gloss name="infonce" /> loss is
+
+$$
+\mathcal{L} = -\log \frac{e^{s_y/\tau}}{\sum_{j \in \mathcal{C}} e^{s_j/\tau}},
+$$
+
+the cross-entropy of picking $y$ out of $\mathcal{C}$ <Cite id="oord2018" />. In retrieval the candidates are usually
+the other items of the training batch, and the score is a dot product or a
+<NoteLink to="pairwise-distances-and-cosine-similarity">cosine similarity</NoteLink>.
+</Definition>
+
+## Intuition
+
+A retriever must place a user's items near the user's vector and everything else further away. The loss cannot score
+every item in the catalogue for every example, so it contrasts the positive with a handful of others and rewards the
+positive for scoring higher than they do. Each negative is a sample of "everything else".
+
+The softmax makes the negatives compete. A negative that already scores far below the positive holds almost no
+probability and receives almost no <NoteLink to="gradient">gradient</NoteLink>. A negative that scores close to the
+positive holds much of the probability and is pushed hard. The temperature controls how sharply this happens.
+
+## Details
+
+### InfoNCE in a two-tower model
+
+A <NoteLink to="two-tower-model">two-tower model</NoteLink> maps query $b$ to $\uvec_b \in \reals^d$ and item $j$ to
+$\vvec_j \in \reals^d$. A batch holds $B$ positive pairs $(b, y_b)$. Write $s_{bc} = \uvec_b\transpose\vvec_{y_c}$
+for the score of query $b$ against the positive item of pair $c$, forming a $B \times B$ matrix whose diagonal holds
+the positives. The in-batch InfoNCE loss is the mean over rows of a softmax cross-entropy:
+
+$$
+\mathcal{L}_{q \to i} = \frac{1}{B}\sum_{b=1}^{B} \paren{-\frac{s_{bb}}{\tau} + \log\sum_{c=1}^{B} e^{s_{bc}/\tau}}.
+$$
+
+This is a <NoteLink to="sampled-softmax-and-negative-sampling">sampled softmax</NoteLink> over the catalogue with the
+batch as the sample. The batch items are drawn in proportion to their frequency $q_j$ among positives, so without a
+correction the loss learns scores penalised by $\log q_j$. Subtracting $\tau \log q_{y_c}$ from each $s_{bc}$ before
+dividing by $\tau$, the logQ correction, removes the penalty <Cite id="yi2019sampling" />.
+
+### The link to mutual information
+
+Take a query $\xvec$ and its positive $y_1$ from the joint distribution of queries and items, and $B - 1$ negatives
+$y_2, \dots, y_B$ independently from the item marginal $p(y)$. For any critic $f(\xvec, y) = s/\tau$,
+
+$$
+I(X; Y) \ge \log B - \expect[\mathcal{L}],
+$$
+
+and the critic that minimises the expected loss is $f^*(\xvec, y) = \log p(y \mid \xvec) / p(y) + c(\xvec)$
+<Cite id="oord2018" /> <Cite id="poole2019" />. In-batch items are samples from the item marginal, so the uncorrected
+loss learns the <Gloss name="pmi">pointwise mutual information</Gloss> between query and item. This is the same
+$-\log q_j$ penalty that the sampled-softmax analysis gives, reached by a different route. The bound can never exceed
+$\log B$, so a larger batch allows a tighter bound. The full proof is in <NoteLink to="contrastive-learning">contrastive
+learning</NoteLink>.
+
+### The gradient
+
+Fix one query $b$ and drop the index. Let $p_c = e^{s_c/\tau} / \sum_{c'} e^{s_{c'}/\tau}$ be the softmax weight of
+candidate $c$, with $c = y$ the positive. The loss is $\mathcal{L} = -s_y/\tau + \log\sum_c e^{s_c/\tau}$. The
+<NoteLink to="derivative">derivative</NoteLink> of the log-sum-exp with respect to $s_c$ is $p_c/\tau$, so
+
+$$
+\frac{\partial \mathcal{L}}{\partial s_y} = -\frac{1 - p_y}{\tau}, \qquad
+\frac{\partial \mathcal{L}}{\partial s_c} = \frac{p_c}{\tau} \quad (c \ne y).
+$$
+
+The positive is pulled up by the probability it lacks. Each negative is pushed down by the probability it holds. The
+pushes on the negatives sum to $(1 - p_y)/\tau$, the pull on the positive. With dot-product scores
+$s_c = \uvec\transpose\vvec_c$, the chain rule gives the gradients on the vectors:
+
+$$
+\frac{\partial \mathcal{L}}{\partial \uvec} = \frac{1}{\tau}\paren{\sum_c p_c \vvec_c - \vvec_y}, \qquad
+\frac{\partial \mathcal{L}}{\partial \vvec_c} = \frac{p_c - \indicator[c = y]}{\tau}\,\uvec.
+$$
+
+A gradient step moves the query vector towards its positive item and away from the softmax-weighted mean of the
+candidates.
+
+### What the temperature does
+
+Two negatives $c$ and $k$ receive pushes in the ratio
+
+$$
+\frac{p_c}{p_k} = \exp\paren{\frac{s_c - s_k}{\tau}}.
+$$
+
+A small $\tau$ makes the ratio large, so the gradient concentrates on the negatives that score closest to the positive,
+the hard negatives. A large $\tau$ spreads it evenly. Wang and Liu show that the temperature controls this hardness
+weighting and that it trades the uniformity of the embedding against tolerance of semantically similar negatives
+<Cite id="wang2021" />.
+
+The two limits make this exact. Write $\bar s$ for the mean score over the $B$ candidates. As $\tau \to \infty$, a
+first-order expansion $e^{s/\tau} \approx 1 + s/\tau$ gives $\log\sum_c e^{s_c/\tau} \approx \log B + \bar s/\tau$, so
+
+$$
+\mathcal{L} \approx \log B - \frac{s_y - \bar s}{\tau}.
+$$
+
+Every negative is pushed with equal weight $1/(B\tau)$, whatever its score. As $\tau \to 0$, the log-sum-exp
+$\tau \log\sum_c e^{s_c/\tau}$ tends to $\max_c s_c$, so
+
+$$
+\tau\mathcal{L} \to \max_c s_c - s_y = \max\paren{0, \max_{c \ne y} s_c - s_y}.
+$$
+
+This is a <NoteLink to="triplet-and-margin-losses">triplet hinge loss</NoteLink> with margin zero against the single
+hardest negative. The temperature interpolates between a loss that treats all negatives alike and one that sees only
+the hardest.
+
+### Cosine versus dot-product scores
+
+Cosine scores normalise both vectors to unit length, so $s \in [-1, 1]$. The logits $s/\tau$ then differ by at most
+$2/\tau$, and the positive's probability is at most
+
+$$
+p_y \le \frac{e^{1/\tau}}{e^{1/\tau} + (B - 1)e^{-1/\tau}} = \frac{1}{1 + (B - 1)e^{-2/\tau}}.
+$$
+
+With $B = 1024$ and $\tau = 1$ this is $0.0072$, and the loss cannot fall below $4.94$ nats. At $\tau = 0.1$ the
+floor is $2 \times 10^{-6}$ nats. Cosine-scored losses need a small temperature to express confident predictions.
+<Gloss name="clip" /> learns $\tau$ as a parameter <Cite id="radford2021" />.
+
+Dot-product scores are unbounded, and a vector's norm becomes a free parameter. A large item norm raises the item's
+score for every query that points its way, so popular items tend to acquire large norms. Cosine scores remove this
+channel. Wu et al. find that the cosine form of the sampled softmax loss cannot learn vector magnitudes, which in
+recommendation encode item popularity <Cite id="wu2024sampledsoftmaxrec" />.
+
+### Symmetric losses
+
+The loss above reads each row of the score matrix: for each query, pick its item among the batch items. The columns
+give the reverse task: for each item, pick its query among the batch queries,
+
+$$
+\mathcal{L}_{i \to q} = \frac{1}{B}\sum_{c=1}^{B} \paren{-\frac{s_{cc}}{\tau} + \log\sum_{b=1}^{B} e^{s_{bc}/\tau}}.
+$$
+
+<Gloss name="clip" /> trains on the average $\frac{1}{2}(\mathcal{L}_{q \to i} + \mathcal{L}_{i \to q})$ of
+image-to-text and text-to-image losses <Cite id="radford2021" />. In recommendation, the reverse direction trains the
+item tower to separate the users who chose an item from other users. It suits symmetric tasks such as item-to-item
+retrieval, where both towers may share weights.
+
+### Alignment and uniformity
+
+With unit vectors, $\norm{\uvec - \vvec}^2 = 2 - 2\uvec\transpose\vvec$. Wang and Isola show that, as the number of
+negatives grows, the InfoNCE loss splits into two terms <Cite id="wang2020" />. **Alignment** rewards small distances
+between positive pairs. **Uniformity** penalises, for a scale $t > 0$ (Wang and Isola use $t = 2$), the log of the mean
+of $e^{-t\norm{\vvec - \vvec'}^2}$ over pairs of encodings, which is smallest when the encodings are spread evenly over
+the sphere. DirectAU trains a recommender on these two terms directly, with the squared distance between user and item
+vectors as alignment and a uniformity term for users and one for items, and no sampled negatives
+<Cite id="wang2022directau" />.
+
+### Hard negatives and false negatives
+
+In-batch negatives are mostly easy: a random item rarely resembles a user's choice. **Hard-negative mining** adds
+negatives that the current model scores high, for example the top results of a
+<NoteLink to="nearest-neighbour-search">nearest-neighbour search</NoteLink> over the item index. Robinson et al. sample
+negatives with probability proportional to $q_j e^{\beta s_j}$, so that a concentration parameter $\beta \ge 0$ sets the
+hardness <Cite id="robinson2021hardnegatives" />.
+
+The failure mode is the **<Gloss name="fn">false negative</Gloss>**: an item the user would like but has not interacted
+with. The top of the model's ranking is exactly where unseen relevant items sit, so the hardest mined negatives are the
+most likely to be false. In Facebook's embedding-based search, sampling hard negatives from rank positions 101 to 500 of
+the model's results gave better recall than taking the hardest ones, and easy negatives remained necessary
+<Cite id="huang2020ebr" />.
+
+**Debiased contrastive loss** corrects for false negatives in expectation <Cite id="chuang2020debiased" />. Let
+$\pi^+$ be the probability that a randomly drawn item is also a positive for the query. The marginal over candidates is
+a mixture of the positive distribution $p^+$ and the <Gloss name="tn">true-negative</Gloss> distribution $p^-$:
+$p = \pi^+ p^+ + (1 - \pi^+) p^-$. Solving for the expectation under true negatives gives
+
+$$
+\expect_{p^-}\brack{e^{s/\tau}} = \frac{\expect_{p}\brack{e^{s/\tau}} - \pi^+ \expect_{p^+}\brack{e^{s/\tau}}}{1 - \pi^+}.
+$$
+
+The loss replaces the average over sampled negatives with this estimate, using the sampled negatives for the first
+expectation and extra positives of the same query, such as the user's other items, for the second. The estimate is
+clipped below at $e^{-1/\tau}$, the smallest value $e^{s/\tau}$ can take with cosine scores
+<Cite id="chuang2020debiased" />.
+
+## Worked example
+
+A batch holds three users and their three items. The cosine scores, rows for users and columns for items, are
+
+$$
+\Smat = \begin{pmatrix} 0.8 & 0.3 & 0.1 \\ 0.5 & 0.6 & 0.2 \\ 0.0 & 0.4 & 0.7 \end{pmatrix},
+$$
+
+with each user's positive on the diagonal.
+
+**At $\tau = 1$.** Row 2's softmax is $(0.351, 0.388, 0.260)$. User 2's loss is $-\log 0.388 = 0.946$ nats. The three
+row losses average $0.832$. The gradients of user 2's loss with respect to its scores are $(0.351, -0.612, 0.260)$:
+the two negatives are pushed down by similar amounts.
+
+**At $\tau = 0.1$.** Row 2's softmax is $(0.265, 0.721, 0.013)$ and user 2's loss is $0.327$ nats. The gradients are
+$(2.654, -2.786, 0.132)$. Item 1, at score $0.5$, is pushed $e^{(0.5 - 0.2)/0.1} = e^3 \approx 20$ times harder than
+item 3, at $0.2$. If user 2 would in fact like item 1, a false negative, the low temperature spends most of the
+update pushing it away.
+
+**Symmetric loss at $\tau = 0.1$.** The column softmaxes give item-to-user losses $(0.049, 0.170, 0.009)$, averaging
+$0.076$. The row losses average $0.128$. The symmetric loss is their mean, $0.102$.
+
+The figure below shows a slate of six items with one click. A single positive against five negatives is a softmax over
+the slate, the InfoNCE loss with $\tau = 1$ and the slate as the candidate set. Compare its gradient with the
+<NoteLink to="pairwise-ranking-losses">pairwise logistic loss</NoteLink> and pointwise <Gloss name="bce">binary
+cross-entropy</Gloss>: the softmax pushes each negative in proportion to its probability, so the highest-scoring
+negatives receive most of the push.
+
+<RankingLossLab initial="softmax" preset="one" losses={['softmax', 'ranknet', 'pointwise-bce']} />
+
+## Assumptions
+
+- Negatives are samples of items the query did not choose. With <NoteLink to="explicit-and-implicit-feedback">implicit
+  feedback</NoteLink>, an unobserved item is unlabelled, not negative, so some negatives are false.
+- The proposal of the negatives is known or estimable, if the loss is to be corrected towards the full softmax.
+- For the <NoteLink to="mutual-information">mutual-information</NoteLink> reading, negatives are independent draws from
+  the item marginal.
+
+## Pitfalls
+
+- **Duplicates in a batch.** When the same item is the positive for two queries in a batch, each copy is a negative
+  for the other query. Mask duplicate items, and duplicate users in the symmetric loss.
+- **Temperature and <NoteLink to="minibatching-and-batch-size">batch size</NoteLink> interact.** The number of negatives
+  and $\tau$ together decide which negatives dominate the gradient. Change one and retune the other.
+- **Uncorrected popularity penalty.** In-batch negatives without the <Gloss name="logq-correction">logQ
+  correction</Gloss> learn scores penalised by $\log q_j$, which under-recommends popular items. Zhou et al. argue that
+  a contrastive loss with negatives drawn from the popularity distribution acts as an inverse-propensity correction for
+  exposure bias, which can be wanted <Cite id="zhou2021clrec" />. Decide which behaviour is intended.
+- **Mining the hardest negatives.** The top of the model's own ranking holds unseen relevant items. Mine from further
+  down the ranking and keep easy negatives in the mix <Cite id="huang2020ebr" />.
+- **Reading $\log B - \mathcal{L}$ as mutual information.** The bound saturates at $\log B$ and is a poor estimate
+  when the true mutual information is large <Cite id="poole2019" />.

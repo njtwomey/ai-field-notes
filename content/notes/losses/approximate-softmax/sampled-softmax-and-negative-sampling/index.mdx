@@ -1,0 +1,305 @@
+---
+title: Sampled softmax and negative sampling
+kind: technique
+summary: 'Sampled softmax trains a softmax over a huge vocabulary or catalogue by scoring the target against $m$ classes drawn from a proposal $q$. Correcting each sampled logit to $s_j - \log(m q_j)$, the logQ correction, makes the sampled denominator an unbiased estimate of the full one.'
+tags: [loss-functions, sampling, importance-sampling, language-models, recommender-systems, retrieval, worked-example]
+aliases:
+  [
+    importance-sampled softmax,
+    sampling-bias correction,
+    sampled softmax loss,
+    batch softmax,
+    in-batch softmax,
+    mixed negative sampling,
+    streaming frequency estimation,
+    noise-contrastive estimation,
+    NCE,
+    accidental hits,
+  ]
+requires: [softmax-and-log-sum-exp, importance-sampling, cross-entropy-and-perplexity]
+related:
+  [neural-language-model, word-embeddings, two-tower-model, recommendation-loss-families, popularity-bias, contrastive-learning]
+references:
+  [
+    bengio2008importance,
+    jean2015sampledsoftmax,
+    blanc2018sampledsoftmax,
+    yi2019sampling,
+    yang2020mns,
+    gutmann2010,
+    mnih2012nce,
+    mikolov2013b,
+    levy2014,
+    dyer2014nce,
+    covington2016youtube,
+    wu2024sampledsoftmaxrec,
+  ]
+status: draft
+updated: 2026-09-30
+---
+
+import { LogQCorrectionDemo } from './LogQCorrectionDemo'
+
+<Definition>
+**Sampled softmax** approximates the softmax cross-entropy over $M$ classes by comparing the target class with
+$m \ll M$ negatives drawn from a proposal distribution $q$ over the classes. Each sampled negative $j$ enters the
+softmax with the corrected logit $s_j - \log(m q_j)$, the **<Gloss name="logq-correction">logQ correction</Gloss>**,
+which turns the sampled sum into an <NoteLink to="importance-sampling">importance-sampling</NoteLink> estimate of the
+full normaliser <Cite id="bengio2008importance" />. **Negative sampling** replaces the softmax with independent binary
+classifications: the target against each sampled negative, with no correction <Cite id="mikolov2013b" />. Both apply
+wherever the output space is large: the vocabulary of a language model, the catalogue of a recommender.
+</Definition>
+
+## Problem
+
+Many models end in a classification over a very large set of classes. A language model predicts the next word from a
+vocabulary; a recommender or retrieval model predicts the item a user picks from a catalogue. In both, a context
+$\xvec$ (the preceding words; a user, query or session) has scores $s_j = s(\xvec, j)$ for every class
+$j = 1, \dots, M$, and the model defines
+
+$$
+\pr(j \mid \xvec) = \frac{e^{s_j}}{Z}, \qquad Z = \sum_{k=1}^{M} e^{s_k},
+$$
+
+and training on a logged positive $y$ minimises the cross-entropy
+
+$$
+\mathcal{L}_{\text{full}} = -s_y + \log Z.
+$$
+
+The <NoteLink to="softmax-and-log-sum-exp">softmax</NoteLink> is the right model for "which one class comes next": the
+next word, or the item the user picked. Its <NoteLink to="gradient">gradient</NoteLink> with respect to the scores is
+
+$$
+\frac{\partial \mathcal{L}_{\text{full}}}{\partial s_j} = \pr(j \mid \xvec) - \indicator[j = y].
+$$
+
+Every class receives a push down equal to its current probability. The positive receives a push up
+equal to $1 - \pr(y \mid \xvec)$.
+
+The cost is the obstacle. When the score is a dot product $s_j = \uvec\transpose\vvec_j$ of $d$-dimensional vectors, as
+in a language model's output layer or a <NoteLink to="two-tower-model">two-tower model</NoteLink>, computing $Z$ costs
+$M d$ multiply-adds per example, forward and backward. Vocabularies hold $10^4$ to $10^6$ words; recommendation
+catalogues hold $10^6$ to $10^9$ items. With $M = 10^8$ and $d = 128$, one example costs about $1.3 \times 10^{10}$
+multiply-adds before any item-tower computation. The problem arose first in <NoteLink to="neural-language-model">neural
+language models</NoteLink>, whose vocabularies of $10^5$ words made the output softmax the most expensive layer
+<Cite id="bengio2008importance" />, and in neural machine translation, where Jean et al. used sampled softmax to train
+with a very large target vocabulary <Cite id="jean2015sampledsoftmax" />. YouTube's candidate generator framed
+recommendation this way, as extreme multiclass classification over millions of videos, and trained it with sampled
+negatives <Cite id="covington2016youtube" />.
+
+## Mechanism
+
+### The logQ correction
+
+The normaliser is a sum over all $M$ classes. Multiply and divide each term by $q_k$, where $q$ is any distribution with
+$q_k > 0$ for every item:
+
+$$
+Z = \sum_{k=1}^{M} q_k \frac{e^{s_k}}{q_k} = \expect_{k \sim q}\brack{\frac{e^{s_k}}{q_k}}.
+$$
+
+Draw $j_1, \dots, j_m$ independently from $q$. The sample mean of $e^{s_{j}}/q_{j}$ is an unbiased estimate of $Z$:
+
+$$
+\hat Z = \frac{1}{m}\sum_{i=1}^{m} \frac{e^{s_{j_i}}}{q_{j_i}} = \sum_{i=1}^{m} \exp\paren{s_{j_i} - \log(m q_{j_i})}, \qquad
+\expect[\hat Z] = Z.
+$$
+
+The estimate $\hat Z$ is an ordinary sum of exponentials over the $m$ samples, each
+with its logit shifted by $-\log(m q_j)$. Substituting it for $Z$ gives the sampled softmax loss
+
+$$
+\mathcal{L}_{\text{sampled}} = -s_y + \log\paren{e^{s_y} + \sum_{i=1}^{m} e^{s_{j_i} - \log(m q_{j_i})}}.
+$$
+
+The positive's own term is kept in the denominator so that the loss is a proper cross-entropy over $m + 1$ candidates
+and stays non-negative <Cite id="blanc2018sampledsoftmax" />.
+
+Bengio and Senécal introduced the sampled softmax estimator for neural language models, with an adaptive n-gram model
+as $q$ <Cite id="bengio2008importance" />. Jean et al. used it to train translation models with vocabularies of 500,000
+words <Cite id="jean2015sampledsoftmax" />.
+
+A sampled item that coincides with the positive is an **accidental hit**: it is the positive scored as a negative.
+Implementations usually mask such samples.
+
+### What the uncorrected loss learns
+
+A common shortcut drops the correction and uses the raw logits $s_{j_i}$ of the sampled items. The result is a
+different estimator with a different optimum.
+
+Fix the query and let $p_j = \pr(j \mid \xvec)$ be the true probability that the user picks item $j$. For large $m$,
+the uncorrected denominator is dominated by the negatives, and by the <Gloss name="lln">law of large numbers</Gloss>
+
+$$
+\log\paren{e^{s_y} + \sum_{i=1}^{m} e^{s_{j_i}}} \approx \log m + \log \sum_{k=1}^{M} q_k e^{s_k}.
+$$
+
+Average the loss over positives $y \sim p$:
+
+$$
+\expect_{y \sim p}[\mathcal{L}] \approx -\sum_{k} p_k s_k + \log \sum_{k} q_k e^{s_k} + \log m.
+$$
+
+Set the <NoteLink to="derivative">derivative</NoteLink> with respect to $s_j$ to zero:
+
+$$
+-p_j + \frac{q_j e^{s_j}}{\sum_k q_k e^{s_k}} = 0
+\quad\Longrightarrow\quad
+s_j = \log p_j - \log q_j + c,
+$$
+
+with $c$ a constant shared by all items. The uncorrected loss learns the log ratio of how often the user picks the
+item to how often the item is sampled. It subtracts $\log q_j$ from every score, so an item sampled 1000 times more
+often than another loses $\log 1000 \approx 6.9$ nats of score. With the correction, the sampled term becomes
+$q_k e^{s_k - \log q_k} = e^{s_k}$, the derivative is $-p_j + e^{s_j}/Z$, and the optimum is $s_j = \log p_j + c$,
+the full softmax's answer.
+
+When $q$ follows item popularity, the uncorrected model therefore demotes popular items. The learned score is a
+<Gloss name="pmi">pointwise mutual information</Gloss> between query and item, not a log probability. A deployed
+retriever that ranks by it under-recommends items that many users like. This is sometimes wanted as a crude
+counterweight to <NoteLink to="popularity-bias">popularity bias</NoteLink>. It is then a choice to make explicitly,
+for example by subtracting $\beta \log q_j$ with $0 \le \beta \le 1$, which leaves $(1 - \beta) \log q_j$ of the
+popularity penalty in the learned score.
+
+### In-batch negatives
+
+A two-tower model trained on a batch of $B$ positive pairs $(\xvec_b, y_b)$ can use the other $B - 1$ positives' items
+as negatives for each query. Their item vectors are already computed, so the negatives cost only the $B^2$ dot
+products. The batch items are drawn from the training stream, so each is a sample from the item's frequency among
+positives: the proposal $q_j$ is item $j$'s share of logged interactions. Popular items appear in almost every batch,
+and tail items almost never.
+
+Yi et al. apply the logQ correction to every logit in the batch softmax, $s^c_{bb'} = s_{bb'} - \log q_{y_{b'}}$,
+including the positive's <Cite id="yi2019sampling" />. The constant $\log m$ cancels when every logit is shifted.
+
+Frequencies in a stream change and a catalogue is too large to count exactly, so Yi et al. estimate $q_j$ online.
+A hash function $h$ maps items to two arrays. $A[h(j)]$ holds the last training step at which item $j$ was seen, and
+$B[h(j)]$ an estimate of the number of steps between its occurrences. When item $j$ appears at step $t$,
+
+$$
+B[h(j)] \leftarrow (1 - \alpha) B[h(j)] + \alpha \paren{t - A[h(j)]}, \qquad A[h(j)] \leftarrow t,
+$$
+
+with <Gloss name="learning-rate">learning rate</Gloss> $\alpha \in (0, 1)$, and the estimate is $\hat q_j = 1 / B[h(j)]$
+per step <Cite id="yi2019sampling" />.
+
+### Mixed negatives
+
+In-batch negatives only contain items that appear as positives. Items that are rarely or never positives, often new
+or tail items, are almost never pushed down, so the retriever can score them high for every query. **Mixed negative
+sampling** adds $B'$ negatives drawn uniformly from the whole catalogue to the $B$ in-batch items
+<Cite id="yang2020mns" />. The proposal is then a mixture of the frequency distribution and the uniform one, and a
+logQ correction must use the mixture's probability for each item.
+
+### Negative sampling and noise-contrastive estimation
+
+Two binary relatives of sampled softmax come from language modelling.
+
+**Noise-contrastive estimation** (NCE) trains an unnormalised model by classifying observed items against $K$ noise
+items drawn from $q$ <Cite id="gutmann2010" />. The classifier's logit for item $j$ is $s_j - \log(K q_j)$, and the loss
+is
+
+$$
+\mathcal{L}_{\text{NCE}} = -\log \sigma\paren{s_y - \log(K q_y)} - \sum_{i=1}^{K} \log \sigma\paren{-\paren{s_{j_i} - \log(K q_{j_i})}},
+$$
+
+with $\sigma$ the logistic sigmoid. Mnih and Teh used it to train neural language models without computing the
+normaliser <Cite id="mnih2012nce" />.
+
+**Negative sampling**, the word2vec objective, is the same loss with the correction removed
+<Cite id="mikolov2013b" />:
+
+$$
+\mathcal{L}_{\text{NEG}} = -\log \sigma(s_y) - \sum_{i=1}^{K} \log \sigma(-s_{j_i}),
+$$
+
+with word2vec's noise distribution proportional to the unigram frequency raised to the power $3/4$.
+
+The optimum of each follows from one fact about <NoteLink to="logistic-regression">logistic regression</NoteLink>. For
+a fixed query, item $j$ appears as a positive with rate $p_j$ and as a noise sample with expected count $K q_j$. The
+expected loss on item $j$'s logit $z_j$ is $-p_j \log \sigma(z_j) - K q_j \log(1 - \sigma(z_j))$. Its derivative is
+$-p_j (1 - \sigma(z_j)) + K q_j \sigma(z_j)$, which is zero when
+
+$$
+\sigma(z_j) = \frac{p_j}{p_j + K q_j}, \qquad z_j = \log \frac{p_j}{K q_j}.
+$$
+
+For NCE, $z_j = s_j - \log(K q_j)$, so $s_j = \log p_j$: NCE learns normalised log probabilities, and it is a consistent
+estimator <Cite id="gutmann2010" />. For negative sampling, $z_j = s_j$, so $s_j = \log p_j - \log q_j - \log K$. With
+unigram noise this is the pointwise mutual information of word and context shifted by $\log K$, the result of Levy and
+Goldberg <Cite id="levy2014" />. Negative sampling is therefore a classifier that learns association, useful for
+<NoteLink to="word-embeddings">word embeddings</NoteLink> and not an estimator of $p$ <Cite id="dyer2014nce" />.
+
+The four losses pair up. Sampled softmax and NCE carry the correction and recover $\log p_j$. The uncorrected sampled
+softmax and negative sampling drop it and recover $\log p_j - \log q_j$ up to a constant.
+
+## Worked example
+
+A query has a positive with score $s_y = 1$ and three negatives $A$, $B$, $C$ with scores $0$. Item $A$ is popular,
+with $q_A = 0.8$, and $q_B = q_C = 0.1$.
+
+**Full softmax.** $Z$ over the negatives is $3$. The positive's probability is $e/(e + 3) = 0.475$ and the loss is
+$0.744$ nats. Each negative is pushed down by $1/(e + 3) = 0.175$. The three negatives have equal scores, so they
+receive equal pushes.
+
+**Sampled softmax with $m = 1$, uncorrected.** The one sample is $A$ with probability $0.8$. Whichever item is drawn
+gets the push $1/(e + 1) = 0.269$. The expected push is $0.8 \times 0.269 = 0.215$ on $A$ and
+$0.1 \times 0.269 = 0.027$ on $B$ and on $C$. The ratio of pushes on $A$ and $B$ is $8$, the ratio of their sampling
+rates, for every $m$.
+
+**Sampled softmax with $m = 1$, corrected.** Drawing $A$ gives weight $e^{0 - \log 0.8} = 1.25$. Drawing $B$ gives
+$e^{0 - \log 0.1} = 10$. The estimate of $Z$ is unbiased: $0.8 \times 1.25 + 0.2 \times 10 = 3$. The expected push is
+$0.8 \times 1.25/(e + 1.25) = 0.252$ on $A$ and $0.1 \times 10/(e + 10) = 0.079$ on $B$. The ratio falls from $8$ to
+$3.2$.
+
+**Larger $m$.** Enumerating every multinomial draw gives the expected corrected pushes. At $m = 10$ they are $0.187$ on
+$A$ and $0.160$ on $B$, a ratio of $1.17$. At $m = 100$ they are $0.176$ and $0.173$, a ratio of $1.02$, close to the
+full softmax's $0.175$ each. The expected corrected loss is $0.611$ at $m = 1$, $0.725$ at $m = 10$ and $0.742$ at
+$m = 100$, approaching $0.744$ from below.
+
+<LogQCorrectionDemo />
+
+## Cost
+
+- **Full softmax:** $M d$ multiply-adds per example for the scores and again for the gradient, plus a forward pass of
+  the item tower for all $M$ items when items have features.
+- **Sampled softmax:** $m d$ per example plus the cost of drawing $m$ samples. One shared sample of $m$ negatives per
+  batch is common: the $m$ item vectors are computed once and scored against all $B$ queries in a $B \times m$
+  <NoteLink to="matrix-multiplication">matrix product</NoteLink>.
+- **In-batch negatives:** no extra item-tower passes and $B^2 d$ multiply-adds per batch. The frequency estimate costs
+  two array lookups per item.
+- **Negative sampling and NCE:** $K d$ per example, with $K$ typically 5 to 20 in word2vec <Cite id="mikolov2013b" />.
+
+## Trade-offs
+
+**The number of negatives trades cost for bias.** The corrected estimator is unbiased for $Z$ but not for the loss,
+because the loss takes the logarithm of $\hat Z$. By Jensen's inequality for the concave logarithm,
+$\expect[\log(e^{s_y} + \hat Z)] \le \log(e^{s_y} + Z)$, so the expected sampled loss lies below the full loss, as in
+the worked example. A second-order expansion of the logarithm around $Z$ gives a gap of about
+$\var[\hat Z] / (2 (e^{s_y} + Z)^2)$. Since $\var[\hat Z] = \var_{k \sim q}[e^{s_k}/q_k] / m$, the bias shrinks as
+$1/m$. The gradient is biased in the same way, so for any proposal other than the model's own softmax the optimum of the
+sampled loss matches the full softmax's only as $m \to \infty$ <Cite id="bengio2008importance" />.
+
+**The proposal sets the variance.** The variance of $e^{s_k}/q_k$ under $q$ is zero when $q_k \propto e^{s_k}$, the
+model's own softmax. Blanc and Rendle prove that sampled softmax gives an unbiased gradient for every $m$ exactly for
+this proposal, and that the bias grows as $q$ departs from it <Cite id="blanc2018sampledsoftmax" />. A uniform proposal
+rarely draws the high-scoring items that dominate $Z$, so its estimate has high variance. A popularity proposal draws
+items that are often high-scoring, and in-batch negatives provide it without extra item-tower passes. Adaptive proposals
+track the model: an n-gram model in Bengio and Senécal <Cite id="bengio2008importance" />, a kernel that approximates
+$e^{s}$ and can be sampled in time sublinear in $M$, in Blanc and Rendle <Cite id="blanc2018sampledsoftmax" />.
+
+**Popularity proposals demand the correction.** Without it, a model trained with in-batch negatives learns a score
+that penalises each item by $\log q_j$, as derived above. Yi et al. report better retrieval with the correction than
+without it on YouTube data <Cite id="yi2019sampling" />.
+
+**In-batch negatives miss the tail.** Items that never appear as positives are never negatives. Mixed negative sampling
+adds uniform samples at the cost of extra item-tower passes <Cite id="yang2020mns" />.
+
+**Sampled softmax versus binary losses.** A softmax over the sampled candidates couples the negatives through the
+normaliser: a negative is pushed down in proportion to its share of the probability mass, so the gradient concentrates
+on high-scoring negatives. Negative sampling pushes each negative through its own sigmoid, independent of the others. Wu
+et al. find that sampled softmax reduces popularity bias in item recommendation, and that cosine scores stop it from
+learning <NoteLink to="vector-norms">vector norms</NoteLink>, which carry an item's popularity
+<Cite id="wu2024sampledsoftmaxrec" />. See <NoteLink to="contrastive-losses-for-retrieval">contrastive losses for
+retrieval</NoteLink> for the same loss with a temperature and normalised vectors.

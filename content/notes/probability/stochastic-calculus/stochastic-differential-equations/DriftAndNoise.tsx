@@ -13,7 +13,8 @@ import { linspace, rng } from '@/lib/math'
 import { normalCdf } from '@/lib/math/special'
 import { joinPaths } from '../_shared/sde'
 
-const PATHS = 25
+/** Brownian paths simulated once; the paths slider draws the first few. */
+const MAX_PATHS = 50
 const STEPS = 250
 const T = 5
 const TIMES = linspace(0, T, STEPS + 1)
@@ -28,6 +29,7 @@ type Model = 'drift' | 'gbm'
  */
 export function DriftAndNoise() {
   const [model, setModel] = useState<Model>('drift')
+  const count = useParam(25, { min: 1, max: MAX_PATHS, step: 1 })
   const bm = {
     x0: useParam(0, { min: -3, max: 3, step: 0.1 }),
     mu: useParam(0.3, { min: -1, max: 1, step: 0.05 }),
@@ -46,7 +48,7 @@ export function DriftAndNoise() {
   const w = useMemo(() => {
     const { normal } = rng(5)
     const sd = Math.sqrt(T / STEPS)
-    return Array.from({ length: PATHS }, () => {
+    return Array.from({ length: MAX_PATHS }, () => {
       const out = [0]
       for (let k = 1; k <= STEPS; k++) out.push(out[k - 1] + sd * normal())
       return out
@@ -54,10 +56,12 @@ export function DriftAndNoise() {
   }, [])
 
   const series = useMemo<XYSeries[]>(() => {
+    const drawn = w.slice(0, count.value)
+    const thin = count.value > 1
     if (model === 'drift') {
-      const paths = joinPaths(w.map((wp) => ({ x: TIMES, y: wp.map((wk, k) => x0 + mu * TIMES[k] + sigma * wk) })))
+      const paths = joinPaths(drawn.map((wp) => ({ x: TIMES, y: wp.map((wk, k) => x0 + mu * TIMES[k] + sigma * wk) })))
       return [
-        { name: 'paths', type: 'line', ...paths, muted: true },
+        { name: 'paths', type: 'line', ...paths, slot: 3, thin },
         { name: 'mean x₀ + μt', type: 'line', x: TIMES, y: TIMES.map((t) => x0 + mu * t), slot: 0 },
         {
           name: '5% and 95% quantiles',
@@ -72,10 +76,10 @@ export function DriftAndNoise() {
     }
     const drift = mu - (sigma * sigma) / 2
     const paths = joinPaths(
-      w.map((wp) => ({ x: TIMES, y: wp.map((wk, k) => x0 * Math.exp(drift * TIMES[k] + sigma * wk)) })),
+      drawn.map((wp) => ({ x: TIMES, y: wp.map((wk, k) => x0 * Math.exp(drift * TIMES[k] + sigma * wk)) })),
     )
     return [
-      { name: 'paths', type: 'line', ...paths, muted: true },
+      { name: 'paths', type: 'line', ...paths, slot: 3, thin },
       { name: 'mean x₀e^{μt}', type: 'line', x: TIMES, y: TIMES.map((t) => x0 * Math.exp(mu * t)), slot: 0 },
       {
         name: 'median x₀e^{(μ − σ²/2)t}',
@@ -97,7 +101,7 @@ export function DriftAndNoise() {
         dashed: true,
       },
     ]
-  }, [model, w, x0, mu, sigma])
+  }, [model, w, x0, mu, sigma, count.value])
 
   const lossProb = useMemo(() => {
     // P(X_T < x₀) for GBM: Φ(−(μ − σ²/2)√T / σ).
@@ -109,7 +113,7 @@ export function DriftAndNoise() {
   return (
     <Interactive
       title="Drift plus noise"
-      caption="Twenty-five paths of each SDE, driven by the same Brownian paths. Brownian motion with drift moves its mean in a straight line and its 90% band widens like √t. Geometric Brownian motion multiplies the noise by the current value: its mean grows like e^{μt}, but its median grows only like e^{(μ − σ²/2)t}, and with σ²/2 > μ most paths decay while the mean still grows. Drag the start point at t = 0."
+      caption="Paths of each SDE, drawn as light lines and driven by the same Brownian paths; the paths slider sets how many (25 by default). Brownian motion with drift moves its mean in a straight line and its 90% band widens like √t. Geometric Brownian motion multiplies the noise by the current value: its mean grows like e^{μt}, but its median grows only like e^{(μ − σ²/2)t}, and with σ²/2 > μ most paths decay while the mean still grows. Drag the start point at t = 0."
       controls={
         <>
           <ParamChoice
@@ -124,6 +128,7 @@ export function DriftAndNoise() {
           <ParamSlider label="drift μ" param={p.mu} />
           <ParamSlider label="noise σ" param={p.sigma} />
           <ParamSlider label="start x₀" param={p.x0} />
+          <ParamSlider label="paths" param={count} withArrows format={(v) => String(v)} />
         </>
       }
       readout={

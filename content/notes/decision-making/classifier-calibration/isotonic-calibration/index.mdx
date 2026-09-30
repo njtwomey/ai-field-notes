@@ -16,7 +16,7 @@ import { PavSteps } from './PavSteps'
 
 <Definition>
 Sort the calibration cases by classifier score, $s_1 \le s_2 \le \dots \le s_n$, with labels $y_i \in \set{0, 1}$.
-**Isotonic regression** finds values $\mu_1, \dots, \mu_n$ that solve
+**<NoteLink to="isotonic-regression">Isotonic regression</NoteLink>** finds values $\mu_1, \dots, \mu_n$ that solve
 
 $$
 \min_{\mu} \sum_{i=1}^n (\mu_i - y_i)^2 \quad \text{subject to} \quad \mu_1 \le \mu_2 \le \dots \le \mu_n.
@@ -28,39 +28,42 @@ giving a non-decreasing step function from score to probability <Cite id="zadroz
 
 ## Problem
 
-A parametric <NoteLink to="classifier-calibration">calibration map</NoteLink> assumes a shape: a sigmoid for <NoteLink to="platt-scaling">Platt scaling</NoteLink>, a
-beta-derived curve for <NoteLink to="beta-calibration">beta calibration</NoteLink>. A model whose distortion has another
-shape stays miscalibrated. The only assumption that holds for nearly every scoring classifier is that a higher score
-should never mean a lower probability. Isotonic calibration assumes that and nothing else.
+A parametric <NoteLink to="classifier-calibration">calibration map</NoteLink> assumes a shape: a sigmoid for
+<NoteLink to="platt-scaling">Platt scaling</NoteLink>, a beta-derived curve for <NoteLink to="beta-calibration">beta
+calibration</NoteLink>. A model whose distortion has another shape stays miscalibrated. The only assumption that holds
+for nearly every scoring classifier is that a higher score should never mean a lower probability. Isotonic calibration
+assumes that and nothing else.
 
 ## Mechanism
 
 **Pool adjacent violators (PAV).** Process the sorted cases from left to right, keeping a stack of blocks, each with a
-value and a weight (its number of cases). Push each new case as a block of weight 1 with value $y_i$. While the top block
-has a lower value than the block below it, pop both and push one block with their weighted mean. At the end every case
-takes its block's value <Cite id="ayer1955" />. Each case is pushed once and popped at most once, so after sorting the
-algorithm takes $O(n)$ time.
+value and a weight (its number of cases). Push each new case as a block of weight 1 with value $y_i$. While the top
+block has a lower value than the block below it, pop both and push one block with their weighted mean. At the end every
+case takes its block's value <Cite id="ayer1955" />. Each case is pushed once and popped at most once, so after sorting
+the algorithm takes $O(n)$ time.
 
-**Adjacent violators share a value at the optimum.** Suppose adjacent cases have $y_i > y_{i+1}$, and suppose an optimal solution had
-$\mu_i < \mu_{i+1}$. Raise $\mu_i$ and lower $\mu_{i+1}$ by a small $\varepsilon$. The order constraints still hold,
-and the objective changes by
+**Adjacent violators share a value at the optimum.** Suppose adjacent cases have $y_i > y_{i+1}$, and suppose an optimal
+solution had $\mu_i < \mu_{i+1}$. Raise $\mu_i$ and lower $\mu_{i+1}$ by a small $\varepsilon$. The order constraints
+still hold, and the objective changes by
 
 $$
 2\varepsilon\brack{(\mu_i - y_i) - (\mu_{i+1} - y_{i+1})} + O(\varepsilon^2) = 2\varepsilon\brack{(\mu_i - \mu_{i+1}) - (y_i -
 y_{i+1})} + O(\varepsilon^2),
 $$
 
-which is negative because $\mu_i - \mu_{i+1} < 0$ and $y_i - y_{i+1} > 0$. That contradicts optimality, so $\mu_i = \mu_{i+1}$. Two cases forced
-to share a value $\mu$ contribute $(\mu - y_i)^2 + (\mu - y_{i+1})^2 = 2(\mu - \bar y)^2 + \text{const}$, with $\bar y$
-their mean, so they act as one case of weight 2 at $\bar y$. The same argument applies to adjacent blocks with weights,
-and repeating it until no violation remains gives the PAV solution.
+which is negative because $\mu_i - \mu_{i+1} < 0$ and $y_i - y_{i+1} > 0$. That contradicts optimality, so
+$\mu_i = \mu_{i+1}$. Two cases forced to share a value $\mu$ contribute
+$(\mu - y_i)^2 + (\mu - y_{i+1})^2 = 2(\mu - \bar y)^2 + \text{const}$, with $\bar y$ their mean, so they act as one
+case of weight 2 at $\bar y$. The same argument applies to adjacent blocks with weights, and repeating it until no
+violation remains gives the PAV solution.
 
 <PavSteps />
 
-**Optimal for every proper score.** The PAV solution minimises squared error by construction. Brümmer and du Preez proved
-more: among all non-decreasing maps, it simultaneously minimises every binary proper <NoteLink to="proper-scoring-rule">scoring rule</NoteLink> on the calibration
-data, including <NoteLink to="cross-entropy-and-perplexity">log loss</NoteLink> <Cite id="brummer2013" />. The same step function is the best monotone calibration however
-the probabilities will be scored.
+**Optimal for every proper score.** The PAV solution minimises squared error by construction. Brümmer and du Preez
+proved more: among all non-decreasing maps, it simultaneously minimises every binary proper
+<NoteLink to="proper-scoring-rule">scoring rule</NoteLink> on the calibration data, including
+<NoteLink to="cross-entropy-and-perplexity">log loss</NoteLink> <Cite id="brummer2013" />. The same step function is the
+best monotone calibration however the probabilities will be scored.
 
 **Equivalence with the ROC convex hull.** Each block of the PAV solution corresponds to a segment of the convex hull of
 the empirical ROC curve, and each hull segment to a block <Cite id="fawcett2007" />. A block with $n_+$ positives and
@@ -90,7 +93,8 @@ the calibration set was below roughly 200 to 1000 cases, and isotonic regression
 - **Probabilities of 0 and 1.** End blocks that contain only one class get values exactly 0 or 1. Under log loss one
   wrong prediction there costs infinity. Clip the map to $[\varepsilon, 1 - \varepsilon]$ or use Laplace-smoothed block
   values.
-- **Monotone only.** A model whose <NoteLink to="reliability-diagrams-and-consistency-bars">calibration curve</NoteLink> genuinely decreases somewhere, which is rare, cannot be fitted.
+- **Monotone only.** A model whose <NoteLink to="reliability-diagrams-and-consistency-bars">calibration curve</NoteLink>
+  genuinely decreases somewhere, which is rare, cannot be fitted.
 - **Multiclass.** Isotonic regression has no direct multiclass form, because the ordering it relies on is between two
   classes. The usual approach calibrates each class against the rest and renormalises <Cite id="zadrozny2002" />.
 

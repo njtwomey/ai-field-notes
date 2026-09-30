@@ -37,21 +37,21 @@ so that the longer sequence fits in memory <Cite id="liu2024ring" />.
 ## Problem
 
 Two things stop a model at its training length. Attention's cost grows as $n^2$, which
-<NoteLink to="flash-attention">memory-efficient kernels</NoteLink> and distribution address. And the model has never seen
-position values beyond $L$.
+<NoteLink to="flash-attention">memory-efficient kernels</NoteLink> and distribution address. And the model has never
+seen position values beyond $L$.
 
-<NoteLink to="rotary-position-embedding">Rotary position embedding</NoteLink> splits each query and key of width $d$ into
-$d/2$ pairs and rotates pair $i$ at position $m$ by the angle $m\theta_i$, with
+<NoteLink to="rotary-position-embedding">Rotary position embedding</NoteLink> splits each query and key of width $d$
+into $d/2$ pairs and rotates pair $i$ at position $m$ by the angle $m\theta_i$, with
 
 $$
 \theta_i = b^{-2i/d}, \qquad i = 0, 1, \dots, d/2 - 1,
 $$
 
 and base $b = 10{,}000$ <Cite id="su2021" />. The score between positions $m$ and $n$ then depends on the angles
-$(m - n)\theta_i$. The wavelength of pair $i$ is $\lambda_i = 2\pi/\theta_i = 2\pi b^{2i/d}$ tokens. High-frequency pairs
-(small $i$) complete many rotations within $L$ tokens and see every angle during training. Low-frequency pairs (large
-$i$) have wavelengths longer than $L$; during training they see only a fraction of a turn. At positions beyond $L$
-those pairs take angles never seen in training, and attention scores become erratic. Perplexity rises sharply just
+$(m - n)\theta_i$. The wavelength of pair $i$ is $\lambda_i = 2\pi/\theta_i = 2\pi b^{2i/d}$ tokens. High-frequency
+pairs (small $i$) complete many rotations within $L$ tokens and see every angle during training. Low-frequency pairs
+(large $i$) have wavelengths longer than $L$; during training they see only a fraction of a turn. At positions beyond
+$L$ those pairs take angles never seen in training, and attention scores become erratic. Perplexity rises sharply just
 past $L$ <Cite id="chen2023" />.
 
 ## Mechanism
@@ -134,18 +134,19 @@ model.
 ## Cost
 
 Position interpolation, NTK-aware scaling and YaRN change only the rotation frequencies, so inference costs nothing
-extra. They work best with a short fine-tuning at the new length; NTK-aware scaling also works to a degree without
-any <Cite id="peng2024yarn" />. Attention cost at the new length is unchanged: $O(L'^2)$ time per layer and a
-<NoteLink to="key-value-cache">key–value cache</NoteLink> of $L'$ entries. Ring attention adds communication of $O(nd)$ per layer per
-device and keeps each device's memory proportional to $n/P$.
+extra. They work best with a short fine-tuning at the new length; NTK-aware scaling also works to a degree without any
+<Cite id="peng2024yarn" />. Attention cost at the new length is unchanged: $O(L'^2)$ time per layer and a
+<NoteLink to="key-value-cache">key–value cache</NoteLink> of $L'$ entries. Ring attention adds communication of $O(nd)$
+per layer per device and keeps each device's memory proportional to $n/P$.
 
 ## Trade-offs
 
 - **Interpolation versus extrapolation.** Interpolation keeps angles in range but compresses local order. Leaving high
   frequencies alone, as NTK-aware scaling and YaRN do, keeps local order and interpolates only where it is needed.
 - **Nominal versus effective context.** A model that runs at length $L'$ does not necessarily use information from all
-  $L'$ tokens. Check retrieval at every depth, for example with a passkey hidden at a random position, as Chen et al. do.
-- **Other encodings.** <Gloss name="alibi" /> adds a linear distance penalty to scores and extrapolates somewhat without any change
-  <Cite id="press2022" />. Interpolation methods are specific to RoPE.
+  $L'$ tokens. Check retrieval at every depth, for example with a passkey hidden at a random position, as Chen et al.
+  do.
+- **Other encodings.** <Gloss name="alibi" /> adds a linear distance penalty to scores and extrapolates somewhat without
+  any change <Cite id="press2022" />. Interpolation methods are specific to RoPE.
 - **Short-context quality.** Changing the frequencies alters the model at every length. YaRN and fine-tuned
   interpolation keep most short-context quality; untuned scaling can lose some.

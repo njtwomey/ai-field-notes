@@ -13,7 +13,15 @@ import {
   type XYSeries,
 } from '@/components/viz'
 import { linspace, rng } from '@/lib/math'
-import { KERNEL_OPTIONS, makeKernel, posterior, samples, type KernelName } from '../_shared/gp'
+import {
+  KERNEL_OPTIONS,
+  addDiagonal,
+  cholesky,
+  makeKernel,
+  posterior,
+  samplesFromFactor,
+  type KernelName,
+} from '../_shared/gp'
 
 const GRID = linspace(-5, 5, 101)
 const X_RANGE: [number, number] = [-5, 5]
@@ -28,12 +36,15 @@ const INITIAL: [number, number][] = [
   [4.2, 0.9],
   [-3.2, -0.2],
 ]
-const SAMPLES = 3
-/** Fixed standard normals, so posterior samples deform smoothly instead of jumping when a parameter moves. */
-const NORMALS = (() => {
-  const g = rng(11)
-  return Array.from({ length: SAMPLES }, () => GRID.map(() => g.normal()))
-})()
+const MAX_SAMPLES = 30
+/**
+ * Fixed standard normals, so posterior samples deform smoothly instead of jumping when a parameter moves. Draw k has
+ * its own stream, so raising the count adds draws without changing the earlier ones.
+ */
+const NORMALS = Array.from({ length: MAX_SAMPLES }, (_, k) => {
+  const g = rng(11 * 1000 + k)
+  return GRID.map(() => g.normal())
+})
 
 /** GP regression on draggable training points: posterior mean, a band of ±2 posterior sd of f, and samples. */
 export function GpRegression() {
@@ -43,31 +54,37 @@ export function GpRegression() {
   const logEll = useParam(0, { min: -1.2, max: 1, step: 0.02 })
   const sf = useParam(1, { min: 0.2, max: 2, step: 0.05 })
   const sn = useParam(0.1, { min: 0.01, max: 1, step: 0.01 })
+  const count = useParam(3, { min: 1, max: MAX_SAMPLES, step: 1 })
   const [showSamples, setShowSamples] = useState(true)
   const ell = 10 ** logEll.value
-  const data = points.slice(0, n.value)
+  const data = useMemo(() => points.slice(0, n.value), [points, n.value])
 
   const r = useMemo(() => {
     const k = makeKernel(name, { ell, sf: sf.value, period: 3 })
     const x = data.map((p) => p[0])
     const y = data.map((p) => p[1])
     const post = posterior(k, x, y, sn.value ** 2, GRID, true)
-    const draws = samples(post.mean, post.covariance!, NORMALS)
+    // The Cholesky factor is computed once per posterior; changing the number of draws reuses it.
+    const factor = cholesky(addDiagonal(post.covariance!, 1e-6))
     const sd = post.variance.map(Math.sqrt)
     const meanSd = sd.reduce((s, v) => s + v, 0) / sd.length
-    return { post, draws, sd, meanSd }
+    return { post, factor, sd, meanSd }
   }, [data, name, ell, sf.value, sn.value])
+  const draws = useMemo(
+    () => (showSamples ? samplesFromFactor(r.post.mean, r.factor, NORMALS.slice(0, count.value)) : []),
+    [r, count.value, showSamples],
+  )
+  const many = draws.length > 1
 
   const series: XYSeries[] = [
-    ...(showSamples
-      ? r.draws.map((d, i): XYSeries => ({
-          name: `posterior sample ${i + 1}`,
-          type: 'line',
-          x: GRID,
-          y: d,
-          muted: true,
-        }))
-      : []),
+    ...draws.map((d): XYSeries => ({
+      name: many ? 'posterior samples' : 'posterior sample',
+      type: 'line',
+      x: GRID,
+      y: d,
+      slot: 2,
+      thin: many,
+    })),
     {
       name: 'mean + 2 sd',
       type: 'line',
@@ -102,7 +119,7 @@ export function GpRegression() {
   return (
     <Interactive
       title="Gaussian process regression"
-      caption="Drag the training points. The solid line is the posterior mean, the dashed lines are two posterior standard deviations of f either side of it, and the grey curves are samples from the posterior. Near the data the band narrows to about the noise level; far from it the band returns to the prior's ±2σ_f and the mean returns to zero. A short length-scale lets the function turn quickly and forget the data within a short distance. Matérn 1/2 gives rough, continuous but nowhere-differentiable samples; the periodic kernel (period 3) repeats the data."
+      caption="Drag the training points. The solid line is the posterior mean, the dashed lines are two posterior standard deviations of f either side of it, and the light curves are functions drawn from the posterior; the draws slider sets how many. Near the data the band narrows to about the noise level; far from it the band returns to the prior's ±2σ_f and the mean returns to zero. A short length-scale lets the function turn quickly and forget the data within a short distance. Matérn 1/2 gives rough, continuous but nowhere-differentiable samples; the periodic kernel (period 3) repeats the data."
       controls={
         <>
           <ParamChoice label="kernel" value={name} onChange={setName} options={KERNEL_OPTIONS} />
@@ -111,6 +128,7 @@ export function GpRegression() {
           <ParamSlider label="signal sd σ_f" param={sf} />
           <ParamSlider label="noise sd σ_n" param={sn} />
           <ParamSwitch label="posterior samples" checked={showSamples} onChange={setShowSamples} />
+          <ParamSlider label="draws" param={count} withArrows format={(v) => String(v)} />
           <ParamButton onClick={() => setPoints(INITIAL)}>Reset points</ParamButton>
         </>
       }

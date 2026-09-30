@@ -16,11 +16,12 @@ import { PinnerFormerDiagram } from './PinnerFormerDiagram'
 
 <Definition>
 **PinnerFormer** maps a user's $M$ most recent pin engagements to one embedding $\uvec \in \reals^{256}$ of unit length,
-compatible under <NoteLink to="dot-product">cosine similarity</NoteLink> with a pin embedding $\pvec$ computed from the pin's <Gloss name="pinsage" /> vector. A causally
-masked <NoteLink to="transformer">transformer</NoteLink> produces an embedding at every position of the sequence. Training uses the **dense all-action
-loss**: sampled positions each predict one randomly chosen positive engagement from the following $K$ days, through a
-sampled softmax with in-batch and random negatives and a log-frequency correction. The embedding is recomputed once a
-day in batch and has been in production at Pinterest since autumn 2021 <Cite id="pancha2022pinnerformer" />.
+compatible under <NoteLink to="dot-product">cosine similarity</NoteLink> with a pin embedding $\pvec$ computed from the
+pin's <Gloss name="pinsage" /> vector. A causally masked <NoteLink to="transformer">transformer</NoteLink> produces an
+embedding at every position of the sequence. Training uses the **dense all-action loss**: sampled positions each predict
+one randomly chosen positive engagement from the following $K$ days, through a sampled softmax with in-batch and random
+negatives and a log-frequency correction. The embedding is recomputed once a day in batch and has been in production at
+Pinterest since autumn 2021 <Cite id="pancha2022pinnerformer" />.
 </Definition>
 
 ## Problem
@@ -48,17 +49,17 @@ of Time2vec with learned phases $\phivec$. The absolute timestamp uses periods f
 features use 32 periods spaced evenly on a log scale from one second to four weeks.
 
 **Sequence encoder.** The $M$ action vectors are stacked into $\Amat \in \reals^{M \times D_{\mathrm{in}}}$, projected
-to the hidden size $H$ and summed with a learned <NoteLink to="positional-encoding">positional encoding</NoteLink>: $\Vmat^{(0)} = \Amat\Wmat + \mathrm{PE}$. Each of
-$L$ pre-norm layers applies
+to the hidden size $H$ and summed with a learned <NoteLink to="positional-encoding">positional encoding</NoteLink>:
+$\Vmat^{(0)} = \Amat\Wmat + \mathrm{PE}$. Each of $L$ pre-norm layers applies
 
 $$
 \Umat^{(l)} = \Vmat^{(l-1)} + \mathrm{MHSA}\paren{\mathrm{LayerNorm}(\Vmat^{(l-1)})}, \qquad
 \Vmat^{(l)} = \Umat^{(l)} + \mathrm{FFN}\paren{\mathrm{LayerNorm}(\Umat^{(l)})},
 $$
 
-with a feed-forward width of $4H$, 8 attention heads and a <NoteLink to="causal-masking">causal mask</NoteLink>, so position $t$ attends only to actions at or
-before $t$. Every output row passes through a two-layer <Gloss name="mlp" /> and is divided by its norm, giving embeddings
-$\evec_1, \dots, \evec_M$ <Cite id="pancha2022pinnerformer" />.
+with a feed-forward width of $4H$, 8 attention heads and a <NoteLink to="causal-masking">causal mask</NoteLink>, so
+position $t$ attends only to actions at or before $t$. Every output row passes through a two-layer <Gloss name="mlp" />
+and is divided by its norm, giving embeddings $\evec_1, \dots, \evec_M$ <Cite id="pancha2022pinnerformer" />.
 
 **Pin tower.** A pin's embedding is an MLP applied to its PinSage vector, then normalised. User and pin sides are
 trained together, as in a <NoteLink to="two-tower-model">two-tower model</NoteLink>.
@@ -75,8 +76,8 @@ user embeddings with target pins <Cite id="pancha2022pinnerformer" />:
 
 - **Next action.** The last embedding $\evec_T$ predicts the next action $A_{T+1}$ if it is positive.
 - **SASRec.** Every position $t$ predicts the next positive action, the objective of
-  <NoteLink to="sasrec">SASRec</NoteLink> with sampled softmax in place of <NoteLink to="cross-entropy-and-perplexity">binary cross-entropy</NoteLink>
-  <Cite id="kang2018sasrec" />.
+  <NoteLink to="sasrec">SASRec</NoteLink> with sampled softmax in place of
+  <NoteLink to="cross-entropy-and-perplexity">binary cross-entropy</NoteLink> <Cite id="kang2018sasrec" />.
 - **All action.** The last embedding $\evec_T$ predicts every positive in $\Fcal_T$, up to 32 sampled.
 - **Dense all action.** A random set of positions $\set{s_i}$ is chosen, and each $\evec_{s_i}$ predicts one positive
   drawn at random from $\Fcal_{s_i}$.
@@ -97,8 +98,9 @@ within minutes. If it is trained to predict any positive in the next $K$ days, t
 that horizon, which change slowly. The embedding is then close to what it would be if recomputed after each action.
 
 The paper also explains why dense all action beats all action. In the all-action loss, every positive's gradient flows
-through the same final embedding $\evec_T$ and is averaged there. In the dense version the <NoteLink to="gradient">gradients</NoteLink> enter at different
-transformer outputs and are averaged only after passing through the transformer <Cite id="pancha2022pinnerformer" />.
+through the same final embedding $\evec_T$ and is averaged there. In the dense version the
+<NoteLink to="gradient">gradients</NoteLink> enter at different transformer outputs and are averaged only after passing
+through the transformer <Cite id="pancha2022pinnerformer" />.
 
 ## Sampled softmax with logQ correction
 
@@ -126,10 +128,10 @@ the sampled sum an unbiased estimate of the full denominator. Without it, pins t
 appear often as in-batch negatives and are pushed down for everyone <Cite id="yi2019sampling" />.
 
 **Negatives.** In-batch negatives are the other users' positives in the batch, with the user's own positives masked.
-Random negatives are drawn uniformly from the pins eligible for homefeed. Negatives are gathered across all <Gloss name="gpu" plural />, as
-many as fit in memory. Random negatives alone were too easy: with them, 1,000 pins accounted for 90% of the top 10
-results retrieved for 100,000 users out of an index of 1 million. The final model uses a mixed pool with the
-correction <Cite id="pancha2022pinnerformer" />.
+Random negatives are drawn uniformly from the pins eligible for homefeed. Negatives are gathered across all
+<Gloss name="gpu" plural />, as many as fit in memory. Random negatives alone were too easy: with them, 1,000 pins
+accounted for 90% of the top 10 results retrieved for 100,000 users out of an index of 1 million. The final model uses a
+mixed pool with the correction <Cite id="pancha2022pinnerformer" />.
 
 ## Serving
 
@@ -142,9 +144,10 @@ error, fixing the input and rerunning the affected users restores correct embedd
 
 ## Reported results
 
-Offline evaluation embeds each held-out user at time $t$ and measures Recall@10: the share of the user's positive pins in
-$(t, t + 14\,\mathrm{d}]$ that rank in the top 10 among 1 million random pins. P90 Coverage@10 is the fraction of the
-index that accounts for 90% of all users' top-10 results, a measure of global diversity <Cite id="pancha2022pinnerformer" />.
+Offline evaluation embeds each held-out user at time $t$ and measures Recall@10: the share of the user's positive pins
+in $(t, t + 14\,\mathrm{d}]$ that rank in the top 10 among 1 million random pins. P90 Coverage@10 is the fraction of the
+index that accounts for 90% of all users' top-10 results, a measure of global diversity
+<Cite id="pancha2022pinnerformer" />.
 
 | comparison                                          | Recall@10 | P90 Coverage@10 |
 | --------------------------------------------------- | --------- | --------------- |
@@ -162,17 +165,18 @@ per sequence. PinnerSage retrieves more diverse results per user when many clust
 
 **Batch versus real time.** For SASRec, Recall@10 was 0.198 with one embedding for the whole 14 days, 0.216 with daily
 updates and 0.251 with updates after every action. For PinnerFormer the three values were 0.229, 0.243 and 0.264. Moving
-from real-time to daily inference cost SASRec about 14% of its Recall@10 and PinnerFormer about 8%; the paper summarises this as nearly halving
-the gap <Cite id="pancha2022pinnerformer" />.
+from real-time to daily inference cost SASRec about 14% of its Recall@10 and PinnerFormer about 8%; the paper summarises
+this as nearly halving the gap <Cite id="pancha2022pinnerformer" />.
 
 **Ablations.** Removing the PinSage input dropped Recall@10 from 0.229 to 0.142 and P90 Coverage@10 to 0.0005, so the
 model retrieved nearly the same pins for everyone. Removing the timestamp dropped Recall@10 to 0.210. Longer sequences
 helped with diminishing returns; the final model uses $M = 256$ <Cite id="pancha2022pinnerformer" />.
 
 **Online.** Replacing the aggregated PinnerSage feature in the homefeed ranking model with PinnerFormer changed homefeed
-repins by $+7.5\%$, close-ups by $+6\%$ and click-throughs by $+1\%$, and sitewide time spent by $+1\%$, daily active users
-by $+0.4\%$ and weekly active users by $+0.12\%$. Adding PinnerFormer to the ads ranking models raised <Gloss name="click-through-rate">click-through rate</Gloss>
-by 7.1% on related pins, 7.3% on search and 10.0% on homefeed <Cite id="pancha2022pinnerformer" />.
+repins by $+7.5\%$, close-ups by $+6\%$ and click-throughs by $+1\%$, and sitewide time spent by $+1\%$, daily active
+users by $+0.4\%$ and weekly active users by $+0.12\%$. Adding PinnerFormer to the ads ranking models raised
+<Gloss name="click-through-rate">click-through rate</Gloss> by 7.1% on related pins, 7.3% on search and 10.0% on
+homefeed <Cite id="pancha2022pinnerformer" />.
 
 ## Pitfalls
 
@@ -180,5 +184,5 @@ by 7.1% on related pins, 7.3% on search and 10.0% on homefeed <Cite id="pancha20
   remaining gap is what <NoteLink to="transact">TransAct</NoteLink> later filled inside the ranker.
 - **One vector for many interests.** A single embedding retrieves less diverse results than PinnerSage with many
   clusters.
-- **Correction trades diversity for recall.** The logQ correction raised Recall@10 with in-batch or mixed negatives but
-  lowered global coverage <Cite id="pancha2022pinnerformer" />.
+- **Correction trades diversity for recall.** The <Gloss name="logq-correction">logQ correction</Gloss> raised Recall@10
+  with in-batch or mixed negatives but lowered global coverage <Cite id="pancha2022pinnerformer" />.

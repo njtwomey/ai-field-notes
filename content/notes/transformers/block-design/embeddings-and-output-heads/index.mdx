@@ -25,26 +25,26 @@ updated: 2026-09-27
 
 <Definition>
 The **input embedding** is a matrix $\Emat \in \reals^{V \times d}$ whose row $\evec_w$ is the vector for token $w$ of a
-vocabulary of size $V$. The **output head** (unembedding) is a matrix $\Umat \in \reals^{d \times V}$ that maps the final
-hidden state $\hvec \in \reals^d$ to logits $\zvec = \hvec\Umat$, one per token, followed by a softmax. **Weight
+vocabulary of size $V$. The **output head** (unembedding) is a matrix $\Umat \in \reals^{d \times V}$ that maps the
+final hidden state $\hvec \in \reals^d$ to logits $\zvec = \hvec\Umat$, one per token, followed by a softmax. **Weight
 tying** uses one matrix for both, $\Umat = \Emat^\tr$ <Cite id="press2017" />.
 </Definition>
 
 ## Intuition
 
 The input embedding gives each token's contribution to the residual stream. The output head scores how well the final
-hidden state predicts each token. Column $\uvec_w$ of $\Umat$ is a direction in the hidden space, and the logit of $w$ is
-the dot product $\hvec \cdot \uvec_w$. Both matrices hold one $d$-vector per token. Tokens that are interchangeable in
-context should have similar output vectors, and tokens with similar meaning should have similar input vectors. Press and
-Wolf argued that these are close enough to share <Cite id="press2017" />.
+hidden state predicts each token. Column $\uvec_w$ of $\Umat$ is a direction in the hidden space, and the logit of $w$
+is the dot product $\hvec \cdot \uvec_w$. Both matrices hold one $d$-vector per token. Tokens that are interchangeable
+in context should have similar output vectors, and tokens with similar meaning should have similar input vectors. Press
+and Wolf argued that these are close enough to share <Cite id="press2017" />.
 
 ## Weight tying
 
 ### Why a tied matrix learns faster
 
-Let $\ell = -\log p_y$ be the cross-entropy for the correct next token $y$, with $\pvec = \operatorname{softmax}(\zvec)$.
-The <NoteLink to="gradient">gradient</NoteLink> with respect to the logits is $\pvec - \yvec$, where $\yvec$ is the one-hot vector of $y$, so the
-gradient with respect to output column $\uvec_w$ is
+Let $\ell = -\log p_y$ be the cross-entropy for the correct next token $y$, with
+$\pvec = \operatorname{softmax}(\zvec)$. The <NoteLink to="gradient">gradient</NoteLink> with respect to the logits is
+$\pvec - \yvec$, where $\yvec$ is the one-hot vector of $y$, so the gradient with respect to output column $\uvec_w$ is
 
 $$
 \frac{\partial\ell}{\partial\uvec_w} = (p_w - \indicator[w = y])\,\hvec .
@@ -53,30 +53,32 @@ $$
 Every column receives a gradient at every position, because every $p_w > 0$. The input embedding row $\evec_w$ receives
 a gradient only at positions where token $w$ occurs in the input. A rare token's input row is therefore updated rarely.
 With tying, the shared row gets the sum of both gradients and is updated at every step through the output side. Press
-and Wolf showed that the tied embedding evolves more like an untied output embedding than an untied input embedding <Cite id="press2017" />.
+and Wolf showed that the tied embedding evolves more like an untied output embedding than an untied input embedding
+<Cite id="press2017" />.
 
 ### Evidence
 
-On Penn Treebank, tying reduced the parameters of a small <NoteLink to="neural-language-model">LSTM language model</NoteLink> from 4.65M to 2.65M and its test
-perplexity from 114.5 to 112.4. In neural translation with a shared source and target vocabulary, tying the encoder
-input, decoder input and decoder output matrices cut an English–French model from 168M to 80M parameters, with <Gloss name="bleu" />
-33.13 before and 33.46 after <Cite id="press2017" />. The <NoteLink to="transformer">original transformer</NoteLink> used this three-way tying <Cite id="vaswani2017" />.
+On Penn Treebank, tying reduced the parameters of a small <NoteLink to="neural-language-model">LSTM language
+model</NoteLink> from 4.65M to 2.65M and its test perplexity from 114.5 to 112.4. In neural translation with a shared
+source and target vocabulary, tying the encoder input, decoder input and decoder output matrices cut an English–French
+model from 168M to 80M parameters, with <Gloss name="bleu" /> 33.13 before and 33.46 after <Cite id="press2017" />. The
+<NoteLink to="transformer">original transformer</NoteLink> used this three-way tying <Cite id="vaswani2017" />.
 
 ## Scaling the embedding
 
 A tied matrix serves two roles with different target scales. As an input it should give vectors whose entries are of
-order 1, the scale of the residual stream. As an output it should give logits of order 1. After the final
-normalisation $\norm{\hvec} \approx \sqrt d$, so if $\evec_w$ also had norm $\sqrt d$ the logits $\hvec\cdot\evec_w$ would
-have <NoteLink to="variance-and-covariance">standard deviation</NoteLink> $\sqrt d$ at initialisation.
+order 1, the scale of the residual stream. As an output it should give logits of order 1. After the final normalisation
+$\norm{\hvec} \approx \sqrt d$, so if $\evec_w$ also had norm $\sqrt d$ the logits $\hvec\cdot\evec_w$ would have
+<NoteLink to="variance-and-covariance">standard deviation</NoteLink> $\sqrt d$ at initialisation.
 
 Two fixes are in use, and both put a factor of $\sqrt d$ between the two roles:
 
 - **Scale the input up.** Initialise $\Emat$ with entries of standard deviation $d^{-1/2}$, so each row has norm about 1
   and the logits have standard deviation about 1. Multiply the input embedding by $\sqrt d$ so that its entries have
   standard deviation 1. The original transformer multiplies embeddings by $\sqrt d$ <Cite id="vaswani2017" />.
-- **Scale the output down.** <Gloss name="palm" /> initialises $\Emat$ with entries $\Gauss(0, 1)$ "since layer normalization is not
-  applied to the embeddings", and, "because the input and output embedding layers are shared", scales the pre-softmax
-  logits by $1/\sqrt d$ <Cite id="chowdhery2022" />.
+- **Scale the output down.** <Gloss name="palm" /> initialises $\Emat$ with entries $\Gauss(0, 1)$ "since layer
+  normalization is not applied to the embeddings", and, "because the input and output embedding layers are shared",
+  scales the pre-softmax logits by $1/\sqrt d$ <Cite id="chowdhery2022" />.
 
 An untied model can initialise the two matrices at different scales and needs neither factor. The separate
 treatment of input and output layers is also what <NoteLink to="maximal-update-parameterisation">maximal update
@@ -94,9 +96,10 @@ small, and several model families keep two matrices. The total parameter count s
 | Llama 2 7B  | 32,000  | 4,096 | 131M  | no   | 6.74B            | 3.9%                         |
 | Llama 3 8B  | 128,256 | 4,096 | 525M  | no   | 8.03B            | 13%                          |
 
-GPT-2 small's 124,439,808 parameters and Llama 2 7B's 6,738,415,616 are the counts with one and with two
-vocabulary matrices respectively <Cite id="radford2019" /> <Cite id="touvron2023" />. Gemma 2 reports
-590,118,912 embedding parameters for its 2B model, $256{,}128 \times 2{,}304$, and states that its embeddings are tied <Cite id="gemmateam2024" />.
+GPT-2 small's 124,439,808 parameters and Llama 2 7B's 6,738,415,616 are the counts with one and with two vocabulary
+matrices respectively <Cite id="radford2019" /> <Cite id="touvron2023" />. Gemma 2 reports 590,118,912 embedding
+parameters for its 2B model, $256{,}128 \times 2{,}304$, and states that its embeddings are tied
+<Cite id="gemmateam2024" />.
 
 An untied head costs $Vd$ parameters but no extra compute: the logits need the product $\hvec\Umat$ either way. It frees
 the input rows to specialise as stream contributions and the output columns as prediction directions.
@@ -106,19 +109,21 @@ the input rows to specialise as stream contributions and the output columns as p
 A larger vocabulary encodes the same text in fewer tokens, so the transformer stack runs fewer times per document. It
 also costs more per token at the ends of the network:
 
-- the head's product $\hvec\Umat$ takes $2Vd$ <Gloss name="flop" plural /> per token, against about $2N$ for the $N$ non-embedding parameters;
+- the head's product $\hvec\Umat$ takes $2Vd$ <Gloss name="flop" plural /> per token, against about $2N$ for the $N$
+  non-embedding parameters;
 - the softmax and its gradient touch all $V$ logits for every token;
 - rows for rare tokens receive few input-side updates.
 
 Llama 3 enlarged the vocabulary from 32K to 128K tokens <Cite id="grattafiori2024" />; PaLM uses 256K tokens to cover
-many languages without fragmenting words <Cite id="chowdhery2022" />. Tokenisation itself is covered in <NoteLink to="tokenisation">tokenisation</NoteLink>.
+many languages without fragmenting words <Cite id="chowdhery2022" />. Tokenisation itself is covered in
+<NoteLink to="tokenisation">tokenisation</NoteLink>.
 
 ## Worked example
 
-For Llama 3 8B, each vocabulary matrix has $128{,}256 \times 4{,}096 = 525{,}336{,}576$ parameters, and the two
-together have $1{,}050{,}673{,}152$. The 32 blocks have $218{,}112{,}000$ parameters each: $2 \cdot 4096^2$ for the query
-and output projections, $2 \cdot 4096 \cdot 1024$ for grouped keys and values, $3 \cdot 4096 \cdot 14{,}336$ for the
-gated feed-forward layer and $2 \cdot 4096$ for the norms. The model total is
+For Llama 3 8B, each vocabulary matrix has $128{,}256 \times 4{,}096 = 525{,}336{,}576$ parameters, and the two together
+have $1{,}050{,}673{,}152$. The 32 blocks have $218{,}112{,}000$ parameters each: $2 \cdot 4096^2$ for the query and
+output projections, $2 \cdot 4096 \cdot 1024$ for grouped keys and values, $3 \cdot 4096 \cdot 14{,}336$ for the gated
+feed-forward layer and $2 \cdot 4096$ for the norms. The model total is
 $32 \times 218{,}112{,}000 + 1{,}050{,}673{,}152 + 4{,}096 = 8{,}030{,}261{,}248$. Tying would save 525M parameters,
 6.5% of the total. The head's forward cost is $2 \times 525.3\text{M} = 1.05$ GFLOPs per token, against
 $2 \times 6.98\text{B} = 14.0$ GFLOPs for the blocks at short context.
@@ -131,9 +136,10 @@ $2 \times 6.98\text{B} = 14.0$ GFLOPs for the blocks at short context.
 
 ## Pitfalls
 
-- **Double scaling.** Multiplying the input by $\sqrt d$ and also initialising $\Emat$ with unit variance gives entries of
-  size $\sqrt d$ in the stream, which then dominate the first layers.
+- **Double scaling.** Multiplying the input by $\sqrt d$ and also initialising $\Emat$ with unit variance gives entries
+  of size $\sqrt d$ in the stream, which then dominate the first layers.
 - **Counting parameters.** Reported model sizes differ in whether they include embeddings. Scaling-law fits usually
   count non-embedding parameters.
-- **Padding the vocabulary.** $V$ is often rounded up to a multiple of 64 or 128 for efficient <NoteLink to="matrix-multiplication">matrix products</NoteLink>. The
-  padded rows are never used as inputs and should be masked from the softmax.
+- **Padding the vocabulary.** $V$ is often rounded up to a multiple of 64 or 128 for efficient
+  <NoteLink to="matrix-multiplication">matrix products</NoteLink>. The padded rows are never used as inputs and should
+  be masked from the softmax.

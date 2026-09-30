@@ -6,42 +6,84 @@ import { rng } from '@/lib/math'
 
 const FINE = 2 ** 16
 const KS = Array.from({ length: 16 }, (_, i) => i + 1)
+const MAX_PATHS = 30
+
+type Stats = { quot: number; qv: number }[]
+const statsCache = new Map<number, Stats>()
 
 /**
- * One Brownian path on [0, 1], viewed at steps h = 2^−k. The difference quotient ΔW/h has typical size √(2/(πh)) and
- * never settles, while the sum of (ΔW)² settles at 1: (dW)² behaves like dt.
+ * For path p on [0, 1] and every resolution k: mean |ΔW|/h and Σ(ΔW)² at step h = 2^−k. Path p has its own random
+ * stream (path 0 keeps seed 7), so adding paths leaves the existing ones unchanged. Cached: each path costs 2^16 draws.
+ */
+function pathStats(p: number): Stats {
+  const hit = statsCache.get(p)
+  if (hit) return hit
+  const { normal } = rng(p === 0 ? 7 : 7000 + p)
+  const b = new Float64Array(FINE + 1)
+  const sd = Math.sqrt(1 / FINE)
+  for (let i = 1; i <= FINE; i++) b[i] = b[i - 1] + sd * normal()
+  const out = KS.map((kk) => {
+    const m = 2 ** kk
+    const stride = FINE / m
+    let quot = 0
+    let qv = 0
+    for (let j = 1; j <= m; j++) {
+      const d = b[j * stride] - b[(j - 1) * stride]
+      quot += Math.abs(d) * m
+      qv += d * d
+    }
+    return { quot: quot / m, qv }
+  })
+  statsCache.set(p, out)
+  return out
+}
+
+/**
+ * Brownian paths on [0, 1], each viewed at steps h = 2^−k. The difference quotient ΔW/h has typical size √(2/(πh)) and
+ * never settles, while the sum of (ΔW)² settles at 1 on every path: (dW)² behaves like dt.
  */
 export function RoughPath() {
   const k = useParam(4, { min: 1, max: 16, step: 1 })
-  const path = useMemo(() => {
-    const { normal } = rng(7)
-    const b = new Float64Array(FINE + 1)
-    const sd = Math.sqrt(1 / FINE)
-    for (let i = 1; i <= FINE; i++) b[i] = b[i - 1] + sd * normal()
-    return b
-  }, [])
+  const count = useParam(10, { min: 1, max: MAX_PATHS, step: 1 })
 
-  // For every resolution: mean |ΔW|/h and Σ(ΔW)². Computed once; the slider only picks a row.
-  const stats = useMemo(
+  // Statistics at every resolution, computed once per path; the k slider only picks a column.
+  const stats = useMemo(() => Array.from({ length: count.value }, (_, p) => pathStats(p)), [count.value])
+  const avg = useMemo(
     () =>
-      KS.map((kk) => {
-        const m = 2 ** kk
-        const stride = FINE / m
-        let quot = 0
-        let qv = 0
-        for (let j = 1; j <= m; j++) {
-          const d = path[j * stride] - path[(j - 1) * stride]
-          quot += Math.abs(d) * m
-          qv += d * d
-        }
-        return { quot: quot / m, qv }
-      }),
-    [path],
+      KS.map((_, i) => ({
+        quot: stats.reduce((s, st) => s + st[i].quot, 0) / stats.length,
+        qv: stats.reduce((s, st) => s + st[i].qv, 0) / stats.length,
+      })),
+    [stats],
   )
 
-  const series = useMemo<XYSeries[]>(
-    () => [
-      { name: 'mean |ΔW| / h', type: 'line', x: KS, y: stats.map((s) => s.quot), slot: 0 },
+  const series = useMemo<XYSeries[]>(() => {
+    const many = stats.length > 1
+    const out: XYSeries[] = []
+    for (const st of stats)
+      out.push({
+        name: many ? 'mean |ΔW| / h, each path' : 'mean |ΔW| / h',
+        type: 'line',
+        x: KS,
+        y: st.map((s) => s.quot),
+        slot: 0,
+        thin: many,
+      })
+    for (const st of stats)
+      out.push({
+        name: many ? 'Σ (ΔW)², each path' : 'Σ (ΔW)²',
+        type: 'line',
+        x: KS,
+        y: st.map((s) => s.qv),
+        slot: 1,
+        thin: many,
+      })
+    if (many)
+      out.push(
+        { name: 'mean |ΔW| / h, average', type: 'line', x: KS, y: avg.map((s) => s.quot), slot: 0 },
+        { name: 'Σ (ΔW)², average', type: 'line', x: KS, y: avg.map((s) => s.qv), slot: 1 },
+      )
+    out.push(
       {
         name: '√(2 / (π h))',
         type: 'line',
@@ -50,23 +92,36 @@ export function RoughPath() {
         dashed: true,
         muted: true,
       },
-      { name: 'Σ (ΔW)²', type: 'line', x: KS, y: stats.map((s) => s.qv), slot: 1 },
       { name: 'T = 1', type: 'line', x: [1, 16], y: [1, 1], dashed: true, emphasis: true },
-    ],
-    [stats],
-  )
-  const now = stats[k.value - 1]
+    )
+    return out
+  }, [stats, avg])
+
+  const now = avg[k.value - 1]
+  const qvs = stats.map((st) => st[k.value - 1].qv)
+  const many = count.value > 1
 
   return (
     <Interactive
       title="Why ordinary calculus fails on a Brownian path"
-      caption="One Brownian path on [0, 1], sampled with step h = 2⁻ᵏ. The average slope |ΔW|/h grows like 1/√h without limit, so the path has no derivative. The sum of squared increments settles at 1, the length of the interval: over a step of length h, (ΔW)² is about h. Drag the vertical line or use the slider to change k. The y axis is logarithmic."
-      controls={<ParamSlider label="k (step h = 2⁻ᵏ)" param={k} withArrows />}
+      caption="Brownian paths on [0, 1], each sampled with step h = 2⁻ᵏ; the paths slider sets how many. With several paths each one is a light line and the solid lines average them. The average slope |ΔW|/h grows like 1/√h without limit on every path, so no path has a derivative. The sum of squared increments settles at 1, the length of the interval, and the paths bunch ever closer around it as h shrinks: over a step of length h, (ΔW)² is about h. Drag the vertical line or use the slider to change k. The y axis is logarithmic."
+      controls={
+        <>
+          <ParamSlider label="k (step h = 2⁻ᵏ)" param={k} withArrows />
+          <ParamSlider label="paths" param={count} withArrows format={(v) => String(v)} />
+        </>
+      }
       readout={
         <>
           <Readout label="h" value={formatNumber(2 ** -k.value)} />
-          <Readout label="mean |ΔW| / h" value={formatNumber(now.quot)} />
-          <Readout label="Σ (ΔW)²" value={formatNumber(now.qv)} />
+          <Readout label={many ? 'mean |ΔW| / h (average)' : 'mean |ΔW| / h'} value={formatNumber(now.quot)} />
+          <Readout label={many ? 'Σ (ΔW)² (average)' : 'Σ (ΔW)²'} value={formatNumber(now.qv)} />
+          {many && (
+            <Readout
+              label="Σ (ΔW)² range over paths"
+              value={`${formatNumber(Math.min(...qvs))} – ${formatNumber(Math.max(...qvs))}`}
+            />
+          )}
         </>
       }
     >
@@ -77,7 +132,7 @@ export function RoughPath() {
         yLog
         series={series}
         xRange={[1, 16]}
-        yRange={[0.5, 300]}
+        yRange={[0.02, 300]}
         handles={[{ kind: 'x', at: k.value, label: 'k', onDrag: (x) => k.set(x) }]}
       />
     </Interactive>

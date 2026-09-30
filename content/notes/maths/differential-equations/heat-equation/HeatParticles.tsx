@@ -27,7 +27,6 @@ const HI = 5
 const XS = linspace(LO, HI, 201)
 const T_GRID = linspace(0, (FRAMES - 1) * FRAME * DT, FRAMES)
 const X_GRID = linspace(LO, HI, 81)
-const TRACKED = 6
 
 /** Which bump each particle starts in, its offset within the bump, and its random-walk displacement at every frame. */
 const WALK = (() => {
@@ -53,6 +52,7 @@ export function HeatParticles() {
   const frame = useParam(10, { min: 0, max: FRAMES - 1, step: 1 })
   const c1 = useParam(-1.5, { min: -3.5, max: 3.5, step: 0.05 })
   const c2 = useParam(1, { min: -3.5, max: 3.5, step: 0.05 })
+  const tracked = useParam(6, { min: 1, max: 50, step: 1 })
   const c = useMemo<[number, number]>(() => [c1.value, c2.value], [c1.value, c2.value])
   const t = T_GRID[frame.value]
 
@@ -80,20 +80,21 @@ export function HeatParticles() {
   }, [positions, c, t])
 
   const field = useMemo(() => T_GRID.map((tt) => X_GRID.map((x) => density(x, tt, c))), [c])
-  const paths = useMemo<HeatmapOverlay[]>(
-    () =>
-      Array.from({ length: TRACKED }, (_, k) => {
-        const i = k * 97
-        return {
-          name: 'random walkers',
-          type: 'line' as const,
-          x: T_GRID.map((_, f) => start[i] + WALK.disp[f][i]),
-          y: T_GRID,
-          slot: 1,
-        }
-      }),
-    [start],
-  )
+  const paths = useMemo<HeatmapOverlay[]>(() => {
+    const many = tracked.value > 1
+    return Array.from({ length: tracked.value }, (_, k) => {
+      // 97 is coprime to N, so walkers are distinct, and adding walkers keeps the ones already drawn.
+      const i = (k * 97) % N
+      return {
+        name: many ? 'random walkers' : 'random walker',
+        type: 'line' as const,
+        x: T_GRID.map((_, f) => start[i] + WALK.disp[f][i]),
+        y: T_GRID,
+        slot: 1,
+        thin: many,
+      }
+    })
+  }, [start, tracked.value])
   const handles = useMemo<Handle[]>(
     () => [
       { kind: 'x', at: c1.value, onDrag: c1.set },
@@ -107,10 +108,11 @@ export function HeatParticles() {
   return (
     <Interactive
       title="Random walkers and the heat equation"
-      caption="2000 particles start in two bumps and take steps of ±0.1 every 0.01 time units. Left: their histogram at time t against the heat-equation solution with D = ½, the two bumps each widened to variance 0.25² + t. Right: the solution u(x, t) over time as a heat map, with six walkers' paths. Drag the two vertical lines to move the starting bumps; step the time to watch both spread."
+      caption="2000 particles start in two bumps and take steps of ±0.1 every 0.01 time units. Left: their histogram at time t against the heat-equation solution with D = ½, the two bumps each widened to variance 0.25² + t. Right: the solution u(x, t) over time as a heat map, with the paths of some walkers as light lines; the paths slider sets how many. Drag the two vertical lines to move the starting bumps; step the time to watch both spread."
       controls={
         <>
           <ParamSlider label="time t" param={frame} format={(f) => formatNumber(T_GRID[f])} withArrows />
+          <ParamSlider label="paths" param={tracked} withArrows format={(v) => String(v)} />
           <ParamSlider label="bump 1 centre" param={c1} />
           <ParamSlider label="bump 2 centre" param={c2} />
         </>

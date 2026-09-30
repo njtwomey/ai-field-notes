@@ -1,0 +1,314 @@
+---
+title: Recommendation loss families
+kind: overview
+summary: 'Recommenders learn a scoring function whose order serves users. Pointwise losses fit each label, pairwise losses order pairs, listwise losses score whole lists, and retrieval, sequential and generative models train a softmax over the catalogue or its tokens.'
+tags: [recommender-systems, loss-functions, learning-to-rank, ranking, retrieval, worked-example]
+aliases: [loss functions for recommendation, recommendation losses, recommender training objectives, pointwise pairwise listwise, learning-to-rank loss families, training objectives for ranking]
+requires: [normalised-discounted-cumulative-gain, logistic-regression, softmax-and-log-sum-exp]
+related: [ranking-losses, recommender-systems, multi-stage-recommendation, explicit-and-implicit-feedback, surrogate-losses]
+references: [liu2009ltr, joachims2002clickthrough, burges2005, burges2006, burges2010, cao2007, xia2008, koren2009mf, hu2008implicit, rendle2009bpr, covington2016youtube, yi2019sampling, oord2018, hidasi2016gru4rec, kang2018sasrec, sun2019bert4rec, klenitskiy2023, rajput2023tiger, bruch2019softmax, wang2018lambdaloss, robertson1977prp]
+status: draft
+updated: 2026-09-30
+---
+
+import { RankingLossLab } from '../_shared/RankingLossLab'
+
+<Definition>
+A recommender or ranker learns a **scoring function** $s = f(u, i)$ for a user or query $u$ and an item $i$, and shows
+items in decreasing order of score. Its **training loss** is a differentiable function of the scores that stands in for
+what the product needs: good items near the top of each user's list. Loss families differ in the unit they score. A
+**pointwise** loss scores one item, a **pairwise** loss a pair of items, a **listwise** loss a whole list, and
+**retrieval**, **sequential** and **generative** losses a softmax over the catalogue or over item tokens
+<Cite id="liu2009ltr" />.
+</Definition>
+
+## The problem: an order, learnt from feedback
+
+The quality of a recommendation list is measured by ranking metrics such as <Gloss name="ndcg" />, recall at $k$ and
+<Gloss name="mrr" />. Each depends on the scores only through the sort order. With binary relevance $y_i$ and rank
+$\rho_i$ (1 for the top), $\operatorname{DCG} = \sum_i y_i / \log_2(1 + \rho_i)$. A change in the scores small enough
+not to swap two items leaves every $\rho_i$ unchanged, so the metric is piecewise constant in the scores. Its
+<NoteLink to="gradient">gradient</NoteLink> is zero almost everywhere and undefined at ties. Gradient training therefore
+needs a **surrogate**: a smooth loss whose minimisation tends to improve the metric.
+
+The surrogate is constrained by what the training data record. Each kind of signal suits some losses and not others.
+
+| signal | example | what it says | natural loss |
+| --- | --- | --- | --- |
+| explicit ratings | 1 to 5 stars | a graded label on items the user chose to rate | squared error, or pairwise on rating differences |
+| impressions with clicks | a logged feed with click flags | binary labels on shown items; position-biased | <Gloss name="bce">binary cross-entropy</Gloss>, or listwise per impression list |
+| purchases, conversions | orders after a click | rare binary labels, observed only after a click | multi-task cross-entropy |
+| interactions only | plays, views, saves | positives; everything else is unlabelled | pairwise with sampled negatives, <NoteLink to="two-tower-model">sampled softmax</NoteLink> |
+| sequences | a session of item views | the next item given the past | next-item softmax over the catalogue |
+
+Implicit data have no labelled negatives. An item the user did not interact with may be one they never saw (see
+<NoteLink to="explicit-and-implicit-feedback">explicit and implicit feedback</NoteLink>). Every loss for implicit data
+must decide which non-interacted items to treat as negatives and how much to trust them.
+
+## Components
+
+- <NoteLink to="pointwise-recommendation-losses">Pointwise recommendation losses</NoteLink>: squared error on ratings,
+  binary cross-entropy on clicks, confidence weights, negative subsampling and its recalibration.
+- <NoteLink to="pairwise-ranking-losses">Pairwise ranking losses</NoteLink>: hinge (<Gloss name="ranksvm" />), logistic
+  (<Gloss name="ranknet" />, <Gloss name="bpr" />) and rank-weighted pairwise losses.
+- <NoteLink to="lambda-gradients">Lambda gradients</NoteLink>: LambdaRank and <Gloss name="lambdamart" />, which specify
+  metric-weighted gradients instead of a loss.
+- <NoteLink to="listwise-ranking-losses">Listwise ranking losses</NoteLink>: softmax cross-entropy,
+  <Gloss name="listnet" />, <Gloss name="listmle" /> and their relatives.
+- <NoteLink to="ranking-surrogates-and-metrics">Ranking surrogates and metrics</NoteLink>: which surrogate bounds or is
+  consistent for which metric.
+- <NoteLink to="sampled-softmax-and-negative-sampling">Sampled softmax and negative sampling</NoteLink>: training a
+  catalogue-sized softmax from a few sampled items, with the <Gloss name="logq-correction">logQ correction</Gloss>. It
+  is filed under losses, because language models train their vocabulary softmax the same way.
+- <NoteLink to="contrastive-losses-for-retrieval">Contrastive losses for retrieval</NoteLink>: <Gloss name="infonce" />
+  with in-batch negatives for two-tower models.
+- <NoteLink to="sequential-recommendation-losses">Sequential recommendation losses</NoteLink>: next-item objectives,
+  per-position losses and their negatives.
+- <NoteLink to="generative-recommendation-losses">Generative recommendation losses</NoteLink>: token-level
+  cross-entropy over semantic item identifiers.
+
+## Where each family puts the gradient
+
+Consider one list of $n$ items with scores $s_1, \dots, s_n$ and labels $y_1, \dots, y_n$. The families differ in how
+the gradient $\partial L/\partial s_i$ on item $i$ depends on the rest of the list.
+
+**Pointwise.** Binary cross-entropy $L = \sum_i \brack{\ln(1 + e^{s_i}) - y_i s_i}$ has gradient
+$\partial L/\partial s_i = \sigma(s_i) - y_i$, with $\sigma$ the logistic function. It depends on item $i$ alone. An
+irrelevant item already at the bottom of the list is pushed down as hard as one at the top.
+
+**Pairwise.** The logistic pair loss $L = \sum_{(i, j): y_i > y_j} \ln\paren{1 + e^{-(s_i - s_j)}}$ has gradient
+
+$$
+\frac{\partial L}{\partial s_i} = -\sum_{j:\, y_j < y_i}\sigma(s_j - s_i) + \sum_{j:\, y_j > y_i}\sigma(s_i - s_j).
+$$
+
+Item $i$ is pushed up by each item it should beat, most strongly by those that outscore it, and down by each item that
+should beat it. The gradient depends only on score differences, so adding a constant to every score changes nothing.
+
+**Listwise softmax.** With $p_i = e^{s_i} / \sum_k e^{s_k}$ and targets $t_i = y_i / \sum_k y_k$, the loss
+$L = -\sum_i t_i \ln p_i = -\sum_i t_i s_i + \ln\sum_k e^{s_k}$ has gradient
+
+$$
+\frac{\partial L}{\partial s_i} = p_i - t_i,
+$$
+
+because the <NoteLink to="derivative">derivative</NoteLink> of log-sum-exp is the softmax. Each irrelevant item is
+pushed down in proportion to its share $p_i$ of the probability mass. Items with high scores, the ones at the top,
+receive almost all of the push. Low-scored items receive almost none.
+
+**Lambda gradients.** LambdaRank multiplies each pairwise term by $\abs{\Delta\operatorname{NDCG}_{ij}}$, the change in
+NDCG from swapping $i$ and $j$ <Cite id="burges2006" />. Swaps near the top of the list change NDCG most, so the push
+concentrates there even when the scores are close together.
+
+### What each family bounds
+
+
+
+**Pairwise losses bound the misordered-pair count.** For any margin $x$,
+$\ln(1 + e^{-x}) \ge \ln 2 \cdot \indicator[x \le 0]$: the left side is at least $\ln 2$ when $x \le 0$ and positive
+otherwise. Summing over the $P$ pairs with $y_i > y_j$,
+
+$$
+L_{\text{pair}} \ge \ln 2 \sum_{(i, j)}\indicator[s_i \le s_j] = \ln 2 \cdot P\,(1 - \operatorname{AUC}),
+$$
+
+where AUC is the fraction of correctly ordered pairs, the per-list <Gloss name="auroc" />. Driving the pairwise loss to
+zero drives the list's AUC to 1. AUC weights a misorder at the bottom of the list as much as one at the top.
+
+**Softmax cross-entropy bounds NDCG.** Take one relevant item $i$, so $t_i = 1$. Its rank is
+$\rho_i = 1 + \#\set{j \ne i : s_j \ge s_i}$. Every term $e^{s_j - s_i}$ with $s_j \ge s_i$ is at least 1, so
+
+$$
+L_{\text{softmax}} = -\ln p_i = \ln\Big(1 + \sum_{j \ne i} e^{s_j - s_i}\Big) \ge \ln \rho_i.
+$$
+
+With one relevant item, $\operatorname{NDCG} = 1/\log_2(1 + \rho_i)$. For $\rho \ge 1$, $\log_2(1 + \rho) \le \rho$,
+with equality at $\rho = 1$. Hence
+$-\ln\operatorname{NDCG} = \ln\log_2(1 + \rho_i) \le \ln\rho_i \le L_{\text{softmax}}$, or
+
+$$
+\operatorname{NDCG} \ge e^{-L_{\text{softmax}}}.
+$$
+
+Minimising softmax cross-entropy raises a lower bound on NDCG, and through $\rho_i$ on the reciprocal rank too.
+Bruch et al. proved the corresponding bound for several relevant items <Cite id="bruch2019softmax" />.
+
+**Pointwise losses bound nothing about the order.** Binary cross-entropy is a proper scoring rule: its minimiser is
+$\sigma(s_i) = P(y_i = 1)$. When each item's relevance is independent of the other items shown, sorting by true
+relevance probabilities maximises the expected value of the usual ranking metrics <Cite id="robertson1977prp" />, so a
+perfect pointwise model gives the best ranking in expectation. An imperfect one trades errors across items and users
+with no regard for position. The pointwise family's distinct output is calibration, not order.
+
+**Lambda gradients** were defined without a loss. Wang et al. showed that LambdaRank's gradients minimise a loss that
+is a coarse upper bound on an NDCG-based cost, which explains why training with them improves NDCG
+<Cite id="wang2018lambdaloss" />.
+
+## The families side by side
+
+| family | loss on one list | gradient on item $i$ | metric it tracks | cost per list of $n$ |
+| --- | --- | --- | --- | --- |
+| pointwise | $\sum_i \ell(s_i, y_i)$ | $\sigma(s_i) - y_i$; independent of the list | log loss; calibration | $O(n)$ |
+| pairwise | $\sum_{y_i > y_j}\phi(s_i - s_j)$ | sum over pairs; bounded by the number of pairs | AUC, misordered pairs | $O(n^2)$ pairs, or sampled |
+| lambda | none; gradients $\lambda_{ij}\abs{\Delta\text{NDCG}_{ij}}$ | pairwise, weighted towards the top | NDCG | $O(n \log n + n^2)$ |
+| listwise softmax | $-\sum_i t_i \ln p_i$ | $p_i - t_i$; mass at the top | NDCG, MRR, recall | $O(n)$ |
+| ListMLE | $-\ln P_{\text{PL}}(\pi^\star)$ | softmax at every position | full order | $O(n^2)$, or $O(n \log n)$ |
+| sampled softmax | softmax over the positive and $m$ samples | $p_i - t_i$ on the sampled set | recall at $k$ over the catalogue | $O(m)$ instead of $O(M)$ |
+| contrastive (in-batch) | InfoNCE over the batch | $p_i - t_i$ over batch items | recall at $k$ | $O(B^2)$ per batch of $B$ |
+| next-item | softmax over items at each position | $p_i - t_i$ per position | recall, NDCG at $k$ | $O(TM)$ for $T$ positions |
+| generative | cross-entropy over identifier tokens | $p_c - t_c$ per token | recall at $k$ after <Gloss name="beam-search">beam search</Gloss> | $O(TLV)$ for $L$ tokens of vocabulary $V$ |
+
+Here $\phi$ is a decreasing surrogate such as the hinge or logistic function, $P_{\text{PL}}(\pi^\star)$ is the
+<NoteLink to="plackett-luce-model">Plackett–Luce</NoteLink> probability of the ideal permutation, $M$ is the catalogue
+size and $m \ll M$ the number of sampled negatives.
+
+## Gradients on one list under every loss
+
+<RankingLossLab initial="pointwise-bce" />
+
+The figure shows one list of six items. Each item's score is draggable; its marker shows its relevance label. The
+arrows are $-\partial L/\partial s$ for the chosen loss, and the lower panel shows the same push by rank position.
+
+- **Pointwise against the rest.** Start with binary cross-entropy and the "one click" labels. Every unclicked item is
+  pushed down, including the item already at the bottom. Switch to the softmax loss: the bottom items' arrows almost
+  vanish and the top-scored unclicked items take most of the push.
+- **Pairwise against lambda.** Compare the logistic pairwise loss with LambdaRank on the graded labels. Both push each
+  misordered pair apart. LambdaRank's push is largest for pairs that involve the top positions, as the "share of push
+  on the top two" readout shows.
+- **Fix the top, watch the gradient drain.** Drag the most relevant item to the top. Under the softmax and lambda
+  losses the remaining gradient shrinks, because NDCG is now close to 1. Under the pointwise losses it does not,
+  because each item still misses its own target.
+- **Shift everything.** Drag all scores up together. Pairwise and listwise gradients do not change, since they depend
+  on differences. Pointwise gradients do.
+
+## History of recommendation losses
+
+**<Gloss name="ltr">Learning to rank</Gloss> for search.** RankSVM cast ranking as classification of preference pairs,
+with a <Gloss name="hinge-loss">hinge loss</Gloss> on score differences learnt from clickthrough data
+<Cite id="joachims2002clickthrough" />. RankNet replaced the hinge with a <NoteLink to="surrogate-losses">logistic
+loss</NoteLink> on the pair probability $\sigma(s_i - s_j)$ and trained a neural network <Cite id="burges2005" />. Both
+treat every misordered pair equally, though NDCG does not. LambdaRank abandoned the loss and wrote down the gradient, a
+RankNet pair gradient scaled by the NDCG change of a swap <Cite id="burges2006" />. LambdaMART fitted those lambdas with
+gradient-boosted trees and became the standard ranker for tabular features <Cite id="burges2010" />. Listwise losses
+such as ListNet and ListMLE scored the whole list through a probability model of permutations <Cite id="cao2007" />
+<Cite id="xia2008" />.
+
+**Recommendation from feedback.** The <NoteLink to="netflix-prize">Netflix Prize</NoteLink> made rating prediction with
+squared error the reference task <Cite id="koren2009mf" />. Most products have clicks and plays, not ratings.
+<Gloss name="wmf">Weighted matrix factorisation</Gloss> fitted all user–item cells with confidence weights, treating
+absences as weak zeros <Cite id="hu2008implicit" />. BPR recast implicit feedback as pairwise ranking: an interacted
+item should outscore a non-interacted one, with the RankNet logistic loss on sampled triples
+<Cite id="rendle2009bpr" />.
+
+**Retrieval over the catalogue.** Deep candidate generators treat the next item as a class among millions and train a
+softmax over the catalogue, approximated by sampling <Cite id="covington2016youtube" />. Two-tower models train it
+with in-batch negatives, which are sampled in proportion to popularity; the logQ correction subtracts the log sampling
+probability from each logit to remove that bias <Cite id="yi2019sampling" />. The same loss is InfoNCE in
+contrastive learning <Cite id="oord2018" />.
+
+**Sequences and generation.** Session models predict the next item from the items before it, at every position of the
+sequence <Cite id="hidasi2016gru4rec" /> <Cite id="kang2018sasrec" />. <Gloss name="sasrec" /> was first trained with
+binary cross-entropy on one sampled negative per position, <Gloss name="bert4rec" /> with a full softmax on masked
+positions <Cite id="sun2019bert4rec" />. Retrained with the full softmax, SASRec matches or beats BERT4Rec, so much of
+the gap had been the loss, not the architecture <Cite id="klenitskiy2023" />. Generative recommenders go one step
+further and replace the item softmax by a token softmax. <Gloss name="tiger" /> encodes each item as a short tuple of
+discrete codes, a <Gloss name="semantic-identifier">semantic identifier</Gloss>, and trains a
+<Gloss name="seq2seq">sequence-to-sequence model</Gloss> with token-level cross-entropy to generate the next item's
+codes <Cite id="rajput2023tiger" />.
+
+The arc runs from fitting labels, to ordering pairs, to normalising over the list, and then to normalising over the
+whole catalogue. Each step moves the loss closer to the question the product asks: which few items belong at the top.
+
+## Retrieval, sequential and generative losses in one form
+
+The last three families are listwise softmax losses whose "list" is the catalogue. For a context $u$ with true next
+item $i$,
+
+$$
+L = -\ln\frac{e^{s_{ui}}}{\sum_{j=1}^{M} e^{s_{uj}}}.
+$$
+
+They differ in how they make the denominator affordable.
+
+- **Sampled softmax** keeps the positive and $m$ items drawn from a proposal $Q$, and subtracts $\ln Q(j)$ from each
+  sampled logit so that the sampled loss approximates the full softmax without the proposal's bias (see
+  <NoteLink to="sampled-softmax-and-negative-sampling">sampled softmax and negative sampling</NoteLink>).
+- **In-batch contrastive losses** use the other positives in the batch as negatives, which costs no extra item-tower
+  passes (see <NoteLink to="contrastive-losses-for-retrieval">contrastive losses for retrieval</NoteLink>).
+- **Next-item losses** apply the softmax at every position of a sequence, so one sequence of length $T$ gives $T$
+  training examples (see <NoteLink to="sequential-recommendation-losses">sequential recommendation losses</NoteLink>).
+- **Generative losses** factorise the item into $L$ tokens $c_1, \dots, c_L$ and use the chain rule,
+  $-\ln P(i \mid u) = -\sum_{l=1}^{L}\ln P(c_l \mid c_{<l}, u)$. Each factor is a softmax over a codebook of $V$
+  codes, so the cost is $LV$ per example instead of $M$ (see
+  <NoteLink to="generative-recommendation-losses">generative recommendation losses</NoteLink>).
+
+## Choosing a loss
+
+- **The output feeds an auction, a bid or a blend of several predicted events.** Use a pointwise cross-entropy per
+  event. Correct for any negative subsampling. Order is recovered by sorting calibrated probabilities.
+- **A ranker reorders a few hundred candidates with graded or click labels per list.** Use a listwise softmax loss or
+  lambda gradients (LambdaMART for tabular features). Add a pointwise term if a calibrated score is also needed.
+- **Implicit feedback with a moderate catalogue and a factorisation model.** BPR or confidence-weighted matrix
+  factorisation. BPR optimises per-user AUC, which weights all positions equally; rank-weighted pairwise losses such as
+  <Gloss name="warp" /> move the weight to the top (see <NoteLink to="pairwise-ranking-losses">pairwise ranking
+  losses</NoteLink>).
+- **Retrieval from millions of items with a two-tower model.** Sampled softmax or in-batch InfoNCE, with the logQ
+  correction whenever negatives are not uniform.
+- **<NoteLink to="sequential-recommendation-models">Next-item prediction</NoteLink> from sequences.** Full softmax
+  cross-entropy over the catalogue if it fits in memory; otherwise sampled softmax with many negatives. Binary
+  cross-entropy with one negative per position is cheaper and weaker.
+- **Catalogues with many new items, or one model for <NoteLink to="multi-stage-recommendation">retrieval and
+  ranking</NoteLink>.** Generative losses over semantic identifiers, which share codes between similar items.
+
+The loss also sets what the offline metric can detect. A calibration change moves log loss but not NDCG. A ranking
+change near the top moves NDCG but may barely move log loss.
+
+## Worked example
+
+A list of six items has scores $s = (0.4, 1.3, -0.3, 0.8, -1.0, 0.1)$. Only item 3 was clicked. Sorted by score the
+order is 2, 4, 1, 6, 3, 5, so the clicked item is at rank $\rho_3 = 5$ and
+$\operatorname{NDCG} = 1/\log_2 6 = 0.387$. This is the "one click" list of the figure.
+
+| item | score | rank | pointwise BCE | pairwise logistic | softmax | LambdaRank |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 0.4 | 3 | 0.599 | 0.668 | 0.155 | 0.076 |
+| 2 | 1.3 | 1 | 0.786 | 0.832 | 0.382 | 0.510 |
+| 3 (clicked) | −0.3 | 5 | −0.574 | −3.181 | −0.923 | −0.805 |
+| 4 | 0.8 | 2 | 0.690 | 0.750 | 0.232 | 0.183 |
+| 5 | −1.0 | 6 | 0.269 | 0.332 | 0.038 | 0.010 |
+| 6 | 0.1 | 4 | 0.525 | 0.599 | 0.115 | 0.026 |
+
+Each entry is $\partial L/\partial s_i$; a positive value means a gradient step lowers the score. The LambdaRank column
+uses the unnormalised NDCG swap change, which equals $\abs{\Delta\operatorname{NDCG}}$ here because the ideal
+<Gloss name="dcg" /> is 1.
+
+Item 5 sits below the clicked item and is correctly ordered. Binary cross-entropy still pushes it down by 0.269, half as
+hard as it pushes the clicked item up. The softmax pushes it by 0.038 and LambdaRank by 0.010. Item 2, at the top,
+gets the largest downward push under every loss, but by different margins: 2.9 times the push on item 5 under binary
+cross-entropy, 2.5 times under the pairwise loss, 10 times under the softmax and 51 times under LambdaRank.
+
+The bounds hold. The softmax loss is $-\ln p_3 = -\ln 0.077 = 2.562$. It exceeds $\ln\rho_3 = \ln 5 = 1.609$, which
+exceeds $-\ln\operatorname{NDCG} = 0.950$, so $\operatorname{NDCG} = 0.387 \ge e^{-2.562} = 0.077$. The pairwise
+logistic loss is 5.591. Four of the five pairs are misordered, and $4\ln 2 = 2.773 \le 5.591$.
+
+## Assumptions
+
+- **Labels within a list are comparable.** Pairwise and listwise losses compare items shown in the same context. They
+  need consistent labels within a list, not across lists.
+- **Unobserved means negative, to some degree.** Every loss for implicit feedback treats some non-interacted items as
+  negatives. Their weight or sampling distribution is a modelling choice, and a biased choice biases the model.
+- **Logged feedback reflects the old system.** Clicks depend on position and on what was shown. Without correction, any
+  of these losses learns to reproduce the logging policy (see
+  <NoteLink to="unbiased-learning-to-rank">unbiased learning to rank</NoteLink>).
+
+## Pitfalls
+
+- **Comparing architectures under different losses.** A change of loss can move a model more than a change of
+  architecture, as the SASRec and BERT4Rec comparison showed <Cite id="klenitskiy2023" />. Hold the loss and the
+  negatives fixed when comparing models.
+- **Sampled scores read as probabilities.** Losses with sampled negatives learn scores shifted by the log sampling
+  rate. They rank, but they are not calibrated probabilities until corrected.
+- **Pair counts.** A list of $n$ items has up to $n(n - 1)/2$ pairs, so long lists dominate an unnormalised pairwise
+  loss. Normalise per list or sample pairs.
+- **Evaluating on sampled negatives.** Metrics computed against a few sampled negatives can reverse the order of models
+  compared with metrics over the full catalogue (see
+  <NoteLink to="recommendation-metrics">recommendation metrics</NoteLink>).

@@ -16,17 +16,19 @@ import { GpOrdinal } from './GpOrdinal'
 import { GpOrdinalMap } from './GpOrdinalMap'
 
 <Definition>
-Gaussian-process <NoteLink to="ordinal-regression">ordinal regression</NoteLink> places a zero-mean Gaussian-process prior with kernel $k(\xvec, \xvec')$ on a
-latent function $f$, and relates it to an ordinal label $y \in \set{1, \dots, K}$ through thresholds
-$b_1 < \dots < b_{K-1}$ and Gaussian noise of <NoteLink to="variance-and-covariance">standard deviation</NoteLink> $\sigma$:
+Gaussian-process <NoteLink to="ordinal-regression">ordinal regression</NoteLink> places a zero-mean Gaussian-process
+prior with kernel $k(\xvec, \xvec')$ on a latent function $f$, and relates it to an ordinal label
+$y \in \set{1, \dots, K}$ through thresholds $b_1 < \dots < b_{K-1}$ and Gaussian noise of
+<NoteLink to="variance-and-covariance">standard deviation</NoteLink> $\sigma$:
 
 $$
 P(y = k \mid f(\xvec)) = \Phi\LP\frac{b_k - f(\xvec)}{\sigma}\RP - \Phi\LP\frac{b_{k-1} - f(\xvec)}{\sigma}\RP,
 $$
 
-with $b_0 = -\infty$ and $b_K = +\infty$. The posterior over $f$ is not Gaussian; Chu and Ghahramani approximate it
-with the Laplace approximation or expectation propagation, and choose the thresholds, the noise and the kernel's
-parameters by maximising the approximate <NoteLink to="law-of-total-probability">marginal likelihood</NoteLink> <Cite id="chu2005gp" />.
+with $b_0 = -\infty$ and $b_K = +\infty$. The posterior over $f$ is not Gaussian; Chu and Ghahramani approximate it with
+the Laplace approximation or expectation propagation, and choose the thresholds, the noise and the kernel's parameters
+by maximising the approximate <NoteLink to="law-of-total-probability">marginal likelihood</NoteLink>
+<Cite id="chu2005gp" />.
 </Definition>
 
 ## Intuition
@@ -52,17 +54,18 @@ where $z_1 = (b_k - f)/\sigma$ and $z_2 = (b_{k-1} - f)/\sigma$. With $K = 2$ th
 <NoteLink to="gaussian-process-classification" />. With a linear kernel $k(\xvec, \xvec') = \xvec^\top\xvec'$, it is a
 Bayesian ordered probit.
 
-**<NoteLink to="derivative">Derivatives</NoteLink> in $f$.** Write $p = \Phi(z_1) - \Phi(z_2)$ and $\phi$ for the standard normal density. Since
-$\partial z_j/\partial f = -1/\sigma$ and $\phi'(z) = -z\phi(z)$,
+**<NoteLink to="derivative">Derivatives</NoteLink> in $f$.** Write $p = \Phi(z_1) - \Phi(z_2)$ and $\phi$ for the
+standard normal density. Since $\partial z_j/\partial f = -1/\sigma$ and $\phi'(z) = -z\phi(z)$,
 
 $$
 \frac{\partial \log p}{\partial f} = -\frac{\phi(z_1) - \phi(z_2)}{\sigma p}, \qquad
 -\frac{\partial^2 \log p}{\partial f^2} = \frac{1}{\sigma^2}\LB\LP\frac{\phi(z_1) - \phi(z_2)}{p}\RP^2 + \frac{z_1\phi(z_1) - z_2\phi(z_2)}{p}\RB.
 $$
 
-The second quantity is positive for every $f$: the Gaussian cdf difference is log-concave in $f$, so the <NoteLink to="cross-entropy-and-perplexity">negative
-log-likelihood</NoteLink> is convex and the posterior has a single mode. An implementation computes $\log p$ in the tail that
-both ends share, because $\Phi(z_1) - \Phi(z_2)$ underflows for $f$ far outside its interval when $\sigma$ is small.
+The second quantity is positive for every $f$: the Gaussian cdf difference is log-concave in $f$, so the
+<NoteLink to="cross-entropy-and-perplexity">negative log-likelihood</NoteLink> is convex and the posterior has a single
+mode. An implementation computes $\log p$ in the tail that both ends share, because $\Phi(z_1) - \Phi(z_2)$ underflows
+for $f$ far outside its interval when $\sigma$ is small.
 
 ## Laplace approximation
 
@@ -73,17 +76,18 @@ $$
 \Psi(\fvec) = \sum_{i=1}^N \log p(y_i \mid f_i) - \tfrac12 \fvec^\top\Kmat^{-1}\fvec.
 $$
 
-**Mode.** Its <NoteLink to="gradient">gradient</NoteLink> is $\nabla\log p(\yvec \mid \fvec) - \Kmat^{-1}\fvec$ and its <NoteLink to="hessian">Hessian</NoteLink> is $-\Wmat - \Kmat^{-1}$,
-where $\Wmat$ is the diagonal matrix of the second derivatives above. <NoteLink to="newtons-method">Newton's method</NoteLink> gives the update
+**Mode.** Its <NoteLink to="gradient">gradient</NoteLink> is $\nabla\log p(\yvec \mid \fvec) - \Kmat^{-1}\fvec$ and its
+<NoteLink to="hessian">Hessian</NoteLink> is $-\Wmat - \Kmat^{-1}$, where $\Wmat$ is the diagonal matrix of the second
+derivatives above. <NoteLink to="newtons-method">Newton's method</NoteLink> gives the update
 
 $$
 \fvec \leftarrow (\Kmat^{-1} + \Wmat)^{-1}\big(\Wmat\fvec + \nabla\log p(\yvec \mid \fvec)\big),
 $$
 
-computed stably through the <NoteLink to="cholesky-decomposition">Cholesky factor</NoteLink> of $\Bmat = \eye + \Wmat^{1/2}\Kmat\Wmat^{1/2}$ <Cite id="rasmussen2006" />.
-The figure halves the Newton step whenever $\Psi$ would decrease, which matters when $\sigma$ is small and the
-likelihood is nearly a step. The Laplace approximation replaces the posterior by
-$\Gauss(\hat\fvec, (\Kmat^{-1} + \Wmat)^{-1})$ around the mode $\hat\fvec$. See
+computed stably through the <NoteLink to="cholesky-decomposition">Cholesky factor</NoteLink> of
+$\Bmat = \eye + \Wmat^{1/2}\Kmat\Wmat^{1/2}$ <Cite id="rasmussen2006" />. The figure halves the Newton step whenever
+$\Psi$ would decrease, which matters when $\sigma$ is small and the likelihood is nearly a step. The Laplace
+approximation replaces the posterior by $\Gauss(\hat\fvec, (\Kmat^{-1} + \Wmat)^{-1})$ around the mode $\hat\fvec$. See
 <NoteLink to="laplace-approximation" />.
 
 **Prediction.** At a new input $\xvec_*$ with kernel vector $\kvec_*$, the approximate latent posterior is Gaussian with
@@ -113,9 +117,10 @@ Applying this to both thresholds and subtracting gives the class probability.
 </Derivation>
 
 **Expectation propagation** replaces the local Gaussian at the mode with a moment-matched Gaussian site for each
-likelihood term. For the ordinal likelihood the moments of a Gaussian truncated to an interval are available in
-closed form. Chu and Ghahramani derive both approximations and compare them on benchmark data <Cite id="chu2005gp" />.
-Expectation propagation costs more per iteration, because every site is refined in turn. See <NoteLink to="expectation-propagation" />.
+likelihood term. For the ordinal likelihood the moments of a Gaussian truncated to an interval are available in closed
+form. Chu and Ghahramani derive both approximations and compare them on benchmark data <Cite id="chu2005gp" />.
+Expectation propagation costs more per iteration, because every site is refined in turn. See
+<NoteLink to="expectation-propagation" />.
 
 ## On two-dimensional data
 
