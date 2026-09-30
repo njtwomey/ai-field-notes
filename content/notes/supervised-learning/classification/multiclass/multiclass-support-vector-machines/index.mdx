@@ -1,0 +1,364 @@
+---
+title: Multiclass support vector machines
+kind: concept
+summary:
+  'A multiclass SVM fits all $K$ class scores $\wvec_k^\top\xvec$ in one convex problem, asking the true class to beat
+  the others by a margin. Weston–Watkins penalise each violating class, Crammer–Singer only the worst; Lee–Lin–Wahba
+  alone is Fisher-consistent with the hinge.'
+tags: [classification, multiclass, max-margin, kernels, convex-optimisation, learning-theory, worked-example]
+aliases:
+  [
+    multiclass SVM,
+    multi-class SVM,
+    all-together multiclass SVM,
+    Weston–Watkins SVM,
+    Crammer–Singer SVM,
+    Lee–Lin–Wahba SVM,
+    multicategory SVM,
+    MSVM,
+    multiclass hinge loss,
+    Crammer–Singer loss,
+    Weston–Watkins loss,
+    Fisher consistency of multiclass losses,
+  ]
+requires: [support-vector-machine, lagrangian-duality]
+partOf: [multiclass-classification]
+related: [structural-support-vector-machine, multinomial-logistic-regression, surrogate-losses]
+references:
+  [
+    weston1999multiclass,
+    crammer2001multiclass,
+    lee2004multicategory,
+    tewari2007consistency,
+    zhang2004multicategory,
+    hsu2002comparison,
+    rifkin2004defense,
+    tsochantaridis2005,
+  ]
+status: draft
+updated: 2026-09-30
+---
+
+<Definition>
+A **multiclass support vector machine** learns one score function $f_k(\xvec) = \wvec_k^\top\xvec$ per class
+$k \in \set{1, \dots, K}$, predicts $\hat y = \argmax_k f_k(\xvec)$, and fits all $K$ weight vectors in a single convex
+problem: a penalty $\frac12 \sum_k \norm{\wvec_k}^2$ plus a **multiclass hinge loss** that is zero when the true class's
+score exceeds every other score by a margin of $1$. The **Weston–Watkins** loss adds a hinge for each class that
+violates the margin <Cite id="weston1999multiclass" />, the **Crammer–Singer** loss charges only the largest violation
+<Cite id="crammer2001multiclass" />, and the **Lee–Lin–Wahba** loss penalises the wrong classes' scores under a
+sum-to-zero constraint <Cite id="lee2004multicategory" />.
+</Definition>
+
+## Intuition
+
+The binary <NoteLink to="support-vector-machine">support vector machine</NoteLink> asks the score $y f(\xvec)$ of each
+training point to be at least $1$. With $K$ classes there is no single sign to get right. The natural replacement for
+$y f(\xvec)$ is the gap between the score of the true class $y$ and the score of a competing class $k$:
+
+$$
+m_k(\xvec, y) = f_y(\xvec) - f_k(\xvec), \qquad k \ne y.
+$$
+
+The point is classified correctly when all $K - 1$ gaps are positive, and with margin when all are at least $1$.
+
+A reduction such as <NoteLink to="one-versus-rest">one-versus-rest</NoteLink> or
+<NoteLink to="one-versus-one">one-versus-one</NoteLink> trains binary machines separately and combines their outputs
+afterwards. Each binary machine optimises its own margin, not the gaps between the scores used at prediction time. A
+multiclass SVM puts the gaps themselves in the objective, so training and prediction use the same quantity. Training
+solves one optimisation problem with $NK$ or $N(K-1)$ variables instead of several problems with at most $N$ variables
+each.
+
+## Details
+
+Training data are pairs $(\xvec_i, y_i)$, $i = 1, \dots, N$, with $\xvec_i \in \reals^D$ and
+$y_i \in \set{1, \dots, K}$. Write $\Wmat$ for the $K \times D$ matrix with rows $\wvec_k^\top$,
+$f_{ik} = \wvec_k^\top\xvec_i$, and $[z]_+ =
+\max(0, z)$. A constant feature in $\xvec$ plays the role of the intercepts.
+
+### Weston–Watkins
+
+Weston and Watkins give each training point one slack variable per competing class <Cite id="weston1999multiclass" />:
+
+$$
+\min_{\Wmat, \xivec}\ \frac12 \sum_{k=1}^K \norm{\wvec_k}^2 + C \sum_{i=1}^N \sum_{k \ne y_i} \xi_{ik}
+\quad \text{subject to} \quad f_{i y_i} - f_{ik} \ge 1 - \xi_{ik},\ \ \xi_{ik} \ge 0 .
+$$
+
+For fixed $\Wmat$, each $\xi_{ik}$ is minimised separately, and the smallest value satisfying both constraints is
+$\xi_{ik} = [1 - (f_{iy_i} - f_{ik})]_+$. Substituting it gives the unconstrained form with the **Weston–Watkins loss**
+
+$$
+\ell_{\text{WW}}(\fvec, y) = \sum_{k \ne y} \big[1 - (f_y - f_k)\big]_+ .
+$$
+
+Every class whose score comes within $1$ of the true class's score adds a hinge. For $K = 2$, with $f = f_1 - f_2$ and
+$y \in \set{1, 2}$ coded as $\pm 1$, the loss is $[1 - yf]_+$, the binary <Gloss name="hinge-loss">hinge loss</Gloss>.
+
+### Crammer–Singer
+
+Crammer and Singer give each point a single slack, which must cover the worst competing class
+<Cite id="crammer2001multiclass" />:
+
+$$
+\min_{\Wmat, \xivec}\ \frac12 \sum_{k=1}^K \norm{\wvec_k}^2 + C \sum_{i=1}^N \xi_i
+\quad \text{subject to} \quad f_{iy_i} - f_{ik} \ge \Delta_{ik} - \xi_i \ \ \text{for all } k,
+$$
+
+with $\Delta_{ik} = 1$ if $k \ne y_i$ and $\Delta_{ik} = 0$ if $k = y_i$. The constraint for $k = y_i$ reads
+$\xi_i \ge 0$. The smallest feasible slack is the largest violation, which gives the **Crammer–Singer loss**
+
+$$
+\ell_{\text{CS}}(\fvec, y) = \Big[1 - \big(f_y - \max_{k \ne y} f_k\big)\Big]_+ = \max_k \big(\Delta(y, k) + f_k\big) - f_y ,
+$$
+
+where $\Delta(y, k) = \indicator[k \ne y]$. The loss depends only on the gap to the strongest competitor. It is never
+larger than the Weston–Watkins loss, because the largest of the $K - 1$ hinges is at most their sum.
+
+### The Crammer–Singer dual
+
+Attach multipliers $\alpha_{ik} \ge 0$ to the
+$NK$ constraints, one for every point and class. The Lagrangian is
+
+$$
+\mathcal{L} = \frac12 \sum_k \norm{\wvec_k}^2 + C \sum_i \xi_i
+- \sum_{i, k} \alpha_{ik} \big(\wvec_{y_i}^\top\xvec_i - \wvec_k^\top\xvec_i - \Delta_{ik} + \xi_i\big).
+$$
+
+Setting the <NoteLink to="derivative">derivative</NoteLink> with respect to $\xi_i$ to zero gives
+$\sum_k \alpha_{ik} = C$ for every $i$. The weight vector $\wvec_k$ appears with coefficient $+\sum_r \alpha_{ir}$ in
+the term of every point with $y_i = k$, and with coefficient $-\alpha_{ik}$ in the term of every point, so
+
+$$
+\frac{\partial \mathcal{L}}{\partial \wvec_k} = \wvec_k - \sum_i \Big(\indicator[y_i = k] \sum_r \alpha_{ir} - \alpha_{ik}\Big)
+\xvec_i = \zeros
+\quad \Longrightarrow \quad
+\wvec_k = \sum_i \tau_{ik}\, \xvec_i, \qquad \tau_{ik} = C\, \indicator[y_i = k] - \alpha_{ik} .
+$$
+
+The new variables $\tauvec_i = (\tau_{i1}, \dots, \tau_{iK})$ inherit two constraints from $\alpha_{ik} \ge 0$ and
+$\sum_k \alpha_{ik} = C$:
+
+$$
+\tauvec_i \le C\, \evec_{y_i} \ \ \text{(elementwise)}, \qquad \ones^\top\tauvec_i = 0,
+$$
+
+where $\evec_{y}$ is the indicator vector of class $y$. The linear term becomes
+$\sum_{i,k} \alpha_{ik}\Delta_{ik} = \sum_i \sum_{k \ne y_i} \alpha_{ik} = \sum_i (C - \alpha_{iy_i}) = \sum_i
+\tau_{iy_i}$. Substituting $\wvec_k$ back, the quadratic terms combine to $-\frac12\sum_k \norm{\wvec_k}^2$, and
+$\sum_k \wvec_k^\top\wvec_k = \sum_{i,j} (\xvec_i^\top\xvec_j)\, \tauvec_i^\top\tauvec_j$. The dual is
+
+$$
+\max_{\tauvec_1, \dots, \tauvec_N}\ -\frac12 \sum_{i,j} \kappa(\xvec_i, \xvec_j)\, \tauvec_i^\top\tauvec_j
++ \sum_i \tau_{iy_i}
+\quad \text{subject to} \quad \tauvec_i \le C\evec_{y_i},\ \ \ones^\top\tauvec_i = 0,
+$$
+
+with $\kappa(\xvec_i, \xvec_j) = \xvec_i^\top\xvec_j$, or any kernel in its place, so that
+$f_k(\xvec) = \sum_i \tau_{ik}\, \kappa(\xvec_i, \xvec)$ <Cite id="crammer2001multiclass" />.
+
+The structure of this dual is what makes the problem solvable at scale:
+
+- **One block per example.** The variables form $N$ blocks $\tauvec_i \in \reals^K$. Each block has its own constraints
+  and no constraint links two blocks. The coupling is only through the quadratic term. A decomposition method can
+  therefore optimise one block at a time with the others fixed, a $K$-variable problem with one equality and $K$ upper
+  bounds, which Crammer and Singer solve exactly in $O(K \log K)$ time by sorting <Cite id="crammer2001multiclass" />.
+- **No bias.** The primal has no intercepts $b_k$. Intercepts would add $K$ equality constraints
+  $\sum_i \tau_{ik} = 0$ that couple all blocks. Leaving them out, or absorbing them into a constant feature, keeps the
+  blocks independent.
+- **Sign pattern.** For $k \ne y_i$, $\tau_{ik} = -\alpha_{ik} \le 0$, and $\tau_{iy_i} = -\sum_{k \ne y_i} \tau_{ik} \in
+  [0, C]$. Point $i$ adds $\tau_{iy_i}\xvec_i$ to its own class's weight vector and subtracts $\abs{\tau_{ik}}\xvec_i$
+  from competing classes' weight vectors.
+- **Support vectors.** Points with $\tauvec_i = \zeros$ are those with gap at least $1$ to every class. They drop out of
+  every $\wvec_k$, as in the binary machine.
+
+The Weston–Watkins dual has $N(K - 1)$ multipliers, one per point and competing class (only the pairs that violate the
+margin get non-zero multipliers), with a similar block structure. With intercepts it also carries $K$ equality
+constraints across all points.
+
+### Lee–Lin–Wahba
+
+Lee, Lin and Wahba constrain the scores to sum to zero, $\sum_k f_k(\xvec) = 0$ for every $\xvec$, and penalise only the
+wrong classes' scores <Cite id="lee2004multicategory" />. In the scaling used by Tewari and Bartlett the loss is
+
+$$
+\ell_{\text{LLW}}(\fvec, y) = \sum_{k \ne y} \big[1 + f_k\big]_+ ,
+$$
+
+so each wrong class is pushed down to $f_k \le -1$, and the constraint pushes the true class up
+<Cite id="tewari2007consistency" />. Lee, Lin and Wahba state it with margin $1/(K - 1)$ in place of $1$, which rescales
+$\fvec$ and changes nothing else. The loss never compares two scores directly.
+
+### Fisher consistency
+
+A loss is **Fisher-consistent** (classification-calibrated) if minimising its <NoteLink to="expectation">expected
+value</NoteLink> given $\xvec$, over all score vectors $\fvec \in \reals^K$, gives a score vector whose unique largest
+entry is the most probable class $\argmax_k p_k$, where $p_k = \pr(y = k \mid \xvec)$. With enough data and a rich
+enough model, minimising a consistent loss then gives the <NoteLink to="bayes-decision-rule">Bayes
+classifier</NoteLink>. For two classes every convex margin loss with a negative derivative at $0$ is consistent (see
+<NoteLink to="surrogate-losses">surrogate losses</NoteLink>). For $K \ge 3$ that is no longer enough
+<Cite id="zhang2004multicategory" /> <Cite id="tewari2007consistency" />.
+
+**The Crammer–Singer loss is inconsistent whenever no class has probability above $\tfrac12$.** The conditional risk is
+$R(\fvec) = \sum_y p_y\, \ell_{\text{CS}}(\fvec, y)$. The constant vector $\fvec = \zeros$ has loss $1$ for every class,
+so $R(\zeros) = 1$. Now take any $\fvec$, let $t$ be the class with the largest score, $s$ the class with the second
+largest, and $\delta = f_t - f_s \ge 0$. For the true class $y = t$ the loss is $[1 - \delta]_+$. For any other true
+class $y$, the strongest competitor is $t$, and $f_y \le f_s$, so the loss is $1 + f_t - f_y \ge 1 + \delta$. Hence
+
+$$
+R(\fvec) \ge p_t\,[1 - \delta]_+ + (1 - p_t)(1 + \delta).
+$$
+
+If $\delta \le 1$ the right side is $1 + \delta(1 - 2p_t)$. If $\delta > 1$ it is $(1 - p_t)(1 + \delta) > 2(1 - p_t)$.
+When $\max_k p_k < \tfrac12$, both are at least $1$, and both exceed $1$ unless $\delta = 0$. So the minimum risk is
+$1$, every minimiser has its two largest scores tied, and the argmax cannot pick out the Bayes class. The constant
+vector attains the minimum: with $\pvec = (0.4, 0.3, 0.3)$ the Bayes class is 1, and $\fvec = (0, 0, 0)$ has
+Crammer–Singer risk $1$. When some class has $p_k > \tfrac12$, the minimiser gives that class a gap of $1$ and the
+others tied below it, which is correct. Tewari and Bartlett show that no choice of smooth hinge rescues the max-of-gaps
+form <Cite id="tewari2007consistency" />.
+
+**The Weston–Watkins loss with the hinge is inconsistent**, but for a different reason: its minimiser can tie the top
+two classes when their probabilities are close. With $\pvec = (0.4, 0.35, 0.25)$ the conditional risk is minimised,
+uniquely up to adding a constant to every score, at $\fvec = (0, 0, -1)$, with risk $1.75$. Classes 1 and 2 are tied
+although class 1 is more probable. Replacing the hinge by a differentiable loss such as the squared hinge
+$[1 - m]_+^2$ makes the sum-of-gaps form consistent <Cite id="tewari2007consistency" />.
+
+**The Lee–Lin–Wahba loss is consistent with the plain hinge** <Cite id="lee2004multicategory" />
+<Cite id="tewari2007consistency" />. Its minimiser sets $f_k = -1$ for every class except the most probable, which gets
+$f = K - 1$.
+
+<Derivation title="Why the Lee–Lin–Wahba minimiser is the Bayes class">
+The conditional risk collects, for each class $k$, the probability that $k$ is wrong:
+
+$$
+R(\fvec) = \sum_y p_y \sum_{k \ne y} [1 + f_k]_+ = \sum_k (1 - p_k)\,[1 + f_k]_+ .
+$$
+
+Write $a_k = 1 + f_k$. The constraint $\sum_k f_k = 0$ becomes $\sum_k a_k = K$. Let $k^\star$ be the unique most
+probable class. Then
+
+$$
+R = \sum_k (1 - p_k)[a_k]_+ \ \ge\ (1 - p_{k^\star}) \sum_k [a_k]_+ \ \ge\ (1 - p_{k^\star}) \sum_k a_k = (1 - p_{k^\star})K.
+$$
+
+The first inequality is an equality only if $[a_k]_+ = 0$ for every $k$ with $p_k < p_{k^\star}$. The second is an
+equality only if no $a_k$ is negative. Both hold exactly when $a_k = 0$ for $k \ne k^\star$ and $a_{k^\star} = K$, that
+is $f_k = -1$ for $k \ne k^\star$ and $f_{k^\star} = K - 1$. The minimiser is unique and its largest score is the Bayes
+class. With $\pvec = (0.4, 0.3, 0.3)$ it is $\fvec = (2, -1, -1)$, with risk $0.6 \times 3 = 1.8$.
+</Derivation>
+
+Consistency is a population property over all score functions. With a restricted model, such as a linear or kernel
+machine with a finite sample, it guarantees nothing, and an inconsistent loss can still work well in practice. It does
+say which losses cannot recover the Bayes classifier however much data and capacity they are given. None of the three
+hinge losses estimates class probabilities: their minimisers are piecewise constant in $\pvec$
+<Cite id="zhang2004multicategory" />.
+
+### Relation to the structural SVM
+
+The <NoteLink to="structural-support-vector-machine">structural support vector machine</NoteLink> scores whole outputs
+with $\lambdavec^\top\Phib(\xvec, y)$ and trains with the loss <Cite id="tsochantaridis2005" />
+
+$$
+\max_{y'} \big(\Delta(y, y') + \lambdavec^\top\Phib(\xvec, y')\big) - \lambdavec^\top\Phib(\xvec, y)
+$$
+
+Take the output set to be the $K$ classes, the joint feature map to place $\xvec$ in the block of class $y$, so that
+$\lambdavec^\top\Phib(\xvec, y) = \wvec_y^\top\xvec$, and $\Delta$ to be the 0–1 loss. The structural loss is then
+exactly $\ell_{\text{CS}}$. The Crammer–Singer machine is the structural SVM with the simplest output space, and
+loss-augmented decoding is a maximum over $K$ numbers.
+
+### Relation to multinomial logistic regression
+
+<NoteLink to="multinomial-logistic-regression">Multinomial logistic regression</NoteLink> uses the softmax cross-entropy
+
+$$
+\ell_{\text{CE}}(\fvec, y) = \log \sum_k e^{f_k} - f_y .
+$$
+
+The log-sum-exp is a smooth upper bound on the maximum: $\max_k f_k \le \log \sum_k e^{f_k} \le \max_k f_k + \log K$.
+Replacing the maximum in $\max_k(\Delta(y,k) + f_k) - f_y$ by a log-sum-exp gives
+$\log \sum_k e^{\Delta(y,k) + f_k} - f_y$, a smooth Crammer–Singer loss with margin; with $\Delta = 0$ it is the softmax
+cross-entropy. The cross-entropy is differentiable and consistent, and its minimiser $f_k = \log p_k + c$ recovers the
+class probabilities. The hinge losses are exactly zero once all gaps reach $1$, so their solutions depend only on the
+support vectors; the cross-entropy is never zero and every point contributes to the fit.
+
+### Comparison with reductions
+
+Hsu and Lin compared the Weston–Watkins and Crammer–Singer machines with one-versus-rest, one-versus-one and the
+decision <Gloss name="dag" />, all with the same kernels. Accuracy was similar across methods, the all-together machines
+needed longer training, and one-versus-one and the <Gloss name="dag" /> were the most practical
+<Cite id="hsu2002comparison" />. Rifkin and Klautau found that a well-tuned one-versus-rest scheme with regularised
+binary classifiers is as accurate as the alternatives <Cite id="rifkin2004defense" />.
+
+One-versus-rest with the hinge is itself inconsistent: each binary minimiser is $\sgn(2p_k - 1)$, which is $-1$ for
+every class when none has $p_k > \tfrac12$ <Cite id="zhang2004multicategory" />. One-versus-one with the hinge is
+consistent under voting, because if every pairwise machine picks the more probable class of its pair, the most probable
+class wins all $K - 1$ of its contests and no other class can.
+
+| Method | Problems solved | Variables per problem | Scores comparable across classes | Consistent with hinge |
+| --- | --- | --- | --- | --- |
+| One-versus-rest | $K$ | $N$ | no, each binary machine is scaled separately | no |
+| One-versus-one | $K(K-1)/2$ | about $2N/K$ | no, combined by voting | yes, by voting |
+| Weston–Watkins | $1$ | $N(K-1)$ | yes | no; yes with squared hinge |
+| Crammer–Singer | $1$ | $NK$ | yes | no |
+| Lee–Lin–Wahba | $1$ | $NK$ with sum-to-zero | yes | yes |
+
+## Worked example
+
+Take $K = 3$, true class $y = 1$ and scores $\fvec = (0.3, 0.1, -0.4)$. The scores sum to zero, so the Lee–Lin–Wahba
+loss applies directly. The prediction $\argmax_k f_k = 1$ is correct. The gaps are $f_1 - f_2 = 0.2$ and
+$f_1 - f_3 = 0.7$; both are positive and both are below the margin $1$.
+
+**Weston–Watkins.** Both competitors violate the margin:
+
+$$
+\ell_{\text{WW}} = [1 - 0.2]_+ + [1 - 0.7]_+ = 0.8 + 0.3 = 1.1 .
+$$
+
+Each active hinge contributes $+1$ to its competitor's score and $-1$ to the true class's. The
+<NoteLink to="gradient">gradient</NoteLink> is $\partial \ell / \partial \fvec = (-2, 1, 1)$.
+
+**Crammer–Singer.** Only the strongest competitor, class 2, counts:
+
+$$
+\ell_{\text{CS}} = [1 - (0.3 - 0.1)]_+ = 0.8, \qquad \partial \ell / \partial \fvec = (-1, 1, 0).
+$$
+
+Class 3 receives no gradient although it is inside the margin. A subgradient step moves only the true class and the
+strongest competitor.
+
+**Lee–Lin–Wahba.** The wrong classes are both above $-1$:
+
+$$
+\ell_{\text{LLW}} = [1 + 0.1]_+ + [1 - 0.4]_+ = 1.1 + 0.6 = 1.7 .
+$$
+
+The gradient of the sum is $(0, 1, 1)$. The scores must stay on the plane $\sum_k f_k = 0$, so the usable direction is
+its projection, $(0, 1, 1) - \tfrac23(1, 1, 1) = (-\tfrac23, \tfrac13, \tfrac13)$. The true class's score rises only
+through the constraint.
+
+**Softmax cross-entropy.** With $e^{0.3} = 1.350$, $e^{0.1} = 1.105$ and $e^{-0.4} = 0.670$, the sum is $3.125$ and the
+softmax probabilities are $(0.432, 0.354, 0.214)$. The loss is $-\log 0.432 = 0.840$ and the gradient is
+$\operatorname{softmax}(\fvec) - \evec_1 = (-0.568, 0.354, 0.214)$. Every class receives a gradient in proportion to
+its probability, and the loss would stay positive at any finite scores.
+
+The four losses agree on the prediction and disagree on how to change the scores. Weston–Watkins pushes both competitors
+down equally, Crammer–Singer only the nearest, Lee–Lin–Wahba pushes both wrong scores towards $-1$, and the
+cross-entropy weights each competitor by its current probability.
+
+## Assumptions
+
+- The classes are exclusive: each input has one label. Multilabel problems need a different loss.
+- The prediction rule is the largest score, and the loss counts all confusions as equally costly. Crammer–Singer and
+  the structural form accept a general cost $\Delta(y, k)$ in place of the 0–1 loss.
+- The kernel and $C$ are shared by all classes. A reduction can tune them per binary problem.
+
+## Pitfalls
+
+- **Training cost.** The dual has $NK$ or $N(K-1)$ variables and the kernel matrix is shared. Without a decomposition
+  method that works block by block, training is much slower than $K$ binary machines <Cite id="hsu2002comparison" />.
+- **Intercepts.** Adding a bias per class to the Crammer–Singer machine couples all dual blocks. Use a constant feature
+  instead, which regularises the intercepts slightly.
+- **Scores are not probabilities.** None of the multiclass hinge losses gives calibrated probabilities. Use the softmax
+  cross-entropy, or calibrate the scores afterwards.
+- **Reading consistency results.** The inconsistency of the Crammer–Singer and Weston–Watkins hinges concerns the
+  population minimiser when no class is dominant. It does not predict poor accuracy on a given data set.

@@ -1,0 +1,420 @@
+---
+title: Error-correcting output codes
+kind: technique
+summary: 'Error-correcting output codes give each of $K$ classes a codeword of $L$ bits, train one binary classifier per bit, and predict the class whose codeword is nearest the $L$ outputs. A code with minimum distance $d$ corrects any $\lfloor (d-1)/2 \rfloor$ classifier errors.'
+tags: [classification, reductions, multiclass, information-theory, coding, worked-example]
+aliases:
+  [
+    ECOC,
+    error-correcting output coding,
+    output codes,
+    output coding,
+    Hamming decoding,
+    loss-based decoding,
+    sparse ternary codes,
+    exhaustive code,
+    random output codes,
+    Plotkin bound for output codes,
+  ]
+requires: [surrogate-losses]
+partOf: [multiclass-classification]
+related: [one-versus-one, source-coding-theorem, bias-variance-decomposition, bagging]
+references:
+  [
+    dietterich1995ecoc,
+    allwein2000reducing,
+    kong1995ecoc,
+    james1998ecoc,
+    crammer2002codes,
+    pujol2006discriminant,
+    escalera2010decoding,
+    rifkin2004defense,
+    hamming1950,
+    plotkin1960codes,
+    bose1960bch,
+    macwilliams1977codes,
+    shannon1948,
+    cover2006,
+  ]
+status: draft
+updated: 2026-09-30
+---
+
+import { CodeExplorer } from './CodeExplorer'
+
+<Definition>
+An **output code** for $K$ classes is a matrix $\Mmat \in \set{-1, +1}^{K \times L}$. Row $\mvec_k$ is the **codeword**
+of class $k$, and column $s$ defines a binary problem: relabel every training example of class $k$ as $M_{ks}$ and train
+a classifier $f_s$. A new input $\xvec$ gets the output word $\bvec = (\sgn f_1(\xvec), \dots, \sgn f_L(\xvec))$ and the
+prediction
+
+$$
+\hat y(\xvec) = \argmin_{k} \; d_H(\mvec_k, \bvec), \qquad d_H(\mvec, \bvec) = \sum_{s=1}^{L} \indicator[m_s \ne b_s].
+$$
+
+Dietterich and Bakiri proposed choosing $\Mmat$ as an **error-correcting code**, with rows far apart in Hamming distance
+$d_H$, so that the nearest-codeword rule still returns the right class when some classifiers are wrong
+<Cite id="dietterich1995ecoc" />.
+</Definition>
+
+## Problem
+
+A binary learner such as a <Gloss name="svm" />, a <NoteLink to="logistic-regression">logistic regression</NoteLink> or
+a boosted ensemble must be turned into a $K$-class classifier. The two simplest reductions correct no classifier errors.
+<NoteLink to="one-versus-rest">One-versus-rest</NoteLink> trains $K$ classifiers, and one wrong classifier can leave two
+classes tied. <NoteLink to="one-versus-one">One-versus-one</NoteLink> trains $K(K-1)/2$ classifiers, but only $K-1$ of
+them are trained on the true class, and one error among those $K-1$ can change the vote.
+
+Output codes treat the $L$ binary classifiers as the bits of a message. A class needs only $\lceil \log_2 K \rceil$ bits
+to name it. Every further bit is redundancy, and a code designed for redundancy lets decoding correct classifier errors
+in the way a channel code corrects transmission errors.
+
+## Mechanism
+
+### Encoding, training and decoding
+
+- **Encode.** Choose $\Mmat$. Row $k$ is the codeword of class $k$; column $s$ splits the classes into a positive group
+  $\set{k : M_{ks} = +1}$ and a negative group $\set{k : M_{ks} = -1}$, a **dichotomy**.
+- **Train.** For each column, relabel all $n$ training examples by their class's entry and train a binary classifier
+  $f_s$ on them. The $L$ problems are independent and can be trained in parallel.
+- **Decode.** Evaluate the $L$ classifiers on $\xvec$ and return the class whose codeword is nearest the output word.
+  **Hamming decoding** uses the signs $b_s = \sgn f_s(\xvec)$ and $d_H$. **Loss-based decoding** uses the real-valued
+  outputs (see below).
+
+With $d_H(\mvec, \bvec) = \sum_s (1 - m_s b_s)/2$ for $\pm 1$ entries, minimising the distance maximises the correlation
+$\mvec_k^\tr \bvec$, so Hamming decoding picks the codeword that agrees with the most classifiers.
+
+### Why nearest-codeword decoding corrects errors
+
+The **minimum distance** of the code is $d = \min_{k \ne k'} d_H(\mvec_k, \mvec_{k'})$. The Hamming distance is a metric
+on words of length $L$: it counts the positions where two words differ, and a position where $\uvec$ and $\wvec$ differ
+must differ from $\vvec$ in at least one of them, so $d_H(\uvec, \wvec) \le d_H(\uvec, \vvec) + d_H(\vvec, \wvec)$.
+
+Suppose the true class is $y$ and at most $t$ of the $L$ classifiers are wrong, so $d_H(\mvec_y, \bvec) \le t$. For any
+other class $k$ the triangle inequality gives
+
+$$
+d \le d_H(\mvec_k, \mvec_y) \le d_H(\mvec_k, \bvec) + d_H(\bvec, \mvec_y)
+\quad\Longrightarrow\quad d_H(\mvec_k, \bvec) \ge d - t.
+$$
+
+Decoding returns $y$ uniquely when $d - t > t$ for every such $k$, that is when $t < d/2$. The largest integer that
+satisfies it is
+
+$$
+t = \left\lfloor \frac{d - 1}{2} \right\rfloor.
+$$
+
+A code with minimum distance $d$ therefore corrects any $\lfloor (d-1)/2 \rfloor$ classifier errors, whichever
+classifiers make them <Cite id="hamming1950" />. The bound is tight: two codewords at distance $d$ differ in $d$
+positions, and flipping $\lceil d/2 \rceil$ of those positions in one codeword gives a word at least as near the other.
+For even $d$, $d/2$ errors can produce a tie, which decoding detects but cannot resolve.
+
+### Column separation
+
+Row distance protects against errors in *different* columns. Three kinds of column add little or no protection:
+
+- **A constant column** (every entry $+1$) gives no binary problem and adds $0$ to every row distance.
+- **Two identical columns** define the same problem. A deterministic learner trained on the same data returns the same
+  classifier, so the two bits are wrong together. One classifier error then costs two bits of the $d$ the guarantee
+  counted on.
+- **Two complementary columns** ($\cvec_{s'} = -\cvec_s$, where $\cvec_s$ is column $s$) define the same dichotomy with
+  the labels swapped. A learner that treats the two labels symmetrically returns $f_{s'} = -f_s$, and the bits again
+  fail together.
+
+Dietterich and Bakiri therefore required both row separation and **column separation**: each column should be far in
+Hamming distance from every other column and from every other column's complement, so that the classifiers make
+different mistakes <Cite id="dietterich1995ecoc" />. Column separation also caps the length of a useful code. There
+are $2^K$ columns in $\set{-1,+1}^K$; removing the $2$ constant columns and identifying each column with its complement
+leaves at most $2^{K-1} - 1$ distinct dichotomies.
+
+## Designing the code
+
+### Exhaustive codes
+
+The **exhaustive code** uses every dichotomy once: $L = 2^{K-1} - 1$. Each dichotomy is an unordered split of the $K$
+classes into two non-empty groups. Two classes $k$ and $k'$ are in different groups in exactly the splits that separate
+them. The splits that keep them together are splits of $K - 1$ items (the pair merged into one), of which there are
+$2^{K-2} - 1$. The distance between any two rows is therefore
+
+$$
+d = \left(2^{K-1} - 1\right) - \left(2^{K-2} - 1\right) = 2^{K-2},
+$$
+
+the same for every pair. For $K = 4$ the code has $L = 7$ and $d = 4$ and corrects one error; for $K = 7$ it has
+$L = 63$ and $d = 32$ and corrects $15$. Dietterich and Bakiri used exhaustive codes for $3 \le K \le 7$, selected
+columns of the exhaustive code for $8 \le K \le 11$, and hill-climbed or took codewords from algebraic codes beyond
+<Cite id="dietterich1995ecoc" />.
+
+### Random codes
+
+Draw each entry independently as $\pm 1$ with probability $1/2$. The distance between two rows is then a sum of $L$
+independent Bernoulli$(1/2)$ indicators, with mean $L/2$. Short random codes can have two rows close together, and a row
+distance of $0$ makes two classes indistinguishable. A length $L$ of order $\log K$ is enough for every row distance to
+be near $L/2$ with high probability.
+
+<Derivation title="Minimum distance of a random code">
+For one pair of rows, $d_H$ is a sum of $L$ independent indicators with mean $1/2$. By
+<NoteLink to="hoeffdings-inequality">Hoeffding's inequality</NoteLink>, for $0 < \epsilon < 1/2$,
+
+$$
+\pr\left(d_H < \left(\tfrac12 - \epsilon\right)L\right) \le e^{-2\epsilon^2 L}.
+$$
+
+A union bound over the $\binom{K}{2}$ pairs gives
+
+$$
+\pr\left(d < \left(\tfrac12 - \epsilon\right)L\right) \le \binom{K}{2} e^{-2\epsilon^2 L},
+$$
+
+which is below $\delta$ once $L \ge \ln\left(\binom{K}{2}/\delta\right) / (2\epsilon^2)$. A length of order
+$(\log K)/\epsilon^2$ therefore gives minimum distance at least $(1/2 - \epsilon)L$ with high probability.
+</Derivation>
+
+Allwein, Schapire and Singer drew many random matrices, dense ($\pm 1$) with $\lceil 10 \log_2 K \rceil$ columns and
+sparse (entries $0$ with probability $1/2$) with $\lceil 15 \log_2 K \rceil$ columns, and kept the one with the largest
+minimum distance and no identical columns <Cite id="allwein2000reducing" />.
+
+Random codes also have an exact limit. Suppose each classifier $f_s$ outputs the true probability
+$\hat q_s(\xvec) = \sum_{k : M_{ks} = +1} p_k(\xvec)$ of its positive group, where $p_k(\xvec) = \pr(y = k \mid \xvec)$,
+and decode by the absolute distance $D_k = \sum_s \abs{\hat q_s - z_{ks}}$ with
+$z_{ks} = (1 + M_{ks})/2 \in \set{0, 1}$. Over a random column, the other $K - 1$ classes fall in class $k$'s group with
+probability $1/2$ each. If $z_{ks} = 1$, the term is $1 - p_k - \sum_{j \ne k} p_j z_{js}$, with expectation
+$1 - p_k - (1 - p_k)/2 = (1 - p_k)/2$. If $z_{ks} = 0$, it is $\sum_{j \ne k} p_j z_{js}$, with the same expectation. So
+$D_k / L \to (1 - p_k(\xvec))/2$ as $L \to \infty$, and the smallest distance belongs to the most probable class: the
+decoded class tends to the Bayes class <Cite id="james1998ecoc" />. The exhaustive code contains every non-constant
+column once up to complement, and a complemented column has the same term $\abs{\hat q_s - z_{ks}}$, so for the
+exhaustive code $D_k$ is exactly proportional to $1 - p_k(\xvec)$.
+
+### Algebraic codes
+
+Coding theory supplies codes with a guaranteed minimum distance for any length. A **BCH code** of length
+$L = 2^m - 1$ designed to correct $t$ errors has minimum distance at least $2t + 1$ and at least $2^{L - mt}$ codewords
+<Cite id="bose1960bch" />. For $m = 4$ and $t = 2$ that gives $L = 15$, $d \ge 5$ and $2^7 = 128$ codewords, more than
+enough for $K = 26$ classes. An output code takes $K$ of the codewords. The coding-theory guarantee covers rows only, so
+constant, repeated and complementary columns of the selection must still be removed <Cite id="dietterich1995ecoc" />.
+
+### Bounds on the minimum distance
+
+Two bounds from coding theory limit $d$ for $K$ codewords of length $L$ <Cite id="macwilliams1977codes" />.
+
+**Hamming (sphere-packing) bound.** Let $t = \lfloor (d-1)/2 \rfloor$. The balls of radius $t$ around the codewords are
+disjoint: a word within $t$ of two codewords would put them within $2t < d$ of each other. A ball of radius $t$ holds
+$\sum_{i=0}^{t} \binom{L}{i}$ words, one for each set of at most $t$ flipped positions, and all balls sit among the
+$2^L$ words of length $L$. So
+
+$$
+K \sum_{i=0}^{t} \binom{L}{i} \le 2^L.
+$$
+
+**Plotkin bound.** Sum the distances over all $\binom{K}{2}$ pairs of rows. Each pair is at distance at least $d$, so
+the sum is at least $\binom{K}{2} d$. Counted column by column, a column with $a$ entries $+1$ and $K - a$ entries $-1$
+contributes $a(K - a) \le K^2/4$ pairs that differ. So
+
+$$
+\frac{K(K-1)}{2}\, d \le \frac{L K^2}{4} \quad\Longrightarrow\quad d \le \frac{L}{2} \cdot \frac{K}{K - 1}
+$$
+
+<Cite id="plotkin1960codes" />. The Plotkin bound is the one that binds for output codes, whose $K$ is small and $L$
+comparatively large. For $K = 4$ and $L = 7$ it gives $d \le 4.67$, so $d \le 4$, and the exhaustive code attains it.
+The Hamming bound alone would allow $d = 5$, since $4\,(1 + 7 + 21) = 116 \le 128$. In general the exhaustive code has
+$d/L = 2^{K-2}/(2^{K-1} - 1)$, just above $1/2$, and no code for $K$ classes has $d/L$ above $K/(2(K-1))$, which falls
+to $1/2$ as $K$ grows.
+
+## The channel-coding view
+
+Shannon's model of communication sends a message through a noisy channel by encoding it as a longer word, and decodes
+the received word to the most likely message <Cite id="shannon1948" />. Output codes map onto it directly:
+
+| Channel coding | Output code |
+| --- | --- |
+| Message | Class $y$, one of $K$ |
+| Codeword | Row $\mvec_y$ |
+| One use of the channel | One binary classifier |
+| Bit flipped by noise | Classifier wrong on $\xvec$ |
+| Rate | $R = \log_2 K / L$ bits of class information per classifier |
+
+On a **binary symmetric channel**, each bit is flipped independently with probability $p$. Its capacity is
+$C = 1 - \entropy_2(p)$ bits per use, where $\entropy_2(p) = -p\log_2 p - (1-p)\log_2(1-p)$ is the binary entropy. For
+every rate $R < C$ there are codes whose decoding error tends to zero as $L$ grows <Cite id="cover2006" />. With
+$p = 0.1$, $C = 1 - 0.469 = 0.531$. The exhaustive code for $K = 4$ has $R = 2/7 = 0.286$, well below capacity.
+
+The analogy breaks in three places.
+
+- **Errors are correlated.** The $L$ classifiers see the same inputs, the same features and the same training set. An
+  unusual input, or a region where two classes overlap, fools many of them at once. A channel code assumes independent
+  flips, and correlated flips cluster into exactly the multi-bit errors a code cannot correct.
+- **Bits differ in difficulty.** A dichotomy that groups similar classes apart and dissimilar classes together is hard
+  to learn, so its error rate is higher than that of a natural split. The channel is not symmetric across uses, and a
+  column with error rate near $1/2$ carries almost no information. Adding columns to raise $d$ adds harder dichotomies.
+- **The supply of columns is finite.** Channel coding lets $L$ grow without limit. An output code has at most
+  $2^{K-1} - 1$ distinct columns, so the rate cannot fall below $\log_2 K / (2^{K-1} - 1)$.
+
+<CodeExplorer />
+
+## Ternary codes and loss-based decoding
+
+Allwein, Schapire and Singer allowed a third entry, $M_{ks} = 0$, meaning that column $s$ ignores class $k$: its
+examples are left out of that binary problem <Cite id="allwein2000reducing" />. A **ternary code** covers the reductions
+already in use.
+
+- **<NoteLink to="one-versus-rest">One-versus-rest</NoteLink>** is $\Mmat = 2\eye - \ones\ones^\tr$, the $K \times K$
+  matrix with $+1$ on the diagonal and $-1$ elsewhere. Any two rows differ in two columns, so $d = 2$ and $t = 0$: one
+  error can produce a tie, and no error is corrected.
+- **<NoteLink to="one-versus-one">One-versus-one</NoteLink>** has a column for each pair $i < j$, with $+1$ in row $i$,
+  $-1$ in row $j$ and $0$ elsewhere. Two rows are both non-zero only in their own pair's column, so the distance that
+  survives arbitrary outputs on unseen classes is $1$.
+
+A classifier evaluated on a class its column ignores was never trained on that class, so its output there carries no
+designed information. Hamming distance with a zero entry counts $1/2$, a coin toss: $d(\mvec_k, \bvec) = \sum_s (1 -
+M_{ks} b_s)/2$.
+
+**Loss-based decoding** uses the real outputs $f_s(\xvec)$ and the margin loss $\phi$ the binary learner minimised,
+such as the logistic or <Gloss name="hinge-loss">hinge loss</Gloss>:
+
+$$
+\hat y(\xvec) = \argmin_k \sum_{s=1}^{L} \phi\big(M_{ks} f_s(\xvec)\big).
+$$
+
+It picks the class under whose codeword the classifiers' outputs would have had the smallest training loss. A confident
+wrong output then costs more than a hesitant one, where Hamming decoding charges both one bit. Hamming decoding is the
+special case $\phi(z) = (1 - \sgn z)/2$.
+
+### The training-error bound
+
+Let $\rho = \min_{k \ne k'} \sum_s (1 - M_{ks} M_{k's})/2$ be the minimum row distance with zeros counted as $1/2$, and
+let $\bar\epsilon = \frac{1}{nL} \sum_{i=1}^{n} \sum_{s=1}^{L} \phi(M_{y_i s} f_s(\xvec_i))$ be the average binary loss
+over the $n$ training examples and $L$ columns. For a loss with $\phi \ge 0$ and $\tfrac12[\phi(z) + \phi(-z)] \ge
+\phi(0) > 0$, which every convex margin loss with $\phi(0) > 0$ satisfies, loss-based decoding has training error at
+most
+
+$$
+\frac{L\,\bar\epsilon}{\rho\,\phi(0)}
+$$
+
+<Cite id="allwein2000reducing" />. Suppose example $(\xvec, y)$ is misclassified as $k$, so
+$\sum_s \phi(M_{ks} f_s) \le \sum_s \phi(M_{ys} f_s)$. Then
+
+$$
+\sum_s \phi(M_{ys} f_s) \ge \frac12 \sum_s \big[\phi(M_{ys} f_s) + \phi(M_{ks} f_s)\big].
+$$
+
+Bound each column's bracket. Where the rows disagree, $M_{ks} f_s = -M_{ys} f_s$ and the bracket is at least $2\phi(0)$.
+Where one or both entries are zero, one term is $\phi(0)$ and the other is non-negative, so the bracket is at least
+$\phi(0)$. Where the rows agree, it is at least $0$. In every case half the bracket is at least
+$\phi(0)(1 - M_{ys}M_{ks})/2$, so a misclassified example has loss at least $\phi(0)\,\rho$. At most
+$nL\bar\epsilon / (\rho\,\phi(0))$ examples can carry that much of the total loss $nL\bar\epsilon$.
+
+A larger $\rho$ lowers the bound; more columns raise the factor $L$ unless $\rho$
+grows in proportion, and harder dichotomies raise $\bar\epsilon$. One-versus-rest has $\rho = 2$ with $L = K$;
+one-versus-one has $\rho = (L + 1)/2$ with $L = K(K-1)/2$, because each pair of rows disagrees in one column and one or
+both rows are zero in the other $L - 1$.
+
+## Why output codes help
+
+A code corrects any $\lfloor (d - 1)/2 \rfloor$ errors, whichever classifiers make them. Correlated classifiers matter
+because they tend to err together, which raises the number of errors beyond that limit. Kong and Dietterich asked why
+output codes improved the accuracy of <NoteLink to="decision-tree">decision trees</NoteLink> and neural networks, and
+answered with a <NoteLink to="bias-variance-decomposition">bias–variance</NoteLink> decomposition of the
+<NoteLink to="surrogate-losses">0–1 loss</NoteLink> <Cite id="kong1995ecoc" />:
+
+- **Variance.** Decoding combines $L$ classifiers, so it averages out their individual fluctuations in the way a
+  <NoteLink to="bagging">bagged</NoteLink> ensemble does.
+- **Bias.** Each column is a different learning problem, so a learner such as a decision tree builds a different
+  model for each. Their systematic errors fall on different inputs, so decoding can correct errors caused by the
+  learner's bias, which averaging over resampled training sets does not remove.
+- **When it fails.** A local learner such as <NoteLink to="k-nearest-neighbours">$k$-nearest neighbours</NoteLink>
+  answers every column from the same neighbours of $\xvec$. Its bits are highly correlated, so decoding corrects little.
+
+The explanation predicts that output codes help most with learners whose errors depend on the dichotomy, and least with
+learners whose errors are set by the input alone.
+
+## Data-dependent codes
+
+A fixed code ignores which classes are hard to separate. Two lines of work fit the code to the data.
+
+- **Learned codes.** Crammer and Singer showed that finding the best discrete code for a given set of binary
+  classifiers is NP-complete, and relaxed the problem to real-valued codes. The relaxation is a quadratic programme
+  whose solution also yields a multiclass <Gloss name="svm" /> with one weight vector per class
+  <Cite id="crammer2002codes" />, which is developed in
+  <NoteLink to="multiclass-support-vector-machines">multiclass support vector machines</NoteLink>.
+- **Problem-dependent ternary codes.** Discriminant output codes build a binary tree of class splits, choosing each
+  split to maximise the quadratic <NoteLink to="mutual-information">mutual information</NoteLink> between the inputs and
+  the split's labels, and use the $K - 1$ internal nodes as ternary columns <Cite id="pujol2006discriminant" />. This
+  joins output codes to <NoteLink to="nested-dichotomies-and-tree-reductions"> nested dichotomies</NoteLink>.
+
+Ternary codes also raise a decoding question: with zeros counted as $1/2$, each zero adds $1/2$ to a row's distance
+whatever the classifiers output, so rows with different numbers of zeros are not compared on equal terms. Escalera,
+Pujol and Radeva compared decoding rules on this point and proposed loss-weighted decoding, which weights each column by
+its accuracy on each class <Cite id="escalera2010decoding" />.
+
+## Worked example
+
+Take $K = 4$ and the exhaustive code, written with $1$ for $+1$ and $0$ for $-1$:
+
+| Class | $s_1$ | $s_2$ | $s_3$ | $s_4$ | $s_5$ | $s_6$ | $s_7$ |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 |
+| 2 | 0 | 0 | 0 | 0 | 1 | 1 | 1 |
+| 3 | 0 | 0 | 1 | 1 | 0 | 0 | 1 |
+| 4 | 0 | 1 | 0 | 1 | 0 | 1 | 0 |
+
+Every pair of rows differs in exactly $4$ columns, so $d = 4$ and the code corrects $t = \lfloor 3/2 \rfloor = 1$ error.
+Column $s_5$, for example, asks "class 1 or 2, against class 3 or 4".
+
+An input of class 3 should produce $0011001$. Suppose classifier $s_5$ is wrong and the output word is
+$\bvec = 0011\underline{1}01$. The distances are
+
+| Class | Codeword | Positions that differ from $\bvec$ | $d_H$ |
+| --- | --- | --- | --- |
+| 1 | $1111111$ | $s_1, s_2, s_6$ | $3$ |
+| 2 | $0000111$ | $s_3, s_4, s_6$ | $3$ |
+| 3 | $0011001$ | $s_5$ | $1$ |
+| 4 | $0101010$ | $s_2, s_3, s_5, s_6, s_7$ | $5$ |
+
+Decoding returns class 3. The distances also illustrate the proof: class 3 is at $t = 1$, and every other class is at
+$d - t = 3$ or more.
+
+Suppose classifier $s_6$ is also wrong, so $\bvec = 0011\underline{11}1$. Then $d_H = 2$ to classes 1, 2 and 3 and $4$
+to class 4. Two errors equal $d/2$, and decoding meets a three-way tie that it detects but cannot break. Under
+loss-based decoding the tie would go to the class whose disagreeing classifiers were least confident.
+
+If each classifier is wrong independently with probability $p = 0.1$, enumerating all $2^7$ error patterns gives a
+probability of $0.933$ that Hamming decoding with random tie-breaking returns the true class. One-versus-rest with the
+same error rate and the same decoding gives $0.792$.
+
+## Cost
+
+With $n$ training examples, an output code trains $L$ binary classifiers, each on all $n$ examples (or, for a ternary
+column, on the examples of its non-zero classes). The exhaustive code needs $2^{K-1} - 1$ classifiers, which is $7$ for
+$K = 4$ and $511$ for $K = 10$, so exhaustive codes stop being practical near $K = 10$. Random and algebraic codes use
+$L$ of order $\log K$ to a few tens. Prediction evaluates the $L$ classifiers and computes $K$ distances of length $L$,
+$O(KL)$ operations on top of the classifiers.
+
+| Reduction | Binary problems | Examples per problem | Evaluations to predict | Guaranteed corrections |
+| --- | --- | --- | --- | --- |
+| One-versus-rest | $K$ | $n$ | $K$ | $0$ |
+| One-versus-one | $K(K-1)/2$ | about $2n/K$ | $K(K-1)/2$ | $0$ |
+| Exhaustive code | $2^{K-1} - 1$ | $n$ | $2^{K-1} - 1$ | $2^{K-3} - 1$ for $K \ge 3$ |
+| Random dense code | $L$ | $n$ | $L$ | $\lfloor (d-1)/2 \rfloor$, $d \approx L/2$ |
+
+The exhaustive code's entry is $\lfloor (2^{K-2} - 1)/2 \rfloor = 2^{K-3} - 1$.
+
+## Trade-offs
+
+- **Error correction against harder problems.** Long codes correct more errors but include dichotomies that mix
+  dissimilar classes. For a linear learner many such dichotomies are not separable, and their error rate can erase the
+  gain.
+- **Tuned baselines.** Rifkin and Klautau found that one-versus-rest with well-tuned regularised
+  classifiers was as accurate as output codes and one-versus-one in their experiments, and argued that earlier gains
+  came partly from weak binary learners <Cite id="rifkin2004defense" />.
+- **Probabilities.** Hamming decoding returns a class, not a distribution. Loss-based decoding gives scores, and the
+  limit result for random codes connects them to class probabilities, but calibrated probabilities need a further step
+  such as those in <NoteLink to="one-versus-one">pairwise coupling</NoteLink> or
+  <NoteLink to="classifier-calibration">classifier calibration</NoteLink>.
+- **<NoteLink to="class-imbalance">Class imbalance</NoteLink>.** Each dense column pools several classes on each side,
+  so its problem is usually less imbalanced than a one-versus-rest problem.
+- **Direct methods.** <NoteLink to="multinomial-logistic-regression">Multinomial logistic regression</NoteLink> and
+  multiclass support vector machines fit one joint model and need no code. Output codes keep the binary learner
+  unchanged, which is what they were designed for: any binary learner, including one with no multiclass form, becomes a
+  multiclass learner.

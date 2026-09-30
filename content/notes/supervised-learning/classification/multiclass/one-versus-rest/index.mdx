@@ -1,0 +1,233 @@
+---
+title: One-versus-rest
+kind: technique
+summary: 'One-versus-rest trains $K$ binary classifiers, class $k$ against all others, and predicts $\argmax_k f_k(\xvec)$. The argmax is Bayes-optimal when all scores are one increasing function of the class probabilities. Each problem has imbalance ratio $K - 1$ for balanced classes.'
+tags: [classification, multiclass, reductions, calibration, class-imbalance, worked-example]
+aliases: [one-vs-rest, one-vs-all, one-against-all, one-against-rest, OvR, OvA, OAA, winner-takes-all reduction]
+requires: [logistic-regression, bayes-decision-rule]
+partOf: [multiclass-classification]
+related: [platt-scaling, class-imbalance, multinomial-logistic-regression, surrogate-losses]
+references: [rifkin2004defense, allwein2000reducing, bishop2006, zadrozny2002, zhang2004multicategory, hsu2002comparison]
+status: draft
+updated: 2026-09-30
+---
+
+import { MulticlassReductions } from '../_shared/MulticlassReductions'
+
+<Definition>
+**One-versus-rest** (OvR, also one-versus-all) reduces a classification problem with $K$ classes to $K$ binary problems.
+Problem $k$ relabels every training example as positive if its class is $k$ and negative otherwise, and a binary learner
+fits a real-valued score $f_k(\xvec)$ to it. The multiclass prediction is the class with the largest score,
+$\hat y(\xvec) = \argmax_{k} f_k(\xvec)$ <Cite id="rifkin2004defense" />. The rule makes the Bayes decision when the $K$
+scores are one common increasing function of the class probabilities.
+</Definition>
+
+## Problem
+
+A classifier maps an input $\xvec$ to one of $K$ classes, $y \in \{1, \dots, K\}$. Many learners are binary by
+construction: the <NoteLink to="support-vector-machine">support vector machine</NoteLink>, the perceptron,
+<NoteLink to="adaboost">AdaBoost</NoteLink> with its original loss. A reduction turns the $K$-class problem into binary
+problems that such a learner can solve, then combines the binary outputs into one class. One-versus-rest is the
+simplest reduction. It needs $K$ binary problems, the fewest of any reduction in which each class has its own
+classifier. The overview <NoteLink to="multiclass-classification">multiclass classification</NoteLink> compares it with
+the alternatives.
+
+## Mechanism
+
+**Training.** For $k = 1, \dots, K$, form the labels $t_i^{(k)} = +1$ if $y_i = k$ and $t_i^{(k)} = -1$ otherwise, and
+train a binary classifier with score $f_k$ on all $n$ examples $(\xvec_i, t_i^{(k)})$. The $K$ fits are independent and
+can run in parallel.
+
+**Prediction by argmax.** Predict $\hat y(\xvec) = \argmax_k f_k(\xvec)$. If the scores have a continuous distribution,
+ties have probability zero, so almost every input gets exactly one class. Scores that are constant on a region, such as
+the population hinge-loss scores below, can tie there.
+
+**Prediction by claims.** Each binary classifier also makes its own decision: classifier $k$ claims $\xvec$ when
+$f_k(\xvec) > 0$. The claims alone assign a class only where exactly one classifier claims $\xvec$. Two kinds of region
+are left over <Cite id="bishop2006" />:
+
+- **unclaimed**: no score is positive, so every classifier says "not mine";
+- **contested**: several scores are positive, so several classifiers say "mine".
+
+The argmax rule resolves both regions by comparing magnitudes. It can do so only if a score of 2 from classifier $k$
+means more than a score of 1 from classifier $j$. Nothing in the $K$ separate training problems guarantees this.
+
+### One-versus-rest as a code
+
+Write the binary decisions at $\xvec$ as a word $\bvec(\xvec) \in \{0, 1\}^K$ with $b_k = 1$ when classifier $k$ claims
+$\xvec$. In the output-code view of multiclass reduction <Cite id="allwein2000reducing" />, each class $k$ owns a
+codeword, the bits that the $K$ classifiers should output for an example of class $k$. For one-versus-rest the codeword
+of class $k$ is the unit vector $\evec_k$, so the code matrix is the $K \times K$ identity. Decoding picks the class
+whose codeword is nearest in Hamming distance, the number of positions in which two words differ.
+
+Two distinct codewords $\evec_j$ and $\evec_k$ differ in exactly positions $j$ and $k$, so the minimum distance of the
+code is $d = 2$. A code with minimum distance $d$ corrects $\lfloor (d - 1)/2 \rfloor$ bit errors, which is 0 here. The
+ambiguity regions follow from this. Suppose $m$ classifiers claim $\xvec$, so $\bvec$ has $m$ ones.
+
+- For a claiming class $k$, $\bvec$ and $\evec_k$ differ in the other $m - 1$ ones: distance $m - 1$.
+- For a non-claiming class $j$, they differ in all $m$ ones and in position $j$: distance $m + 1$.
+
+With $m = 1$, the single claimer is at distance 0 and wins. With $m = 0$, every class is at distance 1, a $K$-way tie:
+the unclaimed region. With $m \ge 2$, the $m$ claimers tie at distance $m - 1$: the contested region. Hamming decoding
+of the identity code is exactly the claims rule, ties included. One wrong bit is always detected, since it gives $m = 0$
+or $m = 2$, and never corrected. Codes with larger $d$ are the subject of
+<NoteLink to="error-correcting-output-codes">error-correcting output codes</NoteLink>.
+
+### Argmax regions are convex
+
+For linear scores $f_k(\xvec) = \wvec_k^\top\xvec + b_k$, the argmax rule assigns class $k$ where
+$f_k(\xvec) > f_j(\xvec)$ for every $j \ne k$. Each condition $(\wvec_k - \wvec_j)^\top\xvec + (b_k - b_j) > 0$ is an
+open half-space, and the region of class $k$ is the intersection of $K - 1$ half-spaces. An intersection of half-spaces
+is convex, so every class region is convex and connected <Cite id="bishop2006" />. The same holds for
+<NoteLink to="multinomial-logistic-regression">multinomial logistic regression</NoteLink>, which predicts with the
+argmax of $K$ linear scores too. The two methods share one hypothesis class. They differ in how the weights are fitted:
+$K$ separate problems for one-versus-rest, one joint likelihood for the multinomial model.
+
+## Why the scores need a common scale
+
+**The binary problems do not fix the scale.** The 0–1 risk of problem $k$ depends on $f_k$ only through its sign. Let
+$g_k$ be any strictly increasing function with $g_k(0) = 0$. Then $\sgn g_k(f_k(\xvec)) = \sgn f_k(\xvec)$ for every
+$\xvec$, so $g_k \circ f_k$ is as good as $f_k$ on problem $k$. The argmax is not invariant to these maps. Take scores
+$f_1(\xvec) = 1$ and $f_2(\xvec) = 2$, and $g_1(t) = 3t$, $g_2(t) = t$. The argmax moves from class 2 to class 1, while
+neither binary classifier changed a single decision. Each score's scale comes from incidental details of its own
+problem: the regularisation strength, how separable the class is from the rest, the number of training iterations.
+
+**A common increasing map suffices.** Let $\eta_k(\xvec) = P(y = k \mid \xvec)$ be the class posteriors. The
+<NoteLink to="bayes-decision-rule">Bayes decision rule</NoteLink> for the <NoteLink to="surrogate-losses">0–1
+loss</NoteLink> predicts $\argmax_k \eta_k(\xvec)$. Suppose every score is the same strictly increasing function $h$ of
+its own class's posterior, $f_k(\xvec) = h(\eta_k(\xvec))$. Then $f_j > f_k$ exactly when $\eta_j > \eta_k$, so
+$\argmax_k f_k = \argmax_k \eta_k$ and one-versus-rest makes the Bayes decision.
+
+**Proper losses deliver the common map.** In problem $k$ the positive-class posterior is $P(t^{(k)} = +1 \mid \xvec) =
+\eta_k(\xvec)$. The expected logistic loss at $\xvec$ of a score $f$ is
+
+$$
+\eta_k \log(1 + e^{-f}) + (1 - \eta_k)\log(1 + e^{f}).
+$$
+
+Its <NoteLink to="derivative">derivative</NoteLink> in $f$ is
+$-\eta_k\,\sigma(-f) + (1 - \eta_k)\,\sigma(f) = \sigma(f) - \eta_k$, where $\sigma$ is the logistic function. The
+derivative is zero at $\sigma(f) = \eta_k$, so the population minimiser is
+$f_k^*(\xvec) = \operatorname{logit}\eta_k(\xvec)$. Every class gets the same map $h = \operatorname{logit}$. With
+enough data and a model class that contains the minimiser, one-versus-rest <NoteLink to="logistic-regression">logistic
+regression</NoteLink> is therefore consistent for the multiclass 0–1 loss <Cite id="zhang2004multicategory" />.
+
+**The hinge loss loses the scale.** The expected <Gloss name="hinge-loss">hinge loss</Gloss> at $\xvec$ is
+$\eta_k\max(0, 1 - f) + (1 - \eta_k)\max(0, 1 + f)$. On $[-1, 1]$ it equals $1 + (1 - 2\eta_k)f$, a line with slope
+$1 - 2\eta_k$, and outside $[-1, 1]$ it only grows. It is minimised at $f = +1$ when $\eta_k > \frac12$ and at $f = -1$
+when $\eta_k < \frac12$. The population minimiser $f_k^* = \sgn(2\eta_k - 1)$ records only whether class $k$ has
+posterior above one half. With $K \ge 3$ classes, no class need reach one half, e.g. $\etavec(\xvec) = (0.4, 0.3, 0.3)$.
+Then every $f_k^* = -1$, and the argmax is a $K$-way tie: the population scores carry no information about which class
+is most probable. One-versus-rest with the hinge loss is not consistent in general. Rifkin and Klautau report that
+well-tuned one-versus-rest support vector machines are as accurate as the other reductions in their experiments
+<Cite id="rifkin2004defense" />, so finite-sample scores need not reach this limit to rank classes well.
+
+**Calibration restores a common scale.** When the binary learner does not produce probabilities, each score is mapped
+to one after training: <NoteLink to="platt-scaling">Platt scaling</NoteLink> fits
+$\hat p_k(\xvec) = \sigma(a_k f_k(\xvec) + c_k)$ with $a_k, c_k$ learnt on held-out data, and
+<NoteLink to="isotonic-calibration">isotonic calibration</NoteLink> fits any increasing map. Each map is fitted
+separately, so the $\hat p_k$ need not sum to one. Dividing by their sum gives a distribution over the $K$ classes;
+Zadrozny and Elkan found this simple normalisation as accurate as more elaborate couplings <Cite id="zadrozny2002" />.
+Normalisation does not change the argmax.
+
+## Induced class imbalance
+
+Problem $k$ has $n_k$ positive examples and $n - n_k$ negative ones. With class priors $\pi_k = n_k / n$, its imbalance
+ratio, the number of negatives per positive, is
+
+$$
+\frac{n - n_k}{n_k} = \frac{1 - \pi_k}{\pi_k}.
+$$
+
+Even when the $K$ classes are balanced, $\pi_k = 1/K$, and the ratio is $(1 - 1/K)/(1/K) = K - 1$. Ten balanced classes
+give nine negatives per positive; a thousand give 999. A class with prior $\pi_k$ below $1/K$ has a ratio above $K - 1$.
+
+The imbalance does not bias a proper-loss fit. By the argument above, logistic regression on problem $k$ targets
+$\operatorname{logit}\eta_k$ whatever the ratio (see <NoteLink to="class-imbalance">class imbalance</NoteLink>). It
+harms one-versus-rest in three other ways. The positive class of each problem has only $n_k$ examples, so its side of
+the boundary is estimated with high variance. A margin learner with one penalty for both classes places the boundary
+where the many negatives cost least, so the classifiers tend to under-claim and leave a larger unclaimed region as $K$
+grows. And any
+remedy applied to one problem, such as <NoteLink to="class-weights">class weights</NoteLink> or resampling, changes that
+problem's score scale, which is the quantity the argmax compares.
+
+## Worked example
+
+Four classes, $K = 4$, each with 250 training examples, $n = 1000$. Each binary problem has 250 positives and 750
+negatives, imbalance ratio $750/250 = 3 = K - 1$.
+
+At a test point $\xvec$, four one-versus-rest logistic regressions output the log-odds scores
+
+$$
+\fvec(\xvec) = (1.5,\; 0.3,\; -0.8,\; 2.4).
+$$
+
+**Claims.** Classifiers 1, 2 and 4 have positive scores, so $\bvec = (1, 1, 0, 1)$ and $m = 3$. The Hamming distances
+to the codewords $\evec_1, \dots, \evec_4$ are $(2, 2, 4, 2)$: $m - 1 = 2$ for the three claimers and $m + 1 = 4$ for
+class 3. The claims rule leaves $\xvec$ contested among classes 1, 2 and 4.
+
+**Raw argmax.** The largest score is $f_4 = 2.4$, so the argmax predicts class 4.
+
+**Calibrated argmax.** Classifier 4 was trained with a weak penalty on a nearly separable problem, and its scores are
+overconfident. Platt scaling on held-out data gives $(a_k, c_k) = (1, 0)$ for classifiers 1 to 3 and
+$(a_4, c_4) = (0.4, -0.5)$ for classifier 4. The calibrated probabilities are
+
+$$
+\hat\pvec = \paren{\sigma(1.5),\; \sigma(0.3),\; \sigma(-0.8),\; \sigma(0.4 \times 2.4 - 0.5)} = (0.818,\; 0.574,\;
+0.310,\; 0.613).
+$$
+
+They sum to $2.315$, not 1. Normalising gives $(0.353, 0.248, 0.134, 0.265)$. The calibrated argmax is class 1. The two
+argmax rules disagree although all four binary decisions are the same under both: only the scale of $f_4$ changed.
+
+## Interactive: ambiguity and the argmax
+
+<MulticlassReductions initial="ovr-claimed" />
+
+With the method set to "OvR claims", the grey regions are the unclaimed and contested parts of the plane. Switching to
+"OvR argmax" colours every cell and removes both. Class 2 sits between classes 1 and 3, so the linear classifier for
+class 2 against the rest has no good solution. One-versus-rest then gives class 2 a smaller region than the
+multinomial fit, which compares classes in pairs through the differences $\wvec_j - \wvec_k$.
+
+## Cost
+
+Let one binary training run on $s$ examples cost $O(s^\alpha)$, with $\alpha \approx 1$ for a linear model trained by
+stochastic <NoteLink to="gradient">gradient</NoteLink> and $\alpha$ between 2 and 3 for a
+<NoteLink to="kernel-support-vector-machine">kernel support vector machine</NoteLink>.
+
+| Quantity | One-versus-rest | One-versus-one |
+| --- | --- | --- |
+| Binary problems | $K$ | $K(K - 1)/2$ |
+| Examples per problem | $n$ | about $2n/K$ |
+| Training cost | $K n^\alpha$ | $\frac{K(K - 1)}{2}\paren{\frac{2n}{K}}^\alpha$ |
+| Scores to evaluate per prediction | $K$ | $K(K - 1)/2$ |
+
+For $\alpha = 1$ both training costs are about $Kn$. For $\alpha = 2$ one-versus-one costs about $2n^2$ against $Kn^2$
+for one-versus-rest, because its problems are small. This is why kernel machines often use one-versus-one and large
+linear models use one-versus-rest <Cite id="hsu2002comparison" />. A linear one-versus-rest model stores $K$ weight
+vectors of length $D$, the input dimension, the same as a multinomial model, and predicts with one $K \times D$
+<NoteLink to="matrix-multiplication">matrix product</NoteLink>.
+
+## Trade-offs
+
+**Accuracy.** Rifkin and Klautau argue that one-versus-rest is as accurate as any other reduction or direct
+multiclass method, provided the binary learners are well-tuned regularised classifiers such as support vector
+machines. They attribute published gaps to untuned baselines and differences within noise
+<Cite id="rifkin2004defense" />.
+
+**Error correction.** The identity code has minimum distance 2, so a single wrong binary classifier can change the
+prediction. In the bound of Allwein, Schapire and Singer, the multiclass training error is at most
+$L\bar\varepsilon / (d\,\ell(0))$, where $L$ is the number of binary problems, $\bar\varepsilon$ their average loss,
+$d$ the code's minimum distance and $\ell(0)$ the loss at margin 0. For one-versus-rest $L/d = K/2$ grows with
+$K$; for one-versus-one and random codes it stays near 2 <Cite id="allwein2000reducing" />.
+
+**Probabilities.** Calibrated and normalised one-versus-rest probabilities are usable but are not a joint model. A
+multinomial model fits one coherent distribution in one problem.
+
+**Compared with the alternatives.** Against <NoteLink to="one-versus-one">one-versus-one</NoteLink>: fewer and larger
+problems, each imbalanced; no voting ties, but a need for comparable scores. Against
+<NoteLink to="error-correcting-output-codes">error-correcting output codes</NoteLink>: fewer problems and no error
+correction. Against <NoteLink to="nested-dichotomies-and-tree-reductions">tree reductions</NoteLink>: $K$ evaluations
+per prediction rather than about $\log_2 K$. Against
+<NoteLink to="multiclass-support-vector-machines">multiclass support vector machines</NoteLink> and the multinomial
+model: independent problems that parallelise, at the price of scores that were never trained against each other.

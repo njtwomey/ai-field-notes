@@ -1,0 +1,303 @@
+---
+title: One-versus-one
+kind: technique
+summary: 'One-versus-one trains a binary classifier for each of the $K(K-1)/2$ pairs of classes, each on those two classes'' data only. It predicts by majority vote, by a decision DAG of $K - 1$ tests, or by coupling the pairwise probabilities into class probabilities.'
+tags: [classification, reductions, multiclass, worked-example]
+aliases:
+  [
+    OvO,
+    one-vs-one,
+    one-against-one,
+    all-pairs,
+    all-versus-all,
+    pairwise classification,
+    round robin classification,
+    pairwise coupling,
+    max-wins voting,
+    decision DAG,
+    DAGSVM,
+  ]
+requires: [logistic-regression]
+partOf: [multiclass-classification]
+related: [paired-comparison-models, platt-scaling, two-stage-support-vector-machine-conditional-random-field]
+references:
+  [
+    knerr1990pairwise,
+    fuernkranz2002roundrobin,
+    hastie1998pairwise,
+    wu2004pairwise,
+    platt2000dags,
+    hsu2002comparison,
+    chang2011,
+    allwein2000reducing,
+    rifkin2004defense,
+  ]
+status: draft
+updated: 2026-09-30
+---
+
+<Definition>
+For $K$ classes, **one-versus-one** trains a binary classifier $f_{ij}$ for every pair $i < j$, using only the training
+examples of classes $i$ and $j$. There are $K(K-1)/2$ classifiers. Classifier $f_{ij}$ estimates
+$r_{ij}(\xvec) \approx \pr(y = i \mid y \in \set{i, j}, \xvec)$, and $r_{ji} = 1 - r_{ij}$. A prediction combines the
+pairwise answers by a majority vote, by a decision DAG that evaluates $K - 1$ of them, or by **pairwise coupling**,
+which finds class probabilities $p_1, \dots, p_K$ consistent with all the $r_{ij}$ <Cite id="knerr1990pairwise" />
+<Cite id="hastie1998pairwise" />.
+</Definition>
+
+## Problem
+
+A binary learner must be turned into a $K$-class classifier. <NoteLink to="one-versus-rest">One-versus-rest</NoteLink>
+asks $K$ questions of the form "class $k$ or any other class?". Each question uses all $n$ examples, is imbalanced
+about $1:(K-1)$ when classes are equally frequent, and asks a linear learner to separate one class from a union of
+classes that may surround it. Three classes along a line show the difficulty: no single threshold separates the middle
+class from the two outer ones, while every pair of classes is separated by one threshold.
+
+One-versus-one asks the easier questions "class $i$ or class $j$?". Pairwise linear separability is a weaker condition
+than one-against-the-rest linear separability, which is why Knerr, Personnaz and Dreyfus built multiclass networks from
+one linear separator per pair <Cite id="knerr1990pairwise" />. The cost is that each classifier answers a question
+about only two classes, and at prediction time it is asked about inputs from all $K$.
+
+## Mechanism
+
+### Training
+
+For each pair $i < j$, keep the $n_{ij}$ training examples with $y \in \set{i, j}$, label class $i$ positive and class
+$j$ negative, and train $f_{ij}$. The $K(K-1)/2$ problems are independent and can be trained in parallel. Each problem
+is as balanced as the two classes are.
+
+### Majority voting
+
+Each classifier casts one vote. The votes for class $i$ are
+
+$$
+v_i(\xvec) = \sum_{j \ne i} \indicator\left[r_{ij}(\xvec) > \tfrac12\right],
+$$
+
+and the prediction is $\argmax_i v_i(\xvec)$, the **max-wins** rule <Cite id="fuernkranz2002roundrobin" />. The votes
+sum to $K(K-1)/2$.
+
+**What voting guarantees.** Let the true class be $y$. If the $K - 1$ classifiers that involve $y$ are all right, $y$
+wins all its contests and has $v_y = K - 1$. Any other class $i$ lost to $y$, so it can win at most its $K - 2$ other
+contests: $v_i \le K - 2$. Class $y$ wins outright, whatever the other $(K-1)(K-2)/2$ classifiers say.
+
+**Voting is Bayes-consistent under exact pairwise probabilities.** Write $p_k = \pr(y = k \mid \xvec)$. The exact
+pairwise probability is
+
+$$
+r_{ij} = \pr(y = i \mid y \in \set{i, j}, \xvec) = \frac{p_i}{p_i + p_j},
+$$
+
+which exceeds $1/2$ exactly when $p_i > p_j$. Class $i$ then collects one vote for every class less probable than it,
+so the votes rank the classes by $p_k$, and the most probable class, the Bayes decision, gets $K - 1$ votes.
+
+**Incompetent classifiers.** A trained $f_{ij}$ is not the exact pairwise probability. It was fitted on classes $i$ and
+$j$ only, and for an input of class $k \notin \set{i, j}$ it extrapolates into a region with no training data. Its
+answer there is arbitrary, and the classifier is called **incompetent** for that input. Voting is guaranteed to survive
+them only while every competent classifier, one that involves $y$, is right. One wrong competent classifier leaves $y$
+with $K - 2$ votes, and the incompetent votes decide whether another class reaches $K - 2$ or more.
+
+**Ties.** Several classes can share the maximum vote, most often when the pairwise answers form a cycle ($i$ beats
+$j$, $j$ beats $k$, $k$ beats $i$). Common tie-breaks are the class prior, the sum of the pairwise scores
+$\sum_{j \ne i} r_{ij}$, or the coupled probabilities below.
+
+### Pairwise coupling
+
+Voting discards how confident each classifier is. **Pairwise coupling** keeps it by finding one probability vector
+$\pvec = (p_1, \dots, p_K)$ whose implied pairwise probabilities $\mu_{ij} = p_i / (p_i + p_j)$ are as close as possible
+to the estimates $r_{ij}$. With $K - 1$ free unknowns (the $p_i$ sum to one) and $K(K-1)/2$ estimates, the system is
+overdetermined for $K \ge 3$ and usually inconsistent, so coupling is a fit.
+
+Hastie and Tibshirani measure closeness by the weighted <NoteLink to="kullback-leibler-divergence">Kullback–Leibler
+divergence</NoteLink> between the pairwise <NoteLink to="bernoulli-distribution">Bernoulli distributions</NoteLink>
+<Cite id="hastie1998pairwise" />:
+
+$$
+\ell(\pvec) = \sum_{i < j} n_{ij} \left[ r_{ij} \log\frac{r_{ij}}{\mu_{ij}} + r_{ji} \log\frac{r_{ji}}{\mu_{ji}} \right].
+$$
+
+**The fixed point.** Drop the terms that do not depend on $\pvec$. Since $\log \mu_{ij} = \log p_i - \log(p_i + p_j)$
+and $r_{ij} + r_{ji} = 1$, minimising $\ell$ is maximising
+
+$$
+\sum_{i < j} n_{ij} \left[ r_{ij} \log p_i + r_{ji} \log p_j - \log(p_i + p_j) \right].
+$$
+
+This is the log-likelihood of a <NoteLink to="paired-comparison-models">Bradley–Terry model</NoteLink> with strengths
+$p_i$, in which classes $i$ and $j$ play $n_{ij}$ games and $i$ wins a fraction $r_{ij}$ of them. The objective is
+unchanged when $\pvec$ is multiplied by a constant, so the constraint $\sum_i p_i = 1$ can be imposed after
+maximising. Setting the <NoteLink to="derivative">derivative</NoteLink> with respect to $p_i$ to zero,
+
+$$
+\sum_{j \ne i} n_{ij} \left[ \frac{r_{ij}}{p_i} - \frac{1}{p_i + p_j} \right] = 0
+\quad\Longleftrightarrow\quad
+\sum_{j \ne i} n_{ij}\, r_{ij} = \sum_{j \ne i} n_{ij}\, \mu_{ij}.
+$$
+
+At the optimum each class's observed wins equal its expected wins under $\pvec$. Rearranging the stationarity condition
+gives the iteration Hastie and Tibshirani proposed:
+
+$$
+p_i \leftarrow p_i \, \frac{\sum_{j \ne i} n_{ij}\, r_{ij}}{\sum_{j \ne i} n_{ij}\, \mu_{ij}}, \qquad
+\text{then renormalise } \pvec.
+$$
+
+A fixed point of the update satisfies the stationarity condition. The update is Zermelo's iteration for Bradley–Terry
+strengths, a minorise–maximise algorithm whose objective increases at every step. If the $r_{ij}$ are exact,
+$\mu_{ij} = r_{ij}$ is attainable, $\ell = 0$, and coupling returns the true $\pvec$.
+
+**The method used in LIBSVM.** Wu, Lin and Weng proposed two further criteria <Cite id="wu2004pairwise" />. The second
+starts from the identity that exact probabilities satisfy: $r_{ij} = p_i/(p_i + p_j)$ is equivalent to
+$r_{ji}\, p_i = r_{ij}\, p_j$. It minimises the squared violation of that identity,
+
+$$
+\min_{\pvec} \sum_{i=1}^{K} \sum_{j \ne i} \left( r_{ji}\, p_i - r_{ij}\, p_j \right)^2
+\quad \text{subject to} \quad \sum_i p_i = 1,\ p_i \ge 0.
+$$
+
+The objective is $2\pvec^\tr\Qmat\pvec$ for the <Gloss name="positive-semi-definite">positive semi-definite</Gloss>
+matrix $\Qmat$ with $Q_{ii} = \sum_{s \ne i}
+r_{si}^2$ and $Q_{ij} = -r_{ji}\, r_{ij}$. Dropping the sign constraints, the Lagrange conditions are the linear system
+
+$$
+\Qmat\pvec = b\,\ones, \qquad \ones^\tr\pvec = 1,
+$$
+
+with $b = \pvec^\tr\Qmat\pvec$ the optimal value. Wu, Lin and Weng showed that its solution is non-negative, so the
+dropped constraints hold. One $K \times K$ solve replaces an iteration. LIBSVM applies it to pairwise probabilities
+obtained by fitting a <NoteLink to="platt-scaling">Platt sigmoid</NoteLink> to each pairwise <Gloss name="svm" />'s
+decision values <Cite id="chang2011" />.
+
+<Derivation title="The quadratic form of the Wu–Lin–Weng criterion">
+Each unordered pair $\set{i, j}$ appears twice in the double sum, as $(r_{ji}p_i - r_{ij}p_j)^2$ and as
+$(r_{ij}p_j - r_{ji}p_i)^2$, which are equal. The coefficient of $p_i^2$ collects $r_{ji}^2$ from both, for every
+$j \ne i$: $2\sum_{j \ne i} r_{ji}^2 = 2Q_{ii}$. The coefficient of $p_ip_j$ collects $-2r_{ji}r_{ij}$ from both:
+$-4r_{ji}r_{ij} = 4Q_{ij}$. Since $2\pvec^\tr\Qmat\pvec = 2\sum_i Q_{ii}p_i^2 + 4\sum_{i<j} Q_{ij}p_ip_j$, the objective
+equals $2\pvec^\tr\Qmat\pvec$. As a sum of squares it is non-negative for every $\pvec$, so $\Qmat$ is positive
+semi-definite.
+
+With multiplier $\lambda$ for $\ones^\tr\pvec = 1$, the <NoteLink to="gradient">gradient</NoteLink> condition is
+$4\Qmat\pvec = \lambda\ones$. Write $b = \lambda / 4$. Multiplying $\Qmat\pvec = b\ones$ by $\pvec^\tr$ and using
+$\ones^\tr\pvec = 1$ gives $b = \pvec^\tr\Qmat\pvec$.
+</Derivation>
+
+### Decision DAG
+
+Voting evaluates all $K(K-1)/2$ classifiers. Platt, Cristianini and Shawe-Taylor's **decision DAG** evaluates $K - 1$
+<Cite id="platt2000dags" />. Keep a list of candidate classes, initially all $K$. Evaluate the classifier for the first
+and last classes in the list and remove the loser. After $K - 1$ tests one class remains. The tests form a
+<Gloss name="dag" /> of $K(K-1)/2$ nodes, one per pair, in which every path from the root to a leaf passes $K - 1$
+nodes. With a <Gloss name="svm" /> at each node (DAGSVM), Platt and co-authors bounded the generalisation error in terms
+of the margins at the nodes.
+
+A DAG never needs an incompetent classifier to decide between competent ones: a pair is tested only while both classes
+are still candidates. The prediction depends on the order of the list whenever the pairwise answers contain a cycle,
+and it gives no probabilities.
+
+### One-versus-one as an output code
+
+In the language of <NoteLink to="error-correcting-output-codes">error-correcting output codes</NoteLink>, one-versus-one
+is a ternary code with a column for each pair $(i, j)$: $+1$ in row $i$, $-1$ in row $j$, and $0$ elsewhere, where $0$
+means the column never trains on that class <Cite id="allwein2000reducing" />. Hamming decoding charges $1$ for a
+disagreeing entry and $1/2$ for a zero. Row $i$ has zeros in the $(K-1)(K-2)/2$ columns that do not involve class $i$,
+the same number for every row. The zeros therefore add the same constant to every distance, and minimising the distance
+maximises the number of columns involving $i$ that agree with row $i$: Hamming decoding is majority voting. Any two
+rows are both non-zero in one column only, so the code guarantees no correction, as the voting argument above showed.
+
+## Worked example
+
+Take $K = 4$ and one input $\xvec$ with these pairwise outputs $r_{ij}$ (the table gives $r_{ij}$ for $i < j$;
+$r_{ji} = 1 - r_{ij}$):
+
+| Pair | $(1,2)$ | $(1,3)$ | $(1,4)$ | $(2,3)$ | $(2,4)$ | $(3,4)$ |
+| --- | --- | --- | --- | --- | --- | --- |
+| $r_{ij}$ | $0.60$ | $0.45$ | $0.90$ | $0.70$ | $0.80$ | $0.70$ |
+
+**Vote.** Class 1 beats 2 and 4 and loses to 3. Class 2 beats 3 and 4. Class 3 beats 1 and 4. Class 4 wins nothing. The
+votes are $(2, 2, 2, 0)$: a three-way tie produced by the cycle $1 \succ 2 \succ 3 \succ 1$. If the true class is 1, the
+single wrong competent classifier is $f_{13}$, and one error was enough to lose the guarantee.
+
+**Hastie–Tibshirani coupling.** Take $n_{ij}$ equal. The observed wins $\sum_{j \ne i} r_{ij}$ are
+
+$$
+(0.60 + 0.45 + 0.90,\; 0.40 + 0.70 + 0.80,\; 0.55 + 0.30 + 0.70,\; 0.10 + 0.20 + 0.30) = (1.95,\; 1.90,\; 1.55,\; 0.60).
+$$
+
+Iterating the update from $\pvec = (1/4, 1/4, 1/4, 1/4)$ converges to
+
+$$
+\pvec = (0.358,\; 0.338,\; 0.230,\; 0.075),
+$$
+
+at which the expected wins $\sum_{j \ne i} p_i/(p_i + p_j)$ are $(1.95, 1.90, 1.55, 0.60)$, equal to the observed ones.
+Coupling breaks the tie in favour of class 1, which lost its one contest narrowly ($0.45$) and won its others by more.
+
+**Wu–Lin–Weng coupling.** The matrix $\Qmat$ is
+
+$$
+\Qmat = \begin{pmatrix}
+0.4725 & -0.2400 & -0.2475 & -0.0900 \\
+-0.2400 & 0.4900 & -0.2100 & -0.1600 \\
+-0.2475 & -0.2100 & 0.7825 & -0.2100 \\
+-0.0900 & -0.1600 & -0.2100 & 1.9400
+\end{pmatrix},
+$$
+
+where, for example, $Q_{11} = r_{21}^2 + r_{31}^2 + r_{41}^2 = 0.40^2 + 0.55^2 + 0.10^2 = 0.4725$ and
+$Q_{12} = -r_{21} r_{12} = -0.40 \times 0.60 = -0.24$. Solving $\Qmat\pvec = b\ones$, $\ones^\tr\pvec = 1$ gives
+$\pvec = (0.347, 0.333, 0.242, 0.078)$ with $b = 0.0169$. The two couplings agree on the order of the classes and differ
+by about $0.01$ in each probability.
+
+**Decision DAG.** With the list $(1, 2, 3, 4)$: $f_{14}$ gives $0.90$, so 4 leaves; $f_{13}$ gives $0.45$, so 1 leaves;
+$f_{23}$ gives $0.70$, so the DAG predicts class 2 after three tests. Over all $24$ orderings of the list, classes 1, 2
+and 3 each win $8$ times. The DAG resolves the tie by the order of the list, not by the evidence.
+
+## Cost
+
+Let the $n$ training examples be split evenly, $n/K$ per class, and let training a binary classifier on $m$ examples
+cost $c\,m^\alpha$. One-versus-rest trains $K$ classifiers on $n$ examples each; one-versus-one trains $K(K-1)/2$
+classifiers on $2n/K$ examples each. The ratio of total costs is
+
+$$
+\frac{\text{one-versus-one}}{\text{one-versus-rest}}
+= \frac{\frac{K(K-1)}{2}\left(\frac{2n}{K}\right)^{\alpha}}{K\, n^{\alpha}}
+= \frac{2^{\alpha-1}(K-1)}{K^{\alpha}}.
+$$
+
+For a learner linear in $m$ ($\alpha = 1$) the ratio is $(K-1)/K$: one-versus-one is slightly cheaper, since each
+example appears in $K - 1$ problems instead of $K$. For a learner quadratic in $m$ ($\alpha = 2$) the ratio is
+$2(K-1)/K^2 \approx 2/K$, so with $K = 10$ one-versus-one costs about a fifth as much.
+<NoteLink to="kernel-support-vector-machine">Kernel support vector machine</NoteLink> solvers are typically superlinear
+in the number of examples, and Hsu and Lin found one-versus-one and the decision DAG the fastest to train among the
+<NoteLink to="multiclass-support-vector-machines">multiclass support vector machine</NoteLink> methods they compared,
+with accuracy as good as the others <Cite id="hsu2002comparison" />. LIBSVM uses one-versus-one for multiclass problems
+for this reason <Cite id="chang2011" />.
+
+Prediction evaluates $K(K-1)/2$ classifiers for voting or coupling and $K - 1$ for a DAG. Coupling adds an iteration or
+one $K \times K$ linear solve. Storage is $K(K-1)/2$ models, which grows quadratically: $4{,}950$ classifiers for
+$K = 100$. For kernel machines the growth is milder than it looks, because each pairwise model keeps support vectors
+from two classes only and all models share one set of training points and one kernel cache.
+
+## Trade-offs
+
+| Property | One-versus-one | One-versus-rest | Output codes |
+| --- | --- | --- | --- |
+| Binary problems | $K(K-1)/2$ | $K$ | $L$, chosen |
+| Examples per problem | about $2n/K$ | $n$ | $n$ (dense codes) |
+| Class balance within a problem | as balanced as the two classes | about $1:(K-1)$ | depends on the column |
+| Evaluations to predict | $K(K-1)/2$, or $K - 1$ with a DAG | $K$ | $L$ |
+| Ties | common, from cycles | when scores are equal or uncalibrated | when errors reach half the minimum distance $d$ |
+| Probabilities | by pairwise coupling | by normalising calibrated scores | not directly |
+
+- **Easier problems, more of them.** Pairwise problems are smaller, more balanced and more often linearly separable. The
+  number of models grows quadratically in $K$, which for $K = 1{,}000$ means $499{,}500$ models to store and to evaluate
+  at prediction time.
+- **Incompetent classifiers.** Every prediction consults classifiers that never saw the input's class. Voting and
+  coupling both weight their answers like any other; the DAG avoids some of them but becomes order-dependent.
+- **No error correction.** One wrong competent classifier can change the prediction. Codes with larger minimum distance,
+  described in <NoteLink to="error-correcting-output-codes">error-correcting output codes</NoteLink>, trade more and
+  harder binary problems for tolerance of such errors.
+- **Accuracy in practice.** With well-tuned regularised classifiers the reductions perform similarly: Rifkin and
+  Klautau found one-versus-rest as accurate as one-versus-one and output codes on their benchmarks
+  <Cite id="rifkin2004defense" />. The choice then rests on training cost, prediction cost and whether probabilities are
+  needed.

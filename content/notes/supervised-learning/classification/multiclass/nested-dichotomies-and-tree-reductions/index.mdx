@@ -1,0 +1,362 @@
+---
+title: Nested dichotomies and tree reductions
+kind: technique
+summary:
+  'A tree reduction puts the $K$ classes at the leaves of a binary tree with a binary classifier at each internal node.
+  Class probabilities are products of branch probabilities. A prediction walks one path: $\log_2 K$ evaluations when
+  balanced, near the class entropy when frequency-shaped.'
+tags: [classification, multiclass, reductions, information-theory, ensembles, worked-example]
+aliases:
+  [
+    nested dichotomy,
+    nested dichotomies,
+    ensemble of nested dichotomies,
+    END,
+    tree reduction,
+    divide-and-conquer tree,
+    filter tree,
+    conditional probability tree,
+    label tree,
+    label embedding tree,
+    class hierarchy reduction,
+  ]
+requires: [logistic-regression, conditional-probability]
+partOf: [multiclass-classification]
+related: [hierarchical-softmax, source-coding-theorem, decision-tree]
+references:
+  [
+    frank2004nested,
+    dong2005balanced,
+    leathart2016randompair,
+    beygelzimer2009tournaments,
+    beygelzimer2009cpt,
+    bengio2010labeltrees,
+    choromanska2015logtime,
+    huffman1952,
+    cover2006,
+  ]
+status: draft
+updated: 2026-09-30
+---
+
+import { TreeDepthExplorer } from './TreeDepthExplorer'
+
+<Definition>
+A **tree reduction** solves a $K$-class problem with a binary tree whose $K$ leaves are the classes. Each of the $K - 1$
+internal nodes $n$ holds a set of classes $S_n$, the classes of the leaves below it, split into a left part $L_n$ and a
+right part $R_n$, and a binary classifier trained to tell $L_n$ from $R_n$. A **nested dichotomy** is such a tree whose
+node classifiers are probabilistic and trained only on examples with labels in $S_n$. The class probability is then the
+product of the branch probabilities on the path from the root to the class <Cite id="frank2004nested" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="one-versus-rest">One-versus-rest</NoteLink> trains $K$ binary classifiers, each on all $N$ training
+examples, and evaluates all $K$ of them at prediction time. <NoteLink to="one-versus-one">One-versus-one</NoteLink>
+trains $K(K-1)/2$ smaller classifiers and evaluates them all as well. Both costs grow at least linearly in $K$ per
+prediction. For $K$ in the thousands, as in object recognition with many categories or
+<NoteLink to="text-classification">text classification</NoteLink> over a large label set, that per-prediction cost is
+the obstacle.
+
+A label from $K$ classes carries at most $\log_2 K$ bits. A sequence of binary decisions can identify it with about that
+many decisions, provided the decisions are nested: each one narrows the set of candidate classes left by the previous
+one. A binary tree over the classes is exactly such a sequence.
+
+## Mechanism
+
+### Nested dichotomies
+
+Build a binary tree with the classes $\Ycal = \set{1, \dots, K}$ as leaves. The root holds $S_{\text{root}} = \Ycal$.
+Every internal node $n$ splits its set $S_n$ into two non-empty disjoint parts, $S_n = L_n \cup R_n$, which are the sets
+of its two children. The recursion stops at single classes. A full binary tree with $K$ leaves has $K - 1$ internal
+nodes, so the reduction trains $K - 1$ binary classifiers.
+
+The classifier at node $n$ is trained on the examples $(\xvec_i, y_i)$ with $y_i \in S_n$ only, with target $1$ when
+$y_i \in L_n$ and $0$ when $y_i \in R_n$. Examples whose class is outside $S_n$ are left out. A probabilistic binary
+learner, such as <NoteLink to="logistic-regression">logistic regression</NoteLink>, then estimates
+
+$$
+g_n(\xvec) \approx \pr(y \in L_n \mid y \in S_n, \xvec).
+$$
+
+The nested dichotomy was a device for polytomous regression in statistics before Frank and Kramer turned it into a
+general <NoteLink to="multiclass-classification">multiclass reduction</NoteLink> and an ensemble method
+<Cite id="frank2004nested" />.
+
+### Class probabilities are products of branch probabilities
+
+Fix a class $k$ and let $n_0, n_1, \dots, n_{d_k - 1}$ be the internal nodes on the path from the root to leaf $k$,
+where $d_k$ is the depth of leaf $k$. The sets along the path are nested:
+
+$$
+\Ycal = S_{n_0} \supset S_{n_1} \supset \dots \supset S_{n_{d_k - 1}} \supset \set{k}.
+$$
+
+Write $C_j$ for the child set of $n_j$ that the path enters, so $C_j = S_{n_{j+1}}$ for $j < d_k - 1$ and
+$C_{d_k - 1} = \set{k}$. The event $y = k$ is the intersection of the events $y \in C_j$, and each of those events lies
+inside the previous one. By the <NoteLink to="derivative">chain rule</NoteLink> of
+<NoteLink to="conditional-probability">conditional probability</NoteLink>,
+
+$$
+\pr(y = k \mid \xvec) = \prod_{j=0}^{d_k - 1} \pr(y \in C_j \mid y \in S_{n_j}, \xvec),
+$$
+
+because $\pr(y \in S_{n_0} \mid \xvec) = 1$ and $\pr(y \in C_j, y \in S_{n_j} \mid \xvec) = \pr(y \in C_j \mid \xvec)$
+when $C_j \subset S_{n_j}$. Each factor is the target of one node classifier: $g_{n_j}(\xvec)$ when the path turns left
+at $n_j$ and $1 - g_{n_j}(\xvec)$ when it turns right. Restricting the training set of node $n$ to classes in $S_n$ is
+what makes its target the conditional probability in this product. A node trained on all examples would estimate a
+different quantity.
+
+The estimates sum to one over the classes for any node outputs in $[0, 1]$. At each node the two children receive the
+fractions $g_n$ and $1 - g_n$ of the node's probability mass, so the mass reaching the leaves below a node equals the
+mass reaching the node. Induction from the leaves up gives total mass $1$ at the root. The model is therefore a valid
+distribution over the $K$ classes, like a <NoteLink to="multinomial-logistic-regression">multinomial logistic
+regression</NoteLink>, but its parameters are $K - 1$ separate binary models.
+
+### How many nested dichotomies there are
+
+Let $T(K)$ be the number of distinct nested dichotomies on $K$ labelled classes, where swapping the two children of a
+node does not count as a new tree. One class gives one tree, so $T(1) = 1$. A tree on $K$ classes is obtained from a
+tree on the first $K - 1$ classes by attaching class $K$ as the sibling of one existing node: pick a node $v$, replace
+it by a new internal node whose children are $v$ and the leaf $K$. A tree on $K - 1$ leaves has $K - 1$ leaves and
+$K - 2$ internal nodes, so there are $2K - 3$ choices of $v$. Every tree on $K$ classes arises exactly once this way:
+delete leaf $K$ and contract its parent, and the result names both the smaller tree and $v$. Hence
+
+$$
+T(K) = (2K - 3)\, T(K - 1) = (2K - 3)(2K - 5) \cdots 3 \cdot 1 = (2K - 3)!!.
+$$
+
+$T(3) = 3$, $T(4) = 15$, $T(5) = 105$ and $T(10) = 34{,}459{,}425$ <Cite id="frank2004nested" />. For $K = 4$, three of
+the fifteen trees split the root two against two and twelve split it one against three.
+
+### Dependence on the split under a restricted node model
+
+Every nested dichotomy defines the same family of distributions if each node classifier could represent its conditional
+probability exactly. With a fixed model class, such as a linear classifier, the trees differ. A split that separates
+groups of similar classes from each other gives each node an easier binary problem than a split that mixes them, and
+errors at the root propagate to every class below.
+
+Frank and Kramer avoid choosing: they draw nested dichotomies uniformly at random from the $(2K - 3)!!$ possible trees,
+train each, and average the class probability estimates over the ensemble <Cite id="frank2004nested" />. Averaging
+reduces the variance that comes from any one arbitrary tree. Later variants restrict the random draw. Class-balanced
+nested dichotomies split every node's classes into two halves, which bounds the depth at $\lceil \log_2 K \rceil$
+<Cite id="dong2005balanced" />. Random-pair selection picks two classes at a node, trains a classifier on them, and
+sends every other class to the side on which the classifier places most of its examples, so that similar classes stay
+together <Cite id="leathart2016randompair" />.
+
+### Greedy descent is not the most probable class
+
+A nested dichotomy can predict in two ways. **Full evaluation** computes all $K$ class probabilities from all $K - 1$
+node classifiers and returns the largest. **Greedy descent** starts at the root, follows the branch with probability
+above $\tfrac12$ at each node, and returns the leaf it reaches. Greedy descent costs $d_k$ evaluations for the class $k$
+it returns, but it compares sets of classes rather than classes.
+
+Three classes with $\pr(y \mid \xvec) = (0.3, 0.3, 0.4)$ and a root split $\set{1, 2}$ against $\set{3}$ show the
+failure. The root sees $\pr(y \in \set{1, 2} \mid \xvec) = 0.6 > 0.4$ and goes left, and greedy descent returns class 1
+or 2, each with probability $0.3$. The most probable class is 3. The node classifiers are exact and the prediction is
+still wrong. Beygelzimer, Langford and Ravikumar prove that for every $K \ge 3$ and every tree there is a distribution
+on which the divide-and-conquer tree with optimal node classifiers has positive regret
+<Cite id="beygelzimer2009tournaments" />.
+
+### Filter trees
+
+The **filter tree** keeps the $O(\log_2 K)$ prediction cost and removes that inconsistency
+<Cite id="beygelzimer2009tournaments" />. It reads the tree as a single-elimination tournament between the classes,
+played from the leaves up. Each internal node $n$ compares two candidate classes: the winner of its left subtree and the
+winner of its right subtree. Its classifier predicts which of those two candidates is the label.
+
+Training runs bottom-up. Once the classifiers below $n$ are trained, an example $(\xvec, y)$ joins node $n$'s training
+set only if $y$ is in $S_n$ and $y$ won every match on its way up to $n$, that is, every classifier between the leaf
+$y$ and $n$ picked $y$ on $\xvec$. The target is the side of $n$ that $y$ comes from. The lower classifiers therefore
+filter the examples each higher node sees: node $n$ learns only from inputs whose true label is one of the two
+candidates its match compares.
+
+Prediction runs top-down. The root chooses a side, the child on that side chooses a side, and so on to a leaf. The leaf
+reached is the class that every classifier on its path prefers, which is the tournament winner, so only the $d_k$
+classifiers on one path are evaluated.
+
+The filtered training changes what an optimal node does. With exact classifiers each match is won by the more probable
+of the two candidates that reach it, and the most probable class wins every match it plays, so it wins the tournament.
+The general guarantee is a **regret bound**. The regret of a classifier is its error rate minus the Bayes error rate.
+For every set of node classifiers and every distribution, the filter tree's multiclass regret is at most the depth of
+the tree times the average regret of the node classifiers on the binary problems they induce
+<Cite id="beygelzimer2009tournaments" />:
+
+$$
+\operatorname{reg}_{\text{multiclass}} \le d \cdot \overline{\operatorname{reg}}_{\text{binary}}, \qquad d = \max_k d_k.
+$$
+
+The factor $d$ appears because an example $(\xvec, y)$ carries weight in at most one node per level of the tree: the
+node where $y$ plays its next match. The proof shows, by induction from the leaves, that the regret of a subtree's
+winner is at most the sum of the regrets of the matches inside that subtree. For a balanced tree the factor is
+$\lceil \log_2 K \rceil$. The same paper's error-correcting tournaments play several tournaments in parallel and reduce
+the factor to a constant, $5.5$, at $O(\log_2 K)$ depth <Cite id="beygelzimer2009tournaments" />.
+
+<Derivation title="Why a subtree's regret is at most the sum of its matches' regrets">
+Fix $\xvec$ and write $p_c = \pr(y = c \mid \xvec)$. A match at node $n$ between candidates $a$ and $b$ has regret
+$r_n = 0$ if the classifier picks the more probable of the two and $r_n = \abs{p_a - p_b}$ otherwise. The regret of the
+subtree $T_n$ at $n$ is $r_{T_n} = \max_{c \in S_n} p_c - p_w$, where $w$ is the class the subtree outputs.
+
+A leaf has regret $0$. For an internal node, let $a$ and $b$ be the winners of the left and right subtrees, and assume
+by induction that each subtree's regret is at most the sum of the match regrets inside it. Suppose node $n$ picks $b$;
+the case where it picks $a$ is the mirror image. If the most probable class of $S_n$ lies on the right, then $r_{T_n}$
+equals the right subtree's regret. If it lies on the left, then
+
+$$
+r_{T_n} = \Big(\max_{c \in L_n} p_c - p_a\Big) + (p_a - p_b) \le r_{T_{\text{left}}} + r_n,
+$$
+
+because $p_a - p_b \le \abs{p_a - p_b}$ and that term is $r_n$ whenever it is positive, which is when the node chose
+wrongly. Both cases give $r_{T_n} \le \sum_{m \in T_n} r_m$. At the root, the multiclass regret at $\xvec$ is at most
+the sum of the match regrets along the tree. Taking <NoteLink to="expectation">expectations</NoteLink> over $\xvec$ and
+counting at most one match per level for each example gives the factor $d$ <Cite id="beygelzimer2009tournaments" />.
+</Derivation>
+
+### Trees for very many classes
+
+For $K$ in the tens of thousands or more, the tree itself is learned from data. Label embedding trees train a
+one-versus-rest classifier, compute its <NoteLink to="confusion-matrix">confusion matrix</NoteLink>, and split the
+classes by <NoteLink to="spectral-clustering">spectral clustering</NoteLink> of that matrix, so that classes the flat
+classifier confuses share a subtree and are separated late <Cite id="bengio2010labeltrees" />. Conditional probability
+trees estimate $\pr(y \mid \xvec)$ with a binary regressor at each node, build the tree online with logarithmic depth,
+and have a regret bound on the class probabilities that grows with the depth of the tree
+<Cite id="beygelzimer2009cpt" />. Logarithmic online multiclass trees grow the tree online with a node objective that
+rewards splits that are both pure in class and balanced in size, with training and prediction time logarithmic in $K$
+<Cite id="choromanska2015logtime" />.
+
+### Relation to other reductions
+
+A nested dichotomy is an <NoteLink to="error-correcting-output-codes">output code</NoteLink> with $K - 1$ columns and
+ternary entries. Column $n$ has $+1$ for the classes in $L_n$, $-1$ for the classes in $R_n$, and $0$ for the classes
+outside $S_n$, which the column ignores. Two sibling leaves differ in a single column, so the code has minimum distance
+one and corrects no errors: one wrong node decision changes the predicted class.
+
+The same tree with every node a logistic function of a shared representation is the
+<NoteLink to="hierarchical-softmax">hierarchical softmax</NoteLink> of <NoteLink to="neural-language-model">neural
+language models</NoteLink>. There the node classifiers are trained jointly by maximum likelihood rather than one at a
+time.
+
+## Cost
+
+### Prediction is a prefix code
+
+Label the left branch of every node $0$ and the right branch $1$. The path from the root to class $k$ is then a binary
+string of length $d_k$, and no class's string is the start of another's, because a leaf has no descendants. The tree is
+a binary prefix code for the classes, and greedy or filter-tree prediction of class $k$ costs $d_k$ classifier
+evaluations, one per bit of its codeword.
+
+In a balanced tree every class has depth $\lceil \log_2 K \rceil$ or $\lfloor \log_2 K \rfloor$, the smallest possible
+maximum depth. When $K$ is a power of 2 every depth is $\log_2 K$ and the tree is a fixed-length code. When the classes
+occur with frequencies $\pi_1, \dots, \pi_K$ and the predictions are mostly correct, the expected number of evaluations
+per prediction is the expected codeword length $\bar d = \sum_k \pi_k d_k$. The
+<NoteLink to="source-coding-theorem">source coding theorem</NoteLink> bounds it below by the
+<NoteLink to="entropy">entropy</NoteLink> of the class distribution.
+
+Every binary tree satisfies the Kraft equality $\sum_k 2^{-d_k} = 1$: each internal node halves its share of the total
+weight between its two children. So $r_k = 2^{-d_k}$ is a probability distribution on the classes, and
+
+$$
+\bar d - \entropy(\pivec) = \sum_k \pi_k d_k + \sum_k \pi_k \log_2 \pi_k = \sum_k \pi_k \log_2 \frac{\pi_k}{r_k}
+= \KL(\pivec \,\|\, \rvec) \ge 0,
+$$
+
+with equality exactly when $\pi_k = 2^{-d_k}$ for every class. The tree that minimises $\bar d$ is the Huffman code for
+$\pivec$: repeatedly merge the two least frequent classes or groups into one node <Cite id="huffman1952" />. Its
+expected depth satisfies $\entropy(\pivec) \le \bar d < \entropy(\pivec) + 1$ <Cite id="cover2006" />. A
+frequency-shaped tree gives frequent classes short paths and rare classes long ones. Its expected depth falls below that
+of a balanced tree when the class distribution is skewed, as label frequencies in text and retrieval usually are. For
+uniform frequencies the Huffman tree is balanced and the two coincide.
+
+The identity also gives the extra expected depth under a frequency mismatch. If the tree was shaped for frequencies
+$\pivec$ but the classes arrive with frequencies $\qvec$, the expected depth is
+$\sum_k q_k d_k = \entropy(\qvec) + \KL(\qvec \,\|\, \rvec)$, the
+<NoteLink to="cross-entropy-and-perplexity">cross-entropy</NoteLink> of $\qvec$ against the code's implied distribution.
+
+### Training
+
+The node classifier at $n$ trains on the examples whose classes are in $S_n$. Example $i$ is used at the $d_{y_i}$ nodes
+on its class's path, so the $K - 1$ training sets together hold $\sum_i d_{y_i} = N \bar d$ examples. A balanced tree
+uses about $N \log_2 K$. <NoteLink to="one-versus-rest">One-versus-rest</NoteLink> uses $NK$ and
+<NoteLink to="one-versus-one">one-versus-one</NoteLink> $N(K - 1)$. The filter tree's training sets are subsets of
+these, since filtering removes examples. The same tree shape that shortens prediction for frequent classes also shortens
+their training contribution.
+
+| Reduction | Binary problems | Examples per problem | Evaluations per prediction |
+| --- | --- | --- | --- |
+| One-versus-rest | $K$ | $N$ | $K$ |
+| One-versus-one | $K(K-1)/2$ | about $2N/K$ with balanced classes | $K(K-1)/2$, or $K - 1$ with a decision DAG |
+| Nested dichotomy, full evaluation | $K - 1$ | those with labels in $S_n$ | $K - 1$ |
+| Tree, greedy or filter | $K - 1$ | those with labels in $S_n$ | $d_k$: $\lceil\log_2 K\rceil$ balanced, $\approx \entropy(\pivec)$ Huffman |
+
+## Worked example
+
+Take $K = 4$ classes $a, b, c, d$ with training frequencies $\pivec = (\tfrac12, \tfrac14, \tfrac18, \tfrac18)$.
+
+**Two trees.** The balanced tree splits $\set{a, b}$ from $\set{c, d}$ at the root and then separates each pair. Every
+class has depth 2. The frequency-shaped (Huffman) tree splits $\set{a}$ from $\set{b, c, d}$, then $\set{b}$ from
+$\set{c, d}$, then $\set{c}$ from $\set{d}$. The depths are $1, 2, 3, 3$.
+
+**Class probabilities.** At some input $\xvec$, the three node classifiers of the frequency tree output
+
+- root: $\pr(y \in \set{b, c, d} \mid \xvec) = 0.8$,
+- second node: $\pr(y \in \set{c, d} \mid y \in \set{b, c, d}, \xvec) = 0.55$,
+- third node: $\pr(y = c \mid y \in \set{c, d}, \xvec) = 0.75$.
+
+The products along the paths are
+
+$$
+\begin{aligned}
+\pr(a \mid \xvec) &= 0.2, &\quad \pr(b \mid \xvec) &= 0.8 \times 0.45 = 0.36, \\
+\pr(c \mid \xvec) &= 0.8 \times 0.55 \times 0.75 = 0.33, &\quad \pr(d \mid \xvec) &= 0.8 \times 0.55 \times 0.25 = 0.11,
+\end{aligned}
+$$
+
+which sum to $1$. Greedy descent goes to $\set{b, c, d}$ ($0.8$), then to $\set{c, d}$ ($0.55$), then to $c$ ($0.75$),
+and predicts $c$. Full evaluation predicts $b$, the most probable class. The group $\set{c, d}$ beat $b$ at the second
+node on combined mass, $0.44$ against $0.36$, although neither $c$ nor $d$ alone beats $b$.
+
+The balanced tree with exact node classifiers represents the same four probabilities with root output
+$\pr(y \in \set{c, d} \mid \xvec) = 0.44$, left node $\pr(y = b \mid y \in \set{a, b}, \xvec) = 0.36 / 0.56 = 0.643$ and
+right node $0.33 / 0.44 = 0.75$. Its greedy descent goes to $\set{a, b}$ and then to $b$, the correct answer. The class
+probabilities are the same in both trees; the greedy decisions are not.
+
+**Expected cost.** With classes arriving at the training frequencies, the balanced tree evaluates $2$ classifiers per
+prediction. The frequency tree evaluates
+
+$$
+\bar d = \tfrac12 \cdot 1 + \tfrac14 \cdot 2 + \tfrac18 \cdot 3 + \tfrac18 \cdot 3 = 1.75.
+$$
+
+The entropy is $\entropy(\pivec) = \tfrac12 \log_2 2 + \tfrac14 \log_2 4 + 2 \cdot \tfrac18 \log_2 8 = 1.75$ bits. The
+frequencies are powers of $\tfrac12$, so the frequency tree meets the entropy bound exactly. With $N$ training examples,
+the frequency tree's three training sets hold $1.75N$ examples in total and the balanced tree's hold $2N$.
+
+If the classes instead arrive uniformly, $\qvec = (\tfrac14, \tfrac14, \tfrac14, \tfrac14)$, the frequency tree costs
+$\tfrac14(1 + 2 + 3 + 3) = 2.25$ evaluations, more than the balanced tree's $2$. The excess is
+$\KL(\qvec \,\|\, \rvec) = \tfrac14(\log_2 \tfrac12 + 0 + \log_2 2 + \log_2 2) = 0.25$ bits, with $\rvec = (\tfrac12,
+\tfrac14, \tfrac18, \tfrac18)$ the distribution implied by the depths.
+
+<TreeDepthExplorer />
+
+## Trade-offs
+
+- **Prediction cost against accuracy.** Greedy and filter-tree prediction cost $d_k$ evaluations, logarithmic in $K$ for
+  a balanced tree and near the entropy for a Huffman tree. Full evaluation of a nested dichotomy costs $K - 1$
+  evaluations but returns every class probability and the most probable class.
+- **Consistency.** A nested dichotomy with exact conditional probabilities at every node gives exact class probabilities
+  and, with full evaluation, the Bayes classifier. Greedy descent is not consistent. The filter tree is, with regret at
+  most the depth times the average binary regret <Cite id="beygelzimer2009tournaments" />.
+- **The tree is a modelling choice.** With a restricted node model, different trees give different accuracy, and there
+  are $(2K - 3)!!$ of them. Ensembles of random trees average the choice away at a proportional increase in cost
+  <Cite id="frank2004nested" />. Learned trees group confusable classes <Cite id="bengio2010labeltrees" />. A
+  frequency-shaped tree minimises cost but may create hard node problems, such as one frequent class against a mixture
+  of all others.
+- **No error correction.** Unlike an <NoteLink to="error-correcting-output-codes">error-correcting output
+  code</NoteLink>, one wrong decision on the path gives a wrong class. Errors near the root affect the most classes.
+- **Imbalance at the nodes.** A node's binary problem inherits the class frequencies of its two sides. A
+  one-against-rest split of a rare class is as imbalanced as the corresponding
+  <NoteLink to="one-versus-rest">one-versus-rest</NoteLink> problem; a balanced split of a balanced class set is not
+  imbalanced at all.
+- **Probabilities.** Nested dichotomies give normalised class probabilities by construction, which
+  <NoteLink to="one-versus-rest">one-versus-rest</NoteLink> scores do not. The filter tree gives a class, not
+  probabilities; conditional probability trees give probabilities in logarithmic time <Cite id="beygelzimer2009cpt" />.

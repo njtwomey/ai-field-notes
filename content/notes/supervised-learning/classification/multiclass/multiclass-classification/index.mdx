@@ -1,0 +1,283 @@
+---
+title: Multiclass classification
+kind: overview
+summary: 'Multiclass classification assigns one of $K > 2$ classes; the Bayes rule is $\argmax_k P(y = k \mid \xvec)$. Direct models handle $K$ classes natively. Reductions train binary classifiers and decode them through a code matrix; codewords at distance $d$ correct $\lfloor (d - 1)/2 \rfloor$ wrong classifiers.'
+tags: [classification, multiclass, reductions, information-theory, worked-example]
+aliases: [multiclass, multi-class classification, multinomial classification, polychotomous classification, K-class classification, multiclass reduction, reduction to binary, code matrix]
+requires: [bayes-decision-rule, logistic-regression]
+related: [multinomial-logistic-regression, support-vector-machine, source-coding-theorem, hierarchical-softmax, surrogate-losses, averaging-multiclass-metrics, binary-decomposition-for-ordinal-regression]
+references: [allwein2000reducing, dietterich1995ecoc, rifkin2004defense, hsu2002comparison, tewari2007consistency, hastie2009, bishop2006]
+status: draft
+updated: 2026-09-30
+---
+
+import { MulticlassReductions } from '../_shared/MulticlassReductions'
+
+<Definition>
+**Multiclass classification** is the task of predicting a label $y \in \{1, \dots, K\}$ with $K > 2$ mutually exclusive
+classes from an input $\xvec$. Under the 0–1 loss the optimal rule predicts the class with the largest posterior
+probability. There are two families of methods. **Direct** models, such as multinomial logistic regression, decision
+trees and nearest neighbours, handle $K$ classes in one model. **Reductions** train several binary classifiers and
+combine their outputs; one-versus-rest, one-versus-one, error-correcting output codes and tree reductions are all
+reductions, and each is a choice of code matrix <Cite id="allwein2000reducing" />.
+</Definition>
+
+## The problem and its Bayes rule
+
+Let $\eta_k(\xvec) = P(y = k \mid \xvec)$ be the class posteriors, with $\sum_k \eta_k(\xvec) = 1$. A classifier
+$\hat y$ incurs <NoteLink to="surrogate-losses">0–1 loss</NoteLink> $\indicator[\hat y(\xvec) \ne y]$. Predicting class
+$k$ at $\xvec$ has conditional risk
+
+$$
+\expect\brack{\indicator[k \ne y] \mid \xvec} = \sum_{j \ne k} \eta_j(\xvec) = 1 - \eta_k(\xvec).
+$$
+
+The risk is smallest for the class with the largest posterior, so the
+<NoteLink to="bayes-decision-rule">Bayes decision rule</NoteLink> is
+
+$$
+\hat y^*(\xvec) = \argmax_{k} \eta_k(\xvec),
+$$
+
+and the Bayes error is $\expect_{\xvec}\brack{1 - \max_k \eta_k(\xvec)}$. A multiclass method is **consistent** when its
+predictions approach $\hat y^*$ as the sample grows.
+
+Two things change from the binary case. First, a single score no longer suffices: the rule compares $K$ numbers, so
+they must be comparable. Second, the posterior of the predicted class can be small. With $\etavec(\xvec) =
+(0.4, 0.3, 0.3)$ the Bayes class has probability $0.4$, and a rule that only asks "is $\eta_k > \frac12$?" cannot find
+it.
+
+## Direct models
+
+Several learners are multiclass by construction.
+
+- **Probabilistic discriminative models.** <NoteLink to="multinomial-logistic-regression">Multinomial logistic
+  regression</NoteLink> models $\eta_k \propto \exp(\wvec_k^\top\xvec)$ and fits all $K$ weight vectors in one
+  likelihood. A neural network with a <NoteLink to="softmax-and-log-sum-exp">softmax</NoteLink> output layer does the
+  same with learnt features.
+- **Generative models.** <NoteLink to="linear-discriminant-analysis">Linear</NoteLink> and
+  <NoteLink to="quadratic-discriminant-analysis">quadratic discriminant analysis</NoteLink> and
+  <NoteLink to="naive-bayes">naive Bayes</NoteLink> model each class density $p(\xvec \mid y = k)$ and the priors, and
+  obtain all $K$ posteriors from Bayes' theorem.
+- **Partitioning and local methods.** A <NoteLink to="decision-tree">decision tree</NoteLink> splits on an impurity of
+  the $K$ class proportions and stores those proportions at its leaves.
+  <NoteLink to="k-nearest-neighbours">k-nearest neighbours</NoteLink> votes among $K$ classes.
+- **Multiclass margin methods.** <NoteLink to="multiclass-support-vector-machines">Multiclass support vector
+  machines</NoteLink> solve one optimisation problem with a margin between the true class's score and each other
+  class's score.
+
+Direct models see all classes at once. Their scores are trained against each other, so comparing them is meaningful.
+Their cost is one larger problem instead of several small ones.
+
+## Reductions to binary problems
+
+A reduction uses a binary learner as a black box. It defines $L$ binary problems by relabelling the training set,
+trains one classifier $f_l$ per problem, and maps the $L$ outputs at a test point back to a class.
+
+- <NoteLink to="one-versus-rest">One-versus-rest</NoteLink>: $K$ problems, class $k$ against all others; predict the
+  largest score.
+- <NoteLink to="one-versus-one">One-versus-one</NoteLink>: $K(K - 1)/2$ problems, one per pair of classes, each trained
+  only on the two classes involved; predict by majority vote or by coupling pairwise probabilities.
+- <NoteLink to="error-correcting-output-codes">Error-correcting output codes</NoteLink>: $L$ problems, each a split of
+  the classes into two groups, chosen so that the classes' codewords are far apart; predict the nearest codeword
+  <Cite id="dietterich1995ecoc" />.
+- <NoteLink to="nested-dichotomies-and-tree-reductions">Nested dichotomies and tree reductions</NoteLink>: $K - 1$
+  problems arranged in a binary tree; predict by walking from the root to a leaf.
+
+### The code matrix
+
+All four are instances of one construction <Cite id="allwein2000reducing" />. A **code matrix**
+$\Mmat \in \{-1, 0, +1\}^{K \times L}$ has one row per class and one column per binary problem. Column $l$ defines
+problem $l$: examples of class $k$ are positive if $M_{kl} = +1$, negative if $M_{kl} = -1$, and left out if
+$M_{kl} = 0$. Row $k$ is the **codeword** of class $k$, the outputs that the $L$ classifiers should give for an example
+of class $k$. For $K = 4$:
+
+$$
+\Mmat_{\text{OvR}} = \begin{pmatrix} + & - & - & - \\ - & + & - & - \\ - & - & + & - \\ - & - & - & + \end{pmatrix},
+\qquad
+\Mmat_{\text{OvO}} = \begin{pmatrix} + & + & + & 0 & 0 & 0 \\ - & 0 & 0 & + & + & 0 \\ 0 & - & 0 & - & 0 & + \\
+0 & 0 & - & 0 & - & - \end{pmatrix},
+\qquad
+\Mmat_{\text{tree}} = \begin{pmatrix} + & + & 0 \\ + & - & 0 \\ - & 0 & + \\ - & 0 & - \end{pmatrix}.
+$$
+
+The tree matrix encodes the balanced tree that first separates $\{1, 2\}$ from $\{3, 4\}$. A dense error-correcting
+code has no zeros and more columns than one-versus-rest.
+
+**Decoding** compares the vector of outputs $\fvec(\xvec) = (f_1(\xvec), \dots, f_L(\xvec))$ with each codeword and
+predicts the closest class. **Hamming decoding** uses only the signs and counts disagreements, with a zero entry
+counting one half. **Loss-based decoding** uses the magnitudes: it predicts
+$\argmin_k \sum_l \ell(M_{kl} f_l(\xvec))$ for the margin loss $\ell$ the binary learner minimised, such as the logistic
+loss $\ell(m) = \log(1 + e^{-m})$. Loss-based decoding breaks the ties that Hamming decoding leaves.
+
+Allwein, Schapire and Singer bound the multiclass training error of loss-based decoding by
+
+$$
+\frac{L\,\bar\varepsilon}{\rho\,\ell(0)},
+$$
+
+where $\bar\varepsilon$ is the average binary loss over the $L$ problems and $\rho$ is the minimum distance between two
+codewords <Cite id="allwein2000reducing" />. The ratio $L/\rho$ measures how much a code amplifies binary errors. It is
+$K/2$ for one-versus-rest and close to 2 for one-versus-one and for random codes.
+
+## The information-theoretic view
+
+A reduction sends the class through $L$ binary classifiers, each of which can err, and recovers it by decoding. This is
+a channel code, and the classical results about codes apply.
+
+**At least $\log_2 K$ bits.** The codewords must be distinct, or two classes could never be told apart. There are
+$2^L$ binary words of length $L$, so $K$ distinct codewords need $2^L \ge K$, that is $L \ge \lceil\log_2 K\rceil$. A
+code of exactly that length, such as the binary expansion of the class index, has minimum distance 1: one wrong
+classifier turns one codeword into another, and the error is not even detected. Its columns are also arbitrary splits of
+the classes, which may be hard to learn.
+
+**Redundancy buys correction.** Let the minimum distance between codewords be $d$ and let $t = \lfloor (d - 1)/2
+\rfloor$. If a received word were within distance $t$ of two codewords, the triangle inequality would put those
+codewords within $2t < d$ of each other. So the Hamming balls of radius $t$ around the codewords are disjoint, and
+nearest-codeword decoding corrects any $t$ wrong classifiers <Cite id="hamming1950" />. Each ball holds
+$\sum_{i=0}^{t}\binom{L}{i}$ words, and all of them fit among the $2^L$ words of length $L$:
+
+$$
+K \sum_{i=0}^{t}\binom{L}{i} \le 2^L
+\quad\Longleftrightarrow\quad
+L - \log_2 K \ge \log_2 \sum_{i=0}^{t}\binom{L}{i}.
+$$
+
+The left-hand side is the **redundancy**, the bits beyond the minimum. Correcting $t$ errors requires a redundancy of at
+least the logarithm of a Hamming ball's size. One-versus-rest spends $K - \log_2 K$ redundant bits and gets $d = 2$: it
+detects a single error and corrects none.
+
+**A reduction restricts which columns a code may use.** In a channel code any column is allowed. In a reduction, a
+column and its complement define the same binary problem with the labels swapped, and a constant column defines no
+problem. A dense code therefore has at most $(2^K - 2)/2 = 2^{K - 1} - 1$ distinct columns. For $K = 4$ that is 7, so
+long codes are impossible for small $K$. Each column must also be learnable: a split that groups classes lying far apart
+is a hard binary problem, and a code that is ideal as a channel code can be poor as a reduction.
+
+**A tree is a prefix code.** In a tree reduction, the path from the root to the leaf of class $k$, read as left and
+right turns, is a binary codeword of length $\ell_k$. No path is the start of another, so the codewords form a prefix
+code, and prediction reads only the bits on one path. A full binary tree with $K$ leaves has $K - 1$ internal nodes
+(binary classifiers) and satisfies Kraft's equality $\sum_k 2^{-\ell_k} = 1$. The expected number of classifiers
+evaluated for a test point of class distribution $\pi$ is $\sum_k \pi_k \ell_k$, and by the
+<NoteLink to="source-coding-theorem">source coding theorem</NoteLink> it is at least the
+<NoteLink to="entropy">entropy</NoteLink> $H(\pi)$ in bits. A Huffman tree on the class frequencies comes within one bit
+of that bound, which is the construction behind the
+<NoteLink to="hierarchical-softmax">hierarchical softmax</NoteLink>. The prefix code has minimum distance 1 in effect: a
+wrong turn at the root is never undone.
+
+<Derivation title="Expected depth of a tree reduction is at least the entropy">
+Let the leaf depths $\ell_k$ satisfy $\sum_k 2^{-\ell_k} \le 1$ (Kraft's inequality holds for the leaves of any binary
+tree). Then
+
+$$
+H(\pi) - \sum_k \pi_k \ell_k = \sum_k \pi_k \log_2 \frac{2^{-\ell_k}}{\pi_k} \le \log_2 \sum_k \pi_k \frac{2^{-\ell_k}}{\pi_k}
+= \log_2 \sum_k 2^{-\ell_k} \le 0,
+$$
+
+where the first inequality is <NoteLink to="expectation">Jensen's inequality</NoteLink> for the concave $\log_2$.
+Equality needs $2^{-\ell_k} = \pi_k$ for every class. With uniform classes, $H = \log_2 K$, and a balanced tree of depth
+$\lceil\log_2 K\rceil$ is optimal.
+</Derivation>
+
+## Comparison
+
+The table compares the methods for $K$ classes and $n$ training examples, with roughly balanced classes. A binary
+training run on $m$ examples costs $O(m^\alpha)$: $\alpha \approx 1$ for linear models trained by stochastic
+<NoteLink to="gradient">gradient</NoteLink>, $\alpha$ between 2 and 3 for
+<NoteLink to="kernel-support-vector-machine">kernel support vector machines</NoteLink>.
+
+| | One-versus-rest | One-versus-one | Dense output code | Tree reduction | Direct model |
+| --- | --- | --- | --- | --- | --- |
+| Binary problems | $K$ | $K(K - 1)/2$ | $L$, typically $10\log_2 K$ for large $K$ (columns repeat when $L > 2^{K-1} - 1$) | $K - 1$ | none, one joint problem |
+| Examples per problem | $n$ | $\approx 2n/K$ | $n$ | $n$ at the root, fewer below | $n$ |
+| Training cost | $K n^\alpha$ | $\approx 2^{\alpha - 1} K^{2 - \alpha} n^\alpha$ | $L n^\alpha$ | $\approx n^\alpha \log_2 K$ if balanced | one problem with $K$ times the parameters |
+| Classifiers per prediction | $K$ | $K(K - 1)/2$ | $L$ | $\approx\log_2 K$ | one model, $K$ scores |
+| Ambiguity | unclaimed and contested regions under the sign rule; none under argmax | vote ties | distance ties under Hamming decoding | none | none |
+| Class probabilities | after calibration and normalisation | by pairwise coupling | by loss-based decoding, approximately | product of branch probabilities | native for probabilistic models |
+| Minimum distance $\rho$ | 2 | $(L - 1)/2 + 1$ | about $L/2$ | 1 in effect | not applicable |
+| Imbalance per problem | $K - 1$ negatives per positive | balanced | depends on the split | balanced if the tree is | none induced |
+| Consistency | yes with a proper loss; not with the <Gloss name="hinge-loss">hinge loss</Gloss> | yes when pairwise decisions are Bayes | not with Hamming decoding | yes if branch probabilities are multiplied | multinomial logistic yes; depends on the loss for margin methods |
+
+Notes on the rows:
+
+- **Cost.** One-versus-one has more problems, but they are small. For $\alpha = 2$ its training cost is about $2n^2$,
+  against $Kn^2$ for one-versus-rest. Hsu and Lin found one-versus-one and its
+  <Gloss name="dag">directed-acyclic-graph</Gloss> variant the most practical choices for kernel support vector machines
+  <Cite id="hsu2002comparison" />. Dense codes of length about $10\log_2 K$ were used by Allwein, Schapire and Singer
+  <Cite id="allwein2000reducing" />.
+- **Minimum distance.** $\rho$ counts a position where either codeword is zero as one half, following Allwein,
+  Schapire and Singer. In one-versus-one, two codewords have opposite signs in the one column that pits their classes
+  against each other and at least one zero in every other column <Cite id="allwein2000reducing" />.
+- **Consistency.** One-versus-one voting is consistent when every pairwise classifier makes the Bayes decision for its
+  pair, since the Bayes class then wins all of its $K - 1$ duels and no other class can. Hamming decoding discards the
+  bit probabilities: with Bayes-optimal bits and posterior $(0.4, 0.3, 0.3, 0)$, the exhaustive four-class code ties
+  classes 1, 2 and 3. A tree that follows the more probable branch at each node is not the Bayes rule: with posterior
+  $(0.4, 0.3, 0.3)$ and a root that separates $\{1\}$ from $\{2, 3\}$, the walk goes to $\{2, 3\}$, which has
+  probability 0.6, and misses class 1. Multiplying branch probabilities recovers every $\eta_k$ exactly by the
+  <NoteLink to="derivative">chain rule</NoteLink>. Multiclass margin losses differ: Tewari and Bartlett show that some
+  multiclass <Gloss name="svm">support vector machine</Gloss> losses are inconsistent and others are consistent
+  <Cite id="tewari2007consistency" />.
+
+**Accuracy.** No reduction dominates. Rifkin and Klautau argue that with well-tuned regularised binary learners,
+one-versus-rest is as accurate as the alternatives, and that many reported gaps come from untuned baselines
+<Cite id="rifkin2004defense" />. Error-correcting codes help most when the binary classifiers make errors that are not
+correlated with each other.
+
+## Choosing a method
+
+- **A probabilistic model with gradient training** (logistic model, neural network): use the direct softmax model.
+  It gives coherent probabilities, and its cost grows with $K$ only through the output layer.
+- **A binary-only learner with superlinear training cost** (kernel support vector machine): one-versus-one. Its small
+  problems make training cheapest.
+- **A linear model on large data**: one-versus-rest. The problems are independent and parallelise, and prediction is
+  one <NoteLink to="matrix-multiplication">matrix product</NoteLink>. Calibrate if the scores come from a margin loss.
+- **A weak or unstable binary learner** (shallow trees, small networks) with spare compute: an error-correcting code.
+  The extra columns average out uncorrelated errors.
+- **Very many classes** (thousands and more): a tree reduction or a hierarchical softmax, which evaluate about
+  $\log_2 K$ classifiers per prediction.
+- **Ordered classes**: an ordinal model, such as a
+  <NoteLink to="binary-decomposition-for-ordinal-regression">binary decomposition for ordinal regression</NoteLink>,
+  which uses the order that nominal reductions ignore.
+
+Evaluate the result with multiclass metrics; <NoteLink to="averaging-multiclass-metrics">averaging multiclass
+metrics</NoteLink> explains micro and macro averages.
+
+## Interactive: five rules on one dataset
+
+<MulticlassReductions />
+
+Every rule in the figure uses the same linear logistic base learner. The differences come only from the binary
+problems each rule defines and from how it combines the outputs. "OvR claims" shows the unclaimed and contested
+regions; "OvR argmax" resolves them by comparing scores. "ECOC Hamming" uses the exhaustive seven-column code and leaves
+large tied regions, because columns such as $\{1, 4\}$ against $\{2, 3\}$ are not linearly separable here and err
+often. "ECOC loss" decodes the same code by summed logistic loss and has no ties. The multinomial model fits one joint
+likelihood.
+
+## Worked example: one wrong classifier
+
+Four classes, and the test point belongs to class 2. Compare three codes when binary classifiers err.
+
+**One-versus-rest**, codeword $(0, 1, 0, 0)$ in 0/1 form, $L = 4$, $d = 2$. If classifier 1 errs, the received word is
+$(1, 1, 0, 0)$. Its Hamming distances to the four codewords are $(1, 1, 3, 3)$: classes 1 and 2 tie. If classifier 2
+errs, the received word is $(0, 0, 0, 0)$, at distance 1 from every codeword: a four-way tie. One error is detected but
+not corrected.
+
+**Exhaustive code**, $L = 7$, rows
+
+$$
+\begin{aligned}
+\text{class 1}&: 1\,1\,1\,1\,1\,1\,1, & \text{class 2}&: 1\,1\,1\,0\,0\,0\,0, \\
+\text{class 3}&: 1\,0\,0\,1\,1\,0\,0, & \text{class 4}&: 0\,1\,0\,1\,0\,1\,0.
+\end{aligned}
+$$
+
+Every pair of rows differs in 4 positions, so $d = 4$ and $t = 1$. If classifier 7 errs, the received word is
+$1\,1\,1\,0\,0\,0\,1$, at distances $(3, 1, 5, 5)$: class 2 is recovered. If classifiers 6 and 7 both err, the received
+word $1\,1\,1\,0\,0\,1\,1$ is at distances $(2, 2, 6, 4)$: classes 1 and 2 tie. Two errors are detected but not
+corrected, as $d - 1 = 3 \ge 2 > t$ predicts. The Hamming bound allows this: $4 \times (1 + 7) = 32 \le 2^7 = 128$.
+
+**Balanced tree**, root $\{1, 2\}$ against $\{3, 4\}$, then $1$ against $2$ and $3$ against $4$. Class 2 has codeword
+"left, right" of length $2 = \log_2 4$, and a prediction evaluates two classifiers. If the root classifier errs, the
+walk enters $\{3, 4\}$ and ends at class 3 or 4 whatever the second classifier does.
+
+The minimum code length is $\log_2 4 = 2$ bits. The tree uses exactly 2 bits per prediction and corrects nothing,
+one-versus-rest uses 4 and detects one error, and the exhaustive code uses 7 and corrects one.

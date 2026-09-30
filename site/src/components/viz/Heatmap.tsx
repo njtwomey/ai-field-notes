@@ -6,6 +6,7 @@ import { EChart, type EChartClick, type PlotPointer } from './EChart'
 import type { Handle } from './handles'
 import { vectorLines, type Vector } from './vectors'
 import {
+  categorical,
   chrome,
   diverging,
   interpolateColors,
@@ -54,8 +55,14 @@ export type HeatmapProps = {
   z: number[][]
   xLabel?: string
   yLabel?: string
-  /** `sequential` for magnitude, `diverging` for signed values around `midpoint`. */
-  scale?: 'sequential' | 'diverging'
+  /**
+   * `sequential` for magnitude, `diverging` for signed values around `midpoint`, `categorical` for unordered classes:
+   * z holds a class index k ≥ 0, drawn in palette slot k, or a neutral value, -1 (unassigned, e.g. claimed by no class
+   * or a tie) or -2 (contested, e.g. claimed by several). A categorical grid has no colour bar.
+   */
+  scale?: 'sequential' | 'diverging' | 'categorical'
+  /** Categorical only: a name per class index, shown in the tooltip. Pass a memoised array. */
+  categoryNames?: string[]
   range?: [number, number]
   /**
    * Label the colour bar at these values, e.g. the classes 1…K of an ordinal map. ECharts labels a continuous bar only
@@ -103,6 +110,20 @@ export type HeatmapProps = {
 }
 
 const NO_OVERLAY: HeatmapOverlay[] = []
+
+/** A categorical cell's colour: palette slot k for class k, a light neutral for -1, a darker neutral for -2. */
+function categoryColor(mode: Mode, value: number): string {
+  if (value === -2) return chrome(mode).muted
+  if (value < 0) return chrome(mode).grid
+  return categorical(mode)[Math.round(value) % categorical(mode).length]
+}
+
+/** Tooltip text for a categorical cell. */
+function categoryName(value: number, names: string[] | undefined): string {
+  if (value === -1) return 'unassigned'
+  if (value === -2) return 'contested'
+  return names?.[value] ?? formatNumber(value)
+}
 
 /** Contour lines as one ink line series (segments split by null points), plus one label per level. */
 function contourSeries(x: number[], y: number[], z: number[][], contours: HeatmapProps['contours'], mode: Mode) {
@@ -173,7 +194,10 @@ function overlaySeries(
   return overlay.flatMap((s, index): OverlaySeries[] => {
     if (s.values || s.colors) {
       const colorAt = (i: number) =>
-        s.colors?.[i] ?? interpolateColors(stops, hi > lo ? ((s.values?.[i] ?? lo) - lo) / (hi - lo) : 0)
+        s.colors?.[i] ??
+        (scale === 'categorical'
+          ? categoryColor(mode, s.values?.[i] ?? -1)
+          : interpolateColors(stops, hi > lo ? ((s.values?.[i] ?? lo) - lo) / (hi - lo) : 0))
       // With values, colour carries the value and `group` only picks the marker shape. Every named group keeps a
       // series, so the legend (drawn in ink, since colour means something else) does not change as points move.
       const groups = s.group ? (s.groupNames?.map((_, g) => g) ?? [...new Set(s.group)].sort((a, b) => a - b)) : [0]
@@ -237,6 +261,7 @@ export function Heatmap({
   xLabel,
   yLabel,
   scale = 'sequential',
+  categoryNames,
   range,
   scaleTicks,
   fillOpacity = 1,
@@ -256,6 +281,9 @@ export function Heatmap({
   const { resolved: mode } = useTheme()
   const [rangeLo, rangeHi] = range ?? [undefined, undefined]
   const clickable = !!onCellClick
+  const isCategorical = scale === 'categorical'
+  // A value for the option's memo dependencies, so an inline array does not redraw the grid.
+  const namesKey = categoryNames?.join('\u0000')
 
   // The colour scale's ends, shared by the grid and by overlays coloured by value.
   const [lo, hi] = useMemo(() => {
@@ -275,8 +303,10 @@ export function Heatmap({
     const dx = x.length > 1 ? x[1] - x[0] : 1
     const dy = y.length > 1 ? y[1] - y[0] : 1
     const cells = y.flatMap((yv, i) => x.map((xv, j) => [xv, yv, z[i][j]]))
+    const names = namesKey?.split('\u0000')
+    const valueText = (v: number) => (isCategorical ? categoryName(v, names) : formatNumber(v))
     return {
-      grid: gridMargins(!!scaleTicks || !colorBar),
+      grid: gridMargins(!!scaleTicks || !colorBar || isCategorical),
       legend: {
         show: structure.length > 1,
         // Each entry shows its series' marker, so shapes that encode groups read correctly in the legend.
@@ -292,13 +322,13 @@ export function Heatmap({
         trigger: 'item',
         formatter: (p: { seriesName: string; value: number[] }) =>
           p.seriesName === '__grid'
-            ? `(${formatNumber(p.value[0])}, ${formatNumber(p.value[1])})<br/>${valueLabel}: ${formatNumber(p.value[2])}`
+            ? `(${formatNumber(p.value[0])}, ${formatNumber(p.value[1])})<br/>${valueLabel}: ${valueText(p.value[2])}`
             : `${p.seriesName}<br/>(${formatNumber(p.value[0])}, ${formatNumber(p.value[1])})`,
       },
       visualMap: {
         min: lo,
         max: hi,
-        show: !scaleTicks && colorBar,
+        show: !scaleTicks && colorBar && !isCategorical,
         dimension: 2,
         seriesIndex: 0,
         calculable: false,
@@ -344,11 +374,12 @@ export function Heatmap({
             const cy = api.value(1)
             const [x0, y0] = api.coord([cx - dx / 2, cy + dy / 2])
             const [x1, y1] = api.coord([cx + dx / 2, cy - dy / 2])
+            const color = isCategorical ? categoryColor(mode, api.value(2)) : api.visual('color')
             return {
               type: 'rect',
               shape: { x: x0, y: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 },
               style: {
-                fill: fillOpacity < 1 ? mute(api.visual('color'), surface, fillOpacity) : api.visual('color'),
+                fill: fillOpacity < 1 ? mute(color, surface, fillOpacity) : color,
                 stroke: 'none',
               },
             }
@@ -386,6 +417,8 @@ export function Heatmap({
     xLabel,
     yLabel,
     scale,
+    isCategorical,
+    namesKey,
     lo,
     hi,
     scaleTicks,
@@ -431,7 +464,7 @@ export function Heatmap({
     observer.observe(wrapper.current)
     return () => observer.disconnect()
   }, [equalAspect])
-  const margins = gridMargins(!!scaleTicks || !colorBar)
+  const margins = gridMargins(!!scaleTicks || !colorBar || isCategorical)
   const xSpan = x.length > 1 ? (x[x.length - 1] - x[0]) * (x.length / (x.length - 1)) : 1
   const ySpan = y.length > 1 ? (y[y.length - 1] - y[0]) * (y.length / (y.length - 1)) : 1
   const chartHeight = equalAspect
@@ -457,7 +490,7 @@ export function Heatmap({
         {width > 0 && chart}
       </div>
     )
-  if (!scaleTicks) return chart
+  if (!scaleTicks || isCategorical) return chart
   return (
     <div className="flex items-center">
       <div className="min-w-0 flex-1">{chart}</div>
