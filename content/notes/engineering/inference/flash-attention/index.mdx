@@ -39,9 +39,9 @@ matrices also dominate memory: for $N = 4096$ in 16-bit precision, $\Smat$ takes
 8 GiB for a batch of 8 sequences with 32 heads. The backward pass needs $\Pmat$ again, so standard implementations keep
 it.
 
-Splitting the computation into blocks along the key dimension is easy for $\Qmat \Kmat^\tr$ and for $\Pmat \Vmat$, but
-the softmax normalises each row over all $N$ keys. The obstacle is to compute a row-wise softmax without first seeing
-the whole row.
+Splitting the computation into blocks along the key dimension lets $\Qmat \Kmat^\tr$ and $\Pmat \Vmat$ be computed
+block by block, but the softmax normalises each row over all $N$ keys. The obstacle is to compute a row-wise softmax
+without first seeing the whole row.
 
 ## Mechanism
 
@@ -126,12 +126,13 @@ principle, and gave a practical $O(\sqrt N)$ implementation, without optimising 
 
 ## Cost
 
-FlashAttention trained BERT-large 15% faster than the MLPerf 1.1 record, <Gloss name="gpt-2" /> at sequence length 1K three times faster
-than standard implementations, and made sequence lengths of 16K practical, and 64K with a block-sparse variant
-<Cite id="dao2022" />.
+FlashAttention trained BERT-large 15% faster than the MLPerf 1.1 record, <Gloss name="gpt-2" /> at sequence length 1K
+three times faster than standard implementations, and made sequence lengths of 16K practical, and 64K with a
+block-sparse variant <Cite id="dao2022" />.
+
 FlashAttention-2 reorders the loops so that the outer loop runs over query blocks, which removes the repeated writes of
-$\Omat$, parallelises over the sequence dimension and moves non-matrix-multiply work out of the inner loop. It runs about
-twice as fast as the first version and reaches 50–73% of the A100's peak throughput in the forward pass
+$\Omat$, parallelises over the sequence dimension and moves non-matrix-multiply work out of the inner loop. It runs
+about twice as fast as the first version and reaches 50–73% of the A100's peak throughput in the forward pass
 <Cite id="dao2023" />.
 
 ## Trade-offs
@@ -144,7 +145,7 @@ twice as fast as the first version and reaches 50–73% of the A100's peak throu
 - **Hardware-specific kernels.** Block sizes depend on SRAM size, and a fast kernel is written for each GPU generation
   and head width. Masks, dropout and positional biases must be fused into the kernel, because the scores never leave
   the chip.
-- **Decoding.** During autoregressive decoding with a <NoteLink to="key-value-cache">KV cache</NoteLink>, each step has one
+- **Decoding.** During autoregressive decoding with a <NoteLink to="key-value-cache">key-value cache</NoteLink>, each step has one
   query row, so there is no $N \times N$ matrix to avoid. The time per step is set by reading the cache; splitting the
   cache across blocks processed in parallel and merging them with the same rule helps there.
 
@@ -152,7 +153,7 @@ twice as fast as the first version and reaches 50–73% of the A100's peak throu
 
 - **Merging normalised outputs.** Partial outputs from different blocks must be merged through their maxima and
   normalisers; averaging normalised outputs is wrong, as the worked example shows.
-- **Returning the log-sum-exp.** Code that needs the attention probabilities, for example to visualise them, cannot get
+- **Access to attention probabilities.** Code that needs the attention probabilities, for example to visualise them, cannot get
   them from FlashAttention without recomputing them.
 - **Mask semantics.** A row whose keys are all masked has $\ell = 0$; kernels must define its output, usually zero, to
   avoid dividing by zero.
