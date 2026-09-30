@@ -1,290 +1,123 @@
-# aifn (aifn-js)
+# aifn-js: core and applications
 
-The AI Field Notes library: tested, traceable implementations of the models, algorithms and numerics behind the
-site's figures. The plan is `docs/aifn-plan.md`; this file is the contract every module follows.
+The AI Field Notes library in two workspace packages. The decision and its reasoning are in
+`docs/aifn-architecture.md` ("Decided: core and applications").
 
-## Layout
+| Package        | Folder          | Imported as                                                       | Holds                                                              |
+| -------------- | --------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `aifn`         | `core/`         | `aifn/<family>/<module>` (`aifn` for foundation's common surface) | Tensor-native numerics, generic engines and every protocol         |
+| `aifn-applied` | `applications/` | `aifn-applied/<area>/…`                                           | Named models, problems, environments, datasets and worked examples |
 
-- `src/<module>/index.ts` is a module's public surface, imported as `aifn/<module>` (e.g. `aifn/linalg`). A module may
-  split its code into several files in its folder; only `index.ts` is public.
-- `test/<module>.test.ts` (or `test/<module>/*.test.ts`) holds its vitest tests; run them with `make test`.
-- `test/fixtures/<module>.json` holds golden values generated in Python by `test/fixtures/generate.py`
-  (`make fixtures`). Tests read fixtures; they never call Python.
-- Modules import each other only through `aifn/<module>`, never by relative path across modules, and only downwards in
-  the tier order below (no cycles).
-- No dependency outside this repository. No React, no DOM: aifn runs in Node, in the browser and in a Web Worker.
+Both packages are trees (`.scratch/aifn/module-tree.md`): core has 12 families in tiers, each holding modules in local
+tiers and optional shared files at the family root; applications have 15 areas holding groups and modules, where a
+group's root files are its shared layer. `modules.json` is the one source for the tree: families, modules, local
+tiers, shared files, areas and their DAG (`dependsOn`), and the taxonomy topics each serves. The layer lint
+(`node scripts/aifn-layers.ts`, in `make lint` and `make test`), the tables below and the lab's sidebar read it.
 
-## Layers
+## What core is
 
-A module may import (values or types) only from modules in strictly lower tiers. The table below is the source of
-truth: `node scripts/aifn-layers.ts` (run by `make lint` and so by `make check`) parses it, fails on any import that
-goes up or across a tier, on a relative import into another module's folder, and on a module missing from the table.
-`docs/aifn-plan.md` §3 carries a copy, which the script checks against this one.
+A module or export belongs in core when it passes all of C1–C5, or C6 alone:
+
+- **C1** Its interface names no model, problem or dataset.
+- **C2** At least two areas (or core modules) use it.
+- **C3** It is testable against a reference (NumPy, SciPy, scikit-learn, a textbook value) or a law.
+- **C4** It is Tensor-native: inputs are `number | Tensor` or a declared protocol object; outputs are Tensors, numbers
+  or protocol objects.
+- **C5** It does not change when a note or a figure does.
+- **C6** Other core code depends on it. Foundations such as `zeros`, the `*Like` input types and `Value` are core
+  because the rest of core is built on them, not because they are capabilities.
+
+Core is the numerical library: primitives and their derivatives; linear algebra, special functions, randomness and
+statistics; the solvers (optimisation, roots, quadrature, ODE and SDE integration, mathematical programming, optimal
+transport, interpolation); the generic inference engines (message passing, EP, MCMC, VI, Kalman-type filters); signal
+and system operations; general learning parts (kernels, standard losses and metrics, neural-network layers, pipelines
+and validation); and every protocol the rest implements. Its module contract is `core/README.md`.
+
+## What an application is
+
+An application is a named model, problem, environment, dataset or worked example built from core: k-means, a GMM
+fitted by EM, the dishonest casino, a multi-armed bandit, the heat equation. Applications live in 15 areas named after
+the site's subjects, not its folders; a note moving category changes nothing here. Didactic code that is itself the
+lesson lives here too, written to be read, and notes show it rather than copy it. Details: `applications/README.md`.
+
+## Import rules
+
+| From               | May import                                                                                                                                                             | May not                                                                                            |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| core file          | modules of lower family tiers; modules of its own family in lower local tiers (D5); its ancestors' shared files by relative path; a family index only for shared names | `aifn-applied`; the package root; its own family's index; anything outside aifn; the DOM           |
+| core test          | core                                                                                                                                                                   | `aifn-applied`                                                                                     |
+| application file   | any core node; its ancestors' shared files by relative path; areas below it in the DAG                                                                                 | siblings or other nodes of its own area (siblings share through the parent); anything outside aifn |
+| lab, site, widgets | core and applications, by public path                                                                                                                                  | defining numerics; relative paths into aifn                                                        |
+
+- No relative import leaves its module except upward to an ancestor's shared file; a parent never imports a child
+  (except an `index.ts` re-exporting it).
+- Tests of a core combinator with an application (a pipeline of `standardScaler` and a model) are application tests.
+
+## Promotion and demotion
+
+- **Promote** an application export to core when C1–C5 hold: its interface names no model, a second area (or a core
+  module) needs it, a reference fixture exists, and its surface is Tensor-native.
+- **Demote** a core export to an application when it names a problem, has consumers in one area only, or exists for
+  one figure.
+- **How.** Move the file (`node scripts/aifn-moves.ts` rewrites importers from `moves.json`), update `modules.json`,
+  move or add the fixture, and rewrite importers in the same change.
+
+## Layers (generated)
+
+Families import only strictly lower tiers; modules of a family import only lower local tiers of it.
 
 <!-- aifn-layers:start -->
 
-| Tier | Modules                                                                    |
-| ---- | -------------------------------------------------------------------------- |
-| 0    | tensor                                                                     |
-| 1    | special, autodiff                                                          |
-| 2    | linalg, kernels                                                            |
-| 3    | random, geometry                                                           |
-| 4    | trace, stats                                                               |
-| 5    | optim, solve, quadrature, graph                                            |
-| 6    | distributions, programming, ode, pde, smooth, dsp, maps                    |
-| 7    | info, mcmc, vi, ep, pgm, sde, fields, control, timeseries, ot, bandits, rl |
-| 8    | metrics, losses                                                            |
-| 9    | estimators                                                                 |
-| 10   | preprocess, glm, gp, classify, cluster, embed, nn                          |
-| 11   | gam, compose, validate, diffusion                                          |
-| 12   | datasets                                                                   |
+<!-- Generated from aifn-js/modules.json by `node scripts/aifn-layers.ts --write`; do not edit. -->
+
+| Tier | Family      | Modules (local tiers, low to high; * gap)                                                              | Shared             |
+| ---- | ----------- | ------------------------------------------------------------------------------------------------------ | ------------------ |
+| 0    | foundation  | contracts, errors · registry · tensor · pytree, fourier · convolution, autodiff, random · space, trace |                    |
+| 1    | numerics    | special · linalg · polynomial, quadrature, roots, geometry · interpolate                               |                    |
+| 2    | graph       | traversal, shortest-paths, spanning-trees, structures, matrices · flows, structured, propagation       | graph, tree, heap  |
+| 3    | probability | stats, bijectors, samplers · distributions · likelihoods, information                                  |                    |
+| 3    | optim       | line-search · first-order, second-order, proximal, derivative-free, programming · minimize             | options, schedules |
+| 3    | systems     | (one module)                                                                                           |                    |
+| 4    | inference   | model · exact, message-passing, expectation-propagation, variational, stochastic, filtering · engines  |                    |
+| 4    | dynamics    | ode, sde · fields, control                                                                             |                    |
+| 4    | signal      | windows · filters, spectral, time-frequency, wavelets, statistical, multirate* · decompositions        | signal             |
+| 4    | transport   | (one module)                                                                                           |                    |
+| 5    | learning    | estimators, kernels · losses, metrics, compose, validate                                               |                    |
+| 6    | nn          | functional, init · layers · training                                                                   |                    |
 
 <!-- aifn-layers:end -->
 
-Reading the order: numerics first (tensor, then the scalar special functions and autodiff, then linear algebra),
-randomness and geometry above them, then the protocols that use randomness (trace, stats), the solvers, probability
-and the dynamics built on the solvers, then evaluation (metrics, losses), the estimator protocol, the models, the
-compositions of models, and datasets last, so that a dataset may be generated by any model. Shared protocol types sit
-in the lowest module that all their users can import (e.g. `Target`, an unnormalised log-density, is in
-`distributions` so that `mcmc` and `vi` both use it without importing each other).
+## Areas (generated)
 
-## Style
+An area imports core freely and the areas it depends on (transitively).
 
-- TypeScript, strict. Readable before clever: these implementations are read by people learning the ideas. Comment the
-  non-obvious _why_ and cite the source of an algorithm in a comment (author, year, equation or section).
-- Functions over classes, plain data over hidden state. Where a stateful object is natural (a fitted model, a
-  distribution) it is a plain object whose fields are public and documented.
-- Every exported function has a TSDoc comment stating inputs (with shapes), outputs and conventions.
-- Numerical failure is reported, never hidden: a result carries `jitter`, `singular`, `diverged` or `converged` flags
-  where they apply. No silent clamping or flooring.
-- Names spell ideas out (`choleskyDecomposition` may be shortened to `cholesky`; never cryptic abbreviations).
+<!-- aifn-areas:start -->
 
-## Numbers: `aifn/tensor`
+<!-- Generated from aifn-js/modules.json by `node scripts/aifn-layers.ts --write`; do not edit. -->
 
-```ts
-type DType = 'float64' | 'float32' | 'int32'
-interface Tensor {
-  readonly shape: readonly number[] // [] for a scalar tensor
-  readonly strides: readonly number[] // in elements, row-major by default
-  readonly offset: number
-  readonly dtype: DType
-  readonly data: Float64Array | Float32Array | Int32Array
-}
-type Vector = Tensor // rank 1
-type Matrix = Tensor // rank 2
-```
+| Area         | Nodes (group/{children} [shared]; * gap)                                                                                                                                                                                                     | Depends on       | Serves topics                                                   |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | --------------------------------------------------------------- |
+| learning     | generalised/{glm, gam, ordinal*} [irls, residuals, backfitting, smoothing], linear, generative-classifiers, kernel-methods, gaussian-processes, trees-and-ensembles/{bagging, boosting} [tree], neighbours, reductions, preprocessing [util] | unsupervised     | supervised-learning, learning-foundations                       |
+| unsupervised | clustering, embedding/{linear, manifold, neighbour} [neighbourhoods, centring, util]                                                                                                                                                         |                  | unsupervised-learning, anomaly-detection                        |
+| inference    | sequence-models, topic-models, rating-models, lattice-models, mixture-models, conjugate-models, classifier-models                                                                                                                            |                  | probabilistic-inference, probability, statistics                |
+| timeseries   | (one module)                                                                                                                                                                                                                                 |                  | time-series                                                     |
+| signals      | audio                                                                                                                                                                                                                                        |                  | signal-processing                                               |
+| vision       | filters                                                                                                                                                                                                                                      |                  | computer-vision                                                 |
+| dynamics     | maps, pde, nonlinear, control                                                                                                                                                                                                                |                  | maths/differential-equations, control-theory                    |
+| decisions    | bandits, reinforcement-learning/{planning, learning} [mdp]                                                                                                                                                                                   |                  | online-experimentation, reinforcement-learning, decision-making |
+| generative   | diffusion                                                                                                                                                                                                                                    | neural           | generative-models                                               |
+| neural       | architectures, ordinal*                                                                                                                                                                                                                      |                  | neural-networks, transformers, sequence-models                  |
+| retrieval    | losses                                                                                                                                                                                                                                       |                  | recommendation-and-retrieval, losses                            |
+| evaluation   | text, detection, quality, generative, fairness, beyond-accuracy                                                                                                                                                                              | algorithms       | metrics, trustworthy-machine-learning                           |
+| information  | channels, coding, projection                                                                                                                                                                                                                 |                  | probability/information-theory                                  |
+| algorithms   | dynamic-programming                                                                                                                                                                                                                          |                  | maths/optimisation, natural-language-processing                 |
+| data         | synthetic, real, objectives, targets, environments, signals [truth, sizes, types, rows]                                                                                                                                                      | every other area | (support)                                                       |
 
-- Tensors are immutable by convention: operations return new tensors (views share `data` when no copy is needed).
-- Constructors: `tensor(nested | flat, shape?)`, `zeros`, `ones`, `full`, `eye`, `arange`, `linspace`, `fromRows`.
-- Converters for the chart boundary: `toArray` (nested `number[]…`), `toRows` (`number[][]`), `toFlat` (`number[]`).
-- Elementwise operations broadcast (NumPy rules). Reductions take `axis?: number | number[]` and `keepDims?: boolean`.
-- Performance-critical inner loops may work on `data` directly (the `dense` namespace has the shared kernels for this),
-  but public functions take and return `Tensor` (or plain numbers), not raw arrays. Data arguments may also be
-  `VectorLike` (a rank-1 tensor or an array of numbers) or `MatrixLike` (a rank-2 tensor or rows of numbers).
+<!-- aifn-areas:end -->
 
-## One definition per operation
+## To the lab in phase 1
 
-Every mathematical operation is defined **once**, as a primitive with its forward computation and its derivative rule.
-There is no separate scalar, tensor and differentiable version of the same function.
+Presentation helpers still in core, to move to the lab (the paper's "aifn-ui"):
 
-- A primitive accepts numbers, tensors and traced values: `softplus(2)` returns a number, `softplus(t)` a tensor
-  (elementwise), and inside `grad(f)` the same call records itself on the tape. Autodiff is a mode, not a parallel set
-  of functions.
-- Primitives are declared with `defineUnary(name, f, df)`, `defineBinary(name, f, dfa, dfb)` (elementwise, with
-  broadcasting) and `defineOp(name, forward, vjp)` (general, e.g. reductions and matmul), all from `aifn/tensor`.
-  Derivatives are written next to the forward rule and tested against finite differences.
-- Modules above `tensor` (e.g. `special` for erf, lgamma, softplus, sigmoid) define their functions through these
-  helpers, so each function exists in one place and is differentiable wherever its derivative is known. A primitive
-  without a derivative (e.g. a discrete sampler) says so, and differentiating through it is an error, not a silent zero.
-- `aifn/autodiff` supplies the tape and the `grad`, `valueAndGrad`, `jvp` and `hvp` transforms. It does not redefine
-  operations.
-- **Shapes, not scalars, are the public surface.** Scalar kernels are internal to their module and never exported.
-  Every public function of numbers accepts `number | Tensor` (any rank) and broadcasts over all its arguments, so
-  `erf(0.5)`, `erf(vector)` and `erf(matrix)` all work and keep their shapes. Samplers likewise take tensor-valued
-  parameters with broadcasting and an optional `shape`: `normal(s, mean, sd, { shape })` returns a tensor of draws.
-- Until `aifn/tensor` exists, a module may export scalar-only functions as a stopgap only if they are thin wrappers
-  over its kernel table; they are lifted to primitives as soon as `tensor` lands, before anything else builds on them.
-- `defineUnary`, `defineBinary` and `defineTernary` all take `options.derivative` (the derivative as a primitive), so
-  second derivatives work; `sumLike` (reduce a broadcast cotangent back to an input's shape) is exported for modules
-  that define their own ops.
-- Outputs are tensors: any function whose result is an array of numbers returns a `Tensor` (ranks, z-scores,
-  histograms' counts, autocorrelations), numbers stay numbers.
-- Samplers return float64 tensors for values and int32 tensors for indices (`categorical`, `choice`, `permutation`);
-  counts that can be NaN for invalid parameters (Poisson, binomial) stay float64. Sampler parameters may not be traced:
-  reparameterised sampling is done explicitly (e.g. `mean + sd * normals(s, shape)`).
-
-## Randomness: `aifn/random`
-
-```ts
-interface Stream {
-  readonly key: string // a human-readable path, e.g. "7/chain:3/env"
-  child(...path: (string | number)[]): Stream // an independent substream; never collides with siblings or the parent
-  uniform(): number // [0, 1)
-  uint32(): number
-  int(n: number): number // uniform integer in [0, n)
-}
-function stream(seed: number | string): Stream
-```
-
-- Philox4x32-10 (Salmon et al., 2011) keyed by a 128-bit hash of the key path. Path elements are compared as
-  strings, so `s.child(3)` and `s.child('3')` are the same stream.
-- Counter-based and keyed: a stream's values depend only on its key and how many values it has produced, so
-  `s.child('chain', k)` gives the same draws however many values `s` or other children have drawn.
-- Every sampler takes the stream as its first argument: `normal(s, mean, sd)`, `gamma(s, shape, scale)`,
-  `normals(s, n)` → `Vector`.
-- `replicate(n, s, fn)` runs `fn(s.child(k), k)` for `k < n` and caches results by key.
-
-## Traces: `aifn/trace`
-
-```ts
-interface Algorithm<Opts, State> {
-  name: string
-  init(opts: Opts, s?: Stream): State
-  step(state: State): State // pure
-  done?(state: State): boolean
-}
-interface Trace<State> {
-  steps: State[] // kept steps; steps[0] is the initial state
-  index: number[] // step number of each kept step
-  series: Record<string, Tensor> // recorded quantities stacked over kept steps
-  checkpoints: Map<number, State> // full states every `checkpointEvery` steps, for `seek`
-  timing: {
-    stepMs: Float64Array // one entry per computed step (not per kept step)
-    totalMs: number // time spent in `step`
-    elapsedMs: number // wall time of the whole run, including recording
-    perSecond: number
-    phases: Record<string, number> // totals from `profile(name, fn)`
-  }
-  meta: {
-    algorithm: string
-    stopped: 'done' | 'limit' | 'diverged'
-    steps: number
-    every: number
-    checkpointEvery: number
-    opts: unknown
-    seed?: string
-  }
-}
-```
-
-- Runners: `run(alg, opts, n)`, `trace(alg, opts, n, { every, record, checkpointEvery })`, `seek(alg, opts, i)`,
-  `extend(trace, alg, opts, m)`, `live(alg, opts)` (a generator).
-- States are immutable, plain objects and tensors (serialisable). Every iterative algorithm in aifn is an `Algorithm`;
-  convenience functions such as `kmeans(x, k)` are `run(...)` wrappers.
-- `profile(name, fn)` inside a step adds to `timing.phases[name]`.
-- A run stops as `diverged` when a state sets `diverged: true`, when a recorded value is infinite, or when a recorded
-  series that has been finite becomes NaN. NaN before a series has any finite value means "not defined yet" (a step
-  size at step 0) and does not stop the run.
-
-## Distributions: `aifn/distributions`
-
-Plain objects with `logProb`, `prob`, `cdf`/`logcdf` (where defined), `quantile` (univariate),
-`sample(s, { shape })`, and the methods `mean()`, `variance()` or `covariance()`, `stddev()`, `entropy()`, `mode()`,
-plus `support`, `batchShape`, `eventShape`. Gaussians are parameterised by mean and standard deviation (or
-covariance), like scipy's `scale`; exponential families also expose `expFamily` (natural parameters, sufficient
-statistics, log-partition).
-
-- Draws have shape `[...sampleShape, ...batchShape, ...eventShape]`, as in PyTorch.
-- Moments are methods, not fields, so they are computed only when asked for.
-- `Univariate` accepts any univariate distribution; `Univariate<number>` is one with number parameters, whose
-  methods return numbers.
-- Elementwise functions that are not about distributions (`xlogy`, `xlog1py`, Bessel functions) belong in `special`.
-
-## Conventions fixed once
-
-Kernels by lengthscale ℓ. Eigenvalues in descending order. Histograms return `{ edges, counts, density }` and count
-values equal to the last edge in the last bin. Ranks average ties. nDCG gain explicit, default 2^rel − 1. The stream
-comes first in every sampler. Angles in radians. Probabilities as probabilities, log-probabilities named `log…`.
-
-## Conventions (draft, pending the architecture review)
-
-These rules come from the consolidation audit (`.scratch/aifn/consolidation.md` §9). They are a draft: the
-architecture review of the whole system (tensor and autodiff included) may change them. Each rule is followed by its
-reason. Code written now should follow them; existing code is brought into line module by module.
-
-### Naming
-
-- **N1. Algorithms are factories.** `method(problem…, options?)` returns an `Algorithm<Start, State>` whose
-  `init(start, s?)` takes only an optional initialisation (`{ x0 }`, `{ centroids }`), so `trace(alg, {}, n)` always
-  works. _Reason:_ most Algorithms already have this form; a generic player, `seek` and the lab cannot drive an
-  Algorithm whose `init` needs the whole problem, and cannot tell the two forms apart from the type.
-- **N2. An Algorithm is named for its method** (`adam`, `hmc`, `brent`, `heatEquation`). It takes the suffix `Steps`
-  only when the module also exports a one-call convenience with the method's natural name (`kmeansSteps` and
-  `kmeans`). No other suffixes (`Fitter`, `Search`). _Reason:_ this is what almost every module already does, and it
-  keeps short names where the runner is generic (`minimize`, `solveIvp`, `sampleChains`).
-- **N3. Runners are verbs or the method's name**: `solveX`, `fitX`, `findX`, `integrate`, or the bare method name
-  paired with N2. Estimators are nouns (`gaussianMixture`). _Reason:_ one reading per name.
-- **N4. PascalCase only for distribution constructors and nn layers** (`Normal`, `Linear`); everything else is
-  camelCase. _Reason:_ already true; it mirrors torch and separates `Normal` (an object) from `normal` (a sampler).
-- **N5. No two modules export different things under one name.** A deliberate re-export of the same object is allowed.
-  _Reason:_ figures import from several modules at once, and a name that means two things (`trace`, `adam`,
-  `shuffle`) is a bug waiting in every such file.
-
-### Arguments
-
-- **A1. The stream comes first** in every function whose output is random (`normal(s, mean, sd)`,
-  `bootstrap(s, x, statistic, n)`); Algorithms take it in `init(start, s)`; estimators and runners take it as
-  `options.stream`. No `() => number` sources. _Reason:_ keyed, reproducible randomness (see Randomness); an unkeyed
-  function source is a door for draws that no stream accounts for.
-- **A2. Inputs and outputs.** Public numeric functions accept `number | Tensor` and broadcast. Data arguments may be
-  `VectorLike` or `MatrixLike`, defined once in `aifn/tensor`; no module defines its own input alias. Any result that
-  is an array of numbers is a `Tensor` (int32 for indices, counts of items and lags); index lists passed in may be
-  `number[]`. _Reason:_ one boundary relaxation instead of a dozen local ones, and one output type that every chart
-  helper and every downstream function reads.
-
-### Results and state
-
-- **R1. State flags.** Every Algorithm state carries `t` (steps taken). Iterative algorithms carry `converged` and
-  `diverged`; finite ones carry `done`; exact solvers may add a `status` enum. `stalled`, `terminated`, `singular`
-  and `jitter` appear where they apply. _Reason:_ the trace stops on `diverged`, and readouts and players need `t`
-  without knowing the algorithm.
-- **R2. Field names.** The iterate is `x` (a domain name where the iterate is a named object: `weights`, `params`,
-  `position`); `value` is an objective being optimised, `loss` a training loss, `logLikelihood` and `elbo` are named;
-  the gradient is `grad`. _Reason:_ charts and readouts read the same key across algorithms.
-- **R3. Option names.** `tolerance` (or `atol`/`rtol`), `maxSteps` for any step budget, `stepSize` in optim, mcmc, vi
-  and ode, `learningRate` for learners. _Reason:_ names are spelled out (see Style), and `maxSteps` matches
-  `trace(…, n)`.
-
-### Capabilities
-
-- **C1. Every fitted model is built by an `Estimator`** and declares what it can do. Classifiers: `decide`, `score`,
-  and `predictive` when probabilistic (no separate `probabilities` method). Regressors: `decide` and `expect`, and
-  `predictive` when there is a noise model. Clusterers: `decide` when inductive; transductive models (agglomerative,
-  spectral, OPTICS) say so with `transductive: true` and expose `labels`. Embedders: `transform` when they map new
-  points, otherwise `embedding` and `transductive: true`. Inverse maps are `inverseTransform`. Iterative fits are
-  `Trained` and copy `converged` and `diverged` from the final state. _Reason:_ figures branch on capabilities
-  (`hasPredictive`, `hasTransform`), not on model kinds; a model that does not declare what it can do forces every
-  figure to know it by name.
-
-### Shared helpers, defined once
-
-- Inputs and inner loops: `VectorLike`, `MatrixLike` and the `dense` kernels (`dense.toF64`, `dense.toMatrixF64`,
-  `dense.dot`, `dense.matVec`, `dense.matMul`, `dense.axpy`, …) in `aifn/tensor`; indexed reads and writes `gather`,
-  `scatterAdd` and `take` there too.
-- Linear algebra: `squaredDistances` and `pairwiseDistances`, `solveDense` (small systems in inner loops), the
-  general eigenproblem `eig`, `expm` and `matrixTrace` in `aifn/linalg`.
-- Elementwise functions: `xlogy`, `xlog1py`, `besselI0`, `besselI1`, `logBesselI0`, `besselRatio` in `aifn/special`;
-  `logsumexp` in `aifn/tensor` (no aliases).
-- Scalar minimisation: `minimizeScalar` (Brent, golden section) in `aifn/optim`.
-- Sequences and weights: `autocorrelation` and `autocovariance` (FFT for long sequences) and
-  `importanceEffectiveSampleSize` in `aifn/stats`.
-- Protocol types: `Target` (an unnormalised log-density) in `aifn/distributions`.
-- Optimisation test surfaces (`rosenbrock`, `himmelblau`, …) are data, in `aifn/datasets`.
-
-A module that needs one of these imports it; it does not keep a private copy.
-
-## Tests
-
-- Each exported function has tests. Deterministic numerics are checked against Python fixtures (numpy, scipy,
-  scikit-learn, torch) at stated tolerances. Stochastic code gets statistical tests (moments, KS against a reference
-  cdf) with fixed streams, plus determinism tests.
-- Every `Algorithm` gets protocol tests: same seed → same trace; `seek(i)` equals `run(i)`; `extend` equals a longer
-  `trace`.
-
-## The lab
-
-`make lab` starts `aifn-lab` (http://localhost:5190/). Each module adds specimens in
-`aifn-lab/src/specimens/<module>.tsx`, and generic views of aifn objects live in `aifn-lab/src/views/`. A specimen's
-page is `/<module>/<specimen-slug>` and a figure on it is `#<figure-id>` (the slug of its title), e.g.
-`/autodiff/a-function-and-its-derivatives#f-with-its-tangent-and-osculating-circle-and-f-f-from-grad`; `/ui-kit` shows
-every control and chart. `make lab-check` renders every page and checks paths and figure ids are unique.
+- `fields`: grid sampling for drawing (direction and slope fields, nullclines, level sets).
+- `geometry`: `lttb` and `minMaxDecimate` (decimation for charts).

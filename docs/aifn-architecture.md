@@ -13,10 +13,58 @@ Detail and evidence live in three working documents, cited by letter:
 
 Decisions that need the owner are collected in §10, each with a recommendation.
 
-> **Pending: core against applications.** The owner wants aifn-js split into a clean core of general capabilities and
-> an application layer of compositions (e.g. a GMM fitted by EM), the latter loosely following the field notes. The
-> options are being analysed in `.scratch/aifn/core-vs-apps.md`; the tiers, registries and packages below will be
-> revised once that is decided.
+> **Decided (2026-09-30): core and applications.** aifn-js holds two workspace packages:
+> `aifn-js/core` (package `aifn`, imported as `aifn/<module>`) and `aifn-js/applications` (package `aifn-applied`,
+> imported as `aifn-applied/<area>`). Details and the per-module classification: `.scratch/aifn/core-vs-apps.md`.
+>
+> - **Core** holds what passes all of: C1 its interface names no model, problem or dataset; C2 at least two areas (or
+>   core modules) use it; C3 it is testable against a reference or a law; C4 it is Tensor-native; C5 it does not change
+>   when a note or figure does. **Or** C6: other core code depends on it (foundations such as `zeros`, the `*Like`
+>   input types and `Value` are core because the rest of core is built on them, not because they are capabilities).
+> - **Contracts.** `aifn/contracts` (tier 0, types only) is where the shapes and signatures are defined once: `Value`,
+>   `TensorLike`/`VectorLike`/`MatrixLike` and the other input aliases, the protocol interfaces (Algorithm, Trace,
+>   Status, Distribution, LogDensity, Bijector, Objective, Kernel, Model and capabilities, Dataset and Recipe types,
+>   Metric/Loss info, Graph/Tree, Signal, Spectrum, LtiSystem, Decomposition, Space, registry Info), and the function
+>   signature types of each family (e.g. `Sampler`, `Kernel`, `MetricFn`). Mathematical values are typed `Scalar` (an alias of
+>   `number`), so signatures read in mathematical terms: `erf(x: Scalar | Tensor)`, `Normal(mean: Scalar | Tensor, …)`.
+>   Integer metadata keeps its own names (`Size`, `Axis`, `Index`, `Shape`), so a scalar value and a count are never
+>   confused in a signature. Implementations are checked against them
+>   (`satisfies`); no module defines its own alias. The generated API reports record every concrete export.
+> - **Applications** are named models, problems, environments, datasets and worked examples, in 15 areas (learning,
+>   unsupervised, inference, timeseries, signals, vision, dynamics, decisions, generative, neural, retrieval,
+>   evaluation, information, algorithms, data). All datasets, generators, modifiers, test objectives and environments
+>   are in `data`. Applications import core and lower areas; core never imports applications; didactic code that is
+>   itself a lesson lives here, written to be read, not in notes. An application is promoted to core when C1–C5 hold.
+> - Presentation code that the paper assigned to "aifn-ui" (grid sampling for drawing, LTTB decimation) goes to the lab.
+>
+> **Decided (2026-09-30): break freely.** Until the site consumes aifn, refactors go straight to the target shape:
+> importers are rewritten in the same pass, with no alias barrels, shims, `Legacy…` types or deprecation aliases.
+> The deprecation policy in §8 applies only from site migration on.
+>
+> **Decided (2026-09-30): graphs as one core structure, intentional first.** One base `Graph` (and `Tree`) carries
+> typed nodes and edges. On it, **structured graphs** describe intentional models: node roles (observed, latent,
+> factor, deterministic, parameter), **groups** (plates, with sizes and nesting) and **templates** (chains, lattices,
+> trees, repeated slices), expandable by `unroll` and queryable by `shape` so algorithms take fast paths
+> (forward–backward on a chain, exact BP on a tree). The pgm model language, LDA's plate diagram, a linear-chain CRF
+> and the lab's diagrams all use this one structure. Data graphs (k-NN, ε-ball, random) and graph matrices
+> (adjacency, Laplacian) sit on the same base, with a differentiable propagation primitive. Details:
+> `.scratch/aifn/refinement.md` ("Graph structures in core").
+>
+> **Decided (2026-09-30): nested structure.** `foundation/` (contracts, tensor with its primitives, autodiff, random,
+> trace, registry, space, errors, pytrees) is its own tier: all of core may import it, and it imports nothing else in
+> core. Families form the second level (e.g. `inference/{exact,message-passing,stochastic,variational,…}`,
+> `nn/{functional,layers,…}` after torch), with sub-modules only where they earn it. Import paths follow the tree
+> (`aifn/inference/variational`), each family has an index for its common surface, `modules.json` records the tree,
+> and the lint checks order at both levels. Applications nest the same way inside their areas. The full tree is
+> `.scratch/aifn/module-tree.md`; its decisions D1–D15 were adopted as recommended (2026-09-30).
+>
+> **Decided (2026-09-30): named chain models are applications; core keeps the chain engines.** By C1, a named model
+> is an application. `aifn/inference/exact` holds only generic chain engines: `forwardBackward`, `viterbi`, their
+> `…Steps` and `sampleHiddenPath` (forward filtering, backward sampling) on a `ChainPotentials` (node potentials
+> N × K, transition K × K), `chainForwardBackward`/`chainViterbi` on log-potentials, and `factorChain`/`chainSumProduct`
+> on chain-shaped factor graphs. The HMM (`Hmm`, `hmm`, `hmmChain` building its potentials from observations,
+> `hmmModel`, the casino, sampling) and the linear-chain CRF live in `aifn-applied/inference/sequence-models`, and so
+> do future named chain models (factorial HMM, MEMM).
 
 ## 1. Goals and non-goals
 
@@ -44,8 +92,10 @@ aifn-js (package aifn): numerics and models, no React, no DOM ◀── generate
     tier 4+ distributions, optim, solve, quadrature, graph, systems, stats, …  (full order: C §11, updated here)
 ```
 
-The layer order lives in one file, `aifn-js/modules.json`; a lint enforces it, and the README tables and the lab
-sidebar are generated from it (S §5.2).
+The tier list in the diagram above is superseded by the module tree (`.scratch/aifn/module-tree.md` §4.1, applied
+2026-09-30, and moved in phase 1 when `graph` came to use `numerics/linalg`: families `foundation` 0; `numerics` 1;
+`graph` 2; `probability`, `optim`, `systems` 3; `inference`, `dynamics`, `signal`, `transport` 4; `learning` 5; `nn` 6). The layer order lives in one file,
+`aifn-js/modules.json`; a lint enforces it, and the README tables and the lab sidebar are generated from it (S §5.2).
 
 ## 3. The numerical core (K)
 
@@ -91,19 +141,19 @@ gradient (K §9).
 Every value that crosses a module, a view or a language is one of these. Each has one home, one interface, a `kind`
 brand where it can be shown, and a registry where it has named variants.
 
-| Object | Home | Replaces |
-| --- | --- | --- |
-| `Space` (serialisable parameter schema: real, int, choice, bool, nested, variants; conditions as data) | `aifn/space`, tier 0 | five parameter descriptions: lab controls, search spaces, recipes, hyperparameters, distribution ranges |
-| `Distribution`, `LogDensity`, `Bijector` | distributions | two distribution protocols; mcmc's `Target`; compose's target maps |
-| `Objective` (value built from primitives, optional domain and known minimisers) | optim | three objective shapes; test surfaces become registered objectives |
-| `Model` + capabilities (`decide`, `scores`, `predictive`, `expect`, `transform`, `sample`), declared per estimator | estimators | uneven conformance (C §3); separate `probabilities` methods |
-| `Dataset`, `Recipe`, truth as a `Model` | `aifn/data` (types), datasets (generators) | two dataset types; hand-kept recipe lists; truth that re-implements densities |
-| `Metric`, `Loss` (functions with metadata; one capability vocabulary) | registry + metrics, losses | two metric types and two `defineMetric`s |
-| `Kernel`, `Graph`, `Tree`, `Curve`, confusion results | kernels, graph, metrics | hand-kept wire mirrors |
-| `Signal`, `Spectrum`, `TimeFrequency`, `Filter`, `FilterBank` | dsp | `Tensor \| ArrayLike` signals with no sample rate |
-| `LtiSystem` (tf, zpk, ss, sos; continuous or discrete; conversions, responses) | **`aifn/systems`**, below dsp and control | two transfer-function types and two frequency-response shapes |
-| `Decomposition` (components that sum back to the signal) | `aifn/data` | EMD results, wavelet decompositions, STL, GAM partial effects |
-| `Algorithm`, `Trace` | trace | two algorithm forms (C N1) |
+| Object                                                                                                             | Home                                       | Replaces                                                                                                |
+| ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `Space` (serialisable parameter schema: real, int, choice, bool, nested, variants; conditions as data)             | `aifn/space`, tier 0                       | five parameter descriptions: lab controls, search spaces, recipes, hyperparameters, distribution ranges |
+| `Distribution`, `LogDensity`, `Bijector`                                                                           | distributions                              | two distribution protocols; mcmc's `Target`; compose's target maps                                      |
+| `Objective` (value built from primitives, optional domain and known minimisers)                                    | optim                                      | three objective shapes; test surfaces become registered objectives                                      |
+| `Model` + capabilities (`decide`, `scores`, `predictive`, `expect`, `transform`, `sample`), declared per estimator | estimators                                 | uneven conformance (C §3); separate `probabilities` methods                                             |
+| `Dataset`, `Recipe`, truth as a `Model`                                                                            | `aifn/data` (types), datasets (generators) | two dataset types; hand-kept recipe lists; truth that re-implements densities                           |
+| `Metric`, `Loss` (functions with metadata; one capability vocabulary)                                              | registry + metrics, losses                 | two metric types and two `defineMetric`s                                                                |
+| `Kernel`, `Graph`, `Tree`, `Curve`, confusion results                                                              | kernels, graph, metrics                    | hand-kept wire mirrors                                                                                  |
+| `Signal`, `Spectrum`, `TimeFrequency`, `Filter`, `FilterBank`                                                      | dsp                                        | `Tensor \| ArrayLike` signals with no sample rate                                                       |
+| `LtiSystem` (tf, zpk, ss, sos; continuous or discrete; conversions, responses)                                     | **`aifn/systems`**, below dsp and control  | two transfer-function types and two frequency-response shapes                                           |
+| `Decomposition` (components that sum back to the signal)                                                           | `aifn/data`                                | EMD results, wavelet decompositions, STL, GAM partial effects                                           |
+| `Algorithm`, `Trace`                                                                                               | trace                                      | two algorithm forms (C N1)                                                                              |
 
 "Target" disappears as a name (it meant three things).
 
@@ -138,22 +188,22 @@ impulse and step response, filter banks, and audio playback.
 
 aifn-py complements aifn-js; it does not mirror it. Each concept has one home language:
 
-| Concept | Home | Carried by |
-| --- | --- | --- |
-| Wire shapes crossing languages | pydantic (`aifn.contracts`) | JSON Schema → generated `aifn/wire` types, with typed `toWire`/`fromWire` converters |
-| Implementations and their metadata | TypeScript registries | `catalog.json` |
-| Reference values for tests | aifn-py fixtures, keyed by catalog entry | `aifn-js/test/fixtures/*.json`; `aifn fixtures --check` reports stable entries without a case |
-| Palette, module order | `design/palette.json`, `aifn-js/modules.json` | read directly |
+| Concept                            | Home                                          | Carried by                                                                                    |
+| ---------------------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Wire shapes crossing languages     | pydantic (`aifn.contracts`)                   | JSON Schema → generated `aifn/wire` types, with typed `toWire`/`fromWire` converters          |
+| Implementations and their metadata | TypeScript registries                         | `catalog.json`                                                                                |
+| Reference values for tests         | aifn-py fixtures, keyed by catalog entry      | `aifn-js/test/fixtures/*.json`; `aifn fixtures --check` reports stable entries without a case |
+| Palette, module order              | `design/palette.json`, `aifn-js/modules.json` | read directly                                                                                 |
 
 `python/mlc` becomes `aifn-py` (package `aifn`) as its own step (plan §2).
 
 ## 8. Packages and checks (S §6)
 
-| Package | May import |
-| --- | --- |
-| aifn-js | lower tiers of itself only; no DOM |
-| aifn-lab (holds all UI: design, controls, viz, views, figures, diagram) | aifn, React, ECharts, Base UI, KaTeX, lucide, the palette |
-| site, note widgets | aifn; how the site reuses the lab's UI is decided at site migration, not now |
+| Package                                                                 | May import                                                                   |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| aifn-js                                                                 | lower tiers of itself only; no DOM                                           |
+| aifn-lab (holds all UI: design, controls, viz, views, figures, diagram) | aifn, React, ECharts, Base UI, KaTeX, lucide, the palette                    |
+| site, note widgets                                                      | aifn; how the site reuses the lab's UI is decided at site migration, not now |
 
 Checks: layer lint; package boundaries; name collisions; catalog freshness and links; registry conformance (declared
 capabilities, state roles, kinds); generated primitive tests (values, broadcasting, dtypes, vjp and jvp against finite
@@ -167,18 +217,18 @@ reference tests, conforms, is documented and cited. Protocol types become stable
 
 One sequence merging K §11, S §8 and C §13. Phases overlap where their files do not.
 
-| Phase | Work | Size |
-| --- | --- | --- |
-| **0 Safety net** | error hierarchy, tensor brand, numerics constants; `definePrimitive` registry scaffold with today's `define*` as wrappers; generated primitive test suite and benchmarks against today's rules; `aifn/registry` (`define`, `Info`, kinds); `modules.json` + layer lint (WP0 has the lint); DOM lib out of aifn's tsconfig | M |
-| **1 One of each, one protocol** | the §4 merges (Dataset, Metric, distribution protocol, LogDensity, Objective, capability vocabulary, kind brands); Algorithm protocol in its final form in one pass: factory only, `step(state, ctx)`, `Status`, plain-data streams, no Box–Muller spare, batched samplers; naming and collisions (C §1, §10); capability conformance (C §3) | L |
-| **2 Core internals** | special with one derivative per function; structural primitives collapsed; kernel fast paths; interpreters (reverse, forward, batch), `vmap`, pytrees once; custom rules, checkpoint, implicit differentiation; linalg derivatives, single-factor cholesky, lu factor/solve | L |
-| **3 Signal spine** | complex128; FFT primitives and the DFT matrix; the conv family; `linearFilter`; polynomials; `aifn/systems`; `Signal`, `Spectrum`, `TimeFrequency`, `Decomposition`; dsp and control moved onto them | L |
-| **4 Catalog and Space** | `aifn/space` under the lab's param builders; registries for every kind; `catalog.json` and its checks | L |
-| **5 Views v2** | Plot, axis model and layers; figure state, probes, scheduler, `Equation`; view registry and `Show`; frame-owning views split; the page review of every lab page against DESIGN.md §2 | L |
-| **6 Languages** | wire shapes and converters; fixtures moved into aifn-py and keyed by the catalog; `mlc` → `aifn` | M |
-| **7 Coverage and hardening** | DSP gaps by chapter (multirate, adaptive, time–frequency, audio, spectral, wavelets; S §9); the rest of R; reference fixtures to promote modules to stable | L |
-| **8 The site** | later: decide how the site reuses the lab's UI, then migrate figures by domain | L |
-| **Throughout** | API reports, deprecation lint, generated docs | S |
+| Phase                           | Work                                                                                                                                                                                                                                                                                                                                                                                                                                               | Size |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| **0 Safety net and layout**     | aifn-js split into `core/` and `applications/` workspaces with the 12 whole application modules moved; `aifn/contracts`; error hierarchy, tensor brand, numerics constants; `definePrimitive` registry scaffold with today's `define*` as wrappers; generated primitive test suite and benchmarks against today's rules; `aifn/registry` (`define`, `Info`, kinds); `modules.json` + layer lint (WP0 has the lint); DOM lib out of aifn's tsconfig | M    |
+| **1 One of each, one protocol** | the §4 merges (Dataset, Metric, distribution protocol, LogDensity, Objective, capability vocabulary, kind brands); Algorithm protocol in its final form in one pass: factory only, `step(state, ctx)`, `Status`, plain-data streams, no Box–Muller spare, batched samplers; naming and collisions (C §1, §10); capability conformance (C §3)                                                                                                       | L    |
+| **2 Core internals**            | special with one derivative per function; structural primitives collapsed; kernel fast paths; interpreters (reverse, forward, batch), `vmap`, pytrees once; custom rules, checkpoint, implicit differentiation; linalg derivatives, single-factor cholesky, lu factor/solve                                                                                                                                                                        | L    |
+| **3 Signal spine**              | complex128; FFT primitives and the DFT matrix; the conv family; `linearFilter`; polynomials; `aifn/systems`; `Signal`, `Spectrum`, `TimeFrequency`, `Decomposition`; dsp and control moved onto them                                                                                                                                                                                                                                               | L    |
+| **4 Catalog and Space**         | `aifn/space` under the lab's param builders; registries for every kind; `catalog.json` and its checks                                                                                                                                                                                                                                                                                                                                              | L    |
+| **5 Views v2**                  | Plot, axis model and layers; figure state, probes, scheduler, `Equation`; view registry and `Show`; frame-owning views split; the page review of every lab page against DESIGN.md §2                                                                                                                                                                                                                                                               | L    |
+| **6 Languages**                 | wire shapes and converters; fixtures moved into aifn-py and keyed by the catalog; `mlc` → `aifn`                                                                                                                                                                                                                                                                                                                                                   | M    |
+| **7 Coverage and hardening**    | DSP gaps by chapter (multirate, adaptive, time–frequency, audio, spectral, wavelets; S §9); the rest of R; reference fixtures to promote modules to stable                                                                                                                                                                                                                                                                                         | L    |
+| **8 The site**                  | later: decide how the site reuses the lab's UI, then migrate figures by domain                                                                                                                                                                                                                                                                                                                                                                     | L    |
+| **Throughout**                  | API reports, deprecation lint, generated docs                                                                                                                                                                                                                                                                                                                                                                                                      | S    |
 
 Phase 1 replaces consolidation WP1–WP5 (their renames and conformance work, plus the Algorithm changes done once
 rather than twice). Phases 2 and 3 are internal to the core and can run beside 4 and 5.
@@ -187,21 +237,21 @@ rather than twice). Phases 2 and 3 are internal to the core and can run beside 4
 
 All sixteen adopted as recommended (2026-09-30). The core/applications split (above) is decided separately.
 
-| # | Decision | Recommendation |
-| --- | --- | --- |
-| 1 | Autodiff as three interpreters (reverse, forward, batch) over one primitive registry, every general primitive with vjp **and** jvp | **Adopt.** About 1,500 internal lines change; the public API stays. |
-| 2 | Randomness without hidden state: no Box–Muller spare (normal draws change once more), streams passed to `step` | **Yes, both, in phase 1**, together with the factory-only Algorithm change, so every stochastic algorithm changes once. |
-| 3 | Complex numbers as an interleaved dtype, differentiated as real pairs; FFT and convolution as core primitives | **Yes.** It is the spine of the signal-processing wing. |
-| 4 | Static registries per module plus a generated catalog | **Yes.** No import-order side effects; one catalog for every consumer. |
-| 5 | A `kind` brand on every displayable object | **Yes.** Views and wire decoding dispatch exactly. |
-| 6 | `Space` in aifn (data), presentation in the lab | **Yes.** Search, recipes, families, kernels and figure state share one schema; URL state becomes generic. |
-| 7 | Note links declared on aifn entries, backlinks computed | **Yes.** The code knows what it implements. |
-| 8 | One LTI system in `aifn/systems` below dsp and control | **Yes** (named `systems`, not `lti`: modules spell ideas out). |
-| 9 | One `Decomposition` shape for EMD, wavelets, STL and partial effects | **Yes.** |
-| 10 | Pydantic stays the source of cross-language shapes | **Yes**, with typed converters in aifn-js. |
-| 11 | A separate aifn-ui package | **No.** The owner's focus is the lab; all UI lives in aifn-lab. The site question waits for migration. |
-| 12 | One shadcn install shared with the site | **Not now.** No UI packaging work; revisit at site migration. |
-| 13 | Register all 165 algorithms | **Yes.** Workers and the generic trace view need every one. |
-| 14 | Frequency axes: Hz with `fs` for sampled data, rad/s for continuous systems, always tagged | **Yes.** |
-| 15 | Audio playback in the lab (user-gesture start, peak normalisation reported, A/B comparison) | **Yes.** |
-| 16 | Execution order: phase 0, then 1, then 2–5 overlapping | **Yes.** Phase 1 is the last big breaking change; after it, changes are additive or internal. |
+| #   | Decision                                                                                                                           | Recommendation                                                                                                          |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 1   | Autodiff as three interpreters (reverse, forward, batch) over one primitive registry, every general primitive with vjp **and** jvp | **Adopt.** About 1,500 internal lines change; the public API stays.                                                     |
+| 2   | Randomness without hidden state: no Box–Muller spare (normal draws change once more), streams passed to `step`                     | **Yes, both, in phase 1**, together with the factory-only Algorithm change, so every stochastic algorithm changes once. |
+| 3   | Complex numbers as an interleaved dtype, differentiated as real pairs; FFT and convolution as core primitives                      | **Yes.** It is the spine of the signal-processing wing.                                                                 |
+| 4   | Static registries per module plus a generated catalog                                                                              | **Yes.** No import-order side effects; one catalog for every consumer.                                                  |
+| 5   | A `kind` brand on every displayable object                                                                                         | **Yes.** Views and wire decoding dispatch exactly.                                                                      |
+| 6   | `Space` in aifn (data), presentation in the lab                                                                                    | **Yes.** Search, recipes, families, kernels and figure state share one schema; URL state becomes generic.               |
+| 7   | Note links declared on aifn entries, backlinks computed                                                                            | **Yes.** The code knows what it implements.                                                                             |
+| 8   | One LTI system in `aifn/systems` below dsp and control                                                                             | **Yes** (named `systems`, not `lti`: modules spell ideas out).                                                          |
+| 9   | One `Decomposition` shape for EMD, wavelets, STL and partial effects                                                               | **Yes.**                                                                                                                |
+| 10  | Pydantic stays the source of cross-language shapes                                                                                 | **Yes**, with typed converters in aifn-js.                                                                              |
+| 11  | A separate aifn-ui package                                                                                                         | **No.** The owner's focus is the lab; all UI lives in aifn-lab. The site question waits for migration.                  |
+| 12  | One shadcn install shared with the site                                                                                            | **Not now.** No UI packaging work; revisit at site migration.                                                           |
+| 13  | Register all 165 algorithms                                                                                                        | **Yes.** Workers and the generic trace view need every one.                                                             |
+| 14  | Frequency axes: Hz with `fs` for sampled data, rad/s for continuous systems, always tagged                                         | **Yes.**                                                                                                                |
+| 15  | Audio playback in the lab (user-gesture start, peak normalisation reported, A/B comparison)                                        | **Yes.**                                                                                                                |
+| 16  | Execution order: phase 0, then 1, then 2–5 overlapping                                                                             | **Yes.** Phase 1 is the last big breaking change; after it, changes are additive or internal.                           |

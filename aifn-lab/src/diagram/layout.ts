@@ -4,7 +4,8 @@
  * `aifn/graph`), long edges are split by virtual nodes, each layer is ordered by barycentre sweeps to reduce
  * crossings, and positions within a layer are pulled towards their neighbours while keeping the order and spacing.
  */
-import { depthFirstSearch, fromEdges, topologicalSort } from 'aifn/graph'
+import { depthFirstSearch, topologicalSort } from 'aifn/graph/traversal'
+import { fromEdges } from 'aifn/graph'
 import type { DiagramEdge, DiagramSpec, PlacedNode } from './types'
 
 const endId = (ref: string) => ref.split(':')[0]

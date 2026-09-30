@@ -3,8 +3,12 @@ import { DiagramsKit } from './kit/DiagramsKit'
 import { UiKit } from './kit/UiKit'
 import type { Specimen } from './specimen'
 
-// Every file in ./specimens exports `specimens: Specimen[]`; files starting with `_` hold shared code.
-const modules = import.meta.glob<{ specimens: Specimen[] }>('./specimens/*.tsx', { eager: true })
+// Every file under ./specimens (at `<family>/<module>.tsx`, mirroring the aifn module tree) exports
+// `specimens: Specimen[]`; folders and files starting with `_` hold shared code.
+const modules = import.meta.glob<{ specimens: Specimen[] }>(
+  ['./specimens/**/*.tsx', '!./specimens/**/_*/**', '!./specimens/**/_*.tsx'],
+  { eager: true },
+)
 const specimens: Specimen[] = Object.values(modules).flatMap((m) => m.specimens ?? [])
 
 const pages: LabPage[] = [

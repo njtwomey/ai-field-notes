@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import type { Dataset } from 'aifn/datasets'
-import { toFlat } from 'aifn/tensor'
+import type { Dataset } from 'aifn-applied/data'
+import { toFlat } from 'aifn/foundation/tensor'
 import { useScaleColor, type XYSeries } from '@lab/viz'
 
 /** The scatter series of a dataset: by class (groups), by the coordinate t (a colour ramp), or plain. */

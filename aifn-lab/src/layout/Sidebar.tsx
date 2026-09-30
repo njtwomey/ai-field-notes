@@ -6,7 +6,7 @@ import { Input } from '@lab/ui/input'
 import { Kbd } from '@lab/ui/kbd'
 import { cn } from '@lab/lib/utils'
 import type { Specimen } from '../specimen'
-import { FAMILIES, moduleRank, unmappedModules, type Family } from './families'
+import { FAMILIES, moduleLabel, moduleRank, unmappedModules, type Family } from './families'
 import { hrefOf } from './paths'
 import { ThemeToggle } from './ThemeToggle'
 
@@ -257,7 +257,7 @@ export function Sidebar({
                               )}
                             >
                               <ChevronRight className="size-3 shrink-0 text-muted-foreground transition-transform group-aria-expanded/row:rotate-90" />
-                              <span className="truncate">{highlight(module, words)}</span>
+                              <span className="truncate">{highlight(moduleLabel(module), words)}</span>
                               <Count n={list.length} />
                             </CollapsibleTrigger>
                             <Panel>

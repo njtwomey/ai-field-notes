@@ -1,5 +1,5 @@
-import { grad } from 'aifn/autodiff'
-import { exp, linspace, mul, sin, square, sum, toFlat, type Tensor, type Value } from 'aifn/tensor'
+import { grad } from 'aifn/foundation/autodiff'
+import { exp, linspace, mul, sin, square, sum, toFlat, type Tensor, type Value } from 'aifn/foundation/tensor'
 import { useMemo } from 'react'
 import { Slider, useParam } from '@lab/controls'
 import { Figure } from '@lab/layout'

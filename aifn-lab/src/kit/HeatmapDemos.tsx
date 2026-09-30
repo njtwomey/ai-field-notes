@@ -1,4 +1,4 @@
-import { normal, stream } from 'aifn/random'
+import { child, normal, stream } from 'aifn/foundation/random'
 import { useMemo, useState } from 'react'
 import { ChartSize, formatNumber, Heatmap, Readout, XYChart, type Handle, type Vec2, type XYSeries } from '@lab/viz'
 import { Player, Select, Slider, Switch, useParam } from '@lab/controls'
@@ -131,11 +131,11 @@ export function LinkedFigure() {
     const loss = [0]
     const ms: number[] = []
     for (let i = 0; i < n; i++) {
-      const noise = s.child(i)
+      const noise = child(s, i)
       if (i > 0)
         for (let k = 0; k < 3; k++) w[k].push(w[k][i - 1] - 0.03 * (k + 1) * w[k][i - 1] + 0.02 * normal(noise, 0, 1))
       loss[i] = w.reduce((acc, wk, k) => acc + (k + 1) * wk[i] ** 2, 0)
-      ms.push(0.4 + 0.1 * Math.abs(normal(noise.child('t'), 0, 1)) + (i % 50 === 0 ? 1.2 : 0))
+      ms.push(0.4 + 0.1 * Math.abs(normal(child(noise, 't'), 0, 1)) + (i % 50 === 0 ? 1.2 : 0))
     }
     return { step, loss, w, ms }
   }, [])

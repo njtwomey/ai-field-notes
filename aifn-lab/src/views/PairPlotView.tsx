@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
-import { correlation, extent, histogram, kde } from 'aifn/stats'
+import { correlation, extent, histogram, kde } from 'aifn/probability/stats'
+import { toFlat } from 'aifn/foundation/tensor'
 import { seriesColor } from '@lab/design/palette'
 import { useTheme } from '@lab/design/theme'
 import { Button, MultiCombobox, Select, Switch } from '@lab/controls'
@@ -98,7 +99,7 @@ export function PairPlotView({
   }, [labels, active, k])
 
   // Shared bins per feature, from every drawn row, so hiding a class or brushing never moves them.
-  const edges = useMemo(() => columns.map((c) => histogram(c, { bins: 'sturges' }).edges), [columns])
+  const edges = useMemo(() => columns.map((c) => toFlat(histogram(c, { bins: 'sturges' }).edges)), [columns])
   const spans = useMemo(() => columns.map((c) => extent(c)), [columns])
 
   const diagonalSeries = useMemo(
@@ -115,7 +116,7 @@ export function PairPlotView({
             name: 'all shown',
             type: 'bar',
             x: centres,
-            y: Array.from(
+            y: toFlat(
               histogram(
                 values((i) => !!shown[i]),
                 { bins: e },
@@ -133,7 +134,7 @@ export function PairPlotView({
               name,
               type: 'bar',
               x: centres,
-              y: Array.from(histogram(v, { bins: e }).counts),
+              y: toFlat(histogram(v, { bins: e }).counts),
               histogram: true,
               slot: c,
             })
@@ -147,7 +148,7 @@ export function PairPlotView({
                 name,
                 type: 'line',
                 x: at,
-                y: Array.from(density, (p) => p * v.length * width),
+                y: toFlat(density).map((p) => p * v.length * width),
                 area: true,
                 slot: c,
               })
@@ -386,7 +387,7 @@ const NO_SEGMENTS: readonly Segment[] = []
 /** A dashed ink line at the hovered row's value on a diagonal panel, as tall as its tallest bar or curve. */
 function diagonalLive(at: number | null, series: readonly XYSeries[]): XYSeries[] {
   let peak = 0
-  for (const s of series) for (const v of s.y) peak = Math.max(peak, v)
+  for (const s of series) for (const v of Array.from(s.y)) peak = Math.max(peak, v)
   return [
     {
       name: 'hovered',

@@ -1,0 +1,10 @@
+import { expect, it } from 'vitest'
+import { grad, mul, ShapeError, stream, tensor, toArray, trace, type Value } from 'aifn'
+
+it('the package root re-exports foundation’s common surface (D1)', () => {
+  expect(toArray(tensor([1, 2]))).toEqual([1, 2])
+  expect(grad((x: Value) => mul(x, x))(3)).toBe(6)
+  expect(typeof stream(1).uniform()).toBe('number')
+  expect(typeof trace).toBe('function')
+  expect(new ShapeError('op', 'm')).toBeInstanceOf(Error)
+})

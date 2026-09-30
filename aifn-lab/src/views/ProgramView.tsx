@@ -1,5 +1,5 @@
-import type { LinearProgramResult, QuadraticProgramResult } from 'aifn/programming'
-import { toFlat, type Tensor } from 'aifn/tensor'
+import type { LinearProgramResult, QuadraticProgramResult } from 'aifn/optim/programming'
+import { toFlat, type Tensor } from 'aifn/foundation/tensor'
 import type { ReactNode } from 'react'
 import { Badge } from '@lab/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@lab/ui/table'
@@ -87,7 +87,7 @@ export function ProgramView({ result, variableNames, constraintNames, equalityNa
         objective <span className="font-mono tabular-nums">{formatValue(result.objective)}</span>
       </span>
       <span className="text-xs text-muted-foreground">
-        {result.method}, {result.iterations} iterations
+        {result.method}, {result.steps} steps
       </span>
     </div>
   )

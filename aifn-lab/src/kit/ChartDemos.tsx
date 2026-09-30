@@ -1,5 +1,5 @@
-import { normal, stream } from 'aifn/random'
-import { normalCdf } from 'aifn/special'
+import { child, normal, stream } from 'aifn/foundation/random'
+import { normalCdf } from 'aifn/numerics/special'
 import { useMemo, useState } from 'react'
 import { NumberField, Slider, Switch, useParam } from '@lab/controls'
 import { Figure, Tex } from '@lab/layout'
@@ -70,7 +70,7 @@ export function ClusterFigure() {
     const x: number[] = []
     const y: number[] = []
     centres.forEach(([cx, cy], k) => {
-      const c = s.child('cluster', k)
+      const c = child(s, 'cluster', k)
       for (let i = 0; i < 60; i++) {
         x.push(normal(c, cx, spread.value))
         y.push(normal(c, cy, spread.value))
@@ -181,7 +181,7 @@ export function LogFigure() {
     const t = Array.from({ length: 2000 }, (_, i) => i + 1)
     const s = stream('loss')
     return [0.002, 0.01, 0.05].map((rate, k) => {
-      const c = s.child(k)
+      const c = child(s, k)
       return {
         name: `learning rate ${rate}`,
         type: 'line',
@@ -213,7 +213,10 @@ export function VectorFigure() {
   const [tip, setTip] = useState<Vec2>([1, 1.5])
   const points = useMemo(() => {
     const s = stream('vectors')
-    return Array.from({ length: 24 }, (_, i): Vec2 => [normal(s.child(i), 0, 1.4), normal(s.child(i), 0, 1.4)])
+    return Array.from({ length: 24 }, (_, i): Vec2 => {
+      const c = child(s, i)
+      return [normal(c, 0, 1.4), normal(c, 0, 1.4)]
+    })
   }, [])
   const { series, segments, angle } = useMemo(() => {
     const [wx, wy] = tip

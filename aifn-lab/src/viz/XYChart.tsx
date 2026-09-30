@@ -16,8 +16,8 @@ export type XYSeries = {
   name: string
   /** `area` is a line filled down to y = 0; `bar` draws a bar at each x (e.g. a histogram). */
   type: 'line' | 'scatter' | 'bar' | 'area'
-  x: readonly number[]
-  y: readonly number[]
+  x: ArrayLike<number>
+  y: ArrayLike<number>
   /** Scatter only: a categorical group per point, drawn in slot g with marker shape g. */
   group?: readonly number[] | null
   /** Names for group indices, shown in the legend. */

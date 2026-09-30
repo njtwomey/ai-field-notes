@@ -7,15 +7,15 @@ import type {
   detCurve,
   gainCurve,
   precisionRecallGainCurve,
-} from 'aifn/metrics'
-import { normalQuantile } from 'aifn/special'
-import { toFlat } from 'aifn/tensor'
+} from 'aifn/learning/metrics'
+import { normalQuantile } from 'aifn/numerics/special'
+import { toFlat } from 'aifn/foundation/tensor'
 import { Figure } from '@lab/layout'
 import { Panel, Readout, Subplots, XYChart, type Handle, type XYSeries } from '@lab/viz'
 import { formatValue } from './format'
 import type { FrameProps } from './frame'
 
-/** Every typed curve `aifn/metrics` returns; each carries a `kind`. */
+/** Every typed curve `aifn/learning/metrics` returns; each carries a `kind`. */
 export type Curve =
   | RocCurve
   | PrecisionRecallCurve
@@ -219,7 +219,7 @@ function kindName(c: Curve): string {
 }
 
 /**
- * A typed curve from `aifn/metrics` (ROC, precision–recall, reliability, DET, gain, cost, precision–recall–gain) as a
+ * A typed curve from `aifn/learning/metrics` (ROC, precision–recall, reliability, DET, gain, cost, precision–recall–gain) as a
  * figure: the curve with its chance or ideal line, an optional operating point, and its summary number (AUROC, AP,
  * ECE, area) as a readout. A reliability diagram adds the bin counts as a panel beneath. Several curves of one kind
  * are drawn together for comparison.

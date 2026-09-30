@@ -94,8 +94,11 @@ try {
   render('lab / UI kit', 'ui-kit', () => createElement(UiKit))
   const { DiagramsKit } = await server.ssrLoadModule('/src/kit/DiagramsKit.tsx')
   render('lab / Diagrams', 'diagrams', () => createElement(DiagramsKit))
-  const files = (await import('node:fs')).readdirSync(path.join(import.meta.dirname, 'src/specimens'))
-  for (const file of files.filter((f) => f.endsWith('.tsx')).sort()) {
+  // Specimen files mirror the module tree (`<family>/<module>.tsx`); `_`-folders and `_`-files hold shared code.
+  const files = (readdirSync(path.join(import.meta.dirname, 'src/specimens'), { recursive: true }) as string[])
+    .map((f) => f.split(path.sep).join('/'))
+    .filter((f) => f.endsWith('.tsx') && !f.split('/').some((part) => part.startsWith('_')))
+  for (const file of files.sort()) {
     const mod = await server.ssrLoadModule(`/src/specimens/${file}`)
     for (const s of mod.specimens ?? []) {
       const at = specimenPath(s) as string

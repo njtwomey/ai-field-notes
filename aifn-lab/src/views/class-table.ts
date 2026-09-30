@@ -1,10 +1,11 @@
 import { useMemo } from 'react'
-import { split, type Dataset } from 'aifn/datasets'
-import { stream } from 'aifn/random'
-import { fromData, toFlat, type Tensor } from 'aifn/tensor'
+import { split } from 'aifn-applied/data/synthetic'
+import { type Dataset } from 'aifn-applied/data'
+import { stream } from 'aifn/foundation/random'
+import { fromData, toFlat, type Tensor } from 'aifn/foundation/tensor'
 
 /**
- * The input of the multi-feature data views: a dataset (`aifn/datasets`), or a plain matrix with optional labels.
+ * The input of the multi-feature data views: a dataset (`aifn-applied/data`), or a plain matrix with optional labels.
  * Integer labels colour the rows by class; without them every row is one class.
  */
 export type ClassTableInput = {
@@ -43,6 +44,7 @@ function toDataset({ data, x, y, featureNames, labelNames }: ClassTableInput): D
   const t = 'shape' in x ? x : fromData(Float64Array.from(x.flat()), [x.length, x[0]?.length ?? 0])
   const d = t.shape[1]
   return {
+    kind: 'dataset',
     x: t,
     y: y === undefined ? undefined : fromData(Int32Array.from('shape' in y ? toFlat(y) : Array.from(y))),
     meta: {

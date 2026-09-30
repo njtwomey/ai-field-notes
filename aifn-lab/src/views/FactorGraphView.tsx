@@ -1,10 +1,5 @@
-import {
-  toFactorDiagram,
-  type BeliefPropagationState,
-  type Bindings,
-  type DiscreteFactorGraph,
-  type Model,
-} from 'aifn/pgm'
+import { toFactorDiagram, type Bindings, type DiscreteFactorGraph, type Model } from 'aifn/inference/model'
+import { type BeliefPropagationState } from 'aifn/inference/message-passing'
 import { useMemo } from 'react'
 import { Diagram, type DiagramEdge, type DiagramNode, type DiagramSpec } from '@lab/diagram'
 
@@ -12,11 +7,11 @@ export type FactorGraphViewProps = {
   /** A discrete factor graph, or a model description (expanded against `bindings`). */
   graph: DiscreteFactorGraph | Model
   bindings?: Bindings
-  /** Fixed centres (grid units) of the variables: by index for a discrete graph, by key for a model. */
+  /** Fixed centres (grid units) of the variables: by index for a discrete graph, by instance key for a model. */
   positions?: Readonly<Record<string | number, readonly [number, number]>>
-  /** Variable labels (TeX allowed), by index or key. */
+  /** Variable labels (TeX allowed), by index or instance key. */
   labels?: Readonly<Record<string | number, string>>
-  /** Highlight a variable (index or key) and its Markov blanket. */
+  /** Highlight a variable (index or instance key) and its Markov blanket. */
   highlight?: string | number
   /**
    * A belief-propagation state on the discrete graph: the messages updated by its last step ride on their edges
@@ -25,6 +20,7 @@ export type FactorGraphViewProps = {
   state?: BeliefPropagationState
   /** Which messages to show as chips: those updated by the last step (default), all, or none. */
   messages?: 'updated' | 'all' | 'none'
+  /** Called with a variable's index (as a string) or instance key when it is clicked. */
   onVariableClick?: (variable: string) => void
   height?: number | 'fill'
   ariaLabel?: string
@@ -34,9 +30,26 @@ const fmt = (x: number) => (Math.abs(x) >= 0.995 || x === 0 ? x.toFixed(1) : x.t
 const vec = (v: ArrayLike<number>) => (v.length === 2 ? fmt(v[1]) : `(${Array.from(v, fmt).join(', ')})`)
 
 /**
- * A factor graph from `toFactorDiagram`, optionally with belief propagation's messages and beliefs at one step.
- * Binary messages show μ(x = 1); longer ones the whole vector. Click a variable to choose it (e.g. for a Markov
- * blanket); ids passed to `onVariableClick` are the variable's index or key.
+ * Groups a label's base before an appended instance subscript, so `\theta_d_{0}` (a double subscript, which KaTeX
+ * rejects) reads `{\theta_d}_{0}`. aifn's `toFactorGraph` appends the instance index to labels that may already carry
+ * a subscript (reported to aifn/inference/model); remove this once the labels arrive grouped.
+ */
+function groupSubscripts(label: string | undefined): string | undefined {
+  if (!label) return label
+  const fix = (tex: string) => tex.replace(/^(.*_(?:\{[^{}]*\}|[^_{}\s]))_\{([^{}]*)\}$/, '{$1}_{$2}')
+  return label.startsWith('$') && label.endsWith('$') ? `$${fix(label.slice(1, -1))}$` : fix(label)
+}
+
+/** Keys of a record by the diagram's node names: `x<i>` for a discrete graph's variables, instance keys for a model. */
+function byName<V>(record: Readonly<Record<string | number, V>> | undefined, discrete: boolean) {
+  if (!record || !discrete) return record as Readonly<Record<string, V>> | undefined
+  return Object.fromEntries(Object.entries(record).map(([k, v]) => [`x${k}`, v]))
+}
+
+/**
+ * A factor graph drawn from `toFactorDiagram` (a structured graph's `toDiagram`), optionally with belief propagation's
+ * messages and beliefs at one step. Binary messages show μ(x = 1); longer ones the whole vector. Click a variable to
+ * choose it (e.g. for a Markov blanket).
  */
 export function FactorGraphView({
   graph,
@@ -50,13 +63,20 @@ export function FactorGraphView({
   height,
   ariaLabel = 'A factor graph',
 }: FactorGraphViewProps) {
+  const discrete = 'cardinalities' in graph
   const spec = useMemo((): DiagramSpec => {
-    const d = toFactorDiagram(graph, { bindings, positions, labels, highlight })
+    const d: DiagramSpec = toFactorDiagram(graph, {
+      bindings,
+      positions: byName(positions, discrete),
+      labels: byName(labels, discrete),
+      highlight: highlight === undefined ? undefined : discrete ? `x${highlight}` : String(highlight),
+    })
+    d.nodes = d.nodes.map((n) => ({ ...n, label: groupSubscripts(n.label) }))
     if (!state) return d
     const updated = new Map(state.updated.map((u) => [u.edge, u.to]))
     const nodes = d.nodes.map((n): DiagramNode => {
-      if (!n.id.startsWith('var ')) return n
-      const b = state.beliefs[Number(n.id.slice(4))]?.data
+      const v = /^x(\d+)$/.exec(n.id)
+      const b = v ? state.beliefs[Number(v[1])]?.data : undefined
       if (!b) return n
       return { ...n, ...(b.length === 2 ? { shade: b[1] } : {}), notes: { s: `$${vec(b)}$` } }
     })
@@ -66,8 +86,8 @@ export function FactorGraphView({
       const toVariable = (to ?? 'factor') === 'variable'
       const m = (toVariable ? state.toVariable : state.toFactor)[k].data
       return {
-        from: `var ${e.variable}`,
-        to: `factor ${e.factor}`,
+        from: `x${e.variable}`,
+        to: `f${e.factor}`,
         route: 'straight',
         arrow: to !== undefined ? 'mid' : 'none',
         reverse: toVariable,
@@ -76,13 +96,16 @@ export function FactorGraphView({
       }
     })
     return { ...d, nodes, edges }
-  }, [graph, bindings, positions, labels, highlight, state, messages])
+  }, [graph, discrete, bindings, positions, labels, highlight, state, messages])
+  const variables = useMemo(() => new Set(spec.nodes.filter((n) => n.shape !== 'factor').map((n) => n.id)), [spec])
   return (
     <Diagram
       spec={spec}
       ariaLabel={ariaLabel}
       height={height}
-      onNodeClick={onVariableClick ? (id) => id.startsWith('var ') && onVariableClick(id.slice(4)) : undefined}
+      onNodeClick={
+        onVariableClick ? (id) => variables.has(id) && onVariableClick(discrete ? id.replace(/^x/, '') : id) : undefined
+      }
     />
   )
 }

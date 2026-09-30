@@ -1,5 +1,5 @@
-import type { Graph, GraphNode } from 'aifn/autodiff'
-import { toFlat, type Tensor } from 'aifn/tensor'
+import type { Graph, GraphNode } from 'aifn/foundation/autodiff'
+import { toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { useContext, useMemo, useState, type ReactNode } from 'react'
 import { Player } from '@lab/controls'
 import { Diagram, layeredLayout, type DiagramEdge, type DiagramSpec, type ElementState } from '@lab/diagram'
@@ -9,7 +9,7 @@ import { formatValue } from './format'
 import type { FrameProps } from './frame'
 
 export type ComputationGraphViewProps = FrameProps & {
-  /** A graph from `traceGraph` in `aifn/autodiff`. */
+  /** A graph from `traceGraph` in `aifn/foundation/autodiff`. */
   graph: Graph
   /** The function being differentiated, as TeX, set large above the diagram, e.g. `L = \log(1 + e^{wx + b})`. */
   expression?: string

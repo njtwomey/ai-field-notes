@@ -652,7 +652,7 @@ async function run() {
             (log.length ? `; console:\n${log.map((l) => `${l.level.toUpperCase()}  ${l.text}`).join('\n')}` : ''),
         )
       await cdp.send('Page.removeScriptToEvaluateOnNewDocument', { identifier })
-      // The registry, as the shell lists it: the lab's own pages and every specimen of src/specimens/*.tsx.
+      // The registry, as the shell lists it: the lab's own pages and every specimen under src/specimens.
       const all = await cdp.eval<string[]>(
         `[...document.querySelectorAll('nav[aria-label="Specimens"] a[href]')].map((a) => decodeURIComponent(a.getAttribute('href').slice(1)))`,
       )

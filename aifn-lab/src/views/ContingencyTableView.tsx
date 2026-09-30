@@ -1,13 +1,13 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import { confusionMargins, type ConfusionMatrix } from 'aifn/metrics'
-import { toFlat } from 'aifn/tensor'
+import { confusionMargins, type ConfusionMatrix } from 'aifn/learning/metrics'
+import { toFlat } from 'aifn/foundation/tensor'
 import { chrome, interpolateColors, sequential } from '@lab/design/palette'
 import { useTheme } from '@lab/design/theme'
 import { cn } from '@lab/lib/utils'
 import { formatNumber } from '@lab/viz'
 
 export type ContingencyTableViewProps = {
-  /** A confusion matrix of counts from `aifn/metrics` (`confusionMatrix`): rows actual, columns predicted. */
+  /** A confusion matrix of counts from `aifn/learning/metrics` (`confusionMatrix`): rows actual, columns predicted. */
   table: ConfusionMatrix
   /** A name per class, in the table's order (default the labels). */
   classNames?: readonly string[]
@@ -41,7 +41,7 @@ const rate = (v: number) => (Number.isFinite(v) ? formatNumber(v) : '–')
  * rate; TPR, FNR, TNR, FPR for two classes), column totals the column rates (precision and false discovery rate; PPV,
  * FDR, NPV, FOR), and the corner the grand total with the prevalence and the accuracy. Hovering a rate outlines the
  * cells it divides: the numerator solid, the rest of the denominator dashed. The margins come from
- * `aifn/metrics` `confusionMargins`.
+ * `aifn/learning/metrics` `confusionMargins`.
  */
 export function ContingencyTableView({
   table,

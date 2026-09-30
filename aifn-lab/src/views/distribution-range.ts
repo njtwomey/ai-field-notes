@@ -1,5 +1,5 @@
-import type { Univariate } from 'aifn/distributions'
-import { toFlat, unwrap, type Value } from 'aifn/tensor'
+import type { Univariate } from 'aifn/probability/distributions'
+import { toFlat, unwrap, type Value } from 'aifn/foundation/tensor'
 
 const numbers = (v: Value): number[] => {
   const r = unwrap(v)

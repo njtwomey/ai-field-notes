@@ -1,4 +1,4 @@
-import { iris } from 'aifn/datasets'
+import { iris } from 'aifn-applied/data/real'
 import { PairPlotView, ParallelCoordinatesView } from '@lab/views'
 
 const IRIS = iris()

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { isContiguous, size, slice, toFlat, toRows, type Tensor } from 'aifn/tensor'
+import { isContiguous, size, slice, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import { Select, Slider } from '@lab/controls'
 import { Figure } from '@lab/layout'
 import { Table, TableBody, TableCell, TableRow } from '@lab/ui/table'

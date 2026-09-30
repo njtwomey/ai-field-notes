@@ -8,15 +8,15 @@ import {
   isClassDistribution,
   isUnivariate,
   type Distribution,
-} from 'aifn/estimators'
-import { fromData, linspace, reshape, toFlat, type Tensor } from 'aifn/tensor'
+} from 'aifn/learning/estimators'
+import { fromData, linspace, reshape, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { Figure } from '@lab/layout'
 import { ChartSize, Readout, XYChart, type XYSeries } from '@lab/viz'
 import type { FrameProps } from './frame'
 import { StateTree } from './StateTree'
 
 export type FitViewProps = FrameProps & {
-  /** A fitted model from `aifn/estimators`, `aifn/compose` or any module with the same capabilities. */
+  /** A fitted model from `aifn/learning/estimators`, `aifn/learning/compose` or any module with the same capabilities. */
   model: object
   /** The training data: inputs [n, d] and targets [n]. */
   data: { x: Tensor; y: Tensor }

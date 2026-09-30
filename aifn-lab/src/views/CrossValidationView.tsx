@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { toRows } from 'aifn/tensor'
-import type { CrossValidation } from 'aifn/validate'
+import { toRows } from 'aifn/foundation/tensor'
+import type { CrossValidation } from 'aifn/learning/validate'
 import { Select } from '@lab/controls'
 import { Figure } from '@lab/layout'
 import { ChartSize, Heatmap, Readout, XYChart, type XYSeries } from '@lab/viz'

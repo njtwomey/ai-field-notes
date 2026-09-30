@@ -1,0 +1,186 @@
+/**
+ * Standard target log-densities (`kind: 'log-density'`) for samplers and variational inference: a banana (twisted
+ * Gaussian), a Gaussian, an isotropic Gaussian mixture and Neal's funnel. Each log-density is written with the
+ * registered distributions of `aifn/probability/distributions`, so it is differentiable; `grad` gives the closed form,
+ * and `truth` the known moments where they exist.
+ */
+
+import type { LogDensity, Value, VectorLike } from 'aifn/foundation/contracts'
+import {
+  add,
+  exp,
+  fromData,
+  get,
+  isTensor,
+  logsumexp,
+  mul,
+  slice,
+  sub,
+  sum,
+  toFlat,
+  type Tensor,
+} from 'aifn/foundation/tensor'
+import { inverse } from 'aifn/numerics/linalg'
+import { MultivariateNormal, Normal } from 'aifn/probability/distributions'
+
+/** A vector input as a fresh Float64Array. */
+function vec(v: Tensor | VectorLike): Float64Array {
+  if (isTensor(v)) {
+    const n = v.shape.length === 0 ? 1 : v.shape[0]
+    return Float64Array.from({ length: n }, (_, i) => Number(v.data[v.offset + i * (v.strides[0] ?? 0)]))
+  }
+  return Float64Array.from(v as ArrayLike<number>)
+}
+
+const matrixOf = (rows: readonly (readonly number[])[]): Tensor =>
+  fromData(Float64Array.from(rows.flat()), [rows.length, rows[0]?.length ?? 0])
+
+/**
+ * The banana (twisted Gaussian of Haario, Saksman and Tamminen, 1999, "Adaptive proposal distribution for random walk
+ * Metropolis algorithm", Computational Statistics 14) in two dimensions: x ~ N(0, a²) and y | x ~ N(b(x² − a²), 1), so
+ * the mean is (0, 0), Var x = a², Var y = 1 + 2b²a⁴, and b bends the ridge (b = 0 is a Gaussian). Default a = 1, b = 1.
+ */
+export function banana(options: { a?: number; b?: number } = {}): LogDensity & { mean: Tensor; variance: Tensor } {
+  const { a = 1, b = 1 } = options
+  const mean = fromData(Float64Array.of(0, 0), [2])
+  const variance = fromData(Float64Array.of(a * a, 1 + 2 * b * b * a ** 4), [2])
+  return {
+    kind: 'log-density',
+    name: 'banana',
+    dim: 2,
+    normalised: true,
+    logDensity: (theta: Value) => {
+      const x = get(theta, 0)
+      const y = get(theta, 1)
+      const ridge = mul(b, sub(mul(x, x), a * a))
+      return add(Normal(0, a).logProb(x), Normal(ridge, 1).logProb(y))
+    },
+    grad: (theta) => {
+      const [x, y] = vec(theta)
+      const r = y - b * (x * x - a * a)
+      return [-x / (a * a) + 2 * b * x * r, -r]
+    },
+    mean,
+    variance,
+    truth: { mean },
+  }
+}
+
+/**
+ * A normalised multivariate Gaussian target N(mean, covariance): log π(θ) = −½(θ − μ)ᵀΣ⁻¹(θ − μ) − ½ log|2πΣ|, with
+ * gradient −Σ⁻¹(θ − μ). `precision` is Σ⁻¹ (d × d).
+ */
+export function gaussianTarget(
+  mean: Tensor | VectorLike,
+  covariance: Tensor | readonly (readonly number[])[],
+): LogDensity & { mean: Tensor; covariance: Tensor; precision: Tensor } {
+  const mu = vec(mean)
+  const d = mu.length
+  const cov = isTensor(covariance) ? covariance : matrixOf(covariance as readonly (readonly number[])[])
+  if (cov.shape.length !== 2 || cov.shape[0] !== d || cov.shape[1] !== d)
+    throw new RangeError(`gaussianTarget: covariance must be ${d}×${d}`)
+  const law = MultivariateNormal(fromData(mu, [d]), { covariance: cov })
+  const precision = inverse(cov)
+  const P = Float64Array.from(toFlat(precision))
+  const meanT = fromData(Float64Array.from(mu), [d])
+  return {
+    kind: 'log-density',
+    name: 'gaussian',
+    dim: d,
+    normalised: true,
+    logDensity: (theta: Value) => law.logProb(theta),
+    grad: (theta) => {
+      const x = vec(theta)
+      const g = new Float64Array(d)
+      for (let i = 0; i < d; i++) {
+        let s = 0
+        for (let j = 0; j < d; j++) s += P[i * d + j] * (x[j] - mu[j])
+        g[i] = -s
+      }
+      return g
+    },
+    mean: meanT,
+    covariance: cov,
+    precision,
+    truth: { mean: meanT, cov },
+  }
+}
+
+/**
+ * An isotropic Gaussian mixture Σₖ wₖ N(θ | mₖ, σ²I) (normalised): the log of the weighted sum of a batch of K
+ * multivariate normals. `means` is K × d; `weights` default to equal.
+ */
+export function gaussianMixtureTarget(
+  means: readonly (readonly number[])[],
+  sd: number,
+  weights?: readonly number[],
+): LogDensity & { means: Tensor; weights: Tensor } {
+  const K = means.length
+  const d = means[0].length
+  const total = weights?.reduce((a, b) => a + b, 0) ?? K
+  const w = weights ? weights.map((v) => v / total) : new Array<number>(K).fill(1 / K)
+  const logW = fromData(Float64Array.from(w, Math.log), [K])
+  const components = MultivariateNormal(matrixOf(means), {
+    covariance: fromData(
+      Float64Array.from({ length: d * d }, (_, e) => (e % (d + 1) === 0 ? sd * sd : 0)),
+      [d, d],
+    ),
+  })
+  const componentLogs = (theta: Value) => add(logW, components.logProb(theta))
+  const meanOf = Float64Array.from({ length: d }, (_, i) => w.reduce((a, wk, k) => a + wk * means[k][i], 0))
+  return {
+    kind: 'log-density',
+    name: 'gaussian-mixture',
+    dim: d,
+    normalised: true,
+    logDensity: (theta: Value) => logsumexp(componentLogs(theta)),
+    grad: (theta) => {
+      const x = vec(theta)
+      const logs = vec(componentLogs(fromData(x, [d])) as Tensor)
+      const m = Math.max(...logs)
+      const r = logs.map((l) => Math.exp(l - m))
+      const z = r.reduce((a, b) => a + b, 0)
+      const g = new Float64Array(d)
+      means.forEach((mk, k) => {
+        for (let i = 0; i < d; i++) g[i] -= ((r[k] / z) * (x[i] - mk[i])) / (sd * sd)
+      })
+      return g
+    },
+    means: matrixOf(means),
+    weights: fromData(Float64Array.from(w), [K]),
+    truth: { mean: fromData(meanOf, [d]) },
+  }
+}
+
+/**
+ * Neal's funnel (Neal, 2003, "Slice sampling", Annals of Statistics 31(3), §8) in d dimensions: v ~ N(0, s²) and
+ * xᵢ | v ~ N(0, eᵛ) for i = 1 … d − 1, with θ = (v, x₁, …). Its neck (v ≪ 0) needs small steps and its mouth large
+ * ones, so fixed-step HMC diverges there. Default d = 2, s = 3.
+ */
+export function funnel(options: { dim?: number; scale?: number } = {}): LogDensity {
+  const { dim = 2, scale = 3 } = options
+  return {
+    kind: 'log-density',
+    name: 'funnel',
+    dim,
+    normalised: true,
+    logDensity: (theta: Value) => {
+      const v = get(theta, 0)
+      const rest = slice(theta, [1, null])
+      return add(Normal(0, scale).logProb(v), sum(Normal(0, exp(mul(0.5, v))).logProb(rest)))
+    },
+    grad: (theta) => {
+      const x = vec(theta)
+      const v = x[0]
+      const g = new Float64Array(dim)
+      let q = 0
+      for (let i = 1; i < dim; i++) {
+        q += x[i] * x[i]
+        g[i] = -x[i] * Math.exp(-v)
+      }
+      g[0] = -v / (scale * scale) + 0.5 * q * Math.exp(-v) - (dim - 1) / 2
+      return g
+    },
+    truth: { mean: fromData(new Float64Array(dim), [dim]) },
+  }
+}

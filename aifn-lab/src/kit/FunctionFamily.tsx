@@ -1,6 +1,19 @@
-import { grad } from 'aifn/autodiff'
-import { softplus } from 'aifn/special'
-import { add, div, exp, linspace, mul, sin, square, sub, sum, toFlat, type Tensor, type Value } from 'aifn/tensor'
+import { grad } from 'aifn/foundation/autodiff'
+import { softplus } from 'aifn/numerics/special'
+import {
+  add,
+  div,
+  exp,
+  linspace,
+  mul,
+  sin,
+  square,
+  sub,
+  sum,
+  toFlat,
+  type Tensor,
+  type Value,
+} from 'aifn/foundation/tensor'
 import { useMemo } from 'react'
 import { choice, defineVariants, slider, toggle, useParam, useVariants, VariantControls } from '@lab/controls'
 import { Figure } from '@lab/layout'

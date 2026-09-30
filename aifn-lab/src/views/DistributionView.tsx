@@ -1,12 +1,13 @@
 import { useMemo } from 'react'
-import type { Distribution, Multivariate, Univariate } from 'aifn/distributions'
-import { stream } from 'aifn/random'
-import { histogram } from 'aifn/stats'
-import { reshape, tensor, toFlat, unwrap, type Tensor, type Value } from 'aifn/tensor'
+import type { Distribution, Multivariate, Univariate } from 'aifn/probability/distributions'
+import { stream } from 'aifn/foundation/random'
+import { histogram } from 'aifn/probability/stats'
+import { reshape, tensor, toFlat, unwrap, type Tensor, type Value } from 'aifn/foundation/tensor'
 import { Figure } from '@lab/layout'
 import { Heatmap, Panel, Readout, Subplots, XYChart, type HeatmapOverlay, type XYSeries } from '@lab/viz'
 import { distributionRange } from './distribution-range'
 import { formatValue } from './format'
+import { histogramBars } from './histogram'
 import type { FrameProps } from './frame'
 
 export type DistributionViewProps = FrameProps & {
@@ -141,8 +142,8 @@ function UnivariateView({
         out.push({
           name: 'draws (density)',
           type: 'bar',
-          x: Array.from({ length: h.counts.length }, (_, i) => (h.edges[i] + h.edges[i + 1]) / 2),
-          y: Array.from(h.density),
+          x: histogramBars(h).x,
+          y: toFlat(h.density),
           muted: true,
         })
       }

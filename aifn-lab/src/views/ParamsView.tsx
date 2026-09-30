@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { countParams, treeLeaves } from 'aifn/nn'
-import { norm, type Tensor } from 'aifn/tensor'
+import { countParams, treeLeaves } from 'aifn/foundation/pytree'
+import { norm, type Tensor } from 'aifn/foundation/tensor'
 import { Select } from '@lab/controls'
 import { Figure } from '@lab/layout'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@lab/ui/table'

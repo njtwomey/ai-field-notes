@@ -1,4 +1,4 @@
-import type { Dataset } from 'aifn/datasets'
+import type { Dataset } from 'aifn-applied/data'
 import { Figure } from '@lab/layout'
 import { Readout, XYChart } from '@lab/viz'
 import { useDatasetSeries } from './dataset-series'
@@ -16,7 +16,7 @@ export type DatasetViewProps = FrameProps & {
   bare?: boolean
 }
 
-/** A dataset (`aifn/datasets`) as a scatter of two features coloured by class or by its coordinate, with its metadata. */
+/** A dataset (`aifn-applied/data`) as a scatter of two features coloured by class or by its coordinate, with its metadata. */
 export function DatasetView({
   data,
   dims,
@@ -46,7 +46,7 @@ export function DatasetView({
           {readouts}
           <Readout label="shape" value={`${data.x.shape.join(' × ')}`} />
           {data.meta.labelNames && <Readout label="classes" value={data.meta.labelNames.length} />}
-          {data.meta.stream && <Readout label="stream" value={data.meta.stream} />}
+          {data.meta.key && <Readout label="key" value={data.meta.key.path} />}
         </>
       }
       caption={caption ?? data.meta.source}

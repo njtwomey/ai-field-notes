@@ -1,0 +1,467 @@
+/**
+ * Generative classifiers: naive Bayes (Gaussian, multinomial, Bernoulli) and linear and quadratic discriminant
+ * analysis. Each fits p(x | y = k) and p(y = k) and classifies by Bayes' rule; `forward` returns the joint
+ * log-likelihoods log p(x, y = k) (up to a constant shared by the classes), and `predictive` their softmax.
+ *
+ * References: Hastie, Tibshirani and Friedman (2009), "The Elements of Statistical Learning", §4.3 (LDA, QDA) and
+ * §6.6.3 (naive Bayes); McCallum and Nigam (1998), "A comparison of event models for naive Bayes text
+ * classification" (multinomial and Bernoulli models). Conventions match scikit-learn's `GaussianNB`, `MultinomialNB`,
+ * `BernoulliNB`, `LinearDiscriminantAnalysis` (the default `svd` solver) and `QuadraticDiscriminantAnalysis`.
+ */
+
+import type { AnyUnivariate, Decides, Estimator, Fitted, Predicts, Scores, Supervised } from 'aifn/learning/estimators'
+import { cholesky, eigh } from 'aifn/numerics/linalg'
+import { fromData, type Tensor } from 'aifn/foundation/tensor'
+import { classLabels, inputs, mat, matrix, probabilityModel, softmaxRows, vec } from '../util'
+
+/** A fitted generative classifier: joint log-likelihoods as its head, a categorical predictive. */
+export interface GenerativeClassifier
+  extends Fitted<Tensor, Tensor>, Scores<Tensor>, Decides<Tensor, Tensor>, Predicts<Tensor, AnyUnivariate> {
+  readonly classes: number
+  /** log p(y = k), [K]. */
+  readonly logPrior: Tensor
+}
+
+/** Class counts and log-priors (empirical frequencies unless `priors` are given). */
+function priorsOf(y: Int32Array, K: number, priors: readonly number[] | undefined, where: string) {
+  const counts = new Float64Array(K)
+  for (const c of y) counts[c]++
+  const logPrior = new Float64Array(K)
+  if (priors) {
+    if (priors.length !== K) throw new Error(`${where}: ${K} classes but ${priors.length} priors`)
+    const total = priors.reduce((a, b) => a + b, 0)
+    for (let c = 0; c < K; c++) logPrior[c] = Math.log(priors[c] / total)
+  } else {
+    for (let c = 0; c < K; c++) logPrior[c] = Math.log(counts[c] / y.length)
+  }
+  return { counts, logPrior }
+}
+
+/** Per-class means [K, d]. */
+function classMeans(v: Float64Array, y: Int32Array, n: number, d: number, K: number, counts: Float64Array) {
+  const means = new Float64Array(K * d)
+  for (let i = 0; i < n; i++) for (let j = 0; j < d; j++) means[y[i] * d + j] += v[i * d + j]
+  for (let c = 0; c < K; c++) for (let j = 0; j < d; j++) means[c * d + j] /= counts[c] || 1
+  return means
+}
+
+// ── Naive Bayes ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** A fitted Gaussian naive Bayes model. */
+export interface GaussianNaiveBayesModel extends GenerativeClassifier {
+  readonly kind: 'model'
+  /** The model's name. */
+  readonly name: 'gaussian-naive-bayes'
+  /** Per-class feature means [K, d]. */
+  readonly means: Tensor
+  /** Per-class feature variances [K, d] (maximum likelihood, plus the smoothing `epsilon`). */
+  readonly variances: Tensor
+  /** The variance added to every entry: `varianceSmoothing` × the largest feature variance. */
+  readonly epsilon: number
+}
+
+/**
+ * Gaussian naive Bayes: features independent given the class, each Gaussian with a per-class mean and variance.
+ * `varianceSmoothing` (default 1e-9) adds that fraction of the largest feature variance to every variance, for
+ * stability, as scikit-learn's `var_smoothing`.
+ */
+export function gaussianNaiveBayes(
+  params: { varianceSmoothing?: number; priors?: readonly number[] } = {},
+): Estimator<Supervised<Tensor, Tensor>, GaussianNaiveBayesModel> {
+  const { varianceSmoothing = 1e-9, priors } = params
+  return {
+    name: 'gaussian-naive-bayes',
+    params: { varianceSmoothing, priors },
+    fit({ x, y }) {
+      const { n, d, v } = matrix(x, 'gaussianNaiveBayes')
+      const { y: labels, k: K } = classLabels(y, n, 'gaussianNaiveBayes')
+      const { counts, logPrior } = priorsOf(labels, K, priors, 'gaussianNaiveBayes')
+      const means = classMeans(v, labels, n, d, K, counts)
+      // ε = smoothing × the largest variance of any feature over all the data.
+      let largest = 0
+      for (let j = 0; j < d; j++) {
+        let m = 0
+        for (let i = 0; i < n; i++) m += v[i * d + j]
+        m /= n
+        let s = 0
+        for (let i = 0; i < n; i++) s += (v[i * d + j] - m) ** 2
+        largest = Math.max(largest, s / n)
+      }
+      const epsilon = varianceSmoothing * largest
+      const variances = new Float64Array(K * d)
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < d; j++) variances[labels[i] * d + j] += (v[i * d + j] - means[labels[i] * d + j]) ** 2
+      }
+      for (let c = 0; c < K; c++)
+        for (let j = 0; j < d; j++) variances[c * d + j] = variances[c * d + j] / (counts[c] || 1) + epsilon
+      const head = (q: Tensor) => {
+        const { n: m, v: qv } = inputs(q, d, 'gaussianNaiveBayes')
+        const out = new Float64Array(m * K)
+        for (let i = 0; i < m; i++) {
+          for (let c = 0; c < K; c++) {
+            let s = logPrior[c]
+            for (let j = 0; j < d; j++) {
+              const s2 = variances[c * d + j]
+              s -= 0.5 * Math.log(2 * Math.PI * s2) + (qv[i * d + j] - means[c * d + j]) ** 2 / (2 * s2)
+            }
+            out[i * K + c] = s
+          }
+        }
+        return out
+      }
+      return {
+        kind: 'model',
+        name: 'gaussian-naive-bayes',
+        classes: K,
+        logPrior: vec(logPrior),
+        means: mat(means, K, d),
+        variances: mat(variances, K, d),
+        epsilon,
+        ...probabilityModel(head, (h, m) => softmaxRows(h, m, K), K),
+      }
+    },
+  }
+}
+
+/** A fitted multinomial or Bernoulli naive Bayes model. */
+export interface DiscreteNaiveBayesModel extends GenerativeClassifier {
+  readonly kind: 'model'
+  /** The model's name. */
+  readonly name: 'multinomial-naive-bayes' | 'bernoulli-naive-bayes'
+  /** log P(feature j | class k) [K, d]: the probability of a count unit (multinomial) or of a one (Bernoulli). */
+  readonly featureLogProb: Tensor
+  /** The smoothed per-class feature totals [K, d] (counts plus α). */
+  readonly featureCounts: Tensor
+}
+
+/**
+ * Multinomial naive Bayes for count features (e.g. word counts): log p(x | k) = Σⱼ xⱼ log θ_kj + const, with
+ * θ_kj = (N_kj + α) / Σⱼ (N_kj + α) (additive, Laplace, smoothing α, default 1).
+ */
+export function multinomialNaiveBayes(
+  params: { alpha?: number; priors?: readonly number[] } = {},
+): Estimator<Supervised<Tensor, Tensor>, DiscreteNaiveBayesModel> {
+  const { alpha = 1, priors } = params
+  return {
+    name: 'multinomial-naive-bayes',
+    params: { alpha, priors },
+    fit({ x, y }) {
+      const { n, d, v } = matrix(x, 'multinomialNaiveBayes')
+      const { y: labels, k: K } = classLabels(y, n, 'multinomialNaiveBayes')
+      const { logPrior } = priorsOf(labels, K, priors, 'multinomialNaiveBayes')
+      for (const u of v) if (!(u >= 0)) throw new Error('multinomialNaiveBayes: features must be non-negative counts')
+      const counts = new Float64Array(K * d).fill(alpha)
+      for (let i = 0; i < n; i++) for (let j = 0; j < d; j++) counts[labels[i] * d + j] += v[i * d + j]
+      const logProb = new Float64Array(K * d)
+      for (let c = 0; c < K; c++) {
+        let total = 0
+        for (let j = 0; j < d; j++) total += counts[c * d + j]
+        for (let j = 0; j < d; j++) logProb[c * d + j] = Math.log(counts[c * d + j]) - Math.log(total)
+      }
+      const head = (q: Tensor) => {
+        const { n: m, v: qv } = inputs(q, d, 'multinomialNaiveBayes')
+        const out = new Float64Array(m * K)
+        for (let i = 0; i < m; i++) {
+          for (let c = 0; c < K; c++) {
+            let s = logPrior[c]
+            for (let j = 0; j < d; j++) s += qv[i * d + j] * logProb[c * d + j]
+            out[i * K + c] = s
+          }
+        }
+        return out
+      }
+      return {
+        kind: 'model',
+        name: 'multinomial-naive-bayes',
+        classes: K,
+        logPrior: vec(logPrior),
+        featureLogProb: mat(logProb, K, d),
+        featureCounts: mat(counts, K, d),
+        ...probabilityModel(head, (h, m) => softmaxRows(h, m, K), K),
+      }
+    },
+  }
+}
+
+/**
+ * Bernoulli naive Bayes for binary features: each feature is 1 with probability θ_kj = (N_kj + α) / (N_k + 2α) in
+ * class k, and absent features count too (unlike the multinomial model). Features are binarised as x > `binarize`
+ * (default 0; `null` when they are already 0/1).
+ */
+export function bernoulliNaiveBayes(
+  params: { alpha?: number; binarize?: number | null; priors?: readonly number[] } = {},
+): Estimator<Supervised<Tensor, Tensor>, DiscreteNaiveBayesModel> {
+  const { alpha = 1, binarize = 0, priors } = params
+  const bit = (u: number) => (binarize === null ? u : u > binarize ? 1 : 0)
+  return {
+    name: 'bernoulli-naive-bayes',
+    params: { alpha, binarize, priors },
+    fit({ x, y }) {
+      const { n, d, v } = matrix(x, 'bernoulliNaiveBayes')
+      const { y: labels, k: K } = classLabels(y, n, 'bernoulliNaiveBayes')
+      const { counts: classCounts, logPrior } = priorsOf(labels, K, priors, 'bernoulliNaiveBayes')
+      const counts = new Float64Array(K * d).fill(alpha)
+      for (let i = 0; i < n; i++) for (let j = 0; j < d; j++) counts[labels[i] * d + j] += bit(v[i * d + j])
+      const logP = new Float64Array(K * d)
+      const logQ = new Float64Array(K * d)
+      for (let c = 0; c < K; c++) {
+        for (let j = 0; j < d; j++) {
+          const p = counts[c * d + j] / (classCounts[c] + 2 * alpha)
+          logP[c * d + j] = Math.log(p)
+          logQ[c * d + j] = Math.log1p(-p)
+        }
+      }
+      const head = (q: Tensor) => {
+        const { n: m, v: qv } = inputs(q, d, 'bernoulliNaiveBayes')
+        const out = new Float64Array(m * K)
+        for (let i = 0; i < m; i++) {
+          for (let c = 0; c < K; c++) {
+            let s = logPrior[c]
+            for (let j = 0; j < d; j++) {
+              const b = bit(qv[i * d + j])
+              s += b * logP[c * d + j] + (1 - b) * logQ[c * d + j]
+            }
+            out[i * K + c] = s
+          }
+        }
+        return out
+      }
+      return {
+        kind: 'model',
+        name: 'bernoulli-naive-bayes',
+        classes: K,
+        logPrior: vec(logPrior),
+        featureLogProb: mat(logP, K, d),
+        featureCounts: mat(counts, K, d),
+        ...probabilityModel(head, (h, m) => softmaxRows(h, m, K), K),
+      }
+    },
+  }
+}
+
+// ── Discriminant analysis ────────────────────────────────────────────────────────────────────────────────────────
+
+/** A Cholesky factor as raw values, with log |Σ| and the jitter that was needed. */
+function factorCovariance(cov: Float64Array, d: number) {
+  const { L, jitter, failed } = cholesky(fromData(cov, [d, d]))
+  const l = Float64Array.from(L.data as Float64Array)
+  let logDet = 0
+  for (let j = 0; j < d; j++) logDet += 2 * Math.log(l[j * d + j])
+  return { l, logDet, jitter, failed }
+}
+
+/** ‖L⁻¹ r‖² by forward substitution (the squared Mahalanobis distance when LLᵀ = Σ). */
+function mahalanobis(l: Float64Array, d: number, r: Float64Array): number {
+  const z = new Float64Array(d)
+  let s = 0
+  for (let i = 0; i < d; i++) {
+    let t = r[i]
+    for (let k = 0; k < i; k++) t -= l[i * d + k] * z[k]
+    z[i] = t / l[i * d + i]
+    s += z[i] * z[i]
+  }
+  return s
+}
+
+/** A fitted linear or quadratic discriminant analysis. */
+export interface DiscriminantModel extends GenerativeClassifier {
+  readonly kind: 'model'
+  /** The model's name. */
+  readonly name: 'linear-discriminant' | 'quadratic-discriminant'
+  /** Class means [K, d]. */
+  readonly means: Tensor
+  /** LDA: the pooled within-class covariance [d, d]. QDA: one covariance per class [K, d, d]. */
+  readonly covariance: Tensor
+  /** Jitter added to each covariance's diagonal to factor it (0 when it was positive definite). */
+  readonly jitter: Tensor
+}
+
+/** A fitted LDA, which also projects onto its discriminant directions. */
+export interface LinearDiscriminantModel extends DiscriminantModel {
+  readonly kind: 'model'
+  /** The model's name. */
+  readonly name: 'linear-discriminant'
+  /**
+   * Discriminant directions [d, r] (r = min(K − 1, d)) as columns, solving S_b w = λ S_w w with wᵀ S_w w = 1, so the
+   * projected classes have unit within-class variance. Ordered by λ, descending.
+   */
+  readonly scalings: Tensor
+  /** The share of the between-class variance along each direction [r]. */
+  readonly explainedVarianceRatio: Tensor
+  /** Projections of x − (the prior-weighted mean of the class means) onto `scalings`, [m, r]. */
+  transform(x: Tensor): Tensor
+}
+
+/**
+ * Linear discriminant analysis: Gaussian classes sharing one covariance Σ, estimated as the within-class scatter
+ * divided by n (the maximum-likelihood estimate, which scikit-learn's predictions use). The discriminant is
+ * δ_k(x) = xᵀΣ⁻¹μ_k − ½ μ_kᵀΣ⁻¹μ_k + log π_k, linear in x. `shrinkage` s ∈ [0, 1] replaces Σ by
+ * (1 − s)Σ + s (tr Σ / d) I.
+ */
+export function linearDiscriminant(
+  params: { priors?: readonly number[]; shrinkage?: number } = {},
+): Estimator<Supervised<Tensor, Tensor>, LinearDiscriminantModel> {
+  const { priors, shrinkage = 0 } = params
+  if (!(shrinkage >= 0 && shrinkage <= 1)) throw new Error('linearDiscriminant: shrinkage must lie in [0, 1]')
+  return {
+    name: 'linear-discriminant',
+    params: { priors, shrinkage },
+    fit({ x, y }) {
+      const { n, d, v } = matrix(x, 'linearDiscriminant')
+      const { y: labels, k: K } = classLabels(y, n, 'linearDiscriminant')
+      const { counts, logPrior } = priorsOf(labels, K, priors, 'linearDiscriminant')
+      const means = classMeans(v, labels, n, d, K, counts)
+      const cov = new Float64Array(d * d)
+      for (let i = 0; i < n; i++) {
+        const c = labels[i]
+        for (let a = 0; a < d; a++) {
+          const ra = v[i * d + a] - means[c * d + a]
+          for (let b = 0; b <= a; b++) cov[a * d + b] += ra * (v[i * d + b] - means[c * d + b])
+        }
+      }
+      for (let a = 0; a < d; a++) for (let b = 0; b <= a; b++) cov[b * d + a] = cov[a * d + b] /= n
+      if (shrinkage > 0) {
+        let tr = 0
+        for (let a = 0; a < d; a++) tr += cov[a * d + a]
+        for (let a = 0; a < d; a++) {
+          for (let b = 0; b < d; b++)
+            cov[a * d + b] = (1 - shrinkage) * cov[a * d + b] + (a === b ? (shrinkage * tr) / d : 0)
+        }
+      }
+      const f = factorCovariance(cov, d)
+      // Discriminant directions: with Σ = LLᵀ, the eigenvectors u of L⁻¹ S_b L⁻ᵀ give w = L⁻ᵀ u (Fisher, 1936; Rao,
+      // 1948). S_b is the prior-weighted scatter of the class means about their weighted mean.
+      const prior = Float64Array.from(logPrior, Math.exp)
+      const centre = new Float64Array(d)
+      for (let c = 0; c < K; c++) for (let j = 0; j < d; j++) centre[j] += prior[c] * means[c * d + j]
+      const Z = new Float64Array(K * d) // rows: √π_k L⁻¹(μ_k − μ̄)
+      for (let c = 0; c < K; c++) {
+        for (let i = 0; i < d; i++) {
+          let t = means[c * d + i] - centre[i]
+          for (let k = 0; k < i; k++) t -= f.l[i * d + k] * Z[c * d + k]
+          Z[c * d + i] = t / f.l[i * d + i]
+        }
+      }
+      for (let c = 0; c < K; c++) for (let i = 0; i < d; i++) Z[c * d + i] *= Math.sqrt(prior[c])
+      const B = new Float64Array(d * d)
+      for (let c = 0; c < K; c++)
+        for (let a = 0; a < d; a++) for (let b = 0; b < d; b++) B[a * d + b] += Z[c * d + a] * Z[c * d + b]
+      const e = eigh(fromData(B, [d, d]))
+      const r = Math.min(K - 1, d)
+      const U = e.vectors.data as Float64Array
+      const lambda = e.values.data as Float64Array
+      let lambdaTotal = 0
+      for (let j = 0; j < d; j++) lambdaTotal += Math.max(lambda[j], 0)
+      const W = new Float64Array(d * r)
+      for (let col = 0; col < r; col++) {
+        // Back-substitute Lᵀ w = u.
+        for (let i = d - 1; i >= 0; i--) {
+          let t = U[i * d + col]
+          for (let k = i + 1; k < d; k++) t -= f.l[k * d + i] * W[k * r + col]
+          W[i * r + col] = t / f.l[i * d + i]
+        }
+      }
+      const head = (q: Tensor) => {
+        const { n: m, v: qv } = inputs(q, d, 'linearDiscriminant')
+        const out = new Float64Array(m * K)
+        const res = new Float64Array(d)
+        for (let i = 0; i < m; i++) {
+          for (let c = 0; c < K; c++) {
+            for (let j = 0; j < d; j++) res[j] = qv[i * d + j] - means[c * d + j]
+            out[i * K + c] = logPrior[c] - 0.5 * mahalanobis(f.l, d, res)
+          }
+        }
+        return out
+      }
+      return {
+        kind: 'model',
+        name: 'linear-discriminant',
+        classes: K,
+        logPrior: vec(logPrior),
+        means: mat(means, K, d),
+        covariance: mat(cov, d, d),
+        jitter: vec([f.jitter]),
+        scalings: mat(W, d, r),
+        explainedVarianceRatio: vec(Array.from({ length: r }, (_, j) => Math.max(lambda[j], 0) / (lambdaTotal || 1))),
+        transform: (q: Tensor) => {
+          const { n: m, v: qv } = inputs(q, d, 'linearDiscriminant.transform')
+          const out = new Float64Array(m * r)
+          for (let i = 0; i < m; i++) {
+            for (let col = 0; col < r; col++) {
+              let s = 0
+              for (let j = 0; j < d; j++) s += (qv[i * d + j] - centre[j]) * W[j * r + col]
+              out[i * r + col] = s
+            }
+          }
+          return mat(out, m, r)
+        },
+        ...probabilityModel(head, (h, m) => softmaxRows(h, m, K), K),
+      }
+    },
+  }
+}
+
+/**
+ * Quadratic discriminant analysis: Gaussian classes each with its own covariance Σ_k (the maximum-likelihood
+ * estimate, divided by n_k, as scikit-learn ≥ 1.6), so the
+ * boundaries are quadrics: δ_k(x) = −½ log |Σ_k| − ½ (x − μ_k)ᵀΣ_k⁻¹(x − μ_k) + log π_k. `regularisation` r ∈ [0, 1]
+ * replaces each Σ_k by (1 − r)Σ_k + rI, as scikit-learn's `reg_param`.
+ */
+export function quadraticDiscriminant(
+  params: { priors?: readonly number[]; regularisation?: number } = {},
+): Estimator<Supervised<Tensor, Tensor>, DiscriminantModel> {
+  const { priors, regularisation = 0 } = params
+  return {
+    name: 'quadratic-discriminant',
+    params: { priors, regularisation },
+    fit({ x, y }) {
+      const { n, d, v } = matrix(x, 'quadraticDiscriminant')
+      const { y: labels, k: K } = classLabels(y, n, 'quadraticDiscriminant')
+      const { counts, logPrior } = priorsOf(labels, K, priors, 'quadraticDiscriminant')
+      for (let c = 0; c < K; c++) {
+        if (counts[c] < 2) throw new Error(`quadraticDiscriminant: class ${c} has fewer than two rows`)
+      }
+      const means = classMeans(v, labels, n, d, K, counts)
+      const covs = new Float64Array(K * d * d)
+      for (let i = 0; i < n; i++) {
+        const c = labels[i]
+        for (let a = 0; a < d; a++) {
+          const ra = v[i * d + a] - means[c * d + a]
+          for (let b = 0; b < d; b++) covs[c * d * d + a * d + b] += ra * (v[i * d + b] - means[c * d + b])
+        }
+      }
+      const factors: ReturnType<typeof factorCovariance>[] = []
+      for (let c = 0; c < K; c++) {
+        const cov = covs.subarray(c * d * d, (c + 1) * d * d)
+        for (let a = 0; a < d; a++) {
+          for (let b = 0; b < d; b++) {
+            cov[a * d + b] = (1 - regularisation) * (cov[a * d + b] / counts[c]) + (a === b ? regularisation : 0)
+          }
+        }
+        factors.push(factorCovariance(Float64Array.from(cov), d))
+      }
+      const head = (q: Tensor) => {
+        const { n: m, v: qv } = inputs(q, d, 'quadraticDiscriminant')
+        const out = new Float64Array(m * K)
+        const res = new Float64Array(d)
+        for (let i = 0; i < m; i++) {
+          for (let c = 0; c < K; c++) {
+            for (let j = 0; j < d; j++) res[j] = qv[i * d + j] - means[c * d + j]
+            out[i * K + c] = logPrior[c] - 0.5 * factors[c].logDet - 0.5 * mahalanobis(factors[c].l, d, res)
+          }
+        }
+        return out
+      }
+      return {
+        kind: 'model',
+        name: 'quadratic-discriminant',
+        classes: K,
+        logPrior: vec(logPrior),
+        means: mat(means, K, d),
+        covariance: fromData(covs, [K, d, d]),
+        jitter: vec(factors.map((f) => f.jitter)),
+        ...probabilityModel(head, (h, m) => softmaxRows(h, m, K), K),
+      }
+    },
+  }
+}

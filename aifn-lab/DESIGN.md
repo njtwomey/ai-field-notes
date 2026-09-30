@@ -8,14 +8,14 @@ of patching each page as feedback arrives. Points for the owner are marked **[de
 
 Every piece of feedback on the lab so far falls into one of six gaps, and each gap was patched in place:
 
-| Feedback | Gap |
-| --- | --- |
-| Sliders invisible, unclickable, tiny, not typeable; controls crammed together; "one row per thing" | Controls are placed by hand on every page |
+| Feedback                                                                                                               | Gap                                                                                                          |
+| ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Sliders invisible, unclickable, tiny, not typeable; controls crammed together; "one row per thing"                     | Controls are placed by hand on every page                                                                    |
 | Panels misaligned, one toolbar incomplete, circle not round, axes rescaling on every change, arrows vanishing off-axis | Each chart owns its axes; sharing, aspect, holding, zoom and clipping are separate features added one by one |
-| Click the heatmap to query, drag x₀, the osculating circle, supports shown on the axes | The same pattern (a point the reader moves, with numbers computed there) is rebuilt on every page |
-| Histograms faint or missing, support bands, a signed KL area, a rotated output density | Probability pictures are assembled from raw lines and bars each time |
-| "Terrible, I don't know its purpose" (KL), "quite poor" (transformed), the backprop table | There is no standard for what a figure must show |
-| Every visual bug found by the owner, not by the builder | Builders cannot see the page: the render check proves it renders, not that it reads |
+| Click the heatmap to query, drag x₀, the osculating circle, supports shown on the axes                                 | The same pattern (a point the reader moves, with numbers computed there) is rebuilt on every page            |
+| Histograms faint or missing, support bands, a signed KL area, a rotated output density                                 | Probability pictures are assembled from raw lines and bars each time                                         |
+| "Terrible, I don't know its purpose" (KL), "quite poor" (transformed), the backprop table                              | There is no standard for what a figure must show                                                             |
+| Every visual bug found by the owner, not by the builder                                                                | Builders cannot see the page: the render check proves it renders, not that it reads                          |
 
 The symptom in the code: `XYChart` has 30 props, most added for one page, and `Heatmap` repeats the axis logic.
 Specimens hold 197 `useState` calls, each wired by hand to a slider, sometimes a handle, and a readout.
@@ -97,11 +97,15 @@ state.input.key; state.input.values.mu; state.reveal.jacobian; state.x0
 
 ```tsx
 <Plots rows={2} cols={2} share={{ x: 'col', y: 'row' }} heights={[3, 2]} widths={[2, 1]}>
-  <Plot x={xAxis} y={yAxis}>                      {/* the map */}
+  <Plot x={xAxis} y={yAxis}>
+    {' '}
+    {/* the map */}
     <Curve x={xs} y={gx} emphasis />
-    <Probe probe={x0} />                           {/* §6: guide lines, tangent, dx → dy */}
+    <Probe probe={x0} /> {/* §6: guide lines, tangent, dx → dy */}
   </Plot>
-  <Plot x={densityAxis} y={yAxis}>                {/* the output density, rotated */}
+  <Plot x={densityAxis} y={yAxis}>
+    {' '}
+    {/* the output density, rotated */}
     <Histogram values={gxDraws} orient="y" />
     <Density dist={Y} orient="y" />
     <SupportBand interval={Y.support} orient="y" />
@@ -183,16 +187,16 @@ scheduler handles it:
 
 ## 9. Components: keep, break up, replace
 
-| Today | After |
-| --- | --- |
-| `XYChart` (30 props), `Heatmap` | `Plot` + layers; thin compatibility wrappers, then retired |
-| `Subplots`/`Panel`, `ChartSize`, per-chart `aspect`, `rescaleOnChange`, `axisKey`, `holdFit`, `ViewportControls` per chart | `Plots` grid + `useAxis` (sharing, aspect, holding and toolbars in one place) |
-| `useParam`, `useVariants`, `useParams`, `ParamControls`, `ControlRow` | `useFigureState` + schema builders |
-| Handles wired per page | `state.handle(name)` and `Probe` |
-| `Readout` lists | `Readouts` groups, `ProbeReadout`, `Equation` |
-| `DistributionView`, `SamplesView`, `CurveView` | Rebuilt on layers (`Density`, `Histogram`, `SupportBand`), so the views and pages share one vocabulary |
-| `Figure` | Same frame + `purpose`, `equation`, `state` |
-| `debounceMs`, per-widget throttles, `useMemo` chains recomputed per pointer move | `useComputed` scheduler (§8a) + live layers |
+| Today                                                                                                                      | After                                                                                                  |
+| -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `XYChart` (30 props), `Heatmap`                                                                                            | `Plot` + layers; thin compatibility wrappers, then retired                                             |
+| `Subplots`/`Panel`, `ChartSize`, per-chart `aspect`, `rescaleOnChange`, `axisKey`, `holdFit`, `ViewportControls` per chart | `Plots` grid + `useAxis` (sharing, aspect, holding and toolbars in one place)                          |
+| `useParam`, `useVariants`, `useParams`, `ParamControls`, `ControlRow`                                                      | `useFigureState` + schema builders                                                                     |
+| Handles wired per page                                                                                                     | `state.handle(name)` and `Probe`                                                                       |
+| `Readout` lists                                                                                                            | `Readouts` groups, `ProbeReadout`, `Equation`                                                          |
+| `DistributionView`, `SamplesView`, `CurveView`                                                                             | Rebuilt on layers (`Density`, `Histogram`, `SupportBand`), so the views and pages share one vocabulary |
+| `Figure`                                                                                                                   | Same frame + `purpose`, `equation`, `state`                                                            |
+| `debounceMs`, per-widget throttles, `useMemo` chains recomputed per pointer move                                           | `useComputed` scheduler (§8a) + live layers                                                            |
 
 ## 10. Decisions for the owner
 

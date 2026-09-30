@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import { andrewsCurves } from 'aifn/embed'
-import { mean, zScores } from 'aifn/stats'
-import { fromData, toFlat } from 'aifn/tensor'
+import { andrewsCurves } from 'aifn-applied/unsupervised/embedding/linear'
+import { zScores } from 'aifn/probability/stats'
+import { fromData, mean, tensor, toFlat } from 'aifn/foundation/tensor'
 import { Switch } from '@lab/controls'
 import { ControlRow, Figure } from '@lab/layout'
 import { Readout, XYChart, type XYSeries } from '@lab/viz'
@@ -48,14 +48,14 @@ export function AndrewsCurvesView({
   const [hidden, setHidden] = useState<ReadonlySet<number>>(() => new Set())
 
   const { t, rows, means } = useMemo(() => {
-    const cols = scaled ? columns.map((c) => zScores(c)) : columns
+    const cols = scaled ? columns.map((c) => toFlat(zScores(c))) : columns
     const flat = new Float64Array(n * d)
     for (let i = 0; i < n; i++) for (let j = 0; j < d; j++) flat[i * d + j] = cols[j][i]
     const at = Array.from({ length: POINTS }, (_, j) => -Math.PI + (2 * Math.PI * j) / (POINTS - 1))
     const { t, curves } = andrewsCurves(fromData(flat, [n, d]), at)
     // The curve of the class mean is the mean of the class's curves: the map is linear.
     const centres = Array.from({ length: k }, (_, c) => {
-      const mine = cols.map((v) => mean(v.filter((_, i) => labels[i] === c)))
+      const mine = cols.map((v) => mean(tensor(Array.from(v).filter((_, i) => labels[i] === c))))
       return toFlat(andrewsCurves(fromData(Float64Array.from(mine), [1, d]), at).curves)
     })
     return { t: Array.from(t), rows: toFlat(curves), means: centres }

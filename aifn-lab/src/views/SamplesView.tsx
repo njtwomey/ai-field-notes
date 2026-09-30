@@ -1,9 +1,10 @@
 import { useMemo } from 'react'
-import { extent, histogram, mean, quantile, variance } from 'aifn/stats'
-import { linspace, toFlat } from 'aifn/tensor'
+import { extent, histogram, quantile } from 'aifn/probability/stats'
+import { linspace, mean, tensor, toFlat, variance } from 'aifn/foundation/tensor'
 import { Figure } from '@lab/layout'
 import { Readout, XYChart, type XYSeries } from '@lab/viz'
 import { formatValue } from './format'
+import { histogramBars } from './histogram'
 import type { FrameProps } from './frame'
 
 /** Reference moments shown beside the sample's own. */
@@ -55,7 +56,10 @@ const withExact = (value: number, exact: number | undefined) =>
   `${formatValue(value)}${exact !== undefined ? ` (exact ${formatValue(exact)})` : ''}`
 
 function MomentReadouts({ samples, reference }: { samples: ArrayLike<number>; reference?: ReferenceMoments }) {
-  const m = useMemo(() => ({ mean: mean(samples), variance: variance(samples, { sample: true }) }), [samples])
+  const m = useMemo(() => {
+    const x = tensor(samples)
+    return { mean: mean(x), variance: variance(x, null, false, 1) }
+  }, [samples])
   return (
     <>
       <Readout label="n" value={samples.length} />
@@ -93,14 +97,15 @@ function HistogramSamples({
   const { series, ks } = useMemo(() => {
     const [lo, hi] = [lo0 ?? quantile(samples, 0.005), hi0 ?? quantile(samples, 0.995)]
     const h = histogram(samples, { bins, range: [lo, hi] })
+    const bars = histogramBars(h)
     // Density over all n draws, so the bars integrate to the share that falls in the range.
     const scale = (samples.length - h.dropped) / samples.length
     const out: XYSeries[] = [
       {
         name: 'samples',
         type: 'bar',
-        x: Array.from(h.counts, (_, i) => (h.edges[i] + h.edges[i + 1]) / 2),
-        y: Array.from(h.density, (d) => d * scale),
+        x: bars.x,
+        y: bars.density.map((d) => d * scale),
       },
     ]
     if (density) {
@@ -157,7 +162,7 @@ function DiscreteSamples({
     const h = histogram(samples, { bins: toFlat(linspace(lo - 0.5, hi + 0.5, hi - lo + 2)) })
     const ks = Array.from({ length: hi - lo + 1 }, (_, i) => lo + i)
     const out: XYSeries[] = [
-      { name: 'samples', type: 'bar', x: ks, y: Array.from(h.counts, (c) => c / samples.length) },
+      { name: 'samples', type: 'bar', x: ks, y: toFlat(h.counts).map((c) => c / samples.length) },
     ]
     if (pmf) out.push({ name: 'pmf', type: 'scatter', x: ks, y: ks.map(pmf) })
     return out

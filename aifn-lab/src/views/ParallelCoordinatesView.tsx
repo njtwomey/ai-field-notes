@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { ArrowUpDown, GripVertical } from 'lucide-react'
-import { extent, median, zScores } from 'aifn/stats'
+import { extent, median, zScores } from 'aifn/probability/stats'
+import { toFlat } from 'aifn/foundation/tensor'
 import { chrome, seriesColor } from '@lab/design/palette'
 import { useTheme } from '@lab/design/theme'
 import { Button, Select, Switch } from '@lab/controls'
@@ -67,7 +68,7 @@ export function ParallelCoordinatesView({
 
   // The plotted values: raw on per-axis ranges, or z-scores (aifn/stats) on one range shared by every axis.
   const scaled = useMemo(() => {
-    const values = scaling === 'standard' ? columns.map((c) => zScores(c)) : columns
+    const values = scaling === 'standard' ? columns.map((c) => Float64Array.from(toFlat(zScores(c)))) : columns
     const ranges = values.map((v) => extent(v) as Range)
     const common: Range = [Math.min(...ranges.map((r) => r[0])), Math.max(...ranges.map((r) => r[1]))]
     return { values, ranges: scaling === 'standard' ? ranges.map(() => common) : ranges }

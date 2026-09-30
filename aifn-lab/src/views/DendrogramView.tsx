@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { cutTree, mergeTree } from 'aifn/cluster'
-import { toFlat, toRows, type Tensor } from 'aifn/tensor'
+import { cutTree, mergeTree } from 'aifn-applied/unsupervised/clustering'
+import { toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import { Slider } from '@lab/controls'
 import { Figure } from '@lab/layout'
 import { Readout, XYChart } from '@lab/viz'
@@ -9,7 +9,10 @@ import { formatValue } from './format'
 import { TreeView } from './TreeView'
 
 export type DendrogramViewProps = FrameProps & {
-  /** A linkage matrix [n − 1, 4] in SciPy's format (from `aifn/cluster`'s `linkage` or an `agglomerative` model). */
+  /**
+   * A linkage matrix [n − 1, 4] in SciPy's format (from `aifn-applied/unsupervised/cluster`'s `linkage` or an
+   * `agglomerative` model).
+   */
   merges: Tensor
   /** Where the tree is cut (a merge height); merges above it are undone. */
   cut: number

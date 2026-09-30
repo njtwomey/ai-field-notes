@@ -1,57 +1,265 @@
 /**
- * `make aifn-layers` (part of `make lint`): checks the layer order of `aifn-js/src`. Every module sits in one tier of
- * the table between the `aifn-layers` markers in `aifn-js/README.md`, and may import (values or types) only from
- * modules in strictly lower tiers, through `aifn/<module>`. Also fails on a relative import that reaches into another
- * module's folder, on a module folder missing from the table (or a table entry with no folder), and on a copy of the
- * table in `docs/aifn-plan.md` that differs from the README's.
+ * `make aifn-layers` (part of `make lint` and `make test`): checks aifn-js against its module tree,
+ * `aifn-js/modules.json` (the rules: `.scratch/aifn/module-tree.md` §1).
+ *
+ * - The tree: every directory under `core/src` and `applications/src` is a declared node (family, group, module or
+ *   area) or an alias (an old flat path, kept only during phase 1 step 1); every declared node has a folder with an
+ *   `index.ts` (unless its status is "gap"); a module has no child directories; the plain files at a group's root are
+ *   exactly its declared shared files.
+ * - Core (package `aifn`): a file imports a node of a strictly lower family tier, or of its own family and a strictly
+ *   lower local tier (D5); its ancestors' shared files by relative path; nothing else of core by relative path. A
+ *   family index is imported from outside the family only for its shared names; the package root and aliases never
+ *   (aliases warn while they exist). `foundation` (tier 0) therefore imports nothing else in core. Core, its tests
+ *   included, never imports `aifn-applied`, and nothing outside aifn.
+ * - Applications (package `aifn-applied`): any core node; ancestors' shared files by relative path; another area only
+ *   down `dependsOn` (acyclic), through its public path; never a node of its own area (siblings share through the
+ *   parent). No React, DOM libraries or third-party packages.
+ * - A parent never imports a child, except an `index.ts` re-exporting it.
+ * - Topics are taxonomy paths in `content/taxonomy.yaml`.
+ * - The tables between the `aifn-layers` and `aifn-areas` markers in `aifn-js/README.md`, and the tier table in
+ *   `docs/aifn-plan.md`, are generated from the file: `--write` regenerates them, and the check fails when stale.
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import { parse } from 'yaml'
+
+type CoreModule = { module: string; tier: number; topics: string[]; status?: 'gap' }
+type Family = { family: string; title: string; tier: number; topics: string[]; shared: string[]; modules: CoreModule[] }
+type AppNode =
+  { module: string; topics?: string[]; status?: 'gap' } | { group: string; shared: string[]; children: AppNode[] }
+type Area = {
+  area: string
+  title: string
+  dependsOn: string[]
+  topics: string[]
+  shared: string[]
+  children: AppNode[]
+}
+type Modules = {
+  core: { package: string; families: Family[] }
+  applications: { package: string; areas: Area[] }
+  aliases: { path: string; until: string }[]
+  transitional?: { file: string; imports: string; reason: string }[]
+  testsSuspended?: boolean
+}
 
 const root = path.resolve(import.meta.dirname, '..')
-const srcDir = path.join(root, 'aifn-js', 'src')
+const coreDir = path.join(root, 'aifn-js', 'core')
+const appsDir = path.join(root, 'aifn-js', 'applications')
+const coreSrc = path.join(coreDir, 'src')
+const appsSrc = path.join(appsDir, 'src')
+const write = process.argv.includes('--write')
 const errors: string[] = []
+const warnings: string[] = []
 
-/** The tier table between `<!-- aifn-layers:start -->` and `<!-- aifn-layers:end -->`: rows `| tier | a, b, c |`. */
-function readTiers(file: string): Map<string, number> | null {
-  const text = fs.readFileSync(path.join(root, file), 'utf8')
-  const block = /<!-- aifn-layers:start -->([\s\S]*?)<!-- aifn-layers:end -->/.exec(text)
-  if (!block) return null
-  const tiers = new Map<string, number>()
-  for (const line of block[1].split('\n')) {
-    const row = /^\|\s*(\d+)\s*\|([^|]*)\|/.exec(line)
-    if (!row) continue
-    for (const name of row[2].split(',').map((m) => m.replace(/`/g, '').trim())) {
-      if (!name) continue
-      if (tiers.has(name)) errors.push(`${file}: module ${name} is listed in two tiers`)
-      tiers.set(name, Number(row[1]))
-    }
+const spec = JSON.parse(fs.readFileSync(path.join(root, 'aifn-js', 'modules.json'), 'utf8')) as Modules
+const aliases = new Set(spec.aliases.map((a) => a.path))
+const transitional = spec.transitional ?? []
+
+// ── The declared tree ────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** A declared node, keyed by its path under src (`numerics/linalg`, `learning/generalised`). */
+type Node = {
+  pkg: 'core' | 'apps'
+  path: string
+  kind: 'family' | 'module' | 'group' | 'area'
+  /** Core: family tier and local tier (a family itself has local -1; a single-module family is a module at 0). */
+  tier: number
+  local: number
+  shared: string[]
+  gap: boolean
+  children: string[]
+  topics: string[]
+}
+const nodes = new Map<string, Node>()
+const add = (key: string, n: Node) => {
+  if (nodes.has(key)) errors.push(`modules.json: ${key} is declared twice`)
+  nodes.set(key, n)
+}
+for (const f of spec.core.families) {
+  const single = f.modules.length === 0
+  add(`core:${f.family}`, {
+    pkg: 'core',
+    path: f.family,
+    kind: single ? 'module' : 'family',
+    tier: f.tier,
+    local: single ? 0 : -1,
+    shared: f.shared,
+    gap: false,
+    children: f.modules.map((m) => `${f.family}/${m.module}`),
+    topics: f.topics,
+  })
+  for (const m of f.modules)
+    add(`core:${f.family}/${m.module}`, {
+      pkg: 'core',
+      path: `${f.family}/${m.module}`,
+      kind: 'module',
+      tier: f.tier,
+      local: m.tier,
+      shared: [],
+      gap: m.status === 'gap',
+      children: [],
+      topics: m.topics,
+    })
+}
+const addApp = (prefix: string, n: AppNode) => {
+  if ('module' in n) {
+    add(`apps:${prefix}/${n.module}`, {
+      pkg: 'apps',
+      path: `${prefix}/${n.module}`,
+      kind: 'module',
+      tier: 0,
+      local: 0,
+      shared: [],
+      gap: n.status === 'gap',
+      children: [],
+      topics: n.topics ?? [],
+    })
+    return
   }
-  return tiers
+  const p = `${prefix}/${n.group}`
+  add(`apps:${p}`, {
+    pkg: 'apps',
+    path: p,
+    kind: 'group',
+    tier: 0,
+    local: 0,
+    shared: n.shared,
+    gap: false,
+    children: n.children.map((c) => `${p}/${'module' in c ? c.module : c.group}`),
+    topics: [],
+  })
+  for (const c of n.children) addApp(p, c)
+}
+const areas = new Map<string, Area>()
+for (const a of spec.applications.areas) {
+  areas.set(a.area, a)
+  add(`apps:${a.area}`, {
+    pkg: 'apps',
+    path: a.area,
+    // An area without children is a single module (timeseries), as a core family without modules is.
+    kind: a.children.length ? 'area' : 'module',
+    tier: 0,
+    local: 0,
+    shared: a.shared,
+    gap: false,
+    children: a.children.map((c) => `${a.area}/${'module' in c ? c.module : c.group}`),
+    topics: a.topics,
+  })
+  for (const c of a.children) addApp(a.area, c)
 }
 
-const tiers = readTiers('aifn-js/README.md')
-if (!tiers) {
-  console.error('aifn-layers: no tier table between <!-- aifn-layers:start/end --> markers in aifn-js/README.md')
-  process.exit(1)
+// ── The area DAG ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+for (const a of areas.values())
+  for (const d of a.dependsOn) if (!areas.has(d)) errors.push(`modules.json: area ${a.area} depends on unknown ${d}`)
+
+/** The areas below `area` in the DAG (transitively), or null on a cycle through it. */
+function below(area: string, seen: string[] = []): Set<string> | null {
+  if (seen.includes(area)) return null
+  const out = new Set<string>()
+  for (const d of areas.get(area)?.dependsOn ?? []) {
+    const sub = below(d, [...seen, area])
+    if (!sub) return null
+    out.add(d)
+    for (const s of sub) out.add(s)
+  }
+  return out
+}
+const reachable = new Map<string, Set<string>>()
+for (const a of areas.keys()) {
+  const r = below(a)
+  if (!r) errors.push(`modules.json: area ${a} is on a dependency cycle`)
+  reachable.set(a, r ?? new Set())
 }
 
-const plan = readTiers('docs/aifn-plan.md')
-if (!plan) errors.push('docs/aifn-plan.md: no tier table between <!-- aifn-layers:start/end --> markers')
-else {
-  for (const [m, t] of tiers)
-    if (plan.get(m) !== t) errors.push(`docs/aifn-plan.md: ${m} is in tier ${plan.get(m)}, README says ${t}`)
-  for (const m of plan.keys()) if (!tiers.has(m)) errors.push(`docs/aifn-plan.md: ${m} is not in the README's table`)
+// ── Topics ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+type Topic = { id: string; children?: Topic[] }
+const topics = new Set<string>()
+const walkTopics = (list: Topic[], prefix: string) => {
+  for (const n of list) {
+    topics.add(prefix + n.id)
+    walkTopics(n.children ?? [], `${prefix}${n.id}/`)
+  }
+}
+walkTopics(parse(fs.readFileSync(path.join(root, 'content', 'taxonomy.yaml'), 'utf8')) as Topic[], '')
+for (const [key, n] of nodes)
+  for (const t of n.topics) if (!topics.has(t)) errors.push(`modules.json: ${key} names unknown topic ${t}`)
+
+// ── Folders against the file ─────────────────────────────────────────────────────────────────────────────────────────
+
+const dirs = (dir: string) =>
+  fs.existsSync(dir)
+    ? fs
+        .readdirSync(dir, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name)
+    : []
+const plainFiles = (dir: string) =>
+  fs.existsSync(dir)
+    ? fs
+        .readdirSync(dir, { withFileTypes: true })
+        .filter((d) => d.isFile() && /\.tsx?$/.test(d.name) && d.name !== 'index.ts')
+        .map((d) => d.name.replace(/\.tsx?$/, ''))
+    : []
+
+const publicOf = (pkg: 'core' | 'apps', p: string) => `${pkg === 'core' ? 'aifn' : 'aifn-applied'}/${p}`
+const srcOf = (pkg: 'core' | 'apps') => (pkg === 'core' ? coreSrc : appsSrc)
+
+/** Legacy folders: aliases whose folder is not a declared node (their files are checked leniently). */
+const legacyDirs = new Set<string>()
+/** Files of a legacy alias left at a family root that is also a new node (graph, optim, nn during the move). */
+const legacyFiles = new Set<string>()
+function checkDir(pkg: 'core' | 'apps', rel: string) {
+  const full = path.join(srcOf(pkg), rel)
+  for (const d of dirs(full)) {
+    const p = rel ? `${rel}/${d}` : d
+    const n = nodes.get(`${pkg}:${p}`)
+    if (n) continue
+    if (aliases.has(publicOf(pkg, p))) {
+      legacyDirs.add(`${pkg}:${p}`)
+      continue
+    }
+    errors.push(`aifn-js/${pkg === 'core' ? 'core' : 'applications'}/src/${p}: folder is not declared in modules.json`)
+  }
+  for (const d of dirs(full)) {
+    const p = rel ? `${rel}/${d}` : d
+    if (nodes.has(`${pkg}:${p}`)) checkDir(pkg, p)
+  }
+}
+checkDir('core', '')
+checkDir('apps', '')
+for (const [key, n] of nodes) {
+  const full = path.join(srcOf(n.pkg), n.path)
+  const where = `aifn-js/${n.pkg === 'core' ? 'core' : 'applications'}/src/${n.path}`
+  if (!fs.existsSync(full)) {
+    if (!n.gap) errors.push(`modules.json: ${key} has no folder`)
+    continue
+  }
+  if (n.gap) errors.push(`modules.json: ${key} is a gap but has a folder; drop its status`)
+  if (!fs.existsSync(path.join(full, 'index.ts'))) errors.push(`${where}: no index.ts`)
+  if (n.kind === 'module') {
+    const sub = dirs(full).filter((d) => !legacyDirs.has(`${n.pkg}:${n.path}/${d}`))
+    if (sub.length) errors.push(`${where}: a module has no child folders (found ${sub.join(', ')})`)
+    continue
+  }
+  const files = plainFiles(full)
+  const legacy = aliases.has(publicOf(n.pkg, n.path))
+  for (const f of files)
+    if (!n.shared.includes(f)) {
+      if (legacy) legacyFiles.add(path.join(full, `${f}.ts`))
+      else errors.push(`${where}/${f}.ts: not a declared shared file of ${n.path}`)
+    }
+  for (const s of n.shared)
+    if (!files.includes(s))
+      (aliases.size ? warnings : errors).push(`modules.json: ${key} shared file ${s}.ts is missing`)
 }
 
-const modules = fs
-  .readdirSync(srcDir, { withFileTypes: true })
-  .filter((d) => d.isDirectory())
-  .map((d) => d.name)
-for (const m of modules) if (!tiers.has(m)) errors.push(`aifn-js/src/${m}: module missing from the tier table`)
-for (const m of tiers.keys()) if (!modules.includes(m)) errors.push(`tier table: ${m} has no folder in aifn-js/src`)
+// ── Imports ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 function* files(dir: string): Generator<string> {
+  if (!fs.existsSync(dir)) return
   for (const d of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, d.name)
     if (d.isDirectory()) yield* files(p)
@@ -59,39 +267,308 @@ function* files(dir: string): Generator<string> {
   }
 }
 
-// Static imports and re-exports (`from '…'`), side-effect imports and `import('…')` type queries.
-const specifiers = /(?:\bfrom\s*|\bimport\s*\(\s*|^\s*import\s+)['"]([^'"]+)['"]/gm
+// Static imports and re-exports (`from '…'`), side-effect imports and `import('…')` type queries, with the named
+// bindings when there are any. A specifier has no whitespace, which keeps string literals in prose out.
+const statements =
+  /(?:\b(?:import|export)\s+(?:type\s+)?(?:\{([^}]*)\}\s*from\s*)?|\bfrom\s*|\bimport\s*\(\s*|^\s*import\s+)['"]([^'"\s]+)['"]/gm
 
-for (const m of modules) {
-  const tier = tiers.get(m)
-  for (const file of files(path.join(srcDir, m))) {
-    const rel = path.relative(root, file)
-    const text = fs.readFileSync(file, 'utf8')
-    for (const match of text.matchAll(specifiers)) {
-      const spec = match[1]
-      const line = text.slice(0, match.index).split('\n').length
-      const where = `${rel}:${line}`
-      if (spec.startsWith('.')) {
-        const target = path.relative(srcDir, path.resolve(path.dirname(file), spec)).split(path.sep)[0]
-        if (target !== m)
-          errors.push(`${where}: relative import '${spec}' reaches into ${target}; use 'aifn/${target}'`)
-        continue
-      }
-      const dep = /^aifn\/([^/]+)$/.exec(spec)?.[1]
-      if (!dep || dep === m) continue
-      const depTier = tiers.get(dep)
-      if (depTier === undefined) errors.push(`${where}: imports unknown module aifn/${dep}`)
-      else if (tier !== undefined && depTier >= tier)
-        errors.push(
-          `${where}: ${m} (tier ${tier}) imports aifn/${dep} (tier ${depTier}); only lower tiers may be imported`,
-        )
-    }
+function* imports(file: string): Generator<{ spec: string; names: string[] | null; where: string }> {
+  const text = fs.readFileSync(file, 'utf8')
+  for (const match of text.matchAll(statements)) {
+    const line = text.slice(0, match.index).split('\n').length
+    const names =
+      match[1] === undefined
+        ? null
+        : match[1]
+            .split(',')
+            .map((s) =>
+              s
+                .trim()
+                .replace(/^type\s+/, '')
+                .split(/\s+as\s+/)[0]
+                .trim(),
+            )
+            .filter(Boolean)
+    yield { spec: match[2], names, where: `${path.relative(root, file)}:${line}` }
   }
 }
 
+/** Where a file sits: its package, the node (or legacy folder) holding it, and whether it is that node's index. */
+type Place = { pkg: 'core' | 'apps'; dir: string; node: Node | null; legacy: boolean; index: boolean; shared: boolean }
+function place(file: string): Place | null {
+  for (const pkg of ['core', 'apps'] as const) {
+    const rel = path.relative(srcOf(pkg), file)
+    if (rel.startsWith('..')) continue
+    const dir = path.dirname(rel).split(path.sep).join('/')
+    const node = nodes.get(`${pkg}:${dir}`) ?? null
+    const index = path.basename(file) === 'index.ts'
+    const legacy =
+      legacyDirs.has(`${pkg}:${dir}`) ||
+      legacyFiles.has(file) ||
+      [...legacyDirs].some((d) => `${pkg}:${dir}`.startsWith(`${d}/`))
+    const shared = !!node && node.kind !== 'module' && !index && !legacy
+    return { pkg, dir, node, legacy, index, shared }
+  }
+  return null
+}
+
+/** The node a public specifier names (`aifn/numerics/linalg`), or 'alias', 'root' or null. */
+function target(spec: string): { pkg: 'core' | 'apps'; node: Node } | 'alias' | 'root' | null {
+  if (spec === 'aifn' || spec === 'aifn-applied') return 'root'
+  if (aliases.has(spec)) return 'alias'
+  const m = /^(aifn|aifn-applied)\/(.+)$/.exec(spec)
+  if (!m) return null
+  const pkg = m[1] === 'aifn' ? 'core' : 'apps'
+  const node = nodes.get(`${pkg}:${m[2]}`)
+  return node ? { pkg, node } : null
+}
+
+/** The names a group index takes from its children (`export … from './child'`), which must be imported from the child. */
+const childNames = new Map<string, Set<string>>()
+function namesFromChildren(n: Node): Set<string> {
+  const key = `${n.pkg}:${n.path}`
+  const known = childNames.get(key)
+  if (known) return known
+  const out = new Set<string>()
+  const index = path.join(srcOf(n.pkg), n.path, 'index.ts')
+  if (fs.existsSync(index)) {
+    const text = fs.readFileSync(index, 'utf8')
+    for (const m of text.matchAll(/export\s+(?:type\s+)?\{([^}]*)\}\s*from\s*'\.\/([^'/]+)'/g)) {
+      if (!nodes.has(`${n.pkg}:${n.path}/${m[2]}`)) continue
+      for (const s of m[1].split(','))
+        out.add(
+          s
+            .trim()
+            .replace(/^type\s+/, '')
+            .split(/\s+as\s+/)
+            .pop()!
+            .trim(),
+        )
+    }
+  }
+  childNames.set(key, out)
+  return out
+}
+
+const familyOf = (p: string) => p.split('/')[0]
+let aliasImports = 0
+
+function checkRelative(file: string, at: Place, spec: string, where: string) {
+  const resolved = path.resolve(path.dirname(file), spec)
+  const rel = path.relative(srcOf(at.pkg), resolved)
+  if (rel.startsWith('..')) return errors.push(`${where}: relative import '${spec}' leaves the package`)
+  const tdir = path.dirname(rel).split(path.sep).join('/')
+  const base = path.basename(rel).replace(/\.tsx?$/, '')
+  if (legacyFiles.has(`${resolved}.ts`)) return
+  if ([...legacyDirs].some((d) => d === `${at.pkg}:${tdir}`)) {
+    // Into an old flat folder whose files wait for 1c: allowed while the alias exists.
+    warnings.push(`${where}: relative import '${spec}' into a legacy folder (TODO(tree 1c))`)
+    return
+  }
+  if (tdir === at.dir && base !== 'index' && fs.existsSync(`${resolved}.ts`)) {
+    // Own folder: a module's files import each other; a shared file imports only other shared files.
+    if (at.shared && !at.node!.shared.includes(base))
+      errors.push(`${where}: shared file imports '${spec}', which is not shared (a parent never imports a child)`)
+    return
+  }
+  // An index re-exports its own files and its descendants.
+  if (at.index && (path.dirname(resolved) + path.sep).startsWith(path.dirname(file) + path.sep)) return
+  if (at.legacy) {
+    if (tdir === at.dir || nodes.has(`${at.pkg}:${tdir}`)) return
+    return errors.push(`${where}: relative import '${spec}' leaves its folder`)
+  }
+  // An ancestor's shared file.
+  const anc = nodes.get(`${at.pkg}:${tdir}`)
+  if (anc && at.dir.startsWith(`${tdir}/`) && anc.shared.includes(base)) return
+  errors.push(`${where}: relative import '${spec}' is neither in its module nor an ancestor's shared file`)
+}
+
+function checkCore(file: string) {
+  if (file === path.join(coreSrc, 'index.ts')) {
+    // The package root (D1): foundation's common surface only.
+    for (const { spec, where } of imports(file))
+      if (spec !== 'aifn' && !spec.startsWith('aifn/foundation/'))
+        errors.push(`${where}: the package root re-exports foundation only, not '${spec}'`)
+    return
+  }
+  const at = place(file)!
+  const own = at.node
+  for (const { spec, names, where } of imports(file)) {
+    if (spec.startsWith('.')) {
+      checkRelative(file, at, spec, where)
+      continue
+    }
+    if (spec.startsWith('aifn-applied')) {
+      errors.push(`${where}: core imports the application '${spec}'; core never imports aifn-applied`)
+      continue
+    }
+    const t = target(spec)
+    if (t === null) {
+      errors.push(`${where}: '${spec}' is not a node of aifn; core imports only aifn/<family>/<module>`)
+      continue
+    }
+    if (t === 'root') {
+      errors.push(`${where}: core imports the package root; import the defining node`)
+      continue
+    }
+    if (t === 'alias') {
+      aliasImports++
+      if (!at.legacy) warnings.push(`${where}: imports the alias '${spec}' (TODO(tree 1d))`)
+      continue
+    }
+    if (at.legacy || !own) continue
+    const excused = transitional.some((x) => where.startsWith(`aifn-js/core/src/${x.file}`) && x.imports === spec)
+    const tn = t.node
+    const sameFamily = familyOf(tn.path) === familyOf(own.path)
+    const isGroupIndex = tn.kind === 'family'
+    if (isGroupIndex) {
+      // A family index: only its shared names, and only from outside the family.
+      if (sameFamily) errors.push(`${where}: imports its own family's index '${spec}'; use the relative path`)
+      else if (names) {
+        const children = namesFromChildren(tn)
+        for (const n of names)
+          if (children.has(n))
+            errors.push(`${where}: imports ${n} from the family index '${spec}'; use its module's path`)
+      }
+      if (!sameFamily && tn.tier >= own.tier && !excused)
+        errors.push(`${where}: ${own.path} (tier ${own.tier}) imports ${spec} (tier ${tn.tier}); only lower tiers`)
+      continue
+    }
+    if (!sameFamily) {
+      if (tn.tier >= own.tier && !excused)
+        errors.push(
+          `${where}: ${own.path} (family tier ${own.tier}) imports ${spec} (tier ${tn.tier}); only lower tiers`,
+        )
+      continue
+    }
+    if (tn.path === own.path) {
+      errors.push(`${where}: imports its own module through '${spec}'; use './…'`)
+      continue
+    }
+    if (at.shared) {
+      errors.push(`${where}: a shared file imports the child '${spec}' (a parent never imports a child)`)
+      continue
+    }
+    if (tn.local >= own.local && !excused)
+      errors.push(
+        `${where}: ${own.path} (local tier ${own.local}) imports ${spec} (local tier ${tn.local}); only lower`,
+      )
+  }
+}
+
+function checkApp(file: string) {
+  const at = place(file)!
+  const area = at.dir.split('/')[0]
+  const allowed = reachable.get(area) ?? new Set()
+  for (const { spec, where } of imports(file)) {
+    if (spec.startsWith('.')) {
+      checkRelative(file, at, spec, where)
+      continue
+    }
+    const t = target(spec)
+    if (t === 'alias') {
+      aliasImports++
+      if (!at.legacy) warnings.push(`${where}: imports the alias '${spec}' (TODO(tree 1d))`)
+      continue
+    }
+    if (t === null || t === 'root') {
+      errors.push(`${where}: '${spec}' is not a node of aifn or aifn-applied; applications import only those`)
+      continue
+    }
+    if (t.pkg === 'core') continue
+    const ta = t.node.path.split('/')[0]
+    if (ta === area) {
+      if (at.legacy) continue
+      errors.push(`${where}: imports '${spec}' of its own area; siblings share only through the parent's shared files`)
+    } else if (!allowed.has(ta))
+      errors.push(`${where}: ${area} imports ${spec}, which is not below it in the area DAG (dependsOn)`)
+  }
+}
+
+for (const file of files(coreSrc)) checkCore(file)
+for (const file of files(appsSrc)) checkApp(file)
+// Core tests: never an application. (Skipped while the tests are suspended during the tree move: modules.json
+// `testsSuspended`, TODO(tree): remove when the tests return.)
+if (!spec.testsSuspended)
+  for (const file of files(path.join(coreDir, 'test')))
+    for (const { spec, where } of imports(file))
+      if (spec.startsWith('aifn-applied'))
+        errors.push(`${where}: a core test imports the application '${spec}'; test that combination in applications`)
+
+// ── Generated tables ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** A Markdown table with padded columns, as Prettier writes it. */
+function table(head: string[], rows: string[][]): string {
+  const widths = head.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)))
+  const line = (cells: string[]) => `| ${cells.map((c, i) => c.padEnd(widths[i])).join(' | ')} |`
+  return [line(head), line(widths.map((w) => '-'.repeat(w))), ...rows.map(line)].join('\n')
+}
+
+const localTiers = (f: Family) => {
+  if (!f.modules.length) return '(one module)'
+  const by = new Map<number, string[]>()
+  for (const m of f.modules) by.set(m.tier, [...(by.get(m.tier) ?? []), m.status === 'gap' ? `${m.module}*` : m.module])
+  return [...by]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, ms]) => ms.join(', '))
+    .join(' · ')
+}
+const tierTable = table(
+  ['Tier', 'Family', 'Modules (local tiers, low to high; * gap)', 'Shared'],
+  spec.core.families.map((f) => [String(f.tier), f.family, localTiers(f), f.shared.join(', ')]),
+)
+const appTree = (list: AppNode[]): string =>
+  list
+    .map((c) =>
+      'module' in c
+        ? `${c.module}${c.status === 'gap' ? '*' : ''}`
+        : `${c.group}/{${appTree(c.children)}}${c.shared.length ? ` [${c.shared.join(', ')}]` : ''}`,
+    )
+    .join(', ')
+const areaTable = table(
+  ['Area', 'Nodes (group/{children} [shared]; * gap)', 'Depends on', 'Serves topics'],
+  spec.applications.areas.map((a) => [
+    a.area,
+    `${appTree(a.children) || '(one module)'}${a.shared.length ? ` [${a.shared.join(', ')}]` : ''}`,
+    a.dependsOn.length === areas.size - 1 ? 'every other area' : a.dependsOn.join(', ') || '',
+    a.topics.join(', ') || '(support)',
+  ]),
+)
+
+const note = '<!-- Generated from aifn-js/modules.json by `node scripts/aifn-layers.ts --write`; do not edit. -->'
+function block(name: string, body: string): string {
+  return `<!-- ${name}:start -->\n\n${note}\n\n${body}\n\n<!-- ${name}:end -->`
+}
+
+function sync(file: string, blocks: Record<string, string>) {
+  const full = path.join(root, file)
+  let text = fs.readFileSync(full, 'utf8')
+  const before = text
+  for (const [name, body] of Object.entries(blocks)) {
+    const re = new RegExp(`<!-- ${name}:start -->[\\s\\S]*?<!-- ${name}:end -->`)
+    if (!re.test(text)) {
+      errors.push(`${file}: no <!-- ${name}:start/end --> markers`)
+      continue
+    }
+    text = text.replace(re, block(name, body))
+  }
+  if (text === before) return
+  if (write) {
+    fs.writeFileSync(full, text)
+    console.log(`aifn-layers: wrote ${file}`)
+  } else errors.push(`${file}: tables are stale; run node scripts/aifn-layers.ts --write`)
+}
+sync('aifn-js/README.md', { 'aifn-layers': tierTable, 'aifn-areas': areaTable })
+sync('docs/aifn-plan.md', { 'aifn-layers': tierTable })
+
+if (process.argv.includes('--verbose')) for (const w of warnings) console.warn(`! ${w}`)
 if (errors.length) {
   for (const e of errors) console.error(`✗ ${e}`)
   console.error(`aifn-layers: ${errors.length} error${errors.length === 1 ? '' : 's'}`)
   process.exit(1)
 }
-console.log(`aifn-layers: ${modules.length} modules, every import goes down a tier`)
+const count = (k: Node['kind']) => [...nodes.values()].filter((n) => n.kind === k && !n.gap).length
+console.log(
+  `aifn-layers: ${spec.core.families.length} families and ${count('module')} modules follow the tree` +
+    (aliases.size ? `; ${aliases.size} aliases, ${legacyDirs.size} legacy folders, ${aliasImports} alias imports` : ''),
+)

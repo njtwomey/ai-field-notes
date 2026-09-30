@@ -1,4 +1,4 @@
-import { toFlat, type Tensor } from 'aifn/tensor'
+import { toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { cn } from '@lab/lib/utils'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@lab/ui/table'
 import { formatValue } from './format'

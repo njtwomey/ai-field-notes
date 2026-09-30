@@ -4,7 +4,7 @@ import { Badge } from '@lab/ui/badge'
 import { Button } from '@lab/ui/button'
 import { cn } from '@lab/lib/utils'
 import type { Specimen } from '../specimen'
-import { FAMILIES, LAB_FAMILY, familyOf } from './families'
+import { FAMILIES, LAB_FAMILY, familyOf, importPath } from './families'
 import { FigurePage } from './FigurePage'
 import { hrefOf, pathKey, redirectHashRoute, revealHash, specimenPath } from './paths'
 import { Sidebar, type Entry, type LabPage } from './Sidebar'
@@ -117,7 +117,7 @@ function Page({ entry }: { entry: Entry }) {
   return (
     // Keyed so a specimen's state starts afresh when another is opened.
     <FigurePage scope={entry.key} key={entry.key}>
-      <PageHeader kicker={`aifn/${s.module}`} title={s.title} description={s.description} tags={s.tags} />
+      <PageHeader kicker={importPath(s.module)} title={s.title} description={s.description} tags={s.tags} />
       <div className="flex flex-col gap-6">{s.render()}</div>
     </FigurePage>
   )

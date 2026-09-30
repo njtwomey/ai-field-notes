@@ -1,12 +1,12 @@
-import { toPlateDiagram, type Model, type PlateDiagramOptions } from 'aifn/pgm'
+import { toDiagram, type DiagramOptions, type StructuredGraph } from 'aifn/graph/structured'
 import { useMemo } from 'react'
 import { Diagram, type DiagramSpec } from '@lab/diagram'
 
 export type PlateViewProps = {
-  /** An `aifn/pgm` model description. */
-  model: Model
+  /** A structured graph, e.g. an `aifn/inference/model` model description (a model is one). */
+  graph: StructuredGraph
   /** Fixed centres (grid units) by node name, overriding the automatic layout. */
-  positions?: PlateDiagramOptions['positions']
+  positions?: DiagramOptions['positions']
   /** Node names drawn in the accent colour, e.g. the node a figure is about. */
   highlight?: readonly string[]
   /** Called with a node's name when it is clicked. */
@@ -17,19 +17,20 @@ export type PlateViewProps = {
 }
 
 /**
- * A model description in plate notation, from `toPlateDiagram`: latent variables as circles, observed ones shaded,
- * deterministic ones dashed, constants small; plates as groups labelled with their size.
+ * A structured graph in plate notation, drawn from `toDiagram` (`aifn/graph/structured`): latent variables as circles,
+ * observed ones shaded, deterministic ones dashed, parameters small; plates and templates as groups labelled with their
+ * size, lagged edges labelled with their lag.
  */
-export function PlateView({ model, positions, highlight, onNodeClick, height, ariaLabel }: PlateViewProps) {
+export function PlateView({ graph, positions, highlight, onNodeClick, height, ariaLabel }: PlateViewProps) {
   const spec = useMemo((): DiagramSpec => {
-    const d = toPlateDiagram(model, { positions })
+    const d: DiagramSpec = toDiagram(graph, { positions })
     const on = new Set(highlight ?? [])
     return { ...d, nodes: d.nodes.map((n) => (on.has(n.id) ? { ...n, highlight: true } : n)) }
-  }, [model, positions, highlight])
+  }, [graph, positions, highlight])
   return (
     <Diagram
       spec={spec}
-      ariaLabel={ariaLabel ?? `${model.name} in plate notation`}
+      ariaLabel={ariaLabel ?? `${graph.name ?? 'A graph'} in plate notation`}
       height={height}
       onNodeClick={onNodeClick}
     />

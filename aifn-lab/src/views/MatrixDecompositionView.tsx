@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import type { Tensor } from 'aifn/tensor'
+import type { Tensor } from 'aifn/foundation/tensor'
 import { Select } from '@lab/controls'
 import { Figure } from '@lab/layout'
 import { ChartSize } from '@lab/viz'

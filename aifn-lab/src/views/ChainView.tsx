@@ -1,11 +1,12 @@
-import { autocorrelation, effectiveSampleSize, monteCarloStandardError, splitRhat } from 'aifn/mcmc'
-import { histogram, quantile, runningMean } from 'aifn/stats'
-import { linspace, toFlat, type Tensor } from 'aifn/tensor'
+import { effectiveSampleSize, monteCarloStandardError, splitRhat } from 'aifn/inference/stochastic'
+import { autocorrelation, histogram, quantile, runningMean } from 'aifn/probability/stats'
+import { linspace, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { useMemo, useState } from 'react'
 import { Select } from '@lab/controls'
 import { Figure } from '@lab/layout'
 import { Panel, Readout, Subplots, XYChart, type XYSeries } from '@lab/viz'
 import { formatValue } from './format'
+import { histogramBars } from './histogram'
 import type { FrameProps } from './frame'
 
 export type ChainViewProps = FrameProps & {
@@ -30,7 +31,7 @@ const f3 = (v: number) => formatValue(Number(v.toPrecision(3)))
 /**
  * MCMC output for one parameter at a time: trace plots of every chain, a histogram of the pooled draws (against the
  * target's marginal when given), each chain's autocorrelation function, and each chain's running mean. Readouts give
- * the bulk and tail ESS, the rank-normalised split R̂ and the MCSE of the mean, all from `aifn/mcmc`.
+ * the bulk and tail ESS, the rank-normalised split R̂ and the MCSE of the mean, all from `aifn/inference/stochastic`.
  */
 export function ChainView({
   draws,
@@ -70,14 +71,15 @@ export function ChainView({
     const lo = quantile(pooled, 0.002)
     const hi = quantile(pooled, 0.998)
     const h = histogram(pooled, { bins: 50, range: [lo, hi] })
+    const bars = histogramBars(h)
     const scale = (pooled.length - h.dropped) / pooled.length
     const hist: XYSeries[] = [
       {
         name: 'draws',
         type: 'bar',
         thin: true,
-        x: Array.from(h.counts, (_, i) => (h.edges[i] + h.edges[i + 1]) / 2),
-        y: Array.from(h.density, (v) => v * scale),
+        x: bars.x,
+        y: bars.density.map((v) => v * scale),
       },
     ]
     if (density) {

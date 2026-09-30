@@ -42,26 +42,27 @@ internals, and every iterative algorithm can be stepped, scrubbed, replicated, p
 There is no "core" module. Modules are grouped into families below for documentation only; the import paths are flat
 (`aifn/linalg`, `aifn/pgm`). The families do not set the dependency order. The order is an explicit stack of tiers: a
 module may import only from strictly lower tiers. `scripts/aifn-layers.ts` enforces it in `make lint` (and so in
-`make check`); the source of truth is the table in `aifn-js/README.md` ("Layers"), and the script checks that this copy
-matches it.
+`make check`); the source of truth is `aifn-js/modules.json`, from which this table and the README's are generated
+(`node scripts/aifn-layers.ts --write`). The 12 application modules have moved to `aifn-applied` (`aifn-js/README.md`).
 
 <!-- aifn-layers:start -->
 
-| Tier | Modules                                                                    |
-| ---- | -------------------------------------------------------------------------- |
-| 0    | tensor                                                                     |
-| 1    | special, autodiff                                                          |
-| 2    | linalg, kernels                                                            |
-| 3    | random, geometry                                                           |
-| 4    | trace, stats                                                               |
-| 5    | optim, solve, quadrature, graph                                            |
-| 6    | distributions, programming, ode, pde, smooth, dsp, maps                    |
-| 7    | info, mcmc, vi, ep, pgm, sde, fields, control, timeseries, ot, bandits, rl |
-| 8    | metrics, losses                                                            |
-| 9    | estimators                                                                 |
-| 10   | preprocess, glm, gp, classify, cluster, embed, nn                          |
-| 11   | gam, compose, validate, diffusion                                          |
-| 12   | datasets                                                                   |
+<!-- Generated from aifn-js/modules.json by `node scripts/aifn-layers.ts --write`; do not edit. -->
+
+| Tier | Family      | Modules (local tiers, low to high; * gap)                                                              | Shared             |
+| ---- | ----------- | ------------------------------------------------------------------------------------------------------ | ------------------ |
+| 0    | foundation  | contracts, errors · registry · tensor · pytree, fourier · convolution, autodiff, random · space, trace |                    |
+| 1    | numerics    | special · linalg · polynomial, quadrature, roots, geometry · interpolate                               |                    |
+| 2    | graph       | traversal, shortest-paths, spanning-trees, structures, matrices · flows, structured, propagation       | graph, tree, heap  |
+| 3    | probability | stats, bijectors, samplers · distributions · likelihoods, information                                  |                    |
+| 3    | optim       | line-search · first-order, second-order, proximal, derivative-free, programming · minimize             | options, schedules |
+| 3    | systems     | (one module)                                                                                           |                    |
+| 4    | inference   | model · exact, message-passing, expectation-propagation, variational, stochastic, filtering · engines  |                    |
+| 4    | dynamics    | ode, sde · fields, control                                                                             |                    |
+| 4    | signal      | windows · filters, spectral, time-frequency, wavelets, statistical, multirate* · decompositions        | signal             |
+| 4    | transport   | (one module)                                                                                           |                    |
+| 5    | learning    | estimators, kernels · losses, metrics, compose, validate                                               |                    |
+| 6    | nn          | functional, init · layers · training                                                                   |                    |
 
 <!-- aifn-layers:end -->
 

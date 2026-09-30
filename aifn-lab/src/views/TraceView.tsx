@@ -1,6 +1,6 @@
-import { toFlat, type Tensor } from 'aifn/tensor'
-import type { Trace } from 'aifn/trace'
-import { decimate, seriesComponents } from 'aifn/trace'
+import { toFlat, type Tensor } from 'aifn/foundation/tensor'
+import type { Trace } from 'aifn/foundation/trace'
+import { decimate, seriesComponents } from 'aifn/foundation/trace'
 import { Check, Copy } from 'lucide-react'
 import { useCallback, useId, useMemo, useState, type ReactNode } from 'react'
 import { Button, Player, Switch } from '@lab/controls'
@@ -28,7 +28,7 @@ export type TraceViewProps<S> = FrameProps & {
 }
 
 /** The kept position whose step number is nearest `step` (index is ascending). */
-function nearestPosition(index: readonly number[], step: number): number {
+function nearestPosition(index: ArrayLike<number>, step: number): number {
   let lo = 0
   let hi = index.length - 1
   while (hi - lo > 1) {
@@ -106,6 +106,7 @@ export function TraceView<S>({
 
   // Drawing copy of the trace, decimated once per trace.
   const drawn = useMemo(() => decimate(trace, maxPoints), [trace, maxPoints])
+  const drawnIndex = useMemo(() => Array.from(drawn.index), [drawn])
   const cursor = useCallback(
     (label: string): Handle[] => [
       { kind: 'x', at: step, label, onDrag: (x: number) => setPosition(nearestPosition(trace.index, x)) },
@@ -149,11 +150,9 @@ export function TraceView<S>({
                 <Num>{trace.checkpoints.index.length}</Num> checkpoints
               </span>
             )}
-            {trace.meta.seed !== undefined && (
-              <span>
-                seed <Num>{trace.meta.seed}</Num>
-              </span>
-            )}
+            <span>
+              key <span className="font-mono">{trace.meta.key.path}</span>
+            </span>
           </span>
         </span>
       }
@@ -208,7 +207,7 @@ export function TraceView<S>({
                 name={name}
                 full={trace.series[name]}
                 drawn={drawn.series[name]}
-                x={drawn.index}
+                x={drawnIndex}
                 position={pos}
                 step={step}
                 handles={cursor(name)}
@@ -398,7 +397,7 @@ function TimingPanel<S>({
     return [{ name: n > maxPoints ? 'ms per step (bucket mean)' : 'ms per step', type: 'line', x, y, slot: 0 }]
   }, [stepMs, maxPoints])
   const inStep = Object.entries(phases).filter(([k]) => k !== 'init' && k !== 'record')
-  const positive = series[0].y.every((v) => v > 0)
+  const positive = Array.from(series[0].y).every((v) => v > 0)
   return (
     <section className="flex flex-col gap-2">
       <div className="text-xs text-muted-foreground">Timing</div>

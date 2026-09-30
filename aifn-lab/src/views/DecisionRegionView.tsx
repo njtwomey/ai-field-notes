@@ -1,7 +1,7 @@
 import { useMemo, type ReactNode } from 'react'
-import { classProbabilities, hasPredictive, type Distribution } from 'aifn/estimators'
-import { grid2d } from 'aifn/geometry'
-import { fromData, toFlat, type Tensor } from 'aifn/tensor'
+import { classProbabilities, hasPredictive, type Distribution } from 'aifn/learning/estimators'
+import { grid2d } from 'aifn/numerics/geometry'
+import { fromData, toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import { Figure } from '@lab/layout'
 import { Heatmap, Readout, type HeatmapOverlay, type Vec2 } from '@lab/viz'
 import type { FrameProps } from './frame'
@@ -94,7 +94,7 @@ export function DecisionRegionView({
     let probs: number[] | null = null
     if (hasPredictive(model)) {
       const d = (model as unknown as { predictive(x: Tensor): Distribution }).predictive(q)
-      probs = Array.from(classProbabilities(d).probs)
+      probs = toRows(classProbabilities(d))[0]
     }
     return { label, probs }
   }, [model, query])
