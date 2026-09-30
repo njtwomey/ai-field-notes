@@ -16,7 +16,7 @@ A **categorical feature** takes values in a finite set of levels $\set{1, \dots,
 country or a product identifier. **Categorical encoding** maps each level to a numeric vector. **One-hot encoding** maps
 level $c$ to the indicator vector $\evec_c \in \set{0, 1}^K$. **Target encoding** maps level $c$ to an estimate of
 $\expect[y \mid \text{level } c]$ computed from training labels. **Feature hashing** maps level $c$ to a signed
-indicator in $m \ll K$ columns chosen by a hash function.
+indicator in one of $m$ columns chosen by a hash function, with $m$ fixed in advance rather than set by $K$.
 </Definition>
 
 ## Problem
@@ -48,18 +48,18 @@ $c$ with $n_c$ training rows and target sum $S_c$, the raw encoding is $\bar y_c
 so the standard version shrinks towards the global mean $\bar y$ <Cite id="micci2001" />:
 
 $$
-\operatorname{enc}(c) = \frac{S_c + m\bar y}{n_c + m}.
+\operatorname{enc}(c) = \frac{S_c + \kappa\bar y}{n_c + \kappa}.
 $$
 
 For a binary target this is the posterior mean of the level's positive rate under a
-$\operatorname{Beta}(m\bar y,\, m(1 - \bar y))$ prior: the prior contributes $m$ pseudo-observations at the global rate,
+$\operatorname{Beta}(\kappa\bar y,\, \kappa(1 - \bar y))$ prior: the prior contributes $\kappa$ pseudo-observations at the global rate,
 and <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink> with a binomial likelihood adds $S_c$ successes in $n_c$ trials.
-The strength $m$ sets how many rows a level needs before its own mean dominates.
+The strength $\kappa$ sets how many rows a level needs before its own mean dominates.
 
 ### Why in-sample target encoding leaks
 
 If row $i$'s encoding is computed from a sample that includes row $i$, the encoding contains $y_i$ itself with weight
-$1/(n_c + m)$. For a level seen once, with no smoothing, the encoding equals the label exactly. A flexible model learns
+$1/(n_c + \kappa)$. For a level seen once, with no smoothing, the encoding equals the label exactly. A flexible model learns
 to read the label off the encoding, reaches near-perfect training accuracy, and fails on new rows whose encodings do not
 contain their labels. This is target leakage (see <NoteLink to="data-leakage">data leakage</NoteLink>)
 <Cite id="kaufman2012" />.
@@ -69,7 +69,7 @@ $y_i$ within each level, so within a level it sorts the rows by their labels, in
 
 The fixes compute each row's encoding from labels that the row cannot influence:
 
-- **Out-of-fold encoding.** Split the training data into $K$ folds and encode the rows of each fold using statistics
+- **Out-of-fold encoding.** Split the training data into folds and encode the rows of each fold using statistics
   from the other folds only. Test rows use statistics from the full training set.
 - **<NoteLink to="xgboost-lightgbm-catboost">Ordered target statistics</NoteLink>.** Draw a random permutation of the rows and encode each row from the rows before it in
   the permutation. CatBoost does this, with several permutations <Cite id="prokhorenkova2018" />.
@@ -95,7 +95,7 @@ preserved in expectation. The variance falls as $m$ grows.
 
 ## Worked example
 
-Let the global positive rate be $\bar y = 0.2$ and the smoothing strength $m = 10$.
+Let the global positive rate be $\bar y = 0.2$ and the smoothing strength $\kappa = 10$.
 
 - **Level A**, 3 rows with labels $(1, 1, 0)$. The raw mean is $0.667$. The smoothed encoding is
   $(2 + 10 \times 0.2)/(3 + 10) = 4/13 = 0.308$.
