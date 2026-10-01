@@ -57,3 +57,4 @@ export {
   type VjpResult,
   type VmapOptions,
 } from './transforms'
+export { autodiffFunctions } from './registry'

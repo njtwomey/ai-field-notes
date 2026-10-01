@@ -4,7 +4,7 @@
  * view picks default series and a worker can address an algorithm by key (design S §2.3).
  */
 
-import { definer, entries, type AlgorithmInfo, type Entry } from 'aifn/foundation/registry'
+import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as trees from './trees'
 
 const algorithm = definer<AlgorithmInfo>('algorithm', 'graph/spanning-trees')
@@ -34,4 +34,15 @@ algorithm(
 export const spanningTreesAlgorithms: Readonly<Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>> =
   entries<AlgorithmInfo>('algorithm', trees) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>
+  >
+
+definer<FunctionInfo>('function', 'graph/spanning-trees')(
+  { key: 'minimumSpanningTree', name: 'Minimum spanning tree', role: 'solver', notes: ['hierarchical-clustering'] },
+  trees.minimumSpanningTree,
+)
+
+/** The functions of the module, keyed by name. */
+export const spanningTreesFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', trees) as Readonly<
+    Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

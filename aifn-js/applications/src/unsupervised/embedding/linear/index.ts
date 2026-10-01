@@ -17,3 +17,4 @@ export {
   type SmacofState,
 } from './linear'
 export { andrewsCurves } from './andrews'
+export { linearEmbeddingAlgorithms, linearEmbeddingFunctions } from './registry'

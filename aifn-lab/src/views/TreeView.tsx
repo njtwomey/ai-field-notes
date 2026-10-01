@@ -1,5 +1,5 @@
-import type { Tree } from 'aifn/graph'
-import { useMemo, useState } from 'react'
+import { pathToRoot, type Tree } from 'aifn/graph'
+import { useMemo, useState, type KeyboardEvent } from 'react'
 import {
   Diagram,
   treeLayout,
@@ -75,7 +75,52 @@ export type TreeViewProps = {
   height?: number | 'fill'
   onNodeClick?: (id: number) => void
   onNodeHover?: (id: number | null) => void
+  /**
+   * The chosen node: ringed, with its path from the root emphasised. With `onSelect`, nodes are clickable (and
+   * focusable: Tab and Enter), and the arrow keys move the choice (up to the parent, down to the first child, left and
+   * right to the neighbouring sibling).
+   */
+  selected?: number | null
+  onSelect?: (id: number) => void
+  /**
+   * Nodes cut back to leaves (pruning): drawn as leaves, with their descendants hidden and the layout of the whole tree
+   * kept, so the tree shrinks in place.
+   */
+  cut?: readonly number[]
+  /** A path of node ids (e.g. a point's decision path): its edges emphasised and every other node dimmed. */
+  path?: readonly number[]
+  /**
+   * What each node holds, drawn in it: class shares as a stacked bar in the class colours (thin under an internal
+   * node's label; a leaf's label is the majority share), or a mean; with `n` beneath leaves. By default read from a
+   * decision tree's nodes (`value`, `count`), so any `aifn` decision tree shows its class proportions; `false` turns
+   * it off. Large trees fall back to a bar alone in small leaves.
+   */
+  nodeSummary?: false | ((id: number) => NodeSummary | undefined)
 }
+
+/** What a node holds: class shares (in palette slots, by class) or a mean, and its number of rows. */
+export type NodeSummary = { shares?: readonly number[]; mean?: number; n?: number }
+
+type SummaryNode = { value?: unknown; count?: unknown }
+
+/** A decision tree's node summaries (duck-typed on `task`, `value` and `count`), or undefined for other trees. */
+function decisionSummary(tree: Tree): ((id: number) => NodeSummary) | undefined {
+  const task = (tree as { task?: unknown }).task
+  const first = tree.nodes[0] as SummaryNode | undefined
+  if ((task !== 'classification' && task !== 'regression') || !first || !Array.isArray(first.value)) return undefined
+  return (id) => {
+    const node = tree.nodes[id] as SummaryNode
+    const value = node.value as number[]
+    const n = typeof node.count === 'number' ? node.count : undefined
+    return task === 'classification' ? { shares: value, n } : { mean: value[0], n }
+  }
+}
+
+/** Leaves beyond which leaf labels and notes give way to a bar alone. */
+const COMPACT_LEAVES = 14
+/** Leaves beyond which internal nodes also show a bar alone. */
+const TINY_LEAVES = 28
+const fmt = (v: number) => Number(v.toPrecision(2)).toString()
 
 const nid = (v: number) => `t${v}`
 
@@ -109,6 +154,11 @@ export function TreeView({
   height,
   onNodeClick,
   onNodeHover,
+  selected = null,
+  onSelect,
+  path,
+  cut,
+  nodeSummary,
 }: TreeViewProps) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<number>>(() => {
     if (!collapsible || !defaultCollapsed) return new Set()
@@ -129,10 +179,50 @@ export function TreeView({
     [collapsed, tree],
   )
 
+  const summaryOf = useMemo(
+    () => (nodeSummary === false ? undefined : (nodeSummary ?? decisionSummary(tree))),
+    [nodeSummary, tree],
+  )
+  const emphasis = useMemo(() => {
+    const onPath = new Set(
+      path ?? (selected !== null && selected < tree.nodes.length ? pathToRoot(tree, selected) : []),
+    )
+    return { onPath, dim: path !== undefined && path.length > 0 }
+  }, [path, selected, tree])
+
+  const pruned = useMemo(() => {
+    const cutSet = new Set(cut ?? [])
+    const below = new Set<number>()
+    const stack = [...cutSet].flatMap((v) => tree.nodes[v]?.children ?? [])
+    while (stack.length) {
+      const w = stack.pop()!
+      below.add(w)
+      stack.push(...tree.nodes[w].children)
+    }
+    return { cutSet, below }
+  }, [cut, tree])
+
   const spec = useMemo((): DiagramSpec => {
     const down = orientation === 'down'
-    const leaf = (v: number) => tree.nodes[v].children.length === 0 || live.has(v)
-    const labelOf = (v: number) => at(nodeLabels, v) ?? tree.nodes[v].label ?? String(v)
+    const isLeaf = (v: number) => tree.nodes[v].children.length === 0 || pruned.cutSet.has(v)
+    const leafCount = tree.nodes.filter((n) => isLeaf(n.id) && !pruned.below.has(n.id)).length
+    const compact = leafCount > COMPACT_LEAVES
+    // Very large trees: internal nodes give way to their bar too (the rule is in the node's accessible name).
+    const tiny = leafCount > TINY_LEAVES
+    const summaries = tree.nodes.map((n) => summaryOf?.(n.id))
+    const leaf = (v: number) => isLeaf(v) || live.has(v)
+    const summaryLabel = (v: number): string | undefined => {
+      const sm = summaries[v]
+      if (!sm || !isLeaf(v)) return undefined
+      if (compact) return ''
+      if (sm.mean !== undefined) return `$${fmt(sm.mean)}$`
+      if (!sm.shares) return undefined
+      const total = sm.shares.reduce((a, b) => a + b, 0) || 1
+      const top = sm.shares.reduce((b, v2, k) => (v2 > sm.shares![b] ? k : b), 0)
+      return `${fmt(sm.shares[top] / total)} class ${top}`
+    }
+    const labelOf = (v: number) =>
+      at(nodeLabels, v) ?? summaryLabel(v) ?? (tiny && summaries[v]?.shares ? '' : (tree.nodes[v].label ?? String(v)))
     const labels = tree.nodes.map((n) => labelOf(n.id))
     const shapeOf = (v: number): Shape => {
       if (typeof shape === 'function') return shape(v)
@@ -152,7 +242,9 @@ export function TreeView({
       hiddenCount.set(v, count)
     }
     const notesOf = (v: number): Partial<Record<Side, string>> | undefined => {
-      const note = at(nodeNotes, v)
+      const sm = summaries[v]
+      const note =
+        at(nodeNotes, v) ?? (sm?.n !== undefined && !compact && isLeaf(v) && !live.has(v) ? `n = ${sm.n}` : undefined)
       const extra = hiddenCount.has(v) ? `+${hiddenCount.get(v)}` : undefined
       if (note === undefined) return extra ? { [down ? 's' : 'e']: extra } : undefined
       if (typeof note !== 'string') return extra ? { ...note, [down ? 's' : 'e']: extra } : note
@@ -172,7 +264,9 @@ export function TreeView({
         return [d, d]
       }
       if (s === 'dot') return [0.14, 0.14]
-      return [Math.max(0.9, w), 0.7]
+      const sm = summaries[n.id]
+      if (sm?.shares && labels[n.id] === '') return [0.5, 0.36]
+      return [Math.max(0.9, w), sm?.shares ? 0.85 : 0.7]
     })
     const acrossSize = (v: number) => {
       const [w, h] = dims[v]
@@ -202,7 +296,7 @@ export function TreeView({
       collapsed: live,
     })
     const lit = new Set(highlight ?? [])
-    const visible = (v: number) => positions[v] !== null && !at(hidden, v)
+    const visible = (v: number) => positions[v] !== null && !at(hidden, v) && !pruned.below.has(v)
     const nodes = tree.nodes
       .filter((n) => visible(n.id))
       .map((n): DiagramNode => {
@@ -216,9 +310,15 @@ export function TreeView({
           w,
           h,
           label: labels[n.id] || undefined,
+          ariaLabel: tree.nodes[n.id].label ?? `node ${n.id}`,
           tone: at(nodeTone, n.id) ?? 'ink',
-          state: at(nodeState, n.id),
+          state: at(nodeState, n.id) ?? (emphasis.dim && !emphasis.onPath.has(n.id) ? 'idle' : undefined),
           highlight: lit.has(n.id) || undefined,
+          ...(summaries[n.id]?.shares && {
+            bar: summaries[n.id]!.shares,
+            barHeight: leaf(n.id) ? 5 : 3,
+          }),
+          ...(onSelect && { selected: n.id === selected }),
           notes: notes[n.id],
           dashed: live.has(n.id) || undefined,
           ...node?.(n.id),
@@ -251,12 +351,31 @@ export function TreeView({
           labelSide: (down ? pc.x < pp.x : pc.y > pp.y) ? 'right' : 'left',
           ...(label !== undefined && !elbow && { labelPos: 0.45 }),
           tone: at(edgeTone, c),
-          state: at(edgeState, c),
+          state:
+            at(edgeState, c) ??
+            (emphasis.onPath.has(c) && emphasis.onPath.has(p) ? 'active' : emphasis.dim ? 'idle' : undefined),
           highlight: (lit.has(c) && lit.has(p)) || undefined,
           ...edge?.(c),
         }
       })
-    return { nodes, edges }
+    // Hidden nodes keep their room: the view frames the whole tree, so it keeps its scale as nodes appear or go.
+    const placed = tree.nodes.flatMap((n) => {
+      const q = positions[n.id]
+      // Pruned nodes give their room back, so a pruned tree grows to fill the view.
+      if (!q || pruned.below.has(n.id)) return []
+      const [w, h] = dims[n.id]
+      return [{ x0: q.x - w / 2, y0: q.y - h / 2, x1: q.x + w / 2, y1: q.y + h / 2 + 0.5 }]
+    })
+    const frame = placed.length
+      ? {
+          x0: Math.min(...placed.map((b) => b.x0)),
+          y0: Math.min(...placed.map((b) => b.y0)),
+          x1: Math.max(...placed.map((b) => b.x1)),
+          y1: Math.max(...placed.map((b) => b.y1)),
+        }
+      : undefined
+    // Class colours fill the nodes, so emphasis is drawn in ink rather than a data colour.
+    return { nodes, edges, frame, ...(summaries.some((v) => v?.shares) && { accent: 'ink' as const }) }
   }, [
     tree,
     orientation,
@@ -276,6 +395,11 @@ export function TreeView({
     live,
     node,
     edge,
+    summaryOf,
+    emphasis,
+    pruned,
+    selected,
+    onSelect,
   ])
 
   const toggle = (v: number) =>
@@ -286,14 +410,34 @@ export function TreeView({
       return next
     })
   const click =
-    onNodeClick || collapsible
+    onNodeClick || collapsible || onSelect
       ? (s: string) => {
           const v = Number(s.slice(1))
           if (collapsible && tree.nodes[v].children.length) toggle(v)
           onNodeClick?.(v)
+          onSelect?.(v)
         }
       : undefined
-  return (
+  const shown = (v: number | undefined | null) =>
+    v !== undefined && v !== null && v < tree.nodes.length && !at(hidden, v) && !pruned.below.has(v)
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!onSelect) return
+    const keys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']
+    if (!keys.includes(event.key)) return
+    event.preventDefault()
+    if (selected === null || !shown(selected)) return onSelect(tree.root)
+    const node = tree.nodes[selected]
+    let next: number | null | undefined = null
+    if (event.key === 'ArrowUp') next = node.parent
+    else if (event.key === 'ArrowDown')
+      next = live.has(selected) || pruned.cutSet.has(selected) ? null : node.children.find((c) => shown(c))
+    else if (node.parent !== null) {
+      const siblings = tree.nodes[node.parent].children.filter((c) => shown(c))
+      next = siblings[siblings.indexOf(selected) + (event.key === 'ArrowLeft' ? -1 : 1)]
+    }
+    if (shown(next)) onSelect(next!)
+  }
+  const diagram = (
     <Diagram
       spec={spec}
       ariaLabel={ariaLabel}
@@ -301,5 +445,16 @@ export function TreeView({
       onNodeClick={click}
       onNodeHover={onNodeHover && ((s) => onNodeHover(s === null ? null : Number(s.slice(1))))}
     />
+  )
+  if (!onSelect) return diagram
+  return (
+    <div
+      role="group"
+      aria-label={`${ariaLabel}: click a node, or use the arrow keys, to choose it`}
+      onKeyDown={onKeyDown}
+      style={{ display: 'contents' }}
+    >
+      {diagram}
+    </div>
   )
 }

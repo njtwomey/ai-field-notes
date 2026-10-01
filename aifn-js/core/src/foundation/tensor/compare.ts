@@ -62,11 +62,15 @@ export function equal(a: Value, b: Value): boolean {
     if (typeof ra === 'number' && typeof rb === 'number') return ra === rb
     const t = (typeof ra === 'number' ? rb : ra) as Tensor
     const x = (typeof ra === 'number' ? ra : rb) as number
-    return t.shape.length === 0 && flatData(t)[0] === x
+    if (t.shape.length !== 0) return false
+    const v = flatData(t)
+    return v[0] === x && (t.dtype !== 'complex128' || v[1] === 0)
   }
   if (ra.shape.length !== rb.shape.length || ra.shape.some((d, k) => d !== rb.shape[k])) return false
-  const fa = flatData(ra)
-  const fb = flatData(rb)
+  // A real tensor against a complex one compares as complex (imaginary parts 0), so both read (re, im) pairs.
+  const field = ra.dtype === 'complex128' || rb.dtype === 'complex128' ? 'complex128' : undefined
+  const fa = flatData(ra, field ?? ra.dtype)
+  const fb = flatData(rb, field ?? rb.dtype)
   for (let k = 0; k < fa.length; k++) if (fa[k] !== fb[k]) return false
   return true
 }

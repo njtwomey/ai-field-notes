@@ -77,6 +77,12 @@ describe('explicit Runge–Kutta', () => {
     expect(s.evaluations).toBe(16)
   })
 
+  it('rejects a step pointing away from tEnd (review: it reported done at t₀ without a step)', () => {
+    expect(() => run(rungeKutta(decay, 'rk4', { stepSize: 0.1, tEnd: -1 }), { x0: [1] }, 100)).toThrow(/points away/)
+    expect(() => run(implicitEuler(decay, { stepSize: 0.1, tEnd: -1 }), { x0: [1] }, 100)).toThrow(/points away/)
+    expect(run(rungeKutta(decay, 'rk4', { stepSize: -0.25, tEnd: -1 }), { x0: [1] }, 100).time).toBeCloseTo(-1, 14)
+  })
+
   it('flags divergence instead of returning Infinity silently', () => {
     const tr = trace(
       rungeKutta((_t, x) => mul(x, x), 'euler', { stepSize: 0.5 }),

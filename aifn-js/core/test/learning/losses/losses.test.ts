@@ -61,6 +61,13 @@ describe('classification losses match torch', () => {
     check((q) => binaryCrossEntropy(q, p.y as number[]), p.p, p)
   })
 
+  it('binary cross-entropy has a finite gradient at p = y ∈ {0, 1} (review: was NaN)', () => {
+    // d/dp −log(1 − p) = 1/(1 − p) = 1 at p = 0; d/dp −log p = −1/p = −1 at p = 1.
+    const r = valueAndGrad((q: Value) => binaryCrossEntropy(q, [0, 1], { reduction: 'sum' }))(tensor([0, 1]))
+    expect(num(r.value as Value)).toBe(0)
+    expect(Array.from(toFlat(r.grad as Tensor))).toEqual([1, -1])
+  })
+
   it('softmax cross-entropy with label smoothing and soft targets', () => {
     const c = F.softmaxCe
     check((z) => softmaxCrossEntropy(z, c.labels as number[], { labelSmoothing: 0.1 }), c.logits, c)

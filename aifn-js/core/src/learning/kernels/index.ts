@@ -54,4 +54,4 @@ export {
   type StationaryParams,
   type VarianceParams,
 } from './kernels'
-export { kernelRegistry } from './registry'
+export { kernelRegistry, kernelsFunctions } from './registry'

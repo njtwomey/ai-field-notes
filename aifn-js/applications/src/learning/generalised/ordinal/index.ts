@@ -32,3 +32,4 @@ export {
   type DeepOrdinalRegressionModel,
   type DeepOrdinalRegressionParams,
 } from './deep'
+export { ordinalFunctions } from './registry'

@@ -44,3 +44,4 @@ export {
   type Manifolds,
 } from './fixed'
 export { gridAxes, sampleScalar, type Grid2 } from './grid'
+export { fieldsFunctions } from './registry'

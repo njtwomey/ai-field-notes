@@ -185,8 +185,12 @@ function millsRemainder(x: number): number {
 export function normalLogIntervalProbability(l: number, u: number): number {
   if (u <= 0) return logDiffExp(normalLogCdf(u), normalLogCdf(l))
   if (l >= 0) return logDiffExp(normalLogCdf(-l), normalLogCdf(-u))
-  // l < 0 < u: 1 − Φ(l) − Φ(−u), both terms at most 1/2.
-  return Math.log1p(-(normalCdf(l) + normalCdf(-u)))
+  // l < 0 < u. A wide interval: log1p(−Φ(l) − Φ(−u)), accurate as the result nears 0. A narrow one (tails above ½):
+  // Φ(u) − Φ(l) = (erf(u/√2) + erf(−l/√2))/2, a sum of two positive terms, which keeps its relative accuracy where
+  // 1 − Φ(l) − Φ(−u) would cancel.
+  const tails = normalCdf(l) + normalCdf(-u)
+  if (tails < 0.5) return Math.log1p(-tails)
+  return Math.log(0.5 * (erf(u * Math.SQRT1_2) + erf(-l * Math.SQRT1_2)))
 }
 
 /**

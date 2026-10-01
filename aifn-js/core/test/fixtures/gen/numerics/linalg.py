@@ -26,7 +26,9 @@ def eigsh_cases() -> dict[str, object]:
         rows, cols = np.nonzero(a)
         entry = {"n": a.shape[0], "rows": rows, "cols": cols, "vals": a[rows, cols]}
         for which, label in [("LA", "largest"), ("SA", "smallest"), ("LM", "magnitude")]:
-            w, v = eigsh(a, k=5, which=which, tol=1e-12)
+            # ARPACK draws a random start vector unless given one; a seeded v0 makes the fixture reproducible.
+            v0 = np.random.default_rng(0).standard_normal(a.shape[0])
+            w, v = eigsh(a, k=5, which=which, tol=1e-12, v0=v0)
             order = {"LA": np.argsort(-w), "SA": np.argsort(w), "LM": np.argsort(-np.abs(w))}[which]
             entry[label] = {"values": w[order], "vectors": v[:, order]}
         out[key] = entry

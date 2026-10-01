@@ -10,7 +10,8 @@
  * - links: inverse ∘ link = identity on the mean space, dμ/dη against central differences;
  * - likelihood families: canonical link and dispersion as declared, links registered;
  * - filter designs: a stable IIR or an FIR (denominator 1) low-pass with unit DC gain and attenuated Nyquist;
- * - KL rules: both families registered, KL(p ‖ p) = 0, and KL(p ‖ q) equal to a Monte Carlo estimate.
+ * - KL rules: both families registered, KL(p ‖ p) = 0, and KL(p ‖ q) equal to a Monte Carlo estimate;
+ * - functions: a function named by its key, with a known role.
  */
 import path from 'node:path'
 import fs from 'node:fs'
@@ -24,6 +25,7 @@ import type {
   Distribution,
   DistributionInfo,
   FilterDesignInfo,
+  FunctionInfo,
   Interval,
   KernelInfo,
   KlRuleInfo,
@@ -305,5 +307,17 @@ describe.each(klRules.map((r) => [address(r), r] as const))('KL rule %s', (_, en
     const m = diff.reduce((a, b) => a + b, 0) / n
     const sd = Math.sqrt(diff.reduce((a, b) => a + (b - m) ** 2, 0) / (n - 1))
     expect(Math.abs(m - exact)).toBeLessThan(6 * (sd / Math.sqrt(n)) + 1e-9)
+  })
+})
+
+// ── Functions ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const functions = await entriesOf<FunctionInfo>('function')
+const roles = ['transform', 'estimator', 'test', 'construction', 'property', 'fit', 'simulation', 'solver', 'inference']
+describe('functions', () => {
+  it.each(functions.map((f) => [address(f), f] as const))('%s is a function named by its key, with a role', (_, f) => {
+    expect(typeof f).toBe('function')
+    expect((f as unknown as { name: string }).name).toBe(f.info.key)
+    expect(roles).toContain(f.info.role)
   })
 })

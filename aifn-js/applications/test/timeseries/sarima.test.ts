@@ -69,28 +69,8 @@ describe('seasonal ARIMA', () => {
     expect(sarimaLogLikelihood(x, { seasonalAr: [1.1], period: 4 }).logLikelihood).toBe(-Infinity)
   })
 
-  it('recovers the airline model SARIMA(0,1,1)(0,1,1)₁₂ from a simulation', () => {
-    const truth = { ma: [-0.4], seasonalMa: [-0.6], period: 12, diff: 1, seasonalDiff: 1, sigma: 0.5 }
-    const x = toFlat(simulateSarima(stream('airline'), truth, 600).x)
-    const fit = fitSarima(x, { p: 0, d: 1, q: 1, P: 0, D: 1, Q: 1, period: 12 })
-    expect(fit.converged).toBe(true)
-    expect(toFlat(fit.ma)[0]).toBeCloseTo(-0.4, 1)
-    expect(toFlat(fit.seasonalMa)[0]).toBeCloseTo(-0.6, 1)
-    expect(Math.sqrt(fit.sigma2)).toBeCloseTo(0.5, 1)
-    expect(fit.mean).toBe(0)
-    // The fit maximises the likelihood: nudging a coefficient lowers it.
-    const at = (ma: number, sma: number) =>
-      sarimaLogLikelihood(x, { ma: [ma], seasonalMa: [sma], period: 12, diff: 1, seasonalDiff: 1 }).logLikelihood
-    const best = at(toFlat(fit.ma)[0], toFlat(fit.seasonalMa)[0])
-    expect(best).toBeCloseTo(fit.logLikelihood, 8)
-    for (const [a, b] of [
-      [0.02, 0],
-      [-0.02, 0],
-      [0, 0.02],
-      [0, -0.02],
-    ])
-      expect(at(toFlat(fit.ma)[0] + a, toFlat(fit.seasonalMa)[0] + b)).toBeLessThan(best)
-  })
+  // The airline model's maximum-likelihood fit is checked against scipy on a 144-point series in reference.test.ts
+  // (it replaced a 600-point recovery here that took about 3 s and timed out under parallel load).
 
   it('recovers a stationary seasonal AR with a mean, SARIMA(1,0,0)(1,0,0)₄', () => {
     const x = toFlat(
@@ -104,7 +84,7 @@ describe('seasonal ARIMA', () => {
       expect(fit.mean).toBeCloseTo(3, 0)
       expect(fit.aic).toBeCloseTo(-2 * fit.logLikelihood + 2 * 4, 10)
     }
-  })
+  }, 20_000)
 
   it('forecasts a seasonal random walk by repeating the last season, with se growing by whole seasons', () => {
     const x = [1, 5, 2, 8, 1.5, 5.5, 2.5, 7.5]

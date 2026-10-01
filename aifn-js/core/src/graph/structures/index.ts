@@ -22,3 +22,4 @@ export {
   type PointGraphOptions,
   type StructureOptions,
 } from './structures'
+export { structuresFunctions } from './registry'

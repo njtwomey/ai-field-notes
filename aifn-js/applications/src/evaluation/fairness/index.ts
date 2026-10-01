@@ -12,3 +12,4 @@ export {
   type FairnessOptions,
   type GroupRates,
 } from './fairness'
+export { fairnessFunctions } from './registry'

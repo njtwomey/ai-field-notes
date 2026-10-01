@@ -3,6 +3,7 @@ import {
   abs,
   add,
   allclose,
+  complex,
   arange,
   argmax,
   astype,
@@ -307,5 +308,15 @@ describe('interpreters', () => {
     expect(g.nodes.map((n) => n.op)).toEqual(['input', 'sum'])
     const z: Tensor = zeros([1])
     expect(z.shape).toEqual([1])
+  })
+})
+
+describe('equal across real and complex (review 2026-10-01)', () => {
+  it('compares a real tensor with a complex one as complex, imaginary parts included', () => {
+    // Before: the real tensor's two values were compared with the first (re, im) pair of the complex one.
+    expect(equal(tensor([1, 2]), complex(tensor([1, 3]), tensor([2, 4])))).toBe(false)
+    expect(equal(tensor([1, 3]), complex(tensor([1, 3]), tensor([0, 0])))).toBe(true)
+    expect(equal(complex(scalar(1), scalar(5)), 1)).toBe(false)
+    expect(equal(complex(scalar(1), scalar(0)), 1)).toBe(true)
   })
 })

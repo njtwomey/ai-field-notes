@@ -187,7 +187,10 @@ const eighOp: Op<Params> = definePrimitive<Params>({
   },
   batch: kernelBatch('numerics/linalg/eigh'),
   shape: ([a]) => float64Aval([a.shape[0] + a.shape[0] * a.shape[0]]),
-  doc: { summary: 'Eigenvalues (descending) and orthonormal eigenvectors of a symmetric matrix.' },
+  doc: {
+    note: 'eigendecomposition',
+    summary: 'Eigenvalues (descending) and orthonormal eigenvectors of a symmetric matrix.',
+  },
   test: { rtol: 1e-4, cases: (draw) => [{ inputs: [positiveDefinite(draw, 3)], params: { maxSweeps: 100 } }] },
 })
 

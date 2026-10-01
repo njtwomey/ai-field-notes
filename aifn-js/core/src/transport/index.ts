@@ -33,4 +33,4 @@ export {
   type GromovProblem,
   type GromovState,
 } from './gromov'
-export { transportAlgorithms } from './registry'
+export { transportAlgorithms, transportFunctions } from './registry'

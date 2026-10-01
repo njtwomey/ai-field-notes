@@ -4,3 +4,4 @@
  */
 
 export { adjacencyMatrix, degreeMatrix, degrees, incidenceMatrix, laplacian, type WeightOptions } from './matrices'
+export { matricesFunctions } from './registry'

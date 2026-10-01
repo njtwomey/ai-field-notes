@@ -22,6 +22,7 @@ import * as clustering from 'aifn-applied/unsupervised/clustering'
 import * as embedLinear from 'aifn-applied/unsupervised/embedding/linear'
 import * as manifold from 'aifn-applied/unsupervised/embedding/manifold'
 import * as neighbour from 'aifn-applied/unsupervised/embedding/neighbour'
+import * as languageModels from 'aifn-applied/neural/language-models'
 
 /** 24 points in two noisy classes: x [24, 2], y in {0, 1}. */
 function twoClasses(): { x: Tensor; y: Tensor } {
@@ -91,6 +92,9 @@ export interface Fixture {
 const f = (make: () => Estimator<never, unknown>, data: unknown): Fixture => ({ make, data })
 
 /** Every registered model key → its tiny fit. The protocol test fails on a registered key without one. */
+/** A short character corpus. */
+const corpus = languageModels.charCorpus('the cat sat on the mat. the dog sat on the log.')
+
 export const MODEL_FIXTURES: Record<string, Fixture> = {
   // learning/linear
   linearRegression: f(() => linear.linearRegression(), dataset(reg.x, reg.y)),
@@ -187,6 +191,9 @@ export const MODEL_FIXTURES: Record<string, Fixture> = {
   locallyLinearEmbedding: f(() => manifold.locallyLinearEmbedding({ neighbours: 6 }), unlabelled),
   tsne: f(() => neighbour.tsne({ perplexity: 5, iterations: 50 }), unlabelled),
   umap: f(() => neighbour.umap({ neighbours: 6, epochs: 20 }), unlabelled),
+  // neural/language-models
+  kneserNey: f(() => languageModels.kneserNey(), corpus),
+  charGpt: f(() => languageModels.charGpt({ width: 8, layers: 1, heads: 2, context: 8, steps: 3 }), corpus),
 }
 
 /** A stream for fits that draw. */

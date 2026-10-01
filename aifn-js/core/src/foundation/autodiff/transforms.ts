@@ -89,6 +89,8 @@ function argnumList(argnums: Argnums, n: number, where: string): number[] {
     if (!Number.isInteger(k) || k < 0 || k >= n)
       throw new AifnError(where, `${where}: argnum ${k} is out of range for ${n} args`)
   }
+  // A repeated argnum would trace the argument twice, and the first copy's gradient would read as zero.
+  if (new Set(list).size !== list.length) throw new AifnError(where, `${where}: argnums [${list.join(', ')}] repeat`)
   return list
 }
 

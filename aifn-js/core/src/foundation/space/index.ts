@@ -190,8 +190,11 @@ function clampDim(dim: Dim, v: unknown, dropped?: string[], path = ''): SpaceVal
       if (typeof v !== 'number' || Number.isNaN(v)) return dim.default
       let x = Math.min(dim.max, Math.max(dim.min, v))
       if (dim.step !== undefined && dim.step > 0) {
-        x = dim.min + Math.round((x - dim.min) / dim.step) * dim.step
-        if (x > dim.max) x -= dim.step
+        // The last grid point at or below max, with a little slack so that rounding in (max − min)/step (0.3/0.1 is
+        // 2.9999999999999996) does not drop a max that lies on the grid; min + k·step is then capped at max.
+        const last = Math.floor((dim.max - dim.min) / dim.step + 1e-9)
+        const k = Math.min(last, Math.round((x - dim.min) / dim.step))
+        x = Math.min(dim.max, dim.min + k * dim.step)
       }
       return x
     }

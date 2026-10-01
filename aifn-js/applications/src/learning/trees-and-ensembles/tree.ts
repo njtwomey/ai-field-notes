@@ -48,6 +48,24 @@ export interface SplitData {
   value: number[]
   /** Weighted impurity decrease of the split, (w_t·i(t) − w_L·i(L) − w_R·i(R)) / W (0 at a leaf). */
   decrease: number
+  /** The training rows that reached the node (indices into the data the tree was grown on). */
+  rows: Int32Array
+  /** Classification: the weighted class totals [K]. Regression: [Σ w y, Σ w y²]. */
+  counts: number[]
+  /**
+   * The split search the fitter made here: each searched feature's best threshold and decrease (empty when the node
+   * was a leaf before any search). The split taken is the largest; `splitCurve` gives a feature's every candidate.
+   */
+  splits: FeatureBest[]
+  /** Why the node is a leaf (null at a split). */
+  stop: LeafReason | null
+}
+
+/** A feature's best split at a node: its threshold and weighted impurity decrease (NaN and −∞ when it has none). */
+export interface FeatureBest {
+  feature: number
+  threshold: number
+  decrease: number
 }
 
 /** A node of a decision tree: an `aifn/graph` `TreeNode` (id, parent, children, slot, label) with `SplitData`. */
@@ -63,6 +81,8 @@ export interface DecisionTree extends Tree<SplitData> {
   /** Number of classes (1 for regression) and of features. */
   classes: number
   features: number
+  /** The growth parameters, resolved (unlimited values as Infinity), and so the order used. */
+  params: Required<Omit<TreeParams, 'maxFeatures'>> & { maxFeatures: number }
 }
 
 /** The node label: the split as TeX, or the leaf's class (or mean). */
@@ -78,10 +98,7 @@ export function nodeLabel(node: SplitData, task: 'classification' | 'regression'
 }
 
 /** A tree from nodes (parents before children), with its edge list and arity. */
-function asTree(
-  nodes: DecisionNode[],
-  p: { task: 'classification' | 'regression'; criterion: Criterion; K: number; d: number },
-): DecisionTree {
+function asTree(nodes: DecisionNode[], p: Prepared): DecisionTree {
   return {
     kind: 'tree',
     nodes,
@@ -92,6 +109,16 @@ function asTree(
     criterion: p.criterion,
     classes: p.K,
     features: p.d,
+    params: {
+      criterion: p.criterion,
+      maxDepth: p.maxDepth,
+      minSamplesSplit: p.minSamplesSplit,
+      minSamplesLeaf: p.minSamplesLeaf,
+      minImpurityDecrease: p.minImpurityDecrease,
+      maxFeatures: p.maxFeatures,
+      maxLeaves: p.maxLeaves,
+      order: p.order,
+    },
   }
 }
 
@@ -111,7 +138,25 @@ export interface TreeParams {
    * Subsets are drawn from the stream given to growth (random forests).
    */
   maxFeatures?: number | 'sqrt' | 'log2'
+  /**
+   * At most this many leaves (default unlimited). With a budget the expansion order matters; scikit-learn grows
+   * best-first whenever `max_leaf_nodes` is set.
+   */
+  maxLeaves?: number
+  /**
+   * Which waiting node is expanded next (default `depth-first`): the last pushed (depth-first, preorder numbering),
+   * the first pushed (breadth-first, level by level) or the one whose best split decreases impurity most (best-first).
+   * Without a leaf budget every order grows the same tree, numbered differently, since each split depends only on its
+   * own node's rows.
+   */
+  order?: GrowthOrder
 }
+
+/** The order in which tree growth expands waiting nodes. */
+export type GrowthOrder = 'depth-first' | 'breadth-first' | 'best-first'
+
+/** Why a node became a leaf. */
+export type LeafReason = 'pure' | 'max-depth' | 'min-samples' | 'no-split' | 'min-decrease' | 'max-leaves' | 'pruned'
 
 /** The data a tree is grown on: inputs [n, d], targets (labels 0 … K−1, or real values) and optional sample weights. */
 export interface TreeProblem {
@@ -178,6 +223,8 @@ interface Prepared {
   minSamplesLeaf: number
   minImpurityDecrease: number
   maxFeatures: number
+  maxLeaves: number
+  order: GrowthOrder
 }
 
 function prepare(problem: TreeProblem, where: string): Prepared {
@@ -229,6 +276,8 @@ function prepare(problem: TreeProblem, where: string): Prepared {
     minSamplesLeaf: p.minSamplesLeaf ?? 1,
     minImpurityDecrease: p.minImpurityDecrease ?? 0,
     maxFeatures,
+    maxLeaves: p.maxLeaves ?? Infinity,
+    order: p.order ?? 'depth-first',
   }
 }
 
@@ -327,26 +376,40 @@ export function splitSearch(problem: TreeProblem, rows?: ArrayLike<number>): Spl
 
 // ── Growth ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** A node waiting to be expanded. */
-interface Pending {
-  rows: Int32Array
+/** A node waiting to be created: its rows, depth and parent (−1 for the root) and which child it is. */
+export interface PendingNode {
+  rows: Tensor
   depth: number
   parent: number
   side: 0 | 1
+  /** Best-first only: the node evaluated when it was pushed, whose split decrease is its priority. */
+  evaluation?: NodeEvaluation
 }
 
-/** One state of tree growth: the nodes so far and the stack of nodes still to expand. */
+/** What growth decides at a node: its statistics, why it is a leaf (null when it splits) and its split search. */
+export interface NodeEvaluation {
+  stats: Float64Array
+  w: number
+  impurity: number
+  leaf: LeafReason | null
+  /** Null when the node is a leaf before any search (pure, depth, size). */
+  search: SplitSearch | null
+}
+
+/** One state of tree growth: the nodes so far and the nodes still to create. */
 export interface TreeGrowthState extends Status {
   /** Nodes created. */
   t: number
   /** The nodes created so far, as a (partial) tree: every created child is linked to its parent. */
   tree: DecisionTree
-  /** Nodes waiting to be created, top of the stack last: their rows, depth and parent. */
-  pending: { rows: Tensor; depth: number; parent: number; side: 0 | 1 }[]
+  /** Nodes waiting to be created, in push order. */
+  pending: PendingNode[]
   /** The node created in this step (−1 at the start), the rows that reached it and the search made there (null at a leaf that was not searched). */
   current: number
   rows: Tensor
   search: SplitSearch | null
+  /** Why the node created in this step is a leaf (null when it splits, and at the start). */
+  stop: LeafReason | null
   done: boolean
 }
 
@@ -386,50 +449,94 @@ function searchSubset(p: Prepared, rows: Int32Array, s: Stream): SplitSearch {
   return found
 }
 
+/** Each searched feature's best threshold and decrease, from the candidates of a split search. */
+function featureBests(found: SplitSearch): FeatureBest[] {
+  return found.candidates.map((c) => {
+    const t = c.thresholds.data as Float64Array
+    const d = c.decreases.data as Float64Array
+    let k = -1
+    for (let i = 0; i < d.length; i++) if (k < 0 || d[i] > d[k]) k = i
+    return { feature: c.feature, threshold: k < 0 ? NaN : t[k], decrease: k < 0 ? -Infinity : d[k] }
+  })
+}
+
+/** Statistics, leaf reason and split search of a node with these rows at this depth. */
+function evaluate(p: Prepared, rows: Int32Array, depth: number, s: Stream): NodeEvaluation {
+  const { stats, w } = statsOf(p, rows)
+  const impurity = impurityOf(p.criterion, stats, w)
+  const early: LeafReason | null =
+    impurity <= Number.EPSILON
+      ? 'pure'
+      : depth >= p.maxDepth
+        ? 'max-depth'
+        : rows.length < p.minSamplesSplit || rows.length < 2 * p.minSamplesLeaf
+          ? 'min-samples'
+          : null
+  if (early) return { stats, w, impurity, leaf: early, search: null }
+  const search = searchSubset(p, rows, s)
+  const leaf =
+    search.feature < 0 ? 'no-split' : search.decrease + Number.EPSILON < p.minImpurityDecrease ? 'min-decrease' : null
+  return { stats, w, impurity, leaf, search }
+}
+
+/** The waiting node expanded next: the last pushed, the first pushed, or the one with the largest split decrease. */
+function nextPending(order: GrowthOrder, pending: readonly PendingNode[]): number {
+  if (order === 'depth-first') return pending.length - 1
+  if (order === 'breadth-first') return 0
+  const priority = (q: PendingNode) =>
+    !q.evaluation ? Infinity : q.evaluation.leaf ? -Infinity : q.evaluation.search!.decrease
+  let best = 0
+  for (let i = 1; i < pending.length; i++) if (priority(pending[i]) > priority(pending[best])) best = i
+  return best
+}
+
 /**
- * CART growth as a traceable algorithm: each step pops one node from the stack, decides whether it is a leaf (depth,
- * size, purity or no split worth making) and otherwise searches its best split and pushes the right and then the left
- * child. Nodes are therefore numbered in preorder. When `maxFeatures` is below the number of features, the step that
- * creates a node draws its feature subset from the step's stream, and draws further features when the subset has no
- * valid split (`searchSubset`). No start.
+ * CART growth as a traceable algorithm: each step takes one waiting node (by `order`: depth-first pops the last
+ * pushed, so nodes are numbered in preorder; breadth-first takes the first; best-first the one whose best split
+ * decreases impurity most), decides whether it is a leaf (purity, depth, size, no split worth making, or the leaf
+ * budget `maxLeaves`) and otherwise splits it and queues both children. Nodes are numbered in the order they are
+ * created. When `maxFeatures` is below the number of features, the step that searches a node draws its feature subset
+ * from the step's stream (best-first searches a child when it is queued, from the step's stream keyed by side), and
+ * draws further features when the subset has no valid split (`searchSubset`). No start.
  */
 export function treeGrowthSteps(problem: TreeProblem): Algorithm<void, TreeGrowthState> {
   const p = prepare(problem, 'treeGrowthSteps')
-  const toPending = (q: Pending) => ({
-    rows: fromData(q.rows, [q.rows.length]),
-    depth: q.depth,
-    parent: q.parent,
-    side: q.side,
-  })
   return {
     name: 'cart-growth',
     init: () => ({
       t: 0,
       tree: asTree([], p),
-      pending: [toPending({ rows: Int32Array.from({ length: p.n }, (_, i) => i), depth: 0, parent: -1, side: 0 })],
+      pending: [
+        {
+          rows: fromData(
+            Int32Array.from({ length: p.n }, (_, i) => i),
+            [p.n],
+          ),
+          depth: 0,
+          parent: -1,
+          side: 0,
+        },
+      ],
       current: -1,
       rows: fromData(new Int32Array(0), [0]),
       search: null,
+      stop: null,
       done: false,
     }),
     step: (state, ctx) => {
       if (state.pending.length === 0) return { ...state, t: state.t + 1, done: true }
       const pending = state.pending.slice()
-      const top = pending.pop()!
+      const [top] = pending.splice(nextPending(p.order, pending), 1)
       const rows = Int32Array.from(top.rows.data as Int32Array)
       const id = state.tree.nodes.length
-      const { stats, w } = statsOf(p, rows)
-      const impurity = impurityOf(p.criterion, stats, w)
-      let leaf =
-        top.depth >= p.maxDepth ||
-        rows.length < p.minSamplesSplit ||
-        rows.length < 2 * p.minSamplesLeaf ||
-        impurity <= Number.EPSILON
-      let found: SplitSearch | null = null
-      if (!leaf) {
-        found = searchSubset(p, rows, ctx.stream)
-        leaf = found.feature < 0 || found.decrease + Number.EPSILON < p.minImpurityDecrease
+      const ev = top.evaluation ?? evaluate(p, rows, top.depth, ctx.stream)
+      let leaf = ev.leaf
+      // A split turns one leaf into two: it must fit the budget with the leaves made and the nodes still waiting.
+      if (!leaf && Number.isFinite(p.maxLeaves)) {
+        const made = state.tree.nodes.reduce((a, node) => a + (node.feature < 0 ? 1 : 0), 0)
+        if (made + pending.length + 2 > p.maxLeaves) leaf = 'max-leaves'
       }
+      const found = ev.search
       const node: DecisionNode = {
         id,
         parent: top.parent < 0 ? null : top.parent,
@@ -440,10 +547,14 @@ export function treeGrowthSteps(problem: TreeProblem): Algorithm<void, TreeGrowt
         feature: leaf ? -1 : found!.feature,
         threshold: leaf ? NaN : found!.threshold,
         count: rows.length,
-        weight: w,
-        impurity,
-        value: nodeValue(p, stats, w),
+        weight: ev.w,
+        impurity: ev.impurity,
+        value: nodeValue(p, ev.stats, ev.w),
         decrease: leaf ? 0 : found!.decrease,
+        rows,
+        counts: Array.from(ev.stats),
+        splits: found ? featureBests(found) : [],
+        stop: leaf,
       }
       node.label = nodeLabel(node, p.task)
       const nodes = state.tree.nodes.slice()
@@ -454,8 +565,18 @@ export function treeGrowthSteps(problem: TreeProblem): Algorithm<void, TreeGrowt
         nodes[top.parent] = parent
       }
       if (!leaf) {
-        pending.push(toPending({ rows: found!.right, depth: top.depth + 1, parent: id, side: 1 }))
-        pending.push(toPending({ rows: found!.left, depth: top.depth + 1, parent: id, side: 0 }))
+        const kids = ([found!.left, found!.right] as const).map((r, side): PendingNode => ({
+          rows: fromData(r, [r.length]),
+          depth: top.depth + 1,
+          parent: id,
+          side: side as 0 | 1,
+          ...(p.order === 'best-first' && {
+            evaluation: evaluate(p, r, top.depth + 1, child(ctx.stream, side ? 'right' : 'left')),
+          }),
+        }))
+        // Depth-first pops the left child next; the other orders take children left first.
+        if (p.order === 'depth-first') pending.push(kids[1], kids[0])
+        else pending.push(kids[0], kids[1])
       }
       return {
         t: state.t + 1,
@@ -464,6 +585,7 @@ export function treeGrowthSteps(problem: TreeProblem): Algorithm<void, TreeGrowt
         current: id,
         rows: fromData(rows, [rows.length]),
         search: found,
+        stop: leaf,
         done: pending.length === 0,
       }
     },
@@ -482,42 +604,70 @@ export function growTree(s: Stream | undefined, problem: TreeProblem): DecisionT
 
 // ── Prediction ───────────────────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Options of prediction and paths. `within` marks the nodes present (default all): descent stops at a node whose next
+ * child is absent, which then acts as a leaf. It reads a tree part-way through growth (the nodes created so far) or
+ * pruned in place (the nodes `keptNodes` leaves), keeping the full tree's node ids.
+ */
+export interface DescentOptions {
+  within?: (id: number) => boolean
+}
+
+/** The node a point (row `i` of the flat matrix `v` with `d` columns) stops at, and the tests on the way. */
+function descend(tree: DecisionTree, v: ArrayLike<number>, i: number, d: number, within?: (id: number) => boolean) {
+  const tests: DecisionTest[] = []
+  const nodes = [tree.root]
+  let node = tree.nodes[tree.root]
+  while (node.children.length) {
+    const value = v[i * d + node.feature]
+    const left = value <= node.threshold
+    const next = node.children[left ? 0 : 1]
+    if (next === undefined || (within && !within(next))) break
+    tests.push({ node: node.id, feature: node.feature, threshold: node.threshold, value, left })
+    node = tree.nodes[next]
+    nodes.push(node.id)
+  }
+  return { nodes, tests, leaf: node.id }
+}
+
 /** The leaf each row of x [m, d] reaches, int32 [m]. */
-export function applyTree(tree: DecisionTree, x: Tensor): Tensor {
+export function applyTree(tree: DecisionTree, x: Tensor, options: DescentOptions = {}): Tensor {
   if (x.shape.length !== 2 || x.shape[1] !== tree.features) {
     throw new Error(`applyTree: expected x of shape [m, ${tree.features}]`)
   }
   const [m, d] = x.shape
   const v = values(x)
   const out = new Int32Array(m)
-  for (let i = 0; i < m; i++) {
-    let node = tree.nodes[tree.root]
-    while (node.children.length)
-      node = tree.nodes[v[i * d + node.feature] <= node.threshold ? node.children[0] : node.children[1]]
-    out[i] = node.id
-  }
+  for (let i = 0; i < m; i++) out[i] = descend(tree, v, i, d, options.within).leaf
   return fromData(out, [m])
 }
 
-/** The ids of the nodes on each row's path from the root to its leaf. */
-export function decisionPath(tree: DecisionTree, x: Tensor): number[][] {
-  const [m, d] = x.shape
-  const v = values(x)
-  return Array.from({ length: m }, (_, i) => {
-    const path: number[] = []
-    let node = tree.nodes[tree.root]
-    path.push(node.id)
-    while (node.children.length) {
-      node = tree.nodes[v[i * d + node.feature] <= node.threshold ? node.children[0] : node.children[1]]
-      path.push(node.id)
-    }
-    return path
-  })
+/** One test on a decision path: the node, its rule x[feature] ≤ threshold, the point's value and the outcome. */
+export interface DecisionTest {
+  node: number
+  feature: number
+  threshold: number
+  value: number
+  /** True when the test holds and the point goes left. */
+  left: boolean
+}
+
+/** A point's way through a tree: the node ids from the root to its leaf, and the test passed at each split. */
+export interface DecisionPath {
+  nodes: number[]
+  tests: DecisionTest[]
+  leaf: number
+}
+
+/** The decision path of one point (its d feature values) from the root to the leaf it reaches. */
+export function decisionPath(tree: DecisionTree, point: ArrayLike<number>, options: DescentOptions = {}): DecisionPath {
+  if (point.length !== tree.features) throw new Error(`decisionPath: expected ${tree.features} features`)
+  return descend(tree, point, 0, tree.features, options.within)
 }
 
 /** Leaf values for x [m, d]: class shares [m, K] (classification) or predictions [m] (regression). */
-export function predictTree(tree: DecisionTree, x: Tensor): Tensor {
-  const leaves = applyTree(tree, x).data as Int32Array
+export function predictTree(tree: DecisionTree, x: Tensor, options: DescentOptions = {}): Tensor {
+  const leaves = applyTree(tree, x, options).data as Int32Array
   const m = leaves.length
   if (tree.task === 'regression')
     return fromData(
@@ -528,6 +678,63 @@ export function predictTree(tree: DecisionTree, x: Tensor): Tensor {
   const out = new Float64Array(m * K)
   for (let i = 0; i < m; i++) for (let c = 0; c < K; c++) out[i * K + c] = tree.nodes[leaves[i]].value[c]
   return fromData(out, [m, K])
+}
+
+/** The class a node predicts: its weighted majority (the first on ties), or its mean for regression. */
+export function nodePrediction(tree: DecisionTree, id: number): number {
+  const v = tree.nodes[id].value
+  if (tree.task === 'regression') return v[0]
+  let best = 0
+  for (let c = 1; c < v.length; c++) if (v[c] > v[best]) best = c
+  return best
+}
+
+/** Decisions for x [m, d]: the predicted class (int32) or, for regression, the prediction. */
+export function decideTree(tree: DecisionTree, x: Tensor, options: DescentOptions = {}): Tensor {
+  const leaves = applyTree(tree, x, options).data as Int32Array
+  if (tree.task === 'regression') return predictTree(tree, x, options)
+  return fromData(
+    Int32Array.from(leaves, (id) => nodePrediction(tree, id)),
+    [leaves.length],
+  )
+}
+
+/**
+ * The axis-aligned box of the inputs that reach a node: the intersection of its ancestors' half-spaces
+ * (x[f] ≤ t going left, x[f] > t going right) within `bounds`. A row reaches the node exactly when it lies in the box,
+ * lower ends open and upper ends closed.
+ */
+export function nodeRegion(
+  tree: DecisionTree,
+  id: number,
+  bounds: { lower: ArrayLike<number>; upper: ArrayLike<number> },
+): { lower: number[]; upper: number[] } {
+  const lower = Array.from(bounds.lower)
+  const upper = Array.from(bounds.upper)
+  let node = tree.nodes[id]
+  while (node.parent !== null) {
+    const parent = tree.nodes[node.parent]
+    const f = parent.feature
+    if (parent.children[0] === node.id) upper[f] = Math.min(upper[f], parent.threshold)
+    else lower[f] = Math.max(lower[f], parent.threshold)
+    node = parent
+  }
+  return { lower, upper }
+}
+
+/**
+ * Every candidate threshold of one feature at a node and its weighted impurity decrease: the fitter's own split search
+ * (the function growth calls), re-run on the node's stored rows with the tree's parameters, since the tree keeps only
+ * each feature's best. `data` is the data the tree was grown on.
+ */
+export function splitCurve(
+  tree: DecisionTree,
+  id: number,
+  feature: number,
+  data: { x: Tensor; y: Tensor; weights?: Tensor },
+): FeatureSplits {
+  const p = prepare({ ...data, task: tree.task, classes: tree.classes, params: tree.params }, 'splitCurve')
+  return search(p, tree.nodes[id].rows, [feature]).candidates[0]
 }
 
 /** Impurity-based feature importances [d]: each feature's total weighted impurity decrease, normalised to sum to 1. */
@@ -582,17 +789,25 @@ function weakestLinks(tree: DecisionTree, cut: Set<number>) {
 
 /**
  * The minimal cost-complexity pruning path: the effective α at which each successive weakest link is pruned, and the
- * total leaf impurity Σ (w_t / W) i(t) of the pruned tree at each α (starting with α = 0 and the full tree), as
- * scikit-learn's `cost_complexity_pruning_path`.
+ * total leaf impurity Σ (w_t / W) i(t) and leaf count of the pruned tree at each α (starting with α = 0 and the full
+ * tree), as scikit-learn's `cost_complexity_pruning_path`. `cuts[k]` is the node (an id of `tree`) whose subtree
+ * collapses into a leaf at step k + 1, at α = alphas[k + 1].
  */
-export function costComplexityPath(tree: DecisionTree): { alphas: Tensor; impurities: Tensor; leaves: Tensor } {
+export function costComplexityPath(tree: DecisionTree): {
+  alphas: Tensor
+  impurities: Tensor
+  leaves: Tensor
+  cuts: Tensor
+} {
   const cut = new Set<number>()
   let w = weakestLinks(tree, cut)
   const alphas = [0]
   const impurities = [w.impurity]
   const leaves = [w.leaves]
+  const cuts: number[] = []
   while (w.best >= 0) {
     cut.add(w.best)
+    cuts.push(w.best)
     const alpha = w.alpha
     w = weakestLinks(tree, cut)
     alphas.push(alpha)
@@ -603,7 +818,23 @@ export function costComplexityPath(tree: DecisionTree): { alphas: Tensor; impuri
     alphas: fromData(Float64Array.from(alphas), [alphas.length]),
     impurities: fromData(Float64Array.from(impurities), [impurities.length]),
     leaves: fromData(Int32Array.from(leaves), [leaves.length]),
+    cuts: fromData(Int32Array.from(cuts), [cuts.length]),
   }
+}
+
+/**
+ * The nodes a tree keeps after collapsing the subtrees at `cuts` into leaves, as a mask over its node ids (1 kept):
+ * every node not strictly below a cut. With `DescentOptions.within` it reads the pruned tree in the full tree's ids.
+ */
+export function keptNodes(tree: DecisionTree, cuts: Iterable<number>): Uint8Array {
+  const out = new Uint8Array(tree.nodes.length)
+  const cut = new Set(cuts)
+  const visit = (id: number) => {
+    out[id] = 1
+    if (!cut.has(id)) for (const c of tree.nodes[id].children) visit(c)
+  }
+  visit(tree.root)
+  return out
 }
 
 /**
@@ -633,6 +864,7 @@ export function pruneTree(tree: DecisionTree, alpha: number): DecisionTree {
       feature: leaf ? -1 : src.feature,
       threshold: leaf ? NaN : src.threshold,
       decrease: leaf ? 0 : src.decrease,
+      stop: src.children.length && leaf ? 'pruned' : src.stop,
       value: src.value.slice(),
     })
     nodes[nid].label = nodeLabel(nodes[nid], tree.task)
@@ -818,6 +1050,8 @@ defineModel(
       minSamplesSplit: int(2, 100, { default: 2 }),
       minSamplesLeaf: int(1, 100, { default: 1 }),
       minImpurityDecrease: real(0, 1, { default: 0 }),
+      maxLeaves: int(2, 1024, { default: 1024, doc: 'The factory default is unlimited.' }),
+      order: oneOf(['depth-first', 'breadth-first', 'best-first']),
       pruneAlpha: real(0, 1, { default: 0, label: 'α' }),
     }),
     notes: ['decision-tree', 'tree-pruning'],

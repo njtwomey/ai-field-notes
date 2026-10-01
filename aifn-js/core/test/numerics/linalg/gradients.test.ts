@@ -12,8 +12,20 @@ import {
   solve,
   solveTriangular,
   matrixTrace,
+  svd,
 } from 'aifn/numerics/linalg'
-import { add, matmul, mul, realPart, sum, tensor, transpose, type Tensor, type Value } from 'aifn/foundation/tensor'
+import {
+  add,
+  matmul,
+  mul,
+  realPart,
+  sum,
+  tensor,
+  toFlat,
+  transpose,
+  type Tensor,
+  type Value,
+} from 'aifn/foundation/tensor'
 import { checkGradient } from '../../foundation/tensor/check-gradient'
 import { grad } from 'aifn/foundation/autodiff'
 import { NotDifferentiableError } from 'aifn/foundation/errors'
@@ -112,5 +124,24 @@ describe('linear-algebra vjps match finite differences', () => {
   })
   it('the general eigenproblem refuses traced input (no derivative rule)', () => {
     expect(() => grad((x: Value) => sum(realPart(eig(x as never).values)))(A)).toThrow(NotDifferentiableError)
+  })
+})
+
+describe('svd: the projection term at a zero singular value (review regression)', () => {
+  it('a function of S alone of a rank-deficient tall matrix gives a finite gradient, not NaN', () => {
+    const A = tensor([
+      [1, 2],
+      [2, 4],
+      [3, 6],
+    ])
+    const g = toFlat(grad((a: Value) => sum(svd(a).S))(A) as Tensor)
+    expect(Array.from(g).every(Number.isFinite)).toBe(true)
+    // With s̄ = 1 the gradient is U Vᵀ; the projection term vanishes because Ū = 0.
+    const { U, V } = svd(A)
+    const u = toFlat(U)
+    const v = toFlat(V)
+    for (let i = 0; i < 3; i++)
+      for (let j = 0; j < 2; j++)
+        expect(g[i * 2 + j]).toBeCloseTo(u[i * 2] * v[j * 2] + u[i * 2 + 1] * v[j * 2 + 1], 12)
   })
 })

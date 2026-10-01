@@ -14,6 +14,7 @@
  * implementation files.
  */
 
+import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import {
   add,
   cos,
@@ -112,14 +113,61 @@ const domains: Readonly<Record<string, Domain | readonly Domain[]>> = {
 /** A derivative written with primitives: the arguments, then the output y. */
 type Derivative = ((...argsAndOutput: Value[]) => Value) | null
 
+/** The site note that defines each function, where there is one (the primitive's `doc.note`). */
+const NOTES: Readonly<Record<string, string>> = {
+  gamma: 'gamma-function',
+  logGamma: 'gamma-function',
+  digamma: 'gamma-function',
+  logFactorial: 'gamma-function',
+  regularisedGammaP: 'gamma-distribution',
+  regularisedGammaQ: 'gamma-distribution',
+  logBeta: 'beta-distribution',
+  regularisedBeta: 'beta-distribution',
+  regularisedBetaInverse: 'beta-distribution',
+  erf: 'gaussian-integral',
+  erfc: 'gaussian-integral',
+  normalCdf: 'gaussian-distribution',
+  normalPdf: 'gaussian-distribution',
+  normalLogPdf: 'gaussian-distribution',
+  normalLogCdf: 'gaussian-distribution',
+  normalQuantile: 'gaussian-distribution',
+  studentTCdf: 'student-t-distribution',
+  studentTQuantile: 'student-t-distribution',
+  chiSquareCdf: 'chi-squared-distribution',
+  chiSquareSf: 'chi-squared-distribution',
+  sigmoid: 'logistic-regression',
+  logSigmoid: 'logistic-regression',
+  logit: 'logistic-regression',
+  softplus: 'softmax-and-log-sum-exp',
+  logAddExp: 'softmax-and-log-sum-exp',
+  logDiffExp: 'softmax-and-log-sum-exp',
+  xlogy: 'entropy',
+  binaryEntropy: 'entropy',
+  truncatedNormalV: 'expectation-propagation-truncated-gaussian',
+  truncatedNormalW: 'expectation-propagation-truncated-gaussian',
+}
+const doc = (name: string) => (NOTES[name] ? { doc: { note: NOTES[name] } } : {})
+
 /** Register a one-argument function under `numerics/special/<name>` with its derivative dy/dx(x, y). */
 function unary(name: string, f: (x: number) => number, derivative: Derivative): Unary {
-  return elementwise({ id: `numerics/special/${name}`, f, derivative: [derivative], test: { domain: domains[name] } })
+  return elementwise({
+    id: `numerics/special/${name}`,
+    f,
+    derivative: [derivative],
+    test: { domain: domains[name] },
+    ...doc(name),
+  })
 }
 
 /** Register a two-argument function with its partials ∂y/∂a(a, b, y) and ∂y/∂b(a, b, y). */
 function binary(name: string, f: (a: number, b: number) => number, da: Derivative, db: Derivative): Binary {
-  return elementwise({ id: `numerics/special/${name}`, f, derivative: [da, db], test: { domain: domains[name] } })
+  return elementwise({
+    id: `numerics/special/${name}`,
+    f,
+    derivative: [da, db],
+    test: { domain: domains[name] },
+    ...doc(name),
+  })
 }
 
 /** Register a three-argument function with its three partials. */
@@ -128,7 +176,7 @@ function ternary(
   f: (a: number, b: number, c: number) => number,
   derivative: readonly [Derivative, Derivative, Derivative],
 ): Ternary {
-  return elementwise({ id: `numerics/special/${name}`, f, derivative, test: { domain: domains[name] } })
+  return elementwise({ id: `numerics/special/${name}`, f, derivative, test: { domain: domains[name] }, ...doc(name) })
 }
 
 /**
@@ -536,3 +584,29 @@ export function binaryEntropy(p: Value, base = Math.E): Value {
   const h = binaryEntropyNats(p)
   return base === Math.E ? h : div(h, Math.log(base))
 }
+
+// ── Registry of the composite functions ──────────────────────────────────────────────────────────────────────────────
+
+const fn = definer<FunctionInfo>('function', 'numerics/special')
+const SOFTMAX = ['softmax-and-log-sum-exp']
+
+fn(
+  {
+    key: 'softmax',
+    name: 'Softmax',
+    tex: '\\operatorname{softmax}(x)_i = e^{x_i/T} / \\sum_j e^{x_j/T}',
+    role: 'transform',
+    notes: [...SOFTMAX, 'multinomial-logistic-regression'],
+  },
+  softmax,
+)
+fn({ key: 'logSoftmax', name: 'Log-softmax', role: 'transform', notes: SOFTMAX }, logSoftmax)
+fn({ key: 'binaryEntropy', name: 'Binary entropy', tex: 'H_b(p)', role: 'property', notes: ['entropy'] }, binaryEntropy)
+
+/** The composite functions of the module, keyed by name. */
+export const specialFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', {
+    softmax: softmax,
+    logSoftmax: logSoftmax,
+    binaryEntropy: binaryEntropy,
+  }) as Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>>

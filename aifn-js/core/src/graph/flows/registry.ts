@@ -4,7 +4,7 @@
  * view picks default series and a worker can address an algorithm by key (design S §2.3).
  */
 
-import { definer, entries, type AlgorithmInfo, type Entry } from 'aifn/foundation/registry'
+import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as flows from './flows'
 
 const algorithm = definer<AlgorithmInfo>('algorithm', 'graph/flows')
@@ -34,4 +34,23 @@ algorithm(
 export const flowsAlgorithms: Readonly<Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>> =
   entries<AlgorithmInfo>('algorithm', flows) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>
+  >
+
+const fn = definer<FunctionInfo>('function', 'graph/flows')
+
+fn({ key: 'maxFlow', name: 'Maximum flow', role: 'solver', notes: ['optimal-transport'] }, flows.maxFlow)
+fn(
+  {
+    key: 'minCostFlow',
+    name: 'Minimum-cost flow',
+    role: 'solver',
+    notes: ['optimal-transport', 'earth-movers-distance'],
+  },
+  flows.minCostFlow,
+)
+
+/** The functions of the module, keyed by name. */
+export const flowsFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', flows) as Readonly<
+    Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

@@ -14,6 +14,8 @@ import {
 import { AifnError, NotDifferentiableError } from 'aifn/foundation/errors'
 import {
   allclose,
+  complex,
+  conj,
   div,
   dot,
   equalTo,
@@ -21,6 +23,7 @@ import {
   map,
   mul,
   norm,
+  scalar,
   sin,
   sum,
   tanh,
@@ -129,5 +132,22 @@ describe('refuseTraced', () => {
     }
     expect(raw(1)).toBe(1)
     expect(() => grad(raw)(1)).toThrow(NotDifferentiableError)
+  })
+})
+
+describe('customVjp in forward mode with complex values (review 2026-10-01)', () => {
+  it('the transpose trick through bwd uses the ℝ² inner product, so J·t matches the plain jvp', () => {
+    const w = complex(scalar(2), scalar(3))
+    const f = (z: Value) => mul(z, w)
+    const g = customVjp(
+      f,
+      (z: Value) => ({ out: f(z), residuals: null }),
+      (_r: null, ct: Value) => [mul(ct, conj(w))],
+    )
+    const z = complex(tensor([1]), tensor([1]))
+    const t = complex(tensor([0]), tensor([1]))
+    // (2 + 3i)·i = −3 + 2i; the plain Σ c·t pairing gave 3 − 2i.
+    expect(toFlat(jvp(g, z, t).tangent as Tensor)).toEqual(toFlat(jvp(f, z, t).tangent as Tensor))
+    expect(toFlat(jvp(g, z, t).tangent as Tensor)).toEqual([-3, 2])
   })
 })

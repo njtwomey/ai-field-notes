@@ -46,3 +46,4 @@ export {
   type SearchResult,
   type SearchRow,
 } from './search'
+export { validateFunctions } from './registry'

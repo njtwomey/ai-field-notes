@@ -48,3 +48,4 @@ export {
   type CartPoleParameters,
   type CartPoleState,
 } from './control'
+export { environmentFunctions } from './registry'

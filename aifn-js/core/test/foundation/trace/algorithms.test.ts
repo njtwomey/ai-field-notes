@@ -75,12 +75,35 @@ import {
   unadjustedLangevin,
 } from 'aifn/inference/stochastic'
 import { bbvi } from 'aifn/inference/variational'
+import { Normal } from 'aifn/probability/distributions'
+import {
+  confidenceSequence,
+  cusum,
+  groupSequentialBoundaries,
+  groupSequentialTest,
+  msprt,
+  sprt,
+} from 'aifn/probability/tests'
 import { normal, normals } from 'aifn/foundation/random'
 import { binaryCrossEntropyWithLogits } from 'aifn/learning/losses'
+import { poolAdjacentViolatorsSteps } from 'aifn/learning/calibration'
 import { xavierUniform } from 'aifn/nn/init'
 import { Mlp } from 'aifn/nn/layers'
 import { trainingLoop } from 'aifn/nn/training'
-import { kleinmanIteration, riccatiDoubling, riccatiMatrixSign, riccatiRecursion } from 'aifn/numerics/linalg'
+import { flashAttentionSteps } from 'aifn/nn/attention'
+import { beamSearch, greedyDecoding, samplingDecoding, speculativeDecoding } from 'aifn/nn/decoding'
+import { add as addT, blellochScanSteps, hillisSteeleScanSteps } from 'aifn/foundation/tensor'
+import {
+  gaussSeidelSteps,
+  gramSchmidtSteps,
+  householderSteps,
+  jacobiSteps,
+  kleinmanIteration,
+  powerIterationSteps,
+  riccatiDoubling,
+  riccatiMatrixSign,
+  riccatiRecursion,
+} from 'aifn/numerics/linalg'
 import { adaptiveSimpson, gaussKronrod, monteCarlo, romberg } from 'aifn/numerics/quadrature'
 import {
   bisection,
@@ -130,6 +153,7 @@ import { randomGraph } from '../../graph/helpers'
 import { casinoChain, isingGrid, randomTree, sprinkler } from '../../inference/graphs'
 import { banana, gaussianTarget } from '../../inference/stochastic/targets'
 import { bowl, rosenbrock } from '../../optim/problems'
+import { bpeSteps, unigramLmSteps, wordPieceSteps } from 'aifn/text/subword'
 import { checkProtocol, plainOf } from '../../protocol'
 import { address, entriesOf } from '../../registries'
 
@@ -140,6 +164,12 @@ const at = <S, St extends Status>(alg: Algorithm<S, St>, start: S, steps?: numbe
   start,
   steps,
 })
+
+const diagonallyDominant = [
+  [4, 1, 0],
+  [1, 5, 2],
+  [0, 2, 6],
+]
 
 // ── Problems ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -297,6 +327,16 @@ const cx = costMatrix(points, points, { p: 1 })
 
 // ── Cases, by address ────────────────────────────────────────────────────────────────────────────────────────────────
 
+// A bigram language model over three tokens, for the decoders.
+const toyLm = (prefix: readonly number[]): Tensor =>
+  tensor(
+    [
+      [1.0, 0.2, -0.5],
+      [0.1, 1.4, 0.8],
+      [0.6, -0.3, 1.1],
+    ][prefix.length ? prefix[prefix.length - 1] : 0],
+  )
+
 const CASES: Record<string, () => Case> = {
   'dynamics/ode/rungeKutta': () => at(rungeKutta(lotkaVolterra, 'rk4', { stepSize: 0.05 }), lv, 16),
   'dynamics/ode/dormandPrince': () => at(dormandPrince(lotkaVolterra, { tEnd: 50 }), lv, 16),
@@ -451,6 +491,39 @@ const CASES: Record<string, () => Case> = {
   'inference/stochastic/factorGraphGibbs': () => at(factorGraphGibbs(ising), undefined, 10),
   'inference/stochastic/modelGibbs': () => at(modelGibbs(sprinkler, { data: { wet: 1 } }), undefined, 8),
   'inference/variational/bbvi': () => at(bbvi(target, { stepSize: 0.05 }), {}),
+  'foundation/tensor/hillisSteeleScanSteps': () =>
+    at(hillisSteeleScanSteps(addT, tensor([1, 2, 3, 4, 5])), undefined, 4),
+  'foundation/tensor/blellochScanSteps': () => at(blellochScanSteps(addT, tensor([1, 2, 3, 4, 5]), 0), undefined, 8),
+  'nn/attention/flashAttentionSteps': () =>
+    at(
+      flashAttentionSteps(
+        tensor([
+          [1, 0],
+          [0, 1],
+          [1, 1],
+        ]),
+        tensor([
+          [1, 2],
+          [0, 1],
+          [2, 0],
+          [1, 1],
+        ]),
+        tensor([[1], [2], [3], [4]]),
+        { causal: true, queryBlock: 2, keyBlock: 2 },
+      ),
+      undefined,
+      6,
+    ),
+  'nn/decoding/greedyDecoding': () => at(greedyDecoding(toyLm, { prompt: [0], maxTokens: 5 }), undefined, 6),
+  'nn/decoding/samplingDecoding': () =>
+    at(samplingDecoding(toyLm, { prompt: [0], maxTokens: 6, topP: 0.9, temperature: 1.2 }), undefined, 6),
+  'nn/decoding/beamSearch': () => at(beamSearch(toyLm, { prompt: [1], maxTokens: 4, beams: 2 }), undefined, 4),
+  'nn/decoding/speculativeDecoding': () =>
+    at(
+      speculativeDecoding(toyLm, (p) => mul(0.5, toyLm(p)) as Tensor, { prompt: [0], maxTokens: 8, lookahead: 2 }),
+      undefined,
+      6,
+    ),
   'nn/training/trainingLoop': () =>
     at(
       trainingLoop({
@@ -465,6 +538,36 @@ const CASES: Record<string, () => Case> = {
   'numerics/linalg/riccatiMatrixSign': () => at(riccatiMatrixSign(systems.care), undefined, 6),
   'numerics/linalg/riccatiRecursion': () => at(riccatiRecursion(systems.dare), undefined, 6),
   'numerics/linalg/riccatiDoubling': () => at(riccatiDoubling(systems.dare), undefined, 5),
+  'numerics/linalg/gramSchmidtSteps': () =>
+    at(
+      gramSchmidtSteps(
+        [
+          [1, 1, 0],
+          [1, 0, 1],
+          [0, 1, 1],
+          [1, 1, 1],
+        ],
+        { variant: 'classical' },
+      ),
+      undefined,
+      3,
+    ),
+  'numerics/linalg/householderSteps': () =>
+    at(
+      householderSteps([
+        [12, -51, 4],
+        [6, 167, -68],
+        [-4, 24, -41],
+      ]),
+      undefined,
+      3,
+    ),
+  'numerics/linalg/jacobiSteps': () => at(jacobiSteps(diagonallyDominant, [1, 2, 3]), undefined, 8),
+  'numerics/linalg/gaussSeidelSteps': () =>
+    at(gaussSeidelSteps(diagonallyDominant, [1, 2, 3], { omega: 1.1 }), undefined, 8),
+  'learning/calibration/poolAdjacentViolatorsSteps': () =>
+    at(poolAdjacentViolatorsSteps([3, 1, 4, 1, 5, 9, 2, 6]), undefined, 20),
+  'numerics/linalg/powerIterationSteps': () => at(powerIterationSteps(diagonallyDominant), undefined, 10),
   'numerics/quadrature/adaptiveSimpson': () =>
     at(
       adaptiveSimpson((x) => Math.abs(x - 0.3), { tolerance: 1e-12 }),
@@ -517,6 +620,26 @@ const CASES: Record<string, () => Case> = {
       10,
     ),
   'numerics/roots/continuation': () => at(continuation(newtonHomotopy(F, [3, 0.5])), { x0: [3, 0.5] }, 10),
+  'probability/tests/sprt': () =>
+    at(
+      sprt([0.3, 1.2, 0.8, -0.1, 0.9, 1.4], { h0: Normal(0, 1), h1: Normal(1, 1), alpha: 0.1, beta: 0.1 }),
+      undefined,
+      6,
+    ),
+  'probability/tests/msprt': () => at(msprt([0.3, 1.2, 0.8, -0.1, 0.9, 1.4], { sigma: 1, tau: 0.5 }), undefined, 6),
+  'probability/tests/confidenceSequence': () =>
+    at(confidenceSequence([0.3, 1.2, 0.8, -0.1, 0.9, 1.4], { sigma: 1, tau: 0.5 }), undefined, 6),
+  'probability/tests/groupSequentialTest': () =>
+    at(
+      groupSequentialTest([0.3, 1.2, 0.8, -0.1, 0.9, 1.4], {
+        looks: [2, 4, 6],
+        boundaries: groupSequentialBoundaries(3, { points: 101 }),
+        sigma: 1,
+      }),
+      undefined,
+      6,
+    ),
+  'probability/tests/cusum': () => at(cusum([0.3, 1.2, 2.8, 2.1, 0.9, 3.4], { h: 2 }), undefined, 6),
   'optim/derivative-free/nelderMead': () => at(nelderMead(rosen.value), fromRosen),
   'optim/derivative-free/simulatedAnnealing': () => at(simulatedAnnealing(rosen.value), fromRosen),
   'optim/derivative-free/cmaEs': () => at(cmaEs(rosen.value), fromRosen),
@@ -616,6 +739,10 @@ const CASES: Record<string, () => Case> = {
       undefined,
       6,
     ),
+  'text/subword/bpeSteps': () => at(bpeSteps({ low: 5, lower: 2, newest: 6, widest: 3 }), undefined, 12),
+  'text/subword/wordPieceSteps': () => at(wordPieceSteps({ hug: 10, pug: 5, pun: 12, bun: 4, hugs: 5 }), undefined, 8),
+  'text/subword/unigramLmSteps': () =>
+    at(unigramLmSteps({ hug: 10, pug: 5, pun: 12, bun: 4, hugs: 5 }, { vocabularySize: 12 }), undefined, 4),
 }
 
 const FLAGS = ['converged', 'diverged', 'stalled', 'terminated'] as const

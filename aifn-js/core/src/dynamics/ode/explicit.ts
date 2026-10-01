@@ -156,6 +156,15 @@ export function nextStep(t: number, h: number, tEnd: number | undefined): number
   return Math.abs(left) < Math.abs(h) ? left : h
 }
 
+/**
+ * Throw unless a fixed step h points from t₀ towards `tEnd` (internal). Otherwise `reached` holds at t₀ and the run
+ * would report `done` without taking a step.
+ */
+export function checkDirection(t0: number, h: number, tEnd: number | undefined, where: string): void {
+  if (tEnd !== undefined && tEnd !== t0 && Math.sign(tEnd - t0) !== Math.sign(h))
+    throw new Error(`${where}: the step size ${h} points away from tEnd = ${tEnd} (t₀ = ${t0})`)
+}
+
 /** True when a solver has reached `tEnd` (to rounding; internal). */
 export function reached(t: number, h: number, tEnd: number | undefined): boolean {
   if (tEnd === undefined) return false
@@ -182,7 +191,10 @@ export function rungeKutta(
   const name = tab.name
   return {
     name,
-    init: ({ x0, t0 = 0 }) => initialValue(x0, t0, name),
+    init: ({ x0, t0 = 0 }) => {
+      checkDirection(t0, h, tEnd, name)
+      return initialValue(x0, t0, name)
+    },
     step: (s) => {
       const hk = nextStep(s.time, h, tEnd)
       const k = stages(f, tab, s.time, s.x, hk, name)

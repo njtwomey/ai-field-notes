@@ -4,3 +4,4 @@
  */
 
 export { messageEdges, propagate, type Aggregation, type EdgeFunction, type PropagateOptions } from './propagation'
+export { propagationFunctions } from './registry'

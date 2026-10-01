@@ -49,7 +49,8 @@ export function Dashboard({
   const height = useChartHeight()
   const [ref, size] = useElementSize<HTMLDivElement>()
   const rows = Children.toArray(children).filter(isRow)
-  const total = rows.reduce((s, r) => s + (r.props.ratio ?? 1), 0) || 1
+  // Rows that fit their width (a diagram) take the height their content needs; the others share the frame's height.
+  const total = rows.reduce((s, r) => s + (r.props.fit === 'width' ? 0 : (r.props.ratio ?? 1)), 0) || 1
   const room = Math.max(height - gap * (rows.length - 1), 0)
   const stacked = size.width > 0 && size.width < stackBelow
   return (
@@ -78,6 +79,11 @@ type RowProps = {
   ratio?: number
   /** The least height of the row, in pixels (default 200); the frame grows rather than squash it. */
   minHeight?: number
+  /**
+   * `width`: the row's cells fit the full width and take the height that needs (a diagram such as a tree grows taller
+   * as the figure widens), instead of a share of the frame's height. The frame grows to hold it.
+   */
+  fit?: 'width'
   className?: string
 }
 
@@ -108,9 +114,27 @@ const isCell = (c: unknown): c is ReactElement<CellProps> => isValidElement(c) &
 const aspectOf = (a: CellProps['aspect']) => (a === 'square' ? 1 : a)
 
 /** One row of a `Dashboard`; its children are `DashboardCell`s. */
-export function DashboardRow({ children, className }: RowProps) {
+export function DashboardRow({ children, className, fit, minHeight }: RowProps) {
   const { height, width, gap, stacked } = useContext(RowContext)
   const cells = Children.toArray(children).filter(isCell)
+  if (fit === 'width')
+    return (
+      <div
+        className={cn('flex w-full', stacked ? 'flex-col items-center' : 'flex-row', className)}
+        style={{ gap, minHeight }}
+      >
+        {cells.map((cell, i) => (
+          <CellFrame
+            key={cell.key ?? i}
+            box={{ height: undefined, flex: `${cell.props.ratio ?? 1} 1 0` }}
+            stacked={stacked}
+            className={cell.props.className}
+          >
+            {cell.props.children}
+          </CellFrame>
+        ))}
+      </div>
+    )
   // Aspect cells first take their width from the row's height; if they would not fit, they shrink together.
   const fixed = cells.map((c) => aspectOf(c.props.aspect))
   const wanted = fixed.reduce<number>((s, a) => s + (a ? a * height : 0), 0)
@@ -155,7 +179,8 @@ function CellFrame({
   className,
   children,
 }: {
-  box: { width?: number; height: number; flex?: string }
+  /** No height: the content sets it (a `fit="width"` row). */
+  box: { width?: number; height: number | undefined; flex?: string }
   stacked: boolean
   className?: string
   children: ReactNode

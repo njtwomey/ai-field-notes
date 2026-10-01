@@ -5,3 +5,4 @@
 
 export { envelope, hilbert, hilbertSpectrum, instantaneous, type HilbertSpectrum, type Instantaneous } from './hilbert'
 export { cqt, type CqtOptions } from './cqt'
+export { timeFrequencyFunctions } from './registry'

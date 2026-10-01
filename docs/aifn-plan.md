@@ -76,15 +76,16 @@ module may import only from strictly lower tiers. `scripts/aifn-layers.ts` enfor
 | 0    | foundation  | contracts, errors · registry · tensor · pytree, fourier · convolution, autodiff, random · space, trace |                    |
 | 1    | numerics    | special · linalg · polynomial, quadrature, roots, implicit, geometry · interpolate                     |                    |
 | 2    | graph       | traversal, shortest-paths, spanning-trees, structures, matrices · flows, structured, propagation       | graph, tree, heap  |
-| 3    | probability | stats, bijectors, samplers · distributions · likelihoods, information                                  |                    |
+| 3    | probability | stats, bijectors, samplers · distributions · likelihoods, information, tests                           |                    |
 | 3    | optim       | line-search · first-order, second-order, proximal, derivative-free, programming · minimize             | options, schedules |
 | 3    | systems     | (one module)                                                                                           |                    |
 | 4    | inference   | model · exact, message-passing, expectation-propagation, variational, stochastic, filtering · engines  |                    |
 | 4    | dynamics    | ode, sde · fields, control                                                                             |                    |
 | 4    | signal      | windows · filters, spectral, time-frequency, wavelets, statistical · multirate, decompositions         | signal             |
 | 4    | transport   | (one module)                                                                                           |                    |
-| 5    | learning    | estimators, kernels · losses, metrics, compose, validate                                               |                    |
-| 6    | nn          | functional, init · layers · training                                                                   |                    |
+| 4    | text        | normalise, tokenise, stem · vocabulary · subword, features, cooccurrence                               |                    |
+| 5    | learning    | estimators, kernels, calibration · losses, metrics, compose, validate                                  |                    |
+| 6    | nn          | functional, init, decoding · layers · attention, training · sequence                                   |                    |
 | 7    | interpreter | (one module)                                                                                           |                    |
 
 <!-- aifn-layers:end -->

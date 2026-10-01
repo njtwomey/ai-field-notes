@@ -21,7 +21,7 @@ import {
   reshape,
   toFlat,
   unwrap,
-  zeros,
+  zerosOf,
   type Tensor,
 } from 'aifn/foundation/tensor'
 import type { Raw, Scalar, Shape, Size, Value } from 'aifn/foundation/contracts'
@@ -168,12 +168,12 @@ export function treeMap<T, V extends Value = LeafValue>(tree: T, f: (leaf: V, pa
   return treeZip<T, V>([tree], ([leaf], path) => f(leaf, path))
 }
 
-/** A tree of zeros with the structure of `tree`: 0 for a number leaf, `zeros(shape)` for a tensor (or traced) leaf. */
+/**
+ * A tree of zeros with the structure of `tree`: 0 for a number leaf, `zeros(shape)` for a tensor (or traced) leaf
+ * (complex128 for a complex leaf, float64 otherwise).
+ */
 export function zerosLike<T>(tree: T): T {
-  return treeMap<T, Value>(tree, (leaf) => {
-    const aval = avalOf(leaf)
-    return aval.number ? 0 : zeros(aval.shape)
-  })
+  return treeMap<T, Value>(tree, (leaf) => zerosOf(avalOf(leaf)))
 }
 
 /** The number of scalar entries in a tree's leaves (a number counts 1, a tensor its size). */
@@ -191,7 +191,8 @@ export type Raveled<T> = {
 
 /**
  * Ravel a tree of raw leaves into one Float64Array (for L-BFGS, Nelder–Mead and other vector optimisers), with its
- * inverse. Traced leaves are read through their values; the vector is not differentiable.
+ * inverse. Traced leaves are read through their values; the vector is not differentiable. A complex128 leaf takes two
+ * entries per element, (re, im) interleaved (the ℝ² view), and is rebuilt complex.
  */
 export function ravel<T>(tree: T): Raveled<T> {
   const { leaves, treedef } = treeFlatten(tree)
@@ -199,7 +200,8 @@ export function ravel<T>(tree: T): Raveled<T> {
     const v = unwrap(leaf)
     return typeof v === 'number' ? null : v.shape
   })
-  const sizes = shapes.map((s) => (s === null ? 1 : s.reduce((a, b) => a * b, 1)))
+  const complex = leaves.map((leaf) => avalOf(leaf).dtype === 'complex128')
+  const sizes = shapes.map((s, k) => (s === null ? 1 : s.reduce((a, b) => a * b, 1) * (complex[k] ? 2 : 1)))
   const total = sizes.reduce((a, b) => a + b, 0)
   const vector = new Float64Array(total)
   let at = 0
@@ -218,7 +220,8 @@ export function ravel<T>(tree: T): Raveled<T> {
       const n = sizes[k]
       const part = Float64Array.from({ length: n }, (_, i) => values[offset + i])
       offset += n
-      return shape === null ? part[0] : reshape(fromData(part), shape)
+      if (shape === null) return part[0]
+      return complex[k] ? fromData(part, shape, 'complex128') : reshape(fromData(part), shape)
     })
     return treeUnflatten<T>(treedef, rebuilt)
   }

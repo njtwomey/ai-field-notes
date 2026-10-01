@@ -1,0 +1,15 @@
+/**
+ * `aifn-applied/text/corpora`: toy corpora for the text pipeline: the hand-worked corpora of the notes and a seeded
+ * sentence generator with inflection.
+ */
+
+export {
+  CORPUS_TOPICS,
+  corpusDatasets,
+  NAMED_CORPORA,
+  namedCorpus,
+  toyCorpus,
+  type Corpus,
+  type CorpusName,
+  type ToyCorpusOptions,
+} from './corpora'

@@ -54,6 +54,7 @@ import {
   meanAveragePrecision,
   meanReciprocalRank,
   meanSquaredError,
+  normalisedRootMeanSquaredError,
   metricRegistry,
   minkowskiDistance,
   cosineSimilarity,
@@ -335,6 +336,12 @@ describe('regression and forecasting', () => {
     const train = [10, 12, 11, 13, 15, 14]
     expect(meanAbsoluteScaledError([16, 15], [15, 16], { train })).toBeCloseTo(0.625, 12)
     expect(rootMeanSquaredScaledError([16, 15], [15, 16], { train })).toBeCloseTo(0.6, 2)
+  })
+  it('normalises RMSE by the range of a long series (review: Math.max(...y) overflowed the stack past ~1e5)', () => {
+    const n = 300_000
+    const y = Float64Array.from({ length: n }, (_, i) => i / (n - 1))
+    const p = Float64Array.from(y, (v) => v + 0.5)
+    expect(normalisedRootMeanSquaredError(y, p, { by: 'range' })).toBeCloseTo(0.5, 12)
   })
 })
 

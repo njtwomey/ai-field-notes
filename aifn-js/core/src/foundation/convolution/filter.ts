@@ -193,6 +193,7 @@ const linearFilterOp: Op<FilterParams> = definePrimitive<FilterParams>({
     return batchByLoop(linearFilterOp, values, axes, params, size)
   },
   doc: {
+    note: 'difference-equations',
     summary: 'The output of the difference equation with feedforward coefficients b and feedback coefficients a.',
     formula: '\\sum_{k} a_k y_{t-k} = \\sum_{k} b_k x_{t-k}',
   },

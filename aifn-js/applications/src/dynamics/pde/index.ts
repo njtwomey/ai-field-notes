@@ -30,3 +30,4 @@ export {
   type WaveOptions,
   type WaveState,
 } from './solvers'
+export { pdeAlgorithms } from './registry'

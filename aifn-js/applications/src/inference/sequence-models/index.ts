@@ -19,3 +19,4 @@ export {
   type LinearChainCrf,
 } from './crf'
 export { dishonestCasino, hmm, hmmChain, hmmModel, sampleHmm, type Hmm } from './hmm'
+export { sequenceModelFunctions } from './registry'

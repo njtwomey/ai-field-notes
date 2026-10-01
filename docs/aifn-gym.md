@@ -439,7 +439,7 @@ One agent, about half a day; each step ends green (`make check`).
 1. **Contracts**: `Domain`, `Environment`, `Step`, `Transition`, `Agent`, `EnvironmentModel`, `EnvironmentOracle`,
    `RenderSpec` in core contracts; `Domain` helpers (`contains`, `uniform(domain, stream)` for a random agent,
    `size` of a discrete domain). Contract tests.
-2. **Rollout**: `rollout`, `episodes`, `compare` in `aifn-applied/decisions`. A protocol test (as for Algorithms):
+2. **Rollout**: `rollout`, `episodes`, `compare` in `aifn-applied/gym` (`gym/rollout.ts`). A protocol test (as for Algorithms):
    purity, clone/revive of every state, common random numbers across agents, `terminated` vs `truncated` honoured.
 3. **Bandits**: port the three environments and twelve policies; delete `BanditEnvironment`, `banditRun`,
    `regretCurves` (break freely). Regret against the existing fixtures must be identical for the same seeds.

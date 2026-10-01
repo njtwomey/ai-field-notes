@@ -39,4 +39,4 @@ export {
   type TarjanEvent,
   type TarjanState,
 } from './components'
-export { traversalAlgorithms } from './registry'
+export { traversalAlgorithms, traversalFunctions } from './registry'

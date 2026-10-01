@@ -57,11 +57,14 @@ import {
   variance,
   where,
   elementwise,
+  linearCombination,
+  scalar,
+  toFlat,
   type Raw,
   type Tensor,
   type Value,
 } from 'aifn/foundation/tensor'
-import { grad, hessian, jvp } from 'aifn/foundation/autodiff'
+import { grad, hessian, jvp, vmap } from 'aifn/foundation/autodiff'
 import { NotDifferentiableError } from 'aifn/foundation/errors'
 import { checkGradient } from './check-gradient'
 
@@ -393,5 +396,43 @@ describe('elementwise and defineOp (local primitives)', () => {
     expect(Array.from((sumLike(g, tensor([[0], [0]])) as Tensor).data)).toEqual([6, 15])
     expect(sumLike(g, g)).toBe(g)
     expect((sumLike(2, tensor([0, 0])) as Tensor).shape).toEqual([2])
+  })
+})
+
+describe('review regressions (2026-10-01)', () => {
+  it('pow has finite derivatives at a = 0 with b = 0 (polynomial features at x = 0)', () => {
+    // d/dx Σₖ xᵏ for k = 0, 1, 2 at x = 0 is 0 + 1 + 0; b·aᵇ⁻¹ alone gives 0·∞ = NaN for the constant term.
+    expect(grad((x: Value) => sum(pow(x, tensor([0, 1, 2]))))(0)).toBe(1)
+    expect(grad((x: Value) => pow(x, 0))(0)).toBe(0)
+    expect(hessian((x: Value) => pow(x, 0))(0)).toBe(0)
+    // d/db 0ᵇ = 0 for b > 0, and its second derivative is 0 too (y·log a guarded inside the unused branch).
+    expect(grad((b: Value) => pow(0, b))(2)).toBe(0)
+    expect(hessian((b: Value) => pow(0, b))(2)).toBe(0)
+    // Away from the guards the rules are unchanged, including the mixed partial at b = 0: ∂²(aᵇ)/∂a∂b = 1/a there.
+    const mixed = grad((b: Value) => grad((a: Value) => pow(a, b))(2) as Value)(0) as number
+    expect(mixed).toBeCloseTo(0.5, 12)
+    expect(grad((x: Value) => pow(x, 3))(-2)).toBeCloseTo(12, 12)
+  })
+
+  it('the gradient of a sum has the kind of its input (a rank-0 tensor gives a rank-0 tensor)', () => {
+    const g = grad((x: Value) => sum(x))(scalar(2)) as Tensor
+    expect(typeof g).toBe('object')
+    expect(g.shape).toEqual([])
+    expect(grad((x: Value) => sum(x))(2)).toBe(1)
+  })
+
+  it('linearCombination batches a number example against a tensor one, as its forward rule broadcasts', () => {
+    const c = tensor([1, 2, 3])
+    const batched = vmap((a: Value) => linearCombination([a, c], [1, 1]))(tensor([10, 20])) as Tensor
+    expect(batched.shape).toEqual([2, 3])
+    expect(toFlat(batched)).toEqual([11, 12, 13, 21, 22, 23])
+    const both = vmap((a: Value, b: Value) => linearCombination([a, b], [1, 2]))(
+      tensor([1, 2]),
+      tensor([
+        [1, 2],
+        [3, 4],
+      ]),
+    )
+    expect(toFlat(both as Tensor)).toEqual([3, 5, 8, 10])
   })
 })

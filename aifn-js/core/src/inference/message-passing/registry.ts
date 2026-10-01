@@ -4,7 +4,7 @@
  * view picks default series and a worker can address an algorithm by key (design S §2.3).
  */
 
-import { definer, entries, type AlgorithmInfo, type Entry } from 'aifn/foundation/registry'
+import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as bp from './bp'
 import * as gaussianBp from './gaussianBp'
 
@@ -36,4 +36,40 @@ algorithm(
 export const messagePassingAlgorithms: Readonly<Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>> =
   entries<AlgorithmInfo>('algorithm', bp, gaussianBp) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>
+  >
+
+const fn = definer<FunctionInfo>('function', 'inference/message-passing')
+const BP = ['belief-propagation', 'loopy-belief-propagation']
+
+fn(
+  {
+    key: 'beliefPropagation',
+    name: 'Belief propagation',
+    role: 'inference',
+    notes: [...BP, 'factor-graph'],
+    cite: ['pearl1988', 'kschischang2001'],
+  },
+  bp.beliefPropagation,
+)
+fn({ key: 'factorBeliefs', name: 'Factor beliefs', role: 'inference', notes: BP }, bp.factorBeliefs)
+fn(
+  {
+    key: 'betheLogZ',
+    name: 'Bethe free energy (log Z)',
+    role: 'estimator',
+    notes: ['loopy-belief-propagation'],
+    cite: ['yedidia2005'],
+  },
+  bp.betheLogZ,
+)
+fn({ key: 'decodeBeliefs', name: 'Decode beliefs (max-marginals)', role: 'inference', notes: BP }, bp.decodeBeliefs)
+fn(
+  { key: 'gaussianBeliefPropagation', name: 'Gaussian belief propagation', role: 'inference', notes: BP },
+  gaussianBp.gaussianBeliefPropagation,
+)
+
+/** The functions of the module, keyed by name. */
+export const messagePassingFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', bp, gaussianBp) as Readonly<
+    Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

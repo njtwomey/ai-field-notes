@@ -39,3 +39,4 @@ export { dct, dctMatrix, idct } from './dct'
 // Raw-array readers for `aifn/signal` and `aifn/foundation/convolution`.
 export { readSignal, readValues } from './complex'
 // `transformInPlace` is the primitives' kernel only (not exported): call fft/rfft/ifft/irfft.
+export { fourierFunctions } from './registry'

@@ -1,7 +1,7 @@
 /**
  * `aifn/nn/layers`: layers as parameter trees with a forward function (after torch.nn.modules): `Linear`, `Embedding`,
- * convolutions and pools, `LayerNorm`, `RmsNorm`, `BatchNorm`, `Dropout`, `Sequential`, `Mlp`, `Residual`, multi-head
- * attention (`scaledDotProductAttention`, `MultiHeadAttention`) and RNN, GRU and LSTM cells.
+ * convolutions and pools, `LayerNorm`, `RmsNorm`, `BatchNorm`, `Dropout`, `Sequential`, `Mlp`, `Residual`, and RNN, GRU
+ * and LSTM cells. Attention is `aifn/nn/attention`.
  */
 
 export {
@@ -41,16 +41,6 @@ export {
   type MlpOptions,
   type NormParams,
 } from './layers'
-export {
-  causalMask,
-  multiHeadAttention,
-  MultiHeadAttention,
-  scaledDotProductAttention,
-  type AttentionOptions,
-  type AttentionResult,
-  type MultiHeadAttentionParams,
-  type MultiHeadOptions,
-} from './attention'
 export {
   GruCell,
   LstmCell,

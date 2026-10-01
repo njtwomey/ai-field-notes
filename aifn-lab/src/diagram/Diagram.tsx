@@ -4,7 +4,17 @@ import { FrameContext, useElementSize } from '@lab/viz'
 import { parseEnd } from './ends'
 import { layeredLayout } from './layout'
 import { MathText } from './MathText'
-import type { DiagramEdge, DiagramGroup, DiagramSpec, Direction, ElementState, PlacedNode, Side, Tone } from './types'
+import type {
+  DiagramEdge,
+  DiagramGroup,
+  DiagramNode,
+  DiagramSpec,
+  Direction,
+  ElementState,
+  PlacedNode,
+  Side,
+  Tone,
+} from './types'
 
 type Pt = { x: number; y: number }
 type Box = { x0: number; y0: number; x1: number; y1: number }
@@ -260,11 +270,15 @@ function groupBox(g: DiagramGroup, byId: Map<string, PlacedNode>): Box {
 
 const INSIDE_LABEL = new Set(['box', 'pill', 'stack', 'circle', 'latent', 'noise', 'encoder', 'decoder', 'op'])
 
+/** What a node's measured size depends on: a cached size is reused only while these are unchanged. */
+const fitKey = (n: DiagramNode) =>
+  JSON.stringify([n.label ?? '', n.shape ?? 'box', n.small ?? false, n.w ?? null, n.h ?? null, n.bar ? 1 : 0])
+
+/** A measured label size, with the key of the node it was measured on. */
+type Fit = { key: string; size: [number, number] }
+
 /** Lay out if asked, apply `spread` to every position and grow nodes to the measured label sizes. */
-function prepare(
-  source: DiagramSpec,
-  fit: Record<string, [number, number]>,
-): Omit<DiagramSpec, 'nodes'> & { nodes: PlacedNode[] } {
+function prepare(source: DiagramSpec, fit: Record<string, Fit>): Omit<DiagramSpec, 'nodes'> & { nodes: PlacedNode[] } {
   const spec = source.layout === 'layered' ? layeredLayout(source) : source
   const [sx, sy] = Array.isArray(spec.spread) ? spec.spread : [spec.spread ?? 1, spec.spread ?? 1]
   return {
@@ -273,7 +287,9 @@ function prepare(
       if (n.x === undefined || n.y === undefined)
         throw new Error(`diagram node ${n.id}: no position (give x and y, or use layout: 'layered')`)
       const [w, h] = size(n as PlacedNode)
-      const f = fit[n.id]
+      // A size measured for a different label or shape under the same id (a new tree reusing node ids) is stale.
+      const cached = fit[n.id]
+      const f = cached && cached.key === fitKey(n) ? cached.size : undefined
       const round = ROUND.has(n.shape ?? 'box')
       // Circles grow evenly; trapezoids need extra width because their narrow end is only TAPER of the height.
       const [fw, fh] = f ? (round ? [Math.max(f[0], f[1]), Math.max(f[0], f[1])] : f) : [0, 0]
@@ -321,6 +337,42 @@ function besideBox(n: PlacedNode, b: Box, s: Side, u: number, row = 0): Box {
   return { x0: b.x0 - gap - lw, y0: n.y * u - lh / 2, x1: b.x0 - gap, y1: n.y * u + lh / 2 }
 }
 
+/** Room, in diagram pixels, that a node's share bar takes under its label. */
+const barStrip = (n: PlacedNode) => (n.barHeight ?? 5) + 4
+
+/** A node's stacked share bar: along the bottom under a label, or filling the node when it has none. */
+function ShareBar({
+  n,
+  b,
+  mode,
+  strip,
+  opacity,
+}: {
+  n: PlacedNode
+  b: Box
+  mode: Mode
+  strip: number
+  opacity: number
+}) {
+  const shares = n.bar ?? []
+  const total = shares.reduce((a, v) => a + Math.max(v, 0), 0)
+  if (!(total > 0)) return null
+  const inset = ROUND.has(n.shape ?? 'box') ? (b.x1 - b.x0) * 0.2 : 4
+  const x0 = b.x0 + inset
+  const width = b.x1 - b.x0 - 2 * inset
+  const height = strip ? strip - 4 : Math.max(b.y1 - b.y0 - 2 * inset, 3)
+  const y = strip ? b.y1 - strip : b.y0 + inset
+  const widths = shares.map((v) => (Math.max(v, 0) / total) * width)
+  const starts = widths.map((_, k) => x0 + widths.slice(0, k).reduce((acc, w) => acc + w, 0))
+  return (
+    <g style={{ opacity, transition: TRANSITION }}>
+      {widths.map((wk, k) => (
+        <rect key={k} x={starts[k]} y={y} width={wk} height={height} fill={seriesColor(mode, k)} />
+      ))}
+    </g>
+  )
+}
+
 /** Colour, weight and opacity of an element in a step state. */
 function stateLook(state: ElementState | undefined, colour: string, muted: string, active: string) {
   if (state === 'idle') return { colour: muted, opacity: 0.45, weight: 1, fill: 0.6 }
@@ -341,6 +393,8 @@ export type DiagramProps = {
   onNodeClick?: (id: string) => void
   /** Called with a node's id when the pointer enters it, and with null when it leaves. */
   onNodeHover?: (id: string | null) => void
+  /** With `onNodeClick`: each node takes the focus by Tab and clicks on Enter or Space (default true). */
+  focusable?: boolean
 }
 
 /**
@@ -355,11 +409,12 @@ export function Diagram({
   height: heightProp,
   onNodeClick,
   onNodeHover,
+  focusable = true,
 }: DiagramProps) {
   const { resolved: mode } = useTheme()
   const frame = useContext(FrameContext)
   const u = source.unit ?? 40
-  const [fit, setFit] = useState<Record<string, [number, number]>>({})
+  const [fit, setFit] = useState<Record<string, Fit>>({})
   const spec = useMemo(() => prepare(source, fit), [source, fit])
   const [wrapper, box] = useElementSize<HTMLDivElement>()
   const c = chrome(mode)
@@ -407,6 +462,7 @@ export function Diagram({
       })
     })
     const all: Box[] = [
+      ...(spec.frame ? [spec.frame] : []),
       ...spec.nodes.map(extent),
       ...beside,
       ...groups.map((g) => g.box),
@@ -430,15 +486,23 @@ export function Diagram({
   // The box to fit: a fixed height (prop or frame) fits both ways; otherwise the width alone.
   const fixed = heightProp ?? frame.height
   const maxScale = spec.maxScale ?? 1.4
+  // Fitting the width alone (no frame height: a `fit="width"` dashboard row, or outside a Figure), a deep diagram is
+  // still kept within about three quarters of the window's height, so it never needs scrolling past.
+  const tallest = typeof window === 'undefined' ? Infinity : 0.75 * window.innerHeight
   const scale = box.width
-    ? Math.min(box.width / width, fixed !== undefined && box.height ? box.height / height : Infinity, maxScale)
+    ? Math.min(
+        box.width / width,
+        fixed !== undefined && box.height ? box.height / height : fixed === undefined ? tallest / height : Infinity,
+        maxScale,
+      )
     : 1
   const scaled = (b: Box): Box => ({ x0: b.x0 * u, y0: b.y0 * u, x1: b.x1 * u, y1: b.y1 * u })
   const overlays: Overlay[] = []
   const vx = view.x0 * u
   const vy = view.y0 * u
+  const accentColour = spec.accent === 'ink' ? c.ink : seriesColor(mode, ACCENT_SLOT)
   const accent = (tone: Tone | undefined) =>
-    tone === undefined || tone === 'ink' || tone === 'neutral' ? seriesColor(mode, ACCENT_SLOT) : toneColour(mode, tone)
+    tone === undefined || tone === 'ink' || tone === 'neutral' ? accentColour : toneColour(mode, tone)
   const chip = (text: string, colour: string, border?: string) => (
     <span
       className="rounded px-1 whitespace-nowrap"
@@ -506,11 +570,7 @@ export function Diagram({
       })}
 
       {layout.edges.map(({ e, pts, loop }, i) => {
-        const base = e.highlight
-          ? seriesColor(mode, ACCENT_SLOT)
-          : e.tone === undefined
-            ? c.inkSecondary
-            : toneColour(mode, e.tone)
+        const base = e.highlight ? accentColour : e.tone === undefined ? c.inkSecondary : toneColour(mode, e.tone)
         const look = stateLook(e.state, base, c.muted, accent(e.tone))
         const colour = look.colour
         const strokeWidth = (e.highlight ? 2.5 : 1.5) * look.weight
@@ -692,7 +752,7 @@ export function Diagram({
       {spec.nodes.map((n) => {
         const shape = n.shape ?? 'box'
         const tone = n.tone ?? (shape === 'op' || shape === 'text' || shape === 'factor' ? 'ink' : 'neutral')
-        const base = n.highlight ? seriesColor(mode, ACCENT_SLOT) : toneColour(mode, tone)
+        const base = n.highlight ? accentColour : toneColour(mode, tone)
         const look = stateLook(n.state, base, c.muted, accent(n.tone))
         const colour = look.colour
         const b = scaled(extent(n))
@@ -717,10 +777,11 @@ export function Diagram({
               ? c.muted
               : c.ink
         const side = n.labelSide ?? (shape === 'factor' || shape === 'dot' ? 'n' : undefined)
+        const strip = n.bar && n.label && !side ? barStrip(n) : 0
         if (n.label)
           overlays.push({
             key: `n-${n.id}`,
-            box: side ? besideBox(n, b, side, u) : b,
+            box: side ? besideBox(n, b, side, u) : { ...b, y1: b.y1 - strip },
             fitNode: side || !INSIDE_LABEL.has(shape) ? undefined : n.id,
             size: n.small ? FONT.small : FONT.label,
             align: side === 'e' ? 'start' : side === 'w' ? 'end' : 'center',
@@ -783,15 +844,54 @@ export function Diagram({
               </>
             )
         }
+        const ring = n.selected ? 4 : 0
         return (
           <g
             key={n.id}
             onClick={onNodeClick ? () => onNodeClick(n.id) : undefined}
+            onKeyDown={
+              onNodeClick
+                ? (event) => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return
+                    event.preventDefault()
+                    onNodeClick(n.id)
+                  }
+                : undefined
+            }
             onPointerEnter={onNodeHover ? () => onNodeHover(n.id) : undefined}
             onPointerLeave={onNodeHover ? () => onNodeHover(null) : undefined}
-            style={onNodeClick ? { cursor: 'pointer' } : undefined}
+            tabIndex={onNodeClick && focusable ? 0 : undefined}
+            role={onNodeClick ? 'button' : undefined}
+            aria-label={onNodeClick ? (n.ariaLabel ?? n.label ?? n.id) : undefined}
+            aria-pressed={onNodeClick && n.selected !== undefined ? n.selected : undefined}
+            style={onNodeClick ? { cursor: 'pointer', outline: 'none' } : undefined}
           >
             {body}
+            {n.bar && (shape === 'box' || shape === 'pill' || !n.label) && (
+              <ShareBar n={n} b={b} mode={mode} strip={n.label ? barStrip(n) : 0} opacity={look.opacity} />
+            )}
+            {ring > 0 &&
+              (ROUND.has(shape) ? (
+                <circle
+                  cx={n.x * u}
+                  cy={n.y * u}
+                  r={Math.min(w, h) / 2 + ring}
+                  fill="none"
+                  stroke={c.ink}
+                  strokeWidth={2}
+                />
+              ) : (
+                <rect
+                  x={b.x0 - ring}
+                  y={b.y0 - ring}
+                  width={w + 2 * ring}
+                  height={h + 2 * ring}
+                  rx={shape === 'pill' ? h / 2 + ring : 8}
+                  fill="none"
+                  stroke={c.ink}
+                  strokeWidth={2}
+                />
+              ))}
           </g>
         )
       })}
@@ -802,23 +902,29 @@ export function Diagram({
   useLayoutEffect(() => {
     const root = wrapper.current
     if (!root || source.fitLabels === false || !box.width) return
-    const grow: Record<string, [number, number]> = {}
+    const grow: Record<string, Fit> = {}
+    const source_ = new Map(source.nodes.map((n) => [n.id, n]))
     root.querySelectorAll<HTMLElement>('[data-fit-node]').forEach((el) => {
       const id = el.dataset.fitNode!
       const node = layout.byId.get(id)
+      const given = source_.get(id)
       const inner = el.firstElementChild as HTMLElement | null
-      if (!node || !inner) return
-      const [w, h] = size(node)
+      if (!node || !inner || !given) return
+      const key = fitKey(given)
+      // Measure against the node's own size when the cached one is stale, so a smaller label can shrink it again.
+      const [w, h] =
+        fit[id] && fit[id].key !== key ? size({ ...node, w: given.w, h: given.h } as PlacedNode) : size(node)
       // A trapezoid's height at its centre is (1 + TAPER)/2 of its full height, so it needs proportionally more.
       const middle = node.shape === 'encoder' || node.shape === 'decoder' ? (1 + TAPER) / 2 : 1
       const wide = (inner.scrollWidth / scale + 14) / u
-      const tall = (inner.scrollHeight / scale + 8) / u / middle
-      if (wide > w + 0.02 || tall > h + 0.02) grow[id] = [Math.max(w, wide), Math.max(h, tall)]
+      const tall = (inner.scrollHeight / scale + 8 + (node.bar ? barStrip(node) : 0)) / u / middle
+      const stale = fit[id] !== undefined && fit[id].key !== key
+      if (stale || wide > w + 0.02 || tall > h + 0.02) grow[id] = { key, size: [Math.max(w, wide), Math.max(h, tall)] }
     })
     // Sizes come from the rendered DOM, so they can only be read after layout; growth is monotone, so this settles.
     // oxlint-disable-next-line react/set-state-in-effect
     if (Object.keys(grow).length) setFit((prev) => ({ ...prev, ...grow }))
-  }, [layout, scale, u, source.fitLabels, box.width, wrapper])
+  }, [layout, scale, u, source.fitLabels, source.nodes, fit, box.width, wrapper])
 
   const px = (v: number) => `${v * scale}px`
   return (

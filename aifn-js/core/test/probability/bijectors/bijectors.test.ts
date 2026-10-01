@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   affineBijector,
+  chainBijectors,
   expBijector,
+  logBijector,
+  normalCdfBijector,
+  powerBijector,
+  sigmoidBijector,
+  tanhBijector,
   orderedBijector,
   softplusBijector,
   supportInteriorPoint,
@@ -42,8 +48,20 @@ describe('the ordered bijector', () => {
 
 describe('scalar bijectors', () => {
   it('forward, inverse and log-Jacobian agree with autodiff', () => {
-    for (const b of [expBijector, softplusBijector, affineBijector(2, -3)]) {
-      const x = tensor([-0.7, 0.4, 1.9])
+    const onReals = [
+      expBijector,
+      softplusBijector,
+      affineBijector(2, -3),
+      sigmoidBijector,
+      tanhBijector,
+      normalCdfBijector,
+      chainBijectors(affineBijector(0, 0.5), sigmoidBijector),
+    ]
+    const onPositive = [logBijector, powerBijector(2.5), powerBijector(-0.5)]
+    for (const [b, x] of [
+      ...onReals.map((b) => [b, tensor([-0.7, 0.4, 1.9])] as const),
+      ...onPositive.map((b) => [b, tensor([0.3, 1.1, 2.4])] as const),
+    ]) {
       flat(b.inverse(b.forward(x))).forEach((v, i) => expect(v).toBeCloseTo(flat(x)[i], 12))
       const J = toRows(jacobian((v: Value) => b.forward(v))(x) as Tensor)
       flat(b.logAbsDetJacobian(x)).forEach((v, i) => expect(v).toBeCloseTo(Math.log(Math.abs(J[i][i])), 10))

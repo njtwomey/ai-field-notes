@@ -37,3 +37,4 @@ export {
   type Text,
   type Tokeniser,
 } from './text'
+export { textEvaluationFunctions } from './registry'

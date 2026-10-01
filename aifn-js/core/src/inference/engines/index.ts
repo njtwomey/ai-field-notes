@@ -15,3 +15,4 @@ export {
   type Inference,
   type InferenceContext,
 } from './engines'
+export { enginesFunctions } from './registry'

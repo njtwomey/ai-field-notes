@@ -11,6 +11,7 @@ import { abs, angle, complexAbs, dense, fromData, isTensor, type Tensor } from '
 import type { Scalar, Size, Signal, Spectrum, TimeFrequency, VectorLike } from 'aifn/foundation/contracts'
 import { ShapeError } from 'aifn/foundation/errors'
 import { decibels } from 'aifn/foundation/fourier'
+import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 
 export type { Signal, Spectrum, TimeFrequency } from 'aifn/foundation/contracts'
 
@@ -173,3 +174,56 @@ export function unwrapPhase(phase: VectorLike, { discont = Math.PI }: { discont?
   }
   return fromData(out, [out.length])
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const fn = definer<FunctionInfo>('function', 'signal')
+
+fn(
+  {
+    key: 'signal',
+    name: 'Signal',
+    summary: 'Samples with a sample rate, start time and unit.',
+    role: 'construction',
+    returns: 'signal',
+    notes: ['sampling-theorem'],
+  },
+  signal,
+)
+fn({ key: 'spectrum', name: 'Spectrum', role: 'construction', returns: 'spectrum' }, spectrum)
+fn(
+  { key: 'timeFrequency', name: 'Time–frequency representation', role: 'construction', returns: 'time-frequency' },
+  timeFrequency,
+)
+fn({ key: 'sampleTimes', name: 'Sample times', role: 'property', notes: ['sampling-theorem'] }, sampleTimes)
+fn({ key: 'magnitude', name: 'Magnitude', role: 'transform', notes: ['frequency-response'] }, magnitude)
+fn(
+  { key: 'phase', name: 'Phase', role: 'transform', notes: ['frequency-response', 'linear-phase-and-group-delay'] },
+  phase,
+)
+fn(
+  { key: 'spectrumDecibels', name: 'Spectrum in decibels', role: 'transform', notes: ['frequency-response'] },
+  spectrumDecibels,
+)
+fn(
+  {
+    key: 'unwrapPhase',
+    name: 'Unwrap phase',
+    role: 'transform',
+    notes: ['linear-phase-and-group-delay', 'instantaneous-frequency'],
+  },
+  unwrapPhase,
+)
+
+/** The functions of the module, keyed by name. */
+export const signalFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', {
+    signal,
+    spectrum,
+    timeFrequency,
+    sampleTimes,
+    magnitude,
+    phase,
+    spectrumDecibels,
+    unwrapPhase,
+  }) as Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>>

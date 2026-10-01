@@ -4,7 +4,8 @@
  * view picks default series and a worker can address an algorithm by key (design S §2.3).
  */
 
-import { definer, entries, type AlgorithmInfo, type Entry } from 'aifn/foundation/registry'
+import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
+import * as rules from './rules'
 import * as conjugateGradient from './conjugateGradient'
 import * as coordinateDescent from './coordinateDescent'
 import * as firstOrder from './firstOrder'
@@ -154,6 +155,7 @@ algorithm(
     summary: 'Conjugate gradient for Ax = b with A symmetric positive definite.',
     problem: 'quadratic-program',
     state: { iterate: 'x', objective: 'residualNorm', stepSize: 'alpha', flags: ['converged', 'diverged', 'stalled'] },
+    notes: ['iterative-linear-solvers', 'quadratic-programming'],
     cite: ['hestenes1952'],
   },
   conjugateGradient.linearConjugateGradient,
@@ -174,4 +176,72 @@ algorithm(
 export const firstOrderAlgorithms: Readonly<Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>> =
   entries<AlgorithmInfo>('algorithm', conjugateGradient, coordinateDescent, firstOrder) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>
+  >
+
+const fn = definer<FunctionInfo>('function', 'optim/first-order')
+
+fn(
+  {
+    key: 'sgdRule',
+    name: 'SGD update rule (with momentum)',
+    role: 'transform',
+    notes: ['gradient-descent', 'momentum-and-nesterov'],
+    cite: ['robbins1951', 'polyak1964'],
+  },
+  rules.sgdRule,
+)
+fn(
+  {
+    key: 'adagradRule',
+    name: 'AdaGrad update rule',
+    role: 'transform',
+    notes: ['adagrad-and-rmsprop'],
+    cite: ['duchi2011'],
+  },
+  rules.adagradRule,
+)
+fn(
+  {
+    key: 'rmspropRule',
+    name: 'RMSProp update rule',
+    role: 'transform',
+    notes: ['adagrad-and-rmsprop'],
+    cite: ['tieleman2012'],
+  },
+  rules.rmspropRule,
+)
+fn(
+  { key: 'adamRule', name: 'Adam update rule', role: 'transform', notes: ['adam'], cite: ['kingma2015'] },
+  rules.adamRule,
+)
+fn(
+  {
+    key: 'adamwRule',
+    name: 'AdamW update rule',
+    role: 'transform',
+    notes: ['decoupled-weight-decay', 'adam'],
+    cite: ['loshchilov2019'],
+  },
+  rules.adamwRule,
+)
+fn({ key: 'chainRules', name: 'Chain update rules', role: 'construction' }, rules.chainRules)
+fn(
+  { key: 'globalNorm', name: 'Global gradient norm', role: 'property', notes: ['vanishing-and-exploding-gradients'] },
+  rules.globalNorm,
+)
+fn(
+  {
+    key: 'clipByGlobalNorm',
+    name: 'Clip by global norm',
+    role: 'transform',
+    notes: ['vanishing-and-exploding-gradients'],
+    cite: ['pascanu2013'],
+  },
+  rules.clipByGlobalNorm,
+)
+
+/** The update rules of the module, keyed by name. */
+export const firstOrderFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', rules) as Readonly<
+    Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

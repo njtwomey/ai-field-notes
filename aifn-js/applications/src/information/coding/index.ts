@@ -24,3 +24,4 @@ export {
   type PrefixCode,
   type Word,
 } from './coding'
+export { codingAlgorithms, codingFunctions } from './registry'

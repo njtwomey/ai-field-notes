@@ -21,4 +21,4 @@ export {
   type ShortestPathOptions,
   type ShortestPaths,
 } from './paths'
-export { shortestPathsAlgorithms } from './registry'
+export { shortestPathsAlgorithms, shortestPathsFunctions } from './registry'

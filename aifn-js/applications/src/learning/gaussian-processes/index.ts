@@ -101,3 +101,4 @@ export {
   type RvmState,
 } from './rvm'
 export { gpEp, gpEpEvidence, type GpEpOptions, type GpEpProblem } from './classification-ep'
+export { gaussianProcessAlgorithms, gaussianProcessFunctions } from './registry'

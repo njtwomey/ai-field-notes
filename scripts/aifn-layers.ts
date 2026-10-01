@@ -498,7 +498,7 @@ for (const file of files(path.join(coreDir, 'test')))
 // `test/fixtures/<node path>.json`, their generators in `test/fixtures/gen/<node path>.py`.
 const packageTests: Record<'core' | 'apps', string[]> = {
   core: ['primitives.test.ts', 'root.test.ts'],
-  apps: ['names.test.ts'],
+  apps: ['names.test.ts', 'functions.test.ts'],
 }
 for (const [pkg, dir] of [
   ['core', coreDir],

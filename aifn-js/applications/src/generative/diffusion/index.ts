@@ -70,3 +70,4 @@ export {
   type SamplerStart,
   type SamplerState,
 } from './samplers'
+export { diffusionAlgorithms, diffusionFunctions } from './registry'

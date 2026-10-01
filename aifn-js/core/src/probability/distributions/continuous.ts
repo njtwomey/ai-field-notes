@@ -624,6 +624,84 @@ export function Beta<A extends Value, B extends Value>(a: A, b: B): Univariate<A
   })
 }
 
+// ── Fisher–Snedecor F ────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The F distribution with d₁ > 0 and d₂ > 0 degrees of freedom (scipy's f(d₁, d₂)): the law of (X₁/d₁)/(X₂/d₂) for
+ * independent X₁ ~ χ²(d₁) and X₂ ~ χ²(d₂), and of (d₂/d₁)·B/(1 − B) for B ~ Beta(d₁/2, d₂/2), which gives the cdf
+ * I_{d₁x/(d₁x + d₂)}(d₁/2, d₂/2), the survival function from the other tail of the same beta, and the quantiles.
+ * Mean d₂/(d₂ − 2) for d₂ > 2 and the variance for d₂ > 4 (Infinity otherwise, as scipy); the null law of an
+ * analysis-of-variance ratio.
+ */
+export function FisherSnedecor<A extends Value, B extends Value>(df1: A, df2: B): Univariate<A | B> {
+  check('FisherSnedecor', 'df1', df1, positive, 'positive')
+  check('FisherSnedecor', 'df2', df2, positive, 'positive')
+  const a = mul(0.5, df1)
+  const b = mul(0.5, df2)
+  const valid = (x: Value) => mask([x], (v) => v >= 0)
+  // The beta variable B = d₁x/(d₁x + d₂) and its complement d₂/(d₁x + d₂), with x clamped at 0.
+  const lower = (x: Value) => {
+    const s = mul(df1, maximum(x, 0))
+    return div(s, add(s, df2))
+  }
+  const upper = (x: Value) => div(df2, add(mul(df1, maximum(x, 0)), df2))
+  const fromBeta = (y: Value) => div(mul(df2, y), mul(df1, sub(1, y)))
+  return univariate({
+    name: 'FisherSnedecor',
+    params: { df1, df2 },
+    support: { type: 'interval', lower: 0, upper: Infinity },
+    logProb: (x) => {
+      const ok = valid(x)
+      const xs = guard(x, ok, 1)
+      const body = sub(
+        add(mul(a, log(df1)), add(mul(b, log(df2)), xlogy(sub(a, 1), xs))),
+        add(mul(add(a, b), log(add(mul(df1, xs), df2))), logBeta(a, b)),
+      )
+      return outside(ok, body, -Infinity)
+    },
+    cdf: (x) => regularisedBeta(a, b, lower(x)),
+    logcdf: (x) => logRegularisedBeta(a, b, lower(x)),
+    survival: (x) => regularisedBeta(b, a, upper(x)),
+    logSurvival: (x) => logRegularisedBeta(b, a, upper(x)),
+    quantile: (p) => fromBeta(regularisedBetaInverse(a, b, p)),
+    // The complement 1 − B = I⁻¹(b, a, q) keeps upper quantiles accurate for tiny q.
+    isf: (q) => {
+      const c = regularisedBetaInverse(b, a, q)
+      return div(mul(df2, sub(1, c)), mul(df1, c))
+    },
+    sample: (s, shape) => {
+      const y = drawn(betaDraws(s, raw(a, 'FisherSnedecor'), raw(b, 'FisherSnedecor'), { shape }))
+      return drawnAt(fromBeta(y), shape)
+    },
+    // Infinite moments are Infinity (the variable is positive), as in scipy.
+    mean: () =>
+      where(
+        mask([df1, df2], (_u, v) => v > 2),
+        atBatch(div(df2, sub(df2, 2)), df1),
+        Infinity,
+      ),
+    variance: () =>
+      where(
+        mask([df1, df2], (_u, v) => v > 4),
+        div(mul(mul(2, square(df2)), sub(add(df1, df2), 2)), mul(mul(df1, square(sub(df2, 2))), sub(df2, 4))),
+        Infinity,
+      ),
+    // h = log B(a, b) − (a − 1)ψ(a) − (b + 1)ψ(b) + (a + b)ψ(a + b) + log(d₂/d₁): the beta-prime entropy, shifted
+    // by the log of the scale d₂/d₁.
+    entropy: () =>
+      add(
+        sub(sub(logBeta(a, b), mul(sub(a, 1), digamma(a))), mul(add(b, 1), digamma(b))),
+        add(mul(add(a, b), digamma(add(a, b))), log(div(df2, df1))),
+      ),
+    mode: () =>
+      where(
+        mask([df1, df2], (u) => u > 2),
+        div(mul(sub(df1, 2), df2), mul(df1, add(df2, 2))),
+        atBatch(0, df1, df2),
+      ),
+  })
+}
+
 // ── Weibull ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The Weibull distribution with shape k > 0 and scale λ > 0 (scipy's weibull_min(k, scale = λ)). Support x ≥ 0. */

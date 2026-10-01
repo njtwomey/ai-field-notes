@@ -10,7 +10,7 @@ import {
   treeZip,
   zerosLike,
 } from 'aifn/foundation/pytree'
-import { add, mul, tensor, toFlat, type Tensor, type Value } from 'aifn/foundation/tensor'
+import { add, complex, mul, tensor, toFlat, type Tensor, type Value } from 'aifn/foundation/tensor'
 import { grad } from 'aifn/foundation/autodiff'
 
 const tree = {
@@ -80,5 +80,22 @@ describe('gradients have the structure of their argument', () => {
     expect((g.layers[1] as { gain: number }).gain).toBe(4)
     expect(toFlat(g.w as Tensor)).toEqual([0, 0, 0, 0])
     expect(g.name).toBe('net')
+  })
+})
+
+describe('complex leaves (review 2026-10-01)', () => {
+  it('ravel takes two entries per complex element and unravel rebuilds the complex leaf', () => {
+    const z = complex(tensor([1, 2]), tensor([3, 4]))
+    const r = ravel({ a: z, b: 7, c: tensor([5, 6, 7]) })
+    expect(Array.from(r.vector)).toEqual([1, 3, 2, 4, 7, 5, 6, 7])
+    const back = r.unravel(r.vector) as { a: Tensor; b: number; c: Tensor }
+    expect(back.a.dtype).toBe('complex128')
+    expect(toFlat(back.a)).toEqual([1, 3, 2, 4])
+    expect(back.b).toBe(7)
+    expect(toFlat(back.c)).toEqual([5, 6, 7])
+  })
+  it('zerosLike keeps a complex leaf complex', () => {
+    const zl = zerosLike({ a: complex(tensor([1]), tensor([2])) }) as { a: Tensor }
+    expect(zl.a.dtype).toBe('complex128')
   })
 })

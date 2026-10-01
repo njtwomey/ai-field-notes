@@ -14,4 +14,4 @@ export {
   type AdaptiveFilterState,
   type RlsState,
 } from './adaptive'
-export { statisticalAlgorithms } from './registry'
+export { statisticalAlgorithms, statisticalFunctions } from './registry'

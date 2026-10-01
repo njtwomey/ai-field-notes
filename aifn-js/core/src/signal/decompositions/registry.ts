@@ -4,7 +4,7 @@
  * view picks default series and a worker can address an algorithm by key (design S §2.3).
  */
 
-import { definer, entries, type AlgorithmInfo, type Entry } from 'aifn/foundation/registry'
+import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as emd from './emd'
 import * as vmd from './vmd'
 
@@ -40,4 +40,81 @@ algorithm(
 export const decompositionsAlgorithms: Readonly<Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>> =
   entries<AlgorithmInfo>('algorithm', emd, vmd) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>
+  >
+
+const fn = definer<FunctionInfo>('function', 'signal/decompositions')
+const EMD = ['empirical-mode-decomposition', 'hilbert-huang-transform']
+
+fn(
+  {
+    key: 'emd',
+    name: 'Empirical mode decomposition',
+    role: 'transform',
+    returns: 'decomposition',
+    notes: EMD,
+    cite: ['huang1998'],
+  },
+  emd.emd,
+)
+fn(
+  { key: 'extrema', name: 'Extrema and zero crossings', role: 'property', notes: ['empirical-mode-decomposition'] },
+  emd.extrema,
+)
+fn(
+  {
+    key: 'siftImf',
+    name: 'Sift one IMF',
+    role: 'transform',
+    notes: ['empirical-mode-decomposition'],
+    cite: ['huang1998'],
+  },
+  emd.siftImf,
+)
+fn(
+  {
+    key: 'eemd',
+    name: 'Ensemble EMD',
+    summary: 'EMD averaged over noise-added copies of the signal.',
+    role: 'transform',
+    returns: 'decomposition',
+    random: true,
+    notes: ['ensemble-empirical-mode-decomposition'],
+    cite: ['wu2009'],
+  },
+  emd.eemd,
+)
+fn(
+  {
+    key: 'ceemdan',
+    name: 'CEEMDAN',
+    summary:
+      'Complete ensemble EMD with adaptive noise: each mode from the ensemble of first IMFs of noise-added residues.',
+    role: 'transform',
+    returns: 'decomposition',
+    random: true,
+    notes: ['ensemble-empirical-mode-decomposition'],
+    cite: ['torres2011'],
+  },
+  emd.ceemdan,
+)
+fn(
+  {
+    key: 'vmd',
+    name: 'Variational mode decomposition',
+    role: 'transform',
+    returns: 'decomposition',
+    notes: ['variational-mode-decomposition'],
+    cite: ['dragomiretskiy2014'],
+  },
+  vmd.vmd,
+)
+fn(
+  { key: 'vmdModes', name: 'VMD modes of a state', role: 'transform', notes: ['variational-mode-decomposition'] },
+  vmd.vmdModes,
+)
+
+/** The functions of the module, keyed by name. */
+export const decompositionsFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', emd, vmd) as Readonly<
+    Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

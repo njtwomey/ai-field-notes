@@ -59,4 +59,4 @@ export {
   type ModelEpState,
 } from './model'
 export { multivariateExpectationPropagation, type MvEpOptions, type MvEpState } from './multivariate'
-export { expectationPropagationAlgorithms } from './registry'
+export { expectationPropagationAlgorithms, expectationPropagationFunctions } from './registry'

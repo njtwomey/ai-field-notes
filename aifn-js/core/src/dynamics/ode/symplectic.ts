@@ -9,7 +9,7 @@
 import { grad } from 'aifn/foundation/autodiff'
 import { dense, fromData, toFlat, type Tensor, type Value, type Vector } from 'aifn/foundation/tensor'
 import type { Algorithm, Scalar, VectorLike } from 'aifn/foundation/contracts'
-import { initialState, nextStep, reached } from './explicit'
+import { checkDirection, initialState, nextStep, reached } from './explicit'
 import type { FixedStepOptions, OdeState, Rhs } from './types'
 
 const { allFinite, toF64 } = dense
@@ -146,6 +146,7 @@ export function symplectic(
   return {
     name: method,
     init: ({ q0, p0, t0 = 0 }) => {
+      checkDirection(t0, h, tEnd, method)
       const q = toF64(q0, method)
       const p = toF64(p0, method)
       if (q.length !== p.length) throw new Error('symplectic: q0 and p0 must have the same length')

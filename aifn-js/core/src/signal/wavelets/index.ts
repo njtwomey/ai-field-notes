@@ -18,4 +18,4 @@ export {
   type WaveletFilters,
   type WaveletName,
 } from './wavelets'
-export { waveletRegistry } from './registry'
+export { waveletRegistry, waveletsFunctions } from './registry'

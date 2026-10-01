@@ -3,3 +3,4 @@
  */
 
 export { minimize, type Method, type MethodOptions, type MinimizeResult } from './minimize'
+export { minimizeFunctions } from './registry'

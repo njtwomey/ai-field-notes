@@ -7,3 +7,4 @@ export {
   bayesPointMachine,
   bayesPointMachinePredict,
 } from './bayesPointMachine'
+export { classifierModelAlgorithms, classifierModelFunctions } from './registry'

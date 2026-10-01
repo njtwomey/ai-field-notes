@@ -96,7 +96,9 @@ export const normalisedRootMeanSquaredError = defineMetric(
     const m = weightedMeanOf(y)
     const by = options.by ?? 'std'
     if (by === 'mean') return divide(rmse, m)
-    if (by === 'range') return divide(rmse, Math.max(...y) - Math.min(...y))
+    // A loop, not Math.max(...y): spreading more than ~1e5 arguments overflows the call stack.
+    if (by === 'range')
+      return divide(rmse, y.reduce((a, v) => Math.max(a, v), -Infinity) - y.reduce((a, v) => Math.min(a, v), Infinity))
     return divide(rmse, Math.sqrt(weightedMeanOf(Float64Array.from(y, (v) => (v - m) ** 2))))
   },
 )

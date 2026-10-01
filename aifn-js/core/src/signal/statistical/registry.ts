@@ -4,7 +4,8 @@
  * series and a worker can address an algorithm by key (design S §2.3).
  */
 
-import { definer, entries, type AlgorithmInfo, type Entry } from 'aifn/foundation/registry'
+import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
+import * as autoregression from './autoregression'
 import * as adaptive from './adaptive'
 
 const algorithm = definer<AlgorithmInfo>('algorithm', 'signal/statistical')
@@ -55,4 +56,35 @@ algorithm(
 export const statisticalAlgorithms: Readonly<Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>> =
   entries<AlgorithmInfo>('algorithm', adaptive) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>
+  >
+
+const fn = definer<FunctionInfo>('function', 'signal/statistical')
+const AR = ['parametric-spectral-estimation', 'linear-prediction', 'autoregressive-model']
+
+fn(
+  {
+    key: 'yuleWalker',
+    name: 'Yule–Walker AR estimate',
+    summary: 'AR coefficients from the sample autocorrelation by the Levinson–Durbin recursion.',
+    role: 'estimator',
+    notes: AR,
+    cite: ['yule1927', 'walker1931'],
+  },
+  autoregression.yuleWalker,
+)
+fn(
+  {
+    key: 'burg',
+    name: "Burg's AR estimate",
+    summary: 'AR coefficients minimising forward and backward prediction errors, one reflection coefficient per order.',
+    role: 'estimator',
+    notes: AR,
+  },
+  autoregression.burg,
+)
+
+/** The functions of the module, keyed by name. */
+export const statisticalFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', autoregression) as Readonly<
+    Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

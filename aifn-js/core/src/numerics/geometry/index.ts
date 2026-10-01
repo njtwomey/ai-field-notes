@@ -21,3 +21,4 @@ export {
   type SimplexGrid,
 } from './simplex'
 export { grid2d, evaluateGrid, type Grid2d } from './grids'
+export { geometryFunctions } from './registry'

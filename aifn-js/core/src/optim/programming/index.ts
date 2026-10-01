@@ -86,4 +86,4 @@ export {
   type HungarianPhase,
   type HungarianState,
 } from './assignment'
-export { programmingAlgorithms } from './registry'
+export { programmingAlgorithms, programmingFunctions } from './registry'

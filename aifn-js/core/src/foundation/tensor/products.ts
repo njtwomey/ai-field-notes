@@ -66,7 +66,7 @@ const matmulOp: Op<undefined> = definePrimitive<undefined>({
     })
     return [matmulOp(moved, undefined), 0]
   },
-  doc: { summary: 'Batched matrix product with broadcast batch axes.' },
+  doc: { note: 'matrix-multiplication', summary: 'Batched matrix product with broadcast batch axes.' },
   test: {
     complex: true,
     secondOrder: true,
@@ -335,7 +335,7 @@ const einsumOp: Op<EinsumSpec> = definePrimitive<EinsumSpec>({
     const inputs = spec.inputs.map((labels, i) => (axes[i] === null ? labels : free + labels))
     return [einsumOp(moved, { inputs, output: free + spec.output }), 0]
   },
-  doc: { summary: 'Einstein summation over letter-labelled axes.' },
+  doc: { note: 'matrix-multiplication', summary: 'Einstein summation over letter-labelled axes.' },
   test: {
     complex: true,
     secondOrder: true,
@@ -416,13 +416,18 @@ const linearCombinationOp: Op<readonly number[]> = definePrimitive<readonly numb
       ? { shape: [...tensorAval.shape], dtype: avals.map((a) => a.dtype).reduce(promote), number: false }
       : { shape: [], dtype: 'float64', number: true }
   },
-  // Batched inputs move their batch axis first; unbatched ones are broadcast along a new first axis.
+  // Every input is brought to [size, ...example shape]: batched ones move their batch axis first, and both they and
+  // unbatched ones are broadcast up from a number example (which the forward rule broadcasts against tensors).
   batch: (xs, axes, c, size) => {
-    const i0 = axes.findIndex((b) => b !== null)
-    const shape = [size, ...shapeOfValue(xs[i0]).filter((_, k) => k !== axes[i0])]
+    const examples = xs.map((x, i) => shapeOfValue(x).filter((_, k) => axes[i] === null || k !== axes[i]))
+    const example = examples.find((s, i) => s.length > 0 || (axes[i] === null && !avalOf(xs[i]).number)) ?? []
+    const shape = [size, ...example]
     const moved = xs.map((x, i) => {
       const b = axes[i]
-      return b !== null ? batchToFront(x, b) : broadcastTo(reshape(x, [1, ...shapeOfValue(x)]), shape)
+      const front = b !== null ? batchToFront(x, b) : reshape(x, [1, ...examples[i]])
+      const pad = example.length - examples[i].length
+      const lead = b !== null ? size : 1
+      return broadcastTo(pad > 0 ? reshape(front, [lead, ...new Array<number>(pad).fill(1)]) : front, shape)
     })
     return [linearCombinationOp(moved, c), 0]
   },

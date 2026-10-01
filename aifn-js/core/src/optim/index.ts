@@ -17,7 +17,7 @@ export {
   type VectorLike,
 } from 'aifn/foundation/contracts'
 export { objectiveFn, type RunOptions, type StartOptions } from './options'
-export { exponentialDecay, inverseSqrtDecay, inverseTimeDecay } from './schedules'
+export { exponentialDecay, inverseSqrtDecay, inverseTimeDecay, scheduleFunctions } from './schedules'
 export { minimize } from './minimize'
 export {
   adam,

@@ -37,3 +37,4 @@ export {
 } from './convolution'
 export { correlate2d, convolve2d, readImage, separableFilter, type Border, type ImageInput } from './image'
 export { linearFilter, type LinearFilterOptions } from './filter'
+export { convolutionFunctions } from './registry'

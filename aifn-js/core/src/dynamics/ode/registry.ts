@@ -4,7 +4,12 @@
  * view picks default series and a worker can address an algorithm by key (design S §2.3).
  */
 
-import { definer, entries, type AlgorithmInfo, type Entry } from 'aifn/foundation/registry'
+import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
+import * as adjoint from './adjoint'
+import * as events from './events'
+import * as linear from './linear'
+import * as solve from './solve'
+import * as stability from './stability'
 import * as adaptive from './adaptive'
 import * as explicit from './explicit'
 import * as implicit from './implicit'
@@ -101,4 +106,80 @@ algorithm(
 export const odeAlgorithms: Readonly<Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>> =
   entries<AlgorithmInfo>('algorithm', adaptive, explicit, implicit, symplectic, variableBdf) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>
+  >
+
+const fn = definer<FunctionInfo>('function', 'dynamics/ode')
+const ODE = ['numerical-ode-solvers', 'ordinary-differential-equations']
+
+fn(
+  {
+    key: 'solveIvp',
+    name: 'Solve an initial value problem',
+    summary: 'One entry point over the registered solvers, as scipy.integrate.solve_ivp.',
+    role: 'solver',
+    notes: ODE,
+    cite: ['hairer1993'],
+  },
+  solve.solveIvp,
+)
+fn(
+  {
+    key: 'linearFlow',
+    name: 'Flow of a linear system',
+    tex: 'x(t) = e^{At} x_0',
+    role: 'solver',
+    notes: ['linear-systems-and-the-matrix-exponential', 'first-order-linear-odes'],
+  },
+  linear.linearFlow,
+)
+fn(
+  {
+    key: 'amplification',
+    name: 'Amplification factor',
+    tex: 'R(z)',
+    role: 'property',
+    notes: ['numerical-ode-solvers'],
+    cite: ['hairer1996'],
+  },
+  stability.amplification,
+)
+fn(
+  {
+    key: 'stabilityRegion',
+    name: 'Absolute-stability region',
+    role: 'property',
+    notes: ['numerical-ode-solvers'],
+    cite: ['hairer1996'],
+  },
+  stability.stabilityRegion,
+)
+fn(
+  { key: 'boundaryLocus', name: 'Boundary locus', role: 'property', notes: ['numerical-ode-solvers'] },
+  stability.boundaryLocus,
+)
+fn(
+  {
+    key: 'hamiltonianSystem',
+    name: 'Hamiltonian system',
+    role: 'construction',
+    notes: ['vector-fields-and-flows', 'hamiltonian-monte-carlo'],
+  },
+  symplectic.hamiltonianSystem,
+)
+fn({ key: 'withEvents', name: 'ODE solver with event detection', role: 'construction', notes: ODE }, events.withEvents)
+fn(
+  {
+    key: 'odeAdjoint',
+    name: 'Adjoint sensitivities of an ODE',
+    summary: 'Gradients of a loss through an ODE solve by integrating the adjoint system backwards.',
+    role: 'solver',
+    notes: ['neural-ordinary-differential-equations', 'backpropagation'],
+  },
+  adjoint.odeAdjoint,
+)
+
+/** The functions of the module, keyed by name. */
+export const odeFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', solve, linear, stability, symplectic, events, adjoint) as Readonly<
+    Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

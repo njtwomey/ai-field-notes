@@ -99,3 +99,4 @@ export {
   type ReplayBuffer,
   type StoredTransition,
 } from './dqn'
+export { planningAlgorithms, agentFunctions } from './registry'

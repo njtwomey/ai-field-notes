@@ -53,3 +53,4 @@ export {
   type DiagramNodeData,
   type DiagramOptions,
 } from './diagram'
+export { structuredFunctions } from './registry'

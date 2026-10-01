@@ -37,3 +37,4 @@ export {
   type TargetModel,
   type TransformedPredictive,
 } from './target'
+export { composeFunctions } from './registry'

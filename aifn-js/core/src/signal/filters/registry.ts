@@ -4,7 +4,7 @@
  * lab's filter picker enumerate this table.
  */
 
-import { definer, entries, type Entry, type FilterDesignInfo } from 'aifn/foundation/registry'
+import { definer, entries, type Entry, type FilterDesignInfo, type FunctionInfo } from 'aifn/foundation/registry'
 import { int, oneOf, real, space } from 'aifn/foundation/space'
 import * as filters from './filters'
 
@@ -93,4 +93,106 @@ define(
 export const filterDesignRegistry: Readonly<Record<string, Entry<(...args: never[]) => unknown, FilterDesignInfo>>> =
   entries<FilterDesignInfo>('filter-design', filters) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, FilterDesignInfo>>
+  >
+
+const fn = definer<FunctionInfo>('function', 'signal/filters')
+const IIR = ['infinite-impulse-response-filters', 'difference-equations']
+
+fn(
+  {
+    key: 'iirfilter',
+    name: 'IIR filter design',
+    role: 'construction',
+    returns: 'lti',
+    notes: ['infinite-impulse-response-filter-design'],
+  },
+  filters.iirfilter,
+)
+fn(
+  {
+    key: 'kaiserBeta',
+    name: 'Kaiser β for an attenuation',
+    role: 'construction',
+    notes: ['finite-impulse-response-filter-design', 'spectral-leakage-and-windows'],
+  },
+  filters.kaiserBeta,
+)
+fn(
+  {
+    key: 'kaiserAttenuation',
+    name: 'Kaiser window attenuation',
+    role: 'property',
+    notes: ['finite-impulse-response-filter-design'],
+  },
+  filters.kaiserAttenuation,
+)
+fn(
+  {
+    key: 'kaiserOrder',
+    name: 'Kaiser window order',
+    role: 'construction',
+    notes: ['finite-impulse-response-filter-design'],
+  },
+  filters.kaiserOrder,
+)
+fn(
+  {
+    key: 'lfilter',
+    name: 'Linear filter (difference equation)',
+    summary: 'y = (b/a) * x by the transposed direct form II, with initial conditions.',
+    role: 'transform',
+    notes: [...IIR, 'finite-impulse-response-filters', 'linear-time-invariant-systems'],
+    cite: ['oppenheim2010'],
+  },
+  filters.lfilter,
+)
+fn({ key: 'sosfilt', name: 'Filter by second-order sections', role: 'transform', notes: IIR }, filters.sosfilt)
+fn(
+  { key: 'lfilterZi', name: 'Steady-state initial conditions', role: 'construction', notes: ['zero-phase-filtering'] },
+  filters.lfilterZi,
+)
+fn(
+  {
+    key: 'sosfiltZi',
+    name: 'Steady-state initial conditions (sections)',
+    role: 'construction',
+    notes: ['zero-phase-filtering'],
+  },
+  filters.sosfiltZi,
+)
+fn(
+  {
+    key: 'filtfilt',
+    name: 'Zero-phase filtering',
+    summary: 'Filter forwards then backwards: the magnitude response squared and zero phase.',
+    role: 'transform',
+    notes: ['zero-phase-filtering'],
+  },
+  filters.filtfilt,
+)
+fn(
+  {
+    key: 'freqz',
+    name: 'Digital frequency response',
+    role: 'property',
+    returns: 'spectrum',
+    notes: ['frequency-response', 'discrete-time-fourier-transform'],
+  },
+  filters.freqz,
+)
+fn(
+  {
+    key: 'groupDelay',
+    name: 'Group delay',
+    tex: '\\tau_g(\\omega)',
+    role: 'property',
+    notes: ['linear-phase-and-group-delay'],
+  },
+  filters.groupDelay,
+)
+
+/** The functions of the module, keyed by name. */
+export const filtersFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', filters) as Readonly<
+    Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

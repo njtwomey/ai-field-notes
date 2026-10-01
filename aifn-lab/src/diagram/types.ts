@@ -66,6 +66,16 @@ export type DiagramNode = {
   state?: ElementState
   /** For `layout: 'layered'`: pin the node to this column (layer) instead of its topological depth. */
   layer?: number
+  /**
+   * A stacked bar of shares by palette slot (share k in slot k, e.g. class proportions), drawn along the bottom of a
+   * box or pill (`barHeight` pixels, default 5) under its label, or filling a node that has no label.
+   */
+  bar?: readonly number[]
+  barHeight?: number
+  /** The node the reader has chosen: an ink ring around it. */
+  selected?: boolean
+  /** What a screen reader announces for a clickable node (default its label). */
+  ariaLabel?: string
 }
 
 export type DiagramGroup = {
@@ -156,6 +166,16 @@ export type DiagramSpec = {
   unit?: number
   /** How far the diagram may scale up beyond its natural size to fill its container. */
   maxScale?: number
+  /**
+   * A box (grid units) the view always includes, so the drawing keeps its scale while elements come and go (e.g. a
+   * tree drawn node by node).
+   */
+  frame?: { x0: number; y0: number; x1: number; y1: number }
+  /**
+   * The colour of active and highlighted elements: the accent data colour (default), or `ink`, for diagrams whose data
+   * colours carry meaning (e.g. class colours in a tree's nodes).
+   */
+  accent?: 'data' | 'ink'
   /**
    * Multiplies every position (nodes, waypoints, group rectangles) to space the layout out without resizing the shapes;
    * a pair scales x and y separately.

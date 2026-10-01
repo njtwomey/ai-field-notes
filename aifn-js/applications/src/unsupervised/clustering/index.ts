@@ -57,3 +57,4 @@ export {
 } from './density'
 export { affinityMatrix, spectralClustering, type Affinity, type SpectralClusteringModel } from './spectral'
 export { canonical as canonicalLabels } from './util'
+export { clusteringAlgorithms, clusteringFunctions } from './registry'

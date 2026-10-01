@@ -159,7 +159,7 @@ const expmOp: Op<Params> = definePrimitive<Params>({
   jvp: ([t], [a]) => (t === null ? null : frechet(a, t, shapeOfValue(a)[0])),
   batch: kernelBatch('numerics/linalg/expm'),
   shape: ([a]) => float64Aval(a.shape),
-  doc: { summary: 'The matrix exponential e^A.' },
+  doc: { note: 'linear-systems-and-the-matrix-exponential', summary: 'The matrix exponential e^A.' },
   test: { rtol: 1e-4, secondOrder: true, cases: (draw) => [{ inputs: [draw([3, 3])], params: {} }] },
 })
 

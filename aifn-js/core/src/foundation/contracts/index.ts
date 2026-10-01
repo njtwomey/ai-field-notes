@@ -18,7 +18,8 @@
  * - Learning: `Kernel`, `Model` and the capabilities, `Dataset`, `DatasetMeta`, `Recipe`, `Truth`, `Features`;
  *   registry `Info`, `EntryKind`, `Stability` and the per-kind infos (`MetricInfo`, `LossInfo`, `DistributionInfo`,
  *   `BijectorInfo`, `KlRuleInfo`, `LinkInfo`, `LikelihoodInfo`, `KernelInfo`, `WindowInfo`, `WaveletInfo`,
- *   `FilterDesignInfo`, `AlgorithmInfo` with `StateRoles`, `PrimitiveInfo`, and the applications' kinds).
+ *   `FilterDesignInfo`, `AlgorithmInfo` with `StateRoles`, `FunctionInfo` with `FunctionRole`, `TestInfo` with
+ *   `TestData`, `PrimitiveInfo`, and the applications' kinds).
  * - Structure and signals: `Graph`, `Tree`, `Signal`, `Spectrum`, `TimeFrequency`, `LtiSystem`, `Decomposition`,
  *   `Curve`; parameter spaces `Space`, `Dim`; error kinds.
  * - Function families: `Unary`, `Binary`, `Reduction`, `Sampler`, `KernelFn`, `MetricFn`, `LossFn`.

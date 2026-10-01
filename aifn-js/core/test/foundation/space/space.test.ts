@@ -128,3 +128,16 @@ describe('grid', () => {
     expect(grid(space({ r: real(0, 1) }), { points: 5 }).map((p) => p.r)).toEqual([0, 0.25, 0.5, 0.75, 1])
   })
 })
+
+describe('stepped reals at the top of the range (review 2026-10-01)', () => {
+  it('keeps a max that lies on the step grid', () => {
+    // (0.3 − 0)/0.1 is 2.9999999999999996 in floating point; the max used to snap down a step to 0.2.
+    const s = space({ a: real(0, 0.3, { step: 0.1 }) })
+    expect(clamp(s, { a: 0.3 }).a).toBe(0.3)
+    expect(clamp(s, { a: 9 }).a).toBe(0.3)
+    expect(decode(s, [1]).a).toBe(0.3)
+    expect(clamp(space({ a: real(0, 0.7, { step: 0.1 }) }), { a: 0.7 }).a).toBe(0.7)
+    // A max off the grid still snaps down to the last grid point.
+    expect(clamp(space({ a: real(0, 1, { step: 0.3 }) }), { a: 1 }).a).toBeCloseTo(0.9, 12)
+  })
+})

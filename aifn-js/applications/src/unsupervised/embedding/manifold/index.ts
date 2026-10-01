@@ -12,3 +12,4 @@ export {
   type LleModel,
   type SpectralEmbeddingModel,
 } from './manifold'
+export { manifoldFunctions } from './registry'

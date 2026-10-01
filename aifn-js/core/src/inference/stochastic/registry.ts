@@ -4,7 +4,9 @@
  * view picks default series and a worker can address an algorithm by key (design S §2.3).
  */
 
-import { definer, entries, type AlgorithmInfo, type Entry } from 'aifn/foundation/registry'
+import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
+import * as chains from './chains'
+import * as diagnostics from './diagnostics'
 import * as factorGibbs from './factorGibbs'
 import * as gibbs from './gibbs'
 import * as hamiltonian from './hamiltonian'
@@ -186,4 +188,100 @@ algorithm(
 export const stochasticAlgorithms: Readonly<Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>> =
   entries<AlgorithmInfo>('algorithm', factorGibbs, gibbs, hamiltonian, langevin, metropolis, smc) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>
+  >
+
+const fn = definer<FunctionInfo>('function', 'inference/stochastic')
+const DIAG = ['markov-chain-monte-carlo-diagnostics']
+
+fn(
+  {
+    key: 'effectiveSampleSize',
+    name: 'Effective sample size',
+    role: 'estimator',
+    notes: DIAG,
+    cite: ['vehtari2021', 'geyer1992'],
+  },
+  diagnostics.effectiveSampleSize,
+)
+fn(
+  {
+    key: 'integratedAutocorrelationTime',
+    name: 'Integrated autocorrelation time',
+    role: 'estimator',
+    notes: DIAG,
+    cite: ['geyer1992'],
+  },
+  diagnostics.integratedAutocorrelationTime,
+)
+fn(
+  {
+    key: 'splitRhat',
+    name: 'Split R̂',
+    tex: '\\hat R',
+    role: 'estimator',
+    notes: DIAG,
+    cite: ['vehtari2021', 'gelman2013'],
+  },
+  diagnostics.splitRhat,
+)
+fn(
+  { key: 'monteCarloStandardError', name: 'Monte Carlo standard error', role: 'estimator', notes: DIAG },
+  diagnostics.monteCarloStandardError,
+)
+fn({ key: 'summarise', name: 'Chain summary', role: 'estimator', notes: DIAG }, diagnostics.summarise)
+fn(
+  {
+    key: 'sampleChains',
+    name: 'Run several chains',
+    role: 'simulation',
+    random: true,
+    notes: ['markov-chain-monte-carlo', ...DIAG],
+  },
+  chains.sampleChains,
+)
+fn(
+  { key: 'raoBlackwell', name: 'Rao–Blackwellised estimate', role: 'estimator', notes: ['gibbs-sampling'] },
+  chains.raoBlackwell,
+)
+fn(
+  { key: 'gibbsMarginals', name: 'Gibbs marginals', role: 'estimator', notes: ['gibbs-sampling'] },
+  factorGibbs.gibbsMarginals,
+)
+fn(
+  {
+    key: 'gaussianConditionals',
+    name: 'Gaussian full conditionals',
+    role: 'construction',
+    notes: ['gibbs-sampling', 'multivariate-normal-distribution'],
+  },
+  gibbs.gaussianConditionals,
+)
+fn(
+  {
+    key: 'conditionalMean',
+    name: 'Gaussian conditional mean',
+    role: 'property',
+    notes: ['multivariate-normal-distribution', 'schur-complement'],
+  },
+  gibbs.conditionalMean,
+)
+fn(
+  {
+    key: 'leapfrog',
+    name: 'Leapfrog integrator',
+    role: 'simulation',
+    notes: ['hamiltonian-monte-carlo'],
+    cite: ['neal2011'],
+  },
+  hamiltonian.leapfrog,
+)
+fn(
+  { key: 'resample', name: 'Resample particles', role: 'simulation', random: true, notes: ['particle-filter'] },
+  smc.resample,
+)
+
+/** The functions of the module, keyed by name. */
+export const stochasticFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', diagnostics, chains, factorGibbs, gibbs, hamiltonian, smc) as Readonly<
+    Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

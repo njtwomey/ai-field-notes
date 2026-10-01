@@ -9,7 +9,9 @@
  * vectors.
  */
 
-import { definer, entries, type DistributionInfo, type Entry } from 'aifn/foundation/registry'
+import { definer, entries, type DistributionInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
+import * as divergence from './divergence'
+import * as klRules from './kl'
 import { int, real, space } from 'aifn/foundation/space'
 import * as compose from './compose'
 import * as continuous from './continuous'
@@ -196,6 +198,22 @@ family(
     notes: ['chi-squared-distribution'],
   },
   continuous.ChiSquare,
+)
+family(
+  {
+    key: 'FisherSnedecor',
+    name: 'F (Fisher–Snedecor)',
+    params: space({
+      df1: real(1, 30, { default: 5, label: 'd_1', doc: 'numerator degrees of freedom' }),
+      df2: real(5, 60, { default: 20, label: 'd_2', doc: 'denominator degrees of freedom' }),
+    }),
+    support: 'non-negative',
+    discrete: false,
+    eventRank: 0,
+    expFamily: false,
+    notes: ['f-distribution'],
+  },
+  continuous.FisherSnedecor,
 )
 family(
   {
@@ -561,4 +579,112 @@ family(
 export const distributionRegistry: Readonly<Record<string, Entry<(...args: never[]) => unknown, DistributionInfo>>> =
   entries<DistributionInfo>('distribution', continuous, discrete, multivariate, compose) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, DistributionInfo>>
+  >
+
+// ── Functions ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const fn = definer<FunctionInfo>('function', 'probability/distributions')
+const KL = ['kullback-leibler-divergence']
+
+fn(
+  {
+    key: 'kl',
+    name: 'KL divergence (closed form)',
+    tex: 'D_{KL}(p \\| q)',
+    summary: 'KL(p ‖ q) by the registered closed-form rule for the pair of families.',
+    role: 'property',
+    notes: KL,
+    cite: ['kullback1951'],
+  },
+  klRules.kl,
+)
+fn(
+  {
+    key: 'klMonteCarlo',
+    name: 'KL divergence (Monte Carlo)',
+    role: 'estimator',
+    random: true,
+    notes: [...KL, 'monte-carlo-integration'],
+  },
+  klRules.klMonteCarlo,
+)
+fn(
+  {
+    key: 'klNumerical',
+    name: 'KL divergence (quadrature)',
+    role: 'estimator',
+    notes: [...KL, 'numerical-integration'],
+  },
+  divergence.klNumerical,
+)
+fn(
+  {
+    key: 'klMonteCarloWithError',
+    name: 'KL divergence (Monte Carlo, with error)',
+    role: 'estimator',
+    random: true,
+    notes: KL,
+  },
+  divergence.klMonteCarloWithError,
+)
+fn(
+  {
+    key: 'klAuto',
+    name: 'KL divergence (best available)',
+    summary: 'The closed form when a rule exists, else quadrature in one dimension, else Monte Carlo.',
+    role: 'estimator',
+    notes: KL,
+  },
+  divergence.klAuto,
+)
+fn(
+  {
+    key: 'entropyNumerical',
+    name: 'Entropy (quadrature)',
+    role: 'estimator',
+    notes: ['differential-entropy', 'entropy'],
+  },
+  divergence.entropyNumerical,
+)
+fn(
+  {
+    key: 'entropyAuto',
+    name: 'Entropy (best available)',
+    role: 'estimator',
+    notes: ['differential-entropy', 'entropy'],
+  },
+  divergence.entropyAuto,
+)
+fn(
+  {
+    key: 'crossEntropyAuto',
+    name: 'Cross-entropy (best available)',
+    role: 'estimator',
+    notes: ['cross-entropy-and-perplexity'],
+  },
+  divergence.crossEntropyAuto,
+)
+fn(
+  {
+    key: 'jensenShannonNumerical',
+    name: 'Jensen–Shannon divergence (quadrature)',
+    role: 'estimator',
+    notes: ['f-divergences-and-jensen-shannon'],
+  },
+  divergence.jensenShannonNumerical,
+)
+fn(
+  {
+    key: 'normalFromNatural',
+    name: 'Normal from natural parameters',
+    role: 'construction',
+    notes: ['exponential-family', 'gaussian-distribution'],
+  },
+  continuous.normalFromNatural,
+)
+
+/** The functions of the module (divergences and constructions), keyed by name. */
+export const distributionFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', klRules, divergence, continuous) as Readonly<
+    Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

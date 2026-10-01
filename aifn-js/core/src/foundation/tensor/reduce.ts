@@ -27,6 +27,7 @@ import { joinComplex, pairwiseSum, reducedShape, reduceKernel, splitComplex, typ
 import {
   batchToFront,
   definePrimitive,
+  fitTo,
   type Op,
   type OpBatch,
   type PrimitiveSpec,
@@ -186,7 +187,8 @@ export const sum: Reduction = reduction(
   [],
   // A worked example of a linear primitive: the transpose broadcasts the cotangent back over the summed axes; the vjp
   // and the jvp (the sum of the tangent) are derived from it.
-  { linear: 'linear', transpose: (ct, [x], _which, p) => expand(ct, x, p), dtype: 'float' },
+  // fitTo keeps the input's kind: a rank-0 tensor input gets a rank-0 cotangent, not the number a full sum gives.
+  { linear: 'linear', transpose: (ct, [x], _which, p) => fitTo(expand(ct, x, p), avalOf(x)), dtype: 'float' },
 )
 
 /** Arithmetic mean of elements. */

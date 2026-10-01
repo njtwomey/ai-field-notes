@@ -15,3 +15,4 @@ export {
   type FrechetDistance,
   type PolynomialKernel,
 } from './generative'
+export { generativeEvaluationFunctions } from './registry'

@@ -16,3 +16,4 @@ export {
   type SegmentOptions,
 } from './spectral'
 export { checkCola, checkNola, istft, type IstftOptions } from './inverse'
+export { spectralFunctions } from './registry'

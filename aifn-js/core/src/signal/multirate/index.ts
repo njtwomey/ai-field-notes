@@ -14,3 +14,4 @@ export {
   type DecimateOptions,
   type ResamplePolyOptions,
 } from './multirate'
+export { multirateFunctions } from './registry'

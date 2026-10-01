@@ -64,3 +64,4 @@ export {
   type ThinPlateRegressionBasis,
   type ThinPlateSpline,
 } from './thinplate'
+export { interpolateFunctions } from './registry'

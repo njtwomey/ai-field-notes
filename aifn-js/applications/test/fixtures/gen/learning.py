@@ -52,8 +52,8 @@ def cases() -> dict[str, object]:
 
     svc = SVC(C=1.0, kernel="rbf", gamma=0.5, tol=1e-6).fit(x2, y2)
     svc_linear = SVC(C=0.5, kernel="linear", tol=1e-6).fit(x2, y2)
-    lsvc = LinearSVC(C=0.5, loss="hinge", dual=True, tol=1e-10, max_iter=1_000_000).fit(x2, y2)
-    cs = LinearSVC(C=0.5, multi_class="crammer_singer", tol=1e-10, max_iter=1_000_000).fit(x3, y3)
+    lsvc = LinearSVC(C=0.5, loss="hinge", dual=True, tol=1e-10, max_iter=1_000_000, random_state=0).fit(x2, y2)
+    cs = LinearSVC(C=0.5, multi_class="crammer_singer", tol=1e-10, max_iter=1_000_000, random_state=0).fit(x3, y3)
     perceptron = Perceptron(shuffle=False, eta0=1.0, max_iter=1000, tol=None).fit(x2, y2)
 
     ada = AdaBoostClassifier(DecisionTreeClassifier(max_depth=1), n_estimators=5, random_state=0).fit(x3, y3)

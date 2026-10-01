@@ -320,7 +320,11 @@ export function integers(s: Stream, n: Size, options?: SampleOptions): number | 
 /** The categorical index of u ∈ [0, 1) under non-negative weights w[offset … offset + k − 1] (a linear scan). */
 function categoricalIndex(u: number, w: ArrayLike<number>, offset: number, k: number): number {
   let total = 0
-  for (let j = 0; j < k; j++) total += w[offset + j]
+  for (let j = 0; j < k; j++) {
+    // A negative weight would count in the total but never be picked, biasing every other index.
+    if (w[offset + j] < 0) throw new DomainError('categorical', 'categorical needs non-negative weights')
+    total += w[offset + j]
+  }
   if (!(total > 0) || !Number.isFinite(total))
     throw new DomainError('categorical', 'categorical needs finite weights with a positive sum')
   const target = u * total
@@ -375,7 +379,10 @@ export function aliasTable(weights: Tensor | ArrayLike<number>): AliasTable {
   const w = vectorValues(weights, 'aliasTable')
   const n = w.length
   let total = 0
-  for (let k = 0; k < n; k++) total += w[k]
+  for (let k = 0; k < n; k++) {
+    if (w[k] < 0) throw new DomainError('aliasTable', 'aliasTable needs non-negative weights')
+    total += w[k]
+  }
   if (!(total > 0) || !Number.isFinite(total))
     throw new DomainError('aliasTable', 'aliasTable needs finite weights with a positive sum')
   const scaled = new Float64Array(n)

@@ -50,3 +50,4 @@ export {
   standardNormals,
   units,
 } from './samplers'
+export { randomFunctions } from './registry'

@@ -406,3 +406,21 @@ describe('samplers: shapes, broadcasting and element order', () => {
     expect(new Set(toFlat(c)).size).toBe(6)
   })
 })
+
+describe('negative weights (review 2026-10-01)', () => {
+  it('categorical and aliasTable refuse a negative weight rather than biasing the others', () => {
+    // [-1, 1, 1] sums to 1, so the scan used to reach index 1 for every u and never pick index 2.
+    expect(() => R.categorical(R.stream(1), [-1, 1, 1])).toThrow(DomainError)
+    expect(() =>
+      R.categorical(
+        R.stream(1),
+        tensor([
+          [0.5, 0.5],
+          [2, -1],
+        ]),
+      ),
+    ).toThrow(DomainError)
+    expect(() => R.aliasTable([-1, 1, 1])).toThrow(DomainError)
+    expect(R.categorical(R.stream(1), [0, 1, 0])).toBe(1)
+  })
+})

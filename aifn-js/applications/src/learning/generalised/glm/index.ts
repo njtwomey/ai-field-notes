@@ -28,3 +28,4 @@ export {
   type SoftmaxNewtonState,
   type SoftmaxProblem,
 } from './logistic'
+export { glmAlgorithms, glmFunctions } from './registry'

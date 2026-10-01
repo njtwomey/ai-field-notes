@@ -18,4 +18,4 @@ export {
   type StopRule,
 } from './emd'
 export { vmd, vmdModes, vmdSteps, type VmdOptions, type VmdState } from './vmd'
-export { decompositionsAlgorithms } from './registry'
+export { decompositionsAlgorithms, decompositionsFunctions } from './registry'

@@ -5,7 +5,19 @@
  */
 
 import { normalCdf, sigmoid, softplus } from 'aifn/numerics/special'
-import { add, elementwise, expm1, greater, mul, pow, tanh, where, type Unary, type Value } from 'aifn/foundation/tensor'
+import {
+  add,
+  elementwise,
+  expm1,
+  greater,
+  minimum,
+  mul,
+  pow,
+  tanh,
+  where,
+  type Unary,
+  type Value,
+} from 'aifn/foundation/tensor'
 
 /**
  * The rectified linear unit max(0, x) (Nair & Hinton, 2010). Its derivative is 1[x > 0], taken as 0 at x = 0 (as in
@@ -25,7 +37,8 @@ export function leakyRelu(x: Value, slope = 0.01): Value {
 
 /** The exponential linear unit: x for x > 0 and α(eˣ − 1) otherwise (Clevert, Unterthiner & Hochreiter, 2016). */
 export function elu(x: Value, alpha = 1): Value {
-  return where(greater(x, 0), x, mul(alpha, expm1(x)))
+  // expm1 of min(x, 0): the unused branch must stay finite for large x, or its zero cotangent times e^x is NaN.
+  return where(greater(x, 0), x, mul(alpha, expm1(minimum(x, 0))))
 }
 
 /**

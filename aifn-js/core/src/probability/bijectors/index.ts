@@ -36,4 +36,4 @@ export {
   type OrderedOptions,
 } from './maps'
 export { transformLogDensity, type Reparameterisation, type TransformedLogDensity } from './reparameterise'
-export { bijectorRegistry } from './registry'
+export { bijectorFunctions, bijectorRegistry } from './registry'

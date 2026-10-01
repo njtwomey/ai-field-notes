@@ -165,7 +165,10 @@ const choleskyOp: Op<Params> = defineOp<Params>(
     },
     batch: kernelBatch('numerics/linalg/cholesky'),
     shape: ([a]) => float64Aval(a.shape),
-    doc: { summary: 'The Cholesky factor L of a symmetric positive-definite matrix, LLᵀ = A.' },
+    doc: {
+      note: 'cholesky-decomposition',
+      summary: 'The Cholesky factor L of a symmetric positive-definite matrix, LLᵀ = A.',
+    },
     test: { secondOrder: true, cases: (draw) => [{ inputs: [positiveDefinite(draw, 3)], params: { jitter: 0 } }] },
   },
 )

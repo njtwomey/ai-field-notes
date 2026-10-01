@@ -13,3 +13,4 @@ export {
   type LdaOptions,
   type LdaState,
 } from './lda'
+export { topicModelAlgorithms, topicModelFunctions } from './registry'

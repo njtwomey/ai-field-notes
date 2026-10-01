@@ -25,3 +25,4 @@ export {
   type CrammerSingerModel,
   crammerSinger,
 } from './crammerSinger'
+export { kernelMethodsAlgorithms, kernelMethodsFunctions } from './registry'

@@ -64,4 +64,4 @@ export {
   type Regressed,
   type RunStats,
 } from './changepoint'
-export { filteringAlgorithms } from './registry'
+export { filteringAlgorithms, filteringFunctions } from './registry'

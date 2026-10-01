@@ -24,3 +24,4 @@ export {
   type LqrBangBangOptions,
   type LqrBangBangState,
 } from './cartpole'
+export { controlAgentFunctions } from './registry'

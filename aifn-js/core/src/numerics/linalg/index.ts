@@ -28,6 +28,9 @@
  *   a non-converged or degenerate `eigh`/`svd` (unless the function is invariant), a rank-deficient `qr`. The general
  *   `eig` has no derivative (its values may be complex) and refuses traced input. Rule sources are cited at each
  *   primitive; the shared rule helpers are in `rules.ts`.
+ * - Step-through forms (traceable algorithms) of what the notes walk through: `gramSchmidtSteps` (classical or
+ *   modified; `gramSchmidt` runs it), `householderSteps` (the step `qr` itself runs), `jacobiSteps` and
+ *   `gaussSeidelSteps` (with SOR; `solveStationary` runs them) and `powerIterationSteps` (and inverse iteration).
  * - Closed forms on 2×2 tuples: `det2`, `apply2`, `inv2`, `eigh2`, `eig2`, `cholesky2`, `svd2`.
  */
 
@@ -35,7 +38,7 @@ export { LinAlgError } from './dense'
 export { solveTriangular, type TriangularOptions } from './triangular'
 export { cholesky, choleskyLogDet, choleskySolve, type Cholesky, type CholeskyOptions } from './cholesky'
 export { det, inverse, logDet, lu, luFactor, luSolve, signDet, solve, type LU, type LuFactor } from './lu'
-export { qr, type QR } from './qr'
+export { householderSteps, qr, type HouseholderState, type QR } from './qr'
 export { eigh, type Eigh } from './eigh'
 export { conditionNumber, lstsq, pinv, svd, type LeastSquares, type SVD } from './svd'
 export { kron, matrixTrace, normFrobenius } from './products'
@@ -59,4 +62,22 @@ export {
 } from './riccati'
 export { levinsonDurbin, type LevinsonDurbin } from './levinson'
 export { eigsh, operatorOf, type EigshOptions, type EigshResult, type EigshWhich, type LinearOperator } from './lanczos'
-export { linalgAlgorithms } from './registry'
+export {
+  gramSchmidt,
+  gramSchmidtSteps,
+  type GramSchmidt,
+  type GramSchmidtOptions,
+  type GramSchmidtState,
+  type GramSchmidtVariant,
+} from './orthogonalise'
+export {
+  gaussSeidelSteps,
+  jacobiSteps,
+  powerIterationSteps,
+  solveStationary,
+  type PowerIterationState,
+  type StationaryOptions,
+  type StationarySolution,
+  type StationaryState,
+} from './iterative'
+export { linalgAlgorithms, linalgFunctions } from './registry'

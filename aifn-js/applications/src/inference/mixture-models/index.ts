@@ -13,3 +13,4 @@ export {
   clutterEp,
   clutterPosterior,
 } from './clutter'
+export { mixtureModelAlgorithms, mixtureModelFunctions } from './registry'

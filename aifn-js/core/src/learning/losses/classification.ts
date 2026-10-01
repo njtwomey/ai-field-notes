@@ -75,9 +75,19 @@ export const binaryCrossEntropy = defineLoss(
   },
   (probabilities: Value, targets: Target, { reduction }: ReductionOptions = {}): Value => {
     const y = constant(targets)
-    // y log p with 0 log 0 = 0 on either side, so hard labels do not multiply 0 by −∞.
-    const term = (w: Value, l: Value) => where(w, mul(w, l), 0)
-    return reduce(neg(add(term(y, log(probabilities)), term(sub(1, y), log1p(neg(probabilities))))), reduction)
+    // y log p with 0 log 0 = 0 on either side, so hard labels do not multiply 0 by −∞. The log's argument is also
+    // replaced where its weight is 0 (the "double where"), so its derivative there is finite and the masked branch
+    // contributes 0 to the gradient instead of 0·∞ = NaN.
+    const term = (w: Value, l: (q: Value) => Value) => where(w, mul(w, l(where(w, probabilities, 0.5))), 0)
+    return reduce(
+      neg(
+        add(
+          term(y, log),
+          term(sub(1, y), (q) => log1p(neg(q))),
+        ),
+      ),
+      reduction,
+    )
   },
 )
 

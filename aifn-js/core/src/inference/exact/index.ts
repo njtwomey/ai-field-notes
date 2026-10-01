@@ -41,4 +41,4 @@ export {
   type ViterbiResult,
   type ViterbiState,
 } from './chain'
-export { exactAlgorithms } from './registry'
+export { exactAlgorithms, exactFunctions } from './registry'

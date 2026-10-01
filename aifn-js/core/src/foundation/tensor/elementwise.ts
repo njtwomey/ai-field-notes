@@ -81,7 +81,7 @@ export const exp: Unary = elementwise({
   },
   holomorphic: true,
   derivative: [(_x, y) => y],
-  doc: { summary: 'The exponential eˣ.' },
+  doc: { note: 'exponential-and-logarithm', summary: 'The exponential eˣ.' },
 })
 
 /** eˣ − 1, accurate for small x. */
@@ -102,7 +102,7 @@ export const log: Unary = elementwise({
   },
   holomorphic: true,
   derivative: [(x) => div(1, x)],
-  doc: { summary: 'The natural logarithm.' },
+  doc: { note: 'exponential-and-logarithm', summary: 'The natural logarithm.' },
   test: { domain: { lo: 0.1, hi: 3 } },
 })
 
@@ -215,16 +215,27 @@ export const div: Binary = elementwise({
 })
 
 /**
- * aᵇ (always floating point). The derivative in b is y·log a, taken as 0 where a = 0 (the limit for b > 0) and NaN
- * for a < 0, where aᵇ is not differentiable in b. It is computed only when b is differentiated, so a constant exponent
- * never evaluates log a.
+ * aᵇ (always floating point). The derivative in a is b·aᵇ⁻¹, taken as 0 at a = b = 0 (a⁰ = 1 for every a, where
+ * b·aᵇ⁻¹ would be 0·∞, e.g. the constant term of polynomial features at x = 0). The derivative in b is y·log a, taken
+ * as 0 where a = 0 (the limit for b > 0) and NaN for a < 0, where aᵇ is not differentiable in b. It is computed only
+ * when b is differentiated, so a constant exponent never evaluates log a. Both guards also replace the operand inside
+ * the unused branch (the "double where"), so that branch stays finite and second derivatives are not NaN there.
  */
 export const pow: Binary = elementwise({
   id: 'foundation/tensor/pow',
   f: Math.pow,
   complex: complexPower,
   holomorphic: true,
-  derivative: [(a, b) => mul(b, pow(a, sub(b, 1))), (a, _b, y) => where(equalTo(a, 0), 0, mul(y, log(a)))],
+  derivative: [
+    (a, b) => {
+      const origin = mul(equalTo(a, 0), equalTo(b, 0))
+      return where(origin, 0, mul(b, pow(a, sub(where(origin, 1, b), 1))))
+    },
+    (a, _b, y) => {
+      const zero = equalTo(a, 0)
+      return where(zero, 0, mul(y, log(where(zero, 1, a))))
+    },
+  ],
   doc: { summary: 'The power aᵇ.' },
   test: {
     domain: [

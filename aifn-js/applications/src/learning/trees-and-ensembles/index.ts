@@ -7,19 +7,32 @@
 export {
   applyTree,
   costComplexityPath,
+  decideTree,
   decisionPath,
   decisionTree,
   featureImportances,
   growTree,
+  keptNodes,
   nodeLabel,
+  nodePrediction,
+  nodeRegion,
   predictTree,
   pruneTree,
   regressionTree,
+  splitCurve,
   splitSearch,
   treeGrowthSteps,
   treeSize,
   type Criterion,
   type DecisionNode,
+  type DecisionPath,
+  type DecisionTest,
+  type DescentOptions,
+  type FeatureBest,
+  type GrowthOrder,
+  type LeafReason,
+  type NodeEvaluation,
+  type PendingNode,
   type DecisionTree,
   type DecisionTreeModel,
   type FeatureSplits,
@@ -33,3 +46,4 @@ export {
 } from './tree'
 export { randomForest } from './bagging'
 export { adaBoost, gradientBoosting } from './boosting'
+export { treesAlgorithms, treesFunctions } from './registry'

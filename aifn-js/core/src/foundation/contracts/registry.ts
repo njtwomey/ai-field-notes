@@ -27,6 +27,8 @@ export type EntryKind =
   | 'agent'
   | 'log-density'
   | 'algorithm'
+  | 'function'
+  | 'test'
   | 'engine'
   | 'kl-rule'
   | 'likelihood'
@@ -262,10 +264,11 @@ export interface FilterDesignInfo extends Info {
 
 /**
  * What an algorithm's factory takes: `objective` (a function to minimise), `least-squares` (residuals), `root` (a
- * scalar equation), `system` (a nonlinear system), `integral`, `ode`, `sde`, `log-density` (a target to sample),
- * `factor-graph`, `chain` (chain potentials), `gaussian-model`, `graph`, `flow-network`, `linear-program`,
- * `quadratic-program`, `integer-program`, `assignment`, `dynamic-program`, `riccati`, `transport`, `signal`,
- * `lti-system`, `network` (a model to train), `sequence` (a data stream to filter).
+ * scalar equation), `system` (a nonlinear system), `integral`, `ode`, `sde`, `pde` (a discretised partial
+ * differential equation), `map` (an iterated map), `log-density` (a target to sample), `factor-graph`, `chain` (chain
+ * potentials), `gaussian-model`, `graph`, `flow-network`, `linear-program`, `quadratic-program`, `integer-program`,
+ * `assignment`, `dynamic-program`, `riccati`, `transport`, `signal`, `lti-system`, `network` (a model to train),
+ * `sequence` (a data stream to filter), `corpus` (words or documents of text, e.g. a tokeniser to train).
  */
 export type AlgorithmProblem =
   | 'objective'
@@ -275,6 +278,8 @@ export type AlgorithmProblem =
   | 'integral'
   | 'ode'
   | 'sde'
+  | 'pde'
+  | 'map'
   | 'log-density'
   | 'factor-graph'
   | 'chain'
@@ -292,6 +297,7 @@ export type AlgorithmProblem =
   | 'lti-system'
   | 'network'
   | 'sequence'
+  | 'corpus'
 
 /** The `Status` flags a state may set. */
 export type StatusFlag = 'converged' | 'diverged' | 'stalled' | 'terminated'
@@ -315,6 +321,58 @@ export interface AlgorithmInfo extends Info {
   readonly kind: 'algorithm'
   readonly problem: AlgorithmProblem
   readonly state: StateRoles
+}
+
+// ── Functions ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What a registered function computes, for grouping in the catalog and the lab: a `transform` of data or a signal (a
+ * DFT, a Hilbert transform, a Box–Cox map), an `estimator` of a quantity from a sample (a correlation, a periodogram, a
+ * KDE bandwidth), a `test` (a statistic with its p-value), a `construction` of an object from parameters (a state-space
+ * system, a noise schedule, a model specification), a `property` of an object (poles, stability, margins, an ARMA
+ * process's roots), a `fit` that returns a fitted object in one call, a `simulation` that draws a path or a sample, and
+ * a `solver` that returns a solution in one call.
+ */
+export type FunctionRole =
+  'transform' | 'estimator' | 'test' | 'construction' | 'property' | 'fit' | 'simulation' | 'solver' | 'inference'
+
+/**
+ * A named computation that is not stepped through (one call, a result): a transform, an estimator, a construction or a
+ * one-shot solver. An iterative procedure a note walks through is an `algorithm` instead, and the function that runs
+ * it to the end may be registered here beside it.
+ */
+export interface FunctionInfo extends Info {
+  readonly kind: 'function'
+  readonly role: FunctionRole
+  /** The `kind` brand of the result where it is a displayable object (`spectrum`, `lti`, `time-frequency`, …). */
+  readonly returns?: string
+}
+
+// ── Hypothesis tests ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What a hypothesis test reads: `one-sample` (values against a reference value or distribution), `two-sample`
+ * (independent samples), `paired` (matched pairs), `k-sample` (several groups), `table` (counts: a goodness-of-fit
+ * vector or a contingency table), `series` (an ordered sequence), `survival` (times with censoring flags and groups) or
+ * `p-values` (a family of tests, for multiple-testing procedures).
+ */
+export type TestData =
+  'one-sample' | 'two-sample' | 'paired' | 'k-sample' | 'table' | 'series' | 'survival' | 'p-values'
+
+/**
+ * A hypothesis test (`aifn/probability/tests`): a function of data returning a `TestResult` (statistic, null law,
+ * p-value, alternative, interval and effect size), or, for a multiple-testing procedure, adjusted p-values. `statistic`
+ * is the statistic's symbol in TeX, `null` the registry key of the family of its null law (`StudentT`, `ChiSquare`, …;
+ * `exact` for a law the test builds itself), and `alternatives` the alternatives it accepts.
+ */
+export interface TestInfo extends Info {
+  readonly kind: 'test'
+  readonly data: TestData
+  readonly statistic: string
+  readonly null: string
+  readonly alternatives: readonly ('two-sided' | 'less' | 'greater')[]
+  /** True for a test that assumes a parametric model of the data (normality, a known variance). */
+  readonly parametric: boolean
 }
 
 // ── Primitives (the catalog's view of the primitive table) ──────────────────────────────────────────────────────────

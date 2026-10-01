@@ -10,3 +10,4 @@ export {
   type PerceptronState,
 } from './perceptron'
 export { linearRegression, type LinearRegressionModel, type LinearRegressionParams } from './leastSquares'
+export { linearAlgorithms } from './registry'

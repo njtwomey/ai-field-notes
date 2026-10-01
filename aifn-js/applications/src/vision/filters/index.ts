@@ -5,3 +5,4 @@
 
 export { gaussianBlur } from './image'
 export { sobel } from './image'
+export { visionFilterFunctions } from './registry'

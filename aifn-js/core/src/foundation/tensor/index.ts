@@ -17,6 +17,8 @@
  *   `aifn/foundation/errors`.
  * - The brand: `isTensor` checks it; `revive` re-brands tensors that crossed `structuredClone` or a worker.
  * - Indexed reads and writes (primitives): `gather`, `scatterAdd`, `take` (rows along the first axis).
+ * - The associative scan (`associativeScan`, a composition) and the Hillis–Steele and Blelloch scans as step-through
+ *   algorithms (`hillisSteeleScanSteps`, `blellochScanSteps`, registered in `scanAlgorithms`).
  * - Inputs: `VectorLike` and `MatrixLike`, the one sanctioned relaxation of `Tensor` for data arguments.
  * - Dense kernels for inner loops, on row-major `Float64Array`s: the `dense` namespace (`dense.toF64`,
  *   `dense.toMatrixF64`, `dense.dot`, `dense.matVec`, `dense.matMul`, `dense.axpy`, …). Not primitives.
@@ -197,3 +199,15 @@ export { gather, scatterAdd, take } from './gather'
 export type { MatrixLike, VectorLike } from './dense'
 export * as dense from './dense'
 export { meshgrid, logspace } from './grids'
+export {
+  associativeScan,
+  blellochScanSteps,
+  hillisSteeleScanSteps,
+  scanAlgorithms,
+  type BlellochPhase,
+  type BlellochState,
+  type HillisSteeleState,
+  type ScanElement,
+  type ScanMove,
+  type ScanOptions,
+} from './scan'

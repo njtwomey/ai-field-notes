@@ -27,3 +27,4 @@ export {
   type GroundTruthObject,
   type Match,
 } from './detection'
+export { detectionFunctions } from './registry'

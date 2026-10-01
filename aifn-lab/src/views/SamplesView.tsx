@@ -1,5 +1,6 @@
 import { useMemo, type ReactNode } from 'react'
-import { extent, histogram, ksTest, quantile } from 'aifn/probability/stats'
+import { extent, histogram, quantile } from 'aifn/probability/stats'
+import { ksTest } from 'aifn/probability/tests'
 import { linspace, mean, tensor, toFlat, variance } from 'aifn/foundation/tensor'
 import { PanelSlot } from '@lab/layout'
 import { Bars, Curve, Plot, Points, Readout, useAxis } from '@lab/viz'
@@ -71,7 +72,7 @@ function MomentReadouts({ samples, reference }: { samples: ArrayLike<number>; re
  * Draws from a sampler against the distribution they should follow, as one figure: a density histogram under the
  * reference density, a relative-frequency plot against a mass function, or a scatter for pairs. Readouts give the
  * sample moments against the exact ones and, when a cdf is given, the Kolmogorov–Smirnov distance with its p-value
- * (`ksTest` from `aifn/probability/stats`).
+ * (`ksTest` from `aifn/probability/tests`).
  */
 export function SamplesPanel(props: SamplesPanelProps) {
   if (props.kind === 'discrete') return <DiscreteSamples {...props} />

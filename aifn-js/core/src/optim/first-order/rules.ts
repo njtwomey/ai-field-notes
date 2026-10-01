@@ -88,12 +88,19 @@ export function chainRules(...rules: readonly UpdateRule<unknown>[]): UpdateRule
 
 /** The Euclidean norm of all the leaves of a tree taken together. */
 export function globalNorm(tree: Params): Scalar {
-  let s = 0
+  // Scaled by the largest entry, so that gradients near 1e200 do not overflow the sum of squares to ∞ (which would
+  // make `clipByGlobalNorm` scale them to 0).
+  const values: number[] = []
   for (const { value } of treeLeaves(tree)) {
-    if (typeof value === 'number') s += value * value
-    else for (const v of toFlat(value)) s += v * v
+    if (typeof value === 'number') values.push(value)
+    else for (const v of toFlat(value)) values.push(v)
   }
-  return Math.sqrt(s)
+  let big = 0
+  for (const v of values) big = Math.max(big, Math.abs(v))
+  if (big === 0 || !Number.isFinite(big)) return big
+  let s = 0
+  for (const v of values) s += (v / big) ** 2
+  return big * Math.sqrt(s)
 }
 
 /**

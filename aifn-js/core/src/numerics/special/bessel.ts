@@ -58,7 +58,21 @@ export function besselI1Derivative(x: number): number {
 
 /** log I₀(x) for x ≥ 0 (NaN below), without overflow. */
 export function logBesselI0(x: number): number {
-  return x >= 0 ? x + Math.log(besselIScaled(0, x)) : NaN
+  if (!(x >= 0)) return NaN
+  if (x < 1) {
+    // log1p of the series' tail Σₖ≥₁ (x²/4)ᵏ/(k!)², so log I₀ ≈ x²/4 keeps its relative accuracy near 0 (x + log of
+    // the scaled value would cancel).
+    const q = (x * x) / 4
+    let term = 1
+    let tail = 0
+    for (let k = 1; k < 50; k++) {
+      term *= q / (k * k)
+      tail += term
+      if (term < 1e-17 * tail) break
+    }
+    return Math.log1p(tail)
+  }
+  return x + Math.log(besselIScaled(0, x))
 }
 
 /** A(x) = I₁(x)/I₀(x) for x ≥ 0 (NaN below): the mean resultant length of a von Mises distribution. */

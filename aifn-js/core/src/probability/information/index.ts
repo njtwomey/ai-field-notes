@@ -26,3 +26,4 @@ export {
   type Probabilities,
 } from './measures'
 export { gaussianMutualInformation, ksgMutualInformation } from './continuous'
+export { informationFunctions } from './registry'

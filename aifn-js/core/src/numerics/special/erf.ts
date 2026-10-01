@@ -87,7 +87,7 @@ export function erfcx(x: number): number {
 export function logErfc(x: number): number {
   if (Number.isNaN(x)) return NaN
   if (x === Infinity) return -Infinity
-  if (x < 0) return Math.LN2 + Math.log1p(-erfc(-x) / 2)
-  if (x < SPLIT) return Math.log(1 - erfSeries(x))
+  // log1p(−erf x) keeps the relative accuracy of log erfc near x = 0, where log(1 − erf x) and log 2 + log1p(…) cancel.
+  if (x < SPLIT) return Math.log1p(-erf(x))
   return Math.log(erfcxFraction(x)) - x * x
 }

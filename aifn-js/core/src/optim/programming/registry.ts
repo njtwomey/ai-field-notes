@@ -4,7 +4,9 @@
  * view picks default series and a worker can address an algorithm by key (design S §2.3).
  */
 
-import { definer, entries, type AlgorithmInfo, type Entry } from 'aifn/foundation/registry'
+import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
+import * as linprog from './linprog'
+import * as lp from './lp'
 import * as assignment from './assignment'
 import * as dp from './dp'
 import * as interior from './interior'
@@ -111,4 +113,86 @@ algorithm(
 export const programmingAlgorithms: Readonly<Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>> =
   entries<AlgorithmInfo>('algorithm', assignment, dp, interior, milp, qp, simplex) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>
+  >
+
+const fn = definer<FunctionInfo>('function', 'optim/programming')
+const LP = ['linear-programming']
+const QP = ['quadratic-programming', 'karush-kuhn-tucker-conditions']
+
+fn(
+  {
+    key: 'linprog',
+    name: 'Solve a linear program',
+    summary:
+      'min cᵀx subject to linear inequalities, equalities and bounds, by the simplex or an interior-point method.',
+    role: 'solver',
+    notes: LP,
+    cite: ['dantzig1963'],
+  },
+  linprog.linprog,
+)
+fn(
+  { key: 'simplexSolve', name: 'Solve by the simplex method', role: 'solver', notes: LP, cite: ['dantzig1963'] },
+  simplex.simplexSolve,
+)
+fn(
+  {
+    key: 'interiorPointSolve',
+    name: 'Solve by a primal–dual interior-point method',
+    role: 'solver',
+    notes: [...LP, 'penalty-and-barrier-methods'],
+    cite: ['karmarkar1984'],
+  },
+  interior.interiorPointSolve,
+)
+fn(
+  {
+    key: 'lpCentralPath',
+    name: 'Central path of a linear program',
+    role: 'solver',
+    notes: [...LP, 'penalty-and-barrier-methods'],
+  },
+  interior.lpCentralPath,
+)
+fn(
+  {
+    key: 'dualityReport',
+    name: 'LP duality report',
+    summary: 'Primal and dual objectives, the gap and complementary slackness.',
+    role: 'property',
+    notes: [...LP, 'lagrangian-duality'],
+  },
+  lp.dualityReport,
+)
+fn({ key: 'standardForm', name: 'LP in standard form', role: 'transform', notes: LP }, lp.standardForm)
+fn({ key: 'quadprog', name: 'Solve a quadratic program', role: 'solver', notes: QP }, qp.quadprog)
+fn(
+  { key: 'boxQuadprog', name: 'Solve a box-constrained QP', role: 'solver', notes: ['quadratic-programming'] },
+  qp.boxQuadprog,
+)
+fn(
+  {
+    key: 'kktReport',
+    name: 'KKT conditions report',
+    summary: 'Stationarity, primal and dual feasibility and complementary slackness at a point.',
+    role: 'property',
+    notes: ['karush-kuhn-tucker-conditions', 'lagrange-multipliers'],
+    cite: ['boyd2004'],
+  },
+  qp.kktReport,
+)
+fn({ key: 'milp', name: 'Solve a mixed-integer linear program', role: 'solver', notes: LP }, milp.milp)
+fn(
+  { key: 'branchAndBoundTree', name: 'Branch-and-bound tree', role: 'solver', returns: 'tree', notes: LP },
+  milp.branchAndBoundTree,
+)
+fn(
+  { key: 'hungarian', name: 'Hungarian method (assignment)', role: 'solver', cite: ['kuhn1955'] },
+  assignment.hungarian,
+)
+
+/** The functions of the module, keyed by name. */
+export const programmingFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', linprog, simplex, interior, lp, qp, milp, assignment, dp) as Readonly<
+    Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

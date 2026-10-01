@@ -109,8 +109,16 @@ export type PointsProps = CommonProps & {
 /** Scatter marks. Grouped points split by class (colour and shape); shapes may also vary on their own. */
 export const Points = defineLayer<PointsProps>({
   kind: 'Points',
+  // Grouped points without group names (a faded copy under a highlighted subset) add no legend entries: their series are
+  // named per group, so a single entry under the layer's name would match no series.
   legend: (p) =>
-    p.dense ? [] : p.groupNames ? [...p.groupNames] : p.shapeNames ? [...p.shapeNames] : [p.name ?? 'points'],
+    p.dense || (p.group && !p.groupNames)
+      ? []
+      : p.groupNames
+        ? [...p.groupNames]
+        : p.shapeNames
+          ? [...p.shapeNames]
+          : [p.name ?? 'points'],
   slotted: (p) => !p.group && !p.muted && !p.emphasis && !p.tone,
   canvas: (p) => !!p.dense || p.x.length > 4000,
   extent: (p) => ({ x: extentOf(p.x), y: extentOf(p.y) }),
@@ -156,6 +164,12 @@ export const Points = defineLayer<PointsProps>({
       if (!buckets.has(`${g}:${sh}`)) buckets.set(`${g}:${sh}`, { g, s: sh, data: [] })
     }
     if (p.group && p.groupNames && p.shape === undefined) p.groupNames.forEach((_, g) => keep(g, g))
+    // With shapes of their own (e.g. right and wrong), a named class absent from the data still needs a series of its
+    // name, or the legend entry matches nothing.
+    else if (p.group && p.groupNames)
+      p.groupNames.forEach((_, g) => {
+        if (![...buckets.values()].some((b) => b.g === g)) keep(g, typeof p.shape === 'number' ? p.shape : 0)
+      })
     else if (!p.group && !p.shapeNames && buckets.size === 0)
       keep(null, typeof p.shape === 'number' ? p.shape : p.emphasis ? 3 : 0)
     const size = p.size ?? (p.emphasis ? (p.thin ? 11 : 16) : p.thin ? 5 : MARKER_SIZE)

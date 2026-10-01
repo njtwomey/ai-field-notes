@@ -4,7 +4,9 @@
  * view picks default series and a worker can address an algorithm by key (design S §2.3).
  */
 
-import { definer, entries, type AlgorithmInfo, type Entry } from 'aifn/foundation/registry'
+import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
+import * as convenience from './convenience'
+import * as minimize from './minimize'
 import * as scalar from './scalar'
 import * as systems from './systems'
 
@@ -115,4 +117,37 @@ algorithm(
 export const rootsAlgorithms: Readonly<Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>> =
   entries<AlgorithmInfo>('algorithm', scalar, systems) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>
+  >
+
+const fn = definer<FunctionInfo>('function', 'numerics/roots')
+
+fn(
+  {
+    key: 'findRoot',
+    name: 'Find a root',
+    summary: 'A bracketed root by Brent, or an unbracketed one by Newton or the secant method.',
+    role: 'solver',
+    notes: ['root-finding'],
+  },
+  convenience.findRoot,
+)
+fn(
+  { key: 'solveSystem', name: 'Solve a nonlinear system', role: 'solver', notes: ['root-finding', 'newtons-method'] },
+  convenience.solveSystem,
+)
+fn(
+  {
+    key: 'minimizeScalar',
+    name: 'Minimise a function of one variable',
+    summary: "Brent's method: golden-section search with parabolic steps.",
+    role: 'solver',
+    notes: ['line-search'],
+  },
+  minimize.minimizeScalar,
+)
+
+/** The functions of the module, keyed by name. */
+export const rootsFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', convenience, minimize) as Readonly<
+    Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

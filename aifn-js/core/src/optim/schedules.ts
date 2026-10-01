@@ -5,6 +5,7 @@
  */
 
 import type { Scalar, Schedule } from 'aifn/foundation/contracts'
+import { definer, entries, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 
 /** The schedule η_t = η₀ / (1 + kt). */
 export const inverseTimeDecay =
@@ -23,3 +24,32 @@ export const inverseSqrtDecay =
   (initial: Scalar): Schedule =>
   (t) =>
     initial / Math.sqrt(t + 1)
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const schedule = definer<FunctionInfo>('function', 'optim')
+const LR = ['learning-rate-schedules']
+schedule(
+  { key: 'inverseTimeDecay', name: 'Inverse-time decay', tex: '\\eta_0 / (1 + k t)', role: 'construction', notes: LR },
+  inverseTimeDecay,
+)
+schedule(
+  { key: 'exponentialDecay', name: 'Exponential decay', tex: '\\eta_0 \\gamma^t', role: 'construction', notes: LR },
+  exponentialDecay,
+)
+schedule(
+  {
+    key: 'inverseSqrtDecay',
+    name: 'Inverse square-root decay',
+    tex: '\\eta_0 / \\sqrt{1 + t}',
+    role: 'construction',
+    notes: LR,
+  },
+  inverseSqrtDecay,
+)
+
+/** The step-size schedules, keyed by name. */
+export const scheduleFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', { inverseTimeDecay, exponentialDecay, inverseSqrtDecay }) as Readonly<
+    Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
+  >

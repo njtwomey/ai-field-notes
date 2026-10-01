@@ -149,6 +149,11 @@ describe('activations', () => {
     expect(grad((v: Value) => relu(v))(2)).toBe(1)
   })
 
+  it('elu has a finite gradient for large inputs (review: e^x overflowed in the unused branch, giving NaN)', () => {
+    expect(flat(grad((v: Value) => sum(elu(v)))(tensor([1000, -1000, 0.5])) as Value)).toEqual([1, 0, 1])
+    expect(flat(grad((v: Value) => sum(elu(v)))(tensor([-1])) as Value)[0]).toBeCloseTo(Math.exp(-1), 15)
+  })
+
   it('activationFn looks activations up by name', () => {
     const x = tensor([-1, 0.5])
     expect(flat(activationFn('relu')(x))).toEqual([0, 0.5])

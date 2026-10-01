@@ -36,7 +36,7 @@ def cases() -> dict[str, object]:
         "v": interpolate.make_smoothing_spline(x, y, lam=0.8)(ts),
         "vw": interpolate.make_smoothing_spline(x, y, w=w, lam=0.8)(ts),
     }
-    bary = interpolate.BarycentricInterpolator(x, y)
+    bary = interpolate.BarycentricInterpolator(x, y, random_state=0)  # it permutes the nodes randomly unless seeded
     out["polynomial"] = {"v": bary(ts), "d1": bary.derivative(ts, 1)}
 
     # B-spline design matrices (and derivatives) on a non-uniform clamped knot vector.

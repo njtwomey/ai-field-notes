@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { defaults } from 'aifn/foundation/space'
 import { learningModelRegistry } from 'aifn-applied/learning'
 import { unsupervisedModelRegistry } from 'aifn-applied/unsupervised'
+import { neuralModelRegistry } from 'aifn-applied/neural'
 import { MODEL_FIXTURES } from '../model-fixtures'
 import { expectModelProtocol } from '../registry'
 
@@ -16,7 +17,11 @@ describe('learningModelRegistry', () => {
 
 describe('model fixtures', () => {
   it('belong to registered estimators only', () => {
-    const keys = new Set([...Object.keys(learningModelRegistry), ...Object.keys(unsupervisedModelRegistry)])
+    const keys = new Set([
+      ...Object.keys(learningModelRegistry),
+      ...Object.keys(unsupervisedModelRegistry),
+      ...Object.keys(neuralModelRegistry),
+    ])
     for (const key of Object.keys(MODEL_FIXTURES)) expect(keys.has(key), key).toBe(true)
   })
 })

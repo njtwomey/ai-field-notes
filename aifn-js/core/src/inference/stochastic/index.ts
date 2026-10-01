@@ -94,4 +94,4 @@ export {
   type EssMethod,
   type RhatMethod,
 } from './diagnostics'
-export { stochasticAlgorithms } from './registry'
+export { stochasticAlgorithms, stochasticFunctions } from './registry'

@@ -363,3 +363,10 @@ describe('traceGraph', () => {
     expect(() => traceGraph((x: Value) => sum(map(x, Math.round)), tensor([0.2]))).toThrow(NotDifferentiableError)
   })
 })
+
+describe('argnums (review 2026-10-01)', () => {
+  it('refuses a repeated argnum, which would trace the argument twice and report a zero gradient', () => {
+    expect(() => grad((a: Value, b: Value) => mul(a, b), { argnums: [0, 0] })(2, 3)).toThrow(/repeat/)
+    expect(grad((a: Value, b: Value) => mul(a, b), { argnums: [1, 0] })(2, 3)).toEqual([2, 3])
+  })
+})

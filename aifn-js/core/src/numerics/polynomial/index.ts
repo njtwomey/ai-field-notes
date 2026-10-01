@@ -22,3 +22,4 @@ export {
   type PolynomialRoots,
   type ResidueOptions,
 } from './polynomial'
+export { polynomialFunctions } from './registry'

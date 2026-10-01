@@ -16,3 +16,4 @@ export {
   type RateDistortionPoint,
   type RateDistortionState,
 } from './channel'
+export { channelsAlgorithms, channelsFunctions } from './registry'

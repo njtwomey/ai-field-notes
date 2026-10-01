@@ -25,8 +25,10 @@ import { AifnError, NotDifferentiableError } from 'aifn/foundation/errors'
 import {
   add,
   avalOf,
+  conj,
   isTraced,
   mul,
+  realPart,
   stack,
   sum,
   zerosOf,
@@ -267,7 +269,8 @@ export function defineCustomVjp<A extends unknown[], R, Res>(spec: CustomVjpSpec
     pull(us).forEach((c, i) => {
       const t = tangents[i]
       if (c === null || t === null) return
-      const term = sum(mul(c, t))
+      // The ℝ² inner product Re Σ conj(c)·t (the plain Σ c·t for real values), as forward.ts's transpose trick.
+      const term = sum(realPart(mul(conj(c), t)))
       s = s === null ? term : add(s, term)
     })
     const touts: (Value | null)[] =

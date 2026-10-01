@@ -421,3 +421,25 @@ describe('the protocol helper', () => {
     expect(() => checkProtocol(impure, undefined, { steps: 6, random: true })).toThrow()
   })
 })
+
+describe('runner consistency (review 2026-10-01)', () => {
+  it('timeSliced agrees with trace when only a provisional row has been finite', async () => {
+    // Kept rows (even steps) record NaN, off-grid rows 1: a snapshot after an odd step shows a finite provisional row,
+    // which used to mark the series finite, so the NaN at the next kept step read as divergence.
+    const record = { v: (s: WalkState) => (s.t % 2 ? 1 : NaN) }
+    const full = trace(randomWalk, { x0: 0 }, 4, { every: 2, record })
+    expect(full.meta.stopped).toBe('limit')
+    let last: Trace<WalkState> | undefined
+    for await (const p of timeSliced(randomWalk, { x0: 0 }, 4, 0, { every: 2, record, schedule: (r) => r() })) last = p
+    expect(last!.meta.stopped).toBe('limit')
+    expect(last!.meta.steps).toBe(4)
+  })
+
+  it('seek refuses a stream other than the trace’s, whose states it would mix with', () => {
+    const t = trace(randomWalk, { x0: 0 }, 10, { checkpointEvery: 5, stream: toyStream('a') })
+    expect(() => seek(randomWalk, { x0: 0 }, 7, { checkpoints: t, stream: toyStream('b') })).toThrow(/not the trace/)
+    expect(seek(randomWalk, { x0: 0 }, 7, { checkpoints: t, stream: toyStream('a') }).x).toBe(
+      run(randomWalk, { x0: 0 }, 7, { stream: toyStream('a') }).x,
+    )
+  })
+})

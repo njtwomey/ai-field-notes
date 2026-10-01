@@ -76,6 +76,12 @@ export function seek<Start, S extends Status>(
   options: { checkpoints?: Trace<S> | Checkpoints<S>; stream?: Stream } = {},
 ): S {
   const c = options.checkpoints
+  // A trace's states were drawn with its own key: continuing them with another stream would mix two runs.
+  if (options.stream && c && 'meta' in c && options.stream.key.path !== c.meta.key.path)
+    throw new AifnError(
+      'seek',
+      `seek: the stream (${options.stream.key.path}) is not the trace's (${c.meta.key.path}); omit it to use the trace's`,
+    )
   const key = options.stream ? options.stream.key : c && 'meta' in c ? c.meta.key : rootKey(undefined)
   let t = 0
   let state: S | undefined
@@ -267,11 +273,18 @@ function createBuilder<S extends Status>(
   const began = now() - (r?.elapsedOffset ?? 0)
   let stopped: StopReason | null = null
 
-  /** Runs the recorders on a state; returns one row per series and whether any value was not finite. */
-  function recordRow(s: S, step: Index): { rows: [Column, ArrayLike<number>][]; nonFinite: boolean } {
+  /**
+   * Runs the recorders on a state; returns one row per series, whether any value was not finite, and the columns
+   * that saw a finite value (committed by `keepStep` only, so a provisional row shown by `snapshot` changes nothing).
+   */
+  function recordRow(
+    s: S,
+    step: Index,
+  ): { rows: [Column, ArrayLike<number>][]; nonFinite: boolean; finiteIn: Column[] } {
     const startRecord = timing === 'step' ? now() : 0
     let nonFinite = false
     const rows: [Column, ArrayLike<number>][] = []
+    const finiteIn: Column[] = []
     for (const [name, recorder] of recorders) {
       const { shape, values } = flattenRecorded(recorder(s, step) as Recorded, name)
       const column = columns.get(name)!
@@ -294,15 +307,16 @@ function createBuilder<S extends Status>(
         if (v === Infinity || v === -Infinity || (Number.isNaN(v) && column.finiteSeen)) nonFinite = true
         else if (Number.isFinite(v)) finite = true
       }
-      if (finite) column.finiteSeen = true
+      if (finite) finiteIn.push(column)
       rows.push([column, values])
     }
     if (timing === 'step') phases.record = (phases.record ?? 0) + (now() - startRecord)
-    return { rows, nonFinite }
+    return { rows, nonFinite, finiteIn }
   }
 
   function keepStep(s: S, step: Index): boolean {
-    const { rows, nonFinite } = recordRow(s, step)
+    const { rows, nonFinite, finiteIn } = recordRow(s, step)
+    for (const column of finiteIn) column.finiteSeen = true
     if (keep === 'all') states.push(s)
     index.push([step])
     if (timing === 'step') elapsed.push([now() - began])

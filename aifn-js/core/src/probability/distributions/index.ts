@@ -22,7 +22,7 @@
  *   `GammaWithScale`, Geometric on k ≥ 1, NegativeBinomial counting failures.
  *
  * Families (`distributionRegistry`: every constructor with its parameter `Space`, support and structure). Continuous: Normal, LogNormal, StudentT, Cauchy, Laplace, Logistic, Uniform, Exponential, Gamma,
- * InverseGamma, Beta, ChiSquare, Weibull, Gumbel, VonMises, TruncatedNormal. Discrete: Bernoulli, Binomial,
+ * InverseGamma, Beta, ChiSquare, FisherSnedecor (F), Weibull, Gumbel, VonMises, TruncatedNormal. Discrete: Bernoulli, Binomial,
  * Categorical, Poisson, Geometric, NegativeBinomial, Hypergeometric, DiscreteUniform. Multivariate:
  * MultivariateNormal (with `condition` and `marginal`), Dirichlet, Multinomial, Wishart. Composition: Mixture,
  * Independent, Transformed (through a monotone bijector: `affineBijector`, `expBijector`, `logBijector`,
@@ -55,6 +55,7 @@ export {
   Cauchy,
   ChiSquare,
   Exponential,
+  FisherSnedecor,
   Gamma,
   GammaWithScale,
   Gumbel,
@@ -83,7 +84,8 @@ export {
 export { Dirichlet, Multinomial, MultivariateNormal, Wishart, type MultivariateNormalSpread } from './multivariate'
 export { Independent, Mixture, Pushforward, Transformed } from './compose'
 export { hasKl, kl, klMonteCarlo, klRegistry, type KlRule } from './kl'
-export { distributionRegistry } from './registry'
+export { distributionFunctions, distributionRegistry } from './registry'
+export { univariate, type UnivariateSpec } from './util'
 export {
   crossEntropyAuto,
   entropyAuto,

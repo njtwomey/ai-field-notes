@@ -4,7 +4,7 @@
  * kernel view (profile, Gram heatmap, prior draws) and the lab's kernel picker enumerate this table.
  */
 
-import { definer, entries, type Entry, type KernelInfo } from 'aifn/foundation/registry'
+import { definer, entries, type Entry, type FunctionInfo, type KernelInfo } from 'aifn/foundation/registry'
 import { int, oneOf, real, space } from 'aifn/foundation/space'
 import * as kernels from './kernels'
 
@@ -121,4 +121,37 @@ kernel(
 export const kernelRegistry: Readonly<Record<string, Entry<(...args: never[]) => kernels.Kernel, KernelInfo>>> =
   entries<KernelInfo>('kernel', kernels) as Readonly<
     Record<string, Entry<(...args: never[]) => kernels.Kernel, KernelInfo>>
+  >
+
+const fn = definer<FunctionInfo>('function', 'learning/kernels')
+
+fn(
+  {
+    key: 'gram',
+    name: 'Gram matrix',
+    tex: 'K_{ij} = k(x_i, x_j)',
+    role: 'construction',
+    notes: ['kernel-trick', 'covariance-functions', 'positive-definite-matrices'],
+  },
+  kernels.gram,
+)
+fn(
+  { key: 'kernelDiagonal', name: 'Kernel diagonal', role: 'construction', notes: ['covariance-functions'] },
+  kernels.kernelDiagonal,
+)
+fn(
+  {
+    key: 'kernelProfile',
+    name: 'Kernel profile',
+    summary: 'k(x, x′) as a function of the distance, for plotting a stationary kernel.',
+    role: 'property',
+    notes: ['covariance-functions'],
+  },
+  kernels.kernelProfile,
+)
+
+/** The functions of the module that are not kernels, keyed by name. */
+export const kernelsFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', kernels) as Readonly<
+    Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

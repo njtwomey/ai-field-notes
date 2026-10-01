@@ -15,3 +15,4 @@ export {
   type LineSearchTrial,
   type StrongWolfeOptions,
 } from './lineSearch'
+export { lineSearchFunctions } from './registry'

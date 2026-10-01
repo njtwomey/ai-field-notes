@@ -4,7 +4,8 @@
  * codomains as support names. `Transformed` distributions, constrained parameters and the lab's pickers use this table.
  */
 
-import { definer, entries, type BijectorInfo, type Entry } from 'aifn/foundation/registry'
+import { definer, entries, type BijectorInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
+import * as reparameterise from './reparameterise'
 import { real, space } from 'aifn/foundation/space'
 import * as maps from './maps'
 
@@ -105,3 +106,18 @@ export const bijectorRegistry: Readonly<Record<string, Entry<object, BijectorInf
   'bijector',
   maps,
 ) as Readonly<Record<string, Entry<object, BijectorInfo>>>
+
+/** The functions of the module, keyed by name. */
+export const bijectorFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', {
+    transformLogDensity: definer<FunctionInfo>('function', 'probability/bijectors')(
+      {
+        key: 'transformLogDensity',
+        name: 'Transform a log density',
+        summary: 'The log density of x = f(z) in z: log p(f(z)) + log |det f′(z)|, so samplers can work unconstrained.',
+        role: 'transform',
+        notes: ['change-of-variables', 'normalising-flow', 'reparameterisation-trick'],
+      },
+      reparameterise.transformLogDensity,
+    ),
+  }) as Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>>

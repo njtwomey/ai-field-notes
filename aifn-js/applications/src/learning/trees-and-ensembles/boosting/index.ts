@@ -15,3 +15,4 @@ export {
   type GradientBoostingProblem,
   type GradientBoostingState,
 } from './ensembles'
+export { boostingAlgorithms } from './registry'

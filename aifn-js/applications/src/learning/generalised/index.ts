@@ -19,3 +19,4 @@ export {
 export { glm } from './glm'
 export { gam } from './gam'
 export { ordinalRegression } from './ordinal'
+export { generalisedAlgorithms, generalisedFunctions } from './registry'

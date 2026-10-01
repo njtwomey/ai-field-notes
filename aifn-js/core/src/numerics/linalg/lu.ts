@@ -223,7 +223,10 @@ const luOp: Op<LuParams> = definePrimitive<LuParams>({
   },
   batch: kernelBatch('numerics/linalg/lu'),
   shape: ([a]) => float64Aval([3 * a.shape[0] * a.shape[0]]),
-  doc: { summary: 'The unpacked LU factors L, U and the permutation P of PA = LU with partial pivoting.' },
+  doc: {
+    note: 'lower-upper-decomposition',
+    summary: 'The unpacked LU factors L, U and the permutation P of PA = LU with partial pivoting.',
+  },
   test: { secondOrder: true, cases: (draw) => [{ inputs: [wellConditioned(draw, 3)], params: {} }] },
 })
 
@@ -355,7 +358,10 @@ const luSolveOp: Op<SolveParams> = definePrimitive<SolveParams>({
       ? foldColumns((rhs) => luSolveOp([a, rhs], p), b, axisB, size)
       : kernelBatch<SolveParams>('numerics/linalg/luSolve')([a, b], [axisA, axisB], p, size),
   shape: ([, b]) => float64Aval(b.shape),
-  doc: { summary: 'Solve A X = B (or Aᵀ X = B) by substitution with the LU factor of A.' },
+  doc: {
+    note: 'lower-upper-decomposition',
+    summary: 'Solve A X = B (or Aᵀ X = B) by substitution with the LU factor of A.',
+  },
   test: {
     secondOrder: true,
     cases: (draw) => [
@@ -482,7 +488,7 @@ const detOp: Op<DetParams> = definePrimitive<DetParams>({
   jvp: ([t], [a], d, p) => (t === null ? null : mul(d, matrixTrace(solveForRule(a, t, p, false, 'det')))),
   batch: kernelBatch('numerics/linalg/det'),
   shape: () => float64Aval([], true),
-  doc: { summary: 'The determinant of a square matrix.' },
+  doc: { note: 'determinant', summary: 'The determinant of a square matrix.' },
   test: { secondOrder: true, cases: (draw) => [{ inputs: [wellConditioned(draw, 3)], params: {} }] },
 })
 
@@ -502,7 +508,7 @@ const logDetOp: Op<DetParams> = definePrimitive<DetParams>({
   jvp: ([t], [a], _y, p) => (t === null ? null : matrixTrace(solveForRule(a, t, p, false, 'logDet'))),
   batch: kernelBatch('numerics/linalg/logDet'),
   shape: () => float64Aval([], true),
-  doc: { summary: 'log |det A|.' },
+  doc: { note: 'determinant', summary: 'log |det A|.' },
   test: { secondOrder: true, cases: (draw) => [{ inputs: [wellConditioned(draw, 3)], params: {} }] },
 })
 

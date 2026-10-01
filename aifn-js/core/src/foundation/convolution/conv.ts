@@ -187,6 +187,7 @@ const convOp: Op<Geometry> = definePrimitive<Geometry>({
   },
   dtype: 'float',
   doc: {
+    note: 'convolution',
     summary:
       'N-dimensional convolution (or cross-correlation) of [N, C, ...S] inputs with [O, C/groups, ...K] kernels.',
     formula: 'y_{n,o,i} = \\sum_{c,a} x_{n,c,is-p+ad}\\, w_{o,c,\\hat a}',

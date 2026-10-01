@@ -15,3 +15,4 @@ export {
   multinomial,
   multivariateNormal,
 } from './samplers'
+export { samplerFunctions } from './registry'

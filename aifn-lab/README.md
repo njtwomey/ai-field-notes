@@ -1,7 +1,7 @@
 # aifn lab
 
-A standalone app for exploring aifn: every module's specimens, each a page of figures. It depends on `aifn` and
-third-party packages only (`make lab-check` enforces the boundary).
+A standalone app for exploring aifn: every module's specimens, each a page of figures. It depends on `aifn`, `aifn-applied`,
+`aifn-js/modules.json` and third-party packages only (`make lab-check` enforces the boundary).
 
 | Command          | What it does                                                                            |
 | ---------------- | --------------------------------------------------------------------------------------- |

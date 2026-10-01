@@ -306,6 +306,30 @@ describe('SVD, pinv, lstsq and condition numbers against numpy', () => {
     expect(toFlat(zero.S)).toEqual([0, 0])
     expect(distance(matmul(transpose(zero.U), zero.U), eye(2))).toBeLessThan(1e-15)
   })
+  it('converges on a rank-deficient square matrix whose null column underflows (review regression)', () => {
+    // A null column driven to ~1e-157 has a subnormal squared norm; the convergence test used to rotate it forever.
+    const A = tensor([
+      [1, 2, 3],
+      [2, 4, 6],
+      [1, 0, 1],
+    ])
+    const r = svd(A)
+    expect(r.converged).toBe(true)
+    expect(toFlat(r.S)[2]).toBeLessThan(1e-14)
+    expect(distance(matmul(matmul(r.U, diag(r.S)), transpose(r.V)), A)).toBeLessThan(1e-14)
+  })
+  it('keeps a singular value near 1e-300 instead of underflowing it to 0 (review regression)', () => {
+    expect(
+      toFlat(
+        svd(
+          tensor([
+            [1e-300, 0],
+            [0, 1],
+          ]),
+        ).S,
+      ),
+    ).toEqual([1, 1e-300])
+  })
   it('pinv, including a rank-deficient matrix', () => {
     expectClose(pinv(T('tall')), F.pinvTall, 1e-13)
     expectClose(pinv(T('wide')), F.pinvWide, 1e-13)

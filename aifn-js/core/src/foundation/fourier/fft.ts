@@ -286,6 +286,7 @@ const fftOp: Op<LineParams> = definePrimitive<LineParams>({
   shape: ([x], { axis }) => resized(x, axis, x.shape[x.shape.length + axis], false),
   batch: ([x], [b], p) => [fftOp([batchToFront(x, b ?? 0)], p), 0],
   doc: {
+    note: 'fast-fourier-transform',
     summary: 'The discrete Fourier transform along an axis (radix-2 or Bluestein).',
     formula: 'X_k = s \\sum_{t=0}^{n-1} x_t e^{-2\\pi i kt/n}',
   },
@@ -302,6 +303,7 @@ const ifftOp: Op<LineParams> = definePrimitive<LineParams>({
   shape: ([x], { axis }) => resized(x, axis, x.shape[x.shape.length + axis], false),
   batch: ([x], [b], p) => [ifftOp([batchToFront(x, b ?? 0)], p), 0],
   doc: {
+    note: 'discrete-fourier-transform',
     summary: 'The inverse discrete Fourier transform along an axis.',
     formula: 'x_t = s \\sum_{k=0}^{n-1} X_k e^{2\\pi i kt/n}',
   },
@@ -344,6 +346,7 @@ const rfftOp: Op<RealParams> = definePrimitive<RealParams>({
   },
   batch: ([x], [b], p) => [rfftOp([batchToFront(x, b ?? 0)], p), 0],
   doc: {
+    note: 'fast-fourier-transform',
     summary: 'The DFT of a real signal at its non-negative frequencies k = 0, …, ⌊n/2⌋.',
     formula: 'X_k = s \\sum_{t=0}^{n-1} x_t e^{-2\\pi i kt/n}, \\; 0 \\le k \\le \\lfloor n/2 \\rfloor',
   },
@@ -388,6 +391,7 @@ const irfftOp: Op<RealParams> = definePrimitive<RealParams>({
   shape: ([x], { axis, n }) => resized(x, axis, n, true),
   batch: ([x], [b], p) => [irfftOp([batchToFront(x, b ?? 0)], p), 0],
   doc: {
+    note: 'discrete-fourier-transform',
     summary: 'The real signal of length n whose non-negative half-spectrum is the input (Hermitian extension).',
     formula: 'x_t = s \\sum_{k=0}^{n-1} X_k e^{2\\pi i kt/n}, \\; X_{n-k} = \\overline{X_k}',
   },

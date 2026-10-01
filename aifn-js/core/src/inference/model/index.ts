@@ -83,3 +83,4 @@ export {
   type ModelDiscreteGraph,
   type ModelFactorGraph,
 } from './structure'
+export { modelFunctions } from './registry'

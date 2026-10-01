@@ -12,3 +12,4 @@
 
 export { implicitFixedPoint, implicitRoot, type ImplicitOptions } from './implicit'
 export { atConvergence, type AtConvergenceOptions } from './convergence'
+export { implicitFunctions } from './registry'

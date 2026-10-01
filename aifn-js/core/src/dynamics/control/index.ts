@@ -5,3 +5,4 @@
 
 export { closedLoopPoles, dlqr, lqr, type LqrResult, type StateFeedbackPlant } from './lqr'
 export { ackermann, type PolePlacement } from './ackermann'
+export { controlFunctions } from './registry'

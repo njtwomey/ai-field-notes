@@ -117,6 +117,15 @@ describe('pytree update rules match torch.optim', () => {
     close(toFlat(out.a), [-1.2, 0], 1e-15)
     expect(out.b).toBeCloseTo(-1.6, 15)
   })
+
+  it('clipByGlobalNorm scales huge gradients to the bound, not to 0 (review regression: ‖g‖² overflowed)', () => {
+    const g = { a: tensor([3e200, 0]), b: 4e200 }
+    expect(globalNorm(g)).toBeCloseTo(5e200, -186)
+    const clip = clipByGlobalNorm(1)
+    const clipped = clip.update(g, clip.init(g)).updates as { a: Tensor; b: number }
+    close(toFlat(clipped.a), [0.6, 0], 1e-15)
+    expect(clipped.b).toBeCloseTo(0.8, 15)
+  })
 })
 
 describe('first-order methods', () => {

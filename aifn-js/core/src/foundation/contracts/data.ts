@@ -62,7 +62,7 @@ export interface DatasetMeta {
   readonly name: string
   /** One or two sentences for a caption: how the data were made and what the labels mean. */
   readonly description: string
-  readonly task: Task | 'manifold' | 'sequence' | 'images' | 'recommendation'
+  readonly task: Task | 'manifold' | 'sequence' | 'images' | 'recommendation' | 'text'
   readonly featureNames?: readonly string[]
   readonly labelNames?: readonly string[]
   readonly targetName?: string
@@ -90,11 +90,11 @@ export interface Dataset<X extends Features = Features, Y = Tensor> extends Kind
 
 /**
  * What a dataset generator returns: a `Dataset` (the only form a recipe can start from), several (`datasets`), a
- * sequence with hidden states, a series, an image tensor, a set of binary patterns, ratings, a click log or a
- * catalogue.
+ * sequence with hidden states, a series, an image tensor, a set of binary patterns, ratings, a click log, a
+ * catalogue or a text corpus.
  */
 export type DatasetOutput =
-  'dataset' | 'datasets' | 'sequence' | 'series' | 'image' | 'patterns' | 'ratings' | 'clicks' | 'catalogue'
+  'dataset' | 'datasets' | 'sequence' | 'series' | 'image' | 'patterns' | 'ratings' | 'clicks' | 'catalogue' | 'corpus'
 
 /**
  * Registry metadata of a dataset generator: its task, its knobs (the scalar options, with the generator's defaults),

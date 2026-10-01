@@ -47,3 +47,4 @@ export {
   type PowerLambda,
   type PowerTransform,
 } from './power'
+export { preprocessingFunctions } from './registry'

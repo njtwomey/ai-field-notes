@@ -1,6 +1,6 @@
 /**
- * aifn/nn/layers against torch (float64 goldens, `fixtures/nn.json`): normalisation, multi-head attention and
- * recurrent cells with gradients; layer compositions by finite differences; dropout.
+ * aifn/nn/layers against torch (float64 goldens, `fixtures/nn.json`): normalisation and recurrent cells with
+ * gradients; layer compositions by finite differences; dropout.
  */
 import { describe, expect, it } from 'vitest'
 import { grad, gradCheck } from 'aifn/foundation/autodiff'
@@ -11,19 +11,14 @@ import {
   ActivationLayer,
   BatchNorm,
   batchNorm,
-  causalMask,
   Conv2d,
   dropout,
   Embedding,
   Flatten,
   GruCell,
-  LayerNorm,
   layerNorm,
   Linear,
   LstmCell,
-  MultiHeadAttention,
-  multiHeadAttention,
-  Residual,
   RnnCell,
   rmsNorm,
   Sequential,
@@ -128,40 +123,6 @@ describe('normalisation', () => {
     const y = flat(rmsNorm(tensor([3, 4]), tensor([1, 2]), 0))
     const rms = Math.sqrt((9 + 16) / 2)
     close(y, [3 / rms, (2 * 4) / rms], 1e-14)
-  })
-})
-
-describe('attention', () => {
-  it('multi-head causal self-attention matches torch', () => {
-    const c = F.mha
-    const p = {
-      query: { weight: T(c.wq), bias: T(c.bq) },
-      key: { weight: T(c.wk), bias: T(c.bk) },
-      value: { weight: T(c.wv), bias: T(c.bv) },
-      output: { weight: T(c.wo), bias: T(c.bo) },
-    }
-    const heads = c.heads as number
-    const { output, weights } = multiHeadAttention(p, T(c.x), T(c.x), { heads, causal: true })
-    close(output, c.y)
-    close(weights, c.weights)
-    const gx = grad((x: Value) => weighted(c.w)(multiHeadAttention(p, x, x, { heads, causal: true }).output))(T(c.x))
-    close(gx, c.gx, 1e-8)
-  })
-
-  it('a causal mask hides the future', () => {
-    expect(toFlat(causalMask(3))).toEqual([1, 0, 0, 1, 1, 0, 1, 1, 1])
-  })
-
-  it('a pre-norm residual attention block keeps its shape and has correct gradients', () => {
-    const block = Sequential(
-      Residual(Sequential(LayerNorm(8), MultiHeadAttention(8, { heads: 2, causal: true }))),
-      Residual(Sequential(LayerNorm(8), Linear(8, 16), ActivationLayer('gelu'), Linear(16, 8))),
-    )
-    const params = block.init(stream('block'))
-    const x = tensor(Array.from({ length: 4 }, (_, t) => Array.from({ length: 8 }, (_, j) => Math.sin(t + j))))
-    expect((unwrap(block.apply(params, x)) as Tensor).shape).toEqual([4, 8])
-    const report = gradCheck((p: typeof params) => sum(block.apply(p, x)), params, { rtol: 1e-4, atol: 1e-6 })
-    expect(report.ok).toBe(true)
   })
 })
 

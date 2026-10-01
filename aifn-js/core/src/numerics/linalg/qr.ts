@@ -21,7 +21,9 @@ import {
   type Value,
 } from 'aifn/foundation/tensor'
 import { NotDifferentiableError, NumericalError } from 'aifn/foundation/errors'
-import { dense, EPS, matrix } from './dense'
+import type { MatrixLike, Status } from 'aifn/foundation/contracts'
+import type { Algorithm } from 'aifn/foundation/trace'
+import { asMatrix, dense, EPS, matrix, vector } from './dense'
 import {
   concreteExamples,
   float64Aval,
@@ -43,7 +45,47 @@ export type QR<T = Tensor> = {
   R: T
 }
 
-/** Householder QR of a dense copy of A. */
+/**
+ * One Householder step on the row-major m×n working matrix r, in place: the reflector H = I − τvvᵀ (v[0] = 1, stored
+ * from row j) that maps column j below the diagonal to −sign(α)·‖x‖·e₁, applied to columns j … n − 1. A column already
+ * zero below the diagonal gives H = I (τ = 0), as `dlarfg`. `qr` and `householderSteps` both run this step.
+ */
+function reflectColumn(r: Float64Array, m: number, n: number, j: number): { v: Float64Array; tau: number } {
+  const alpha = r[j * n + j]
+  let sigma = 0
+  for (let i = j + 1; i < m; i++) sigma += r[i * n + j] * r[i * n + j]
+  const v = new Float64Array(m - j)
+  v[0] = 1
+  if (sigma === 0) return { v, tau: 0 }
+  const norm = Math.hypot(alpha, Math.sqrt(sigma))
+  const beta = alpha >= 0 ? -norm : norm
+  const tau = (beta - alpha) / beta
+  const scale = 1 / (alpha - beta)
+  for (let i = j + 1; i < m; i++) v[i - j] = r[i * n + j] * scale
+  // Apply H to the trailing columns of R.
+  for (let c = j; c < n; c++) {
+    let s = 0
+    for (let i = j; i < m; i++) s += v[i - j] * r[i * n + c]
+    s *= tau
+    for (let i = j; i < m; i++) r[i * n + c] -= s * v[i - j]
+  }
+  r[j * n + j] = beta
+  for (let i = j + 1; i < m; i++) r[i * n + j] = 0
+  return { v, tau }
+}
+
+/** Q ← Q·H in place for H = I − τvvᵀ acting on coordinates j … m − 1 (v stored from j); Q is m×m row-major. */
+function applyReflectorRight(q: Float64Array, m: number, v: Float64Array, tau: number, j: number): void {
+  if (tau === 0) return
+  for (let row = 0; row < m; row++) {
+    let s = 0
+    for (let i = j; i < m; i++) s += q[row * m + i] * v[i - j]
+    s *= tau
+    for (let i = j; i < m; i++) q[row * m + i] -= s * v[i - j]
+  }
+}
+
+/** Householder QR of a dense copy of A: `reflectColumn` for each of the k = min(m, n) columns, then Q. */
 function householder(a: Value, mode: 'reduced' | 'complete'): QR {
   const { m, n, a: r } = dense(a, 'qr')
   const k = Math.min(m, n)
@@ -51,31 +93,7 @@ function householder(a: Value, mode: 'reduced' | 'complete'): QR {
   const vs: Float64Array[] = []
   const taus: number[] = []
   for (let j = 0; j < k; j++) {
-    const alpha = r[j * n + j]
-    let sigma = 0
-    for (let i = j + 1; i < m; i++) sigma += r[i * n + j] * r[i * n + j]
-    const v = new Float64Array(m - j)
-    v[0] = 1
-    if (sigma === 0) {
-      // Nothing to annihilate: H = I (τ = 0), as dlarfg.
-      vs.push(v)
-      taus.push(0)
-      continue
-    }
-    const norm = Math.hypot(alpha, Math.sqrt(sigma))
-    const beta = alpha >= 0 ? -norm : norm
-    const tau = (beta - alpha) / beta
-    const scale = 1 / (alpha - beta)
-    for (let i = j + 1; i < m; i++) v[i - j] = r[i * n + j] * scale
-    // Apply H to the trailing columns of R.
-    for (let c = j; c < n; c++) {
-      let s = 0
-      for (let i = j; i < m; i++) s += v[i - j] * r[i * n + c]
-      s *= tau
-      for (let i = j; i < m; i++) r[i * n + c] -= s * v[i - j]
-    }
-    r[j * n + j] = beta
-    for (let i = j + 1; i < m; i++) r[i * n + j] = 0
+    const { v, tau } = reflectColumn(r, m, n, j)
     vs.push(v)
     taus.push(tau)
   }
@@ -96,6 +114,82 @@ function householder(a: Value, mode: 'reduced' | 'complete'): QR {
   }
   const rows = mode === 'complete' ? m : k
   return { Q: matrix(q, m, cols), R: matrix(r.slice(0, rows * n), rows, n) }
+}
+
+/** One state of `householderSteps`. */
+export interface HouseholderState extends Status {
+  /** The working matrix: columns 0 … column − 1 reduced to upper-triangular form (m×n). */
+  R: Tensor
+  /** The product H₀H₁⋯H_{column−1} of the reflectors so far (m×m, orthogonal); Q·R = A at every step. */
+  Q: Tensor
+  /** The reflector vector v of the last step, zero above its column (length m; zeros at t = 0). */
+  reflector: Tensor
+  /** τ of the last step (H = I − τvvᵀ; 0 at t = 0 or when the column was already reduced). */
+  tau: number
+  /** The next column to reduce; k = min(m, n) when done. */
+  column: number
+  /** ‖A − QR‖_F, which stays at rounding level. */
+  residual: number
+  done: boolean
+}
+
+/**
+ * Householder QR as a traceable algorithm (Golub and Van Loan, 2013, Algorithm 5.2.1): each step reflects one column
+ * onto a multiple of e₁ below the diagonal and applies the reflector to the trailing columns, so after step j the first
+ * j columns of R are upper triangular and Q = H₀⋯H_{j−1} is orthogonal with QR = A throughout. Done after
+ * k = min(m, n) steps. The step is `qr`'s own (`reflectColumn`); `qr` runs it without keeping states.
+ */
+export function householderSteps(A: MatrixLike): Algorithm<void, HouseholderState> {
+  const { m, n, a: a0 } = dense(asMatrix(A, 'householderSteps'), 'householderSteps')
+  const k = Math.min(m, n)
+  const residual = (q: Float64Array, r: Float64Array) => {
+    let s = 0
+    for (let i = 0; i < m; i++)
+      for (let c = 0; c < n; c++) {
+        let qr = 0
+        for (let l = 0; l < m; l++) qr += q[i * m + l] * r[l * n + c]
+        s += (a0[i * n + c] - qr) ** 2
+      }
+    return Math.sqrt(s)
+  }
+  return {
+    name: 'householder-qr',
+    init: () => {
+      const q = new Float64Array(m * m)
+      for (let i = 0; i < m; i++) q[i * m + i] = 1
+      return {
+        t: 0,
+        R: matrix(Float64Array.from(a0), m, n),
+        Q: matrix(q, m, m),
+        reflector: vector(new Float64Array(m)),
+        tau: 0,
+        column: 0,
+        residual: 0,
+        done: k === 0,
+      }
+    },
+    step: (s) => {
+      if (s.done) return { ...s, t: s.t + 1 }
+      const j = s.column
+      const r = dense(s.R, 'householderSteps').a
+      const q = dense(s.Q, 'householderSteps').a
+      const { v, tau } = reflectColumn(r, m, n, j)
+      applyReflectorRight(q, m, v, tau, j)
+      const full = new Float64Array(m)
+      full.set(v, j)
+      return {
+        t: s.t + 1,
+        R: matrix(r, m, n),
+        Q: matrix(q, m, m),
+        reflector: vector(full),
+        tau,
+        column: j + 1,
+        residual: residual(q, r),
+        done: j + 1 === k,
+      }
+    },
+    done: (s) => s.done,
+  }
 }
 
 /** X R⁻¹ for upper-triangular R. */
@@ -197,7 +291,7 @@ const qrOp: Op<undefined> = definePrimitive<undefined>({
     const k = Math.min(m, n)
     return float64Aval([m * k + k * n])
   },
-  doc: { summary: 'The reduced QR factorisation by Householder reflections.' },
+  doc: { note: 'qr-decomposition', summary: 'The reduced QR factorisation by Householder reflections.' },
   test: {
     rtol: 1e-4,
     cases: (draw) => [

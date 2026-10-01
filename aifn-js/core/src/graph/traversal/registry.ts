@@ -4,7 +4,7 @@
  * view picks default series and a worker can address an algorithm by key (design S §2.3).
  */
 
-import { definer, entries, type AlgorithmInfo, type Entry } from 'aifn/foundation/registry'
+import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as components from './components'
 import * as order from './order'
 import * as traversal from './traversal'
@@ -50,4 +50,41 @@ algorithm(
 export const traversalAlgorithms: Readonly<Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>> =
   entries<AlgorithmInfo>('algorithm', components, order, traversal) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>
+  >
+
+const fn = definer<FunctionInfo>('function', 'graph/traversal')
+
+fn({ key: 'breadthFirstSearch', name: 'Breadth-first search', role: 'solver' }, traversal.breadthFirstSearch)
+fn({ key: 'depthFirstSearch', name: 'Depth-first search', role: 'solver' }, traversal.depthFirstSearch)
+fn({ key: 'iterativeDeepening', name: 'Iterative deepening', role: 'solver' }, traversal.iterativeDeepening)
+fn(
+  { key: 'unweightedShortestPaths', name: 'Unweighted shortest paths', role: 'solver' },
+  traversal.unweightedShortestPaths,
+)
+fn(
+  { key: 'topologicalSort', name: 'Topological sort', role: 'solver', notes: ['bayesian-network'] },
+  order.topologicalSort,
+)
+fn({ key: 'isDag', name: 'Is a DAG', role: 'property', notes: ['bayesian-network'] }, order.isDag)
+fn({ key: 'findCycle', name: 'Find a cycle', role: 'solver' }, order.findCycle)
+fn(
+  {
+    key: 'connectedComponents',
+    name: 'Connected components',
+    role: 'solver',
+    notes: ['density-based-spatial-clustering'],
+  },
+  components.connectedComponents,
+)
+fn(
+  { key: 'stronglyConnectedComponents', name: 'Strongly connected components', role: 'solver' },
+  components.stronglyConnectedComponents,
+)
+fn({ key: 'condensation', name: 'Condensation', role: 'transform' }, components.condensation)
+fn({ key: 'bipartite', name: 'Bipartition', role: 'property' }, components.bipartite)
+
+/** The functions of the module, keyed by name. */
+export const traversalFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', traversal, order, components) as Readonly<
+    Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

@@ -14,4 +14,4 @@ export {
   type MaxFlowResult,
   type MinCostFlowState,
 } from './flows'
-export { flowsAlgorithms } from './registry'
+export { flowsAlgorithms, flowsFunctions } from './registry'

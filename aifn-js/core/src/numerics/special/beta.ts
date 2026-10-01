@@ -122,7 +122,9 @@ function lowerTailInverse(a: number, b: number, logP: number, xMax: number): num
       const x2 = Math.exp(next)
       const g2 = logRegularisedBeta(a, b, x2) - logP
       const slope2 = Math.exp(a * next + (b - 1) * Math.log1p(-x2) - lbeta - (g2 + logP))
-      return Math.exp(next - g2 / slope2)
+      const last = next - g2 / slope2
+      // Where the root underflows (x2 = 0), the polishing step is −∞/∞; keep the last iterate.
+      return Math.exp(Number.isFinite(last) ? last : next)
     }
     s = next
   }

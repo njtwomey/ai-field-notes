@@ -9,3 +9,4 @@ export {
   type NormalProjection,
   type NormalProjectionOptions,
 } from './projection'
+export { projectionFunctions } from './registry'

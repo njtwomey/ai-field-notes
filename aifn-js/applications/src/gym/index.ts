@@ -93,3 +93,4 @@ export function validPairs(): { environment: string; agent: string }[] {
       if (compatible(e.info, a.info)) out.push({ environment: e.info.key, agent: a.info.key })
   return out
 }
+export { gymFunctions } from './registry'

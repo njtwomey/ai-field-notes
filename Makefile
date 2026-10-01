@@ -1,6 +1,6 @@
 # Common tasks. `make help` lists them.
 .DEFAULT_GOAL := help
-.PHONY: help install dev contracts assets content doctor links lint aifn-layers aifn-names catalog catalog-check format typecheck test bench check build preview clean
+.PHONY: help install dev contracts assets content doctor links wrap lint aifn-layers aifn-names catalog catalog-check format typecheck test bench fixtures lab-check lab-shots lab check build preview clean
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -60,9 +60,10 @@ typecheck: ## Type-check TypeScript and Python
 	npx tsc -b
 	uv run pyright
 
-test: aifn-layers ## Run the aifn-js tests (core and applications) and the Python core tests
+test: aifn-layers aifn-names ## Run the aifn-js tests (core and applications) and the Python core tests
 	npx vitest run --config aifn-js/core/vitest.config.ts
-	npx vitest run --config aifn-js/applications/vitest.config.ts
+	@# The name lint (test/names.test.ts) already ran as the aifn-names prerequisite; make runs a prerequisite once.
+	npx vitest run --config aifn-js/applications/vitest.config.ts --exclude test/names.test.ts
 	uv run pytest
 
 bench: ## Run the aifn core micro-benchmarks (reported, not gated; not part of check)

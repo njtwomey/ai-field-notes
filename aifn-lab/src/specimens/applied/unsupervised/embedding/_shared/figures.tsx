@@ -161,8 +161,20 @@ export function NeighbourEmbeddingSpecimen() {
       },
       { label: '1 · method', choiceLabel: 'method' },
     ),
+    view: row('2 · axes', {
+      frame: choice(
+        [
+          { value: 'run', label: 'whole run' },
+          { value: 'grow', label: 'grow only' },
+          { value: 'step', label: 'each step' },
+        ],
+        'run',
+        { label: 'axes frame' },
+      ),
+    }),
   })
   const method = state.method.key
+  const frame = state.view.frame
   const perplexity = state.method.key === 'tsne' ? state.method.values.perplexity : 15
   const neighbours = state.method.key === 'umap' ? state.method.values.neighbours : 12
   const [step, setStep] = useState(0)
@@ -204,9 +216,29 @@ export function NeighbourEmbeddingSpecimen() {
   const k = Math.min(Math.round(step / (method === 'tsne' ? 10 : 2)), run.steps.length - 1)
   const e = run.steps[k]
   const layout = useMemo(() => ({ x: e.map((r) => r[0]), y: e.map((r) => r[1]) }), [e])
-  // Only relative positions matter, so the axes refit to every frame.
-  const z0 = useAxis({ label: 'z₀' })
-  const z1 = useAxis({ label: 'z₁', equal: z0 })
+  // The layout spreads out over the run (t-SNE starts at a spread of 1e-4), so refitting every frame makes the axes jump.
+  // 'whole run' fixes them to the extent of every recorded step; 'grow' widens and never shrinks; 'step' refits.
+  const runRange = useMemo(() => {
+    let lo = Infinity
+    let hi = -Infinity
+    for (const rows of run.steps)
+      for (const r of rows) {
+        lo = Math.min(lo, r[0], r[1])
+        hi = Math.max(hi, r[0], r[1])
+      }
+    const pad = 0.05 * (hi - lo || 1)
+    return [lo - pad, hi + pad] as [number, number]
+  }, [run])
+  const key = `${method}:${perplexity}:${neighbours}`
+  const z0 = useAxis({
+    label: 'z₀',
+    ...(frame === 'run' ? { range: runRange, key } : frame === 'grow' ? { hold: 'union' as const, key } : {}),
+  })
+  const z1 = useAxis({
+    label: 'z₁',
+    equal: z0,
+    ...(frame === 'run' ? { range: runRange, key } : frame === 'grow' ? { hold: 'union' as const, key } : {}),
+  })
   return (
     <Figure
       title="t-SNE and UMAP layouts, iteration by iteration"
@@ -215,7 +247,7 @@ export function NeighbourEmbeddingSpecimen() {
       defaultSize="L"
       controls={
         <>
-          <ControlRow label="2 · iterations">
+          <ControlRow label="3 · iterations">
             <Player
               value={k}
               onChange={(i) => setStep(run.index[i])}
@@ -233,7 +265,7 @@ export function NeighbourEmbeddingSpecimen() {
           <Readout label="points" value={e.length} />
         </>
       }
-      caption="Noisy 5 × 7 digit glyphs (35 dimensions), classes 0 to 7, coloured by digit. t-SNE's first 250 iterations exaggerate P, which pulls clusters apart early; UMAP starts from a spectral layout and its learning rate falls to zero. Press play from iteration 0 (the random or spectral start); the axes refit to each frame, since only relative positions matter."
+      caption="Noisy 5 × 7 digit glyphs (35 dimensions), classes 0 to 7, coloured by digit. t-SNE's first 250 iterations exaggerate P, which pulls clusters apart early; UMAP starts from a spectral layout and its learning rate falls to zero. Press play from iteration 0 (the random or spectral start). The axes are fixed to the whole run's extent by default, so the layout's growth shows (t-SNE's tiny random start is a dot at first); “grow only” widens them as the layout spreads, and “each step” refits every frame, since only relative positions matter."
     >
       <Plot x={z0} y={z1} legend={false}>
         <Points

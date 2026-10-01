@@ -11,6 +11,7 @@ import {
   diag,
   diagonal,
   div,
+  greater,
   isTraced,
   matmul,
   mul,
@@ -23,6 +24,7 @@ import {
   type TensorResult,
   transpose,
   type Value,
+  where,
 } from 'aifn/foundation/tensor'
 import { NumericalError, ShapeError } from 'aifn/foundation/errors'
 import { dense, EPS, matrix, vector } from './dense'
@@ -67,6 +69,9 @@ type Jacobi = {
   converged: boolean
 }
 
+/** The smallest normal double: a squared column norm below it has lost its precision to underflow. */
+const SUBNORMAL_SQUARE = 2.2250738585072014e-308
+
 /** One-sided Jacobi on an m×n matrix with m ≥ n (row-major in `a`, overwritten). */
 function jacobi(a: Float64Array, m: number, n: number, maxSweeps: number): Jacobi {
   const V = new Float64Array(n * n)
@@ -87,7 +92,11 @@ function jacobi(a: Float64Array, m: number, n: number, maxSweeps: number): Jacob
           beta += y * y
           gamma += x * y
         }
-        if (gamma === 0 || Math.abs(gamma) <= EPS * Math.sqrt(alpha * beta)) continue
+        // A column whose squared norm is subnormal (norm below about 1.5e-154, as a rank-deficient input's null column
+        // becomes) cannot have its orthogonality measured, and rotating it never converges: treat it as done. √α·√β
+        // rather than √(αβ), which underflows sooner.
+        if (gamma === 0 || Math.min(alpha, beta) < SUBNORMAL_SQUARE) continue
+        if (Math.abs(gamma) <= EPS * Math.sqrt(alpha) * Math.sqrt(beta)) continue
         rotated = true
         const zeta = (beta - alpha) / (2 * gamma)
         const t = (zeta >= 0 ? 1 : -1) / (Math.abs(zeta) + Math.sqrt(1 + zeta * zeta))
@@ -114,9 +123,12 @@ function jacobi(a: Float64Array, m: number, n: number, maxSweeps: number): Jacob
   }
   const S = new Float64Array(n)
   for (let j = 0; j < n; j++) {
+    // Scaled by the column's largest entry, so a singular value near 1e-300 does not underflow to 0 when squared.
+    let big = 0
+    for (let i = 0; i < m; i++) big = Math.max(big, Math.abs(a[i * n + j]))
     let s = 0
-    for (let i = 0; i < m; i++) s += a[i * n + j] * a[i * n + j]
-    S[j] = Math.sqrt(s)
+    if (big > 0) for (let i = 0; i < m; i++) s += (a[i * n + j] / big) ** 2
+    S[j] = big * Math.sqrt(s)
   }
   return { U: a, S, V, m, n, sweeps, converged }
 }
@@ -280,7 +292,11 @@ const svdOp: Op<Params> = definePrimitive<Params>({
         return !gUc || Array.from({ length: m }, (_, i) => gUc[i * n + j]).some((v) => v !== 0)
       })
       const projected = sub(gU, matmul(U, UtgU))
-      ga = add(ga, matmul(mul(projected, reshape(div(1, s), [1, n])), transpose(V)))
+      // A zero singular value passes the check above only when its column of Ū is zero, so its projected column is
+      // exactly zero: divide it by 1 rather than 0 (0 · ∞ would be NaN).
+      const nonzero = greater(s, 0)
+      const inverse = where(nonzero, div(1, where(nonzero, s, 1)), 0)
+      ga = add(ga, matmul(mul(projected, reshape(inverse, [1, n])), transpose(V)))
     }
     return [ga]
   },
@@ -314,7 +330,7 @@ const svdOp: Op<Params> = definePrimitive<Params>({
     const [m, n] = a.shape
     return float64Aval([m * n + n + n * n])
   },
-  doc: { summary: 'The thin singular value decomposition of a tall matrix.' },
+  doc: { note: 'singular-value-decomposition', summary: 'The thin singular value decomposition of a tall matrix.' },
   test: {
     rtol: 1e-4,
     cases: (draw) => [{ inputs: [draw([4, 3])], params: { maxSweeps: 60, signOn: 'V' } }],

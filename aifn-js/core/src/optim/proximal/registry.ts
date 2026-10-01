@@ -4,7 +4,7 @@
  * view picks default series and a worker can address an algorithm by key (design S §2.3).
  */
 
-import { definer, entries, type AlgorithmInfo, type Entry } from 'aifn/foundation/registry'
+import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 import * as proximal from './proximal'
 
 const algorithm = definer<AlgorithmInfo>('algorithm', 'optim/proximal')
@@ -58,4 +58,66 @@ algorithm(
 export const proximalAlgorithms: Readonly<Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>> =
   entries<AlgorithmInfo>('algorithm', proximal) as Readonly<
     Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>
+  >
+
+const fn = definer<FunctionInfo>('function', 'optim/proximal')
+const PROX = ['proximal-gradient-methods']
+
+fn({ key: 'projectBox', name: 'Projection onto a box', role: 'transform', notes: PROX }, proximal.projectBox)
+fn(
+  { key: 'projectNonnegative', name: 'Projection onto the non-negative orthant', role: 'transform', notes: PROX },
+  proximal.projectNonnegative,
+)
+fn({ key: 'projectBall', name: 'Projection onto a ball', role: 'transform', notes: PROX }, proximal.projectBall)
+fn(
+  {
+    key: 'projectSimplex',
+    name: 'Projection onto the simplex',
+    role: 'transform',
+    notes: [...PROX, 'sampling-the-simplex'],
+  },
+  proximal.projectSimplex,
+)
+fn({ key: 'proxZero', name: 'Proximal operator of zero (identity)', role: 'transform', notes: PROX }, proximal.proxZero)
+fn(
+  {
+    key: 'proxL1',
+    name: 'Soft thresholding (prox of the L1 norm)',
+    tex: '\\operatorname{sign}(x)\\max(|x| - \\lambda, 0)',
+    role: 'transform',
+    notes: [...PROX, 'subgradients'],
+    cite: ['parikh2014'],
+  },
+  proximal.proxL1,
+)
+fn(
+  {
+    key: 'proxL2',
+    name: 'Block soft thresholding (prox of the L2 norm)',
+    role: 'transform',
+    notes: PROX,
+    cite: ['parikh2014'],
+  },
+  proximal.proxL2,
+)
+fn(
+  {
+    key: 'proxSquaredL2',
+    name: 'Prox of the squared L2 norm (shrinkage)',
+    role: 'transform',
+    notes: PROX,
+    cite: ['parikh2014'],
+  },
+  proximal.proxSquaredL2,
+)
+fn({ key: 'proxBox', name: 'Prox of a box indicator', role: 'transform', notes: PROX }, proximal.proxBox)
+fn(
+  { key: 'proxNonnegative', name: 'Prox of the non-negativity indicator', role: 'transform', notes: PROX },
+  proximal.proxNonnegative,
+)
+
+/** The functions of the module, keyed by name. */
+export const proximalFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', proximal) as Readonly<
+    Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>
   >

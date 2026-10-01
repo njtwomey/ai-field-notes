@@ -65,3 +65,4 @@ export {
 export type { FitState } from './fit'
 export { stateSpaceEm, type EmEstimate, type StateSpaceEmState } from './state-space'
 export { constantVelocityModel, type ConstantVelocityOptions } from './tracking'
+export { timeseriesAlgorithms, timeseriesFunctions } from './registry'

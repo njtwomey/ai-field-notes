@@ -32,4 +32,4 @@ export {
   type IirOptions,
   type ResponseOptions,
 } from './filters'
-export { filterDesignRegistry } from './registry'
+export { filterDesignRegistry, filtersFunctions } from './registry'

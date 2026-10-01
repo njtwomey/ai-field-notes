@@ -15,14 +15,14 @@ Decisions that need the owner are collected in §10, each with a recommendation.
 planned is in "Status (2026-10-01)" below and in a status line at the head of each section.
 
 > **Decided (2026-09-30): core and applications.** aifn-js holds two workspace packages:
-> `aifn-js/core` (package `aifn`, imported as `aifn/<module>`) and `aifn-js/applications` (package `aifn-applied`,
+> `aifn-js/core` (package `aifn`, imported as `aifn/<family>/<module>`) and `aifn-js/applications` (package `aifn-applied`,
 > imported as `aifn-applied/<area>`). Details and the per-module classification: `.scratch/aifn/core-vs-apps.md`.
 >
 > - **Core** holds what passes all of: C1 its interface names no model, problem or dataset; C2 at least two areas (or
 >   core modules) use it; C3 it is testable against a reference or a law; C4 it is Tensor-native; C5 it does not change
 >   when a note or figure does. **Or** C6: other core code depends on it (foundations such as `zeros`, the `*Like`
 >   input types and `Value` are core because the rest of core is built on them, not because they are capabilities).
-> - **Contracts.** `aifn/contracts` (tier 0, types only) is where the shapes and signatures are defined once: `Value`,
+> - **Contracts.** `aifn/foundation/contracts` (tier 0, types only) is where the shapes and signatures are defined once: `Value`,
 >   `TensorLike`/`VectorLike`/`MatrixLike` and the other input aliases, the protocol interfaces (Algorithm, Trace,
 >   Status, Distribution, LogDensity, Bijector, Objective, Kernel, Model and capabilities, Dataset and Recipe types,
 >   Metric/Loss info, Graph/Tree, Signal, Spectrum, LtiSystem, Decomposition, Space, registry Info), and the function
@@ -31,11 +31,12 @@ planned is in "Status (2026-10-01)" below and in a status line at the head of ea
 >   Integer metadata keeps its own names (`Size`, `Axis`, `Index`, `Shape`), so a scalar value and a count are never
 >   confused in a signature. Implementations are checked against them
 >   (`satisfies`); no module defines its own alias. The generated API reports record every concrete export.
-> - **Applications** are named models, problems, environments, datasets and worked examples, in 15 areas (learning,
->   unsupervised, inference, timeseries, signals, vision, dynamics, decisions, generative, neural, retrieval,
->   evaluation, information, algorithms, data). All datasets, generators, modifiers, test objectives and environments
->   are in `data`. Applications import core and lower areas; core never imports applications; didactic code that is
->   itself a lesson lives here, written to be read, not in notes. An application is promoted to core when C1–C5 hold.
+> - **Applications** are named models, problems, environments, datasets and worked examples, in 17 areas (learning,
+>   unsupervised, inference, timeseries, signals, text, vision, dynamics, gym, generative, neural, retrieval,
+>   evaluation, information, algorithms, data, interpreter). All datasets, generators, modifiers, test objectives and
+>   environments are in `data`. Applications import core and lower areas; core never imports applications; didactic
+>   code that is itself a lesson lives here, written to be read, not in notes. An application is promoted to core when
+>   C1–C5 hold.
 > - Presentation code that the paper assigned to "aifn-ui" (grid sampling for drawing, LTTB decimation) goes to the lab.
 >
 > **Decided (2026-09-30): break freely.** Until the site consumes aifn, refactors go straight to the target shape:
@@ -126,7 +127,7 @@ aifn-js (package aifn): numerics and models, no React, no DOM ◀── generate
             autodiff, random, space, trace)                                                          fixtures,
     tier 1  numerics   2  graph   3  probability, optim, systems                                        figure data,
     tier 4  inference, dynamics, signal, transport   5  learning   6  nn                                examples
-aifn-applied: 15 areas over core (learning, …, data)
+aifn-applied: 17 areas over core (learning, …, data)
 ```
 
 **Status:** built, except aifn-py (phase 6) and the site's use of aifn (phase 8). The tier list in the diagram above

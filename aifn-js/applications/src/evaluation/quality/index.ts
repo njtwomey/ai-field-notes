@@ -15,3 +15,4 @@ export {
   type Image,
   type SsimOptions,
 } from './signal'
+export { qualityFunctions } from './registry'

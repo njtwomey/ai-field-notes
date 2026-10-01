@@ -69,4 +69,4 @@ export {
 } from './responses'
 export { discretise, feedback, parallel, series, stateFeedback, type DiscretisationMethod } from './transform'
 export { placePoles, type PlacePolesOptions, type PolePlacementResult } from './placement'
-export { systemsAlgorithms } from './registry'
+export { systemsAlgorithms, systemsFunctions } from './registry'

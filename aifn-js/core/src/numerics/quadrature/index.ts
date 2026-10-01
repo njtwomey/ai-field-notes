@@ -45,4 +45,4 @@ export {
   type MonteCarloState,
   type MultivariateIntegrand,
 } from './multivariate'
-export { quadratureAlgorithms } from './registry'
+export { quadratureAlgorithms, quadratureFunctions } from './registry'

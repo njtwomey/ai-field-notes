@@ -41,4 +41,4 @@ export {
 } from './systems'
 export { findRoot, solveSystem, type RootResult, type SystemResult } from './convenience'
 export { minimizeScalar, type MinimizeScalarOptions, type MinimizeScalarResult } from './minimize'
-export { rootsAlgorithms } from './registry'
+export { rootsAlgorithms, rootsFunctions } from './registry'

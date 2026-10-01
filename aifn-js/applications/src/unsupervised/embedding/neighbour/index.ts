@@ -28,3 +28,4 @@ export {
   type UmapState,
 } from './umap'
 export { nearestNeighbourDescent, type NearestNeighbourDescentOptions, type NeighbourLists } from './nn-descent'
+export { neighbourEmbeddingAlgorithms, neighbourEmbeddingFunctions } from './registry'

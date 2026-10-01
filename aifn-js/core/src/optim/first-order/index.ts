@@ -58,4 +58,4 @@ export {
   type CoordinateDescentState,
   type CoordinateRule,
 } from './coordinateDescent'
-export { firstOrderAlgorithms } from './registry'
+export { firstOrderAlgorithms, firstOrderFunctions } from './registry'

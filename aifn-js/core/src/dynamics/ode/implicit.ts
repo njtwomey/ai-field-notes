@@ -10,7 +10,7 @@ import { newtonSystem } from 'aifn/numerics/roots'
 import { dense, fromData, SQRT_EPS, type Tensor, toFlat, type Value, type Vector } from 'aifn/foundation/tensor'
 import { run } from 'aifn/foundation/trace'
 import type { Algorithm, Scalar, Size } from 'aifn/foundation/contracts'
-import { evaluate, initialState, nextStep, reached } from './explicit'
+import { checkDirection, evaluate, initialState, nextStep, reached } from './explicit'
 import type { FixedStepOptions, InitialValue, JacobianOption, OdeState, Rhs } from './types'
 
 const { allFinite, toF64, toMatrixF64 } = dense
@@ -171,12 +171,10 @@ function implicitSolver(f: Rhs, scheme: Scheme, options: ImplicitOptions): Algor
   const name = scheme.name
   return {
     name,
-    init: ({ x0, t0 = 0 }) => ({
-      ...initialState(toF64(x0, name), t0),
-      newtonSteps: 0,
-      newtonConverged: true,
-      history: [],
-    }),
+    init: ({ x0, t0 = 0 }) => {
+      checkDirection(t0, h, tEnd, name)
+      return { ...initialState(toF64(x0, name), t0), newtonSteps: 0, newtonConverged: true, history: [] }
+    },
     step: (s) => {
       const x = dense.data(s.x)
       const hk = nextStep(s.time, h, tEnd)

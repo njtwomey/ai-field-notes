@@ -10,3 +10,4 @@ export {
   type NormalGammaPosterior,
   type NormalGammaPrior,
 } from './cavi'
+export { conjugateModelAlgorithms, conjugateModelFunctions } from './registry'

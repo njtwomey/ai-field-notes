@@ -81,3 +81,4 @@ export {
   type ExpectileTrainingRun,
 } from './expectile-training'
 export { ebmBoosting, explainableBoostingMachine, type EbmModel, type EbmParams, type EbmState } from './ebm'
+export { gamAlgorithms, gamFunctions } from './registry'

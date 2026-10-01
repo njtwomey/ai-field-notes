@@ -28,3 +28,4 @@ export {
   needlemanWunsch,
   smithWaterman,
 } from './problems'
+export { dynamicProgrammingFunctions } from './registry'

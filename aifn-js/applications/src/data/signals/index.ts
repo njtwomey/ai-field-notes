@@ -3,3 +3,4 @@
  */
 
 export { chirp, uniformTimes, tones } from './signals'
+export { signalGeneratorFunctions } from './registry'

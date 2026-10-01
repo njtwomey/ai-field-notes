@@ -12,6 +12,7 @@ import { grad, jacobian } from 'aifn/foundation/autodiff'
 import { qr } from 'aifn/numerics/linalg'
 import { fromData, toFlat, type Matrix, type Tensor, type Value, type Vector } from 'aifn/foundation/tensor'
 import type { Algorithm } from 'aifn/foundation/trace'
+import { definer, entries, type AlgorithmInfo, type Entry, type FunctionInfo } from 'aifn/foundation/registry'
 
 type F64 = Float64Array<ArrayBuffer>
 
@@ -317,3 +318,68 @@ export function lyapunovSpectrum(
   const exponents = Array.from(sums, (s) => s / keep).sort((a, b) => b - a)
   return { exponents: vec(exponents), running: fromData(running, [keep, d]) }
 }
+
+// ── Registry ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const algorithm = definer<AlgorithmInfo>('algorithm', 'dynamics/maps')
+const fn = definer<FunctionInfo>('function', 'dynamics/maps')
+
+algorithm(
+  {
+    key: 'mapIteration',
+    name: 'Map iteration',
+    summary: 'x_{n+1} = f(x_n) for a map of the line or of ℝᵈ, one iterate per step.',
+    problem: 'map',
+    state: { iterate: 'x', flags: ['diverged'] },
+    cite: ['strogatz2015'],
+  },
+  mapIteration,
+)
+fn(
+  {
+    key: 'logisticMap',
+    name: 'Logistic map',
+    tex: 'x \\mapsto r x (1 - x)',
+    role: 'construction',
+    cite: ['strogatz2015'],
+  },
+  logisticMap,
+)
+fn({ key: 'tentMap', name: 'Tent map', role: 'construction' }, tentMap)
+fn({ key: 'sineMap', name: 'Sine map', role: 'construction' }, sineMap)
+fn({ key: 'henonMap', name: 'Hénon map', role: 'construction' }, henonMap)
+fn({ key: 'standardMap', name: 'Chirikov standard map', role: 'construction' }, standardMap)
+fn({ key: 'orbit', name: 'Orbit', role: 'simulation' }, orbit)
+fn({ key: 'cobweb', name: 'Cobweb diagram', role: 'construction' }, cobweb)
+fn(
+  { key: 'bifurcationDiagram', name: 'Bifurcation diagram', role: 'simulation', cite: ['strogatz2015'] },
+  bifurcationDiagram,
+)
+fn(
+  { key: 'lyapunovExponent', name: 'Lyapunov exponent of a map', role: 'estimator', cite: ['strogatz2015'] },
+  lyapunovExponent,
+)
+fn({ key: 'lyapunovCurve', name: 'Lyapunov exponent across a family', role: 'estimator' }, lyapunovCurve)
+fn({ key: 'lyapunovSpectrum', name: 'Lyapunov spectrum (QR method)', role: 'estimator' }, lyapunovSpectrum)
+
+/** The algorithms of the module, keyed by factory name. */
+export const mapsAlgorithms: Readonly<Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>> =
+  entries<AlgorithmInfo>('algorithm', { mapIteration }) as Readonly<
+    Record<string, Entry<(...args: never[]) => unknown, AlgorithmInfo>>
+  >
+
+/** The functions of the module, keyed by name. */
+export const mapsFunctions: Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>> =
+  entries<FunctionInfo>('function', {
+    logisticMap,
+    tentMap,
+    sineMap,
+    henonMap,
+    standardMap,
+    orbit,
+    cobweb,
+    bifurcationDiagram,
+    lyapunovExponent,
+    lyapunovCurve,
+    lyapunovSpectrum,
+  }) as Readonly<Record<string, Entry<(...args: never[]) => unknown, FunctionInfo>>>

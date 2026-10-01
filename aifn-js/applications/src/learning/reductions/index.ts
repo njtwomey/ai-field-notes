@@ -22,3 +22,4 @@ export {
   type NestedDichotomyModel,
   type ReductionModel,
 } from './multiclass'
+export { reductionsFunctions } from './registry'

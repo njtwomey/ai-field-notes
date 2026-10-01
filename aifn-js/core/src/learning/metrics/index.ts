@@ -263,3 +263,4 @@ export {
   values as metricValues,
   type Dense,
 } from './core'
+export { metricsFunctions } from './function-registry'

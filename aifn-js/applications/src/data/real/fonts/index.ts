@@ -27,3 +27,4 @@ export {
 
 /** The font dataset generator (kind `dataset`), keyed by `info.key`. */
 export const fontDatasetRegistry = entries('dataset', table) as Readonly<Record<string, DatasetEntry>>
+export { fontFunctions } from './registry'
