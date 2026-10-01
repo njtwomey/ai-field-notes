@@ -1,18 +1,32 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { fromData, tensor, toFlat } from 'aifn/foundation/tensor'
-import { members, signature, type Prelude, type RunResult } from 'aifn/interpreter'
+import type { Space } from 'aifn/foundation/space'
+import { entrySignature, members, signature, type Prelude, type RunResult } from 'aifn/interpreter'
 import { dataset } from 'aifn/learning/estimators'
 import { prelude } from 'aifn-applied/interpreter'
 import { linearRegression } from 'aifn-applied/learning/linear'
 import { logisticRegression } from 'aifn-applied/learning/generalised/glm'
-import { Button, CodeEditor, NumberField, Select, Switch, type CodeError } from '@lab/controls'
+import {
+  Button,
+  CodeEditor,
+  NumberField,
+  ParamControls,
+  Select,
+  Switch,
+  useParams,
+  type CodeError,
+} from '@lab/controls'
 import { Figure } from '@lab/layout'
-import { call, useComputed } from '@lab/state'
+import { call, fromSpace, useComputed } from '@lab/state'
 import { Curve, Plot, Points, Readout, useAxis } from '@lab/viz'
 import { formatValue } from '@lab/views'
 
 const REGRESSION = `seed(7)
 
+/**
+ * @param {int} n [20, 1000] number of points
+ * @param {real} noise [0, 2] noise standard deviation
+ */
 function make(n = 200, noise = 0.3) {
   const x = array.linspace(0, 6, n)
   const e = random.normal(n)
@@ -23,7 +37,11 @@ function make(n = 200, noise = 0.3) {
 
 const CLASSIFICATION = `seed(3)
 
-// Two Gaussian clouds in the plane, labelled 0 and 1.
+/**
+ * Two Gaussian clouds in the plane, labelled 0 and 1.
+ * @param {int} n [20, 1000] number of points
+ * @param {real} gap [0, 5] distance between the class means along x₁
+ */
 function make(n = 160, gap = 2.5) {
   const labels = random.bernoulli(0.5, n)
   const x1 = random.normal(n).map((z, i) => z + gap * labels[i])
@@ -154,6 +172,24 @@ function PreludeReference({ prelude }: { prelude: Prelude }) {
   )
 }
 
+type ArgValues = Readonly<Record<string, unknown>>
+
+/** Controls for the entry function's parameters, from its signature's `Space`; reports their values. */
+function EntryControls({
+  space,
+  initial,
+  onChange,
+}: {
+  space: Space
+  initial: ArgValues
+  onChange: (values: ArgValues) => void
+}) {
+  const defs = useMemo(() => fromSpace(space), [space])
+  const p = useParams(defs, initial)
+  useEffect(() => onChange(p.values as ArgValues), [p.values, onChange])
+  return <ParamControls {...p} />
+}
+
 const PRELUDE_TASK = call('applied/interpreter/prelude')
 
 /** The editor, the program's run in the compute worker, and the fitted model. */
@@ -165,9 +201,29 @@ export function DatasetFromCode() {
   // With auto-run off, the program runs only on the Run button (or Mod-Enter): `submitted` is what was run.
   const [submitted, setSubmitted] = useState({ code: EXAMPLES.regression.code, at: 0 })
   const source = auto ? code : submitted.code
+
+  // The entry's parameters: controls rebuild when the signature (names, types, ranges, defaults) changes, keeping the
+  // values of parameters whose dimension is unchanged; editing the body keeps every value.
+  const sig = useMemo(() => entrySignature(source), [source])
+  const sigKey = JSON.stringify(sig.space)
+  const [shape, setShape] = useState({ key: sigKey, space: sig.space, initial: {} as ArgValues })
+  const [values, setValues] = useState<ArgValues>({})
+  if (shape.key !== sigKey) {
+    const kept = Object.fromEntries(
+      Object.entries(values).filter(
+        ([k]) => JSON.stringify(shape.space.dims[k]) === JSON.stringify(sig.space.dims[k]) && k in sig.space.dims,
+      ),
+    )
+    setShape({ key: sigKey, space: sig.space, initial: kept })
+  }
+  const onValues = useCallback((v: ArgValues) => setValues(v), [])
+  // Positional arguments: a control's value, or undefined so the default applies.
+  const args = sig.params.map((p) => (p.name in shape.space.dims ? values[p.name] : undefined))
+  const argsKey = JSON.stringify(args)
+
   const run = useComputed(
-    () => call<RunResult>('interpreter/runProgram', source, { seed, prelude: PRELUDE_TASK }),
-    [source, seed, submitted.at],
+    () => call<RunResult>('interpreter/runProgram', source, { seed, prelude: PRELUDE_TASK, args }),
+    [source, seed, submitted.at, argsKey],
     { mode: 'worker', initial: null as RunResult | null, cancelAfter: 400 },
   )
   const result = run.value
@@ -233,6 +289,16 @@ export function DatasetFromCode() {
             onRun={runNow}
             label="Program"
           />
+          {Object.keys(shape.space.dims).length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <div className="text-xs text-muted-foreground">
+                parameters of <span className="font-mono">make()</span>, from its signature and JSDoc
+              </div>
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] items-end gap-x-6 gap-y-3">
+                <EntryControls key={shape.key} space={shape.space} initial={shape.initial} onChange={onValues} />
+              </div>
+            </div>
+          )}
           <div className="min-h-6 font-mono text-xs" aria-live="polite">
             {problem ? (
               <span className="text-destructive">
@@ -272,7 +338,7 @@ export function DatasetFromCode() {
           </>
         ) : null
       }
-      caption="Edit the program: completion lists the namespaces (math, array, random, stats, linalg, signal, learn) and, after a dot, their functions with signatures, docs and source modules; hovering a name shows its doc, and errors are underlined. The program's make() is called with its defaults. Changing the run seed changes every draw; seed(…) inside the program keys it further. The program runs in a worker, so a runaway loop is stopped by the next edit."
+      caption="Edit the program: completion lists the namespaces (math, array, random, stats, linalg, signal, learn) and, after a dot, their functions with signatures, docs and source modules; hovering a name shows its doc, and errors are underlined. The parameters of make() get controls from its signature: an integer default is an int, a decimal a real, and a JSDoc @param {int} n [20, 1000] line sets the type and range. Changing the run seed changes every draw; seed(…) inside the program keys it further. The program runs in a worker, so a runaway loop is stopped by the next edit."
     >
       <Plot x={xa} y={ya}>
         {fit?.kind === 'regression' && (

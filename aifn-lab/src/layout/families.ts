@@ -63,7 +63,7 @@ const ICONS: Record<string, LucideIcon> = {
   'applied/signals': Waves,
   'applied/vision': Eye,
   'applied/dynamics': Orbit,
-  'applied/decisions': Target,
+  'applied/gym': Target,
   'applied/generative': Sparkles,
   'applied/neural': Brain,
   'applied/retrieval': Search,

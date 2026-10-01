@@ -31,6 +31,7 @@ export {
 } from './schema'
 export { useFigureState, type FigureState, type FigureStateApi, type HandleOptions, type Param } from './useFigureState'
 export { fromEntries, toEntries, type Raw } from './store'
+export { useStreamed, type Streamed } from './useStreamed'
 export {
   useComputed,
   type Computed,

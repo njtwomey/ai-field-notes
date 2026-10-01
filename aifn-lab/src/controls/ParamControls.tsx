@@ -184,6 +184,7 @@ function RevealToggle({
       <Toggle
         variant="outline"
         size="sm"
+        aria-label={typeof label === 'string' ? label : undefined}
         pressed={pressed}
         onPressedChange={onChange}
         className="data-pressed:border-primary/60 data-pressed:bg-primary/10 data-pressed:text-foreground"

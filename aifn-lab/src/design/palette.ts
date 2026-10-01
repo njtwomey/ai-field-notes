@@ -49,6 +49,9 @@ export const palette = {
       muted: '#898781',
       grid: '#e1e0d9',
       axis: '#c3c2b7',
+      // Outcome colours, matching lab.css's --destructive and --success: a failed and a successful episode.
+      destructive: '#e7000b',
+      success: '#00a63e',
     },
     dark: {
       surface: '#1a1a19',
@@ -57,6 +60,8 @@ export const palette = {
       muted: '#898781',
       grid: '#2c2c2a',
       axis: '#383835',
+      destructive: '#ff6467',
+      success: '#05df72',
     },
   },
 } as const

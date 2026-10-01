@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   datasetRegistry,
-  environmentRegistry,
   generate,
   logDensityRegistry,
   modifierRegistry,
@@ -72,9 +71,8 @@ describe('modifier registry', () => {
   })
 })
 
-describe('environments, objectives and log densities', () => {
+describe('objectives and log densities', () => {
   it('have well-formed metadata', () => {
-    expectInfo(environmentRegistry, 'environment')
     expectInfo(objectiveRegistry, 'objective')
     expectInfo(logDensityRegistry, 'log-density')
   })
@@ -88,13 +86,7 @@ describe('environments, objectives and log densities', () => {
     }
   })
 
-  it('environments and log densities without required arguments build at their defaults', () => {
-    const required = new Set(['bernoulliBandit', 'gaussianBandit', 'linearBandit', 'maze'])
-    for (const entry of Object.values(environmentRegistry)) {
-      if (required.has(entry.info.key)) continue
-      const env = (entry as unknown as (p: object) => object)(defaults(entry.info.params))
-      expect(typeof env, entry.info.key).toBe('object')
-    }
+  it('log densities without required arguments build at their defaults', () => {
     for (const entry of Object.values(logDensityRegistry)) {
       if (entry.info.key === 'gaussianTarget' || entry.info.key === 'gaussianMixtureTarget') continue
       const target = (entry as unknown as (p: object) => { kind: string })(defaults(entry.info.params))

@@ -1,18 +1,11 @@
 /**
  * The registered things of `aifn-applied/data` (design S §2.8, §3.1): dataset generators, dataset modifiers,
- * environments, test objectives and test log densities, each defined where it is written (with
+ * test objectives and test log densities, each defined where it is written (with
  * `aifn/foundation/registry`'s `definer`) and collected by `data/index.ts`. `generate` and `modify` call an entry with
  * or without a stream, as its `info.random` says.
  */
 
-import type {
-  DatasetInfo,
-  EnvironmentInfo,
-  LogDensityInfo,
-  ModifierInfo,
-  ObjectiveInfo,
-  Stream,
-} from 'aifn/foundation/contracts'
+import type { DatasetInfo, LogDensityInfo, ModifierInfo, ObjectiveInfo, Stream } from 'aifn/foundation/contracts'
 import type { Entry } from 'aifn/foundation/registry'
 import type { Dataset } from './types'
 
@@ -24,9 +17,6 @@ export type DatasetEntry = Entry<Callable, DatasetInfo>
 
 /** A registered modifier: `(s, dataset, params)` when `info.random`, else `(dataset, params)`. */
 export type ModifierEntry = Entry<Callable, ModifierInfo>
-
-/** A registered environment factory, called `(params)`. */
-export type EnvironmentEntry = Entry<Callable, EnvironmentInfo>
 
 /** A registered test objective factory, called `(params)`. */
 export type ObjectiveEntry = Entry<Callable, ObjectiveInfo>

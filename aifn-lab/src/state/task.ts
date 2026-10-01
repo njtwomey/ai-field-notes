@@ -69,4 +69,6 @@ export const fromMessage = <T>(x: unknown): T => revive(x) as T
 
 /** A request to the compute worker and its answer. */
 export type WorkerRequest = { id: number; task: unknown }
-export type WorkerResponse = { id: number; ms: number } & ({ ok: true; value: unknown } | { ok: false; error: string })
+export type WorkerResponse = { id: number; ms: number } & (
+  { ok: true; value: unknown; partial?: boolean } | { ok: false; error: string }
+)

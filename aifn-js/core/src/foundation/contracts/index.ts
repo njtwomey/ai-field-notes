@@ -29,7 +29,7 @@
 export type * from './algorithm'
 export type * from './data'
 export type * from './distribution'
-export type * from './environment'
+export type * from './gym'
 export type * from './errors'
 export type * from './functions'
 export type * from './graph'

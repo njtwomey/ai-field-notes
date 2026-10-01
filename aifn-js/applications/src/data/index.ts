@@ -1,18 +1,17 @@
 /**
  * `aifn-applied/data`: datasets: seeded synthetic generators and modifiers, small embedded real datasets, test
- * objectives, test log densities, environments for bandits and reinforcement learning, and test signals. The shared
+ * objectives, test log densities and test signals. The shared
  * layer holds the `Dataset` shape, ground truth, sizes and the recipe interpreter.
  *
  * Registries (design S §3), keyed by `info.key`: `datasetRegistry` (generators; the font table, a large module, keeps
- * its own `fontDatasetRegistry` in `aifn-applied/data/real/fonts`), `modifierRegistry`, `environmentRegistry`,
+ * its own `fontDatasetRegistry` in `aifn-applied/data/real/fonts`), `modifierRegistry`,
  * `objectiveRegistry` and `logDensityRegistry`. Recipes replay them: `recipe`, `normaliseRecipe`, `describeRecipe`,
  * `encodeRecipe`, `decodeRecipe`, `parseRecipe`, `recipeBases`, `recipeOps` and `recipeSpace` (the space of a base and
  * its knobs, derived from the registry).
  */
 
 import { entries } from 'aifn/foundation/registry'
-import type { DatasetEntry, EnvironmentEntry, LogDensityEntry, ModifierEntry, ObjectiveEntry } from './define'
-import * as environments from './environments'
+import type { DatasetEntry, LogDensityEntry, ModifierEntry, ObjectiveEntry } from './define'
 import * as objectives from './objectives'
 import * as real from './real'
 import { recipeBook } from './recipe'
@@ -49,23 +48,18 @@ export {
   generate,
   modify,
   type DatasetEntry,
-  type EnvironmentEntry,
   type LogDensityEntry,
   type ModifierEntry,
   type ObjectiveEntry,
 } from './define'
 export { type NormalisedRecipe, type RecipeBook, type RecipeInput, type RecipeStepInput } from './recipe'
 export { blobs, moons } from './synthetic'
-export { gridworld } from './environments'
 
 /** Every registered dataset generator (kind `dataset`) of `data/synthetic` and `data/real`. */
 export const datasetRegistry = entries('dataset', synthetic, real) as Readonly<Record<string, DatasetEntry>>
 
 /** Every registered dataset modifier (kind `modifier`). */
 export const modifierRegistry = entries('modifier', synthetic) as Readonly<Record<string, ModifierEntry>>
-
-/** Every registered environment (kind `environment`): bandits and Markov decision processes. */
-export const environmentRegistry = entries('environment', environments) as Readonly<Record<string, EnvironmentEntry>>
 
 /** Every registered test objective (kind `objective`). */
 export const objectiveRegistry = entries('objective', objectives) as Readonly<Record<string, ObjectiveEntry>>

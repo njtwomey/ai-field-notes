@@ -4,7 +4,7 @@
  * names one entry across the lab, the site, URLs, fixtures and workers. Metric and loss metadata specialise it.
  */
 
-import type { DomainKind } from './environment'
+import type { DomainKind } from './gym'
 import type { Capability } from './model'
 import type { Space } from './space'
 
@@ -344,11 +344,15 @@ export interface EnvironmentInfo extends Info {
   readonly capabilities?: readonly ('model' | 'oracle' | 'render')[]
 }
 
-/** What an agent needs of an environment: domain kinds, and an explicit model for planners. */
+/**
+ * What an agent needs of an environment: domain kinds, an explicit model for planners, and the environment families it
+ * is meant for (any when omitted; a bandit policy reads arms, a linear one an arms × features context).
+ */
 export interface AgentRequires {
   readonly observation?: DomainKind
   readonly action?: DomainKind
-  readonly model?: 'tabular'
+  readonly model?: 'tabular' | 'dynamics'
+  readonly families?: readonly EnvironmentInfo['family'][]
 }
 
 /** Agent metadata: a learning or acting agent (`Agent`), its hyperparameters and what it requires. */

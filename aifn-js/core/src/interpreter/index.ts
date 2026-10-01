@@ -21,10 +21,13 @@
  *   `seed`, `print`, `Math` (mapped to `math`, with a seeded `Math.random`) and `console.log` are top-level.
  * - Prelude functions take numbers, plain arrays or tensors and return numbers or plain arrays; `math.add`,
  *   `math.mul` and the other elementwise operators broadcast.
+ * - `entrySignature(source)` reads the entry function's parameters (literal defaults, types inferred or from a JSDoc
+ *   `@param {int} n [10, 1000] doc` block) and gives a `Space` of them, for controls.
  * - Seeds: each random call draws from its own child of the run's root stream, keyed by call order; no streams are
  *   exposed. A program can call `seed(s)`.
  */
 export { checkProgram, runProgram, type RunError, type RunOptions, type RunResult } from './run'
+export { entrySignature, entrySpace, PARAM_TYPES, type EntryParam, type EntrySignature, type ParamType } from './entry'
 export { CORE_NAMESPACES, corePrelude, rootStream } from './core-prelude'
 export {
   lookup,

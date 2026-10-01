@@ -5,7 +5,7 @@
  *   so they follow the lab's light and dark themes.
  * - Completion from the prelude: the namespaces at the top level, each namespace's members after `ns.` (`Math.` is
  *   `math.`), each with its signature, doc and source module; then the program's own names.
- * - Hover docs for namespaces and their members.
+ * - Hover docs for namespaces and their members; JSDoc `@param {…}` types complete too.
  * - Error marks: syntax errors from the editor's own parse, and the `errors` the page passes in (a run's error with
  *   its line and column).
  * - Mod-Enter calls `onRun`.
@@ -36,7 +36,15 @@ import {
   lineNumbers,
 } from '@codemirror/view'
 import { tagHighlighter, tags as t } from '@lezer/highlight'
-import { members, qualified, signature, type Namespace, type Prelude, type PreludeEntry } from 'aifn/interpreter'
+import {
+  members,
+  PARAM_TYPES,
+  qualified,
+  signature,
+  type Namespace,
+  type Prelude,
+  type PreludeEntry,
+} from 'aifn/interpreter'
 import { cn } from '@lab/lib/utils'
 
 /** An error to mark: a message and, when known, a 1-based line and column. */
@@ -161,7 +169,11 @@ function preludeCompletions(prelude: Prelude) {
     })),
     ...members(prelude, null).map((e) => ({ ...option(e), boost: 1 })),
   ]
+  const types: Completion[] = PARAM_TYPES.map((t) => ({ label: t, type: 'type', detail: 'parameter type' }))
   return (ctx: CompletionContext) => {
+    // A JSDoc `@param {…}` type: int, real, real:log, bool, choice.
+    const type = ctx.matchBefore(/@param\s*\{[\w:]*/)
+    if (type) return { from: type.from + type.text.indexOf('{') + 1, options: types, validFor: /^[\w:]*$/ }
     const member = ctx.matchBefore(/[\w$]+\.[\w$]*/)
     if (member) {
       const dot = member.text.indexOf('.')

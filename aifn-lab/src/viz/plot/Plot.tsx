@@ -200,7 +200,7 @@ export function Plot({
   useAxisVersion([x, y, ...extra])
   let category = 0
   const entries: Entry[] = layers.map((l, i) => {
-    const slotted = l.def.slotted ? l.def.slotted(l.props) : !l.props.muted && !l.props.emphasis
+    const slotted = l.def.slotted ? l.def.slotted(l.props) : !l.props.muted && !l.props.emphasis && !l.props.tone
     const slot = l.props.slot ?? (slotted ? category++ : 0)
     // A layer that is live by definition (a probe) is live unless its props say otherwise.
     const props = l.def.live && l.props.live === undefined ? { ...l.props, live: true } : l.props

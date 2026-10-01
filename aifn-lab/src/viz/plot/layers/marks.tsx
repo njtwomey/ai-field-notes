@@ -111,7 +111,7 @@ export const Points = defineLayer<PointsProps>({
   kind: 'Points',
   legend: (p) =>
     p.dense ? [] : p.groupNames ? [...p.groupNames] : p.shapeNames ? [...p.shapeNames] : [p.name ?? 'points'],
-  slotted: (p) => !p.group && !p.muted && !p.emphasis,
+  slotted: (p) => !p.group && !p.muted && !p.emphasis && !p.tone,
   canvas: (p) => !!p.dense || p.x.length > 4000,
   extent: (p) => ({ x: extentOf(p.x), y: extentOf(p.y) }),
   build: (p, ctx) => {

@@ -11,7 +11,8 @@
  * - Coordinates: `encode(space, values)` maps values into the unit cube [0, 1]^m (log dimensions in log space, integers
  *   and choices as equal bins) and `decode(space, u)` maps any point of the cube back, so `encodedSize` coordinates
  *   drawn uniformly decode to a uniform draw from the space. Inactive dimensions encode their defaults.
- * - Domains of observations and actions (`Domain`): `discreteDomain`, `domainContains`, `domainSize`, `sampleDomain`.
+ * - Domains of observations and actions (`Domain`): `discreteDomain`, `boxDomain`, `domainContains`, `clipToDomain`,
+ *   `domainSize` (`Infinity` for a box), `domainDimension`, `sampleDomain`.
  * - Enumeration and draws: `grid(space, { points })` (every combination, conditions respected) and `sample(s, space)`.
  *
  * The encoding follows the unit-cube convention of Bayesian-optimisation libraries (Snoek, Larochelle and Adams, 2012,
@@ -25,8 +26,25 @@ import { uniform, type Stream } from 'aifn/foundation/random'
 import { toFlat } from 'aifn/foundation/tensor'
 
 // Types defined once, in `aifn/foundation/contracts`.
-export type { Condition, Dim, DimSpec, Domain, DomainKind, Space } from 'aifn/foundation/contracts'
-export { discreteDomain, domainContains, domainSize, sampleDomain } from './domain'
+export type {
+  BoxDomain,
+  Condition,
+  Dim,
+  DimSpec,
+  DiscreteDomain,
+  Domain,
+  DomainKind,
+  Space,
+} from 'aifn/foundation/contracts'
+export {
+  boxDomain,
+  clipToDomain,
+  discreteDomain,
+  domainContains,
+  domainDimension,
+  domainSize,
+  sampleDomain,
+} from './domain'
 
 // ── Values ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 

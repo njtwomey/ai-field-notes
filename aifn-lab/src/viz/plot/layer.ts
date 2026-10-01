@@ -27,6 +27,8 @@ export type CommonProps = {
   muted?: boolean
   /** A data colour from a scale helper in place of the slot. */
   color?: string
+  /** An outcome colour in place of the slot: the theme's destructive red (a failure) or its success green. */
+  tone?: 'destructive' | 'success'
   /** Sent as a patch on every change without redrawing the rest; never widens the axes. */
   live?: boolean
   /** A fixed series id prefix, so the layer keeps its identity when layers before it come and go. */
@@ -151,6 +153,7 @@ export function collectLayers(children: ReactNode): LayerElement[] {
 export function layerColor(props: CommonProps, slot: number, mode: Mode): string {
   const c = chrome(mode)
   if (props.color) return props.color
+  if (props.tone) return c[props.tone]
   if (props.emphasis) return c.ink
   if (props.muted) return c.muted
   return seriesColor(mode, slot)

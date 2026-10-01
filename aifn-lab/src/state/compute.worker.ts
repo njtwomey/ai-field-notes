@@ -1,8 +1,9 @@
 /**
  * The compute worker of `useComputed(…, { mode: 'worker' })`: it evaluates one task at a time (`state/task.ts`),
  * resolving each address to an aifn export by importing that module on first use, and answers with the result made
- * cloneable. aifn is DOM-free, so its modules run here unchanged. A stale job is cancelled by the page, which
- * terminates this worker and starts a fresh one.
+ * cloneable. A result that is a generator (headless training, `aifn-applied/gym` `training`) streams: every yielded
+ * value is posted as a partial answer, then the last one as the result. aifn is DOM-free, so its modules run here
+ * unchanged. A stale job is cancelled by the page, which terminates this worker and starts a fresh one.
  */
 import { fromMessage, isTask, toMessage, type WorkerRequest, type WorkerResponse } from './task'
 
@@ -54,6 +55,15 @@ async function evaluate(x: unknown): Promise<unknown> {
   return x
 }
 
+/** A generator's iterator (not an array or other built-in iterable). */
+const isIterator = (x: unknown): x is Iterator<unknown> =>
+  typeof x === 'object' &&
+  x !== null &&
+  !Array.isArray(x) &&
+  !ArrayBuffer.isView(x) &&
+  typeof (x as { next?: unknown }).next === 'function' &&
+  typeof (x as { [Symbol.iterator]?: unknown })[Symbol.iterator] === 'function'
+
 // The worker's global scope; the lab's TypeScript program has the DOM library, not the worker one.
 const scope = self as unknown as {
   postMessage(r: WorkerResponse): void
@@ -65,7 +75,17 @@ scope.onmessage = async (e) => {
   const { id, task } = e.data
   const t0 = performance.now()
   try {
-    const value = toMessage(await evaluate(task))
+    let result = await evaluate(task)
+    // A generator streams: each value it yields goes back as a partial answer, and the last is the result.
+    if (isIterator(result)) {
+      let last: unknown = undefined
+      for (let step = result.next(); !step.done; step = result.next()) {
+        last = step.value
+        post({ id, ok: true, partial: true, value: toMessage(last), ms: performance.now() - t0 })
+      }
+      result = last
+    }
+    const value = toMessage(result)
     post({ id, ok: true, value, ms: performance.now() - t0 })
   } catch (err) {
     post({ id, ok: false, error: err instanceof Error ? err.message : String(err), ms: performance.now() - t0 })

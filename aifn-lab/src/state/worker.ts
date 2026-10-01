@@ -8,7 +8,7 @@
 import { fromMessage, toMessage, type WorkerRequest, type WorkerResponse } from './task'
 
 export type WorkerResult = { ok: true; value: unknown; ms: number } | { ok: false; error: string; ms: number }
-type Job = { task: unknown; done: (r: WorkerResult) => void }
+type Job = { task: unknown; done: (r: WorkerResult) => void; partial?: (value: unknown, ms: number) => void }
 
 let nextId = 1
 
@@ -25,9 +25,12 @@ export class ComputeWorker {
     this.cancelAfter = cancelAfter
   }
 
-  /** Run `task`, after or instead of what is pending; `done` gets its answer. */
-  submit(task: unknown, done: (r: WorkerResult) => void) {
-    this.queued = { task, done }
+  /**
+   * Run `task`, after or instead of what is pending; `done` gets its answer, and `partial` every value a streaming task
+   * (a generator) yields before it.
+   */
+  submit(task: unknown, done: (r: WorkerResult) => void, partial?: (value: unknown, ms: number) => void) {
+    this.queued = { task, done, partial }
     if (!this.running) return this.next()
     const left = this.cancelAfter - (performance.now() - this.running.started)
     if (left <= 0) this.restart()
@@ -69,6 +72,7 @@ export class ComputeWorker {
       const r = e.data
       const job = this.running
       if (!job || job.id !== r.id) return
+      if (r.ok && r.partial) return job.partial?.(fromMessage(r.value), r.ms)
       this.running = null
       this.clearTimer()
       job.done(r.ok ? { ok: true, value: fromMessage(r.value), ms: r.ms } : { ok: false, error: r.error, ms: r.ms })

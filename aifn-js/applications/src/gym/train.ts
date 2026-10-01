@@ -1,0 +1,197 @@
+/**
+ * Headless training (docs/aifn-gym.md §4b): `train` runs an agent for a number of episodes with no display and returns
+ * plain data, per-episode summaries (return, length, terminated, success or failure, pseudo-regret, first action and
+ * the agent's own `scalars`) and agent-state checkpoints; `training` is the same run as a generator that yields partial
+ * results, so a worker can stream progress. Episode e (1-based) runs on `child(stream(seed), 'step', e − 1)` from an
+ * agent initialised on `child(stream(seed), 'init')`, exactly as a trace of `episodes(env, agent)` on `stream(seed)`
+ * would, so any training episode can be re-run from the nearest checkpoint: `replay` gives episode e as it happened
+ * (with exploration), `agentAfter` the agent's state after e episodes, and `evaluateEpisode` a fresh greedy episode of
+ * that agent on an evaluation seed.
+ */
+
+import type { Agent, Environment } from 'aifn/foundation/contracts'
+import { child, stream, type Stream } from 'aifn/foundation/random'
+import { runEpisode, type Trajectory } from './rollout'
+
+/** Options for `train` and `training`. */
+export interface TrainOptions {
+  /** Episodes to run. */
+  episodes: number
+  /** The root seed. Default 0. */
+  seed?: number | string
+  /** Least spacing of the agent-state checkpoints, in episodes. Default 1 (widened to keep `maxCheckpoints`). */
+  checkpointEvery?: number
+  /** At most this many checkpoints besides the initial state. Default 200. */
+  maxCheckpoints?: number
+  /** `training` yields after every this many episodes. Default about a twentieth of the run. */
+  chunk?: number
+}
+
+/** A checkpoint: the agent's state after `episode` episodes (0 is the initial state). */
+export interface Checkpoint<G> {
+  episode: number
+  agent: G
+}
+
+/** A training run so far: per-episode columns (one entry per completed episode) and checkpoints. Plain data. */
+export interface Training<G> {
+  seed: number | string
+  /** Episodes requested and completed. */
+  total: number
+  episodes: number
+  /** The checkpoint spacing in episodes. */
+  every: number
+  /** Undiscounted return, length (steps) and whether it ended at a terminal state, per episode. */
+  returns: Float64Array
+  lengths: Float64Array
+  terminated: Uint8Array
+  /** Σ pseudo-regret per episode, when the environment's oracle knows expected rewards; else null. */
+  regret: Float64Array | null
+  /** 1 for a success, −1 for a failure, 0 when the environment does not say (`ending`). */
+  outcome: Int8Array
+  /** The episode's first action, for discrete actions (a bandit's pull); NaN otherwise. */
+  firstAction: Float64Array
+  /** The agent's `scalars` after each episode (NaN before a scalar first appears). */
+  scalars: Record<string, Float64Array>
+  /** The agent's state after every `every` episodes, from episode 0. */
+  checkpoints: Checkpoint<G>[]
+  /** The agent's state after the last completed episode. */
+  final: G
+  done: boolean
+}
+
+/** The checkpoint spacing for a run: at least `checkpointEvery`, wide enough for at most `maxCheckpoints`. */
+export function checkpointSpacing(episodes: number, checkpointEvery = 1, maxCheckpoints = 200): number {
+  return Math.max(1, Math.round(checkpointEvery), Math.ceil(episodes / Math.max(1, maxCheckpoints)))
+}
+
+const root = (seed: number | string): Stream => stream(seed)
+
+/**
+ * Training as a generator: yields the run so far after every `chunk` episodes and at the end (`done: true`). Each
+ * yielded value is a fresh snapshot (its arrays are copies), safe to post from a worker.
+ */
+export function* training<S, O, A, G>(
+  env: Environment<S, O, A>,
+  agent: Agent<G, O, A>,
+  options: TrainOptions,
+): Generator<Training<G>, Training<G>> {
+  const { episodes: total, seed = 0, checkpointEvery, maxCheckpoints } = options
+  const every = checkpointSpacing(total, checkpointEvery, maxCheckpoints)
+  const chunk = Math.max(1, Math.round(options.chunk ?? Math.ceil(total / 20)))
+  const r = root(seed)
+  let g = agent.init(env, child(child(r, 'init'), 'agent'))
+  const returns = new Float64Array(total)
+  const lengths = new Float64Array(total)
+  const terminated = new Uint8Array(total)
+  const hasRegret = !!(env.oracle?.expectedReward && env.oracle.bestExpectedReward)
+  const regret = hasRegret ? new Float64Array(total) : null
+  const outcome = new Int8Array(total)
+  const firstAction = new Float64Array(total).fill(NaN)
+  const scalars: Record<string, Float64Array> = {}
+  const checkpoints: Checkpoint<G>[] = [{ episode: 0, agent: g }]
+  const snapshot = (n: number): Training<G> => ({
+    seed,
+    total,
+    episodes: n,
+    every,
+    returns: returns.slice(0, n),
+    lengths: lengths.slice(0, n),
+    terminated: terminated.slice(0, n),
+    regret: regret ? regret.slice(0, n) : null,
+    outcome: outcome.slice(0, n),
+    firstAction: firstAction.slice(0, n),
+    scalars: Object.fromEntries(Object.entries(scalars).map(([k, v]) => [k, v.slice(0, n)])),
+    checkpoints: checkpoints.slice(),
+    final: g,
+    done: n === total,
+  })
+  for (let e = 0; e < total; e++) {
+    const run = runEpisode(env, agent, g, child(r, 'step', e))
+    g = run.agent
+    const tr = run.trajectory
+    returns[e] = tr.episodeReturn
+    lengths[e] = tr.actions.length
+    terminated[e] = tr.reachedTerminal ? 1 : 0
+    if (regret) regret[e] = tr.regret
+    if (tr.ending) outcome[e] = tr.ending.success ? 1 : -1
+    if (typeof tr.actions[0] === 'number') firstAction[e] = tr.actions[0]
+    for (const [k, v] of Object.entries(agent.scalars?.(g) ?? {}))
+      (scalars[k] ??= new Float64Array(total).fill(NaN))[e] = v
+    if ((e + 1) % every === 0) checkpoints.push({ episode: e + 1, agent: g })
+    if (e + 1 < total && (e + 1) % chunk === 0) yield snapshot(e + 1)
+  }
+  const last = snapshot(total)
+  yield last
+  return last
+}
+
+/** Train with no display (see `training`): the complete run. */
+export function train<S, O, A, G>(
+  env: Environment<S, O, A>,
+  agent: Agent<G, O, A>,
+  options: TrainOptions,
+): Training<G> {
+  let last: Training<G> | undefined
+  for (const t of training(env, agent, options)) last = t
+  return last!
+}
+
+/** Re-run training episodes from the nearest checkpoint at or before `from`, up to episode `to`; calls `each`. */
+function rerun<S, O, A, G>(
+  env: Environment<S, O, A>,
+  agent: Agent<G, O, A>,
+  t: Pick<Training<G>, 'seed' | 'checkpoints'>,
+  to: number,
+  each?: (e: number, run: ReturnType<typeof runEpisode<S, O, A, G>>) => void,
+): G {
+  let c = t.checkpoints[0]
+  for (const k of t.checkpoints) if (k.episode <= to && k.episode >= c.episode) c = k
+  const r = root(t.seed)
+  let g = c.agent
+  for (let e = c.episode; e < to; e++) {
+    const run = runEpisode(env, agent, g, child(r, 'step', e))
+    each?.(e + 1, run)
+    g = run.agent
+  }
+  return g
+}
+
+/** The agent's state after `e` episodes of a training run (re-run from the nearest checkpoint). */
+export function agentAfter<S, O, A, G>(
+  env: Environment<S, O, A>,
+  agent: Agent<G, O, A>,
+  t: Pick<Training<G>, 'seed' | 'checkpoints'>,
+  e: number,
+): G {
+  return rerun(env, agent, t, e)
+}
+
+/** Training episode `e` (1-based) exactly as it happened, with exploration, and the agent's state before it. */
+export function replay<S, O, A, G>(
+  env: Environment<S, O, A>,
+  agent: Agent<G, O, A>,
+  t: Pick<Training<G>, 'seed' | 'checkpoints'>,
+  e: number,
+): { trajectory: Trajectory<S, O, A>; agent: G } {
+  if (!(e >= 1)) throw new RangeError(`replay: episodes are numbered from 1, got ${e}`)
+  const before = rerun(env, agent, t, e - 1)
+  const run = runEpisode(env, agent, before, child(root(t.seed), 'step', e - 1))
+  return { trajectory: run.trajectory, agent: before }
+}
+
+/**
+ * A fresh episode of the policy learnt after `e` episodes, with no exploration and no learning (the agent's `greedy`
+ * action, or its `act` when it has none), on `child(stream(evaluationSeed), 'evaluate')`.
+ */
+export function evaluateEpisode<S, O, A, G>(
+  env: Environment<S, O, A>,
+  agent: Agent<G, O, A>,
+  t: Pick<Training<G>, 'seed' | 'checkpoints'>,
+  e: number,
+  evaluationSeed: number | string = 'evaluate',
+): { trajectory: Trajectory<S, O, A>; agent: G } {
+  const g = rerun(env, agent, t, e)
+  const run = runEpisode(env, agent, g, child(root(evaluationSeed), 'evaluate'), 'greedy')
+  return { trajectory: run.trajectory, agent: g }
+}
