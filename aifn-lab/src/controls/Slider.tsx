@@ -54,7 +54,7 @@ export function Slider(props: SliderProps) {
     const next = snap(v)
     if (next !== value) onChange(next)
   }
-  const field = useNumberDraft({ value, onCommit: set, step, format })
+  const field = useNumberDraft({ value, onCommit: set, step, format }).props
   const first = (v: number | readonly number[]) => (Array.isArray(v) ? v[0] : (v as number))
 
   const track = (

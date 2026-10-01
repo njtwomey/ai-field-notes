@@ -4,7 +4,9 @@
  */
 export {
   choice,
+  float,
   fromSpace,
+  int,
   number,
   row,
   setting,
@@ -41,6 +43,18 @@ export {
 } from './useComputed'
 export { call, type Task } from './task'
 export { formatField, snapToStep } from './step'
+export {
+  checkNumber,
+  clampNumber,
+  formatNumberValue,
+  numberBounds,
+  parseNumber,
+  stepNumber,
+  validateNumber,
+  type NumberOptions,
+  type NumberScale,
+  type NumberType,
+} from './number'
 export { isPointerHeld, onceReleased } from './pointer'
 export { useProbe, type ProbeModel } from './probe'
 export { ProbeReadout } from './ProbeReadout'

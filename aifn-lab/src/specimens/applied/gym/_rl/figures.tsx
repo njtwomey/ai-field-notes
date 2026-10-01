@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { episodes, stateCell, type EpisodeState } from 'aifn-applied/gym'
+import { episodes, type EpisodeState } from 'aifn-applied/gym'
 import {
   greedyPath,
   greedyPolicy,
@@ -15,47 +15,15 @@ import {
   frozenLakeEnvironment,
   gridworldEnvironment,
   mazeEnvironment,
-  type MdpEnvironment,
 } from 'aifn-applied/gym/environments'
 import { stream } from 'aifn/foundation/random'
-import { toFlat, type Tensor } from 'aifn/foundation/tensor'
+import { toFlat } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
 import { Player } from '@lab/controls'
 import { ControlRow, Figure } from '@lab/layout'
-import { choice, row, slider, useFigureState } from '@lab/state'
-import { Bars, Curve, Handle, Plot, Plots, Raster, Readout, useAxis, Vectors, type Vector } from '@lab/viz'
-
-/** The value table as heatmap rows (row y = grid row y, bottom first); walls are blank. */
-function gridRows(env: MdpEnvironment, V: Tensor): number[][] {
-  const g = env.render!
-  const v = toFlat(V)
-  return Array.from({ length: g.height }, (_, y) =>
-    Array.from({ length: g.width }, (_, x) => (g.cells[y * g.width + x] === 'wall' ? NaN : v[y * g.width + x])),
-  )
-}
-
-/** Greedy-policy arrows from each active cell's centre. */
-function arrows(env: MdpEnvironment, policy: Tensor): Vector[] {
-  const g = env.render!
-  const p = toFlat(policy)
-  const out: Vector[] = []
-  p.forEach((a, s) => {
-    if (a < 0) return
-    const [x, y] = stateCell(g.width, s)
-    const [dx, dy] = g.actionVectors[a]
-    out.push({ from: [x - 0.2 * dx, y - 0.2 * dy], to: [x + 0.3 * dx, y + 0.3 * dy] })
-  })
-  return out
-}
-
-/** A path of states as the x and y of its cells. */
-function pathCells(env: MdpEnvironment, path: Tensor) {
-  const w = env.render!.width
-  const cells = toFlat(path).map((s) => stateCell(w, s))
-  return { x: cells.map((c) => c[0]), y: cells.map((c) => c[1]) }
-}
-
-const axes = (n: number) => Array.from({ length: n }, (_, i) => i)
+import { choice, float, row, slider, useFigureState } from '@lab/state'
+import { GridView } from '@lab/views'
+import { Bars, Curve, Handle, Plot, Plots, Readout, useAxis } from '@lab/viz'
 
 // ---------------------------------------------------------------------------------------------------------------------
 // 1. Value iteration and policy iteration, sweep by sweep.
@@ -107,7 +75,6 @@ export function PlanningSpecimen() {
   const [step, setStep] = useState(0)
   const at = Math.min(step, run.steps.length - 1)
   const s = run.steps[at]
-  const g = env.render!
   const start = env.reset(stream(0)).state
   // A symmetric colour range about 0 from the final values, so the sign of V reads as its hue.
   const vRange = useMemo<[number, number]>(() => {
@@ -121,12 +88,8 @@ export function PlanningSpecimen() {
     }),
     [run, method],
   )
-  const values = useMemo(() => gridRows(env, s.V), [env, s])
-  const policyArrows = useMemo(() => arrows(env, s.policy), [env, s])
-  const gx = useMemo(() => axes(g.width), [g])
-  const gy = useMemo(() => axes(g.height), [g])
-  const xa = useAxis({ label: 'x' })
-  const ya = useAxis({ label: 'y', equal: xa })
+  const field = useMemo(() => ({ values: toFlat(s.V), label: 'V(s)', range: vRange }), [s, vRange])
+  const policy = useMemo(() => toFlat(s.policy), [s])
   const ka = useAxis({ label: method === 'vi' ? 'sweep k' : 'iteration', hold: 'initial', key: run })
   const ra = useAxis({
     label: method === 'vi' ? 'max |TV − V|' : 'changed',
@@ -166,10 +129,7 @@ export function PlanningSpecimen() {
       caption="Play or drag the k line. aifn valueIteration and policyIteration on env.model of gridworldEnvironment (exits +1 and −1), a text maze (goal +10, step −1) and FrozenLake; colour is V, arrows the greedy policy. Right: the residual per sweep (it falls at least as fast as γᵏ) or the actions changed per improvement."
     >
       <Plots cols={2} widths={[1.4, 1]}>
-        <Plot x={xa} y={ya}>
-          <Raster x={gx} y={gy} z={values} scale="diverging" range={vRange} valueLabel="V(s)" />
-          <Vectors vectors={policyArrows} />
-        </Plot>
+        <GridView render={env.render!} value={field} policy={policy} />
         <Plot x={ka} y={ra} legend={false}>
           {method === 'vi' ? (
             <Curve name="Bellman residual" x={progress.x} y={progress.y} slot={2} />
@@ -191,6 +151,10 @@ const CLIFF_START = CLIFF.reset(stream(0)).state
 type CliffState = EpisodeState<number, number, TdAgentState>
 const EPISODES = 500
 
+/** A greedy route's moves, or "loops" when it ends on a state it already visited. */
+const routeLength = (path: readonly number[]) =>
+  path.indexOf(path[path.length - 1]) < path.length - 1 ? 'loops' : path.length - 1
+
 function smooth(y: number[], w = 20): number[] {
   return y.map((_, i) => {
     const lo = Math.max(0, i - w + 1)
@@ -203,8 +167,8 @@ function smooth(y: number[], w = 20): number[] {
 export function CliffSpecimen() {
   const state = useFigureState({
     learning: row('1 · learning', {
-      epsilon: slider(0, 0.3, 0.1, { label: 'exploration ε' }),
-      alpha: slider(0.05, 1, 0.5, { label: 'step size α' }),
+      epsilon: float(0.1, { label: 'exploration ε', ge: 0, le: 1, step: 0.05, suggestions: [0.01, 0.05, 0.1, 0.2] }),
+      alpha: float(0.5, { label: 'step size α', gt: 0, le: 1, step: 0.05, suggestions: [0.05, 0.1, 0.5, 1] }),
     }),
   })
   const { epsilon, alpha } = state.learning
@@ -220,15 +184,23 @@ export function CliffSpecimen() {
   const e = Math.min(episode, EPISODES)
   const q = runs.q.steps[e]
   const s = runs.s.steps[e]
-  const g = CLIFF.render!
   const learnt = (st: CliffState) => {
     const policy = greedyPolicy(CLIFF.model, st.agent.Q)
-    return { V: valuesFromQ(CLIFF.model, st.agent.Q), path: greedyPath(CLIFF.model, CLIFF_START, policy) }
+    const path = Array.from(toFlat(greedyPath(CLIFF.model, CLIFF_START, policy)))
+    const values = toFlat(valuesFromQ(CLIFF.model, st.agent.Q))
+    return {
+      field: {
+        values,
+        label: 'max_a Q(s, a)',
+        range: [-20, 0] as [number, number],
+        scale: 'sequential' as const,
+        fillOpacity: 0.55,
+      },
+      path,
+    }
   }
   const ql = learnt(q)
   const sl = learnt(s)
-  const qPath = ql.path
-  const sPath = sl.path
   const curves = useMemo(
     () => ({
       q: { x: Array.from(runs.q.index), y: smooth(toFlat(runs.q.series.reward)) },
@@ -236,26 +208,26 @@ export function CliffSpecimen() {
     }),
     [runs],
   )
-  // The cliff (bottom row between start and goal) is left blank.
-  const valueRows = (V: Tensor) =>
-    gridRows(CLIFF, V).map((row, y) => row.map((v, x) => (y === 0 && x > 0 && x < g.width - 1 ? NaN : v)))
-  const gx = axes(g.width)
-  const gy = axes(g.height)
   // Cells, not geometry: no equal units, so the two grids share the column's height evenly. Both grids share one
-  // x and one y axis (one toolbar entry each, one zoom).
-  const qx = useAxis({ label: 'x' })
-  const qy = useAxis({ label: 'y' })
+  // x and one y axis (one toolbar entry each, one zoom), held at their first fit.
+  const qx = useAxis({ label: 'x', hold: 'initial' })
+  const qy = useAxis({ label: 'y', hold: 'initial' })
   const ea = useAxis({ label: 'episode', range: [0, EPISODES] })
   const wa = useAxis({ label: 'reward per episode', range: [-150, 0] })
-  const panel = (V: Tensor, path: Tensor, name: string, slot: number, x: typeof qx, y: typeof qy) => {
-    const p = pathCells(CLIFF, path)
-    return (
-      <Plot x={x} y={y} title={name}>
-        <Raster x={gx} y={gy} z={valueRows(V)} range={[-20, 0]} valueLabel="max_a Q(s, a)" />
-        <Curve name={`${name} greedy path`} x={p.x} y={p.y} slot={slot} showPoints />
-      </Plot>
-    )
-  }
+  // The greedy route as move arrows in the method's colour; a policy that loops ends back on a state it visited.
+  const panel = (l: typeof ql, name: string, slot: number) => (
+    <GridView
+      render={CLIFF.render!}
+      x={qx}
+      y={qy}
+      title={name}
+      value={l.field}
+      path={l.path}
+      pathSlot={slot}
+      inkLatest={false}
+      agent={false}
+    />
+  )
   return (
     <Figure
       title="Q-learning against SARSA on the cliff"
@@ -278,8 +250,8 @@ export function CliffSpecimen() {
       }
       readouts={
         <>
-          <Readout label="Q-learning path length" value={qPath.shape[0] - 1} />
-          <Readout label="SARSA path length" value={sPath.shape[0] - 1} />
+          <Readout label="Q-learning path length" value={routeLength(ql.path)} />
+          <Readout label="SARSA path length" value={routeLength(sl.path)} />
           <Readout
             label="Q-learning last 100 (mean)"
             value={(
@@ -298,11 +270,11 @@ export function CliffSpecimen() {
           />
         </>
       }
-      caption="Drag the episode line or play. aifn episodes of qLearningAgent and sarsaAgent on cliffWalkingEnvironment (Sutton and Barto, Example 6.6), one episode per step, both on stream('cliff'); the cliff is the blank bottom row. Bottom: reward per episode, a 20-episode moving average."
+      caption="Drag the episode line or play. aifn episodes of qLearningAgent and sarsaAgent on cliffWalkingEnvironment (Sutton and Barto, Example 6.6), one episode per step, both on stream('cliff'); the cliff is the blank bottom row. Each grid draws the method's greedy route from the start as move arrows; a route that loops ends on a cell it already crossed. Bottom: reward per episode, a 20-episode moving average."
     >
       <Plots rows={3} heights={[1.5, 1.5, 1]}>
-        {panel(ql.V, qPath, 'Q-learning', 0, qx, qy)}
-        {panel(sl.V, sPath, 'SARSA', 1, qx, qy)}
+        {panel(ql, 'Q-learning', 0)}
+        {panel(sl, 'SARSA', 1)}
         <Plot x={ea} y={wa}>
           <Curve name="Q-learning" x={curves.q.x} y={curves.q.y} slot={0} />
           <Curve name="SARSA" x={curves.s.x} y={curves.s.y} slot={1} />

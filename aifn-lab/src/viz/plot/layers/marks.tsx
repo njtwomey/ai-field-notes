@@ -3,7 +3,7 @@ import { chrome, MARKER_SHAPES, scaleStops, seriesColor } from '@lab/design/pale
 import { formatNumber } from '../../format'
 import type { Handle as HandleSpec } from '../../handles'
 import { LINE_WIDTH, MARKER_SIZE } from '../../theme'
-import { vectorEnds, vectorLines, type Vector } from '../../vectors'
+import { vectorEnds, vectorLines, vectorMidLabels, type Vector } from '../../vectors'
 import {
   defineLayer,
   extentOf,
@@ -502,8 +502,9 @@ export const Segments = defineLayer<SegmentsProps>({
 export type VectorsProps = CommonProps & { vectors: readonly Vector[] }
 
 /**
- * Arrows, ink unless a vector sets `slot`. Clipped to the drawn box: an arrow leaving the plot ends at the edge with a
- * chevron pointing the way it goes (ECharts would drop it otherwise).
+ * Arrows, ink unless a vector sets `slot`; a vector's `label` sits at its tip, or upright on a pill at its midpoint with
+ * `labelAt: 'middle'`. Clipped to the drawn box: an arrow leaving the plot ends at the edge with a chevron pointing the
+ * way it goes (ECharts would drop it otherwise).
  */
 export const Vectors = defineLayer<VectorsProps>({
   kind: 'Vectors',
@@ -533,6 +534,21 @@ export const Vectors = defineLayer<VectorsProps>({
           data: vectorLines(p.vectors, ctx.mode, ctx.box),
         },
         z: 6,
+      },
+      // Midpoint labels (a count on a move), upright over the shaft.
+      {
+        id: `${ctx.id}:labels`,
+        name: '__vector-labels',
+        type: 'scatter',
+        data: vectorMidLabels(p.vectors, ctx.mode, ctx.box),
+        // ECharts drops the label of a symbol 'none' point; an invisible dot carries it.
+        symbol: 'circle',
+        symbolSize: 1,
+        itemStyle: { color: 'transparent' },
+        silent: true,
+        tooltip: { show: false },
+        animation: false,
+        z: 7,
       },
     ],
   }),

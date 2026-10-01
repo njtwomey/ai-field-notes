@@ -120,6 +120,47 @@ function tidyAxes(axes: unknown): unknown {
 
 const HANDLES_ID = '__handles'
 
+/** An option ECharts rejected, named by what it held: the bare ECharts errors ("Error" from an assert) say nothing. */
+export class ChartError extends Error {
+  override name = 'ChartError'
+}
+
+const fmt = (v: unknown) => (typeof v === 'number' ? String(v) : v === undefined ? 'auto' : JSON.stringify(v))
+
+/** The axes (name, type, min, max) and series (id, type, points, non-finite values) of an option, in one line each. */
+function describeOption(option: unknown): string {
+  const o = (isPlain(option) ? option : {}) as Plain
+  const axes = (key: 'xAxis' | 'yAxis') =>
+    asArray(o[key])
+      .filter(isPlain)
+      .map((a) => `${key[0]} ${fmt(a.name ?? '')} ${fmt(a.type ?? 'value')} [${fmt(a.min)}, ${fmt(a.max)}]`)
+  const series = asArray(o.series)
+    .filter(isPlain)
+    .map((q) => {
+      const data = Array.isArray(q.data) ? (q.data as unknown[]) : []
+      const bad = data.filter((d) =>
+        (Array.isArray(d) ? d : [d]).some((v) => typeof v === 'number' && !Number.isFinite(v)),
+      ).length
+      return `${fmt(q.id ?? q.name ?? '?')} ${fmt(q.type ?? '')} ${data.length} points${bad ? `, ${bad} non-finite` : ''}`
+    })
+  return [...axes('xAxis'), ...axes('yAxis'), ...series].join('; ')
+}
+
+/** setOption, rethrowing any ECharts failure as a `ChartError` that names the axes and series it was given. */
+function setOptionNamed(instance: echarts.ECharts, option: unknown, opts?: { notMerge?: boolean }) {
+  try {
+    instance.setOption(option as EChartsOption, opts)
+  } catch (e) {
+    const cause = e instanceof Error ? e.message || e.name : String(e)
+    const err = new ChartError(
+      `ECharts rejected the chart (${cause || 'internal assertion'}${e instanceof Error && e.stack?.includes('assert') ? ', in an ECharts assert' : ''}): ${describeOption(option)}`,
+      { cause: e },
+    )
+    console.error(err.message, e)
+    throw err
+  }
+}
+
 /**
  * Dev-only counters on `window.__labStats`, read by `make lab-shots ARGS='--profile'`: `setOption` counts every call
  * into ECharts, `full` the full redraws among them (`notMerge`, a new base option). Production builds drop it.
@@ -214,7 +255,7 @@ export function EChart({
         merged.yAxis = tidyAxes(merged.yAxis)
       }
       if (handles && cartesian) merged.series = [...asArray(merged.series), handlesSeries(mode)]
-      instance.setOption(merged as EChartsOption, { notMerge: true })
+      setOptionNamed(instance, merged, { notMerge: true })
       countSetOption(true)
       if (cartesian && !frozen.current) {
         const extents = axisExtents(instance)
@@ -240,7 +281,7 @@ export function EChart({
     if (patch || withHandles) {
       const p = { ...(patch ?? {}) } as Plain
       if (withHandles) p.series = [...asArray(p.series), handlesPatch(handles)]
-      instance.setOption(p as EChartsOption)
+      setOptionNamed(instance, p)
       countSetOption(false)
     }
   })

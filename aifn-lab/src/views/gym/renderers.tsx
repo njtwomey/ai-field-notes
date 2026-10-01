@@ -8,7 +8,8 @@
 import { useMemo, type ComponentType } from 'react'
 import type { Trajectory, Training } from 'aifn-applied/gym'
 import type { CartPoleRender, Environment, EpisodeEnd, GridRender, PendulumRender } from 'aifn/foundation/contracts'
-import { Bars, Curve, Plot, Points, Raster, useAxis } from '@lab/viz'
+import { Bars, Plot, Points, useAxis } from '@lab/viz'
+import { GridView } from './GridView'
 import { CartPoleView } from './CartPoleView'
 import { PendulumView, type PendulumViewProps } from './PendulumView'
 
@@ -33,35 +34,16 @@ const toneOf = (end: EpisodeEnd | null | undefined): 'destructive' | 'success' |
 
 export type GymRenderer = ComponentType<GymRenderProps>
 
-/** Cell kinds drawn in colour, in slot order; other cells are blank. */
-const KINDS = ['wall', 'goal', 'trap', 'start', 'hole', 'cliff', 'terminal'] as const
-
+/** A gridworld or maze: the shared `GridView` with the episode's path up to the step and the agent there. */
 export function GridRenderer({ env, trajectory, step, end }: GymRenderProps) {
-  const r = env.render as GridRender<unknown>
-  const { width, height } = r
-  const xs = useMemo(() => Array.from({ length: width }, (_, i) => i), [width])
-  const ys = useMemo(() => Array.from({ length: height }, (_, i) => i), [height])
-  const map = useMemo(
-    () =>
-      Array.from({ length: height }, (_, y) =>
-        Array.from({ length: width }, (_, x) => KINDS.indexOf(r.cells[y * width + x] as (typeof KINDS)[number])),
-      ),
-    [r, width, height],
-  )
-  const cells = useMemo(
-    () => trajectory.states.map((s) => r.cell(s)).map((c) => [c % width, Math.floor(c / width)] as const),
-    [trajectory, r, width],
-  )
-  const upTo = cells.slice(0, step + 1)
-  const [px, py] = cells[Math.min(step, cells.length - 1)]
-  const xa = useAxis({ label: 'x' })
-  const ya = useAxis({ label: 'y', equal: xa })
   return (
-    <Plot x={xa} y={ya} title={end ? `${env.name}: ${end.reason}` : env.name}>
-      <Raster x={xs} y={ys} z={map} scale="categorical" categoryNames={KINDS} />
-      <Curve name="path" x={upTo.map((c) => c[0])} y={upTo.map((c) => c[1])} slot={1} tone={toneOf(end)} showPoints />
-      <Points name="agent" x={[px]} y={[py]} emphasis={!end} tone={toneOf(end)} size={end ? 16 : undefined} />
-    </Plot>
+    <GridView
+      render={env.render as GridRender<unknown>}
+      title={end ? `${env.name}: ${end.reason}` : env.name}
+      path={trajectory.states}
+      step={step}
+      end={end}
+    />
   )
 }
 

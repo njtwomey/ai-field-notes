@@ -477,8 +477,9 @@ export function reinforceAgent({
 // ── Reading a learnt table ───────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * The path a policy follows from `start` when every move takes its most likely outcome: stops at a terminal state, a
- * repeated state, or after `maxLength` states. For drawing the greedy route on a grid.
+ * The path a policy follows from `start` when every move takes its most likely outcome: stops at a terminal state,
+ * after `maxLength` states, or on reaching a state already on the path, which it includes so that a loop closes (the
+ * last state then appears twice). For drawing the greedy route on a grid.
  */
 export function greedyPath(
   mdp: MdpTables,
@@ -496,8 +497,8 @@ export function greedyPath(
     const outs = mdp.outcomes[s * mdp.actions + a]
     if (!outs.length) break
     const o = outs.reduce((best, x) => (x.p > best.p ? x : best), outs[0])
-    if (seen.has(o.next)) break
     path.push(o.next)
+    if (seen.has(o.next)) break
     seen.add(o.next)
     s = o.next
   }

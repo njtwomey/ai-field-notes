@@ -232,6 +232,80 @@ agents, { replicates, steps, stream?, points? })` runs replicate k of every agen
   `PendulumView` (`aifn-lab/src/views/gym/`), which `GymTrainer` also uses for the `pendulum` render kind.
   The swing-up, LQR and cart-pole agents implement `greedy`.
 
+### 3d. Function approximation: the deep Q-network (2026-10-01)
+
+- **`dqnAgent(options)`** (`aifn-applied/gym/agents/dqn.ts`) is DQN after Mnih et al. (2015) on the schedule of
+  Stable-Baselines3's `DQN`, for a box observation and discrete actions (`requires: { observation: 'box', action:
+'discrete', families: ['control'] }`). The Q-network is `qNetwork(sizes, activation, layerNorm)`: dense layers from
+  aifn nn (`Linear`, optional `LayerNorm`, `ActivationLayer`) with PyTorch's default initialisation (weights and biases
+  uniform on ±1/√fan-in), one linear output per action. Each gradient step draws a fresh minibatch and takes one Adam
+  step (`adamRule`, ε 10⁻⁸, chained after `clipByGlobalNorm(clipNorm)`) on the Huber loss between Q(o, a) and
+  y = r + γ (1 − terminated) Q̄(o′, a*). With double DQN (van Hasselt et al., 2016) a* is the online network's argmax
+  at o′, otherwise the target's (SB3). A truncated transition still bootstraps (SB3's `handle_timeout_termination`).
+  Defaults: 4 → 64 → 64 → 2 ReLU, lr 10⁻³, batch 64, buffer 10 000, warm-up 1000, one gradient step every 4 steps,
+  sync 500, ε 1 → 0.05 over 10 000 steps, double DQN, γ the environment's. `SB3_CARTPOLE` holds the Zoo recipe.
+- **The mapping from SB3** (`DQN`, `OffPolicyAlgorithm.collect_rollouts`, `DQN.train` and `DQN._on_step`), with t the
+  environment steps so far:
+
+  | SB3                                           | `dqnAgent`                                | Semantics                                                                       |
+  | --------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------- |
+  | `learning_starts`                             | `warmup`                                  | uniformly random actions while t < warmup; training only once t > warmup        |
+  | `train_freq` (steps), `gradient_steps`        | `updateEvery`, `gradientSteps`            | after step t with t mod updateEvery = 0: `gradientSteps` updates, fresh batches |
+  | `target_update_interval`, `tau`               | `targetSync`, `tau` (default 1)           | Q̄ ← τ Q + (1 − τ) Q̄ after every step with t mod targetSync = 0, before training |
+  | `exploration_fraction`, `_final_eps`          | `epsilonSteps`, `epsilonEnd`              | ε = 1 + (ε_end − 1) min(1, t / epsilonSteps); epsilonSteps = fraction × budget  |
+  | `max_grad_norm = 10`, smooth L1, Adam         | `clipNorm`, Huber (δ 1), `adamRule`       | the same rules                                                                  |
+  | DQN (not double), `optimize_memory_usage` off | `double: false`; o′ stored per transition | the target network's max at o′                                                  |
+  | `total_timesteps`                             | `train(…, { steps })`                     | SB3 stops at exactly the budget; `train` finishes the episode that crosses it   |
+
+  Known differences: aifn computes in float64 (SB3 float32); the random streams differ, so runs match in law, not
+  draw for draw; SB3 samples random actions during warm-up from the action space and ε-greedy from NumPy, aifn from
+  its own streams; SB3 cuts the last episode at the budget.
+
+- **Plain-data state:** the two networks and Adam's moments as parameter pytrees of tensors, counters, the minibatch
+  seed and the buffer. `learn` takes no stream, so minibatch u is drawn from `child(stream(seed), 'batch', u)` with the
+  seed fixed in `init`. `act` draws ε-greedy exploration from its own stream. The state passes the Algorithm protocol
+  (clone and revive, seek, extend), and `replay` reproduces training episodes exactly.
+- **The replay buffer is persistent.** A copied ring buffer costs O(capacity) per step, and a mutated one corrupts the
+  checkpoints and trace states that share it. The buffer stores transitions (o, a, r, terminated, o′; Float32) in
+  sealed chunks of 256 that are never written again and are shared by every later state, plus a tail of fewer than 256
+  that each push copies. A state holds only the chunks that overlap its window of the last `bufferSize` transitions,
+  so the window is bounded like a ring buffer while checkpoints share all but their tails.
+- **Checkpoint memory** (151 checkpoints from `train`'s default spacing, unique typed-array bytes): about 16–17.5 MB for
+  300 episodes with the 64 × 2 network, of which 1–2 MB is replay data and the rest networks and Adam moments (about
+  110 KB per checkpoint); about 7 MB with 32 × 2. So `train` keeps its usual spacing: thinning the checkpoints would
+  save memory but make `replay` and `evaluateEpisode` re-run more learning steps on the page.
+- **Cost** (Node, batch 64, aifn tensors and reverse-mode autodiff): 4 → 64 → 64 → 2 forward 0.45 ms, value and
+  gradient 1.5 ms, Adam with clipping 0.3 ms; one update with the two target forwards about 2.7 ms. 4 → 32 → 32 → 2:
+  about 1 ms. An environment step with the greedy forward and the buffer push is about 20 µs. 300 episodes at the
+  defaults take 3–40 s depending on how long the episodes become.
+- **How well it learns (first build, before the SB3 schedule and init):** DQN learns on the cart-pole and then partly forgets. With the defaults the moving
+  return peaks at 150–350 around episodes 200–275 and falls back to about 100–150, and the final greedy policy
+  returns 20–180; some seeds first lock onto one action (returns ≈ 10) for a hundred or more episodes. No probe recipe
+  (lr 3 × 10⁻⁴–2.3 × 10⁻³, update every 1–4 steps, sync 100–1000, buffer 10–100 k, Polyak averaging, γ 0.995, nets
+  32 × 2 to 128) reached a final greedy mean of 450 on most seeds within 500–800 episodes. A PyTorch DQN on Gymnasium's
+  CartPole equations with the same recipe gave the same curve shape (peaks 180–260, final greedy means 111, 111 and 272
+  on three seeds), so the plateau is the recipe and budget, not the implementation. In PyTorch, a fast ε decay (over
+  2000 steps) with Polyak averaging reached returns of 500 on some seeds but did not stay there. The owner dropped the
+  ≥ 450 bar; the test asserts that DQN learns (the mean return of the last 50 of 200 episodes is at least three times
+  the random agent's on three of three seeds, with 32 × 2, an update every 2 steps and ε over 5000 steps).
+- **The Zoo recipe on the small network** (50 000 steps; lr 2.3 × 10⁻³, batch 64, buffer 100 000, learning starts
+  1000, γ 0.99, target every 10 steps, 128 gradient steps every 256, ε to 0.04 over 0.16 of the budget, plain DQN;
+  network 4 → 32 → 32 → 2 as the owner chose, not the Zoo's 256 × 2). aifn takes 26–27 s per run in Node (24 700
+  gradient steps at about 1 ms each). The mean return of the episodes ending in the last tenth of the budget, seeds
+  0, 1, 2: aifn 81, 105, 111; a torch reproduction of SB3's loop on Gym's CartPole equations with the same network
+  273, 23, 268. Both curves rise to about 90–220 by 10 000 steps and then wander (aifn seed 0 averages 493 between 30 000
+  and 35 000 steps; torch seed 2 reaches 500 at 45 000), so the shape agrees and the seed-to-seed spread is wider than
+  the gap. With the Zoo's 256 × 2 network the torch loop rises more slowly and steadily: 388, 167 and 474. In aifn that
+  network costs about 27 ms per gradient step (forward 5.4 ms, value and gradient 17 ms, clipped Adam 4.9 ms; one
+  64 × 256 by 256 × 256 matmul is 4.9 ms), about 11 minutes for the budget, so the page keeps 32 × 2.
+- **Lab:** the cart-pole page trains DQN on a step budget (default 50 000) with the Zoo recipe as its default and a
+  "SB3 RL Zoo preset" button that restores it (training fields only; the network row is separate). Rows: DQN
+  (learning rate, budget, train every, gradient steps, batch, target sync, buffer, double DQN, an "advanced" switch),
+  advanced (γ, learning starts, final ε, ε decay as a fraction of the budget, gradient clip) and network (hidden
+  layers, width, activation, layer norm). `GymTrainer` takes a `scalars` prop that draws up to three agent scalars in
+  their own row: the page shows ε, the loss and the mean max Q at the sampled next states (the last two averaged over
+  each episode's updates).
+
 ## 4. The loop (applications, `gym/rollout.ts`)
 
 ```ts
@@ -252,20 +326,34 @@ environment randomness.
 
 ### 4a. Layout (owner's direction, 2026-10-01: everything under `gym`)
 
-| Where                                                                  | What                                                                                 |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| core `aifn/foundation/contracts` (`gym.ts`)                            | `Domain`, `Environment`, `Step`, `Transition`, `Agent`, models, oracle, render specs |
-| core `aifn/foundation/space` (`domain.ts`)                             | `discreteDomain`, `boxDomain`, `domainContains`, `sampleDomain`, …                   |
-| `aifn-applied/gym` (`index.ts`, `rollout.ts`, `mdp.ts`)                | `rollout`, `episodes`, `compare`; `TabularMdp` and its helpers; the two registries   |
-| `aifn-applied/gym/environments` (`bandits`, `gridworlds`)              | bandits; grid MDPs and `mdpEnvironment`; child `control` (the pendulum)              |
-| `aifn-applied/gym/agents` (`random`, `bandits`, `tabular`, `planning`) | random; bandit policies; tabular learners; planners; child `control`                 |
-| lab `applied/gym`                                                      | bandit regret and round-by-round, maze, cliff, planning and pendulum pages           |
+| Where                                                                         | What                                                                                 |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| core `aifn/foundation/contracts` (`gym.ts`)                                   | `Domain`, `Environment`, `Step`, `Transition`, `Agent`, models, oracle, render specs |
+| core `aifn/foundation/space` (`domain.ts`)                                    | `discreteDomain`, `boxDomain`, `domainContains`, `sampleDomain`, …                   |
+| `aifn-applied/gym` (`index.ts`, `rollout.ts`, `mdp.ts`)                       | `rollout`, `episodes`, `compare`; `TabularMdp` and its helpers; the two registries   |
+| `aifn-applied/gym/environments` (`bandits`, `gridworlds`)                     | bandits; grid MDPs and `mdpEnvironment`; child `control` (the pendulum)              |
+| `aifn-applied/gym/agents` (`random`, `bandits`, `tabular`, `planning`, `dqn`) | random; bandit policies; tabular learners; planners; DQN; child `control`            |
+| lab `applied/gym`                                                             | bandit regret and round-by-round, maze, cliff, planning and pendulum pages           |
 
 Registry addresses read `gym/environments/<key>` and `gym/agents/<key>`; `gym/index.ts` exports
 `environmentRegistry`, `agentRegistry`, `compatible(envInfo, agentInfo)` and `validPairs()`.
 
 ### 4b. Headless training and the trainer (2026-10-01)
 
+- **One training-run row (2026-10-01).** Every `GymTrainer` page spreads `run: trainingRun(defaults)` (`views/gym`)
+  into its `useFigureState`: the budget in episodes or environment steps, its size and the seed, in the figure's URL
+  state; `GymTrainer` reads `state.run`, so pages declare no budget or seed fields. `gymSetup(envKey, envParams,
+agentKey, agentParams)` builds the page's environment and agent from the gym registries and the matching worker
+  tasks at their registry addresses, replacing each page's factory-and-address tables. SB3's ε fraction becomes steps
+  through `epsilonStepsFor(fraction, budgetSteps)` beside `SB3_CARTPOLE`.
+- **Step budgets and Stop (2026-10-01).** `train` and `training` take `{ steps }` instead of `{ episodes }`: episodes
+  run until at least that many environment steps are done, and the episode that crosses the budget runs to its end, so
+  every episode replays as it happened. `Training` reports `budget` and `steps`; under a step budget the checkpoint
+  spacing starts at `checkpointEvery` and doubles, dropping every other checkpoint, whenever there would be more than
+  `maxCheckpoints`. `GymTrainer` takes `steps` in its setup and shows progress in steps. While training, its Train
+  button becomes Stop: `useStreamed(task).stop()` terminates the worker (`ComputeWorker.cancel`) and keeps the last
+  streamed partial run, which carries every checkpoint so far, so curves, replay and evaluate work on it; the status
+  reads "stopped at N episodes / M steps".
 - `train(env, agent, { episodes, seed, checkpointEvery?, maxCheckpoints = 200 })` (`gym/train.ts`) runs episodes with
   no display and returns plain data: per-episode columns (return, length, terminated, pseudo-regret when the oracle
   knows it, the first action, and the agent's optional `scalars`) and agent-state checkpoints every
@@ -318,7 +406,8 @@ context-free bandit), whose action is an arm (`integers [0, arms − 1]`), and w
 
 - **Classic control** on core's ODE solvers: cart-pole, mountain car, pendulum, acrobot (continuous observations; the
   `dynamics` model is differentiable, so iLQR/MPC can use `grad`).
-- **Function approximation**: tile coding, linear TD, semi-gradient SARSA; DQN and actor–critic on the nn module.
+- **Function approximation**: tile coding, linear TD, semi-gradient SARSA; actor–critic on the nn module (DQN is built,
+  §3d).
 - **Off-policy evaluation**: importance sampling and doubly robust estimators over logged `Transition`s (the notes in
   `reinforcement-learning/model-based-and-offline`).
 - **Lab**: one environment × agent picker; an episode Player; return/regret curves from `compare`; the grid renderer

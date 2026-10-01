@@ -27,7 +27,7 @@ import { type Dataset } from 'aifn-applied/data'
 import { child, stream } from 'aifn/foundation/random'
 import { toFlat, toRows, type Tensor } from 'aifn/foundation/tensor'
 import { Figure } from '@lab/layout'
-import { choice, number, row, slider, useFigureState, variants } from '@lab/state'
+import { int, choice, row, slider, useFigureState, variants } from '@lab/state'
 import { Area, Curve, Plot, Plots, Points, Raster, Readout, useAxis } from '@lab/viz'
 import { useDatasetSeries } from '@lab/views'
 
@@ -66,7 +66,7 @@ export function GallerySpecimen() {
     gen: GENERATORS,
     sample: row('2 · sample', {
       n: slider(20, 1000, 300, { label: 'points n', step: 10 }),
-      seed: number(0, { min: 0, step: 1, label: 'stream' }),
+      seed: int(0, { ge: 0, label: 'stream' }),
     }),
   })
   const { gen } = state

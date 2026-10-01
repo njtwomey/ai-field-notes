@@ -5,10 +5,11 @@
  * `evaluate` plays a fresh greedy episode of the policy as it was after that episode. The environment is drawn by the
  * renderer for its `render.kind` (`GYM_RENDERERS`).
  *
- * The page owns the controls (episodes, seed, the agent's hyperparameters, in its `useFigureState`) and passes a
- * `setup`: the environment and agent built on the page (for replay and evaluation) and the same two as worker tasks
- * (for training). Training starts on mount; afterwards it runs when Train is pressed, so moving a control does not
- * discard a run until asked.
+ * The page owns the environment's and agent's controls in its `useFigureState`, spreads in the shared training-run
+ * row (`run: trainingRun(defaults)`: the budget in episodes or steps, and the seed), which `GymTrainer` reads from
+ * `state.run`, and passes a `setup` (`gymSetup(envKey, envParams, agentKey, agentParams)`): the environment and agent
+ * built on the page (for replay and evaluation) and the same two as worker tasks (for training). Nothing trains until Train is pressed, and a changed setting marks the shown run as stale until Train
+ * is pressed again, so the reader chooses the configuration before spending the compute.
  */
 import { useMemo, useState, type ReactNode } from 'react'
 import { evaluateEpisode, replay, type Training, type Trajectory } from 'aifn-applied/gym'
@@ -21,6 +22,7 @@ import { Curve, Handle, Plot, Plots, Points, Readout, useAxis } from '@lab/viz'
 import { GYM_RENDERERS, renderKind, WIDE_KINDS } from './registry'
 import type { GymRenderer } from './renderers'
 import { hasStepSeries } from './series'
+import { trainingRunOf } from './trainingRun'
 import { StepSeries } from './StepSeries'
 
 /** What to train: the environment and agent on the page, the same as worker tasks, and the run's length and seed. */
@@ -31,8 +33,6 @@ export type GymSetup = {
   envTask: Task
   /** `call('gym/agents/<key>', params)`. */
   agentTask: Task
-  episodes: number
-  seed: number | string
   /** The environment `evaluate` plays in, when it differs from the trained one (another start state). Not trained on. */
   evaluationEnv?: Environment<unknown, unknown, unknown>
 }
@@ -41,8 +41,8 @@ export type GymTrainerProps = {
   title: string
   purpose: ReactNode
   caption?: ReactNode
-  /** The page's figure state (its controls appear above the trainer's). */
-  state?: FigureProps['state']
+  /** The page's figure state, with the training-run row as `run` (its controls appear above the trainer's). */
+  state: FigureProps['state']
   setup: GymSetup
   /** A renderer for this page, instead of the one for `render.kind`. */
   renderer?: GymRenderer
@@ -53,6 +53,12 @@ export type GymTrainerProps = {
   initialMode?: 'replay' | 'evaluate'
   /** Options passed to the renderer (`GymRenderProps.options`). */
   rendererOptions?: Readonly<Record<string, unknown>>
+  /** Agent scalars (`Agent.scalars` names) drawn against episode in a row of their own, at most three. */
+  scalars?: readonly string[]
+  /** Extra buttons beside Train (e.g. a page's presets). */
+  actions?: ReactNode
+  /** The episode Player's starting speed, in steps per second (default 10). */
+  playbackSpeed?: number
 }
 
 type Mode = 'replay' | 'evaluate'
@@ -70,7 +76,10 @@ function smooth(y: ArrayLike<number>, total: number, fraction: number): number[]
   return out
 }
 
-const keyOf = (s: GymSetup) => JSON.stringify([s.envTask, s.agentTask, s.episodes, s.seed])
+/** A setup with the training run (budget and seed) from the figure state's `run` row. */
+type RunSetup = GymSetup & { episodes?: number; steps?: number; seed: number }
+
+const keyOf = (s: RunSetup) => JSON.stringify([s.envTask, s.agentTask, s.steps ?? s.episodes, s.seed])
 
 export function GymTrainer({
   title,
@@ -83,37 +92,60 @@ export function GymTrainer({
   defaultSize = 'XL',
   initialMode = 'replay',
   rendererOptions,
+  scalars: scalarNames = [],
+  playbackSpeed = 10,
+  actions,
 }: GymTrainerProps) {
-  // The setup last trained: the first one on mount, then whatever is current when Train is pressed.
-  const [trained, setTrained] = useState(setup)
-  const stale = keyOf(trained) !== keyOf(setup)
+  // The setup of the run shown: none until Train is pressed, then the setup current at that press. A fresh object per
+  // press, so pressing again with the same settings reruns.
+  const [trained, setTrained] = useState<RunSetup | null>(null)
+  const run0 = trainingRunOf(state)
+  const current: RunSetup = { ...setup, ...run0 }
+  const stale = trained !== null && keyOf(trained) !== keyOf(current)
+  const shown = trained ?? current
   const task = useMemo(
     () =>
-      call<Training<unknown>>('gym/training', trained.envTask, trained.agentTask, {
-        episodes: trained.episodes,
-        seed: trained.seed,
-      }),
+      trained
+        ? call<Training<unknown>>(
+            'gym/training',
+            trained.envTask,
+            trained.agentTask,
+            trained.steps !== undefined
+              ? { steps: trained.steps, seed: trained.seed }
+              : { episodes: trained.episodes, seed: trained.seed },
+          )
+        : null,
     [trained],
   )
   const run = useStreamed(task)
   const training = run.value
   const n = training?.episodes ?? 0
+  const stepsDone = training?.steps ?? 0
+  const stepBudget = shown.steps
+  // How far the run is, as a fraction, and in words.
+  const progress = stepBudget ? stepsDone / stepBudget : n / Math.max(1, shown.episodes ?? 1)
+  const progressText = stepBudget
+    ? `${n} episodes · ${stepsDone.toLocaleString()} / ${stepBudget.toLocaleString()} steps`
+    : `${n} / ${shown.episodes} episodes`
 
   // The chosen episode follows the newest one until the reader picks one.
   // A pick belongs to the run it was made on; a new run starts from its newest episode again.
   const [picked, setPicked] = useState<{ task: typeof task; episode: number } | null>(null)
   const episode = Math.min(picked?.task === task ? picked.episode : n, n)
   const [mode, setMode] = useState<Mode>(initialMode)
-  const evaluationEnv = setup.evaluationEnv ?? trained.env
-  const shownEnv = mode === 'evaluate' ? evaluationEnv : trained.env
+  const evaluationEnv = setup.evaluationEnv ?? shown.env
+  const shownEnv = mode === 'evaluate' ? evaluationEnv : shown.env
 
+  // One job at a time: while the run streams in, only the learning curves update. No episode is replayed or drawn
+  // until training ends, so the main thread does not re-simulate an episode on every streamed batch.
+  const busy = run.running
   const trajectory = useMemo((): Trajectory<unknown, unknown, unknown> | null => {
-    if (!training || episode < 1) return null
+    if (busy || !training || !trained || episode < 1) return null
     const { env, agent } = trained
     return mode === 'replay'
       ? replay(env, agent, training, episode).trajectory
       : evaluateEpisode(evaluationEnv, agent, training, episode, evaluationSeed).trajectory
-  }, [training, episode, mode, trained, evaluationSeed, evaluationEnv])
+  }, [busy, training, episode, mode, trained, evaluationSeed, evaluationEnv])
   // The step belongs to the trajectory it was set on: a newly chosen episode opens at step 0.
   const [stepOf, setStepOf] = useState<{ trajectory: typeof trajectory; step: number } | null>(null)
   const step = stepOf?.trajectory === trajectory ? stepOf.step : 0
@@ -132,7 +164,8 @@ export function GymTrainer({
     const pick = (o: number) => x.filter((e) => outcome[e - 1] === o)
     const failX = pick(-1)
     const okX = pick(1)
-    const w = Math.max(1, Math.round(training.total / 20))
+    const span = Number.isNaN(training.total) ? training.episodes : training.total
+    const w = Math.max(1, Math.round(span / 20))
     let fails = 0
     const failShare = Array.from(outcome, (o, i) => {
       fails += o === -1 ? 1 : 0
@@ -143,7 +176,7 @@ export function GymTrainer({
       x,
       // One-step episodes (a bandit's rounds) pay noisy single rewards: no raw curve, and a wider average.
       returns: oneStep ? null : Array.from(training.returns),
-      smoothed: smooth(training.returns, training.total, oneStep ? 1 / 10 : 1 / 50),
+      smoothed: smooth(training.returns, span, oneStep ? 1 / 10 : 1 / 50),
       lengths: Array.from(training.lengths),
       regret: training.regret ? Array.from(training.regret, (r) => (cum += r)) : null,
       scalar: scalar ? { name: scalar[0], y: Array.from(scalar[1]) } : null,
@@ -159,12 +192,13 @@ export function GymTrainer({
     }
   }, [training])
 
-  const kind = renderKind(trained.env)
+  const kind = renderKind(shown.env)
   const Renderer = renderer ?? GYM_RENDERERS[kind]
   // Per-step panels (state series and actions against step) for environments that declare state series.
-  const withSeries = hasStepSeries(trained.env, kind)
+  const withSeries = hasStepSeries(shown.env, kind)
   const wide = WIDE_KINDS.has(kind)
-  const total = trained.episodes
+  // Under a step budget the number of episodes is not known in advance: the episode axis follows the run.
+  const total = stepBudget ? Math.max(1, n) : (shown.episodes ?? 1)
   const ea = useAxis({ label: 'episode', range: [0, total], key: total })
   const ra = useAxis({ label: 'return', hold: 'union', key: task })
   const ba = useAxis({ label: curves?.regret ? 'cumulative regret' : 'length (steps)', hold: 'union', key: task })
@@ -178,8 +212,31 @@ export function GymTrainer({
     ...(curves?.outcomes && { range: [0, 1] as const }),
   })
   const sx = useAxis({ label: 'step' })
+  // One axis per extra scalar panel (a fixed number of hooks).
+  const extra = scalarNames.slice(0, 3)
+  const xa = [
+    useAxis({ label: extra[0] ?? '', hold: 'union', key: task }),
+    useAxis({ label: extra[1] ?? '', hold: 'union', key: task }),
+    useAxis({ label: extra[2] ?? '', hold: 'union', key: task }),
+  ]
   const pick = (v: number) => setPicked({ task, episode: Math.max(1, Math.min(n, Math.round(v))) })
-  const marker = n > 0 && <Handle kind="x" at={episode} label="episode" onDrag={pick} />
+  // The marker stays on the chart (adding and removing a handle layer mid-stream would re-patch a missing series); it
+  // only ignores drags while training runs.
+  const marker = n > 0 && <Handle kind="x" at={episode} label="episode" onDrag={busy ? () => {} : pick} />
+  const extraPlots =
+    extra.length > 0 ? (
+      <Plots cols={extra.length} scale={withSeries ? 0.3 : 0.4}>
+        {extra.map((name, i) => {
+          const y = training?.scalars[name]
+          return (
+            <Plot key={name} x={ea} y={xa[i]} legend={false}>
+              {curves && y && <Curve name={name} x={curves.x} y={Array.from(y)} slot={i + 1} />}
+              {marker}
+            </Plot>
+          )
+        })}
+      </Plots>
+    ) : null
 
   const rewardsSoFar = trajectory ? trajectory.rewards.slice(0, at).reduce((a, b) => a + b, 0) : 0
   // At the last step of an episode that the environment calls a success or a failure, the scene takes that tone.
@@ -209,7 +266,17 @@ export function GymTrainer({
         end={end}
       />
     ) : (
-      <Plot x={sx} y={sa} title="waiting for the first episodes" />
+      <Plot
+        x={sx}
+        y={sa}
+        title={
+          !trained
+            ? 'press Train to start'
+            : busy
+              ? 'training: pick an episode on the curves when it finishes'
+              : 'waiting for the first episodes'
+        }
+      />
     )
   const returnPlot = (
     <Plot x={ea} y={ra} title="return per episode">
@@ -267,54 +334,39 @@ export function GymTrainer({
         <>
           <ControlRow label="train">
             <div className="flex flex-wrap items-center gap-3">
-              <Button
-                size="sm"
-                variant={stale ? 'default' : 'outline'}
-                aria-label="Train"
-                onClick={() => setTrained(setup)}
-              >
-                Train
-              </Button>
+              {run.running ? (
+                <Button size="sm" variant="destructive" aria-label="Stop" onClick={run.stop}>
+                  Stop
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant={!trained || stale ? 'default' : 'outline'}
+                  aria-label="Train"
+                  onClick={() => setTrained({ ...current })}
+                >
+                  {trained ? 'Retrain' : 'Train'}
+                </Button>
+              )}
+              {actions}
               <div className="h-1.5 w-40 overflow-hidden rounded bg-muted" aria-busy={run.running}>
-                <div className="h-full bg-primary" style={{ width: `${(100 * n) / Math.max(1, total)}%` }} />
+                <div className="h-full bg-primary" style={{ width: `${100 * Math.min(1, progress)}%` }} />
               </div>
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {run.error
-                  ? `failed: ${run.error}`
-                  : `${n} / ${total} episodes${run.running ? '…' : ''}${stale ? ' · settings changed: press Train' : ''}`}
+              <span
+                className={`text-xs tabular-nums ${!trained || stale ? 'font-medium text-foreground' : 'text-muted-foreground'}`}
+              >
+                {!trained
+                  ? 'Not trained yet: choose the settings, then press Train.'
+                  : run.error
+                    ? `failed: ${run.error}`
+                    : stale
+                      ? `Settings changed since this run (${progressText} shown): press Retrain to train with them.`
+                      : run.stopped
+                        ? `stopped at ${n} episodes / ${stepsDone.toLocaleString()} steps`
+                        : `${progressText}${run.running ? '…' : ''}`}
               </span>
             </div>
           </ControlRow>
-          <ControlRow label={`episode ${episode}`}>
-            <div className="flex items-center gap-1">
-              {(['replay', 'evaluate'] as const).map((m) => (
-                <Button
-                  key={m}
-                  size="sm"
-                  variant={mode === m ? 'default' : 'outline'}
-                  aria-label={m}
-                  aria-pressed={mode === m}
-                  onClick={() => setMode(m)}
-                >
-                  {m === 'replay' ? 'replay (as trained)' : 'evaluate (greedy)'}
-                </Button>
-              ))}
-            </div>
-            <Player label="step" value={at} onChange={setStep} count={steps} defaultSpeed={10} />
-          </ControlRow>
-          {end && (
-            <div
-              role="status"
-              className={
-                end.success
-                  ? 'border-success/40 bg-success/10 text-success col-span-full w-fit rounded-md border px-3 py-1.5 text-sm'
-                  : 'col-span-full w-fit rounded-md border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-sm text-destructive'
-              }
-            >
-              {end.success ? '✓ ' : '✗ '}
-              {outcomeText}
-            </div>
-          )}
         </>
       }
       readouts={
@@ -328,32 +380,56 @@ export function GymTrainer({
       }
       caption={
         <>
-          {caption} Trained headlessly in the worker by aifn <code>training</code> ({total} episodes, seed{' '}
-          {String(trained.seed)}, checkpoints every {training?.every ?? '…'} episodes); drag or click the episode marker
-          to pick an episode, then play it: replay re-runs the training episode from the nearest checkpoint, evaluate
-          plays the greedy policy as of that episode on seed {String(evaluationSeed)}.
+          {caption} Trained headlessly in the worker by aifn <code>training</code> (
+          {stepBudget ? `${stepBudget.toLocaleString()} steps` : `${total} episodes`}, seed {String(shown.seed)},
+          checkpoints every {training?.every ?? '…'} episodes); drag or click the episode marker to pick an episode,
+          then play it: replay re-runs the training episode from the nearest checkpoint, evaluate plays the greedy
+          policy as of that episode on seed {String(evaluationSeed)}.
         </>
       }
     >
-      {wide ? (
-        <>
-          <Plots cols={1} scale={withSeries ? 0.26 : 0.45}>
-            {scene}
-          </Plots>
-          <Plots cols={3} scale={withSeries ? 0.36 : 0.55}>
-            {returnPlot}
-            {middlePlot}
-            {lastPlot}
-          </Plots>
-        </>
-      ) : (
-        <Plots cols={2} rows={2} heights={[2.2, 1]} widths={[1, 1.3]} scale={withSeries ? 0.62 : 1}>
-          {scene}
-          {returnPlot}
-          {middlePlot}
-          {lastPlot}
-        </Plots>
-      )}
+      {/* The flow, top to bottom: how training went, then the episode chosen on it, then that episode played. */}
+      <Plots cols={3} scale={wide ? 0.36 : 0.5}>
+        {returnPlot}
+        {middlePlot}
+        {lastPlot}
+      </Plots>
+      {extraPlots}
+      <div className="flex flex-col gap-3">
+        <ControlRow label={`episode ${episode}`}>
+          <div className="flex items-center gap-1">
+            {(['replay', 'evaluate'] as const).map((m) => (
+              <Button
+                key={m}
+                size="sm"
+                variant={mode === m ? 'default' : 'outline'}
+                aria-label={m}
+                aria-pressed={mode === m}
+                onClick={() => setMode(m)}
+              >
+                {m === 'replay' ? 'replay (as trained)' : 'evaluate (greedy)'}
+              </Button>
+            ))}
+          </div>
+          <Player label="step" value={at} onChange={setStep} count={steps} defaultSpeed={playbackSpeed} />
+        </ControlRow>
+        {end && (
+          <div
+            role="status"
+            className={
+              end.success
+                ? 'border-success/40 bg-success/10 text-success col-span-full w-fit rounded-md border px-3 py-1.5 text-sm'
+                : 'col-span-full w-fit rounded-md border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-sm text-destructive'
+            }
+          >
+            {end.success ? '✓ ' : '✗ '}
+            {outcomeText}
+          </div>
+        )}
+      </div>
+      <Plots cols={1} scale={wide ? (withSeries ? 0.26 : 0.45) : 0.55}>
+        {scene}
+      </Plots>
       {withSeries && trajectory && (
         <StepSeries env={shownEnv} kind={kind} trajectory={trajectory} step={at} onStep={setStep} scale={0.38} />
       )}

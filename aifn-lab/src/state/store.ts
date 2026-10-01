@@ -15,6 +15,7 @@ import {
   type ParamValue,
   type VariantsDef,
 } from './schema'
+import { parseNumber, validateNumber } from './number'
 
 export type Raw = { readonly [key: string]: RawValue }
 /** A variants field: the chosen case, every case's own values (kept when switching away), and the shared values. */
@@ -70,7 +71,7 @@ export function signature(def: ParamDef | ParamDefs): string {
       case 'slider':
         return `s${d.min},${d.max},${d.step ?? ''},${d.initial}`
       case 'number':
-        return `n${d.min ?? ''},${d.max ?? ''},${d.step ?? ''},${d.initial}`
+        return `n${JSON.stringify([d.type, d.gt, d.ge, d.lt, d.le, d.min, d.max, d.step, d.scale, d.initial])}`
       case 'choice':
         return `c${d.options.map((o) => (typeof o === 'object' ? o.value : o)).join('|')}:${d.initial}`
       case 'switch':
@@ -235,7 +236,8 @@ export type Decoded = { raw: Raw; dropped: string[] }
 /**
  * State from `[path, text]` pairs (the inverse of `toEntries`): texts are parsed by each field's type, then the whole
  * point is clamped into the schema's aifn `Space` by `clampReport`, which lists unknown and inactive keys. Values that
- * do not parse are listed too.
+ * do not parse are listed too, as are typed numbers that break their type or a bound (a number field is validated,
+ * not clamped).
  */
 export function fromEntries(defs: ParamDefs, entries: readonly (readonly [string, string])[]): Decoded {
   const dropped: string[] = []
@@ -290,10 +292,14 @@ function buildNested(defs: ParamDefs, entries: readonly (readonly [string, strin
 
 function parseLeaf(def: LeafDef, value: string): ParamValue | undefined {
   switch (def.kind) {
-    case 'slider':
-    case 'number': {
+    case 'slider': {
       const x = Number(value)
       return value.trim() !== '' && Number.isFinite(x) ? x : undefined
+    }
+    case 'number': {
+      // A typed field is validated, not clamped: a value that breaks its type or a bound is dropped and reported.
+      const x = parseNumber(value)
+      return x !== null && validateNumber(def, x) === null ? x : undefined
     }
     case 'choice': {
       const v = coerce(def, value)

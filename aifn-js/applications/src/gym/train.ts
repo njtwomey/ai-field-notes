@@ -13,17 +13,26 @@ import type { Agent, Environment } from 'aifn/foundation/contracts'
 import { child, stream, type Stream } from 'aifn/foundation/random'
 import { runEpisode, type Trajectory } from './rollout'
 
-/** Options for `train` and `training`. */
+/**
+ * Options for `train` and `training`. The budget is `episodes`, or `steps`: run episodes until at least this many
+ * environment steps are done. The episode that crosses the budget runs to its end (it is not cut short), so a run
+ * may overshoot by up to one episode and every episode stays replayable as it happened.
+ */
 export interface TrainOptions {
   /** Episodes to run. */
-  episodes: number
+  episodes?: number
+  /** Environment steps to run instead (see above). */
+  steps?: number
   /** The root seed. Default 0. */
   seed?: number | string
   /** Least spacing of the agent-state checkpoints, in episodes. Default 1 (widened to keep `maxCheckpoints`). */
   checkpointEvery?: number
   /** At most this many checkpoints besides the initial state. Default 200. */
   maxCheckpoints?: number
-  /** `training` yields after every this many episodes. Default about a twentieth of the run. */
+  /**
+   * `training` yields after every this many episodes. Default about a twentieth of the run (with a step budget, after
+   * every twentieth of the steps).
+   */
   chunk?: number
 }
 
@@ -36,10 +45,13 @@ export interface Checkpoint<G> {
 /** A training run so far: per-episode columns (one entry per completed episode) and checkpoints. Plain data. */
 export interface Training<G> {
   seed: number | string
-  /** Episodes requested and completed. */
+  /** Episodes requested (NaN under a step budget) and completed. */
   total: number
   episodes: number
-  /** The checkpoint spacing in episodes. */
+  /** The step budget (NaN under an episode budget) and the environment steps done. */
+  budget: number
+  steps: number
+  /** The checkpoint spacing in episodes (doubled whenever a step-budget run would exceed `maxCheckpoints`). */
   every: number
   /** Undiscounted return, length (steps) and whether it ended at a terminal state, per episode. */
   returns: Float64Array
@@ -76,52 +88,78 @@ export function* training<S, O, A, G>(
   agent: Agent<G, O, A>,
   options: TrainOptions,
 ): Generator<Training<G>, Training<G>> {
-  const { episodes: total, seed = 0, checkpointEvery, maxCheckpoints } = options
-  const every = checkpointSpacing(total, checkpointEvery, maxCheckpoints)
-  const chunk = Math.max(1, Math.round(options.chunk ?? Math.ceil(total / 20)))
+  const { seed = 0, checkpointEvery, maxCheckpoints = 200 } = options
+  const budget = options.steps ?? NaN
+  const total = Number.isNaN(budget) ? (options.episodes ?? NaN) : NaN
+  if (!(total >= 0) && !(budget >= 0)) throw new RangeError('training: give a budget, episodes or steps')
+  // Under an episode budget the spacing is fixed; under a step budget it doubles as the checkpoints fill up.
+  let every = checkpointSpacing(Number.isNaN(total) ? 0 : total, checkpointEvery, maxCheckpoints)
+  const chunk = Math.max(1, Math.round(options.chunk ?? Math.ceil((Number.isNaN(total) ? 0 : total) / 20)))
+  const stepChunk = Math.max(1, Math.ceil(budget / 20))
   const r = root(seed)
   let g = agent.init(env, child(child(r, 'init'), 'agent'))
-  const returns = new Float64Array(total)
-  const lengths = new Float64Array(total)
-  const terminated = new Uint8Array(total)
+  const returns: number[] = []
+  const lengths: number[] = []
+  const terminated: number[] = []
   const hasRegret = !!(env.oracle?.expectedReward && env.oracle.bestExpectedReward)
-  const regret = hasRegret ? new Float64Array(total) : null
-  const outcome = new Int8Array(total)
-  const firstAction = new Float64Array(total).fill(NaN)
-  const scalars: Record<string, Float64Array> = {}
-  const checkpoints: Checkpoint<G>[] = [{ episode: 0, agent: g }]
-  const snapshot = (n: number): Training<G> => ({
+  const regret: number[] = []
+  const outcome: number[] = []
+  const firstAction: number[] = []
+  const scalars: Record<string, number[]> = {}
+  let checkpoints: Checkpoint<G>[] = [{ episode: 0, agent: g }]
+  let steps = 0
+  const snapshot = (done: boolean): Training<G> => ({
     seed,
     total,
-    episodes: n,
+    episodes: returns.length,
+    budget,
+    steps,
     every,
-    returns: returns.slice(0, n),
-    lengths: lengths.slice(0, n),
-    terminated: terminated.slice(0, n),
-    regret: regret ? regret.slice(0, n) : null,
-    outcome: outcome.slice(0, n),
-    firstAction: firstAction.slice(0, n),
-    scalars: Object.fromEntries(Object.entries(scalars).map(([k, v]) => [k, v.slice(0, n)])),
+    returns: Float64Array.from(returns),
+    lengths: Float64Array.from(lengths),
+    terminated: Uint8Array.from(terminated),
+    regret: hasRegret ? Float64Array.from(regret) : null,
+    outcome: Int8Array.from(outcome),
+    firstAction: Float64Array.from(firstAction),
+    scalars: Object.fromEntries(
+      Object.entries(scalars).map(([k, v]) => [
+        k,
+        Float64Array.from({ length: returns.length }, (_, i) => v[i] ?? NaN),
+      ]),
+    ),
     checkpoints: checkpoints.slice(),
     final: g,
-    done: n === total,
+    done,
   })
-  for (let e = 0; e < total; e++) {
+  const finished = () => (Number.isNaN(budget) ? returns.length >= total : steps >= budget)
+  let nextYield = Number.isNaN(budget) ? chunk : stepChunk
+  for (let e = 0; !finished(); e++) {
     const run = runEpisode(env, agent, g, child(r, 'step', e))
     g = run.agent
     const tr = run.trajectory
-    returns[e] = tr.episodeReturn
-    lengths[e] = tr.actions.length
-    terminated[e] = tr.reachedTerminal ? 1 : 0
-    if (regret) regret[e] = tr.regret
-    if (tr.ending) outcome[e] = tr.ending.success ? 1 : -1
-    if (typeof tr.actions[0] === 'number') firstAction[e] = tr.actions[0]
-    for (const [k, v] of Object.entries(agent.scalars?.(g) ?? {}))
-      (scalars[k] ??= new Float64Array(total).fill(NaN))[e] = v
-    if ((e + 1) % every === 0) checkpoints.push({ episode: e + 1, agent: g })
-    if (e + 1 < total && (e + 1) % chunk === 0) yield snapshot(e + 1)
+    returns.push(tr.episodeReturn)
+    lengths.push(tr.actions.length)
+    steps += tr.actions.length
+    terminated.push(tr.reachedTerminal ? 1 : 0)
+    if (hasRegret) regret.push(tr.regret)
+    outcome.push(tr.ending ? (tr.ending.success ? 1 : -1) : 0)
+    firstAction.push(typeof tr.actions[0] === 'number' ? tr.actions[0] : NaN)
+    for (const [k, v] of Object.entries(agent.scalars?.(g) ?? {})) (scalars[k] ??= [])[e] = v
+    if ((e + 1) % every === 0) {
+      checkpoints.push({ episode: e + 1, agent: g })
+      // A step budget does not know its episodes in advance: keep at most `maxCheckpoints` by thinning to every other.
+      if (checkpoints.length > maxCheckpoints + 1) {
+        every *= 2
+        checkpoints = checkpoints.filter((c) => c.episode % every === 0)
+      }
+    }
+    const progress = Number.isNaN(budget) ? e + 1 : steps
+    if (!finished() && progress >= nextYield) {
+      nextYield = progress + (Number.isNaN(budget) ? chunk : stepChunk)
+      yield snapshot(false)
+    }
   }
-  const last = snapshot(total)
+  const last = snapshot(true)
   yield last
   return last
 }

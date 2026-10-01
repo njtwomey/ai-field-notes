@@ -92,7 +92,7 @@ export function ControlsDemo() {
         <Slider label="noise (not steppable)" value={noise} onChange={setNoise} min={0} max={2} steppable={false} />
         <Slider label="disabled" value={0.5} onChange={() => {}} min={0} max={1} disabled />
         <NumberField label="seed" value={seed} onChange={setSeed} min={0} max={2 ** 31} step={1} />
-        <NumberField label="tolerance" value={tolerance} onChange={setTolerance} min={0} step={1e-6} />
+        <NumberField label="tolerance" value={tolerance} onChange={setTolerance} gt={0} scale="log10" />
         <Select label="kernel (Select, 4 options)" value={kernel} onChange={setKernel} options={KERNELS} />
         <Combobox
           label="distribution (Combobox, 40 options)"

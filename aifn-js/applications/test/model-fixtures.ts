@@ -137,6 +137,7 @@ export const MODEL_FIXTURES: Record<string, Fixture> = {
     () => gp.sparseGaussianProcessRegressor({ kernel, inducing: 5, noiseVariance: 0.01 }),
     dataset(reg.x, reg.y),
   ),
+  relevanceVectorMachine: f(() => gp.relevanceVectorMachine({ kernel }), dataset(reg.x, reg.y)),
   gpClassifier: f(() => gp.gpClassifier({ kernel }), dataset(bin.x, bin.y)),
   gpOrdinalRegression: f(() => gp.gpOrdinalRegression({ kernel, hyperSteps: 10 }), dataset(tri.x, tri.y)),
   // learning/trees-and-ensembles

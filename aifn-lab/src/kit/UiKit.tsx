@@ -7,6 +7,7 @@ import {
   VectorFigure,
 } from './ChartDemos'
 import { ControlsDemo } from './ControlsDemo'
+import { NumberFieldDemo } from './NumberFieldDemo'
 import { FunctionFamilyFigure } from './FunctionFamily'
 import { HeatmapFigure, LinkedFigure } from './HeatmapDemos'
 import { PaletteDemo } from './PaletteDemo'
@@ -32,6 +33,12 @@ export function UiKit() {
         description="Sliders are steppable by default and take a typed value; categorical choices are dropdowns, searchable when long."
       >
         <ControlsDemo />
+      </Section>
+      <Section
+        title="Typed numbers"
+        description="NumberField, from number(), float() and int(): a type, strict or inclusive bounds (gt, ge, lt, le), a linear or log10 scale and optional suggestions. A draft that breaks a rule is refused with a message, not clamped; the buttons step and clamp."
+      >
+        <NumberFieldDemo />
       </Section>
       <Section
         title="Conditional controls"

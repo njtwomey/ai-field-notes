@@ -42,6 +42,11 @@ export class ComputeWorker {
     return this.running !== null || this.queued !== null
   }
 
+  /** Drop the job in flight and any queued one, terminating the worker (a fresh one starts with the next submit). */
+  cancel() {
+    this.dispose()
+  }
+
   dispose() {
     this.clearTimer()
     this.worker?.terminate()

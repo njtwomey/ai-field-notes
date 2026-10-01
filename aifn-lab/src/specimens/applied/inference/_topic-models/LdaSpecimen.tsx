@@ -7,7 +7,7 @@ import { toFlat, toRows } from 'aifn/foundation/tensor'
 import { useMemo, useState } from 'react'
 import { Player } from '@lab/controls'
 import { ControlRow, Dashboard, DashboardCell, DashboardRow, Figure } from '@lab/layout'
-import { number, row, slider, useFigureState } from '@lab/state'
+import { int, row, slider, useFigureState } from '@lab/state'
 import { Curve, formatNumber, Plot, Plots, Points, Raster, Readout, useAxis } from '@lab/viz'
 
 const K = 6
@@ -34,7 +34,7 @@ export function LdaSpecimen() {
   const state = useFigureState({
     corpus: row('1 · corpus', {
       docs: slider(10, 200, 100, { label: 'documents', step: 10 }),
-      seed: number(1, { min: 1, max: 20, step: 1, label: 'seed' }),
+      seed: int(1, { ge: 1, le: 20, label: 'seed' }),
     }),
   })
   const { docs, seed } = state.corpus

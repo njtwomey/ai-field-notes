@@ -1,8 +1,18 @@
 import { chrome, seriesColor, type Mode } from '@lab/design/palette'
 import type { Range } from './viewport'
 
-/** An arrow from `from` to `to`. Ink by default; `slot` colours it as that palette slot, `label` names it at its tip. */
-export type Vector = { from: [number, number]; to: [number, number]; slot?: number; label?: string }
+/**
+ * An arrow from `from` to `to`. Ink by default; `slot` colours it as that palette slot. `label` names it at its tip, or
+ * with `labelAt: 'middle'` on a small pill at its midpoint (a count on a path's move, say). `width` thickens the shaft.
+ */
+export type Vector = {
+  from: [number, number]
+  to: [number, number]
+  slot?: number
+  label?: string
+  labelAt?: 'end' | 'middle'
+  width?: number
+}
 
 /** The plot's visible box in data coordinates, with each axis's scale. */
 export type Box = { x: Range; y: Range; xLog?: boolean; yLog?: boolean }
@@ -54,14 +64,51 @@ export function vectorLines(vectors: readonly Vector[], mode: Mode, box?: Box) {
     const clipped = box ? clipSegment(v.from, v.to, box) : { from: v.from, to: v.to, tipInside: true }
     if (!clipped) return []
     const color = v.slot === undefined ? chrome(mode).ink : seriesColor(mode, v.slot)
-    const label = v.label ? { show: true, formatter: v.label, position: 'end', color, fontSize: 11 } : { show: false }
+    // A midpoint label is drawn upright on its own (`vectorMidLabels`), not along the line.
+    const label =
+      v.label && v.labelAt !== 'middle'
+        ? { show: true, formatter: v.label, position: 'end', color, fontSize: 11 }
+        : { show: false }
+    const lineStyle = v.width === undefined ? { color } : { color, width: v.width }
     return [
       [
-        { coord: clipped.from, lineStyle: { color }, label, symbol: 'none' },
+        { coord: clipped.from, lineStyle, label, symbol: 'none' },
         clipped.tipInside
           ? { coord: clipped.to, symbol: 'arrow', symbolSize: 10 }
           : { coord: clipped.to, symbol: CHEVRON, symbolSize: [8, 8] },
       ],
+    ]
+  })
+}
+
+/**
+ * Scatter data for the labels of vectors with `labelAt: 'middle'`: upright text on a small pill in the plot's surface
+ * colour, centred on the shaft's midpoint so the shaft runs under it. A label whose midpoint is outside `box` is dropped.
+ */
+export function vectorMidLabels(vectors: readonly Vector[], mode: Mode, box?: Box) {
+  const inside = (p: Point) => !box || (p[0] >= box.x[0] && p[0] <= box.x[1] && p[1] >= box.y[0] && p[1] <= box.y[1])
+  return vectors.flatMap((v) => {
+    if (!v.label || v.labelAt !== 'middle') return []
+    const mid: Point = [(v.from[0] + v.to[0]) / 2, (v.from[1] + v.to[1]) / 2]
+    if (!inside(mid)) return []
+    const color = v.slot === undefined ? chrome(mode).ink : seriesColor(mode, v.slot)
+    return [
+      {
+        value: mid,
+        label: {
+          show: true,
+          position: 'inside',
+          formatter: v.label,
+          color,
+          fontSize: 10,
+          fontWeight: 600,
+          backgroundColor: chrome(mode).surface,
+          borderColor: color,
+          borderWidth: 1,
+          borderRadius: 7,
+          padding: [1, 4],
+        },
+      },
     ]
   })
 }

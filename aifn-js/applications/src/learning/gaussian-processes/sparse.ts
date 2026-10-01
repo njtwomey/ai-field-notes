@@ -31,11 +31,12 @@ import {
   type Trained,
 } from 'aifn/learning/estimators'
 import { Normal, type Univariate } from 'aifn/probability/distributions'
-import { kernelLogVector } from './regression'
+import { kernelLogVector, logMarginalLikelihood } from './regression'
 import { cholesky, solveTriangular } from 'aifn/numerics/linalg'
 import { lbfgs, type LbfgsState } from 'aifn/optim/second-order'
 import {
   add,
+  concat,
   diagonal,
   div,
   exp,
@@ -57,9 +58,10 @@ import {
   type Tensor,
   type Value,
 } from 'aifn/foundation/tensor'
-import { trace, type Trace } from 'aifn/foundation/trace'
+import { trace, type Algorithm, type Status, type Trace } from 'aifn/foundation/trace'
 import { defineModel } from 'aifn/learning/estimators'
 import { bool, int, oneOf, real, space } from 'aifn/foundation/space'
+import { definer, type AlgorithmInfo } from 'aifn/foundation/registry'
 
 const LOG_2PI = Math.log(2 * Math.PI)
 
@@ -205,7 +207,7 @@ export function sparseLogMarginal(kernel: Kernel, x: Value, y: Tensor, z: Value,
   return pieces(kernel, x, y, z, options).bound
 }
 
-/** Options of `fitSparseGp`. */
+/** Options of `fitSparseGp` and `sparseGpFitSteps`. */
 export type FitSparseGpOptions = {
   method?: SparseMethod
   /** Starting noise variance (default 0.1). */
@@ -218,53 +220,52 @@ export type FitSparseGpOptions = {
   mean?: number
   maxSteps?: number
   tolerance?: number
+  /** Also record the exact GP's log marginal likelihood at every state's hyperparameters (O(n³) a state). */
+  exact?: boolean
 }
 
-/** The result of `fitSparseGp`. */
-export type SparseGpFit<P extends KernelParams = KernelParams> = {
-  model: SparseGp<P>
-  /** The L-BFGS trace over [log θ, log σ², Z (flattened)], each part present when it is fitted. */
-  training: Trace<LbfgsState>
-  converged: boolean
+/** What every state of a sparse-GP fit reports: the inducing inputs, hyperparameters and objective it has reached. */
+export type SparseGpFitFields = {
+  /** Inducing inputs Z [m, d]. */
+  inducing: Tensor
+  /** The kernel's log hyperparameters, in `kernelLogVector` order (rebuild the kernel with `sparseGpAt`). */
+  logKernel: Float64Array
+  /** The kernel's hyperparameters by name (pytree path). */
+  hyper: Record<string, number>
+  noiseVariance: number
+  /** The approximate log marginal likelihood (for `vfe`, the ELBO). */
+  logMarginal: number
+  /** With `exact`: the exact GP's log marginal likelihood at the same hyperparameters (≥ the VFE bound). */
+  exact?: number
 }
 
-/**
- * Maximise the sparse approximation's log marginal likelihood (the ELBO for `vfe`) over the kernel's log
- * hyperparameters, log σ² and the inducing inputs, by L-BFGS with gradients from `aifn/foundation/autodiff`.
- */
-export function fitSparseGp<P extends KernelParams>(
-  kernel: Kernel<P>,
-  x: Tensor,
-  y: Tensor,
-  z: Tensor,
-  options: FitSparseGpOptions = {},
-): SparseGpFit<P> {
-  const {
-    method = 'vfe',
-    noiseVariance = 0.1,
-    fitNoise = true,
-    fitInducing = true,
-    fitKernel = true,
-    mean = 0,
-  } = options
-  const { maxSteps = 200, tolerance = 1e-6 } = options
+/** The state of `sparseGpFitSteps`: an L-BFGS state with the fit's fields. */
+export type SparseGpFitState = LbfgsState & SparseGpFitFields
+
+/** The fitting problem: the objective over θ = [log θ_k, log σ², Z] (each part present when fitted) and its layout. */
+function fitProblem<P extends KernelParams>(kernel: Kernel<P>, x: Tensor, y: Tensor, z: Tensor, o: FitSparseGpOptions) {
+  const { method = 'vfe', noiseVariance = 0.1, fitNoise = true, fitInducing = true, fitKernel = true, mean = 0 } = o
   const X = asRows(x) as Tensor
   const Y = y.shape.length === 2 ? (reshape(y, [y.shape[0]]) as Tensor) : y
   const Z0 = asRows(z) as Tensor
   const [m, d] = Z0.shape
-  // θ = [log kernel hyperparameters (pytree order), log σ², Z flattened], each part present when it is fitted. The
-  // gradient is taken with respect to the parts (the kernel's as a pytree) and concatenated in the same order.
+  // The gradient is taken with respect to the parts (the kernel's as a pytree) and concatenated in θ's order.
   const lv = kernelLogVector(kernel)
   const k = fitKernel ? lv.vector.length : 0
   const zStart = k + (fitNoise ? 1 : 0)
-  const parts = (theta: ArrayLike<number>) => ({
-    tree: fitKernel ? lv.unravel(Array.from(theta).slice(0, k)) : lv.unravel(lv.vector),
-    logNoise: fitNoise ? theta[k] : Math.log(noiseVariance),
-    z: fitInducing ? fromData(Float64Array.from(Array.from(theta).slice(zStart, zStart + m * d)), [m, d]) : Z0,
-  })
+  const parts = (theta: ArrayLike<number>) => {
+    const th = Array.from(theta)
+    const logKernel = fitKernel ? Float64Array.from(th.slice(0, k)) : lv.vector
+    return {
+      logKernel,
+      tree: lv.unravel(logKernel),
+      logNoise: fitNoise ? th[k] : Math.log(noiseVariance),
+      z: fitInducing ? fromData(Float64Array.from(th.slice(zStart, zStart + m * d)), [m, d]) : Z0,
+    }
+  }
   const negative = valueAndGrad(
-    (tree: P, logNoise: Value, z: Value) =>
-      mul(-1, sparseLogMarginal(kernelFromLog(kernel, tree), X, Y, z, { method, noiseVariance: exp(logNoise), mean })),
+    (tree: P, logNoise: Value, zz: Value) =>
+      mul(-1, sparseLogMarginal(kernelFromLog(kernel, tree), X, Y, zz, { method, noiseVariance: exp(logNoise), mean })),
     { argnums: [0, 1, 2] },
   )
   const objective = (theta: Tensor) => {
@@ -288,17 +289,213 @@ export function fitSparseGp<P extends KernelParams>(
     ...(fitNoise ? [Math.log(noiseVariance)] : []),
     ...(fitInducing ? (toFlat(Z0) as number[]) : []),
   ]
-  const training = trace(lbfgs(objective, { tolerance }), { x0: tensor(start) }, maxSteps, {
-    record: { logMarginal: (s: LbfgsState) => -s.value },
+  /** The fields of the state at θ whose objective is `value`. */
+  const fields = (theta: Tensor, value: number): SparseGpFitFields => {
+    const u = parts(toFlat(theta))
+    const noise = Math.exp(u.logNoise)
+    const hyper = Object.fromEntries(lv.names.map((name, i) => [name, Math.exp(u.logKernel[i])]))
+    return {
+      inducing: u.z,
+      logKernel: u.logKernel,
+      hyper,
+      noiseVariance: noise,
+      logMarginal: -value,
+      ...(o.exact ? { exact: exactLogMarginal(kernelFromLog(kernel, u.tree), X, Y, noise, mean) } : {}),
+    }
+  }
+  return { X, Y, objective, start, fields, method, mean }
+}
+
+function exactLogMarginal(kernel: Kernel, x: Tensor, y: Tensor, noiseVariance: number, mean: number): number {
+  return logMarginalLikelihood(kernel, x, y, { noiseVariance, mean }).value as number
+}
+
+/**
+ * The sparse GP's fit as a traceable algorithm: L-BFGS on minus the approximate log marginal likelihood (the ELBO for
+ * `vfe`) over the kernel's log hyperparameters, log σ² and the inducing inputs Z, with gradients from
+ * `aifn/foundation/autodiff`. Every state carries Z, the hyperparameters and the objective, so a figure can play the
+ * optimisation; `init` takes nothing. The objective never decreases from one state to the next (a Wolfe line search).
+ */
+export function sparseGpFitSteps<P extends KernelParams>(
+  kernel: Kernel<P>,
+  x: Tensor,
+  y: Tensor,
+  z: Tensor,
+  options: FitSparseGpOptions = {},
+): Algorithm<void, SparseGpFitState> {
+  const problem = fitProblem(kernel, x, y, z, options)
+  const opt = lbfgs(problem.objective, { tolerance: options.tolerance ?? 1e-6 })
+  const wrap = (s: LbfgsState): SparseGpFitState => ({ ...s, ...problem.fields(s.x, s.value) })
+  return {
+    name: 'sparse-gp-fit',
+    init: (_start, stream) => wrap(opt.init({ x0: tensor(problem.start) }, stream)),
+    step: (s, ctx) => wrap(opt.step(s, ctx)),
+  }
+}
+
+/** The sparse GP at a fit state's inducing inputs and hyperparameters (`kernel` is the template the fit started from). */
+export function sparseGpAt<P extends KernelParams>(
+  kernel: Kernel<P>,
+  x: Tensor,
+  y: Tensor,
+  state: Pick<SparseGpFitFields, 'inducing' | 'logKernel' | 'noiseVariance'>,
+  options: { method?: SparseMethod; mean?: number } = {},
+): SparseGp<P> {
+  const fitted = kernelFromLog(kernel, kernelLogVector(kernel).unravel(state.logKernel))
+  return sparseGp(fitted, x, y, state.inducing, { ...options, noiseVariance: state.noiseVariance })
+}
+
+/** The result of `fitSparseGp`. */
+export type SparseGpFit<P extends KernelParams = KernelParams> = {
+  model: SparseGp<P>
+  /** The trace of `sparseGpFitSteps`, with the objective recorded as `logMarginal`. */
+  training: Trace<SparseGpFitState>
+  converged: boolean
+}
+
+/**
+ * Maximise the sparse approximation's log marginal likelihood (the ELBO for `vfe`) over the kernel's log
+ * hyperparameters, log σ² and the inducing inputs, by L-BFGS (`sparseGpFitSteps` run to `maxSteps`, default 200).
+ */
+export function fitSparseGp<P extends KernelParams>(
+  kernel: Kernel<P>,
+  x: Tensor,
+  y: Tensor,
+  z: Tensor,
+  options: FitSparseGpOptions = {},
+): SparseGpFit<P> {
+  const training = trace(sparseGpFitSteps(kernel, x, y, z, options), undefined, options.maxSteps ?? 200, {
+    record: { logMarginal: (s: SparseGpFitState) => s.logMarginal },
   })
   const final = training.final
-  const u = parts(toFlat(final.x))
-  const model = sparseGp(kernelFromLog(kernel, u.tree), X, Y, u.z, {
-    method,
-    noiseVariance: Math.exp(u.logNoise),
-    mean,
+  const model = sparseGpAt(kernel, x, y, final, { method: options.method, mean: options.mean })
+  return { model, training, converged: final.converged ?? false }
+}
+
+// ── Greedy growth of the inducing set ────────────────────────────────────────────────────────────────────────────────
+
+/** Options of `sparseGpGrowSteps`. */
+export type SparseGpGrowOptions = FitSparseGpOptions & {
+  /** Inducing inputs at step 0, themselves chosen greedily (default 1). */
+  initial?: number
+  /** Stop at this many inducing inputs (default 20). */
+  maxInducing?: number
+  /** Candidates: this many training rows drawn without replacement from the stream (default min(n, 50)). */
+  candidates?: number
+  /** L-BFGS steps on the hyperparameters and Z after each addition (default 0: hyperparameters held, Z only grows). */
+  reoptimise?: number
+}
+
+/** The state of `sparseGpGrowSteps`. */
+export type SparseGpGrowState = Status &
+  SparseGpFitFields & {
+    /** Candidate training rows not yet added. */
+    candidates: number[]
+    /** The training row added at this step (null at step 0). */
+    added: number | null
+    /** The objective just after the addition, before any re-optimisation (NaN at step 0). */
+    afterAdd: number
+  }
+
+/**
+ * Greedy selection of inducing inputs (in the spirit of Seeger et al., 2003, and Titsias, 2009, §3): each step adds the
+ * candidate training input whose addition most increases the objective (the ELBO for `vfe`, the approximate log
+ * marginal likelihood otherwise), then optionally re-optimises everything by `reoptimise` L-BFGS steps. Each candidate is
+ * scored exactly, at O(nm²) for m inducing inputs, so a step costs O(cnm²) for c candidates. With the hyperparameters
+ * held, the VFE bound never decreases as Z grows. `init` draws the candidates from its stream.
+ */
+export function sparseGpGrowSteps<P extends KernelParams>(
+  kernel: Kernel<P>,
+  x: Tensor,
+  y: Tensor,
+  options: SparseGpGrowOptions = {},
+): Algorithm<void, SparseGpGrowState> {
+  const { method = 'vfe', mean = 0, initial = 1, maxInducing = 20, reoptimise = 0 } = options
+  const X = asRows(x) as Tensor
+  const Y = y.shape.length === 2 ? (reshape(y, [y.shape[0]]) as Tensor) : y
+  const n = X.shape[0]
+  const count = Math.min(n, options.candidates ?? 50)
+  const lv = kernelLogVector(kernel)
+  const kernelOf = (logKernel: ArrayLike<number>) => kernelFromLog(kernel, lv.unravel(logKernel))
+  const score = (k: Kernel, z: Tensor, noise: number) => {
+    try {
+      const v = sparseLogMarginal(k, X, Y, z, { method, noiseVariance: noise, mean }) as number
+      return Number.isFinite(v) ? v : -Infinity
+    } catch {
+      return -Infinity
+    }
+  }
+  const rowsOf = (z: Tensor | null, row: number) => {
+    const r = take(X, [row]) as Tensor
+    return z ? (concat([z, r], 0) as Tensor) : r
+  }
+  /** Add the best candidate to Z; returns the new Z, the row added and its objective. */
+  const grow = (z: Tensor | null, candidates: number[], logKernel: Float64Array, noise: number) => {
+    const k = kernelOf(logKernel)
+    let best = -1
+    let bestValue = -Infinity
+    for (const c of candidates) {
+      const v = score(k, rowsOf(z, c), noise)
+      if (v > bestValue || best < 0) [best, bestValue] = [c, v]
+    }
+    return { z: rowsOf(z, best), added: best, value: bestValue, rest: candidates.filter((c) => c !== best) }
+  }
+  const fieldsAt = (z: Tensor, logKernel: Float64Array, noise: number, value: number): SparseGpFitFields => ({
+    inducing: z,
+    logKernel,
+    hyper: Object.fromEntries(lv.names.map((name, i) => [name, Math.exp(logKernel[i])])),
+    noiseVariance: noise,
+    logMarginal: value,
+    ...(options.exact ? { exact: exactLogMarginal(kernelOf(logKernel), X, Y, noise, mean) } : {}),
   })
-  return { model, training, converged: final.converged }
+  const noise0 = options.noiseVariance ?? 0.1
+  return {
+    name: 'sparse-gp-grow',
+    init: (_start, stream) => {
+      let candidates = Array.from(toFlat(permutation(stream, n))).slice(0, count)
+      let z: Tensor | null = null
+      let value = -Infinity
+      for (let i = 0; i < Math.max(1, Math.min(initial, count)); i++) {
+        const g = grow(z, candidates, lv.vector, noise0)
+        ;[z, value, candidates] = [g.z, g.value, g.rest]
+      }
+      return {
+        t: 0,
+        ...fieldsAt(z!, lv.vector, noise0, value),
+        candidates,
+        added: null,
+        afterAdd: NaN,
+        terminated: candidates.length === 0 || z!.shape[0] >= maxInducing,
+      }
+    },
+    step: (s, ctx) => {
+      if (s.candidates.length === 0 || s.inducing.shape[0] >= maxInducing) return { ...s, t: s.t + 1, terminated: true }
+      const g = grow(s.inducing, s.candidates, s.logKernel, s.noiseVariance)
+      let fields = fieldsAt(g.z, s.logKernel, s.noiseVariance, g.value)
+      if (reoptimise > 0) {
+        const tr = trace(
+          sparseGpFitSteps(kernelOf(s.logKernel) as Kernel<P>, X, Y, g.z, {
+            ...options,
+            noiseVariance: s.noiseVariance,
+          }),
+          undefined,
+          reoptimise,
+          { keep: 'none', stream: ctx.stream },
+        )
+        // A failed line search leaves the state where it was, so the objective after re-optimisation is never lower.
+        const { inducing, logKernel, noiseVariance, logMarginal } = tr.final
+        fields = fieldsAt(inducing, logKernel, noiseVariance, logMarginal)
+      }
+      return {
+        t: s.t + 1,
+        ...fields,
+        candidates: g.rest,
+        added: g.added,
+        afterAdd: g.value,
+        terminated: g.rest.length === 0 || g.z.shape[0] >= maxInducing,
+      }
+    },
+  }
 }
 
 // ── Estimator ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -396,4 +593,38 @@ defineModel(
     cite: ['titsias2009'],
   },
   sparseGaussianProcessRegressor,
+)
+
+const algorithm = definer<AlgorithmInfo>('algorithm', 'learning/gaussian-processes')
+algorithm(
+  {
+    key: 'sparseGpFitSteps',
+    name: 'Sparse GP fit by L-BFGS',
+    summary: 'L-BFGS on the sparse objective (the VFE bound, or FITC/DTC/SoR evidence) over log θ, log σ² and Z.',
+    problem: 'objective',
+    state: {
+      iterate: 'inducing',
+      objective: 'logMarginal',
+      grad: 'grad',
+      stepSize: 'stepSize',
+      flags: ['converged', 'stalled'],
+    },
+    notes: ['sparse-gaussian-processes'],
+    cite: ['titsias2009'],
+  },
+  sparseGpFitSteps,
+)
+algorithm(
+  {
+    key: 'sparseGpGrowSteps',
+    name: 'Sparse GP by greedy inducing-point selection',
+    summary:
+      'Add the candidate training input that most raises the sparse objective, one per step, optionally re-optimising.',
+    problem: 'objective',
+    state: { iterate: 'inducing', objective: 'logMarginal', flags: ['terminated'] },
+    random: true,
+    notes: ['sparse-gaussian-processes'],
+    cite: ['titsias2009'],
+  },
+  sparseGpGrowSteps,
 )

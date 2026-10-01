@@ -431,6 +431,12 @@ function FrameHeight({ height, children }: { height: number; children: ReactNode
   return <FrameContext.Provider value={value}>{children}</FrameContext.Provider>
 }
 
+/** The stack (or message) of an error's cause, if it has one. */
+function causeStack(e: Error): string | undefined {
+  const c = (e as Error & { cause?: unknown }).cause
+  return c instanceof Error ? (c.stack ?? c.message) : c === undefined ? undefined : String(c)
+}
+
 /** Contains a crash inside one figure, so the rest of the page still renders, and names the error. */
 class FigureBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null }
@@ -444,7 +450,16 @@ class FigureBoundary extends Component<{ children: ReactNode }, { error: Error |
         role="alert"
         className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive"
       >
-        This figure failed to render: {this.state.error.message}
+        <p className="font-medium">This figure failed to render.</p>
+        <p className="mt-1 font-mono text-xs break-words whitespace-pre-wrap">
+          {this.state.error.name}: {this.state.error.message}
+        </p>
+        <details className="mt-2 text-xs">
+          <summary className="cursor-pointer select-none">details</summary>
+          <pre className="mt-1 max-h-64 overflow-auto font-mono whitespace-pre-wrap opacity-80">
+            {[this.state.error.stack, causeStack(this.state.error)].filter(Boolean).join('\n\ncaused by ')}
+          </pre>
+        </details>
       </div>
     )
   }

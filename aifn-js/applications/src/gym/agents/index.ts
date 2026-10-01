@@ -1,7 +1,8 @@
 /**
  * `aifn-applied/gym/agents`: agents on the gym protocol. `random.ts` (the baseline), `bandits.ts` (the bandit
  * policies), `tabular.ts` (TD control, n-step SARSA, Monte Carlo control, TD(0) prediction, REINFORCE) and
- * `planning.ts` (value and policy iteration as traceable algorithms on an MDP's tables, and as planning agents); child:
+ * `planning.ts` (value and policy iteration as traceable algorithms on an MDP's tables, and as planning agents),
+ * `dqn.ts` (the deep Q-network and its persistent replay buffer); child:
  * `control` (classic control).
  */
 
@@ -76,3 +77,25 @@ export {
   type LqrBangBangOptions,
   type LqrBangBangState,
 } from './control'
+export {
+  bufferSize,
+  CHUNK,
+  dqnAgent,
+  SB3_CARTPOLE,
+  SB3_CARTPOLE_STEPS,
+  SB3_CARTPOLE_EPSILON_FRACTION,
+  epsilonStepsFor,
+  gatherMinibatch,
+  pushTransition,
+  qNetwork,
+  qValues,
+  replayBuffer,
+  sampleIndices,
+  tdTargets,
+  transitionAt,
+  type DqnOptions,
+  type DqnState,
+  type Minibatch,
+  type ReplayBuffer,
+  type StoredTransition,
+} from './dqn'

@@ -16,7 +16,7 @@ import { child, stream, uniform } from 'aifn/foundation/random'
 import { fromData, linspace, matmul, tensor, toFlat, type Tensor } from 'aifn/foundation/tensor'
 import { Player } from '@lab/controls'
 import { ControlRow, Figure } from '@lab/layout'
-import { choice, number, useFigureState, variants } from '@lab/state'
+import { int, choice, useFigureState, variants } from '@lab/state'
 import { Curve, Plot, Plots, Points, Readout, useAxis } from '@lab/viz'
 import { formatValue } from '@lab/views'
 
@@ -86,7 +86,7 @@ const MODEL = variants(
     label: '1 · model',
     choiceLabel: 'family',
     initial: 'poisson',
-    shared: { seed: number(1, { min: 1, max: 20, step: 1, label: 'data seed' }) },
+    shared: { seed: int(1, { ge: 1, le: 20, label: 'data seed' }) },
   },
 )
 const N = 80

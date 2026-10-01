@@ -14,6 +14,8 @@ export { useParam, type Param, type ParamSpec } from './param'
 export {
   slider,
   number,
+  float,
+  int,
   choice,
   toggle,
   setting,

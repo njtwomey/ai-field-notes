@@ -14,7 +14,7 @@ import { grid2d } from 'aifn/numerics/geometry'
 import { type SpaceValues } from 'aifn/foundation/space'
 import { fromData, toFlat } from 'aifn/foundation/tensor'
 import { Figure } from '@lab/layout'
-import { fromSpace, number, row, toggle, useFigureState, variants, type AnyValues, type ParamDefs } from '@lab/state'
+import { int, fromSpace, row, toggle, useFigureState, variants, type AnyValues, type ParamDefs } from '@lab/state'
 import { Contours, Plot, Plots, Points, Raster, Readout, useAxis } from '@lab/viz'
 
 // Every labelled point-set generator of the registry; its knobs and the modifiers' parameters come from their spaces.
@@ -29,7 +29,7 @@ const pct = (v: number) => `${Math.round(100 * v)}%`
 const BASE = variants(
   Object.fromEntries(BASES.map((k) => [k, { label: k, params: fromSpace(datasetRegistry[k].info.knobs) }])),
   {
-    shared: { seed: number(0, { min: 0, step: 1, label: 'seed' }) },
+    shared: { seed: int(0, { ge: 0, label: 'seed' }) },
     initial: 'moons',
     label: '1 · base',
     choiceLabel: 'generator',

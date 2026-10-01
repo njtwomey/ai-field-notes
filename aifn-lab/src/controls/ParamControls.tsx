@@ -139,9 +139,16 @@ export function LeafControl({
           label={label}
           value={value as number}
           onChange={onChange}
+          type={def.type}
+          gt={def.gt}
+          ge={def.ge}
+          lt={def.lt}
+          le={def.le}
           min={def.min}
           max={def.max}
+          scale={def.scale}
           step={def.step}
+          suggestions={def.suggestions}
         />
       )
     case 'choice': {

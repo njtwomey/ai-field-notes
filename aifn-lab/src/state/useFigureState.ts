@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Handle } from '@lab/viz/handles'
 import { niceStep } from '@lab/viz/format'
+import { numberBounds } from './number'
 import { sliderStep, type ParamDefs, type Values } from './schema'
 import {
   fromEntries,
@@ -150,8 +151,8 @@ export function useFigureState<const S extends ParamDefs>(
     }
     const bind = (path: string): Param => {
       const def = numeric(path)
-      const min = def.min ?? -Infinity
-      const max = def.max ?? Infinity
+      // A number's strict bounds are approximated by inclusive ones here; its field validates them exactly.
+      const { lower: min, upper: max } = def.kind === 'number' ? numberBounds(def) : { lower: def.min, upper: def.max }
       const step =
         def.kind === 'slider' ? sliderStep(def) : (def.step ?? (Number.isFinite(min + max) ? niceStep(min, max) : 1))
       return { value: valueAt(path), set: (v: number) => set(path, v), min, max, step }

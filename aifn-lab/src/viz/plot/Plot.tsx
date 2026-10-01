@@ -661,15 +661,36 @@ function rowsAt(hover: readonly HoverSeries[], at: number, fy: (v: number) => st
 }
 
 /** One axis of the option, from its model and its resolved range. */
+/** A number rounded to 12 significant digits: 0.7000000000000001 becomes 0.7. */
+const clean = (v: number) => (v === 0 ? 0 : Number(v.toPrecision(12)))
+
+/**
+ * A range ECharts can tick: finite ends, cleaned of floating-point noise, and a positive span (a degenerate one, every
+ * value equal, is widened about its value). ECharts asserts on anything else and takes the whole figure down: a min of
+ * 0.7000000000000001 (a nice-rounding artefact) makes its own nice extent start at 0.7, below the min, and its tick
+ * code asserts.
+ */
+function drawableRange(given: Range | undefined, log: boolean): Range | undefined {
+  if (!given || !Number.isFinite(given[0]) || !Number.isFinite(given[1])) return undefined
+  const r: Range = [clean(given[0]), clean(given[1])]
+  if (log && !(r[0] > 0 && r[1] > 0)) return undefined
+  if (r[1] > r[0]) return r
+  const v = r[0]
+  if (log) return [v / 10, v * 10]
+  const half = Math.max(Math.abs(v), 1) / 2
+  return [v - half, v + half]
+}
+
 function axisOption(
   axis: AxisModel,
-  r: Range | undefined,
+  given: Range | undefined,
   labels: boolean,
   bare: boolean,
   which: 'x' | 'y',
   pixels: number,
 ) {
   const o = axis.options
+  const r = drawableRange(given, axis.log)
   const formatter = axis.categorical ? (v: number) => axis.label(v) : axis.log ? formatPower : o.format
   return {
     // A log axis ticks every decade, or every few when the decades would crowd (ECharts alone steps by 10 decades

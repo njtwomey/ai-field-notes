@@ -147,6 +147,8 @@ export function Player({
         step={1}
         steppable={false}
         format={format}
+        // Nothing to scrub (an untrained trainer, a one-frame run): the track is inert, like the buttons.
+        disabled={count < 2}
         onChange={go}
       />
       <Select

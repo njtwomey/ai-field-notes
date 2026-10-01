@@ -1,13 +1,7 @@
 import { useMemo } from 'react'
-import { swingUpAgent } from 'aifn-applied/gym/agents/control'
-import { pendulumEnvironment } from 'aifn-applied/gym/environments/control'
-import { randomAgent } from 'aifn-applied/gym/agents'
-import type { Agent, Environment } from 'aifn/foundation/contracts'
-import { call, choice, number, row, slider, useFigureState } from '@lab/state'
-import { GymTrainer, type GymSetup } from '@lab/views'
+import { choice, row, slider, useFigureState } from '@lab/state'
+import { GymTrainer, gymEnvironment, gymSetup, trainingRun } from '@lab/views'
 
-type AnyEnv = Environment<unknown, unknown, unknown>
-type AnyAgent = Agent<unknown, unknown, unknown>
 type AgentKind = 'swing' | 'lqr' | 'random'
 
 const HANGING = Math.PI
@@ -42,39 +36,31 @@ export function PendulumAgentSpecimen() {
         { label: 'training starts' },
       ),
     }),
-    run: row('2 · runs', {
-      episodes: choice([4, 8, 16], 8, { label: 'episodes' }),
-      seed: number(1, { label: 'seed', min: 0, max: 9999, step: 1 }),
+    evaluation: row('2 · evaluation', {
       theta0: slider(-Math.PI, Math.PI, HANGING, { label: 'evaluation start θ₀ (rad, 0 upright)', step: 0.01 }),
     }),
+    run: trainingRun({ episodes: 8, label: '3 · training run' }),
   })
   const kind = state.setup.agent as AgentKind
   const torques = state.setup.actions === 'box' ? 0 : 5
   const { maxTorque, reset } = state.setup
-  const { episodes, seed, theta0 } = state.run
-  const setup = useMemo((): GymSetup => {
+  const { theta0 } = state.evaluation
+  const setup = useMemo(() => {
     const envParams = {
       maxTorque,
       torques,
       ...(reset === 'hanging' && { start: { theta: HANGING, thetaDot: 0 } }),
     }
     const agentParams = kind === 'random' ? {} : { swingUp: kind === 'swing' }
-    return {
-      env: pendulumEnvironment(envParams) as unknown as AnyEnv,
-      agent: (kind === 'random' ? randomAgent() : swingUpAgent(agentParams)) as AnyAgent,
-      envTask: call('gym/environments/control/pendulumEnvironment', envParams),
-      agentTask: call(kind === 'random' ? 'gym/agents/randomAgent' : 'gym/agents/control/swingUpAgent', agentParams),
-      episodes,
-      seed,
-    }
-  }, [kind, maxTorque, torques, reset, episodes, seed])
+    return gymSetup('pendulumEnvironment', envParams, kind === 'random' ? 'randomAgent' : 'swingUpAgent', agentParams)
+  }, [kind, maxTorque, torques, reset])
   // Evaluation plays in the same pendulum from the dragged start θ₀ (not part of training, so no retrain).
   const evaluationEnv = useMemo(
-    () => pendulumEnvironment({ maxTorque, torques, start: { theta: theta0, thetaDot: 0 } }) as unknown as AnyEnv,
+    () => gymEnvironment('pendulumEnvironment', { maxTorque, torques, start: { theta: theta0, thetaDot: 0 } }),
     [maxTorque, torques, theta0],
   )
   const rendererOptions = useMemo(
-    () => ({ start: { angle: theta0, onDrag: (angle: number) => state.set('run.theta0', angle) } }),
+    () => ({ start: { angle: theta0, onDrag: (angle: number) => state.set('evaluation.theta0', angle) } }),
     [theta0, state],
   )
   return (

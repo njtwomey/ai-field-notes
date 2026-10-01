@@ -19,7 +19,7 @@ import { run, trace } from 'aifn/foundation/trace'
 import { useMemo } from 'react'
 import { Button, Player, usePlayhead } from '@lab/controls'
 import { ControlRow, Figure } from '@lab/layout'
-import { choice, number, row, slider, toggle, useFigureState } from '@lab/state'
+import { int, choice, row, slider, toggle, useFigureState } from '@lab/state'
 import { Area, Bars, Curve, formatNumber, Handle, Plot, Plots, Points, Readout, useAxis } from '@lab/viz'
 import { TracePanel } from '@lab/views'
 
@@ -94,7 +94,7 @@ export function KalmanTrackingSpecimen() {
     model: row('1 · model', {
       logQ: slider(-4, 0, -2, { label: 'log₁₀ process noise q', step: 0.25 }),
       logR: slider(-1, 1.5, 0.5, { label: 'log₁₀ observation noise r', step: 0.25 }),
-      seed: number(4, { min: 1, max: 20, step: 1, label: 'seed' }),
+      seed: int(4, { ge: 1, le: 20, label: 'seed' }),
     }),
   })
   const { logQ, logR, seed } = state.model
@@ -218,7 +218,7 @@ export function ArmaSpecimen() {
       theta: slider(-0.95, 0.95, 0, { label: 'θ₁ (MA)', step: 0.05 }),
     }),
     sample: row('2 · sample and reveal', {
-      seed: number(2, { min: 1, max: 20, step: 1, label: 'seed' }),
+      seed: int(2, { ge: 1, le: 20, label: 'seed' }),
       theory: toggle(true, 'theoretical ACF'),
     }),
   })
@@ -456,7 +456,7 @@ export function GarchSpecimen() {
     model: row('1 · model', {
       persistence: slider(0, 0.995, 0.97, { label: 'persistence α + β', step: 0.005 }),
       alpha: slider(0, 0.3, 0.1, { label: 'α (reaction)', step: 0.01 }),
-      seed: number(3, { min: 1, max: 30, step: 1, label: 'seed' }),
+      seed: int(3, { ge: 1, le: 30, label: 'seed' }),
     }),
   })
   const { persistence, alpha, seed } = state.model

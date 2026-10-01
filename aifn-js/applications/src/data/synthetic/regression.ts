@@ -35,8 +35,12 @@ export interface Regression1dOptions {
   noise?: number
   /** Input range; defaults to the named function's. */
   range?: readonly [number, number]
-  /** `random`: x uniform on the range (sorted); `even`: evenly spaced including both ends. Default `random`. */
-  spacing?: 'random' | 'even'
+  /**
+   * `random`: x uniform on the range (sorted); `even`: evenly spaced including both ends; `gapped`: non-uniform with a
+   * gap (sorted): three quarters of the inputs uniform on the first 45% of the range, the rest on the last 35%, none in
+   * between. Default `random`.
+   */
+  spacing?: 'random' | 'even' | 'gapped'
   /** Noise sd grows linearly from `noise` at the left end to `noise · (1 + heteroscedastic)` at the right. Default 0. */
   heteroscedastic?: number
 }
@@ -54,9 +58,13 @@ export function regression1d(s: Stream, options: Regression1dOptions = {}): Data
   const [lo, hi] = options.range ?? named?.range ?? [0, 1]
   const xs = new Float64Array(n)
   const inputs = child(s, 'x')
+  const position = (): number => {
+    if (spacing !== 'gapped') return uniform(inputs)
+    return uniform(inputs) < 0.75 ? 0.45 * uniform(inputs) : 0.65 + 0.35 * uniform(inputs)
+  }
   for (let i = 0; i < n; i++)
-    xs[i] = spacing === 'even' ? (n > 1 ? lo + ((hi - lo) * i) / (n - 1) : lo) : lo + (hi - lo) * uniform(inputs)
-  if (spacing === 'random') xs.sort()
+    xs[i] = spacing === 'even' ? (n > 1 ? lo + ((hi - lo) * i) / (n - 1) : lo) : lo + (hi - lo) * position()
+  if (spacing !== 'even') xs.sort()
   const eps = child(s, 'noise')
   const fx = xs.map(f)
   const sdAt = (x: number) => noise * (1 + (heteroscedastic * (x - lo)) / (hi - lo || 1))
@@ -74,7 +82,7 @@ export function regression1d(s: Stream, options: Regression1dOptions = {}): Data
     f: vector(fx),
     meta: {
       name: typeof fn === 'string' ? fn : 'custom function',
-      description: `${n} noisy observations of ${named ? `y = ${named.formula}` : 'a function'} on [${lo}, ${hi}] with noise sd ${noise}${heteroscedastic ? ' growing to the right' : ''}.`,
+      description: `${n} noisy observations of ${named ? `y = ${named.formula}` : 'a function'} on [${lo}, ${hi}]${spacing === 'gapped' ? ' (dense on the left, sparse on the right, a gap between)' : ''} with noise sd ${noise}${heteroscedastic ? ' growing to the right' : ''}.`,
       task: 'regression',
       featureNames: ['x'],
       targetName: 'y',
@@ -218,7 +226,7 @@ dataset(
       n: int(2, 5000, { default: 50 }),
       fn: oneOf(['sine', 'linear', 'cubic', 'step', 'sinc', 'bump', 'doppler']),
       noise: real(0, 2, { default: 0.2 }),
-      spacing: oneOf(['random', 'even']),
+      spacing: oneOf(['random', 'even', 'gapped']),
       heteroscedastic: real(0, 10, { default: 0 }),
     }),
     truth: true,

@@ -17,6 +17,7 @@
 import type { ReactNode } from 'react'
 import {
   bool,
+  int as intDim,
   oneOf,
   real,
   space,
@@ -28,6 +29,7 @@ import {
 } from 'aifn/foundation/space'
 import { niceStep } from '@lab/viz/format'
 import { snapToStep } from './step'
+import { clampNumber, nextDown, nextUp, numberBounds, type NumberOptions } from './number'
 
 export type { Condition } from 'aifn/foundation/space'
 
@@ -64,7 +66,8 @@ export type SliderDef = Common & {
   /** Formats the value in the slider's field. */
   format?: (v: number) => string
 }
-export type NumberDef = Common & { kind: 'number'; initial: number; min?: number; max?: number; step?: number }
+/** A typed number with − and + buttons: float or int, with strict or inclusive bounds, linear or log10 (number.ts). */
+export type NumberDef = Common & NumberOptions & { kind: 'number'; initial: number }
 
 /** One choice: a value, what to show, and words that search should also match. */
 export type ChoiceOption<T extends string | number> = {
@@ -179,9 +182,23 @@ export function slider(min: number, max: number, initial: number, extra: Extra<S
   return { kind: 'slider', min, max, initial, ...extra }
 }
 
-/** A typed number with − and + buttons, optionally bounded. */
+/**
+ * A typed number with − and + buttons: `type` float (default) or int; bounds `gt`, `ge`, `lt`, `le` (`min` and `max`
+ * are aliases of `ge` and `le`); `scale` linear or log10; `suggestions` a menu of common values. A typed value that
+ * breaks the type or a bound is refused with a message, not clamped.
+ */
 export function number(initial: number, extra: Extra<NumberDef> & { min?: number; max?: number } = {}): NumberDef {
   return { kind: 'number', initial, ...extra }
+}
+
+/** A typed real number: `float(1e-3, { gt: 0, scale: 'log10' })`. */
+export function float(initial: number, extra: Omit<Extra<NumberDef>, 'type'> & { min?: number; max?: number } = {}) {
+  return number(initial, { ...extra, type: 'float' })
+}
+
+/** A typed integer: `int(200, { ge: 1, le: 5000 })`. */
+export function int(initial: number, extra: Omit<Extra<NumberDef>, 'type'> & { min?: number; max?: number } = {}) {
+  return number(initial, { ...extra, type: 'int' })
 }
 
 /** A categorical choice among strings or numbers; `initial` defaults to the first option. */
@@ -261,17 +278,27 @@ export const isCase = (c: CaseInput): c is CaseDef => {
   )
 }
 
-/** Fields from an aifn `Space` (a registry's parameters): reals as sliders, choices, booleans as settings. */
+/**
+ * Fields from an aifn `Space` (a registry's parameters): reals as sliders (a log-scale real as a typed log10 float),
+ * ints as step-1 sliders (a range wider than 1000 as a typed int), choices, booleans as settings.
+ */
 export function fromSpace(s: Space): ParamDefs {
   const out: Record<string, ParamDef> = {}
   for (const [key, dim] of Object.entries(s.dims)) {
     const common = { label: dim.label ?? key, doc: dim.doc, when: dim.when }
     switch (dim.type) {
       case 'real':
-        out[key] = slider(dim.min, dim.max, dim.default, { ...common, step: dim.step })
+        out[key] =
+          dim.scale === 'log'
+            ? float(dim.default, { ...common, ge: dim.min, le: dim.max, scale: 'log10' })
+            : slider(dim.min, dim.max, dim.default, { ...common, step: dim.step })
         break
       case 'int':
-        out[key] = slider(dim.min, dim.max, dim.default, { ...common, step: 1 })
+        // A wide integer range (an episode count, a buffer size) is typed, not slid.
+        out[key] =
+          dim.max - dim.min > 1000
+            ? int(dim.default, { ...common, ge: dim.min, le: dim.max })
+            : slider(dim.min, dim.max, dim.default, { ...common, step: 1 })
         break
       case 'choice':
         out[key] = choice(dim.options, dim.default, common)
@@ -315,13 +342,8 @@ export function coerce(def: LeafDef, value: unknown): ParamValue {
       return typeof value === 'number' && Number.isFinite(value)
         ? snapToStep(value, def.min, def.max, sliderStep(def))
         : snapToStep(def.initial, def.min, def.max, sliderStep(def))
-    case 'number': {
-      if (typeof value !== 'number' || !Number.isFinite(value)) return def.initial
-      const [min, max] = [def.min ?? -Infinity, def.max ?? Infinity]
-      return Number.isFinite(min) && def.step
-        ? snapToStep(value, min, max, def.step)
-        : Math.min(Math.max(value, min), max)
-    }
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value) ? clampNumber(def, value) : def.initial
     case 'choice': {
       const values = def.options.map(optionValue)
       if (values.includes(value as string | number)) return value as string | number
@@ -354,12 +376,31 @@ function leafDim(def: LeafDef): DimSpec {
     case 'slider':
       return real(def.min, def.max, { default: coerce(def, def.initial) as number, ...when })
     case 'number':
-      return real(def.min ?? -BIG, def.max ?? BIG, { default: def.initial, ...when })
+      return numberDim(def, when)
     case 'choice':
       return oneOf(def.options.map(optionValue), { default: def.initial, ...when })
     case 'switch':
       return bool({ default: def.initial, ...when })
   }
+}
+
+/**
+ * A number field as a `Space` dimension: an int as `int` on its inclusive integer bounds; a float as `real`, log scale
+ * when log10 and the lower bound is positive. A `Space` has only inclusive bounds, so a strict float bound becomes the
+ * next double inside it (gt 0 → 5e-324): an approximation, exact for clamping and sampling in practice. An unbounded
+ * end is ±1e15.
+ */
+function numberDim(def: NumberDef, when: { when?: Condition }): DimSpec {
+  const b = numberBounds(def)
+  if (def.type === 'int') {
+    const lo = Number.isFinite(b.lower) ? b.lower : -BIG
+    const hi = Number.isFinite(b.upper) ? b.upper : BIG
+    return intDim(lo, hi, { default: def.initial, ...when })
+  }
+  const lo = Number.isFinite(b.lower) ? (b.lowerStrict ? nextUp(b.lower) : b.lower) : -BIG
+  const hi = Number.isFinite(b.upper) ? (b.upperStrict ? nextDown(b.upper) : b.upper) : BIG
+  const scale = def.scale === 'log10' && lo > 0 ? { scale: 'log' as const } : {}
+  return real(lo, hi, { default: def.initial, ...scale, ...when })
 }
 
 /**

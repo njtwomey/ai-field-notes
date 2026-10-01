@@ -6,6 +6,8 @@
 export {
   choice,
   coerce,
+  float,
+  int,
   isActive,
   number,
   row,

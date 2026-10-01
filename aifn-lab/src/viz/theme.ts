@@ -31,9 +31,12 @@ export function baseOption(mode: Mode) {
     backgroundColor: 'transparent',
     color: [...categorical(mode)],
     textStyle: { fontFamily: FONT, color: c.ink },
-    // No entrance animation: a resize during ECharts' clip-path animation can leave lines hidden until a repaint.
+    // No animation at all. Entrance animation: a resize during ECharts' clip-path animation can leave lines hidden until
+    // a repaint. Update tweening: when frames change faster than the tween (a Player at 120 steps/s, a drag), marks
+    // glide towards targets that have already moved and lag the rest of the scene (the cart-pole's hinge behind its pole).
+    animation: false,
     animationDuration: 0,
-    animationDurationUpdate: 80,
+    animationDurationUpdate: 0,
     grid: { ...GRID, containLabel: false },
     legend: {
       top: 0,

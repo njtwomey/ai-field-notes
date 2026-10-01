@@ -17,7 +17,7 @@ import { toFlat } from 'aifn/foundation/tensor'
 import { trace } from 'aifn/foundation/trace'
 import { Player } from '@lab/controls'
 import { ControlRow, Figure } from '@lab/layout'
-import { choice, row, slider, useFigureState } from '@lab/state'
+import { choice, int, row, slider, useFigureState } from '@lab/state'
 import { Bars, Curve, Handle, Plot, Plots, Points, Readout, useAxis } from '@lab/viz'
 
 type ArmAgent = Agent<unknown, number, number>
@@ -39,8 +39,8 @@ export function RegretSpecimen() {
       m3: slider(0.05, 0.95, 0.6, { label: 'μ₃' }),
     }),
     experiment: row('2 · experiment', {
-      horizon: choice([300, 1000, 3000], 1000, { label: 'horizon' }),
-      runs: choice([5, 10, 20, 50], 10, { label: 'replicates' }),
+      horizon: int(1000, { label: 'horizon', ge: 1, le: 10_000, suggestions: [300, 1000, 3000, 10_000] }),
+      runs: int(10, { label: 'replicates', ge: 1, le: 200, suggestions: [5, 10, 20, 50] }),
     }),
   })
   const { m1, m2, m3 } = state.arms

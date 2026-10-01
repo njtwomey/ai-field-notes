@@ -8,8 +8,9 @@ import { toFlat } from 'aifn/foundation/tensor'
 import { run, seek, trace } from 'aifn/foundation/trace'
 import { Player } from '@lab/controls'
 import { ControlRow, Figure } from '@lab/layout'
-import { choice, row, slider, toggle, useFigureState } from '@lab/state'
-import { Curve, Handle, Plot, Plots, Points, Raster, Readout, useAxis, Vectors, type Vector } from '@lab/viz'
+import { choice, float, row, toggle, useFigureState } from '@lab/state'
+import { GridView } from '@lab/views'
+import { Curve, Handle, Plot, Plots, Readout, useAxis } from '@lab/viz'
 
 type Layout = keyof typeof MAZES
 type AgentState = TdAgentState | { action: unknown }
@@ -18,43 +19,6 @@ type State = RolloutState<number, number, number, AgentState>
 const EPISODES = 150
 const MAX_STEPS = 15000
 const CHECKPOINT = 250
-const KINDS = ['wall', 'goal', 'trap', 'start'] as const
-
-/** Cell (x, y) of state s on the environment's grid. */
-const cellOf = (env: MdpEnvironment, s: number): [number, number] => {
-  const w = env.render!.width
-  return [s % w, Math.floor(s / w)]
-}
-
-/** The map as categorical rows (bottom row first): walls, goal, traps and start in slots 0–3; open cells blank. */
-function mapRows(env: MdpEnvironment): number[][] {
-  const r = env.render!
-  return Array.from({ length: r.height }, (_, y) =>
-    Array.from({ length: r.width }, (_, x) => KINDS.indexOf(r.cells[y * r.width + x] as (typeof KINDS)[number])),
-  )
-}
-
-/** State values as heatmap rows; walls are blank. */
-function valueRows(env: MdpEnvironment, V: ArrayLike<number>): number[][] {
-  const r = env.render!
-  return Array.from({ length: r.height }, (_, y) =>
-    Array.from({ length: r.width }, (_, x) => (r.cells[y * r.width + x] === 'wall' ? NaN : V[y * r.width + x])),
-  )
-}
-
-/** Greedy-policy arrows from each active cell's centre. */
-function arrows(env: MdpEnvironment, policy: ArrayLike<number>): Vector[] {
-  const out: Vector[] = []
-  for (let s = 0; s < policy.length; s++) {
-    const a = policy[s]
-    if (a < 0) continue
-    const [x, y] = cellOf(env, s)
-    const [dx, dy] = env.render!.actionVectors[a]
-    out.push({ from: [x - 0.2 * dx, y - 0.2 * dy], to: [x + 0.3 * dx, y + 0.3 * dy] })
-  }
-  return out
-}
-
 /** max_a Q(s, a) at active states, 0 at terminals. */
 function maxQ(env: MdpEnvironment, Q: ArrayLike<number>): Float64Array {
   const { states: S, actions: A, terminal } = env.model
@@ -65,8 +29,6 @@ function maxQ(env: MdpEnvironment, Q: ArrayLike<number>): Float64Array {
     return best
   })
 }
-
-const axes = (n: number) => Array.from({ length: n }, (_, i) => i)
 
 export function MazeAgentSpecimen() {
   const state = useFigureState({
@@ -88,9 +50,23 @@ export function MazeAgentSpecimen() {
         'q',
         { label: 'agent' },
       ),
-      gamma: slider(0.5, 0.99, 0.95, { label: 'discount γ' }),
-      epsilon: slider(0, 0.5, 0.1, { label: 'exploration ε', when: (v) => v.agent === 'q' }),
-      alpha: slider(0.05, 1, 0.5, { label: 'step size α', when: (v) => v.agent === 'q' }),
+      gamma: float(0.95, { label: 'discount γ', ge: 0, lt: 1, step: 0.01, suggestions: [0.9, 0.95, 0.99] }),
+      epsilon: float(0.1, {
+        label: 'exploration ε',
+        ge: 0,
+        le: 1,
+        step: 0.05,
+        suggestions: [0.01, 0.05, 0.1, 0.2],
+        when: (v) => v.agent === 'q',
+      }),
+      alpha: float(0.5, {
+        label: 'step size α',
+        gt: 0,
+        le: 1,
+        step: 0.05,
+        suggestions: [0.05, 0.1, 0.5, 1],
+        when: (v) => v.agent === 'q',
+      }),
     }),
     view: row('2 · view', { values: toggle(false, 'values and greedy policy') }),
   })
@@ -147,14 +123,13 @@ export function MazeAgentSpecimen() {
   const optimal = useMemo(() => run(valueIteration(env.model, { tolerance: 1e-9 }), undefined, 2000), [env])
   const optimalPolicy = useMemo(() => toFlat(optimal.policy), [optimal])
 
-  // The current episode's path up to this step: from its reset (step 0, or the start cell after an episode ended).
+  // The current episode's states up to this step: from its reset (step 0, or the start cell after an episode ended).
   const trail = useMemo(() => {
     let k = at
     while (k > 0 && !series.ended[k - 1]) k--
-    const cells = k === 0 ? [] : [env.reset(stream('maze')).state]
-    for (let i = k; i <= at; i++) cells.push(series.cell[i])
-    const xy = cells.map((c) => cellOf(env, c))
-    return { x: xy.map((c) => c[0]), y: xy.map((c) => c[1]) }
+    const states = k === 0 ? [] : [env.reset(stream('maze')).state]
+    for (let i = k; i <= at; i++) states.push(series.cell[i])
+    return states
   }, [at, series, env])
 
   const learnt = 'Q' in now.agent ? (now.agent as TdAgentState) : null
@@ -175,22 +150,21 @@ export function MazeAgentSpecimen() {
     return good / active
   }, [agentPolicy, optimalQ, env])
 
-  const r = env.render!
-  const gx = useMemo(() => axes(r.width), [r])
-  const gy = useMemo(() => axes(r.height), [r])
-  const map = useMemo(() => mapRows(env), [env])
   const vRange = useMemo<[number, number]>(() => {
     const m = Math.max(1e-9, ...toFlat(optimal.V).map(Math.abs))
     return [-m, m]
   }, [optimal])
   const showValues = overlay && agentValues !== null
-  const agentRows = useMemo(() => (agentValues ? valueRows(env, agentValues) : null), [env, agentValues])
-  const agentArrows = useMemo(() => (agentPolicy ? arrows(env, agentPolicy) : []), [env, agentPolicy])
-  const optimalRows = useMemo(() => valueRows(env, toFlat(optimal.V)), [env, optimal])
-  const optimalArrows = useMemo(() => arrows(env, optimalPolicy), [env, optimalPolicy])
+  const agentField = useMemo(
+    () =>
+      showValues && agentValues
+        ? { values: agentValues, label: 'max_a Q(s, a)', range: vRange, colorBar: false }
+        : null,
+    [showValues, agentValues, vRange],
+  )
+  const optimalField = useMemo(() => ({ values: toFlat(optimal.V), label: 'V*(s)', range: vRange }), [optimal, vRange])
   const curve = useMemo(() => ({ x: series.returns.map((_, e) => e + 1), y: series.returns }), [series])
   const episodeNow = series.episode[at] + (series.ended[at] ? 0 : 1)
-  const [px, py] = cellOf(env, series.cell[at])
 
   // The two grids share one pair of axes (one toolbar entry each, one zoom) with equal units, so cells are square.
   const xa = useAxis({ label: 'x' })
@@ -221,31 +195,26 @@ export function MazeAgentSpecimen() {
           />
         </>
       }
-      caption={`Play, step or drag the episode line. aifn rollout of ${agent.name} on mazeEnvironment('${layout}') (goal +10, trap −20 and back to start, step −1; truncated after ${env.horizon} steps), ${EPISODES} episodes or ${MAX_STEPS} steps on stream('maze'). Top left: the agent (large mark) and its path this episode; reveal "values and greedy policy" to colour cells by max_a Q and draw the agent's greedy policy. Top right: V* and π* by value iteration on env.model. Bottom: return per episode.`}
+      caption={`Play, step or drag the episode line. aifn rollout of ${agent.name} on mazeEnvironment('${layout}') (goal +10, trap −20 and back to start, step −1; truncated after ${env.horizon} steps), ${EPISODES} episodes or ${MAX_STEPS} steps on stream('maze'). Top left: the agent (large mark) and its moves this episode, one arrow per direction of each cell edge walked, numbered when walked more than once (the latest move in ink); reveal "values and greedy policy" to colour cells by max_a Q and draw the agent's greedy policy. Top right: V* and π* by value iteration on env.model. Bottom: return per episode.`}
     >
       <Plots cols={2} scale={0.7}>
-        <Plot x={xa} y={ya} title={showValues ? `${agent.name}: max Q, greedy` : agent.name}>
-          {showValues && agentRows ? (
-            <Raster
-              x={gx}
-              y={gy}
-              z={agentRows}
-              scale="diverging"
-              range={vRange}
-              valueLabel="max_a Q(s, a)"
-              colorBar={false}
-            />
-          ) : (
-            <Raster x={gx} y={gy} z={map} scale="categorical" categoryNames={KINDS} />
-          )}
-          {showValues && <Vectors vectors={agentArrows} />}
-          <Curve name="path this episode" x={trail.x} y={trail.y} slot={1} showPoints />
-          <Points name="agent" x={[px]} y={[py]} emphasis />
-        </Plot>
-        <Plot x={xa} y={ya} title="value iteration on env.model: V* and π*">
-          <Raster x={gx} y={gy} z={optimalRows} scale="diverging" range={vRange} valueLabel="V*(s)" />
-          <Vectors vectors={optimalArrows} />
-        </Plot>
+        <GridView
+          render={env.render!}
+          x={xa}
+          y={ya}
+          title={showValues ? `${agent.name}: max Q, greedy` : agent.name}
+          value={agentField}
+          policy={showValues ? agentPolicy : null}
+          path={trail}
+        />
+        <GridView
+          render={env.render!}
+          x={xa}
+          y={ya}
+          title="value iteration on env.model: V* and π*"
+          value={optimalField}
+          policy={optimalPolicy}
+        />
       </Plots>
       <Plot x={ea} y={ra} scale={0.3}>
         <Curve name="return per episode" x={curve.x} y={curve.y} slot={0} />
